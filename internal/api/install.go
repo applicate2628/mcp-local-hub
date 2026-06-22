@@ -2570,7 +2570,20 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 		// entry already existed with a different URL or relay config,
 		// we AddEntry(prior) to restore — instead of RemoveEntry, which
 		// would leave the client with no entry at all.
-		priorEntry, _ := client.GetEntry(m.Name)
+		//
+		// A GetEntry error MUST abort BEFORE the backup/AddEntry below
+		// (bot PR #420 finding 1, data-loss). For a multi-layer adapter
+		// (mimocode) GetEntry can confirm a write-target prior yet still
+		// fail reading a malformed lower layer, returning (nil, err).
+		// Dropping that error would treat prior as nil → AddEntry
+		// overwrites the write target → the nil-prior rollback branch
+		// RemoveEntry-s and DELETES the operator's entry. So fail loud and
+		// run the rollback-so-far instead of snapshotting a corrupt prior.
+		priorEntry, err := client.GetEntry(m.Name)
+		if err != nil {
+			runRollback()
+			return fmt.Errorf("snapshot prior entry for %s in %s: %w", m.Name, u.Client, err)
+		}
 
 		// keepN is the user's `backups.keep_n` setting (default 5). The
 		// adapter writes a fresh timestamped backup, then prunes older
@@ -2605,7 +2618,16 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 		entryName := m.Name
 		savedPrior := priorEntry
 		rollback = append(rollback, func() {
-			if savedPrior != nil {
+			// A non-nil prior from a multi-layer adapter (mimocode) MAY be sourced
+			// from a layer the hub never writes — config.json strictly BELOW the
+			// write target, or the ~/.claude.json import. Copying THAT up into the
+			// write target would shadow the operator's lower/import layer forever
+			// and, for the import, leak its credentials into the hub file (bot PR
+			// #420 finding 1). For such a prior take the REMOVE branch: drop the
+			// hub's write-target key and let the lower/import layer re-emerge via
+			// the merge. The zero value (every other adapter, and an at/above
+			// mimo prior) keeps the copy-up path.
+			if savedPrior != nil && !savedPrior.SourceBelowWriteTarget {
 				if err := clientRef.AddEntry(*savedPrior); err == nil {
 					fmt.Fprintf(w, "  rollback: restored prior %s entry in %s\n", entryName, u.Client)
 					return

@@ -92,7 +92,12 @@ func secureCreateClientConfigParentDirImpl(configPath string, skipParentGate boo
 	// absolute path-walk window between verified prefix N and child N+1.
 	for _, comp := range rel {
 		nextPath := filepath.Join(curPath, comp)
-		nextHandle, err := mkdirOrVerifyRealDirWindows(curHandle, comp, nextPath, sd, !skipParentGate)
+		// G17 home-anchored leg: keep the per-component verifyDACL posture
+		// (every prefix walked is under $HOME — see the documented POSIX/Windows
+		// divergence in secure_create_client_config_parent_posix.go). The new
+		// `created` verdict is for the volume-root leg's deepest-existing-prefix
+		// gate only and is intentionally ignored here.
+		nextHandle, _, err := mkdirOrVerifyRealDirWindows(curHandle, comp, nextPath, sd, !skipParentGate)
 		if err != nil {
 			return err
 		}
@@ -122,9 +127,20 @@ func secureCreateClientConfigParentDirImpl(configPath string, skipParentGate boo
 // restrictive create-time security descriptor when absent, or opens an
 // existing component relative to the same parent handle with
 // FILE_OPEN_REPARSE_POINT before verifying it.
-func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string, sd *windows.SECURITY_DESCRIPTOR, verifyDACL bool) (windows.Handle, error) {
+//
+// The returned `created` bool is the Windows analog of the POSIX leg's
+// mkdirat created-vs-EEXIST verdict (secure_create_parent_anywhere_posix.go):
+// true when the component was freshly created via FILE_CREATE, false when it
+// already existed (the isAlreadyExistsErr branch). The volume-root-anchored
+// caller (secure_create_parent_anywhere_windows.go) uses it to identify the
+// deepest existing prefix — the parent of the FIRST freshly-created component
+// — so the strict-mode DACL gate fires there exactly ONCE rather than on every
+// system-owned ancestor. The home-anchored G17 caller
+// (secureCreateClientConfigParentDirImpl) ignores it and keeps its
+// per-component verifyDACL posture (every prefix it walks is under $HOME).
+func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string, sd *windows.SECURITY_DESCRIPTOR, verifyDACL bool) (handle windows.Handle, created bool, err error) {
 	if !singleWindowsPathComponent(name) {
-		return windows.InvalidHandle, fmt.Errorf("secure mkparent: invalid path component %q", name)
+		return windows.InvalidHandle, false, fmt.Errorf("secure mkparent: invalid path component %q", name)
 	}
 
 	h, err := ntCreateRelative(
@@ -137,7 +153,7 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 	)
 	if err != nil {
 		if !isAlreadyExistsErr(err) {
-			return windows.InvalidHandle, fmt.Errorf("secure mkparent: ntcreate dir %s: %w", full, err)
+			return windows.InvalidHandle, false, fmt.Errorf("secure mkparent: ntcreate dir %s: %w", full, err)
 		}
 		// Existing component: open it relative to the held parent handle
 		// (FILE_OPEN_REPARSE_POINT) and refuse a reparse point / non-dir
@@ -145,7 +161,7 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 		// resolved-symlink-target walk in client_write_resolve_windows.go).
 		h, err = openExistingRealDirAt(parentHandle, name)
 		if err != nil {
-			return windows.InvalidHandle, fmt.Errorf("secure mkparent: refuse to descend through reparse point / symlink at %s: %w", full, err)
+			return windows.InvalidHandle, false, fmt.Errorf("secure mkparent: refuse to descend through reparse point / symlink at %s: %w", full, err)
 		}
 		closeOnErr := true
 		defer func() {
@@ -155,11 +171,11 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 		}()
 		if verifyDACL {
 			if verr := verifyWindowsDACLFromHandle(h); verr != nil {
-				return windows.InvalidHandle, fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, full, verr)
+				return windows.InvalidHandle, false, fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, full, verr)
 			}
 		}
 		closeOnErr = false
-		return h, nil
+		return h, false, nil
 	}
 
 	// Freshly created via FILE_CREATE: it is a real directory by
@@ -174,15 +190,15 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 	}()
 
 	if rerr := refuseReparsePointHandle(h); rerr != nil {
-		return windows.InvalidHandle, fmt.Errorf("secure mkparent: refuse to descend through reparse point / symlink at %s: %w", full, rerr)
+		return windows.InvalidHandle, false, fmt.Errorf("secure mkparent: refuse to descend through reparse point / symlink at %s: %w", full, rerr)
 	}
 	if verifyDACL {
 		if verr := verifyWindowsDACLFromHandle(h); verr != nil {
-			return windows.InvalidHandle, fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, full, verr)
+			return windows.InvalidHandle, false, fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, full, verr)
 		}
 	}
 	closeOnErr = false
-	return h, nil
+	return h, true, nil
 }
 
 // openExistingRealDirAt opens an EXISTING real directory `name` relative to

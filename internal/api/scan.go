@@ -62,6 +62,7 @@ type ScanOpts struct {
 	ClineConfigPath    string
 	KiloCodeConfigPath string
 	OpenCodeConfigPath string
+	MimoCodeConfigPath string
 	HermesConfigPath   string
 	OpenClawConfigPath string
 
@@ -93,6 +94,7 @@ func (o ScanOpts) legacyNamedConfigPathSet() map[string]string {
 		"cline":       o.ClineConfigPath,
 		"kilocode":    o.KiloCodeConfigPath,
 		"opencode":    o.OpenCodeConfigPath,
+		"mimocode":    o.MimoCodeConfigPath,
 		"hermes":      o.HermesConfigPath,
 		"openclaw":    o.OpenClawConfigPath,
 	}
@@ -353,6 +355,41 @@ func classifyMissingClientConfig(path string) string {
 	return "missing-init-possible"
 }
 
+// isPromotableAbsentPresenceState reports whether a probeClientConfigPresence
+// verdict is an ABSENT (config-file-not-yet-present) state whose write target is
+// TRULY WRITABLE, so a lower/overlay/inline read layer may promote it to "ok".
+// The full set classifyMissingClientConfig can return is "missing",
+// "missing-init-possible", "missing-init-creatable", and
+// "missing-init-blocked-symlink"; the NON-missing verdicts are "ok" (the file is
+// a regular file) and the config-FAULT states "error" (non-regular target:
+// directory / FIFO / device) and "error-symlink" (refused / dangling symlink).
+//
+// Used only by the MiMoCode lower-layer presence promotion (ScanFrom). The
+// promotion makes the cell render a normal enabled state and lets Apply/backup
+// proceed against the write target, so it must fire ONLY when that write target
+// could actually be created and written:
+//
+//   - It NEVER upgrades a config-FAULT verdict ("error" / "error-symlink") — that
+//     would mask a bad write target behind a green cell Apply/backup cannot write
+//     to (bot PR #420 finding 2 refinement).
+//   - It also EXCLUDES "missing-init-blocked-symlink": the write/init pipeline
+//     refuses to create the missing write target through a parent symlink
+//     (POSIX O_NOFOLLOW / Windows FILE_FLAG_OPEN_REPARSE_POINT), so even though a
+//     lower layer (config.json) exists, an Apply that needs to create the write
+//     target would deterministically fail. Promoting it to "ok" would show a
+//     normal enabled cell whose later Apply fails — exactly the broken UX the
+//     config-FAULT exclusion already prevents. So only the genuinely-creatable
+//     absent states (missing / missing-init-possible / missing-init-creatable)
+//     are promotable.
+func isPromotableAbsentPresenceState(state string) bool {
+	switch state {
+	case "missing", "missing-init-possible", "missing-init-creatable":
+		return true
+	default:
+		return false
+	}
+}
+
 // classifyAbsentParentCreatable classifies a config-file parent dir that
 // is absent (clean os.IsNotExist). It mirrors the safety contract of the
 // secure parent-create (SecureCreateClientConfigParentDir) WITHOUT
@@ -494,6 +531,9 @@ func clientScanners() map[string]struct {
 		"cline":    {scanCline, "cline"},
 		"kilocode": {scanKiloCode, "kilocode"},
 		"opencode": {scanOpenCode, "opencode"},
+		// mimocode is an OpenCode fork sharing the top-level `mcp` config
+		// shape — scanMimoCode mirrors scanOpenCode under the mimocode id.
+		"mimocode": {scanMimoCode, "mimocode"},
 		"hermes":   {scanHermes, "hermes"},
 		"openclaw": {scanOpenClaw, "openclaw"},
 		// TIER-1 skills-CLI clients. These all use the canonical
@@ -554,6 +594,129 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	entries := map[string]*ScanEntry{}
 	presence := probeClientConfigPresence(opts)
 	paths := opts.effectiveConfigPaths()
+	// MiMoCode multi-layer presence (bot PR #420 finding 2): the generic probe
+	// above stats ONLY the registered scan path (mimocode's WRITE target —
+	// mimocode.json). MiMoCode deep-merges lower layers (config.json), the
+	// MIMOCODE_CONFIG file, and the MIMOCODE_CONFIG_DIR overlay, so a profile
+	// whose servers live ONLY in a lower/overlay layer (write target absent)
+	// would probe a MISSING state → the scanIfReadable gate would SKIP
+	// scanMimoCode → the operator's real entries vanish from the matrix. Promote
+	// presence to "ok" when ANY resolved read layer exists as a regular file (so
+	// the row is both scanned and shown).
+	//
+	// SCOPE OF THE PROMOTION (bot PR #420 finding 2 refinement): only a MISSING
+	// (absent) write-target verdict may be promoted. If the generic probe already
+	// classified the write target itself as a config ERROR — "error" (the path is
+	// a directory / FIFO / device) or "error-symlink" (a refused / dangling
+	// symlink) — that is a real write-target fault Apply/backup must not proceed
+	// against, and the GUI must keep rendering the config-error cell. Promoting
+	// THAT to "ok" because a SEPARATE lower layer happens to exist would mask the
+	// fault: the row would render green, the operator clicks Apply, and the
+	// hardened write fails against the bad write target. So the promotion is
+	// gated on isPromotableAbsentPresenceState — it upgrades only the WRITABLE
+	// absent states (missing / missing-init-possible / missing-init-creatable),
+	// never an error/error-symlink/ok verdict, and never
+	// missing-init-blocked-symlink (the write/init pipeline refuses to create the
+	// write target through a parent symlink, so a promoted cell's later Apply
+	// would deterministically fail — same broken-UX hazard as the config-FAULT
+	// states).
+	//
+	// INLINE-ONLY PROFILES (bot PR #420 finding 1): MimoCodeReadLayerPaths yields
+	// only FILE paths, so a profile whose ONLY mimo config layer is
+	// MIMOCODE_CONFIG_CONTENT (inline, no file on disk) has nothing to stat and
+	// would never promote — yet MimoCodeMergedConfig parses that inline layer and
+	// surfaces its servers. So promote on a parseable inline layer too, not just a
+	// stat-able file. Either signal upgrades the absent state to "ok".
+	//
+	// CLAUDE-IMPORT-ONLY PROFILES (bot PR #420 finding 1, r15): MimoCode also
+	// imports ~/.claude.json mcpServers into the effective `mcp` view (TOP layer,
+	// skip-if-name-exists, gated by MIMOCODE_DISABLE_CLAUDE_CODE_MCP). A profile
+	// whose ONLY active mimo MCP source is that import (no mimo config FILE layer,
+	// no inline content) has nothing to stat AND no inline string — both signals
+	// above miss it — yet MimoCodeMergedConfig WOULD import those servers. So
+	// promote on a parseable claude import too. MimoCodeHasClaudeImport reuses the
+	// SAME env-resolution + MIMOCODE_DISABLE_CLAUDE_CODE_MCP gate the read path
+	// uses, so the scan stays state-safe (the standard scan-test barrier sets the
+	// disable flag → no real ~/.claude.json read).
+	//
+	// MALFORMED INLINE-ONLY (bot PR #420 finding 4): a present-but-UNPARSEABLE
+	// MIMOCODE_CONFIG_CONTENT (no file layers) is an active-but-broken profile.
+	// Left as the default "missing"/absent verdict it would render the cell as
+	// not-configured and the scanner would never run the merged read that surfaces
+	// the parse error — the broken profile looks ABSENT. So promote it to the
+	// existing config-FAULT "error" state (the same state a non-regular write
+	// target / wrong-shape file produces), making the matrix render a loud
+	// config-error cell instead of silently dropping the profile. Only a TRULY
+	// absent verdict is promoted (isPromotableAbsentPresenceState already excludes
+	// "ok"/"error"/"error-symlink"), so this never downgrades an "ok" or masks an
+	// existing fault.
+	if mp := paths["mimocode"]; mp != "" && isPromotableAbsentPresenceState(presence["mimocode"]) {
+		for _, lf := range clients.MimoCodeReadLayerPaths(mp) {
+			if st, err := os.Stat(lf); err == nil && st.Mode().IsRegular() {
+				presence["mimocode"] = "ok"
+				break
+			}
+		}
+		if presence["mimocode"] != "ok" {
+			switch state, _ := clients.MimoCodeInlineContentState(mp); state {
+			case "ok":
+				presence["mimocode"] = "ok"
+			case "error":
+				// Malformed inline-only profile → loud config-error cell, not absent.
+				presence["mimocode"] = "error"
+			}
+		}
+		// Claude-import-only profile (bot PR #420 finding 1, r15): no file layer and
+		// no inline content promoted it, but a parseable ~/.claude.json import yields
+		// servers MimoCodeMergedConfig would surface. Promote to "ok" so the row is
+		// scanned and shown. Re-check isPromotableAbsentPresenceState so a malformed
+		// inline that just set "error" above is NOT overridden (that fault must keep
+		// rendering the config-error cell).
+		if isPromotableAbsentPresenceState(presence["mimocode"]) && clients.MimoCodeHasClaudeImport(mp) {
+			presence["mimocode"] = "ok"
+		}
+	}
+	// NON-REGULAR ACTIVE LAYER guard (bot PR #420 finding 4). The promotion above
+	// upgrades to "ok" on the FIRST regular layer it finds, and the generic probe
+	// classifies ONLY the write target — so a profile whose write target (or one
+	// promoting layer) is a regular file but ANOTHER active layer (config.json, the
+	// MIMOCODE_CONFIG file, or the overlay mimocode.json/.jsonc) is a
+	// directory/FIFO/non-regular would stay "ok". scanMimoCode then reads ALL
+	// layers via MimoCodeMergedConfig → readRawConfig returns a non-regular read
+	// error → ScanFrom fails the ENTIRE multi-client scan with `mimocode: ...`. To
+	// keep one bad mimo layer from taking the whole scan down, downgrade an
+	// otherwise-"ok" mimocode presence to the per-client config-error "error" state
+	// when ANY existing active layer is non-regular/unreadable — the same per-client
+	// config-error the write-target probe surfaces, rendering a loud cell and
+	// SKIPPING scanMimoCode (scanIfReadable gates on "ok") instead of aborting. Only
+	// an "ok" verdict is downgraded: a genuinely absent/missing verdict is left
+	// untouched (no scanMimoCode would run there anyway), and an already-"error"
+	// verdict is unchanged.
+	if mp := paths["mimocode"]; mp != "" && presence["mimocode"] == "ok" {
+		if _, bad := clients.MimoCodeNonRegularActiveLayer(mp); bad {
+			presence["mimocode"] = "error"
+		}
+	}
+	// MALFORMED INLINE CONTENT guard (bot PR #420 r17 finding B2). The inline
+	// tri-state is checked in the absent-state promotion block above ONLY when the
+	// write target is absent (isPromotableAbsentPresenceState). But when a FILE
+	// layer (the write-target mimocode.json, or a lower config.json) already made
+	// the client present ("ok"), that block is skipped — so a malformed
+	// MIMOCODE_CONFIG_CONTENT inline layer was NOT converted to "error". scanMimoCode
+	// would then run (scanIfReadable gates on "ok"), call MimoCodeMergedConfig, hit
+	// the inline PARSE error, and abort the ENTIRE multi-client scan with
+	// `mimocode: ...`. So downgrade an otherwise-"ok" mimocode presence to the
+	// per-client config-error "error" state when the inline content is present but
+	// UNPARSEABLE — REGARDLESS of whether a file layer made the client present. This
+	// mirrors the non-regular-layer guard above: convert a whole-scan-aborting merge
+	// fault into a loud per-client config-error cell that SKIPS scanMimoCode. Only an
+	// "ok" verdict is downgraded; an absent/missing verdict is left untouched (no
+	// scanMimoCode runs there), and an already-"error" verdict is unchanged.
+	if mp := paths["mimocode"]; mp != "" && presence["mimocode"] == "ok" {
+		if state, _ := clients.MimoCodeInlineContentState(mp); state == "error" {
+			presence["mimocode"] = "error"
+		}
+	}
 	scanIfReadable := func(name string) bool {
 		// "ok" is the only state for which an adapter read is
 		// guaranteed to find a regular file. "missing" /
@@ -1227,6 +1390,142 @@ func scanOpenCode(entries map[string]*ScanEntry, path string) error {
 	return nil
 }
 
+// scanMimoCode reads MiMoCode's config FAITHFULLY (MiMoCode is an OpenCode
+// fork using the top-level `mcp` map, but its config has three behaviors the
+// generic OpenCode scan path does not handle):
+//
+//   - JSONC: the resolved config can be a commented/trailing-comma
+//     `mimocode.jsonc` (the path resolver explicitly PREFERS it), which raw
+//     encoding/json rejects with a scan-failing 500. Decode via the adapter's
+//     JSONC-tolerant merged read (clients.MimoCodeMergedConfig).
+//   - In-dir layer merge: mimocode.json + mimocode.jsonc in the resolved dir
+//     are deep-merged (.jsonc wins) so a server defined in either layer is
+//     visible. clients.MimoCodeMergedConfig is the single owner of that merge
+//     (also used by the adapter's read path), and it honors explicit override
+//     paths (a temp/test path is read verbatim, never recomputing the dir).
+//   - Local command arrays + `enabled` flag: handled by shapeMimoCodeEntry.
+//
+// The merged map is decoded into the `mcp` section; each entry is shaped by
+// shapeMimoCodeEntry (NOT the generic shapeURLOrCommandEntry, which only reads
+// a string `command` and ignores `enabled:false`).
+func scanMimoCode(entries map[string]*ScanEntry, path string) error {
+	merged, err := clients.MimoCodeMergedConfig(path)
+	if err != nil {
+		return err
+	}
+	servers, _ := merged["mcp"].(map[string]any)
+	for name, rawAny := range servers {
+		raw, ok := rawAny.(map[string]any)
+		if !ok {
+			continue
+		}
+		e := entries[name]
+		if e == nil {
+			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
+			entries[name] = e
+		}
+		e.ClientPresence["mimocode"] = shapeMimoCodeEntry(raw)
+	}
+	return nil
+}
+
+// shapeMimoCodeEntry classifies a MiMoCode `mcp` entry FAITHFULLY:
+//
+//   - enabled:false → an ABSENT presence (Transport "absent"). MiMoCode uses
+//     `enabled` (default true) as the active flag; a disabled entry is one
+//     MiMoCode will NOT load. Recording it as active http/stdio would let the
+//     matrix show a disabled hub entry as connected `via-hub`, or a disabled
+//     local entry as a migrate candidate, and let Apply re-enable/clobber a
+//     server the operator intentionally disabled. The frontend's routing
+//     treats an "absent" transport as not-installed/disabled and never
+//     promotes it to "available" off config_presence:"ok" (routing.ts Finding
+//     4 clobber-protection). A missing/true `enabled` is active.
+//   - remote (`url`) → http (classify() then tags a loopback url as via-hub).
+//   - local (`command` ARRAY ["npx","-y",...]) → stdio with the real command
+//     in Endpoint (first array element) and the full argv preserved in Raw, so
+//     Discovery shows the executable instead of an empty "Unknown stdio" and
+//     extract can recover command+args. A string `command` is also accepted
+//     (defensive). The shaper never delegates the array case to the shared
+//     string-only shapeURLOrCommandEntry.
+//
+// For the command-ARRAY case the stored Raw is NORMALIZED (bot PR #420 finding
+// 6): MiMoCode keeps LSP tokens (`--lsp go`) in the `command` ARRAY, but the
+// downstream LSP classifier (classifyLSPEntries / extractLSPLanguageFromArgs)
+// reads them from `Raw["args"]`. Without normalization a non-canonical mimo
+// mcp-language-server entry (whose name does not follow the canonical shape)
+// could not be identified as a direct LSP legacy/conflict. The normalized Raw
+// carries `args` = command-array tail ++ entry's own `args` (mirroring the
+// adapter's mimoCodeNormalizeCommandArrays) so the args-reverse-lookup finds
+// `--lsp <bin>` (and the gopls `mcp` arg). extract does NOT consume this Raw (it
+// re-reads MimoCodeMergedConfig directly), so normalizing here is safe.
+func shapeMimoCodeEntry(raw map[string]any) ClientEntry {
+	if enabled, present := raw["enabled"]; present {
+		if b, ok := enabled.(bool); ok && !b {
+			return ClientEntry{Transport: "absent", Raw: raw}
+		}
+	}
+	if url, ok := raw["url"].(string); ok && url != "" {
+		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+	}
+	// Local stdio: MiMoCode stores `command` as an ARRAY. Surface the executable
+	// (first element) as the endpoint; the normalized argv goes in Raw so the LSP
+	// args-reverse-lookup sees the `--lsp`/`mcp` tokens the command array carries.
+	if cmd, tail := mimoCodeCommandArray(raw); cmd != "" {
+		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: mimoCodeRawWithNormalizedArgs(raw, tail)}
+	}
+	// Defensive: a string command (non-canonical but harmless) still classifies
+	// as stdio with that command as the endpoint.
+	if cmd, ok := raw["command"].(string); ok && cmd != "" {
+		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	}
+	return ClientEntry{Transport: "absent", Raw: raw}
+}
+
+// mimoCodeRawWithNormalizedArgs returns a shallow copy of a MiMoCode local
+// entry's raw map with `args` rewritten to (command-array tail ++ entry's own
+// `args`) so the LSP classifier's args-reverse-lookup (which reads Raw["args"])
+// finds the `--lsp <bin>` / `mcp` tokens MiMoCode stores in the `command` ARRAY.
+// The original map is not mutated; `command` is left as the original array (no
+// downstream consumer of this scan-side Raw reads it — extract re-reads the
+// adapter merge directly). Mirrors the adapter's mimoCodeNormalizeCommandArrays
+// (tail PREPENDED to existing args).
+func mimoCodeRawWithNormalizedArgs(raw map[string]any, cmdTail []string) map[string]any {
+	out := make(map[string]any, len(raw)+1)
+	for k, v := range raw {
+		out[k] = v
+	}
+	merged := make([]any, 0, len(cmdTail))
+	for _, a := range cmdTail {
+		merged = append(merged, a)
+	}
+	if existing, ok := raw["args"].([]any); ok {
+		merged = append(merged, existing...)
+	}
+	out["args"] = merged
+	return out
+}
+
+// mimoCodeCommandArray reads a MiMoCode local entry's `command` ARRAY
+// (["npx","-y","pkg"]) and splits it into (executable, args). Returns ("", nil)
+// when `command` is absent or not an array (a string command is handled by the
+// caller). Non-string array elements are skipped.
+func mimoCodeCommandArray(raw map[string]any) (string, []string) {
+	arr, ok := raw["command"].([]any)
+	if !ok || len(arr) == 0 {
+		return "", nil
+	}
+	var parts []string
+	for _, v := range arr {
+		if s, ok := v.(string); ok {
+			parts = append(parts, s)
+		}
+	}
+	if len(parts) == 0 {
+		return "", nil
+	}
+	return parts[0], parts[1:]
+}
+
 // scanHermes reads Hermes' ~/.hermes/config.yaml. Its MCP map lives under the
 // top-level YAML `mcp_servers` key and a hub entry carries a `url`. Hermes
 // reads many unrelated settings from the same file, so only the mcp_servers
@@ -1770,6 +2069,67 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 				}
 			}
 		}
+
+	case "mimocode":
+		if opts.MimoCodeConfigPath == "" {
+			return "", fmt.Errorf("MimoCodeConfigPath empty")
+		}
+		// MiMoCode's config is JSONC and split across mimocode.json +
+		// mimocode.jsonc layers; reuse the adapter's merged read so a commented
+		// .jsonc and a split-layer local entry are both visible. The explicit
+		// path is honored verbatim (never recomputes the real ~/.config/mimocode
+		// dir) by the same layer resolver the scan/adapter use.
+		merged, err := clients.MimoCodeMergedConfig(opts.MimoCodeConfigPath)
+		if err != nil {
+			return "", err
+		}
+		servers, _ := merged["mcp"].(map[string]any)
+		if servers != nil {
+			raw, _ = servers[serverName].(map[string]any)
+		}
+		if raw == nil {
+			return "", fmt.Errorf("server %q not found in client %q config", serverName, client)
+		}
+		// MiMoCode local entries use a `command` ARRAY (["npx","-y",...]) and
+		// store env under `environment` (NOT `env`). Translate both here and
+		// render directly — the generic string-`command`/`env` tail below does
+		// NOT understand either, so a fall-through would drop the env vars and
+		// emit an empty command. A remote/HTTP entry (no command array) is
+		// rejected with the same demigrate guidance as the shared tail.
+		cmd, args := mimoCodeCommandArray(raw)
+		if cmd == "" {
+			// No usable local command array — either a remote/hub entry or a
+			// (non-canonical) string command. Fall through to the shared tail,
+			// which classifies a string `command` and rejects HTTP-only entries
+			// with actionable demigrate guidance.
+			break
+		}
+		// A MiMoCode entry may carry a SEPARATE `args` array alongside the
+		// `command` array (e.g. command:["mcp-language-server"], args:["--lsp",
+		// "go"]). The command-array tail above drops it, so append it after the
+		// tail — matching the adapter's mimoCodeNormalizeCommandArrays
+		// (command-array tail PREPENDED to the entry's own args), so the
+		// generated manifest starts the full command line (bot PR #420 finding 4).
+		if extraArgs, ok := raw["args"].([]any); ok {
+			for _, v := range extraArgs {
+				if s, ok := v.(string); ok {
+					args = append(args, s)
+				}
+			}
+		}
+		envMap := map[string]string{}
+		if envAny, ok := raw["environment"].(map[string]any); ok {
+			for k, v := range envAny {
+				if s, ok := v.(string); ok {
+					envMap[k] = s
+				}
+			}
+		}
+		port, err := pickNextFreePort(opts.ManifestDir)
+		if err != nil {
+			return "", err
+		}
+		return renderDraftManifestYAML(serverName, cmd, args, envMap, port), nil
 
 	default:
 		return "", fmt.Errorf("extract not yet supported for client %q (extend here when needed)", client)

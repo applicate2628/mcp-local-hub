@@ -719,9 +719,10 @@ describe("ServersScreen — manual column visibility", () => {
     // aria-expanded reflects state.
     expect(btn.getAttribute("aria-expanded")).toBe("true");
     // A toggle exists for every known client (the full CORE + NON_CORE
-    // registry mirror), including newer non-core clients beyond the original
-    // wave-2 set (e.g. warp, goose, zencoder).
-    for (const c of ["claude-code", "zed", "hermes", "openclaw", "warp", "goose", "zencoder"]) {
+    // registry mirror), including the mimocode OpenCode fork and newer
+    // non-core clients beyond the original wave-2 set (e.g. warp, goose,
+    // zencoder).
+    for (const c of ["claude-code", "zed", "mimocode", "hermes", "openclaw", "warp", "goose", "zencoder"]) {
       expect(screen.queryByTestId(`matrix-columns-toggle-${c}`)).toBeTruthy();
     }
     // The popover lists one checkbox per ALL_CLIENTS entry.

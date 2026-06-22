@@ -71,6 +71,33 @@ var WriteConfigFile = fallbackWriteConfigFile
 // Deep-sec PR #208 Lane C #1 closure.
 var CreateConfigFileIfMissing = fallbackCreateConfigFileIfMissing
 
+// SecureCreateParentDir is the production swap point for the write-target
+// PARENT-DIRECTORY creation that withConfigLock (config_lock.go) performs
+// before opening the advisory flock. The test default is a plain
+// os.MkdirAll — acceptable because in-package and cross-package adapter
+// tests run under t.TempDir() where there is no symlink/reparse-point
+// threat, exactly the rationale fallbackWriteConfigFile /
+// fallbackCreateConfigFileIfMissing use for keeping a plain os-level
+// default.
+//
+// `internal/api/init()` swaps this variable to
+// `api.SecureCreateParentDirForConfigLock` which creates the missing
+// parent chain COMPONENT-BY-COMPONENT, REFUSING any symlink / reparse-point
+// component (POSIX O_NOFOLLOW openat; Windows NtCreateFile +
+// FILE_OPEN_REPARSE_POINT-refusal) and anchored at the nearest existing
+// ancestor. That closes the bot PR #420 finding 1 (r16) P1 regression: the
+// previous blind os.MkdirAll here FOLLOWED a symlinked prefix and could
+// create the write-target parent OUTSIDE the intended path, after which the
+// hardened SecureWriteClientConfig would publish token-bearing client config
+// through that redirected parent.
+//
+// Mode 0o700 in the fallback (NOT 0o755): a fresh mcphub-created config dir
+// with no operator mode to preserve, and the secure-write parent-dir gate
+// rejects group/world bits on POSIX — a 0o755 dir would make a subsequent
+// strict-mode SecureWriteClientConfig reject the very dir just created. The
+// injected production impl creates each component owner-only too.
+var SecureCreateParentDir = fallbackSecureCreateParentDir
+
 // fallbackWriteConfigFile is the test-friendly default. It creates
 // parent dirs (matching the prior writeJSON / writeTOML behavior in
 // each adapter), opens the destination with O_CREATE|O_WRONLY|O_TRUNC
@@ -86,6 +113,18 @@ func fallbackWriteConfigFile(path string, contents []byte) error {
 		}
 	}
 	return os.WriteFile(path, contents, 0o600)
+}
+
+// fallbackSecureCreateParentDir is the test-friendly default for
+// SecureCreateParentDir. It creates `dir` and any missing ancestors via a
+// plain os.MkdirAll(0o700). This intentionally does NOT acquire the
+// symlink-refusing component-walk guarantees of the production impl — it is
+// safe only in test sandboxes (t.TempDir()) where no co-resident principal
+// can plant a symlinked prefix. Production callers MUST ensure
+// SecureCreateParentDir is pointed at api.SecureCreateParentDirForConfigLock
+// (wired by internal/api/init()).
+func fallbackSecureCreateParentDir(dir string) error {
+	return os.MkdirAll(dir, 0o700)
 }
 
 // EnsureClientConfigStub is the canonical helper for adapter

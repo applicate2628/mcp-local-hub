@@ -40,7 +40,12 @@ func (realExtractor) ExtractManifestFromClient(client, server string, _ api.Scan
 		GeminiConfigPath:      guiClientConfigPath("gemini-cli"),
 		QwenConfigPath:        guiClientConfigPath("qwen-cli"),
 		AntigravityConfigPath: guiClientConfigPath("antigravity"),
-		ManifestDir:           "", // embed-first; matches CLI scanManifestDir() in prod
+		// MiMoCode local entries are extractable from the GUI Create-manifest
+		// button (the Discovery row navigates with from-client=mimocode); the
+		// extract case requires the resolved mimocode config path, so populate
+		// it here (the GUI previously only set the seven core clients).
+		MimoCodeConfigPath: guiClientConfigPath("mimocode"),
+		ManifestDir:        "", // embed-first; matches CLI scanManifestDir() in prod
 	})
 }
 

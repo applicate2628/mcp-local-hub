@@ -53,6 +53,77 @@ func withConfigLock(configPath string, fn func() error) error {
 	mu.Lock()
 	defer mu.Unlock()
 
+	// Ensure the write-target parent dir exists BEFORE creating the advisory
+	// flock (bot PR #420 finding 3, r15). The flock file lives at
+	// "<configPath>.lock" INSIDE the write-target dir, so flock.New(...).Lock()
+	// fails outright when that dir is absent — BEFORE any mutating adapter method
+	// body (e.g. BackupKeep's own os.MkdirAll, mimocode.go) ever runs, leaving the
+	// adapter-internal create structurally unreachable through this wrapper. A
+	// MiMoCode profile active ONLY via a MIMOCODE_CONFIG_DIR overlay (or
+	// MIMOCODE_CONFIG / inline content) with the GLOBAL ~/.config/mimocode dir
+	// absent reports Exists()==true, so install / register / GUI Apply proceed to a
+	// mutating call here — and without this create they would fail at the lock and
+	// abort. This is the SINGLE owner of "the flock needs its parent dir to exist"
+	// on the WRITE side; the READ side already handles the same constraint in
+	// withConfigReadLock below.
+	//
+	// Runs under the per-path mutex already held above, so intra-process racers on
+	// a new path are serialized (the create is idempotent for the cross-process
+	// case). The production SecureCreateParentDirForConfigLock creates missing
+	// components mode 0o700 (NOT 0o755): a fresh mcphub-created config dir with no
+	// operator mode to preserve, and the secure-write parent-dir gate rejects
+	// group/world bits on POSIX — a 0o755 dir would make a subsequent strict-mode
+	// (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) SecureWriteClientConfig reject the very
+	// dir just created. The FILE write itself stays hardened by the unchanged
+	// WriteConfigFile / SecureWriteClientConfig pipeline (handle-relative DACL/mode,
+	// atomic rename, symlink refusal); this governs only the parent dir.
+	//
+	// SECURITY (bot PR #420 finding 1 + r16 P1 + r17 finding P2a): the create/verify
+	// goes through SecureCreateParentDir, NOT a blind os.MkdirAll. In production
+	// internal/api/init() swaps SecureCreateParentDir to
+	// api.SecureCreateParentDirForConfigLock, which descends the parent chain from
+	// the VOLUME ROOT component-by-component, refusing any symlink / reparse-point
+	// component (existing OR missing). It is called UNCONDITIONALLY — NOT only when
+	// the dir is absent (the r17 P2a fix). The earlier IsNotExist-guarded form
+	// skipped the descent when the parent dir ALREADY EXISTED, so an existing
+	// SYMLINKED / reparse-point parent dir was never refused: flock.New(configPath +
+	// ".lock") below would then create the lock file THROUGH the symlinked parent
+	// (at an attacker-chosen target) before the later hardened SecureWriteClientConfig
+	// could refuse it. Running the secure descent unconditionally verifies every
+	// EXISTING component O_NOFOLLOW-relative and refuses a symlinked parent up front,
+	// closing that pre-flock TOCTOU. The descent is idempotent for a clean existing
+	// real-dir chain (every component opens as a real dir and returns nil). The test
+	// default (fallbackSecureCreateParentDir) stays a plain idempotent MkdirAll,
+	// safe only in the t.TempDir() sandboxes adapter tests use.
+	// Normalize the write-target parent to an ABSOLUTE path BEFORE the secure
+	// create (bot PR #420 r18 LOW/MEDIUM finding). Two adapters have a documented
+	// BARE-RELATIVE fallback config path — copilot-cli's "mcp-config.json" and
+	// qoder's "mcp-settings.json" (their defaultXConfigPath() degrades to a bare
+	// basename when os.UserHomeDir() fails, matching the fail-safe posture
+	// AllClients uses). For such a path filepath.Dir(configPath) is ".", and the
+	// PRODUCTION secure creator (api.SecureCreateParentDirForConfigLock →
+	// secureCreateParentDirAnywhereImpl) rejects "." / any non-absolute dir up
+	// front ("no volume name" / "not absolute"), so r18's unconditional-secure-
+	// create (the P2a symlink-gap fix) regressed those adapters' writes to a hard
+	// failure at this chokepoint. filepath.Abs resolves the bare-relative dir
+	// against the process cwd so the secure descent runs against a real absolute
+	// chain — which restores copilot-cli/qoder writes WITHOUT weakening the P2a
+	// guarantee for real absolute config paths: filepath.Abs is a Clean-only
+	// no-op on an already-absolute dir, so the symlink-refusing volume-root descent
+	// still applies unchanged to every absolute parent (no IsNotExist re-guard, no
+	// skip — the gap stays closed). The flock + the actual file write below use the
+	// SAME process cwd to resolve the original relative configPath, so the secured
+	// absolute dir and the lock/write target are the same physical directory.
+	if dir := filepath.Dir(configPath); dir != "" {
+		absDir, absErr := filepath.Abs(dir)
+		if absErr != nil {
+			return fmt.Errorf("config lock %s: resolve parent dir %q to absolute: %w", configPath+".lock", dir, absErr)
+		}
+		if mkErr := SecureCreateParentDir(absDir); mkErr != nil {
+			return fmt.Errorf("config lock %s: create parent dir: %w", configPath+".lock", mkErr)
+		}
+	}
+
 	lockPath := configPath + ".lock"
 	fl := flock.New(lockPath)
 	if err := fl.Lock(); err != nil {

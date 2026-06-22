@@ -95,7 +95,7 @@ export const CORE_CLIENTS = [
 ] as const;
 
 // NON_CORE_CLIENTS are every client the backend registry knows that is NOT
-// one of the seven CORE_CLIENTS. With 46 total clients an always-visible
+// one of the seven CORE_CLIENTS. With 47 total clients an always-visible
 // matrix would be unusably wide, so these are DETECTION-GATED: a non-core
 // column appears only when that client is actually present on the host (its
 // config file or parent directory was detected, or it already has a server
@@ -115,13 +115,17 @@ export const CORE_CLIENTS = [
 // parses this file and fails `go test ./internal/gui/` if CORE_CLIENTS +
 // NON_CORE_CLIENTS falls out of sync with clients.SupportedClientNames().
 export const NON_CORE_CLIENTS = [
-  // Wave 2 (PR #306): 8 opt-in adapters.
+  // Wave 2 (PR #306): 8 opt-in adapters; mimocode joined later as an
+  // OpenCode fork, placed next to opencode (same registry position).
   "zed",
   "kiro",
   "windsurf",
   "cline",
   "kilocode",
   "opencode",
+  // mimocode is an OpenCode fork (same `mcp` config shape); the backend
+  // registry places it next to opencode, so the GUI order matches.
+  "mimocode",
   "hermes",
   "openclaw",
   // agent-skills vendor reconciliation (2026-06-17): 4 file-config agents.

@@ -45,6 +45,66 @@ type MCPEntry struct {
 	// Empty preserves the legacy --server/--daemon behavior for every
 	// existing caller.
 	RelayURL string
+
+	// Raw, when non-nil, carries an adapter's verbatim on-disk entry value
+	// (the parsed JSON/TOML map under the server's name) so an entry shape the
+	// lean MCPEntry CANNOT represent — currently only MiMoCode's LOCAL entry
+	// (type:"local", `command` as an ARRAY, env under `environment`) — survives
+	// a GetEntry → AddEntry rollback round-trip byte-identical instead of being
+	// projected onto a lossy {URL,Headers} shape (which would rewrite the
+	// operator's local entry as a broken `url:""` remote) or skipped entirely
+	// (which makes the install rollback's nil-prior else-branch RemoveEntry
+	// DELETE the operator's original entry).
+	//
+	// CONTRACT: Raw is ADDITIVE and defaults nil. The hub's normal install path
+	// (install.go / register.go) builds MCPEntry WITHOUT Raw, so every adapter
+	// that ignores Raw (all of them except MiMoCode) is byte-unchanged. Only the
+	// MiMoCode adapter reads it: GetEntry sets Raw (and leaves URL empty) for a
+	// url-less local entry; AddEntry, when Raw != nil, writes Raw verbatim and
+	// IGNORES URL/Headers (Raw wins). For a URL entry MiMoCode leaves Raw nil and
+	// returns {URL,Headers} as before, so the normal hub-install/restore polarity
+	// is unchanged. No other adapter populates or consumes Raw.
+	Raw map[string]any
+
+	// SourceBelowWriteTarget, when true, marks that this entry was projected by a
+	// MULTI-LAYER adapter (currently only MiMoCode) from a layer the hub never
+	// writes and never clobbered — i.e. STRICTLY BELOW the write target
+	// (config.json) or the ~/.claude.json mcpServers IMPORT (skip-if-name-exists,
+	// also never hub-written). It exists so GetEntry can report read-membership
+	// (return a NON-nil entry so discovery/idempotency callers see the server as
+	// present) while still telling the install/register ROLLBACK path NOT to copy
+	// this entry UP into the hub's write target — which for an import-sourced prior
+	// would leak ~/.claude.json credentials into mimocode.json and shadow the
+	// operator's import forever (bot PR #420 r14 finding 1).
+	//
+	// CONTRACT: SourceBelowWriteTarget is ADDITIVE and defaults FALSE =
+	// "writable at/above the write target ⇒ copy-up on rollback is correct" — the
+	// historical behavior of EVERY adapter. Only MiMoCode's GetEntry sets it true;
+	// every other adapter leaves it zero, so their rollback polarity
+	// (AddEntry(*prior) when prior != nil) is byte-unchanged. The 2 rollback sites
+	// (install.go, register.go) are the ONLY consumers; the read-membership
+	// GetEntry callers ignore it.
+	SourceBelowWriteTarget bool
+
+	// Disabled, when true, marks that this entry is present in the client config
+	// but in a DISABLED state the client will NOT load (currently only MiMoCode's
+	// `enabled:false`). It exists so a read-membership consumer can keep SEEING
+	// the entry (GetEntry returns a non-nil entry so discovery/idempotency/rollback
+	// callers behave) while a GATING consumer that asks "is this an ACTIVE entry
+	// the client actually loads" can exclude it. The only gating consumer today is
+	// api.GatedOnClients (the `mcphub gui --reset-port` footgun guard): a DISABLED
+	// `mcphub-hub` aggregate must NOT count as gate-on, because the client never
+	// loads it, so resetting the hub port would orphan nothing — blocking the
+	// reset on a disabled aggregate is a false positive (bot PR #420 finding 5).
+	// This mirrors the scan path's shapeMimoCodeEntry, which classifies an
+	// enabled:false entry as Transport "absent" (absent for gating).
+	//
+	// CONTRACT: Disabled is ADDITIVE and defaults FALSE = "active / loaded" — the
+	// historical behavior of EVERY adapter. Only MiMoCode's GetEntry sets it true
+	// (for an enabled:false projected entry); every other adapter leaves it zero,
+	// so their gating behavior is byte-unchanged. GatedOnClients is the ONLY
+	// consumer; every other GetEntry caller ignores it.
+	Disabled bool
 }
 
 // Client is the OS-/format-abstracted interface for a single MCP client config file.
@@ -675,6 +735,11 @@ func clientRegistry() []clientDescriptor {
 		{name: "cline", factory: NewCline},
 		{name: "kilocode", factory: NewKiloCode},
 		{name: "opencode", factory: NewOpenCode},
+		// mimocode is a FORK of opencode and reuses opencode's MCP config
+		// shape verbatim (top-level `mcp` object, type:local/remote); only the
+		// config path differs (~/.config/mimocode/mimocode.json). Placed next
+		// to opencode so the relationship is visible in the registry order.
+		{name: "mimocode", factory: NewMimoCode},
 		{name: "hermes", factory: NewHermes},
 		{name: "openclaw", factory: NewOpenClaw},
 		// agent-skills vendor reconciliation (2026-06-17): 4 more opt-in clients

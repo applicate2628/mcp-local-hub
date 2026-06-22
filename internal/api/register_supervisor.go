@@ -296,7 +296,22 @@ func (a *API) registerOneLanguageSupervised(
 			continue
 		}
 		entryName := entryNameByClient[b.Client]
-		priorEntry, _ := client.GetEntry(entryName)
+		// Snapshot the prior entry; a GetEntry error MUST abort before the
+		// AddEntry below (bot PR #420 finding 1, data-loss). A multi-layer
+		// adapter (mimocode) can confirm a write-target prior yet still fail
+		// reading a malformed lower layer, returning (nil, err); dropping the
+		// error would let AddEntry overwrite and the nil-prior rollback branch
+		// DELETE the operator's entry. The caller runs the accumulated
+		// *rollback on this returned error, so no local runRollback is needed.
+		//
+		// Write-target parent-dir creation for an otherwise-active profile whose
+		// GLOBAL dir is absent (bot PR #420 finding 3, r15) is owned by the config
+		// lock chokepoint (clients.withConfigLock), NOT here — same single owner as
+		// the non-supervised register loop.
+		priorEntry, err := client.GetEntry(entryName)
+		if err != nil {
+			return WorkspaceEntry{}, fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, b.Client, err)
+		}
 		urlPath := b.URLPath
 		if urlPath == "" {
 			urlPath = "/mcp"
@@ -313,7 +328,12 @@ func (a *API) registerOneLanguageSupervised(
 		capturedName := entryName
 		capturedClientName := b.Client
 		*rollback = append(*rollback, func() {
-			if savedPrior != nil {
+			// See install.go rollback: a mimo prior sourced BELOW the write target
+			// (config.json) or from the ~/.claude.json import must NOT be copied up
+			// (permanent shadow + import-credential leak — bot PR #420 finding 1).
+			// Take REMOVE for those; the zero value (every other adapter / an
+			// at-or-above mimo prior) copies up.
+			if savedPrior != nil && !savedPrior.SourceBelowWriteTarget {
 				_ = clientRef.AddEntry(*savedPrior)
 				fmt.Fprintf(w, "  rollback: restored prior %s entry in %s\n", capturedName, capturedClientName)
 				return
