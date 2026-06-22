@@ -15,6 +15,7 @@ import {
   act,
 } from "@testing-library/preact";
 import { ServersScreen } from "./Servers";
+import { ALL_CLIENTS, CORE_CLIENTS } from "../lib/routing";
 import { installMemoryLocalStorage } from "../lib/test-local-storage";
 import type { ScanResult, DaemonStatus } from "../types";
 
@@ -46,6 +47,19 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 function scanWith(presence: Record<string, string>, name = "memory"): ScanResult {
+  // visibleClients() gates an auto-detected non-core column on the SCANNABLE
+  // capability, and effectiveVisibleClients() additionally drops a PINNED
+  // (pref === true) non-core column unless that client is scannable. Mark the
+  // ENTIRE client registry scannable (not just the core set) so these tests
+  // exercise the file-present detection + pref gate, not the scannable gate
+  // (that is unit-tested in routing.test.ts) — and so a pinned non-core client
+  // (e.g. hermes/kiro) renders its column instead of being dropped by the
+  // scannable re-check. direct_installable / remote_http_capable are irrelevant
+  // to column visibility, so default both to false.
+  const capabilities: NonNullable<ScanResult["client_capabilities"]> = {};
+  for (const c of [...ALL_CLIENTS, ...Object.keys(presence)]) {
+    capabilities[c] = { scannable: true, direct_installable: false, remote_http_capable: false };
+  }
   return {
     at: "2026-05-16T00:00:00Z",
     entries: [
@@ -57,6 +71,7 @@ function scanWith(presence: Record<string, string>, name = "memory"): ScanResult
       },
     ],
     client_config_presence: presence as ScanResult["client_config_presence"],
+    client_capabilities: capabilities,
   };
 }
 
@@ -556,10 +571,12 @@ describe("ServersScreen — LSP matrix rows", () => {
   });
 });
 
-// PR #306-wiring: the eight wave-2 opt-in clients are detection-gated as
-// matrix columns. A wave-2 client surfaces as a column header only when the
-// scan reports it present on the host; an undetected one adds no column.
-describe("ServersScreen — detection-gated wave-2 client columns", () => {
+// The non-core opt-in clients are detection-gated as matrix columns. A
+// non-core client surfaces as a column header only when the scan reports it
+// present on the host; an undetected one adds no column. The non-core
+// universe is derived live from client_config_presence (all backend clients),
+// not a hardcoded list, so all supported clients can surface when detected.
+describe("ServersScreen — detection-gated non-core client columns", () => {
   beforeEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -608,13 +625,16 @@ describe("ServersScreen — detection-gated wave-2 client columns", () => {
     expect(headerLabels().some((t) => t.includes("kiro"))).toBe(false);
   });
 
-  it("renders multiple detected wave-2 columns (kiro http-direct + zed relay)", async () => {
+  it("renders multiple detected wave-2 columns when their config FILES are present (kiro http-direct + zed relay)", async () => {
+    // Both have an actual config file ("ok"), so both earn a column. (A
+    // "missing-init-*" parent-exists-but-file-absent state would NOT — that is
+    // the anti-overflow gate, covered in routing.test.ts.)
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
         "/api/scan": () =>
           jsonResponse(
             200,
-            scanWith({ "claude-code": "ok", zed: "ok", kiro: "missing-init-possible" }),
+            scanWith({ "claude-code": "ok", zed: "ok", kiro: "ok" }),
           ),
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
       }) as unknown as typeof fetch,
@@ -624,6 +644,29 @@ describe("ServersScreen — detection-gated wave-2 client columns", () => {
       expect(headerLabels().some((t) => t.includes("kiro"))).toBe(true);
     });
     expect(headerLabels().some((t) => t.includes("zed"))).toBe(true);
+  });
+
+  it("HIDES a wave-2 client whose config file is absent but parent dir exists (no overflow on fresh profile)", async () => {
+    // Finding 1 anti-overflow: a "missing-init-possible" non-core client does
+    // NOT earn a column even though it is scannable — only a present config
+    // FILE does. Pre-fix this state counted as detected and overflowed the
+    // matrix on a fresh profile.
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () =>
+          jsonResponse(
+            200,
+            scanWith({ "claude-code": "ok", zed: "missing-init-possible", kiro: "missing-init-creatable" }),
+          ),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryAllByRole("columnheader").length).toBeGreaterThan(0);
+    });
+    expect(headerLabels().some((t) => t.includes("zed"))).toBe(false);
+    expect(headerLabels().some((t) => t.includes("kiro"))).toBe(false);
   });
 });
 
@@ -660,11 +703,13 @@ describe("ServersScreen — manual column visibility", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
     render(<ServersScreen />);
     const btn = await screen.findByTestId("matrix-columns-button");
-    // Bare host: 7 core clients visible out of 16 total.
-    expect(btn.textContent).toContain("Clients (7/16)");
+    // Bare host: 7 core clients visible out of the full registry total.
+    expect(btn.textContent).toContain(
+      `Clients (${CORE_CLIENTS.length}/${ALL_CLIENTS.length})`,
+    );
   });
 
-  it("opens the popover with all 16 client checkboxes on click", async () => {
+  it("opens the popover with a checkbox for every supported client on click", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
     render(<ServersScreen />);
     const btn = await screen.findByTestId("matrix-columns-button");
@@ -673,8 +718,15 @@ describe("ServersScreen — manual column visibility", () => {
     expect(screen.queryByTestId("matrix-columns-popover")).toBeTruthy();
     // aria-expanded reflects state.
     expect(btn.getAttribute("aria-expanded")).toBe("true");
-    // A toggle exists for every known client (7 core + 9 wave-2 = 16).
-    for (const c of ["claude-code", "zed", "mimocode", "hermes", "openclaw"]) {
+    // A toggle exists for every known client (the full CORE + NON_CORE
+    // registry mirror), including the mimocode OpenCode fork and newer
+    // non-core clients beyond the original wave-2 set (e.g. warp, goose,
+    // zencoder).
+    for (const c of ["claude-code", "zed", "mimocode", "hermes", "openclaw", "warp", "goose", "zencoder"]) {
+      expect(screen.queryByTestId(`matrix-columns-toggle-${c}`)).toBeTruthy();
+    }
+    // The popover lists one checkbox per ALL_CLIENTS entry.
+    for (const c of ALL_CLIENTS) {
       expect(screen.queryByTestId(`matrix-columns-toggle-${c}`)).toBeTruthy();
     }
   });
@@ -695,8 +747,10 @@ describe("ServersScreen — manual column visibility", () => {
     await waitFor(() => {
       expect(headerLabels().some((t) => t.includes("claude-code"))).toBe(false);
     });
-    // Count drops to 6/16.
-    expect(btn.textContent).toContain("Clients (6/16)");
+    // Count drops by one (one core column hidden).
+    expect(btn.textContent).toContain(
+      `Clients (${CORE_CLIENTS.length - 1}/${ALL_CLIENTS.length})`,
+    );
     // Persisted to localStorage under the documented key.
     const stored = JSON.parse(
       localStorage.getItem("mcphub.servers.column-visibility") ?? "{}",

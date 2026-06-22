@@ -25,6 +25,23 @@ func registerScanRoutes(s *Server) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(result)
 	}))
+
+	// /api/client-capabilities exposes the backend's per-client capability
+	// map (scannable / direct_installable / remote_http_capable) WITHOUT
+	// running a full scan, so the Catalog can derive its direct-install client
+	// choices (direct_installable) from the same single owner the Servers
+	// matrix consumes via the scan result. The body is the static
+	// api.ClientCapabilities() projection of clientScanners() + IsRelayStdio
+	// + remoteHTTPCapableClients — no host I/O, no caching concern.
+	s.mux.HandleFunc("/api/client-capabilities", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.ClientCapabilities())
+	}))
 }
 
 func sanitizeScanResult(in *api.ScanResult) *api.ScanResult {

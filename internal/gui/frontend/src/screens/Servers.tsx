@@ -42,8 +42,12 @@ import type {
 
 // The rendered client columns are no longer a fixed constant: they are
 // computed per-scan by visibleClients() so the seven core clients always
-// show while the eight wave-2 opt-in clients (PR #306) appear only when
-// detected on the host (detection-gated, see routing.ts::visibleClients).
+// show while every non-core opt-in client appears only when detected on the
+// host (detection-gated, see routing.ts::visibleClients). The non-core
+// universe is derived live from the scan's client_config_presence map (one
+// key per clients.SupportedClientNames(), all 46 backend clients), so any
+// supported client surfaces when installed — no hardcoded column list to
+// drift behind the backend registry.
 // On top of that auto-detected base the operator's manual show/hide
 // overrides (persisted in localStorage, see lib/matrix-columns.ts) are
 // folded in via effectiveVisibleClients() — the "Manage columns" popover
@@ -770,7 +774,7 @@ export function ServersScreen() {
   // (with coexistence rendering as dual badges per cell).
   const lspRows = collectLspRows(scanForLsp, workspaceEntries, selectedWorkspaceKey);
   // Effective client columns: the detection-gated base (seven core
-  // clients always, plus any wave-2 opt-in client detected on this host)
+  // clients always, plus any non-core opt-in client detected on this host)
   // with the operator's manual show/hide overrides folded in. Derived
   // from the live scan + persisted prefs so an uninstalled niche client
   // adds no column unless explicitly pinned, and a noisy detected column

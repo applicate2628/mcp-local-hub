@@ -762,6 +762,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		At:                   time.Now(),
 		ClientConfigPresence: presence,
 		GUIPort:              opts.GUIPort,
+		ClientCapabilities:   ClientCapabilities(),
 	}
 	for _, e := range entries {
 		out.Entries = append(out.Entries, *e)

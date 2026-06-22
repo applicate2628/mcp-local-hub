@@ -1,4 +1,9 @@
-import { ALL_CLIENTS, visibleClients } from "./routing";
+import {
+  ALL_CLIENTS,
+  orderClientsForColumns,
+  scannableClients,
+  visibleClients,
+} from "./routing";
 import type { ScanResult } from "../types";
 
 // COLUMN_PREFS_KEY is the localStorage key holding the operator's manual
@@ -72,14 +77,39 @@ export function clearColumnPrefs(): void {
 
 // effectiveVisibleClients folds the operator's manual overrides onto the
 // auto-detected default column set. The auto-detected set from
-// visibleClients(scan) is the BASE; then, walking ALL_CLIENTS in stable
-// order so the column order never depends on pref insertion order:
+// visibleClients(scan) is the BASE; then, walking the ordering universe in
+// stable order so the column order never depends on pref insertion order:
 //   - a client explicitly hidden (pref === false) is removed even if it
 //     was auto-detected;
 //   - a client explicitly shown (pref === true) is added even if it was
-//     NOT auto-detected (e.g. an undetected wave-2 client the operator
-//     wants pinned visible);
+//     NOT auto-detected (e.g. an undetected non-core client the operator
+//     wants pinned visible) — UNLESS it is a non-core client the backend
+//     reports as NON-SCANNABLE (no clientScanners() parser), in which case
+//     the pin is DROPPED (see the scannable re-check below);
 //   - a client with no pref keeps its auto-detected visibility.
+//
+// SCANNABLE re-check on a `pref === true` pin (Finding 1): visibleClients()
+// already gates the AUTO-detected non-core columns on the scannable capability
+// so an unscannable client never auto-shows. But a persisted/checkbox pin
+// (pref === true) previously bypassed that gate, letting an operator force a
+// column for an unscannable no-scanner client (e.g. aider). That column's cells
+// would render interactive "available" (an "ok" config) yet could never be
+// reconciled after a migrate — /api/scan reports no per-entry presence for an
+// unparsed client — so the cell never becomes "via-hub" and can't be
+// demigrated. So a pinned NON-CORE client is dropped here unless it is
+// scannable. CORE clients are ALWAYS shown (and always scannable in
+// production), so the re-check is scoped to non-core pins. When the backend
+// omits client_capabilities (empty scannable set) the re-check is INERT —
+// every client is treated as scannable so legacy pin behavior is preserved
+// (the visibleClients() side already falls back to a conservative core-only
+// auto set in that case).
+//
+// The ordering universe is ALL_CLIENTS (the registry mirror) UNIONED with
+// the auto-detected set and any pref keys, so a detected client newer than
+// the static ALL_CLIENTS list (a backend client the frontend list hasn't
+// caught up to) is still ordered + shown rather than silently dropped by an
+// ALL_CLIENTS-only loop. orderClientsForColumns keeps CORE first, then
+// registry order, then alphabetical extras.
 //
 // Pure + side-effect-free so it is trivially unit-testable.
 export function effectiveVisibleClients(
@@ -87,12 +117,30 @@ export function effectiveVisibleClients(
   prefs: ColumnPrefs,
 ): string[] {
   const auto = new Set(visibleClients(scan));
+  // CORE_CLIENT_SET-equivalent: orderClientsForColumns always emits the core
+  // set first, and visibleClients() always includes the core set, so any client
+  // in `auto` that is also a core client is trivially core. Rather than
+  // re-import CORE_CLIENTS, derive the "always-shown core" membership from the
+  // auto set's leading core entries via visibleClients(null) (which returns
+  // exactly the core set on a null scan) — a pure, dependency-free core probe.
+  const core = new Set(visibleClients(null));
+  const scannable = scannableClients(scan);
+  // gateInert: with no capability info (older backend) the scannable set is
+  // empty, so honor every pin as before (the re-check must not silently hide a
+  // pinned column just because capabilities are unavailable).
+  const gateInert = scannable.size === 0;
+  const universe = new Set<string>(ALL_CLIENTS);
+  for (const c of auto) universe.add(c);
+  for (const c of Object.keys(prefs)) universe.add(c);
   const out: string[] = [];
-  for (const client of ALL_CLIENTS) {
+  for (const client of orderClientsForColumns(universe)) {
     const pref = prefs[client];
     let show: boolean;
     if (pref === true) {
-      show = true;
+      // A pinned NON-CORE client must still be scannable to render an
+      // interactive column (Finding 1). Core clients are exempt (always shown);
+      // the gate is inert when capabilities are absent.
+      show = core.has(client) || gateInert || scannable.has(client);
     } else if (pref === false) {
       show = false;
     } else {
