@@ -524,3 +524,70 @@ func TestSweepPruneWorkspaces_ForwardEnteringDuringPruneWaitsForGate(t *testing.
 		t.Fatal("serena forward did not finish after prune teardown completed")
 	}
 }
+
+// redirectSettingsPath points api.SettingsPath() at a hermetic temp dir on every
+// GOOS so the test never reads or writes the live gui-preferences.yaml.
+func redirectSettingsPath(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("LOCALAPPDATA", dir)  // Windows
+	t.Setenv("XDG_DATA_HOME", dir) // Linux/macOS
+	t.Setenv("HOME", dir)          // POSIX home backstop
+	t.Setenv("USERPROFILE", dir)   // Windows home backstop
+	p := api.SettingsPath()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	return p
+}
+
+// seedSetting persists key=value at the redirected SettingsPath() THROUGH the
+// hardened state-file writer so the resulting file carries the owner-only DACL
+// the READ gate requires (a raw os.WriteFile on a corp/CI Windows t.TempDir()
+// inherits an Authenticated-Users ACE the read gate hard-rejects).
+func seedSetting(t *testing.T, p, key, value string) {
+	t.Helper()
+	if err := api.NewAPI().SettingsSetIn(p, key, value); err != nil {
+		t.Fatalf("SettingsSetIn(%s=%s): %v", key, value, err)
+	}
+}
+
+// TestDefaultPruneDeadWorktrees_FailClosed locks in the GUI sweeper's fail-SAFE
+// posture (Finding 2 parity): a settings-read error resolves the destructive
+// dead-worktree gate to FALSE; an absent key applies the registry Default
+// ("true"); an explicit value is honored. This is the canonical posture the CLI's
+// pruneDeadWorktreesEnabled MUST mirror exactly.
+func TestDefaultPruneDeadWorktrees_FailClosed(t *testing.T) {
+	t.Run("malformed settings file → read error → gate FALSE (fail safe)", func(t *testing.T) {
+		p := redirectSettingsPath(t)
+		// Create an owner-only file via the hardened writer, then overwrite its
+		// content in place with malformed YAML (the truncating write preserves the
+		// DACL), so SettingsList fails at YAML parse — the read error under test —
+		// not at the file-DACL gate.
+		seedSetting(t, p, api.PruneDeadWorktreesSettingKey, "true")
+		if err := os.WriteFile(p, []byte("- not: a map\n- still: not\n"), 0o600); err != nil {
+			t.Fatalf("overwrite with malformed settings: %v", err)
+		}
+		if _, err := api.NewAPI().SettingsList(); err == nil {
+			t.Fatalf("precondition: expected SettingsList to error on malformed YAML, got nil")
+		}
+		if defaultPruneDeadWorktrees() {
+			t.Fatalf("defaultPruneDeadWorktrees() = true on a settings-read error; want false (fail safe)")
+		}
+	})
+
+	t.Run("absent settings file → registry default applies → gate TRUE", func(t *testing.T) {
+		redirectSettingsPath(t)
+		if !defaultPruneDeadWorktrees() {
+			t.Fatalf("defaultPruneDeadWorktrees() = false with no persisted value; want true (registry Default)")
+		}
+	})
+
+	t.Run("explicit false persisted → gate FALSE", func(t *testing.T) {
+		p := redirectSettingsPath(t)
+		seedSetting(t, p, api.PruneDeadWorktreesSettingKey, "false")
+		if defaultPruneDeadWorktrees() {
+			t.Fatalf("defaultPruneDeadWorktrees() = true with the gate persisted \"false\"; want false")
+		}
+	})
+}

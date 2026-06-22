@@ -255,13 +255,18 @@ func runWorkspacePrune(cmd *cobra.Command, opts workspacePruneOpts) error {
 // pruneDeadWorktreesEnabled resolves the persisted daemons.prune_dead_worktrees
 // gate (default "true") so the manual command honors the SAME gate the GUI
 // sweeper reads each tick — the dead-worktree structural signal is on unless the
-// operator turned it off in Settings. A settings-read failure defaults the
-// signal ON (the registry Default), keeping the manual command's structural
-// coverage intact when the GUI is not running to seed the value.
+// operator turned it off in Settings. It FAILS CLOSED, exactly mirroring the GUI
+// sweeper's defaultPruneDeadWorktrees: a settings-read error (gui-preferences.yaml
+// unreadable/malformed) resolves the gate to FALSE (signal DISABLED). The
+// dead-worktree prune is DESTRUCTIVE; a gate-read failure must NOT enable it
+// (otherwise `mcphub workspace prune --yes` could classify+prune dead-worktree
+// rows even when the operator turned the gate OFF). A genuinely-absent key still
+// applies the registry Default ("true") — that is a SUCCESSFUL read of an
+// unset value, not a read failure.
 func pruneDeadWorktreesEnabled() bool {
 	vals, err := api.NewAPI().SettingsList()
 	if err != nil {
-		return true // registry Default is "true"; keep the structural signal on
+		return false // fail-safe: do not run the destructive signal on a read failure
 	}
 	v, ok := vals[api.PruneDeadWorktreesSettingKey]
 	if !ok {

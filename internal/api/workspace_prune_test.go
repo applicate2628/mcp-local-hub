@@ -485,11 +485,14 @@ func TestIsDeadGitWorktreePath_Submodule(t *testing.T) {
 }
 
 // TestIsWorktreeAdminPath unit-tests the Finding-1 worktrees-path discriminator
-// directly: only an admin path of the FULL `<repo>/.git/worktrees/<name>` shape
-// (immediate parent `worktrees` AND grandparent `.git`) is a worktree admin
-// path. A `modules/<name>` submodule path, a submodule under a worktrees-named
-// dir (`.git/modules/.../worktrees/foo` — parent `worktrees` but grandparent NOT
-// `.git`, the Finding-1 r6 trap), or anything else is not.
+// directly: a worktree admin path has immediate parent `worktrees` AND no
+// `modules` segment immediately after a git-common-dir segment (`.git`/`*.git`).
+// That ACCEPTS the normal-repo (`<repo>/.git/worktrees/<name>`), bare-repo
+// (`<repo>/main.git/worktrees/<name>`), and user-dir-named-`modules`
+// (`.../modules/proj/.git/worktrees/<name>`, `modules` ABOVE the git dir) shapes,
+// while REJECTING a `<git-dir>/modules/<name>` submodule path (flat or nested) and
+// a submodule under a worktrees-named dir (`.git/modules/.../worktrees/foo` —
+// parent `worktrees` but `modules` sits directly under `.git`, the r6 trap).
 func TestIsWorktreeAdminPath(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -500,20 +503,98 @@ func TestIsWorktreeAdminPath(t *testing.T) {
 		{"submodule admin path", filepath.Join("repo", ".git", "modules", "sub"), false},
 		{"bare .git child (no worktrees parent)", filepath.Join("repo", ".git", "HEAD"), false},
 		{"deep worktree admin path", filepath.Join("x", "y", ".git", "worktrees", "w"), true},
-		// Finding 1 (r6): a submodule checked out under a directory literally named
-		// `worktrees` makes git store its admin dir at
+		// Finding 1 (r6 trap): a submodule checked out under a directory literally
+		// named `worktrees` makes git store its admin dir at
 		// `<repo>/.git/modules/deps/worktrees/foo` — immediate parent `worktrees`
-		// (so the old parent-only check ACCEPTED it) but grandparent `deps`, NOT
-		// `.git`. The full-shape (grandparent==`.git`) check rejects it.
-		{"submodule under worktrees-named dir (parent worktrees, grandparent NOT .git)", filepath.Join("repo", ".git", "modules", "deps", "worktrees", "foo"), false},
-		// A genuine deep worktree still has grandparent `.git` → accepted.
+		// (so a parent-only check would ACCEPT it) but it CONTAINS a `modules`
+		// component, so the modules-absence check rejects it.
+		{"submodule under worktrees-named dir (parent worktrees, has modules component)", filepath.Join("repo", ".git", "modules", "deps", "worktrees", "foo"), false},
+		// A genuine deep worktree (common git dir literally `.git`) → accepted.
 		{"worktree admin path with worktrees grandparent .git", filepath.Join("a", "b", "c", ".git", "worktrees", "feat"), true},
+		// Finding 1 (this round): a worktree created from a BARE repo has a common
+		// git dir named e.g. `main.git`, so `git worktree add` writes
+		// `gitdir: .../main.git/worktrees/<name>` — immediate parent `worktrees`,
+		// grandparent `main.git` (NOT `.git`), no `modules` component. The earlier
+		// grandparent==`.git` check WRONGLY rejected this; the modules-absence rule
+		// ACCEPTS it.
+		{"bare-repo worktree admin path (grandparent main.git, not .git)", filepath.Join("x", "main.git", "worktrees", "wt"), true},
+		{"deep bare-repo worktree admin path", filepath.Join("srv", "repos", "proj.git", "worktrees", "feat"), true},
+		// A bare-repo SUBMODULE store still carries `modules` directly under the
+		// `*.git` common dir → rejected.
+		{"submodule under bare-named git dir (modules after super.git)", filepath.Join("x", "super.git", "modules", "sub"), false},
+		// Nested submodule: git stores it at `<git-dir>/modules/<sub-path>` with a
+		// multi-segment sub-path; `modules` still sits directly under `.git` → rejected.
+		{"nested submodule admin path (modules/libs/mysub under .git)", filepath.Join("super", ".git", "modules", "libs", "mysub"), false},
+		// Architect adjudication (this round): a worktree whose owning repo merely
+		// LIVES under a user dir literally named `modules` (the `modules` segment is
+		// ABOVE the git common dir, not immediately after it) must be ACCEPTED — the
+		// "modules anywhere" rule would wrongly reject it (the same orphan-row
+		// false-negative Finding 1 targets). The positional rule accepts it.
+		{"worktree under a user dir named modules (modules above .git)", filepath.Join("home", "user", "modules", "proj", ".git", "worktrees", "wt"), true},
 		{"empty", "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := isWorktreeAdminPath(c.adminDir); got != c.want {
 				t.Fatalf("isWorktreeAdminPath(%q) = %v, want %v", c.adminDir, got, c.want)
+			}
+		})
+	}
+}
+
+// TestIsDeadGitWorktreePath_BareRepoWorktree covers Finding 1 (this round)
+// end-to-end: a worktree created from a BARE repo has a common git dir named
+// e.g. `main.git`, so its `.git` pointer is `gitdir: .../main.git/worktrees/<name>`.
+// The earlier grandparent==`.git` guard WRONGLY rejected such an admin path
+// (grandparent `main.git`, not `.git`) → the dead-worktree signal never fired
+// for bare-repo worktrees. With the modules-absence rule a REMOVED bare-repo
+// worktree (admin leaf gone, parent `worktrees/` present) is correctly PRUNED.
+func TestIsDeadGitWorktreePath_BareRepoWorktree(t *testing.T) {
+	// DEAD bare-repo worktree: gitdir → <repo>/main.git/worktrees/<name>; the
+	// parent `worktrees/` exists, only the `<name>` leaf is gone → genuinely DEAD.
+	deadBare := t.TempDir()
+	bareWorktreesParent := filepath.Join(t.TempDir(), "main.git", "worktrees")
+	if err := os.MkdirAll(bareWorktreesParent, 0o755); err != nil {
+		t.Fatalf("mkdir bare worktrees parent: %v", err)
+	}
+	bareDeadAdmin := filepath.Join(bareWorktreesParent, "wt") // leaf never created
+	writeGitFile(t, deadBare, bareDeadAdmin)
+
+	// LIVE bare-repo worktree: admin leaf PRESENT → not dead (negative control,
+	// proves the accept path does not over-prune a live bare-repo worktree).
+	liveBare := t.TempDir()
+	liveBareAdmin := filepath.Join(t.TempDir(), "main.git", "worktrees", "live")
+	if err := os.MkdirAll(liveBareAdmin, 0o755); err != nil {
+		t.Fatalf("mkdir live bare admin: %v", err)
+	}
+	writeGitFile(t, liveBare, liveBareAdmin)
+
+	// DEAD worktree whose owning repo LIVES under a user dir literally named
+	// `modules` (the `modules` segment is ABOVE the git common dir, not git's
+	// submodule-store position). The positional rule must ACCEPT this → a removed
+	// worktree here is correctly PRUNED. A "modules anywhere" rule would wrongly
+	// reject it (orphan row lingers — the Finding-1 bug class).
+	deadUserModules := t.TempDir()
+	userModulesWorktreesParent := filepath.Join(t.TempDir(), "modules", "proj", ".git", "worktrees")
+	if err := os.MkdirAll(userModulesWorktreesParent, 0o755); err != nil {
+		t.Fatalf("mkdir user-modules worktrees parent: %v", err)
+	}
+	userModulesAdmin := filepath.Join(userModulesWorktreesParent, "wt") // leaf never created
+	writeGitFile(t, deadUserModules, userModulesAdmin)
+
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"dead bare-repo worktree (main.git/worktrees/<name> leaf absent, parent present) → pruned", deadBare, true},
+		{"live bare-repo worktree (admin leaf present) → NOT pruned", liveBare, false},
+		{"dead worktree under a user dir named modules (modules above .git) → pruned", deadUserModules, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := IsDeadGitWorktreePath(c.path); got != c.want {
+				t.Fatalf("IsDeadGitWorktreePath(%q) = %v, want %v", c.path, got, c.want)
 			}
 		})
 	}
