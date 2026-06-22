@@ -45,23 +45,6 @@ type MCPEntry struct {
 	// Empty preserves the legacy --server/--daemon behavior for every
 	// existing caller.
 	RelayURL string
-
-	// Raw, when non-nil, is the VERBATIM prior on-disk entry value an adapter's
-	// GetEntry could not represent through the URL/Relay fields above — the
-	// canonical case being a MiMoCode/OpenCode-fork LOCAL entry
-	// (`{"type":"local","command":["npx",...],"environment":{...}}`) which has
-	// no `url`. It exists ONLY so the install/register snapshot-rollback
-	// (GetEntry → AddEntry(*priorEntry)) can round-trip such an entry FAITHFULLY:
-	// without it, AddEntry would rewrite the user's local command-array entry as
-	// a broken `{"type":"remote","url":"","enabled":true}` REMOTE entry on any
-	// install-failure rollback (corruption). An adapter that honors Raw writes it
-	// back verbatim and ignores every other field. nil (the default for every
-	// hub-managed MCPEntry the installer builds) preserves the existing
-	// URL/Relay write path for all callers and all adapters. Currently populated
-	// + honored ONLY by the MiMoCode adapter; the structurally-identical OpenCode
-	// adapter has the same latent local-entry rollback gap, tracked as an
-	// adjacent finding (work-items/bugs) rather than silently changed here.
-	Raw map[string]any
 }
 
 // Client is the OS-/format-abstracted interface for a single MCP client config file.

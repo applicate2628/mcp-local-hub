@@ -158,125 +158,6 @@ func TestMimoCode_GetEntry_RoundTrips(t *testing.T) {
 	}
 }
 
-// TestMimoCode_GetEntry_LocalEntryCarriesRaw_RoundTripPreservesIt pins Finding
-// 5: a user's LOCAL entry (command ARRAY, `environment`, NO url) must survive
-// the install/register snapshot-rollback (GetEntry → AddEntry(*priorEntry))
-// UNCHANGED. Pre-fix GetEntry returned an MCPEntry with empty URL, and the
-// rollback's AddEntry rewrote the local entry as a broken
-// `{"type":"remote","url":"","enabled":true}` REMOTE entry — corruption.
-// GetEntry now carries the verbatim shape in MCPEntry.Raw and AddEntry writes
-// Raw back unchanged, so the round-trip is faithful.
-func TestMimoCode_GetEntry_LocalEntryCarriesRaw_RoundTripPreservesIt(t *testing.T) {
-	o := newMimoCodeForTest(t, `{
-  "mcp": {
-    "memory": {
-      "type": "local",
-      "command": ["npx", "-y", "@modelcontextprotocol/server-memory"],
-      "environment": {"API_KEY": "secret"},
-      "enabled": true
-    }
-  }
-}`)
-	prior, err := o.GetEntry("memory")
-	if err != nil {
-		t.Fatalf("GetEntry: %v", err)
-	}
-	if prior == nil {
-		t.Fatal("GetEntry returned nil for a present local entry")
-	}
-	// A local entry has no url; the lean URL representation cannot carry it, so
-	// the raw shape must be present for faithful restore.
-	if prior.URL != "" {
-		t.Errorf("local entry URL = %q, want empty (no url field)", prior.URL)
-	}
-	if prior.Raw == nil {
-		t.Fatal("local entry must carry its verbatim shape in MCPEntry.Raw")
-	}
-	if prior.Raw["type"] != "local" {
-		t.Errorf("Raw[type] = %v, want local", prior.Raw["type"])
-	}
-
-	// Simulate the install-rollback round-trip: clobber the entry (as a failed
-	// install would), then restore the prior snapshot via AddEntry.
-	if err := o.AddEntry(MCPEntry{Name: "memory", URL: "http://localhost:9123/mcp"}); err != nil {
-		t.Fatalf("AddEntry (simulated install): %v", err)
-	}
-	if err := o.AddEntry(*prior); err != nil {
-		t.Fatalf("AddEntry (rollback restore): %v", err)
-	}
-
-	// The restored entry must be the ORIGINAL local shape, not a remote url:"" entry.
-	restored, err := o.GetEntry("memory")
-	if err != nil {
-		t.Fatalf("GetEntry after restore: %v", err)
-	}
-	if restored == nil || restored.Raw == nil {
-		t.Fatal("restored local entry lost its raw shape")
-	}
-	if restored.Raw["type"] != "local" {
-		t.Errorf("restored Raw[type] = %v, want local (rollback must NOT rewrite it as remote)", restored.Raw["type"])
-	}
-	if _, hasURL := restored.Raw["url"]; hasURL {
-		t.Errorf("restored local entry must NOT have a url field; got %v", restored.Raw["url"])
-	}
-	cmd, ok := restored.Raw["command"].([]any)
-	if !ok || len(cmd) != 3 || cmd[0] != "npx" {
-		t.Errorf("restored command array corrupted: %v", restored.Raw["command"])
-	}
-	env, ok := restored.Raw["environment"].(map[string]any)
-	if !ok || env["API_KEY"] != "secret" {
-		t.Errorf("restored environment lost: %v", restored.Raw["environment"])
-	}
-}
-
-// TestMimoCode_DeepMergeRead pins Finding 1 at the adapter level: GetEntry reads
-// the DEEP-MERGED view across the accepted global layers, so a server defined
-// only in config.json is visible even when the highest-precedence file
-// (mimocode.jsonc) holds only unrelated settings, and a later layer overrides an
-// earlier one per server name.
-func TestMimoCode_DeepMergeRead(t *testing.T) {
-	t.Setenv("MIMOCODE_CONFIG", "")
-	t.Setenv("MIMOCODE_CONFIG_DIR", "")
-	t.Setenv("MIMOCODE_HOME", "")
-	xdg := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", xdg)
-	dir := filepath.Join(xdg, "mimocode")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// config.json holds memory (stale) AND a unique server `legacy`.
-	if err := os.WriteFile(filepath.Join(dir, "config.json"),
-		[]byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9999/STALE","enabled":true},"legacy":{"type":"remote","url":"http://localhost:9100/mcp","enabled":true}}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// mimocode.jsonc (top layer) overrides memory's URL and adds only settings.
-	jsoncPath := filepath.Join(dir, "mimocode.jsonc")
-	if err := os.WriteFile(jsoncPath,
-		[]byte("{\n  // top layer\n  \"theme\": \"dark\",\n  \"mcp\": {\"memory\": {\"type\":\"remote\",\"url\":\"http://localhost:9123/mcp\",\"enabled\":true}}\n}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	home, _ := os.UserHomeDir()
-	o := &mimoCodeClient{path: jsoncPath, home: home}
-
-	// `legacy` lives only in config.json — it must be visible.
-	leg, err := o.GetEntry("legacy")
-	if err != nil {
-		t.Fatalf("GetEntry(legacy): %v", err)
-	}
-	if leg == nil || leg.URL != "http://localhost:9100/mcp" {
-		t.Errorf("config.json-only server must be visible via deep-merge; got %+v", leg)
-	}
-	// `memory` is overridden by the top layer (later wins).
-	mem, err := o.GetEntry("memory")
-	if err != nil {
-		t.Fatalf("GetEntry(memory): %v", err)
-	}
-	if mem == nil || mem.URL != "http://localhost:9123/mcp" {
-		t.Errorf("later layer must override per server name; got %+v", mem)
-	}
-}
-
 // TestMimoCode_RemoveEntry confirms removal is scoped and idempotent.
 func TestMimoCode_RemoveEntry(t *testing.T) {
 	o := newMimoCodeForTest(t, `{"mcp":{"serena":{"type":"remote","url":"http://localhost:9121/mcp","enabled":true},"other":{"type":"remote","url":"http://x/mcp","enabled":true}}}`)
@@ -504,19 +385,15 @@ func TestMimoCode_FindStdioLanguageServerEntries(t *testing.T) {
 	}
 }
 
-// TestMimoCode_DefaultConfigPath asserts the global path resolution precedence
-// (MIMOCODE_HOME/config → XDG_CONFIG_HOME/mimocode → ~/.config/mimocode), that
-// it does NOT switch to a Windows %APPDATA% / macOS ~/Library convention, and
-// that an existing mimocode.jsonc is preferred over mimocode.json (because
-// MiMoCode merges .jsonc OVER .json at load time — see defaultMimoCodeConfigPath
-// doc; sources verified against the MiMoCode config-overrides docs 2026-06).
+// TestMimoCode_DefaultConfigPath asserts the global path resolution
+// (XDG_CONFIG_HOME/mimocode → ~/.config/mimocode), that it does NOT switch to a
+// Windows %APPDATA% / macOS ~/Library convention, and that an existing
+// mimocode.jsonc is preferred over mimocode.json (MiMoCode reads both, so a hub
+// entry written into a separate .json while a .jsonc exists could be ignored).
+// Mirrors the OpenCode adapter's resolution (mimo is a fork); the only
+// divergence is the .jsonc preference.
 func TestMimoCode_DefaultConfigPath(t *testing.T) {
-	// Isolate from any ambient env on the host running the tests.
-	t.Setenv("MIMOCODE_HOME", "")
-	t.Setenv("XDG_CONFIG_HOME", "")
-
 	t.Run("default ~/.config/mimocode", func(t *testing.T) {
-		t.Setenv("MIMOCODE_HOME", "")
 		t.Setenv("XDG_CONFIG_HOME", "")
 		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
 		want := filepath.Join("home", "u", ".config", "mimocode", "mimocode.json")
@@ -525,7 +402,6 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 		}
 	})
 	t.Run("XDG_CONFIG_HOME override", func(t *testing.T) {
-		t.Setenv("MIMOCODE_HOME", "")
 		xdg := filepath.Join("custom", "xdg")
 		t.Setenv("XDG_CONFIG_HOME", xdg)
 		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
@@ -534,33 +410,8 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 			t.Errorf("defaultMimoCodeConfigPath = %q, want %q", got, want)
 		}
 	})
-	t.Run("MIMOCODE_HOME wins over XDG, config/ subdir", func(t *testing.T) {
-		// Absolute MIMOCODE_HOME → $MIMOCODE_HOME/config/mimocode.json,
-		// taking precedence over XDG and home. Use an absolute temp dir so the
-		// absolute-path gate (filepath.IsAbs) accepts it on every OS.
-		mh := t.TempDir()
-		t.Setenv("MIMOCODE_HOME", mh)
-		t.Setenv("XDG_CONFIG_HOME", filepath.Join("custom", "xdg"))
-		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		want := filepath.Join(mh, "config", "mimocode.json")
-		if got != want {
-			t.Errorf("defaultMimoCodeConfigPath = %q, want %q", got, want)
-		}
-	})
-	t.Run("relative MIMOCODE_HOME is ignored (docs require absolute)", func(t *testing.T) {
-		t.Setenv("MIMOCODE_HOME", filepath.Join("not", "absolute"))
-		t.Setenv("XDG_CONFIG_HOME", "")
-		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		want := filepath.Join("home", "u", ".config", "mimocode", "mimocode.json")
-		if got != want {
-			t.Errorf("relative MIMOCODE_HOME should be ignored; got %q, want %q", got, want)
-		}
-	})
 	t.Run("existing mimocode.jsonc is preferred over mimocode.json", func(t *testing.T) {
-		// Point XDG at a real temp dir and seed a mimocode.jsonc there: the
-		// resolver must target the .jsonc (the file MiMoCode actually honors).
 		xdg := t.TempDir()
-		t.Setenv("MIMOCODE_HOME", "")
 		t.Setenv("XDG_CONFIG_HOME", xdg)
 		dir := filepath.Join(xdg, "mimocode")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -577,7 +428,6 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 	})
 	t.Run("no mimocode.jsonc falls back to mimocode.json", func(t *testing.T) {
 		xdg := t.TempDir()
-		t.Setenv("MIMOCODE_HOME", "")
 		t.Setenv("XDG_CONFIG_HOME", xdg)
 		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
 		want := filepath.Join(xdg, "mimocode", "mimocode.json")
@@ -585,172 +435,10 @@ func TestMimoCode_DefaultConfigPath(t *testing.T) {
 			t.Errorf("with no .jsonc present, defaultMimoCodeConfigPath = %q, want %q", got, want)
 		}
 	})
-	t.Setenv("MIMOCODE_HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 	if !strings.HasSuffix(defaultMimoCodeConfigPath("/home/u"), "mimocode.json") {
 		t.Errorf("path must end in mimocode.json")
 	}
-}
-
-// TestMimoCode_ConfigFilePrecedence pins the documented global-file merge
-// order (config.json < mimocode.json < mimocode.jsonc, "merged in that order,
-// later overrides earlier"): the path owner targets the HIGHEST-precedence
-// EXISTING file so the hub write wins the merge and scan/backup read the file
-// that actually holds entries. Crucially it covers `config.json` — an install
-// whose MCP entries live solely there used to be invisible to scan/backup
-// (Findings 1+4). Env is isolated so an ambient MIMOCODE_* on the host running
-// the tests cannot leak in.
-func TestMimoCode_ConfigFilePrecedence(t *testing.T) {
-	t.Setenv("MIMOCODE_CONFIG", "")
-	t.Setenv("MIMOCODE_CONFIG_DIR", "")
-	t.Setenv("MIMOCODE_HOME", "")
-
-	seed := func(t *testing.T, dir string, names ...string) {
-		t.Helper()
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		for _, n := range names {
-			if err := os.WriteFile(filepath.Join(dir, n), []byte(`{"mcp":{}}`), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-
-	t.Run("config.json only is selected (not silently skipped)", func(t *testing.T) {
-		xdg := t.TempDir()
-		t.Setenv("XDG_CONFIG_HOME", xdg)
-		dir := filepath.Join(xdg, "mimocode")
-		seed(t, dir, "config.json")
-		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		want := filepath.Join(dir, "config.json")
-		if got != want {
-			t.Errorf("config.json-only install: got %q, want %q", got, want)
-		}
-	})
-
-	t.Run("mimocode.json wins over config.json", func(t *testing.T) {
-		xdg := t.TempDir()
-		t.Setenv("XDG_CONFIG_HOME", xdg)
-		dir := filepath.Join(xdg, "mimocode")
-		seed(t, dir, "config.json", "mimocode.json")
-		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		want := filepath.Join(dir, "mimocode.json")
-		if got != want {
-			t.Errorf("mimocode.json+config.json: got %q, want %q", got, want)
-		}
-	})
-
-	t.Run("mimocode.jsonc wins over both", func(t *testing.T) {
-		xdg := t.TempDir()
-		t.Setenv("XDG_CONFIG_HOME", xdg)
-		dir := filepath.Join(xdg, "mimocode")
-		seed(t, dir, "config.json", "mimocode.json", "mimocode.jsonc")
-		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		want := filepath.Join(dir, "mimocode.jsonc")
-		if got != want {
-			t.Errorf("all three present: got %q, want %q", got, want)
-		}
-	})
-
-	t.Run("nothing present falls back to mimocode.json", func(t *testing.T) {
-		xdg := t.TempDir()
-		t.Setenv("XDG_CONFIG_HOME", xdg)
-		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		want := filepath.Join(xdg, "mimocode", "mimocode.json")
-		if got != want {
-			t.Errorf("empty dir: got %q, want %q", got, want)
-		}
-	})
-}
-
-// TestMimoCode_ConfigEnvOverrides pins the documented env precedence
-// MIMOCODE_CONFIG (file) > MIMOCODE_CONFIG_DIR (dir) > MIMOCODE_HOME > XDG >
-// default (Finding 2). MIMOCODE_CONFIG points straight at a file and bypasses
-// all file probing; MIMOCODE_CONFIG_DIR replaces the directory but keeps the
-// in-dir file preference. Relative values are ignored (absolute-path
-// requirement mirrors MIMOCODE_HOME).
-func TestMimoCode_ConfigEnvOverrides(t *testing.T) {
-	t.Setenv("MIMOCODE_CONFIG", "")
-	t.Setenv("MIMOCODE_CONFIG_DIR", "")
-	t.Setenv("MIMOCODE_HOME", "")
-	t.Setenv("XDG_CONFIG_HOME", "")
-
-	t.Run("MIMOCODE_CONFIG (absolute file) is used verbatim, no probing", func(t *testing.T) {
-		f := filepath.Join(t.TempDir(), "custom.jsonc")
-		t.Setenv("MIMOCODE_CONFIG", f)
-		// Even with MIMOCODE_HOME + XDG set, the direct file override wins.
-		t.Setenv("MIMOCODE_HOME", t.TempDir())
-		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		if got != f {
-			t.Errorf("MIMOCODE_CONFIG override: got %q, want %q", got, f)
-		}
-	})
-
-	t.Run("relative MIMOCODE_CONFIG is ignored", func(t *testing.T) {
-		t.Setenv("MIMOCODE_CONFIG", filepath.Join("not", "absolute", "x.json"))
-		t.Setenv("MIMOCODE_CONFIG_DIR", "")
-		t.Setenv("MIMOCODE_HOME", "")
-		t.Setenv("XDG_CONFIG_HOME", "")
-		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		want := filepath.Join("home", "u", ".config", "mimocode", "mimocode.json")
-		if got != want {
-			t.Errorf("relative MIMOCODE_CONFIG should be ignored: got %q, want %q", got, want)
-		}
-	})
-
-	t.Run("MIMOCODE_CONFIG_DIR (absolute) replaces the dir, keeps mimocode.json(c) preference", func(t *testing.T) {
-		t.Setenv("MIMOCODE_CONFIG", "")
-		cd := t.TempDir()
-		t.Setenv("MIMOCODE_CONFIG_DIR", cd)
-		// MIMOCODE_HOME present but lower precedence — CONFIG_DIR must win.
-		t.Setenv("MIMOCODE_HOME", t.TempDir())
-		// Seed mimocode.json in the custom dir → resolver picks it.
-		if err := os.WriteFile(filepath.Join(cd, "mimocode.json"), []byte(`{"mcp":{}}`), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		want := filepath.Join(cd, "mimocode.json")
-		if got != want {
-			t.Errorf("MIMOCODE_CONFIG_DIR override: got %q, want %q", got, want)
-		}
-	})
-
-	t.Run("config.json is NOT selected under MIMOCODE_CONFIG_DIR (global-dir-only layer — Finding 2)", func(t *testing.T) {
-		// Docs (https://mimo.xiaomi.com/mimocode/config-overrides): "`.mimocode/`
-		// and MIMOCODE_CONFIG_DIR likewise use mimocode.json(c)" — config.json is
-		// a GLOBAL-default-dir-only layer MiMo does NOT load from a custom dir. A
-		// custom dir holding ONLY config.json must therefore resolve to a fresh
-		// mimocode.json (the file the adapter creates + MiMo will actually load),
-		// NOT the config.json (which MiMo would ignore).
-		t.Setenv("MIMOCODE_CONFIG", "")
-		cd := t.TempDir()
-		t.Setenv("MIMOCODE_CONFIG_DIR", cd)
-		t.Setenv("MIMOCODE_HOME", "")
-		t.Setenv("XDG_CONFIG_HOME", "")
-		if err := os.WriteFile(filepath.Join(cd, "config.json"), []byte(`{"mcp":{}}`), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		want := filepath.Join(cd, "mimocode.json")
-		if got != want {
-			t.Errorf("config.json under a custom CONFIG_DIR must be ignored; got %q, want %q", got, want)
-		}
-	})
-
-	t.Run("relative MIMOCODE_CONFIG_DIR is ignored (falls to MIMOCODE_HOME)", func(t *testing.T) {
-		t.Setenv("MIMOCODE_CONFIG", "")
-		t.Setenv("MIMOCODE_CONFIG_DIR", filepath.Join("rel", "dir"))
-		mh := t.TempDir()
-		t.Setenv("MIMOCODE_HOME", mh)
-		t.Setenv("XDG_CONFIG_HOME", "")
-		got := defaultMimoCodeConfigPath(filepath.Join("home", "u"))
-		want := filepath.Join(mh, "config", "mimocode.json")
-		if got != want {
-			t.Errorf("relative MIMOCODE_CONFIG_DIR should fall through to MIMOCODE_HOME: got %q, want %q", got, want)
-		}
-	})
 }
 
 // TestMimoCode_JSONC_ReadAddRemovePreservesComments pins MiMoCode's JSONC
@@ -758,7 +446,7 @@ func TestMimoCode_ConfigEnvOverrides(t *testing.T) {
 // unrelated `$schema` key, and a trailing comma must read, AddEntry, and
 // RemoveEntry without dropping comments or unrelated keys. MiMoCode's resolved
 // file can be `mimocode.jsonc` (the path owner prefers it), so this is a
-// first-class path, not an edge case. Mirrors TestJSONC_OpenCode_*.
+// first-class path, not an edge case.
 func TestMimoCode_JSONC_ReadAddRemovePreservesComments(t *testing.T) {
 	const fixture = `{
   // hand-written header (mimocode supports a .jsonc variant)

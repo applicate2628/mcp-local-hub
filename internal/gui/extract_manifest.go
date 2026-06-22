@@ -40,13 +40,7 @@ func (realExtractor) ExtractManifestFromClient(client, server string, _ api.Scan
 		GeminiConfigPath:      guiClientConfigPath("gemini-cli"),
 		QwenConfigPath:        guiClientConfigPath("qwen-cli"),
 		AntigravityConfigPath: guiClientConfigPath("antigravity"),
-		// mimocode: Discovery surfaces a mimocode stdio entry as a Create-manifest
-		// candidate (from-client=mimocode), so the extract path must resolve its
-		// config file too. Resolved through the adapter's ConfigPath owner
-		// (ConfigPathForName → defaultMimoCodeConfigPath) so it honors
-		// MIMOCODE_CONFIG/_DIR/_HOME + the .jsonc/.json/config.json preference.
-		MimoCodeConfigPath: guiClientConfigPath("mimocode"),
-		ManifestDir:        "", // embed-first; matches CLI scanManifestDir() in prod
+		ManifestDir:           "", // embed-first; matches CLI scanManifestDir() in prod
 	})
 }
 

@@ -486,12 +486,10 @@ func TestScanCoversWave2Clients(t *testing.T) {
 }
 
 // TestScanCoversMimoCode is the scan-pipeline counterpart of the mimocode
-// adapter wiring (Finding 1): the clientScanners() registry must have a
-// mimocode entry so ScanFrom records ClientPresence["mimocode"] for an
-// installed mimo config. MiMoCode is an OpenCode fork sharing the top-level
-// `mcp` map, so the hub binding shape is identical to opencode's. The second
-// sub-case exercises the JSONC tolerance the mimo scanner adds (the resolved
-// file can be mimocode.jsonc with comments).
+// adapter wiring: the clientScanners() registry must have a mimocode entry so
+// ScanFrom records ClientPresence["mimocode"] for an installed mimo config.
+// MiMoCode is an OpenCode fork sharing the top-level `mcp` map, so the hub
+// binding shape — and scanMimoCode — are identical to opencode's.
 func TestScanCoversMimoCode(t *testing.T) {
 	manifestFixture := func(dir string) string {
 		manifestDir := filepath.Join(dir, "servers")
@@ -534,90 +532,10 @@ func TestScanCoversMimoCode(t *testing.T) {
 		}
 	})
 
-	t.Run("jsonc with a comment parses (scanner tolerates JSONC)", func(t *testing.T) {
-		tmp := t.TempDir()
-		mimoPath := filepath.Join(tmp, "mimocode.jsonc")
-		_ = os.WriteFile(mimoPath, []byte("{\n  // operator comment\n  \"mcp\": {\n    \"memory\": {\"type\":\"remote\",\"url\":\"http://localhost:9123/mcp\",\"enabled\":true}\n  }\n}\n"), 0600)
-		manifestDir := manifestFixture(tmp)
-
-		a := NewAPI()
-		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
-		if err != nil {
-			t.Fatalf("Scan: %v", err)
-		}
-		mem := memEntryFor(t, res)
-		if got := mem.ClientPresence["mimocode"].Endpoint; got != "http://localhost:9123/mcp" {
-			t.Errorf("mimocode (jsonc).Endpoint: got %q, want the loopback hub URL", got)
-		}
-	})
-
-	t.Run("local command ARRAY shapes a real stdio endpoint (Finding 3)", func(t *testing.T) {
+	t.Run("entry with absent `enabled` still records presence", func(t *testing.T) {
 		tmp := t.TempDir()
 		mimoPath := filepath.Join(tmp, "mimocode.json")
-		// MiMoCode local entry: command as an ARRAY, no separate args, no url.
-		_ = os.WriteFile(mimoPath, []byte(`{"mcp":{"memory":{"type":"local","command":["npx","-y","@modelcontextprotocol/server-memory"]}}}`), 0600)
-		manifestDir := manifestFixture(tmp)
-
-		a := NewAPI()
-		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
-		if err != nil {
-			t.Fatalf("Scan: %v", err)
-		}
-		mem := memEntryFor(t, res)
-		ce := mem.ClientPresence["mimocode"]
-		if ce.Transport != "stdio" {
-			t.Errorf("local entry Transport: got %q, want stdio", ce.Transport)
-		}
-		if ce.Endpoint != "npx -y @modelcontextprotocol/server-memory" {
-			t.Errorf("local entry Endpoint: got %q, want the joined command array (not empty 'Unknown stdio')", ce.Endpoint)
-		}
-		// A local stdio mimo entry for a known-manifest server is a migrate
-		// candidate, not via-hub and not the empty-endpoint row it produced before.
-		if mem.Status != "can-migrate" {
-			t.Errorf("local stdio entry Status: got %q, want can-migrate", mem.Status)
-		}
-	})
-
-	t.Run("enabled:false entry records ABSENT presence, not skipped (Finding 4)", func(t *testing.T) {
-		tmp := t.TempDir()
-		mimoPath := filepath.Join(tmp, "mimocode.json")
-		// A disabled hub entry must NOT surface as via-hub/connected, but it MUST
-		// record a present-but-inactive ("absent" transport) presence so the
-		// frontend marks the cell not-installed (disabled, not a migrate
-		// candidate) and Apply cannot clobber the disabled user entry. Skipping
-		// the key entirely (the prior r3 behavior) left the cell looking
-		// "available" → clobberable.
-		_ = os.WriteFile(mimoPath, []byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":false}}}`), 0600)
-		manifestDir := manifestFixture(tmp)
-
-		a := NewAPI()
-		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
-		if err != nil {
-			t.Fatalf("Scan: %v", err)
-		}
-		mem := memEntryFor(t, res)
-		ce, present := mem.ClientPresence["mimocode"]
-		if !present {
-			t.Fatalf("enabled:false entry must STILL record a mimocode presence (as 'absent'); got no key")
-		}
-		if ce.Transport != "absent" {
-			t.Errorf("disabled entry Transport: got %q, want \"absent\" (present-but-inactive)", ce.Transport)
-		}
-		// The raw disabled entry is preserved on the presence so the matrix can
-		// diagnose it (it was explicitly disabled, not merely missing).
-		if ce.Raw == nil {
-			t.Errorf("disabled entry must carry its raw shape for diagnosis; got nil Raw")
-		}
-		// Must NOT classify via-hub — the entry is OFF.
-		if mem.Status == "via-hub" {
-			t.Errorf("enabled:false entry must not classify via-hub; got Status=%q", mem.Status)
-		}
-	})
-
-	t.Run("enabled:true (and absent enabled) still records presence", func(t *testing.T) {
-		tmp := t.TempDir()
-		mimoPath := filepath.Join(tmp, "mimocode.json")
-		// enabled omitted entirely → treated as on (absence != disabled).
+		// enabled omitted entirely → the generic url/command shaper records it.
 		_ = os.WriteFile(mimoPath, []byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp"}}}`), 0600)
 		manifestDir := manifestFixture(tmp)
 
@@ -631,91 +549,7 @@ func TestScanCoversMimoCode(t *testing.T) {
 			t.Error("entry with absent `enabled` must still record mimocode presence")
 		}
 		if mem.Status != "via-hub" {
-			t.Errorf("enabled-absent hub entry Status: got %q, want via-hub", mem.Status)
-		}
-	})
-
-	t.Run("split-file profile: server in config.json stays visible when mimocode.jsonc holds only settings (Finding 1)", func(t *testing.T) {
-		// MiMoCode DEEP-MERGES config.json + mimocode.json + mimocode.jsonc
-		// (later wins). A split-file profile keeps the MCP server in config.json
-		// and unrelated settings in mimocode.jsonc; the resolved top-layer file
-		// (mimocode.jsonc) holds NO `mcp.memory`, so a partial single-file read
-		// would make the server invisible. The merge-read must surface it.
-		//
-		// The merge resolver re-derives the accepted layers from env, so anchor
-		// the global-default dir at an XDG temp dir and seed both files there.
-		xdg := t.TempDir()
-		t.Setenv("MIMOCODE_CONFIG", "")
-		t.Setenv("MIMOCODE_CONFIG_DIR", "")
-		t.Setenv("MIMOCODE_HOME", "")
-		t.Setenv("XDG_CONFIG_HOME", xdg)
-		dir := filepath.Join(xdg, "mimocode")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		// The MCP server lives ONLY in config.json.
-		if err := os.WriteFile(filepath.Join(dir, "config.json"),
-			[]byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		// mimocode.jsonc holds only unrelated settings (no `mcp.memory`). It is
-		// the highest-precedence file → the resolved config path.
-		jsoncPath := filepath.Join(dir, "mimocode.jsonc")
-		if err := os.WriteFile(jsoncPath,
-			[]byte("{\n  // settings only — no mcp.memory here\n  \"theme\": \"dark\"\n}\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		manifestDir := manifestFixture(xdg)
-
-		a := NewAPI()
-		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: jsoncPath, ManifestDir: manifestDir})
-		if err != nil {
-			t.Fatalf("Scan: %v", err)
-		}
-		mem := memEntryFor(t, res)
-		ce, present := mem.ClientPresence["mimocode"]
-		if !present {
-			t.Fatalf("a server defined only in config.json must stay visible via the deep-merge read; got no mimocode presence")
-		}
-		if ce.Transport != "http" || ce.Endpoint != "http://localhost:9123/mcp" {
-			t.Errorf("merged entry shape: got transport=%q endpoint=%q, want http + the loopback hub URL", ce.Transport, ce.Endpoint)
-		}
-		if mem.Status != "via-hub" {
-			t.Errorf("merged config.json hub entry Status: got %q, want via-hub", mem.Status)
-		}
-	})
-
-	t.Run("later layer overrides earlier per server name (deep merge, later wins)", func(t *testing.T) {
-		// mcp.memory exists in BOTH config.json (stale URL) and mimocode.json
-		// (current URL). The later writer (mimocode.json > config.json) wins.
-		xdg := t.TempDir()
-		t.Setenv("MIMOCODE_CONFIG", "")
-		t.Setenv("MIMOCODE_CONFIG_DIR", "")
-		t.Setenv("MIMOCODE_HOME", "")
-		t.Setenv("XDG_CONFIG_HOME", xdg)
-		dir := filepath.Join(xdg, "mimocode")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "config.json"),
-			[]byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9999/STALE","enabled":true}}}`), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		jsonPath := filepath.Join(dir, "mimocode.json")
-		if err := os.WriteFile(jsonPath,
-			[]byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		manifestDir := manifestFixture(xdg)
-
-		a := NewAPI()
-		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: jsonPath, ManifestDir: manifestDir})
-		if err != nil {
-			t.Fatalf("Scan: %v", err)
-		}
-		mem := memEntryFor(t, res)
-		if got := mem.ClientPresence["mimocode"].Endpoint; got != "http://localhost:9123/mcp" {
-			t.Errorf("later-layer override: got endpoint %q, want the mimocode.json URL (config.json is stale)", got)
+			t.Errorf("hub entry Status: got %q, want via-hub", mem.Status)
 		}
 	})
 }
