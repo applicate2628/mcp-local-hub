@@ -20,6 +20,25 @@ func isolateMimoCodeEnv(t *testing.T) {
 	for _, k := range []string{"MIMOCODE_CONFIG", "MIMOCODE_CONFIG_CONTENT", "MIMOCODE_CONFIG_DIR", "MIMOCODE_HOME", "XDG_CONFIG_HOME"} {
 		t.Setenv(k, "")
 	}
+	// Disable the ~/.claude.json import in the DEFAULT isolation posture so a
+	// scan/merge through a global-layer-named temp path never reads the
+	// developer's real ~/.claude.json (the import reads $HOME/$USERPROFILE, an
+	// ambient input the MIMOCODE_* clears above do not cover). A claude-import
+	// test re-enables it explicitly via mimoCodeEnableClaudeImportForTest below.
+	t.Setenv(MimoCodeDisableClaudeImportEnv, "1")
+}
+
+// mimoCodeEnableClaudeImportForTest re-enables the ~/.claude.json import (cleared
+// by isolateMimoCodeEnv) and redirects the OS home to a temp dir, so an import
+// test exercises a FIXTURE ~/.claude.json, never the developer's real one. Returns
+// the temp home dir the fixture should be written under.
+func mimoCodeEnableClaudeImportForTest(t *testing.T) string {
+	t.Helper()
+	t.Setenv(MimoCodeDisableClaudeImportEnv, "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	return home
 }
 
 func newMimoCodeForTest(t *testing.T, initial string) *mimoCodeClient {
@@ -1120,7 +1139,10 @@ func TestMimoCode_ConfigFile_MergesAboveGlobal(t *testing.T) {
 	// config file); the config file is recorded as a read layer.
 	t.Setenv("MIMOCODE_CONFIG", configFile)
 	t.Setenv("XDG_CONFIG_HOME", globalDir) // global dir = $XDG/mimocode below
-	r := resolveMimoCodeConfig(filepath.Join("home", "u"))
+	r, err := resolveMimoCodeConfig(filepath.Join("home", "u"))
+	if err != nil {
+		t.Fatalf("resolveMimoCodeConfig: %v", err)
+	}
 	wantWrite := filepath.Join(globalDir, "mimocode", "mimocode.json")
 	if r.writeTarget != wantWrite {
 		t.Errorf("write target must be the global seed, not the MIMOCODE_CONFIG file: got %q, want %q", r.writeTarget, wantWrite)
@@ -1799,12 +1821,50 @@ func TestMimoCode_RelativeConfigEnv_ResolvedFromCwd(t *testing.T) {
 		}
 	})
 
-	t.Run("MIMOCODE_HOME stays absolute-only (relative ignored)", func(t *testing.T) {
+	t.Run("relative MIMOCODE_HOME is a LOUD error, NOT a silent fallback (bot PR #420 finding 5)", func(t *testing.T) {
+		// MiMoCode's global.ts THROWS on a relative / ~/-prefixed MIMOCODE_HOME
+		// (global.test.ts:34-47); the hub must NOT silently fall back to
+		// ~/.config/mimocode and report a false-success install. mimoCodeHomeDir
+		// surfaces the typed error; an absolute value passes; empty is unset.
+		for _, bad := range []string{"rel-home", filepath.Join("foo", "bar"), "~/profiles/a"} {
+			isolateMimoCodeEnv(t)
+			t.Setenv("MIMOCODE_HOME", bad)
+			got, err := mimoCodeHomeDir()
+			if err == nil {
+				t.Errorf("relative/~/ MIMOCODE_HOME %q must be a loud error, got %q (silent fallback bug)", bad, got)
+			}
+			var typed *ErrMimoCodeHomeNotAbsolute
+			if !errors.As(err, &typed) {
+				t.Errorf("MIMOCODE_HOME %q must yield *ErrMimoCodeHomeNotAbsolute, got %T", bad, err)
+			} else if typed.Value != bad {
+				t.Errorf("error must carry the offending value: got %q want %q", typed.Value, bad)
+			}
+		}
+	})
+
+	t.Run("absolute MIMOCODE_HOME resolves; empty is unset", func(t *testing.T) {
 		isolateMimoCodeEnv(t)
-		t.Chdir(t.TempDir())
-		t.Setenv("MIMOCODE_HOME", "rel-home") // RELATIVE — must be ignored
-		if got := absoluteEnv("MIMOCODE_HOME"); got != "" {
-			t.Errorf("relative MIMOCODE_HOME must be ignored (absolute-only): got %q", got)
+		abs := t.TempDir()
+		t.Setenv("MIMOCODE_HOME", abs)
+		if got, err := mimoCodeHomeDir(); err != nil || got != abs {
+			t.Errorf("absolute MIMOCODE_HOME: got (%q, %v), want (%q, nil)", got, err, abs)
+		}
+		t.Setenv("MIMOCODE_HOME", "")
+		if got, err := mimoCodeHomeDir(); err != nil || got != "" {
+			t.Errorf("empty MIMOCODE_HOME must be unset: got (%q, %v), want (\"\", nil)", got, err)
+		}
+	})
+
+	t.Run("relative MIMOCODE_HOME fails NewMimoCode + sentinel write target (no silent fallback)", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		t.Setenv("MIMOCODE_HOME", "rel-home")
+		if c, err := NewMimoCode(); err == nil {
+			t.Errorf("NewMimoCode must fail loud on a relative MIMOCODE_HOME, got client %v", c)
+		}
+		// defaultMimoCodeConfigPath keeps the string signature but returns the
+		// sentinel "" on the resolution error — never the real ~/.config/mimocode.
+		if got := defaultMimoCodeConfigPath(filepath.Join("home", "u")); got != "" {
+			t.Errorf("defaultMimoCodeConfigPath must return the sentinel \"\" on a relative MIMOCODE_HOME, got %q", got)
 		}
 	})
 }

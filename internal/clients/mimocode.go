@@ -3,9 +3,52 @@ package clients
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"os/user"
 	"path/filepath"
+	"runtime"
+	"strings"
 )
 
+// ## Scope — which of MiMoCode's 13 config layers this adapter reads, merges,
+// shadow-detects, and writes (the AGREED PR #420 scope, not an omission).
+//
+// MiMoCode resolves MCP entries from up to 13 layers (config.ts loadInstanceState,
+// lowest→highest): remote well-known < global(config.json<mimocode.json<.jsonc) <
+// MIMOCODE_CONFIG < project .mimocode/ < MIMOCODE_CONFIG_DIR < Claude commands <
+// .mimocode dir < MIMOCODE_CONFIG_CONTENT < org account < managed config dir <
+// macOS Managed Preferences < ~/.claude.json + <dir>/.claude.json MCP import
+// (skip-if-name-exists, gated by MIMOCODE_DISABLE_CLAUDE_CODE_MCP) < legacy
+// migration. The hub splits these into THREE buckets:
+//
+//   - WRITABLE layers — FULLY MERGED for read + shadow, and the hub WRITES exactly
+//     ONE of them (the global mimocode.json write target). These are: the global
+//     dir layers (config.json / mimocode.json / mimocode.jsonc), the MIMOCODE_CONFIG
+//     file, the MIMOCODE_CONFIG_DIR overlay, and MIMOCODE_CONFIG_CONTENT inline.
+//     A same-name entry in a writable layer ABOVE the write target is refused at
+//     AddEntry (it would win the merge and mask the hub entry) — fail loud, never
+//     silent success.
+//   - The ~/.claude.json MCP import (writable-ADJACENT) — READ-ONLY into the
+//     effective merge so a Claude-imported server is discoverable / extractable /
+//     shadow-detected, honoring skip-if-name-exists (an explicit mimo entry wins)
+//     and MIMOCODE_DISABLE_CLAUDE_CODE_MCP. The hub NEVER writes .claude.json. Only
+//     the home ~/.claude.json is imported (the single-target model has no project
+//     ctx for the <dir>/.claude.json sibling — a documented narrowing of
+//     config.ts:889, justified because the hub has no project directory concept).
+//   - Read-only MANAGED layers — DETECT-AND-FAIL-LOUD ONLY, NEVER merged into the
+//     writable path and NEVER written. macOS Managed Preferences (MDM) is the one
+//     implemented here: on macOS, if the managed plist defines the server being
+//     installed, AddEntry returns a typed loud error rather than reporting a
+//     successful write to mimocode.json (MiMoCode would keep resolving the MDM
+//     entry — a silent false success). The not-yet-implemented managed layers (org
+//     account, remote well-known, managed config dir) follow the SAME
+//     detect-and-fail-loud principle when added; their absence here is a scoped
+//     deferral, not a contract gap.
+//
+// This three-bucket split is the agreed PR #420 scope: read/merge the writable
+// layers + the home ~/.claude.json import; detect-and-fail-loud the managed
+// layers; write only the single writable global write target.
+//
 // NewMimoCode returns a Client bound to MiMoCode's global config file.
 //
 // MiMoCode (Xiaomi MiMo Code, github.com/XiaomiMiMo/MiMo-Code) is built as a
@@ -121,12 +164,21 @@ func NewMimoCode() (Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := resolveMimoCodeConfig(home)
+	r, err := resolveMimoCodeConfig(home)
+	if err != nil {
+		// A relative / ~/-prefixed MIMOCODE_HOME is an operator error MiMoCode
+		// itself rejects at startup (global.ts:26-50 THROWS); surface it loud
+		// here so the client never silently constructs against the wrong
+		// ~/.config/mimocode profile and reports a false-success install (bot PR
+		// #420 finding 5). The matrix renders the failed client as not-installed.
+		return nil, err
+	}
 	return newLockingClient(&mimoCodeClient{
 		path:          r.writeTarget,
 		configFile:    r.configFile,
 		overlayDir:    r.overlayDir,
 		inlineContent: r.inlineContent,
+		claudeHome:    home,
 	}), nil
 }
 
@@ -211,14 +263,17 @@ type mimoCodeResolution struct {
 // relative MIMOCODE_HOME outright and the XDG spec ignores a relative
 // XDG_CONFIG_HOME). MIMOCODE_CONFIG_CONTENT is read raw (it is content, not a
 // path).
-func resolveMimoCodeConfig(home string) mimoCodeResolution {
-	globalDir := resolveMimoCodeGlobalDir(home)
+func resolveMimoCodeConfig(home string) (mimoCodeResolution, error) {
+	globalDir, err := resolveMimoCodeGlobalDir(home)
+	if err != nil {
+		return mimoCodeResolution{}, err
+	}
 	return mimoCodeResolution{
 		writeTarget:   mimoCodeWriteTargetInDir(globalDir),
 		configFile:    cwdResolvedEnv("MIMOCODE_CONFIG"),
 		overlayDir:    cwdResolvedEnv("MIMOCODE_CONFIG_DIR"),
 		inlineContent: os.Getenv("MIMOCODE_CONFIG_CONTENT"),
-	}
+	}, nil
 }
 
 // mimoCodeWriteTargetInDir returns the WRITE-target file in a config dir: ALWAYS
@@ -247,6 +302,63 @@ func mimoCodeWriteTargetInDir(dir string) string {
 	return filepath.Join(dir, "mimocode.json")
 }
 
+// mimoCodePathsSamePhysical reports whether a and b name the SAME physical file,
+// the single owner of every write-target self-exemption in the shadow walk (bot
+// PR #420 finding 2). The hub writes only the global write target (o.path); a
+// READ layer (the MIMOCODE_CONFIG_DIR overlay, the MIMOCODE_CONFIG file, the
+// global mimocode.jsonc) that resolves to the SAME physical file as o.path is NOT
+// a higher layer that shadows — editing o.path is exactly what takes effect — so
+// AddEntry must NOT refuse an existing entry there as a shadow on re-install.
+//
+// It degrades safely across the three failure modes a plain filepath.Clean
+// compare misses:
+//  1. os.SameFile(stat(a), stat(b)) when BOTH exist — the kernel's own identity,
+//     so a symlink / hardlink / bind alias to the write target is caught for free
+//     and OS-correctly (no manual case handling needed when both files exist).
+//  2. EvalSymlinks both then case-aware compare — covers a symlink whose target
+//     spells the write target differently, when SameFile is unavailable.
+//  3. case-aware filepath.Clean compare of the raw inputs — covers the common
+//     re-install case where the overlay file does NOT yet exist (EvalSymlinks and
+//     Stat both error on a missing path), so a redundant `./x/..` spelling or a
+//     case-variant of the write target is still recognized.
+//
+// Case sensitivity: only the fallback branches (2,3) fold, and only on
+// case-insensitive filesystems (Windows/macOS) — folding on Linux ext4 would
+// wrongly equate Foo and foo. os.SameFile (branch 1) is OS-correct without
+// folding.
+func mimoCodePathsSamePhysical(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	// 1. Authoritative identity when both files exist.
+	if sa, err := os.Stat(a); err == nil {
+		if sb, err := os.Stat(b); err == nil {
+			return os.SameFile(sa, sb)
+		}
+	}
+	// 2. Resolve symlinks then case-aware compare (best-effort; either side may
+	// fail to resolve when the path does not exist, which falls to branch 3).
+	if ra, err := filepath.EvalSymlinks(a); err == nil {
+		if rb, err := filepath.EvalSymlinks(b); err == nil {
+			return mimoCodePathEqualFold(filepath.Clean(ra), filepath.Clean(rb))
+		}
+	}
+	// 3. Literal case-aware Clean compare (non-existent overlay file — the common
+	// re-install case where the file is not yet created).
+	return mimoCodePathEqualFold(filepath.Clean(a), filepath.Clean(b))
+}
+
+// mimoCodePathEqualFold compares two cleaned paths, folding case ONLY on
+// case-insensitive filesystems (Windows / macOS). On a case-sensitive FS
+// (Linux) it compares exactly, so distinct case-variant filenames are not
+// wrongly equated.
+func mimoCodePathEqualFold(a, b string) bool {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
 // resolveMimoCodeGlobalDir resolves the GLOBAL config DIRECTORY honoring
 // MiMoCode's documented env precedence (highest first):
 //
@@ -256,25 +368,82 @@ func mimoCodeWriteTargetInDir(dir string) string {
 //
 // (MIMOCODE_CONFIG — the FILE override — and MIMOCODE_CONFIG_DIR — the overlay —
 // are handled one level up in resolveMimoCodeConfig; neither replaces the global
-// dir, and both accept a cwd-relative value per bot PR #420 finding 3.) For the
-// global-dir vars resolved HERE (MIMOCODE_HOME, XDG_CONFIG_HOME) a relative value
-// is IGNORED.
-func resolveMimoCodeGlobalDir(home string) string {
-	if h := absoluteEnv("MIMOCODE_HOME"); h != "" {
-		return filepath.Join(h, "config")
+// dir, and both accept a cwd-relative value per bot PR #420 finding 3.)
+//
+// MIMOCODE_HOME and XDG_CONFIG_HOME diverge on a relative value (bot PR #420
+// finding 5):
+//   - A relative or ~/-prefixed MIMOCODE_HOME is a HARD ERROR — MiMoCode's own
+//     global.ts:26-50 THROWS ("MIMOCODE_HOME must be an absolute path"; ~/ is not
+//     absolute, so it throws too — global.test.ts:34-47). Falling back to
+//     ~/.config/mimocode here would write the install to a profile MiMoCode never
+//     reads with that env set, then report success. So mimoCodeHomeDir surfaces
+//     the error and we propagate it (NewMimoCode fails loud → not-installed).
+//   - A relative XDG_CONFIG_HOME is correctly IGNORED (the XDG spec says relative
+//     values must be ignored), so absoluteEnv stays for it.
+func resolveMimoCodeGlobalDir(home string) (string, error) {
+	h, err := mimoCodeHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if h != "" {
+		return filepath.Join(h, "config"), nil
 	}
 	if xdg := absoluteEnv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "mimocode")
+		return filepath.Join(xdg, "mimocode"), nil
 	}
-	return filepath.Join(home, ".config", "mimocode")
+	return filepath.Join(home, ".config", "mimocode"), nil
+}
+
+// ErrMimoCodeHomeNotAbsolute is returned by mimoCodeHomeDir (and propagated
+// through NewMimoCode) when MIMOCODE_HOME is set to a relative or ~/-prefixed
+// value. MiMoCode's global.ts rejects exactly this at startup, so the hub must
+// not silently fall back to ~/.config/mimocode and report a false-success
+// install against a profile MiMoCode will never read (bot PR #420 finding 5).
+type ErrMimoCodeHomeNotAbsolute struct {
+	Value string
+}
+
+func (e *ErrMimoCodeHomeNotAbsolute) Error() string {
+	return fmt.Sprintf("mimocode: MIMOCODE_HOME must be an absolute path, got %q — MiMoCode rejects a relative or ~/-prefixed value at startup, so the hub cannot resolve a config profile; set MIMOCODE_HOME to an absolute path (or unset it to use ~/.config/mimocode)", e.Value)
+}
+
+// mimoCodeHomeDir resolves MIMOCODE_HOME faithfully to MiMoCode's global.ts:26-50:
+//   - unset / empty            → "", nil  (caller falls back to XDG / ~/.config)
+//   - absolute path            → <value>, nil
+//   - relative OR ~/-prefixed  → "", *ErrMimoCodeHomeNotAbsolute  (LOUD)
+//
+// `~/x` is NOT absolute (filepath.IsAbs is false on every OS for a leading ~),
+// so a tilde path routes to the error arm — matching global.test.ts:34-47 where
+// both relative and ~/ throw. An empty string is treated as unset (the XDG
+// fallback applies), mirroring global.test.ts:29-32.
+func mimoCodeHomeDir() (string, error) {
+	v := os.Getenv("MIMOCODE_HOME")
+	if v == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(v) {
+		return "", &ErrMimoCodeHomeNotAbsolute{Value: v}
+	}
+	return v, nil
 }
 
 // defaultMimoCodeConfigPath returns the WRITE-target path for the resolved
 // config surface (the single file every WRITE + DELETE touches). Thin wrapper
 // over resolveMimoCodeConfig kept for the config-path test surface and any
 // caller that only needs the write target.
+//
+// On a resolution error (a relative / ~/ MIMOCODE_HOME — bot PR #420 finding 5)
+// it returns "" (the sentinel write target): mimoCodeReadLayerFiles("") yields
+// [""], os.Stat("") fails everywhere, so Exists() is false and every write path
+// fails loud against the empty path — never a silent fallback to the real
+// ~/.config/mimocode. The string signature is preserved so the config-path test
+// surface and any string-only caller are not forced to handle the error.
 func defaultMimoCodeConfigPath(home string) string {
-	return resolveMimoCodeConfig(home).writeTarget
+	r, err := resolveMimoCodeConfig(home)
+	if err != nil {
+		return ""
+	}
+	return r.writeTarget
 }
 
 // absoluteEnv returns the named env var's value only when it is set AND an
@@ -355,6 +524,16 @@ type mimoCodeClient struct {
 	configFile    string
 	overlayDir    string
 	inlineContent string
+	// claudeHome is the OS home dir ($HOME / $USERPROFILE) under which MiMoCode
+	// imports ~/.claude.json mcpServers into the effective `mcp` view
+	// (config.ts:887-890; Global.Path.home = process.env.HOME || USERPROFILE).
+	// Non-empty ONLY for the live NewMimoCode resolution and the scan-side
+	// resolver when the path is a known global layer name — direct/test
+	// construction leaves it "" so the read set never imports the developer's
+	// real ~/.claude.json (state-safe, same gate as inlineContent). Read-only:
+	// the hub never WRITES .claude.json. See mergeClaudeImport (bot PR #420
+	// finding 3).
+	claudeHome string
 }
 
 // mimoCodeMCPKey is the single owner of MiMoCode's top-level MCP section
@@ -580,11 +759,112 @@ func (e *ErrMimoCodeInlineContentShadowsServer) Error() string {
 // mimoCodeShadowSource identifies the single highest-precedence READ layer above
 // the hub's write target that defines mcp.<name>. Kind is "" when nothing
 // shadows; "inline" for the MIMOCODE_CONFIG_CONTENT layer (File is ""); "file"
-// for any file layer (File names it, Label describes it).
+// for any file layer (File names it, Label describes it); "managed" for the
+// macOS Managed Preferences (MDM) layer (PlistFile names the plist).
 type mimoCodeShadowSource struct {
-	Kind  string // "", "inline", or "file"
+	Kind  string // "", "inline", "file", or "managed"
 	Label string // human label for the "file" kind
 	File  string // file path for the "file" kind
+
+	// PlistFile is the plist path for the "managed" kind. Separate from File so
+	// the managed branch can carry the MDM plist source without conflating it
+	// with the operator-editable "file" layers.
+	PlistFile string
+}
+
+// mimoCodeManagedPrefsReader, when non-nil (tests only), replaces the production
+// macOS Managed Preferences reader so the detect-and-fail-loud managed-shadow
+// path can be exercised on a Windows/Linux CI runner without a real /Library
+// plist or `plutil`. Mirrors the established func-var test-seam idiom
+// (clients.go copyFileTornWindowHook): nil in production, assigned in a test
+// with a t.Cleanup restore. Bot PR #420 finding 1.
+var mimoCodeManagedPrefsReader func(name string) (mimoCodeShadowSource, error)
+
+// ErrMimoCodeManagedShadowsServer is returned by AddEntry when the macOS Managed
+// Preferences (MDM) layer already defines mcp.<Server>. That layer is read-only
+// to the hub and MiMoCode merges it ABOVE every user/env layer (config.ts:876-885
+// "override everything"), so a write into the global mimocode.json would "succeed"
+// yet MiMoCode would keep resolving the MDM entry — a silent false success. The
+// hub cannot and must not write a managed layer (it is MDM-deployed), so AddEntry
+// fails loud: the operator must remove the entry in their MDM / Managed
+// Preferences profile, not in any hub-writable file. Distinct from the file /
+// inline shadow errors because the remediation surface is MDM, not a file or env
+// var the operator edits directly.
+type ErrMimoCodeManagedShadowsServer struct {
+	Server      string
+	WriteTarget string
+	PlistFile   string // the managed plist that defines the server ("" if not captured)
+}
+
+func (e *ErrMimoCodeManagedShadowsServer) Error() string {
+	where := "the macOS Managed Preferences (MDM) layer"
+	if e.PlistFile != "" {
+		where = fmt.Sprintf("the macOS Managed Preferences (MDM) layer %q", e.PlistFile)
+	}
+	return fmt.Sprintf("mimocode: server %q is already defined in %s, which MiMoCode merges on top of the hub's write target %q and wins — the hub entry would have no effect and the hub cannot write a managed (MDM-deployed) layer; remove mcp.%s from the managed configuration profile, then retry",
+		e.Server, where, e.WriteTarget, e.Server)
+}
+
+// mimoCodeReadManagedPrefs is the production macOS Managed Preferences reader for
+// the AddEntry shadow check (bot PR #420 finding 1). It is DETECT-ONLY: it never
+// merges the managed layer into a writable path — it only reports whether the MDM
+// plist defines mcp.<name> so AddEntry can fail loud.
+//
+//   - Non-darwin → ("", nil) no-op (managed.ts:47 returns undefined off darwin).
+//   - darwin → reads /Library/Managed Preferences/<user>/ai.opencode.managed.plist
+//     then /Library/Managed Preferences/ai.opencode.managed.plist (managed.ts:50-53;
+//     the plist DOMAIN is "ai.opencode.managed", inherited from the OpenCode
+//     upstream, NOT "mimocode"). Each present plist is converted to JSON via
+//     `plutil -convert json` (the SAME tool managed.ts:58 uses — present on every
+//     macOS host, so no new Go dependency), parsed with the shared JSONC helper,
+//     and tested for mcp.<name>. The FIRST plist that defines it wins (per-user
+//     plist takes precedence over the system plist, matching managed.ts's path
+//     order). A `plutil`/parse failure on a present plist propagates (a malformed
+//     managed layer must not be silently read as "no shadow").
+//
+// The plist directory honors MIMOCODE_TEST_MANAGED_CONFIG_DIR-style isolation
+// only indirectly: the primary test seam is mimoCodeManagedPrefsReader (the
+// func-var above), which replaces this whole function on non-darwin CI.
+func mimoCodeReadManagedPrefs(name string) (mimoCodeShadowSource, error) {
+	if runtime.GOOS != "darwin" {
+		return mimoCodeShadowSource{}, nil
+	}
+	const managedPlistDomain = "ai.opencode.managed"
+	// Resolve the username the way managed.ts:49 does (os.userInfo().username);
+	// os/user.Current() is the Go equivalent. Fall back to $USER if the lookup
+	// fails (cgo-less cross builds), and to no per-user plist if neither resolves.
+	username := ""
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		username = u.Username
+	} else if env := os.Getenv("USER"); env != "" {
+		username = env
+	}
+	plists := []string{
+		filepath.Join("/Library/Managed Preferences", managedPlistDomain+".plist"),
+	}
+	if username != "" {
+		// Per-user plist takes precedence (managed.ts lists it first).
+		plists = append([]string{
+			filepath.Join("/Library/Managed Preferences", username, managedPlistDomain+".plist"),
+		}, plists...)
+	}
+	for _, plist := range plists {
+		if _, err := os.Stat(plist); err != nil {
+			continue // not present — skip (managed.ts:56 existsSync gate)
+		}
+		out, err := exec.Command("plutil", "-convert", "json", "-o", "-", plist).Output()
+		if err != nil {
+			return mimoCodeShadowSource{}, fmt.Errorf("mimocode: convert managed preferences plist %q: %w", plist, err)
+		}
+		m, err := parseJSONCBytes(out)
+		if err != nil {
+			return mimoCodeShadowSource{}, fmt.Errorf("mimocode: parse managed preferences plist %q: %w", plist, err)
+		}
+		if mimoCodeMapDefines(m, name) {
+			return mimoCodeShadowSource{Kind: "managed", Label: "macOS Managed Preferences", PlistFile: plist}, nil
+		}
+	}
+	return mimoCodeShadowSource{}, nil
 }
 
 // mimoCodeHigherLayerDefining walks every READ layer ABOVE the hub's global
@@ -592,10 +872,11 @@ type mimoCodeShadowSource struct {
 // FIRST that defines mcp.<name> — i.e. the layer that actually wins the merge,
 // the one the operator must edit to un-shadow. Order (highest→lowest):
 //
-//  1. MIMOCODE_CONFIG_CONTENT inline string
-//  2. MIMOCODE_CONFIG_DIR overlay: mimocode.jsonc then mimocode.json
-//  3. MIMOCODE_CONFIG file
-//  4. global higher layer mimocode.jsonc (sibling of the write target)
+//  1. macOS Managed Preferences (MDM) — read-only, "override everything"
+//  2. MIMOCODE_CONFIG_CONTENT inline string
+//  3. MIMOCODE_CONFIG_DIR overlay: mimocode.jsonc then mimocode.json
+//  4. MIMOCODE_CONFIG file
+//  5. global higher layer mimocode.jsonc (sibling of the write target)
 //
 // config.json and the write-target mimocode.json itself are BELOW the write
 // target / are the write target, so they cannot shadow and are not checked. It
@@ -604,8 +885,24 @@ type mimoCodeShadowSource struct {
 // dir from env/home). A parse error on a present layer propagates (a malformed
 // higher layer must not be silently treated as "no shadow" — that would
 // re-introduce the silent-false-success this guards).
+//
+// The ~/.claude.json MCP import is deliberately NOT a shadow source here, even
+// though config.ts merges it ABOVE everything (887-890): it is SKIP-IF-NAME-EXISTS
+// (694-698), so once AddEntry writes mcp.<name> to the write target the import
+// skips that name and the hub entry wins the merge. A claude.json entry therefore
+// can never shadow a name the hub writes — see the closing note in the body.
 func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShadowSource, error) {
-	// 1. Inline content (highest).
+	// 1. macOS Managed Preferences (MDM) — highest, read-only, detect-and-fail-loud.
+	reader := mimoCodeManagedPrefsReader
+	if reader == nil {
+		reader = mimoCodeReadManagedPrefs
+	}
+	if src, err := reader(name); err != nil {
+		return mimoCodeShadowSource{}, err
+	} else if src.Kind != "" {
+		return src, nil
+	}
+	// 2. Inline content.
 	if o.inlineContent != "" {
 		defined, err := mimoCodeInlineDefines(o.inlineContent, name)
 		if err != nil {
@@ -615,10 +912,19 @@ func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShado
 			return mimoCodeShadowSource{Kind: "inline"}, nil
 		}
 	}
-	// 2. MIMOCODE_CONFIG_DIR overlay (mimocode.jsonc preferred over mimocode.json).
+	// 3. MIMOCODE_CONFIG_DIR overlay (mimocode.jsonc preferred over mimocode.json).
 	if o.overlayDir != "" {
 		for i := len(mimoCodeOverlayLayerNames) - 1; i >= 0; i-- {
 			f := filepath.Join(o.overlayDir, mimoCodeOverlayLayerNames[i])
+			// Skip a file physically identical to the write target (bot PR #420
+			// finding 2): if MIMOCODE_CONFIG_DIR resolves to the global config dir
+			// (or to it via a symlink / case variant), this loop reads the same
+			// mimocode.json o.path writes — editing o.path IS what takes effect, so
+			// it is not a higher shadowing layer. Same exemption polarity as the
+			// MIMOCODE_CONFIG == o.path case below, upgraded to physical comparison.
+			if mimoCodePathsSamePhysical(f, o.path) {
+				continue
+			}
 			defined, err := mimoCodeFileDefines(f, name)
 			if err != nil {
 				return mimoCodeShadowSource{}, err
@@ -628,14 +934,16 @@ func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShado
 			}
 		}
 	}
-	// 3. MIMOCODE_CONFIG file — but NOT when it points at the write target itself
-	// (bot PR #420). When MIMOCODE_CONFIG == o.path (e.g. set to the global
-	// mimocode.json the hub already writes), it is the SAME file the write lands
-	// in, not a higher layer that would shadow it — editing o.path is exactly what
-	// takes effect, so an existing entry must not be refused as a shadow. A
-	// genuine MIMOCODE_CONFIG at a DIFFERENT path still shadows. Compare cleaned
-	// paths so a "./x/../mimocode.json"-style spelling does not slip past.
-	if o.configFile != "" && filepath.Clean(o.configFile) != filepath.Clean(o.path) {
+	// 4. MIMOCODE_CONFIG file — but NOT when it points at the write target itself
+	// (bot PR #420). When MIMOCODE_CONFIG resolves to o.path (e.g. set to the
+	// global mimocode.json the hub already writes, possibly via a symlink / case
+	// variant), it is the SAME file the write lands in, not a higher layer that
+	// would shadow it — editing o.path is exactly what takes effect, so an existing
+	// entry must not be refused as a shadow. A genuine MIMOCODE_CONFIG at a
+	// DIFFERENT physical path still shadows. Physical comparison (single owner
+	// mimoCodePathsSamePhysical) so a symlinked / case-variant / "./x/.."-spelled
+	// configFile does not slip past a plain Clean compare.
+	if o.configFile != "" && !mimoCodePathsSamePhysical(o.configFile, o.path) {
 		defined, err := mimoCodeFileDefines(o.configFile, name)
 		if err != nil {
 			return mimoCodeShadowSource{}, err
@@ -644,9 +952,9 @@ func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShado
 			return mimoCodeShadowSource{Kind: "file", Label: "MIMOCODE_CONFIG file", File: o.configFile}, nil
 		}
 	}
-	// 4. global higher layer mimocode.jsonc (sibling of the write target).
+	// 5. global higher layer mimocode.jsonc (sibling of the write target).
 	jsonc := filepath.Join(filepath.Dir(o.path), "mimocode.jsonc")
-	if jsonc != o.path { // never treat the write target itself as a shadow
+	if !mimoCodePathsSamePhysical(jsonc, o.path) { // never treat the write target itself as a shadow
 		defined, err := mimoCodeFileDefines(jsonc, name)
 		if err != nil {
 			return mimoCodeShadowSource{}, err
@@ -655,6 +963,16 @@ func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShado
 			return mimoCodeShadowSource{Kind: "file", Label: "global higher layer", File: jsonc}, nil
 		}
 	}
+	// NOTE on the ~/.claude.json MCP import — it is NOT a shadow source. Unlike
+	// every layer above, the claude import is SKIP-IF-NAME-EXISTS (config.ts:694-698:
+	// an entry already defined by a non-"claude" layer is skipped). The hub's
+	// AddEntry is ABOUT TO write mcp.<name> to the write target, so AFTER the write
+	// the write target defines <name> and the claude import SKIPS it — the hub's
+	// entry wins the merge. A ~/.claude.json entry can therefore never shadow a name
+	// the hub writes, so it is deliberately absent from this shadow walk (an earlier
+	// revision wrongly treated it as a shadow). The import still contributes to the
+	// READ merge (readMergedLayers) and to GetEntry membership for names the hub
+	// does NOT write.
 	return mimoCodeShadowSource{}, nil
 }
 
@@ -776,7 +1094,251 @@ func (o *mimoCodeClient) readMergedLayers() (map[string]any, error) {
 		}
 		merged = mimoCodeDeepMerge(merged, m)
 	}
+	// ~/.claude.json MCP import — the TOP layer (config.ts:887-890), SKIP-IF-NAME-
+	// EXISTS so it only ADDS mcp.<name> entries not already defined by any layer
+	// above (an explicit mimo entry always wins). Read-only: the hub never writes
+	// .claude.json. Empty / no-op when MIMOCODE_DISABLE_CLAUDE_CODE_MCP is set, in
+	// the state-safe single-file mode (claudeHome ""), or when ~/.claude.json
+	// defines no importable mcpServers. A parse error on a present ~/.claude.json
+	// propagates (bot PR #420 finding 3).
+	if err := o.mergeClaudeImport(merged); err != nil {
+		return nil, err
+	}
 	return merged, nil
+}
+
+// MimoCodeDisableClaudeImportEnv is MiMoCode's env flag that disables the Claude
+// Code MCP compatibility import (config.ts:887 `Flag.MIMOCODE_DISABLE_CLAUDE_CODE_MCP`).
+// Exported (single owner of the string) so internal/api tests share the same
+// suppression flag for state-safe scan isolation without hardcoding the literal.
+const MimoCodeDisableClaudeImportEnv = "MIMOCODE_DISABLE_CLAUDE_CODE_MCP"
+
+// mimoCodeDisableClaudeImportEnv is the unexported alias used inside the package.
+const mimoCodeDisableClaudeImportEnv = MimoCodeDisableClaudeImportEnv
+
+// claudeJSONPath returns the ~/.claude.json path the import reads, or "" when no
+// claudeHome was captured (direct/test construction → state-safe no import).
+// MiMoCode anchors this on the OS home (config.ts:888 `Global.Path.home` =
+// process.env.HOME || USERPROFILE), NOT MIMOCODE_HOME, so claudeHome holds the
+// OS home dir.
+func (o *mimoCodeClient) claudeJSONPath() string {
+	if o.claudeHome == "" {
+		return ""
+	}
+	return filepath.Join(o.claudeHome, ".claude.json")
+}
+
+// mergeClaudeImport applies MiMoCode's ~/.claude.json MCP compatibility import
+// (config.ts:887-890, mergeClaudeMcp config.ts:688-716) onto the already-merged
+// map, in place. SKIP-IF-NAME-EXISTS: each ~/.claude.json mcpServers entry is
+// imported under mcp.<name> ONLY when the merged map does not already define that
+// name (an explicit mimo entry wins). Each claude entry is converted to MiMoCode's
+// native mcp shape via mimoCodeFromClaude (faithful to ConfigMCP.fromClaude); an
+// unconvertible entry (sse / non-string command|url / missing both) is skipped,
+// matching upstream's warning-skip.
+//
+// No-op (returns nil, leaves merged unchanged) when:
+//   - MIMOCODE_DISABLE_CLAUDE_CODE_MCP is set (config.ts:887 gate), OR
+//   - claudeHome is empty (direct/test construction — state-safe), OR
+//   - ~/.claude.json is absent / has no mcpServers object.
+//
+// A parse error on a PRESENT ~/.claude.json propagates (a malformed claude config
+// must not be silently dropped — that would re-introduce a silent-wrong-merge).
+// Read-only: never writes .claude.json.
+func (o *mimoCodeClient) mergeClaudeImport(merged map[string]any) error {
+	imported, err := o.claudeImportEntries()
+	if err != nil {
+		return err
+	}
+	if len(imported) == 0 {
+		return nil
+	}
+	servers, _ := merged[mimoCodeMCPKey].(map[string]any)
+	if servers == nil {
+		servers = map[string]any{}
+		merged[mimoCodeMCPKey] = servers
+	}
+	for name, entry := range imported {
+		if _, exists := servers[name]; exists {
+			continue // skip-if-name-exists: explicit mimo entry wins
+		}
+		servers[name] = entry
+	}
+	return nil
+}
+
+// claudeImportEntries reads ~/.claude.json (claudeJSONPath) and returns the
+// converted MiMoCode-shape mcp entries it would import, keyed by server name.
+// This is the SINGLE owner of the claude.json read + conversion; both
+// readMergedLayers (skip-if-name-exists merge) and mimoCodeHigherLayerDefining /
+// mimoCodeDefinedAtOrAboveWriteTarget (shadow membership) consume it.
+//
+// Returns an empty map (nil) when the import is disabled, claudeHome is empty,
+// the file is absent, or it has no convertible mcpServers. A parse error on a
+// present ~/.claude.json propagates. Read-only.
+func (o *mimoCodeClient) claudeImportEntries() (map[string]any, error) {
+	if o.claudeHome == "" {
+		return nil, nil
+	}
+	if os.Getenv(mimoCodeDisableClaudeImportEnv) != "" {
+		return nil, nil
+	}
+	path := o.claudeJSONPath()
+	data, err := readRawConfig(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	m, err := parseJSONCBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	claudeServers, _ := m["mcpServers"].(map[string]any)
+	if len(claudeServers) == 0 {
+		return nil, nil
+	}
+	out := map[string]any{}
+	for name, raw := range claudeServers {
+		if converted, ok := mimoCodeFromClaude(raw); ok {
+			out[name] = converted
+		}
+	}
+	return out, nil
+}
+
+// mimoCodeClaudeLocalTypes / mimoCodeClaudeRemoteTypes mirror mcp.ts:68-69. A
+// claude entry with a `command` string and (no type OR a local type) becomes a
+// mimo LOCAL entry; with a `url` string and (no type OR a remote type) a mimo
+// REMOTE entry.
+var (
+	mimoCodeClaudeRemoteTypes = map[string]bool{"http": true, "streamable-http": true, "remote": true}
+	mimoCodeClaudeLocalTypes  = map[string]bool{"stdio": true, "local": true}
+)
+
+// mimoCodeFromClaude converts one ~/.claude.json mcpServers entry into MiMoCode's
+// native `mcp` entry shape, faithful to ConfigMCP.fromClaude (mcp.ts:95-158). It
+// returns (converted, true) for an importable entry and (nil, false) for one
+// MiMoCode skips with a warning (not an object, sse transport, non-string /
+// non-array args, command-not-string, url-not-string, unsupported type, or
+// neither command nor url).
+//
+//   - {command:string} (+ no type or a local type) → {type:"local",
+//     command:[command, ...args], environment?, enabled, timeout?}. args come
+//     from `args` (must be a string array). environment from `environment` or
+//     `env`. enabled = !(disabled==true) && !(enabled==false) → defaults true.
+//   - {url:string} (+ no type or a remote type) → {type:"remote", url, enabled,
+//     headers?, timeout?}. (oauth is preserved verbatim if present — the hub's
+//     classifiers ignore unknown remote keys, and GetEntry already snapshots an
+//     extra-field remote via Raw, so carrying oauth keeps the projection faithful.)
+//
+// The produced shape is the SAME normalized shape the rest of the merge emits, so
+// every downstream consumer (shapeMimoCodeEntry, GetEntry, the LSP classifier)
+// reads it without a second special case.
+func mimoCodeFromClaude(raw any) (map[string]any, bool) {
+	input, ok := raw.(map[string]any)
+	if !ok {
+		return nil, false // not an object — skip
+	}
+	typeStr, _ := input["type"].(string)
+	if typeStr == "sse" {
+		return nil, false // unsupported transport — skip
+	}
+	// args: must be a []any of strings when present.
+	var args []any
+	if av, present := input["args"]; present {
+		arr, isArr := av.([]any)
+		if !isArr {
+			return nil, false // args is not an array — skip
+		}
+		for _, item := range arr {
+			if _, isStr := item.(string); !isStr {
+				return nil, false // args must contain only strings — skip
+			}
+		}
+		args = arr
+	}
+	// enabled = disabled===true ? false : enabled===false ? false : true (mcp.ts:111).
+	enabled := true
+	if d, ok := input["disabled"].(bool); ok && d {
+		enabled = false
+	} else if e, ok := input["enabled"].(bool); ok && !e {
+		enabled = false
+	}
+	environment := mimoCodeStringRecord(input["environment"])
+	if environment == nil {
+		environment = mimoCodeStringRecord(input["env"])
+	}
+	timeout, hasTimeout := input["timeout"].(float64)
+
+	// LOCAL: command string + (no type or local type).
+	if cmd, ok := input["command"].(string); ok && (typeStr == "" || mimoCodeClaudeLocalTypes[typeStr]) {
+		command := make([]any, 0, len(args)+1)
+		command = append(command, cmd)
+		command = append(command, args...)
+		entry := map[string]any{
+			"type":    "local",
+			"command": command,
+			"enabled": enabled,
+		}
+		if environment != nil {
+			entry["environment"] = environment
+		}
+		if hasTimeout {
+			entry["timeout"] = timeout
+		}
+		return entry, true
+	}
+	if _, present := input["command"]; present {
+		return nil, false // command present but not a string — skip
+	}
+
+	// REMOTE: url string + (no type or remote type).
+	if url, ok := input["url"].(string); ok && (typeStr == "" || mimoCodeClaudeRemoteTypes[typeStr]) {
+		entry := map[string]any{
+			"type":    "remote",
+			"url":     url,
+			"enabled": enabled,
+		}
+		if headers := mimoCodeStringRecord(input["headers"]); headers != nil {
+			entry["headers"] = headers
+		}
+		if oauth, ok := input["oauth"].(map[string]any); ok {
+			entry["oauth"] = oauth
+		}
+		if hasTimeout {
+			entry["timeout"] = timeout
+		}
+		return entry, true
+	}
+	if _, present := input["url"]; present {
+		return nil, false // url present but not a string — skip
+	}
+
+	// Unsupported type, or neither command nor url — skip (mcp.ts:151-157).
+	return nil, false
+}
+
+// mimoCodeStringRecord coerces a value into a map[string]any of string→string,
+// faithful to mcp.ts:72-78 stringRecord: when the value is NOT a map it returns
+// nil (upstream undefined → the optional field is omitted); when it IS a map it
+// FILTERS to only the string-valued keys and returns that (possibly empty) map.
+// Upstream emits the field whenever stringRecord is non-undefined (an empty
+// filtered object is truthy in JS), so a present-but-all-non-string map yields an
+// empty map here, not nil — the field is still emitted, matching upstream.
+func mimoCodeStringRecord(v any) map[string]any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, val := range m {
+		if s, ok := val.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
 }
 
 // mimoCodeDeepMerge recursively merges src over dst (src wins per key) and
@@ -969,35 +1531,91 @@ func MimoCodeReadLayerPaths(path string) []string {
 // MimoCodeMergedConfig: the inline env is honored ONLY when path is a known
 // global layer name (a temp/test override path stays state-safe single-file and
 // never reads MIMOCODE_CONFIG_CONTENT). "Parseable" is required so a malformed
-// inline string does NOT promote presence — scanMimoCode would surface that as a
-// loud parse error on the merged read, mirroring a present-but-malformed FILE
-// layer; promoting it to "ok" would be no different from the file-layer path.
+// inline string does NOT promote presence to "ok" — the malformed case is its
+// own config-error state (see MimoCodeInlineContentState), surfaced loud by scan
+// rather than left silently "absent" (bot PR #420 finding 4).
+//
+// Signature retained as bool (a thin wrapper over MimoCodeInlineContentState) so
+// existing callers are unaffected; the malformed branch is handled by the new
+// tri-state probe.
 func MimoCodeHasInlineContent(path string) bool {
+	state, _ := MimoCodeInlineContentState(path)
+	return state == mimoCodeInlineStateOK
+}
+
+// Inline-content tri-state values returned by MimoCodeInlineContentState.
+const (
+	mimoCodeInlineStateNone  = ""      // no inline content (unset / state-safe override path)
+	mimoCodeInlineStateOK    = "ok"    // inline content present AND parseable
+	mimoCodeInlineStateError = "error" // inline content present BUT unparseable (malformed profile)
+)
+
+// MimoCodeInlineContentState reports the tri-state of the resolved
+// MIMOCODE_CONFIG_CONTENT inline layer for a scan-supplied config path (bot PR
+// #420 finding 4):
+//
+//   - "" (none)  — no inline content (unset, or a state-safe override path that
+//     does not read the env). err is nil.
+//   - "ok"       — inline content present AND parseable. err is nil.
+//   - "error"    — inline content present BUT unparseable. err carries the parse
+//     error so the caller can surface it.
+//
+// A malformed inline-only profile (MIMOCODE_CONFIG_CONTENT set + broken, no file
+// layers) previously returned not-present here, so scan left the client "missing"
+// and never reached the loud merged-read error — an active-but-broken profile
+// looked ABSENT. This tri-state lets scan.go promote presence to the config-error
+// "error" state instead, rendering the matrix cell as a config fault, not absent.
+// Same env-resolution gate as MimoCodeHasInlineContent (inline honored only for a
+// known global layer path).
+func MimoCodeInlineContentState(path string) (string, error) {
 	content := mimoCodeClientForScanPath(path).inlineContent
 	if content == "" {
-		return false
+		return mimoCodeInlineStateNone, nil
 	}
-	_, err := parseJSONCBytes([]byte(content))
-	return err == nil
+	if _, err := parseJSONCBytes([]byte(content)); err != nil {
+		return mimoCodeInlineStateError, err
+	}
+	return mimoCodeInlineStateOK, nil
 }
 
 // mimoCodeClientForScanPath builds the read-only client a scan/extract entry
 // point uses for a supplied config path, resolving the MIMOCODE_CONFIG file, the
-// MIMOCODE_CONFIG_DIR overlay, and the MIMOCODE_CONFIG_CONTENT inline content
-// from the live environment — but ONLY when the path is a known global layer
-// name (so a temp/test path stays state-safe single-file). Single owner of the
-// scan-side path→resolution mapping so the merged-read and the layer-path probe
-// never diverge.
+// MIMOCODE_CONFIG_DIR overlay, the MIMOCODE_CONFIG_CONTENT inline content, and the
+// ~/.claude.json import home from the live environment — but ONLY when the path is
+// a known global layer name (so a temp/test path stays state-safe single-file).
+// Single owner of the scan-side path→resolution mapping so the merged-read and the
+// layer-path probe never diverge.
+//
+// claudeHome is the OS home dir (os.UserHomeDir → $HOME / $USERPROFILE), matching
+// MiMoCode's Global.Path.home (config.ts:888); it lets the scan side see the same
+// ~/.claude.json-imported servers the adapter does (bot PR #420 finding 3). A
+// home-resolution failure is non-fatal here (claudeHome stays "" → no import), so
+// a scan still works on a host with no resolvable home.
 func mimoCodeClientForScanPath(path string) *mimoCodeClient {
 	if !mimoCodeIsGlobalLayerName(filepath.Base(path)) {
 		// Explicit/temp override — state-safe single-file, no env-resolved layers.
 		return &mimoCodeClient{path: path}
+	}
+	// State-safety: the ~/.claude.json import reads $HOME / $USERPROFILE via
+	// os.UserHomeDir(), an ambient input the MIMOCODE_* env isolation does NOT
+	// clear. Gate the home resolution on the SAME flag that disables the import in
+	// production (MIMOCODE_DISABLE_CLAUDE_CODE_MCP): when it is set, claudeHome
+	// stays "" → no import. isolateMimoCodeEnv sets this flag truthy by default, so
+	// a scan/merge through a global-layer-named TEMP path under the standard test
+	// barrier never reaches the developer's real ~/.claude.json. Production
+	// (flag unset) resolves the OS home exactly as before — claudeImportEntries
+	// re-checks the same flag, so behavior for real operators is unchanged. A
+	// home-resolution failure is non-fatal (claudeHome stays "" → no import).
+	claudeHome := ""
+	if os.Getenv(mimoCodeDisableClaudeImportEnv) == "" {
+		claudeHome, _ = os.UserHomeDir()
 	}
 	return &mimoCodeClient{
 		path:          path,
 		configFile:    cwdResolvedEnv("MIMOCODE_CONFIG"),
 		overlayDir:    cwdResolvedEnv("MIMOCODE_CONFIG_DIR"),
 		inlineContent: os.Getenv("MIMOCODE_CONFIG_CONTENT"),
+		claudeHome:    claudeHome,
 	}
 }
 
@@ -1055,6 +1673,15 @@ func (o *mimoCodeClient) AddEntry(entry MCPEntry) error {
 	// wrong-state into a visible install failure the operator can fix.
 	if shadow, err := o.mimoCodeHigherLayerDefining(entry.Name); err != nil {
 		return err
+	} else if shadow.Kind == "managed" {
+		// macOS Managed Preferences (MDM) — read-only, cannot be written by the
+		// hub; fail loud so the operator removes it in their MDM profile (bot PR
+		// #420 finding 1).
+		return &ErrMimoCodeManagedShadowsServer{
+			Server:      entry.Name,
+			WriteTarget: o.path,
+			PlistFile:   shadow.PlistFile,
+		}
 	} else if shadow.Kind == "inline" {
 		return &ErrMimoCodeInlineContentShadowsServer{Server: entry.Name, WriteTarget: o.path}
 	} else if shadow.Kind == "file" {
@@ -1135,6 +1762,15 @@ func (o *mimoCodeClient) mimoCodeDefinedAtOrAboveWriteTarget(name string) (bool,
 			return true, nil
 		}
 	}
+	// The ~/.claude.json MCP import is deliberately NOT counted here. It is
+	// SKIP-IF-NAME-EXISTS (config.ts:694-698) and the hub never writes .claude.json,
+	// so a name present ONLY in ~/.claude.json is — exactly like the config.json
+	// layer below — an entry the hub never wrote and never clobbered. For the
+	// install/register rollback it must behave as "no prior" (nil-prior →
+	// RemoveEntry the hub's write-target key, letting the ~/.claude.json entry
+	// re-emerge via the merge), NOT as a restore candidate that GetEntry would copy
+	// UP into the write target (which would shadow the operator's claude.json entry
+	// forever — the same hazard the config.json exclusion above prevents).
 	return false, nil
 }
 

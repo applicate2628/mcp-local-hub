@@ -627,6 +627,18 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	// would never promote — yet MimoCodeMergedConfig parses that inline layer and
 	// surfaces its servers. So promote on a parseable inline layer too, not just a
 	// stat-able file. Either signal upgrades the absent state to "ok".
+	//
+	// MALFORMED INLINE-ONLY (bot PR #420 finding 4): a present-but-UNPARSEABLE
+	// MIMOCODE_CONFIG_CONTENT (no file layers) is an active-but-broken profile.
+	// Left as the default "missing"/absent verdict it would render the cell as
+	// not-configured and the scanner would never run the merged read that surfaces
+	// the parse error — the broken profile looks ABSENT. So promote it to the
+	// existing config-FAULT "error" state (the same state a non-regular write
+	// target / wrong-shape file produces), making the matrix render a loud
+	// config-error cell instead of silently dropping the profile. Only a TRULY
+	// absent verdict is promoted (isPromotableAbsentPresenceState already excludes
+	// "ok"/"error"/"error-symlink"), so this never downgrades an "ok" or masks an
+	// existing fault.
 	if mp := paths["mimocode"]; mp != "" && isPromotableAbsentPresenceState(presence["mimocode"]) {
 		for _, lf := range clients.MimoCodeReadLayerPaths(mp) {
 			if st, err := os.Stat(lf); err == nil && st.Mode().IsRegular() {
@@ -634,8 +646,14 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 				break
 			}
 		}
-		if presence["mimocode"] != "ok" && clients.MimoCodeHasInlineContent(mp) {
-			presence["mimocode"] = "ok"
+		if presence["mimocode"] != "ok" {
+			switch state, _ := clients.MimoCodeInlineContentState(mp); state {
+			case "ok":
+				presence["mimocode"] = "ok"
+			case "error":
+				// Malformed inline-only profile → loud config-error cell, not absent.
+				presence["mimocode"] = "error"
+			}
 		}
 	}
 	scanIfReadable := func(name string) bool {

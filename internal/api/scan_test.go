@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"mcp-local-hub/internal/clients"
+
 	toml "github.com/pelletier/go-toml/v2"
 )
 
@@ -510,6 +512,7 @@ func TestScanCoversMimoCode(t *testing.T) {
 	}
 
 	t.Run("plain json mimocode.json hub binding -> via-hub", func(t *testing.T) {
+		isolateMimoCodeScanEnv(t)
 		tmp := t.TempDir()
 		mimoPath := filepath.Join(tmp, "mimocode.json")
 		_ = os.WriteFile(mimoPath, []byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`), 0600)
@@ -533,6 +536,7 @@ func TestScanCoversMimoCode(t *testing.T) {
 	})
 
 	t.Run("entry with absent `enabled` still records presence", func(t *testing.T) {
+		isolateMimoCodeScanEnv(t)
 		tmp := t.TempDir()
 		mimoPath := filepath.Join(tmp, "mimocode.json")
 		// enabled omitted entirely → the generic url/command shaper records it.
@@ -559,11 +563,18 @@ func TestScanCoversMimoCode(t *testing.T) {
 // layer resolver toward the developer's real ~/.config/mimocode. All paths in
 // these tests are explicit temp files; this is belt-and-suspenders since an
 // explicit non-layer-named path already bypasses dir recomputation.
+//
+// It also DISABLES the ~/.claude.json MCP import (bot PR #420 finding 3): a scan
+// path whose basename IS a global layer name (mimocode.json) passes the layer
+// gate, so without this the scan resolver would resolve os.UserHomeDir() and read
+// the developer's REAL ~/.claude.json. Setting the disable flag (single owner —
+// clients.MimoCodeDisableClaudeImportEnv) keeps the scan state-safe by default.
 func isolateMimoCodeScanEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{"MIMOCODE_CONFIG", "MIMOCODE_CONFIG_CONTENT", "MIMOCODE_CONFIG_DIR", "MIMOCODE_HOME", "XDG_CONFIG_HOME"} {
 		t.Setenv(k, "")
 	}
+	t.Setenv(clients.MimoCodeDisableClaudeImportEnv, "1")
 }
 
 // TestScanMimoCode_Faithful exercises the three source-accurate scan behaviors
