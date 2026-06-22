@@ -7,7 +7,7 @@ import {
   effectiveVisibleClients,
   type ColumnPrefs,
 } from "./matrix-columns";
-import { CORE_CLIENTS, WAVE2_CLIENTS } from "./routing";
+import { CORE_CLIENTS, NON_CORE_CLIENTS } from "./routing";
 import { installMemoryLocalStorage } from "./test-local-storage";
 import type { ScanResult } from "../types";
 
@@ -15,11 +15,28 @@ import type { ScanResult } from "../types";
 // Storage methods, so install a Map-backed shim for the persistence tests.
 const ls = installMemoryLocalStorage();
 
+// scan builds a ScanResult fixture. visibleClients() now gates non-core
+// columns on the SCANNABLE capability (a backend clientScanners() parser), so
+// the fixture marks every CORE + NON_CORE client scannable — these tests
+// exercise the pref-folding of effectiveVisibleClients, not the scannable
+// gate itself (that is covered in routing.test.ts). Any presence key is also
+// marked scannable so a 'warp: "ok"' fixture still auto-detects here.
 function scan(presence: Record<string, string>): ScanResult {
+  const caps: NonNullable<ScanResult["client_capabilities"]> = {};
+  for (const c of [
+    ...CORE_CLIENTS,
+    ...NON_CORE_CLIENTS,
+    ...Object.keys(presence),
+  ]) {
+    // These tests gate on `scannable` only; direct_installable / remote_http_capable
+    // are irrelevant here, so default both to false.
+    caps[c] = { scannable: true, direct_installable: false, remote_http_capable: false };
+  }
   return {
     at: "",
     entries: [],
     client_config_presence: presence as ScanResult["client_config_presence"],
+    client_capabilities: caps,
   } as ScanResult;
 }
 
@@ -118,17 +135,51 @@ describe("effectiveVisibleClients", () => {
     expect(cols).toEqual([...CORE_CLIENTS, "zed"]);
   });
 
-  it("preserves ALL_CLIENTS order when mixing hide-core + show-wave2", () => {
-    // Hide one core client, pin two undetected wave-2 clients (out of
+  it("preserves ALL_CLIENTS order when mixing hide-core + show-non-core", () => {
+    // Hide one core client, pin two undetected non-core clients (out of
     // declaration order in the prefs object) — the result must still be
     // in ALL_CLIENTS order, not pref-insertion order.
     const prefs: ColumnPrefs = { hermes: true, "codex-cli": false, zed: true };
     const cols = effectiveVisibleClients(scan({}), prefs);
     const expected = [
       ...CORE_CLIENTS.filter((c) => c !== "codex-cli"),
-      ...WAVE2_CLIENTS.filter((c) => c === "zed" || c === "hermes"),
+      ...NON_CORE_CLIENTS.filter((c) => c === "zed" || c === "hermes"),
     ];
     expect(cols).toEqual(expected);
+  });
+
+  it("shows a NEWER non-core client (warp) when auto-detected", () => {
+    // warp is a non-core client added after the original wave-2 set. With
+    // the full 46-client universe it must auto-show on detection.
+    const cols = effectiveVisibleClients(scan({ warp: "ok" }), {});
+    expect(cols).toEqual([...CORE_CLIENTS, "warp"]);
+  });
+
+  it("does NOT drop a detected client that is outside the static ALL_CLIENTS list", () => {
+    // A backend client newer than the frontend ALL_CLIENTS list, detected via
+    // an entry reference, must still survive the ordering loop (which unions
+    // ALL_CLIENTS with the auto-detected set) rather than being silently
+    // dropped. It sorts to the tail (unknown extra).
+    const s: ScanResult = {
+      at: "",
+      entries: [
+        {
+          name: "memory",
+          client_presence: {
+            "future-client-xyz": { transport: "http", endpoint: "http://127.0.0.1:9123/mcp" },
+          },
+        },
+      ],
+      client_config_presence: {},
+      // A referenced client necessarily came from a scanner (only a scannable
+      // client can produce an entry), so it is scannable in the capability map.
+      client_capabilities: {
+        "future-client-xyz": { scannable: true, direct_installable: false, remote_http_capable: false },
+      },
+    } as ScanResult;
+    const cols = effectiveVisibleClients(s, {});
+    expect(cols).toContain("future-client-xyz");
+    expect(cols[cols.length - 1]).toBe("future-client-xyz");
   });
 
   it("reset semantics: empty prefs returns to the detection default", () => {

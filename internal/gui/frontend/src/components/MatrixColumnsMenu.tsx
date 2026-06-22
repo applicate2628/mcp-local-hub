@@ -17,9 +17,10 @@ export type MatrixColumnsMenuProps = {
   onReset: () => void;
 };
 
-// MatrixColumnsMenu — the "Columns (N/15)" affordance beside the Servers
-// matrix. Clicking opens a popover listing all 15 known clients, each a
-// checkbox the operator ticks/unticks to show/hide that matrix column.
+// MatrixColumnsMenu — the "Clients (N/total)" affordance beside the Servers
+// matrix. Clicking opens a popover listing every known client (the full
+// ALL_CLIENTS registry mirror), each a checkbox the operator ticks/unticks
+// to show/hide that matrix column.
 // "Reset to auto" clears the persisted overrides. This is a pure VIEW
 // filter — hiding a column does not uninstall or change any binding.
 //
