@@ -15,6 +15,7 @@ import {
   act,
 } from "@testing-library/preact";
 import { ServersScreen } from "./Servers";
+import { ALL_CLIENTS, CORE_CLIENTS } from "../lib/routing";
 import { installMemoryLocalStorage } from "../lib/test-local-storage";
 import type { ScanResult, DaemonStatus } from "../types";
 
@@ -556,10 +557,12 @@ describe("ServersScreen — LSP matrix rows", () => {
   });
 });
 
-// PR #306-wiring: the eight wave-2 opt-in clients are detection-gated as
-// matrix columns. A wave-2 client surfaces as a column header only when the
-// scan reports it present on the host; an undetected one adds no column.
-describe("ServersScreen — detection-gated wave-2 client columns", () => {
+// The non-core opt-in clients are detection-gated as matrix columns. A
+// non-core client surfaces as a column header only when the scan reports it
+// present on the host; an undetected one adds no column. The non-core
+// universe is derived live from client_config_presence (all backend clients),
+// not a hardcoded list, so all supported clients can surface when detected.
+describe("ServersScreen — detection-gated non-core client columns", () => {
   beforeEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -660,11 +663,13 @@ describe("ServersScreen — manual column visibility", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
     render(<ServersScreen />);
     const btn = await screen.findByTestId("matrix-columns-button");
-    // Bare host: 7 core clients visible out of 15 total.
-    expect(btn.textContent).toContain("Clients (7/15)");
+    // Bare host: 7 core clients visible out of the full registry total.
+    expect(btn.textContent).toContain(
+      `Clients (${CORE_CLIENTS.length}/${ALL_CLIENTS.length})`,
+    );
   });
 
-  it("opens the popover with all 15 client checkboxes on click", async () => {
+  it("opens the popover with a checkbox for every supported client on click", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(bareScanRouter());
     render(<ServersScreen />);
     const btn = await screen.findByTestId("matrix-columns-button");
@@ -673,8 +678,14 @@ describe("ServersScreen — manual column visibility", () => {
     expect(screen.queryByTestId("matrix-columns-popover")).toBeTruthy();
     // aria-expanded reflects state.
     expect(btn.getAttribute("aria-expanded")).toBe("true");
-    // A toggle exists for every known client (7 core + 8 wave-2 = 15).
-    for (const c of ["claude-code", "zed", "hermes", "openclaw"]) {
+    // A toggle exists for every known client (the full CORE + NON_CORE
+    // registry mirror), including newer non-core clients beyond the original
+    // wave-2 set (e.g. warp, goose, zencoder).
+    for (const c of ["claude-code", "zed", "hermes", "openclaw", "warp", "goose", "zencoder"]) {
+      expect(screen.queryByTestId(`matrix-columns-toggle-${c}`)).toBeTruthy();
+    }
+    // The popover lists one checkbox per ALL_CLIENTS entry.
+    for (const c of ALL_CLIENTS) {
       expect(screen.queryByTestId(`matrix-columns-toggle-${c}`)).toBeTruthy();
     }
   });
@@ -695,8 +706,10 @@ describe("ServersScreen — manual column visibility", () => {
     await waitFor(() => {
       expect(headerLabels().some((t) => t.includes("claude-code"))).toBe(false);
     });
-    // Count drops to 6/15.
-    expect(btn.textContent).toContain("Clients (6/15)");
+    // Count drops by one (one core column hidden).
+    expect(btn.textContent).toContain(
+      `Clients (${CORE_CLIENTS.length - 1}/${ALL_CLIENTS.length})`,
+    );
     // Persisted to localStorage under the documented key.
     const stored = JSON.parse(
       localStorage.getItem("mcphub.servers.column-visibility") ?? "{}",

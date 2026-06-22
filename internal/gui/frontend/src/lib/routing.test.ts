@@ -7,8 +7,10 @@ import {
   perClientRouting,
   collectServers,
   visibleClients,
+  orderClientsForColumns,
   CORE_CLIENTS,
-  WAVE2_CLIENTS,
+  NON_CORE_CLIENTS,
+  ALL_CLIENTS,
 } from "./routing";
 import type { ScanEntry, ScanResult } from "../types";
 
@@ -371,6 +373,29 @@ describe("perClientRouting with client_config_presence", () => {
     }
   });
 
+  it("classifies EVERY ALL_CLIENTS member, not just the core seven", () => {
+    // The routing second pass must cover the full registry mirror so a
+    // detected non-core client (any of the 46) gets a correctly classified
+    // cell, not a missing key. Pre-fix only the 15 hardcoded clients were
+    // classified.
+    const r = perClientRouting({}, {});
+    for (const c of ALL_CLIENTS) {
+      expect(r[c]).toBe("not-installed");
+    }
+  });
+
+  it("classifies a NEWER non-core client (warp) as available when its config is ok", () => {
+    const r = perClientRouting({}, { warp: "ok" }, true);
+    expect(r["warp"]).toBe("available");
+  });
+
+  it("classifies a detected client NOT in ALL_CLIENTS (drift-resilient via presence keys)", () => {
+    // A backend client newer than the static list still gets a classified
+    // cell because the routing universe unions the presence-map keys.
+    const r = perClientRouting({}, { "future-client-xyz": "ok" }, true);
+    expect(r["future-client-xyz"]).toBe("available");
+  });
+
   it("collectServers threads client_config_presence to perClientRouting", () => {
     const scan: ScanResult = {
       at: "",
@@ -444,10 +469,14 @@ describe("perClientRouting with client_config_presence", () => {
   });
 });
 
-// PR #306-wiring: the 15-client matrix is too wide to show every column
-// always, so the eight wave-2 opt-in clients are detection-gated while the
-// seven core clients always render. visibleClients() decides the columns.
-describe("visibleClients (detection-gated wave-2 columns)", () => {
+// The matrix is too wide to show every column always, so the non-core
+// opt-in clients are detection-gated while the seven core clients always
+// render. visibleClients() decides the columns. The non-core candidate
+// universe is derived from the scan's client_config_presence map (one key
+// per clients.SupportedClientNames()), NOT a frontend-hardcoded list, so all
+// 46 backend clients can surface when detected — and a backend client newer
+// than the frontend NON_CORE_CLIENTS list still surfaces when detected.
+describe("visibleClients (detection-gated non-core columns)", () => {
   function scan(
     presence: Record<string, string>,
     entries: ScanEntry[] = [],
@@ -464,24 +493,70 @@ describe("visibleClients (detection-gated wave-2 columns)", () => {
     for (const c of CORE_CLIENTS) {
       expect(cols).toContain(c);
     }
-    // No wave-2 client detected → none appended → exactly the core set.
+    // No non-core client detected → none appended → exactly the core set.
     expect(cols).toHaveLength(CORE_CLIENTS.length);
   });
 
-  it("hides an undetected wave-2 client (plain 'missing' or absent)", () => {
+  it("never shows a non-core client that is merely present in the presence map as 'missing'", () => {
+    // The presence map carries ALL 46 backend clients, most as plain
+    // "missing" on a typical host. Those must NOT become columns — only a
+    // DETECTED state (or a referencing entry) gates a column. This is the
+    // core anti-overflow guarantee with the now-46-wide candidate universe.
+    const allMissing: Record<string, string> = {};
+    for (const c of NON_CORE_CLIENTS) allMissing[c] = "missing";
+    const cols = visibleClients(scan(allMissing));
+    expect(cols).toEqual([...CORE_CLIENTS]);
+    expect(cols).toHaveLength(CORE_CLIENTS.length);
+  });
+
+  it("hides an undetected non-core client (plain 'missing' or absent)", () => {
     const cols = visibleClients(scan({ zed: "missing", kiro: "missing" }));
     expect(cols).not.toContain("zed");
     expect(cols).not.toContain("kiro");
   });
 
-  it("shows a wave-2 client whose config file is present ('ok')", () => {
+  it("shows a non-core client whose config file is present ('ok')", () => {
     const cols = visibleClients(scan({ zed: "ok" }));
     expect(cols).toContain("zed");
-    // Other wave-2 clients stay hidden.
+    // Other non-core clients stay hidden.
     expect(cols).not.toContain("kiro");
   });
 
-  it("shows a wave-2 client whose parent dir exists ('missing-init-possible')", () => {
+  it("shows a NEWER non-core client (beyond the original wave-2 set) when detected", () => {
+    // warp/goose/zencoder are non-core clients added after the original 8
+    // wave-2 adapters. They must surface exactly like any other non-core
+    // client when their config is detected — the whole point of the 46-wide
+    // derive-from-presence universe (the original bug: only ~15 were shown).
+    const cols = visibleClients(scan({ warp: "ok", goose: "missing-init-possible", zencoder: "ok" }));
+    expect(cols).toContain("warp");
+    expect(cols).toContain("goose");
+    expect(cols).toContain("zencoder");
+  });
+
+  it("shows ALL non-core clients when every one is detected (no overflow cap, full universe)", () => {
+    // Prove the universe truly spans the full backend registry: when every
+    // non-core client is 'ok', every one becomes a column. This is the
+    // regression guard for the reported bug — pre-fix only the 15 hardcoded
+    // clients could ever appear regardless of detection.
+    const allOk: Record<string, string> = {};
+    for (const c of NON_CORE_CLIENTS) allOk[c] = "ok";
+    const cols = visibleClients(scan(allOk));
+    expect(cols).toEqual([...ALL_CLIENTS]);
+    expect(cols).toHaveLength(ALL_CLIENTS.length);
+  });
+
+  it("surfaces a detected backend client NOT in the static NON_CORE_CLIENTS list (drift-resilient)", () => {
+    // A backend client newer than this frontend list must still appear when
+    // detected, because the candidate universe is the presence map, not the
+    // static list. It sorts AFTER all known non-core clients (extras last).
+    const cols = visibleClients(scan({ "future-client-xyz": "ok" }));
+    expect(cols).toContain("future-client-xyz");
+    // Core stays first; the unknown client is the tail.
+    expect(cols.slice(0, CORE_CLIENTS.length)).toEqual([...CORE_CLIENTS]);
+    expect(cols[cols.length - 1]).toBe("future-client-xyz");
+  });
+
+  it("shows a non-core client whose parent dir exists ('missing-init-possible')", () => {
     const cols = visibleClients(scan({ windsurf: "missing-init-possible" }));
     expect(cols).toContain("windsurf");
   });
@@ -501,13 +576,13 @@ describe("visibleClients (detection-gated wave-2 columns)", () => {
     expect(cols).not.toContain("zed");
   });
 
-  it("shows a wave-2 client in an error state (config present but unreadable)", () => {
+  it("shows a non-core client in an error state (config present but unreadable)", () => {
     const cols = visibleClients(scan({ hermes: "error", openclaw: "error-symlink" }));
     expect(cols).toContain("hermes");
     expect(cols).toContain("openclaw");
   });
 
-  it("shows a wave-2 client that already has a server entry, even if presence is absent", () => {
+  it("shows a non-core client that already has a server entry, even if presence is absent", () => {
     const entries: ScanEntry[] = [
       {
         name: "memory",
@@ -518,20 +593,53 @@ describe("visibleClients (detection-gated wave-2 columns)", () => {
     expect(cols).toContain("cline");
   });
 
-  it("appends detected wave-2 clients after the core set in stable order", () => {
-    // Detect three wave-2 clients out of order; expect core-then-wave2 order
-    // (wave2 in WAVE2_CLIENTS declaration order, not presence-map order).
+  it("appends detected non-core clients after the core set in stable registry order", () => {
+    // Detect three non-core clients out of presence-map order; expect
+    // core-then-non-core order (non-core in NON_CORE_CLIENTS / registry
+    // declaration order, not presence-map order).
     const cols = visibleClients(scan({ openclaw: "ok", zed: "ok", cline: "ok" }));
     expect(cols.slice(0, CORE_CLIENTS.length)).toEqual([...CORE_CLIENTS]);
     const tail = cols.slice(CORE_CLIENTS.length);
-    // Stable order = filtered WAVE2_CLIENTS order: zed < cline < openclaw.
+    // Stable order = filtered NON_CORE_CLIENTS order: zed < cline < openclaw.
     expect(tail).toEqual(
-      WAVE2_CLIENTS.filter((c) => c === "zed" || c === "cline" || c === "openclaw"),
+      NON_CORE_CLIENTS.filter((c) => c === "zed" || c === "cline" || c === "openclaw"),
     );
   });
 
   it("tolerates a null/undefined scan", () => {
     expect(visibleClients(null)).toEqual([...CORE_CLIENTS]);
     expect(visibleClients(undefined)).toEqual([...CORE_CLIENTS]);
+  });
+});
+
+// orderClientsForColumns is the shared ordering authority (used by
+// effectiveVisibleClients). CORE first (always, registry order), then
+// non-core present-in-input ids in registry order, then unknown extras
+// alphabetically.
+describe("orderClientsForColumns", () => {
+  it("puts the seven core clients first, in registry order, even if absent from input", () => {
+    const out = orderClientsForColumns(["zed"]);
+    expect(out.slice(0, CORE_CLIENTS.length)).toEqual([...CORE_CLIENTS]);
+    expect(out[out.length - 1]).toBe("zed");
+  });
+
+  it("orders non-core ids in ALL_CLIENTS (registry) order, not input order", () => {
+    const out = orderClientsForColumns(["openclaw", "zed", "cline"]);
+    const tail = out.slice(CORE_CLIENTS.length);
+    expect(tail).toEqual(
+      NON_CORE_CLIENTS.filter((c) => c === "zed" || c === "cline" || c === "openclaw"),
+    );
+  });
+
+  it("appends unknown (non-registry) ids after known ones, alphabetically", () => {
+    const out = orderClientsForColumns(["zzz-client", "aaa-client", "zed"]);
+    const tail = out.slice(CORE_CLIENTS.length);
+    // zed (known non-core) precedes the two unknown extras; extras sorted.
+    expect(tail).toEqual(["zed", "aaa-client", "zzz-client"]);
+  });
+
+  it("deduplicates and is stable for the full ALL_CLIENTS input", () => {
+    const out = orderClientsForColumns([...ALL_CLIENTS, ...ALL_CLIENTS]);
+    expect(out).toEqual([...ALL_CLIENTS]);
   });
 });

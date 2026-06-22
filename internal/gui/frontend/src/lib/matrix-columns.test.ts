@@ -7,7 +7,7 @@ import {
   effectiveVisibleClients,
   type ColumnPrefs,
 } from "./matrix-columns";
-import { CORE_CLIENTS, WAVE2_CLIENTS } from "./routing";
+import { CORE_CLIENTS, NON_CORE_CLIENTS } from "./routing";
 import { installMemoryLocalStorage } from "./test-local-storage";
 import type { ScanResult } from "../types";
 
@@ -118,17 +118,46 @@ describe("effectiveVisibleClients", () => {
     expect(cols).toEqual([...CORE_CLIENTS, "zed"]);
   });
 
-  it("preserves ALL_CLIENTS order when mixing hide-core + show-wave2", () => {
-    // Hide one core client, pin two undetected wave-2 clients (out of
+  it("preserves ALL_CLIENTS order when mixing hide-core + show-non-core", () => {
+    // Hide one core client, pin two undetected non-core clients (out of
     // declaration order in the prefs object) — the result must still be
     // in ALL_CLIENTS order, not pref-insertion order.
     const prefs: ColumnPrefs = { hermes: true, "codex-cli": false, zed: true };
     const cols = effectiveVisibleClients(scan({}), prefs);
     const expected = [
       ...CORE_CLIENTS.filter((c) => c !== "codex-cli"),
-      ...WAVE2_CLIENTS.filter((c) => c === "zed" || c === "hermes"),
+      ...NON_CORE_CLIENTS.filter((c) => c === "zed" || c === "hermes"),
     ];
     expect(cols).toEqual(expected);
+  });
+
+  it("shows a NEWER non-core client (warp) when auto-detected", () => {
+    // warp is a non-core client added after the original wave-2 set. With
+    // the full 46-client universe it must auto-show on detection.
+    const cols = effectiveVisibleClients(scan({ warp: "ok" }), {});
+    expect(cols).toEqual([...CORE_CLIENTS, "warp"]);
+  });
+
+  it("does NOT drop a detected client that is outside the static ALL_CLIENTS list", () => {
+    // A backend client newer than the frontend ALL_CLIENTS list, detected via
+    // an entry reference, must still survive the ordering loop (which unions
+    // ALL_CLIENTS with the auto-detected set) rather than being silently
+    // dropped. It sorts to the tail (unknown extra).
+    const s: ScanResult = {
+      at: "",
+      entries: [
+        {
+          name: "memory",
+          client_presence: {
+            "future-client-xyz": { transport: "http", endpoint: "http://127.0.0.1:9123/mcp" },
+          },
+        },
+      ],
+      client_config_presence: {},
+    } as ScanResult;
+    const cols = effectiveVisibleClients(s, {});
+    expect(cols).toContain("future-client-xyz");
+    expect(cols[cols.length - 1]).toBe("future-client-xyz");
   });
 
   it("reset semantics: empty prefs returns to the detection default", () => {

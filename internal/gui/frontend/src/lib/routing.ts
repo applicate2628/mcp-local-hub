@@ -93,13 +93,28 @@ export const CORE_CLIENTS = [
   "antigravity",
 ] as const;
 
-// WAVE2_CLIENTS are the eight opt-in adapters added in PR #306. With 15
-// total clients an always-visible matrix would be unusably wide, so these
-// are DETECTION-GATED: a wave-2 column appears only when that client is
-// actually present on the host (its config file or parent directory was
-// detected, or it already has a server entry). An uninstalled niche client
-// adds no column. See visibleClients() for the gating rule.
-export const WAVE2_CLIENTS = [
+// NON_CORE_CLIENTS are every client the backend registry knows that is NOT
+// one of the seven CORE_CLIENTS. With 46 total clients an always-visible
+// matrix would be unusably wide, so these are DETECTION-GATED: a non-core
+// column appears only when that client is actually present on the host (its
+// config file or parent directory was detected, or it already has a server
+// entry). An uninstalled niche client adds no column. See visibleClients()
+// for the gating rule.
+//
+// This list MUST mirror clients.SupportedClientNames() (registry order,
+// minus the 7 CORE_CLIENTS) — it is the ordering + membership authority for
+// the column toggle menu (MatrixColumnsMenu), the Add/Edit-server binding
+// editor (AddServer), the Catalog direct-install multiselect, and the
+// Settings → Backups grouping. The DETECTION universe itself, however, is
+// derived live from the scan's client_config_presence map (the backend's
+// single source of truth, keyed by every SupportedClientNames() client), so
+// visibleClients()/perClientRouting() surface a freshly-registered backend
+// client the moment it is detected — even before it is added to this list.
+// The cross-language drift guard internal/gui/client_registry_drift_test.go
+// parses this file and fails `go test ./internal/gui/` if CORE_CLIENTS +
+// NON_CORE_CLIENTS falls out of sync with clients.SupportedClientNames().
+export const NON_CORE_CLIENTS = [
+  // Wave 2 (PR #306): 8 opt-in adapters.
   "zed",
   "kiro",
   "windsurf",
@@ -108,11 +123,47 @@ export const WAVE2_CLIENTS = [
   "opencode",
   "hermes",
   "openclaw",
+  // agent-skills vendor reconciliation (2026-06-17): 4 file-config agents.
+  "copilot-cli",
+  "amazon-q",
+  "openhands",
+  "aider",
+  // skills-CLI vendor reconciliation TIER-1 (2026-06-17): 19 file-config agents.
+  "bob",
+  "codebuddy",
+  "command-code",
+  "cortex",
+  "deepagents",
+  "devin",
+  "droid",
+  "firebender",
+  "iflow-cli",
+  "junie",
+  "kimi-code-cli",
+  "kode",
+  "ona",
+  "pi",
+  "qoder",
+  "qoder-cn",
+  "roo",
+  "rovodev",
+  "tabnine-cli",
+  // skills-CLI vendor reconciliation TIER-2 (2026-06-17): writable global config.
+  "warp",
+  "continue",
+  "goose",
+  // skills-CLI vendor reconciliation TIER-2 bespoke (2026-06-17): non-standard key.
+  "neovate",
+  "crush",
+  "pochi",
+  "amp",
+  "zencoder",
 ] as const;
 
-// ALL_CLIENTS is the full superset (core + wave-2) in stable order. Used
-// for membership tests and as the source order for visibleClients().
-export const ALL_CLIENTS = [...CORE_CLIENTS, ...WAVE2_CLIENTS] as const;
+// ALL_CLIENTS is the full superset (core + non-core) in stable registry
+// order. Used for membership tests and as the source order for
+// visibleClients()/effectiveVisibleClients() column ordering.
+export const ALL_CLIENTS = [...CORE_CLIENTS, ...NON_CORE_CLIENTS] as const;
 
 // DETECTED_PRESENCE_STATES are the client_config_presence values that mean
 // "this client exists on the host in some inspectable form, OR is securely
@@ -138,38 +189,120 @@ const DETECTED_PRESENCE_STATES = new Set([
   "missing-init-creatable",
 ]);
 
+// CORE_CLIENT_SET is a fast membership test for the always-shown core set.
+const CORE_CLIENT_SET = new Set<string>(CORE_CLIENTS);
+
+// ALL_CLIENT_ORDER maps a known client id → its index in ALL_CLIENTS, the
+// canonical registry order. Used to sort the detected non-core columns
+// deterministically; a detected client NOT in this map (a backend client
+// newer than this frontend list) sorts AFTER all known ones, then
+// alphabetically among such extras, so it still surfaces with no edit here.
+const ALL_CLIENT_ORDER = new Map<string, number>(
+  ALL_CLIENTS.map((c, i) => [c, i]),
+);
+
+// nonCoreCandidates derives the set of NON-core client ids the scan knows
+// about: every client_config_presence key (the backend probes one per
+// clients.SupportedClientNames(), so this is the full backend universe) plus
+// every client any scanned entry already binds (covers a hand-edited config
+// the presence probe missed, and keeps an existing binding visible), minus
+// the always-shown CORE set. Deriving the candidate universe from the scan —
+// not a frontend-hardcoded list — is what keeps the matrix from drifting
+// behind the backend registry: a newly-registered backend client appears in
+// the presence map and therefore here automatically.
+function nonCoreCandidates(scan: ScanResult | null | undefined): Set<string> {
+  const out = new Set<string>();
+  for (const c of Object.keys(scan?.client_config_presence ?? {})) {
+    if (!CORE_CLIENT_SET.has(c)) out.add(c);
+  }
+  for (const e of scan?.entries ?? []) {
+    for (const c of Object.keys(e.client_presence ?? {})) {
+      if (!CORE_CLIENT_SET.has(c)) out.add(c);
+    }
+  }
+  return out;
+}
+
+// orderNonCore sorts a set of non-core client ids into the stable display
+// order: known clients in ALL_CLIENTS (registry) order first, then any
+// extras (ids not in ALL_CLIENTS) alphabetically. Deterministic regardless
+// of Set/map iteration order.
+function orderNonCore(ids: Iterable<string>): string[] {
+  return [...ids].sort((a, b) => {
+    const ia = ALL_CLIENT_ORDER.get(a);
+    const ib = ALL_CLIENT_ORDER.get(b);
+    if (ia !== undefined && ib !== undefined) return ia - ib;
+    if (ia !== undefined) return -1; // known before unknown
+    if (ib !== undefined) return 1;
+    return a.localeCompare(b); // both unknown → alphabetical
+  });
+}
+
+// orderClientsForColumns orders an arbitrary set of client ids into the
+// canonical column order: the seven CORE_CLIENTS first (always, in registry
+// order — even if absent from the input set), then every non-core id present
+// in the input in stable order (ALL_CLIENTS registry order, then alphabetical
+// extras). This is the ordering authority shared by the Servers matrix
+// column logic (effectiveVisibleClients) so a detected client newer than the
+// static ALL_CLIENTS list is ordered + shown rather than dropped.
+export function orderClientsForColumns(ids: Iterable<string>): string[] {
+  const set = new Set(ids);
+  const nonCore = orderNonCore([...set].filter((c) => !CORE_CLIENT_SET.has(c)));
+  return [...CORE_CLIENTS, ...nonCore];
+}
+
 // visibleClients returns the ordered list of client columns the matrix
 // should render for this scan: the seven CORE_CLIENTS unconditionally,
-// plus any WAVE2_CLIENTS that are DETECTED on the host. Detection is true
+// plus any NON-core client that is DETECTED on the host. Detection is true
 // when the client's client_config_presence state is anything other than
 // plain "missing"/absent, OR when at least one scanned server entry already
 // references the client (covers a hand-edited config the presence probe
 // somehow missed, and keeps a row's existing binding visible).
 //
-// This keeps the common case (only a couple of editors installed) to a
-// narrow matrix while still surfacing every wave-2 client the operator
-// actually uses, with no always-15-columns overflow.
+// The non-core candidate universe is derived from the scan itself (every
+// client_config_presence key the backend probed for, which is one per
+// clients.SupportedClientNames()), NOT a frontend-hardcoded list — so all
+// 46 backend clients can surface here when detected, and a newly-registered
+// backend client surfaces with no edit to this file. This keeps the common
+// case (only a couple of editors installed) to a narrow matrix while still
+// surfacing every client the operator actually uses, with no overflow.
 export function visibleClients(scan: ScanResult | null | undefined): string[] {
   const ccp = scan?.client_config_presence ?? {};
   const referenced = new Set<string>();
   for (const e of scan?.entries ?? []) {
     for (const c of Object.keys(e.client_presence ?? {})) referenced.add(c);
   }
-  const out: string[] = [...CORE_CLIENTS];
-  for (const c of WAVE2_CLIENTS) {
+  const detected: string[] = [];
+  for (const c of nonCoreCandidates(scan)) {
     if (DETECTED_PRESENCE_STATES.has(ccp[c] ?? "") || referenced.has(c)) {
-      out.push(c);
+      detected.push(c);
     }
   }
-  return out;
+  return [...CORE_CLIENTS, ...orderNonCore(detected)];
 }
 
-// KNOWN_CLIENTS is retained as the full superset for perClientRouting's
-// second-pass fill (it must classify every client that could carry a cell,
-// not just the visible ones, so a detected wave-2 client's routing is
-// computed even before the column-visibility decision). Column VISIBILITY
-// is decided by visibleClients(); routing classification covers all.
-const KNOWN_CLIENTS = ALL_CLIENTS;
+// routingClassificationClients is the full set of client ids
+// perClientRouting's second-pass fill must classify — NOT just the visible
+// ones, so a detected client's routing is computed regardless of the
+// column-visibility decision. It is the union of the static ALL_CLIENTS
+// registry-mirror AND every client_config_presence key the scan supplied
+// (the backend's full SupportedClientNames() universe), so a detected
+// non-core client — including one newer than ALL_CLIENTS — gets a correctly
+// classified cell. Column VISIBILITY is decided by visibleClients(); this
+// classification covers everything the scan knows about. Returned in a
+// deterministic order (ALL_CLIENTS order, then presence-only extras
+// alphabetically) so the cell-fill loop is stable.
+function routingClassificationClients(
+  clientConfigPresence: Record<string, ClientConfigState>,
+): string[] {
+  const union = new Set<string>(ALL_CLIENTS);
+  for (const c of Object.keys(clientConfigPresence)) union.add(c);
+  // Core first (registry order), then non-core in stable order.
+  const nonCore = orderNonCore(
+    [...union].filter((c) => !CORE_CLIENT_SET.has(c)),
+  );
+  return [...CORE_CLIENTS, ...nonCore];
+}
 
 // perClientRouting maps a server's per-entry client_presence onto per-cell
 // routing tags. The cell's tag drives the checkbox visual (checked/
@@ -264,7 +397,7 @@ export function perClientRouting(
   // playwright-as-per-session) with can_migrate=false; without the
   // gate, those rows got enabled checkboxes that hit deterministic
   // /api/migrate errors when clicked.
-  for (const client of KNOWN_CLIENTS) {
+  for (const client of routingClassificationClients(clientConfigPresence)) {
     if (client in routing) continue;
     const state = clientConfigPresence[client];
     if (state === "ok" && canMigrate) {

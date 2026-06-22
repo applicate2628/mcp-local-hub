@@ -1,4 +1,4 @@
-import { ALL_CLIENTS, visibleClients } from "./routing";
+import { ALL_CLIENTS, orderClientsForColumns, visibleClients } from "./routing";
 import type { ScanResult } from "../types";
 
 // COLUMN_PREFS_KEY is the localStorage key holding the operator's manual
@@ -72,14 +72,21 @@ export function clearColumnPrefs(): void {
 
 // effectiveVisibleClients folds the operator's manual overrides onto the
 // auto-detected default column set. The auto-detected set from
-// visibleClients(scan) is the BASE; then, walking ALL_CLIENTS in stable
-// order so the column order never depends on pref insertion order:
+// visibleClients(scan) is the BASE; then, walking the ordering universe in
+// stable order so the column order never depends on pref insertion order:
 //   - a client explicitly hidden (pref === false) is removed even if it
 //     was auto-detected;
 //   - a client explicitly shown (pref === true) is added even if it was
-//     NOT auto-detected (e.g. an undetected wave-2 client the operator
+//     NOT auto-detected (e.g. an undetected non-core client the operator
 //     wants pinned visible);
 //   - a client with no pref keeps its auto-detected visibility.
+//
+// The ordering universe is ALL_CLIENTS (the registry mirror) UNIONED with
+// the auto-detected set and any pref keys, so a detected client newer than
+// the static ALL_CLIENTS list (a backend client the frontend list hasn't
+// caught up to) is still ordered + shown rather than silently dropped by an
+// ALL_CLIENTS-only loop. orderClientsForColumns keeps CORE first, then
+// registry order, then alphabetical extras.
 //
 // Pure + side-effect-free so it is trivially unit-testable.
 export function effectiveVisibleClients(
@@ -87,8 +94,11 @@ export function effectiveVisibleClients(
   prefs: ColumnPrefs,
 ): string[] {
   const auto = new Set(visibleClients(scan));
+  const universe = new Set<string>(ALL_CLIENTS);
+  for (const c of auto) universe.add(c);
+  for (const c of Object.keys(prefs)) universe.add(c);
   const out: string[] = [];
-  for (const client of ALL_CLIENTS) {
+  for (const client of orderClientsForColumns(universe)) {
     const pref = prefs[client];
     let show: boolean;
     if (pref === true) {

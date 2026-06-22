@@ -6,7 +6,7 @@ import {
   refreshMarketplace,
 } from "../api";
 import type { MarketplaceInstallResult, ReadinessReport } from "../api";
-import { CORE_CLIENTS, WAVE2_CLIENTS } from "../lib/routing";
+import { CORE_CLIENTS, NON_CORE_CLIENTS } from "../lib/routing";
 import { InfoTip } from "../components/InfoTip";
 import { ReadinessPanel, readinessBlockerCount } from "../components/ReadinessPanel";
 import { AddSecretModal } from "../components/AddSecretModal";
@@ -607,10 +607,10 @@ function CatalogInstallGate({
 }
 
 // The supported direct-mode client list, mirroring the Servers matrix client
-// set (CORE_CLIENTS first, then the wave-2 opt-in adapters). Direct mode
+// set (CORE_CLIENTS first, then the non-core opt-in adapters). Direct mode
 // writes the remote URL straight into each selected client config, so the
 // multiselect offers the same superset the rest of the GUI knows about.
-const DIRECT_CLIENTS: readonly string[] = [...CORE_CLIENTS, ...WAVE2_CLIENTS];
+const DIRECT_CLIENTS: readonly string[] = [...CORE_CLIENTS, ...NON_CORE_CLIENTS];
 
 // MarketplaceInstallState tracks the per-entry install lifecycle for one
 // marketplace row, mirroring the shipped-server PerServerInstall pattern
