@@ -2025,3 +2025,147 @@ func TestMimoCode_WriteTargetStable_DemigrateHitsActualLayer(t *testing.T) {
 		t.Errorf("backup/remove must NOT touch the operator's mimocode.jsonc")
 	}
 }
+
+// TestMimoCode_FindStdioLanguageServer_WriteTargetShapeMismatch pins bot PR #420
+// r12 HIGH (wrong-delete). A name that is stdio mcp-language-server in a HIGHER
+// layer (mimocode.jsonc) but a hub REMOTE entry in the WRITE TARGET (mimocode.json)
+// must NOT be reported: the merged-view match is the higher stdio shape, but
+// RemoveEntry deletes the write-target REMOTE value — reporting on name-presence
+// alone would wrong-delete the operator-visible remote and leave the higher stdio
+// active. A genuine write-target stdio LSP entry must still be reported (removable).
+func TestMimoCode_FindStdioLanguageServer_WriteTargetShapeMismatch(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	// Higher layer (mimocode.jsonc): `srv` is a local mcp-language-server (stdio).
+	// Under replace-by-name this is what the MERGED view shows for `srv`.
+	if err := os.WriteFile(filepath.Join(dir, "mimocode.jsonc"),
+		[]byte("{\n  \"mcp\": {\"srv\": {\"type\":\"local\",\"command\":[\"mcp-language-server\",\"--lsp\",\"go\"],\"enabled\":true}}\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Write target (mimocode.json): `srv` is a hub REMOTE entry (different shape).
+	// RemoveEntry would delete THIS value — it must not be deleted by an LSP cleanup.
+	// `clean-ls` is a genuine write-target stdio LSP entry that SHOULD be reported.
+	if err := os.WriteFile(filepath.Join(dir, "mimocode.json"),
+		[]byte(`{"mcp":{"srv":{"type":"remote","url":"http://localhost:9121/mcp","enabled":true},"clean-ls":{"type":"local","command":["mcp-language-server","--lsp","python"],"enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
+	ls, err := o.FindStdioLanguageServerEntries()
+	if err != nil {
+		t.Fatalf("FindStdioLanguageServerEntries: %v", err)
+	}
+	got := map[string]bool{}
+	for _, e := range ls {
+		got[e.Name] = true
+	}
+	if got["srv"] {
+		t.Errorf("`srv` is REMOTE in the write target — must NOT be reported (RemoveEntry would wrong-delete the remote): %v", ls)
+	}
+	if !got["clean-ls"] {
+		t.Errorf("genuine write-target stdio LSP entry must be reported (RemoveEntry can delete it): %v", ls)
+	}
+}
+
+// TestMimoCode_DeepMerge_EnabledOnlyOverrideOverlays pins bot PR #420 r12 MEDIUM
+// (enabled-only override dropped). A higher-layer enabled-ONLY override
+// ({enabled:false}) over a lower FULL local entry must OVERLAY just `enabled`,
+// preserving the lower command/type — NOT wholesale-replace the value (which would
+// drop the command). A higher FULL redefinition still replaces wholesale (no
+// stdio+remote hybrid). The unknown-extra-key variant must still overlay (fail
+// safe), and the live lower-layer map must NOT be mutated (no aliasing).
+func TestMimoCode_DeepMerge_EnabledOnlyOverrideOverlays(t *testing.T) {
+	isolateMimoCodeEnv(t)
+
+	readMergedSrv := func(t *testing.T, lowerJSON, higherJSONC string) map[string]any {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(lowerJSON), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "mimocode.jsonc"), []byte(higherJSONC), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
+		merged, err := o.readMergedLayers()
+		if err != nil {
+			t.Fatalf("readMergedLayers: %v", err)
+		}
+		servers, _ := merged[mimoCodeMCPKey].(map[string]any)
+		entry, _ := servers["srv"].(map[string]any)
+		if entry == nil {
+			t.Fatalf("srv missing from merged view: %+v", merged)
+		}
+		return entry
+	}
+
+	t.Run("enabled-only over full local overlays enabled, keeps command", func(t *testing.T) {
+		entry := readMergedSrv(t,
+			`{"mcp":{"srv":{"type":"local","command":["mcp-language-server","--lsp","go"],"enabled":true}}}`,
+			`{"mcp":{"srv":{"enabled":false}}}`)
+		if enabled, _ := entry["enabled"].(bool); enabled {
+			t.Errorf("higher enabled:false override not applied: %+v", entry)
+		}
+		if _, hasCmd := entry["command"]; !hasCmd {
+			t.Errorf("lower-layer `command` was DROPPED by a wholesale replace (overlay missing): %+v", entry)
+		}
+		if entry["type"] != "local" {
+			t.Errorf("lower-layer `type` not preserved on overlay: %+v", entry)
+		}
+	})
+
+	t.Run("enabled-only with an unknown extra key still overlays (fails safe)", func(t *testing.T) {
+		entry := readMergedSrv(t,
+			`{"mcp":{"srv":{"type":"remote","url":"http://localhost:9121/mcp","enabled":true}}}`,
+			`{"mcp":{"srv":{"enabled":false,"note":"off for now"}}}`)
+		if enabled, _ := entry["enabled"].(bool); enabled {
+			t.Errorf("higher enabled:false not applied with extra key: %+v", entry)
+		}
+		if _, hasURL := entry["url"]; !hasURL {
+			t.Errorf("lower-layer `url` DROPPED (extra key forced a destructive wholesale replace): %+v", entry)
+		}
+		if entry["note"] != "off for now" {
+			t.Errorf("stray override key should ride along on the overlay: %+v", entry)
+		}
+	})
+
+	t.Run("full redefinition still wholesale-replaces (no hybrid)", func(t *testing.T) {
+		entry := readMergedSrv(t,
+			`{"mcp":{"srv":{"type":"local","command":["gopls","mcp"],"enabled":true}}}`,
+			`{"mcp":{"srv":{"type":"remote","url":"http://localhost:9121/mcp","enabled":true}}}`)
+		if _, hasCmd := entry["command"]; hasCmd {
+			t.Errorf("full higher redefinition must NOT field-merge the lower command (hybrid): %+v", entry)
+		}
+		if entry["url"] != "http://localhost:9121/mcp" || entry["type"] != "remote" {
+			t.Errorf("full higher remote redefinition did not win wholesale: %+v", entry)
+		}
+	})
+
+	t.Run("overlay does not mutate the live lower-layer parsed map", func(t *testing.T) {
+		dir := t.TempDir()
+		lowerPath := filepath.Join(dir, "config.json")
+		if err := os.WriteFile(lowerPath,
+			[]byte(`{"mcp":{"srv":{"type":"local","command":["mcp-language-server","--lsp","go"],"enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "mimocode.jsonc"),
+			[]byte(`{"mcp":{"srv":{"enabled":false}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
+		if _, err := o.readMergedLayers(); err != nil {
+			t.Fatalf("readMergedLayers: %v", err)
+		}
+		// Re-parse the lower layer fresh: the overlay must have copied, not mutated
+		// the in-memory lower map, so the on-disk file still reads enabled:true.
+		raw, _ := os.ReadFile(lowerPath)
+		reparsed, _ := parseJSONCBytes(raw)
+		srv, _ := reparsed[mimoCodeMCPKey].(map[string]any)
+		entry, _ := srv["srv"].(map[string]any)
+		if entry == nil {
+			t.Fatalf("re-parse lost srv: %s", raw)
+		}
+		if enabled, _ := entry["enabled"].(bool); !enabled {
+			t.Errorf("lower-layer file's enabled flipped — overlay mutated a shared map instead of copying: %+v", entry)
+		}
+	})
+}

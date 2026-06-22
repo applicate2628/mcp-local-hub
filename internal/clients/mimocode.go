@@ -675,6 +675,49 @@ func mimoCodeFileDefines(path, name string) (bool, error) {
 	return mimoCodeMapDefines(m, name), nil
 }
 
+// mimoCodeFileDefinesStdioLSP reports whether the JSONC file at path defines
+// mcp.<name> AND that WRITE-TARGET value is ITSELF a stdio mcp-language-server
+// entry. The shape test routes through the single canonical classifier
+// (matchLanguageServerStdio) after the SAME normalization the merged-view match
+// applied (array `command` → string command + args, then disabled-dropped), so
+// the write-target shape is judged by the exact same owner that produced the
+// match. A missing/empty file → false; a parse error on present bytes propagates.
+//
+// This is the write-target SHAPE gate for FindStdioLanguageServerEntries (bot PR
+// #420 r12 HIGH finding). Name-membership alone (mimoCodeFileDefines) is NOT
+// enough: a name can be stdio in a HIGHER layer (so the merged-view match is
+// stdio) yet REMOTE in the write target, and RemoveEntry deletes the write
+// target's value — reporting on name alone would wrong-delete the write-target
+// remote and leave the higher stdio active. Reporting only when the write
+// target's OWN value is stdio-LSP keeps the destructive cleanup honest.
+func mimoCodeFileDefinesStdioLSP(path, name string) (bool, error) {
+	data, err := readRawConfig(path)
+	if err != nil {
+		return false, err
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	m, err := parseJSONCBytes(data)
+	if err != nil {
+		return false, fmt.Errorf("parse %s: %w", path, err)
+	}
+	servers, _ := m[mimoCodeMCPKey].(map[string]any)
+	if servers == nil {
+		return false, nil
+	}
+	// Reuse the merged-view normalization + disabled-drop so the write-target
+	// value is classified exactly as the merged match was, then run the single
+	// canonical stdio-LSP classifier over the one named entry.
+	normalized := mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers))
+	entry, ok := normalized[name].(map[string]any)
+	if !ok {
+		return false, nil
+	}
+	_, _, isStdioLSP := matchLanguageServerStdio(entry)
+	return isStdioLSP, nil
+}
+
 // mimoCodeInlineDefines reports whether the inline JSONC string defines
 // mcp.<name>. A parse error propagates.
 func mimoCodeInlineDefines(content, name string) (bool, error) {
@@ -751,23 +794,49 @@ func (o *mimoCodeClient) readMergedLayers() (map[string]any, error) {
 // field-merge into a HYBRID carrying BOTH `command` AND `url`. That hybrid is
 // unclassifiable: a hub mcp entry is EITHER stdio OR remote, never both, and the
 // consumers split-brain on it (FindStdioLanguageServerEntries reads it as stdio
-// while shapeMimoCodeEntry reads it as remote). So this adapter REPLACES each
-// `mcp` entry VALUE by name: the entry NAMES still union across layers, but each
-// name's VALUE is taken wholesale from the HIGHEST layer that defines it (no
-// recursion into the entry object). Every OTHER top-level key still deep-merges.
+// while shapeMimoCodeEntry reads it as remote). So for a FULL redefinition this
+// adapter REPLACES the `mcp` entry VALUE by name: the entry NAMES still union
+// across layers, but each name's VALUE is taken wholesale from the HIGHEST layer
+// that defines it (no recursion into the entry object). Every OTHER top-level key
+// still deep-merges.
+//
+// ENABLED-ONLY OVERLAY EXCEPTION (bot PR #420 r12 finding). MiMoCode's schema
+// (config.ts:194-201) allows TWO mcp-entry forms in the layer union: the FULL
+// ConfigMCP.Info (a Local {type,command,...} or Remote {type,url,...}) AND a
+// legacy enabled-ONLY disable form `z.object({enabled: z.boolean()}).strict()`.
+// Upstream merges layers with remeda mergeDeep (field-merge), so a higher
+// enabled-only override field-merges onto the lower full entry, overlaying ONLY
+// `enabled` and PRESERVING the lower command/url/type. A blanket wholesale
+// replace-by-name would DROP the lower command/url here, leaving an
+// unclassifiable bare {enabled:...} value. So this adapter special-cases an
+// enabled-only HIGHER value (a map carrying a bool `enabled` and NONE of
+// type/command/url) — it OVERLAYS just the higher entry's keys onto a COPY of the
+// lower entry, mirroring upstream's field-merge for this one form, while keeping
+// replace-by-name for every full redefinition (so the local+remote hybrid stays
+// prevented). The structural "no type/command/url" test (not upstream's strict
+// "only key is enabled") is the tolerant-read choice: an extra unknown key fails
+// SAFE (overlay, preserve the lower entry) rather than destructive (wholesale
+// replace, drop the lower command/url). `enabled` must be a bool — a malformed
+// {enabled:"false"} falls through to wholesale replace, matching mimoCodeDropDisabled.
+// When the lower entry is ABSENT (enabled-only is the first/only definer), the
+// bare {enabled:...} is kept verbatim (an inert disable stub MiMoCode never
+// spawns; the hub's classifiers ignore it).
+//
 // In practice a server is defined in exactly ONE layer, so this changes behavior
 // only on the redefine-across-layers edge. Kept LOCAL to the mimocode adapter
 // (no shared-type change).
 func mimoCodeDeepMerge(dst, src map[string]any) map[string]any {
 	for k, sv := range src {
 		// `mcp` entry VALUES are replace-by-name, not field-merged (see the
-		// divergence note above). Union the entry NAMES across layers, but take
-		// each name's VALUE wholesale from the later (higher) layer.
+		// divergence note above) — EXCEPT an enabled-only higher override, which
+		// overlays just `enabled` onto a copy of the lower entry. Union the entry
+		// NAMES across layers, but take each name's VALUE from the later (higher)
+		// layer (wholesale for a full redefinition, overlay for enabled-only).
 		if k == mimoCodeMCPKey {
 			if svMap, ok := sv.(map[string]any); ok {
 				if dvMap, ok := dst[k].(map[string]any); ok {
 					for name, entry := range svMap {
-						dvMap[name] = entry // later layer's entry value wins entirely
+						dvMap[name] = mimoCodeMergeMCPEntry(dvMap[name], entry)
 					}
 					continue
 				}
@@ -785,6 +854,61 @@ func mimoCodeDeepMerge(dst, src map[string]any) map[string]any {
 		dst[k] = sv
 	}
 	return dst
+}
+
+// mimoCodeMergeMCPEntry computes the merged VALUE of one `mcp.<name>` entry given
+// the lower-layer value (lower, may be nil/absent) and the higher-layer value
+// (higher, src wins). It implements the enabled-only overlay exception described
+// on mimoCodeDeepMerge:
+//   - higher is an enabled-only override (a map with a bool `enabled` and no
+//     type/command/url) AND lower is a full entry map → OVERLAY: a shallow COPY
+//     of lower with higher's keys applied on top, preserving the lower
+//     command/url/type. The copy is mandatory — lower may alias a layer's live
+//     parsed map (the first layer to define `mcp` is seeded by reference in
+//     readMergedLayers), so an in-place overlay would mutate that layer's map.
+//   - otherwise → wholesale replace-by-name (higher wins entirely), the
+//     finding-2 hybrid-prevention default.
+func mimoCodeMergeMCPEntry(lower, higher any) any {
+	higherMap, hOK := higher.(map[string]any)
+	lowerMap, lOK := lower.(map[string]any)
+	if hOK && lOK && mimoCodeIsEnabledOnlyOverride(higherMap) {
+		merged := make(map[string]any, len(lowerMap)+len(higherMap))
+		for k, v := range lowerMap {
+			merged[k] = v
+		}
+		for k, v := range higherMap {
+			merged[k] = v
+		}
+		return merged
+	}
+	return higher // full redefinition (or no lower entry): wholesale replace-by-name
+}
+
+// mimoCodeIsEnabledOnlyOverride reports whether entry is MiMoCode's legacy
+// enabled-ONLY disable form — a higher-layer override that should overlay just
+// `enabled` onto a lower full entry rather than replace it. Verified against
+// config.ts:194-201: the union's second member is z.object({enabled:
+// z.boolean()}).strict(). The structural test here (bool `enabled` present, and
+// NONE of the full-entry discriminating keys type/command/url) is the
+// tolerant-read form: a stray unknown key fails SAFE to overlay (preserve the
+// lower entry) instead of the destructive wholesale replace the strict
+// only-key-is-enabled test would trigger. A non-bool `enabled` is malformed and
+// is NOT treated as an enabled-only override (it falls through to wholesale
+// replace), matching mimoCodeDropDisabled's bool-only `enabled` handling.
+func mimoCodeIsEnabledOnlyOverride(entry map[string]any) bool {
+	if _, ok := entry["enabled"].(bool); !ok {
+		return false
+	}
+	if _, ok := entry["type"]; ok {
+		return false
+	}
+	if _, ok := entry["command"]; ok {
+		return false
+	}
+	if _, ok := entry["url"]; ok {
+		return false
+	}
+	return true
 }
 
 // readJSON returns the deep-merged view across the resolved READ layer files.
@@ -1243,21 +1367,32 @@ func (o *mimoCodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 	}
 	servers, _ := m[mimoCodeMCPKey].(map[string]any)
 	matched := findLanguageServerStdioInMap(mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers)))
-	// Write-target restriction (bot PR #420 finding 4). The ONLY consumers of
-	// this method are DESTRUCTIVE — the post-register direct-LSP cleanup
-	// (register.go) and `mcphub language-server cleanup` (cli/language_server.go)
-	// both call RemoveEntry on each returned entry. RemoveEntry → deleteMember
-	// deletes from the write target (o.path = mimocode.json) ONLY. An
-	// mcp-language-server entry living in a LOWER layer (config.json) or a HIGHER
-	// layer (mimocode.jsonc / MIMOCODE_CONFIG / overlay / inline) would be
-	// "removed" with a logged success yet re-emerge via the merge — leaving the
-	// LSP entry active. So report only entries the write target actually defines
-	// (the only ones RemoveEntry can delete); an other-layer entry is the
-	// operator's, never hub-managed, and the hub must not claim to have removed
-	// it. mimoCodeFileDefines(o.path, name) is the write-target membership test.
+	// Write-target SHAPE restriction (bot PR #420 finding 4 + r12 HIGH). The ONLY
+	// consumers of this method are DESTRUCTIVE — the post-register direct-LSP
+	// cleanup (register.go) and `mcphub language-server cleanup`
+	// (cli/language_server.go) both call RemoveEntry on each returned entry.
+	// RemoveEntry → deleteMember deletes from the write target (o.path =
+	// mimocode.json) ONLY. An mcp-language-server entry living in a LOWER layer
+	// (config.json) or a HIGHER layer (mimocode.jsonc / MIMOCODE_CONFIG / overlay
+	// / inline) would be "removed" with a logged success yet re-emerge via the
+	// merge — leaving the LSP entry active.
+	//
+	// Membership-by-NAME is NOT sufficient (r12 HIGH): the matched shape is from
+	// the MERGED view (could be a HIGHER layer's stdio shape), while RemoveEntry
+	// deletes the WRITE-TARGET's value (could be a DIFFERENT shape). A name that
+	// is stdio in mimocode.jsonc but a hub REMOTE entry in mimocode.json would, on
+	// a name-only test, be reported → RemoveEntry would delete the write-target
+	// REMOTE, leaving the higher stdio active (WRONG entry deleted). So report
+	// only entries whose WRITE-TARGET OWN value is ITSELF the stdio-LSP shape —
+	// mimoCodeFileDefinesStdioLSP routes that decision through the same single
+	// classifier (matchLanguageServerStdio) that produced the merged match. Under
+	// the replace-by-name merge an mcp entry never field-merges across layers, so
+	// a write-target stdio entry is self-contained when the write target is the
+	// highest definer; when a higher layer shadows it, declining is correct (the
+	// write-target value is not what MiMoCode loads).
 	out := matched[:0]
 	for _, e := range matched {
-		defined, err := mimoCodeFileDefines(o.path, e.Name)
+		defined, err := mimoCodeFileDefinesStdioLSP(o.path, e.Name)
 		if err != nil {
 			return nil, err
 		}
