@@ -664,15 +664,20 @@ func TestMimoCode_ConfigJSONIsRealReadLayer(t *testing.T) {
 			[]byte(`{"mcp":{"from-config":{"type":"remote","url":"http://localhost:9009/mcp","enabled":true}}}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		// Write target is mimocode.json (top of write), but the read must surface
-		// the config.json-layer entry.
+		// Write target is mimocode.json (top of write), but the MERGE must surface
+		// the config.json-layer entry. NOTE: probe the merged read directly (NOT
+		// GetEntry) — GetEntry deliberately suppresses a config.json-ONLY entry to
+		// keep the install/register rollback from copying it up into the write
+		// target (bot PR #420 finding 1; see TestMimoCode_GetEntry_LowerLayerOnly...).
 		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
-		e, err := o.GetEntry("from-config")
+		merged, err := o.readMergedLayers()
 		if err != nil {
-			t.Fatalf("GetEntry: %v", err)
+			t.Fatalf("readMergedLayers: %v", err)
 		}
-		if e == nil || e.URL != "http://localhost:9009/mcp" {
-			t.Errorf("config.json-layer entry not visible through merged read: %+v", e)
+		servers, _ := merged[mimoCodeMCPKey].(map[string]any)
+		entry, _ := servers["from-config"].(map[string]any)
+		if entry == nil || entry["url"] != "http://localhost:9009/mcp" {
+			t.Errorf("config.json-layer entry not visible through merged read: %+v", merged)
 		}
 	})
 	t.Run("precedence config.json < mimocode.json < mimocode.jsonc", func(t *testing.T) {
@@ -714,8 +719,17 @@ func TestMimoCode_ConfigJSONIsRealReadLayer(t *testing.T) {
 			t.Fatal(err)
 		}
 		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
-		if e, _ := o.GetEntry("low"); e == nil || e.URL != "http://low/mcp" {
-			t.Errorf("config.json entry shadowed by an unrelated higher layer: %+v", e)
+		// Probe the MERGE directly — a config.json-only entry must survive an
+		// unrelated higher layer (deep-merge by key). GetEntry suppresses a
+		// config.json-only entry by design (finding 1), so it is not the probe here.
+		merged, err := o.readMergedLayers()
+		if err != nil {
+			t.Fatalf("readMergedLayers: %v", err)
+		}
+		servers, _ := merged[mimoCodeMCPKey].(map[string]any)
+		entry, _ := servers["low"].(map[string]any)
+		if entry == nil || entry["url"] != "http://low/mcp" {
+			t.Errorf("config.json entry shadowed by an unrelated higher layer: %+v", merged)
 		}
 	})
 }
@@ -832,9 +846,154 @@ func TestMimoCode_RemoveEntry_TopLayerOnly_PreservesLowerOriginal(t *testing.T) 
 		t.Error("hub's top-layer serena entry should have been removed")
 	}
 	// And the merged read now surfaces the operator's original (restored view).
-	if e, _ := o.GetEntry("serena"); e == nil || e.URL != "http://operator-original/mcp" {
-		t.Errorf("merged read should reveal the operator's lower-layer original after removal: %+v", e)
+	// Probe readMergedLayers directly: after removal the entry lives ONLY in the
+	// lower config.json layer, which GetEntry deliberately suppresses (finding 1)
+	// so a rollback never copies it up; the MERGE still reveals it.
+	merged, err := o.readMergedLayers()
+	if err != nil {
+		t.Fatalf("readMergedLayers: %v", err)
 	}
+	mergedServers, _ := merged[mimoCodeMCPKey].(map[string]any)
+	mergedEntry, _ := mergedServers["serena"].(map[string]any)
+	if mergedEntry == nil || mergedEntry["url"] != "http://operator-original/mcp" {
+		t.Errorf("merged read should reveal the operator's lower-layer original after removal: %+v", merged)
+	}
+	// And GetEntry now reports it ABSENT (the rollback-safety guard): a same-named
+	// server living ONLY below the write target must NOT be returned as a prior the
+	// rollback would AddEntry(*prior) up into the write target.
+	if e, _ := o.GetEntry("serena"); e != nil {
+		t.Errorf("GetEntry must suppress a config.json-only entry (rollback safety), got %+v", e)
+	}
+}
+
+// TestMimoCode_GetEntry_LowerLayerOnly_RollbackRemovesNotCopiesUp pins bot PR
+// #420 finding 1: when the prior entry the install/register rollback snapshots
+// lives ONLY in the config.json layer BELOW the write target, GetEntry must
+// report it ABSENT (nil) so the rollback takes the nil-prior branch (RemoveEntry
+// the hub's write-target key) — NOT AddEntry(*prior), which would copy the
+// operator's lower-layer entry UP into the write target (mimocode.json) and
+// SHADOW their config.json forever. This test drives the EXACT rollback contract
+// from install.go:2573 / register.go:786 (snapshot prior → AddEntry hub entry →
+// on failure: prior==nil ? RemoveEntry : AddEntry(*prior)).
+func TestMimoCode_GetEntry_LowerLayerOnly_RollbackRemovesNotCopiesUp(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	configJSON := filepath.Join(dir, "config.json")
+	writeTarget := filepath.Join(dir, "mimocode.json")
+	// The operator's ONLY definition of "serena" lives in the LOWER config.json
+	// layer. The write target does not (yet) carry it.
+	if err := os.WriteFile(configJSON,
+		[]byte(`{"mcp":{"serena":{"type":"remote","url":"http://operator-original/mcp","enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := &mimoCodeClient{path: writeTarget}
+
+	// 1. Rollback snapshots the prior BEFORE the hub write. A config.json-only
+	//    prior must read as ABSENT so the rollback removes (not copies up).
+	priorEntry, err := o.GetEntry("serena")
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if priorEntry != nil {
+		t.Fatalf("config.json-only prior must read ABSENT for rollback safety, got %+v", priorEntry)
+	}
+
+	// 2. The hub installs its own entry into the write target (mimocode.json).
+	if err := o.AddEntry(MCPEntry{Name: "serena", URL: "http://127.0.0.1:9121/mcp"}); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+
+	// 3. Downstream install failure → rollback. With priorEntry == nil the
+	//    rollback closure (install.go:2607 / register.go:802) calls RemoveEntry.
+	if priorEntry != nil {
+		t.Fatal("unreachable: prior was nil")
+	}
+	if err := o.RemoveEntry("serena"); err != nil {
+		t.Fatalf("rollback RemoveEntry: %v", err)
+	}
+
+	// 4a. The write target must NOT carry serena — the hub's key was removed and
+	//     the lower-layer entry was never copied up.
+	wtData, _ := os.ReadFile(writeTarget)
+	wtM, _ := parseJSONCBytes(wtData)
+	wtServers, _ := wtM[mimoCodeMCPKey].(map[string]any)
+	if _, present := wtServers["serena"]; present {
+		t.Errorf("SHADOW BUG: the operator's config.json serena was copied up into the write target by the rollback: %s", wtData)
+	}
+
+	// 4b. The operator's config.json original is byte-untouched.
+	lowData, _ := os.ReadFile(configJSON)
+	lowM, _ := parseJSONCBytes(lowData)
+	lowServers, _ := lowM[mimoCodeMCPKey].(map[string]any)
+	lowEntry, _ := lowServers["serena"].(map[string]any)
+	if lowEntry == nil || lowEntry["url"] != "http://operator-original/mcp" {
+		t.Errorf("operator's config.json original was mutated/lost: %s", lowData)
+	}
+
+	// 4c. The merged read once again surfaces the operator's original — config.json
+	//     re-emerged, which is the restore-to-prior-state the rollback promises.
+	merged, err := o.readMergedLayers()
+	if err != nil {
+		t.Fatalf("readMergedLayers: %v", err)
+	}
+	mServers, _ := merged[mimoCodeMCPKey].(map[string]any)
+	mEntry, _ := mServers["serena"].(map[string]any)
+	if mEntry == nil || mEntry["url"] != "http://operator-original/mcp" {
+		t.Errorf("config.json original did not re-emerge via the merge after rollback: %+v", merged)
+	}
+}
+
+// TestMimoCode_Exists_InlineOnlyProfile pins bot PR #420 finding 3: an
+// INLINE-ONLY MIMOCODE_CONFIG_CONTENT profile (no config file on disk, no config
+// dir) must report Exists()==true so every write path gating on client.Exists()
+// (Apply / Register) proceeds — consistent with the scan promotion that already
+// shows such a profile as present and discovers its servers. A MALFORMED inline
+// string must NOT assert presence (it is surfaced as a loud merged-read parse
+// error elsewhere, not a silent skip).
+func TestMimoCode_Exists_InlineOnlyProfile(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	// A directory that does NOT contain any mimo config files, and whose write
+	// target dir we delete so the dir-stat fallback also misses — isolating the
+	// inline-content branch as the ONLY presence signal.
+	parent := t.TempDir()
+	absentDir := filepath.Join(parent, "no-such-config-dir")
+	writeTarget := filepath.Join(absentDir, "mimocode.json")
+
+	t.Run("parseable inline content makes Exists true with no files and no dir", func(t *testing.T) {
+		o := &mimoCodeClient{
+			path:          writeTarget,
+			inlineContent: `{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`,
+		}
+		// Sanity: no read-layer file and no config dir exist.
+		for _, f := range o.readLayerFiles() {
+			if _, err := os.Stat(f); err == nil {
+				t.Fatalf("test setup leaked a real read-layer file %q", f)
+			}
+		}
+		if _, err := os.Stat(filepath.Dir(o.path)); err == nil {
+			t.Fatalf("test setup leaked a real config dir %q", filepath.Dir(o.path))
+		}
+		if !o.Exists() {
+			t.Error("inline-only profile must report Exists()==true so Apply/Register can act on it")
+		}
+	})
+
+	t.Run("malformed inline content does NOT assert presence", func(t *testing.T) {
+		o := &mimoCodeClient{
+			path:          writeTarget,
+			inlineContent: `{"mcp": { not valid json`,
+		}
+		if o.Exists() {
+			t.Error("malformed inline content must NOT assert Exists() (no silent presence on unparseable bytes)")
+		}
+	})
+
+	t.Run("empty inline content with no files is not present", func(t *testing.T) {
+		o := &mimoCodeClient{path: writeTarget, inlineContent: ""}
+		if o.Exists() {
+			t.Error("no inline content, no file, no dir → Exists() must be false")
+		}
+	})
 }
 
 // TestMimoCode_ExplicitPath_NoSiblingMerge pins the explicit-path honoring

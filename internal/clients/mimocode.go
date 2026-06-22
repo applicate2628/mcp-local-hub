@@ -367,14 +367,34 @@ func (o *mimoCodeClient) ConfigPath() string { return o.path }
 // IsRelayStdio reports false: mimocode is a URL-native HTTP MCP client.
 func (o *mimoCodeClient) IsRelayStdio() bool { return false }
 
-// Exists treats MiMoCode as installed when EITHER any resolved READ layer file
-// is present OR the write-target's config directory exists, mirroring the
+// Exists treats MiMoCode as installed when ANY of: a resolved READ layer FILE is
+// present; a PARSEABLE MIMOCODE_CONFIG_CONTENT inline layer is set; OR the
+// write-target's config directory exists — mirroring the
 // opencode/cursor/vscode/kiro "directory means installed" heuristic so an
 // operator who has MiMoCode installed but no MCP config yet still gets the
 // Initialize / install affordance.
+//
+// The inline-content branch (bot PR #420 finding 3) keeps Exists() consistent
+// with the SCAN promotion: an INLINE-ONLY profile (MIMOCODE_CONFIG_CONTENT set,
+// no config file on disk, possibly no config dir) is promoted to "ok" and has its
+// servers discovered by the scan path (MimoCodeHasInlineContent /
+// MimoCodeMergedConfig). Without this branch readLayerFiles() (FILE paths only,
+// never the inline string) plus the dir stat would BOTH miss it, Exists() would
+// return false, and every write path gating on client.Exists() (Apply / Register)
+// would silently skip mimo — unable to act on the inline-only setup the matrix
+// shows as present. "Parseable" matches MimoCodeHasInlineContent: a malformed
+// inline string is NOT treated as present (a write path acting on it would
+// surface the inline-shadow / merged-parse error from the existing guards, not a
+// silent skip). The merged-read parse error on a malformed inline string remains
+// the loud signal; Exists() simply does not assert presence on unparseable bytes.
 func (o *mimoCodeClient) Exists() bool {
 	for _, f := range o.readLayerFiles() {
 		if _, err := os.Stat(f); err == nil {
+			return true
+		}
+	}
+	if o.inlineContent != "" {
+		if _, err := parseJSONCBytes([]byte(o.inlineContent)); err == nil {
 			return true
 		}
 	}
@@ -922,6 +942,49 @@ var mimoCodeHubRemoteShapeKeys = map[string]bool{
 	"type": true, "url": true, "enabled": true, "headers": true,
 }
 
+// mimoCodeDefinedAtOrAboveWriteTarget reports whether mcp.<name> is defined in
+// the write target (mimocode.json = o.path) OR any READ layer ABOVE it
+// (mimocode.jsonc, the MIMOCODE_CONFIG file, the MIMOCODE_CONFIG_DIR overlay, or
+// the MIMOCODE_CONFIG_CONTENT inline string) — i.e. in any layer the hub's own
+// write could have CLOBBERED, or that wins the merge over the write target. It
+// deliberately EXCLUDES the ONLY layer strictly BELOW the write target,
+// config.json in the write-target dir: a name present ONLY there is an operator
+// entry the hub never wrote (setMember/deleteMember touch o.path alone — see
+// deleteMember's doc), so for the install/register rollback it must behave as "no
+// prior" — see GetEntry's lower-layer guard (bot PR #420 finding 1).
+//
+// State-safe: in the explicit/temp single-file mode (basename not a global layer
+// name) readLayerFiles returns only [o.path] (the write target), so the loop
+// checks exactly that file and the lower-layer exclusion is a no-op — it never
+// reaches the real ~/.config/mimocode. A parse error on a present layer
+// propagates (a malformed layer must not be silently read as "not defined").
+func (o *mimoCodeClient) mimoCodeDefinedAtOrAboveWriteTarget(name string) (bool, error) {
+	lowerLayer := filepath.Clean(filepath.Join(filepath.Dir(o.path), "config.json"))
+	for _, f := range o.readLayerFiles() {
+		if filepath.Clean(f) == lowerLayer {
+			continue // the sole layer strictly below the write target — excluded
+		}
+		defined, err := mimoCodeFileDefines(f, name)
+		if err != nil {
+			return false, err
+		}
+		if defined {
+			return true, nil
+		}
+	}
+	// Inline MIMOCODE_CONFIG_CONTENT is a TOP (above) layer, not a file path.
+	if o.inlineContent != "" {
+		defined, err := mimoCodeInlineDefines(o.inlineContent, name)
+		if err != nil {
+			return false, err
+		}
+		if defined {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // GetEntry reads mcp.<name> from the merged layers and projects it onto MCPEntry.
 //
 //   - A clean hub-shaped ENABLED remote entry (only type/url/enabled/headers,
@@ -946,8 +1009,35 @@ var mimoCodeHubRemoteShapeKeys = map[string]bool{
 //     drop oauth/timeout. Carrying Raw makes the rollback restore the verbatim
 //     shape (Raw wins in AddEntry).
 //
+// LOWER-LAYER-ONLY guard (bot PR #420 finding 1). GetEntry reads the MERGED view,
+// so a same-named server defined ONLY in the config.json layer BELOW the write
+// target would project as a non-nil prior. The install/register rollback then
+// runs AddEntry(*prior), writing that operator entry UP into the write target
+// (mimocode.json) — which SHADOWS the operator's config.json forever (the
+// write-target copy now wins the merge) instead of just removing the hub's entry
+// and letting config.json re-emerge. The hub physically only ever writes the
+// write target (setMember/deleteMember touch o.path alone), so a name present
+// only in config.json is an operator entry the hub never wrote and never
+// clobbered: the correct rollback is the nil-prior branch (RemoveEntry the hub's
+// write-target key). So a name defined ONLY below the write target is reported as
+// ABSENT → (nil, nil). A prior IN the write target (the only layer the hub's
+// write could clobber) or — moot at rollback, since AddEntry shadow-refuses the
+// install before any write — in a HIGHER layer is a real restore candidate and is
+// projected normally.
+//
 // A missing entry returns (nil, nil).
 func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {
+	// Lower-layer-only guard (bot PR #420 finding 1): a name defined ONLY in the
+	// config.json layer below the write target is an operator entry the hub never
+	// wrote; report it ABSENT so the rollback removes the hub's write-target key
+	// (config.json re-emerges) rather than copying the lower entry up.
+	atOrAbove, err := o.mimoCodeDefinedAtOrAboveWriteTarget(name)
+	if err != nil {
+		return nil, err
+	}
+	if !atOrAbove {
+		return nil, nil
+	}
 	m, err := o.readJSON()
 	if err != nil {
 		return nil, err

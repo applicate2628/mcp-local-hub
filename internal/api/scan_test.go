@@ -802,6 +802,52 @@ func TestScanMimoCode_PresencePromotion_RestrictedToMissing(t *testing.T) {
 	})
 }
 
+// TestScanMimoCode_PresencePromotion_NotForSymlinkBlockedParent pins bot PR #420
+// (mimo r10) finding 2 follow-up: the lower-layer presence promotion must EXCLUDE
+// the "missing-init-blocked-symlink" state. A write target whose parent resolves
+// through a symlink cannot be CREATED by the hardened init/write pipeline
+// (O_NOFOLLOW / FILE_FLAG_OPEN_REPARSE_POINT refuse to descend), so even with a
+// present lower layer (config.json) an Apply that needs to create the write
+// target would deterministically fail. Promoting it to "ok" would show a normal
+// enabled cell whose later Apply fails — the same broken-UX hazard the
+// config-FAULT exclusion already prevents. So the symlink-blocked absent state
+// must stay un-promoted. State-safe: temp dir, env isolated; POSIX-only (symlink
+// creation needs elevation on Windows).
+func TestScanMimoCode_PresencePromotion_NotForSymlinkBlockedParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevation on Windows; the POSIX path exercises the symlink-blocked exclusion")
+	}
+	isolateMimoCodeScanEnv(t)
+	tmp := t.TempDir()
+	// Real dir where the config actually lives, plus a symlink standing in for the
+	// config dir's parent (dotfile-management setup). The write target's immediate
+	// parent IS the symlink, so the generic probe classifies it
+	// "missing-init-blocked-symlink".
+	realDir := filepath.Join(tmp, "real-dotfiles", "mimocode")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(tmp, "mimocode")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+	// A present lower-layer config.json (through the symlink) that WOULD promote
+	// presence to "ok" if the gate keyed on every absent state.
+	if err := os.WriteFile(filepath.Join(link, "config.json"),
+		[]byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeTarget := filepath.Join(link, "mimocode.json") // absent, parent is a symlink
+	a := NewAPI()
+	res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: writeTarget})
+	if err != nil {
+		t.Fatalf("ScanFrom: %v", err)
+	}
+	if got := res.ClientConfigPresence["mimocode"]; got != "missing-init-blocked-symlink" {
+		t.Errorf("a symlink-blocked write-target parent must NOT be promoted to ok by a lower config.json layer: got %q, want missing-init-blocked-symlink", got)
+	}
+}
+
 // TestProbeClientConfigPresence_Wave2Clients confirms the eight wave-2
 // clients participate in the per-client presence probe the Servers matrix
 // uses to gate column visibility + the Initialize affordance. Mirrors

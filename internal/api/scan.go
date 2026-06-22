@@ -355,23 +355,35 @@ func classifyMissingClientConfig(path string) string {
 	return "missing-init-possible"
 }
 
-// isMissingPresenceState reports whether a probeClientConfigPresence verdict is
-// one of the ABSENT (missing) states — the config file does not exist yet. The
-// complete set classifyMissingClientConfig can return is "missing",
+// isPromotableAbsentPresenceState reports whether a probeClientConfigPresence
+// verdict is an ABSENT (config-file-not-yet-present) state whose write target is
+// TRULY WRITABLE, so a lower/overlay/inline read layer may promote it to "ok".
+// The full set classifyMissingClientConfig can return is "missing",
 // "missing-init-possible", "missing-init-creatable", and
-// "missing-init-blocked-symlink". The NON-missing verdicts are "ok" (the file
-// is a regular file) and the config-FAULT states "error" (non-regular target:
+// "missing-init-blocked-symlink"; the NON-missing verdicts are "ok" (the file is
+// a regular file) and the config-FAULT states "error" (non-regular target:
 // directory / FIFO / device) and "error-symlink" (refused / dangling symlink).
 //
-// Used only by the MiMoCode lower-layer presence promotion (ScanFrom): a
-// lower-layer file may upgrade an ABSENT write-target verdict to "ok", but must
-// NEVER upgrade a config-FAULT verdict — that would mask a bad write target and
-// render a green cell over a path Apply/backup cannot write to (bot PR #420
-// finding 2 refinement). Keying on the explicit missing-state set (rather than
-// `!= "ok"`) keeps the promotion gated to the absent case only.
-func isMissingPresenceState(state string) bool {
+// Used only by the MiMoCode lower-layer presence promotion (ScanFrom). The
+// promotion makes the cell render a normal enabled state and lets Apply/backup
+// proceed against the write target, so it must fire ONLY when that write target
+// could actually be created and written:
+//
+//   - It NEVER upgrades a config-FAULT verdict ("error" / "error-symlink") — that
+//     would mask a bad write target behind a green cell Apply/backup cannot write
+//     to (bot PR #420 finding 2 refinement).
+//   - It also EXCLUDES "missing-init-blocked-symlink": the write/init pipeline
+//     refuses to create the missing write target through a parent symlink
+//     (POSIX O_NOFOLLOW / Windows FILE_FLAG_OPEN_REPARSE_POINT), so even though a
+//     lower layer (config.json) exists, an Apply that needs to create the write
+//     target would deterministically fail. Promoting it to "ok" would show a
+//     normal enabled cell whose later Apply fails — exactly the broken UX the
+//     config-FAULT exclusion already prevents. So only the genuinely-creatable
+//     absent states (missing / missing-init-possible / missing-init-creatable)
+//     are promotable.
+func isPromotableAbsentPresenceState(state string) bool {
 	switch state {
-	case "missing", "missing-init-possible", "missing-init-creatable", "missing-init-blocked-symlink":
+	case "missing", "missing-init-possible", "missing-init-creatable":
 		return true
 	default:
 		return false
@@ -601,8 +613,13 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	// THAT to "ok" because a SEPARATE lower layer happens to exist would mask the
 	// fault: the row would render green, the operator clicks Apply, and the
 	// hardened write fails against the bad write target. So the promotion is
-	// gated on isMissingPresenceState — it upgrades only the absent states
-	// (missing / missing-init-*), never an error/error-symlink/ok verdict.
+	// gated on isPromotableAbsentPresenceState — it upgrades only the WRITABLE
+	// absent states (missing / missing-init-possible / missing-init-creatable),
+	// never an error/error-symlink/ok verdict, and never
+	// missing-init-blocked-symlink (the write/init pipeline refuses to create the
+	// write target through a parent symlink, so a promoted cell's later Apply
+	// would deterministically fail — same broken-UX hazard as the config-FAULT
+	// states).
 	//
 	// INLINE-ONLY PROFILES (bot PR #420 finding 1): MimoCodeReadLayerPaths yields
 	// only FILE paths, so a profile whose ONLY mimo config layer is
@@ -610,7 +627,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	// would never promote — yet MimoCodeMergedConfig parses that inline layer and
 	// surfaces its servers. So promote on a parseable inline layer too, not just a
 	// stat-able file. Either signal upgrades the absent state to "ok".
-	if mp := paths["mimocode"]; mp != "" && isMissingPresenceState(presence["mimocode"]) {
+	if mp := paths["mimocode"]; mp != "" && isPromotableAbsentPresenceState(presence["mimocode"]) {
 		for _, lf := range clients.MimoCodeReadLayerPaths(mp) {
 			if st, err := os.Stat(lf); err == nil && st.Mode().IsRegular() {
 				presence["mimocode"] = "ok"
