@@ -561,7 +561,7 @@ func TestScanCoversMimoCode(t *testing.T) {
 // explicit non-layer-named path already bypasses dir recomputation.
 func isolateMimoCodeScanEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_HOME", "XDG_CONFIG_HOME"} {
+	for _, k := range []string{"MIMOCODE_CONFIG", "MIMOCODE_CONFIG_CONTENT", "MIMOCODE_CONFIG_DIR", "MIMOCODE_HOME", "XDG_CONFIG_HOME"} {
 		t.Setenv(k, "")
 	}
 }
@@ -749,6 +749,57 @@ func TestScanMimoCode_InDirLayerMerge(t *testing.T) {
 	if got := mem.ClientPresence["mimocode"].Transport; got != "http" {
 		t.Errorf("merged-layer Transport: got %q, want http", got)
 	}
+}
+
+// TestScanMimoCode_PresencePromotion_RestrictedToMissing pins bot PR #420
+// finding 2 (refinement): the MiMoCode lower-layer presence promotion upgrades
+// only an ABSENT write-target verdict to "ok". A config-FAULT write target
+// (directory / FIFO at the path → "error", or a refused symlink →
+// "error-symlink") must NOT be promoted even when a separate lower layer exists —
+// otherwise the GUI renders a green cell over a write target Apply/backup cannot
+// write to. State-safe: temp dir, env isolated.
+func TestScanMimoCode_PresencePromotion_RestrictedToMissing(t *testing.T) {
+	t.Run("error (directory at write target) is NOT promoted despite a present config.json layer", func(t *testing.T) {
+		isolateMimoCodeScanEnv(t)
+		tmp := t.TempDir()
+		// Write target mimocode.json is itself a DIRECTORY → generic probe = "error".
+		writeTarget := filepath.Join(tmp, "mimocode.json")
+		if err := os.MkdirAll(writeTarget, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// A real lower-layer config.json with an entry that WOULD trigger promotion
+		// if the gate keyed on `!= "ok"`.
+		if err := os.WriteFile(filepath.Join(tmp, "config.json"),
+			[]byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: writeTarget})
+		if err != nil {
+			t.Fatalf("ScanFrom: %v", err)
+		}
+		if got := res.ClientConfigPresence["mimocode"]; got != "error" {
+			t.Errorf("a config-error write target must stay \"error\" (not promoted to ok by a lower layer): got %q", got)
+		}
+	})
+
+	t.Run("missing write target IS promoted to ok by a present config.json layer (positive control)", func(t *testing.T) {
+		isolateMimoCodeScanEnv(t)
+		tmp := t.TempDir()
+		writeTarget := filepath.Join(tmp, "mimocode.json") // absent
+		if err := os.WriteFile(filepath.Join(tmp, "config.json"),
+			[]byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		a := NewAPI()
+		res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: writeTarget})
+		if err != nil {
+			t.Fatalf("ScanFrom: %v", err)
+		}
+		if got := res.ClientConfigPresence["mimocode"]; got != "ok" {
+			t.Errorf("an absent write target with a present config.json lower layer must promote to ok: got %q", got)
+		}
+	})
 }
 
 // TestProbeClientConfigPresence_Wave2Clients confirms the eight wave-2

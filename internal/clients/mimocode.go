@@ -22,11 +22,14 @@ import (
 //     calls). config.json IS a real merge layer — see mimoCodeGlobalLayerNames.
 //   - MiMoCode honors a richer env-override chain for the global config
 //     location (MIMOCODE_HOME / XDG_CONFIG_HOME) — see
-//     resolveMimoCodeGlobalDir — and two custom-config flags layered ON TOP of
-//     the global dir, not replacing it: MIMOCODE_CONFIG (a single config FILE,
-//     loaded verbatim) and MIMOCODE_CONFIG_DIR (an ADDITIONAL overlay dir whose
-//     mimocode.json/.jsonc merge on top of the global dir, custom winning) —
-//     see resolveMimoCodeConfig.
+//     resolveMimoCodeGlobalDir — plus THREE custom-config sources layered ON TOP
+//     of the global dir (config.ts loadInstanceState merges them AFTER
+//     getGlobal(), each winning over what is below; none REPLACES the global
+//     layers): MIMOCODE_CONFIG (a single config FILE merged above the global
+//     layers), MIMOCODE_CONFIG_DIR (an overlay dir whose mimocode.json/.jsonc
+//     merge above the MIMOCODE_CONFIG file), and MIMOCODE_CONFIG_CONTENT (an
+//     INLINE JSONC config string merged as the TOP layer) — see
+//     resolveMimoCodeConfig.
 //   - MiMoCode local entries store `command` as an ARRAY (and env under
 //     `environment`) — handled by the scanner + extractor + the LSP scan, and
 //     the reason GetEntry returns a Raw-carrying MCPEntry for a URL-less local
@@ -43,15 +46,22 @@ import (
 //   - Project: per-repo + per-project `.mimocode` directories (highest
 //     precedence, merged over global at load time).
 //
-// The hub WRITES the GLOBAL dir's top layer so a single per-user hub entry is
-// visible in every project, matching every other adapter's user-scoped posture.
-// READ (and the rollback restore) merge every active layer; WRITE and DELETE
-// touch the single top write-target file ONLY (o.path) — never a lower layer —
-// so an operator's lower-layer (config.json / mimocode.json) original is never
-// destroyed and re-emerges via the merge after the hub's top-layer entry is
-// removed. The project-root / cross-DIR `.mimocode` overlay (project + home) is
-// a documented LIMITATION shared with the OpenCode adapter — this adapter
-// targets the resolved global dir plus the MIMOCODE_CONFIG_DIR overlay only.
+// The hub WRITES the GLOBAL dir's FIXED seed mimocode.json so a single per-user
+// hub entry is visible in every project, matching every other adapter's
+// user-scoped posture. READ (and the rollback restore) merge every active layer;
+// WRITE, DELETE, and BACKUP touch the single FIXED write-target file ONLY
+// (o.path = mimocode.json) — never a lower or higher layer. The write target
+// does NOT float to mimocode.jsonc when that file exists (bot PR #420 finding 5:
+// a floating target makes a later backup/demigrate miss the file the hub
+// actually wrote). An operator's OTHER-layer original (config.json,
+// mimocode.jsonc, MIMOCODE_CONFIG file, overlay, inline content) is never
+// mutated and re-emerges via the merge after the hub's entry is removed; a
+// same-named server in a HIGHER layer is refused at AddEntry by the shadow guard
+// (it would otherwise win the merge and silently mask the hub entry). The
+// project-root / cross-DIR `.mimocode` overlay (project + home) is a documented
+// LIMITATION shared with the OpenCode adapter — this adapter targets the
+// resolved global dir plus the MIMOCODE_CONFIG file, the MIMOCODE_CONFIG_DIR
+// overlay, and MIMOCODE_CONFIG_CONTENT inline only.
 //
 // Transport choice — HTTP-direct (NOT relay-stdio). Like OpenCode, MiMoCode
 // supports remote MCP servers natively over Streamable HTTP. A remote entry
@@ -75,11 +85,16 @@ import (
 // Optional `headers` is emitted when MCPEntry.Headers is non-empty.
 //
 // Sources (verified 2026-06 against the live source):
-//   - config.ts (packages/opencode/src/config/config.ts) — `loadGlobal` deep-
-//     merges config.json → mimocode.json → mimocode.jsonc (three mergeDeep
-//     calls). Flag.MIMOCODE_CONFIG is a single config FILE loaded verbatim;
-//     Flag.MIMOCODE_CONFIG_DIR is appended to the directory list and its
-//     mimocode.json/.jsonc are merged ON TOP of the global dir (overlay).
+//   - config.ts (packages/opencode/src/config/config.ts) — `Config.layer` →
+//     `loadInstanceState` merges, lowest→highest (later merges win via
+//     mergeDeep): `getGlobal()` (= loadGlobal: config.json → mimocode.json →
+//     mimocode.jsonc) then `if (Flag.MIMOCODE_CONFIG) merge(loadFile(...))` then
+//     the per-directory loop (`.mimocode` dirs + MIMOCODE_CONFIG_DIR:
+//     mimocode.json → mimocode.jsonc) then
+//     `if (process.env.MIMOCODE_CONFIG_CONTENT) merge(loadConfig(...))`. So the
+//     MIMOCODE_CONFIG file is a LAYER above global (NOT a replacement),
+//     MIMOCODE_CONFIG_DIR is above it, and MIMOCODE_CONFIG_CONTENT (inline JSONC
+//     parsed via loadConfig → ConfigParse.jsonc) is the TOP in-scope layer.
 //   - paths.ts (packages/opencode/src/config/paths.ts) — `directories()`
 //     returns [globalConfig, ...project .mimocode, ...home .mimocode,
 //     MIMOCODE_CONFIG_DIR]; the global dir always loads even when
@@ -107,7 +122,12 @@ func NewMimoCode() (Client, error) {
 		return nil, err
 	}
 	r := resolveMimoCodeConfig(home)
-	return newLockingClient(&mimoCodeClient{path: r.writeTarget, overlayDir: r.overlayDir, fileOverride: r.fileOverride}), nil
+	return newLockingClient(&mimoCodeClient{
+		path:          r.writeTarget,
+		configFile:    r.configFile,
+		overlayDir:    r.overlayDir,
+		inlineContent: r.inlineContent,
+	}), nil
 }
 
 // mimoCodeGlobalLayerNames are the config files MiMoCode's GLOBAL loader merges
@@ -132,59 +152,91 @@ var mimoCodeGlobalLayerNames = []string{"config.json", "mimocode.json", "mimocod
 // wins).
 var mimoCodeOverlayLayerNames = []string{"mimocode.json", "mimocode.jsonc"}
 
-// mimoCodeResolution is the fully resolved config surface: the single
-// write/delete target file, the optional MIMOCODE_CONFIG_DIR overlay
-// (read-merged on top of the write-target's own global-dir layers), and a
-// single-file-override flag set when MIMOCODE_CONFIG points at a verbatim file
-// (in which case the read set, the write target, and the delete target are all
-// that one file — no dir probing, no overlay, no siblings).
+// mimoCodeResolution is the fully resolved config surface, faithful to
+// MiMoCode's `Config.layer` → `loadInstanceState` merge order (verified against
+// the live source, see the package doc). All env-resolved READ layers above the
+// global write target are recorded; the write target itself is the FIXED global
+// seed (never floats — bot PR #420 finding 5).
+//
+//   - writeTarget — the single global-dir file every WRITE + DELETE + BACKUP
+//     touches (o.path). It is ALWAYS mimocode.json in the resolved global dir
+//     (the deterministic seed); it does NOT float to mimocode.jsonc when that
+//     exists, so a backup/demigrate always hits the exact file the hub wrote.
+//   - configFile — the MIMOCODE_CONFIG absolute FILE, a READ LAYER merged ABOVE
+//     the global layers (NOT a replacement — bot PR #420 finding 1). "" when
+//     unset / relative. The hub never WRITES it (operator-owned).
+//   - overlayDir — the MIMOCODE_CONFIG_DIR absolute overlay DIR whose
+//     mimocode.json/.jsonc merge above configFile. "" when unset / relative.
+//   - inlineContent — the MIMOCODE_CONFIG_CONTENT raw JSONC STRING merged as the
+//     TOP layer (highest in-scope precedence — bot PR #420 finding 4). "" when
+//     unset. It is content, not a path, so it threads into the merge separately
+//     from the file layers.
 type mimoCodeResolution struct {
-	writeTarget  string // the single file WRITE + DELETE touch (o.path)
-	overlayDir   string // MIMOCODE_CONFIG_DIR overlay read on top of global ("" when unset / file-override mode)
-	fileOverride bool   // true when MIMOCODE_CONFIG pinned a single verbatim file
+	writeTarget   string // FIXED global seed file WRITE + DELETE + BACKUP touch (o.path)
+	configFile    string // MIMOCODE_CONFIG file — a READ LAYER above global ("" when unset)
+	overlayDir    string // MIMOCODE_CONFIG_DIR overlay read above configFile ("" when unset)
+	inlineContent string // MIMOCODE_CONFIG_CONTENT inline JSONC string — TOP read layer ("" when unset)
 }
 
 // resolveMimoCodeConfig resolves MiMoCode's config surface honoring its
-// documented env precedence:
+// documented merge order (config.ts `loadInstanceState`, verified source):
 //
-//   - MIMOCODE_CONFIG (absolute FILE) → file-override mode: the read set, the
-//     write target, and the delete target are ALL that one file. No dir
-//     probing, no sibling layers, no overlay. (config.ts loads
-//     Flag.MIMOCODE_CONFIG verbatim; the adapter, which writes ONE user-scoped
-//     entry, operates on exactly that file.)
-//   - otherwise the GLOBAL dir is resolved (MIMOCODE_HOME > XDG_CONFIG_HOME >
-//     ~/.config/mimocode) and:
-//   - write target = the global dir's TOP existing layer (.jsonc when
-//     present, else mimocode.json — the hub seeds mimocode.json on a fresh
-//     host). config.json is NEVER a write target (it is a legacy migration
-//     sink; paths.ts loads it only as the lowest READ layer).
-//   - MIMOCODE_CONFIG_DIR (absolute DIR), when set, is recorded as the
-//     overlay read on TOP of the global layers (custom wins). It does NOT
-//     become the write target — the hub writes the canonical per-user
-//     global file, which MiMoCode still loads.
+//   - The GLOBAL dir is resolved (MIMOCODE_HOME > XDG_CONFIG_HOME >
+//     ~/.config/mimocode). The write target is the FIXED seed mimocode.json in
+//     that dir — it does NOT float to mimocode.jsonc even when that file
+//     exists (bot PR #420 finding 5: a floating write target makes a later
+//     backup/demigrate miss the layer the hub actually wrote). config.json is
+//     never a write target (a read-only legacy migration sink).
+//   - MIMOCODE_CONFIG (absolute FILE) is a READ LAYER merged ABOVE the global
+//     layers (bot PR #420 finding 1). MiMoCode merges it ON TOP of getGlobal()
+//     — `if (Flag.MIMOCODE_CONFIG) merge(loadFile(Flag.MIMOCODE_CONFIG))` runs
+//     AFTER `merge(getGlobal())` — it is NOT a replacement. The hub never
+//     WRITES it (operator-owned); it only contributes to READS + shadow checks.
+//   - MIMOCODE_CONFIG_DIR (absolute DIR) is the overlay read ABOVE configFile
+//     (config.ts's per-directory loop runs after the MIMOCODE_CONFIG merge);
+//     custom wins per key. It does NOT become the write target.
+//   - MIMOCODE_CONFIG_CONTENT is an INLINE JSONC config string merged as the
+//     TOP layer (config.ts merges `process.env.MIMOCODE_CONFIG_CONTENT` last of
+//     the in-scope sources — bot PR #420 finding 4). It is content, not a path,
+//     so it is carried as a raw string.
 //
-// Relative env values are IGNORED (global.ts rejects a relative MIMOCODE_HOME
-// outright and the XDG spec ignores a relative XDG_CONFIG_HOME).
+// Relative env values are IGNORED for the PATH vars (global.ts rejects a
+// relative MIMOCODE_HOME outright and the XDG spec ignores a relative
+// XDG_CONFIG_HOME). MIMOCODE_CONFIG_CONTENT is read raw (it is content, not a
+// path).
 func resolveMimoCodeConfig(home string) mimoCodeResolution {
-	if f := absoluteEnv("MIMOCODE_CONFIG"); f != "" {
-		return mimoCodeResolution{writeTarget: f, fileOverride: true}
-	}
 	globalDir := resolveMimoCodeGlobalDir(home)
 	return mimoCodeResolution{
-		writeTarget: mimoCodeWriteTargetInDir(globalDir),
-		overlayDir:  absoluteEnv("MIMOCODE_CONFIG_DIR"),
+		writeTarget:   mimoCodeWriteTargetInDir(globalDir),
+		configFile:    absoluteEnv("MIMOCODE_CONFIG"),
+		overlayDir:    absoluteEnv("MIMOCODE_CONFIG_DIR"),
+		inlineContent: os.Getenv("MIMOCODE_CONFIG_CONTENT"),
 	}
 }
 
-// mimoCodeWriteTargetInDir returns the WRITE-target file in a config dir: the
-// existing higher layer (mimocode.jsonc) when present so a hub entry is not
-// written into a separate lower-priority file the client merges below it;
-// otherwise mimocode.json — the file the adapter seeds on a fresh host. Never
-// config.json (a read-only legacy migration layer).
+// mimoCodeWriteTargetInDir returns the WRITE-target file in a config dir: ALWAYS
+// the fixed seed mimocode.json. It deliberately does NOT float to mimocode.jsonc
+// when that file exists.
+//
+// Why a fixed seed (bot PR #420 finding 5). Backup() / BackupKeep() /
+// LatestBackupPath() / ConfigPath() are NAME-LESS in the Client interface and
+// key off o.path alone; the demigrate/install sequence calls Backup() (name-
+// less) then RemoveEntry(server) (named) against the SAME adapter, and both must
+// resolve to the one file the hub actually wrote. The old floating target
+// (.jsonc when present) broke that: a hub install while only mimocode.json
+// existed wrote the entry to mimocode.json, but if the operator LATER created
+// mimocode.jsonc the write target floated to .jsonc — so backup looked for
+// .jsonc backups and RemoveEntry deleted from .jsonc, MISSING the .json backups
+// and leaving the hub entry stranded in mimocode.json. A fixed seed keeps
+// write/delete/backup mutually consistent forever.
+//
+// The shadowing concern the float was (wrongly) meant to address — a same-named
+// server in the higher mimocode.jsonc layer winning the merge over the hub's
+// mimocode.json entry — is handled by the shadow guard (AddEntry refuses when a
+// higher layer defines mcp.<name>), NOT by writing into the higher layer.
+//
+// config.json is never a write target (a read-only legacy migration layer).
 func mimoCodeWriteTargetInDir(dir string) string {
-	if jsonc := filepath.Join(dir, "mimocode.jsonc"); isRegularFile(jsonc) {
-		return jsonc
-	}
 	return filepath.Join(dir, "mimocode.json")
 }
 
@@ -228,44 +280,42 @@ func absoluteEnv(name string) string {
 	return v
 }
 
-// isRegularFile reports whether path is an existing regular file. A stat error
-// other than not-exist (e.g. a permission failure) is treated as "absent" so
-// resolution never fails closed on a transient probe error.
-func isRegularFile(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && fi.Mode().IsRegular()
-}
-
 // mimoCodeClient is a standalone adapter (NOT an embedding of jsonMCPClient)
 // because MiMoCode uses the top-level `mcp` key rather than the JSON family's
 // `mcpServers`, AND a distinct entry shape (`type:"remote"` + `enabled:true`
 // rather than `disabled:false`). It mirrors the OpenCode adapter's
 // standalone-struct + HTTP-direct pattern with the same key/field set, plus
-// MiMoCode-faithful multi-layer reads (config.json/mimocode.json/.jsonc + an
-// optional MIMOCODE_CONFIG_DIR overlay) and single-top-layer writes/deletes.
+// MiMoCode-faithful multi-layer reads (config.json/mimocode.json/.jsonc + the
+// MIMOCODE_CONFIG file + an optional MIMOCODE_CONFIG_DIR overlay +
+// MIMOCODE_CONFIG_CONTENT inline) and fixed-seed single-target writes/deletes.
 //
-// path is the single WRITE + DELETE target. overlayDir, when non-empty, is the
-// MIMOCODE_CONFIG_DIR overlay whose mimocode.json/.jsonc are read-merged on top
-// of path's own directory layers. Direct construction (`&mimoCodeClient{path}`
-// in tests / scan / extract) leaves overlayDir empty, so the read set is path's
-// own directory layers (or just path for an explicit override) — the state-safe
-// default that never reaches the developer's real ~/.config/mimocode.
+// path is the single FIXED WRITE + DELETE + BACKUP target (always the global
+// seed mimocode.json — never floats; bot PR #420 finding 5). The three
+// env-resolved READ layers above it merge in MiMoCode's source order (config.ts
+// loadInstanceState): configFile (MIMOCODE_CONFIG) above the global layers, then
+// the overlayDir (MIMOCODE_CONFIG_DIR) above that, then inlineContent
+// (MIMOCODE_CONFIG_CONTENT) as the TOP layer. The hub WRITES only path; the
+// three extra layers are operator-owned READ + shadow-check inputs.
 //
-// fileOverride records that MIMOCODE_CONFIG pinned a single verbatim file (the
-// resolution-time verdict carried verbatim from resolveMimoCodeConfig, bot PR
-// #420 finding 1). It is the AUTHORITATIVE single-file-mode signal: the read /
-// write / delete path consults this flag, NOT path's basename. Without it the
-// read path re-inferred override mode from the basename, so a MIMOCODE_CONFIG
-// pointing at a file NAMED mimocode.json/.jsonc/config.json was wrongly treated
-// as a default-resolved global layer and merged siblings + the overlay — the
-// exact opposite of the verbatim-single-file contract. Direct construction (the
-// scan/extract/test path) leaves it false; those callers fall back to the
-// basename heuristic, which is correct for a temp/test path whose basename is
-// not a known global layer name.
+// Direct construction (`&mimoCodeClient{path}` in tests / scan / extract) leaves
+// configFile / overlayDir / inlineContent empty, so the read set collapses to
+// path's own directory layers (or just path for an explicit non-layer-named
+// override) with no env-resolved sources — the state-safe default that never
+// reaches the developer's real ~/.config/mimocode.
+//
+//   - configFile (MIMOCODE_CONFIG) — an absolute FILE read as a LAYER ABOVE the
+//     global dir layers (bot PR #420 finding 1). It is NOT a replacement: the
+//     global layers stay in the read set. The hub never writes it.
+//   - overlayDir (MIMOCODE_CONFIG_DIR) — an absolute DIR whose
+//     mimocode.json/.jsonc merge ABOVE configFile.
+//   - inlineContent (MIMOCODE_CONFIG_CONTENT) — a raw JSONC STRING merged as the
+//     TOP read layer (bot PR #420 finding 4). It is content, not a path, so it
+//     is parsed and merged after the file layers in readMergedLayers.
 type mimoCodeClient struct {
-	path         string
-	overlayDir   string
-	fileOverride bool
+	path          string
+	configFile    string
+	overlayDir    string
+	inlineContent string
 }
 
 // mimoCodeMCPKey is the single owner of MiMoCode's top-level MCP section
@@ -342,57 +392,61 @@ func (o *mimoCodeClient) Restore(backupPath string) error {
 	return WriteConfigFile(o.path, data)
 }
 
-// readLayerFiles returns every config file the READ merge consumes, LOWEST
+// readLayerFiles returns every config FILE the READ merge consumes, LOWEST
 // precedence first. This is deliberately BROADER than the single write/delete
 // target (o.path): a lower-layer entry must be VISIBLE so the merge reveals an
 // operator's original after the hub's top-layer entry is removed.
 //
-// Resolution (state-safe + explicit-path honoring, bot PR #420):
+// NOTE: this returns FILE paths only. The MIMOCODE_CONFIG_CONTENT inline layer
+// (o.inlineContent) is a STRING, not a path, so it does NOT appear here — it is
+// merged as the TOP layer separately inside readMergedLayers.
 //
-//   - File-override (fileOverride true — MIMOCODE_CONFIG pinned this verbatim
-//     file) OR explicit override (o.path's basename is NOT a known global layer
-//     name — a temp/test path): return ONLY [o.path]. No dir probing, no
-//     siblings, no overlay — so a temp/test scan never reaches the real
-//     ~/.config/mimocode, and a pinned MIMOCODE_CONFIG file is operated on
-//     verbatim EVEN when it is named mimocode.json/.jsonc/config.json (bot PR
-//     #420 finding 1: the flag, not the basename, is authoritative).
-//   - Known global layer name (and NOT file-override): return config.json +
-//     mimocode.json + mimocode.jsonc in o.path's own directory (the global
-//     layers, .jsonc winning), THEN — when overlayDir is set
-//     (MIMOCODE_CONFIG_DIR) — the overlay's mimocode.json + mimocode.jsonc
-//     appended LAST so the overlay wins per key (faithful to config.ts's
-//     directory-order merge).
+// Resolution (state-safe + explicit-path honoring, faithful to config.ts
+// loadInstanceState order):
 //
-// It never recomputes a directory from env/home beyond the overlayDir already
-// captured at construction; it stays inside dir(o.path) plus the explicit
-// overlayDir.
+//   - Explicit override (o.path's basename is NOT a known global layer name — a
+//     temp/test path): return ONLY [o.path]. No dir probing, no siblings, no
+//     MIMOCODE_CONFIG file, no overlay — so a temp/test scan never reaches the
+//     real ~/.config/mimocode. (Direct construction also leaves configFile /
+//     overlayDir empty, so this branch is doubly state-safe.)
+//   - Known global layer name (the live NewMimoCode write target, basename
+//     mimocode.json): return, lowest→highest —
+//       1. config.json + mimocode.json + mimocode.jsonc in o.path's own dir
+//          (the global getGlobal() layers, .jsonc winning);
+//       2. configFile (MIMOCODE_CONFIG), when set, ABOVE the global layers
+//          (bot PR #420 finding 1 — it merges on top, NOT a replacement);
+//       3. when overlayDir (MIMOCODE_CONFIG_DIR) is set, its mimocode.json +
+//          mimocode.jsonc appended LAST so the overlay wins per key.
+//
+// It never recomputes a directory from env/home beyond the configFile /
+// overlayDir already captured at construction; it stays inside dir(o.path) plus
+// those explicit paths.
 func (o *mimoCodeClient) readLayerFiles() []string {
-	return mimoCodeReadLayerFiles(o.path, o.overlayDir, o.fileOverride)
+	return mimoCodeReadLayerFiles(o.path, o.configFile, o.overlayDir)
 }
 
 // mimoCodeReadLayerFiles is the pure resolver behind
-// (*mimoCodeClient).readLayerFiles. See that method's doc for the rules.
-// fileOverride short-circuits to single-file mode regardless of basename; the
-// basename heuristic is the fallback for direct (scan/extract/test)
-// construction that leaves the flag false.
-func mimoCodeReadLayerFiles(path, overlayDir string, fileOverride bool) []string {
-	if fileOverride {
-		// Authoritative single-file mode: MIMOCODE_CONFIG pinned this file. Operate
-		// on it verbatim even when its basename is a known global layer name.
-		return []string{path}
-	}
+// (*mimoCodeClient).readLayerFiles. See that method's doc for the rules. The
+// basename heuristic is the state-safe single-file collapse for direct
+// (scan/extract/test) construction whose path is not a known global layer name.
+func mimoCodeReadLayerFiles(path, configFile, overlayDir string) []string {
 	base := filepath.Base(path)
 	if !mimoCodeIsGlobalLayerName(base) {
 		// Explicit override (temp/test path, basename not a global layer name):
 		// operate only on the supplied file; do NOT recompute the dir, pull
-		// siblings, or apply an overlay.
+		// siblings, the MIMOCODE_CONFIG file, or the overlay.
 		return []string{path}
 	}
 	dir := filepath.Dir(path)
-	files := make([]string, 0, len(mimoCodeGlobalLayerNames)+len(mimoCodeOverlayLayerNames))
+	files := make([]string, 0, len(mimoCodeGlobalLayerNames)+1+len(mimoCodeOverlayLayerNames))
 	for _, n := range mimoCodeGlobalLayerNames {
 		files = append(files, filepath.Join(dir, n))
 	}
+	// MIMOCODE_CONFIG file: a single FILE merged ABOVE the global layers.
+	if configFile != "" {
+		files = append(files, configFile)
+	}
+	// MIMOCODE_CONFIG_DIR overlay: ABOVE the MIMOCODE_CONFIG file.
 	if overlayDir != "" {
 		for _, n := range mimoCodeOverlayLayerNames {
 			files = append(files, filepath.Join(overlayDir, n))
@@ -403,8 +457,11 @@ func mimoCodeReadLayerFiles(path, overlayDir string, fileOverride bool) []string
 
 // mimoCodeIsGlobalLayerName reports whether base is one of the global-dir layer
 // file names (config.json / mimocode.json / mimocode.jsonc). Used to decide
-// whether a path is a default-resolved global layer (sibling merge applies) or
-// an explicit override / MIMOCODE_CONFIG file (single-file mode).
+// whether a supplied path is a default-resolved global layer (the full merge —
+// global siblings + the env-resolved MIMOCODE_CONFIG file / overlay / inline
+// content — applies) or a state-safe explicit override (a temp/test path whose
+// basename is not a global layer name → single-file read, no env-resolved
+// sources).
 func mimoCodeIsGlobalLayerName(base string) bool {
 	for _, n := range mimoCodeGlobalLayerNames {
 		if base == n {
@@ -415,70 +472,173 @@ func mimoCodeIsGlobalLayerName(base string) bool {
 }
 
 // ErrMimoCodeOverlayShadowsServer is returned by (*mimoCodeClient).AddEntry when
-// the MIMOCODE_CONFIG_DIR overlay already defines mcp.<Server>. The hub writes
-// only the lower-precedence global write target (WriteTarget); the overlay
-// merges on top and WINS, so the hub entry would never take effect. Rather than
-// silently report success while MiMoCode keeps using the overlay definition, the
-// adapter refuses the write and names the shadowing OverlayFile so the operator
-// can remove/rename that entry or unset MIMOCODE_CONFIG_DIR (bot PR #420 finding
-// 7). Writing into the overlay instead is rejected by design — Backup /
-// ConfigPath / demigrate are all anchored to the single global write target, so
-// a per-server target would orphan the backup and break the demigrate
-// round-trip — and deleting the operator-owned overlay entry is out of the hub's
-// write ownership.
+// a FILE-based read layer ABOVE the hub's global write target already defines
+// mcp.<Server>. The hub writes only the lowest writable global layer
+// (WriteTarget = mimocode.json); any higher layer merges on top and WINS, so the
+// hub entry would never take effect. The shadowing layer can be (highest→lowest
+// precedence): the MIMOCODE_CONFIG_DIR overlay, the MIMOCODE_CONFIG file, or the
+// global higher layer mimocode.jsonc. SourceLabel names which kind it is (for
+// the actionable message); SourceFile is the offending file path. Rather than
+// silently report success while MiMoCode keeps using the shadowing definition,
+// the adapter refuses the write (bot PR #420 findings 4+7). Writing into the
+// higher layer instead is rejected by design — Backup / ConfigPath / demigrate
+// are all anchored to the single global write target, so a per-layer target
+// would orphan the backup and break the demigrate round-trip — and editing the
+// operator-owned higher layer is out of the hub's write ownership.
+//
+// The inline MIMOCODE_CONFIG_CONTENT layer shadows too, but it has no file path;
+// that case uses the distinct ErrMimoCodeInlineContentShadowsServer below.
 type ErrMimoCodeOverlayShadowsServer struct {
 	Server      string
 	WriteTarget string
+	SourceLabel string // human label of the shadowing layer, e.g. "MIMOCODE_CONFIG_DIR overlay"
+	SourceFile  string // the offending file path
+	// OverlayFile is retained as an alias of SourceFile for backward
+	// compatibility with callers that named the overlay file directly.
 	OverlayFile string
 }
 
 func (e *ErrMimoCodeOverlayShadowsServer) Error() string {
-	return fmt.Sprintf("mimocode: server %q is already defined in the MIMOCODE_CONFIG_DIR overlay %q, which MiMoCode merges on top of the hub's write target %q and wins — the hub entry would have no effect; remove or rename mcp.%s in the overlay file, or unset MIMOCODE_CONFIG_DIR, then retry",
-		e.Server, e.OverlayFile, e.WriteTarget, e.Server)
+	return fmt.Sprintf("mimocode: server %q is already defined in the %s %q, which MiMoCode merges on top of the hub's write target %q and wins — the hub entry would have no effect; remove or rename mcp.%s there (or unset the relevant env var), then retry",
+		e.Server, e.SourceLabel, e.SourceFile, e.WriteTarget, e.Server)
 }
 
-// mimoCodeOverlayLayerFileDefining returns the highest-precedence overlay layer
-// file (mimocode.jsonc preferred over mimocode.json, mirroring the .jsonc-wins
-// order) under overlayDir that defines mcp.<name>, or "" when no overlay layer
-// defines it. It reads ONLY the overlayDir's own layer files (state-safe — never
-// recomputes a dir from env/home, stays inside the explicit overlayDir) using
-// the same JSONC-tolerant decode as the merged read. A parse error on a present
-// overlay layer propagates (a malformed overlay must not be silently treated as
-// "no shadow" — that would re-introduce the silent-false-success this guards).
-func mimoCodeOverlayLayerFileDefining(overlayDir, name string) (string, error) {
-	// Walk highest-precedence first so the returned file is the one whose
-	// definition actually wins the overlay merge.
-	for i := len(mimoCodeOverlayLayerNames) - 1; i >= 0; i-- {
-		f := filepath.Join(overlayDir, mimoCodeOverlayLayerNames[i])
-		data, err := readRawConfig(f)
+// ErrMimoCodeInlineContentShadowsServer is returned by AddEntry when the inline
+// MIMOCODE_CONFIG_CONTENT layer already defines mcp.<Server>. Distinct from the
+// file-based shadow error because there is NO file to name — conflating it into
+// the file error would force a misleading empty/sentinel file path. The operator
+// must edit the env var, not a file.
+type ErrMimoCodeInlineContentShadowsServer struct {
+	Server      string
+	WriteTarget string
+}
+
+func (e *ErrMimoCodeInlineContentShadowsServer) Error() string {
+	return fmt.Sprintf("mimocode: server %q is already defined in MIMOCODE_CONFIG_CONTENT (the inline config string), which MiMoCode merges on top of the hub's write target %q and wins — the hub entry would have no effect; remove mcp.%s from MIMOCODE_CONFIG_CONTENT, or unset that env var, then retry",
+		e.Server, e.WriteTarget, e.Server)
+}
+
+// mimoCodeShadowSource identifies the single highest-precedence READ layer above
+// the hub's write target that defines mcp.<name>. Kind is "" when nothing
+// shadows; "inline" for the MIMOCODE_CONFIG_CONTENT layer (File is ""); "file"
+// for any file layer (File names it, Label describes it).
+type mimoCodeShadowSource struct {
+	Kind  string // "", "inline", or "file"
+	Label string // human label for the "file" kind
+	File  string // file path for the "file" kind
+}
+
+// mimoCodeHigherLayerDefining walks every READ layer ABOVE the hub's global
+// write target (mimocode.json) from HIGHEST precedence DOWN and returns the
+// FIRST that defines mcp.<name> — i.e. the layer that actually wins the merge,
+// the one the operator must edit to un-shadow. Order (highest→lowest):
+//
+//  1. MIMOCODE_CONFIG_CONTENT inline string
+//  2. MIMOCODE_CONFIG_DIR overlay: mimocode.jsonc then mimocode.json
+//  3. MIMOCODE_CONFIG file
+//  4. global higher layer mimocode.jsonc (sibling of the write target)
+//
+// config.json and the write-target mimocode.json itself are BELOW the write
+// target / are the write target, so they cannot shadow and are not checked. It
+// reads ONLY the explicit configFile / overlayDir / inlineContent captured at
+// construction plus the write target's own dir (state-safe — never recomputes a
+// dir from env/home). A parse error on a present layer propagates (a malformed
+// higher layer must not be silently treated as "no shadow" — that would
+// re-introduce the silent-false-success this guards).
+func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShadowSource, error) {
+	// 1. Inline content (highest).
+	if o.inlineContent != "" {
+		defined, err := mimoCodeInlineDefines(o.inlineContent, name)
 		if err != nil {
-			return "", err
+			return mimoCodeShadowSource{}, err
 		}
-		if len(data) == 0 {
-			continue
-		}
-		m, err := parseJSONCBytes(data)
-		if err != nil {
-			return "", fmt.Errorf("parse %s: %w", f, err)
-		}
-		servers, _ := m[mimoCodeMCPKey].(map[string]any)
-		if servers == nil {
-			continue
-		}
-		if _, present := servers[name]; present {
-			return f, nil
+		if defined {
+			return mimoCodeShadowSource{Kind: "inline"}, nil
 		}
 	}
-	return "", nil
+	// 2. MIMOCODE_CONFIG_DIR overlay (mimocode.jsonc preferred over mimocode.json).
+	if o.overlayDir != "" {
+		for i := len(mimoCodeOverlayLayerNames) - 1; i >= 0; i-- {
+			f := filepath.Join(o.overlayDir, mimoCodeOverlayLayerNames[i])
+			defined, err := mimoCodeFileDefines(f, name)
+			if err != nil {
+				return mimoCodeShadowSource{}, err
+			}
+			if defined {
+				return mimoCodeShadowSource{Kind: "file", Label: "MIMOCODE_CONFIG_DIR overlay", File: f}, nil
+			}
+		}
+	}
+	// 3. MIMOCODE_CONFIG file.
+	if o.configFile != "" {
+		defined, err := mimoCodeFileDefines(o.configFile, name)
+		if err != nil {
+			return mimoCodeShadowSource{}, err
+		}
+		if defined {
+			return mimoCodeShadowSource{Kind: "file", Label: "MIMOCODE_CONFIG file", File: o.configFile}, nil
+		}
+	}
+	// 4. global higher layer mimocode.jsonc (sibling of the write target).
+	jsonc := filepath.Join(filepath.Dir(o.path), "mimocode.jsonc")
+	if jsonc != o.path { // never treat the write target itself as a shadow
+		defined, err := mimoCodeFileDefines(jsonc, name)
+		if err != nil {
+			return mimoCodeShadowSource{}, err
+		}
+		if defined {
+			return mimoCodeShadowSource{Kind: "file", Label: "global higher layer", File: jsonc}, nil
+		}
+	}
+	return mimoCodeShadowSource{}, nil
 }
 
-// readMergedLayers reads every READ layer file and DEEP-MERGES them
-// lowest-first (config.json base, mimocode.json over it, mimocode.jsonc over
-// that, then the MIMOCODE_CONFIG_DIR overlay's mimocode.json/.jsonc on top) so
-// an entry present in any layer is visible and the highest layer wins per key.
-// Missing layers are skipped (treated as empty); a parse error on a present
-// layer propagates. JSONC (comments + trailing commas) is tolerated via the
-// shared parseJSONCBytes helper.
+// mimoCodeFileDefines reports whether the JSONC file at path defines mcp.<name>.
+// A missing/empty file → false; a parse error on present bytes propagates.
+func mimoCodeFileDefines(path, name string) (bool, error) {
+	data, err := readRawConfig(path)
+	if err != nil {
+		return false, err
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	m, err := parseJSONCBytes(data)
+	if err != nil {
+		return false, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return mimoCodeMapDefines(m, name), nil
+}
+
+// mimoCodeInlineDefines reports whether the inline JSONC string defines
+// mcp.<name>. A parse error propagates.
+func mimoCodeInlineDefines(content, name string) (bool, error) {
+	m, err := parseJSONCBytes([]byte(content))
+	if err != nil {
+		return false, fmt.Errorf("parse MIMOCODE_CONFIG_CONTENT: %w", err)
+	}
+	return mimoCodeMapDefines(m, name), nil
+}
+
+// mimoCodeMapDefines reports whether a parsed config map carries mcp.<name>.
+func mimoCodeMapDefines(m map[string]any, name string) bool {
+	servers, _ := m[mimoCodeMCPKey].(map[string]any)
+	if servers == nil {
+		return false
+	}
+	_, present := servers[name]
+	return present
+}
+
+// readMergedLayers reads every READ layer and DEEP-MERGES them lowest-first
+// (config.json base, mimocode.json over it, mimocode.jsonc over that, then the
+// MIMOCODE_CONFIG file, then the MIMOCODE_CONFIG_DIR overlay's
+// mimocode.json/.jsonc, and finally the MIMOCODE_CONFIG_CONTENT inline string as
+// the TOP layer) so an entry present in any layer is visible and the highest
+// layer wins per key. This is the verified config.ts loadInstanceState order.
+// Missing file layers are skipped (treated as empty); a parse error on a present
+// layer (file OR inline) propagates. JSONC (comments + trailing commas) is
+// tolerated via the shared parseJSONCBytes helper.
 func (o *mimoCodeClient) readMergedLayers() (map[string]any, error) {
 	merged := map[string]any{}
 	for _, f := range o.readLayerFiles() {
@@ -492,6 +652,19 @@ func (o *mimoCodeClient) readMergedLayers() (map[string]any, error) {
 		m, err := parseJSONCBytes(data)
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", f, err)
+		}
+		merged = mimoCodeDeepMerge(merged, m)
+	}
+	// MIMOCODE_CONFIG_CONTENT inline layer — a JSONC STRING, not a file path, so
+	// it merges AFTER (above) every file layer (bot PR #420 finding 4). Empty
+	// when unset OR in the state-safe single-file mode (direct/test construction
+	// leaves o.inlineContent empty). A parse error on a present inline string
+	// propagates — a malformed MIMOCODE_CONFIG_CONTENT must not be silently
+	// dropped (that would re-introduce a silent-wrong-merge).
+	if o.inlineContent != "" {
+		m, err := parseJSONCBytes([]byte(o.inlineContent))
+		if err != nil {
+			return nil, fmt.Errorf("parse MIMOCODE_CONFIG_CONTENT: %w", err)
 		}
 		merged = mimoCodeDeepMerge(merged, m)
 	}
@@ -535,46 +708,53 @@ func (o *mimoCodeClient) readJSON() (map[string]any, error) {
 // decode as the adapter, keeping the merge a single owner (no parallel
 // reimplementation in scan.go) and keeping the shared clients types untouched.
 //
-// The MIMOCODE_CONFIG_DIR overlay is resolved from the live environment when
-// the supplied path is a default-resolved global layer (so a scan/extract sees
-// the same overlay the adapter does); an explicit/temp override path stays
-// single-file (state-safe — never reaches the real config dir or the overlay).
-// When MIMOCODE_CONFIG pins THIS exact path (a verbatim file override, bot PR
-// #420 finding 1), single-file mode is forced via the fileOverride flag EVEN
-// when the file's basename is a known global layer name — so a scan/extract sees
-// the same single-file view the adapter writes, never merging siblings or the
-// overlay. Returns an empty (non-nil) map when no layer file exists; a parse
-// error on a present file propagates.
+// The MIMOCODE_CONFIG file, MIMOCODE_CONFIG_DIR overlay, and
+// MIMOCODE_CONFIG_CONTENT inline layer are resolved from the live environment
+// when the supplied path is a default-resolved global layer (so a scan/extract
+// sees the same merged view the adapter does); an explicit/temp override path
+// stays single-file (state-safe — never reaches the real config dir, the
+// MIMOCODE_CONFIG file, the overlay, or the inline content). Returns an empty
+// (non-nil) map when no layer exists; a parse error on a present layer
+// propagates.
 func MimoCodeMergedConfig(path string) (map[string]any, error) {
 	return mimoCodeClientForScanPath(path).readMergedLayers()
 }
 
-// MimoCodeReadLayerPaths returns the resolved READ-layer file paths for a
+// MimoCodeReadLayerPaths returns the resolved READ-layer FILE paths for a
 // scan-supplied config path, using the SAME layer resolution as
 // MimoCodeMergedConfig (config.json + mimocode.json + mimocode.jsonc in the
-// path's own dir, plus the env-resolved MIMOCODE_CONFIG_DIR overlay; or just the
-// single file for a MIMOCODE_CONFIG / explicit override). Exported so
-// internal/api/scan.go can decide MiMoCode's config PRESENCE from the actual
-// layer files rather than only the (possibly absent) write target — a profile
-// whose servers live only in a lower config.json layer or in the overlay must
-// still be scanned (bot PR #420 finding 2). The returned paths are candidates;
-// the caller stats them. No file is read here.
+// path's own dir, plus the env-resolved MIMOCODE_CONFIG file and
+// MIMOCODE_CONFIG_DIR overlay; or just the single file for an explicit/temp
+// override). Exported so internal/api/scan.go can decide MiMoCode's config
+// PRESENCE from the actual layer files rather than only the (possibly absent)
+// write target — a profile whose servers live only in a lower config.json layer,
+// the MIMOCODE_CONFIG file, or the overlay must still be scanned (bot PR #420
+// finding 2). The returned paths are candidates; the caller stats them. No file
+// is read here. NOTE: the MIMOCODE_CONFIG_CONTENT inline layer has no file path,
+// so it does not appear here — a host whose ONLY config is inline content has no
+// presence file to stat, which is correct (there is no file to scan).
 func MimoCodeReadLayerPaths(path string) []string {
 	return mimoCodeClientForScanPath(path).readLayerFiles()
 }
 
 // mimoCodeClientForScanPath builds the read-only client a scan/extract entry
-// point uses for a supplied config path, resolving file-override (MIMOCODE_CONFIG
-// pins this exact path) and the MIMOCODE_CONFIG_DIR overlay from the live
-// environment. Single owner of the scan-side path→resolution mapping so the
-// merged-read and the layer-path probe never diverge.
+// point uses for a supplied config path, resolving the MIMOCODE_CONFIG file, the
+// MIMOCODE_CONFIG_DIR overlay, and the MIMOCODE_CONFIG_CONTENT inline content
+// from the live environment — but ONLY when the path is a known global layer
+// name (so a temp/test path stays state-safe single-file). Single owner of the
+// scan-side path→resolution mapping so the merged-read and the layer-path probe
+// never diverge.
 func mimoCodeClientForScanPath(path string) *mimoCodeClient {
-	fileOverride := absoluteEnv("MIMOCODE_CONFIG") == path && path != ""
-	overlay := ""
-	if !fileOverride && mimoCodeIsGlobalLayerName(filepath.Base(path)) {
-		overlay = absoluteEnv("MIMOCODE_CONFIG_DIR")
+	if !mimoCodeIsGlobalLayerName(filepath.Base(path)) {
+		// Explicit/temp override — state-safe single-file, no env-resolved layers.
+		return &mimoCodeClient{path: path}
 	}
-	return &mimoCodeClient{path: path, overlayDir: overlay, fileOverride: fileOverride}
+	return &mimoCodeClient{
+		path:          path,
+		configFile:    absoluteEnv("MIMOCODE_CONFIG"),
+		overlayDir:    absoluteEnv("MIMOCODE_CONFIG_DIR"),
+		inlineContent: os.Getenv("MIMOCODE_CONFIG_CONTENT"),
+	}
 }
 
 // setMember sets mcp.<name> = value on the WRITE-target file (o.path),
@@ -616,27 +796,30 @@ func (o *mimoCodeClient) AddEntry(entry MCPEntry) error {
 	if entry.Raw != nil {
 		return o.setMember(entry.Name, entry.Raw)
 	}
-	// Overlay-shadow guard (normal install path only, bot PR #420 finding 7).
-	// The hub writes ONLY the global write target (o.path); the
-	// MIMOCODE_CONFIG_DIR overlay merges ON TOP and WINS per key. So when the
-	// overlay ALREADY defines mcp.<name>, a global write would "succeed" yet
-	// MiMoCode would keep resolving the server from the shadowing overlay — a
-	// silent false success. We cannot redirect the write into the overlay
-	// (Backup/ConfigPath/demigrate are anchored to the single o.path; a per-
-	// server target would orphan the backup and break the demigrate round-trip),
-	// and we must not delete the operator-owned overlay entry. So we FAIL LOUD
-	// with an actionable typed error naming the shadowing file — converting a
-	// silent wrong-state into a visible install failure the operator can fix
-	// (remove/rename the overlay's mcp.<name>, or unset MIMOCODE_CONFIG_DIR).
-	if o.overlayDir != "" {
-		if shadow, err := mimoCodeOverlayLayerFileDefining(o.overlayDir, entry.Name); err != nil {
-			return err
-		} else if shadow != "" {
-			return &ErrMimoCodeOverlayShadowsServer{
-				Server:      entry.Name,
-				WriteTarget: o.path,
-				OverlayFile: shadow,
-			}
+	// Higher-layer-shadow guard (normal install path only, bot PR #420 findings
+	// 4+7). The hub writes ONLY the global write target (o.path = mimocode.json);
+	// EVERY read layer above it merges ON TOP and WINS per key: the global
+	// mimocode.jsonc, the MIMOCODE_CONFIG file, the MIMOCODE_CONFIG_DIR overlay,
+	// and the MIMOCODE_CONFIG_CONTENT inline content. So when ANY of them already
+	// defines mcp.<name>, a global write would "succeed" yet MiMoCode would keep
+	// resolving the server from the shadowing layer — a silent false success. We
+	// cannot redirect the write into the higher layer (Backup/ConfigPath/demigrate
+	// are anchored to the single o.path; a per-layer target would orphan the
+	// backup and break the demigrate round-trip), and we must not edit the
+	// operator-owned higher layer. So we FAIL LOUD with an actionable typed error
+	// naming the highest-precedence shadowing source — converting a silent
+	// wrong-state into a visible install failure the operator can fix.
+	if shadow, err := o.mimoCodeHigherLayerDefining(entry.Name); err != nil {
+		return err
+	} else if shadow.Kind == "inline" {
+		return &ErrMimoCodeInlineContentShadowsServer{Server: entry.Name, WriteTarget: o.path}
+	} else if shadow.Kind == "file" {
+		return &ErrMimoCodeOverlayShadowsServer{
+			Server:      entry.Name,
+			WriteTarget: o.path,
+			SourceLabel: shadow.Label,
+			SourceFile:  shadow.File,
+			OverlayFile: shadow.File,
 		}
 	}
 	serverEntry := map[string]any{
@@ -658,9 +841,20 @@ func (o *mimoCodeClient) RemoveEntry(name string) error {
 	return o.deleteMember(name)
 }
 
+// mimoCodeHubRemoteShapeKeys are the ONLY keys the hub's AddEntry remote-HTTP
+// shape ever writes: `type`, `url`, `enabled`, and the optional `headers`. A
+// remote entry whose key set is a subset of these is faithfully representable as
+// a lean {URL,Headers} MCPEntry (so GetEntry can leave Raw nil and the normal
+// URL round-trip applies). A remote entry carrying ANY other key (oauth, timeout,
+// or any MiMoCode MCP-schema field beyond this set) is NOT — see GetEntry.
+var mimoCodeHubRemoteShapeKeys = map[string]bool{
+	"type": true, "url": true, "enabled": true, "headers": true,
+}
+
 // GetEntry reads mcp.<name> from the merged layers and projects it onto MCPEntry.
 //
-//   - A remote/URL entry → {Name, URL, Headers}, Raw left nil (the normal
+//   - A clean hub-shaped ENABLED remote entry (only type/url/enabled/headers,
+//     enabled not false) → {Name, URL, Headers}, Raw left nil (the normal
 //     hub-managed / user-remote shape; rollback restores it via the URL path).
 //   - A URL-less LOCAL entry (type:"local", a `command` ARRAY, NO `url`) →
 //     {Name, Raw: <the raw entry map>}, URL left empty. The lean MCPEntry has
@@ -670,6 +864,16 @@ func (o *mimoCodeClient) RemoveEntry(name string) error {
 //     RemoveEntry. Returning nil for a local entry would make the nil-prior
 //     else-branch DELETE the operator's original; returning {Raw} makes
 //     AddEntry(*prior) restore it verbatim instead (bot PR #420 P1).
+//   - A DISABLED remote entry (enabled:false) → {Name, Raw}, URL empty (bot PR
+//     #420 finding 5 — the lean path hardcodes enabled:true, which would
+//     re-enable it on rollback).
+//   - A user-authored remote entry carrying EXTRA fields beyond the hub shape
+//     (oauth, timeout, or any other MiMoCode MCP-schema key) → {Name, Raw}, URL
+//     empty (bot PR #420 finding 3). The lean {URL,Headers} snapshot is LOSSY
+//     for those fields, so a GetEntry→AddEntry(*prior) rollback would rewrite
+//     the entry as the bare {type:remote,url,enabled:true,headers} shape and
+//     drop oauth/timeout. Carrying Raw makes the rollback restore the verbatim
+//     shape (Raw wins in AddEntry).
 //
 // A missing entry returns (nil, nil).
 func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {
@@ -697,16 +901,38 @@ func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {
 	// enabled:true, so a GetEntry→AddEntry(*prior) rollback would silently
 	// RE-ENABLE a server the operator had disabled (bot PR #420 finding 5).
 	// Carry the verbatim entry in Raw so the rollback writes it back byte-shaped
-	// (Raw wins in AddEntry), preserving enabled:false. An enabled / missing-flag
-	// URL entry stays on the lean {URL,Headers} path (Raw nil) so the normal
-	// hub-install/restore polarity and every existing URL round-trip are
-	// unchanged.
+	// (Raw wins in AddEntry), preserving enabled:false.
 	if enabled, present := raw["enabled"]; present {
 		if b, ok := enabled.(bool); ok && !b {
 			return &MCPEntry{Name: name, Raw: raw}, nil
 		}
 	}
+	// A user-authored remote entry carrying EXTRA fields beyond the hub-written
+	// shape (type/url/enabled/headers) — e.g. oauth, timeout (accepted by
+	// MiMoCode's MCP schema) — is ALSO not faithfully representable by the lean
+	// {URL,Headers} MCPEntry: a GetEntry→AddEntry(*prior) rollback would re-emit
+	// only the bare remote shape and DROP those fields (bot PR #420 finding 3).
+	// Carry the verbatim entry in Raw so the rollback restores it byte-shaped. A
+	// clean hub-shaped remote entry (key set ⊆ {type,url,enabled,headers}) stays
+	// on the lean {URL,Headers} path (Raw nil) so the normal hub-install/restore
+	// polarity and every existing URL round-trip are unchanged.
+	if mimoCodeRemoteHasExtraFields(raw) {
+		return &MCPEntry{Name: name, Raw: raw}, nil
+	}
 	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers")}, nil
+}
+
+// mimoCodeRemoteHasExtraFields reports whether a remote entry map carries any
+// key beyond the clean hub-written remote shape (type/url/enabled/headers). Such
+// an entry is user-authored with fields the lean {URL,Headers} MCPEntry cannot
+// represent, so GetEntry must snapshot it via Raw for a verbatim rollback.
+func mimoCodeRemoteHasExtraFields(raw map[string]any) bool {
+	for k := range raw {
+		if !mimoCodeHubRemoteShapeKeys[k] {
+			return true
+		}
+	}
+	return false
 }
 
 func (o *mimoCodeClient) LatestBackupPath() (string, bool, error) {

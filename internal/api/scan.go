@@ -355,6 +355,29 @@ func classifyMissingClientConfig(path string) string {
 	return "missing-init-possible"
 }
 
+// isMissingPresenceState reports whether a probeClientConfigPresence verdict is
+// one of the ABSENT (missing) states — the config file does not exist yet. The
+// complete set classifyMissingClientConfig can return is "missing",
+// "missing-init-possible", "missing-init-creatable", and
+// "missing-init-blocked-symlink". The NON-missing verdicts are "ok" (the file
+// is a regular file) and the config-FAULT states "error" (non-regular target:
+// directory / FIFO / device) and "error-symlink" (refused / dangling symlink).
+//
+// Used only by the MiMoCode lower-layer presence promotion (ScanFrom): a
+// lower-layer file may upgrade an ABSENT write-target verdict to "ok", but must
+// NEVER upgrade a config-FAULT verdict — that would mask a bad write target and
+// render a green cell over a path Apply/backup cannot write to (bot PR #420
+// finding 2 refinement). Keying on the explicit missing-state set (rather than
+// `!= "ok"`) keeps the promotion gated to the absent case only.
+func isMissingPresenceState(state string) bool {
+	switch state {
+	case "missing", "missing-init-possible", "missing-init-creatable", "missing-init-blocked-symlink":
+		return true
+	default:
+		return false
+	}
+}
+
 // classifyAbsentParentCreatable classifies a config-file parent dir that
 // is absent (clean os.IsNotExist). It mirrors the safety contract of the
 // secure parent-create (SecureCreateClientConfigParentDir) WITHOUT
@@ -561,15 +584,26 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	paths := opts.effectiveConfigPaths()
 	// MiMoCode multi-layer presence (bot PR #420 finding 2): the generic probe
 	// above stats ONLY the registered scan path (mimocode's WRITE target —
-	// mimocode.json/.jsonc). MiMoCode deep-merges lower layers (config.json) and
-	// the MIMOCODE_CONFIG_DIR overlay, so a profile whose servers live ONLY in a
-	// lower/overlay layer (write target absent) would probe "missing" → the
-	// scanIfReadable gate would SKIP scanMimoCode → the operator's real entries
-	// vanish from the matrix. Promote presence to "ok" when ANY resolved read
-	// layer exists as a regular file (so the row is both scanned and shown). Only
-	// upgrade a not-ok state; never downgrade an "ok"/"error"/symlink verdict the
-	// generic probe already produced for the write target itself.
-	if mp := paths["mimocode"]; mp != "" && presence["mimocode"] != "ok" {
+	// mimocode.json). MiMoCode deep-merges lower layers (config.json), the
+	// MIMOCODE_CONFIG file, and the MIMOCODE_CONFIG_DIR overlay, so a profile
+	// whose servers live ONLY in a lower/overlay layer (write target absent)
+	// would probe a MISSING state → the scanIfReadable gate would SKIP
+	// scanMimoCode → the operator's real entries vanish from the matrix. Promote
+	// presence to "ok" when ANY resolved read layer exists as a regular file (so
+	// the row is both scanned and shown).
+	//
+	// SCOPE OF THE PROMOTION (bot PR #420 finding 2 refinement): only a MISSING
+	// (absent) write-target verdict may be promoted. If the generic probe already
+	// classified the write target itself as a config ERROR — "error" (the path is
+	// a directory / FIFO / device) or "error-symlink" (a refused / dangling
+	// symlink) — that is a real write-target fault Apply/backup must not proceed
+	// against, and the GUI must keep rendering the config-error cell. Promoting
+	// THAT to "ok" because a SEPARATE lower layer happens to exist would mask the
+	// fault: the row would render green, the operator clicks Apply, and the
+	// hardened write fails against the bad write target. So the promotion is
+	// gated on isMissingPresenceState — it upgrades only the absent states
+	// (missing / missing-init-*), never an error/error-symlink/ok verdict.
+	if mp := paths["mimocode"]; mp != "" && isMissingPresenceState(presence["mimocode"]) {
 		for _, lf := range clients.MimoCodeReadLayerPaths(mp) {
 			if st, err := os.Stat(lf); err == nil && st.Mode().IsRegular() {
 				presence["mimocode"] = "ok"
