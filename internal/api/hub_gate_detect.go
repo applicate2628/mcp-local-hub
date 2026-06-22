@@ -39,7 +39,17 @@ import (
 //   - its adapter constructs on this host (clients.AllClients drops
 //     unconstructable adapters), AND
 //   - its config file exists (Exists()), AND
-//   - GetEntry("mcphub-hub") returns a non-nil entry with no error.
+//   - GetEntry("mcphub-hub") returns a non-nil entry with no error, AND
+//   - that entry is NOT disabled (entry.Disabled == false).
+//
+// The disabled exclusion (bot PR #420 finding 5): a multi-layer adapter
+// (MiMoCode) can return a non-nil aggregate entry that is in a DISABLED state
+// (enabled:false) the client will NOT load. A disabled aggregate orphans no live
+// URL, so a hub port reset against it would break nothing — counting it as
+// gate-ON would FALSELY block `mcphub gui --reset-port`. GetEntry stamps
+// MCPEntry.Disabled for such an entry (additive, default false), so this gate
+// skips it while read-membership callers still see the entry. This mirrors the
+// scan path (shapeMimoCodeEntry classifies enabled:false as Transport "absent").
 //
 // Read errors per client (corrupt config, DACL violation) are
 // SKIPPED, not fatal: this is a best-effort advisory probe whose only
@@ -70,6 +80,12 @@ func GatedOnClients() []string {
 		entry, err := c.GetEntry(hubReconcileAggregateEntryName)
 		if err != nil || entry == nil {
 			// Skip on read error (best-effort) or absent entry.
+			continue
+		}
+		if entry.Disabled {
+			// A disabled aggregate (enabled:false) is one the client never loads,
+			// so it orphans no live URL on a hub port reset — not gate-ON (bot PR
+			// #420 finding 5).
 			continue
 		}
 		gated = append(gated, name)

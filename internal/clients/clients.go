@@ -85,6 +85,26 @@ type MCPEntry struct {
 	// (install.go, register.go) are the ONLY consumers; the read-membership
 	// GetEntry callers ignore it.
 	SourceBelowWriteTarget bool
+
+	// Disabled, when true, marks that this entry is present in the client config
+	// but in a DISABLED state the client will NOT load (currently only MiMoCode's
+	// `enabled:false`). It exists so a read-membership consumer can keep SEEING
+	// the entry (GetEntry returns a non-nil entry so discovery/idempotency/rollback
+	// callers behave) while a GATING consumer that asks "is this an ACTIVE entry
+	// the client actually loads" can exclude it. The only gating consumer today is
+	// api.GatedOnClients (the `mcphub gui --reset-port` footgun guard): a DISABLED
+	// `mcphub-hub` aggregate must NOT count as gate-on, because the client never
+	// loads it, so resetting the hub port would orphan nothing — blocking the
+	// reset on a disabled aggregate is a false positive (bot PR #420 finding 5).
+	// This mirrors the scan path's shapeMimoCodeEntry, which classifies an
+	// enabled:false entry as Transport "absent" (absent for gating).
+	//
+	// CONTRACT: Disabled is ADDITIVE and defaults FALSE = "active / loaded" — the
+	// historical behavior of EVERY adapter. Only MiMoCode's GetEntry sets it true
+	// (for an enabled:false projected entry); every other adapter leaves it zero,
+	// so their gating behavior is byte-unchanged. GatedOnClients is the ONLY
+	// consumer; every other GetEntry caller ignores it.
+	Disabled bool
 }
 
 // Client is the OS-/format-abstracted interface for a single MCP client config file.

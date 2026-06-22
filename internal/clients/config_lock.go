@@ -70,7 +70,7 @@ func withConfigLock(configPath string, fn func() error) error {
 	// Guarded (IsNotExist only) so the common dir-exists case adds no syscall to
 	// the AddEntry/RemoveEntry hot path and is byte-identical to before. Runs under
 	// the per-path mutex already held above, so intra-process racers on a new path
-	// are serialized (MkdirAll is idempotent for the cross-process case). Mode
+	// are serialized (the create is idempotent for the cross-process case). Mode
 	// 0o700 (NOT 0o755): this is a fresh mcphub-created config dir with no operator
 	// mode to preserve, and the secure-write parent-dir gate rejects group/world
 	// bits on POSIX — a 0o755 dir would make a subsequent strict-mode
@@ -78,9 +78,21 @@ func withConfigLock(configPath string, fn func() error) error {
 	// dir just created. The FILE write itself stays hardened by the unchanged
 	// WriteConfigFile / SecureWriteClientConfig pipeline (handle-relative DACL/mode,
 	// atomic rename, symlink refusal); this governs only the parent dir.
+	//
+	// SECURITY (bot PR #420 finding 1, r16 P1 regression fix): the create goes
+	// through SecureCreateParentDir, NOT a blind os.MkdirAll. In production
+	// internal/api/init() swaps SecureCreateParentDir to
+	// api.SecureCreateParentDirForConfigLock, which walks the missing parent chain
+	// COMPONENT-BY-COMPONENT refusing any symlink / reparse-point component and
+	// anchored at the nearest existing ancestor. A blind os.MkdirAll FOLLOWS a
+	// symlinked prefix and could create the write-target parent OUTSIDE the
+	// intended path, after which the hardened SecureWriteClientConfig would publish
+	// token-bearing client config through that redirected parent — the regression
+	// this closes. The test default (fallbackSecureCreateParentDir) stays a plain
+	// MkdirAll, which is safe only in the t.TempDir() sandboxes adapter tests use.
 	if dir := filepath.Dir(configPath); dir != "" {
 		if _, err := os.Stat(dir); err != nil && os.IsNotExist(err) {
-			if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
+			if mkErr := SecureCreateParentDir(dir); mkErr != nil {
 				return fmt.Errorf("config lock %s: create parent dir: %w", configPath+".lock", mkErr)
 			}
 		}

@@ -676,6 +676,27 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 			presence["mimocode"] = "ok"
 		}
 	}
+	// NON-REGULAR ACTIVE LAYER guard (bot PR #420 finding 4). The promotion above
+	// upgrades to "ok" on the FIRST regular layer it finds, and the generic probe
+	// classifies ONLY the write target — so a profile whose write target (or one
+	// promoting layer) is a regular file but ANOTHER active layer (config.json, the
+	// MIMOCODE_CONFIG file, or the overlay mimocode.json/.jsonc) is a
+	// directory/FIFO/non-regular would stay "ok". scanMimoCode then reads ALL
+	// layers via MimoCodeMergedConfig → readRawConfig returns a non-regular read
+	// error → ScanFrom fails the ENTIRE multi-client scan with `mimocode: ...`. To
+	// keep one bad mimo layer from taking the whole scan down, downgrade an
+	// otherwise-"ok" mimocode presence to the per-client config-error "error" state
+	// when ANY existing active layer is non-regular/unreadable — the same per-client
+	// config-error the write-target probe surfaces, rendering a loud cell and
+	// SKIPPING scanMimoCode (scanIfReadable gates on "ok") instead of aborting. Only
+	// an "ok" verdict is downgraded: a genuinely absent/missing verdict is left
+	// untouched (no scanMimoCode would run there anyway), and an already-"error"
+	// verdict is unchanged.
+	if mp := paths["mimocode"]; mp != "" && presence["mimocode"] == "ok" {
+		if _, bad := clients.MimoCodeNonRegularActiveLayer(mp); bad {
+			presence["mimocode"] = "error"
+		}
+	}
 	scanIfReadable := func(name string) bool {
 		// "ok" is the only state for which an adapter read is
 		// guaranteed to find a regular file. "missing" /

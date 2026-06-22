@@ -46,6 +46,7 @@ import (
 func init() {
 	clients.WriteConfigFile = secureWriteWithOperatorOpt
 	clients.CreateConfigFileIfMissing = secureCreateClientConfigIfMissingWithOperatorOpt
+	clients.SecureCreateParentDir = SecureCreateParentDirForConfigLock
 }
 
 // secureCreateClientConfigIfMissingWithOperatorOpt is the
@@ -132,6 +133,60 @@ func SecureCreateClientConfigParentDirWithOperatorOpt(configPath string) error {
 		_ = logErr
 	}
 	return secureCreateClientConfigParentDirSkipParentGate(configPath)
+}
+
+// SecureCreateParentDirForConfigLock securely creates the missing parent
+// directory of a client-config WRITE TARGET for the shared withConfigLock
+// chokepoint (internal/clients/config_lock.go), applying the SAME
+// operator-opt-in policy as the file create: try the hardened pipeline
+// (nearest-existing-ancestor DACL/mode gate ENFORCED) first; on
+// ErrSecureWriteParentInsecure, return the strict error when strict mode is
+// active, else re-run with the anchor gate bypassed and log a warn event.
+// Created directories are owner-only and the symlink / reparse-point refusals
+// apply on BOTH lanes.
+//
+// DIFFERENCE from SecureCreateClientConfigParentDirWithOperatorOpt (the G17
+// Init-button parent creator): that creator REFUSES any path outside the user
+// home (a blast-radius bound for the GUI affordance). This one does NOT —
+// withConfigLock is SHARED across every client adapter, and a legitimate write
+// target can live OUTSIDE the home: MiMoCode's global dir is
+// $MIMOCODE_HOME/config (MIMOCODE_HOME may be any absolute path) or
+// $XDG_CONFIG_HOME/mimocode (see internal/clients/mimocode.go
+// resolveMimoCodeGlobalDir). A home-bounded creator wired here would convert
+// the bot PR #420 finding 1 P1 into an install-breaking regression for
+// outside-home targets. The LOAD-BEARING security property — refuse a
+// symlink/reparse-point component, create each real component fresh owner-only,
+// descend fd/handle-relative (TOCTOU-safe) — is preserved; only the
+// home-containment BLAST-RADIUS bound is dropped, anchoring instead at the
+// nearest existing ancestor. (bot PR #420 finding 1.)
+//
+// `dir` is the parent directory itself (filepath.Dir(configPath) at the call
+// site), so this creates `dir` and any missing ancestors, not dir's parent.
+func SecureCreateParentDirForConfigLock(dir string) error {
+	err := secureCreateParentDirAnywhereImpl(dir, false /*skipParentGate*/)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, ErrSecureWriteParentInsecure) {
+		return err
+	}
+	if operatorRequiresSingleUserHome() {
+		return fmt.Errorf("%w; strict mode is active (via %s, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced for config-lock parent creation (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
+			err, RequireSingleUserHomeEnv)
+	}
+	// Default-relax lane: nearest-ancestor gate rejected but operator did not opt
+	// into strict mode. Re-run with the anchor gate skipped; created dirs stay
+	// owner-only (mode 0700 / allowlist DACL) and the symlink / reparse-point
+	// refusals still apply.
+	if logErr := LogHubMcpEvent("warn", "client-write-unhardened-fallback", map[string]any{
+		"path":   dir,
+		"reason": "default-relax-on-solo-host (config-lock-parent-dir)",
+		"origin": "SecureCreateParentDirForConfigLock",
+		"err":    err.Error(),
+	}); logErr != nil {
+		_ = logErr
+	}
+	return secureCreateParentDirAnywhereImpl(dir, true /*skipParentGate*/)
 }
 
 // AllowUnhardenedClientWriteEnv is a legacy operator-explicit opt-in

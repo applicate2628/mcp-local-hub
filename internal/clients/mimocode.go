@@ -632,7 +632,8 @@ func (o *mimoCodeClient) ConfigPath() string { return o.path }
 func (o *mimoCodeClient) IsRelayStdio() bool { return false }
 
 // Exists treats MiMoCode as installed when ANY of: a resolved READ layer FILE is
-// present; a PARSEABLE MIMOCODE_CONFIG_CONTENT inline layer is set; OR the
+// present; a PARSEABLE MIMOCODE_CONFIG_CONTENT inline layer is set; a PARSEABLE
+// ~/.claude.json mcpServers import yields at least one importable entry; OR the
 // write-target's config directory exists — mirroring the
 // opencode/cursor/vscode/kiro "directory means installed" heuristic so an
 // operator who has MiMoCode installed but no MCP config yet still gets the
@@ -651,6 +652,21 @@ func (o *mimoCodeClient) IsRelayStdio() bool { return false }
 // surface the inline-shadow / merged-parse error from the existing guards, not a
 // silent skip). The merged-read parse error on a malformed inline string remains
 // the loud signal; Exists() simply does not assert presence on unparseable bytes.
+//
+// The claude-import branch (bot PR #420 finding 2, r16) closes the SAME gap for a
+// CLAUDE-IMPORT-ONLY profile: one whose only active mimo MCP source is the
+// ~/.claude.json mcpServers import (no mimo file layer, no inline string, possibly
+// no config dir). The scan path already promotes such a profile to "ok" via
+// MimoCodeHasClaudeImport; without this branch Exists() falls through to the
+// parent-dir stat → false → install/register/Apply gate on Exists() and SKIP mimo
+// even though the matrix shows the imported servers as present. claudeImportEntries
+// is the single owner of the read + conversion and carries the SAME state-safe gate
+// the scan path uses: it returns no entries when claudeHome is "" (direct/test
+// construction) or when MIMOCODE_DISABLE_CLAUDE_CODE_MCP is set, so a test/temp
+// client never reaches the developer's real ~/.claude.json, and it is best-effort
+// (a malformed/unreadable claude.json imports nothing → no false presence). The
+// live client (NewMimoCode) sets claudeHome to the OS home, so an operator with a
+// real ~/.claude.json import is correctly seen as present.
 func (o *mimoCodeClient) Exists() bool {
 	for _, f := range o.readLayerFiles() {
 		if _, err := os.Stat(f); err == nil {
@@ -661,6 +677,9 @@ func (o *mimoCodeClient) Exists() bool {
 		if _, err := parseJSONCBytes([]byte(o.inlineContent)); err == nil {
 			return true
 		}
+	}
+	if imported, err := o.claudeImportEntries(); err == nil && len(imported) > 0 {
+		return true
 	}
 	st, err := os.Stat(filepath.Dir(o.path))
 	return err == nil && st.IsDir()
@@ -1133,6 +1152,46 @@ func mimoCodeFileDefinesStdioLSP(path, name string) (bool, error) {
 	}
 	_, _, isStdioLSP := matchLanguageServerStdio(entry)
 	return isStdioLSP, nil
+}
+
+// mimoCodeFileEntryValue returns the WRITE-target file's OWN parsed mcp.<name>
+// map — the value PHYSICALLY present in `path`, independent of the merged
+// multi-layer view. Modeled on mimoCodeFileDefinesStdioLSP's single-file
+// read+parse (readRawConfig + parseJSONCBytes) so the parse is a single owner,
+// NOT re-implemented here.
+//
+//   - absent/empty file, or no such name → (nil, false, nil).
+//   - present name → (verbatim raw map, true, nil).
+//   - parse error on present bytes → (nil, false, err) — propagated so a
+//     malformed write target aborts (the r12/r13 data-loss guard), never
+//     silently reads as "no own value".
+//
+// Used by GetEntry (bot PR #420 finding 3) to snapshot the rollback Raw from the
+// write target's OWN value instead of the merged synthesis, so a lower-layer
+// `command` merged with a write-target enabled-only override is never copied UP
+// into mimocode.json on a rollback. NO normalization / disabled-drop is applied:
+// the verbatim physical value is exactly what a rollback AddEntry must write back.
+func mimoCodeFileEntryValue(path, name string) (map[string]any, bool, error) {
+	data, err := readRawConfig(path)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(data) == 0 {
+		return nil, false, nil
+	}
+	m, err := parseJSONCBytes(data)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse %s: %w", path, err)
+	}
+	servers, _ := m[mimoCodeMCPKey].(map[string]any)
+	if servers == nil {
+		return nil, false, nil
+	}
+	v, ok := servers[name].(map[string]any)
+	if !ok {
+		return nil, false, nil
+	}
+	return v, true, nil
 }
 
 // mimoCodeInlineDefines reports whether the inline JSONC string defines
@@ -1680,6 +1739,44 @@ func MimoCodeReadLayerPaths(path string) []string {
 	return mimoCodeClientForScanPath(path).readLayerFiles()
 }
 
+// MimoCodeNonRegularActiveLayer reports whether ANY resolved READ layer that
+// EXISTS on disk is a NON-REGULAR entry (directory, FIFO, device, or symlink) —
+// a config fault that the merged read (MimoCodeMergedConfig → readRawConfig)
+// would surface as a hard read error. Returns the offending layer path and true
+// on the first such layer, ("", false) when every existing layer is a plain
+// regular file (or absent — an absent layer is skipped in the merge, not a
+// fault). Uses the SAME resolved layer set as MimoCodeReadLayerPaths /
+// MimoCodeMergedConfig (single owner of the layer resolution), so it stays
+// state-safe (a temp/test override path is single-file) and cannot diverge from
+// the layers the merge actually reads.
+//
+// Exported for internal/api/scan.go (bot PR #420 finding 4): when ONE active
+// mimo layer is non-regular, scanMimoCode's whole-config merged read returns an
+// error and would fail the ENTIRE multi-client scan with `mimocode: ...`. The
+// scan side uses this to surface a PER-CLIENT config-error presence (and skip
+// scanMimoCode) instead, so a bad mimo layer can never take the whole scan down.
+//
+// os.Lstat (NOT Stat) so a SYMLINK layer is classified as non-regular here
+// rather than followed — consistent with the readRawConfig failure a symlinked
+// or non-regular layer would produce. A stat error other than IsNotExist
+// (permission, I/O fault) on an existing layer is ALSO a fault (returns that
+// path, true): the merged read would fail on it identically.
+func MimoCodeNonRegularActiveLayer(path string) (string, bool) {
+	for _, f := range MimoCodeReadLayerPaths(path) {
+		st, err := os.Lstat(f)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue // absent layer — skipped in the merge, not a fault
+			}
+			return f, true // unreadable existing layer — merged read would fail
+		}
+		if !st.Mode().IsRegular() {
+			return f, true // directory / FIFO / device / symlink — merged read would fail
+		}
+	}
+	return "", false
+}
+
 // MimoCodeHasInlineContent reports whether the scan-supplied config path resolves
 // to a PARSEABLE MIMOCODE_CONFIG_CONTENT inline layer. Exported so
 // internal/api/scan.go can promote MiMoCode's config PRESENCE for an INLINE-ONLY
@@ -2140,12 +2237,59 @@ func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {
 	if !ok {
 		return nil, nil
 	}
-	url, _ := raw["url"].(string)
+	// WRITE-TARGET-OWN-VALUE snapshot (bot PR #420 finding 3). `raw` above is the
+	// MERGED view across layers. The merge is REPLACE-by-name EXCEPT an
+	// enabled-only HIGHER override, which FIELD-merges its `enabled` onto the lower
+	// entry (mimoCodeDeepMerge). So when the write target carries a bare
+	// {enabled:false} stub over a LOWER config.json server, `raw` is the SYNTHESIS
+	// {command:...lower..., enabled:false}. A rollback AddEntry(*prior) with that
+	// merged Raw would COPY the lower layer's `command` UP into mimocode.json,
+	// permanently shadowing the layer the hub never owned. So snapshot the Raw from
+	// the write target's OWN physical value (ownRaw) — the bare stub as it exists
+	// in mimocode.json — and judge the branch SHAPE against it too.
+	//
+	// CONDITION — snapshot ownRaw ONLY when the write target is the layer that
+	// RESOLVES the merge for `name`, i.e. ownOK AND NO higher layer defines it.
+	// When a HIGHER layer (mimocode.jsonc / MIMOCODE_CONFIG / overlay / inline /
+	// MDM) ALSO defines `name`, that higher layer WINS the merge (replace-by-name),
+	// so `raw` is the higher-layer value and read-membership MUST return it (the
+	// merge-precedence tests depend on this) — and the rollback is MOOT there
+	// anyway (AddEntry shadow-refuses a higher-layer-defined name before any
+	// write). When the write target has NO own value (!ownOK — name lives only in a
+	// HIGHER layer, or only below/in the import), effRaw stays the merged raw: a
+	// higher-only prior is shadow-refused, and a below/import prior
+	// (SourceBelowWriteTarget=true) routes to RemoveEntry, not AddEntry. So no
+	// lower/higher-layer command/url is EVER copied up.
+	ownRaw, ownOK, err := mimoCodeFileEntryValue(o.path, name)
+	if err != nil {
+		return nil, err
+	}
+	higher, err := o.mimoCodeHigherLayerDefining(name)
+	if err != nil {
+		return nil, err
+	}
+	effRaw := raw
+	if ownOK && higher.Kind == "" {
+		effRaw = ownRaw
+	}
+	// Disabled verdict (bot PR #420 finding 5), computed ONCE against effRaw (the
+	// write-target's own value when resident) so it matches the physical entry
+	// regardless of which shape branch the projection takes below. Stamped on
+	// EVERY return branch so a disabled entry is flagged whether it is a bare
+	// {enabled:false} stub (url-less branch), a disabled remote (url branch), or a
+	// disabled extra-fields remote. The gating consumer (api.GatedOnClients)
+	// excludes a disabled `mcphub-hub` aggregate from gate-ON detection: the client
+	// never loads a disabled aggregate, so a `--reset-port` would orphan nothing —
+	// blocking the reset on it is a false positive. Read-membership / rollback
+	// callers ignore the flag and still see the non-nil entry. Mirrors the scan
+	// path (shapeMimoCodeEntry classifies enabled:false as Transport "absent").
+	disabled := mimoCodeEntryDisabled(effRaw)
+	url, _ := effRaw["url"].(string)
 	if url == "" {
 		// URL-less local entry (or a url-less remote) — not representable as a
 		// URL MCPEntry. Carry the verbatim value in Raw so rollback restores it
 		// exactly rather than deleting it or corrupting it to {type:remote,url:""}.
-		return &MCPEntry{Name: name, Raw: raw, SourceBelowWriteTarget: below}, nil
+		return &MCPEntry{Name: name, Raw: effRaw, SourceBelowWriteTarget: below, Disabled: disabled}, nil
 	}
 	// A DISABLED URL entry (enabled:false) is also not faithfully representable
 	// as a {URL,Headers} MCPEntry: AddEntry's normal install path hardcodes
@@ -2153,10 +2297,8 @@ func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {
 	// RE-ENABLE a server the operator had disabled (bot PR #420 finding 5).
 	// Carry the verbatim entry in Raw so the rollback writes it back byte-shaped
 	// (Raw wins in AddEntry), preserving enabled:false.
-	if enabled, present := raw["enabled"]; present {
-		if b, ok := enabled.(bool); ok && !b {
-			return &MCPEntry{Name: name, Raw: raw, SourceBelowWriteTarget: below}, nil
-		}
+	if disabled {
+		return &MCPEntry{Name: name, Raw: effRaw, SourceBelowWriteTarget: below, Disabled: true}, nil
 	}
 	// A user-authored remote entry carrying EXTRA fields beyond the hub-written
 	// shape (type/url/enabled/headers) — e.g. oauth, timeout (accepted by
@@ -2167,10 +2309,24 @@ func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {
 	// clean hub-shaped remote entry (key set ⊆ {type,url,enabled,headers}) stays
 	// on the lean {URL,Headers} path (Raw nil) so the normal hub-install/restore
 	// polarity and every existing URL round-trip are unchanged.
-	if mimoCodeRemoteHasExtraFields(raw) {
-		return &MCPEntry{Name: name, Raw: raw, SourceBelowWriteTarget: below}, nil
+	if mimoCodeRemoteHasExtraFields(effRaw) {
+		return &MCPEntry{Name: name, Raw: effRaw, SourceBelowWriteTarget: below, Disabled: disabled}, nil
 	}
-	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers"), SourceBelowWriteTarget: below}, nil
+	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(effRaw, "headers"), SourceBelowWriteTarget: below, Disabled: disabled}, nil
+}
+
+// mimoCodeEntryDisabled reports whether a parsed mcp entry map carries an
+// explicit `enabled: false`. MiMoCode uses `enabled` (default true) as the
+// active flag, so an absent or true `enabled` is ACTIVE and only a literal
+// boolean false is disabled — matching mimoCodeDropDisabled's bool-only handling
+// and shapeMimoCodeEntry's scan-side classification (bot PR #420 finding 5).
+func mimoCodeEntryDisabled(raw map[string]any) bool {
+	if enabled, present := raw["enabled"]; present {
+		if b, ok := enabled.(bool); ok && !b {
+			return true
+		}
+	}
+	return false
 }
 
 // mimoCodeRemoteHasExtraFields reports whether a remote entry map carries any
