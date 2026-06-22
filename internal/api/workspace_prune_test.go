@@ -562,18 +562,30 @@ func TestIsWorktreeAdminPath(t *testing.T) {
 		// `gitdir: .../main/.git/worktrees/modules`.) Without this case a future
 		// "simplify to modules-anywhere" refactor silently reintroduces the regression.
 		{"worktree literally named modules (modules is the leaf under worktrees)", filepath.Join("main", ".git", "worktrees", "modules"), true},
-		// Finding 1 (this round): a BARE repo whose common dir name does NOT end in
-		// `.git` (e.g. `git init --bare myrepo`) produces NO git-common-dir segment,
-		// so firstGit < 0. The earlier `firstGit < 0 → return true` shortcut wrongly
-		// ACCEPTED a boundary-less submodule store. The front-scan now catches the
-		// interior `modules`:
-		//   REJECT — boundary-less submodule store under a bare worktree:
+		// REQUIRE-A-BOUNDARY (this round — Findings 1+2 convergent root fix): a
+		// `worktrees`/`modules` component is git's store marker ONLY when a real
+		// `.git`/`*.git` segment is its ANCESTOR. A path with NO git-common-dir
+		// segment (firstGit < 0) is REJECTED — it is path-indistinguishable from a
+		// coincidentally-named user dir. This REVERTS the prior r9 boundary-less
+		// ACCEPTS (the rows below that now say `false`), which was the unsafe path:
+		// it mis-pruned a LIVE separate-git-dir workspace under a user folder named
+		// `worktrees` (Finding 2 — see the `/worktrees/gone` case below).
+		//   REJECT — boundary-less submodule store under a bare worktree (no boundary):
 		{"boundary-less submodule store (no .git segment, interior modules)", filepath.Join("myrepo", "worktrees", "wt", "modules", "deps", "worktrees", "foo"), false},
 		{"boundary-less nested submodule store (no .git segment)", filepath.Join("bare", "worktrees", "wt", "modules", "libs", "sub"), false},
-		//   ACCEPT — boundary-less NORMAL bare-repo worktree (no interior modules):
-		{"boundary-less bare-repo worktree (no .git segment, no interior modules)", filepath.Join("myrepo", "worktrees", "wt"), true},
-		//   ACCEPT — boundary-less worktree literally NAMED `modules` (leaf, not interior):
-		{"boundary-less worktree named modules (leaf under worktrees, no .git segment)", filepath.Join("myrepo", "worktrees", "modules"), true},
+		//   REJECT — boundary-less NORMAL bare-repo worktree (no .git/*.git ancestor):
+		//   REVERTS r9 — now an accepted benign false-NEGATIVE (dead orphan row lingers).
+		{"boundary-less bare-repo worktree (no .git segment) — REVERT r9, now rejected", filepath.Join("myrepo", "worktrees", "wt"), false},
+		//   REJECT — boundary-less worktree literally NAMED `modules` (no boundary):
+		{"boundary-less worktree named modules (no .git segment) — REVERT r9, now rejected", filepath.Join("myrepo", "worktrees", "modules"), false},
+		// Finding 2 (this round) FALSE-POSITIVE the boundary requirement closes: a
+		// `git init --separate-git-dir=/worktrees/gone` repo under a user folder
+		// literally named `worktrees` writes an admin dir whose immediate parent is
+		// `worktrees` but which has NO `.git`/`*.git` ancestor. The parent-only rule
+		// ACCEPTED it → a LIVE separate-git-dir workspace was mis-pruned as a removed
+		// worktree. Requiring a boundary strictly above `worktrees` REJECTS it.
+		{"separate-git-dir under user folder named worktrees (no .git ancestor) — Finding 2 reject", filepath.Join("worktrees", "gone"), false},
+		{"separate-git-dir under user worktrees, deeper (no .git ancestor)", filepath.Join("home", "me", "worktrees", "gone"), false},
 		// Finding 2 (this round) — DOCUMENTED false-NEGATIVE, architect-adjudicated
 		// DOCUMENT-AS-LIMITATION. A submodule's OWN linked worktree stores its admin
 		// at `<repo>/.git/modules/<sub>/worktrees/<name>` (verified real-git:
@@ -624,17 +636,32 @@ func TestIsSubmoduleAdminPath(t *testing.T) {
 		{"submodule inside a linked worktree", filepath.Join("main", ".git", "worktrees", "wt", "modules", "sub"), true},
 		{"submodule's own worktree (interior modules, parent worktrees)", filepath.Join("repo", ".git", "modules", "sub", "worktrees", "name"), true},
 		{"submodule under worktrees-named dir (r6 trap)", filepath.Join("repo", ".git", "modules", "deps", "worktrees", "foo"), true},
-		{"boundary-less submodule store (no .git segment)", filepath.Join("myrepo", "worktrees", "wt", "modules", "deps", "worktrees", "foo"), true},
+		// REQUIRE-A-BOUNDARY (this round): a boundary-less `modules` (no .git/*.git
+		// ancestor) is NO LONGER a positively-identified submodule store → false.
+		// REVERTS r9 — the walk now STOPS false at it (live/ambiguous boundary)
+		// instead of climbing past, an accepted benign false-NEGATIVE.
+		{"boundary-less submodule store (no .git segment) — REVERT r9, now false", filepath.Join("myrepo", "worktrees", "wt", "modules", "deps", "worktrees", "foo"), false},
 		// WORKTREE / non-submodule shapes → false.
 		{"normal worktree admin path", filepath.Join("repo", ".git", "worktrees", "feat"), false},
 		{"bare-repo worktree admin path", filepath.Join("x", "main.git", "worktrees", "wt"), false},
 		{"worktree under user dir named modules (modules above .git)", filepath.Join("home", "user", "modules", "proj", ".git", "worktrees", "wt"), false},
 		{"worktree literally named modules (leaf)", filepath.Join("main", ".git", "worktrees", "modules"), false},
 		// Finding 1: a separate-git-dir / arbitrary gitfile target points at an
-		// ARBITRARY live git dir (NOT under worktrees/ or modules/) → NOT a submodule
-		// → the walk must NOT climb past it. (No interior `modules` segment.)
+		// ARBITRARY live git dir (NOT a real submodule store under a .git boundary)
+		// → NOT a submodule → the walk must NOT climb past it. (No interior `modules`
+		// segment after a real boundary.)
 		{"separate-git-dir arbitrary gitfile target (live repo boundary)", filepath.Join("home", "user", "nested-gitdir"), false},
 		{"separate-git-dir absolute-ish arbitrary git dir", filepath.Join("var", "lib", "gitdirs", "proj.gitdir"), false},
+		// Finding 1 (this round) FALSE-POSITIVE the boundary requirement closes: a
+		// `git init --separate-git-dir=/mnt/modules/nested-gitdir` repo under a USER
+		// dir literally named `modules` writes an admin dir carrying an interior
+		// `modules` (`modules/nested-gitdir`) but with NO `.git`/`*.git` ancestor.
+		// The front-scan-from-the-FRONT mis-classified it as a submodule store → the
+		// IsDeadGitWorktreePath walk CLIMBED PAST this LIVE nested repo to a dead
+		// ancestor worktree and pruned the live workspace. Requiring a `.git`/`*.git`
+		// ancestor for the interior `modules` rejects it → walk STOPS false.
+		{"separate-git-dir under user dir named modules (no .git ancestor) — Finding 1 reject", filepath.Join("mnt", "modules", "nested-gitdir"), false},
+		{"separate-git-dir under user modules, with leaf (no .git ancestor)", filepath.Join("mnt", "modules", "nested-gitdir", "objects"), false},
 		{"empty", "", false},
 	}
 	for _, c := range cases {
@@ -799,6 +826,145 @@ func TestIsDeadGitWorktreePath_SeparateGitDirNested_RealGit(t *testing.T) {
 	// though the outer worktree above it is genuinely dead.
 	if IsDeadGitWorktreePath(nested) {
 		t.Fatalf("Finding 1 false-positive: live nested separate-git-dir repo pruned because the walk climbed past its arbitrary gitfile to the dead outer worktree: %s", nested)
+	}
+}
+
+// TestIsDeadGitWorktreePath_SeparateGitDirUnderUserModules_RealGit drives a REAL
+// git binary to construct the Finding-1 (this round) FALSE-POSITIVE: a LIVE
+// `git init --separate-git-dir` repo whose admin dir lives under a USER directory
+// literally named `modules` (`<wt>/modules/nested-gitdir`), nested inside a linked
+// worktree whose OUTER admin is removed. git writes `gitdir: <wt>/modules/nested-gitdir`
+// — an interior `modules` with NO `.git`/`*.git` ANCESTOR. The prior
+// front-scan-from-the-FRONT mis-classified that as a submodule store, so the walk
+// CLIMBED PAST this LIVE nested repo to the dead outer worktree pointer and pruned
+// the live workspace. Requiring a `.git`/`*.git` ancestor for the interior `modules`
+// makes isSubmoduleAdminPath false → the walk STOPS false → NOT pruned. Skipped when
+// git is unavailable (TestIsSubmoduleAdminPath pins the discriminator without git).
+func TestIsDeadGitWorktreePath_SeparateGitDirUnderUserModules_RealGit(t *testing.T) {
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not on PATH; TestIsSubmoduleAdminPath covers the discriminator")
+	}
+	root := t.TempDir()
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(gitBin, args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, e := cmd.CombinedOutput(); e != nil {
+			t.Fatalf("git %s (in %s): %v\n%s", strings.Join(args, " "), dir, e, out)
+		}
+	}
+
+	// Superproject + a linked worktree.
+	main := filepath.Join(root, "main")
+	runGit(root, "init", "-q", main)
+	if err := os.WriteFile(filepath.Join(main, "m.txt"), []byte("main\n"), 0o600); err != nil {
+		t.Fatalf("write main file: %v", err)
+	}
+	runGit(main, "add", ".")
+	runGit(main, "commit", "-qm", "init")
+	wt := filepath.Join(root, "wt")
+	runGit(main, "worktree", "add", "-q", wt)
+
+	// LIVE nested separate-git-dir repo whose admin dir is under a USER dir named
+	// `modules`, INSIDE the worktree. git writes `gitdir: <wt>/modules/nested-gitdir`.
+	if err := os.MkdirAll(filepath.Join(wt, "modules"), 0o755); err != nil {
+		t.Fatalf("mkdir user modules dir: %v", err)
+	}
+	nested := filepath.Join(wt, "live-nested")
+	sepGitDir := filepath.Join(wt, "modules", "nested-gitdir")
+	runGit(root, "init", "-q", "--separate-git-dir", sepGitDir, nested)
+	ptr, ptrErr := os.ReadFile(filepath.Join(nested, ".git"))
+	if ptrErr != nil {
+		t.Fatalf("read nested .git pointer: %v", ptrErr)
+	}
+	if !strings.Contains(string(ptr), "modules") {
+		t.Fatalf("expected the separate-git-dir pointer under a user `modules` dir (shape changed?): %q", string(ptr))
+	}
+
+	// LIVE state (outer admin present) → not a dead worktree.
+	if IsDeadGitWorktreePath(nested) {
+		t.Fatalf("live nested separate-git-dir repo mis-classified as dead (outer admin present): %s", nested)
+	}
+
+	// Remove the OUTER worktree admin so a climb-past WOULD reach a dead outer
+	// worktree pointer. The fix must STOP at the boundary-less `modules` pointer.
+	entries, _ := os.ReadDir(filepath.Join(main, ".git", "worktrees"))
+	for _, e := range entries {
+		if rmErr := os.RemoveAll(filepath.Join(main, ".git", "worktrees", e.Name())); rmErr != nil {
+			t.Fatalf("remove outer admin %s: %v", e.Name(), rmErr)
+		}
+	}
+	if IsDeadGitWorktreePath(nested) {
+		t.Fatalf("Finding 1 false-positive: live separate-git-dir repo under a user `modules` dir pruned because the walk climbed past it to the dead outer worktree: %s", nested)
+	}
+}
+
+// TestIsDeadGitWorktreePath_SeparateGitDirUnderUserWorktrees_RealGit drives a REAL
+// git binary to construct the Finding-2 (this round) FALSE-POSITIVE: a LIVE
+// `git init --separate-git-dir` repo whose admin dir lives under a USER directory
+// literally named `worktrees` (`<root>/worktrees/gone`). git writes
+// `gitdir: <root>/worktrees/gone` — immediate parent `worktrees` but NO `.git`/`*.git`
+// ANCESTOR. The prior parent-only rule classified it as a worktree admin path; when
+// the admin LEAF is removed (workspace dir still present) isAdminDirGenuinelyDeleted's
+// sibling-present branch fired and the LIVE workspace was mis-pruned. Requiring a
+// `.git`/`*.git` ancestor strictly above `worktrees` makes isWorktreeAdminPath false →
+// NOT pruned. Skipped when git is unavailable (TestIsWorktreeAdminPath pins the
+// discriminator without git).
+func TestIsDeadGitWorktreePath_SeparateGitDirUnderUserWorktrees_RealGit(t *testing.T) {
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git not on PATH; TestIsWorktreeAdminPath covers the discriminator")
+	}
+	root := t.TempDir()
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(gitBin, args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, e := cmd.CombinedOutput(); e != nil {
+			t.Fatalf("git %s (in %s): %v\n%s", strings.Join(args, " "), dir, e, out)
+		}
+	}
+
+	// User folder literally named `worktrees`; the separate-git-dir admin is `gone`
+	// under it. The workspace dir itself lives elsewhere under root.
+	if err := os.MkdirAll(filepath.Join(root, "worktrees"), 0o755); err != nil {
+		t.Fatalf("mkdir user worktrees dir: %v", err)
+	}
+	ws := filepath.Join(root, "live-workspace")
+	adminDir := filepath.Join(root, "worktrees", "gone")
+	runGit(root, "init", "-q", "--separate-git-dir", adminDir, ws)
+	ptr, ptrErr := os.ReadFile(filepath.Join(ws, ".git"))
+	if ptrErr != nil {
+		t.Fatalf("read workspace .git pointer: %v", ptrErr)
+	}
+	if !strings.Contains(string(ptr), "worktrees") {
+		t.Fatalf("expected the separate-git-dir pointer under a user `worktrees` dir (shape changed?): %q", string(ptr))
+	}
+
+	// LIVE state (admin present) → not dead.
+	if IsDeadGitWorktreePath(ws) {
+		t.Fatalf("live separate-git-dir workspace under user `worktrees` mis-classified as dead (admin present): %s", ws)
+	}
+
+	// Remove the admin LEAF while the user `worktrees/` parent survives — the shape
+	// the OLD parent-only rule read as a dead worktree (sibling-present branch). The
+	// workspace dir still exists (WorkspaceDirDeleted false), so only the boundary
+	// requirement keeps it from being pruned.
+	if rmErr := os.RemoveAll(adminDir); rmErr != nil {
+		t.Fatalf("remove separate-git-dir admin: %v", rmErr)
+	}
+	if _, statErr := os.Stat(filepath.Dir(adminDir)); statErr != nil {
+		t.Fatalf("expected user worktrees/ parent to remain: %v", statErr)
+	}
+	if IsDeadGitWorktreePath(ws) {
+		t.Fatalf("Finding 2 false-positive: live separate-git-dir workspace under a user `worktrees` dir (no .git ancestor) pruned as a removed worktree: %s", ws)
 	}
 }
 
@@ -1309,35 +1475,40 @@ func TestIsDeadGitWorktreePath_ForeignRelativeGitdirEndToEnd(t *testing.T) {
 	}
 }
 
-// TestIsDeadGitWorktreePath_BoundarylessBareRepoSubmodule covers Finding 1 (this
-// round) end-to-end: a BARE repo whose common dir name does NOT end in `.git`
-// (e.g. `git init --bare myrepo`, or a clone without the suffix) produces NO
-// git-common-dir segment, so the isWorktreeAdminPath firstGit<0 branch previously
-// returned true UNCONDITIONALLY. A submodule under such a bare worktree
-// (`<bare>/worktrees/<wt>/modules/deps/worktrees/foo`) has immediate parent
-// `worktrees` (parent gate passes) AND an interior `modules` but no `.git`
-// boundary — it was therefore wrongly ACCEPTED and a LIVE submodule workspace
-// would be mis-pruned. The front-scan now rejects it. A boundary-less NORMAL
-// bare-repo worktree (`<bare>/worktrees/<wt>`, no interior modules) is still
-// classified normally (accepted → its admin-dir availability is then checked).
+// TestIsDeadGitWorktreePath_BoundarylessBareRepoSubmodule covers the REQUIRE-A-
+// BOUNDARY rule (this round — Findings 1+2 convergent root fix, REVERTS r9)
+// end-to-end on the SUFFIX-LESS bare-repo family. A BARE repo whose common dir name
+// does NOT end in `.git` (e.g. `git init --bare myrepo`, or a clone without the
+// suffix) produces NO git-common-dir segment in its worktree/submodule admin paths.
+// The prior r9 logic ACCEPTED such boundary-less paths (worktree → pruned;
+// submodule store → walk climbed past). That was the UNSAFE path: a boundary-less
+// `worktrees/<wt>` (or `modules/...`) is path-indistinguishable from a
+// coincidentally-named user dir, so a LIVE `git init --separate-git-dir` workspace
+// under a user folder named `worktrees`/`modules` was mis-pruned (Finding 2 /
+// Finding 1).
 //
-// Verified real-git shape (git 2.53, bare clone WITHOUT `.git` suffix):
+// The boundary requirement makes the WHOLE suffix-less family NOT pruned — an
+// accepted benign false-NEGATIVE: a genuinely-dead suffix-less bare-repo worktree
+// (or a dead worktree reachable only via a suffix-less submodule pointer) lingers
+// as an orphan row instead of being pruned. A bare repo whose dir name DOES end in
+// `.git` keeps the `.git`-suffix boundary and IS still classified/pruned (see
+// TestIsDeadGitWorktreePath_BareRepoWorktree).
+//
+// Real-git shapes the synthetic admin paths below mirror (git 2.53, bare clone
+// WITHOUT `.git` suffix):
 //
 //	git clone --bare src myrepo                    → myrepo (no suffix)
 //	git -C myrepo worktree add wt main             → gitdir: .../myrepo/worktrees/wt
 //	git -C wt submodule add ... deps; ...           → store under myrepo/worktrees/wt/modules/deps
 //	git -C wt/deps worktree add deps-wt feat       → gitdir: .../myrepo/worktrees/wt/modules/deps/worktrees/deps-wt
-//
-// i.e. a boundary-less store path whose leaf parent is `worktrees` with an
-// interior `modules` — exactly the synthetic admin path pinned below.
 func TestIsDeadGitWorktreePath_BoundarylessBareRepoSubmodule(t *testing.T) {
 	// --- BOUNDARY-LESS submodule store (no .git segment, interior modules, parent
 	// `worktrees`): the workspace `.git` points at
 	// `<bare>/worktrees/<wt>/modules/deps/worktrees/foo`; the parent `worktrees/`
-	// dir exists, only the `foo` leaf is gone. Without the Finding-1 front-scan the
-	// firstGit<0 branch ACCEPTS it → isAdminDirGenuinelyDeleted's sibling-present
-	// branch fires → mis-pruned. The front-scan rejects the interior `modules` →
-	// NOT pruned (a LIVE submodule workspace). ---
+	// dir exists, only the `foo` leaf is gone. REQUIRE-A-BOUNDARY: no `.git`/`*.git`
+	// ancestor → isSubmoduleAdminPath is false → the walk STOPS false (does not
+	// climb past) → NOT pruned (a LIVE submodule workspace, or a dead one lingering
+	// benignly — either way never a false-positive). ---
 	subWT := t.TempDir()
 	// bare common dir literally `myrepo` (no `.git` / `*.git` suffix).
 	boundarylessStoreParent := filepath.Join(t.TempDir(), "myrepo", "worktrees", "wt", "modules", "deps", "worktrees")
@@ -1347,11 +1518,16 @@ func TestIsDeadGitWorktreePath_BoundarylessBareRepoSubmodule(t *testing.T) {
 	subAdmin := filepath.Join(boundarylessStoreParent, "foo") // leaf never created
 	writeGitFile(t, subWT, subAdmin)
 
-	// --- BOUNDARY-LESS NORMAL bare-repo worktree (no interior modules): the
-	// workspace `.git` points at `<bare>/worktrees/<wt>`; the parent `worktrees/`
-	// exists, only the `<wt>` leaf is gone → genuinely DEAD → pruned. Proves the
-	// front-scan rejects ONLY the boundary-less submodule store, not a genuine
-	// boundary-less bare-repo worktree. ---
+	// --- BOUNDARY-LESS NORMAL bare-repo worktree (no interior modules, no .git
+	// segment): the workspace `.git` points at `<bare>/worktrees/<wt>`; the parent
+	// `worktrees/` exists, only the `<wt>` leaf is gone. REQUIRE-A-BOUNDARY (this
+	// round, REVERTS r9): with NO `.git`/`*.git` ancestor this admin path is
+	// path-indistinguishable from a user dir named `worktrees`, so it is NO LONGER
+	// classified as a worktree → NOT pruned (an accepted benign false-NEGATIVE: a
+	// dead orphan row lingers rather than risk pruning a live `/worktrees/gone`
+	// separate-git-dir workspace). A bare repo whose dir name ends in `.git`
+	// (`<repo>.git/worktrees/<wt>`) keeps the boundary and IS still pruned — see
+	// TestIsDeadGitWorktreePath_BareRepoWorktree. ---
 	deadBareWT := t.TempDir()
 	bareWorktreesParent := filepath.Join(t.TempDir(), "myrepo", "worktrees")
 	if err := os.MkdirAll(bareWorktreesParent, 0o755); err != nil {
@@ -1361,7 +1537,7 @@ func TestIsDeadGitWorktreePath_BoundarylessBareRepoSubmodule(t *testing.T) {
 	writeGitFile(t, deadBareWT, bareDeadAdmin)
 
 	// --- LIVE boundary-less bare-repo worktree (admin leaf present) → NOT pruned
-	// (negative control: the accept path does not over-prune a live one). ---
+	// (also rejected at the boundary check, so doubly safe). ---
 	liveBareWT := t.TempDir()
 	liveBareAdmin := filepath.Join(t.TempDir(), "myrepo", "worktrees", "live")
 	if err := os.MkdirAll(liveBareAdmin, 0o755); err != nil {
@@ -1375,7 +1551,7 @@ func TestIsDeadGitWorktreePath_BoundarylessBareRepoSubmodule(t *testing.T) {
 		want bool
 	}{
 		{"boundary-less submodule store (parent worktrees, interior modules, no .git segment) → NOT pruned", subWT, false},
-		{"boundary-less bare-repo worktree (no interior modules) removed → pruned", deadBareWT, true},
+		{"boundary-less bare-repo worktree (no .git ancestor) removed → NOT pruned (REVERT r9, accepted false-negative)", deadBareWT, false},
 		{"live boundary-less bare-repo worktree (admin present) → NOT pruned", liveBareWT, false},
 	}
 	for _, c := range cases {
