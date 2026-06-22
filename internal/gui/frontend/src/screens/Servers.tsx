@@ -856,7 +856,7 @@ export function ServersScreen() {
         }}
       />
       <div id="servers-toolbar">
-        <button onClick={applyChanges} disabled={applyDisabled}>
+        <button class="btn btn-primary" onClick={applyChanges} disabled={applyDisabled}>
           {retryPendingCount > 0
             ? `Apply changes (incl. retry ${retryPendingCount})`
             : "Apply changes"}
@@ -961,7 +961,7 @@ export function ServersScreen() {
                     {canInit && (
                       <button
                         type="button"
-                        class="matrix-col-init-btn"
+                        class="matrix-col-init-btn btn btn-sm"
                         data-testid={`init-client-${c}`}
                         disabled={busy}
                         title={

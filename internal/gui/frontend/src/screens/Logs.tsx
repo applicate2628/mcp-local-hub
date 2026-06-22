@@ -267,10 +267,10 @@ export function LogsScreen() {
           class={filterError ? "logs-filter logs-filter-error" : "logs-filter"}
           title={filterError ?? undefined}
         />
-        <button disabled={controlsDisabled} onClick={() => setReloadToken((x) => x + 1)}>
+        <button class="btn" disabled={controlsDisabled} onClick={() => setReloadToken((x) => x + 1)}>
           Refresh
         </button>
-        <button onClick={openLogsFolder} title="Open the logs folder in your file manager">
+        <button class="btn" onClick={openLogsFolder} title="Open the logs folder in your file manager">
           Open folder
         </button>
       </div>

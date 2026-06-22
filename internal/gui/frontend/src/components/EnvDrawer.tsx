@@ -171,6 +171,7 @@ export function EnvDrawer(props: EnvDrawerProps) {
       <div class="env-drawer-actions">
         <button
           type="button"
+          class="btn btn-primary"
           onClick={handleApply}
           disabled={working}
           data-testid="env-drawer-apply"
@@ -188,6 +189,7 @@ export function EnvDrawer(props: EnvDrawerProps) {
         </label>
         <button
           type="button"
+          class="btn"
           onClick={handleRestart}
           disabled={working}
           data-testid="env-drawer-restart"

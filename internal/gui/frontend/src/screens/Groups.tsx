@@ -382,7 +382,7 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
                   </button>
                   <button
                     type="button"
-                    class="btn danger"
+                    class="btn btn-danger"
                     data-testid={`groups-delete-${g.name}`}
                     onClick={() => {
                       setDeleteError(null);

@@ -1034,8 +1034,8 @@ export function AddServerScreen(props: {
         <div class="banner error" data-testid="load-error-banner">
           <p>Failed to load <code>{editName || "(unnamed)"}</code>: {loadError}</p>
           <div class="banner-actions">
-            <button type="button" onClick={() => { setLoadError(null); window.location.reload(); }}>Retry</button>
-            <button type="button" onClick={() => { window.location.hash = "#/servers"; }}>Back to Servers</button>
+            <button type="button" class="btn btn-secondary" onClick={() => { setLoadError(null); window.location.reload(); }}>Retry</button>
+            <button type="button" class="btn btn-secondary" onClick={() => { window.location.hash = "#/servers"; }}>Back to Servers</button>
           </div>
         </div>
       )}
@@ -1047,7 +1047,7 @@ export function AddServerScreen(props: {
             delete + recreate via Add Server.
           </p>
           <div class="banner-actions">
-            <button type="button" onClick={() => { window.location.hash = "#/servers"; }}>Back to Servers</button>
+            <button type="button" class="btn btn-secondary" onClick={() => { window.location.hash = "#/servers"; }}>Back to Servers</button>
           </div>
         </div>
       )}
@@ -1117,6 +1117,7 @@ export function AddServerScreen(props: {
               // reads the latest inlineSecrets, not a closure frozen at failure time.
               onClick={() => retryInstall(banner.retryName!)}
               data-action="retry-install"
+              class="btn btn-secondary"
             >
               Retry Install
             </button>
@@ -1134,15 +1135,16 @@ export function AddServerScreen(props: {
               title={manifestDirty ? "Save your changes first — Reinstall applies the last saved manifest." : undefined}
               onClick={() => retryInstall(formState.name.trim())}
               data-action="reinstall"
+              class="btn btn-secondary"
             >
               Reinstall
             </button>
           )}
           {banner.staleReload && (
-            <button type="button" disabled={busy !== ""} onClick={() => runReload()} data-action="reload">Reload</button>
+            <button type="button" class="btn btn-secondary" disabled={busy !== ""} onClick={() => runReload()} data-action="reload">Reload</button>
           )}
           {banner.staleForceSave && (
-            <button type="button" disabled={busy !== ""} onClick={() => runForceSave()} data-action="force-save">Force Save</button>
+            <button type="button" class="btn btn-danger" disabled={busy !== ""} onClick={() => runForceSave()} data-action="force-save">Force Save</button>
           )}
         </div>
       )}

@@ -56,6 +56,7 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
       <label class="workspace-selector-label">
         <span>Active workspace:</span>
         <select
+          class="field-ctl"
           value={selectedKey}
           onChange={(ev) => onChange((ev.currentTarget as HTMLSelectElement).value)}
           data-testid="workspace-selector-select"
