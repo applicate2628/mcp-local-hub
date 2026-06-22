@@ -47,6 +47,15 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 function scanWith(presence: Record<string, string>, name = "memory"): ScanResult {
+  // visibleClients() now gates a non-core column on the SCANNABLE capability
+  // (a backend clientScanners() parser). Mark every presence key scannable so
+  // these tests exercise the file-present detection gate, not the scannable
+  // gate (that is unit-tested in routing.test.ts). The core clients are always
+  // shown regardless; marking them scannable keeps the map representative.
+  const capabilities: NonNullable<ScanResult["client_capabilities"]> = {};
+  for (const c of [...CORE_CLIENTS, ...Object.keys(presence)]) {
+    capabilities[c] = { scannable: true, remote_http_capable: false };
+  }
   return {
     at: "2026-05-16T00:00:00Z",
     entries: [
@@ -58,6 +67,7 @@ function scanWith(presence: Record<string, string>, name = "memory"): ScanResult
       },
     ],
     client_config_presence: presence as ScanResult["client_config_presence"],
+    client_capabilities: capabilities,
   };
 }
 
@@ -611,13 +621,16 @@ describe("ServersScreen — detection-gated non-core client columns", () => {
     expect(headerLabels().some((t) => t.includes("kiro"))).toBe(false);
   });
 
-  it("renders multiple detected wave-2 columns (kiro http-direct + zed relay)", async () => {
+  it("renders multiple detected wave-2 columns when their config FILES are present (kiro http-direct + zed relay)", async () => {
+    // Both have an actual config file ("ok"), so both earn a column. (A
+    // "missing-init-*" parent-exists-but-file-absent state would NOT — that is
+    // the anti-overflow gate, covered in routing.test.ts.)
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
         "/api/scan": () =>
           jsonResponse(
             200,
-            scanWith({ "claude-code": "ok", zed: "ok", kiro: "missing-init-possible" }),
+            scanWith({ "claude-code": "ok", zed: "ok", kiro: "ok" }),
           ),
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
       }) as unknown as typeof fetch,
@@ -627,6 +640,29 @@ describe("ServersScreen — detection-gated non-core client columns", () => {
       expect(headerLabels().some((t) => t.includes("kiro"))).toBe(true);
     });
     expect(headerLabels().some((t) => t.includes("zed"))).toBe(true);
+  });
+
+  it("HIDES a wave-2 client whose config file is absent but parent dir exists (no overflow on fresh profile)", async () => {
+    // Finding 1 anti-overflow: a "missing-init-possible" non-core client does
+    // NOT earn a column even though it is scannable — only a present config
+    // FILE does. Pre-fix this state counted as detected and overflowed the
+    // matrix on a fresh profile.
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () =>
+          jsonResponse(
+            200,
+            scanWith({ "claude-code": "ok", zed: "missing-init-possible", kiro: "missing-init-creatable" }),
+          ),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryAllByRole("columnheader").length).toBeGreaterThan(0);
+    });
+    expect(headerLabels().some((t) => t.includes("zed"))).toBe(false);
+    expect(headerLabels().some((t) => t.includes("kiro"))).toBe(false);
   });
 });
 

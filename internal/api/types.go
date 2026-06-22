@@ -273,6 +273,30 @@ type ScanResult struct {
 	// "Initialize <client>" affordance in the matrix header so the
 	// operator can create the empty stub without leaving the GUI.
 	ClientConfigPresence map[string]string `json:"client_config_presence,omitempty"`
+
+	// ClientCapabilities reports the per-client capability flags the GUI
+	// uses to decide which clients it may safely offer, keyed by every
+	// clients.SupportedClientNames() id. It is the backend's single source
+	// of truth so the GUI derives its column / direct-install universe
+	// without a hard-coded mirror that drifts:
+	//
+	//   - scannable           — the client has a clientScanners() parser, so
+	//                           /api/scan can report its per-entry presence
+	//                           truthfully. The Servers matrix shows a non-
+	//                           core column ONLY for a scannable client; a
+	//                           presence-probed-but-unparsed client
+	//                           (copilot-cli/amazon-q/openhands/aider) can
+	//                           never have its cell reconciled after a
+	//                           migrate, so it gets no enabled column.
+	//   - remote_http_capable — the client adapter accepts a
+	//                           transport=remote-http (URL-native) binding.
+	//                           The Catalog direct-install flow offers ONLY
+	//                           these clients; a relay-stdio adapter rejects
+	//                           a URL-only entry at AddEntry, so a direct
+	//                           install would deterministically fail.
+	//
+	// See client_capabilities.go (ClientCapabilities()) for the owner.
+	ClientCapabilities map[string]ClientCapability `json:"client_capabilities,omitempty"`
 }
 
 // BackupInfo describes one file in the backup area.

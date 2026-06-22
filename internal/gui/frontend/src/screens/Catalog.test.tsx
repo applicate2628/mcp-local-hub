@@ -69,6 +69,23 @@ function mpEntry(
 // "unexpected fetch" guard on the component's /api/marketplace load.
 const emptyMarketplace = () => jsonResponse(200, { entries: [] });
 
+// Default /api/client-capabilities route — the backend capability map the
+// Catalog fetches to derive the direct-install client choices. Mirrors the
+// production remoteHTTPCapableClients set (the 6 URL-native clients are
+// remote_http_capable; a relay-stdio adapter would be false). Direct-install
+// tests use this so the multiselect renders exactly the URL-native clients.
+const urlNativeCapabilities = () =>
+  jsonResponse(200, {
+    "claude-code": { scannable: true, remote_http_capable: true },
+    "codex-cli": { scannable: true, remote_http_capable: true },
+    cursor: { scannable: true, remote_http_capable: true },
+    "gemini-cli": { scannable: true, remote_http_capable: true },
+    "qwen-cli": { scannable: true, remote_http_capable: true },
+    vscode: { scannable: true, remote_http_capable: true },
+    // a relay-stdio client: NOT URL-native → not offered for direct install.
+    aider: { scannable: false, remote_http_capable: false },
+  });
+
 // A "ready" GET /api/server/readiness body — no requirements, ready=true. The
 // install gate (epic area 2) opens on Install click and fetches this BEFORE the
 // POST. Shipped-server install tests that don't care about readiness use this so
@@ -883,6 +900,7 @@ describe("CatalogScreen", () => {
         },
         "/api/marketplace": () =>
           jsonResponse(200, { entries: [mpEntry("remote", "Remote", "x", [], "", "http")] }),
+        "/api/client-capabilities": urlNativeCapabilities,
       }) as unknown as typeof fetch,
     );
 
@@ -932,6 +950,7 @@ describe("CatalogScreen", () => {
           }),
         "/api/marketplace": () =>
           jsonResponse(200, { entries: [mpEntry("remote", "Remote", "x", [], "", "http")] }),
+        "/api/client-capabilities": urlNativeCapabilities,
       }) as unknown as typeof fetch,
     );
 
@@ -952,6 +971,36 @@ describe("CatalogScreen", () => {
     expect(screen.getByTestId("catalog-marketplace-direct-failed-remote").textContent).toContain(
       "config file is a symlink",
     );
+  });
+
+  it("direct multiselect offers ONLY URL-native clients, never a relay-stdio client (Finding 2)", async () => {
+    // Regression guard: pre-fix the direct multiselect rendered all ~46
+    // clients including relay-stdio adapters (aider/zencoder/pi/pochi) whose
+    // AddEntry rejects a URL-only entry, so a direct install into them
+    // deterministically failed. The list now derives from the backend
+    // /api/client-capabilities remote_http_capable set.
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace": () =>
+          jsonResponse(200, { entries: [mpEntry("remote", "Remote", "x", [], "", "http")] }),
+        "/api/client-capabilities": urlNativeCapabilities,
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-marketplace-direct-toggle-remote"));
+    await screen.findByTestId("catalog-marketplace-direct-panel-remote");
+
+    // Every URL-native client renders a checkbox.
+    for (const c of ["claude-code", "codex-cli", "cursor", "gemini-cli", "qwen-cli", "vscode"]) {
+      expect(screen.queryByTestId(`catalog-marketplace-client-remote-${c}`)).toBeTruthy();
+    }
+    // A relay-stdio client is NOT offered (would reject a URL-only install).
+    expect(screen.queryByTestId("catalog-marketplace-client-remote-aider")).toBeNull();
+    expect(screen.queryByTestId("catalog-marketplace-client-remote-zencoder")).toBeNull();
+    expect(screen.queryByTestId("catalog-marketplace-client-remote-pi")).toBeNull();
   });
 
   it("surfaces an inline error when the install POST fails (e.g. 502 catalog unavailable)", async () => {

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"testing"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 )
 
@@ -73,6 +74,68 @@ func TestRoutingTSClientListMirrorsBackendRegistry(t *testing.T) {
 		if !registrySet[n] {
 			t.Errorf("routing.ts lists client %q that is not in clients.SupportedClientNames() (stale/removed client)", n)
 		}
+	}
+}
+
+// TestMatrixScannableUniverseMatchesBackendCapabilities is the drift guard for
+// the Servers-matrix SCANNABLE universe. The matrix now shows a non-core
+// column ONLY for a SCANNABLE client (one with a clientScanners() parser), and
+// the frontend derives "scannable" live from api.ClientCapabilities() carried
+// on the scan result. This test pins the two ends together:
+//
+//  1. Every scannable client (the matrix's potential column universe) is
+//     declared in routing.ts (CORE_CLIENTS ∪ NON_CORE_CLIENTS), so a
+//     scannable client always has its column-toggle/binding-row/Backups-group
+//     authority entry — a scannable client missing from the static list would
+//     be a half-wired column.
+//  2. Every client routing.ts declares is a real SupportedClientNames() id
+//     (already pinned above) AND its capability entry exists, so the runtime
+//     scannable gate has a value to read for each declared client.
+//
+// Because the runtime scannable decision reads api.ClientCapabilities()
+// (single owner, == clientScanners() keys), a backend that registers a new
+// parser surfaces the column automatically; this guard ensures the static TS
+// authorities don't fall behind that scannable set.
+func TestMatrixScannableUniverseMatchesBackendCapabilities(t *testing.T) {
+	path := filepath.Join("frontend", "src", "lib", "routing.ts")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	src := string(data)
+
+	tsSet := map[string]bool{}
+	for _, n := range extractTSStringArray(t, src, "CORE_CLIENTS") {
+		tsSet[n] = true
+	}
+	for _, n := range extractTSStringArray(t, src, "NON_CORE_CLIENTS") {
+		tsSet[n] = true
+	}
+
+	caps := api.ClientCapabilities()
+	if len(caps) == 0 {
+		t.Fatal("api.ClientCapabilities() returned an empty map")
+	}
+
+	scannableCount := 0
+	for name, cap := range caps {
+		if !cap.Scannable {
+			continue
+		}
+		scannableCount++
+		if !tsSet[name] {
+			t.Errorf("scannable client %q (has a clientScanners() parser) is missing from routing.ts CORE/NON_CORE — its Servers column authorities would be unwired", name)
+		}
+	}
+	// Sanity: the scannable set must be a strict, non-trivial subset — at
+	// least the 7 core clients (all have parsers), but fewer than the full
+	// registry (Finding 3: the no-scanner clients are excluded). A regression
+	// that made every client scannable (or none) would defeat the gate.
+	if scannableCount < len(extractTSStringArray(t, src, "CORE_CLIENTS")) {
+		t.Errorf("scannable client count = %d, expected at least the core clients (all core clients have parsers)", scannableCount)
+	}
+	if scannableCount >= len(caps) {
+		t.Errorf("scannable client count = %d equals the full registry %d — the no-scanner exclusion (Finding 3) is not in effect", scannableCount, len(caps))
 	}
 }
 

@@ -15,11 +15,26 @@ import type { ScanResult } from "../types";
 // Storage methods, so install a Map-backed shim for the persistence tests.
 const ls = installMemoryLocalStorage();
 
+// scan builds a ScanResult fixture. visibleClients() now gates non-core
+// columns on the SCANNABLE capability (a backend clientScanners() parser), so
+// the fixture marks every CORE + NON_CORE client scannable — these tests
+// exercise the pref-folding of effectiveVisibleClients, not the scannable
+// gate itself (that is covered in routing.test.ts). Any presence key is also
+// marked scannable so a 'warp: "ok"' fixture still auto-detects here.
 function scan(presence: Record<string, string>): ScanResult {
+  const caps: NonNullable<ScanResult["client_capabilities"]> = {};
+  for (const c of [
+    ...CORE_CLIENTS,
+    ...NON_CORE_CLIENTS,
+    ...Object.keys(presence),
+  ]) {
+    caps[c] = { scannable: true, remote_http_capable: false };
+  }
   return {
     at: "",
     entries: [],
     client_config_presence: presence as ScanResult["client_config_presence"],
+    client_capabilities: caps,
   } as ScanResult;
 }
 
@@ -154,6 +169,11 @@ describe("effectiveVisibleClients", () => {
         },
       ],
       client_config_presence: {},
+      // A referenced client necessarily came from a scanner (only a scannable
+      // client can produce an entry), so it is scannable in the capability map.
+      client_capabilities: {
+        "future-client-xyz": { scannable: true, remote_http_capable: false },
+      },
     } as ScanResult;
     const cols = effectiveVisibleClients(s, {});
     expect(cols).toContain("future-client-xyz");

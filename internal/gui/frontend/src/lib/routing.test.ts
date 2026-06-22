@@ -7,12 +7,13 @@ import {
   perClientRouting,
   collectServers,
   visibleClients,
+  remoteHTTPCapableClients,
   orderClientsForColumns,
   CORE_CLIENTS,
   NON_CORE_CLIENTS,
   ALL_CLIENTS,
 } from "./routing";
-import type { ScanEntry, ScanResult } from "../types";
+import type { ClientCapability, ScanEntry, ScanResult } from "../types";
 
 describe("isHubLoopback", () => {
   it("accepts 127.0.0.1 URLs", () => {
@@ -476,15 +477,49 @@ describe("perClientRouting with client_config_presence", () => {
 // per clients.SupportedClientNames()), NOT a frontend-hardcoded list, so all
 // 46 backend clients can surface when detected — and a backend client newer
 // than the frontend NON_CORE_CLIENTS list still surfaces when detected.
-describe("visibleClients (detection-gated non-core columns)", () => {
+describe("visibleClients (scannable + file-present non-core columns)", () => {
+  // capsFor builds a client_capabilities map marking the given client ids as
+  // scannable (the matrix only shows a non-core column for a SCANNABLE client
+  // — one with a backend clientScanners() parser). Defaults to marking every
+  // CORE + NON_CORE client scannable, plus any presence/entry key, so the
+  // generic "ok"-detection tests below behave as before; the dedicated
+  // non-scannable-exclusion test overrides this with an explicit empty/partial
+  // map.
+  function capsFor(
+    ids: Iterable<string>,
+  ): ScanResult["client_capabilities"] {
+    const out: NonNullable<ScanResult["client_capabilities"]> = {};
+    for (const id of ids) {
+      out[id] = { scannable: true, remote_http_capable: false };
+    }
+    return out;
+  }
+
   function scan(
     presence: Record<string, string>,
     entries: ScanEntry[] = [],
+    capabilities?: ScanResult["client_capabilities"],
   ): ScanResult {
+    // Default capabilities: everything the test names is scannable, so the
+    // file-present gate is what is under test. A test exercising the
+    // non-scannable exclusion passes an explicit (narrower) capabilities map.
+    const referenced = new Set<string>();
+    for (const e of entries) {
+      for (const c of Object.keys(e.client_presence ?? {})) referenced.add(c);
+    }
+    const caps =
+      capabilities ??
+      capsFor([
+        ...CORE_CLIENTS,
+        ...NON_CORE_CLIENTS,
+        ...Object.keys(presence),
+        ...referenced,
+      ]);
     return {
       at: "",
       entries,
       client_config_presence: presence as ScanResult["client_config_presence"],
+      client_capabilities: caps,
     } as ScanResult;
   }
 
@@ -522,27 +557,66 @@ describe("visibleClients (detection-gated non-core columns)", () => {
     expect(cols).not.toContain("kiro");
   });
 
-  it("shows a NEWER non-core client (beyond the original wave-2 set) when detected", () => {
-    // warp/goose/zencoder are non-core clients added after the original 8
-    // wave-2 adapters. They must surface exactly like any other non-core
-    // client when their config is detected — the whole point of the 46-wide
-    // derive-from-presence universe (the original bug: only ~15 were shown).
-    const cols = visibleClients(scan({ warp: "ok", goose: "missing-init-possible", zencoder: "ok" }));
-    expect(cols).toContain("warp");
-    expect(cols).toContain("goose");
-    expect(cols).toContain("zencoder");
+  it("shows a NEWER non-core client (beyond the original wave-2 set) when its config FILE is present", () => {
+    // A scannable non-core client with an actual config file ("ok") surfaces.
+    // A scannable client whose file is merely creatable ("missing-init-*")
+    // does NOT — that is the anti-overflow gate (Finding 1): on a fresh
+    // profile the absent-but-creatable config dirs must not manufacture
+    // columns. (warp/goose are non-scannable in production, but the generic
+    // scan() helper marks them scannable here so this test isolates the
+    // FILE-PRESENT gate; cline/zed are used as scannable file-present cases.)
+    const cols = visibleClients(scan({ cline: "ok", zed: "missing-init-possible", kilocode: "ok" }));
+    expect(cols).toContain("cline");
+    expect(cols).toContain("kilocode");
+    // zed's parent dir exists but its config file is absent → no column.
+    expect(cols).not.toContain("zed");
   });
 
-  it("shows ALL non-core clients when every one is detected (no overflow cap, full universe)", () => {
-    // Prove the universe truly spans the full backend registry: when every
-    // non-core client is 'ok', every one becomes a column. This is the
-    // regression guard for the reported bug — pre-fix only the 15 hardcoded
-    // clients could ever appear regardless of detection.
+  it("shows every SCANNABLE non-core client that is file-present (full scannable universe)", () => {
+    // When every non-core client is 'ok' AND every one is scannable (the
+    // generic helper marks them so), every one becomes a column. This is the
+    // upper-bound regression guard for the reported bug — pre-fix only ~15
+    // hardcoded clients could ever appear regardless of detection.
     const allOk: Record<string, string> = {};
     for (const c of NON_CORE_CLIENTS) allOk[c] = "ok";
     const cols = visibleClients(scan(allOk));
     expect(cols).toEqual([...ALL_CLIENTS]);
     expect(cols).toHaveLength(ALL_CLIENTS.length);
+  });
+
+  it("HIDES a file-present non-core client that is NOT scannable (no clientScanners parser)", () => {
+    // Finding 3: a presence-probed-but-unparsed client (copilot-cli/amazon-q/
+    // openhands/aider in production) gets no enabled column even with an 'ok'
+    // config file — /api/scan can never report its per-entry presence, so the
+    // cell could never be reconciled/demigrated after a migrate. Here 'aider'
+    // is file-present but NOT in the scannable capability map, while 'zed' is
+    // both scannable and file-present.
+    const caps: NonNullable<ScanResult["client_capabilities"]> = {};
+    for (const c of CORE_CLIENTS) caps[c] = { scannable: true, remote_http_capable: false };
+    caps.zed = { scannable: true, remote_http_capable: false };
+    caps.aider = { scannable: false, remote_http_capable: false };
+    const cols = visibleClients(
+      scan({ zed: "ok", aider: "ok" }, [], caps),
+    );
+    expect(cols).toContain("zed");
+    expect(cols).not.toContain("aider");
+  });
+
+  it("shows ONLY the core set on a fresh profile (no overflow), even with the full presence map", () => {
+    // The anti-overflow guarantee end-to-end: a fresh profile reports every
+    // non-core client as 'missing' or 'missing-init-*' (no real config file),
+    // so NONE earn a column regardless of scannability — exactly the core set.
+    const fresh: Record<string, string> = {};
+    let i = 0;
+    for (const c of NON_CORE_CLIENTS) {
+      // alternate the absent-but-creatable states to prove none counts as
+      // detection for a non-core column.
+      fresh[c] = i % 2 === 0 ? "missing" : "missing-init-possible";
+      i++;
+    }
+    const cols = visibleClients(scan(fresh));
+    expect(cols).toEqual([...CORE_CLIENTS]);
+    expect(cols).toHaveLength(CORE_CLIENTS.length);
   });
 
   it("surfaces a detected backend client NOT in the static NON_CORE_CLIENTS list (drift-resilient)", () => {
@@ -556,24 +630,26 @@ describe("visibleClients (detection-gated non-core columns)", () => {
     expect(cols[cols.length - 1]).toBe("future-client-xyz");
   });
 
-  it("shows a non-core client whose parent dir exists ('missing-init-possible')", () => {
+  it("HIDES a non-core client whose config FILE is absent but parent dir exists ('missing-init-possible')", () => {
+    // Finding 1: parent-dir-exists / file-absent is NOT detection for a
+    // derived non-core column. On a fresh profile dozens of niche-client
+    // config dirs would otherwise overflow the matrix. A non-core client
+    // earns a column only when an actual config FILE exists.
     const cols = visibleClients(scan({ windsurf: "missing-init-possible" }));
-    expect(cols).toContain("windsurf");
+    expect(cols).not.toContain("windsurf");
   });
 
-  // F1 (G17 wave-2 regression): on a CLEAN install a wave-2 client whose
-  // config dir is absent-but-securely-creatable classifies
-  // "missing-init-creatable". That state MUST be treated as detected so the
-  // column (and its per-column Initialize button) appears — otherwise G17's
-  // whole point ("инициализация не везде доступна при чистой установке") is
-  // silently broken for the wave-2 set. Pre-fix DETECTED_PRESENCE_STATES
-  // omitted "missing-init-creatable" and this column was hidden.
-  it("shows a wave-2 client whose parent dir is absent-but-creatable ('missing-init-creatable')", () => {
+  it("HIDES a non-core client whose config dir is absent-but-creatable ('missing-init-creatable')", () => {
+    // Same anti-overflow gate (Finding 1): "missing-init-creatable" means the
+    // file AND its parent are absent (just securely creatable). On a CLEAN
+    // install that is the overflow case — every niche client would show. The
+    // clean-install Initialize guarantee G17 added is a CORE-client guarantee
+    // (core columns are always shown and matrix-stable); a NON-core client
+    // must have a real config file before it earns a column.
     const cols = visibleClients(scan({ kiro: "missing-init-creatable" }));
-    expect(cols).toContain("kiro");
-    // An undetected sibling stays hidden — proves it's the state, not a
-    // blanket "show everything" change.
-    expect(cols).not.toContain("zed");
+    expect(cols).not.toContain("kiro");
+    // No non-core client is file-present here → exactly the core set.
+    expect(cols).toEqual([...CORE_CLIENTS]);
   });
 
   it("shows a non-core client in an error state (config present but unreadable)", () => {
@@ -609,6 +685,55 @@ describe("visibleClients (detection-gated non-core columns)", () => {
   it("tolerates a null/undefined scan", () => {
     expect(visibleClients(null)).toEqual([...CORE_CLIENTS]);
     expect(visibleClients(undefined)).toEqual([...CORE_CLIENTS]);
+  });
+});
+
+// remoteHTTPCapableClients derives the Catalog direct-install client choices
+// from the backend capability map. Only URL-native (remote-http-capable)
+// clients are offered — a relay-stdio client would reject a URL-only entry.
+describe("remoteHTTPCapableClients", () => {
+  function caps(
+    entries: Record<string, boolean>,
+  ): Record<string, ClientCapability> {
+    const out: Record<string, ClientCapability> = {};
+    for (const [c, remote] of Object.entries(entries)) {
+      out[c] = { scannable: true, remote_http_capable: remote };
+    }
+    return out;
+  }
+
+  it("returns only the URL-native clients, in canonical column order", () => {
+    const got = remoteHTTPCapableClients(
+      caps({
+        "claude-code": true,
+        cursor: true,
+        vscode: true,
+        // relay-stdio clients: NOT URL-native → excluded.
+        aider: false,
+        zencoder: false,
+        pi: false,
+      }),
+    );
+    expect(got).toEqual(["claude-code", "cursor", "vscode"]);
+    // No relay-stdio client leaked in.
+    expect(got).not.toContain("aider");
+    expect(got).not.toContain("zencoder");
+  });
+
+  it("returns an empty list for a null/undefined/empty capability map", () => {
+    expect(remoteHTTPCapableClients(null)).toEqual([]);
+    expect(remoteHTTPCapableClients(undefined)).toEqual([]);
+    expect(remoteHTTPCapableClients({})).toEqual([]);
+  });
+
+  it("orders core URL-native clients before non-core ones", () => {
+    // A hypothetical non-core URL-native client sorts after the core ones.
+    const got = remoteHTTPCapableClients(
+      caps({ vscode: true, "claude-code": true, "future-remote": true }),
+    );
+    // claude-code (core) precedes vscode (core) precedes the unknown extra.
+    expect(got[0]).toBe("claude-code");
+    expect(got[got.length - 1]).toBe("future-remote");
   });
 });
 

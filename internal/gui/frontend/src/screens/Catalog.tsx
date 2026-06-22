@@ -6,11 +6,11 @@ import {
   refreshMarketplace,
 } from "../api";
 import type { MarketplaceInstallResult, ReadinessReport } from "../api";
-import { CORE_CLIENTS, NON_CORE_CLIENTS } from "../lib/routing";
+import { remoteHTTPCapableClients } from "../lib/routing";
 import { InfoTip } from "../components/InfoTip";
 import { ReadinessPanel, readinessBlockerCount } from "../components/ReadinessPanel";
 import { AddSecretModal } from "../components/AddSecretModal";
-import type { DaemonStatus } from "../types";
+import type { ClientCapability, DaemonStatus } from "../types";
 
 // Mirrors catalogEntry in internal/gui/manifest.go — one row of the GET
 // /api/catalog body. Each shipped server projects {name, description,
@@ -105,6 +105,15 @@ export function CatalogScreen() {
   // /api/status. The status array carries one row per daemon, so multiple
   // rows can share a `server`; collapse to a Set of names.
   const [installedServers, setInstalledServers] = useState<Set<string>>(new Set());
+  // Backend-derived per-client capability map (GET /api/client-capabilities).
+  // The direct-install multiselect derives its URL-native client choices from
+  // this single owner so it can't drift behind the backend remote-http matrix.
+  // null until the (non-fatal) fetch resolves; a failure leaves it null and
+  // the direct-install panel simply offers no clients (honest — better than a
+  // hard-coded mirror that would offer relay-stdio clients that deterministically
+  // fail a direct install).
+  const [clientCapabilities, setClientCapabilities] =
+    useState<Record<string, ClientCapability> | null>(null);
   // Per-row install lifecycle. A row absent from the map is "idle".
   const [installStates, setInstallStates] = useState<Record<string, InstallState>>({});
   // Per-row uninstall lifecycle. A row absent from the map is "idle".
@@ -174,6 +183,19 @@ export function CatalogScreen() {
           }
         } catch {
           if (!cancelled) setMarketplace([]);
+        }
+        // Client-capabilities load is also separate + non-fatal: the
+        // direct-install multiselect needs the backend's URL-native client
+        // set, but a failure here must not blank the store. On failure the
+        // map stays null and the direct panel offers no clients.
+        try {
+          const caps = await fetchOrThrow<Record<string, ClientCapability>>(
+            "/api/client-capabilities",
+            "object",
+          );
+          if (!cancelled) setClientCapabilities(caps);
+        } catch {
+          if (!cancelled) setClientCapabilities(null);
         }
       } catch (err) {
         if (!cancelled) setError((err as Error).message);
@@ -285,6 +307,14 @@ export function CatalogScreen() {
         (e.description ?? "").toLowerCase().includes(q),
     );
   }, [catalog, query]);
+
+  // The URL-native client set the direct-install multiselect may offer,
+  // derived from the backend capability map (single owner) — never a
+  // hard-coded mirror. Empty until /api/client-capabilities resolves.
+  const directClients = useMemo(
+    () => remoteHTTPCapableClients(clientCapabilities),
+    [clientCapabilities],
+  );
 
   if (error) {
     return (
@@ -441,6 +471,7 @@ export function CatalogScreen() {
       <MarketplaceSection
         entries={marketplace}
         installedServers={installedServers}
+        directClients={directClients}
         onRefreshed={setMarketplace}
       />
     </section>
@@ -606,12 +637,6 @@ function CatalogInstallGate({
   );
 }
 
-// The supported direct-mode client list, mirroring the Servers matrix client
-// set (CORE_CLIENTS first, then the non-core opt-in adapters). Direct mode
-// writes the remote URL straight into each selected client config, so the
-// multiselect offers the same superset the rest of the GUI knows about.
-const DIRECT_CLIENTS: readonly string[] = [...CORE_CLIENTS, ...NON_CORE_CLIENTS];
-
 // MarketplaceInstallState tracks the per-entry install lifecycle for one
 // marketplace row, mirroring the shipped-server PerServerInstall pattern
 // (idle → installing → installed → error), keyed per entry id in the parent
@@ -644,9 +669,15 @@ const MARKETPLACE_IDLE: MarketplaceInstallState = { phase: "idle" };
 function MarketplaceSection({
   entries,
   installedServers,
+  directClients,
   onRefreshed,
 }: {
   entries: MarketplaceEntry[];
+  // The backend-derived URL-native client set the direct-install multiselect
+  // may offer (remoteHTTPCapableClients of the /api/client-capabilities map).
+  // Empty until capabilities load; a relay-stdio client is never in it, so
+  // direct install can't be attempted against a client that would reject it.
+  directClients: string[];
   // Names of servers already running per /api/status (same Set the shipped
   // store uses). A marketplace entry whose id OR name is in this set is
   // already installed, so we render an "Installed" badge instead of an
@@ -779,6 +810,7 @@ function MarketplaceSection({
               // we must not offer to install it as "fetch-2").
               installed={installedServers.has(entry.id) || installedServers.has(entry.name)}
               state={states[entry.id] ?? MARKETPLACE_IDLE}
+              directClients={directClients}
               onInstall={runInstall}
             />
           ))}
@@ -796,6 +828,7 @@ function MarketplaceCard({
   entry,
   installed,
   state,
+  directClients,
   onInstall,
 }: {
   entry: MarketplaceEntry;
@@ -804,6 +837,10 @@ function MarketplaceCard({
   // the GUI never offers to install an already-running server.
   installed: boolean;
   state: MarketplaceInstallState;
+  // The backend-derived URL-native client set the direct-install multiselect
+  // renders (remoteHTTPCapableClients). A relay-stdio client is never present,
+  // so the operator can't pick a client a direct install would reject.
+  directClients: string[];
   onInstall: (
     id: string,
     mode: "hub" | "direct",
@@ -923,7 +960,7 @@ function MarketplaceCard({
                 role="group"
                 aria-labelledby={`catalog-marketplace-direct-legend-${entry.id}`}
               >
-                {DIRECT_CLIENTS.map((client) => (
+                {directClients.map((client) => (
                   <label class="catalog-marketplace-client" key={client}>
                     <input
                       type="checkbox"

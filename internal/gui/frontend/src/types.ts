@@ -97,6 +97,32 @@ export interface ScanResult {
   // -> ~/dotfiles/Claude) would render the button only for the click
   // to deterministically fail with INIT_FAILED.
   client_config_presence?: Record<string, ClientConfigState>;
+
+  // client_capabilities is the backend's per-client capability map (keyed by
+  // every clients.SupportedClientNames() id) that the GUI uses to decide which
+  // clients it may safely offer, derived from the single backend owner so it
+  // cannot drift:
+  //   - scannable           — the client has a clientScanners() parser, so the
+  //                           scan reports its per-entry presence truthfully.
+  //                           The Servers matrix shows a non-core column ONLY
+  //                           for a scannable client (a presence-probed-but-
+  //                           unparsed client like copilot-cli/amazon-q/
+  //                           openhands/aider can never have its cell
+  //                           reconciled after a migrate, so it gets no
+  //                           enabled column).
+  //   - remote_http_capable — the adapter accepts a transport=remote-http
+  //                           (URL-native) binding; the Catalog direct-install
+  //                           flow offers ONLY these clients.
+  // Absent (older backend) → visibleClients() falls back to the conservative
+  // "no non-core client is scannable" view (core-only matrix), never overflow.
+  client_capabilities?: Record<string, ClientCapability>;
+}
+
+// ClientCapability mirrors api.ClientCapability — the per-client capability
+// flags surfaced on the scan result and the /api/client-capabilities endpoint.
+export interface ClientCapability {
+  scannable: boolean;
+  remote_http_capable: boolean;
 }
 
 export type ClientConfigState =
