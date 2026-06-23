@@ -152,6 +152,51 @@ describe("perClientRouting", () => {
     );
     expect(r["claude-code"]).toBe("direct");
   });
+  it("tags a PORT-MATCHING hub loopback cell with inherited:true as via-hub-inherited", () => {
+    // Mirrors backend classify "via-hub-inherited": an import-/below-write-target
+    // sourced hub cell is hub-routed but read-only (the hub never wrote it).
+    const r = perClientRouting(
+      { mimocode: { transport: "http", endpoint: "http://127.0.0.1:9120/mcp", inherited: true } },
+      {},
+      true,
+      "time",
+      [9120],
+    );
+    expect(r.mimocode).toBe("via-hub-inherited");
+  });
+  it("a port-matching hub loopback cell with inherited:false stays via-hub (regression)", () => {
+    const r = perClientRouting(
+      { mimocode: { transport: "http", endpoint: "http://127.0.0.1:9120/mcp", inherited: false } },
+      {},
+      true,
+      "time",
+      [9120],
+    );
+    expect(r.mimocode).toBe("via-hub");
+  });
+  it("a port-matching hub loopback cell with inherited ABSENT stays via-hub (regression)", () => {
+    const r = perClientRouting(
+      { mimocode: { transport: "http", endpoint: "http://127.0.0.1:9120/mcp" } },
+      {},
+      true,
+      "time",
+      [9120],
+    );
+    expect(r.mimocode).toBe("via-hub");
+  });
+  it("an inherited hub cell at a NON-matching port is direct (mirrors backend, not via-hub-inherited)", () => {
+    // The backend only sets hasHubInherited inside its port-MATCH branch; a
+    // non-matching inherited cell falls to direct/external like any stale-port
+    // cell. The frontend must mirror that exactly.
+    const r = perClientRouting(
+      { mimocode: { transport: "http", endpoint: "http://127.0.0.1:9999/mcp", inherited: true } },
+      {},
+      true,
+      "time",
+      [9120],
+    );
+    expect(r.mimocode).toBe("direct");
+  });
   it("tags relay transport as via-hub (port check does not apply to relay)", () => {
     const r = perClientRouting({ "codex-cli": { transport: "relay" } });
     expect(r["codex-cli"]).toBe("via-hub");

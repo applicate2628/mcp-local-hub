@@ -201,6 +201,13 @@ export interface ClientPresence {
   endpoint?: string;
   relay_url?: string;
   raw?: unknown;
+  // Mirrors api.ClientEntry.Inherited (`json:"inherited,omitempty"`). True for
+  // a hub-loopback cell whose source is an inherited import (~/.claude.json) or
+  // a config.json layer BELOW the write target — a layer the hub never wrote
+  // and cannot demigrate (multi-layer adapter, currently only MiMoCode).
+  // perClientRouting maps such a cell to "via-hub-inherited" (read-only).
+  // Absent/false on every other client's cell (omitempty on the wire).
+  inherited?: boolean;
 }
 
 // ClientEntry mirrors api.ClientEntry (internal/api/types.go:111). On the
@@ -237,8 +244,16 @@ export type ClientEntry = ClientPresence;
 //                     instead of the misleading generic stat-error
 //                     tooltip. Maps from client_config_presence
 //                     value "error-symlink". 2026-05-19 fix.
+//   "via-hub-inherited" — hub-loopback URL whose source is an inherited import
+//                     (~/.claude.json) or a below-write-target layer the hub
+//                     never wrote (multi-layer adapter, currently only
+//                     MiMoCode). The cell IS hub-routed (rendered checked) but
+//                     read-only/disabled: the hub cannot demigrate what it did
+//                     not write. Remedy: edit the source config to remove it.
+//                     Mirrors backend ScanEntry.Status "via-hub-inherited".
 export type Routing =
   | "via-hub"
+  | "via-hub-inherited"
   | "direct"
   | "available"
   | "not-installed"

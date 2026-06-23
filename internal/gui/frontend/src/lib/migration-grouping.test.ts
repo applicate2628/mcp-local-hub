@@ -20,6 +20,27 @@ describe("groupMigrationEntries", () => {
     expect(g.perSession.map(e => e.name)).toEqual(["d"]);
   });
 
+  it("surfaces status='via-hub-inherited' in its own read-only bucket (visible, NOT dropped, NOT demigratable)", () => {
+    const scan: ScanResult = {
+      at: "2026-04-23T00:00:00Z",
+      entries: [
+        // Import-/below-write-target-sourced hub-loopback entry (backend classify
+        // "via-hub-inherited"): hub-routed but not hub-ownable.
+        {name: "time", status: "via-hub-inherited", managed: false, client_presence: {"mimocode": {transport: "http", endpoint: "http://localhost:9200/mcp", inherited: true}}},
+        // A genuinely owned hub entry stays in the demigratable bucket.
+        {name: "memory", status: "via-hub", managed: true, client_presence: {"claude-code": {transport: "http", endpoint: "http://localhost:9200/mcp"}}},
+      ],
+    };
+    const g = groupMigrationEntries(scan, new Set());
+    // VISIBLE: the inherited row is in its own bucket, not dropped.
+    expect(g.viaHubInherited.map(e => e.name)).toEqual(["time"]);
+    // NOT in the demigratable viaHub bucket.
+    expect(g.viaHub.map(e => e.name)).toEqual(["memory"]);
+    expect(g.viaHub.map(e => e.name)).not.toContain("time");
+    // Not leaked into any other bucket.
+    expect(g.canMigrate.length + g.unknown.length + g.external.length + g.perSession.length + g.dismissed.length).toBe(0);
+  });
+
   it("drops entries with status='not-installed' (no client has them)", () => {
     const scan: ScanResult = {
       at: "2026-04-23T00:00:00Z",
