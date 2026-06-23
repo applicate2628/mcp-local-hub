@@ -1,5 +1,18 @@
 # C1 — `mcphub gui --force`: stuck-instance recovery
 
+> ## Superseded by
+>
+> The "default `--force` opens the lock folder" behavior described below
+> was **reversed** by the reveal-window orphan-flood fix
+> (`work-items/bugs/2026-06-22-explorer-folder-window-orphan-flood.md`).
+> An empirical probe proved `explorer.exe /select` HANDS OFF (the launched
+> process exits within seconds; the persistent window is a different,
+> handed-off PID), so no reliable reaper exists. **Current contract:** bare
+> `--force` is PRINT-ONLY; opening the lock folder is opt-in via
+> `--force --reveal`, which accepts one un-reapable persistent
+> `explorer.exe` window per invocation. Treat every "opens the lock folder"
+> claim in this design memo as superseded by the print-only default.
+
 **Status:** rev 9. Codex r7 returned REVISE on rev 8 (no BLOCKER,
 no SUGGEST blockers) — strict `argv[1] == "gui"` would refuse the
 no-arg Explorer/Start-menu double-click path where
@@ -11,9 +24,9 @@ Design has converged across 7 review rounds.
 
 **Scope:** PR #23 — replace the placeholder `--force` warning with a
 genuinely useful stuck-instance recovery flow. Default `--force` shows
-the diagnostic AND opens the lock folder in the OS file manager, so the
-operator has both the explanation AND immediate one-click access to
-the offending files. An explicit `--force --kill` adds opt-in
+the diagnostic and PRINTS the lock-folder path (PRINT-ONLY — see the
+Superseded-by breadcrumb above; opening the folder is opt-in via
+`--force --reveal`). An explicit `--force --kill` adds opt-in
 destructive automation: verify the recorded PID owns an `mcphub.exe`
 image, kill it, wait for the kernel to release the flock, retry
 acquire. Everything destructive is gated behind `--kill`; bare

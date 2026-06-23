@@ -746,6 +746,12 @@ type Server struct {
 	// intentionally separate from the Serena router because LSP workspace
 	// proxies are sessionless upstreams and need no daemon-session handshake.
 	lspRouterDeps atomic.Pointer[lspRouterDeps]
+
+	// revealSepProcessWarned guards the once-per-process
+	// SeparateProcess=1 detection warning
+	// (separate_process_detect_windows.go). Windows-only; the !windows
+	// detectSeparateProcessOnce shim never touches it.
+	revealSepProcessWarned sync.Once
 }
 
 // NewServer constructs the Server. It registers the ping handler
@@ -966,6 +972,18 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	close(ready)
 	errCh := make(chan error, 1)
 	go func() { errCh <- s.srv.Serve(ln) }()
+
+	// Reveal-window flood advisory (bug
+	// 2026-06-22-explorer-folder-window-orphan-flood): warn once if the
+	// Windows "Launch folder windows in a separate process" setting is on,
+	// since that is the precondition for the orphan explorer.exe flood that
+	// `mcphub gui --force --reveal` can leave behind (one un-reapable
+	// window per invocation). Run AFTER close(ready)+Serve and in a
+	// goroutine: the warn path takes a blocking hub-mcp.log.lock flock, so
+	// running it on the readiness-critical path could let a concurrent log
+	// writer stall GUI readiness (codex bot #423 P2). No-op off-Windows;
+	// fail-soft on read error; idempotent via its own sync.Once.
+	go detectSeparateProcessOnce(s)
 
 	// codex bot phase4 r9 P1 closure on PR #158: run hub startup in
 	// a goroutine so ctx.Done() during the bind transaction (e.g. a
