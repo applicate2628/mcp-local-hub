@@ -290,3 +290,86 @@ func (l *lockingClient) BackupEntryIsHubManaged(backupPath, name string) (manage
 	}
 	return managed, err
 }
+
+// RemovableStdioEntries forwards the OPTIONAL Client method of the same name to
+// the wrapped concrete client, so the register-path inner type-assert
+// (realClientAdapter.RemovableStdioEntries: a.c.(interface{ RemovableStdioEntries... }))
+// actually reaches it. Without this forwarder the assert is made against the
+// lockingClient, which embeds the Client INTERFACE — and RemovableStdioEntries is
+// NOT on that interface (only *mimoCodeClient implements it) — so the assert
+// failed and the cleanup path silently fell back to the merged-view
+// AllStdioEntries(), making the write-target/effective-enabled removability
+// discrimination INERT for the production (NewMimoCode → newLockingClient) chain.
+//
+// It is a plain pass-through (NO config lock): the wrapped method it forwards to
+// (AllStdioEntries / RemovableStdioEntries) is a read-only method that the
+// decorator does not lock — same posture as the embedded AllStdioEntries
+// pass-through — so wrapping it in withConfigReadLock would add no consistency
+// the un-overridden AllStdioEntries already lacks. It dispatches on the CONCRETE
+// l.Client, not the embedded interface, so it routes to *mimoCodeClient's own
+// RemovableStdioEntries. Non-mimo clients have no such method → fall back to
+// their own AllStdioEntries (backward-compatible: identical to pre-forwarder
+// behavior, where the register inner assert also fell back to AllStdioEntries).
+func (l *lockingClient) RemovableStdioEntries() ([]StdioEntry, error) {
+	if c, ok := l.Client.(interface {
+		RemovableStdioEntries() ([]StdioEntry, error)
+	}); ok {
+		return c.RemovableStdioEntries()
+	}
+	return l.Client.AllStdioEntries()
+}
+
+// ActiveStdioEntriesExcludingWriteTarget / ActiveLanguageServerEntriesExcludingWriteTarget
+// forward the two OPTIONAL post-removal active readers to the wrapped concrete
+// client so the register-path inner type-assert reaches *mimoCodeClient's own
+// methods (same forwarding reason as RemovableStdioEntries above; without these
+// the assert is made against the embedded Client interface and silently fails).
+// Plain pass-through, no config lock — read-only, same posture as
+// RemovableStdioEntries. NON-mimo clients have no such method → return (nil, nil):
+// an EMPTY post-removal survivor set means "nothing re-emerges", the correct
+// default for a single-file adapter where RemoveEntry deletes the sole definition.
+// The caller-side workspace-scoped recheck (register.go) then never blocks for a
+// non-mimo client — behavior-unchanged.
+func (l *lockingClient) ActiveStdioEntriesExcludingWriteTarget(name string) ([]StdioEntry, error) {
+	if c, ok := l.Client.(interface {
+		ActiveStdioEntriesExcludingWriteTarget(string) ([]StdioEntry, error)
+	}); ok {
+		return c.ActiveStdioEntriesExcludingWriteTarget(name)
+	}
+	return nil, nil
+}
+
+func (l *lockingClient) ActiveLanguageServerEntriesExcludingWriteTarget(name string) ([]LanguageServerStdioEntry, error) {
+	if c, ok := l.Client.(interface {
+		ActiveLanguageServerEntriesExcludingWriteTarget(string) ([]LanguageServerStdioEntry, error)
+	}); ok {
+		return c.ActiveLanguageServerEntriesExcludingWriteTarget(name)
+	}
+	return nil, nil
+}
+
+// RemovableStdioCandidatesWriteTargetOwned / FindStdioLanguageServerCandidatesWriteTargetOwned
+// forward the OPTIONAL workspace-aware register-grain candidate sources (branch (a)
+// + managed-only) to the wrapped concrete client (only *mimoCodeClient implements
+// them; same forwarding reason as RemovableStdioEntries above). Plain pass-through,
+// no config lock (read-only). The register grain's removableStdioEntriesForDirectCleanup /
+// findStdioLanguageServerCandidatesForDirectCleanup wrappers fall back to the
+// conservative full-survivor methods for any client lacking these, so a non-mimo
+// adapter is behavior-unchanged.
+func (l *lockingClient) RemovableStdioCandidatesWriteTargetOwned() ([]StdioEntry, error) {
+	if c, ok := l.Client.(interface {
+		RemovableStdioCandidatesWriteTargetOwned() ([]StdioEntry, error)
+	}); ok {
+		return c.RemovableStdioCandidatesWriteTargetOwned()
+	}
+	return l.Client.AllStdioEntries()
+}
+
+func (l *lockingClient) FindStdioLanguageServerCandidatesWriteTargetOwned() ([]LanguageServerStdioEntry, error) {
+	if c, ok := l.Client.(interface {
+		FindStdioLanguageServerCandidatesWriteTargetOwned() ([]LanguageServerStdioEntry, error)
+	}); ok {
+		return c.FindStdioLanguageServerCandidatesWriteTargetOwned()
+	}
+	return l.Client.FindStdioLanguageServerEntries()
+}

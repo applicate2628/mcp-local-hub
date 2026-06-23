@@ -973,6 +973,14 @@ type ErrMimoCodeHigherLayerRetainsServer struct {
 	Server      string
 	WriteTarget string
 	Source      mimoCodeShadowSource // the higher layer that still defines the server
+	// WriteTargetUnchanged is true when this error came from the MANAGED PRE-CHECK
+	// in RemoveEntry — i.e. it was returned BEFORE deleteMember ran, so the write
+	// target was NOT mutated (the file is byte-unchanged). It is false on the
+	// post-delete B4 path, where the write-target key WAS removed but a higher
+	// layer still wins. Error() branches the user-facing wording on this so a
+	// pre-check refusal never tells the operator the server was "removed" when the
+	// file was left untouched (bot PR #425 r5: "don't report a delete before it happens").
+	WriteTargetUnchanged bool
 }
 
 func (e *ErrMimoCodeHigherLayerRetainsServer) Error() string {
@@ -999,6 +1007,10 @@ func (e *ErrMimoCodeHigherLayerRetainsServer) Error() string {
 		} else if e.Source.Label != "" {
 			where = e.Source.Label
 		}
+	}
+	if e.WriteTargetUnchanged {
+		return fmt.Sprintf("mimocode: refused to remove server %q from the hub write target %q — it is also defined in %s, a read-only layer MiMoCode merges on top and wins, so removing the write-target entry would NOT unregister the server. The write target was left UNCHANGED; remove mcp.%s from that layer to unregister it",
+			e.Server, e.WriteTarget, where, e.Server)
 	}
 	return fmt.Sprintf("mimocode: removed server %q from the hub write target %q, but it is still defined in %s, which MiMoCode merges on top and wins — the entry remains active; remove mcp.%s from that layer to fully unregister it",
 		e.Server, e.WriteTarget, where, e.Server)
@@ -1326,7 +1338,38 @@ func (o *mimoCodeClient) mimoCodeHomeMimocodeDirShadows(name string) (mimoCodeSh
 // (694-698), so once AddEntry writes mcp.<name> to the write target the import
 // skips that name and the hub entry wins the merge. A claude.json entry therefore
 // can never shadow a name the hub writes — see the closing note in the body.
-func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShadowSource, error) {
+// mimoCodeManagedLayerShadows reports whether either MANAGED layer ABOVE the hub
+// write target — the macOS Managed Preferences (MDM) plist (step 1) or the
+// cross-platform managed config dir (step 1b) — carries a mcp.<name> VALUE that
+// SHADOWS the write target. These are the ONLY two layers that
+// mimoCodeHigherLayerDefining covers but readLayerFiles / readMergedLayersExcluding
+// do NOT fold (they are detect-only, outside the merge-input set — a managed MDM
+// plist and the managed config dir are read-only admin/system policy surfaces the
+// hub never writes and the file merge never reads). It is the SINGLE owner of the
+// managed-layer detection: mimoCodeHigherLayerDefining delegates steps 1+1b here,
+// and the re-resolve simulate
+// (mimoCodeNameReResolvesAfterWriteTargetRemoval) OR-s it in to cover the managed
+// layers the fold misses (bot PR #425 follow-up GAP 1).
+//
+// Order (highest→lowest), matching mimoCodeHigherLayerDefining's verified
+// config.ts precedence:
+//
+//  1. macOS Managed Preferences (MDM) plist — read-only, "override everything".
+//     Routed through the mimoCodeManagedPrefsReader func-var test seam (nil in
+//     production → mimoCodeReadManagedPrefs; replaced on non-darwin CI). The reader
+//     is SHADOW-AWARE (mimoCodeMapShadows in mimoCodeReadManagedPrefs), so an
+//     enabled-only:true managed override is NOT returned as a shadow. A read error
+//     propagates.
+//  1b. managed config dir (%ProgramData%\opencode | /Library/Application Support/
+//     opencode | /etc/opencode | MIMOCODE_TEST_MANAGED_CONFIG_DIR) — read-only
+//     admin/system layer, also shadow-aware (mimoCodeMapShadows), warn-skip on an
+//     unparseable file.
+//
+// Returns Kind == "" when neither managed layer shadows. The returned shadow's
+// shape is already the mimoCodeValueShadowsWriteTarget verdict (full-redefine or
+// disabling) — callers that need the active/inert distinction (the simulate)
+// further subtract the disable-only case via mimoCodeShadowIsDisableOnlyOverride.
+func (o *mimoCodeClient) mimoCodeManagedLayerShadows(name string) (mimoCodeShadowSource, error) {
 	// 1. macOS Managed Preferences (MDM) — highest, read-only, detect-and-fail-loud.
 	reader := mimoCodeManagedPrefsReader
 	if reader == nil {
@@ -1344,6 +1387,20 @@ func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShado
 	// /Library/Application Support/opencode (darwin), /etc/opencode (linux), or
 	// MIMOCODE_TEST_MANAGED_CONFIG_DIR.
 	if src := mimoCodeManagedConfigDirShadows(name); src.Kind != "" {
+		return src, nil
+	}
+	return mimoCodeShadowSource{}, nil
+}
+
+func (o *mimoCodeClient) mimoCodeHigherLayerDefining(name string) (mimoCodeShadowSource, error) {
+	// 1 + 1b. MANAGED layers (MDM plist, managed config dir) — extracted to the
+	// single owner mimoCodeManagedLayerShadows and delegated here (bot PR #425
+	// follow-up GAP 1: the simulate path OR-s in the SAME helper to cover the
+	// managed layers the file fold misses). Behavior is byte-identical to the prior
+	// inline steps 1+1b.
+	if src, err := o.mimoCodeManagedLayerShadows(name); err != nil {
+		return mimoCodeShadowSource{}, err
+	} else if src.Kind != "" {
 		return src, nil
 	}
 	// 2. Inline content. SHADOW-AWARE (bot PR #420 r17 finding B5): an
@@ -1561,7 +1618,50 @@ func mimoCodeMapDefines(m map[string]any, name string) bool {
 // Missing file layers are skipped (treated as empty); a parse error on a present
 // layer (file OR inline) propagates. JSONC (comments + trailing commas) is
 // tolerated via the shared parseJSONCBytes helper.
+//
+// This is the un-excluded merge: a thin delegation to readMergedLayersExcluding("")
+// so the merge body has exactly ONE owner (bot PR #425 re-resolve redesign).
 func (o *mimoCodeClient) readMergedLayers() (map[string]any, error) {
+	return o.readMergedLayersExcluding("")
+}
+
+// readMergedLayersExcluding is the single merge body behind readMergedLayers. It
+// is byte-identical to the historical readMergedLayers EXCEPT one surgical
+// difference: when skipName != "" and the layer being folded is the hub's
+// WRITE TARGET (identified by physical equality mimoCodePathsSamePhysical(f,
+// o.path) — the same single-owner helper the AddEntry shadow walk uses), it
+// deletes skipName from a COPY of that layer's parsed `mcp` map BEFORE folding it
+// into the deep-merge. This simulates "what does the merged read look like after
+// RemoveEntry(skipName) from the write target" without ever mutating the live
+// parsed layer maps and without forking the merge.
+//
+// WHY PRE-FOLD ON A COPY, NOT POST-MERGE SUBTRACTION (bot PR #425 re-resolve
+// redesign, architect-owned): removing the write-target key changes the merge
+// INPUTS, not just the output. Subtracting skipName from the FULL merge after the
+// fact is wrong on two MiMoCode merge mechanics:
+//   - skip-if-name-exists: the ~/.claude.json import only ADDS a name not already
+//     defined above. With the write-target key present the import skips it; with
+//     the key gone the import RE-EMERGES the entry. Post-merge subtraction would
+//     never let the import in.
+//   - enabled-only overlay: a higher {enabled:true} overlay overlays its flag onto
+//     the LOWER write-target entry (mimoCodeMergeMCPEntry). Once the write-target
+//     entry is gone the overlay has no lower entry to overlay onto, so it stays a
+//     content-less inert stub. Post-merge subtraction would lose that distinction
+//     and keep the overlaid (active) entry visible.
+//
+// The COPY is mandatory: mimoCodeDeepMerge seeds the first `mcp`-defining layer by
+// reference and then mutates dst[mcp] in place, so the parsed write-target layer's
+// `mcp` map can be aliased into the merged result — an in-place delete would
+// corrupt the live layer and leak into a later readMergedLayers() on the same
+// process. Only the per-layer `mcp` sub-map is shallow-copied (one extra map per
+// the single write-target layer); the entry VALUES are shared, which is safe
+// because the simulate only DELETES a key, never edits a value.
+//
+// skipName == "" reproduces the historical merge exactly (no layer is altered),
+// so readMergedLayers and every existing caller are byte-for-byte unchanged.
+// Missing file layers are skipped; a parse error on a present layer (file OR
+// inline) propagates; the ~/.claude.json import stays best-effort-swallowed.
+func (o *mimoCodeClient) readMergedLayersExcluding(skipName string) (map[string]any, error) {
 	merged := map[string]any{}
 	for _, f := range o.readLayerFiles() {
 		data, err := readRawConfig(f)
@@ -1575,6 +1675,14 @@ func (o *mimoCodeClient) readMergedLayers() (map[string]any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", f, err)
 		}
+		// WRITE-TARGET key exclusion (the only divergence from the historical
+		// body): drop skipName from a COPY of this layer's `mcp` map before the
+		// fold, so the deep-merge sees the inputs RemoveEntry(skipName) would
+		// leave. Only the write target is altered (it is the sole file the hub's
+		// RemoveEntry touches); every other layer folds verbatim.
+		if skipName != "" && mimoCodePathsSamePhysical(f, o.path) {
+			m = mimoCodeLayerWithoutMCPName(m, skipName)
+		}
 		merged = mimoCodeDeepMerge(merged, m)
 	}
 	// MIMOCODE_CONFIG_CONTENT inline layer — a JSONC STRING, not a file path, so
@@ -1582,7 +1690,10 @@ func (o *mimoCodeClient) readMergedLayers() (map[string]any, error) {
 	// when unset OR in the state-safe single-file mode (direct/test construction
 	// leaves o.inlineContent empty). A parse error on a present inline string
 	// propagates — a malformed MIMOCODE_CONFIG_CONTENT must not be silently
-	// dropped (that would re-introduce a silent-wrong-merge).
+	// dropped (that would re-introduce a silent-wrong-merge). The inline layer is
+	// NOT the write target (the hub never writes MIMOCODE_CONFIG_CONTENT), so
+	// skipName never excludes it — a name the inline layer defines correctly still
+	// re-resolves after a write-target removal.
 	if o.inlineContent != "" {
 		m, err := parseJSONCBytes([]byte(o.inlineContent))
 		if err != nil {
@@ -1601,10 +1712,44 @@ func (o *mimoCodeClient) readMergedLayers() (map[string]any, error) {
 	// error here is therefore effectively always nil today, but the signature is
 	// kept for symmetry with the other merge steps and so a future hard-failure
 	// import mode stays a one-line change.
+	//
+	// When skipName excluded the write-target key, this import is what lets the
+	// re-resolve simulate observe the ~/.claude.json RE-EMERGENCE: with the
+	// write-target name gone, skip-if-name-exists no longer fires for that name and
+	// the import adds it back — exactly the merged read RemoveEntry would produce.
 	if err := o.mergeClaudeImport(merged); err != nil {
 		return nil, err
 	}
 	return merged, nil
+}
+
+// mimoCodeLayerWithoutMCPName returns a layer map equivalent to m but with
+// mcp.<name> deleted, WITHOUT mutating m or any map it shares with the live
+// parsed config. When m has no `mcp` map, or that map does not define name, m is
+// returned unchanged (no copy made — nothing to drop). Otherwise a shallow copy
+// of the top-level map and a shallow copy of its `mcp` sub-map are produced, the
+// name is deleted from the copied sub-map, and the rest of the layer (entry
+// VALUES, other top-level keys) is shared by reference. Sharing the values is
+// safe: the re-resolve simulate only removes a key, it never edits an entry.
+func mimoCodeLayerWithoutMCPName(m map[string]any, name string) map[string]any {
+	servers, ok := m[mimoCodeMCPKey].(map[string]any)
+	if !ok {
+		return m
+	}
+	if _, present := servers[name]; !present {
+		return m
+	}
+	serversCopy := make(map[string]any, len(servers))
+	for k, v := range servers {
+		serversCopy[k] = v
+	}
+	delete(serversCopy, name)
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	out[mimoCodeMCPKey] = serversCopy
+	return out
 }
 
 // MimoCodeDisableClaudeImportEnv is MiMoCode's env flag that disables the Claude
@@ -2463,6 +2608,47 @@ func (o *mimoCodeClient) RemoveEntry(name string) error {
 	if ownErr != nil {
 		return ownErr
 	}
+	// MANAGED-LAYER RETENTION PRE-CHECK (bot PR #425 follow-up — write-then-fail
+	// data-loss). deleteMember below MUTATES the write target on disk (o.path); the
+	// B4 retention guard further down then fires AFTER the mutation, so for a
+	// retained MANAGED layer the file was already edited when the typed error
+	// returns — the caller sees an error yet the write target lost the entry. The
+	// MANAGED layers (MDM plist, managed config dir) are read-only and cannot be
+	// removed by the hub, so a managed retention is decidable BEFORE the delete and
+	// must short-circuit it: when the write target physically held the name AND an
+	// ACTIVE managed layer (full-redefine/disabling, minus the inert disable-only
+	// stub) still defines it, return ErrMimoCodeHigherLayerRetainsServer WITHOUT
+	// touching the file. SCOPED TO MANAGED ONLY: the file/inline/below-layer and the
+	// disable-only-overlay outcomes are decided by the B4 post-delete path below,
+	// BYTE-IDENTICAL to before (this pre-check never alters them — it only diverts
+	// the managed-retain case, which the post-delete path would have reported anyway,
+	// to fire before the mutation rather than after it). The managed pre-check reuses
+	// the SAME two owners (mimoCodeManagedLayerShadows + mimoCodeShadowIsDisableOnlyOverride)
+	// the post-delete guard and the re-resolve simulate use, so its verdict cannot
+	// diverge from the post-delete managed verdict.
+	if hadOwnValue {
+		managedRetains, err := o.mimoCodeManagedLayerReResolves(name)
+		if err != nil {
+			return err
+		}
+		if managedRetains {
+			// Active managed retention — refuse BEFORE deleteMember so the write target
+			// is left byte-unchanged (no write-then-fail). The operator must edit the
+			// managed (read-only) layer named here. Re-read the source for the typed
+			// error's Source field (the same layer mimoCodeManagedLayerReResolves just
+			// classified active); a reader error here propagates fail-closed.
+			managed, err := o.mimoCodeManagedLayerShadows(name)
+			if err != nil {
+				return err
+			}
+			return &ErrMimoCodeHigherLayerRetainsServer{
+				Server:               name,
+				WriteTarget:          o.path,
+				Source:               managed,
+				WriteTargetUnchanged: true, // pre-check refused BEFORE deleteMember — file untouched (bot #425 r5)
+			}
+		}
+	}
 	// Comment-preserving delete on the top write layer only; absence is a no-op.
 	if err := o.deleteMember(name); err != nil {
 		return err
@@ -2505,9 +2691,12 @@ func (o *mimoCodeClient) RemoveEntry(name string) error {
 	// the shadowing layer's OWN value is a content-less enabled-only override, the
 	// removal succeeded; return cleanly. Any ACTIVE definition — a full redefinition
 	// carrying type/command/url, INCLUDING a disabled-FULL {type,url,enabled:false}
-	// (which still re-emerges a server-shaped key; consistent with the "DISABLED
-	// ENTRIES COUNT" semantic in mimoCodeNameReResolvesAfterWriteTargetRemoval), or a
-	// non-map scalar — still fails loud naming the layer the operator must edit.
+	// (which still re-emerges a server-shaped key in a HIGHER layer; consistent with
+	// the higher-layer-shadow semantic in
+	// mimoCodeNameReResolvesAfterWriteTargetRemoval — see "ENABLED LOWER/IMPORT
+	// ENTRIES COUNT; DISABLED ONES DO NOT" there, which leaves the higher-layer
+	// branch unchanged), or a non-map scalar — still fails loud naming the layer the
+	// operator must edit.
 	disableOnly, err := o.mimoCodeShadowIsDisableOnlyOverride(shadow, name)
 	if err != nil {
 		return err
@@ -2632,99 +2821,197 @@ func (o *mimoCodeClient) mimoCodeDefinedAtOrAboveWriteTarget(name string) (bool,
 	return false, nil
 }
 
+// mimoCodeReResolveConsumer selects which destructive consumer's ACTIVE-set
+// definition the re-resolve predicate applies after the write-target key is
+// simulated away. Both consumers compute their candidate set over the SAME
+// merged + disabled-dropped + command-array-normalized view; they differ ONLY in
+// the final survivor filter (which entries count as "active membership"):
+//   - reResolveConsumerStdio: collectStdioEntries (any non-empty-command stdio
+//     entry) — the RemovableStdioEntries set.
+//   - reResolveConsumerLSP: findLanguageServerStdioInMap (the stdio entries that
+//     ALSO match the mcp-language-server --lsp invocation) — the
+//     FindStdioLanguageServerEntries set.
+type mimoCodeReResolveConsumer int
+
+const (
+	reResolveConsumerStdio mimoCodeReResolveConsumer = iota
+	reResolveConsumerLSP
+)
+
+// mimoCodeNameInActiveSet reports whether mcp.<name> is present in the consumer's
+// ACTIVE membership set computed over the given merged config. It applies the
+// EXACT same active-filter pipeline the consumer itself uses — mimoCodeDropDisabled
+// (drop enabled:false), then mimoCodeNormalizeCommandArrays (MiMoCode array
+// `command` → string command + args), then the consumer's survivor filter
+// (collectStdioEntries for the stdio set, findLanguageServerStdioInMap for the
+// LSP set). Routing through the SAME owners (no re-derivation) is the whole point
+// of the redesign: the re-resolve decision uses the identical computation that
+// decided the name was an active candidate in the first place.
+func mimoCodeNameInActiveSet(merged map[string]any, name string, consumer mimoCodeReResolveConsumer) bool {
+	servers, _ := merged[mimoCodeMCPKey].(map[string]any)
+	active := mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers))
+	switch consumer {
+	case reResolveConsumerLSP:
+		for _, e := range findLanguageServerStdioInMap(active) {
+			if e.Name == name {
+				return true
+			}
+		}
+	default: // reResolveConsumerStdio
+		for _, e := range collectStdioEntries(active) {
+			if e.Name == name {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // mimoCodeNameReResolvesAfterWriteTargetRemoval reports whether mcp.<name> would
-// STILL resolve in the merged read after a hypothetical RemoveEntry(name) from
-// the WRITE TARGET (mimocode.json = o.path) — i.e. whether ANY layer OTHER than
-// the write target defines the name. Because the merge is REPLACE-by-name (an mcp
-// entry never field-merges across layers; see readMergedLayers), the name
-// re-resolves iff some other layer still defines it after the write-target key is
-// gone.
+// STILL be an ACTIVE entry in the merged read after a hypothetical
+// RemoveEntry(name) from the WRITE TARGET (mimocode.json = o.path) — i.e. whether
+// the name re-emerges as a server MiMoCode actually loads once the hub's
+// write-target key is gone.
 //
-// This is the "sole effective definition" predicate for the DESTRUCTIVE direct-LSP
-// cleanup (bot PR #420 r15 finding 2). FindStdioLanguageServerEntries' consumers
-// (register.go post-register cleanup, `mcphub language-server cleanup`) RemoveEntry
-// each returned name from the write target ONLY. If the SAME name is also defined
-// in another layer, the cleanup logs success yet the other layer re-emerges in the
-// merged read — the LSP entry stays active. So the cleanup must DECLINE (not
-// report) a name that re-resolves after removal: report only when the write target
-// is the SOLE definer.
+// REDESIGN (bot PR #425 re-resolve, architect-owned). Earlier revisions
+// re-derived this BY HAND per layer (mimoCodeHigherLayerDefining +
+// mimoCodeFileDefinesEnabled + the claude import), and the codex bot flagged
+// three rounds of layer-merge edge cases that piecemeal walk got wrong. The
+// asymmetry was the bug factory: the PRE-removal "is it active?" side already used
+// the REAL merge (readJSON → readMergedLayers), while only the POST-removal
+// predicate re-derived membership by hand. This now re-runs the REAL merge with
+// the write target's own mcp.<name> key excluded (readMergedLayersExcluding) and
+// tests post-removal ACTIVE membership with the SAME computation that decided the
+// name was an active candidate — eliminating the hand-walk entirely.
 //
-// LAYER COVERAGE — the complement of the write target, composed from the existing
-// single-owner per-layer membership primitives (NO re-implementation of the merge):
+// WHY THIS IS CORRECT ACROSS THE MERGE MECHANICS:
+//   - skip-if-name-exists (~/.claude.json import): excluding the write-target key
+//     from the merge INPUTS lets the import re-emerge exactly as RemoveEntry would
+//     — the import only skipped the name because the write target defined it.
+//   - enabled-only overlay: a higher {enabled:true} overlay that re-enabled an
+//     enabled:false write-target entry has no lower entry to overlay onto once the
+//     key is excluded, so it stays a content-less inert stub — collectStdioEntries
+//     (which requires a non-empty command, clients.go) correctly excludes it →
+//     does NOT re-resolve → the active direct entry IS removable (the bug this
+//     redesign's parent PR #425 closes).
+//   - disabled lower / disabled import: dropped by mimoCodeDropDisabled in the
+//     active set → does NOT re-resolve → does NOT block removal.
+//   - enabled lower / enabled import / full higher redefine: survive the merge as
+//     an active entry → re-resolves → blocks removal (correct decline).
 //
-//   - HIGHER layers (MDM, inline, MIMOCODE_CONFIG_DIR overlay, MIMOCODE_CONFIG
-//     file, global mimocode.jsonc) → mimoCodeHigherLayerDefining(name). It already
-//     excludes the write target and the claude import, exactly what is needed here.
-//     Post-B5 (bot PR #420 r17) this check is SHADOW-aware: it returns a hit when a
-//     higher layer re-emerges an EFFECTIVE server — a full entry OR a DISABLING
-//     (enabled:false) overlay — and a MISS for an enabled-only:TRUE overlay (a bare
-//     {enabled:true} stub is not a server: with the write target gone it leaves no
-//     loadable command/url, so the destructive cleanup did clear the effective
-//     entry). This is the CORRECT re-resolution semantics: a disabled FULL entry
-//     ({type,url,enabled:false}) still has type/url → it is a full redefinition →
-//     it shadows → it counts (see "DISABLED ENTRIES COUNT" below); only the
-//     content-less enabled-only:true stub is (rightly) excluded.
-//   - The config.json layer strictly BELOW the write target → mimoCodeFileDefines.
-//     A name present ONLY there re-emerges after the write-target removal, so it
-//     must count.
-//   - The ~/.claude.json import → claudeImportEntries(). This is the CRITICAL
-//     asymmetry from the AddEntry shadow guard (mimoCodeHigherLayerDefining) and
-//     mimoCodeDefinedAtOrAboveWriteTarget, both of which correctly EXCLUDE the
-//     import: there the import can never shadow a name the hub is about to write /
-//     has written (skip-if-name-exists skips it while the write target defines it).
-//     HERE the sequence is reversed — the write target CURRENTLY defines the name
-//     (so the import is currently skipped), RemoveEntry deletes the write-target
-//     key, and on the next merged read skip-if-name-exists no longer fires → the
-//     import RE-EMERGES the entry. So the import IS a re-emergence source and MUST
-//     be checked. Any re-emerged shape (stdio-LSP or not) means the destructive
-//     RemoveEntry did not clear the name, so name presence in the converted import
-//     — not its shape — is the right test.
+// PARSE-ERROR PROPAGATION (architect claim 2): readMergedLayersExcluding
+// propagates a parse error on any present non-import layer (a malformed
+// config.json / mimocode.jsonc must abort, never silently read as "does not
+// define"); the ~/.claude.json import keeps its best-effort swallow. On err this
+// returns (false, err) so the destructive consumer aborts and deletes nothing.
 //
-// DISABLED ENTRIES COUNT. A disabled FULL entry ({type/command/url, enabled:false})
-// in another layer still re-emerges a server-shaped key (just disabled), so it
-// counts → decline. The config.json-below and claude-import checks test raw name
-// presence (mimoCodeFileDefines / claudeImportEntries) and do NOT drop enabled:false,
-// and the higher-layer shadow check counts a disabled FULL entry (full redefinition).
-// The ONE shape that does NOT count is a content-less enabled-only:TRUE overlay in a
-// higher layer (post-B5): a bare {enabled:true} with no command/url is not a server,
-// so after the write-target removal nothing loadable re-emerges from it — the
-// destructive removal genuinely cleared the effective entry. The question is "does
-// mcp.<name> re-emerge an EFFECTIVE entry after removal", not "is it still an active
-// stdio-LSP". Declining is the conservative side (the operator resolves the
-// ambiguous cross-layer entry manually); reporting-and-deleting on the false belief
-// that the name is gone is the bug this guards.
+// BRANCH (a) is SEPARATE and UNTOUCHED. This predicate is branch (b) only — the
+// cross-layer re-resolve test. The write-target-OWNERSHIP gate
+// (mimoCodeWriteTargetDefinesStdio for RemovableStdioEntries,
+// mimoCodeFileDefinesStdioLSP for FindStdioLanguageServerEntries) stays a distinct
+// caller-side check that runs BEFORE this. Folding ownership into the simulate
+// would break the r12 higher-stdio-over-write-target-remote case (where the
+// write-target value is REMOTE but a higher layer is stdio): branch (a) declines
+// it on shape so RemoveEntry never wrong-deletes the operator-visible remote.
 //
-// State-safe: in the explicit/temp single-file mode mimoCodeHigherLayerDefining
-// reads only the explicit configFile/overlayDir/inline captured at construction
-// (empty for a direct/test client), the config.json-below path sits in the temp
-// dir, and claudeImportEntries returns nil when claudeHome is "" — so it never
-// reaches the real ~/.config/mimocode or ~/.claude.json. A parse error on any
-// present layer propagates (a malformed layer must not be silently read as "does
-// not define" — that would re-introduce the silent-false-success this guards).
-func (o *mimoCodeClient) mimoCodeNameReResolvesAfterWriteTargetRemoval(name string) (bool, error) {
-	// HIGHER layers (MDM / inline / overlay / MIMOCODE_CONFIG / global jsonc).
-	if shadow, err := o.mimoCodeHigherLayerDefining(name); err != nil {
-		return false, err
-	} else if shadow.Kind != "" {
-		return true, nil
-	}
-	// config.json strictly BELOW the write target (in the write-target dir).
-	belowLayer := filepath.Join(filepath.Dir(o.path), "config.json")
-	if defined, err := mimoCodeFileDefines(belowLayer, name); err != nil {
-		return false, err
-	} else if defined {
-		return true, nil
-	}
-	// ~/.claude.json import — a re-emergence source HERE (skip-if-name-exists no
-	// longer skips once the write-target key is removed).
-	imported, err := o.claudeImportEntries()
+// State-safe: in the explicit/temp single-file mode readLayerFiles collapses to
+// the single supplied file, o.inlineContent is empty, and claudeImportEntries
+// returns nil when claudeHome is "" — so the simulate never reaches the real
+// ~/.config/mimocode or ~/.claude.json.
+//
+// MANAGED-LAYER OR (bot PR #425 follow-up GAP 1). readMergedLayersExcluding folds
+// ONLY the read-layer files (readLayerFiles) + inline content + the ~/.claude.json
+// import. The TWO MANAGED layers — the macOS MDM plist and the cross-platform
+// managed config dir — are DETECT-ONLY and live OUTSIDE that fold (they are
+// read-only admin/system policy surfaces the file merge never reads). The OLD
+// hand-walked re-resolve covered them via mimoCodeHigherLayerDefining; the
+// merge-based redesign would silently miss a managed-layer re-emergence, leaving a
+// managed-shadowed gopls / LSP entry wrongly reported removable. So OR-in the
+// SHARED managed detector mimoCodeManagedLayerShadows here, with the SAME
+// active/inert semantic the folded layers use:
+//
+//   - mimoCodeManagedLayerShadows already returns a shadow ONLY for a full-redefine
+//     or a DISABLING value (mimoCodeValueShadowsWriteTarget), never for an
+//     enabled-only:TRUE overlay — so a managed {enabled:true}-only overlay (inert
+//     once the write-target key is gone, the lower content removed) is correctly
+//     NOT a re-emergent server and leaves the entry REMOVABLE.
+//   - then SUBTRACT the disable-only managed case via
+//     mimoCodeShadowIsDisableOnlyOverride: a managed {enabled:false}-only stub has
+//     nothing to merge onto once the write-target entry is deleted, so it retains
+//     NO active server. This mirrors RemoveEntry's B4 retention semantic exactly
+//     (same two owners) — the managed OR means "an ACTIVE server re-emerges".
+//
+// No double-counting: readLayerFiles' paths (dir(o.path) globals, MIMOCODE_CONFIG,
+// the home .mimocode dir, the MIMOCODE_CONFIG_DIR overlay) are DISJOINT from the
+// managed paths (the MDM plist dir and mimoCodeManagedConfigDir()), so a name is
+// never both folded and managed-OR-ed.
+//
+// A managed-reader error (MDM plist read) propagates → the destructive consumer
+// aborts and deletes nothing, same fail-closed posture as the merge parse error.
+func (o *mimoCodeClient) mimoCodeNameReResolvesAfterWriteTargetRemoval(name string, consumer mimoCodeReResolveConsumer) (bool, error) {
+	mergedAfter, err := o.readMergedLayersExcluding(name)
 	if err != nil {
 		return false, err
 	}
-	if _, ok := imported[name]; ok {
+	if mimoCodeNameInActiveSet(mergedAfter, name, consumer) {
 		return true, nil
 	}
-	return false, nil
+	// MANAGED-LAYER OR — the two detect-only layers the fold above misses, delegated
+	// to the single owner so the managed step has exactly one definition shared by
+	// this combined predicate, RemovableStdioEntries, FindStdioLanguageServerEntries,
+	// and the RemoveEntry pre-check (CHANGE 2).
+	return o.mimoCodeManagedLayerReResolves(name)
+}
+
+// mimoCodeManagedLayerReResolves reports whether mcp.<name> re-emerges as an
+// ACTIVE server from a MANAGED layer (the macOS MDM plist or the cross-platform
+// managed config dir) after a hypothetical write-target removal — the managed
+// half of the post-removal re-resolve question, isolated so it can be applied
+// WITHOUT the file-merge survivor (bot PR #425 follow-up GAP 1 + GAP 2, architect
+// GATE PASS). It is the SINGLE owner of the managed-active verdict, consumed by:
+//   - mimoCodeNameReResolvesAfterWriteTargetRemoval (OR-ed after the file survivor);
+//   - RemovableStdioEntries / FindStdioLanguageServerEntries (the ONLY managed
+//     guard once their stdio/LSP-WIDE file survivor moved CALLER-SIDE to a
+//     workspace-scoped recheck — register.go); and
+//   - RemoveEntry's managed-only write-then-fail pre-check (CHANGE 2).
+//
+// The managed layers are DETECT-ONLY (outside readMergedLayersExcluding's fold),
+// read-only to the hub, and carry NO workspace — so the managed verdict is
+// workspace-blind by construction, which is exactly why it stays in the adapter
+// while the workspace-aware file survivor moves to the caller.
+//
+// SEMANTIC (mirrors RemoveEntry's B4 retention, same two owners):
+//   - mimoCodeManagedLayerShadows returns a shadow ONLY for a full-redefine or a
+//     DISABLING value (mimoCodeValueShadowsWriteTarget), never for an
+//     enabled-only:TRUE overlay — a managed {enabled:true}-only overlay goes inert
+//     once the write-target key is gone (no lower content to overlay), so it is NOT
+//     a re-emergent server → the entry stays REMOVABLE;
+//   - SUBTRACT the disable-only managed case (mimoCodeShadowIsDisableOnlyOverride):
+//     a managed {enabled:false}-only stub has nothing to merge onto → retains NO
+//     active server → REMOVABLE.
+// So this returns true ("an ACTIVE managed server re-emerges") only for a managed
+// full-redefine / disabling-FULL value. Consumer-agnostic: a managed full-redefine
+// shadows the name for both the stdio and LSP views (it is one read-only policy
+// surface), so this takes no consumer enum — slightly more conservative than the
+// old LSP-survivor (a managed redefine to a non-LSP shape now also DECLINES the LSP
+// removal), which only ever blocks a removal the hub could not fully clear anyway.
+//
+// A managed-reader error (MDM plist read) propagates → callers fail closed
+// (delete nothing). No double-counting: the managed paths (MDM plist dir +
+// mimoCodeManagedConfigDir()) are disjoint from readLayerFiles' file paths.
+func (o *mimoCodeClient) mimoCodeManagedLayerReResolves(name string) (bool, error) {
+	managed, err := o.mimoCodeManagedLayerShadows(name)
+	if err != nil {
+		return false, err
+	}
+	if managed.Kind == "" {
+		return false, nil
+	}
+	disableOnly, err := o.mimoCodeShadowIsDisableOnlyOverride(managed, name)
+	if err != nil {
+		return false, err
+	}
+	return !disableOnly, nil
 }
 
 // GetEntry reads mcp.<name> from the merged layers and projects it onto MCPEntry.
@@ -3025,36 +3312,81 @@ func (o *mimoCodeClient) AllStdioEntries() ([]StdioEntry, error) {
 // RemovableStdioEntries returns the subset of MiMoCode stdio entries that a
 // single RemoveEntry call can actually remove from the EFFECTIVE configuration.
 // Unlike AllStdioEntries (which intentionally returns the full merged view for
-// non-destructive orphan-process pattern discovery), this method is used by the
-// post-register direct gopls cleanup path, which is destructive and prints a
-// removal success after calling RemoveEntry.
+// non-destructive orphan-process pattern discovery), this method is the
+// destructive-safe view for WORKSPACE-FREE consumers that call RemoveEntry per
+// entry and report success (the WORKSPACE-AWARE register cleanup uses the narrower
+// RemovableStdioCandidatesWriteTargetOwned instead — see below).
 //
 // MiMoCode RemoveEntry deletes only the hub's write target (o.path,
 // mimocode.json). Entries defined in config.json, mimocode.jsonc,
 // MIMOCODE_CONFIG, MIMOCODE_CONFIG_DIR, inline content, home .mimocode, or the
 // Claude import can remain effective after the write-target key is deleted. So
 // the cleanup view must be constrained to entries whose OWN write-target value is
-// stdio AND whose name would not re-resolve from another layer after removal.
-// This mirrors FindStdioLanguageServerEntries' destructive-cleanup scoping, but
-// keeps the broader AllStdioEntries contract unchanged for non-destructive
-// callers.
+// stdio AND whose name would not re-emerge as ACTIVE from a layer the hub cannot
+// remove. This mirrors FindStdioLanguageServerEntries' destructive-cleanup
+// scoping, but keeps the broader AllStdioEntries contract unchanged for
+// non-destructive callers.
+//
+// WORKSPACE-FREE CONSERVATIVE SURVIVOR (architect REVISE → Option C). This method
+// is the candidate source for WORKSPACE-FREE destructive consumers — it keeps the
+// FULL cross-layer survivor (branch (b) = mimoCodeNameReResolvesAfterWriteTargetRemoval,
+// which under CHANGE 1 OR-s in the managed-layer coverage). Any same-name ACTIVE
+// re-emergence from a FILE / inline / import / managed layer DECLINES the entry, so
+// a workspace-blind caller (e.g. `mcphub language-server cleanup` via
+// FindStdioLanguageServerEntries' sibling) never wrong-deletes an entry that
+// re-emerges. The WORKSPACE-SCOPED destructive gopls/LSP register cleanup does NOT
+// consume this method — it consumes the narrower
+// RemovableStdioCandidatesWriteTargetOwned (branch (a) + managed-only) and applies
+// its own workspace-scoped survivor caller-side (register.go), so a same-name
+// DIFFERENT-workspace re-emergence does not block removal of the real entry.
+//
+// EFFECTIVE-enabled, not write-target-enabled (bot PR #425 finding 2). The
+// candidate set is the MERGED stdio view (collectStdioEntries over the
+// disabled-dropped merged servers — the exact AllStdioEntries computation), NOT
+// the disabled-dropped WRITE-TARGET servers. The write-target's own `enabled`
+// flag is the wrong gate: MiMoCode's merge lets a HIGHER enabled-only:true
+// overlay RE-ENABLE a write-target entry whose own value is enabled:false. In
+// that config the effective server is an ACTIVE stdio gopls (the write target
+// supplies the command, the higher overlay flips it on), and deleting the
+// write-target key DOES clear it (the higher enabled-only stub goes inert with no
+// command left to supply) — so it IS removable. Building candidates from the
+// disabled-dropped write target (the prior code) dropped that entry BEFORE the
+// re-resolve check, leaving the active direct gopls behind register cleanup →
+// duplicate LSP processes. Using the merged effective view captures it, and
+// mimoCodeWriteTargetDefinesStdio below re-imposes the write-target ownership
+// constraint so a higher-stdio-over-write-target-remote name is still excluded.
 func (o *mimoCodeClient) RemovableStdioEntries() ([]StdioEntry, error) {
-	data, err := readRawConfig(o.path)
+	merged, err := o.readJSON()
 	if err != nil {
 		return nil, err
 	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-	m, err := parseJSONCBytes(data)
-	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", o.path, err)
-	}
-	servers, _ := m[mimoCodeMCPKey].(map[string]any)
+	servers, _ := merged[mimoCodeMCPKey].(map[string]any)
+	// EFFECTIVE stdio view (same computation as AllStdioEntries): the disabled
+	// drop here is over the MERGED value, so an entry the higher overlay
+	// re-enabled survives, and one disabled with no re-enabling overlay does not.
 	entries := collectStdioEntries(mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers)))
 	out := entries[:0]
 	for _, e := range entries {
-		reResolves, err := o.mimoCodeNameReResolvesAfterWriteTargetRemoval(e.Name)
+		// (a) The write target's OWN value must itself be stdio shape, so
+		// RemoveEntry (which deletes only the write-target key) can actually clear
+		// it. Excludes lower-layer-only entries and the higher-stdio-over-
+		// write-target-remote case (RemoveEntry would delete the write-target
+		// remote and leave the higher stdio active — the r12 HIGH scenario
+		// FindStdioLanguageServerEntries guards, applied here for plain stdio).
+		ownsStdio, err := o.mimoCodeWriteTargetDefinesStdio(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if !ownsStdio {
+			continue
+		}
+		// (b) The name must not re-resolve as an ACTIVE entry from another layer
+		// after the write-target key is removed — the FULL cross-layer survivor
+		// (file / inline / import / managed via the CHANGE-1 managed OR). An
+		// enabled-only:true overlay re-enabling an enabled:false write-target entry
+		// goes inert once the key is gone (no command left), so it does NOT
+		// re-resolve and the entry is reported removable (bot PR #425 finding 2).
+		reResolves, err := o.mimoCodeNameReResolvesAfterWriteTargetRemoval(e.Name, reResolveConsumerStdio)
 		if err != nil {
 			return nil, err
 		}
@@ -3064,6 +3396,87 @@ func (o *mimoCodeClient) RemovableStdioEntries() ([]StdioEntry, error) {
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// RemovableStdioCandidatesWriteTargetOwned is the WORKSPACE-AWARE register-grain
+// candidate source for the destructive direct-gopls cleanup (architect REVISE →
+// Option C, bot PR #425 follow-up GAP 2). It is RemovableStdioEntries with branch
+// (b) reduced to the MANAGED-only re-resolve: it keeps branch (a)
+// (mimoCodeWriteTargetDefinesStdio, the write-target ownership gate) and the
+// MANAGED-layer guard (mimoCodeManagedLayerReResolves — the workspace-blind,
+// read-only MDM plist + managed config dir that readMergedLayersExcluding never
+// folds), but OMITS the FILE/inline/import-WIDE survivor.
+//
+// That file survivor is too coarse for the gopls grain: a same-name lower-layer
+// DIFFERENT stdio (npx / a different LSP language / gopls for a DIFFERENT
+// workspace) would wrongly block removal of the real gopls. So it MOVES CALLER-SIDE
+// to a WORKSPACE-SCOPED recheck (register.go matchingDirectGoplsMCPEntries via
+// ActiveStdioEntriesExcludingWriteTarget), where the workspace identity lives. A
+// managed-active re-emergence still excludes the candidate HERE (workspace-blind,
+// read-only — the hub cannot clear it regardless of workspace).
+//
+// This method is consumed ONLY by the workspace-aware register grain. The
+// workspace-FREE consumers keep the conservative full-survivor RemovableStdioEntries
+// above, so they never wrong-delete a file/import re-emergence.
+func (o *mimoCodeClient) RemovableStdioCandidatesWriteTargetOwned() ([]StdioEntry, error) {
+	merged, err := o.readJSON()
+	if err != nil {
+		return nil, err
+	}
+	servers, _ := merged[mimoCodeMCPKey].(map[string]any)
+	entries := collectStdioEntries(mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers)))
+	out := entries[:0]
+	for _, e := range entries {
+		// (a) write-target ownership gate — unchanged from RemovableStdioEntries.
+		ownsStdio, err := o.mimoCodeWriteTargetDefinesStdio(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if !ownsStdio {
+			continue
+		}
+		// (b) MANAGED-only guard — the file/inline/import survivor is the caller's
+		// workspace-scoped job (register.go), so only the workspace-blind managed
+		// retention excludes a candidate here.
+		managedRetains, err := o.mimoCodeManagedLayerReResolves(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if managedRetains {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// mimoCodeWriteTargetDefinesStdio reports whether the WRITE TARGET's (o.path) OWN
+// value for mcp.<name> is itself a stdio entry — it physically carries a
+// `command` (string or MiMoCode array form). It reads the write target's verbatim
+// own value via mimoCodeFileEntryValue (single owner of the write-target raw
+// read+parse, independent of the merged multi-layer view) and routes the shape
+// decision through the SAME normalization the merged-view stdio match applied
+// (mimoCodeNormalizeCommandArrays → non-empty string `command`), so the write
+// target is judged by the exact owner that produced the candidate. NO disabled
+// drop: an enabled:false write-target value re-enabled by a higher overlay still
+// OWNS the stdio shape RemoveEntry will delete, which is exactly what this gate
+// must confirm. A missing write target / absent name / non-stdio value → false; a
+// parse error on present bytes propagates.
+func (o *mimoCodeClient) mimoCodeWriteTargetDefinesStdio(name string) (bool, error) {
+	value, ok, err := mimoCodeFileEntryValue(o.path, name)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+	normalized := mimoCodeNormalizeCommandArrays(map[string]any{name: value})
+	entry, ok := normalized[name].(map[string]any)
+	if !ok {
+		return false, nil
+	}
+	cmd, _ := entry["command"].(string)
+	return cmd != "", nil
 }
 
 // FindStdioLanguageServerEntries scans the merged `mcp` for stdio entries
@@ -3126,10 +3539,18 @@ func (o *mimoCodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 	// re-resolve after a hypothetical write-target removal: report only when the
 	// write target is the SOLE defining layer.
 	// mimoCodeNameReResolvesAfterWriteTargetRemoval owns that cross-layer predicate
-	// (composing the existing per-layer membership helpers; it does NOT fork the
-	// merge), and crucially COUNTS the ~/.claude.json import — opposite the AddEntry
-	// shadow guard's exclusion — because skip-if-name-exists stops skipping once the
+	// (the FULL file/inline/import survivor, plus the CHANGE-1 managed OR), and
+	// crucially COUNTS the ~/.claude.json import — opposite the AddEntry shadow
+	// guard's exclusion — because skip-if-name-exists stops skipping once the
 	// write-target key is gone.
+	//
+	// WORKSPACE-FREE CONSERVATIVE SURVIVOR (architect REVISE → Option C). This method
+	// is consumed by the WORKSPACE-FREE `mcphub language-server cleanup`
+	// (cli/language_server.go), so it KEEPS the full cross-layer survivor: any
+	// same-name ACTIVE re-emergence declines, preventing a false-success delete.
+	// The WORKSPACE-AWARE register cleanup does NOT consume this method — it consumes
+	// FindStdioLanguageServerCandidatesWriteTargetOwned (branch (a) + managed-only)
+	// and applies its own workspace-scoped survivor caller-side.
 	out := matched[:0]
 	for _, e := range matched {
 		defined, err := mimoCodeFileDefinesStdioLSP(o.path, e.Name)
@@ -3139,20 +3560,122 @@ func (o *mimoCodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 		if !defined {
 			continue
 		}
-		reResolves, err := o.mimoCodeNameReResolvesAfterWriteTargetRemoval(e.Name)
+		reResolves, err := o.mimoCodeNameReResolvesAfterWriteTargetRemoval(e.Name, reResolveConsumerLSP)
 		if err != nil {
 			return nil, err
 		}
 		if reResolves {
-			// Another layer also defines this name → RemoveEntry from the write
-			// target would NOT clear it (the other layer re-emerges). Decline so the
-			// destructive cleanup does not falsely report a removable LSP entry the
-			// hub cannot fully remove.
+			// Another layer re-resolves this name as an ACTIVE stdio mcp-language-
+			// server entry after the write-target key is removed → RemoveEntry would
+			// NOT clear it (the other layer re-emerges). Decline so the destructive
+			// cleanup does not falsely report a removable LSP entry the hub cannot
+			// fully remove. The LSP active-set survivor filter
+			// (findLanguageServerStdioInMap) is applied inside the predicate, so a
+			// non-LSP same-named re-emergence in another layer does not block the LSP
+			// cleanup.
 			continue
 		}
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// FindStdioLanguageServerCandidatesWriteTargetOwned is the WORKSPACE-AWARE
+// register-grain candidate source for the destructive direct-LSP cleanup (architect
+// REVISE → Option C, bot PR #425 follow-up GAP 2). It is FindStdioLanguageServerEntries
+// with branch (b) reduced to the MANAGED-only re-resolve: it keeps branch (a)
+// (mimoCodeFileDefinesStdioLSP, the write-target stdio-LSP shape gate) and the
+// MANAGED-layer guard (mimoCodeManagedLayerReResolves), but OMITS the
+// FILE/inline/import-WIDE LSP survivor.
+//
+// That survivor is too coarse for the LSP grain: a same-name lower-layer
+// mcp-language-server for a DIFFERENT workspace re-emerges as an active LSP entry
+// and would wrongly block removal of the real workspace-A entry. So it MOVES
+// CALLER-SIDE to a WORKSPACE-SCOPED recheck (register.go
+// matchingDirectLanguageServerEntries via ActiveLanguageServerEntriesExcludingWriteTarget).
+// A managed-active re-emergence (workspace-blind, read-only) still excludes the
+// candidate HERE.
+//
+// Consumed ONLY by the workspace-aware register grain. The workspace-FREE
+// `mcphub language-server cleanup` keeps the conservative full-survivor
+// FindStdioLanguageServerEntries above.
+func (o *mimoCodeClient) FindStdioLanguageServerCandidatesWriteTargetOwned() ([]LanguageServerStdioEntry, error) {
+	m, err := o.readJSON()
+	if err != nil {
+		return nil, err
+	}
+	servers, _ := m[mimoCodeMCPKey].(map[string]any)
+	matched := findLanguageServerStdioInMap(mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers)))
+	out := matched[:0]
+	for _, e := range matched {
+		// (a) write-target stdio-LSP shape gate — unchanged from
+		// FindStdioLanguageServerEntries.
+		defined, err := mimoCodeFileDefinesStdioLSP(o.path, e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if !defined {
+			continue
+		}
+		// (b) MANAGED-only guard — the file/inline/import survivor is the caller's
+		// workspace-scoped job (register.go).
+		managedRetains, err := o.mimoCodeManagedLayerReResolves(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if managedRetains {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, nil
+}
+
+// ActiveStdioEntriesExcludingWriteTarget returns the ACTIVE stdio entries that
+// re-emerge in the merged read AFTER a hypothetical RemoveEntry(name) from the
+// WRITE TARGET — i.e. collectStdioEntries over readMergedLayersExcluding(name),
+// the SAME active-stdio computation RemovableStdioEntries / AllStdioEntries use.
+// It is the workspace-free, name-scoped post-removal reader the caller-side
+// WORKSPACE-SCOPED gopls survivor recheck consumes (register.go
+// matchingDirectGoplsMCPEntries, bot PR #425 follow-up GAP 2, architect GATE PASS).
+//
+// It deliberately carries NO managed layer (managed retention is the in-adapter
+// mimoCodeManagedLayerReResolves guard) and NO workspace (the workspace identity
+// lives only in register.go; the caller applies directEntryWorkspaceMatches over
+// each returned entry's Args). The returned StdioEntry set is the full re-emergent
+// active stdio view minus the write target's own mcp.<name>; the caller scans it
+// for a same-name gopls-for-THIS-workspace survivor.
+//
+// State-safe and fail-closed: readMergedLayersExcluding collapses to the single
+// supplied file in explicit/temp mode and propagates a parse error on any present
+// non-import layer (so the destructive caller aborts and deletes nothing).
+func (o *mimoCodeClient) ActiveStdioEntriesExcludingWriteTarget(name string) ([]StdioEntry, error) {
+	mergedAfter, err := o.readMergedLayersExcluding(name)
+	if err != nil {
+		return nil, err
+	}
+	servers, _ := mergedAfter[mimoCodeMCPKey].(map[string]any)
+	return collectStdioEntries(mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers))), nil
+}
+
+// ActiveLanguageServerEntriesExcludingWriteTarget is the LSP-shaped sibling of
+// ActiveStdioEntriesExcludingWriteTarget: the ACTIVE mcp-language-server entries
+// that re-emerge after a hypothetical RemoveEntry(name) from the write target,
+// i.e. findLanguageServerStdioInMap over readMergedLayersExcluding(name). It
+// returns LanguageServerStdioEntry so the caller can scope on `Language` (extracted
+// by the single canonical classifier matchLanguageServerStdio inside
+// findLanguageServerStdioInMap — never re-derived caller-side) plus
+// directEntryWorkspaceMatches over Args. Consumed by the workspace-scoped LSP
+// survivor recheck in register.go matchingDirectLanguageServerEntries (bot PR #425
+// follow-up GAP 2). Workspace-free, managed-free, fail-closed — same contract as
+// the stdio reader.
+func (o *mimoCodeClient) ActiveLanguageServerEntriesExcludingWriteTarget(name string) ([]LanguageServerStdioEntry, error) {
+	mergedAfter, err := o.readMergedLayersExcluding(name)
+	if err != nil {
+		return nil, err
+	}
+	servers, _ := mergedAfter[mimoCodeMCPKey].(map[string]any)
+	return findLanguageServerStdioInMap(mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers))), nil
 }
 
 // mimoCodeDropDisabled returns a shallow copy of servers with every entry whose
