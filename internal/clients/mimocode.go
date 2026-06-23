@@ -1552,6 +1552,87 @@ func mimoCodeMapDefines(m map[string]any, name string) bool {
 	return present
 }
 
+// mimoCodeValueIsContentBearing reports whether a mcp.<name> VALUE carries the
+// server's own loadable IDENTITY — a `type`/`command`/`url` (the inverse of
+// mimoCodeIsEnabledOnlyOverride) — rather than being a bare enabled-only overlay
+// ({enabled:<bool>} with no content). A bare {enabled:true} or {enabled:false}
+// overlay does NOT supply a URL/command of its own: it field-merges its `enabled`
+// onto a LOWER full entry, so the URL/command still comes from below (or the
+// ~/.claude.json import). A non-map value (a malformed scalar/array/null) is
+// treated as content-bearing — like mimoCodeValueShadowsWriteTarget (2058), a
+// non-object value is a full (un-mergeable) value present at the layer, so the
+// conservative side is to count it as an own value rather than silently treat it
+// as "no content".
+//
+// This is the SHAPE half of the at/above OWNERSHIP question (bot PR #420 r19
+// finding 1): "does a layer at/above the write target OWN this server's URL?" is
+// NOT bare name-presence — an enabled-only overlay at/above does not own the
+// lower/import URL, so a write target carrying ONLY {enabled:true} over an import
+// hub URL must NOT count as at/above (else the scan offers a demigrate the hub
+// cannot complete: the URL lives in a layer the hub never wrote). The enabled-only
+// semantics stay a SINGLE owner — this reuses mimoCodeIsEnabledOnlyOverride rather
+// than re-encoding the type/command/url discriminator.
+func mimoCodeValueIsContentBearing(value any) bool {
+	entry, ok := value.(map[string]any)
+	if !ok {
+		// Non-object value (scalar / array / null): a full un-mergeable value
+		// present → count as content-bearing (conservative, matches the shadow
+		// predicate's non-map polarity).
+		return true
+	}
+	// A map value owns the URL iff it is NOT an enabled-only overlay (i.e. it
+	// carries type/command/url). Both enabled:true and enabled:false overlays are
+	// enabled-only → not content-bearing → do not own.
+	return !mimoCodeIsEnabledOnlyOverride(entry)
+}
+
+// mimoCodeMapDefinesContentBearing reports whether a parsed config map carries a
+// CONTENT-BEARING mcp.<name> value (mimoCodeValueIsContentBearing) — name present
+// AND its value owns the server's URL/command. The shape-aware variant of
+// mimoCodeMapDefines (bare presence) for the at/above ownership predicate.
+func mimoCodeMapDefinesContentBearing(m map[string]any, name string) bool {
+	servers, _ := m[mimoCodeMCPKey].(map[string]any)
+	if servers == nil {
+		return false
+	}
+	value, present := servers[name]
+	if !present {
+		return false
+	}
+	return mimoCodeValueIsContentBearing(value)
+}
+
+// mimoCodeFileDefinesContentBearing reports whether the JSONC file at path defines
+// a CONTENT-BEARING mcp.<name> (mimoCodeMapDefinesContentBearing). Same read+parse
+// as mimoCodeFileDefines, but a bare enabled-only overlay does NOT count. A
+// missing/empty file → false; a parse error on present bytes propagates (a
+// malformed layer must not be silently read as "not at/above").
+func mimoCodeFileDefinesContentBearing(path, name string) (bool, error) {
+	data, err := readRawConfig(path)
+	if err != nil {
+		return false, err
+	}
+	if len(data) == 0 {
+		return false, nil
+	}
+	m, err := parseJSONCBytes(data)
+	if err != nil {
+		return false, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return mimoCodeMapDefinesContentBearing(m, name), nil
+}
+
+// mimoCodeInlineDefinesContentBearing is the inline-string analog of
+// mimoCodeFileDefinesContentBearing for the MIMOCODE_CONFIG_CONTENT top layer. A
+// parse error propagates.
+func mimoCodeInlineDefinesContentBearing(content, name string) (bool, error) {
+	m, err := parseJSONCBytes([]byte(content))
+	if err != nil {
+		return false, fmt.Errorf("parse MIMOCODE_CONFIG_CONTENT: %w", err)
+	}
+	return mimoCodeMapDefinesContentBearing(m, name), nil
+}
+
 // readMergedLayers reads every READ layer and DEEP-MERGES them lowest-first
 // (config.json base, mimocode.json over it, mimocode.jsonc over that, then the
 // MIMOCODE_CONFIG file, then the MIMOCODE_CONFIG_DIR overlay's
@@ -2308,6 +2389,45 @@ func MimoCodeHasClaudeImport(path string) bool {
 	return len(imported) > 0
 }
 
+// MimoCodeNameAtOrAboveWriteTarget reports whether mcp.<name> for the
+// scan-supplied config path is defined by a CONTENT-BEARING entry in the hub's
+// WRITE target (mimocode.json) OR any READ layer ABOVE it — i.e. in a layer the
+// hub's own write could have CLOBBERED or that wins the merge AND that OWNS the
+// server's URL/command. It is the SCAN-side, single-owner answer to "is this
+// server name hub-OWNABLE?" exported so internal/api/scan.go can label an
+// import-inherited hub cell WITHOUT re-deriving the layer model.
+//
+//   - true  → a CONTENT-BEARING (type/command/url-bearing) definition resolves
+//     at/above the write target. The hub can own and demigrate it; classify keeps
+//     the cell "via-hub".
+//   - false → the name's URL/command resolves ONLY from a layer the hub NEVER
+//     writes — the config.json layer strictly BELOW the write target, OR the
+//     ~/.claude.json mcpServers import (skip-if-name-exists) — OR the only thing
+//     at/above is a bare enabled-only overlay ({enabled:<bool>}, no
+//     type/command/url) that field-merges its flag onto that lower/import URL
+//     without owning it. The hub cannot demigrate it (RemoveEntry on the hub's
+//     own key would leave the import/below URL live); for an http hub-loopback
+//     cell scan.go flags ClientEntry.Inherited so classify returns
+//     "via-hub-inherited" (read-only) instead of offering a demigrate switch that
+//     would always fail closed.
+//
+// It wraps the single-owner OWNERSHIP predicate mimoCodeOwnedAtOrAboveWriteTarget
+// (content-bearing, bot PR #420 r19 finding 1 — an enabled-only stub at/above does
+// NOT own the lower/import URL), NOT the bare-presence
+// mimoCodeDefinedAtOrAboveWriteTarget that GetEntry uses to stamp the rollback
+// source. It runs on the SAME client construction MimoCodeMergedConfig /
+// MimoCodeHasClaudeImport use (mimoCodeClientForScanPath), so the env-layer
+// resolution and state-safety gate (MIMOCODE_DISABLE_CLAUDE_CODE_MCP +
+// global-layer-name check) are identical — a temp/test path stays single-file and
+// never reads the developer's real config. A parse error on a present layer
+// propagates (a malformed layer must not be silently read as "not at/above");
+// scan.go fails open to NOT-inherited on that error (the backend demigrate gate
+// still fail-closes, so the worst case is the pre-fix cryptic Apply error, never a
+// wrong write).
+func MimoCodeNameAtOrAboveWriteTarget(path, name string) (bool, error) {
+	return mimoCodeClientForScanPath(path).mimoCodeOwnedAtOrAboveWriteTarget(name)
+}
+
 // mimoCodeClientForScanPath builds the read-only client a scan/extract entry
 // point uses for a supplied config path, resolving the MIMOCODE_CONFIG file, the
 // MIMOCODE_CONFIG_DIR overlay, the MIMOCODE_CONFIG_CONTENT inline content, and the
@@ -2578,18 +2698,30 @@ var mimoCodeHubRemoteShapeKeys = map[string]bool{
 	"type": true, "url": true, "enabled": true, "headers": true,
 }
 
-// mimoCodeDefinedAtOrAboveWriteTarget reports whether mcp.<name> is defined in
-// the write target (mimocode.json = o.path) OR any READ layer ABOVE it
-// (mimocode.jsonc, the MIMOCODE_CONFIG file, the MIMOCODE_CONFIG_DIR overlay, or
-// the MIMOCODE_CONFIG_CONTENT inline string) — i.e. in any layer the hub's own
-// write could have CLOBBERED, or that wins the merge over the write target. It
-// deliberately EXCLUDES the ONLY layer strictly BELOW the write target,
+// mimoCodeDefinedAtOrAboveWriteTarget reports whether mcp.<name> is defined (bare
+// name presence) in the write target (mimocode.json = o.path) OR any READ layer
+// ABOVE it (mimocode.jsonc, the MIMOCODE_CONFIG file, the MIMOCODE_CONFIG_DIR
+// overlay, or the MIMOCODE_CONFIG_CONTENT inline string) — i.e. in any layer the
+// hub's own write could have CLOBBERED, or that wins the merge over the write
+// target. It deliberately EXCLUDES the ONLY layer strictly BELOW the write target,
 // config.json in the write-target dir: a name present ONLY there is an operator
 // entry the hub never wrote (setMember/deleteMember touch o.path alone — see
 // deleteMember's doc). GetEntry uses this verdict to STAMP SourceBelowWriteTarget
 // (false here = at/above = copy-up-OK; true = below/import = remove-not-copy-up on
 // rollback) rather than to suppress the entry, so read-membership still sees a
 // below-only name — see GetEntry's source-layer split (bot PR #420 finding 1).
+//
+// PRESENCE, not ownership. This is the ROLLBACK-SOURCE predicate: it answers "is
+// the name PHYSICALLY in the write target or a layer above it" so GetEntry can
+// decide copy-up-vs-remove. A bare {enabled:false}/{enabled:true} overlay
+// PHYSICALLY in the write target IS at/above here (SourceBelowWriteTarget=false) —
+// correct, because GetEntry then snapshots the write target's OWN stub value
+// (mimoCodeFileEntryValue / effRaw) for the rollback and never copies a lower
+// layer's command/url up; the rollback is moot for a shadowed name anyway (AddEntry
+// shadow-refuses before any write). The SCAN-side "is the URL hub-OWNABLE?"
+// question is DIFFERENT (an enabled-only stub does not own the lower/import URL) and
+// uses the separate content-bearing predicate mimoCodeOwnedAtOrAboveWriteTarget
+// (bot PR #420 r19 finding 1) — do NOT conflate the two.
 //
 // State-safe: in the explicit/temp single-file mode (basename not a global layer
 // name) readLayerFiles returns only [o.path] (the write target), so the loop
@@ -2629,6 +2761,67 @@ func (o *mimoCodeClient) mimoCodeDefinedAtOrAboveWriteTarget(name string) (bool,
 	// re-emerge via the merge), NOT as a restore candidate that GetEntry would copy
 	// UP into the write target (which would shadow the operator's claude.json entry
 	// forever — the same hazard the config.json exclusion above prevents).
+	return false, nil
+}
+
+// mimoCodeOwnedAtOrAboveWriteTarget reports whether mcp.<name> is OWNED at/above the
+// write target — i.e. whether a CONTENT-BEARING (type/command/url-bearing)
+// definition resolves in the write target (mimocode.json = o.path) OR any READ
+// layer ABOVE it. It is the SCAN-side "is this server's URL hub-OWNABLE?" predicate
+// (bot PR #420 r19 finding 1), DISTINCT from mimoCodeDefinedAtOrAboveWriteTarget
+// (bare presence, used by GetEntry to stamp the rollback SOURCE).
+//
+// OWNERSHIP ≠ PRESENCE. MiMoCode merges a bare enabled-only overlay
+// ({enabled:<bool>} with no type/command/url) by FIELD-MERGING just `enabled` onto
+// a LOWER full entry, so the URL/command still comes from below (the config.json
+// layer) or the ~/.claude.json import. A write target carrying ONLY {enabled:true}
+// over an import/below hub URL therefore does NOT own that URL. Counting it as
+// at/above (as bare presence does) makes the scan stamp Inherited=false and offer a
+// demigrate the hub CANNOT complete — RemoveEntry would clear only the enabled-only
+// key, leaving the import/below URL live. So each layer is judged by
+// mimoCodeFileDefinesContentBearing / mimoCodeInlineDefinesContentBearing (the
+// enabled-only-aware shape gate, single owner mimoCodeIsEnabledOnlyOverride),
+// applied to the write target's OWN value too (the write-target {enabled:true} stub
+// is the actual bug locus). An enabled-only overlay of EITHER polarity (true or
+// false) is not content-bearing → NOT owned (Inherited=true → "via-hub-inherited",
+// read-only); a full entry carrying type/command/url IS content-bearing → owned
+// (stays "via-hub", demigratable). A non-map value (malformed scalar/array) is
+// treated as content-bearing (owned) — the conservative side keeps it demigratable
+// (the backend demigrate gate fails closed if wrong) rather than silently flipping
+// to read-only.
+//
+// Layer set, config.json-below exclusion, claude-import exclusion, and parse-error
+// propagation are IDENTICAL to mimoCodeDefinedAtOrAboveWriteTarget — only the
+// per-layer shape gate (content-bearing vs. bare presence) differs. State-safe by
+// the same readLayerFiles single-file mode in the explicit/temp override path.
+func (o *mimoCodeClient) mimoCodeOwnedAtOrAboveWriteTarget(name string) (bool, error) {
+	lowerLayer := filepath.Clean(filepath.Join(filepath.Dir(o.path), "config.json"))
+	for _, f := range o.readLayerFiles() {
+		if filepath.Clean(f) == lowerLayer {
+			continue // the sole layer strictly below the write target — excluded
+		}
+		owned, err := mimoCodeFileDefinesContentBearing(f, name)
+		if err != nil {
+			return false, err
+		}
+		if owned {
+			return true, nil
+		}
+	}
+	// Inline MIMOCODE_CONFIG_CONTENT is a TOP (above) layer, not a file path.
+	if o.inlineContent != "" {
+		owned, err := mimoCodeInlineDefinesContentBearing(o.inlineContent, name)
+		if err != nil {
+			return false, err
+		}
+		if owned {
+			return true, nil
+		}
+	}
+	// The ~/.claude.json MCP import is EXCLUDED for the same reason as in
+	// mimoCodeDefinedAtOrAboveWriteTarget: it is SKIP-IF-NAME-EXISTS and the hub
+	// never writes it, so an import-sourced URL is NOT hub-ownable — a name owned
+	// ONLY by the import must report false → "via-hub-inherited" (read-only).
 	return false, nil
 }
 
@@ -2776,10 +2969,11 @@ func (o *mimoCodeClient) mimoCodeNameReResolvesAfterWriteTargetRemoval(name stri
 // STAMPS SourceBelowWriteTarget = !mimoCodeDefinedAtOrAboveWriteTarget(name):
 // true for a below/import-only name, false for a name in the write target or a
 // HIGHER layer (a real, hub-clobberable restore candidate — moot at rollback
-// since AddEntry shadow-refuses the install before any write). The 2 rollback
-// sites route a SourceBelowWriteTarget prior to RemoveEntry instead of AddEntry,
-// preserving the no-credential-copy-up security invariant. Every OTHER GetEntry
-// caller ignores the field; no other adapter sets it.
+// since AddEntry shadow-refuses the install before any write). The 3 rollback
+// sites (install.go, register.go, register_supervisor.go) route a
+// SourceBelowWriteTarget prior to RemoveEntry instead of AddEntry, preserving the
+// no-credential-copy-up security invariant. Every OTHER GetEntry caller ignores
+// the field; no other adapter sets it.
 //
 // A genuinely missing entry returns (nil, nil).
 func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {

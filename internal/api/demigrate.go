@@ -288,8 +288,7 @@ func demigrateOneBinding(
 	if restoredFrom == "" && err == nil {
 		err = tryMarkerOrBackfillRemove(
 			adapter, binding, m, server,
-			fmt.Sprintf("no backup (of %d candidates, newest %s) contains %q in pre-hub form — last skip: %v",
-				len(backups), latestBackupPath, server, lastSkipReason),
+			noPreHubFormReason(server, backups, latestBackupPath, lastSkipReason),
 			allowBackupMissingEntryRestore && (len(backups) > 0 || sawLegacy),
 			allowBackupMissingEntryRestore,
 			&restoredFrom,
@@ -394,6 +393,24 @@ func tryMarkerOrBackfillRemove(
 		return fmt.Errorf("%s, AND consulting managed-entries marker failed: %w",
 			reasonPrefix, mErr)
 	case !managed:
+		// Fail-closed refusal: no ownership evidence (marker absent, no backup
+		// corroborated), so the entry MIGHT be user-owned and is not safe to
+		// delete. The canonical refusal vocabulary ("managed-entries marker has
+		// no record", "refusing to RemoveEntry") is preserved verbatim — operator
+		// runbooks and tests key on it.
+		//
+		// When the live entry ALREADY carries a hub-loopback URL, append an
+		// operator-readable cause/remedy hint: the most common real cause is a
+		// multi-layer client (e.g. MiMoCode) whose effective entry is INHERITED
+		// from a layer the hub never wrote — chiefly the ~/.claude.json mcpServers
+		// IMPORT (skip-if-name-exists) or a config.json layer BELOW the write
+		// target — which the hub cannot roll back. This only ENRICHES the message
+		// string; the fail-closed decision (no-copy-up + refuse-RemoveEntry) is
+		// unchanged.
+		if liveEntryHasHubURL(adapter, server) {
+			return fmt.Errorf("%s, but managed-entries marker has no record that mcphub installed this entry — refusing to RemoveEntry. The entry's URL points at the hub, but mcphub did not record installing it: it may be INHERITED from a config layer mcphub never wrote (e.g. the ~/.claude.json mcpServers import, or a lower config.json layer), which mcphub cannot roll back. Remedy: edit the source client config (%s) manually to remove it, or re-run migrate to take ownership of this entry first",
+				reasonPrefix, adapter.ConfigPath())
+		}
 		return fmt.Errorf("%s, but managed-entries marker has no record that mcphub installed this entry — refusing to RemoveEntry (entry may be user-owned); to roll back this entry, edit %s manually, or re-run migrate first to populate the marker",
 			reasonPrefix, adapter.ConfigPath())
 	default:
@@ -442,6 +459,35 @@ func liveEntryHasHubURL(adapter clients.Client, server string) bool {
 		return false
 	}
 	return clients.IsHubHTTPURL(live.URL)
+}
+
+// noPreHubFormReason builds the OPERATOR-READABLE leading clause passed to
+// tryMarkerOrBackfillRemove when iterating every backup found NO pre-hub form
+// for `server`. It replaces the prior cryptic
+// "no backup (of 0 candidates, newest ) contains \"x\" in pre-hub form — last
+// skip: <nil>" string with wording that:
+//
+//   - drops the trailing "— last skip: <nil>" noise when lastSkipReason is nil
+//     (the common case: no candidate was even eligible to skip), keeping it only
+//     when a real skip reason exists (then it IS diagnostic);
+//   - says "no mcp-local-hub backups exist for this client" plainly when there
+//     were zero candidates, instead of "(of 0 candidates, newest )".
+//
+// This is a STRING-only change: it produces the reasonPrefix the unchanged
+// fail-closed decision in tryMarkerOrBackfillRemove appends to. It does not
+// alter what demigrate writes or which branch is taken.
+func noPreHubFormReason(server string, backups []string, latestBackupPath string, lastSkipReason error) string {
+	var base string
+	if len(backups) == 0 {
+		base = fmt.Sprintf("no mcp-local-hub backups exist for this client, so none can restore %q to its pre-hub form", server)
+	} else {
+		base = fmt.Sprintf("no mcp-local-hub backup (of %d candidate(s), newest %s) contains %q in pre-hub form",
+			len(backups), latestBackupPath, server)
+	}
+	if lastSkipReason != nil {
+		base += fmt.Sprintf(" — last skip: %v", lastSkipReason)
+	}
+	return base
 }
 
 // tryLegacyPrefixRestore iterates this client's LEGACY-codename backups

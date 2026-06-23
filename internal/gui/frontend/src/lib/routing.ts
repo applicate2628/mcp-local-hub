@@ -472,8 +472,25 @@ export function perClientRouting(
         // renders "direct"/re-migratable — matching the backend's "external" —
         // instead of a deceptive checked cell that hides the unusable URL. guiPort
         // 0 degrades to port-agnostic (Codex #379 r3).
+        //
+        // Import-inherited mirror (backend classify serena-router branch): a
+        // LIVE-port serena router cell whose source is a layer the hub never
+        // wrote (~/.claude.json import or a below-write-target config.json layer;
+        // ClientEntry.Inherited, only MiMoCode today) is hub-routed but NOT
+        // hub-ownable. Tag it "via-hub-inherited" so Servers.tsx renders it
+        // checked-but-disabled (read-only) instead of a demigrate switch that
+        // always fails closed. Mirrors the backend EXACTLY: the inherited tag is
+        // applied ONLY on the live-port (managed) path — a stale-port router cell
+        // falls to "direct" regardless of inheritance, just like the backend.
+        // Gated on `entry?.inherited === true` so every existing (non-inherited)
+        // serena cell keeps its via-hub result unchanged.
         const port = loopbackEntryPort(endpoint);
-        routing[client] = guiPort <= 0 || port === guiPort ? "via-hub" : "direct";
+        const onLivePort = guiPort <= 0 || port === guiPort;
+        routing[client] = onLivePort
+          ? entry?.inherited === true
+            ? "via-hub-inherited"
+            : "via-hub"
+          : "direct";
         continue;
       }
       // Loopback SHAPE is necessary but not sufficient — require the URL
@@ -484,9 +501,24 @@ export function perClientRouting(
       // the backend classifies it "external". (Security review: a deceptive
       // green via-hub cell would invite the operator to overwrite/remove a
       // binding that does not point at this server's daemon.)
-      routing[client] = loopbackPortMatchesDaemon(endpoint, daemonPorts)
-        ? "via-hub"
-        : "direct";
+      if (loopbackPortMatchesDaemon(endpoint, daemonPorts)) {
+        // Import-inherited mirror (backend classify "via-hub-inherited"): a
+        // PORT-MATCHING hub-loopback cell whose source is a layer the hub never
+        // wrote — the ~/.claude.json mcpServers import or a config.json layer
+        // BELOW the write target (multi-layer adapter, currently only MiMoCode;
+        // ClientEntry.Inherited) — is hub-routed but NOT hub-ownable. Tag it
+        // "via-hub-inherited" so Servers.tsx renders it checked-but-disabled
+        // (read-only) instead of a demigrate switch that always fails closed.
+        // Mirrors the backend EXACTLY: the backend only sets hasHubInherited in
+        // its port-MATCH branch (a non-matching inherited cell falls to
+        // "external"/"direct" just like any stale-port cell), so the inherited
+        // tag is applied ONLY inside this port-match block. Gated on
+        // `entry?.inherited === true` so every existing (non-inherited) cell
+        // keeps its via-hub result unchanged.
+        routing[client] = entry?.inherited === true ? "via-hub-inherited" : "via-hub";
+      } else {
+        routing[client] = "direct";
+      }
     } else if (transport === "relay") {
       if (serverName === "serena") {
         const relayURL = entry?.relay_url ?? "";

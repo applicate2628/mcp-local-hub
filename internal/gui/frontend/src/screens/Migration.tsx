@@ -249,7 +249,7 @@ export function DiscoveryScreen() {
 
   const groups: MigrationGroups = scan
     ? groupMigrationEntries(scan, dismissedUnknown)
-    : { viaHub: [], canMigrate: [], unknown: [], external: [], perSession: [], dismissed: [] };
+    : { viaHub: [], viaHubInherited: [], canMigrate: [], unknown: [], external: [], perSession: [], dismissed: [] };
 
   if (error) {
     return (
@@ -270,6 +270,7 @@ export function DiscoveryScreen() {
 
   const totalRows =
     groups.viaHub.length +
+    groups.viaHubInherited.length +
     groups.canMigrate.length +
     groups.unknown.length +
     groups.external.length +
@@ -301,6 +302,7 @@ export function DiscoveryScreen() {
             actionBusy={actionBusy}
             onDemigrate={runDemigrate}
           />
+          <ManagedInheritedGroup entries={groups.viaHubInherited} />
           <ReadyToMigrateGroup
             entries={groups.canMigrate}
             selected={selected}
@@ -364,6 +366,46 @@ function ManagedByHubGroup(props: {
             >
               {props.actionBusy === e.name ? "Demigrating…" : "Demigrate"}
             </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// ManagedInheritedGroup renders the hub-routed-but-INHERITED bucket
+// (backend classify "via-hub-inherited"): servers reached through a hub
+// loopback URL whose SOURCE is an import (~/.claude.json) or a
+// below-write-target layer the hub never wrote (currently only MiMoCode).
+// They ARE hub-routed but the hub does NOT own them, so this group is
+// strictly READ-ONLY — NO Demigrate button (a demigrate would fail closed,
+// since the hub cannot remove an entry it never wrote). It is rendered
+// (never dropped) so the "see all MCP servers" Discovery view shows these
+// import-inherited rows instead of hiding them. Rendered only when non-empty
+// (the common host has none — an empty section would be noise).
+function ManagedInheritedGroup(props: { entries: ScanEntry[] }) {
+  if (props.entries.length === 0) {
+    return null;
+  }
+  return (
+    <section class="group group-via-hub-inherited" data-group="via-hub-inherited">
+      <div class="group-heading">
+        <h2>Managed by hub (inherited)</h2>
+        <InfoTip
+          label="About inherited hub entries"
+          text="These servers are routed through the hub, but their definition lives in a layer the hub never wrote — an imported ~/.claude.json entry or a lower config layer. They are shown read-only: the hub cannot demigrate an entry it does not own. To remove the routing, edit the source config that defines the server."
+        />
+      </div>
+      <ul class="group-rows">
+        {props.entries.map((e) => (
+          <li key={e.name} data-server={e.name}>
+            <span class="server-name">{e.name}</span>
+            <span
+              class="badge badge-inherited"
+              data-testid={`inherited-badge-${e.name}`}
+            >
+              Inherited (read-only)
+            </span>
           </li>
         ))}
       </ul>

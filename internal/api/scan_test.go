@@ -1161,6 +1161,57 @@ func TestClassify(t *testing.T) {
 			daemonPorts: []int{9200},
 			want:        "external",
 		},
+		{
+			// FINDING #1 (bot P2 scan.go serena-router branch): an INHERITED serena
+			// router cell (Inherited=true — import/below-write-target source the hub
+			// never wrote) is hub-ROUTED but NOT hub-OWNABLE. It must classify
+			// "via-hub-inherited" (read-only) — NOT "via-hub" (which would offer a
+			// demigrate switch that always fails closed). guiPort 0 = CLI/unknown so
+			// the live-router check degrades to the port-agnostic shape match.
+			name:        "INHERITED serena /serena/mcp router -> via-hub-inherited (finding #1)",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"mimocode": {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp", Inherited: true}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     0,
+			want:        "via-hub-inherited",
+		},
+		{
+			// Regression guard for finding #1: an OWNED serena router cell
+			// (Inherited unset) stays "via-hub" (still demigratable). Same shape as
+			// the inherited case above minus the Inherited flag.
+			name:        "OWNED serena /serena/mcp router -> via-hub (finding #1 guard)",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"mimocode": {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp"}}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     0,
+			want:        "via-hub",
+		},
+		{
+			// An owned serena cell in one client WINS over an inherited serena cell
+			// in another: the row stays demigratable "via-hub" (owned hub presence
+			// beats inherited-only). Mirrors classify()'s hasHub-over-hasHubInherited
+			// branch ordering.
+			name: "OWNED serena cell wins over INHERITED serena cell -> via-hub",
+			entry: &ScanEntry{ClientPresence: map[string]ClientEntry{
+				"mimocode":    {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp", Inherited: true},
+				"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp"},
+			}},
+			serverName:  "serena",
+			daemonPorts: []int{9121},
+			guiPort:     0,
+			want:        "via-hub",
+		},
+		{
+			// Companion regression guard for the generic daemon-port branch (the
+			// already-fixed inherited path classify() shipped): an inherited
+			// NON-serena hub-loopback cell whose port matches the daemon port stays
+			// "via-hub-inherited".
+			name:        "INHERITED non-serena hub loopback (port match) -> via-hub-inherited",
+			entry:       &ScanEntry{ClientPresence: map[string]ClientEntry{"mimocode": {Transport: "http", Endpoint: "http://localhost:9200/mcp", Inherited: true}}},
+			serverName:  "memory",
+			daemonPorts: []int{9200},
+			want:        "via-hub-inherited",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

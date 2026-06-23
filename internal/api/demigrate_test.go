@@ -693,6 +693,95 @@ client_bindings:
 	}
 }
 
+// TestDemigrate_InheritedImport_ClearerError reproduces the live import-inherited
+// case (a hub-loopback entry that mcphub did not install — no marker, no backups,
+// and a hub URL that does NOT match the manifest binding) and pins the
+// OPERATOR-READABLE failure message:
+//
+//   - it names the import/edit-manually remedy (so an operator who sees a mimocode
+//     ~/.claude.json-imported hub cell knows why Apply failed and what to do);
+//   - it contains NO "<nil>" last-skip noise when there is no skip reason (zero
+//     backups → the clean "no mcp-local-hub backups exist" reasonPrefix);
+//   - the live config is UNTOUCHED (no-copy-up + fail-closed preserved) and the
+//     run still reports the entry as FAILED.
+//
+// It KEEPS asserting the canonical "managed-entries marker has no record" /
+// "refusing" refusal vocabulary — that is the established fail-closed contract the
+// sibling demigrate tests guard; the fix ENRICHES the message, it does not drop it.
+func TestDemigrate_InheritedImport_ClearerError(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("HOME", tmp)
+	managedEntriesTestHelper(t) // isolate the marker store → no marker for `time`
+	claudePath := filepath.Join(tmp, ".claude.json")
+	// A hub-loopback URL (IsHubHTTPURL true) at a port that does NOT match the
+	// manifest binding (9999 vs 9200), so the URL backfill rejects → !managed.
+	// No backup files exist (zero candidates) → the clean reasonPrefix path.
+	_ = os.WriteFile(claudePath, []byte(
+		`{"mcpServers":{"time":{"type":"http","url":"http://localhost:9999/mcp"}}}`), 0o600)
+
+	manifestDir := t.TempDir()
+	srvDir := filepath.Join(manifestDir, "time")
+	_ = os.MkdirAll(srvDir, 0o700)
+	_ = os.WriteFile(filepath.Join(srvDir, "manifest.yaml"), []byte(
+		`name: time
+kind: global
+transport: stdio-bridge
+command: npx
+daemons:
+  - name: default
+    port: 9200
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+`), 0o600)
+
+	a := NewAPI()
+	report, err := a.Demigrate(DemigrateOpts{
+		Servers:  []string{"time"},
+		ScanOpts: ScanOpts{ManifestDir: manifestDir},
+		Writer:   io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Demigrate: %v", err)
+	}
+	if len(report.Restored) != 0 {
+		t.Fatalf("expected 0 restored (import-inherited, fail-closed), got %+v", report.Restored)
+	}
+	if len(report.Failed) != 1 {
+		t.Fatalf("expected 1 FAILED entry, got %d: %+v", len(report.Failed), report.Failed)
+	}
+	msg := report.Failed[0].Err
+	lower := strings.ToLower(msg)
+	// Clearer remedy hint is present.
+	if !strings.Contains(lower, "import") {
+		t.Errorf("error must name the import cause; got %q", msg)
+	}
+	if !strings.Contains(lower, "re-run migrate") {
+		t.Errorf("error must name the re-run-migrate remedy; got %q", msg)
+	}
+	// No <nil> last-skip noise when there is no skip reason (zero backups).
+	if strings.Contains(msg, "<nil>") {
+		t.Errorf("error must NOT contain the <nil> last-skip noise; got %q", msg)
+	}
+	if strings.Contains(msg, "of 0 candidates") {
+		t.Errorf("error must NOT contain the cryptic 'of 0 candidates' phrasing; got %q", msg)
+	}
+	// Canonical fail-closed vocabulary is preserved (sibling-test contract).
+	if !strings.Contains(lower, "managed-entries marker has no record") {
+		t.Errorf("error must still cite the marker-has-no-record refusal; got %q", msg)
+	}
+	// Live config untouched — no-copy-up + fail-closed.
+	live, _ := os.ReadFile(claudePath)
+	var liveMap map[string]any
+	_ = json.Unmarshal(live, &liveMap)
+	servers, _ := liveMap["mcpServers"].(map[string]any)
+	if _, present := servers["time"]; !present {
+		t.Errorf("import-inherited fail-closed must NOT delete the live entry; file = %s", live)
+	}
+}
+
 func TestDemigrate_ServerAddedAfterSentinelThenMigratedTwice_OnlyHubBackups_BackfillSucceeds(t *testing.T) {
 	// Originally TestDemigrate_FailsWhenServerAddedAfterSentinelThenMigratedTwice
 	// (Bot R2 P1 reproducer). Assertions flipped under the

@@ -1062,8 +1062,14 @@ function OtherMCPEntriesSection(props: { servers: ServerRow[] }) {
       </summary>
       <ul style="font-family:monospace; font-size:0.9em; margin-top:var(--gap-xs)">
         {servers.map((s) => {
+          // "in: <clients>" lists every client that ACTUALLY HAS an entry for
+          // this server — hub-routed (via-hub), inherited hub-routed
+          // (via-hub-inherited), or a direct non-hub entry. via-hub-inherited
+          // is an entry the operator can see (just not demigrate), so it
+          // belongs in this presence list; dropping it would hide a real
+          // binding the same way the Discovery default-case drop did.
           const clientsWithEntry = Object.entries(s.routing)
-            .filter(([, r]) => r === "via-hub" || r === "direct")
+            .filter(([, r]) => r === "via-hub" || r === "via-hub-inherited" || r === "direct")
             .map(([c]) => c);
           return (
             <li key={s.name}>
@@ -1354,7 +1360,11 @@ function CellView(props: {
   // Treat undefined routing as "not-installed" — perClientRouting only
   // populates keys present in /api/scan's client_presence map.
   const routing: Routing = server.routing[client] ?? "not-installed";
-  const initialChecked = routing === "via-hub";
+  // "via-hub-inherited" IS hub-routed (rendered CHECKED) but read-only/disabled
+  // — the hub cannot demigrate an inherited (import / below-write-target) entry
+  // it never wrote, so the cell shows checked-but-disabled (see `disabled` +
+  // cellInteractive below), not a toggleable demigrate switch.
+  const initialChecked = routing === "via-hub" || routing === "via-hub-inherited";
   // effectiveChecked folds a pending dirty edit over the scan baseline so a
   // column toggle (or any out-of-band dirty mutation) is reflected visually.
   const effectiveChecked = pendingDirection
@@ -1388,10 +1398,21 @@ function CellView(props: {
     routing === "unsupported" ||
     routing === "not-installed" ||
     routing === "config-error" ||
-    routing === "config-error-symlink";
+    routing === "config-error-symlink" ||
+    // "via-hub-inherited" is hub-routed but read-only: the hub never wrote the
+    // inherited (import / below-write-target) source and cannot demigrate it,
+    // so the cell renders checked-but-disabled (kiro disabled-cell precedent).
+    routing === "via-hub-inherited";
   let title: string | undefined;
   if (routing === "via-hub") {
     title = `Currently routed through the hub. Uncheck and Apply to roll this binding back to the original ${client} config.`;
+  } else if (routing === "via-hub-inherited") {
+    // The hub-loopback entry exists but its SOURCE is a layer the hub never
+    // wrote — chiefly the ~/.claude.json mcpServers import, or a config.json
+    // layer below ${client}'s write target. The hub cannot demigrate what it
+    // did not write, so this cell is read-only; the operator edits the source
+    // config to remove it (kiro disabled-cell precedent).
+    title = `Routed through the hub, but ${client} inherits this entry from a config layer mcphub never wrote (e.g. ~/.claude.json, or a lower config.json layer). mcphub cannot roll it back — edit that source config directly to remove it.`;
   } else if (routing === "direct") {
     title = `${client} has a direct (non-hub) entry for this server. Check and Apply to route it through the hub.`;
   } else if (routing === "available") {

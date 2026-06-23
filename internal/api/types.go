@@ -144,8 +144,11 @@ type HealthProbe struct {
 
 // ScanEntry is one row in the unified "across all clients" view.
 type ScanEntry struct {
-	Name           string                 `json:"name"`
-	Status         string                 `json:"status"` // "via-hub" | "can-migrate" | "unknown" | "per-session" | "external" | "not-installed"
+	Name   string `json:"name"`
+	Status string `json:"status"` // "via-hub" | "via-hub-inherited" | "can-migrate" | "unknown" | "per-session" | "external" | "not-installed"
+	// "via-hub-inherited": routed via an inherited (import / below-write-target)
+	// source the hub did not write and cannot demigrate (multi-layer adapter,
+	// currently only MiMoCode). Managed stays FALSE for this status.
 	ClientPresence map[string]ClientEntry `json:"client_presence"`
 	LegacyConflict map[string]ClientEntry `json:"legacy_conflict,omitempty"`
 	ManifestExists bool                   `json:"manifest_exists"`
@@ -175,6 +178,17 @@ type ClientEntry struct {
 	Endpoint  string         `json:"endpoint"`            // URL for http, command for stdio, etc.
 	RelayURL  string         `json:"relay_url,omitempty"` // resolved relay --url target, when present
 	Raw       map[string]any `json:"raw"`                 // the original JSON/TOML fragment
+	// Inherited marks a hub-loopback cell whose source is a layer the hub never
+	// wrote and CANNOT demigrate — for a multi-layer adapter (currently only
+	// MiMoCode) a name resolved from the ~/.claude.json mcpServers IMPORT or a
+	// config.json layer strictly BELOW the write target. Mirrors the
+	// SourceBelowWriteTarget rollback split (clients.go:69) on the SCAN/label
+	// side: defaults FALSE = the historical hub-ownable shape, and ONLY the
+	// mimocode scan path sets it true (clients.MimoCodeNameAtOrAboveWriteTarget
+	// == false on an http hub-loopback cell). classify() turns an Inherited cell
+	// into Status "via-hub-inherited" (read-only) instead of "via-hub". The
+	// omitempty tag keeps EVERY other client's wire bytes byte-identical.
+	Inherited bool `json:"inherited,omitempty"`
 }
 
 // ScanResult bundles a full scan with timestamp for caching / SSE.
