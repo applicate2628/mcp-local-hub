@@ -127,6 +127,64 @@ func TestScanMimoCode_OwnedHubURL_StaysViaHub(t *testing.T) {
 	}
 }
 
+// TestScanMimoCode_ImportLSPHubURL_ClassifiedInherited is the end-to-end probe
+// for bot finding #2 (PR #422): a mimocode `mcp-language-server-go` LSP entry
+// whose hub-loopback URL is sourced ONLY from the ~/.claude.json mcpServers
+// import (a layer the hub never wrote) must classify Status == "via-hub-inherited"
+// with Managed == false — NOT "via-hub". This exercises the FULL path: the
+// mimocode scan stamps ClientEntry.Inherited on the http hub-loopback LSP cell,
+// classify() sets "via-hub-inherited", then classifyLSPEntries (which runs AFTER
+// and re-classifies http LSP rows) MUST preserve it rather than forcing it back
+// to the demigratable "via-hub" bucket.
+func TestScanMimoCode_ImportLSPHubURL_ClassifiedInherited(t *testing.T) {
+	isolateMimoCodeScanEnv(t)
+	t.Setenv(clients.MimoCodeDisableClaudeImportEnv, "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	const (
+		lspName = "mcp-language-server-go"
+		port    = 9300
+	)
+	manifestDir := writeMimoManifest(t, home, lspName, port)
+
+	globalDir := filepath.Join(home, ".config", "mimocode")
+	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mimoPath := filepath.Join(globalDir, "mimocode.json")
+	// Write target EXISTS but does NOT define the LSP server.
+	if err := os.WriteFile(mimoPath, []byte(`{"mcp":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The LSP server resolves ONLY from the ~/.claude.json import, pointing at the
+	// hub loopback URL on the manifest's daemon port.
+	claudeBody := `{"mcpServers":{"` + lspName + `":{"url":"http://localhost:9300/mcp"}}}`
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(claudeBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewAPI()
+	res, err := a.ScanFrom(ScanOpts{MimoCodeConfigPath: mimoPath, ManifestDir: manifestDir})
+	if err != nil {
+		t.Fatalf("ScanFrom: %v", err)
+	}
+	ent := mimoEntryFor(res, lspName)
+	if ent == nil {
+		t.Fatalf("%q row missing from the scan (import-only LSP profile must still be scanned)", lspName)
+	}
+	if !ent.ClientPresence["mimocode"].Inherited {
+		t.Errorf("the mimocode LSP cell must carry Inherited == true, got %+v", ent.ClientPresence["mimocode"])
+	}
+	if ent.Status != "via-hub-inherited" {
+		t.Errorf("import-sourced hub LSP URL must classify via-hub-inherited (classifyLSPEntries must not force via-hub), got %q", ent.Status)
+	}
+	if ent.Managed {
+		t.Errorf("via-hub-inherited LSP row must keep Managed == false, got true")
+	}
+}
+
 // TestClientEntry_InheritedJSON_OmitEmpty is the wire-shape verification (per
 // AGENTS.md): the additive Inherited field is absent on the wire when false
 // (so every non-mimocode client's bytes are byte-identical) and present+true

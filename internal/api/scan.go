@@ -1797,7 +1797,9 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 	// set only by the mimocode scan path). Such a cell IS hub-routed but NOT
 	// hub-ownable, so when it is the ONLY hub presence (no owned via-hub, no
 	// stdio) classify returns "via-hub-inherited" — a read-only status the
-	// matrix renders checked-but-disabled instead of a demigrate switch.
+	// matrix renders checked-but-disabled instead of a demigrate switch. Set in
+	// BOTH http hub-loopback paths an inherited cell can take: the serena live
+	// /serena/mcp router branch AND the generic daemon-port-match branch below.
 	hasHubInherited := false
 	for _, c := range e.ClientPresence {
 		if c.Transport == "http" && clients.IsHubHTTPURL(c.Endpoint) {
@@ -1810,7 +1812,22 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 				// not-a-daemon-port and is misclassified as external, so the matrix
 				// shows a connected serena as not-connected (serena-client-revert-
 				// on-manifest-sync read-side).
-				hasHub = true
+				//
+				// Inherited-source gate (mirrors the daemon-port branch below): a
+				// serena router cell sourced from an import / below-write-target
+				// layer the hub never wrote (ClientEntry.Inherited, set only by the
+				// mimocode scan path on an http hub-loopback cell) is hub-ROUTED but
+				// NOT hub-OWNABLE — the hub cannot demigrate it. Record it as
+				// inherited so a row whose ONLY hub presence is an inherited serena
+				// router cell classifies "via-hub-inherited" (read-only) instead of
+				// "via-hub" (which would offer a demigrate switch that always fails
+				// closed). An OWNED router cell (Inherited false) stays via-hub and
+				// remains demigratable.
+				if c.Inherited {
+					hasHubInherited = true
+				} else {
+					hasHub = true
+				}
 			case IsSerenaServer(name) && IsSerenaRouterURL(c.Endpoint):
 				// serena router SHAPE but NOT on the live GUI port → a STALE router
 				// URL (e.g. the GUI previously ran on 9121 and later moved). Classify
@@ -2481,8 +2498,24 @@ func classifyLSPEntries(entries map[string]*ScanEntry, reg *Registry) {
 			pairKey := clientName + "\x00" + lang
 			switch {
 			case ce.Transport == "http":
-				// Rule 1: hub-managed.
-				e.Status = "via-hub"
+				// Rule 1: hub-managed. Mirror classify()'s owned-vs-inherited
+				// precedence so an inherited (import / below-write-target) hub LSP
+				// cell does NOT get force-overwritten back to the demigratable
+				// "via-hub" bucket. An OWNED http cell (Inherited false) always wins
+				// — set "via-hub" unconditionally. An INHERITED http cell promotes
+				// the row to "via-hub-inherited" (read-only, Managed stays false via
+				// the exact-equality re-sync below) ONLY when no owned http cell has
+				// already claimed "via-hub" for this row; a later owned cell still
+				// overrides it. This keeps the LSP pass in lockstep with classify():
+				// a row whose only hub presence is inherited stays read-only instead
+				// of moving BACK into "Managed by hub" (the demigratable bucket).
+				if ce.Inherited {
+					if e.Status != "via-hub" {
+						e.Status = "via-hub-inherited"
+					}
+				} else {
+					e.Status = "via-hub"
+				}
 				hubsByPair[pairKey] = append(hubsByPair[pairKey], e)
 			case ce.Transport == "stdio":
 				base := filepath.Base(strings.TrimSuffix(ce.Endpoint, ".exe"))

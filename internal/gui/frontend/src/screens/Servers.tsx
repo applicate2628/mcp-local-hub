@@ -1062,8 +1062,14 @@ function OtherMCPEntriesSection(props: { servers: ServerRow[] }) {
       </summary>
       <ul style="font-family:monospace; font-size:0.9em; margin-top:var(--gap-xs)">
         {servers.map((s) => {
+          // "in: <clients>" lists every client that ACTUALLY HAS an entry for
+          // this server — hub-routed (via-hub), inherited hub-routed
+          // (via-hub-inherited), or a direct non-hub entry. via-hub-inherited
+          // is an entry the operator can see (just not demigrate), so it
+          // belongs in this presence list; dropping it would hide a real
+          // binding the same way the Discovery default-case drop did.
           const clientsWithEntry = Object.entries(s.routing)
-            .filter(([, r]) => r === "via-hub" || r === "direct")
+            .filter(([, r]) => r === "via-hub" || r === "via-hub-inherited" || r === "direct")
             .map(([c]) => c);
           return (
             <li key={s.name}>
