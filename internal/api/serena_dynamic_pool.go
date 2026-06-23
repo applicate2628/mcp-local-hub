@@ -210,13 +210,52 @@ func BuildInMemorySerenaDynamicPoolManifest(m *config.ServerManifest) (*config.S
 			PortPool:          tpl.PortPool,
 			ExtraArgsTemplate: tpl.ExtraArgsTemplate,
 		},
+		// D-2 + D-3 (Tier-0) carry-through: the synthesized manifest is what the
+		// install/admission gates actually see (the embed m is discarded after
+		// this build). DROPPING these fields here would make an inert
+		// (availability=watch / disabled-until-probe) source manifest become
+		// effectively READY before InstallParsedManifest, and an unpinned
+		// vendored source bypass the D-2 pin gate. Deep-copy them so out.Validate()
+		// below sees the pin (D-2) and the downstream Preflight→AdmissionCheck sees
+		// the inert availability (D-3). ADDITIVE: an embed with these fields nil/
+		// empty (the shipped serena manifest) produces a byte-identical out.
+		VendoredSource: cloneVendoredSource(m.VendoredSource),
+		Availability:   m.Availability,
+		InstallProbe:   cloneAvailabilityProbe(m.InstallProbe),
 	}
 	// Validate the synthesized shape eagerly so a malformed embed (e.g. a
-	// --context token smuggled into base_args, or an empty effective context)
-	// is caught at build time with the canonical Validate error rather than
-	// surfacing later at descriptor-materialization or spawn time.
+	// --context token smuggled into base_args, an empty effective context, or an
+	// unpinned vendored_source / availability-typo) is caught at build time with
+	// the canonical Validate error rather than surfacing later at
+	// descriptor-materialization or spawn time.
 	if err := out.Validate(); err != nil {
 		return nil, fmt.Errorf("build serena dynamic-pool manifest: %w", err)
 	}
 	return out, nil
+}
+
+// cloneVendoredSource deep-copies the D-2 vendored_source descriptor for the
+// serena dynamic-pool projection so the synthesized manifest carries the pin +
+// license-status independently of the embed. All fields are strings, so a struct
+// copy is a full deep copy; nil in → nil out (additive: a non-vendored embed
+// stays non-vendored).
+func cloneVendoredSource(v *config.VendoredSource) *config.VendoredSource {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
+}
+
+// cloneAvailabilityProbe deep-copies the D-3 install probe (its Binaries/Files
+// are slices, so the slices are copied — not aliased — to keep the synthesized
+// manifest fully independent of the embed). nil in → nil out.
+func cloneAvailabilityProbe(p *config.AvailabilityProbe) *config.AvailabilityProbe {
+	if p == nil {
+		return nil
+	}
+	return &config.AvailabilityProbe{
+		Binaries: append([]string(nil), p.Binaries...),
+		Files:    append([]string(nil), p.Files...),
+	}
 }

@@ -142,6 +142,17 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	if m.Kind != config.KindWorkspaceScoped {
 		return nil, fmt.Errorf("manifest %s: not workspace-scoped", m.Name)
 	}
+	// D-3 availability admission gate (shared single owner). A watch /
+	// disabled-until-probe LSP manifest whose install-probe has not passed must
+	// NOT create scheduler tasks (EnsureWeeklyRefreshTask + per-language tasks) or
+	// write client entries. Run it at the START — before any side effect — so an
+	// inert manifest is refused with the same typed availability error Install /
+	// Preflight returns, not after a partial registration. ADDITIVE: the shipped
+	// mcp-language-server manifest carries no availability/install_probe, so this
+	// returns nil immediately and the path is byte-identical to before.
+	if err := AvailabilityAdmission(m); err != nil {
+		return nil, err
+	}
 	w := opts.Writer
 	if w == nil {
 		w = os.Stderr

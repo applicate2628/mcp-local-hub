@@ -1175,4 +1175,108 @@ describe("CatalogScreen", () => {
     expect(retryBtn.textContent).toBe("Refresh");
     expect(retryBtn.disabled).toBe(false);
   });
+
+  // --- D-3 tri-state browse probe_state render branches (CHANGE A-frontend) ----
+  //
+  // The backend emits probe_state ∈ {ready, inert-blocked, inert-unknown}. The
+  // Catalog renders ONE of two surfaces from it:
+  //   ready          → install affordance (no extra tooltip)
+  //   inert-unknown  → install affordance + a "clicking install verifies it"
+  //                    tooltip on the hub button (the files[]/path-shaped probe
+  //                    the browse path deferred; the real probe runs at install)
+  //   inert-blocked  → greyed "probe to enable" badge, NO install affordance
+  //
+  // mpProbe builds a marketplace row carrying availability + probe_state. The
+  // backend always emits probe_state (not omitempty), so the wire row carries it.
+  function mpProbe(id: string, availability: string, probe_state: string) {
+    return {
+      id,
+      name: id,
+      summary: `summary for ${id}`,
+      categories: [] as string[],
+      homepage: "",
+      transport: "stdio",
+      availability,
+      probe_state,
+    };
+  }
+
+  function renderWithMarketplace(rows: unknown[]) {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/client-capabilities": urlNativeCapabilities,
+        "/api/marketplace": () => jsonResponse(200, { entries: rows }),
+      }) as unknown as typeof fetch,
+    );
+    render(<CatalogScreen />);
+  }
+
+  it("probe_state=ready renders the install affordance (no inert-unknown tooltip)", async () => {
+    renderWithMarketplace([mpProbe("readyrow", "watch", "ready")]);
+    const hub = await screen.findByTestId("catalog-marketplace-hub-readyrow");
+    expect(hub.textContent).toContain("Add to hub");
+    // The install block is present; the probe-to-enable badge is absent.
+    expect(screen.queryByTestId("catalog-marketplace-install-readyrow")).toBeTruthy();
+    expect(screen.queryByTestId("catalog-marketplace-probe-to-enable-readyrow")).toBeNull();
+    // A pure "ready" row carries NO inert-unknown verify tooltip.
+    expect(hub.getAttribute("title")).toBeNull();
+  });
+
+  it("probe_state=inert-unknown renders install + the verify-on-install tooltip", async () => {
+    renderWithMarketplace([mpProbe("unknownrow", "disabled-until-probe", "inert-unknown")]);
+    const hub = await screen.findByTestId("catalog-marketplace-hub-unknownrow");
+    // Install IS offered (the browse path deferred the file/path probe; the real
+    // probe runs at install) — NOT greyed.
+    expect(screen.queryByTestId("catalog-marketplace-install-unknownrow")).toBeTruthy();
+    expect(screen.queryByTestId("catalog-marketplace-probe-to-enable-unknownrow")).toBeNull();
+    // The hub button carries the explanatory tooltip.
+    expect(hub.getAttribute("title")).toContain(
+      "host app not auto-detected; clicking install verifies it",
+    );
+  });
+
+  it("probe_state=inert-blocked renders the greyed 'probe to enable' badge, no install", async () => {
+    renderWithMarketplace([mpProbe("blockedrow", "watch", "inert-blocked")]);
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-probe-to-enable-blockedrow")).toBeTruthy();
+    });
+    // No install affordance for a provably-blocked row.
+    expect(screen.queryByTestId("catalog-marketplace-install-blockedrow")).toBeNull();
+    expect(screen.queryByTestId("catalog-marketplace-hub-blockedrow")).toBeNull();
+  });
+
+  it("legacy backend without probe_state falls back to probe_passes (fail-closed)", async () => {
+    // An older backend that omits probe_state but emits the deprecated bool: a
+    // watch row with probe_passes=false is greyed (legacyProbeState → inert-blocked);
+    // probe_passes=true is installable (→ ready).
+    renderWithMarketplace([
+      {
+        id: "legacyblocked",
+        name: "legacyblocked",
+        summary: "x",
+        categories: [],
+        homepage: "",
+        transport: "stdio",
+        availability: "watch",
+        probe_passes: false,
+      },
+      {
+        id: "legacyready",
+        name: "legacyready",
+        summary: "x",
+        categories: [],
+        homepage: "",
+        transport: "stdio",
+        availability: "watch",
+        probe_passes: true,
+      },
+    ]);
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-probe-to-enable-legacyblocked")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("catalog-marketplace-install-legacyblocked")).toBeNull();
+    expect(screen.queryByTestId("catalog-marketplace-install-legacyready")).toBeTruthy();
+  });
 });

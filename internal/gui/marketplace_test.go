@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -307,5 +309,127 @@ func TestMarketplaceRefreshHandler_RejectsCrossOrigin(t *testing.T) {
 	rec := postMarketplaceRefresh(t, s, "cross-site")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+}
+
+// TestMarketplaceHandler_ProjectsLiveProbeVerdict is the FINDING-1 (D-3
+// mirror-gate) regression: the browse DTO must carry the LIVE host-probe verdict
+// (probe_passes) — the same verdict the backend install gate reaches — not just
+// the static availability field. Without it, an inert (watch) row whose host app
+// is NOW detected stays greyed in the GUI even though the backend would admit the
+// install POST, so a now-ready row can never be installed from Catalog.
+//
+//   - ready/empty row                          → probe_passes=true (installable)
+//   - inert row, probe PASSES (present binary)  → probe_passes=true (NOW installable)
+//   - inert row, probe FAILS (absent binary)    → probe_passes=false (still greyed)
+//
+// "go" is guaranteed present in the test toolchain (the same anchor
+// availability_probe_test.go uses), so the inert-passing row is deterministic.
+func TestMarketplaceHandler_ProjectsLiveProbeVerdict(t *testing.T) {
+	m := &fakeMarketplaceLister{entries: []api.MarketplaceEntry{
+		// (a) ordinary ready row — no availability, no probe.
+		{ID: "ready-row", Name: "Ready", Transport: "stdio", Command: "npx"},
+		// (b) inert row whose probe PASSES on this host RIGHT NOW: the host app
+		// ("go") is detected, so the backend gate would admit it. The DTO must
+		// report probe_passes=true so the GUI exposes the install affordance.
+		{
+			ID: "now-ready-watch", Name: "Now Ready", Transport: "stdio", Command: "npx",
+			Availability: "watch",
+			InstallProbe: &api.CatalogAvailabilityProbe{Binaries: []string{"go"}},
+		},
+		// (c) inert row whose probe FAILS: the host app is absent, so the row
+		// stays greyed. probe_passes=false.
+		{
+			ID: "still-inert-watch", Name: "Still Inert", Transport: "stdio", Command: "npx",
+			Availability: "disabled-until-probe",
+			InstallProbe: &api.CatalogAvailabilityProbe{Binaries: []string{"definitely-not-on-path-xyz"}},
+		},
+	}}
+	s := newMarketplaceTestServer(m)
+	rec := getMarketplace(t, s, "same-origin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%q", rec.Code, rec.Body.String())
+	}
+	// The wire body MUST carry the probe_passes key (proves the field exists on
+	// the DTO, not just the Go struct).
+	if !strings.Contains(rec.Body.String(), `"probe_passes"`) {
+		t.Fatalf("DTO body missing probe_passes key: %s", rec.Body.String())
+	}
+	var body marketplaceListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	byID := map[string]marketplaceEntry{}
+	for _, e := range body.Entries {
+		byID[e.ID] = e
+	}
+	if e := byID["ready-row"]; !e.ProbePasses {
+		t.Errorf("ready row: probe_passes=%v, want true (always installable)", e.ProbePasses)
+	}
+	// The load-bearing claim: a now-ready inert row is reported installable so the
+	// GUI (isInert = inert-availability AND NOT probe_passes) shows the buttons.
+	nowReady := byID["now-ready-watch"]
+	if nowReady.Availability != "watch" {
+		t.Errorf("now-ready row availability = %q, want watch", nowReady.Availability)
+	}
+	if !nowReady.ProbePasses {
+		t.Errorf("now-ready inert row: probe_passes=false, want true — a detected host app must be installable from Catalog")
+	}
+	if e := byID["still-inert-watch"]; e.ProbePasses {
+		t.Errorf("still-inert row (absent host app): probe_passes=true, want false")
+	}
+}
+
+// TestMarketplaceHandler_BrowseDoesNotStatFileProbe is the FINDING-1 (codex
+// catalog r4 P2) regression: the browse projection (GET /api/marketplace) must
+// NOT os.Stat a catalog-supplied files[] probe while merely serving the list — a
+// slow automount or UNC path would otherwise stall opening/refreshing the Catalog
+// and touch an external location before the operator chooses install. We prove
+// browse is file-presence-INDEPENDENT: a row whose file probe points at a PRESENT
+// marker and a row pointing at an ABSENT marker both serialize probe_passes=false
+// (browse-unknown / greyed). If the browse path stat'd the file, the present-file
+// row would read true and diverge. The real file probe runs only at install
+// admission (api.AvailabilityAdmissionEntry), so the now-ready file-probe row is
+// still installable once the operator clicks install.
+func TestMarketplaceHandler_BrowseDoesNotStatFileProbe(t *testing.T) {
+	dir := t.TempDir()
+	present := filepath.Join(dir, "installed.marker")
+	if err := os.WriteFile(present, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	absent := filepath.Join(dir, "not-installed.marker")
+
+	m := &fakeMarketplaceLister{entries: []api.MarketplaceEntry{
+		{
+			ID: "file-probe-present", Name: "Present", Transport: "stdio", Command: "npx",
+			Availability: "watch",
+			InstallProbe: &api.CatalogAvailabilityProbe{Files: []string{present}},
+		},
+		{
+			ID: "file-probe-absent", Name: "Absent", Transport: "stdio", Command: "npx",
+			Availability: "watch",
+			InstallProbe: &api.CatalogAvailabilityProbe{Files: []string{absent}},
+		},
+	}}
+	s := newMarketplaceTestServer(m)
+	rec := getMarketplace(t, s, "same-origin")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%q", rec.Code, rec.Body.String())
+	}
+	var body marketplaceListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	byID := map[string]marketplaceEntry{}
+	for _, e := range body.Entries {
+		byID[e.ID] = e
+	}
+	// Both file-probe rows are browse-unknown (greyed) regardless of file presence
+	// — the browse projection never stat'd either path.
+	if byID["file-probe-present"].ProbePasses {
+		t.Errorf("file-probe row with a PRESENT marker reported probe_passes=true — the browse projection must not stat the file")
+	}
+	if byID["file-probe-absent"].ProbePasses {
+		t.Errorf("file-probe row with an ABSENT marker reported probe_passes=true; want false")
 	}
 }

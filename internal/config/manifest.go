@@ -48,6 +48,31 @@ const (
 	TransportProcess = "process"
 )
 
+// Availability is the D-3 catalog-row lifecycle gate enum (Tier-0). Empty/absent
+// == AvailabilityReady, the universal current behavior, so every existing
+// manifest is unchanged. A "watch" / "disabled-until-probe" row MUST NOT spawn a
+// daemon nor write a client config until its InstallProbe passes — enforced in
+// the host-state readiness gate (internal/api.AdmissionCheck), NOT here.
+//
+// Decision: work-items/decisions/2026-06-23-d3-availability-probe.md
+const (
+	AvailabilityReady              = "ready"                // default; spawns + writes normally (== empty)
+	AvailabilityWatch              = "watch"                // inert until probe passes; GUI greys with 'probe to enable'
+	AvailabilityDisabledUntilProbe = "disabled-until-probe" // synonym-strength: same inert behavior, stronger label
+)
+
+// LicenseStatus enum for VendoredSource.LicenseStatus (D-2, Tier-0). Free-form-
+// tolerant at parse, but Validate() rejects an unknown NON-EMPTY value so a typo
+// cannot pass the D-4 vetting record silently. Empty is allowed (treated as
+// unknown for gate purposes).
+//
+// Decision: work-items/decisions/2026-06-23-d2-vendored-source.md
+const (
+	LicenseStatusConfirmed = "confirmed" // LICENSE present + vetted on the real repo (gh API license != null)
+	LicenseStatusPending   = "pending"   // not yet vetted — admission gate WARNS but does not block (advisory)
+	LicenseStatusUnknown   = "unknown"   // explicitly recorded as unverifiable
+)
+
 // NativeHTTPInternalPortOffset is the fixed delta between a native-http
 // daemon's external (client-facing) port and the internal port its
 // upstream subprocess binds. Lives here so the two independent readers
@@ -121,6 +146,57 @@ type ServerManifest struct {
 	//
 	// Plan ref: docs/superpowers/plans/2026-05-20-serena-supervisor-unified.md §D.1.
 	DaemonTemplate *DaemonTemplate `yaml:"daemon_template,omitempty"`
+
+	// VendoredSource (D-2, Tier-0), when non-nil, declares that this manifest's
+	// command/run path comes from a vendored or community-fork source pinned at
+	// PinnedRef. ADDITIVE + OPTIONAL: every existing manifest (which omits it)
+	// parses and validates byte-identically because the field is a pointer with
+	// omitempty — a host with no desktop rows is unaffected. Enforcement (pin
+	// presence + non-moving ref + license-status enum): Validate() D-2 gate via
+	// validateVendoredAndAvailability.
+	VendoredSource *VendoredSource `yaml:"vendored_source,omitempty"`
+
+	// Availability (D-3, Tier-0) is the catalog-row lifecycle gate. Empty/absent
+	// == AvailabilityReady (the universal current behavior, so every existing
+	// manifest is unchanged). "watch" / "disabled-until-probe" mark a row that
+	// MUST NOT spawn a daemon nor write a client config until InstallProbe passes
+	// — that inert behavior is enforced by the host-state readiness gate
+	// (internal/api.AdmissionCheck), not by this schema gate.
+	Availability string `yaml:"availability,omitempty"`
+
+	// InstallProbe (D-3, Tier-0) is the install-detector consulted when
+	// Availability != ready. It is metadata describing WHAT the host must have;
+	// the probe is EVALUATED by reusing the readiness gate primitives as a
+	// dry-run (internal/api.availabilityProbePasses composing binaryAvailable +
+	// entryScriptStatus). It carries NO new detection logic here.
+	InstallProbe *AvailabilityProbe `yaml:"install_probe,omitempty"`
+}
+
+// VendoredSource is the D-2 vendored/community-fork provenance + pin descriptor.
+// It is metadata-only: nothing here spawns a process or writes a client config.
+// PinnedRef is the load-bearing safety field — a vendored source MUST be pinned
+// to an immutable ref (full 40-hex SHA preferred; an annotated tag accepted),
+// never a moving branch like main/master/HEAD.
+//
+// Decision: work-items/decisions/2026-06-23-d2-vendored-source.md
+type VendoredSource struct {
+	Repo          string `yaml:"repo,omitempty"`           // upstream/fork repo URL or owner/name slug (free-form metadata)
+	PinnedRef     string `yaml:"pinned_ref,omitempty"`     // immutable git ref — 40-hex SHA (preferred) or tag; REQUIRED when VendoredSource is declared
+	InstallCmd    string `yaml:"install_cmd,omitempty"`    // human-readable vendor/build command (e.g. "uv pip install ."); documentation only — NOT executed by mcphub
+	RunCmd        string `yaml:"run_cmd,omitempty"`        // human-readable run hint; documentation only — the real launcher stays command/base_args
+	LicenseStatus string `yaml:"license_status,omitempty"` // one of LicenseStatus* constants; vetting outcome recorded by D-4 at admission
+}
+
+// AvailabilityProbe is the D-3 install-detector descriptor for a watch /
+// disabled-until-probe row. It declares the host signal that flips the row to
+// enabled. It carries NO new detection logic — each field maps onto an EXISTING
+// readiness probe primitive (binaryAvailable / entryScriptStatus). The probe is
+// satisfied iff EVERY declared signal is present (AND semantics).
+//
+// Decision: work-items/decisions/2026-06-23-d3-availability-probe.md
+type AvailabilityProbe struct {
+	Binaries []string `yaml:"binaries,omitempty"` // each must resolve via the readiness binaryAvailable() owner (PATH/toolchain-dir) — e.g. ["matlab"]
+	Files    []string `yaml:"files,omitempty"`    // each must exist as a regular file via the readiness entryScriptStatus() owner — e.g. an install marker
 }
 
 type DaemonSpec struct {
@@ -390,6 +466,316 @@ func ArgsContainContextFlag(args []string) bool {
 	return false
 }
 
+// movingGitRefs is the conservative set of well-known MOVING branch names a
+// vendored source MUST NOT pin to (D-2 rule A2). A bare branch name is the exact
+// failure D-4 forbids — the fork content can change underneath the pin. A 40-hex
+// SHA or a vX.Y.Z tag is immutable and passes. We deliberately do NOT attempt
+// full SHA-shape validation (a short SHA or unusual tag is legitimate); only
+// these known moving-branch names are rejected, conservative by design.
+var movingGitRefs = map[string]struct{}{
+	"main": {}, "master": {}, "head": {}, "latest": {},
+	"trunk": {}, "develop": {}, "dev": {},
+}
+
+// IsMovingGitRef reports whether ref is a MOVING (non-immutable) git ref — one
+// whose commit can change underneath the pin (D-2 rule A2). It is the single
+// predicate the D-2 pin gate uses, shared by the manifest gate and the
+// catalog-entry mirror so the two cannot diverge.
+//
+// Rather than enumerate the (open-ended) set of BAD ref forms — the approach
+// that repeatedly let a new shape slip through (a non-listed branch name, then
+// a degenerate prefix-only ref, then a bare "<remote>/<branch>" shorthand like
+// "origin/main") — it states the COMPLETE INVERTIBLE rule and rejects everything
+// else. A ref is IMMUTABLE (returns false) iff it matches EXACTLY ONE of:
+//
+//	(a) a hex object name (SHA): ^[0-9a-fA-F]{7,40}$ — no slash;
+//	(b) a fully-qualified tag: starts with "refs/tags/" (slashes inside the tag
+//	    are fine, e.g. "refs/tags/release/2026");
+//	(c) a bare tag name: contains NO slash AND is NOT a well-known moving branch
+//	    name (movingGitRefs, case-insensitive).
+//
+// Everything else is MOVING (returns true), specifically: empty/whitespace; a
+// "refs/heads/" or "refs/remotes/" branch/remote-tracking ref (mutable regardless
+// of the bare name); ANY slash-containing value that is not a "refs/tags/" tag
+// (this is what catches "origin/main", "upstream/develop", any "<remote>/<branch>"
+// shorthand, and any other non-tag slash form — operators must qualify a
+// slash-containing tag as "refs/tags/<tag>" or use a SHA); and a bare name that
+// IS a well-known moving branch. The rule keys on IMMUTABILITY (slash-presence +
+// tag/SHA shape) directly, not on branch-name normalization, so no enumerate-bad
+// helper is needed.
+func IsMovingGitRef(ref string) bool {
+	r := strings.TrimSpace(ref)
+	if r == "" {
+		return true
+	}
+	// (b) fully-qualified tag — immutable, but ONLY when the tag name after the
+	// "refs/tags/" prefix is non-blank. A degenerate "refs/tags/" (or
+	// "refs/tags/   ") carries no tag and is not an immutable pin, so it must fall
+	// through to MOVING (return true) rather than be accepted as a tag.
+	if strings.HasPrefix(r, "refs/tags/") {
+		if strings.TrimSpace(strings.TrimPrefix(r, "refs/tags/")) != "" {
+			return false
+		}
+		return true
+	}
+	if strings.ContainsRune(r, '/') {
+		// Any other slash-containing ref (refs/heads/*, refs/remotes/*,
+		// origin/main, upstream/develop, feature/x, …) is NOT an immutable pin.
+		return true
+	}
+	// No slash from here on.
+	// (a) hex SHA — immutable.
+	if isHexObjectName(r) {
+		return false
+	}
+	// (c) bare name: immutable iff NOT a well-known moving branch.
+	_, moving := movingGitRefs[strings.ToLower(r)]
+	return moving
+}
+
+// IsPathShaped reports whether token LEXICALLY looks like a filesystem path
+// rather than a bare PATH-searchable command name. It is the single lexical
+// owner of the "this is a path, not a command" taxonomy, shared by the
+// install_probe validator (a path-shaped binaries[] entry is rejected — binaries
+// are exec.LookPath'd, not stat'd) and the browse classifier (a path-shaped
+// binary is deferred rather than LookPath'd). A token is path-shaped iff it:
+//
+//	(a) contains a forward slash '/' or a backslash '\\' (covers POSIX paths,
+//	    Windows paths, AND UNC "\\\\host\\share"); OR
+//	(b) starts with a Windows drive-letter prefix "<letter>:" (e.g. "C:tools");
+//	    OR
+//	(c) begins with '~' (a shell home-dir reference like "~/tool").
+//
+// It is PLATFORM-NEUTRAL and PURELY LEXICAL — it never touches filepath.* (whose
+// separator set is GOOS-dependent) and never touches the filesystem, so a
+// catalog authored on one OS classifies identically on every host. A bare name
+// like "matlab" or "go" is NOT path-shaped.
+func IsPathShaped(token string) bool {
+	if token == "" {
+		return false
+	}
+	if strings.ContainsAny(token, `/\`) {
+		return true
+	}
+	if token[0] == '~' {
+		return true
+	}
+	return hasDriveLetterPrefix(token)
+}
+
+// IsAbsolutePathShape reports whether token LEXICALLY looks like an ABSOLUTE
+// filesystem path on SOME host OS, GOOS-independently. It is the single lexical
+// owner used by the install_probe files[] gate so a catalog files[] entry that
+// is absolute on the host it targets (e.g. "C:\\marker" for a Windows row, or
+// "/opt/marker" for a POSIX row) is ACCEPTED at parse/validate time on ANY build
+// platform — filepath.IsAbs would wrongly reject "C:\\marker" on a linux build
+// and "/opt/marker" on a windows build, making a cross-platform registry
+// host-OS-specific. A token is absolute-path-shaped iff it:
+//
+//	(a) starts with a Windows drive-letter ABSOLUTE prefix "<letter>:\\" or
+//	    "<letter>:/" (drive letter + ':' + a separator); OR
+//	(b) begins with '/' (POSIX absolute); OR
+//	(c) begins with '\\' (Windows absolute or UNC "\\\\host\\share").
+//
+// The drive prefix MUST be followed by a separator: "C:\\marker" / "C:/marker"
+// are absolute, but a bare "C:marker" (drive letter + ':' + no separator) is
+// Windows DRIVE-RELATIVE — it resolves against the current directory ON THAT
+// DRIVE, so os.Stat'ing it would depend on the process CWD exactly like a plain
+// relative path. It is therefore NOT absolute-path-shaped and falls to the
+// files[] relative-path reject in ValidateProbeValuesNonEmpty. (It IS still
+// path-shaped per IsPathShaped, so a drive-relative binaries[] entry is rejected
+// as a path, not LookPath'd.)
+//
+// Relative forms ("./marker", "marker", "sub/marker", "C:marker") and '~'-home
+// references ("~/marker") are NOT absolute-path-shaped, so the validator still
+// rejects them (preserving the CWD-protection invariant). Real host-OS
+// existence/regular-file resolution is intentionally DEFERRED to the
+// install/readiness probe (entryScriptStatus), which os.Stat's the path on the
+// actual host.
+func IsAbsolutePathShape(token string) bool {
+	if token == "" {
+		return false
+	}
+	if token[0] == '/' || token[0] == '\\' {
+		return true
+	}
+	return hasDriveLetterAbsolutePrefix(token)
+}
+
+// hasDriveLetterPrefix reports whether token begins with a Windows drive-letter
+// prefix "<ASCII-letter>:" (e.g. "C:", "d:tools"). Lexical and GOOS-independent.
+// This is the PATH-SHAPE predicate (IsPathShaped): a bare "C:marker" still IS a
+// path (drive-relative), so a binaries[] entry of that shape is rejected as a
+// path rather than LookPath'd. The ABSOLUTE classification is stricter — see
+// hasDriveLetterAbsolutePrefix.
+func hasDriveLetterPrefix(token string) bool {
+	if len(token) < 2 || token[1] != ':' {
+		return false
+	}
+	c := token[0]
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+}
+
+// hasDriveLetterAbsolutePrefix reports whether token begins with a Windows
+// drive-letter ABSOLUTE prefix "<ASCII-letter>:\\" or "<ASCII-letter>:/" — a
+// drive letter, a colon, AND a path separator (e.g. "C:\\tools", "d:/rel"). It
+// is STRICTER than hasDriveLetterPrefix: a bare "C:marker" (no separator) is
+// Windows drive-RELATIVE (resolved against the CWD on that drive), so it is NOT
+// absolute. Lexical and GOOS-independent.
+func hasDriveLetterAbsolutePrefix(token string) bool {
+	if len(token) < 3 || token[1] != ':' {
+		return false
+	}
+	c := token[0]
+	if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+		return false
+	}
+	return token[2] == '\\' || token[2] == '/'
+}
+
+// isHexObjectName reports whether s is a git object-name (SHA) shape: 7..40 hex
+// digits and nothing else. A full SHA-1 is 40 hex; git accepts unambiguous
+// abbreviations down to ~7, so we admit that range. Callers guarantee s has no
+// slash before reaching here.
+func isHexObjectName(s string) bool {
+	if len(s) < 7 || len(s) > 40 {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+		case r >= 'a' && r <= 'f':
+		case r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// validateVendoredAndAvailability is the D-2 + D-3 schema/cross-field gate
+// (Tier-0). It is PURE: it inspects only the manifest struct, never PATH / ports
+// / vault / host state. Host-install detection (the D-3 probe) is evaluated
+// separately in internal/api.AdmissionCheck as a readiness dry-run. This helper
+// is additive — it touches no existing companion/remote-http/workspace-scoped
+// branch — and short-circuits on the nil/empty fields every existing manifest
+// carries, so a host with no desktop rows is unaffected.
+func (m *ServerManifest) validateVendoredAndAvailability() error {
+	// D-2: vendored/community-fork provenance + pin.
+	if m.VendoredSource != nil {
+		vs := m.VendoredSource
+		// A1 (load-bearing): a vendored source MUST be pinned to a non-empty ref.
+		ref := strings.TrimSpace(vs.PinnedRef)
+		if ref == "" {
+			return fmt.Errorf("manifest %s: vendored_source requires a non-empty pinned_ref (pin to a 40-hex SHA or tag; a moving branch like main/HEAD is rejected)", m.Name)
+		}
+		// A2: a well-known moving branch name is not an immutable pin. Both a
+		// bare branch name ("main") and a branch-qualified ref
+		// ("refs/heads/main", "refs/remotes/origin/main") are rejected;
+		// "refs/tags/<tag>" is an immutable tag and passes.
+		if IsMovingGitRef(ref) {
+			return fmt.Errorf("manifest %s: vendored_source requires a non-empty pinned_ref (pin to a 40-hex SHA or tag; a moving branch like main/HEAD is rejected)", m.Name)
+		}
+		// A3: license_status enum (empty allowed == unknown for gate purposes).
+		switch vs.LicenseStatus {
+		case "", LicenseStatusConfirmed, LicenseStatusPending, LicenseStatusUnknown:
+		default:
+			return fmt.Errorf("manifest %s: vendored_source.license_status %q is not one of %q|%q|%q", m.Name, vs.LicenseStatus, LicenseStatusConfirmed, LicenseStatusPending, LicenseStatusUnknown)
+		}
+	}
+
+	// D-3: availability lifecycle gate + install probe.
+	switch m.Availability {
+	case "", AvailabilityReady, AvailabilityWatch, AvailabilityDisabledUntilProbe:
+	default:
+		return fmt.Errorf("manifest %s: availability %q must be %q|%q|%q", m.Name, m.Availability, AvailabilityReady, AvailabilityWatch, AvailabilityDisabledUntilProbe)
+	}
+	inert := m.Availability == AvailabilityWatch || m.Availability == AvailabilityDisabledUntilProbe
+	// A5: a probe on a ready/empty row is dead config (symmetric to the existing
+	// remote-http field-gate idiom that rejects fields meaningless for the mode).
+	if m.InstallProbe != nil && !inert {
+		return fmt.Errorf("manifest %s: install_probe is only meaningful with availability=watch|disabled-until-probe", m.Name)
+	}
+	// A6: a watch/disabled row needs a NON-EMPTY probe (binaries or files) — a
+	// watch row with no probe can never become ready.
+	if inert {
+		if m.InstallProbe == nil || (len(m.InstallProbe.Binaries) == 0 && len(m.InstallProbe.Files) == 0) {
+			return fmt.Errorf("manifest %s: availability=%q requires a non-empty install_probe (binaries or files) — a watch row with no probe can never become ready", m.Name, m.Availability)
+		}
+		// A7: each DECLARED probe value must be a non-empty (trimmed) token. A
+		// blank binary/file slot passes the length check above but the runtime
+		// probe then looks up an empty name and can never pass — a permanently
+		// disabled row with a confusing error. Reject it up front instead.
+		if err := ValidateProbeValuesNonEmpty(m.InstallProbe, "manifest "+m.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateProbeValuesNonEmpty is the single-owner validator for install_probe
+// values, shared by the manifest gate and the catalog-entry mirror (via
+// catalogProbeToConfig) so both produce the same diagnostic shape. label
+// prefixes the error. A nil probe is a no-op (the caller's A6 check owns the
+// "needs a probe" rule). It enforces three rules per declared value, in this
+// order (validate/normalize first, then the path-shape check on files):
+//
+//  1. NON-EMPTY: a blank (empty / whitespace-only) entry is rejected — the
+//     runtime probe would look up an empty name and can never pass (a confusing
+//     permanently-disabled row).
+//  2. NO SURROUNDING WHITESPACE: a value with leading/trailing whitespace (e.g.
+//     "go ") is rejected. The non-empty check above trims before testing, so a
+//     padded-but-non-blank value would otherwise slip past, yet the runtime
+//     probe passes the ORIGINAL padded token to exec.LookPath / os.Stat and the
+//     row never enables even when the tool is installed (invisible-whitespace
+//     permanent-disable). Fail loud on the malformed value instead.
+//  3. BARE binaries[] (not a path): each binaries[] entry must be a bare
+//     PATH-searchable command name, NOT a path. binaries[] are resolved via
+//     exec.LookPath (PATH search), so a path-shaped value (e.g. "/net/slow/tool",
+//     "C:\\tools\\x.exe", a UNC "\\\\host\\share\\x", "./tool", "bin/tool",
+//     "~/tool") is a category error: LookPath would treat the slash/drive form as
+//     a literal path or never resolve it, so the row silently never enables. Use
+//     files[] for a fixed path instead. The path-shape taxonomy is the single
+//     lexical owner config.IsPathShaped (platform-neutral).
+//  4. ABSOLUTE files[] PATHS: each files[] entry must be an absolute-path SHAPE on
+//     SOME host OS (IsAbsolutePathShape — drive-letter "C:\\…", leading "/", or
+//     leading "\\" incl UNC). A relative file-probe path is os.Stat'd as-is by the
+//     runtime probe, so the gate would depend on the GUI/CLI process CWD — an
+//     unrelated "./marker" in one dir would enable the row while the same manifest
+//     stays blocked from another dir. We use the GOOS-INDEPENDENT lexical shape
+//     (NOT filepath.IsAbs, whose result is host-OS-specific) so a cross-platform
+//     registry that declares "C:\\marker" or "/opt/marker" parses identically on
+//     every build platform; the real host-OS os.Stat (existence + regular-file)
+//     is intentionally deferred to entryScriptStatus at install/readiness.
+func ValidateProbeValuesNonEmpty(p *AvailabilityProbe, label string) error {
+	if p == nil {
+		return nil
+	}
+	for i, bin := range p.Binaries {
+		if strings.TrimSpace(bin) == "" {
+			return fmt.Errorf("%s: install_probe.binaries[%d] is empty — every declared probe value must be a non-empty name", label, i)
+		}
+		if strings.TrimSpace(bin) != bin {
+			return fmt.Errorf("%s: install_probe.binaries[%d] %q has leading/trailing whitespace — the runtime probe looks up the value verbatim, so a padded name never resolves on PATH; remove the surrounding whitespace", label, i, bin)
+		}
+		if IsPathShaped(bin) {
+			return fmt.Errorf("%s: install_probe.binaries[%d] %q is a path, not a PATH-searchable name; a binary probe must be a bare command name (use files[] for a fixed path)", label, i, bin)
+		}
+	}
+	for i, f := range p.Files {
+		if strings.TrimSpace(f) == "" {
+			return fmt.Errorf("%s: install_probe.files[%d] is empty — every declared probe value must be a non-empty path", label, i)
+		}
+		if strings.TrimSpace(f) != f {
+			return fmt.Errorf("%s: install_probe.files[%d] %q has leading/trailing whitespace — the runtime probe stats the value verbatim, so a padded path never resolves; remove the surrounding whitespace", label, i, f)
+		}
+		if !IsAbsolutePathShape(f) {
+			return fmt.Errorf("%s: install_probe.files[%d] %q must be an absolute path — a relative file probe is stat'd against the process working directory, so the gate would depend on which directory mcphub runs from", label, i, f)
+		}
+	}
+	return nil
+}
+
 // Validate checks required fields and enum values. Called automatically by ParseManifest.
 //
 // Validate is COMPAT mode for the '__'-in-name policy: structural fields
@@ -584,6 +970,18 @@ func (m *ServerManifest) Validate() error {
 	}
 	if m.Transport != TransportNativeHTTP && m.Transport != TransportStdioBridge && m.Transport != TransportRemoteHTTP && m.Transport != TransportProcess {
 		return fmt.Errorf("manifest %s: transport must be %q, %q, %q, or %q (got %q)", m.Name, TransportNativeHTTP, TransportStdioBridge, TransportRemoteHTTP, TransportProcess, m.Transport)
+	}
+
+	// D-2 + D-3 schema/cross-field gates (Tier-0). Placed here — AFTER the
+	// kind/transport enum checks and BEFORE the companion early-return below — so
+	// it applies to EVERY kind/transport uniformly (a vendored COM server is
+	// kind=global; a watch row could be any kind). Pin-presence and enum-shape
+	// are decidable from the manifest struct alone, so they belong in this pure,
+	// host-state-free gate that runs at parse time (ManifestCreate AND Install).
+	// Host-install detection (the D-3 probe) is a host/runtime fact and lives in
+	// internal/api.AdmissionCheck instead.
+	if err := m.validateVendoredAndAvailability(); err != nil {
+		return err
 	}
 
 	// kind=companion and transport=process are a matched pair: each is invalid

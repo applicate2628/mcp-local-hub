@@ -14,6 +14,14 @@ import (
 
 var lspEnsureLocks sync.Map // map[string]*sync.Mutex, keyed by workspaceKey + "\x00" + language
 
+// loadLSPRegisterManifestFn is the test seam for the embedded-manifest load in
+// EnsureLSPRegistered. Production wires the real loadLSPRegisterManifest (loads
+// the shipped mcp-language-server manifest); tests inject a synthetic manifest
+// (e.g. an inert availability=watch row) to exercise the D-3 admission gate
+// hermetically without a catalog edit. Mirrors the package's other `…Fn` seams
+// (proxyReadinessFn, registerSupervisorReconcileFn).
+var loadLSPRegisterManifestFn = loadLSPRegisterManifest
+
 const lspExistingProxyProbeTimeout = 500 * time.Millisecond
 
 // EnsureLSPRegistered idempotently creates the supervised workspace-proxy row
@@ -49,8 +57,19 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		return WorkspaceEntry{}, err
 	}
 
-	m, spec, err := loadLSPRegisterManifest(language)
+	m, spec, err := loadLSPRegisterManifestFn(language)
 	if err != nil {
+		return WorkspaceEntry{}, err
+	}
+	// D-3 availability admission gate (shared single owner), run immediately
+	// after the manifest load and BEFORE any registry write, supervisor-intent
+	// upsert, reconcile, or spawn. It guards BOTH downstream branches below — the
+	// prior-row promotion branch (legacy → supervised) and the first-registration
+	// branch — so a watch / disabled-until-probe manifest whose install-probe has
+	// not passed never reaches an intent/reconcile mutation. ADDITIVE: the shipped
+	// mcp-language-server manifest carries no availability/install_probe, so this
+	// returns nil immediately (byte-identical first-touch behavior).
+	if err := AvailabilityAdmission(m); err != nil {
 		return WorkspaceEntry{}, err
 	}
 	if m.PortPool == nil {

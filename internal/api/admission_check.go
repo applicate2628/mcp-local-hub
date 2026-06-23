@@ -70,6 +70,48 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 		})
 	}
 
+	// D-3 inert gate (Tier-0), evaluated FIRST and for EVERY transport. A
+	// watch / disabled-until-probe row whose install-probe has NOT passed gets a
+	// NON-OPTIONAL finding, which makes Preflight return the AdmissionError and
+	// abort Install BEFORE installPlanCore writes any supervisor-intent row or
+	// client config — the single chokepoint guaranteeing "an inert row NEVER
+	// spawns a daemon nor writes a client config until the probe passes". The
+	// probe is the readiness gate reused as a dry-run (availabilityProbePasses
+	// composes the existing binaryAvailable + entryScriptStatus owners), so it
+	// cannot drift from the install gate. When the probe PASSES the row falls
+	// through and behaves exactly like a ready row.
+	//
+	// The finding itself is emitted by availabilityProbeFinding — the SINGLE
+	// OWNER reused by every non-Preflight install/register/spawn path through
+	// AvailabilityAdmission / AvailabilityAdmissionFields, so the D-3 gate is one
+	// decision shared across all paths (architecture law: one owner per
+	// cross-cutting invariant).
+	if f, inertBlock := availabilityProbeFinding(m.Availability, m.InstallProbe, m.Name); inertBlock {
+		findings = append(findings, f)
+		// Short-circuit: an inert un-probed row needs no further port/binary
+		// findings — it is not going to install.
+		return findings
+	}
+	// Probe passed (or row is ready) → fall through to the normal admission
+	// checks; the row now behaves exactly like a ready row (spawn + write proceed).
+
+	// D-2 advisory (Tier-0): a vendored/community-fork server whose license has
+	// not been vetted (license_status pending / empty / unknown) gets an OPTIONAL
+	// finding. Optional == does NOT block install (the operator may knowingly
+	// install a pending-license fork on their own host); it surfaces in the GUI
+	// readiness panel as a yellow advisory row. The HARD pin-presence enforcement
+	// lives in config.Validate() (Gate A); only the soft license vetting is
+	// advisory here, matching the epic's "confirm LICENSE" being a D-4 protocol
+	// step, not a schema invariant. Network-fact license vetting (gh API) is out
+	// of scope for this PRE-SPAWN/MCPHUB-FIXABLE gate.
+	if vs := m.VendoredSource; vs != nil && vs.LicenseStatus != config.LicenseStatusConfirmed {
+		shown := vs.LicenseStatus
+		if shown == "" {
+			shown = "unset"
+		}
+		add("vendored-license-unvetted", "vendored source: "+m.Name, fmt.Sprintf("server %s is vendored from %s but its license_status is %q (not confirmed) — vet LICENSE on the real repo before relying on it", m.Name, vendoredRepoForFinding(vs.Repo), shown), "Vet the LICENSE on the upstream/fork repo, then set vendored_source.license_status: confirmed in the manifest.", true)
+	}
+
 	if m.Transport == config.TransportRemoteHTTP {
 		if _, err := ensureCanonicalMcphubPresent(); err != nil {
 			_, fix := LauncherGuidance("mcphub")
@@ -207,6 +249,245 @@ func containsNonOptional(findings []AdmissionFinding) bool {
 		}
 	}
 	return false
+}
+
+// optionalFindingByID returns the FIRST advisory (Optional) finding with the
+// given ID from an AdmissionCheck result, so CheckServerReadiness can surface a
+// specific non-blocking advisory (e.g. the D-2 "vendored-license-unvetted" row)
+// as a visible requirement WITHOUT re-deriving its predicate or text — the
+// AdmissionCheck finding stays the single owner. It matches only Optional
+// findings by design: a blocking (non-optional) finding is already surfaced
+// through its own readiness path / the install-plan blocker, so this never
+// reclassifies a blocker as advisory.
+func optionalFindingByID(findings []AdmissionFinding, id string) (AdmissionFinding, bool) {
+	for _, f := range findings {
+		if f.Optional && f.ID == id {
+			return f, true
+		}
+	}
+	return AdmissionFinding{}, false
+}
+
+// findingByID returns the FIRST finding with the given ID from an AdmissionCheck
+// result, regardless of its Optional flag. CheckServerReadinessWithScope uses it
+// to REUSE the blocking "availability-probe" finding produced by the SINGLE
+// AdmissionCheck call instead of re-evaluating the file-based probe a second time
+// (which would risk an intra-request TOCTOU between the Ready seed and the
+// surfaced advisory row). It deliberately does NOT filter on Optional — the
+// availability-probe finding is non-optional — so it is the general single-call
+// reuse helper, while optionalFindingByID stays the advisory-only variant.
+func findingByID(findings []AdmissionFinding, id string) (AdmissionFinding, bool) {
+	for _, f := range findings {
+		if f.ID == id {
+			return f, true
+		}
+	}
+	return AdmissionFinding{}, false
+}
+
+// availabilityProbeFinding is the SINGLE OWNER of the D-3 inert-gate finding.
+// Given a manifest/entry's availability string + install probe, it returns the
+// NON-OPTIONAL availability-probe finding (and inertBlock=true) when the row is
+// inert (watch/disabled-until-probe) AND its probe has NOT passed; otherwise it
+// returns inertBlock=false (a ready/empty row, or an inert row whose probe is
+// satisfied, falls through to normal admission). AdmissionCheck composes it for
+// the Preflight path; AvailabilityAdmission / AvailabilityAdmissionFields wrap
+// it into a typed error for the 4 install/register/spawn paths that do NOT
+// route through full AdmissionCheck/Preflight. Defining the finding text +
+// inert predicate + probe dry-run in this one place is what keeps the D-3 gate
+// from drifting across paths (architecture law: one owner per cross-cutting
+// invariant). availabilityInert + availabilityProbePasses are the same readiness
+// owners the gate has always used — no second detector is introduced here.
+func availabilityProbeFinding(availability string, probe *config.AvailabilityProbe, name string) (AdmissionFinding, bool) {
+	if availability != config.AvailabilityWatch && availability != config.AvailabilityDisabledUntilProbe {
+		return AdmissionFinding{}, false
+	}
+	ok, why := availabilityProbePasses(probe)
+	if ok {
+		return AdmissionFinding{}, false
+	}
+	return AdmissionFinding{
+		ID:       "availability-probe",
+		Name:     "availability: " + availability,
+		Reason:   fmt.Sprintf("server %s is %s and its install-probe has not passed (%s); it will not spawn or write client configs until the probe is satisfied", name, availability, why),
+		Fix:      "Install the host app/tool the probe detects, then re-run install / re-check readiness; the row is greyed until then.",
+		Optional: false,
+	}, true
+}
+
+// AvailabilityAdmission is the shared D-3-only admission gate every
+// install/register/spawn path that does NOT already run the full
+// AdmissionCheck/Preflight gate must call so an inert (watch /
+// disabled-until-probe) manifest NEVER spawns a daemon nor writes a client
+// config until its install-probe passes. It returns the same typed
+// *AdmissionError the Preflight chokepoint returns for the availability-probe
+// finding, or nil when the row is ready / the probe is satisfied. ADDITIVE: a
+// manifest with empty availability + no probe (every existing manifest) returns
+// nil immediately, so the path behaves byte-identically to before Tier-0.
+//
+// It is intentionally D-3-ONLY (not the full AdmissionCheck): the register /
+// LSP-auto-register / serena-projection paths have their own port/binary/
+// scheduler verification and only the cross-cutting availability gate was
+// being bypassed; running the full port/secret/dynamic-pool gate here would
+// change their behavior. The D-2 pin-presence gate for those paths lives in
+// config.ServerManifest.Validate (its own single owner).
+func AvailabilityAdmission(m *config.ServerManifest) error {
+	if m == nil {
+		return nil
+	}
+	return AvailabilityAdmissionFields(m.Availability, m.InstallProbe, m.Name)
+}
+
+// AvailabilityAdmissionFields is the field-level form of AvailabilityAdmission
+// for callers that hold the availability string + probe directly rather than a
+// *config.ServerManifest — chiefly the marketplace one-click install handler,
+// whose catalog MarketplaceEntry mirrors the manifest's availability/install_probe
+// in JSON-tagged types. It maps onto the SAME availabilityProbeFinding owner, so
+// the marketplace entry gate and the manifest gate are one decision.
+func AvailabilityAdmissionFields(availability string, probe *config.AvailabilityProbe, name string) error {
+	if f, inertBlock := availabilityProbeFinding(availability, probe, name); inertBlock {
+		return admissionErrorFromFinding(f)
+	}
+	return nil
+}
+
+// MarketplaceEntryProbePasses reports whether a catalog entry's install probe
+// is satisfied on THIS host RIGHT NOW — the LIVE readiness dry-run, not the
+// static availability field. It composes the SAME availabilityProbeFinding owner
+// the install gate (AvailabilityAdmissionFields / AdmissionCheck) uses, so the
+// GUI browse DTO reflects the EXACT gate verdict instead of re-deriving a
+// stricter one: a ready/empty row is always installable, and an inert (watch /
+// disabled-until-probe) row is installable iff its probe passes (the host app is
+// detected). This is the mirror-gate seam for the Catalog screen — the GUI keys
+// its install-button suppression on "inert AND NOT this", matching the backend
+// gate exactly, so a now-ready inert row can be installed once detected. A nil
+// entry, or an entry whose availability is empty/ready, returns true.
+func MarketplaceEntryProbePasses(e *MarketplaceEntry) bool {
+	if e == nil {
+		return true
+	}
+	_, inertBlock := availabilityProbeFinding(e.Availability, catalogProbeToConfig(e.InstallProbe), e.ID)
+	return !inertBlock
+}
+
+// ProbeBrowseState is the TRI-STATE browse-time verdict for one catalog row,
+// emitted by the read-only GET /api/marketplace projection. It distinguishes the
+// THREE states a single bool conflated — "definitely installable", "definitely
+// not yet (host app missing)", and "cannot tell without an install-time probe" —
+// so the frontend can offer install on the last (the probe runs at install) yet
+// keep greying the genuinely-blocked one. The three values:
+//
+//	ProbeBrowseReady        — ready/empty row, OR an inert binary-only row whose
+//	                          bare binaries ALL resolve on PATH. Installable now.
+//	ProbeBrowseInertBlocked — inert row that is provably NOT installable yet: a
+//	                          nil/empty probe (fail-closed), or a bare binary that
+//	                          is absent from PATH. The GUI greys it "probe to
+//	                          enable".
+//	ProbeBrowseInertUnknown — inert row whose readiness cannot be decided WITHOUT
+//	                          touching the filesystem/an external location: it
+//	                          carries a files[] probe, OR a path-shaped binary, OR
+//	                          a mix. The browse path NEVER os.Stats a file and
+//	                          NEVER LookPaths a path, so it defers — the GUI still
+//	                          offers install (the real probe runs at the
+//	                          install-time AvailabilityAdmissionEntry gate, which
+//	                          DOES stat).
+type ProbeBrowseState string
+
+const (
+	ProbeBrowseReady        ProbeBrowseState = "ready"
+	ProbeBrowseInertBlocked ProbeBrowseState = "inert-blocked"
+	ProbeBrowseInertUnknown ProbeBrowseState = "inert-unknown"
+)
+
+// MarketplaceEntryBrowseProbeState is the PASSIVE browse-time TRI-STATE
+// classifier for the read-only GET /api/marketplace projection. The full gate
+// (MarketplaceEntryProbePasses / AvailabilityAdmissionEntry) runs
+// availabilityProbePasses, which os.Stats every files[] target — fine on the
+// operator-initiated install path, but a per-row os.Stat while merely SERVING
+// the browse list lets a catalog-provided file-probe path (a slow automount, a
+// Windows UNC share) stall opening/refreshing the Catalog and touches an
+// external location before the operator ever chooses to install. So this
+// classifier NEVER os.Stats a files[] entry and NEVER exec.LookPaths a
+// path-shaped token; it evaluates ONLY the bounded bare-binary probe (the SAME
+// binaryAvailable owner the install gate uses) and DEFERS everything else.
+//
+// Algorithm (in order):
+//   - non-inert (ready/empty, incl. a nil entry) → ProbeBrowseReady.
+//   - nil/empty probe → ProbeBrowseInertBlocked (fail-closed; A6 forbids an inert
+//     row without a probe, so this is defensive).
+//   - BARE binaries FIRST: ANY bare binary absent from PATH → ProbeBrowseInertBlocked.
+//     With the install gate's AND semantics a missing bare binary already proves
+//     the probe cannot pass, even on a MIXED row that also carries files[]; the
+//     check is bounded (exec.LookPath, no os.Stat), so it is safe on the browse
+//     path. Path-shaped binaries are skipped here and deferred below (codex r6
+//     finding 4).
+//   - then any files[] present → ProbeBrowseInertUnknown (DEFERRED; never os.Stat).
+//   - then any path-shaped binary (config.IsPathShaped) → ProbeBrowseInertUnknown
+//     (DEFERRED; never LookPath a path — defense-in-depth for a manifest that
+//     bypassed the strict ValidateProbeValuesNonEmpty path gate).
+//   - otherwise (all bare binaries resolved, no files[], no path-shaped binary) →
+//     ProbeBrowseReady.
+//
+// A mixed binaries+files probe whose bare binaries ALL resolve lands in
+// ProbeBrowseInertUnknown via the files[] rule; if a bare binary is MISSING it is
+// ProbeBrowseInertBlocked (the row is definitely not installable yet, so the GUI
+// greys it instead of offering an install that immediately 412s). The install-time
+// gate still runs the FULL file probe, so an inert-unknown row is still installable
+// once the operator clicks install.
+func MarketplaceEntryBrowseProbeState(e *MarketplaceEntry) ProbeBrowseState {
+	if e == nil {
+		return ProbeBrowseReady
+	}
+	if e.Availability != config.AvailabilityWatch && e.Availability != config.AvailabilityDisabledUntilProbe {
+		return ProbeBrowseReady
+	}
+	p := catalogProbeToConfig(e.InstallProbe)
+	// A6 guarantees an inert row declares a non-empty probe; defensively a nil /
+	// empty probe is fail-closed (provably not installable yet).
+	if p == nil || (len(p.Binaries) == 0 && len(p.Files) == 0) {
+		return ProbeBrowseInertBlocked
+	}
+	// BARE binaries FIRST (codex r6 finding 4): the install-time probe is AND
+	// semantics — EVERY declared binary must resolve AND every file must exist — so a
+	// MISSING bare binary already PROVES the probe cannot pass, regardless of any
+	// files[] alongside it. Checking it is bounded (exec.LookPath / PATH search, no
+	// os.Stat, no external location touched), so it is safe on the browse path. Doing
+	// it before the files[]/path-shaped deferral means a mixed row whose bare binary
+	// is absent is correctly greyed (inert-blocked) instead of offered as
+	// inert-unknown and then immediately 412'd at install. A path-shaped binary is
+	// SKIPPED here (it must NOT be LookPath'd as a bare name) and handled by the
+	// deferral below.
+	for _, bin := range p.Binaries {
+		if config.IsPathShaped(bin) {
+			continue
+		}
+		if !binaryAvailable(bin) {
+			return ProbeBrowseInertBlocked
+		}
+	}
+	// All BARE binaries resolved. Anything that cannot be decided WITHOUT touching
+	// the filesystem / an external location is now DEFERRED to the install gate: a
+	// declared file probe (never os.Stat'd here), or a path-shaped binary (never
+	// exec.LookPath'd as a bare name — defense-in-depth for a manifest that bypassed
+	// the strict ValidateProbeValuesNonEmpty path gate).
+	if len(p.Files) > 0 {
+		return ProbeBrowseInertUnknown
+	}
+	for _, bin := range p.Binaries {
+		if config.IsPathShaped(bin) {
+			return ProbeBrowseInertUnknown
+		}
+	}
+	return ProbeBrowseReady
+}
+
+// vendoredRepoForFinding renders the D-2 advisory's repo reference, falling back
+// to a neutral phrase when the manifest omits the (free-form, optional) repo.
+func vendoredRepoForFinding(repo string) string {
+	if strings.TrimSpace(repo) == "" {
+		return "an unspecified source"
+	}
+	return repo
 }
 
 func scopeForPreflight(daemonFilter string) AdmissionScope {

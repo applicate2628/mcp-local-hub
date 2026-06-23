@@ -301,6 +301,28 @@ describe("installMarketplaceEntry", () => {
     expect(out).toEqual({ kind: "name-conflict", suggestedName: "git-2" });
   });
 
+  // FINDING 3 regression: a 412 AVAILABILITY_PROBE_PENDING must map to its OWN
+  // kind:'probe-pending' (carrying the backend reason) — NOT the 409
+  // name-conflict branch. A 409 helper that branched only on HTTP code would
+  // misroute the probe gate to the name-conflict retry UI; 412 keeps them
+  // distinct.
+  it("maps a 412 AVAILABILITY_PROBE_PENDING to kind:'probe-pending' (not name-conflict, not a throw)", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 412,
+      statusText: "Precondition Failed",
+      json: async () => ({
+        error: "server X is watch and its install-probe has not passed",
+        code: "AVAILABILITY_PROBE_PENDING",
+      }),
+    }) as unknown as Response);
+    const out = await installMarketplaceEntry({ id: "x", mode: "hub" });
+    expect(out).toEqual({
+      kind: "probe-pending",
+      reason: "server X is watch and its install-probe has not passed",
+    });
+  });
+
   it("carries the suggested name through on a hub retry", async () => {
     const seen: { body?: string } = {};
     globalThis.fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
@@ -375,6 +397,64 @@ describe("installMarketplaceEntry", () => {
     await expect(installMarketplaceEntry({ id: "git", mode: "hub" })).rejects.toThrow(
       /marketplace catalog unavailable/,
     );
+  });
+});
+
+import { refreshMarketplace } from "./api";
+
+describe("refreshMarketplace", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // FINDING 2 regression: the refresh path is a SECOND marketplace-DTO consumer
+  // (beyond the initial load). It must carry the D-3 availability + probe_passes
+  // fields onto the refreshed entry, or a refreshed watch / disabled-until-probe
+  // row would lose its inert-gating (Catalog keys the install-button suppression
+  // on them) after Refresh.
+  it("carries availability + probe_passes through onto the refreshed entries", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        entries: [
+          {
+            id: "inert",
+            name: "Inert",
+            summary: "needs a host app",
+            categories: ["dev"],
+            homepage: "https://example.com",
+            transport: "stdio",
+            availability: "watch",
+            probe_passes: false,
+          },
+        ],
+      }),
+    }) as unknown as Response);
+    const rows = await refreshMarketplace();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: "inert",
+      availability: "watch",
+      probe_passes: false,
+    });
+  });
+
+  it("normalizes a missing availability to '' and omits probe_passes when absent", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        entries: [{ id: "ready", name: "Ready", transport: "http" }],
+      }),
+    }) as unknown as Response);
+    const rows = await refreshMarketplace();
+    expect(rows[0].availability).toBe("");
+    // Absent probe_passes stays undefined (fail-closed grey-on-availability),
+    // never coerced to a boolean that would falsely mark an inert row passing.
+    expect(rows[0].probe_passes).toBeUndefined();
   });
 });
 

@@ -54,6 +54,55 @@ interface MarketplaceEntry {
   // omits it (or a hostile/partial body) reads as "" and falls back to the
   // safe HUB-ONLY affordance.
   transport: string;
+  // Availability (D-3, Tier-0): "" | "ready" | "watch" | "disabled-until-probe".
+  // A "watch" / "disabled-until-probe" row is greyed and labeled "probe to
+  // enable" — its host app/tool isn't detected yet. An older backend that omits
+  // it (or "" / "ready") renders exactly as before. Optional + string-normalized.
+  availability?: string;
+  // ProbeState (D-3, Tier-0 — mirror-gate): the TRI-STATE browse-time host-probe
+  // verdict — "ready" (installable now), "inert-blocked" (host app provably not
+  // detected yet → greyed "probe to enable"), or "inert-unknown" (carries a
+  // files[]/path-shaped probe the browse path defers — still offer install; the
+  // real probe runs at install). This is the new authority. An older backend that
+  // omits it reads as undefined → we fall back to the deprecated probe_passes
+  // alias (ready iff true, else inert-blocked — fail-closed).
+  probe_state?: string;
+  // ProbePasses (DEPRECATED alias of probe_state, kept for one release): the bool
+  // host-probe verdict (true iff probe_state == "ready"). New code reads
+  // probe_state; this remains only so an un-regenerated bundle / older backend
+  // degrades safely (undefined → fail-closed grey-on-availability).
+  probe_passes?: boolean;
+}
+
+// ProbeBrowseState mirrors the backend api.ProbeBrowseState tri-state. Kept as a
+// string union so an unknown future value coming off the wire still type-checks
+// (we fall back to the fail-closed inert-blocked branch for anything unexpected).
+type ProbeBrowseState = "ready" | "inert-blocked" | "inert-unknown";
+
+// legacyProbeState maps the DEPRECATED probe_passes bool (when probe_state is
+// absent on an older backend) onto the tri-state, fail-closed: probe_passes ===
+// true → "ready"; anything else (false / undefined) → "inert-blocked". The
+// legacy bool never carried the "unknown" state, so a now-inert row with a
+// file/path probe stays greyed under the legacy path — the prior, stricter
+// behavior. SINGLE place the deprecated alias is interpreted.
+function legacyProbeState(entry: MarketplaceEntry): ProbeBrowseState {
+  if (entry.availability !== "watch" && entry.availability !== "disabled-until-probe") {
+    return "ready";
+  }
+  return entry.probe_passes === true ? "ready" : "inert-blocked";
+}
+
+// resolveProbeState picks the authoritative tri-state for one row: the backend
+// probe_state when present (and a recognized value), else the legacy bool map.
+function resolveProbeState(entry: MarketplaceEntry): ProbeBrowseState {
+  switch (entry.probe_state) {
+    case "ready":
+    case "inert-blocked":
+    case "inert-unknown":
+      return entry.probe_state;
+    default:
+      return legacyProbeState(entry);
+  }
 }
 
 // Mirrors marketplaceListResponse in internal/gui/marketplace.go — the GET
@@ -178,6 +227,9 @@ export function CatalogScreen() {
             const rows = (Array.isArray(mp.entries) ? mp.entries : []).map((e) => ({
               ...e,
               transport: typeof e.transport === "string" ? e.transport : "",
+              // Normalize availability to a string so an older backend that
+              // omits it reads as "" (ready) and the row renders as before.
+              availability: typeof e.availability === "string" ? e.availability : "",
             }));
             setMarketplace(rows);
           }
@@ -646,6 +698,9 @@ function CatalogInstallGate({
 // map. The richer terminal states carry the data the row renders inline:
 //   "installed"      → hub-mode 201 success (name + resolved port).
 //   "name-conflict"  → hub-mode 409: offer a one-click retry under suggestedName.
+//   "probe-pending"  → 412: the D-3 host-probe precondition is unmet (host app
+//                      not detected) — rendered as its OWN message, never the
+//                      name-conflict retry.
 //   "direct-result"  → direct-mode 200/207: per-client updated / failed split.
 //   "error"          → any unmodelled failure, rendered as an inline message.
 type MarketplaceInstallState =
@@ -653,6 +708,7 @@ type MarketplaceInstallState =
   | { phase: "installing" }
   | { phase: "installed"; name: string; port: number }
   | { phase: "name-conflict"; suggestedName: string }
+  | { phase: "probe-pending"; reason: string }
   | {
       phase: "direct-result";
       partial: boolean;
@@ -756,6 +812,8 @@ function MarketplaceSection({
         setState(id, { phase: "installed", name: result.name, port: result.port });
       } else if (result.kind === "name-conflict") {
         setState(id, { phase: "name-conflict", suggestedName: result.suggestedName });
+      } else if (result.kind === "probe-pending") {
+        setState(id, { phase: "probe-pending", reason: result.reason });
       } else {
         setState(id, {
           phase: "direct-result",
@@ -851,6 +909,18 @@ function MarketplaceCard({
   ) => void;
 }) {
   const isHttp = entry.transport === "http";
+  // D-3 (Tier-0, mirror-gate): the TRI-STATE browse verdict drives the affordance.
+  // "ready" and "inert-unknown" both show the install block — "ready" is detected
+  // now, and "inert-unknown" carries a files[]/path-shaped probe the browse path
+  // deliberately did NOT touch, so the Catalog still offers install and the real
+  // probe runs at the install-time gate (a tooltip explains this). Only
+  // "inert-blocked" (host app provably absent) shows the greyed "probe to enable"
+  // badge. resolveProbeState falls back to the deprecated probe_passes bool when
+  // an older backend omits probe_state (fail-closed).
+  const probeState = resolveProbeState(entry);
+  const showInstall = probeState === "ready" || probeState === "inert-unknown";
+  const showProbeBadge = probeState === "inert-blocked";
+  const isInertUnknown = probeState === "inert-unknown";
   const installing = state.phase === "installing";
   // Direct-mode client multiselect open + selected set, local to this row.
   const [directOpen, setDirectOpen] = useState(false);
@@ -911,7 +981,25 @@ function MarketplaceCard({
           Added to hub as <strong>{state.name}</strong>
           {state.port > 0 ? ` on port ${state.port}.` : "."}
         </p>
-      ) : (
+      ) : showProbeBadge ? (
+        /* D-3 (Tier-0): inert-blocked watch / disabled-until-probe row — the host
+           app is provably not detected yet (a bare binary absent from PATH, or a
+           fail-closed nil probe). Greyed, no install affordance, "probe to enable"
+           badge. Installing it would only hit the backend's blocking
+           availability-probe AdmissionError, so the UI suppresses the buttons
+           until the host app is detected. An inert-UNKNOWN row (files[]/path-shaped
+           probe the browse path deferred) is NOT here — it shows the install
+           block below with an extra tooltip. */
+        <span
+          class="lsp-chip catalog-marketplace-probe-to-enable"
+          data-testid={`catalog-marketplace-probe-to-enable-${entry.id}`}
+          title="This server's host app or tool isn't detected on this machine yet. Install it, then this row enables."
+        >
+          probe to enable
+        </span>
+      ) : showInstall ? (
+        /* showInstall: "ready" or "inert-unknown". The latter adds a tooltip
+           explaining that clicking install runs the real host probe. */
         <div class="catalog-marketplace-install" data-testid={`catalog-marketplace-install-${entry.id}`}>
           <div class="catalog-marketplace-actions">
             <button
@@ -919,6 +1007,11 @@ function MarketplaceCard({
               class="btn-primary"
               data-testid={`catalog-marketplace-hub-${entry.id}`}
               disabled={installing}
+              title={
+                isInertUnknown
+                  ? "host app not auto-detected; clicking install verifies it and reports if missing"
+                  : undefined
+              }
               onClick={() => onInstall(entry.id, "hub")}
             >
               {installing ? "Installing…" : "Add to hub"}
@@ -988,6 +1081,20 @@ function MarketplaceCard({
             </div>
           )}
 
+          {/* 412 AVAILABILITY_PROBE_PENDING: the host app/tool isn't detected
+              yet. Rendered as its OWN message — distinct from the 409
+              name-conflict retry — so the operator knows to install the host app
+              first, not to rename. */}
+          {state.phase === "probe-pending" && (
+            <p
+              class="catalog-marketplace-status catalog-marketplace-status-warn"
+              role="alert"
+              data-testid={`catalog-marketplace-probe-pending-${entry.id}`}
+            >
+              Host app not detected yet — {state.reason}
+            </p>
+          )}
+
           {/* 409 NAME_CONFLICT: offer a one-click retry under the suggested
               name. */}
           {state.phase === "name-conflict" && (
@@ -1038,7 +1145,7 @@ function MarketplaceCard({
             </p>
           )}
         </div>
-      )}
+      ) : null}
 
       {/* homepage comes from an UNTRUSTED external registry — only render the
           link when it is an http(s) URL, so a hostile catalog cannot inject a
