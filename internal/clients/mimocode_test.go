@@ -2005,6 +2005,65 @@ func TestMimoCode_AllStdioEntries_ArrayCommand(t *testing.T) {
 	}
 }
 
+func TestMimoCode_RemovableStdioEntries_WriteTargetOnly(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	writeTarget := filepath.Join(dir, "mimocode.json")
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{
+  "mcp": {
+    "lower-gopls": {"type": "local", "command": ["gopls", "mcp"], "enabled": true}
+  }
+}`), 0o600); err != nil {
+		t.Fatalf("write lower config: %v", err)
+	}
+	if err := os.WriteFile(writeTarget, []byte(`{
+  "mcp": {
+    "writable-gopls": {"type": "local", "command": ["gopls", "mcp"], "enabled": true},
+    "shadowed-gopls": {"type": "local", "command": ["gopls", "mcp"], "enabled": true}
+  }
+}`), 0o600); err != nil {
+		t.Fatalf("write target config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "mimocode.jsonc"), []byte(`{
+  "mcp": {
+    "shadowed-gopls": {"type": "local", "command": ["gopls", "mcp"], "enabled": true}
+  }
+}`), 0o600); err != nil {
+		t.Fatalf("write higher config: %v", err)
+	}
+	o := &mimoCodeClient{path: writeTarget}
+
+	all, err := o.AllStdioEntries()
+	if err != nil {
+		t.Fatalf("AllStdioEntries: %v", err)
+	}
+	allNames := map[string]bool{}
+	for _, e := range all {
+		allNames[e.Name] = true
+	}
+	if !allNames["lower-gopls"] || !allNames["writable-gopls"] || !allNames["shadowed-gopls"] {
+		t.Fatalf("AllStdioEntries must keep the merged non-destructive view, got %#v", all)
+	}
+
+	removable, err := o.RemovableStdioEntries()
+	if err != nil {
+		t.Fatalf("RemovableStdioEntries: %v", err)
+	}
+	got := map[string]bool{}
+	for _, e := range removable {
+		got[e.Name] = true
+	}
+	if !got["writable-gopls"] {
+		t.Fatalf("write-target-only gopls should be removable, got %#v", removable)
+	}
+	if got["lower-gopls"] {
+		t.Fatalf("lower-layer gopls must not be reported as removable: %#v", removable)
+	}
+	if got["shadowed-gopls"] {
+		t.Fatalf("write-target gopls shadowed by a higher layer must not be reported as removable: %#v", removable)
+	}
+}
+
 // TestMimoCode_FindStdioLanguageServer_WriteTargetOnly pins bot PR #420 finding
 // 4: the destructive direct-LSP cleanup (which calls RemoveEntry on each match,
 // and RemoveEntry deletes from the write target ONLY) must report only entries

@@ -320,7 +320,7 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 		}
 		matches := matchingDirectLanguageServerEntries(entries, aliases, canonicalWorkspace)
 		if aliases["go"] || aliases["gopls"] {
-			stdioEntries, err := client.AllStdioEntries()
+			stdioEntries, err := removableStdioEntriesForDirectCleanup(client)
 			if err != nil {
 				warnings = append(warnings, fmt.Sprintf("%s direct stdio scan failed: %v", clientName, err))
 			} else {
@@ -1319,6 +1319,17 @@ type registerClient interface {
 	FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error)
 }
 
+type removableStdioEntriesClient interface {
+	RemovableStdioEntries() ([]clients.StdioEntry, error)
+}
+
+func removableStdioEntriesForDirectCleanup(client registerClient) ([]clients.StdioEntry, error) {
+	if c, ok := client.(removableStdioEntriesClient); ok {
+		return c.RemovableStdioEntries()
+	}
+	return client.AllStdioEntries()
+}
+
 // Package-level hooks — nil in production (fall back to real schedulers /
 // clients); tests assign replacements via newRegisterHarness and restore
 // them in defer.
@@ -1379,6 +1390,14 @@ func (a realClientAdapter) GetEntry(name string) (*clients.MCPEntry, error) {
 	return a.c.GetEntry(name)
 }
 func (a realClientAdapter) AllStdioEntries() ([]clients.StdioEntry, error) {
+	return a.c.AllStdioEntries()
+}
+func (a realClientAdapter) RemovableStdioEntries() ([]clients.StdioEntry, error) {
+	if c, ok := a.c.(interface {
+		RemovableStdioEntries() ([]clients.StdioEntry, error)
+	}); ok {
+		return c.RemovableStdioEntries()
+	}
 	return a.c.AllStdioEntries()
 }
 func (a realClientAdapter) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {

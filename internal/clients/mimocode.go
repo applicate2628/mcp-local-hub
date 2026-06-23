@@ -2999,15 +2999,6 @@ func (o *mimoCodeClient) restoreEntryFromBackup(backupPath, name string, allowHu
 // non-destructive kill-pattern consumer must still see lower-layer entries, an
 // orphan process spawned from a lower-layer entry is a real orphan.
 //
-// KNOWN LIMITATION (gopls direct-LSP destructive path): the gopls cleanup at
-// register.go consumes this merged view then RemoveEntry-s a match, but
-// RemoveEntry deletes from the write target ONLY. A gopls direct entry living in
-// a NON-write-target layer would log a false success and re-emerge via merge —
-// the same class as finding 4 (filed as an adjacent finding) but on the shared
-// AllStdioEntries/gopls path, which cannot be write-target-scoped mimo-locally
-// without touching a shared surface. The write-target restriction is applied in
-// FindStdioLanguageServerEntries (mcp-language-server cleanup) only.
-//
 // enabled:false entries are dropped FIRST (bot PR #420 r18 P3): MiMoCode uses
 // `enabled` (default true) as the active flag and never spawns a disabled entry,
 // so neither consumer of this method should treat a disabled entry as live. The
@@ -3029,6 +3020,50 @@ func (o *mimoCodeClient) AllStdioEntries() ([]StdioEntry, error) {
 	}
 	servers, _ := m[mimoCodeMCPKey].(map[string]any)
 	return collectStdioEntries(mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers))), nil
+}
+
+// RemovableStdioEntries returns the subset of MiMoCode stdio entries that a
+// single RemoveEntry call can actually remove from the EFFECTIVE configuration.
+// Unlike AllStdioEntries (which intentionally returns the full merged view for
+// non-destructive orphan-process pattern discovery), this method is used by the
+// post-register direct gopls cleanup path, which is destructive and prints a
+// removal success after calling RemoveEntry.
+//
+// MiMoCode RemoveEntry deletes only the hub's write target (o.path,
+// mimocode.json). Entries defined in config.json, mimocode.jsonc,
+// MIMOCODE_CONFIG, MIMOCODE_CONFIG_DIR, inline content, home .mimocode, or the
+// Claude import can remain effective after the write-target key is deleted. So
+// the cleanup view must be constrained to entries whose OWN write-target value is
+// stdio AND whose name would not re-resolve from another layer after removal.
+// This mirrors FindStdioLanguageServerEntries' destructive-cleanup scoping, but
+// keeps the broader AllStdioEntries contract unchanged for non-destructive
+// callers.
+func (o *mimoCodeClient) RemovableStdioEntries() ([]StdioEntry, error) {
+	data, err := readRawConfig(o.path)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	m, err := parseJSONCBytes(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", o.path, err)
+	}
+	servers, _ := m[mimoCodeMCPKey].(map[string]any)
+	entries := collectStdioEntries(mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers)))
+	out := entries[:0]
+	for _, e := range entries {
+		reResolves, err := o.mimoCodeNameReResolvesAfterWriteTargetRemoval(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if reResolves {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, nil
 }
 
 // FindStdioLanguageServerEntries scans the merged `mcp` for stdio entries
