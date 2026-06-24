@@ -3,11 +3,18 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/config"
 )
+
+// gitSHA40 matches a full 40-hex git object name (the immutable-pin shape the
+// ableton row uses after the provenance fix). A bare PyPI version like "2.2.0"
+// does NOT match, so this also guards against a silent revert to the prior
+// hijacked-PyPI-name pin.
+var gitSHA40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // tier1CatalogIDs are the Tier-1 desktop-app rows the v2 catalog appends after the
 // verbatim v1 entries. The first batch was excel/ableton/codex-mcp-server; matlab
@@ -21,6 +28,7 @@ import (
 //     (category error), the server artifact is unprobed+absent (repo unpackaged →
 //     crash-loop), and the license is pending
 //     (work-items/backlog/2026-06-24-mathcad-mcp-row-deferred.md).
+//
 // Five further EDA/CAD rows are DEFERRED (real MCP servers, but each needs a manual
 // git-clone+build that vendored_source.install_cmd does not execute — see
 // work-items/backlog/2026-06-24-tier3-manual-clone-mcps.md).
@@ -386,6 +394,64 @@ func TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles(t *testing.T) {
 					t.Fatalf("Tier-1 row %q file_globs entry %q is not absolute-path-shaped", id, g)
 				}
 			}
+		}
+	}
+}
+
+// TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact is the codex-bot P1
+// closure ("Align Ableton provenance with the installed package"). The ableton row
+// MUST install from the operator's actual upstream uisato/ableton-mcp-extended repo
+// at an immutable git SHA — NOT the PyPI distribution `ableton-mcp-extended`, which
+// is a DIFFERENT codebase (IMNMV's branch) whose project URLs point at
+// github.com/IMNMV/ableton-mcp and which depends on the nonexistent `audio2llm`
+// package (install fails). This test pins the provenance-consistency invariant the
+// bot flagged: the vetted source (vendored_source.repo + readme_url), the executed
+// command (args git+ URL + vendored_source.install_cmd/run_cmd), and the SHA pin all
+// agree, so the code users run is exactly the repo/readme/license being presented.
+func TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact(t *testing.T) {
+	e := v2CatalogByID(t)["ableton"]
+	if e == nil {
+		t.Fatalf("v2 catalog missing the ableton row")
+	}
+
+	const wantRepo = "https://github.com/uisato/ableton-mcp-extended"
+
+	vs := e.VendoredSource
+	if vs == nil {
+		t.Fatalf("ableton row lost its vendored_source")
+	}
+	if vs.Repo != wantRepo {
+		t.Fatalf("ableton vendored_source.repo = %q, want %q (must be the operator's actual upstream, not the hijacked PyPI source)", vs.Repo, wantRepo)
+	}
+	// The pin must be a 40-hex git SHA (immutable), not the prior bare PyPI version
+	// "2.2.0" that resolved to IMNMV's broken/audio2llm-missing package.
+	sha := strings.TrimSpace(vs.PinnedRef)
+	if !gitSHA40.MatchString(sha) {
+		t.Fatalf("ableton vendored_source.pinned_ref = %q, want a 40-hex git SHA (a bare PyPI version like 2.2.0 is a provenance/install hazard)", sha)
+	}
+	// Defense-in-depth: the same gate the catalog/manifest validators use must agree
+	// the SHA is immutable (not a moving branch).
+	if config.IsMovingGitRef(vs.PinnedRef) {
+		t.Fatalf("ableton pinned_ref %q is a moving ref (must be an immutable SHA)", vs.PinnedRef)
+	}
+
+	// The EXECUTED artifact must come from that exact git source + SHA. The PyPI name
+	// `ableton-mcp-extended==<ver>` in --from would silently pull IMNMV's package, so
+	// the args MUST carry the git+<repo>@<sha> form pointing at uisato.
+	wantGitFrom := "git+" + wantRepo + "@" + sha
+	joinedArgs := strings.Join(e.Args, " ")
+	if !strings.Contains(joinedArgs, wantGitFrom) {
+		t.Fatalf("ableton args %v do not install from the pinned git source %q (a PyPI-name --from would pull the wrong IMNMV codebase)", e.Args, wantGitFrom)
+	}
+	// Guard against the prior PyPI-name pin lingering anywhere in the executed args.
+	if strings.Contains(joinedArgs, "ableton-mcp-extended==") {
+		t.Fatalf("ableton args %v still carry a PyPI-version --from pin (==<ver>); must be the git+<repo>@<sha> form", e.Args)
+	}
+	// vendored_source.install_cmd / run_cmd must reflect the same git+SHA source so the
+	// advertised reproduction command matches what `command`+`args` actually run.
+	for label, cmd := range map[string]string{"install_cmd": vs.InstallCmd, "run_cmd": vs.RunCmd} {
+		if !strings.Contains(cmd, wantGitFrom) {
+			t.Fatalf("ableton vendored_source.%s = %q does not reference the pinned git source %q", label, cmd, wantGitFrom)
 		}
 	}
 }
