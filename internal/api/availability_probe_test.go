@@ -67,6 +67,397 @@ func TestAvailabilityProbePasses_NilNeverPasses(t *testing.T) {
 	}
 }
 
+// TestGlobProbeMatches_GlobMatchesMultipleVersions is the Tier-1 acceptance for
+// the version-agnostic file_globs[] field: a "…Mathcad Prime *…" pattern (the same
+// `*`-in-a-spaced-segment shape the ableton/excel catalog probes use) must match
+// a synthetic "Mathcad Prime 11.0.1.0" install AND a "12.0.0.0" install from ONE
+// shared catalog row, so the row is not frozen to a single product version. Uses
+// temp dirs + the platform path separator (filepath.Join) so it is host-OS
+// correct on every build. The pattern is routed through the file_globs[] field —
+// the OPT-IN glob path (a literal files[] entry would be stat'd verbatim, not
+// globbed).
+func TestGlobProbeMatches_GlobMatchesMultipleVersions(t *testing.T) {
+	base := t.TempDir()
+	// Two version dirs with a spaced "Mathcad Prime <ver>" segment, each carrying a
+	// MathcadPrime.exe regular file — the shape the version-agnostic probe targets.
+	for _, ver := range []string{"11.0.1.0", "12.0.0.0"} {
+		dir := filepath.Join(base, "Mathcad Prime "+ver)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "MathcadPrime.exe"), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write exe: %v", err)
+		}
+	}
+	pattern := filepath.Join(base, "Mathcad Prime *", "MathcadPrime.exe")
+
+	// globProbeMatches: ANY match is a regular file → pass.
+	if ok, why := globProbeMatches(pattern); !ok {
+		t.Fatalf("glob probe over two version dirs failed: %q", why)
+	}
+	// And through the full availabilityProbePasses owner via FileGlobs (the
+	// install/readiness path) — the opt-in glob field.
+	if ok, why := availabilityProbePasses(&config.AvailabilityProbe{FileGlobs: []string{pattern}}); !ok {
+		t.Fatalf("availabilityProbePasses with the file_globs[] probe failed: %q", why)
+	}
+
+	// Removing BOTH version dirs makes the glob match nothing → fail inert (does
+	// not exist), proving the glob is genuinely host-presence-driven.
+	for _, ver := range []string{"11.0.1.0", "12.0.0.0"} {
+		if err := os.RemoveAll(filepath.Join(base, "Mathcad Prime "+ver)); err != nil {
+			t.Fatalf("rm version dir: %v", err)
+		}
+	}
+	ok, why := globProbeMatches(pattern)
+	if ok {
+		t.Fatalf("glob probe passed with no matching install; want fail")
+	}
+	if !strings.Contains(why, "does not exist") {
+		t.Fatalf("no-match reason %q, want \"does not exist\" (fail-closed)", why)
+	}
+}
+
+// TestFileProbeMatches_AbletonBroadenedGlobCoversAllEditions is the Tier-1
+// acceptance for the BROADENED ableton probe (this PR): the catalog glob was
+// narrowed to Suite-only ("…\\Live * Suite\\Program\\Ableton Live * Suite.exe"),
+// which the ableton-mcp README contradicts — it supports Live 10+ in ANY edition.
+// The broadened pattern "…\\Live *\\Program\\Ableton Live *.exe" must match a
+// Suite install AND a Standard install from ONE shared catalog row, while the OLD
+// Suite-only pattern would MISS the Standard edition. Uses temp dirs +
+// filepath.Join so it is host-OS correct on every build. The real catalog pattern
+// is rooted at C:\ProgramData\Ableton; here the root is a temp dir but the
+// edition-spanning segment shape ("Live <ver> <edition>") is identical.
+func TestGlobProbeMatches_AbletonBroadenedGlobCoversAllEditions(t *testing.T) {
+	base := t.TempDir()
+	// Two installs differing by EDITION (not just version): a Suite and a Standard,
+	// each with the matching "Ableton Live <ver> <edition>.exe" the shipped
+	// installer lays down (verified against the host's real Live 11/12 Suite layout).
+	installs := []struct{ dir, exe string }{
+		{"Live 11 Suite", "Ableton Live 11 Suite.exe"},
+		{"Live 12 Standard", "Ableton Live 12 Standard.exe"},
+	}
+	for _, in := range installs {
+		prog := filepath.Join(base, in.dir, "Program")
+		if err := os.MkdirAll(prog, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", prog, err)
+		}
+		if err := os.WriteFile(filepath.Join(prog, in.exe), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write exe: %v", err)
+		}
+	}
+
+	// BROADENED pattern (this PR): edition word dropped, so the spanning `*`
+	// covers "11 Suite", "12 Standard", "11 Intro", etc.
+	broadened := filepath.Join(base, "Live *", "Program", "Ableton Live *.exe")
+	// OLD Suite-only pattern (what shipped first), reconstructed here to PROVE the
+	// broadening is load-bearing: it must NOT see the Standard edition.
+	suiteOnly := filepath.Join(base, "Live * Suite", "Program", "Ableton Live * Suite.exe")
+
+	// Broadened: ANY match is a runnable regular file → pass (it sees BOTH editions).
+	if ok, why := globProbeMatches(broadened); !ok {
+		t.Fatalf("broadened ableton glob over Suite+Standard failed: %q", why)
+	}
+	// And through the full availabilityProbePasses owner via the file_globs[] field
+	// (the install/readiness path) — this is the OPT-IN glob the ableton catalog row
+	// now declares.
+	if ok, why := availabilityProbePasses(&config.AvailabilityProbe{FileGlobs: []string{broadened}}); !ok {
+		t.Fatalf("availabilityProbePasses with the broadened ableton file_globs[] failed: %q", why)
+	}
+	// Confirm the broadened pattern actually matches BOTH editions (not just one) —
+	// the edition-coverage claim, not merely "some match exists".
+	matches, err := filepath.Glob(broadened)
+	if err != nil {
+		t.Fatalf("glob broadened pattern: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("broadened glob matched %d installs, want 2 (Suite + Standard): %v", len(matches), matches)
+	}
+
+	// The OLD Suite-only pattern is the contrast that proves the broadening matters:
+	// it matches ONLY the Suite install, missing the Standard one. (With ONLY the
+	// Standard edition present it would match nothing — the regression the
+	// broadening fixes.)
+	suiteMatches, err := filepath.Glob(suiteOnly)
+	if err != nil {
+		t.Fatalf("glob suite-only pattern: %v", err)
+	}
+	if len(suiteMatches) != 1 {
+		t.Fatalf("suite-only glob matched %d installs, want exactly 1 (Suite); broadening is what adds the rest: %v", len(suiteMatches), suiteMatches)
+	}
+
+	// Remove BOTH installs → the broadened glob matches nothing → fail inert
+	// (does not exist), proving it is genuinely host-presence-driven (fail-closed).
+	for _, in := range installs {
+		if err := os.RemoveAll(filepath.Join(base, in.dir)); err != nil {
+			t.Fatalf("rm install dir: %v", err)
+		}
+	}
+	ok, why := globProbeMatches(broadened)
+	if ok {
+		t.Fatalf("broadened ableton glob passed with no install present; want fail")
+	}
+	if !strings.Contains(why, "does not exist") {
+		t.Fatalf("no-match reason %q, want \"does not exist\" (fail-closed)", why)
+	}
+}
+
+// TestFilesProbe_ExactStatLiteralNeverGlobs is TEST #1 — the FINDING-1 core: a
+// files[] entry is stat'd VERBATIM and is NEVER globbed. The load-bearing case is
+// an ABSENT literal whose path contains a glob metacharacter (a manifest that
+// INTENDED the literal `…/Foo*/marker` where `Foo*` is a real directory name): it
+// must FAIL (the exact file is absent) and must NOT silently fall to a sibling
+// `…/FooBeta/marker` the way an unconditional glob would. We engineer exactly that
+// sibling and prove files[] never sees it.
+func TestFilesProbe_ExactStatLiteralNeverGlobs(t *testing.T) {
+	base := t.TempDir()
+	// A SIBLING that a `Foo*` glob WOULD match — but the literal the manifest
+	// intends is `<base>/Foo*/marker`, which does NOT exist on disk.
+	sib := filepath.Join(base, "FooBeta")
+	if err := os.MkdirAll(sib, 0o755); err != nil {
+		t.Fatalf("mkdir sibling: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sib, "marker"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write sibling marker: %v", err)
+	}
+	literalAbsent := filepath.Join(base, "Foo*", "marker") // the intended literal, NOT present
+
+	// PROOF the regression would exist under glob: filepath.Glob of `<base>/Foo*/marker`
+	// DOES match the sibling — so a glob-on-files[] would wrongly enable the row.
+	globMatches, gerr := filepath.Glob(literalAbsent)
+	if gerr != nil {
+		t.Fatalf("glob of the metachar literal errored: %v", gerr)
+	}
+	if len(globMatches) == 0 {
+		t.Fatalf("expected the `Foo*` glob to match the FooBeta sibling (proving the footgun); got none")
+	}
+
+	// files[] is EXACT: the intended literal `Foo*/marker` does not exist, so the probe
+	// FAILS — it never globs to the FooBeta sibling.
+	if ok, why := availabilityProbePasses(&config.AvailabilityProbe{Files: []string{literalAbsent}}); ok {
+		t.Fatalf("files[] globbed an ABSENT literal to a sibling; want fail. why=%q", why)
+	} else if !strings.Contains(why, "does not exist") {
+		t.Fatalf("files[] absent-literal reason %q, want \"does not exist\"", why)
+	}
+
+	// And a files[] literal that DOES exist (with a metachar in its real name) passes
+	// via the verbatim stat — the literal owner finds it directly.
+	realMetacharDir := filepath.Join(base, "Foo [Beta]")
+	if err := os.MkdirAll(realMetacharDir, 0o755); err != nil {
+		t.Fatalf("mkdir real metachar dir: %v", err)
+	}
+	realLiteral := filepath.Join(realMetacharDir, "marker")
+	if err := os.WriteFile(realLiteral, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write real metachar marker: %v", err)
+	}
+	if ok, why := availabilityProbePasses(&config.AvailabilityProbe{Files: []string{realLiteral}}); !ok {
+		t.Fatalf("files[] missed an EXISTING literal `Foo [Beta]` path: %q", why)
+	}
+}
+
+// TestFilesProbe_LiteralByteIdenticalToExactStat is the additive-guarantee
+// regression: a files[] literal behaves BYTE-IDENTICALLY to the exact os.Stat
+// owner entryScriptStatus for the present-regular-file, absent, and directory
+// cases — files[] simply IS entryScriptStatus per entry (no glob layer). This is
+// what keeps every existing literal probe unchanged. Also asserts globProbeMatches
+// of a metacharacter-FREE pattern equals the same tuple (a no-wildcard file_globs[]
+// entry resolves to its one self-match), so a file_globs[] row with no wildcard is
+// equivalent.
+func TestFilesProbe_LiteralByteIdenticalToExactStat(t *testing.T) {
+	dir := t.TempDir()
+	present := filepath.Join(dir, "installed.marker")
+	if err := os.WriteFile(present, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	absent := filepath.Join(dir, "not-installed.marker")
+
+	cases := []string{present, absent, dir}
+	for _, path := range cases {
+		wantOK, wantReason := entryScriptStatus(path)
+		// files[] per-entry == entryScriptStatus exactly (no metachars in these paths).
+		if gotOK, _ := availabilityProbePasses(&config.AvailabilityProbe{Files: []string{path}}); gotOK != wantOK {
+			t.Fatalf("literal %q: files[] availabilityProbePasses=%v want %v", path, gotOK, wantOK)
+		}
+		// globProbeMatches of a metacharacter-free pattern returns the SAME tuple
+		// (filepath.Glob of a literal returns that one path iff it exists).
+		gotOK, gotReason := globProbeMatches(path)
+		if gotOK != wantOK || gotReason != wantReason {
+			t.Fatalf("metachar-free %q: globProbeMatches=(%v,%q) want entryScriptStatus=(%v,%q)",
+				path, gotOK, gotReason, wantOK, wantReason)
+		}
+	}
+}
+
+// TestFilesProbe_LiteralPathWithGlobMetacharsExists is the codex catalog finding 1
+// regression, now handled STRUCTURALLY by the files[] exact-stat field: a LITERAL
+// absolute path whose dir/file name contains a glob metacharacter (here `[` `]` in
+// "Foo [Beta]") that ACTUALLY EXISTS must be detected as present. files[] stats the
+// verbatim literal and never globs, so a real "[…]"/"*"/"?"-bearing install path is
+// found without being misread as a pattern. Belt-and-suspenders: confirm
+// filepath.Glob of that same literal returns NO match (so routing it through
+// file_globs[] would MISS it — proving files[] is the correct field), while the
+// files[] probe passes.
+func TestFilesProbe_LiteralPathWithGlobMetacharsExists(t *testing.T) {
+	base := t.TempDir()
+	// A literal install path with glob metacharacters in a segment name. Created on
+	// disk verbatim — there is no wildcard intent here; "[Beta]" is a real folder.
+	dir := filepath.Join(base, "Foo [Beta]", "bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	exe := filepath.Join(dir, "tool")
+	if err := os.WriteFile(exe, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write exe: %v", err)
+	}
+
+	// PROOF that file_globs[] would be the WRONG field for this literal: filepath.Glob
+	// of the path misreads "[Beta]" as a char class and matches NOTHING.
+	globMatches, gerr := filepath.Glob(exe)
+	if gerr != nil {
+		t.Fatalf("glob of literal metachar path errored: %v", gerr)
+	}
+	if len(globMatches) != 0 {
+		t.Fatalf("expected filepath.Glob of the literal \"[Beta]\" path to match NOTHING (char-class misread), got %v", globMatches)
+	}
+	// Confirm the FALSE routing: through file_globs[] the same path FAILS (glob misses
+	// the char-class literal) — which is exactly why a literal belongs in files[].
+	if ok, _ := availabilityProbePasses(&config.AvailabilityProbe{FileGlobs: []string{exe}}); ok {
+		t.Fatalf("file_globs[] unexpectedly matched a char-class literal; that field globs and should miss it")
+	}
+
+	// The CORRECT field: files[] exact-stat finds the literal file → probe passes.
+	if ok, why := availabilityProbePasses(&config.AvailabilityProbe{Files: []string{exe}}); !ok {
+		t.Fatalf("files[] missed the existing literal \"[Beta]\" path: %q", why)
+	}
+
+	// Removing the file → the literal no longer exists → files[] fails inert (does
+	// not exist), preserving fail-closed polarity.
+	if err := os.Remove(exe); err != nil {
+		t.Fatalf("rm exe: %v", err)
+	}
+	ok, why := availabilityProbePasses(&config.AvailabilityProbe{Files: []string{exe}})
+	if ok {
+		t.Fatalf("files[] passed for an absent literal \"[Beta]\" path; want fail")
+	}
+	if !strings.Contains(why, "does not exist") {
+		t.Fatalf("absent literal \"[Beta]\" reason %q, want \"does not exist\" (fail-closed)", why)
+	}
+}
+
+// TestAvailabilityProbePasses_ANDAcrossAllThreeFields is TEST #3 — the cross-field
+// AND: a probe passes ONLY when every binary is on PATH AND every files[] literal
+// exists AND every file_globs[] pattern matches. We build a probe with a PRESENT
+// binary ("go"), a PRESENT files[] literal, AND a PRESENT file_globs[] match, then
+// flip each field to a failing value in turn and assert the WHOLE probe fails,
+// naming the failing term. A glob is OR only WITHIN one pattern's match set, never
+// across fields.
+func TestAvailabilityProbePasses_ANDAcrossAllThreeFields(t *testing.T) {
+	base := t.TempDir()
+	// Present files[] literal.
+	literal := filepath.Join(base, "installed.marker")
+	if err := os.WriteFile(literal, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write literal: %v", err)
+	}
+	// Present file_globs[] match.
+	dir := filepath.Join(base, "App 1.0")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app.exe"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write exe: %v", err)
+	}
+	pattern := filepath.Join(base, "App *", "app.exe")
+	absentLiteral := filepath.Join(base, "nope.marker")
+	absentPattern := filepath.Join(base, "Nope *", "x.exe")
+
+	// All three present → pass.
+	if ok, why := availabilityProbePasses(&config.AvailabilityProbe{
+		Binaries:  []string{"go"},
+		Files:     []string{literal},
+		FileGlobs: []string{pattern},
+	}); !ok {
+		t.Fatalf("all-three-present probe should pass: %q", why)
+	}
+
+	cases := []struct {
+		name      string
+		probe     *config.AvailabilityProbe
+		wantInWhy string
+	}{
+		{"absent-binary", &config.AvailabilityProbe{
+			Binaries: []string{"definitely-not-on-path-xyz"}, Files: []string{literal}, FileGlobs: []string{pattern},
+		}, "definitely-not-on-path-xyz"},
+		{"absent-files-literal", &config.AvailabilityProbe{
+			Binaries: []string{"go"}, Files: []string{absentLiteral}, FileGlobs: []string{pattern},
+		}, "nope.marker"},
+		{"absent-file-glob", &config.AvailabilityProbe{
+			Binaries: []string{"go"}, Files: []string{literal}, FileGlobs: []string{absentPattern},
+		}, "x.exe"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, why := availabilityProbePasses(tc.probe)
+			if ok {
+				t.Fatalf("probe passed though one AND term fails (%s)", tc.name)
+			}
+			if !strings.Contains(why, tc.wantInWhy) {
+				t.Fatalf("reason %q should name the failing AND term %q", why, tc.wantInWhy)
+			}
+		})
+	}
+}
+
+// TestMarketplaceEntryBrowseProbeState_FileGlobsDefersNoGlob is TEST #4 — the
+// browse-path invariant for a file_globs[] row: the passive GET /api/marketplace
+// classifier must return ProbeBrowseInertUnknown (deferred-to-install) and must
+// NEVER run filepath.Glob / os.Stat on the browse projection — the no-glob/no-stat-
+// on-browse invariant holds for the file_globs[] field exactly as for files[].
+// Presence INDEPENDENCE is the proof the filesystem was not touched: a glob whose
+// pattern MATCHES a real on-disk file and a glob whose pattern matches NOTHING both
+// classify inert-unknown (a stat/glob would have diverged matched=ready vs
+// absent=blocked).
+func TestMarketplaceEntryBrowseProbeState_FileGlobsDefersNoGlob(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "App 1.0")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "app.exe"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write exe: %v", err)
+	}
+	matchingGlob := filepath.Join(base, "App *", "app.exe")                // matches the file above
+	nonMatchingGlob := filepath.Join(base, "Nonexistent *", "missing.exe") // matches nothing
+
+	mk := func(globs []string) *MarketplaceEntry {
+		return &MarketplaceEntry{
+			ID:           "globrow",
+			Availability: "disabled-until-probe",
+			InstallProbe: &CatalogAvailabilityProbe{FileGlobs: globs},
+		}
+	}
+	for _, tc := range []struct {
+		name  string
+		globs []string
+	}{
+		{"glob-matches-on-disk", []string{matchingGlob}},
+		{"glob-matches-nothing", []string{nonMatchingGlob}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MarketplaceEntryBrowseProbeState(mk(tc.globs)); got != ProbeBrowseInertUnknown {
+				t.Fatalf("file_globs[] browse state = %q, want %q (deferred, no glob/stat)", got, ProbeBrowseInertUnknown)
+			}
+		})
+	}
+	// Belt-and-suspenders: the FULL install gate DOES glob+stat, so it diverges
+	// matched(true) vs non-matching(false) — that divergence is exactly the
+	// filesystem touch the browse path skips above.
+	if !MarketplaceEntryProbePasses(mk([]string{matchingGlob})) {
+		t.Fatalf("full gate should PASS for a file_globs[] pattern that matches a real file")
+	}
+	if MarketplaceEntryProbePasses(mk([]string{nonMatchingGlob})) {
+		t.Fatalf("full gate should FAIL for a file_globs[] pattern that matches nothing")
+	}
+}
+
 // TestAvailabilityProbePasses_WindowsPathBasenameInError is the codex r6 finding 3
 // regression: a file probe with a Windows ABSOLUTE path (now accepted by the
 // cross-platform validator) must surface ONLY the marker basename in the failure
@@ -88,6 +479,19 @@ func TestAvailabilityProbePasses_WindowsPathBasenameInError(t *testing.T) {
 	// The directory prefix must NOT leak — assert the full path is absent.
 	if strings.Contains(why, "alice") || strings.Contains(why, `C:\`) {
 		t.Fatalf("reason %q leaked the full Windows path; want basename only", why)
+	}
+	// The file_globs[] branch shares the same basename-only redaction. A Windows
+	// absolute glob that matches nothing must surface only the leaf, never the dir.
+	winGlob := `C:\Users\alice\AppData\Local\Programs\App *\server.exe`
+	ok, why = availabilityProbePasses(&config.AvailabilityProbe{FileGlobs: []string{winGlob}})
+	if ok {
+		t.Fatalf("a nonexistent Windows file_globs probe passed; want fail")
+	}
+	if !strings.Contains(why, "server.exe") {
+		t.Fatalf("file_globs reason %q missing the leaf basename", why)
+	}
+	if strings.Contains(why, "alice") || strings.Contains(why, `C:\`) {
+		t.Fatalf("file_globs reason %q leaked the full Windows path; want basename only", why)
 	}
 	// The same for a path-shaped binary probe (the binary branch shares the fix).
 	winBin := `C:\Program Files\tool\definitely-absent.exe`
@@ -136,6 +540,14 @@ func TestMarketplaceEntryBrowseProbeState_TriState(t *testing.T) {
 		{"file-only-present", mk(&CatalogAvailabilityProbe{Files: []string{present}}), ProbeBrowseInertUnknown},
 		// file-only (absent) → inert-unknown — same verdict (file-presence-INDEPENDENT).
 		{"file-only-absent", mk(&CatalogAvailabilityProbe{Files: []string{absent}}), ProbeBrowseInertUnknown},
+		// file_globs-only → inert-unknown WITHOUT globbing (glob-presence-INDEPENDENT,
+		// same no-touch-on-browse invariant as files[]).
+		{"file-globs-only", mk(&CatalogAvailabilityProbe{FileGlobs: []string{filepath.Join(dir, "App *", "x.exe")}}), ProbeBrowseInertUnknown},
+		// mixed bare-binary present + file_globs → inert-unknown (the glob defers).
+		{"mixed-bin-present-and-file-globs", mk(&CatalogAvailabilityProbe{Binaries: []string{"go"}, FileGlobs: []string{filepath.Join(dir, "App *", "x.exe")}}), ProbeBrowseInertUnknown},
+		// mixed bare-binary ABSENT + file_globs → inert-blocked (the absent bare binary
+		// already proves the AND probe fails, even with a file_globs[] entry present).
+		{"mixed-bin-absent-and-file-globs", mk(&CatalogAvailabilityProbe{Binaries: []string{"definitely-not-on-path-xyz"}, FileGlobs: []string{filepath.Join(dir, "App *", "x.exe")}}), ProbeBrowseInertBlocked},
 		// path-shaped binary → inert-unknown (never LookPath a path — B2 defense).
 		{"path-binary-posix", mk(&CatalogAvailabilityProbe{Binaries: []string{"/net/slow/tool"}}), ProbeBrowseInertUnknown},
 		{"path-binary-windows", mk(&CatalogAvailabilityProbe{Binaries: []string{`C:\tools\x.exe`}}), ProbeBrowseInertUnknown},

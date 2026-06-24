@@ -33,9 +33,12 @@ import (
 )
 
 // DefaultMarketplaceRegistryURL is the curated catalog served from
-// this repo's master branch. v1 ships with a single registry to
-// keep trust management simple; v0.4.x can grow to multi-registry.
-const DefaultMarketplaceRegistryURL = "https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v1/catalog.json"
+// this repo's master branch. v2 is the current default (it adds the
+// Tier-1 desktop-app rows with the additive D-2/D-3 metadata); the
+// frozen v1 catalog is kept in-tree only so an OLDER released client
+// hard-coded to the v1 URL still resolves. A single registry keeps
+// trust management simple; v0.4.x can grow to multi-registry.
+const DefaultMarketplaceRegistryURL = "https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v2/catalog.json"
 
 func newMarketplaceCmd() *cobra.Command {
 	c := &cobra.Command{

@@ -468,19 +468,47 @@ func TestValidate_InstallProbe_PathShapedBinaryRejected(t *testing.T) {
 // install — we deliberately do NOT ban ".."). The architect section-E files[]
 // table.
 func TestValidate_InstallProbe_CrossPlatformFilePathAccepted(t *testing.T) {
-	accept := []string{
+	// files[] is the LITERAL-path field (stat'd verbatim, never globbed); file_globs[]
+	// is the OPT-IN glob-pattern field. BOTH share the same absolute-path-shape /
+	// non-empty / no-surrounding-whitespace validator rules, so a glob pattern is an
+	// absolute path with wildcards and passes either field's shape gate. The
+	// metacharacters are NOT rejected on EITHER field (files[] treats them literally;
+	// file_globs[] expands them via the runtime globProbeMatches owner).
+	acceptLiteral := []string{
 		"/opt/marker",         // POSIX absolute — accepted on a windows build too
 		`C:\marker`,           // Windows absolute — accepted on a linux build too
 		`\\host\share\marker`, // UNC
 		"/opt/..",             // lexically absolute; os.Stat resolves at install (no ..-ban)
+		// A files[] LITERAL may itself contain a glob metacharacter (a real folder named
+		// "Foo [Beta]" / "Foo*"); the shape gate accepts it, and the runtime stats it
+		// literally (never globbed).
+		`/Applications/Foo [Beta]/bin/server`,
 	}
-	for _, f := range accept {
-		t.Run("accept-"+f, func(t *testing.T) {
+	// file_globs[] carries the intentional version-agnostic SHARED-catalog patterns —
+	// the real first-batch catalog probes now live here, not in files[].
+	acceptGlob := []string{
+		`C:\ProgramData\Ableton\Live *\Program\Ableton Live *.exe`,   // ableton (Live 11/12, any edition)
+		`C:\Program Files*\Microsoft Office\root\Office1?\EXCEL.EXE`, // excel (64-bit + (x86) C2R)
+		"/opt/app-*/bin/server",                                      // POSIX glob, also cross-platform
+		`C:\Program Files\ANSYS Inc\v*\ansys\bin\winx64\ansys*.exe`,  // ansys (v<ver> root + version-stamped exe)
+	}
+	for _, f := range acceptLiteral {
+		t.Run("accept-files-"+f, func(t *testing.T) {
 			m := baseStdioManifest()
 			m.Availability = AvailabilityWatch
 			m.InstallProbe = &AvailabilityProbe{Files: []string{f}}
 			if err := m.Validate(); err != nil {
-				t.Fatalf("Validate rejected a host-absolute file probe %q on this build platform: %v", f, err)
+				t.Fatalf("Validate rejected a host-absolute files[] probe %q on this build platform: %v", f, err)
+			}
+		})
+	}
+	for _, g := range acceptGlob {
+		t.Run("accept-file_globs-"+g, func(t *testing.T) {
+			m := baseStdioManifest()
+			m.Availability = AvailabilityWatch
+			m.InstallProbe = &AvailabilityProbe{FileGlobs: []string{g}}
+			if err := m.Validate(); err != nil {
+				t.Fatalf("Validate rejected a host-absolute file_globs[] probe %q on this build platform: %v", g, err)
 			}
 		})
 	}
@@ -499,13 +527,26 @@ func TestValidate_InstallProbe_CrossPlatformFilePathAccepted(t *testing.T) {
 		{"drive-relative-lower", "d:rel"},
 	}
 	for _, tc := range reject {
-		t.Run("reject-"+tc.name, func(t *testing.T) {
+		// A relative path is rejected on BOTH fields (same absolute-path-shape rule).
+		t.Run("reject-files-"+tc.name, func(t *testing.T) {
 			m := baseStdioManifest()
 			m.Availability = AvailabilityWatch
 			m.InstallProbe = &AvailabilityProbe{Files: []string{tc.file}}
 			err := m.Validate()
 			if err == nil {
-				t.Fatalf("Validate accepted a non-absolute file probe %q; want reject", tc.file)
+				t.Fatalf("Validate accepted a non-absolute files[] probe %q; want reject", tc.file)
+			}
+			if !strings.Contains(err.Error(), "must be an absolute path") {
+				t.Fatalf("error %q missing the absolute-path message", err)
+			}
+		})
+		t.Run("reject-file_globs-"+tc.name, func(t *testing.T) {
+			m := baseStdioManifest()
+			m.Availability = AvailabilityWatch
+			m.InstallProbe = &AvailabilityProbe{FileGlobs: []string{tc.file}}
+			err := m.Validate()
+			if err == nil {
+				t.Fatalf("Validate accepted a non-absolute file_globs[] probe %q; want reject", tc.file)
 			}
 			if !strings.Contains(err.Error(), "must be an absolute path") {
 				t.Fatalf("error %q missing the absolute-path message", err)
@@ -527,8 +568,11 @@ func TestValidate_InstallProbe_EmptyProbeValueRejected(t *testing.T) {
 		{"empty-binary", &AvailabilityProbe{Binaries: []string{""}}, "binaries[0] is empty"},
 		{"whitespace-binary", &AvailabilityProbe{Binaries: []string{"   "}}, "binaries[0] is empty"},
 		{"empty-file", &AvailabilityProbe{Files: []string{""}}, "files[0] is empty"},
+		{"empty-file-glob", &AvailabilityProbe{FileGlobs: []string{""}}, "file_globs[0] is empty"},
+		{"whitespace-file-glob", &AvailabilityProbe{FileGlobs: []string{"   "}}, "file_globs[0] is empty"},
 		{"second-binary-blank", &AvailabilityProbe{Binaries: []string{"matlab", "\t"}}, "binaries[1] is empty"},
 		{"good-bin-empty-file", &AvailabilityProbe{Binaries: []string{"matlab"}, Files: []string{""}}, "files[0] is empty"},
+		{"good-glob-empty-second", &AvailabilityProbe{FileGlobs: []string{`/opt/App */bin/x`, ""}}, "file_globs[1] is empty"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -571,6 +615,8 @@ func TestValidate_InstallProbe_WhitespacePaddedValueRejected(t *testing.T) {
 		{"leading-space-binary", &AvailabilityProbe{Binaries: []string{" go"}}, "binaries[0] \" go\" has leading/trailing whitespace"},
 		{"trailing-tab-file", &AvailabilityProbe{Files: []string{"/opt/x/marker\t"}}, "files[0] \"/opt/x/marker\\t\" has leading/trailing whitespace"},
 		{"good-bin-padded-file", &AvailabilityProbe{Binaries: []string{"go"}, Files: []string{" /opt/x/marker"}}, "files[0] \" /opt/x/marker\" has leading/trailing whitespace"},
+		{"trailing-space-file-glob", &AvailabilityProbe{FileGlobs: []string{"/opt/App */x "}}, "file_globs[0] \"/opt/App */x \" has leading/trailing whitespace"},
+		{"leading-space-file-glob", &AvailabilityProbe{FileGlobs: []string{" /opt/App */x"}}, "file_globs[0] \" /opt/App */x\" has leading/trailing whitespace"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -614,6 +660,8 @@ func TestValidate_InstallProbe_RelativeFilePathRejected(t *testing.T) {
 		{"dot-relative-file", &AvailabilityProbe{Files: []string{"./marker"}}, "must be an absolute path"},
 		{"nested-relative-file", &AvailabilityProbe{Files: []string{"sub/marker"}}, "must be an absolute path"},
 		{"good-bin-relative-file", &AvailabilityProbe{Binaries: []string{"go"}, Files: []string{"marker"}}, "files[0] \"marker\" must be an absolute path"},
+		{"bare-relative-file-glob", &AvailabilityProbe{FileGlobs: []string{"App */x"}}, "file_globs[0] \"App */x\" must be an absolute path"},
+		{"dot-relative-file-glob", &AvailabilityProbe{FileGlobs: []string{"./App */x"}}, "must be an absolute path"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

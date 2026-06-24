@@ -16,8 +16,13 @@ import (
 // (internal/cli.DefaultMarketplaceRegistryURL). It is duplicated here as
 // a GUI-local constant rather than imported from internal/cli because the
 // GUI layer must not depend on the CLI command package; both reference the
-// same canonical source URL (CLAUDE.md "Marketplace (G5, v0.3.0)").
-const defaultMarketplaceRegistryURL = "https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v1/catalog.json"
+// same canonical source URL (CLAUDE.md "Marketplace (G5, v0.3.0)"). v2 is
+// the current default (Tier-1 desktop-app rows + additive D-2/D-3
+// metadata); frozen v1 is kept only for older clients pinned to its URL.
+// NOTE: this URL string is intentionally duplicated with the CLI const
+// (layering boundary — GUI must not import internal/cli); both MUST be
+// bumped together — see work-items/bugs/2026-06-24-marketplace-url-duplication.md.
+const defaultMarketplaceRegistryURL = "https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v2/catalog.json"
 
 // marketplaceLister is the pin-point subset of api.LoadMarketplaceCatalog
 // backing GET /api/marketplace (§10 v2b — read-only marketplace browse).
