@@ -56,28 +56,25 @@ import {
 } from "../api";
 import { stateShape } from "../lib/status";
 
-// isWindows reflects the host the GUI runs against. The canonical project key
-// lowercases on Windows (case-insensitive filesystem) but preserves case
-// elsewhere (POSIX is case-sensitive). navigator.platform is the only signal
-// available client-side; guard for non-browser test bootstraps.
-function isWindowsHost(): boolean {
-  try {
-    return /win/i.test(navigator.platform || "");
-  } catch {
-    return false;
-  }
-}
-
 // canonicalProjectKey is the SINGLE owner of the project join key (this file).
 // A workspace_path (Model A) is normalized into a canonical key used both to
 // (a) deduplicate workspace entries into one card per project and (b) match
 // the #/projects?path=<key> detail-lens param back to its entries.
 //
 // Normalization: filepath-clean (collapse `.`/`..`/duplicate separators) +
-// forward-slash normalize (backslashes → `/`, strip a trailing slash) +
-// lowercase ONLY on Windows. This is a display/join key, not a filesystem
-// operation — it never touches disk.
-export function canonicalProjectKey(rawPath: string, windows = isWindowsHost()): string {
+// forward-slash normalize (backslashes → `/`, strip a trailing slash). This is
+// a display/join key, not a filesystem operation — it never touches disk.
+//
+// CASE IS PRESERVED. The P1 join is workspace-path ↔ workspace-path: both sides
+// come from the SAME backend source (/api/workspaces) with the SAME casing, so
+// a case-sensitive compare is correct and never collapses two distinct entries.
+// We deliberately do NOT case-fold on Windows here: navigator.platform reflects
+// the BROWSER's OS, not the hub's — a POSIX hub opened from a Windows browser
+// (WSL/remote) would otherwise wrongly fold case-sensitive POSIX paths
+// (`/home/A/Repo` vs `/home/a/repo`) and merge 2 distinct projects into one
+// card. The OS-aware fold is only needed for the P2 Model-B claude-key↔path
+// join, which can take a BACKEND-provided OS hint at that point.
+export function canonicalProjectKey(rawPath: string): string {
   let p = (rawPath ?? "").trim();
   if (p === "") return "";
   // Normalize separators to forward slashes first so the clean pass is
@@ -110,7 +107,6 @@ export function canonicalProjectKey(rawPath: string, windows = isWindowsHost()):
   if (cleaned === "") cleaned = hasLeadingSlash ? "/" : ".";
   // Strip a trailing slash (except the bare root "/").
   if (cleaned.length > 1 && cleaned.endsWith("/")) cleaned = cleaned.slice(0, -1);
-  if (windows) cleaned = cleaned.toLowerCase();
   return cleaned;
 }
 
@@ -146,10 +142,20 @@ function routingChipForBackend(backend: string): "via-hub" | "direct" | "legacy"
 
 // lifecycleState maps a workspace entry's lifecycle/last_error into the same
 // vocabulary stateShape() understands so the State column reuses the exact
-// Servers glyph + color classes. The registry lifecycle values are lower-case
-// lazy-mode words ("active"/"materialized"/"idle"/"") — fold them to the
-// capitalized health vocabulary stateShape switches on. A non-empty last_error
-// always reads as Failed regardless of lifecycle.
+// Servers glyph + color classes. The registry's authoritative lifecycle words
+// are the 5 in internal/api/workspace_registry.go:20-26 — "configured",
+// "starting", "active", "missing", "failed" — folded here to the capitalized
+// health vocabulary stateShape switches on:
+//   - "active" (materialized + healthy) → Running (state-ok ●)
+//   - "missing"/"failed" → Failed: a DOWN/ERROR state (state-down ✕), NOT a
+//     benign idle. "missing" = the LSP binary is not on PATH; "failed" = a
+//     materialization error. Both are real failures the operator must see, so
+//     they must never read as the neutral open circle.
+//   - "starting" → Starting (transient ◓)
+//   - "configured"/""/"idle" → Stopped (benign idle ○): registry entry exists,
+//     backend not spawned — deliberately not running.
+// A non-empty last_error always reads as Failed regardless of lifecycle (it is
+// surfaced as the cell tooltip so the operator can read the cause).
 function lifecycleState(entry: WorkspaceEntryDTO): string {
   if ((entry.last_error ?? "").trim() !== "") return "Failed";
   switch ((entry.lifecycle ?? "").trim().toLowerCase()) {
@@ -157,10 +163,14 @@ function lifecycleState(entry: WorkspaceEntryDTO): string {
     case "materialized":
     case "running":
       return "Running";
+    case "missing":
+    case "failed":
+      return "Failed";
     case "starting":
     case "spawning":
       return "Starting";
     case "":
+    case "configured":
     case "idle":
     case "registered":
       return "Stopped";
@@ -362,15 +372,6 @@ function ProjectList({
         global matrix.
       </p>
 
-      {workspacesError !== null && (
-        <p class="settings-error" data-testid="projects-workspaces-error" role="alert">
-          Could not load workspace tools: {workspacesError}{" "}
-          <button type="button" class="btn text-xs" onClick={onRetry}>
-            Retry
-          </button>
-        </p>
-      )}
-
       {groupsError !== null && (
         <p class="settings-error" data-testid="projects-groups-error" role="alert">
           Could not load groups: {groupsError} — the per-card group count below
@@ -381,7 +382,22 @@ function ProjectList({
         </p>
       )}
 
-      {projects.length === 0 ? (
+      {workspacesError !== null ? (
+        // The workspace registry failed to load, so `projects` is [] for a
+        // reason that has nothing to do with a clean install. Render an explicit
+        // UNAVAILABLE list state — NEVER the "No projects yet" empty-state, which
+        // would falsely tell the operator the registry is empty and send them to
+        // re-register projects that may already exist. The empty-state below is
+        // reachable ONLY when the workspace registry loaded OK and is genuinely
+        // empty.
+        <p class="settings-error" data-testid="projects-workspaces-error" role="alert">
+          Projects unavailable — failed to load the workspace registry:{" "}
+          {workspacesError}{" "}
+          <button type="button" class="btn text-xs" onClick={onRetry}>
+            Retry
+          </button>
+        </p>
+      ) : projects.length === 0 ? (
         <p class="empty-state" data-testid="projects-empty">
           No projects yet. Register a project to manage its MCP servers
           per-project.
@@ -418,7 +434,11 @@ function ProjectList({
                   class="m-0 text-xs text-app-muted"
                   data-testid={`projects-summary-${p.key}`}
                 >
-                  {wsCount} workspace{wsCount === 1 ? "" : "s"} ·{" "}
+                  {/* entries are the per-(language) workspace tool registrations
+                      for this ONE project, NOT separate workspaces — labelling
+                      them "workspaces" disagreed with the one-card-per-project
+                      model. They are "workspace tools". */}
+                  {wsCount} workspace tool{wsCount === 1 ? "" : "s"} ·{" "}
                   {/* Project MCP config (Model B) is not wired in P1 → always — */}
                   &mdash; project-config · {grSummary}
                 </p>
@@ -483,11 +503,15 @@ function ProjectDetail({
           ← All projects
         </a>
       </div>
-      {/* Quiet cross-link into the global Servers matrix. The WorkspaceSelector
-          there already accepts a selected key; this just routes to #/servers. */}
+      {/* Quiet cross-link into the global Servers matrix. ServersScreen inits to
+          the all-workspaces sentinel (ALL_WORKSPACES_KEY), so #/servers opens
+          the GLOBAL matrix — NOT a view scoped to this project's path. The copy
+          says exactly that so it does not promise a scoped lens it can't deliver
+          (the route-scoped deep-link is a P4 nicety; faking it here by reading a
+          route query would have to touch the protected Servers.tsx). */}
       <p class="m-0 mb-4 text-xs text-app-muted">
         <a href="#/servers" data-testid="projects-servers-crosslink">
-          View this workspace in the global Servers matrix →
+          Open the global Servers matrix →
         </a>
       </p>
 
@@ -562,6 +586,9 @@ function ProjectDetail({
                     <td
                       class={`state-cell ${st === "Running" ? "state-ok" : st === "Failed" ? "state-down" : ""}`}
                       data-testid={`projects-workspace-state-${entry.language}`}
+                      // Surface the materialization error (if any) as the cell
+                      // tooltip so a Failed/missing row tells the operator WHY.
+                      title={(entry.last_error ?? "").trim() || undefined}
                     >
                       <span class="state-shape" aria-hidden="true">
                         {stateShape(st)}
