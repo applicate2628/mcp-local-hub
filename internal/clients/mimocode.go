@@ -3520,6 +3520,52 @@ func (o *mimoCodeClient) mimoCodeManagedEnableOnlyTrueOverlay(name string) (bool
 	return mimoCodeManagedConfigDirEnableOnlyTrue(name), nil
 }
 
+// mimoCodeManagedEnableOnlyReactivatesLowerSurvivor reports whether a managed
+// {enabled:true} enable-only overlay would RE-ACTIVATE a lower-layer content-bearing
+// entry that SURVIVES a hypothetical write-target removal — the precise false-cleanup
+// condition for the workspace-FREE CLI consumers (bot PR #425 FOLLOW-UP-2 FINDING 1).
+// It is true iff BOTH:
+//
+//   - a managed enable-only:true overlay is present (mimoCodeManagedEnableOnlyTrueOverlay),
+//     AND
+//   - after the write-target key is removed, the FILE merge still defines a CONTENT-BEARING
+//     (type/command/url-bearing) entry for mcp.<name> (mimoCodeMapDefinesContentBearing over
+//     readMergedLayersExcluding) — i.e. a lower layer supplies the command the managed
+//     enable flips back ON.
+//
+// This is DELIBERATELY NARROWER than the register-grain candidate methods'
+// over-blocking mimoCodeManagedEnableOnlyTrueOverlay-only guard. The register grain
+// ACCEPTS the over-block (a managed {enabled:true} with NO surviving lower content still
+// excludes — architect-ruled acceptable, since its branch (b) is managed-only). The CLI
+// consumers use the FULL file survivor (branch (b)), so an unconditional over-block would
+// WRONGLY drop a genuinely-removable entry whose content lives ONLY in the write target
+// (no lower survivor → nothing for the managed enable to re-activate). That no-lower case
+// is PINNED removable by TestMimoCode_Followup_ManagedEnabledOnlyTrueOverlay_StillRemovable
+// and TestMimoCode_Followup_ManagedEnableTrue_NoLowerContent_StaysRemovable, so this guard
+// fires ONLY when a re-activatable lower survivor actually exists.
+//
+// Why branch (b) misses this without the guard: readMergedLayersExcluding does NOT fold the
+// managed layer (managed is detect-only), so it sees the lower entry as {command,
+// enabled:false} → mimoCodeDropDisabled drops it → the active-set survivor reads FALSE; and
+// the managed OR (mimoCodeManagedLayerReResolves) returns FALSE for an enable-only overlay
+// (Kind=="", PATH-B). So branch (b) reports removable while PRODUCTION leaves the server
+// active (lower command + managed enable). A readJSON/managed-reader/parse error propagates
+// fail-closed (the destructive consumer aborts and deletes nothing).
+func (o *mimoCodeClient) mimoCodeManagedEnableOnlyReactivatesLowerSurvivor(name string) (bool, error) {
+	overlay, err := o.mimoCodeManagedEnableOnlyTrueOverlay(name)
+	if err != nil {
+		return false, err
+	}
+	if !overlay {
+		return false, nil
+	}
+	mergedAfter, err := o.readMergedLayersExcluding(name)
+	if err != nil {
+		return false, err
+	}
+	return mimoCodeMapDefinesContentBearing(mergedAfter, name), nil
+}
+
 // mimoCodeLowerLayerHardLinkedToWriteTargetDefines reports whether ANY read-layer file
 // DISTINCT from the write target by clean-path is a TRUE HARD LINK to the write target
 // (a distinct directory entry, a regular file with NO symlink in either chain, sharing
@@ -3549,7 +3595,13 @@ func (o *mimoCodeClient) mimoCodeManagedEnableOnlyTrueOverlay(name string) (bool
 // own chain; two regular directory entries over one inode are precisely a hard link.
 //
 // The clean-path inequality gate excludes the write target's OWN entry in readLayerFiles
-// (same path, trivially same inode) so only a DISTINCT entry flags. An Lstat failure on a
+// (same path, trivially same inode) so only a DISTINCT entry flags. A CASE-ONLY alias of
+// the write target on a case-INSENSITIVE volume is ALSO the same directory entry (not a
+// distinct one), so it is skipped too (bot PR #425 FOLLOW-UP-2 FINDING 2): the exact
+// string compare is case-SENSITIVE and would miss it, leaving os.Lstat+os.SameFile to
+// MIS-CLASSIFY the same-entry alias as a hard link. The fold is gated on a volume PROBE
+// (mimoCodeCaseFoldedPathsSamePhysical) so a genuinely-distinct case-variant file on a
+// case-SENSITIVE volume still reaches the os.SameFile check. An Lstat failure on a
 // candidate layer is treated as "not hard-linked" (the file is absent / unreadable → it
 // cannot be a live lower layer that re-emerges); a parse error while checking
 // name-definition propagates fail-closed (the destructive caller aborts).
@@ -3575,8 +3627,27 @@ func (o *mimoCodeClient) mimoCodeLowerLayerHardLinkedToWriteTargetDefines(name s
 	}
 	cleanTarget := filepath.Clean(o.path)
 	for _, f := range o.readLayerFiles() {
-		if filepath.Clean(f) == cleanTarget {
+		cleanF := filepath.Clean(f)
+		if cleanF == cleanTarget {
 			continue // the write target's own entry — same path, not a DISTINCT hard link
+		}
+		// CASE-ALIAS skip (bot PR #425 FOLLOW-UP-2 FINDING 2). On a case-INSENSITIVE
+		// volume (Windows / default macOS) a layer path that differs from the write
+		// target ONLY by case (e.g. MIMOCODE.JSON vs mimocode.json) is the SAME
+		// directory entry, NOT a distinct one. The exact-string compare above misses it
+		// (filepath.Clean is case-SENSITIVE), so os.Lstat would return a regular file for
+		// both ends and os.SameFile would succeed → the same-entry alias would be
+		// MIS-CLASSIFIED as a true hard link and wrongly BLOCK an otherwise-removable
+		// candidate. Like a symlink, a case-only alias FOLLOWS deleteMember's temp+rename
+		// (it resolves to the renamed file), so NO old entry re-emerges → it must NOT
+		// block. Treat it as the write target itself: skip it. Gate the fold on a PROBE
+		// of the actual volume (mimoCodeCaseFoldedPathsSamePhysical, the same case-fold
+		// owner mimoCodePathsSamePhysical's finding-4 branch uses) rather than a blanket
+		// GOOS fold — a case-SENSITIVE volume (case-sensitive NTFS dir / case-sensitive
+		// APFS) where MIMOCODE.JSON and mimocode.json are genuinely distinct files (and an
+		// operator hard-linked them) still reaches the os.SameFile hard-link check below.
+		if strings.EqualFold(cleanF, cleanTarget) && mimoCodeCaseFoldedPathsSamePhysical(cleanF, cleanTarget) {
+			continue // a case-only alias of the write target on a case-insensitive volume — same entry
 		}
 		fLstat, err := os.Lstat(f)
 		if err != nil {
@@ -3987,14 +4058,40 @@ func (o *mimoCodeClient) RemovableStdioEntries() ([]StdioEntry, error) {
 		if reResolves {
 			continue
 		}
-		// (c) HARD-LINK GUARD (bot PR #425 FINDING 3). The branch-(b) simulate
-		// (readMergedLayersExcluding) matches the write target by INODE, so a lower-layer
-		// config.json HARD-LINKED to the write target also loses the name in the simulate →
-		// reResolves reads FALSE and the entry looks removable. PRODUCTION diverges:
-		// RemoveEntry's temp+rename breaks the link and leaves the lower entry LIVE, so the
-		// server re-emerges yet the CLI reported it removable (false cleanup). The SAME
-		// FINDING-1-corrected detector excludes it (a SYMLINK / case-alias follows the
-		// rename and is NOT blocked).
+		// (c) CONSERVATIVE cleanup guards (bot PR #425 follow-up FINDINGS 1+2). The
+		// workspace-FREE CLI consumer rests on branch (b)'s merge-based survivor
+		// (mimoCodeNameReResolvesAfterWriteTargetRemoval), which the simulate consumers'
+		// two SIMULATE-ONLY guards also backstop — kept identical here so the CLI path
+		// (`mcphub language-server cleanup`) is SYMMETRIC with the register-grain candidate
+		// methods. They are NOT in the RemoveEntry pre-check / B4 path (which keep their
+		// byte-identical PATH-B verdict). Each EXCLUDES a candidate branch (b) would
+		// otherwise falsely report removable:
+		//
+		//   FINDING 1 — a managed {enabled:true} enable-only overlay re-activates a lower
+		//   disabled full config.json entry through MiMoCode's enabled-overlay merge, so
+		//   after the write-target delete the server stays ACTIVE. Branch (b)'s survivor
+		//   (mimoCodeNameInActiveSet over readMergedLayersExcluding) drops the disabled
+		//   lower entry, and the managed OR's mimoCodeManagedLayerReResolves returns FALSE
+		//   for an enable-only overlay (Kind=="" — PATH-B), so branch (b) reports FALSE and
+		//   the entry would be wrongly reported removable. The CONDITIONED detector excludes
+		//   it ONLY when a re-activatable lower content-bearing survivor actually exists —
+		//   NARROWER than the register grain's over-blocking guard, because the CLI's FULL
+		//   file survivor (branch (b)) means an unconditional over-block would wrongly drop a
+		//   genuinely-removable entry whose content lives ONLY in the write target (the
+		//   no-lower case, pinned removable by the CLAIM-2 followup tests).
+		managedEnableReactivates, err := o.mimoCodeManagedEnableOnlyReactivatesLowerSurvivor(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if managedEnableReactivates {
+			continue
+		}
+		//   FINDING 2 — a lower-layer file HARD-LINKED to the write target re-emerges live
+		//   after RemoveEntry (temp+rename breaks the link), but the merge-based simulate
+		//   (readMergedLayersExcluding) matches the write target by INODE so it modeled both
+		//   copies as losing the name → reResolves reads FALSE and the entry looks
+		//   removable. The SAME FINDING-1-corrected detector excludes it (a SYMLINK /
+		//   case-alias follows the rename and is NOT blocked).
 		hardLinked, err := o.mimoCodeLowerLayerHardLinkedToWriteTargetDefines(e.Name)
 		if err != nil {
 			return nil, err
@@ -4091,6 +4188,46 @@ func (o *mimoCodeClient) RemovableStdioCandidatesWriteTargetOwned() ([]StdioEntr
 	return out, nil
 }
 
+// mimoCodeWriteTargetEnableOnlyActivatesEffectiveStdio reports whether the write
+// target's OWN value for mcp.<name> is a bare {enabled:true} ENABLE-ONLY overlay that
+// EFFECTIVELY ACTIVATES a lower-layer stdio command of the consumer's shape (bot PR #425
+// FOLLOW-UP-2 FINDING 3). It is the effective-ownership sibling of the own-value SHAPE
+// gates: the write target carries no command of its OWN, but MiMoCode's enabled-overlay
+// merge (mimoCodeMergeMCPEntry) overlays the write-target {enabled:true} onto a lower full
+// entry (config.json {command, enabled:false}), so the MERGED effective entry is an ACTIVE
+// stdio/LSP server — and deleting the write-target key re-DISABLES it (the lower
+// enabled:false takes over). The write-target enable is therefore what ACTIVATES the
+// server, so the hub OWNS the activation and RemoveEntry can clean it.
+//
+// CRITICAL distinction from the FINDING 1 MANAGED enable-only guard
+// (mimoCodeManagedEnableOnlyTrueOverlay, which EXCLUDES a candidate): there the
+// {enabled:true} lives in a MANAGED layer the hub CANNOT write/delete, so the activation
+// survives RemoveEntry and the candidate must be conservatively blocked. HERE the
+// {enabled:true} is the WRITE TARGET's OWN value, which RemoveEntry deletes — so it is
+// REMOVABLE. Both verdicts are consistent: write-target-enable = owned/removable;
+// managed-enable = excluded. (The re-resolve survivor downstream still excludes the
+// candidate if a NON-managed lower/higher layer keeps it active after removal — that is
+// branch (b)'s job, not this own-value gate's.)
+//
+// Gated on the write-target value actually being an enable-only override
+// (mimoCodeIsEnabledOnlyOverride — the SINGLE owner of the enabled-only shape) so a
+// write-target value carrying its own command never routes here (the direct-command branch
+// in the callers already owns that). The merged effective shape is decided by the SAME
+// single owner the candidate loop used (mimoCodeNameInActiveSet over o.readJSON), so this
+// gate cannot drift from the active-set definition that produced the candidate. A
+// non-enable-only own value → false (no effective-ownership claim). A readJSON parse error
+// propagates fail-closed.
+func (o *mimoCodeClient) mimoCodeWriteTargetEnableOnlyActivatesEffectiveStdio(name string, ownValue map[string]any, consumer mimoCodeReResolveConsumer) (bool, error) {
+	if !mimoCodeIsEnabledOnlyOverride(ownValue) {
+		return false, nil
+	}
+	merged, err := o.readJSON()
+	if err != nil {
+		return false, err
+	}
+	return mimoCodeNameInActiveSet(merged, name, consumer), nil
+}
+
 // mimoCodeWriteTargetDefinesStdio reports whether the WRITE TARGET's (o.path) OWN
 // value for mcp.<name> is itself a stdio entry — it physically carries a
 // `command` (string or MiMoCode array form). It reads the write target's verbatim
@@ -4101,8 +4238,18 @@ func (o *mimoCodeClient) RemovableStdioCandidatesWriteTargetOwned() ([]StdioEntr
 // target is judged by the exact owner that produced the candidate. NO disabled
 // drop: an enabled:false write-target value re-enabled by a higher overlay still
 // OWNS the stdio shape RemoveEntry will delete, which is exactly what this gate
-// must confirm. A missing write target / absent name / non-stdio value → false; a
-// parse error on present bytes propagates.
+// must confirm.
+//
+// EFFECTIVE-ENABLED OWNERSHIP (bot PR #425 FOLLOW-UP-2 FINDING 3). When the write
+// target's own value carries NO command of its own but IS a bare {enabled:true}
+// enable-only overlay that ACTIVATES a lower-layer stdio command (the merge overlays the
+// flag onto config.json's {command, enabled:false}), the hub OWNS the activation —
+// deleting the write-target key re-disables it. So this gate ALSO returns true via
+// mimoCodeWriteTargetEnableOnlyActivatesEffectiveStdio. This is DISTINCT from the FINDING 1
+// MANAGED enable-only guard (which EXCLUDES — the hub cannot clean a managed layer).
+//
+// A missing write target / absent name / non-stdio value → false; a parse error on present
+// bytes propagates.
 func (o *mimoCodeClient) mimoCodeWriteTargetDefinesStdio(name string) (bool, error) {
 	value, ok, err := mimoCodeFileEntryValue(o.path, name)
 	if err != nil {
@@ -4116,8 +4263,12 @@ func (o *mimoCodeClient) mimoCodeWriteTargetDefinesStdio(name string) (bool, err
 	if !ok {
 		return false, nil
 	}
-	cmd, _ := entry["command"].(string)
-	return cmd != "", nil
+	if cmd, _ := entry["command"].(string); cmd != "" {
+		return true, nil // the write target's own value physically carries the command
+	}
+	// No own command — but a write-target {enabled:true} enable-only overlay that
+	// activates a lower-layer stdio command OWNS the activation (FINDING 3).
+	return o.mimoCodeWriteTargetEnableOnlyActivatesEffectiveStdio(name, value, reResolveConsumerStdio)
 }
 
 // mimoCodeWriteTargetDefinesStdioLSP reports whether the WRITE TARGET's (o.path) OWN
@@ -4142,6 +4293,15 @@ func (o *mimoCodeClient) mimoCodeWriteTargetDefinesStdio(name string) (bool, err
 // is a SEPARATE concern owned by mimoCodeNameReResolvesAfterWriteTargetRemoval / the
 // managed guards downstream, not by this own-value SHAPE gate.
 //
+// EFFECTIVE-ENABLED OWNERSHIP (bot PR #425 FOLLOW-UP-2 FINDING 3) — the LSP sibling of the
+// same branch in mimoCodeWriteTargetDefinesStdio. A write-target bare {enabled:true}
+// enable-only overlay that ACTIVATES a lower-layer mcp-language-server command (the merge
+// overlays the flag onto config.json's {command:["mcp-language-server",...], enabled:false})
+// makes the merged effective entry an ACTIVE direct LSP; deleting the write-target key
+// re-disables it, so the hub OWNS the activation. Routed through the SAME
+// mimoCodeWriteTargetEnableOnlyActivatesEffectiveStdio owner with the LSP consumer.
+// DISTINCT from the MANAGED enable-only guard (which EXCLUDES).
+//
 // A missing write target / absent name / non-LSP value → false; a parse error on present
 // bytes propagates fail-closed (the destructive caller aborts).
 func (o *mimoCodeClient) mimoCodeWriteTargetDefinesStdioLSP(name string) (bool, error) {
@@ -4157,8 +4317,12 @@ func (o *mimoCodeClient) mimoCodeWriteTargetDefinesStdioLSP(name string) (bool, 
 	if !ok {
 		return false, nil
 	}
-	_, _, isStdioLSP := matchLanguageServerStdio(entry)
-	return isStdioLSP, nil
+	if _, _, isStdioLSP := matchLanguageServerStdio(entry); isStdioLSP {
+		return true, nil // the write target's own value physically carries the LSP command
+	}
+	// No own LSP command — but a write-target {enabled:true} enable-only overlay that
+	// activates a lower-layer mcp-language-server command OWNS the activation (FINDING 3).
+	return o.mimoCodeWriteTargetEnableOnlyActivatesEffectiveStdio(name, value, reResolveConsumerLSP)
 }
 
 // FindStdioLanguageServerEntries scans the merged `mcp` for stdio entries
@@ -4257,6 +4421,25 @@ func (o *mimoCodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 			// (findLanguageServerStdioInMap) is applied inside the predicate, so a
 			// non-LSP same-named re-emergence in another layer does not block the LSP
 			// cleanup.
+			continue
+		}
+		// MANAGED-ENABLE-ONLY GUARD (bot PR #425 follow-up FINDING 1). A managed
+		// {enabled:true} enable-only overlay re-activates a lower DISABLED full
+		// mcp-language-server entry through MiMoCode's enabled-overlay merge, so after the
+		// write-target delete the LSP stays ACTIVE. The branch-(b) survivor above
+		// (mimoCodeNameReResolvesAfterWriteTargetRemoval) does NOT catch it: its merge-based
+		// half drops the disabled lower entry, and its managed OR
+		// (mimoCodeManagedLayerReResolves) returns FALSE for an enable-only overlay (Kind=="",
+		// PATH-B), so it reads removable. The CONDITIONED detector excludes it ONLY when a
+		// re-activatable lower content-bearing survivor actually exists — NARROWER than the
+		// register grain's over-blocking guard, because the CLI's FULL file survivor means an
+		// unconditional over-block would wrongly drop a genuinely-removable entry whose
+		// content lives only in the write target (the no-lower case).
+		managedEnableReactivates, err := o.mimoCodeManagedEnableOnlyReactivatesLowerSurvivor(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if managedEnableReactivates {
 			continue
 		}
 		// HARD-LINK GUARD (bot PR #425 FINDING 3). mimoCodeNameReResolvesAfterWriteTarget
