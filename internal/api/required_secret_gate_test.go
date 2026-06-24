@@ -124,6 +124,55 @@ func TestRequiredSecretGate_SecretSetNoBlock(t *testing.T) {
 	}
 }
 
+// codex finding 2 — a required key PRESENT in the vault but holding an EMPTY
+// STRING value must be treated as UNRESOLVED → the blocking required-secret
+// finding still fires. vault.Get returns ("", nil) for a present-but-blank key,
+// so a gate that trusted gerr==nil alone would let a crash-looping install
+// through (the server still hard-exits on an empty ACEDATACLOUD_API_TOKEN). This
+// pins the value-check, not just the error-check.
+func TestRequiredSecretGate_EmptyValueBlocks(t *testing.T) {
+	// Seed the required key with an EMPTY value (present-but-blank).
+	seedDefaultSecretForTest(t, "acedata_api_token", "")
+	preparePreflightBinaryChecks(t)
+
+	m := sunoStyleManifest()
+
+	findings := AdmissionCheck(m, AdmissionScope{})
+	f, ok := admissionFindingByID(findings, "required-secret")
+	if !ok {
+		t.Fatalf("required-secret finding missing when the key is present-but-EMPTY: %#v", findings)
+	}
+	if f.Optional {
+		t.Fatal("required-secret finding for an empty value is Optional; it must be BLOCKING")
+	}
+	if f.Name != "secret: acedata_api_token" {
+		t.Errorf("finding Name = %q, want %q", f.Name, "secret: acedata_api_token")
+	}
+	if err := Preflight(m, ""); err == nil {
+		t.Fatal("Preflight passed with a present-but-EMPTY required secret; an empty token must block (server crash-loops on it)")
+	}
+	// Parity: readiness must also see the empty value as blocking (Ready=false).
+	if CheckServerReadiness(m).Ready {
+		t.Fatal("readiness Ready=true with a present-but-EMPTY required secret; want false")
+	}
+}
+
+// TestRequiredSecretGate_WhitespaceValueBlocks is the sibling: a whitespace-only
+// value (spaces / tabs) is just as unusable as empty — strings.TrimSpace makes
+// the gate treat it as unresolved too.
+func TestRequiredSecretGate_WhitespaceValueBlocks(t *testing.T) {
+	seedDefaultSecretForTest(t, "acedata_api_token", "   \t  ")
+	preparePreflightBinaryChecks(t)
+
+	m := sunoStyleManifest()
+	if !hasAdmissionFinding(AdmissionCheck(m, AdmissionScope{}), "required-secret") {
+		t.Fatalf("required-secret finding missing for a whitespace-only value: %#v", AdmissionCheck(m, AdmissionScope{}))
+	}
+	if err := Preflight(m, ""); err == nil {
+		t.Fatal("Preflight passed with a whitespace-only required secret; want block")
+	}
+}
+
 // CLAIM 4 — the schema is ADDITIVE: a manifest WITH required_secrets round-trips
 // through ParseManifest, and a manifest WITHOUT it parses byte-identically (nil
 // slice). The existing manifest parse corpus is unaffected (covered by the
@@ -277,6 +326,38 @@ func TestCatalogRequiredSecrets_AuthoringGuardAcceptsBackedKey(t *testing.T) {
 	}
 	if len(cat.Entries) != 1 || len(cat.Entries[0].RequiredSecrets) != 1 || cat.Entries[0].RequiredSecrets[0] != "acedata_api_token" {
 		t.Fatalf("required_secrets not parsed: %#v", cat.Entries)
+	}
+}
+
+// codex finding 3 — the catalog authoring guard must reject a required_secrets
+// key whose NAME is not settable (the same shape `mcphub secrets set` / POST
+// /api/secrets accepts, owned by secrets.ValidateSettableKeyName). A key the
+// operator literally cannot `set` (e.g. `bad-key` — hyphen — or a digit-leading
+// name) would gate the projected install FOREVER. The env secret: ref backs the
+// key so the back-env check passes, isolating the settable-key-name guard as the
+// rejector. The r2 manifest gate already reuses the SAME owner; this proves the
+// catalog author guard rejects one layer earlier, at catalog-author time.
+func TestCatalogRequiredSecrets_AuthoringGuardRejectsUnsettableKeyName(t *testing.T) {
+	raw := `{
+  "schema_version": "2",
+  "entries": [
+    {
+      "id": "suno",
+      "name": "Suno",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["--from", "mcp-suno", "mcp-suno"],
+      "env": {"ACEDATACLOUD_API_TOKEN": "secret:bad-key"},
+      "required_secrets": ["bad-key"]
+    }
+  ]
+}`
+	_, err := ParseMarketplaceCatalog([]byte(raw))
+	if err == nil {
+		t.Fatal("catalog with an un-settable required_secrets key name parsed; want settable-key-name rejection")
+	}
+	if !strings.Contains(err.Error(), "bad-key") || !strings.Contains(err.Error(), "settable") {
+		t.Fatalf("error = %q, want it to name the un-settable key + the settable-key-name restriction", err.Error())
 	}
 }
 

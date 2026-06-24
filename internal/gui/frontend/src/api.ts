@@ -1011,17 +1011,26 @@ export interface MarketplaceInstallRequest {
 //   "hub-installed"  → 201: hub daemon created (name + resolved port).
 //   "name-conflict"  → 409: a server with this name exists; suggested_name is
 //                      the "-2" variant the UI offers as a one-click retry.
-//   "probe-pending"  → 412: the D-3 host-probe precondition is unmet (the
-//                      server's host app/tool isn't detected on this machine
-//                      yet). A DISTINCT status from the 409 name-conflict so the
-//                      UI never misroutes it to the name-conflict retry; it
-//                      carries the backend's human reason for an inline message.
+//   "probe-pending"  → 412 (code AVAILABILITY_PROBE_PENDING): the D-3 host-probe
+//                      precondition is unmet (the server's host app/tool isn't
+//                      detected on this machine yet). A DISTINCT status from the
+//                      409 name-conflict so the UI never misroutes it to the
+//                      name-conflict retry; it carries the backend's human reason.
+//   "required-secret-missing" → 412 (code REQUIRED_SECRET_MISSING): the install
+//                      gate refused because a REQUIRED vault secret is unset (or
+//                      present-but-empty). The SAME 412 status as probe-pending,
+//                      so we branch on the `code` field — NOT the HTTP status —
+//                      to tell the two apart; otherwise a required-secret refusal
+//                      would render the misleading "host app not detected" message
+//                      (codex finding 1). The actionable fix is to set the secret
+//                      on the Secrets screen, not to install a host app.
 //   "direct"         → 200/207: per-client updated / failed split. `partial`
 //                      is true on 207 (some client writes failed).
 export type MarketplaceInstallResult =
   | { kind: "hub-installed"; name: string; port: number }
   | { kind: "name-conflict"; suggestedName: string }
   | { kind: "probe-pending"; reason: string }
+  | { kind: "required-secret-missing"; reason: string }
   | {
       kind: "direct";
       partial: boolean;
@@ -1060,17 +1069,35 @@ export async function installMarketplaceEntry(
     throw new Error(`/api/marketplace/install: name conflict (no suggested name)`);
   }
 
-  // 412 AVAILABILITY_PROBE_PENDING — the D-3 host-probe precondition is unmet
-  // (the server's host app/tool isn't detected on this machine yet). A DISTINCT
-  // status from the 409 name-conflict so it never misroutes to the name-conflict
-  // retry UI; surfaced as its own recoverable result carrying the backend's
-  // human-readable reason for an inline "probe pending" message.
+  // 412 Precondition Failed covers TWO distinct gates, disambiguated by the
+  // `code` field (NOT the HTTP status — both are 412):
+  //
+  //   AVAILABILITY_PROBE_PENDING — the D-3 host-probe precondition is unmet (the
+  //     server's host app/tool isn't detected on this machine yet).
+  //   REQUIRED_SECRET_MISSING — the install gate refused because a REQUIRED vault
+  //     secret is unset or present-but-empty; the fix is to SET the secret, not to
+  //     install a host app (codex finding 1 — a status-only branch would render
+  //     the misleading "host app not detected" message for the required-secret
+  //     case, which is the Suno row's main failure mode).
+  //
+  // Each is surfaced as its OWN recoverable result kind carrying the backend's
+  // human-readable reason (which names the key + the actionable fix for the
+  // secret case) for an inline message. An unrecognized 412 code falls back to
+  // the probe-pending message (conservative: it never throws a modelled gate).
   if (resp.status === 412) {
     let body: { error?: string; code?: string } | null = null;
     try {
       body = (await resp.json()) as { error?: string; code?: string };
     } catch {
       // Non-JSON 412 body; fall through to a generic reason.
+    }
+    if (body?.code === "REQUIRED_SECRET_MISSING") {
+      return {
+        kind: "required-secret-missing",
+        reason:
+          body?.error ??
+          "a required secret is not set — set it on the Secrets screen, then retry",
+      };
     }
     return {
       kind: "probe-pending",

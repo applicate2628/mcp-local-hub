@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/secrets"
 	"mcp-local-hub/internal/urlredact"
 )
 
@@ -414,6 +415,18 @@ func validateCatalogVendoredAndAvailability(e *MarketplaceEntry) error {
 		for _, key := range e.RequiredSecrets {
 			if strings.TrimSpace(key) == "" {
 				return fmt.Errorf("required_secrets contains an empty key")
+			}
+			// The key must be a SETTABLE vault key name — the same shape `mcphub
+			// secrets set` / POST /api/secrets accepts, owned by the single
+			// secrets.ValidateSettableKeyName predicate (the r2 manifest gate already
+			// reuses it; the catalog author guard must reject the same un-settable
+			// names one layer earlier, at catalog-author time, codex finding 3). A
+			// key the operator literally cannot `set` (e.g. `bad-key`, a digit-leading
+			// name) would gate the projected install FOREVER: the blocking finding
+			// never clears because the satisfying vault write is itself rejected.
+			// Reusing the secrets owner keeps this from forking the key-name regex.
+			if err := secrets.ValidateSettableKeyName(key); err != nil {
+				return fmt.Errorf("required_secrets key %q is not a settable vault key name (%v) — it can never be set via `mcphub secrets set` / the Secrets screen, so the install gate would block forever", key, err)
 			}
 			if !envSecretKeys[key] {
 				return fmt.Errorf("required_secrets key %q has no matching secret:%s env ref (a required secret must back an env value the server actually reads)", key, key)

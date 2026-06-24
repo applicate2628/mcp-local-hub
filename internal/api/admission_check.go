@@ -261,7 +261,16 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 			for _, key := range sortedRequiredSecretKeys(reqSecrets) {
 				resolvable := false
 				if vault != nil {
-					if _, gerr := vault.Get(key); gerr == nil {
+					// vault.Get returns ("", nil) when the key EXISTS but holds an
+					// empty string — a present-but-blank token. That is NOT resolved:
+					// a required server (e.g. mcp-suno) still hard-exits on startup
+					// with an empty ACEDATACLOUD_API_TOKEN, so a gate that passed on
+					// gerr==nil alone would let a crash-looping install through (codex
+					// finding 2). Treat a whitespace-only value as unresolved so the
+					// blocking finding still fires and the operator is told to set a
+					// real value. The Reason names the KEY only (redaction posture),
+					// never the value.
+					if v, gerr := vault.Get(key); gerr == nil && strings.TrimSpace(v) != "" {
 						resolvable = true
 					}
 				}
