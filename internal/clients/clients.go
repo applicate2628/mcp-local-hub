@@ -544,6 +544,28 @@ func findLanguageServerStdioInMap(servers map[string]any) []LanguageServerStdioE
 	return out
 }
 
+// ClassifyLanguageServerStdioEntry classifies a StdioEntry as a stdio
+// mcp-language-server invocation and returns the extracted --lsp language.
+// It is the StdioEntry-shaped front door to the SINGLE canonical classifier
+// matchLanguageServerStdio (isLanguageServerBinary + extractLspLanguageArg) —
+// it reconstructs the raw map shape that classifier consumes so callers in
+// other packages reuse the exact same binary-basename + --lsp gate instead of
+// re-deriving any shape logic. Returns ("", false) for a non-LSP stdio entry
+// (npx, gopls-mcp, a binary without an explicit --lsp arg). Used by the
+// post-register direct-LSP cleanup's shared cross-kind survivor predicate
+// (bot PR #425 follow-up FINDING 2, architect GATE PASS).
+func ClassifyLanguageServerStdioEntry(e StdioEntry) (language string, ok bool) {
+	args := make([]any, 0, len(e.Args))
+	for _, a := range e.Args {
+		args = append(args, a)
+	}
+	_, lang, isLSP := matchLanguageServerStdio(map[string]any{
+		"command": e.Command,
+		"args":    args,
+	})
+	return lang, isLSP
+}
+
 // ErrClientNotInstalled signals the client's config file does not exist on this machine.
 type ErrClientNotInstalled struct{ Client string }
 

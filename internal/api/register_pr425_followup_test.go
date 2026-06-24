@@ -19,19 +19,19 @@ import (
 // in isolation from the mimo merge (the adapter-side reader correctness is pinned
 // in internal/clients/mimocode_pr425_followup_test.go).
 
-// followupReaderFake implements registerClient PLUS the two optional post-removal
-// active-reader interfaces. Only the methods the caller functions touch are real;
-// the rest satisfy registerClient with trivial bodies.
+// followupReaderFake implements registerClient PLUS the single post-removal
+// ALL-STDIO active-reader interface that FINDING 2 made both caller families
+// consume. Only the methods the caller functions touch are real; the rest satisfy
+// registerClient with trivial bodies.
 type followupReaderFake struct {
 	stdioSurvivors map[string][]clients.StdioEntry
-	lspSurvivors   map[string][]clients.LanguageServerStdioEntry
 }
 
-func (f *followupReaderFake) Exists() bool                                 { return true }
-func (f *followupReaderFake) BackupKeep(int) (string, error)               { return "/b", nil }
-func (f *followupReaderFake) AddEntry(clients.MCPEntry) error              { return nil }
-func (f *followupReaderFake) RemoveEntry(string) error                     { return nil }
-func (f *followupReaderFake) GetEntry(string) (*clients.MCPEntry, error)   { return nil, nil }
+func (f *followupReaderFake) Exists() bool                               { return true }
+func (f *followupReaderFake) BackupKeep(int) (string, error)             { return "/b", nil }
+func (f *followupReaderFake) AddEntry(clients.MCPEntry) error            { return nil }
+func (f *followupReaderFake) RemoveEntry(string) error                   { return nil }
+func (f *followupReaderFake) GetEntry(string) (*clients.MCPEntry, error) { return nil, nil }
 func (f *followupReaderFake) AllStdioEntries() ([]clients.StdioEntry, error) {
 	return nil, nil
 }
@@ -41,9 +41,6 @@ func (f *followupReaderFake) FindStdioLanguageServerEntries() ([]clients.Languag
 func (f *followupReaderFake) ActiveStdioEntriesExcludingWriteTarget(name string) ([]clients.StdioEntry, error) {
 	return f.stdioSurvivors[name], nil
 }
-func (f *followupReaderFake) ActiveLanguageServerEntriesExcludingWriteTarget(name string) ([]clients.LanguageServerStdioEntry, error) {
-	return f.lspSurvivors[name], nil
-}
 
 func goplsArgs(workspace string) []string {
 	return []string{"mcp", "--workspace", workspace}
@@ -51,6 +48,16 @@ func goplsArgs(workspace string) []string {
 
 func lsArgs(workspace string) []string {
 	return []string{"--lsp", "go", "--workspace", workspace}
+}
+
+// goplsStdio / lsStdio build the ALL-STDIO survivor shapes the single reader now
+// returns: a gopls-mcp entry and an mcp-language-server --lsp <lang> entry.
+func goplsStdio(name, workspace string) clients.StdioEntry {
+	return clients.StdioEntry{Name: name, Command: "gopls", Args: goplsArgs(workspace)}
+}
+
+func lsStdio(name, lang, workspace string) clients.StdioEntry {
+	return clients.StdioEntry{Name: name, Command: "mcp-language-server", Args: []string{"--lsp", lang, "--workspace", workspace}}
 }
 
 // CLAIM 3 — gopls(workspace A) write-target + a lower same-name gopls(workspace B)
@@ -96,7 +103,7 @@ func TestFollowup_GoplsCaller_WorkspaceScopedSurvivor(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := &followupReaderFake{stdioSurvivors: map[string][]clients.StdioEntry{"gopls": tc.survivors}}
-			out, err := matchingDirectGoplsMCPEntries(fake, []clients.StdioEntry{candidate}, canonicalA)
+			out, err := matchingDirectGoplsMCPEntries(fake, []clients.StdioEntry{candidate}, map[string]bool{"go": true, "gopls": true}, canonicalA)
 			if err != nil {
 				t.Fatalf("matchingDirectGoplsMCPEntries: %v", err)
 			}
@@ -109,7 +116,9 @@ func TestFollowup_GoplsCaller_WorkspaceScopedSurvivor(t *testing.T) {
 }
 
 // CLAIM 4 — mcp-language-server(workspace A) write-target + a lower same-name LSP
-// for workspace B → A IS removed; same-workspace re-emergence DOES block.
+// for workspace B → A IS removed; same-workspace re-emergence DOES block. After
+// FINDING 2 the survivor source is the SINGLE all-stdio reader (stdioSurvivors),
+// not the dropped LSP-only reader.
 func TestFollowup_LSPCaller_WorkspaceScopedSurvivor(t *testing.T) {
 	wsA := t.TempDir()
 	wsB := t.TempDir()
@@ -123,7 +132,7 @@ func TestFollowup_LSPCaller_WorkspaceScopedSurvivor(t *testing.T) {
 
 	cases := []struct {
 		name       string
-		survivors  []clients.LanguageServerStdioEntry
+		survivors  []clients.StdioEntry
 		wantRemove bool
 	}{
 		{
@@ -133,23 +142,23 @@ func TestFollowup_LSPCaller_WorkspaceScopedSurvivor(t *testing.T) {
 		},
 		{
 			name:       "different-workspace mcp-language-server(B) survivor -> still removed",
-			survivors:  []clients.LanguageServerStdioEntry{{Name: "mls", Command: "mcp-language-server", Language: "go", Args: lsArgs(wsB)}},
+			survivors:  []clients.StdioEntry{lsStdio("mls", "go", wsB)},
 			wantRemove: true,
 		},
 		{
 			name:       "different-language survivor (rust) -> still removed",
-			survivors:  []clients.LanguageServerStdioEntry{{Name: "mls", Command: "mcp-language-server", Language: "rust", Args: []string{"--lsp", "rust", "--workspace", wsA}}},
+			survivors:  []clients.StdioEntry{lsStdio("mls", "rust", wsA)},
 			wantRemove: true,
 		},
 		{
 			name:       "same-workspace+alias survivor -> BLOCKED",
-			survivors:  []clients.LanguageServerStdioEntry{{Name: "mls", Command: "mcp-language-server", Language: "go", Args: lsArgs(wsA)}},
+			survivors:  []clients.StdioEntry{lsStdio("mls", "go", wsA)},
 			wantRemove: false,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			fake := &followupReaderFake{lspSurvivors: map[string][]clients.LanguageServerStdioEntry{"mls": tc.survivors}}
+			fake := &followupReaderFake{stdioSurvivors: map[string][]clients.StdioEntry{"mls": tc.survivors}}
 			out, err := matchingDirectLanguageServerEntries(fake, []clients.LanguageServerStdioEntry{candidate}, aliases, canonicalA)
 			if err != nil {
 				t.Fatalf("matchingDirectLanguageServerEntries: %v", err)
@@ -183,7 +192,7 @@ func TestFollowup_Caller_NoReaderFallback_NeverBlocks(t *testing.T) {
 	fc := &fakeClient{parent: parent, name: "x"}
 
 	gopls := clients.StdioEntry{Name: "gopls", Command: "gopls", Args: goplsArgs(wsA)}
-	out, err := matchingDirectGoplsMCPEntries(fc, []clients.StdioEntry{gopls}, canonicalA)
+	out, err := matchingDirectGoplsMCPEntries(fc, []clients.StdioEntry{gopls}, map[string]bool{"go": true, "gopls": true}, canonicalA)
 	if err != nil {
 		t.Fatalf("matchingDirectGoplsMCPEntries: %v", err)
 	}
@@ -198,5 +207,110 @@ func TestFollowup_Caller_NoReaderFallback_NeverBlocks(t *testing.T) {
 	}
 	if len(lspOut) != 1 {
 		t.Fatalf("LSP path: a client without the optional reader must never block; got %d matches", len(lspOut))
+	}
+}
+
+// FINDING 2 — the CROSS-KIND survivor gap. Before the fix each caller family read
+// its OWN reader with its OWN recheck, blind to the OTHER family:
+//   - the gopls path consumed all-stdio but its inline filter only matched gopls;
+//     an mcp-language-server --lsp go survivor for the same workspace was invisible
+//     → the write-target gopls(A) was wrongly removed.
+//   - the mcp-language-server path consumed the LSP-only reader (which DROPS
+//     gopls-mcp); a gopls mcp survivor for the same workspace was invisible → the
+//     write-target mcp-language-server(A) was wrongly removed.
+// Both families now consume the single all-stdio reader and run the shared
+// directLSPSurvivorMatchesWorkspace predicate, so EITHER family's survivor for THIS
+// workspace blocks removal. These pin BOTH directions plus the different-workspace
+// negatives.
+
+// Direction A: gopls candidate × a lower same-name mcp-language-server-go-for-W
+// survivor → BLOCKED (the formerly-invisible cross-kind survivor).
+func TestFollowup_GoplsCaller_CrossKind_MlsGoSurvivor_Blocks(t *testing.T) {
+	wsA := t.TempDir()
+	wsB := t.TempDir()
+	canonicalA, err := CanonicalWorkspacePathForCleanup(wsA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliases := map[string]bool{"go": true, "gopls": true}
+	candidate := goplsStdio("dev", wsA)
+
+	cases := []struct {
+		name       string
+		survivors  []clients.StdioEntry
+		wantRemove bool
+	}{
+		{
+			name:       "cross-kind mcp-language-server-go(A) survivor -> BLOCKED",
+			survivors:  []clients.StdioEntry{lsStdio("dev", "go", wsA)},
+			wantRemove: false,
+		},
+		{
+			name:       "cross-kind mcp-language-server-go(B) survivor (diff workspace) -> still removed",
+			survivors:  []clients.StdioEntry{lsStdio("dev", "go", wsB)},
+			wantRemove: true,
+		},
+		{
+			name:       "cross-kind mcp-language-server-rust(A) survivor (non-alias lang) -> still removed",
+			survivors:  []clients.StdioEntry{lsStdio("dev", "rust", wsA)},
+			wantRemove: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &followupReaderFake{stdioSurvivors: map[string][]clients.StdioEntry{"dev": tc.survivors}}
+			out, err := matchingDirectGoplsMCPEntries(fake, []clients.StdioEntry{candidate}, aliases, canonicalA)
+			if err != nil {
+				t.Fatalf("matchingDirectGoplsMCPEntries: %v", err)
+			}
+			got := len(out) == 1 && out[0].Name == "dev"
+			if got != tc.wantRemove {
+				t.Fatalf("removable=%v, want %v (survivors=%v)", got, tc.wantRemove, tc.survivors)
+			}
+		})
+	}
+}
+
+// Direction B: mcp-language-server-go candidate × a lower same-name gopls-mcp-for-W
+// survivor → BLOCKED (the formerly-invisible cross-kind survivor; the LSP-only
+// reader used to DROP gopls-mcp entirely).
+func TestFollowup_LSPCaller_CrossKind_GoplsSurvivor_Blocks(t *testing.T) {
+	wsA := t.TempDir()
+	wsB := t.TempDir()
+	canonicalA, err := CanonicalWorkspacePathForCleanup(wsA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliases := map[string]bool{"go": true, "gopls": true}
+	candidate := clients.LanguageServerStdioEntry{Name: "dev", Command: "mcp-language-server", Language: "go", Args: lsArgs(wsA)}
+
+	cases := []struct {
+		name       string
+		survivors  []clients.StdioEntry
+		wantRemove bool
+	}{
+		{
+			name:       "cross-kind gopls-mcp(A) survivor -> BLOCKED",
+			survivors:  []clients.StdioEntry{goplsStdio("dev", wsA)},
+			wantRemove: false,
+		},
+		{
+			name:       "cross-kind gopls-mcp(B) survivor (diff workspace) -> still removed",
+			survivors:  []clients.StdioEntry{goplsStdio("dev", wsB)},
+			wantRemove: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &followupReaderFake{stdioSurvivors: map[string][]clients.StdioEntry{"dev": tc.survivors}}
+			out, err := matchingDirectLanguageServerEntries(fake, []clients.LanguageServerStdioEntry{candidate}, aliases, canonicalA)
+			if err != nil {
+				t.Fatalf("matchingDirectLanguageServerEntries: %v", err)
+			}
+			got := len(out) == 1 && out[0].Name == "dev"
+			if got != tc.wantRemove {
+				t.Fatalf("removable=%v, want %v (survivors=%v)", got, tc.wantRemove, tc.survivors)
+			}
+		})
 	}
 }

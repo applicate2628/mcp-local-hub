@@ -378,5 +378,121 @@ func TestMimoCode_Followup_HigherLayerDefining_DelegatesManaged(t *testing.T) {
 		if src.Kind != "" {
 			t.Fatalf("a managed enabled-only:true override must not be a shadow, got Kind=%q", src.Kind)
 		}
+		// FINDING 3 sanity: with NO content-bearing lower entry to overlay onto, the
+		// enable-true overlay must ALSO leave mimoCodeManagedLayerReResolves false
+		// (still removable) — the AddEntry-guard "not a shadow" verdict and the
+		// re-resolve verdict agree in the no-lower-content case.
+		reResolves, err := o.mimoCodeManagedLayerReResolves("serena")
+		if err != nil {
+			t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
+		}
+		if reResolves {
+			t.Fatalf("a managed enable-true overlay with NO surviving content-bearing lower entry must NOT re-resolve (removable)")
+		}
 	})
+}
+
+// FINDING 3 — managed enable-true RE-ACTIVATION over a DISABLED lower full entry
+// (bot PR #425 follow-up, architect GATE PASS). A managed {enabled:true}-only
+// overlay FIELD-MERGES enabled:true onto a non-managed DISABLED full entry that
+// SURVIVES below the write target (config.json), re-activating the server. The
+// shadow path is blind to this (enable-true is correctly "not a shadow" for the
+// AddEntry guard), so mimoCodeManagedLayerReResolves now adds the enable-true ×
+// content-bearing-lower branch → the candidate is NOT removable. Pinned for BOTH
+// reResolveConsumerStdio (gopls) AND reResolveConsumerLSP (mcp-language-server).
+func TestMimoCode_Followup_ManagedEnableTrueOverDisabledLowerFull_NotRemovable(t *testing.T) {
+	// disabledFull builds a DISABLED full stdio entry (content-bearing: carries
+	// type+command) for the named command shape.
+	cases := []struct {
+		name        string
+		server      string
+		disabledLow string                                     // config.json (below write target), disabled full entry
+		writeTarget string                                     // mimocode.json write-target value (the removable candidate)
+		consumer    func(t *testing.T, o *mimoCodeClient) bool // does the consumer still REPORT (offer) the candidate?
+	}{
+		{
+			name:        "stdio gopls",
+			server:      "gopls",
+			disabledLow: `{"type":"local","command":["gopls","mcp"],"enabled":false}`,
+			writeTarget: `{"type":"local","command":["gopls","mcp"],"enabled":true}`,
+			consumer: func(t *testing.T, o *mimoCodeClient) bool {
+				return reResolveRemovableNames(t, o)["gopls"]
+			},
+		},
+		{
+			name:        "stdio mcp-language-server (LSP consumer)",
+			server:      "mls",
+			disabledLow: `{"type":"local","command":["mcp-language-server","--lsp","go"],"enabled":false}`,
+			writeTarget: `{"type":"local","command":["mcp-language-server","--lsp","go"],"enabled":true}`,
+			consumer: func(t *testing.T, o *mimoCodeClient) bool {
+				return stdioLSPEntryNames(t, o)["mls"]
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateMimoCodeEnv(t)
+			// Managed config dir carries ONLY an {enabled:true} overlay for the name.
+			seedManagedConfigDir(t, `{"mcp":{"`+tc.server+`":{"enabled":true}}}`)
+
+			dir := t.TempDir()
+			writeTargetPath := filepath.Join(dir, "mimocode.json")
+			writeMimoFile(t, writeTargetPath, `{"mcp":{"`+tc.server+`":`+tc.writeTarget+`}}`)
+			// config.json BELOW the write target: a DISABLED full entry that survives a
+			// write-target removal and is re-activated by the managed enable-true overlay.
+			writeMimoFile(t, filepath.Join(dir, "config.json"), `{"mcp":{"`+tc.server+`":`+tc.disabledLow+`}}`)
+			o := &mimoCodeClient{path: writeTargetPath}
+
+			// The single managed re-resolve owner now reports the re-activation.
+			reResolves, err := o.mimoCodeManagedLayerReResolves(tc.server)
+			if err != nil {
+				t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
+			}
+			if !reResolves {
+				t.Fatalf("a managed enable-true overlay over a DISABLED content-bearing lower entry RE-ACTIVATES the server — must re-resolve (NOT removable)")
+			}
+
+			// The combined predicate reaches the same verdict for BOTH consumers (the
+			// managed OR fires after the folded active-set check passes through).
+			for _, consumer := range []mimoCodeReResolveConsumer{reResolveConsumerStdio, reResolveConsumerLSP} {
+				r, err := o.mimoCodeNameReResolvesAfterWriteTargetRemoval(tc.server, consumer)
+				if err != nil {
+					t.Fatalf("mimoCodeNameReResolvesAfterWriteTargetRemoval(consumer=%d): %v", consumer, err)
+				}
+				if !r {
+					t.Fatalf("the combined re-resolve predicate must DECLINE removal for consumer=%d (managed enable-true re-activation)", consumer)
+				}
+			}
+
+			// The destructive consumer must NOT offer the candidate as removable.
+			if tc.consumer(t, o) {
+				t.Fatalf("the candidate must NOT be removable while a managed enable-true overlay re-activates a surviving content-bearing lower entry")
+			}
+		})
+	}
+}
+
+// FINDING 3 negative — a managed enable-true overlay with NO surviving content-bearing
+// lower entry (the lower entry lives ONLY in the write target, which is excluded on
+// removal) stays REMOVABLE. This is the boundary the fix must NOT cross — it pins
+// that the new branch does not over-block (and that CLAIM 2 above remains correct).
+func TestMimoCode_Followup_ManagedEnableTrue_NoLowerContent_StaysRemovable(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	seedManagedConfigDir(t, `{"mcp":{"gopls":{"enabled":true}}}`)
+	dir := t.TempDir()
+	writeTargetPath := filepath.Join(dir, "mimocode.json")
+	// The content-bearing gopls lives ONLY in the write target; no config.json below.
+	writeMimoFile(t, writeTargetPath, `{"mcp":{"gopls":`+followupStdioGopls+`}}`)
+	o := &mimoCodeClient{path: writeTargetPath}
+
+	reResolves, err := o.mimoCodeManagedLayerReResolves("gopls")
+	if err != nil {
+		t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
+	}
+	if reResolves {
+		t.Fatalf("a managed enable-true overlay with NO surviving content-bearing lower entry must stay REMOVABLE (the write-target entry is excluded on removal)")
+	}
+	if !reResolveRemovableNames(t, o)["gopls"] {
+		t.Fatalf("gopls must be removable when the managed enable-true overlay has no surviving lower content to re-activate")
+	}
 }

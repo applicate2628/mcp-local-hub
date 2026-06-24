@@ -1024,6 +1024,18 @@ func (e *ErrMimoCodeHigherLayerRetainsServer) Error() string {
 // with a t.Cleanup restore. Bot PR #420 finding 1.
 var mimoCodeManagedPrefsReader func(name string) (mimoCodeShadowSource, error)
 
+// mimoCodeManagedPrefsEnableOnlyTrueReader, when non-nil (tests only), replaces the
+// production macOS Managed Preferences ENABLE-ONLY-TRUE detector
+// (mimoCodeReadManagedPrefsEnableOnlyTrue) so the FINDING 3 managed-enable-true
+// re-activation branch can be exercised on a Windows/Linux CI runner without a real
+// /Library plist or `plutil`. Same nil-in-production func-var idiom as
+// mimoCodeManagedPrefsReader. It reports whether the MDM plist carries a bare
+// {enabled:true} ENABLE-ONLY overlay for mcp.<name> — the polarity the shadow-aware
+// reader deliberately drops (an enable-true overlay is NOT a shadow), which is
+// exactly the overlay that re-activates a disabled lower content-bearing entry once
+// the write-target key is gone.
+var mimoCodeManagedPrefsEnableOnlyTrueReader func(name string) (bool, error)
+
 // ErrMimoCodeManagedShadowsServer is returned by AddEntry when the macOS Managed
 // Preferences (MDM) layer already defines mcp.<Server>. That layer is read-only
 // to the hub and MiMoCode merges it ABOVE every user/env layer (config.ts:876-885
@@ -1153,6 +1165,113 @@ func mimoCodeReadManagedPrefs(name string) (mimoCodeShadowSource, error) {
 		}
 	}
 	return mimoCodeShadowSource{}, nil
+}
+
+// mimoCodeReadManagedPrefsEnableOnlyTrue is the FINDING 3 sibling of
+// mimoCodeReadManagedPrefs: it reports whether the macOS Managed Preferences (MDM)
+// plist carries a bare {enabled:true} ENABLE-ONLY overlay for mcp.<name> — the
+// polarity the shadow-aware reader drops. Same plist resolution + plutil read +
+// warn-skip-on-unparseable posture as mimoCodeReadManagedPrefs (the realistic
+// managed enable-only case is the operator-editable managed config DIR, but the MDM
+// layer is covered symmetrically so a darwin host is not a blind spot). On
+// non-darwin it returns false (no MDM plist). A plutil/parse failure warn-skips
+// (treat as "no enable-only overlay") for the same reason the shadow path does — a
+// host whose unrelated managed profile is merely unconvertible must not have its
+// removability verdict flipped by a plist that may not even mention the server.
+func mimoCodeReadManagedPrefsEnableOnlyTrue(name string) (bool, error) {
+	if runtime.GOOS != "darwin" {
+		return false, nil
+	}
+	const managedPlistDomain = "ai.opencode.managed"
+	username := ""
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		username = u.Username
+	} else if env := os.Getenv("USER"); env != "" {
+		username = env
+	}
+	plists := []string{
+		filepath.Join("/Library/Managed Preferences", managedPlistDomain+".plist"),
+	}
+	if username != "" {
+		plists = append([]string{
+			filepath.Join("/Library/Managed Preferences", username, managedPlistDomain+".plist"),
+		}, plists...)
+	}
+	for _, plist := range plists {
+		if _, err := os.Stat(plist); err != nil {
+			continue
+		}
+		out, err := exec.Command("plutil", "-convert", "json", "-o", "-", plist).Output()
+		if err != nil {
+			continue // plutil convert failed — warn-skip
+		}
+		m, err := parseJSONCBytes(out)
+		if err != nil {
+			continue // unparseable converted JSON — warn-skip
+		}
+		if mimoCodeMapDefinesEnableOnlyTrue(m, name) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// mimoCodeManagedConfigDirEnableOnlyTrue is the FINDING 3 sibling of
+// mimoCodeManagedConfigDirShadows: it reports whether mimocode.json/.jsonc in the
+// managed config dir carries a bare {enabled:true} ENABLE-ONLY overlay for
+// mcp.<name>. Same dir resolution, .jsonc-over-.json precedence, and
+// warn-skip-on-unparseable posture as the shadow reader. A missing dir / file is
+// "no overlay".
+func mimoCodeManagedConfigDirEnableOnlyTrue(name string) bool {
+	dir := mimoCodeManagedConfigDir()
+	if dir == "" {
+		return false
+	}
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return false
+	}
+	for i := len(mimoCodeOverlayLayerNames) - 1; i >= 0; i-- {
+		f := filepath.Join(dir, mimoCodeOverlayLayerNames[i])
+		data, err := readRawConfig(f)
+		if err != nil {
+			continue // unreadable — warn-skip
+		}
+		if len(data) == 0 {
+			continue
+		}
+		m, err := parseJSONCBytes(data)
+		if err != nil {
+			continue // unparseable — warn-skip
+		}
+		if mimoCodeMapDefinesEnableOnlyTrue(m, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// mimoCodeManagedLayerEnableOnlyTrueOverlay is the SINGLE owner of the FINDING 3
+// "does a MANAGED layer carry a bare {enabled:true} ENABLE-ONLY overlay for
+// mcp.<name>" verdict, OR-ing the macOS MDM plist (via the test seam) and the
+// cross-platform managed config dir. It is consumed ONLY by
+// mimoCodeManagedLayerReResolves — a managed enable-true overlay is not a shadow
+// (the lower content wins / the hub write is effective), so it MUST NOT feed the
+// AddEntry shadow guard; it only matters AFTER the write-target key is gone, when it
+// re-activates a surviving lower content-bearing entry. An MDM reader error
+// propagates → the destructive consumer fails closed.
+func mimoCodeManagedLayerEnableOnlyTrueOverlay(name string) (bool, error) {
+	reader := mimoCodeManagedPrefsEnableOnlyTrueReader
+	if reader == nil {
+		reader = mimoCodeReadManagedPrefsEnableOnlyTrue
+	}
+	mdm, err := reader(name)
+	if err != nil {
+		return false, err
+	}
+	if mdm {
+		return true, nil
+	}
+	return mimoCodeManagedConfigDirEnableOnlyTrue(name), nil
 }
 
 // mimoCodeManagedConfigDir resolves MiMoCode's MANAGED config DIRECTORY faithfully
@@ -1360,7 +1479,7 @@ func (o *mimoCodeClient) mimoCodeHomeMimocodeDirShadows(name string) (mimoCodeSh
 //     is SHADOW-AWARE (mimoCodeMapShadows in mimoCodeReadManagedPrefs), so an
 //     enabled-only:true managed override is NOT returned as a shadow. A read error
 //     propagates.
-//  1b. managed config dir (%ProgramData%\opencode | /Library/Application Support/
+//     1b. managed config dir (%ProgramData%\opencode | /Library/Application Support/
 //     opencode | /etc/opencode | MIMOCODE_TEST_MANAGED_CONFIG_DIR) — read-only
 //     admin/system layer, also shadow-aware (mimoCodeMapShadows), warn-skip on an
 //     unparseable file.
@@ -1761,6 +1880,26 @@ func (o *mimoCodeClient) readMergedLayersExcluding(skipName string) (map[string]
 		// fold, so the deep-merge sees the inputs RemoveEntry(skipName) would
 		// leave. Only the write target is altered (it is the sole file the hub's
 		// RemoveEntry touches); every other layer folds verbatim.
+		//
+		// KNOWN LIMITATION — hard-link inode identity (bot PR #425 follow-up
+		// FINDING 1, architect-ruled ACCEPTABLE RESIDUAL, P3). The write-target
+		// layer is matched by INODE identity (mimoCodePathsSamePhysical → os.SameFile),
+		// not by path string, so the exclusion fires for ANY layer file that shares
+		// the write target's inode. If an operator DELIBERATELY hard-links a
+		// LOWER-layer config.json to the write-target mimocode.json (two distinct
+		// MiMoCode global layers pointing at one inode — a non-default manual setup),
+		// this simulate models BOTH as losing skipName, so it predicts the lower
+		// inode's entry also disappears. PRODUCTION diverges: RemoveEntry writes via
+		// atomic temp-file + rename (setMember/deleteMember), which BREAKS the hard
+		// link and leaves the lower inode's entry LIVE — so the name actually
+		// re-emerges from the still-live lower layer. The mismatch is therefore a
+		// FALSE-removable prediction whose re-emergence lands on the BELOW-target
+		// (intended-rollback) layer; it requires a deliberate, non-default manual
+		// hard-link of two distinct global layers and causes NO data loss. Do NOT
+		// "fix" by switching to path-string equality: mimoCodePathsSamePhysical's
+		// FOUR shadow-walk callers correctly NEED inode identity (they must treat a
+		// path that IS the write target by another name as the write target). Tracked
+		// in work-items/bugs/2026-06-24-mimocode-hardlink-simulate-residual.md.
 		if skipName != "" && mimoCodePathsSamePhysical(f, o.path) {
 			m = mimoCodeLayerWithoutMCPName(m, skipName)
 		}
@@ -2345,6 +2484,38 @@ func mimoCodeMapShadows(m map[string]any, name string) bool {
 		return false
 	}
 	return mimoCodeValueShadowsWriteTarget(value)
+}
+
+// mimoCodeMapDefinesEnableOnlyTrue reports whether a parsed config map carries a
+// mcp.<name> value that is a bare ENABLE-ONLY overlay with enabled==true — name
+// present, mimoCodeIsEnabledOnlyOverride (the single-owner enabled-only shape gate),
+// AND the flag is true. This is the EXACT polarity the shadow-aware predicate
+// (mimoCodeValueShadowsWriteTarget) drops as "not a shadow" — it is correct for the
+// AddEntry guard (an enable-true overlay lets the lower write-target content win, so
+// the hub write IS effective), but it is ALSO the overlay that, once the write-target
+// key is removed, FIELD-MERGES enabled:true onto a SURVIVING lower content-bearing
+// (even disabled) entry and RE-ACTIVATES it (mimoCodeMergeMCPEntry). FINDING 3 uses
+// this to detect that re-activation in the managed layer, where the shadow path is
+// blind. An absent name, a content-bearing value, or an {enabled:false} overlay all
+// return false.
+func mimoCodeMapDefinesEnableOnlyTrue(m map[string]any, name string) bool {
+	servers, _ := m[mimoCodeMCPKey].(map[string]any)
+	if servers == nil {
+		return false
+	}
+	value, present := servers[name]
+	if !present {
+		return false
+	}
+	entry, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	if !mimoCodeIsEnabledOnlyOverride(entry) {
+		return false
+	}
+	enabled, _ := entry["enabled"].(bool) // bool by mimoCodeIsEnabledOnlyOverride's gate
+	return enabled
 }
 
 // readJSON returns the deep-merged view across the resolved READ layer files.
@@ -3177,34 +3348,70 @@ func (o *mimoCodeClient) mimoCodeNameReResolvesAfterWriteTargetRemoval(name stri
 //   - mimoCodeManagedLayerShadows returns a shadow ONLY for a full-redefine or a
 //     DISABLING value (mimoCodeValueShadowsWriteTarget), never for an
 //     enabled-only:TRUE overlay — a managed {enabled:true}-only overlay goes inert
-//     once the write-target key is gone (no lower content to overlay), so it is NOT
-//     a re-emergent server → the entry stays REMOVABLE;
+//     once the write-target key is gone IF there is no lower content to overlay
+//     onto, so it is NOT a re-emergent server → the entry stays REMOVABLE;
 //   - SUBTRACT the disable-only managed case (mimoCodeShadowIsDisableOnlyOverride):
 //     a managed {enabled:false}-only stub has nothing to merge onto → retains NO
 //     active server → REMOVABLE.
-// So this returns true ("an ACTIVE managed server re-emerges") only for a managed
-// full-redefine / disabling-FULL value. Consumer-agnostic: a managed full-redefine
-// shadows the name for both the stdio and LSP views (it is one read-only policy
-// surface), so this takes no consumer enum — slightly more conservative than the
-// old LSP-survivor (a managed redefine to a non-LSP shape now also DECLINES the LSP
-// removal), which only ever blocks a removal the hub could not fully clear anyway.
 //
-// A managed-reader error (MDM plist read) propagates → callers fail closed
-// (delete nothing). No double-counting: the managed paths (MDM plist dir +
-// mimoCodeManagedConfigDir()) are disjoint from readLayerFiles' file paths.
+// FINDING 3 — managed enable-true RE-ACTIVATION (bot PR #425 follow-up, architect
+// GATE PASS). The "goes inert once the write-target key is gone" reasoning above
+// holds ONLY when no content-bearing entry for the name SURVIVES below the write
+// target. When a CONTENT-BEARING lower entry survives (the realistic case: a
+// non-managed DISABLED full stdio entry in config.json below the write target), a
+// managed {enabled:true} ENABLE-ONLY overlay FIELD-MERGES enabled:true onto it and
+// RE-ACTIVATES the server (mimoCodeMergeMCPEntry) — so the name DOES re-resolve as
+// active and the entry is NOT removable. The shadow path is blind to this (an
+// enable-true overlay is correctly "not a shadow" for the AddEntry guard — do NOT
+// weaken mimoCodeValueShadowsWriteTarget, or installs over-refuse). So after the
+// shadow check finds no active managed shadow, this adds ONE branch: if a managed
+// ENABLE-ONLY-TRUE overlay exists for the name AND a content-bearing entry for the
+// name survives in the write-target-EXCLUDED lower merge (readMergedLayersExcluding,
+// the inputs RemoveEntry would leave — read BEFORE mimoCodeDropDisabled so a DISABLED
+// lower full entry the overlay re-enables still counts as content-bearing), report
+// the re-activation → NOT removable.
+//
+// So this returns true ("an ACTIVE managed server re-emerges") for a managed
+// full-redefine / disabling-FULL value OR a managed enable-only-true overlay over a
+// surviving content-bearing lower entry. Consumer-agnostic: a managed full-redefine
+// shadows the name for both the stdio and LSP views (it is one read-only policy
+// surface), and the enable-true re-activation likewise re-enables whatever content
+// shape survives below, so this takes no consumer enum — slightly more conservative
+// than the old LSP-survivor, which only ever blocks a removal the hub could not fully
+// clear anyway.
+//
+// A managed-reader error (MDM plist read) or a merge parse error propagates →
+// callers fail closed (delete nothing). No double-counting: the managed paths (MDM
+// plist dir + mimoCodeManagedConfigDir()) are disjoint from readLayerFiles' file
+// paths, and the enable-true branch only fires when the shadow path found nothing.
 func (o *mimoCodeClient) mimoCodeManagedLayerReResolves(name string) (bool, error) {
 	managed, err := o.mimoCodeManagedLayerShadows(name)
 	if err != nil {
 		return false, err
 	}
-	if managed.Kind == "" {
-		return false, nil
+	if managed.Kind != "" {
+		disableOnly, err := o.mimoCodeShadowIsDisableOnlyOverride(managed, name)
+		if err != nil {
+			return false, err
+		}
+		return !disableOnly, nil
 	}
-	disableOnly, err := o.mimoCodeShadowIsDisableOnlyOverride(managed, name)
+	// FINDING 3: no managed shadow, but a managed enable-only-TRUE overlay may
+	// re-activate a content-bearing lower entry that SURVIVES a write-target removal.
+	enableOnlyTrue, err := mimoCodeManagedLayerEnableOnlyTrueOverlay(name)
 	if err != nil {
 		return false, err
 	}
-	return !disableOnly, nil
+	if !enableOnlyTrue {
+		return false, nil
+	}
+	mergedAfter, err := o.readMergedLayersExcluding(name)
+	if err != nil {
+		return false, err
+	}
+	// Content-bearing BEFORE drop-disabled: a DISABLED lower full entry is exactly
+	// what the managed enable:true overlay re-enables, so it must count here.
+	return mimoCodeMapDefinesContentBearing(mergedAfter, name), nil
 }
 
 // GetEntry reads mcp.<name> from the merged layers and projects it onto MCPEntry.
