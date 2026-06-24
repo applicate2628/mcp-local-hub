@@ -1025,13 +1025,14 @@ func (e *ErrMimoCodeHigherLayerRetainsServer) Error() string {
 var mimoCodeManagedPrefsReader func(name string) (mimoCodeShadowSource, error)
 
 // mimoCodeManagedPrefsDisableOnlyReader, when non-nil (tests only), replaces the
-// production macOS Managed Preferences DISABLE-ONLY detector
-// (mimoCodeReadManagedPrefsDisableOnly) so the FINDING 1 managed disable-only case
-// can be exercised on a Windows/Linux CI runner without a real /Library plist or
-// `plutil`. Same nil-in-production func-var idiom as the enable-only-true seam
-// above. It reports whether the MDM plist carries a bare {enabled:false} ENABLE-ONLY
-// overlay for mcp.<name> — the polarity mimoCodeShadowIsDisableOnlyOverride needs to
-// classify a managed (MDM) shadow as disable-only (retains NO active server → the
+// production macOS Managed Preferences DISABLE-ONLY classifier of the SELECTED plist
+// (mimoCodeReadManagedPlistDisableOnly) so the managed disable-only case can be exercised
+// on a Windows/Linux CI runner without a real /Library plist or `plutil`. Same
+// nil-in-production func-var idiom as the enable-only-true seam above; keyed on `name`
+// because on a non-darwin runner there is no real plist path to thread, so the seam owns
+// the verdict directly. It reports whether the MDM plist carries a bare {enabled:false}
+// ENABLE-ONLY overlay for mcp.<name> — the polarity mimoCodeShadowIsDisableOnlyOverride
+// needs to classify a managed (MDM) shadow as disable-only (retains NO active server → the
 // entry is removable; bot PR #425 follow-up FINDING 1 regression fix).
 var mimoCodeManagedPrefsDisableOnlyReader func(name string) (bool, error)
 
@@ -1187,55 +1188,57 @@ func mimoCodeManagedPlistFiles() []string {
 	return plists
 }
 
-// mimoCodeReadManagedPrefsDisableOnly reports whether the macOS Managed Preferences
-// (MDM) plist carries a bare {enabled:false} ENABLE-ONLY overlay for mcp.<name> (bot
-// PR #425 follow-up FINDING 1). It reads the SINGLE MDM layer's OWN value directly via
-// the SAME plist-path resolution + plutil read + JSONC parse as the shadow reader
-// mimoCodeReadManagedPrefs (single owner mimoCodeManagedPlistFiles, no merge with the
-// managed config dir, no func-var value chain), then applies the shared shape gate
-// mimoCodeMapDefinesDisableOnly on the FIRST plist that defines mcp.<name>. Consumed by
-// mimoCodeShadowIsDisableOnlyOverride's "managed" case so a disable-only MDM shadow is
-// classified disable-only (retains NO active server → removable) rather than falling
-// through to the conservative fail-loud. Off darwin → (false, nil) (mimoCodeManagedPlistFiles
-// returns nil). Warn-skip-on-unparseable matches the shadow reader's posture (an
-// unconvertible/unparseable plist is treated as "no disable-only overlay" — it cannot be
-// PROVEN to carry one); the test seam is mimoCodeManagedPrefsDisableOnlyReader.
-func mimoCodeReadManagedPrefsDisableOnly(name string) (bool, error) {
-	for _, plist := range mimoCodeManagedPlistFiles() {
-		if _, err := os.Stat(plist); err != nil {
-			continue // not present — skip (existsSync gate)
-		}
-		out, err := exec.Command("plutil", "-convert", "json", "-o", "-", plist).Output()
-		if err != nil {
-			continue // plutil convert failed — warn-skip
-		}
-		m, err := parseJSONCBytes(out)
-		if err != nil {
-			continue // unparseable converted JSON — warn-skip
-		}
-		servers, _ := m[mimoCodeMCPKey].(map[string]any)
-		if servers == nil {
-			continue
-		}
-		if _, present := servers[name]; !present {
-			continue
-		}
-		// The FIRST plist that defines mcp.<name> wins (same precedence as the shadow
-		// reader). Apply the disable-only shape gate to ITS own value — no merge.
-		return mimoCodeMapDefinesDisableOnly(m, name), nil
+// mimoCodeReadManagedPlistDisableOnly reports whether the SPECIFIC macOS Managed
+// Preferences (MDM) plist at `plist` carries a bare {enabled:false} ENABLE-ONLY overlay
+// for mcp.<name> (bot PR #425 FINDING 2). It classifies the SELECTED plist — the one
+// mimoCodeManagedLayerShadows / mimoCodeReadManagedPrefs ALREADY CHOSE as the shadow
+// source (pinned by mimoCodeShadowSource.PlistFile) — NOT a fresh top-of-list re-scan.
+// This is the FINDING 2 fix: a dual-plist host (per-user {enabled:true} + system
+// disable-only for the same name) has the SHADOW-AWARE reader skip the higher
+// non-shadowing per-user plist and select the LOWER system disable-only plist; a re-scan
+// that stopped at the FIRST plist merely DEFINING the name would classify the per-user
+// {enabled:true} plist (verdict false) and wrongly treat the LOWER actual disable-only
+// shadow as active retention. Classifying shadow.PlistFile keeps the disable-only verdict
+// CONSISTENT with the shadow reader's own selection BY CONSTRUCTION.
+//
+// It reads the plist's OWN value directly via the SAME plutil read + JSONC parse as the
+// shadow reader mimoCodeReadManagedPrefs (no merge with the managed config dir, no
+// func-var value chain), then applies the shared shape gate mimoCodeMapDefinesDisableOnly.
+// An empty `plist` (no managed shadow source) → (false, nil). Warn-skip-on-unparseable
+// matches the shadow reader's posture (an unconvertible/unparseable plist is treated as
+// "no disable-only overlay" — it cannot be PROVEN to carry one); the test seam is
+// mimoCodeManagedPrefsDisableOnlyReader.
+func mimoCodeReadManagedPlistDisableOnly(plist, name string) (bool, error) {
+	if plist == "" {
+		return false, nil // no selected managed plist source
 	}
-	return false, nil
+	if _, err := os.Stat(plist); err != nil {
+		return false, nil // not present — cannot be PROVEN disable-only
+	}
+	out, err := exec.Command("plutil", "-convert", "json", "-o", "-", plist).Output()
+	if err != nil {
+		return false, nil // plutil convert failed — warn-skip
+	}
+	m, err := parseJSONCBytes(out)
+	if err != nil {
+		return false, nil // unparseable converted JSON — warn-skip
+	}
+	// Apply the disable-only shape gate to the SELECTED plist's own value — no merge,
+	// no re-scan.
+	return mimoCodeMapDefinesDisableOnly(m, name), nil
 }
 
-// mimoCodeReadManagedPrefsEnableOnlyTrue is the enable-ONLY-TRUE-polarity sibling of
-// mimoCodeReadManagedPrefsDisableOnly (bot PR #425 follow-up FINDING 1 — conservative
+// mimoCodeReadManagedPrefsEnableOnlyTrue is the enable-ONLY-TRUE-polarity sibling of the
+// disable-only managed classifier (bot PR #425 follow-up FINDING 1 — conservative
 // cleanup guard). It reports whether the macOS Managed Preferences (MDM) plist carries
-// a bare {enabled:true} ENABLE-ONLY overlay for mcp.<name>. It reads the SINGLE MDM
-// layer's OWN value directly via the SAME plist-path resolution + plutil read + JSONC
-// parse as mimoCodeReadManagedPrefsDisableOnly (single owner mimoCodeManagedPlistFiles,
-// no merge with the managed config dir, no func-var value chain), then applies the
-// shared enable-only-true shape gate mimoCodeMapDefinesEnableOnlyTrue on the FIRST plist
-// that defines mcp.<name>.
+// a bare {enabled:true} ENABLE-ONLY overlay for mcp.<name>. It reads the MDM layer's OWN
+// value directly via the SAME plist-path resolution + plutil read + JSONC parse as the
+// shadow reader mimoCodeReadManagedPrefs (single owner mimoCodeManagedPlistFiles, no merge
+// with the managed config dir, no func-var value chain), then applies the shared
+// enable-only-true shape gate mimoCodeMapDefinesEnableOnlyTrue on the FIRST plist that
+// defines mcp.<name>. (Unlike the FINDING-2 disable-only classifier, this enable-only-TRUE
+// over-block guard is consumer-side conservatism, not a shadow-selection agreement, so it
+// keeps the first-defining scan — there is no selected-shadow plist to thread here.)
 //
 // Consumed by mimoCodeManagedEnableOnlyTrueOverlay (the managed half of the two simulate
 // consumers' conservative guard): a managed enable-only:true overlay re-activates a lower
@@ -3013,14 +3016,17 @@ func (o *mimoCodeClient) RemoveEntry(name string) error {
 // enabled-only:TRUE overlay upstream (it never returns a shadow for it), so in
 // practice this returns true only for the disable-only ({enabled:false}) stub.
 //
-// The macOS Managed Preferences (MDM) "managed" kind reads its OWN plist value via
-// the disable-only seam (mimoCodeReadManagedPrefsDisableOnly, bot PR #425 follow-up
-// FINDING 1): a disable-only MDM overlay ({enabled:false} with no type/command/url)
-// DISABLES the server, so once the write-target key is gone it retains NO active
-// server and the removal succeeded — it must NOT keep failing loud. (The prior code
-// treated every "managed" kind as NOT disable-only, which made RemoveEntry refuse to
-// delete a write-target entry a disable-only MDM overlay was actually disabling — the
-// FINDING 1 regression.) mimoCodeManagedLayerReResolves (the RemoveEntry managed
+// The macOS Managed Preferences (MDM) "managed" kind classifies the SELECTED plist's
+// OWN value (mimoCodeReadManagedPlistDisableOnly over shadow.PlistFile, bot PR #425
+// FINDING 2 — NOT a fresh re-scan): a disable-only MDM overlay ({enabled:false} with no
+// type/command/url) DISABLES the server, so once the write-target key is gone it retains
+// NO active server and the removal succeeded — it must NOT keep failing loud. The prior
+// FINDING 1 code treated every "managed" kind as NOT disable-only (making RemoveEntry
+// refuse to delete a write-target entry a disable-only MDM overlay was actually
+// disabling); the FINDING 2 follow-up classifies the SAME plist mimoCodeManagedLayerShadows
+// selected (a re-scan that stopped at the first NAME-DEFINING plist could classify a
+// HIGHER non-shadowing {enabled:true} plist on a dual-plist host and wrongly treat the
+// LOWER disable-only shadow as active retention). mimoCodeManagedLayerReResolves (the RemoveEntry managed
 // pre-check) reuses THIS SAME classifier to subtract the disable-only case from a managed
 // shadow, so the pre-check and this B4 post-delete guard stay mutually consistent BY
 // CONSTRUCTION (one disable-only owner, no divergent merge). A reader error propagates
@@ -3047,14 +3053,26 @@ func (o *mimoCodeClient) mimoCodeShadowIsDisableOnlyOverride(shadow mimoCodeShad
 		}
 		return mimoCodeIsEnabledOnlyOverride(v), nil
 	case "managed":
-		// macOS Managed Preferences (MDM) plist — read ITS own value via the
-		// disable-only seam (FINDING 1): a bare {enabled:false} MDM overlay is
-		// disable-only → retains NO active server once the write target is gone.
-		reader := mimoCodeManagedPrefsDisableOnlyReader
-		if reader == nil {
-			reader = mimoCodeReadManagedPrefsDisableOnly
+		// macOS Managed Preferences (MDM) plist — classify the SELECTED plist's own value
+		// (bot PR #425 FINDING 2). The shadow source `shadow` is the plist
+		// mimoCodeManagedLayerShadows already CHOSE (the SHADOW-AWARE reader skips a
+		// higher non-shadowing {enabled:true} plist and selects the LOWER plist that
+		// actually shadows), and shadow.PlistFile pins it. The disable-only classifier
+		// MUST agree with THAT selection. A test seam (mimoCodeManagedPrefsDisableOnlyReader),
+		// when set, owns the verdict directly (it stands in for the whole MDM read on a
+		// non-darwin runner, so there is no real plist to thread). In production the seam
+		// is nil and we classify shadow.PlistFile's OWN value directly — NOT a fresh
+		// top-of-list re-scan. The prior FINDING-1 code re-scanned from the top and stopped
+		// at the FIRST plist that merely DEFINED the name, which on a dual-plist host
+		// (per-user {enabled:true} + system disable-only) is the HIGHER non-shadowing
+		// per-user plist → it returned false and the LOWER actual disable-only shadow was
+		// wrongly treated as active retention (the FINDING 2 regression). Classifying the
+		// SELECTED plist makes the disable-only verdict consistent with the shadow reader's
+		// own selection BY CONSTRUCTION.
+		if reader := mimoCodeManagedPrefsDisableOnlyReader; reader != nil {
+			return reader(name)
 		}
-		return reader(name)
+		return mimoCodeReadManagedPlistDisableOnly(shadow.PlistFile, name)
 	default:
 		// Any unexpected kind: not classified as disable-only — keep the conservative
 		// fail-loud.
@@ -3528,10 +3546,12 @@ func (o *mimoCodeClient) mimoCodeManagedEnableOnlyTrueOverlay(name string) (bool
 //
 //   - a managed enable-only:true overlay is present (mimoCodeManagedEnableOnlyTrueOverlay),
 //     AND
-//   - after the write-target key is removed, the FILE merge still defines a CONTENT-BEARING
-//     (type/command/url-bearing) entry for mcp.<name> (mimoCodeMapDefinesContentBearing over
-//     readMergedLayersExcluding) — i.e. a lower layer supplies the command the managed
-//     enable flips back ON.
+//   - after the write-target key is removed AND the name entry is re-enabled (modeling the
+//     managed enable flipping it ON), the FILE merge still defines a survivor OF THE
+//     CLEANUP'S OWN CONSUMER SHAPE for mcp.<name> (mimoCodeNameInActiveSet over
+//     readMergedLayersExcluding for the given consumer — collectStdioEntries for stdio,
+//     findLanguageServerStdioInMap for LSP) — i.e. a lower layer supplies a stdio/LSP command
+//     of the cleanup's shape that the managed enable flips back ON.
 //
 // This is DELIBERATELY NARROWER than the register-grain candidate methods'
 // over-blocking mimoCodeManagedEnableOnlyTrueOverlay-only guard. The register grain
@@ -3544,14 +3564,38 @@ func (o *mimoCodeClient) mimoCodeManagedEnableOnlyTrueOverlay(name string) (bool
 // and TestMimoCode_Followup_ManagedEnableTrue_NoLowerContent_StaysRemovable, so this guard
 // fires ONLY when a re-activatable lower survivor actually exists.
 //
-// Why branch (b) misses this without the guard: readMergedLayersExcluding does NOT fold the
-// managed layer (managed is detect-only), so it sees the lower entry as {command,
-// enabled:false} → mimoCodeDropDisabled drops it → the active-set survivor reads FALSE; and
-// the managed OR (mimoCodeManagedLayerReResolves) returns FALSE for an enable-only overlay
-// (Kind=="", PATH-B). So branch (b) reports removable while PRODUCTION leaves the server
-// active (lower command + managed enable). A readJSON/managed-reader/parse error propagates
-// fail-closed (the destructive consumer aborts and deletes nothing).
-func (o *mimoCodeClient) mimoCodeManagedEnableOnlyReactivatesLowerSurvivor(name string) (bool, error) {
+// CONSUMER SHAPE (bot PR #425 FINDING 3). The lower survivor must match THE CLEANUP'S OWN
+// CONSUMER SHAPE, not any content-bearing value. A plain mimoCodeMapDefinesContentBearing
+// over the post-removal merge matches a lower REMOTE entry or a DIFFERENT stdio command —
+// so for the stdio cleanup over a write-target gopls it would wrongly fire on a disabled
+// lower REMOTE survivor (which the managed enable would re-activate as a REMOTE server, NOT
+// a stdio one the stdio cleanup is removing), and for the LSP cleanup it would fire on a
+// non-mcp-language-server stdio survivor. Deleting the write-target key then leaves NO
+// matching direct-stdio / direct-LSP survivor of the cleanup's shape, so the entry WAS
+// removable — over-blocking it is a false negative. So the guard threads the `consumer` and
+// applies the SAME survivor filter the cleanup uses (collectStdioEntries for stdio via
+// reResolveConsumerStdio, findLanguageServerStdioInMap for LSP via reResolveConsumerLSP),
+// through the single owner mimoCodeNameInActiveSet — the SAME computation that decided the
+// name was a candidate. The guard fires ONLY when the managed enable re-activates a survivor
+// OF THE CLEANUP'S OWN SHAPE.
+//
+// Why the survivor must be re-enabled before the shape test: readMergedLayersExcluding does
+// NOT fold the managed layer (managed is detect-only), so it sees the lower entry as
+// {command, enabled:false}. The MANAGED {enabled:true} overlay (already confirmed present
+// above) is exactly what flips it ON in PRODUCTION, so to model the post-delete reality the
+// guard re-enables the name entry (strips its `enabled` flag on a COPY) before applying the
+// active-set survivor filter — otherwise mimoCodeDropDisabled / the consumer filters would
+// drop the disabled lower entry and the guard could never fire. The re-enable is scoped to
+// the SINGLE name on a COPY (mimoCodeReEnableNameOnCopy); the live merged maps are never
+// mutated.
+//
+// Why branch (b) misses this without the guard: branch (b)'s survivor
+// (mimoCodeNameInActiveSet over readMergedLayersExcluding) drops the disabled lower entry,
+// and the managed OR (mimoCodeManagedLayerReResolves) returns FALSE for an enable-only
+// overlay (Kind=="", PATH-B). So branch (b) reports removable while PRODUCTION leaves the
+// server active (lower command + managed enable). A readJSON/managed-reader/parse error
+// propagates fail-closed (the destructive consumer aborts and deletes nothing).
+func (o *mimoCodeClient) mimoCodeManagedEnableOnlyReactivatesLowerSurvivor(name string, consumer mimoCodeReResolveConsumer) (bool, error) {
 	overlay, err := o.mimoCodeManagedEnableOnlyTrueOverlay(name)
 	if err != nil {
 		return false, err
@@ -3563,7 +3607,49 @@ func (o *mimoCodeClient) mimoCodeManagedEnableOnlyReactivatesLowerSurvivor(name 
 	if err != nil {
 		return false, err
 	}
-	return mimoCodeMapDefinesContentBearing(mergedAfter, name), nil
+	// Re-enable the name entry on a COPY (the managed {enabled:true} overlay confirmed
+	// above flips it ON in production) so a disabled lower survivor is not dropped before
+	// the consumer-shape filter, then test the cleanup's OWN consumer shape.
+	reEnabled := mimoCodeReEnableNameOnCopy(mergedAfter, name)
+	return mimoCodeNameInActiveSet(reEnabled, name, consumer), nil
+}
+
+// mimoCodeReEnableNameOnCopy returns a view of `merged` in which the mcp.<name> entry has
+// its `enabled` key REMOVED (so mimoCodeDropDisabled / the consumer survivor filters treat
+// it as enabled — MiMoCode's default) — modeling a managed {enabled:true} overlay flipping a
+// lower {enabled:false} entry back ON. It is a SHALLOW, NAME-SCOPED copy: only the top-level
+// map, the mcp servers map, and the single `name` entry are copied; every OTHER entry and
+// nested value is shared by reference, and the LIVE merged maps are NEVER mutated (the
+// no-live-mutation invariant the re-resolve redesign pins). If the name is absent or its
+// value is not a map (a malformed scalar/array), `merged` is returned unchanged — the
+// downstream consumer-shape filter decides those by its own shape gate.
+func mimoCodeReEnableNameOnCopy(merged map[string]any, name string) map[string]any {
+	servers, _ := merged[mimoCodeMCPKey].(map[string]any)
+	entry, ok := servers[name].(map[string]any)
+	if !ok {
+		return merged // absent or non-map — nothing to re-enable; let the shape filter decide
+	}
+	if _, hasEnabled := entry["enabled"]; !hasEnabled {
+		return merged // already enabled-by-default — no copy needed
+	}
+	entryCopy := make(map[string]any, len(entry))
+	for k, v := range entry {
+		if k == "enabled" {
+			continue // drop the flag → enabled by MiMoCode default
+		}
+		entryCopy[k] = v
+	}
+	serversCopy := make(map[string]any, len(servers))
+	for k, v := range servers {
+		serversCopy[k] = v
+	}
+	serversCopy[name] = entryCopy
+	out := make(map[string]any, len(merged))
+	for k, v := range merged {
+		out[k] = v
+	}
+	out[mimoCodeMCPKey] = serversCopy
+	return out
 }
 
 // mimoCodeLowerLayerHardLinkedToWriteTargetDefines reports whether ANY read-layer file
@@ -3579,32 +3665,47 @@ func (o *mimoCodeClient) mimoCodeManagedEnableOnlyReactivatesLowerSurvivor(name 
 // cleanup falsely reported it cleared. Excluding such a candidate conservatively avoids
 // the false-cleanup.
 //
-// TRUE-HARD-LINK gate (bot PR #425 FINDING 1 correction). A naive os.Stat + os.SameFile is
-// WRONG here: os.Stat FOLLOWS symlinks, so a SYMLINK (or, on a case-insensitive volume, a
-// case-only alias) pointing AT the write target reports the SAME inode and would be
-// mis-classified as a hard link. But unlike a true hard link, such an alias is a POINTER
-// that FOLLOWS deleteMember's temp+rename — after the rename it resolves to the NEW file,
-// no OLD entry survives, so the name does NOT re-emerge and the candidate must NOT be
-// blocked. (Operators whose MIMOCODE_CONFIG / overlay file is a symlink to mimocode.json
-// would otherwise be unable to clean entries.) So before treating a lower file as a hard
-// link we os.Lstat BOTH the write target and the candidate and require BOTH to be REGULAR
-// files (mode has no os.ModeSymlink / os.ModeIrregular / etc.), then confirm the SAME
-// inode via os.SameFile over the Lstat'd FileInfo (raw inode identity — NOT the protected
-// mimoCodePathsSamePhysical, which folds symlink/case variants and is needed verbatim by
-// the four shadow-walk callers). A regular file is, by definition, not a symlink in its
-// own chain; two regular directory entries over one inode are precisely a hard link.
+// TRUE-HARD-LINK gate via FULL-PATH SYMLINK RESOLUTION (bot PR #425 FINDING 1 — COMPLETE
+// version). A naive os.Stat + os.SameFile is WRONG here: os.Stat FOLLOWS symlinks, so a
+// SYMLINK (or, on a case-insensitive volume, a case-only alias) pointing AT the write target
+// reports the SAME inode and would be mis-classified as a hard link. The earlier correction
+// used os.Lstat on BOTH ends, but os.Lstat only inspects the FINAL path component for a
+// symlink — it still FOLLOWS symlinks in the PARENT directory components. So a layer that
+// reaches the write target THROUGH A SYMLINKED PARENT DIR (e.g.
+// MIMOCODE_CONFIG=/dotfiles/mimocode/mimocode.json where /dotfiles/mimocode is a symlink to
+// ~/.config/mimocode) presents a REGULAR final file to os.Lstat, and os.SameFile then reports
+// the SAME inode — mis-classifying the symlinked-parent ALIAS as a TRUE hard link and wrongly
+// BLOCKING an otherwise-removable candidate. Like any symlink alias, such a path FOLLOWS
+// deleteMember's temp+rename (after the rename it resolves to the NEW file), so NO old entry
+// re-emerges and it must NOT block.
+//
+// So compare RESOLVED paths: filepath.EvalSymlinks(o.path) and filepath.EvalSymlinks(f)
+// resolve EVERY symlink in BOTH chains (parents AND the final component) plus the OS's own
+// case folding on a case-insensitive volume.
+//
+//   - Resolved paths EQUAL (filepath.Clean compare) → they name the SAME directory entry via
+//     a symlink ANYWHERE in the path (or a case-fold alias) → an ALIAS, NOT a hard link → skip
+//     (the candidate stays removable). This subsumes the earlier Lstat-final + the
+//     case-fold-probe checks into one correct full-path-resolution check.
+//   - Resolved paths DISTINCT → they are two genuinely-different directory entries; confirm a
+//     TRUE hard link via os.SameFile over the RESOLVED regular files (same inode, both
+//     regular). Two distinct directory entries over one inode are precisely a hard link, and
+//     production's temp+rename breaks it and leaves THIS file live → exclude conservatively.
+//   - EvalSymlinks ERROR on either path (non-existent / unreadable) → fail toward
+//     NOT-a-hard-link: do NOT block on a resolution error (the candidate stays removable). A
+//     genuinely-missing candidate cannot be a live lower layer that re-emerges. As a narrow
+//     fallback for the (rare) case where ONLY the candidate fails to resolve yet both raw
+//     paths exist as distinct regular entries over one inode, an unresolved os.SameFile over
+//     os.Lstat'd FileInfo still catches a real hard link — but the RESOLVED comparison above
+//     is the authoritative path.
+//
+// os.SameFile here is raw inode identity over the RESOLVED files — NOT the protected
+// mimoCodePathsSamePhysical, which is needed verbatim by the four shadow-walk callers. A
+// parse error while checking name-definition propagates fail-closed (the destructive caller
+// aborts).
 //
 // The clean-path inequality gate excludes the write target's OWN entry in readLayerFiles
-// (same path, trivially same inode) so only a DISTINCT entry flags. A CASE-ONLY alias of
-// the write target on a case-INSENSITIVE volume is ALSO the same directory entry (not a
-// distinct one), so it is skipped too (bot PR #425 FOLLOW-UP-2 FINDING 2): the exact
-// string compare is case-SENSITIVE and would miss it, leaving os.Lstat+os.SameFile to
-// MIS-CLASSIFY the same-entry alias as a hard link. The fold is gated on a volume PROBE
-// (mimoCodeCaseFoldedPathsSamePhysical) so a genuinely-distinct case-variant file on a
-// case-SENSITIVE volume still reaches the os.SameFile check. An Lstat failure on a
-// candidate layer is treated as "not hard-linked" (the file is absent / unreadable → it
-// cannot be a live lower layer that re-emerges); a parse error while checking
-// name-definition propagates fail-closed (the destructive caller aborts).
+// (same path, trivially same inode) so only a DISTINCT entry reaches the resolution compare.
 //
 // State-safe: in the explicit/temp single-file mode readLayerFiles returns only [o.path]
 // (the write target), which the clean-path gate skips, so the loop is a no-op and the
@@ -3626,47 +3727,65 @@ func (o *mimoCodeClient) mimoCodeLowerLayerHardLinkedToWriteTargetDefines(name s
 		return false, nil
 	}
 	cleanTarget := filepath.Clean(o.path)
+	// Resolve the write target's FULL path once (every symlink in its chain, parents
+	// included, plus OS case folding). An error leaves resolvedTarget == "" so the
+	// resolved-equality branch never spuriously matches a candidate (it falls through to
+	// the unresolved SameFile fallback instead).
+	resolvedTarget := ""
+	if r, err := filepath.EvalSymlinks(o.path); err == nil {
+		resolvedTarget = filepath.Clean(r)
+	}
 	for _, f := range o.readLayerFiles() {
 		cleanF := filepath.Clean(f)
 		if cleanF == cleanTarget {
 			continue // the write target's own entry — same path, not a DISTINCT hard link
 		}
-		// CASE-ALIAS skip (bot PR #425 FOLLOW-UP-2 FINDING 2). On a case-INSENSITIVE
-		// volume (Windows / default macOS) a layer path that differs from the write
-		// target ONLY by case (e.g. MIMOCODE.JSON vs mimocode.json) is the SAME
-		// directory entry, NOT a distinct one. The exact-string compare above misses it
-		// (filepath.Clean is case-SENSITIVE), so os.Lstat would return a regular file for
-		// both ends and os.SameFile would succeed → the same-entry alias would be
-		// MIS-CLASSIFIED as a true hard link and wrongly BLOCK an otherwise-removable
-		// candidate. Like a symlink, a case-only alias FOLLOWS deleteMember's temp+rename
-		// (it resolves to the renamed file), so NO old entry re-emerges → it must NOT
-		// block. Treat it as the write target itself: skip it. Gate the fold on a PROBE
-		// of the actual volume (mimoCodeCaseFoldedPathsSamePhysical, the same case-fold
-		// owner mimoCodePathsSamePhysical's finding-4 branch uses) rather than a blanket
-		// GOOS fold — a case-SENSITIVE volume (case-sensitive NTFS dir / case-sensitive
-		// APFS) where MIMOCODE.JSON and mimocode.json are genuinely distinct files (and an
-		// operator hard-linked them) still reaches the os.SameFile hard-link check below.
-		if strings.EqualFold(cleanF, cleanTarget) && mimoCodeCaseFoldedPathsSamePhysical(cleanF, cleanTarget) {
-			continue // a case-only alias of the write target on a case-insensitive volume — same entry
+		// FULL-PATH SYMLINK RESOLUTION (bot PR #425 FINDING 1 — complete version). Resolve
+		// the candidate's ENTIRE chain (parents AND final component) and compare to the
+		// resolved write target. If they resolve EQUAL the candidate is an ALIAS of the
+		// write target (a symlink ANYWHERE in the path — including a symlinked PARENT dir —
+		// or a case-fold alias on a case-insensitive volume), which FOLLOWS the temp+rename
+		// and leaves NO old entry → NOT a hard link → skip. This single check subsumes the
+		// former Lstat-final-component check and the case-fold probe.
+		if resolvedF, err := filepath.EvalSymlinks(f); err == nil {
+			if resolvedTarget != "" && filepath.Clean(resolvedF) == resolvedTarget {
+				continue // resolves to the SAME entry via a symlink/case-fold alias — not a hard link
+			}
+			// DISTINCT resolved paths: confirm a TRUE hard link by raw inode identity over
+			// the RESOLVED regular files. os.Stat follows no further symlinks (the path is
+			// already fully resolved); require BOTH to be regular.
+			fResolvedStat, ferr := os.Stat(resolvedF)
+			tResolvedStat, terr := os.Stat(resolvedTarget)
+			if ferr == nil && terr == nil &&
+				fResolvedStat.Mode().IsRegular() && tResolvedStat.Mode().IsRegular() &&
+				os.SameFile(tResolvedStat, fResolvedStat) {
+				defines, err := mimoCodeFileDefines(f, name)
+				if err != nil {
+					return false, err
+				}
+				if defines {
+					return true, nil
+				}
+			}
+			continue
 		}
+		// EvalSymlinks failed for the candidate (absent / unreadable / a broken symlink) —
+		// fail toward NOT-a-hard-link. As a narrow fallback, an unresolved os.Lstat +
+		// os.SameFile still catches a real hard link between two existing distinct regular
+		// directory entries (no symlink in either chain, so EvalSymlinks would have
+		// succeeded — meaning this fallback only runs when the candidate genuinely could
+		// not be resolved, e.g. a transient read error). A missing candidate Lstat-errs and
+		// is skipped.
 		fLstat, err := os.Lstat(f)
 		if err != nil {
 			continue // absent / unreadable lower layer — cannot re-emerge live
 		}
 		if !fLstat.Mode().IsRegular() {
-			// A SYMLINK or case-alias (or other non-regular) — it FOLLOWS the temp+rename
-			// to the new file, so NO old entry re-emerges. NOT a true hard link → do not
-			// block.
-			continue
+			continue // a symlink / non-regular — follows the rename, not a hard link
 		}
 		if !os.SameFile(targetLstat, fLstat) {
 			continue // distinct inode — not hard-linked to the write target
 		}
-		// This DISTINCT REGULAR file shares the write target's inode — a TRUE hard link
-		// (two regular directory entries, one inode, no symlink in either chain).
-		// Production's temp+rename breaks the link and leaves THIS file live, so if it
-		// defines the candidate name the entry re-emerges after RemoveEntry → exclude
-		// conservatively.
 		defines, err := mimoCodeFileDefines(f, name)
 		if err != nil {
 			return false, err
@@ -4078,8 +4197,10 @@ func (o *mimoCodeClient) RemovableStdioEntries() ([]StdioEntry, error) {
 		//   NARROWER than the register grain's over-blocking guard, because the CLI's FULL
 		//   file survivor (branch (b)) means an unconditional over-block would wrongly drop a
 		//   genuinely-removable entry whose content lives ONLY in the write target (the
-		//   no-lower case, pinned removable by the CLAIM-2 followup tests).
-		managedEnableReactivates, err := o.mimoCodeManagedEnableOnlyReactivatesLowerSurvivor(e.Name)
+		//   no-lower case, pinned removable by the CLAIM-2 followup tests). The guard applies
+		//   THIS consumer's stdio survivor shape (bot PR #425 FINDING 3) so a disabled lower
+		//   REMOTE / non-stdio survivor does not falsely exclude a removable stdio entry.
+		managedEnableReactivates, err := o.mimoCodeManagedEnableOnlyReactivatesLowerSurvivor(e.Name, reResolveConsumerStdio)
 		if err != nil {
 			return nil, err
 		}
@@ -4434,8 +4555,10 @@ func (o *mimoCodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 		// re-activatable lower content-bearing survivor actually exists — NARROWER than the
 		// register grain's over-blocking guard, because the CLI's FULL file survivor means an
 		// unconditional over-block would wrongly drop a genuinely-removable entry whose
-		// content lives only in the write target (the no-lower case).
-		managedEnableReactivates, err := o.mimoCodeManagedEnableOnlyReactivatesLowerSurvivor(e.Name)
+		// content lives only in the write target (the no-lower case). The guard applies THIS
+		// consumer's LSP survivor shape (bot PR #425 FINDING 3) so a disabled lower REMOTE /
+		// non-mcp-language-server stdio survivor does not falsely exclude a removable LSP entry.
+		managedEnableReactivates, err := o.mimoCodeManagedEnableOnlyReactivatesLowerSurvivor(e.Name, reResolveConsumerLSP)
 		if err != nil {
 			return nil, err
 		}

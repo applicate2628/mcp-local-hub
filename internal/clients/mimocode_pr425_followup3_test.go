@@ -69,8 +69,9 @@ func TestMimoCode_CleanupGuardF3_F1_CLIManagedEnableOverLowerDisabled_StdioExclu
 	writeMimoFile(t, filepath.Join(dir, "config.json"), `{"mcp":{"gopls":`+goplsStdioDisabled+`}}`)
 	o := &mimoCodeClient{path: writeTargetPath}
 
-	// The conditioned detector reports the re-activatable lower survivor.
-	reactivates, err := o.mimoCodeManagedEnableOnlyReactivatesLowerSurvivor("gopls")
+	// The conditioned detector reports the re-activatable lower survivor (stdio consumer
+	// shape — the lower disabled gopls IS a stdio command, bot PR #425 FINDING 3).
+	reactivates, err := o.mimoCodeManagedEnableOnlyReactivatesLowerSurvivor("gopls", reResolveConsumerStdio)
 	if err != nil {
 		t.Fatalf("mimoCodeManagedEnableOnlyReactivatesLowerSurvivor: %v", err)
 	}
@@ -128,7 +129,7 @@ func TestMimoCode_CleanupGuardF3_F1_CLIManagedEnableNoLower_StaysRemovable(t *te
 		`{"mcp":{"gopls":`+followupStdioGopls+`,"mls":`+stdioLSEnabled+`}}`)
 	o := &mimoCodeClient{path: writeTargetPath}
 
-	reactivates, err := o.mimoCodeManagedEnableOnlyReactivatesLowerSurvivor("gopls")
+	reactivates, err := o.mimoCodeManagedEnableOnlyReactivatesLowerSurvivor("gopls", reResolveConsumerStdio)
 	if err != nil {
 		t.Fatalf("mimoCodeManagedEnableOnlyReactivatesLowerSurvivor: %v", err)
 	}
