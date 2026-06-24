@@ -2025,6 +2025,18 @@ section[data-section] button.btn-danger:not(:disabled):hover {
 .lsp-chip-via-hub { background: #c8e6c9; color: #1b5e20; }
 .lsp-chip-direct  { background: #fff9c4; color: #795548; }
 .lsp-chip-legacy  { background: #ffcdd2; color: #b71c1c; }
+/* projects-mechanism-badge is the NEUTRAL provenance label chip in the
+   Projects detail-lens section headers ("workspace"/"project-config"/"group").
+   It mirrors the .lsp-chip border/padding but is deliberately NOT a routing
+   color (no green via-hub): it is a label, not a chip value. Uses theme tokens
+   so it stays legible on both light and dark themes. */
+.projects-mechanism-badge {
+  display: inline-block; padding: 0 0.4rem; margin: 0 0.1rem;
+  border-radius: 4px; font-size: 0.75rem; font-weight: 500;
+  vertical-align: middle;
+  background: var(--sidebar-bg); color: var(--text-muted);
+  border: 1px solid var(--border);
+}
 /* Projects screen (epic area 6 P1) — read-only per-project lens. The
    workspace-tools table mirrors the .servers-matrix border/padding idiom so
    the [A] section reads consistently with the global matrix it complements. */

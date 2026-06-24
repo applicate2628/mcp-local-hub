@@ -76,6 +76,17 @@ describe("canonicalProjectKey", () => {
   it("returns empty for a blank path", () => {
     expect(canonicalProjectKey("   ", false)).toBe("");
   });
+  it("preserves the double leading slash of a UNC path", () => {
+    // \\server\share\proj → //server/share/proj — the host must NOT collapse
+    // into a path segment (a single-slash collapse would corrupt the key).
+    expect(canonicalProjectKey("\\\\server\\share\\proj", false)).toBe(
+      "//server/share/proj",
+    );
+    // ..-resolution still works under the UNC root and the // is kept.
+    expect(canonicalProjectKey("//server/share/a/../b", false)).toBe(
+      "//server/share/b",
+    );
+  });
 });
 
 describe("ProjectsScreen — list view", () => {
@@ -138,7 +149,7 @@ describe("ProjectsScreen — list view", () => {
     expect(summary?.textContent).toContain("project-config");
   });
 
-  it("renders the list even when /api/groups fails (per-endpoint isolation)", async () => {
+  it("renders the list with an UNKNOWN group indicator (not '0 groups') when /api/groups fails", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
         "/api/workspaces": () =>
@@ -152,9 +163,19 @@ describe("ProjectsScreen — list view", () => {
     // error+Retry screen).
     await waitFor(() => expect(screen.queryByTestId("projects-list")).toBeTruthy());
     expect(screen.queryByTestId("projects-error")).toBeNull();
+
+    // The groups-load failure is surfaced (not silently dropped) AND the
+    // per-card group count reads "? groups (load failed)", NOT a misleading
+    // "0 groups" indistinguishable from a real-empty groups.yaml.
+    const grErr = screen.getByTestId("projects-groups-error");
+    expect(grErr.textContent).toContain("Could not load groups");
+    const cards = screen.getAllByTestId(/^projects-row-/);
+    const summary = cards[0].querySelector('[data-testid^="projects-summary-"]');
+    expect(summary?.textContent).toContain("? groups (load failed)");
+    expect(summary?.textContent).not.toContain("0 group");
   });
 
-  it("shows the full error+Retry only when BOTH endpoints fail", async () => {
+  it("shows the full error+Retry with BOTH errors only when BOTH endpoints fail", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
         "/api/workspaces": () => jsonResponse(500, { error: "ws boom", code: "X" }),
@@ -165,6 +186,14 @@ describe("ProjectsScreen — list view", () => {
     render(<ProjectsScreen />);
     await waitFor(() => expect(screen.queryByTestId("projects-load-error")).toBeTruthy());
     expect(screen.getByText("Retry")).toBeTruthy();
+    // BOTH the workspace error AND the groups error are surfaced — the groups
+    // error must not be dropped from the both-failed block.
+    expect(screen.getByTestId("projects-load-error-workspaces").textContent).toContain(
+      "ws boom",
+    );
+    expect(screen.getByTestId("projects-load-error-groups").textContent).toContain(
+      "gr boom",
+    );
   });
 });
 
@@ -227,6 +256,50 @@ describe("ProjectsScreen — detail lens", () => {
     );
     // The "manage in Groups →" cross-link.
     expect(screen.getByTestId("projects-manage-groups")).toBeTruthy();
+  });
+
+  it("renders legacy-lsp as the red 'legacy' chip (not green via-hub) and an unknown backend as no chip", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/workspaces": () =>
+          jsonResponse(
+            200,
+            workspacesBody([
+              // The deprecated direct-LSP backend must read as the OLD path.
+              wsEntry({
+                workspace_path: "/home/x/legacyproj",
+                language: "go",
+                backend: "legacy-lsp",
+                client_entries: { "claude-code": "legacy-lsp-go" },
+              }),
+              // An unknown non-empty backend must NOT be fabricated into a
+              // green via-hub chip — it renders no chip ("—").
+              wsEntry({
+                workspace_path: "/home/x/legacyproj",
+                language: "ruby",
+                backend: "some-future-backend",
+                client_entries: { "claude-code": "x" },
+              }),
+            ]),
+          ),
+        "/api/groups": () => jsonResponse(200, groupsBody([])),
+      }) as unknown as typeof fetch,
+    );
+
+    const key = canonicalProjectKey("/home/x/legacyproj", false);
+    render(<ProjectsScreen route={routeWithPath(key)} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-detail")).toBeTruthy());
+
+    // legacy-lsp → the red lsp-chip-legacy class with the "legacy" label.
+    const legacyChip = screen.getByTestId("projects-chip-go-claude-code");
+    expect(legacyChip.className).toContain("lsp-chip-legacy");
+    expect(legacyChip.className).not.toContain("lsp-chip-via-hub");
+    expect(legacyChip.textContent).toContain("legacy");
+
+    // unknown backend → no chip at all (the routing cell shows the "—" empty).
+    expect(screen.queryByTestId("projects-chip-ruby-claude-code")).toBeNull();
+    const rubyRow = screen.getByTestId("projects-workspace-row-ruby");
+    expect(rubyRow.querySelector(".lsp-cell-empty")?.textContent).toBe("—");
   });
 
   it("shows the workspace empty-state when the selected path has no entries", async () => {

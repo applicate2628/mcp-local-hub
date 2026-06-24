@@ -85,7 +85,10 @@ export function canonicalProjectKey(rawPath: string, windows = isWindowsHost()):
   p = p.replace(/\\/g, "/");
   // filepath-clean equivalent: collapse runs of slashes, resolve `.` and `..`
   // segments. Preserve a leading slash (POSIX root) and a leading drive
-  // (`C:`) verbatim.
+  // (`C:`) verbatim. A leading `//` is a UNC root (`\\server\share` →
+  // `//server/share`) and MUST keep BOTH slashes — collapsing it to a single
+  // `/server/share` would silently rewrite the host into a path segment.
+  const isUNC = p.startsWith("//");
   const hasLeadingSlash = p.startsWith("/");
   const segments = p.split("/");
   const out: string[] = [];
@@ -102,7 +105,8 @@ export function canonicalProjectKey(rawPath: string, windows = isWindowsHost()):
     }
     out.push(seg);
   }
-  let cleaned = (hasLeadingSlash ? "/" : "") + out.join("/");
+  const prefix = isUNC ? "//" : hasLeadingSlash ? "/" : "";
+  let cleaned = prefix + out.join("/");
   if (cleaned === "") cleaned = hasLeadingSlash ? "/" : ".";
   // Strip a trailing slash (except the bare root "/").
   if (cleaned.length > 1 && cleaned.endsWith("/")) cleaned = cleaned.slice(0, -1);
@@ -114,11 +118,17 @@ export function canonicalProjectKey(rawPath: string, windows = isWindowsHost()):
 // reused lsp-chip variants. Router-backed backends (the per-language
 // mcp-language-server router, the go-specific gopls-mcp router, and serena's
 // dynamic-pool proxy) route through the hub LSP router → "via-hub". A bare
-// legacy direct-stdio entry is "direct". Unknown/blank → null (render "—").
+// legacy direct-stdio entry is "direct". The deprecated `legacy-lsp` backend
+// (the old direct-LSP path the router replaced — see admission_check_test.go's
+// Backend:"legacy-lsp") is "legacy", rendered with the red lsp-chip-legacy
+// class so the operator sees it is the OLD path, not a healthy via-hub route.
+// Unknown/blank → null (render "—"). An unknown NON-empty backend must NOT be
+// fabricated into a green via-hub chip — we honestly render no chip rather than
+// guess routing the registry never told us.
 //
 // This is the honest mapping from what /api/workspaces actually carries; it is
 // NOT the live-scan per-client transport probe the Servers matrix runs.
-function routingChipForBackend(backend: string): "via-hub" | "direct" | null {
+function routingChipForBackend(backend: string): "via-hub" | "direct" | "legacy" | null {
   switch ((backend || "").trim()) {
     case "mcp-language-server":
     case "gopls-mcp":
@@ -127,8 +137,10 @@ function routingChipForBackend(backend: string): "via-hub" | "direct" | null {
     case "stdio":
     case "direct":
       return "direct";
+    case "legacy-lsp":
+      return "legacy";
     default:
-      return backend.trim() === "" ? null : "via-hub";
+      return null;
   }
 }
 
@@ -276,12 +288,21 @@ export function ProjectsScreen({ route }: ProjectsScreenProps): preact.JSX.Eleme
   }
 
   if (bothFailed) {
+    // Both endpoints failed — surface BOTH errors (dropping the groups error
+    // here would hide half the diagnosis).
+    const wsErr = state.workspaces.ok ? "" : state.workspaces.error;
+    const grErr = state.groups.ok ? "" : state.groups.error;
     return (
       <section class="projects-screen" data-testid="projects-error">
         <h1>Projects</h1>
         <p class="settings-error" data-testid="projects-load-error">
-          Could not load projects:{" "}
-          {state.workspaces.ok ? "" : (state.workspaces as { error: string }).error}
+          Could not load projects.
+        </p>
+        <p class="settings-error" data-testid="projects-load-error-workspaces">
+          Workspace tools: {wsErr}
+        </p>
+        <p class="settings-error" data-testid="projects-load-error-groups">
+          Groups: {grErr}
         </p>
         <button type="button" class="btn" onClick={() => void load()}>
           Retry
@@ -309,6 +330,7 @@ export function ProjectsScreen({ route }: ProjectsScreenProps): preact.JSX.Eleme
       projects={projects}
       groups={groups}
       workspacesError={state.workspaces.ok ? null : state.workspaces.error}
+      groupsError={state.groups.ok ? null : state.groups.error}
       onRetry={() => void load()}
     />
   );
@@ -320,11 +342,13 @@ function ProjectList({
   projects,
   groups,
   workspacesError,
+  groupsError,
   onRetry,
 }: {
   projects: Project[];
   groups: GroupDTO[];
   workspacesError: string | null;
+  groupsError: string | null;
   onRetry: () => void;
 }): preact.JSX.Element {
   return (
@@ -347,6 +371,16 @@ function ProjectList({
         </p>
       )}
 
+      {groupsError !== null && (
+        <p class="settings-error" data-testid="projects-groups-error" role="alert">
+          Could not load groups: {groupsError} — the per-card group count below
+          reads &ldquo;? groups&rdquo; (load failed), not 0.{" "}
+          <button type="button" class="btn text-xs" onClick={onRetry}>
+            Retry
+          </button>
+        </p>
+      )}
+
       {projects.length === 0 ? (
         <p class="empty-state" data-testid="projects-empty">
           No projects yet. Register a project to manage its MCP servers
@@ -359,7 +393,13 @@ function ProjectList({
             // Groups are not yet path-bound (P3), so every project lists ALL
             // groups in the detail lens; the per-card summary reflects the
             // global group count so the operator sees the mechanism exists.
-            const grCount = groups.length;
+            // When the groups fetch FAILED, render "? groups (load failed)"
+            // rather than a misleading "0 groups" — a real empty groups.yaml
+            // and a failed load must be visually distinguishable.
+            const grSummary =
+              groupsError !== null
+                ? "? groups (load failed)"
+                : `${groups.length} group${groups.length === 1 ? "" : "s"}`;
             return (
               <li
                 key={p.key}
@@ -380,7 +420,7 @@ function ProjectList({
                 >
                   {wsCount} workspace{wsCount === 1 ? "" : "s"} ·{" "}
                   {/* Project MCP config (Model B) is not wired in P1 → always — */}
-                  &mdash; project-config · {grCount} group{grCount === 1 ? "" : "s"}
+                  &mdash; project-config · {grSummary}
                 </p>
               </li>
             );
@@ -394,7 +434,10 @@ function ProjectList({
 // MechanismBadge is the right-aligned "backed by <file>" provenance label +
 // mechanism badge for a detail section (the anti-confusion rule). It tells the
 // operator exactly which on-disk mechanism owns this section so the three are
-// never confused for one another.
+// never confused for one another. The badge is a LABEL ("backed by …"), NOT a
+// routing-chip value — so it uses a NEUTRAL .projects-mechanism-badge class
+// (theme-token gray) rather than the green lsp-chip-via-hub, which would both
+// misread as a routing signal and wash out on the dark theme.
 function MechanismBadge({
   label,
   backedBy,
@@ -406,7 +449,7 @@ function MechanismBadge({
 }): preact.JSX.Element {
   return (
     <span class="flex items-center gap-2 text-xs text-app-muted" data-testid={testId}>
-      <span class="lsp-chip lsp-chip-via-hub">{label}</span>
+      <span class="projects-mechanism-badge">{label}</span>
       <span>
         backed by <code>{backedBy}</code>
       </span>

@@ -74,6 +74,24 @@ func TestValidate_Enum(t *testing.T) {
 	}
 }
 
+func TestValidate_DefaultScreen_IncludesProjects(t *testing.T) {
+	// The Projects nav screen (epic area 6 P1) must be selectable as the
+	// Settings → Appearance default screen — the frontend VALID_DEFAULT_SCREENS
+	// allow-list already accepts "projects" (app.tsx), so the backend enum must
+	// match or operators cannot save Projects as the default.
+	def := findDef("appearance.default_screen")
+	if def.Type != TypeEnum {
+		t.Fatal("appearance.default_screen must be TypeEnum")
+	}
+	if err := validate(def, "projects"); err != nil {
+		t.Fatalf("expected 'projects' to validate as a default_screen, got %v", err)
+	}
+	// Sanity: a bogus screen still rejects (the enum is a real allow-list).
+	if err := validate(def, "not-a-screen"); err == nil {
+		t.Fatal("expected a bogus default_screen value to be rejected")
+	}
+}
+
 func TestValidate_Int_Bounds(t *testing.T) {
 	def := findDef("gui_server.port")
 	if err := validate(def, "99"); err == nil {
