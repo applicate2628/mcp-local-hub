@@ -270,11 +270,20 @@ func TestV2MatlabRow_ProbeRequiresMatlabOnPATH(t *testing.T) {
 	// Cross-check the probe AGREES with the server's discovery: the row declares no
 	// args/env, so PATH is the only MATLAB discovery — the probe requires `matlab` on
 	// PATH, so it cannot pass where the server would fail to find MATLAB.
-	if len(e.Args) != 0 {
-		t.Fatalf("matlab row gained args %v — if it now passes --matlab-root, the probe's matlab-on-PATH requirement must be revisited", e.Args)
+	// Args MAY carry non-discovery flags (e.g. --disable-telemetry=true for privacy),
+	// but MUST NOT pass --matlab-root, which would move MATLAB discovery off PATH and
+	// invalidate the matlab-on-PATH probe requirement above.
+	for _, a := range e.Args {
+		if has([]string{a}, "--matlab-root") || (len(a) >= 13 && a[:13] == "--matlab-root") {
+			t.Fatalf("matlab row passes %q — discovery is no longer PATH-only; the probe's matlab-on-PATH requirement must be revisited", a)
+		}
 	}
-	if len(e.Env) != 0 {
-		t.Fatalf("matlab row gained env %v — if it now sets MW_MCP_SERVER_MATLAB_ROOT, the probe's matlab-on-PATH requirement must be revisited", e.Env)
+	// Telemetry-off is REQUIRED for the curated row (privacy parity with the ableton row).
+	if !has(e.Args, "--disable-telemetry=true") {
+		t.Fatalf("matlab row args %v MUST include --disable-telemetry=true (curated-row privacy default; matlab-mcp-server data-collection is on by default)", e.Args)
+	}
+	if _, ok := e.Env["MW_MCP_SERVER_MATLAB_ROOT"]; ok {
+		t.Fatalf("matlab row sets MW_MCP_SERVER_MATLAB_ROOT — discovery is no longer PATH-only; the probe's matlab-on-PATH requirement must be revisited")
 	}
 }
 
