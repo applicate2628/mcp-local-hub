@@ -94,29 +94,44 @@ func TestForce_HealthyIncumbent_KillFlagPrintsNoticeAndActivates(t *testing.T) {
 }
 
 // ---------------------------------------------------------------
-// Scenario 3: Stuck — bare --force shows diagnostic + opens folder
+// Scenario 3: Stuck — bare --force is PRINT-ONLY (Option C, bug
+// 2026-06-22-explorer-folder-window-orphan-flood). The diagnostic block
+// already prints the lock-folder path; auto-opening explorer.exe is the
+// highest-frequency trigger of the reveal-window flood, so it is gated
+// behind --reveal. Bare --force must NOT spawn the open-folder seam;
+// --force --reveal must.
 // ---------------------------------------------------------------
 
-func TestForce_StuckIncumbent_BareFlagShowsDiagnosticAndOpensFolder(t *testing.T) {
+// setupStuckForceFixture writes a pidport whose recorded PID is alive
+// (this test process) but whose port is closed, then pre-acquires the
+// flock so AcquireSingleInstance returns busy and --force routes to the
+// diagnostic path. Returns the temp dir for MCPHUB_GUI_TEST_PIDPORT_DIR
+// and registers flock cleanup on t.
+func setupStuckForceFixture(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	pidport := filepath.Join(dir, "gui.pidport")
 	const probablyClosedPort = 1
 	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d %d\n", os.Getpid(), probablyClosedPort)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Pre-acquire flock so AcquireSingleInstance returns busy.
 	fl := flock.New(pidport + ".lock")
 	if ok, _ := fl.TryLock(); !ok {
 		t.Fatal("could not pre-lock")
 	}
-	defer fl.Unlock()
+	t.Cleanup(func() { _ = fl.Unlock() })
+	return dir
+}
 
-	// Mock the open-folder seam.
+func TestForce_StuckIncumbent_BareFlagIsPrintOnly(t *testing.T) {
+	dir := setupStuckForceFixture(t)
+
+	// Mock the open-folder seam and assert it is NOT invoked.
 	prevSpawn := gui.OpenFolderSpawnForTest()
 	defer gui.RestoreOpenFolderSpawn(prevSpawn)
-	var spawnedName string
+	spawned := false
 	gui.SetOpenFolderSpawn(func(name string, args ...string) error {
-		spawnedName = name
+		spawned = true
 		return nil
 	})
 
@@ -136,8 +151,41 @@ func TestForce_StuckIncumbent_BareFlagShowsDiagnosticAndOpensFolder(t *testing.T
 	if !strings.Contains(out, "Cannot acquire") {
 		t.Errorf("expected diagnostic block; got %q", out)
 	}
+	if spawned {
+		t.Errorf("bare --force must be print-only; open-folder seam was invoked")
+	}
+}
+
+func TestForce_StuckIncumbent_RevealFlagOpensFolder(t *testing.T) {
+	dir := setupStuckForceFixture(t)
+
+	// Mock the open-folder seam and assert it IS invoked with --reveal.
+	prevSpawn := gui.OpenFolderSpawnForTest()
+	defer gui.RestoreOpenFolderSpawn(prevSpawn)
+	var spawnedName string
+	gui.SetOpenFolderSpawn(func(name string, args ...string) error {
+		spawnedName = name
+		return nil
+	})
+
+	var buf bytes.Buffer
+	c := newGuiCmdRealForTest()
+	c.SetOut(&buf)
+	c.SetArgs([]string{"--port", "0", "--no-browser", "--no-tray", "--force", "--reveal"})
+	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", dir)
+	err := c.Execute()
+	var fe interface{ ExitCode() int }
+	if !errors.As(err, &fe) {
+		t.Errorf("expected typed exit code error; got %v", err)
+	} else if fe.ExitCode() != 2 {
+		t.Errorf("exit code = %d, want 2", fe.ExitCode())
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Cannot acquire") {
+		t.Errorf("expected diagnostic block; got %q", out)
+	}
 	if spawnedName == "" {
-		t.Errorf("OpenFolderAt seam was not invoked")
+		t.Errorf("--force --reveal must open the lock folder; seam was not invoked")
 	}
 }
 

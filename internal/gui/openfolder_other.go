@@ -8,6 +8,11 @@ import (
 	"runtime"
 )
 
+// openFolderImpl reveals the file in the platform file manager. POSIX
+// launchers (xdg-open / open / `open -R`) delegate to the user's running
+// file manager and exit immediately, so there is never a per-open
+// persistent process — the reveal-window flood is a Windows-only
+// phenomenon under the SeparateProcess=1 setting.
 func openFolderImpl(path string) error {
 	dir := filepath.Dir(path)
 	if runtime.GOOS == "darwin" {

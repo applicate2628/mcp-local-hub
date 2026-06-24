@@ -5,6 +5,14 @@ import type { ScanResult, ScanEntry } from "../types";
 //   - viaHub: entries already routed through the hub (HTTP url pointing
 //     at localhost, or the antigravity/zed relay shape). Read-only display;
 //     Demigrate roll-back action only. Carry Managed=true.
+//   - viaHubInherited: entries routed through a hub loopback URL whose SOURCE
+//     is an import (~/.claude.json) or a below-write-target layer the hub never
+//     wrote (multi-layer adapter, currently only MiMoCode; backend classify
+//     "via-hub-inherited"). They ARE hub-routed but NOT hub-OWNABLE — the hub
+//     cannot demigrate them — so they render READ-ONLY (no Demigrate button),
+//     distinct from the demigratable viaHub bucket. They must NOT fall into the
+//     default DROP path below: that would HIDE these import-inherited rows from
+//     the "see all MCP servers" Discovery view entirely (the bug this fixes).
 //   - canMigrate: stdio entries whose server name matches a manifest
 //     in servers/. Pre-checked with Migrate-selected batch action.
 //   - unknown: stdio entries with no matching manifest. "Create
@@ -36,6 +44,9 @@ import type { ScanResult, ScanEntry } from "../types";
 // screen can render a collapsed "Dismissed" section instead of losing them.
 export interface MigrationGroups {
   viaHub: ScanEntry[];
+  // Hub-routed but NOT hub-ownable (import / below-write-target source). Read-only;
+  // rendered visible (NOT dropped) but never offered a Demigrate action. See header.
+  viaHubInherited: ScanEntry[];
   canMigrate: ScanEntry[];
   unknown: ScanEntry[];
   external: ScanEntry[];
@@ -56,6 +67,7 @@ export function groupMigrationEntries(
 ): MigrationGroups {
   const groups: MigrationGroups = {
     viaHub: [],
+    viaHubInherited: [],
     canMigrate: [],
     unknown: [],
     external: [],
@@ -67,6 +79,12 @@ export function groupMigrationEntries(
     switch (entry.status) {
       case "via-hub":
         groups.viaHub.push(entry);
+        break;
+      case "via-hub-inherited":
+        // Hub-routed but inherited from an import/below layer the hub never wrote:
+        // VISIBLE + read-only. Distinct from viaHub (NOT demigratable) and from the
+        // default drop (which would hide it from Discovery — the bug this fixes).
+        groups.viaHubInherited.push(entry);
         break;
       case "can-migrate":
         groups.canMigrate.push(entry);
@@ -97,6 +115,7 @@ export function groupMigrationEntries(
     }
   }
   groups.viaHub.sort(byName);
+  groups.viaHubInherited.sort(byName);
   groups.canMigrate.sort(byName);
   groups.unknown.sort(byName);
   groups.external.sort(byName);

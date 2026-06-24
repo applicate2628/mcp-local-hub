@@ -136,6 +136,7 @@ func newGuiCmdReal() *cobra.Command {
 		yes        bool
 		resetPort  bool
 		strictMode bool
+		reveal     bool
 	)
 	c := &cobra.Command{
 		Use:   "gui",
@@ -310,7 +311,10 @@ activates the first window and exits 0.`,
 				//     try handshake; on failure, exit 1 with concise
 				//     "rerun with --force" message (legacy).
 				//   - bare --force → run Probe, print structured
-				//     diagnostic, open lock folder, exit 2.
+				//     diagnostic, exit 2 (PRINT-ONLY; opening the lock
+				//     folder is opt-in via --force --reveal).
+				//   - --force --reveal → as bare --force, plus open the
+				//     lock folder in the file manager.
 				//   - --force --kill → KillRecordedHolder (with
 				//     three-part identity gate); on success continue
 				//     normal startup; on failure map Verdict to the
@@ -331,7 +335,7 @@ activates the first window and exits 0.`,
 						}
 						return forceExit(exitCode)
 					}
-					exitCode := runForceDiagnostic(ctx, cmd, pidportPath)
+					exitCode := runForceDiagnostic(ctx, cmd, pidportPath, reveal)
 					return forceExit(exitCode)
 				}
 				if err := gui.TryActivateIncumbent(pidportPath, 2*time.Second); err != nil {
@@ -363,14 +367,16 @@ activates the first window and exits 0.`,
 	c.Flags().IntVar(&port, "port", 0, "TCP port on 127.0.0.1 (0 = auto-pick from ephemeral)")
 	c.Flags().BoolVar(&noBrowser, "no-browser", false, "do not auto-launch a browser window")
 	c.Flags().BoolVar(&noTray, "no-tray", false, "do not show the system-tray icon")
-	c.Flags().BoolVar(&force, "force", false, "stuck-instance recovery: print diagnostic + open lock folder. Add --kill to terminate the recorded PID after a three-part identity gate.")
+	c.Flags().BoolVar(&force, "force", false, "stuck-instance recovery: print the diagnostic (PRINT-ONLY; add --reveal to also open the lock folder in the file manager). Add --kill to terminate the recorded PID after a three-part identity gate.")
 	c.Flags().BoolVar(&kill, "kill", false, "with --force: kill the recorded PID (image/argv/start-time gate); SIGKILL/TerminateProcess. The kernel releases the flock as a side effect.")
 	c.Flags().BoolVar(&yes, "yes", false, "with --force --kill or --reset-port: skip the confirmation prompt (required in non-interactive shells).")
 	c.Flags().BoolVar(&resetPort, "reset-port", false, "discard the persistent hub-mcp port (instance_id preserved) and emit credential-rotation guidance — does NOT start the server")
 	c.Flags().BoolVar(&strictMode, "strict-mode", false, "pass --strict-mode through to the supervisor process the GUI spawns (corp-managed Windows hosts; see CLAUDE.md \"Hardened state-file writes\")")
+	c.Flags().BoolVar(&reveal, "reveal", false, "during stuck-instance recovery, also open the lock folder in the file manager (off by default — the diagnostic already prints the path; opt in to avoid leaking a persistent explorer.exe window under the Windows 'launch folder windows in a separate process' option)")
 	_ = c.Flags().MarkHidden("force")
 	_ = c.Flags().MarkHidden("kill")
 	_ = c.Flags().MarkHidden("yes")
+	_ = c.Flags().MarkHidden("reveal")
 	return c
 }
 
@@ -994,14 +1000,25 @@ func runWorkspacePruneTicker(ctx context.Context, s *gui.Server, interval time.D
 	}
 }
 
-// runForceDiagnostic implements the bare `--force` flow: Probe,
-// print structured block, open lock folder, return exit code 2 (or
-// 0 on Healthy fall-through to handshake).
+// runForceDiagnostic implements bare `mcphub gui --force`: probe the
+// stuck incumbent and print the diagnostic, returning exit code 2 (or 0
+// on a Healthy fall-through to the handshake). The diagnostic block
+// already prints the lock-folder path, so opening that folder in the file
+// manager is an OPT-IN convenience gated behind --reveal.
 //
 // ctx is the signal-aware context from RunE so Ctrl+C/SIGTERM
 // during Probe (which makes a network call) cancels promptly.
 // (Codex iter-10 P2 #1.)
-func runForceDiagnostic(ctx context.Context, cmd *cobra.Command, pidportPath string) int {
+//
+// Default (reveal=false) is PRINT-ONLY — that print-only default is the
+// durable mitigation for the reveal-window orphan flood (bug
+// 2026-06-22-explorer-folder-window-orphan-flood): an empirical probe on
+// a SeparateProcess=1 host proved `explorer.exe /select,<path>` HANDS OFF
+// — the launched process exits within seconds and the persistent window
+// is a DIFFERENT, handed-off PID — so no reliable reaper exists. --reveal
+// is the opt-in that accepts ONE un-reapable persistent explorer.exe
+// window per invocation; repeated `--force` (no --reveal) leaks nothing.
+func runForceDiagnostic(ctx context.Context, cmd *cobra.Command, pidportPath string, reveal bool) int {
 	v := gui.Probe(ctx, pidportPath)
 	if v.Class == gui.VerdictHealthy {
 		// Healthy → fall through to TryActivateIncumbent (legacy
@@ -1014,7 +1031,9 @@ func runForceDiagnostic(ctx context.Context, cmd *cobra.Command, pidportPath str
 		return 0
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), formatDiagnostic(v, pidportPath))
-	_ = gui.OpenFolderAt(pidportPath)
+	if reveal {
+		_ = gui.OpenFolderAt(pidportPath)
+	}
 	return 2
 }
 

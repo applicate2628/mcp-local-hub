@@ -152,6 +152,101 @@ describe("perClientRouting", () => {
     );
     expect(r["claude-code"]).toBe("direct");
   });
+  it("INHERITED serena router http is via-hub-inherited (finding #1 frontend mirror)", () => {
+    // Mirrors the backend classify serena-router Inherited gate: an
+    // import-/below-write-target-sourced serena router cell is hub-routed but
+    // read-only — the hub cannot demigrate what it never wrote.
+    const r = perClientRouting(
+      { mimocode: { transport: "http", endpoint: "http://127.0.0.1:9125/serena/mcp", inherited: true } },
+      {},
+      true,
+      "serena",
+      [9121],
+      0, // unknown live port → degrade to port-agnostic, still the live (managed) path
+    );
+    expect(r.mimocode).toBe("via-hub-inherited");
+  });
+  it("INHERITED serena router http on the LIVE gui port is via-hub-inherited", () => {
+    const r = perClientRouting(
+      { mimocode: { transport: "http", endpoint: "http://127.0.0.1:9125/serena/mcp", inherited: true } },
+      {},
+      true,
+      "serena",
+      [9121],
+      9125, // live port matches the cell port → managed path → inherited tag applies
+    );
+    expect(r.mimocode).toBe("via-hub-inherited");
+  });
+  it("OWNED serena router cell stays via-hub (finding #1 regression guard)", () => {
+    const r = perClientRouting(
+      { mimocode: { transport: "http", endpoint: "http://127.0.0.1:9125/serena/mcp", inherited: false } },
+      {},
+      true,
+      "serena",
+      [9121],
+      0,
+    );
+    expect(r.mimocode).toBe("via-hub");
+  });
+  it("INHERITED serena router cell on a STALE port is direct (inheritance does not rescue a dead URL)", () => {
+    // Mirrors the backend: the inherited tag is applied ONLY on the live
+    // (managed) path; a stale-port serena router cell falls to direct
+    // regardless of inheritance, exactly like any stale-port cell.
+    const r = perClientRouting(
+      { mimocode: { transport: "http", endpoint: "http://127.0.0.1:9124/serena/mcp", inherited: true } },
+      {},
+      true,
+      "serena",
+      [9121],
+      9125, // gui re-bound to 9125; the 9124 entry is stale
+    );
+    expect(r.mimocode).toBe("direct");
+  });
+  it("tags a PORT-MATCHING hub loopback cell with inherited:true as via-hub-inherited", () => {
+    // Mirrors backend classify "via-hub-inherited": an import-/below-write-target
+    // sourced hub cell is hub-routed but read-only (the hub never wrote it).
+    const r = perClientRouting(
+      { mimocode: { transport: "http", endpoint: "http://127.0.0.1:9120/mcp", inherited: true } },
+      {},
+      true,
+      "time",
+      [9120],
+    );
+    expect(r.mimocode).toBe("via-hub-inherited");
+  });
+  it("a port-matching hub loopback cell with inherited:false stays via-hub (regression)", () => {
+    const r = perClientRouting(
+      { mimocode: { transport: "http", endpoint: "http://127.0.0.1:9120/mcp", inherited: false } },
+      {},
+      true,
+      "time",
+      [9120],
+    );
+    expect(r.mimocode).toBe("via-hub");
+  });
+  it("a port-matching hub loopback cell with inherited ABSENT stays via-hub (regression)", () => {
+    const r = perClientRouting(
+      { mimocode: { transport: "http", endpoint: "http://127.0.0.1:9120/mcp" } },
+      {},
+      true,
+      "time",
+      [9120],
+    );
+    expect(r.mimocode).toBe("via-hub");
+  });
+  it("an inherited hub cell at a NON-matching port is direct (mirrors backend, not via-hub-inherited)", () => {
+    // The backend only sets hasHubInherited inside its port-MATCH branch; a
+    // non-matching inherited cell falls to direct/external like any stale-port
+    // cell. The frontend must mirror that exactly.
+    const r = perClientRouting(
+      { mimocode: { transport: "http", endpoint: "http://127.0.0.1:9999/mcp", inherited: true } },
+      {},
+      true,
+      "time",
+      [9120],
+    );
+    expect(r.mimocode).toBe("direct");
+  });
   it("tags relay transport as via-hub (port check does not apply to relay)", () => {
     const r = perClientRouting({ "codex-cli": { transport: "relay" } });
     expect(r["codex-cli"]).toBe("via-hub");

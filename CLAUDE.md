@@ -1331,8 +1331,22 @@ secret-bearing state file; repair the file DACL/mode.
 
 If `mcphub gui` exits with the structured "Cannot acquire mcphub gui
 single-instance lock" block, run `mcphub gui --force` for the
-diagnostic — it also opens the lock folder in your file manager so
-the offending files are visible.
+diagnostic — it prints the lock-folder path. By default `--force` is
+PRINT-ONLY: it no longer auto-opens the lock folder in the file manager
+(bug `work-items/bugs/2026-06-22-explorer-folder-window-orphan-flood.md`
+— the one-shot CLI process cannot track/close the `explorer.exe` window
+it spawns, so repeated `--force` recoveries on a host with the Windows
+"Launch folder windows in a separate process" option leaked unbounded
+persistent `explorer.exe` windows). Add `--reveal` to also open the
+folder: `mcphub gui --force --reveal`. With `--reveal` the operator
+accepts one un-reapable persistent `explorer.exe` window per invocation:
+an empirical probe proved `explorer.exe /select` HANDS OFF (the launched
+process exits within seconds and the surviving window is a different,
+handed-off PID), so no reliable reaper exists — the print-only default is
+the durable mitigation. On a host with the separate-process option set,
+the GUI also emits a one-time
+`severity: warn, event: explorer-separate-process-detected` entry to
+`hub-mcp.log` naming the behavior.
 
 To recover automatically:
 

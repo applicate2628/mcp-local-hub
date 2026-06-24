@@ -561,6 +561,121 @@ func clientScanners() map[string]struct {
 	}
 }
 
+// presencePostProbe is a per-client hook that ADJUSTS the generic
+// probeClientConfigPresence verdict for a multi-layer client whose effective
+// presence cannot be decided from the registered scan path alone. It takes the
+// client id, the resolved config path, and the current verdict, and returns the
+// possibly promoted/downgraded verdict. A client without a hook is an identity
+// no-op. Same §9.2 drift-prevention shape as clientScanners: ScanFrom DISPATCHES
+// through the registry instead of inlining a named client.
+type presencePostProbe func(name, path, cur string) string
+
+// presencePostProbes maps a client id to its presence post-probe hook. Only
+// MiMoCode needs one today: the generic probe stats ONLY the registered scan
+// path (mimocode's WRITE target), but MiMoCode deep-merges lower layers
+// (config.json), the MIMOCODE_CONFIG file/overlay, an inline MIMOCODE_CONFIG_CONTENT
+// layer, and the ~/.claude.json import — so the effective presence may differ.
+// A client absent from this map keeps its generic verdict unchanged.
+func presencePostProbes() map[string]presencePostProbe {
+	return map[string]presencePostProbe{
+		"mimocode": mimoCodePresencePostProbe,
+	}
+}
+
+// mimoCodePresencePostProbe is the behavior-PRESERVING extraction of the inline
+// MiMoCode presence-promotion/downgrade block that used to sit in ScanFrom. It
+// takes the resolved mimocode config path and the current generic presence
+// verdict (`cur`) and returns the adjusted verdict. The three guards run in the
+// SAME order with the SAME intermediate re-checks as the original inline block —
+// the order is load-bearing (absent-promotion first, then the two "ok"-only
+// downgrades), so it must not be reordered:
+//
+//  1. ABSENT-STATE PROMOTION (bot PR #420 finding 2 + finding 1/4 refinements):
+//     only a promotable-absent verdict is upgraded; a stat-able regular layer,
+//     a parseable inline layer, or a parseable ~/.claude.json import promotes to
+//     "ok", a malformed inline-only layer promotes to "error", and the
+//     claude-import re-check re-tests isPromotableAbsentPresenceState so a
+//     just-set "error" is not overridden.
+//  2. NON-REGULAR ACTIVE LAYER downgrade (finding 4): an otherwise-"ok" verdict
+//     with a non-regular active layer is downgraded to "error" so one bad layer
+//     does not abort the whole scan.
+//  3. MALFORMED INLINE CONTENT downgrade (r17 finding B2): an otherwise-"ok"
+//     verdict with present-but-unparseable inline content is downgraded to
+//     "error" regardless of whether a file layer made it present.
+//
+// The caller guarantees path != "" (the dispatch is gated on a non-empty path),
+// matching the original inline `mp != ""` guard.
+func mimoCodePresencePostProbe(_ /*name*/, path, cur string) string {
+	if isPromotableAbsentPresenceState(cur) {
+		for _, lf := range clients.MimoCodeReadLayerPaths(path) {
+			if st, err := os.Stat(lf); err == nil && st.Mode().IsRegular() {
+				cur = "ok"
+				break
+			}
+		}
+		if cur != "ok" {
+			switch state, _ := clients.MimoCodeInlineContentState(path); state {
+			case "ok":
+				cur = "ok"
+			case "error":
+				// Malformed inline-only profile → loud config-error cell, not absent.
+				cur = "error"
+			}
+		}
+		// Claude-import-only profile (bot PR #420 finding 1, r15): no file layer and
+		// no inline content promoted it, but a parseable ~/.claude.json import yields
+		// servers MimoCodeMergedConfig would surface. Promote to "ok" so the row is
+		// scanned and shown. Re-check isPromotableAbsentPresenceState so a malformed
+		// inline that just set "error" above is NOT overridden (that fault must keep
+		// rendering the config-error cell).
+		if isPromotableAbsentPresenceState(cur) && clients.MimoCodeHasClaudeImport(path) {
+			cur = "ok"
+		}
+	}
+	// NON-REGULAR ACTIVE LAYER guard (bot PR #420 finding 4). The promotion above
+	// upgrades to "ok" on the FIRST regular layer it finds, and the generic probe
+	// classifies ONLY the write target — so a profile whose write target (or one
+	// promoting layer) is a regular file but ANOTHER active layer (config.json, the
+	// MIMOCODE_CONFIG file, or the overlay mimocode.json/.jsonc) is a
+	// directory/FIFO/non-regular would stay "ok". scanMimoCode then reads ALL
+	// layers via MimoCodeMergedConfig → readRawConfig returns a non-regular read
+	// error → ScanFrom fails the ENTIRE multi-client scan with `mimocode: ...`. To
+	// keep one bad mimo layer from taking the whole scan down, downgrade an
+	// otherwise-"ok" mimocode presence to the per-client config-error "error" state
+	// when ANY existing active layer is non-regular/unreadable — the same per-client
+	// config-error the write-target probe surfaces, rendering a loud cell and
+	// SKIPPING scanMimoCode (scanIfReadable gates on "ok") instead of aborting. Only
+	// an "ok" verdict is downgraded: a genuinely absent/missing verdict is left
+	// untouched (no scanMimoCode would run there anyway), and an already-"error"
+	// verdict is unchanged.
+	if cur == "ok" {
+		if _, bad := clients.MimoCodeNonRegularActiveLayer(path); bad {
+			cur = "error"
+		}
+	}
+	// MALFORMED INLINE CONTENT guard (bot PR #420 r17 finding B2). The inline
+	// tri-state is checked in the absent-state promotion block above ONLY when the
+	// write target is absent (isPromotableAbsentPresenceState). But when a FILE
+	// layer (the write-target mimocode.json, or a lower config.json) already made
+	// the client present ("ok"), that block is skipped — so a malformed
+	// MIMOCODE_CONFIG_CONTENT inline layer was NOT converted to "error". scanMimoCode
+	// would then run (scanIfReadable gates on "ok"), call MimoCodeMergedConfig, hit
+	// the inline PARSE error, and abort the ENTIRE multi-client scan with
+	// `mimocode: ...`. So downgrade an otherwise-"ok" mimocode presence to the
+	// per-client config-error "error" state when the inline content is present but
+	// UNPARSEABLE — REGARDLESS of whether a file layer made the client present. This
+	// mirrors the non-regular-layer guard above: convert a whole-scan-aborting merge
+	// fault into a loud per-client config-error cell that SKIPS scanMimoCode. Only an
+	// "ok" verdict is downgraded; an absent/missing verdict is left untouched (no
+	// scanMimoCode runs there), and an already-"error" verdict is unchanged.
+	if cur == "ok" {
+		if state, _ := clients.MimoCodeInlineContentState(path); state == "error" {
+			cur = "error"
+		}
+	}
+	return cur
+}
+
 // perSessionServers are MCP servers whose sessions must remain isolated
 // per local client/process. Even when an upstream tool supports a session_id
 // parameter, we conservatively keep them per-session unless the hub
@@ -594,127 +709,18 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	entries := map[string]*ScanEntry{}
 	presence := probeClientConfigPresence(opts)
 	paths := opts.effectiveConfigPaths()
-	// MiMoCode multi-layer presence (bot PR #420 finding 2): the generic probe
-	// above stats ONLY the registered scan path (mimocode's WRITE target —
-	// mimocode.json). MiMoCode deep-merges lower layers (config.json), the
-	// MIMOCODE_CONFIG file, and the MIMOCODE_CONFIG_DIR overlay, so a profile
-	// whose servers live ONLY in a lower/overlay layer (write target absent)
-	// would probe a MISSING state → the scanIfReadable gate would SKIP
-	// scanMimoCode → the operator's real entries vanish from the matrix. Promote
-	// presence to "ok" when ANY resolved read layer exists as a regular file (so
-	// the row is both scanned and shown).
-	//
-	// SCOPE OF THE PROMOTION (bot PR #420 finding 2 refinement): only a MISSING
-	// (absent) write-target verdict may be promoted. If the generic probe already
-	// classified the write target itself as a config ERROR — "error" (the path is
-	// a directory / FIFO / device) or "error-symlink" (a refused / dangling
-	// symlink) — that is a real write-target fault Apply/backup must not proceed
-	// against, and the GUI must keep rendering the config-error cell. Promoting
-	// THAT to "ok" because a SEPARATE lower layer happens to exist would mask the
-	// fault: the row would render green, the operator clicks Apply, and the
-	// hardened write fails against the bad write target. So the promotion is
-	// gated on isPromotableAbsentPresenceState — it upgrades only the WRITABLE
-	// absent states (missing / missing-init-possible / missing-init-creatable),
-	// never an error/error-symlink/ok verdict, and never
-	// missing-init-blocked-symlink (the write/init pipeline refuses to create the
-	// write target through a parent symlink, so a promoted cell's later Apply
-	// would deterministically fail — same broken-UX hazard as the config-FAULT
-	// states).
-	//
-	// INLINE-ONLY PROFILES (bot PR #420 finding 1): MimoCodeReadLayerPaths yields
-	// only FILE paths, so a profile whose ONLY mimo config layer is
-	// MIMOCODE_CONFIG_CONTENT (inline, no file on disk) has nothing to stat and
-	// would never promote — yet MimoCodeMergedConfig parses that inline layer and
-	// surfaces its servers. So promote on a parseable inline layer too, not just a
-	// stat-able file. Either signal upgrades the absent state to "ok".
-	//
-	// CLAUDE-IMPORT-ONLY PROFILES (bot PR #420 finding 1, r15): MimoCode also
-	// imports ~/.claude.json mcpServers into the effective `mcp` view (TOP layer,
-	// skip-if-name-exists, gated by MIMOCODE_DISABLE_CLAUDE_CODE_MCP). A profile
-	// whose ONLY active mimo MCP source is that import (no mimo config FILE layer,
-	// no inline content) has nothing to stat AND no inline string — both signals
-	// above miss it — yet MimoCodeMergedConfig WOULD import those servers. So
-	// promote on a parseable claude import too. MimoCodeHasClaudeImport reuses the
-	// SAME env-resolution + MIMOCODE_DISABLE_CLAUDE_CODE_MCP gate the read path
-	// uses, so the scan stays state-safe (the standard scan-test barrier sets the
-	// disable flag → no real ~/.claude.json read).
-	//
-	// MALFORMED INLINE-ONLY (bot PR #420 finding 4): a present-but-UNPARSEABLE
-	// MIMOCODE_CONFIG_CONTENT (no file layers) is an active-but-broken profile.
-	// Left as the default "missing"/absent verdict it would render the cell as
-	// not-configured and the scanner would never run the merged read that surfaces
-	// the parse error — the broken profile looks ABSENT. So promote it to the
-	// existing config-FAULT "error" state (the same state a non-regular write
-	// target / wrong-shape file produces), making the matrix render a loud
-	// config-error cell instead of silently dropping the profile. Only a TRULY
-	// absent verdict is promoted (isPromotableAbsentPresenceState already excludes
-	// "ok"/"error"/"error-symlink"), so this never downgrades an "ok" or masks an
-	// existing fault.
-	if mp := paths["mimocode"]; mp != "" && isPromotableAbsentPresenceState(presence["mimocode"]) {
-		for _, lf := range clients.MimoCodeReadLayerPaths(mp) {
-			if st, err := os.Stat(lf); err == nil && st.Mode().IsRegular() {
-				presence["mimocode"] = "ok"
-				break
-			}
-		}
-		if presence["mimocode"] != "ok" {
-			switch state, _ := clients.MimoCodeInlineContentState(mp); state {
-			case "ok":
-				presence["mimocode"] = "ok"
-			case "error":
-				// Malformed inline-only profile → loud config-error cell, not absent.
-				presence["mimocode"] = "error"
-			}
-		}
-		// Claude-import-only profile (bot PR #420 finding 1, r15): no file layer and
-		// no inline content promoted it, but a parseable ~/.claude.json import yields
-		// servers MimoCodeMergedConfig would surface. Promote to "ok" so the row is
-		// scanned and shown. Re-check isPromotableAbsentPresenceState so a malformed
-		// inline that just set "error" above is NOT overridden (that fault must keep
-		// rendering the config-error cell).
-		if isPromotableAbsentPresenceState(presence["mimocode"]) && clients.MimoCodeHasClaudeImport(mp) {
-			presence["mimocode"] = "ok"
-		}
-	}
-	// NON-REGULAR ACTIVE LAYER guard (bot PR #420 finding 4). The promotion above
-	// upgrades to "ok" on the FIRST regular layer it finds, and the generic probe
-	// classifies ONLY the write target — so a profile whose write target (or one
-	// promoting layer) is a regular file but ANOTHER active layer (config.json, the
-	// MIMOCODE_CONFIG file, or the overlay mimocode.json/.jsonc) is a
-	// directory/FIFO/non-regular would stay "ok". scanMimoCode then reads ALL
-	// layers via MimoCodeMergedConfig → readRawConfig returns a non-regular read
-	// error → ScanFrom fails the ENTIRE multi-client scan with `mimocode: ...`. To
-	// keep one bad mimo layer from taking the whole scan down, downgrade an
-	// otherwise-"ok" mimocode presence to the per-client config-error "error" state
-	// when ANY existing active layer is non-regular/unreadable — the same per-client
-	// config-error the write-target probe surfaces, rendering a loud cell and
-	// SKIPPING scanMimoCode (scanIfReadable gates on "ok") instead of aborting. Only
-	// an "ok" verdict is downgraded: a genuinely absent/missing verdict is left
-	// untouched (no scanMimoCode would run there anyway), and an already-"error"
-	// verdict is unchanged.
-	if mp := paths["mimocode"]; mp != "" && presence["mimocode"] == "ok" {
-		if _, bad := clients.MimoCodeNonRegularActiveLayer(mp); bad {
-			presence["mimocode"] = "error"
-		}
-	}
-	// MALFORMED INLINE CONTENT guard (bot PR #420 r17 finding B2). The inline
-	// tri-state is checked in the absent-state promotion block above ONLY when the
-	// write target is absent (isPromotableAbsentPresenceState). But when a FILE
-	// layer (the write-target mimocode.json, or a lower config.json) already made
-	// the client present ("ok"), that block is skipped — so a malformed
-	// MIMOCODE_CONFIG_CONTENT inline layer was NOT converted to "error". scanMimoCode
-	// would then run (scanIfReadable gates on "ok"), call MimoCodeMergedConfig, hit
-	// the inline PARSE error, and abort the ENTIRE multi-client scan with
-	// `mimocode: ...`. So downgrade an otherwise-"ok" mimocode presence to the
-	// per-client config-error "error" state when the inline content is present but
-	// UNPARSEABLE — REGARDLESS of whether a file layer made the client present. This
-	// mirrors the non-regular-layer guard above: convert a whole-scan-aborting merge
-	// fault into a loud per-client config-error cell that SKIPS scanMimoCode. Only an
-	// "ok" verdict is downgraded; an absent/missing verdict is left untouched (no
-	// scanMimoCode runs there), and an already-"error" verdict is unchanged.
-	if mp := paths["mimocode"]; mp != "" && presence["mimocode"] == "ok" {
-		if state, _ := clients.MimoCodeInlineContentState(mp); state == "error" {
-			presence["mimocode"] = "error"
+	// §9.2 drift-prevention: ADJUST the generic per-client presence verdict for
+	// any client with a presencePostProbes hook, dispatched through the registry
+	// instead of inlining a named client. Today only MiMoCode registers one — the
+	// generic probe stats ONLY the registered scan path (mimocode's WRITE target),
+	// but MiMoCode deep-merges lower layers (config.json), the MIMOCODE_CONFIG
+	// file/overlay, an inline MIMOCODE_CONFIG_CONTENT layer, and the ~/.claude.json
+	// import, so the effective presence may differ. The hook returns the
+	// possibly promoted/downgraded verdict (see mimoCodePresencePostProbe for the
+	// full per-layer rules). A client without a hook keeps its generic verdict.
+	for name, probe := range presencePostProbes() {
+		if p := paths[name]; p != "" {
+			presence[name] = probe(name, p, presence[name])
 		}
 	}
 	scanIfReadable := func(name string) bool {
@@ -1424,7 +1430,28 @@ func scanMimoCode(entries map[string]*ScanEntry, path string) error {
 			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
 			entries[name] = e
 		}
-		e.ClientPresence["mimocode"] = shapeMimoCodeEntry(raw)
+		cell := shapeMimoCodeEntry(raw)
+		// Import-inherited signal (single owner: the adapter ownership predicate).
+		// An http hub-loopback cell whose name resolves ONLY from a layer the hub
+		// never wrote — the ~/.claude.json mcpServers import or a config.json layer
+		// BELOW the write target — is hub-ROUTED but not hub-OWNABLE: the hub
+		// cannot demigrate it. Stamp ClientEntry.Inherited so classify() returns
+		// "via-hub-inherited" (read-only) instead of a "via-hub" demigrate switch
+		// that always fails closed. Only the http hub-loopback shape can become a
+		// via-hub cell in classify(), so the probe is gated on that shape — every
+		// stdio/relay/external/disabled cell skips it.
+		//
+		// Fail-open-to-not-inherited: a malformed lower layer makes the predicate
+		// return an error; leave Inherited false and do NOT abort the scan (the
+		// per-client config-error guards in ScanFrom own malformed-layer handling,
+		// and the backend demigrate gate still fail-closes, so the worst case is
+		// the pre-fix cryptic Apply error — never a wrong write).
+		if cell.Transport == "http" && clients.IsHubHTTPURL(cell.Endpoint) {
+			if atOrAbove, err := clients.MimoCodeNameAtOrAboveWriteTarget(path, name); err == nil && !atOrAbove {
+				cell.Inherited = true
+			}
+		}
+		e.ClientPresence["mimocode"] = cell
 	}
 	return nil
 }
@@ -1764,6 +1791,16 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 	// (unmanaged remote), so it surfaces read-only in the Unmanaged /
 	// External group instead of masquerading as a correct migration.
 	hasRemoteExternal := false
+	// hasHubInherited: at least one client routes this server through a hub
+	// loopback URL whose SOURCE is an inherited (import / below-write-target)
+	// layer the hub never wrote and cannot demigrate (ClientEntry.Inherited,
+	// set only by the mimocode scan path). Such a cell IS hub-routed but NOT
+	// hub-ownable, so when it is the ONLY hub presence (no owned via-hub, no
+	// stdio) classify returns "via-hub-inherited" — a read-only status the
+	// matrix renders checked-but-disabled instead of a demigrate switch. Set in
+	// BOTH http hub-loopback paths an inherited cell can take: the serena live
+	// /serena/mcp router branch AND the generic daemon-port-match branch below.
+	hasHubInherited := false
 	for _, c := range e.ClientPresence {
 		if c.Transport == "http" && clients.IsHubHTTPURL(c.Endpoint) {
 			switch {
@@ -1775,7 +1812,22 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 				// not-a-daemon-port and is misclassified as external, so the matrix
 				// shows a connected serena as not-connected (serena-client-revert-
 				// on-manifest-sync read-side).
-				hasHub = true
+				//
+				// Inherited-source gate (mirrors the daemon-port branch below): a
+				// serena router cell sourced from an import / below-write-target
+				// layer the hub never wrote (ClientEntry.Inherited, set only by the
+				// mimocode scan path on an http hub-loopback cell) is hub-ROUTED but
+				// NOT hub-OWNABLE — the hub cannot demigrate it. Record it as
+				// inherited so a row whose ONLY hub presence is an inherited serena
+				// router cell classifies "via-hub-inherited" (read-only) instead of
+				// "via-hub" (which would offer a demigrate switch that always fails
+				// closed). An OWNED router cell (Inherited false) stays via-hub and
+				// remains demigratable.
+				if c.Inherited {
+					hasHubInherited = true
+				} else {
+					hasHub = true
+				}
 			case IsSerenaServer(name) && IsSerenaRouterURL(c.Endpoint):
 				// serena router SHAPE but NOT on the live GUI port → a STALE router
 				// URL (e.g. the GUI previously ran on 9121 and later moved). Classify
@@ -1785,7 +1837,18 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 				// of letting Apply rewrite it to the live port (#379 r5).
 				hasRemoteExternal = true
 			case loopbackPortMatchesDaemon(c.Endpoint, daemonPorts):
-				hasHub = true
+				// A port-matching hub loopback cell is hub-routed. If its source
+				// is an inherited (import / below-write-target) layer the hub never
+				// wrote (ClientEntry.Inherited), it is NOT hub-OWNABLE — record it
+				// as inherited so a row whose ONLY hub presence is inherited
+				// classifies "via-hub-inherited" (read-only) rather than "via-hub".
+				// An OWNED port-matching cell (Inherited false) stays via-hub and
+				// remains demigratable.
+				if c.Inherited {
+					hasHubInherited = true
+				} else {
+					hasHub = true
+				}
 			default:
 				// Loopback shape but wrong/absent port for this server's
 				// daemons (stale migration, or operator's own local server).
@@ -1830,6 +1893,20 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 	}
 	if hasStdio {
 		return "unknown"
+	}
+	// Inherited-only hub presence: the server is routed through a hub loopback
+	// URL whose source is an import / below-write-target layer the hub never
+	// wrote (ClientEntry.Inherited), and there is NO owned via-hub cell and NO
+	// stdio presence. It IS hub-routed (so the matrix renders the cell checked)
+	// but NOT hub-ownable (the hub cannot demigrate it). Surface a distinct
+	// read-only status so the cell renders checked-but-disabled instead of a
+	// demigrate switch that always fails closed. Ordered AFTER the owned-hub /
+	// stdio branches (an owned via-hub or migratable cell keeps its richer
+	// status) and BEFORE the external branch (an inherited hub cell is NOT a
+	// generic external remote — IsHubHTTPURL is true for it). Managed stays
+	// FALSE here because Managed == (Status == "via-hub") exact-equality.
+	if hasHubInherited && !hasHub && !hasStdio {
+		return "via-hub-inherited"
 	}
 	// A client-present non-hub remote with no stdio presence is a real
 	// external MCP server — surface it (not "not-installed"). Ordered AFTER
@@ -2421,8 +2498,24 @@ func classifyLSPEntries(entries map[string]*ScanEntry, reg *Registry) {
 			pairKey := clientName + "\x00" + lang
 			switch {
 			case ce.Transport == "http":
-				// Rule 1: hub-managed.
-				e.Status = "via-hub"
+				// Rule 1: hub-managed. Mirror classify()'s owned-vs-inherited
+				// precedence so an inherited (import / below-write-target) hub LSP
+				// cell does NOT get force-overwritten back to the demigratable
+				// "via-hub" bucket. An OWNED http cell (Inherited false) always wins
+				// — set "via-hub" unconditionally. An INHERITED http cell promotes
+				// the row to "via-hub-inherited" (read-only, Managed stays false via
+				// the exact-equality re-sync below) ONLY when no owned http cell has
+				// already claimed "via-hub" for this row; a later owned cell still
+				// overrides it. This keeps the LSP pass in lockstep with classify():
+				// a row whose only hub presence is inherited stays read-only instead
+				// of moving BACK into "Managed by hub" (the demigratable bucket).
+				if ce.Inherited {
+					if e.Status != "via-hub" {
+						e.Status = "via-hub-inherited"
+					}
+				} else {
+					e.Status = "via-hub"
+				}
 				hubsByPair[pairKey] = append(hubsByPair[pairKey], e)
 			case ce.Transport == "stdio":
 				base := filepath.Base(strings.TrimSuffix(ce.Endpoint, ".exe"))

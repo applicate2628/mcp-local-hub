@@ -81,9 +81,9 @@ type MCPEntry struct {
 	// "writable at/above the write target ⇒ copy-up on rollback is correct" — the
 	// historical behavior of EVERY adapter. Only MiMoCode's GetEntry sets it true;
 	// every other adapter leaves it zero, so their rollback polarity
-	// (AddEntry(*prior) when prior != nil) is byte-unchanged. The 2 rollback sites
-	// (install.go, register.go) are the ONLY consumers; the read-membership
-	// GetEntry callers ignore it.
+	// (AddEntry(*prior) when prior != nil) is byte-unchanged. The 3 rollback sites
+	// (install.go, register.go, register_supervisor.go) are the ONLY consumers; the
+	// read-membership GetEntry callers ignore it.
 	SourceBelowWriteTarget bool
 
 	// Disabled, when true, marks that this entry is present in the client config
