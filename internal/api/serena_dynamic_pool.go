@@ -255,7 +255,8 @@ func cloneAvailabilityProbe(p *config.AvailabilityProbe) *config.AvailabilityPro
 		return nil
 	}
 	return &config.AvailabilityProbe{
-		Binaries: append([]string(nil), p.Binaries...),
-		Files:    append([]string(nil), p.Files...),
+		Binaries:  append([]string(nil), p.Binaries...),
+		Files:     append([]string(nil), p.Files...),
+		FileGlobs: append([]string(nil), p.FileGlobs...),
 	}
 }

@@ -10,9 +10,16 @@
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/filesystem/README.md",
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "${workspaceFolder}"
+      ],
       "env": {},
-      "categories": ["filesystem", "io"],
+      "categories": [
+        "filesystem",
+        "io"
+      ],
       "license": "MIT"
     },
     {
@@ -23,9 +30,16 @@
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/git/README.md",
       "transport": "stdio",
       "command": "uvx",
-      "args": ["mcp-server-git", "--repository", "${workspaceFolder}"],
+      "args": [
+        "mcp-server-git",
+        "--repository",
+        "${workspaceFolder}"
+      ],
       "env": {},
-      "categories": ["git", "vcs"],
+      "categories": [
+        "git",
+        "vcs"
+      ],
       "license": "MIT"
     },
     {
@@ -36,9 +50,14 @@
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/fetch/README.md",
       "transport": "stdio",
       "command": "uvx",
-      "args": ["mcp-server-fetch"],
+      "args": [
+        "mcp-server-fetch"
+      ],
       "env": {},
-      "categories": ["http", "io"],
+      "categories": [
+        "http",
+        "io"
+      ],
       "license": "MIT"
     },
     {
@@ -49,9 +68,16 @@
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/sqlite/README.md",
       "transport": "stdio",
       "command": "uvx",
-      "args": ["mcp-server-sqlite", "--db-path", "${workspaceFolder}/db.sqlite"],
+      "args": [
+        "mcp-server-sqlite",
+        "--db-path",
+        "${workspaceFolder}/db.sqlite"
+      ],
       "env": {},
-      "categories": ["database", "sql"],
+      "categories": [
+        "database",
+        "sql"
+      ],
       "license": "MIT"
     },
     {
@@ -62,9 +88,15 @@
       "readme_url": "https://raw.githubusercontent.com/microsoft/playwright-mcp/main/README.md",
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@playwright/mcp"],
+      "args": [
+        "-y",
+        "@playwright/mcp"
+      ],
       "env": {},
-      "categories": ["browser", "automation"],
+      "categories": [
+        "browser",
+        "automation"
+      ],
       "license": "Apache-2.0"
     },
     {
@@ -76,7 +108,10 @@
       "transport": "http",
       "url": "https://mcp.context7.com/mcp",
       "env": {},
-      "categories": ["docs", "remote"],
+      "categories": [
+        "docs",
+        "remote"
+      ],
       "license": "MIT"
     },
     {
@@ -88,7 +123,11 @@
       "transport": "http",
       "url": "https://qt-docs-mcp.qt.io/mcp",
       "env": {},
-      "categories": ["docs", "remote", "qt"],
+      "categories": [
+        "docs",
+        "remote",
+        "qt"
+      ],
       "license": "Qt"
     },
     {
@@ -99,9 +138,16 @@
       "readme_url": "https://raw.githubusercontent.com/yctimlin/mcp_excalidraw/main/README.md",
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "mcp-excalidraw-server"],
+      "args": [
+        "-y",
+        "mcp-excalidraw-server"
+      ],
       "env": {},
-      "categories": ["diagrams", "drawing", "visualization"],
+      "categories": [
+        "diagrams",
+        "drawing",
+        "visualization"
+      ],
       "license": "MIT"
     },
     {
@@ -112,9 +158,15 @@
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/everything/README.md",
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-everything"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everything"
+      ],
       "env": {},
-      "categories": ["debug", "reference"],
+      "categories": [
+        "debug",
+        "reference"
+      ],
       "license": "MIT"
     },
     {
@@ -125,11 +177,17 @@
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/memory/README.md",
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
       "env": {
         "MEMORY_FILE_PATH": "${HOME}/.local/share/mcp-memory/memory.jsonl"
       },
-      "categories": ["memory", "knowledge-graph"],
+      "categories": [
+        "memory",
+        "knowledge-graph"
+      ],
       "license": "MIT"
     },
     {
@@ -140,9 +198,15 @@
       "readme_url": "https://www.npmjs.com/package/@mcpcentral/mcp-time",
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@mcpcentral/mcp-time@0.0.5"],
+      "args": [
+        "-y",
+        "@mcpcentral/mcp-time@0.0.5"
+      ],
       "env": {},
-      "categories": ["time", "utilities"],
+      "categories": [
+        "time",
+        "utilities"
+      ],
       "license": "MIT"
     },
     {
@@ -153,9 +217,15 @@
       "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/sequentialthinking/README.md",
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking@2025.12.18"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking@2025.12.18"
+      ],
       "env": {},
-      "categories": ["reasoning", "agent"],
+      "categories": [
+        "reasoning",
+        "agent"
+      ],
       "license": "MIT"
     },
     {
@@ -177,7 +247,11 @@
       "env": {
         "PYTHONUNBUFFERED": "1"
       },
-      "categories": ["code-intelligence", "lsp", "refactoring"],
+      "categories": [
+        "code-intelligence",
+        "lsp",
+        "refactoring"
+      ],
       "license": "MIT"
     },
     {
@@ -188,11 +262,20 @@
       "readme_url": "https://raw.githubusercontent.com/openags/paper-search-mcp/main/README.md",
       "transport": "stdio",
       "command": "uvx",
-      "args": ["--from", "paper-search-mcp", "python", "-m", "paper_search_mcp.server"],
+      "args": [
+        "--from",
+        "paper-search-mcp",
+        "python",
+        "-m",
+        "paper_search_mcp.server"
+      ],
       "env": {
         "PAPER_SEARCH_MCP_UNPAYWALL_EMAIL": "secret:unpaywall_email"
       },
-      "categories": ["research", "papers"],
+      "categories": [
+        "research",
+        "papers"
+      ],
       "license": "MIT"
     },
     {
@@ -205,12 +288,22 @@
       "command": "mcp-excel",
       "args": [],
       "env": {},
-      "categories": ["engineering", "office", "spreadsheet", "com", "excel"],
+      "categories": [
+        "engineering",
+        "office",
+        "spreadsheet",
+        "com",
+        "excel"
+      ],
       "license": "MIT",
       "availability": "disabled-until-probe",
       "install_probe": {
-        "binaries": ["mcp-excel"],
-        "file_globs": ["C:\\Program Files*\\Microsoft Office\\root\\Office1?\\EXCEL.EXE"]
+        "binaries": [
+          "mcp-excel"
+        ],
+        "file_globs": [
+          "C:\\Program Files*\\Microsoft Office\\root\\Office1?\\EXCEL.EXE"
+        ]
       },
       "vendored_source": {
         "repo": "https://github.com/sbroenne/mcp-server-excel",
@@ -236,11 +329,17 @@
       "env": {
         "ABLETON_MCP_DISABLE_TELEMETRY": "true"
       },
-      "categories": ["music", "daw", "ableton"],
+      "categories": [
+        "music",
+        "daw",
+        "ableton"
+      ],
       "license": "MIT",
       "availability": "disabled-until-probe",
       "install_probe": {
-        "file_globs": ["C:\\ProgramData\\Ableton\\Live *\\Program\\Ableton Live *.exe"]
+        "file_globs": [
+          "C:\\ProgramData\\Ableton\\Live *\\Program\\Ableton Live *.exe"
+        ]
       },
       "vendored_source": {
         "repo": "https://github.com/ahujasid/ableton-mcp",
@@ -258,13 +357,21 @@
       "readme_url": "https://raw.githubusercontent.com/openai/codex/main/README.md",
       "transport": "stdio",
       "command": "codex",
-      "args": ["mcp-server"],
+      "args": [
+        "mcp-server"
+      ],
       "env": {},
-      "categories": ["agent", "codex", "coding-agent"],
+      "categories": [
+        "agent",
+        "codex",
+        "coding-agent"
+      ],
       "license": "Apache-2.0",
       "availability": "disabled-until-probe",
       "install_probe": {
-        "binaries": ["codex"]
+        "binaries": [
+          "codex"
+        ]
       }
     },
     {
@@ -275,13 +382,23 @@
       "readme_url": "https://raw.githubusercontent.com/matlab/matlab-mcp-server/v0.11.0/README.md",
       "transport": "stdio",
       "command": "matlab-mcp-server",
-      "args": [],
+      "args": [
+        "--disable-telemetry=true"
+      ],
       "env": {},
-      "categories": ["engineering", "matlab", "math", "scientific-computing"],
+      "categories": [
+        "engineering",
+        "matlab",
+        "math",
+        "scientific-computing"
+      ],
       "license": "MathWorks (custom BSD-style, product-use restricted)",
       "availability": "disabled-until-probe",
       "install_probe": {
-        "binaries": ["matlab-mcp-server", "matlab"]
+        "binaries": [
+          "matlab-mcp-server",
+          "matlab"
+        ]
       }
     },
     {
@@ -292,13 +409,25 @@
       "readme_url": "https://raw.githubusercontent.com/ansys/pymapdl-mcp/v0.2.1/README.md",
       "transport": "stdio",
       "command": "uvx",
-      "args": ["--from", "ansys-mapdl-mcp==0.2.1", "ansys-mapdl-mcp"],
+      "args": [
+        "--from",
+        "ansys-mapdl-mcp==0.2.1",
+        "ansys-mapdl-mcp"
+      ],
       "env": {},
-      "categories": ["engineering", "ansys", "fea", "cae", "simulation"],
+      "categories": [
+        "engineering",
+        "ansys",
+        "fea",
+        "cae",
+        "simulation"
+      ],
       "license": "Apache-2.0",
       "availability": "disabled-until-probe",
       "install_probe": {
-        "file_globs": ["C:\\Program Files\\ANSYS Inc\\v*\\ansys\\bin\\winx64\\ansys*.exe"]
+        "file_globs": [
+          "C:\\Program Files\\ANSYS Inc\\v*\\ansys\\bin\\winx64\\ansys*.exe"
+        ]
       }
     }
   ]
