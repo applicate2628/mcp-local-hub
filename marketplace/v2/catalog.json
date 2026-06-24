@@ -115,23 +115,6 @@
       "license": "MIT"
     },
     {
-      "id": "suno",
-      "name": "Suno AI Music (AceDataCloud)",
-      "summary": "REQUIRES an AceDataCloud Bearer token (sign up at https://platform.acedata.cloud, then click \"Acquire\" on the API documentation page to mint it) added as the `Authorization: Bearer <token>` header at install time — the hosted server returns 401 on every request WITHOUT it, so a one-click install with no header is inert until you add it. AI music generation via Suno through the AceDataCloud-hosted MCP server — remote HTTP, no local installation required. 27 documented tools spanning music generation (generate/custom/extend/cover/concat/persona/remaster/stems/replace/upload-extend/upload-cover/mashup), lyrics (generate/mashup/format-guide), media conversion (WAV/MIDI/MP4/timing/vocal-extract), persona management, audio upload, and task queries (list models/actions, query task/tasks-batch). The marketplace remote-http draft emits a headers: block — fill the Authorization header there, referencing a vault key with ${secret:KEY}; never commit the raw token. On Claude.ai the hosted server also supports OAuth login with no token. The catalog carries NO secret; the operator adds the header at install time (exactly like the context7 remote row).",
-      "homepage": "https://github.com/AceDataCloud/SunoMCP",
-      "readme_url": "https://raw.githubusercontent.com/AceDataCloud/SunoMCP/main/README.md",
-      "transport": "http",
-      "url": "https://suno.mcp.acedata.cloud/mcp",
-      "env": {},
-      "categories": [
-        "music",
-        "ai",
-        "audio",
-        "generation"
-      ],
-      "license": "MIT"
-    },
-    {
       "id": "qt-docs",
       "name": "Qt Documentation MCP server",
       "summary": "Official Qt documentation lookup from The Qt Company — remote HTTP server. Useful for Qt/C++/QML development (Qt Widgets, Qt Quick, modules, classes).",
@@ -488,6 +471,30 @@
         "run_cmd": "uvx --from kicad-mcp-pro==3.14.1 kicad-mcp-pro",
         "license_status": "confirmed"
       }
+    },
+    {
+      "id": "suno",
+      "name": "Suno AI Music (AceDataCloud)",
+      "summary": "REQUIRES an AceDataCloud API token (sign up at https://platform.acedata.cloud, mint a token on the API documentation page) stored in the mcphub vault as the `acedata_api_token` secret — the install surfaces it as a per-key secret prompt (env ACEDATACLOUD_API_TOKEN = secret:acedata_api_token), and the local mcp-suno server hard-exits (exit 1) on startup when the token is unset, so it never silently runs returning 401s. Local AI music generation via Suno through the AceDataCloud API: runs the official mcp-suno PyPI package locally over stdio with uvx (no hosted endpoint, no Authorization header to hand-edit). 36 tools spanning music generation (generate/custom/extend/cover/concat/persona/persona-vox/remaster/stems/replace/upload-extend/upload-cover/mashup), lyrics (generate/mashup/format-guide), media conversion (WAV/MIDI/MP4/timing/vocal-extract), persona management, audio upload, and task queries (list models/actions, query task/tasks-batch).",
+      "homepage": "https://pypi.org/project/mcp-suno/",
+      "readme_url": "https://platform.acedata.cloud/documents/4da95d9d-7722-4a72-857d-bf6be86036e9",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mcp-suno==2026.6.18.0",
+        "mcp-suno"
+      ],
+      "env": {
+        "ACEDATACLOUD_API_TOKEN": "secret:acedata_api_token"
+      },
+      "categories": [
+        "music",
+        "ai",
+        "audio",
+        "generation"
+      ],
+      "license": "MIT"
     }
   ]
 }

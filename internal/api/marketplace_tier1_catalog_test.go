@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/secrets"
 )
 
 // gitSHA40 matches a full 40-hex git object name (the immutable-pin shape the
@@ -34,15 +35,24 @@ var gitSHA40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // work-items/backlog/2026-06-24-tier3-manual-clone-mcps.md).
 var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys", "kicad"}
 
-// tierMusicRemoteCatalogIDs are the v2-only remote-http music rows appended after
-// the Tier-1 desktop-app rows. Unlike tier1CatalogIDs (local-stdio forks pinned via
-// vendored_source), these are managed remote endpoints (transport: http, url),
-// carry NO vendored_source and NO install_probe, and the operator supplies the
-// Authorization header at install time (the catalog holds no secret) — same shape
-// as the v1 context7/qt-docs remote rows. They are NOT folded into tier1CatalogIDs
-// because the Tier-1 loops assert stdio-fork-only properties (vendored_source,
-// install_probe, port-0 daemon draft) a remote row must not have.
-var tierMusicRemoteCatalogIDs = []string{"suno"}
+// tierMusicLocalCatalogIDs are the v2-only LOCAL-stdio music rows appended LAST,
+// after the Tier-1 desktop-app rows (so the frozen 14-entry v1 prefix at indices
+// 0-13 stays byte-identical to marketplace/v1/catalog.json). suno was originally a
+// remote-http row, but a hosted remote endpoint cannot REQUIRE an operator
+// credential at install: generateRemoteHTTPDraft emits only name/kind/transport/url
+// (no headers), so a one-click install yields a server returning 401 on every
+// request (codex-bot PR #429 P1). It was switched to the official mcp-suno PyPI
+// package run locally over stdio with uvx, carrying an `env` secret ref
+// (ACEDATACLOUD_API_TOKEN = secret:acedata_api_token) that the readiness gate
+// surfaces as a concrete per-key install prompt AND that the mcp-suno package
+// itself hard-requires (it exit(1)s on startup when the token is unset). These
+// rows are NOT folded into tier1CatalogIDs because they carry NO vendored_source
+// (mcp-suno is an official AceDataCloud package, not a community fork — like
+// codex-mcp-server/matlab/ansys) and NO install_probe (uvx fetches the package on
+// demand; there is no host-installed artifact to gate on). They ARE stdio rows, so
+// they share the stdio draft shape (command/args/env, port-0 daemon) the remote
+// rows lack.
+var tierMusicLocalCatalogIDs = []string{"suno"}
 
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
@@ -80,10 +90,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("v1 catalog failed to parse: %v", err)
 	}
-	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicRemoteCatalogIDs)
+	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs)
 	if len(cat.Entries) != wantCount {
-		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-remote)",
-			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicRemoteCatalogIDs))
+		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local)",
+			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs))
 	}
 
 	// Every v1 entry id must still be present (verbatim copy), in order, before
@@ -95,6 +105,19 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	for _, v1e := range v1cat.Entries {
 		if _, ok := byID[v1e.ID]; !ok {
 			t.Fatalf("v2 catalog dropped v1 entry %q", v1e.ID)
+		}
+	}
+
+	// FROZEN-PREFIX INVARIANT (codex-bot PR #429 P2): the v2 catalog must keep the
+	// 14 v1 entries copied VERBATIM IN ORDER at indices 0..len(v1)-1, BEFORE any
+	// v2-only addition. Inserting a v2 row inside the v1 prefix (suno was wrongly
+	// inserted at index 6, between context7 and qt-docs) shifts the frozen entries
+	// down and breaks the byte-for-byte v1→v2 prefix copy. Assert positionally, not
+	// just by set membership.
+	for i, v1e := range v1cat.Entries {
+		if cat.Entries[i].ID != v1e.ID {
+			t.Fatalf("FROZEN-PREFIX VIOLATION: v2 entry[%d] = %q, want the v1 entry %q (the 14 v1 rows must stay verbatim in order before all v2-only additions; a v2 row was inserted inside the frozen prefix)",
+				i, cat.Entries[i].ID, v1e.ID)
 		}
 	}
 
@@ -235,53 +258,83 @@ func TestV2Tier1Rows_GenerateThenCreateDryRun(t *testing.T) {
 	}
 }
 
-// TestV2MusicRemoteRows_GenerateThenCreateDryRun is the MIRROR GATE for the
-// v2-only remote-http music rows: for each row, project it through
-// GenerateDraftManifest (the `mcphub marketplace generate <id>` path → the
-// transport=http branch → generateRemoteHTTPDraft), then ParseManifest+Validate the
-// drafted remote-http manifest. A clean draft + clean Validate proves the row is
-// gate-clean (it would be accepted by `mcphub manifest create`). Fully in-process:
-// no daemon spawn, no state-dir write — state-safe with no env redirection. The
-// remote-http draft carries no daemon port placeholder, so unlike the stdio mirror
-// gate there is no port-0 substitution step.
-func TestV2MusicRemoteRows_GenerateThenCreateDryRun(t *testing.T) {
+// TestV2MusicLocalRows_GenerateThenCreateDryRun is the MIRROR GATE for the v2-only
+// LOCAL-stdio music rows: for each row, project it through GenerateDraftManifest
+// (the `mcphub marketplace generate <id>` path → the transport=stdio branch →
+// generateCommandDraft), substitute a real port for the placeholder 0 (the
+// operator's required edit), then ParseManifest+Validate the drafted stdio
+// manifest. A clean draft + clean Validate proves the row is gate-clean (it would
+// be accepted by `mcphub manifest create`). Fully in-process: no daemon spawn, no
+// state-dir write — state-safe with no env redirection.
+//
+// The CREDENTIAL GATE is the point of the switch from remote-http (codex-bot PR
+// #429 P1): a stdio `env` secret ref (`ACEDATACLOUD_API_TOKEN = secret:<key>`)
+// survives the draft verbatim (the expander only touches ${...} placeholders, and a
+// bare `secret:<key>` value has none), and HasSecretRef on the drafted manifest's
+// env confirms the readiness gate will surface a concrete per-key install prompt for
+// it — exactly the operator-facing credential requirement a hosted remote endpoint
+// (which materializes NO headers in generateRemoteHTTPDraft) cannot provide.
+func TestV2MusicLocalRows_GenerateThenCreateDryRun(t *testing.T) {
 	byID := v2CatalogByID(t)
-	for _, id := range tierMusicRemoteCatalogIDs {
+	ws := t.TempDir()
+	for _, id := range tierMusicLocalCatalogIDs {
 		id := id
 		t.Run(id, func(t *testing.T) {
 			e, ok := byID[id]
 			if !ok {
-				t.Fatalf("v2 catalog missing music-remote row %q", id)
+				t.Fatalf("v2 catalog missing music-local row %q", id)
 			}
-			// Shape contract: remote-http row carries a transport+url, NO
-			// vendored_source, NO install_probe, and an empty/absent availability gate
-			// (a hosted endpoint is always reachable — there is no local artifact to
-			// probe), matching the context7/qt-docs remote rows.
-			if e.Transport != "http" {
-				t.Fatalf("music-remote row %q transport = %q, want \"http\"", id, e.Transport)
+			// Shape contract: local-stdio row carries a command (no remote url), and —
+			// unlike a remote endpoint — at least one `env` secret ref so the install
+			// REQUIRES a credential (the bot's exact P1 ask). It carries NO
+			// vendored_source (mcp-suno is an official AceDataCloud package, not a
+			// community fork) and NO install_probe (uvx fetches on demand).
+			if e.Transport != "stdio" {
+				t.Fatalf("music-local row %q transport = %q, want \"stdio\"", id, e.Transport)
 			}
-			if strings.TrimSpace(e.URL) == "" {
-				t.Fatalf("music-remote row %q has an empty url", id)
+			if strings.TrimSpace(e.URL) != "" {
+				t.Fatalf("music-local row %q must NOT carry a url (it is a local stdio server): %q", id, e.URL)
+			}
+			if strings.TrimSpace(e.Command) == "" {
+				t.Fatalf("music-local row %q has an empty command", id)
 			}
 			if e.VendoredSource != nil {
-				t.Fatalf("music-remote row %q must NOT carry vendored_source (remote endpoint, not a local fork): %#v", id, e.VendoredSource)
+				t.Fatalf("music-local row %q must NOT carry vendored_source (official package, not a community fork): %#v", id, e.VendoredSource)
 			}
 			if e.InstallProbe != nil {
-				t.Fatalf("music-remote row %q must NOT carry install_probe (no local artifact to probe): %#v", id, e.InstallProbe)
+				t.Fatalf("music-local row %q must NOT carry install_probe (uvx fetches the package on demand): %#v", id, e.InstallProbe)
 			}
-			draft, warns, err := GenerateDraftManifest(e, GenerateOpts{})
+			// CREDENTIAL GATE: the catalog row must carry an env secret ref so the
+			// install surfaces a required-credential prompt. A remote-http row could not
+			// (generateRemoteHTTPDraft emits no headers).
+			if !secrets.HasSecretRef(e.Env) {
+				t.Fatalf("music-local row %q carries no `env` secret: ref — the credential gate is the whole point of the local switch (PR #429 P1): env=%#v", id, e.Env)
+			}
+			// The env value must be the bare `secret:<key>` form (like paper-search-mcp),
+			// NOT a ${secret:KEY} placeholder (that form is for remote url/headers).
+			for k, v := range e.Env {
+				if strings.HasPrefix(v, "secret:") && strings.Contains(v, "${") {
+					t.Fatalf("music-local row %q env[%q] = %q mixes the ${...} placeholder form into a bare secret: env ref", id, k, v)
+				}
+			}
+
+			draft, warns, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: ws})
 			if err != nil {
-				t.Fatalf("generate remote-http draft for %q: %v (warnings=%v)", id, err, warns)
+				t.Fatalf("generate stdio draft for %q: %v (warnings=%v)", id, err, warns)
 			}
-			m, err := config.ParseManifest(strings.NewReader(draft))
+			// The operator's required edit: pick a real port for the placeholder 0.
+			parseReady := strings.Replace(draft, "port: 0", "port: 9312", 1)
+			m, err := config.ParseManifest(strings.NewReader(parseReady))
 			if err != nil {
-				t.Fatalf("row %q drafted remote-http manifest failed ParseManifest+Validate (mirror gate): %v\n---\n%s", id, err, draft)
+				t.Fatalf("row %q drafted stdio manifest failed ParseManifest+Validate (mirror gate): %v\n---\n%s", id, err, parseReady)
 			}
-			if m.Transport != config.TransportRemoteHTTP {
-				t.Fatalf("row %q drafted manifest transport = %q, want %q", id, m.Transport, config.TransportRemoteHTTP)
+			if m.Transport != config.TransportStdioBridge {
+				t.Fatalf("row %q drafted manifest transport = %q, want %q", id, m.Transport, config.TransportStdioBridge)
 			}
-			if strings.TrimSpace(m.URL) == "" {
-				t.Fatalf("row %q drafted remote-http manifest lost the url", id)
+			// The secret ref must survive into the drafted manifest's env so the
+			// readiness gate (HasSecretRef) surfaces the per-key install prompt.
+			if !secrets.HasSecretRef(m.Env) {
+				t.Fatalf("row %q drafted manifest lost the env secret: ref — the readiness credential prompt would never fire: env=%#v", id, m.Env)
 			}
 		})
 	}
