@@ -14,6 +14,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 )
 
 // ---------------------------------------------------------------------------
@@ -226,6 +227,31 @@ func (s *Server) handleMarketplaceHubInstall(w http.ResponseWriter, req *marketp
 			return
 		}
 		finalYAML = rewritten
+	}
+
+	// Required-secret install gate, run BEFORE ManifestCreate so a blocked
+	// install writes NOTHING (no manifest left behind). The production
+	// Install→Preflight gate also enforces required_secrets, but it runs INSIDE
+	// s.installer.Install — AFTER ManifestCreate has already persisted the
+	// manifest to disk, so a one-click install of a required-secret server (e.g.
+	// suno) with no token would leave the manifest file behind (codex finding 2).
+	// Parse the resolved finalYAML into a manifest and run the SAME required-secret
+	// AdmissionCheck owner here, on the parsed-but-unpersisted manifest, so the
+	// gate decides before any disk write. ParseManifest also re-validates the
+	// resolved draft (port substituted, name rewritten) — a structurally invalid
+	// draft is surfaced as a 400 BAD_ENTRY rather than reaching ManifestCreate.
+	parsed, err := config.ParseManifest(strings.NewReader(finalYAML))
+	if err != nil {
+		writeAPIError(w, fmt.Errorf("resolved manifest is invalid: %w", err), http.StatusBadRequest, "BAD_ENTRY")
+		return
+	}
+	if err := api.RequiredSecretAdmission(parsed); err != nil {
+		// 412 Precondition Failed (NOT 409 — that is NAME_CONFLICT, which the
+		// frontend branches on by HTTP code): the required-secret precondition is
+		// unmet. The AdmissionError's Reason names the KEY only (redaction posture),
+		// so it is safe to surface to the operator as the actionable fix.
+		writeAPIError(w, err, http.StatusPreconditionFailed, "REQUIRED_SECRET_MISSING")
+		return
 	}
 
 	if err := s.manifestCreator.ManifestCreate(name, finalYAML); err != nil {

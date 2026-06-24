@@ -311,6 +311,34 @@ func requiredSecretSet(m *config.ServerManifest) map[string]bool {
 	return set
 }
 
+// RequiredSecretAdmission runs the SAME AdmissionCheck owner and returns the
+// blocking required-secret finding (as the typed *AdmissionError) when a key in
+// m.RequiredSecrets is unset in the vault, or nil otherwise. It is the
+// pre-persist gate seam for callers that hold a PARSED-but-not-yet-written
+// manifest and must refuse the install BEFORE writing it to disk — chiefly the
+// GUI one-click hub-install handler, which calls ManifestCreate (a disk write)
+// before the production Install→Preflight gate runs, so without this a blocked
+// install would leave a manifest file behind.
+//
+// It deliberately surfaces ONLY the "required-secret" finding, NOT the full
+// Preflight set: ports / binaries / launchers are re-checked loud at the real
+// Install→Preflight gate (which loads the persisted manifest), and a parsed
+// in-memory draft may legitimately not yet satisfy a host port/binary check that
+// Install handles. Reusing AdmissionCheck + requiredSecretSet keeps this on the
+// single required-secret owner (no second predicate). Returns nil for a manifest
+// with no required_secrets (every existing manifest), so it is additive.
+func RequiredSecretAdmission(m *config.ServerManifest) error {
+	if m == nil {
+		return nil
+	}
+	for _, f := range AdmissionCheck(m, AdmissionScope{}) {
+		if f.ID == "required-secret" && !f.Optional {
+			return admissionErrorFromFinding(f)
+		}
+	}
+	return nil
+}
+
 // sortedRequiredSecretKeys returns the required-secret keys in a deterministic
 // order so the emitted findings are stable across runs (Go map iteration order
 // is randomized).
