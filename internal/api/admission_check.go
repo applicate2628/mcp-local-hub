@@ -259,22 +259,12 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 		// a confusing "<key> not set" on top of "vault unreadable".
 		if verr == nil {
 			for _, key := range sortedRequiredSecretKeys(reqSecrets) {
-				resolvable := false
-				if vault != nil {
-					// vault.Get returns ("", nil) when the key EXISTS but holds an
-					// empty string — a present-but-blank token. That is NOT resolved:
-					// a required server (e.g. mcp-suno) still hard-exits on startup
-					// with an empty ACEDATACLOUD_API_TOKEN, so a gate that passed on
-					// gerr==nil alone would let a crash-looping install through (codex
-					// finding 2). Treat a whitespace-only value as unresolved so the
-					// blocking finding still fires and the operator is told to set a
-					// real value. The Reason names the KEY only (redaction posture),
-					// never the value.
-					if v, gerr := vault.Get(key); gerr == nil && strings.TrimSpace(v) != "" {
-						resolvable = true
-					}
-				}
-				if !resolvable {
+				// requiredSecretResolved is the SINGLE OWNER of the resolved
+				// predicate (present AND non-blank via TrimSpace), shared with
+				// readiness.go so a present-but-blank required value blocks BOTH
+				// admission AND readiness in parity (codex finding 2). The Reason
+				// names the KEY only (redaction posture), never the value.
+				if !requiredSecretResolved(vault, key) {
 					add("required-secret", "secret: "+key, key+" is REQUIRED — the server exits on startup when it is unset", "Set it on the Secrets screen or `mcphub secrets set "+key+"` before installing.", false)
 				}
 			}
@@ -318,6 +308,25 @@ func requiredSecretSet(m *config.ServerManifest) map[string]bool {
 		set[k] = true
 	}
 	return set
+}
+
+// requiredSecretResolved is the SINGLE OWNER of the "is this required-secret key
+// RESOLVED?" predicate, consumed by BOTH the AdmissionCheck blocking loop (above)
+// and the readiness per-key required-secret classification (readiness.go), so the
+// two can never drift on what counts as resolved. A key is resolved ONLY when it
+// is present in the vault AND holds a non-whitespace value: vault.Get returns
+// ("", nil) for a present-but-BLANK entry, but a required server (e.g. mcp-suno)
+// still hard-exits on startup with an empty ACEDATACLOUD_API_TOKEN, so a
+// blank/whitespace-only value is NOT resolved (codex finding 2). A nil vault
+// (absent or unreadable) resolves nothing. Any future resolution rule lives here,
+// in this one place — admission and readiness MUST keep calling this owner so a
+// blank required value blocks BOTH (Ready=false AND admission-blocked).
+func requiredSecretResolved(vault *secrets.Vault, key string) bool {
+	if vault == nil {
+		return false
+	}
+	v, err := vault.Get(key)
+	return err == nil && strings.TrimSpace(v) != ""
 }
 
 // RequiredSecretAdmission runs the SAME AdmissionCheck owner and returns the

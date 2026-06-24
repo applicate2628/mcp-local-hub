@@ -144,8 +144,23 @@ func TestMarketplaceInstall_HubUnreadableVaultBlocksBeforeManifestCreate(t *test
 	if body := rec.Body.String(); !strings.Contains(body, "REQUIRED_SECRET_MISSING") {
 		t.Errorf("body missing REQUIRED_SECRET_MISSING code: %q", body)
 	}
-	// The secret-vault-readable Reason names the vault problem (no value leaked).
-	if body := rec.Body.String(); !strings.Contains(body, "vault") {
-		t.Errorf("body should name the unreadable-vault problem: %q", body)
+	// codex finding 1 — the 412 body must use the REDACTED generic vault message,
+	// NOT the raw OpenVaultOptional error, which embeds the absolute vault/key FILE
+	// PATH (DefaultKeyPath/DefaultVaultPath) and, on corp hosts, the AD username in
+	// C:\Users\<name>\.... The redacted message names the vault problem + the
+	// Secrets screen, with no path.
+	body := rec.Body.String()
+	if !strings.Contains(body, "secrets vault could not be read") {
+		t.Errorf("body should carry the redacted vault message; got %q", body)
+	}
+	// The temp data dir path (and the raw-error fragments that carry it) must NOT
+	// leak into the HTTP body.
+	if strings.Contains(body, dataDir) {
+		t.Errorf("412 body LEAKS the vault directory path %q: %q", dataDir, body)
+	}
+	for _, leak := range []string{"secrets.age", "read identity", "vault exists but unreadable", "uses secret refs"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("412 body leaks raw vault-error fragment %q: %q", leak, body)
+		}
 	}
 }

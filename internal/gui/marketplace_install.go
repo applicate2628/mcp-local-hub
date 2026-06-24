@@ -248,8 +248,25 @@ func (s *Server) handleMarketplaceHubInstall(w http.ResponseWriter, req *marketp
 	if err := api.RequiredSecretAdmission(parsed); err != nil {
 		// 412 Precondition Failed (NOT 409 — that is NAME_CONFLICT, which the
 		// frontend branches on by HTTP code): the required-secret precondition is
-		// unmet. The AdmissionError's Reason names the KEY only (redaction posture),
-		// so it is safe to surface to the operator as the actionable fix.
+		// unmet. RequiredSecretAdmission surfaces TWO findings (admission_check.go):
+		//   - "required-secret"        — Reason names the KEY only (no path); safe to
+		//                                surface verbatim as the actionable fix.
+		//   - "secrets-vault-readable" — Reason wraps the raw OpenVaultOptional error,
+		//                                which embeds the absolute vault/key FILE PATH
+		//                                (DefaultKeyPath/DefaultVaultPath) and on
+		//                                corp-managed hosts the AD username in
+		//                                C:\Users\<name>\... (codex finding 1). Echoing
+		//                                it to the HTTP body leaks that path, so the
+		//                                vault-unreadable case gets a REDACTED generic
+		//                                message (matching readiness.go:879's posture)
+		//                                while the raw error is logged server-side for
+		//                                diagnosis.
+		var admErr *api.AdmissionError
+		if errors.As(err, &admErr) && admErr.ID == "secrets-vault-readable" {
+			log.Printf("/api/marketplace/install required-secret gate name=%q: %v", name, err)
+			writeAPIError(w, errors.New("the secrets vault could not be read — check it on the Secrets screen"), http.StatusPreconditionFailed, "REQUIRED_SECRET_MISSING")
+			return
+		}
 		writeAPIError(w, err, http.StatusPreconditionFailed, "REQUIRED_SECRET_MISSING")
 		return
 	}

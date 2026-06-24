@@ -144,18 +144,51 @@ func catalogProbeToConfig(p *CatalogAvailabilityProbe) *config.AvailabilityProbe
 	}
 }
 
-// ParseMarketplaceCatalog decodes raw JSON. Returns the first error
-// per spec §"Threat model" (malformed catalogs reject wholesale,
-// never partial-accept).
+// ParseMarketplaceCatalog decodes raw JSON that a DEPLOYED CLIENT FETCHED from a
+// registry. Returns the first error per spec §"Threat model" (malformed catalogs
+// reject wholesale, never partial-accept).
 //
-// codex r5 P2 closure: rejects trailing bytes after the top-level
-// JSON object so a valid catalog appended with garbage (or a second
-// object) cannot be silently accepted. Mirrors the registry-source
-// "single canonical document" contract from §"Threat model".
+// FORWARD-COMPAT (codex catalog finding 4 / architect path A): the FETCH decode
+// DELIBERATELY does NOT call DisallowUnknownFields. A future v2-additive field
+// added to catalog.json must be NON-BREAKING for already-deployed older clients,
+// so an unknown key on a v2 catalog parses and is IGNORED by the typed decode
+// rather than rejecting the whole catalog. The structural guards that DO survive:
+//   - trailing-byte rejection (a second/garbage top-level object is still refused),
+//   - schema-version acceptance (only v1/v2 are accepted),
+//   - the newCatalogFieldsRequireV2 v1-gate, which is KEY-PRESENCE based
+//     (catalogEntryNewKeyPresence) so a v1 catalog STILL cannot carry a v2 key,
+//   - per-entry validation + duplicate-id detection.
+// The STRICT no-unknown-key check belongs on the bytes WE author, not the bytes a
+// deployed client fetches — see ParseMarketplaceCatalogStrict / the author-side
+// catalog test (marketplace_tier1_catalog_test.go), which feeds a typo'd key and
+// asserts rejection so the repo's own catalog still catches authoring typos.
+//
+// codex r5 P2 closure: rejects trailing bytes after the top-level JSON object so a
+// valid catalog appended with garbage (or a second object) cannot be silently
+// accepted. Mirrors the registry-source "single canonical document" contract from
+// §"Threat model".
 func ParseMarketplaceCatalog(raw []byte) (*MarketplaceCatalog, error) {
+	return parseMarketplaceCatalog(raw, false)
+}
+
+// ParseMarketplaceCatalogStrict is the AUTHOR-SIDE decode: identical to
+// ParseMarketplaceCatalog but ALSO rejects unknown keys (DisallowUnknownFields).
+// It is for validating the bytes WE author (the in-repo catalog.json), so a typo'd
+// field name (e.g. `instal_probe`) is caught at authoring/test time. It is NOT on
+// the deployed-client fetch path — a fetched catalog with a future additive field
+// must stay non-breaking there (see ParseMarketplaceCatalog).
+func ParseMarketplaceCatalogStrict(raw []byte) (*MarketplaceCatalog, error) {
+	return parseMarketplaceCatalog(raw, true)
+}
+
+func parseMarketplaceCatalog(raw []byte, strictUnknownFields bool) (*MarketplaceCatalog, error) {
 	var cat MarketplaceCatalog
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
+	if strictUnknownFields {
+		// Author-side only: catch typo'd keys in the repo's own catalog. The
+		// deployed-client fetch path leaves this off for additive forward-compat.
+		dec.DisallowUnknownFields()
+	}
 	if err := dec.Decode(&cat); err != nil {
 		return nil, fmt.Errorf("decode catalog: %w", err)
 	}

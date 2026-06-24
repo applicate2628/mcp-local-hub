@@ -222,6 +222,13 @@ func BuildInMemorySerenaDynamicPoolManifest(m *config.ServerManifest) (*config.S
 		VendoredSource: cloneVendoredSource(m.VendoredSource),
 		Availability:   m.Availability,
 		InstallProbe:   cloneAvailabilityProbe(m.InstallProbe),
+		// Required-secret install gate carry-through: the synthesized manifest is
+		// what the install/admission gates see, so DROPPING RequiredSecrets here
+		// would let a dynamic-pool source manifest with required_secrets install
+		// with the gate silently lost (codex finding 3). Deep-copy the slice so out
+		// is independent of the embed. ADDITIVE: a nil/empty embed (the shipped
+		// serena manifest) produces a byte-identical out.
+		RequiredSecrets: append([]string(nil), m.RequiredSecrets...),
 	}
 	// Validate the synthesized shape eagerly so a malformed embed (e.g. a
 	// --context token smuggled into base_args, an empty effective context, or an

@@ -152,8 +152,32 @@ func TestRequiredSecretGate_EmptyValueBlocks(t *testing.T) {
 		t.Fatal("Preflight passed with a present-but-EMPTY required secret; an empty token must block (server crash-loops on it)")
 	}
 	// Parity: readiness must also see the empty value as blocking (Ready=false).
-	if CheckServerReadiness(m).Ready {
+	rep := CheckServerReadiness(m)
+	if rep.Ready {
 		t.Fatal("readiness Ready=true with a present-but-EMPTY required secret; want false")
+	}
+	// Non-vacuous parity at the ROW level: assert the SPECIFIC required-secret row
+	// is OK=false, not merely that overall Ready is false (which some other failing
+	// requirement could satisfy by accident). Before the requiredSecretResolved
+	// collapse, readiness used checkSecretRefs → resolver.Resolve → vault.Get, which
+	// returns ("",nil) for a present-but-blank key, so this row was painted OK=true
+	// (GREEN) while admission BLOCKED — the exact divergence (codex finding 2). Now
+	// both call the single requiredSecretResolved owner, so a blank value blocks both.
+	var secretRow *ReadinessRequirement
+	for i := range rep.Requirements {
+		if rep.Requirements[i].Name == "secret: acedata_api_token" {
+			secretRow = &rep.Requirements[i]
+			break
+		}
+	}
+	if secretRow == nil {
+		t.Fatalf("no secret row surfaced for the required key; requirements=%#v", rep.Requirements)
+	}
+	if secretRow.OK {
+		t.Errorf("required-secret readiness row OK=true with a present-but-EMPTY value; admission blocks it, so readiness must too (parity)")
+	}
+	if secretRow.Optional {
+		t.Errorf("required-secret readiness row Optional=true; a required secret must render blocking (RED)")
 	}
 }
 
@@ -170,6 +194,14 @@ func TestRequiredSecretGate_WhitespaceValueBlocks(t *testing.T) {
 	}
 	if err := Preflight(m, ""); err == nil {
 		t.Fatal("Preflight passed with a whitespace-only required secret; want block")
+	}
+	// Readiness row parity: the whitespace-only value must paint the row OK=false
+	// (the shared requiredSecretResolved owner TrimSpaces it to unresolved).
+	rep := CheckServerReadiness(m)
+	for i := range rep.Requirements {
+		if rep.Requirements[i].Name == "secret: acedata_api_token" && rep.Requirements[i].OK {
+			t.Errorf("required-secret readiness row OK=true for a whitespace-only value; want false (parity with admission block)")
+		}
 	}
 }
 

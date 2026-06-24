@@ -1,11 +1,37 @@
 ---
-status: open
+status: done
 severity: medium
 context: adjacent-finding
-defer: true
+defer: false
+folded-into: PR #430
+closed: 2026-06-25
 ---
 
 # Make `ParseMarketplaceCatalog` tolerate unknown fields on the FETCH/cache path (strict at authoring/CI)
+
+## RESOLUTION (2026-06-25 — folded into PR #430)
+
+Path A was implemented in PR #430 after the bot re-raised the P1 despite the
+verified-no-deployed-break reply (option B was not getting a PASS, so the robust
+fix ships here). Concretely, in `internal/api/marketplace_catalog.go`:
+
+- `ParseMarketplaceCatalog` (the FETCH decode) no longer calls
+  `DisallowUnknownFields`, so a v2 catalog with a future additive field parses and
+  the unknown key is ignored — non-breaking for an already-deployed older client.
+- The structural guards SURVIVE: trailing-byte rejection, schema-version
+  acceptance, duplicate-id detection, per-entry validation, and the
+  `newCatalogFieldsRequireV2` v1-gate (KEY-PRESENCE based via
+  `catalogEntryNewKeyPresence`, so a v1 catalog still cannot carry a v2 key).
+- A new `ParseMarketplaceCatalogStrict` (DisallowUnknownFields) is the AUTHOR-side
+  decode for the bytes WE author; the catalog test
+  (`marketplace_tier1_catalog_test.go`) round-trips the real v1+v2 catalogs through
+  it AND asserts a typo'd key is rejected, while the fetch path tolerates the same
+  bytes.
+- The on-disk cache read (`readMarketplaceCache`, `marketplace_cache.go:243`)
+  already used plain `json.Unmarshal` — no change needed.
+
+`$security-reviewer` runs on PR #430 before merge (the trust-boundary review this
+item flagged as mandatory).
 
 ## Summary (codex PR #430 finding 1 — the CLASS fix)
 
@@ -83,6 +109,6 @@ pattern.
 
 ## Disposition
 
-DEFER until a v2-default binary is scheduled for a release tag. Then implement
-path A (fetch-tolerant decode + CI-strict authoring validator) as its own
-security-reviewed PR.
+DONE — folded into PR #430 (see RESOLUTION above). Path A (fetch-tolerant decode
++ author-strict validator) shipped in #430 rather than waiting for a v2-default
+release tag, because the bot re-raised it as a P1 that option B could not clear.

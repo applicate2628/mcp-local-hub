@@ -145,6 +145,124 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	}
 }
 
+// --- codex catalog finding 4 / architect path A: fetch-tolerance + author-strict ---
+
+// TestParseCatalog_FetchToleratesUnknownAdditiveField proves the FETCH decode is
+// forward-compatible: a v2 catalog carrying a FUTURE additive field the current
+// build does not know about parses cleanly (the unknown key is ignored by the
+// typed decode) instead of rejecting the whole catalog. This is what keeps an
+// already-deployed older client non-broken when a new v2-additive field ships.
+func TestParseCatalog_FetchToleratesUnknownAdditiveField(t *testing.T) {
+	raw := `{
+  "schema_version": "2",
+  "entries": [
+    {
+      "id": "future-thing",
+      "name": "Future Thing",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["x"],
+      "future_additive_field_v3": {"some": "value"}
+    }
+  ]
+}`
+	cat, err := ParseMarketplaceCatalog([]byte(raw))
+	if err != nil {
+		t.Fatalf("fetch decode rejected a v2 catalog with an unknown additive field; want forward-compat tolerance: %v", err)
+	}
+	if len(cat.Entries) != 1 || cat.Entries[0].ID != "future-thing" {
+		t.Fatalf("entry not parsed despite the unknown field: %#v", cat.Entries)
+	}
+}
+
+// TestParseCatalog_FetchStructuralGuardsSurvive proves the structural guards
+// dropping DisallowUnknownFields did NOT weaken: trailing bytes, a bad
+// schema_version, a duplicate id, and a v1 catalog carrying a v2 key are all still
+// rejected on the FETCH path.
+func TestParseCatalog_FetchStructuralGuardsSurvive(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		wantSub string
+	}{
+		{
+			name:    "trailing bytes",
+			raw:     `{"schema_version":"2","entries":[]}  {"x":1}`,
+			wantSub: "trailing bytes",
+		},
+		{
+			name:    "bad schema_version",
+			raw:     `{"schema_version":"99","entries":[]}`,
+			wantSub: "schema_version",
+		},
+		{
+			name:    "duplicate id",
+			raw:     `{"schema_version":"2","entries":[{"id":"dup","name":"A","transport":"stdio","command":"uvx","args":["x"]},{"id":"dup","name":"B","transport":"stdio","command":"uvx","args":["x"]}]}`,
+			wantSub: "duplicate id",
+		},
+		{
+			name:    "v1 catalog carrying a v2 key (key-presence gate)",
+			raw:     `{"schema_version":"1","entries":[{"id":"x","name":"X","transport":"stdio","command":"uvx","args":["x"],"availability":""}]}`,
+			wantSub: "schema_version",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseMarketplaceCatalog([]byte(tc.raw))
+			if err == nil {
+				t.Fatalf("ParseMarketplaceCatalog accepted %s; want rejection", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("error = %q, want it to mention %q", err.Error(), tc.wantSub)
+			}
+		})
+	}
+}
+
+// TestParseCatalogStrict_RealCatalogsPass proves the author-side strict decode
+// (DisallowUnknownFields) accepts the repo's OWN catalogs — so the strict gate is
+// a real, passing assertion the in-repo catalog.json must keep satisfying, not a
+// vacuous one.
+func TestParseCatalogStrict_RealCatalogsPass(t *testing.T) {
+	for _, p := range []string{v1CatalogPath(), v2CatalogPath()} {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("catalog not readable at %s: %v", p, err)
+		}
+		if _, err := ParseMarketplaceCatalogStrict(raw); err != nil {
+			t.Fatalf("the repo's own catalog %s failed the strict author decode (an unknown/typo key crept in): %v", p, err)
+		}
+	}
+}
+
+// TestParseCatalogStrict_RejectsTypoKey proves the author-strict decode catches a
+// typo'd field name — the protection the fetch path deliberately gives up. The
+// fetch path tolerates the same typo'd-key bytes (it cannot tell a typo from a
+// future additive field), so this guard lives ONLY on the author side.
+func TestParseCatalogStrict_RejectsTypoKey(t *testing.T) {
+	raw := `{
+  "schema_version": "2",
+  "entries": [
+    {
+      "id": "typo-row",
+      "name": "Typo Row",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["x"],
+      "instal_probe": {"binaries": ["go"]}
+    }
+  ]
+}`
+	if _, err := ParseMarketplaceCatalogStrict([]byte(raw)); err == nil {
+		t.Fatal("strict author decode accepted a typo'd key (instal_probe); want rejection")
+	}
+	// The SAME bytes must be TOLERATED on the fetch path (forward-compat): the
+	// typo is indistinguishable from a future additive field at fetch time.
+	if _, err := ParseMarketplaceCatalog([]byte(raw)); err != nil {
+		t.Fatalf("fetch decode rejected the unknown key; the author-strict guard must be the ONLY rejector: %v", err)
+	}
+}
+
 // TestV1CatalogFrozen_ParsesAsSchema1WithNoNewKeys is the FREEZE guard: the
 // repointed default URL now serves v2, but marketplace/v1/catalog.json MUST stay
 // frozen so an OLDER released client hard-coded to the v1 URL still resolves. It
