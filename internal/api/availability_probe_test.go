@@ -117,84 +117,86 @@ func TestGlobProbeMatches_GlobMatchesMultipleVersions(t *testing.T) {
 	}
 }
 
-// TestFileProbeMatches_AbletonBroadenedGlobCoversAllEditions is the Tier-1
-// acceptance for the BROADENED ableton probe (this PR): the catalog glob was
-// narrowed to Suite-only ("…\\Live * Suite\\Program\\Ableton Live * Suite.exe"),
-// which the ableton-mcp README contradicts — it supports Live 10+ in ANY edition.
-// The broadened pattern "…\\Live *\\Program\\Ableton Live *.exe" must match a
-// Suite install AND a Standard install from ONE shared catalog row, while the OLD
-// Suite-only pattern would MISS the Standard edition. Uses temp dirs +
-// filepath.Join so it is host-OS correct on every build. The real catalog pattern
-// is rooted at C:\ProgramData\Ableton; here the root is a temp dir but the
-// edition-spanning segment shape ("Live <ver> <edition>") is identical.
-func TestGlobProbeMatches_AbletonBroadenedGlobCoversAllEditions(t *testing.T) {
+// TestGlobProbeMatches_AbletonGlobNarrowedToLive11Plus is the Tier-1 acceptance for
+// the NARROWED ableton probe (PR #429 follow-up, codex catalog.json:319 finding):
+// the build-fixed extended fork advertises Ableton Live 11 or NEWER and does NOT
+// support Live 10. The prior probe glob ("…\\Live *\\Program\\Ableton Live *.exe")
+// matched Live 10 too, so a Live-10-only host wrongly passed admission for a server
+// it cannot drive. The narrowed catalog glob uses the version char-class
+// "…\\Live 1[1-9]*\\…\\Ableton Live 1[1-9]*.exe" — the 1[1-9] class matches the
+// supported Live 11-19 (across every edition Suite/Standard/Intro/Lite) and EXCLUDES
+// Live 10 (third version digit 0 is outside the 1-9 class), the same [^7]/[89]-style
+// version-class technique kicad's glob uses. Uses temp dirs + filepath.Join so it is
+// host-OS correct on every build; the real catalog pattern is rooted at
+// C:\ProgramData\Ableton but the version-class + edition-spanning segment shape is
+// identical here.
+func TestGlobProbeMatches_AbletonGlobNarrowedToLive11Plus(t *testing.T) {
 	base := t.TempDir()
-	// Two installs differing by EDITION (not just version): a Suite and a Standard,
-	// each with the matching "Ableton Live <ver> <edition>.exe" the shipped
-	// installer lays down (verified against the host's real Live 11/12 Suite layout).
-	installs := []struct{ dir, exe string }{
+	// SUPPORTED installs (Live 11+) differing by EDITION (Suite + Standard), each with
+	// the "Ableton Live <ver> <edition>.exe" the shipped installer lays down (verified
+	// against the host's real Live 11/12 Suite layout), PLUS one UNSUPPORTED Live 10
+	// that the narrowed glob must EXCLUDE.
+	supported := []struct{ dir, exe string }{
 		{"Live 11 Suite", "Ableton Live 11 Suite.exe"},
 		{"Live 12 Standard", "Ableton Live 12 Standard.exe"},
 	}
-	for _, in := range installs {
-		prog := filepath.Join(base, in.dir, "Program")
+	unsupported := struct{ dir, exe string }{"Live 10 Suite", "Ableton Live 10 Suite.exe"}
+	mkInstall := func(dir, exe string) {
+		prog := filepath.Join(base, dir, "Program")
 		if err := os.MkdirAll(prog, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", prog, err)
 		}
-		if err := os.WriteFile(filepath.Join(prog, in.exe), []byte("x"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(prog, exe), []byte("x"), 0o644); err != nil {
 			t.Fatalf("write exe: %v", err)
 		}
 	}
+	for _, in := range supported {
+		mkInstall(in.dir, in.exe)
+	}
+	mkInstall(unsupported.dir, unsupported.exe)
 
-	// BROADENED pattern (this PR): edition word dropped, so the spanning `*`
-	// covers "11 Suite", "12 Standard", "11 Intro", etc.
-	broadened := filepath.Join(base, "Live *", "Program", "Ableton Live *.exe")
-	// OLD Suite-only pattern (what shipped first), reconstructed here to PROVE the
-	// broadening is load-bearing: it must NOT see the Standard edition.
-	suiteOnly := filepath.Join(base, "Live * Suite", "Program", "Ableton Live * Suite.exe")
+	// NARROWED pattern (this change): the version char-class 1[1-9] matches Live 11-19
+	// in ANY edition (the spanning `*` after it covers "11 Suite", "12 Standard", …)
+	// and EXCLUDES Live 10. This mirrors the shipped catalog glob exactly (temp root).
+	narrowed := filepath.Join(base, "Live 1[1-9]*", "Program", "Ableton Live 1[1-9]*.exe")
 
-	// Broadened: ANY match is a runnable regular file → pass (it sees BOTH editions).
-	if ok, why := globProbeMatches(broadened); !ok {
-		t.Fatalf("broadened ableton glob over Suite+Standard failed: %q", why)
+	// Narrowed: ANY supported match is a runnable regular file → pass.
+	if ok, why := globProbeMatches(narrowed); !ok {
+		t.Fatalf("narrowed ableton glob over Live 11/12 failed: %q", why)
 	}
 	// And through the full availabilityProbePasses owner via the file_globs[] field
-	// (the install/readiness path) — this is the OPT-IN glob the ableton catalog row
-	// now declares.
-	if ok, why := availabilityProbePasses(&config.AvailabilityProbe{FileGlobs: []string{broadened}}); !ok {
-		t.Fatalf("availabilityProbePasses with the broadened ableton file_globs[] failed: %q", why)
+	// (the install/readiness path) — the OPT-IN glob the ableton catalog row declares.
+	if ok, why := availabilityProbePasses(&config.AvailabilityProbe{FileGlobs: []string{narrowed}}); !ok {
+		t.Fatalf("availabilityProbePasses with the narrowed ableton file_globs[] failed: %q", why)
 	}
-	// Confirm the broadened pattern actually matches BOTH editions (not just one) —
-	// the edition-coverage claim, not merely "some match exists".
-	matches, err := filepath.Glob(broadened)
+
+	// EXACT match set: the narrowed glob must match the TWO supported installs
+	// (Live 11 Suite + Live 12 Standard) and NOT the Live 10 Suite — that exclusion is
+	// the whole point of the narrowing.
+	matches, err := filepath.Glob(narrowed)
 	if err != nil {
-		t.Fatalf("glob broadened pattern: %v", err)
+		t.Fatalf("glob narrowed pattern: %v", err)
 	}
 	if len(matches) != 2 {
-		t.Fatalf("broadened glob matched %d installs, want 2 (Suite + Standard): %v", len(matches), matches)
+		t.Fatalf("narrowed glob matched %d installs, want exactly 2 (Live 11 Suite + Live 12 Standard, NOT Live 10): %v", len(matches), matches)
 	}
-
-	// The OLD Suite-only pattern is the contrast that proves the broadening matters:
-	// it matches ONLY the Suite install, missing the Standard one. (With ONLY the
-	// Standard edition present it would match nothing — the regression the
-	// broadening fixes.)
-	suiteMatches, err := filepath.Glob(suiteOnly)
-	if err != nil {
-		t.Fatalf("glob suite-only pattern: %v", err)
-	}
-	if len(suiteMatches) != 1 {
-		t.Fatalf("suite-only glob matched %d installs, want exactly 1 (Suite); broadening is what adds the rest: %v", len(suiteMatches), suiteMatches)
-	}
-
-	// Remove BOTH installs → the broadened glob matches nothing → fail inert
-	// (does not exist), proving it is genuinely host-presence-driven (fail-closed).
-	for _, in := range installs {
-		if err := os.RemoveAll(filepath.Join(base, in.dir)); err != nil {
-			t.Fatalf("rm install dir: %v", err)
+	for _, m := range matches {
+		if strings.Contains(m, "Live 10") {
+			t.Fatalf("narrowed glob wrongly matched a Live 10 install %q — the extended fork drops Live 10 support", m)
 		}
 	}
-	ok, why := globProbeMatches(broadened)
+
+	// Remove the supported installs, keep ONLY the unsupported Live 10 → the narrowed
+	// glob now matches NOTHING (it excludes Live 10), so the probe fails inert
+	// (does not exist). Proves a Live-10-only host does NOT pass admission.
+	for _, in := range supported {
+		if err := os.RemoveAll(filepath.Join(base, in.dir)); err != nil {
+			t.Fatalf("rm supported install dir: %v", err)
+		}
+	}
+	ok, why := globProbeMatches(narrowed)
 	if ok {
-		t.Fatalf("broadened ableton glob passed with no install present; want fail")
+		t.Fatalf("narrowed ableton glob passed with only an unsupported Live 10 install present; want fail (Live 10 is excluded)")
 	}
 	if !strings.Contains(why, "does not exist") {
 		t.Fatalf("no-match reason %q, want \"does not exist\" (fail-closed)", why)
