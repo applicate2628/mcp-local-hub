@@ -439,7 +439,7 @@
     {
       "id": "kicad",
       "name": "KiCad MCP server",
-      "summary": "Drive KiCad EDA from an AI client — PCB design, DRC, simulation, BOM, DFM, and manufacturing — through kicad-cli and the KiCad IPC / SWIG scripting API. Community server oaslananka/kicad-mcp (Python), published to PyPI as kicad-mcp-pro and pinned to v3.14.1; run via uvx with the version pinned in --from (like the ansys row's PyPI pin), so it carries a vendored_source block (community fork, MIT). PRIVACY: telemetry is OFF by default (no usage data is transmitted unless the operator opts in — the server's OTLP export is opt-in and points only at an operator-supplied collector), so this row needs no telemetry-disable env. SAFETY: the remote tools are read-only by default and destructive operations (writes to the board/schematic, manufacturing output) require explicit operator consent. disabled-until-probe: enables only when a local KiCad install is detected via the version-narrowed glob C:\\Program Files\\KiCad\\[89]*\\bin\\kicad-cli.exe — KiCad lays kicad-cli.exe down under a per-version root (C:\\Program Files\\KiCad\\8.0\\bin\\, \\9.0\\bin\\, …) and the [89]* char-class matches the 8.x and 9.x roots while EXCLUDING 7.x. requires KiCad 8.x or 9.x (the kicad-mcp-pro server does not support KiCad 7 or earlier; 10.x support lands when KiCad 10 ships). REQUIRES Python 3.13+ and uv on PATH and a host KiCad install. Windows + KiCad desktop only in this probe.",
+      "summary": "Drive KiCad EDA from an AI client — PCB design, DRC, simulation, BOM, DFM, manufacturing — through kicad-cli and the KiCad IPC / SWIG scripting API. Community server oaslananka/kicad-mcp (Python), published to PyPI as kicad-mcp-pro, pinned to v3.14.1 and run via uvx with the version pinned in --from (vendored_source block, community fork, MIT). PRIVACY: telemetry is OFF by default (the server's OTLP export is opt-in and points only at an operator-supplied collector), so no telemetry-disable env is needed. SAFETY: remote tools are read-only by default; destructive operations (board/schematic writes, manufacturing output) require explicit operator consent. disabled-until-probe: enables when uvx is on PATH AND a local KiCad install is detected via the glob C:\\Program Files\\KiCad\\[^7]*\\bin\\kicad-cli.exe — the [^7]* char-class matches every KiCad version root EXCEPT 7.x (so KiCad 8.x / 9.x / 10.x and newer all match; kicad-mcp-pro requires KiCad 8+ and does not support 7.x). REQUIRES Python 3.13+ and uv on PATH, plus a host KiCad 8.x-or-newer install. Windows + KiCad desktop only in this probe.",
       "homepage": "https://github.com/oaslananka/kicad-mcp",
       "readme_url": "https://raw.githubusercontent.com/oaslananka/kicad-mcp/e0ffa7c6f6c36a1ca9e22917ba2a7c6d60ed3e8a/README.md",
       "transport": "stdio",
@@ -463,7 +463,7 @@
           "uvx"
         ],
         "file_globs": [
-          "C:\\Program Files\\KiCad\\[89]*\\bin\\kicad-cli.exe"
+          "C:\\Program Files\\KiCad\\[^7]*\\bin\\kicad-cli.exe"
         ]
       },
       "vendored_source": {
