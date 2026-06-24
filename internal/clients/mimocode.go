@@ -1623,53 +1623,19 @@ func mimoCodeFileDefines(path, name string) (bool, error) {
 	return mimoCodeMapDefines(m, name), nil
 }
 
-// mimoCodeFileDefinesStdioLSP reports whether the JSONC file at path defines
-// mcp.<name> AND that WRITE-TARGET value is ITSELF a stdio mcp-language-server
-// entry. The shape test routes through the single canonical classifier
-// (matchLanguageServerStdio) after the SAME normalization the merged-view match
-// applied (array `command` → string command + args, then disabled-dropped), so
-// the write-target shape is judged by the exact same owner that produced the
-// match. A missing/empty file → false; a parse error on present bytes propagates.
-//
-// This is the write-target SHAPE gate for FindStdioLanguageServerEntries (bot PR
-// #420 r12 HIGH finding). Name-membership alone (mimoCodeFileDefines) is NOT
-// enough: a name can be stdio in a HIGHER layer (so the merged-view match is
-// stdio) yet REMOTE in the write target, and RemoveEntry deletes the write
-// target's value — reporting on name alone would wrong-delete the write-target
-// remote and leave the higher stdio active. Reporting only when the write
-// target's OWN value is stdio-LSP keeps the destructive cleanup honest.
-func mimoCodeFileDefinesStdioLSP(path, name string) (bool, error) {
-	data, err := readRawConfig(path)
-	if err != nil {
-		return false, err
-	}
-	if len(data) == 0 {
-		return false, nil
-	}
-	m, err := parseJSONCBytes(data)
-	if err != nil {
-		return false, fmt.Errorf("parse %s: %w", path, err)
-	}
-	servers, _ := m[mimoCodeMCPKey].(map[string]any)
-	if servers == nil {
-		return false, nil
-	}
-	// Reuse the merged-view normalization + disabled-drop so the write-target
-	// value is classified exactly as the merged match was, then run the single
-	// canonical stdio-LSP classifier over the one named entry.
-	normalized := mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers))
-	entry, ok := normalized[name].(map[string]any)
-	if !ok {
-		return false, nil
-	}
-	_, _, isStdioLSP := matchLanguageServerStdio(entry)
-	return isStdioLSP, nil
-}
+// The write-target stdio-LSP SHAPE gate is mimoCodeWriteTargetDefinesStdioLSP (defined
+// next to its plain-stdio sibling mimoCodeWriteTargetDefinesStdio). It reads the write
+// target's OWN value via mimoCodeFileEntryValue WITHOUT a disabled-drop so an enabled:false
+// write-target entry a higher overlay re-enables is still judged OWNED (bot PR #425
+// FINDING 2); name-membership alone (mimoCodeFileDefines) is NOT enough — a name can be
+// stdio in a HIGHER layer yet REMOTE in the write target, and RemoveEntry deletes the
+// write-target value, so reporting on name alone would wrong-delete the write-target remote
+// and leave the higher stdio active.
 
 // mimoCodeFileEntryValue returns the WRITE-target file's OWN parsed mcp.<name>
 // map — the value PHYSICALLY present in `path`, independent of the merged
-// multi-layer view. Modeled on mimoCodeFileDefinesStdioLSP's single-file
-// read+parse (readRawConfig + parseJSONCBytes) so the parse is a single owner,
+// multi-layer view. Uses the same single-file read+parse idiom as
+// mimoCodeFileDefines (readRawConfig + parseJSONCBytes) so the parse is a single owner,
 // NOT re-implemented here.
 //
 //   - absent/empty file, or no such name → (nil, false, nil).
@@ -1880,24 +1846,26 @@ func (o *mimoCodeClient) readMergedLayersExcluding(skipName string) (map[string]
 		// RemoveEntry touches); every other layer folds verbatim.
 		//
 		// KNOWN LIMITATION — hard-link inode identity (bot PR #425 follow-up
-		// FINDING 1, architect-ruled ACCEPTABLE RESIDUAL, P3). The write-target
-		// layer is matched by INODE identity (mimoCodePathsSamePhysical → os.SameFile),
-		// not by path string, so the exclusion fires for ANY layer file that shares
-		// the write target's inode. If an operator DELIBERATELY hard-links a
-		// LOWER-layer config.json to the write-target mimocode.json (two distinct
-		// MiMoCode global layers pointing at one inode — a non-default manual setup),
-		// this simulate models BOTH as losing skipName, so it predicts the lower
-		// inode's entry also disappears. PRODUCTION diverges: RemoveEntry writes via
-		// atomic temp-file + rename (setMember/deleteMember), which BREAKS the hard
-		// link and leaves the lower inode's entry LIVE — so the name actually
-		// re-emerges from the still-live lower layer. The mismatch is therefore a
-		// FALSE-removable prediction whose re-emergence lands on the BELOW-target
-		// (intended-rollback) layer; it requires a deliberate, non-default manual
-		// hard-link of two distinct global layers and causes NO data loss. Do NOT
-		// "fix" by switching to path-string equality: mimoCodePathsSamePhysical's
-		// FOUR shadow-walk callers correctly NEED inode identity (they must treat a
-		// path that IS the write target by another name as the write target). Tracked
-		// in work-items/bugs/2026-06-24-mimocode-hardlink-simulate-residual.md.
+		// FINDING 1/3). The write-target layer is matched by INODE identity
+		// (mimoCodePathsSamePhysical → os.SameFile), not by path string, so the
+		// exclusion fires for ANY layer file that shares the write target's inode. If
+		// an operator DELIBERATELY hard-links a LOWER-layer config.json to the
+		// write-target mimocode.json (two distinct MiMoCode global layers pointing at
+		// one inode — a non-default manual setup), this simulate models BOTH as losing
+		// skipName, so it predicts the lower inode's entry also disappears. PRODUCTION
+		// diverges: RemoveEntry writes via atomic temp-file + rename
+		// (setMember/deleteMember), which BREAKS the hard link and leaves the lower
+		// inode's entry LIVE — so the name actually re-emerges from the still-live
+		// lower layer. This simulate is DELIBERATELY left as-is (do NOT "fix" by
+		// switching to path-string equality: mimoCodePathsSamePhysical's FOUR
+		// shadow-walk callers correctly NEED inode identity — they must treat a path
+		// that IS the write target by another name as the write target). Instead the
+		// false-removable prediction is BLOCKED at the destructive-consumer level by
+		// mimoCodeLowerLayerHardLinkedToWriteTargetDefines (the FINDING-1-corrected
+		// true-hard-link detector), called by the register-grain candidate methods AND
+		// the workspace-free CLI methods (FindStdioLanguageServerEntries +
+		// RemovableStdioEntries). Tracked in
+		// work-items/bugs/2026-06-24-mimocode-hardlink-simulate-residual.md.
 		if skipName != "" && mimoCodePathsSamePhysical(f, o.path) {
 			m = mimoCodeLayerWithoutMCPName(m, skipName)
 		}
@@ -3324,7 +3292,7 @@ func (o *mimoCodeClient) mimoCodeOwnedAtOrAboveWriteTarget(name string) (bool, e
 // BRANCH (a) is SEPARATE and UNTOUCHED. This predicate is branch (b) only — the
 // cross-layer re-resolve test. The write-target-OWNERSHIP gate
 // (mimoCodeWriteTargetDefinesStdio for RemovableStdioEntries,
-// mimoCodeFileDefinesStdioLSP for FindStdioLanguageServerEntries) stays a distinct
+// mimoCodeWriteTargetDefinesStdioLSP for FindStdioLanguageServerEntries) stays a distinct
 // caller-side check that runs BEFORE this. Folding ownership into the simulate
 // would break the r12 higher-stdio-over-write-target-remote case (where the
 // write-target value is REMOTE but a higher layer is stdio): branch (a) declines
@@ -3553,36 +3521,56 @@ func (o *mimoCodeClient) mimoCodeManagedEnableOnlyTrueOverlay(name string) (bool
 }
 
 // mimoCodeLowerLayerHardLinkedToWriteTargetDefines reports whether ANY read-layer file
-// DISTINCT from the write target by clean-path is HARD-LINKED to the write target
-// (os.SameFile inode identity) AND defines mcp.<name>. It is the FINDING-2 conservative
-// cleanup guard's detector (bot PR #425 follow-up): when an operator hard-links a
-// lower-layer config.json to the write-target mimocode.json (two distinct global layers
-// over one inode — a deliberate non-default setup), the merge-based simulate
-// (readMergedLayersExcluding) models BOTH layer copies as losing the name, so it predicts
-// the candidate removable. PRODUCTION diverges — deleteMember's atomic temp-file + rename
-// BREAKS the hard link and leaves the lower layer's entry LIVE, so the server re-emerges
-// after RemoveEntry yet the cleanup falsely reported it cleared. Excluding such a
-// candidate conservatively avoids the false-cleanup.
+// DISTINCT from the write target by clean-path is a TRUE HARD LINK to the write target
+// (a distinct directory entry, a regular file with NO symlink in either chain, sharing
+// one inode) AND defines mcp.<name>. It is the FINDING-2 conservative cleanup guard's
+// detector (bot PR #425 follow-up): when an operator hard-links a lower-layer config.json
+// to the write-target mimocode.json (two distinct global layers over one inode — a
+// deliberate non-default setup), the merge-based simulate (readMergedLayersExcluding)
+// models BOTH layer copies as losing the name, so it predicts the candidate removable.
+// PRODUCTION diverges — deleteMember's atomic temp-file + rename BREAKS the hard link and
+// leaves the lower layer's entry LIVE, so the server re-emerges after RemoveEntry yet the
+// cleanup falsely reported it cleared. Excluding such a candidate conservatively avoids
+// the false-cleanup.
 //
-// It uses os.SameFile (raw inode identity) DELIBERATELY, NOT the protected
-// mimoCodePathsSamePhysical (which folds symlink/case variants and is needed verbatim by
-// the four shadow-walk callers). A hard link is two directory entries pointing at one
-// inode, so a plain Stat + os.SameFile detects it without symlink resolution. The
-// clean-path inequality gate excludes the write target's OWN entry in readLayerFiles
-// (same path, trivially same inode) so only a DISTINCT hard-linked file flags. A Stat
-// failure on a candidate layer is treated as "not hard-linked" (the file is absent /
-// unreadable → it cannot be a live lower layer that re-emerges); a parse error while
-// checking name-definition propagates fail-closed (the destructive caller aborts).
+// TRUE-HARD-LINK gate (bot PR #425 FINDING 1 correction). A naive os.Stat + os.SameFile is
+// WRONG here: os.Stat FOLLOWS symlinks, so a SYMLINK (or, on a case-insensitive volume, a
+// case-only alias) pointing AT the write target reports the SAME inode and would be
+// mis-classified as a hard link. But unlike a true hard link, such an alias is a POINTER
+// that FOLLOWS deleteMember's temp+rename — after the rename it resolves to the NEW file,
+// no OLD entry survives, so the name does NOT re-emerge and the candidate must NOT be
+// blocked. (Operators whose MIMOCODE_CONFIG / overlay file is a symlink to mimocode.json
+// would otherwise be unable to clean entries.) So before treating a lower file as a hard
+// link we os.Lstat BOTH the write target and the candidate and require BOTH to be REGULAR
+// files (mode has no os.ModeSymlink / os.ModeIrregular / etc.), then confirm the SAME
+// inode via os.SameFile over the Lstat'd FileInfo (raw inode identity — NOT the protected
+// mimoCodePathsSamePhysical, which folds symlink/case variants and is needed verbatim by
+// the four shadow-walk callers). A regular file is, by definition, not a symlink in its
+// own chain; two regular directory entries over one inode are precisely a hard link.
+//
+// The clean-path inequality gate excludes the write target's OWN entry in readLayerFiles
+// (same path, trivially same inode) so only a DISTINCT entry flags. An Lstat failure on a
+// candidate layer is treated as "not hard-linked" (the file is absent / unreadable → it
+// cannot be a live lower layer that re-emerges); a parse error while checking
+// name-definition propagates fail-closed (the destructive caller aborts).
 //
 // State-safe: in the explicit/temp single-file mode readLayerFiles returns only [o.path]
 // (the write target), which the clean-path gate skips, so the loop is a no-op and the
 // real ~/.config/mimocode is never reached.
 func (o *mimoCodeClient) mimoCodeLowerLayerHardLinkedToWriteTargetDefines(name string) (bool, error) {
-	targetStat, err := os.Stat(o.path)
+	// Lstat the write target (NO symlink follow): a true hard link is between two
+	// REGULAR directory entries. If the write target is itself a symlink (or absent),
+	// no lower file can be a true hard link to its regular-file inode.
+	targetLstat, err := os.Lstat(o.path)
 	if err != nil {
 		// The write target itself is absent/unreadable — no inode to share, so no
 		// hard-linked lower layer can match. (A genuinely missing write target means the
 		// candidate could not have come from it anyway.)
+		return false, nil
+	}
+	if !targetLstat.Mode().IsRegular() {
+		// The write target is a symlink / non-regular — it is not the hard-link end of a
+		// "two regular entries, one inode" pair, so nothing to guard here.
 		return false, nil
 	}
 	cleanTarget := filepath.Clean(o.path)
@@ -3590,16 +3578,24 @@ func (o *mimoCodeClient) mimoCodeLowerLayerHardLinkedToWriteTargetDefines(name s
 		if filepath.Clean(f) == cleanTarget {
 			continue // the write target's own entry — same path, not a DISTINCT hard link
 		}
-		fStat, err := os.Stat(f)
+		fLstat, err := os.Lstat(f)
 		if err != nil {
 			continue // absent / unreadable lower layer — cannot re-emerge live
 		}
-		if !os.SameFile(targetStat, fStat) {
+		if !fLstat.Mode().IsRegular() {
+			// A SYMLINK or case-alias (or other non-regular) — it FOLLOWS the temp+rename
+			// to the new file, so NO old entry re-emerges. NOT a true hard link → do not
+			// block.
+			continue
+		}
+		if !os.SameFile(targetLstat, fLstat) {
 			continue // distinct inode — not hard-linked to the write target
 		}
-		// This DISTINCT file shares the write target's inode (hard-linked). Production's
-		// temp+rename breaks the link and leaves THIS file live, so if it defines the
-		// candidate name the entry re-emerges after RemoveEntry → exclude conservatively.
+		// This DISTINCT REGULAR file shares the write target's inode — a TRUE hard link
+		// (two regular directory entries, one inode, no symlink in either chain).
+		// Production's temp+rename breaks the link and leaves THIS file live, so if it
+		// defines the candidate name the entry re-emerges after RemoveEntry → exclude
+		// conservatively.
 		defines, err := mimoCodeFileDefines(f, name)
 		if err != nil {
 			return false, err
@@ -3991,6 +3987,21 @@ func (o *mimoCodeClient) RemovableStdioEntries() ([]StdioEntry, error) {
 		if reResolves {
 			continue
 		}
+		// (c) HARD-LINK GUARD (bot PR #425 FINDING 3). The branch-(b) simulate
+		// (readMergedLayersExcluding) matches the write target by INODE, so a lower-layer
+		// config.json HARD-LINKED to the write target also loses the name in the simulate →
+		// reResolves reads FALSE and the entry looks removable. PRODUCTION diverges:
+		// RemoveEntry's temp+rename breaks the link and leaves the lower entry LIVE, so the
+		// server re-emerges yet the CLI reported it removable (false cleanup). The SAME
+		// FINDING-1-corrected detector excludes it (a SYMLINK / case-alias follows the
+		// rename and is NOT blocked).
+		hardLinked, err := o.mimoCodeLowerLayerHardLinkedToWriteTargetDefines(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if hardLinked {
+			continue
+		}
 		out = append(out, e)
 	}
 	return out, nil
@@ -4109,6 +4120,47 @@ func (o *mimoCodeClient) mimoCodeWriteTargetDefinesStdio(name string) (bool, err
 	return cmd != "", nil
 }
 
+// mimoCodeWriteTargetDefinesStdioLSP reports whether the WRITE TARGET's (o.path) OWN
+// value for mcp.<name> is ITSELF a stdio mcp-language-server entry. It is the LSP-shape
+// sibling of mimoCodeWriteTargetDefinesStdio: it reads the write target's verbatim own
+// value via mimoCodeFileEntryValue (single owner of the write-target raw read+parse,
+// independent of the merged multi-layer view), applies the SAME normalization the
+// merged-view LSP match used (mimoCodeNormalizeCommandArrays: array `command` → string
+// command + prepended args), then runs the single canonical classifier
+// matchLanguageServerStdio over the one named entry.
+//
+// NO mimoCodeDropDisabled (bot PR #425 FINDING 2). A gate that drops an enabled:false
+// write-target value BEFORE classifying would judge a write-target mcp-language-server
+// entry written {enabled:false} that a HIGHER overlay re-enables (so the merged match IS
+// the active LSP) as "not the LSP shape", leaving the active direct LSP behind after
+// register cleanup — the same effective-enabled defect mimoCodeWriteTargetDefinesStdio
+// already avoids for plain gopls by judging the write-target shape disabled-or-not.
+// An enabled:false write-target value re-enabled by a higher overlay still OWNS the
+// stdio-LSP shape RemoveEntry will delete (RemoveEntry deletes the whole write-target key,
+// disabled flag and all), which is exactly what this ownership gate must confirm. The
+// cross-layer survivor (whether the merged name STAYS active after the write-target delete)
+// is a SEPARATE concern owned by mimoCodeNameReResolvesAfterWriteTargetRemoval / the
+// managed guards downstream, not by this own-value SHAPE gate.
+//
+// A missing write target / absent name / non-LSP value → false; a parse error on present
+// bytes propagates fail-closed (the destructive caller aborts).
+func (o *mimoCodeClient) mimoCodeWriteTargetDefinesStdioLSP(name string) (bool, error) {
+	value, ok, err := mimoCodeFileEntryValue(o.path, name)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+	normalized := mimoCodeNormalizeCommandArrays(map[string]any{name: value})
+	entry, ok := normalized[name].(map[string]any)
+	if !ok {
+		return false, nil
+	}
+	_, _, isStdioLSP := matchLanguageServerStdio(entry)
+	return isStdioLSP, nil
+}
+
 // FindStdioLanguageServerEntries scans the merged `mcp` for stdio entries
 // matching the mcp-language-server invocation pattern. MiMoCode local entries
 // store `command` as an ARRAY (["mcp-language-server","--lsp","go"]); the
@@ -4152,8 +4204,10 @@ func (o *mimoCodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 	// a name-only test, be reported → RemoveEntry would delete the write-target
 	// REMOTE, leaving the higher stdio active (WRONG entry deleted). So report
 	// only entries whose WRITE-TARGET OWN value is ITSELF the stdio-LSP shape —
-	// mimoCodeFileDefinesStdioLSP routes that decision through the same single
-	// classifier (matchLanguageServerStdio) that produced the merged match. Under
+	// mimoCodeWriteTargetDefinesStdioLSP routes that decision through the same single
+	// classifier (matchLanguageServerStdio) that produced the merged match, judging the
+	// write target's OWN value WITHOUT a disabled-drop (bot PR #425 FINDING 2) so an
+	// enabled:false write-target entry a higher overlay re-enables is still OWNED. Under
 	// the replace-by-name merge an mcp entry never field-merges across layers, so
 	// a write-target stdio entry is self-contained when the write target is the
 	// highest definer; when a higher layer shadows it, declining is correct (the
@@ -4183,7 +4237,7 @@ func (o *mimoCodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 	// and applies its own workspace-scoped survivor caller-side.
 	out := matched[:0]
 	for _, e := range matched {
-		defined, err := mimoCodeFileDefinesStdioLSP(o.path, e.Name)
+		defined, err := o.mimoCodeWriteTargetDefinesStdioLSP(e.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -4205,6 +4259,23 @@ func (o *mimoCodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 			// cleanup.
 			continue
 		}
+		// HARD-LINK GUARD (bot PR #425 FINDING 3). mimoCodeNameReResolvesAfterWriteTarget
+		// Removal's simulate (readMergedLayersExcluding) matches the write target by INODE
+		// (mimoCodePathsSamePhysical), so a lower-layer config.json HARD-LINKED to the write
+		// target also has the name dropped in the simulate → reResolves reads FALSE and the
+		// entry looks removable. PRODUCTION diverges: RemoveEntry's temp+rename breaks the
+		// link and leaves the lower-layer entry LIVE, so the LSP re-emerges yet the CLI
+		// reported it removable (false cleanup). The SAME FINDING-1-corrected detector the
+		// register-grain candidate methods use excludes such a candidate here. (A SYMLINK /
+		// case-alias is NOT a true hard link — it follows the rename — so the detector does
+		// NOT block it.)
+		hardLinked, err := o.mimoCodeLowerLayerHardLinkedToWriteTargetDefines(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if hardLinked {
+			continue
+		}
 		out = append(out, e)
 	}
 	return out, nil
@@ -4214,9 +4285,9 @@ func (o *mimoCodeClient) FindStdioLanguageServerEntries() ([]LanguageServerStdio
 // register-grain candidate source for the destructive direct-LSP cleanup (architect
 // REVISE → Option C, bot PR #425 follow-up GAP 2). It is FindStdioLanguageServerEntries
 // with branch (b) reduced to the MANAGED-only re-resolve: it keeps branch (a)
-// (mimoCodeFileDefinesStdioLSP, the write-target stdio-LSP shape gate) and the
-// MANAGED-layer guard (mimoCodeManagedLayerReResolves), but OMITS the
-// FILE/inline/import-WIDE LSP survivor.
+// (mimoCodeWriteTargetDefinesStdioLSP, the write-target stdio-LSP shape gate — no
+// disabled-drop, bot PR #425 FINDING 2) and the MANAGED-layer guard
+// (mimoCodeManagedLayerReResolves), but OMITS the FILE/inline/import-WIDE LSP survivor.
 //
 // That survivor is too coarse for the LSP grain: a same-name lower-layer
 // mcp-language-server for a DIFFERENT workspace re-emerges as an active LSP entry
@@ -4238,9 +4309,9 @@ func (o *mimoCodeClient) FindStdioLanguageServerCandidatesWriteTargetOwned() ([]
 	matched := findLanguageServerStdioInMap(mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers)))
 	out := matched[:0]
 	for _, e := range matched {
-		// (a) write-target stdio-LSP shape gate — unchanged from
-		// FindStdioLanguageServerEntries.
-		defined, err := mimoCodeFileDefinesStdioLSP(o.path, e.Name)
+		// (a) write-target stdio-LSP shape gate — same as FindStdioLanguageServerEntries
+		// (mimoCodeWriteTargetDefinesStdioLSP, no disabled-drop, bot PR #425 FINDING 2).
+		defined, err := o.mimoCodeWriteTargetDefinesStdioLSP(e.Name)
 		if err != nil {
 			return nil, err
 		}

@@ -52,25 +52,39 @@ SIMULATE/cleanup consumers, WITHOUT touching `readMergedLayersExcluding`'s fold
 or `mimoCodePathsSamePhysical` (both protected — the four shadow-walk callers
 need inode identity, see below):
 
-- `RemovableStdioCandidatesWriteTargetOwned` and
-  `FindStdioLanguageServerCandidatesWriteTargetOwned`
-  (internal/clients/mimocode.go) now call
-  `mimoCodeLowerLayerHardLinkedToWriteTargetDefines(name)`. It walks
+- The two register-grain candidate methods
+  (`RemovableStdioCandidatesWriteTargetOwned`,
+  `FindStdioLanguageServerCandidatesWriteTargetOwned`) AND the two
+  workspace-free CLI methods (`FindStdioLanguageServerEntries`,
+  `RemovableStdioEntries`) — the latter consumed by `mcphub language-server
+  cleanup` (cli/language_server.go), which was the actually-vulnerable CLI
+  path — now call `mimoCodeLowerLayerHardLinkedToWriteTargetDefines(name)`
+  (bot PR #425 FINDING 3 extended the guard to the CLI consumers). It walks
   `readLayerFiles()`, and for any file DISTINCT from the write target by
-  clean-path that shares its inode (`os.SameFile`, raw inode identity — NOT
+  clean-path that is a TRUE HARD LINK to it AND defines the candidate name, it
+  returns true → the consumer EXCLUDES the candidate. Production's temp+rename
+  breaks the hard link and leaves that lower entry live, so excluding it avoids
+  the false-cleanup.
+- TRUE-HARD-LINK detection (bot PR #425 FINDING 1 correction): the detector
+  `os.Lstat`s BOTH the write target and the candidate, requires BOTH to be
+  REGULAR files (a SYMLINK or case-only alias is NOT a true hard link — it
+  FOLLOWS the temp+rename and re-points at the new file, so its name does NOT
+  re-emerge and it must NOT block), then confirms the SAME inode via
+  `os.SameFile` over the Lstat'd FileInfo (raw inode identity — NOT
   `mimoCodePathsSamePhysical`, so symlink/case folding is deliberately not
-  applied) AND defines the candidate name, it returns true → the consumer
-  EXCLUDES the candidate. Production's temp+rename breaks the hard link and
-  leaves that lower entry live, so excluding it avoids the false-cleanup.
+  applied here).
 - `readMergedLayersExcluding`'s fold and `mimoCodePathsSamePhysical` are
-  **UNCHANGED** (the `KNOWN LIMITATION` comment below still documents the
+  **UNCHANGED** (the `KNOWN LIMITATION` comment there still documents the
   simulate's inode-collision behavior; the consumer-side guard is what now
   blocks the destructive false-success).
 
 The remaining residual is only the **safe over-block** described above (a
 deliberate non-default hard-link causes a removable candidate to be withheld;
 no data loss, no false-cleanup). Pinned by `TestMimoCode_CleanupGuard_F2_*` in
-internal/clients/mimocode_pr425_cleanup_guard_test.go.
+internal/clients/mimocode_pr425_cleanup_guard_test.go and, for the FINDING-1
+symlink-not-blocked correction plus the FINDING-3 CLI-path coverage, by
+`TestMimoCode_CleanupGuard_F1Corr_*` / `TestMimoCode_CleanupGuard_F3_*` in
+internal/clients/mimocode_pr425_followup2_test.go.
 
 ## Why NOT switch to path-string equality
 
