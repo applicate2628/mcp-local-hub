@@ -47,7 +47,10 @@ future work-item and is explicitly NOT in this PR** (the Tier-1 first batch is S
 
 ## Consequences
 
-- Tier-1 first batch (this PR) is entirely S1: mathcad, excel, ableton, codex-mcp-server.
+- Tier-1 first batch (this PR) is entirely S1: excel, ableton, codex-mcp-server. (mathcad was
+  DROPPED before merge — ${workspaceFolder} freeze for a kind:global daemon, unprobed/absent
+  server artifact, license pending; deferred to
+  work-items/backlog/2026-06-24-mathcad-mcp-row-deferred.md.)
 - S2 already exists and is unchanged (context7/qt-docs remote-http rows in v1, carried into
   v2 verbatim).
 - S3 (Tier-5: Fusion / Blender Lab / SketchUp) is parked as docs-only; no schema work lands

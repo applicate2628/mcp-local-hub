@@ -9,10 +9,15 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
-// tier1CatalogIDs are the four Tier-1 desktop-app rows the v2 catalog appends
-// after the verbatim v1 entries (cst was DROPPED — bbl21/CST_MCP is a CLI
-// toolkit, not an MCP server; see work-items/bugs/2026-06-24-cst-not-an-mcp-server.md).
-var tier1CatalogIDs = []string{"mathcad", "excel", "ableton", "codex-mcp-server"}
+// tier1CatalogIDs are the three Tier-1 desktop-app rows the v2 catalog appends
+// after the verbatim v1 entries. Two rows were DROPPED before merge:
+//   - cst — bbl21/CST_MCP is a CLI toolkit, not an MCP server
+//     (work-items/bugs/2026-06-24-cst-not-an-mcp-server.md).
+//   - mathcad — ${workspaceFolder} freezes to CWD for a kind:global daemon
+//     (category error), the server artifact is unprobed+absent (repo unpackaged →
+//     crash-loop), and the license is pending
+//     (work-items/backlog/2026-06-24-mathcad-mcp-row-deferred.md).
+var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server"}
 
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
@@ -22,7 +27,7 @@ func v2CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v
 // the new marketplace/v2/catalog.json parses cleanly through the SAME
 // ParseMarketplaceCatalog gate (no Go gate change in this PR — Tier-0 already
 // taught it to accept "2" and allow the D-2/D-3 keys), declares schema_version
-// "2", and carries the four Tier-1 desktop-app rows on TOP of the 14 verbatim v1
+// "2", and carries the three Tier-1 desktop-app rows on TOP of the 14 verbatim v1
 // entries. Each Tier-1 row is inert (disabled-until-probe) with a non-empty
 // install_probe, and each forked row carries a pinned vendored_source.
 func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
@@ -82,9 +87,9 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 		}
 	}
 
-	// The three FORK rows carry a pinned vendored_source; the official codex row
+	// The two FORK rows carry a pinned vendored_source; the official codex row
 	// carries NONE (it is not a fork).
-	for _, id := range []string{"mathcad", "excel", "ableton"} {
+	for _, id := range []string{"excel", "ableton"} {
 		e := byID[id]
 		if e.VendoredSource == nil || strings.TrimSpace(e.VendoredSource.PinnedRef) == "" {
 			t.Fatalf("fork row %q is missing a pinned vendored_source", id)
@@ -153,10 +158,9 @@ func TestV2Tier1Rows_GenerateThenCreateDryRun(t *testing.T) {
 		byID[cat.Entries[i].ID] = &cat.Entries[i]
 	}
 
-	// A fixed absolute workspace so the mathcad ${workspaceFolder} placeholder
-	// expands to an absolute base_args[0] path (Validate accepts the shape; the
-	// missing-file is a readiness row, not a Validate failure). t.TempDir is
-	// absolute on every OS.
+	// A fixed absolute workspace for any ${workspaceFolder} placeholder a row's
+	// args carry (Validate accepts the expanded shape; a missing file is a
+	// readiness row, not a Validate failure). t.TempDir is absolute on every OS.
 	ws := t.TempDir()
 
 	for _, id := range tier1CatalogIDs {
@@ -184,10 +188,10 @@ func TestV2Tier1Rows_GenerateThenCreateDryRun(t *testing.T) {
 			if m.InstallProbe == nil || (len(m.InstallProbe.Binaries) == 0 && len(m.InstallProbe.Files) == 0) {
 				t.Fatalf("row %q drafted manifest lost install_probe", id)
 			}
-			// The three fork rows project the pinned vendored_source; codex (official)
+			// The two fork rows project the pinned vendored_source; codex (official)
 			// does not.
 			switch id {
-			case "mathcad", "excel", "ableton":
+			case "excel", "ableton":
 				if m.VendoredSource == nil || strings.TrimSpace(m.VendoredSource.PinnedRef) == "" {
 					t.Fatalf("fork row %q drafted manifest lost the pinned vendored_source: %#v", id, m.VendoredSource)
 				}

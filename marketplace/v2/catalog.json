@@ -196,33 +196,6 @@
       "license": "MIT"
     },
     {
-      "id": "mathcad",
-      "name": "Mathcad MCP server (Prime, COM)",
-      "summary": "Drive PTC Mathcad Prime via COM — open/calc worksheets, set inputs, read outputs/matrices, units, export (~24 tools). Community fork puran-water/mathcad-mcp, pinned. NOT a packaged project: the repo is a bare FastMCP standalone.py (no pyproject/console-script), so the launch is `python <cloned>/standalone.py` — clone the pinned commit into ${workspaceFolder}/mathcad-mcp and `pip install -r requirements.txt` first (see vendored_source.install_cmd). disabled-until-probe: enables only when Mathcad Prime AND a Python interpreter are present. ALL worksheet-write/calc tools mutate the live Mathcad host application — gate behind operator consent. LICENSE not yet confirmed (no detected LICENSE file at the pinned commit) — license_status pending, confirm before redistribution.",
-      "homepage": "https://github.com/puran-water/mathcad-mcp",
-      "readme_url": "https://raw.githubusercontent.com/puran-water/mathcad-mcp/edd035b42dbbf2c9523e409ee640664d85306e6f/README.md",
-      "transport": "stdio",
-      "command": "python",
-      "args": ["${workspaceFolder}/mathcad-mcp/standalone.py"],
-      "env": {
-        "MATHCAD_VISIBLE": "true"
-      },
-      "categories": ["engineering", "math", "com", "mathcad"],
-      "license": "",
-      "availability": "disabled-until-probe",
-      "install_probe": {
-        "binaries": ["python"],
-        "files": ["C:\\Program Files\\PTC\\Mathcad Prime 11.0.1.0\\MathcadPrime.exe"]
-      },
-      "vendored_source": {
-        "repo": "https://github.com/puran-water/mathcad-mcp",
-        "pinned_ref": "edd035b42dbbf2c9523e409ee640664d85306e6f",
-        "install_cmd": "git clone https://github.com/puran-water/mathcad-mcp ${workspaceFolder}/mathcad-mcp && git -C ${workspaceFolder}/mathcad-mcp checkout edd035b42dbbf2c9523e409ee640664d85306e6f && pip install -r ${workspaceFolder}/mathcad-mcp/requirements.txt",
-        "run_cmd": "python ${workspaceFolder}/mathcad-mcp/standalone.py",
-        "license_status": "pending"
-      }
-    },
-    {
       "id": "excel",
       "name": "Excel MCP server (live COM, .NET)",
       "summary": "Automate Microsoft Excel through its native COM API — Power Query, DAX measures, PivotTables, charts, formatting, and VBA macros (25 tools / ~230 operations) with real recalc against the live Excel process. Community server sbroenne/mcp-server-excel (C#/.NET 10), pinned to release v1.8.70. Distributed as a self-contained mcp-excel.exe — download from the release ZIP and add to PATH (see vendored_source.install_cmd); the launch command is the bare `mcp-excel` binary, not uvx. disabled-until-probe: enables only when Excel AND the mcp-excel server binary are present. The VBA-exec / RunMacro operations execute arbitrary code in the live workbook — gate the 6 VBA-exec ops behind operator consent (D-4). Windows + Excel desktop only.",
@@ -237,7 +210,7 @@
       "availability": "disabled-until-probe",
       "install_probe": {
         "binaries": ["mcp-excel"],
-        "files": ["C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE"]
+        "files": ["C:\\Program Files*\\Microsoft Office\\root\\Office1?\\EXCEL.EXE"]
       },
       "vendored_source": {
         "repo": "https://github.com/sbroenne/mcp-server-excel",
@@ -265,7 +238,7 @@
       "license": "MIT",
       "availability": "disabled-until-probe",
       "install_probe": {
-        "files": ["C:\\ProgramData\\Ableton\\Live 11 Suite\\Program\\Ableton Live 11 Suite.exe"]
+        "files": ["C:\\ProgramData\\Ableton\\Live * Suite\\Program\\Ableton Live * Suite.exe"]
       },
       "vendored_source": {
         "repo": "https://github.com/ahujasid/ableton-mcp",

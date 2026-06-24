@@ -745,8 +745,20 @@ func (m *ServerManifest) validateVendoredAndAvailability() error {
 //     stays blocked from another dir. We use the GOOS-INDEPENDENT lexical shape
 //     (NOT filepath.IsAbs, whose result is host-OS-specific) so a cross-platform
 //     registry that declares "C:\\marker" or "/opt/marker" parses identically on
-//     every build platform; the real host-OS os.Stat (existence + regular-file)
-//     is intentionally deferred to entryScriptStatus at install/readiness.
+//     every build platform; the real host-OS glob/stat (existence + regular-file)
+//     is intentionally deferred to the runtime fileProbeMatches owner at
+//     install/readiness.
+//
+//     A files[] entry MAY carry glob metacharacters (`*` / `?` / `[`) — the runtime
+//     probe (fileProbeMatches) expands the pattern via filepath.Glob, so a SHARED
+//     cross-host catalog can declare a version-agnostic pattern (e.g.
+//     "C:\\…\\Live * Suite\\…\\Ableton Live * Suite.exe" matching Live 11/12)
+//     instead of one frozen host path. A glob pattern is STILL an absolute path
+//     (with wildcards), so it must satisfy IsAbsolutePathShape + the
+//     non-empty/no-surrounding-whitespace rules exactly like a literal path; only
+//     the leaf segment(s) gain wildcards. The metacharacters themselves are NOT
+//     rejected here — IsAbsolutePathShape keys only on the absolute PREFIX, which a
+//     glob pattern shares with the literal it generalizes.
 func ValidateProbeValuesNonEmpty(p *AvailabilityProbe, label string) error {
 	if p == nil {
 		return nil

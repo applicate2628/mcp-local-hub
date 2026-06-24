@@ -473,6 +473,14 @@ func TestValidate_InstallProbe_CrossPlatformFilePathAccepted(t *testing.T) {
 		`C:\marker`,           // Windows absolute — accepted on a linux build too
 		`\\host\share\marker`, // UNC
 		"/opt/..",             // lexically absolute; os.Stat resolves at install (no ..-ban)
+		// Tier-1 glob enhancement: a files[] entry MAY carry glob metacharacters
+		// (`*`/`?`/`[`) for a version-agnostic SHARED-catalog probe. It is still an
+		// absolute path (with wildcards), so it must pass IsAbsolutePathShape; the
+		// metacharacters are NOT rejected (the runtime fileProbeMatches expands them
+		// via filepath.Glob). These are the two real first-batch catalog probes.
+		`C:\ProgramData\Ableton\Live * Suite\Program\Ableton Live * Suite.exe`, // ableton (Live 11/12)
+		`C:\Program Files*\Microsoft Office\root\Office1?\EXCEL.EXE`,           // excel (64-bit + (x86) C2R)
+		"/opt/app-*/bin/server",                                                // POSIX glob, also cross-platform
 	}
 	for _, f := range accept {
 		t.Run("accept-"+f, func(t *testing.T) {

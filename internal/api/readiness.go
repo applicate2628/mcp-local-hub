@@ -236,6 +236,57 @@ func entryScriptStatus(path string) (bool, string) {
 	return true, ""
 }
 
+// fileProbeMatches is the SINGLE OWNER of the D-3 install_probe files[] check
+// (Tier-1 glob enhancement). It expands `pattern` via filepath.Glob, then
+// COMPOSES the existing regular-file owner entryScriptStatus over each match —
+// it adds NO new detection (entryScriptStatus stays the literal-path stat owner;
+// this helper only widens the input from one exact path to a glob's match set).
+// It returns (true, "") if ANY match is a runnable regular file, else
+// (false, reason). The shape lets a SHARED cross-host catalog declare a
+// version-agnostic probe (e.g. "…\\Live * Suite\\…\\Ableton Live * Suite.exe"
+// matching Live 11/12) without baking an exact host path.
+//
+// Polarity is fail-closed, matching today's os.Stat:
+//   - filepath.Glob returns (nil, nil) on NO match → (false, "does not exist") —
+//     byte-identical to entryScriptStatus on a missing literal path, so the
+//     probe-fails-inert verdict is preserved (no match = the host app absent).
+//   - filepath.Glob's only error is ErrBadPattern (a malformed pattern) → fail
+//     inert with a named reason rather than silently passing.
+//
+// METACHARACTER-FREE pattern == today's exact stat: filepath.Glob of a literal
+// path returns exactly that one path when it exists (and (nil,nil) when it does
+// not), so a probe with no `*`/`?`/`[` behaves BYTE-IDENTICALLY to the prior
+// entryScriptStatus(f) — the only behavioral widening is for patterns that
+// actually contain a wildcard.
+func fileProbeMatches(pattern string) (bool, string) {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		// filepath.Glob's documented error is ErrBadPattern only. A malformed
+		// pattern can never enable the row, so fail inert with a reason instead of
+		// letting it slip through.
+		return false, "is not a valid glob pattern"
+	}
+	if len(matches) == 0 {
+		// No match — the host app/marker is absent. Reuse entryScriptStatus's
+		// missing-path reason so a metacharacter-free pattern is byte-identical.
+		return false, "does not exist"
+	}
+	// ANY match that is a runnable regular file satisfies the probe. Compose the
+	// existing regular-file owner over each glob match (a directory match is
+	// rejected exactly as a literal directory is today).
+	var lastReason string
+	for _, m := range matches {
+		ok, reason := entryScriptStatus(m)
+		if ok {
+			return true, ""
+		}
+		lastReason = reason
+	}
+	// Every match existed but none was a runnable regular file (e.g. the glob hit
+	// only directories). Surface the regular-file owner's own reason.
+	return false, lastReason
+}
+
 // availabilityInert is the SINGLE OWNER of the D-3 watch/disabled predicate,
 // consumed by AdmissionCheck (the gate) and any GUI signal so the meaning of
 // "inert" is defined exactly once (architecture law: one owner per cross-cutting
@@ -271,9 +322,15 @@ func availabilityProbePasses(p *config.AvailabilityProbe) (bool, string) {
 		}
 	}
 	for _, f := range p.Files {
-		if ok, reason := entryScriptStatus(f); !ok {
+		// fileProbeMatches glob-expands f then composes entryScriptStatus over each
+		// match — a metacharacter-free f behaves byte-identically to the prior exact
+		// os.Stat (filepath.Glob of a literal returns that one path). A glob pattern
+		// (e.g. version-agnostic "…\\Live * Suite\\…") passes if ANY match is a
+		// runnable regular file. AND-semantics across entries are preserved: a single
+		// non-matching pattern returns false here and fails the whole probe.
+		if ok, reason := fileProbeMatches(f); !ok {
 			// DISPLAY ONLY: dual-separator basename for the same reason as the binary
-			// branch above — entryScriptStatus(f) os.Stat's the verbatim path; only the
+			// branch above — fileProbeMatches stats the verbatim pattern; only the
 			// user-visible marker name is stripped (codex r6 finding 3).
 			return false, fmt.Sprintf("%q %s", basenameAcrossSeparators(f), reason)
 		}

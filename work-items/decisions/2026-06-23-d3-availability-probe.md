@@ -107,4 +107,64 @@ Tier-0-PROTECTED surface) and re-evaluating the probe at reconcile. This is a ru
 health / staleness concern distinct from the install-time D-3 admission gate → deferred to
 `work-items/backlog/2026-06-23-d3-reconcile-reprobe.md` (prereq: Tier-1 inert rows).
 
+## Tier-1 amendment: glob in files[] (version-agnostic probes for a SHARED catalog)
+
+Status stays **proposed** — this is the SAME D-3 probe-model decision owner extended for the
+first Tier-1 data batch, not a new decision id.
+
+### Problem
+
+A single `catalog.json` is SHARED across every host. A files[] probe that bakes ONE exact host
+path (e.g. `C:\ProgramData\Ableton\Live 11 Suite\…\Ableton Live 11 Suite.exe` or
+`C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE`) only ever matches one product
+version / install layout, so the same shared row stays permanently inert on a host that has
+Ableton Live **12** or 64-bit / (x86) Click-to-Run Excel. Both the codex bot and a sonnet
+commission flagged this baked-exact-path specificity in a shared catalog.
+
+### Decision
+
+A files[] entry MAY carry glob metacharacters (`*` / `?` / `[`). The runtime probe owner
+`fileProbeMatches` (`internal/api/readiness.go`) expands the pattern via `filepath.Glob` and
+then COMPOSES the existing regular-file owner `entryScriptStatus` over each match — passing iff
+ANY match is a runnable regular file. No new detection is added; `entryScriptStatus` stays the
+literal-path stat owner and the glob helper only widens the input from one exact path to a
+match set.
+
+- **Fail-closed polarity preserved.** `filepath.Glob` returns `(nil, nil)` on NO match →
+  `(false, "does not exist")`, byte-identical to today's `os.Stat` on a missing literal. A
+  malformed pattern (`ErrBadPattern`) fails inert with a named reason.
+- **Metacharacter-free == byte-identical.** `filepath.Glob` of a literal returns exactly that
+  one path when it exists, so a probe with no wildcard behaves EXACTLY as before — the only
+  behavioral widening is for patterns that actually contain a wildcard.
+- **AND-semantics across entries UNCHANGED.** Every declared binary AND every declared files[]
+  pattern must still pass; a glob is OR only WITHIN one pattern's own match set (any match
+  satisfies that single entry), never across entries.
+- **Validator.** `ValidateProbeValuesNonEmpty` (`internal/config/manifest.go`) already accepted
+  glob metacharacters (it keys only on the absolute PREFIX via `IsAbsolutePathShape` + the
+  non-empty / no-surrounding-whitespace rules); the amendment makes that acceptance EXPLICIT in
+  the rule-4 doc so a future edit does not add a wildcard rejection. A glob pattern is still an
+  absolute path with wildcards.
+- **Browse path UNCHANGED.** `MarketplaceEntryBrowseProbeState` still classifies ANY files[]
+  row (glob or literal) as `inert-unknown` and NEVER runs `filepath.Glob` / `os.Stat` on the
+  browse projection — the no-os.Stat-on-browse invariant holds for glob patterns too.
+
+### First-batch probes
+
+- ableton: `C:\ProgramData\Ableton\Live * Suite\Program\Ableton Live * Suite.exe` (Live 11/12
+  Suite). DISCLOSED scope: Windows Live Suite editions; macOS + non-Suite editions NOT covered
+  (a 2nd files[] entry would be AND'd, not OR'd — disclose, do not escalate to or-groups).
+- excel: `C:\Program Files*\Microsoft Office\root\Office1?\EXCEL.EXE` (64-bit + (x86)
+  Click-to-Run via the single `*`+`?` pattern — `Program Files*` spans ` (x86)`). DISCLOSED
+  scope: MSI volume-license installs (no `root\` segment) NOT covered in this batch.
+- codex-mcp-server: UNCHANGED (`binaries: [codex]` bare name, already version-agnostic).
+
+### Adjacent footgun (filed, NOT fixed here)
+
+mathcad was DROPPED from the first batch partly because `${workspaceFolder}` is a GENERATE-time
+token that freezes to CWD for a `kind:global` daemon (a category error — the spawn-time
+workspace token is the DIFFERENT `${workspace.path}`, workspace-scoped only). A catalog-validator
+warning for that footgun is filed at
+`work-items/bugs/2026-06-24-workspacefolder-global-daemon-footgun.md` (out of scope for this
+catalog-data PR).
+
 The `$architecture-reviewer` promotes proposed → accepted.
