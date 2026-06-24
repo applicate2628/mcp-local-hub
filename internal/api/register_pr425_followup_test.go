@@ -271,6 +271,62 @@ func TestFollowup_GoplsCaller_CrossKind_MlsGoSurvivor_Blocks(t *testing.T) {
 	}
 }
 
+// CLAIM 2 (FINDING 2) — the gopls survivor branch of directLSPSurvivorMatchesWorkspace
+// is now ALIAS-GATED. matchingDirectLanguageServerEntries runs UNCONDITIONALLY (outside
+// the go/gopls candidate guard in cleanupDirectLanguageServerEntriesAfterRegister), so
+// a NON-Go register (e.g. python) whose aliases do NOT carry gopls must NOT have a
+// same-name lower gopls-mcp-for-THIS-workspace survivor wrongly BLOCK removal of the
+// non-Go entry. Before the fix the gopls branch returned true with NO alias gate, so it
+// blocked the python cleanup on a co-named gopls survivor. The mcp-language-server
+// branch was already alias-gated; this pins that the gopls branch now matches it.
+func TestFollowup_NonGoCleanup_GoplsSurvivor_DoesNotBlock_AliasGate(t *testing.T) {
+	wsA := t.TempDir()
+	canonicalA, err := CanonicalWorkspacePathForCleanup(wsA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A python cleanup: aliases carry python + its LSP command, NOT go/gopls.
+	aliases := map[string]bool{"python": true, "pyright-langserver": true}
+	candidate := clients.LanguageServerStdioEntry{
+		Name: "py", Command: "mcp-language-server", Language: "python",
+		Args: []string{"--lsp", "python", "--workspace", wsA},
+	}
+
+	cases := []struct {
+		name       string
+		survivors  []clients.StdioEntry
+		wantRemove bool
+	}{
+		{
+			// The FINDING 2 case: a same-name gopls-mcp-for-W survivor must NOT block the
+			// python removal now that the gopls branch is alias-gated and aliases lack gopls.
+			name:       "same-name same-workspace gopls survivor + no gopls alias -> python REMOVED",
+			survivors:  []clients.StdioEntry{goplsStdio("py", wsA)},
+			wantRemove: true,
+		},
+		{
+			// A same-name python mcp-language-server survivor for THIS workspace DOES block
+			// (the alias-gated mcp-language-server branch matches python).
+			name:       "same-name same-workspace python mcp-language-server survivor -> BLOCKED",
+			survivors:  []clients.StdioEntry{lsStdio("py", "python", wsA)},
+			wantRemove: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &followupReaderFake{stdioSurvivors: map[string][]clients.StdioEntry{"py": tc.survivors}}
+			out, err := matchingDirectLanguageServerEntries(fake, []clients.LanguageServerStdioEntry{candidate}, aliases, canonicalA)
+			if err != nil {
+				t.Fatalf("matchingDirectLanguageServerEntries: %v", err)
+			}
+			got := len(out) == 1 && out[0].Name == "py"
+			if got != tc.wantRemove {
+				t.Fatalf("removable=%v, want %v (survivors=%v)", got, tc.wantRemove, tc.survivors)
+			}
+		})
+	}
+}
+
 // Direction B: mcp-language-server-go candidate × a lower same-name gopls-mcp-for-W
 // survivor → BLOCKED (the formerly-invisible cross-kind survivor; the LSP-only
 // reader used to DROP gopls-mcp entirely).

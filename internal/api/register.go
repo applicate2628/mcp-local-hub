@@ -392,15 +392,23 @@ func addLSPCleanupAlias(aliases map[string]bool, value string) {
 // gopls via isCommandBasename + stringSliceContainsFold; mcp-language-server via
 // clients.ClassifyLanguageServerStdioEntry (which wraps matchLanguageServerStdio
 // = isLanguageServerBinary + extractLspLanguageArg). Workspace via the shared
-// directEntryWorkspaceMatches. The gopls branch is identity-based and does not
-// consult aliases (the gopls cleanup path only runs when aliases already carry
-// go/gopls); the mcp-language-server branch is alias-gated so an unrelated
-// --lsp language never blocks.
+// directEntryWorkspaceMatches. BOTH branches are now alias-gated (bot PR #425
+// follow-up FINDING 2): the gopls branch requires lspCleanupAliasMatches("gopls",
+// aliases) and the mcp-language-server branch requires the classified --lsp language
+// to match the aliases. A Go cleanup adds BOTH "go" and "gopls" to aliases
+// (cleanupDirectLanguageServerEntriesAfterRegister → addLSPCleanupAlias(lang) +
+// addLSPCleanupAlias(spec.LspCommand="gopls")), so the gopls branch still fires for a
+// Go cleanup; but a NON-Go cleanup (e.g. python) whose aliases do NOT carry gopls no
+// longer has a same-name lower gopls-mcp-for-W survivor wrongly block removal of the
+// non-Go entry (matchingDirectLanguageServerEntries runs UNCONDITIONALLY, outside the
+// go/gopls candidate guard). The matchingDirectGoplsMCPEntries candidate path is
+// unaffected: it only runs when aliases already carry go/gopls, so the alias gate is
+// always satisfied there.
 func directLSPSurvivorMatchesWorkspace(s clients.StdioEntry, aliases map[string]bool, canonicalWorkspace string) bool {
 	if !directEntryWorkspaceMatches(s.Args, canonicalWorkspace) {
 		return false
 	}
-	if isCommandBasename(s.Command, "gopls") && stringSliceContainsFold(s.Args, "mcp") {
+	if isCommandBasename(s.Command, "gopls") && stringSliceContainsFold(s.Args, "mcp") && lspCleanupAliasMatches("gopls", aliases) {
 		return true
 	}
 	if lang, ok := clients.ClassifyLanguageServerStdioEntry(s); ok && lspCleanupAliasMatches(lang, aliases) {

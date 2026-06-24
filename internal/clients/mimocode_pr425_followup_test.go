@@ -66,7 +66,9 @@ func TestMimoCode_Followup_ManagedActiveGopls_NotRemovable_AndRemoveEntryByteUnc
 	}
 
 	// (1b) The managed-only re-resolve owner reports the active managed retention.
-	managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls")
+	// reResolveConsumerAny = the BROADEST coarse-shape "any active server re-emerges"
+	// semantic the RemoveEntry pre-check uses.
+	managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls", reResolveConsumerAny)
 	if err != nil {
 		t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 	}
@@ -119,7 +121,7 @@ func TestMimoCode_Followup_ManagedEnabledOnlyTrueOverlay_StillRemovable(t *testi
 	o := &mimoCodeClient{path: writeTargetPath}
 
 	// Managed-only re-resolve must be FALSE (enabled-only:true is not a shadow).
-	managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls")
+	managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls", reResolveConsumerAny)
 	if err != nil {
 		t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 	}
@@ -151,7 +153,7 @@ func TestMimoCode_Followup_ManagedDisableOnlyStub_StillRemovable(t *testing.T) {
 	writeMimoFile(t, writeTargetPath, `{"mcp":{"gopls":`+followupStdioGopls+`}}`)
 	o := &mimoCodeClient{path: writeTargetPath}
 
-	managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls")
+	managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls", reResolveConsumerAny)
 	if err != nil {
 		t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 	}
@@ -382,7 +384,7 @@ func TestMimoCode_Followup_HigherLayerDefining_DelegatesManaged(t *testing.T) {
 		// enable-true overlay must ALSO leave mimoCodeManagedLayerReResolves false
 		// (still removable) — the AddEntry-guard "not a shadow" verdict and the
 		// re-resolve verdict agree in the no-lower-content case.
-		reResolves, err := o.mimoCodeManagedLayerReResolves("serena")
+		reResolves, err := o.mimoCodeManagedLayerReResolves("serena", reResolveConsumerAny)
 		if err != nil {
 			t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 		}
@@ -406,8 +408,15 @@ func TestMimoCode_Followup_ManagedEnableTrueOverDisabledLowerFull_NotRemovable(t
 	cases := []struct {
 		name        string
 		server      string
-		disabledLow string                                     // config.json (below write target), disabled full entry
-		writeTarget string                                     // mimocode.json write-target value (the removable candidate)
+		disabledLow string // config.json (below write target), disabled full entry
+		writeTarget string // mimocode.json write-target value (the removable candidate)
+		// expectStdio / expectLSP: whether the re-activated server is active in each
+		// consumer's shape set. A gopls-mcp entry is stdio-active but NOT LSP-active; an
+		// mcp-language-server entry is BOTH (it is a stdio entry that ALSO matches the
+		// --lsp invocation). reResolveConsumerAny is always true (the value is
+		// content-bearing) and is asserted separately.
+		expectStdio bool
+		expectLSP   bool
 		consumer    func(t *testing.T, o *mimoCodeClient) bool // does the consumer still REPORT (offer) the candidate?
 	}{
 		{
@@ -415,6 +424,8 @@ func TestMimoCode_Followup_ManagedEnableTrueOverDisabledLowerFull_NotRemovable(t
 			server:      "gopls",
 			disabledLow: `{"type":"local","command":["gopls","mcp"],"enabled":false}`,
 			writeTarget: `{"type":"local","command":["gopls","mcp"],"enabled":true}`,
+			expectStdio: true,
+			expectLSP:   false, // gopls-mcp is not an mcp-language-server re-emergence
 			consumer: func(t *testing.T, o *mimoCodeClient) bool {
 				return reResolveRemovableNames(t, o)["gopls"]
 			},
@@ -424,6 +435,8 @@ func TestMimoCode_Followup_ManagedEnableTrueOverDisabledLowerFull_NotRemovable(t
 			server:      "mls",
 			disabledLow: `{"type":"local","command":["mcp-language-server","--lsp","go"],"enabled":false}`,
 			writeTarget: `{"type":"local","command":["mcp-language-server","--lsp","go"],"enabled":true}`,
+			expectStdio: true, // mcp-language-server IS a stdio entry too
+			expectLSP:   true,
 			consumer: func(t *testing.T, o *mimoCodeClient) bool {
 				return stdioLSPEntryNames(t, o)["mls"]
 			},
@@ -444,7 +457,7 @@ func TestMimoCode_Followup_ManagedEnableTrueOverDisabledLowerFull_NotRemovable(t
 			o := &mimoCodeClient{path: writeTargetPath}
 
 			// The single managed re-resolve owner now reports the re-activation.
-			reResolves, err := o.mimoCodeManagedLayerReResolves(tc.server)
+			reResolves, err := o.mimoCodeManagedLayerReResolves(tc.server, reResolveConsumerAny)
 			if err != nil {
 				t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 			}
@@ -452,15 +465,31 @@ func TestMimoCode_Followup_ManagedEnableTrueOverDisabledLowerFull_NotRemovable(t
 				t.Fatalf("a managed enable-true overlay over a DISABLED content-bearing lower entry RE-ACTIVATES the server — must re-resolve (NOT removable)")
 			}
 
-			// The combined predicate reaches the same verdict for BOTH consumers (the
-			// managed OR fires after the folded active-set check passes through).
-			for _, consumer := range []mimoCodeReResolveConsumer{reResolveConsumerStdio, reResolveConsumerLSP} {
+			// reResolveConsumerAny (the BROADEST coarse-shape semantic) ALWAYS re-resolves
+			// here: the effective managed enable-true ⊕ disabled-lower value is
+			// content-bearing.
+			anyR, err := o.mimoCodeNameReResolvesAfterWriteTargetRemoval(tc.server, reResolveConsumerAny)
+			if err != nil {
+				t.Fatalf("mimoCodeNameReResolvesAfterWriteTargetRemoval(any): %v", err)
+			}
+			if !anyR {
+				t.Fatalf("reResolveConsumerAny must DECLINE removal (managed enable-true re-activation of a content-bearing lower entry)")
+			}
+			// The F3 unified managed-OR rework applies CONSUMER-SHAPE active membership:
+			// a gopls-mcp re-emergence is stdio-active but NOT LSP-active; an
+			// mcp-language-server re-emergence is BOTH. So each register consumer
+			// re-resolves only for the shape it actually matches — the prior
+			// consumer-agnostic predicate over-blocked the LSP consumer on a gopls server.
+			for consumer, want := range map[mimoCodeReResolveConsumer]bool{
+				reResolveConsumerStdio: tc.expectStdio,
+				reResolveConsumerLSP:   tc.expectLSP,
+			} {
 				r, err := o.mimoCodeNameReResolvesAfterWriteTargetRemoval(tc.server, consumer)
 				if err != nil {
 					t.Fatalf("mimoCodeNameReResolvesAfterWriteTargetRemoval(consumer=%d): %v", consumer, err)
 				}
-				if !r {
-					t.Fatalf("the combined re-resolve predicate must DECLINE removal for consumer=%d (managed enable-true re-activation)", consumer)
+				if r != want {
+					t.Fatalf("combined re-resolve for consumer=%d = %v, want %v (consumer-shape active membership)", consumer, r, want)
 				}
 			}
 
@@ -485,7 +514,7 @@ func TestMimoCode_Followup_ManagedEnableTrue_NoLowerContent_StaysRemovable(t *te
 	writeMimoFile(t, writeTargetPath, `{"mcp":{"gopls":`+followupStdioGopls+`}}`)
 	o := &mimoCodeClient{path: writeTargetPath}
 
-	reResolves, err := o.mimoCodeManagedLayerReResolves("gopls")
+	reResolves, err := o.mimoCodeManagedLayerReResolves("gopls", reResolveConsumerAny)
 	if err != nil {
 		t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 	}
