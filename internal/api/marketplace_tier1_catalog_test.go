@@ -26,6 +26,16 @@ import (
 // work-items/backlog/2026-06-24-tier3-manual-clone-mcps.md).
 var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys", "kicad"}
 
+// tierMusicRemoteCatalogIDs are the v2-only remote-http music rows appended after
+// the Tier-1 desktop-app rows. Unlike tier1CatalogIDs (local-stdio forks pinned via
+// vendored_source), these are managed remote endpoints (transport: http, url),
+// carry NO vendored_source and NO install_probe, and the operator supplies the
+// Authorization header at install time (the catalog holds no secret) — same shape
+// as the v1 context7/qt-docs remote rows. They are NOT folded into tier1CatalogIDs
+// because the Tier-1 loops assert stdio-fork-only properties (vendored_source,
+// install_probe, port-0 daemon draft) a remote row must not have.
+var tierMusicRemoteCatalogIDs = []string{"suno"}
+
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
 func v2CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v2", "catalog.json") }
@@ -62,10 +72,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("v1 catalog failed to parse: %v", err)
 	}
-	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs)
+	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicRemoteCatalogIDs)
 	if len(cat.Entries) != wantCount {
-		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1)",
-			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs))
+		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-remote)",
+			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicRemoteCatalogIDs))
 	}
 
 	// Every v1 entry id must still be present (verbatim copy), in order, before
@@ -212,6 +222,58 @@ func TestV2Tier1Rows_GenerateThenCreateDryRun(t *testing.T) {
 				if m.VendoredSource != nil {
 					t.Fatalf("official row %q drafted manifest gained a vendored_source: %#v", id, m.VendoredSource)
 				}
+			}
+		})
+	}
+}
+
+// TestV2MusicRemoteRows_GenerateThenCreateDryRun is the MIRROR GATE for the
+// v2-only remote-http music rows: for each row, project it through
+// GenerateDraftManifest (the `mcphub marketplace generate <id>` path → the
+// transport=http branch → generateRemoteHTTPDraft), then ParseManifest+Validate the
+// drafted remote-http manifest. A clean draft + clean Validate proves the row is
+// gate-clean (it would be accepted by `mcphub manifest create`). Fully in-process:
+// no daemon spawn, no state-dir write — state-safe with no env redirection. The
+// remote-http draft carries no daemon port placeholder, so unlike the stdio mirror
+// gate there is no port-0 substitution step.
+func TestV2MusicRemoteRows_GenerateThenCreateDryRun(t *testing.T) {
+	byID := v2CatalogByID(t)
+	for _, id := range tierMusicRemoteCatalogIDs {
+		id := id
+		t.Run(id, func(t *testing.T) {
+			e, ok := byID[id]
+			if !ok {
+				t.Fatalf("v2 catalog missing music-remote row %q", id)
+			}
+			// Shape contract: remote-http row carries a transport+url, NO
+			// vendored_source, NO install_probe, and an empty/absent availability gate
+			// (a hosted endpoint is always reachable — there is no local artifact to
+			// probe), matching the context7/qt-docs remote rows.
+			if e.Transport != "http" {
+				t.Fatalf("music-remote row %q transport = %q, want \"http\"", id, e.Transport)
+			}
+			if strings.TrimSpace(e.URL) == "" {
+				t.Fatalf("music-remote row %q has an empty url", id)
+			}
+			if e.VendoredSource != nil {
+				t.Fatalf("music-remote row %q must NOT carry vendored_source (remote endpoint, not a local fork): %#v", id, e.VendoredSource)
+			}
+			if e.InstallProbe != nil {
+				t.Fatalf("music-remote row %q must NOT carry install_probe (no local artifact to probe): %#v", id, e.InstallProbe)
+			}
+			draft, warns, err := GenerateDraftManifest(e, GenerateOpts{})
+			if err != nil {
+				t.Fatalf("generate remote-http draft for %q: %v (warnings=%v)", id, err, warns)
+			}
+			m, err := config.ParseManifest(strings.NewReader(draft))
+			if err != nil {
+				t.Fatalf("row %q drafted remote-http manifest failed ParseManifest+Validate (mirror gate): %v\n---\n%s", id, err, draft)
+			}
+			if m.Transport != config.TransportRemoteHTTP {
+				t.Fatalf("row %q drafted manifest transport = %q, want %q", id, m.Transport, config.TransportRemoteHTTP)
+			}
+			if strings.TrimSpace(m.URL) == "" {
+				t.Fatalf("row %q drafted remote-http manifest lost the url", id)
 			}
 		})
 	}
