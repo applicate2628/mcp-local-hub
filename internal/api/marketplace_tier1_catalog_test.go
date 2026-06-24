@@ -12,14 +12,19 @@ import (
 // tier1CatalogIDs are the Tier-1 desktop-app rows the v2 catalog appends after the
 // verbatim v1 entries. The first batch was excel/ableton/codex-mcp-server; matlab
 // (official MathWorks Go binary, v0.11.0) and ansys (official ansys/pymapdl-mcp,
-// v0.2.1, FastMCP/stdio) extend it. Two rows were DROPPED before merge:
+// v0.2.1, FastMCP/stdio) extend it, and kicad (community fork oaslananka/kicad-mcp,
+// PyPI kicad-mcp-pro v3.14.1, uvx --from, MIT) is the one clean one-click EDA row.
+// Two rows were DROPPED before merge:
 //   - cst — bbl21/CST_MCP is a CLI toolkit, not an MCP server
 //     (work-items/bugs/2026-06-24-cst-not-an-mcp-server.md).
 //   - mathcad — ${workspaceFolder} freezes to CWD for a kind:global daemon
 //     (category error), the server artifact is unprobed+absent (repo unpackaged →
 //     crash-loop), and the license is pending
 //     (work-items/backlog/2026-06-24-mathcad-mcp-row-deferred.md).
-var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys"}
+// Five further EDA/CAD rows are DEFERRED (real MCP servers, but each needs a manual
+// git-clone+build that vendored_source.install_cmd does not execute — see
+// work-items/backlog/2026-06-24-tier3-manual-clone-mcps.md).
+var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys", "kicad"}
 
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
@@ -89,11 +94,13 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 		}
 	}
 
-	// The two FORK rows carry a pinned vendored_source; the OFFICIAL rows (codex,
+	// The FORK rows carry a pinned vendored_source; the OFFICIAL rows (codex,
 	// matlab, ansys) carry NONE — they are first-party servers, not community forks,
 	// so their pin lives in the upstream-pinned readme_url / args (matlab release
 	// v0.11.0 binary; ansys uvx ==0.2.1 PyPI pin), not a vendored_source block.
-	for _, id := range []string{"excel", "ableton"} {
+	// kicad is a community fork (oaslananka/kicad-mcp) published to PyPI, so it pins
+	// via vendored_source like excel/ableton.
+	for _, id := range []string{"excel", "ableton", "kicad"} {
 		e := byID[id]
 		if e.VendoredSource == nil || strings.TrimSpace(e.VendoredSource.PinnedRef) == "" {
 			t.Fatalf("fork row %q is missing a pinned vendored_source", id)
@@ -194,10 +201,10 @@ func TestV2Tier1Rows_GenerateThenCreateDryRun(t *testing.T) {
 			if m.InstallProbe == nil || (len(m.InstallProbe.Binaries) == 0 && len(m.InstallProbe.Files) == 0 && len(m.InstallProbe.FileGlobs) == 0) {
 				t.Fatalf("row %q drafted manifest lost install_probe", id)
 			}
-			// The two fork rows project the pinned vendored_source; the official rows
+			// The fork rows project the pinned vendored_source; the official rows
 			// (codex, matlab, ansys) do not.
 			switch id {
-			case "excel", "ableton":
+			case "excel", "ableton", "kicad":
 				if m.VendoredSource == nil || strings.TrimSpace(m.VendoredSource.PinnedRef) == "" {
 					t.Fatalf("fork row %q drafted manifest lost the pinned vendored_source: %#v", id, m.VendoredSource)
 				}
@@ -290,20 +297,20 @@ func TestV2MatlabRow_ProbeRequiresMatlabOnPATH(t *testing.T) {
 // TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles asserts the catalog-data migration:
 // every version-agnostic glob pattern in the Tier-1 rows lives in the OPT-IN
 // file_globs[] field, NEVER files[] (which is now exact-stat-only). excel + ableton +
-// ansys carry their patterns in file_globs[]; matlab carries none (binaries-only);
-// codex carries binaries-only. No Tier-1 row uses files[] (none needs a literal path),
-// and no file_globs[] entry is missing its absolute-path shape.
+// ansys + kicad carry their patterns in file_globs[]; matlab carries none
+// (binaries-only); codex carries binaries-only. No Tier-1 row uses files[] (none
+// needs a literal path), and no file_globs[] entry is missing its absolute-path shape.
 func TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles(t *testing.T) {
 	byID := v2CatalogByID(t)
 	// Rows whose probe carries a glob pattern → must be in file_globs[].
-	wantGlobRows := map[string]bool{"excel": true, "ableton": true, "ansys": true}
+	wantGlobRows := map[string]bool{"excel": true, "ableton": true, "ansys": true, "kicad": true}
 	for id, e := range byID {
 		if e.InstallProbe == nil {
 			continue
 		}
 		p := e.InstallProbe
 		// No Tier-1 row should use files[] (no literal-path probe in this batch).
-		if id == "excel" || id == "ableton" || id == "codex-mcp-server" || id == "matlab" || id == "ansys" {
+		if id == "excel" || id == "ableton" || id == "codex-mcp-server" || id == "matlab" || id == "ansys" || id == "kicad" {
 			if len(p.Files) != 0 {
 				t.Fatalf("Tier-1 row %q uses files[] %v — version globs belong in file_globs[]; files[] is exact-stat-only", id, p.Files)
 			}

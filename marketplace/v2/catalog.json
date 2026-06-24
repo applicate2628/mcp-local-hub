@@ -337,6 +337,9 @@
       "license": "MIT",
       "availability": "disabled-until-probe",
       "install_probe": {
+        "binaries": [
+          "uvx"
+        ],
         "file_globs": [
           "C:\\ProgramData\\Ableton\\Live *\\Program\\Ableton Live *.exe"
         ]
@@ -425,9 +428,50 @@
       "license": "Apache-2.0",
       "availability": "disabled-until-probe",
       "install_probe": {
+        "binaries": [
+          "uvx"
+        ],
         "file_globs": [
           "C:\\Program Files\\ANSYS Inc\\v*\\ansys\\bin\\winx64\\ansys*.exe"
         ]
+      }
+    },
+    {
+      "id": "kicad",
+      "name": "KiCad MCP server",
+      "summary": "Drive KiCad EDA from an AI client — PCB design, DRC, simulation, BOM, DFM, manufacturing — through kicad-cli and the KiCad IPC / SWIG scripting API. Community server oaslananka/kicad-mcp (Python), published to PyPI as kicad-mcp-pro, pinned to v3.14.1 and run via uvx with the version pinned in --from (vendored_source block, community fork, MIT). PRIVACY: telemetry is OFF by default (OTLP export is opt-in to an operator-supplied collector), no telemetry-disable env needed. SAFETY: remote tools are read-only by default; destructive operations (board/schematic writes, manufacturing output) require explicit operator consent. disabled-until-probe: enables when uvx is on PATH AND a host KiCad 10.x install is detected via the glob C:\\Program Files\\KiCad\\1[0-9]*\\bin\\kicad-cli.exe — per the server's compatibility.yaml, kicad-mcp-pro v3.14.1 targets KiCad 10.0.x as the PRIMARY supported line (KiCad 9.x was dropped/EOL after 10.0.0; 8.x is deprecated file-level-only; 7.x unsupported), so the gate matches the 10.x-and-newer roots only. REQUIRES Python 3.13+ and uv on PATH, plus a host KiCad 10.x install. Windows + KiCad desktop only in this probe.",
+      "homepage": "https://github.com/oaslananka/kicad-mcp",
+      "readme_url": "https://raw.githubusercontent.com/oaslananka/kicad-mcp/e0ffa7c6f6c36a1ca9e22917ba2a7c6d60ed3e8a/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "kicad-mcp-pro==3.14.1",
+        "kicad-mcp-pro"
+      ],
+      "env": {},
+      "categories": [
+        "engineering",
+        "eda",
+        "pcb",
+        "electronics"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ],
+        "file_globs": [
+          "C:\\Program Files\\KiCad\\1[0-9]*\\bin\\kicad-cli.exe"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/oaslananka/kicad-mcp",
+        "pinned_ref": "e0ffa7c6f6c36a1ca9e22917ba2a7c6d60ed3e8a",
+        "install_cmd": "uvx --from kicad-mcp-pro==3.14.1 kicad-mcp-pro",
+        "run_cmd": "uvx --from kicad-mcp-pro==3.14.1 kicad-mcp-pro",
+        "license_status": "confirmed"
       }
     }
   ]
