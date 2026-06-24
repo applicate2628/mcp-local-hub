@@ -114,6 +114,88 @@ func TestFileProbeMatches_GlobMatchesMultipleVersions(t *testing.T) {
 	}
 }
 
+// TestFileProbeMatches_AbletonBroadenedGlobCoversAllEditions is the Tier-1
+// acceptance for the BROADENED ableton probe (this PR): the catalog glob was
+// narrowed to Suite-only ("…\\Live * Suite\\Program\\Ableton Live * Suite.exe"),
+// which the ableton-mcp README contradicts — it supports Live 10+ in ANY edition.
+// The broadened pattern "…\\Live *\\Program\\Ableton Live *.exe" must match a
+// Suite install AND a Standard install from ONE shared catalog row, while the OLD
+// Suite-only pattern would MISS the Standard edition. Uses temp dirs +
+// filepath.Join so it is host-OS correct on every build. The real catalog pattern
+// is rooted at C:\ProgramData\Ableton; here the root is a temp dir but the
+// edition-spanning segment shape ("Live <ver> <edition>") is identical.
+func TestFileProbeMatches_AbletonBroadenedGlobCoversAllEditions(t *testing.T) {
+	base := t.TempDir()
+	// Two installs differing by EDITION (not just version): a Suite and a Standard,
+	// each with the matching "Ableton Live <ver> <edition>.exe" the shipped
+	// installer lays down (verified against the host's real Live 11/12 Suite layout).
+	installs := []struct{ dir, exe string }{
+		{"Live 11 Suite", "Ableton Live 11 Suite.exe"},
+		{"Live 12 Standard", "Ableton Live 12 Standard.exe"},
+	}
+	for _, in := range installs {
+		prog := filepath.Join(base, in.dir, "Program")
+		if err := os.MkdirAll(prog, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", prog, err)
+		}
+		if err := os.WriteFile(filepath.Join(prog, in.exe), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write exe: %v", err)
+		}
+	}
+
+	// BROADENED pattern (this PR): edition word dropped, so the spanning `*`
+	// covers "11 Suite", "12 Standard", "11 Intro", etc.
+	broadened := filepath.Join(base, "Live *", "Program", "Ableton Live *.exe")
+	// OLD Suite-only pattern (what shipped first), reconstructed here to PROVE the
+	// broadening is load-bearing: it must NOT see the Standard edition.
+	suiteOnly := filepath.Join(base, "Live * Suite", "Program", "Ableton Live * Suite.exe")
+
+	// Broadened: ANY match is a runnable regular file → pass (it sees BOTH editions).
+	if ok, why := fileProbeMatches(broadened); !ok {
+		t.Fatalf("broadened ableton glob over Suite+Standard failed: %q", why)
+	}
+	// And through the full availabilityProbePasses owner (the install/readiness path).
+	if ok, why := availabilityProbePasses(&config.AvailabilityProbe{Files: []string{broadened}}); !ok {
+		t.Fatalf("availabilityProbePasses with the broadened ableton glob failed: %q", why)
+	}
+	// Confirm the broadened pattern actually matches BOTH editions (not just one) —
+	// the edition-coverage claim, not merely "some match exists".
+	matches, err := filepath.Glob(broadened)
+	if err != nil {
+		t.Fatalf("glob broadened pattern: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("broadened glob matched %d installs, want 2 (Suite + Standard): %v", len(matches), matches)
+	}
+
+	// The OLD Suite-only pattern is the contrast that proves the broadening matters:
+	// it matches ONLY the Suite install, missing the Standard one. (With ONLY the
+	// Standard edition present it would match nothing — the regression the
+	// broadening fixes.)
+	suiteMatches, err := filepath.Glob(suiteOnly)
+	if err != nil {
+		t.Fatalf("glob suite-only pattern: %v", err)
+	}
+	if len(suiteMatches) != 1 {
+		t.Fatalf("suite-only glob matched %d installs, want exactly 1 (Suite); broadening is what adds the rest: %v", len(suiteMatches), suiteMatches)
+	}
+
+	// Remove BOTH installs → the broadened glob matches nothing → fail inert
+	// (does not exist), proving it is genuinely host-presence-driven (fail-closed).
+	for _, in := range installs {
+		if err := os.RemoveAll(filepath.Join(base, in.dir)); err != nil {
+			t.Fatalf("rm install dir: %v", err)
+		}
+	}
+	ok, why := fileProbeMatches(broadened)
+	if ok {
+		t.Fatalf("broadened ableton glob passed with no install present; want fail")
+	}
+	if !strings.Contains(why, "does not exist") {
+		t.Fatalf("no-match reason %q, want \"does not exist\" (fail-closed)", why)
+	}
+}
+
 // TestFileProbeMatches_LiteralByteIdenticalToExactStat is the additive-guarantee
 // regression: a metacharacter-free (literal) pattern must behave BYTE-IDENTICALLY
 // to the prior exact os.Stat — filepath.Glob of a literal returns that one path
@@ -138,6 +220,62 @@ func TestFileProbeMatches_LiteralByteIdenticalToExactStat(t *testing.T) {
 			t.Fatalf("literal %q: fileProbeMatches=(%v,%q) want entryScriptStatus=(%v,%q)",
 				path, gotOK, gotReason, wantOK, wantReason)
 		}
+	}
+}
+
+// TestFileProbeMatches_LiteralPathWithGlobMetacharsExists is the codex catalog
+// finding 1 regression: a LITERAL absolute path whose dir/file name contains a
+// glob metacharacter (here `[` `]` in "Foo [Beta]") that ACTUALLY EXISTS must be
+// detected as present. The prior unconditional filepath.Glob interpreted `[Beta]`
+// as a character class and returned NO match for the literal path → the row was
+// wrongly disabled even though the exact file exists. The exact-stat-first fix
+// stats the verbatim literal FIRST, so a real "[…]"/"*"/"?"-bearing install path
+// is found without being misread as a pattern. Belt-and-suspenders: confirm
+// filepath.Glob of that same literal returns NO match (proving the literal would
+// have been missed by glob alone), and that fileProbeMatches still passes.
+func TestFileProbeMatches_LiteralPathWithGlobMetacharsExists(t *testing.T) {
+	base := t.TempDir()
+	// A literal install path with glob metacharacters in a segment name. Created on
+	// disk verbatim — there is no wildcard intent here; "[Beta]" is a real folder.
+	dir := filepath.Join(base, "Foo [Beta]", "bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	exe := filepath.Join(dir, "tool")
+	if err := os.WriteFile(exe, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write exe: %v", err)
+	}
+
+	// PROOF the regression existed: filepath.Glob of the literal path misreads
+	// "[Beta]" as a char class and matches NOTHING — glob alone would disable the row.
+	globMatches, gerr := filepath.Glob(exe)
+	if gerr != nil {
+		t.Fatalf("glob of literal metachar path errored: %v", gerr)
+	}
+	if len(globMatches) != 0 {
+		t.Fatalf("expected filepath.Glob of the literal \"[Beta]\" path to match NOTHING (char-class misread), got %v", globMatches)
+	}
+
+	// The fix: exact-stat-first finds the literal file → probe passes.
+	if ok, why := fileProbeMatches(exe); !ok {
+		t.Fatalf("fileProbeMatches misread an EXISTING literal \"[Beta]\" path as a pattern and missed it: %q", why)
+	}
+	// And through the full availabilityProbePasses owner (the install/readiness path).
+	if ok, why := availabilityProbePasses(&config.AvailabilityProbe{Files: []string{exe}}); !ok {
+		t.Fatalf("availabilityProbePasses missed the existing literal \"[Beta]\" path: %q", why)
+	}
+
+	// Removing the file → the literal no longer exists AND the glob still matches
+	// nothing → fail inert (does not exist), preserving fail-closed polarity.
+	if err := os.Remove(exe); err != nil {
+		t.Fatalf("rm exe: %v", err)
+	}
+	ok, why := fileProbeMatches(exe)
+	if ok {
+		t.Fatalf("fileProbeMatches passed for an absent literal \"[Beta]\" path; want fail")
+	}
+	if !strings.Contains(why, "does not exist") {
+		t.Fatalf("absent literal \"[Beta]\" reason %q, want \"does not exist\" (fail-closed)", why)
 	}
 }
 

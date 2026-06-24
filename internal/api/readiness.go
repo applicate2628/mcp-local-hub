@@ -237,31 +237,55 @@ func entryScriptStatus(path string) (bool, string) {
 }
 
 // fileProbeMatches is the SINGLE OWNER of the D-3 install_probe files[] check
-// (Tier-1 glob enhancement). It expands `pattern` via filepath.Glob, then
-// COMPOSES the existing regular-file owner entryScriptStatus over each match —
-// it adds NO new detection (entryScriptStatus stays the literal-path stat owner;
-// this helper only widens the input from one exact path to a glob's match set).
-// It returns (true, "") if ANY match is a runnable regular file, else
-// (false, reason). The shape lets a SHARED cross-host catalog declare a
-// version-agnostic probe (e.g. "…\\Live * Suite\\…\\Ableton Live * Suite.exe"
-// matching Live 11/12) without baking an exact host path.
+// (Tier-1 glob enhancement). It COMPOSES the existing regular-file owner
+// entryScriptStatus — it adds NO new detection (entryScriptStatus stays the
+// literal-path stat owner; this helper only widens the input from one exact path
+// to a glob's match set). It returns (true, "") if the literal path OR any glob
+// match is a runnable regular file, else (false, reason). The shape lets a SHARED
+// cross-host catalog declare a version-agnostic probe (e.g.
+// "…\\Live *\\…\\Ableton Live *.exe" matching Live 11/12) without baking an exact
+// host path.
 //
-// Polarity is fail-closed, matching today's os.Stat:
-//   - filepath.Glob returns (nil, nil) on NO match → (false, "does not exist") —
-//     byte-identical to entryScriptStatus on a missing literal path, so the
-//     probe-fails-inert verdict is preserved (no match = the host app absent).
-//   - filepath.Glob's only error is ErrBadPattern (a malformed pattern) → fail
-//     inert with a named reason rather than silently passing.
+// EXACT-STAT FIRST (codex catalog finding 1 — literal-path-with-metachars
+// regression): a real existing manifest can carry a LITERAL absolute path whose
+// dir/file name contains a glob metacharacter — e.g. "/Applications/Foo [Beta]/x"
+// or any name with `*`/`?`/`[`. filepath.Glob would interpret `[Beta]` as a
+// character class and return NO match for that literal path (verified: Glob of an
+// existing "Foo [Beta]/bin/x" yields []), wrongly disabling a row whose file
+// actually exists. So we stat the VERBATIM pattern FIRST via entryScriptStatus;
+// if the literal path exists as a runnable regular file we return (true, "")
+// without ever globbing. ONLY when the exact literal does NOT exist (no such
+// literal file — the normal case for a genuine version glob like "Live *") do we
+// fall back to filepath.Glob and compose entryScriptStatus over each match.
 //
-// METACHARACTER-FREE pattern == today's exact stat: filepath.Glob of a literal
-// path returns exactly that one path when it exists (and (nil,nil) when it does
-// not), so a probe with no `*`/`?`/`[` behaves BYTE-IDENTICALLY to the prior
-// entryScriptStatus(f) — the only behavioral widening is for patterns that
-// actually contain a wildcard.
+// Polarity stays fail-closed, matching today's os.Stat:
+//   - exact stat succeeds → (true, "") immediately (covers literal paths AND
+//     metacharacter-bearing literal paths the glob would misread).
+//   - exact stat fails, glob returns (nil, nil) on NO match → (false,
+//     "does not exist") — byte-identical to entryScriptStatus on a missing
+//     literal path, so the probe-fails-inert verdict is preserved (no match = the
+//     host app absent).
+//   - exact stat fails AND filepath.Glob errors (ErrBadPattern, a malformed
+//     pattern) → fail inert with a named reason rather than silently passing.
+//     This branch is only reachable when the literal did NOT exist AND the glob
+//     is malformed, so a real literal "[" path that exists still passes via the
+//     exact stat above.
+//
+// METACHARACTER-FREE pattern == today's exact stat: the exact stat already
+// satisfies it, so a probe with no `*`/`?`/`[` behaves BYTE-IDENTICALLY to the
+// prior entryScriptStatus(f) — the only behavioral widening is for patterns that
+// actually contain a wildcard AND whose literal path does not itself exist.
 func fileProbeMatches(pattern string) (bool, string) {
+	// EXACT-STAT FIRST: a literal path (including one containing glob
+	// metacharacters like `[Beta]`) that exists as a runnable regular file passes
+	// directly — filepath.Glob would misread the metacharacters and miss it.
+	if ok, _ := entryScriptStatus(pattern); ok {
+		return true, ""
+	}
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		// filepath.Glob's documented error is ErrBadPattern only. A malformed
+		// filepath.Glob's documented error is ErrBadPattern only. Reached only when
+		// the literal pattern did NOT exist above AND it is malformed; a malformed
 		// pattern can never enable the row, so fail inert with a reason instead of
 		// letting it slip through.
 		return false, "is not a valid glob pattern"

@@ -9,15 +9,17 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
-// tier1CatalogIDs are the three Tier-1 desktop-app rows the v2 catalog appends
-// after the verbatim v1 entries. Two rows were DROPPED before merge:
+// tier1CatalogIDs are the Tier-1 desktop-app rows the v2 catalog appends after the
+// verbatim v1 entries. The first batch was excel/ableton/codex-mcp-server; matlab
+// (official MathWorks Go binary, v0.11.0) and ansys (official ansys/pymapdl-mcp,
+// v0.2.1, FastMCP/stdio) extend it. Two rows were DROPPED before merge:
 //   - cst — bbl21/CST_MCP is a CLI toolkit, not an MCP server
 //     (work-items/bugs/2026-06-24-cst-not-an-mcp-server.md).
 //   - mathcad — ${workspaceFolder} freezes to CWD for a kind:global daemon
 //     (category error), the server artifact is unprobed+absent (repo unpackaged →
 //     crash-loop), and the license is pending
 //     (work-items/backlog/2026-06-24-mathcad-mcp-row-deferred.md).
-var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server"}
+var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys"}
 
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
@@ -43,7 +45,7 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 		t.Fatalf("v2 catalog schema_version = %q, want %q", cat.SchemaVersion, MarketplaceCatalogSchemaVersionV2)
 	}
 
-	// Entry count: the v1 entries are copied VERBATIM, then the 4 Tier-1 rows are
+	// Entry count: the v1 entries are copied VERBATIM, then the Tier-1 rows are
 	// appended. Derive the expected count from the v1 file so this stays correct
 	// if v1 ever grows before being frozen (it is frozen now, but the derivation
 	// is the robust assertion).
@@ -87,8 +89,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 		}
 	}
 
-	// The two FORK rows carry a pinned vendored_source; the official codex row
-	// carries NONE (it is not a fork).
+	// The two FORK rows carry a pinned vendored_source; the OFFICIAL rows (codex,
+	// matlab, ansys) carry NONE — they are first-party servers, not community forks,
+	// so their pin lives in the upstream-pinned readme_url / args (matlab release
+	// v0.11.0 binary; ansys uvx ==0.2.1 PyPI pin), not a vendored_source block.
 	for _, id := range []string{"excel", "ableton"} {
 		e := byID[id]
 		if e.VendoredSource == nil || strings.TrimSpace(e.VendoredSource.PinnedRef) == "" {
@@ -98,8 +102,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 			t.Fatalf("fork row %q pinned_ref %q is a moving ref (must be a SHA or tag)", id, e.VendoredSource.PinnedRef)
 		}
 	}
-	if e := byID["codex-mcp-server"]; e.VendoredSource != nil {
-		t.Fatalf("official codex row must NOT carry vendored_source (it is not a fork): %#v", e.VendoredSource)
+	for _, id := range []string{"codex-mcp-server", "matlab", "ansys"} {
+		if e := byID[id]; e.VendoredSource != nil {
+			t.Fatalf("official row %q must NOT carry vendored_source (it is not a fork): %#v", id, e.VendoredSource)
+		}
 	}
 }
 
@@ -188,14 +194,14 @@ func TestV2Tier1Rows_GenerateThenCreateDryRun(t *testing.T) {
 			if m.InstallProbe == nil || (len(m.InstallProbe.Binaries) == 0 && len(m.InstallProbe.Files) == 0) {
 				t.Fatalf("row %q drafted manifest lost install_probe", id)
 			}
-			// The two fork rows project the pinned vendored_source; codex (official)
-			// does not.
+			// The two fork rows project the pinned vendored_source; the official rows
+			// (codex, matlab, ansys) do not.
 			switch id {
 			case "excel", "ableton":
 				if m.VendoredSource == nil || strings.TrimSpace(m.VendoredSource.PinnedRef) == "" {
 					t.Fatalf("fork row %q drafted manifest lost the pinned vendored_source: %#v", id, m.VendoredSource)
 				}
-			case "codex-mcp-server":
+			case "codex-mcp-server", "matlab", "ansys":
 				if m.VendoredSource != nil {
 					t.Fatalf("official row %q drafted manifest gained a vendored_source: %#v", id, m.VendoredSource)
 				}

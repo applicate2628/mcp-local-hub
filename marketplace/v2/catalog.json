@@ -197,8 +197,8 @@
     },
     {
       "id": "excel",
-      "name": "Excel MCP server (live COM, .NET)",
-      "summary": "Automate Microsoft Excel through its native COM API — Power Query, DAX measures, PivotTables, charts, formatting, and VBA macros (25 tools / ~230 operations) with real recalc against the live Excel process. Community server sbroenne/mcp-server-excel (C#/.NET 10), pinned to release v1.8.70. Distributed as a self-contained mcp-excel.exe — download from the release ZIP and add to PATH (see vendored_source.install_cmd); the launch command is the bare `mcp-excel` binary, not uvx. disabled-until-probe: enables only when Excel AND the mcp-excel server binary are present. The VBA-exec / RunMacro operations execute arbitrary code in the live workbook — gate the 6 VBA-exec ops behind operator consent (D-4). Windows + Excel desktop only.",
+      "name": "Excel MCP server (live COM, .NET) — Click-to-Run / Microsoft 365",
+      "summary": "Automate Microsoft Excel through its native COM API — Power Query, DAX measures, PivotTables, charts, formatting, and VBA macros (25 tools / ~230 operations) with real recalc against the live Excel process. Community server sbroenne/mcp-server-excel (C#/.NET 10), pinned to release v1.8.70. Distributed as a self-contained mcp-excel.exe — download from the release ZIP and add to PATH (see vendored_source.install_cmd); the launch command is the bare `mcp-excel` binary, not uvx. disabled-until-probe: enables only when Excel AND the mcp-excel server binary are present. PROBE SCOPE: this row targets a Click-to-Run / Microsoft 365 Excel install (the C:\\Program Files*\\Microsoft Office\\root\\Office1?\\EXCEL.EXE layout, where the `root\\` segment is the Click-to-Run signature). MSI / volume-license installs lay EXCEL.EXE down WITHOUT the `root\\` segment (…\\Microsoft Office\\Office16\\EXCEL.EXE), so the host-detect probe does NOT cover them in this batch — filepath.Glob has no `**` and the files[] probe uses AND-semantics across entries, so it cannot OR the optional `root\\` across two patterns. A files[] OR-group probe model covering Click-to-Run + MSI + macOS is the tracked D-3 follow-up. The VBA-exec / RunMacro operations execute arbitrary code in the live workbook — gate the 6 VBA-exec ops behind operator consent (D-4). Windows + Click-to-Run Excel desktop only.",
       "homepage": "https://github.com/sbroenne/mcp-server-excel",
       "readme_url": "https://raw.githubusercontent.com/sbroenne/mcp-server-excel/v1.8.70/README.md",
       "transport": "stdio",
@@ -223,7 +223,7 @@
     {
       "id": "ableton",
       "name": "Ableton Live MCP server",
-      "summary": "Control Ableton Live over a loopback TCP socket — create/edit tracks, clips, devices, and transport via the Live Object Model. Community server ahujasid/ableton-mcp (Python), pinned, run via uvx from the git source. disabled-until-probe: enables only when Ableton Live is installed. REQUIRES the operator to first install the bundled Ableton Remote Script into Live's MIDI Remote Scripts directory and load it in Live — the MCP server connects to that script over a local loopback socket; the host-exe probe detects Live, NOT the Remote Script, so verify the script is loaded before use.",
+      "summary": "Control Ableton Live over a loopback TCP socket — create/edit tracks, clips, devices, and transport via the Live Object Model. Community server ahujasid/ableton-mcp (Python, supports Live 10+ any edition), pinned, run via uvx from the git source. disabled-until-probe: enables only when Ableton Live is installed. The install probe covers ALL Windows Live editions (Suite/Standard/Intro/Lite, Live 11/12) via the version-agnostic glob C:\\ProgramData\\Ableton\\Live *\\Program\\Ableton Live *.exe; macOS (/Applications/Ableton Live *.app) is NOT covered in this batch — the files[] probe uses AND-semantics across entries and cannot OR a second install root, so a macOS row (or files[] OR-group support) is a follow-up. PRIVACY: the pinned ableton-mcp ships telemetry ON by default (anonymous usage data sent to the upstream); this curated row sets ABLETON_MCP_DISABLE_TELEMETRY=true in env to DISABLE it by default — no usage data leaves your machine unless you remove that env. REQUIRES the operator to first install the bundled Ableton Remote Script into Live's MIDI Remote Scripts directory and load it in Live — the MCP server connects to that script over a local loopback socket; the host-exe probe detects Live, NOT the Remote Script, so verify the script is loaded before use.",
       "homepage": "https://github.com/ahujasid/ableton-mcp",
       "readme_url": "https://raw.githubusercontent.com/ahujasid/ableton-mcp/5e9ffbd246bae60994699900f4fef34ad7b40407/README.md",
       "transport": "stdio",
@@ -233,12 +233,14 @@
         "git+https://github.com/ahujasid/ableton-mcp@5e9ffbd246bae60994699900f4fef34ad7b40407",
         "ableton-mcp"
       ],
-      "env": {},
+      "env": {
+        "ABLETON_MCP_DISABLE_TELEMETRY": "true"
+      },
       "categories": ["music", "daw", "ableton"],
       "license": "MIT",
       "availability": "disabled-until-probe",
       "install_probe": {
-        "files": ["C:\\ProgramData\\Ableton\\Live * Suite\\Program\\Ableton Live * Suite.exe"]
+        "files": ["C:\\ProgramData\\Ableton\\Live *\\Program\\Ableton Live *.exe"]
       },
       "vendored_source": {
         "repo": "https://github.com/ahujasid/ableton-mcp",
@@ -263,6 +265,41 @@
       "availability": "disabled-until-probe",
       "install_probe": {
         "binaries": ["codex"]
+      }
+    },
+    {
+      "id": "matlab",
+      "name": "MATLAB MCP server (official, MathWorks)",
+      "summary": "Run MATLAB from an AI client — execute code, scripts, and functions against a live MATLAB process via the official MathWorks Go MCP server (matlab-mcp-server, stdio). OFFICIAL MathWorks server (matlab/matlab-mcp-server, pinned to release v0.11.0) — NOT a community fork, so no vendored_source (like the codex row). Distributed as a self-contained matlab-mcp-server binary: download matlab-mcp-server-windows-x64.exe from the v0.11.0 release and add it to PATH (rename to matlab-mcp-server), OR `go install github.com/matlab/matlab-mcp-server/cmd/matlab-mcp-server@latest`. REQUIRES a host MATLAB R2021a-or-later install — the server locates it on PATH (or via --matlab-root / the MW_MCP_SERVER_MATLAB_ROOT env var) and drives the live MATLAB engine, so executing MATLAB code runs arbitrary host computation; the operator gates that the same way they gate any code-exec tool. disabled-until-probe: enables only when BOTH the matlab-mcp-server binary AND a MATLAB install are present. License: MathWorks custom (BSD-style, with a clause restricting use to MathWorks products). Windows + MATLAB desktop only in this probe (the host-install glob is the Windows MATLAB layout).",
+      "homepage": "https://github.com/matlab/matlab-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/matlab/matlab-mcp-server/v0.11.0/README.md",
+      "transport": "stdio",
+      "command": "matlab-mcp-server",
+      "args": [],
+      "env": {},
+      "categories": ["engineering", "matlab", "math", "scientific-computing"],
+      "license": "MathWorks (custom BSD-style, product-use restricted)",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": ["matlab-mcp-server"],
+        "files": ["C:\\Program Files\\MATLAB\\R*\\bin\\matlab.exe"]
+      }
+    },
+    {
+      "id": "ansys",
+      "name": "Ansys MAPDL MCP server (PyMAPDL)",
+      "summary": "Drive Ansys MAPDL (Mechanical APDL) from an AI client through PyMAPDL — launch/connect to a MAPDL session and run finite-element analysis. Official Ansys server ansys/pymapdl-mcp (Python, FastMCP, stdio), pinned to release v0.2.1; published on PyPI as ansys-mapdl-mcp, run via uvx with the version pinned in args (like serena's pinned uvx source), so no vendored_source (official Ansys-org package, Apache-2.0). disabled-until-probe: enables only when an Ansys MAPDL install is detected via the version-agnostic glob C:\\Program Files\\ANSYS Inc\\v*\\ansys\\bin\\winx64\\ansys*.exe — the Ansys solver executable is itself version-stamped (ansys241.exe for 2024 R1, etc.) under a v<ver> root (v231/v241/...). REQUIRES Python + uv on PATH and a host Ansys MAPDL install — the MAPDL-launching tools (launch_mapdl_session / connect_to_mapdl / disconnect_from_mapdl) start or attach to the solver and run arbitrary APDL, so the operator gates those raw solver/run tools behind consent the same way as any code-exec surface (D-4). Windows + Ansys MAPDL desktop only in this probe.",
+      "homepage": "https://github.com/ansys/pymapdl-mcp",
+      "readme_url": "https://raw.githubusercontent.com/ansys/pymapdl-mcp/v0.2.1/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["--from", "ansys-mapdl-mcp==0.2.1", "ansys-mapdl-mcp"],
+      "env": {},
+      "categories": ["engineering", "ansys", "fea", "cae", "simulation"],
+      "license": "Apache-2.0",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "files": ["C:\\Program Files\\ANSYS Inc\\v*\\ansys\\bin\\winx64\\ansys*.exe"]
       }
     }
   ]
