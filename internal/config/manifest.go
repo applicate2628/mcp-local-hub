@@ -765,6 +765,17 @@ func (m *ServerManifest) validateRequiredSecretsBackEnv() error {
 		if strings.TrimSpace(key) == "" {
 			return fmt.Errorf("manifest %s: required_secrets contains an empty key", m.Name)
 		}
+		// The key must be a SETTABLE vault key name (the same shape the
+		// secret-set path — `mcphub secrets set` / POST /api/secrets — accepts,
+		// owned by secrets.ValidateSettableKeyName). A required_secrets key the
+		// operator literally cannot `set` (e.g. `bad-key`, a digit-leading name)
+		// would gate the install FOREVER: the blocking finding never clears
+		// because the satisfying vault write is itself rejected. Fail loud at
+		// validate instead. Reusing the secrets owner keeps this from forking the
+		// key-name regex (the two paths must agree on settable shape).
+		if err := secrets.ValidateSettableKeyName(key); err != nil {
+			return fmt.Errorf("manifest %s: required_secrets key %q is not a settable vault key name (%v) — it can never be set via `mcphub secrets set` / the Secrets screen, so the install gate would block forever", m.Name, key, err)
+		}
 		if !envSecretKeys[key] {
 			return fmt.Errorf("manifest %s: required_secrets key %q has no matching secret:%s env ref (a required secret must back an env value the server actually reads)", m.Name, key, key)
 		}

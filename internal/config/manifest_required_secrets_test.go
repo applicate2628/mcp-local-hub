@@ -63,6 +63,43 @@ func TestValidate_RequiredSecrets_EmptyKeyRejected(t *testing.T) {
 	}
 }
 
+// A required_secrets key that is NOT a settable vault key name is rejected even
+// when a matching secret:<key> env ref backs it (codex finding 2). A name like
+// `bad-key` (hyphen) or a digit-leading name passes the back-env check but can
+// never be written via `mcphub secrets set` / POST /api/secrets (whose
+// secrets.SettableKeyNameRE owner the gate now reuses), so the install gate would
+// block FOREVER on a key the operator literally cannot set. Fail loud at Validate.
+func TestValidate_RequiredSecrets_UnsettableKeyNameRejected(t *testing.T) {
+	for _, name := range []string{"bad-key", "1leading_digit", "has space", "dot.name"} {
+		m := requiredSecretStdioManifest()
+		// Back the un-settable name with a matching secret:<name> env ref so the
+		// back-env check passes — isolating the settable-name check as the rejector.
+		m.Env = map[string]string{"ACEDATACLOUD_API_TOKEN": "secret:" + name}
+		m.RequiredSecrets = []string{name}
+		err := m.Validate()
+		if err == nil {
+			t.Fatalf("Validate accepted un-settable required_secrets key %q; want reject", name)
+		}
+		if !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), "settable") {
+			t.Fatalf("error %q must name the un-settable key %q and explain it is not settable", err, name)
+		}
+	}
+}
+
+// A required_secrets key that IS a settable vault key name (and is backed by env)
+// validates cleanly — the settable-name check must not over-reject the lowercase
+// underscore identifiers the repo actually ships (e.g. acedata_api_token).
+func TestValidate_RequiredSecrets_SettableKeyNameAccepted(t *testing.T) {
+	for _, name := range []string{"acedata_api_token", "Wolfram_App_ID", "k", "a1_b2"} {
+		m := requiredSecretStdioManifest()
+		m.Env = map[string]string{"SOME_ENV": "secret:" + name}
+		m.RequiredSecrets = []string{name}
+		if err := m.Validate(); err != nil {
+			t.Fatalf("Validate rejected a settable required_secrets key %q: %v", name, err)
+		}
+	}
+}
+
 // The reverse direction is intentionally NOT enforced: a secret: env ref WITHOUT
 // a required_secrets entry stays the default optional-secret posture (the whole
 // point of the opt-in gate) — Validate must NOT require required_secrets to list

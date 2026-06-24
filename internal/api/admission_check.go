@@ -320,19 +320,36 @@ func requiredSecretSet(m *config.ServerManifest) map[string]bool {
 // before the production Install→Preflight gate runs, so without this a blocked
 // install would leave a manifest file behind.
 //
-// It deliberately surfaces ONLY the "required-secret" finding, NOT the full
-// Preflight set: ports / binaries / launchers are re-checked loud at the real
-// Install→Preflight gate (which loads the persisted manifest), and a parsed
+// It deliberately surfaces ONLY the SECRET-related blocking findings, NOT the
+// full Preflight set: ports / binaries / launchers are re-checked loud at the
+// real Install→Preflight gate (which loads the persisted manifest), and a parsed
 // in-memory draft may legitimately not yet satisfy a host port/binary check that
 // Install handles. Reusing AdmissionCheck + requiredSecretSet keeps this on the
 // single required-secret owner (no second predicate). Returns nil for a manifest
-// with no required_secrets (every existing manifest), so it is additive.
+// with no required_secrets and a readable/absent vault, so it is additive.
+//
+// It surfaces TWO secret-block findings, both non-optional:
+//   - "required-secret"        — a declared key is unset in a readable vault.
+//   - "secrets-vault-readable" — the vault FILE exists but cannot be opened.
+//
+// The second is load-bearing: when the vault is unreadable, AdmissionCheck
+// emits "secrets-vault-readable" and DELIBERATELY SKIPS the per-key
+// "required-secret" loop (it cannot tell which keys are present). Filtering to
+// "required-secret" ALONE would then see no blocking finding and let
+// ManifestCreate write the manifest BEFORE the real Install→Preflight gate
+// re-detects the unreadable vault — leaving a manifest behind. Surfacing the
+// secret-vault-readable block here keeps the pre-persist gate symmetric with the
+// AdmissionCheck secret block. It stays scoped to the SECRET findings: ports /
+// binaries / launchers remain at the real Install→Preflight gate.
 func RequiredSecretAdmission(m *config.ServerManifest) error {
 	if m == nil {
 		return nil
 	}
 	for _, f := range AdmissionCheck(m, AdmissionScope{}) {
-		if f.ID == "required-secret" && !f.Optional {
+		if f.Optional {
+			continue
+		}
+		if f.ID == "required-secret" || f.ID == "secrets-vault-readable" {
 			return admissionErrorFromFinding(f)
 		}
 	}

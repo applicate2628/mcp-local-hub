@@ -392,6 +392,19 @@ func validateCatalogVendoredAndAvailability(e *MarketplaceEntry) error {
 	// point of the opt-in gate. Empty entries are rejected so a stray "" cannot
 	// become a permanently-unblockable phantom requirement.
 	if len(e.RequiredSecrets) > 0 {
+		// required_secrets is a LOCAL-STDIO concern only (codex finding 3): the
+		// install gate that blocks on a missing required secret runs on the
+		// daemon-spawn path. BOTH http install paths ignore required_secrets —
+		// generateRemoteHTTPDraft (marketplace_generate.go) projects only
+		// name/kind/transport/url/client_bindings/availability, and the remote-http
+		// install never gates on it — so required_secrets on a transport:"http"
+		// entry is meaningless and misleading (it would imply a gate that does not
+		// exist). Reject it at authoring rather than silently dropping it. A remote
+		// endpoint's credentials live in its headers (Authorization / X-API-Key),
+		// not in a required-secret env gate.
+		if e.Transport == "http" {
+			return fmt.Errorf("required_secrets is not supported on a transport:\"http\" entry (it is a local-stdio install gate; a remote endpoint's credentials belong in its headers)")
+		}
 		envSecretKeys := map[string]bool{}
 		for _, v := range e.Env {
 			if strings.HasPrefix(v, "secret:") {

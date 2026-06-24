@@ -15,6 +15,37 @@ var SecretPlaceholderRE = regexp.MustCompile(`\$\{secret:([A-Za-z0-9_\-.]+)\}`)
 // intended placeholders that failed the stricter SecretPlaceholderRE shape.
 var MalformedSecretPrefixRE = regexp.MustCompile(`\$\{secret:`)
 
+// SettableKeyNameRE is the SINGLE OWNER of the "is this a settable vault key
+// name" predicate — the shape a key must have for `mcphub secrets set` /
+// POST /api/secrets to be able to write it. It lives in this lowest layer
+// (imported by BOTH internal/api and internal/config) so the secret-set path
+// and the manifest required_secrets gate share one definition and can never
+// disagree on which key names an operator can actually create.
+//
+// It is DELIBERATELY stricter than SecretPlaceholderRE above (which allows `-`
+// and `.`): the placeholder regex describes the broader resolvable-REF shape
+// inside a `${secret:KEY}` token, while this regex describes the narrower
+// SETTABLE key-name shape. A key matching the placeholder regex but not this
+// one (e.g. `bad-key`, `1foo`) is referenceable in env yet un-settable — which
+// is exactly the trap required_secrets must reject so the install gate cannot
+// block forever on a key the operator literally cannot set.
+var SettableKeyNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+
+// ValidateSettableKeyName returns nil when name is a settable vault key name
+// (matches SettableKeyNameRE), or an error naming the required shape otherwise.
+// PURE: regex match only — it does NOT enforce caller-side policy such as the
+// `init` reserved-name collision or a non-empty value, which stay with the
+// secret-set/rotate callers in internal/api (those are HTTP-route / set-op
+// concerns, not key-name shape). The error text embeds the regex source so the
+// api call sites preserve their existing operator-visible SECRETS_INVALID_NAME
+// wording.
+func ValidateSettableKeyName(name string) error {
+	if !SettableKeyNameRE.MatchString(name) {
+		return fmt.Errorf("name %q does not match %s", name, SettableKeyNameRE.String())
+	}
+	return nil
+}
+
 // Resolver turns manifest env values (which may contain prefixes like `secret:`,
 // `file:`, or `$VAR`) into plaintext for use in a child process environment.
 // Resolution order per spec §3.8:

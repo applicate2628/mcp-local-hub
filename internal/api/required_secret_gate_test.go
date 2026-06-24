@@ -280,6 +280,36 @@ func TestCatalogRequiredSecrets_AuthoringGuardAcceptsBackedKey(t *testing.T) {
 	}
 }
 
+// TestCatalogRequiredSecrets_HTTPEntryRejected proves the codex finding-3 guard:
+// required_secrets on a transport:"http" entry is REJECTED at catalog parse.
+// BOTH http install paths ignore required_secrets (generateRemoteHTTPDraft does
+// not project it; the remote-http install never gates on it), so declaring it on
+// an http entry is meaningless/misleading — a gate that does not exist. The env
+// secret: ref backs the key (so the back-env check passes), isolating the
+// transport guard as the rejector.
+func TestCatalogRequiredSecrets_HTTPEntryRejected(t *testing.T) {
+	raw := `{
+  "schema_version": "2",
+  "entries": [
+    {
+      "id": "remote-thing",
+      "name": "Remote Thing",
+      "transport": "http",
+      "url": "https://mcp.example.com/mcp",
+      "env": {"SOME_TOKEN": "secret:some_token"},
+      "required_secrets": ["some_token"]
+    }
+  ]
+}`
+	_, err := ParseMarketplaceCatalog([]byte(raw))
+	if err == nil {
+		t.Fatal("catalog with required_secrets on an http entry parsed; want transport-guard rejection")
+	}
+	if !strings.Contains(err.Error(), "required_secrets") || !strings.Contains(err.Error(), "http") {
+		t.Fatalf("error = %q, want it to name required_secrets + the http-transport restriction", err.Error())
+	}
+}
+
 // TestCatalogRequiredSecrets_V1Rejects proves required_secrets is gated to
 // schema_version 2 (newCatalogFieldKeys): a v1 catalog carrying the key is
 // rejected by the forward-compat gate, so a frozen v1 catalog can never carry it.
