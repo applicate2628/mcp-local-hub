@@ -79,7 +79,7 @@ var SettingsRegistry = []SettingDef{
 		Help: "Navigation layout. 'sidebar' shows screen links in a left rail (default); 'tabs' shows them across the top. Spec §5 line 241."},
 	{Key: "appearance.default_screen", Section: "appearance", Type: TypeEnum,
 		Default: "dashboard",
-		Enum:    []string{"dashboard", "servers", "groups", "migration", "add-server", "secrets", "logs", "capabilities", "settings", "about"},
+		Enum:    []string{"dashboard", "servers", "projects", "groups", "catalog", "migration", "add-server", "secrets", "logs", "capabilities", "settings", "about"},
 		Help:    "Screen shown when the GUI is opened with no hash route. Default is the Dashboard (live daemon state)."},
 
 	// ----- gui_server -----
