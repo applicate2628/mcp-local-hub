@@ -316,14 +316,14 @@
     {
       "id": "ableton",
       "name": "Ableton Live MCP (extended)",
-      "summary": "Control Ableton Live over a local TCP socket — create/edit tracks, clips, devices, and transport via the Live Object Model. Community server uisato/ableton-mcp-extended (a more-capable fork of ahujasid/ableton-mcp), pinned to the operator's actual upstream repo at the immutable HEAD commit 11164498a31e782ca3d3f4ac67cbb526df0166e7 and installed/run via uvx from that git source (NOT the PyPI name `ableton-mcp-extended`, which is a DIFFERENT codebase — IMNMV's Claude-session branch — that depends on the nonexistent `audio2llm` PyPI package and fails to install; same name, different project). disabled-until-probe: enables only when Ableton Live is installed. The install probe covers ALL Windows Live editions (Suite/Standard/Intro/Lite, Live 11/12) via the version-agnostic glob C:\\ProgramData\\Ableton\\Live *\\Program\\Ableton Live *.exe; macOS (/Applications/Ableton Live *.app) is NOT covered in this batch — the install_probe uses AND-semantics across entries and cannot OR a second install root, so a macOS row (or file_globs[] OR-group support) is a follow-up. SETUP (operator-side, REQUIRED): install the bundled Ableton Remote Script into Live's User Library Remote Scripts directory and load it as a Control Surface in Live — the MCP server connects to that script over a local TCP socket on localhost:9877; the host-exe probe detects Live, NOT the Remote Script, so verify the script is loaded before use. The pinned uisato source's runtime deps (mcp[cli]>=1.3.0, elevenlabs>=0.2.26, python-dotenv>=1.0.0) ALL resolve cleanly on PyPI — it bundles ElevenLabs voice integration that installs via the dep, but the VOICE tools need an ElevenLabs API key while the core Ableton control works WITHOUT any key. The high-performance UDP hybrid server is an optional manual add-on, not the default. PRIVACY: the pinned uisato source carries no telemetry — there is no telemetry to disable, so no opt-out env is set on this row (unlike the prior ahujasid row, which set ABLETON_MCP_DISABLE_TELEMETRY).",
-      "homepage": "https://github.com/uisato/ableton-mcp-extended",
-      "readme_url": "https://raw.githubusercontent.com/uisato/ableton-mcp-extended/11164498a31e782ca3d3f4ac67cbb526df0166e7/README.md",
+      "summary": "Control Ableton Live over a local TCP socket — create/edit tracks, clips, devices, and transport via the Live Object Model. Installed from mcphub's build-fixed fork applicate2628/ableton-mcp-extended (a fork of the community server uisato/ableton-mcp-extended, itself a more-capable fork of ahujasid/ableton-mcp), pinned to the immutable fix commit da886bf94a256efcd51785031217b1071fc68871 and installed/run via uvx from that git source. WHY THE FORK: upstream uisato's pyproject mis-declared the optional `AbletonMCP_UDP` package at the wrong path, so setuptools' source build failed and `uvx --from git+...uisato...` could not install; our fork drops `AbletonMCP_UDP` from `packages` (verified not imported by MCP_Server/server.py — it is an optional separate UDP add-on), and the install now builds (empirically verified: uvx resolves 44 packages and the server starts, correctly reporting the Remote-Script requirement). The console-script entry point `ableton-mcp-extended = \"MCP_Server.server:main\"` is unchanged from upstream. Do NOT use the PyPI name `ableton-mcp-extended` — that is a DIFFERENT codebase (IMNMV's Claude-session branch) that depends on the nonexistent `audio2llm` PyPI package and fails to install; same name, different project. disabled-until-probe: enables only when Ableton Live is installed. The install probe covers ALL Windows Live editions (Suite/Standard/Intro/Lite, Live 11/12) via the version-agnostic glob C:\\ProgramData\\Ableton\\Live *\\Program\\Ableton Live *.exe; macOS (/Applications/Ableton Live *.app) is NOT covered in this batch — the install_probe uses AND-semantics across entries and cannot OR a second install root, so a macOS row (or file_globs[] OR-group support) is a follow-up. SETUP (operator-side, REQUIRED): install the bundled Ableton Remote Script into Live's User Library Remote Scripts directory and load it as a Control Surface in Live — the MCP server connects to that script over a local TCP socket on localhost:9877; the host-exe probe detects Live, NOT the Remote Script, so verify the script is loaded before use. The fork's runtime deps (mcp[cli]>=1.3.0, elevenlabs>=0.2.26, python-dotenv>=1.0.0) ALL resolve cleanly on PyPI — it bundles ElevenLabs voice integration that installs via the dep, but the VOICE tools need an ElevenLabs API key while the core Ableton control works WITHOUT any key. The high-performance UDP hybrid server is an optional manual add-on, not the default. PRIVACY: the source carries no telemetry — there is no telemetry to disable, so no opt-out env is set on this row (unlike the prior ahujasid row, which set ABLETON_MCP_DISABLE_TELEMETRY). LICENSE: MIT, inherited from upstream uisato.",
+      "homepage": "https://github.com/applicate2628/ableton-mcp-extended",
+      "readme_url": "https://raw.githubusercontent.com/applicate2628/ableton-mcp-extended/da886bf94a256efcd51785031217b1071fc68871/README.md",
       "transport": "stdio",
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/uisato/ableton-mcp-extended@11164498a31e782ca3d3f4ac67cbb526df0166e7",
+        "git+https://github.com/applicate2628/ableton-mcp-extended@da886bf94a256efcd51785031217b1071fc68871",
         "ableton-mcp-extended"
       ],
       "env": {},
@@ -343,10 +343,10 @@
         ]
       },
       "vendored_source": {
-        "repo": "https://github.com/uisato/ableton-mcp-extended",
-        "pinned_ref": "11164498a31e782ca3d3f4ac67cbb526df0166e7",
-        "install_cmd": "uvx --from git+https://github.com/uisato/ableton-mcp-extended@11164498a31e782ca3d3f4ac67cbb526df0166e7 ableton-mcp-extended",
-        "run_cmd": "uvx --from git+https://github.com/uisato/ableton-mcp-extended@11164498a31e782ca3d3f4ac67cbb526df0166e7 ableton-mcp-extended",
+        "repo": "https://github.com/applicate2628/ableton-mcp-extended",
+        "pinned_ref": "da886bf94a256efcd51785031217b1071fc68871",
+        "install_cmd": "uvx --from git+https://github.com/applicate2628/ableton-mcp-extended@da886bf94a256efcd51785031217b1071fc68871 ableton-mcp-extended",
+        "run_cmd": "uvx --from git+https://github.com/applicate2628/ableton-mcp-extended@da886bf94a256efcd51785031217b1071fc68871 ableton-mcp-extended",
         "license_status": "confirmed"
       }
     },

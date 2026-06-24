@@ -452,10 +452,14 @@ func TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles(t *testing.T) {
 }
 
 // TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact is the codex-bot P1
-// closure ("Align Ableton provenance with the installed package"). The ableton row
-// MUST install from the operator's actual upstream uisato/ableton-mcp-extended repo
-// at an immutable git SHA — NOT the PyPI distribution `ableton-mcp-extended`, which
-// is a DIFFERENT codebase (IMNMV's branch) whose project URLs point at
+// closure ("ableton must install from an installable source"). The ableton row MUST
+// install from mcphub's build-fixed fork applicate2628/ableton-mcp-extended at an
+// immutable git SHA. Upstream uisato/ableton-mcp-extended's pyproject mis-declared
+// the optional `AbletonMCP_UDP` package at the wrong path, so the setuptools source
+// build failed and `uvx --from git+...uisato...` could not install; our fork drops
+// that optional package (not imported by MCP_Server/server.py) so the install builds.
+// The row must NOT install from the PyPI distribution `ableton-mcp-extended`, which is
+// a DIFFERENT codebase (IMNMV's branch) whose project URLs point at
 // github.com/IMNMV/ableton-mcp and which depends on the nonexistent `audio2llm`
 // package (install fails). This test pins the provenance-consistency invariant the
 // bot flagged: the vetted source (vendored_source.repo + readme_url), the executed
@@ -467,14 +471,14 @@ func TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact(t *testing.T) 
 		t.Fatalf("v2 catalog missing the ableton row")
 	}
 
-	const wantRepo = "https://github.com/uisato/ableton-mcp-extended"
+	const wantRepo = "https://github.com/applicate2628/ableton-mcp-extended"
 
 	vs := e.VendoredSource
 	if vs == nil {
 		t.Fatalf("ableton row lost its vendored_source")
 	}
 	if vs.Repo != wantRepo {
-		t.Fatalf("ableton vendored_source.repo = %q, want %q (must be the operator's actual upstream, not the hijacked PyPI source)", vs.Repo, wantRepo)
+		t.Fatalf("ableton vendored_source.repo = %q, want %q (must be mcphub's build-fixed fork, not upstream uisato whose pyproject fails to build, and not the hijacked PyPI source)", vs.Repo, wantRepo)
 	}
 	// The pin must be a 40-hex git SHA (immutable), not the prior bare PyPI version
 	// "2.2.0" that resolved to IMNMV's broken/audio2llm-missing package.
@@ -490,7 +494,7 @@ func TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact(t *testing.T) 
 
 	// The EXECUTED artifact must come from that exact git source + SHA. The PyPI name
 	// `ableton-mcp-extended==<ver>` in --from would silently pull IMNMV's package, so
-	// the args MUST carry the git+<repo>@<sha> form pointing at uisato.
+	// the args MUST carry the git+<repo>@<sha> form pointing at our build-fixed fork.
 	wantGitFrom := "git+" + wantRepo + "@" + sha
 	joinedArgs := strings.Join(e.Args, " ")
 	if !strings.Contains(joinedArgs, wantGitFrom) {
