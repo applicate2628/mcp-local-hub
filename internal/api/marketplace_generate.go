@@ -82,6 +82,19 @@ func generateRemoteHTTPDraft(e *MarketplaceEntry) (string, []string, error) {
 		bindings = append(bindings, map[string]any{"client": c})
 	}
 	draft["client_bindings"] = bindings
+	// D-3 (Tier-0) projection: carry the availability gate + install probe from
+	// the catalog entry into the remote-http draft too (consistent with the
+	// stdio generateCommandDraft projection). Without this, an inert (watch /
+	// disabled-until-probe) http row's generate→`manifest create`→install
+	// workflow would produce a remote-http manifest with no gate, so the
+	// post-create readiness path would treat it as ready and bypass D-3.
+	// vendored_source is intentionally NOT projected here — it is a local-stdio
+	// fork concern, not a remote-URL one. The projected availability/install_probe
+	// values are untrusted catalog strings, so the projection refuses unsafe runes
+	// the same way the url/id fields above do.
+	if err := projectAvailability(draft, e); err != nil {
+		return "", nil, fmt.Errorf("entry %q has availability/install_probe characters unsafe for YAML — refusing to emit draft (registry may be hostile): %w", e.ID, err)
+	}
 	data, err := yaml.Marshal(draft)
 	if err != nil {
 		return "", nil, fmt.Errorf("yaml marshal: %w", err)
@@ -204,6 +217,19 @@ func generateCommandDraft(e *MarketplaceEntry, opts GenerateOpts, manifestTransp
 		{"client": "codex-cli", "daemon": "default", "url_path": "/mcp"},
 		{"client": "cursor", "daemon": "default", "url_path": "/mcp"},
 	}
+	// D-2 + D-3 (Tier-0) projection: carry the vendored-source pin + availability
+	// gate + install probe from the catalog entry into the drafted (and, once the
+	// operator saves it, persisted) manifest. Without this the post-install
+	// readiness gate would be blind to the pin/probe — it can only re-evaluate
+	// fields that survive into the manifest on disk. Only the local-stdio S1 draft
+	// projects these; generateRemoteHTTPDraft (S2) does not — a vendored fork is a
+	// local-stdio concern, not a remote-URL one. The catalog→manifest key mapping
+	// mirrors the JSON↔YAML field tags exactly.
+	// Each projected value is an untrusted catalog string, so the projection
+	// refuses unsafe runes the same way the id/command/args/env fields above do.
+	if err := projectVendoredAndAvailability(draft, e); err != nil {
+		return "", warnings, fmt.Errorf("refusing to emit marketplace draft: %w", err)
+	}
 	data, err := yaml.Marshal(draft)
 	if err != nil {
 		return "", warnings, fmt.Errorf("yaml marshal: %w", err)
@@ -219,6 +245,105 @@ func generateCommandDraft(e *MarketplaceEntry, opts GenerateOpts, manifestTransp
 		"",
 	}, "\n")
 	return header + string(data), warnings, nil
+}
+
+// projectVendoredAndAvailability writes the D-2 vendored_source + D-3
+// availability / install_probe keys from the catalog entry into the drafted
+// manifest map, mapping the catalog (JSON) field names onto the manifest (YAML)
+// field names. Each key is emitted ONLY when the catalog entry carries it, so an
+// entry without these fields produces a byte-identical draft to before Tier-0.
+// Used by the local-stdio S1 draft (generateCommandDraft) — a vendored fork is a
+// local-stdio concern, so this is the only path that projects vendored_source.
+//
+// EVERY projected value is a catalog-controlled (untrusted) string, so it MUST
+// route through rejectUnsafeMarketplaceDraftString — the SAME owner the existing
+// id/command/args/env/url/base_args draft fields use — before it lands in the
+// draft map. Without this a hostile registry could inject C0/C1 control bytes,
+// terminal escapes, or Trojan-Source bidi runes through the new vendored_source.*
+// fields and have them surface verbatim in the operator's drafted YAML (bot
+// catalog-r3 P2). Returns an error so generateCommandDraft refuses to emit a
+// draft built from a hostile entry, mirroring how the other field rejections
+// abort generation.
+func projectVendoredAndAvailability(draft map[string]any, e *MarketplaceEntry) error {
+	if vs := e.VendoredSource; vs != nil {
+		m := map[string]any{}
+		if vs.Repo != "" {
+			if err := rejectUnsafeMarketplaceDraftString("vendored_source.repo", vs.Repo); err != nil {
+				return err
+			}
+			m["repo"] = vs.Repo
+		}
+		if vs.PinnedRef != "" {
+			if err := rejectUnsafeMarketplaceDraftString("vendored_source.pinned_ref", vs.PinnedRef); err != nil {
+				return err
+			}
+			m["pinned_ref"] = vs.PinnedRef
+		}
+		if vs.InstallCmd != "" {
+			if err := rejectUnsafeMarketplaceDraftString("vendored_source.install_cmd", vs.InstallCmd); err != nil {
+				return err
+			}
+			m["install_cmd"] = vs.InstallCmd
+		}
+		if vs.RunCmd != "" {
+			if err := rejectUnsafeMarketplaceDraftString("vendored_source.run_cmd", vs.RunCmd); err != nil {
+				return err
+			}
+			m["run_cmd"] = vs.RunCmd
+		}
+		if vs.LicenseStatus != "" {
+			if err := rejectUnsafeMarketplaceDraftString("vendored_source.license_status", vs.LicenseStatus); err != nil {
+				return err
+			}
+			m["license_status"] = vs.LicenseStatus
+		}
+		draft["vendored_source"] = m
+	}
+	return projectAvailability(draft, e)
+}
+
+// projectAvailability writes ONLY the D-3 availability / install_probe keys from
+// the catalog entry into the drafted manifest map. It is the shared owner both
+// the local-stdio S1 draft (via projectVendoredAndAvailability) and the
+// remote-http S2 draft (generateRemoteHTTPDraft) call, so an inert http row's
+// drafted manifest carries the SAME gate the stdio path projects — without that,
+// a watch/disabled http entry's generate→create→install workflow would bypass
+// the D-3 readiness gate (the persisted remote-http manifest would look ready).
+// vendored_source is deliberately NOT projected here: it is a local-stdio fork
+// concern, not a remote-URL one. Each key is emitted ONLY when present, so an
+// entry without the D-3 fields produces a byte-identical draft to before.
+//
+// availability + every install_probe binaries[]/files[] value is catalog-
+// controlled (untrusted), so each routes through rejectUnsafeMarketplaceDraftString
+// (the same owner the existing draft fields use) before it lands in the draft map,
+// so a hostile registry cannot inject control/escape/bidi runes through the new
+// D-3 fields (bot catalog-r3 P2). Returns an error so both draft paths
+// (generateCommandDraft via projectVendoredAndAvailability, generateRemoteHTTPDraft
+// directly) refuse to emit a draft built from a hostile entry.
+func projectAvailability(draft map[string]any, e *MarketplaceEntry) error {
+	if e.Availability != "" {
+		if err := rejectUnsafeMarketplaceDraftString("availability", e.Availability); err != nil {
+			return err
+		}
+		draft["availability"] = e.Availability
+	}
+	if p := e.InstallProbe; p != nil {
+		m := map[string]any{}
+		if len(p.Binaries) > 0 {
+			if err := rejectUnsafeMarketplaceDraftStringSlice("install_probe.binaries", p.Binaries); err != nil {
+				return err
+			}
+			m["binaries"] = p.Binaries
+		}
+		if len(p.Files) > 0 {
+			if err := rejectUnsafeMarketplaceDraftStringSlice("install_probe.files", p.Files); err != nil {
+				return err
+			}
+			m["files"] = p.Files
+		}
+		draft["install_probe"] = m
+	}
+	return nil
 }
 
 // collectTraversalCandidates returns every string from args + env

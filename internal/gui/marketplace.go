@@ -73,7 +73,7 @@ func (realMarketplaceLister) RefreshMarketplaceEntries(ctx context.Context) ([]a
 
 // marketplaceEntry is the read-only wire shape for one marketplace catalog
 // row exposed to the Catalog screen. It projects the fields the browse view
-// renders ({id, name, summary, categories, homepage}) PLUS `transport` so
+// renders ({id, name, summary, categories, homepage, availability}) PLUS `transport` so
 // the one-click-install frontend can decide between hub mode (stdio entries
 // → a hub daemon) and direct mode (a client-native entry, no daemon) without
 // a second round-trip. The heavier install details (command/args/url/env)
@@ -92,6 +92,28 @@ type marketplaceEntry struct {
 	// "http"). The frontend reads it to choose the install mode affordance;
 	// an unknown/empty value renders as a non-installable row.
 	Transport string `json:"transport"`
+	// Availability (D-3, Tier-0) is the read-only catalog-row lifecycle gate
+	// ("" / "ready" / "watch" / "disabled-until-probe"). The frontend greys a
+	// watch / disabled-until-probe row and labels it "probe to enable". Empty /
+	// "ready" renders exactly as today. Purely additive wire field.
+	Availability string `json:"availability,omitempty"`
+	// ProbeState (D-3, Tier-0 — mirror-gate) is the TRI-STATE browse-time host-probe
+	// verdict the backend reaches for this entry RIGHT NOW: "ready" (installable
+	// now — a ready/empty row, or an inert binary-only row whose binaries resolve
+	// on PATH), "inert-blocked" (provably not installable yet — the GUI greys it
+	// "probe to enable"), or "inert-unknown" (carries a files[] / path-shaped
+	// probe the browse path deliberately does NOT touch — the GUI still offers
+	// install, and the real probe runs at the install-time gate). This REPLACES the
+	// 3-state-conflating bool. Always emitted (not omitempty) so the frontend can
+	// distinguish a real value from "field absent on an older backend".
+	ProbeState string `json:"probe_state"`
+	// ProbePasses is the DEPRECATED bool alias of ProbeState, kept for ONE release
+	// so an un-regenerated older frontend bundle degrades safely: it is true iff
+	// ProbeState == "ready". A frontend reading probe_passes alone treats both
+	// inert-blocked and inert-unknown as "not passing" (fail-closed grey), the
+	// prior conservative behavior. New frontends read probe_state. Remove next
+	// release.
+	ProbePasses bool `json:"probe_passes"`
 }
 
 type marketplaceListResponse struct {
@@ -172,8 +194,8 @@ func registerMarketplaceRoutes(s *Server) {
 // projectMarketplaceEntries maps api.MarketplaceEntry values onto the
 // read-only browse wire shape shared by GET /api/marketplace and POST
 // /api/marketplace/refresh. It projects only {id, name, summary,
-// categories, homepage, transport} — the heavier install-only command
-// fields stay server-side — and normalizes a nil Categories to [] so
+// categories, homepage, transport, availability} — the heavier install-only
+// command fields stay server-side — and normalizes a nil Categories to [] so
 // the JSON is never null (the frontend maps without a guard). The
 // returned slice is always non-nil so an empty catalog serializes as [],
 // not null.
@@ -184,13 +206,34 @@ func projectMarketplaceEntries(entries []api.MarketplaceEntry) []marketplaceEntr
 		if cats == nil {
 			cats = []string{}
 		}
+		// e is a fresh per-iteration value (Go 1.22+), so &e is this row's entry.
+		probeState := api.MarketplaceEntryBrowseProbeState(&e)
 		rows = append(rows, marketplaceEntry{
-			ID:         e.ID,
-			Name:       e.Name,
-			Summary:    e.Summary,
-			Categories: cats,
-			Homepage:   e.Homepage,
-			Transport:  e.Transport,
+			ID:           e.ID,
+			Name:         e.Name,
+			Summary:      e.Summary,
+			Categories:   cats,
+			Homepage:     e.Homepage,
+			Transport:    e.Transport,
+			Availability: e.Availability,
+			// PASSIVE browse-time TRI-STATE host-probe verdict. The full gate
+			// (api.MarketplaceEntryProbePasses / AvailabilityAdmissionEntry) os.Stats
+			// every files[] probe — fine on the operator-initiated install path, but
+			// running it here, while merely SERVING the browse list, would let a
+			// catalog-provided file-probe path (slow automount, UNC share) stall
+			// opening/refreshing the Catalog and touch an external location before the
+			// operator chooses install. So the browse projection classifies WITHOUT a
+			// stat / a path LookPath: "ready" (a ready/empty row, or a binary-only
+			// inert row whose binaries resolve on PATH), "inert-blocked" (provably not
+			// installable yet → greyed "probe to enable"), or "inert-unknown" (carries
+			// a files[]/path-shaped probe the browse path defers — the GUI still offers
+			// install). The real file probe runs at install admission
+			// (gui/marketplace_install.go → AvailabilityAdmissionEntry), so an
+			// inert-unknown row is still installable once the operator clicks install.
+			// probe_passes is the deprecated bool alias (true iff state==ready) so an
+			// un-regenerated older bundle degrades safely.
+			ProbeState:  string(probeState),
+			ProbePasses: probeState == api.ProbeBrowseReady,
 		})
 	}
 	return rows

@@ -125,6 +125,27 @@ func registerMarketplaceInstallRoutes(s *Server) {
 			return
 		}
 
+		// D-3 availability admission gate (shared single owner), run BEFORE both
+		// the hub and direct dispatch. A watch / disabled-until-probe entry whose
+		// host-app install-probe has not passed must NOT install — the direct path
+		// writes client configs without ever reaching the manifest AdmissionCheck,
+		// so without this gate it would bypass D-3 entirely. Gating at the entry
+		// keeps both modes consistent and refuses inert rows with a stable code.
+		// ADDITIVE: an entry with no availability/install_probe (every current
+		// catalog row) returns nil immediately.
+		//
+		// Status 412 Precondition Failed — NOT 409. The host-probe precondition (the
+		// server's host app/tool must be detected) is unmet. 409 Conflict is already
+		// the NAME_CONFLICT status the frontend's install helper branches on by
+		// HTTP code; a 409 here would collide with that branch and misroute the
+		// probe-pending gate to the name-conflict retry UI. 412 keeps the
+		// AVAILABILITY_PROBE_PENDING code on a distinct status the frontend renders
+		// as its own "probe pending / host app not detected" message.
+		if err := api.AvailabilityAdmissionEntry(entry); err != nil {
+			writeAPIError(w, err, http.StatusPreconditionFailed, "AVAILABILITY_PROBE_PENDING")
+			return
+		}
+
 		switch mode {
 		case "hub":
 			s.handleMarketplaceHubInstall(w, &req, entry)

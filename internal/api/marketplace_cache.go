@@ -210,6 +210,26 @@ func isMarketplaceCacheFresh(cf *marketplaceCacheFile) bool {
 	return age < marketplaceCacheTTL
 }
 
+// marketplaceCacheCatalogKeyPresence pulls the nested `catalog` sub-object out
+// of the raw cache bytes and runs it through the SAME per-entry key-presence
+// decoder the fresh-fetch parser uses (catalogEntryNewKeyPresence), so the
+// forward-compat gate enforces raw KEY PRESENCE on the cache path too. Returns a
+// nil slice (presence info unavailable → value-based inner guard) when the
+// `catalog` key is absent or not a JSON object; that is not an error, because a
+// cache file without a catalog object has no new keys to reject here.
+func marketplaceCacheCatalogKeyPresence(raw []byte) ([]map[string]json.RawMessage, error) {
+	var shell struct {
+		Catalog json.RawMessage `json:"catalog"`
+	}
+	if err := json.Unmarshal(raw, &shell); err != nil {
+		return nil, fmt.Errorf("re-decode catalog for key-presence check: %w", err)
+	}
+	if len(shell.Catalog) == 0 {
+		return nil, nil
+	}
+	return catalogEntryNewKeyPresence(shell.Catalog)
+}
+
 func readMarketplaceCache() (*marketplaceCacheFile, error) {
 	raw, err := readHubMcpStateFile(marketplaceCacheFileLeaf)
 	if err != nil {
@@ -223,11 +243,21 @@ func readMarketplaceCache() (*marketplaceCacheFile, error) {
 	if err := json.Unmarshal(raw, &cf); err != nil {
 		return nil, fmt.Errorf("parse cache: %w", err)
 	}
-	if cf.SchemaVersion != MarketplaceCatalogSchemaVersion {
-		return nil, fmt.Errorf("validate cache schema_version %q: this build only accepts %q",
-			cf.SchemaVersion, MarketplaceCatalogSchemaVersion)
+	if !marketplaceSchemaVersionAccepted(cf.SchemaVersion) {
+		return nil, fmt.Errorf("validate cache schema_version %q: this build only accepts %q or %q",
+			cf.SchemaVersion, MarketplaceCatalogSchemaVersion, MarketplaceCatalogSchemaVersionV2)
 	}
-	if err := validateMarketplaceCatalog(&cf.Catalog); err != nil {
+	// Extract the nested `catalog` sub-object's raw bytes so the forward-compat
+	// gate can reject on raw KEY PRESENCE (codex r7 P2) even on the cache path —
+	// a tampered cache file could carry a v1 catalog with `availability:""` /
+	// `vendored_source:null` that the typed decode alone would not catch. A nil
+	// presence (catalog key absent / malformed) falls back to the value-based
+	// inner guard, which is correct: there is then no new key to reject.
+	presence, err := marketplaceCacheCatalogKeyPresence(raw)
+	if err != nil {
+		return nil, fmt.Errorf("validate cache catalog: %w", err)
+	}
+	if err := validateMarketplaceCatalog(&cf.Catalog, presence); err != nil {
 		return nil, fmt.Errorf("validate cache catalog: %w", err)
 	}
 	if cf.SourceURL != "" {

@@ -194,6 +194,25 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// context, no duplicate --context) are extracted to validateDynamicPoolManifest
 	// so CheckServerReadiness runs the SAME validation and never reports Ready
 	// for a manifest this install path rejects (Codex #377 r6, single owner).
+
+	// Canonical manifest schema validation — runs BEFORE the path-specific
+	// dynamic-pool gate and Preflight. This seam accepts an ALREADY-PARSED
+	// manifest, so unlike ParseManifest (which calls Validate automatically) a
+	// caller that SYNTHESIZES the manifest in-memory (the serena dynamic-pool
+	// projection BuildInMemorySerenaDynamicPoolManifest) would otherwise bypass
+	// every schema invariant — including the D-2 vendored_source.pinned_ref
+	// presence + license_status enum gate (config.validateVendoredAndAvailability),
+	// which lives in Validate, NOT in Preflight/AdmissionCheck. Running it here
+	// closes that bypass so an in-process unpinned-vendored or availability-typo
+	// manifest is rejected before any supervisor-intent mutation. ADDITIVE: a
+	// manifest with no D-2/D-3 fields validates byte-identically to before (the
+	// gate short-circuits on the nil/empty fields every existing manifest
+	// carries). Validate is the pure schema gate; the D-3 HOST probe stays in
+	// Preflight (step 1a) — each its own single owner.
+	if err := m.Validate(); err != nil {
+		return "", fmt.Errorf("validate manifest: %w", err)
+	}
+
 	if err := validateDynamicPoolManifest(m); err != nil {
 		return "", err
 	}

@@ -236,6 +236,51 @@ func entryScriptStatus(path string) (bool, string) {
 	return true, ""
 }
 
+// availabilityInert is the SINGLE OWNER of the D-3 watch/disabled predicate,
+// consumed by AdmissionCheck (the gate) and any GUI signal so the meaning of
+// "inert" is defined exactly once (architecture law: one owner per cross-cutting
+// invariant). A ready/empty availability is NOT inert and behaves exactly as
+// every existing manifest does today.
+func availabilityInert(m *config.ServerManifest) bool {
+	return m.Availability == config.AvailabilityWatch || m.Availability == config.AvailabilityDisabledUntilProbe
+}
+
+// availabilityProbePasses reports whether the D-3 install-probe is satisfied. It
+// is a pure DRY-RUN over the EXISTING readiness primitives — it neither spawns
+// the daemon nor writes any config, and adds ZERO new detection: it composes the
+// SINGLE OWNERS binaryAvailable (PATH/toolchain runnability) and entryScriptStatus
+// (regular-file existence), the exact functions Preflight and CheckServerReadiness
+// already use, so there is no second detection path that can drift from the
+// install gate. AND semantics: every declared binary must be runnable AND every
+// declared file must exist. A nil probe never passes (Gate A rule A6 already
+// forbids declaring an inert row without one). Returns (ok, reason-when-not-ok).
+func availabilityProbePasses(p *config.AvailabilityProbe) (bool, string) {
+	if p == nil {
+		return false, "no install probe declared"
+	}
+	for _, bin := range p.Binaries {
+		if !binaryAvailable(bin) {
+			// DISPLAY ONLY: basenameAcrossSeparators (not filepath.Base) so a Windows
+			// absolute probe path (now accepted by the cross-platform validator) does
+			// not echo the WHOLE `C:\...\tool` back through the 412/readiness error on
+			// a non-Windows build, where filepath.Base treats '\' as a normal char and
+			// returns the full path (codex r6 finding 3). The probe target passed to
+			// binaryAvailable above is the verbatim value — only the surfaced string is
+			// shortened.
+			return false, fmt.Sprintf("%q not found on PATH", basenameAcrossSeparators(bin))
+		}
+	}
+	for _, f := range p.Files {
+		if ok, reason := entryScriptStatus(f); !ok {
+			// DISPLAY ONLY: dual-separator basename for the same reason as the binary
+			// branch above — entryScriptStatus(f) os.Stat's the verbatim path; only the
+			// user-visible marker name is stripped (codex r6 finding 3).
+			return false, fmt.Sprintf("%q %s", basenameAcrossSeparators(f), reason)
+		}
+	}
+	return true, ""
+}
+
 // fixedPortStatus checks a FIXED daemon port for the readiness report the way
 // the daemon will actually bind it at launch: a valid 1..65535 range AND
 // bindable via the same probe the pool allocator uses (portAvailable),
@@ -364,12 +409,66 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 // A daemon-filtered install must not be blocked by sibling daemons that the
 // actual install path will skip during Preflight and planning.
 func CheckServerReadinessWithScope(m *config.ServerManifest, scope AdmissionScope) *ReadinessReport {
-	rep := &ReadinessReport{Server: m.Name, Ready: !containsNonOptional(AdmissionCheck(m, scope))}
+	// Run the scope-independent admission gate ONCE and reuse it both to seed
+	// Ready and to surface its advisory (Optional) findings as visible rows
+	// below — re-calling AdmissionCheck would repeat the port/binary probes.
+	admission := AdmissionCheck(m, scope)
+	rep := &ReadinessReport{Server: m.Name, Ready: !containsNonOptional(admission)}
 	add := func(r ReadinessRequirement) {
 		if !r.OK && !r.Optional {
 			rep.Ready = false
 		}
 		rep.Requirements = append(rep.Requirements, r)
+	}
+
+	// D-3 inert short-circuit (Tier-0). When the manifest is inert
+	// (watch / disabled-until-probe) and its install-probe has NOT passed,
+	// AdmissionCheck returns ONLY the availability-probe blocking finding and
+	// short-circuits every downstream port/binary/script check — the row is not
+	// going to install. Mirror that here: surface the availability-probe finding
+	// as a VISIBLE requirement row (so Ready=false has a rendered explanation
+	// instead of a bare false with no reason) and return. Without this the GUI
+	// panel would show Ready=false alongside launcher/script rows that do not
+	// reflect why the row is blocked. We REUSE the finding from the SINGLE
+	// AdmissionCheck call above (findingByID) rather than re-calling
+	// availabilityProbeFinding — re-running it would evaluate the file-based probe
+	// a SECOND time within one readiness request, so a probe that changes mid-
+	// request (a binary/file appearing or disappearing between the two calls)
+	// could yield a Ready seed and an advisory row that disagree (intra-request
+	// TOCTOU, bot catalog-r3 P3). One call, one verdict. ADDITIVE: a ready/empty
+	// manifest (or an inert row whose probe passed) carries no such finding, so
+	// the requirement list is byte-identical to before.
+	if f, inertBlock := findingByID(admission, "availability-probe"); inertBlock {
+		add(ReadinessRequirement{
+			Name:   f.Name,
+			OK:     false,
+			Reason: f.Reason,
+			Fix:    f.Fix,
+		})
+		return rep
+	}
+
+	// D-2 vendored-license advisory (Tier-0). AdmissionCheck emits an OPTIONAL
+	// "vendored-license-unvetted" finding when a vendored/community-fork server's
+	// license_status is empty / pending / unknown (not confirmed). Preflight
+	// ignores optional findings (they do not block the mutating install — the
+	// operator may knowingly install a pending-license fork on their own host),
+	// and Ready was seeded from containsNonOptional, so the advisory neither
+	// blocks install nor flips Ready. But without surfacing it here the operator
+	// would never SEE the unvetted-license advisory in the GUI readiness panel.
+	// Mirror how the inert-probe finding is surfaced above: render the SAME
+	// AdmissionCheck finding (reusing its owner — no re-derivation of the predicate
+	// or text) as an Optional (advisory, NON-blocking) row. ADDITIVE: a manifest
+	// with no vendored_source (every existing manifest) produces no such finding,
+	// so the requirement list is byte-identical to before.
+	if f, ok := optionalFindingByID(admission, "vendored-license-unvetted"); ok {
+		add(ReadinessRequirement{
+			Name:     f.Name,
+			OK:       false,
+			Optional: true,
+			Reason:   f.Reason,
+			Fix:      f.Fix,
+		})
 	}
 
 	// Launcher on PATH (with guided fix), then the runtime behind it. For a

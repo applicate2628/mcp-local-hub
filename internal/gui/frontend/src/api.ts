@@ -1004,18 +1004,24 @@ export interface MarketplaceInstallRequest {
   clients?: string[];
 }
 
-// The discriminated result the UI branches on. `kind` distinguishes the four
+// The discriminated result the UI branches on. `kind` distinguishes the
 // terminal outcomes the handler can return so the screen never has to re-read
 // HTTP status codes:
 //
 //   "hub-installed"  → 201: hub daemon created (name + resolved port).
 //   "name-conflict"  → 409: a server with this name exists; suggested_name is
 //                      the "-2" variant the UI offers as a one-click retry.
+//   "probe-pending"  → 412: the D-3 host-probe precondition is unmet (the
+//                      server's host app/tool isn't detected on this machine
+//                      yet). A DISTINCT status from the 409 name-conflict so the
+//                      UI never misroutes it to the name-conflict retry; it
+//                      carries the backend's human reason for an inline message.
 //   "direct"         → 200/207: per-client updated / failed split. `partial`
 //                      is true on 207 (some client writes failed).
 export type MarketplaceInstallResult =
   | { kind: "hub-installed"; name: string; port: number }
   | { kind: "name-conflict"; suggestedName: string }
+  | { kind: "probe-pending"; reason: string }
   | {
       kind: "direct";
       partial: boolean;
@@ -1052,6 +1058,26 @@ export async function installMarketplaceEntry(
       return { kind: "name-conflict", suggestedName: body.suggested_name };
     }
     throw new Error(`/api/marketplace/install: name conflict (no suggested name)`);
+  }
+
+  // 412 AVAILABILITY_PROBE_PENDING — the D-3 host-probe precondition is unmet
+  // (the server's host app/tool isn't detected on this machine yet). A DISTINCT
+  // status from the 409 name-conflict so it never misroutes to the name-conflict
+  // retry UI; surfaced as its own recoverable result carrying the backend's
+  // human-readable reason for an inline "probe pending" message.
+  if (resp.status === 412) {
+    let body: { error?: string; code?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string; code?: string };
+    } catch {
+      // Non-JSON 412 body; fall through to a generic reason.
+    }
+    return {
+      kind: "probe-pending",
+      reason:
+        body?.error ??
+        "this server's host app or tool isn't detected on this machine yet",
+    };
   }
 
   if (!resp.ok) {
@@ -1109,7 +1135,10 @@ export async function installMarketplaceEntry(
 // The shape mirrors internal/gui/marketplace.go marketplaceEntry. `transport`
 // is normalized to a string so an older backend that omits it (or a partial
 // body) reads as "" and the caller falls back to the safe HUB-ONLY affordance,
-// matching the GET-path normalization in Catalog.tsx.
+// matching the GET-path normalization in Catalog.tsx. The D-3 availability +
+// probe_passes fields are carried through identically to the initial-load path
+// so a refreshed watch / disabled-until-probe row keeps its inert-gating (Catalog
+// keys its install-button suppression on them).
 // ───────────────────────────────────────────────────────────────────
 
 export interface MarketplaceCatalogEntry {
@@ -1119,6 +1148,18 @@ export interface MarketplaceCatalogEntry {
   categories: string[];
   homepage: string;
   transport: string;
+  // Availability (D-3, Tier-0): "" | "ready" | "watch" | "disabled-until-probe".
+  // Optional; an older backend that omits it reads as "" (ready).
+  availability?: string;
+  // ProbeState (D-3, Tier-0 — mirror-gate): the TRI-STATE browse-time host-probe
+  // verdict — "ready" | "inert-blocked" | "inert-unknown". Optional; an older
+  // backend that omits it reads as undefined and Catalog falls back to the
+  // deprecated probe_passes alias. New authority.
+  probe_state?: string;
+  // ProbePasses (DEPRECATED alias of probe_state): the bool host-probe verdict
+  // (true iff probe_state == "ready"). Optional; kept for one release so an older
+  // backend / un-regenerated bundle degrades fail-closed (undefined → grey).
+  probe_passes?: boolean;
 }
 
 export async function refreshMarketplace(): Promise<MarketplaceCatalogEntry[]> {
@@ -1146,6 +1187,15 @@ export async function refreshMarketplace(): Promise<MarketplaceCatalogEntry[]> {
     categories: Array.isArray(e.categories) ? e.categories : [],
     homepage: typeof e.homepage === "string" ? e.homepage : "",
     transport: typeof e.transport === "string" ? e.transport : "",
+    // Carry the D-3 fields through so a refreshed inert row keeps its gating —
+    // dropping them here was the all-consumers-sweep gap (a SECOND DTO consumer
+    // beyond the initial load). Normalize availability to a string; carry
+    // probe_state when it is a string (the new tri-state authority) and preserve
+    // the deprecated probe_passes alias when it is a real boolean (undefined →
+    // fail-closed grey).
+    availability: typeof e.availability === "string" ? e.availability : "",
+    ...(typeof e.probe_state === "string" ? { probe_state: e.probe_state } : {}),
+    ...(typeof e.probe_passes === "boolean" ? { probe_passes: e.probe_passes } : {}),
   }));
 }
 

@@ -206,6 +206,49 @@ func TestGenerateDraftManifest_RejectsUnsafeDraftBoundStrings(t *testing.T) {
 			Command:   "npx",
 			Args:      []string{"${env:AWS_TOKEN\u202E}"},
 		},
+		// bot catalog-r3 P2: the new Tier-0 projected fields are
+		// catalog-controlled and MUST be sanitized too. Each carries an
+		// immutable pinned_ref so the entry reaches projection (generate
+		// does not run the moving-ref gate); the unsafe rune is on the
+		// OTHER field under test.
+		"vendored_source.repo RLO": {
+			ID:             "bad-vs-repo",
+			Name:           "Bad",
+			Transport:      "stdio",
+			Command:        "npx",
+			VendoredSource: &CatalogVendoredSource{Repo: "github.com/x/y\u202E", PinnedRef: "v1.2.3"},
+		},
+		"vendored_source.install_cmd isolate": {
+			ID:             "bad-vs-install-cmd",
+			Name:           "Bad",
+			Transport:      "stdio",
+			Command:        "npx",
+			VendoredSource: &CatalogVendoredSource{InstallCmd: "make\u2066build", PinnedRef: "v1.2.3"},
+		},
+		"availability ALM (stdio)": {
+			ID:           "bad-availability",
+			Name:         "Bad",
+			Transport:    "stdio",
+			Command:      "npx",
+			Availability: "watch\u061C",
+			InstallProbe: &CatalogAvailabilityProbe{Binaries: []string{"foo"}},
+		},
+		"install_probe.binaries RLO (http)": {
+			ID:           "bad-probe-bin",
+			Name:         "Bad",
+			Transport:    "http",
+			URL:          "https://example.com/mcp",
+			Availability: "watch",
+			InstallProbe: &CatalogAvailabilityProbe{Binaries: []string{"foo\u202E"}},
+		},
+		"install_probe.files isolate (stdio)": {
+			ID:           "bad-probe-file",
+			Name:         "Bad",
+			Transport:    "stdio",
+			Command:      "npx",
+			Availability: "disabled-until-probe",
+			InstallProbe: &CatalogAvailabilityProbe{Files: []string{"/opt/app\u2066/bin"}},
+		},
 	}
 	for name, e := range cases {
 		t.Run(name, func(t *testing.T) {
