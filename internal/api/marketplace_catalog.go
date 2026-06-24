@@ -74,6 +74,18 @@ type MarketplaceEntry struct {
 	// for catalog.json. Projected into the drafted manifest alongside
 	// Availability so the post-install readiness gate can re-evaluate the probe.
 	InstallProbe *CatalogAvailabilityProbe `json:"install_probe,omitempty"`
+
+	// RequiredSecrets mirrors config.ServerManifest.RequiredSecrets, JSON-tagged
+	// for catalog.json. The OPT-IN list of vault KEYS that MUST be set before this
+	// row installs (the server hard-exits on startup without them). Each key MUST
+	// appear as a `secret:<key>` value in Env (catalog-authoring guard in
+	// validateCatalogVendoredAndAvailability — a typo key can't silently un-gate).
+	// Gated to schema_version 2 (newCatalogFieldKeys), and projected into the
+	// drafted stdio manifest by generateCommandDraft so the persisted manifest's
+	// AdmissionCheck install gate sees it.
+	//
+	// Decision: work-items/decisions/2026-06-24-required-secret-install-gate.md
+	RequiredSecrets []string `json:"required_secrets,omitempty"`
 }
 
 // CatalogVendoredSource is the catalog-entry (JSON) mirror of
@@ -173,7 +185,7 @@ func ParseMarketplaceCatalog(raw []byte) (*MarketplaceCatalog, error) {
 // or populated all count) — so an older v1-only client whose
 // DisallowUnknownFields decoder rejects the WHOLE catalog on the bare KEY never
 // has to face a v1 catalog carrying it.
-var newCatalogFieldKeys = []string{"vendored_source", "availability", "install_probe"}
+var newCatalogFieldKeys = []string{"vendored_source", "availability", "install_probe", "required_secrets"}
 
 // catalogEntryNewKeyPresence re-decodes the catalog body's `entries` array into
 // a parallel per-entry map[string]json.RawMessage from the SAME bytes the typed
@@ -273,6 +285,8 @@ func newCatalogFieldsRequireV2(e *MarketplaceEntry, schemaVersion string, presen
 		return fmt.Errorf("availability requires catalog schema_version %q", MarketplaceCatalogSchemaVersionV2)
 	case e.InstallProbe != nil:
 		return fmt.Errorf("install_probe requires catalog schema_version %q", MarketplaceCatalogSchemaVersionV2)
+	case len(e.RequiredSecrets) > 0:
+		return fmt.Errorf("required_secrets requires catalog schema_version %q", MarketplaceCatalogSchemaVersionV2)
 	}
 	return nil
 }
@@ -365,6 +379,32 @@ func validateCatalogVendoredAndAvailability(e *MarketplaceEntry) error {
 		// disabled row whose runtime probe looks up an empty name.
 		if err := config.ValidateProbeValuesNonEmpty(catalogProbeToConfig(e.InstallProbe), "catalog entry"); err != nil {
 			return err
+		}
+	}
+	// required_secrets authoring guard: each named vault key MUST appear as a
+	// `secret:<key>` value in the entry's Env. A required-secret key that has no
+	// matching env ref would gate the install on a credential the projected
+	// manifest never actually consumes — so a typo in required_secrets (or a stale
+	// key left after an env rename) cannot silently UN-gate the row or block on a
+	// phantom credential. The reverse direction is intentionally NOT required: a
+	// `secret:` env ref WITHOUT a required_secrets entry stays the default
+	// optional-secret posture (paper-search's unpaywall_email), which is the whole
+	// point of the opt-in gate. Empty entries are rejected so a stray "" cannot
+	// become a permanently-unblockable phantom requirement.
+	if len(e.RequiredSecrets) > 0 {
+		envSecretKeys := map[string]bool{}
+		for _, v := range e.Env {
+			if strings.HasPrefix(v, "secret:") {
+				envSecretKeys[strings.TrimPrefix(v, "secret:")] = true
+			}
+		}
+		for _, key := range e.RequiredSecrets {
+			if strings.TrimSpace(key) == "" {
+				return fmt.Errorf("required_secrets contains an empty key")
+			}
+			if !envSecretKeys[key] {
+				return fmt.Errorf("required_secrets key %q has no matching secret:%s env ref (a required secret must back an env value the server actually reads)", key, key)
+			}
 		}
 	}
 	return nil

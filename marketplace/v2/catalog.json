@@ -471,6 +471,33 @@
         "run_cmd": "uvx --from kicad-mcp-pro==3.14.1 kicad-mcp-pro",
         "license_status": "confirmed"
       }
+    },
+    {
+      "id": "suno",
+      "name": "Suno AI Music (AceDataCloud)",
+      "summary": "Local AI music generation via Suno through the AceDataCloud API — runs the official mcp-suno PyPI package locally over stdio with uvx (no hosted endpoint). 27 tools spanning music generation, lyrics, media conversion, persona management, and task queries. REQUIRES an AceDataCloud API token: sign up at https://platform.acedata.cloud and mint a token on the API documentation page, then store it in the mcphub vault as the `acedata_api_token` secret (env ACEDATACLOUD_API_TOKEN = secret:acedata_api_token). The token is a REQUIRED install gate (required_secrets) — the local mcp-suno server hard-exits (exit 1) on startup when the token is unset, so a one-click install with no token is BLOCKED at install rather than crash-looping a daemon that returns 401s.",
+      "homepage": "https://pypi.org/project/mcp-suno/",
+      "readme_url": "https://platform.acedata.cloud/documents/4da95d9d-7722-4a72-857d-bf6be86036e9",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mcp-suno==2026.6.18.0",
+        "mcp-suno"
+      ],
+      "env": {
+        "ACEDATACLOUD_API_TOKEN": "secret:acedata_api_token"
+      },
+      "categories": [
+        "music",
+        "ai",
+        "audio",
+        "generation"
+      ],
+      "license": "MIT",
+      "required_secrets": [
+        "acedata_api_token"
+      ]
     }
   ]
 }

@@ -299,6 +299,23 @@ func projectVendoredAndAvailability(draft map[string]any, e *MarketplaceEntry) e
 		}
 		draft["vendored_source"] = m
 	}
+	// required_secrets (opt-in install gate) is projected ONLY on the local-stdio
+	// S1 draft — a required LOCAL-ENV secret is a local-stdio concern (the daemon
+	// reads it from its env), so generateRemoteHTTPDraft (S2) does NOT project it
+	// (a remote endpoint's credentials ride url/headers ${secret:KEY} placeholders,
+	// which are gated by the remote-http secret path, not this list). Carrying it
+	// into the persisted manifest is what lets the post-install AdmissionCheck /
+	// readiness gate re-evaluate the required-secret block. Each key is a catalog-
+	// controlled (untrusted) string, so the slice routes through the SAME
+	// rejectUnsafeMarketplaceDraftStringSlice owner every other untrusted draft
+	// slice uses. Emitted ONLY when present, so an entry without it drafts a
+	// byte-identical manifest.
+	if len(e.RequiredSecrets) > 0 {
+		if err := rejectUnsafeMarketplaceDraftStringSlice("required_secrets", e.RequiredSecrets); err != nil {
+			return err
+		}
+		draft["required_secrets"] = e.RequiredSecrets
+	}
 	return projectAvailability(draft, e)
 }
 

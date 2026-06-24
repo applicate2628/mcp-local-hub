@@ -138,6 +138,21 @@ type ServerManifest struct {
 	// Spec: docs/superpowers/specs/2026-05-19-servers-matrix-lsp-and-env-revamp-design.md §"Manifest schema additions".
 	RequiredBinaries []string `yaml:"required_binaries,omitempty"`
 
+	// RequiredSecrets is the OPT-IN list of vault KEYS that MUST be resolvable
+	// before this server installs. Unlike the default "secrets are optional"
+	// posture (an unset `secret:` env ref is omitted at spawn so the server
+	// reports its own missing-key — see secrets.ResolveMapBestEffort), a key
+	// listed here turns into a BLOCKING admission finding when it is not set in
+	// the vault, so the install is REFUSED rather than spawning a daemon that
+	// hard-exits on startup for the missing credential. ADDITIVE + OPTIONAL:
+	// every existing manifest omits it (nil slice → no change). The keys are the
+	// vault keys behind the `secret:<key>` env refs, e.g.
+	// `required_secrets: [acedata_api_token]` for env
+	// ACEDATACLOUD_API_TOKEN: secret:acedata_api_token.
+	//
+	// Decision: work-items/decisions/2026-06-24-required-secret-install-gate.md
+	RequiredSecrets []string `yaml:"required_secrets,omitempty"`
+
 	// DaemonTemplate is the per-workspace dynamic-pool spawn template.
 	// REQUIRES kind=workspace-scoped AND transport != remote-http
 	// (cross-branch validator gate rejects other combinations). Mutually

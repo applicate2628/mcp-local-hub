@@ -885,23 +885,38 @@ func CheckServerReadinessWithScope(m *config.ServerManifest, scope AdmissionScop
 	// Declared secrets — reported PER KEY so the GUI can offer each as an
 	// inline "fill this field at install" prompt (the operator's request:
 	// "секреты нужно явно предлагать в конкретные поля при установке").
-	// Secrets are OPTIONAL: an unset key is advisory (Optional=true), NOT a
-	// blocker — the server still installs + spawns (the env var is omitted)
-	// and reports its own missing-key if it actually needs it.
+	// Secrets are OPTIONAL BY DEFAULT: an unset key is advisory (Optional=true),
+	// NOT a blocker — the server still installs + spawns (the env var is omitted)
+	// and reports its own missing-key if it actually needs it. The EXCEPTION is a
+	// key listed in m.RequiredSecrets (the opt-in install gate): that one is
+	// BLOCKING (Optional=false, RED), so an unset required key flips Ready=false —
+	// in PARITY with the AdmissionCheck "required-secret" blocking finding. The
+	// classification derives from the SAME requiredSecretSet owner the admission
+	// finding consults, so readiness and admission can never disagree on which
+	// secrets block.
+	reqSecretSet := requiredSecretSet(m)
 	for k, v := range m.Env {
 		if !strings.HasPrefix(v, "secret:") {
 			continue
 		}
 		key := strings.TrimPrefix(v, "secret:")
-		req := ReadinessRequirement{Name: "secret: " + key, Optional: true}
+		required := reqSecretSet[key]
+		req := ReadinessRequirement{Name: "secret: " + key, Optional: !required}
 		if err := checkSecretRefs(map[string]string{k: v}); err != nil {
 			req.OK = false
-			// Neutral wording: checkSecretRefs errors for BOTH "key not set" and
-			// "vault unreadable", so do not assert "not set" — the dedicated
-			// "secrets vault" requirement above covers the unreadable case
-			// (Codex pre-catch r9).
-			req.Reason = "could not be resolved from the vault (optional — set it, or fix the vault if it exists but is unreadable; the server otherwise runs without it)"
-			req.Fix = fmt.Sprintf("Enter %s at install, or set it later via the Secrets screen / `mcphub secrets set %s`.", key, key)
+			if required {
+				// Required (opt-in install gate): the server hard-exits on startup
+				// without it, so this is a BLOCKER, not an advisory.
+				req.Reason = "is REQUIRED but could not be resolved from the vault — the server exits on startup when it is unset"
+				req.Fix = fmt.Sprintf("Set %s on the Secrets screen or `mcphub secrets set %s` before installing.", key, key)
+			} else {
+				// Neutral wording: checkSecretRefs errors for BOTH "key not set" and
+				// "vault unreadable", so do not assert "not set" — the dedicated
+				// "secrets vault" requirement above covers the unreadable case
+				// (Codex pre-catch r9).
+				req.Reason = "could not be resolved from the vault (optional — set it, or fix the vault if it exists but is unreadable; the server otherwise runs without it)"
+				req.Fix = fmt.Sprintf("Enter %s at install, or set it later via the Secrets screen / `mcphub secrets set %s`.", key, key)
+			}
 		} else {
 			req.OK = true
 		}

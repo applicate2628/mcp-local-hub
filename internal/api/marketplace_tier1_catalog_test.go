@@ -34,12 +34,13 @@ var gitSHA40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // work-items/backlog/2026-06-24-tier3-manual-clone-mcps.md).
 var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys", "kicad"}
 
-// NOTE: the suno music row + its tierMusicLocalCatalogIDs / music-local mirror-gate
-// test were SPLIT OUT of this PR. suno needs a required_secrets install-gate (the
-// mcp-suno server hard-exits without the AceDataCloud token), which ships in a
-// SEPARATE PR; the row spec is preserved in .scratch/suno-row-spec.json for that PR
-// to re-create. This PR ships the build-verified ableton fork only, so the v2 count
-// is back to len(v1) + len(tier1CatalogIDs) = 20.
+// tierMusicLocalCatalogIDs are the local-stdio music rows that gate the install on
+// a REQUIRED vault secret (required_secrets) rather than a host-app install_probe.
+// suno (mcp-suno via uvx) hard-exits on startup without its AceDataCloud token, so
+// the row carries required_secrets: [acedata_api_token] and is BLOCKED at install
+// until the token is set — the opt-in install gate shipped alongside this row. These
+// rows are READY (not disabled-until-probe): the gate is the secret, not a probe.
+var tierMusicLocalCatalogIDs = []string{"suno"}
 
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
@@ -77,10 +78,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("v1 catalog failed to parse: %v", err)
 	}
-	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs)
+	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs)
 	if len(cat.Entries) != wantCount {
-		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1)",
-			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs))
+		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local)",
+			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs))
 	}
 
 	// Every v1 entry id must still be present (verbatim copy), in order, before
@@ -415,5 +416,66 @@ func TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact(t *testing.T) 
 		if !strings.Contains(cmd, wantGitFrom) {
 			t.Fatalf("ableton vendored_source.%s = %q does not reference the pinned git source %q", label, cmd, wantGitFrom)
 		}
+	}
+}
+
+// TestV2SunoRow_RequiredSecretGate pins the music-local suno row's shape: it is a
+// READY local-stdio row (NOT disabled-until-probe) whose install gate is a REQUIRED
+// vault secret. The row MUST declare required_secrets: [acedata_api_token] and back
+// it with the matching env ref ACEDATACLOUD_API_TOKEN: secret:acedata_api_token, so
+// the catalog authoring guard (validateCatalogVendoredAndAvailability) accepts it and
+// the projected manifest's AdmissionCheck install gate blocks a token-less install
+// (the mcp-suno server hard-exits without the token). It carries NO install_probe /
+// availability gate (the secret is the gate) and NO vendored_source (it is an
+// official PyPI package run via uvx, like the ansys row).
+func TestV2SunoRow_RequiredSecretGate(t *testing.T) {
+	e := v2CatalogByID(t)["suno"]
+	if e == nil {
+		t.Fatalf("v2 catalog missing the suno music-local row")
+	}
+	// READY (the secret is the gate, not a host-app probe). Absent availability ==
+	// ready; an inert availability would wrongly grey it behind a host-app probe.
+	if e.Availability != "" && e.Availability != "ready" {
+		t.Fatalf("suno availability = %q, want ready/empty (the install gate is the required secret, not a probe)", e.Availability)
+	}
+	if e.InstallProbe != nil {
+		t.Fatalf("suno carries an install_probe %#v — its gate is required_secrets, not a host-app probe", e.InstallProbe)
+	}
+	if e.VendoredSource != nil {
+		t.Fatalf("suno carries a vendored_source %#v — it is an official PyPI package run via uvx, not a community fork", e.VendoredSource)
+	}
+	if e.Transport != "stdio" {
+		t.Fatalf("suno transport = %q, want stdio (local mcp-suno over uvx)", e.Transport)
+	}
+	// required_secrets present and matched by a secret: env ref (the authoring guard).
+	if len(e.RequiredSecrets) != 1 || e.RequiredSecrets[0] != "acedata_api_token" {
+		t.Fatalf("suno required_secrets = %v, want [acedata_api_token]", e.RequiredSecrets)
+	}
+	if got := e.Env["ACEDATACLOUD_API_TOKEN"]; got != "secret:acedata_api_token" {
+		t.Fatalf("suno env ACEDATACLOUD_API_TOKEN = %q, want secret:acedata_api_token (required_secrets must back an env secret ref)", got)
+	}
+
+	// MIRROR GATE: generate→`manifest create` dry-run must project required_secrets +
+	// the secret env ref into a schema-valid manifest, so the post-install AdmissionCheck
+	// re-sees the gate. (Port-0 placeholder is the operator's required edit.)
+	draft, warns, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: t.TempDir()})
+	if err != nil {
+		t.Fatalf("generate draft for suno: %v (warnings=%v)", err, warns)
+	}
+	for _, want := range []string{"required_secrets:", "acedata_api_token", "secret:acedata_api_token"} {
+		if !strings.Contains(draft, want) {
+			t.Fatalf("suno draft missing %q\n---\n%s", want, draft)
+		}
+	}
+	parseReady := strings.Replace(draft, "port: 0", "port: 9314", 1)
+	m, err := config.ParseManifest(strings.NewReader(parseReady))
+	if err != nil {
+		t.Fatalf("suno drafted manifest failed ParseManifest+Validate (mirror gate): %v\n---\n%s", err, parseReady)
+	}
+	if len(m.RequiredSecrets) != 1 || m.RequiredSecrets[0] != "acedata_api_token" {
+		t.Fatalf("suno drafted manifest lost required_secrets: %v", m.RequiredSecrets)
+	}
+	if got := m.Env["ACEDATACLOUD_API_TOKEN"]; got != "secret:acedata_api_token" {
+		t.Fatalf("suno drafted manifest lost the secret env ref: %q", got)
 	}
 }
