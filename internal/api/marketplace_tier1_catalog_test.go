@@ -84,8 +84,8 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 		if e.Availability != config.AvailabilityDisabledUntilProbe {
 			t.Fatalf("Tier-1 row %q availability = %q, want %q", id, e.Availability, config.AvailabilityDisabledUntilProbe)
 		}
-		if e.InstallProbe == nil || (len(e.InstallProbe.Binaries) == 0 && len(e.InstallProbe.Files) == 0) {
-			t.Fatalf("Tier-1 row %q has no install_probe (binaries or files)", id)
+		if e.InstallProbe == nil || (len(e.InstallProbe.Binaries) == 0 && len(e.InstallProbe.Files) == 0 && len(e.InstallProbe.FileGlobs) == 0) {
+			t.Fatalf("Tier-1 row %q has no install_probe (binaries, files, or file_globs)", id)
 		}
 	}
 
@@ -191,7 +191,7 @@ func TestV2Tier1Rows_GenerateThenCreateDryRun(t *testing.T) {
 			if m.Availability != config.AvailabilityDisabledUntilProbe {
 				t.Fatalf("row %q drafted manifest lost availability gate: av=%q", id, m.Availability)
 			}
-			if m.InstallProbe == nil || (len(m.InstallProbe.Binaries) == 0 && len(m.InstallProbe.Files) == 0) {
+			if m.InstallProbe == nil || (len(m.InstallProbe.Binaries) == 0 && len(m.InstallProbe.Files) == 0 && len(m.InstallProbe.FileGlobs) == 0) {
 				t.Fatalf("row %q drafted manifest lost install_probe", id)
 			}
 			// The two fork rows project the pinned vendored_source; the official rows
@@ -207,5 +207,107 @@ func TestV2Tier1Rows_GenerateThenCreateDryRun(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// v2CatalogByID is a small helper for the catalog-data assertions below.
+func v2CatalogByID(t *testing.T) map[string]*MarketplaceEntry {
+	t.Helper()
+	raw, err := os.ReadFile(v2CatalogPath())
+	if err != nil {
+		t.Fatalf("v2 catalog not readable at %s: %v", v2CatalogPath(), err)
+	}
+	cat, err := ParseMarketplaceCatalog(raw)
+	if err != nil {
+		t.Fatalf("v2 catalog failed to parse: %v", err)
+	}
+	byID := map[string]*MarketplaceEntry{}
+	for i := range cat.Entries {
+		byID[cat.Entries[i].ID] = &cat.Entries[i]
+	}
+	return byID
+}
+
+// TestV2MatlabRow_ProbeRequiresMatlabOnPATH is TEST #6 — the codex catalog finding 2
+// fix. The matlab-mcp-server discovers MATLAB via the `matlab` launcher on PATH by
+// default (README v0.11.0: "By default, the server tries to find the first MATLAB on
+// the system PATH"; setup step 1 is "add it to the system PATH"), and the row sets no
+// args/env (no --matlab-root / MW_MCP_SERVER_MATLAB_ROOT), so PATH is the ONLY
+// discovery. The probe MUST therefore require `matlab` on PATH so it AGREES with the
+// server's discovery — a MATLAB-installed-but-not-on-PATH host must NOT pass the
+// probe and then have the server fail to find MATLAB. The redundant
+// Program-Files-path file-glob is DROPPED (matlab-on-PATH is the authoritative
+// signal). So the probe is exactly binaries: [matlab-mcp-server, matlab] and carries
+// NO files[] / file_globs[].
+func TestV2MatlabRow_ProbeRequiresMatlabOnPATH(t *testing.T) {
+	e := v2CatalogByID(t)["matlab"]
+	if e == nil {
+		t.Fatalf("v2 catalog missing the matlab row")
+	}
+	if e.InstallProbe == nil {
+		t.Fatalf("matlab row has no install_probe")
+	}
+	p := e.InstallProbe
+	// Both binaries required: the server binary AND the `matlab` launcher (PATH discovery).
+	has := func(s []string, want string) bool {
+		for _, v := range s {
+			if v == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(p.Binaries, "matlab-mcp-server") {
+		t.Fatalf("matlab probe binaries %v missing the server binary matlab-mcp-server", p.Binaries)
+	}
+	if !has(p.Binaries, "matlab") {
+		t.Fatalf("matlab probe binaries %v MUST include `matlab` so the probe matches the server's PATH discovery (finding 2)", p.Binaries)
+	}
+	// The redundant file-glob is dropped — matlab-on-PATH is the authoritative signal.
+	if len(p.Files) != 0 || len(p.FileGlobs) != 0 {
+		t.Fatalf("matlab probe should carry NO files[]/file_globs[] (matlab-on-PATH is authoritative): files=%v file_globs=%v", p.Files, p.FileGlobs)
+	}
+	// Cross-check the probe AGREES with the server's discovery: the row declares no
+	// args/env, so PATH is the only MATLAB discovery — the probe requires `matlab` on
+	// PATH, so it cannot pass where the server would fail to find MATLAB.
+	if len(e.Args) != 0 {
+		t.Fatalf("matlab row gained args %v — if it now passes --matlab-root, the probe's matlab-on-PATH requirement must be revisited", e.Args)
+	}
+	if len(e.Env) != 0 {
+		t.Fatalf("matlab row gained env %v — if it now sets MW_MCP_SERVER_MATLAB_ROOT, the probe's matlab-on-PATH requirement must be revisited", e.Env)
+	}
+}
+
+// TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles asserts the catalog-data migration:
+// every version-agnostic glob pattern in the Tier-1 rows lives in the OPT-IN
+// file_globs[] field, NEVER files[] (which is now exact-stat-only). excel + ableton +
+// ansys carry their patterns in file_globs[]; matlab carries none (binaries-only);
+// codex carries binaries-only. No Tier-1 row uses files[] (none needs a literal path),
+// and no file_globs[] entry is missing its absolute-path shape.
+func TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles(t *testing.T) {
+	byID := v2CatalogByID(t)
+	// Rows whose probe carries a glob pattern → must be in file_globs[].
+	wantGlobRows := map[string]bool{"excel": true, "ableton": true, "ansys": true}
+	for id, e := range byID {
+		if e.InstallProbe == nil {
+			continue
+		}
+		p := e.InstallProbe
+		// No Tier-1 row should use files[] (no literal-path probe in this batch).
+		if id == "excel" || id == "ableton" || id == "codex-mcp-server" || id == "matlab" || id == "ansys" {
+			if len(p.Files) != 0 {
+				t.Fatalf("Tier-1 row %q uses files[] %v — version globs belong in file_globs[]; files[] is exact-stat-only", id, p.Files)
+			}
+		}
+		if wantGlobRows[id] {
+			if len(p.FileGlobs) == 0 {
+				t.Fatalf("Tier-1 glob row %q has no file_globs[] (its version-agnostic pattern was lost)", id)
+			}
+			for _, g := range p.FileGlobs {
+				if !config.IsAbsolutePathShape(g) {
+					t.Fatalf("Tier-1 row %q file_globs entry %q is not absolute-path-shaped", id, g)
+				}
+			}
+		}
 	}
 }

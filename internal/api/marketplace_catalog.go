@@ -88,11 +88,14 @@ type CatalogVendoredSource struct {
 }
 
 // CatalogAvailabilityProbe is the catalog-entry (JSON) mirror of
-// config.AvailabilityProbe (D-3, Tier-0). Decision:
+// config.AvailabilityProbe (D-3, Tier-0). file_globs[] is the OPT-IN glob-pattern
+// field; files[] is the LITERAL-path field (stat'd verbatim, never globbed) — see
+// the config type for the split. Decision:
 // work-items/decisions/2026-06-23-d3-availability-probe.md
 type CatalogAvailabilityProbe struct {
-	Binaries []string `json:"binaries,omitempty"`
-	Files    []string `json:"files,omitempty"`
+	Binaries  []string `json:"binaries,omitempty"`
+	Files     []string `json:"files,omitempty"`
+	FileGlobs []string `json:"file_globs,omitempty"`
 }
 
 // AvailabilityAdmissionEntry runs the shared D-3 availability admission gate
@@ -122,8 +125,9 @@ func catalogProbeToConfig(p *CatalogAvailabilityProbe) *config.AvailabilityProbe
 		return nil
 	}
 	return &config.AvailabilityProbe{
-		Binaries: append([]string(nil), p.Binaries...),
-		Files:    append([]string(nil), p.Files...),
+		Binaries:  append([]string(nil), p.Binaries...),
+		Files:     append([]string(nil), p.Files...),
+		FileGlobs: append([]string(nil), p.FileGlobs...),
 	}
 }
 
@@ -351,8 +355,8 @@ func validateCatalogVendoredAndAvailability(e *MarketplaceEntry) error {
 		return fmt.Errorf("install_probe is only meaningful with availability=watch|disabled-until-probe")
 	}
 	if inert {
-		if e.InstallProbe == nil || (len(e.InstallProbe.Binaries) == 0 && len(e.InstallProbe.Files) == 0) {
-			return fmt.Errorf("availability=%q requires a non-empty install_probe (binaries or files)", e.Availability)
+		if e.InstallProbe == nil || (len(e.InstallProbe.Binaries) == 0 && len(e.InstallProbe.Files) == 0 && len(e.InstallProbe.FileGlobs) == 0) {
+			return fmt.Errorf("availability=%q requires a non-empty install_probe (binaries, files, or file_globs)", e.Availability)
 		}
 		// Each declared probe value must be a non-empty token — same A7 rule the
 		// manifest gate enforces, run through the SAME config owner (mapping the

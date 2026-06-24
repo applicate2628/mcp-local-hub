@@ -190,13 +190,25 @@ type VendoredSource struct {
 // AvailabilityProbe is the D-3 install-detector descriptor for a watch /
 // disabled-until-probe row. It declares the host signal that flips the row to
 // enabled. It carries NO new detection logic — each field maps onto an EXISTING
-// readiness probe primitive (binaryAvailable / entryScriptStatus). The probe is
-// satisfied iff EVERY declared signal is present (AND semantics).
+// readiness probe primitive (binaryAvailable / entryScriptStatus / a glob over
+// entryScriptStatus). The probe is satisfied iff EVERY declared signal is present
+// (AND semantics across all three fields).
+//
+// files[] vs file_globs[] is an EXPLICIT-INTENT split (codex catalog finding,
+// glob-vs-literal ambiguity): a files[] entry is a LITERAL path stat'd verbatim
+// and NEVER globbed (so a real install path containing a glob metacharacter —
+// "/opt/Foo*/marker", "Foo [Beta]" — resolves to itself and a sibling like
+// "/opt/FooBeta/marker" can never satisfy it). A file_globs[] entry is the
+// OPT-IN pattern path: it is filepath.Glob-expanded and any matching regular file
+// satisfies it (where Mathcad-Prime-*/Live-*/R*/v* version globs live). One field
+// per intent removes the ambiguity of inferring glob-vs-literal from a single
+// files[] value.
 //
 // Decision: work-items/decisions/2026-06-23-d3-availability-probe.md
 type AvailabilityProbe struct {
-	Binaries []string `yaml:"binaries,omitempty"` // each must resolve via the readiness binaryAvailable() owner (PATH/toolchain-dir) — e.g. ["matlab"]
-	Files    []string `yaml:"files,omitempty"`    // each must exist as a regular file via the readiness entryScriptStatus() owner — e.g. an install marker
+	Binaries  []string `yaml:"binaries,omitempty"`   // each must resolve via the readiness binaryAvailable() owner (PATH/toolchain-dir) — e.g. ["matlab"]
+	Files     []string `yaml:"files,omitempty"`      // each LITERAL path must exist as a regular file via the readiness entryScriptStatus() owner — NEVER globbed — e.g. an install marker
+	FileGlobs []string `yaml:"file_globs,omitempty"` // each GLOB PATTERN must filepath.Glob-expand to at least one regular file — the opt-in version-agnostic path (e.g. "…\\Live *\\…\\Ableton Live *.exe")
 }
 
 type DaemonSpec struct {
@@ -696,11 +708,11 @@ func (m *ServerManifest) validateVendoredAndAvailability() error {
 	if m.InstallProbe != nil && !inert {
 		return fmt.Errorf("manifest %s: install_probe is only meaningful with availability=watch|disabled-until-probe", m.Name)
 	}
-	// A6: a watch/disabled row needs a NON-EMPTY probe (binaries or files) — a
-	// watch row with no probe can never become ready.
+	// A6: a watch/disabled row needs a NON-EMPTY probe (binaries, files, or
+	// file_globs) — a watch row with no probe can never become ready.
 	if inert {
-		if m.InstallProbe == nil || (len(m.InstallProbe.Binaries) == 0 && len(m.InstallProbe.Files) == 0) {
-			return fmt.Errorf("manifest %s: availability=%q requires a non-empty install_probe (binaries or files) — a watch row with no probe can never become ready", m.Name, m.Availability)
+		if m.InstallProbe == nil || (len(m.InstallProbe.Binaries) == 0 && len(m.InstallProbe.Files) == 0 && len(m.InstallProbe.FileGlobs) == 0) {
+			return fmt.Errorf("manifest %s: availability=%q requires a non-empty install_probe (binaries, files, or file_globs) — a watch row with no probe can never become ready", m.Name, m.Availability)
 		}
 		// A7: each DECLARED probe value must be a non-empty (trimmed) token. A
 		// blank binary/file slot passes the length check above but the runtime
@@ -745,20 +757,27 @@ func (m *ServerManifest) validateVendoredAndAvailability() error {
 //     stays blocked from another dir. We use the GOOS-INDEPENDENT lexical shape
 //     (NOT filepath.IsAbs, whose result is host-OS-specific) so a cross-platform
 //     registry that declares "C:\\marker" or "/opt/marker" parses identically on
-//     every build platform; the real host-OS glob/stat (existence + regular-file)
-//     is intentionally deferred to the runtime fileProbeMatches owner at
+//     every build platform; the real host-OS stat (existence + regular-file) is
+//     intentionally deferred to the runtime entryScriptStatus owner at
 //     install/readiness.
 //
-//     A files[] entry MAY carry glob metacharacters (`*` / `?` / `[`) — the runtime
-//     probe (fileProbeMatches) expands the pattern via filepath.Glob, so a SHARED
-//     cross-host catalog can declare a version-agnostic pattern (e.g.
-//     "C:\\…\\Live * Suite\\…\\Ableton Live * Suite.exe" matching Live 11/12)
-//     instead of one frozen host path. A glob pattern is STILL an absolute path
-//     (with wildcards), so it must satisfy IsAbsolutePathShape + the
-//     non-empty/no-surrounding-whitespace rules exactly like a literal path; only
-//     the leaf segment(s) gain wildcards. The metacharacters themselves are NOT
-//     rejected here — IsAbsolutePathShape keys only on the absolute PREFIX, which a
-//     glob pattern shares with the literal it generalizes.
+//     A files[] entry is a LITERAL path stat'd VERBATIM by the runtime probe
+//     (entryScriptStatus) — it is NEVER globbed. Metacharacters (`*` / `?` / `[`)
+//     in a files[] value are therefore treated literally (a directory really named
+//     "Foo*" or "Foo [Beta]"); they are NOT rejected here (IsAbsolutePathShape keys
+//     only on the absolute PREFIX), but they do NOT make the path a pattern. Use
+//     file_globs[] for an intentional version-agnostic pattern.
+//
+//  5. ABSOLUTE file_globs[] PATTERNS: each file_globs[] entry is the OPT-IN
+//     version-agnostic glob (e.g. "C:\\…\\Live *\\…\\Ableton Live *.exe" matching
+//     Live 11/12). The runtime probe (globProbeMatches) filepath.Glob-expands it, so
+//     a SHARED cross-host catalog can declare ONE pattern instead of a frozen host
+//     path. A glob pattern is STILL an absolute path (with wildcards in the leaf
+//     segment(s)), so it must satisfy the SAME non-empty / no-surrounding-whitespace
+//     / absolute-path-shape rules as a files[] literal — only the EXPANSION at the
+//     runtime probe differs. The metacharacters are explicitly ALLOWED here (that is
+//     the field's purpose); they share the absolute PREFIX with the literal they
+//     generalize.
 func ValidateProbeValuesNonEmpty(p *AvailabilityProbe, label string) error {
 	if p == nil {
 		return nil
@@ -783,6 +802,17 @@ func ValidateProbeValuesNonEmpty(p *AvailabilityProbe, label string) error {
 		}
 		if !IsAbsolutePathShape(f) {
 			return fmt.Errorf("%s: install_probe.files[%d] %q must be an absolute path — a relative file probe is stat'd against the process working directory, so the gate would depend on which directory mcphub runs from", label, i, f)
+		}
+	}
+	for i, g := range p.FileGlobs {
+		if strings.TrimSpace(g) == "" {
+			return fmt.Errorf("%s: install_probe.file_globs[%d] is empty — every declared probe value must be a non-empty glob pattern", label, i)
+		}
+		if strings.TrimSpace(g) != g {
+			return fmt.Errorf("%s: install_probe.file_globs[%d] %q has leading/trailing whitespace — the runtime probe globs the value verbatim, so a padded pattern never matches; remove the surrounding whitespace", label, i, g)
+		}
+		if !IsAbsolutePathShape(g) {
+			return fmt.Errorf("%s: install_probe.file_globs[%d] %q must be an absolute path pattern — a relative glob is expanded against the process working directory, so the gate would depend on which directory mcphub runs from", label, i, g)
 		}
 	}
 	return nil

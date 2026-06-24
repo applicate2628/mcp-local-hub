@@ -236,68 +236,47 @@ func entryScriptStatus(path string) (bool, string) {
 	return true, ""
 }
 
-// fileProbeMatches is the SINGLE OWNER of the D-3 install_probe files[] check
-// (Tier-1 glob enhancement). It COMPOSES the existing regular-file owner
-// entryScriptStatus — it adds NO new detection (entryScriptStatus stays the
-// literal-path stat owner; this helper only widens the input from one exact path
-// to a glob's match set). It returns (true, "") if the literal path OR any glob
-// match is a runnable regular file, else (false, reason). The shape lets a SHARED
-// cross-host catalog declare a version-agnostic probe (e.g.
-// "…\\Live *\\…\\Ableton Live *.exe" matching Live 11/12) without baking an exact
-// host path.
+// globProbeMatches is the SINGLE OWNER of the D-3 install_probe file_globs[]
+// check — the OPT-IN glob-pattern path. It COMPOSES the existing regular-file
+// owner entryScriptStatus over each filepath.Glob match — it adds NO new
+// detection (entryScriptStatus stays the literal-path stat owner; this helper
+// only widens the input from one exact path to a glob's match set). It returns
+// (true, "") if ANY glob match is a runnable regular file, else (false, reason).
+// The shape lets a SHARED cross-host catalog declare a version-agnostic probe
+// (e.g. "…\\Live *\\…\\Ableton Live *.exe" matching Live 11/12) without baking an
+// exact host path.
 //
-// EXACT-STAT FIRST (codex catalog finding 1 — literal-path-with-metachars
-// regression): a real existing manifest can carry a LITERAL absolute path whose
-// dir/file name contains a glob metacharacter — e.g. "/Applications/Foo [Beta]/x"
-// or any name with `*`/`?`/`[`. filepath.Glob would interpret `[Beta]` as a
-// character class and return NO match for that literal path (verified: Glob of an
-// existing "Foo [Beta]/bin/x" yields []), wrongly disabling a row whose file
-// actually exists. So we stat the VERBATIM pattern FIRST via entryScriptStatus;
-// if the literal path exists as a runnable regular file we return (true, "")
-// without ever globbing. ONLY when the exact literal does NOT exist (no such
-// literal file — the normal case for a genuine version glob like "Live *") do we
-// fall back to filepath.Glob and compose entryScriptStatus over each match.
+// GLOB-ONLY by design (codex catalog finding — explicit glob intent): this helper
+// is reached ONLY for file_globs[] entries, where the operator/catalog DECLARED a
+// pattern. It does NOT stat the verbatim pattern first — a literal path lives in
+// files[] (entryScriptStatus owner) and is never routed here. That split removes
+// the glob-vs-literal ambiguity of a single files[] field: a files[] literal with
+// a glob metacharacter ("/opt/Foo*/marker", "Foo [Beta]") stats literally and a
+// sibling can never satisfy it; only a file_globs[] entry globs.
 //
-// Polarity stays fail-closed, matching today's os.Stat:
-//   - exact stat succeeds → (true, "") immediately (covers literal paths AND
-//     metacharacter-bearing literal paths the glob would misread).
-//   - exact stat fails, glob returns (nil, nil) on NO match → (false,
-//     "does not exist") — byte-identical to entryScriptStatus on a missing
-//     literal path, so the probe-fails-inert verdict is preserved (no match = the
-//     host app absent).
-//   - exact stat fails AND filepath.Glob errors (ErrBadPattern, a malformed
-//     pattern) → fail inert with a named reason rather than silently passing.
-//     This branch is only reachable when the literal did NOT exist AND the glob
-//     is malformed, so a real literal "[" path that exists still passes via the
-//     exact stat above.
-//
-// METACHARACTER-FREE pattern == today's exact stat: the exact stat already
-// satisfies it, so a probe with no `*`/`?`/`[` behaves BYTE-IDENTICALLY to the
-// prior entryScriptStatus(f) — the only behavioral widening is for patterns that
-// actually contain a wildcard AND whose literal path does not itself exist.
-func fileProbeMatches(pattern string) (bool, string) {
-	// EXACT-STAT FIRST: a literal path (including one containing glob
-	// metacharacters like `[Beta]`) that exists as a runnable regular file passes
-	// directly — filepath.Glob would misread the metacharacters and miss it.
-	if ok, _ := entryScriptStatus(pattern); ok {
-		return true, ""
-	}
+// Polarity stays fail-closed, matching the prior owner:
+//   - filepath.Glob errors (ErrBadPattern, a malformed pattern) → fail inert with
+//     a named reason rather than silently passing.
+//   - glob returns (nil, nil) on NO match → (false, "does not exist") —
+//     byte-identical to entryScriptStatus on a missing literal path, so the
+//     probe-fails-inert verdict is preserved (no match = the host app absent).
+//   - a match that is a directory is rejected exactly as a literal directory is.
+func globProbeMatches(pattern string) (bool, string) {
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
-		// filepath.Glob's documented error is ErrBadPattern only. Reached only when
-		// the literal pattern did NOT exist above AND it is malformed; a malformed
+		// filepath.Glob's documented error is ErrBadPattern only. A malformed
 		// pattern can never enable the row, so fail inert with a reason instead of
 		// letting it slip through.
 		return false, "is not a valid glob pattern"
 	}
 	if len(matches) == 0 {
 		// No match — the host app/marker is absent. Reuse entryScriptStatus's
-		// missing-path reason so a metacharacter-free pattern is byte-identical.
+		// missing-path reason so the diagnostic shape matches a literal miss.
 		return false, "does not exist"
 	}
 	// ANY match that is a runnable regular file satisfies the probe. Compose the
 	// existing regular-file owner over each glob match (a directory match is
-	// rejected exactly as a literal directory is today).
+	// rejected exactly as a literal directory is).
 	var lastReason string
 	for _, m := range matches {
 		ok, reason := entryScriptStatus(m)
@@ -323,12 +302,23 @@ func availabilityInert(m *config.ServerManifest) bool {
 // availabilityProbePasses reports whether the D-3 install-probe is satisfied. It
 // is a pure DRY-RUN over the EXISTING readiness primitives — it neither spawns
 // the daemon nor writes any config, and adds ZERO new detection: it composes the
-// SINGLE OWNERS binaryAvailable (PATH/toolchain runnability) and entryScriptStatus
-// (regular-file existence), the exact functions Preflight and CheckServerReadiness
+// SINGLE OWNERS binaryAvailable (PATH/toolchain runnability), entryScriptStatus
+// (LITERAL regular-file existence), and globProbeMatches (a glob over
+// entryScriptStatus), the exact functions Preflight and CheckServerReadiness
 // already use, so there is no second detection path that can drift from the
-// install gate. AND semantics: every declared binary must be runnable AND every
-// declared file must exist. A nil probe never passes (Gate A rule A6 already
-// forbids declaring an inert row without one). Returns (ok, reason-when-not-ok).
+// install gate. AND semantics across ALL THREE fields: every declared binary must
+// be runnable AND every declared files[] LITERAL must exist AND every declared
+// file_globs[] pattern must have at least one matching regular file. A nil probe
+// never passes (Gate A rule A6 already forbids declaring an inert row without
+// one). Returns (ok, reason-when-not-ok).
+//
+// files[] is EXACT-STAT ONLY (codex catalog finding — make glob expansion opt-in):
+// a files[] entry is a literal path stat'd verbatim via entryScriptStatus and is
+// NEVER globbed, so a literal install path that happens to contain a glob
+// metacharacter ("/opt/Foo*/marker", "Foo [Beta]") resolves to ITSELF and an
+// absent literal can never silently fall to a sibling match. file_globs[] is the
+// OPT-IN pattern path (globProbeMatches). Splitting the two fields removes the
+// ambiguity of inferring intent from one value.
 func availabilityProbePasses(p *config.AvailabilityProbe) (bool, string) {
 	if p == nil {
 		return false, "no install probe declared"
@@ -346,17 +336,29 @@ func availabilityProbePasses(p *config.AvailabilityProbe) (bool, string) {
 		}
 	}
 	for _, f := range p.Files {
-		// fileProbeMatches glob-expands f then composes entryScriptStatus over each
-		// match — a metacharacter-free f behaves byte-identically to the prior exact
-		// os.Stat (filepath.Glob of a literal returns that one path). A glob pattern
-		// (e.g. version-agnostic "…\\Live * Suite\\…") passes if ANY match is a
-		// runnable regular file. AND-semantics across entries are preserved: a single
-		// non-matching pattern returns false here and fails the whole probe.
-		if ok, reason := fileProbeMatches(f); !ok {
+		// files[] is the LITERAL-path owner: stat the verbatim path via
+		// entryScriptStatus (exact, NEVER globbed). A path containing a glob
+		// metacharacter is treated literally — the file at that exact path must exist
+		// as a runnable regular file. AND-semantics across entries: a single missing
+		// literal fails the whole probe.
+		if ok, reason := entryScriptStatus(f); !ok {
 			// DISPLAY ONLY: dual-separator basename for the same reason as the binary
-			// branch above — fileProbeMatches stats the verbatim pattern; only the
+			// branch above — entryScriptStatus stats the verbatim path; only the
 			// user-visible marker name is stripped (codex r6 finding 3).
 			return false, fmt.Sprintf("%q %s", basenameAcrossSeparators(f), reason)
+		}
+	}
+	for _, g := range p.FileGlobs {
+		// file_globs[] is the OPT-IN PATTERN owner: globProbeMatches filepath.Glob-
+		// expands g then composes entryScriptStatus over each match. A version-agnostic
+		// pattern (e.g. "…\\Live *\\…") passes if ANY match is a runnable regular file.
+		// AND-semantics across entries are preserved: a single non-matching pattern
+		// fails the whole probe.
+		if ok, reason := globProbeMatches(g); !ok {
+			// DISPLAY ONLY: dual-separator basename for the same reason as the branches
+			// above — globProbeMatches globs the verbatim pattern; only the user-visible
+			// marker name is stripped (codex r6 finding 3).
+			return false, fmt.Sprintf("%q %s", basenameAcrossSeparators(g), reason)
 		}
 	}
 	return true, ""

@@ -121,78 +121,100 @@ version / install layout, so the same shared row stays permanently inert on a ho
 Ableton Live **12** or 64-bit / (x86) Click-to-Run Excel. Both the codex bot and a sonnet
 commission flagged this baked-exact-path specificity in a shared catalog.
 
-### Decision
+### Decision — EXPLICIT files[] vs file_globs[] split (supersedes the glob-in-files[] model)
 
-A files[] entry MAY carry glob metacharacters (`*` / `?` / `[`). The runtime probe owner
-`fileProbeMatches` (`internal/api/readiness.go`) stats the VERBATIM literal FIRST via
-`entryScriptStatus`, and only if that literal does not exist falls back to `filepath.Glob` and
-COMPOSES `entryScriptStatus` over each match — passing iff the literal OR any glob match is a
-runnable regular file. No new detection is added; `entryScriptStatus` stays the literal-path
-stat owner and the glob helper only widens the input from one exact path to a match set.
+Glob expansion is now **OPT-IN via a separate `file_globs[]` field**, not inferred from a
+`files[]` value. `files[]` is the LITERAL-path field — stat'd VERBATIM via `entryScriptStatus`
+and NEVER globbed. `file_globs[]` is the version-agnostic PATTERN field — `filepath.Glob`-expanded
+by the runtime owner `globProbeMatches` (`internal/api/readiness.go`), passing iff ANY match is a
+runnable regular file. `availabilityProbePasses` AND's all three fields: every binary on PATH AND
+every files[] literal exists AND every file_globs[] pattern has a match.
 
-- **EXACT-STAT FIRST (codex catalog finding 1 — literal-path-with-metachars).** A real existing
-  manifest can carry a LITERAL absolute path whose dir/file name contains a glob metacharacter
-  (e.g. `/Applications/Foo [Beta]/x`). An unconditional `filepath.Glob` would interpret `[Beta]`
-  as a character class and miss the literal (VERIFIED: `Glob` of an existing `Foo [Beta]/bin/x`
-  returns `[]`), wrongly disabling a row whose file exists. The fix stats the verbatim literal
-  first, so a metacharacter-bearing literal that exists passes WITHOUT being globbed; only a
-  non-existent literal (the normal case for a genuine version glob like `Live *`) falls to glob.
-- **Fail-closed polarity preserved.** When the literal does not exist, `filepath.Glob` returns
-  `(nil, nil)` on NO match → `(false, "does not exist")`, byte-identical to today's `os.Stat` on
-  a missing literal. A malformed pattern (`ErrBadPattern`) — reachable only when the literal did
-  NOT exist AND the glob is malformed — fails inert with a named reason.
-- **Metacharacter-free == byte-identical.** The exact stat already satisfies a literal path, so a
-  probe with no wildcard behaves EXACTLY as before — the only behavioral widening is for patterns
-  that actually contain a wildcard AND whose literal path does not itself exist.
-- **AND-semantics across entries UNCHANGED.** Every declared binary AND every declared files[]
-  pattern must still pass; a glob is OR only WITHIN one pattern's own match set (any match
-  satisfies that single entry), never across entries.
-- **Validator.** `ValidateProbeValuesNonEmpty` (`internal/config/manifest.go`) already accepted
-  glob metacharacters (it keys only on the absolute PREFIX via `IsAbsolutePathShape` + the
-  non-empty / no-surrounding-whitespace rules); the amendment makes that acceptance EXPLICIT in
-  the rule-4 doc so a future edit does not add a wildcard rejection. A glob pattern is still an
-  absolute path with wildcards.
-- **Browse path UNCHANGED.** `MarketplaceEntryBrowseProbeState` still classifies ANY files[]
-  row (glob or literal) as `inert-unknown` and NEVER runs `filepath.Glob` / `os.Stat` on the
-  browse projection — the no-os.Stat-on-browse invariant holds for glob patterns too.
+> **Supersedes** the earlier "a files[] entry MAY carry glob metacharacters; the runtime owner
+> `fileProbeMatches` stats the literal first then falls back to `filepath.Glob`" model. That
+> exact-stat-first-then-glob fallback was ambiguous: an ABSENT literal `files[]` path that happened
+> to contain a metacharacter (a real `/opt/Foo*/marker` or `Foo [Beta]` install) would silently
+> fall through to glob and a SIBLING (`/opt/FooBeta/marker`) could satisfy it — installing
+> `AvailabilityAdmissionEntry` against the WRONG file. The single-field model could not tell
+> "literal path that contains a metachar" from "intentional pattern". The explicit split removes the
+> ambiguity: `fileProbeMatches` is renamed `globProbeMatches` and is GLOB-ONLY (no exact-stat-first
+> branch); literals live in `files[]` (exact only). The codex finding-1 metachar-literal regression
+> is now handled structurally — a literal with a metachar simply goes in `files[]` and is never
+> globbed.
+
+- **files[] is EXACT-STAT ONLY.** `entryScriptStatus(f)` stats the verbatim path. A metacharacter
+  in a files[] value is treated literally (a directory really named `Foo*` or `Foo [Beta]`); the
+  exact file at that path must exist as a runnable regular file. No glob, no sibling fallback.
+- **file_globs[] is GLOB-ONLY.** `globProbeMatches(g)` calls `filepath.Glob(g)` and composes
+  `entryScriptStatus` over each match. This is where version-agnostic patterns
+  (`Mathcad Prime *` / `Live *` / `R*` / `v*`) live. No exact-stat-first — the field IS the intent.
+- **Fail-closed polarity preserved.** A files[] literal that does not exist → `(false, "does not
+  exist")`. A file_globs[] pattern with NO match → `(false, "does not exist")` (byte-identical
+  diagnostic). A malformed glob (`ErrBadPattern`) → fail inert with a named reason. A directory
+  match is rejected exactly as a literal directory.
+- **AND-semantics across ALL three fields UNCHANGED.** Every declared binary AND every files[]
+  literal AND every file_globs[] pattern must pass; a glob is OR only WITHIN one pattern's own
+  match set (any match satisfies that single entry), never across entries.
+- **Validator.** `ValidateProbeValuesNonEmpty` (`internal/config/manifest.go`) applies the SAME
+  non-empty / no-surrounding-whitespace / absolute-path-shape rules to BOTH files[] and
+  file_globs[] (rules 4 and 5); the metacharacters are explicitly ALLOWED on file_globs[] (that is
+  the field's purpose) and treated literally on files[]. A6 now requires a non-empty probe across
+  binaries OR files OR file_globs.
+- **Browse path UNCHANGED.** `MarketplaceEntryBrowseProbeState` classifies ANY files[] OR
+  file_globs[] row as `inert-unknown` and NEVER runs `filepath.Glob` / `os.Stat` on the browse
+  projection — the no-os.Stat/no-glob-on-browse invariant holds for both fields.
+- **Catalog mirror.** `CatalogAvailabilityProbe` (`internal/api/marketplace_catalog.go`) gains
+  `file_globs` (json), `catalogProbeToConfig` carries it onto `config.AvailabilityProbe`, and
+  `projectAvailability` (`internal/api/marketplace_generate.go`) projects it into the drafted
+  manifest — so a `file_globs[]` row survives generate→create→install with the gate intact.
 
 ### Tier-1 first-batch probes (5 rows: excel, ableton, codex-mcp-server, matlab, ansys)
 
-- ableton: `C:\ProgramData\Ableton\Live *\Program\Ableton Live *.exe` (BROADENED from the
-  initial Suite-only glob — the ableton-mcp README supports Live 10+ in ANY edition, so the
+All version-agnostic patterns now live in `file_globs[]` (the opt-in glob field), never `files[]`.
+
+- ableton: `file_globs: [C:\ProgramData\Ableton\Live *\Program\Ableton Live *.exe]` (BROADENED from
+  the initial Suite-only glob — the ableton-mcp README supports Live 10+ in ANY edition, so the
   Suite-only pattern wrongly missed Standard/Intro/Lite). DISCLOSED scope: ALL Windows Live
   editions (Live 11/12, Suite/Standard/Intro/Lite); macOS (`/Applications/Ableton Live *.app`)
-  NOT covered in this batch (a 2nd files[] entry would be AND'd, not OR'd — disclose, do not
+  NOT covered in this batch (a 2nd file_globs[] entry would be AND'd, not OR'd — disclose, do not
   escalate to or-groups). PRIVACY: the pinned ableton-mcp ships telemetry ON by default
   (`_user_consent = True` in `MCP_Server/telemetry.py` at commit `5e9ffbd`); the curated row sets
   `env.ABLETON_MCP_DISABLE_TELEMETRY=true` (one of the three verified disable vars
   `DISABLE_TELEMETRY` / `ABLETON_MCP_DISABLE_TELEMETRY` / `MCP_DISABLE_TELEMETRY`, accepted values
   `true/1/yes/on`) so no usage data leaves the host by default.
-- excel: `C:\Program Files*\Microsoft Office\root\Office1?\EXCEL.EXE` (64-bit + (x86)
-  Click-to-Run via the single `*`+`?` pattern — `Program Files*` spans ` (x86)`). DISCLOSED scope
-  (now honest in the row name + summary): Click-to-Run / Microsoft 365 only — the `root\` segment
-  is the Click-to-Run signature. MSI / volume-license installs (`…\Microsoft Office\Office16\…`,
-  no `root\`) NOT covered in this batch; `filepath.Glob` has no `**` and files[] is AND across
-  entries, so the optional `root\` cannot be OR'd. Disclose-and-restrict (do NOT change the glob
-  to one that silently fails); C2R+MSI coverage is the or-groups D-3 follow-up below.
+- excel: `binaries: [mcp-excel]` AND `file_globs:
+  [C:\Program Files*\Microsoft Office\root\Office1?\EXCEL.EXE]` (64-bit + (x86) Click-to-Run via
+  the single `*`+`?` pattern — `Program Files*` spans the `(x86)` suffix). DISCLOSED scope (now honest in the
+  row name + summary): Click-to-Run / Microsoft 365 only — the `root\` segment is the Click-to-Run
+  signature. MSI / volume-license installs (`…\Microsoft Office\Office16\…`, no `root\`) NOT
+  covered in this batch; `filepath.Glob` has no `**` and the probe is AND across entries, so the
+  optional `root\` cannot be OR'd. Disclose-and-restrict (do NOT change the glob to one that
+  silently fails); C2R+MSI coverage is the or-groups D-3 follow-up below.
 - codex-mcp-server: UNCHANGED (`binaries: [codex]` bare name, already version-agnostic).
-- matlab: `binaries: [matlab-mcp-server]` AND `files: [C:\Program Files\MATLAB\R*\bin\matlab.exe]`
-  — `R*` is an intentional release-version glob (R2021a, R2024b, …); the literal `R*` never
-  exists, so exact-stat-first falls straight to glob. No finding-1 literal-glob regression.
-- ansys: `files: [C:\Program Files\ANSYS Inc\v*\ansys\bin\winx64\ansys*.exe]` — `v*` (v231/v241/…)
-  and `ansys*` (ansys241.exe, version-stamped) are intentional version globs; the literal never
-  exists, so exact-stat-first falls to glob. No finding-1 literal-glob regression.
+- matlab: `binaries: [matlab-mcp-server, matlab]` — NO file glob (codex catalog finding 2). The
+  matlab-mcp-server README (v0.11.0) is explicit: setup step 1 is "Install MATLAB … and **add it
+  to the system PATH**", and "By default, the server tries to find the first MATLAB on the system
+  PATH". The row sets no args/env (no `--matlab-root`, no `MW_MCP_SERVER_MATLAB_ROOT`), so PATH is
+  the ONLY discovery the server uses. The old `files: [C:\Program Files\MATLAB\R*\bin\matlab.exe]`
+  file-glob would pass for a MATLAB INSTALLED-BUT-NOT-ON-PATH host, where the server then fails to
+  find MATLAB → broken one-click. Requiring `matlab` on PATH makes the probe AGREE with the
+  server's own discovery; the file-glob is redundant once `matlab`-on-PATH is the authoritative
+  signal, so it is DROPPED. Operators who keep MATLAB off PATH add `--matlab-root` after install
+  (documented in the row summary).
+- ansys: `file_globs: [C:\Program Files\ANSYS Inc\v*\ansys\bin\winx64\ansys*.exe]` — `v*`
+  (v231/v241/…) and `ansys*` (ansys241.exe, version-stamped) are intentional version globs in the
+  opt-in glob field.
 
 ### or-groups probe model — D-3 follow-up (NOT built here)
 
 The disclose-and-restrict rows above each leave a minority install layout uncovered because
-`filepath.Glob` has no `**` and the files[] probe is AND across entries (it cannot OR alternative
-install roots within one row). The next D-3 enhancement is a files[] OR-GROUP probe model: a row
-declares a small set of alternative path patterns, ANY of which satisfies the row. It would let a
-single row cover, in ONE pass: Excel Click-to-Run + MSI/volume-license; Ableton Windows +
+`filepath.Glob` has no `**` and the probe is AND across entries (it cannot OR alternative
+install roots within one row). The next D-3 enhancement is a file_globs[] OR-GROUP probe model: a
+row declares a small set of alternative path patterns, ANY of which satisfies the row. It would let
+a single row cover, in ONE pass: Excel Click-to-Run + MSI/volume-license; Ableton Windows +
 macOS; and any multi-root desktop app (matlab/ansys multiple install roots). Scope: a config
-schema addition (`files` becomes a list-of-or-groups, or a sibling `files_any` field) + the
-`availabilityProbePasses` owner + browse classifier + validator, with the exact-stat-first
+schema addition (`file_globs` becomes a list-of-or-groups, or a sibling `file_globs_any` field) +
+the `availabilityProbePasses` owner + browse classifier + validator, with the glob
 literal handling preserved per group entry. This is a design + research item under the desktop-app
 epic, out of scope for the catalog-data PR.
 

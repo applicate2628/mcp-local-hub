@@ -421,15 +421,17 @@ const (
 //     check is bounded (exec.LookPath, no os.Stat), so it is safe on the browse
 //     path. Path-shaped binaries are skipped here and deferred below (codex r6
 //     finding 4).
-//   - then any files[] present → ProbeBrowseInertUnknown (DEFERRED; never os.Stat).
+//   - then any files[] or file_globs[] present → ProbeBrowseInertUnknown (DEFERRED;
+//     never os.Stat / filepath.Glob — the no-touch-on-browse invariant holds for
+//     a glob pattern exactly as for a literal path).
 //   - then any path-shaped binary (config.IsPathShaped) → ProbeBrowseInertUnknown
 //     (DEFERRED; never LookPath a path — defense-in-depth for a manifest that
 //     bypassed the strict ValidateProbeValuesNonEmpty path gate).
-//   - otherwise (all bare binaries resolved, no files[], no path-shaped binary) →
-//     ProbeBrowseReady.
+//   - otherwise (all bare binaries resolved, no files[]/file_globs[], no path-shaped
+//     binary) → ProbeBrowseReady.
 //
 // A mixed binaries+files probe whose bare binaries ALL resolve lands in
-// ProbeBrowseInertUnknown via the files[] rule; if a bare binary is MISSING it is
+// ProbeBrowseInertUnknown via the files[]/file_globs[] rule; if a bare binary is MISSING it is
 // ProbeBrowseInertBlocked (the row is definitely not installable yet, so the GUI
 // greys it instead of offering an install that immediately 412s). The install-time
 // gate still runs the FULL file probe, so an inert-unknown row is still installable
@@ -444,7 +446,7 @@ func MarketplaceEntryBrowseProbeState(e *MarketplaceEntry) ProbeBrowseState {
 	p := catalogProbeToConfig(e.InstallProbe)
 	// A6 guarantees an inert row declares a non-empty probe; defensively a nil /
 	// empty probe is fail-closed (provably not installable yet).
-	if p == nil || (len(p.Binaries) == 0 && len(p.Files) == 0) {
+	if p == nil || (len(p.Binaries) == 0 && len(p.Files) == 0 && len(p.FileGlobs) == 0) {
 		return ProbeBrowseInertBlocked
 	}
 	// BARE binaries FIRST (codex r6 finding 4): the install-time probe is AND
@@ -467,10 +469,12 @@ func MarketplaceEntryBrowseProbeState(e *MarketplaceEntry) ProbeBrowseState {
 	}
 	// All BARE binaries resolved. Anything that cannot be decided WITHOUT touching
 	// the filesystem / an external location is now DEFERRED to the install gate: a
-	// declared file probe (never os.Stat'd here), or a path-shaped binary (never
-	// exec.LookPath'd as a bare name — defense-in-depth for a manifest that bypassed
-	// the strict ValidateProbeValuesNonEmpty path gate).
-	if len(p.Files) > 0 {
+	// declared files[] LITERAL or file_globs[] PATTERN probe (never os.Stat'd /
+	// filepath.Glob'd here — the no-stat/no-glob-on-browse invariant holds for BOTH
+	// fields), or a path-shaped binary (never exec.LookPath'd as a bare name —
+	// defense-in-depth for a manifest that bypassed the strict
+	// ValidateProbeValuesNonEmpty path gate).
+	if len(p.Files) > 0 || len(p.FileGlobs) > 0 {
 		return ProbeBrowseInertUnknown
 	}
 	for _, bin := range p.Binaries {

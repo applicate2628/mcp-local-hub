@@ -198,7 +198,7 @@
     {
       "id": "excel",
       "name": "Excel MCP server (live COM, .NET) — Click-to-Run / Microsoft 365",
-      "summary": "Automate Microsoft Excel through its native COM API — Power Query, DAX measures, PivotTables, charts, formatting, and VBA macros (25 tools / ~230 operations) with real recalc against the live Excel process. Community server sbroenne/mcp-server-excel (C#/.NET 10), pinned to release v1.8.70. Distributed as a self-contained mcp-excel.exe — download from the release ZIP and add to PATH (see vendored_source.install_cmd); the launch command is the bare `mcp-excel` binary, not uvx. disabled-until-probe: enables only when Excel AND the mcp-excel server binary are present. PROBE SCOPE: this row targets a Click-to-Run / Microsoft 365 Excel install (the C:\\Program Files*\\Microsoft Office\\root\\Office1?\\EXCEL.EXE layout, where the `root\\` segment is the Click-to-Run signature). MSI / volume-license installs lay EXCEL.EXE down WITHOUT the `root\\` segment (…\\Microsoft Office\\Office16\\EXCEL.EXE), so the host-detect probe does NOT cover them in this batch — filepath.Glob has no `**` and the files[] probe uses AND-semantics across entries, so it cannot OR the optional `root\\` across two patterns. A files[] OR-group probe model covering Click-to-Run + MSI + macOS is the tracked D-3 follow-up. The VBA-exec / RunMacro operations execute arbitrary code in the live workbook — gate the 6 VBA-exec ops behind operator consent (D-4). Windows + Click-to-Run Excel desktop only.",
+      "summary": "Automate Microsoft Excel through its native COM API — Power Query, DAX measures, PivotTables, charts, formatting, and VBA macros (25 tools / ~230 operations) with real recalc against the live Excel process. Community server sbroenne/mcp-server-excel (C#/.NET 10), pinned to release v1.8.70. Distributed as a self-contained mcp-excel.exe — download from the release ZIP and add to PATH (see vendored_source.install_cmd); the launch command is the bare `mcp-excel` binary, not uvx. disabled-until-probe: enables only when Excel AND the mcp-excel server binary are present. PROBE SCOPE: this row targets a Click-to-Run / Microsoft 365 Excel install (the C:\\Program Files*\\Microsoft Office\\root\\Office1?\\EXCEL.EXE layout, where the `root\\` segment is the Click-to-Run signature). MSI / volume-license installs lay EXCEL.EXE down WITHOUT the `root\\` segment (…\\Microsoft Office\\Office16\\EXCEL.EXE), so the host-detect probe does NOT cover them in this batch — filepath.Glob has no `**` and the install_probe uses AND-semantics across entries, so it cannot OR the optional `root\\` across two patterns. A file_globs[] OR-group probe model covering Click-to-Run + MSI + macOS is the tracked D-3 follow-up. The VBA-exec / RunMacro operations execute arbitrary code in the live workbook — gate the 6 VBA-exec ops behind operator consent (D-4). Windows + Click-to-Run Excel desktop only.",
       "homepage": "https://github.com/sbroenne/mcp-server-excel",
       "readme_url": "https://raw.githubusercontent.com/sbroenne/mcp-server-excel/v1.8.70/README.md",
       "transport": "stdio",
@@ -210,7 +210,7 @@
       "availability": "disabled-until-probe",
       "install_probe": {
         "binaries": ["mcp-excel"],
-        "files": ["C:\\Program Files*\\Microsoft Office\\root\\Office1?\\EXCEL.EXE"]
+        "file_globs": ["C:\\Program Files*\\Microsoft Office\\root\\Office1?\\EXCEL.EXE"]
       },
       "vendored_source": {
         "repo": "https://github.com/sbroenne/mcp-server-excel",
@@ -223,7 +223,7 @@
     {
       "id": "ableton",
       "name": "Ableton Live MCP server",
-      "summary": "Control Ableton Live over a loopback TCP socket — create/edit tracks, clips, devices, and transport via the Live Object Model. Community server ahujasid/ableton-mcp (Python, supports Live 10+ any edition), pinned, run via uvx from the git source. disabled-until-probe: enables only when Ableton Live is installed. The install probe covers ALL Windows Live editions (Suite/Standard/Intro/Lite, Live 11/12) via the version-agnostic glob C:\\ProgramData\\Ableton\\Live *\\Program\\Ableton Live *.exe; macOS (/Applications/Ableton Live *.app) is NOT covered in this batch — the files[] probe uses AND-semantics across entries and cannot OR a second install root, so a macOS row (or files[] OR-group support) is a follow-up. PRIVACY: the pinned ableton-mcp ships telemetry ON by default (anonymous usage data sent to the upstream); this curated row sets ABLETON_MCP_DISABLE_TELEMETRY=true in env to DISABLE it by default — no usage data leaves your machine unless you remove that env. REQUIRES the operator to first install the bundled Ableton Remote Script into Live's MIDI Remote Scripts directory and load it in Live — the MCP server connects to that script over a local loopback socket; the host-exe probe detects Live, NOT the Remote Script, so verify the script is loaded before use.",
+      "summary": "Control Ableton Live over a loopback TCP socket — create/edit tracks, clips, devices, and transport via the Live Object Model. Community server ahujasid/ableton-mcp (Python, supports Live 10+ any edition), pinned, run via uvx from the git source. disabled-until-probe: enables only when Ableton Live is installed. The install probe covers ALL Windows Live editions (Suite/Standard/Intro/Lite, Live 11/12) via the version-agnostic glob C:\\ProgramData\\Ableton\\Live *\\Program\\Ableton Live *.exe; macOS (/Applications/Ableton Live *.app) is NOT covered in this batch — the install_probe uses AND-semantics across entries and cannot OR a second install root, so a macOS row (or file_globs[] OR-group support) is a follow-up. PRIVACY: the pinned ableton-mcp ships telemetry ON by default (anonymous usage data sent to the upstream); this curated row sets ABLETON_MCP_DISABLE_TELEMETRY=true in env to DISABLE it by default — no usage data leaves your machine unless you remove that env. REQUIRES the operator to first install the bundled Ableton Remote Script into Live's MIDI Remote Scripts directory and load it in Live — the MCP server connects to that script over a local loopback socket; the host-exe probe detects Live, NOT the Remote Script, so verify the script is loaded before use.",
       "homepage": "https://github.com/ahujasid/ableton-mcp",
       "readme_url": "https://raw.githubusercontent.com/ahujasid/ableton-mcp/5e9ffbd246bae60994699900f4fef34ad7b40407/README.md",
       "transport": "stdio",
@@ -240,7 +240,7 @@
       "license": "MIT",
       "availability": "disabled-until-probe",
       "install_probe": {
-        "files": ["C:\\ProgramData\\Ableton\\Live *\\Program\\Ableton Live *.exe"]
+        "file_globs": ["C:\\ProgramData\\Ableton\\Live *\\Program\\Ableton Live *.exe"]
       },
       "vendored_source": {
         "repo": "https://github.com/ahujasid/ableton-mcp",
@@ -270,7 +270,7 @@
     {
       "id": "matlab",
       "name": "MATLAB MCP server (official, MathWorks)",
-      "summary": "Run MATLAB from an AI client — execute code, scripts, and functions against a live MATLAB process via the official MathWorks Go MCP server (matlab-mcp-server, stdio). OFFICIAL MathWorks server (matlab/matlab-mcp-server, pinned to release v0.11.0) — NOT a community fork, so no vendored_source (like the codex row). Distributed as a self-contained matlab-mcp-server binary: download matlab-mcp-server-windows-x64.exe from the v0.11.0 release and add it to PATH (rename to matlab-mcp-server), OR `go install github.com/matlab/matlab-mcp-server/cmd/matlab-mcp-server@latest`. REQUIRES a host MATLAB R2021a-or-later install — the server locates it on PATH (or via --matlab-root / the MW_MCP_SERVER_MATLAB_ROOT env var) and drives the live MATLAB engine, so executing MATLAB code runs arbitrary host computation; the operator gates that the same way they gate any code-exec tool. disabled-until-probe: enables only when BOTH the matlab-mcp-server binary AND a MATLAB install are present. License: MathWorks custom (BSD-style, with a clause restricting use to MathWorks products). Windows + MATLAB desktop only in this probe (the host-install glob is the Windows MATLAB layout).",
+      "summary": "Run MATLAB from an AI client — execute code, scripts, and functions against a live MATLAB process via the official MathWorks Go MCP server (matlab-mcp-server, stdio). OFFICIAL MathWorks server (matlab/matlab-mcp-server, pinned to release v0.11.0) — NOT a community fork, so no vendored_source (like the codex row). Distributed as a self-contained matlab-mcp-server binary: download matlab-mcp-server-windows-x64.exe from the v0.11.0 release and add it to PATH (rename to matlab-mcp-server), OR `go install github.com/matlab/matlab-mcp-server/cmd/matlab-mcp-server@latest`. REQUIRES a host MATLAB R2021a-or-later install ON THE SYSTEM PATH — by default the server finds the first MATLAB on PATH (it can also be pointed at one via --matlab-root / the MW_MCP_SERVER_MATLAB_ROOT env var, but this row sets no args/env so PATH is the only discovery), then drives the live MATLAB engine, so executing MATLAB code runs arbitrary host computation; the operator gates that the same way they gate any code-exec tool. disabled-until-probe: enables only when BOTH the matlab-mcp-server binary AND the `matlab` launcher are on PATH — the probe (binaries: matlab-mcp-server + matlab) AGREES with the server's own PATH discovery, so a MATLAB installed but NOT on PATH does not falsely enable the row. If you keep MATLAB off PATH, pass --matlab-root=<MATLAB root> (or set MW_MCP_SERVER_MATLAB_ROOT) in the manifest after install. License: MathWorks custom (BSD-style, with a clause restricting use to MathWorks products).",
       "homepage": "https://github.com/matlab/matlab-mcp-server",
       "readme_url": "https://raw.githubusercontent.com/matlab/matlab-mcp-server/v0.11.0/README.md",
       "transport": "stdio",
@@ -281,8 +281,7 @@
       "license": "MathWorks (custom BSD-style, product-use restricted)",
       "availability": "disabled-until-probe",
       "install_probe": {
-        "binaries": ["matlab-mcp-server"],
-        "files": ["C:\\Program Files\\MATLAB\\R*\\bin\\matlab.exe"]
+        "binaries": ["matlab-mcp-server", "matlab"]
       }
     },
     {
@@ -299,7 +298,7 @@
       "license": "Apache-2.0",
       "availability": "disabled-until-probe",
       "install_probe": {
-        "files": ["C:\\Program Files\\ANSYS Inc\\v*\\ansys\\bin\\winx64\\ansys*.exe"]
+        "file_globs": ["C:\\Program Files\\ANSYS Inc\\v*\\ansys\\bin\\winx64\\ansys*.exe"]
       }
     }
   ]
