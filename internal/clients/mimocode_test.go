@@ -2005,6 +2005,341 @@ func TestMimoCode_AllStdioEntries_ArrayCommand(t *testing.T) {
 	}
 }
 
+func TestMimoCode_RemovableStdioEntries_WriteTargetOnly(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	writeTarget := filepath.Join(dir, "mimocode.json")
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{
+  "mcp": {
+    "lower-gopls": {"type": "local", "command": ["gopls", "mcp"], "enabled": true}
+  }
+}`), 0o600); err != nil {
+		t.Fatalf("write lower config: %v", err)
+	}
+	if err := os.WriteFile(writeTarget, []byte(`{
+  "mcp": {
+    "writable-gopls": {"type": "local", "command": ["gopls", "mcp"], "enabled": true},
+    "shadowed-gopls": {"type": "local", "command": ["gopls", "mcp"], "enabled": true}
+  }
+}`), 0o600); err != nil {
+		t.Fatalf("write target config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "mimocode.jsonc"), []byte(`{
+  "mcp": {
+    "shadowed-gopls": {"type": "local", "command": ["gopls", "mcp"], "enabled": true}
+  }
+}`), 0o600); err != nil {
+		t.Fatalf("write higher config: %v", err)
+	}
+	o := &mimoCodeClient{path: writeTarget}
+
+	all, err := o.AllStdioEntries()
+	if err != nil {
+		t.Fatalf("AllStdioEntries: %v", err)
+	}
+	allNames := map[string]bool{}
+	for _, e := range all {
+		allNames[e.Name] = true
+	}
+	if !allNames["lower-gopls"] || !allNames["writable-gopls"] || !allNames["shadowed-gopls"] {
+		t.Fatalf("AllStdioEntries must keep the merged non-destructive view, got %#v", all)
+	}
+
+	removable, err := o.RemovableStdioEntries()
+	if err != nil {
+		t.Fatalf("RemovableStdioEntries: %v", err)
+	}
+	got := map[string]bool{}
+	for _, e := range removable {
+		got[e.Name] = true
+	}
+	if !got["writable-gopls"] {
+		t.Fatalf("write-target-only gopls should be removable, got %#v", removable)
+	}
+	if got["lower-gopls"] {
+		t.Fatalf("lower-layer gopls must not be reported as removable: %#v", removable)
+	}
+	if got["shadowed-gopls"] {
+		t.Fatalf("write-target gopls shadowed by a higher layer must not be reported as removable: %#v", removable)
+	}
+}
+
+// TestMimoCode_RemovableStdioEntries_ProductionChainReachesRealMethod pins bot PR
+// #425 finding 1 (CRITICAL): the post-register direct-gopls cleanup constructs the
+// PRODUCTION client via NewMimoCode → newLockingClient(&mimoCodeClient{...}), and
+// register.go's realClientAdapter.RemovableStdioEntries inner-asserts the wrapped
+// clients.Client implements the optional RemovableStdioEntries method. lockingClient
+// embeds the Client INTERFACE (which does NOT carry RemovableStdioEntries — only
+// *mimoCodeClient does), so before the lockingClient forwarder the assert FAILED and
+// the cleanup silently fell back to the merged-view AllStdioEntries — the whole
+// write-target/effective-enabled discrimination was INERT in production.
+//
+// This builds the real client, reproduces the EXACT inner-assert shape
+// realClientAdapter uses, and proves (a) the assert now succeeds AND (b) it routes
+// to the discriminating method, not the AllStdioEntries fallback: a lower-layer-only
+// stdio entry is present in AllStdioEntries (the fallback) but EXCLUDED from
+// RemovableStdioEntries (the real method), so the two views diverge and the excluded
+// entry confirms the real path ran.
+func TestMimoCode_RemovableStdioEntries_ProductionChainReachesRealMethod(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	// Redirect the OS home so NewMimoCode's claudeHome (HOME || USERPROFILE) and the
+	// ~/.mimocode merge layer resolve to an EMPTY temp dir, never the developer's
+	// real home (state-safe; the ~/.claude.json import is also disabled by
+	// isolateMimoCodeEnv). os.UserHomeDir (used for the global-dir resolution) reads
+	// HOME on POSIX and USERPROFILE on Windows, so set both.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
+	mh := t.TempDir()
+	t.Setenv("MIMOCODE_HOME", mh)
+	dir := filepath.Join(mh, "config")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	// Lower layer (config.json) — a stdio gopls the hub never wrote. RemoveEntry
+	// (write-target only) cannot delete it, so it is in AllStdioEntries but must be
+	// EXCLUDED from RemovableStdioEntries.
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{
+  "mcp": {
+    "lower-only-gopls": {"type": "local", "command": ["gopls", "mcp"], "enabled": true}
+  }
+}`), 0o600); err != nil {
+		t.Fatalf("write lower config: %v", err)
+	}
+	// Write target — a stdio gopls the hub owns; deletable, so REMOVABLE.
+	if err := os.WriteFile(filepath.Join(dir, "mimocode.json"), []byte(`{
+  "mcp": {
+    "writable-gopls": {"type": "local", "command": ["gopls", "mcp"], "enabled": true}
+  }
+}`), 0o600); err != nil {
+		t.Fatalf("write target config: %v", err)
+	}
+
+	c, err := NewMimoCode()
+	if err != nil {
+		t.Fatalf("NewMimoCode: %v", err)
+	}
+
+	// (a) The production wrapper (lockingClient) MUST satisfy the optional
+	// RemovableStdioEntries interface — the exact inner-assert realClientAdapter
+	// performs. Before the forwarder this assert FAILED on the lockingClient.
+	rc, ok := c.(interface {
+		RemovableStdioEntries() ([]StdioEntry, error)
+	})
+	if !ok {
+		t.Fatal("production NewMimoCode client (lockingClient) must satisfy the optional RemovableStdioEntries interface; the register inner type-assert relies on it (bot PR #425 finding 1)")
+	}
+
+	all, err := c.AllStdioEntries()
+	if err != nil {
+		t.Fatalf("AllStdioEntries: %v", err)
+	}
+	allNames := map[string]bool{}
+	for _, e := range all {
+		allNames[e.Name] = true
+	}
+	if !allNames["lower-only-gopls"] || !allNames["writable-gopls"] {
+		t.Fatalf("AllStdioEntries (the fallback) must contain both layers, got %#v", all)
+	}
+
+	removable, err := rc.RemovableStdioEntries()
+	if err != nil {
+		t.Fatalf("RemovableStdioEntries: %v", err)
+	}
+	got := map[string]bool{}
+	for _, e := range removable {
+		got[e.Name] = true
+	}
+	// (b) The discriminating method ran, NOT the AllStdioEntries fallback: the
+	// lower-layer-only entry is present in All but absent from Removable.
+	if !got["writable-gopls"] {
+		t.Fatalf("write-target gopls must be removable through the production chain, got %#v", removable)
+	}
+	if got["lower-only-gopls"] {
+		t.Fatalf("lower-layer-only gopls must be EXCLUDED — its presence proves the AllStdioEntries fallback ran instead of the real RemovableStdioEntries (bot PR #425 finding 1): %#v", removable)
+	}
+}
+
+// TestMimoCode_RemovableStdioEntries_HigherEnabledOnlyOverlayReEnables pins bot PR
+// #425 finding 2 (P2): a write-target entry whose OWN value is enabled:false but is
+// EFFECTIVELY ENABLED by a higher enabled-only overlay ({enabled:true}, no command)
+// is an ACTIVE stdio server MiMoCode spawns. Deleting the write-target key DOES
+// clear it (the higher enabled-only stub goes inert with no command to supply), so
+// it IS removable. The prior code dropped it via the write-target disabled-drop
+// BEFORE the re-resolve check, so the active direct gopls survived register cleanup
+// → duplicate LSP processes. The fix builds candidates from the merged EFFECTIVE
+// view, so the re-enabled entry is reported removable; and after RemoveEntry the
+// effective gopls is gone.
+func TestMimoCode_RemovableStdioEntries_HigherEnabledOnlyOverlayReEnables(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	writeTarget := filepath.Join(dir, "mimocode.json")
+	// Write target: gopls is DISABLED in its own value but still carries the command.
+	if err := os.WriteFile(writeTarget, []byte(`{
+  "mcp": {
+    "gopls": {"type": "local", "command": ["gopls", "mcp"], "enabled": false}
+  }
+}`), 0o600); err != nil {
+		t.Fatalf("write target config: %v", err)
+	}
+	// Higher layer (mimocode.jsonc): an enabled-ONLY overlay ({enabled:true}, no
+	// command) that RE-ENABLES the write-target gopls. It is NOT a shadow — it
+	// supplies no command, so the lower write-target content wins the merge, and it
+	// goes inert once the write-target key is deleted.
+	if err := os.WriteFile(filepath.Join(dir, "mimocode.jsonc"), []byte(`{
+  "mcp": {
+    "gopls": {"enabled": true}
+  }
+}`), 0o600); err != nil {
+		t.Fatalf("write higher enabled-only overlay: %v", err)
+	}
+	o := &mimoCodeClient{path: writeTarget}
+
+	// The merged effective view sees gopls as an ACTIVE stdio server.
+	all, err := o.AllStdioEntries()
+	if err != nil {
+		t.Fatalf("AllStdioEntries: %v", err)
+	}
+	allActive := false
+	for _, e := range all {
+		if e.Name == "gopls" {
+			allActive = true
+		}
+	}
+	if !allActive {
+		t.Fatalf("the higher enabled-only overlay must make gopls effectively active in AllStdioEntries, got %#v", all)
+	}
+
+	// RemovableStdioEntries must INCLUDE it (the prior write-target disabled-drop
+	// wrongly excluded it).
+	removable, err := o.RemovableStdioEntries()
+	if err != nil {
+		t.Fatalf("RemovableStdioEntries: %v", err)
+	}
+	got := false
+	for _, e := range removable {
+		if e.Name == "gopls" {
+			got = true
+		}
+	}
+	if !got {
+		t.Fatalf("a write-target enabled:false entry RE-ENABLED by a higher enabled-only overlay must be removable (bot PR #425 finding 2): %#v", removable)
+	}
+
+	// After RemoveEntry, the effective gopls is gone (the inert higher stub supplies
+	// no command).
+	if err := o.RemoveEntry("gopls"); err != nil {
+		t.Fatalf("RemoveEntry: %v", err)
+	}
+	after, err := o.AllStdioEntries()
+	if err != nil {
+		t.Fatalf("AllStdioEntries after remove: %v", err)
+	}
+	for _, e := range after {
+		if e.Name == "gopls" {
+			t.Fatalf("effective gopls must be gone after removing the write-target key, still present: %#v", after)
+		}
+	}
+}
+
+// TestMimoCode_RemovableStdioEntries_DisabledLowerLayerDoesNotBlock pins bot PR
+// #425 P2 ("do not skip removable entries behind disabled lower layers"). The
+// write target carries the ACTIVE direct gopls (stdio-LSP); a SAME-NAMED but
+// DISABLED (enabled:false) gopls sits in a lower/import layer. A disabled lower
+// entry is dropped by mimoCodeDropDisabled in the merged-effective view, so it can
+// NOT re-emerge as an ACTIVE entry after RemoveEntry clears the write-target key —
+// the active gopls IS removable and must be REPORTED. Pre-fix the re-resolve
+// predicate's below-layer / import branches used bare name-presence and wrongly
+// DECLINED, leaving the active direct gopls in place → duplicate LSP. A CONTROL
+// with an ENABLED lower entry still declines (it genuinely re-emerges active).
+func TestMimoCode_RemovableStdioEntries_DisabledLowerLayerDoesNotBlock(t *testing.T) {
+	const stdioLS = `{"type":"local","command":["gopls","mcp"],"enabled":true}`
+
+	removableNames := func(t *testing.T, o *mimoCodeClient) map[string]bool {
+		t.Helper()
+		removable, err := o.RemovableStdioEntries()
+		if err != nil {
+			t.Fatalf("RemovableStdioEntries: %v", err)
+		}
+		got := map[string]bool{}
+		for _, e := range removable {
+			got[e.Name] = true
+		}
+		return got
+	}
+
+	t.Run("config.json BELOW disabled gopls -> active write-target gopls IS removable", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		writeMimoFile(t, filepath.Join(dir, "mimocode.json"),
+			`{"mcp":{"gopls":`+stdioLS+`}}`)
+		// Lower layer (config.json) has the SAME name but DISABLED — dropped from the
+		// effective view, so it cannot re-emerge active after the write-target removal.
+		writeMimoFile(t, filepath.Join(dir, "config.json"),
+			`{"mcp":{"gopls":{"type":"local","command":["gopls","mcp"],"enabled":false}}}`)
+		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
+		got := removableNames(t, o)
+		if !got["gopls"] {
+			t.Fatalf("active write-target gopls behind a DISABLED config.json-below entry must be REPORTED removable (bot PR #425 P2), got %#v", got)
+		}
+	})
+
+	t.Run("config.json BELOW ENABLED gopls -> decline (control)", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		writeMimoFile(t, filepath.Join(dir, "mimocode.json"),
+			`{"mcp":{"gopls":`+stdioLS+`}}`)
+		writeMimoFile(t, filepath.Join(dir, "config.json"),
+			`{"mcp":{"gopls":{"type":"local","command":["gopls","mcp"],"enabled":true}}}`)
+		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
+		got := removableNames(t, o)
+		if got["gopls"] {
+			t.Fatalf("an ENABLED config.json-below gopls re-emerges active after RemoveEntry — must DECLINE, got %#v", got)
+		}
+	})
+
+	t.Run("claude import DISABLED gopls -> active write-target gopls IS removable", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		t.Setenv(MimoCodeDisableClaudeImportEnv, "") // re-enable the import for this test
+		home := t.TempDir()
+		globalDir := filepath.Join(home, ".config", "mimocode")
+		if err := os.MkdirAll(globalDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		// ~/.claude.json has a SAME-NAMED but DISABLED entry (disabled:true projects to
+		// enabled:false via mimoCodeFromClaude) → dropped from the effective view → it
+		// cannot re-emerge active.
+		writeMimoFile(t, filepath.Join(home, ".claude.json"),
+			`{"mcpServers":{"gopls":{"command":"gopls","args":["mcp"],"disabled":true}}}`)
+		writeMimoFile(t, filepath.Join(globalDir, "mimocode.json"),
+			`{"mcp":{"gopls":`+stdioLS+`}}`)
+		o := &mimoCodeClient{path: filepath.Join(globalDir, "mimocode.json"), claudeHome: home}
+		got := removableNames(t, o)
+		if !got["gopls"] {
+			t.Fatalf("active write-target gopls behind a DISABLED ~/.claude.json import must be REPORTED removable (bot PR #425 P2), got %#v", got)
+		}
+	})
+
+	t.Run("claude import ENABLED gopls -> decline (control)", func(t *testing.T) {
+		isolateMimoCodeEnv(t)
+		t.Setenv(MimoCodeDisableClaudeImportEnv, "")
+		home := t.TempDir()
+		globalDir := filepath.Join(home, ".config", "mimocode")
+		if err := os.MkdirAll(globalDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeMimoFile(t, filepath.Join(home, ".claude.json"),
+			`{"mcpServers":{"gopls":{"command":"gopls","args":["mcp"]}}}`)
+		writeMimoFile(t, filepath.Join(globalDir, "mimocode.json"),
+			`{"mcp":{"gopls":`+stdioLS+`}}`)
+		o := &mimoCodeClient{path: filepath.Join(globalDir, "mimocode.json"), claudeHome: home}
+		got := removableNames(t, o)
+		if got["gopls"] {
+			t.Fatalf("an ENABLED ~/.claude.json import gopls re-emerges active after RemoveEntry — must DECLINE, got %#v", got)
+		}
+	})
+}
+
 // TestMimoCode_FindStdioLanguageServer_WriteTargetOnly pins bot PR #420 finding
 // 4: the destructive direct-LSP cleanup (which calls RemoveEntry on each match,
 // and RemoveEntry deletes from the write target ONLY) must report only entries

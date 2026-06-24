@@ -40,41 +40,93 @@ func stdioLSPEntryNames(t *testing.T, o *mimoCodeClient) map[string]bool {
 func TestMimoCode_FindStdioLanguageServer_DeclinesWhenAnotherLayerDefines(t *testing.T) {
 	const stdioLS = `{"type":"local","command":["mcp-language-server","--lsp","go"],"enabled":true}`
 
-	t.Run("config.json BELOW also defines -> decline", func(t *testing.T) {
+	t.Run("config.json BELOW re-emerges a NON-LSP dup -> active LSP IS removable (reported)", func(t *testing.T) {
+		// bot PR #425 re-resolve redesign (architect PASS): the LSP cleanup's
+		// re-resolve predicate now tests post-removal ACTIVE mcp-language-server
+		// membership (findLanguageServerStdioInMap), NOT bare name-presence. The
+		// write target's `dup` IS the stdio-LSP entry; config.json BELOW defines a
+		// SAME-NAMED but NON-LSP (remote) `dup`. Under the replace-by-name merge,
+		// removing the write-target key leaves the config.json REMOTE — which is not
+		// an active mcp-language-server. So after RemoveEntry NO active LSP `dup`
+		// survives → the duplicate-LSP cleanup's job is done → `dup` must be REPORTED
+		// removable. RemoveEntry touches only the write target; the operator's lower
+		// remote re-emerges untouched (no wrong-delete, no orphan).
 		isolateMimoCodeEnv(t)
 		dir := t.TempDir()
-		// Write target (mimocode.json): stdio-LSP shape for `dup`.
 		writeMimoFile(t, filepath.Join(dir, "mimocode.json"),
 			`{"mcp":{"dup":`+stdioLS+`,"sole":`+stdioLS+`}}`)
-		// Lower layer (config.json) ALSO defines `dup` — removing the write-target
-		// copy lets this re-emerge, so the LSP entry stays active.
 		writeMimoFile(t, filepath.Join(dir, "config.json"),
 			`{"mcp":{"dup":{"type":"remote","url":"http://below/mcp","enabled":true}}}`)
 		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
 		got := stdioLSPEntryNames(t, o)
-		if got["dup"] {
-			t.Errorf("`dup` re-emerges from config.json after RemoveEntry — must DECLINE, got %v", got)
+		if !got["dup"] {
+			t.Errorf("a NON-LSP config.json-below `dup` is not an active mcp-language-server — the active write-target LSP IS removable, must be REPORTED, got %v", got)
 		}
 		if !got["sole"] {
 			t.Errorf("`sole` is the only definer — must be reported (removable), got %v", got)
 		}
 	})
 
-	t.Run("a disabled definition in another layer still COUNTS -> decline", func(t *testing.T) {
+	t.Run("an ACTIVE LSP-shaped re-emergence in config.json BELOW still blocks removal -> decline", func(t *testing.T) {
+		// Decline-path coverage (replaces the former bare-name control): the ONLY
+		// re-emergence that blocks the LSP cleanup now is one that re-emerges as
+		// ANOTHER ACTIVE stdio mcp-language-server. config.json BELOW defines `dup`
+		// as an ENABLED mcp-language-server (--lsp go) just like the write target.
+		// After RemoveEntry clears the write-target key, the config.json LSP entry
+		// RE-EMERGES active → the duplicate LSP stays → the cleanup must DECLINE.
 		isolateMimoCodeEnv(t)
 		dir := t.TempDir()
 		writeMimoFile(t, filepath.Join(dir, "mimocode.json"),
 			`{"mcp":{"dup":`+stdioLS+`}}`)
-		// Lower layer defines `dup` with enabled:false. The deep-merge keeps the KEY
-		// present (only the matcher drops disabled), so after RemoveEntry the name is
-		// still PRESENT in the merged config → the destructive removal did not clear
-		// it → decline.
+		writeMimoFile(t, filepath.Join(dir, "config.json"),
+			`{"mcp":{"dup":`+stdioLS+`}}`)
+		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
+		got := stdioLSPEntryNames(t, o)
+		if got["dup"] {
+			t.Errorf("an ENABLED LSP-shaped config.json-below `dup` re-emerges as an active mcp-language-server after RemoveEntry — must DECLINE, got %v", got)
+		}
+	})
+
+	t.Run("a DISABLED config.json-below definition does NOT block removal -> reported", func(t *testing.T) {
+		// bot PR #425 P2 — "do not skip removable entries behind disabled lower
+		// layers". The write target has the ACTIVE stdio-LSP `dup`; config.json BELOW
+		// has a SAME-NAMED but DISABLED (enabled:false) entry. mimoCodeDropDisabled
+		// drops that disabled below entry from the merged-effective view, so after
+		// RemoveEntry clears the write-target key NOTHING active re-emerges — the
+		// active stdio-LSP IS removable and must be REPORTED. Pre-fix the below-layer
+		// check used bare name-presence (mimoCodeFileDefines) and wrongly DECLINED,
+		// leaving the active direct gopls in place → duplicate LSP.
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		writeMimoFile(t, filepath.Join(dir, "mimocode.json"),
+			`{"mcp":{"dup":`+stdioLS+`}}`)
 		writeMimoFile(t, filepath.Join(dir, "config.json"),
 			`{"mcp":{"dup":{"type":"local","command":["x"],"enabled":false}}}`)
 		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
 		got := stdioLSPEntryNames(t, o)
-		if got["dup"] {
-			t.Errorf("a disabled same-name definition in another layer must still cause a DECLINE, got %v", got)
+		if !got["dup"] {
+			t.Errorf("a DISABLED config.json-below entry cannot re-emerge active — `dup` must be REPORTED (removable), got %v", got)
+		}
+	})
+
+	t.Run("an ENABLED NON-LSP stdio config.json-below re-emergence -> active LSP IS removable (reported)", func(t *testing.T) {
+		// bot PR #425 re-resolve redesign (architect PASS): an ENABLED but NON-LSP
+		// stdio re-emergence ({command:[x]}, no --lsp) is an active stdio server but
+		// NOT an active mcp-language-server, so it does NOT satisfy the LSP cleanup's
+		// re-resolve predicate (findLanguageServerStdioInMap). Removing the
+		// write-target LSP value leaves only the non-LSP `x` server → no duplicate
+		// active mcp-language-server survives → `dup` must be REPORTED removable. (The
+		// LSP-shaped-re-emergence decline path is pinned by the subtest above.)
+		isolateMimoCodeEnv(t)
+		dir := t.TempDir()
+		writeMimoFile(t, filepath.Join(dir, "mimocode.json"),
+			`{"mcp":{"dup":`+stdioLS+`}}`)
+		writeMimoFile(t, filepath.Join(dir, "config.json"),
+			`{"mcp":{"dup":{"type":"local","command":["x"],"enabled":true}}}`)
+		o := &mimoCodeClient{path: filepath.Join(dir, "mimocode.json")}
+		got := stdioLSPEntryNames(t, o)
+		if !got["dup"] {
+			t.Errorf("an ENABLED NON-LSP stdio config.json-below `dup` is not an active mcp-language-server — the active write-target LSP IS removable, must be REPORTED, got %v", got)
 		}
 	})
 
@@ -113,8 +165,14 @@ func TestMimoCode_FindStdioLanguageServer_DeclinesWhenAnotherLayerDefines(t *tes
 // which correctly EXCLUDES the import). The import is SKIP-IF-NAME-EXISTS: while
 // the write target defines the name the import is skipped, but once RemoveEntry
 // deletes the write-target key the import no longer skips it → the entry
-// RE-EMERGES. So a name defined in BOTH the write target (stdio-LSP) AND
-// ~/.claude.json must be DECLINED (cleanup cannot fully remove it).
+// RE-EMERGES.
+//
+// bot PR #425 re-resolve redesign (architect PASS): the LSP cleanup's re-resolve
+// predicate now tests post-removal ACTIVE mcp-language-server membership
+// (findLanguageServerStdioInMap), not bare name-presence. So a same-name import
+// re-emergence only DECLINES the LSP cleanup when it re-emerges as ANOTHER ACTIVE
+// stdio mcp-language-server; a NON-LSP import re-emergence (e.g. `npx`) leaves no
+// active LSP duplicate → the write-target LSP IS removable (reported).
 func TestMimoCode_FindStdioLanguageServer_ClaudeImportReEmergence(t *testing.T) {
 	const stdioLS = `{"type":"local","command":["mcp-language-server","--lsp","go"],"enabled":true}`
 
@@ -127,12 +185,14 @@ func TestMimoCode_FindStdioLanguageServer_ClaudeImportReEmergence(t *testing.T) 
 		return globalDir
 	}
 
-	t.Run("name in BOTH write target AND claude import -> decline", func(t *testing.T) {
+	t.Run("NON-LSP claude import re-emergence -> active LSP IS removable (reported)", func(t *testing.T) {
+		// The import re-emerges `dup` as a NON-LSP stdio server (`npx`), not an
+		// mcp-language-server. After RemoveEntry clears the write-target LSP value, no
+		// active mcp-language-server `dup` survives → `dup` must be REPORTED removable.
 		isolateMimoCodeEnv(t)
 		t.Setenv(MimoCodeDisableClaudeImportEnv, "") // re-enable the import for this test
 		home := t.TempDir()
 		globalDir := newGlobalDir(t, home)
-		// ~/.claude.json defines `dup` — it re-emerges once the write-target key is gone.
 		writeMimoFile(t, filepath.Join(home, ".claude.json"),
 			`{"mcpServers":{"dup":{"command":"npx","args":["-y","dup"]}}}`)
 		// Write target: `dup` is the stdio-LSP shape (claude currently skips it).
@@ -140,8 +200,32 @@ func TestMimoCode_FindStdioLanguageServer_ClaudeImportReEmergence(t *testing.T) 
 			`{"mcp":{"dup":`+stdioLS+`,"sole":`+stdioLS+`}}`)
 		o := &mimoCodeClient{path: filepath.Join(globalDir, "mimocode.json"), claudeHome: home}
 		got := stdioLSPEntryNames(t, o)
+		if !got["dup"] {
+			t.Errorf("a NON-LSP `npx` claude import re-emergence is not an active mcp-language-server — the active write-target LSP IS removable, must be REPORTED, got %v", got)
+		}
+		if !got["sole"] {
+			t.Errorf("`sole` (no other layer / no import) must still be reported, got %v", got)
+		}
+	})
+
+	t.Run("an LSP-shaped claude import re-emergence -> decline", func(t *testing.T) {
+		// Decline-path coverage for the import source: ~/.claude.json defines `dup`
+		// as a mcp-language-server (--lsp go). mimoCodeFromClaude projects it to a
+		// local entry with command [mcp-language-server, --lsp, go]. After RemoveEntry
+		// clears the write-target key, skip-if-name-exists stops firing and the import
+		// RE-EMERGES an ACTIVE mcp-language-server → the duplicate LSP stays → DECLINE.
+		isolateMimoCodeEnv(t)
+		t.Setenv(MimoCodeDisableClaudeImportEnv, "")
+		home := t.TempDir()
+		globalDir := newGlobalDir(t, home)
+		writeMimoFile(t, filepath.Join(home, ".claude.json"),
+			`{"mcpServers":{"dup":{"command":"mcp-language-server","args":["--lsp","go"]}}}`)
+		writeMimoFile(t, filepath.Join(globalDir, "mimocode.json"),
+			`{"mcp":{"dup":`+stdioLS+`,"sole":`+stdioLS+`}}`)
+		o := &mimoCodeClient{path: filepath.Join(globalDir, "mimocode.json"), claudeHome: home}
+		got := stdioLSPEntryNames(t, o)
 		if got["dup"] {
-			t.Errorf("`dup` re-emerges from the ~/.claude.json import after RemoveEntry — must DECLINE, got %v", got)
+			t.Errorf("an LSP-shaped ~/.claude.json import re-emerges as an active mcp-language-server after RemoveEntry — must DECLINE, got %v", got)
 		}
 		if !got["sole"] {
 			t.Errorf("`sole` (no other layer / no import) must still be reported, got %v", got)

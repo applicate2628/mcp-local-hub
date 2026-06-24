@@ -324,18 +324,32 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 		if client == nil || !client.Exists() {
 			continue
 		}
-		entries, err := client.FindStdioLanguageServerEntries()
+		// WORKSPACE-AWARE register grain (architect REVISE → Option C): consume the
+		// branch-(a)+managed-only CANDIDATE source, NOT the conservative full-survivor
+		// FindStdioLanguageServerEntries (that one stays for the workspace-FREE
+		// `mcphub language-server cleanup`). The FILE-layer survivor is re-applied
+		// workspace-scoped inside matchingDirectLanguageServerEntries below.
+		entries, err := findStdioLanguageServerCandidatesForDirectCleanup(client)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s direct LSP scan failed: %v", clientName, err))
 			continue
 		}
-		matches := matchingDirectLanguageServerEntries(entries, aliases, canonicalWorkspace)
+		matches, err := matchingDirectLanguageServerEntries(client, entries, aliases, canonicalWorkspace)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s direct LSP survivor scan failed: %v", clientName, err))
+			continue
+		}
 		if aliases["go"] || aliases["gopls"] {
-			stdioEntries, err := client.AllStdioEntries()
+			stdioEntries, err := removableStdioEntriesForDirectCleanup(client)
 			if err != nil {
 				warnings = append(warnings, fmt.Sprintf("%s direct stdio scan failed: %v", clientName, err))
 			} else {
-				matches = append(matches, matchingDirectGoplsMCPEntries(stdioEntries, canonicalWorkspace)...)
+				goplsMatches, err := matchingDirectGoplsMCPEntries(client, stdioEntries, aliases, canonicalWorkspace)
+				if err != nil {
+					warnings = append(warnings, fmt.Sprintf("%s direct gopls survivor scan failed: %v", clientName, err))
+				} else {
+					matches = append(matches, goplsMatches...)
+				}
 			}
 		}
 		matches = dedupeDirectLanguageServerEntries(matches)
@@ -366,23 +380,130 @@ func addLSPCleanupAlias(aliases map[string]bool, value string) {
 	}
 }
 
-func matchingDirectLanguageServerEntries(entries []clients.LanguageServerStdioEntry, aliases map[string]bool, canonicalWorkspace string) []clients.LanguageServerStdioEntry {
-	var out []clients.LanguageServerStdioEntry
-	for _, entry := range entries {
-		if lspCleanupAliasMatches(entry.Language, aliases) && directEntryWorkspaceMatches(entry.Args, canonicalWorkspace) {
-			out = append(out, entry)
-		}
+// directLSPSurvivorMatchesWorkspace is the SINGLE-OWNER cross-kind survivor
+// predicate for the post-register direct-LSP cleanup (bot PR #425 follow-up
+// FINDING 2, architect GATE PASS). Both caller families
+// (matchingDirectGoplsMCPEntries and matchingDirectLanguageServerEntries) now
+// consume the SAME all-stdio survivor reader
+// (ActiveStdioEntriesExcludingWriteTarget) and run THIS one predicate, so a
+// re-emergent direct LSP of EITHER command family for THIS workspace blocks the
+// destructive removal. Before the fix the two families used two readers with two
+// blind rechecks: the gopls path only blocked on a gopls-mcp survivor (a
+// re-emergent mcp-language-server for the same workspace was invisible) and the
+// mcp-language-server path read the LSP-only reader that DROPS gopls-mcp (a
+// re-emergent gopls-mcp for the same workspace was invisible) — a cross-kind
+// false-cleanup deleting a write-target entry while the OTHER family survives.
+//
+// s blocks removal when it is, for canonicalWorkspace:
+//   - a true gopls-MCP survivor (isCommandBasename gopls + "mcp" arg), OR
+//   - a true mcp-language-server survivor whose classified --lsp language
+//     matches the cleanup aliases.
+//
+// Both classifications REUSE existing single owners (NO new shape logic):
+// gopls via isCommandBasename + stringSliceContainsFold; mcp-language-server via
+// clients.ClassifyLanguageServerStdioEntry (which wraps matchLanguageServerStdio
+// = isLanguageServerBinary + extractLspLanguageArg). Workspace via the shared
+// directEntryWorkspaceMatches. BOTH branches are now alias-gated (bot PR #425
+// follow-up FINDING 2): the gopls branch requires lspCleanupAliasMatches("gopls",
+// aliases) and the mcp-language-server branch requires the classified --lsp language
+// to match the aliases. A Go cleanup adds BOTH "go" and "gopls" to aliases
+// (cleanupDirectLanguageServerEntriesAfterRegister → addLSPCleanupAlias(lang) +
+// addLSPCleanupAlias(spec.LspCommand="gopls")), so the gopls branch still fires for a
+// Go cleanup; but a NON-Go cleanup (e.g. python) whose aliases do NOT carry gopls no
+// longer has a same-name lower gopls-mcp-for-W survivor wrongly block removal of the
+// non-Go entry (matchingDirectLanguageServerEntries runs UNCONDITIONALLY, outside the
+// go/gopls candidate guard). The matchingDirectGoplsMCPEntries candidate path is
+// unaffected: it only runs when aliases already carry go/gopls, so the alias gate is
+// always satisfied there.
+func directLSPSurvivorMatchesWorkspace(s clients.StdioEntry, aliases map[string]bool, canonicalWorkspace string) bool {
+	if !directEntryWorkspaceMatches(s.Args, canonicalWorkspace) {
+		return false
 	}
-	return out
+	if isCommandBasename(s.Command, "gopls") && stringSliceContainsFold(s.Args, "mcp") && lspCleanupAliasMatches("gopls", aliases) {
+		return true
+	}
+	if lang, ok := clients.ClassifyLanguageServerStdioEntry(s); ok && lspCleanupAliasMatches(lang, aliases) {
+		return true
+	}
+	return false
 }
 
-func matchingDirectGoplsMCPEntries(entries []clients.StdioEntry, canonicalWorkspace string) []clients.LanguageServerStdioEntry {
+// matchingDirectLanguageServerEntries narrows the FindStdioLanguageServerEntries
+// candidates to alias-matching entries scoped to THIS workspace, then applies the
+// SAME WORKSPACE-SCOPED CROSS-KIND post-removal survivor recheck as the gopls path
+// (bot PR #425 follow-up FINDING 2, architect GATE PASS). FindStdioLanguageServerEntries'
+// own branch (b) is now MANAGED-only and workspace-blind, so a same-name lower-layer
+// mcp-language-server for a DIFFERENT workspace no longer wrongly blocks removal of
+// the real workspace-A entry at the adapter. Here, for each candidate, fetch the
+// active ALL-STDIO entries that re-emerge after a hypothetical RemoveEntry(name)
+// (ActiveStdioEntriesExcludingWriteTarget — NOT the LSP-only reader, which DROPS
+// gopls-mcp and was blind to a cross-kind gopls-for-THIS-workspace survivor) and
+// BLOCK only if a re-emergent SAME-NAME entry satisfies the shared cross-kind
+// predicate directLSPSurvivorMatchesWorkspace (a gopls-mcp OR an alias-matching
+// mcp-language-server, both scoped to THIS workspace). Both survivor
+// classifications reuse existing single owners — never re-derived caller-side.
+func matchingDirectLanguageServerEntries(client registerClient, entries []clients.LanguageServerStdioEntry, aliases map[string]bool, canonicalWorkspace string) ([]clients.LanguageServerStdioEntry, error) {
+	var out []clients.LanguageServerStdioEntry
+	for _, entry := range entries {
+		if !lspCleanupAliasMatches(entry.Language, aliases) || !directEntryWorkspaceMatches(entry.Args, canonicalWorkspace) {
+			continue
+		}
+		survivors, err := activeStdioExcludingForDirectCleanup(client, entry.Name)
+		if err != nil {
+			return nil, err
+		}
+		blocked := false
+		for _, s := range survivors {
+			if s.Name == entry.Name && directLSPSurvivorMatchesWorkspace(s, aliases, canonicalWorkspace) {
+				blocked = true
+				break
+			}
+		}
+		if blocked {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+// matchingDirectGoplsMCPEntries narrows the branch-(a)-owned removable stdio
+// candidates to direct gopls-MCP entries scoped to THIS workspace, then applies the
+// WORKSPACE-SCOPED CROSS-KIND post-removal survivor recheck (bot PR #425 follow-up
+// FINDING 2, architect GATE PASS). The adapter's branch (b) is now MANAGED-only and
+// workspace-blind, so a same-name lower-layer DIFFERENT stdio (npx / a different
+// LSP language / gopls for a DIFFERENT workspace) no longer wrongly blocks removal
+// at the adapter. The workspace decision lives HERE, where canonicalWorkspace is
+// known: for each candidate, fetch the active stdio entries that re-emerge after a
+// hypothetical RemoveEntry(name) (ActiveStdioEntriesExcludingWriteTarget) and BLOCK
+// removal only if a re-emergent SAME-NAME entry satisfies the shared cross-kind
+// predicate directLSPSurvivorMatchesWorkspace — a true gopls-for-THIS-workspace OR
+// an alias-matching mcp-language-server-for-THIS-workspace survivor (the latter was
+// invisible to the old inline gopls-only filter, the FINDING 2 cross-kind gap). A
+// re-emergent npx / different-language / different-workspace entry does NOT block.
+// (Reader returns nil for non-mimo / test fakes → never blocks; a reader error
+// propagates so the destructive cleanup aborts and deletes nothing.)
+func matchingDirectGoplsMCPEntries(client registerClient, entries []clients.StdioEntry, aliases map[string]bool, canonicalWorkspace string) ([]clients.LanguageServerStdioEntry, error) {
 	var out []clients.LanguageServerStdioEntry
 	for _, entry := range entries {
 		if !isCommandBasename(entry.Command, "gopls") || !stringSliceContainsFold(entry.Args, "mcp") {
 			continue
 		}
 		if !directEntryWorkspaceMatches(entry.Args, canonicalWorkspace) {
+			continue
+		}
+		survivors, err := activeStdioExcludingForDirectCleanup(client, entry.Name)
+		if err != nil {
+			return nil, err
+		}
+		blocked := false
+		for _, s := range survivors {
+			if s.Name == entry.Name && directLSPSurvivorMatchesWorkspace(s, aliases, canonicalWorkspace) {
+				blocked = true
+				break
+			}
+		}
+		if blocked {
 			continue
 		}
 		out = append(out, clients.LanguageServerStdioEntry{
@@ -392,7 +513,7 @@ func matchingDirectGoplsMCPEntries(entries []clients.StdioEntry, canonicalWorksp
 			Args:     entry.Args,
 		})
 	}
-	return out
+	return out, nil
 }
 
 func directEntryWorkspaceMatches(args []string, canonicalWorkspace string) bool {
@@ -1330,6 +1451,84 @@ type registerClient interface {
 	FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error)
 }
 
+// removableStdioCandidatesClient / findStdioLanguageServerCandidatesClient are the
+// OPTIONAL WORKSPACE-AWARE register-grain candidate sources (architect REVISE →
+// Option C, bot PR #425 follow-up GAP 2): the destructive direct-gopls/LSP cleanup
+// candidate set with branch (a) + the MANAGED-only survivor, OMITTING the
+// FILE/inline/import-WIDE survivor (which the grain re-applies caller-side,
+// workspace-scoped). Only the mimo client implements them. They are DISTINCT from
+// the conservative full-survivor RemovableStdioEntries / FindStdioLanguageServerEntries
+// that the WORKSPACE-FREE `mcphub language-server cleanup` (cli/language_server.go)
+// keeps consuming — so that workspace-free consumer never wrong-deletes a
+// file/import re-emergence.
+type removableStdioCandidatesClient interface {
+	RemovableStdioCandidatesWriteTargetOwned() ([]clients.StdioEntry, error)
+}
+
+type findStdioLanguageServerCandidatesClient interface {
+	FindStdioLanguageServerCandidatesWriteTargetOwned() ([]clients.LanguageServerStdioEntry, error)
+}
+
+// removableStdioEntriesForDirectCleanup picks the destructive-safe WORKSPACE-AWARE
+// stdio CANDIDATE view for the direct-gopls cleanup. Two type-assert gates compose:
+//
+//   - OUTER gate (this function): test-fake isolation. The in-memory fakeClient
+//     used by register_test.go does NOT implement the candidate method, so it falls
+//     back to AllStdioEntries() — tests drive removability via their own
+//     allStdioEntries fixture, not the mimo layer-merge logic. The production
+//     realClientAdapter DOES implement it, so it takes the discriminating path.
+//   - INNER gate (realClientAdapter.RemovableStdioCandidatesWriteTargetOwned): real
+//     mimo discrimination. It asserts the wrapped clients.Client (a lockingClient
+//     over *mimoCodeClient) implements the optional candidate method; only mimo
+//     does, so only mimo gets the branch (a) + managed-only candidate scoping. Every
+//     other real client falls back to AllStdioEntries (unchanged behavior). The
+//     FILE-layer survivor is then re-applied workspace-scoped in
+//     matchingDirectGoplsMCPEntries.
+func removableStdioEntriesForDirectCleanup(client registerClient) ([]clients.StdioEntry, error) {
+	if c, ok := client.(removableStdioCandidatesClient); ok {
+		return c.RemovableStdioCandidatesWriteTargetOwned()
+	}
+	return client.AllStdioEntries()
+}
+
+// findStdioLanguageServerCandidatesForDirectCleanup is the LSP sibling: the
+// WORKSPACE-AWARE register-grain candidate source (branch (a) + managed-only), with
+// the same outer/inner gate composition. Non-mimo clients (and the test fake) fall
+// back to the conservative FindStdioLanguageServerEntries — behavior-unchanged.
+func findStdioLanguageServerCandidatesForDirectCleanup(client registerClient) ([]clients.LanguageServerStdioEntry, error) {
+	if c, ok := client.(findStdioLanguageServerCandidatesClient); ok {
+		return c.FindStdioLanguageServerCandidatesWriteTargetOwned()
+	}
+	return client.FindStdioLanguageServerEntries()
+}
+
+// activeStdioExcludingClient is the OPTIONAL post-removal active-reader capability
+// (bot PR #425 follow-up, architect GATE PASS). It returns the active ALL-STDIO
+// entries that re-emerge after a hypothetical RemoveEntry(name) from the write
+// target — workspace-FREE (the adapter never sees a workspace). Only the mimo
+// client implements it; every other client (and the register_test.go fakeClient)
+// lacks it and activeStdioExcludingForDirectCleanup falls back to an EMPTY set =
+// "no re-emergent survivor" (correct default for a single-file adapter where
+// RemoveEntry deletes the sole definition). The CALLER then applies the shared
+// WORKSPACE-SCOPED CROSS-KIND survivor predicate (directLSPSurvivorMatchesWorkspace)
+// over the returned all-stdio entries, keeping the workspace decision out of the
+// adapter. FINDING 2 collapsed the former LSP-only sibling reader into this single
+// all-stdio reader so a cross-kind (gopls-mcp vs mcp-language-server) survivor for
+// the same workspace is never invisible.
+type activeStdioExcludingClient interface {
+	ActiveStdioEntriesExcludingWriteTarget(name string) ([]clients.StdioEntry, error)
+}
+
+// activeStdioExcludingForDirectCleanup returns the post-removal active stdio set
+// for `name`, or (nil, nil) when the client does not implement the optional reader
+// (non-mimo / test fake) — an empty set means the caller never blocks removal.
+func activeStdioExcludingForDirectCleanup(client registerClient, name string) ([]clients.StdioEntry, error) {
+	if c, ok := client.(activeStdioExcludingClient); ok {
+		return c.ActiveStdioEntriesExcludingWriteTarget(name)
+	}
+	return nil, nil
+}
+
 // Package-level hooks — nil in production (fall back to real schedulers /
 // clients); tests assign replacements via newRegisterHarness and restore
 // them in defer.
@@ -1391,6 +1590,38 @@ func (a realClientAdapter) GetEntry(name string) (*clients.MCPEntry, error) {
 }
 func (a realClientAdapter) AllStdioEntries() ([]clients.StdioEntry, error) {
 	return a.c.AllStdioEntries()
+}
+func (a realClientAdapter) RemovableStdioEntries() ([]clients.StdioEntry, error) {
+	if c, ok := a.c.(interface {
+		RemovableStdioEntries() ([]clients.StdioEntry, error)
+	}); ok {
+		return c.RemovableStdioEntries()
+	}
+	return a.c.AllStdioEntries()
+}
+func (a realClientAdapter) ActiveStdioEntriesExcludingWriteTarget(name string) ([]clients.StdioEntry, error) {
+	if c, ok := a.c.(interface {
+		ActiveStdioEntriesExcludingWriteTarget(string) ([]clients.StdioEntry, error)
+	}); ok {
+		return c.ActiveStdioEntriesExcludingWriteTarget(name)
+	}
+	return nil, nil
+}
+func (a realClientAdapter) RemovableStdioCandidatesWriteTargetOwned() ([]clients.StdioEntry, error) {
+	if c, ok := a.c.(interface {
+		RemovableStdioCandidatesWriteTargetOwned() ([]clients.StdioEntry, error)
+	}); ok {
+		return c.RemovableStdioCandidatesWriteTargetOwned()
+	}
+	return a.c.AllStdioEntries()
+}
+func (a realClientAdapter) FindStdioLanguageServerCandidatesWriteTargetOwned() ([]clients.LanguageServerStdioEntry, error) {
+	if c, ok := a.c.(interface {
+		FindStdioLanguageServerCandidatesWriteTargetOwned() ([]clients.LanguageServerStdioEntry, error)
+	}); ok {
+		return c.FindStdioLanguageServerCandidatesWriteTargetOwned()
+	}
+	return a.c.FindStdioLanguageServerEntries()
 }
 func (a realClientAdapter) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {
 	return a.c.FindStdioLanguageServerEntries()
