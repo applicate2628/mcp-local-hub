@@ -59,6 +59,39 @@ content-bearing `config.json` below the hub write target. A managed FULL
 redefine or a DISABLING overlay is a shadow (`Kind != ""`) and is handled by
 the predicate normally (retained / disable-only-removable respectively).
 
+## NOW CONSERVATIVELY BLOCKED in the cleanup consumers (bot PR #425 follow-up)
+
+The codex bot's explicit ask for this finding was to "conservatively block /
+fall back to the conservative non-removable result" so the destructive cleanup
+never reports a FALSE success. That is now implemented — but ONLY in the two
+SIMULATE/cleanup consumers, leaving the RemoveEntry pre-check + B4 verdict
+above untouched (so the structural single-owner pre-check/B4 agreement is
+preserved by construction):
+
+- `RemovableStdioCandidatesWriteTargetOwned` and
+  `FindStdioLanguageServerCandidatesWriteTargetOwned`
+  (internal/clients/mimocode.go) now call the dedicated own-value-only detector
+  `mimoCodeManagedEnableOnlyTrueOverlay(name)` (MDM plist OR managed config dir,
+  via `mimoCodeMapDefinesEnableOnlyTrue` — a single-managed-layer-own-value
+  check, NO value-chain / effective-merge / `readMergedLayersExcluding`). When a
+  managed `{enabled:true}` enable-only overlay exists for the candidate, the
+  consumer EXCLUDES it (never offers it for removal) — so the register-grain
+  destructive cleanup cannot falsely report it cleared while the server stays
+  active from `config.json` + the managed enable.
+- `mimoCodeManagedLayerReResolves` (the PATH-B managed re-resolve owner shared
+  with the RemoveEntry pre-check + B4 guard) is **UNCHANGED** — it still returns
+  `false` for an enable-only overlay (`Kind == ""`). The new detector is
+  INDEPENDENT and additive, so the pre-check/B4 path keeps its byte-identical
+  PATH-B own-value-only verdict and the two cannot diverge.
+
+The remaining residual is therefore only the **safe over-block**: a managed
+`{enabled:true}` overlay with NO lower content-bearing entry still excludes the
+candidate (there is nothing to re-activate, but excluding it is harmless
+conservatism — no false-cleanup; the operator removes the redundant managed
+entry manually). Architect-ruled ACCEPTABLE. Pinned by
+`TestMimoCode_CleanupGuard_F1_*` in
+internal/clients/mimocode_pr425_cleanup_guard_test.go.
+
 ## Residual F4 managed-chain (exotic, no data loss)
 
 A chain of managed overlays across both managed layers (the MDM plist

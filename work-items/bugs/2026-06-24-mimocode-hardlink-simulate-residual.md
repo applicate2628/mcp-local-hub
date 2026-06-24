@@ -43,6 +43,35 @@ still-live lower layer after the removal.
   defect is a FALSE-removable prediction that resolves into an
   intended-rollback re-emergence.
 
+## NOW CONSERVATIVELY BLOCKED in the cleanup consumers (bot PR #425 follow-up)
+
+The codex bot's explicit ask was to "conservatively block / fall back to the
+conservative non-removable result" so the destructive cleanup never reports a
+FALSE success. That is now implemented — via a NEW conservative guard in the two
+SIMULATE/cleanup consumers, WITHOUT touching `readMergedLayersExcluding`'s fold
+or `mimoCodePathsSamePhysical` (both protected — the four shadow-walk callers
+need inode identity, see below):
+
+- `RemovableStdioCandidatesWriteTargetOwned` and
+  `FindStdioLanguageServerCandidatesWriteTargetOwned`
+  (internal/clients/mimocode.go) now call
+  `mimoCodeLowerLayerHardLinkedToWriteTargetDefines(name)`. It walks
+  `readLayerFiles()`, and for any file DISTINCT from the write target by
+  clean-path that shares its inode (`os.SameFile`, raw inode identity — NOT
+  `mimoCodePathsSamePhysical`, so symlink/case folding is deliberately not
+  applied) AND defines the candidate name, it returns true → the consumer
+  EXCLUDES the candidate. Production's temp+rename breaks the hard link and
+  leaves that lower entry live, so excluding it avoids the false-cleanup.
+- `readMergedLayersExcluding`'s fold and `mimoCodePathsSamePhysical` are
+  **UNCHANGED** (the `KNOWN LIMITATION` comment below still documents the
+  simulate's inode-collision behavior; the consumer-side guard is what now
+  blocks the destructive false-success).
+
+The remaining residual is only the **safe over-block** described above (a
+deliberate non-default hard-link causes a removable candidate to be withheld;
+no data loss, no false-cleanup). Pinned by `TestMimoCode_CleanupGuard_F2_*` in
+internal/clients/mimocode_pr425_cleanup_guard_test.go.
+
 ## Why NOT switch to path-string equality
 
 `mimoCodePathsSamePhysical` (os.SameFile / inode identity) is REQUIRED by

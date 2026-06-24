@@ -1035,6 +1035,17 @@ var mimoCodeManagedPrefsReader func(name string) (mimoCodeShadowSource, error)
 // entry is removable; bot PR #425 follow-up FINDING 1 regression fix).
 var mimoCodeManagedPrefsDisableOnlyReader func(name string) (bool, error)
 
+// mimoCodeManagedPrefsEnableOnlyTrueReader, when non-nil (tests only), replaces the
+// production macOS Managed Preferences ENABLE-ONLY-TRUE detector
+// (mimoCodeReadManagedPrefsEnableOnlyTrue) so the FINDING 1 conservative cleanup guard's
+// managed MDM-plist case can be exercised on a Windows/Linux CI runner without a real
+// /Library plist or `plutil`. Same nil-in-production func-var idiom as the disable-only
+// seam above. It reports whether the MDM plist carries a bare {enabled:true} ENABLE-ONLY
+// overlay for mcp.<name> — the polarity mimoCodeManagedEnableOnlyTrueOverlay needs to
+// CONSERVATIVELY exclude a candidate whose managed enable-only overlay would re-activate a
+// lower disabled full entry (bot PR #425 follow-up FINDING 1 cleanup guard).
+var mimoCodeManagedPrefsEnableOnlyTrueReader func(name string) (bool, error)
+
 // ErrMimoCodeManagedShadowsServer is returned by AddEntry when the macOS Managed
 // Preferences (MDM) layer already defines mcp.<Server>. That layer is read-only
 // to the hub and MiMoCode merges it ABOVE every user/env layer (config.ts:876-885
@@ -1212,6 +1223,51 @@ func mimoCodeReadManagedPrefsDisableOnly(name string) (bool, error) {
 		// The FIRST plist that defines mcp.<name> wins (same precedence as the shadow
 		// reader). Apply the disable-only shape gate to ITS own value — no merge.
 		return mimoCodeMapDefinesDisableOnly(m, name), nil
+	}
+	return false, nil
+}
+
+// mimoCodeReadManagedPrefsEnableOnlyTrue is the enable-ONLY-TRUE-polarity sibling of
+// mimoCodeReadManagedPrefsDisableOnly (bot PR #425 follow-up FINDING 1 — conservative
+// cleanup guard). It reports whether the macOS Managed Preferences (MDM) plist carries
+// a bare {enabled:true} ENABLE-ONLY overlay for mcp.<name>. It reads the SINGLE MDM
+// layer's OWN value directly via the SAME plist-path resolution + plutil read + JSONC
+// parse as mimoCodeReadManagedPrefsDisableOnly (single owner mimoCodeManagedPlistFiles,
+// no merge with the managed config dir, no func-var value chain), then applies the
+// shared enable-only-true shape gate mimoCodeMapDefinesEnableOnlyTrue on the FIRST plist
+// that defines mcp.<name>.
+//
+// Consumed by mimoCodeManagedEnableOnlyTrueOverlay (the managed half of the two simulate
+// consumers' conservative guard): a managed enable-only:true overlay re-activates a lower
+// disabled full entry, so the consumers EXCLUDE the candidate (never report it removable
+// → no false-cleanup). Off darwin → (false, nil) (mimoCodeManagedPlistFiles returns nil).
+// Warn-skip-on-unparseable matches the shadow reader's posture (an unparseable plist
+// cannot be PROVEN to carry the overlay — treated as "no enable-only overlay", which here
+// means "do not over-block on an unprovable managed plist"); the test seam is
+// mimoCodeManagedPrefsEnableOnlyTrueReader.
+func mimoCodeReadManagedPrefsEnableOnlyTrue(name string) (bool, error) {
+	for _, plist := range mimoCodeManagedPlistFiles() {
+		if _, err := os.Stat(plist); err != nil {
+			continue // not present — skip (existsSync gate)
+		}
+		out, err := exec.Command("plutil", "-convert", "json", "-o", "-", plist).Output()
+		if err != nil {
+			continue // plutil convert failed — warn-skip
+		}
+		m, err := parseJSONCBytes(out)
+		if err != nil {
+			continue // unparseable converted JSON — warn-skip
+		}
+		servers, _ := m[mimoCodeMCPKey].(map[string]any)
+		if servers == nil {
+			continue
+		}
+		if _, present := servers[name]; !present {
+			continue
+		}
+		// The FIRST plist that defines mcp.<name> wins (same precedence as the shadow
+		// reader). Apply the enable-only-true shape gate to ITS own value — no merge.
+		return mimoCodeMapDefinesEnableOnlyTrue(m, name), nil
 	}
 	return false, nil
 }
@@ -2456,6 +2512,40 @@ func mimoCodeMapDefinesDisableOnly(m map[string]any, name string) bool {
 	return !enabled
 }
 
+// mimoCodeMapDefinesEnableOnlyTrue is the enable-TRUE-polarity sibling of
+// mimoCodeMapDefinesDisableOnly: it reports whether a parsed config map carries a
+// mcp.<name> value that is a bare ENABLE-ONLY overlay with enabled==true — name
+// present, mimoCodeIsEnabledOnlyOverride (the single-owner enabled-only shape gate),
+// AND the flag is true. It reuses the SAME shape gate, only flipping the boolean
+// polarity, so the enable-only classification stays a single owner.
+//
+// This is the shape the conservative cleanup guard needs (bot PR #425 follow-up
+// FINDING 1): a managed {enabled:true} enable-only overlay re-activates a lower
+// disabled full entry through MiMoCode's enabled-overlay merge, so once the
+// write-target key is deleted the server stays ACTIVE from the lower layer + the
+// managed enable. The simulate consumers therefore CONSERVATIVELY exclude a candidate
+// carrying such a managed overlay (no false-cleanup). An absent name, a
+// content-bearing value, or an {enabled:false} overlay all return false.
+func mimoCodeMapDefinesEnableOnlyTrue(m map[string]any, name string) bool {
+	servers, _ := m[mimoCodeMCPKey].(map[string]any)
+	if servers == nil {
+		return false
+	}
+	value, present := servers[name]
+	if !present {
+		return false
+	}
+	entry, ok := value.(map[string]any)
+	if !ok {
+		return false
+	}
+	if !mimoCodeIsEnabledOnlyOverride(entry) {
+		return false
+	}
+	enabled, _ := entry["enabled"].(bool) // bool by mimoCodeIsEnabledOnlyOverride's gate
+	return enabled
+}
+
 // readJSON returns the deep-merged view across the resolved READ layer files.
 // Used by GetEntry / AllStdioEntries / FindStdioLanguageServerEntries.
 func (o *mimoCodeClient) readJSON() (map[string]any, error) {
@@ -3372,6 +3462,155 @@ func (o *mimoCodeClient) mimoCodeManagedLayerReResolves(name string) (bool, erro
 	return !disableOnly, nil
 }
 
+// mimoCodeManagedConfigDirEnableOnlyTrue reports whether the cross-platform MANAGED
+// CONFIG DIR layer (%ProgramData%\opencode | /Library/Application Support/opencode |
+// /etc/opencode | MIMOCODE_TEST_MANAGED_CONFIG_DIR) carries a bare {enabled:true}
+// ENABLE-ONLY overlay for mcp.<name>. It mirrors mimoCodeManagedConfigDirShadows'
+// existsSync-gated, highest-within-dir-first read (mimocode.jsonc over mimocode.json)
+// and SAME warn-skip-on-unparseable posture, but applies the enable-only-true shape gate
+// mimoCodeMapDefinesEnableOnlyTrue to the FIRST managed file that defines mcp.<name>
+// instead of the shadow verdict. The FIRST defining managed file wins (its own value, no
+// merge). A missing dir / missing file / unparseable file → false.
+//
+// This is the managed-config-dir half of the conservative cleanup guard's managed
+// detector (bot PR #425 follow-up FINDING 1): the simulate consumers exclude a candidate
+// when a managed layer's enable-only:true overlay could re-activate a lower disabled full
+// entry the write-target delete cannot clear.
+func mimoCodeManagedConfigDirEnableOnlyTrue(name string) bool {
+	dir := mimoCodeManagedConfigDir()
+	if dir == "" {
+		return false
+	}
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return false // absent / not a dir — no overlay (existsSync gate)
+	}
+	// Highest-within-dir first: mimocode.jsonc wins over mimocode.json.
+	for i := len(mimoCodeOverlayLayerNames) - 1; i >= 0; i-- {
+		f := filepath.Join(dir, mimoCodeOverlayLayerNames[i])
+		data, err := readRawConfig(f)
+		if err != nil {
+			continue // unreadable managed file — warn-skip
+		}
+		if len(data) == 0 {
+			continue
+		}
+		m, err := parseJSONCBytes(data)
+		if err != nil {
+			continue // unparseable managed file — warn-skip
+		}
+		servers, _ := m[mimoCodeMCPKey].(map[string]any)
+		if servers == nil {
+			continue
+		}
+		if _, present := servers[name]; !present {
+			continue
+		}
+		// The FIRST managed file that defines mcp.<name> wins — apply the enable-only-true
+		// shape gate to ITS own value (no merge).
+		return mimoCodeMapDefinesEnableOnlyTrue(m, name)
+	}
+	return false
+}
+
+// mimoCodeManagedEnableOnlyTrueOverlay reports whether a MANAGED layer — the macOS
+// Managed Preferences (MDM) plist OR the cross-platform managed config dir — carries a
+// bare {enabled:true} ENABLE-ONLY overlay for mcp.<name>. It is the FINDING-1 conservative
+// cleanup guard's managed detector (bot PR #425 follow-up): the two simulate consumers
+// EXCLUDE a candidate when this returns true, because a managed enable-only:true overlay
+// re-activates a lower disabled full config.json entry through MiMoCode's enabled-overlay
+// merge — so after RemoveEntry deletes the write-target key the server stays ACTIVE from
+// the lower layer + the managed enable, but the cleanup would have falsely reported it
+// cleared. Excluding it conservatively avoids the false-cleanup; the operator removes the
+// redundant entry manually.
+//
+// DELIBERATELY a single-managed-layer-OWN-value detector — NO value-chain / effective
+// merge / readMergedLayersExcluding. It is INDEPENDENT of mimoCodeManagedLayerReResolves
+// (the PATH-B managed re-resolve owner shared with the RemoveEntry pre-check + B4 guard),
+// which is left untouched: this guard lives ONLY in the two simulate consumers, so the
+// pre-check / B4 path keeps its byte-identical PATH-B own-value-only verdict.
+//
+// OVER-BLOCK is ACCEPTABLE (architect-ruled, bot PR #425 follow-up FINDING 1): a managed
+// {enabled:true} overlay with NO lower entry still excludes the candidate even though
+// there is nothing to re-activate. That is safe conservatism (no false-cleanup); the
+// operator can clean the redundant managed entry. Reuses the same MDM-plist test seam
+// idiom (mimoCodeManagedPrefsEnableOnlyTrueReader) as the other managed readers; a reader
+// error propagates fail-closed (the destructive consumer aborts and deletes nothing).
+func (o *mimoCodeClient) mimoCodeManagedEnableOnlyTrueOverlay(name string) (bool, error) {
+	// 1. macOS Managed Preferences (MDM) plist — highest managed layer, read-only.
+	reader := mimoCodeManagedPrefsEnableOnlyTrueReader
+	if reader == nil {
+		reader = mimoCodeReadManagedPrefsEnableOnlyTrue
+	}
+	mdm, err := reader(name)
+	if err != nil {
+		return false, err
+	}
+	if mdm {
+		return true, nil
+	}
+	// 1b. Managed config dir — cross-platform read-only admin/system layer.
+	return mimoCodeManagedConfigDirEnableOnlyTrue(name), nil
+}
+
+// mimoCodeLowerLayerHardLinkedToWriteTargetDefines reports whether ANY read-layer file
+// DISTINCT from the write target by clean-path is HARD-LINKED to the write target
+// (os.SameFile inode identity) AND defines mcp.<name>. It is the FINDING-2 conservative
+// cleanup guard's detector (bot PR #425 follow-up): when an operator hard-links a
+// lower-layer config.json to the write-target mimocode.json (two distinct global layers
+// over one inode — a deliberate non-default setup), the merge-based simulate
+// (readMergedLayersExcluding) models BOTH layer copies as losing the name, so it predicts
+// the candidate removable. PRODUCTION diverges — deleteMember's atomic temp-file + rename
+// BREAKS the hard link and leaves the lower layer's entry LIVE, so the server re-emerges
+// after RemoveEntry yet the cleanup falsely reported it cleared. Excluding such a
+// candidate conservatively avoids the false-cleanup.
+//
+// It uses os.SameFile (raw inode identity) DELIBERATELY, NOT the protected
+// mimoCodePathsSamePhysical (which folds symlink/case variants and is needed verbatim by
+// the four shadow-walk callers). A hard link is two directory entries pointing at one
+// inode, so a plain Stat + os.SameFile detects it without symlink resolution. The
+// clean-path inequality gate excludes the write target's OWN entry in readLayerFiles
+// (same path, trivially same inode) so only a DISTINCT hard-linked file flags. A Stat
+// failure on a candidate layer is treated as "not hard-linked" (the file is absent /
+// unreadable → it cannot be a live lower layer that re-emerges); a parse error while
+// checking name-definition propagates fail-closed (the destructive caller aborts).
+//
+// State-safe: in the explicit/temp single-file mode readLayerFiles returns only [o.path]
+// (the write target), which the clean-path gate skips, so the loop is a no-op and the
+// real ~/.config/mimocode is never reached.
+func (o *mimoCodeClient) mimoCodeLowerLayerHardLinkedToWriteTargetDefines(name string) (bool, error) {
+	targetStat, err := os.Stat(o.path)
+	if err != nil {
+		// The write target itself is absent/unreadable — no inode to share, so no
+		// hard-linked lower layer can match. (A genuinely missing write target means the
+		// candidate could not have come from it anyway.)
+		return false, nil
+	}
+	cleanTarget := filepath.Clean(o.path)
+	for _, f := range o.readLayerFiles() {
+		if filepath.Clean(f) == cleanTarget {
+			continue // the write target's own entry — same path, not a DISTINCT hard link
+		}
+		fStat, err := os.Stat(f)
+		if err != nil {
+			continue // absent / unreadable lower layer — cannot re-emerge live
+		}
+		if !os.SameFile(targetStat, fStat) {
+			continue // distinct inode — not hard-linked to the write target
+		}
+		// This DISTINCT file shares the write target's inode (hard-linked). Production's
+		// temp+rename breaks the link and leaves THIS file live, so if it defines the
+		// candidate name the entry re-emerges after RemoveEntry → exclude conservatively.
+		defines, err := mimoCodeFileDefines(f, name)
+		if err != nil {
+			return false, err
+		}
+		if defines {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // GetEntry reads mcp.<name> from the merged layers and projects it onto MCPEntry.
 //
 //   - A clean hub-shaped ENABLED remote entry (only type/url/enabled/headers,
@@ -3807,6 +4046,35 @@ func (o *mimoCodeClient) RemovableStdioCandidatesWriteTargetOwned() ([]StdioEntr
 		if managedRetains {
 			continue
 		}
+		// (c) CONSERVATIVE cleanup guards (bot PR #425 follow-up FINDINGS 1+2). These are
+		// SIMULATE-CONSUMER-ONLY blocks (NOT in the RemoveEntry pre-check / B4 path, which
+		// keep their byte-identical PATH-B verdict). They EXCLUDE a candidate the simulate
+		// would otherwise falsely report removable:
+		//
+		//   FINDING 1 — a managed {enabled:true} enable-only overlay re-activates a lower
+		//   disabled full config.json entry through MiMoCode's enabled-overlay merge, so
+		//   after the write-target delete the server stays ACTIVE. mimoCodeManagedLayer
+		//   ReResolves returns FALSE for an enable-only overlay (Kind=="" — PATH-B), so it
+		//   does NOT cover this; the dedicated own-value-only detector does. Over-blocking
+		//   a managed {enabled:true} with no lower entry is ACCEPTABLE conservatism.
+		managedEnableOnly, err := o.mimoCodeManagedEnableOnlyTrueOverlay(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if managedEnableOnly {
+			continue
+		}
+		//   FINDING 2 — a lower-layer file HARD-LINKED to the write target re-emerges live
+		//   after RemoveEntry (temp+rename breaks the link), but the merge-based simulate
+		//   modeled both copies as losing the name. Exclude when a distinct hard-linked
+		//   lower layer defines the candidate.
+		hardLinked, err := o.mimoCodeLowerLayerHardLinkedToWriteTargetDefines(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if hardLinked {
+			continue
+		}
 		out = append(out, e)
 	}
 	return out, nil
@@ -3989,6 +4257,27 @@ func (o *mimoCodeClient) FindStdioLanguageServerCandidatesWriteTargetOwned() ([]
 			return nil, err
 		}
 		if managedRetains {
+			continue
+		}
+		// (c) CONSERVATIVE cleanup guards (bot PR #425 follow-up FINDINGS 1+2) — same
+		// SIMULATE-CONSUMER-ONLY blocks as RemovableStdioCandidatesWriteTargetOwned, kept
+		// out of the RemoveEntry pre-check / B4 path. FINDING 1: a managed {enabled:true}
+		// enable-only overlay re-activating a lower disabled full LSP entry (PATH-B managed
+		// re-resolve returns false for it) → exclude. FINDING 2: a lower-layer file
+		// hard-linked to the write target that defines the candidate re-emerges live after
+		// the temp+rename delete → exclude. Both avoid a false-cleanup.
+		managedEnableOnly, err := o.mimoCodeManagedEnableOnlyTrueOverlay(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if managedEnableOnly {
+			continue
+		}
+		hardLinked, err := o.mimoCodeLowerLayerHardLinkedToWriteTargetDefines(e.Name)
+		if err != nil {
+			return nil, err
+		}
+		if hardLinked {
 			continue
 		}
 		out = append(out, e)
