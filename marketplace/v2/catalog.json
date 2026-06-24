@@ -1,0 +1,296 @@
+{
+  "schema_version": "2",
+  "generated_at": "2026-06-24T00:00:00Z",
+  "entries": [
+    {
+      "id": "filesystem",
+      "name": "Filesystem MCP server",
+      "summary": "Read and write files in a sandboxed directory.",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/filesystem/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"],
+      "env": {},
+      "categories": ["filesystem", "io"],
+      "license": "MIT"
+    },
+    {
+      "id": "git",
+      "name": "Git MCP server",
+      "summary": "Read git repo state (status, log, diff, blame).",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/git/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "${workspaceFolder}"],
+      "env": {},
+      "categories": ["git", "vcs"],
+      "license": "MIT"
+    },
+    {
+      "id": "fetch",
+      "name": "Fetch MCP server",
+      "summary": "Fetch arbitrary HTTP URLs and return content.",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/fetch/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "env": {},
+      "categories": ["http", "io"],
+      "license": "MIT"
+    },
+    {
+      "id": "sqlite",
+      "name": "SQLite MCP server",
+      "summary": "Query a SQLite database (read-write).",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/sqlite/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-sqlite", "--db-path", "${workspaceFolder}/db.sqlite"],
+      "env": {},
+      "categories": ["database", "sql"],
+      "license": "MIT"
+    },
+    {
+      "id": "playwright",
+      "name": "Playwright MCP server",
+      "summary": "Browser automation via Playwright (Chromium-headless by default).",
+      "homepage": "https://github.com/microsoft/playwright-mcp",
+      "readme_url": "https://raw.githubusercontent.com/microsoft/playwright-mcp/main/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp"],
+      "env": {},
+      "categories": ["browser", "automation"],
+      "license": "Apache-2.0"
+    },
+    {
+      "id": "context7",
+      "name": "Context7 (Upstash)",
+      "summary": "Library docs lookup via Context7 — remote HTTP server.",
+      "homepage": "https://github.com/upstash/context7",
+      "readme_url": "https://raw.githubusercontent.com/upstash/context7/main/README.md",
+      "transport": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "env": {},
+      "categories": ["docs", "remote"],
+      "license": "MIT"
+    },
+    {
+      "id": "qt-docs",
+      "name": "Qt Documentation MCP server",
+      "summary": "Official Qt documentation lookup from The Qt Company — remote HTTP server. Useful for Qt/C++/QML development (Qt Widgets, Qt Quick, modules, classes).",
+      "homepage": "https://qt-docs-mcp.qt.io",
+      "readme_url": "https://qt-docs-mcp.qt.io",
+      "transport": "http",
+      "url": "https://qt-docs-mcp.qt.io/mcp",
+      "env": {},
+      "categories": ["docs", "remote", "qt"],
+      "license": "Qt"
+    },
+    {
+      "id": "excalidraw",
+      "name": "Excalidraw MCP server",
+      "summary": "Create and manipulate Excalidraw diagrams programmatically — 26 tools for element CRUD, layout, scene awareness, export to PNG/SVG, and Mermaid conversion. Community implementation (yctimlin); the Excalidraw team's official excalidraw/excalidraw-mcp is not npm-published.",
+      "homepage": "https://github.com/yctimlin/mcp_excalidraw",
+      "readme_url": "https://raw.githubusercontent.com/yctimlin/mcp_excalidraw/main/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-excalidraw-server"],
+      "env": {},
+      "categories": ["diagrams", "drawing", "visualization"],
+      "license": "MIT"
+    },
+    {
+      "id": "everything",
+      "name": "Everything MCP server (smoke test)",
+      "summary": "Reference MCP server exercising every protocol feature — use for smoke testing.",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/everything",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/everything/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-everything"],
+      "env": {},
+      "categories": ["debug", "reference"],
+      "license": "MIT"
+    },
+    {
+      "id": "memory",
+      "name": "Memory MCP server",
+      "summary": "Persistent knowledge-graph memory — store and recall entities, relations, and observations across sessions.",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/memory/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "env": {
+        "MEMORY_FILE_PATH": "${HOME}/.local/share/mcp-memory/memory.jsonl"
+      },
+      "categories": ["memory", "knowledge-graph"],
+      "license": "MIT"
+    },
+    {
+      "id": "time",
+      "name": "Time MCP server",
+      "summary": "Time and timezone utilities — current time, conversions, and timezone-aware calculations.",
+      "homepage": "https://www.npmjs.com/package/@mcpcentral/mcp-time",
+      "readme_url": "https://www.npmjs.com/package/@mcpcentral/mcp-time",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@mcpcentral/mcp-time@0.0.5"],
+      "env": {},
+      "categories": ["time", "utilities"],
+      "license": "MIT"
+    },
+    {
+      "id": "sequential-thinking",
+      "name": "Sequential Thinking MCP server",
+      "summary": "Structured step-by-step reasoning — decompose hard problems into revisable thought sequences.",
+      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/sequentialthinking/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking@2025.12.18"],
+      "env": {},
+      "categories": ["reasoning", "agent"],
+      "license": "MIT"
+    },
+    {
+      "id": "serena",
+      "name": "Serena MCP server",
+      "summary": "Semantic code toolkit — LSP-backed symbol search, references, and precise multi-file edits across your codebase. Launched via uvx from the upstream repo (pinned commit); requires Python + uv.",
+      "homepage": "https://github.com/oraios/serena",
+      "readme_url": "https://raw.githubusercontent.com/oraios/serena/main/README.md",
+      "transport": "native-http",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena@f0a3a279b7c48d28b9e7e4aea1ed9caed846906b",
+        "serena",
+        "start-mcp-server",
+        "--transport",
+        "streamable-http"
+      ],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "categories": ["code-intelligence", "lsp", "refactoring"],
+      "license": "MIT"
+    },
+    {
+      "id": "paper-search-mcp",
+      "name": "Paper Search MCP server",
+      "summary": "Academic paper search — query arXiv and other sources for research papers and abstracts. Requires Python + uv; set the Unpaywall email secret for full-text resolution.",
+      "homepage": "https://github.com/openags/paper-search-mcp",
+      "readme_url": "https://raw.githubusercontent.com/openags/paper-search-mcp/main/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["--from", "paper-search-mcp", "python", "-m", "paper_search_mcp.server"],
+      "env": {
+        "PAPER_SEARCH_MCP_UNPAYWALL_EMAIL": "secret:unpaywall_email"
+      },
+      "categories": ["research", "papers"],
+      "license": "MIT"
+    },
+    {
+      "id": "mathcad",
+      "name": "Mathcad MCP server (Prime, COM)",
+      "summary": "Drive PTC Mathcad Prime via COM — open/calc worksheets, set inputs, read outputs/matrices, units, export (~24 tools). Community fork puran-water/mathcad-mcp, pinned. NOT a packaged project: the repo is a bare FastMCP standalone.py (no pyproject/console-script), so the launch is `python <cloned>/standalone.py` — clone the pinned commit into ${workspaceFolder}/mathcad-mcp and `pip install -r requirements.txt` first (see vendored_source.install_cmd). disabled-until-probe: enables only when Mathcad Prime AND a Python interpreter are present. ALL worksheet-write/calc tools mutate the live Mathcad host application — gate behind operator consent. LICENSE not yet confirmed (no detected LICENSE file at the pinned commit) — license_status pending, confirm before redistribution.",
+      "homepage": "https://github.com/puran-water/mathcad-mcp",
+      "readme_url": "https://raw.githubusercontent.com/puran-water/mathcad-mcp/edd035b42dbbf2c9523e409ee640664d85306e6f/README.md",
+      "transport": "stdio",
+      "command": "python",
+      "args": ["${workspaceFolder}/mathcad-mcp/standalone.py"],
+      "env": {
+        "MATHCAD_VISIBLE": "true"
+      },
+      "categories": ["engineering", "math", "com", "mathcad"],
+      "license": "",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": ["python"],
+        "files": ["C:\\Program Files\\PTC\\Mathcad Prime 11.0.1.0\\MathcadPrime.exe"]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/puran-water/mathcad-mcp",
+        "pinned_ref": "edd035b42dbbf2c9523e409ee640664d85306e6f",
+        "install_cmd": "git clone https://github.com/puran-water/mathcad-mcp ${workspaceFolder}/mathcad-mcp && git -C ${workspaceFolder}/mathcad-mcp checkout edd035b42dbbf2c9523e409ee640664d85306e6f && pip install -r ${workspaceFolder}/mathcad-mcp/requirements.txt",
+        "run_cmd": "python ${workspaceFolder}/mathcad-mcp/standalone.py",
+        "license_status": "pending"
+      }
+    },
+    {
+      "id": "excel",
+      "name": "Excel MCP server (live COM, .NET)",
+      "summary": "Automate Microsoft Excel through its native COM API — Power Query, DAX measures, PivotTables, charts, formatting, and VBA macros (25 tools / ~230 operations) with real recalc against the live Excel process. Community server sbroenne/mcp-server-excel (C#/.NET 10), pinned to release v1.8.70. Distributed as a self-contained mcp-excel.exe — download from the release ZIP and add to PATH (see vendored_source.install_cmd); the launch command is the bare `mcp-excel` binary, not uvx. disabled-until-probe: enables only when Excel AND the mcp-excel server binary are present. The VBA-exec / RunMacro operations execute arbitrary code in the live workbook — gate the 6 VBA-exec ops behind operator consent (D-4). Windows + Excel desktop only.",
+      "homepage": "https://github.com/sbroenne/mcp-server-excel",
+      "readme_url": "https://raw.githubusercontent.com/sbroenne/mcp-server-excel/v1.8.70/README.md",
+      "transport": "stdio",
+      "command": "mcp-excel",
+      "args": [],
+      "env": {},
+      "categories": ["engineering", "office", "spreadsheet", "com", "excel"],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": ["mcp-excel"],
+        "files": ["C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE"]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/sbroenne/mcp-server-excel",
+        "pinned_ref": "v1.8.70",
+        "install_cmd": "download mcp-excel.exe from the v1.8.70 release ZIP (https://github.com/sbroenne/mcp-server-excel/releases/tag/v1.8.70), extract to a tools dir, and add that dir to PATH",
+        "run_cmd": "mcp-excel",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "ableton",
+      "name": "Ableton Live MCP server",
+      "summary": "Control Ableton Live over a loopback TCP socket — create/edit tracks, clips, devices, and transport via the Live Object Model. Community server ahujasid/ableton-mcp (Python), pinned, run via uvx from the git source. disabled-until-probe: enables only when Ableton Live is installed. REQUIRES the operator to first install the bundled Ableton Remote Script into Live's MIDI Remote Scripts directory and load it in Live — the MCP server connects to that script over a local loopback socket; the host-exe probe detects Live, NOT the Remote Script, so verify the script is loaded before use.",
+      "homepage": "https://github.com/ahujasid/ableton-mcp",
+      "readme_url": "https://raw.githubusercontent.com/ahujasid/ableton-mcp/5e9ffbd246bae60994699900f4fef34ad7b40407/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/ahujasid/ableton-mcp@5e9ffbd246bae60994699900f4fef34ad7b40407",
+        "ableton-mcp"
+      ],
+      "env": {},
+      "categories": ["music", "daw", "ableton"],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "files": ["C:\\ProgramData\\Ableton\\Live 11 Suite\\Program\\Ableton Live 11 Suite.exe"]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/ahujasid/ableton-mcp",
+        "pinned_ref": "5e9ffbd246bae60994699900f4fef34ad7b40407",
+        "install_cmd": "uvx --from git+https://github.com/ahujasid/ableton-mcp@5e9ffbd246bae60994699900f4fef34ad7b40407 ableton-mcp",
+        "run_cmd": "uvx --from git+https://github.com/ahujasid/ableton-mcp@5e9ffbd246bae60994699900f4fef34ad7b40407 ableton-mcp",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "codex-mcp-server",
+      "name": "Codex MCP server (OpenAI Codex CLI)",
+      "summary": "Expose the OpenAI Codex CLI as an MCP server (`codex mcp-server`, stdio) so agents can call codex as a tool (codex() / codex-reply()). Official Codex CLI subcommand — NOT a community fork, so no vendored_source/pin. disabled-until-probe: enables only when the `codex` binary is on PATH. Keep the direct invoke-codex-prompt.sh path for orchestration/commission (file-based, governance); this row is for agents calling codex-as-tool.",
+      "homepage": "https://github.com/openai/codex",
+      "readme_url": "https://raw.githubusercontent.com/openai/codex/main/README.md",
+      "transport": "stdio",
+      "command": "codex",
+      "args": ["mcp-server"],
+      "env": {},
+      "categories": ["agent", "codex", "coding-agent"],
+      "license": "Apache-2.0",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": ["codex"]
+      }
+    }
+  ]
+}

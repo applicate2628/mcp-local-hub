@@ -1133,8 +1133,23 @@ schema" above:
 ## Marketplace (G5, v0.3.0)
 
 `mcphub marketplace {search,show,generate,refresh}` lets an operator
-discover MCP servers from a curated catalog. Default registry URL:
-`https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v1/catalog.json`.
+discover MCP servers from a curated catalog. Default registry URL
+(**v2 is the current default** — the Tier-1 desktop-app rows + the
+additive D-2/D-3 metadata live here):
+`https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v2/catalog.json`.
+
+**v1 is FROZEN** (`marketplace/v1/catalog.json`) — kept in-tree only so
+an OLDER released client hard-coded to the v1 URL still resolves; do NOT
+edit it (old-client contract — it must stay `schema_version: "1"` with
+zero D-2/D-3 keys). The default-URL string is duplicated in
+`internal/cli/marketplace.go` (`DefaultMarketplaceRegistryURL`) and
+`internal/gui/marketplace.go` (`defaultMarketplaceRegistryURL`) by a
+documented layering exception (GUI must not import the CLI package) —
+**bump both together** on any catalog-version change (tracked:
+`work-items/bugs/2026-06-24-marketplace-url-duplication.md`). The v2
+catalog's three shapes (S1 local-stdio / S2 remote-http / S3 docs-only
+OAuth connector) are decided in
+`work-items/decisions/2026-06-24-d1-three-catalog-shapes.md`.
 
 - `search [query]` — table of catalog entries matching query (empty = list all).
 - `show <id>` — metadata block + `Readme URL:` line (operator opens the URL).
