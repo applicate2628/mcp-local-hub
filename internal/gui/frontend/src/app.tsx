@@ -43,7 +43,7 @@ const DEFAULT_SCREEN_CACHE_KEY = "mcphub.appearance.default_screen";
 // entry can't drop the router into an unknown screen and crash on
 // the switch fall-through.
 const VALID_DEFAULT_SCREENS = new Set([
-  "dashboard", "servers", "groups", "catalog", "migration", "add-server",
+  "dashboard", "servers", "projects", "groups", "catalog", "migration", "add-server",
   "secrets", "logs", "capabilities", "settings", "about",
 ]);
 
@@ -86,6 +86,7 @@ import { DashboardScreen } from "./screens/Dashboard";
 import { GroupsScreen } from "./screens/Groups";
 import { LogsScreen } from "./screens/Logs";
 import { MigrationScreen } from "./screens/Migration";
+import { ProjectsScreen } from "./screens/Projects";
 import { SecretsScreen } from "./screens/Secrets";
 import { ServersScreen } from "./screens/Servers";
 import { SettingsScreen } from "./screens/Settings";
@@ -252,6 +253,11 @@ export function App() {
     case "servers":
       body = <ServersScreen />;
       break;
+    case "projects":
+      // route carries ?path=<canonicalKey> for the per-project detail lens
+      // (epic area 6 P1). Read-only; no onDirtyChange (P1 has no editor).
+      body = <ProjectsScreen route={route} />;
+      break;
     case "groups":
       body = <GroupsScreen onDirtyChange={setGroupsDirty} />;
       break;
@@ -312,6 +318,7 @@ export function App() {
   // discipline already in SecretPicker (env-picker).
   const NAV_ITEMS: ReadonlyArray<{ screen: string; href: string; label: string }> = [
     { screen: "servers",      href: "#/servers",      label: "Servers" },
+    { screen: "projects",     href: "#/projects",     label: "Projects" },
     { screen: "groups",       href: "#/groups",       label: "Groups" },
     { screen: "catalog",      href: "#/catalog",      label: "Catalog" },
     { screen: "migration",    href: "#/migration",    label: "Discovery" },
