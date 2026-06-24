@@ -65,10 +65,9 @@ func TestMimoCode_Followup_ManagedActiveGopls_NotRemovable_AndRemoveEntryByteUnc
 		t.Fatalf("a managed-active gopls must be excluded from RemovableStdioEntries (managed branch (b) retains it)")
 	}
 
-	// (1b) The managed-only re-resolve owner reports the active managed retention.
-	// reResolveConsumerAny = the BROADEST coarse-shape "any active server re-emerges"
-	// semantic the RemoveEntry pre-check uses.
-	managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls", reResolveConsumerAny)
+	// (1b) The managed-only re-resolve owner reports the active managed retention. The
+	// predicate is consumer-agnostic (it reads only the managed layer's own value).
+	managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls")
 	if err != nil {
 		t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 	}
@@ -121,7 +120,7 @@ func TestMimoCode_Followup_ManagedEnabledOnlyTrueOverlay_StillRemovable(t *testi
 	o := &mimoCodeClient{path: writeTargetPath}
 
 	// Managed-only re-resolve must be FALSE (enabled-only:true is not a shadow).
-	managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls", reResolveConsumerAny)
+	managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls")
 	if err != nil {
 		t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 	}
@@ -153,7 +152,7 @@ func TestMimoCode_Followup_ManagedDisableOnlyStub_StillRemovable(t *testing.T) {
 	writeMimoFile(t, writeTargetPath, `{"mcp":{"gopls":`+followupStdioGopls+`}}`)
 	o := &mimoCodeClient{path: writeTargetPath}
 
-	managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls", reResolveConsumerAny)
+	managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls")
 	if err != nil {
 		t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 	}
@@ -380,131 +379,33 @@ func TestMimoCode_Followup_HigherLayerDefining_DelegatesManaged(t *testing.T) {
 		if src.Kind != "" {
 			t.Fatalf("a managed enabled-only:true override must not be a shadow, got Kind=%q", src.Kind)
 		}
-		// FINDING 3 sanity: with NO content-bearing lower entry to overlay onto, the
-		// enable-true overlay must ALSO leave mimoCodeManagedLayerReResolves false
-		// (still removable) — the AddEntry-guard "not a shadow" verdict and the
-		// re-resolve verdict agree in the no-lower-content case.
-		reResolves, err := o.mimoCodeManagedLayerReResolves("serena", reResolveConsumerAny)
+		// Sanity: an enable-true managed overlay is not a shadow (Kind==""), so the
+		// managed-own-value-only predicate reports false (removable) — the AddEntry-guard
+		// "not a shadow" verdict and the re-resolve verdict agree.
+		reResolves, err := o.mimoCodeManagedLayerReResolves("serena")
 		if err != nil {
 			t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 		}
 		if reResolves {
-			t.Fatalf("a managed enable-true overlay with NO surviving content-bearing lower entry must NOT re-resolve (removable)")
+			t.Fatalf("a managed enable-true overlay must NOT re-resolve on its own (removable)")
 		}
 	})
 }
 
-// FINDING 3 — managed enable-true RE-ACTIVATION over a DISABLED lower full entry
-// (bot PR #425 follow-up, architect GATE PASS). A managed {enabled:true}-only
-// overlay FIELD-MERGES enabled:true onto a non-managed DISABLED full entry that
-// SURVIVES below the write target (config.json), re-activating the server. The
-// shadow path is blind to this (enable-true is correctly "not a shadow" for the
-// AddEntry guard), so mimoCodeManagedLayerReResolves now adds the enable-true ×
-// content-bearing-lower branch → the candidate is NOT removable. Pinned for BOTH
-// reResolveConsumerStdio (gopls) AND reResolveConsumerLSP (mcp-language-server).
-func TestMimoCode_Followup_ManagedEnableTrueOverDisabledLowerFull_NotRemovable(t *testing.T) {
-	// disabledFull builds a DISABLED full stdio entry (content-bearing: carries
-	// type+command) for the named command shape.
-	cases := []struct {
-		name        string
-		server      string
-		disabledLow string // config.json (below write target), disabled full entry
-		writeTarget string // mimocode.json write-target value (the removable candidate)
-		// expectStdio / expectLSP: whether the re-activated server is active in each
-		// consumer's shape set. A gopls-mcp entry is stdio-active but NOT LSP-active; an
-		// mcp-language-server entry is BOTH (it is a stdio entry that ALSO matches the
-		// --lsp invocation). reResolveConsumerAny is always true (the value is
-		// content-bearing) and is asserted separately.
-		expectStdio bool
-		expectLSP   bool
-		consumer    func(t *testing.T, o *mimoCodeClient) bool // does the consumer still REPORT (offer) the candidate?
-	}{
-		{
-			name:        "stdio gopls",
-			server:      "gopls",
-			disabledLow: `{"type":"local","command":["gopls","mcp"],"enabled":false}`,
-			writeTarget: `{"type":"local","command":["gopls","mcp"],"enabled":true}`,
-			expectStdio: true,
-			expectLSP:   false, // gopls-mcp is not an mcp-language-server re-emergence
-			consumer: func(t *testing.T, o *mimoCodeClient) bool {
-				return reResolveRemovableNames(t, o)["gopls"]
-			},
-		},
-		{
-			name:        "stdio mcp-language-server (LSP consumer)",
-			server:      "mls",
-			disabledLow: `{"type":"local","command":["mcp-language-server","--lsp","go"],"enabled":false}`,
-			writeTarget: `{"type":"local","command":["mcp-language-server","--lsp","go"],"enabled":true}`,
-			expectStdio: true, // mcp-language-server IS a stdio entry too
-			expectLSP:   true,
-			consumer: func(t *testing.T, o *mimoCodeClient) bool {
-				return stdioLSPEntryNames(t, o)["mls"]
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			isolateMimoCodeEnv(t)
-			// Managed config dir carries ONLY an {enabled:true} overlay for the name.
-			seedManagedConfigDir(t, `{"mcp":{"`+tc.server+`":{"enabled":true}}}`)
+// NOTE: the F3 enable-true RE-ACTIVATION-over-DISABLED-lower-full test was DROPPED in
+// the managed-OR simplification (architect GATE REVISE → PATH-B). It asserted the
+// REMOVED effective-merge behavior (a managed enable-true overlay over a below-layer
+// config.json full entry RETAINS the server via the merge). The managed-own-value-only
+// predicate instead reports such an overlay retains NOTHING on its own, so the entry is
+// REMOVABLE and the below-layer re-emergence is the INTENDED B4 rollback. That agreement
+// is now pinned by TestMimoCode_UnifiedManagedOR_PreCheckAndB4Agree_EnableTrueOverBelowLayerFull
+// in mimocode_pr425_unified_managed_or_test.go; the residual is documented in
+// work-items/bugs/2026-06-24-mimocode-managed-enable-over-lower-residual.md.
 
-			dir := t.TempDir()
-			writeTargetPath := filepath.Join(dir, "mimocode.json")
-			writeMimoFile(t, writeTargetPath, `{"mcp":{"`+tc.server+`":`+tc.writeTarget+`}}`)
-			// config.json BELOW the write target: a DISABLED full entry that survives a
-			// write-target removal and is re-activated by the managed enable-true overlay.
-			writeMimoFile(t, filepath.Join(dir, "config.json"), `{"mcp":{"`+tc.server+`":`+tc.disabledLow+`}}`)
-			o := &mimoCodeClient{path: writeTargetPath}
-
-			// The single managed re-resolve owner now reports the re-activation.
-			reResolves, err := o.mimoCodeManagedLayerReResolves(tc.server, reResolveConsumerAny)
-			if err != nil {
-				t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
-			}
-			if !reResolves {
-				t.Fatalf("a managed enable-true overlay over a DISABLED content-bearing lower entry RE-ACTIVATES the server — must re-resolve (NOT removable)")
-			}
-
-			// reResolveConsumerAny (the BROADEST coarse-shape semantic) ALWAYS re-resolves
-			// here: the effective managed enable-true ⊕ disabled-lower value is
-			// content-bearing.
-			anyR, err := o.mimoCodeNameReResolvesAfterWriteTargetRemoval(tc.server, reResolveConsumerAny)
-			if err != nil {
-				t.Fatalf("mimoCodeNameReResolvesAfterWriteTargetRemoval(any): %v", err)
-			}
-			if !anyR {
-				t.Fatalf("reResolveConsumerAny must DECLINE removal (managed enable-true re-activation of a content-bearing lower entry)")
-			}
-			// The F3 unified managed-OR rework applies CONSUMER-SHAPE active membership:
-			// a gopls-mcp re-emergence is stdio-active but NOT LSP-active; an
-			// mcp-language-server re-emergence is BOTH. So each register consumer
-			// re-resolves only for the shape it actually matches — the prior
-			// consumer-agnostic predicate over-blocked the LSP consumer on a gopls server.
-			for consumer, want := range map[mimoCodeReResolveConsumer]bool{
-				reResolveConsumerStdio: tc.expectStdio,
-				reResolveConsumerLSP:   tc.expectLSP,
-			} {
-				r, err := o.mimoCodeNameReResolvesAfterWriteTargetRemoval(tc.server, consumer)
-				if err != nil {
-					t.Fatalf("mimoCodeNameReResolvesAfterWriteTargetRemoval(consumer=%d): %v", consumer, err)
-				}
-				if r != want {
-					t.Fatalf("combined re-resolve for consumer=%d = %v, want %v (consumer-shape active membership)", consumer, r, want)
-				}
-			}
-
-			// The destructive consumer must NOT offer the candidate as removable.
-			if tc.consumer(t, o) {
-				t.Fatalf("the candidate must NOT be removable while a managed enable-true overlay re-activates a surviving content-bearing lower entry")
-			}
-		})
-	}
-}
-
-// FINDING 3 negative — a managed enable-true overlay with NO surviving content-bearing
-// lower entry (the lower entry lives ONLY in the write target, which is excluded on
-// removal) stays REMOVABLE. This is the boundary the fix must NOT cross — it pins
-// that the new branch does not over-block (and that CLAIM 2 above remains correct).
+// A managed enable-true overlay (which is NOT a managed shadow — Kind=="") retains
+// NOTHING on its own, so the entry stays REMOVABLE. With no surviving content-bearing
+// lower entry there is nothing to re-emerge either. This pins that the
+// managed-own-value-only predicate does not over-block an enable-true overlay.
 func TestMimoCode_Followup_ManagedEnableTrue_NoLowerContent_StaysRemovable(t *testing.T) {
 	isolateMimoCodeEnv(t)
 	seedManagedConfigDir(t, `{"mcp":{"gopls":{"enabled":true}}}`)
@@ -514,12 +415,12 @@ func TestMimoCode_Followup_ManagedEnableTrue_NoLowerContent_StaysRemovable(t *te
 	writeMimoFile(t, writeTargetPath, `{"mcp":{"gopls":`+followupStdioGopls+`}}`)
 	o := &mimoCodeClient{path: writeTargetPath}
 
-	reResolves, err := o.mimoCodeManagedLayerReResolves("gopls", reResolveConsumerAny)
+	reResolves, err := o.mimoCodeManagedLayerReResolves("gopls")
 	if err != nil {
 		t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 	}
 	if reResolves {
-		t.Fatalf("a managed enable-true overlay with NO surviving content-bearing lower entry must stay REMOVABLE (the write-target entry is excluded on removal)")
+		t.Fatalf("a managed enable-true overlay must stay REMOVABLE (it retains nothing on its own)")
 	}
 	if !reResolveRemovableNames(t, o)["gopls"] {
 		t.Fatalf("gopls must be removable when the managed enable-true overlay has no surviving lower content to re-activate")

@@ -1,47 +1,58 @@
 package clients
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 )
 
-// This file pins the bot PR #425 FOLLOW-UP UNIFIED MANAGED-OR REWORK (architect GATE
-// PASS): mimoCodeManagedLayerReResolves(name, consumer) now computes the EFFECTIVE
-// managed-layer merge (MDM plist value ⊕ managed-config-dir value, MDM-wins, via
-// mimoCodeMergeMCPEntry) overlaid on the post-removal lower merge, then tests
-// CONSUMER-SHAPE active membership. The three findings dissolve into that one
-// predicate:
-//   - FINDING 1: a disable-only MDM ("managed" kind) is classified disable-only and
-//     the entry is removable (was a regression — the prior "managed" default→false in
-//     mimoCodeShadowIsDisableOnlyOverride wrongly refused the delete).
-//   - FINDING 3: a managed enable overlay over a REMOTE lower survivor is NOT
-//     stdio-active for the register stdio consumer → removable (the consumer-blind
-//     coarse content-bearing test wrongly retained it).
-//   - FINDING 4: MDM {enabled:true} ⊕ managed-config-dir {enabled:false} re-enables to
-//     active (over a surviving lower command), so it re-resolves true (the prior
-//     first-shadow short-circuit classified the config-dir shadow disable-only in
-//     ISOLATION and wrongly reported removable).
+// This file pins the bot PR #425 FOLLOW-UP MANAGED-OR SIMPLIFICATION (architect GATE
+// REVISE → PATH-B). The prior revision computed an EFFECTIVE-managed-merge (the managed
+// value MERGED over the post-removal lower file merge, then a consumer-shape active
+// test). The architect ruled that a WRONG ABSTRACTION: it made the managed verdict
+// depend on the below-layer/file merge, creating a TWO-OWNER invariant (the RemoveEntry
+// managed pre-check vs the post-delete B4 guard) impossible to hold by hand, and gave
+// the F3 enable-over-lower feature an irreducible conflict with B4's intended
+// below-layer rollback.
+//
+// mimoCodeManagedLayerReResolves(name) is now a MANAGED-OWN-VALUE-ONLY predicate: it
+// reads ONLY the managed layer's own value (mimoCodeManagedLayerShadows + the
+// disable-only subtract via mimoCodeShadowIsDisableOnlyOverride — the SAME two readers
+// the B4 post-delete guard uses), is CONSUMER-AGNOSTIC, and NEVER reads
+// readMergedLayersExcluding. The pre-check and B4 therefore cannot diverge BY
+// CONSTRUCTION.
+//
+//   - F1 (KEPT): a disable-only MDM ("managed" kind) is classified disable-only and the
+//     entry is removable. Covered here by the shadow seam (Kind "managed") + the
+//     disable-only seam.
+//   - The new AGREEMENT test pins the regression-#3 guard: for {managed enable-true
+//     overlay + a below-layer config.json full entry} the RemoveEntry pre-check AND the
+//     post-delete B4 guard BOTH ALLOW the delete (the below-layer re-emergence is the
+//     INTENDED B4 rollback). The dropped effective-merge tests asserted the OPPOSITE
+//     (retention via the below-layer merge), which the architect rejected.
 
-// CLAIM 1 (FINDING 1) — a disable-only MDM ("managed" kind, via the MDM disable-only
-// seam) leaves the entry REMOVABLE and RemoveEntry actually deletes it. Before the
-// fix mimoCodeShadowIsDisableOnlyOverride's default case treated every "managed" kind
-// as NOT disable-only, so the RemoveEntry pre-check refused to delete a write-target
-// entry the disable-only MDM overlay was actually disabling.
+// CLAIM 1 (FINDING 1, KEPT) — a disable-only MDM ("managed" kind, via the MDM
+// disable-only seam) leaves the entry REMOVABLE and RemoveEntry actually deletes it.
+// Before the FINDING 1 fix mimoCodeShadowIsDisableOnlyOverride's default case treated
+// every "managed" kind as NOT disable-only, so the RemoveEntry pre-check refused to
+// delete a write-target entry the disable-only MDM overlay was actually disabling.
+//
+// Under the managed-own-value-only predicate this is covered WITHOUT the (now-deleted)
+// effective-merge value seam: the shadow seam makes mimoCodeManagedLayerShadows return
+// Kind "managed", and the disable-only seam makes mimoCodeShadowIsDisableOnlyOverride
+// classify it disable-only → mimoCodeManagedLayerReResolves returns false (removable).
 func TestMimoCode_UnifiedManagedOR_MDMDisableOnly_Removable(t *testing.T) {
 	isolateMimoCodeEnv(t)
 
-	// Inject an MDM (macOS Managed Preferences) "managed" shadow + a disable-only MDM
-	// value via the two MDM seams so the path is exercised on any OS (no real /Library
-	// plist). The shadow seam makes mimoCodeManagedLayerShadows return Kind "managed";
-	// the disable-only seam makes mimoCodeShadowIsDisableOnlyOverride classify it
-	// disable-only. The VALUE seam supplies the bare {enabled:false} so the effective
-	// merge resolves disabled.
+	// Inject an MDM (macOS Managed Preferences) "managed" shadow + classify it
+	// disable-only via the two SURVIVING MDM seams (the shadow seam + the disable-only
+	// seam) so the path is exercised on any OS (no real /Library plist). The shadow seam
+	// makes mimoCodeManagedLayerShadows return Kind "managed"; the disable-only seam
+	// makes mimoCodeShadowIsDisableOnlyOverride classify it disable-only.
 	prevShadow := mimoCodeManagedPrefsReader
-	prevValue := mimoCodeManagedPrefsValueReader
 	prevDisable := mimoCodeManagedPrefsDisableOnlyReader
 	t.Cleanup(func() {
 		mimoCodeManagedPrefsReader = prevShadow
-		mimoCodeManagedPrefsValueReader = prevValue
 		mimoCodeManagedPrefsDisableOnlyReader = prevDisable
 	})
 	mimoCodeManagedPrefsReader = func(name string) (mimoCodeShadowSource, error) {
@@ -53,12 +64,6 @@ func TestMimoCode_UnifiedManagedOR_MDMDisableOnly_Removable(t *testing.T) {
 		}
 		return mimoCodeShadowSource{}, nil
 	}
-	mimoCodeManagedPrefsValueReader = func(name string) (map[string]any, bool, error) {
-		if name == "gopls" {
-			return map[string]any{"enabled": false}, true, nil
-		}
-		return nil, false, nil
-	}
 	mimoCodeManagedPrefsDisableOnlyReader = func(name string) (bool, error) {
 		return name == "gopls", nil
 	}
@@ -69,9 +74,9 @@ func TestMimoCode_UnifiedManagedOR_MDMDisableOnly_Removable(t *testing.T) {
 	writeMimoFile(t, writeTargetPath, `{"mcp":{"gopls":`+followupStdioGopls+`}}`)
 	o := &mimoCodeClient{path: writeTargetPath}
 
-	// (1a) the unified managed-OR predicate must report FALSE (disable-only MDM → not
-	// active → removable) for the broadest semantic.
-	reResolves, err := o.mimoCodeManagedLayerReResolves("gopls", reResolveConsumerAny)
+	// (1a) the managed-own-value-only predicate must report FALSE (disable-only MDM →
+	// retains no active server → removable).
+	reResolves, err := o.mimoCodeManagedLayerReResolves("gopls")
 	if err != nil {
 		t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 	}
@@ -94,144 +99,71 @@ func TestMimoCode_UnifiedManagedOR_MDMDisableOnly_Removable(t *testing.T) {
 	}
 }
 
-// CLAIM 3 (FINDING 3) — a managed {enabled:true} overlay over a REMOTE lower survivor
-// + a write-target stdio gopls → the stdio register-grain candidate source REMOVES it
-// (the re-emergent value is an enabled REMOTE entry, NOT stdio-active, so the stdio
-// cleanup leaves no duplicate). The TWIN: a STDIO lower survivor re-activates a stdio
-// entry → retained. The coarse content-bearing test the prior predicate used would
-// have retained BOTH; only the consumer-shape test distinguishes them.
-func TestMimoCode_UnifiedManagedOR_ManagedEnableOverRemoteLower_StdioRemovable(t *testing.T) {
-	cases := []struct {
-		name        string
-		lower       string // config.json value BELOW the write target (the survivor)
-		wantRemove  bool   // does RemovableStdioCandidatesWriteTargetOwned offer gopls?
-		description string
-	}{
-		{
-			name:        "remote lower survivor -> stdio candidate REMOVED",
-			lower:       `{"type":"remote","url":"http://localhost:9121/mcp","enabled":false}`,
-			wantRemove:  true,
-			description: "a remote re-emergence is not stdio-active, so deleting the write-target stdio leaves no stdio duplicate",
-		},
-		{
-			name:        "stdio lower survivor -> stdio candidate RETAINED",
-			lower:       `{"type":"local","command":["gopls","mcp"],"enabled":false}`,
-			wantRemove:  false,
-			description: "a stdio re-emergence IS stdio-active, so the managed enable overlay re-activates a stdio duplicate",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			isolateMimoCodeEnv(t)
-			// Managed config dir carries ONLY an {enabled:true} overlay for gopls.
-			seedManagedConfigDir(t, `{"mcp":{"gopls":{"enabled":true}}}`)
-
-			dir := t.TempDir()
-			writeTargetPath := filepath.Join(dir, "mimocode.json")
-			// Write target: an ENABLED stdio gopls (the removable candidate; passes
-			// branch (a) write-target-owns-stdio).
-			writeMimoFile(t, writeTargetPath, `{"mcp":{"gopls":`+followupStdioGopls+`}}`)
-			// config.json BELOW: a DISABLED full entry that survives the write-target
-			// removal and is re-enabled by the managed enable-true overlay. Its SHAPE
-			// (remote vs stdio) drives the consumer-shape verdict.
-			writeMimoFile(t, filepath.Join(dir, "config.json"), `{"mcp":{"gopls":`+tc.lower+`}}`)
-			o := &mimoCodeClient{path: writeTargetPath}
-
-			// The STDIO register-grain candidate source (branch (a) + managed-only,
-			// reResolveConsumerStdio).
-			cands, err := o.RemovableStdioCandidatesWriteTargetOwned()
-			if err != nil {
-				t.Fatalf("RemovableStdioCandidatesWriteTargetOwned: %v", err)
-			}
-			offered := false
-			for _, e := range cands {
-				if e.Name == "gopls" {
-					offered = true
-				}
-			}
-			if offered != tc.wantRemove {
-				t.Fatalf("RemovableStdioCandidatesWriteTargetOwned offered gopls = %v, want %v (%s)", offered, tc.wantRemove, tc.description)
-			}
-
-			// Cross-check the managed-only predicate with the stdio consumer directly.
-			managedRetains, err := o.mimoCodeManagedLayerReResolves("gopls", reResolveConsumerStdio)
-			if err != nil {
-				t.Fatalf("mimoCodeManagedLayerReResolves(stdio): %v", err)
-			}
-			// retains == !removable for the stdio consumer.
-			if managedRetains == tc.wantRemove {
-				t.Fatalf("mimoCodeManagedLayerReResolves(stdio)=%v but wantRemove=%v (%s)", managedRetains, tc.wantRemove, tc.description)
-			}
-		})
-	}
-}
-
-// CLAIM 4 (FINDING 4) — MDM {enabled:true} ⊕ managed-config-dir {enabled:false} over a
-// surviving lower command re-enables to ACTIVE, so the unified predicate re-resolves
-// true (NOT removable). The prior first-shadow short-circuit returned the config-dir
-// shadow (disabling) and, classifying it disable-only IN ISOLATION, wrongly reported
-// removable — it never saw the higher MDM enable that re-enables the effective merge.
-func TestMimoCode_UnifiedManagedOR_MDMEnableOverConfigDirDisable_Retained(t *testing.T) {
+// AGREEMENT (regression-#3 guard) — for {managed enable-true overlay + a below-layer
+// config.json full entry}, the RemoveEntry managed PRE-CHECK and the post-delete B4
+// GUARD must AGREE that the delete is ALLOWED. This is the case the architect ruled the
+// effective-merge revision got WRONG: that revision read the below-layer merge into the
+// managed verdict and RETAINED the entry (edge #3, the F3 feature's irreducible conflict
+// with B4). The managed-own-value-only predicate instead reports the managed layer
+// retains nothing on its own (an enable-true overlay is Kind==""), so the below-layer
+// config.json re-emergence is the INTENDED B4 rollback and the delete succeeds.
+func TestMimoCode_UnifiedManagedOR_PreCheckAndB4Agree_EnableTrueOverBelowLayerFull(t *testing.T) {
 	isolateMimoCodeEnv(t)
-
-	// managed-config-dir carries a DISABLING {enabled:false} overlay for gopls (the
-	// layer the first-shadow walk would short-circuit on).
-	seedManagedConfigDir(t, `{"mcp":{"gopls":{"enabled":false}}}`)
-
-	// MDM (higher than the config dir) carries an ENABLE-ONLY {enabled:true} overlay
-	// for gopls — injected via the VALUE seam so the effective merge MDM⊕config-dir
-	// resolves to {enabled:true}. The shadow seam returns NO managed shadow (an
-	// enable-only:true MDM overlay is correctly not a shadow), so the first-shadow path
-	// would have stopped at the config-dir disable and missed this re-enable.
-	prevShadow := mimoCodeManagedPrefsReader
-	prevValue := mimoCodeManagedPrefsValueReader
-	t.Cleanup(func() {
-		mimoCodeManagedPrefsReader = prevShadow
-		mimoCodeManagedPrefsValueReader = prevValue
-	})
-	mimoCodeManagedPrefsReader = func(string) (mimoCodeShadowSource, error) {
-		return mimoCodeShadowSource{}, nil // MDM enable-true is not a shadow
-	}
-	mimoCodeManagedPrefsValueReader = func(name string) (map[string]any, bool, error) {
-		if name == "gopls" {
-			return map[string]any{"enabled": true}, true, nil
-		}
-		return nil, false, nil
-	}
+	// Managed config dir carries ONLY an {enabled:true} overlay for gopls (no
+	// command/url) — correctly NOT a shadow.
+	seedManagedConfigDir(t, `{"mcp":{"gopls":{"enabled":true}}}`)
 
 	dir := t.TempDir()
 	writeTargetPath := filepath.Join(dir, "mimocode.json")
-	// Write target: an enabled stdio gopls (the candidate the cleanup would try to
-	// remove).
+	// Write target: an enabled stdio gopls (the entry the hub owns and will delete).
 	writeMimoFile(t, writeTargetPath, `{"mcp":{"gopls":`+followupStdioGopls+`}}`)
-	// config.json BELOW: a DISABLED full stdio gopls (the surviving lower COMMAND the
-	// effective enable-true overlay re-activates after the write-target key is gone).
+	// config.json BELOW the write target: a content-bearing full entry that SURVIVES the
+	// write-target removal. The managed {enabled:true} overlay would re-activate it —
+	// but that re-emergence lands on the BELOW-target (intended-rollback) layer.
 	writeMimoFile(t, filepath.Join(dir, "config.json"),
 		`{"mcp":{"gopls":{"type":"local","command":["gopls","mcp"],"enabled":false}}}`)
 	o := &mimoCodeClient{path: writeTargetPath}
 
-	// The unified predicate must RE-RESOLVE (retain) for the broadest semantic: the
-	// EFFECTIVE managed value (config-dir {enabled:false} ⊕ MDM {enabled:true}) =
-	// {enabled:true}, which re-enables the surviving lower gopls command → active.
-	reResolves, err := o.mimoCodeManagedLayerReResolves("gopls", reResolveConsumerAny)
+	// (a) The managed PRE-CHECK owner (mimoCodeManagedLayerReResolves) must report FALSE:
+	// the managed layer (an enable-only:true overlay) retains nothing ON ITS OWN. It does
+	// NOT read the below-layer merge, so the surviving config.json entry does not flip
+	// the verdict.
+	preCheckRetains, err := o.mimoCodeManagedLayerReResolves("gopls")
 	if err != nil {
 		t.Fatalf("mimoCodeManagedLayerReResolves: %v", err)
 	}
-	if !reResolves {
-		t.Fatalf("MDM {enabled:true} ⊕ config-dir {enabled:false} over a surviving lower command RE-ENABLES the server — must re-resolve (retained); FINDING 4 (the first-shadow short-circuit missed the MDM re-enable)")
+	if preCheckRetains {
+		t.Fatalf("the managed pre-check must ALLOW the delete (an enable-true managed overlay retains nothing on its own); regression-#3")
 	}
 
-	// And the stdio register grain agrees (the re-activated value is a stdio gopls).
-	reResolvesStdio, err := o.mimoCodeManagedLayerReResolves("gopls", reResolveConsumerStdio)
+	// (b) The post-delete B4 guard's owners must AGREE: mimoCodeHigherLayerDefining
+	// returns Kind "" (the managed enable-true is not a shadow, and config.json is BELOW
+	// the write target so it is excluded), so B4 also ALLOWS the delete. This is the
+	// structural guarantee — both verdicts flow from the SAME shadow reader.
+	hld, err := o.mimoCodeHigherLayerDefining("gopls")
 	if err != nil {
-		t.Fatalf("mimoCodeManagedLayerReResolves(stdio): %v", err)
+		t.Fatalf("mimoCodeHigherLayerDefining: %v", err)
 	}
-	if !reResolvesStdio {
-		t.Fatalf("the re-enabled effective value is a stdio gopls — the stdio consumer must also retain it")
+	if hld.Kind != "" {
+		t.Fatalf("the B4 guard must ALLOW the delete (no winning higher layer; config.json is a below-target survivor), got Kind=%q", hld.Kind)
 	}
 
-	// The conservative RemovableStdioEntries must DECLINE gopls (not removable).
-	if reResolveRemovableNames(t, o)["gopls"] {
-		t.Fatalf("gopls must NOT be removable when the effective managed merge re-enables it (FINDING 4)")
+	// (c) RemoveEntry must therefore SUCCEED and delete the write-target entry — neither
+	// the pre-check nor the B4 post-delete guard refuses. (The server re-emerges from
+	// config.json, the operator's own below-layer entry — the intended B4 rollback.)
+	if err := o.RemoveEntry("gopls"); err != nil {
+		var retainErr *ErrMimoCodeHigherLayerRetainsServer
+		if errors.As(err, &retainErr) {
+			t.Fatalf("RemoveEntry must NOT refuse: pre-check and B4 AGREE the delete is allowed (below-layer re-emergence is intended rollback), got retention error %v", err)
+		}
+		t.Fatalf("RemoveEntry must succeed, got %v", err)
+	}
+	if v, ok, _ := mimoCodeFileEntryValue(writeTargetPath, "gopls"); ok && v != nil {
+		t.Fatalf("RemoveEntry must have deleted the write-target gopls; still present: %+v", v)
+	}
+	// The below-layer config.json entry is untouched (no data loss) — RemoveEntry only
+	// edits the write target.
+	if _, ok, _ := mimoCodeFileEntryValue(filepath.Join(dir, "config.json"), "gopls"); !ok {
+		t.Fatalf("RemoveEntry must NOT touch the below-layer config.json gopls (no data loss); it is gone")
 	}
 }

@@ -1035,18 +1035,6 @@ var mimoCodeManagedPrefsReader func(name string) (mimoCodeShadowSource, error)
 // entry is removable; bot PR #425 follow-up FINDING 1 regression fix).
 var mimoCodeManagedPrefsDisableOnlyReader func(name string) (bool, error)
 
-// mimoCodeManagedPrefsValueReader, when non-nil (tests only), replaces the
-// production macOS Managed Preferences raw-VALUE reader
-// (mimoCodeReadManagedPrefsValue) so the FINDING 3/4 EFFECTIVE-managed-merge path
-// (mimoCodeManagedLayerValue → mimoCodeManagedLayerReResolves) can be exercised on a
-// Windows/Linux CI runner without a real /Library plist or `plutil`. Same
-// nil-in-production func-var idiom as the seams above. It returns the MDM plist's OWN
-// raw mcp.<name> value (verbatim map) so the effective managed merge can overlay it
-// onto the managed-config-dir value via mimoCodeMergeMCPEntry and then onto the
-// post-removal lower merge, exactly mirroring mimoCodeNameInActiveSet's shape-correct
-// active test (bot PR #425 follow-up unified managed-OR rework).
-var mimoCodeManagedPrefsValueReader func(name string) (map[string]any, bool, error)
-
 // ErrMimoCodeManagedShadowsServer is returned by AddEntry when the macOS Managed
 // Preferences (MDM) layer already defines mcp.<Server>. That layer is read-only
 // to the hub and MiMoCode merges it ABOVE every user/env layer (config.ts:876-885
@@ -1188,24 +1176,20 @@ func mimoCodeManagedPlistFiles() []string {
 	return plists
 }
 
-// mimoCodeReadManagedPrefsValue returns the macOS Managed Preferences (MDM) plist's
-// OWN raw mcp.<name> value (the verbatim parsed map), independent of the shadow-aware
-// verdict mimoCodeReadManagedPrefs computes. It is the MDM half of the EFFECTIVE
-// managed-layer value (bot PR #425 follow-up unified managed-OR rework): the
-// effective merge needs the RAW value (not a polarity boolean) so the consumer-shape
-// active test (mimoCodeNameInActiveSet — stdio vs LSP vs remote) can be applied to
-// the managed contribution exactly as it is to the folded layers.
-//
-// Same plist resolution, plutil read, and warn-skip-on-unparseable posture as the
-// shadow-aware MDM reader (mimoCodeReadManagedPrefs):
-// the FIRST present, successfully-parsed plist that defines mcp.<name> wins; an
-// unparseable/unconvertible plist warn-skips (treat as "no managed value") so a host
-// whose unrelated managed profile is merely unconvertible does not have its
-// removability verdict flipped. Off darwin → (nil, false, nil). A non-map value at
-// mcp.<name> is returned as (nil, false) — the effective-merge path treats a missing
-// MDM value as no MDM contribution; a malformed scalar there is not a mergeable
-// overlay.
-func mimoCodeReadManagedPrefsValue(name string) (map[string]any, bool, error) {
+// mimoCodeReadManagedPrefsDisableOnly reports whether the macOS Managed Preferences
+// (MDM) plist carries a bare {enabled:false} ENABLE-ONLY overlay for mcp.<name> (bot
+// PR #425 follow-up FINDING 1). It reads the SINGLE MDM layer's OWN value directly via
+// the SAME plist-path resolution + plutil read + JSONC parse as the shadow reader
+// mimoCodeReadManagedPrefs (single owner mimoCodeManagedPlistFiles, no merge with the
+// managed config dir, no func-var value chain), then applies the shared shape gate
+// mimoCodeMapDefinesDisableOnly on the FIRST plist that defines mcp.<name>. Consumed by
+// mimoCodeShadowIsDisableOnlyOverride's "managed" case so a disable-only MDM shadow is
+// classified disable-only (retains NO active server → removable) rather than falling
+// through to the conservative fail-loud. Off darwin → (false, nil) (mimoCodeManagedPlistFiles
+// returns nil). Warn-skip-on-unparseable matches the shadow reader's posture (an
+// unconvertible/unparseable plist is treated as "no disable-only overlay" — it cannot be
+// PROVEN to carry one); the test seam is mimoCodeManagedPrefsDisableOnlyReader.
+func mimoCodeReadManagedPrefsDisableOnly(name string) (bool, error) {
 	for _, plist := range mimoCodeManagedPlistFiles() {
 		if _, err := os.Stat(plist); err != nil {
 			continue // not present — skip (existsSync gate)
@@ -1222,115 +1206,14 @@ func mimoCodeReadManagedPrefsValue(name string) (map[string]any, bool, error) {
 		if servers == nil {
 			continue
 		}
-		v, ok := servers[name].(map[string]any)
-		if !ok {
+		if _, present := servers[name]; !present {
 			continue
 		}
-		return v, true, nil
+		// The FIRST plist that defines mcp.<name> wins (same precedence as the shadow
+		// reader). Apply the disable-only shape gate to ITS own value — no merge.
+		return mimoCodeMapDefinesDisableOnly(m, name), nil
 	}
-	return nil, false, nil
-}
-
-// mimoCodeReadManagedPrefsDisableOnly reports whether the macOS Managed Preferences
-// (MDM) plist carries a bare {enabled:false} ENABLE-ONLY overlay for mcp.<name> (bot
-// PR #425 follow-up FINDING 1). It REUSES the single MDM raw-value reader
-// (mimoCodeReadManagedPrefsValue, via the value seam) so there is ONE plist-read path,
-// then applies the shared shape gate mimoCodeMapDefinesDisableOnly. Consumed by
-// mimoCodeShadowIsDisableOnlyOverride's "managed" case so a disable-only MDM shadow is
-// classified disable-only (retains NO active server → removable) rather than falling
-// through to the conservative fail-loud. Off darwin → (false, nil); a value-reader
-// error propagates fail-closed.
-func mimoCodeReadManagedPrefsDisableOnly(name string) (bool, error) {
-	reader := mimoCodeManagedPrefsValueReader
-	if reader == nil {
-		reader = mimoCodeReadManagedPrefsValue
-	}
-	v, ok, err := reader(name)
-	if err != nil {
-		return false, err
-	}
-	if !ok {
-		return false, nil
-	}
-	return mimoCodeMapDefinesDisableOnly(map[string]any{mimoCodeMCPKey: map[string]any{name: v}}, name), nil
-}
-
-// mimoCodeManagedConfigDirValue returns the managed config dir's OWN raw mcp.<name>
-// value (verbatim parsed map), the config-dir half of the EFFECTIVE managed-layer
-// value (bot PR #425 follow-up unified managed-OR rework). Same dir resolution,
-// .jsonc-over-.json precedence, and warn-skip-on-unparseable posture as
-// mimoCodeManagedConfigDirShadows — it just
-// returns the RAW value (highest-within-dir wins) so the effective merge can apply
-// mimoCodeMergeMCPEntry. A missing dir / file / name → (nil, false). A non-map value
-// → (nil, false) (not a mergeable overlay).
-func mimoCodeManagedConfigDirValue(name string) (map[string]any, bool) {
-	dir := mimoCodeManagedConfigDir()
-	if dir == "" {
-		return nil, false
-	}
-	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
-		return nil, false
-	}
-	for i := len(mimoCodeOverlayLayerNames) - 1; i >= 0; i-- {
-		f := filepath.Join(dir, mimoCodeOverlayLayerNames[i])
-		data, err := readRawConfig(f)
-		if err != nil {
-			continue // unreadable — warn-skip
-		}
-		if len(data) == 0 {
-			continue
-		}
-		m, err := parseJSONCBytes(data)
-		if err != nil {
-			continue // unparseable — warn-skip
-		}
-		servers, _ := m[mimoCodeMCPKey].(map[string]any)
-		if servers == nil {
-			continue
-		}
-		if v, ok := servers[name].(map[string]any); ok {
-			return v, true
-		}
-	}
-	return nil, false
-}
-
-// mimoCodeManagedLayerValue computes the per-name EFFECTIVE MANAGED-LAYER value —
-// the macOS MDM plist value OVERLAID on the cross-platform managed config dir value
-// in MiMoCode's verified precedence (MDM > managed-config-dir, mimocode.go:1041 +
-// 1280-1282) via mimoCodeMergeMCPEntry (REUSED read-only). It is the SINGLE owner of
-// the effective managed value consumed by mimoCodeManagedLayerReResolves (bot PR #425
-// follow-up unified managed-OR rework). enable/disable polarity is preserved by the
-// merge: an MDM enable-only overlay field-merges onto a config-dir full/disabled
-// value (re-enabling it); an MDM full redefine replaces wholesale.
-//
-//   - neither layer defines the name → (nil, false, nil): no managed contribution.
-//   - both → mimoCodeMergeMCPEntry(configDirValue lower, mdmValue higher).
-//   - one → that layer's value.
-//
-// An MDM value-reader error propagates → the destructive consumer fails closed.
-func (o *mimoCodeClient) mimoCodeManagedLayerValue(name string) (any, bool, error) {
-	reader := mimoCodeManagedPrefsValueReader
-	if reader == nil {
-		reader = mimoCodeReadManagedPrefsValue
-	}
-	mdmVal, mdmOK, err := reader(name)
-	if err != nil {
-		return nil, false, err
-	}
-	cfgVal, cfgOK := mimoCodeManagedConfigDirValue(name)
-	switch {
-	case mdmOK && cfgOK:
-		// MDM (higher) overlaid on managed-config-dir (lower): an MDM enable-only
-		// overlay re-enables/flips the config-dir value; an MDM full redefine replaces.
-		return mimoCodeMergeMCPEntry(cfgVal, mdmVal), true, nil
-	case mdmOK:
-		return mdmVal, true, nil
-	case cfgOK:
-		return cfgVal, true, nil
-	default:
-		return nil, false, nil
-	}
+	return false, nil
 }
 
 // mimoCodeManagedConfigDir resolves MiMoCode's MANAGED config DIRECTORY faithfully
@@ -2962,21 +2845,21 @@ func (o *mimoCodeClient) RemoveEntry(name string) error {
 	// MANAGED layers (MDM plist, managed config dir) are read-only and cannot be
 	// removed by the hub, so a managed retention is decidable BEFORE the delete and
 	// must short-circuit it: when the write target physically held the name AND an
-	// ACTIVE managed layer (the EFFECTIVE managed merge resolving to a content-bearing
-	// enabled value, minus the inert disable-only stub) still defines it, return
+	// ACTIVE managed layer (a managed shadow — full-redefine or disabling — minus the
+	// inert disable-only stub, read by mimoCodeManagedLayerReResolves from the managed
+	// layer's OWN value only) still defines it, return
 	// ErrMimoCodeHigherLayerRetainsServer WITHOUT touching the file. SCOPED TO MANAGED
 	// ONLY: the file/inline/below-layer and the disable-only-overlay outcomes are
 	// decided by the B4 post-delete path below, BYTE-IDENTICAL to before (this
 	// pre-check never alters them — it only diverts the managed-retain case, which the
 	// post-delete path would have reported anyway, to fire before the mutation rather
-	// than after it). It uses the BROADEST reResolveConsumerAny semantic (the coarse
-	// content-bearing test, NOT the register-grain stdio/LSP narrowing), so its verdict
-	// stays mutually consistent with the post-delete B4 guard (which reuses the SAME
-	// effective-managed-merge owners via mimoCodeShadowIsDisableOnlyOverride) — the
-	// pre-check's whole point is that it cannot diverge from the post-delete managed
-	// verdict.
+	// than after it). mimoCodeManagedLayerReResolves composes the SAME two readers the
+	// post-delete B4 guard uses (mimoCodeManagedLayerShadows + the disable-only subtract
+	// via mimoCodeShadowIsDisableOnlyOverride), so its verdict CANNOT diverge from the
+	// post-delete managed verdict BY CONSTRUCTION — the pre-check's whole point (bot PR
+	// #425 follow-up managed-OR simplification, architect GATE REVISE → PATH-B).
 	if hadOwnValue {
-		managedRetains, err := o.mimoCodeManagedLayerReResolves(name, reResolveConsumerAny)
+		managedRetains, err := o.mimoCodeManagedLayerReResolves(name)
 		if err != nil {
 			return err
 		}
@@ -3079,10 +2962,11 @@ func (o *mimoCodeClient) RemoveEntry(name string) error {
 // server and the removal succeeded — it must NOT keep failing loud. (The prior code
 // treated every "managed" kind as NOT disable-only, which made RemoveEntry refuse to
 // delete a write-target entry a disable-only MDM overlay was actually disabling — the
-// FINDING 1 regression.) This matches the consumer-shape EFFECTIVE-managed-merge
-// verdict in mimoCodeManagedLayerReResolves (a disable-only effective managed value
-// resolves disabled → not active → removable), so the RemoveEntry pre-check and this
-// B4 post-delete guard stay mutually consistent. A reader error propagates fail-closed.
+// FINDING 1 regression.) mimoCodeManagedLayerReResolves (the RemoveEntry managed
+// pre-check) reuses THIS SAME classifier to subtract the disable-only case from a managed
+// shadow, so the pre-check and this B4 post-delete guard stay mutually consistent BY
+// CONSTRUCTION (one disable-only owner, no divergent merge). A reader error propagates
+// fail-closed.
 func (o *mimoCodeClient) mimoCodeShadowIsDisableOnlyOverride(shadow mimoCodeShadowSource, name string) (bool, error) {
 	switch shadow.Kind {
 	case "file", "managed-config-dir":
@@ -3206,47 +3090,29 @@ func (o *mimoCodeClient) mimoCodeDefinedAtOrAboveWriteTarget(name string) (bool,
 //   - reResolveConsumerLSP: findLanguageServerStdioInMap (the stdio entries that
 //     ALSO match the mcp-language-server --lsp invocation) — the
 //     FindStdioLanguageServerEntries set.
-//   - reResolveConsumerAny: the BROADEST "any active server re-emerges" semantic
-//     used by the RemoveEntry pre-check (mimocode.go RemoveEntry) and, transitively,
-//     the post-delete B4 guard. Its active test is the COARSE content-bearing test
-//     (mimoCodeValueIsContentBearing — name present with a type/command/url, BEFORE
-//     drop-disabled, so a disabled-FULL re-emergent server-shaped key still counts,
-//     matching the historical B4 retention semantic), NOT the narrow stdio/LSP shape.
-//     This keeps RemoveEntry's protected retention BYTE-IDENTICAL to the pre-rework
-//     verdict for every currently-correct case while ONLY the register-grain
-//     consumers above get the consumer-shape narrowing.
+//
+// There is no broad "any re-emerges" consumer: the RemoveEntry managed pre-check now
+// reads ONLY the managed layer's own value (mimoCodeManagedLayerReResolves, no merge,
+// consumer-agnostic), so the coarse content-bearing test is no longer routed through
+// this enum (bot PR #425 follow-up managed-OR simplification, architect GATE REVISE →
+// PATH-B).
 type mimoCodeReResolveConsumer int
 
 const (
 	reResolveConsumerStdio mimoCodeReResolveConsumer = iota
 	reResolveConsumerLSP
-	reResolveConsumerAny
 )
 
 // mimoCodeNameInActiveSet reports whether mcp.<name> is present in the consumer's
-// ACTIVE membership set computed over the given merged config. For the register-grain
-// consumers it applies the EXACT same active-filter pipeline the consumer itself uses
-// — mimoCodeDropDisabled (drop enabled:false), then mimoCodeNormalizeCommandArrays
-// (MiMoCode array `command` → string command + args), then the consumer's survivor
-// filter (collectStdioEntries for the stdio set, findLanguageServerStdioInMap for the
-// LSP set). Routing through the SAME owners (no re-derivation) is the whole point of
-// the redesign: the re-resolve decision uses the identical computation that decided
-// the name was an active candidate in the first place.
-//
-// reResolveConsumerAny uses the COARSE content-bearing test instead
-// (mimoCodeMapDefinesContentBearing — name present with type/command/url, BEFORE
-// drop-disabled), the BROADEST "any active server re-emerges" semantic the RemoveEntry
-// pre-check + B4 guard need (byte-identical to the historical managed retention: a
-// disabled-FULL re-emergent server-shaped key still counts). It is the single shape
-// owner for all three consumers so the managed effective-merge predicate and the
-// folded survivor agree on what "active membership" means per consumer.
+// ACTIVE membership set computed over the given merged config. It applies the EXACT
+// same active-filter pipeline the consumer itself uses — mimoCodeDropDisabled (drop
+// enabled:false), then mimoCodeNormalizeCommandArrays (MiMoCode array `command` →
+// string command + args), then the consumer's survivor filter (collectStdioEntries for
+// the stdio set, findLanguageServerStdioInMap for the LSP set). Routing through the SAME
+// owners (no re-derivation) is the whole point of the redesign: the re-resolve decision
+// uses the identical computation that decided the name was an active candidate in the
+// first place.
 func mimoCodeNameInActiveSet(merged map[string]any, name string, consumer mimoCodeReResolveConsumer) bool {
-	if consumer == reResolveConsumerAny {
-		// BROADEST semantic: any content-bearing re-emergent server-shaped key (not
-		// narrowed to stdio/LSP, and counting a disabled-FULL value — matching the
-		// historical B4/pre-check coarse retention).
-		return mimoCodeMapDefinesContentBearing(merged, name)
-	}
 	servers, _ := merged[mimoCodeMCPKey].(map[string]any)
 	active := mimoCodeNormalizeCommandArrays(mimoCodeDropDisabled(servers))
 	switch consumer {
@@ -3419,105 +3285,91 @@ func (o *mimoCodeClient) mimoCodeNameReResolvesAfterWriteTargetRemoval(name stri
 	// MANAGED-LAYER OR — the two detect-only layers the fold above misses, delegated
 	// to the single owner so the managed step has exactly one definition shared by
 	// this combined predicate, RemovableStdioEntries, FindStdioLanguageServerEntries,
-	// and the RemoveEntry pre-check (CHANGE 2). The SAME consumer flows through so the
-	// managed half applies the identical consumer-shape active test the folded half
-	// just applied (bot PR #425 follow-up FINDING 3 unified managed-OR rework).
-	return o.mimoCodeManagedLayerReResolves(name, consumer)
+	// and the RemoveEntry pre-check. The managed verdict is CONSUMER-AGNOSTIC (a managed
+	// full-redefine shadows every consumer shape; an enable-only overlay retains
+	// nothing on its own regardless of consumer), so it takes no consumer argument —
+	// the consumer-shape narrowing lives ENTIRELY on the folded file-survivor half above
+	// (bot PR #425 follow-up — managed-OR simplification, architect GATE REVISE → PATH-B).
+	return o.mimoCodeManagedLayerReResolves(name)
 }
 
-// mimoCodeManagedLayerReResolves reports whether mcp.<name> re-emerges as an ACTIVE
-// server of the CONSUMER's shape from a MANAGED layer (the macOS MDM plist or the
-// cross-platform managed config dir) after a hypothetical write-target removal — the
-// managed half of the post-removal re-resolve question, isolated so it can be applied
-// WITHOUT the file-merge survivor (bot PR #425 follow-up GAP 1 + GAP 2 + the unified
-// managed-OR rework, architect GATE PASS). It is the SINGLE owner of the managed-active
-// verdict, consumed by:
-//   - mimoCodeNameReResolvesAfterWriteTargetRemoval (OR-ed after the folded survivor,
-//     with the SAME consumer);
-//   - RemovableStdioCandidatesWriteTargetOwned (reResolveConsumerStdio) /
-//     FindStdioLanguageServerCandidatesWriteTargetOwned (reResolveConsumerLSP) — the
-//     ONLY managed guard once their stdio/LSP-WIDE file survivor moved CALLER-SIDE to
-//     a workspace-scoped recheck (register.go); and
-//   - RemoveEntry's managed-only write-then-fail pre-check (reResolveConsumerAny — the
-//     BROADEST coarse-shape "any active server re-emerges" semantic; byte-identical to
-//     the historical retention for every currently-correct case).
+// mimoCodeManagedLayerReResolves reports whether a MANAGED layer (the macOS MDM plist
+// or the cross-platform managed config dir) RETAINS an active server for mcp.<name>
+// ON ITS OWN after a hypothetical write-target removal — the managed half of the
+// post-removal re-resolve question, isolated so it can be applied WITHOUT the
+// file-merge survivor. It is the SINGLE owner of the managed-active verdict, consumed
+// by:
+//   - mimoCodeNameReResolvesAfterWriteTargetRemoval (OR-ed after the folded survivor);
+//   - RemovableStdioCandidatesWriteTargetOwned / FindStdioLanguageServerCandidatesWriteTargetOwned
+//     — the ONLY managed guard once their stdio/LSP-WIDE file survivor moved CALLER-SIDE
+//     to a workspace-scoped recheck (register.go); and
+//   - RemoveEntry's managed-only write-then-fail pre-check.
+//
+// MANAGED-OWN-VALUE-ONLY PREDICATE (bot PR #425 follow-up — architect GATE REVISE →
+// PATH-B). The prior revision computed an EFFECTIVE-managed-merge (the managed value
+// MERGED over the post-removal lower file merge, then a consumer-shape active test).
+// The architect ruled that a WRONG ABSTRACTION: it made the managed verdict depend on
+// the below-layer/file merge, creating a TWO-OWNER invariant (this pre-check vs the
+// post-delete B4 guard) impossible to hold by hand, and it gave the F3 enable-over-lower
+// feature an irreducible conflict with B4's intended below-layer rollback. This
+// predicate is therefore deliberately NARROWED to read ONLY the managed layer's OWN
+// value — it NEVER reads readMergedLayersExcluding — and is CONSUMER-AGNOSTIC (a managed
+// full-redefine shadows every consumer shape; an enable-only overlay retains nothing on
+// its own). It composes the SAME two readers the B4 post-delete guard uses, so the
+// pre-check and B4 CANNOT diverge BY CONSTRUCTION:
+//
+//   - mimoCodeManagedLayerShadows(name) — the shadow-shape reader (B4's own owner). It
+//     returns Kind != "" ONLY for a managed value that SHADOWS the write target (a full
+//     redefine or a DISABLING {enabled:false} overlay); it returns Kind == "" for an
+//     enable-only:true overlay (correctly not a shadow).
+//   - When a managed shadow exists, subtract the disable-only case via
+//     mimoCodeShadowIsDisableOnlyOverride: a disable-only ({enabled:false}) managed
+//     overlay DISABLES the server, so once the write-target key is gone it retains NO
+//     active server (removable). A full-redefine or disabling-full managed shadow
+//     retains an active server (retained). This is F1.
+//   - No managed shadow (Kind == ""), including an enable-only:true overlay → the
+//     managed layer retains NOTHING on its own (false). If such an overlay re-activates
+//     a LOWER survivor, that re-emergence is the FILE-survivor's job — the register.go
+//     workspace-scoped recheck for the register grain, and B4's intended-rollback ALLOW
+//     for the below-layer config.json case. (Residual F3-over-below-layer +
+//     F4 managed-chain: work-items/bugs/2026-06-24-mimocode-managed-enable-over-lower-residual.md.)
 //
 // The managed layers are DETECT-ONLY (outside readMergedLayersExcluding's fold),
 // read-only to the hub, and carry NO workspace — so the managed verdict is
 // workspace-blind by construction, which is exactly why it stays in the adapter while
 // the workspace-aware file survivor moves to the caller.
 //
-// EFFECTIVE-MANAGED-MERGE DISCIPLINE (the unified rework — dissolves the FINDING 1, 3,
-// and 4 defects of the prior first-shadow short-circuit into one shape-correct
-// predicate, the managed-OR analogue of mimoCodeNameInActiveSet). Instead of the prior
-// "first managed shadow, minus disable-only, plus a separate enable-true branch" walk,
-// this now:
-//
-//  1. Builds the per-name EFFECTIVE MANAGED VALUE via mimoCodeManagedLayerValue —
-//     the MDM plist value OVERLAID on the managed-config-dir value in MiMoCode's
-//     verified precedence (MDM > managed-config-dir) through mimoCodeMergeMCPEntry
-//     (REUSED read-only), so enable/disable polarity is preserved (an MDM
-//     {enabled:true} overlay re-enables a config-dir {enabled:false} value — the
-//     FINDING 4 case the first-shadow short-circuit classified disable-only in
-//     ISOLATION and wrongly reported removable).
-//  2. Merges that effective managed value over the POST-REMOVAL lower merge
-//     (readMergedLayersExcluding — the inputs RemoveEntry would leave) via
-//     mimoCodeMergeMCPEntry again (managed is the higher layer), so a managed
-//     ENABLE-ONLY overlay field-merges onto a SURVIVING lower content-bearing entry
-//     and RE-ACTIVATES it (FINDING 3 enable-true re-activation), while taking its
-//     loadable shape (stdio / LSP / remote) from whichever layer supplies the
-//     command/url.
-//  3. Tests CONSUMER-SHAPE active membership on the effective merged value via
-//     mimoCodeNameInActiveSet:
-//     - reResolveConsumerStdio → collectStdioEntries (a REMOTE lower survivor under
-//     a managed enable overlay is NOT stdio-active → removable; the FINDING 3
-//     consumer-blind drop the coarse content-bearing test got wrong);
-//     - reResolveConsumerLSP → findLanguageServerStdioInMap;
-//     - reResolveConsumerAny → the coarse content-bearing test (BROADEST; the
-//     RemoveEntry pre-check + B4 guard need this byte-identical to the historical
-//     managed retention).
-//
-// All three findings fall out of this one predicate:
-//   - FINDING 1 — a disable-only effective managed value (a bare {enabled:false} with
-//     no surviving lower content) resolves DISABLED → not active → removable.
-//   - FINDING 3 — a managed enable overlay over a REMOTE lower survivor → enabled
-//     remote → NOT stdio/LSP-active for the register consumer → removable.
-//   - FINDING 4 — a managed enable over a managed disable-stub (+ a surviving lower
-//     command) → effective enabled content → active → retained.
-//
-// State-safe and fail-closed: readMergedLayersExcluding collapses to the single
-// supplied file in explicit/temp mode and propagates a parse error on any present
-// non-import layer; a managed value-reader error (MDM plist read) propagates → the
-// destructive consumer aborts and deletes nothing. No double-counting: the managed
-// paths (the MDM plist dir + mimoCodeManagedConfigDir()) are DISJOINT from
-// readLayerFiles' file paths, so the same value is never both folded and
-// managed-overlaid.
-func (o *mimoCodeClient) mimoCodeManagedLayerReResolves(name string, consumer mimoCodeReResolveConsumer) (bool, error) {
-	managedVal, ok, err := o.mimoCodeManagedLayerValue(name)
+// Fail-closed: a managed-reader error (the MDM plist read or the disable-only
+// classifier) propagates → the destructive consumer aborts and deletes nothing.
+func (o *mimoCodeClient) mimoCodeManagedLayerReResolves(name string) (bool, error) {
+	shadow, err := o.mimoCodeManagedLayerShadows(name)
 	if err != nil {
 		return false, err
 	}
-	if !ok {
-		// No managed layer defines the name → no managed contribution.
+	if shadow.Kind == "" {
+		// No managed shadow (including an enable-only:true overlay, which the
+		// shadow-aware reader correctly returns Kind=="" for): the managed layer
+		// retains NOTHING on its own. Any re-activation of a lower survivor is the
+		// file-survivor's / B4-rollback's job, not the managed verdict's.
+		//
+		// KNOWN RESIDUAL — a managed {enabled:true}-bare overlay over a content-bearing
+		// below-target config.json survivor reports REMOVABLE here, and the server
+		// re-emerges from config.json after the delete. That is the INTENDED B4 rollback
+		// (no data loss), but an operator might expect the managed enable to PIN it.
+		// Architect-ruled ACCEPTABLE RESIDUAL (PATH-B). Tracked in
+		// work-items/bugs/2026-06-24-mimocode-managed-enable-over-lower-residual.md.
 		return false, nil
 	}
-	// The lower merge as it would stand AFTER the write-target key is removed (the
-	// inputs RemoveEntry would leave); the managed layer is the HIGHEST, so overlay it
-	// on top. A managed ENABLE-ONLY overlay field-merges its flag onto a surviving
-	// lower content-bearing entry (re-activating it and taking the lower's shape); a
-	// managed full redefine replaces wholesale (and supplies its own shape).
-	mergedAfter, err := o.readMergedLayersExcluding(name)
+	// A managed shadow exists (full-redefine or disabling). Subtract the disable-only
+	// case via the B4 guard's OWN classifier so the pre-check and the post-delete B4
+	// guard share the identical disable-only verdict: a disable-only managed overlay
+	// retains no active server (removable); a full-redefine / disabling-full one retains
+	// it (retained).
+	disableOnly, err := o.mimoCodeShadowIsDisableOnlyOverride(shadow, name)
 	if err != nil {
 		return false, err
 	}
-	lowerServers, _ := mergedAfter[mimoCodeMCPKey].(map[string]any)
-	var lowerVal any
-	if lowerServers != nil {
-		lowerVal = lowerServers[name] // nil when absent — mimoCodeMergeMCPEntry handles it
-	}
-	effective := mimoCodeMergeMCPEntry(lowerVal, managedVal)
-	effectiveMerged := map[string]any{mimoCodeMCPKey: map[string]any{name: effective}}
-	return mimoCodeNameInActiveSet(effectiveMerged, name, consumer), nil
+	return !disableOnly, nil
 }
 
 // GetEntry reads mcp.<name> from the merged layers and projects it onto MCPEntry.
@@ -3944,11 +3796,11 @@ func (o *mimoCodeClient) RemovableStdioCandidatesWriteTargetOwned() ([]StdioEntr
 		}
 		// (b) MANAGED-only guard — the file/inline/import survivor is the caller's
 		// workspace-scoped job (register.go), so only the workspace-blind managed
-		// retention excludes a candidate here. Stdio consumer shape: a managed enable
-		// overlay over a REMOTE lower survivor is NOT stdio-active → not excluded here
-		// (FINDING 3 — the register-grain narrowing the coarse content-bearing test
-		// missed).
-		managedRetains, err := o.mimoCodeManagedLayerReResolves(e.Name, reResolveConsumerStdio)
+		// retention (a managed full-redefine / disabling shadow, minus the disable-only
+		// case) excludes a candidate here. A managed enable-only overlay retains nothing
+		// on its own (Kind==""), so it never excludes the candidate; any re-activation of
+		// a lower survivor is the caller's workspace-scoped recheck's job.
+		managedRetains, err := o.mimoCodeManagedLayerReResolves(e.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -4128,10 +3980,11 @@ func (o *mimoCodeClient) FindStdioLanguageServerCandidatesWriteTargetOwned() ([]
 			continue
 		}
 		// (b) MANAGED-only guard — the file/inline/import survivor is the caller's
-		// workspace-scoped job (register.go). LSP consumer shape: only a managed
-		// re-emergence that resolves to an mcp-language-server stdio entry excludes the
-		// candidate here.
-		managedRetains, err := o.mimoCodeManagedLayerReResolves(e.Name, reResolveConsumerLSP)
+		// workspace-scoped job (register.go). Only the workspace-blind managed retention
+		// (a managed full-redefine / disabling shadow, minus the disable-only case)
+		// excludes the candidate here; a managed enable-only overlay retains nothing on
+		// its own and any lower-survivor re-activation is the caller's recheck's job.
+		managedRetains, err := o.mimoCodeManagedLayerReResolves(e.Name)
 		if err != nil {
 			return nil, err
 		}
