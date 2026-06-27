@@ -1,0 +1,237 @@
+package clients
+
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
+
+// TestProjectScopes_VerifiedFormats pins the per-client project-scope formats
+// against the design's VERIFIED table
+// (work-items/decisions/2026-06-24-per-project-gui-design.md): claude-code →
+// .mcp.json/mcpServers, cursor → .cursor/mcp.json/mcpServers, vscode →
+// .vscode/mcp.json/servers (NOT mcpServers).
+func TestProjectScopes_VerifiedFormats(t *testing.T) {
+	want := map[string]struct {
+		rel     string
+		section string
+	}{
+		"claude-code": {filepath.Join(".mcp.json"), "mcpServers"},
+		"cursor":      {filepath.Join(".cursor", "mcp.json"), "mcpServers"},
+		"vscode":      {filepath.Join(".vscode", "mcp.json"), "servers"},
+	}
+	got := map[string]ProjectScope{}
+	for _, ps := range ProjectScopes() {
+		if !ps.Supported {
+			t.Errorf("ProjectScopes() returned an unsupported row for %q", ps.Client)
+		}
+		got[ps.Client] = ps
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ProjectScopes() count = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for client, w := range want {
+		ps, ok := got[client]
+		if !ok {
+			t.Fatalf("ProjectScopes() missing client %q", client)
+		}
+		if ps.RelFile != w.rel {
+			t.Errorf("%s RelFile = %q, want %q", client, ps.RelFile, w.rel)
+		}
+		if ps.SectionKey != w.section {
+			t.Errorf("%s SectionKey = %q, want %q", client, ps.SectionKey, w.section)
+		}
+	}
+}
+
+// TestProjectScope_SectionKeyMatchesAdapter is the drift guard pinning each
+// ProjectScope.SectionKey to the adapter's own section-key constant — so the
+// documentary key in the registry can never silently diverge from the key the
+// real scanner/adapter parses. claudeCodeMCPServersKey (claude_code.go) and
+// vscodeServersKey (vscode.go) are the single owners; cursor reuses the
+// canonical JSON-family `mcpServers`.
+func TestProjectScope_SectionKeyMatchesAdapter(t *testing.T) {
+	bySection := map[string]string{}
+	for _, ps := range ProjectScopes() {
+		bySection[ps.Client] = ps.SectionKey
+	}
+	if bySection["claude-code"] != claudeCodeMCPServersKey {
+		t.Errorf("claude-code SectionKey = %q, want adapter const %q", bySection["claude-code"], claudeCodeMCPServersKey)
+	}
+	if bySection["vscode"] != vscodeServersKey {
+		t.Errorf("vscode SectionKey = %q, want adapter const %q", bySection["vscode"], vscodeServersKey)
+	}
+	// cursor uses the canonical JSON-family key (no per-adapter const; it is a
+	// jsonMCPClient over `mcpServers`).
+	if bySection["cursor"] != "mcpServers" {
+		t.Errorf("cursor SectionKey = %q, want canonical \"mcpServers\"", bySection["cursor"])
+	}
+}
+
+// TestProjectScopeClients_AreRegistryClients ensures every project-scope client
+// id is a real SupportedClientNames() client (no orphan / typo'd id).
+func TestProjectScopeClients_AreRegistryClients(t *testing.T) {
+	known := map[string]bool{}
+	for _, n := range SupportedClientNames() {
+		known[n] = true
+	}
+	for _, ps := range ProjectScopes() {
+		if !known[ps.Client] {
+			t.Errorf("ProjectScope client %q is not a SupportedClientNames() client", ps.Client)
+		}
+	}
+}
+
+// TestProjectScanConfigPaths_Valid resolves an existing temp directory and
+// returns absolute, in-root paths for all three clients.
+func TestProjectScanConfigPaths_Valid(t *testing.T) {
+	root := t.TempDir()
+
+	paths, err := ProjectScanConfigPaths(root)
+	if err != nil {
+		t.Fatalf("ProjectScanConfigPaths(%q) error = %v", root, err)
+	}
+
+	// EvalSymlinks may canonicalize the temp dir (e.g. /var→/private/var on
+	// macOS, or 8.3 short-name expansion on Windows); resolve the expected base
+	// the same way so the comparison is exact.
+	realRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", root, err)
+	}
+
+	want := map[string]string{
+		"claude-code": filepath.Join(realRoot, ".mcp.json"),
+		"cursor":      filepath.Join(realRoot, ".cursor", "mcp.json"),
+		"vscode":      filepath.Join(realRoot, ".vscode", "mcp.json"),
+	}
+	if len(paths) != len(want) {
+		t.Fatalf("got %d paths, want %d: %v", len(paths), len(want), paths)
+	}
+	for client, w := range want {
+		got, ok := paths[client]
+		if !ok {
+			t.Fatalf("missing path for %q", client)
+		}
+		if got != w {
+			t.Errorf("%s path = %q, want %q", client, got, w)
+		}
+		if !filepath.IsAbs(got) {
+			t.Errorf("%s path %q is not absolute", client, got)
+		}
+	}
+}
+
+// TestProjectScanConfigPaths_PathSafety_Rejects is the security table: every
+// hostile/degenerate root must be rejected with a non-nil error and NO returned
+// map. The error message must not echo the raw input (leak-safety asserted at
+// the handler boundary; here we assert rejection + structural safety).
+func TestProjectScanConfigPaths_PathSafety_Rejects(t *testing.T) {
+	existingDir := t.TempDir()
+	// A regular file (non-directory) target.
+	regFile := filepath.Join(existingDir, "afile")
+	if err := os.WriteFile(regFile, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		root string
+	}{
+		{"empty", ""},
+		{"relative", "some/rel/path"},
+		{"relative-traversal", "../../etc"},
+		{"dot", "."},
+		{"absolute-traversal-to-nonexistent", filepath.Join(existingDir, "..", "..", "etc")},
+		{"nonexistent-absolute", filepath.Join(existingDir, "definitely-not-here-xyz")},
+		{"non-directory-file", regFile},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			paths, err := ProjectScanConfigPaths(c.root)
+			if err == nil {
+				t.Fatalf("ProjectScanConfigPaths(%q) = %v, want error", c.root, paths)
+			}
+			if paths != nil {
+				t.Errorf("ProjectScanConfigPaths(%q) returned non-nil map on error: %v", c.root, paths)
+			}
+		})
+	}
+}
+
+// TestProjectScanConfigPaths_AbsoluteTraversalCollapses verifies that an
+// absolute root carrying `..` segments is rejected by the clean round-trip
+// guard rather than silently resolved — i.e. the caller cannot smuggle
+// traversal through a not-yet-collapsed absolute path.
+func TestProjectScanConfigPaths_AbsoluteTraversalCollapses(t *testing.T) {
+	base := t.TempDir()
+	// base/sub exists; base/sub/../sub cleans to base/sub but is NOT in clean
+	// form, so it must be rejected by the round-trip equality guard.
+	sub := filepath.Join(base, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Build the dirty path by raw separator concatenation (NOT filepath.Join,
+	// which would pre-clean it) so the function actually receives the `..`
+	// segments. filepath.Clean(dirty) == sub, but dirty != sub, so the
+	// round-trip equality guard must reject it.
+	sep := string(filepath.Separator)
+	dirty := base + sep + "sub" + sep + ".." + sep + "sub"
+	if dirty == filepath.Clean(dirty) {
+		t.Fatalf("test bug: constructed path %q is already clean", dirty)
+	}
+	if _, err := ProjectScanConfigPaths(dirty); err == nil {
+		t.Fatalf("ProjectScanConfigPaths(%q) accepted a non-clean absolute path", dirty)
+	}
+}
+
+// TestProjectScanConfigPaths_SymlinkContainedToDir accepts a symlinked root
+// that resolves to a real directory, and the returned per-client paths are
+// joined onto the RESOLVED real target (not the link path).
+func TestProjectScanConfigPaths_SymlinkContainedToDir(t *testing.T) {
+	target := t.TempDir()
+	linkParent := t.TempDir()
+	link := filepath.Join(linkParent, "projlink")
+	if err := os.Symlink(target, link); err != nil {
+		// Windows without privilege / dev mode cannot create directory
+		// symlinks — skip rather than fail.
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unsupported on this host: %v", err)
+		}
+		t.Fatalf("symlink: %v", err)
+	}
+
+	paths, err := ProjectScanConfigPaths(link)
+	if err != nil {
+		t.Fatalf("ProjectScanConfigPaths(symlink→dir) error = %v", err)
+	}
+	realTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(target): %v", err)
+	}
+	wantClaude := filepath.Join(realTarget, ".mcp.json")
+	if paths["claude-code"] != wantClaude {
+		t.Errorf("symlinked root resolved to %q, want join onto real target %q", paths["claude-code"], wantClaude)
+	}
+}
+
+// TestProjectScanConfigPaths_SymlinkToFileRejected rejects a symlinked root
+// whose target is a regular file (resolves to a non-directory).
+func TestProjectScanConfigPaths_SymlinkToFileRejected(t *testing.T) {
+	dir := t.TempDir()
+	targetFile := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(targetFile, []byte("x"), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "filelink")
+	if err := os.Symlink(targetFile, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unsupported on this host: %v", err)
+		}
+		t.Fatalf("symlink: %v", err)
+	}
+	if _, err := ProjectScanConfigPaths(link); err == nil {
+		t.Fatalf("ProjectScanConfigPaths(symlink→file) accepted a non-directory target")
+	}
+}

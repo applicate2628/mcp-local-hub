@@ -1,0 +1,76 @@
+// internal/gui/projects.go
+//
+// Per-project-GUI Phase 2a (Model B path-reparam) — READ-ONLY project-scoped
+// scan. GET /api/projects/scan?root=<abs> scans a single project's LOCAL
+// client config files (.mcp.json / .cursor/mcp.json / .vscode/mcp.json) and
+// returns the same api.ScanResult DTO the global Servers matrix uses, but
+// resolved from project paths instead of the OS-global ones.
+//
+// SCAN ISOLATION (the key invariant): this is a SEPARATE ScanFrom call with a
+// DISJOINT ConfigPaths resolver (clients.ProjectScanConfigPaths) from the
+// global scan's clients.DefaultScanConfigPaths. scan.go's ScanFrom /
+// probeClientConfigPresence / DefaultScanConfigPaths / ScanOpts are UNTOUCHED —
+// the global matrix's scan output stays byte-identical. Two disjoint resolvers
+// make global↔project leakage structurally impossible.
+//
+// READ-ONLY: this handler never writes — no manifest, no intent, no
+// client-config mutation. ProjectScanConfigPaths only stats the root;
+// ScanFrom only reads config files + manifest names + the (best-effort)
+// workspace registry.
+package gui
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
+)
+
+func registerProjectsRoutes(s *Server) {
+	s.mux.HandleFunc("/api/projects/scan", s.requireSameOrigin(s.projectsScanHandler))
+}
+
+// projectsScanHandler implements GET /api/projects/scan?root=<abs>.
+//
+// On a bad/missing/traversal root it returns 400 with a generic, leak-safe
+// body: the error envelope carries a stable code and a fixed message, never
+// the caller's raw root nor any resolved internal path (the precise reason is
+// logged server-side via writeAPIErrorRedacted for host-side diagnosis).
+func (s *Server) projectsScanHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	root := r.URL.Query().Get("root")
+
+	// Validate + resolve the untrusted root into per-client project config
+	// paths. clients.ProjectScanConfigPaths owns the path-safety contract
+	// (absolute, clean, existing directory, symlink-contained, fixed RelFile
+	// joins). Its error messages are already leak-safe, but we still redact at
+	// the boundary so neither the resolver message nor any wrapped path reaches
+	// the wire — the client gets a stable code + fixed body.
+	configPaths, err := clients.ProjectScanConfigPaths(root)
+	if err != nil {
+		writeAPIErrorRedacted(w, err, http.StatusBadRequest, "PROJECT_ROOT_INVALID", "/api/projects/scan")
+		return
+	}
+
+	// SEPARATE ScanFrom call with the project-scoped ConfigPaths. No
+	// ManifestDir / GUIPort wiring needed for a read-only project view; the
+	// per-client ClientPresence map is the payload the Projects screen reads.
+	result, err := api.NewAPI().ScanFrom(api.ScanOpts{ConfigPaths: configPaths})
+	if err != nil {
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "PROJECT_SCAN_FAILED", "/api/projects/scan")
+		return
+	}
+
+	// Reuse the global scan's sanitizer so the per-entry Raw config blobs are
+	// stripped before serialization (no client-config internals on the wire).
+	result = sanitizeScanResult(result)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
