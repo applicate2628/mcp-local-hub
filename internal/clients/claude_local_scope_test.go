@@ -64,7 +64,7 @@ func projectKey(form, root string) string {
 // TestReadClaudeLocalScope_MissingFile: absent ~/.claude.json → empty, no error.
 func TestReadClaudeLocalScope_MissingFile(t *testing.T) {
 	setSyntheticHome(t, "") // no file
-	got, err := ReadClaudeLocalScope(`C:\dev\proj`)
+	got, err := ReadClaudeLocalScope(`C:\dev\proj`, true)
 	if err != nil {
 		t.Fatalf("missing file should not error, got: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestReadClaudeLocalScope_MissingFile(t *testing.T) {
 // empty, no error.
 func TestReadClaudeLocalScope_NoProjectsMap(t *testing.T) {
 	setSyntheticHome(t, `{"mcpServers":{"x":{"url":"http://h/mcp"}}}`)
-	got, err := ReadClaudeLocalScope(`C:\dev\proj`)
+	got, err := ReadClaudeLocalScope(`C:\dev\proj`, true)
 	if err != nil {
 		t.Fatalf("no projects map should not error, got: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestReadClaudeLocalScope_NoProjectsMap(t *testing.T) {
 func TestReadClaudeLocalScope_NoMatchingKey(t *testing.T) {
 	body := `{"projects":{"C:/some/other/proj":{"mcpServers":{"z":{}}}}}`
 	setSyntheticHome(t, body)
-	got, err := ReadClaudeLocalScope(`C:\dev\proj`)
+	got, err := ReadClaudeLocalScope(`C:\dev\proj`, true)
 	if err != nil {
 		t.Fatalf("no matching key should not error, got: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestReadClaudeLocalScope_LocalServers(t *testing.T) {
 	body := `{"projects":{"` + jsonEsc(key) + `":{"mcpServers":{"zeta":{"command":"node"},"alpha":{"url":"http://h/mcp"}}}}}`
 	setSyntheticHome(t, body)
 
-	got, err := ReadClaudeLocalScope(root)
+	got, err := ReadClaudeLocalScope(root, true)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestReadClaudeLocalScope_KeyFormVariants(t *testing.T) {
 			body := `{"projects":{"` + jsonEsc(key) + `":{"mcpServers":{"s1":{}},"disabledMcpjsonServers":[],"enabledMcpjsonServers":[]}}}`
 			setSyntheticHome(t, body)
 
-			got, err := ReadClaudeLocalScope(root)
+			got, err := ReadClaudeLocalScope(root, true)
 			if err != nil {
 				t.Fatalf("read: %v", err)
 			}
@@ -151,8 +151,9 @@ func TestReadClaudeLocalScope_KeyFormVariants(t *testing.T) {
 }
 
 // TestReadClaudeLocalScope_ToggleArrays: disabled/enabled arrays are returned
-// verbatim and the reconciliation rule is applied correctly (disabled, enabled,
-// enabled-override, neither).
+// verbatim and the OPT-IN approval rule is applied correctly (disabled,
+// approved, disabled-wins-over-approve, and the flipped unlisted=NOT-approved
+// default with no enableAll).
 func TestReadClaudeLocalScope_ToggleArrays(t *testing.T) {
 	root := osRoot(t, "dev", "proj")
 	key := projectKey("fwd-upper", root)
@@ -162,12 +163,15 @@ func TestReadClaudeLocalScope_ToggleArrays(t *testing.T) {
 		`"enabledMcpjsonServers":["enabledServer","bothServer"]}}}`
 	setSyntheticHome(t, body)
 
-	got, err := ReadClaudeLocalScope(root)
+	got, err := ReadClaudeLocalScope(root, true)
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
 	if !got.Matched {
 		t.Fatalf("expected match")
+	}
+	if got.EnableAll {
+		t.Errorf("EnableAll should be false (absent enableAllProjectMcpServers)")
 	}
 	if !reflect.DeepEqual(got.Disabled, []string{"disabledServer", "bothServer"}) {
 		t.Errorf("Disabled = %v", got.Disabled)
@@ -176,20 +180,77 @@ func TestReadClaudeLocalScope_ToggleArrays(t *testing.T) {
 		t.Errorf("Enabled = %v", got.Enabled)
 	}
 
-	// Reconciliation rule:
+	// OPT-IN approval rule (no enableAll):
 	cases := []struct {
 		name string
 		want bool
 	}{
 		{"disabledServer", false}, // in disabled, not in enabled → disabled
-		{"enabledServer", true},   // in enabled only → enabled
-		{"bothServer", true},      // in BOTH → enabled wins (override)
-		{"unlistedServer", true},  // in neither → default enabled
+		{"enabledServer", true},   // in enabled only → approved
+		{"bothServer", false},     // in BOTH → DENY wins (disabled is absolute)
+		{"unlistedServer", false}, // in neither + no enableAll → NOT approved (opt-IN flip)
 	}
 	for _, c := range cases {
 		if got.IsMcpjsonServerEnabled(c.name) != c.want {
 			t.Errorf("IsMcpjsonServerEnabled(%q) = %v, want %v", c.name, !c.want, c.want)
 		}
+	}
+}
+
+// TestReadClaudeLocalScope_EnableAll: enableAllProjectMcpServers=true approves an
+// unlisted server, but a DISABLED entry still wins (deny is absolute), and an
+// EXPLICITLY-enabled entry stays approved.
+func TestReadClaudeLocalScope_EnableAll(t *testing.T) {
+	root := osRoot(t, "dev", "proj")
+	key := projectKey("fwd-upper", root)
+	body := `{"projects":{"` + jsonEsc(key) + `":{` +
+		`"enableAllProjectMcpServers":true,` +
+		`"disabledMcpjsonServers":["deniedServer"],` +
+		`"enabledMcpjsonServers":["approvedServer"]}}}`
+	setSyntheticHome(t, body)
+
+	got, err := ReadClaudeLocalScope(root, true)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !got.Matched {
+		t.Fatalf("expected match")
+	}
+	if !got.EnableAll {
+		t.Fatalf("EnableAll should be true")
+	}
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"unlistedServer", true},  // enableAll approves an unlisted server
+		{"approvedServer", true},  // explicit enable → approved
+		{"deniedServer", false},   // disabled wins even under enableAll (deny absolute)
+	}
+	for _, c := range cases {
+		if got.IsMcpjsonServerEnabled(c.name) != c.want {
+			t.Errorf("IsMcpjsonServerEnabled(%q) = %v, want %v (enableAll)", c.name, !c.want, c.want)
+		}
+	}
+}
+
+// TestReadClaudeLocalScope_DisabledWinsOverEnabled: a server in BOTH the disabled
+// AND the enabled arrays is NOT approved — deny is absolute (Claude docs:
+// disabledMcpjsonServers is the reject-list and wins over the approve-list).
+func TestReadClaudeLocalScope_DisabledWinsOverEnabled(t *testing.T) {
+	root := osRoot(t, "dev", "proj")
+	key := projectKey("fwd-upper", root)
+	body := `{"projects":{"` + jsonEsc(key) + `":{` +
+		`"disabledMcpjsonServers":["conflict"],` +
+		`"enabledMcpjsonServers":["conflict"]}}}`
+	setSyntheticHome(t, body)
+
+	got, err := ReadClaudeLocalScope(root, true)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got.IsMcpjsonServerEnabled("conflict") {
+		t.Errorf("a server in BOTH disabled+enabled must be NOT approved (deny wins)")
 	}
 }
 
@@ -227,7 +288,7 @@ func TestReadClaudeLocalScope_DuplicateKeyDeterministic(t *testing.T) {
 	// "first-wins" every time.
 	for i := 0; i < 16; i++ {
 		setSyntheticHome(t, body)
-		got, err := ReadClaudeLocalScope(root)
+		got, err := ReadClaudeLocalScope(root, true)
 		if err != nil {
 			t.Fatalf("iteration %d: read: %v", i, err)
 		}
@@ -264,7 +325,7 @@ func TestReadClaudeLocalScope_DuplicateKeyDeterministic_WindowsCaseFold(t *testi
 
 	for i := 0; i < 16; i++ {
 		setSyntheticHome(t, body)
-		got, err := ReadClaudeLocalScope(root)
+		got, err := ReadClaudeLocalScope(root, true)
 		if err != nil {
 			t.Fatalf("iteration %d: read: %v", i, err)
 		}
@@ -291,7 +352,7 @@ func TestReadClaudeLocalScope_ReadOnly_ByteIdentical(t *testing.T) {
 	beforeInfo, _ := os.Stat(claudePath)
 	beforeHomeListing := listDir(t, home)
 
-	if _, err := ReadClaudeLocalScope(root); err != nil {
+	if _, err := ReadClaudeLocalScope(root, true); err != nil {
 		t.Fatalf("read: %v", err)
 	}
 
@@ -316,7 +377,7 @@ func TestReadClaudeLocalScope_ReadOnly_ByteIdentical(t *testing.T) {
 // error (not silently treated as empty), so corruption is surfaced.
 func TestReadClaudeLocalScope_MalformedJSON(t *testing.T) {
 	setSyntheticHome(t, `{"projects": {`) // truncated
-	_, err := ReadClaudeLocalScope(`C:\dev\proj`)
+	_, err := ReadClaudeLocalScope(`C:\dev\proj`, true)
 	if err == nil {
 		t.Errorf("malformed ~/.claude.json should error, got nil")
 	}
@@ -339,7 +400,7 @@ func TestReadClaudeLocalScope_SpecialFile_Directory(t *testing.T) {
 		t.Fatalf("mkdir special-file dir: %v", err)
 	}
 
-	got, err := ReadClaudeLocalScope(osRoot(t, "dev", "proj"))
+	got, err := ReadClaudeLocalScope(osRoot(t, "dev", "proj"), true)
 	if err != nil {
 		t.Fatalf("directory at ~/.claude.json must NOT error (skip → empty), got: %v", err)
 	}
@@ -348,12 +409,14 @@ func TestReadClaudeLocalScope_SpecialFile_Directory(t *testing.T) {
 	}
 }
 
-// TestReadClaudeLocalScope_Symlink mirrors the presence-gate symlink policy
-// (scan.go probeClientConfigPresence): a symlink-to-regular-file is REFUSED by
-// default (→ empty scope) and only honored when the operator opts in via
-// MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK on a non-strict host. Strict mode
-// (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) keeps the refusal even with the opt-in.
-// Skips where the OS/permissions cannot create a symlink (unprivileged Windows).
+// TestReadClaudeLocalScope_Symlink drives the INJECTED allowSymlink policy
+// directly (Ruling 3: the policy is computed by the single owner
+// api.OperatorAllowsClientConfigSymlink and passed in — the reader no longer
+// reads any env var). A symlink-to-regular-file ~/.claude.json is REFUSED when
+// allowSymlink=false (→ empty scope) and FOLLOWED when allowSymlink=true. The
+// env-var/strict-mode resolution INTO that bool is tested on the api side
+// (TestEnrich..._PersistedStrictRefusesSymlink). Skips where the OS/permissions
+// cannot create a symlink (unprivileged Windows).
 func TestReadClaudeLocalScope_Symlink(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -372,42 +435,25 @@ func TestReadClaudeLocalScope_Symlink(t *testing.T) {
 		t.Skipf("cannot create symlink on this host (need privilege/Developer Mode): %v", err)
 	}
 
-	// DEFAULT (no opt-in): refuse → empty scope, no error, no hang.
-	t.Run("default_refuses", func(t *testing.T) {
-		t.Setenv("MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK", "")
-		t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "")
-		got, err := ReadClaudeLocalScope(root)
+	// allowSymlink=false: refuse → empty scope, no error, no hang.
+	t.Run("disallowed_refuses", func(t *testing.T) {
+		got, err := ReadClaudeLocalScope(root, false)
 		if err != nil {
-			t.Fatalf("default symlink refusal must NOT error, got: %v", err)
+			t.Fatalf("symlink refusal must NOT error, got: %v", err)
 		}
 		if got.Matched {
-			t.Errorf("default: symlink-to-regular-file must be REFUSED (empty scope), got %+v", got)
+			t.Errorf("allowSymlink=false: symlink-to-regular-file must be REFUSED (empty scope), got %+v", got)
 		}
 	})
 
-	// OPT-IN on a non-strict host: follow the symlink → read the target.
-	t.Run("optin_follows", func(t *testing.T) {
-		t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "")
-		t.Setenv("MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK", "1")
-		got, err := ReadClaudeLocalScope(root)
+	// allowSymlink=true: follow the symlink → read the target.
+	t.Run("allowed_follows", func(t *testing.T) {
+		got, err := ReadClaudeLocalScope(root, true)
 		if err != nil {
-			t.Fatalf("opt-in symlink read: %v", err)
+			t.Fatalf("allowed symlink read: %v", err)
 		}
 		if !got.Matched || !reflect.DeepEqual(got.LocalServers, []string{"linked"}) {
-			t.Errorf("opt-in: symlink-to-regular-file must be FOLLOWED, got %+v", got)
-		}
-	})
-
-	// STRICT mode overrides the opt-in: refuse even with the opt-in set.
-	t.Run("strict_overrides_optin", func(t *testing.T) {
-		t.Setenv("MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK", "1")
-		t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "1")
-		got, err := ReadClaudeLocalScope(root)
-		if err != nil {
-			t.Fatalf("strict-mode symlink refusal must NOT error, got: %v", err)
-		}
-		if got.Matched {
-			t.Errorf("strict mode must REFUSE the symlink even with the opt-in set, got %+v", got)
+			t.Errorf("allowSymlink=true: symlink-to-regular-file must be FOLLOWED, got %+v", got)
 		}
 	})
 }

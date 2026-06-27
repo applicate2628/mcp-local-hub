@@ -111,9 +111,10 @@ func TestProjectsScanP2b_LocalScopeExposed(t *testing.T) {
 	}
 }
 
-// TestProjectsScanP2b_Reconciliation: a .mcp.json server in disabledMcpjsonServers
-// → ProjectEnabled=false; in enabledMcpjsonServers → true; in both → true
-// (override); in neither → true (default).
+// TestProjectsScanP2b_Reconciliation (OPT-IN model): a .mcp.json server in
+// disabledMcpjsonServers → ProjectEnabled=false; in enabledMcpjsonServers → true;
+// in BOTH → false (deny wins, absolute); in neither with NO enableAll → false
+// (un-approved / pending the trust prompt — the opt-IN default).
 func TestProjectsScanP2b_Reconciliation(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()
@@ -158,9 +159,9 @@ func TestProjectsScanP2b_Reconciliation(t *testing.T) {
 		}
 	}
 	check("disabledOne", false) // in disabled, not enabled
-	check("enabledOne", true)   // in enabled only
-	check("bothOne", true)      // in both → enabled wins
-	check("defaultOne", true)   // in neither → default enabled
+	check("enabledOne", true)   // in enabled only → approved
+	check("bothOne", false)     // in both → DENY wins (disabled absolute)
+	check("defaultOne", false)  // in neither + no enableAll → NOT approved (opt-IN)
 
 	// The verbatim toggle arrays must be surfaced too.
 	if out.ProjectScope == nil {
@@ -174,10 +175,11 @@ func TestProjectsScanP2b_Reconciliation(t *testing.T) {
 	}
 }
 
-// TestProjectsScanP2b_NoLocalRecord_DefaultsEnabled: a project with a .mcp.json
-// but NO ~/.claude.json local record → every .mcp.json server is ProjectEnabled
-// (default), and ProjectScope is nil (no local scope matched).
-func TestProjectsScanP2b_NoLocalRecord_DefaultsEnabled(t *testing.T) {
+// TestProjectsScanP2b_NoLocalRecord_DefaultsNotApproved (OPT-IN model): a project
+// with a .mcp.json but NO ~/.claude.json approval record → every .mcp.json server
+// is ProjectEnabled=false (pending the trust prompt), and ProjectScope is nil (no
+// local scope matched).
+func TestProjectsScanP2b_NoLocalRecord_DefaultsNotApproved(t *testing.T) {
 	isolateHome(t) // no ~/.claude.json written
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".mcp.json"),
@@ -197,8 +199,8 @@ func TestProjectsScanP2b_NoLocalRecord_DefaultsEnabled(t *testing.T) {
 	}
 	for _, e := range out.Entries {
 		if e.Name == "only" {
-			if e.ProjectEnabled == nil || !*e.ProjectEnabled {
-				t.Errorf("server with no local record should default ProjectEnabled=true, got %v", e.ProjectEnabled)
+			if e.ProjectEnabled == nil || *e.ProjectEnabled {
+				t.Errorf("server with no approval record should default ProjectEnabled=false (opt-IN), got %v", e.ProjectEnabled)
 			}
 		}
 	}

@@ -54,32 +54,50 @@ type ClaudeLocalScope struct {
 	// Disabled is projects.<key>.disabledMcpjsonServers verbatim (the names of
 	// .mcp.json Project-scope servers the user has disabled for this project).
 	Disabled []string
-	// Enabled is projects.<key>.enabledMcpjsonServers verbatim (names the user
-	// has explicitly re-enabled, overriding Disabled).
+	// Enabled is projects.<key>.enabledMcpjsonServers verbatim (the user's
+	// explicit per-server APPROVE list).
 	Enabled []string
+	// EnableAll is projects.<key>.enableAllProjectMcpServers — the project-wide
+	// "approve every .mcp.json server" flag. When true, an unlisted server (in
+	// neither Enabled nor Disabled) is APPROVED; when false (the default,
+	// including absent/non-bool), an unlisted server is PENDING = NOT approved.
+	// Disabled always wins over EnableAll (deny is absolute).
+	EnableAll bool
 }
 
-// IsMcpjsonServerEnabled applies claude-code's enabled/disabled reconciliation
-// rule for ONE .mcp.json (Project-scope) server name:
+// IsMcpjsonServerEnabled applies claude-code's .mcp.json (Project-scope)
+// approval reconciliation rule for ONE server name. Claude's model is OPT-IN: a
+// .mcp.json server is NOT loaded until the user approves it (verified against the
+// Claude Code settings docs — `enableAllProjectMcpServers`,
+// `enabledMcpjsonServers`, `disabledMcpjsonServers`). An unlisted server with no
+// approve-all is PENDING the trust prompt, i.e. NOT enabled.
 //
-//	a server is ENABLED unless it is in disabledMcpjsonServers AND not
-//	overridden in enabledMcpjsonServers.
+// TOTAL precedence (highest to lowest):
 //
-// enabledMcpjsonServers wins on conflict (the explicit re-enable). A name in
-// neither array is enabled (the default). This is the single owner of the rule
-// so the reader and any future consumer can never re-derive it divergently.
+//  1. name in disabledMcpjsonServers → FALSE (deny wins, absolute — overrides
+//     both an explicit enable entry and enableAll).
+//  2. else name in enabledMcpjsonServers → TRUE (explicit per-server approve).
+//  3. else EnableAll (enableAllProjectMcpServers) → TRUE (project-wide approve).
+//  4. else → FALSE (unlisted + no approve-all = un-approved / pending — the
+//     opt-IN default).
+//
+// This is the single owner of the rule so the reader and any future consumer can
+// never re-derive it divergently.
 func (s ClaudeLocalScope) IsMcpjsonServerEnabled(name string) bool {
-	for _, e := range s.Enabled {
-		if e == name {
-			return true // explicit re-enable wins over a disable entry
-		}
-	}
 	for _, d := range s.Disabled {
 		if d == name {
-			return false
+			return false // deny wins, absolute
 		}
 	}
-	return true
+	for _, e := range s.Enabled {
+		if e == name {
+			return true // explicit per-server approve
+		}
+	}
+	if s.EnableAll {
+		return true // project-wide approve-all
+	}
+	return false // unlisted + no approve-all → un-approved (opt-IN default)
 }
 
 // ReadClaudeLocalScope reads ~/.claude.json (the same single-file user config
@@ -101,7 +119,18 @@ func (s ClaudeLocalScope) IsMcpjsonServerEnabled(name string) bool {
 // comparison key against the fixed home file; the path-traversal threat surface
 // is the project config files (guarded in ProjectScanConfigPaths), not this
 // read of the fixed ~/.claude.json.
-func ReadClaudeLocalScope(root string) (ClaudeLocalScope, error) {
+//
+// allowSymlink is the symlink-follow policy INJECTED FROM ABOVE — the SINGLE
+// owner is api.OperatorAllowsClientConfigSymlink (the canonical predicate the
+// client-config presence gate uses), which honors BOTH the env vars
+// (MCPHUB_REQUIRE_SINGLE_USER_HOME strict-override + MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK
+// opt-in) AND the persisted supervisor-intent strict_mode bit. This package
+// cannot import internal/api (cyclic), so the caller computes the policy and
+// passes the resolved bool — the reader never re-derives it (no local env read),
+// guaranteeing the presence gate and the local reader can never diverge. When
+// true, a symlink-to-regular-file ~/.claude.json is followed; when false, a
+// symlink is refused (→ empty scope).
+func ReadClaudeLocalScope(root string, allowSymlink bool) (ClaudeLocalScope, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ClaudeLocalScope{}, err
@@ -125,16 +154,14 @@ func ReadClaudeLocalScope(root string) (ClaudeLocalScope, error) {
 	//     skip → empty scope (presence gate's "error" verdict; here we never
 	//     surface an error for the home file — a malformed live path simply
 	//     yields no local scope, never a hung scan).
-	//   - symlink → REFUSE (skip → empty scope) UNLESS the operator opt-in
-	//     MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK is set on a non-strict host AND the
-	//     symlink resolves to a regular file — the SAME opt-in the presence gate
-	//     honors via OperatorAllowsClientConfigSymlink(). Strict mode
-	//     (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) overrides the opt-in and keeps the
-	//     refusal. This package cannot import internal/api (cyclic), so it reads
-	//     the SAME canonical env-var names directly (project_scope.go references
-	//     the same env name as the cross-package contract).
+	//   - symlink → REFUSE (skip → empty scope) UNLESS the INJECTED allowSymlink
+	//     policy is true AND the symlink resolves to a regular file — the SAME
+	//     policy the presence gate honors. The policy is computed by the single
+	//     owner (api.OperatorAllowsClientConfigSymlink) and passed in, so the
+	//     local reader never re-derives it and cannot diverge from the presence
+	//     gate (it honors both the env vars AND the persisted strict_mode bit).
 	//   - regular file → read (the normal path).
-	if !claudeLocalPathReadable(path) {
+	if !claudeLocalPathReadable(path, allowSymlink) {
 		return ClaudeLocalScope{}, nil
 	}
 
@@ -196,6 +223,9 @@ func ReadClaudeLocalScope(root string) (ClaudeLocalScope, error) {
 	}
 	out.Disabled = stringSliceFromAny(matchedEntry["disabledMcpjsonServers"])
 	out.Enabled = stringSliceFromAny(matchedEntry["enabledMcpjsonServers"])
+	// enableAllProjectMcpServers is the project-wide approve-all flag; absent or
+	// non-bool coerces to false (the opt-IN default — no blanket approval).
+	out.EnableAll, _ = matchedEntry["enableAllProjectMcpServers"].(bool)
 
 	return out, nil
 }
@@ -206,13 +236,17 @@ func ReadClaudeLocalScope(root string) (ClaudeLocalScope, error) {
 // — meaning "skip, treat as empty local scope, do NOT read" — for a missing /
 // unstatable path, a non-regular special file (directory / FIFO / device /
 // junction), or a refused symlink. It returns true ONLY for a regular file, or
-// for a symlink-to-regular-file when the operator has opted in on a non-strict
-// host (the same accept the presence gate grants).
+// for a symlink-to-regular-file when allowSymlink (injected from above by the
+// single policy owner) is true (the same accept the presence gate grants).
+//
+// allowSymlink is the resolved symlink-follow policy passed down from
+// ReadClaudeLocalScope's caller (api.OperatorAllowsClientConfigSymlink); this
+// gate never re-derives it from the environment.
 //
 // READ-ONLY: it only Lstat/Stat-s the path; it never opens or writes it. A
 // missing file is the common "no local-scope config" case, so it returns false
 // silently (the caller maps that to an empty ClaudeLocalScope, never an error).
-func claudeLocalPathReadable(path string) bool {
+func claudeLocalPathReadable(path string, allowSymlink bool) bool {
 	lst, lerr := os.Lstat(path)
 	if lerr != nil {
 		// Missing → normal no-config case. Any other Lstat fault → still skip
@@ -226,11 +260,11 @@ func claudeLocalPathReadable(path string) bool {
 		return false
 	}
 	if isSymlink {
-		// Presence-gate symlink policy: refuse UNLESS the operator opt-in is
-		// set on a non-strict host AND the link resolves to a regular file.
-		// os.Stat (kernel-level symlink follow) classifies the target, matching
+		// Presence-gate symlink policy: refuse UNLESS the injected allowSymlink
+		// policy is true AND the link resolves to a regular file. os.Stat
+		// (kernel-level symlink follow) classifies the target, matching
 		// probeClientConfigPresence's use of os.Stat over filepath.EvalSymlinks.
-		if operatorAllowsClaudeLocalSymlink() {
+		if allowSymlink {
 			if rst, rstErr := os.Stat(path); rstErr == nil && rst.Mode().IsRegular() {
 				return true
 			}
@@ -238,28 +272,6 @@ func claudeLocalPathReadable(path string) bool {
 		return false
 	}
 	return true // regular file
-}
-
-// operatorAllowsClaudeLocalSymlink mirrors api.OperatorAllowsClientConfigSymlink
-// (internal/api/client_write_init.go:772-778) for the clients package, which
-// cannot import internal/api (that would be a cyclic dependency). It reads the
-// SAME canonical env-var name strings — the cross-package contract that
-// project_scope.go also references — so the symlink opt-in stays consistent with
-// the presence gate: strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1|true) always
-// refuses; otherwise MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1|true permits a
-// symlink-to-regular-file.
-func operatorAllowsClaudeLocalSymlink() bool {
-	if envTruthy(os.Getenv("MCPHUB_REQUIRE_SINGLE_USER_HOME")) {
-		return false // strict mode overrides the opt-in (corp-managed hosts)
-	}
-	return envTruthy(os.Getenv("MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK"))
-}
-
-// envTruthy applies the same "1" or case-insensitive "true" parse the api
-// package uses for both env vars (client_write_init.go:776-777, 860-862).
-func envTruthy(v string) bool {
-	v = strings.TrimSpace(v)
-	return v == "1" || strings.EqualFold(v, "true")
 }
 
 // stringSliceFromAny coerces a parsed JSON []any of strings into a []string,
