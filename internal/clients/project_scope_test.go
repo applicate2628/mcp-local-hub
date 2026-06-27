@@ -88,7 +88,7 @@ func TestProjectScopeClients_AreRegistryClients(t *testing.T) {
 func TestProjectScanConfigPaths_Valid(t *testing.T) {
 	root := t.TempDir()
 
-	paths, err := ProjectScanConfigPaths(root)
+	_, paths, err := ProjectScanConfigPaths(root)
 	if err != nil {
 		t.Fatalf("ProjectScanConfigPaths(%q) error = %v", root, err)
 	}
@@ -149,7 +149,7 @@ func TestProjectScanConfigPaths_PathSafety_Rejects(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			paths, err := ProjectScanConfigPaths(c.root)
+			_, paths, err := ProjectScanConfigPaths(c.root)
 			if err == nil {
 				t.Fatalf("ProjectScanConfigPaths(%q) = %v, want error", c.root, paths)
 			}
@@ -181,14 +181,17 @@ func TestProjectScanConfigPaths_AbsoluteTraversalCollapses(t *testing.T) {
 	if dirty == filepath.Clean(dirty) {
 		t.Fatalf("test bug: constructed path %q is already clean", dirty)
 	}
-	if _, err := ProjectScanConfigPaths(dirty); err == nil {
+	if _, _, err := ProjectScanConfigPaths(dirty); err == nil {
 		t.Fatalf("ProjectScanConfigPaths(%q) accepted a non-clean absolute path", dirty)
 	}
 }
 
 // TestProjectScanConfigPaths_SymlinkContainedToDir accepts a symlinked root
 // that resolves to a real directory, and the returned per-client paths are
-// joined onto the RESOLVED real target (not the link path).
+// joined onto the RESOLVED real target (not the link path). It ALSO asserts the
+// returned realRoot equals the resolved real target — the finding-1 contract:
+// the function exposes the SINGLE resolution it used so the caller can thread it
+// into the claude-local lookup (no second EvalSymlinks).
 func TestProjectScanConfigPaths_SymlinkContainedToDir(t *testing.T) {
 	target := t.TempDir()
 	linkParent := t.TempDir()
@@ -202,13 +205,20 @@ func TestProjectScanConfigPaths_SymlinkContainedToDir(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	paths, err := ProjectScanConfigPaths(link)
+	realRoot, paths, err := ProjectScanConfigPaths(link)
 	if err != nil {
 		t.Fatalf("ProjectScanConfigPaths(symlink→dir) error = %v", err)
 	}
 	realTarget, err := filepath.EvalSymlinks(target)
 	if err != nil {
 		t.Fatalf("EvalSymlinks(target): %v", err)
+	}
+	// The returned realRoot is the symlink-RESOLVED root (the real target), NOT
+	// the link path — this is what the caller threads into the claude-local
+	// lookup so a symlinked root matches the projects.<key> Claude Code writes
+	// at the real path.
+	if realRoot != realTarget {
+		t.Errorf("returned realRoot = %q, want resolved real target %q (not the link path)", realRoot, realTarget)
 	}
 	wantClaude := filepath.Join(realTarget, ".mcp.json")
 	if paths["claude-code"] != wantClaude {
@@ -231,7 +241,7 @@ func TestProjectScanConfigPaths_SymlinkToFileRejected(t *testing.T) {
 		}
 		t.Fatalf("symlink: %v", err)
 	}
-	if _, err := ProjectScanConfigPaths(link); err == nil {
+	if _, _, err := ProjectScanConfigPaths(link); err == nil {
 		t.Fatalf("ProjectScanConfigPaths(symlink→file) accepted a non-directory target")
 	}
 }
@@ -270,7 +280,7 @@ func TestProjectScanConfigPaths_IntermediateSymlinkEscapeDropped(t *testing.T) {
 				t.Fatalf("symlink: %v", err)
 			}
 
-			paths, err := ProjectScanConfigPaths(root)
+			_, paths, err := ProjectScanConfigPaths(root)
 			if err != nil {
 				t.Fatalf("ProjectScanConfigPaths(%q) error = %v", root, err)
 			}
@@ -315,7 +325,7 @@ func TestProjectScanConfigPaths_RealIntermediateDirIncluded(t *testing.T) {
 		t.Fatalf("mkdir .vscode: %v", err)
 	}
 
-	paths, err := ProjectScanConfigPaths(root)
+	_, paths, err := ProjectScanConfigPaths(root)
 	if err != nil {
 		t.Fatalf("ProjectScanConfigPaths(%q) error = %v", root, err)
 	}
@@ -373,7 +383,7 @@ func TestProjectScanConfigPaths_FinalFileSymlinkEscapeDropped(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	paths, err := ProjectScanConfigPaths(root)
+	_, paths, err := ProjectScanConfigPaths(root)
 	if err != nil {
 		t.Fatalf("ProjectScanConfigPaths(%q) error = %v", root, err)
 	}
@@ -419,7 +429,7 @@ func TestProjectScanConfigPaths_FinalFileSymlinkContainedIncluded(t *testing.T) 
 		t.Fatalf("symlink: %v", err)
 	}
 
-	paths, err := ProjectScanConfigPaths(root)
+	_, paths, err := ProjectScanConfigPaths(root)
 	if err != nil {
 		t.Fatalf("ProjectScanConfigPaths(%q) error = %v", root, err)
 	}
@@ -446,7 +456,7 @@ func TestProjectScanConfigPaths_ForwardSlashRoot(t *testing.T) {
 		t.Fatalf("test bug: ToSlash(%q) did not change separators on Windows", root)
 	}
 
-	paths, err := ProjectScanConfigPaths(fwd)
+	_, paths, err := ProjectScanConfigPaths(fwd)
 	if err != nil {
 		t.Fatalf("ProjectScanConfigPaths(%q) (forward-slash) error = %v; want accepted", fwd, err)
 	}
@@ -472,7 +482,7 @@ func TestProjectScanConfigPaths_ForwardSlashTraversalRejected(t *testing.T) {
 	// it becomes `C:\dev\..\etc`; Clean collapses to `C:\etc` ≠ normalized
 	// input, so it must be rejected (never stat'd).
 	dirty := "C:/dev/../etc"
-	if _, err := ProjectScanConfigPaths(dirty); err == nil {
+	if _, _, err := ProjectScanConfigPaths(dirty); err == nil {
 		t.Fatalf("ProjectScanConfigPaths(%q) accepted a forward-slash traversal root", dirty)
 	}
 }
@@ -495,7 +505,7 @@ func TestProjectScanConfigPaths_IntermediateSymlinkContainedIncluded(t *testing.
 		t.Fatalf("symlink: %v", err)
 	}
 
-	paths, err := ProjectScanConfigPaths(root)
+	_, paths, err := ProjectScanConfigPaths(root)
 	if err != nil {
 		t.Fatalf("ProjectScanConfigPaths(%q) error = %v", root, err)
 	}

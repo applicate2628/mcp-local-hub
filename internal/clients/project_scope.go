@@ -92,6 +92,17 @@ func ProjectScopes() []ProjectScope {
 // has only a .cursor/mcp.json still returns paths for all three clients and the
 // scanner reports the absent ones as having no servers.
 //
+// It returns the symlink-RESOLVED real root (realRoot) as the first value: the
+// SINGLE canonical resolution of the (possibly symlinked) input root, used both
+// as the join base for the per-client paths AND threaded back to the caller so
+// downstream consumers (e.g. the ~/.claude.json LOCAL-scope lookup) key off the
+// SAME resolved path the scan used. Without this, a symlinked root would be
+// scanned at its real target but matched against ~/.claude.json under its
+// UNRESOLVED form — and Claude Code writes the projects.<key> at the REAL path,
+// so the lookup would silently miss. Sharing one resolution makes that
+// divergence structurally impossible and avoids a second EvalSymlinks in the
+// caller. On any rejection realRoot is "".
+//
 // # Threat model (the security surface for P2a)
 //
 // `root` is UNTRUSTED — it arrives from the GUI's GET /api/projects/scan?root=
@@ -137,9 +148,9 @@ func ProjectScopes() []ProjectScope {
 // it never echoes the caller's raw root path nor any resolved internal path, so
 // the HTTP handler can surface it without leaking filesystem layout (the
 // handler still maps it to a 400 with a generic body; see the gui handler).
-func ProjectScanConfigPaths(root string) (map[string]string, error) {
+func ProjectScanConfigPaths(root string) (string, map[string]string, error) {
 	if root == "" {
-		return nil, fmt.Errorf("project root is required")
+		return "", nil, fmt.Errorf("project root is required")
 	}
 	// Separator normalization BEFORE the IsAbs + clean round-trip guard. The
 	// P1 Projects frontend canonicalizes roots with FORWARD slashes
@@ -154,14 +165,14 @@ func ProjectScanConfigPaths(root string) (map[string]string, error) {
 	// normalized input → still REJECTED by the round-trip guard.
 	root = filepath.FromSlash(root)
 	if !filepath.IsAbs(root) {
-		return nil, fmt.Errorf("project root must be an absolute path")
+		return "", nil, fmt.Errorf("project root must be an absolute path")
 	}
 	// Clean + round-trip equality: reject any root that is not already in
 	// canonical clean form (embeds `..`, `.`, or redundant separators). This
 	// denies traversal segments smuggled through a not-yet-collapsed path.
 	cleanRoot := filepath.Clean(root)
 	if cleanRoot != root {
-		return nil, fmt.Errorf("project root must be a clean absolute path")
+		return "", nil, fmt.Errorf("project root must be a clean absolute path")
 	}
 
 	st, err := os.Stat(cleanRoot)
@@ -169,10 +180,10 @@ func ProjectScanConfigPaths(root string) (map[string]string, error) {
 		// Do NOT wrap err — an *os.PathError embeds the absolute path, which
 		// would leak the (attacker-supplied, but possibly host-revealing) root
 		// back to the caller. A flat message keeps it leak-safe.
-		return nil, fmt.Errorf("project root does not exist or is not accessible")
+		return "", nil, fmt.Errorf("project root does not exist or is not accessible")
 	}
 	if !st.IsDir() {
-		return nil, fmt.Errorf("project root is not a directory")
+		return "", nil, fmt.Errorf("project root is not a directory")
 	}
 
 	// Symlink containment: resolve the real target and re-validate it is a
@@ -181,11 +192,11 @@ func ProjectScanConfigPaths(root string) (map[string]string, error) {
 	// the real directory, not through a redirecting link.
 	realRoot, err := filepath.EvalSymlinks(cleanRoot)
 	if err != nil {
-		return nil, fmt.Errorf("project root could not be resolved")
+		return "", nil, fmt.Errorf("project root could not be resolved")
 	}
 	rst, err := os.Stat(realRoot)
 	if err != nil || !rst.IsDir() {
-		return nil, fmt.Errorf("project root does not resolve to a directory")
+		return "", nil, fmt.Errorf("project root does not resolve to a directory")
 	}
 
 	out := map[string]string{}
@@ -227,7 +238,7 @@ func ProjectScanConfigPaths(root string) (map[string]string, error) {
 		}
 		out[ps.Client] = candidate
 	}
-	return out, nil
+	return realRoot, out, nil
 }
 
 // parentContainedInRoot reports whether the PARENT directory of candidate,

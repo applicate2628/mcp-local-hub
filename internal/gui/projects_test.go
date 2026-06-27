@@ -132,7 +132,7 @@ func sortEntriesByName(es []api.ScanEntry) {
 func TestProjectsScan_ResolverDisjointFromGlobal(t *testing.T) {
 	isolateHome(t)
 	root := t.TempDir()
-	proj, err := clients.ProjectScanConfigPaths(root)
+	_, proj, err := clients.ProjectScanConfigPaths(root)
 	if err != nil {
 		t.Fatalf("ProjectScanConfigPaths: %v", err)
 	}

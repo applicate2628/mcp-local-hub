@@ -52,7 +52,13 @@ func (s *Server) projectsScanHandler(w http.ResponseWriter, r *http.Request) {
 	// joins). Its error messages are already leak-safe, but we still redact at
 	// the boundary so neither the resolver message nor any wrapped path reaches
 	// the wire — the client gets a stable code + fixed body.
-	configPaths, err := clients.ProjectScanConfigPaths(root)
+	//
+	// realRoot is the SINGLE symlink-resolved root the scan keys off (its
+	// EvalSymlinks output). We thread it — not the raw query `root` — into the
+	// claude-local lookup below so a symlinked project root is matched against
+	// ~/.claude.json under the SAME real path the scan used (Claude Code writes
+	// projects.<key> at the real path; the unresolved root would silently miss).
+	realRoot, configPaths, err := clients.ProjectScanConfigPaths(root)
 	if err != nil {
 		writeAPIErrorRedacted(w, err, http.StatusBadRequest, "PROJECT_ROOT_INVALID", "/api/projects/scan")
 		return
@@ -76,11 +82,12 @@ func (s *Server) projectsScanHandler(w http.ResponseWriter, r *http.Request) {
 	// — the SEPARATE private-to-user server set (ScanResult.ProjectScope) + the
 	// per-entry .mcp.json enabled/disabled reconciliation (ScanEntry.ProjectEnabled).
 	// READ-ONLY: reads the fixed ~/.claude.json once, mutates the in-memory result,
-	// writes nothing. `root` here is the raw (already validated by
-	// ProjectScanConfigPaths above) query value; the local-scope match canonicalizes
-	// it against the projects.<key> form, and it is only a comparison key against the
+	// writes nothing. We pass `realRoot` — the symlink-resolved root the scan keyed
+	// off — NOT the raw query value, so a symlinked project root is matched against
+	// the projects.<key> form Claude Code writes (the real path). The lookup
+	// canonicalizes it for comparison and it is only a comparison key against the
 	// fixed home file — not a filesystem-read surface.
-	if err := api.EnrichProjectClaudeLocalScope(result, root); err != nil {
+	if err := api.EnrichProjectClaudeLocalScope(result, realRoot); err != nil {
 		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "PROJECT_SCAN_FAILED", "/api/projects/scan")
 		return
 	}

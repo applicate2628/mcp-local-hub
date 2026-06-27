@@ -285,6 +285,83 @@ func TestProjectsScanP2b_GlobalScanUnchanged(t *testing.T) {
 	}
 }
 
+// TestProjectsScanP2b_SymlinkedRoot_LocalScopeViaRealPath is the finding-1
+// proof: when the scanned ?root is an allowed SYMLINK, the scan resolves it to
+// the REAL root and scans the real paths — and the ~/.claude.json LOCAL-scope
+// lookup MUST be keyed off that SAME resolved real path. Claude Code writes the
+// projects.<key> at the REAL filesystem path, so a lookup keyed off the
+// unresolved symlink path would canonicalize to the link path and MISS the key,
+// silently dropping the project's Local-scope + reconciliation.
+//
+// We key the synthetic ~/.claude.json projects.<key> at the RESOLVED real root,
+// then scan via the SYMLINK. The Local-scope set + the .mcp.json reconciliation
+// must be present — which is only true if the handler threaded the resolved real
+// root into EnrichProjectClaudeLocalScope.
+func TestProjectsScanP2b_SymlinkedRoot_LocalScopeViaRealPath(t *testing.T) {
+	isolateHome(t)
+
+	// Real project dir with a .mcp.json (Project scope).
+	realRoot := t.TempDir()
+	mustWrite(t, filepath.Join(realRoot, ".mcp.json"),
+		`{"mcpServers":{"projServer":{"command":"node"}}}`)
+
+	// A symlink that points at the real project dir; we scan THROUGH it.
+	link := filepath.Join(t.TempDir(), "projlink")
+	if err := os.Symlink(realRoot, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("directory symlink unsupported on this host: %v", err)
+		}
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// The projects.<key> is written at the RESOLVED real root (what Claude Code
+	// writes) — NOT the link path. EvalSymlinks mirrors the handler's resolution.
+	resolvedReal, err := filepath.EvalSymlinks(realRoot)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(realRoot): %v", err)
+	}
+	key := fwdSlashKey(resolvedReal)
+	writeSyntheticClaudeJSON(t, `{"projects":{"`+jsonEscPath(key)+`":{`+
+		`"mcpServers":{"localOnly":{}},`+
+		`"disabledMcpjsonServers":["projServer"]}}}`)
+
+	s := NewServer(Config{})
+	rec := getProjectScan(t, s, link) // scan VIA the symlink
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var out api.ScanResult
+	if derr := json.NewDecoder(rec.Body).Decode(&out); derr != nil {
+		t.Fatalf("decode: %v", derr)
+	}
+
+	// Local scope matched via the resolved real path → ProjectScope present.
+	if out.ProjectScope == nil {
+		t.Fatalf("ProjectScope is nil: the local-scope lookup did NOT match the projects.<key> " +
+			"written at the resolved real path (symlinked root keyed off the unresolved link path)")
+	}
+	if !reflect.DeepEqual(out.ProjectScope.LocalServers, []string{"localOnly"}) {
+		t.Errorf("ProjectScope.LocalServers = %v, want [localOnly]", out.ProjectScope.LocalServers)
+	}
+	// Reconciliation applied via the resolved-path match: projServer is disabled.
+	var found bool
+	for _, e := range out.Entries {
+		if e.Name == "projServer" {
+			found = true
+			if e.ProjectEnabled == nil {
+				t.Fatalf("projServer ProjectEnabled is nil: reconciliation NOT applied " +
+					"(local-scope lookup missed the resolved-path key)")
+			}
+			if *e.ProjectEnabled {
+				t.Errorf("projServer ProjectEnabled = true, want false (it is in disabledMcpjsonServers)")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("projServer (.mcp.json via the symlinked root) absent from entries (%v)", entryNames(out))
+	}
+}
+
 // TestProjectsScanP2b_NoWrite_ClaudeJSONUntouched: the scan must not write the
 // synthetic ~/.claude.json — byte-identical + same mtime after a scan, and no
 // new file under the home.
@@ -314,14 +391,25 @@ func TestProjectsScanP2b_NoWrite_ClaudeJSONUntouched(t *testing.T) {
 	}
 }
 
-// TestProjectsScanP2b_LiveClaudeJSON_Untouched is the LIVE-config-safety proof:
-// it captures the developer's REAL ~/.claude.json (resolved BEFORE isolation),
-// then runs a full project scan under the isolated home, then re-checks the REAL
-// file is byte-identical. The reader CANNOT reach the real file (HOME/USERPROFILE
-// are redirected during the scan), so this guards the contract rather than the
-// mechanism — but it makes a regression that un-isolated the read immediately
-// fail here instead of silently corrupting the operator's file.
-func TestProjectsScanP2b_LiveClaudeJSON_Untouched(t *testing.T) {
+// TestProjectsScanP2b_LiveClaudeJSON_Unreachable is the LIVE-config-safety proof,
+// asserted STRUCTURALLY rather than by byte-comparing the operator's real file.
+//
+// The earlier form snapshotted the developer's REAL ~/.claude.json and asserted
+// it was byte-identical (and same mtime) after a scan. That is flaky for a reason
+// unrelated to P2b: Claude Code (the live session running this very test) may
+// LEGITIMATELY write its own ~/.claude.json mid-test, tripping the byte/mtime
+// compare even though the scan never touched the file. The scan's real read-only
+// contract is already proven by TestProjectsScanP2b_NoWrite_ClaudeJSONUntouched
+// (synthetic, fully isolated). What remains worth guarding here is that the scan,
+// running under the redirected HOME, STRUCTURALLY cannot REACH the real path at
+// all — so we assert that instead of comparing a file another process owns.
+//
+// The reader resolves ~/.claude.json via os.UserHomeDir(), so the load-bearing
+// invariant is: under isolateHome(t), os.UserHomeDir() returns the isolated temp
+// home, and the real ~/.claude.json is NOT under that isolated home. A regression
+// that un-isolated the read (e.g. hardcoding the real home) fails the home-redirect
+// assertion here instead of silently corrupting the operator's file.
+func TestProjectsScanP2b_LiveClaudeJSON_Unreachable(t *testing.T) {
 	// Resolve the REAL home BEFORE any isolation. os.UserHomeDir() here reads the
 	// process env, which TestMain did NOT redirect for HOME/USERPROFILE, so this
 	// is the operator's actual home.
@@ -331,50 +419,58 @@ func TestProjectsScanP2b_LiveClaudeJSON_Untouched(t *testing.T) {
 	}
 	realClaude := filepath.Join(realHome, ".claude.json")
 
-	var hadFile bool
-	var beforeBytes []byte
-	var beforeMod int64
-	if info, statErr := os.Stat(realClaude); statErr == nil && !info.IsDir() {
-		hadFile = true
-		beforeMod = info.ModTime().UnixNano()
-		beforeBytes, err = os.ReadFile(realClaude)
-		if err != nil {
-			t.Skipf("cannot read real ~/.claude.json for the safety snapshot: %v", err)
-		}
-	}
-
 	// Now isolate and run a scan that exercises the local-scope reader.
-	isolateHome(t)
+	isolatedHome := isolateHome(t)
 	root := t.TempDir()
 	mustWrite(t, filepath.Join(root, ".mcp.json"), `{"mcpServers":{"p":{"command":"n"}}}`)
 	key := fwdSlashKey(root)
 	writeSyntheticClaudeJSON(t, `{"projects":{"`+jsonEscPath(key)+`":{"mcpServers":{"l":{}}}}}`)
+
+	// STRUCTURAL guard 1: under isolation, os.UserHomeDir() (the exact resolver the
+	// reader uses) must point at the isolated temp home, NOT the operator's home.
+	resolvedHome, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("os.UserHomeDir under isolation: %v", err)
+	}
+	if resolvedHome != isolatedHome {
+		t.Fatalf("LIVE-CONFIG-SAFETY VIOLATION: os.UserHomeDir()=%q under isolation, want isolated home %q "+
+			"(the reader would read the operator's real ~/.claude.json)", resolvedHome, isolatedHome)
+	}
+
+	// STRUCTURAL guard 2: the real ~/.claude.json path must NOT live under the
+	// isolated home, i.e. the scan's read surface and the real file are disjoint.
+	if pathUnder(isolatedHome, realClaude) {
+		t.Fatalf("test premise broken: real ~/.claude.json %q is under the isolated home %q", realClaude, isolatedHome)
+	}
 
 	s := NewServer(Config{})
 	rec := getProjectScan(t, s, root)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
 	}
-
-	// Re-check the REAL file is byte-identical (and same mtime / still absent).
-	if hadFile {
-		afterBytes, rerr := os.ReadFile(realClaude)
-		if rerr != nil {
-			t.Fatalf("real ~/.claude.json became unreadable after scan: %v", rerr)
-		}
-		if !reflect.DeepEqual(beforeBytes, afterBytes) {
-			t.Fatalf("LIVE-CONFIG-SAFETY VIOLATION: real ~/.claude.json content changed across a scan")
-		}
-		info, serr := os.Stat(realClaude)
-		if serr != nil {
-			t.Fatalf("real ~/.claude.json stat failed after scan: %v", serr)
-		}
-		if info.ModTime().UnixNano() != beforeMod {
-			t.Fatalf("LIVE-CONFIG-SAFETY VIOLATION: real ~/.claude.json mtime changed across a scan")
-		}
-	} else {
-		if _, serr := os.Stat(realClaude); serr == nil {
-			t.Fatalf("LIVE-CONFIG-SAFETY VIOLATION: scan CREATED a real ~/.claude.json that did not exist")
-		}
+	// And the scan saw the SYNTHETIC local scope (proving it read the isolated
+	// file, not the real one).
+	var out api.ScanResult
+	if derr := json.NewDecoder(rec.Body).Decode(&out); derr != nil {
+		t.Fatalf("decode: %v", derr)
 	}
+	if out.ProjectScope == nil || !reflect.DeepEqual(out.ProjectScope.LocalServers, []string{"l"}) {
+		t.Fatalf("scan did not read the SYNTHETIC isolated ~/.claude.json (ProjectScope=%+v); "+
+			"a read of the real file would not carry the synthetic server 'l'", out.ProjectScope)
+	}
+}
+
+// pathUnder reports whether path is equal to, or under, base. Both are compared
+// after Clean; case-insensitively on Windows.
+func pathUnder(base, path string) bool {
+	base = filepath.Clean(base)
+	path = filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		base = strings.ToLower(base)
+		path = strings.ToLower(path)
+	}
+	if base == path {
+		return true
+	}
+	return strings.HasPrefix(path, base+string(filepath.Separator))
 }

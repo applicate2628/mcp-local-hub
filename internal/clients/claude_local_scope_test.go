@@ -193,6 +193,88 @@ func TestReadClaudeLocalScope_ToggleArrays(t *testing.T) {
 	}
 }
 
+// TestReadClaudeLocalScope_DuplicateKeyDeterministic proves the finding-2 fix:
+// when ~/.claude.json has TWO projects.<key> entries that canonicalize to the
+// SAME key, the reader ALWAYS picks the first by SORTED raw key (not a random
+// map-iteration winner). Each colliding entry carries a DISTINCT server set so
+// we can tell which one was chosen, and the read is repeated several times to
+// prove the pick is stable across Go's randomized map iteration order.
+//
+// Cross-platform collision: a trailing-slash vs no-trailing-slash key both
+// Clean to the same canonical key. Sorted, the shorter (no trailing slash) raw
+// key wins ("/dev/proj" < "/dev/proj/"; "C:/dev/proj" < "C:/dev/proj/").
+func TestReadClaudeLocalScope_DuplicateKeyDeterministic(t *testing.T) {
+	root := osRoot(t, "dev", "proj")
+	// Two raw keys that Clean to the same canonical key but differ by a trailing
+	// slash. The forward-slash form keeps the JSON source simple on both OSes.
+	base := strings.ReplaceAll(root, "\\", "/") // e.g. C:/dev/proj or /dev/proj
+	keyNoSlash := base                          // sorted-FIRST (shorter prefix)
+	keyWithSlash := base + "/"                  // sorted-second
+
+	// keyNoSlash → server "first-wins"; keyWithSlash → server "second-loses".
+	body := `{"projects":{` +
+		`"` + jsonEsc(keyNoSlash) + `":{"mcpServers":{"first-wins":{}}},` +
+		`"` + jsonEsc(keyWithSlash) + `":{"mcpServers":{"second-loses":{}}}` +
+		`}}`
+
+	// Sanity: the two raw keys must canonicalize identically (a real collision).
+	if canonicalClaudeProjectKey(keyNoSlash) != canonicalClaudeProjectKey(keyWithSlash) {
+		t.Fatalf("test bug: %q and %q do not collide canonically", keyNoSlash, keyWithSlash)
+	}
+
+	// Repeat the read; Go randomizes map iteration so an order-dependent bug would
+	// surface as a flaky winner across iterations. The sorted-first rule must pick
+	// "first-wins" every time.
+	for i := 0; i < 16; i++ {
+		setSyntheticHome(t, body)
+		got, err := ReadClaudeLocalScope(root)
+		if err != nil {
+			t.Fatalf("iteration %d: read: %v", i, err)
+		}
+		if !got.Matched {
+			t.Fatalf("iteration %d: expected a match for colliding keys", i)
+		}
+		if !reflect.DeepEqual(got.LocalServers, []string{"first-wins"}) {
+			t.Fatalf("iteration %d: LocalServers = %v, want [first-wins] (sorted-first raw key %q must win deterministically)",
+				i, got.LocalServers, keyNoSlash)
+		}
+	}
+}
+
+// TestReadClaudeLocalScope_DuplicateKeyDeterministic_WindowsCaseFold is the
+// Windows-specific collision: two keys differing ONLY by drive-letter case
+// (`C:/dev/proj` vs `c:/dev/proj`) both case-fold to the same canonical key.
+// Sorted, the uppercase-drive key wins ('C' 0x43 < 'c' 0x63).
+func TestReadClaudeLocalScope_DuplicateKeyDeterministic_WindowsCaseFold(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("drive-letter case-fold collision is Windows-specific")
+	}
+	root := osRoot(t, "dev", "proj")
+	keyUpper := projectKey("fwd-upper", root) // C:/dev/proj — sorted-FIRST
+	keyLower := projectKey("fwd-lower", root) // c:/dev/proj — sorted-second
+
+	body := `{"projects":{` +
+		`"` + jsonEsc(keyUpper) + `":{"mcpServers":{"upper-wins":{}}},` +
+		`"` + jsonEsc(keyLower) + `":{"mcpServers":{"lower-loses":{}}}` +
+		`}}`
+
+	if canonicalClaudeProjectKey(keyUpper) != canonicalClaudeProjectKey(keyLower) {
+		t.Fatalf("test bug: %q and %q do not collide canonically", keyUpper, keyLower)
+	}
+
+	for i := 0; i < 16; i++ {
+		setSyntheticHome(t, body)
+		got, err := ReadClaudeLocalScope(root)
+		if err != nil {
+			t.Fatalf("iteration %d: read: %v", i, err)
+		}
+		if !reflect.DeepEqual(got.LocalServers, []string{"upper-wins"}) {
+			t.Fatalf("iteration %d: LocalServers = %v, want [upper-wins] (sorted-first raw key %q must win)",
+				i, got.LocalServers, keyUpper)
+		}
+	}
+}
+
 // TestReadClaudeLocalScope_ReadOnly_ByteIdentical proves the reader writes
 // NOTHING: the synthetic ~/.claude.json is byte-identical (and same mtime) after
 // a read, and no sibling file is created.

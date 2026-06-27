@@ -130,10 +130,24 @@ func ReadClaudeLocalScope(root string) (ClaudeLocalScope, error) {
 		return ClaudeLocalScope{}, nil
 	}
 
+	// DETERMINISTIC match. Two raw projects.<key> entries can canonicalize to the
+	// same key (e.g. `C:/dev/proj` and `c:/dev/proj` both case-fold to the same
+	// key on Windows). Go map iteration order is randomized, so a bare
+	// `for k := range projects` would pick a colliding entry non-deterministically
+	// — the same scan could surface a different Local-scope set across runs. Rule:
+	// iterate the raw keys in SORTED order and take the FIRST whose canonical form
+	// matches (first-by-sorted-raw-key on a canonical collision). The pick is
+	// stable across runs and across hosts.
+	rawKeys := make([]string, 0, len(projects))
+	for k := range projects {
+		rawKeys = append(rawKeys, k)
+	}
+	sort.Strings(rawKeys)
+
 	var matchedEntry map[string]any
-	for k, v := range projects {
+	for _, k := range rawKeys {
 		if canonicalClaudeProjectKey(k) == wantKey {
-			matchedEntry, _ = v.(map[string]any)
+			matchedEntry, _ = projects[k].(map[string]any)
 			break
 		}
 	}
