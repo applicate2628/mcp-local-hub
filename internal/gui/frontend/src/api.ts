@@ -209,6 +209,24 @@ export async function getExtractManifest(client: string, server: string): Promis
   return payload.yaml ?? "";
 }
 
+// CatalogNames is the set of shipped/supported server names from GET
+// /api/catalog. The full {name, description, kind} projection is consumed by
+// the Catalog screen; this thin helper returns only the name set, which is all
+// the D2 cold re-enable Re-add flow needs to decide "is <name> in the catalog?"
+// — the secret-safe branch (catalog match → shipped-manifest prefill) vs the
+// honest-banner blank branch (no match → operator re-enters command/secrets).
+export async function getCatalogNames(): Promise<Set<string>> {
+  const body = await fetchOrThrow<{ catalog?: Array<{ name?: string }> }>(
+    "/api/catalog",
+    "object",
+  );
+  const names = new Set<string>();
+  for (const row of Array.isArray(body.catalog) ? body.catalog : []) {
+    if (typeof row?.name === "string" && row.name) names.add(row.name);
+  }
+  return names;
+}
+
 // postInitClientConfig drives the Servers matrix "Initialize <client>"
 // affordance (v0.4.5). Posts a JSON body naming the client adapter
 // whose empty stub should be seeded. Resolves to the structured

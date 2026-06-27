@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, cleanup, waitFor } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
-import { AddServerScreen } from "./AddServer";
+import { AddServerScreen, parseAddServerQuery } from "./AddServer";
 
 const mockFetch = vi.fn();
 beforeEach(() => {
@@ -707,5 +707,150 @@ describe("AddServerScreen — create save follow-up edits", () => {
       .map((r) => JSON.parse(r.body ?? "{}") as { name?: string; yaml?: string });
     expect(createBodies[1].name).toBe("demo");
     expect(createBodies[1].yaml).toContain("command: 'node2'");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// D2 — secret-safe cold re-enable pre-fill (?readd=<name>).
+// ─────────────────────────────────────────────────────────────────────────
+describe("parseAddServerQuery — D2 ?readd= param", () => {
+  afterEach(() => {
+    window.location.hash = "";
+  });
+
+  it("extracts readd from the hash (disjoint from server/from-client)", () => {
+    window.location.hash = "#/add-server?readd=memory";
+    const q = parseAddServerQuery();
+    expect(q.readd).toBe("memory");
+    expect(q.server).toBe("");
+    expect(q.fromClient).toBe("");
+  });
+
+  it("returns empty readd for the A1 extract hash (server + from-client only)", () => {
+    window.location.hash = "#/add-server?server=ghost&from-client=cursor";
+    const q = parseAddServerQuery();
+    expect(q.readd).toBe("");
+    expect(q.server).toBe("ghost");
+    expect(q.fromClient).toBe("cursor");
+  });
+
+  it("returns all-empty for a bare add-server hash", () => {
+    window.location.hash = "#/add-server";
+    const q = parseAddServerQuery();
+    expect(q.readd).toBe("");
+    expect(q.server).toBe("");
+    expect(q.fromClient).toBe("");
+  });
+});
+
+describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
+  afterEach(() => {
+    window.location.hash = "";
+  });
+
+  it("a NON-catalog ?readd= seeds ONLY the name + honest banner and NEVER fetches extract-manifest", async () => {
+    window.location.hash = "#/add-server?readd=customsrv";
+    const urls: string[] = [];
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      urls.push(url);
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url.startsWith("/api/catalog")) {
+        // customsrv is NOT a shipped/supported server.
+        return Promise.resolve(jsonResponse({ catalog: [{ name: "memory", description: "", kind: "global" }] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(<AddServerScreen />);
+
+    // The name field is seeded from the param.
+    await waitFor(() => {
+      const nameInput = document.querySelector<HTMLInputElement>("#field-name");
+      expect(nameInput?.value).toBe("customsrv");
+    });
+    // Honest banner: re-enter command/args/secrets; not in the catalog.
+    await waitFor(() => {
+      expect(screen.getByTestId("banner").textContent).toContain("Re-adding customsrv");
+    });
+    expect(screen.getByTestId("banner").textContent).toContain("Not found in the catalog");
+
+    // INVARIANT: the extract-manifest path is NEVER touched on the readd branch
+    // (it would 404 + carry the client env verbatim = a literal-secret re-leak).
+    expect(urls.some((u) => u.includes("/api/extract-manifest"))).toBe(false);
+    // And no shipped-manifest read either (no catalog match).
+    expect(urls.some((u) => u.startsWith("/api/manifest/get"))).toBe(false);
+  });
+
+  it("a CATALOG-known ?readd= prefills from the SHIPPED manifest (command/args present, env as a secret: ref — no literal), never extract-manifest", async () => {
+    window.location.hash = "#/add-server?readd=wolfram";
+    const urls: string[] = [];
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      urls.push(url);
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url.startsWith("/api/catalog")) {
+        return Promise.resolve(jsonResponse({ catalog: [{ name: "wolfram", description: "", kind: "global" }] }));
+      }
+      if (url.startsWith("/api/manifest/get")) {
+        // The SHIPPED manifest carries a `secret:` ref, NOT a literal value —
+        // this is the secret-safe source D2 relies on.
+        return Promise.resolve(jsonResponse({
+          yaml:
+            "name: 'wolfram'\nkind: global\ntransport: stdio-bridge\ncommand: 'node'\n" +
+            "base_args:\n  - 'index.js'\nenv:\n  WOLFRAM_LLM_APP_ID: 'secret:wolfram_app_id'\n",
+          hash: "h1",
+        }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(<AddServerScreen />);
+
+    // The form prefills from the shipped manifest: name + command come along.
+    await waitFor(() => {
+      expect(document.querySelector<HTMLInputElement>("#field-name")?.value).toBe("wolfram");
+    });
+    await waitFor(() => {
+      expect(document.querySelector('[data-testid="yaml-preview"]')?.textContent).toContain("command: 'node'");
+    });
+    const preview = document.querySelector('[data-testid="yaml-preview"]')?.textContent ?? "";
+    // The sensitive env is a secret: ref, never a resolved literal.
+    expect(preview).toContain("secret:wolfram_app_id");
+
+    // INVARIANT: never the extract-manifest path.
+    expect(urls.some((u) => u.includes("/api/extract-manifest"))).toBe(false);
+    // Catalog matched → shipped manifest read happened.
+    expect(urls.some((u) => u.startsWith("/api/manifest/get"))).toBe(true);
+    // No honest banner on the catalog-match path.
+    expect(screen.queryByTestId("banner")).toBeNull();
+  });
+
+  it("a bare add-server (no ?readd=) does NOT run the readd seed (form stays blank)", async () => {
+    window.location.hash = "#/add-server";
+    const urls: string[] = [];
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      urls.push(url);
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(<AddServerScreen />);
+    await waitFor(() => {
+      const calls = urls.filter((u) => u.includes("/api/secrets"));
+      expect(calls.length).toBeGreaterThanOrEqual(1);
+    });
+    // No catalog lookup, no manifest read, no extract — the readd branch is inert.
+    expect(urls.some((u) => u.startsWith("/api/catalog"))).toBe(false);
+    expect(urls.some((u) => u.startsWith("/api/manifest/get"))).toBe(false);
+    expect(urls.some((u) => u.includes("/api/extract-manifest"))).toBe(false);
+    expect(document.querySelector<HTMLInputElement>("#field-name")?.value).toBe("");
   });
 });

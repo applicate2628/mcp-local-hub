@@ -417,7 +417,10 @@ describe("ProjectsScreen — detail lens (sections + toggles)", () => {
     // there is no longer an enable toggle to value-lessly POST.
     await waitFor(() => expect(screen.queryByTestId("projects-readd-memo")).toBeTruthy());
     const readd = screen.getByTestId("projects-readd-memo") as HTMLAnchorElement;
-    expect(readd.getAttribute("href")).toBe("#/add-server");
+    // D2: the Re-add CTA carries the server NAME (?readd=) so Add-server can offer
+    // a secret-safe catalog-by-name pre-fill (the member was hard-deleted; mcphub
+    // holds no value to echo).
+    expect(readd.getAttribute("href")).toBe("#/add-server?readd=memo");
     expect(screen.queryByTestId("projects-toggle-project-object-member-memo")).toBeNull();
   });
 

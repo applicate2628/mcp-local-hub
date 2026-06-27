@@ -3,6 +3,7 @@ import { BLANK_FORM, hasNestedUnknown, parseYAMLToForm, toYAML } from "../lib/ma
 import type { RouterState } from "../hooks/useRouter";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import {
+  getCatalogNames,
   getExtractManifest,
   getManifest,
   postManifestCreate,
@@ -61,17 +62,24 @@ function deepEqualForm(a: ManifestFormState, b: ManifestFormState): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-// parseAddServerQuery extracts ?server=...&from-client=... from the current
-// hash. A1's Create-manifest button navigates to
-// #/add-server?server=<name>&from-client=<client> — we pick those up on
-// mount and run the prefill fetch.
-function parseAddServerQuery(): { server: string; fromClient: string } {
+// parseAddServerQuery extracts the create-mode prefill params from the current
+// hash. Two DISJOINT branches:
+//   • A1 Migration Create-manifest: ?server=<name>&from-client=<client> — both
+//     present → the extract-manifest prefill fetch (getExtractManifest).
+//   • D2 cold re-enable Re-add: ?readd=<name> — a NAME-ONLY hint. The disabled
+//     cursor/vscode object-member was HARD-DELETED on disable, so mcphub never
+//     held its value; the ONLY secret-safe source is the catalog by server-name.
+//     This branch NEVER fires getExtractManifest (the extract path is dead
+//     post-delete — it would 404, and it carries the client's env VERBATIM,
+//     which is exactly the literal-secret echo D2 must not do).
+export function parseAddServerQuery(): { server: string; fromClient: string; readd: string } {
   const hash = window.location.hash;
   const q = hash.split("?")[1] ?? "";
   const params = new URLSearchParams(q);
   return {
     server: params.get("server") ?? "",
     fromClient: params.get("from-client") ?? "",
+    readd: params.get("readd") ?? "",
   };
 }
 
@@ -320,11 +328,15 @@ export function AddServerScreen(props: {
     props.onDirtyChange?.(isDirty);
   }, [isDirty]);
 
-  // Prefill path (Q8 baseline gotcha): fetch extract-manifest when the
-  // user arrives from A1, parse → set form state → take the snapshot
-  // AFTER normalization so dirty is false on first render.
+  // A1 prefill path (Q8 baseline gotcha): fetch extract-manifest when the
+  // user arrives from the Migration Create-manifest button, parse → set form
+  // state → take the snapshot AFTER normalization so dirty is false on first
+  // render. The `readd` guard keeps this branch DISJOINT from the D2 cold
+  // re-enable Re-add branch below (a Re-add hash carries no server/from-client,
+  // but the guard makes the no-extract-on-readd invariant explicit + greppable).
   useEffect(() => {
-    const { server, fromClient } = parseAddServerQuery();
+    const { server, fromClient, readd } = parseAddServerQuery();
+    if (readd) return; // D2 Re-add owns this mount — never run the extract fetch.
     if (!server || !fromClient) return;
     let cancelled = false;
     (async () => {
@@ -341,6 +353,68 @@ export function AddServerScreen(props: {
           text: `Could not prefill from ${fromClient}/${server}: ${(err as Error).message}. Continuing with empty form.`,
         });
       }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // D2 cold re-enable Re-add path (#/add-server?readd=<name>): a disabled
+  // cursor/vscode object-member is HARD-DELETED on disable, so mcphub never held
+  // its value — the ONLY secret-safe value source is the catalog by server-name.
+  //
+  // INVARIANT (no-literal-secret-echo): this branch NEVER calls
+  // getExtractManifest. The extract path is dead post-delete (404), and it
+  // carries the client's env VERBATIM — re-leaking the literal secret D2 exists
+  // to never echo. Two sub-paths, both secret-safe by construction:
+  //   • Catalog MATCH → prefill from the SHIPPED manifest (getManifest), whose
+  //     env is published with `secret:`/`${env:}` placeholders, never a resolved
+  //     literal (e.g. servers/wolfram/manifest.yaml: WOLFRAM_LLM_APP_ID =
+  //     "secret:wolfram_app_id"). Command + args come along; secrets stay refs.
+  //   • NO catalog match → seed ONLY the name (blank command/args/env) + an
+  //     honest banner telling the operator to re-enter command/args/secrets.
+  useEffect(() => {
+    const { readd } = parseAddServerQuery();
+    if (!readd) return;
+    let cancelled = false;
+    (async () => {
+      let inCatalog = false;
+      try {
+        const names = await getCatalogNames();
+        inCatalog = names.has(readd);
+      } catch {
+        // A catalog lookup failure must not strand the operator: fall through to
+        // the honest name-only branch (re-enter manually). The form NEVER
+        // receives a literal secret on either branch, so failing closed to blank
+        // is safe — it just asks for one extra re-entry.
+      }
+      if (cancelled) return;
+      if (inCatalog) {
+        try {
+          // Secret-safe: the shipped manifest carries `secret:`/`${env:}`
+          // placeholders, not resolved values.
+          const { yaml } = await getManifest(readd);
+          if (cancelled) return;
+          const parsed = parseYAMLToForm(yaml);
+          setFormState(parsed);
+          setInitialSnapshot(parsed);
+          return;
+        } catch {
+          if (cancelled) return;
+          // The catalog claimed it but the manifest read failed — degrade to
+          // the same name-only blank + honest banner rather than the extract path.
+        }
+      }
+      // No catalog match (or a catalog/manifest read failure): name-only seed +
+      // honest banner. BLANK command/args/env — the operator re-enters secrets
+      // via the existing AddSecretModal / secret:<key> refs.
+      const seeded = { ...BLANK_FORM, name: readd };
+      setFormState(seeded);
+      setInitialSnapshot(seeded);
+      setBanner({
+        kind: "error",
+        text: `Re-adding ${readd} — it was removed from your config, so re-enter its command/args/secrets. (Not found in the catalog.)`,
+      });
     })();
     return () => {
       cancelled = true;
