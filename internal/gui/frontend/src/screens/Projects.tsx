@@ -163,7 +163,6 @@ type LoadKind = "loading" | "ready" | "error";
 interface LoadState {
   kind: LoadKind;
   projects: Project[];
-  groups: GroupDTO[];
   groupsError: string | null;
   // error is the hard-fail message (the whole aggregate fetch threw).
   error: string | null;
@@ -172,7 +171,6 @@ interface LoadState {
 const LOADING_STATE: LoadState = {
   kind: "loading",
   projects: [],
-  groups: [],
   groupsError: null,
   error: null,
 };
@@ -214,7 +212,6 @@ export function ProjectsScreen({ route }: ProjectsScreenProps): preact.JSX.Eleme
       setState({
         kind: "ready",
         projects,
-        groups: agg.groups,
         groupsError: agg.groups_error ?? null,
         error: null,
       });
@@ -223,7 +220,6 @@ export function ProjectsScreen({ route }: ProjectsScreenProps): preact.JSX.Eleme
       setState({
         kind: "error",
         projects: [],
-        groups: [],
         groupsError: null,
         error: asError(e),
       });

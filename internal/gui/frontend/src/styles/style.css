@@ -2683,8 +2683,8 @@ nav a,
   white-space: nowrap;
 }
 .projects-group-binding-badge.is-bound {
-  color: var(--accent, var(--text));
-  border-color: var(--accent, var(--border));
+  color: var(--accent, var(--link));
+  border-color: var(--accent, var(--link));
 }
 .projects-group-binding {
   flex-wrap: wrap;
