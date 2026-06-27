@@ -1417,7 +1417,20 @@ func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Reques
 		// B — future-proofs one-click trust; the path is C0/C1/ESC-stripped via
 		// sanitizeRefusalPath so an attacker-controlled tool-argument path can
 		// never inject terminal-control sequences into the client/UI/logs).
-		safePath := sanitizeRefusalPath(pathArg)
+		//
+		// area-5 r2 (codex P2): surface the CANONICAL RESOLVED root the gate
+		// actually checked — NOT the raw tool-arg `pathArg`, which may be a FILE
+		// or SUBDIRECTORY inside the project. `mcphub trust <subpath>` would trust
+		// the WRONG path and still leave the project unauthorized. The resolved
+		// root rides on the typed *api.SerenaRootNotTrustedError; extract it via
+		// errors.As. Defensive fallback to pathArg only if the resolved root is
+		// somehow empty (never on a real refusal).
+		refusedPath := pathArg
+		var notTrusted *api.SerenaRootNotTrustedError
+		if errors.As(err, &notTrusted) && notTrusted.ResolvedRoot != "" {
+			refusedPath = notTrusted.ResolvedRoot
+		}
+		safePath := sanitizeRefusalPath(refusedPath)
 		writeJSONRPCErrorStatus(w, id, http.StatusServiceUnavailable, serenaRootNotTrustedCode,
 			"workspace "+safePath+" is not a trusted folder; run `mcphub trust "+safePath+"` or add it in GUI Settings → Trusted Roots, then retry",
 			map[string]any{

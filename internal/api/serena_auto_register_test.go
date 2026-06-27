@@ -2450,3 +2450,70 @@ func TestAutoRegisterSerena_RegressionGuard_BlessedParentAllowsSiblingIntroduce(
 		t.Fatalf("a project outside the blessed tree must be refused; got %v", err)
 	}
 }
+
+// TestAutoRegisterSerena_NotTrusted_TypedErrorCarriesResolvedRoot (area-5 r2):
+// the refusal must be a *SerenaRootNotTrustedError whose ResolvedRoot is the
+// CANONICAL marker root (NOT the raw tool-arg subpath/file), AND errors.Is must
+// still match the ErrSerenaRootNotTrusted sentinel. This is the api-side
+// contract the router relies on to name the authorizable root.
+func TestAutoRegisterSerena_NotTrusted_TypedErrorCarriesResolvedRoot(t *testing.T) {
+	autoRegisterTestEnv(t)
+	stubSerenaTrustedRootCheck(t, func(string) (bool, error) { return false, nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	wantRoot := mustCanonical(t, root)
+
+	// Call from a FILE deep under the marker root — the typed error must carry the
+	// resolved ROOT, not this subpath.
+	deepFile := filepath.Join(root, "sub", "deep", "file.go")
+	if err := os.MkdirAll(filepath.Dir(deepFile), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(deepFile, []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), deepFile)
+	if !errors.Is(err, ErrSerenaRootNotTrusted) {
+		t.Fatalf("error = %v, want errors.Is ErrSerenaRootNotTrusted", err)
+	}
+	var typed *SerenaRootNotTrustedError
+	if !errors.As(err, &typed) {
+		t.Fatalf("error = %v, want errors.As *SerenaRootNotTrustedError", err)
+	}
+	if typed.ResolvedRoot != wantRoot {
+		t.Errorf("typed.ResolvedRoot = %q, want the canonical marker root %q (NOT the subpath %q)", typed.ResolvedRoot, wantRoot, deepFile)
+	}
+	if typed.ResolvedRoot == deepFile {
+		t.Errorf("typed error leaked the raw tool-arg subpath %q", deepFile)
+	}
+}
+
+// TestAutoRegisterSerena_GateError_TypedErrorCarriesRootAndCause (area-5 r2): the
+// gate-error path is also a *SerenaRootNotTrustedError carrying the resolved
+// root, so the router still names the authorizable root on a fail-closed gate
+// error.
+func TestAutoRegisterSerena_GateError_TypedErrorCarriesRootAndCause(t *testing.T) {
+	autoRegisterTestEnv(t)
+	stubSerenaTrustedRootCheck(t, func(string) (bool, error) {
+		return false, errors.New("corrupt store")
+	})
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	wantRoot := mustCanonical(t, root)
+
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if !errors.Is(err, ErrSerenaRootNotTrusted) {
+		t.Fatalf("error = %v, want errors.Is ErrSerenaRootNotTrusted", err)
+	}
+	var typed *SerenaRootNotTrustedError
+	if !errors.As(err, &typed) {
+		t.Fatalf("error = %v, want errors.As *SerenaRootNotTrustedError", err)
+	}
+	if typed.ResolvedRoot != wantRoot {
+		t.Errorf("typed.ResolvedRoot = %q, want %q", typed.ResolvedRoot, wantRoot)
+	}
+	if typed.Cause == nil || !strings.Contains(typed.Cause.Error(), "corrupt store") {
+		t.Errorf("typed.Cause = %v, want it to carry the gate error", typed.Cause)
+	}
+}

@@ -130,15 +130,31 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	//      An unset or erroring gate must never silently authorize an
 	//      untrusted path. The router maps the sentinel to a 503/-32002 refusal
 	//      with an actionable message (run `mcphub trust <path>`).
+	// All three refusal sites carry the CANONICAL resolved root on the typed
+	// error so the router names the authorizable project root (not the raw
+	// tool-arg subpath/file) in its `mcphub trust` hint + NEEDS_TRUST data
+	// (area-5 r2). errors.Is(err, ErrSerenaRootNotTrusted) still matches via the
+	// wrapper's Unwrap. We surface the CANONICAL form (CanonicalWorkspacePath —
+	// the same normalization BlessDefaultTrustedRoot applies on write and
+	// WorkspaceRootTrusted applies on read), so the operator can paste
+	// `mcphub trust <data.path>` verbatim and have it authorize the project. The
+	// gate still CHECKS the resolver `root` (the predicate canonicalizes
+	// internally for comparison); only the value reported to the operator is
+	// normalized. Best-effort: if canonicalization fails (dir vanished mid-call),
+	// fall back to the resolver `root` so the error still names a usable path.
+	refusedRoot := root
+	if c, cErr := CanonicalWorkspacePath(root); cErr == nil {
+		refusedRoot = c
+	}
 	if serenaTrustedRootCheckFn == nil {
-		return nil, fmt.Errorf("%w: %s (the trusted-root authorization gate is not configured)", ErrSerenaRootNotTrusted, root)
+		return nil, newSerenaRootNotTrustedError(refusedRoot, errors.New("the trusted-root authorization gate is not configured"))
 	}
 	trusted, trustErr := serenaTrustedRootCheckFn(root)
 	if trustErr != nil {
-		return nil, fmt.Errorf("%w: %s: %v", ErrSerenaRootNotTrusted, root, trustErr)
+		return nil, newSerenaRootNotTrustedError(refusedRoot, trustErr)
 	}
 	if !trusted {
-		return nil, fmt.Errorf("%w: %s", ErrSerenaRootNotTrusted, root)
+		return nil, newSerenaRootNotTrustedError(refusedRoot, nil)
 	}
 
 	// 3. Per-key idempotency guard. The keyed mutex serializes concurrent callers
@@ -1094,17 +1110,62 @@ var ErrNotASerenaProject = errors.New("serena auto-register: path is not a seren
 // descriptor can be synthesized. The router maps this to HTTP 422.
 var ErrNoLanguages = errors.New("serena auto-register: .serena/project.yml declares no languages")
 
-// ErrSerenaRootNotTrusted is returned by AutoRegisterSerenaWorkspace when the
-// resolved (marker-bearing) workspace root is NOT contained by any
-// operator-trusted root in the shared trusted-roots store (area-5 trust gate).
-// It is the authorization boundary distinct from the marker DoS bound: the
-// marker proves the path looks like a serena project, this proves the operator
-// authorized auto-registering it. The router maps this to a 503/-32002 refusal
-// with an actionable message (run `mcphub trust <path>` or add it in GUI
-// Settings → Trusted Roots, then retry) plus a machine-readable
+// ErrSerenaRootNotTrusted is the sentinel returned (wrapped) by
+// AutoRegisterSerenaWorkspace when the resolved (marker-bearing) workspace root
+// is NOT contained by any operator-trusted root in the shared trusted-roots
+// store (area-5 trust gate). It is the authorization boundary distinct from the
+// marker DoS bound: the marker proves the path looks like a serena project,
+// this proves the operator authorized auto-registering it. The router maps this
+// to a 503/-32002 refusal with an actionable message (run `mcphub trust <root>`
+// or add it in GUI Settings → Trusted Roots, then retry) plus a machine-readable
 // `code:"NEEDS_TRUST"` data field. FAIL-CLOSED: a nil gate seam, a gate error,
 // or an explicit not-trusted verdict all surface as this sentinel.
+//
+// It is ALWAYS wrapped inside a *SerenaRootNotTrustedError so a caller can both
+// match it with errors.Is(err, ErrSerenaRootNotTrusted) AND recover the
+// canonical RESOLVED root with errors.As (area-5 r2). The router uses the
+// resolved root — NOT the raw tool-argument path — in the `mcphub trust` hint
+// and the NEEDS_TRUST `data.path`, so the operator trusts the actual
+// authorizable `.serena`-bearing root, not a subpath/file under it.
 var ErrSerenaRootNotTrusted = errors.New("serena auto-register: workspace root is not a trusted folder")
+
+// SerenaRootNotTrustedError carries the CANONICAL resolved workspace root the
+// trust gate refused (the directory resolveSerenaProjectRoot found the
+// `.serena/project.yml` marker in — exactly what `mcphub trust` /
+// BlessDefaultTrustedRoot must record to authorize the project). It wraps
+// ErrSerenaRootNotTrusted (so errors.Is matches) plus an optional underlying
+// cause (a gate-load error). The router extracts ResolvedRoot via errors.As to
+// build an actionable refusal that names the path the operator should trust,
+// instead of the raw tool-argument subpath/file the agent called from.
+type SerenaRootNotTrustedError struct {
+	// ResolvedRoot is the canonical marker-bearing project root the gate
+	// checked + refused. Never empty on a real refusal (it is the resolver
+	// output the gate consulted).
+	ResolvedRoot string
+	// Cause is the underlying gate failure (corrupt store / insecure-parent
+	// rejection / nil-seam reason), or nil for a plain not-trusted verdict.
+	Cause error
+}
+
+func (e *SerenaRootNotTrustedError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %s: %v", ErrSerenaRootNotTrusted.Error(), e.ResolvedRoot, e.Cause)
+	}
+	return fmt.Sprintf("%s: %s", ErrSerenaRootNotTrusted.Error(), e.ResolvedRoot)
+}
+
+// Unwrap returns the sentinel so errors.Is(err, ErrSerenaRootNotTrusted) holds.
+// (A single-error Unwrap is sufficient for the Is match; the gate Cause is
+// surfaced via Error()/the struct field, not the Is/As chain, to avoid an
+// errors.Is(err, <Cause>) false positive on an unrelated sentinel.)
+func (e *SerenaRootNotTrustedError) Unwrap() error { return ErrSerenaRootNotTrusted }
+
+// newSerenaRootNotTrustedError builds the typed refusal carrying the resolved
+// root + optional cause. Centralizes construction so all three gate return
+// sites (nil-seam, gate-error, not-trusted) produce the same shape.
+func newSerenaRootNotTrustedError(resolvedRoot string, cause error) *SerenaRootNotTrustedError {
+	return &SerenaRootNotTrustedError{ResolvedRoot: resolvedRoot, Cause: cause}
+}
 
 // serenaTrustedRootCheckFn is the trust-gate seam consulted by
 // AutoRegisterSerenaWorkspace AFTER the marker check and BEFORE any state

@@ -1194,7 +1194,69 @@ func TestLSPRouter_UntrustedRoot_RefusalCarriesNeedsTrust(t *testing.T) {
 	if resp.Error.Data == nil || resp.Error.Data.Code != "NEEDS_TRUST" {
 		t.Fatalf("error.data = %+v, want code=NEEDS_TRUST (gap-a option B)", resp.Error.Data)
 	}
-	if resp.Error.Data.Path != "/repo/untrusted/main.py" {
-		t.Errorf("data.path = %q, want the candidate path", resp.Error.Data.Path)
+	// area-5 r2 (codex P2): data.path is the RESOLVED workspace root the gate
+	// authorizes, NOT the raw tool-arg FILE path.
+	if resp.Error.Data.Path != "/repo/untrusted" {
+		t.Errorf("data.path = %q, want the resolved workspace root %q (NOT the file arg)", resp.Error.Data.Path, "/repo/untrusted")
+	}
+	if strings.Contains(resp.Error.Message, "/repo/untrusted/main.py") {
+		t.Errorf("message %q must name the resolved root, not the file arg", resp.Error.Message)
+	}
+}
+
+// TestLSPRouter_UntrustedRoot_RefusalUsesResolvedRootNotFileArg is the area-5 r2
+// (codex P2) falsifier for the LSP side: when the tool arg is a file DEEP inside
+// the project, the NEEDS_TRUST data.path + message must name the resolved
+// WORKSPACE ROOT the gate authorizes, never the deeper file path (correct trust
+// target + minimal disclosure).
+func TestLSPRouter_UntrustedRoot_RefusalUsesResolvedRootNotFileArg(t *testing.T) {
+	const root = "/repo/app"
+	const fileArg = "/repo/app/src/pkg/deep.py"
+	resolver := &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
+		"python|" + fileArg: {
+			WorkspaceRoot: root,
+			WorkspaceKey:  "app",
+			Registered:    false,
+			ProjectMarker: true,
+		},
+	}}
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver:               resolver,
+		Sessions:               lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) { return "mcp-language-server", true },
+		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
+			return nil, errors.New("auto-register must not run for an untrusted root")
+		},
+		TrustedRootCheckFn: func(workspaceRoot string) (bool, error) { return false, nil },
+	})
+
+	body := rpcBody("tools/call", "1", `{"name":"diagnostics","arguments":{"filePath":"`+fileArg+`"}}`)
+	rr := postLSP(t, s, "python", body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/call status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Error *struct {
+			Message string `json:"message"`
+			Data    *struct {
+				Path string `json:"path"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode JSON-RPC error: %v; raw=%s", err, rr.Body.String())
+	}
+	if resp.Error == nil || resp.Error.Data == nil {
+		t.Fatalf("missing error.data; raw=%s", rr.Body.String())
+	}
+	if resp.Error.Data.Path != root {
+		t.Errorf("data.path = %q, want the resolved root %q (must NOT be the file arg %q)", resp.Error.Data.Path, root, fileArg)
+	}
+	if resp.Error.Data.Path == fileArg {
+		t.Errorf("data.path leaked the deeper file arg %q — wrong trust target + over-disclosure", fileArg)
+	}
+	if strings.Contains(resp.Error.Message, fileArg) {
+		t.Errorf("message %q must not name the file arg; it should name the resolved root %q", resp.Error.Message, root)
 	}
 }

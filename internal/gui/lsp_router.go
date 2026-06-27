@@ -449,10 +449,22 @@ func (s *Server) workspaceFromResolvedLSPPath(
 		// AREA-5 gap-a option B (additive): keep the existing refusal wire shape
 		// (HTTP 200, JSON-RPC code -32602, same human message) but fold a
 		// machine-readable `code:"NEEDS_TRUST"` + the SANITIZED candidate path
-		// into `data` so a client/UI can future-proof one-click trust. The path
-		// is an untrusted MCP tool argument, so it is C0/C1/ESC-stripped via
+		// into `data` so a client/UI can future-proof one-click trust.
+		//
+		// area-5 r2 (codex P2): name the resolved WORKSPACE ROOT the gate
+		// authorizes — NOT the raw tool-arg `pathArg`, which may be a FILE inside
+		// the project (e.g. /repo/app/main.py). `mcphub register <file>` would
+		// target the wrong path, and exposing the file path needlessly widens the
+		// info surface; the resolved root is both the correct trust target and the
+		// minimal disclosure. Defensive fallback to pathArg only when the resolver
+		// supplied no root (then there is nothing better to name). The path is an
+		// untrusted MCP tool argument, so it is C0/C1/ESC-stripped via
 		// sanitizeRefusalPath before it reaches the client/UI/logs.
-		safePath := sanitizeRefusalPath(pathArg)
+		refusedPath := lspResolvedWorkspaceRoot(resolved)
+		if refusedPath == "" {
+			refusedPath = pathArg
+		}
+		safePath := sanitizeRefusalPath(refusedPath)
 		writeJSONRPCErrorStatus(w, tb.ID, http.StatusOK, jsonrpcInvalidParams,
 			"LSP workspace for "+safePath+" is not registered; run mcphub register for this workspace before using the LSP router",
 			map[string]any{
@@ -500,10 +512,7 @@ func (s *Server) lspWorkspaceRootIsTrusted(deps *lspRouterDeps, resolved *lsp_ro
 	if deps == nil || deps.TrustedRootCheckFn == nil {
 		return false
 	}
-	workspaceRoot := resolved.WorkspaceRoot
-	if workspaceRoot == "" && resolved.Entry != nil {
-		workspaceRoot = resolved.Entry.WorkspacePath
-	}
+	workspaceRoot := lspResolvedWorkspaceRoot(resolved)
 	if workspaceRoot == "" {
 		return false
 	}
@@ -512,6 +521,26 @@ func (s *Server) lspWorkspaceRootIsTrusted(deps *lspRouterDeps, resolved *lsp_ro
 		return false
 	}
 	return trusted
+}
+
+// lspResolvedWorkspaceRoot is the SINGLE owner of "which root does the gate
+// authorize" — the canonical workspace ROOT the trust check runs against. The
+// untrusted-refusal path (area-5 r2, codex P2) names THIS root in its
+// `mcphub register` / NEEDS_TRUST `data.path`, NOT the raw tool-arg `pathArg`
+// (which may be a FILE or SUBDIRECTORY inside the project): surfacing the file
+// path would tell the operator to trust the wrong path AND needlessly expose the
+// deeper file path. Prefers resolved.WorkspaceRoot, falls back to the registered
+// entry's WorkspacePath, mirroring exactly what lspWorkspaceRootIsTrusted checks
+// so the refusal can never name a path different from the one the gate gated.
+func lspResolvedWorkspaceRoot(resolved *lsp_routing.ResolveResult) string {
+	if resolved == nil {
+		return ""
+	}
+	workspaceRoot := resolved.WorkspaceRoot
+	if workspaceRoot == "" && resolved.Entry != nil {
+		workspaceRoot = resolved.Entry.WorkspacePath
+	}
+	return workspaceRoot
 }
 
 func isRelativeLSPPathArg(pathArg string) bool {
