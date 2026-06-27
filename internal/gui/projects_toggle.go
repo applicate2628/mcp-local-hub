@@ -72,9 +72,12 @@ import (
 //     P3a does not synthesize the value (that would absorb the migrate machinery
 //     — out of scope); the caller supplies it. P3a's read API does NOT provide a
 //     value-source field (the r2 `toggle_value` was removed — finding 4); sourcing
-//     this value secret-safely is a P3b concern
-//     (work-items/backlog/2026-06-25-p3b-reenable-value-source.md). The endpoint
-//     already accepts a caller-supplied value, so P3b only adds the source.
+//     P3b SHIPPED #434 settled the value-source NAMES-only: object-member
+//     re-enable is cold-only (no backend value-source; the GUI Re-add CTA routes
+//     to Add/Catalog). The residual D2 gap (the Re-add CTA links to a bare
+//     #/add-server, not a pre-filled restore) is tracked OPEN in
+//     work-items/backlog/2026-06-25-p3b-reenable-value-source.md. The endpoint
+//     still accepts a caller-supplied value (used only on enable).
 //   - Languages narrows a Model-A workspace register/unregister to specific LSP
 //     languages; empty = all (the api.Register/Unregister default).
 type projectToggleRequest struct {
