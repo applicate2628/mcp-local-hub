@@ -45,7 +45,9 @@ import {
   getProjectsAggregate,
   getServerReadiness,
   toggleProjectServer,
+  bindGroupToProject,
   ProjectToggleError,
+  ProjectGroupBindingError,
   type GroupDTO,
   type ProjectAggregateDTO,
   type ProjectToggleRequest,
@@ -161,7 +163,6 @@ type LoadKind = "loading" | "ready" | "error";
 interface LoadState {
   kind: LoadKind;
   projects: Project[];
-  groups: GroupDTO[];
   groupsError: string | null;
   // error is the hard-fail message (the whole aggregate fetch threw).
   error: string | null;
@@ -170,7 +171,6 @@ interface LoadState {
 const LOADING_STATE: LoadState = {
   kind: "loading",
   projects: [],
-  groups: [],
   groupsError: null,
   error: null,
 };
@@ -212,7 +212,6 @@ export function ProjectsScreen({ route }: ProjectsScreenProps): preact.JSX.Eleme
       setState({
         kind: "ready",
         projects,
-        groups: agg.groups,
         groupsError: agg.groups_error ?? null,
         error: null,
       });
@@ -221,7 +220,6 @@ export function ProjectsScreen({ route }: ProjectsScreenProps): preact.JSX.Eleme
       setState({
         kind: "error",
         projects: [],
-        groups: [],
         groupsError: null,
         error: asError(e),
       });
@@ -272,7 +270,6 @@ export function ProjectsScreen({ route }: ProjectsScreenProps): preact.JSX.Eleme
         key={selectedPath}
         projectKey={selectedPath}
         project={project}
-        groups={state.groups}
         groupsError={state.groupsError}
         onReload={() => void load()}
       />
@@ -282,7 +279,6 @@ export function ProjectsScreen({ route }: ProjectsScreenProps): preact.JSX.Eleme
   return (
     <ProjectList
       projects={state.projects}
-      groups={state.groups}
       groupsError={state.groupsError}
       onRetry={() => void load()}
     />
@@ -293,12 +289,10 @@ export function ProjectsScreen({ route }: ProjectsScreenProps): preact.JSX.Eleme
 // empty-state. Mirrors the Groups list-of-cards layout (Groups.tsx:356-408).
 function ProjectList({
   projects,
-  groups,
   groupsError,
   onRetry,
 }: {
   projects: Project[];
-  groups: GroupDTO[];
   groupsError: string | null;
   onRetry: () => void;
 }): preact.JSX.Element {
@@ -331,13 +325,16 @@ function ProjectList({
         <ul class="projects-list m-0 list-none p-0" data-testid="projects-list">
           {projects.map((p) => {
             const wsCount = p.dto.entries.length;
-            // Groups are not yet path-bound (P3c), so every project lists ALL
-            // groups; when the groups fetch FAILED render "? groups (load failed)"
-            // rather than a misleading "0 groups".
+            // P3c: the per-card count is THIS project's binding-filtered group
+            // set (groups bound to this project + the global/unbound ones), the
+            // backend-owned p.dto.groups — NOT the top-level all-groups count.
+            // When the groups fetch FAILED render "? groups (load failed)" rather
+            // than a misleading "0 groups".
+            const grCount = p.dto.groups.length;
             const grSummary =
               groupsError !== null
                 ? "? groups (load failed)"
-                : `${groups.length} group${groups.length === 1 ? "" : "s"}`;
+                : `${grCount} group${grCount === 1 ? "" : "s"}`;
             // The project scan may have failed for one project (root deleted)
             // while the rest render — surface a per-card hint.
             const cfgSummary = p.dto.scan_error
@@ -905,13 +902,11 @@ function ToggleableServerRow(props: ServerRowProps): preact.JSX.Element {
 function ProjectDetail({
   projectKey,
   project,
-  groups,
   groupsError,
   onReload,
 }: {
   projectKey: string;
   project: Project | null;
-  groups: GroupDTO[];
   groupsError: string | null;
   onReload: () => void;
 }): preact.JSX.Element {
@@ -959,7 +954,8 @@ function ProjectDetail({
       />
 
       <SectionGroups
-        groups={groups}
+        projectKey={projectKey}
+        groups={dto?.groups ?? []}
         groupsError={groupsError}
         onReload={onReload}
         mountedRef={mountedRef}
@@ -1508,17 +1504,25 @@ function FlatClientCard({
 }
 
 // ───────────────────────────────────────────────────────────────────
-// [C] Group lens — backed by groups.yaml. Per-server toggle (scope group-servers)
-// adds/removes a server from the group's servers list. Keeps the P1 "tools_hidden
-// not a security fence" + "not yet project-bound" copy until P3c.
+// [C] Group lens — backed by groups.yaml. Two per-group controls:
+//   - the per-server membership toggle (scope group-servers) adds/removes a
+//     server from the group's servers list;
+//   - the per-group PROJECT BINDING control (P3c, design §10.1): "Bind to this
+//     project" / "Unbind (make global)" POSTs /api/projects/group-binding.
+// The list itself is the BACKEND-FILTERED set (groupVisibleInProject is the
+// single owner): this project's bound groups + the global/unbound groups. The
+// frontend never re-derives the visibility filter; it only LABELS each group
+// "bound to this project" vs "global (all projects)" from group.project_path.
 // ───────────────────────────────────────────────────────────────────
 
 function SectionGroups({
+  projectKey,
   groups,
   groupsError,
   onReload,
   mountedRef,
 }: {
+  projectKey: string;
   groups: GroupDTO[];
   groupsError: string | null;
   onReload: () => void;
@@ -1531,8 +1535,8 @@ function SectionGroups({
         <MechanismBadge label="group" backedBy="groups.yaml" testId="projects-badge-groups" />
       </div>
       <p class="m-0 mb-2 text-xs text-app-muted">
-        Groups are not yet bound to a project path (coming later), so this lists
-        every group.{" "}
+        Groups bound to this project plus the global (all-projects) groups. Bind a
+        group here to scope it to this project, or unbind it to make it global.{" "}
         <a href="#/groups" data-testid="projects-manage-groups">
           manage in Groups →
         </a>
@@ -1546,12 +1550,18 @@ function SectionGroups({
         </p>
       ) : groups.length === 0 ? (
         <p class="m-0 text-sm text-app-muted" data-testid="projects-groups-empty">
-          No groups defined.
+          No groups visible for this project.
         </p>
       ) : (
         <ul class="projects-groups-list m-0 list-none p-0" data-testid="projects-groups-list">
           {groups.map((g) => (
-            <GroupCard key={g.name} group={g} onReload={onReload} mountedRef={mountedRef} />
+            <GroupCard
+              key={g.name}
+              group={g}
+              projectKey={projectKey}
+              onReload={onReload}
+              mountedRef={mountedRef}
+            />
           ))}
         </ul>
       )}
@@ -1559,17 +1569,86 @@ function SectionGroups({
   );
 }
 
+// useGroupBinding owns ONE group's bind/unbind lifecycle: optimistic-free
+// immediate POST → on success reload the aggregate (so the filtered list + the
+// label re-derive from the persisted state) → on failure surface the §-style
+// redacted plain copy + Retry. mountedRef-guards the post-await setState
+// (navigate-away race). Mirrors the per-row toggle discipline (useToggleRow) but
+// is simpler: binding has no displayed boolean to optimistically flip — the
+// authoritative state comes back via the reload.
+interface BindingState {
+  busy: boolean;
+  // error is set after a failed bind/unbind; null = clean. We keep the stable
+  // code (tooltip only) + a plain human message (the visible row).
+  error: { message: string; code: string } | null;
+}
+
+// bindingErrorCopy maps the stable backend code to plain copy (the raw code
+// lives only in a tooltip). Mirrors the §3.1 toggle code→copy discipline.
+function bindingErrorCopy(code: string): string {
+  switch (code) {
+    case "PROJECT_GROUP_BINDING_INVALID":
+      return "That project path isn't valid — the binding wasn't saved.";
+    case "PROJECT_GROUP_BINDING_NOT_FOUND":
+      return "That group no longer exists — reload to refresh the list.";
+    default:
+      return "The binding couldn't be saved.";
+  }
+}
+
+function useGroupBinding(mountedRef: { current: boolean }): {
+  st: BindingState;
+  run: (group: string, projectPath: string, onReload: () => void) => Promise<void>;
+} {
+  const [st, setSt] = useState<BindingState>({ busy: false, error: null });
+
+  async function run(group: string, projectPath: string, onReload: () => void): Promise<void> {
+    let skip = false;
+    setSt((s) => {
+      if (s.busy) {
+        skip = true;
+        return s;
+      }
+      return { busy: true, error: null };
+    });
+    if (skip) return;
+    try {
+      await bindGroupToProject(group, projectPath);
+      if (!mountedRef.current) return;
+      setSt({ busy: false, error: null });
+      // Reload so the backend-filtered list + the bound/global label re-derive
+      // from the persisted binding (the single source of truth).
+      onReload();
+    } catch (e) {
+      if (!mountedRef.current) return;
+      const code = e instanceof ProjectGroupBindingError ? e.code : "PROJECT_GROUP_BINDING_FAILED";
+      setSt({ busy: false, error: { message: bindingErrorCopy(code), code } });
+    }
+  }
+
+  return { st, run };
+}
+
 function GroupCard({
   group,
+  projectKey,
   onReload,
   mountedRef,
 }: {
   group: GroupDTO;
+  projectKey: string;
   onReload: () => void;
   mountedRef: { current: boolean };
 }): preact.JSX.Element {
   const hasHidden = group.tools_hidden && Object.keys(group.tools_hidden).length > 0;
   const scope = scopeForToggle("group");
+  // bound-to-THIS vs global: project_path == this key ⇒ bound here;
+  // "" / undefined ⇒ global (all projects). (The backend filter already
+  // guarantees a rendered group is one of these two — a group bound to a
+  // DIFFERENT project is not in this list.)
+  const boundHere = (group.project_path ?? "") === projectKey && projectKey !== "";
+  const { st: bindSt, run: runBind } = useGroupBinding(mountedRef);
+
   return (
     <li class="projects-group-card py-1.5" data-testid={`projects-group-${group.name}`} data-group={group.name}>
       <div class="flex items-center gap-2">
@@ -1577,7 +1656,55 @@ function GroupCard({
         <span class="text-xs text-app-muted">
           {group.servers.length === 0 ? "No servers" : `${group.servers.length} member${group.servers.length === 1 ? "" : "s"}`}
         </span>
+        {/* bound-vs-global label (P3c §10.1) */}
+        <span
+          class={`projects-group-binding-badge text-xs ${boundHere ? "is-bound" : "is-global"}`}
+          data-testid={`projects-group-binding-state-${group.name}`}
+        >
+          {boundHere ? "bound to this project" : "global (all projects)"}
+        </span>
       </div>
+
+      {/* Bind/unbind control (P3c §10.1) — immediate per-row, no dirty/Apply. */}
+      <div class="projects-group-binding mt-1 flex items-center gap-2">
+        <button
+          type="button"
+          class="btn text-xs"
+          data-testid={`projects-group-bind-${group.name}`}
+          disabled={bindSt.busy}
+          aria-busy={bindSt.busy}
+          onClick={() =>
+            void runBind(group.name, boundHere ? "" : projectKey, onReload)
+          }
+        >
+          {bindSt.busy
+            ? "Saving…"
+            : boundHere
+              ? "Unbind (make global)"
+              : "Bind to this project"}
+        </button>
+        {bindSt.error && (
+          <span
+            class="projects-group-binding-error settings-error text-xs"
+            data-testid={`projects-group-bind-error-${group.name}`}
+            role="alert"
+            title={bindSt.error.code}
+          >
+            {bindSt.error.message}{" "}
+            <button
+              type="button"
+              class="btn text-xs"
+              data-testid={`projects-group-bind-retry-${group.name}`}
+              onClick={() =>
+                void runBind(group.name, boundHere ? "" : projectKey, onReload)
+              }
+            >
+              Retry
+            </button>
+          </span>
+        )}
+      </div>
+
       {group.servers.length > 0 && (
         <ul class="projects-server-list m-0 list-none p-0">
           {group.servers.map((server) => (

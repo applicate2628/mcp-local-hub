@@ -1258,6 +1258,15 @@ export interface GroupDTO {
   // copy-pasteable /g/<group>/mcp connection triple when the gate-ON hub is
   // live, else a not-available placeholder with a hint.
   connection?: GroupConnectionDTO;
+  // project_path is the group's per-project binding (P3c, design §10.1): the
+  // canonical project key the group is bound to, or "" / undefined when the
+  // group is UNBOUND / GLOBAL (visible in every project lens). The backend
+  // emits it with omitempty so a global group keeps the compact wire shape; the
+  // per-project lens uses it ONLY to label "bound to this project" vs "global
+  // (all projects)". The backend /api/projects filter is the single owner of
+  // the visibility predicate — this field is never re-derived into a
+  // client-side filter.
+  project_path?: string;
 }
 
 // GroupConnectionDTO mirrors groupConnectionDTO in internal/gui/groups.go. When
@@ -1331,6 +1340,10 @@ function normalizeGroup(raw: Partial<GroupDTO>): GroupDTO {
     description: typeof raw.description === "string" ? raw.description : "",
     servers: Array.isArray(raw.servers) ? raw.servers.filter((s) => typeof s === "string") : [],
     tools_hidden: hidden,
+    // project_path (P3c) — "" / undefined ⇒ global; carried through verbatim so
+    // the project lens can label bound-vs-global. Defended against a non-string
+    // body shape (older/partial backend).
+    project_path: typeof raw.project_path === "string" ? raw.project_path : "",
   };
   // connection (B4) is present only on the GET list path. Carry it through
   // defensively (the backend omits url/token unless available is true).
@@ -1445,6 +1458,11 @@ export interface ProjectAggregateDTO {
   entries: WorkspaceEntryDTO[];
   scan?: ScanResult;
   scan_error?: string;
+  // groups is THIS project's binding-filtered group set (P3c, design §10.1):
+  // every group bound to this project plus every unbound/global group. The
+  // backend (groupVisibleInProject) is the single owner of the filter; the
+  // detail lens reads this list directly. Always a non-nil array.
+  groups: GroupDTO[];
 }
 
 // ProjectsAggregateResponse mirrors gui.projectsAggregateResponse. Groups are
@@ -1468,6 +1486,10 @@ function normalizeProjectsAggregate(
           entries: Array.isArray(p?.entries) ? p.entries : [],
           scan: p?.scan,
           scan_error: typeof p?.scan_error === "string" ? p.scan_error : undefined,
+          // P3c per-project binding-filtered groups; normalized like the
+          // top-level set, defended against an older/partial body (missing field
+          // ⇒ empty array).
+          groups: Array.isArray(p?.groups) ? p.groups.map(normalizeGroup) : [],
         }))
       : [],
     groups: Array.isArray(raw.groups) ? raw.groups.map(normalizeGroup) : [],
@@ -1590,6 +1612,76 @@ export async function toggleProjectServer(
   const code = body?.code ?? `HTTP_${resp.status}`;
   throw new ProjectToggleError(
     `/api/projects/toggle [${code}]: ${msg}`,
+    code,
+    resp.status,
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Group↔project binding (per-project-GUI P3c, design §10.1)
+//
+// POST /api/projects/group-binding {group, project_path} binds ONE group to ONE
+// project (empty project_path = UNBIND → global, visible in every project lens).
+// The backend validates + normalizes project_path to the canonical project key
+// (it is NOT required to exist) and persists via the atomic ReadModifyWriteGroups
+// owner. project_path is DATA-ONLY — it never changes the /g/<name>/mcp route or
+// the "g:<name>" scope key — so no hub republish is needed for a bind/unbind.
+// ───────────────────────────────────────────────────────────────────
+
+// ProjectGroupBindingResult mirrors gui.projectGroupBindingResponse — the
+// persisted binding echoed back so the row reflects the result, not the request
+// intent. project_path is "" when the group is global (unbound).
+export interface ProjectGroupBindingResult {
+  group: string;
+  project_path: string;
+}
+
+// ProjectGroupBindingError preserves the backend's stable `code` + HTTP status so
+// the row can map a failure to plain copy without parsing the message. Codes:
+//   400 PROJECT_GROUP_BINDING_INVALID    — group missing / project_path bad shape.
+//   404 PROJECT_GROUP_BINDING_NOT_FOUND  — that group no longer exists.
+//   500 PROJECT_GROUP_BINDING_FAILED     — the change couldn't be saved.
+export class ProjectGroupBindingError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = "ProjectGroupBindingError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+// bindGroupToProject binds `group` to `projectPath` (a project key/path). Pass an
+// EMPTY projectPath to UNBIND (make the group global). Resolves to the persisted
+// binding on success; rejects with a ProjectGroupBindingError carrying the stable
+// code on any non-2xx.
+export async function bindGroupToProject(
+  group: string,
+  projectPath: string,
+): Promise<ProjectGroupBindingResult> {
+  const resp = await fetch("/api/projects/group-binding", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ group, project_path: projectPath }),
+  });
+  if (resp.ok) {
+    const raw = (await resp.json()) as Partial<ProjectGroupBindingResult>;
+    return {
+      group: typeof raw.group === "string" ? raw.group : group,
+      project_path: typeof raw.project_path === "string" ? raw.project_path : "",
+    };
+  }
+  let body: { error?: string; code?: string } | null = null;
+  try {
+    body = (await resp.json()) as { error?: string; code?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  const msg = body?.error ?? resp.statusText ?? "binding failed";
+  const code = body?.code ?? `HTTP_${resp.status}`;
+  throw new ProjectGroupBindingError(
+    `/api/projects/group-binding [${code}]: ${msg}`,
     code,
     resp.status,
   );

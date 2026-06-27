@@ -269,8 +269,9 @@ test.describe("Projects P3b — per-row toggles (epic area 6)", () => {
   }) => {
     // A group member enable (no value needed) triggers the gate. Readiness has a
     // blocker → the gate opens with Confirm disabled.
+    // P3c: group lives on the per-project dto.groups (the detail lens reads it).
     await stubAggregate(page, {
-      projects: [proj({ scan: { at: "now", entries: [] } })],
+      projects: [proj({ scan: { at: "now", entries: [] }, groups: [{ name: "g1", servers: ["gdb-mcp"], tools_hidden: {}, project_path: "" }] })],
       groups: [{ name: "g1", servers: ["gdb-mcp"], tools_hidden: {} }],
     });
     let blockerPresent = true;
@@ -315,8 +316,9 @@ test.describe("Projects P3b — per-row toggles (epic area 6)", () => {
     page,
     hub,
   }) => {
+    // P3c: group lives on the per-project dto.groups (the detail lens reads it).
     await stubAggregate(page, {
-      projects: [proj({ scan: { at: "now", entries: [] } })],
+      projects: [proj({ scan: { at: "now", entries: [] }, groups: [{ name: "g1", servers: ["projonly"], tools_hidden: {}, project_path: "" }] })],
       groups: [{ name: "g1", servers: ["projonly"], tools_hidden: {} }],
     });
     await stubReadiness(page); // 404 → O-1
@@ -346,8 +348,10 @@ test.describe("Projects P3b — per-row toggles (epic area 6)", () => {
     page,
     hub,
   }) => {
+    // P3c: the detail lens reads the PER-PROJECT binding-filtered dto.groups, so
+    // the group must live on the project DTO (not the top-level groups).
     await stubAggregate(page, {
-      projects: [proj({ scan: { at: "now", entries: [] } })],
+      projects: [proj({ scan: { at: "now", entries: [] }, groups: [{ name: "g1", servers: ["stale"], tools_hidden: {}, project_path: "" }] })],
       groups: [{ name: "g1", servers: ["stale"], tools_hidden: {} }],
     });
     await stubReadiness(page); // O-1 skip so we reach the toggle POST

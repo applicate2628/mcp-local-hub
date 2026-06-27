@@ -163,6 +163,15 @@ type groupDTO struct {
 	Servers     []string            `json:"servers"`
 	ToolsHidden map[string][]string `json:"tools_hidden,omitempty"`
 	Connection  *groupConnectionDTO `json:"connection,omitempty"`
+	// ProjectPath is the group's per-project binding (P3c, design §10.1). It is
+	// the canonical project key the group is bound to, or "" when the group is
+	// UNBOUND / GLOBAL (visible in every project lens). Emitted with omitempty so
+	// a global group keeps the compact pre-P3c wire shape; the per-project-lens UI
+	// reads it to render "bound to this project" vs "global (all projects)". The
+	// /api/projects backend filter is the SINGLE owner of the binding predicate —
+	// this field is informational for the UI label only, never re-derived into a
+	// client-side filter.
+	ProjectPath string `json:"project_path,omitempty"`
 }
 
 // groupConnectionDTO is the copy-pasteable connection info for a group's
@@ -217,6 +226,7 @@ func groupToDTO(g api.Group) groupDTO {
 		Description: g.Description,
 		Servers:     servers,
 		ToolsHidden: hidden,
+		ProjectPath: g.ProjectPath,
 	}
 }
 
@@ -384,11 +394,27 @@ func (s *Server) groupsUpsert(w http.ResponseWriter, r *http.Request) {
 	// rather than appending a second row the write-path uniqueness owner would
 	// then reject as a confusing 500. This keeps create-or-update consistent
 	// with the case-insensitive uniqueness invariant.
+	// finalGroup is the row actually written: on REPLACE it is `updated` with
+	// the matched row's ProjectPath copied over (set inside the callback under
+	// the held lock); on CREATE it stays `updated` with ProjectPath=="".
+	var finalGroup = updated
 	if err := s.groups.ReadModifyWriteGroups(func(cfg *api.GroupsConfig) ([]string, error) {
 		replaced := false
 		for i := range cfg.Groups {
 			if strings.EqualFold(cfg.Groups[i].Name, name) {
-				cfg.Groups[i] = updated
+				// PRESERVE the existing per-project binding (P3c bot R2 P2): the
+				// Groups-screen upsert POST body carries NO project_path (binding
+				// is changed ONLY via the /api/projects/group-binding handler), so
+				// building `updated` from the body alone would SILENTLY CLEAR a
+				// bound group's project_path on every description/members/hidden-
+				// tools edit. Carry the matched row's ProjectPath forward so a
+				// Groups-screen edit never touches the binding. A brand-new group
+				// (the append branch below) correctly stays ProjectPath=="" /
+				// unbound — a new group isn't bound to any project.
+				preserved := updated
+				preserved.ProjectPath = cfg.Groups[i].ProjectPath
+				cfg.Groups[i] = preserved
+				finalGroup = preserved
 				replaced = true
 				break
 			}
@@ -402,7 +428,7 @@ func (s *Server) groupsUpsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dto := groupToDTO(updated)
+	dto := groupToDTO(finalGroup)
 	s.writeGroupMutation(r.Context(), w, &dto)
 }
 

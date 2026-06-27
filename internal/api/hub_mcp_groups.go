@@ -99,6 +99,33 @@ type Group struct {
 	// but Phase 4a implements NO filtering. Keyed by server name → the
 	// raw (un-namespaced) tool names hidden for that server.
 	ToolsHidden map[string][]string `yaml:"tools_hidden,omitempty"`
+
+	// ProjectPath binds this group to ONE project (per-project-GUI P3c, design
+	// decision §10.1). It is the project's CanonicalProjectKey (the SAME join key
+	// the /api/projects aggregate composes A+B+C on). It is purely ADDITIVE and
+	// DATA-ONLY:
+	//
+	//   - "" (the absent/zero form for every pre-P3c group) means UNBOUND /
+	//     GLOBAL — the group is visible in EVERY project lens. groups.yaml version
+	//     stays 1; an existing group with no project_path key parses with
+	//     ProjectPath=="" and keeps its global meaning byte-for-byte.
+	//   - a non-empty value binds the group to that project: the /api/projects
+	//     read filter (the SINGLE backend-side predicate owner) shows the group
+	//     ONLY in that project's lens (plus it always shows the unbound globals).
+	//
+	// It is NOT the scope key and NOT a route segment (§5/T3): the group's
+	// "g:<name>" scope key, the /g/<name>/mcp route, the per-group token row, and
+	// the snapshot bindings are ALL unchanged by project_path —
+	// BuildResolverSnapshotFromManifestsAndGroups never reads this field, so a
+	// bind/unbind changes neither routing nor membership, only the project-lens
+	// read filter. The write owner normalizes it via clients.CanonicalProjectKey
+	// before persisting (the binding handler); a stored value is therefore always
+	// a canonical key, never a raw operator path.
+	//
+	// KnownFields(true) means an OLDER binary hard-fails on a NEWER groups.yaml
+	// carrying project_path — accepted per §5 (groups.yaml is local state; a
+	// fail-closed unknown-key error is safe and documented).
+	ProjectPath string `yaml:"project_path,omitempty"`
 }
 
 // GroupsConfig is the on-disk shape of groups.yaml plus the in-memory

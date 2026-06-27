@@ -311,6 +311,69 @@ func TestGroups_PostCaseInsensitiveUpdatesInPlace(t *testing.T) {
 	}
 }
 
+// TestGroups_PostPreservesProjectBindingOnUpdate pins P3c bot R2 P2: editing a
+// BOUND group's servers/description via the Groups-screen upsert (POST body has
+// NO project_path — binding is managed only via /api/projects/group-binding)
+// must PRESERVE the group's project_path, not silently clear it. A brand-new
+// group (the create branch) stays UNBOUND (project_path == "").
+func TestGroups_PostPreservesProjectBindingOnUpdate(t *testing.T) {
+	const bound = "C:\\projects\\frontend"
+	g := &fakeGroupsAPI{
+		available: []string{"memory", "time"},
+		cfg: api.GroupsConfig{Version: 1, Groups: []api.Group{
+			{Name: "frontend", Servers: []string{"memory"}, Description: "old", ProjectPath: bound},
+		}},
+	}
+	s := groupsTestServer(t, g)
+	// Edit the bound group (new servers + description, NO project_path in body).
+	rec := doJSON(t, s, http.MethodPost, "/api/groups", map[string]any{
+		"name": "frontend", "servers": []string{"time"}, "description": "new",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q, want 200", rec.Code, rec.Body.String())
+	}
+	if n := len(g.lastWrite.Groups); n != 1 {
+		t.Fatalf("after upsert there are %d groups, want 1 (in-place update): %+v", n, g.lastWrite.Groups)
+	}
+	// The binding MUST survive the Groups-screen edit (not cleared by the body).
+	if got := g.lastWrite.Groups[0].ProjectPath; got != bound {
+		t.Fatalf("project_path = %q after Groups-screen edit, want preserved %q (binding silently cleared)", got, bound)
+	}
+	// The edited fields applied.
+	if got := g.lastWrite.Groups[0].Servers; len(got) != 1 || got[0] != "time" {
+		t.Fatalf("upsert did not replace servers: %+v", got)
+	}
+	if got := g.lastWrite.Groups[0].Description; got != "new" {
+		t.Fatalf("upsert did not replace description: %q", got)
+	}
+	// The mutation response DTO also carries the preserved binding.
+	resp := decodeMutationResp(t, rec)
+	if resp.Group == nil || resp.Group.ProjectPath != bound {
+		t.Fatalf("response group project_path = %+v, want preserved %q", resp.Group, bound)
+	}
+
+	// A brand-NEW group via the same endpoint stays UNBOUND.
+	rec = doJSON(t, s, http.MethodPost, "/api/groups", map[string]any{
+		"name": "backend", "servers": []string{"memory"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%q, want 200", rec.Code, rec.Body.String())
+	}
+	var created *api.Group
+	for i := range g.lastWrite.Groups {
+		if g.lastWrite.Groups[i].Name == "backend" {
+			created = &g.lastWrite.Groups[i]
+			break
+		}
+	}
+	if created == nil {
+		t.Fatalf("new group 'backend' not written: %+v", g.lastWrite.Groups)
+	}
+	if created.ProjectPath != "" {
+		t.Fatalf("new group project_path = %q, want \"\" (a new group is unbound)", created.ProjectPath)
+	}
+}
+
 func TestGroups_PostLargeManifestClassBodySucceeds(t *testing.T) {
 	const serverCount = 1800
 	available := make([]string, 0, serverCount)

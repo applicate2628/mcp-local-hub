@@ -125,6 +125,9 @@ describe("ProjectsScreen — list view (aggregate)", () => {
                   key: "/home/x/proj",
                   entries: [{ workspace_key: "k", workspace_path: "/home/x/proj", language: "go", backend: "mcp-language-server", port: 0, task_name: "t" }],
                   scan: { at: "now", entries: [scanEntry("memory", { cursor: {} })] },
+                  // P3c: the per-card group count reads the per-project
+                  // binding-filtered dto.groups, NOT the top-level groups.
+                  groups: [{ name: "frontend", servers: ["serena"], project_path: "" }],
                 }),
                 proj({ key: "/home/x/other", workspace_path: "/home/x/other" }),
               ],
@@ -189,13 +192,15 @@ describe("ProjectsScreen — detail lens (sections + toggles)", () => {
   }
 
   it("renders the 3 mechanism sections + provenance badges", async () => {
+    // P3c: the detail-lens group list reads the PER-PROJECT filtered dto.groups
+    // (backend-owned), not the top-level groups. Put the group in dto.groups.
     mountDetail(
       proj({
         key: "/home/x/proj",
         entries: [{ workspace_key: "k", workspace_path: "/home/x/proj", language: "go", backend: "mcp-language-server", port: 0, task_name: "t", lifecycle: "active", client_entries: { "claude-code": "x" } }],
         scan: { at: "now", entries: [] },
+        groups: [{ name: "g1", servers: ["serena"], tools_hidden: { serena: ["x"] } }],
       }),
-      [{ name: "g1", servers: ["serena"], tools_hidden: { serena: ["x"] } }],
     );
     render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
     await waitFor(() => expect(screen.queryByTestId("projects-detail")).toBeTruthy());
@@ -445,5 +450,123 @@ describe("ProjectsScreen — detail lens (sections + toggles)", () => {
     expect(screen.getByTestId("projects-section-groups")).toBeTruthy();
     // The config section shows the section-scoped error.
     expect(screen.getByTestId("projects-section-config-error").textContent).toContain("could not be read");
+  });
+});
+
+describe("ProjectsScreen — P3c group↔project binding (§10.1)", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+  afterEach(() => cleanup());
+
+  // mountDetailGroups stubs the aggregate + the binding endpoint. dtoGroups are
+  // the PER-PROJECT binding-filtered groups (dto.groups) the detail lens reads.
+  function mountDetailGroups(
+    dtoGroups: unknown[],
+    bindImpl?: (init?: RequestInit) => Response | Promise<Response>,
+  ) {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/projects/group-binding":
+          bindImpl ?? (() => jsonResponse(200, { group: "x", project_path: "" })),
+        "/api/projects/toggle": () => jsonResponse(200, { scope: "group-servers", server: "x", enabled: true }),
+        "/api/projects": () =>
+          jsonResponse(200, aggregate({ projects: [proj({ key: "/home/x/proj", groups: dtoGroups })] })),
+        "/api/server/readiness": () => jsonResponse(404, { error: "not found" }),
+      }) as unknown as typeof fetch,
+    );
+  }
+
+  it("renders the replaced copy (no 'not yet bound to a project') + bind affordance", async () => {
+    mountDetailGroups([{ name: "g1", servers: [], project_path: "" }]);
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-section-groups")).toBeTruthy());
+    const sec = screen.getByTestId("projects-section-groups");
+    // The P1 placeholder copy is GONE.
+    expect(sec.textContent).not.toContain("not yet bound to a project");
+    expect(sec.textContent).not.toContain("coming later");
+    // The new binding copy is present.
+    expect(sec.textContent).toContain("Bind a group here to scope it to this project");
+  });
+
+  it("labels a global group 'global (all projects)' and a bound group 'bound to this project'", async () => {
+    mountDetailGroups([
+      { name: "glob", servers: [], project_path: "" },
+      { name: "mine", servers: [], project_path: "/home/x/proj" },
+    ]);
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-groups-list")).toBeTruthy());
+    expect(screen.getByTestId("projects-group-binding-state-glob").textContent).toContain("global (all projects)");
+    expect(screen.getByTestId("projects-group-binding-state-mine").textContent).toContain("bound to this project");
+    // A global group offers "Bind to this project"; a bound one offers "Unbind".
+    expect(screen.getByTestId("projects-group-bind-glob").textContent).toContain("Bind to this project");
+    expect(screen.getByTestId("projects-group-bind-mine").textContent).toContain("Unbind");
+  });
+
+  it("clicking 'Bind to this project' POSTs the project key and reloads", async () => {
+    const captured: { body: Record<string, unknown> } = { body: {} };
+    let aggCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/projects/group-binding": async (init) => {
+          captured.body = JSON.parse((init?.body as string) ?? "{}");
+          return jsonResponse(200, { group: "glob", project_path: "/home/x/proj" });
+        },
+        "/api/projects": () => {
+          aggCalls++;
+          return jsonResponse(200, aggregate({ projects: [proj({ key: "/home/x/proj", groups: [{ name: "glob", servers: [], project_path: "" }] })] }));
+        },
+        "/api/server/readiness": () => jsonResponse(404, { error: "not found" }),
+      }) as unknown as typeof fetch,
+    );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-group-bind-glob")).toBeTruthy());
+    const callsBefore = aggCalls;
+    fireEvent.click(screen.getByTestId("projects-group-bind-glob"));
+    // The POST carried the group name + this project key.
+    await waitFor(() => expect(captured.body.group).toBe("glob"));
+    expect(captured.body.project_path).toBe("/home/x/proj");
+    // The aggregate was reloaded after a successful bind (so the filter re-derives).
+    await waitFor(() => expect(aggCalls).toBeGreaterThan(callsBefore));
+  });
+
+  it("clicking 'Unbind (make global)' POSTs an EMPTY project_path", async () => {
+    const captured: { body: Record<string, unknown> } = { body: {} };
+    mountDetailGroups(
+      [{ name: "mine", servers: [], project_path: "/home/x/proj" }],
+      async (init) => {
+        captured.body = JSON.parse((init?.body as string) ?? "{}");
+        return jsonResponse(200, { group: "mine", project_path: "" });
+      },
+    );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-group-bind-mine")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("projects-group-bind-mine"));
+    await waitFor(() => expect(captured.body.group).toBe("mine"));
+    // Unbind = empty project_path → global.
+    expect(captured.body.project_path).toBe("");
+  });
+
+  it("a bind failure shows plain copy + Retry (raw code only in tooltip)", async () => {
+    mountDetailGroups(
+      [{ name: "glob", servers: [], project_path: "" }],
+      () => jsonResponse(500, { error: "disk full", code: "PROJECT_GROUP_BINDING_FAILED" }),
+    );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-group-bind-glob")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("projects-group-bind-glob"));
+    await waitFor(() => expect(screen.queryByTestId("projects-group-bind-error-glob")).toBeTruthy());
+    const err = screen.getByTestId("projects-group-bind-error-glob");
+    expect(err.textContent).toContain("couldn't be saved");
+    expect(err.textContent).not.toContain("PROJECT_GROUP_BINDING_FAILED");
+    expect(screen.getByTestId("projects-group-bind-retry-glob")).toBeTruthy();
+  });
+
+  it("empty filtered list shows the per-project empty copy", async () => {
+    mountDetailGroups([]);
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-groups-empty")).toBeTruthy());
+    expect(screen.getByTestId("projects-groups-empty").textContent).toContain("No groups visible for this project");
   });
 });
