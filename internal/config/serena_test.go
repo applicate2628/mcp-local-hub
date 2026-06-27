@@ -18,45 +18,58 @@ func TestSerenaManifestParses(t *testing.T) {
 	if m.Name != "serena" {
 		t.Errorf("Name = %q", m.Name)
 	}
-	// Unified-daemon layout (post-2026-05-20 architectural review): ONE serena
-	// daemon on --context codex for ALL clients, replacing the old
-	// claude(9121)+codex(9122) split. See servers/serena/manifest.yaml for the
-	// rationale (resource savings + search_for_pattern/activate_project for every
-	// agent). Antigravity connects via `mcp relay` subprocess (stdio->HTTP
-	// bridge) because its Cascade agent rejects direct loopback-HTTP entries.
-	if len(m.Daemons) != 1 {
-		t.Errorf("len(Daemons) = %d, want 1 (unified)", len(m.Daemons))
+	// Router-native dynamic-pool layout (area-4 flip): the shipped serena catalog
+	// is kind: workspace-scoped with a daemon_template and NO static daemons[],
+	// so NEW installs are router-native from the start (clients point at the
+	// /serena/mcp router; the supervisor spawns one serena child PER WORKSPACE
+	// from the template). This replaced the unified-intermediate shape (one
+	// static `unified` daemon on --context codex at port 9121). See
+	// servers/serena/manifest.yaml for the why-unified-on-codex rationale
+	// (resource savings + search_for_pattern/activate_project for every agent).
+	// EffectiveSerenaDaemonTemplate (internal/api/serena_dynamic_pool.go) now
+	// reads its template from this embed verbatim instead of falling back to its
+	// built-in default; the dynamic-pool synthesizer is an identity projection.
+	if m.Kind != KindWorkspaceScoped {
+		t.Errorf("Kind = %q, want %q (router-native dynamic-pool catalog)", m.Kind, KindWorkspaceScoped)
 	}
-	if len(m.Daemons) == 1 && m.Daemons[0].Name != "unified" {
-		t.Errorf("Daemons[0].Name = %q, want unified", m.Daemons[0].Name)
+	if len(m.Daemons) != 0 {
+		t.Errorf("len(Daemons) = %d, want 0 (dynamic-pool: no static daemons[])", len(m.Daemons))
 	}
-	if len(m.ClientBindings) != 7 {
-		t.Errorf("len(ClientBindings) = %d, want 7 managed clients", len(m.ClientBindings))
+	if m.DaemonTemplate == nil {
+		t.Fatalf("DaemonTemplate = nil, want a dynamic-pool template (context/port_pool/extra_args_template)")
 	}
-	// EVERY client (including codex-cli) routes to the single "unified" daemon.
-	// Antigravity gets there via a stdio-relay spawn; the others use HTTP
-	// client entries.
-	wantUnified := map[string]bool{
-		"claude-code": false,
-		"codex-cli":   false,
-		"cursor":      false,
-		"vscode":      false,
-		"gemini-cli":  false,
-		"qwen-cli":    false,
-		"antigravity": false,
+	// The embed's daemon_template MUST match EffectiveSerenaDaemonTemplate's
+	// built-in default EXACTLY so the synthesizer output stays byte-identical to
+	// the prior unified-intermediate projection (the embed-wins template == the
+	// prior default). The owner of those defaults is internal/api; this test pins
+	// the literal YAML values so a drift on either side is caught.
+	if m.DaemonTemplate.Context != "codex" {
+		t.Errorf("DaemonTemplate.Context = %q, want %q", m.DaemonTemplate.Context, "codex")
 	}
-	for _, b := range m.ClientBindings {
-		if _, ok := wantUnified[b.Client]; ok {
-			if b.Daemon != "unified" {
-				t.Errorf("binding %s.daemon = %q, want unified", b.Client, b.Daemon)
+	if m.DaemonTemplate.PortPool == nil {
+		t.Fatalf("DaemonTemplate.PortPool = nil, want {9150,9199}")
+	}
+	if m.DaemonTemplate.PortPool.Start != 9150 || m.DaemonTemplate.PortPool.End != 9199 {
+		t.Errorf("DaemonTemplate.PortPool = {%d,%d}, want {9150,9199}",
+			m.DaemonTemplate.PortPool.Start, m.DaemonTemplate.PortPool.End)
+	}
+	wantExtraArgs := []string{"--project", WorkspacePathToken}
+	if len(m.DaemonTemplate.ExtraArgsTemplate) != len(wantExtraArgs) {
+		t.Errorf("DaemonTemplate.ExtraArgsTemplate = %v, want %v", m.DaemonTemplate.ExtraArgsTemplate, wantExtraArgs)
+	} else {
+		for i, a := range wantExtraArgs {
+			if m.DaemonTemplate.ExtraArgsTemplate[i] != a {
+				t.Errorf("DaemonTemplate.ExtraArgsTemplate[%d] = %q, want %q", i, m.DaemonTemplate.ExtraArgsTemplate[i], a)
 			}
-			wantUnified[b.Client] = true
 		}
 	}
-	for client, seen := range wantUnified {
-		if !seen {
-			t.Errorf("binding for client %q not found", client)
-		}
+	// The dynamic-pool catalog carries NO client_bindings: clients route through
+	// the /serena/mcp router (established by `mcphub migrate serena
+	// legacy-to-dynamic-pool` / the reconcile owner), not per-daemon bindings. A
+	// binding referencing a now-absent named daemon would also break the generic
+	// BuildPlanWithOpts install path (findDaemon would fail). Pin the absence.
+	if len(m.ClientBindings) != 0 {
+		t.Errorf("len(ClientBindings) = %d, want 0 (router-native: no per-daemon bindings on the dynamic-pool catalog)", len(m.ClientBindings))
 	}
 
 	// PYTHONUNBUFFERED=1 must reach the serena child env so Python

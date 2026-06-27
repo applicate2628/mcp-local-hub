@@ -121,6 +121,19 @@ func (s serenaSourceState) String() string {
 //
 // Refuse-on-malformed: any shape outside the three recognized states returns
 // serenaSourceMalformed with an explicit error.
+//
+// As of the area-4 router-native flip (servers/serena/manifest.yaml is now
+// kind: workspace-scoped with a daemon_template and NO daemons[]), the SHIPPED
+// embedded catalog classifies as serenaSourceAlreadyMigrated. The classifier
+// LOGIC is unchanged — the already-migrated branch already existed for an
+// operator-edited or future-shipped dynamic-pool manifest. Crucially, this
+// CATALOG classification does NOT short-circuit the migrate to a no-op: the
+// no-op / cutover decision in runMigrateSerenaDynamicPool keys on the committed
+// supervisor-intent.json (serenaRuntimeIntentIsDynamicPool — a nil-runtime_spec
+// legacy intent ⇒ false ⇒ PROCEED), never on this catalog shape (see the
+// finding #2 + #5 comment at the already-migrated decision below). A
+// legacy-intent host therefore still gets the full reap + runtime_spec cutover
+// even though the catalog now reads as already-migrated.
 func detectSerenaSourceState(m *config.ServerManifest) (serenaSourceState, error) {
 	switch {
 	case len(m.Daemons) == 0 && m.DaemonTemplate != nil:

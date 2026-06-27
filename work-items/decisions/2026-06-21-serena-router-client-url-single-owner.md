@@ -1,13 +1,24 @@
 ---
-status: proposed
+status: accepted
 date: 2026-06-21
+accepted: 2026-06-28
 ---
 
 # Serena Router Client URL Single Owner
 
 `SerenaRouterClientURL` is the single owner consumed by all serena client-URL writers and ownership checks: migrate write, install write, scan read/reconcile, and uninstall ownership. This change wires the last unwired writer, the install `BuildPlanWithOpts` write plane, so manifest-driven install planning cannot revert serena clients back to the legacy per-daemon URL.
 
-Strategic follow-up: make the serena manifest router-native, deleting the legacy/dynamic split so the generic manifest flow no longer needs a serena-specific install gate.
+Strategic follow-up (original wording): make the serena manifest router-native, deleting the legacy/dynamic split so the generic manifest flow no longer needs a serena-specific install gate.
+
+## Strategic-clause disposition — REVISED to narrower (area-4, 2026-06-28)
+
+The strategic follow-up was admitted under architect review a5920370 (accepted REVISE-to-narrower) and SHIPPED as the proportionate part; the deletion half of the original clause was REJECTED as a misread.
+
+- SHIPPED — the catalog flip. `servers/serena/manifest.yaml` is now `kind: workspace-scoped` with a `daemon_template` (and no static `daemons[]`/`client_bindings`), so NEW installs are router-native from the start: a fresh host writes ZERO legacy per-daemon `9121` client entries and ZERO `runtime_spec` rows (the §7.1 gate stays inert until a workspace registers). The embed's `daemon_template` matches `EffectiveSerenaDaemonTemplate`'s built-in default exactly, so the in-memory dynamic-pool synthesizer is now an identity projection.
+- KEPT — the migrate as an existing-host upgrade/recovery path. `mcphub migrate serena legacy-to-dynamic-pool` still owns the legacy→router cutover for already-installed hosts. Its no-op/cutover decision keys on the committed `supervisor-intent.json` (`serenaRuntimeIntentIsDynamicPool` — a nil-`runtime_spec` row ⇒ false ⇒ proceed), NOT on the catalog shape, so a legacy-intent host still gets the full reap+`runtime_spec` cutover even though the catalog now classifies as `already-migrated`. Deleting the split would strand every existing host.
+- KEPT — the §7.1 spec-bearing-write gate. The "no serena-specific install gate" half of the original clause was a misread: the gate is GENERIC, keyed on `HasRuntimeSpecRow()` (any spec-bearing supervisor-intent write), not on serena-by-name. It is a spec-version split-brain guard against an older supervisor binary, independent of serena. The client-URL is ALREADY router-native (the dynamic-pool manifest carries no `client_bindings`; serena client routing is the `SerenaRouterClientURL` owner via the migrate reconcile), so no serena-specific install gate exists to delete.
+
+This was a PROPORTIONATE change (catalog flip + classifier comment + tests), NOT the full split-deletion. The PROTECTED surfaces stayed 0-diff: the §7.1 gate (`install_parsed_manifest.go`), the interlock bypass token (`supervisor_lock.go`), the INTRODUCE cutover (`serena_auto_register.go`), the migrate driver LOGIC (`migrate_serena.go`), `HasRuntimeSpecRow` (`supervisor_intent.go`), the `SerenaRouterClientURL` owner (`serena_client_reconcile.go`), and the #400 router-native client write (`install.go`).
 
 ## Evidence
 

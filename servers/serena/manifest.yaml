@@ -1,6 +1,6 @@
 name: serena
 description: "Semantic code toolkit — LSP-backed symbol search, references, and precise multi-file edits across your codebase."
-kind: global
+kind: workspace-scoped
 transport: native-http
 command: uvx
 base_args:
@@ -19,12 +19,17 @@ base_args:
 env:
   PYTHONUNBUFFERED: "1"
 
-# ONE Serena daemon, codex context for ALL clients.
+# Router-native dynamic pool: ONE Serena daemon PER WORKSPACE, codex
+# context for ALL clients. New installs are router-native from the start —
+# every managed client points at the /serena/mcp router (no per-daemon
+# client_bindings on the dynamic-pool shape), and the supervisor spawns one
+# serena child per registered workspace from the daemon_template below.
 #
-# Why unified on --context codex (post-2026-05-20 architectural review):
+# Why a single --context codex for every client (post-2026-05-20
+# architectural review):
 #
-#   The pre-existing split (claude on 9121 with --context claude-code +
-#   codex on 9122 with --context codex) wasted resources for two reasons:
+#   The pre-existing split (claude with --context claude-code + codex with
+#   --context codex) wasted resources for two reasons:
 #
 #   1. Memory + process footprint: 2× Python + 2× SolidLSP + 2× internal
 #      LSP children (clangd, tsserver, ...) at peak when both daemons had
@@ -40,60 +45,42 @@ env:
 #
 #   By unifying everyone on --context codex:
 #
-#   - 1 process instead of 2.
+#   - 1 process per workspace instead of 2 per client-context.
 #   - search_for_pattern available to ALL agents (Codex's stats: 201
 #     calls/month — actively used, not theoretical).
 #   - activate_project available to ALL agents — claude-family agents
-#     can now switch between projects on demand, instead of being
-#     locked to whatever project the daemon was bootstrapped on.
+#     can switch between projects on demand, instead of being locked to
+#     whatever project the daemon was bootstrapped on.
 #
-# Trade-off accepted: _active_project tug-of-war when multiple agents
-# work on different projects simultaneously. Per upstream serena
-# task-executor design (verified via Codex deep-source review):
-# activate_project is sequential within a single daemon, current
-# tool-call drains before switch, cache saved on shutdown
-# (`Project.shutdown(save_cache=True)`). So thrashing is ordered, not
-# racy, and warm-up on return to a prior project is cache-assisted.
-# Pragmatic for single-operator workflow even with 3+ projects in
-# rotation; consider per-project daemon split (--project flag in
-# extra_args) if thrashing latency becomes user-visible.
-daemons:
-  - name: unified
-    context: codex
-    port: 9121
-    extra_args: [--context, codex]
+# The dynamic pool fronts every client through the /serena/mcp router, so a
+# single context per workspace is structurally required (per-client context
+# is unreachable through one router endpoint).
+#
+# The --context value lives SOLELY in daemon_template.context and is
+# appended to each child argv at spawn — it MUST NOT appear in base_args or
+# extra_args_template (the validator rejects a duplicate --context flag).
+daemon_template:
+  context: codex
+  port_pool:
+    start: 9150
+    end: 9199
+  extra_args_template:
+    - --project
+    - ${workspace.path}
 
 ## Antigravity's Cascade agent (Antigravity IDE v0.x as of 2026-04-17)
 # silently drops loopback-HTTP MCP entries regardless of schema. Its HTTP
 # support works only for remote HTTPS endpoints. Workaround: write a stdio
 # entry to ~/.gemini/antigravity/mcp_config.json that spawns `mcphub.exe relay`
-# as its child process. The relay connects to the shared HTTP daemon on 9121
-# and forwards JSON-RPC between Antigravity's stdin/stdout and the daemon.
-# This restores shared-daemon benefits for multi-window Antigravity users
-# without requiring Cascade to add loopback-HTTP support.
+# as its child process. For the dynamic-pool serena the relay is written with
+# `relay --url <…/serena/mcp>` pointing at the GUI's /serena/mcp router (set as
+# the client entry's RelayURL by the migrate client-reconcile — design §5,
+# internal/clients/antigravity.go's two relay shapes); the router resolves the
+# per-workspace daemon (allocated from the daemon_template.port_pool above). The
+# relay forwards JSON-RPC between Antigravity's stdin/stdout and the router. This
+# restores shared-daemon benefits for multi-window Antigravity users without
+# requiring Cascade to add loopback-HTTP support.
 #
 # See internal/clients/antigravity.go + internal/daemon/relay.go.
-client_bindings:
-  - client: claude-code
-    daemon: unified
-    url_path: /mcp
-  - client: codex-cli
-    daemon: unified
-    url_path: /mcp
-  - client: cursor
-    daemon: unified
-    url_path: /mcp
-  - client: vscode
-    daemon: unified
-    url_path: /mcp
-  - client: gemini-cli
-    daemon: unified
-    url_path: /mcp
-  - client: qwen-cli
-    daemon: unified
-    url_path: /mcp
-  - client: antigravity
-    daemon: unified
-    url_path: /mcp
 
 weekly_refresh: false
