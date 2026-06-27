@@ -124,3 +124,84 @@ func TestScan_RedactsRawClientConfig(t *testing.T) {
 		t.Fatalf("raw should be redacted, got: %#v", got)
 	}
 }
+
+// TestSanitizeScanResult_StripsLegacyConflictRaw is the finding-2 guard: the
+// Raw config blob on a LegacyConflict entry (the stdio donor row
+// classifyLSPEntries moves into a hub row) must be nil'd on the wire, not just
+// the ClientPresence Raw. Before the fix, sanitizeScanResult cleared only
+// ClientPresence, so the LegacyConflict entry's raw config leaked.
+func TestSanitizeScanResult_StripsLegacyConflictRaw(t *testing.T) {
+	in := &api.ScanResult{Entries: []api.ScanEntry{{
+		Name: "mcp-language-server",
+		ClientPresence: map[string]api.ClientEntry{
+			"codex-cli": {
+				Transport: "http",
+				Endpoint:  "http://127.0.0.1:9121/lsp/go/mcp",
+				Raw:       map[string]any{"url": "http://127.0.0.1:9121/lsp/go/mcp"},
+			},
+		},
+		LegacyConflict: map[string]api.ClientEntry{
+			"codex-cli": {
+				Transport: "stdio",
+				Endpoint:  "mcp-language-server",
+				Raw: map[string]any{
+					"command": "mcp-language-server",
+					"env":     map[string]any{"SECRET_TOKEN": "leak-me"},
+				},
+			},
+		},
+	}}}
+
+	out := sanitizeScanResult(in)
+	if out == nil || len(out.Entries) != 1 {
+		t.Fatalf("sanitizeScanResult returned unexpected shape: %#v", out)
+	}
+	if got := out.Entries[0].ClientPresence["codex-cli"].Raw; got != nil {
+		t.Errorf("ClientPresence Raw should be stripped, got: %#v", got)
+	}
+	if got := out.Entries[0].LegacyConflict["codex-cli"].Raw; got != nil {
+		t.Errorf("LegacyConflict Raw should be stripped, got: %#v", got)
+	}
+	// The non-Raw fields of the LegacyConflict entry survive (only Raw nil'd).
+	if out.Entries[0].LegacyConflict["codex-cli"].Transport != "stdio" {
+		t.Errorf("LegacyConflict entry transport corrupted: %#v", out.Entries[0].LegacyConflict["codex-cli"])
+	}
+	// Input must NOT be mutated (sanitize deep-copies).
+	if in.Entries[0].LegacyConflict["codex-cli"].Raw == nil {
+		t.Errorf("input LegacyConflict Raw was mutated; sanitize must deep-copy")
+	}
+
+	// Defense-in-depth: no raw secret survives anywhere in the serialized body.
+	body, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(body), "leak-me") {
+		t.Fatalf("serialized scan body still contains the raw secret: %s", body)
+	}
+}
+
+// TestSanitizeScanResult_NilLegacyConflictStaysAbsent pins the omitempty wire
+// shape: a nil LegacyConflict (the common no-coexistence case) must remain nil
+// after sanitize so the omitempty field stays ABSENT from the JSON rather than
+// becoming an empty object.
+func TestSanitizeScanResult_NilLegacyConflictStaysAbsent(t *testing.T) {
+	in := &api.ScanResult{Entries: []api.ScanEntry{{
+		Name: "demo",
+		ClientPresence: map[string]api.ClientEntry{
+			"claude-code": {Transport: "stdio", Endpoint: "node", Raw: map[string]any{"x": 1}},
+		},
+		// LegacyConflict deliberately nil.
+	}}}
+	out := sanitizeScanResult(in)
+	if out.Entries[0].LegacyConflict != nil {
+		t.Errorf("nil LegacyConflict should stay nil, got: %#v", out.Entries[0].LegacyConflict)
+	}
+	body, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(body), "legacy_conflict") {
+		t.Errorf("omitempty broken: serialized body contains legacy_conflict for a nil field: %s", body)
+	}
+}

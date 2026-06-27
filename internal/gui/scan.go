@@ -44,6 +44,17 @@ func registerScanRoutes(s *Server) {
 	}))
 }
 
+// sanitizeScanResult deep-copies a scan result and NILs every Raw config blob
+// before serialization, so no client-config internals reach the wire. Raw is a
+// field of api.ClientEntry, which appears in EVERY map[string]api.ClientEntry
+// on api.ScanEntry — currently both ClientPresence AND LegacyConflict (the
+// stdio donor row classifyLSPEntries moves into a hub row, scan.go). Earlier
+// this only stripped ClientPresence, so a LegacyConflict entry's Raw leaked
+// (codex finding 2). Stripping both is ADDITIVE: the global /api/scan that also
+// calls this strips strictly more Raw, which is the intended posture; the only
+// observable change is that a previously-leaking LegacyConflict.Raw is now nil
+// on the wire. If a new Raw-bearing map[string]api.ClientEntry field is ever
+// added to api.ScanEntry, it must be cleared here too.
 func sanitizeScanResult(in *api.ScanResult) *api.ScanResult {
 	if in == nil {
 		return nil
@@ -52,14 +63,27 @@ func sanitizeScanResult(in *api.ScanResult) *api.ScanResult {
 	out.Entries = make([]api.ScanEntry, len(in.Entries))
 	for i, entry := range in.Entries {
 		entryCopy := entry
-		entryCopy.ClientPresence = make(map[string]api.ClientEntry, len(entry.ClientPresence))
-		for client, clientEntry := range entry.ClientPresence {
-			clientEntry.Raw = nil
-			entryCopy.ClientPresence[client] = clientEntry
-		}
+		entryCopy.ClientPresence = stripClientEntryRaw(entry.ClientPresence)
+		entryCopy.LegacyConflict = stripClientEntryRaw(entry.LegacyConflict)
 		out.Entries[i] = entryCopy
 	}
 	return &out
+}
+
+// stripClientEntryRaw returns a copy of a client-entry map with every entry's
+// Raw config blob nil'd. A nil input returns nil (preserving the omitempty
+// shape of LegacyConflict — an absent field stays absent on the wire rather
+// than becoming an empty object).
+func stripClientEntryRaw(in map[string]api.ClientEntry) map[string]api.ClientEntry {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]api.ClientEntry, len(in))
+	for client, clientEntry := range in {
+		clientEntry.Raw = nil
+		out[client] = clientEntry
+	}
+	return out
 }
 
 // writeAPIError is the canonical error-envelope shape from spec §4.3.
