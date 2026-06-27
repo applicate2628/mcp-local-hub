@@ -849,7 +849,7 @@ function ToggleableServerRow(props: ServerRowProps): preact.JSX.Element {
           // — the name + catalog-by-name is the only secret-safe source (D2).
           href={`#/add-server?readd=${encodeURIComponent(server)}`}
           data-testid={`projects-readd-${server}`}
-          title="Disabling removed this entry; re-add this server (pre-filled by name from the catalog when known) to enable it again."
+          title="Disabling removed this entry; re-add this server (pre-filled from the catalog when known) to enable it again."
         >
           Re-add…
         </a>

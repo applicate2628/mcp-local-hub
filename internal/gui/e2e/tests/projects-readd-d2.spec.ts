@@ -148,7 +148,11 @@ seededTest.describe("D2 — secret-safe cold re-enable Re-add", () => {
     // Name pre-filled from ?readd=; honest banner (not in the catalog).
     await expect(page.locator("#field-name")).toHaveValue(SERVER);
     await expect(page.getByTestId("banner")).toContainText(`Re-adding ${SERVER}`);
-    await expect(page.getByTestId("banner")).toContainText("Not found in the catalog");
+    // F3: the honest no-match copy (the catalog was read; it does not list memo).
+    await expect(page.getByTestId("banner")).toContainText("isn't in the catalog");
+    // F1: a non-catalog re-add is a NORMAL outcome, so the banner is the neutral
+    // info kind (renders .banner.info), never the red .banner.error.
+    await expect(page.getByTestId("banner")).toHaveClass(/banner info/);
 
     // (b) THE FORM never holds the literal: YAML preview + every env input.
     await expect(page.locator('[data-testid="yaml-preview"]')).not.toContainText(LIVE_SECRET);
@@ -162,6 +166,100 @@ seededTest.describe("D2 — secret-safe cold re-enable Re-add", () => {
     expect(extractHits.count).toBe(0);
 
     // (a) NO /api/* response body observed during the flow contained the literal.
+    const leaked = apiBodies.filter((b) => b.includes(LIVE_SECRET));
+    expect(leaked, `a /api/* response leaked the literal secret: ${leaked.slice(0, 1)}`).toHaveLength(0);
+  });
+
+  // -------------------------------------------------------------------------
+  // F3 (QA-gap): a catalog READ FAILURE (500) must degrade to the distinct
+  // read-failure copy — NOT the "isn't in the catalog" no-match copy — and the
+  // form must still seed BLANK (no literal-secret echo). Reuses the seeded
+  // on-disk literal + the extract-manifest trap so the read-failure degrade is
+  // ALSO proven secret-safe end-to-end.
+  // -------------------------------------------------------------------------
+  seededTest("catalog read-failure (500) degrades to the read-failure banner + blank form, no secret echo", async ({
+    page,
+    hub,
+  }) => {
+    const apiBodies: string[] = [];
+    page.on("response", async (resp) => {
+      const url = resp.url();
+      if (!url.includes("/api/")) return;
+      try {
+        apiBodies.push(await resp.text());
+      } catch {
+        // Some responses (204, redirects) have no body — ignore.
+      }
+    });
+
+    const extractHits = { count: 0 };
+    await installExtractTrap(page, extractHits);
+
+    // SANITIZED aggregate (raw=NIL) so the disable → cold → Re-add path is the
+    // same as the falsifier; only the catalog read fails here.
+    await page.route("**/api/projects", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            projects: [proj({ scan: { at: "now", entries: [scanEntry(SERVER, { cursor: {} })] } })],
+            groups: [],
+          }),
+        });
+      } else {
+        await route.continue();
+      }
+    });
+    await page.route("**/api/projects/toggle", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ scope: "project-object-member", server: SERVER, enabled: false }),
+      });
+    });
+    // THE READ FAILURE: the catalog lookup 500s, so the readd flow cannot know
+    // whether `memo` is in the catalog → it degrades to the read-failure copy.
+    await page.route("**/api/catalog**", async (route) => {
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "catalog unavailable" }) });
+    });
+
+    await page.goto(`${hub.url}/#/projects?path=${encodeURIComponent(PROJECT_KEY)}`);
+    await expect(page.getByTestId("projects-client-cursor")).toBeVisible();
+
+    const toggle = page.getByTestId(`projects-toggle-project-object-member-${SERVER}`);
+    await expect(toggle).toBeChecked();
+    await toggle.click();
+    const readd = page.getByTestId(`projects-readd-${SERVER}`);
+    await expect(readd).toBeVisible();
+
+    await readd.click();
+    await expect(page.locator("h1")).toHaveText("Add server");
+    await expect(page.locator("#field-name")).toHaveValue(SERVER);
+
+    // F3: the read-failure copy — it must NOT assert "isn't in the catalog"
+    // (the lookup failed; membership is unknown), and it must name the cause.
+    await expect(page.getByTestId("banner")).toContainText(`Re-adding ${SERVER}`);
+    await expect(page.getByTestId("banner")).toContainText("catalog lookup failed");
+    await expect(page.getByTestId("banner")).not.toContainText("isn't in the catalog");
+    // F1: a read-failure degrade is a NORMAL outcome → neutral info kind.
+    await expect(page.getByTestId("banner")).toHaveClass(/banner info/);
+
+    // Blank form: command empty, no env block — the secret-safe seed.
+    await expect(page.locator('[data-testid="yaml-preview"]')).toContainText("command: ''");
+    await expect(page.locator('[data-testid="yaml-preview"]')).not.toContainText("env:");
+
+    // The form never holds the literal (YAML preview + every env input).
+    await expect(page.locator('[data-testid="yaml-preview"]')).not.toContainText(LIVE_SECRET);
+    const envInputs = page.locator("[data-env-row] input");
+    const n = await envInputs.count();
+    for (let i = 0; i < n; i++) {
+      await expect(envInputs.nth(i)).not.toHaveValue(new RegExp(LIVE_SECRET));
+    }
+
+    // The dead extract path was NEVER reached on the read-failure degrade.
+    expect(extractHits.count).toBe(0);
+    // No /api/* response body leaked the literal during the read-failure flow.
     const leaked = apiBodies.filter((b) => b.includes(LIVE_SECRET));
     expect(leaked, `a /api/* response leaked the literal secret: ${leaked.slice(0, 1)}`).toHaveLength(0);
   });
@@ -183,7 +281,9 @@ baseTest.describe("D2 — Add-server ?readd= pre-fill routing", () => {
     await baseExpect(page.locator("h1")).toHaveText("Add server");
     await baseExpect(page.locator("#field-name")).toHaveValue("customsrv");
     await baseExpect(page.getByTestId("banner")).toContainText("Re-adding customsrv");
-    await baseExpect(page.getByTestId("banner")).toContainText("Not found in the catalog");
+    // F3: honest no-match copy + F1 neutral info kind (not red error).
+    await baseExpect(page.getByTestId("banner")).toContainText("isn't in the catalog");
+    await baseExpect(page.getByTestId("banner")).toHaveClass(/banner info/);
     // Blank command + no env on the honest branch (the blank form still
     // serializes an EMPTY `command: ''`; assert it is empty, and that no env
     // block was seeded).
@@ -225,8 +325,10 @@ baseTest.describe("D2 — Add-server ?readd= pre-fill routing", () => {
     await baseExpect(page.locator('[data-testid="yaml-preview"]')).toContainText("index.js");
     // The sensitive env is a secret: ref, never a resolved literal.
     await baseExpect(page.locator('[data-testid="yaml-preview"]')).toContainText("secret:wolfram_app_id");
-    // No honest banner on the catalog-match path.
-    await baseExpect(page.getByTestId("banner")).toHaveCount(0);
+    // F4: the catalog-match prefill is no longer silent — a neutral info notice
+    // explains WHY the form is pre-filled and nudges the operator to set secrets.
+    await baseExpect(page.getByTestId("banner")).toContainText("Pre-filled from the catalog for wolfram");
+    await baseExpect(page.getByTestId("banner")).toHaveClass(/banner info/);
     baseExpect(manifestHit).toBe(true);
     baseExpect(extractHits.count).toBe(0);
   });

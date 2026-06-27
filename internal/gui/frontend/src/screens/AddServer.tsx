@@ -378,7 +378,14 @@ export function AddServerScreen(props: {
     if (!readd) return;
     let cancelled = false;
     (async () => {
+      // readFailed distinguishes an HONEST no-match (the catalog was read and
+      // does not list this server) from a READ FAILURE (the catalog or shipped
+      // manifest lookup threw, so we cannot know whether it is in the catalog).
+      // Both degrade to the same secret-safe blank seed, but their honest copy
+      // differs: a read-failure must NOT claim "isn't in the catalog" — the
+      // lookup failed; the server may well be there.
       let inCatalog = false;
+      let readFailed = false;
       try {
         const names = await getCatalogNames();
         inCatalog = names.has(readd);
@@ -387,6 +394,7 @@ export function AddServerScreen(props: {
         // the honest name-only branch (re-enter manually). The form NEVER
         // receives a literal secret on either branch, so failing closed to blank
         // is safe — it just asks for one extra re-entry.
+        readFailed = true;
       }
       if (cancelled) return;
       if (inCatalog) {
@@ -398,22 +406,35 @@ export function AddServerScreen(props: {
           const parsed = parseYAMLToForm(yaml);
           setFormState(parsed);
           setInitialSnapshot(parsed);
+          // F4: the catalog-match prefill is otherwise silent. Explain WHY the
+          // form is pre-filled and nudge the operator to set required secrets —
+          // a neutral notice symmetric with the no-match / read-failure branches.
+          setBanner({
+            kind: "info",
+            text: `Pre-filled from the catalog for ${readd} — review and set any required secrets before installing.`,
+          });
           return;
         } catch {
           if (cancelled) return;
           // The catalog claimed it but the manifest read failed — degrade to
           // the same name-only blank + honest banner rather than the extract path.
+          readFailed = true;
         }
       }
       // No catalog match (or a catalog/manifest read failure): name-only seed +
       // honest banner. BLANK command/args/env — the operator re-enters secrets
-      // via the existing AddSecretModal / secret:<key> refs.
+      // via the existing AddSecretModal / secret:<key> refs. Both branches are
+      // NORMAL outcomes, so the banner is neutral (kind: "info"), never red.
       const seeded = { ...BLANK_FORM, name: readd };
       setFormState(seeded);
       setInitialSnapshot(seeded);
       setBanner({
-        kind: "error",
-        text: `Re-adding ${readd} — it was removed from your config, so re-enter its command/args/secrets. (Not found in the catalog.)`,
+        kind: "info",
+        // F3: read-failure copy must NOT assert "isn't in the catalog" — the
+        // lookup failed, so its catalog membership is unknown.
+        text: readFailed
+          ? `Re-adding ${readd} — couldn't pre-fill it (catalog lookup failed), so re-enter its command/args/secrets.`
+          : `Re-adding ${readd} — it was removed from your config and isn't in the catalog, so re-enter its command/args/secrets.`,
       });
     })();
     return () => {
@@ -635,7 +656,11 @@ export function AddServerScreen(props: {
   const [warnings, setWarnings] = useState<string[] | null>(null);
 
   type Banner = {
-    kind: "error" | "success";
+    // "info" is a NEUTRAL informational notice (renders .banner.info, not the
+    // red .banner.error). The D2 readd flow uses it for its honest-UX notices:
+    // a non-catalog re-add, a catalog read-failure degrade, and a catalog-match
+    // success are all NORMAL outcomes, not failures — they must not render red.
+    kind: "error" | "success" | "info";
     text: string;
     // retryName is the install TARGET name, NOT a callback: the Retry button
     // invokes the CURRENT render's retryInstall(retryName) so it reads the latest

@@ -775,7 +775,11 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
     await waitFor(() => {
       expect(screen.getByTestId("banner").textContent).toContain("Re-adding customsrv");
     });
-    expect(screen.getByTestId("banner").textContent).toContain("Not found in the catalog");
+    // F3: the honest no-match copy (the catalog was read; it does not list it).
+    expect(screen.getByTestId("banner").textContent).toContain("isn't in the catalog");
+    // F1: a non-catalog re-add is a NORMAL outcome → neutral info kind, not red.
+    expect(screen.getByTestId("banner").className).toContain("info");
+    expect(screen.getByTestId("banner").className).not.toContain("error");
 
     // INVARIANT: the extract-manifest path is NEVER touched on the readd branch
     // (it would 404 + carry the client env verbatim = a literal-secret re-leak).
@@ -826,8 +830,51 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
     expect(urls.some((u) => u.includes("/api/extract-manifest"))).toBe(false);
     // Catalog matched → shipped manifest read happened.
     expect(urls.some((u) => u.startsWith("/api/manifest/get"))).toBe(true);
-    // No honest banner on the catalog-match path.
-    expect(screen.queryByTestId("banner")).toBeNull();
+    // F4: the catalog-match prefill is no longer silent — a neutral info notice
+    // explains WHY the form is pre-filled and nudges the operator to set secrets.
+    await waitFor(() => {
+      expect(screen.getByTestId("banner").textContent).toContain("Pre-filled from the catalog for wolfram");
+    });
+    expect(screen.getByTestId("banner").className).toContain("info");
+    expect(screen.getByTestId("banner").className).not.toContain("error");
+  });
+
+  it("a CATALOG READ FAILURE (catalog 500) degrades to the distinct read-failure copy + blank form, never extract-manifest", async () => {
+    window.location.hash = "#/add-server?readd=memo";
+    const urls: string[] = [];
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      urls.push(url);
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url.startsWith("/api/catalog")) {
+        // THE READ FAILURE: the catalog lookup 500s → getCatalogNames throws →
+        // the readd flow cannot know catalog membership → read-failure degrade.
+        return Promise.resolve(jsonResponse({ error: "catalog unavailable" }, 500));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(<AddServerScreen />);
+
+    await waitFor(() => {
+      expect(document.querySelector<HTMLInputElement>("#field-name")?.value).toBe("memo");
+    });
+    // F3: the read-failure copy — names the failed lookup and must NOT assert
+    // "isn't in the catalog" (membership is unknown when the lookup failed).
+    await waitFor(() => {
+      expect(screen.getByTestId("banner").textContent).toContain("Re-adding memo");
+    });
+    expect(screen.getByTestId("banner").textContent).toContain("catalog lookup failed");
+    expect(screen.getByTestId("banner").textContent).not.toContain("isn't in the catalog");
+    // F1: a read-failure degrade is a NORMAL outcome → neutral info kind.
+    expect(screen.getByTestId("banner").className).toContain("info");
+    expect(screen.getByTestId("banner").className).not.toContain("error");
+
+    // Blank secret-safe seed: no shipped-manifest read, never the extract path.
+    expect(urls.some((u) => u.startsWith("/api/manifest/get"))).toBe(false);
+    expect(urls.some((u) => u.includes("/api/extract-manifest"))).toBe(false);
   });
 
   it("a bare add-server (no ?readd=) does NOT run the readd seed (form stays blank)", async () => {
