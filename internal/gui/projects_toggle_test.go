@@ -265,6 +265,113 @@ func TestProjectsToggle_Unsupported(t *testing.T) {
 	}
 }
 
+// TestProjectsToggle_ClaudeObjectMember_RejectedNeverMemberDeletes is the
+// security falsifier for bug 2026-06-27 at the HTTP boundary: a direct
+// /api/projects/toggle caller sending {client:"claude-code",
+// scope:"project-object-member", enable:false} against a project's checked-in
+// .mcp.json is REJECTED (400 PROJECT_TOGGLE_UNSUPPORTED, no write) and the
+// mcpServers[<server>] DEFINITION SURVIVES — the member-delete data-loss the P3b
+// frontend fix prevented is now closed at the backend classifier too.
+func TestProjectsToggle_ClaudeObjectMember_RejectedNeverMemberDeletes(t *testing.T) {
+	isolateHome(t)
+	t.Cleanup(api.SetClientWriteFallbackForTest())
+	root := t.TempDir()
+	s := NewServer(Config{})
+
+	// Seed a checked-in .mcp.json with a claude server definition (the shared,
+	// collaborator-visible file a member-delete would destroy).
+	mcpPath := filepath.Join(root, ".mcp.json")
+	seed := `{"mcpServers":{"keepme":{"command":"node","args":["server.js"]}}}`
+	if err := os.WriteFile(mcpPath, []byte(seed), 0o600); err != nil {
+		t.Fatalf("seed .mcp.json: %v", err)
+	}
+	before, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatalf("read seeded .mcp.json: %v", err)
+	}
+
+	body := `{"root":"` + jsonEscPath(root) + `","client":"claude-code","scope":"project-object-member","server":"keepme","enable":false}`
+	rec := postToggle(t, s, body)
+
+	// 1) The destructive route is refused (no guess, no write).
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 (claude-code object-member toggle must be rejected); body=%s", rec.Code, rec.Body.String())
+	}
+	var env struct{ Code string }
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	if env.Code != "PROJECT_TOGGLE_UNSUPPORTED" {
+		t.Errorf("code=%q, want PROJECT_TOGGLE_UNSUPPORTED", env.Code)
+	}
+
+	// 2) The shared .mcp.json must be byte-for-byte UNCHANGED (the reject path
+	//    makes NO write at all) AND the mcpServers[keepme] DEFINITION must STILL
+	//    be present (no member-delete data-loss — the exact bug 2026-06-27).
+	after, err := os.ReadFile(mcpPath)
+	if err != nil {
+		t.Fatalf("re-read .mcp.json: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("rejected claude-code object-member toggle REWROTE the shared .mcp.json (must be byte-unchanged)\nbefore=\n%s\nafter=\n%s", before, after)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(after, &m); err != nil {
+		t.Fatalf("parse .mcp.json: %v (file=\n%s)", err, after)
+	}
+	ms, ok := m["mcpServers"].(map[string]any)
+	if !ok {
+		t.Fatalf("mcpServers section DELETED (data-loss!); file=\n%s", after)
+	}
+	if _, ok := ms["keepme"]; !ok {
+		t.Errorf("mcpServers[keepme] definition member-DELETED by a claude-code object-member disable (the exact bug 2026-06-27 data-loss); file=\n%s", after)
+	}
+}
+
+// TestProjectsToggle_CursorVscodeObjectMember_StillWork confirms the narrowing
+// did NOT break the clients that legitimately use object-member: cursor and
+// vscode each enable then disable a project server through the object-member
+// owner (they have no approval array, so member add/remove IS their correct
+// semantic).
+func TestProjectsToggle_CursorVscodeObjectMember_StillWork(t *testing.T) {
+	isolateHome(t)
+	t.Cleanup(api.SetClientWriteFallbackForTest())
+	s := NewServer(Config{})
+
+	cases := []struct {
+		client  string
+		relFile string
+	}{
+		{"cursor", filepath.Join(".cursor", "mcp.json")},
+		{"vscode", filepath.Join(".vscode", "mcp.json")},
+	}
+	for _, c := range cases {
+		t.Run(c.client, func(t *testing.T) {
+			root := t.TempDir()
+			enable := `{"root":"` + jsonEscPath(root) + `","client":"` + c.client +
+				`","scope":"project-object-member","server":"beta","enable":true,"value":{"url":"http://127.0.0.1:9200/mcp"}}`
+			rec := postToggle(t, s, enable)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s enable status=%d body=%s", c.client, rec.Code, rec.Body.String())
+			}
+			if got := decodeToggleResp(t, rec); !got.Enabled {
+				t.Errorf("%s enable read-back Enabled=false, want true", c.client)
+			}
+			if _, err := os.Stat(filepath.Join(root, c.relFile)); err != nil {
+				t.Fatalf("%s project config not created: %v", c.client, err)
+			}
+
+			disable := `{"root":"` + jsonEscPath(root) + `","client":"` + c.client +
+				`","scope":"project-object-member","server":"beta","enable":false}`
+			rec = postToggle(t, s, disable)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s disable status=%d body=%s", c.client, rec.Code, rec.Body.String())
+			}
+			if got := decodeToggleResp(t, rec); got.Enabled {
+				t.Errorf("%s disable read-back Enabled=true, want false", c.client)
+			}
+		})
+	}
+}
+
 // TestProjectsToggle_PathSafety: a hostile/degenerate root for a project-config
 // toggle is rejected (400), leak-safe, and writes nothing outside.
 func TestProjectsToggle_PathSafety(t *testing.T) {

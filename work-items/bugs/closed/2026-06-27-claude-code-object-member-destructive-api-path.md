@@ -1,5 +1,5 @@
 ---
-status: open
+status: fixed
 severity: medium
 context: closeout-bot-finding (#436); latent backend gap surfaced by the per-project-GUI closeout review
 ---
@@ -55,3 +55,45 @@ Add a regression test (`project_toggle_owner_test.go`) asserting claude-code +
 `project-object-member` does NOT route to `OwnerProjectObjectMember`.
 
 Found by the closeout bot on #436 (round 3).
+
+## Resolution
+
+Direction 1 (reject — preferred) shipped. The WRITE classifier was narrowed at
+its single owner; the SCAN/read path was left untouched.
+
+- **Classifier narrowing** — `internal/clients/project_toggle_owner.go`:
+  the `ScopeProjectObjectMember` arm now consults a new predicate
+  `clientUsesApprovalArrayToggle(client)` (true ONLY for claude-code) and returns
+  `OwnerUnsupported` for an approval-array-gated client BEFORE the registry lookup.
+  cursor/vscode (no approval array) keep `OwnerProjectObjectMember` — object member
+  add/remove IS their correct disable semantic. claude-code's correct path
+  (`ScopeClaudeLocalMembership` → `OwnerClaudeLocalMembership`, the non-destructive
+  ~/.claude.json array-move) is unchanged. So a direct API caller (or a future
+  frontend regression) sending `{client:"claude-code", scope:"project-object-member",
+  enable:false}` can no longer member-delete the shared checked-in `.mcp.json`
+  definition.
+- **`projectScopeRegistry` (project_scope.go) UNTOUCHED** — claude-code STAYS in the
+  registry so the P2a scan/read path keeps reading `.mcp.json`. The narrowing lives
+  ONLY in the write classifier (`ProjectToggleOwner`), not the registry.
+  `internal/api/scan.go` is 0-diff.
+- **Handler** — `internal/gui/projects_toggle.go`: the now-`OwnerUnsupported`
+  claude-code object-member toggle falls to the existing `default` arm → redacted
+  400 `PROJECT_TOGGLE_UNSUPPORTED` with no write; its message was clarified to name
+  the correct `claude-local-membership` scope.
+- **Regression tests** —
+  `internal/clients/project_toggle_owner_test.go`: the dispatch-table case for
+  claude-code object-member was flipped to `OwnerUnsupported`, plus a dedicated
+  `TestProjectToggleOwner_ClaudeCodeObjectMemberRejected` (the falsifier:
+  reject + scan-path-intact + cursor/vscode-still-`OwnerProjectObjectMember` +
+  claude-local-still-`OwnerClaudeLocalMembership`).
+  `internal/gui/projects_toggle_test.go`:
+  `TestProjectsToggle_ClaudeObjectMember_RejectedNeverMemberDeletes` (HTTP-level:
+  a claude-code object-member disable is 400-rejected AND the seeded `.mcp.json`
+  `mcpServers[keepme]` definition survives byte-for-byte) +
+  `TestProjectsToggle_CursorVscodeObjectMember_StillWork`.
+
+Decision promoted alongside: `work-items/decisions/2026-06-27-trusted-roots-shared-owner.md`
+(unrelated area-5 decision, proposed→accepted).
+
+Fixed by the classifier-narrowing commit on branch
+`fix/claude-object-member-destructive-api`.
