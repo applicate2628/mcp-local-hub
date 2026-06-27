@@ -218,33 +218,6 @@ type ClientEntry struct {
 	// into Status "via-hub-inherited" (read-only) instead of "via-hub". The
 	// omitempty tag keeps EVERY other client's wire bytes byte-identical.
 	Inherited bool `json:"inherited,omitempty"`
-
-	// ToggleValue is the per-project-GUI P3a RE-ENABLE value source for an
-	// OBJECT-MEMBER project substrate (cursor / vscode / claude-code .mcp.json
-	// Project scope). POST /api/projects/toggle requires the caller to send the
-	// full object-member `value` to re-enable a project-config server (P3a does
-	// not synthesize it — see projectToggleRequest.Value); but the project
-	// aggregate / project scan strip the verbatim Raw config blob before
-	// serialization, so without this the P3b frontend cannot reconstruct an
-	// entry whose fields are not in the transport summary. ToggleValue carries
-	// the SAME bytes the project read path already read from the user's own
-	// config (the object member's verbatim fragment) so P3b can echo it back on
-	// enable.
-	//
-	// PROVENANCE / NO-LEAK (bot PR #433 finding 5): it is populated ONLY by the
-	// project read paths (GET /api/projects + GET /api/projects/scan), and ONLY
-	// for an object-member-scope client (clients.ProjectToggleOwner ==
-	// OwnerProjectObjectMember). The GLOBAL Servers-matrix scan NEVER sets it, so
-	// its omitempty keeps the global wire bytes byte-identical (golden invariant).
-	// It exposes NO new surface: the source is the entry's own Raw (the same
-	// verbatim member the scan already read from the user's config, which is
-	// same-origin localhost — the user's own .mcp.json back to their own
-	// browser), and the scan never resolves secrets — a `secret:<key>` /
-	// `${env:...}` reference stays a verbatim reference here, never a resolved
-	// value. claude-code LOCAL scope (array-move) does NOT need this (re-enable
-	// moves the name between the enabled/disabled arrays; the mcpServers
-	// definition is untouched), so the claude-local path never sets it.
-	ToggleValue map[string]any `json:"toggle_value,omitempty"`
 }
 
 // ScanResult bundles a full scan with timestamp for caching / SSE.

@@ -167,10 +167,9 @@ func (s *Server) scanOneProject(root string, guiPort int) (*api.ScanResult, stri
 	if err := api.EnrichProjectClaudeLocalScope(result, realRoot); err != nil {
 		return nil, "PROJECT_SCAN_FAILED"
 	}
-	// P3a finding 5 (bot PR #433): preserve the object-member re-enable value
-	// source BEFORE sanitizeScanResult nils Raw, so the P3b frontend can echo it
-	// back on a re-enable toggle. Same single-owner scope discrimination + no-leak
-	// posture as the /api/projects/scan path (preserveProjectToggleValues).
-	preserveProjectToggleValues(result)
+	// P3a stays NAMES-only (bot PR #433 r3 finding 4, lead adjudication): the r2
+	// `toggle_value` Raw-copy provision is REMOVED — it re-exposed secret-bearing
+	// config sanitizeScanResult strips on purpose. The re-enable value-source is a
+	// P3b concern (work-items/backlog/2026-06-25-p3b-reenable-value-source.md).
 	return sanitizeScanResult(result), ""
 }

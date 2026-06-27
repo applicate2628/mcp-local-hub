@@ -467,92 +467,156 @@ func TestProjectsToggle_GroupServers_DisableNotNameGated(t *testing.T) {
 	}
 }
 
-// TestProjectsScan_PreservesObjectMemberToggleValue pins finding 5: the project
-// scan exposes a per-entry `toggle_value` for OBJECT-MEMBER substrates carrying
-// the verbatim member value, while still stripping `raw`. A secret:<key> ref
-// survives verbatim (no resolution) — the no-leak posture.
-func TestProjectsScan_PreservesObjectMemberToggleValue(t *testing.T) {
+// --- bot PR #433 round 3 ---
+
+// groupsYamlPath returns the on-disk groups.yaml path under the active
+// (test-overridden) daemon state dir.
+func groupsYamlPath(t *testing.T) string {
+	t.Helper()
+	dir, err := api.DaemonStateDirReadOnly()
+	if err != nil {
+		t.Fatalf("resolve state dir: %v", err)
+	}
+	return filepath.Join(dir, "groups.yaml")
+}
+
+// TestProjectsToggle_GroupNotFound_NoWriteWhenNoFile pins finding 2 (bot PR #433
+// r3): a toggle of a NON-EXISTENT group when NO groups.yaml exists yet returns
+// 404 AND creates NO groups.yaml. Before the fix the RMW callback returned
+// nil,nil even on a miss, so ReadModifyWriteGroups normalized/CREATED the file
+// before the handler 404'd.
+func TestProjectsToggle_GroupNotFound_NoWriteWhenNoFile(t *testing.T) {
 	isolateHome(t)
-	root := t.TempDir()
-	mustWrite(t, filepath.Join(root, ".cursor", "mcp.json"),
-		`{"mcpServers":{"beta":{"command":"node","args":["b.js"],"env":{"TOKEN":"secret:beta_token"}}}}`)
+	stateDir := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(stateDir))
+	t.Cleanup(api.SetClientWriteFallbackForTest())
+
+	gpath := groupsYamlPath(t)
+	if _, err := os.Stat(gpath); err == nil {
+		t.Fatalf("precondition: groups.yaml must NOT exist before the toggle")
+	}
 
 	s := NewServer(Config{})
-	rec := getProjectScan(t, s, root)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	// "memory" is routable so the ENABLE name-gate passes and the toggle reaches
+	// the group-existence check (proving 404 from a missing GROUP, not a 400 from
+	// an unknown server).
+	rec := postToggle(t, s, `{"scope":"group-servers","group":"ghost","server":"memory","enable":true}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404; body=%s", rec.Code, rec.Body.String())
 	}
-	var out api.ScanResult
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	var beta *api.ScanEntry
-	for i := range out.Entries {
-		if out.Entries[i].Name == "beta" {
-			beta = &out.Entries[i]
-			break
-		}
-	}
-	if beta == nil {
-		t.Fatalf("beta entry absent (names=%v)", entryNames(out))
-	}
-	ce, ok := beta.ClientPresence["cursor"]
-	if !ok {
-		t.Fatalf("beta has no cursor presence: %+v", beta.ClientPresence)
-	}
-	if ce.Raw != nil {
-		t.Errorf("cursor entry leaked Raw on the wire: %+v", ce.Raw)
-	}
-	if ce.ToggleValue == nil {
-		t.Fatalf("cursor object-member entry missing toggle_value (finding 5: P3b re-enable source)")
-	}
-	if got, _ := ce.ToggleValue["command"].(string); got != "node" {
-		t.Errorf("toggle_value.command=%q, want node (verbatim member)", got)
-	}
-	env2, _ := ce.ToggleValue["env"].(map[string]any)
-	if env2 == nil {
-		t.Fatalf("toggle_value missing env: %+v", ce.ToggleValue)
-	}
-	if got, _ := env2["TOKEN"].(string); got != "secret:beta_token" {
-		t.Errorf("toggle_value env.TOKEN=%q, want verbatim secret:beta_token (NO resolution)", got)
+	// The missing-group toggle must NOT have created groups.yaml (finding 2).
+	if _, err := os.Stat(gpath); err == nil {
+		t.Fatalf("missing-group toggle CREATED groups.yaml (finding 2: must make NO write): %s", gpath)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error on %s: %v", gpath, err)
 	}
 }
 
-// TestProjectsScan_ToggleValueForVscodeServersKey confirms finding 5 also covers
-// the vscode `servers`-key object-member substrate.
-func TestProjectsScan_ToggleValueForVscodeServersKey(t *testing.T) {
+// TestProjectsToggle_GroupNotFound_FileByteUnchanged pins finding 2's
+// existing-file case: a toggle of a non-existent group leaves an EXISTING
+// groups.yaml byte-for-byte unchanged (no normalize/rewrite on the not-found
+// path).
+func TestProjectsToggle_GroupNotFound_FileByteUnchanged(t *testing.T) {
 	isolateHome(t)
-	root := t.TempDir()
-	mustWrite(t, filepath.Join(root, ".vscode", "mcp.json"),
-		`{"servers":{"gamma":{"command":"uvx","args":["g"]}}}`)
+	stateDir := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(stateDir))
+	t.Cleanup(api.SetClientWriteFallbackForTest())
+
+	// Seed an existing groups.yaml with one real group, via the real write path.
+	if err := api.WriteGroups(api.GroupsConfig{Version: 1, Groups: []api.Group{{Name: "frontend", Servers: []string{"existing"}}}}); err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+	gpath := groupsYamlPath(t)
+	before, err := os.ReadFile(gpath)
+	if err != nil {
+		t.Fatalf("read seeded groups.yaml: %v", err)
+	}
 
 	s := NewServer(Config{})
-	rec := getProjectScan(t, s, root)
+	s.groups = diskTestGroupsAPI{available: []string{"memory"}}
+	rec := postToggle(t, s, `{"scope":"group-servers","group":"ghost","server":"memory","enable":true}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404; body=%s", rec.Code, rec.Body.String())
+	}
+
+	after, err := os.ReadFile(gpath)
+	if err != nil {
+		t.Fatalf("read groups.yaml after toggle: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("missing-group toggle rewrote groups.yaml (finding 2: must be byte-unchanged)\nbefore=\n%s\nafter=\n%s", before, after)
+	}
+}
+
+// TestProjectsToggle_GroupServers_DisableDropsToolsHidden pins finding 5 (bot PR
+// #433 r3): disabling a server from a group removes it from BOTH the servers list
+// AND the group's tools_hidden map — so groups.yaml is never left in the
+// editor-rejected state /api/groups forbids (a tools_hidden key for a non-member),
+// and re-adding the server later does not silently re-apply the stale filter.
+func TestProjectsToggle_GroupServers_DisableDropsToolsHidden(t *testing.T) {
+	isolateHome(t)
+	stateDir := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(stateDir))
+	t.Cleanup(api.SetClientWriteFallbackForTest())
+
+	// Seed a group whose member "memory" carries a per-server hidden-tool filter.
+	if err := api.WriteGroups(api.GroupsConfig{Version: 1, Groups: []api.Group{{
+		Name:        "frontend",
+		Servers:     []string{"memory", "time"},
+		ToolsHidden: map[string][]string{"memory": {"delete_file"}},
+	}}}); err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+
+	s := NewServer(Config{})
+	s.groups = diskTestGroupsAPI{available: []string{"memory", "time"}}
+	s.groupsRepublishFn = func(_ context.Context, _ *api.API) error { return nil }
+
+	// DISABLE "memory": dropped from servers AND tools_hidden.
+	rec := postToggle(t, s, `{"scope":"group-servers","group":"frontend","server":"memory","enable":false}`)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("disable status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	var out api.ScanResult
-	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
-		t.Fatalf("decode: %v", err)
+	cfg, err := api.LoadGroups()
+	if err != nil {
+		t.Fatalf("LoadGroups: %v", err)
 	}
-	var gamma *api.ScanEntry
-	for i := range out.Entries {
-		if out.Entries[i].Name == "gamma" {
-			gamma = &out.Entries[i]
-			break
+	g := findGroup(cfg, "frontend")
+	if g == nil {
+		t.Fatalf("group lost after disable")
+	}
+	if groupHasServer(g.Servers, "memory") {
+		t.Errorf("memory still in servers after disable: %+v", g.Servers)
+	}
+	if _, ok := g.ToolsHidden["memory"]; ok {
+		t.Errorf("tools_hidden[memory] survived a member removal (finding 5): %+v", g.ToolsHidden)
+	}
+	// The other member's filter (none here) / membership must be intact.
+	if !groupHasServer(g.Servers, "time") {
+		t.Errorf("unrelated member 'time' lost: %+v", g.Servers)
+	}
+
+	// RE-ENABLE "memory": it returns as a plain member with NO stale filter.
+	rec = postToggle(t, s, `{"scope":"group-servers","group":"frontend","server":"memory","enable":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("re-enable status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	cfg, _ = api.LoadGroups()
+	g = findGroup(cfg, "frontend")
+	if g == nil || !groupHasServer(g.Servers, "memory") {
+		t.Fatalf("memory not re-added: %+v", cfg.Groups)
+	}
+	if _, ok := g.ToolsHidden["memory"]; ok {
+		t.Errorf("re-adding memory resurrected a stale tools_hidden filter (finding 5): %+v", g.ToolsHidden)
+	}
+}
+
+// findGroup returns a pointer to the named group in cfg, or nil.
+func findGroup(cfg api.GroupsConfig, name string) *api.Group {
+	for i := range cfg.Groups {
+		if cfg.Groups[i].Name == name {
+			return &cfg.Groups[i]
 		}
 	}
-	if gamma == nil {
-		t.Fatalf("gamma entry absent (names=%v)", entryNames(out))
-	}
-	ce, ok := gamma.ClientPresence["vscode"]
-	if !ok {
-		t.Fatalf("gamma has no vscode presence: %+v", gamma.ClientPresence)
-	}
-	if ce.ToggleValue == nil {
-		t.Fatalf("vscode object-member entry missing toggle_value")
-	}
-	if got, _ := ce.ToggleValue["command"].(string); got != "uvx" {
-		t.Errorf("toggle_value.command=%q, want uvx", got)
-	}
+	return nil
 }

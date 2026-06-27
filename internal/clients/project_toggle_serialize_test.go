@@ -168,3 +168,68 @@ func TestToggleProjectObjectMember_DisableMissingParentNoStrayDir(t *testing.T) 
 		t.Fatalf("disable-of-absent created a config file %s", cfg)
 	}
 }
+
+// TestToggleClaudeLocal_ConcurrentNoLostUpdate pins bot PR #433 r3 finding 1: the
+// claude-local array-move RMW is now serialized through withConfigLock (the SAME
+// per-path lock the object-member path and the adapter decorator use). Two
+// concurrent ENABLE toggles of DIFFERENT .mcp.json servers — which both
+// read-modify-write the SINGLE shared ~/.claude.json — must BOTH land their array
+// move. Before the fix each goroutine read the same snapshot and the later
+// whole-file WriteConfigFile replacement clobbered the earlier (lost update).
+//
+// STATE-SAFETY: setSyntheticHome t.Setenv's HOME/USERPROFILE to a temp dir and
+// seeds a synthetic ~/.claude.json there; the live host file is unreachable. The
+// in-package test-default WriteConfigFile (plain os.WriteFile) +
+// SecureCreateParentDir (MkdirAll, on the always-existing temp home) are used.
+func TestToggleClaudeLocal_ConcurrentNoLostUpdate(t *testing.T) {
+	root := toggleTestRoot()
+	key := projectKey("fwd-upper", root)
+	keyEsc := jsonEscapeForTest(key)
+	// Seed the project entry with an empty enabled array so every racer starts
+	// from the same baseline (a single shared ~/.claude.json, one projects.<key>).
+	body := `{"projects":{"` + keyEsc + `":{"enabledMcpjsonServers":[]}}}`
+	_, claudePath := setSyntheticHome(t, body)
+
+	const n = 24
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start // release together to maximize contention
+			server := fmt.Sprintf("srv%02d", i)
+			errs[i] = ToggleClaudeMcpjsonMembership(root, server, true /*enable*/, false /*allowSymlink*/)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, e := range errs {
+		if e != nil {
+			t.Fatalf("concurrent claude-local enable %d errored: %v", i, e)
+		}
+	}
+
+	// Every server name must survive in enabledMcpjsonServers — none lost to a
+	// torn read-modify-write of the shared ~/.claude.json.
+	_, entry := readClaudeProjectsMap(t, claudePath, root)
+	if entry == nil {
+		t.Fatalf("project entry lost after concurrent toggles")
+	}
+	enabled := stringSliceFromAny(entry["enabledMcpjsonServers"])
+	got := make(map[string]bool, len(enabled))
+	for _, s := range enabled {
+		got[s] = true
+	}
+	if len(got) != n {
+		t.Fatalf("concurrent claude-local enables lost updates: %d distinct servers survived, want %d (enabled=%v)", len(got), n, enabled)
+	}
+	for i := 0; i < n; i++ {
+		server := fmt.Sprintf("srv%02d", i)
+		if !got[server] {
+			t.Errorf("server %q lost to a concurrent claude-local write", server)
+		}
+	}
+}

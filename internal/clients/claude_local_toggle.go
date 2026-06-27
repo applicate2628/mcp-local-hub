@@ -139,40 +139,58 @@ func ToggleClaudeMcpjsonMembership(root, server string, enable, allowSymlink boo
 		return fmt.Errorf("claude-local toggle: ~/.claude.json is not a writable regular file (a non-regular special file, or a refused symlink)")
 	}
 
-	original, err := readRawConfig(path) // absent → (nil, nil)
-	if err != nil {
-		return err
-	}
-
-	// Resolve the existing toggle arrays + the raw projects.<key> (when the file
-	// and the project entry already exist) so the move is computed against the
-	// CURRENT membership. A missing file / projects map / project entry all yield
-	// empty arrays + an empty rawKey (a fresh entry under wantKey is created).
+	// SERIALIZE THE READ-MODIFY-WRITE (bot PR #433 r3 finding 1): wrap the whole
+	// read→compute→write of ~/.claude.json in withConfigLock — the SAME per-path
+	// in-process mutex + cross-process advisory flock the adapter decorator
+	// (lockingClient) and the object-member toggle (ToggleProjectObjectMember)
+	// already serialize their RMWs on. The object-member r2 fix wrapped its own
+	// path but MISSED this one, which RMWs the SINGLE shared ~/.claude.json across
+	// ALL projects: two concurrent /api/projects/toggle on DIFFERENT claude-local
+	// servers (even in different projects) each read the same snapshot, and the
+	// later whole-file WriteConfigFile replacement clobbers the earlier array move
+	// (lost update). Because ~/.claude.json is ONE path, EVERY claude-local toggle
+	// serializes on the same lock key, so no two array moves can torn-write.
 	//
-	// CRITICAL (corruption-surface defense): the value-read parse runs on a COPY
-	// of `original`, NOT the slice itself. parseJSONCBytes → hujson.Standardize
-	// MUTATES its input slice in place (it overwrites `//` and `/* */` comment
-	// bytes with spaces). If we parsed `original` directly here, the subsequent
-	// comment-preserving write (applyClaudeMcpjsonToggleArrays, which re-parses
-	// the SAME `original` with hujson.Parse) would see a comment-stripped buffer
-	// and silently drop EVERY comment from ~/.claude.json. The copy keeps the
-	// write's view of `original` pristine.
-	curEnabled, curDisabled, rawKey := currentClaudeToggleArrays(copyBytes(original), root)
+	// withConfigLock also runs SecureCreateParentDir on the home dir before the
+	// flock — idempotent for the (always-existing) home parent, so this adds the
+	// serialization the finding asks for without changing the no-parent-create
+	// posture the finding notes (~/.claude.json's parent always exists).
+	return withConfigLock(path, func() error {
+		original, err := readRawConfig(path) // absent → (nil, nil)
+		if err != nil {
+			return err
+		}
 
-	newEnabled, newDisabled := computeMcpjsonToggleMove(server, curEnabled, curDisabled, enable)
+		// Resolve the existing toggle arrays + the raw projects.<key> (when the file
+		// and the project entry already exist) so the move is computed against the
+		// CURRENT membership. A missing file / projects map / project entry all yield
+		// empty arrays + an empty rawKey (a fresh entry under wantKey is created).
+		//
+		// CRITICAL (corruption-surface defense): the value-read parse runs on a COPY
+		// of `original`, NOT the slice itself. parseJSONCBytes → hujson.Standardize
+		// MUTATES its input slice in place (it overwrites `//` and `/* */` comment
+		// bytes with spaces). If we parsed `original` directly here, the subsequent
+		// comment-preserving write (applyClaudeMcpjsonToggleArrays, which re-parses
+		// the SAME `original` with hujson.Parse) would see a comment-stripped buffer
+		// and silently drop EVERY comment from ~/.claude.json. The copy keeps the
+		// write's view of `original` pristine.
+		curEnabled, curDisabled, rawKey := currentClaudeToggleArrays(copyBytes(original), root)
 
-	// The raw key to write under: an existing matched raw key (preserve the
-	// operator's exact key spelling) or, when none, the canonical key.
-	writeKey := rawKey
-	if writeKey == "" {
-		writeKey = wantKey
-	}
+		newEnabled, newDisabled := computeMcpjsonToggleMove(server, curEnabled, curDisabled, enable)
 
-	out, err := applyClaudeMcpjsonToggleArrays(original, writeKey, newEnabled, newDisabled)
-	if err != nil {
-		return err
-	}
-	return WriteConfigFile(path, out)
+		// The raw key to write under: an existing matched raw key (preserve the
+		// operator's exact key spelling) or, when none, the canonical key.
+		writeKey := rawKey
+		if writeKey == "" {
+			writeKey = wantKey
+		}
+
+		out, err := applyClaudeMcpjsonToggleArrays(original, writeKey, newEnabled, newDisabled)
+		if err != nil {
+			return err
+		}
+		return WriteConfigFile(path, out)
+	})
 }
 
 // copyBytes returns a fresh copy of b (nil-safe). Used to protect a write

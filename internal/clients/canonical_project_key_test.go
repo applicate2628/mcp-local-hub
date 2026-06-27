@@ -60,6 +60,50 @@ func TestCanonicalProjectKey_NoCWDDependence(t *testing.T) {
 	}
 }
 
+// TestCanonicalProjectKey_RootStaysAddressable pins finding 3 (bot PR #433 r3):
+// a ROOT project/workspace path must canonicalize to a NON-EMPTY, addressable
+// key — trimming ALL trailing slashes collapsed `/` → "" and `C:/` → "c:",
+// making root projects unaddressable (the aggregate skips empty keys, the
+// claude-local matcher treats "" as no-match). A NON-root trailing slash is
+// still trimmed (`foo/` → `foo`).
+func TestCanonicalProjectKey_RootStaysAddressable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		cases := []struct{ in, want string }{
+			{`C:\`, "c:/"},          // drive root keeps its slash, NOT "c:"
+			{`C:/`, "c:/"},          // forward-slash drive root
+			{`c:/`, "c:/"},          // already-lower drive root
+			{`D:\`, "d:/"},          // a different drive root
+			{`C:\dev\proj\`, "c:/dev/proj"}, // non-root trailing slash trimmed
+			{`C:\dev\proj`, "c:/dev/proj"},  // already-trimmed non-root unchanged
+		}
+		for _, c := range cases {
+			got := CanonicalProjectKey(c.in)
+			if got != c.want {
+				t.Errorf("CanonicalProjectKey(%q) = %q, want %q", c.in, got, c.want)
+			}
+			if got == "" {
+				t.Errorf("CanonicalProjectKey(%q) collapsed to an empty/unaddressable key", c.in)
+			}
+		}
+	} else {
+		cases := []struct{ in, want string }{
+			{"/", "/"},                  // POSIX root keeps its slash, NOT ""
+			{"/dev/proj/", "/dev/proj"}, // non-root trailing slash trimmed
+			{"/dev/proj", "/dev/proj"},  // already-trimmed non-root unchanged
+			{"foo/", "foo"},             // relative non-root trailing slash trimmed
+		}
+		for _, c := range cases {
+			got := CanonicalProjectKey(c.in)
+			if got != c.want {
+				t.Errorf("CanonicalProjectKey(%q) = %q, want %q", c.in, got, c.want)
+			}
+			if got == "" {
+				t.Errorf("CanonicalProjectKey(%q) collapsed to an empty/unaddressable key", c.in)
+			}
+		}
+	}
+}
+
 // TestCanonicalClaudeKeyIsAliasOfCanonical proves the claude-specific helper is
 // a thin caller of the single owner — they agree on every form, so there is ONE
 // normalizer, not two that could drift (T2).

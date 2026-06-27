@@ -70,7 +70,11 @@ import (
 //   - Value is the object-member value to SET on a Model-B ENABLE (the config
 //     shape for this client; ignored on disable, where the member is removed).
 //     P3a does not synthesize the value (that would absorb the migrate machinery
-//     — out of scope); the caller (P3b frontend) supplies it from the scan data.
+//     — out of scope); the caller supplies it. P3a's read API does NOT provide a
+//     value-source field (the r2 `toggle_value` was removed — finding 4); sourcing
+//     this value secret-safely is a P3b concern
+//     (work-items/backlog/2026-06-25-p3b-reenable-value-source.md). The endpoint
+//     already accepts a caller-supplied value, so P3b only adds the source.
 //   - Languages narrows a Model-A workspace register/unregister to specific LSP
 //     languages; empty = all (the api.Register/Unregister default).
 type projectToggleRequest struct {
@@ -321,28 +325,44 @@ func (s *Server) toggleGroupServers(ctx context.Context, w http.ResponseWriter, 
 		}
 	}
 
-	found := false
+	// Finding 1 (bot PR #433 r3): ABORT a missing-group toggle BEFORE any write.
+	// The callback returns the errGroupNotFound SENTINEL (the SAME one the
+	// /api/groups DELETE callback uses) when the target group is absent —
+	// ReadModifyWriteGroups propagates a non-nil callback error WITHOUT writing
+	// (writeGroupsLocked never runs), so a toggle of a non-existent group makes
+	// NO write to (and never CREATES) groups.yaml. The handler then maps the
+	// sentinel to the 404. Returning nil,nil before would normalize/create the
+	// file (lost the "no write on not-found" invariant the bot flagged).
 	mutErr := api.ReadModifyWriteGroups(func(cfg *api.GroupsConfig) ([]string, error) {
 		for i := range cfg.Groups {
 			if cfg.Groups[i].Name != group {
 				continue
 			}
-			found = true
 			if req.Enable {
 				cfg.Groups[i].Servers = ensureGroupServer(cfg.Groups[i].Servers, req.Server)
 			} else {
 				cfg.Groups[i].Servers = removeGroupServer(cfg.Groups[i].Servers, req.Server)
+				// Finding 5 (bot PR #433 r3): when REMOVING a server from a group's
+				// servers list, ALSO drop its tools_hidden[server] entry. The
+				// /api/groups authoring boundary REJECTS a tools_hidden key for a
+				// non-member (groupsUpsert: "tools_hidden names server which is not a
+				// member"), so leaving the filter behind would put groups.yaml in an
+				// editor-rejected state AND silently re-apply the stale hidden-tool
+				// filter if the server is later re-added. groupsUpsert avoids this by
+				// replacing the WHOLE Group row from the request body; this surgical
+				// servers-list edit must mirror that invariant explicitly.
+				cfg.Groups[i].ToolsHidden = pruneToolsHidden(cfg.Groups[i].ToolsHidden, req.Server)
 			}
-			break
+			return nil, nil
 		}
-		return nil, nil
+		return nil, errGroupNotFound
 	})
 	if mutErr != nil {
+		if errors.Is(mutErr, errGroupNotFound) {
+			writeAPIError(w, errBadToggleField("group not found"), http.StatusNotFound, "PROJECT_TOGGLE_GROUP_NOT_FOUND")
+			return
+		}
 		writeAPIErrorRedacted(w, mutErr, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")
-		return
-	}
-	if !found {
-		writeAPIError(w, errBadToggleField("group not found"), http.StatusNotFound, "PROJECT_TOGGLE_GROUP_NOT_FOUND")
 		return
 	}
 
@@ -404,6 +424,25 @@ func removeGroupServer(in []string, server string) []string {
 		}
 	}
 	return out
+}
+
+// pruneToolsHidden deletes the per-server hidden-tool filter for `server` from a
+// group's tools_hidden map when that server is removed from the group's servers
+// list (finding 5). It mirrors the /api/groups authoring invariant — every
+// tools_hidden key MUST be a current member (groupsUpsert rejects a non-member
+// key) — so a surgical member removal does not leave an editor-rejected,
+// silently-re-applicable stale filter behind. A nil/empty map stays nil; the map
+// is returned to nil when its last entry is removed so groups.yaml omits the
+// empty `tools_hidden:` key (matching the omitempty YAML tag).
+func pruneToolsHidden(in map[string][]string, server string) map[string][]string {
+	if _, ok := in[server]; !ok {
+		return in
+	}
+	delete(in, server)
+	if len(in) == 0 {
+		return nil
+	}
+	return in
 }
 
 func groupHasServer(in []string, server string) bool {
