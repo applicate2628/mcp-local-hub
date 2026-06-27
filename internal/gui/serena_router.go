@@ -1408,6 +1408,23 @@ func (s *Server) attemptSerenaAutoRegister(w http.ResponseWriter, r *http.Reques
 		writeJSONRPCErrorStatus(w, id, http.StatusUnprocessableEntity, jsonrpcInvalidParams,
 			"serena project at "+pathArg+" declares no languages", nil)
 		return nil
+	case errors.Is(err, api.ErrSerenaRootNotTrusted):
+		// AREA-5 TRUST GATE refusal. The marker exists (it is a serena project)
+		// but its root is not contained by any operator-trusted root, so
+		// auto-register was refused BEFORE any state mutation (fail-closed). Map
+		// to 503/-32002 with an actionable message AND a machine-readable
+		// `code:"NEEDS_TRUST"` + sanitized candidate path in `data` (gap-a option
+		// B — future-proofs one-click trust; the path is C0/C1/ESC-stripped via
+		// sanitizeRefusalPath so an attacker-controlled tool-argument path can
+		// never inject terminal-control sequences into the client/UI/logs).
+		safePath := sanitizeRefusalPath(pathArg)
+		writeJSONRPCErrorStatus(w, id, http.StatusServiceUnavailable, serenaRootNotTrustedCode,
+			"workspace "+safePath+" is not a trusted folder; run `mcphub trust "+safePath+"` or add it in GUI Settings → Trusted Roots, then retry",
+			map[string]any{
+				"code": "NEEDS_TRUST",
+				"path": safePath,
+			})
+		return nil
 	default:
 		writeJSONRPCErrorStatus(w, id, http.StatusServiceUnavailable, jsonrpcInternalError,
 			"serena auto-register failed: "+err.Error(), nil)

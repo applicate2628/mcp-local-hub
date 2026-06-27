@@ -103,6 +103,44 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		return nil, err
 	}
 
+	// 2.5. TRUST GATE (area-5 security core). The .serena/project.yml marker
+	//      is the DoS bound (an attacker cannot register a path with no marker
+	//      they own), but a marker is cheap to plant in an attacker-chosen
+	//      directory, so the marker ALONE is not an authorization boundary: a
+	//      marked attacker path could otherwise spawn a serena daemon (uvx),
+	//      mutate the registry + supervisor-intent, and abuse the §7.1
+	//      supervisor cutover. The trusted-root containment check is the
+	//      authorization boundary — auto-register proceeds ONLY when the
+	//      canonical resolved root is equal to, or a true subdirectory of, an
+	//      operator-trusted root (an operator-configured allowed root OR a root
+	//      blessed by a prior EXPLICIT register / trust / setup / GUI action).
+	//
+	//      This runs AFTER the marker check (composes with the DoS bound: no
+	//      marker → ErrNotASerenaProject; marker + untrusted → this refusal)
+	//      and BEFORE step-3's per-key mutex / port allocation / registry Save /
+	//      supervisor interlock — so a refused root touches NO state and cannot
+	//      perturb the §7.1 supervisor interlock. The gate consults the SAME
+	//      canonical `root` resolveSerenaProjectRoot produced, which is exactly
+	//      what BlessDefaultTrustedRoot stores, so a register-blessed tree
+	//      matches here.
+	//
+	//      FAIL-CLOSED on every uncertainty: a nil seam (legacy / unwired),
+	//      a gate error (corrupt store, insecure-parent rejection), or an
+	//      explicit "not trusted" verdict all return ErrSerenaRootNotTrusted.
+	//      An unset or erroring gate must never silently authorize an
+	//      untrusted path. The router maps the sentinel to a 503/-32002 refusal
+	//      with an actionable message (run `mcphub trust <path>`).
+	if serenaTrustedRootCheckFn == nil {
+		return nil, fmt.Errorf("%w: %s (the trusted-root authorization gate is not configured)", ErrSerenaRootNotTrusted, root)
+	}
+	trusted, trustErr := serenaTrustedRootCheckFn(root)
+	if trustErr != nil {
+		return nil, fmt.Errorf("%w: %s: %v", ErrSerenaRootNotTrusted, root, trustErr)
+	}
+	if !trusted {
+		return nil, fmt.Errorf("%w: %s", ErrSerenaRootNotTrusted, root)
+	}
+
 	// 3. Per-key idempotency guard. The keyed mutex serializes concurrent callers
 	//    for the SAME workspace root so they register exactly once; the loser
 	//    blocks here, then the post-acquire GetSerena re-read below returns the
@@ -1055,3 +1093,28 @@ var ErrNotASerenaProject = errors.New("serena auto-register: path is not a seren
 // `.serena/project.yml` marker exists but declares no languages, so no serena
 // descriptor can be synthesized. The router maps this to HTTP 422.
 var ErrNoLanguages = errors.New("serena auto-register: .serena/project.yml declares no languages")
+
+// ErrSerenaRootNotTrusted is returned by AutoRegisterSerenaWorkspace when the
+// resolved (marker-bearing) workspace root is NOT contained by any
+// operator-trusted root in the shared trusted-roots store (area-5 trust gate).
+// It is the authorization boundary distinct from the marker DoS bound: the
+// marker proves the path looks like a serena project, this proves the operator
+// authorized auto-registering it. The router maps this to a 503/-32002 refusal
+// with an actionable message (run `mcphub trust <path>` or add it in GUI
+// Settings → Trusted Roots, then retry) plus a machine-readable
+// `code:"NEEDS_TRUST"` data field. FAIL-CLOSED: a nil gate seam, a gate error,
+// or an explicit not-trusted verdict all surface as this sentinel.
+var ErrSerenaRootNotTrusted = errors.New("serena auto-register: workspace root is not a trusted folder")
+
+// serenaTrustedRootCheckFn is the trust-gate seam consulted by
+// AutoRegisterSerenaWorkspace AFTER the marker check and BEFORE any state
+// mutation. Default consults the shared trusted-roots store via the
+// server-neutral WorkspaceRootTrusted alias (which reads the live on-disk
+// lsp-trusted-roots.json — the SAME store the LSP router gate and the explicit
+// register/trust/setup/GUI bless paths use). It is a package-level var ONLY so
+// unit tests can stub trusted/untrusted/error verdicts without seeding a store;
+// production never reassigns it. A nil value (defensive — never nil in
+// production) is treated as fail-closed by the gate.
+var serenaTrustedRootCheckFn = func(root string) (bool, error) {
+	return WorkspaceRootTrusted(root)
+}

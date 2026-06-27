@@ -290,6 +290,34 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 		return err
 	}
 
+	// 6b. EXPLICIT serena register → bless this workspace's canonical root as a
+	//     trusted root (area-5 co-design — REGRESSION-SAFETY). This is the serena
+	//     counterpart of the LSP explicit-register bless (internal/api/register.go
+	//     registerBlessTrustedRootFn). Without it the area-5 serena trust gate
+	//     (AutoRegisterSerenaWorkspace step 2.5) would block the out-of-box serena
+	//     auto-introduce that the install-and-it-works epic shipped: an explicit
+	//     register would NOT seed trust for the tree, so a sibling `.serena`
+	//     project under the same root could never auto-introduce. Blessing the
+	//     canonical root here seeds the tree exactly as the LSP path does.
+	//
+	//     CRITICAL INVARIANT: this bless is reachable ONLY from EXPLICIT operator
+	//     actions (this register command + `mcphub trust` + `mcphub setup
+	//     --trusted-root` + the GUI Trusted-Roots panel), NEVER from the router's
+	//     AutoRegisterSerenaWorkspace path — a self-blessing router would let an
+	//     untrusted tool-call path bless itself and pass the gate on the very next
+	//     request, re-opening the vulnerability (area-5 claim 10).
+	//
+	//     Bless the CANONICAL root the row stores (the same value the trust gate
+	//     canonicalizes + compares). Best-effort / warn-only: a bless failure does
+	//     NOT fail the register (the workspace IS registered); the worst case is a
+	//     sibling needing its own explicit register/trust.
+	if err := serenaRegisterBlessTrustedRootFn(canonical); err != nil {
+		fmt.Fprintf(cmd.OutOrStderr(),
+			"warning: workspace registered but could not record %s as a trusted root "+
+				"(serena auto-introduce of sibling projects under this tree may require "+
+				"`mcphub trust %s` or explicit register): %v\n", canonical, canonical, err)
+	}
+
 	// 7. Optionally write the default marker. Errors here are non-fatal
 	// — registration already succeeded; the default is a UX nicety.
 	if setDefault {
@@ -306,6 +334,19 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 		fmt.Fprintln(cmd.OutOrStdout(), "  default: yes")
 	}
 	return nil
+}
+
+// serenaRegisterBlessTrustedRootFn is the explicit-serena-register bless seam
+// (area-5 co-design). Production blesses the workspace's canonical root in the
+// shared trusted-roots store via api.BlessDefaultTrustedRoot — the SAME owner
+// the LSP register / `mcphub trust` / `mcphub setup --trusted-root` / GUI panel
+// use, so the CLI never hand-rolls a store write. Tests override it (to assert
+// the bless fired with the canonical root, and to keep register tests off the
+// real store). The ROUTER auto-register path (AutoRegisterSerenaWorkspace) does
+// NOT use this seam — a self-blessing router would re-open the vulnerability
+// (area-5 claim 10).
+var serenaRegisterBlessTrustedRootFn = func(canonicalWorkspaceRoot string) error {
+	return api.BlessDefaultTrustedRoot(canonicalWorkspaceRoot)
 }
 
 // newWorkspaceUnregisterCmd builds `mcphub workspace unregister <path>

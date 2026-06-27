@@ -446,8 +446,19 @@ func (s *Server) workspaceFromResolvedLSPPath(
 	// <state-dir>/lsp-trusted-roots.json; see
 	// internal/api/lsp_trusted_roots.go.
 	if !s.lspWorkspaceRootIsTrusted(deps, resolved) {
-		writeJSONRPCError(w, tb.ID, jsonrpcInvalidParams,
-			"LSP workspace for "+pathArg+" is not registered; run mcphub register for this workspace before using the LSP router")
+		// AREA-5 gap-a option B (additive): keep the existing refusal wire shape
+		// (HTTP 200, JSON-RPC code -32602, same human message) but fold a
+		// machine-readable `code:"NEEDS_TRUST"` + the SANITIZED candidate path
+		// into `data` so a client/UI can future-proof one-click trust. The path
+		// is an untrusted MCP tool argument, so it is C0/C1/ESC-stripped via
+		// sanitizeRefusalPath before it reaches the client/UI/logs.
+		safePath := sanitizeRefusalPath(pathArg)
+		writeJSONRPCErrorStatus(w, tb.ID, http.StatusOK, jsonrpcInvalidParams,
+			"LSP workspace for "+safePath+" is not registered; run mcphub register for this workspace before using the LSP router",
+			map[string]any{
+				"code": "NEEDS_TRUST",
+				"path": safePath,
+			})
 		return nil, false
 	}
 	// Defense-in-depth on top of the trusted-root gate: even inside a trusted

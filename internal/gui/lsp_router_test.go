@@ -1140,3 +1140,61 @@ func TestLSPRouter_ForwardsSSEPassthrough(t *testing.T) {
 		t.Fatalf("SSE body mismatch: %q", rr.Body.String())
 	}
 }
+
+// TestLSPRouter_UntrustedRoot_RefusalCarriesNeedsTrust asserts the area-5 gap-a
+// option B metadata on the LSP refusal: the untrusted first-touch refusal keeps
+// its wire shape (HTTP 200, JSON-RPC -32602, "is not registered" message) AND
+// folds a machine-readable `data.code == "NEEDS_TRUST"` + the sanitized
+// candidate path so a client/UI can offer one-click trust.
+func TestLSPRouter_UntrustedRoot_RefusalCarriesNeedsTrust(t *testing.T) {
+	resolver := &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
+		"python|/repo/untrusted/main.py": {
+			WorkspaceRoot: "/repo/untrusted",
+			WorkspaceKey:  "untrusted",
+			Registered:    false,
+			ProjectMarker: true,
+		},
+	}}
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver:               resolver,
+		Sessions:               lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) { return "mcp-language-server", true },
+		AutoRegisterFn: func(ctx context.Context, wsKey, workspacePath, language string) (*api.WorkspaceEntry, error) {
+			return nil, errors.New("auto-register must not run for an untrusted root")
+		},
+		// Untrusted → refuse with NEEDS_TRUST metadata.
+		TrustedRootCheckFn: func(workspaceRoot string) (bool, error) { return false, nil },
+	})
+
+	body := rpcBody("tools/call", "1", `{"name":"diagnostics","arguments":{"filePath":"/repo/untrusted/main.py"}}`)
+	rr := postLSP(t, s, "python", body, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("tools/call status = %d, want 200 (wire shape preserved); body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Data    *struct {
+				Code string `json:"code"`
+				Path string `json:"path"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode JSON-RPC error: %v; raw=%s", err, rr.Body.String())
+	}
+	if resp.Error == nil || resp.Error.Code != jsonrpcInvalidParams {
+		t.Fatalf("error code = %+v, want %d (invalid-params — wire shape preserved)", resp.Error, jsonrpcInvalidParams)
+	}
+	if !strings.Contains(resp.Error.Message, "is not registered") {
+		t.Errorf("message %q should keep the existing 'is not registered' wording", resp.Error.Message)
+	}
+	if resp.Error.Data == nil || resp.Error.Data.Code != "NEEDS_TRUST" {
+		t.Fatalf("error.data = %+v, want code=NEEDS_TRUST (gap-a option B)", resp.Error.Data)
+	}
+	if resp.Error.Data.Path != "/repo/untrusted/main.py" {
+		t.Errorf("data.path = %q, want the candidate path", resp.Error.Data.Path)
+	}
+}
