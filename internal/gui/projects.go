@@ -58,10 +58,15 @@ func (s *Server) projectsScanHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// SEPARATE ScanFrom call with the project-scoped ConfigPaths. No
-	// ManifestDir / GUIPort wiring needed for a read-only project view; the
-	// per-client ClientPresence map is the payload the Projects screen reads.
-	result, err := api.NewAPI().ScanFrom(api.ScanOpts{ConfigPaths: configPaths})
+	// SEPARATE ScanFrom call with the project-scoped ConfigPaths. GUIPort is
+	// threaded with the SAME value the global GUI scan uses (realScanner →
+	// s.Port, server.go) so scan.go's classifier (IsLiveSerenaRouterURL /
+	// classifyLSPEntries, scan.go) can tell a project config's LIVE serena
+	// /serena/mcp (or /lsp/) router URL from a STALE old-GUI-port one: without
+	// it (GUIPort 0), the live-port check degrades to port-agnostic and a stale
+	// router URL is misclassified `via-hub` instead of `external`/re-migratable.
+	// No ManifestDir wiring needed for a read-only project view.
+	result, err := api.NewAPI().ScanFrom(api.ScanOpts{ConfigPaths: configPaths, GUIPort: s.Port()})
 	if err != nil {
 		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "PROJECT_SCAN_FAILED", "/api/projects/scan")
 		return

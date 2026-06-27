@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 )
 
 // ProjectScope is one row of the per-project (Model B) config-scope registry:
@@ -112,6 +114,19 @@ func ProjectScopes() []ProjectScope {
 //     ps.RelFile is a FIXED CONSTANT from the registry above, NEVER from input.
 //     With a fixed, traversal-free relative component and an
 //     already-validated clean+absolute+real root, no join can escape the root.
+//   - INTERMEDIATE-COMPONENT symlink containment: the root-level EvalSymlinks
+//     above only proves the ROOT itself does not redirect outside its real
+//     target. It does NOT catch a symlink created at an INTERMEDIATE path
+//     component INSIDE the valid root — e.g. `<root>/.cursor -> /other/dir`.
+//     The downstream scanner only Lstats the FINAL config file, so os.ReadFile
+//     would FOLLOW the `.cursor` link and read `/other/dir/mcp.json`, OUTSIDE
+//     realRoot. To close that, each candidate's PARENT directory is resolved
+//     with filepath.EvalSymlinks (when it exists) and the resolved parent is
+//     re-checked to be contained within realRoot (rootContainsPath). A client
+//     whose parent escapes realRoot is DROPPED from the returned map — never
+//     read. A missing parent (the common no-config case) is NOT an escape:
+//     the candidate stays in, and the scanner absorbs the absent file. A
+//     partial result is correct: the other clients still scan.
 //
 // On any rejection it returns a non-nil error whose message is SAFE TO SHOW —
 // it never echoes the caller's raw root path nor any resolved internal path, so
@@ -162,9 +177,93 @@ func ProjectScanConfigPaths(root string) (map[string]string, error) {
 			continue
 		}
 		// ps.RelFile is a fixed registry constant (never input). Joined onto a
-		// validated clean+absolute+real-directory root, the result cannot
-		// escape realRoot.
-		out[ps.Client] = filepath.Join(realRoot, ps.RelFile)
+		// validated clean+absolute+real-directory root, the LEXICAL result
+		// cannot escape realRoot.
+		candidate := filepath.Join(realRoot, ps.RelFile)
+
+		// Intermediate-component symlink defense: resolve the candidate's
+		// PARENT dir and verify it is still contained within realRoot. This
+		// catches `<root>/.cursor -> /other/dir`, which a lexical join cannot.
+		// DROP (do not read) a client whose parent escapes; a partial result
+		// is correct.
+		if !parentContainedInRoot(realRoot, candidate) {
+			continue
+		}
+		out[ps.Client] = candidate
 	}
 	return out, nil
+}
+
+// parentContainedInRoot reports whether the PARENT directory of candidate,
+// after symlink resolution, is still contained within realRoot. realRoot is
+// the already-symlink-resolved project root (the EvalSymlinks output above).
+//
+// The parent — not the final file — is the symlink surface that matters: the
+// downstream scanner Lstats the final config file but os.ReadFile follows a
+// symlinked intermediate DIRECTORY (e.g. a `.cursor` link). So we resolve the
+// parent and require it to live inside realRoot.
+//
+// A MISSING parent is NOT an escape (the overwhelmingly common no-config
+// case): the candidate is kept and the scanner absorbs the absent file. A
+// parent that EXISTS but cannot be resolved (EvalSymlinks error other than
+// not-exist) fails CLOSED — treated as an escape and dropped. A resolved
+// parent that escapes realRoot is an escape.
+func parentContainedInRoot(realRoot, candidate string) bool {
+	parent := filepath.Dir(candidate)
+
+	// Fast path: the parent IS realRoot itself (e.g. <root>/.mcp.json). realRoot
+	// is already resolved + validated, so no per-candidate resolution is needed.
+	if pathsEqual(parent, realRoot) {
+		return true
+	}
+
+	resolvedParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		// Missing parent → keep (scanner absorbs the absent file). Any other
+		// resolution failure → fail closed (drop).
+		return os.IsNotExist(err)
+	}
+	return rootContainsPath(realRoot, resolvedParent)
+}
+
+// rootContainsPath reports whether candidate is equal to, or a true
+// subdirectory of, root. Both MUST already be absolute + symlink-resolved.
+//
+// Separator-aware (NOT a bare string prefix) so "/dev" does not match
+// "/developer" and "C:\\proj" does not match "C:\\project2". Comparison is
+// case-insensitive on Windows (NTFS is case-preserving but case-insensitive),
+// case-sensitive elsewhere — mirroring the repo convention (api.rootContains
+// in lsp_trusted_roots.go; install.go image comparison) of strings.EqualFold
+// for Windows path comparison. It is a clients-package local copy because
+// project_scope.go (clients) cannot import internal/api.
+func rootContainsPath(root, candidate string) bool {
+	if root == "" || candidate == "" {
+		return false
+	}
+	eq := func(a, b string) bool { return a == b }
+	hasPrefix := strings.HasPrefix
+	if runtime.GOOS == "windows" {
+		eq = strings.EqualFold
+		hasPrefix = func(s, prefix string) bool {
+			return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
+		}
+	}
+	if eq(root, candidate) {
+		return true
+	}
+	prefix := strings.TrimRight(root, string(os.PathSeparator))
+	if prefix == "" {
+		// root was only separators (POSIX "/"): everything is under it.
+		return hasPrefix(candidate, string(os.PathSeparator))
+	}
+	return hasPrefix(candidate, prefix+string(os.PathSeparator))
+}
+
+// pathsEqual compares two absolute paths with the same OS-aware case folding
+// as rootContainsPath.
+func pathsEqual(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }

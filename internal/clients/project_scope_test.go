@@ -235,3 +235,134 @@ func TestProjectScanConfigPaths_SymlinkToFileRejected(t *testing.T) {
 		t.Fatalf("ProjectScanConfigPaths(symlink→file) accepted a non-directory target")
 	}
 }
+
+// TestProjectScanConfigPaths_IntermediateSymlinkEscapeDropped is the headline
+// finding-1 guard: an INTERMEDIATE per-client config dir (.cursor / .vscode)
+// that is itself a symlink pointing OUTSIDE the root must NOT contribute a
+// config path — the client is DROPPED (never read), so os.ReadFile can never
+// follow the link to <outside>/mcp.json. claude-code (whose config sits
+// directly at <root>/.mcp.json, parent == root) is unaffected and stays. A
+// partial result is correct: claude-code still scans.
+func TestProjectScanConfigPaths_IntermediateSymlinkEscapeDropped(t *testing.T) {
+	for _, tc := range []struct {
+		name    string // subtest
+		client  string // the registry client whose intermediate dir we attack
+		linkDir string // the in-root dir name that becomes a symlink (.cursor/.vscode)
+	}{
+		{"cursor-dir-symlinked-out", "cursor", ".cursor"},
+		{"vscode-dir-symlinked-out", "vscode", ".vscode"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			// An OUTSIDE directory holding an attacker-controlled mcp.json the
+			// scan must never reach.
+			outside := t.TempDir()
+			if err := os.WriteFile(filepath.Join(outside, "mcp.json"),
+				[]byte(`{"mcpServers":{"evil":{"command":"x"}}}`), 0o600); err != nil {
+				t.Fatalf("seed outside mcp.json: %v", err)
+			}
+			// <root>/.cursor (or .vscode) -> outside  (intermediate-dir symlink).
+			link := filepath.Join(root, tc.linkDir)
+			if err := os.Symlink(outside, link); err != nil {
+				if runtime.GOOS == "windows" {
+					t.Skipf("symlink unsupported on this host: %v", err)
+				}
+				t.Fatalf("symlink: %v", err)
+			}
+
+			paths, err := ProjectScanConfigPaths(root)
+			if err != nil {
+				t.Fatalf("ProjectScanConfigPaths(%q) error = %v", root, err)
+			}
+			// The attacked client is DROPPED entirely.
+			if got, ok := paths[tc.client]; ok {
+				t.Errorf("client %q must be dropped (intermediate-dir symlink escape) but got path %q", tc.client, got)
+			}
+			// claude-code (parent == root) is unaffected — partial result.
+			realRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
+			if err != nil {
+				t.Fatalf("EvalSymlinks(root): %v", err)
+			}
+			wantClaude := filepath.Join(realRoot, ".mcp.json")
+			if paths["claude-code"] != wantClaude {
+				t.Errorf("claude-code path = %q, want %q (must survive a sibling-client escape)", paths["claude-code"], wantClaude)
+			}
+			// Defense-in-depth: NO returned path may resolve under `outside`.
+			realOutside, err := filepath.EvalSymlinks(outside)
+			if err != nil {
+				t.Fatalf("EvalSymlinks(outside): %v", err)
+			}
+			for client, p := range paths {
+				if rootContainsPath(realOutside, filepath.Dir(p)) {
+					t.Errorf("client %q path %q escapes into outside root %q", client, p, realOutside)
+				}
+			}
+		})
+	}
+}
+
+// TestProjectScanConfigPaths_RealIntermediateDirIncluded is the negative
+// control for finding 1: a NORMAL real (non-symlink) .cursor / .vscode dir is
+// fully contained and the client is INCLUDED. Without this the escape guard
+// could over-reject legitimate projects.
+func TestProjectScanConfigPaths_RealIntermediateDirIncluded(t *testing.T) {
+	root := t.TempDir()
+	// Real in-root dirs (no symlinks).
+	if err := os.MkdirAll(filepath.Join(root, ".cursor"), 0o755); err != nil {
+		t.Fatalf("mkdir .cursor: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".vscode"), 0o755); err != nil {
+		t.Fatalf("mkdir .vscode: %v", err)
+	}
+
+	paths, err := ProjectScanConfigPaths(root)
+	if err != nil {
+		t.Fatalf("ProjectScanConfigPaths(%q) error = %v", root, err)
+	}
+	realRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
+	if err != nil {
+		t.Fatalf("EvalSymlinks(root): %v", err)
+	}
+	want := map[string]string{
+		"claude-code": filepath.Join(realRoot, ".mcp.json"),
+		"cursor":      filepath.Join(realRoot, ".cursor", "mcp.json"),
+		"vscode":      filepath.Join(realRoot, ".vscode", "mcp.json"),
+	}
+	for client, w := range want {
+		got, ok := paths[client]
+		if !ok {
+			t.Errorf("client %q dropped despite a real (non-symlink) in-root dir", client)
+			continue
+		}
+		if got != w {
+			t.Errorf("%s path = %q, want %q", client, got, w)
+		}
+	}
+}
+
+// TestProjectScanConfigPaths_IntermediateSymlinkContainedIncluded proves the
+// guard is CONTAINMENT-based, not symlink-phobic: a .cursor that is a symlink
+// pointing to ANOTHER directory still INSIDE realRoot resolves in-root and the
+// client is INCLUDED.
+func TestProjectScanConfigPaths_IntermediateSymlinkContainedIncluded(t *testing.T) {
+	root := t.TempDir()
+	// An in-root real target dir, and .cursor -> that in-root dir.
+	inRootTarget := filepath.Join(root, "real-cursor-store")
+	if err := os.MkdirAll(inRootTarget, 0o755); err != nil {
+		t.Fatalf("mkdir in-root target: %v", err)
+	}
+	if err := os.Symlink(inRootTarget, filepath.Join(root, ".cursor")); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unsupported on this host: %v", err)
+		}
+		t.Fatalf("symlink: %v", err)
+	}
+
+	paths, err := ProjectScanConfigPaths(root)
+	if err != nil {
+		t.Fatalf("ProjectScanConfigPaths(%q) error = %v", root, err)
+	}
+	if _, ok := paths["cursor"]; !ok {
+		t.Errorf("cursor dropped despite an IN-ROOT symlinked .cursor dir (guard is containment-based, not symlink-phobic)")
+	}
+}

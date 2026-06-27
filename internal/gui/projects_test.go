@@ -326,6 +326,72 @@ func TestProjectsScan_NoWrite_EmptyProjectCreatesNothing(t *testing.T) {
 	}
 }
 
+// TestProjectsScan_GUIPortThreaded_SerenaStaleVsLive is the finding-2 guard:
+// the project scan must thread the live GUI port into ScanOpts.GUIPort so
+// scan.go's classifier (IsLiveSerenaRouterURL) can tell a project config's
+// serena /serena/mcp router URL on the LIVE port (→ "via-hub") from the SAME
+// URL on a STALE old-GUI-port (→ "external"/re-migratable). With GUIPort
+// unthreaded (0) the live-port check degrades to port-agnostic and the STALE
+// entry is misclassified "via-hub".
+//
+// We pin the live GUI port via s.port.Store (the established test pattern, see
+// install_test.go / daemons_test.go). A serena /serena/mcp entry whose port
+// MATCHES the live port classifies "via-hub"; one on a stale port classifies
+// "external". The contrast is what proves GUIPort was actually threaded — if it
+// were dropped, BOTH would read "via-hub".
+func TestProjectsScan_GUIPortThreaded_SerenaStaleVsLive(t *testing.T) {
+	isolateHome(t)
+
+	const livePort = 9125
+	const stalePort = 9121 // legacy serena daemon port; not the live GUI port
+
+	scanSerenaURL := func(t *testing.T, serenaURL string) string {
+		t.Helper()
+		root := t.TempDir()
+		// A cursor project config whose serena entry points at serenaURL.
+		mustWrite(t, filepath.Join(root, ".cursor", "mcp.json"),
+			`{"mcpServers":{"serena":{"url":"`+serenaURL+`"}}}`)
+
+		s := NewServer(Config{})
+		s.port.Store(livePort) // pin the live GUI port the handler threads in
+
+		rec := getProjectScan(t, s, root)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+		}
+		var out api.ScanResult
+		if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		// The result must echo the threaded port (scan.go copies opts.GUIPort
+		// into ScanResult.GUIPort) — a direct proof the handler passed it.
+		if out.GUIPort != livePort {
+			t.Errorf("ScanResult.GUIPort = %d, want threaded live port %d", out.GUIPort, livePort)
+		}
+		for _, e := range out.Entries {
+			if e.Name == "serena" {
+				return e.Status
+			}
+		}
+		t.Fatalf("serena entry absent from project scan (names=%v)", entryNames(out))
+		return ""
+	}
+
+	t.Run("live-port-via-hub", func(t *testing.T) {
+		got := scanSerenaURL(t, "http://127.0.0.1:9125/serena/mcp")
+		if got != "via-hub" {
+			t.Errorf("serena at LIVE port: status = %q, want \"via-hub\"", got)
+		}
+	})
+
+	t.Run("stale-port-external", func(t *testing.T) {
+		got := scanSerenaURL(t, "http://127.0.0.1:9121/serena/mcp")
+		if got != "external" {
+			t.Errorf("serena at STALE port %d (live %d): status = %q, want \"external\" (GUIPort not threaded → would read \"via-hub\")", stalePort, livePort, got)
+		}
+	})
+}
+
 // snapshotTree returns a map of relative-path → (size, modtime-unixnano) for
 // every regular file under root, so the before/after comparison catches a
 // created OR modified file.
