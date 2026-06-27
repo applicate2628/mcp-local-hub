@@ -33,9 +33,11 @@ D2 v1 is **secret-safe by construction** — it does NOT stash any value:
 
 - The Re-add CTA carries the disabled server's NAME
   (`#/add-server?readd=<name>`).
-- **Catalog-known** name → Add-server pre-fills from the SHIPPED manifest
-  (`/api/manifest/get`), whose `env` carries `secret:`/`${env:}` placeholders,
-  never a resolved literal (e.g. `servers/wolfram/manifest.yaml`:
+- **Catalog-known** name → Add-server pre-fills from the SHIPPED manifest via
+  the embed-ONLY `/api/catalog/manifest` endpoint (D2 r2 — NOT `/api/manifest/get`,
+  which is disk-only and would echo a hand-planted disk literal; see PR #439 r2),
+  whose `env` carries `secret:`/`${env:}` placeholders, never a resolved literal
+  (e.g. `servers/wolfram/manifest.yaml`:
   `WOLFRAM_LLM_APP_ID: "secret:wolfram_app_id"`). Command + args come along.
 - **Non-catalog** name → Add-server seeds ONLY the name (blank
   command/args/env) plus an honest banner telling the operator to re-enter its

@@ -371,10 +371,14 @@ export function AddServerScreen(props: {
   // (the dead post-delete path that carries client env VERBATIM). The ONE
   // source is getCatalogManifest → GET /api/catalog/manifest, which the
   // backend serves EMBED-ONLY with a membership gate that excludes any
-  // disk-only name BEFORE the loader. So the prefill is secret-safe BY
-  // CONSTRUCTION — the embed YAML's env carries `secret:`/`${env:}`
-  // placeholders (e.g. servers/wolfram/manifest.yaml: WOLFRAM_LLM_APP_ID =
-  // "secret:wolfram_app_id"), never a resolved literal. Three outcomes:
+  // disk-only name BEFORE the loader. So from the frontend the prefill is
+  // secret-safe by construction — the embed YAML's env carries `secret:`/
+  // `${env:}` placeholders (e.g. servers/wolfram/manifest.yaml:
+  // WOLFRAM_LLM_APP_ID = "secret:wolfram_app_id"), never a resolved literal.
+  // (Backend caveat: the test-only MCPHUB_MANIFEST_DIR_OVERRIDE seam can read
+  // an override dir for an embedded name — see CatalogManifestGet; it needs
+  // user-level env control, which already grants vault read, so no trust
+  // boundary is crossed.) Three outcomes:
   //   • 200 → prefill from the embed YAML (command/args/secret-refs) + the
   //     F4 catalog-match info banner.
   //   • 404 (CatalogManifestNotFoundError) → name-only seed + the honest

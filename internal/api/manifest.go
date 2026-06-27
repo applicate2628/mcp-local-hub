@@ -304,7 +304,9 @@ func (a *API) ManifestGet(name string) (string, error) {
 // membership-gate signal: a name that is only on disk (a dev-checkout
 // manifest, or — the security case — a hand-planted disk manifest whose
 // env carries literal secrets) is excluded BEFORE the loader runs, so the
-// disk read in loadManifestYAMLEmbedFirst is unreachable for this path.
+// disk FALLBACK in loadManifestYAMLEmbedFirst is unreachable for this path
+// (absent the test-only MCPHUB_MANIFEST_DIR_OVERRIDE seam — see the security
+// note on CatalogManifestGet below).
 var ErrManifestNotEmbedded = errors.New("manifest not in the embedded catalog set")
 
 // CatalogManifestGet returns the raw YAML of the named server's manifest
@@ -327,16 +329,23 @@ var ErrManifestNotEmbedded = errors.New("manifest not in the embedded catalog se
 //     test override, and the loader below is never reached for it.
 //  3. loadManifestYAMLEmbedFirst(name) — for a name that PASSED the gate
 //     (so it IS embedded), the embed branch (manifest_source.go:81) returns
-//     before the disk fallback (:84-86) ever executes. A disk manifest with
-//     literal secrets is therefore never sourced by this path.
+//     before the disk FALLBACK (:84-86) ever executes. A disk manifest with
+//     literal secrets is therefore never sourced by this path in production.
+//     The sole exception is the test-only MCPHUB_MANIFEST_DIR_OVERRIDE seam
+//     (manifest_source.go:77-79), which reads an override dir even for an
+//     embedded name; it is honored in shipped binaries but requires
+//     user-level env control, which already grants direct vault/secret read,
+//     so it crosses no trust boundary the attacker doesn't already hold.
 func (a *API) CatalogManifestGet(name string) (string, error) {
 	if err := checkManifestName(name); err != nil {
 		return "", err
 	}
 	// Membership gate BEFORE the loader. A name that is not in the embed
 	// set (disk-only dev manifest, or a hand-planted disk manifest) is
-	// refused here, so loadManifestYAMLEmbedFirst's disk fallback is
-	// structurally unreachable for the catalog-prefill contract.
+	// refused here, so loadManifestYAMLEmbedFirst's disk FALLBACK is
+	// unreachable for the catalog-prefill contract in production. (The
+	// test-only MCPHUB_MANIFEST_DIR_OVERRIDE seam still reads an override
+	// dir for an embedded name — documented above; not production-default.)
 	embedded := false
 	for _, n := range embeddedManifestNames() {
 		if n == name {
