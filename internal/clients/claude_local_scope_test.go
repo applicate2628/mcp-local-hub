@@ -322,6 +322,96 @@ func TestReadClaudeLocalScope_MalformedJSON(t *testing.T) {
 	}
 }
 
+// TestReadClaudeLocalScope_SpecialFile_Directory is the security-DoS regression
+// guard (codex-bot P2): when ~/.claude.json is NOT a regular file, the reader
+// must Lstat-gate it BEFORE the unconditional os.ReadFile so a special live path
+// can never block or read unbounded data on /api/projects/scan. A DIRECTORY at
+// the path is the cross-platform non-regular case (a FIFO needs mkfifo, absent
+// on Windows). The reader must return an EMPTY scope — NOT an error, NOT a hang
+// — mirroring the client-config presence gate's skip-on-non-regular verdict.
+func TestReadClaudeLocalScope_SpecialFile_Directory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	// Create a DIRECTORY exactly where ~/.claude.json would be a file.
+	claudePath := filepath.Join(home, ".claude.json")
+	if err := os.Mkdir(claudePath, 0o700); err != nil {
+		t.Fatalf("mkdir special-file dir: %v", err)
+	}
+
+	got, err := ReadClaudeLocalScope(osRoot(t, "dev", "proj"))
+	if err != nil {
+		t.Fatalf("directory at ~/.claude.json must NOT error (skip → empty), got: %v", err)
+	}
+	if got.Matched || len(got.LocalServers) != 0 || len(got.Disabled) != 0 || len(got.Enabled) != 0 {
+		t.Errorf("directory at ~/.claude.json must yield an EMPTY scope (special-file skip), got %+v", got)
+	}
+}
+
+// TestReadClaudeLocalScope_Symlink mirrors the presence-gate symlink policy
+// (scan.go probeClientConfigPresence): a symlink-to-regular-file is REFUSED by
+// default (→ empty scope) and only honored when the operator opts in via
+// MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK on a non-strict host. Strict mode
+// (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) keeps the refusal even with the opt-in.
+// Skips where the OS/permissions cannot create a symlink (unprivileged Windows).
+func TestReadClaudeLocalScope_Symlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	// Real target: a regular ~/.claude.json body living OUTSIDE the symlink path.
+	root := osRoot(t, "dev", "proj")
+	key := projectKey("fwd-upper", root)
+	body := `{"projects":{"` + jsonEsc(key) + `":{"mcpServers":{"linked":{}}}}}`
+	target := filepath.Join(home, "real-claude.json")
+	if err := os.WriteFile(target, []byte(body), 0o600); err != nil {
+		t.Fatalf("write symlink target: %v", err)
+	}
+	link := filepath.Join(home, ".claude.json")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("cannot create symlink on this host (need privilege/Developer Mode): %v", err)
+	}
+
+	// DEFAULT (no opt-in): refuse → empty scope, no error, no hang.
+	t.Run("default_refuses", func(t *testing.T) {
+		t.Setenv("MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK", "")
+		t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "")
+		got, err := ReadClaudeLocalScope(root)
+		if err != nil {
+			t.Fatalf("default symlink refusal must NOT error, got: %v", err)
+		}
+		if got.Matched {
+			t.Errorf("default: symlink-to-regular-file must be REFUSED (empty scope), got %+v", got)
+		}
+	})
+
+	// OPT-IN on a non-strict host: follow the symlink → read the target.
+	t.Run("optin_follows", func(t *testing.T) {
+		t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "")
+		t.Setenv("MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK", "1")
+		got, err := ReadClaudeLocalScope(root)
+		if err != nil {
+			t.Fatalf("opt-in symlink read: %v", err)
+		}
+		if !got.Matched || !reflect.DeepEqual(got.LocalServers, []string{"linked"}) {
+			t.Errorf("opt-in: symlink-to-regular-file must be FOLLOWED, got %+v", got)
+		}
+	})
+
+	// STRICT mode overrides the opt-in: refuse even with the opt-in set.
+	t.Run("strict_overrides_optin", func(t *testing.T) {
+		t.Setenv("MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK", "1")
+		t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "1")
+		got, err := ReadClaudeLocalScope(root)
+		if err != nil {
+			t.Fatalf("strict-mode symlink refusal must NOT error, got: %v", err)
+		}
+		if got.Matched {
+			t.Errorf("strict mode must REFUSE the symlink even with the opt-in set, got %+v", got)
+		}
+	})
+}
+
 // TestCanonicalClaudeProjectKey exercises canonicalClaudeProjectKey directly:
 //
 //   - Windows-gated: C:/dev/Proj, c:/dev/proj, C:\dev\proj all normalize to the

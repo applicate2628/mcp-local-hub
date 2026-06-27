@@ -108,6 +108,36 @@ func ReadClaudeLocalScope(root string) (ClaudeLocalScope, error) {
 	}
 	path := filepath.Join(home, ".claude.json")
 
+	// SPECIAL-FILE / DoS gate (mirrors the client-config PRESENCE policy in
+	// internal/api/scan.go probeClientConfigPresence:226-268). readRawConfig
+	// below does an UNCONDITIONAL os.ReadFile, which — if ~/.claude.json is NOT
+	// a regular file (a FIFO, device, named pipe, or a symlink to a stream) —
+	// can BLOCK or read unbounded data on EVERY /api/projects/scan, hanging /
+	// DoS-ing the Projects scan. So we Lstat-classify the path FIRST and read
+	// ONLY a regular file, applying the SAME accept/reject the presence gate
+	// uses:
+	//
+	//   - missing / Lstat error → empty scope (the normal "no local config"
+	//     case; readRawConfig already coerces a missing file to empty, but we
+	//     also treat any Lstat failure as "skip" so a transient/perm fault
+	//     never falls through to an unconditional ReadFile).
+	//   - non-regular AND non-symlink (directory / FIFO / device / junction) →
+	//     skip → empty scope (presence gate's "error" verdict; here we never
+	//     surface an error for the home file — a malformed live path simply
+	//     yields no local scope, never a hung scan).
+	//   - symlink → REFUSE (skip → empty scope) UNLESS the operator opt-in
+	//     MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK is set on a non-strict host AND the
+	//     symlink resolves to a regular file — the SAME opt-in the presence gate
+	//     honors via OperatorAllowsClientConfigSymlink(). Strict mode
+	//     (MCPHUB_REQUIRE_SINGLE_USER_HOME=1) overrides the opt-in and keeps the
+	//     refusal. This package cannot import internal/api (cyclic), so it reads
+	//     the SAME canonical env-var names directly (project_scope.go references
+	//     the same env name as the cross-package contract).
+	//   - regular file → read (the normal path).
+	if !claudeLocalPathReadable(path) {
+		return ClaudeLocalScope{}, nil
+	}
+
 	data, err := readRawConfig(path) // absent → (nil, nil)
 	if err != nil {
 		return ClaudeLocalScope{}, err
@@ -168,6 +198,68 @@ func ReadClaudeLocalScope(root string) (ClaudeLocalScope, error) {
 	out.Enabled = stringSliceFromAny(matchedEntry["enabledMcpjsonServers"])
 
 	return out, nil
+}
+
+// claudeLocalPathReadable reports whether path (~/.claude.json) is safe to
+// os.ReadFile, mirroring the client-config PRESENCE gate
+// (internal/api/scan.go probeClientConfigPresence:226-268). It returns false
+// — meaning "skip, treat as empty local scope, do NOT read" — for a missing /
+// unstatable path, a non-regular special file (directory / FIFO / device /
+// junction), or a refused symlink. It returns true ONLY for a regular file, or
+// for a symlink-to-regular-file when the operator has opted in on a non-strict
+// host (the same accept the presence gate grants).
+//
+// READ-ONLY: it only Lstat/Stat-s the path; it never opens or writes it. A
+// missing file is the common "no local-scope config" case, so it returns false
+// silently (the caller maps that to an empty ClaudeLocalScope, never an error).
+func claudeLocalPathReadable(path string) bool {
+	lst, lerr := os.Lstat(path)
+	if lerr != nil {
+		// Missing → normal no-config case. Any other Lstat fault → still skip
+		// (never fall through to an unconditional ReadFile on a faulty path).
+		return false
+	}
+	isSymlink := lst.Mode()&os.ModeSymlink != 0
+	if !lst.Mode().IsRegular() && !isSymlink {
+		// Directory / FIFO / device / junction — the DoS surface this gate
+		// closes. Presence gate returns "error"; here we skip → empty scope.
+		return false
+	}
+	if isSymlink {
+		// Presence-gate symlink policy: refuse UNLESS the operator opt-in is
+		// set on a non-strict host AND the link resolves to a regular file.
+		// os.Stat (kernel-level symlink follow) classifies the target, matching
+		// probeClientConfigPresence's use of os.Stat over filepath.EvalSymlinks.
+		if operatorAllowsClaudeLocalSymlink() {
+			if rst, rstErr := os.Stat(path); rstErr == nil && rst.Mode().IsRegular() {
+				return true
+			}
+		}
+		return false
+	}
+	return true // regular file
+}
+
+// operatorAllowsClaudeLocalSymlink mirrors api.OperatorAllowsClientConfigSymlink
+// (internal/api/client_write_init.go:772-778) for the clients package, which
+// cannot import internal/api (that would be a cyclic dependency). It reads the
+// SAME canonical env-var name strings — the cross-package contract that
+// project_scope.go also references — so the symlink opt-in stays consistent with
+// the presence gate: strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME=1|true) always
+// refuses; otherwise MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1|true permits a
+// symlink-to-regular-file.
+func operatorAllowsClaudeLocalSymlink() bool {
+	if envTruthy(os.Getenv("MCPHUB_REQUIRE_SINGLE_USER_HOME")) {
+		return false // strict mode overrides the opt-in (corp-managed hosts)
+	}
+	return envTruthy(os.Getenv("MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK"))
+}
+
+// envTruthy applies the same "1" or case-insensitive "true" parse the api
+// package uses for both env vars (client_write_init.go:776-777, 860-862).
+func envTruthy(v string) bool {
+	v = strings.TrimSpace(v)
+	return v == "1" || strings.EqualFold(v, "true")
 }
 
 // stringSliceFromAny coerces a parsed JSON []any of strings into a []string,
