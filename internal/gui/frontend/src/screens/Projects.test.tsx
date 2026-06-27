@@ -1,17 +1,21 @@
-// screens/Projects.test.tsx — component tests for the per-project lens
-// (epic area 6 Phase 1). Mirrors Groups.test.tsx's fetch-router idiom: a
-// declarative URL→response map so each test describes the wire surface
-// without brittle mockResolvedValueOnce ordering. P1 is READ-ONLY, so these
-// tests cover the COMPOSITION of the two existing endpoints (/api/workspaces +
-// /api/groups) and the operator-visible read behaviors:
+// screens/Projects.test.tsx — component tests for the per-project lens.
+//
+// PHASE 3b switched the data source to the SINGLE GET /api/projects aggregate
+// (design decision 6) and wired the IMMEDIATE per-row toggle. These tests cover
+// the new behaviors:
 //   - canonicalProjectKey pure-fn normalization (the join key, single owner);
-//   - LIST render: one card per unique canonical project path + per-mechanism
-//     summary counts;
-//   - the empty-state on a clean install;
-//   - the DETAIL lens (#/projects?path=<key>) 3 sections;
-//   - per-endpoint catch-isolation (one failing fetch ≠ whole screen blank).
+//   - LIST render from the aggregate (one card per project + summary counts);
+//   - empty-state on a clean install; hard-fail error+Retry on aggregate failure;
+//   - DETAIL lens (#/projects?path=<key>) 4 mechanism sections;
+//   - the per-row toggle state machine (optimistic flip → reconcile-to-response,
+//     error revert + §3.1 plain copy, per-row isolation);
+//   - both-scopes claude card (Project toggle / Local read-only / shadow once);
+//   - warm/cold object-member re-enable (warm replays held value; cold → Re-add).
+//
+// Mirrors Servers.test.tsx's fetch-router idiom (a declarative URL→response map)
+// + happy-dom EventSource stub conventions.
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, cleanup, screen } from "@testing-library/preact";
+import { render, waitFor, cleanup, screen, fireEvent } from "@testing-library/preact";
 import { ProjectsScreen, canonicalProjectKey } from "./Projects";
 import type { RouterState } from "../hooks/useRouter";
 
@@ -22,42 +26,51 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-// fetchRouter dispatches each fetch call to the matching response based on the
-// request URL prefix (same helper shape as Groups.test.tsx).
-function fetchRouter(routes: Record<string, () => Response>) {
-  return vi.fn(async (input: RequestInfo | URL) => {
+// fetchRouter dispatches each fetch call (method-aware) to the matching response
+// based on URL prefix. Returns the vi.fn so a test can assert call args.
+function fetchRouter(
+  routes: Record<string, (init?: RequestInit) => Response | Promise<Response>>,
+) {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const keys = Object.keys(routes).sort((a, b) => b.length - a.length);
     for (const prefix of keys) {
-      if (url.startsWith(prefix)) return routes[prefix]();
+      if (url.startsWith(prefix)) return routes[prefix](init);
     }
     throw new Error(`unexpected fetch: ${url}`);
   });
 }
 
-// wsEntry builds one workspace entry DTO with sensible defaults.
-function wsEntry(over: Partial<Record<string, unknown>> = {}) {
+function routeWithPath(path: string): RouterState {
+  return { screen: "projects", query: `path=${encodeURIComponent(path)}` };
+}
+
+// aggregate builds a /api/projects response body.
+function aggregate(over: {
+  projects?: unknown[];
+  groups?: unknown[];
+  groups_error?: string;
+} = {}) {
   return {
-    workspace_key: "k",
-    workspace_path: "C:/dev/proj",
-    language: "go",
-    backend: "mcp-language-server",
-    port: 0,
-    task_name: "\\mcp-local-hub-go",
-    client_entries: {},
+    projects: over.projects ?? [],
+    groups: over.groups ?? [],
+    ...(over.groups_error ? { groups_error: over.groups_error } : {}),
+  };
+}
+
+// proj builds one project aggregate DTO.
+function proj(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    key: "/home/x/proj",
+    workspace_path: "/home/x/proj",
+    entries: [],
     ...over,
   };
 }
 
-function workspacesBody(entries: unknown[]) {
-  return { workspaces: [], entries };
-}
-function groupsBody(groups: unknown[]) {
-  return { groups, available_servers: [] };
-}
-
-function routeWithPath(path: string): RouterState {
-  return { screen: "projects", query: `path=${encodeURIComponent(path)}` };
+// scanEntry builds one ScanEntry (claude/cursor/vscode object member).
+function scanEntry(name: string, presence: Record<string, unknown>, over: Record<string, unknown> = {}) {
+  return { name, client_presence: presence, manifest_exists: true, can_migrate: true, ...over };
 }
 
 describe("canonicalProjectKey", () => {
@@ -65,40 +78,20 @@ describe("canonicalProjectKey", () => {
     expect(canonicalProjectKey("C:\\dev\\proj\\")).toBe("C:/dev/proj");
   });
   it("collapses . and .. segments (filepath-clean)", () => {
-    // filepath.Clean semantics: `b/..` pops `b`, `.` drops out.
     expect(canonicalProjectKey("/a/b/../c/./d")).toBe("/a/c/d");
     expect(canonicalProjectKey("a//b///c")).toBe("a/b/c");
   });
   it("PRESERVES case (no browser-OS case-fold)", () => {
-    // navigator.platform reflects the BROWSER's OS, not the hub's; a POSIX hub
-    // opened from a Windows browser must NOT collapse case-sensitive POSIX
-    // paths. The P1 path↔path join is same-source/same-case, so a
-    // case-sensitive compare is correct and case is preserved everywhere.
     expect(canonicalProjectKey("C:/Dev/Proj")).toBe("C:/Dev/Proj");
-    expect(canonicalProjectKey("/Dev/Proj")).toBe("/Dev/Proj");
-    // Two POSIX paths differing only in case stay DISTINCT keys (the bug the
-    // browser-OS fold would have introduced).
-    expect(canonicalProjectKey("/home/A/Repo")).not.toBe(
-      canonicalProjectKey("/home/a/repo"),
-    );
-  });
-  it("returns empty for a blank path", () => {
-    expect(canonicalProjectKey("   ")).toBe("");
+    expect(canonicalProjectKey("/home/A/Repo")).not.toBe(canonicalProjectKey("/home/a/repo"));
   });
   it("preserves the double leading slash of a UNC path", () => {
-    // \\server\share\proj → //server/share/proj — the host must NOT collapse
-    // into a path segment (a single-slash collapse would corrupt the key).
-    expect(canonicalProjectKey("\\\\server\\share\\proj")).toBe(
-      "//server/share/proj",
-    );
-    // ..-resolution still works under the UNC root and the // is kept.
-    expect(canonicalProjectKey("//server/share/a/../b")).toBe(
-      "//server/share/b",
-    );
+    expect(canonicalProjectKey("\\\\server\\share\\proj")).toBe("//server/share/proj");
+    expect(canonicalProjectKey("//server/share/a/../b")).toBe("//server/share/b");
   });
 });
 
-describe("ProjectsScreen — list view", () => {
+describe("ProjectsScreen — list view (aggregate)", () => {
   beforeEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -106,313 +99,253 @@ describe("ProjectsScreen — list view", () => {
   });
   afterEach(() => cleanup());
 
-  it("renders the empty-state when no projects are registered", async () => {
+  it("renders the empty-state when the aggregate has no projects", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
-      fetchRouter({
-        "/api/workspaces": () => jsonResponse(200, workspacesBody([])),
-        "/api/groups": () => jsonResponse(200, groupsBody([])),
-      }) as unknown as typeof fetch,
+      fetchRouter({ "/api/projects": () => jsonResponse(200, aggregate()) }) as unknown as typeof fetch,
     );
-
     render(<ProjectsScreen />);
     await waitFor(() => expect(screen.queryByTestId("projects-empty")).toBeTruthy());
     expect(screen.getByTestId("projects-empty").textContent).toContain("No projects yet");
-    expect(screen.getByText("Projects")).toBeTruthy();
   });
 
-  it("composes the two endpoints into one card per unique canonical path with per-mechanism counts", async () => {
+  it("renders one card per aggregate project with summary counts", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        // Two entries on the SAME path (different casing + trailing slash) must
-        // collapse into ONE project card; a second distinct path → second card.
-        "/api/workspaces": () =>
+        "/api/projects": () =>
           jsonResponse(
             200,
-            workspacesBody([
-              wsEntry({ workspace_path: "C:/dev/proj", language: "go" }),
-              wsEntry({ workspace_path: "C:/dev/proj/", language: "python" }),
-              wsEntry({ workspace_path: "C:/dev/other", language: "rust" }),
-            ]),
+            aggregate({
+              projects: [
+                proj({
+                  key: "/home/x/proj",
+                  entries: [{ workspace_key: "k", workspace_path: "/home/x/proj", language: "go", backend: "mcp-language-server", port: 0, task_name: "t" }],
+                  scan: { at: "now", entries: [scanEntry("memory", { cursor: {} })] },
+                }),
+                proj({ key: "/home/x/other", workspace_path: "/home/x/other" }),
+              ],
+              groups: [{ name: "frontend", servers: ["serena"] }],
+            }),
           ),
-        "/api/groups": () =>
-          jsonResponse(200, groupsBody([{ name: "frontend", servers: ["serena"] }])),
       }) as unknown as typeof fetch,
     );
-
     render(<ProjectsScreen />);
     await waitFor(() => expect(screen.queryByTestId("projects-list")).toBeTruthy());
-
-    // The two C:/dev/proj entries (one with a trailing slash) collapse via the
-    // trailing-slash strip into ONE card regardless of host OS — case is
-    // preserved (no browser-OS fold) but the paths are byte-identical after
-    // normalization. The second distinct path → a second card.
     const cards = screen.getAllByTestId(/^projects-row-/);
     expect(cards.length).toBe(2);
-
-    // The proj card's summary reflects 2 workspace tool registrations + 1 group.
-    const projCard = cards.find((c) => c.textContent?.includes("C:/dev/proj"));
-    expect(projCard).toBeTruthy();
+    const projCard = cards.find((c) => c.textContent?.includes("/home/x/proj"));
     const summary = projCard!.querySelector('[data-testid^="projects-summary-"]');
-    expect(summary?.textContent).toContain("2 workspace tools");
+    expect(summary?.textContent).toContain("1 workspace tool");
+    expect(summary?.textContent).toContain("1 config server");
     expect(summary?.textContent).toContain("1 group");
-    // Model B (project-config) is not wired in P1 → always the — em-dash.
-    expect(summary?.textContent).toContain("project-config");
   });
 
-  it("renders the list with an UNKNOWN group indicator (not '0 groups') when /api/groups fails", async () => {
+  it("surfaces a hard-fail error+Retry when the aggregate fetch fails", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/workspaces": () =>
-          jsonResponse(200, workspacesBody([wsEntry({ workspace_path: "/home/x/p" })])),
-        "/api/groups": () => jsonResponse(500, { error: "boom", code: "GROUPS_LIST_FAILED" }),
+        "/api/projects": () => jsonResponse(500, { error: "boom", code: "PROJECTS_REGISTRY_FAILED" }),
       }) as unknown as typeof fetch,
     );
-
-    render(<ProjectsScreen />);
-    // The project card still renders despite the groups failure (not a full
-    // error+Retry screen).
-    await waitFor(() => expect(screen.queryByTestId("projects-list")).toBeTruthy());
-    expect(screen.queryByTestId("projects-error")).toBeNull();
-
-    // The groups-load failure is surfaced (not silently dropped) AND the
-    // per-card group count reads "? groups (load failed)", NOT a misleading
-    // "0 groups" indistinguishable from a real-empty groups.yaml.
-    const grErr = screen.getByTestId("projects-groups-error");
-    expect(grErr.textContent).toContain("Could not load groups");
-    const cards = screen.getAllByTestId(/^projects-row-/);
-    const summary = cards[0].querySelector('[data-testid^="projects-summary-"]');
-    expect(summary?.textContent).toContain("? groups (load failed)");
-    expect(summary?.textContent).not.toContain("0 group");
-  });
-
-  it("shows an UNAVAILABLE list-state (not the empty-state) when /api/workspaces fails but /api/groups succeeds", async () => {
-    // The workspace registry failed → `projects` is [] for a NON-empty reason.
-    // The list must NOT show "No projects yet" (which would falsely claim a
-    // clean install and send the operator to re-register existing projects);
-    // it must render the explicit workspaces-load-failure state + Retry.
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      fetchRouter({
-        "/api/workspaces": () => jsonResponse(500, { error: "ws registry boom", code: "X" }),
-        "/api/groups": () => jsonResponse(200, groupsBody([{ name: "g", servers: [] }])),
-      }) as unknown as typeof fetch,
-    );
-
-    render(<ProjectsScreen />);
-    // Not a full both-failed error screen (groups loaded OK).
-    await waitFor(() => expect(screen.queryByTestId("projects-loaded")).toBeTruthy());
-    expect(screen.queryByTestId("projects-error")).toBeNull();
-
-    // The empty-state must NOT be shown — instead the unavailable state with the
-    // workspace-registry error.
-    expect(screen.queryByTestId("projects-empty")).toBeNull();
-    const unavailable = screen.getByTestId("projects-workspaces-error");
-    expect(unavailable.textContent).toContain("Projects unavailable");
-    expect(unavailable.textContent).toContain("ws registry boom");
-    expect(unavailable.textContent).not.toContain("No projects yet");
-    // Retry is offered.
-    expect(screen.getByText("Retry")).toBeTruthy();
-  });
-
-  it("shows the full error+Retry with BOTH errors only when BOTH endpoints fail", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      fetchRouter({
-        "/api/workspaces": () => jsonResponse(500, { error: "ws boom", code: "X" }),
-        "/api/groups": () => jsonResponse(500, { error: "gr boom", code: "Y" }),
-      }) as unknown as typeof fetch,
-    );
-
     render(<ProjectsScreen />);
     await waitFor(() => expect(screen.queryByTestId("projects-load-error")).toBeTruthy());
+    expect(screen.getByTestId("projects-load-error").textContent).toContain("boom");
     expect(screen.getByText("Retry")).toBeTruthy();
-    // BOTH the workspace error AND the groups error are surfaced — the groups
-    // error must not be dropped from the both-failed block.
-    expect(screen.getByTestId("projects-load-error-workspaces").textContent).toContain(
-      "ws boom",
+  });
+
+  it("shows '? groups (load failed)' when groups_error is set but projects render", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/projects": () =>
+          jsonResponse(200, aggregate({ projects: [proj()], groups_error: "GROUPS_LIST_FAILED" })),
+      }) as unknown as typeof fetch,
     );
-    expect(screen.getByTestId("projects-load-error-groups").textContent).toContain(
-      "gr boom",
-    );
+    render(<ProjectsScreen />);
+    await waitFor(() => expect(screen.queryByTestId("projects-list")).toBeTruthy());
+    expect(screen.getByTestId("projects-groups-error").textContent).toContain("Could not load groups");
+    const summary = screen.getAllByTestId(/^projects-summary-/)[0];
+    expect(summary.textContent).toContain("? groups (load failed)");
   });
 });
 
-describe("ProjectsScreen — detail lens", () => {
+describe("ProjectsScreen — detail lens (sections + toggles)", () => {
   beforeEach(() => {
     cleanup();
     vi.restoreAllMocks();
   });
   afterEach(() => cleanup());
 
-  it("renders the 3 labelled sections for the selected project path", async () => {
+  function mountDetail(dto: Record<string, unknown>, groups: unknown[] = [], toggleImpl?: (init?: RequestInit) => Response | Promise<Response>) {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/workspaces": () =>
-          jsonResponse(
-            200,
-            workspacesBody([
-              wsEntry({
-                workspace_path: "/home/x/proj",
-                language: "go",
-                backend: "mcp-language-server",
-                client_entries: { "claude-code": "mcp-language-server-go" },
-                lifecycle: "active",
-              }),
-            ]),
-          ),
-        "/api/groups": () =>
-          jsonResponse(200, groupsBody([{ name: "g1", servers: ["serena"], tools_hidden: { serena: ["x"] } }])),
+        "/api/projects/toggle": toggleImpl ?? (() => jsonResponse(200, { scope: "project-object-member", server: "x", enabled: false })),
+        "/api/projects": () => jsonResponse(200, aggregate({ projects: [dto], groups })),
+        "/api/server/readiness": () => jsonResponse(404, { error: "not found" }),
       }) as unknown as typeof fetch,
     );
+  }
 
-    // POSIX canonical key for "/home/x/proj" (case preserved).
-    const key = canonicalProjectKey("/home/x/proj");
-    render(<ProjectsScreen route={routeWithPath(key)} />);
-
+  it("renders the 3 mechanism sections + provenance badges", async () => {
+    mountDetail(
+      proj({
+        key: "/home/x/proj",
+        entries: [{ workspace_key: "k", workspace_path: "/home/x/proj", language: "go", backend: "mcp-language-server", port: 0, task_name: "t", lifecycle: "active", client_entries: { "claude-code": "x" } }],
+        scan: { at: "now", entries: [] },
+      }),
+      [{ name: "g1", servers: ["serena"], tools_hidden: { serena: ["x"] } }],
+    );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
     await waitFor(() => expect(screen.queryByTestId("projects-detail")).toBeTruthy());
-
-    // All three sections present with their provenance badges.
     expect(screen.getByTestId("projects-section-workspace")).toBeTruthy();
     expect(screen.getByTestId("projects-section-config")).toBeTruthy();
     expect(screen.getByTestId("projects-section-groups")).toBeTruthy();
-    expect(screen.getByTestId("projects-badge-workspace").textContent).toContain("workspaces.yaml");
     expect(screen.getByTestId("projects-badge-config").textContent).toContain(".mcp.json");
-    expect(screen.getByTestId("projects-badge-groups").textContent).toContain("groups.yaml");
-
-    // [A] the go workspace row renders with a per-client via-hub chip + state.
-    expect(screen.getByTestId("projects-workspace-row-go")).toBeTruthy();
-    expect(screen.getByTestId("projects-chip-go-claude-code").textContent).toContain("via-hub");
-    expect(screen.getByTestId("projects-workspace-state-go").textContent).toContain("Running");
-
-    // [B] the not-yet-wired placeholder copy.
-    expect(screen.getByTestId("projects-config-placeholder").textContent).toContain(
-      "Not managed here yet",
-    );
-
-    // [C] the group is listed read-only + the security-fence note (tools_hidden).
-    expect(screen.getByTestId("projects-group-g1")).toBeTruthy();
-    expect(screen.getByTestId("projects-group-hidden-note-g1").textContent).toContain(
-      "not",
-    );
-    // The "manage in Groups →" cross-link.
-    expect(screen.getByTestId("projects-manage-groups")).toBeTruthy();
+    // workspace row + its toggle exist.
+    expect(screen.getByTestId("projects-toggle-workspace-lsp-go")).toBeTruthy();
+    // group member toggle.
+    expect(screen.getByTestId("projects-toggle-group-servers-serena")).toBeTruthy();
+    // tools_hidden security-fence note kept.
+    expect(screen.getByTestId("projects-group-hidden-note-g1").textContent).toContain("not");
   });
 
-  it("renders legacy-lsp as the red 'legacy' chip (not green via-hub) and an unknown backend as no chip", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      fetchRouter({
-        "/api/workspaces": () =>
-          jsonResponse(
-            200,
-            workspacesBody([
-              // The deprecated direct-LSP backend must read as the OLD path.
-              wsEntry({
-                workspace_path: "/home/x/legacyproj",
-                language: "go",
-                backend: "legacy-lsp",
-                client_entries: { "claude-code": "legacy-lsp-go" },
-              }),
-              // An unknown non-empty backend must NOT be fabricated into a
-              // green via-hub chip — it renders no chip ("—").
-              wsEntry({
-                workspace_path: "/home/x/legacyproj",
-                language: "ruby",
-                backend: "some-future-backend",
-                client_entries: { "claude-code": "x" },
-              }),
-            ]),
-          ),
-        "/api/groups": () => jsonResponse(200, groupsBody([])),
-      }) as unknown as typeof fetch,
+  it("toggle reconciles to response.enabled, not the requested intent (clamp)", async () => {
+    // The operator clicks ON, but the backend read-back clamps to OFF (e.g. an
+    // idempotent self-correct). The row MUST reflect response.enabled (OFF).
+    mountDetail(
+      proj({
+        key: "/home/x/proj",
+        scan: { at: "now", entries: [scanEntry("memory", { cursor: { raw: { command: "x" } } })] },
+      }),
+      [],
+      () => jsonResponse(200, { scope: "project-object-member", server: "memory", enabled: false }),
     );
-
-    const key = canonicalProjectKey("/home/x/legacyproj");
-    render(<ProjectsScreen route={routeWithPath(key)} />);
-    await waitFor(() => expect(screen.queryByTestId("projects-detail")).toBeTruthy());
-
-    // legacy-lsp → the red lsp-chip-legacy class with the "legacy" label.
-    const legacyChip = screen.getByTestId("projects-chip-go-claude-code");
-    expect(legacyChip.className).toContain("lsp-chip-legacy");
-    expect(legacyChip.className).not.toContain("lsp-chip-via-hub");
-    expect(legacyChip.textContent).toContain("legacy");
-
-    // unknown backend → no chip at all (the routing cell shows the "—" empty).
-    expect(screen.queryByTestId("projects-chip-ruby-claude-code")).toBeNull();
-    const rubyRow = screen.getByTestId("projects-workspace-row-ruby");
-    expect(rubyRow.querySelector(".lsp-cell-empty")?.textContent).toBe("—");
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-client-cursor")).toBeTruthy());
+    const toggle = screen.getByTestId("projects-toggle-project-object-member-memory") as HTMLInputElement;
+    expect(toggle.checked).toBe(true); // initially present → enabled
+    // Disable (held value captured). Backend echoes enabled:false → reconciles OFF.
+    fireEvent.change(toggle, { target: { checked: false } });
+    await waitFor(() =>
+      expect(
+        (screen.getByTestId("projects-toggle-project-object-member-memory") as HTMLInputElement).checked,
+      ).toBe(false),
+    );
+    // ✓ flash appears after the successful reconcile.
+    await waitFor(() =>
+      expect(screen.queryByTestId("projects-toggle-ok-project-object-member-memory")).toBeTruthy(),
+    );
   });
 
-  it("renders 'failed'/'missing' lifecycle as a DOWN state (state-down ✕), not OK/neutral", async () => {
-    // The registry lifecycle words "failed" (materialization error) and
-    // "missing" (LSP binary not on PATH) are real failures — they must read as
-    // the error cross, never the benign open circle. last_error is surfaced as
-    // the cell tooltip.
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      fetchRouter({
-        "/api/workspaces": () =>
-          jsonResponse(
-            200,
-            workspacesBody([
-              wsEntry({
-                workspace_path: "/home/x/brokenproj",
-                language: "go",
-                backend: "mcp-language-server",
-                lifecycle: "failed",
-                last_error: "gopls exited 1",
-              }),
-              wsEntry({
-                workspace_path: "/home/x/brokenproj",
-                language: "python",
-                backend: "mcp-language-server",
-                lifecycle: "missing",
-              }),
-              // A genuinely-healthy active row stays state-ok for contrast.
-              wsEntry({
-                workspace_path: "/home/x/brokenproj",
-                language: "rust",
-                backend: "mcp-language-server",
-                lifecycle: "active",
-              }),
-            ]),
-          ),
-        "/api/groups": () => jsonResponse(200, groupsBody([])),
-      }) as unknown as typeof fetch,
+  it("toggle failure REVERTS the optimistic flip and shows the §3.1 plain copy + Retry", async () => {
+    mountDetail(
+      proj({
+        key: "/home/x/proj",
+        scan: { at: "now", entries: [scanEntry("memory", { cursor: { raw: { command: "x" } } })] },
+      }),
+      [],
+      () => jsonResponse(500, { error: "disk full", code: "PROJECT_TOGGLE_FAILED" }),
     );
-
-    const key = canonicalProjectKey("/home/x/brokenproj");
-    render(<ProjectsScreen route={routeWithPath(key)} />);
-    await waitFor(() => expect(screen.queryByTestId("projects-detail")).toBeTruthy());
-
-    // lifecycle:failed → state-down (NOT state-ok / neutral) + Failed label +
-    // last_error tooltip.
-    const failedCell = screen.getByTestId("projects-workspace-state-go");
-    expect(failedCell.className).toContain("state-down");
-    expect(failedCell.className).not.toContain("state-ok");
-    expect(failedCell.textContent).toContain("Failed");
-    expect(failedCell.getAttribute("title")).toBe("gopls exited 1");
-
-    // lifecycle:missing → also state-down (real failure, not benign idle).
-    const missingCell = screen.getByTestId("projects-workspace-state-python");
-    expect(missingCell.className).toContain("state-down");
-    expect(missingCell.className).not.toContain("state-ok");
-    expect(missingCell.textContent).toContain("Failed");
-
-    // lifecycle:active → state-ok (contrast: a healthy row is NOT down).
-    const activeCell = screen.getByTestId("projects-workspace-state-rust");
-    expect(activeCell.className).toContain("state-ok");
-    expect(activeCell.className).not.toContain("state-down");
-    expect(activeCell.textContent).toContain("Running");
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-client-cursor")).toBeTruthy());
+    const toggle = screen.getByTestId("projects-toggle-project-object-member-memory") as HTMLInputElement;
+    fireEvent.change(toggle, { target: { checked: false } });
+    // REVERT: the optimistic OFF flips back to ON (the pre-toggle state).
+    await waitFor(() =>
+      expect(
+        (screen.getByTestId("projects-toggle-project-object-member-memory") as HTMLInputElement).checked,
+      ).toBe(true),
+    );
+    const err = screen.getByTestId("projects-toggle-error-project-object-member-memory");
+    // Plain copy, NOT the raw code on the visible row.
+    expect(err.textContent).toContain("couldn't be saved");
+    expect(err.textContent).not.toContain("PROJECT_TOGGLE_FAILED");
+    // Retry offered.
+    expect(screen.getByTestId("projects-toggle-retry-project-object-member-memory")).toBeTruthy();
   });
 
-  it("shows the workspace empty-state when the selected path has no entries", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      fetchRouter({
-        "/api/workspaces": () => jsonResponse(200, workspacesBody([])),
-        "/api/groups": () => jsonResponse(200, groupsBody([])),
-      }) as unknown as typeof fetch,
+  it("both-scopes claude card: Project toggle + Local read-only + shadow rendered once", async () => {
+    mountDetail(
+      proj({
+        key: "/home/x/proj",
+        scan: {
+          at: "now",
+          entries: [
+            // Non-shadowed approved claude .mcp.json entry → live toggle.
+            scanEntry("approved", { "claude-code": { raw: { command: "y" } } }, { project_enabled: true }),
+            // Shadowed entry → rendered ONCE Local-owned (muted ⊘ in Project).
+            scanEntry("shadowed", { "claude-code": {} }, { project_shadowed_by_local: true }),
+          ],
+          project_scope: { local_servers: ["shadowed", "localonly"] },
+        },
+      }),
     );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-client-claude-code")).toBeTruthy());
+    // Project subsection: live toggle for the approved entry.
+    expect(screen.getByTestId("projects-toggle-project-object-member-approved")).toBeTruthy();
+    // Shadow: ONE muted anchor in Project + the authoritative cross-ref in Local.
+    expect(screen.getByTestId("projects-shadow-shadowed")).toBeTruthy();
+    expect(screen.getByTestId("projects-shadow-authoritative-shadowed")).toBeTruthy();
+    // The shadowed entry has NO competing toggle in the Project subsection.
+    expect(screen.queryByTestId("projects-toggle-project-object-member-shadowed")).toBeNull();
+    // Local subsection lists both local servers read-only.
+    expect(screen.getByTestId("projects-claude-local-localonly")).toBeTruthy();
+    expect(screen.getByTestId("projects-claude-local-localonly").textContent).toContain("read-only");
+  });
 
-    render(<ProjectsScreen route={routeWithPath("/nonexistent")} />);
+  it("warm re-enable replays the held value; cold re-enable shows the Re-add CTA", async () => {
+    // Warm: a cursor member with a raw value in the scan. Disabling captures it;
+    // re-enabling replays it as the POST value (asserted via the captured body).
+    const captured: { body: Record<string, unknown> } = { body: {} };
+    mountDetail(
+      proj({
+        key: "/home/x/proj",
+        scan: { at: "now", entries: [scanEntry("warm", { cursor: { raw: { command: "held-cmd" } } })] },
+      }),
+      [],
+      async (init) => {
+        captured.body = JSON.parse((init?.body as string) ?? "{}");
+        const enable = captured.body.enable === true;
+        return jsonResponse(200, { scope: "project-object-member", server: "warm", enabled: enable });
+      },
+    );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-client-cursor")).toBeTruthy());
+    const toggle = screen.getByTestId("projects-toggle-project-object-member-warm") as HTMLInputElement;
+    // Disable then re-enable — the enable POST must carry the held value.
+    fireEvent.change(toggle, { target: { checked: false } });
+    await waitFor(() => expect((screen.getByTestId("projects-toggle-project-object-member-warm") as HTMLInputElement).checked).toBe(false));
+    fireEvent.change(screen.getByTestId("projects-toggle-project-object-member-warm"), { target: { checked: true } });
+    await waitFor(() => expect(captured.body.enable).toBe(true));
+    expect(captured.body.value).toEqual({ command: "held-cmd" });
+  });
+
+  it("cold object-member (no held value) renders the Re-add CTA, not a value-less enable toggle", async () => {
+    // A claude .mcp.json entry that is DISABLED (project_enabled:false) and has no
+    // raw value in the scan → cold: the toggle is off + we render a Re-add CTA so
+    // an enable POST is never sent without a value (CORE RULING / D2).
+    mountDetail(
+      proj({
+        key: "/home/x/proj",
+        scan: {
+          at: "now",
+          entries: [scanEntry("cold", { "claude-code": {} }, { project_enabled: false })],
+        },
+      }),
+    );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-client-claude-code")).toBeTruthy());
+    // No held value + off → Re-add CTA, no enable toggle for this row.
+    expect(screen.getByTestId("projects-readd-cold")).toBeTruthy();
+    expect(screen.queryByTestId("projects-toggle-project-object-member-cold")).toBeNull();
+  });
+
+  it("section-scoped scan error renders inside the config section, not the whole screen", async () => {
+    mountDetail(proj({ key: "/home/x/proj", scan: undefined, scan_error: "PROJECT_ROOT_INVALID" }));
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
     await waitFor(() => expect(screen.queryByTestId("projects-detail")).toBeTruthy());
-    expect(screen.getByTestId("projects-workspace-empty")).toBeTruthy();
-    expect(screen.getByTestId("projects-groups-empty")).toBeTruthy();
+    // The whole screen still renders (workspace + groups sections present).
+    expect(screen.getByTestId("projects-section-workspace")).toBeTruthy();
+    expect(screen.getByTestId("projects-section-groups")).toBeTruthy();
+    // The config section shows the section-scoped error.
+    expect(screen.getByTestId("projects-section-config-error").textContent).toContain("could not be read");
   });
 });

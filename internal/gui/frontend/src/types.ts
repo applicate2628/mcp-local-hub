@@ -123,6 +123,12 @@ export interface ScanResult {
   // Absent (older backend) → visibleClients() falls back to the conservative
   // "no non-core client is scannable" view (core-only matrix), never overflow.
   client_capabilities?: Record<string, ClientCapability>;
+
+  // project_scope mirrors api.ScanResult.ProjectScope (`json:"project_scope,omitempty"`)
+  // — the claude-code LOCAL-scope projection, set ONLY on a PROJECT scan (the
+  // global Servers-matrix scan leaves it nil so its bytes stay golden). The P3b
+  // claude both-scopes card reads it for the Local subsection.
+  project_scope?: ProjectScopeInfo;
 }
 
 // ClientCapability mirrors api.ClientCapability — the per-client capability
@@ -194,6 +200,42 @@ export interface ScanEntry {
   // as a green hub cell. Absent/empty (no manifest) → no loopback entry
   // can match → such a cell falls to "direct" (unmanaged).
   daemon_ports?: number[];
+
+  // ── per-project-GUI Phase 2b: claude-code DUAL-substrate fields ──
+  // Mirror api.ScanEntry.ProjectEnabled / ProjectShadowedByLocal
+  // (`json:"project_enabled,omitempty"` / `json:"project_shadowed_by_local,omitempty"`).
+  // Set ONLY by the project-scoped scan (GET /api/projects), never the global
+  // Servers-matrix scan, and ONLY for a claude-code .mcp.json (Project-scope)
+  // entry. The P3b Projects detail lens reads these two *bool flags directly
+  // (never re-derives precedence — the backend owns the Local>Project rule).
+  //
+  //   project_enabled — the OPT-IN approval reconciliation result for THIS
+  //     server in the project's .mcp.json (Project scope): true = approved/
+  //     loaded, false = NOT approved (pending the trust prompt). undefined =
+  //     does not apply (a non-claude-code entry, the global scan, or a
+  //     shadowed entry). The toggle UI must render a SHADOWED entry's Project
+  //     row as a muted ⊘ anchor (state-unknown), never guess ON.
+  //   project_shadowed_by_local — true when this claude-code .mcp.json entry's
+  //     Name also appears in the project's ~/.claude.json Local scope: Claude
+  //     loads the Local definition, so the .mcp.json approval is MOOT. Such an
+  //     entry is rendered ONCE Local-owned (the authoritative row lives in the
+  //     Local subsection); the Project subsection shows a muted cross-reference.
+  project_enabled?: boolean;
+  project_shadowed_by_local?: boolean;
+}
+
+// ProjectScopeInfo mirrors api.ProjectScopeInfo — the claude-code LOCAL-scope
+// projection (~/.claude.json → projects.<key>) attached to a PROJECT scan
+// (`ScanResult.project_scope`, omitted by the global scan). All fields are
+// omitempty on the wire, so an absent record reads as nil/empty here. The P3b
+// claude card's Local subsection renders local_servers READ-ONLY (no write
+// owner in P3b v1 — deferral D1); the verbatim toggle arrays surface in the
+// collapsible "Advanced: raw approval state".
+export interface ProjectScopeInfo {
+  local_servers?: string[];
+  disabled_mcpjson_servers?: string[];
+  enabled_mcpjson_servers?: string[];
+  enable_all_project_mcp_servers?: boolean;
 }
 
 export interface ClientPresence {
