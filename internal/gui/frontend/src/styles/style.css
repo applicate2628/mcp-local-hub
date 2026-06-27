@@ -2667,3 +2667,31 @@ nav a,
   padding-top: var(--gap-sm);
   border-top: 1px solid var(--border);
 }
+
+/* P3c group↔project binding (design §10.1): a neutral pill labels each group
+   bound-to-this-project vs global, and an immediate per-row bind/unbind control
+   sits below the title. The badge is informational only (the backend filter is
+   the authoritative visibility owner). */
+.projects-group-binding-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--gap-xs);
+  border-radius: var(--radius-sm, 4px);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface-2, transparent);
+  white-space: nowrap;
+}
+.projects-group-binding-badge.is-bound {
+  color: var(--accent, var(--text));
+  border-color: var(--accent, var(--border));
+}
+.projects-group-binding {
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+}
+.projects-group-binding-error {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}

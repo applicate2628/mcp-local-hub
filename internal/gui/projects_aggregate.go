@@ -11,10 +11,14 @@
 //     (clients.ProjectScanConfigPaths, NEVER DefaultScanConfigPaths, so the
 //     global Servers-matrix scan stays byte-identical) + the P2b claude-LOCAL
 //     enrichment (both claude scopes: .mcp.json Project + ~/.claude.json Local).
-//   - C (groups): the groups from groups.yaml. P3a does NOT filter by project
-//     binding (project_path is P3c); every project lists all groups, matching
-//     the P1 frontend's current behavior. The binding predicate owner will be
-//     backend-side here in P3c.
+//   - C (groups): the groups from groups.yaml. P3c FILTERS each project's groups
+//     by the §10.1 binding: a project's Groups list carries every group bound to
+//     THAT project (Group.ProjectPath == the project's canonical key) plus every
+//     unbound/global group (ProjectPath == ""). groupVisibleInProject is the
+//     SINGLE backend-side owner of that predicate; the frontend reads the
+//     filtered per-project list and never re-derives it. The top-level Groups
+//     stays as the project-unfiltered set (each row carries its project_path so
+//     the UI can label bound-vs-global).
 //
 // READ-ONLY: it only reads the registry, the project config files, ~/.claude.json
 // (once per project), and groups.yaml. It writes NOTHING. It uses the PROJECT
@@ -46,10 +50,20 @@ type projectAggregateDTO struct {
 	// then carries a stable code so the row still renders.
 	Scan      *api.ScanResult `json:"scan,omitempty"`
 	ScanError string          `json:"scan_error,omitempty"`
+	// Groups are the Model-C groups VISIBLE in THIS project's lens (P3c, design
+	// §10.1): every group bound to this project (ProjectPath == this Key) PLUS
+	// every unbound/global group (ProjectPath == ""). This is the
+	// SINGLE-BACKEND-OWNED binding-filter output (groupVisibleInProject is the one
+	// predicate); the frontend reads this list directly and NEVER re-derives the
+	// filter. Always a non-nil array (empty when no group is visible). Each
+	// groupDTO carries its project_path so the UI can label bound-vs-global.
+	Groups []groupDTO `json:"groups"`
 }
 
-// projectsAggregateResponse is the GET /api/projects body. Groups are returned
-// once at the top (project-unbound in P3a) rather than duplicated per project.
+// projectsAggregateResponse is the GET /api/projects body. The top-level Groups
+// is the project-UNFILTERED set (each row carries its project_path so the UI can
+// label bound-vs-global); each project's OWN binding-filtered subset lives in
+// projectAggregateDTO.Groups (P3c, the §10.1 binding filter).
 type projectsAggregateResponse struct {
 	Projects []projectAggregateDTO `json:"projects"`
 	Groups   []groupDTO            `json:"groups"`
@@ -101,6 +115,29 @@ func (s *Server) projectsAggregateHandler(w http.ResponseWriter, r *http.Request
 	}
 	sort.Strings(keyOrder)
 
+	// C — groups, loaded ONCE up front so the per-project binding filter
+	// (groupVisibleInProject) can be applied as each project DTO is built. A load
+	// failure is non-fatal: the frontend renders "groups load failed" while the
+	// projects still show. allGroupRows is the project-unfiltered set surfaced at
+	// the top of the response (each row carries its project_path so the UI can
+	// label bound-vs-global); per-project filtering reuses cfg.Groups directly.
+	var cfg api.GroupsConfig
+	var groupsErr string
+	allGroupRows := []groupDTO{}
+	cfg, gerr := api.LoadGroups()
+	if gerr != nil {
+		groupsErr = "GROUPS_LIST_FAILED"
+	} else {
+		port, hubLive := s.HubMcpBoundPort()
+		instanceID, hasInstance := s.groups.HubInstanceID()
+		allGroupRows = make([]groupDTO, 0, len(cfg.Groups))
+		for _, g := range cfg.Groups {
+			d := groupToDTO(g)
+			d.Connection = s.groupConnection(g.Name, port, hubLive, instanceID, hasInstance)
+			allGroupRows = append(allGroupRows, d)
+		}
+	}
+
 	guiPort := s.Port()
 	projects := make([]projectAggregateDTO, 0, len(keyOrder))
 	for _, key := range keyOrder {
@@ -109,6 +146,11 @@ func (s *Server) projectsAggregateHandler(w http.ResponseWriter, r *http.Request
 			Key:           key,
 			WorkspacePath: acc.path,
 			Entries:       acc.entries,
+			// C (P3c) — the per-project binding filter. groupVisibleInProject is
+			// the SINGLE owner of the `bound-to-this OR global-unbound` predicate;
+			// the frontend never re-derives it. Empty (non-nil) when groups failed
+			// to load or none are visible.
+			Groups: filterGroupsForProject(cfg.Groups, key),
 		}
 		sort.Slice(dto.Entries, func(i, j int) bool { return dto.Entries[i].Language < dto.Entries[j].Language })
 
@@ -126,25 +168,38 @@ func (s *Server) projectsAggregateHandler(w http.ResponseWriter, r *http.Request
 		projects = append(projects, dto)
 	}
 
-	// C — groups (project-unbound in P3a). A load failure is non-fatal: the
-	// frontend renders "groups load failed" while the projects still show.
-	resp := projectsAggregateResponse{Projects: projects, Groups: []groupDTO{}}
-	cfg, gerr := api.LoadGroups()
-	if gerr != nil {
-		resp.GroupsError = "GROUPS_LIST_FAILED"
-	} else {
-		port, hubLive := s.HubMcpBoundPort()
-		instanceID, hasInstance := s.groups.HubInstanceID()
-		rows := make([]groupDTO, 0, len(cfg.Groups))
-		for _, g := range cfg.Groups {
-			d := groupToDTO(g)
-			d.Connection = s.groupConnection(g.Name, port, hubLive, instanceID, hasInstance)
-			rows = append(rows, d)
-		}
-		resp.Groups = rows
-	}
-
+	resp := projectsAggregateResponse{Projects: projects, Groups: allGroupRows, GroupsError: groupsErr}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// groupVisibleInProject is the SINGLE OWNER of the per-project binding predicate
+// (design §10.1): a group is visible in a project's lens when it is bound to THAT
+// project (its canonical ProjectPath equals the project's canonical key) OR it is
+// UNBOUND / GLOBAL (ProjectPath == "" — every pre-P3c group, plus any group the
+// operator explicitly made global). Both sides are already canonical keys: the
+// stored ProjectPath was normalized via clients.CanonicalProjectKey by the
+// binding write owner, and projectKey is the aggregate's CanonicalProjectKey, so
+// this is a direct string compare with no re-normalization here. The frontend
+// reads the filtered per-project Groups list this predicate produces and never
+// re-implements it.
+func groupVisibleInProject(g api.Group, projectKey string) bool {
+	return g.ProjectPath == "" || g.ProjectPath == projectKey
+}
+
+// filterGroupsForProject returns the project-lens-visible subset of groups
+// (groupVisibleInProject), mapped to the wire DTO. The result is a non-nil array
+// (empty when nothing is visible). The Connection triple is left nil here: the
+// project lens lists groups for binding/membership, not for the B4 copy-paste
+// connection details (which the top-level Groups + the dedicated Groups screen
+// own), so a per-project group row stays compact.
+func filterGroupsForProject(groups []api.Group, projectKey string) []groupDTO {
+	out := make([]groupDTO, 0, len(groups))
+	for _, g := range groups {
+		if groupVisibleInProject(g, projectKey) {
+			out = append(out, groupToDTO(g))
+		}
+	}
+	return out
 }
 
 // scanOneProject runs the Model-B project scan for a single project root via the

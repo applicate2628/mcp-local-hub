@@ -163,6 +163,15 @@ type groupDTO struct {
 	Servers     []string            `json:"servers"`
 	ToolsHidden map[string][]string `json:"tools_hidden,omitempty"`
 	Connection  *groupConnectionDTO `json:"connection,omitempty"`
+	// ProjectPath is the group's per-project binding (P3c, design §10.1). It is
+	// the canonical project key the group is bound to, or "" when the group is
+	// UNBOUND / GLOBAL (visible in every project lens). Emitted with omitempty so
+	// a global group keeps the compact pre-P3c wire shape; the per-project-lens UI
+	// reads it to render "bound to this project" vs "global (all projects)". The
+	// /api/projects backend filter is the SINGLE owner of the binding predicate —
+	// this field is informational for the UI label only, never re-derived into a
+	// client-side filter.
+	ProjectPath string `json:"project_path,omitempty"`
 }
 
 // groupConnectionDTO is the copy-pasteable connection info for a group's
@@ -217,6 +226,7 @@ func groupToDTO(g api.Group) groupDTO {
 		Description: g.Description,
 		Servers:     servers,
 		ToolsHidden: hidden,
+		ProjectPath: g.ProjectPath,
 	}
 }
 
