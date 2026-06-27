@@ -20,8 +20,8 @@ import type { ProjectToggleScope } from "../api";
 // never) branch on the client string to choose a scope.
 export type ToggleMechanism =
   | "workspace" // Model A — workspace LSP daemon
-  | "object-member" // Model B — cursor/vscode/claude-code .mcp.json object member
-  | "claude-local" // Model B-claude Local — array move in ~/.claude.json
+  | "object-member" // Model B — cursor/vscode .mcp.json object member (add/remove)
+  | "claude-local" // Model B-claude — the claude .mcp.json Project approval array move
   | "group"; // Model C — group membership
 
 // scopeForToggle is the SINGLE place the frontend decides which substrate scope a
@@ -29,15 +29,21 @@ export type ToggleMechanism =
 // stable ProjectToggleScope the backend dispatches on. There is deliberately NO
 // branch on a client name here:
 //   - workspace            → "workspace-lsp"
-//   - object-member        → "project-object-member"  (cursor / vscode / claude .mcp.json Project)
-//   - claude-local         → "claude-local-membership" (the array move; D1 read-only in P3b v1)
+//   - object-member        → "project-object-member"  (cursor / vscode .mcp.json member)
+//   - claude-local         → "claude-local-membership" (the approval array move)
 //   - group                → "group-servers"
 //
-// claude-code's .mcp.json Project rows use mechanism "object-member" → scope
-// "project-object-member" (the array-move-free object member); the design's
-// "claude Project rows → claude-local-membership" line refers to the LOCAL-array
-// APPROVAL move, which is mechanism "claude-local". The two claude substrates are
-// distinct mechanisms, never one client-name branch.
+// The claude-code .mcp.json PROJECT subsection (decision lines 19/21, §10.2) uses
+// mechanism "claude-local" → scope "claude-local-membership": the APPROVAL
+// ARRAY-MOVE that shifts the server name between ~/.claude.json projects.<key>.
+// {enabled,disabled}McpjsonServers and NEVER deletes the checked-in .mcp.json
+// mcpServers definition (decision 5). It is NOT mechanism "object-member" — that
+// substrate (cursor / vscode) ADDS/REMOVES a member from the project config file
+// and is the WRONG owner for the claude Project row (a member delete would
+// data-loss the shared checked-in definition and spring back ON on reload because
+// the approval arrays were never touched — the P3b r2 bug FIX 1 corrects). claude's
+// OTHER substrate, the ~/.claude.json projects.<key>.mcpServers Local DEFINITIONS,
+// has no write owner in P3b v1 (D1, read-only) and is not toggled by this map.
 export function scopeForToggle(mechanism: ToggleMechanism): ProjectToggleScope {
   switch (mechanism) {
     case "workspace":

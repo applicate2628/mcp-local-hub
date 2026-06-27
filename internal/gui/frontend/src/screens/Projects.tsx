@@ -265,7 +265,11 @@ export function ProjectsScreen({ route }: ProjectsScreenProps): preact.JSX.Eleme
   if (selectedPath !== null) {
     const project = state.projects.find((p) => p.key === selectedPath) ?? null;
     return (
+      // KEY by the selected project path (FIX 5): switching projects remounts the
+      // detail tree so every per-row useToggleRow re-seeds from the new project's
+      // initialEnabled — no stale toggle state leaks across same-named servers.
       <ProjectDetail
+        key={selectedPath}
         projectKey={selectedPath}
         project={project}
         groups={state.groups}
@@ -492,6 +496,7 @@ function ToggleControl({
   st,
   label,
   disabled,
+  title,
   onToggle,
   onRetry,
 }: {
@@ -501,6 +506,10 @@ function ToggleControl({
   st: RowToggleState;
   label?: string;
   disabled?: boolean;
+  // title is a hover/aria-description surfaced on the checkbox itself — used for
+  // the object-member disable-affordance warning (FIX 6: "Disabling removes this
+  // entry; re-enabling will require re-adding it.").
+  title?: string;
   onToggle: (next: boolean) => void;
   onRetry: () => void;
 }): preact.JSX.Element {
@@ -516,13 +525,15 @@ function ToggleControl({
   }
   return (
     <div class="projects-toggle-cell">
-      <label class="projects-toggle-label">
+      <label class="projects-toggle-label" title={title}>
         <input
           type="checkbox"
           data-testid={testId}
           checked={st.enabled}
           disabled={disabled || st.busy}
           aria-busy={st.busy}
+          title={title}
+          aria-description={title}
           onChange={(e) => onToggle((e.target as HTMLInputElement).checked)}
         />
         {label ? <span class="text-xs">{label}</span> : null}
@@ -722,26 +733,37 @@ async function resolveConsentOnEnable(server: string): Promise<ConsentResolution
 // ───────────────────────────────────────────────────────────────────
 // Toggleable-server-row — the shared building block for the object-member,
 // claude-local-array, and group sections. Owns its toggle state machine, the
-// warm/cold re-enable logic, and the consent-on-enable gate.
+// cold re-enable affordance, and the consent-on-enable gate.
+//
+// RE-ENABLE IS ALWAYS COLD FOR AN OBJECT-MEMBER SUBSTRATE (P3b r2, FIX 2). The
+// warm value-replay path was REMOVED: the only legitimate warm source would have
+// been the just-disabled member value, but the /api/projects aggregate NILs every
+// ClientPresence.raw (sanitizeScanResult / stripClientEntryRaw — the strip-Raw
+// security posture that keeps secret-bearing config off the wire). So the held
+// value was ALWAYS undefined and the warm path was dead code. For an object-member
+// (cursor / vscode, scope project-object-member) DISABLE removes the member and
+// re-enable ALWAYS renders the cold "Re-add…" CTA → #/add-server (never a
+// value-less enable POST, never a backend-echoed value). The claude Project row
+// is NOT an object-member here — it uses the value-free APPROVAL ARRAY-MOVE
+// (scope claude-local-membership), whose .mcp.json definition stays put, so its
+// re-enable is trivial (no value, no cold CTA): coldReenable=false.
 // ───────────────────────────────────────────────────────────────────
 
 interface ServerRowProps {
   server: string;
   scope: ReturnType<typeof scopeForToggle>;
   initialEnabled: boolean;
-  // buildRequest closes over the substrate identity (root/client/group). For an
-  // object-member ENABLE the caller must inject the warm-held value when present;
-  // when no value is held, `canEnable` is false (cold re-enable → Re-add CTA).
-  buildRequest: (enable: boolean, heldValue?: Record<string, unknown>) => ProjectToggleRequest;
-  // heldValue is the client-held just-disabled member value (warm re-enable) or
-  // undefined (cold). Only object-member rows pass it; for workspace/claude-local/
-  // group the array/registry IS the value-free substrate, so enable needs no value.
-  needsValueToEnable: boolean;
-  heldValue?: Record<string, unknown>;
-  // onCaptureValue lets the parent stash the value the backend can re-read on a
-  // SUCCESSFUL disable (warm re-enable source). The aggregate is NAMES-only, so
-  // the only legitimate source is the value the operator just had in this session.
-  onCaptureValue?: () => Record<string, unknown> | undefined;
+  // buildRequest closes over the substrate identity (root/client/group). No value
+  // is ever carried — value-free substrates (workspace / claude-local array /
+  // group) need none, and object-member ENABLE is cold (Re-add CTA), never a
+  // value-bearing enable POST.
+  buildRequest: (enable: boolean) => ProjectToggleRequest;
+  // coldReenable: object-member rows (cursor / vscode, scope project-object-member)
+  // DELETE the member on disable, so a disabled row cannot be toggled back on —
+  // it renders the cold "Re-add…" CTA instead. Value-free substrates (workspace /
+  // claude-local array / group) set this false: their disable is reversible by a
+  // plain enable toggle.
+  coldReenable: boolean;
   // gateOnEnable: object-member / claude-local / group rows run the readiness
   // consent gate on enable; workspace rows do not (LSP register has its own flow).
   gateOnEnable: boolean;
@@ -756,8 +778,7 @@ function ToggleableServerRow(props: ServerRowProps): preact.JSX.Element {
     scope,
     initialEnabled,
     buildRequest,
-    needsValueToEnable,
-    heldValue,
+    coldReenable: coldReenableSubstrate,
     gateOnEnable,
     onReload,
     mountedRef,
@@ -769,22 +790,16 @@ function ToggleableServerRow(props: ServerRowProps): preact.JSX.Element {
   const lastIntentRef = useRef<boolean>(initialEnabled);
   const toggleTestId = `projects-toggle-${scope}-${server}`;
 
-  // doToggle is the single entry into the state machine. For an enable it first
-  // resolves consent (O-1) and the warm/cold value; for a disable it just runs.
+  // doToggle is the single entry into the state machine. An enable first resolves
+  // consent (O-1); a disable just runs (never gates). No value is ever carried.
   async function doToggle(next: boolean): Promise<void> {
     lastIntentRef.current = next;
     if (!next) {
-      // Disable never gates and needs no value.
+      // Disable never gates.
       await toggle(false, (en) => buildRequest(en));
       return;
     }
     // ENABLE.
-    // Cold object-member re-enable: no value held → DO NOT POST. The Re-add CTA
-    // is rendered separately (see below); this guard prevents an enable-without-
-    // value POST (CORE RULING / D2). For a value-free substrate this is unreachable.
-    if (needsValueToEnable && !heldValue) {
-      return;
-    }
     if (gateOnEnable) {
       const resolution = await resolveConsentOnEnable(server);
       if (!mountedRef.current) return;
@@ -793,12 +808,12 @@ function ToggleableServerRow(props: ServerRowProps): preact.JSX.Element {
         return; // wait for Confirm/Cancel
       }
     }
-    await toggle(true, (en) => buildRequest(en, heldValue));
+    await toggle(true, (en) => buildRequest(en));
   }
 
   function onConfirmConsent(): void {
     setPendingConsent(null);
-    void toggle(true, (en) => buildRequest(en, heldValue));
+    void toggle(true, (en) => buildRequest(en));
   }
 
   function onCancelConsent(): void {
@@ -810,11 +825,17 @@ function ToggleableServerRow(props: ServerRowProps): preact.JSX.Element {
     void doToggle(lastIntentRef.current);
   }
 
-  // Cold re-enable CTA: an object-member that needs a value to enable but has
-  // none held (e.g. after a reload) cannot be toggled back on — render a Re-add…
-  // CTA routing to the Add-server / Catalog flow instead (never a value-less
-  // enable POST). The toggle itself stays OFF + disabled.
-  const coldReenable = needsValueToEnable && !st.enabled && !heldValue;
+  // Cold re-enable CTA: an object-member substrate whose member was removed on
+  // disable cannot be toggled back on — render a Re-add… CTA routing to the
+  // Add-server / Catalog flow instead (never a value-less enable POST; CORE
+  // RULING / D2). Value-free substrates never hit this.
+  //
+  // GATE ON !busy: while a disable is IN FLIGHT (optimistic OFF + spinner), keep
+  // the toggle visible so the operator sees the spinner and an error-revert can
+  // bring the control straight back. Swap to the Re-add CTA only once the disable
+  // has RECONCILED (busy cleared, st.enabled settled false) — i.e. the member is
+  // confirmed gone, not merely optimistically flipped.
+  const coldReenable = coldReenableSubstrate && !st.enabled && !st.busy;
 
   return (
     <li class="projects-server-row py-1.5" data-testid={`projects-server-${scope}-${server}`} data-server={server}>
@@ -824,7 +845,7 @@ function ToggleableServerRow(props: ServerRowProps): preact.JSX.Element {
           class="btn text-xs"
           href={`#/add-server`}
           data-testid={`projects-readd-${server}`}
-          title="The just-disabled config wasn't kept across reload — re-add this server from the Add-server / Catalog flow."
+          title="Disabling removed this entry; re-add this server from the Add-server / Catalog flow to enable it again."
         >
           Re-add…
         </a>
@@ -835,6 +856,15 @@ function ToggleableServerRow(props: ServerRowProps): preact.JSX.Element {
           server={server}
           st={st}
           disabled={pendingConsent !== null}
+          // The disable-affordance warning (P3b r2, FIX 6): an object-member
+          // disable removes the entry, and re-enable is cold (Re-add). Surface
+          // that on the live (ON) control so the operator knows the cost BEFORE
+          // clicking. Value-free substrates pass no title.
+          title={
+            coldReenableSubstrate
+              ? "Disabling removes this entry; re-enabling will require re-adding it."
+              : undefined
+          }
           onToggle={(next) => void doToggle(next)}
           onRetry={onRetry}
         />
@@ -863,8 +893,13 @@ function ToggleableServerRow(props: ServerRowProps): preact.JSX.Element {
 
 // ───────────────────────────────────────────────────────────────────
 // ProjectDetail — the DETAIL lens (#/projects?path=<key>). 4 mechanism sections,
-// all fed from the SINGLE aggregate DTO. Lifts the client-held just-disabled
-// object-member values so a warm re-enable can replay them.
+// all fed from the SINGLE aggregate DTO.
+//
+// RE-SEED ON PROJECT CHANGE (P3b r2, FIX 5): ProjectDetail is KEYED by projectKey
+// at the ProjectsScreen call site, so navigating between two projects remounts the
+// whole detail tree. Each per-row useToggleRow then re-seeds from the new
+// initialEnabled, so a same-named server with a different enabled state in the
+// next project never shows the previous project's stale toggle state.
 // ───────────────────────────────────────────────────────────────────
 
 function ProjectDetail({
@@ -894,13 +929,6 @@ function ProjectDetail({
     };
   }, []);
 
-  // heldValues stashes the per-(client, server) value the operator just disabled
-  // so a WARM re-enable can replay it. NEVER persisted, never round-tripped — the
-  // aggregate stays NAMES-only (CORE RULING). The value is captured from the
-  // scan's ClientPresence.raw at disable time (the config shape the scan read);
-  // a cold reload empties this map → the Re-add CTA path.
-  const heldValuesRef = useRef<Map<string, Record<string, unknown>>>(new Map());
-
   return (
     <section class="projects-screen" data-testid="projects-detail">
       <div class="mb-1 flex items-center justify-between gap-3">
@@ -926,7 +954,6 @@ function ProjectDetail({
         scan={scan}
         scanError={scanError}
         root={root}
-        heldValuesRef={heldValuesRef}
         onReload={onReload}
         mountedRef={mountedRef}
       />
@@ -1011,10 +1038,14 @@ function WorkspaceRow({
   const st = lifecycleState(entry);
   const chip = routingChipForBackend(entry.backend);
   const clientList = Object.keys(entry.client_entries ?? {}).sort();
-  // A registered-and-materialized entry is "enabled"; a deliberately-stopped one
-  // is not. We treat a non-Failed registry presence as enabled — toggling OFF
-  // unregisters, toggling ON registers.
-  const initialEnabled = st === "Running" || st === "Starting" || st === "Stopped";
+  // EVERY rendered workspace row is a REGISTERED registry entry — it only appears
+  // here because the registry holds it — so it is "enabled" for the toggle's
+  // purpose: the first click DISABLES (Unregister/cleanup). That includes a
+  // Failed/missing entry (FIX 3): a broken LSP registration is still registered
+  // and the operator must be able to clean it up. Seeding such a row OFF would
+  // make the first click an enable/Register (a no-op churn) instead of the
+  // Unregister the operator needs. So initialEnabled is true for every state.
+  const initialEnabled = true;
   const scope = scopeForToggle("workspace");
 
   function buildRequest(enable: boolean): ProjectToggleRequest {
@@ -1139,14 +1170,12 @@ function SectionProjectConfig({
   scan,
   scanError,
   root,
-  heldValuesRef,
   onReload,
   mountedRef,
 }: {
   scan: import("../types").ScanResult | null;
   scanError: string | null;
   root: string;
-  heldValuesRef: { current: Map<string, Record<string, unknown>> };
   onReload: () => void;
   mountedRef: { current: boolean };
 }): preact.JSX.Element {
@@ -1154,8 +1183,24 @@ function SectionProjectConfig({
   const claudeEntries = entriesForClient(entries, "claude-code");
   const cursorEntries = entriesForClient(entries, "cursor");
   const vscodeEntries = entriesForClient(entries, "vscode");
+  // A claude Local-only project (FIX 4): the backend sets ProjectScope
+  // (local_servers / approval arrays) INDEPENDENTLY of the scan entries, so a
+  // project whose ONLY project config is the claude Local scope has zero scan
+  // entries but a non-empty project_scope. Render the claude both-scopes card for
+  // it (its Local subsection is the whole content) rather than the "no config"
+  // empty-state.
+  const projectScope = scan?.project_scope ?? null;
+  const hasClaudeLocalScope =
+    (projectScope?.local_servers?.length ?? 0) > 0 ||
+    (projectScope?.enabled_mcpjson_servers?.length ?? 0) > 0 ||
+    (projectScope?.disabled_mcpjson_servers?.length ?? 0) > 0 ||
+    projectScope?.enable_all_project_mcp_servers === true;
   const noConfig =
-    !scanError && claudeEntries.length === 0 && cursorEntries.length === 0 && vscodeEntries.length === 0;
+    !scanError &&
+    claudeEntries.length === 0 &&
+    cursorEntries.length === 0 &&
+    vscodeEntries.length === 0 &&
+    !hasClaudeLocalScope;
 
   return (
     <div class="card mb-3" data-testid="projects-section-config">
@@ -1183,9 +1228,8 @@ function SectionProjectConfig({
         <>
           <ClaudeBothScopesCard
             entries={claudeEntries}
-            projectScope={scan?.project_scope ?? null}
+            projectScope={projectScope}
             root={root}
-            heldValuesRef={heldValuesRef}
             onReload={onReload}
             mountedRef={mountedRef}
           />
@@ -1195,7 +1239,6 @@ function SectionProjectConfig({
             backedBy=".cursor/mcp.json"
             entries={cursorEntries}
             root={root}
-            heldValuesRef={heldValuesRef}
             onReload={onReload}
             mountedRef={mountedRef}
           />
@@ -1205,7 +1248,6 @@ function SectionProjectConfig({
             backedBy=".vscode/mcp.json"
             entries={vscodeEntries}
             root={root}
-            heldValuesRef={heldValuesRef}
             onReload={onReload}
             mountedRef={mountedRef}
           />
@@ -1215,45 +1257,40 @@ function SectionProjectConfig({
   );
 }
 
-// captureHeldValue stashes the scan's ClientPresence.raw config shape for a
-// server (the value a warm re-enable replays) keyed by (client, server). Called
-// from the object-member buildRequest closure. Returns the held value (or
-// undefined) for the row's warm/cold decision.
-function heldKey(client: string, server: string): string {
-  return `${client}::${server}`;
-}
-
-function rawObjectValue(entry: ScanEntry, client: string): Record<string, unknown> | undefined {
-  const raw = entry.client_presence?.[client]?.raw;
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    return raw as Record<string, unknown>;
-  }
-  return undefined;
-}
-
 // ClaudeBothScopesCard renders the §10.2 dual-substrate claude card: a Project
-// subsection (live object-member toggles, scope project-object-member) + a Local
-// READ-ONLY subsection (no write owner in P3b v1 — D1). A shadowed entry is
-// rendered ONCE Local-owned: the Project subsection shows a muted ⊘ cross-
-// reference anchor, the Local subsection shows the authoritative row.
+// subsection (live toggles, scope claude-local-membership — the APPROVAL
+// ARRAY-MOVE, NOT a .mcp.json member delete) + a Local READ-ONLY subsection (no
+// write owner in P3b v1 — D1). A shadowed entry is rendered ONCE Local-owned: the
+// Project subsection shows a muted ⊘ cross-reference anchor, the Local subsection
+// shows the authoritative row.
+//
+// SCOPE (P3b r2, FIX 1): the claude checked-in .mcp.json Project toggle uses
+// mechanism "claude-local" → scope claude-local-membership, which MOVES the
+// server name between ~/.claude.json projects.<key>.{enabled,disabled}McpjsonServers
+// and NEVER deletes the .mcp.json mcpServers definition (decision 5). It is NOT
+// the object-member member-delete substrate (scope project-object-member) — that
+// would (a) data-loss the shared checked-in def on disable and (b) spring back ON
+// on reload because the approval arrays were never touched. Because the def stays
+// put, re-enable is trivial (a value-free array flip), so coldReenable=false: NO
+// Re-add CTA and NO value on the wire. Only cursor / vscode are object-member.
 function ClaudeBothScopesCard({
   entries,
   projectScope,
   root,
-  heldValuesRef,
   onReload,
   mountedRef,
 }: {
   entries: ScanEntry[];
   projectScope: ProjectScopeInfo | null;
   root: string;
-  heldValuesRef: { current: Map<string, Record<string, unknown>> };
   onReload: () => void;
   mountedRef: { current: boolean };
 }): preact.JSX.Element {
   const localServers = projectScope?.local_servers ?? [];
   const projectEntries = entries; // claude-code .mcp.json (Project scope)
-  const scope = scopeForToggle("object-member");
+  // The claude Project toggle is the APPROVAL ARRAY-MOVE (claude-local-membership),
+  // a value-free substrate — never the project-object-member member delete.
+  const scope = scopeForToggle("claude-local");
 
   return (
     <div class="projects-client-card" data-testid="projects-client-claude-code">
@@ -1266,7 +1303,8 @@ function ClaudeBothScopesCard({
       <div class="projects-claude-subsection" data-testid="projects-claude-project">
         <p class="m-0 text-xs text-app-muted">
           <strong>Project</strong> — <code>.mcp.json</code> (checked-in, shared).
-          Toggles approve/disapprove the server for this project.
+          Toggles approve/disapprove the server for this project (the{" "}
+          <code>.mcp.json</code> definition stays put — only your approval moves).
         </p>
         {projectEntries.length === 0 ? (
           <p class="m-0 text-sm text-app-muted" data-testid="projects-claude-project-empty">
@@ -1311,33 +1349,26 @@ function ClaudeBothScopesCard({
                   </li>
                 );
               }
-              const held = rawObjectValue(entry, "claude-code");
               return (
                 <ToggleableServerRow
                   key={entry.name}
                   server={entry.name}
                   scope={scope}
                   initialEnabled={entry.project_enabled === true}
-                  needsValueToEnable={true}
-                  heldValue={held ?? heldValuesRef.current.get(heldKey("claude-code", entry.name))}
+                  // Array-move substrate: value-free, reversible by a plain toggle.
+                  // The .mcp.json def is never deleted (decision 5), so a disabled
+                  // server re-enables by flipping the approval array — no Re-add CTA.
+                  coldReenable={false}
                   gateOnEnable={true}
                   onReload={onReload}
                   mountedRef={mountedRef}
-                  buildRequest={(enable, heldValue) => {
-                    if (!enable) {
-                      // Stash the value we just had so a warm re-enable can replay it.
-                      const v = held ?? heldValuesRef.current.get(heldKey("claude-code", entry.name));
-                      if (v) heldValuesRef.current.set(heldKey("claude-code", entry.name), v);
-                    }
-                    return {
-                      root,
-                      client: "claude-code",
-                      scope,
-                      server: entry.name,
-                      enable,
-                      value: enable ? heldValue : undefined,
-                    };
-                  }}
+                  buildRequest={(enable) => ({
+                    root,
+                    client: "claude-code",
+                    scope,
+                    server: entry.name,
+                    enable,
+                  })}
                 />
               );
             })}
@@ -1415,15 +1446,16 @@ function ClaudeRawApprovalState({
 }
 
 // FlatClientCard renders a single-substrate client (cursor / vscode) as a flat
-// live-toggle list (scope project-object-member). Each row uses ToggleableServerRow
-// with the warm/cold re-enable + consent-on-enable behavior.
+// live-toggle list (scope project-object-member). Each row is an object-member:
+// DISABLE removes the member from the project config, so re-enable is ALWAYS COLD
+// (the Re-add… CTA — P3b r2, FIX 2). No value is ever held or sent (the aggregate
+// is NAMES-only — sanitizeScanResult NILs every raw blob).
 function FlatClientCard({
   client,
   label,
   backedBy,
   entries,
   root,
-  heldValuesRef,
   onReload,
   mountedRef,
 }: {
@@ -1432,7 +1464,6 @@ function FlatClientCard({
   backedBy: string;
   entries: ScanEntry[];
   root: string;
-  heldValuesRef: { current: Map<string, Record<string, unknown>> };
   onReload: () => void;
   mountedRef: { current: boolean };
 }): preact.JSX.Element | null {
@@ -1447,39 +1478,30 @@ function FlatClientCard({
         </span>
       </div>
       <ul class="projects-server-list m-0 list-none p-0">
-        {entries.map((entry) => {
+        {entries.map((entry) => (
           // For a single-substrate object-member, presence in the scan means the
           // member exists (enabled). A removed member won't appear in entries at
-          // all, so initialEnabled is true for every rendered row.
-          const held = rawObjectValue(entry, client);
-          return (
-            <ToggleableServerRow
-              key={entry.name}
-              server={entry.name}
-              scope={scope}
-              initialEnabled={true}
-              needsValueToEnable={true}
-              heldValue={held ?? heldValuesRef.current.get(heldKey(client, entry.name))}
-              gateOnEnable={true}
-              onReload={onReload}
-              mountedRef={mountedRef}
-              buildRequest={(enable, heldValue) => {
-                if (!enable) {
-                  const v = held ?? heldValuesRef.current.get(heldKey(client, entry.name));
-                  if (v) heldValuesRef.current.set(heldKey(client, entry.name), v);
-                }
-                return {
-                  root,
-                  client,
-                  scope,
-                  server: entry.name,
-                  enable,
-                  value: enable ? heldValue : undefined,
-                };
-              }}
-            />
-          );
-        })}
+          // all, so initialEnabled is true for every rendered row. coldReenable is
+          // true: disabling removes the member, so a re-enable routes to the
+          // Re-add CTA rather than a value-less enable POST (CORE RULING / D2).
+          <ToggleableServerRow
+            key={entry.name}
+            server={entry.name}
+            scope={scope}
+            initialEnabled={true}
+            coldReenable={true}
+            gateOnEnable={true}
+            onReload={onReload}
+            mountedRef={mountedRef}
+            buildRequest={(enable) => ({
+              root,
+              client,
+              scope,
+              server: entry.name,
+              enable,
+            })}
+          />
+        ))}
       </ul>
     </div>
   );
@@ -1564,7 +1586,9 @@ function GroupCard({
               server={server}
               scope={scope}
               initialEnabled={true}
-              needsValueToEnable={false}
+              // Group membership is a value-free array (group-servers): a removed
+              // member re-joins by a plain enable toggle, no Re-add CTA.
+              coldReenable={false}
               gateOnEnable={true}
               onReload={onReload}
               mountedRef={mountedRef}

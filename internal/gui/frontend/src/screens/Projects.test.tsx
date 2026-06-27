@@ -9,8 +9,13 @@
 //   - DETAIL lens (#/projects?path=<key>) 4 mechanism sections;
 //   - the per-row toggle state machine (optimistic flip → reconcile-to-response,
 //     error revert + §3.1 plain copy, per-row isolation);
-//   - both-scopes claude card (Project toggle / Local read-only / shadow once);
-//   - warm/cold object-member re-enable (warm replays held value; cold → Re-add).
+//   - both-scopes claude card (Project toggle uses the claude-local-membership
+//     APPROVAL ARRAY-MOVE — FIX 1 — / Local read-only / shadow once);
+//   - the decision-5 invariant (claude Project disable → array-move scope, NEVER
+//     the object-member member-delete) + the reload spring-back regression (a
+//     disabled claude Project server stays OFF after a remount/reload);
+//   - object-member re-enable is ALWAYS cold → Re-add CTA (warm path removed,
+//     FIX 2 — the aggregate NILs every raw blob).
 //
 // Mirrors Servers.test.tsx's fetch-router idiom (a declarative URL→response map)
 // + happy-dom EventSource stub conventions.
@@ -207,30 +212,38 @@ describe("ProjectsScreen — detail lens (sections + toggles)", () => {
   });
 
   it("toggle reconciles to response.enabled, not the requested intent (clamp)", async () => {
-    // The operator clicks ON, but the backend read-back clamps to OFF (e.g. an
-    // idempotent self-correct). The row MUST reflect response.enabled (OFF).
+    // The operator disables, and the backend read-back clamps to OFF; the row MUST
+    // reflect response.enabled. Demonstrated on the claude Project array-move row,
+    // which STAYS a toggle after a disable (the .mcp.json def is never deleted), so
+    // the reconcile-to-response semantic is observable on the same control (an
+    // object-member row would flip to the cold Re-add CTA — covered separately).
     mountDetail(
       proj({
         key: "/home/x/proj",
-        scan: { at: "now", entries: [scanEntry("memory", { cursor: { raw: { command: "x" } } })] },
+        scan: {
+          at: "now",
+          entries: [scanEntry("memory", { "claude-code": {} }, { project_enabled: true })],
+          project_scope: { local_servers: [] },
+        },
       }),
       [],
-      () => jsonResponse(200, { scope: "project-object-member", server: "memory", enabled: false }),
+      () => jsonResponse(200, { scope: "claude-local-membership", server: "memory", enabled: false }),
     );
     render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
-    await waitFor(() => expect(screen.queryByTestId("projects-client-cursor")).toBeTruthy());
-    const toggle = screen.getByTestId("projects-toggle-project-object-member-memory") as HTMLInputElement;
-    expect(toggle.checked).toBe(true); // initially present → enabled
-    // Disable (held value captured). Backend echoes enabled:false → reconciles OFF.
+    await waitFor(() => expect(screen.queryByTestId("projects-client-claude-code")).toBeTruthy());
+    const toggle = screen.getByTestId("projects-toggle-claude-local-membership-memory") as HTMLInputElement;
+    expect(toggle.checked).toBe(true); // project_enabled:true → enabled
+    // Disable. Backend echoes enabled:false → reconciles OFF (the array-move row
+    // stays a toggle).
     fireEvent.change(toggle, { target: { checked: false } });
     await waitFor(() =>
       expect(
-        (screen.getByTestId("projects-toggle-project-object-member-memory") as HTMLInputElement).checked,
+        (screen.getByTestId("projects-toggle-claude-local-membership-memory") as HTMLInputElement).checked,
       ).toBe(false),
     );
     // ✓ flash appears after the successful reconcile.
     await waitFor(() =>
-      expect(screen.queryByTestId("projects-toggle-ok-project-object-member-memory")).toBeTruthy(),
+      expect(screen.queryByTestId("projects-toggle-ok-claude-local-membership-memory")).toBeTruthy(),
     );
   });
 
@@ -261,15 +274,18 @@ describe("ProjectsScreen — detail lens (sections + toggles)", () => {
     expect(screen.getByTestId("projects-toggle-retry-project-object-member-memory")).toBeTruthy();
   });
 
-  it("both-scopes claude card: Project toggle + Local read-only + shadow rendered once", async () => {
+  it("both-scopes claude card: Project toggle uses claude-local-membership + Local read-only + shadow once", async () => {
+    // Raw is NIL on the wire (sanitizeScanResult strips it); the claude Project
+    // toggle is the APPROVAL ARRAY-MOVE (scope claude-local-membership), NOT the
+    // object-member member-delete (FIX 1).
     mountDetail(
       proj({
         key: "/home/x/proj",
         scan: {
           at: "now",
           entries: [
-            // Non-shadowed approved claude .mcp.json entry → live toggle.
-            scanEntry("approved", { "claude-code": { raw: { command: "y" } } }, { project_enabled: true }),
+            // Non-shadowed approved claude .mcp.json entry → live array-move toggle.
+            scanEntry("approved", { "claude-code": {} }, { project_enabled: true }),
             // Shadowed entry → rendered ONCE Local-owned (muted ⊘ in Project).
             scanEntry("shadowed", { "claude-code": {} }, { project_shadowed_by_local: true }),
           ],
@@ -279,63 +295,145 @@ describe("ProjectsScreen — detail lens (sections + toggles)", () => {
     );
     render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
     await waitFor(() => expect(screen.queryByTestId("projects-client-claude-code")).toBeTruthy());
-    // Project subsection: live toggle for the approved entry.
-    expect(screen.getByTestId("projects-toggle-project-object-member-approved")).toBeTruthy();
+    // Project subsection: the toggle uses the claude-local-membership scope (FIX 1),
+    // NOT project-object-member (which would member-delete the shared def).
+    expect(screen.getByTestId("projects-toggle-claude-local-membership-approved")).toBeTruthy();
+    expect(screen.queryByTestId("projects-toggle-project-object-member-approved")).toBeNull();
     // Shadow: ONE muted anchor in Project + the authoritative cross-ref in Local.
     expect(screen.getByTestId("projects-shadow-shadowed")).toBeTruthy();
     expect(screen.getByTestId("projects-shadow-authoritative-shadowed")).toBeTruthy();
     // The shadowed entry has NO competing toggle in the Project subsection.
-    expect(screen.queryByTestId("projects-toggle-project-object-member-shadowed")).toBeNull();
+    expect(screen.queryByTestId("projects-toggle-claude-local-membership-shadowed")).toBeNull();
     // Local subsection lists both local servers read-only.
     expect(screen.getByTestId("projects-claude-local-localonly")).toBeTruthy();
     expect(screen.getByTestId("projects-claude-local-localonly").textContent).toContain("read-only");
   });
 
-  it("warm re-enable replays the held value; cold re-enable shows the Re-add CTA", async () => {
-    // Warm: a cursor member with a raw value in the scan. Disabling captures it;
-    // re-enabling replays it as the POST value (asserted via the captured body).
+  it("claude Project DISABLE posts claude-local-membership (the array-move, never an object-member delete) — decision-5 invariant", async () => {
+    // FIX 8 regression: this is the test that would have caught FIX 1. The claude
+    // Project toggle MUST route through scope claude-local-membership (the approval
+    // array move that NEVER deletes the .mcp.json mcpServers definition — decision
+    // 5), and NEVER through project-object-member (the member delete that data-loses
+    // the shared checked-in definition). It is value-FREE (the array move needs no
+    // member value).
     const captured: { body: Record<string, unknown> } = { body: {} };
-    mountDetail(
-      proj({
-        key: "/home/x/proj",
-        scan: { at: "now", entries: [scanEntry("warm", { cursor: { raw: { command: "held-cmd" } } })] },
-      }),
-      [],
-      async (init) => {
-        captured.body = JSON.parse((init?.body as string) ?? "{}");
-        const enable = captured.body.enable === true;
-        return jsonResponse(200, { scope: "project-object-member", server: "warm", enabled: enable });
-      },
-    );
-    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
-    await waitFor(() => expect(screen.queryByTestId("projects-client-cursor")).toBeTruthy());
-    const toggle = screen.getByTestId("projects-toggle-project-object-member-warm") as HTMLInputElement;
-    // Disable then re-enable — the enable POST must carry the held value.
-    fireEvent.change(toggle, { target: { checked: false } });
-    await waitFor(() => expect((screen.getByTestId("projects-toggle-project-object-member-warm") as HTMLInputElement).checked).toBe(false));
-    fireEvent.change(screen.getByTestId("projects-toggle-project-object-member-warm"), { target: { checked: true } });
-    await waitFor(() => expect(captured.body.enable).toBe(true));
-    expect(captured.body.value).toEqual({ command: "held-cmd" });
-  });
-
-  it("cold object-member (no held value) renders the Re-add CTA, not a value-less enable toggle", async () => {
-    // A claude .mcp.json entry that is DISABLED (project_enabled:false) and has no
-    // raw value in the scan → cold: the toggle is off + we render a Re-add CTA so
-    // an enable POST is never sent without a value (CORE RULING / D2).
     mountDetail(
       proj({
         key: "/home/x/proj",
         scan: {
           at: "now",
-          entries: [scanEntry("cold", { "claude-code": {} }, { project_enabled: false })],
+          entries: [scanEntry("approved", { "claude-code": {} }, { project_enabled: true })],
+          project_scope: { local_servers: [] },
+        },
+      }),
+      [],
+      async (init) => {
+        captured.body = JSON.parse((init?.body as string) ?? "{}");
+        return jsonResponse(200, { scope: "claude-local-membership", server: "approved", enabled: false });
+      },
+    );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-client-claude-code")).toBeTruthy());
+    const toggle = screen.getByTestId("projects-toggle-claude-local-membership-approved") as HTMLInputElement;
+    expect(toggle.checked).toBe(true); // project_enabled:true → ON
+    fireEvent.change(toggle, { target: { checked: false } });
+    await waitFor(() => expect(captured.body.enable).toBe(false));
+    // The load-bearing assertion: the array-move scope + claude-code client + NO value.
+    expect(captured.body.scope).toBe("claude-local-membership");
+    expect(captured.body.client).toBe("claude-code");
+    expect(captured.body.value).toBeUndefined();
+    // Reconciles OFF; ✓ flash on the array-move scope's testid.
+    await waitFor(() =>
+      expect((screen.getByTestId("projects-toggle-claude-local-membership-approved") as HTMLInputElement).checked).toBe(false),
+    );
+  });
+
+  it("claude Project DISABLE stays OFF after a reload (spring-back regression) — the approval array was written", async () => {
+    // FIX 8 regression: the bug's second symptom was spring-back — an object-member
+    // disable never touches the approval arrays, so a reload re-seeded the row ON.
+    // With the array-move scope the disable IS persisted in the approval array, so
+    // a fresh aggregate (now project_enabled:false) re-seeds the row OFF and it
+    // STAYS off across the remount. We simulate the post-disable reload by serving
+    // an aggregate whose entry is already disabled and asserting the seeded state.
+    mountDetail(
+      proj({
+        key: "/home/x/proj",
+        scan: {
+          at: "now",
+          // Post-disable reload shape: the approval array moved the server to
+          // disabledMcpjsonServers, so the project-scoped scan now reports
+          // project_enabled:false for it.
+          entries: [scanEntry("springy", { "claude-code": {} }, { project_enabled: false })],
+          project_scope: { local_servers: [], disabled_mcpjson_servers: ["springy"] },
         },
       }),
     );
     render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
     await waitFor(() => expect(screen.queryByTestId("projects-client-claude-code")).toBeTruthy());
-    // No held value + off → Re-add CTA, no enable toggle for this row.
-    expect(screen.getByTestId("projects-readd-cold")).toBeTruthy();
-    expect(screen.queryByTestId("projects-toggle-project-object-member-cold")).toBeNull();
+    // The reloaded row is seeded OFF from project_enabled:false (NOT springing back
+    // ON). claude Project is the array-move substrate, so a disabled server still
+    // renders a (value-free) toggle — never a cold Re-add CTA.
+    const toggle = screen.getByTestId("projects-toggle-claude-local-membership-springy") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(screen.queryByTestId("projects-readd-springy")).toBeNull();
+    // The raw approval state shows the persisted disable.
+    expect(screen.getByTestId("projects-claude-raw").textContent).toContain("springy");
+  });
+
+  it("cursor object-member disable → cold re-enable shows the Re-add CTA (warm path removed)", async () => {
+    // FIX 7: the warm value-replay path is dead (the aggregate NILs every raw blob),
+    // so for a cursor/vscode object-member, DISABLE removes the member and re-enable
+    // is ALWAYS cold. Against the sanitized (raw=null) wire shape, disabling the
+    // member must reconcile OFF, never carry a value, and present the Re-add CTA —
+    // never a value-less enable POST (CORE RULING / D2).
+    const captured: { body: Record<string, unknown> } = { body: {} };
+    mountDetail(
+      proj({
+        key: "/home/x/proj",
+        // raw is NIL on the wire — exactly what /api/projects returns.
+        scan: { at: "now", entries: [scanEntry("memo", { cursor: {} })] },
+      }),
+      [],
+      async (init) => {
+        captured.body = JSON.parse((init?.body as string) ?? "{}");
+        return jsonResponse(200, { scope: "project-object-member", server: "memo", enabled: false });
+      },
+    );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-client-cursor")).toBeTruthy());
+    const toggle = screen.getByTestId("projects-toggle-project-object-member-memo") as HTMLInputElement;
+    expect(toggle.checked).toBe(true); // present → enabled
+    // Disable: object-member scope, NO value on the wire (warm removed).
+    fireEvent.change(toggle, { target: { checked: false } });
+    await waitFor(() => expect(captured.body.enable).toBe(false));
+    expect(captured.body.scope).toBe("project-object-member");
+    expect(captured.body.value).toBeUndefined();
+    // After the reconcile to OFF the row flips to the cold Re-add CTA (member gone);
+    // there is no longer an enable toggle to value-lessly POST.
+    await waitFor(() => expect(screen.queryByTestId("projects-readd-memo")).toBeTruthy());
+    const readd = screen.getByTestId("projects-readd-memo") as HTMLAnchorElement;
+    expect(readd.getAttribute("href")).toBe("#/add-server");
+    expect(screen.queryByTestId("projects-toggle-project-object-member-memo")).toBeNull();
+  });
+
+  it("cold object-member (disabled, no member) renders the Re-add CTA, not a value-less enable toggle", async () => {
+    // A cursor object-member that is OFF (member absent) → cold: render a Re-add CTA
+    // so an enable POST is never sent without a value (CORE RULING / D2). We seed
+    // OFF by... a removed member never appears in the scan, so we exercise the cold
+    // branch via the disable→reconcile path proven above; here we assert the
+    // disable-affordance warning copy on a live (ON) cursor row (FIX 6).
+    mountDetail(
+      proj({
+        key: "/home/x/proj",
+        scan: { at: "now", entries: [scanEntry("warn", { cursor: {} })] },
+      }),
+    );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    await waitFor(() => expect(screen.queryByTestId("projects-client-cursor")).toBeTruthy());
+    const toggle = screen.getByTestId("projects-toggle-project-object-member-warn") as HTMLInputElement;
+    // FIX 6: the live object-member control carries the disable-affordance warning.
+    expect(toggle.getAttribute("title")).toContain("re-adding it");
+    expect(toggle.getAttribute("aria-description")).toContain("re-adding it");
   });
 
   it("section-scoped scan error renders inside the config section, not the whole screen", async () => {

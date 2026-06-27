@@ -1503,11 +1503,15 @@ export type ProjectToggleScope =
 //   - enable: true = approve/add/register; false = remove/unregister.
 //   - group:  the group name for group-servers.
 //   - value:  the object-member value to SET on an object-member ENABLE (the
-//             config shape for this client). REQUIRED on object-member enable
-//             (the backend refuses an enable with no value — PROJECT_TOGGLE_INVALID).
-//             The frontend sources it ONLY from the client-held just-disabled
-//             value (warm re-enable); a cold re-enable routes to Add-server/Catalog
-//             instead, never an enable POST without a value (CORE RULING / D2).
+//             config shape for this client). REQUIRED by the backend on an
+//             object-member enable (PROJECT_TOGGLE_INVALID otherwise). The Projects
+//             screen NEVER sends it: an object-member (cursor / vscode) re-enable is
+//             always COLD — it routes to Add-server / Catalog (CORE RULING / D2),
+//             never a value-bearing enable POST. (The warm value-replay path was
+//             removed in P3b r2: the aggregate NILs every raw blob — strip-Raw
+//             security posture — so no held value could ever exist. FIX 2.) The
+//             field stays on the wire type because the backend object-member enable
+//             contract still accepts it for a future value-bearing caller.
 //   - languages: narrows a workspace register/unregister to specific LSP
 //             languages; empty = all.
 export interface ProjectToggleRequest {
