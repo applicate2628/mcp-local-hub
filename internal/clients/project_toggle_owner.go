@@ -73,10 +73,24 @@ const (
 //   - scope ScopeWorkspaceLSP        → OwnerWorkspaceRegister (client ignored;
 //     A is per-workspace, not per-client-config).
 //   - scope ScopeProjectObjectMember → OwnerProjectObjectMember, but ONLY for a
-//     client that actually has a project-local object-member scope in the
-//     ProjectScope registry (cursor, vscode, claude-code). An unknown client is
-//     OwnerUnsupported — the classifier never invents a path for a client the
-//     registry does not cover.
+//     client that (a) has a project-local object-member scope in the ProjectScope
+//     registry AND (b) is NOT approval-array-gated (cursor, vscode — NOT
+//     claude-code). An unknown client is OwnerUnsupported — the classifier never
+//     invents a path for a client the registry does not cover.
+//
+//     claude-code is DELIBERATELY EXCLUDED from the object-member arm even though
+//     it IS in the registry (it stays there for the SCAN/read path, which reads
+//     .mcp.json). claude-code's Project-row DISABLE must go through
+//     ScopeClaudeLocalMembership (the non-destructive ~/.claude.json approval
+//     array-move), NEVER object-member: an object-member disable RFC-6902-removes
+//     /mcpServers/<server> from the checked-in, SHARED .mcp.json — data-loss that
+//     destroys the server definition for every collaborator. That is the exact
+//     destructive path the P3b frontend fix steered AWAY from (the GUI sends
+//     claude-local-membership for the claude Project row, shipped #434); narrowing
+//     the WRITE classifier here makes the destructive path unreachable for a
+//     direct API caller or a future frontend regression, not just the current GUI.
+//     cursor/vscode have NO approval array, so object member add/remove IS their
+//     correct enable/disable semantic and they KEEP OwnerProjectObjectMember.
 //   - scope ScopeClaudeLocalMembership → OwnerClaudeLocalMembership, ONLY for
 //     client "claude-code" (the Local substrate is claude-specific). Any other
 //     client is OwnerUnsupported.
@@ -91,6 +105,13 @@ func ProjectToggleOwner(client string, scope ProjectToggleScope) ProjectToggleOw
 	case ScopeWorkspaceLSP:
 		return OwnerWorkspaceRegister
 	case ScopeProjectObjectMember:
+		// An approval-array-gated client (claude-code) MUST use the
+		// ScopeClaudeLocalMembership array-move, never object-member (which would
+		// member-delete the shared checked-in definition). Refuse it here so the
+		// destructive path is unreachable at the single-owner classifier.
+		if clientUsesApprovalArrayToggle(client) {
+			return OwnerUnsupported
+		}
 		if projectScopeForClient(client) != nil {
 			return OwnerProjectObjectMember
 		}
@@ -111,6 +132,22 @@ func ProjectToggleOwner(client string, scope ProjectToggleScope) ProjectToggleOw
 // the classifier and any consumer reference one literal (it matches the
 // projectScopeRegistry row in project_scope.go).
 const claudeCodeClientID = "claude-code"
+
+// clientUsesApprovalArrayToggle reports whether `client` disables a Project-scope
+// server by MOVING its name in an approval array (the ~/.claude.json
+// enabled/disabledMcpjsonServers lists — ScopeClaudeLocalMembership) instead of
+// removing the object member from the checked-in config. Only claude-code has
+// that approval-array substrate.
+//
+// It is the predicate the object-member arm of ProjectToggleOwner consults to
+// EXCLUDE such a client: an object-member disable RFC-6902-removes the server
+// from the SHARED .mcp.json definition (data-loss across collaborators), so an
+// approval-array client must route through the array-move owner. cursor/vscode
+// return false — they have no approval array, so object member add/remove IS
+// their correct disable semantic.
+func clientUsesApprovalArrayToggle(client string) bool {
+	return client == claudeCodeClientID
+}
 
 // projectScopeForClient returns the ProjectScope registry row for client, or nil
 // when the client has no project-local object-member scope. It is the lookup the

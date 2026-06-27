@@ -139,7 +139,16 @@ func (s *Server) projectsToggleHandler(w http.ResponseWriter, r *http.Request) {
 	default:
 		// No write owner for this (client, scope) — refuse (no write) rather
 		// than guess. The substrate the toggle named is unsupported.
-		writeAPIError(w, errBadToggleField("unsupported (client, scope) for a project toggle"),
+		//
+		// This is the path a claude-code + project-object-member toggle now lands
+		// on (ProjectToggleOwner returns OwnerUnsupported for it): claude-code's
+		// Project toggle MUST use the non-destructive claude-local-membership
+		// array-move, never object-member (which would member-delete the shared
+		// checked-in .mcp.json definition — the data-loss the P3b fix steered away
+		// from). The message names the correct scope so a direct API caller can
+		// retry. It is our own fixed, non-leaking string (no path / filesystem
+		// layout), so the stable-coded 400 stays redaction-safe.
+		writeAPIError(w, errBadToggleField("unsupported (client, scope) for a project toggle — claude-code project toggles use the claude-local-membership scope (the non-destructive approval array-move)"),
 			http.StatusBadRequest, "PROJECT_TOGGLE_UNSUPPORTED")
 	}
 }

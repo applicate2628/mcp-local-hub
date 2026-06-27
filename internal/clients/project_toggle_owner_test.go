@@ -31,7 +31,14 @@ func TestProjectToggleOwner_Dispatch(t *testing.T) {
 		{"workspace-A", "anything", ScopeWorkspaceLSP, OwnerWorkspaceRegister},
 		{"cursor-object-member", "cursor", ScopeProjectObjectMember, OwnerProjectObjectMember},
 		{"vscode-object-member", "vscode", ScopeProjectObjectMember, OwnerProjectObjectMember},
-		{"claude-project-object-member", "claude-code", ScopeProjectObjectMember, OwnerProjectObjectMember},
+		// SECURITY FALSIFIER (bug 2026-06-27): claude-code is approval-array-gated,
+		// so a project-object-member toggle MUST NOT route to OwnerProjectObjectMember
+		// (that owner member-DELETES the shared checked-in .mcp.json definition on a
+		// disable — data-loss). It must be OwnerUnsupported so the caller is forced
+		// onto the non-destructive claude-local-membership array-move. claude-code
+		// STAYS in projectScopeRegistry for the scan/read path; only this WRITE
+		// classifier narrows.
+		{"claude-project-object-member-REJECTED", "claude-code", ScopeProjectObjectMember, OwnerUnsupported},
 		{"unknown-client-object-member", "emacs", ScopeProjectObjectMember, OwnerUnsupported},
 		{"claude-local-membership", "claude-code", ScopeClaudeLocalMembership, OwnerClaudeLocalMembership},
 		{"non-claude-local-membership-unsupported", "cursor", ScopeClaudeLocalMembership, OwnerUnsupported},
@@ -45,6 +52,62 @@ func TestProjectToggleOwner_Dispatch(t *testing.T) {
 				t.Errorf("ProjectToggleOwner(%q,%q) = %d, want %d", c.client, c.scope, got, c.want)
 			}
 		})
+	}
+}
+
+// TestProjectToggleOwner_ClaudeCodeObjectMemberRejected is the focused security
+// falsifier for bug 2026-06-27 (destructive claude-code object-member API path).
+// It pins, separately from the table above so a future table edit cannot silently
+// flip it back:
+//
+//   - claude-code + project-object-member → OwnerUnsupported (NOT
+//     OwnerProjectObjectMember). The OwnerProjectObjectMember owner member-DELETEs
+//     /mcpServers/<server> from the shared, checked-in .mcp.json on a disable;
+//     routing claude-code there is the data-loss the P3b frontend fix steered away
+//     from. The narrowed WRITE classifier makes it unreachable for a direct caller.
+//   - claude-code STAYS in the projectScopeRegistry (scan/read path UNAFFECTED):
+//     projectScopeForClient("claude-code") is still non-nil. The narrowing lives
+//     ONLY in the write classifier, not the registry.
+//   - cursor + vscode + project-object-member STILL → OwnerProjectObjectMember
+//     (they have no approval array; object member add/remove IS their disable
+//     semantic — not broken by the narrowing).
+//   - claude-code + claude-local-membership STILL → OwnerClaudeLocalMembership
+//     (the correct, non-destructive path is unaffected).
+func TestProjectToggleOwner_ClaudeCodeObjectMemberRejected(t *testing.T) {
+	// The falsifier: the destructive route must be closed.
+	if got := ProjectToggleOwner("claude-code", ScopeProjectObjectMember); got != OwnerUnsupported {
+		t.Fatalf("ProjectToggleOwner(claude-code, project-object-member) = %d, want OwnerUnsupported (%d) — destructive member-delete route must be closed",
+			got, OwnerUnsupported)
+	}
+
+	// Scan/read path UNAFFECTED: claude-code is still in the project-scope registry.
+	if projectScopeForClient("claude-code") == nil {
+		t.Fatalf("projectScopeForClient(claude-code) became nil — the scan/read path must stay intact (only the WRITE classifier narrows)")
+	}
+	// And the predicate that drives the narrowing classifies only claude-code.
+	if !clientUsesApprovalArrayToggle("claude-code") {
+		t.Errorf("clientUsesApprovalArrayToggle(claude-code) = false, want true")
+	}
+	for _, c := range []string{"cursor", "vscode", "emacs", ""} {
+		if clientUsesApprovalArrayToggle(c) {
+			t.Errorf("clientUsesApprovalArrayToggle(%q) = true, want false (only claude-code is approval-array-gated)", c)
+		}
+	}
+
+	// cursor/vscode object-member STILL works (not broken by the narrowing).
+	if got := ProjectToggleOwner("cursor", ScopeProjectObjectMember); got != OwnerProjectObjectMember {
+		t.Errorf("ProjectToggleOwner(cursor, project-object-member) = %d, want OwnerProjectObjectMember (%d) — cursor must keep object-member",
+			got, OwnerProjectObjectMember)
+	}
+	if got := ProjectToggleOwner("vscode", ScopeProjectObjectMember); got != OwnerProjectObjectMember {
+		t.Errorf("ProjectToggleOwner(vscode, project-object-member) = %d, want OwnerProjectObjectMember (%d) — vscode must keep object-member",
+			got, OwnerProjectObjectMember)
+	}
+
+	// claude-code's correct non-destructive path STILL resolves.
+	if got := ProjectToggleOwner("claude-code", ScopeClaudeLocalMembership); got != OwnerClaudeLocalMembership {
+		t.Errorf("ProjectToggleOwner(claude-code, claude-local-membership) = %d, want OwnerClaudeLocalMembership (%d) — the correct path must be unaffected",
+			got, OwnerClaudeLocalMembership)
 	}
 }
 
