@@ -169,6 +169,20 @@ type ScanEntry struct {
 	// for this server). Mirrored as TS ScanEntry.daemon_ports.
 	DaemonPorts  []int `json:"daemon_ports,omitempty"`
 	ProcessCount int   `json:"process_count,omitempty"`
+
+	// ProjectEnabled is the per-project-GUI Phase 2b claude-code
+	// enabled/disabled reconciliation result for THIS .mcp.json (Project-scope)
+	// server: true = enabled, false = disabled per the project's
+	// ~/.claude.json projects.<key>.disabled/enabledMcpjsonServers arrays (a
+	// server is disabled if it is in disabledMcpjsonServers and not overridden
+	// in enabledMcpjsonServers). It is a *bool so nil means "reconciliation does
+	// not apply" — the GLOBAL scan and every non-claude-code project entry leave
+	// it nil, and its omitempty keeps their wire bytes byte-identical (golden
+	// invariant). Only the project scan, and only for the claude-code .mcp.json
+	// entry whose project has a matching ~/.claude.json local-scope record, sets
+	// it. The single owner of the rule is
+	// clients.ClaudeLocalScope.IsMcpjsonServerEnabled.
+	ProjectEnabled *bool `json:"project_enabled,omitempty"`
 }
 
 // ClientEntry captures the shape of how one MCP server is configured inside
@@ -316,6 +330,42 @@ type ScanResult struct {
 	//
 	// See client_capabilities.go (ClientCapabilities()) for the owner.
 	ClientCapabilities map[string]ClientCapability `json:"client_capabilities,omitempty"`
+
+	// ProjectScope carries the per-project-GUI Phase 2b claude-code LOCAL-scope
+	// projection (~/.claude.json → projects.<key>). It is set ONLY by the
+	// read-only project scan (GET /api/projects/scan), never by the global
+	// Servers-matrix scan — the global scan leaves it nil, so its omitempty
+	// keeps the global wire bytes byte-identical (golden-test invariant). See
+	// ProjectScopeInfo.
+	ProjectScope *ProjectScopeInfo `json:"project_scope,omitempty"`
+}
+
+// ProjectScopeInfo is the per-project-GUI Phase 2b claude-code LOCAL-scope
+// projection attached to a project ScanResult. claude-code has a DUAL
+// per-project substrate (design doc 2026-06-24-per-project-gui-design.md):
+//
+//   - the .mcp.json PROJECT scope (checked-in) — already surfaced as the
+//     ScanResult.Entries (P2a), with per-entry enabled/disabled reconciliation
+//     now folded in as ScanEntry.ProjectEnabled;
+//   - the ~/.claude.json projects.<key> LOCAL scope (private to the user) — a
+//     SEPARATE server set, surfaced here in LocalServers.
+//
+// P2b only READS + EXPOSES both scopes; the §10.2 PRESENTATION decision (show
+// both in the GUI, or one) is a P3 UX sign-off, NOT built here. All fields are
+// additive/omitempty.
+type ProjectScopeInfo struct {
+	// LocalServers is the SORTED set of server names from the project's
+	// ~/.claude.json projects.<key>.mcpServers (the LOCAL scope) — distinct from
+	// the .mcp.json Project-scope servers in ScanResult.Entries. Empty/absent
+	// when ~/.claude.json has no entry for this project.
+	LocalServers []string `json:"local_servers,omitempty"`
+
+	// DisabledMcpjsonServers / EnabledMcpjsonServers are the project's
+	// claude-code toggle arrays (projects.<key>.disabled/enabledMcpjsonServers),
+	// surfaced verbatim for transparency. They gate the .mcp.json Project-scope
+	// servers; the per-entry result of applying them is ScanEntry.ProjectEnabled.
+	DisabledMcpjsonServers []string `json:"disabled_mcpjson_servers,omitempty"`
+	EnabledMcpjsonServers  []string `json:"enabled_mcpjson_servers,omitempty"`
 }
 
 // BackupInfo describes one file in the backup area.

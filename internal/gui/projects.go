@@ -72,6 +72,19 @@ func (s *Server) projectsScanHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// P2b: fold in the claude-code LOCAL scope (~/.claude.json → projects.<root>)
+	// — the SEPARATE private-to-user server set (ScanResult.ProjectScope) + the
+	// per-entry .mcp.json enabled/disabled reconciliation (ScanEntry.ProjectEnabled).
+	// READ-ONLY: reads the fixed ~/.claude.json once, mutates the in-memory result,
+	// writes nothing. `root` here is the raw (already validated by
+	// ProjectScanConfigPaths above) query value; the local-scope match canonicalizes
+	// it against the projects.<key> form, and it is only a comparison key against the
+	// fixed home file — not a filesystem-read surface.
+	if err := api.EnrichProjectClaudeLocalScope(result, root); err != nil {
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "PROJECT_SCAN_FAILED", "/api/projects/scan")
+		return
+	}
+
 	// Reuse the global scan's sanitizer so the per-entry Raw config blobs are
 	// stripped before serialization (no client-config internals on the wire).
 	result = sanitizeScanResult(result)
