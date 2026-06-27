@@ -29,11 +29,54 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"mcp-local-hub/internal/api"
 )
+
+// sanitizeRefusalPath scrubs an untrusted candidate path before it is folded
+// into a JSON-RPC refusal message / `data.path` (area-5 gap-a option B). The
+// path originates in an MCP tool-call argument (attacker-influenceable), so a
+// hostile agent could otherwise smuggle ANSI/OSC escape sequences or C0/C1
+// control bytes into the error that a client UI, log viewer, or terminal would
+// render — corrupting output or injecting hyperlinks. It mirrors the catalog
+// sanitizer posture (internal/cli/marketplace.go sanitizeCatalogField) using
+// the SAME single safety predicate api.IsUnsafeMarketplaceTextRune so the
+// control/bidi/Trojan-Source rune set stays defined in one owner:
+//   - U+001B (ESC) and other C0 controls (<0x20) → a single space (defeats
+//     CSI/OSC sequences without dropping the surrounding path text);
+//   - DEL/C1 controls and Unicode bidi/line/paragraph separators → '?';
+//   - invalid UTF-8 bytes → '?' so a raw C1 byte cannot hide behind a decode
+//     failure.
+// Everything else (printable ASCII + safe UTF-8) passes through unchanged.
+func sanitizeRefusalPath(s string) string {
+	if s == "" {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			b.WriteByte('?')
+			i++
+			continue
+		}
+		switch {
+		case api.IsUnsafeMarketplaceTextRune(r) && r < 0x20:
+			b.WriteByte(' ')
+		case api.IsUnsafeMarketplaceTextRune(r):
+			b.WriteByte('?')
+		default:
+			b.WriteRune(r)
+		}
+		i += size
+	}
+	return b.String()
+}
 
 // supportedProtocolVersions is the set of MCP protocol versions the
 // synthesized initialize will echo back verbatim. Negotiation rule (MCP
@@ -105,6 +148,13 @@ const (
 	jsonrpcInvalidParams  = -32602
 	jsonrpcInternalError  = -32603
 	serenaNoWorkspaceCode = -32001
+	// serenaRootNotTrustedCode is the server-defined code (implementation
+	// range -32000..-32099) the serena router returns when first-touch
+	// auto-register is refused because the resolved workspace root is not a
+	// trusted folder (area-5 trust gate, api.ErrSerenaRootNotTrusted). The
+	// accompanying error `data` carries `code:"NEEDS_TRUST"` + the sanitized
+	// candidate path so a client/UI can offer one-click trust.
+	serenaRootNotTrustedCode = -32002
 )
 
 // workspaceLister is the OPTIONAL capability the router uses to pick a

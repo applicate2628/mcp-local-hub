@@ -47,6 +47,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newConfigCmd())
 	root.AddCommand(newRegisterCmd())
 	root.AddCommand(newUnregisterCmd())
+	root.AddCommand(newTrustCmd())
+	root.AddCommand(newUntrustCmd())
 	root.AddCommand(newWorkspacesCmd())
 	root.AddCommand(newWorkspaceCmd())
 	root.AddCommand(newLanguageServerCmd())

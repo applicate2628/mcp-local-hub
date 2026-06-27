@@ -1964,3 +1964,182 @@ func TestSerenaRouter_ActivateProject_BindsAndForwards(t *testing.T) {
 		t.Fatalf("upstream daemon tool hits = %v, want [activate_project get_current_config]", hits)
 	}
 }
+
+// TestSerenaRouter_AutoRegister_NotTrusted_Returns503WithNeedsTrust: the area-5
+// trust-gate refusal. AutoRegisterFn returns a typed *api.SerenaRootNotTrustedError
+// carrying the RESOLVED root → HTTP 503, JSON-RPC code -32002, an actionable
+// message, and a machine-readable `data.code == "NEEDS_TRUST"` + the RESOLVED
+// root in data.path (gap-a option B; area-5 r2 — NOT the raw tool-arg subpath).
+func TestSerenaRouter_AutoRegister_NotTrusted_Returns503WithNeedsTrust(t *testing.T) {
+	const resolvedRoot = "/proj/untrusted"
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: nil},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return "http://invalid" },
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			return nil, &api.SerenaRootNotTrustedError{ResolvedRoot: resolvedRoot}
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/untrusted/file.go"})
+	rr := postSerena(t, s, body, nil)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Data    *struct {
+				Code string `json:"code"`
+				Path string `json:"path"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode JSON-RPC error: %v; raw=%s", err, rr.Body.String())
+	}
+	if resp.Error == nil || resp.Error.Code != serenaRootNotTrustedCode {
+		t.Fatalf("error code = %+v, want %d (serenaRootNotTrustedCode)", resp.Error, serenaRootNotTrustedCode)
+	}
+	if !strings.Contains(resp.Error.Message, "not a trusted folder") {
+		t.Errorf("error message %q should name the not-a-trusted-folder condition", resp.Error.Message)
+	}
+	if !strings.Contains(resp.Error.Message, "mcphub trust "+resolvedRoot) {
+		t.Errorf("error message %q should give `mcphub trust %s` naming the RESOLVED root", resp.Error.Message, resolvedRoot)
+	}
+	if resp.Error.Data == nil {
+		t.Fatalf("error.data missing; want NEEDS_TRUST metadata (gap-a option B)")
+	}
+	if resp.Error.Data.Code != "NEEDS_TRUST" {
+		t.Errorf("data.code = %q, want NEEDS_TRUST", resp.Error.Data.Code)
+	}
+	if resp.Error.Data.Path != resolvedRoot {
+		t.Errorf("data.path = %q, want the RESOLVED root %q (NOT the raw tool-arg subpath)", resp.Error.Data.Path, resolvedRoot)
+	}
+}
+
+// TestSerenaRouter_AutoRegister_NotTrusted_DataPathIsResolvedRootNotSubpath is
+// the area-5 r2 (codex P2) falsifier: when the tool arg is a FILE/SUBDIRECTORY
+// inside the untrusted project, the refusal's `mcphub trust` hint AND data.path
+// must name the RESOLVED project ROOT (what `mcphub trust` actually authorizes),
+// NOT the raw subpath the agent called from.
+func TestSerenaRouter_AutoRegister_NotTrusted_DataPathIsResolvedRootNotSubpath(t *testing.T) {
+	const resolvedRoot = "/proj/myrepo"
+	const toolArgSubpath = "/proj/myrepo/sub/deep/file.py"
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: nil},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return "http://invalid" },
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			// The gate resolves the marker root (an ANCESTOR of the tool arg) and
+			// refuses with THAT root on the typed error.
+			return nil, &api.SerenaRootNotTrustedError{ResolvedRoot: resolvedRoot}
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": toolArgSubpath})
+	rr := postSerena(t, s, body, nil)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Error *struct {
+			Message string `json:"message"`
+			Data    *struct {
+				Path string `json:"path"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode JSON-RPC error: %v; raw=%s", err, rr.Body.String())
+	}
+	if resp.Error == nil || resp.Error.Data == nil {
+		t.Fatalf("missing error.data; raw=%s", rr.Body.String())
+	}
+	if resp.Error.Data.Path != resolvedRoot {
+		t.Errorf("data.path = %q, want the RESOLVED root %q (must NOT be the subpath %q)", resp.Error.Data.Path, resolvedRoot, toolArgSubpath)
+	}
+	if resp.Error.Data.Path == toolArgSubpath {
+		t.Errorf("data.path leaked the raw tool-arg subpath %q — operator would trust the wrong path", toolArgSubpath)
+	}
+	if strings.Contains(resp.Error.Message, toolArgSubpath) {
+		t.Errorf("message %q must not name the subpath; it should name the resolved root %q", resp.Error.Message, resolvedRoot)
+	}
+	if !strings.Contains(resp.Error.Message, "mcphub trust "+resolvedRoot) {
+		t.Errorf("message %q should instruct `mcphub trust %s`", resp.Error.Message, resolvedRoot)
+	}
+}
+
+// TestSerenaRouter_AutoRegister_NotTrusted_SanitizesPath: a RESOLVED root
+// carrying terminal control bytes (ESC + a C0 control) must be SANITIZED before
+// it reaches the refusal message / data.path so it cannot inject escape
+// sequences into a client UI / log / terminal. (The resolved root is canonical
+// in production, but the sanitizer is the defense-in-depth backstop.)
+func TestSerenaRouter_AutoRegister_NotTrusted_SanitizesPath(t *testing.T) {
+	hostileRoot := "/proj/\x1b[31mevil\x07" // ESC + BEL in the resolved root
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: nil},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return "http://invalid" },
+		AutoRegisterFn: func(ctx context.Context, absPath string) (*api.WorkspaceEntry, error) {
+			return nil, &api.SerenaRootNotTrustedError{ResolvedRoot: hostileRoot}
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": hostileRoot + "/file.go"})
+	rr := postSerena(t, s, body, nil)
+
+	raw := rr.Body.String()
+	if strings.ContainsRune(raw, 0x1b) {
+		t.Errorf("response leaked a raw ESC byte (terminal-injection risk): %q", raw)
+	}
+	if strings.ContainsRune(raw, 0x07) {
+		t.Errorf("response leaked a raw BEL byte: %q", raw)
+	}
+	var resp struct {
+		Error *struct {
+			Data *struct {
+				Path string `json:"path"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode JSON-RPC error: %v; raw=%s", err, raw)
+	}
+	if resp.Error == nil || resp.Error.Data == nil {
+		t.Fatalf("missing error.data; raw=%s", raw)
+	}
+	if strings.ContainsRune(resp.Error.Data.Path, 0x1b) || strings.ContainsRune(resp.Error.Data.Path, 0x07) {
+		t.Errorf("data.path = %q still carries control bytes after sanitization", resp.Error.Data.Path)
+	}
+}
+
+// TestSanitizeRefusalPath_StripsControlBytes is a focused unit test of the
+// sanitizer posture (mirror of the catalog sanitizer): ESC + C0 → space, C1/DEL
+// + bidi → '?', invalid UTF-8 → '?', safe text unchanged.
+func TestSanitizeRefusalPath_StripsControlBytes(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", ""},
+		{"/normal/path", "/normal/path"},
+		{"a\x1bb", "a b"},            // ESC → space
+		{"a\tb", "a b"},             // C0 (TAB) → space
+		{"a\x7fb", "a?b"},           // DEL → ?
+		{"a‮b", "a?b"},         // RLO bidi → ?
+		{"a\x9bb", "a?b"},           // raw C1 byte (invalid UTF-8) → ?
+		{"D:\\dev\\Proj", "D:\\dev\\Proj"},
+	}
+	for _, c := range cases {
+		if got := sanitizeRefusalPath(c.in); got != c.want {
+			t.Errorf("sanitizeRefusalPath(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

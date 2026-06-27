@@ -100,6 +100,15 @@ func autoRegisterTestEnv(t *testing.T) (regPath string) {
 	autoRegisterAcquireInterlockFn = nil
 	t.Cleanup(func() { autoRegisterAcquireInterlockFn = prevInterlock })
 
+	// Default the area-5 trust gate to TRUSTED so the existing happy-path /
+	// idempotency / concurrency / introduce / different-root tests proceed
+	// UNCHANGED (the falsifier that trusted behavior is preserved). The
+	// dedicated trust-gate tests override this seam to untrusted / error to
+	// assert the fail-closed refusal + zero side effects.
+	prevTrust := serenaTrustedRootCheckFn
+	serenaTrustedRootCheckFn = func(string) (bool, error) { return true, nil }
+	t.Cleanup(func() { serenaTrustedRootCheckFn = prevTrust })
+
 	// Reset the per-key concurrency guard so a key registered in a prior test
 	// (package-level map persists across tests) cannot leak a held/known lock.
 	serenaAutoRegisterKeyMu.Lock()
@@ -107,6 +116,16 @@ func autoRegisterTestEnv(t *testing.T) (regPath string) {
 	serenaAutoRegisterKeyMu.Unlock()
 
 	return regPath
+}
+
+// stubSerenaTrustedRootCheck overrides the area-5 trust-gate seam for the test
+// scope (trusted=true / untrusted=false / error). The default env wires it
+// trusted; the trust-gate tests use this to drive the fail-closed paths.
+func stubSerenaTrustedRootCheck(t *testing.T, fn func(root string) (bool, error)) {
+	t.Helper()
+	orig := serenaTrustedRootCheckFn
+	serenaTrustedRootCheckFn = fn
+	t.Cleanup(func() { serenaTrustedRootCheckFn = orig })
 }
 
 // autoRegisterCatalogManifest is a valid serena catalog (current embedded
@@ -2186,3 +2205,315 @@ func TestAutoRegisterSerena_Introduce_ReapTargetsOldSupervisorNotCaller(t *testi
 	}
 }
 
+
+// ---------------------------------------------------------------------------
+// AREA-5 TRUST GATE — the security core.
+//
+// AutoRegisterSerenaWorkspace must REFUSE (ErrSerenaRootNotTrusted) when the
+// resolved marker-bearing root is NOT trusted, and must do so with ZERO side
+// effects: no registry load/save, no pool-port allocation, no install, no
+// reconcile, no readiness probe, and NO supervisor interlock acquire / reap /
+// start. The refusal runs AFTER the marker check (composes with the DoS bound)
+// and BEFORE step-3, so a refused root can never perturb the supervisor
+// interlock.
+// ---------------------------------------------------------------------------
+
+// TestAutoRegisterSerena_UntrustedRoot_RefusesWithZeroSideEffects is THE
+// security test. An untrusted (but marker-bearing) root must return
+// ErrSerenaRootNotTrusted and touch NOTHING.
+func TestAutoRegisterSerena_UntrustedRoot_RefusesWithZeroSideEffects(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	stubSerenaTrustedRootCheck(t, func(string) (bool, error) { return false, nil })
+
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install seam must NOT be called for an untrusted root")
+		return "", nil
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {
+		t.Fatalf("reconcile seam must NOT be called for an untrusted root")
+		return ReconcileResponse{}, nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error {
+		t.Fatalf("readiness seam must NOT be called for an untrusted root")
+		return nil
+	})
+	stubAutoRegisterAcquireInterlock(t, func() (*SupervisorLock, func(), error) {
+		t.Fatalf("supervisor interlock must NOT be acquired for an untrusted root")
+		return nil, func() {}, nil
+	})
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	entry, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil {
+		t.Fatalf("expected ErrSerenaRootNotTrusted, got entry %+v", entry)
+	}
+	if !errors.Is(err, ErrSerenaRootNotTrusted) {
+		t.Fatalf("error = %v, want ErrSerenaRootNotTrusted", err)
+	}
+	if entry != nil {
+		t.Errorf("entry = %+v, want nil", entry)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows, want 0 (untrusted root must never register)", len(rows))
+	}
+}
+
+// TestAutoRegisterSerena_GateError_FailsClosed: a trusted-root check that ERRORS
+// must fail CLOSED — refuse with ErrSerenaRootNotTrusted, no side effects.
+func TestAutoRegisterSerena_GateError_FailsClosed(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	stubSerenaTrustedRootCheck(t, func(string) (bool, error) {
+		return false, errors.New("simulated trusted-roots store load failure")
+	})
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install seam must NOT be called when the trust gate errors (fail-closed)")
+		return "", nil
+	})
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if !errors.Is(err, ErrSerenaRootNotTrusted) {
+		t.Fatalf("error = %v, want ErrSerenaRootNotTrusted (fail-closed on gate error)", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows, want 0 (gate error must fail closed)", len(rows))
+	}
+}
+
+// TestAutoRegisterSerena_NilGate_FailsClosed: a NIL trust-gate seam (legacy /
+// unwired) must fail CLOSED, never silently authorize.
+func TestAutoRegisterSerena_NilGate_FailsClosed(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	stubSerenaTrustedRootCheck(t, nil)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		t.Fatalf("install seam must NOT be called when the trust gate is nil (fail-closed)")
+		return "", nil
+	})
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if !errors.Is(err, ErrSerenaRootNotTrusted) {
+		t.Fatalf("error = %v, want ErrSerenaRootNotTrusted (nil gate must fail closed)", err)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
+		t.Errorf("registry has %d serena rows, want 0 (nil gate must fail closed)", len(rows))
+	}
+}
+
+// TestAutoRegisterSerena_NoMarker_ComposesBeforeTrustGate: the DoS marker bound
+// runs FIRST — a path with no marker returns ErrNotASerenaProject and the trust
+// seam is never consulted.
+func TestAutoRegisterSerena_NoMarker_ComposesBeforeTrustGate(t *testing.T) {
+	autoRegisterTestEnv(t)
+	trustCalled := false
+	stubSerenaTrustedRootCheck(t, func(string) (bool, error) {
+		trustCalled = true
+		return false, nil
+	})
+
+	dir := t.TempDir()
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), dir)
+	if !errors.Is(err, ErrNotASerenaProject) {
+		t.Fatalf("error = %v, want ErrNotASerenaProject (marker DoS bound runs before the trust gate)", err)
+	}
+	if trustCalled {
+		t.Error("trust gate must NOT be consulted for a path with no marker (the marker check returns first)")
+	}
+}
+
+// TestAutoRegisterSerena_TrustGateConsultsResolvedRoot: the gate must consult
+// the CANONICAL resolved root (the marker dir), not the raw tool-argument
+// absPath, so a register-blessed tree matches when the agent calls from a
+// subdirectory/file under the marked root.
+func TestAutoRegisterSerena_TrustGateConsultsResolvedRoot(t *testing.T) {
+	autoRegisterTestEnv(t)
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	wantRoot := root
+
+	var sawRoot string
+	stubSerenaTrustedRootCheck(t, func(r string) (bool, error) {
+		sawRoot = r
+		return false, nil
+	})
+
+	deepFile := filepath.Join(root, "pkg", "main.go")
+	if err := os.MkdirAll(filepath.Dir(deepFile), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(deepFile, []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, _ = NewAPI().AutoRegisterSerenaWorkspace(context.Background(), deepFile)
+	if sawRoot != wantRoot {
+		t.Fatalf("trust gate saw root %q, want the resolved marker root %q", sawRoot, wantRoot)
+	}
+}
+
+// TestAutoRegisterSerena_AutoRegisterNeverBlesses is the bless-not-on-router
+// invariant for serena (mirror of TestLSPRouter_AutoRegisterPathDoesNotBless): a
+// SUCCESSFUL auto-register must NOT write the trusted-roots store.
+func TestAutoRegisterSerena_AutoRegisterNeverBlesses(t *testing.T) {
+	autoRegisterTestEnv(t)
+
+	stubSerenaTrustedRootCheck(t, func(string) (bool, error) { return true, nil })
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil })
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	storePath, err := DefaultLSPTrustedRootsPath()
+	if err != nil {
+		t.Fatalf("resolve trusted-roots store path: %v", err)
+	}
+	if _, statErr := os.Stat(storePath); statErr == nil {
+		t.Fatalf("trusted-roots store unexpectedly exists before the router runs: %s", storePath)
+	}
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root); err != nil {
+		t.Fatalf("AutoRegisterSerenaWorkspace: %v", err)
+	}
+
+	if _, statErr := os.Stat(storePath); statErr == nil {
+		t.Fatalf("serena auto-register blessed a trusted root (store created at %s) — re-opens the vulnerability (area-5 claim 10)", storePath)
+	} else if !os.IsNotExist(statErr) {
+		t.Fatalf("unexpected stat error on trusted-roots store: %v", statErr)
+	}
+	f, err := LoadDefaultLSPTrustedRoots()
+	if err != nil {
+		t.Fatalf("load trusted-roots after auto-register: %v", err)
+	}
+	if len(f.Roots) != 0 {
+		t.Fatalf("serena auto-register must record zero trusted roots, got %v", f.Roots)
+	}
+}
+
+// TestAutoRegisterSerena_RegressionGuard_BlessedParentAllowsSiblingIntroduce is
+// the analyst-flagged regression made falsifiable (area-5 co-design). With the
+// trust gate live, an explicit register that blesses a tree's root MUST let a
+// SIBLING .serena project under that same root auto-introduce. We exercise the
+// REAL trust predicate (WorkspaceRootTrusted, reading the live redirected store)
+// — NOT the stubbed seam — so the bless→containment→authorize chain is proven
+// end-to-end. The install/reconcile/readiness seams are faked (no supervisor),
+// but the AUTHORIZATION decision is real.
+func TestAutoRegisterSerena_RegressionGuard_BlessedParentAllowsSiblingIntroduce(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	// Wire the REAL trust predicate (the env defaults it to always-true; here we
+	// want the genuine store-backed containment check).
+	stubSerenaTrustedRootCheck(t, WorkspaceRootTrusted)
+
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) { return ReconcileResponse{}, nil })
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error { return nil })
+
+	// A tree root explicitly blessed (as `mcphub workspace register` would do via
+	// serenaRegisterBlessTrustedRootFn → BlessDefaultTrustedRoot). The store is
+	// redirected by autoRegisterTestEnv's SetDaemonStateRootForTest.
+	treeRoot := t.TempDir()
+	parent := filepath.Join(treeRoot, "monorepo")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatalf("mkdir parent: %v", err)
+	}
+	if err := BlessDefaultTrustedRoot(parent); err != nil {
+		t.Fatalf("bless parent (simulating explicit register): %v", err)
+	}
+
+	// A SIBLING serena project UNDER the blessed parent (never explicitly
+	// registered itself). Pre-gate it would be refused; post-bless it must
+	// auto-introduce.
+	sibling := writeSerenaMarker(t, filepath.Join(parent, "service-b"), validSerenaMarkerYAML)
+
+	entry, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), sibling)
+	if err != nil {
+		t.Fatalf("sibling under a blessed parent must auto-introduce; got %v", err)
+	}
+	if entry == nil {
+		t.Fatal("entry = nil, want a registered sibling entry")
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Fatalf("want 1 serena row after sibling auto-introduce, got %d", len(rows))
+	}
+
+	// Negative half: a project OUTSIDE the blessed tree is still refused, so the
+	// bless did not over-broaden trust.
+	outside := writeSerenaMarker(t, filepath.Join(treeRoot, "elsewhere"), validSerenaMarkerYAML)
+	if _, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), outside); !errors.Is(err, ErrSerenaRootNotTrusted) {
+		t.Fatalf("a project outside the blessed tree must be refused; got %v", err)
+	}
+}
+
+// TestAutoRegisterSerena_NotTrusted_TypedErrorCarriesResolvedRoot (area-5 r2):
+// the refusal must be a *SerenaRootNotTrustedError whose ResolvedRoot is the
+// CANONICAL marker root (NOT the raw tool-arg subpath/file), AND errors.Is must
+// still match the ErrSerenaRootNotTrusted sentinel. This is the api-side
+// contract the router relies on to name the authorizable root.
+func TestAutoRegisterSerena_NotTrusted_TypedErrorCarriesResolvedRoot(t *testing.T) {
+	autoRegisterTestEnv(t)
+	stubSerenaTrustedRootCheck(t, func(string) (bool, error) { return false, nil })
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	wantRoot := mustCanonical(t, root)
+
+	// Call from a FILE deep under the marker root — the typed error must carry the
+	// resolved ROOT, not this subpath.
+	deepFile := filepath.Join(root, "sub", "deep", "file.go")
+	if err := os.MkdirAll(filepath.Dir(deepFile), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(deepFile, []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), deepFile)
+	if !errors.Is(err, ErrSerenaRootNotTrusted) {
+		t.Fatalf("error = %v, want errors.Is ErrSerenaRootNotTrusted", err)
+	}
+	var typed *SerenaRootNotTrustedError
+	if !errors.As(err, &typed) {
+		t.Fatalf("error = %v, want errors.As *SerenaRootNotTrustedError", err)
+	}
+	if typed.ResolvedRoot != wantRoot {
+		t.Errorf("typed.ResolvedRoot = %q, want the canonical marker root %q (NOT the subpath %q)", typed.ResolvedRoot, wantRoot, deepFile)
+	}
+	if typed.ResolvedRoot == deepFile {
+		t.Errorf("typed error leaked the raw tool-arg subpath %q", deepFile)
+	}
+}
+
+// TestAutoRegisterSerena_GateError_TypedErrorCarriesRootAndCause (area-5 r2): the
+// gate-error path is also a *SerenaRootNotTrustedError carrying the resolved
+// root, so the router still names the authorizable root on a fail-closed gate
+// error.
+func TestAutoRegisterSerena_GateError_TypedErrorCarriesRootAndCause(t *testing.T) {
+	autoRegisterTestEnv(t)
+	stubSerenaTrustedRootCheck(t, func(string) (bool, error) {
+		return false, errors.New("corrupt store")
+	})
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	wantRoot := mustCanonical(t, root)
+
+	_, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if !errors.Is(err, ErrSerenaRootNotTrusted) {
+		t.Fatalf("error = %v, want errors.Is ErrSerenaRootNotTrusted", err)
+	}
+	var typed *SerenaRootNotTrustedError
+	if !errors.As(err, &typed) {
+		t.Fatalf("error = %v, want errors.As *SerenaRootNotTrustedError", err)
+	}
+	if typed.ResolvedRoot != wantRoot {
+		t.Errorf("typed.ResolvedRoot = %q, want %q", typed.ResolvedRoot, wantRoot)
+	}
+	if typed.Cause == nil || !strings.Contains(typed.Cause.Error(), "corrupt store") {
+		t.Errorf("typed.Cause = %v, want it to carry the gate error", typed.Cause)
+	}
+}

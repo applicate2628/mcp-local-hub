@@ -293,6 +293,26 @@ func LSPWorkspaceRootTrusted(workspaceRoot string) (bool, error) {
 	return f.LSPWorkspaceRootTrusted(workspaceRoot), nil
 }
 
+// WorkspaceRootTrusted is the server-NEUTRAL alias of
+// LSPWorkspaceRootTrusted: it loads the default trusted-roots store and
+// reports whether workspaceRoot is authorized for first-touch
+// auto-register (equal to, or a true subdirectory of, a trusted root).
+//
+// KEEP-NOT-RENAME (area-5 decision 2026-06-27): the underlying store
+// (lsp-trusted-roots.json), its file shape (LSPTrustedRootsFile), the
+// canonical predicate (LSPWorkspaceRootTrusted), the containment helper
+// (rootContains), and the bless/remove owners are all REUSED UNCHANGED —
+// no store rename, no migration shim. This alias exists ONLY so the serena
+// trust gate (internal/api/serena_auto_register.go) reads server-neutral
+// ("is this workspace root trusted?") rather than naming the LSP store. The
+// trust boundary now gates BOTH the LSP router and the serena router; the
+// store is the single shared owner. A load failure (corrupt JSON,
+// insecure-parent gate rejection) propagates as an error so the caller
+// fails CLOSED (refuses auto-register).
+func WorkspaceRootTrusted(workspaceRoot string) (bool, error) {
+	return LSPWorkspaceRootTrusted(workspaceRoot)
+}
+
 // BlessTrustedRoot canonicalizes workspaceRoot and idempotently appends
 // it to the trusted-roots store at path under a cross-process flock.
 // This is "auto-bless on first explicit register": it MUST be called
