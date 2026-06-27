@@ -62,6 +62,21 @@ type catalogLister interface {
 	CatalogList() ([]config.CatalogFields, error)
 }
 
+// catalogManifestGetter is the pin-point subset of api.API backing GET
+// /api/catalog/manifest (D2 r2 — embed-only catalog-manifest source).
+// Same Server-local interface idiom as catalogLister so manifest_test.go
+// can swap a fake without the whole API surface. It returns the EMBED-ONLY
+// YAML for a shipped server (the secret-safe source the cold-re-enable
+// Re-add prefill relies on — the shipped manifest's env carries
+// `secret:`/`${env:}` placeholders, never a resolved literal); a name not
+// in the embed set returns api.ErrManifestNotEmbedded, which the handler
+// maps to a stable 404. It is DISTINCT from manifestGetter
+// (ManifestGetWithHash, disk-only edit contract) precisely so the prefill
+// can never echo a hand-planted disk manifest carrying a literal secret.
+type catalogManifestGetter interface {
+	CatalogManifestGet(name string) (yaml string, err error)
+}
+
 type manifestListResponse struct {
 	// Manifests is always a JSON array — never null — so the frontend
 	// can map over it without a null guard. An empty set is 200 [].
@@ -83,6 +98,15 @@ type catalogListResponse struct {
 	// Catalog is always a JSON array — never null — so the frontend can
 	// map over it without a null guard. An empty set is 200 {"catalog":[]}.
 	Catalog []catalogEntry `json:"catalog"`
+}
+
+// catalogManifestGetResponse is the GET /api/catalog/manifest wire shape
+// (D2 r2). It carries ONLY the embed-sourced YAML — no hash (this is a
+// read-for-prefill path, not the optimistic-concurrency edit contract that
+// manifestGetResponse serves). A miss (name not embedded) is a 404
+// CATALOG_MANIFEST_NOT_FOUND, never a body with an empty yaml.
+type catalogManifestGetResponse struct {
+	YAML string `json:"yaml"`
 }
 
 type manifestCreateRequest struct {
@@ -380,6 +404,50 @@ func registerManifestRoutes(s *Server) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(catalogListResponse{Catalog: entries})
+	}))
+	// GET /api/catalog/manifest?name= — embed-ONLY YAML of a shipped server
+	// (D2 r2). It backs the cold-re-enable Re-add prefill, whose only
+	// secret-safe source is the shipped manifest (env carries `secret:`/
+	// `${env:}` placeholders, never a resolved literal). It is DISTINCT from
+	// GET /api/manifest/get (disk-only edit contract, ManifestGetWithHash):
+	// the prefill MUST NOT echo a disk manifest, because a hand-planted
+	// on-disk manifest could carry a literal secret in env. The handler maps
+	// api.ErrManifestNotEmbedded → 404 CATALOG_MANIFEST_NOT_FOUND (the
+	// frontend's "isn't in the catalog" name-only seed) and sanitizes any
+	// other error to a 500 that never leaks a filesystem path.
+	//
+	// Registered under the /api/catalog/ subtree; the exact-path /api/catalog
+	// handler above is more specific and takes precedence in net/http
+	// ServeMux, so this only receives /api/catalog/manifest (and any other
+	// /api/catalog/* suffix, which the method+name gates below 404/400).
+	s.mux.HandleFunc("/api/catalog/manifest", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		name := strings.TrimSpace(r.URL.Query().Get("name"))
+		if name == "" {
+			writeAPIError(w, fmt.Errorf("name must not be empty"), http.StatusBadRequest, "BAD_REQUEST")
+			return
+		}
+		yaml, err := s.catalogManifestGetter.CatalogManifestGet(name)
+		if err != nil {
+			// ErrManifestNotEmbedded is the membership-gate miss: a stable,
+			// path-free 404 the frontend maps to the name-only seed. Other
+			// errors (checkManifestName rejection wraps no path, but the
+			// embed read can wrap an *os.PathError on a corrupt embed) are
+			// sanitized to a 500 that never leaks the filesystem layout.
+			if errors.Is(err, api.ErrManifestNotEmbedded) {
+				writeAPIError(w, fmt.Errorf("catalog manifest %q not found", name), http.StatusNotFound, "CATALOG_MANIFEST_NOT_FOUND")
+				return
+			}
+			log.Printf("/api/catalog/manifest name=%q: %v", name, err)
+			writeAPIError(w, errors.New("internal error reading catalog manifest"), http.StatusInternalServerError, "CATALOG_MANIFEST_GET_FAILED")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(catalogManifestGetResponse{YAML: yaml})
 	}))
 	// DELETE /api/manifest/:name — remove the named manifest directory.
 	// Registered as the /api/manifest/ subtree; the exact-path handlers

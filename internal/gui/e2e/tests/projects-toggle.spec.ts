@@ -102,7 +102,9 @@ test.describe("Projects P3b — per-row toggles (epic area 6)", () => {
     // Reconciled OFF → object-member member gone → the row flips to the cold
     // Re-add CTA (no value-less enable toggle remains).
     await expect(page.getByTestId("projects-readd-memory")).toBeVisible();
-    await expect(page.getByTestId("projects-readd-memory")).toHaveAttribute("href", "#/add-server");
+    // D2: the Re-add CTA carries the server NAME so Add-server can offer a
+    // secret-safe catalog-by-name pre-fill.
+    await expect(page.getByTestId("projects-readd-memory")).toHaveAttribute("href", "#/add-server?readd=memory");
     await expect(page.getByTestId("projects-toggle-project-object-member-memory")).toHaveCount(0);
     // SINGLE-OWNER scope: cursor object-member → scope project-object-member, no value.
     expect(toggleBody!.scope).toBe("project-object-member");

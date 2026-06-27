@@ -824,6 +824,18 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
 .screen.add-server .banner.success {
   border-left-color: var(--success);
 }
+/* F1: a NEUTRAL informational banner — re-adding a non-catalog server, a
+   catalog read-failure degrade, and a catalog-match prefill are all NORMAL
+   outcomes, not errors. Matches the reusable .banner-info accent (#4a90e2 on
+   #eef5ff) so the honest-UX notices read as info, never red. */
+.screen.add-server .banner.info {
+  background: #eef5ff;
+  border-left-color: #4a90e2;
+}
+[data-theme="dark"] .screen.add-server .banner.info {
+  background: #0d1f38;
+  border-left-color: #4a90e2;
+}
 
 /* A2b Advanced subsections */
 .screen.add-server .language-entry,

@@ -3,6 +3,7 @@ import { BLANK_FORM, hasNestedUnknown, parseYAMLToForm, toYAML } from "../lib/ma
 import type { RouterState } from "../hooks/useRouter";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import {
+  getCatalogManifest,
   getExtractManifest,
   getManifest,
   postManifestCreate,
@@ -10,6 +11,7 @@ import {
   postManifestValidate,
   checkDraftReadiness,
   ManifestHashMismatchError,
+  CatalogManifestNotFoundError,
   type ReadinessReport,
 } from "../api";
 import { generateUUID } from "../lib/uuid";
@@ -61,17 +63,24 @@ function deepEqualForm(a: ManifestFormState, b: ManifestFormState): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-// parseAddServerQuery extracts ?server=...&from-client=... from the current
-// hash. A1's Create-manifest button navigates to
-// #/add-server?server=<name>&from-client=<client> — we pick those up on
-// mount and run the prefill fetch.
-function parseAddServerQuery(): { server: string; fromClient: string } {
+// parseAddServerQuery extracts the create-mode prefill params from the current
+// hash. Two DISJOINT branches:
+//   • A1 Migration Create-manifest: ?server=<name>&from-client=<client> — both
+//     present → the extract-manifest prefill fetch (getExtractManifest).
+//   • D2 cold re-enable Re-add: ?readd=<name> — a NAME-ONLY hint. The disabled
+//     cursor/vscode object-member was HARD-DELETED on disable, so mcphub never
+//     held its value; the ONLY secret-safe source is the catalog by server-name.
+//     This branch NEVER fires getExtractManifest (the extract path is dead
+//     post-delete — it would 404, and it carries the client's env VERBATIM,
+//     which is exactly the literal-secret echo D2 must not do).
+export function parseAddServerQuery(): { server: string; fromClient: string; readd: string } {
   const hash = window.location.hash;
   const q = hash.split("?")[1] ?? "";
   const params = new URLSearchParams(q);
   return {
     server: params.get("server") ?? "",
     fromClient: params.get("from-client") ?? "",
+    readd: params.get("readd") ?? "",
   };
 }
 
@@ -102,6 +111,20 @@ export function AddServerScreen(props: {
   // anti-silent-data-loss: paste must not move the baseline).
   const [initialSnapshot, setInitialSnapshot] = useState<ManifestFormState>(BLANK_FORM);
   const [committedCreate, setCommittedCreate] = useState<{ name: string; hash: string } | null>(null);
+  // catalogShipped (D2 r3, FINDING 2): the SHIPPED server name that the
+  // catalog-match Re-add prefill dropped into this CREATE form. Set ONLY in the
+  // 200-success prefill branch (a shipped/embedded server, no local manifest);
+  // null everywhere else and after reset. It is the single owner of the
+  // shipped-server edit-shadow warning, and is HONEST-ON-RENAME by design: the
+  // notice renders iff catalogShipped !== null AND the live form name is still
+  // that shipped name (formState.name === catalogShipped). When the operator
+  // renames away to save a customized copy, the names diverge and the warning
+  // hides automatically. WHY: re-adding a shipped server prefills CREATE mode
+  // with the shipped name; if the operator edits command/args and Save&Install,
+  // ManifestCreateIn writes a disk manifest but Install reads embed-first
+  // (manifest_source.go:81) → the UNEDITED shipped manifest installs while the
+  // UI says "saved/installed". The notice makes that honest (no backend change).
+  const [catalogShipped, setCatalogShipped] = useState<string | null>(null);
   // editName is derived from route.query so that a dirty-declined name=a →
   // name=b navigation does not fire a stale load (the memo dep stays stable).
   const editName = useMemo(() => {
@@ -320,11 +343,15 @@ export function AddServerScreen(props: {
     props.onDirtyChange?.(isDirty);
   }, [isDirty]);
 
-  // Prefill path (Q8 baseline gotcha): fetch extract-manifest when the
-  // user arrives from A1, parse → set form state → take the snapshot
-  // AFTER normalization so dirty is false on first render.
+  // A1 prefill path (Q8 baseline gotcha): fetch extract-manifest when the
+  // user arrives from the Migration Create-manifest button, parse → set form
+  // state → take the snapshot AFTER normalization so dirty is false on first
+  // render. The `readd` guard keeps this branch DISJOINT from the D2 cold
+  // re-enable Re-add branch below (a Re-add hash carries no server/from-client,
+  // but the guard makes the no-extract-on-readd invariant explicit + greppable).
   useEffect(() => {
-    const { server, fromClient } = parseAddServerQuery();
+    const { server, fromClient, readd } = parseAddServerQuery();
+    if (readd) return; // D2 Re-add owns this mount — never run the extract fetch.
     if (!server || !fromClient) return;
     let cancelled = false;
     (async () => {
@@ -339,6 +366,115 @@ export function AddServerScreen(props: {
         setBanner({
           kind: "error",
           text: `Could not prefill from ${fromClient}/${server}: ${(err as Error).message}. Continuing with empty form.`,
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // D2 cold re-enable Re-add path (#/add-server?readd=<name>): a disabled
+  // cursor/vscode object-member is HARD-DELETED on disable, so mcphub never held
+  // its value — the ONLY secret-safe value source is the EMBEDDED catalog
+  // manifest by server-name.
+  //
+  // INVARIANT (no-literal-secret-echo): this branch NEVER calls getManifest
+  // (the disk-only edit contract, which could read a hand-planted on-disk
+  // manifest carrying a literal secret) and NEVER calls getExtractManifest
+  // (the dead post-delete path that carries client env VERBATIM). The ONE
+  // source is getCatalogManifest → GET /api/catalog/manifest, which the
+  // backend serves EMBED-ONLY (CatalogManifestGet reads the embed FS directly:
+  // membership gate excludes any disk-only name, then a direct embed read with
+  // no override, no disk, no fallback). So from the frontend the prefill is
+  // secret-safe by construction — the embed YAML's env carries `secret:`/
+  // `${env:}` placeholders (e.g. servers/wolfram/manifest.yaml:
+  // WOLFRAM_LLM_APP_ID = "secret:wolfram_app_id"), never a resolved literal.
+  // Three outcomes:
+  //   • 200 → prefill from the embed YAML (command/args/secret-refs) + the
+  //     F4 catalog-match info banner.
+  //   • 404 (CatalogManifestNotFoundError) → name-only seed + the honest
+  //     "isn't in the catalog" no-match info banner.
+  //   • any other error → name-only seed + the read-failure info banner
+  //     (membership unknown — must NOT claim "isn't in the catalog").
+  //
+  // CLOBBER-GUARD (P2-429): the lookup is async; the operator may type into
+  // the form before it resolves. We snapshot the BLANK baseline at effect
+  // entry and apply the seed ONLY if the form is still pristine (deep-equal to
+  // that baseline) — via a FUNCTIONAL setFormState updater so the compare reads
+  // the LIVE current state, not a stale closure. If the operator typed, we skip
+  // BOTH setFormState and setInitialSnapshot (keep their typed form + a correct
+  // dirty guard) and suppress the banner so it cannot claim a prefill that did
+  // not happen.
+  useEffect(() => {
+    const { readd } = parseAddServerQuery();
+    if (!readd) return;
+    let cancelled = false;
+    // Snapshot the pristine baseline (BLANK_FORM at mount) at effect entry. The
+    // functional updater below compares the LIVE current form against this to
+    // decide whether the operator has typed since the lookup started.
+    const baselineAtStart = formState;
+    // applyIfPristine seeds `next` + its banner ONLY when the form is still
+    // pristine. Returns nothing; the functional updater's deepEqualForm compare
+    // is the single source of truth for "did the operator type?". When pristine
+    // it replaces the form, moves the dirty-check baseline to `next`, and sets
+    // the banner; when not, it leaves all three untouched.
+    // Returns true iff the form was still pristine and the seed was applied —
+    // the caller uses that to arm catalogShipped ONLY when the prefill landed,
+    // so the shipped-edit-shadow notice never lies about a prefill that the
+    // clobber-guard skipped.
+    const applyIfPristine = (next: ManifestFormState, banner: { kind: "info"; text: string }): boolean => {
+      let replaced = false;
+      setFormState((current) => {
+        if (deepEqualForm(current, baselineAtStart)) {
+          replaced = true;
+          return next;
+        }
+        return current;
+      });
+      // setInitialSnapshot + setBanner ONLY in the branch that actually replaced
+      // the form — otherwise the dirty guard would baseline to a form the
+      // operator never sees, and the banner would lie about a prefill.
+      if (replaced) {
+        setInitialSnapshot(next);
+        setBanner(banner);
+      }
+      return replaced;
+    };
+    (async () => {
+      try {
+        // Secret-safe by construction: getCatalogManifest is EMBED-ONLY. The
+        // embed YAML carries `secret:`/`${env:}` placeholders, not literals.
+        const { yaml } = await getCatalogManifest(readd);
+        if (cancelled) return;
+        const parsed = parseYAMLToForm(yaml);
+        // F4: explain WHY the form is pre-filled + nudge the operator to set
+        // required secrets — symmetric with the no-match / read-failure copy.
+        const seeded = applyIfPristine(parsed, {
+          kind: "info",
+          text: `Pre-filled from the catalog for ${readd} — review and set any required secrets before installing.`,
+        });
+        // FINDING 2: arm the shipped-server edit-shadow notice ONLY for a
+        // landed catalog-match prefill (a shipped/embedded server). It is
+        // honest-on-rename: rendered iff formState.name === catalogShipped, so
+        // renaming away to save a customized copy hides it.
+        if (seeded) {
+          setCatalogShipped(readd);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        // Name-only secret-safe seed (BLANK command/args/env — the operator
+        // re-enters secrets via the existing AddSecretModal / secret:<key>
+        // refs). Both outcomes are NORMAL, so the banner is neutral info.
+        const seeded = { ...BLANK_FORM, name: readd };
+        const notFound = err instanceof CatalogManifestNotFoundError;
+        applyIfPristine(seeded, {
+          kind: "info",
+          // F3: the read-failure copy must NOT assert "isn't in the catalog" —
+          // the lookup failed, so the server's catalog membership is unknown.
+          text: notFound
+            ? `Re-adding ${readd} — it was removed from your config and isn't in the catalog, so re-enter its command/args/secrets.`
+            : `Re-adding ${readd} — couldn't pre-fill it (catalog lookup failed), so re-enter its command/args/secrets.`,
         });
       }
     })();
@@ -363,6 +499,9 @@ export function AddServerScreen(props: {
     setFormState(BLANK_FORM);
     setInitialSnapshot(BLANK_FORM);
     setCommittedCreate(null);
+    // The shipped-server edit-shadow notice is a CREATE-mode (Re-add) flag;
+    // clear it on an edit-mode mount so it can never bleed across modes.
+    setCatalogShipped(null);
     // Clear inline secrets typed for the PRIOR draft so a value entered for
     // manifest a cannot reappear prefilled in manifest b that references the
     // same missing key (Codex #378 r4 — a→b edit navigation would otherwise
@@ -561,7 +700,11 @@ export function AddServerScreen(props: {
   const [warnings, setWarnings] = useState<string[] | null>(null);
 
   type Banner = {
-    kind: "error" | "success";
+    // "info" is a NEUTRAL informational notice (renders .banner.info, not the
+    // red .banner.error). The D2 readd flow uses it for its honest-UX notices:
+    // a non-catalog re-add, a catalog read-failure degrade, and a catalog-match
+    // success are all NORMAL outcomes, not failures — they must not render red.
+    kind: "error" | "success" | "info";
     text: string;
     // retryName is the install TARGET name, NOT a callback: the Retry button
     // invokes the CURRENT render's retryInstall(retryName) so it reads the latest
@@ -1146,6 +1289,22 @@ export function AddServerScreen(props: {
           {banner.staleForceSave && (
             <button type="button" class="btn btn-danger" disabled={busy !== ""} onClick={() => runForceSave()} data-action="force-save">Force Save</button>
           )}
+        </div>
+      )}
+      {/* FINDING 2 (D2 r3): shipped-server edit-shadow notice. A catalog-match
+          Re-add prefills CREATE mode with the SHIPPED name; if the operator
+          edits command/args and Save&Installs under that name, the install
+          reads the embed-first manifest (manifest_source.go:81), so the
+          UNEDITED shipped manifest installs while the form shows the edits.
+          Live ONLY while the form name is still the shipped name (honest on
+          rename — renaming to save a customized copy hides it). Rendered as a
+          sibling of the banner so it persists past a Save&Install success
+          banner as long as the shipped name is unchanged. */}
+      {catalogShipped !== null && formState.name === catalogShipped && (
+        <div class="banner info" data-testid="shipped-server-notice">
+          <p>
+            This is a shipped server — installing re-installs the shipped manifest. Edits to command/args here won't change what's installed; rename the server to save a customized copy.
+          </p>
         </div>
       )}
       {warnings && warnings.length > 0 && (

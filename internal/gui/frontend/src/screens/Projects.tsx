@@ -739,8 +739,9 @@ async function resolveConsentOnEnable(server: string): Promise<ConsentResolution
 // security posture that keeps secret-bearing config off the wire). So the held
 // value was ALWAYS undefined and the warm path was dead code. For an object-member
 // (cursor / vscode, scope project-object-member) DISABLE removes the member and
-// re-enable ALWAYS renders the cold "Re-add…" CTA → #/add-server (never a
-// value-less enable POST, never a backend-echoed value). The claude Project row
+// re-enable ALWAYS renders the cold "Re-add…" CTA → #/add-server?readd=<name>
+// (never a value-less enable POST, never a backend-echoed value; the name routes
+// the secret-safe catalog-by-name pre-fill — D2). The claude Project row
 // is NOT an object-member here — it uses the value-free APPROVAL ARRAY-MOVE
 // (scope claude-local-membership), whose .mcp.json definition stays put, so its
 // re-enable is trivial (no value, no cold CTA): coldReenable=false.
@@ -840,9 +841,15 @@ function ToggleableServerRow(props: ServerRowProps): preact.JSX.Element {
       {coldReenable ? (
         <a
           class="btn text-xs"
-          href={`#/add-server`}
+          // Carry the disabled server's NAME (?readd=) so the Add-server form
+          // can offer a SECRET-SAFE pre-fill: a catalog-known name prefills from
+          // the shipped manifest (secret:/${env:} placeholders, never a literal
+          // value), an unknown name seeds only the name + an honest banner. The
+          // member was HARD-DELETED on disable, so mcphub holds no value to echo
+          // — the name + catalog-by-name is the only secret-safe source (D2).
+          href={`#/add-server?readd=${encodeURIComponent(server)}`}
           data-testid={`projects-readd-${server}`}
-          title="Disabling removed this entry; re-add this server from the Add-server / Catalog flow to enable it again."
+          title="Disabling removed this entry; re-add this server (pre-filled from the catalog when known) to enable it again."
         >
           Re-add…
         </a>
