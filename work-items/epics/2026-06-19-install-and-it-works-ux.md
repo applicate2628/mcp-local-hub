@@ -58,10 +58,15 @@ Agreed direction (operator, 2026-06-19):
    exist. The REAL remaining gaps are narrower: (a) a first-touch interactive
    "do you trust this folder?" prompt, (b) a standalone `mcphub trust` verb,
    (c) extend trust-gating to serena roots (currently LSP-only).
-6. **per-project-gui** — GUI surface to SEE which MCPs are active per project
-   AND toggle them, across all three project models; keep the global Servers
-   matrix. The biggest new feature; Model B (project-local `.mcp.json`) must be
-   built from zero. Last.
+6. (DONE) **per-project-gui** — GUI surface to SEE which MCPs are active per
+   project AND toggle them, across all three project models; keep the global
+   Servers matrix. The biggest new feature; Model B (project-local `.mcp.json`)
+   was built from zero. Shipped P1→P3c: read-only Projects screen (#428), then
+   the write phase — P3a writes-backend + `/api/projects` aggregate (#433),
+   P3b frontend toggle + both claude scopes + deps-consent (#434), P3c
+   group↔project binding (#435). Design accepted in
+   `decisions/2026-06-25-per-project-gui-p3-design.md`. DONE 2026-06-27,
+   live 8c359a1c.
 
 ## Sequencing (areas equal in importance; this is a build order, not a priority)
 
@@ -70,6 +75,10 @@ directly kills the cryptic-502 pain), then 2/3/4/5 (the specific hub-launch
 fixes, each independently shippable), then 6 (per-project GUI — the largest,
 builds on the workspace registry + groups + client-config scopes the earlier
 areas touch).
+
+> **Status (2026-06-27):** area 6 (per-project-gui) is DONE/shipped (PRs
+> #428/#433/#434/#435, live 8c359a1c). **Area 5 (trusted-folders-ux) is the
+> last remaining child** — the epic STAYS `status: active` until area 5 closes.
 
 ## Non-goals (for now)
 

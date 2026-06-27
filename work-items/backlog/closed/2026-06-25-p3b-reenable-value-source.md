@@ -1,6 +1,6 @@
 # P3b — design the object-member re-enable value-source SECRET-SAFELY
 
-- status: open
+- status: closed (settled — see ## Resolution)
 - created: 2026-06-25
 - origin: PR #433 (per-project-GUI P3a, write phase) bot finding 4 — lead adjudication
 - area: per-project-GUI, internal/gui (projects scan/aggregate), internal/api (ScanResult/ClientEntry)
@@ -56,3 +56,24 @@ P3b only has to source that value securely — the write side is done.
 - claude-code LOCAL scope (array-move) needs NO value source — a re-enable moves
   the name between the enabled/disabled arrays; the `mcpServers` definition is
   untouched.
+
+## Resolution (settled 2026-06-27)
+
+Settled by the P3b UX design decision
+(`work-items/decisions/2026-06-27-per-project-gui-p3b-uxdesign.md`, status: accepted),
+whose frontmatter `settles:` this backlog item, in combination with PR #434's
+warm-replay removal:
+
+- The warm value-replay machinery (the proposed in-session client-held value path)
+  was **REMOVED in #434** — the aggregate NILs every `raw` (`stripClientEntryRaw`),
+  so the warm path was always a no-op. There is therefore no backend value-source to
+  build, and the security constraint (never re-send secret-bearing `Raw`) is preserved
+  by construction.
+- **Cold object-member re-enable routes to the existing Add/Catalog flow** (value
+  sourced from marketplace/manifest + vault `secret:<key>` refs), NOT a backend-echoed
+  value — the aggregate stays NAMES-only.
+
+Residual: **cold object-member re-enable via the per-row toggle is DEFERRED (D2)**,
+tracked in the p3b-uxdesign decision's `## Deferrals from P3b v1` (D2). The claude
+Project scope (array-move) needs no value source at all. No live work remains in this
+item; it is closed/settled.

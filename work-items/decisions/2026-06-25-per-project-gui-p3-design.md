@@ -1,10 +1,11 @@
 # Decision: per-project-GUI P3 design (the WRITE phase)
 
-status: proposed
+status: accepted
 date: 2026-06-25
 owners: architect (a5d44dad, PASS) + operator sign-offs (§10.1, §10.2 decided 2026-06-25)
 parent: work-items/decisions/2026-06-24-per-project-gui-design.md
 depends-on: P2b (PR #432 — needs `IsMcpjsonServerEnabled` + `canonicalClaudeProjectKey` symbols, absent until #432 merges)
+Implemented: P3a (PR #433) + P3b (PR #434) + P3c (PR #435) — all shipped; live 8c359a1c.
 
 ## Operator sign-offs (DECIDED 2026-06-25)
 - **§10.1 = ADD `project_path` to groups.yaml (binding).** Groups bind to a project path; the project view shows "groups for THIS project". Additive `yaml:"project_path,omitempty"`; existing groups (no field) = global/unbound; version stays 1.
