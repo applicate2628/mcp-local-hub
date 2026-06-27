@@ -3,7 +3,7 @@ import { BLANK_FORM, hasNestedUnknown, parseYAMLToForm, toYAML } from "../lib/ma
 import type { RouterState } from "../hooks/useRouter";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import {
-  getCatalogNames,
+  getCatalogManifest,
   getExtractManifest,
   getManifest,
   postManifestCreate,
@@ -11,6 +11,7 @@ import {
   postManifestValidate,
   checkDraftReadiness,
   ManifestHashMismatchError,
+  CatalogManifestNotFoundError,
   type ReadinessReport,
 } from "../api";
 import { generateUUID } from "../lib/uuid";
@@ -361,81 +362,93 @@ export function AddServerScreen(props: {
 
   // D2 cold re-enable Re-add path (#/add-server?readd=<name>): a disabled
   // cursor/vscode object-member is HARD-DELETED on disable, so mcphub never held
-  // its value — the ONLY secret-safe value source is the catalog by server-name.
+  // its value — the ONLY secret-safe value source is the EMBEDDED catalog
+  // manifest by server-name.
   //
-  // INVARIANT (no-literal-secret-echo): this branch NEVER calls
-  // getExtractManifest. The extract path is dead post-delete (404), and it
-  // carries the client's env VERBATIM — re-leaking the literal secret D2 exists
-  // to never echo. Two sub-paths, both secret-safe by construction:
-  //   • Catalog MATCH → prefill from the SHIPPED manifest (getManifest), whose
-  //     env is published with `secret:`/`${env:}` placeholders, never a resolved
-  //     literal (e.g. servers/wolfram/manifest.yaml: WOLFRAM_LLM_APP_ID =
-  //     "secret:wolfram_app_id"). Command + args come along; secrets stay refs.
-  //   • NO catalog match → seed ONLY the name (blank command/args/env) + an
-  //     honest banner telling the operator to re-enter command/args/secrets.
+  // INVARIANT (no-literal-secret-echo): this branch NEVER calls getManifest
+  // (the disk-only edit contract, which could read a hand-planted on-disk
+  // manifest carrying a literal secret) and NEVER calls getExtractManifest
+  // (the dead post-delete path that carries client env VERBATIM). The ONE
+  // source is getCatalogManifest → GET /api/catalog/manifest, which the
+  // backend serves EMBED-ONLY with a membership gate that excludes any
+  // disk-only name BEFORE the loader. So the prefill is secret-safe BY
+  // CONSTRUCTION — the embed YAML's env carries `secret:`/`${env:}`
+  // placeholders (e.g. servers/wolfram/manifest.yaml: WOLFRAM_LLM_APP_ID =
+  // "secret:wolfram_app_id"), never a resolved literal. Three outcomes:
+  //   • 200 → prefill from the embed YAML (command/args/secret-refs) + the
+  //     F4 catalog-match info banner.
+  //   • 404 (CatalogManifestNotFoundError) → name-only seed + the honest
+  //     "isn't in the catalog" no-match info banner.
+  //   • any other error → name-only seed + the read-failure info banner
+  //     (membership unknown — must NOT claim "isn't in the catalog").
+  //
+  // CLOBBER-GUARD (P2-429): the lookup is async; the operator may type into
+  // the form before it resolves. We snapshot the BLANK baseline at effect
+  // entry and apply the seed ONLY if the form is still pristine (deep-equal to
+  // that baseline) — via a FUNCTIONAL setFormState updater so the compare reads
+  // the LIVE current state, not a stale closure. If the operator typed, we skip
+  // BOTH setFormState and setInitialSnapshot (keep their typed form + a correct
+  // dirty guard) and suppress the banner so it cannot claim a prefill that did
+  // not happen.
   useEffect(() => {
     const { readd } = parseAddServerQuery();
     if (!readd) return;
     let cancelled = false;
-    (async () => {
-      // readFailed distinguishes an HONEST no-match (the catalog was read and
-      // does not list this server) from a READ FAILURE (the catalog or shipped
-      // manifest lookup threw, so we cannot know whether it is in the catalog).
-      // Both degrade to the same secret-safe blank seed, but their honest copy
-      // differs: a read-failure must NOT claim "isn't in the catalog" — the
-      // lookup failed; the server may well be there.
-      let inCatalog = false;
-      let readFailed = false;
-      try {
-        const names = await getCatalogNames();
-        inCatalog = names.has(readd);
-      } catch {
-        // A catalog lookup failure must not strand the operator: fall through to
-        // the honest name-only branch (re-enter manually). The form NEVER
-        // receives a literal secret on either branch, so failing closed to blank
-        // is safe — it just asks for one extra re-entry.
-        readFailed = true;
-      }
-      if (cancelled) return;
-      if (inCatalog) {
-        try {
-          // Secret-safe: the shipped manifest carries `secret:`/`${env:}`
-          // placeholders, not resolved values.
-          const { yaml } = await getManifest(readd);
-          if (cancelled) return;
-          const parsed = parseYAMLToForm(yaml);
-          setFormState(parsed);
-          setInitialSnapshot(parsed);
-          // F4: the catalog-match prefill is otherwise silent. Explain WHY the
-          // form is pre-filled and nudge the operator to set required secrets —
-          // a neutral notice symmetric with the no-match / read-failure branches.
-          setBanner({
-            kind: "info",
-            text: `Pre-filled from the catalog for ${readd} — review and set any required secrets before installing.`,
-          });
-          return;
-        } catch {
-          if (cancelled) return;
-          // The catalog claimed it but the manifest read failed — degrade to
-          // the same name-only blank + honest banner rather than the extract path.
-          readFailed = true;
+    // Snapshot the pristine baseline (BLANK_FORM at mount) at effect entry. The
+    // functional updater below compares the LIVE current form against this to
+    // decide whether the operator has typed since the lookup started.
+    const baselineAtStart = formState;
+    // applyIfPristine seeds `next` + its banner ONLY when the form is still
+    // pristine. Returns nothing; the functional updater's deepEqualForm compare
+    // is the single source of truth for "did the operator type?". When pristine
+    // it replaces the form, moves the dirty-check baseline to `next`, and sets
+    // the banner; when not, it leaves all three untouched.
+    const applyIfPristine = (next: ManifestFormState, banner: { kind: "info"; text: string }) => {
+      let replaced = false;
+      setFormState((current) => {
+        if (deepEqualForm(current, baselineAtStart)) {
+          replaced = true;
+          return next;
         }
-      }
-      // No catalog match (or a catalog/manifest read failure): name-only seed +
-      // honest banner. BLANK command/args/env — the operator re-enters secrets
-      // via the existing AddSecretModal / secret:<key> refs. Both branches are
-      // NORMAL outcomes, so the banner is neutral (kind: "info"), never red.
-      const seeded = { ...BLANK_FORM, name: readd };
-      setFormState(seeded);
-      setInitialSnapshot(seeded);
-      setBanner({
-        kind: "info",
-        // F3: read-failure copy must NOT assert "isn't in the catalog" — the
-        // lookup failed, so its catalog membership is unknown.
-        text: readFailed
-          ? `Re-adding ${readd} — couldn't pre-fill it (catalog lookup failed), so re-enter its command/args/secrets.`
-          : `Re-adding ${readd} — it was removed from your config and isn't in the catalog, so re-enter its command/args/secrets.`,
+        return current;
       });
+      // setInitialSnapshot + setBanner ONLY in the branch that actually replaced
+      // the form — otherwise the dirty guard would baseline to a form the
+      // operator never sees, and the banner would lie about a prefill.
+      if (replaced) {
+        setInitialSnapshot(next);
+        setBanner(banner);
+      }
+    };
+    (async () => {
+      try {
+        // Secret-safe by construction: getCatalogManifest is EMBED-ONLY. The
+        // embed YAML carries `secret:`/`${env:}` placeholders, not literals.
+        const { yaml } = await getCatalogManifest(readd);
+        if (cancelled) return;
+        const parsed = parseYAMLToForm(yaml);
+        // F4: explain WHY the form is pre-filled + nudge the operator to set
+        // required secrets — symmetric with the no-match / read-failure copy.
+        applyIfPristine(parsed, {
+          kind: "info",
+          text: `Pre-filled from the catalog for ${readd} — review and set any required secrets before installing.`,
+        });
+      } catch (err) {
+        if (cancelled) return;
+        // Name-only secret-safe seed (BLANK command/args/env — the operator
+        // re-enters secrets via the existing AddSecretModal / secret:<key>
+        // refs). Both outcomes are NORMAL, so the banner is neutral info.
+        const seeded = { ...BLANK_FORM, name: readd };
+        const notFound = err instanceof CatalogManifestNotFoundError;
+        applyIfPristine(seeded, {
+          kind: "info",
+          // F3: the read-failure copy must NOT assert "isn't in the catalog" —
+          // the lookup failed, so the server's catalog membership is unknown.
+          text: notFound
+            ? `Re-adding ${readd} — it was removed from your config and isn't in the catalog, so re-enter its command/args/secrets.`
+            : `Re-adding ${readd} — couldn't pre-fill it (catalog lookup failed), so re-enter its command/args/secrets.`,
+        });
+      }
     })();
     return () => {
       cancelled = true;

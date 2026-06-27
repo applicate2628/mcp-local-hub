@@ -209,22 +209,48 @@ export async function getExtractManifest(client: string, server: string): Promis
   return payload.yaml ?? "";
 }
 
-// CatalogNames is the set of shipped/supported server names from GET
-// /api/catalog. The full {name, description, kind} projection is consumed by
-// the Catalog screen; this thin helper returns only the name set, which is all
-// the D2 cold re-enable Re-add flow needs to decide "is <name> in the catalog?"
-// — the secret-safe branch (catalog match → shipped-manifest prefill) vs the
-// honest-banner blank branch (no match → operator re-enters command/secrets).
-export async function getCatalogNames(): Promise<Set<string>> {
-  const body = await fetchOrThrow<{ catalog?: Array<{ name?: string }> }>(
-    "/api/catalog",
-    "object",
-  );
-  const names = new Set<string>();
-  for (const row of Array.isArray(body.catalog) ? body.catalog : []) {
-    if (typeof row?.name === "string" && row.name) names.add(row.name);
+// CatalogManifestNotFoundError marks the 404 (membership-gate miss) branch
+// of getCatalogManifest so the D2 cold re-enable Re-add flow can distinguish
+// an HONEST no-match (the server is not in the embedded catalog) from a READ
+// FAILURE (the lookup threw / 500'd). The two degrade to the same secret-safe
+// blank seed but carry different honest copy: a read-failure must NOT claim
+// "isn't in the catalog".
+export class CatalogManifestNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CatalogManifestNotFoundError";
   }
-  return names;
+}
+
+// getCatalogManifest fetches the EMBED-ONLY manifest YAML for a shipped
+// server from GET /api/catalog/manifest?name=. This is the single,
+// secret-safe source the D2 cold re-enable Re-add flow uses: the shipped
+// manifest's env carries `secret:`/`${env:}` placeholders, never a resolved
+// literal. It is DISTINCT from getManifest (GET /api/manifest/get, the
+// disk-only edit contract) precisely so the prefill can never echo a
+// hand-planted disk manifest carrying a literal secret — the backend's
+// membership gate excludes any disk-only name BEFORE the loader.
+//
+// Resolves to { yaml } on 200. Rejects with CatalogManifestNotFoundError on
+// 404 (the name is not in the embedded catalog → the caller seeds name-only
+// with the "isn't in the catalog" copy). Throws a plain Error on any other
+// non-2xx (the caller degrades to the read-failure copy — membership unknown).
+export async function getCatalogManifest(name: string): Promise<{ yaml: string }> {
+  const resp = await fetch(`/api/catalog/manifest?name=${encodeURIComponent(name)}`);
+  if (resp.status === 404) {
+    throw new CatalogManifestNotFoundError(`/api/catalog/manifest: ${name} is not in the catalog`);
+  }
+  if (!resp.ok) {
+    let body: { error?: string } | null = null;
+    try {
+      body = (await resp.json()) as { error?: string };
+    } catch {
+      // Non-JSON error body; fall through.
+    }
+    throw new Error(`/api/catalog/manifest: ${body?.error ?? resp.statusText}`);
+  }
+  const payload = (await resp.json()) as { yaml?: string };
+  return { yaml: payload.yaml ?? "" };
 }
 
 // postInitClientConfig drives the Servers matrix "Initialize <client>"

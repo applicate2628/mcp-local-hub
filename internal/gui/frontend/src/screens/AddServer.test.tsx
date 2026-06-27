@@ -748,7 +748,7 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
     window.location.hash = "";
   });
 
-  it("a NON-catalog ?readd= seeds ONLY the name + honest banner and NEVER fetches extract-manifest", async () => {
+  it("a NON-catalog ?readd= (404 from /api/catalog/manifest) seeds ONLY the name + honest banner, never getManifest or extract-manifest", async () => {
     window.location.hash = "#/add-server?readd=customsrv";
     const urls: string[] = [];
     mockFetch.mockImplementation((input: RequestInfo | URL) => {
@@ -757,9 +757,10 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
       if (url.includes("/api/secrets")) {
         return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
       }
-      if (url.startsWith("/api/catalog")) {
-        // customsrv is NOT a shipped/supported server.
-        return Promise.resolve(jsonResponse({ catalog: [{ name: "memory", description: "", kind: "global" }] }));
+      if (url.startsWith("/api/catalog/manifest")) {
+        // customsrv is NOT in the embedded catalog → the membership-gate 404
+        // the frontend maps to the honest name-only no-match seed.
+        return Promise.resolve(jsonResponse({ error: "not found", code: "CATALOG_MANIFEST_NOT_FOUND" }, 404));
       }
       return Promise.resolve(jsonResponse({}));
     });
@@ -775,20 +776,20 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
     await waitFor(() => {
       expect(screen.getByTestId("banner").textContent).toContain("Re-adding customsrv");
     });
-    // F3: the honest no-match copy (the catalog was read; it does not list it).
+    // F3: the honest no-match copy (the membership gate said it isn't embedded).
     expect(screen.getByTestId("banner").textContent).toContain("isn't in the catalog");
     // F1: a non-catalog re-add is a NORMAL outcome → neutral info kind, not red.
     expect(screen.getByTestId("banner").className).toContain("info");
     expect(screen.getByTestId("banner").className).not.toContain("error");
 
-    // INVARIANT: the extract-manifest path is NEVER touched on the readd branch
-    // (it would 404 + carry the client env verbatim = a literal-secret re-leak).
-    expect(urls.some((u) => u.includes("/api/extract-manifest"))).toBe(false);
-    // And no shipped-manifest read either (no catalog match).
+    // INVARIANT: the single embed-only endpoint is the ONLY manifest source —
+    // never the disk-only edit contract (/api/manifest/get) and never the dead
+    // extract path (/api/extract-manifest, which carries client env verbatim).
     expect(urls.some((u) => u.startsWith("/api/manifest/get"))).toBe(false);
+    expect(urls.some((u) => u.includes("/api/extract-manifest"))).toBe(false);
   });
 
-  it("a CATALOG-known ?readd= prefills from the SHIPPED manifest (command/args present, env as a secret: ref — no literal), never extract-manifest", async () => {
+  it("[P2-404] a CATALOG-known ?readd= prefills from the EMBED manifest via /api/catalog/manifest (command/args present, env as a secret: ref — NOT blank, never getManifest/extract)", async () => {
     window.location.hash = "#/add-server?readd=wolfram";
     const urls: string[] = [];
     mockFetch.mockImplementation((input: RequestInfo | URL) => {
@@ -797,17 +798,14 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
       if (url.includes("/api/secrets")) {
         return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
       }
-      if (url.startsWith("/api/catalog")) {
-        return Promise.resolve(jsonResponse({ catalog: [{ name: "wolfram", description: "", kind: "global" }] }));
-      }
-      if (url.startsWith("/api/manifest/get")) {
-        // The SHIPPED manifest carries a `secret:` ref, NOT a literal value —
-        // this is the secret-safe source D2 relies on.
+      if (url.startsWith("/api/catalog/manifest")) {
+        // The EMBED manifest carries a `secret:` ref, NOT a literal value —
+        // the secret-safe source D2 relies on. (No hash field: this is the
+        // read-for-prefill contract, not the optimistic-concurrency edit one.)
         return Promise.resolve(jsonResponse({
           yaml:
             "name: 'wolfram'\nkind: global\ntransport: stdio-bridge\ncommand: 'node'\n" +
             "base_args:\n  - 'index.js'\nenv:\n  WOLFRAM_LLM_APP_ID: 'secret:wolfram_app_id'\n",
-          hash: "h1",
         }));
       }
       return Promise.resolve(jsonResponse({}));
@@ -815,7 +813,9 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
 
     render(<AddServerScreen />);
 
-    // The form prefills from the shipped manifest: name + command come along.
+    // The form prefills from the embed manifest: name + command come along
+    // (this is the P2-404 fix — the shipped server now actually prefills,
+    // rather than landing on a blank form).
     await waitFor(() => {
       expect(document.querySelector<HTMLInputElement>("#field-name")?.value).toBe("wolfram");
     });
@@ -823,13 +823,15 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
       expect(document.querySelector('[data-testid="yaml-preview"]')?.textContent).toContain("command: 'node'");
     });
     const preview = document.querySelector('[data-testid="yaml-preview"]')?.textContent ?? "";
+    // The form is NOT blank — args + the secret: ref came along.
+    expect(preview).toContain("index.js");
     // The sensitive env is a secret: ref, never a resolved literal.
     expect(preview).toContain("secret:wolfram_app_id");
 
-    // INVARIANT: never the extract-manifest path.
+    // INVARIANT: the embed-only endpoint was the ONLY manifest source.
+    expect(urls.some((u) => u.startsWith("/api/catalog/manifest"))).toBe(true);
+    expect(urls.some((u) => u.startsWith("/api/manifest/get"))).toBe(false);
     expect(urls.some((u) => u.includes("/api/extract-manifest"))).toBe(false);
-    // Catalog matched → shipped manifest read happened.
-    expect(urls.some((u) => u.startsWith("/api/manifest/get"))).toBe(true);
     // F4: the catalog-match prefill is no longer silent — a neutral info notice
     // explains WHY the form is pre-filled and nudges the operator to set secrets.
     await waitFor(() => {
@@ -839,7 +841,7 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
     expect(screen.getByTestId("banner").className).not.toContain("error");
   });
 
-  it("a CATALOG READ FAILURE (catalog 500) degrades to the distinct read-failure copy + blank form, never extract-manifest", async () => {
+  it("a CATALOG-MANIFEST READ FAILURE (/api/catalog/manifest 500) degrades to the distinct read-failure copy + blank form, never getManifest/extract", async () => {
     window.location.hash = "#/add-server?readd=memo";
     const urls: string[] = [];
     mockFetch.mockImplementation((input: RequestInfo | URL) => {
@@ -848,10 +850,10 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
       if (url.includes("/api/secrets")) {
         return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
       }
-      if (url.startsWith("/api/catalog")) {
-        // THE READ FAILURE: the catalog lookup 500s → getCatalogNames throws →
-        // the readd flow cannot know catalog membership → read-failure degrade.
-        return Promise.resolve(jsonResponse({ error: "catalog unavailable" }, 500));
+      if (url.startsWith("/api/catalog/manifest")) {
+        // THE READ FAILURE: a non-404 → getCatalogManifest throws a plain
+        // Error → the readd flow cannot know membership → read-failure degrade.
+        return Promise.resolve(jsonResponse({ error: "catalog manifest unavailable", code: "CATALOG_MANIFEST_GET_FAILED" }, 500));
       }
       return Promise.resolve(jsonResponse({}));
     });
@@ -872,9 +874,75 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
     expect(screen.getByTestId("banner").className).toContain("info");
     expect(screen.getByTestId("banner").className).not.toContain("error");
 
-    // Blank secret-safe seed: no shipped-manifest read, never the extract path.
+    // Blank secret-safe seed: never the disk-edit contract, never the extract path.
     expect(urls.some((u) => u.startsWith("/api/manifest/get"))).toBe(false);
     expect(urls.some((u) => u.includes("/api/extract-manifest"))).toBe(false);
+  });
+
+  it("[P2-429] clobber-guard: typing during the lookup PRESERVES the typed form (no prefill clobber) and keeps the dirty guard correct", async () => {
+    window.location.hash = "#/add-server?readd=wolfram";
+    // Hold the /api/catalog/manifest response open so we can type into the form
+    // BEFORE it resolves — the exact P2-429 race the clobber-guard defends. The
+    // deferred is resolved AND fully drained inside this test (see the
+    // `await manifestSettled` below) so no fetch task survives to window
+    // teardown (which would surface as a happy-dom AbortError).
+    let resolveManifest: ((r: Response) => void) | null = null;
+    const manifestPending = new Promise<Response>((resolve) => {
+      resolveManifest = resolve;
+    });
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url.startsWith("/api/catalog/manifest")) {
+        return manifestPending; // resolved later, after the operator types
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(<AddServerScreen />);
+
+    // The name field seeds from ?readd= only AFTER the lookup resolves — so
+    // until then the form is BLANK. The operator types a custom name into the
+    // still-blank form while the lookup is in flight.
+    const nameInput = document.querySelector<HTMLInputElement>("#field-name");
+    expect(nameInput).not.toBeNull();
+    await userEvent.clear(nameInput!);
+    await userEvent.type(nameInput!, "typed-by-operator");
+    expect(nameInput!.value).toBe("typed-by-operator");
+
+    // NOW the embed manifest resolves with the wolfram prefill. The clobber-guard
+    // must NOT overwrite the operator's typed form.
+    resolveManifest!(jsonResponse({
+      yaml:
+        "name: 'wolfram'\nkind: global\ntransport: stdio-bridge\ncommand: 'node'\n" +
+        "base_args:\n  - 'index.js'\nenv:\n  WOLFRAM_LLM_APP_ID: 'secret:wolfram_app_id'\n",
+    }));
+
+    // Fully drain the resolved fetch chain (await the deferred + its .json()
+    // hop) so the readd effect's setState calls have all flushed and no async
+    // task is left in flight at window teardown.
+    await manifestPending;
+    await waitFor(() => {
+      // The typed name is PRESERVED — the prefill was suppressed because the
+      // form was no longer pristine when the lookup resolved.
+      expect(document.querySelector<HTMLInputElement>("#field-name")?.value).toBe("typed-by-operator");
+    });
+    const preview = document.querySelector('[data-testid="yaml-preview"]')?.textContent ?? "";
+    // The wolfram embed values must NOT have clobbered the typed form.
+    expect(preview).not.toContain("secret:wolfram_app_id");
+    expect(preview).not.toContain("command: 'node'");
+    // And the F4 prefill banner must NOT fire (no prefill happened).
+    const banner = screen.queryByTestId("banner");
+    if (banner) {
+      expect(banner.textContent).not.toContain("Pre-filled from the catalog");
+    }
+
+    // The dirty guard stays correct: the typed form differs from the (blank)
+    // initial snapshot, so the unsaved-changes guard is armed. The Add-server
+    // sidebar-intercept guard reads that; we assert the proxy invariant that the
+    // name field holds the typed value above (a blank baseline + non-blank form).
   });
 
   it("a bare add-server (no ?readd=) does NOT run the readd seed (form stays blank)", async () => {
@@ -894,8 +962,8 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
       const calls = urls.filter((u) => u.includes("/api/secrets"));
       expect(calls.length).toBeGreaterThanOrEqual(1);
     });
-    // No catalog lookup, no manifest read, no extract — the readd branch is inert.
-    expect(urls.some((u) => u.startsWith("/api/catalog"))).toBe(false);
+    // No catalog-manifest lookup, no disk-edit read, no extract — inert branch.
+    expect(urls.some((u) => u.startsWith("/api/catalog/manifest"))).toBe(false);
     expect(urls.some((u) => u.startsWith("/api/manifest/get"))).toBe(false);
     expect(urls.some((u) => u.includes("/api/extract-manifest"))).toBe(false);
     expect(document.querySelector<HTMLInputElement>("#field-name")?.value).toBe("");

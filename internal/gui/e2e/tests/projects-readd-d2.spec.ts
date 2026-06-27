@@ -1,6 +1,7 @@
 // internal/gui/e2e/tests/projects-readd-d2.spec.ts
 //
-// D2 v1 — secret-safe pre-filled cold object-member re-enable. These specs
+// D2 r2 — secret-safe pre-filled cold object-member re-enable, now sourced
+// through the SINGLE embed-only endpoint GET /api/catalog/manifest. These specs
 // drive the Re-add CTA → Add-server pre-fill flow against a LIVE mcphub gui.
 //
 // THE LOAD-BEARING SECURITY TEST is `never echoes a literal secret …`: it seeds
@@ -10,10 +11,14 @@
 // claim two ways:
 //   (a) NO /api/* response body observed during the flow contains the literal;
 //   (b) the Add-server form (its YAML preview + every env input) never holds it.
-// An EXTRACT-MANIFEST TRAP is installed: if the readd branch ever reached for
-// /api/extract-manifest (the dead post-delete path that carries client env
-// VERBATIM = a re-leak), the trap returns the literal — and assertion (a)/(b)
-// would fail. The flow must never touch it.
+// The invariant is now embed-only-BY-CONSTRUCTION: the prefill's ONLY source is
+// /api/catalog/manifest (embed-only with a membership gate that excludes any
+// disk-only name BEFORE the loader), so a disk manifest's literal can never be
+// sourced. An EXTRACT-MANIFEST TRAP is still installed: if the readd branch ever
+// reached for /api/extract-manifest (the dead post-delete path that carries
+// client env VERBATIM = a re-leak), the trap returns the literal — and assertion
+// (a)/(b) would fail. The flow must never touch it, nor the disk-only edit
+// contract /api/manifest/get.
 //
 // The /api/projects aggregate is page.route-stubbed to the SANITIZED (raw=NIL)
 // wire shape the production sanitizeScanResult / stripClientEntryRaw posture
@@ -125,10 +130,28 @@ seededTest.describe("D2 — secret-safe cold re-enable Re-add", () => {
         body: JSON.stringify({ scope: "project-object-member", server: SERVER, enabled: false }),
       });
     });
-    // Catalog without a match for `memo` → the Re-add lands on the honest
-    // name-only branch (blank command/env), NOT a value-bearing prefill.
-    await page.route("**/api/catalog", async (route) => {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ catalog: [] }) });
+    // The embed-only catalog-manifest lookup 404s for `memo` (not in the
+    // embedded set) → the Re-add lands on the honest name-only branch (blank
+    // command/env), NOT a value-bearing prefill.
+    await page.route("**/api/catalog/manifest**", async (route) => {
+      await route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "not found", code: "CATALOG_MANIFEST_NOT_FOUND" }),
+      });
+    });
+    // A DISK-READ TRAP: the readd flow must NEVER hit the disk-only edit
+    // contract /api/manifest/get (which could read a hand-planted on-disk
+    // manifest carrying a literal). If it ever does, hand back the literal so
+    // the no-secret assertions catch the leak too.
+    let manifestGetHit = false;
+    await page.route("**/api/manifest/get**", async (route) => {
+      manifestGetHit = true;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ yaml: `name: 'memo'\nenv:\n  MY_TOKEN: '${LIVE_SECRET}'\n`, hash: "h" }),
+      });
     });
 
     await page.goto(`${hub.url}/#/projects?path=${encodeURIComponent(PROJECT_KEY)}`);
@@ -162,8 +185,10 @@ seededTest.describe("D2 — secret-safe cold re-enable Re-add", () => {
       await expect(envInputs.nth(i)).not.toHaveValue(new RegExp(LIVE_SECRET));
     }
 
-    // The dead extract path was NEVER reached.
+    // The dead extract path was NEVER reached, and neither was the disk-only
+    // edit contract — the embed-only endpoint is the sole prefill source.
     expect(extractHits.count).toBe(0);
+    expect(manifestGetHit, "the readd flow must never call the disk-only /api/manifest/get").toBe(false);
 
     // (a) NO /api/* response body observed during the flow contained the literal.
     const leaked = apiBodies.filter((b) => b.includes(LIVE_SECRET));
@@ -218,10 +243,11 @@ seededTest.describe("D2 — secret-safe cold re-enable Re-add", () => {
         body: JSON.stringify({ scope: "project-object-member", server: SERVER, enabled: false }),
       });
     });
-    // THE READ FAILURE: the catalog lookup 500s, so the readd flow cannot know
-    // whether `memo` is in the catalog → it degrades to the read-failure copy.
-    await page.route("**/api/catalog**", async (route) => {
-      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "catalog unavailable" }) });
+    // THE READ FAILURE: the embed-only catalog-manifest lookup 500s, so the
+    // readd flow cannot know whether `memo` is embedded → it degrades to the
+    // read-failure copy (NOT the 404 no-match copy).
+    await page.route("**/api/catalog/manifest**", async (route) => {
+      await route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "catalog manifest unavailable", code: "CATALOG_MANIFEST_GET_FAILED" }) });
     });
 
     await page.goto(`${hub.url}/#/projects?path=${encodeURIComponent(PROJECT_KEY)}`);
@@ -266,15 +292,21 @@ seededTest.describe("D2 — secret-safe cold re-enable Re-add", () => {
 });
 
 // The pre-fill ROUTING specs run on the plain (clean-home) hub fixture: they
-// drive #/add-server?readd=<name> directly and stub /api/catalog +
-// /api/manifest/get for a deterministic verdict.
+// drive #/add-server?readd=<name> directly and stub the SINGLE embed-only
+// endpoint /api/catalog/manifest for a deterministic verdict.
 baseTest.describe("D2 — Add-server ?readd= pre-fill routing", () => {
-  // NON-catalog re-add → name-only seed + honest banner; never extract-manifest.
-  baseTest("non-catalog ?readd= seeds the name + honest banner, no extract fetch", async ({ page, hub }) => {
+  // NON-catalog re-add (404 from /api/catalog/manifest) → name-only seed +
+  // honest banner; never extract-manifest, never the disk-only /api/manifest/get.
+  baseTest("non-catalog ?readd= seeds the name + honest banner, no extract/disk fetch", async ({ page, hub }) => {
     const extractHits = { count: 0 };
     await installExtractTrap(page, extractHits);
-    await page.route("**/api/catalog", async (route) => {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ catalog: [{ name: "other", description: "", kind: "global" }] }) });
+    let manifestGetHit = false;
+    await page.route("**/api/manifest/get**", async (route) => {
+      manifestGetHit = true;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ yaml: "", hash: "" }) });
+    });
+    await page.route("**/api/catalog/manifest**", async (route) => {
+      await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "not found", code: "CATALOG_MANIFEST_NOT_FOUND" }) });
     });
 
     await page.goto(`${hub.url}/#/add-server?readd=customsrv`);
@@ -290,21 +322,26 @@ baseTest.describe("D2 — Add-server ?readd= pre-fill routing", () => {
     await baseExpect(page.locator('[data-testid="yaml-preview"]')).toContainText("command: ''");
     await baseExpect(page.locator('[data-testid="yaml-preview"]')).not.toContainText("env:");
     baseExpect(extractHits.count).toBe(0);
+    baseExpect(manifestGetHit).toBe(false);
   });
 
-  // CATALOG-known re-add → prefill from the SHIPPED manifest: command/args
-  // present, sensitive env as a secret: ref (NEVER a literal). Never extract.
-  baseTest("catalog-known ?readd= prefills from the shipped manifest (command/args present, env as secret: ref)", async ({ page, hub }) => {
+  // CATALOG-known re-add → prefill from the EMBED manifest via the single
+  // /api/catalog/manifest endpoint: command/args present, sensitive env as a
+  // secret: ref (NEVER a literal). Never extract, never the disk-only edit get.
+  baseTest("catalog-known ?readd= prefills from the embed manifest (command/args present, env as secret: ref)", async ({ page, hub }) => {
     const extractHits = { count: 0 };
     await installExtractTrap(page, extractHits);
-    await page.route("**/api/catalog", async (route) => {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ catalog: [{ name: "wolfram", description: "", kind: "global" }] }) });
-    });
-    let manifestHit = false;
+    let manifestGetHit = false;
     await page.route("**/api/manifest/get**", async (route) => {
-      manifestHit = true;
-      // The SHIPPED manifest carries a secret: ref, NOT a literal — the
-      // secret-safe source D2 relies on.
+      manifestGetHit = true;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ yaml: "", hash: "" }) });
+    });
+    let catalogManifestHit = false;
+    await page.route("**/api/catalog/manifest**", async (route) => {
+      catalogManifestHit = true;
+      // The EMBED manifest carries a secret: ref, NOT a literal — the
+      // secret-safe source D2 relies on. (No hash field: read-for-prefill
+      // contract, not the optimistic-concurrency edit one.)
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -312,7 +349,6 @@ baseTest.describe("D2 — Add-server ?readd= pre-fill routing", () => {
           yaml:
             "name: 'wolfram'\nkind: global\ntransport: stdio-bridge\ncommand: 'node'\n" +
             "base_args:\n  - 'index.js'\nenv:\n  WOLFRAM_LLM_APP_ID: 'secret:wolfram_app_id'\n",
-          hash: "h1",
         }),
       });
     });
@@ -320,7 +356,7 @@ baseTest.describe("D2 — Add-server ?readd= pre-fill routing", () => {
     await page.goto(`${hub.url}/#/add-server?readd=wolfram`);
     await baseExpect(page.locator("h1")).toHaveText("Add server");
     await baseExpect(page.locator("#field-name")).toHaveValue("wolfram");
-    // Command/args come along from the shipped manifest.
+    // Command/args come along from the embed manifest.
     await baseExpect(page.locator('[data-testid="yaml-preview"]')).toContainText("command: 'node'");
     await baseExpect(page.locator('[data-testid="yaml-preview"]')).toContainText("index.js");
     // The sensitive env is a secret: ref, never a resolved literal.
@@ -329,7 +365,8 @@ baseTest.describe("D2 — Add-server ?readd= pre-fill routing", () => {
     // explains WHY the form is pre-filled and nudges the operator to set secrets.
     await baseExpect(page.getByTestId("banner")).toContainText("Pre-filled from the catalog for wolfram");
     await baseExpect(page.getByTestId("banner")).toHaveClass(/banner info/);
-    baseExpect(manifestHit).toBe(true);
+    baseExpect(catalogManifestHit).toBe(true);
+    baseExpect(manifestGetHit).toBe(false);
     baseExpect(extractHits.count).toBe(0);
   });
 

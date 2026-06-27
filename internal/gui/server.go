@@ -302,6 +302,17 @@ func (realCatalogLister) CatalogList() ([]config.CatalogFields, error) {
 	return api.NewAPI().CatalogList()
 }
 
+// realCatalogManifestGetter is the production adapter for GET
+// /api/catalog/manifest (D2 r2). It routes to api.CatalogManifestGet,
+// the EMBED-ONLY reader whose membership gate excludes any disk-only name
+// BEFORE the loader, so the cold-re-enable Re-add prefill can never echo a
+// hand-planted disk manifest carrying a literal secret.
+type realCatalogManifestGetter struct{}
+
+func (realCatalogManifestGetter) CatalogManifestGet(name string) (string, error) {
+	return api.NewAPI().CatalogManifestGet(name)
+}
+
 // (realMarketplaceLister, the production adapter for GET /api/marketplace,
 // lives in marketplace.go alongside the marketplaceLister interface +
 // handler — §10 v2b read-only marketplace browse.)
@@ -507,24 +518,25 @@ type Server struct {
 	// caching machinery. Other handlers still use the per-request
 	// api.NewAPI() pattern (out of scope for this task; can adopt later
 	// if their workloads benefit).
-	api                  *api.API
-	onActivateWindow     func() error
-	scanner              scanner
-	status               statusProvider
-	health               healthBackend
-	migrator             migrator
-	demigrater           demigrater
-	dismisser            dismisser
-	manifestCreator      manifestCreator
-	manifestValidator    manifestValidator
-	manifestGetter       manifestGetter
-	manifestPresence     manifestPresence
-	manifestEditor       manifestEditor
-	manifestLister       manifestLister
-	manifestDeleter      manifestDeleter
-	catalogLister        catalogLister
-	marketplaceLister    marketplaceLister
-	marketplaceRefresher marketplaceRefresher
+	api                   *api.API
+	onActivateWindow      func() error
+	scanner               scanner
+	status                statusProvider
+	health                healthBackend
+	migrator              migrator
+	demigrater            demigrater
+	dismisser             dismisser
+	manifestCreator       manifestCreator
+	manifestValidator     manifestValidator
+	manifestGetter        manifestGetter
+	manifestPresence      manifestPresence
+	manifestEditor        manifestEditor
+	manifestLister        manifestLister
+	manifestDeleter       manifestDeleter
+	catalogLister         catalogLister
+	catalogManifestGetter catalogManifestGetter
+	marketplaceLister     marketplaceLister
+	marketplaceRefresher  marketplaceRefresher
 	// Marketplace one-click install (POST /api/marketplace/install) seams —
 	// all behind interfaces so handler tests inject fakes and never touch the
 	// live fleet / live client configs.
@@ -789,6 +801,7 @@ func NewServer(cfg Config) *Server {
 	s.manifestLister = realManifestLister{}
 	s.manifestDeleter = realManifestDeleter{}
 	s.catalogLister = realCatalogLister{}
+	s.catalogManifestGetter = realCatalogManifestGetter{}
 	s.marketplaceLister = realMarketplaceLister{}
 	s.marketplaceRefresher = realMarketplaceLister{}
 	s.marketplaceInstallLoader = realMarketplaceEntryLoader{}

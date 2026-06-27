@@ -297,6 +297,65 @@ func (a *API) ManifestGet(name string) (string, error) {
 	return string(data), nil
 }
 
+// ErrManifestNotEmbedded is returned by CatalogManifestGet when the
+// requested server name is NOT in the binary's embedded manifest set
+// (embeddedManifestNames). The D2 cold-re-enable Re-add flow maps it to
+// the "isn't in the catalog" 404 → name-only seed. It is the explicit
+// membership-gate signal: a name that is only on disk (a dev-checkout
+// manifest, or — the security case — a hand-planted disk manifest whose
+// env carries literal secrets) is excluded BEFORE the loader runs, so the
+// disk read in loadManifestYAMLEmbedFirst is unreachable for this path.
+var ErrManifestNotEmbedded = errors.New("manifest not in the embedded catalog set")
+
+// CatalogManifestGet returns the raw YAML of the named server's manifest
+// SOURCED ONLY FROM THE BINARY'S EMBED — never disk. It backs the D2
+// cold-re-enable Re-add prefill, whose only secret-safe value source is
+// the shipped manifest (its env carries `secret:`/`${env:}` placeholders,
+// never a resolved literal). It is deliberately distinct from ManifestGet
+// (embed-first WITH disk fallback) and ManifestGetWithHash (disk-only edit
+// contract): the prefill must NOT echo a disk manifest, because a
+// hand-planted on-disk manifest could carry a literal secret in env.
+//
+// SECURITY CORE — the membership gate MUST run BEFORE the loader:
+//  1. checkManifestName(name) — the same path-traversal / reserved-name gate
+//     every manifest entry point applies, so a bad name cannot drive a
+//     pre-validation filesystem probe.
+//  2. MEMBERSHIP GATE — name ∈ embeddedManifestNames()? If NO, return
+//     ErrManifestNotEmbedded immediately. embeddedManifestNames reads the
+//     embed FS directly (it does NOT consult MCPHUB_MANIFEST_DIR_OVERRIDE),
+//     so a name present only on disk is excluded here regardless of any
+//     test override, and the loader below is never reached for it.
+//  3. loadManifestYAMLEmbedFirst(name) — for a name that PASSED the gate
+//     (so it IS embedded), the embed branch (manifest_source.go:81) returns
+//     before the disk fallback (:84-86) ever executes. A disk manifest with
+//     literal secrets is therefore never sourced by this path.
+func (a *API) CatalogManifestGet(name string) (string, error) {
+	if err := checkManifestName(name); err != nil {
+		return "", err
+	}
+	// Membership gate BEFORE the loader. A name that is not in the embed
+	// set (disk-only dev manifest, or a hand-planted disk manifest) is
+	// refused here, so loadManifestYAMLEmbedFirst's disk fallback is
+	// structurally unreachable for the catalog-prefill contract.
+	embedded := false
+	for _, n := range embeddedManifestNames() {
+		if n == name {
+			embedded = true
+			break
+		}
+	}
+	if !embedded {
+		return "", ErrManifestNotEmbedded
+	}
+	// name is embedded → loadManifestYAMLEmbedFirst hits the embed branch
+	// and returns before any disk read.
+	data, err := loadManifestYAMLEmbedFirst(name)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 // ManifestGetIn is the tempdir-capable form of ManifestGet.
 //
 // checkManifestName must run at entry: production wrappers gate on it,
