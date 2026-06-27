@@ -340,6 +340,143 @@ func TestProjectScanConfigPaths_RealIntermediateDirIncluded(t *testing.T) {
 	}
 }
 
+// TestProjectScanConfigPaths_FinalFileSymlinkEscapeDropped is the finding-1
+// residual guard: a per-client config FILE that is ITSELF a symlink to an
+// OUTSIDE regular file must be DROPPED even with MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK=1
+// set — the project scan must NOT inherit the presence gate's opt-in
+// symlink-following. The parent .cursor dir is in-root (a real dir), so the
+// parent check passes; only the LEAF link escapes, which the final-file check
+// catches. claude-code (whose .mcp.json is absent) is unaffected and stays.
+func TestProjectScanConfigPaths_FinalFileSymlinkEscapeDropped(t *testing.T) {
+	// Set the opt-in that makes the downstream presence gate report a
+	// symlink-to-regular-file as "ok" → the scan would otherwise follow it.
+	t.Setenv("MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK", "1")
+
+	root := t.TempDir()
+	// A real in-root .cursor dir (parent check passes), but mcp.json inside it
+	// is a symlink to an OUTSIDE file the scan must never read.
+	cursorDir := filepath.Join(root, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
+		t.Fatalf("mkdir .cursor: %v", err)
+	}
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "mcp.json")
+	if err := os.WriteFile(outsideFile,
+		[]byte(`{"mcpServers":{"evil":{"command":"x"}}}`), 0o600); err != nil {
+		t.Fatalf("seed outside mcp.json: %v", err)
+	}
+	// <root>/.cursor/mcp.json -> /outside/mcp.json (final-FILE symlink).
+	if err := os.Symlink(outsideFile, filepath.Join(cursorDir, "mcp.json")); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unsupported on this host: %v", err)
+		}
+		t.Fatalf("symlink: %v", err)
+	}
+
+	paths, err := ProjectScanConfigPaths(root)
+	if err != nil {
+		t.Fatalf("ProjectScanConfigPaths(%q) error = %v", root, err)
+	}
+	// cursor is DROPPED — the leaf link escapes realRoot.
+	if got, ok := paths["cursor"]; ok {
+		t.Errorf("cursor must be dropped (final-file symlink escape under opt-in) but got path %q", got)
+	}
+	// Defense-in-depth: NO returned path may resolve under `outside`.
+	realOutside, err := filepath.EvalSymlinks(outside)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(outside): %v", err)
+	}
+	for client, p := range paths {
+		resolved, rerr := filepath.EvalSymlinks(p)
+		if rerr != nil {
+			// A returned path that doesn't resolve is fine (absent leaf).
+			continue
+		}
+		if rootContainsPath(realOutside, resolved) {
+			t.Errorf("client %q path %q resolves into outside root %q", client, p, realOutside)
+		}
+	}
+}
+
+// TestProjectScanConfigPaths_FinalFileSymlinkContainedIncluded is the negative
+// control for the final-file guard: a mcp.json that is a symlink to ANOTHER
+// file still INSIDE realRoot resolves in-root and the client is INCLUDED — the
+// guard is containment-based, not symlink-phobic.
+func TestProjectScanConfigPaths_FinalFileSymlinkContainedIncluded(t *testing.T) {
+	root := t.TempDir()
+	cursorDir := filepath.Join(root, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o755); err != nil {
+		t.Fatalf("mkdir .cursor: %v", err)
+	}
+	inRootTarget := filepath.Join(root, "real-mcp.json")
+	if err := os.WriteFile(inRootTarget, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatalf("seed in-root target: %v", err)
+	}
+	if err := os.Symlink(inRootTarget, filepath.Join(cursorDir, "mcp.json")); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink unsupported on this host: %v", err)
+		}
+		t.Fatalf("symlink: %v", err)
+	}
+
+	paths, err := ProjectScanConfigPaths(root)
+	if err != nil {
+		t.Fatalf("ProjectScanConfigPaths(%q) error = %v", root, err)
+	}
+	if _, ok := paths["cursor"]; !ok {
+		t.Errorf("cursor dropped despite an IN-ROOT symlinked mcp.json (guard is containment-based, not symlink-phobic)")
+	}
+}
+
+// TestProjectScanConfigPaths_ForwardSlashRoot is the finding-4 guard: the P1
+// frontend canonicalizes Windows roots with FORWARD slashes (C:/dev/proj), and
+// the endpoint must ACCEPT them (previously the clean round-trip rejected them
+// on Windows because Clean produces backslashes). POSIX is unaffected
+// (FromSlash is a no-op). A forward-slash TRAVERSAL (C:/dev/../etc) must STILL
+// be REJECTED. GOOS-gated like the existing symlink tests.
+func TestProjectScanConfigPaths_ForwardSlashRoot(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("forward-slash separator normalization is Windows-specific; POSIX roots already use /")
+	}
+	// A real temp dir, then re-expressed with forward slashes the way the P1
+	// frontend canonicalizes it.
+	root := t.TempDir()
+	fwd := filepath.ToSlash(root) // e.g. C:/Users/.../Temp/xxxxx
+	if fwd == root {
+		t.Fatalf("test bug: ToSlash(%q) did not change separators on Windows", root)
+	}
+
+	paths, err := ProjectScanConfigPaths(fwd)
+	if err != nil {
+		t.Fatalf("ProjectScanConfigPaths(%q) (forward-slash) error = %v; want accepted", fwd, err)
+	}
+	realRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
+	if err != nil {
+		t.Fatalf("EvalSymlinks(root): %v", err)
+	}
+	want := filepath.Join(realRoot, ".mcp.json")
+	if paths["claude-code"] != want {
+		t.Errorf("forward-slash root: claude-code path = %q, want %q", paths["claude-code"], want)
+	}
+}
+
+// TestProjectScanConfigPaths_ForwardSlashTraversalRejected proves the
+// separator normalization PRESERVES the traversal-rejection guard: a
+// forward-slash root carrying `..` (C:/dev/../etc) is FromSlash'd to backslash,
+// Clean'd to a different path, and rejected by the round-trip equality guard.
+func TestProjectScanConfigPaths_ForwardSlashTraversalRejected(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("forward-slash Windows traversal case is Windows-specific")
+	}
+	// Build an absolute forward-slash root with a `..` segment. After FromSlash
+	// it becomes `C:\dev\..\etc`; Clean collapses to `C:\etc` ≠ normalized
+	// input, so it must be rejected (never stat'd).
+	dirty := "C:/dev/../etc"
+	if _, err := ProjectScanConfigPaths(dirty); err == nil {
+		t.Fatalf("ProjectScanConfigPaths(%q) accepted a forward-slash traversal root", dirty)
+	}
+}
+
 // TestProjectScanConfigPaths_IntermediateSymlinkContainedIncluded proves the
 // guard is CONTAINMENT-based, not symlink-phobic: a .cursor that is a symlink
 // pointing to ANOTHER directory still INSIDE realRoot resolves in-root and the

@@ -61,6 +61,11 @@ type ProjectScope struct {
 // Clients without a project-local scope are simply absent from this registry
 // (equivalently Supported:false) and never contribute a project config path.
 var projectScopeRegistry = []ProjectScope{
+	// claude-code reads the .mcp.json Project scope and reports every server in
+	// its `mcpServers` as CONFIGURED. The enabled/disabledMcpjsonServers
+	// reconciliation lives in the ~/.claude.json Local scope (a SEPARATE
+	// substrate) and is deferred to P2b per the design doc — a known scoped
+	// boundary, not a defect.
 	{Client: "claude-code", RelFile: ".mcp.json", SectionKey: "mcpServers", Supported: true},
 	{Client: "cursor", RelFile: filepath.Join(".cursor", "mcp.json"), SectionKey: "mcpServers", Supported: true},
 	{Client: "vscode", RelFile: filepath.Join(".vscode", "mcp.json"), SectionKey: "servers", Supported: true},
@@ -136,6 +141,18 @@ func ProjectScanConfigPaths(root string) (map[string]string, error) {
 	if root == "" {
 		return nil, fmt.Errorf("project root is required")
 	}
+	// Separator normalization BEFORE the IsAbs + clean round-trip guard. The
+	// P1 Projects frontend canonicalizes roots with FORWARD slashes
+	// (`C:/dev/proj`), but on Windows filepath.Clean produces BACKSLASHES, so a
+	// forward-slash Windows root would fail the round-trip equality guard below
+	// and the endpoint would reject the frontend's OWN roots
+	// (PROJECT_ROOT_INVALID), breaking the feature end-to-end. FromSlash
+	// converts `/`→`\` on Windows and is a NO-OP on POSIX (so a POSIX
+	// `/home/proj` is unaffected). The guard's security property is PRESERVED:
+	// FromSlash only swaps the separator, it does NOT collapse `..` segments —
+	// `C:/dev/../etc` → FromSlash → `C:\dev\..\etc` → Clean → `C:\etc` ≠
+	// normalized input → still REJECTED by the round-trip guard.
+	root = filepath.FromSlash(root)
 	if !filepath.IsAbs(root) {
 		return nil, fmt.Errorf("project root must be an absolute path")
 	}
@@ -189,6 +206,25 @@ func ProjectScanConfigPaths(root string) (map[string]string, error) {
 		if !parentContainedInRoot(realRoot, candidate) {
 			continue
 		}
+
+		// FINAL-FILE symlink defense (independent of the parent check above):
+		// the candidate config FILE may ITSELF be a symlink whose target is a
+		// regular file OUTSIDE realRoot — e.g. `<root>/.cursor/mcp.json ->
+		// /outside/mcp.json`. The downstream presence gate only Lstats the
+		// final file and reports "ok" for a symlink-to-regular-file when the
+		// operator has opted in via MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK on a
+		// non-strict host (scan.go probeClientConfigPresence), after which
+		// os.ReadFile FOLLOWS the link and reads the outside target — an escape
+		// the parent check cannot see (the parent .cursor is in-root; only the
+		// leaf link escapes). Resolving the final candidate here makes the
+		// clients-package contract SELF-CONTAINED: the project scan never
+		// inherits that opt-in symlink-following regardless of the presence
+		// gate's posture. A NON-EXISTENT candidate is the common no-config case
+		// — keep it (nothing is read; the presence gate skips an absent file).
+		// Any OTHER resolution failure fails CLOSED (drop).
+		if !finalFileContainedInRoot(realRoot, candidate) {
+			continue
+		}
 		out[ps.Client] = candidate
 	}
 	return out, nil
@@ -224,6 +260,33 @@ func parentContainedInRoot(realRoot, candidate string) bool {
 		return os.IsNotExist(err)
 	}
 	return rootContainsPath(realRoot, resolvedParent)
+}
+
+// finalFileContainedInRoot reports whether the candidate config FILE, after
+// symlink resolution, is still contained within realRoot. realRoot is the
+// already-symlink-resolved project root.
+//
+// Unlike parentContainedInRoot (which guards an intermediate symlinked
+// DIRECTORY), this guards the LEAF: a `<root>/.cursor/mcp.json` that is itself
+// a symlink to an OUTSIDE regular file. The downstream presence gate
+// (scan.go probeClientConfigPresence) reports such a leaf as "ok" under the
+// MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK opt-in, after which the scanner's
+// os.ReadFile follows it outside realRoot. Resolving the leaf here keeps the
+// project scan from inheriting that opt-in symlink-following.
+//
+// A NON-EXISTENT candidate is NOT an escape (the overwhelmingly common
+// no-config case): the candidate is kept and the presence gate skips the
+// absent file. A candidate that EXISTS but cannot be resolved (EvalSymlinks
+// error other than not-exist — e.g. a looping/broken link) fails CLOSED
+// (dropped). A resolved candidate that escapes realRoot is an escape.
+func finalFileContainedInRoot(realRoot, candidate string) bool {
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		// Missing leaf → keep (no read happens). Any other resolution failure
+		// → fail closed (drop).
+		return os.IsNotExist(err)
+	}
+	return rootContainsPath(realRoot, resolved)
 }
 
 // rootContainsPath reports whether candidate is equal to, or a true
