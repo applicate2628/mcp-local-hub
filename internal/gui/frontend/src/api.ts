@@ -1,3 +1,5 @@
+import type { ScanResult } from "./types";
+
 // fetchOrThrow is the shared API wrapper mirroring the legacy fetchOrThrow
 // from servers.js. Backend handlers surface errors via the {error, code}
 // JSON envelope (writeAPIError in the Go side) — not the success shape the
@@ -1415,4 +1417,180 @@ export async function deleteGroup(name: string): Promise<GroupMutationResponse> 
     restart_required: raw.restart_required === true,
     hub_live: raw.hub_live === true,
   };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Per-project-GUI Phase 3b — the Projects detail-lens aggregate + toggle.
+//
+// GET /api/projects   composes A (workspace LSP) + B (project scan, incl. both
+//                     claude scopes) + C (groups) into ONE DTO per canonical
+//                     project key — the SINGLE data source the P3b detail lens
+//                     reads (mirrors internal/gui/projects_aggregate.go).
+// POST /api/projects/toggle  is the IMMEDIATE per-row toggle (no matrix/Apply):
+//                     enable/disable ONE server in ONE substrate. The write
+//                     owner is dispatched server-side by clients.ProjectToggleOwner
+//                     from {client, scope}; the frontend's ONLY scope logic is the
+//                     documented per-substrate rule in Projects.tsx (NEVER branch
+//                     on a client name to pick a write owner — design decision 5).
+//                     The response READS BACK the persisted state, so callers
+//                     reconcile to response.enabled, not the requested intent.
+// ───────────────────────────────────────────────────────────────────
+
+// ProjectAggregateDTO mirrors gui.projectAggregateDTO. `scan` is nil when the
+// project root could not be resolved/scanned; `scan_error` then carries a stable
+// code so the row still renders (PROJECT_ROOT_INVALID / PROJECT_SCAN_FAILED).
+export interface ProjectAggregateDTO {
+  key: string;
+  workspace_path: string;
+  entries: WorkspaceEntryDTO[];
+  scan?: ScanResult;
+  scan_error?: string;
+}
+
+// ProjectsAggregateResponse mirrors gui.projectsAggregateResponse. Groups are
+// returned once at the top (project-unbound in P3a/P3b; binding is P3c).
+export interface ProjectsAggregateResponse {
+  projects: ProjectAggregateDTO[];
+  groups: GroupDTO[];
+  groups_error?: string;
+}
+
+// normalizeProjectsAggregate defends against an older/partial body (consistent
+// with normalizeGroup): guarantees non-null arrays and normalizes each group.
+function normalizeProjectsAggregate(
+  raw: Partial<ProjectsAggregateResponse>,
+): ProjectsAggregateResponse {
+  return {
+    projects: Array.isArray(raw.projects)
+      ? raw.projects.map((p) => ({
+          key: typeof p?.key === "string" ? p.key : "",
+          workspace_path: typeof p?.workspace_path === "string" ? p.workspace_path : "",
+          entries: Array.isArray(p?.entries) ? p.entries : [],
+          scan: p?.scan,
+          scan_error: typeof p?.scan_error === "string" ? p.scan_error : undefined,
+        }))
+      : [],
+    groups: Array.isArray(raw.groups) ? raw.groups.map(normalizeGroup) : [],
+    groups_error: typeof raw.groups_error === "string" ? raw.groups_error : undefined,
+  };
+}
+
+// getProjectsAggregate reads the single A+B+C aggregate. An absent registry /
+// groups.yaml yields empty arrays — the normal first-run path.
+export async function getProjectsAggregate(): Promise<ProjectsAggregateResponse> {
+  return normalizeProjectsAggregate(
+    await fetchOrThrow<Partial<ProjectsAggregateResponse>>("/api/projects", "object"),
+  );
+}
+
+// ProjectToggleScope mirrors clients.ProjectToggleScope — the per-project
+// substrate a toggle targets. The frontend selects the scope per the documented
+// single-owner rule (Projects.tsx `scopeForToggle`); the backend ProjectToggleOwner
+// dispatches the write owner from (client, scope).
+export type ProjectToggleScope =
+  | "workspace-lsp"
+  | "project-object-member"
+  | "claude-local-membership"
+  | "group-servers";
+
+// ProjectToggleRequest mirrors gui.projectToggleRequest.
+//   - root:   the project root (required for workspace-lsp + object-member +
+//             claude-local-membership; ignored for group-servers).
+//   - client: the client id (cursor / vscode / claude-code) for object-member;
+//             ignored for workspace + group.
+//   - scope:  the substrate disambiguator (claude-code has TWO project substrates).
+//   - server: the server name to toggle.
+//   - enable: true = approve/add/register; false = remove/unregister.
+//   - group:  the group name for group-servers.
+//   - value:  the object-member value to SET on an object-member ENABLE (the
+//             config shape for this client). REQUIRED by the backend on an
+//             object-member enable (PROJECT_TOGGLE_INVALID otherwise). The Projects
+//             screen NEVER sends it: an object-member (cursor / vscode) re-enable is
+//             always COLD — it routes to Add-server / Catalog (CORE RULING / D2),
+//             never a value-bearing enable POST. (The warm value-replay path was
+//             removed in P3b r2: the aggregate NILs every raw blob — strip-Raw
+//             security posture — so no held value could ever exist. FIX 2.) The
+//             field stays on the wire type because the backend object-member enable
+//             contract still accepts it for a future value-bearing caller.
+//   - languages: narrows a workspace register/unregister to specific LSP
+//             languages; empty = all.
+export interface ProjectToggleRequest {
+  root?: string;
+  client?: string;
+  scope: ProjectToggleScope;
+  server: string;
+  enable: boolean;
+  group?: string;
+  value?: Record<string, unknown>;
+  languages?: string[];
+}
+
+// ProjectToggleResult mirrors gui.projectToggleResponse — the read-back result.
+// `enabled` is the server's NEW persisted state in the substrate (NOT the
+// requested intent — callers reconcile to this). `warnings` carries best-effort
+// backend warnings (e.g. a Model-A register scheduler warning, or a group
+// republish-stale notice) the row surfaces quietly without failing the toggle.
+export interface ProjectToggleResult {
+  scope: ProjectToggleScope;
+  server: string;
+  enabled: boolean;
+  warnings?: string[];
+}
+
+// ProjectToggleError preserves the backend's stable `code` (and HTTP status) so
+// the row can map a failure to its plain-copy message (§3.1 code→copy map) — the
+// raw code lives only in a tooltip, never on the visible row. Stable codes:
+//   400 PROJECT_TOGGLE_INVALID        — a required field was missing.
+//   400 PROJECT_TOGGLE_UNSUPPORTED    — no project-local config here for this client.
+//   400 PROJECT_ROOT_INVALID          — the project's root could not be read.
+//   400 PROJECT_TOGGLE_UNKNOWN_SERVER — not a known routable server.
+//   404 PROJECT_TOGGLE_GROUP_NOT_FOUND— that group no longer exists.
+//   500 PROJECT_TOGGLE_FAILED         — the change couldn't be saved.
+export class ProjectToggleError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(message: string, code: string, status: number) {
+    super(message);
+    this.name = "ProjectToggleError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
+// toggleProjectServer POSTs the per-row toggle and resolves to the read-back
+// result on success. It rejects with a ProjectToggleError carrying the stable
+// code on any non-2xx so the row can pick the plain-copy + retry/no-retry
+// behavior from the §3.1 map without parsing the human-readable string.
+export async function toggleProjectServer(
+  req: ProjectToggleRequest,
+): Promise<ProjectToggleResult> {
+  const resp = await fetch("/api/projects/toggle", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (resp.ok) {
+    const raw = (await resp.json()) as Partial<ProjectToggleResult>;
+    return {
+      scope: (raw.scope ?? req.scope) as ProjectToggleScope,
+      server: typeof raw.server === "string" ? raw.server : req.server,
+      enabled: raw.enabled === true,
+      warnings: Array.isArray(raw.warnings)
+        ? raw.warnings.filter((wn) => typeof wn === "string")
+        : undefined,
+    };
+  }
+  let body: { error?: string; code?: string } | null = null;
+  try {
+    body = (await resp.json()) as { error?: string; code?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  const msg = body?.error ?? resp.statusText ?? "toggle failed";
+  const code = body?.code ?? `HTTP_${resp.status}`;
+  throw new ProjectToggleError(
+    `/api/projects/toggle [${code}]: ${msg}`,
+    code,
+    resp.status,
+  );
 }

@@ -2463,3 +2463,207 @@ nav a,
 .readiness-secret-deeplink {
   font-size: 0.85em;
 }
+
+/* ============================================================
+ * Projects detail-lens (per-project-GUI Phase 3b)
+ * ------------------------------------------------------------
+ * The #/projects?path=<key> detail lens (screens/Projects.tsx). Token-driven
+ * (--border / --card-surface / --bg / --success / --text-muted / the --gap-*
+ * spacing scale) so the screen is light/dark aware like every other screen.
+ * The list view reuses the shared `.card` chrome; these rules style only the
+ * detail-lens specifics: the per-client sub-cards, the claude both-scopes
+ * subsections, the per-row toggle cell + its feedback (spinner / ✓ flash /
+ * warnings / error), the shadow-muted cross-reference row, and the
+ * consent-on-enable gate.
+ * ============================================================ */
+.projects-screen {
+  /* The screen container; the global `.screen` padding already applies. A small
+     max-width keeps the per-row toggles readable on a wide window. */
+  max-width: 64rem;
+}
+
+/* List view: one card per project. The cards themselves are `.card`; this just
+   resets the <ul> chrome (also set inline, kept here as the styled owner). */
+.projects-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Neutral mechanism provenance badge ("workspace" / "project-config" / "group").
+   Deliberately NEUTRAL gray (NOT a routing-chip color) so it never misreads as a
+   live state value. */
+.projects-mechanism-badge {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 0.75em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* A per-client sub-card inside the "Project MCP config" section (Claude Code
+   dual-scope / Cursor / VS Code). Reads as a panel nested below the section card
+   header: a hairline border + a subtly-recessed surface. */
+.projects-client-card {
+  margin-top: var(--gap-sm);
+  padding: var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg);
+}
+.projects-client-card + .projects-client-card {
+  margin-top: var(--gap-sm);
+}
+.projects-client-card-head {
+  margin-bottom: var(--gap-xs);
+  padding-bottom: var(--gap-xs);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The two labeled subsections of the claude both-scopes card (Project / Local). */
+.projects-claude-subsection {
+  margin-top: var(--gap-sm);
+}
+.projects-claude-subsection + .projects-claude-subsection {
+  padding-top: var(--gap-sm);
+  border-top: 1px dashed var(--border);
+}
+/* Collapsible "Advanced: raw approval state" disclosure under the Local sub. */
+.projects-claude-raw {
+  margin-top: var(--gap-xs);
+}
+.projects-claude-raw > summary {
+  cursor: pointer;
+}
+
+/* A flat per-server toggle list inside a sub-card (claude Project / cursor /
+   vscode / group). */
+.projects-server-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.projects-server-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  flex-wrap: wrap;
+}
+.projects-server-row + .projects-server-row {
+  border-top: 1px solid var(--border);
+}
+.projects-server-name {
+  flex: 1 1 auto;
+  min-width: 8rem;
+}
+
+/* A shadowed claude Project row — rendered ONCE Local-owned, so the Project
+   subsection shows only a MUTED non-interactive cross-reference (the ⊘ anchor).
+   Dimmed so it never competes with the live Local row for attention. */
+.projects-shadow-muted {
+  opacity: 0.65;
+}
+
+/* The per-row toggle cell + its feedback stack. The cell holds the checkbox
+   label and, below it, any spinner / ✓ flash / warnings / error. */
+.projects-toggle-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--gap-xs);
+  margin-left: auto;
+}
+.projects-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  cursor: pointer;
+}
+.projects-toggle-label:has(input:disabled) {
+  cursor: not-allowed;
+}
+/* Busy spinner — a small de-emphasized glyph while the toggle POST is in flight. */
+.projects-toggle-spinner {
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+/* ✓ flash after a successful reconcile (cleared on the next interaction). */
+.projects-toggle-flash {
+  color: var(--success);
+  font-weight: 600;
+}
+/* Quiet per-row warnings surfaced after a successful toggle (e.g. a group
+   republish-stale notice). Muted, never alarming. */
+.projects-toggle-warnings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  text-align: right;
+}
+/* Row-scoped inline error (the §3.1 plain copy + Retry). Aligns its message +
+   Retry button on one line; the raw code lives only in the title tooltip. */
+.projects-toggle-error {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* Consent-on-enable gate (decision 7 — readiness panel reuse). Opens under the
+   row being enabled; mirrors the Catalog install-gate chrome so the two read as
+   the same affordance. Full-width inside the row so the readiness list wraps. */
+.projects-consent-gate {
+  flex: 1 1 100%;
+  margin-top: var(--gap-xs);
+  padding: var(--gap-sm);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--card-surface);
+}
+.projects-consent-actions {
+  display: flex;
+  gap: var(--gap-sm);
+  margin-top: var(--gap-sm);
+}
+
+/* [A] Workspace tools table — same hairline-grid chrome the Servers matrix uses,
+   scoped to the projects screen so it never restyles the global matrix. */
+.projects-workspace-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: var(--gap-xs);
+}
+.projects-workspace-table th,
+.projects-workspace-table td {
+  border: 1px solid var(--border);
+  padding: var(--cell-padding-y) var(--cell-padding-x);
+  text-align: left;
+  vertical-align: middle;
+}
+.projects-workspace-table th {
+  background: var(--sidebar-bg);
+  font-weight: 600;
+}
+/* The Routing cell may hold several per-client lsp-chips; let them wrap. */
+.projects-routing-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+}
+
+/* [C] Group lens — a flat list of group cards, each with its own member list. */
+.projects-groups-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.projects-group-card + .projects-group-card {
+  margin-top: var(--gap-sm);
+  padding-top: var(--gap-sm);
+  border-top: 1px solid var(--border);
+}
