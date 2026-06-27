@@ -365,9 +365,41 @@ baseTest.describe("D2 — Add-server ?readd= pre-fill routing", () => {
     // explains WHY the form is pre-filled and nudges the operator to set secrets.
     await baseExpect(page.getByTestId("banner")).toContainText("Pre-filled from the catalog for wolfram");
     await baseExpect(page.getByTestId("banner")).toHaveClass(/banner info/);
+    // D2 r3 FINDING 2: a catalog-match (shipped) prefill renders the honest
+    // edit-shadow notice — installing re-installs the embed manifest, so edits
+    // here won't change what's installed unless the operator renames.
+    await baseExpect(page.getByTestId("shipped-server-notice")).toContainText("This is a shipped server");
+    await baseExpect(page.getByTestId("shipped-server-notice")).toContainText("rename the server to save a customized copy");
     baseExpect(catalogManifestHit).toBe(true);
     baseExpect(manifestGetHit).toBe(false);
     baseExpect(extractHits.count).toBe(0);
+  });
+
+  // D2 r3 FINDING 2 — honest-on-rename: renaming away from the shipped name
+  // clears the shipped-server notice (the operator is saving a customized copy).
+  baseTest("catalog-known ?readd= shipped-server notice clears after renaming away", async ({ page, hub }) => {
+    await page.route("**/api/catalog/manifest**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          yaml:
+            "name: 'wolfram'\nkind: global\ntransport: stdio-bridge\ncommand: 'node'\n" +
+            "base_args:\n  - 'index.js'\nenv:\n  WOLFRAM_LLM_APP_ID: 'secret:wolfram_app_id'\n",
+        }),
+      });
+    });
+
+    await page.goto(`${hub.url}/#/add-server?readd=wolfram`);
+    await baseExpect(page.locator("h1")).toHaveText("Add server");
+    await baseExpect(page.locator("#field-name")).toHaveValue("wolfram");
+    // The notice is live while the form name is still the shipped name.
+    await baseExpect(page.getByTestId("shipped-server-notice")).toBeVisible();
+
+    // Rename to save a customized copy → the names diverge → notice hides.
+    await page.locator("#field-name").fill("wolfram-custom");
+    await baseExpect(page.locator("#field-name")).toHaveValue("wolfram-custom");
+    await baseExpect(page.getByTestId("shipped-server-notice")).toHaveCount(0);
   });
 
   // A1 REGRESSION: the existing ?server=&from-client= Create-manifest extract

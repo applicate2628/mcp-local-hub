@@ -108,6 +108,61 @@ func TestCatalogManifestGet_OverrideDoesNotSourceDiskLiteralForUnembeddedName(t 
 	}
 }
 
+// TestCatalogManifestGet_EmbeddedNameWithOverrideStillReadsEmbed is the D2 r3
+// FINDING 1 falsifier. It points MCPHUB_MANIFEST_DIR_OVERRIDE at a temp dir
+// holding wolfram/manifest.yaml with a LITERAL secret, then asserts
+// CatalogManifestGet("wolfram") returns the EMBED YAML (the secret: ref), NOT
+// the disk literal.
+//
+// This is the case the r2 code could NOT defend: wolfram IS in the embed set,
+// so the membership gate passes, and the OLD path (loadManifestYAMLEmbedFirst)
+// would hit the override branch (manifest_source.go:77-79) and read the disk
+// literal for an embedded name. The r3 fix reads the embed FS DIRECTLY
+// (fs.ReadFile(servers.Manifests, ...)) after the gate, with no override/disk
+// branch — so the endpoint is TRULY embed-only and secret-safe by construction.
+func TestCatalogManifestGet_EmbeddedNameWithOverrideStillReadsEmbed(t *testing.T) {
+	dir := t.TempDir()
+	// Sanity: wolfram MUST be in the embed set, or this falsifier is vacuous.
+	embedded := false
+	for _, n := range embeddedManifestNames() {
+		if n == "wolfram" {
+			embedded = true
+			break
+		}
+	}
+	if !embedded {
+		t.Fatalf("test invariant broken: %q is not in the embed set", "wolfram")
+	}
+	// A DISK wolfram manifest carrying a LITERAL secret — exactly what the
+	// override branch of loadManifestYAMLEmbedFirst would have sourced for an
+	// embedded name before the r3 direct-embed-read fix.
+	if err := os.MkdirAll(filepath.Join(dir, "wolfram"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const literal = "sk-WOLFRAM-LITERAL-do-not-source"
+	body := "name: wolfram\nkind: global\ntransport: stdio-bridge\ncommand: node\n" +
+		"env:\n  WOLFRAM_LLM_APP_ID: '" + literal + "'\ndaemons:\n  - name: default\n    port: 9298\n"
+	if err := os.WriteFile(filepath.Join(dir, "wolfram", "manifest.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", dir)
+
+	a := NewAPI()
+	yaml, err := a.CatalogManifestGet("wolfram")
+	if err != nil {
+		t.Fatalf("CatalogManifestGet(wolfram): unexpected error %v", err)
+	}
+	// MUST be the embed YAML (the secret: ref), proving the read ignored the
+	// override entirely.
+	if !strings.Contains(yaml, "secret:wolfram_app_id") {
+		t.Errorf("expected the EMBED YAML (secret: ref) despite the override; got:\n%s", yaml)
+	}
+	// MUST NOT be the disk literal — the whole point of the r3 fix.
+	if strings.Contains(yaml, literal) {
+		t.Fatalf("SECURITY VIOLATION: the disk literal %q was sourced through CatalogManifestGet despite the embedded name — the override leaked", literal)
+	}
+}
+
 // TestCatalogManifestGet_RejectsPathTraversal asserts the name gate runs
 // FIRST — a traversal name is refused at checkManifestName (a non-nil error
 // that is NOT ErrManifestNotEmbedded), so it cannot drive a pre-validation

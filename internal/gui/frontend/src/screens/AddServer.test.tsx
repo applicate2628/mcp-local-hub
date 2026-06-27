@@ -969,3 +969,132 @@ describe("AddServerScreen — D2 cold re-enable Re-add seed effect", () => {
     expect(document.querySelector<HTMLInputElement>("#field-name")?.value).toBe("");
   });
 });
+
+// D2 r3 FINDING 2 — shipped-server edit-shadow notice. A catalog-match Re-add
+// prefills CREATE mode with the SHIPPED name; editing command/args + Save&Install
+// would install the embed-first (UNEDITED) shipped manifest while the UI shows
+// the edits, so the form surfaces an honest notice. It is honest-on-rename.
+describe("AddServerScreen — D2 r3 shipped-server edit-shadow notice", () => {
+  afterEach(() => {
+    window.location.hash = "";
+  });
+
+  const catalogMatch = (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (url.includes("/api/secrets")) {
+      return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+    }
+    if (url.startsWith("/api/catalog/manifest")) {
+      return Promise.resolve(jsonResponse({
+        yaml:
+          "name: 'wolfram'\nkind: global\ntransport: stdio-bridge\ncommand: 'node'\n" +
+          "base_args:\n  - 'index.js'\nenv:\n  WOLFRAM_LLM_APP_ID: 'secret:wolfram_app_id'\n",
+      }));
+    }
+    return Promise.resolve(jsonResponse({}));
+  };
+
+  it("a CATALOG-MATCH ?readd= (200) renders the shipped-server notice", async () => {
+    window.location.hash = "#/add-server?readd=wolfram";
+    mockFetch.mockImplementation(catalogMatch);
+
+    render(<AddServerScreen />);
+
+    await waitFor(() => {
+      expect(document.querySelector<HTMLInputElement>("#field-name")?.value).toBe("wolfram");
+    });
+    await waitFor(() => {
+      const notice = screen.getByTestId("shipped-server-notice");
+      expect(notice.textContent).toContain("This is a shipped server");
+      expect(notice.textContent).toContain("rename the server to save a customized copy");
+    });
+  });
+
+  it("a NON-catalog ?readd= (404) does NOT render the shipped-server notice", async () => {
+    window.location.hash = "#/add-server?readd=customsrv";
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url.startsWith("/api/catalog/manifest")) {
+        return Promise.resolve(jsonResponse({ error: "not found", code: "CATALOG_MANIFEST_NOT_FOUND" }, 404));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(<AddServerScreen />);
+
+    await waitFor(() => {
+      expect(document.querySelector<HTMLInputElement>("#field-name")?.value).toBe("customsrv");
+    });
+    // The honest no-match banner fired; the shipped-server notice must NOT.
+    await waitFor(() => {
+      expect(screen.getByTestId("banner").textContent).toContain("Re-adding customsrv");
+    });
+    expect(screen.queryByTestId("shipped-server-notice")).toBeNull();
+  });
+
+  it("a CATALOG-MANIFEST READ FAILURE (500) does NOT render the shipped-server notice", async () => {
+    window.location.hash = "#/add-server?readd=memo";
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url.startsWith("/api/catalog/manifest")) {
+        return Promise.resolve(jsonResponse({ error: "unavailable", code: "CATALOG_MANIFEST_GET_FAILED" }, 500));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(<AddServerScreen />);
+
+    await waitFor(() => {
+      expect(document.querySelector<HTMLInputElement>("#field-name")?.value).toBe("memo");
+    });
+    expect(screen.queryByTestId("shipped-server-notice")).toBeNull();
+  });
+
+  it("a bare add-server (no ?readd=) does NOT render the shipped-server notice", async () => {
+    window.location.hash = "#/add-server";
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(<AddServerScreen />);
+    await waitFor(() => {
+      const calls = mockFetch.mock.calls.filter(([u]) => typeof u === "string" && u.includes("/api/secrets"));
+      expect(calls.length).toBeGreaterThanOrEqual(1);
+    });
+    expect(screen.queryByTestId("shipped-server-notice")).toBeNull();
+  });
+
+  it("renaming away from the shipped name CLEARS the shipped-server notice (honest on rename)", async () => {
+    window.location.hash = "#/add-server?readd=wolfram";
+    mockFetch.mockImplementation(catalogMatch);
+
+    render(<AddServerScreen />);
+
+    // The notice is live while the form name is still the shipped name.
+    await waitFor(() => {
+      expect(document.querySelector<HTMLInputElement>("#field-name")?.value).toBe("wolfram");
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("shipped-server-notice")).not.toBeNull();
+    });
+
+    // Rename to save a customized copy → the names diverge → notice hides.
+    const nameInput = document.querySelector<HTMLInputElement>("#field-name")!;
+    await userEvent.clear(nameInput);
+    await userEvent.type(nameInput, "wolfram-custom");
+    expect(nameInput.value).toBe("wolfram-custom");
+    await waitFor(() => {
+      expect(screen.queryByTestId("shipped-server-notice")).toBeNull();
+    });
+  });
+});

@@ -111,6 +111,20 @@ export function AddServerScreen(props: {
   // anti-silent-data-loss: paste must not move the baseline).
   const [initialSnapshot, setInitialSnapshot] = useState<ManifestFormState>(BLANK_FORM);
   const [committedCreate, setCommittedCreate] = useState<{ name: string; hash: string } | null>(null);
+  // catalogShipped (D2 r3, FINDING 2): the SHIPPED server name that the
+  // catalog-match Re-add prefill dropped into this CREATE form. Set ONLY in the
+  // 200-success prefill branch (a shipped/embedded server, no local manifest);
+  // null everywhere else and after reset. It is the single owner of the
+  // shipped-server edit-shadow warning, and is HONEST-ON-RENAME by design: the
+  // notice renders iff catalogShipped !== null AND the live form name is still
+  // that shipped name (formState.name === catalogShipped). When the operator
+  // renames away to save a customized copy, the names diverge and the warning
+  // hides automatically. WHY: re-adding a shipped server prefills CREATE mode
+  // with the shipped name; if the operator edits command/args and Save&Install,
+  // ManifestCreateIn writes a disk manifest but Install reads embed-first
+  // (manifest_source.go:81) → the UNEDITED shipped manifest installs while the
+  // UI says "saved/installed". The notice makes that honest (no backend change).
+  const [catalogShipped, setCatalogShipped] = useState<string | null>(null);
   // editName is derived from route.query so that a dirty-declined name=a →
   // name=b navigation does not fire a stale load (the memo dep stays stable).
   const editName = useMemo(() => {
@@ -370,15 +384,13 @@ export function AddServerScreen(props: {
   // manifest carrying a literal secret) and NEVER calls getExtractManifest
   // (the dead post-delete path that carries client env VERBATIM). The ONE
   // source is getCatalogManifest → GET /api/catalog/manifest, which the
-  // backend serves EMBED-ONLY with a membership gate that excludes any
-  // disk-only name BEFORE the loader. So from the frontend the prefill is
+  // backend serves EMBED-ONLY (CatalogManifestGet reads the embed FS directly:
+  // membership gate excludes any disk-only name, then a direct embed read with
+  // no override, no disk, no fallback). So from the frontend the prefill is
   // secret-safe by construction — the embed YAML's env carries `secret:`/
   // `${env:}` placeholders (e.g. servers/wolfram/manifest.yaml:
   // WOLFRAM_LLM_APP_ID = "secret:wolfram_app_id"), never a resolved literal.
-  // (Backend caveat: the test-only MCPHUB_MANIFEST_DIR_OVERRIDE seam can read
-  // an override dir for an embedded name — see CatalogManifestGet; it needs
-  // user-level env control, which already grants vault read, so no trust
-  // boundary is crossed.) Three outcomes:
+  // Three outcomes:
   //   • 200 → prefill from the embed YAML (command/args/secret-refs) + the
   //     F4 catalog-match info banner.
   //   • 404 (CatalogManifestNotFoundError) → name-only seed + the honest
@@ -407,7 +419,11 @@ export function AddServerScreen(props: {
     // is the single source of truth for "did the operator type?". When pristine
     // it replaces the form, moves the dirty-check baseline to `next`, and sets
     // the banner; when not, it leaves all three untouched.
-    const applyIfPristine = (next: ManifestFormState, banner: { kind: "info"; text: string }) => {
+    // Returns true iff the form was still pristine and the seed was applied —
+    // the caller uses that to arm catalogShipped ONLY when the prefill landed,
+    // so the shipped-edit-shadow notice never lies about a prefill that the
+    // clobber-guard skipped.
+    const applyIfPristine = (next: ManifestFormState, banner: { kind: "info"; text: string }): boolean => {
       let replaced = false;
       setFormState((current) => {
         if (deepEqualForm(current, baselineAtStart)) {
@@ -423,6 +439,7 @@ export function AddServerScreen(props: {
         setInitialSnapshot(next);
         setBanner(banner);
       }
+      return replaced;
     };
     (async () => {
       try {
@@ -433,10 +450,17 @@ export function AddServerScreen(props: {
         const parsed = parseYAMLToForm(yaml);
         // F4: explain WHY the form is pre-filled + nudge the operator to set
         // required secrets — symmetric with the no-match / read-failure copy.
-        applyIfPristine(parsed, {
+        const seeded = applyIfPristine(parsed, {
           kind: "info",
           text: `Pre-filled from the catalog for ${readd} — review and set any required secrets before installing.`,
         });
+        // FINDING 2: arm the shipped-server edit-shadow notice ONLY for a
+        // landed catalog-match prefill (a shipped/embedded server). It is
+        // honest-on-rename: rendered iff formState.name === catalogShipped, so
+        // renaming away to save a customized copy hides it.
+        if (seeded) {
+          setCatalogShipped(readd);
+        }
       } catch (err) {
         if (cancelled) return;
         // Name-only secret-safe seed (BLANK command/args/env — the operator
@@ -475,6 +499,9 @@ export function AddServerScreen(props: {
     setFormState(BLANK_FORM);
     setInitialSnapshot(BLANK_FORM);
     setCommittedCreate(null);
+    // The shipped-server edit-shadow notice is a CREATE-mode (Re-add) flag;
+    // clear it on an edit-mode mount so it can never bleed across modes.
+    setCatalogShipped(null);
     // Clear inline secrets typed for the PRIOR draft so a value entered for
     // manifest a cannot reappear prefilled in manifest b that references the
     // same missing key (Codex #378 r4 — a→b edit navigation would otherwise
@@ -1262,6 +1289,22 @@ export function AddServerScreen(props: {
           {banner.staleForceSave && (
             <button type="button" class="btn btn-danger" disabled={busy !== ""} onClick={() => runForceSave()} data-action="force-save">Force Save</button>
           )}
+        </div>
+      )}
+      {/* FINDING 2 (D2 r3): shipped-server edit-shadow notice. A catalog-match
+          Re-add prefills CREATE mode with the SHIPPED name; if the operator
+          edits command/args and Save&Installs under that name, the install
+          reads the embed-first manifest (manifest_source.go:81), so the
+          UNEDITED shipped manifest installs while the form shows the edits.
+          Live ONLY while the form name is still the shipped name (honest on
+          rename — renaming to save a customized copy hides it). Rendered as a
+          sibling of the banner so it persists past a Save&Install success
+          banner as long as the shipped name is unchanged. */}
+      {catalogShipped !== null && formState.name === catalogShipped && (
+        <div class="banner info" data-testid="shipped-server-notice">
+          <p>
+            This is a shipped server — installing re-installs the shipped manifest. Edits to command/args here won't change what's installed; rename the server to save a customized copy.
+          </p>
         </div>
       )}
       {warnings && warnings.length > 0 && (

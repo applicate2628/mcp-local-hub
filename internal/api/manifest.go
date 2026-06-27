@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/servers"
 )
 
 // validManifestName bounds acceptable server names to lower-case
@@ -303,10 +305,8 @@ func (a *API) ManifestGet(name string) (string, error) {
 // the "isn't in the catalog" 404 → name-only seed. It is the explicit
 // membership-gate signal: a name that is only on disk (a dev-checkout
 // manifest, or — the security case — a hand-planted disk manifest whose
-// env carries literal secrets) is excluded BEFORE the loader runs, so the
-// disk FALLBACK in loadManifestYAMLEmbedFirst is unreachable for this path
-// (absent the test-only MCPHUB_MANIFEST_DIR_OVERRIDE seam — see the security
-// note on CatalogManifestGet below).
+// env carries literal secrets) is excluded BEFORE the read runs, so disk
+// is never sourced by this path.
 var ErrManifestNotEmbedded = errors.New("manifest not in the embedded catalog set")
 
 // CatalogManifestGet returns the raw YAML of the named server's manifest
@@ -318,34 +318,25 @@ var ErrManifestNotEmbedded = errors.New("manifest not in the embedded catalog se
 // contract): the prefill must NOT echo a disk manifest, because a
 // hand-planted on-disk manifest could carry a literal secret in env.
 //
-// SECURITY CORE — the membership gate MUST run BEFORE the loader:
+// SECURITY CORE — the membership gate MUST run BEFORE the read:
 //  1. checkManifestName(name) — the same path-traversal / reserved-name gate
 //     every manifest entry point applies, so a bad name cannot drive a
 //     pre-validation filesystem probe.
 //  2. MEMBERSHIP GATE — name ∈ embeddedManifestNames()? If NO, return
 //     ErrManifestNotEmbedded immediately. embeddedManifestNames reads the
-//     embed FS directly (it does NOT consult MCPHUB_MANIFEST_DIR_OVERRIDE),
-//     so a name present only on disk is excluded here regardless of any
-//     test override, and the loader below is never reached for it.
-//  3. loadManifestYAMLEmbedFirst(name) — for a name that PASSED the gate
-//     (so it IS embedded), the embed branch (manifest_source.go:81) returns
-//     before the disk FALLBACK (:84-86) ever executes. A disk manifest with
-//     literal secrets is therefore never sourced by this path in production.
-//     The sole exception is the test-only MCPHUB_MANIFEST_DIR_OVERRIDE seam
-//     (manifest_source.go:77-79), which reads an override dir even for an
-//     embedded name; it is honored in shipped binaries but requires
-//     user-level env control, which already grants direct vault/secret read,
-//     so it crosses no trust boundary the attacker doesn't already hold.
+//     embed FS directly, so a name present only on disk is excluded here and
+//     the read below is never reached for it.
+//  3. DIRECT EMBED READ — fs.ReadFile(servers.Manifests, name+"/manifest.yaml").
+//     Reads the embed FS directly: no override, no disk, no fallback. A disk
+//     manifest with literal secrets is structurally unreachable for this path
+//     — secret-safe by construction.
 func (a *API) CatalogManifestGet(name string) (string, error) {
 	if err := checkManifestName(name); err != nil {
 		return "", err
 	}
-	// Membership gate BEFORE the loader. A name that is not in the embed
+	// Membership gate BEFORE the read. A name that is not in the embed
 	// set (disk-only dev manifest, or a hand-planted disk manifest) is
-	// refused here, so loadManifestYAMLEmbedFirst's disk FALLBACK is
-	// unreachable for the catalog-prefill contract in production. (The
-	// test-only MCPHUB_MANIFEST_DIR_OVERRIDE seam still reads an override
-	// dir for an embedded name — documented above; not production-default.)
+	// refused here with ErrManifestNotEmbedded.
 	embedded := false
 	for _, n := range embeddedManifestNames() {
 		if n == name {
@@ -356,9 +347,12 @@ func (a *API) CatalogManifestGet(name string) (string, error) {
 	if !embedded {
 		return "", ErrManifestNotEmbedded
 	}
-	// name is embedded → loadManifestYAMLEmbedFirst hits the embed branch
-	// and returns before any disk read.
-	data, err := loadManifestYAMLEmbedFirst(name)
+	// name proven embedded + checkManifestName already ran → read the embed
+	// FS DIRECTLY. No override, no disk, no fallback — byte-identical to the
+	// embed branch in loadManifestYAMLEmbedFirst (manifest_source.go:81), but
+	// without that helper's override/disk-fallback branches that could source
+	// disk YAML (and its literal secrets) for an embedded name.
+	data, err := fs.ReadFile(servers.Manifests, name+"/manifest.yaml")
 	if err != nil {
 		return "", err
 	}
