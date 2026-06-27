@@ -92,6 +92,16 @@ func (s *Server) projectsScanHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// P3a stays NAMES-only on the wire (bot PR #433 r3 finding 4, lead
+	// adjudication): the earlier r2 `toggle_value` field (a verbatim Raw copy)
+	// re-exposed secret-bearing config that sanitizeScanResult strips on purpose
+	// (Raw may hold hand-written literal headers.Authorization / env.TOKEN), so it
+	// is REMOVED. The re-enable value-source is deferred to P3b
+	// (work-items/backlog/2026-06-25-p3b-reenable-value-source.md), which must
+	// source it secret-safely. The object-member toggle endpoint still accepts a
+	// caller-supplied value (projectToggleRequest.Value) — only the aggregate's
+	// value PROVISION is dropped here.
+	//
 	// Reuse the global scan's sanitizer so the per-entry Raw config blobs are
 	// stripped before serialization (no client-config internals on the wire).
 	result = sanitizeScanResult(result)

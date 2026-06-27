@@ -851,8 +851,10 @@ func NewServer(cfg Config) *Server {
 	registerStateRelaxSettingRoutes(s)
 	registerSerenaRouterRoutes(s)
 	registerLSPRouterRoutes(s)
-	registerGroupsRoutes(s)   // groups Phase 5b-1: /api/groups CRUD authoring endpoint
-	registerProjectsRoutes(s) // per-project-GUI P2a: GET /api/projects/scan (read-only, Model B)
+	registerGroupsRoutes(s)            // groups Phase 5b-1: /api/groups CRUD authoring endpoint
+	registerProjectsRoutes(s)          // per-project-GUI P2a: GET /api/projects/scan (read-only, Model B)
+	registerProjectsToggleRoutes(s)    // per-project-GUI P3a: POST /api/projects/toggle (write backend)
+	registerProjectsAggregateRoutes(s) // per-project-GUI P3a: GET /api/projects (A+B+C aggregate)
 	return s
 }
 
