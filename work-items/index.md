@@ -4,6 +4,12 @@
 
 (none — all delivered items archived)
 
+## Epics
+
+| Epic | Status | Closed | Outcome |
+|---|---|---|---|
+| [2026-06-19-install-and-it-works-ux](epics/2026-06-19-install-and-it-works-ux.md) | closed | 2026-06-28 | DONE — clean-install + hub-launch + per-project UX. Areas 1/2/5/6 done (#377, #407/#408, #437, #428–#435); area 3 closeable (symlink PRs #409/#410 + hardening #414–#416, residual = accept-disclose posture mitigated by MCPHUB_REQUIRE_SINGLE_USER_HOME=1, decision promoted accepted); area 4 defect fixed (#400) with router-native rewrite DEFERRED; D2 cold re-enable shipped (#439). Deferred follow-ups: area-4 router-native, D1 claude-Local write-back, D2 stash-full-restore, embed-first-shadow bug. |
+
 ## Archived
 
 | Item | Closed | Outcome |

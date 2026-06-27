@@ -1,6 +1,7 @@
 ---
-status: proposed
+status: accepted
 date: 2026-06-21
+accepted: 2026-06-28 — code merged + verified (#409/#410 named PRs + hardening #414/#415/#416); the AF-1 TOCTOU bug is resolved.
 driver: A3 symlink-client-config — close the live AF-1 TOCTOU in the MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK opt-in lane (work-items/bugs/2026-06-21-symlink-optin-toctou-string-rewalk.md) and add a per-write scoped-consent seam so PR-2 can build GUI/CLI consent UX on a hardened foundation.
 supersedes: nothing (extends the PR #258 MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK opt-in; does not remove it)
 related: work-items/bugs/2026-06-21-symlink-optin-toctou-string-rewalk.md (AF-1, PR-1 is its fix); work-items/bugs/closed/2026-05-19-codex-config-symlink-blocked-by-pr209.md (the dotfile-symlink UX gap the env opt-in addressed); PR #209 (confused-deputy refusal); PR #258 (env opt-in + error-symlink scan category)
@@ -134,8 +135,15 @@ directory tree and confirms the write succeeds on the resolved location.
 
 ## Status
 
-**PROPOSED.** PR-1 (this work) implements decisions 1-5 and the disclosed
-residual; verified on the POSIX leg (WSL, go1.26.4) with `TestA3_T1..T6` + the
-scoped-consent pin-match control passing (7/7) and the pre-existing F2 symlink
-tests still green. PR-2 (GUI/CLI consent UX surfacing `PinnedResolvedPath` to
-the operator at confirm time) is out of scope and will reference this decision.
+**ACCEPTED (2026-06-28).** Both PRs merged and verified. PR-1 implemented
+decisions 1-5 and the disclosed residual (the security core: handle-pin +
+consent plumbing), verified on the POSIX leg (WSL, go1.26.4) with
+`TestA3_T1..T6` + the scoped-consent pin-match control passing (7/7) and the
+pre-existing F2 symlink tests still green; merged as #409 with hardening
+follow-ups #414/#415/#416. PR-2 (the GUI/CLI consent UX surfacing
+`PinnedResolvedPath` to the operator at confirm time) shipped as #410. The AF-1
+TOCTOU bug this decision closed
+(`bugs/2026-06-21-symlink-optin-toctou-string-rewalk.md`) is resolved. The
+remaining accept-disclose relax is a documented namespace-rights posture (see
+`## Disclosed residual` above), mitigated by
+`MCPHUB_REQUIRE_SINGLE_USER_HOME=1` — not pending code.
