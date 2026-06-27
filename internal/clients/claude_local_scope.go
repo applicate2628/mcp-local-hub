@@ -3,9 +3,7 @@ package clients
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
-	"strings"
 )
 
 // claude_local_scope.go — per-project-GUI Phase 2b.
@@ -182,34 +180,17 @@ func ReadClaudeLocalScope(root string, allowSymlink bool) (ClaudeLocalScope, err
 		return ClaudeLocalScope{}, nil // no projects map → no local scope
 	}
 
-	wantKey := canonicalClaudeProjectKey(root)
-	if wantKey == "" {
-		return ClaudeLocalScope{}, nil
+	// DETERMINISTIC first-by-sorted-raw-key match (handles canonical collisions
+	// like `C:/dev/proj` vs `c:/dev/proj`). The match rule is the SINGLE owner
+	// matchClaudeProjectRawKey (claude_local_toggle.go), shared with the writer
+	// so reader and writer can never key off different raw entries.
+	rawKey, ok := matchClaudeProjectRawKey(projects, root)
+	if !ok {
+		return ClaudeLocalScope{}, nil // no entry for this project (or empty root)
 	}
-
-	// DETERMINISTIC match. Two raw projects.<key> entries can canonicalize to the
-	// same key (e.g. `C:/dev/proj` and `c:/dev/proj` both case-fold to the same
-	// key on Windows). Go map iteration order is randomized, so a bare
-	// `for k := range projects` would pick a colliding entry non-deterministically
-	// — the same scan could surface a different Local-scope set across runs. Rule:
-	// iterate the raw keys in SORTED order and take the FIRST whose canonical form
-	// matches (first-by-sorted-raw-key on a canonical collision). The pick is
-	// stable across runs and across hosts.
-	rawKeys := make([]string, 0, len(projects))
-	for k := range projects {
-		rawKeys = append(rawKeys, k)
-	}
-	sort.Strings(rawKeys)
-
-	var matchedEntry map[string]any
-	for _, k := range rawKeys {
-		if canonicalClaudeProjectKey(k) == wantKey {
-			matchedEntry, _ = projects[k].(map[string]any)
-			break
-		}
-	}
+	matchedEntry, _ := projects[rawKey].(map[string]any)
 	if matchedEntry == nil {
-		return ClaudeLocalScope{}, nil // no entry for this project
+		return ClaudeLocalScope{}, nil // entry present but not an object
 	}
 
 	out := ClaudeLocalScope{Matched: true}
@@ -295,32 +276,19 @@ func stringSliceFromAny(v any) []string {
 	return out
 }
 
-// canonicalClaudeProjectKey normalizes an absolute project path (a project root
-// OR a raw projects.<key> as written by Claude Code) to ONE comparison form so
-// the three observed key shapes (forward-slash+upper-drive, forward-slash+
-// lower-drive, backslash+upper-drive) all reduce to the same string for a given
-// project. The form is: separator-normalized to the OS native form, Clean'd
-// (collapsing `.`/`..`/redundant separators), converted to FORWARD slashes, and
-// case-folded on Windows (NTFS is case-insensitive; the dev host showed
-// mixed-case drive letters in the keys). On POSIX it is case-sensitive and a
-// no-op on separators.
+// canonicalClaudeProjectKey is the claude-code-specific caller of the SINGLE
+// general join-key owner CanonicalProjectKey (canonical_project_key.go). It
+// matches a project root (or a raw ~/.claude.json projects.<key> as written by
+// Claude Code) against the three observed key shapes (forward-slash+upper-drive,
+// forward-slash+lower-drive, backslash+upper-drive) by reducing both sides to
+// the same normalized comparison string.
 //
-// It is deliberately tolerant — it does NOT validate, stat, or resolve symlinks
-// (that is ProjectScanConfigPaths' job for the config-file read surface). It is
-// purely a string-normalization join key for matching the fixed ~/.claude.json
-// against a root. An empty input returns "".
+// It is a thin alias — NOT a second normalizer — so the claude-local reader and
+// the P3a per-project A+B+C composition can never re-derive the join form
+// divergently (P3 design decision 4 + T2 "no 4th normalizer"). All semantics
+// (FromSlash/Clean/ToSlash/trailing-slash-trim/Windows case-fold, the
+// absolute-path caller contract, no stat/symlink resolution) live in
+// CanonicalProjectKey.
 func canonicalClaudeProjectKey(p string) string {
-	if p == "" {
-		return ""
-	}
-	// FromSlash makes the separators native (/ → \ on Windows; no-op POSIX) so
-	// filepath.Clean collapses segments uniformly regardless of the input's
-	// separator style. ToSlash then forces forward slashes for a stable,
-	// separator-agnostic comparison string.
-	cleaned := filepath.ToSlash(filepath.Clean(filepath.FromSlash(p)))
-	cleaned = strings.TrimRight(cleaned, "/") // drop a trailing slash if any survived
-	if runtime.GOOS == "windows" {
-		cleaned = strings.ToLower(cleaned)
-	}
-	return cleaned
+	return CanonicalProjectKey(p)
 }
