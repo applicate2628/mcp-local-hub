@@ -16,12 +16,15 @@ live binary at design time: 12990df1 (P3a deployed — /api/projects aggregate +
 > CTA into the Add-server/Catalog flow. The original 3-step ruling is kept below
 > for design-history honesty; read step 2 (warm) as superseded/never-shipped.
 
-## CORE RULING — object-member cold-re-enable value-source
-Per-row toggle for an OBJECT-MEMBER substrate (cursor `.cursor/mcp.json` + vscode `.vscode/mcp.json`, scope `project-object-member`). NOTE: the claude Project `.mcp.json` row is NOT an object-member toggle — it uses the approval ARRAY-MOVE (`claude-local-membership`), so it needs no value and never deletes the `.mcp.json` definition (see "KEY CORRECTION" below, shipped per #434 r2). The cold-only value-source ruling here applies ONLY to cursor/vscode:
-1. **Disable** always available; UI holds the just-disabled member value CLIENT-SIDE (never persisted, never round-tripped). Disable needs no value.
-2. **Warm re-enable** (same session, value held): replay the client-held value into POST /api/projects/toggle {enable:true, value:<held>}. **[SUPERSEDED — NOT SHIPPED: removed in #434 r2; the aggregate nils `raw`, so no value is ever held. Object-member re-enable is cold-only in the live build.]**
-3. **Cold re-enable** (reload / value lost — the ONLY shipped re-enable path for object-member): render a NON-toggle CTA "Re-add…" routing to the existing Add-server/Catalog flow (value sourced from marketplace/manifest + vault secret:<key> refs) — NOT a backend-echoed value. **Cold object-member re-enable via the per-row toggle is DEFERRED (D2).**
-Rationale: honors the dropped-toggle_value security constraint (backend never re-sends secret-bearing Raw); the value comes only from where the secret already legitimately lives (manifest/marketplace via the Re-add flow). The aggregate stays NAMES-only.
+## CORE RULING — object-member re-enable value-source (SHIPPED = cold-only)
+Per-row toggle for an OBJECT-MEMBER substrate (cursor `.cursor/mcp.json` + vscode `.vscode/mcp.json`, scope `project-object-member`). NOTE: the claude Project `.mcp.json` row is NOT an object-member toggle — it uses the approval ARRAY-MOVE (`claude-local-membership`), so it needs no value and never deletes the `.mcp.json` definition (see "KEY CORRECTION" below, shipped per #434 r2). The ruling here applies ONLY to cursor/vscode.
+
+**SHIPPED behavior:** Disable is always available and needs no value; re-enable is ALWAYS COLD — a NON-toggle CTA "Re-add…" routing to the existing Add-server/Catalog flow (value sourced from marketplace/manifest + vault secret:<key> refs), NOT a backend-echoed value. **Cold object-member re-enable via the per-row toggle is DEFERRED (D2).** Rationale: honors the dropped-toggle_value security constraint (backend never re-sends secret-bearing Raw); the value comes only from where the secret already legitimately lives (manifest/marketplace via the Re-add flow). The aggregate stays NAMES-only.
+
+**Design-time 3-step ruling (steps 1 + 2 SUPERSEDED — NOT SHIPPED, kept for provenance):** the original design assumed the UI could hold the just-disabled value client-side and replay it warm. #434 r2 removed that machinery (the aggregate NILs `raw` via `stripClientEntryRaw`, so the client never receives a value to hold), leaving cold-only.
+1. **Disable** [SUPERSEDED — NOT SHIPPED part: the client-side value-hold was removed in #434 r2; disable still works but holds no value]: always available; in the original design the UI held the just-disabled member value CLIENT-SIDE. In the shipped build disable needs no value AND keeps none.
+2. **Warm re-enable** (same session, value held): replay the client-held value into POST /api/projects/toggle {enable:true, value:<held>}. **[SUPERSEDED — NOT SHIPPED: removed in #434 r2; the aggregate nils `raw`, so no value is ever held.]**
+3. **Cold re-enable** (the ONLY shipped re-enable path for object-member): the "Re-add…" CTA described under SHIPPED behavior above. **DEFERRED (D2)** as a per-row toggle.
 
 ## KEY CORRECTION (verified vs code)
 claude-code dual substrate:

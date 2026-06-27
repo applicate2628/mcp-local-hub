@@ -5,6 +5,14 @@
 - origin: PR #433 (per-project-GUI P3a, write phase) bot finding 4 — lead adjudication
 - area: per-project-GUI, internal/gui (projects scan/aggregate), internal/api (ScanResult/ClientEntry)
 
+> **SETTLED — read the `## Resolution` first.** The "to design" / "to reconsider"
+> sections below are the ORIGINAL open-item framing, kept for provenance. They are
+> NO LONGER live design questions. Net outcome: the warm (in-session value-held)
+> re-enable path described below was **REMOVED in #434** (the aggregate nils `raw`),
+> so object-member re-enable is COLD-ONLY (Re-add via the Add/Catalog flow), and the
+> claude scope needs no value source at all. Where the body below says "to design",
+> read it as "was designed and settled — see Resolution".
+
 ## Context
 
 P3a's `/api/projects/toggle` ENABLE for an OBJECT-MEMBER project substrate
@@ -26,36 +34,40 @@ NAMES-only (the original security-clean shape).
 This resolves the r1-finding-5 ↔ r2-finding-4 flip-flop: the value-source is a
 P3b concern, NOT a P3a read-API field.
 
-## P3b scope (to design)
+## P3b scope (original framing — SETTLED, not live)
 
-Design the object-member re-enable value-source SECRET-SAFELY:
+The original open question was to design the object-member re-enable value-source
+SECRET-SAFELY. The constraints below were honored, but by NOT building a backend
+value-source at all (cold-only re-enable via Add/Catalog). Kept for provenance:
 
 - **Redact raw secrets** per the same sanitize-Raw convention the global/project
   scan already applies — a literal `headers.Authorization` / `env.TOKEN` value
-  must NOT reach the wire.
+  must NOT reach the wire. (Honored: the aggregate stays NAMES-only / nils `raw`.)
 - **`secret:<key>` references MAY pass** — they are references, not resolved
-  secrets (the scan never resolves them), so echoing a `secret:<key>` ref back is
-  safe.
-- **Design WITH the frontend flow.** The two re-enable cases differ:
-  - *re-enable-in-session* — the value may be held client-side (the frontend
-    still has the value it disabled, never round-tripped through a read API), so
-    no backend value-source is needed.
-  - *cold-enable* (fresh page / different session) — needs a redacted/structural
-    value source from the backend, OR a different UX (e.g. operator re-enters
-    secret values, or the structural skeleton is provided with secret fields
-    blanked/marked).
+  secrets. (Moot: no value is echoed at all; cold re-enable sources the value from
+  the Add/Catalog flow, where `secret:<key>` refs already live.)
+- **Design WITH the frontend flow.** The two re-enable cases originally considered:
+  - *re-enable-in-session (warm)* — **NOT SHIPPED.** The original idea was to hold
+    the value client-side and replay it (no backend value-source). #434 removed
+    this: the aggregate nils `raw`, so the frontend never holds a value.
+  - *cold-enable (the ONLY shipped path)* — the redacted/structural-value-from-
+    backend ideas were rejected in favor of routing cold re-enable to the existing
+    Add/Catalog flow (value from manifest/marketplace + vault `secret:<key>` refs),
+    so NO new backend value-source was built.
 
-## Backend already-built seam
+## Backend already-built seam (historical)
 
-The `/api/projects/toggle` backend ALREADY accepts a caller-supplied value
-(`projectToggleRequest.Value`, dispatched to `clients.ToggleProjectObjectMember`).
-P3b only has to source that value securely — the write side is done.
+At the time, the `/api/projects/toggle` backend ALREADY accepted a caller-supplied
+value (`projectToggleRequest.Value`, dispatched to `clients.ToggleProjectObjectMember`),
+so the open question was only how to source that value securely. The settlement was
+to NOT source one (cold-only re-enable), so this caller-supplied-value path is unused
+for object-member cold re-enable.
 
-## Out of scope for P3b admission to reconsider
+## Out of scope (historical — not reopened)
 
 - claude-code LOCAL scope (array-move) needs NO value source — a re-enable moves
   the name between the enabled/disabled arrays; the `mcpServers` definition is
-  untouched.
+  untouched. (Still true; this scope was always value-free.)
 
 ## Resolution (settled 2026-06-27)
 

@@ -38,12 +38,17 @@ Agreed direction (operator, 2026-06-19):
    optional-secret advisories proceed; `--check`) + GUI (#408 — Catalog
    pre-install readiness panel: blockers disable Install + show Fix, optional
    secrets set inline via the reused AddSecretModal + `?key=` deep-link). DONE 2026-06-21.
-3. (IN PROGRESS) **symlink-client-config** — PR-1 (#409, DONE) closed a LIVE
-   TOCTOU in the shipping `MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK` lane (resolve-to-
-   string-then-re-walk → handle-pinned resolve-and-write). PR-2 (consent UX —
-   GUI resolve-symlink-and-write endpoint + Servers confirm affordance + CLI
-   `[y/N]` default-N) in review. Operator decisions: Supplement consent model +
-   CLI default-N + explicit GUI enable + accept-disclose the relax residual.
+3. (MOSTLY DONE) **symlink-client-config** — both named deliverables MERGED:
+   PR-1 (#409) closed a LIVE TOCTOU in the shipping
+   `MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK` lane (resolve-to-string-then-re-walk →
+   handle-pinned resolve-and-write), hardened by follow-ups #414 (full-path pin /
+   consent-bypass close) + #415 (component-walk closes the intermediate-component
+   TOCTOU) + #416 (bound symlink target reads). PR-2 (#410) shipped the guided
+   consent UX — GUI resolve-symlink-and-write endpoint + Servers confirm
+   affordance + CLI `[y/N]` default-N. Operator decisions applied: Supplement
+   consent model + CLI default-N + explicit GUI enable. RESIDUE: the relax
+   residual is an ACCEPT-DISCLOSE posture (documented, not pending code) — no open
+   symlink-area work item remains.
 4. (MOSTLY DONE) **serena-AND-lsp-out-of-box** — serena auto-introduces
    dynamic-pool on first `/serena/mcp` call (no manual migrate on the happy
    path); client-revert (#400), idle-stop + stale-session races (#386), and the
@@ -78,14 +83,20 @@ builds on the workspace registry + groups + client-config scopes the earlier
 areas touch).
 
 > **Status (2026-06-27):** area 6 (per-project-gui) is DONE/shipped (PRs
-> #428 + #431 + #432 + #433 + #434 + #435, live 8c359a1c). DONE children:
-> 1 (readiness-core), 2 (env-secrets-onboarding), 6 (per-project-gui).
-> **Still-open children (epic STAYS `status: active`):** area 3
-> (symlink-client-config — IN PROGRESS, PR-2 consent UX in review), area 4
-> (serena-AND-lsp-out-of-box — MOSTLY DONE, shipped-manifest residue + a
-> PROPOSED router-native decision remain), area 5 (trusted-folders-ux — NEXT,
-> three narrowed gaps a/b/c). The epic does NOT close until 3, 4, and 5 all
-> close.
+> #428 + #431 + #432 + #433 + #434 + #435, live 8c359a1c).
+> - **DONE:** 1 (readiness-core), 2 (env-secrets-onboarding), 6 (per-project-gui).
+> - **MOSTLY DONE:** area 3 (symlink-client-config — both named PRs merged
+>   #409/#410 + hardening #414/#415/#416; residual is the accept-disclose relax
+>   posture, no open work item), area 4 (serena-AND-lsp-out-of-box — happy path
+>   shipped; residual = shipped-manifest `unified-intermediate` on disk + a
+>   PROPOSED router-native decision).
+> - **NEXT (real open work):** area 5 (trusted-folders-ux — three narrowed gaps
+>   a/b/c: first-touch trust prompt, `mcphub trust` verb, serena-root trust-gating).
+>
+> The epic STAYS `status: active`. Area 5 is the only child with genuine
+> unstarted scope; areas 3 and 4 carry documented residual (a posture and a
+> proposed-decision + manifest-state item) rather than fully closed. Close the
+> epic only when 3's posture is final, 4's residual lands, AND area 5 ships.
 
 ## Non-goals (for now)
 
