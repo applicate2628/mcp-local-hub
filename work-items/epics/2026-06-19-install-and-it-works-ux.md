@@ -61,10 +61,11 @@ Agreed direction (operator, 2026-06-19):
 6. (DONE) **per-project-gui** — GUI surface to SEE which MCPs are active per
    project AND toggle them, across all three project models; keep the global
    Servers matrix. The biggest new feature; Model B (project-local `.mcp.json`)
-   was built from zero. Shipped P1→P3c: read-only Projects screen (#428), then
-   the write phase — P3a writes-backend + `/api/projects` aggregate (#433),
-   P3b frontend toggle + both claude scopes + deps-consent (#434), P3c
-   group↔project binding (#435). Design accepted in
+   was built from zero. Shipped P1→P3c: read-only Projects screen (#428),
+   P2a + P2b approval-surface backend (#431 + #432), then the write phase —
+   P3a writes-backend + `/api/projects` aggregate (#433), P3b frontend toggle +
+   both claude scopes + deps-consent (#434), P3c group↔project binding (#435).
+   Full PR chain: #428 + #431 + #432 + #433 + #434 + #435. Design accepted in
    `decisions/2026-06-25-per-project-gui-p3-design.md`. DONE 2026-06-27,
    live 8c359a1c.
 
@@ -77,8 +78,14 @@ builds on the workspace registry + groups + client-config scopes the earlier
 areas touch).
 
 > **Status (2026-06-27):** area 6 (per-project-gui) is DONE/shipped (PRs
-> #428/#433/#434/#435, live 8c359a1c). **Area 5 (trusted-folders-ux) is the
-> last remaining child** — the epic STAYS `status: active` until area 5 closes.
+> #428 + #431 + #432 + #433 + #434 + #435, live 8c359a1c). DONE children:
+> 1 (readiness-core), 2 (env-secrets-onboarding), 6 (per-project-gui).
+> **Still-open children (epic STAYS `status: active`):** area 3
+> (symlink-client-config — IN PROGRESS, PR-2 consent UX in review), area 4
+> (serena-AND-lsp-out-of-box — MOSTLY DONE, shipped-manifest residue + a
+> PROPOSED router-native decision remain), area 5 (trusted-folders-ux — NEXT,
+> three narrowed gaps a/b/c). The epic does NOT close until 3, 4, and 5 all
+> close.
 
 ## Non-goals (for now)
 

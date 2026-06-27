@@ -4,15 +4,24 @@ status: accepted
 date: 2026-06-27
 owners: ux-designer (a324f87e, PASS) + lead (O-1 accepted)
 parent: work-items/decisions/2026-06-25-per-project-gui-p3-design.md
-settles: work-items/backlog/2026-06-25-p3b-reenable-value-source.md
+settles: work-items/backlog/closed/2026-06-25-p3b-reenable-value-source.md
 live binary at design time: 12990df1 (P3a deployed — /api/projects aggregate + /api/projects/toggle present, no frontend consumer)
 
+> **SHIPPED-REALITY UPDATE (#434 r2, live 8c359a1c):** the WARM re-enable path
+> described below was a design-time assumption that was **REMOVED before merge**.
+> The aggregate NILs every `raw` (`stripClientEntryRaw`), so the client never
+> receives a value to hold and the warm replay was dead on arrival. Object-member
+> re-enable (cursor/vscode) is therefore **ALWAYS COLD** in the shipped build —
+> the per-row toggle only ever DISABLES; re-enable is exclusively the "Re-add…"
+> CTA into the Add-server/Catalog flow. The original 3-step ruling is kept below
+> for design-history honesty; read step 2 (warm) as superseded/never-shipped.
+
 ## CORE RULING — object-member cold-re-enable value-source
-Per-row toggle for an OBJECT-MEMBER substrate (cursor/vscode/claude-Project-.mcp.json member, scope `project-object-member`):
+Per-row toggle for an OBJECT-MEMBER substrate (cursor `.cursor/mcp.json` + vscode `.vscode/mcp.json`, scope `project-object-member`). NOTE: the claude Project `.mcp.json` row is NOT an object-member toggle — it uses the approval ARRAY-MOVE (`claude-local-membership`), so it needs no value and never deletes the `.mcp.json` definition (see "KEY CORRECTION" below, shipped per #434 r2). The cold-only value-source ruling here applies ONLY to cursor/vscode:
 1. **Disable** always available; UI holds the just-disabled member value CLIENT-SIDE (never persisted, never round-tripped). Disable needs no value.
-2. **Warm re-enable** (same session, value held): replay the client-held value into POST /api/projects/toggle {enable:true, value:<held>}.
-3. **Cold re-enable** (reload / value lost): render a NON-toggle CTA "Re-add…" routing to the existing Add-server/Catalog flow (value sourced from marketplace/manifest + vault secret:<key> refs) — NOT a backend-echoed value. **Cold object-member re-enable via the per-row toggle is DEFERRED (D2).**
-Rationale: honors the dropped-toggle_value security constraint (backend never re-sends secret-bearing Raw); the value comes only from where the secret already legitimately lives (client memory the operator just had, or manifest/marketplace). The aggregate stays NAMES-only.
+2. **Warm re-enable** (same session, value held): replay the client-held value into POST /api/projects/toggle {enable:true, value:<held>}. **[SUPERSEDED — NOT SHIPPED: removed in #434 r2; the aggregate nils `raw`, so no value is ever held. Object-member re-enable is cold-only in the live build.]**
+3. **Cold re-enable** (reload / value lost — the ONLY shipped re-enable path for object-member): render a NON-toggle CTA "Re-add…" routing to the existing Add-server/Catalog flow (value sourced from marketplace/manifest + vault secret:<key> refs) — NOT a backend-echoed value. **Cold object-member re-enable via the per-row toggle is DEFERRED (D2).**
+Rationale: honors the dropped-toggle_value security constraint (backend never re-sends secret-bearing Raw); the value comes only from where the secret already legitimately lives (manifest/marketplace via the Re-add flow). The aggregate stays NAMES-only.
 
 ## KEY CORRECTION (verified vs code)
 claude-code dual substrate:
@@ -45,9 +54,9 @@ GET /api/server/readiness → if ready, proceed; if blockers, ConsentGate: Readi
 3 cards: [A] Workspace tools (Entries + Enabled toggle col, scope workspace-lsp) · [B] Project MCP config (per-client sub-cards: Claude Code dual-scope §10.2 / Cursor / VS Code flat) · [C] Group lens (per-server toggle scope group-servers; keep P1 "tools_hidden not a security fence" note + "not yet project-bound" copy until P3c). Keep MechanismBadge "backed by <file>" provenance everywhere. No Apply/dirty language anywhere.
 
 ## Acceptance criteria (frontend-engineer) — 11
-single-data-source(aggregate) · single-owner-dispatch({client,scope}, never branch on client name) · immediate-per-row state machine(reconcile-to-response) · both-scopes claude card(Project toggle/Local read-only/shadow once) · consent-on-enable(O-1 skip-when-no-report) · object-member warm-replay/cold-readd(never enable-POST without value) · code→copy map · data-testids(projects-toggle-<scope>-<server>, projects-consent-gate-<server>, projects-shadow-<name>, projects-readd-<server>) · protected(Servers.tsx byte-unchanged, scan.go 0-diff, no new Client method) · mountedRef+req-id seq · `go generate ./internal/gui/...` after frontend changes (embed bundle).
+single-data-source(aggregate) · single-owner-dispatch({client,scope}, never branch on client name) · immediate-per-row state machine(reconcile-to-response) · both-scopes claude card(Project toggle/Local read-only/shadow once) · consent-on-enable(O-1 skip-when-no-report) · object-member cold-readd-only [SHIPPED #434 r2: the warm-replay criterion was dropped — the aggregate nils `raw`, so object-member re-enable is cold-only; never enable-POST without value] · code→copy map · data-testids(projects-toggle-<scope>-<server>, projects-consent-gate-<server>, projects-shadow-<name>, projects-readd-<server>) · protected(Servers.tsx byte-unchanged, scan.go 0-diff, no new Client method) · mountedRef+req-id seq · `go generate ./internal/gui/...` after frontend changes (embed bundle).
 
 ## Deferrals from P3b v1
 D1 claude Local-scope toggle (no write owner; render read-only) · D2 object-member cold re-enable via toggle (→ Add/Catalog flow) · D3 group↔project binding filter (→ P3c) · D4 project-scoped Servers view (would touch protected Servers.tsx).
 
-## Gates: ux-reviewer (warm/cold honesty, shadow legibility, O-1, checked-in-vs-private, copy quality) + architecture-reviewer + qa-engineer (Playwright E2E on a Windows runner per CLAUDE.md — toggle happy/error-revert/reconcile-to-response/both-scopes/array-move-scope/warm+cold-reenable/consent/group-name-gate/per-row-isolation/code-copy/section-scoped-ScanError).
+## Gates: ux-reviewer (cold-readd honesty, shadow legibility, O-1, checked-in-vs-private, copy quality) + architecture-reviewer + qa-engineer (Playwright E2E on a Windows runner per CLAUDE.md — toggle happy/error-revert/reconcile-to-response/both-scopes/array-move-scope/cold-reenable/consent/group-name-gate/per-row-isolation/code-copy/section-scoped-ScanError). [SHIPPED #434 r2: warm-reenable dropped — object-member re-enable is cold-only.]

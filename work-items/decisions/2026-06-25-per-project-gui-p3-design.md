@@ -16,11 +16,20 @@ Implemented: P3a (PR #433) + P3b (PR #434) + P3c (PR #435) — all shipped; live
 |---|---|---|---|---|
 | A workspace LSP | enable=register / disable=unregister daemon | `api.Register`/`api.Unregister` (register.go:109,:979) | supervisor-intent + workspace_registry | workspace_path |
 | B cursor/vscode | add/remove object member | `clients.mutateJSONObjectMemberPath` (jsonc.go:197) → SecureWriteClientConfig | hujson + handle-relative atomic | `<root>/.cursor/mcp.json`, `<root>/.vscode/mcp.json` |
-| B-claude Project | add/remove member in `.mcp.json` mcpServers | same as B | same as B | `<root>/.mcp.json` |
+| B-claude Project | MOVE name between enabled/disabledMcpjsonServers — **NEVER delete the `.mcp.json` mcpServers definition** (scope `claude-local-membership`, the approval ARRAY-MOVE) | same as B-claude Local (`OwnerClaudeLocalMembership` array-move) | hujson + handle-relative atomic | `~/.claude.json` → projects.<canonicalClaudeProjectKey>.{enabled,disabled}McpjsonServers (the `.mcp.json` definition stays) |
 | B-claude Local | MOVE name between enabled/disabledMcpjsonServers — **NEVER delete from mcpServers** | NEW `clients.toggleClaudeMcpjsonMembership` (array-membership sibling); enabled-predicate = P2b `IsMcpjsonServerEnabled` | hujson + handle-relative atomic | `~/.claude.json` → projects.<canonicalClaudeProjectKey>.{enabled,disabled}McpjsonServers |
 | C groups | add/remove from group.servers | `api.ReadModifyWriteGroups` (hub_mcp_groups.go:348) | atomic under hub-mcp.lock | groups.yaml |
 
 Rejected: (1) universal ProjectConfigWriter (collapses 4 owners → method-branch-in-engine anti-pattern); (2) claude-local delete-from-mcpServers (data-loss — loses the server definition); (3) matrix dirty/Apply across 4 files (4 owners/locks, no atomic cross-file txn — decision 8).
+
+> **Table correction (shipped #434 r2):** the `B-claude Project` row originally
+> mapped to "same as B" (the `project-object-member` member-delete via
+> `mutateJSONObjectMemberPath`). That was the P3b wrong-substrate bug
+> (`work-items/bugs/closed/2026-06-27-p3b-claude-project-toggle-wrong-substrate.md`):
+> it would have DELETED the checked-in `.mcp.json` definition, the exact data-loss
+> outcome rejected-item (2) above forbids. The row now reflects the SHIPPED reality —
+> the claude Project toggle uses the approval ARRAY-MOVE (`claude-local-membership`),
+> identical owner to `B-claude Local`, leaving the `.mcp.json` definition intact.
 
 ## Security threat model (security-reviewer MANDATORY — write phase)
 - **T1 project-path write TOCTOU:** resolve write path ONLY via `clients.ProjectScanConfigPaths` (no 4th path-logic copy); write via `SecureWriteClientConfig` (handle-relative, O_NOFOLLOW, atomic rename, DACL-before-bytes — TOCTOU-safe by construction).
