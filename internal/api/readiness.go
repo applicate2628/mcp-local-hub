@@ -885,16 +885,50 @@ func CheckServerReadinessWithScope(m *config.ServerManifest, scope AdmissionScop
 	// Declared secrets — reported PER KEY so the GUI can offer each as an
 	// inline "fill this field at install" prompt (the operator's request:
 	// "секреты нужно явно предлагать в конкретные поля при установке").
-	// Secrets are OPTIONAL: an unset key is advisory (Optional=true), NOT a
-	// blocker — the server still installs + spawns (the env var is omitted)
-	// and reports its own missing-key if it actually needs it.
+	// Secrets are OPTIONAL BY DEFAULT: an unset key is advisory (Optional=true),
+	// NOT a blocker — the server still installs + spawns (the env var is omitted)
+	// and reports its own missing-key if it actually needs it. The EXCEPTION is a
+	// key listed in m.RequiredSecrets (the opt-in install gate): that one is
+	// BLOCKING (Optional=false, RED), so an unset required key flips Ready=false —
+	// in PARITY with the AdmissionCheck "required-secret" blocking finding. The
+	// classification derives from the SAME requiredSecretSet owner the admission
+	// finding consults, so readiness and admission can never disagree on which
+	// secrets block.
+	reqSecretSet := requiredSecretSet(m)
+	// Open the vault ONCE for the required-secret resolved check. The required
+	// branch routes through requiredSecretResolved (the SINGLE OWNER shared with
+	// admission_check.go) so a present-but-blank required value flips Ready=false
+	// in PARITY with the AdmissionCheck blocking finding — checkSecretRefs treats
+	// a present-but-blank key as resolved (resolver.Resolve → vault.Get returns
+	// "",nil) and would otherwise paint a required blank key GREEN while admission
+	// BLOCKS it (codex finding 2). A nil vault (absent or unreadable) resolves
+	// nothing; the dedicated "secrets vault" requirement above already blocks the
+	// unreadable case. Opened only when a required-secret set exists so the
+	// optional-only fast path is unchanged.
+	var reqVault *secrets.Vault
+	if len(reqSecretSet) > 0 {
+		reqVault, _ = secrets.OpenVaultOptional(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+	}
 	for k, v := range m.Env {
 		if !strings.HasPrefix(v, "secret:") {
 			continue
 		}
 		key := strings.TrimPrefix(v, "secret:")
-		req := ReadinessRequirement{Name: "secret: " + key, Optional: true}
-		if err := checkSecretRefs(map[string]string{k: v}); err != nil {
+		required := reqSecretSet[key]
+		req := ReadinessRequirement{Name: "secret: " + key, Optional: !required}
+		if required {
+			// Required (opt-in install gate): the server hard-exits on startup
+			// without it, so this is a BLOCKER, not an advisory. Resolution is
+			// decided by the shared requiredSecretResolved owner (present AND
+			// non-blank), NOT checkSecretRefs, so a present-but-blank value blocks.
+			if requiredSecretResolved(reqVault, key) {
+				req.OK = true
+			} else {
+				req.OK = false
+				req.Reason = "is REQUIRED but could not be resolved from the vault — the server exits on startup when it is unset"
+				req.Fix = fmt.Sprintf("Set %s on the Secrets screen or `mcphub secrets set %s` before installing.", key, key)
+			}
+		} else if err := checkSecretRefs(map[string]string{k: v}); err != nil {
 			req.OK = false
 			// Neutral wording: checkSecretRefs errors for BOTH "key not set" and
 			// "vault unreadable", so do not assert "not set" — the dedicated

@@ -323,6 +323,31 @@ describe("installMarketplaceEntry", () => {
     });
   });
 
+  // FINDING 1 regression: a 412 carries TWO distinct gates, told apart by the
+  // `code` field. REQUIRED_SECRET_MISSING must map to its OWN
+  // kind:'required-secret-missing' (carrying the backend reason that names the
+  // key) — NOT 'probe-pending'. A status-only branch would render the misleading
+  // "host app not detected" message for an unset required secret (the Suno row's
+  // main failure mode).
+  it("maps a 412 REQUIRED_SECRET_MISSING to kind:'required-secret-missing' (not probe-pending)", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 412,
+      statusText: "Precondition Failed",
+      json: async () => ({
+        error:
+          "acedata_api_token is REQUIRED — the server exits on startup when it is unset",
+        code: "REQUIRED_SECRET_MISSING",
+      }),
+    }) as unknown as Response);
+    const out = await installMarketplaceEntry({ id: "suno", mode: "hub" });
+    expect(out).toEqual({
+      kind: "required-secret-missing",
+      reason:
+        "acedata_api_token is REQUIRED — the server exits on startup when it is unset",
+    });
+  });
+
   it("carries the suggested name through on a hub retry", async () => {
     const seen: { body?: string } = {};
     globalThis.fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {

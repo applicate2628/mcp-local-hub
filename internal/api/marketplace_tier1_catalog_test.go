@@ -34,12 +34,13 @@ var gitSHA40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // work-items/backlog/2026-06-24-tier3-manual-clone-mcps.md).
 var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys", "kicad"}
 
-// NOTE: the suno music row + its tierMusicLocalCatalogIDs / music-local mirror-gate
-// test were SPLIT OUT of this PR. suno needs a required_secrets install-gate (the
-// mcp-suno server hard-exits without the AceDataCloud token), which ships in a
-// SEPARATE PR; the row spec is preserved in .scratch/suno-row-spec.json for that PR
-// to re-create. This PR ships the build-verified ableton fork only, so the v2 count
-// is back to len(v1) + len(tier1CatalogIDs) = 20.
+// tierMusicLocalCatalogIDs are the local-stdio music rows that gate the install on
+// a REQUIRED vault secret (required_secrets) rather than a host-app install_probe.
+// suno (mcp-suno via uvx) hard-exits on startup without its AceDataCloud token, so
+// the row carries required_secrets: [acedata_api_token] and is BLOCKED at install
+// until the token is set — the opt-in install gate shipped alongside this row. These
+// rows are READY (not disabled-until-probe): the gate is the secret, not a probe.
+var tierMusicLocalCatalogIDs = []string{"suno"}
 
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
@@ -77,10 +78,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("v1 catalog failed to parse: %v", err)
 	}
-	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs)
+	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs)
 	if len(cat.Entries) != wantCount {
-		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1)",
-			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs))
+		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local)",
+			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs))
 	}
 
 	// Every v1 entry id must still be present (verbatim copy), in order, before
@@ -141,6 +142,124 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 		if e := byID[id]; e.VendoredSource != nil {
 			t.Fatalf("official row %q must NOT carry vendored_source (it is not a fork): %#v", id, e.VendoredSource)
 		}
+	}
+}
+
+// --- codex catalog finding 4 / architect path A: fetch-tolerance + author-strict ---
+
+// TestParseCatalog_FetchToleratesUnknownAdditiveField proves the FETCH decode is
+// forward-compatible: a v2 catalog carrying a FUTURE additive field the current
+// build does not know about parses cleanly (the unknown key is ignored by the
+// typed decode) instead of rejecting the whole catalog. This is what keeps an
+// already-deployed older client non-broken when a new v2-additive field ships.
+func TestParseCatalog_FetchToleratesUnknownAdditiveField(t *testing.T) {
+	raw := `{
+  "schema_version": "2",
+  "entries": [
+    {
+      "id": "future-thing",
+      "name": "Future Thing",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["x"],
+      "future_additive_field_v3": {"some": "value"}
+    }
+  ]
+}`
+	cat, err := ParseMarketplaceCatalog([]byte(raw))
+	if err != nil {
+		t.Fatalf("fetch decode rejected a v2 catalog with an unknown additive field; want forward-compat tolerance: %v", err)
+	}
+	if len(cat.Entries) != 1 || cat.Entries[0].ID != "future-thing" {
+		t.Fatalf("entry not parsed despite the unknown field: %#v", cat.Entries)
+	}
+}
+
+// TestParseCatalog_FetchStructuralGuardsSurvive proves the structural guards
+// dropping DisallowUnknownFields did NOT weaken: trailing bytes, a bad
+// schema_version, a duplicate id, and a v1 catalog carrying a v2 key are all still
+// rejected on the FETCH path.
+func TestParseCatalog_FetchStructuralGuardsSurvive(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		wantSub string
+	}{
+		{
+			name:    "trailing bytes",
+			raw:     `{"schema_version":"2","entries":[]}  {"x":1}`,
+			wantSub: "trailing bytes",
+		},
+		{
+			name:    "bad schema_version",
+			raw:     `{"schema_version":"99","entries":[]}`,
+			wantSub: "schema_version",
+		},
+		{
+			name:    "duplicate id",
+			raw:     `{"schema_version":"2","entries":[{"id":"dup","name":"A","transport":"stdio","command":"uvx","args":["x"]},{"id":"dup","name":"B","transport":"stdio","command":"uvx","args":["x"]}]}`,
+			wantSub: "duplicate id",
+		},
+		{
+			name:    "v1 catalog carrying a v2 key (key-presence gate)",
+			raw:     `{"schema_version":"1","entries":[{"id":"x","name":"X","transport":"stdio","command":"uvx","args":["x"],"availability":""}]}`,
+			wantSub: "schema_version",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseMarketplaceCatalog([]byte(tc.raw))
+			if err == nil {
+				t.Fatalf("ParseMarketplaceCatalog accepted %s; want rejection", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("error = %q, want it to mention %q", err.Error(), tc.wantSub)
+			}
+		})
+	}
+}
+
+// TestParseCatalogStrict_RealCatalogsPass proves the author-side strict decode
+// (DisallowUnknownFields) accepts the repo's OWN catalogs — so the strict gate is
+// a real, passing assertion the in-repo catalog.json must keep satisfying, not a
+// vacuous one.
+func TestParseCatalogStrict_RealCatalogsPass(t *testing.T) {
+	for _, p := range []string{v1CatalogPath(), v2CatalogPath()} {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("catalog not readable at %s: %v", p, err)
+		}
+		if _, err := ParseMarketplaceCatalogStrict(raw); err != nil {
+			t.Fatalf("the repo's own catalog %s failed the strict author decode (an unknown/typo key crept in): %v", p, err)
+		}
+	}
+}
+
+// TestParseCatalogStrict_RejectsTypoKey proves the author-strict decode catches a
+// typo'd field name — the protection the fetch path deliberately gives up. The
+// fetch path tolerates the same typo'd-key bytes (it cannot tell a typo from a
+// future additive field), so this guard lives ONLY on the author side.
+func TestParseCatalogStrict_RejectsTypoKey(t *testing.T) {
+	raw := `{
+  "schema_version": "2",
+  "entries": [
+    {
+      "id": "typo-row",
+      "name": "Typo Row",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["x"],
+      "instal_probe": {"binaries": ["go"]}
+    }
+  ]
+}`
+	if _, err := ParseMarketplaceCatalogStrict([]byte(raw)); err == nil {
+		t.Fatal("strict author decode accepted a typo'd key (instal_probe); want rejection")
+	}
+	// The SAME bytes must be TOLERATED on the fetch path (forward-compat): the
+	// typo is indistinguishable from a future additive field at fetch time.
+	if _, err := ParseMarketplaceCatalog([]byte(raw)); err != nil {
+		t.Fatalf("fetch decode rejected the unknown key; the author-strict guard must be the ONLY rejector: %v", err)
 	}
 }
 
@@ -415,5 +534,66 @@ func TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact(t *testing.T) 
 		if !strings.Contains(cmd, wantGitFrom) {
 			t.Fatalf("ableton vendored_source.%s = %q does not reference the pinned git source %q", label, cmd, wantGitFrom)
 		}
+	}
+}
+
+// TestV2SunoRow_RequiredSecretGate pins the music-local suno row's shape: it is a
+// READY local-stdio row (NOT disabled-until-probe) whose install gate is a REQUIRED
+// vault secret. The row MUST declare required_secrets: [acedata_api_token] and back
+// it with the matching env ref ACEDATACLOUD_API_TOKEN: secret:acedata_api_token, so
+// the catalog authoring guard (validateCatalogVendoredAndAvailability) accepts it and
+// the projected manifest's AdmissionCheck install gate blocks a token-less install
+// (the mcp-suno server hard-exits without the token). It carries NO install_probe /
+// availability gate (the secret is the gate) and NO vendored_source (it is an
+// official PyPI package run via uvx, like the ansys row).
+func TestV2SunoRow_RequiredSecretGate(t *testing.T) {
+	e := v2CatalogByID(t)["suno"]
+	if e == nil {
+		t.Fatalf("v2 catalog missing the suno music-local row")
+	}
+	// READY (the secret is the gate, not a host-app probe). Absent availability ==
+	// ready; an inert availability would wrongly grey it behind a host-app probe.
+	if e.Availability != "" && e.Availability != "ready" {
+		t.Fatalf("suno availability = %q, want ready/empty (the install gate is the required secret, not a probe)", e.Availability)
+	}
+	if e.InstallProbe != nil {
+		t.Fatalf("suno carries an install_probe %#v — its gate is required_secrets, not a host-app probe", e.InstallProbe)
+	}
+	if e.VendoredSource != nil {
+		t.Fatalf("suno carries a vendored_source %#v — it is an official PyPI package run via uvx, not a community fork", e.VendoredSource)
+	}
+	if e.Transport != "stdio" {
+		t.Fatalf("suno transport = %q, want stdio (local mcp-suno over uvx)", e.Transport)
+	}
+	// required_secrets present and matched by a secret: env ref (the authoring guard).
+	if len(e.RequiredSecrets) != 1 || e.RequiredSecrets[0] != "acedata_api_token" {
+		t.Fatalf("suno required_secrets = %v, want [acedata_api_token]", e.RequiredSecrets)
+	}
+	if got := e.Env["ACEDATACLOUD_API_TOKEN"]; got != "secret:acedata_api_token" {
+		t.Fatalf("suno env ACEDATACLOUD_API_TOKEN = %q, want secret:acedata_api_token (required_secrets must back an env secret ref)", got)
+	}
+
+	// MIRROR GATE: generate→`manifest create` dry-run must project required_secrets +
+	// the secret env ref into a schema-valid manifest, so the post-install AdmissionCheck
+	// re-sees the gate. (Port-0 placeholder is the operator's required edit.)
+	draft, warns, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: t.TempDir()})
+	if err != nil {
+		t.Fatalf("generate draft for suno: %v (warnings=%v)", err, warns)
+	}
+	for _, want := range []string{"required_secrets:", "acedata_api_token", "secret:acedata_api_token"} {
+		if !strings.Contains(draft, want) {
+			t.Fatalf("suno draft missing %q\n---\n%s", want, draft)
+		}
+	}
+	parseReady := strings.Replace(draft, "port: 0", "port: 9314", 1)
+	m, err := config.ParseManifest(strings.NewReader(parseReady))
+	if err != nil {
+		t.Fatalf("suno drafted manifest failed ParseManifest+Validate (mirror gate): %v\n---\n%s", err, parseReady)
+	}
+	if len(m.RequiredSecrets) != 1 || m.RequiredSecrets[0] != "acedata_api_token" {
+		t.Fatalf("suno drafted manifest lost required_secrets: %v", m.RequiredSecrets)
+	}
+	if got := m.Env["ACEDATACLOUD_API_TOKEN"]; got != "secret:acedata_api_token" {
+		t.Fatalf("suno drafted manifest lost the secret env ref: %q", got)
 	}
 }

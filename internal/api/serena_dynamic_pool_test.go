@@ -213,6 +213,44 @@ func TestSerenaDynamicPool_BuildInMemoryManifest_RejectsBlankEmbedContext(t *tes
 	}
 }
 
+// TestSerenaDynamicPool_BuildInMemoryManifest_CarriesRequiredSecrets is the
+// codex finding 3 guard: BuildInMemorySerenaDynamicPoolManifest projects the
+// embed into the synthesized manifest the install/admission gates actually see,
+// so DROPPING RequiredSecrets there would let a dynamic-pool source manifest with
+// required_secrets install with the gate silently lost. The synthesized manifest
+// MUST carry the field (and deep-copy it so it is independent of the embed).
+func TestSerenaDynamicPool_BuildInMemoryManifest_CarriesRequiredSecrets(t *testing.T) {
+	m := &config.ServerManifest{
+		Name:      "serena",
+		Kind:      config.KindWorkspaceScoped,
+		Transport: config.TransportNativeHTTP,
+		Command:   "uvx",
+		// required_secrets keys MUST be backed by a secret: env ref
+		// (validateRequiredSecretsBackEnv) or out.Validate() rejects.
+		Env:             map[string]string{"SERENA_API_TOKEN": "secret:serena_api_token"},
+		RequiredSecrets: []string{"serena_api_token"},
+		DaemonTemplate: &config.DaemonTemplate{
+			Context:           "agent",
+			PortPool:          &config.PortPool{Start: 9121, End: 9199},
+			ExtraArgsTemplate: []string{"--project", config.WorkspacePathToken},
+		},
+	}
+
+	out, err := BuildInMemorySerenaDynamicPoolManifest(m)
+	if err != nil {
+		t.Fatalf("BuildInMemorySerenaDynamicPoolManifest: %v", err)
+	}
+	if !equalStringSliceDP(out.RequiredSecrets, []string{"serena_api_token"}) {
+		t.Fatalf("RequiredSecrets = %v, want [serena_api_token] — the install gate would be silently lost (codex finding 3)", out.RequiredSecrets)
+	}
+	// Deep copy: mutating the embed slice must not bleed into the synthesized
+	// manifest (the projection appends into a fresh slice).
+	m.RequiredSecrets[0] = "mutated"
+	if out.RequiredSecrets[0] != "serena_api_token" {
+		t.Errorf("RequiredSecrets aliases the embed slice (got %q after embed mutation); want an independent deep copy", out.RequiredSecrets[0])
+	}
+}
+
 // equalStringSliceDP is a small slice-equality helper local to the
 // dynamic-pool tests (the package-level test file already defines several
 // equal-* helpers; the DP suffix avoids a redeclaration collision).

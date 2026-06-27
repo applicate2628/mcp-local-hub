@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -224,16 +223,16 @@ func initVaultRefused(err error) bool {
 		strings.Contains(msg, "vault file already exists")
 }
 
-// secretNameRE allows lowercase identifiers (memo §5.3 Codex memo-R8 P1:
-// repo ships `secret:wolfram_app_id` and `secret:unpaywall_email`).
-var secretNameRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
-
 // SecretsSet writes a key/value pair to the vault. Wrapper for vault.Set.
 // Validates name regex and non-empty value (memo §5.3). Returns typed
-// errors the handler maps to 400/409.
+// errors the handler maps to 400/409. The settable-key-name shape is owned by
+// secrets.ValidateSettableKeyName (the lowest layer, shared with the config
+// required_secrets gate); the `init` reserved-name + empty-value rejects below
+// are SecretsSet policy and stay here (memo §5.3 Codex memo-R8 P1: the repo
+// ships lowercase keys like `secret:wolfram_app_id` / `secret:unpaywall_email`).
 func (a *API) SecretsSet(name, value string) error {
-	if !secretNameRE.MatchString(name) {
-		return &SecretsOpError{Code: "SECRETS_INVALID_NAME", Msg: fmt.Sprintf("name %q does not match %s", name, secretNameRE.String())}
+	if err := secrets.ValidateSettableKeyName(name); err != nil {
+		return &SecretsOpError{Code: "SECRETS_INVALID_NAME", Msg: err.Error()}
 	}
 	// Codex PR #18 P2: "init" collides with the /api/secrets/init route
 	// (vault initialization). A secret with this name would be reachable
@@ -384,8 +383,8 @@ func nonNilUsage(in []UsageRef) []UsageRef {
 // (partial-result, err) so the handler can map to 500 + RESTART_FAILED
 // while still surfacing vault_updated:true.
 func (a *API) SecretsRotate(name, value string, restart bool) (SecretsRotateResult, error) {
-	if !secretNameRE.MatchString(name) {
-		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_INVALID_NAME", Msg: fmt.Sprintf("name %q does not match %s", name, secretNameRE.String())}
+	if err := secrets.ValidateSettableKeyName(name); err != nil {
+		return SecretsRotateResult{}, &SecretsOpError{Code: "SECRETS_INVALID_NAME", Msg: err.Error()}
 	}
 	// Codex PR #18 P2: belt-and-suspenders guard (mirrors SecretsSet).
 	// In practice SecretsSet already rejects "init" at creation time, so

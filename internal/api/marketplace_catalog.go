@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/secrets"
 	"mcp-local-hub/internal/urlredact"
 )
 
@@ -74,6 +75,18 @@ type MarketplaceEntry struct {
 	// for catalog.json. Projected into the drafted manifest alongside
 	// Availability so the post-install readiness gate can re-evaluate the probe.
 	InstallProbe *CatalogAvailabilityProbe `json:"install_probe,omitempty"`
+
+	// RequiredSecrets mirrors config.ServerManifest.RequiredSecrets, JSON-tagged
+	// for catalog.json. The OPT-IN list of vault KEYS that MUST be set before this
+	// row installs (the server hard-exits on startup without them). Each key MUST
+	// appear as a `secret:<key>` value in Env (catalog-authoring guard in
+	// validateCatalogVendoredAndAvailability — a typo key can't silently un-gate).
+	// Gated to schema_version 2 (newCatalogFieldKeys), and projected into the
+	// drafted stdio manifest by generateCommandDraft so the persisted manifest's
+	// AdmissionCheck install gate sees it.
+	//
+	// Decision: work-items/decisions/2026-06-24-required-secret-install-gate.md
+	RequiredSecrets []string `json:"required_secrets,omitempty"`
 }
 
 // CatalogVendoredSource is the catalog-entry (JSON) mirror of
@@ -131,18 +144,51 @@ func catalogProbeToConfig(p *CatalogAvailabilityProbe) *config.AvailabilityProbe
 	}
 }
 
-// ParseMarketplaceCatalog decodes raw JSON. Returns the first error
-// per spec §"Threat model" (malformed catalogs reject wholesale,
-// never partial-accept).
+// ParseMarketplaceCatalog decodes raw JSON that a DEPLOYED CLIENT FETCHED from a
+// registry. Returns the first error per spec §"Threat model" (malformed catalogs
+// reject wholesale, never partial-accept).
 //
-// codex r5 P2 closure: rejects trailing bytes after the top-level
-// JSON object so a valid catalog appended with garbage (or a second
-// object) cannot be silently accepted. Mirrors the registry-source
-// "single canonical document" contract from §"Threat model".
+// FORWARD-COMPAT (codex catalog finding 4 / architect path A): the FETCH decode
+// DELIBERATELY does NOT call DisallowUnknownFields. A future v2-additive field
+// added to catalog.json must be NON-BREAKING for already-deployed older clients,
+// so an unknown key on a v2 catalog parses and is IGNORED by the typed decode
+// rather than rejecting the whole catalog. The structural guards that DO survive:
+//   - trailing-byte rejection (a second/garbage top-level object is still refused),
+//   - schema-version acceptance (only v1/v2 are accepted),
+//   - the newCatalogFieldsRequireV2 v1-gate, which is KEY-PRESENCE based
+//     (catalogEntryNewKeyPresence) so a v1 catalog STILL cannot carry a v2 key,
+//   - per-entry validation + duplicate-id detection.
+// The STRICT no-unknown-key check belongs on the bytes WE author, not the bytes a
+// deployed client fetches — see ParseMarketplaceCatalogStrict / the author-side
+// catalog test (marketplace_tier1_catalog_test.go), which feeds a typo'd key and
+// asserts rejection so the repo's own catalog still catches authoring typos.
+//
+// codex r5 P2 closure: rejects trailing bytes after the top-level JSON object so a
+// valid catalog appended with garbage (or a second object) cannot be silently
+// accepted. Mirrors the registry-source "single canonical document" contract from
+// §"Threat model".
 func ParseMarketplaceCatalog(raw []byte) (*MarketplaceCatalog, error) {
+	return parseMarketplaceCatalog(raw, false)
+}
+
+// ParseMarketplaceCatalogStrict is the AUTHOR-SIDE decode: identical to
+// ParseMarketplaceCatalog but ALSO rejects unknown keys (DisallowUnknownFields).
+// It is for validating the bytes WE author (the in-repo catalog.json), so a typo'd
+// field name (e.g. `instal_probe`) is caught at authoring/test time. It is NOT on
+// the deployed-client fetch path — a fetched catalog with a future additive field
+// must stay non-breaking there (see ParseMarketplaceCatalog).
+func ParseMarketplaceCatalogStrict(raw []byte) (*MarketplaceCatalog, error) {
+	return parseMarketplaceCatalog(raw, true)
+}
+
+func parseMarketplaceCatalog(raw []byte, strictUnknownFields bool) (*MarketplaceCatalog, error) {
 	var cat MarketplaceCatalog
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
-	dec.DisallowUnknownFields()
+	if strictUnknownFields {
+		// Author-side only: catch typo'd keys in the repo's own catalog. The
+		// deployed-client fetch path leaves this off for additive forward-compat.
+		dec.DisallowUnknownFields()
+	}
 	if err := dec.Decode(&cat); err != nil {
 		return nil, fmt.Errorf("decode catalog: %w", err)
 	}
@@ -173,7 +219,7 @@ func ParseMarketplaceCatalog(raw []byte) (*MarketplaceCatalog, error) {
 // or populated all count) — so an older v1-only client whose
 // DisallowUnknownFields decoder rejects the WHOLE catalog on the bare KEY never
 // has to face a v1 catalog carrying it.
-var newCatalogFieldKeys = []string{"vendored_source", "availability", "install_probe"}
+var newCatalogFieldKeys = []string{"vendored_source", "availability", "install_probe", "required_secrets"}
 
 // catalogEntryNewKeyPresence re-decodes the catalog body's `entries` array into
 // a parallel per-entry map[string]json.RawMessage from the SAME bytes the typed
@@ -273,6 +319,8 @@ func newCatalogFieldsRequireV2(e *MarketplaceEntry, schemaVersion string, presen
 		return fmt.Errorf("availability requires catalog schema_version %q", MarketplaceCatalogSchemaVersionV2)
 	case e.InstallProbe != nil:
 		return fmt.Errorf("install_probe requires catalog schema_version %q", MarketplaceCatalogSchemaVersionV2)
+	case len(e.RequiredSecrets) > 0:
+		return fmt.Errorf("required_secrets requires catalog schema_version %q", MarketplaceCatalogSchemaVersionV2)
 	}
 	return nil
 }
@@ -365,6 +413,57 @@ func validateCatalogVendoredAndAvailability(e *MarketplaceEntry) error {
 		// disabled row whose runtime probe looks up an empty name.
 		if err := config.ValidateProbeValuesNonEmpty(catalogProbeToConfig(e.InstallProbe), "catalog entry"); err != nil {
 			return err
+		}
+	}
+	// required_secrets authoring guard: each named vault key MUST appear as a
+	// `secret:<key>` value in the entry's Env. A required-secret key that has no
+	// matching env ref would gate the install on a credential the projected
+	// manifest never actually consumes — so a typo in required_secrets (or a stale
+	// key left after an env rename) cannot silently UN-gate the row or block on a
+	// phantom credential. The reverse direction is intentionally NOT required: a
+	// `secret:` env ref WITHOUT a required_secrets entry stays the default
+	// optional-secret posture (paper-search's unpaywall_email), which is the whole
+	// point of the opt-in gate. Empty entries are rejected so a stray "" cannot
+	// become a permanently-unblockable phantom requirement.
+	if len(e.RequiredSecrets) > 0 {
+		// required_secrets is a LOCAL-STDIO concern only (codex finding 3): the
+		// install gate that blocks on a missing required secret runs on the
+		// daemon-spawn path. BOTH http install paths ignore required_secrets —
+		// generateRemoteHTTPDraft (marketplace_generate.go) projects only
+		// name/kind/transport/url/client_bindings/availability, and the remote-http
+		// install never gates on it — so required_secrets on a transport:"http"
+		// entry is meaningless and misleading (it would imply a gate that does not
+		// exist). Reject it at authoring rather than silently dropping it. A remote
+		// endpoint's credentials live in its headers (Authorization / X-API-Key),
+		// not in a required-secret env gate.
+		if e.Transport == "http" {
+			return fmt.Errorf("required_secrets is not supported on a transport:\"http\" entry (it is a local-stdio install gate; a remote endpoint's credentials belong in its headers)")
+		}
+		envSecretKeys := map[string]bool{}
+		for _, v := range e.Env {
+			if strings.HasPrefix(v, "secret:") {
+				envSecretKeys[strings.TrimPrefix(v, "secret:")] = true
+			}
+		}
+		for _, key := range e.RequiredSecrets {
+			if strings.TrimSpace(key) == "" {
+				return fmt.Errorf("required_secrets contains an empty key")
+			}
+			// The key must be a SETTABLE vault key name — the same shape `mcphub
+			// secrets set` / POST /api/secrets accepts, owned by the single
+			// secrets.ValidateSettableKeyName predicate (the r2 manifest gate already
+			// reuses it; the catalog author guard must reject the same un-settable
+			// names one layer earlier, at catalog-author time, codex finding 3). A
+			// key the operator literally cannot `set` (e.g. `bad-key`, a digit-leading
+			// name) would gate the projected install FOREVER: the blocking finding
+			// never clears because the satisfying vault write is itself rejected.
+			// Reusing the secrets owner keeps this from forking the key-name regex.
+			if err := secrets.ValidateSettableKeyName(key); err != nil {
+				return fmt.Errorf("required_secrets key %q is not a settable vault key name (%v) — it can never be set via `mcphub secrets set` / the Secrets screen, so the install gate would block forever", key, err)
+			}
+			if !envSecretKeys[key] {
+				return fmt.Errorf("required_secrets key %q has no matching secret:%s env ref (a required secret must back an env value the server actually reads)", key, key)
+			}
 		}
 	}
 	return nil

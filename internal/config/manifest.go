@@ -138,6 +138,21 @@ type ServerManifest struct {
 	// Spec: docs/superpowers/specs/2026-05-19-servers-matrix-lsp-and-env-revamp-design.md §"Manifest schema additions".
 	RequiredBinaries []string `yaml:"required_binaries,omitempty"`
 
+	// RequiredSecrets is the OPT-IN list of vault KEYS that MUST be resolvable
+	// before this server installs. Unlike the default "secrets are optional"
+	// posture (an unset `secret:` env ref is omitted at spawn so the server
+	// reports its own missing-key — see secrets.ResolveMapBestEffort), a key
+	// listed here turns into a BLOCKING admission finding when it is not set in
+	// the vault, so the install is REFUSED rather than spawning a daemon that
+	// hard-exits on startup for the missing credential. ADDITIVE + OPTIONAL:
+	// every existing manifest omits it (nil slice → no change). The keys are the
+	// vault keys behind the `secret:<key>` env refs, e.g.
+	// `required_secrets: [acedata_api_token]` for env
+	// ACEDATACLOUD_API_TOKEN: secret:acedata_api_token.
+	//
+	// Decision: work-items/decisions/2026-06-24-required-secret-install-gate.md
+	RequiredSecrets []string `yaml:"required_secrets,omitempty"`
+
 	// DaemonTemplate is the per-workspace dynamic-pool spawn template.
 	// REQUIRES kind=workspace-scoped AND transport != remote-http
 	// (cross-branch validator gate rejects other combinations). Mutually
@@ -725,6 +740,49 @@ func (m *ServerManifest) validateVendoredAndAvailability() error {
 	return nil
 }
 
+// validateRequiredSecretsBackEnv enforces the required_secrets integrity rule on
+// a manifest: each key in RequiredSecrets MUST appear as a `secret:<key>` value
+// in Env. It is the manifest-side mirror of the catalog authoring guard
+// (validateCatalogVendoredAndAvailability), so a persisted or hand-edited
+// manifest gets the SAME protection a catalog-drafted one does — a typo or stale
+// key in required_secrets can neither block on a phantom credential the daemon
+// never reads, nor silently pass the install gate while the REAL env secret stays
+// unset (which would crash-loop the daemon on startup). Empty entries are rejected
+// so a stray "" cannot become a permanently-unblockable phantom requirement.
+// PURE: it inspects only the manifest struct (no PATH / vault / host state). A
+// manifest with no required_secrets is a no-op.
+func (m *ServerManifest) validateRequiredSecretsBackEnv() error {
+	if len(m.RequiredSecrets) == 0 {
+		return nil
+	}
+	envSecretKeys := map[string]bool{}
+	for _, v := range m.Env {
+		if strings.HasPrefix(v, "secret:") {
+			envSecretKeys[strings.TrimPrefix(v, "secret:")] = true
+		}
+	}
+	for _, key := range m.RequiredSecrets {
+		if strings.TrimSpace(key) == "" {
+			return fmt.Errorf("manifest %s: required_secrets contains an empty key", m.Name)
+		}
+		// The key must be a SETTABLE vault key name (the same shape the
+		// secret-set path — `mcphub secrets set` / POST /api/secrets — accepts,
+		// owned by secrets.ValidateSettableKeyName). A required_secrets key the
+		// operator literally cannot `set` (e.g. `bad-key`, a digit-leading name)
+		// would gate the install FOREVER: the blocking finding never clears
+		// because the satisfying vault write is itself rejected. Fail loud at
+		// validate instead. Reusing the secrets owner keeps this from forking the
+		// key-name regex (the two paths must agree on settable shape).
+		if err := secrets.ValidateSettableKeyName(key); err != nil {
+			return fmt.Errorf("manifest %s: required_secrets key %q is not a settable vault key name (%v) — it can never be set via `mcphub secrets set` / the Secrets screen, so the install gate would block forever", m.Name, key, err)
+		}
+		if !envSecretKeys[key] {
+			return fmt.Errorf("manifest %s: required_secrets key %q has no matching secret:%s env ref (a required secret must back an env value the server actually reads)", m.Name, key, key)
+		}
+	}
+	return nil
+}
+
 // ValidateProbeValuesNonEmpty is the single-owner validator for install_probe
 // values, shared by the manifest gate and the catalog-entry mirror (via
 // catalogProbeToConfig) so both produce the same diagnostic shape. label
@@ -1023,6 +1081,27 @@ func (m *ServerManifest) Validate() error {
 	// Host-install detection (the D-3 probe) is a host/runtime fact and lives in
 	// internal/api.AdmissionCheck instead.
 	if err := m.validateVendoredAndAvailability(); err != nil {
+		return err
+	}
+
+	// required_secrets authoring/integrity gate. Each declared key MUST back a
+	// `secret:<key>` value in this manifest's Env — otherwise the required-secret
+	// install gate (api.AdmissionCheck) would block the install on a credential the
+	// daemon never actually reads from its env, OR a typo key (one that happens to
+	// exist in the vault) would pass the gate while the REAL env secret stays
+	// missing → crash-loop on startup (codex finding 3). The catalog authoring
+	// guard (validateCatalogVendoredAndAvailability) enforces the SAME rule on
+	// MarketplaceEntry, but a persisted / hand-edited manifest gets no such check
+	// without this. Placed BEFORE the companion / remote-http early-returns so it
+	// applies to EVERY kind/transport uniformly: required_secrets is a local-env
+	// concern, so a key with no backing env secret: ref is rejected regardless of
+	// transport (a remote-http endpoint carries credentials via url/headers
+	// ${secret:KEY} placeholders, not required_secrets). The reverse direction is
+	// intentionally NOT required — a `secret:` env ref WITHOUT a required_secrets
+	// entry stays the default optional-secret posture, which is the whole point of
+	// the opt-in gate. ADDITIVE: a manifest without required_secrets (every existing
+	// manifest) skips this block entirely.
+	if err := m.validateRequiredSecretsBackEnv(); err != nil {
 		return err
 	}
 

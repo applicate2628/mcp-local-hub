@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"mcp-local-hub/internal/config"
@@ -233,6 +234,42 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 			add("secrets-vault-readable", "secrets vault", fmt.Sprintf("manifest %s uses secret refs but the vault is unreadable: %v", m.Name, err), "Fix or remove the corrupt vault — a secret-using server fails to start when it cannot be read.", false)
 		}
 	}
+	// REQUIRED secrets (opt-in install gate). A key declared in
+	// m.RequiredSecrets is a NON-OPTIONAL (blocking) finding when it is not
+	// resolvable in the vault — the SERVER hard-exits on startup without it
+	// (e.g. mcp-suno exits 1 when ACEDATACLOUD_API_TOKEN is unset), so a
+	// one-click install with no token would crash-loop instead of failing
+	// loud here. This is the SIBLING of the default optional-secret posture: an
+	// UNMARKED `secret:` ref stays optional (omitted at spawn, server reports
+	// its own missing-key); only a marked key blocks. The blocking finding makes
+	// containsNonOptional() true, so Preflight returns an AdmissionError and
+	// Install aborts BEFORE any manifest/intent/client-config write.
+	//
+	// The vault-UNREADABLE case is NOT re-reported here — the
+	// "secrets-vault-readable" finding above already blocks on it. This loop
+	// fires ONLY on a resolvable vault (absent or readable) where the specific
+	// key is genuinely missing, so the operator sees the actionable per-key
+	// "set <key>" fix, not a duplicate corrupt-vault row. The Reason names the
+	// KEY ONLY, never a value (redaction posture — readiness.go's secret rows).
+	if reqSecrets := requiredSecretSet(m); len(reqSecrets) > 0 {
+		vault, verr := secrets.OpenVaultOptional(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+		// verr != nil → vault EXISTS but is unreadable; the vault-readable finding
+		// above already blocks (when the manifest has secret refs, which a
+		// required-secret manifest does). Skip the per-key loop so we do not stack
+		// a confusing "<key> not set" on top of "vault unreadable".
+		if verr == nil {
+			for _, key := range sortedRequiredSecretKeys(reqSecrets) {
+				// requiredSecretResolved is the SINGLE OWNER of the resolved
+				// predicate (present AND non-blank via TrimSpace), shared with
+				// readiness.go so a present-but-blank required value blocks BOTH
+				// admission AND readiness in parity (codex finding 2). The Reason
+				// names the KEY only (redaction posture), never the value.
+				if !requiredSecretResolved(vault, key) {
+					add("required-secret", "secret: "+key, key+" is REQUIRED — the server exits on startup when it is unset", "Set it on the Secrets screen or `mcphub secrets set "+key+"` before installing.", false)
+				}
+			}
+		}
+	}
 	for k, v := range m.Env {
 		if strings.HasPrefix(v, "file:") {
 			add("file-env-ref", "env: "+k, fmt.Sprintf("manifest %s env[%s] uses a file: ref, which the daemon launch path cannot resolve (mcphub has no local config map); replace it with a secret: ref or a literal value", m.Name, k), "Replace the file: env ref with a secret: ref (vault) or a literal value in the manifest.", false)
@@ -249,6 +286,104 @@ func containsNonOptional(findings []AdmissionFinding) bool {
 		}
 	}
 	return false
+}
+
+// requiredSecretSet is the SINGLE OWNER of the manifest's opt-in required-secret
+// key set, consumed by BOTH the AdmissionCheck blocking finding (above) and the
+// readiness per-key Optional classification (readiness.go) so the two can never
+// drift on which secrets block vs. stay advisory — there is exactly one predicate
+// for "is this vault key a REQUIRED install gate". Returns nil for a manifest with
+// no required_secrets (every existing manifest), keeping the gate additive. Blank
+// entries are skipped defensively so a stray "" cannot become a permanently
+// unblockable phantom key.
+func requiredSecretSet(m *config.ServerManifest) map[string]bool {
+	if m == nil || len(m.RequiredSecrets) == 0 {
+		return nil
+	}
+	set := make(map[string]bool, len(m.RequiredSecrets))
+	for _, k := range m.RequiredSecrets {
+		if k == "" {
+			continue
+		}
+		set[k] = true
+	}
+	return set
+}
+
+// requiredSecretResolved is the SINGLE OWNER of the "is this required-secret key
+// RESOLVED?" predicate, consumed by BOTH the AdmissionCheck blocking loop (above)
+// and the readiness per-key required-secret classification (readiness.go), so the
+// two can never drift on what counts as resolved. A key is resolved ONLY when it
+// is present in the vault AND holds a non-whitespace value: vault.Get returns
+// ("", nil) for a present-but-BLANK entry, but a required server (e.g. mcp-suno)
+// still hard-exits on startup with an empty ACEDATACLOUD_API_TOKEN, so a
+// blank/whitespace-only value is NOT resolved (codex finding 2). A nil vault
+// (absent or unreadable) resolves nothing. Any future resolution rule lives here,
+// in this one place — admission and readiness MUST keep calling this owner so a
+// blank required value blocks BOTH (Ready=false AND admission-blocked).
+func requiredSecretResolved(vault *secrets.Vault, key string) bool {
+	if vault == nil {
+		return false
+	}
+	v, err := vault.Get(key)
+	return err == nil && strings.TrimSpace(v) != ""
+}
+
+// RequiredSecretAdmission runs the SAME AdmissionCheck owner and returns the
+// blocking required-secret finding (as the typed *AdmissionError) when a key in
+// m.RequiredSecrets is unset in the vault, or nil otherwise. It is the
+// pre-persist gate seam for callers that hold a PARSED-but-not-yet-written
+// manifest and must refuse the install BEFORE writing it to disk — chiefly the
+// GUI one-click hub-install handler, which calls ManifestCreate (a disk write)
+// before the production Install→Preflight gate runs, so without this a blocked
+// install would leave a manifest file behind.
+//
+// It deliberately surfaces ONLY the SECRET-related blocking findings, NOT the
+// full Preflight set: ports / binaries / launchers are re-checked loud at the
+// real Install→Preflight gate (which loads the persisted manifest), and a parsed
+// in-memory draft may legitimately not yet satisfy a host port/binary check that
+// Install handles. Reusing AdmissionCheck + requiredSecretSet keeps this on the
+// single required-secret owner (no second predicate). Returns nil for a manifest
+// with no required_secrets and a readable/absent vault, so it is additive.
+//
+// It surfaces TWO secret-block findings, both non-optional:
+//   - "required-secret"        — a declared key is unset in a readable vault.
+//   - "secrets-vault-readable" — the vault FILE exists but cannot be opened.
+//
+// The second is load-bearing: when the vault is unreadable, AdmissionCheck
+// emits "secrets-vault-readable" and DELIBERATELY SKIPS the per-key
+// "required-secret" loop (it cannot tell which keys are present). Filtering to
+// "required-secret" ALONE would then see no blocking finding and let
+// ManifestCreate write the manifest BEFORE the real Install→Preflight gate
+// re-detects the unreadable vault — leaving a manifest behind. Surfacing the
+// secret-vault-readable block here keeps the pre-persist gate symmetric with the
+// AdmissionCheck secret block. It stays scoped to the SECRET findings: ports /
+// binaries / launchers remain at the real Install→Preflight gate.
+func RequiredSecretAdmission(m *config.ServerManifest) error {
+	if m == nil {
+		return nil
+	}
+	for _, f := range AdmissionCheck(m, AdmissionScope{}) {
+		if f.Optional {
+			continue
+		}
+		if f.ID == "required-secret" || f.ID == "secrets-vault-readable" {
+			return admissionErrorFromFinding(f)
+		}
+	}
+	return nil
+}
+
+// sortedRequiredSecretKeys returns the required-secret keys in a deterministic
+// order so the emitted findings are stable across runs (Go map iteration order
+// is randomized).
+func sortedRequiredSecretKeys(set map[string]bool) []string {
+	keys := make([]string, 0, len(set))
+	for k := range set {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // optionalFindingByID returns the FIRST advisory (Optional) finding with the

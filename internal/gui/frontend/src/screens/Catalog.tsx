@@ -698,9 +698,13 @@ function CatalogInstallGate({
 // map. The richer terminal states carry the data the row renders inline:
 //   "installed"      → hub-mode 201 success (name + resolved port).
 //   "name-conflict"  → hub-mode 409: offer a one-click retry under suggestedName.
-//   "probe-pending"  → 412: the D-3 host-probe precondition is unmet (host app
-//                      not detected) — rendered as its OWN message, never the
-//                      name-conflict retry.
+//   "probe-pending"  → 412 (AVAILABILITY_PROBE_PENDING): the D-3 host-probe
+//                      precondition is unmet (host app not detected) — rendered as
+//                      its OWN message, never the name-conflict retry.
+//   "required-secret-missing" → 412 (REQUIRED_SECRET_MISSING): a REQUIRED vault
+//                      secret is unset — rendered with a "set the secret on the
+//                      Secrets screen" message + an Open-Secrets deep-link, NOT the
+//                      misleading "host app not detected" copy (codex finding 1).
 //   "direct-result"  → direct-mode 200/207: per-client updated / failed split.
 //   "error"          → any unmodelled failure, rendered as an inline message.
 type MarketplaceInstallState =
@@ -709,6 +713,7 @@ type MarketplaceInstallState =
   | { phase: "installed"; name: string; port: number }
   | { phase: "name-conflict"; suggestedName: string }
   | { phase: "probe-pending"; reason: string }
+  | { phase: "required-secret-missing"; reason: string }
   | {
       phase: "direct-result";
       partial: boolean;
@@ -814,6 +819,8 @@ function MarketplaceSection({
         setState(id, { phase: "name-conflict", suggestedName: result.suggestedName });
       } else if (result.kind === "probe-pending") {
         setState(id, { phase: "probe-pending", reason: result.reason });
+      } else if (result.kind === "required-secret-missing") {
+        setState(id, { phase: "required-secret-missing", reason: result.reason });
       } else {
         setState(id, {
           phase: "direct-result",
@@ -1093,6 +1100,27 @@ function MarketplaceCard({
             >
               Host app not detected yet — {state.reason}
             </p>
+          )}
+
+          {/* 412 REQUIRED_SECRET_MISSING: a REQUIRED vault secret is unset (or
+              empty). DISTINCT from the probe-pending message above — the fix is
+              to SET the secret, not to install a host app (codex finding 1). The
+              backend reason already names the key + the fix; we add an
+              Open-Secrets deep-link reusing the existing #/secrets nav. */}
+          {state.phase === "required-secret-missing" && (
+            <div
+              class="catalog-marketplace-status catalog-marketplace-status-warn"
+              role="alert"
+              data-testid={`catalog-marketplace-required-secret-${entry.id}`}
+            >
+              {state.reason}{" "}
+              <a
+                href="#/secrets"
+                data-testid={`catalog-marketplace-required-secret-open-${entry.id}`}
+              >
+                Open Secrets
+              </a>
+            </div>
           )}
 
           {/* 409 NAME_CONFLICT: offer a one-click retry under the suggested

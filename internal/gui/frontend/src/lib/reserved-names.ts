@@ -10,8 +10,9 @@ export function isReservedName(name: string): boolean {
   return RESERVED_SECRET_NAMES.has(name);
 }
 
-// SECRET_NAME_RE mirrors the backend AddSecret name validator at
-// internal/api/secrets.go:secretNameRE (^[A-Za-z][A-Za-z0-9_]*$).
+// SECRET_NAME_RE mirrors the backend settable-vault-key-name validator at
+// internal/secrets/resolver.go:SettableKeyNameRE (^[A-Za-z][A-Za-z0-9_]*$),
+// reused by api.SecretsSet/SecretsRotate and the config required_secrets gate.
 // AddSecretModal and SecretPicker both reference this single source so
 // that client-side rejection matches what the backend would reject.
 //
