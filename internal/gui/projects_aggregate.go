@@ -167,5 +167,10 @@ func (s *Server) scanOneProject(root string, guiPort int) (*api.ScanResult, stri
 	if err := api.EnrichProjectClaudeLocalScope(result, realRoot); err != nil {
 		return nil, "PROJECT_SCAN_FAILED"
 	}
+	// P3a finding 5 (bot PR #433): preserve the object-member re-enable value
+	// source BEFORE sanitizeScanResult nils Raw, so the P3b frontend can echo it
+	// back on a re-enable toggle. Same single-owner scope discrimination + no-leak
+	// posture as the /api/projects/scan path (preserveProjectToggleValues).
+	preserveProjectToggleValues(result)
 	return sanitizeScanResult(result), ""
 }

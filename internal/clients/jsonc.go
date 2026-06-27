@@ -54,6 +54,18 @@ func readRawConfig(path string) ([]byte, error) {
 // behavior where an absent or empty file yields an empty map, not an error).
 // A nil top-level (literal JSON `null`) is also coerced to an empty map so
 // callers never have to nil-check the result.
+//
+// CAUTION (input-mutation hazard): hujson.Standardize MUTATES its input slice
+// IN PLACE (it overwrites comment bytes with spaces while standardizing), so the
+// `data` slice this function receives is clobbered after the call. A
+// read-then-comment-preserving-write caller (one that parses to inspect, then
+// later Pack()s the ORIGINAL bytes to keep comments) MUST pass a COPY of the
+// on-disk bytes here — never the same slice it intends to comment-preserve-write
+// later. Today no caller depends on `data` staying intact after this call (the
+// comment-preserving write path in applyJSONCObjectMemberPath re-reads via
+// hujson.Parse on a fresh read), so this is documented as a hazard, not a live
+// bug. Proper single-owner fix (defensive copy inside this helper) is deferred:
+// work-items/backlog/2026-06-25-jsonc-parsebytes-defensive-copy.md.
 func parseJSONCBytes(data []byte) (map[string]any, error) {
 	if len(data) == 0 || len(strings.TrimSpace(string(data))) == 0 {
 		return map[string]any{}, nil

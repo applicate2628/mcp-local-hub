@@ -92,10 +92,58 @@ func (s *Server) projectsScanHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// P3a finding 5 (bot PR #433): preserve a RE-ENABLE value source for
+	// object-member project substrates (cursor/vscode/claude-code Project)
+	// BEFORE the sanitizer nils Raw, so the P3b frontend can echo the full
+	// member value back on a re-enable toggle. Copies Raw → ToggleValue only for
+	// object-member-scope clients; no new surface (the same verbatim member the
+	// scan already read), no resolved secrets (Raw carries secret:<key> refs
+	// verbatim).
+	preserveProjectToggleValues(result)
+
 	// Reuse the global scan's sanitizer so the per-entry Raw config blobs are
 	// stripped before serialization (no client-config internals on the wire).
 	result = sanitizeScanResult(result)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
+}
+
+// preserveProjectToggleValues copies each OBJECT-MEMBER-scope client entry's
+// verbatim Raw config fragment into ClientEntry.ToggleValue so it survives the
+// sanitizeScanResult Raw-stripping and reaches the P3b frontend as the re-enable
+// value source (bot PR #433 finding 5). It is a PROJECT-read-only enrichment —
+// the GLOBAL Servers-matrix scan never calls it, so the global wire shape stays
+// byte-identical (golden invariant); ToggleValue's omitempty keeps it absent
+// there.
+//
+// Scope discrimination uses the SINGLE owner clients.ProjectToggleOwner: a
+// client gets a ToggleValue only when ProjectToggleOwner(client,
+// ScopeProjectObjectMember) == OwnerProjectObjectMember (cursor / vscode /
+// claude-code). claude-code's LOCAL array-move scope is NOT object-member, so it
+// is correctly excluded (re-enable there needs no value). The function mutates
+// the in-memory result in place BEFORE sanitization; callers MUST run it before
+// sanitizeScanResult (which nils Raw, the source it reads).
+//
+// NO-LEAK posture (finding 5): ToggleValue is the entry's own Raw — the same
+// verbatim object-member fragment the project scan already read from the user's
+// own config (same-origin localhost). The scan never resolves secrets, so a
+// secret:<key> / ${env:...} reference is copied verbatim, never resolved.
+func preserveProjectToggleValues(result *api.ScanResult) {
+	if result == nil {
+		return
+	}
+	for i := range result.Entries {
+		presence := result.Entries[i].ClientPresence
+		for client, ce := range presence {
+			if clients.ProjectToggleOwner(client, clients.ScopeProjectObjectMember) != clients.OwnerProjectObjectMember {
+				continue
+			}
+			if ce.Raw == nil {
+				continue
+			}
+			ce.ToggleValue = ce.Raw
+			presence[client] = ce
+		}
+	}
 }

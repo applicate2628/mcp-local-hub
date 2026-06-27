@@ -17,7 +17,11 @@
 //     - B-claude Local (array move) → clients.ToggleClaudeMcpjsonMembership →
 //     hujson + WriteConfigFile → SecureWriteClientConfig (NEVER deletes
 //     mcpServers — decision 5)
-//     - C  groups                   → api.ReadModifyWriteGroups
+//     - C  groups                   → api.ReadModifyWriteGroups, then the SAME
+//     republishGroupsSnapshot seam /api/groups uses (so a membership change is
+//     effective in the live hub immediately, not only after a restart); ENABLE
+//     is name-gated against the same routable-server set /api/groups validates
+//     against.
 //  4. READS BACK the new state from the same readers /api/projects composes, so
 //     the response reflects the persisted result, not the requested intent.
 //
@@ -42,6 +46,8 @@
 package gui
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -122,7 +128,7 @@ func (s *Server) projectsToggleHandler(w http.ResponseWriter, r *http.Request) {
 	case clients.OwnerClaudeLocalMembership:
 		s.toggleClaudeLocalMembership(w, req)
 	case clients.OwnerGroupServers:
-		s.toggleGroupServers(w, req)
+		s.toggleGroupServers(r.Context(), w, req)
 	default:
 		// No write owner for this (client, scope) — refuse (no write) rather
 		// than guess. The substrate the toggle named is unsupported.
@@ -264,15 +270,55 @@ func (s *Server) toggleClaudeLocalMembership(w http.ResponseWriter, req projectT
 
 // toggleGroupServers — Model C. Adds/removes the server from the group's
 // servers list via api.ReadModifyWriteGroups (atomic under hub-mcp.lock,
-// lost-update-safe). It does NOT republish the live snapshot here — P3a is the
-// write backend; the group route republish is the groups screen's concern and
-// is out of P3a's scope (the membership write is durable either way).
-func (s *Server) toggleGroupServers(w http.ResponseWriter, req projectToggleRequest) {
+// lost-update-safe), then re-publishes the live hub snapshot through the SAME
+// seam /api/groups uses (bot PR #433 finding 1) so a membership change takes
+// effect IMMEDIATELY instead of only after a hub restart.
+//
+// VALIDATION (bot PR #433 finding 2): on ENABLE the requested server name is
+// validated against the SAME routable-server set /api/groups validates against
+// (s.groups.AvailableServers() → RoutableServerNames()) BEFORE it is persisted
+// — so a same-origin POST can no longer append an arbitrary / non-routable name
+// to groups.yaml (the authoring-boundary strictness the snapshot builder
+// relaxes). DISABLE is not name-gated: removing a stale member is exactly the
+// cleanup an operator should always be allowed to do (mirrors groupsUpsert,
+// which validates only the body's server list, never a removal).
+//
+// REPUBLISH (bot PR #433 finding 1): when the gate-ON hub listener is live, the
+// in-memory ResolverSnapshot is rebuilt from the current manifests + the NEW
+// groups via republishGroupsSnapshot — the SAME per-Server seam
+// writeGroupMutationWithForce calls, so a disabled server is dropped from the
+// /g/<group>/mcp surface in real time. The durable groups.yaml write already
+// landed, so a republish failure is non-fatal: it is surfaced as a Warning
+// (mirroring the groups screen's restart_required banner) rather than failing
+// the toggle. A benign request-context cancel (client disconnect / deadline
+// before the lock could be acquired) is NOT a republish failure — the next
+// mutation/bind republishes — so it is swallowed exactly as the groups tail does.
+func (s *Server) toggleGroupServers(ctx context.Context, w http.ResponseWriter, req projectToggleRequest) {
 	group := strings.TrimSpace(req.Group)
 	if group == "" {
 		writeAPIError(w, errBadToggleField("group is required for a group toggle"),
 			http.StatusBadRequest, "PROJECT_TOGGLE_INVALID")
 		return
+	}
+
+	// Finding 2: name gate on ENABLE only, against the SAME routable set
+	// /api/groups uses. Reject an unknown/non-routable name (redacted 400)
+	// BEFORE persisting it. The disable path skips this so a stale member can
+	// always be cleaned up.
+	if req.Enable {
+		known, err := s.groups.AvailableServers()
+		if err != nil {
+			writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")
+			return
+		}
+		if !groupHasServer(known, req.Server) {
+			// Leak-safe: a fixed message + stable code; never echo the known set
+			// (server names are not secret, but the redacted boundary keeps the
+			// wire shape stable + minimal — the server-side log is unaffected).
+			writeAPIError(w, errBadToggleField("server is not a known routable server"),
+				http.StatusBadRequest, "PROJECT_TOGGLE_UNKNOWN_SERVER")
+			return
+		}
 	}
 
 	found := false
@@ -313,7 +359,27 @@ func (s *Server) toggleGroupServers(w http.ResponseWriter, req projectToggleRequ
 			break
 		}
 	}
-	writeJSON(w, http.StatusOK, projectToggleResponse{Scope: req.Scope, Server: req.Server, Enabled: enabled})
+
+	resp := projectToggleResponse{Scope: req.Scope, Server: req.Server, Enabled: enabled}
+
+	// Finding 1: republish the live snapshot through the SAME seam /api/groups
+	// uses, so the membership change is effective immediately (a disabled server
+	// stops routing in the hub now, not at the next restart). Non-fatal on
+	// failure — the durable write already committed.
+	if s.HubMcpEndpointActive() {
+		if rerr := s.republishGroupsSnapshot(ctx); rerr != nil {
+			if !errors.Is(rerr, context.Canceled) && !errors.Is(rerr, context.DeadlineExceeded) {
+				_ = api.LogHubMcpEvent("warn", "project-group-toggle-republish-failed", map[string]any{
+					"group": group,
+					"err":   rerr.Error(),
+				})
+				resp.Warnings = append(resp.Warnings,
+					"group membership saved, but the live hub snapshot could not be refreshed — restart the hub to apply")
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ensureGroupServer appends server iff absent, preserving order + sorting for a

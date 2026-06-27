@@ -12,7 +12,11 @@
 // cursor's project config" inline.
 package clients
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
 
 // ProjectToggleScope is the per-project substrate a toggle targets. It is the
 // disambiguator the classifier needs ON TOP OF the client id, because a single
@@ -139,12 +143,45 @@ func projectScopeForClient(client string) *ProjectScope {
 // On enable, `value` is the object-member value to set (the same shape the
 // global scan/adapters use for this client). On disable, value is ignored and
 // the member is removed (idempotent: removing an absent member is a no-op).
+//
+// SERIALIZATION + PARENT-CREATE (bot PR #433 findings 3 + 4): the read-modify-
+// write is wrapped in withConfigLock — the SAME per-path in-process mutex +
+// cross-process advisory flock the adapter decorator (lockingClient) wraps every
+// mutating Client method in. Two concurrent /api/projects/toggle on the SAME
+// project config no longer torn/lost-update (each reading the same baseline,
+// the later write clobbering the earlier). withConfigLock ALSO creates the
+// write-target PARENT DIR via the hardened SecureCreateParentDir
+// (symlink-/reparse-point-refusing, owner-only, DACL-before-bytes) BEFORE the
+// flock — so an ENABLE into a first-time project whose `.cursor`/`.vscode` parent
+// does not exist yet succeeds (the production SecureWriteClientConfig opens the
+// IMMEDIATE PARENT handle-relative and does NOT create it). NOT a raw os.MkdirAll
+// — the same hardened parent-create the global write path uses (config_lock.go).
+//
+// DISABLE-into-a-missing-parent is a pure no-op: with no config dir there is no
+// member to remove and nothing to serialize against (a writer needs the dir to
+// exist), so we return nil WITHOUT taking the lock or creating the dir — mirrors
+// withConfigReadLock's missing-parent fast path and avoids leaving a stray empty
+// `.cursor/` directory behind on a disable. (Finding 4: parent-create is an
+// ENABLE-only need.)
 func ToggleProjectObjectMember(client, configPath, server string, value any, enable bool) error {
 	ps := projectScopeForClient(client)
 	if ps == nil {
 		return fmt.Errorf("client %q has no project-local object-member config scope", client)
 	}
-	return mutateJSONObjectMemberPath(configPath, []string{ps.SectionKey}, server, value, !enable)
+	if !enable {
+		// Disable: removing an absent member is a no-op. If the write-target
+		// parent dir does not exist, the member cannot exist either — return
+		// nil WITHOUT acquiring the lock (the flock file lives in that dir) or
+		// creating the dir, so a disable never leaves a stray empty config dir.
+		if _, statErr := os.Stat(filepath.Dir(configPath)); statErr != nil && os.IsNotExist(statErr) {
+			return nil
+		}
+	}
+	// Serialize the RMW (and, on enable, the hardened parent-create) under the
+	// SAME owner the adapter decorator uses for every mutating Client method.
+	return withConfigLock(configPath, func() error {
+		return mutateJSONObjectMemberPath(configPath, []string{ps.SectionKey}, server, value, !enable)
+	})
 }
 
 // ProjectObjectMemberPresent is the Model-B read-back: it reports whether

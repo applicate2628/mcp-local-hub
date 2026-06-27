@@ -24,6 +24,7 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -227,7 +228,11 @@ func TestProjectsToggle_GroupNotFound(t *testing.T) {
 	t.Cleanup(api.SetClientWriteFallbackForTest())
 
 	s := NewServer(Config{})
-	body := `{"scope":"group-servers","group":"ghost","server":"x","enable":true}`
+	// Use a ROUTABLE server name ("memory" is in the default routable set) so the
+	// bot-PR#433-finding-2 ENABLE name-gate PASSES and the toggle reaches the
+	// group-existence check — proving "group not found" → 404 (not the
+	// unknown-server 400). An unknown server would short-circuit to 400 first.
+	body := `{"scope":"group-servers","group":"ghost","server":"memory","enable":true}`
 	rec := postToggle(t, s, body)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status=%d, want 404; body=%s", rec.Code, rec.Body.String())
@@ -311,5 +316,243 @@ func TestProjectsToggle_MissingServer(t *testing.T) {
 	}
 	if after := snapshotTree(t, root); len(after) != len(before) {
 		t.Errorf("missing-server toggle wrote files: %v", after)
+	}
+}
+
+// --- bot PR #433 round 2 ---
+
+// TestProjectsToggle_GroupServers_RepublishesWhenHubLive pins finding 1: a
+// group-servers toggle re-publishes the live hub snapshot via the SAME
+// republishGroupsSnapshot seam /api/groups uses (so a membership change is
+// effective in the running hub immediately). Republish must fire on BOTH the
+// enable and the disable.
+func TestProjectsToggle_GroupServers_RepublishesWhenHubLive(t *testing.T) {
+	isolateHome(t)
+	stateDir := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(stateDir))
+	t.Cleanup(api.SetClientWriteFallbackForTest())
+
+	if err := api.WriteGroups(api.GroupsConfig{Version: 1, Groups: []api.Group{{Name: "frontend", Servers: []string{}}}}); err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+
+	s := NewServer(Config{})
+	// Deterministic routable set so the ENABLE name-gate passes for "memory".
+	s.groups = diskTestGroupsAPI{available: []string{"memory", "time"}}
+	// Mark the gate-ON hub listener live so the republish path runs.
+	comp := &HubListenerComponents{port: 9300}
+	comp.alive.Store(true)
+	s.hubMcpComp.Store(comp)
+	republishCalls := 0
+	s.groupsRepublishFn = func(_ context.Context, _ *api.API) error { republishCalls++; return nil }
+
+	rec := postToggle(t, s, `{"scope":"group-servers","group":"frontend","server":"memory","enable":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("enable status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if republishCalls != 1 {
+		t.Fatalf("republish fired %d times on ENABLE, want 1 (finding 1: same seam as /api/groups)", republishCalls)
+	}
+
+	rec = postToggle(t, s, `{"scope":"group-servers","group":"frontend","server":"memory","enable":false}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disable status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if republishCalls != 2 {
+		t.Fatalf("republish fired %d times after DISABLE, want 2 (republish on every membership change)", republishCalls)
+	}
+}
+
+// TestProjectsToggle_GroupServers_NoRepublishWhenHubOff: with the hub gate-OFF
+// the republish is skipped (no spurious call) and the durable write still lands.
+func TestProjectsToggle_GroupServers_NoRepublishWhenHubOff(t *testing.T) {
+	isolateHome(t)
+	stateDir := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(stateDir))
+	t.Cleanup(api.SetClientWriteFallbackForTest())
+
+	if err := api.WriteGroups(api.GroupsConfig{Version: 1, Groups: []api.Group{{Name: "frontend", Servers: []string{}}}}); err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+
+	s := NewServer(Config{})
+	s.groups = diskTestGroupsAPI{available: []string{"memory"}}
+	// No hubMcpComp stored → HubMcpEndpointActive() false → gate-OFF.
+	republishCalls := 0
+	s.groupsRepublishFn = func(_ context.Context, _ *api.API) error { republishCalls++; return nil }
+
+	rec := postToggle(t, s, `{"scope":"group-servers","group":"frontend","server":"memory","enable":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if republishCalls != 0 {
+		t.Fatalf("republish fired %d times with hub gate-OFF, want 0", republishCalls)
+	}
+	cfg, err := api.LoadGroups()
+	if err != nil {
+		t.Fatalf("LoadGroups: %v", err)
+	}
+	if !groupContains(cfg, "frontend", "memory") {
+		t.Fatalf("durable write missing after gate-OFF enable: %+v", cfg.Groups)
+	}
+}
+
+// TestProjectsToggle_GroupServers_EnableRejectsUnknownServer pins finding 2: an
+// ENABLE of a server NOT in the routable-server set is a redacted 400 and is
+// NEVER persisted to groups.yaml.
+func TestProjectsToggle_GroupServers_EnableRejectsUnknownServer(t *testing.T) {
+	isolateHome(t)
+	stateDir := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(stateDir))
+	t.Cleanup(api.SetClientWriteFallbackForTest())
+
+	if err := api.WriteGroups(api.GroupsConfig{Version: 1, Groups: []api.Group{{Name: "frontend", Servers: []string{}}}}); err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+
+	s := NewServer(Config{})
+	// "ghost" is NOT in the routable set.
+	s.groups = diskTestGroupsAPI{available: []string{"memory", "time"}}
+	s.groupsRepublishFn = func(_ context.Context, _ *api.API) error { return nil }
+
+	rec := postToggle(t, s, `{"scope":"group-servers","group":"frontend","server":"ghost","enable":true}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s, want 400 for unknown server", rec.Code, rec.Body.String())
+	}
+	var env struct{ Error, Code string }
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatalf("decode envelope %q: %v", rec.Body.String(), err)
+	}
+	if env.Code != "PROJECT_TOGGLE_UNKNOWN_SERVER" {
+		t.Errorf("code=%q, want PROJECT_TOGGLE_UNKNOWN_SERVER", env.Code)
+	}
+	// The unknown name must NOT be in groups.yaml.
+	cfg, err := api.LoadGroups()
+	if err != nil {
+		t.Fatalf("LoadGroups: %v", err)
+	}
+	if groupContains(cfg, "frontend", "ghost") {
+		t.Fatalf("unknown server leaked into groups.yaml: %+v", cfg.Groups)
+	}
+}
+
+// TestProjectsToggle_GroupServers_DisableNotNameGated confirms finding 2 is
+// ENABLE-only: a DISABLE of a now-non-routable stale member still succeeds —
+// cleanup must always be allowed.
+func TestProjectsToggle_GroupServers_DisableNotNameGated(t *testing.T) {
+	isolateHome(t)
+	stateDir := t.TempDir()
+	t.Cleanup(api.SetDaemonStateRootForTest(stateDir))
+	t.Cleanup(api.SetClientWriteFallbackForTest())
+
+	// Group already carries a stale, now-non-routable server "ghost".
+	if err := api.WriteGroups(api.GroupsConfig{Version: 1, Groups: []api.Group{{Name: "frontend", Servers: []string{"ghost"}}}}); err != nil {
+		t.Fatalf("seed group: %v", err)
+	}
+
+	s := NewServer(Config{})
+	s.groups = diskTestGroupsAPI{available: []string{"memory"}} // "ghost" absent
+	s.groupsRepublishFn = func(_ context.Context, _ *api.API) error { return nil }
+
+	rec := postToggle(t, s, `{"scope":"group-servers","group":"frontend","server":"ghost","enable":false}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want 200 (disable of a stale member must be allowed)", rec.Code, rec.Body.String())
+	}
+	cfg, err := api.LoadGroups()
+	if err != nil {
+		t.Fatalf("LoadGroups: %v", err)
+	}
+	if groupContains(cfg, "frontend", "ghost") {
+		t.Fatalf("stale member not removed by disable: %+v", cfg.Groups)
+	}
+}
+
+// TestProjectsScan_PreservesObjectMemberToggleValue pins finding 5: the project
+// scan exposes a per-entry `toggle_value` for OBJECT-MEMBER substrates carrying
+// the verbatim member value, while still stripping `raw`. A secret:<key> ref
+// survives verbatim (no resolution) — the no-leak posture.
+func TestProjectsScan_PreservesObjectMemberToggleValue(t *testing.T) {
+	isolateHome(t)
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".cursor", "mcp.json"),
+		`{"mcpServers":{"beta":{"command":"node","args":["b.js"],"env":{"TOKEN":"secret:beta_token"}}}}`)
+
+	s := NewServer(Config{})
+	rec := getProjectScan(t, s, root)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out api.ScanResult
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var beta *api.ScanEntry
+	for i := range out.Entries {
+		if out.Entries[i].Name == "beta" {
+			beta = &out.Entries[i]
+			break
+		}
+	}
+	if beta == nil {
+		t.Fatalf("beta entry absent (names=%v)", entryNames(out))
+	}
+	ce, ok := beta.ClientPresence["cursor"]
+	if !ok {
+		t.Fatalf("beta has no cursor presence: %+v", beta.ClientPresence)
+	}
+	if ce.Raw != nil {
+		t.Errorf("cursor entry leaked Raw on the wire: %+v", ce.Raw)
+	}
+	if ce.ToggleValue == nil {
+		t.Fatalf("cursor object-member entry missing toggle_value (finding 5: P3b re-enable source)")
+	}
+	if got, _ := ce.ToggleValue["command"].(string); got != "node" {
+		t.Errorf("toggle_value.command=%q, want node (verbatim member)", got)
+	}
+	env2, _ := ce.ToggleValue["env"].(map[string]any)
+	if env2 == nil {
+		t.Fatalf("toggle_value missing env: %+v", ce.ToggleValue)
+	}
+	if got, _ := env2["TOKEN"].(string); got != "secret:beta_token" {
+		t.Errorf("toggle_value env.TOKEN=%q, want verbatim secret:beta_token (NO resolution)", got)
+	}
+}
+
+// TestProjectsScan_ToggleValueForVscodeServersKey confirms finding 5 also covers
+// the vscode `servers`-key object-member substrate.
+func TestProjectsScan_ToggleValueForVscodeServersKey(t *testing.T) {
+	isolateHome(t)
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, ".vscode", "mcp.json"),
+		`{"servers":{"gamma":{"command":"uvx","args":["g"]}}}`)
+
+	s := NewServer(Config{})
+	rec := getProjectScan(t, s, root)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var out api.ScanResult
+	if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var gamma *api.ScanEntry
+	for i := range out.Entries {
+		if out.Entries[i].Name == "gamma" {
+			gamma = &out.Entries[i]
+			break
+		}
+	}
+	if gamma == nil {
+		t.Fatalf("gamma entry absent (names=%v)", entryNames(out))
+	}
+	ce, ok := gamma.ClientPresence["vscode"]
+	if !ok {
+		t.Fatalf("gamma has no vscode presence: %+v", gamma.ClientPresence)
+	}
+	if ce.ToggleValue == nil {
+		t.Fatalf("vscode object-member entry missing toggle_value")
+	}
+	if got, _ := ce.ToggleValue["command"].(string); got != "uvx" {
+		t.Errorf("toggle_value.command=%q, want uvx", got)
 	}
 }
