@@ -1,17 +1,18 @@
 # P3b — design the object-member re-enable value-source SECRET-SAFELY
 
-- status: closed (settled — see ## Resolution)
+- status: open (PARTIAL — D2 cold re-enable not actually solved; see ## Partial)
 - created: 2026-06-25
 - origin: PR #433 (per-project-GUI P3a, write phase) bot finding 4 — lead adjudication
-- area: per-project-GUI, internal/gui (projects scan/aggregate), internal/api (ScanResult/ClientEntry)
+- area: per-project-GUI, internal/gui (projects scan/aggregate), internal/gui/frontend (Projects.tsx Re-add CTA)
 
-> **SETTLED — read the `## Resolution` first.** The "to design" / "to reconsider"
-> sections below are the ORIGINAL open-item framing, kept for provenance. They are
-> NO LONGER live design questions. Net outcome: the warm (in-session value-held)
-> re-enable path described below was **REMOVED in #434** (the aggregate nils `raw`),
-> so object-member re-enable is COLD-ONLY (Re-add via the Add/Catalog flow), and the
-> claude scope needs no value source at all. Where the body below says "to design",
-> read it as "was designed and settled — see Resolution".
+> **STILL OPEN — read `## Partial` first.** The warm (in-session value-held)
+> re-enable path described below WAS removed in #434, so the SECRET-SAFE
+> value-source question that originally framed this item is moot. BUT cold
+> object-member re-enable is NOT actually solved: the shipped Re-add CTA links to a
+> BARE `#/add-server` (`internal/gui/frontend/src/screens/Projects.tsx:843`), not a
+> pre-filled restore, so an operator cannot restore the specific disabled member
+> from the toggle flow. That gap (D2) is the remaining open work. The "to design" /
+> "to reconsider" sections below are the ORIGINAL framing, kept for provenance.
 
 ## Context
 
@@ -69,23 +70,34 @@ for object-member cold re-enable.
   the name between the enabled/disabled arrays; the `mcpServers` definition is
   untouched. (Still true; this scope was always value-free.)
 
-## Resolution (settled 2026-06-27)
+## Partial — what shipped vs what's deferred (2026-06-27)
 
-Settled by the P3b UX design decision
-(`work-items/decisions/2026-06-27-per-project-gui-p3b-uxdesign.md`, status: accepted),
-whose frontmatter `settles:` this backlog item, in combination with PR #434's
-warm-replay removal:
+The P3b UX design decision
+(`work-items/decisions/2026-06-27-per-project-gui-p3b-uxdesign.md`, status: accepted,
+frontmatter `partially-settles:` points here) + PR #434 resolved the SECURITY framing
+of this item but left the actual cold-re-enable UX deferred. Honest split:
 
-- The warm value-replay machinery (the proposed in-session client-held value path)
-  was **REMOVED in #434** — the aggregate NILs every `raw` (`stripClientEntryRaw`),
-  so the warm path was always a no-op. There is therefore no backend value-source to
-  build, and the security constraint (never re-send secret-bearing `Raw`) is preserved
-  by construction.
-- **Cold object-member re-enable routes to the existing Add/Catalog flow** (value
-  sourced from marketplace/manifest + vault `secret:<key>` refs), NOT a backend-echoed
-  value — the aggregate stays NAMES-only.
+**SHIPPED (the security question is settled):**
 
-Residual: **cold object-member re-enable via the per-row toggle is DEFERRED (D2)**,
-tracked in the p3b-uxdesign decision's `## Deferrals from P3b v1` (D2). The claude
-Project scope (array-move) needs no value source at all. No live work remains in this
-item; it is closed/settled.
+- The warm value-replay machinery (in-session client-held value path) was **REMOVED
+  in #434** — the aggregate NILs every `raw` (`stripClientEntryRaw`), so no
+  secret-bearing value ever reaches the wire. The original secret-safety constraint
+  is satisfied by construction.
+- Object-member DISABLE works (removes the member). A disabled object-member row
+  renders a cold "Re-add…" CTA instead of a value-less enable POST
+  (`Projects.tsx:1488` coldReenable, CTA at `Projects.tsx:840-848`).
+- claude Project + Local scopes need NO value source — claude Project toggles via the
+  value-free approval array-move (`claude-local-membership`); the `.mcp.json`
+  definition is untouched. Local is read-only (D1).
+
+**DEFERRED / STILL OPEN (D2 — the reason this item is reopened):**
+
+- The shipped Re-add CTA links to a **BARE `#/add-server`**
+  (`internal/gui/frontend/src/screens/Projects.tsx:843`), NOT a re-add pre-filled
+  with the just-disabled server. So an operator who disables a cursor/vscode
+  object-member CANNOT restore that specific member from the toggle flow — they must
+  re-enter it from scratch via Add-server/Catalog. A real cold re-enable (a pre-filled
+  re-add, or a structural-skeleton restore) is unbuilt.
+
+This item stays OPEN tracking the D2 gap. It is ALSO referenced from the p3b-uxdesign
+decision's `## Deferrals from P3b v1` (D2).

@@ -5,7 +5,7 @@ date: 2026-06-25
 owners: architect (a5d44dad, PASS) + operator sign-offs (§10.1, §10.2 decided 2026-06-25)
 parent: work-items/decisions/2026-06-24-per-project-gui-design.md
 depends-on: P2b (PR #432 — supplied the `IsMcpjsonServerEnabled` + `canonicalClaudeProjectKey` symbols). RESOLVED: #432 merged; the symbols are in the tree.
-Implemented: P3a (PR #433) + P3b (PR #434) + P3c (PR #435) — all shipped; live 8c359a1c. This decision is fully implemented; the planning-tense dependency/blocker notes below are HISTORICAL (kept for design provenance, not live gates).
+Implemented: P3a (#433) + P3b (#434) + P3c (#435) SHIPPED, live 8c359a1c. NOT 100% — DEFERRED residuals are tracked, not closed: D1 (claude Local-scope toggle — shipped READ-ONLY in v1; the GUI renders `~/.claude.json` Local servers read-only) and D2 (cold object-member re-enable via the per-row toggle — the shipped Re-add CTA links to a BARE `#/add-server`, not a pre-filled restore; tracked OPEN in `work-items/backlog/2026-06-25-p3b-reenable-value-source.md`). A latent backend gap is also tracked: `work-items/bugs/2026-06-27-claude-code-object-member-destructive-api-path.md`. The planning-tense dependency/blocker notes below are HISTORICAL (design provenance, not live gates).
 
 ## Operator sign-offs (DECIDED 2026-06-25)
 - **§10.1 = ADD `project_path` to groups.yaml (binding).** Groups bind to a project path; the project view shows "groups for THIS project". Additive `yaml:"project_path,omitempty"`; existing groups (no field) = global/unbound; version stays 1.
@@ -16,7 +16,7 @@ Implemented: P3a (PR #433) + P3b (PR #434) + P3c (PR #435) — all shipped; live
 |---|---|---|---|---|
 | A workspace LSP | enable=register / disable=unregister daemon | `api.Register`/`api.Unregister` (register.go:109,:979) | supervisor-intent + workspace_registry | workspace_path |
 | B cursor/vscode | add/remove object member | `clients.mutateJSONObjectMemberPath` (jsonc.go:197) → SecureWriteClientConfig | hujson + handle-relative atomic | `<root>/.cursor/mcp.json`, `<root>/.vscode/mcp.json` |
-| B-claude Project (`.mcp.json` checked-in, shared) | DISPLAYS the `.mcp.json` member; ON/OFF GATED by the approval array-move — moves the name between enabled/disabledMcpjsonServers (scope `claude-local-membership`). **NEVER deletes the `.mcp.json` mcpServers definition.** | `OwnerClaudeLocalMembership` array-move (same mechanism as B-claude Local; the toggle gate writes `~/.claude.json`, the definition it gates lives in `<root>/.mcp.json`) | hujson + handle-relative atomic | gate write → `~/.claude.json` projects.<canonicalClaudeProjectKey>.{enabled,disabled}McpjsonServers; definition stays in `<root>/.mcp.json` |
+| B-claude Project (`.mcp.json` checked-in, shared) | DISPLAYS the `.mcp.json` member; the FRONTEND toggles ON/OFF via the approval array-move — moves the name between enabled/disabledMcpjsonServers (scope `claude-local-membership`), so the SHIPPED GUI **never deletes the `.mcp.json` mcpServers definition**. CAVEAT: the backend `/api/projects/toggle` still ACCEPTS the destructive `project-object-member` scope for claude-code (member-delete) — a direct API caller can still hit it (tracked: `work-items/bugs/2026-06-27-claude-code-object-member-destructive-api-path.md`). | `OwnerClaudeLocalMembership` array-move (same mechanism as B-claude Local; the toggle gate writes `~/.claude.json`, the definition it gates lives in `<root>/.mcp.json`) | hujson + handle-relative atomic | gate write → `~/.claude.json` projects.<canonicalClaudeProjectKey>.{enabled,disabled}McpjsonServers; definition stays in `<root>/.mcp.json` |
 | B-claude Local (`~/.claude.json` private) | MOVE name between enabled/disabledMcpjsonServers — **NEVER delete from mcpServers** | `clients.toggleClaudeMcpjsonMembership` (array-membership owner); enabled-predicate = P2b `IsMcpjsonServerEnabled` | hujson + handle-relative atomic | `~/.claude.json` → projects.<canonicalClaudeProjectKey>.{enabled,disabled}McpjsonServers (both the definition AND the gate live here) |
 | C groups | add/remove from group.servers | `api.ReadModifyWriteGroups` (hub_mcp_groups.go:348) | atomic under hub-mcp.lock | groups.yaml |
 
@@ -29,9 +29,13 @@ Rejected: (1) universal ProjectConfigWriter (collapses 4 owners → method-branc
 > visibility of BOTH scopes. They differ in WHICH server-definition the gate
 > covers: **Project** gates a definition that lives in the checked-in, shared
 > `<root>/.mcp.json`; **Local** gates a definition that lives in the private
-> `~/.claude.json projects.<key>.mcpServers`. Neither toggle ever deletes a
-> definition — it only flips the approval array entry. (In P3b v1 the Local
+> `~/.claude.json projects.<key>.mcpServers`. Neither FRONTEND toggle ever deletes
+> a definition — it only flips the approval array entry. (In P3b v1 the Local
 > definition is also READ-ONLY, deferral D1; the Project row is live-toggleable.)
+> CAVEAT (backend): the destructive `project-object-member` member-delete path is
+> still REACHABLE for claude-code via a direct `/api/projects/toggle` call — the
+> shipped non-destructive behavior is a frontend call-site choice, not a backend
+> guarantee. Tracked: `work-items/bugs/2026-06-27-claude-code-object-member-destructive-api-path.md`.
 >
 > **Table correction (shipped #434 r2):** the `B-claude Project` row originally
 > mapped to "same as B" (the `project-object-member` member-delete via

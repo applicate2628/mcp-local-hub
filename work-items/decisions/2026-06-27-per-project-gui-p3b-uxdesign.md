@@ -4,7 +4,7 @@ status: accepted
 date: 2026-06-27
 owners: ux-designer (a324f87e, PASS) + lead (O-1 accepted)
 parent: work-items/decisions/2026-06-25-per-project-gui-p3-design.md
-settles: work-items/backlog/closed/2026-06-25-p3b-reenable-value-source.md
+partially-settles: work-items/backlog/2026-06-25-p3b-reenable-value-source.md (security/value-source question settled; D2 cold-re-enable UX still OPEN — the Re-add CTA links to a bare #/add-server, not a pre-filled restore)
 live binary at design time: 12990df1 (P3a deployed — /api/projects aggregate + /api/projects/toggle present, no frontend consumer)
 
 > **SHIPPED-REALITY UPDATE (#434 r2, live 8c359a1c):** the WARM re-enable path
@@ -59,7 +59,7 @@ GET /api/server/readiness → if ready, proceed; if blockers, ConsentGate: Readi
 ## Acceptance criteria (frontend-engineer) — 11
 single-data-source(aggregate) · single-owner-dispatch({client,scope}, never branch on client name) · immediate-per-row state machine(reconcile-to-response) · both-scopes claude card(Project toggle/Local read-only/shadow once) · consent-on-enable(O-1 skip-when-no-report) · object-member cold-readd-only [SHIPPED #434 r2: the warm-replay criterion was dropped — the aggregate nils `raw`, so object-member re-enable is cold-only; never enable-POST without value] · code→copy map · data-testids(projects-toggle-<scope>-<server>, projects-consent-gate-<server>, projects-shadow-<name>, projects-readd-<server>) · protected(Servers.tsx byte-unchanged, scan.go 0-diff, no new Client method) · mountedRef+req-id seq · `go generate ./internal/gui/...` after frontend changes (embed bundle).
 
-## Deferrals from P3b v1
-D1 claude Local-scope toggle (no write owner; render read-only) · D2 object-member cold re-enable via toggle (→ Add/Catalog flow) · D3 group↔project binding filter (→ P3c) · D4 project-scoped Servers view (would touch protected Servers.tsx).
+## Deferrals from P3b v1 (D1 + D2 are OPEN residuals, not closed)
+D1 claude Local-scope toggle (no write owner; SHIPPED read-only — `Projects.tsx` Local subsection is read-only) · D2 object-member cold re-enable via toggle — the shipped Re-add CTA links to a BARE `#/add-server` (`Projects.tsx:843`), NOT a pre-filled restore, so the member is not actually restorable from the toggle; tracked OPEN in `work-items/backlog/2026-06-25-p3b-reenable-value-source.md` · D3 group↔project binding filter (shipped in P3c #435) · D4 project-scoped Servers view (would touch protected Servers.tsx — not built).
 
 ## Gates: ux-reviewer (cold-readd honesty, shadow legibility, O-1, checked-in-vs-private, copy quality) + architecture-reviewer + qa-engineer (Playwright E2E on a Windows runner per CLAUDE.md — toggle happy/error-revert/reconcile-to-response/both-scopes/array-move-scope/cold-reenable/consent/group-name-gate/per-row-isolation/code-copy/section-scoped-ScanError). [SHIPPED #434 r2: warm-reenable dropped — object-member re-enable is cold-only.]
