@@ -240,6 +240,103 @@ func TestReadClaudeLocalScope_MalformedJSON(t *testing.T) {
 	}
 }
 
+// TestCanonicalClaudeProjectKey exercises canonicalClaudeProjectKey directly:
+//
+//   - Windows-gated: C:/dev/Proj, c:/dev/proj, C:\dev\proj all normalize to the
+//     SAME key (case-fold + separator normalization; trailing slash trimmed).
+//   - POSIX-gated: /dev/Proj and /dev/proj normalize to DIFFERENT keys (POSIX is
+//     case-sensitive). Forward-slash paths normalise to themselves; trailing
+//     slash trimmed.
+//   - Common (both OS): dot/dotdot segments collapse via Clean; empty input → "".
+func TestCanonicalClaudeProjectKey(t *testing.T) {
+	t.Run("empty_input", func(t *testing.T) {
+		if got := canonicalClaudeProjectKey(""); got != "" {
+			t.Errorf("empty input: got %q, want %q", got, "")
+		}
+	})
+
+	t.Run("dot_dotdot_collapse", func(t *testing.T) {
+		// filepath.Clean collapses these on any OS
+		var input, want string
+		if runtime.GOOS == "windows" {
+			input = `C:\dev\..\dev\proj`
+			want = "c:/dev/proj"
+		} else {
+			input = "/dev/../dev/proj"
+			want = "/dev/proj"
+		}
+		if got := canonicalClaudeProjectKey(input); got != want {
+			t.Errorf("dot/dotdot collapse: got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("trailing_slash_trimmed", func(t *testing.T) {
+		var input, want string
+		if runtime.GOOS == "windows" {
+			input = `C:\dev\proj\`
+			want = "c:/dev/proj"
+		} else {
+			input = "/dev/proj/"
+			want = "/dev/proj"
+		}
+		if got := canonicalClaudeProjectKey(input); got != want {
+			t.Errorf("trailing slash: got %q, want %q", got, want)
+		}
+	})
+
+	if runtime.GOOS == "windows" {
+		t.Run("windows_case_fold_and_sep_normalize", func(t *testing.T) {
+			// All three observed key forms must produce the identical canonical key.
+			cases := []struct {
+				name  string
+				input string
+			}{
+				{"fwd_upper_drive", `C:/dev/Proj`},
+				{"fwd_lower_drive", `c:/dev/proj`},
+				{"back_upper_drive", `C:\dev\proj`},
+				{"mixed_case_segment", `C:/dev/PROJ`},
+				{"trailing_slash_fwd", `C:/dev/proj/`},
+				{"trailing_slash_back", `C:\dev\proj\`},
+			}
+			want := "c:/dev/proj"
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					if got := canonicalClaudeProjectKey(c.input); got != want {
+						t.Errorf("input %q: got %q, want %q", c.input, got, want)
+					}
+				})
+			}
+		})
+	} else {
+		t.Run("posix_case_preserved_no_collision", func(t *testing.T) {
+			// /dev/Proj and /dev/proj MUST NOT produce the same key on POSIX —
+			// the filesystem treats them as distinct directories.
+			upperKey := canonicalClaudeProjectKey("/dev/Proj")
+			lowerKey := canonicalClaudeProjectKey("/dev/proj")
+			if upperKey == lowerKey {
+				t.Errorf("/dev/Proj and /dev/proj both yielded %q — POSIX paths must NOT be case-folded (case-sensitivity violated)", upperKey)
+			}
+		})
+
+		t.Run("posix_already_clean_identity", func(t *testing.T) {
+			// A clean forward-slash POSIX path normalizes to itself.
+			input := "/dev/proj"
+			if got := canonicalClaudeProjectKey(input); got != input {
+				t.Errorf("clean POSIX path: got %q, want %q", got, input)
+			}
+		})
+
+		t.Run("posix_case_preserved_value", func(t *testing.T) {
+			// The exact canonical form for an uppercase POSIX segment is
+			// the same string with forward slashes (no case folding).
+			input := "/dev/MyProject"
+			if got := canonicalClaudeProjectKey(input); got != input {
+				t.Errorf("POSIX uppercase segment: got %q, want %q", got, input)
+			}
+		})
+	}
+}
+
 // --- helpers ---
 
 // osRoot builds an absolute project root that is valid for the current OS:
