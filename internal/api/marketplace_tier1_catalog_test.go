@@ -561,17 +561,20 @@ func TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles(t *testing.T) {
 
 // TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact locks the
 // Ableton row's provenance-consistency invariant. The catalog must execute the
-// same immutable, reviewed upstream source it advertises in vendored_source and
-// readme_url. In particular, it must not install from the project-owned personal
-// fork used briefly as a build-fixed fork, because marketplace one-click install
-// turns this row into a long-lived daemon that executes as the local user.
+// same immutable, reviewed source it advertises in vendored_source and
+// readme_url. The row now installs the reviewed loopback-safe fork
+// applicate2628/ableton-mcp-loopback (security fork of ahujasid/ableton-mcp,
+// MIT): full upstream tool parity, but the in-Live Remote Script binds 127.0.0.1
+// as a hard constant, fixing upstream's HOST=0.0.0.0 LAN exposure. It must still
+// NOT install from the earlier build-fix fork applicate2628/ableton-mcp-extended,
+// which was never security-reviewed for this row.
 func TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact(t *testing.T) {
 	e := v2CatalogByID(t)["ableton"]
 	if e == nil {
 		t.Fatalf("v2 catalog missing the ableton row")
 	}
 
-	const wantRepo = "https://github.com/ahujasid/ableton-mcp"
+	const wantRepo = "https://github.com/applicate2628/ableton-mcp-loopback"
 	const forbiddenFork = "https://github.com/applicate2628/ableton-mcp-extended"
 
 	vs := e.VendoredSource
