@@ -28,8 +28,10 @@ var gitSHA40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // reaper (community fork bonfire-systems/reaper-mcp, PyPI reaper-mcp-server v0.1.1,
 // uvx --from, MIT) is the music-breadth DAW row — like kicad it is a uvx-launched
 // community fork with a pinned vendored_source and a host-app file glob
-// (REAPER's reaper.exe), and its server is stdio + loopback-default (no 0.0.0.0
-// listener), unlike the Ableton-class LAN-bind risk.
+// (REAPER's reaper.exe). Its MCP server is stdio, but the python-reapy distant API
+// it requires binds 0.0.0.0 inside REAPER (LAN-reachable once enabled — SAME risk
+// class as the Ableton row; the row's summary carries the firewall/trusted-network
+// caution + a destructive-write warning).
 // Two rows were DROPPED before merge:
 //   - cst — bbl21/CST_MCP is a CLI toolkit, not an MCP server
 //     (work-items/bugs/2026-06-24-cst-not-an-mcp-server.md).
