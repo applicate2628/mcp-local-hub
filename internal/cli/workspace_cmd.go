@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -34,6 +35,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/gui"
 )
 
 // defaultWorkspaceFilename is the sidecar file alongside workspaces.yaml
@@ -318,6 +320,50 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 				"`mcphub trust %s` or explicit register): %v\n", canonical, canonical, err)
 	}
 
+	// 6c. Wire the in-scope client configs to the constant /serena/mcp router
+	//     URL through the EXISTING single-owner client-reconcile path
+	//     (api.ReconcileSerenaClientsToRouter). This is the router-native
+	//     fresh-install wiring gap fix: post-flip the serena catalog is the
+	//     dynamic-pool shape (no client_bindings), so neither install nor the
+	//     #400 binding-loop override writes a `/serena/mcp` client entry on a
+	//     fresh host — without this hook a brand-new operator who registers a
+	//     workspace would never get their client config pointed at the router and
+	//     would have to discover the migrate command the happy path is meant to
+	//     avoid (work-items/bugs/2026-06-28-serena-fresh-install-client-wiring-gap.md).
+	//
+	//     This reuses the proven, fresh-safe reconcile owner: it is
+	//     zero-workspace-tolerant, fail-closed on a dead GUI, and writes ONLY
+	//     client CONFIG (no supervisor.lock acquire, no supervisor-intent.json
+	//     write — registration's durable state is the registry row written above,
+	//     which the reconcile never touches).
+	//
+	//     WARN-ONLY on failure, mirroring the trusted-root bless above: the
+	//     registration already SUCCEEDED and is durable (the registry row is
+	//     saved), so a dead GUI / partial wire must NEVER fail the register.
+	//     ErrSerenaReconcileGUINotLive (the GUI-not-live fail-closed sentinel) is
+	//     the common case on a fresh host whose GUI is not yet running — the
+	//     operator is told the precise re-wire command. A per-client partial
+	//     failure (report.Failed rows) is surfaced via the reconcile report but
+	//     does not fail the register either; the operator retries by re-running
+	//     the register (or `mcphub gui` + re-wire).
+	if report, rerr := reconcileSerenaRegisterClientsFn(cmd.Context(), cmd.OutOrStderr()); rerr != nil {
+		if errors.Is(rerr, api.ErrSerenaReconcileGUINotLive) {
+			fmt.Fprintf(cmd.OutOrStderr(),
+				"warning: serena workspace registered but client configs were NOT wired to the %s router "+
+					"because the mcphub GUI is not running. Start it and re-wire: run `mcphub gui`, then "+
+					"`mcphub workspace register %s` again (the registry row is already saved, so this just "+
+					"writes the client entries): %v\n",
+				api.SerenaRouterURLPath, canonical, rerr)
+		} else {
+			fmt.Fprintf(cmd.OutOrStderr(),
+				"warning: serena workspace registered but client-config wiring to the %s router failed "+
+					"(retry by re-running `mcphub workspace register %s`): %v\n",
+				api.SerenaRouterURLPath, canonical, rerr)
+		}
+	} else {
+		printSerenaReconcileReport(cmd.OutOrStderr(), report)
+	}
+
 	// 7. Optionally write the default marker. Errors here are non-fatal
 	// — registration already succeeded; the default is a UX nicety.
 	if setDefault {
@@ -347,6 +393,30 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 // (area-5 claim 10).
 var serenaRegisterBlessTrustedRootFn = func(canonicalWorkspaceRoot string) error {
 	return api.BlessDefaultTrustedRoot(canonicalWorkspaceRoot)
+}
+
+// reconcileSerenaRegisterClientsFn is the fresh-register seam over
+// api.ReconcileSerenaClientsToRouter — the SAME single-owner client-reconcile
+// path the serena migrate command uses (migrate_serena.go reconcileSerenaClientsFn).
+// Default wires the gui-package pidport primitives (which the api package cannot
+// import without a cycle) so the reconcile discovers the LIVE GUI router port;
+// tests override it to assert the register wires clients without a live GUI.
+//
+// Unlike the migrate seam, RemoveLegacy is FALSE: a fresh register has no legacy
+// localhost:9121 serena entry to remove, and the reconcile already overwrites
+// the same-named "serena" entry in place for URL clients — so the legacy-removal
+// step is both unnecessary and a no-op here. Keeping it off avoids the migrate's
+// legacy-cleanup semantics leaking into the fresh-onboarding path.
+var reconcileSerenaRegisterClientsFn = func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+	pidportPath, err := gui.PidportPath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve gui pidport path: %w", err)
+	}
+	return api.ReconcileSerenaClientsToRouter(ctx, api.SerenaReconcileOpts{
+		PidportPath: pidportPath,
+		ReadPidport: gui.ReadPidport,
+		BackupKeepN: effectiveBackupKeepN(),
+	})
 }
 
 // newWorkspaceUnregisterCmd builds `mcphub workspace unregister <path>
