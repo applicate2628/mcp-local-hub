@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -322,6 +323,16 @@ func availabilityInert(m *config.ServerManifest) bool {
 func availabilityProbePasses(p *config.AvailabilityProbe) (bool, string) {
 	if p == nil {
 		return false, "no install probe declared"
+	}
+	// platforms[] arch gate FIRST (cheapest, pure, no I/O): when non-empty, the
+	// host's GOOS/GOARCH must be in the allowlist or the row is provably not
+	// installable here regardless of any binary/file/glob matching — so a
+	// launcher-based row (npx/uvx) for a package that does not ship this arch
+	// stays inert instead of passing the launcher probe and then failing loudly at
+	// daemon spawn. EMPTY/absent platforms → PlatformMatches returns true (no
+	// gate), preserving today's behavior for every existing probe.
+	if !config.PlatformMatches(runtime.GOOS, runtime.GOARCH, p.Platforms) {
+		return false, fmt.Sprintf("host platform %s/%s is not in the supported set %v", runtime.GOOS, runtime.GOARCH, p.Platforms)
 	}
 	for _, bin := range p.Binaries {
 		if !binaryAvailable(bin) {

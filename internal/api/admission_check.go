@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -582,6 +583,17 @@ func MarketplaceEntryBrowseProbeState(e *MarketplaceEntry) ProbeBrowseState {
 	// A6 guarantees an inert row declares a non-empty probe; defensively a nil /
 	// empty probe is fail-closed (provably not installable yet).
 	if p == nil || (len(p.Binaries) == 0 && len(p.Files) == 0 && len(p.FileGlobs) == 0) {
+		return ProbeBrowseInertBlocked
+	}
+	// platforms[] arch gate FIRST: it is a PURE predicate (no os.Stat, no
+	// exec.LookPath — just a runtime.GOOS/GOARCH string compare), so it is safe on
+	// the no-touch browse path AND it is DEFINITIVE — an arch mismatch proves the
+	// row is not installable here regardless of any binary/file/glob. So it maps to
+	// inert-blocked ("probe to enable" grey), NOT inert-unknown, matching the
+	// install gate's verdict exactly instead of offering an install that would
+	// immediately fail. EMPTY platforms → PlatformMatches true (no gate), so a row
+	// without platforms[] is classified exactly as before.
+	if !config.PlatformMatches(runtime.GOOS, runtime.GOARCH, p.Platforms) {
 		return ProbeBrowseInertBlocked
 	}
 	// BARE binaries FIRST (codex r6 finding 4): the install-time probe is AND

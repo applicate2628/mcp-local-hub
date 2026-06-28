@@ -657,6 +657,25 @@ func TestV2OnshapeRow_NpxProbeAndOptionalSecretEnv(t *testing.T) {
 	if len(e.InstallProbe.Files) != 0 || len(e.InstallProbe.FileGlobs) != 0 {
 		t.Fatalf("onshape probe must carry NO files[]/file_globs[] (cloud server, no host CAD app): files=%v file_globs=%v", e.InstallProbe.Files, e.InstallProbe.FileGlobs)
 	}
+	// ARCH GATE: the @onshape-mcp npm ships win32-x64 + linux/darwin (x64+arm64)
+	// platform packages but NOT win32-arm64, so the probe arch-gates on exactly that
+	// matrix. On a win-arm64 host the row stays inert instead of false-installing and
+	// then failing at daemon spawn. windows/arm64 MUST be absent.
+	wantPlatforms := map[string]bool{
+		"windows/amd64": true, "linux/amd64": true, "linux/arm64": true,
+		"darwin/amd64": true, "darwin/arm64": true,
+	}
+	if len(e.InstallProbe.Platforms) != len(wantPlatforms) {
+		t.Fatalf("onshape probe platforms = %v, want exactly %d entries (the @onshape-mcp platform matrix)", e.InstallProbe.Platforms, len(wantPlatforms))
+	}
+	for _, p := range e.InstallProbe.Platforms {
+		if !wantPlatforms[p] {
+			t.Fatalf("onshape probe carries unexpected platform %q (want only %v)", p, wantPlatforms)
+		}
+	}
+	if has(e.InstallProbe.Platforms, "windows/arm64") {
+		t.Fatalf("onshape probe MUST NOT list windows/arm64 (the @onshape-mcp npm ships no win32-arm64 package); platforms=%v", e.InstallProbe.Platforms)
+	}
 	// Command + version pin: npx --yes onshape-mcp@0.4.0.
 	if e.Command != "npx" {
 		t.Fatalf("onshape command = %q, want npx", e.Command)
@@ -716,5 +735,15 @@ func TestV2OnshapeRow_NpxProbeAndOptionalSecretEnv(t *testing.T) {
 	}
 	if m.VendoredSource == nil || strings.TrimSpace(m.VendoredSource.PinnedRef) == "" {
 		t.Fatalf("onshape drafted manifest lost the pinned vendored_source: %#v", m.VendoredSource)
+	}
+	// MIRROR GATE: the platforms[] arch matrix survives generate→manifest create so
+	// the post-install readiness gate re-evaluates the same arch allowlist.
+	if m.InstallProbe == nil || len(m.InstallProbe.Platforms) != len(wantPlatforms) {
+		t.Fatalf("onshape drafted manifest dropped the install_probe.platforms matrix: %#v", m.InstallProbe)
+	}
+	for _, p := range m.InstallProbe.Platforms {
+		if !wantPlatforms[p] {
+			t.Fatalf("onshape drafted manifest carries unexpected platform %q", p)
+		}
 	}
 }
