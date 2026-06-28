@@ -64,8 +64,10 @@ const CATEGORY_TO_THEME: Readonly<Record<string, CatalogTheme>> = {
   "scientific-computing": "Engineering & CAD",
   // science/statistics share the engineering-scientific bucket (the rmcp R row's
   // primary category is `science`; statistics rides alongside math/sci-computing).
+  // `plotting` is the origin-pro scientific-graphing tag (rides with science/data).
   science: "Engineering & CAD",
   statistics: "Engineering & CAD",
+  plotting: "Engineering & CAD",
 
   // Music & Audio.
   music: "Music & Audio",
@@ -75,10 +77,18 @@ const CATEGORY_TO_THEME: Readonly<Record<string, CatalogTheme>> = {
 
   // Creative & Media — image/graphics editing and creative-design desktop tools
   // (kept distinct from Music & Audio, which is audio-specific; the photoshop row's
-  // primary category is `image-editing`).
+  // primary category is `image-editing`). The wave-2b docs-only pointers add
+  // creative-3D (blender's `3d`/`modeling`) and video-editing (davinci's `video`/
+  // `editing`) tags here. `3d`/`modeling` map to Creative & Media so the
+  // creative-3D blender row buckets here, while the CAD-3D rhino row (primary
+  // category `engineering`) stays in Engineering & CAD by the primary-category rule.
   "image-editing": "Creative & Media",
   design: "Creative & Media",
   creative: "Creative & Media",
+  "3d": "Creative & Media",
+  modeling: "Creative & Media",
+  video: "Creative & Media",
+  editing: "Creative & Media",
 
   // Development & Code — code intelligence, agents, VCS, debugging.
   "code-intelligence": "Development & Code",
@@ -112,8 +122,16 @@ const CATEGORY_TO_THEME: Readonly<Record<string, CatalogTheme>> = {
   analytics: "Data & Office",
   notebook: "Data & Office",
   "data-analysis": "Data & Office",
+  // Office-document docs-only pointers (word/powerpoint) — their primary `office`
+  // tag already buckets here; `documents`/`presentations` ride alongside it.
+  documents: "Data & Office",
+  presentations: "Data & Office",
 
-  // Research & Docs — documentation, papers, knowledge, diagrams, math.
+  // Research & Docs — documentation, papers, knowledge, diagrams, math, and
+  // personal-knowledge/notes tooling (the wave-2b obsidian/logseq PKM rows lead
+  // with `pkm`; `notes`/`productivity` ride alongside it). The anki flashcards
+  // pointer (primary `productivity`) and its `education`/`flashcards` tags bucket
+  // here as study/learning tooling.
   docs: "Research & Docs",
   papers: "Research & Docs",
   research: "Research & Docs",
@@ -123,6 +141,10 @@ const CATEGORY_TO_THEME: Readonly<Record<string, CatalogTheme>> = {
   math: "Research & Docs",
   visualization: "Research & Docs",
   pkm: "Research & Docs",
+  notes: "Research & Docs",
+  productivity: "Research & Docs",
+  education: "Research & Docs",
+  flashcards: "Research & Docs",
 
   // Utilities — general-purpose helpers and everything not above.
   utilities: "Utilities",

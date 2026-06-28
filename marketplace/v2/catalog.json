@@ -837,9 +837,252 @@
         "run_cmd": "uvx --from rmcp==0.8.1 rmcp start",
         "license_status": "confirmed"
       }
+    },
+    {
+      "id": "obsidian",
+      "name": "Obsidian MCP server",
+      "summary": "Read, search, and edit your Obsidian vault from an AI client -- list files, read/append/patch notes, full-text and JsonLogic search, and manage the periodic-note daily journal -- via Obsidian's Local REST API community plugin. Community server MarkusPfundstein/mcp-obsidian (Python, MIT), published to PyPI as mcp-obsidian and pinned to v0.2.2, run via uvx. LOOPBACK-CLEAN: the MCP server is stdio (mcp.server.stdio) and acts as a CLIENT to the plugin's local API at https://127.0.0.1:27124 (verified loopback default host=127.0.0.1 in obsidian.py) -- it opens NO network listener of its own. PREREQUISITE (REQUIRED, operator-side): the MCP server does NOT talk to Obsidian directly -- it talks to the 'Local REST API' Obsidian COMMUNITY PLUGIN, which you must install once from Obsidian's in-app community-plugin store (Settings -> Community plugins -> Browse -> 'Local REST API') and ENABLE; the plugin then binds 127.0.0.1 and mints the API key you store below. The host-exe probe is not applicable (no separate Obsidian binary on PATH and the gate is the plugin + key), so this row gates on the required secret. REQUIRED SECRET (hard install gate): mcp-obsidian v0.2.2 HARD-EXITS on startup with a ValueError when OBSIDIAN_API_KEY is unset (verified by a clean-cache launch), so the key is routed through the required_secrets gate as OBSIDIAN_API_KEY = secret:obsidian_api_key -- a one-click install with no key is BLOCKED at install rather than crash-looping a daemon. The key is the 'Local REST API' plugin's API key (copy it from the plugin settings). Supply it only through the hub vault, never as plaintext. Obsidian must be RUNNING with the plugin enabled for tools to act.",
+      "homepage": "https://github.com/MarkusPfundstein/mcp-obsidian",
+      "readme_url": "https://raw.githubusercontent.com/MarkusPfundstein/mcp-obsidian/d0c6d9af998a730dd16398cb8593aba31dbf9637/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "mcp-obsidian==0.2.2",
+        "mcp-obsidian"
+      ],
+      "env": {
+        "OBSIDIAN_API_KEY": "secret:obsidian_api_key"
+      },
+      "categories": [
+        "pkm",
+        "notes",
+        "productivity"
+      ],
+      "license": "MIT",
+      "required_secrets": [
+        "obsidian_api_key"
+      ],
+      "vendored_source": {
+        "repo": "https://github.com/MarkusPfundstein/mcp-obsidian",
+        "pinned_ref": "d0c6d9af998a730dd16398cb8593aba31dbf9637",
+        "install_cmd": "uvx --from mcp-obsidian==0.2.2 mcp-obsidian",
+        "run_cmd": "uvx --from mcp-obsidian==0.2.2 mcp-obsidian",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "logseq",
+      "name": "Logseq MCP server",
+      "summary": "Query and edit your Logseq graph from an AI client -- read/create/update/delete pages and blocks, search, and journal access -- via Logseq's built-in HTTP API. Community server ergut/mcp-logseq (Python, MIT), published to PyPI as mcp-logseq and pinned to v1.8.0, run via uvx. STDIO-PINNED: the CLI's default transport is already stdio (--transport stdio/http, default stdio) and this row passes --transport stdio EXPLICITLY to pin it; the alternative --transport http mode DEFAULTS to --host 127.0.0.1 (loopback -- the package comments 'never bind to 0.0.0.0 implicitly' and requires an explicit --insecure flag to bind a non-loopback host, verified in __init__.py), so there is no implicit LAN surface. PREREQUISITE (REQUIRED, operator-side, NO plugin needed): Logseq has a BUILT-IN HTTP API -- enable it once in the Logseq desktop app at Settings -> Features -> 'Enable HTTP APIs', then set an authorization token in the HTTP-API panel. The Logseq HTTP API binds localhost (default http://localhost:12315). The host-exe probe is not applicable (the gate is the toggle + token), so this row gates on the required token. REQUIRED SECRET (hard install gate): mcp-logseq v1.8.0 HARD-EXITS on startup with a ValueError when LOGSEQ_API_TOKEN is unset (verified by a clean-cache launch), so the token is routed through the required_secrets gate as LOGSEQ_API_TOKEN = secret:logseq_token -- a one-click install with no token is BLOCKED at install. The LOGSEQ_API_URL has a localhost default (http://localhost:12315), so it stays an EDITABLE literal (not a required secret) -- edit it only if you moved the Logseq HTTP API off the default port. Supply the token only through the hub vault, never as plaintext.",
+      "homepage": "https://github.com/ergut/mcp-logseq",
+      "readme_url": "https://raw.githubusercontent.com/ergut/mcp-logseq/v1.8.0/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-logseq==1.8.0",
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "LOGSEQ_API_TOKEN": "secret:logseq_token",
+        "LOGSEQ_API_URL": "http://localhost:12315"
+      },
+      "categories": [
+        "pkm",
+        "notes"
+      ],
+      "license": "MIT",
+      "required_secrets": [
+        "logseq_token"
+      ],
+      "vendored_source": {
+        "repo": "https://github.com/ergut/mcp-logseq",
+        "pinned_ref": "v1.8.0",
+        "install_cmd": "uvx mcp-logseq==1.8.0 --transport stdio",
+        "run_cmd": "uvx mcp-logseq==1.8.0 --transport stdio",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "origin-pro",
+      "name": "Origin / OriginPro MCP server",
+      "summary": "Drive OriginLab Origin / OriginPro (scientific graphing + data analysis) from an AI client -- import data, build worksheets, run analysis, and create plots -- via the Origin COM automation server. Community server youngminsw/Origin-Pro-MCP (Python, MIT), published to PyPI as origin-pro-mcp and pinned to v0.1.0, run via uvx. WINDOWS-ONLY COM: the server talks to a running Origin over Windows COM (win32com.client.Dispatch('Origin.ApplicationSI')) -- it is stdio + COM (mcp.run(transport='stdio')), with NO socket, NO network listener, and NO manual plugin to install (loopback-clean by construction, like the photoshop row). The win32com COM bridge is Windows-only, so the install_probe ARCH-GATES on platforms: [windows/amd64]; on any other OS the row stays inert. REQUIRES a host OriginLab Origin/OriginPro install -- detected via the version-agnostic glob C:\\Program Files\\OriginLab\\Origin*\\Origin64.exe (the trailing Origin* matches any year-versioned root, e.g. Origin2024 / Origin2025). Origin must be RUNNING for tools to act; the host-exe probe detects the install, not whether Origin is open. REQUIRES Python + uv on PATH. MATURITY CAVEAT: LOW-maturity, Alpha (Development Status :: 3 - Alpha; ~21 GitHub stars at time of curation, v0.1.0 single release) -- offered to try, verify each operation before relying on it. disabled-until-probe: enables only when uvx AND a host Origin install are present on a windows/amd64 host.",
+      "homepage": "https://github.com/youngminsw/Origin-Pro-MCP",
+      "readme_url": "https://raw.githubusercontent.com/youngminsw/Origin-Pro-MCP/2f1fc76841b8ca3319e2f7d7737943c0e39a9fea/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "origin-pro-mcp==0.1.0"
+      ],
+      "env": {},
+      "categories": [
+        "science",
+        "data-analysis",
+        "plotting"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ],
+        "file_globs": [
+          "C:\\Program Files\\OriginLab\\Origin*\\Origin64.exe"
+        ],
+        "platforms": [
+          "windows/amd64"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/youngminsw/Origin-Pro-MCP",
+        "pinned_ref": "2f1fc76841b8ca3319e2f7d7737943c0e39a9fea",
+        "install_cmd": "uvx origin-pro-mcp==0.1.0",
+        "run_cmd": "uvx origin-pro-mcp==0.1.0",
+        "license_status": "confirmed"
+      }
     }
   ],
   "docs_only": [
+    {
+      "id": "mathematica",
+      "name": "Wolfram Mathematica MCP server (docs-only)",
+      "summary": "Drive a local Wolfram Engine / Mathematica from an AI client -- evaluate Wolfram Language code via wolframscript over stdio. DOCS-ONLY pointer: community server lars20070/mathematica-mcp (Python, MIT) is published to PyPI as mathematica-mcp, but it is VERY LOW maturity (~4 GitHub stars at curation) -- below the bar for a one-click clean row -- so it is offered as a discoverable manual-install pointer with the maturity caveat. It shells out to wolframscript, so it needs a local Wolfram Engine / Mathematica install on PATH.",
+      "homepage": "https://github.com/lars20070/mathematica-mcp",
+      "readme_url": "https://raw.githubusercontent.com/lars20070/mathematica-mcp/main/README.md",
+      "manual_install": "Install via PyPI (mathematica-mcp) per the README, e.g. `uvx mathematica-mcp` once you have reviewed it. Requires a local Wolfram Engine / Mathematica with `wolframscript` on PATH. VERY LOW maturity (~4 stars, single author) -- verify each tool before relying on it; this is why it is a docs-only pointer rather than a one-click row.",
+      "license": "MIT",
+      "categories": [
+        "science",
+        "math"
+      ]
+    },
+    {
+      "id": "word",
+      "name": "Microsoft Word MCP server (docs-only)",
+      "summary": "Create and edit Microsoft Word (.docx) documents from an AI client -- add content, format text, tables, and styles via python-docx. DOCS-ONLY pointer: community server GongRzhe/Office-Word-MCP-Server (Python, MIT), published to PyPI as office-word-mcp-server. The upstream GitHub repo is ARCHIVED (frozen, read-only -- no further fixes will land), so although it is a popular project (~2k stars) the hub offers it as a docs-only pointer rather than tracking a frozen upstream as a one-click row. The operator can still install it manually from PyPI.",
+      "homepage": "https://github.com/GongRzhe/Office-Word-MCP-Server",
+      "readme_url": "https://raw.githubusercontent.com/GongRzhe/Office-Word-MCP-Server/main/README.md",
+      "manual_install": "Install via PyPI (office-word-mcp-server) per the README, e.g. `uvx --from office-word-mcp-server word_mcp_server` (verify the exact entry point in the README). It edits .docx files via python-docx (no host Word install needed). NOTE: the upstream GitHub repo is ARCHIVED/frozen -- it will not receive fixes, so pin a version you have tested and review before relying on it. This is why it is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "office",
+        "documents",
+        "productivity"
+      ]
+    },
+    {
+      "id": "powerpoint",
+      "name": "Microsoft PowerPoint MCP server (docs-only)",
+      "summary": "Create and edit Microsoft PowerPoint (.pptx) presentations from an AI client -- add slides, text, shapes, charts, and images via python-pptx. DOCS-ONLY pointer: community server GongRzhe/Office-PowerPoint-MCP-Server (Python, MIT), published to PyPI as office-powerpoint-mcp-server. The upstream GitHub repo is ARCHIVED (frozen, read-only -- no further fixes), so although it is popular (~1.8k stars) the hub offers it as a docs-only pointer rather than tracking a frozen upstream as a one-click row. The operator can still install it manually from PyPI.",
+      "homepage": "https://github.com/GongRzhe/Office-PowerPoint-MCP-Server",
+      "readme_url": "https://raw.githubusercontent.com/GongRzhe/Office-PowerPoint-MCP-Server/main/README.md",
+      "manual_install": "Install via PyPI (office-powerpoint-mcp-server) per the README, e.g. `uvx --from office-powerpoint-mcp-server ppt_mcp_server` (verify the exact entry point in the README). It edits .pptx files via python-pptx (no host PowerPoint install needed). NOTE: the upstream GitHub repo is ARCHIVED/frozen -- it will not receive fixes, so pin a version you have tested and review before relying on it. This is why it is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "office",
+        "presentations",
+        "productivity"
+      ]
+    },
+    {
+      "id": "blender",
+      "name": "Blender MCP server (docs-only)",
+      "summary": "Drive Blender from an AI client -- create/modify 3D scenes, objects, materials, and run Python in Blender -- over a TCP socket bridge. DOCS-ONLY pointer: community server ahujasid/blender-mcp (Python, MIT, very popular ~23k stars), published to PyPI as blender-mcp. The MCP server runs via uvx, BUT it requires a manual one-time Blender ADD-ON install: you download the repo's addon.py and install + enable it inside Blender (Edit -> Preferences -> Add-ons -> Install), which opens the bridge the MCP server connects to at localhost:9876. Because that add-on load happens inside the host app (the hub cannot perform an in-app add-on install + enable), this is a manual-install pointer.",
+      "homepage": "https://github.com/ahujasid/blender-mcp",
+      "readme_url": "https://raw.githubusercontent.com/ahujasid/blender-mcp/main/README.md",
+      "manual_install": "Two steps per the README: (1) install the Blender add-on -- download addon.py from https://github.com/ahujasid/blender-mcp, then in Blender go to Edit -> Preferences -> Add-ons -> Install, select addon.py, enable it, and start the connection (it listens on localhost:9876); (2) run the MCP server with `uvx blender-mcp`. Requires a local Blender install. The in-app add-on install + enable is manual, which is why this is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "3d",
+        "modeling",
+        "creative"
+      ]
+    },
+    {
+      "id": "freecad",
+      "name": "FreeCAD MCP server (docs-only)",
+      "summary": "Drive FreeCAD from an AI client -- create/edit parts, sketches, and documents, and run Python in FreeCAD -- over an RPC bridge. DOCS-ONLY pointer: community server neka-nat/freecad-mcp (Python, MIT, ~1.2k stars), published to PyPI as freecad-mcp. It requires a manual one-time workbench install: you COPY the repo's freecad_addon/MCPAddon into FreeCAD's Mod directory, restart FreeCAD, select the 'MCP Addon' workbench and start its RPC server. SECURITY FOOTGUN: the addon's RPC server defaults to localhost but is OPERATOR-TOGGLABLE to 0.0.0.0 (LAN-reachable) via its 'Start RPC Server' dialog -- keep it on localhost unless you firewall the port. Because the workbench copy + restart happens inside the host app, this is a manual-install pointer.",
+      "homepage": "https://github.com/neka-nat/freecad-mcp",
+      "readme_url": "https://raw.githubusercontent.com/neka-nat/freecad-mcp/main/README.md",
+      "manual_install": "Two steps per the README: (1) install the workbench -- copy freecad_addon/MCPAddon from https://github.com/neka-nat/freecad-mcp into your FreeCAD Mod directory, restart FreeCAD, switch to the 'MCP Addon' workbench, and click 'Start RPC Server' (KEEP the bind on localhost -- the dialog lets you choose 0.0.0.0, which exposes it to your LAN); (2) run the MCP server with `uvx freecad-mcp`. Requires a local FreeCAD install. The manual workbench copy + the 0.0.0.0 toggle footgun are why this is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "engineering",
+        "cad",
+        "mechanical"
+      ]
+    },
+    {
+      "id": "fusion360",
+      "name": "Autodesk Fusion 360 MCP server (docs-only)",
+      "summary": "Drive Autodesk Fusion 360 from an AI client -- create/modify parametric CAD geometry -- via a Fusion 360 add-in bridge. DOCS-ONLY pointer: community server faust-machines/fusion360-mcp-server (Python, MIT, early ~47 stars), published to PyPI. It requires a manual one-time add-in install: you COPY the repo's Fusion 360 add-in into Fusion's Add-Ins directory and run it from inside Fusion (Utilities -> Add-Ins), which opens the bridge the MCP server connects to at localhost:9876. Because the add-in copy + in-app run happens inside the host app, this is a manual-install pointer.",
+      "homepage": "https://github.com/faust-machines/fusion360-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/faust-machines/fusion360-mcp-server/main/README.md",
+      "manual_install": "Two steps per the README: (1) install the Fusion 360 add-in -- copy the repo's add-in folder from https://github.com/faust-machines/fusion360-mcp-server into your Fusion 360 Add-Ins directory, then in Fusion go to Utilities -> Add-Ins, select it, and Run (it listens on localhost:9876); (2) run the MCP server with `uvx fusion360-mcp-server` (verify the entry point in the README). Requires a local Autodesk Fusion 360 install. The in-app add-in copy + run is manual, which is why this is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "engineering",
+        "cad",
+        "mechanical"
+      ]
+    },
+    {
+      "id": "rhino",
+      "name": "Rhino (RhinoMCP) MCP server (docs-only)",
+      "summary": "Drive Rhino 3D / Grasshopper from an AI client -- create/modify geometry and run RhinoScript/Python -- over a socket bridge. DOCS-ONLY pointer: community server jingcheng-chen/rhinomcp (Python, MIT, ~777 stars), published to PyPI as rhinomcp. It requires a manual one-time plugin install via Rhino's PACKAGE MANAGER: inside Rhino run the PackageManager command, install the 'rhinomcp' plugin, and start it (it opens a bridge the MCP server connects to at 127.0.0.1:1999 -- loopback). Because the plugin install happens inside Rhino's package manager (the hub cannot drive Rhino's in-app PackageManager), this is a manual-install pointer.",
+      "homepage": "https://github.com/jingcheng-chen/rhinomcp",
+      "readme_url": "https://raw.githubusercontent.com/jingcheng-chen/rhinomcp/main/README.md",
+      "manual_install": "Two steps per the README: (1) install the Rhino plugin -- in Rhino run the `PackageManager` command, search for and install 'rhinomcp', then start it (it listens on 127.0.0.1:1999, loopback); (2) run the MCP server with `uvx rhinomcp`. Requires a local Rhino 3D install. The in-app Package Manager plugin install is manual, which is why this is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "engineering",
+        "cad",
+        "3d"
+      ]
+    },
+    {
+      "id": "davinci",
+      "name": "DaVinci Resolve MCP server (docs-only)",
+      "summary": "Drive Blackmagic DaVinci Resolve from an AI client -- control the timeline, media pool, color, and rendering -- via Resolve's scripting API. DOCS-ONLY pointer: community server samuelgursky/davinci-resolve-mcp (~1.4k stars, MIT), distributed as a git-clone + bootstrapper rather than a clean one-click package. TWO hard prerequisites: (1) it REQUIRES DaVinci Resolve STUDIO -- the PAID edition; the free edition does NOT expose the external scripting API; (2) you must manually ENABLE external scripting inside Resolve (Preferences -> System -> General -> 'External scripting using' = Local) and set the scripting env vars per the README. Because of the manual scripting-toggle + the paid-Studio requirement, this is a manual-install pointer.",
+      "homepage": "https://github.com/samuelgursky/davinci-resolve-mcp",
+      "readme_url": "https://raw.githubusercontent.com/samuelgursky/davinci-resolve-mcp/main/README.md",
+      "manual_install": "Per the README: (1) you MUST have DaVinci Resolve STUDIO (the PAID edition -- the free edition has no external scripting API); (2) enable external scripting inside Resolve at Preferences -> System -> General -> 'External scripting using' = Local, and set the RESOLVE_SCRIPT_API / RESOLVE_SCRIPT_LIB / PYTHONPATH env vars the README documents; (3) git clone https://github.com/samuelgursky/davinci-resolve-mcp and run its bootstrap/install script. The paid-Studio requirement + the manual scripting toggle are why this is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "video",
+        "editing",
+        "creative"
+      ]
+    },
+    {
+      "id": "audacity",
+      "name": "Audacity MCP server (docs-only)",
+      "summary": "Drive Audacity from an AI client -- record, edit, apply effects, and export audio -- via Audacity's mod-script-pipe scripting interface. DOCS-ONLY pointer: community server xDarkzx/Audacity-MCP (Python, Apache-2.0, early ~47 stars), published to PyPI as audacity-mcp. It requires a manual one-time in-app step: ENABLE the 'mod-script-pipe' module inside Audacity (Edit -> Preferences -> Modules -> set mod-script-pipe to 'Enabled', then restart Audacity) so the named-pipe scripting bridge the MCP server uses is available. Because that module-enable happens inside the host app, this is a manual-install pointer.",
+      "homepage": "https://github.com/xDarkzx/Audacity-MCP",
+      "readme_url": "https://raw.githubusercontent.com/xDarkzx/Audacity-MCP/main/README.md",
+      "manual_install": "Two steps per the README: (1) enable scripting in Audacity -- go to Edit -> Preferences -> Modules, set 'mod-script-pipe' to Enabled, and restart Audacity (this opens the named-pipe scripting bridge); (2) install + run the MCP server from PyPI (audacity-mcp), e.g. `uvx audacity-mcp` (verify the entry point in the README). Requires a local Audacity install. The in-app mod-script-pipe enable is manual, which is why this is a docs-only pointer.",
+      "license": "Apache-2.0",
+      "categories": [
+        "music",
+        "audio",
+        "editing"
+      ]
+    },
+    {
+      "id": "anki",
+      "name": "Anki MCP server (docs-only)",
+      "summary": "Create and manage Anki flashcards/decks from an AI client -- add notes, browse cards, sync -- via the AnkiConnect add-on's local HTTP API. DOCS-ONLY pointer: the MCP server ankimcp/anki-mcp-server (Node, MIT) is published to npm as @ankimcp/anki-mcp-server, but it depends on the AnkiConnect add-on, which you install INSIDE Anki (Tools -> Add-ons -> Get Add-ons, code 2055492159). DEPENDENCY-HEALTH RISK: the AnkiConnect upstream add-on repo (FooSoft/anki-connect) is ARCHIVED (frozen, read-only) AND carries a NOASSERTION (unclear) license per GitHub's classifier -- so the load-bearing dependency is unmaintained with an ambiguous license. The MCP server itself is MIT, but because of the in-app add-on install AND the archived/ambiguously-licensed AnkiConnect dependency, the hub offers this as a docs-only pointer with the warning rather than a one-click row.",
+      "homepage": "https://github.com/ankimcp/anki-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/ankimcp/anki-mcp-server/main/README.md",
+      "manual_install": "Two steps per the README: (1) install the AnkiConnect add-on inside Anki -- Tools -> Add-ons -> Get Add-ons, enter code 2055492159, restart Anki (it exposes a local HTTP API on 127.0.0.1:8765); (2) run the MCP server with `npx @ankimcp/anki-mcp-server`. Requires a local Anki install. WARNING: AnkiConnect (the required add-on, FooSoft/anki-connect) is ARCHIVED/unmaintained and carries a NOASSERTION/unclear license -- review the dependency-health risk before relying on it. The in-app add-on install + the archived dependency are why this is a docs-only pointer.",
+      "license": "MIT",
+      "categories": [
+        "productivity",
+        "education",
+        "flashcards"
+      ]
+    },
     {
       "id": "comsol",
       "name": "COMSOL Multiphysics MCP server (docs-only)",
