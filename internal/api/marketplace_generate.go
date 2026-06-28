@@ -34,9 +34,61 @@ func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, []st
 		return generateCommandDraft(e, opts, config.TransportNativeHTTP)
 	case "http":
 		return generateRemoteHTTPDraft(e)
+	case "docs-only":
+		return generateDocsOnlyPointer(e)
 	default:
 		return "", nil, fmt.Errorf("entry %q transport %q is not supported by draft generation", e.ID, e.Transport)
 	}
+}
+
+// generateDocsOnlyPointer projects a transport:"docs-only" catalog entry onto a
+// human-readable POINTER TEXT block — NOT a YAML manifest. A docs-only row is a
+// server that is NOT one-click installable (immature, git-clone-only, macOS-only,
+// or a LAN-bind risk), so the hub never installs it; `mcphub marketplace generate
+// <id>` on such a row prints where to go (homepage + readme) and the verbatim
+// manual_install setup steps instead of a draft the operator could pipe into
+// `mcphub manifest create`. There is NO command/args/url to emit — the row carries
+// none (validateMarketplaceEntry rejects a docs-only row that does).
+//
+// EVERY interpolated field (id, name, homepage, readme_url, summary,
+// manual_install) is a catalog-controlled UNTRUSTED string, so each routes through
+// rejectUnsafeMarketplaceDraftString — the SAME owner the stdio/remote-http draft
+// arms use — before it lands in the pointer text, so a hostile registry cannot
+// inject C0/C1 control bytes, terminal escapes, or Trojan-Source bidi runes into
+// the operator's terminal. A refusal aborts generation, mirroring the other arms.
+func generateDocsOnlyPointer(e *MarketplaceEntry) (string, []string, error) {
+	for field, value := range map[string]string{
+		"entry id":       e.ID,
+		"name":           e.Name,
+		"homepage":       e.Homepage,
+		"readme_url":     e.ReadmeURL,
+		"summary":        e.Summary,
+		"manual_install": e.ManualInstall,
+	} {
+		if err := rejectUnsafeMarketplaceDraftString(field, value); err != nil {
+			return "", nil, fmt.Errorf("entry %q %s contains characters unsafe for terminal output — refusing to emit pointer (registry may be hostile): %w", e.ID, field, err)
+		}
+	}
+	lines := []string{
+		"# " + e.Name + " (" + e.ID + ") — DOCS-ONLY pointer",
+		"#",
+		"# This server is NOT installable through mcphub: it is a manual-install",
+		"# pointer (immature, git-clone-only, macOS-only, or a LAN-bind risk), so",
+		"# the hub never drafts or installs it. Follow the steps below by hand.",
+		"#",
+		"# What it is: " + e.Summary,
+	}
+	if strings.TrimSpace(e.Homepage) != "" {
+		lines = append(lines, "# Homepage:   "+e.Homepage)
+	}
+	if strings.TrimSpace(e.ReadmeURL) != "" {
+		lines = append(lines, "# Readme:     "+e.ReadmeURL)
+	}
+	if strings.TrimSpace(e.ManualInstall) != "" {
+		lines = append(lines, "#", "# Manual setup steps:", "#   "+e.ManualInstall)
+	}
+	lines = append(lines, "")
+	return strings.Join(lines, "\n"), nil, nil
 }
 
 // generateRemoteHTTPDraft projects an http catalog entry onto a

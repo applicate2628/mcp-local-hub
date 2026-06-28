@@ -126,6 +126,25 @@ func registerMarketplaceInstallRoutes(s *Server) {
 			return
 		}
 
+		// S4 docs-only guard, run BEFORE every other gate (availability/name/draft)
+		// and BEFORE both the hub and direct dispatch. A transport:"docs-only" row is
+		// a manual-install POINTER — it carries no command/args/url, so it can NEVER
+		// produce a manifest, a daemon, or a client-config write. Refuse it loud with a
+		// stable 400 DOCS_ONLY_NOT_INSTALLABLE and the pointer text in the body so the
+		// frontend (which suppresses the install affordances for docs-only) and any
+		// direct API caller both see the same "follow the manual steps" answer instead
+		// of a confusing draft/availability error. GenerateDraftManifest's docs-only
+		// arm returns the pointer text (never YAML); a generator refusal (hostile
+		// runes) degrades to a generic message so a bad entry still refuses install.
+		if entry.Transport == "docs-only" {
+			pointer, _, genErr := api.GenerateDraftManifest(entry, api.GenerateOpts{})
+			if genErr != nil {
+				pointer = "This server is a manual-install pointer and cannot be installed through mcphub; see its homepage for setup steps."
+			}
+			writeAPIError(w, errors.New(pointer), http.StatusBadRequest, "DOCS_ONLY_NOT_INSTALLABLE")
+			return
+		}
+
 		// D-3 availability admission gate (shared single owner), run BEFORE both
 		// the hub and direct dispatch. A watch / disabled-until-probe entry whose
 		// host-app install-probe has not passed must NOT install — the direct path

@@ -89,10 +89,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("v1 catalog failed to parse: %v", err)
 	}
-	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs)
+	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs) + len(docsOnlyCatalogIDs)
 	if len(cat.Entries) != wantCount {
-		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local)",
-			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs))
+		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local + %d docs-only)",
+			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs), len(docsOnlyCatalogIDs))
 	}
 
 	// Every v1 entry id must still be present (verbatim copy), in order, before

@@ -575,6 +575,140 @@
         "run_cmd": "uvx --from reaper-mcp-server==0.1.1 reaper-mcp-server",
         "license_status": "confirmed"
       }
+    },
+    {
+      "id": "comsol",
+      "name": "COMSOL Multiphysics MCP server (docs-only)",
+      "summary": "Drive COMSOL Multiphysics from an AI client — build/run FEA models via GUI automation. DOCS-ONLY pointer: community server 777gegewu/comsol-mcp is NOT packaged (no PyPI/npm) — it is git-clone + a PowerShell venv bootstrap (setup_venv.ps1 / start_server.ps1), automates COMSOL by pasting into its GUI, and carries hardcoded local paths; it is an unofficial educational project. The hub cannot one-click install it, so this is a manual-install pointer.",
+      "homepage": "https://github.com/777gegewu/comsol-mcp",
+      "readme_url": "https://raw.githubusercontent.com/777gegewu/comsol-mcp/main/README.md",
+      "transport": "docs-only",
+      "categories": [
+        "engineering",
+        "cae",
+        "simulation"
+      ],
+      "license": "MIT",
+      "manual_install": "git clone https://github.com/777gegewu/comsol-mcp, run the PowerShell bootstrap (setup_venv.ps1) to create the venv, edit the hardcoded COMSOL install paths in the config to match your machine, then launch with start_server.ps1. Requires a local COMSOL Multiphysics install. Unofficial/educational, GUI-paste automation — review the README before use."
+    },
+    {
+      "id": "solidworks",
+      "name": "SolidWorks MCP server (docs-only)",
+      "summary": "Drive SolidWorks CAD from an AI client over its COM API. DOCS-ONLY pointer: community server vespo92/SolidworksMCP-TS is NOT npx-runnable — it depends on the winax native Node addon, which must be compiled against your toolchain at install (node-gyp/MSVC), and the project is Alpha: its README states most tools are not yet validated against a live SolidWorks. The hub cannot one-click install a native-compile, unvalidated row, so this is a manual-install pointer.",
+      "homepage": "https://github.com/vespo92/SolidworksMCP-TS",
+      "readme_url": "https://raw.githubusercontent.com/vespo92/SolidworksMCP-TS/main/README.md",
+      "transport": "docs-only",
+      "categories": [
+        "engineering",
+        "cad",
+        "mechanical"
+      ],
+      "license": "MIT",
+      "manual_install": "git clone https://github.com/vespo92/SolidworksMCP-TS, then `npm install` (this compiles the winax native addon via node-gyp — you need a working MSVC/Build Tools toolchain), `npm run build`, and run the built server. Requires a local Windows SolidWorks install. Alpha: most tools are not yet validated against live SolidWorks — verify each tool before relying on it."
+    },
+    {
+      "id": "autocad",
+      "name": "AutoCAD MCP server (docs-only)",
+      "summary": "Drive AutoCAD from an AI client. DOCS-ONLY pointer: community server puran-water/autocad-mcp is NOT on PyPI and requires a 2-step manual in-application setup — you load its support code inside AutoCAD via the APPLOAD command before the MCP server can connect — and targets AutoCAD LT specifically. Because the load step happens inside the host app (the hub cannot perform an in-app APPLOAD), this is a manual-install pointer.",
+      "homepage": "https://github.com/puran-water/autocad-mcp",
+      "readme_url": "https://raw.githubusercontent.com/puran-water/autocad-mcp/main/README.md",
+      "transport": "docs-only",
+      "categories": [
+        "engineering",
+        "cad",
+        "drawing"
+      ],
+      "license": "MIT",
+      "manual_install": "git clone https://github.com/puran-water/autocad-mcp and follow its README: install the Python deps, then INSIDE AutoCAD run the APPLOAD command to load the project's support code (step 1), and start the MCP server (step 2). Targets AutoCAD LT. The in-app APPLOAD step must be done by hand each session the README describes."
+    },
+    {
+      "id": "guitarpro",
+      "name": "Guitar Pro MCP server (docs-only)",
+      "summary": "Generate Guitar Pro tablature from an AI client. DOCS-ONLY pointer: community server quinnjr/guitar-pro-mcp was published to npm then UNPUBLISHED (the guitar-pro-mcp package is a tombstone — `npx guitar-pro-mcp` no longer resolves), so it must be built from a git clone. It generates GP6 (.gp) files only and is an early single-star project. The hub cannot one-click install an unpublished package, so this is a manual-install pointer.",
+      "homepage": "https://github.com/quinnjr/guitar-pro-mcp",
+      "readme_url": "https://raw.githubusercontent.com/quinnjr/guitar-pro-mcp/main/README.md",
+      "transport": "docs-only",
+      "categories": [
+        "music",
+        "audio"
+      ],
+      "license": "ISC",
+      "manual_install": "The npm package guitar-pro-mcp was unpublished, so install from source: git clone https://github.com/quinnjr/guitar-pro-mcp, `npm install`, `npm run build`, then point your client at the built server. Generates Guitar Pro 6 (.gp) files only. Early project (single star) — try before relying on it."
+    },
+    {
+      "id": "flstudio",
+      "name": "FL Studio MCP server (docs-only)",
+      "summary": "Drive FL Studio from an AI client. DOCS-ONLY pointer: community server rosasynthesiz/flstudio-mcp. NOTE the PyPI package fl-studio-mcp@1.0.0 is authored by rosasynthesiz (this repo's owner) — do NOT confuse it with similarly-named FL Studio MCP projects by other authors (karl-andres / calvinw), a real name-collision trap. It is an early single-star, unvalidated, Windows-only project requiring an in-app FL Studio MIDI-controller-script setup, so the hub does not one-click install it; this is a manual-install pointer.",
+      "homepage": "https://github.com/rosasynthesiz/flstudio-mcp",
+      "readme_url": "https://raw.githubusercontent.com/rosasynthesiz/flstudio-mcp/main/README.md",
+      "transport": "docs-only",
+      "categories": [
+        "music",
+        "daw",
+        "audio"
+      ],
+      "license": "MIT",
+      "manual_install": "Follow the README at https://github.com/rosasynthesiz/flstudio-mcp: install the project (PyPI fl-studio-mcp by author rosasynthesiz — verify the author to avoid the karl-andres/calvinw name collision), then install the bundled FL Studio MIDI-controller script into FL Studio and enable it. Windows + FL Studio only. Early, unvalidated single-star project — verify behavior before use."
+    },
+    {
+      "id": "bitwig",
+      "name": "Bitwig Studio MCP server (docs-only)",
+      "summary": "Drive Bitwig Studio from an AI client over OSC. DOCS-ONLY pointer: community server WeModulate/bitwig-mcp-server is NOT on PyPI and reaches Bitwig through a third-party 'Driven by Moss' OSC controller extension you install into Bitwig separately; the repo is ~14 months stale. The MCP server's own OSC endpoint binds 127.0.0.1 by default (loopback — verified in osc/server.py + settings.py), so it is not a LAN-exposure row, but the multi-piece manual setup (clone + the separate Moss extension) means the hub does not one-click install it; this is a manual-install pointer.",
+      "homepage": "https://github.com/WeModulate/bitwig-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/WeModulate/bitwig-mcp-server/main/README.md",
+      "transport": "docs-only",
+      "categories": [
+        "music",
+        "daw",
+        "audio"
+      ],
+      "license": "MIT",
+      "manual_install": "Install the third-party 'Driven by Moss' OSC controller extension into Bitwig Studio first (it exposes Bitwig over OSC), then git clone https://github.com/WeModulate/bitwig-mcp-server, install its Python deps, and run the server (its OSC binds 127.0.0.1 by default). Requires Bitwig Studio. Repo is ~14 months stale — verify against your Bitwig version."
+    },
+    {
+      "id": "midi",
+      "name": "MIDI MCP server (docs-only)",
+      "summary": "Generate MIDI files from an AI client. DOCS-ONLY pointer: community server tubone24/midi-mcp-server is a MIDI-FILE GENERATOR (writes .mid files), NOT a live-device/DAW driver, and is NOT published to npm (build from a git clone). SECURITY: its HTTP transport mode calls httpServer.listen(port) with NO host argument, so Node binds 0.0.0.0 — the HTTP endpoint is reachable from your LAN (verified in src/index.ts). RUN IT IN STDIO MODE (the default, no network listener) — only use HTTP mode behind a firewall restricting the port to loopback or on a trusted network. The hub does not one-click install it; this is a manual-install pointer.",
+      "homepage": "https://github.com/tubone24/midi-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/tubone24/midi-mcp-server/main/README.md",
+      "transport": "docs-only",
+      "categories": [
+        "music",
+        "audio",
+        "generation"
+      ],
+      "license": "MIT",
+      "manual_install": "git clone https://github.com/tubone24/midi-mcp-server, `npm install`, `npm run build`, then run in STDIO mode (the default — no network listener). It generates .mid files (not a device driver). WARNING: HTTP mode binds 0.0.0.0 (LAN-reachable) — prefer stdio; if you must use HTTP, restrict the port to loopback via your firewall or run only on a trusted network."
+    },
+    {
+      "id": "logicpro",
+      "name": "Logic Pro MCP server (docs-only)",
+      "summary": "Drive Apple Logic Pro from an AI client. DOCS-ONLY pointer: community server MongLong0214/logic-pro-mcp is macOS-ONLY — a Swift binary built with the macOS Accessibility/AppleScript APIs (Package.swift, no PyPI/npm), so it must be compiled on a Mac with Xcode. It is among the more mature DAW MCP repos and drives Logic via macOS Accessibility (it dropped the earlier OSC path, so it is loopback-clean — no network listener). Because it is a macOS-only Swift build the hub cannot one-click install, this is a manual-install pointer.",
+      "homepage": "https://github.com/MongLong0214/logic-pro-mcp",
+      "readme_url": "https://raw.githubusercontent.com/MongLong0214/logic-pro-mcp/main/README.md",
+      "transport": "docs-only",
+      "categories": [
+        "music",
+        "daw",
+        "audio"
+      ],
+      "license": "MIT",
+      "manual_install": "macOS only. Install Xcode/Swift toolchain, git clone https://github.com/MongLong0214/logic-pro-mcp, `swift build` (the Package.swift target), and grant the built binary macOS Accessibility permission (System Settings → Privacy & Security → Accessibility) so it can drive Logic Pro. Requires Logic Pro on macOS. Drives via Accessibility (no network listener)."
+    },
+    {
+      "id": "cubase",
+      "name": "Cubase MCP server (docs-only)",
+      "summary": "Drive Steinberg Cubase from an AI client. DOCS-ONLY pointer: community server hedidjs/cubase-mcp is macOS-oriented, very early (8 stars, 3 commits, immature), and NOT packaged (requirements.txt, git-clone-only). It controls Cubase over a virtual-MIDI port (a Generic Remote / MIDI mapping you configure inside Cubase — no network socket). Because of the immaturity and the manual in-app virtual-MIDI setup the hub does not one-click install it; this is a manual-install pointer.",
+      "homepage": "https://github.com/hedidjs/cubase-mcp",
+      "readme_url": "https://raw.githubusercontent.com/hedidjs/cubase-mcp/main/README.md",
+      "transport": "docs-only",
+      "categories": [
+        "music",
+        "daw",
+        "audio"
+      ],
+      "license": "MIT",
+      "manual_install": "git clone https://github.com/hedidjs/cubase-mcp, install the Python deps from requirements.txt, create a virtual-MIDI port and configure Cubase's Generic Remote / MIDI mapping to it (per the README), then run the server. macOS-oriented. Requires Cubase. Very early (3 commits) — try before relying on it."
     }
   ]
 }

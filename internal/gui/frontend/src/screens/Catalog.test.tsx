@@ -1279,4 +1279,64 @@ describe("CatalogScreen", () => {
     expect(screen.queryByTestId("catalog-marketplace-install-legacyblocked")).toBeNull();
     expect(screen.queryByTestId("catalog-marketplace-install-legacyready")).toBeTruthy();
   });
+
+  // --- S4: transport:"docs-only" manual-install pointer rows ---
+  //
+  // A docs-only row is a server the hub never installs (immature, git-clone-only,
+  // macOS-only, or a LAN-bind risk). The Catalog renders a distinct "DOCS-ONLY"
+  // badge + readme link + a "view setup" block carrying the manual_install steps,
+  // and NO install affordance at all (no Add-to-hub, no Install-directly, no
+  // probe-to-enable badge).
+  function mpDocsOnly(id: string) {
+    return {
+      id,
+      name: `${id} (docs-only)`,
+      summary: `summary for ${id}`,
+      categories: ["music", "daw"],
+      homepage: `https://github.com/example/${id}`,
+      transport: "docs-only",
+      readme_url: `https://raw.githubusercontent.com/example/${id}/main/README.md`,
+      manual_install: `git clone https://github.com/example/${id} and follow the README.`,
+      // A docs-only row carries no availability gate → backend emits probe_state
+      // "ready"; the frontend must still suppress install on transport, not probe.
+      probe_state: "ready",
+    };
+  }
+
+  it("docs-only row renders the manual-install pointer and NO install affordance", async () => {
+    renderWithMarketplace([mpDocsOnly("cubase")]);
+    // The docs-only pointer block + badge render.
+    const block = await screen.findByTestId("catalog-marketplace-docs-only-cubase");
+    expect(block).toBeTruthy();
+    expect(screen.getByTestId("catalog-marketplace-docs-only-badge-cubase").textContent).toContain(
+      "DOCS-ONLY",
+    );
+    // Readme link carries the safe external-link attrs.
+    const readme = screen.getByTestId(
+      "catalog-marketplace-docs-only-readme-cubase",
+    ) as HTMLAnchorElement;
+    expect(readme.getAttribute("href")).toBe(
+      "https://raw.githubusercontent.com/example/cubase/main/README.md",
+    );
+    expect(readme.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(readme.getAttribute("target")).toBe("_blank");
+    // The manual_install steps render in the setup block.
+    expect(screen.getByTestId("catalog-marketplace-docs-only-steps-cubase").textContent).toContain(
+      "git clone https://github.com/example/cubase",
+    );
+    // NO install affordance of ANY kind for a docs-only row.
+    expect(screen.queryByTestId("catalog-marketplace-install-cubase")).toBeNull();
+    expect(screen.queryByTestId("catalog-marketplace-hub-cubase")).toBeNull();
+    expect(screen.queryByTestId("catalog-marketplace-direct-toggle-cubase")).toBeNull();
+    expect(screen.queryByTestId("catalog-marketplace-probe-to-enable-cubase")).toBeNull();
+  });
+
+  it("docs-only row still groups under its theme section", async () => {
+    // categories ["music","daw"] fold into the "Music & Audio" theme — a docs-only
+    // row is a normal render-grouping citizen (PR #443), it just suppresses install.
+    renderWithMarketplace([mpDocsOnly("logicpro")]);
+    await screen.findByTestId("catalog-marketplace-docs-only-logicpro");
+    expect(screen.queryByTestId("catalog-theme-section-Music & Audio")).toBeTruthy();
+    expect(screen.getByTestId("catalog-marketplace-card-logicpro")).toBeTruthy();
+  });
 });

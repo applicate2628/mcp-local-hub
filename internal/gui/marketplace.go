@@ -93,9 +93,10 @@ type marketplaceEntry struct {
 	Summary    string   `json:"summary"`
 	Categories []string `json:"categories"`
 	Homepage   string   `json:"homepage"`
-	// Transport is the catalog entry's transport discriminator ("stdio" or
-	// "http"). The frontend reads it to choose the install mode affordance;
-	// an unknown/empty value renders as a non-installable row.
+	// Transport is the catalog entry's transport discriminator ("stdio", "http",
+	// or "docs-only"). The frontend reads it to choose the install mode affordance;
+	// a "docs-only" row suppresses install entirely and renders the manual-install
+	// pointer instead; an unknown/empty value renders as a non-installable row.
 	Transport string `json:"transport"`
 	// Availability (D-3, Tier-0) is the read-only catalog-row lifecycle gate
 	// ("" / "ready" / "watch" / "disabled-until-probe"). The frontend greys a
@@ -119,6 +120,19 @@ type marketplaceEntry struct {
 	// prior conservative behavior. New frontends read probe_state. Remove next
 	// release.
 	ProbePasses bool `json:"probe_passes"`
+	// Homepage is the entry's homepage URL — already on the browse DTO for the
+	// installable rows; a docs-only POINTER row leans on it as the operator's
+	// primary destination, so the frontend always renders it (when http(s)).
+	// (Re-declared here next to the docs-only fields it pairs with; the field set
+	// above already projects Homepage.)
+	//
+	// ReadmeURL + ManualInstall (S4) are the docs-only pointer payload: the raw
+	// README link and the verbatim manual-setup steps. They are projected ONLY for
+	// the read wire so the Catalog can render a "view setup" block for a
+	// transport:"docs-only" row without a second round-trip. omitempty so an
+	// installable row's browse JSON is byte-identical to before.
+	ReadmeURL     string `json:"readme_url,omitempty"`
+	ManualInstall string `json:"manual_install,omitempty"`
 }
 
 type marketplaceListResponse struct {
@@ -239,6 +253,9 @@ func projectMarketplaceEntries(entries []api.MarketplaceEntry) []marketplaceEntr
 			// un-regenerated older bundle degrades safely.
 			ProbeState:  string(probeState),
 			ProbePasses: probeState == api.ProbeBrowseReady,
+			// S4 docs-only pointer payload (omitempty — empty on installable rows).
+			ReadmeURL:     e.ReadmeURL,
+			ManualInstall: e.ManualInstall,
 		})
 	}
 	return rows

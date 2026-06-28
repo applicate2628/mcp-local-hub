@@ -51,10 +51,19 @@ interface MarketplaceEntry {
   summary: string;
   categories: string[];
   homepage: string;
-  // "stdio" | "http" — the install-mode discriminator. An older backend that
-  // omits it (or a hostile/partial body) reads as "" and falls back to the
-  // safe HUB-ONLY affordance.
+  // "stdio" | "http" | "docs-only" — the install-mode discriminator. A
+  // "docs-only" row is a manual-install POINTER: the install affordances are
+  // suppressed entirely and the readme link + manual_install steps render
+  // instead (the hub never installs it). An older backend that omits it (or a
+  // hostile/partial body) reads as "" and falls back to the safe HUB-ONLY
+  // affordance.
   transport: string;
+  // ReadmeURL + ManualInstall (S4): the docs-only pointer payload — the raw
+  // README link and the verbatim manual-setup steps. Present only on a
+  // transport:"docs-only" row; optional on every other row (the installable
+  // rows omit them). Rendered in the docs-only "Manual install" block.
+  readme_url?: string;
+  manual_install?: string;
   // Availability (D-3, Tier-0): "" | "ready" | "watch" | "disabled-until-probe".
   // A "watch" / "disabled-until-probe" row is greyed and labeled "probe to
   // enable" — its host app/tool isn't detected yet. An older backend that omits
@@ -955,6 +964,12 @@ function MarketplaceCard({
   ) => void;
 }) {
   const isHttp = entry.transport === "http";
+  // S4: a docs-only row is a manual-install POINTER — the hub never installs it.
+  // It suppresses EVERY install affordance (hub/direct/probe) and renders a
+  // distinct "DOCS-ONLY" badge + a "Manual install" block (the readme link + the
+  // verbatim manual_install steps) instead. Decided BEFORE the probe-state branch
+  // so a docs-only row never reaches the install/probe affordances.
+  const isDocsOnly = entry.transport === "docs-only";
   // D-3 (Tier-0, mirror-gate): the TRI-STATE browse verdict drives the affordance.
   // "ready" and "inert-unknown" both show the install block — "ready" is detected
   // now, and "inert-unknown" carries a files[]/path-shaped probe the browse path
@@ -1006,11 +1021,13 @@ function MarketplaceCard({
         </p>
       )}
 
-      {/* Install affordance. stdio → hub only; http → hub + direct.
-          But FIRST: a server already running per /api/status (e.g. the
-          shipped `fetch` daemon, which is also a catalog entry) shows an
-          "Installed" badge and NO install affordance — we must never offer
-          to re-install it (which would hit NAME_CONFLICT → suggest fetch-2). */}
+      {/* Install affordance. stdio → hub only; http → hub + direct; docs-only →
+          NO install (a manual-install pointer). But FIRST: a server already
+          running per /api/status (e.g. the shipped `fetch` daemon, which is also a
+          catalog entry) shows an "Installed" badge and NO install affordance — we
+          must never offer to re-install it (which would hit NAME_CONFLICT →
+          suggest fetch-2). Then: a docs-only row renders its pointer block and
+          NEVER any install/probe affordance. */}
       {installed ? (
         <span
           class="lsp-chip lsp-chip-via-hub"
@@ -1018,6 +1035,52 @@ function MarketplaceCard({
         >
           installed
         </span>
+      ) : isDocsOnly ? (
+        /* S4 docs-only POINTER row: a server the hub never installs (immature,
+           git-clone-only, macOS-only, or a LAN-bind risk). NO "Add to hub" /
+           "Install directly" affordance and NO probe badge — instead a distinct
+           "DOCS-ONLY" / "manual install" badge, the readme link, and a collapsible
+           "view setup" block carrying the verbatim manual_install steps. */
+        <div
+          class="catalog-marketplace-docs-only"
+          data-testid={`catalog-marketplace-docs-only-${entry.id}`}
+        >
+          <span
+            class="lsp-chip catalog-marketplace-docs-only-badge"
+            data-testid={`catalog-marketplace-docs-only-badge-${entry.id}`}
+            title="This server isn't one-click installable through mcphub — follow the manual setup steps below."
+          >
+            DOCS-ONLY · manual install
+          </span>
+          {/* readme link — UNTRUSTED external registry value, so only render it
+              when it is an http(s) URL (same guard as the homepage link). */}
+          {entry.readme_url && /^https?:\/\//i.test(entry.readme_url) && (
+            <p class="catalog-marketplace-docs-only-readme">
+              <a
+                href={entry.readme_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid={`catalog-marketplace-docs-only-readme-${entry.id}`}
+              >
+                Readme
+              </a>
+            </p>
+          )}
+          {entry.manual_install && (
+            <details
+              class="catalog-marketplace-docs-only-setup"
+              data-testid={`catalog-marketplace-docs-only-setup-${entry.id}`}
+            >
+              <summary>View setup steps</summary>
+              <p
+                class="catalog-marketplace-docs-only-steps"
+                data-testid={`catalog-marketplace-docs-only-steps-${entry.id}`}
+              >
+                {entry.manual_install}
+              </p>
+            </details>
+          )}
+        </div>
       ) : state.phase === "installed" ? (
         <p
           class="catalog-marketplace-status catalog-marketplace-status-ok"

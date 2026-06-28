@@ -87,6 +87,15 @@ type MarketplaceEntry struct {
 	//
 	// Decision: work-items/decisions/2026-06-24-required-secret-install-gate.md
 	RequiredSecrets []string `json:"required_secrets,omitempty"`
+
+	// ManualInstall (S4) carries the verbatim manual-setup steps for a
+	// transport:"docs-only" pointer row — a server that is NOT one-click installable
+	// (immature, git-clone-only, macOS-only, or a LAN-bind risk) so the hub never
+	// installs it. The Catalog renders it as a "view setup" block; it is NEVER
+	// projected into a manifest (a docs-only row produces no command/args/url). It
+	// is ADDITIVE + gated to schema_version 2 (newCatalogFieldKeys), so a v1 catalog
+	// can never carry it and a row without it drafts byte-identically.
+	ManualInstall string `json:"manual_install,omitempty"`
 }
 
 // CatalogVendoredSource is the catalog-entry (JSON) mirror of
@@ -158,6 +167,7 @@ func catalogProbeToConfig(p *CatalogAvailabilityProbe) *config.AvailabilityProbe
 //   - the newCatalogFieldsRequireV2 v1-gate, which is KEY-PRESENCE based
 //     (catalogEntryNewKeyPresence) so a v1 catalog STILL cannot carry a v2 key,
 //   - per-entry validation + duplicate-id detection.
+//
 // The STRICT no-unknown-key check belongs on the bytes WE author, not the bytes a
 // deployed client fetches — see ParseMarketplaceCatalogStrict / the author-side
 // catalog test (marketplace_tier1_catalog_test.go), which feeds a typo'd key and
@@ -219,7 +229,7 @@ func parseMarketplaceCatalog(raw []byte, strictUnknownFields bool) (*Marketplace
 // or populated all count) — so an older v1-only client whose
 // DisallowUnknownFields decoder rejects the WHOLE catalog on the bare KEY never
 // has to face a v1 catalog carrying it.
-var newCatalogFieldKeys = []string{"vendored_source", "availability", "install_probe", "required_secrets"}
+var newCatalogFieldKeys = []string{"vendored_source", "availability", "install_probe", "required_secrets", "manual_install"}
 
 // catalogEntryNewKeyPresence re-decodes the catalog body's `entries` array into
 // a parallel per-entry map[string]json.RawMessage from the SAME bytes the typed
@@ -321,6 +331,8 @@ func newCatalogFieldsRequireV2(e *MarketplaceEntry, schemaVersion string, presen
 		return fmt.Errorf("install_probe requires catalog schema_version %q", MarketplaceCatalogSchemaVersionV2)
 	case len(e.RequiredSecrets) > 0:
 		return fmt.Errorf("required_secrets requires catalog schema_version %q", MarketplaceCatalogSchemaVersionV2)
+	case e.ManualInstall != "":
+		return fmt.Errorf("manual_install requires catalog schema_version %q", MarketplaceCatalogSchemaVersionV2)
 	}
 	return nil
 }
@@ -350,8 +362,29 @@ func validateMarketplaceEntry(e *MarketplaceEntry, schemaVersion string, presenc
 		if _, err := parseMarketplacePublicHTTPSURL(e.URL); err != nil {
 			return fmt.Errorf("http entry url must be valid public https:// without embedded credentials (got %q): %w", marketplaceCatalogURLForError(e.URL), err)
 		}
+	case "docs-only":
+		// S4 pointer row: discoverable in the Catalog, NEVER installed by the hub.
+		// It is install-inert by construction — it carries the homepage + summary +
+		// manual_install setup steps and NOTHING that could produce a manifest/daemon
+		// (no command/args/url). The install handlers reject it (DOCS_ONLY_NOT_INSTALLABLE)
+		// and the generate arm emits a human-readable pointer text block, never YAML.
+		// homepage + summary are REQUIRED so the rendered pointer is meaningful (the
+		// operator needs somewhere to go); command/args/url are REJECTED so a docs-only
+		// row can never carry install fields a future code path might honor.
+		if strings.TrimSpace(e.Homepage) == "" {
+			return fmt.Errorf("docs-only entry must declare homepage (it is a pointer row — the operator needs a destination)")
+		}
+		if strings.TrimSpace(e.Summary) == "" {
+			return fmt.Errorf("docs-only entry must declare summary (it is a pointer row — describe what it does and why it is docs-only)")
+		}
+		if e.Command != "" || len(e.Args) > 0 {
+			return fmt.Errorf("docs-only entry must NOT declare command/args (it is install-inert by construction; put the setup steps in manual_install)")
+		}
+		if e.URL != "" {
+			return fmt.Errorf("docs-only entry must NOT declare url (it is install-inert by construction; put the setup steps in manual_install)")
+		}
 	default:
-		return fmt.Errorf("unknown transport %q (want stdio, native-http, or http)", e.Transport)
+		return fmt.Errorf("unknown transport %q (want stdio, native-http, http, or docs-only)", e.Transport)
 	}
 	// Forward-compat: the additive D-2/D-3 metadata fields are gated to
 	// schema_version 2 so a v1 catalog can never carry keys an older v1-only

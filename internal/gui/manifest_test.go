@@ -17,12 +17,14 @@ import (
 // fakeManifestCreator and fakeManifestValidator are Server-local test doubles.
 // They shadow the real api.API calls via the interfaces injected into Server.
 type fakeManifestCreator struct {
-	name string
-	yaml string
-	err  error
+	name   string
+	yaml   string
+	err    error
+	called bool
 }
 
 func (f *fakeManifestCreator) ManifestCreate(name, yaml string) error {
+	f.called = true
 	f.name, f.yaml = name, yaml
 	return f.err
 }
