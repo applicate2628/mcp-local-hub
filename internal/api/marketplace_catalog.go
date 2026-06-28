@@ -368,6 +368,18 @@ func validateMarketplaceEntry(e *MarketplaceEntry, schemaVersion string, presenc
 		// manual_install setup steps and NOTHING that could produce a manifest/daemon
 		// (no command/args/url). The install handlers reject it (DOCS_ONLY_NOT_INSTALLABLE)
 		// and the generate arm emits a human-readable pointer text block, never YAML.
+		//
+		// V2-GATE: docs-only is a v2-only transport DISCRIMINATOR, exactly like the
+		// manual_install field is a v2-only key. An OLDER v1-only client knows only
+		// stdio/native-http/http and rejects the whole catalog on the unknown
+		// transport, so a v1 catalog must NEVER ship a docs-only row — gating only the
+		// manual_install KEY (newCatalogFieldsRequireV2) left a v1 docs-only row with no
+		// manual_install accepted by THIS parser yet rejected by older clients (a
+		// contract split — bot #446 P2). Reject the docs-only transport unless
+		// schema_version is v2, naming the version so the catalog author sees the gate.
+		if schemaVersion != MarketplaceCatalogSchemaVersionV2 {
+			return fmt.Errorf("transport %q requires catalog schema_version %q (it is a v2-only discriminator; an older v1-only client rejects the whole catalog on this unknown transport)", e.Transport, MarketplaceCatalogSchemaVersionV2)
+		}
 		// homepage + summary are REQUIRED so the rendered pointer is meaningful (the
 		// operator needs somewhere to go); command/args/url are REJECTED so a docs-only
 		// row can never carry install fields a future code path might honor.

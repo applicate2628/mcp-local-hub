@@ -1176,6 +1176,60 @@ describe("CatalogScreen", () => {
     expect(retryBtn.disabled).toBe(false);
   });
 
+  it("Refresh carries readme_url + manual_install through for a docs-only row (DTO round-trip)", async () => {
+    // bot #446 P2: the refresh normalizer (refreshMarketplace) previously dropped
+    // readme_url + manual_install, so a refreshed docs-only row rendered just the
+    // badge — no Readme link, no setup steps. The refresh body here returns a FULL
+    // docs-only row; after Refresh the Readme link + setup steps MUST render.
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace/refresh": () =>
+          jsonResponse(200, {
+            entries: [
+              {
+                id: "cubase",
+                name: "cubase (docs-only)",
+                summary: "summary for cubase",
+                categories: ["music", "daw"],
+                homepage: "https://github.com/example/cubase",
+                transport: "docs-only",
+                readme_url: "https://raw.githubusercontent.com/example/cubase/main/README.md",
+                manual_install: "git clone https://github.com/example/cubase and follow the README.",
+                probe_state: "ready",
+              },
+            ],
+          }),
+        // Initial mount load: empty marketplace so only the refresh body provides
+        // the docs-only row (proves the refresh DTO, not the initial-load spread).
+        "/api/marketplace": () => jsonResponse(200, { entries: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    // Initial state: empty marketplace (no docs-only card yet).
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-empty")).toBeTruthy();
+    });
+
+    fireEvent.click(await screen.findByTestId("catalog-marketplace-refresh"));
+
+    // After refresh the docs-only row renders WITH the readme link + setup steps —
+    // proving the refresh normalizer carried both fields through.
+    const readme = (await screen.findByTestId(
+      "catalog-marketplace-docs-only-readme-cubase",
+    )) as HTMLAnchorElement;
+    expect(readme.getAttribute("href")).toBe(
+      "https://raw.githubusercontent.com/example/cubase/main/README.md",
+    );
+    expect(screen.getByTestId("catalog-marketplace-docs-only-steps-cubase").textContent).toContain(
+      "git clone https://github.com/example/cubase",
+    );
+    // And still NO install affordance (docs-only is install-inert).
+    expect(screen.queryByTestId("catalog-marketplace-hub-cubase")).toBeNull();
+  });
+
   // --- D-3 tri-state browse probe_state render branches (CHANGE A-frontend) ----
   //
   // The backend emits probe_state ∈ {ready, inert-blocked, inert-unknown}. The

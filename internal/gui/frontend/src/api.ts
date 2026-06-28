@@ -1233,6 +1233,14 @@ export interface MarketplaceCatalogEntry {
   // (true iff probe_state == "ready"). Optional; kept for one release so an older
   // backend / un-regenerated bundle degrades fail-closed (undefined → grey).
   probe_passes?: boolean;
+  // ReadmeURL + ManualInstall (S4): the docs-only pointer payload — the raw README
+  // link and the verbatim manual-setup steps. Present only on a
+  // transport:"docs-only" row; optional on every other row. The Catalog renders
+  // them in the docs-only "Manual install" block, so the refresh normalizer MUST
+  // carry them through (dropping them blanked the Readme link + setup steps after
+  // a Refresh — bot #446 P2).
+  readme_url?: string;
+  manual_install?: string;
 }
 
 export async function refreshMarketplace(): Promise<MarketplaceCatalogEntry[]> {
@@ -1269,6 +1277,11 @@ export async function refreshMarketplace(): Promise<MarketplaceCatalogEntry[]> {
     availability: typeof e.availability === "string" ? e.availability : "",
     ...(typeof e.probe_state === "string" ? { probe_state: e.probe_state } : {}),
     ...(typeof e.probe_passes === "boolean" ? { probe_passes: e.probe_passes } : {}),
+    // S4 docs-only pointer payload — carry through so a refreshed docs-only row
+    // keeps its Readme link + "View setup steps" block (dropping them was the
+    // refresh-DTO gap, a SECOND consumer beyond the initial load — bot #446 P2).
+    ...(typeof e.readme_url === "string" ? { readme_url: e.readme_url } : {}),
+    ...(typeof e.manual_install === "string" ? { manual_install: e.manual_install } : {}),
   }));
 }
 

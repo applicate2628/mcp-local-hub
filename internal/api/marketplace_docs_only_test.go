@@ -180,6 +180,36 @@ func TestDocsOnlyRequiresSchemaV2(t *testing.T) {
 	}
 }
 
+// TestDocsOnlyTransportRequiresSchemaV2 proves the docs-only TRANSPORT itself is
+// v2-only — distinct from the manual_install KEY gate above (bot #446 P2). A v1
+// catalog with a docs-only row that carries NO manual_install key (so the
+// key-presence gate does NOT fire) must STILL be rejected, because an older v1-only
+// client knows only stdio/native-http/http and rejects the whole catalog on the
+// unknown transport — accepting it here was a contract split. A v2 catalog with the
+// same row is accepted.
+func TestDocsOnlyTransportRequiresSchemaV2(t *testing.T) {
+	// v1 docs-only row WITHOUT manual_install (the key-presence gate is silent here):
+	// the transport gate must still reject it.
+	v1raw := `{"schema_version":"1","entries":[{"id":"x","name":"X","transport":"docs-only","homepage":"https://example.com","summary":"s"}]}`
+	_, err := ParseMarketplaceCatalog([]byte(v1raw))
+	if err == nil {
+		t.Fatal("v1 catalog with a docs-only transport row (no manual_install) was accepted; want rejection (the transport is v2-only)")
+	}
+	if !strings.Contains(err.Error(), "schema_version") || !strings.Contains(err.Error(), "docs-only") {
+		t.Fatalf("error = %q, want it to mention both the docs-only transport and schema_version", err.Error())
+	}
+
+	// Same row under schema_version 2 is accepted.
+	v2raw := `{"schema_version":"2","entries":[{"id":"x","name":"X","transport":"docs-only","homepage":"https://example.com","summary":"s"}]}`
+	cat, err := ParseMarketplaceCatalog([]byte(v2raw))
+	if err != nil {
+		t.Fatalf("v2 catalog with a docs-only row was rejected; want acceptance: %v", err)
+	}
+	if len(cat.Entries) != 1 || cat.Entries[0].Transport != "docs-only" {
+		t.Fatalf("v2 docs-only row not parsed: %#v", cat.Entries)
+	}
+}
+
 // TestV2DocsOnlyRows_PresentInertAndPointerOnly is the S4 catalog-data acceptance:
 // the v2 catalog carries the 9 docs-only pointer rows; each is transport:"docs-only"
 // with homepage + summary + manual_install and NO command/args/url, and each
