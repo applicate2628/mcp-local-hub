@@ -55,7 +55,17 @@ func TestValidateProbeValuesNonEmpty_Platforms(t *testing.T) {
 		want string
 	}{
 		{"empty", "", "is empty"},
-		{"padded", " windows/amd64", "leading/trailing whitespace"},
+		// Surrounding whitespace (bot #447 P2 — author gate rejects even though
+		// PlatformMatches stays trim-tolerant on READ).
+		{"leading-space", " windows/amd64", "contains whitespace"},
+		{"trailing-space", "windows/amd64 ", "contains whitespace"},
+		// INTERNAL whitespace (the bot #447 P2 gap the surrounding-only check missed):
+		// these pass the non-empty-halves shape but can NEVER equal the whitespace-free
+		// runtime host string, so the row would be permanently inert. Must fail LOUD.
+		{"space-after-slash", "windows/ amd64", "contains whitespace"},
+		{"space-in-os", "win dows/amd64", "contains whitespace"},
+		{"space-in-arch", "windows/am d64", "contains whitespace"},
+		{"tab-internal", "windows/\tamd64", "contains whitespace"},
 		{"no-slash", "windows-amd64", "GOOS/GOARCH"},
 		{"triple", "windows/amd64/extra", "GOOS/GOARCH"},
 		{"empty-os", "/amd64", "GOOS/GOARCH"},

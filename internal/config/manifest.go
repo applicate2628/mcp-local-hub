@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"mcp-local-hub/internal/secrets"
 	"mcp-local-hub/internal/urlredact"
@@ -917,24 +918,32 @@ func ValidateProbeValuesNonEmpty(p *AvailabilityProbe, label string) error {
 		}
 	}
 	// platforms[] is the OPT-IN arch gate. Each entry must be a non-empty,
-	// no-surrounding-whitespace "GOOS/GOARCH" token (exactly one '/', both halves
-	// non-empty). A malformed token (empty, padded, missing '/', a triple "a/b/c")
-	// can never equal the runtime "GOOS/GOARCH" host string, so it would silently
-	// narrow the allowlist (or, alone, permanently disable the row). Reject it up
-	// front so a typo'd platforms value is caught at author/validate time, the same
-	// fail-loud posture the other probe fields use. The exact OS/arch NAME is NOT
-	// validated against Go's known set (it is forward-compatible by design — a
-	// future GOARCH must be declarable in a shared catalog); only the SHAPE is
-	// enforced.
+	// whitespace-free "GOOS/GOARCH" token (exactly one '/', both halves non-empty).
+	// A malformed token (empty, surrounding- OR internal-whitespace, missing '/', a
+	// triple "a/b/c") can never equal the runtime "GOOS/GOARCH" host string (which
+	// Go builds from runtime.GOOS+"/"+runtime.GOARCH — no whitespace possible), so
+	// it would silently narrow the allowlist (or, alone, permanently disable the
+	// row). Reject it up front so a typo'd platforms value fails LOUD at
+	// author/validate time, not silently-inert at runtime. PlatformMatches stays
+	// trim-tolerant on READ (a hand-edited manifest that slipped a SURROUNDING space
+	// still matches), but the author-side validator rejects any whitespace so the
+	// shipped catalog is clean. The exact OS/arch NAME is NOT validated against Go's
+	// known set (forward-compatible by design — a future GOARCH must be declarable
+	// in a shared catalog); only the SHAPE is enforced.
 	for i, plat := range p.Platforms {
 		if strings.TrimSpace(plat) == "" {
 			return fmt.Errorf("%s: install_probe.platforms[%d] is empty — every declared platform must be a non-empty \"GOOS/GOARCH\" token (e.g. \"windows/amd64\")", label, i)
 		}
-		if strings.TrimSpace(plat) != plat {
-			return fmt.Errorf("%s: install_probe.platforms[%d] %q has leading/trailing whitespace — the runtime gate compares the value against the host \"GOOS/GOARCH\" verbatim; remove the surrounding whitespace", label, i, plat)
+		// Reject ANY whitespace (surrounding OR internal). The host string is
+		// whitespace-free, so a token like "windows/ amd64", "win dows/amd64", or
+		// " windows/amd64" can NEVER match and would leave the row permanently inert
+		// — a silent-disable footgun the surrounding-only check below would miss for
+		// the internal cases.
+		if strings.IndexFunc(plat, unicode.IsSpace) >= 0 {
+			return fmt.Errorf("%s: install_probe.platforms[%d] %q contains whitespace — the runtime gate compares the value against the host \"GOOS/GOARCH\" (which is whitespace-free), so a padded token never matches and the row stays permanently inert; remove all whitespace", label, i, plat)
 		}
 		os, arch, ok := strings.Cut(plat, "/")
-		if !ok || strings.Contains(arch, "/") || strings.TrimSpace(os) == "" || strings.TrimSpace(arch) == "" {
+		if !ok || strings.Contains(arch, "/") || os == "" || arch == "" {
 			return fmt.Errorf("%s: install_probe.platforms[%d] %q must be a \"GOOS/GOARCH\" token (exactly one '/', both halves non-empty) — e.g. \"windows/amd64\", \"linux/arm64\", \"darwin/arm64\"", label, i, plat)
 		}
 	}
