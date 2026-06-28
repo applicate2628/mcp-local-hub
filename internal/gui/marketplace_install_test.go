@@ -20,12 +20,28 @@ type fakeMarketplaceEntryLoader struct {
 	err    error
 	seenID string
 	called bool
+
+	// S4 docs_only resolution: when LoadEntry returns found=false, the handler
+	// consults LoadDocsOnly so a docs_only id is refused DOCS_ONLY_NOT_INSTALLABLE
+	// rather than a misleading 404. Defaults (zero value) make LoadDocsOnly a no-op
+	// returning not-found, so install tests that don't set these are unaffected.
+	docsEntry  *api.DocsOnlyEntry
+	docsFound  bool
+	docsErr    error
+	docsCalled bool
+	docsSeenID string
 }
 
 func (f *fakeMarketplaceEntryLoader) LoadEntry(_ context.Context, id string) (*api.MarketplaceEntry, bool, error) {
 	f.called = true
 	f.seenID = id
 	return f.entry, f.found, f.err
+}
+
+func (f *fakeMarketplaceEntryLoader) LoadDocsOnly(_ context.Context, id string) (*api.DocsOnlyEntry, bool, error) {
+	f.docsCalled = true
+	f.docsSeenID = id
+	return f.docsEntry, f.docsFound, f.docsErr
 }
 
 type fakeGlobalPortPicker struct {

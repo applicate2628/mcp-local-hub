@@ -230,6 +230,22 @@ func marketplaceCacheCatalogKeyPresence(raw []byte) ([]map[string]json.RawMessag
 	return catalogEntryNewKeyPresence(shell.Catalog)
 }
 
+// marketplaceCacheDocsOnlyPresent reports whether the nested cache `catalog`
+// sub-object carries the top-level docs_only key (S4 v2-gate on the cache path). A
+// missing/empty catalog object means the key is absent.
+func marketplaceCacheDocsOnlyPresent(raw []byte) (bool, error) {
+	var shell struct {
+		Catalog json.RawMessage `json:"catalog"`
+	}
+	if err := json.Unmarshal(raw, &shell); err != nil {
+		return false, fmt.Errorf("re-decode catalog for docs_only presence check: %w", err)
+	}
+	if len(shell.Catalog) == 0 {
+		return false, nil
+	}
+	return catalogTopLevelKeyPresent(shell.Catalog, "docs_only")
+}
+
 func readMarketplaceCache() (*marketplaceCacheFile, error) {
 	raw, err := readHubMcpStateFile(marketplaceCacheFileLeaf)
 	if err != nil {
@@ -257,7 +273,14 @@ func readMarketplaceCache() (*marketplaceCacheFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("validate cache catalog: %w", err)
 	}
-	if err := validateMarketplaceCatalog(&cf.Catalog, presence); err != nil {
+	// S4: detect the docs_only top-level key in the nested cache `catalog` object so
+	// the docs_only v2-gate fires on the cache path too (a tampered cache could carry
+	// a v1 catalog with docs_only present).
+	docsOnlyPresent, err := marketplaceCacheDocsOnlyPresent(raw)
+	if err != nil {
+		return nil, fmt.Errorf("validate cache catalog: %w", err)
+	}
+	if err := validateMarketplaceCatalog(&cf.Catalog, presence, docsOnlyPresent); err != nil {
 		return nil, fmt.Errorf("validate cache catalog: %w", err)
 	}
 	if cf.SourceURL != "" {

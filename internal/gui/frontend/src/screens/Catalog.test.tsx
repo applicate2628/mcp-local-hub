@@ -1187,23 +1187,23 @@ describe("CatalogScreen", () => {
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
         "/api/marketplace/refresh": () =>
           jsonResponse(200, {
-            entries: [
+            entries: [],
+            // S4: docs-only rows arrive in the SEPARATE docs_only[] array.
+            docs_only: [
               {
                 id: "cubase",
                 name: "cubase (docs-only)",
                 summary: "summary for cubase",
                 categories: ["music", "daw"],
                 homepage: "https://github.com/example/cubase",
-                transport: "docs-only",
                 readme_url: "https://raw.githubusercontent.com/example/cubase/main/README.md",
                 manual_install: "git clone https://github.com/example/cubase and follow the README.",
-                probe_state: "ready",
               },
             ],
           }),
         // Initial mount load: empty marketplace so only the refresh body provides
-        // the docs-only row (proves the refresh DTO, not the initial-load spread).
-        "/api/marketplace": () => jsonResponse(200, { entries: [] }),
+        // the docs-only row (proves the refresh DTO, not the initial-load).
+        "/api/marketplace": () => jsonResponse(200, { entries: [], docs_only: [] }),
       }) as unknown as typeof fetch,
     );
 
@@ -1261,7 +1261,21 @@ describe("CatalogScreen", () => {
         "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
         "/api/client-capabilities": urlNativeCapabilities,
-        "/api/marketplace": () => jsonResponse(200, { entries: rows }),
+        "/api/marketplace": () => jsonResponse(200, { entries: rows, docs_only: [] }),
+      }) as unknown as typeof fetch,
+    );
+    render(<CatalogScreen />);
+  }
+
+  // renderWithDocsOnly is the S4 counterpart: it serves the rows in the SEPARATE
+  // docs_only[] array (entries empty), exercising the docs-only pointer render path.
+  function renderWithDocsOnly(docsRows: unknown[]) {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/client-capabilities": urlNativeCapabilities,
+        "/api/marketplace": () => jsonResponse(200, { entries: [], docs_only: docsRows }),
       }) as unknown as typeof fetch,
     );
     render(<CatalogScreen />);
@@ -1334,13 +1348,14 @@ describe("CatalogScreen", () => {
     expect(screen.queryByTestId("catalog-marketplace-install-legacyready")).toBeTruthy();
   });
 
-  // --- S4: transport:"docs-only" manual-install pointer rows ---
+  // --- S4: docs_only[] manual-install POINTER rows (separate top-level array) ---
   //
   // A docs-only row is a server the hub never installs (immature, git-clone-only,
-  // macOS-only, or a LAN-bind risk). The Catalog renders a distinct "DOCS-ONLY"
+  // macOS-only, or a LAN-bind risk). It arrives in the SEPARATE docs_only[] array
+  // (NOT entries[]) — bot #446 P1 — and the Catalog renders a distinct "DOCS-ONLY"
   // badge + readme link + a "view setup" block carrying the manual_install steps,
   // and NO install affordance at all (no Add-to-hub, no Install-directly, no
-  // probe-to-enable badge).
+  // probe-to-enable badge). The row has NO transport/probe fields.
   function mpDocsOnly(id: string) {
     return {
       id,
@@ -1348,18 +1363,14 @@ describe("CatalogScreen", () => {
       summary: `summary for ${id}`,
       categories: ["music", "daw"],
       homepage: `https://github.com/example/${id}`,
-      transport: "docs-only",
       readme_url: `https://raw.githubusercontent.com/example/${id}/main/README.md`,
       manual_install: `git clone https://github.com/example/${id} and follow the README.`,
-      // A docs-only row carries no availability gate → backend emits probe_state
-      // "ready"; the frontend must still suppress install on transport, not probe.
-      probe_state: "ready",
     };
   }
 
   it("docs-only row renders the manual-install pointer and NO install affordance", async () => {
-    renderWithMarketplace([mpDocsOnly("cubase")]);
-    // The docs-only pointer block + badge render.
+    renderWithDocsOnly([mpDocsOnly("cubase")]);
+    // The docs-only pointer card + badge render.
     const block = await screen.findByTestId("catalog-marketplace-docs-only-cubase");
     expect(block).toBeTruthy();
     expect(screen.getByTestId("catalog-marketplace-docs-only-badge-cubase").textContent).toContain(
@@ -1385,12 +1396,29 @@ describe("CatalogScreen", () => {
     expect(screen.queryByTestId("catalog-marketplace-probe-to-enable-cubase")).toBeNull();
   });
 
-  it("docs-only row still groups under its theme section", async () => {
+  it("docs-only row still groups under its theme section alongside entries", async () => {
     // categories ["music","daw"] fold into the "Music & Audio" theme — a docs-only
-    // row is a normal render-grouping citizen (PR #443), it just suppresses install.
-    renderWithMarketplace([mpDocsOnly("logicpro")]);
+    // pointer is a normal render-grouping citizen (PR #443), it just suppresses
+    // install. Serve it in docs_only[] AND an installable entry under the same theme
+    // to prove they co-group.
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/client-capabilities": urlNativeCapabilities,
+        "/api/marketplace": () =>
+          jsonResponse(200, {
+            entries: [mpEntry("ableton", "Ableton", "x", ["music", "daw"], "", "stdio")],
+            docs_only: [mpDocsOnly("logicpro")],
+          }),
+      }) as unknown as typeof fetch,
+    );
+    render(<CatalogScreen />);
     await screen.findByTestId("catalog-marketplace-docs-only-logicpro");
     expect(screen.queryByTestId("catalog-theme-section-Music & Audio")).toBeTruthy();
-    expect(screen.getByTestId("catalog-marketplace-card-logicpro")).toBeTruthy();
+    // The docs-only pointer card and the installable entry card both render under
+    // the same Music & Audio theme.
+    expect(screen.getByTestId("catalog-marketplace-docs-only-logicpro")).toBeTruthy();
+    expect(screen.getByTestId("catalog-marketplace-card-ableton")).toBeTruthy();
   });
 });

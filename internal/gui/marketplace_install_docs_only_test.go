@@ -9,32 +9,36 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
-// docsOnlyEntry is a canned full docs-only catalog entry the refusal tests
-// resolve. It carries the pointer payload (homepage/readme/summary/manual_install)
-// and NO install fields — exactly the shape validateMarketplaceEntry accepts.
-func docsOnlyEntry(id string) *api.MarketplaceEntry {
-	return &api.MarketplaceEntry{
+// docsOnlyTestEntry is a canned api.DocsOnlyEntry the refusal tests resolve via
+// LoadDocsOnly. A docs_only row carries the pointer payload and (by type) no
+// install fields — exactly the shape validateDocsOnlyEntry accepts.
+func docsOnlyTestEntry(id string) *api.DocsOnlyEntry {
+	return &api.DocsOnlyEntry{
 		ID:            id,
 		Name:          "Cubase MCP server (docs-only)",
 		Summary:       "Drive Cubase from an AI client.",
 		Homepage:      "https://github.com/hedidjs/cubase-mcp",
 		ReadmeURL:     "https://raw.githubusercontent.com/hedidjs/cubase-mcp/main/README.md",
-		Transport:     "docs-only",
 		ManualInstall: "git clone the repo and configure a virtual-MIDI port in Cubase.",
 	}
 }
 
-// TestMarketplaceInstall_DocsOnly_HubRefused pins the S4 install guard: a
-// transport:"docs-only" row is refused with 400 DOCS_ONLY_NOT_INSTALLABLE in HUB
-// mode, BEFORE any port pick / name presence / manifest create. The pointer text
-// rides the body so the operator/API caller sees the manual-install steps.
+// TestMarketplaceInstall_DocsOnly_HubRefused pins the S4 install guard for HUB
+// mode: a docs_only id is NOT in entries[] (LoadEntry found=false), so the handler
+// consults LoadDocsOnly and refuses with 400 DOCS_ONLY_NOT_INSTALLABLE + the pointer
+// text — BEFORE any port pick / name presence / manifest create. None of the install
+// seams may be touched.
 func TestMarketplaceInstall_DocsOnly_HubRefused(t *testing.T) {
-	loader := &fakeMarketplaceEntryLoader{entry: docsOnlyEntry("cubase"), found: true}
+	loader := &fakeMarketplaceEntryLoader{
+		// Not an installable entry...
+		entry: nil, found: false,
+		// ...but it IS a docs_only pointer.
+		docsEntry: docsOnlyTestEntry("cubase"), docsFound: true,
+	}
 	picker := &fakeGlobalPortPicker{}
-	presence := &fakeServerNamePresence{}
 	creator := &fakeManifestCreator{}
 	installer := &fakeInstaller{}
-	s := newMarketplaceInstallTestServer(loader, picker, presence, &fakeDirectClientWriter{}, creator, installer)
+	s := newMarketplaceInstallTestServer(loader, picker, &fakeServerNamePresence{}, &fakeDirectClientWriter{}, creator, installer)
 
 	rec := postInstall(t, s, `{"id":"cubase","mode":"hub"}`, "same-origin")
 	if rec.Code != http.StatusBadRequest {
@@ -50,27 +54,24 @@ func TestMarketplaceInstall_DocsOnly_HubRefused(t *testing.T) {
 	if body.Code != "DOCS_ONLY_NOT_INSTALLABLE" {
 		t.Errorf("code = %q, want DOCS_ONLY_NOT_INSTALLABLE", body.Code)
 	}
-	// The pointer text rides the body (so the caller sees where to go).
 	if !strings.Contains(body.Error, "DOCS-ONLY pointer") {
 		t.Errorf("error body = %q, want it to carry the pointer text", body.Error)
 	}
-	// NONE of the install seams may have been touched — a docs-only row can never
-	// produce a manifest/daemon/client write.
-	if picker.called {
-		t.Error("port picker must NOT be called for a docs-only row")
+	if !loader.docsCalled || loader.docsSeenID != "cubase" {
+		t.Errorf("LoadDocsOnly not consulted for the not-found entry id (docsCalled=%v seenID=%q)", loader.docsCalled, loader.docsSeenID)
 	}
-	if creator.called {
-		t.Error("manifest creator must NOT be called for a docs-only row")
-	}
-	if installer.called {
-		t.Error("installer must NOT be called for a docs-only row")
+	if picker.called || creator.called || installer.called {
+		t.Errorf("install seams must NOT be touched for a docs_only row (picker=%v creator=%v installer=%v)", picker.called, creator.called, installer.called)
 	}
 }
 
 // TestMarketplaceInstall_DocsOnly_DirectRefused pins the same guard for DIRECT
-// mode: a docs-only row never reaches the direct client-config writer.
+// mode: a docs_only id never reaches the direct client-config writer.
 func TestMarketplaceInstall_DocsOnly_DirectRefused(t *testing.T) {
-	loader := &fakeMarketplaceEntryLoader{entry: docsOnlyEntry("cubase"), found: true}
+	loader := &fakeMarketplaceEntryLoader{
+		entry: nil, found: false,
+		docsEntry: docsOnlyTestEntry("cubase"), docsFound: true,
+	}
 	writer := &fakeDirectClientWriter{}
 	s := newMarketplaceInstallTestServer(loader, &fakeGlobalPortPicker{}, &fakeServerNamePresence{}, writer, &fakeManifestCreator{}, &fakeInstaller{})
 
@@ -88,6 +89,26 @@ func TestMarketplaceInstall_DocsOnly_DirectRefused(t *testing.T) {
 		t.Errorf("code = %q, want DOCS_ONLY_NOT_INSTALLABLE", body.Code)
 	}
 	if writer.called {
-		t.Error("direct client writer must NOT be called for a docs-only row")
+		t.Error("direct client writer must NOT be called for a docs_only row")
+	}
+}
+
+// TestMarketplaceInstall_UnknownId_Still404 proves the guard is precise: an id in
+// NEITHER entries[] nor docs_only[] still returns 404 ENTRY_NOT_FOUND (not a
+// docs-only refusal).
+func TestMarketplaceInstall_UnknownId_Still404(t *testing.T) {
+	loader := &fakeMarketplaceEntryLoader{entry: nil, found: false, docsEntry: nil, docsFound: false}
+	s := newMarketplaceInstallTestServer(loader, &fakeGlobalPortPicker{}, &fakeServerNamePresence{}, &fakeDirectClientWriter{}, &fakeManifestCreator{}, &fakeInstaller{})
+
+	rec := postInstall(t, s, `{"id":"nope","mode":"hub"}`, "same-origin")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%q", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Code != "ENTRY_NOT_FOUND" {
+		t.Errorf("code = %q, want ENTRY_NOT_FOUND", body.Code)
 	}
 }

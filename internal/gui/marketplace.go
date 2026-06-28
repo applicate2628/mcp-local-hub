@@ -32,7 +32,11 @@ const defaultMarketplaceRegistryURL = "https://raw.githubusercontent.com/applica
 // the handler never 500s the Catalog screen — a marketplace fetch failure
 // is a degraded-but-usable state, not an error.
 type marketplaceLister interface {
-	MarketplaceEntries(ctx context.Context) ([]api.MarketplaceEntry, error)
+	// MarketplaceEntries returns BOTH the installable entries[] and the separate
+	// top-level docs_only[] pointer rows (S4), so the browse handler can render both
+	// in one round-trip. A fetch/cache miss returns (nil, nil, err) and the handler
+	// degrades to empty arrays.
+	MarketplaceEntries(ctx context.Context) ([]api.MarketplaceEntry, []api.DocsOnlyEntry, error)
 }
 
 // realMarketplaceLister is the production adapter for GET /api/marketplace.
@@ -43,12 +47,12 @@ type marketplaceLister interface {
 // transient registry outage never breaks the page.
 type realMarketplaceLister struct{}
 
-func (realMarketplaceLister) MarketplaceEntries(ctx context.Context) ([]api.MarketplaceEntry, error) {
+func (realMarketplaceLister) MarketplaceEntries(ctx context.Context) ([]api.MarketplaceEntry, []api.DocsOnlyEntry, error) {
 	cat, _, err := api.LoadMarketplaceCatalog(ctx, defaultMarketplaceRegistryURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return cat.Entries, nil
+	return cat.Entries, cat.DocsOnly, nil
 }
 
 // marketplaceRefresher is the pin-point subset backing POST
@@ -59,7 +63,10 @@ func (realMarketplaceLister) MarketplaceEntries(ctx context.Context) ([]api.Mark
 // marketplace_test.go exercise the handler without a live network
 // fetch, the same idiom as marketplaceLister.
 type marketplaceRefresher interface {
-	RefreshMarketplaceEntries(ctx context.Context) ([]api.MarketplaceEntry, error)
+	// RefreshMarketplaceEntries returns BOTH the installable entries[] and the
+	// separate top-level docs_only[] pointer rows (S4) after a force-refresh, so the
+	// refresh body carries the docs_only rows too (matching the GET browse shape).
+	RefreshMarketplaceEntries(ctx context.Context) ([]api.MarketplaceEntry, []api.DocsOnlyEntry, error)
 }
 
 // RefreshMarketplaceEntries reuses api.RefreshMarketplaceCatalog — the
@@ -68,12 +75,12 @@ type marketplaceRefresher interface {
 // api.RefreshMarketplaceCatalogWithClient). It is implemented on the
 // same realMarketplaceLister adapter so production wires one struct for
 // both the GET (cached) and POST (force-refresh) marketplace routes.
-func (realMarketplaceLister) RefreshMarketplaceEntries(ctx context.Context) ([]api.MarketplaceEntry, error) {
+func (realMarketplaceLister) RefreshMarketplaceEntries(ctx context.Context) ([]api.MarketplaceEntry, []api.DocsOnlyEntry, error) {
 	cat, err := api.RefreshMarketplaceCatalog(ctx, defaultMarketplaceRegistryURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return cat.Entries, nil
+	return cat.Entries, cat.DocsOnly, nil
 }
 
 // marketplaceEntry is the read-only wire shape for one marketplace catalog
@@ -120,19 +127,24 @@ type marketplaceEntry struct {
 	// prior conservative behavior. New frontends read probe_state. Remove next
 	// release.
 	ProbePasses bool `json:"probe_passes"`
-	// Homepage is the entry's homepage URL — already on the browse DTO for the
-	// installable rows; a docs-only POINTER row leans on it as the operator's
-	// primary destination, so the frontend always renders it (when http(s)).
-	// (Re-declared here next to the docs-only fields it pairs with; the field set
-	// above already projects Homepage.)
-	//
-	// ReadmeURL + ManualInstall (S4) are the docs-only pointer payload: the raw
-	// README link and the verbatim manual-setup steps. They are projected ONLY for
-	// the read wire so the Catalog can render a "view setup" block for a
-	// transport:"docs-only" row without a second round-trip. omitempty so an
-	// installable row's browse JSON is byte-identical to before.
-	ReadmeURL     string `json:"readme_url,omitempty"`
-	ManualInstall string `json:"manual_install,omitempty"`
+}
+
+// marketplaceDocsOnlyEntry (S4) is the read-only wire shape for ONE manual-install
+// POINTER row from the catalog's separate top-level docs_only[] array. It carries
+// the pointer payload the Catalog renders (id/name/summary/categories/homepage +
+// the raw README link + the verbatim manual_install steps) and DELIBERATELY no
+// transport/probe/install fields — a docs_only row is install-inert, so the
+// frontend renders a DOCS-ONLY badge + readme link + a "view setup" block and never
+// an install affordance. Defined here (not by serializing api.DocsOnlyEntry) so the
+// GUI HTTP contract owns its own JSON shape.
+type marketplaceDocsOnlyEntry struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Summary       string   `json:"summary"`
+	Categories    []string `json:"categories"`
+	Homepage      string   `json:"homepage"`
+	ReadmeURL     string   `json:"readme_url,omitempty"`
+	ManualInstall string   `json:"manual_install,omitempty"`
 }
 
 type marketplaceListResponse struct {
@@ -140,6 +152,11 @@ type marketplaceListResponse struct {
 	// map over it without a null guard. A fetch/cache miss is 200
 	// {"entries":[]}, the same "empty is normal" posture as /api/catalog.
 	Entries []marketplaceEntry `json:"entries"`
+	// DocsOnly (S4) is the parallel array of manual-install POINTER rows from the
+	// catalog's separate top-level docs_only[] array. Always a JSON array (never
+	// null) so the frontend maps without a guard; empty when the catalog carries no
+	// docs_only rows (every pre-S4 catalog).
+	DocsOnly []marketplaceDocsOnlyEntry `json:"docs_only"`
 }
 
 // registerMarketplaceRoutes wires GET /api/marketplace onto the server's
@@ -164,15 +181,19 @@ func registerMarketplaceRoutes(s *Server) {
 		// only a TTL-expired entry forces the network round-trip.
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
-		entries, err := s.marketplaceLister.MarketplaceEntries(ctx)
+		entries, docsOnly, err := s.marketplaceLister.MarketplaceEntries(ctx)
 		if err != nil {
-			// Best-effort: log + return an empty array (200), NEVER 500.
+			// Best-effort: log + return empty arrays (200), NEVER 500.
 			// A degraded marketplace must not break the Catalog screen.
 			log.Printf("/api/marketplace: %v", err)
 			entries = nil
+			docsOnly = nil
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(marketplaceListResponse{Entries: projectMarketplaceEntries(entries)})
+		_ = json.NewEncoder(w).Encode(marketplaceListResponse{
+			Entries:  projectMarketplaceEntries(entries),
+			DocsOnly: projectMarketplaceDocsOnly(docsOnly),
+		})
 	}))
 
 	// POST /api/marketplace/refresh (roadmap §B) forces an unconditional
@@ -197,7 +218,7 @@ func registerMarketplaceRoutes(s *Server) {
 		// request goroutine indefinitely.
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
-		entries, err := s.marketplaceRefresher.RefreshMarketplaceEntries(ctx)
+		entries, docsOnly, err := s.marketplaceRefresher.RefreshMarketplaceEntries(ctx)
 		if err != nil {
 			// Log the raw error server-side; return a sanitized envelope so
 			// the upstream fetch/network detail does not leak into the body.
@@ -206,7 +227,10 @@ func registerMarketplaceRoutes(s *Server) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(marketplaceListResponse{Entries: projectMarketplaceEntries(entries)})
+		_ = json.NewEncoder(w).Encode(marketplaceListResponse{
+			Entries:  projectMarketplaceEntries(entries),
+			DocsOnly: projectMarketplaceDocsOnly(docsOnly),
+		})
 	}))
 }
 
@@ -253,9 +277,32 @@ func projectMarketplaceEntries(entries []api.MarketplaceEntry) []marketplaceEntr
 			// un-regenerated older bundle degrades safely.
 			ProbeState:  string(probeState),
 			ProbePasses: probeState == api.ProbeBrowseReady,
-			// S4 docs-only pointer payload (omitempty — empty on installable rows).
-			ReadmeURL:     e.ReadmeURL,
-			ManualInstall: e.ManualInstall,
+		})
+	}
+	return rows
+}
+
+// projectMarketplaceDocsOnly maps the catalog's separate top-level docs_only[]
+// rows (S4) onto the read-only browse pointer wire shape, shared by GET
+// /api/marketplace and POST /api/marketplace/refresh. It carries the pointer
+// payload (id/name/summary/categories/homepage/readme/manual steps) and normalizes
+// a nil Categories to [] so the JSON is never null. The returned slice is always
+// non-nil so an empty (or pre-S4) catalog serializes docs_only as [], not null.
+func projectMarketplaceDocsOnly(docsOnly []api.DocsOnlyEntry) []marketplaceDocsOnlyEntry {
+	rows := make([]marketplaceDocsOnlyEntry, 0, len(docsOnly))
+	for _, d := range docsOnly {
+		cats := d.Categories
+		if cats == nil {
+			cats = []string{}
+		}
+		rows = append(rows, marketplaceDocsOnlyEntry{
+			ID:            d.ID,
+			Name:          d.Name,
+			Summary:       d.Summary,
+			Categories:    cats,
+			Homepage:      d.Homepage,
+			ReadmeURL:     d.ReadmeURL,
+			ManualInstall: d.ManualInstall,
 		})
 	}
 	return rows

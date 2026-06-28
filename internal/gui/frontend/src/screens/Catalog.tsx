@@ -51,19 +51,12 @@ interface MarketplaceEntry {
   summary: string;
   categories: string[];
   homepage: string;
-  // "stdio" | "http" | "docs-only" — the install-mode discriminator. A
-  // "docs-only" row is a manual-install POINTER: the install affordances are
-  // suppressed entirely and the readme link + manual_install steps render
-  // instead (the hub never installs it). An older backend that omits it (or a
-  // hostile/partial body) reads as "" and falls back to the safe HUB-ONLY
-  // affordance.
+  // "stdio" | "http" — the install-mode discriminator. An older backend that
+  // omits it (or a hostile/partial body) reads as "" and falls back to the safe
+  // HUB-ONLY affordance. NOTE: docs-only POINTER rows are NOT entries — they
+  // arrive in the SEPARATE docs_only[] array (S4, bot #446 P1), so an installable
+  // entry never carries the docs-only discriminator.
   transport: string;
-  // ReadmeURL + ManualInstall (S4): the docs-only pointer payload — the raw
-  // README link and the verbatim manual-setup steps. Present only on a
-  // transport:"docs-only" row; optional on every other row (the installable
-  // rows omit them). Rendered in the docs-only "Manual install" block.
-  readme_url?: string;
-  manual_install?: string;
   // Availability (D-3, Tier-0): "" | "ready" | "watch" | "disabled-until-probe".
   // A "watch" / "disabled-until-probe" row is greyed and labeled "probe to
   // enable" — its host app/tool isn't detected yet. An older backend that omits
@@ -115,12 +108,30 @@ function resolveProbeState(entry: MarketplaceEntry): ProbeBrowseState {
   }
 }
 
+// MarketplaceDocsOnlyEntry mirrors marketplaceDocsOnlyEntry in
+// internal/gui/marketplace.go — ONE manual-install POINTER row from the catalog's
+// SEPARATE top-level docs_only[] array (S4, bot #446 P1). It carries the pointer
+// payload (id/name/summary/categories/homepage + the raw README link + the verbatim
+// manual_install steps) and NO transport/probe/install fields — the Catalog renders
+// a DOCS-ONLY badge + readme link + a "view setup" block, never an install
+// affordance.
+interface MarketplaceDocsOnlyEntry {
+  id: string;
+  name: string;
+  summary: string;
+  categories: string[];
+  homepage: string;
+  readme_url?: string;
+  manual_install?: string;
+}
+
 // Mirrors marketplaceListResponse in internal/gui/marketplace.go — the GET
-// /api/marketplace body shape ({ "entries": [{id, name, summary, …}, …] }).
-// A fetch/cache miss is a best-effort 200 {"entries":[]} (the backend never
-// 500s the page), so an empty list is the normal degraded state.
+// /api/marketplace body shape ({ "entries": [...], "docs_only": [...] }).
+// A fetch/cache miss is a best-effort 200 {"entries":[],"docs_only":[]} (the
+// backend never 500s the page), so empty lists are the normal degraded state.
 interface MarketplaceListResponse {
   entries: MarketplaceEntry[];
+  docs_only: MarketplaceDocsOnlyEntry[];
 }
 
 // PerServerInstall tracks the install button lifecycle for one catalog
@@ -159,6 +170,10 @@ const UNINSTALL_IDLE: UninstallState = { phase: "idle" };
 export function CatalogScreen() {
   const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null);
   const [marketplace, setMarketplace] = useState<MarketplaceEntry[]>([]);
+  // S4: the docs-only POINTER rows arrive in a SEPARATE docs_only[] array, kept in
+  // its own state slice (not folded into `marketplace`) so the install entries and
+  // the manual-install pointers stay distinct shapes end-to-end.
+  const [docsOnly, setDocsOnly] = useState<MarketplaceDocsOnlyEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   // installedServers is the set of server names that already appear in
   // /api/status. The status array carries one row per daemon, so multiple
@@ -242,9 +257,15 @@ export function CatalogScreen() {
               availability: typeof e.availability === "string" ? e.availability : "",
             }));
             setMarketplace(rows);
+            // S4: docs_only is a SEPARATE array. An older backend (pre-S4) omits
+            // it entirely → reads as [] → no pointer rows render (graceful).
+            setDocsOnly(Array.isArray(mp.docs_only) ? mp.docs_only : []);
           }
         } catch {
-          if (!cancelled) setMarketplace([]);
+          if (!cancelled) {
+            setMarketplace([]);
+            setDocsOnly([]);
+          }
         }
         // Client-capabilities load is also separate + non-fatal: the
         // direct-install multiselect needs the backend's URL-native client
@@ -535,9 +556,13 @@ export function CatalogScreen() {
 
       <MarketplaceSection
         entries={marketplace}
+        docsOnly={docsOnly}
         installedServers={installedServers}
         directClients={directClients}
-        onRefreshed={setMarketplace}
+        onRefreshed={(rows, docs) => {
+          setMarketplace(rows);
+          setDocsOnly(docs);
+        }}
       />
     </section>
   );
@@ -734,6 +759,14 @@ type MarketplaceInstallState =
 
 const MARKETPLACE_IDLE: MarketplaceInstallState = { phase: "idle" };
 
+// MarketplaceRow is the unified discriminated row the theme grouper folds: either
+// an installable entry (rendered as MarketplaceCard) or an S4 docs-only pointer
+// (rendered as MarketplaceDocsOnlyCard). Both carry `categories` + `name`, so they
+// group under the same coarse themes (PR #443).
+type MarketplaceRow =
+  | { kind: "entry"; entry: MarketplaceEntry }
+  | { kind: "docs-only"; docs: MarketplaceDocsOnlyEntry };
+
 // MarketplaceSection renders the curated marketplace registry as a one-click
 // Store. Each entry installs straight from the GUI per the two-tier rule:
 // stdio entries get a single "Add to hub" action; http entries additionally
@@ -742,11 +775,17 @@ const MARKETPLACE_IDLE: MarketplaceInstallState = { phase: "idle" };
 // notice rather than nothing, so operators know the section exists.
 function MarketplaceSection({
   entries,
+  docsOnly,
   installedServers,
   directClients,
   onRefreshed,
 }: {
   entries: MarketplaceEntry[];
+  // S4 manual-install POINTER rows (the catalog's separate docs_only[] array).
+  // Rendered alongside the installable entries — grouped under the same themes —
+  // but as a DOCS-ONLY pointer card (badge + readme link + setup steps), never an
+  // install affordance.
+  docsOnly: MarketplaceDocsOnlyEntry[];
   // The backend-derived URL-native client set the direct-install multiselect
   // may offer (directInstallableClients of the /api/client-capabilities map).
   // Empty until capabilities load; a relay-stdio client is never in it, so
@@ -757,10 +796,10 @@ function MarketplaceSection({
   // already installed, so we render an "Installed" badge instead of an
   // install affordance — never offer to install an already-running server.
   installedServers: Set<string>;
-  // Called with the freshly-fetched entries after a successful force-refresh
-  // so the parent's marketplace state re-renders the section with the updated
-  // registry (the refresh bypasses the 24h TTL + ETag and rewrites the cache).
-  onRefreshed: (entries: MarketplaceEntry[]) => void;
+  // Called with the freshly-fetched entries + docs_only rows after a successful
+  // force-refresh so the parent's marketplace state re-renders the section with the
+  // updated registry (the refresh bypasses the 24h TTL + ETag and rewrites the cache).
+  onRefreshed: (entries: MarketplaceEntry[], docsOnly: MarketplaceDocsOnlyEntry[]) => void;
 }) {
   // Per-row install lifecycle. A row absent from the map is "idle".
   const [states, setStates] = useState<Record<string, MarketplaceInstallState>>({});
@@ -786,12 +825,12 @@ function MarketplaceSection({
     if (refreshState.phase === "refreshing") return;
     setRefreshState({ phase: "refreshing" });
     try {
-      const rows = await refreshMarketplace();
+      const { entries: rows, docsOnly: docs } = await refreshMarketplace();
       if (!mountedRef.current) return;
-      // The api helper already normalizes `transport` to a string, so the
-      // entries are safe to hand straight to the parent (same shape the GET
-      // load path produces).
-      onRefreshed(rows);
+      // The api helper already normalizes the entries (transport → string) and
+      // carries the docs_only[] pointer rows through, so both are safe to hand
+      // straight to the parent (same shape the GET load path produces).
+      onRefreshed(rows, docs);
       setRefreshState({ phase: "idle" });
     } catch (err) {
       if (!mountedRef.current) return;
@@ -803,21 +842,25 @@ function MarketplaceSection({
     setStates((prev) => ({ ...prev, [id]: next }));
   }
 
-  // Group the flat registry rows into coarse-theme sections (Engineering & CAD,
-  // Development & Code, Data & Office, Research & Docs, Music & Audio,
-  // Utilities, Other) over the existing per-entry `categories` field. This is a
-  // pure render REORGANIZATION (flat → grouped); each row's install affordance,
-  // probe-state, two-tier rule, and ARIA are untouched. An empty entry list
-  // yields zero sections, so the empty-state card below renders instead.
-  const themeSections = useMemo(
-    () =>
-      groupByTheme(
-        entries,
-        (e) => e.categories ?? [],
-        (e) => e.name,
-      ),
-    [entries],
-  );
+  // Group BOTH the installable entries AND the S4 docs-only pointer rows into
+  // coarse-theme sections (Engineering & CAD, Development & Code, Data & Office,
+  // Research & Docs, Music & Audio, Utilities, Other) over the per-row `categories`
+  // field. A unified discriminated row carries either an install entry or a pointer,
+  // so a docs-only pointer groups under the SAME theme as the entries (PR #443) and
+  // renders its own pointer card. This is a pure render REORGANIZATION; each row's
+  // affordance/probe-state/two-tier rule/ARIA is untouched. Empty entries + empty
+  // docs_only yields zero sections, so the empty-state card below renders instead.
+  const themeSections = useMemo(() => {
+    const rows: MarketplaceRow[] = [
+      ...entries.map((e): MarketplaceRow => ({ kind: "entry", entry: e })),
+      ...docsOnly.map((d): MarketplaceRow => ({ kind: "docs-only", docs: d })),
+    ];
+    return groupByTheme(
+      rows,
+      (r) => (r.kind === "entry" ? r.entry.categories ?? [] : r.docs.categories ?? []),
+      (r) => (r.kind === "entry" ? r.entry.name : r.docs.name),
+    );
+  }, [entries, docsOnly]);
 
   // runInstall is the shared POST driver for both hub + direct modes. `name`
   // carries the suggested-name retry for the hub 409 path; `clients` is the
@@ -888,7 +931,7 @@ function MarketplaceSection({
           {refreshState.message}
         </p>
       )}
-      {entries.length === 0 ? (
+      {entries.length === 0 && docsOnly.length === 0 ? (
         <p class="empty-state" data-testid="catalog-marketplace-empty">
           No marketplace entries available right now.
         </p>
@@ -897,7 +940,9 @@ function MarketplaceSection({
         // and its own cards grid; themes with no members are dropped by
         // groupByTheme so no empty headers appear. The catalog-marketplace-cards
         // testid is kept on a wrapper so existing coverage that counts all
-        // marketplace cards still resolves across the grouped sections.
+        // marketplace cards still resolves across the grouped sections. Each row is
+        // either an installable entry (MarketplaceCard) or an S4 docs-only pointer
+        // (MarketplaceDocsOnlyCard).
         <div data-testid="catalog-marketplace-cards">
           {themeSections.map((section) => (
             <section
@@ -913,20 +958,26 @@ function MarketplaceSection({
                 {section.theme}
               </h3>
               <div class="cards" data-testid={`catalog-theme-cards-${section.theme}`}>
-                {section.entries.map((entry) => (
-                  <MarketplaceCard
-                    key={entry.id}
-                    entry={entry}
-                    // An entry is already installed if /api/status reports a daemon
-                    // whose server name matches the entry id OR its display name
-                    // (e.g. the shipped `fetch` hub daemon is also a catalog entry —
-                    // we must not offer to install it as "fetch-2").
-                    installed={installedServers.has(entry.id) || installedServers.has(entry.name)}
-                    state={states[entry.id] ?? MARKETPLACE_IDLE}
-                    directClients={directClients}
-                    onInstall={runInstall}
-                  />
-                ))}
+                {section.entries.map((row) =>
+                  row.kind === "entry" ? (
+                    <MarketplaceCard
+                      key={row.entry.id}
+                      entry={row.entry}
+                      // An entry is already installed if /api/status reports a daemon
+                      // whose server name matches the entry id OR its display name
+                      // (e.g. the shipped `fetch` hub daemon is also a catalog entry —
+                      // we must not offer to install it as "fetch-2").
+                      installed={
+                        installedServers.has(row.entry.id) || installedServers.has(row.entry.name)
+                      }
+                      state={states[row.entry.id] ?? MARKETPLACE_IDLE}
+                      directClients={directClients}
+                      onInstall={runInstall}
+                    />
+                  ) : (
+                    <MarketplaceDocsOnlyCard key={row.docs.id} entry={row.docs} />
+                  ),
+                )}
               </div>
             </section>
           ))}
@@ -964,12 +1015,6 @@ function MarketplaceCard({
   ) => void;
 }) {
   const isHttp = entry.transport === "http";
-  // S4: a docs-only row is a manual-install POINTER — the hub never installs it.
-  // It suppresses EVERY install affordance (hub/direct/probe) and renders a
-  // distinct "DOCS-ONLY" badge + a "Manual install" block (the readme link + the
-  // verbatim manual_install steps) instead. Decided BEFORE the probe-state branch
-  // so a docs-only row never reaches the install/probe affordances.
-  const isDocsOnly = entry.transport === "docs-only";
   // D-3 (Tier-0, mirror-gate): the TRI-STATE browse verdict drives the affordance.
   // "ready" and "inert-unknown" both show the install block — "ready" is detected
   // now, and "inert-unknown" carries a files[]/path-shaped probe the browse path
@@ -1021,13 +1066,12 @@ function MarketplaceCard({
         </p>
       )}
 
-      {/* Install affordance. stdio → hub only; http → hub + direct; docs-only →
-          NO install (a manual-install pointer). But FIRST: a server already
-          running per /api/status (e.g. the shipped `fetch` daemon, which is also a
-          catalog entry) shows an "Installed" badge and NO install affordance — we
-          must never offer to re-install it (which would hit NAME_CONFLICT →
-          suggest fetch-2). Then: a docs-only row renders its pointer block and
-          NEVER any install/probe affordance. */}
+      {/* Install affordance. stdio → hub only; http → hub + direct. (docs-only
+          POINTER rows are NOT entries — they render via MarketplaceDocsOnlyCard, so
+          this card never handles them.) FIRST: a server already running per
+          /api/status (e.g. the shipped `fetch` daemon, which is also a catalog
+          entry) shows an "Installed" badge and NO install affordance — we must never
+          offer to re-install it (which would hit NAME_CONFLICT → suggest fetch-2). */}
       {installed ? (
         <span
           class="lsp-chip lsp-chip-via-hub"
@@ -1035,52 +1079,6 @@ function MarketplaceCard({
         >
           installed
         </span>
-      ) : isDocsOnly ? (
-        /* S4 docs-only POINTER row: a server the hub never installs (immature,
-           git-clone-only, macOS-only, or a LAN-bind risk). NO "Add to hub" /
-           "Install directly" affordance and NO probe badge — instead a distinct
-           "DOCS-ONLY" / "manual install" badge, the readme link, and a collapsible
-           "view setup" block carrying the verbatim manual_install steps. */
-        <div
-          class="catalog-marketplace-docs-only"
-          data-testid={`catalog-marketplace-docs-only-${entry.id}`}
-        >
-          <span
-            class="lsp-chip catalog-marketplace-docs-only-badge"
-            data-testid={`catalog-marketplace-docs-only-badge-${entry.id}`}
-            title="This server isn't one-click installable through mcphub — follow the manual setup steps below."
-          >
-            DOCS-ONLY · manual install
-          </span>
-          {/* readme link — UNTRUSTED external registry value, so only render it
-              when it is an http(s) URL (same guard as the homepage link). */}
-          {entry.readme_url && /^https?:\/\//i.test(entry.readme_url) && (
-            <p class="catalog-marketplace-docs-only-readme">
-              <a
-                href={entry.readme_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                data-testid={`catalog-marketplace-docs-only-readme-${entry.id}`}
-              >
-                Readme
-              </a>
-            </p>
-          )}
-          {entry.manual_install && (
-            <details
-              class="catalog-marketplace-docs-only-setup"
-              data-testid={`catalog-marketplace-docs-only-setup-${entry.id}`}
-            >
-              <summary>View setup steps</summary>
-              <p
-                class="catalog-marketplace-docs-only-steps"
-                data-testid={`catalog-marketplace-docs-only-steps-${entry.id}`}
-              >
-                {entry.manual_install}
-              </p>
-            </details>
-          )}
-        </div>
       ) : state.phase === "installed" ? (
         <p
           class="catalog-marketplace-status catalog-marketplace-status-ok"
@@ -1287,6 +1285,94 @@ function MarketplaceCard({
             target="_blank"
             rel="noopener noreferrer"
             data-testid={`catalog-marketplace-homepage-${entry.id}`}
+          >
+            Homepage
+          </a>
+        </p>
+      )}
+    </div>
+  );
+}
+
+// MarketplaceDocsOnlyCard renders ONE S4 manual-install POINTER row (from the
+// catalog's separate docs_only[] array): name + summary + categories, a distinct
+// DOCS-ONLY badge, the readme link, and a collapsible "view setup" block with the
+// verbatim manual_install steps. It NEVER renders an install affordance — a
+// docs_only row is a server the hub never installs (immature, git-clone-only,
+// macOS-only, or a LAN-bind risk). homepage + readme_url come from an UNTRUSTED
+// registry, so each link renders only when it is an http(s) URL (same guard as the
+// entry card's homepage link).
+function MarketplaceDocsOnlyCard({ entry }: { entry: MarketplaceDocsOnlyEntry }) {
+  return (
+    <div
+      class="card catalog-card catalog-marketplace-card catalog-marketplace-docs-only"
+      data-testid={`catalog-marketplace-docs-only-${entry.id}`}
+    >
+      <div class="card-title">
+        <span>{entry.name}</span>
+        {entry.summary && (
+          <InfoTip
+            label={`About ${entry.name}`}
+            text={entry.summary}
+            data-testid={`catalog-marketplace-docs-only-summary-${entry.id}`}
+          />
+        )}
+      </div>
+      {entry.categories.length > 0 && (
+        <p class="catalog-marketplace-categories">
+          {entry.categories.map((c) => (
+            <span class="lsp-chip" key={c}>
+              {c}
+            </span>
+          ))}
+        </p>
+      )}
+
+      <span
+        class="lsp-chip catalog-marketplace-docs-only-badge"
+        data-testid={`catalog-marketplace-docs-only-badge-${entry.id}`}
+        title="This server isn't one-click installable through mcphub — follow the manual setup steps below."
+      >
+        DOCS-ONLY · manual install
+      </span>
+
+      {/* readme link — UNTRUSTED external registry value, so only render it when it
+          is an http(s) URL (same guard as the homepage link below). */}
+      {entry.readme_url && /^https?:\/\//i.test(entry.readme_url) && (
+        <p class="catalog-marketplace-docs-only-readme">
+          <a
+            href={entry.readme_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid={`catalog-marketplace-docs-only-readme-${entry.id}`}
+          >
+            Readme
+          </a>
+        </p>
+      )}
+
+      {entry.manual_install && (
+        <details
+          class="catalog-marketplace-docs-only-setup"
+          data-testid={`catalog-marketplace-docs-only-setup-${entry.id}`}
+        >
+          <summary>View setup steps</summary>
+          <p
+            class="catalog-marketplace-docs-only-steps"
+            data-testid={`catalog-marketplace-docs-only-steps-${entry.id}`}
+          >
+            {entry.manual_install}
+          </p>
+        </details>
+      )}
+
+      {/^https?:\/\//i.test(entry.homepage) && (
+        <p class="catalog-marketplace-homepage">
+          <a
+            href={entry.homepage}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid={`catalog-marketplace-docs-only-homepage-${entry.id}`}
           >
             Homepage
           </a>
