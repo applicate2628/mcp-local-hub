@@ -7,6 +7,7 @@ import {
 } from "../api";
 import type { MarketplaceInstallResult, ReadinessReport } from "../api";
 import { directInstallableClients } from "../lib/routing";
+import { groupByTheme } from "../lib/catalog-themes";
 import { InfoTip } from "../components/InfoTip";
 import { ReadinessPanel, readinessBlockerCount } from "../components/ReadinessPanel";
 import { AddSecretModal } from "../components/AddSecretModal";
@@ -793,6 +794,22 @@ function MarketplaceSection({
     setStates((prev) => ({ ...prev, [id]: next }));
   }
 
+  // Group the flat registry rows into coarse-theme sections (Engineering & CAD,
+  // Development & Code, Data & Office, Research & Docs, Music & Audio,
+  // Utilities, Other) over the existing per-entry `categories` field. This is a
+  // pure render REORGANIZATION (flat → grouped); each row's install affordance,
+  // probe-state, two-tier rule, and ARIA are untouched. An empty entry list
+  // yields zero sections, so the empty-state card below renders instead.
+  const themeSections = useMemo(
+    () =>
+      groupByTheme(
+        entries,
+        (e) => e.categories ?? [],
+        (e) => e.name,
+      ),
+    [entries],
+  );
+
   // runInstall is the shared POST driver for both hub + direct modes. `name`
   // carries the suggested-name retry for the hub 409 path; `clients` is the
   // direct-mode target list. It maps the discriminated api result onto the
@@ -867,20 +884,42 @@ function MarketplaceSection({
           No marketplace entries available right now.
         </p>
       ) : (
-        <div class="cards" data-testid="catalog-marketplace-cards">
-          {entries.map((entry) => (
-            <MarketplaceCard
-              key={entry.id}
-              entry={entry}
-              // An entry is already installed if /api/status reports a daemon
-              // whose server name matches the entry id OR its display name
-              // (e.g. the shipped `fetch` hub daemon is also a catalog entry —
-              // we must not offer to install it as "fetch-2").
-              installed={installedServers.has(entry.id) || installedServers.has(entry.name)}
-              state={states[entry.id] ?? MARKETPLACE_IDLE}
-              directClients={directClients}
-              onInstall={runInstall}
-            />
+        // Grouped-by-theme render. Each non-empty theme gets a section header
+        // and its own cards grid; themes with no members are dropped by
+        // groupByTheme so no empty headers appear. The catalog-marketplace-cards
+        // testid is kept on a wrapper so existing coverage that counts all
+        // marketplace cards still resolves across the grouped sections.
+        <div data-testid="catalog-marketplace-cards">
+          {themeSections.map((section) => (
+            <section
+              class="catalog-theme-section"
+              key={section.theme}
+              data-testid={`catalog-theme-section-${section.theme}`}
+              aria-label={section.theme}
+            >
+              <h3
+                class="catalog-theme-header"
+                data-testid={`catalog-theme-header-${section.theme}`}
+              >
+                {section.theme}
+              </h3>
+              <div class="cards" data-testid={`catalog-theme-cards-${section.theme}`}>
+                {section.entries.map((entry) => (
+                  <MarketplaceCard
+                    key={entry.id}
+                    entry={entry}
+                    // An entry is already installed if /api/status reports a daemon
+                    // whose server name matches the entry id OR its display name
+                    // (e.g. the shipped `fetch` hub daemon is also a catalog entry —
+                    // we must not offer to install it as "fetch-2").
+                    installed={installedServers.has(entry.id) || installedServers.has(entry.name)}
+                    state={states[entry.id] ?? MARKETPLACE_IDLE}
+                    directClients={directClients}
+                    onInstall={runInstall}
+                  />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       )}
