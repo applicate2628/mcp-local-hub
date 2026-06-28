@@ -487,10 +487,9 @@ func TestValidate_InstallProbe_CrossPlatformFilePathAccepted(t *testing.T) {
 	// file_globs[] carries the intentional version-agnostic SHARED-catalog patterns —
 	// the real first-batch catalog probes now live here, not in files[].
 	acceptGlob := []string{
-		`C:\ProgramData\Ableton\Live 1[0-9]*\Program\Ableton Live 1[0-9]*.exe`, // ableton (Live 10-19, any edition; excludes pre-10)
 		`C:\Program Files*\Microsoft Office\root\Office1?\EXCEL.EXE`, // excel (64-bit + (x86) C2R)
-		"/opt/app-*/bin/server",                                      // POSIX glob, also cross-platform
-		`C:\Program Files\ANSYS Inc\v*\ansys\bin\winx64\ansys*.exe`,  // ansys (v<ver> root + version-stamped exe)
+		"/opt/app-*/bin/server", // POSIX glob, also cross-platform
+		`C:\Program Files\ANSYS Inc\v*\ansys\bin\winx64\ansys*.exe`, // ansys (v<ver> root + version-stamped exe)
 	}
 	for _, f := range acceptLiteral {
 		t.Run("accept-files-"+f, func(t *testing.T) {

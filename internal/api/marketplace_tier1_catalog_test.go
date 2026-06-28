@@ -10,14 +10,12 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
-// gitSHA40 matches a full 40-hex git object name (the immutable-pin shape the
-// ableton row uses after the provenance fix). A bare PyPI version like "2.2.0"
-// does NOT match, so this also guards against a silent revert to the prior
-// hijacked-PyPI-name pin.
+// gitSHA40 matches a full 40-hex git object name. A bare PyPI version like
+// "2.2.0" does NOT match, so this guards rows that require immutable git pins.
 var gitSHA40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // tier1CatalogIDs are the Tier-1 desktop-app rows the v2 catalog appends after the
-// verbatim v1 entries. The first batch was excel/ableton/codex-mcp-server; matlab
+// verbatim v1 entries. The first batch was excel/codex-mcp-server; matlab
 // (official MathWorks Go binary, v0.11.0) and ansys (official ansys/pymapdl-mcp,
 // v0.2.1, FastMCP/stdio) extend it, and kicad (community fork oaslananka/kicad-mcp,
 // PyPI kicad-mcp-pro v3.14.1, uvx --from, MIT) is the one clean one-click EDA row.
@@ -35,8 +33,11 @@ var gitSHA40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 //
 // Five further EDA/CAD rows are DEFERRED (real MCP servers, but each needs a manual
 // git-clone+build that vendored_source.install_cmd does not execute — see
-// work-items/backlog/2026-06-24-tier3-manual-clone-mcps.md).
-var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys", "kicad", "onshape"}
+// work-items/backlog/2026-06-24-tier3-manual-clone-mcps.md). The Ableton row is
+// intentionally omitted until its required Remote Script can be loopback-bound;
+// the previously pinned upstream script listened on 0.0.0.0:9877 and exposed DAW
+// control to adjacent-network hosts.
+var tier1CatalogIDs = []string{"excel", "codex-mcp-server", "matlab", "ansys", "kicad", "onshape"}
 
 // tierMusicLocalCatalogIDs are the local-stdio music rows that gate the install on
 // a REQUIRED vault secret (required_secrets) rather than a host-app install_probe.
@@ -132,10 +133,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	// so their pin lives in the upstream-pinned readme_url / args (matlab release
 	// v0.11.0 binary; ansys uvx ==0.2.1 PyPI pin), not a vendored_source block.
 	// kicad is a community fork (oaslananka/kicad-mcp) published to PyPI, so it pins
-	// via vendored_source like excel/ableton. onshape is a community server
+	// via vendored_source like excel. onshape is a community server
 	// (altendky/onshape-mcp) published to npm, pinned via vendored_source to the
 	// v0.4.0 tag SHA.
-	for _, id := range []string{"excel", "ableton", "kicad", "onshape"} {
+	for _, id := range []string{"excel", "kicad", "onshape"} {
 		e := byID[id]
 		if e.VendoredSource == nil || strings.TrimSpace(e.VendoredSource.PinnedRef) == "" {
 			t.Fatalf("fork row %q is missing a pinned vendored_source", id)
@@ -357,7 +358,7 @@ func TestV2Tier1Rows_GenerateThenCreateDryRun(t *testing.T) {
 			// The fork rows project the pinned vendored_source; the official rows
 			// (codex, matlab, ansys) do not.
 			switch id {
-			case "excel", "ableton", "kicad", "onshape":
+			case "excel", "kicad", "onshape":
 				if m.VendoredSource == nil || strings.TrimSpace(m.VendoredSource.PinnedRef) == "" {
 					t.Fatalf("fork row %q drafted manifest lost the pinned vendored_source: %#v", id, m.VendoredSource)
 				}
@@ -449,21 +450,21 @@ func TestV2MatlabRow_ProbeRequiresMatlabOnPATH(t *testing.T) {
 
 // TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles asserts the catalog-data migration:
 // every version-agnostic glob pattern in the Tier-1 rows lives in the OPT-IN
-// file_globs[] field, NEVER files[] (which is now exact-stat-only). excel + ableton +
+// file_globs[] field, NEVER files[] (which is now exact-stat-only). excel +
 // ansys + kicad carry their patterns in file_globs[]; matlab carries none
 // (binaries-only); codex carries binaries-only. No Tier-1 row uses files[] (none
 // needs a literal path), and no file_globs[] entry is missing its absolute-path shape.
 func TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles(t *testing.T) {
 	byID := v2CatalogByID(t)
 	// Rows whose probe carries a glob pattern → must be in file_globs[].
-	wantGlobRows := map[string]bool{"excel": true, "ableton": true, "ansys": true, "kicad": true}
+	wantGlobRows := map[string]bool{"excel": true, "ansys": true, "kicad": true}
 	for id, e := range byID {
 		if e.InstallProbe == nil {
 			continue
 		}
 		p := e.InstallProbe
 		// No Tier-1 row should use files[] (no literal-path probe in this batch).
-		if id == "excel" || id == "ableton" || id == "codex-mcp-server" || id == "matlab" || id == "ansys" || id == "kicad" {
+		if id == "excel" || id == "codex-mcp-server" || id == "matlab" || id == "ansys" || id == "kicad" {
 			if len(p.Files) != 0 {
 				t.Fatalf("Tier-1 row %q uses files[] %v — version globs belong in file_globs[]; files[] is exact-stat-only", id, p.Files)
 			}
@@ -481,51 +482,14 @@ func TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles(t *testing.T) {
 	}
 }
 
-// TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact locks the
-// Ableton row's provenance-consistency invariant. The catalog must execute the
-// same immutable, reviewed upstream source it advertises in vendored_source and
-// readme_url. In particular, it must not install from the project-owned personal
-// fork used briefly as a build-fixed fork, because marketplace one-click install
-// turns this row into a long-lived daemon that executes as the local user.
-func TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact(t *testing.T) {
-	e := v2CatalogByID(t)["ableton"]
-	if e == nil {
-		t.Fatalf("v2 catalog missing the ableton row")
-	}
-
-	const wantRepo = "https://github.com/ahujasid/ableton-mcp"
-	const forbiddenFork = "https://github.com/applicate2628/ableton-mcp-extended"
-
-	vs := e.VendoredSource
-	if vs == nil {
-		t.Fatalf("ableton row lost its vendored_source")
-	}
-	if vs.Repo != wantRepo {
-		t.Fatalf("ableton vendored_source.repo = %q, want trusted upstream %q", vs.Repo, wantRepo)
-	}
-	sha := strings.TrimSpace(vs.PinnedRef)
-	if !gitSHA40.MatchString(sha) {
-		t.Fatalf("ableton vendored_source.pinned_ref = %q, want a 40-hex git SHA", sha)
-	}
-	if config.IsMovingGitRef(vs.PinnedRef) {
-		t.Fatalf("ableton pinned_ref %q is a moving ref (must be an immutable SHA)", vs.PinnedRef)
-	}
-
-	wantGitFrom := "git+" + wantRepo + "@" + sha
-	joinedArgs := strings.Join(e.Args, " ")
-	if !strings.Contains(joinedArgs, wantGitFrom) {
-		t.Fatalf("ableton args %v do not install from the pinned upstream git source %q", e.Args, wantGitFrom)
-	}
-	if strings.Contains(joinedArgs, forbiddenFork) {
-		t.Fatalf("ableton args %v still install from the untrusted personal fork %q", e.Args, forbiddenFork)
-	}
-	for label, cmd := range map[string]string{"install_cmd": vs.InstallCmd, "run_cmd": vs.RunCmd} {
-		if !strings.Contains(cmd, wantGitFrom) {
-			t.Fatalf("ableton vendored_source.%s = %q does not reference the pinned upstream git source %q", label, cmd, wantGitFrom)
-		}
-		if strings.Contains(cmd, forbiddenFork) {
-			t.Fatalf("ableton vendored_source.%s = %q still references the untrusted personal fork %q", label, cmd, forbiddenFork)
-		}
+// TestV2Catalog_OmitsAbletonUntilLoopbackRemoteScript verifies the catalog does
+// not promote a one-click Ableton install while the required upstream Remote
+// Script binds 0.0.0.0:9877. A warning in summary text is insufficient because
+// marketplace install would still persist a daemon for a LAN-reachable,
+// unauthenticated DAW-control listener.
+func TestV2Catalog_OmitsAbletonUntilLoopbackRemoteScript(t *testing.T) {
+	if e := v2CatalogByID(t)["ableton"]; e != nil {
+		t.Fatalf("v2 catalog must omit ableton until its required Remote Script is loopback-bound; got row with homepage %q", e.Homepage)
 	}
 }
 
