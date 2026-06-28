@@ -538,6 +538,43 @@
         "run_cmd": "npx --yes onshape-mcp@0.4.0",
         "license_status": "confirmed"
       }
+    },
+    {
+      "id": "reaper",
+      "name": "REAPER MCP server",
+      "summary": "Control the REAPER DAW from an AI client — 58 tools spanning project/transport, tracks, MIDI, items, FX, mixing, mastering, rendering, and audio analysis — driven through python-reapy against the REAPER Lua/Python Object Model. Community server bonfire-systems/reaper-mcp (Python), published to PyPI as reaper-mcp-server and pinned to v0.1.1, run via uvx with the version pinned in --from (vendored_source block, community fork, MIT). LOOPBACK-DEFAULT (NOT 0.0.0.0): the MCP server itself is stdio (`mcp.run(transport=\"stdio\")` — no network listener in the repo), and the python-reapy bridge it uses talks to REAPER over a LOCALHOST-default ReaScript socket inside REAPER — so unlike the Ableton-class row (whose upstream Remote Script binds 0.0.0.0:9877 and is LAN-reachable), this row exposes NO LAN surface by default; REAPER control stays on the local machine. REQUIRED one-time operator setup: REAPER's distant API must be enabled ONCE inside REAPER before the server can connect — per the repo README, open REAPER → Actions → Run ReaScript → run `scripts/enable_reapy.py` from the repo (it calls `reapy.config.enable_dist_api()`), then restart REAPER. The host-exe probe detects a REAPER install, NOT whether the distant API is enabled, so run the enable step before first use. MATURITY: Alpha (pyproject Development Status :: 3 - Alpha; thin tests upstream) — offered to try, not all 58 tools are equally battle-tested. disabled-until-probe: enables when uvx is on PATH AND a host REAPER install is detected via the Windows glob C:\\Program Files\\REAPER*\\reaper.exe (the default x64 install lands at C:\\Program Files\\REAPER (x64)\\reaper.exe; the trailing-* on REAPER matches the (x64)/(x86)/version-suffixed variants). REQUIRES Python 3.10+ and uv on PATH plus a host REAPER install. macOS (/Applications/REAPER*.app) and Linux REAPER paths are NOT covered in this batch — file_globs[] entries are AND-semantics and cannot OR a second install root (same limit as the Ableton row), so a macOS/Linux probe is a follow-up.",
+      "homepage": "https://github.com/bonfire-systems/reaper-mcp",
+      "readme_url": "https://raw.githubusercontent.com/bonfire-systems/reaper-mcp/f0911c23a903b68c51695eeeb6ff21398d4058a6/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "reaper-mcp-server==0.1.1",
+        "reaper-mcp-server"
+      ],
+      "env": {},
+      "categories": [
+        "music",
+        "daw",
+        "audio"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ],
+        "file_globs": [
+          "C:\\Program Files\\REAPER*\\reaper.exe"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/bonfire-systems/reaper-mcp",
+        "pinned_ref": "f0911c23a903b68c51695eeeb6ff21398d4058a6",
+        "install_cmd": "uvx --from reaper-mcp-server==0.1.1 reaper-mcp-server",
+        "run_cmd": "uvx --from reaper-mcp-server==0.1.1 reaper-mcp-server",
+        "license_status": "confirmed"
+      }
     }
   ]
 }
