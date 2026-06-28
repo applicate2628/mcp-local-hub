@@ -1141,11 +1141,14 @@ additive D-2/D-3 metadata live here):
 **v1 is FROZEN** (`marketplace/v1/catalog.json`) — kept in-tree only so
 an OLDER released client hard-coded to the v1 URL still resolves; do NOT
 edit it (old-client contract — it must stay `schema_version: "1"` with
-zero D-2/D-3 keys). The default-URL string is duplicated in
-`internal/cli/marketplace.go` (`DefaultMarketplaceRegistryURL`) and
-`internal/gui/marketplace.go` (`defaultMarketplaceRegistryURL`) by a
-documented layering exception (GUI must not import the CLI package) —
-**bump both together** on any catalog-version change (tracked:
+zero D-2/D-3 keys). The default-URL string is **single-owned in
+`internal/api`** (`api.DefaultMarketplaceRegistryURL`, in
+`marketplace_catalog.go`); `internal/cli/marketplace.go`
+(`DefaultMarketplaceRegistryURL`) and `internal/gui/marketplace.go`
+(`defaultMarketplaceRegistryURL`) both RE-EXPORT from it (both already
+import `internal/api`, and the GUI still never imports the CLI package) —
+so a catalog-version change is **one bump in `internal/api`**, no more
+bump-both drift (was tracked + now closed:
 `work-items/bugs/2026-06-24-marketplace-url-duplication.md`). The v2
 catalog's three shapes (S1 local-stdio / S2 remote-http / S3 docs-only
 OAuth connector) are decided in
