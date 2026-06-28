@@ -23,11 +23,17 @@ describe("themeForCategories — granular category → coarse theme", () => {
     ["matlab", "Engineering & CAD"],
     ["simulation", "Engineering & CAD"],
     ["scientific-computing", "Engineering & CAD"],
+    ["science", "Engineering & CAD"],
+    ["statistics", "Engineering & CAD"],
     // Music & Audio
     ["music", "Music & Audio"],
     ["daw", "Music & Audio"],
     ["audio", "Music & Audio"],
     ["ableton", "Music & Audio"],
+    // Creative & Media
+    ["image-editing", "Creative & Media"],
+    ["design", "Creative & Media"],
+    ["creative", "Creative & Media"],
     // Development & Code
     ["code-intelligence", "Development & Code"],
     ["lsp", "Development & Code"],
@@ -36,18 +42,26 @@ describe("themeForCategories — granular category → coarse theme", () => {
     ["agent", "Development & Code"],
     ["reasoning", "Development & Code"],
     ["debug", "Development & Code"],
+    ["dev", "Development & Code"],
     // Data & Office
     ["database", "Data & Office"],
     ["sql", "Data & Office"],
     ["spreadsheet", "Data & Office"],
     ["filesystem", "Data & Office"],
     ["io", "Data & Office"],
+    ["data", "Data & Office"],
+    ["observability", "Data & Office"],
+    ["bi", "Data & Office"],
+    ["analytics", "Data & Office"],
+    ["notebook", "Data & Office"],
+    ["data-analysis", "Data & Office"],
     // Research & Docs
     ["docs", "Research & Docs"],
     ["papers", "Research & Docs"],
     ["research", "Research & Docs"],
     ["diagrams", "Research & Docs"],
     ["math", "Research & Docs"],
+    ["pkm", "Research & Docs"],
     // Utilities
     ["utilities", "Utilities"],
     ["memory", "Utilities"],
@@ -165,9 +179,12 @@ describe("groupByTheme — flat list → ordered theme sections", () => {
     expect(sections[1].entries.map((e) => e.name)).toEqual(["mystery"]);
   });
 
-  it("groups the full v2 catalog into the six expected non-empty themes", () => {
-    // The real 23-entry v2 catalog primary categories. Confirms every entry
-    // lands and the distribution matches the design (no surprise Other).
+  it("groups the full v2 catalog into the seven expected non-empty themes", () => {
+    // The real 30-entry v2 catalog primary categories. Confirms every entry
+    // lands and the distribution matches the design (no surprise Other). The
+    // vendor-breadth wave-2a rows (grafana/tableau/photoshop/zotero/metabase/
+    // jupyter/rmcp) add the Data & Office BI/observability cluster, the rmcp
+    // science row, the zotero reference row, and the first Creative & Media row.
     const rows: Row[] = [
       { name: "filesystem", categories: ["filesystem", "io"] },
       { name: "git", categories: ["git", "vcs"] },
@@ -192,6 +209,13 @@ describe("groupByTheme — flat list → ordered theme sections", () => {
       { name: "suno", categories: ["music", "ai", "audio", "generation"] },
       { name: "onshape", categories: ["engineering", "cad", "mechanical", "cloud"] },
       { name: "reaper", categories: ["music", "daw", "audio"] },
+      { name: "grafana", categories: ["data", "observability", "bi"] },
+      { name: "tableau", categories: ["data", "bi", "analytics"] },
+      { name: "photoshop", categories: ["image-editing", "design", "creative"] },
+      { name: "zotero", categories: ["research", "reference", "pkm"] },
+      { name: "metabase", categories: ["data", "bi", "analytics"] },
+      { name: "jupyter", categories: ["data", "notebook", "dev"] },
+      { name: "rmcp", categories: ["science", "statistics", "data-analysis"] },
     ];
     const sections = groupByTheme(rows, cats, key);
     // No Other section for the real catalog (every entry maps).
@@ -201,15 +225,17 @@ describe("groupByTheme — flat list → ordered theme sections", () => {
       "Data & Office",
       "Research & Docs",
       "Music & Audio",
+      "Creative & Media",
       "Utilities",
     ]);
     const counts = Object.fromEntries(sections.map((s) => [s.theme, s.entries.length]));
     expect(counts).toEqual({
-      "Engineering & CAD": 5, // excel, matlab, ansys, kicad, onshape
+      "Engineering & CAD": 6, // excel, matlab, ansys, kicad, onshape, rmcp
       "Development & Code": 5, // git, everything, sequential-thinking, serena, codex-mcp-server
-      "Data & Office": 2, // filesystem, sqlite
-      "Research & Docs": 4, // context7, qt-docs, excalidraw, paper-search-mcp
+      "Data & Office": 6, // filesystem, sqlite, grafana, tableau, metabase, jupyter
+      "Research & Docs": 5, // context7, qt-docs, excalidraw, paper-search-mcp, zotero
       "Music & Audio": 3, // ableton, suno, reaper
+      "Creative & Media": 1, // photoshop
       "Utilities": 4, // fetch, playwright, memory, time
     });
     // Every input entry is accounted for exactly once.

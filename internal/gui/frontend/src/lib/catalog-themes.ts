@@ -20,6 +20,7 @@ export type CatalogTheme =
   | "Data & Office"
   | "Research & Docs"
   | "Music & Audio"
+  | "Creative & Media"
   | "Utilities"
   | "Other";
 
@@ -35,6 +36,7 @@ export const THEME_ORDER: readonly CatalogTheme[] = [
   "Data & Office",
   "Research & Docs",
   "Music & Audio",
+  "Creative & Media",
   "Utilities",
   "Other",
 ];
@@ -60,12 +62,23 @@ const CATEGORY_TO_THEME: Readonly<Record<string, CatalogTheme>> = {
   matlab: "Engineering & CAD",
   simulation: "Engineering & CAD",
   "scientific-computing": "Engineering & CAD",
+  // science/statistics share the engineering-scientific bucket (the rmcp R row's
+  // primary category is `science`; statistics rides alongside math/sci-computing).
+  science: "Engineering & CAD",
+  statistics: "Engineering & CAD",
 
   // Music & Audio.
   music: "Music & Audio",
   daw: "Music & Audio",
   audio: "Music & Audio",
   ableton: "Music & Audio",
+
+  // Creative & Media — image/graphics editing and creative-design desktop tools
+  // (kept distinct from Music & Audio, which is audio-specific; the photoshop row's
+  // primary category is `image-editing`).
+  "image-editing": "Creative & Media",
+  design: "Creative & Media",
+  creative: "Creative & Media",
 
   // Development & Code — code intelligence, agents, VCS, debugging.
   "code-intelligence": "Development & Code",
@@ -80,8 +93,12 @@ const CATEGORY_TO_THEME: Readonly<Record<string, CatalogTheme>> = {
   agent: "Development & Code",
   reasoning: "Development & Code",
   ai: "Development & Code",
+  dev: "Development & Code",
 
-  // Data & Office — databases, spreadsheets, filesystem/IO.
+  // Data & Office — databases, spreadsheets, filesystem/IO, BI/analytics, and
+  // data-science notebooks (grafana/tableau/metabase/jupyter land here by their
+  // primary `data` category; observability/bi/analytics/notebook/data-analysis are
+  // the data-platform tags those rows carry).
   database: "Data & Office",
   sql: "Data & Office",
   spreadsheet: "Data & Office",
@@ -89,6 +106,12 @@ const CATEGORY_TO_THEME: Readonly<Record<string, CatalogTheme>> = {
   office: "Data & Office",
   io: "Data & Office",
   filesystem: "Data & Office",
+  data: "Data & Office",
+  observability: "Data & Office",
+  bi: "Data & Office",
+  analytics: "Data & Office",
+  notebook: "Data & Office",
+  "data-analysis": "Data & Office",
 
   // Research & Docs — documentation, papers, knowledge, diagrams, math.
   docs: "Research & Docs",
@@ -99,6 +122,7 @@ const CATEGORY_TO_THEME: Readonly<Record<string, CatalogTheme>> = {
   diagrams: "Research & Docs",
   math: "Research & Docs",
   visualization: "Research & Docs",
+  pkm: "Research & Docs",
 
   // Utilities — general-purpose helpers and everything not above.
   utilities: "Utilities",

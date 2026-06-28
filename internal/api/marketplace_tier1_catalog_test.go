@@ -43,7 +43,29 @@ var gitSHA40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // Five further EDA/CAD rows are DEFERRED (real MCP servers, but each needs a manual
 // git-clone+build that vendored_source.install_cmd does not execute — see
 // work-items/backlog/2026-06-24-tier3-manual-clone-mcps.md).
-var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys", "kicad", "onshape", "reaper"}
+// The vendor-breadth wave-2a rows extend the disabled-until-probe set with five more
+// uvx/npx-launched servers that gate on the launcher (and, for photoshop, a host-app
+// glob + an arch matrix). Each is verified to launch on a clean cache and carries a
+// pinned vendored_source:
+//   - grafana   — official grafana/mcp-grafana (Apache-2.0), PyPI mcp-grafana==0.17.0
+//     (a Python wheel bundling the per-platform Go server binary); stdio is the Go
+//     binary's default and the row passes -t stdio to pin it (the SSE/streamable-http
+//     modes are opt-in and bind localhost:8000, not 0.0.0.0). The Grafana
+//     service-account token is the OPTIONAL-secret posture (server starts without it).
+//   - photoshop — community loonghao/photoshop-python-api-mcp-server (MIT), PyPI
+//     photoshop-mcp-server==0.1.11; Windows-only COM (win32com) + stdio (no socket),
+//     so the probe ARCH-GATES on platforms:[windows/amd64] plus a host Photoshop glob.
+//   - zotero    — community kujenga/zotero-mcp (MIT), PyPI zotero-mcp==0.1.6; stdio,
+//     ZOTERO_LOCAL=true (literal) makes it a CLIENT to Zotero desktop's own loopback
+//     local API (http://localhost:23119, verified in pyzotero). No secret.
+//   - jupyter   — community datalayer/jupyter-mcp-server (BSD-3-Clause), PyPI
+//     jupyter-mcp-server==1.0.2; the CLI default is stdio and the row passes
+//     --transport stdio to PIN it AWAY from the streamable-http mode (host=0.0.0.0,
+//     opt-in, NOT used). The Jupyter token is the OPTIONAL-secret posture.
+//   - rmcp      — community finite-sample/rmcp (MIT, the PyPI provenance repo), PyPI
+//     rmcp==0.8.1; the row runs the `start` subcommand (stdio) to PIN it AWAY from
+//     `serve-http --host 0.0.0.0` (opt-in, NOT used). No secret; drives R via Rscript.
+var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys", "kicad", "onshape", "reaper", "grafana", "photoshop", "zotero", "jupyter", "rmcp"}
 
 // tierMusicLocalCatalogIDs are the local-stdio music rows that gate the install on
 // a REQUIRED vault secret (required_secrets) rather than a host-app install_probe.
@@ -52,6 +74,20 @@ var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab",
 // until the token is set — the opt-in install gate shipped alongside this row. These
 // rows are READY (not disabled-until-probe): the gate is the secret, not a probe.
 var tierMusicLocalCatalogIDs = []string{"suno"}
+
+// tierSecretGatedVendoredCatalogIDs are the wave-2a data/BI rows that, like suno, gate
+// the install on a REQUIRED vault secret (they hard-exit on startup without auth —
+// verified by a clean-cache launch), but UNLIKE suno are pinned community/official
+// servers carrying a vendored_source (npm packages run via npx). They are READY (the
+// secret is the gate, not a host-app probe) and carry NO install_probe:
+//   - tableau  — official tableau/tableau-mcp (Apache-2.0), npm @tableau/mcp-server
+//     @2.18.1; hard-exits without SERVER/PAT_NAME/PAT_VALUE, so required_secrets is
+//     [tableau_pat_name, tableau_pat_value] (the PAT name+value stored in the vault).
+//   - metabase — community easecloudio/mcp-metabase-server (MIT), npm
+//     @easecloudio/mcp-metabase-server@1.3.0; StdioServerTransport only (no port,
+//     loopback-clean); hard-exits without METABASE_URL, so required_secrets is
+//     [metabase_api_key].
+var tierSecretGatedVendoredCatalogIDs = []string{"tableau", "metabase"}
 
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
@@ -92,10 +128,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	// The docs-only POINTER rows live in the SEPARATE top-level docs_only[] array
 	// (S4, bot #446 P1), NOT entries[], so the entries[] count is v1 + Tier-1 +
 	// music-local only. docs_only count is asserted separately below.
-	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs)
+	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs) + len(tierSecretGatedVendoredCatalogIDs)
 	if len(cat.Entries) != wantCount {
-		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local; docs-only rows are in docs_only[], not entries[])",
-			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs))
+		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local + %d secret-gated-vendored; docs-only rows are in docs_only[], not entries[])",
+			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs), len(tierSecretGatedVendoredCatalogIDs))
 	}
 	if len(cat.DocsOnly) != len(docsOnlyCatalogIDs) {
 		t.Fatalf("v2 catalog docs_only count = %d, want %d", len(cat.DocsOnly), len(docsOnlyCatalogIDs))
@@ -150,7 +186,7 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	// v0.4.0 tag SHA. reaper is a community fork (bonfire-systems/reaper-mcp)
 	// published to PyPI (reaper-mcp-server), pinned via vendored_source to the
 	// v0.1.1 tag SHA.
-	for _, id := range []string{"excel", "ableton", "kicad", "onshape", "reaper"} {
+	for _, id := range []string{"excel", "ableton", "kicad", "onshape", "reaper", "grafana", "photoshop", "zotero", "jupyter", "rmcp", "tableau", "metabase"} {
 		e := byID[id]
 		if e.VendoredSource == nil || strings.TrimSpace(e.VendoredSource.PinnedRef) == "" {
 			t.Fatalf("fork row %q is missing a pinned vendored_source", id)
@@ -372,7 +408,7 @@ func TestV2Tier1Rows_GenerateThenCreateDryRun(t *testing.T) {
 			// The fork rows project the pinned vendored_source; the official rows
 			// (codex, matlab, ansys) do not.
 			switch id {
-			case "excel", "ableton", "kicad", "onshape", "reaper":
+			case "excel", "ableton", "kicad", "onshape", "reaper", "grafana", "photoshop", "zotero", "jupyter", "rmcp":
 				if m.VendoredSource == nil || strings.TrimSpace(m.VendoredSource.PinnedRef) == "" {
 					t.Fatalf("fork row %q drafted manifest lost the pinned vendored_source: %#v", id, m.VendoredSource)
 				}
@@ -470,15 +506,19 @@ func TestV2MatlabRow_ProbeRequiresMatlabOnPATH(t *testing.T) {
 // needs a literal path), and no file_globs[] entry is missing its absolute-path shape.
 func TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles(t *testing.T) {
 	byID := v2CatalogByID(t)
-	// Rows whose probe carries a glob pattern → must be in file_globs[].
-	wantGlobRows := map[string]bool{"excel": true, "ableton": true, "ansys": true, "kicad": true, "reaper": true}
+	// Rows whose probe carries a glob pattern → must be in file_globs[]. photoshop
+	// adds the year-versioned Adobe Photoshop host-exe glob (wave-2a).
+	wantGlobRows := map[string]bool{"excel": true, "ableton": true, "ansys": true, "kicad": true, "reaper": true, "photoshop": true}
 	for id, e := range byID {
 		if e.InstallProbe == nil {
 			continue
 		}
 		p := e.InstallProbe
-		// No Tier-1 row should use files[] (no literal-path probe in this batch).
-		if id == "excel" || id == "ableton" || id == "codex-mcp-server" || id == "matlab" || id == "ansys" || id == "kicad" || id == "reaper" {
+		// No Tier-1 row should use files[] (no literal-path probe in this batch). The
+		// wave-2a uvx/npx rows (grafana/photoshop/zotero/jupyter/rmcp) gate on the
+		// launcher (+ photoshop's host-exe glob), never a literal files[] path.
+		if id == "excel" || id == "ableton" || id == "codex-mcp-server" || id == "matlab" || id == "ansys" || id == "kicad" || id == "reaper" ||
+			id == "grafana" || id == "photoshop" || id == "zotero" || id == "jupyter" || id == "rmcp" {
 			if len(p.Files) != 0 {
 				t.Fatalf("Tier-1 row %q uses files[] %v — version globs belong in file_globs[]; files[] is exact-stat-only", id, p.Files)
 			}
@@ -745,5 +785,364 @@ func TestV2OnshapeRow_NpxProbeAndOptionalSecretEnv(t *testing.T) {
 		if !wantPlatforms[p] {
 			t.Fatalf("onshape drafted manifest carries unexpected platform %q", p)
 		}
+	}
+}
+
+// --- vendor-breadth wave-2a row shape locks ---
+
+// hasStr is a tiny membership helper for the wave-2a row assertions.
+func hasStr(s []string, want string) bool {
+	for _, v := range s {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestV2SecretGatedVendoredRows_RequiredSecretGate pins the tableau + metabase rows:
+// each is a READY local-stdio row (NOT disabled-until-probe) whose install gate is a
+// REQUIRED vault secret backing a secret: env ref, carries a pinned vendored_source
+// (npm package via npx), and projects required_secrets + the secret env refs into a
+// schema-valid manifest (the post-install AdmissionCheck re-sees the gate). Both
+// servers hard-exit on startup without their auth env (verified by a clean-cache
+// launch), which is exactly why they take the required_secrets posture rather than
+// onshape's optional-secret one.
+func TestV2SecretGatedVendoredRows_RequiredSecretGate(t *testing.T) {
+	byID := v2CatalogByID(t)
+	cases := []struct {
+		id        string
+		license   string
+		secrets   []string
+		secretEnv map[string]string // env key -> expected secret: ref
+		pinArg    string            // a version-pinned npm arg the row must carry
+	}{
+		{
+			// The Tableau instance URL is routed through required_secrets (no
+			// required-non-secret-config mechanism exists), so SERVER is a
+			// secret: ref AND in required_secrets — the install BLOCKS until the
+			// operator sets the real URL, never shipping the placeholder default.
+			id:      "tableau",
+			license: "Apache-2.0",
+			secrets: []string{"tableau_server_url", "tableau_pat_name", "tableau_pat_value"},
+			secretEnv: map[string]string{
+				"SERVER":    "secret:tableau_server_url",
+				"PAT_NAME":  "secret:tableau_pat_name",
+				"PAT_VALUE": "secret:tableau_pat_value",
+			},
+			pinArg: "@tableau/mcp-server@2.18.1",
+		},
+		{
+			// Same required-URL gate for metabase: METABASE_URL is a secret: ref
+			// AND in required_secrets so the placeholder URL can never ship as the
+			// live default.
+			id:      "metabase",
+			license: "MIT",
+			secrets: []string{"metabase_url", "metabase_api_key"},
+			secretEnv: map[string]string{
+				"METABASE_URL":     "secret:metabase_url",
+				"METABASE_API_KEY": "secret:metabase_api_key",
+			},
+			pinArg: "@easecloudio/mcp-metabase-server@1.3.0",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.id, func(t *testing.T) {
+			e := byID[tc.id]
+			if e == nil {
+				t.Fatalf("v2 catalog missing the %s row", tc.id)
+			}
+			if e.Transport != "stdio" {
+				t.Fatalf("%s transport = %q, want stdio", tc.id, e.Transport)
+			}
+			if e.License != tc.license {
+				t.Fatalf("%s license = %q, want %q", tc.id, e.License, tc.license)
+			}
+			// READY (the secret is the gate, not a host-app probe). An inert
+			// availability would wrongly grey it behind a non-existent host-app probe.
+			if e.Availability != "" && e.Availability != "ready" {
+				t.Fatalf("%s availability = %q, want ready/empty (the install gate is the required secret)", tc.id, e.Availability)
+			}
+			if e.InstallProbe != nil {
+				t.Fatalf("%s carries an install_probe %#v — its gate is required_secrets, not a host-app probe", tc.id, e.InstallProbe)
+			}
+			// required_secrets present, in order, each backed by its secret: env ref.
+			if len(e.RequiredSecrets) != len(tc.secrets) {
+				t.Fatalf("%s required_secrets = %v, want %v", tc.id, e.RequiredSecrets, tc.secrets)
+			}
+			for i, want := range tc.secrets {
+				if e.RequiredSecrets[i] != want {
+					t.Fatalf("%s required_secrets[%d] = %q, want %q", tc.id, i, e.RequiredSecrets[i], want)
+				}
+			}
+			for envKey, wantRef := range tc.secretEnv {
+				if got := e.Env[envKey]; got != wantRef {
+					t.Fatalf("%s env %s = %q, want %q (required_secrets must back a secret: env ref)", tc.id, envKey, got, wantRef)
+				}
+			}
+			// Version-pinned npm arg present (no floating @latest).
+			if !hasStr(e.Args, tc.pinArg) {
+				t.Fatalf("%s args %v must pin %q", tc.id, e.Args, tc.pinArg)
+			}
+			// Pinned vendored_source (immutable SHA — the npm version's tag commit).
+			vs := e.VendoredSource
+			if vs == nil || !gitSHA40.MatchString(strings.TrimSpace(vs.PinnedRef)) {
+				t.Fatalf("%s vendored_source.pinned_ref = %#v, want a 40-hex git SHA", tc.id, vs)
+			}
+			if config.IsMovingGitRef(vs.PinnedRef) {
+				t.Fatalf("%s pinned_ref %q is a moving ref", tc.id, vs.PinnedRef)
+			}
+
+			// MIRROR GATE: generate→`manifest create` dry-run projects required_secrets +
+			// the VERBATIM secret env refs (no resolved plaintext) into a schema-valid
+			// manifest.
+			draft, warns, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: t.TempDir()})
+			if err != nil {
+				t.Fatalf("generate draft for %s: %v (warnings=%v)", tc.id, err, warns)
+			}
+			wants := append([]string{"required_secrets:"}, tc.secrets...)
+			for _, ref := range tc.secretEnv {
+				wants = append(wants, ref)
+			}
+			for _, want := range wants {
+				if !strings.Contains(draft, want) {
+					t.Fatalf("%s draft missing %q\n---\n%s", tc.id, want, draft)
+				}
+			}
+			parseReady := strings.Replace(draft, "port: 0", "port: 9320", 1)
+			m, err := config.ParseManifest(strings.NewReader(parseReady))
+			if err != nil {
+				t.Fatalf("%s drafted manifest failed ParseManifest+Validate (mirror gate): %v\n---\n%s", tc.id, err, parseReady)
+			}
+			if len(m.RequiredSecrets) != len(tc.secrets) {
+				t.Fatalf("%s drafted manifest lost required_secrets: %v", tc.id, m.RequiredSecrets)
+			}
+			for envKey, wantRef := range tc.secretEnv {
+				if got := m.Env[envKey]; got != wantRef {
+					t.Fatalf("%s drafted manifest env %s = %q, want verbatim secret ref %q", tc.id, envKey, got, wantRef)
+				}
+			}
+			if m.VendoredSource == nil || strings.TrimSpace(m.VendoredSource.PinnedRef) == "" {
+				t.Fatalf("%s drafted manifest lost the pinned vendored_source: %#v", tc.id, m.VendoredSource)
+			}
+		})
+	}
+}
+
+// TestV2DataRows_NoPlaceholderURLDefaultAndReadOnlyToolMode locks the bot #448 P2
+// config-correctness fixes for the tableau + metabase rows, which the GUI one-click
+// path writes VERBATIM with no operator-edit step:
+//
+//   findings 2+3 — the instance URL must NOT ship as a placeholder http(s):// literal
+//     default (that would silently target a sample URL on every install). Since there
+//     is no required-non-secret-config mechanism, the URL is routed through the
+//     required_secrets gate as a secret: env ref, so a one-click install BLOCKS until
+//     the operator supplies the real URL. The URL env value must therefore be a
+//     `secret:` ref AND the key must be in required_secrets — never a bare URL.
+//   finding 1 — metabase must default to the upstream NON-destructive tool set
+//     (TOOL_MODE=read); omitting it would default upstream to `all` (create/update/
+//     delete). The operator opts into the destructive surface explicitly.
+func TestV2DataRows_NoPlaceholderURLDefaultAndReadOnlyToolMode(t *testing.T) {
+	byID := v2CatalogByID(t)
+
+	// The URL env key per row + the required_secrets key it must be gated by.
+	urlGate := map[string]struct{ envKey, secretKey string }{
+		"tableau":  {"SERVER", "tableau_server_url"},
+		"metabase": {"METABASE_URL", "metabase_url"},
+	}
+	for id, g := range urlGate {
+		e := byID[id]
+		if e == nil {
+			t.Fatalf("v2 catalog missing the %s row", id)
+		}
+		got := e.Env[g.envKey]
+		// MUST be a secret: ref, never a bare http(s) placeholder default.
+		if !strings.HasPrefix(got, "secret:") {
+			t.Fatalf("%s env %s = %q — the instance URL must be a secret: ref (required-URL gate), not a placeholder literal that ships as the live default", id, g.envKey, got)
+		}
+		if strings.HasPrefix(got, "secret:http") || strings.Contains(got, "://") {
+			t.Fatalf("%s env %s = %q looks like a bare URL leaked into the value", id, g.envKey, got)
+		}
+		// AND must be in required_secrets so the one-click install BLOCKS until set.
+		if !hasStr(e.RequiredSecrets, g.secretKey) {
+			t.Fatalf("%s required_secrets %v must include %q so the install blocks until the real URL is supplied (no placeholder default)", id, e.RequiredSecrets, g.secretKey)
+		}
+		// Belt-and-suspenders: no env value anywhere is a bare http(s) literal.
+		for k, v := range e.Env {
+			if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
+				t.Fatalf("%s env %s = %q ships a placeholder URL literal as the live default; route it through the required_secrets gate instead", id, k, v)
+			}
+		}
+	}
+
+	// finding 1: metabase ships read-only (TOOL_MODE=read), never the destructive
+	// upstream `all` default.
+	mb := byID["metabase"]
+	if got := mb.Env["TOOL_MODE"]; got != "read" {
+		t.Fatalf("metabase env TOOL_MODE = %q, want \"read\" (non-destructive default; omitting it defaults upstream to `all` which can create/update/delete)", got)
+	}
+}
+
+// TestV2TableauRow_NodeEngineNoteInSummary pins bot #448 finding 5: the tableau row's
+// npm package declares engines.node >= 22.7.5 and the probe cannot version-check node,
+// so the summary MUST loudly document the requirement (the failure on an older node is
+// a clear spawn-time version error, not silent — a summary note is the agreed mitigation,
+// no node-version probe field is added).
+func TestV2TableauRow_NodeEngineNoteInSummary(t *testing.T) {
+	e := v2CatalogByID(t)["tableau"]
+	if e == nil {
+		t.Fatalf("v2 catalog missing the tableau row")
+	}
+	if !strings.Contains(e.Summary, "22.7.5") {
+		t.Fatalf("tableau summary must document the node >= 22.7.5 requirement (engines.node from @tableau/mcp-server@2.18.1); summary=%q", e.Summary)
+	}
+}
+
+// TestV2PhotoshopRow_WindowsArchGate pins the photoshop row's Windows-only COM shape:
+// disabled-until-probe gated on uvx + a host Adobe Photoshop host-exe glob + an arch
+// matrix of exactly [windows/amd64] (win32com COM is Windows-only). On any non-Windows
+// host the row stays inert. The row carries NO secret and NO PS_VERSION (v0.1.11
+// auto-detects via COM). The arch matrix must survive generate→manifest
+// create so the post-install readiness gate re-evaluates the same allowlist.
+func TestV2PhotoshopRow_WindowsArchGate(t *testing.T) {
+	e := v2CatalogByID(t)["photoshop"]
+	if e == nil {
+		t.Fatalf("v2 catalog missing the photoshop row")
+	}
+	if e.Availability != config.AvailabilityDisabledUntilProbe {
+		t.Fatalf("photoshop availability = %q, want %q", e.Availability, config.AvailabilityDisabledUntilProbe)
+	}
+	p := e.InstallProbe
+	if p == nil {
+		t.Fatalf("photoshop row has no install_probe")
+	}
+	if !hasStr(p.Binaries, "uvx") {
+		t.Fatalf("photoshop probe binaries %v must gate on uvx", p.Binaries)
+	}
+	if len(p.FileGlobs) == 0 {
+		t.Fatalf("photoshop probe must carry a host Photoshop file_globs entry")
+	}
+	for _, g := range p.FileGlobs {
+		if !config.IsAbsolutePathShape(g) {
+			t.Fatalf("photoshop file_globs entry %q is not absolute-path-shaped", g)
+		}
+	}
+	// Arch matrix is EXACTLY windows/amd64 (COM is Windows-only).
+	if len(p.Platforms) != 1 || p.Platforms[0] != "windows/amd64" {
+		t.Fatalf("photoshop probe platforms = %v, want exactly [windows/amd64] (win32com COM is Windows-only)", p.Platforms)
+	}
+	// No secret on this row, and no env at all.
+	if len(e.RequiredSecrets) != 0 {
+		t.Fatalf("photoshop required_secrets = %v, want none", e.RequiredSecrets)
+	}
+	for _, v := range e.Env {
+		if strings.HasPrefix(v, "secret:") {
+			t.Fatalf("photoshop env carries a secret ref %q — the row has no secret", v)
+		}
+	}
+	// PROBE↔PS_VERSION ALIGNMENT (bot #448 finding 4): v0.1.11's COM adapter builds
+	// Session()/Application() with NO version argument (auto-detects the installed
+	// Photoshop via the COM ProgID) — it does NOT read PS_VERSION. A hardcoded
+	// PS_VERSION=2024 would be inert AND would imply a version pin that does not
+	// happen, falsely conflicting with the version-agnostic `Adobe Photoshop *`
+	// glob. So the row MUST NOT set PS_VERSION; the glob stays version-agnostic so
+	// it matches the auto-detect behavior for ANY installed year.
+	if _, ok := e.Env["PS_VERSION"]; ok {
+		t.Fatalf("photoshop must NOT set PS_VERSION (inert in v0.1.11, which auto-detects via COM; a hardcoded year falsely conflicts with the version-agnostic glob): env=%v", e.Env)
+	}
+	// The glob must stay version-agnostic (not narrowed to a single year), matching
+	// the auto-detect behavior — assert it does not pin a 4-digit year segment.
+	for _, g := range p.FileGlobs {
+		if strings.Contains(g, "Adobe Photoshop 20") {
+			t.Fatalf("photoshop file_globs %q narrows to a specific year; must stay version-agnostic (Adobe Photoshop *) to match COM auto-detect", g)
+		}
+	}
+	// MIRROR GATE: the arch matrix survives generate→manifest create.
+	draft, warns, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: t.TempDir()})
+	if err != nil {
+		t.Fatalf("generate draft for photoshop: %v (warnings=%v)", err, warns)
+	}
+	parseReady := strings.Replace(draft, "port: 0", "port: 9321", 1)
+	m, err := config.ParseManifest(strings.NewReader(parseReady))
+	if err != nil {
+		t.Fatalf("photoshop drafted manifest failed ParseManifest+Validate (mirror gate): %v\n---\n%s", err, parseReady)
+	}
+	if m.InstallProbe == nil || len(m.InstallProbe.Platforms) != 1 || m.InstallProbe.Platforms[0] != "windows/amd64" {
+		t.Fatalf("photoshop drafted manifest dropped/changed the [windows/amd64] arch gate: %#v", m.InstallProbe)
+	}
+}
+
+// TestV2OptionalSecretRows_NotRequiredGate pins the grafana + jupyter rows' optional-
+// secret posture: each is disabled-until-probe (gated on uvx), wires its server token
+// as a secret: env ref, but is deliberately NOT a required_secrets install gate — the
+// server STARTS without the token (verified by a clean-cache launch: grafana enforces
+// auth per-tool-call, jupyter connects to Jupyter lazily), so a one-click install is
+// not hard-blocked. This is the onshape optional-secret posture, not the suno one.
+func TestV2OptionalSecretRows_NotRequiredGate(t *testing.T) {
+	byID := v2CatalogByID(t)
+	cases := []struct {
+		id        string
+		secretEnv map[string]string
+	}{
+		{id: "grafana", secretEnv: map[string]string{"GRAFANA_SERVICE_ACCOUNT_TOKEN": "secret:grafana_service_account_token"}},
+		{id: "jupyter", secretEnv: map[string]string{"JUPYTER_TOKEN": "secret:jupyter_token"}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.id, func(t *testing.T) {
+			e := byID[tc.id]
+			if e == nil {
+				t.Fatalf("v2 catalog missing the %s row", tc.id)
+			}
+			if e.Availability != config.AvailabilityDisabledUntilProbe {
+				t.Fatalf("%s availability = %q, want %q", tc.id, e.Availability, config.AvailabilityDisabledUntilProbe)
+			}
+			if e.InstallProbe == nil || !hasStr(e.InstallProbe.Binaries, "uvx") {
+				t.Fatalf("%s probe must gate on uvx: %#v", tc.id, e.InstallProbe)
+			}
+			// The token is wired as a secret: ref...
+			for envKey, wantRef := range tc.secretEnv {
+				if got := e.Env[envKey]; got != wantRef {
+					t.Fatalf("%s env %s = %q, want %q", tc.id, envKey, got, wantRef)
+				}
+			}
+			// ...but is NOT a required_secrets install gate (optional-secret posture).
+			if len(e.RequiredSecrets) != 0 {
+				t.Fatalf("%s required_secrets = %v, want none (server starts without the token — optional-secret posture)", tc.id, e.RequiredSecrets)
+			}
+		})
+	}
+}
+
+// TestV2StdioPinnedRows_PinAwayFrom0000 locks the loopback-discipline invariant for
+// the two rows whose upstream ships an opt-in HTTP transport that binds 0.0.0.0: the
+// row's args must PIN the stdio entry so a one-click install never silently opens a
+// LAN listener. jupyter passes --transport stdio (the streamable-http mode binds
+// host=0.0.0.0); rmcp runs the `start` subcommand (the serve-http mode binds
+// --host 0.0.0.0). Neither row may carry the http-mode token in its args.
+func TestV2StdioPinnedRows_PinAwayFrom0000(t *testing.T) {
+	byID := v2CatalogByID(t)
+
+	jup := byID["jupyter"]
+	if jup == nil {
+		t.Fatalf("v2 catalog missing the jupyter row")
+	}
+	if !hasStr(jup.Args, "stdio") || !hasStr(jup.Args, "--transport") {
+		t.Fatalf("jupyter args %v must pin --transport stdio (the streamable-http mode binds 0.0.0.0)", jup.Args)
+	}
+	if hasStr(jup.Args, "streamable-http") {
+		t.Fatalf("jupyter args %v must NOT select the 0.0.0.0 streamable-http transport", jup.Args)
+	}
+
+	r := byID["rmcp"]
+	if r == nil {
+		t.Fatalf("v2 catalog missing the rmcp row")
+	}
+	if !hasStr(r.Args, "start") {
+		t.Fatalf("rmcp args %v must run the `start` (stdio) subcommand (serve-http binds --host 0.0.0.0)", r.Args)
+	}
+	if hasStr(r.Args, "serve-http") {
+		t.Fatalf("rmcp args %v must NOT select the 0.0.0.0 serve-http subcommand", r.Args)
 	}
 }
