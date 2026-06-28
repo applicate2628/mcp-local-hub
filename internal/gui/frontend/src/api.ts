@@ -1235,7 +1235,32 @@ export interface MarketplaceCatalogEntry {
   probe_passes?: boolean;
 }
 
-export async function refreshMarketplace(): Promise<MarketplaceCatalogEntry[]> {
+// MarketplaceDocsOnlyCatalogEntry mirrors the backend marketplaceDocsOnlyEntry —
+// ONE S4 manual-install POINTER row from the catalog's SEPARATE top-level
+// docs_only[] array (bot #446 P1). It carries the pointer payload (id/name/summary/
+// categories/homepage + raw README link + verbatim manual_install steps) and NO
+// transport/probe/install fields. The refresh normalizer MUST carry readme_url +
+// manual_install through so a refreshed docs-only row keeps its Readme link + "view
+// setup" block (dropping them was the refresh-DTO gap, bot #446 P2).
+export interface MarketplaceDocsOnlyCatalogEntry {
+  id: string;
+  name: string;
+  summary: string;
+  categories: string[];
+  homepage: string;
+  readme_url?: string;
+  manual_install?: string;
+}
+
+// MarketplaceRefreshResult is the force-refresh return shape: BOTH the installable
+// entries[] and the separate docs_only[] pointer rows (S4), matching the GET browse
+// body, so the Catalog re-renders both after a Refresh.
+export interface MarketplaceRefreshResult {
+  entries: MarketplaceCatalogEntry[];
+  docsOnly: MarketplaceDocsOnlyCatalogEntry[];
+}
+
+export async function refreshMarketplace(): Promise<MarketplaceRefreshResult> {
   const resp = await fetch("/api/marketplace/refresh", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1251,9 +1276,12 @@ export async function refreshMarketplace(): Promise<MarketplaceCatalogEntry[]> {
     const code = body?.code ?? `HTTP_${resp.status}`;
     throw new Error(`/api/marketplace/refresh [${code}]: ${msg}`);
   }
-  const body = (await resp.json()) as { entries?: Array<Partial<MarketplaceCatalogEntry>> };
+  const body = (await resp.json()) as {
+    entries?: Array<Partial<MarketplaceCatalogEntry>>;
+    docs_only?: Array<Partial<MarketplaceDocsOnlyCatalogEntry>>;
+  };
   const rows = Array.isArray(body.entries) ? body.entries : [];
-  return rows.map((e) => ({
+  const entries: MarketplaceCatalogEntry[] = rows.map((e) => ({
     id: typeof e.id === "string" ? e.id : "",
     name: typeof e.name === "string" ? e.name : "",
     summary: typeof e.summary === "string" ? e.summary : "",
@@ -1270,6 +1298,21 @@ export async function refreshMarketplace(): Promise<MarketplaceCatalogEntry[]> {
     ...(typeof e.probe_state === "string" ? { probe_state: e.probe_state } : {}),
     ...(typeof e.probe_passes === "boolean" ? { probe_passes: e.probe_passes } : {}),
   }));
+  // S4 docs_only pointer rows — carry readme_url + manual_install through so a
+  // refreshed docs-only row keeps its Readme link + "View setup steps" block
+  // (dropping them was the refresh-DTO gap, bot #446 P2). A pre-S4 backend omits
+  // docs_only entirely → empty array.
+  const docsRows = Array.isArray(body.docs_only) ? body.docs_only : [];
+  const docsOnly: MarketplaceDocsOnlyCatalogEntry[] = docsRows.map((d) => ({
+    id: typeof d.id === "string" ? d.id : "",
+    name: typeof d.name === "string" ? d.name : "",
+    summary: typeof d.summary === "string" ? d.summary : "",
+    categories: Array.isArray(d.categories) ? d.categories : [],
+    homepage: typeof d.homepage === "string" ? d.homepage : "",
+    ...(typeof d.readme_url === "string" ? { readme_url: d.readme_url } : {}),
+    ...(typeof d.manual_install === "string" ? { manual_install: d.manual_install } : {}),
+  }));
+  return { entries, docsOnly };
 }
 
 // ───────────────────────────────────────────────────────────────────

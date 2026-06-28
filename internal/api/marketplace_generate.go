@@ -39,6 +39,59 @@ func GenerateDraftManifest(e *MarketplaceEntry, opts GenerateOpts) (string, []st
 	}
 }
 
+// DocsOnlyPointerText projects an S4 DocsOnlyEntry onto a human-readable POINTER
+// TEXT block — NOT a YAML manifest. A docs_only row is a server that is NOT
+// one-click installable (immature, git-clone-only, macOS-only, or a LAN-bind risk),
+// so the hub never installs it; this prints where to go (homepage + readme) and the
+// verbatim manual_install setup steps. It is the message the install-refuse path
+// returns when a hand-crafted request asks to install a docs_only id (the row is
+// not in entries[], so the normal install path never reaches it — this is the
+// belt-and-suspenders refusal body).
+//
+// EVERY interpolated field (id, name, homepage, readme_url, summary,
+// manual_install) is a catalog-controlled UNTRUSTED string, so each routes through
+// rejectUnsafeMarketplaceDraftString — the SAME owner the stdio/remote-http draft
+// arms use — before it lands in the pointer text, so a hostile registry cannot
+// inject C0/C1 control bytes, terminal escapes, or Trojan-Source bidi runes into
+// the operator's terminal/HTTP body. A refusal aborts, returning the error.
+func DocsOnlyPointerText(d *DocsOnlyEntry) (string, error) {
+	if d == nil {
+		return "", fmt.Errorf("nil docs_only entry")
+	}
+	for field, value := range map[string]string{
+		"entry id":       d.ID,
+		"name":           d.Name,
+		"homepage":       d.Homepage,
+		"readme_url":     d.ReadmeURL,
+		"summary":        d.Summary,
+		"manual_install": d.ManualInstall,
+	} {
+		if err := rejectUnsafeMarketplaceDraftString(field, value); err != nil {
+			return "", fmt.Errorf("docs_only %q %s contains characters unsafe for output — refusing to emit pointer (registry may be hostile): %w", d.ID, field, err)
+		}
+	}
+	lines := []string{
+		"# " + d.Name + " (" + d.ID + ") — DOCS-ONLY pointer",
+		"#",
+		"# This server is NOT installable through mcphub: it is a manual-install",
+		"# pointer (immature, git-clone-only, macOS-only, or a LAN-bind risk), so",
+		"# the hub never drafts or installs it. Follow the steps below by hand.",
+		"#",
+		"# What it is: " + d.Summary,
+	}
+	if strings.TrimSpace(d.Homepage) != "" {
+		lines = append(lines, "# Homepage:   "+d.Homepage)
+	}
+	if strings.TrimSpace(d.ReadmeURL) != "" {
+		lines = append(lines, "# Readme:     "+d.ReadmeURL)
+	}
+	if strings.TrimSpace(d.ManualInstall) != "" {
+		lines = append(lines, "#", "# Manual setup steps:", "#   "+d.ManualInstall)
+	}
+	lines = append(lines, "")
+	return strings.Join(lines, "\n"), nil
+}
+
 // generateRemoteHTTPDraft projects an http catalog entry onto a
 // transport=remote-http manifest. The catalog carries the URL but
 // not headers — operators add Authorization or X-API-Key by editing

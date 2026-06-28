@@ -44,6 +44,39 @@ type MarketplaceCatalog struct {
 	SchemaVersion string             `json:"schema_version"`
 	GeneratedAt   string             `json:"generated_at,omitempty"`
 	Entries       []MarketplaceEntry `json:"entries"`
+
+	// DocsOnly (S4) is a SEPARATE top-level array of manual-install POINTER rows —
+	// servers that are NOT one-click installable (immature, git-clone-only,
+	// macOS-only, or a LAN-bind risk), so the hub never installs them. They live
+	// OUT of `entries[]` deliberately: a docs-only row is a pointer, not an
+	// installable entry, and the entry validator rejects any unknown transport. If
+	// these rows lived in entries[] with transport:"docs-only", EVERY
+	// already-released client (whose parser knows only stdio/native-http/http) would
+	// reject the WHOLE catalog on the first such row → an empty marketplace for all
+	// shipped clients. As a NEW TOP-LEVEL KEY it is instead IGNORED by released
+	// clients (the deployed fetch decode leaves DisallowUnknownFields OFF — see
+	// ParseMarketplaceCatalog), so publishing docs-only rows is forward-compat-safe
+	// with NO v3 catalog and NO URL bump (bot #446 P1). Gated to schema_version 2
+	// (a v1 catalog must not carry it — validateMarketplaceCatalog).
+	DocsOnly []DocsOnlyEntry `json:"docs_only,omitempty"`
+}
+
+// DocsOnlyEntry (S4) is one manual-install POINTER row. It carries ONLY the
+// discoverable-pointer payload — homepage + summary + the verbatim manual_install
+// setup steps + readme/license/categories — and DELIBERATELY no transport / command
+// / args / url / probe / vendored_source: a docs-only row is install-inert by
+// construction (the hub never installs it), so it has nothing that could produce a
+// manifest/daemon/client write. The Catalog renders it as a DOCS-ONLY badge +
+// readme link + a "view setup" block, grouped under its theme alongside entries.
+type DocsOnlyEntry struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Summary       string   `json:"summary,omitempty"`
+	Homepage      string   `json:"homepage,omitempty"`
+	ReadmeURL     string   `json:"readme_url,omitempty"`
+	ManualInstall string   `json:"manual_install,omitempty"`
+	License       string   `json:"license,omitempty"`
+	Categories    []string `json:"categories,omitempty"`
 }
 
 type MarketplaceEntry struct {
@@ -158,6 +191,7 @@ func catalogProbeToConfig(p *CatalogAvailabilityProbe) *config.AvailabilityProbe
 //   - the newCatalogFieldsRequireV2 v1-gate, which is KEY-PRESENCE based
 //     (catalogEntryNewKeyPresence) so a v1 catalog STILL cannot carry a v2 key,
 //   - per-entry validation + duplicate-id detection.
+//
 // The STRICT no-unknown-key check belongs on the bytes WE author, not the bytes a
 // deployed client fetches — see ParseMarketplaceCatalogStrict / the author-side
 // catalog test (marketplace_tier1_catalog_test.go), which feeds a typo'd key and
@@ -207,10 +241,32 @@ func parseMarketplaceCatalog(raw []byte, strictUnknownFields bool) (*Marketplace
 	if err != nil {
 		return nil, fmt.Errorf("decode catalog: %w", err)
 	}
-	if err := validateMarketplaceCatalog(&cat, presence); err != nil {
+	// Top-level `docs_only` KEY PRESENCE drives the v2-gate (S4): a typed decode of
+	// `docs_only: []` / `docs_only: null` leaves cat.DocsOnly empty/nil and is
+	// indistinguishable from the key being absent, yet the bare key on a v1 catalog
+	// must still be rejected (older v1-only clients never saw it). Re-decode the SAME
+	// bytes for raw top-level key presence.
+	docsOnlyPresent, err := catalogTopLevelKeyPresent(raw, "docs_only")
+	if err != nil {
+		return nil, fmt.Errorf("decode catalog: %w", err)
+	}
+	if err := validateMarketplaceCatalog(&cat, presence, docsOnlyPresent); err != nil {
 		return nil, err
 	}
 	return &cat, nil
+}
+
+// catalogTopLevelKeyPresent reports whether the catalog's top-level JSON object
+// carries the named key, by raw KEY PRESENCE (present-empty / present-null /
+// populated all count) — the same posture catalogEntryNewKeyPresence uses for the
+// per-entry forward-compat gate. Drives the S4 docs_only v2-gate.
+func catalogTopLevelKeyPresent(raw []byte, key string) (bool, error) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return false, fmt.Errorf("re-decode top-level keys for presence check: %w", err)
+	}
+	_, ok := top[key]
+	return ok, nil
 }
 
 // newCatalogFieldKeys are the additive D-2/D-3 entry keys gated to
@@ -262,10 +318,21 @@ func entryNewKeyPresence(presence []map[string]json.RawMessage, i int) map[strin
 	return presence[i]
 }
 
-func validateMarketplaceCatalog(cat *MarketplaceCatalog, presence []map[string]json.RawMessage) error {
+func validateMarketplaceCatalog(cat *MarketplaceCatalog, presence []map[string]json.RawMessage, docsOnlyPresent bool) error {
 	if !marketplaceSchemaVersionAccepted(cat.SchemaVersion) {
 		return fmt.Errorf("schema_version %q: this build only accepts %q or %q",
 			cat.SchemaVersion, MarketplaceCatalogSchemaVersion, MarketplaceCatalogSchemaVersionV2)
+	}
+	// S4 docs_only v2-gate (the forward-compat-correct gate that REPLACES the prior
+	// per-entry transport gate, bot #446 P1). The docs_only TOP-LEVEL array is a
+	// v2-only addition; a v1 catalog must never carry it. Reject on raw KEY PRESENCE
+	// so a present-empty `docs_only: []` / present-null on a v1 catalog is caught,
+	// not just a populated one — a released v1-only client never saw the key. (A
+	// released client safely IGNORES the unknown top-level key on the fetch path, so
+	// shipping docs_only is forward-compat-safe; this gate only forbids it on a v1
+	// catalog the author should not have written.)
+	if docsOnlyPresent && cat.SchemaVersion != MarketplaceCatalogSchemaVersionV2 {
+		return fmt.Errorf("docs_only requires catalog schema_version %q", MarketplaceCatalogSchemaVersionV2)
 	}
 	seen := map[string]bool{}
 	for i := range cat.Entries {
@@ -277,6 +344,46 @@ func validateMarketplaceCatalog(cat *MarketplaceCatalog, presence []map[string]j
 			return fmt.Errorf("entry %d: duplicate id %q", i, e.ID)
 		}
 		seen[e.ID] = true
+	}
+	// S4 docs_only rows share the SAME id namespace as entries[] (an id collision
+	// across the two arrays would make the GUI render two cards / the install loader
+	// ambiguous), so the duplicate-id set spans both arrays.
+	for i := range cat.DocsOnly {
+		d := &cat.DocsOnly[i]
+		if err := validateDocsOnlyEntry(d); err != nil {
+			return fmt.Errorf("docs_only %d (id=%q): %w", i, d.ID, err)
+		}
+		if seen[d.ID] {
+			return fmt.Errorf("docs_only %d: duplicate id %q (collides with an entries[] id or another docs_only row)", i, d.ID)
+		}
+		seen[d.ID] = true
+	}
+	return nil
+}
+
+// validateDocsOnlyEntry validates one S4 manual-install POINTER row. A docs_only
+// row carries ONLY the pointer payload (id/name/homepage/summary/readme/manual
+// steps/license/categories) and is install-inert by construction. homepage +
+// summary are REQUIRED so the rendered pointer is meaningful (the operator needs a
+// destination + a reason it's docs-only); the id must pass the SAME name gate as an
+// entry id so it shares the namespace cleanly. The struct has no transport / command
+// / args / url fields, so an install-field cannot be carried at all — the type makes
+// the install-inert invariant unrepresentable rather than checked.
+func validateDocsOnlyEntry(d *DocsOnlyEntry) error {
+	if d.ID == "" {
+		return fmt.Errorf("missing id")
+	}
+	if d.Name == "" {
+		return fmt.Errorf("missing name")
+	}
+	if err := CheckManifestName(d.ID); err != nil {
+		return fmt.Errorf("id %q fails manifest-name gate: %w", d.ID, err)
+	}
+	if strings.TrimSpace(d.Homepage) == "" {
+		return fmt.Errorf("docs_only entry must declare homepage (it is a pointer row — the operator needs a destination)")
+	}
+	if strings.TrimSpace(d.Summary) == "" {
+		return fmt.Errorf("docs_only entry must declare summary (it is a pointer row — describe what it does and why it is docs-only)")
 	}
 	return nil
 }

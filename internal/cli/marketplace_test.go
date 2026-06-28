@@ -24,6 +24,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"mcp-local-hub/internal/api"
 )
 
@@ -244,5 +246,165 @@ func TestMarketplaceGenerate_HttpEntryEmitsRemoteHTTPDraft(t *testing.T) {
 	// No stderr noise: G6 sub-PR 4 closes the deferral surface.
 	if strings.Contains(stderr.String(), "G6") {
 		t.Errorf("stderr should no longer mention G6 deferral; got: %s", stderr.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// S4 docs-only POINTER rows — CLI discoverability (bot #446 R3).
+//
+// docs_only rows live in the catalog's SEPARATE top-level docs_only[] array (NOT
+// entries[]), so the CLI marketplace commands must iterate it too or they are
+// GUI-discoverable but CLI-invisible. docs_only is v2-gated, so these fixtures
+// declare schema_version "2".
+// ---------------------------------------------------------------------------
+
+const docsOnlyCatalogFixture = `{"schema_version":"2","entries":[
+  {"id":"filesystem","name":"Filesystem","summary":"sandboxed fs","transport":"stdio","command":"npx","categories":["fs"]}
+],"docs_only":[
+  {"id":"cubase","name":"Cubase MCP server (docs-only)","summary":"manual-install pointer for Cubase","homepage":"https://github.com/hedidjs/cubase-mcp","readme_url":"https://raw.githubusercontent.com/hedidjs/cubase-mcp/main/README.md","manual_install":"git clone the repo and configure a virtual-MIDI port in Cubase.","license":"MIT","categories":["music","daw"]}
+]}`
+
+func newDocsOnlyTestCmd(t *testing.T) *cobra.Command {
+	t.Helper()
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(docsOnlyCatalogFixture))
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(api.InstallMarketplaceTestClientForCLI(srv))
+	return newMarketplaceCmd()
+}
+
+// TestMarketplaceSearch_ListsDocsOnlyRowTagged proves `search` lists a docs_only
+// row, marked `docs-only` in the TRANSPORT column (so the operator sees it is a
+// manual-install pointer, not a one-click install). It must appear alongside the
+// installable entry.
+func TestMarketplaceSearch_ListsDocsOnlyRowTagged(t *testing.T) {
+	c := newDocsOnlyTestCmd(t)
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"search", "--registry", api.MarketplaceTestRegistryURL("/docs-only-search.json")})
+	if err := c.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("search: %v\nstderr: %s", err, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "filesystem") {
+		t.Errorf("search output missing the installable entry\n---\n%s", out)
+	}
+	if !strings.Contains(out, "cubase") {
+		t.Errorf("search output missing the docs_only row (CLI-invisible regression)\n---\n%s", out)
+	}
+	// The cubase row must carry the docs-only transport tag.
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "cubase") && !strings.Contains(line, "docs-only") {
+			t.Errorf("docs_only row not tagged `docs-only` in TRANSPORT column\nline: %q", line)
+		}
+	}
+}
+
+// TestMarketplaceSearch_DocsOnlyMatchesQuery proves the docs_only rows honor the
+// search query (a query that matches only the docs_only row still surfaces it).
+func TestMarketplaceSearch_DocsOnlyMatchesQuery(t *testing.T) {
+	c := newDocsOnlyTestCmd(t)
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"search", "cubase", "--registry", api.MarketplaceTestRegistryURL("/docs-only-q.json")})
+	if err := c.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("search: %v\nstderr: %s", err, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "cubase") {
+		t.Errorf("query 'cubase' did not surface the docs_only row\n---\n%s", out)
+	}
+	// A non-matching installable entry must be filtered out.
+	if strings.Contains(out, "filesystem") {
+		t.Errorf("query 'cubase' should not list the non-matching installable entry\n---\n%s", out)
+	}
+}
+
+// TestMarketplaceShow_DocsOnlyPrintsPointer proves `show <docs-only-id>` prints the
+// pointer block (homepage / readme / manual_install steps / why docs-only) instead
+// of "not found".
+func TestMarketplaceShow_DocsOnlyPrintsPointer(t *testing.T) {
+	c := newDocsOnlyTestCmd(t)
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"show", "cubase", "--registry", api.MarketplaceTestRegistryURL("/docs-only-show.json")})
+	if err := c.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("show docs-only: %v\nstderr: %s", err, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{
+		"DOCS-ONLY pointer",
+		"https://github.com/hedidjs/cubase-mcp",
+		"https://raw.githubusercontent.com/hedidjs/cubase-mcp/main/README.md",
+		"git clone the repo and configure a virtual-MIDI port in Cubase.",
+		"Manual setup steps:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("show docs-only pointer missing %q\n---\n%s", want, out)
+		}
+	}
+	// It must NOT print the installable-entry metadata block keys.
+	if strings.Contains(out, "Command:") || strings.Contains(out, "Transport:") {
+		t.Errorf("docs-only show printed installable-entry metadata keys\n---\n%s", out)
+	}
+}
+
+// TestMarketplaceGenerate_DocsOnlyRefuses proves `generate <docs-only-id>` REFUSES
+// (a pointer is not installable — no manifest to draft), points the operator at
+// `show <id>`, and leaves stdout empty (mirrors the GUI DOCS_ONLY_NOT_INSTALLABLE).
+func TestMarketplaceGenerate_DocsOnlyRefuses(t *testing.T) {
+	c := newDocsOnlyTestCmd(t)
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"generate", "cubase", "--registry", api.MarketplaceTestRegistryURL("/docs-only-gen.json")})
+	err := c.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatalf("generate docs-only must refuse; got nil error\nstdout: %s", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "docs-only pointer") || !strings.Contains(err.Error(), "show cubase") {
+		t.Errorf("refusal error = %q, want it to name the docs-only pointer + `show cubase`", err.Error())
+	}
+	// stdout must stay empty (no draft).
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Errorf("generate docs-only must leave stdout empty; got:\n%s", stdout.String())
+	}
+}
+
+// TestMarketplaceShow_UnknownIdStillErrors proves the docs_only fallback did not
+// swallow the genuine not-found error: an id in NEITHER array still errors.
+func TestMarketplaceShow_UnknownIdStillErrors(t *testing.T) {
+	c := newDocsOnlyTestCmd(t)
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"show", "nope", "--registry", api.MarketplaceTestRegistryURL("/docs-only-404.json")})
+	err := c.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatalf("show of an unknown id must error; got nil")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error = %q, want a not-found error", err.Error())
+	}
+}
+
+// TestMarketplaceRefresh_ReportsDocsOnlyCount proves `refresh` reports the docs_only
+// pointer count alongside the entry count.
+func TestMarketplaceRefresh_ReportsDocsOnlyCount(t *testing.T) {
+	c := newDocsOnlyTestCmd(t)
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"refresh", "--registry", api.MarketplaceTestRegistryURL("/docs-only-refresh.json")})
+	if err := c.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("refresh: %v\nstderr: %s", err, stderr.String())
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "docs-only pointer") {
+		t.Errorf("refresh output missing docs-only pointer count\n---\n%s", out)
 	}
 }

@@ -89,10 +89,16 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("v1 catalog failed to parse: %v", err)
 	}
+	// The docs-only POINTER rows live in the SEPARATE top-level docs_only[] array
+	// (S4, bot #446 P1), NOT entries[], so the entries[] count is v1 + Tier-1 +
+	// music-local only. docs_only count is asserted separately below.
 	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs)
 	if len(cat.Entries) != wantCount {
-		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local)",
+		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local; docs-only rows are in docs_only[], not entries[])",
 			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs))
+	}
+	if len(cat.DocsOnly) != len(docsOnlyCatalogIDs) {
+		t.Fatalf("v2 catalog docs_only count = %d, want %d", len(cat.DocsOnly), len(docsOnlyCatalogIDs))
 	}
 
 	// Every v1 entry id must still be present (verbatim copy), in order, before

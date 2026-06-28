@@ -38,12 +38,21 @@ import (
 // marketplaceEntryLoader loads the FULL api.MarketplaceEntry for an id (the
 // install handler needs transport/command/args/url/env, which the read-only
 // GET /api/marketplace DTO omits). Returns (entry, found, err): found=false
-// means the id is not in the catalog (handler → 404); err is reserved for a
-// fetch/parse failure (handler → 502). Production loads the curated catalog
-// via api.LoadMarketplaceCatalog — the same catalog-load path GET
-// /api/marketplace and the refresh handler use.
+// means the id is not an installable entry; err is reserved for a fetch/parse
+// failure (handler → 502). Production loads the curated catalog via
+// api.LoadMarketplaceCatalog — the same catalog-load path GET /api/marketplace
+// and the refresh handler use.
+//
+// LoadDocsOnly resolves an id in the SEPARATE top-level docs_only[] array (S4).
+// A docs_only row is a manual-install POINTER never installed by the hub, so it
+// is NOT in entries[]: a normal install request for such an id finds nothing in
+// entries[] (LoadEntry found=false), and the handler then checks LoadDocsOnly so
+// a hand-crafted request to install a pointer is refused with a 400
+// DOCS_ONLY_NOT_INSTALLABLE (rather than a misleading 404). found=false means the
+// id is not a docs_only row either.
 type marketplaceEntryLoader interface {
 	LoadEntry(ctx context.Context, id string) (*api.MarketplaceEntry, bool, error)
+	LoadDocsOnly(ctx context.Context, id string) (*api.DocsOnlyEntry, bool, error)
 }
 
 // globalPortPicker resolves the daemon port for a hub-mode install. It honors
@@ -122,6 +131,28 @@ func registerMarketplaceInstallRoutes(s *Server) {
 			return
 		}
 		if !found {
+			// S4 docs_only guard: a docs_only id is NOT an installable entry (it lives
+			// in the separate top-level docs_only[] array, never entries[]), so it never
+			// reaches the install path through the normal flow. But a hand-crafted
+			// request could still POST a docs_only id — refuse it loud with a stable 400
+			// DOCS_ONLY_NOT_INSTALLABLE + the pointer text in the body, rather than a
+			// misleading 404, so a docs_only pointer can NEVER produce a manifest /
+			// daemon / client-config write. DocsOnlyPointerText degrades to a generic
+			// message on a hostile-rune refusal so the row still refuses install.
+			docs, docsFound, docsErr := s.marketplaceInstallLoader.LoadDocsOnly(r.Context(), id)
+			if docsErr != nil {
+				log.Printf("/api/marketplace/install LoadDocsOnly id=%q: %v", id, docsErr)
+				writeAPIError(w, errors.New("marketplace catalog unavailable"), http.StatusBadGateway, "CATALOG_UNAVAILABLE")
+				return
+			}
+			if docsFound {
+				pointer, ptrErr := api.DocsOnlyPointerText(docs)
+				if ptrErr != nil {
+					pointer = "This server is a manual-install pointer and cannot be installed through mcphub; see its homepage for setup steps."
+				}
+				writeAPIError(w, errors.New(pointer), http.StatusBadRequest, "DOCS_ONLY_NOT_INSTALLABLE")
+				return
+			}
 			writeAPIError(w, fmt.Errorf("marketplace entry %q not found", id), http.StatusNotFound, "ENTRY_NOT_FOUND")
 			return
 		}
@@ -414,6 +445,24 @@ func (realMarketplaceEntryLoader) LoadEntry(ctx context.Context, id string) (*ap
 		if cat.Entries[i].ID == id {
 			e := cat.Entries[i]
 			return &e, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
+// LoadDocsOnly resolves an id in the SEPARATE top-level docs_only[] array (S4).
+// A docs_only row is a manual-install pointer never installed by the hub; this
+// lets the install handler refuse a hand-crafted install of a pointer id with a
+// clear DOCS_ONLY_NOT_INSTALLABLE instead of a misleading 404.
+func (realMarketplaceEntryLoader) LoadDocsOnly(ctx context.Context, id string) (*api.DocsOnlyEntry, bool, error) {
+	cat, _, err := api.LoadMarketplaceCatalog(ctx, defaultMarketplaceRegistryURL)
+	if err != nil {
+		return nil, false, err
+	}
+	for i := range cat.DocsOnly {
+		if cat.DocsOnly[i].ID == id {
+			d := cat.DocsOnly[i]
+			return &d, true, nil
 		}
 	}
 	return nil, false, nil

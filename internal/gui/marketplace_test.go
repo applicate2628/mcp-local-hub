@@ -19,14 +19,15 @@ import (
 // canned entries/err so the GET /api/marketplace handler is exercised
 // without a live network fetch against the real registry.
 type fakeMarketplaceLister struct {
-	called  bool
-	entries []api.MarketplaceEntry
-	err     error
+	called   bool
+	entries  []api.MarketplaceEntry
+	docsOnly []api.DocsOnlyEntry
+	err      error
 }
 
-func (f *fakeMarketplaceLister) MarketplaceEntries(_ context.Context) ([]api.MarketplaceEntry, error) {
+func (f *fakeMarketplaceLister) MarketplaceEntries(_ context.Context) ([]api.MarketplaceEntry, []api.DocsOnlyEntry, error) {
 	f.called = true
-	return f.entries, f.err
+	return f.entries, f.docsOnly, f.err
 }
 
 // fakeMarketplaceRefresher is a Server-local test double for the
@@ -34,14 +35,15 @@ func (f *fakeMarketplaceLister) MarketplaceEntries(_ context.Context) ([]api.Mar
 // It records the call and returns the canned entries/err so the
 // force-refresh handler is exercised without a live network fetch.
 type fakeMarketplaceRefresher struct {
-	called  bool
-	entries []api.MarketplaceEntry
-	err     error
+	called   bool
+	entries  []api.MarketplaceEntry
+	docsOnly []api.DocsOnlyEntry
+	err      error
 }
 
-func (f *fakeMarketplaceRefresher) RefreshMarketplaceEntries(_ context.Context) ([]api.MarketplaceEntry, error) {
+func (f *fakeMarketplaceRefresher) RefreshMarketplaceEntries(_ context.Context) ([]api.MarketplaceEntry, []api.DocsOnlyEntry, error) {
 	f.called = true
-	return f.entries, f.err
+	return f.entries, f.docsOnly, f.err
 }
 
 // newMarketplaceTestServer wires only the marketplaceLister subset. Unlike

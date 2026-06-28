@@ -457,9 +457,9 @@ describe("refreshMarketplace", () => {
         ],
       }),
     }) as unknown as Response);
-    const rows = await refreshMarketplace();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
+    const { entries } = await refreshMarketplace();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
       id: "inert",
       availability: "watch",
       probe_passes: false,
@@ -475,11 +475,57 @@ describe("refreshMarketplace", () => {
         entries: [{ id: "ready", name: "Ready", transport: "http" }],
       }),
     }) as unknown as Response);
-    const rows = await refreshMarketplace();
-    expect(rows[0].availability).toBe("");
+    const { entries } = await refreshMarketplace();
+    expect(entries[0].availability).toBe("");
     // Absent probe_passes stays undefined (fail-closed grey-on-availability),
     // never coerced to a boolean that would falsely mark an inert row passing.
-    expect(rows[0].probe_passes).toBeUndefined();
+    expect(entries[0].probe_passes).toBeUndefined();
+  });
+
+  // S4 (bot #446 P1+P2): the refresh result carries the SEPARATE docs_only[] array,
+  // and the normalizer keeps readme_url + manual_install on each pointer row (the
+  // P2 refresh-DTO gap was dropping them). A pre-S4 backend omits docs_only → [].
+  it("carries the docs_only[] array with readme_url + manual_install through refresh", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        entries: [{ id: "fs", name: "Filesystem", transport: "stdio" }],
+        docs_only: [
+          {
+            id: "cubase",
+            name: "Cubase (docs-only)",
+            summary: "manual-install pointer",
+            categories: ["music", "daw"],
+            homepage: "https://github.com/example/cubase",
+            readme_url: "https://raw.githubusercontent.com/example/cubase/main/README.md",
+            manual_install: "git clone and configure virtual-MIDI",
+          },
+        ],
+      }),
+    }) as unknown as Response);
+    const { entries, docsOnly } = await refreshMarketplace();
+    expect(entries).toHaveLength(1);
+    expect(docsOnly).toHaveLength(1);
+    expect(docsOnly[0]).toMatchObject({
+      id: "cubase",
+      readme_url: "https://raw.githubusercontent.com/example/cubase/main/README.md",
+      manual_install: "git clone and configure virtual-MIDI",
+    });
+  });
+
+  it("returns an empty docs_only[] when a pre-S4 backend omits it", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        entries: [{ id: "fs", name: "Filesystem", transport: "stdio" }],
+      }),
+    }) as unknown as Response);
+    const { docsOnly } = await refreshMarketplace();
+    expect(docsOnly).toEqual([]);
   });
 });
 

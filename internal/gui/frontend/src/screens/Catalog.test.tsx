@@ -1176,6 +1176,60 @@ describe("CatalogScreen", () => {
     expect(retryBtn.disabled).toBe(false);
   });
 
+  it("Refresh carries readme_url + manual_install through for a docs-only row (DTO round-trip)", async () => {
+    // bot #446 P2: the refresh normalizer (refreshMarketplace) previously dropped
+    // readme_url + manual_install, so a refreshed docs-only row rendered just the
+    // badge — no Readme link, no setup steps. The refresh body here returns a FULL
+    // docs-only row; after Refresh the Readme link + setup steps MUST render.
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace/refresh": () =>
+          jsonResponse(200, {
+            entries: [],
+            // S4: docs-only rows arrive in the SEPARATE docs_only[] array.
+            docs_only: [
+              {
+                id: "cubase",
+                name: "cubase (docs-only)",
+                summary: "summary for cubase",
+                categories: ["music", "daw"],
+                homepage: "https://github.com/example/cubase",
+                readme_url: "https://raw.githubusercontent.com/example/cubase/main/README.md",
+                manual_install: "git clone https://github.com/example/cubase and follow the README.",
+              },
+            ],
+          }),
+        // Initial mount load: empty marketplace so only the refresh body provides
+        // the docs-only row (proves the refresh DTO, not the initial-load).
+        "/api/marketplace": () => jsonResponse(200, { entries: [], docs_only: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    // Initial state: empty marketplace (no docs-only card yet).
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-empty")).toBeTruthy();
+    });
+
+    fireEvent.click(await screen.findByTestId("catalog-marketplace-refresh"));
+
+    // After refresh the docs-only row renders WITH the readme link + setup steps —
+    // proving the refresh normalizer carried both fields through.
+    const readme = (await screen.findByTestId(
+      "catalog-marketplace-docs-only-readme-cubase",
+    )) as HTMLAnchorElement;
+    expect(readme.getAttribute("href")).toBe(
+      "https://raw.githubusercontent.com/example/cubase/main/README.md",
+    );
+    expect(screen.getByTestId("catalog-marketplace-docs-only-steps-cubase").textContent).toContain(
+      "git clone https://github.com/example/cubase",
+    );
+    // And still NO install affordance (docs-only is install-inert).
+    expect(screen.queryByTestId("catalog-marketplace-hub-cubase")).toBeNull();
+  });
+
   // --- D-3 tri-state browse probe_state render branches (CHANGE A-frontend) ----
   //
   // The backend emits probe_state ∈ {ready, inert-blocked, inert-unknown}. The
@@ -1207,7 +1261,21 @@ describe("CatalogScreen", () => {
         "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
         "/api/client-capabilities": urlNativeCapabilities,
-        "/api/marketplace": () => jsonResponse(200, { entries: rows }),
+        "/api/marketplace": () => jsonResponse(200, { entries: rows, docs_only: [] }),
+      }) as unknown as typeof fetch,
+    );
+    render(<CatalogScreen />);
+  }
+
+  // renderWithDocsOnly is the S4 counterpart: it serves the rows in the SEPARATE
+  // docs_only[] array (entries empty), exercising the docs-only pointer render path.
+  function renderWithDocsOnly(docsRows: unknown[]) {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/client-capabilities": urlNativeCapabilities,
+        "/api/marketplace": () => jsonResponse(200, { entries: [], docs_only: docsRows }),
       }) as unknown as typeof fetch,
     );
     render(<CatalogScreen />);
@@ -1278,5 +1346,79 @@ describe("CatalogScreen", () => {
     });
     expect(screen.queryByTestId("catalog-marketplace-install-legacyblocked")).toBeNull();
     expect(screen.queryByTestId("catalog-marketplace-install-legacyready")).toBeTruthy();
+  });
+
+  // --- S4: docs_only[] manual-install POINTER rows (separate top-level array) ---
+  //
+  // A docs-only row is a server the hub never installs (immature, git-clone-only,
+  // macOS-only, or a LAN-bind risk). It arrives in the SEPARATE docs_only[] array
+  // (NOT entries[]) — bot #446 P1 — and the Catalog renders a distinct "DOCS-ONLY"
+  // badge + readme link + a "view setup" block carrying the manual_install steps,
+  // and NO install affordance at all (no Add-to-hub, no Install-directly, no
+  // probe-to-enable badge). The row has NO transport/probe fields.
+  function mpDocsOnly(id: string) {
+    return {
+      id,
+      name: `${id} (docs-only)`,
+      summary: `summary for ${id}`,
+      categories: ["music", "daw"],
+      homepage: `https://github.com/example/${id}`,
+      readme_url: `https://raw.githubusercontent.com/example/${id}/main/README.md`,
+      manual_install: `git clone https://github.com/example/${id} and follow the README.`,
+    };
+  }
+
+  it("docs-only row renders the manual-install pointer and NO install affordance", async () => {
+    renderWithDocsOnly([mpDocsOnly("cubase")]);
+    // The docs-only pointer card + badge render.
+    const block = await screen.findByTestId("catalog-marketplace-docs-only-cubase");
+    expect(block).toBeTruthy();
+    expect(screen.getByTestId("catalog-marketplace-docs-only-badge-cubase").textContent).toContain(
+      "DOCS-ONLY",
+    );
+    // Readme link carries the safe external-link attrs.
+    const readme = screen.getByTestId(
+      "catalog-marketplace-docs-only-readme-cubase",
+    ) as HTMLAnchorElement;
+    expect(readme.getAttribute("href")).toBe(
+      "https://raw.githubusercontent.com/example/cubase/main/README.md",
+    );
+    expect(readme.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(readme.getAttribute("target")).toBe("_blank");
+    // The manual_install steps render in the setup block.
+    expect(screen.getByTestId("catalog-marketplace-docs-only-steps-cubase").textContent).toContain(
+      "git clone https://github.com/example/cubase",
+    );
+    // NO install affordance of ANY kind for a docs-only row.
+    expect(screen.queryByTestId("catalog-marketplace-install-cubase")).toBeNull();
+    expect(screen.queryByTestId("catalog-marketplace-hub-cubase")).toBeNull();
+    expect(screen.queryByTestId("catalog-marketplace-direct-toggle-cubase")).toBeNull();
+    expect(screen.queryByTestId("catalog-marketplace-probe-to-enable-cubase")).toBeNull();
+  });
+
+  it("docs-only row still groups under its theme section alongside entries", async () => {
+    // categories ["music","daw"] fold into the "Music & Audio" theme — a docs-only
+    // pointer is a normal render-grouping citizen (PR #443), it just suppresses
+    // install. Serve it in docs_only[] AND an installable entry under the same theme
+    // to prove they co-group.
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/client-capabilities": urlNativeCapabilities,
+        "/api/marketplace": () =>
+          jsonResponse(200, {
+            entries: [mpEntry("ableton", "Ableton", "x", ["music", "daw"], "", "stdio")],
+            docs_only: [mpDocsOnly("logicpro")],
+          }),
+      }) as unknown as typeof fetch,
+    );
+    render(<CatalogScreen />);
+    await screen.findByTestId("catalog-marketplace-docs-only-logicpro");
+    expect(screen.queryByTestId("catalog-theme-section-Music & Audio")).toBeTruthy();
+    // The docs-only pointer card and the installable entry card both render under
+    // the same Music & Audio theme.
+    expect(screen.getByTestId("catalog-marketplace-docs-only-logicpro")).toBeTruthy();
+    expect(screen.getByTestId("catalog-marketplace-card-ableton")).toBeTruthy();
   });
 });
