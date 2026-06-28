@@ -21,6 +21,10 @@ var gitSHA40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // (official MathWorks Go binary, v0.11.0) and ansys (official ansys/pymapdl-mcp,
 // v0.2.1, FastMCP/stdio) extend it, and kicad (community fork oaslananka/kicad-mcp,
 // PyPI kicad-mcp-pro v3.14.1, uvx --from, MIT) is the one clean one-click EDA row.
+// onshape (community server altendky/onshape-mcp, npm onshape-mcp@0.4.0 via npx,
+// Apache-2.0, SLSA-provenance-attested) is the §9 cloud-CAD breadth row — like kicad
+// it is a community fork with a pinned vendored_source, but it gates on the npx
+// launcher (cloud server, no host app to detect) rather than a host-binary glob.
 // Two rows were DROPPED before merge:
 //   - cst — bbl21/CST_MCP is a CLI toolkit, not an MCP server
 //     (work-items/bugs/2026-06-24-cst-not-an-mcp-server.md).
@@ -32,7 +36,7 @@ var gitSHA40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // Five further EDA/CAD rows are DEFERRED (real MCP servers, but each needs a manual
 // git-clone+build that vendored_source.install_cmd does not execute — see
 // work-items/backlog/2026-06-24-tier3-manual-clone-mcps.md).
-var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys", "kicad"}
+var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys", "kicad", "onshape"}
 
 // tierMusicLocalCatalogIDs are the local-stdio music rows that gate the install on
 // a REQUIRED vault secret (required_secrets) rather than a host-app install_probe.
@@ -128,8 +132,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	// so their pin lives in the upstream-pinned readme_url / args (matlab release
 	// v0.11.0 binary; ansys uvx ==0.2.1 PyPI pin), not a vendored_source block.
 	// kicad is a community fork (oaslananka/kicad-mcp) published to PyPI, so it pins
-	// via vendored_source like excel/ableton.
-	for _, id := range []string{"excel", "ableton", "kicad"} {
+	// via vendored_source like excel/ableton. onshape is a community server
+	// (altendky/onshape-mcp) published to npm, pinned via vendored_source to the
+	// v0.4.0 tag SHA.
+	for _, id := range []string{"excel", "ableton", "kicad", "onshape"} {
 		e := byID[id]
 		if e.VendoredSource == nil || strings.TrimSpace(e.VendoredSource.PinnedRef) == "" {
 			t.Fatalf("fork row %q is missing a pinned vendored_source", id)
@@ -351,7 +357,7 @@ func TestV2Tier1Rows_GenerateThenCreateDryRun(t *testing.T) {
 			// The fork rows project the pinned vendored_source; the official rows
 			// (codex, matlab, ansys) do not.
 			switch id {
-			case "excel", "ableton", "kicad":
+			case "excel", "ableton", "kicad", "onshape":
 				if m.VendoredSource == nil || strings.TrimSpace(m.VendoredSource.PinnedRef) == "" {
 					t.Fatalf("fork row %q drafted manifest lost the pinned vendored_source: %#v", id, m.VendoredSource)
 				}
@@ -581,5 +587,110 @@ func TestV2SunoRow_RequiredSecretGate(t *testing.T) {
 	}
 	if got := m.Env["ACEDATACLOUD_API_TOKEN"]; got != "secret:acedata_api_token" {
 		t.Fatalf("suno drafted manifest lost the secret env ref: %q", got)
+	}
+}
+
+// TestV2OnshapeRow_NpxProbeAndOptionalSecretEnv pins the §9 cloud-CAD onshape row's
+// shape. It is a DISABLED-UNTIL-PROBE local-stdio row whose probe gates on the npx
+// launcher (cloud server — no host CAD app to detect), pinned to the npm
+// onshape-mcp@0.4.0 package via a vendored_source SHA. The Onshape API-key env vars
+// are wired as `secret:` vault refs but are deliberately NOT required_secrets: the
+// server's `auto` auth mode supports an OAuth browser flow as an alternative to
+// static API keys and does not hard-exit without them (per the server's
+// authentication.md OAuthPending state), so the keys are the optional-secret posture
+// (like paper-search's unpaywall_email), not a blocking install gate. The generate
+// dry-run must keep the env values as VERBATIM secret refs (no resolved plaintext).
+func TestV2OnshapeRow_NpxProbeAndOptionalSecretEnv(t *testing.T) {
+	e := v2CatalogByID(t)["onshape"]
+	if e == nil {
+		t.Fatalf("v2 catalog missing the onshape row")
+	}
+	if e.Transport != "stdio" {
+		t.Fatalf("onshape transport = %q, want stdio (npx onshape-mcp over stdio)", e.Transport)
+	}
+	if e.License != "Apache-2.0" {
+		t.Fatalf("onshape license = %q, want Apache-2.0", e.License)
+	}
+	// Inert: gated behind the npx probe (cloud — no host-app glob).
+	if e.Availability != config.AvailabilityDisabledUntilProbe {
+		t.Fatalf("onshape availability = %q, want %q", e.Availability, config.AvailabilityDisabledUntilProbe)
+	}
+	if e.InstallProbe == nil {
+		t.Fatalf("onshape row has no install_probe")
+	}
+	has := func(s []string, want string) bool {
+		for _, v := range s {
+			if v == want {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(e.InstallProbe.Binaries, "npx") {
+		t.Fatalf("onshape probe binaries %v MUST gate on the npx launcher (cloud server, no host app)", e.InstallProbe.Binaries)
+	}
+	// CLOUD: no host-app file glob — the probe gates only on npx.
+	if len(e.InstallProbe.Files) != 0 || len(e.InstallProbe.FileGlobs) != 0 {
+		t.Fatalf("onshape probe must carry NO files[]/file_globs[] (cloud server, no host CAD app): files=%v file_globs=%v", e.InstallProbe.Files, e.InstallProbe.FileGlobs)
+	}
+	// Command + version pin: npx --yes onshape-mcp@0.4.0.
+	if e.Command != "npx" {
+		t.Fatalf("onshape command = %q, want npx", e.Command)
+	}
+	if !has(e.Args, "onshape-mcp@0.4.0") {
+		t.Fatalf("onshape args %v must pin onshape-mcp@0.4.0", e.Args)
+	}
+	// vendored_source pinned to a 40-hex SHA (the v0.4.0 tag commit).
+	vs := e.VendoredSource
+	if vs == nil {
+		t.Fatalf("onshape row lost its vendored_source")
+	}
+	if !gitSHA40.MatchString(strings.TrimSpace(vs.PinnedRef)) {
+		t.Fatalf("onshape vendored_source.pinned_ref = %q, want a 40-hex git SHA (the v0.4.0 tag commit)", vs.PinnedRef)
+	}
+	if config.IsMovingGitRef(vs.PinnedRef) {
+		t.Fatalf("onshape pinned_ref %q is a moving ref (must be an immutable SHA)", vs.PinnedRef)
+	}
+	// API-key env wired as secret: refs.
+	if got := e.Env["ONSHAPE_MCP_AUTH__ACCESS_KEY"]; got != "secret:onshape_access_key" {
+		t.Fatalf("onshape env ONSHAPE_MCP_AUTH__ACCESS_KEY = %q, want secret:onshape_access_key", got)
+	}
+	if got := e.Env["ONSHAPE_MCP_AUTH__SECRET_KEY"]; got != "secret:onshape_secret_key" {
+		t.Fatalf("onshape env ONSHAPE_MCP_AUTH__SECRET_KEY = %q, want secret:onshape_secret_key", got)
+	}
+	// NOT a required_secrets gate (OAuth is a valid alternative; server does not
+	// hard-exit without API keys).
+	if len(e.RequiredSecrets) != 0 {
+		t.Fatalf("onshape required_secrets = %v, want none (OAuth is a valid alternative; the keys are optional-secret posture)", e.RequiredSecrets)
+	}
+
+	// MIRROR GATE: generate→`manifest create` dry-run keeps the env as VERBATIM
+	// secret refs (no resolved plaintext) and projects the npx probe + vendored pin
+	// into a schema-valid manifest.
+	draft, warns, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: t.TempDir()})
+	if err != nil {
+		t.Fatalf("generate draft for onshape: %v (warnings=%v)", err, warns)
+	}
+	for _, want := range []string{"secret:onshape_access_key", "secret:onshape_secret_key", "onshape-mcp@0.4.0"} {
+		if !strings.Contains(draft, want) {
+			t.Fatalf("onshape draft missing %q\n---\n%s", want, draft)
+		}
+	}
+	parseReady := strings.Replace(draft, "port: 0", "port: 9315", 1)
+	m, err := config.ParseManifest(strings.NewReader(parseReady))
+	if err != nil {
+		t.Fatalf("onshape drafted manifest failed ParseManifest+Validate (mirror gate): %v\n---\n%s", err, parseReady)
+	}
+	if got := m.Env["ONSHAPE_MCP_AUTH__ACCESS_KEY"]; got != "secret:onshape_access_key" {
+		t.Fatalf("onshape drafted manifest env ACCESS_KEY = %q, want verbatim secret ref", got)
+	}
+	if got := m.Env["ONSHAPE_MCP_AUTH__SECRET_KEY"]; got != "secret:onshape_secret_key" {
+		t.Fatalf("onshape drafted manifest env SECRET_KEY = %q, want verbatim secret ref", got)
+	}
+	if len(m.RequiredSecrets) != 0 {
+		t.Fatalf("onshape drafted manifest gained required_secrets %v (must stay optional-secret)", m.RequiredSecrets)
+	}
+	if m.VendoredSource == nil || strings.TrimSpace(m.VendoredSource.PinnedRef) == "" {
+		t.Fatalf("onshape drafted manifest lost the pinned vendored_source: %#v", m.VendoredSource)
 	}
 }
