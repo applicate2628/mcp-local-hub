@@ -106,6 +106,25 @@ func newMarketplaceSearchCmd() *cobra.Command {
 					sanitizeCatalogField(e.Summary),
 				)
 			}
+			// S4: docs_only POINTER rows are also catalog-discoverable. List them in
+			// the SAME table, marked `docs-only` in the TRANSPORT column so the
+			// operator sees they are manual-install pointers (not one-click installs).
+			// They live in the separate cat.DocsOnly array (bot #446 P1), so the
+			// search command must iterate it too or they would be CLI-invisible
+			// despite being GUI-discoverable (bot #446 R3 — enumerate ALL consumers).
+			for i := range cat.DocsOnly {
+				d := &cat.DocsOnly[i]
+				if q != "" && !docsOnlyMatches(d, q) {
+					continue
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+					sanitizeCatalogField(d.ID),
+					sanitizeCatalogField(d.Name),
+					"docs-only",
+					sanitizeCatalogField(strings.Join(d.Categories, ",")),
+					sanitizeCatalogField(d.Summary),
+				)
+			}
 			return w.Flush()
 		},
 	}
@@ -206,6 +225,26 @@ func newMarketplaceShowCmd() *cobra.Command {
 				}
 				return nil
 			}
+			// S4: not an installable entry — it may be a docs_only POINTER row. Print
+			// its pointer block (homepage / readme / manual_install steps / why it is
+			// docs-only) via the shared DocsOnlyPointerText owner instead of "not
+			// found", so an operator who searched and saw the `docs-only`-tagged row
+			// can `show` it for the manual setup steps (bot #446 R3).
+			for i := range cat.DocsOnly {
+				d := &cat.DocsOnly[i]
+				if d.ID != args[0] {
+					continue
+				}
+				// DocsOnlyPointerText already routes every field through the untrusted-
+				// rune owner (it refuses a hostile-rune row), so the pointer text is
+				// terminal-safe; print it verbatim. A refusal surfaces as the error.
+				pointer, perr := api.DocsOnlyPointerText(d)
+				if perr != nil {
+					return fmt.Errorf("docs-only entry %q could not be rendered: %w", args[0], perr)
+				}
+				fmt.Fprint(cmd.OutOrStdout(), pointer)
+				return nil
+			}
 			return fmt.Errorf("entry %q not found in catalog", args[0])
 		},
 	}
@@ -263,6 +302,16 @@ func newMarketplaceGenerateCmd() *cobra.Command {
 				fmt.Fprint(cmd.OutOrStdout(), draft)
 				return nil
 			}
+			// S4: a docs_only POINTER row is a manual-install pointer, NOT an
+			// installable entry — it has no command/args/url to draft. REFUSE generate
+			// with a clear message that points the operator at `show <id>` for the
+			// manual steps, mirroring the GUI's DOCS_ONLY_NOT_INSTALLABLE. stdout stays
+			// empty (the error is the operator-facing message). bot #446 R3.
+			for i := range cat.DocsOnly {
+				if cat.DocsOnly[i].ID == args[0] {
+					return fmt.Errorf("entry %q is a docs-only pointer (manual-install, not one-click installable) — there is no manifest to generate; run `mcphub marketplace show %s` for the setup steps", args[0], args[0])
+				}
+			}
 			return fmt.Errorf("entry %q not found in catalog", args[0])
 		},
 	}
@@ -284,7 +333,13 @@ func newMarketplaceRefreshCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Refreshed catalog: %d entries.\n", len(cat.Entries))
+			// S4: report the docs_only pointer count alongside entries so an operator
+			// force-refreshing sees the manual-install pointers landed too (bot #446 R3).
+			if len(cat.DocsOnly) > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "Refreshed catalog: %d entries, %d docs-only pointers.\n", len(cat.Entries), len(cat.DocsOnly))
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "Refreshed catalog: %d entries.\n", len(cat.Entries))
+			}
 			return nil
 		},
 	}
@@ -300,6 +355,16 @@ func newMarketplaceRefreshCmd() *cobra.Command {
 func entryMatches(e *api.MarketplaceEntry, q string) bool {
 	hay := strings.ToLower(strings.Join([]string{
 		e.ID, e.Name, e.Summary, strings.Join(e.Categories, " "),
+	}, " "))
+	return strings.Contains(hay, q)
+}
+
+// docsOnlyMatches is the docs_only counterpart of entryMatches — the SAME
+// case-insensitive substring match across the same human-readable fields (a
+// docs_only row has no transport/command, so those are not in the haystack).
+func docsOnlyMatches(d *api.DocsOnlyEntry, q string) bool {
+	hay := strings.ToLower(strings.Join([]string{
+		d.ID, d.Name, d.Summary, strings.Join(d.Categories, " "),
 	}, " "))
 	return strings.Contains(hay, q)
 }
