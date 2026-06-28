@@ -89,6 +89,29 @@ var tierMusicLocalCatalogIDs = []string{"suno"}
 //     [metabase_api_key].
 var tierSecretGatedVendoredCatalogIDs = []string{"tableau", "metabase"}
 
+// tierVendorWave2bCatalogIDs are the vendor-breadth wave-2b clean rows. Each is a
+// uvx-launched community fork carrying a pinned vendored_source, verified to launch
+// (build + entry-point resolve) on a CLEAN uv cache, with its in-app bridge bound to
+// loopback (or no socket at all). They split across two install-gate postures:
+//   - obsidian — community MarkusPfundstein/mcp-obsidian (MIT), PyPI mcp-obsidian
+//     ==0.2.2; stdio + a CLIENT to the 'Local REST API' Obsidian plugin at
+//     https://127.0.0.1:27124 (loopback, verified). READY (NOT disabled-until-probe):
+//     the gate is the REQUIRED secret — mcp-obsidian HARD-EXITS without OBSIDIAN_API_KEY
+//     (verified on a clean-cache launch), so required_secrets:[obsidian_api_key].
+//   - logseq   — community ergut/mcp-logseq (MIT), PyPI mcp-logseq==1.8.0; stdio
+//     (the row PINS --transport stdio; the http mode DEFAULTS to --host 127.0.0.1 and
+//     needs an explicit --insecure to leave loopback, verified). READY: the gate is
+//     the REQUIRED secret — mcp-logseq HARD-EXITS without LOGSEQ_API_TOKEN, so
+//     required_secrets:[logseq_token]. LOGSEQ_API_URL has a localhost default, so it
+//     stays an editable literal (not a required secret).
+//   - origin-pro — community youngminsw/Origin-Pro-MCP (MIT), PyPI origin-pro-mcp
+//     ==0.1.0; stdio + Windows COM (win32com Dispatch 'Origin.ApplicationSI'), NO
+//     socket (loopback-clean by construction, like photoshop). disabled-until-probe:
+//     ARCH-GATES on platforms:[windows/amd64] (COM is Windows-only) + a host OriginLab
+//     Origin install glob + uvx. NO secret. LOW maturity (Alpha, ~21 stars) — caveat
+//     in the summary, but a clean-cache launch is verified.
+var tierVendorWave2bCatalogIDs = []string{"obsidian", "logseq", "origin-pro"}
+
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
 func v2CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v2", "catalog.json") }
@@ -128,10 +151,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	// The docs-only POINTER rows live in the SEPARATE top-level docs_only[] array
 	// (S4, bot #446 P1), NOT entries[], so the entries[] count is v1 + Tier-1 +
 	// music-local only. docs_only count is asserted separately below.
-	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs) + len(tierSecretGatedVendoredCatalogIDs)
+	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs) + len(tierSecretGatedVendoredCatalogIDs) + len(tierVendorWave2bCatalogIDs)
 	if len(cat.Entries) != wantCount {
-		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local + %d secret-gated-vendored; docs-only rows are in docs_only[], not entries[])",
-			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs), len(tierSecretGatedVendoredCatalogIDs))
+		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local + %d secret-gated-vendored + %d wave-2b; docs-only rows are in docs_only[], not entries[])",
+			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs), len(tierSecretGatedVendoredCatalogIDs), len(tierVendorWave2bCatalogIDs))
 	}
 	if len(cat.DocsOnly) != len(docsOnlyCatalogIDs) {
 		t.Fatalf("v2 catalog docs_only count = %d, want %d", len(cat.DocsOnly), len(docsOnlyCatalogIDs))
@@ -186,7 +209,7 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	// v0.4.0 tag SHA. reaper is a community fork (bonfire-systems/reaper-mcp)
 	// published to PyPI (reaper-mcp-server), pinned via vendored_source to the
 	// v0.1.1 tag SHA.
-	for _, id := range []string{"excel", "ableton", "kicad", "onshape", "reaper", "grafana", "photoshop", "zotero", "jupyter", "rmcp", "tableau", "metabase"} {
+	for _, id := range []string{"excel", "ableton", "kicad", "onshape", "reaper", "grafana", "photoshop", "zotero", "jupyter", "rmcp", "tableau", "metabase", "obsidian", "logseq", "origin-pro"} {
 		e := byID[id]
 		if e.VendoredSource == nil || strings.TrimSpace(e.VendoredSource.PinnedRef) == "" {
 			t.Fatalf("fork row %q is missing a pinned vendored_source", id)
@@ -1144,5 +1167,209 @@ func TestV2StdioPinnedRows_PinAwayFrom0000(t *testing.T) {
 	}
 	if hasStr(r.Args, "serve-http") {
 		t.Fatalf("rmcp args %v must NOT select the 0.0.0.0 serve-http subcommand", r.Args)
+	}
+}
+
+// --- vendor-breadth wave-2b row shape locks ---
+
+// TestV2Wave2bSecretGatedRows_RequiredSecretGate pins the obsidian + logseq rows: each
+// is a READY local-stdio row (NOT disabled-until-probe) whose install gate is a REQUIRED
+// vault secret backing a secret: env ref, carries a pinned vendored_source, and projects
+// required_secrets + the secret env ref into a schema-valid manifest (the post-install
+// AdmissionCheck re-sees the gate). Both servers HARD-EXIT on startup without their token
+// (verified by a clean-cache launch), which is exactly why they take the required_secrets
+// posture rather than an install_probe. logseq additionally pins --transport stdio
+// (the http mode defaults to 127.0.0.1 and needs --insecure to leave loopback), and its
+// LOGSEQ_API_URL stays an editable localhost-default literal (not a required secret).
+func TestV2Wave2bSecretGatedRows_RequiredSecretGate(t *testing.T) {
+	byID := v2CatalogByID(t)
+	cases := []struct {
+		id        string
+		secrets   []string
+		secretEnv map[string]string // env key -> expected secret: ref
+		pinArg    string            // a version-pinned arg the row must carry
+	}{
+		{
+			id:        "obsidian",
+			secrets:   []string{"obsidian_api_key"},
+			secretEnv: map[string]string{"OBSIDIAN_API_KEY": "secret:obsidian_api_key"},
+			pinArg:    "mcp-obsidian==0.2.2",
+		},
+		{
+			id:        "logseq",
+			secrets:   []string{"logseq_token"},
+			secretEnv: map[string]string{"LOGSEQ_API_TOKEN": "secret:logseq_token"},
+			pinArg:    "mcp-logseq==1.8.0",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.id, func(t *testing.T) {
+			e := byID[tc.id]
+			if e == nil {
+				t.Fatalf("v2 catalog missing the %s row", tc.id)
+			}
+			if e.Transport != "stdio" {
+				t.Fatalf("%s transport = %q, want stdio", tc.id, e.Transport)
+			}
+			if e.License != "MIT" {
+				t.Fatalf("%s license = %q, want MIT", tc.id, e.License)
+			}
+			// READY (the secret is the gate, not a host-app probe).
+			if e.Availability != "" && e.Availability != "ready" {
+				t.Fatalf("%s availability = %q, want ready/empty (the install gate is the required secret)", tc.id, e.Availability)
+			}
+			if e.InstallProbe != nil {
+				t.Fatalf("%s carries an install_probe %#v — its gate is required_secrets, not a host-app probe", tc.id, e.InstallProbe)
+			}
+			// required_secrets present, in order, each backed by its secret: env ref.
+			if len(e.RequiredSecrets) != len(tc.secrets) {
+				t.Fatalf("%s required_secrets = %v, want %v", tc.id, e.RequiredSecrets, tc.secrets)
+			}
+			for i, want := range tc.secrets {
+				if e.RequiredSecrets[i] != want {
+					t.Fatalf("%s required_secrets[%d] = %q, want %q", tc.id, i, e.RequiredSecrets[i], want)
+				}
+			}
+			for envKey, wantRef := range tc.secretEnv {
+				if got := e.Env[envKey]; got != wantRef {
+					t.Fatalf("%s env %s = %q, want %q (required_secrets must back a secret: env ref)", tc.id, envKey, got, wantRef)
+				}
+			}
+			if !hasStr(e.Args, tc.pinArg) {
+				t.Fatalf("%s args %v must pin %q", tc.id, e.Args, tc.pinArg)
+			}
+			// Pinned vendored_source (SHA or tag — neither a moving ref).
+			vs := e.VendoredSource
+			if vs == nil || strings.TrimSpace(vs.PinnedRef) == "" {
+				t.Fatalf("%s vendored_source.pinned_ref = %#v, want a pinned SHA/tag", tc.id, vs)
+			}
+			if config.IsMovingGitRef(vs.PinnedRef) {
+				t.Fatalf("%s pinned_ref %q is a moving ref", tc.id, vs.PinnedRef)
+			}
+
+			// MIRROR GATE: generate→`manifest create` dry-run projects required_secrets +
+			// the VERBATIM secret env ref (no resolved plaintext) into a schema-valid manifest.
+			draft, warns, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: t.TempDir()})
+			if err != nil {
+				t.Fatalf("generate draft for %s: %v (warnings=%v)", tc.id, err, warns)
+			}
+			wants := append([]string{"required_secrets:"}, tc.secrets...)
+			for _, ref := range tc.secretEnv {
+				wants = append(wants, ref)
+			}
+			for _, want := range wants {
+				if !strings.Contains(draft, want) {
+					t.Fatalf("%s draft missing %q\n---\n%s", tc.id, want, draft)
+				}
+			}
+			parseReady := strings.Replace(draft, "port: 0", "port: 9330", 1)
+			m, err := config.ParseManifest(strings.NewReader(parseReady))
+			if err != nil {
+				t.Fatalf("%s drafted manifest failed ParseManifest+Validate (mirror gate): %v\n---\n%s", tc.id, err, parseReady)
+			}
+			if len(m.RequiredSecrets) != len(tc.secrets) {
+				t.Fatalf("%s drafted manifest lost required_secrets: %v", tc.id, m.RequiredSecrets)
+			}
+			for envKey, wantRef := range tc.secretEnv {
+				if got := m.Env[envKey]; got != wantRef {
+					t.Fatalf("%s drafted manifest env %s = %q, want verbatim secret ref %q", tc.id, envKey, got, wantRef)
+				}
+			}
+			if m.VendoredSource == nil || strings.TrimSpace(m.VendoredSource.PinnedRef) == "" {
+				t.Fatalf("%s drafted manifest lost the pinned vendored_source: %#v", tc.id, m.VendoredSource)
+			}
+		})
+	}
+
+	// logseq-specific loopback discipline: the row must PIN --transport stdio (the http
+	// mode defaults to 127.0.0.1 but needs --insecure to bind non-loopback; pinning stdio
+	// avoids the question entirely), and must NOT carry the http transport token.
+	lg := byID["logseq"]
+	if !hasStr(lg.Args, "stdio") || !hasStr(lg.Args, "--transport") {
+		t.Fatalf("logseq args %v must pin --transport stdio (the http mode can leave loopback via --insecure)", lg.Args)
+	}
+	if hasStr(lg.Args, "http") {
+		t.Fatalf("logseq args %v must NOT select the http transport", lg.Args)
+	}
+	// LOGSEQ_API_URL stays an editable localhost-default literal (has a default, so it is
+	// NOT routed through required_secrets), consistent with grafana/jupyter localhost URLs.
+	if got := lg.Env["LOGSEQ_API_URL"]; !strings.HasPrefix(got, "http://localhost") {
+		t.Fatalf("logseq env LOGSEQ_API_URL = %q, want a localhost default literal (it has a default, so it is an editable literal not a secret)", got)
+	}
+	if hasStr(lg.RequiredSecrets, "logseq_api_url") {
+		t.Fatalf("logseq required_secrets %v must NOT gate the localhost-default URL", lg.RequiredSecrets)
+	}
+}
+
+// TestV2OriginProRow_WindowsArchGate pins the origin-pro row's Windows-only COM shape:
+// disabled-until-probe gated on uvx + a host OriginLab Origin host-exe glob + an arch
+// matrix of exactly [windows/amd64] (win32com COM is Windows-only). It is loopback-clean
+// by construction (stdio + COM, no socket), carries NO secret, and pins origin-pro-mcp
+// ==0.1.0. The arch matrix must survive generate→manifest create so the post-install
+// readiness gate re-evaluates the same allowlist.
+func TestV2OriginProRow_WindowsArchGate(t *testing.T) {
+	e := v2CatalogByID(t)["origin-pro"]
+	if e == nil {
+		t.Fatalf("v2 catalog missing the origin-pro row")
+	}
+	if e.Transport != "stdio" {
+		t.Fatalf("origin-pro transport = %q, want stdio (stdio + Windows COM, no socket)", e.Transport)
+	}
+	if e.License != "MIT" {
+		t.Fatalf("origin-pro license = %q, want MIT", e.License)
+	}
+	if e.Availability != config.AvailabilityDisabledUntilProbe {
+		t.Fatalf("origin-pro availability = %q, want %q", e.Availability, config.AvailabilityDisabledUntilProbe)
+	}
+	p := e.InstallProbe
+	if p == nil {
+		t.Fatalf("origin-pro row has no install_probe")
+	}
+	if !hasStr(p.Binaries, "uvx") {
+		t.Fatalf("origin-pro probe binaries %v must gate on uvx", p.Binaries)
+	}
+	if len(p.FileGlobs) == 0 {
+		t.Fatalf("origin-pro probe must carry a host OriginLab Origin file_globs entry")
+	}
+	for _, g := range p.FileGlobs {
+		if !config.IsAbsolutePathShape(g) {
+			t.Fatalf("origin-pro file_globs entry %q is not absolute-path-shaped", g)
+		}
+	}
+	// Arch matrix is EXACTLY windows/amd64 (win32com COM is Windows-only).
+	if len(p.Platforms) != 1 || p.Platforms[0] != "windows/amd64" {
+		t.Fatalf("origin-pro probe platforms = %v, want exactly [windows/amd64] (win32com COM is Windows-only)", p.Platforms)
+	}
+	// No secret on this row.
+	if len(e.RequiredSecrets) != 0 {
+		t.Fatalf("origin-pro required_secrets = %v, want none", e.RequiredSecrets)
+	}
+	for _, v := range e.Env {
+		if strings.HasPrefix(v, "secret:") {
+			t.Fatalf("origin-pro env carries a secret ref %q — the row has no secret", v)
+		}
+	}
+	if !hasStr(e.Args, "origin-pro-mcp==0.1.0") {
+		t.Fatalf("origin-pro args %v must pin origin-pro-mcp==0.1.0", e.Args)
+	}
+	// MIRROR GATE: the arch matrix survives generate→manifest create.
+	draft, warns, err := GenerateDraftManifest(e, GenerateOpts{WorkspaceFolder: t.TempDir()})
+	if err != nil {
+		t.Fatalf("generate draft for origin-pro: %v (warnings=%v)", err, warns)
+	}
+	parseReady := strings.Replace(draft, "port: 0", "port: 9331", 1)
+	m, err := config.ParseManifest(strings.NewReader(parseReady))
+	if err != nil {
+		t.Fatalf("origin-pro drafted manifest failed ParseManifest+Validate (mirror gate): %v\n---\n%s", err, parseReady)
+	}
+	if m.Availability != config.AvailabilityDisabledUntilProbe {
+		t.Fatalf("origin-pro drafted manifest lost availability gate: av=%q", m.Availability)
+	}
+	if m.InstallProbe == nil || len(m.InstallProbe.Platforms) != 1 || m.InstallProbe.Platforms[0] != "windows/amd64" {
+		t.Fatalf("origin-pro drafted manifest dropped/changed the [windows/amd64] arch gate: %#v", m.InstallProbe)
+	}
+	if m.VendoredSource == nil || strings.TrimSpace(m.VendoredSource.PinnedRef) == "" {
+		t.Fatalf("origin-pro drafted manifest lost the pinned vendored_source: %#v", m.VendoredSource)
 	}
 }

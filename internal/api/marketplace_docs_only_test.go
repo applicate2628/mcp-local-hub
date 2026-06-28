@@ -7,16 +7,23 @@ import (
 	"testing"
 )
 
-// docsOnlyCatalogIDs are the 9 S4 manual-install POINTER rows the v2 catalog
-// carries in its SEPARATE top-level docs_only[] array — servers the hub never
-// installs (immature, git-clone-only, macOS-only, or a LAN-bind risk), so they are
-// discoverable but install-inert by construction. They live OUT of entries[] so a
-// released v1-only client (which knows only stdio/native-http/http) ignores the
-// unknown top-level docs_only key instead of rejecting the WHOLE catalog on an
-// unknown entry transport (bot #446 P1).
+// docsOnlyCatalogIDs are the S4 manual-install POINTER rows the v2 catalog carries
+// in its SEPARATE top-level docs_only[] array — servers the hub never installs
+// (immature, git-clone-only, macOS-only, archived upstream, in-app-add-on/workbench
+// install, paid-edition requirement, or a LAN-bind risk), so they are discoverable
+// but install-inert by construction. They live OUT of entries[] so a released v1-only
+// client (which knows only stdio/native-http/http) ignores the unknown top-level
+// docs_only key instead of rejecting the WHOLE catalog on an unknown entry transport
+// (bot #446 P1). The vendor-breadth wave-2b batch appends 10 more pointers (office +
+// 3D/CAD + creative + flashcards), each license-confirmed via gh and docs-only for a
+// stated reason (very-low maturity, archived upstream, in-app add-on/workbench load,
+// paid Studio edition, or an archived/ambiguously-licensed dependency).
 var docsOnlyCatalogIDs = []string{
 	"comsol", "solidworks", "autocad", "guitarpro", "flstudio",
 	"bitwig", "midi", "logicpro", "cubase",
+	// wave-2b additions.
+	"mathematica", "word", "powerpoint", "blender", "freecad",
+	"fusion360", "rhino", "davinci", "audacity", "anki",
 }
 
 // TestDocsOnlyPointerText_EmitsPointerNotManifest pins the S4 pointer text: a
@@ -279,6 +286,11 @@ func TestV2DocsOnlyRows_PresentInPointerArray(t *testing.T) {
 		"comsol": "MIT", "solidworks": "MIT", "autocad": "MIT",
 		"guitarpro": "ISC", "flstudio": "MIT", "bitwig": "MIT",
 		"midi": "MIT", "logicpro": "MIT", "cubase": "MIT",
+		// wave-2b additions (license-confirmed via `gh api repos/<r>/license`).
+		"mathematica": "MIT", "word": "MIT", "powerpoint": "MIT",
+		"blender": "MIT", "freecad": "MIT", "fusion360": "MIT",
+		"rhino": "MIT", "davinci": "MIT", "audacity": "Apache-2.0",
+		"anki": "MIT",
 	}
 	if len(cat.DocsOnly) != len(docsOnlyCatalogIDs) {
 		t.Fatalf("docs_only count = %d, want %d", len(cat.DocsOnly), len(docsOnlyCatalogIDs))

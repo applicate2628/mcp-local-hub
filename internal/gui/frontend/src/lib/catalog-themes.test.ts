@@ -25,6 +25,7 @@ describe("themeForCategories — granular category → coarse theme", () => {
     ["scientific-computing", "Engineering & CAD"],
     ["science", "Engineering & CAD"],
     ["statistics", "Engineering & CAD"],
+    ["plotting", "Engineering & CAD"],
     // Music & Audio
     ["music", "Music & Audio"],
     ["daw", "Music & Audio"],
@@ -34,6 +35,10 @@ describe("themeForCategories — granular category → coarse theme", () => {
     ["image-editing", "Creative & Media"],
     ["design", "Creative & Media"],
     ["creative", "Creative & Media"],
+    ["3d", "Creative & Media"],
+    ["modeling", "Creative & Media"],
+    ["video", "Creative & Media"],
+    ["editing", "Creative & Media"],
     // Development & Code
     ["code-intelligence", "Development & Code"],
     ["lsp", "Development & Code"],
@@ -55,6 +60,8 @@ describe("themeForCategories — granular category → coarse theme", () => {
     ["analytics", "Data & Office"],
     ["notebook", "Data & Office"],
     ["data-analysis", "Data & Office"],
+    ["documents", "Data & Office"],
+    ["presentations", "Data & Office"],
     // Research & Docs
     ["docs", "Research & Docs"],
     ["papers", "Research & Docs"],
@@ -62,6 +69,10 @@ describe("themeForCategories — granular category → coarse theme", () => {
     ["diagrams", "Research & Docs"],
     ["math", "Research & Docs"],
     ["pkm", "Research & Docs"],
+    ["notes", "Research & Docs"],
+    ["productivity", "Research & Docs"],
+    ["education", "Research & Docs"],
+    ["flashcards", "Research & Docs"],
     // Utilities
     ["utilities", "Utilities"],
     ["memory", "Utilities"],
@@ -180,11 +191,13 @@ describe("groupByTheme — flat list → ordered theme sections", () => {
   });
 
   it("groups the full v2 catalog into the seven expected non-empty themes", () => {
-    // The real 30-entry v2 catalog primary categories. Confirms every entry
+    // The real 33-entry v2 catalog primary categories. Confirms every entry
     // lands and the distribution matches the design (no surprise Other). The
     // vendor-breadth wave-2a rows (grafana/tableau/photoshop/zotero/metabase/
     // jupyter/rmcp) add the Data & Office BI/observability cluster, the rmcp
-    // science row, the zotero reference row, and the first Creative & Media row.
+    // science row, the zotero reference row, and the first Creative & Media row;
+    // the wave-2b rows (obsidian/logseq PKM + origin-pro scientific-graphing)
+    // extend Research & Docs and Engineering & CAD.
     const rows: Row[] = [
       { name: "filesystem", categories: ["filesystem", "io"] },
       { name: "git", categories: ["git", "vcs"] },
@@ -216,6 +229,10 @@ describe("groupByTheme — flat list → ordered theme sections", () => {
       { name: "metabase", categories: ["data", "bi", "analytics"] },
       { name: "jupyter", categories: ["data", "notebook", "dev"] },
       { name: "rmcp", categories: ["science", "statistics", "data-analysis"] },
+      // vendor-breadth wave-2b clean rows.
+      { name: "obsidian", categories: ["pkm", "notes", "productivity"] },
+      { name: "logseq", categories: ["pkm", "notes"] },
+      { name: "origin-pro", categories: ["science", "data-analysis", "plotting"] },
     ];
     const sections = groupByTheme(rows, cats, key);
     // No Other section for the real catalog (every entry maps).
@@ -230,10 +247,10 @@ describe("groupByTheme — flat list → ordered theme sections", () => {
     ]);
     const counts = Object.fromEntries(sections.map((s) => [s.theme, s.entries.length]));
     expect(counts).toEqual({
-      "Engineering & CAD": 6, // excel, matlab, ansys, kicad, onshape, rmcp
+      "Engineering & CAD": 7, // excel, matlab, ansys, kicad, onshape, rmcp, origin-pro
       "Development & Code": 5, // git, everything, sequential-thinking, serena, codex-mcp-server
       "Data & Office": 6, // filesystem, sqlite, grafana, tableau, metabase, jupyter
-      "Research & Docs": 5, // context7, qt-docs, excalidraw, paper-search-mcp, zotero
+      "Research & Docs": 7, // context7, qt-docs, excalidraw, paper-search-mcp, zotero, obsidian, logseq
       "Music & Audio": 3, // ableton, suno, reaper
       "Creative & Media": 1, // photoshop
       "Utilities": 4, // fetch, playwright, memory, time
