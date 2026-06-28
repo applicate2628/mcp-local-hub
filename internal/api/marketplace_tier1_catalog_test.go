@@ -629,7 +629,16 @@ func TestV2OnshapeRow_NpxProbeAndOptionalSecretEnv(t *testing.T) {
 	if !has(e.InstallProbe.Binaries, "npx") {
 		t.Fatalf("onshape probe binaries %v MUST gate on the npx launcher (cloud server, no host app)", e.InstallProbe.Binaries)
 	}
-	// CLOUD: no host-app file glob — the probe gates only on npx.
+	// codex-bot #441 P2 (529): the probe MUST also require `node`, not just the
+	// `npx` shim — a host with an npx shim on PATH but a missing/broken node
+	// runtime would pass a `npx`-only catalog probe, persist the manifest, and
+	// only fail later at the runtimeBehindLauncher("npx") preflight inside
+	// Install (after the manifest write). Gating on `node` here blocks the row
+	// at AvailabilityAdmissionEntry, before any manifest write.
+	if !has(e.InstallProbe.Binaries, "node") {
+		t.Fatalf("onshape probe binaries %v MUST also gate on the node runtime (an npx shim without node passes a npx-only probe then fails post-manifest-write)", e.InstallProbe.Binaries)
+	}
+	// CLOUD: no host-app file glob — the probe gates only on the npx/node launcher.
 	if len(e.InstallProbe.Files) != 0 || len(e.InstallProbe.FileGlobs) != 0 {
 		t.Fatalf("onshape probe must carry NO files[]/file_globs[] (cloud server, no host CAD app): files=%v file_globs=%v", e.InstallProbe.Files, e.InstallProbe.FileGlobs)
 	}

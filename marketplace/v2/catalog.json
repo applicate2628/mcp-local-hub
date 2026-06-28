@@ -527,6 +527,7 @@
       "availability": "disabled-until-probe",
       "install_probe": {
         "binaries": [
+          "node",
           "npx"
         ]
       },
