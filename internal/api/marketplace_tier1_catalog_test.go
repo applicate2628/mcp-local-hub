@@ -818,20 +818,29 @@ func TestV2SecretGatedVendoredRows_RequiredSecretGate(t *testing.T) {
 		pinArg    string            // a version-pinned npm arg the row must carry
 	}{
 		{
+			// The Tableau instance URL is routed through required_secrets (no
+			// required-non-secret-config mechanism exists), so SERVER is a
+			// secret: ref AND in required_secrets — the install BLOCKS until the
+			// operator sets the real URL, never shipping the placeholder default.
 			id:      "tableau",
 			license: "Apache-2.0",
-			secrets: []string{"tableau_pat_name", "tableau_pat_value"},
+			secrets: []string{"tableau_server_url", "tableau_pat_name", "tableau_pat_value"},
 			secretEnv: map[string]string{
+				"SERVER":    "secret:tableau_server_url",
 				"PAT_NAME":  "secret:tableau_pat_name",
 				"PAT_VALUE": "secret:tableau_pat_value",
 			},
 			pinArg: "@tableau/mcp-server@2.18.1",
 		},
 		{
+			// Same required-URL gate for metabase: METABASE_URL is a secret: ref
+			// AND in required_secrets so the placeholder URL can never ship as the
+			// live default.
 			id:      "metabase",
 			license: "MIT",
-			secrets: []string{"metabase_api_key"},
+			secrets: []string{"metabase_url", "metabase_api_key"},
 			secretEnv: map[string]string{
+				"METABASE_URL":     "secret:metabase_url",
 				"METABASE_API_KEY": "secret:metabase_api_key",
 			},
 			pinArg: "@easecloudio/mcp-metabase-server@1.3.0",
@@ -921,11 +930,80 @@ func TestV2SecretGatedVendoredRows_RequiredSecretGate(t *testing.T) {
 	}
 }
 
+// TestV2DataRows_NoPlaceholderURLDefaultAndReadOnlyToolMode locks the bot #448 P2
+// config-correctness fixes for the tableau + metabase rows, which the GUI one-click
+// path writes VERBATIM with no operator-edit step:
+//
+//   findings 2+3 — the instance URL must NOT ship as a placeholder http(s):// literal
+//     default (that would silently target a sample URL on every install). Since there
+//     is no required-non-secret-config mechanism, the URL is routed through the
+//     required_secrets gate as a secret: env ref, so a one-click install BLOCKS until
+//     the operator supplies the real URL. The URL env value must therefore be a
+//     `secret:` ref AND the key must be in required_secrets — never a bare URL.
+//   finding 1 — metabase must default to the upstream NON-destructive tool set
+//     (TOOL_MODE=read); omitting it would default upstream to `all` (create/update/
+//     delete). The operator opts into the destructive surface explicitly.
+func TestV2DataRows_NoPlaceholderURLDefaultAndReadOnlyToolMode(t *testing.T) {
+	byID := v2CatalogByID(t)
+
+	// The URL env key per row + the required_secrets key it must be gated by.
+	urlGate := map[string]struct{ envKey, secretKey string }{
+		"tableau":  {"SERVER", "tableau_server_url"},
+		"metabase": {"METABASE_URL", "metabase_url"},
+	}
+	for id, g := range urlGate {
+		e := byID[id]
+		if e == nil {
+			t.Fatalf("v2 catalog missing the %s row", id)
+		}
+		got := e.Env[g.envKey]
+		// MUST be a secret: ref, never a bare http(s) placeholder default.
+		if !strings.HasPrefix(got, "secret:") {
+			t.Fatalf("%s env %s = %q — the instance URL must be a secret: ref (required-URL gate), not a placeholder literal that ships as the live default", id, g.envKey, got)
+		}
+		if strings.HasPrefix(got, "secret:http") || strings.Contains(got, "://") {
+			t.Fatalf("%s env %s = %q looks like a bare URL leaked into the value", id, g.envKey, got)
+		}
+		// AND must be in required_secrets so the one-click install BLOCKS until set.
+		if !hasStr(e.RequiredSecrets, g.secretKey) {
+			t.Fatalf("%s required_secrets %v must include %q so the install blocks until the real URL is supplied (no placeholder default)", id, e.RequiredSecrets, g.secretKey)
+		}
+		// Belt-and-suspenders: no env value anywhere is a bare http(s) literal.
+		for k, v := range e.Env {
+			if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
+				t.Fatalf("%s env %s = %q ships a placeholder URL literal as the live default; route it through the required_secrets gate instead", id, k, v)
+			}
+		}
+	}
+
+	// finding 1: metabase ships read-only (TOOL_MODE=read), never the destructive
+	// upstream `all` default.
+	mb := byID["metabase"]
+	if got := mb.Env["TOOL_MODE"]; got != "read" {
+		t.Fatalf("metabase env TOOL_MODE = %q, want \"read\" (non-destructive default; omitting it defaults upstream to `all` which can create/update/delete)", got)
+	}
+}
+
+// TestV2TableauRow_NodeEngineNoteInSummary pins bot #448 finding 5: the tableau row's
+// npm package declares engines.node >= 22.7.5 and the probe cannot version-check node,
+// so the summary MUST loudly document the requirement (the failure on an older node is
+// a clear spawn-time version error, not silent — a summary note is the agreed mitigation,
+// no node-version probe field is added).
+func TestV2TableauRow_NodeEngineNoteInSummary(t *testing.T) {
+	e := v2CatalogByID(t)["tableau"]
+	if e == nil {
+		t.Fatalf("v2 catalog missing the tableau row")
+	}
+	if !strings.Contains(e.Summary, "22.7.5") {
+		t.Fatalf("tableau summary must document the node >= 22.7.5 requirement (engines.node from @tableau/mcp-server@2.18.1); summary=%q", e.Summary)
+	}
+}
+
 // TestV2PhotoshopRow_WindowsArchGate pins the photoshop row's Windows-only COM shape:
 // disabled-until-probe gated on uvx + a host Adobe Photoshop host-exe glob + an arch
 // matrix of exactly [windows/amd64] (win32com COM is Windows-only). On any non-Windows
-// host the row stays inert. PS_VERSION is a literal config value (not a secret), and
-// the row carries NO secret at all. The arch matrix must survive generate→manifest
+// host the row stays inert. The row carries NO secret and NO PS_VERSION (v0.1.11
+// auto-detects via COM). The arch matrix must survive generate→manifest
 // create so the post-install readiness gate re-evaluates the same allowlist.
 func TestV2PhotoshopRow_WindowsArchGate(t *testing.T) {
 	e := v2CatalogByID(t)["photoshop"]
@@ -954,13 +1032,30 @@ func TestV2PhotoshopRow_WindowsArchGate(t *testing.T) {
 	if len(p.Platforms) != 1 || p.Platforms[0] != "windows/amd64" {
 		t.Fatalf("photoshop probe platforms = %v, want exactly [windows/amd64] (win32com COM is Windows-only)", p.Platforms)
 	}
-	// No secret on this row (PS_VERSION is a literal config value).
+	// No secret on this row, and no env at all.
 	if len(e.RequiredSecrets) != 0 {
 		t.Fatalf("photoshop required_secrets = %v, want none", e.RequiredSecrets)
 	}
 	for _, v := range e.Env {
 		if strings.HasPrefix(v, "secret:") {
-			t.Fatalf("photoshop env carries a secret ref %q — the row has no secret (PS_VERSION is literal config)", v)
+			t.Fatalf("photoshop env carries a secret ref %q — the row has no secret", v)
+		}
+	}
+	// PROBE↔PS_VERSION ALIGNMENT (bot #448 finding 4): v0.1.11's COM adapter builds
+	// Session()/Application() with NO version argument (auto-detects the installed
+	// Photoshop via the COM ProgID) — it does NOT read PS_VERSION. A hardcoded
+	// PS_VERSION=2024 would be inert AND would imply a version pin that does not
+	// happen, falsely conflicting with the version-agnostic `Adobe Photoshop *`
+	// glob. So the row MUST NOT set PS_VERSION; the glob stays version-agnostic so
+	// it matches the auto-detect behavior for ANY installed year.
+	if _, ok := e.Env["PS_VERSION"]; ok {
+		t.Fatalf("photoshop must NOT set PS_VERSION (inert in v0.1.11, which auto-detects via COM; a hardcoded year falsely conflicts with the version-agnostic glob): env=%v", e.Env)
+	}
+	// The glob must stay version-agnostic (not narrowed to a single year), matching
+	// the auto-detect behavior — assert it does not pin a 4-digit year segment.
+	for _, g := range p.FileGlobs {
+		if strings.Contains(g, "Adobe Photoshop 20") {
+			t.Fatalf("photoshop file_globs %q narrows to a specific year; must stay version-agnostic (Adobe Photoshop *) to match COM auto-detect", g)
 		}
 	}
 	// MIRROR GATE: the arch matrix survives generate→manifest create.
