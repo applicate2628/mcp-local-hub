@@ -1,8 +1,22 @@
 ---
-status: open
+status: closed
 severity: low
 context: adjacent-finding
+closed: 2026-06-28
 ---
+
+## Resolution (2026-06-28)
+
+Fixed by moving the canonical literal to `internal/api`
+(`api.DefaultMarketplaceRegistryURL`, in `marketplace_catalog.go` next to the
+schema-version consts it owns). `internal/cli` and `internal/gui` BOTH already
+import `internal/api` for `LoadMarketplaceCatalog`, so each now re-exports from
+it (`cli.DefaultMarketplaceRegistryURL = api.DefaultMarketplaceRegistryURL`;
+`gui.defaultMarketplaceRegistryURL = api.DefaultMarketplaceRegistryURL`). This is
+cleaner than the suggested new `internal/marketplaceurl` leaf — no new package,
+the shared lower layer is the single owner, and the GUI still never imports the
+CLI. `grep` confirms the URL literal now appears exactly once. One bump point;
+the drift footgun is gone. (The suggested-fix note below is superseded.)
 
 # Default marketplace-registry URL is duplicated across cli + gui (must bump together)
 
