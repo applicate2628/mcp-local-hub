@@ -500,6 +500,44 @@
       "required_secrets": [
         "acedata_api_token"
       ]
+    },
+    {
+      "id": "onshape",
+      "name": "Onshape MCP server",
+      "summary": "AI-assisted access to your Onshape cloud CAD documents — create sketches, extrude/revolve/sweep/fillet parts, build construction planes, take Part Studio screenshots, export STL/STEP, and write FeatureScript over the full Onshape REST API. Community server altendky/onshape-mcp, dual-licensed Apache-2.0 OR MIT (this row uses Apache-2.0). npx-packaged: the published onshape-mcp@0.4.0 npm package is a thin Node launcher around a per-platform Rust binary, run via `npx --yes onshape-mcp@0.4.0` (version pinned). PROVENANCE: onshape-mcp@0.4.0 is SLSA-provenance-attested and OIDC-published by the maintainer (altendky); the vendored_source pin is the v0.4.0 tag SHA. CLOUD — NO HOST APP: Onshape runs in the browser/cloud, so there is no local CAD install to detect; the install_probe gates only on the npx launcher being present, NOT a host binary. AUTH (two paths): the server's `auto` mode prefers OAuth (a browser login flow it walks you through on first use — no static credentials stored) OR Basic auth via Onshape API keys. To use API keys, store them in the mcphub vault and they wire to env ONSHAPE_MCP_AUTH__ACCESS_KEY = secret:onshape_access_key + ONSHAPE_MCP_AUTH__SECRET_KEY = secret:onshape_secret_key. These are OPTIONAL (not a required_secrets install gate) because OAuth is a valid alternative and the server does not hard-exit without API keys — it enters an OAuth-pending state and waits. D-4 CAVEAT: this is a CLOUD API-key (or OAuth) integration that can WRITE to your Onshape CAD documents (create/modify parts, export); supply credentials only through the hub vault, never as plaintext. PLATFORM: the published npm ships win32-x64 + linux/darwin (x64 + arm64) binaries but NOT win32-arm64 — on a Windows ARM64 host the launcher reports unsupported-platform at startup (a loud, clear error, not a silent failure). The binaries:[node,npx] probe gates on the Node launcher but cannot arch-gate (catalog-schema limitation shared by all launcher-based rows, e.g. KiCad's uvx probe); an arch-aware probe is a tracked follow-up. STATUS: early development — offered to try; some operations work more reliably than others at this stage.",
+      "homepage": "https://github.com/altendky/onshape-mcp",
+      "readme_url": "https://raw.githubusercontent.com/altendky/onshape-mcp/87eb9516df6b30d7a3d07340a1125dc06ed0e2f5/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "--yes",
+        "onshape-mcp@0.4.0"
+      ],
+      "env": {
+        "ONSHAPE_MCP_AUTH__ACCESS_KEY": "secret:onshape_access_key",
+        "ONSHAPE_MCP_AUTH__SECRET_KEY": "secret:onshape_secret_key"
+      },
+      "categories": [
+        "engineering",
+        "cad",
+        "mechanical",
+        "cloud"
+      ],
+      "license": "Apache-2.0",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "node",
+          "npx"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/altendky/onshape-mcp",
+        "pinned_ref": "87eb9516df6b30d7a3d07340a1125dc06ed0e2f5",
+        "install_cmd": "npx --yes onshape-mcp@0.4.0",
+        "run_cmd": "npx --yes onshape-mcp@0.4.0",
+        "license_status": "confirmed"
+      }
     }
   ]
 }
