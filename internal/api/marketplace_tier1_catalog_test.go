@@ -356,64 +356,50 @@ func TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles(t *testing.T) {
 	}
 }
 
-// TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact is the codex-bot P1
-// closure ("ableton must install from an installable source"). The ableton row MUST
-// install from mcphub's build-fixed fork applicate2628/ableton-mcp-extended at an
-// immutable git SHA. Upstream uisato/ableton-mcp-extended's pyproject mis-declared
-// the optional `AbletonMCP_UDP` package at the wrong path, so the setuptools source
-// build failed and `uvx --from git+...uisato...` could not install; our fork drops
-// that optional package (not imported by MCP_Server/server.py) so the install builds.
-// The row must NOT install from the PyPI distribution `ableton-mcp-extended`, which is
-// a DIFFERENT codebase (IMNMV's branch) whose project URLs point at
-// github.com/IMNMV/ableton-mcp and which depends on the nonexistent `audio2llm`
-// package (install fails). This test pins the provenance-consistency invariant the
-// bot flagged: the vetted source (vendored_source.repo + readme_url), the executed
-// command (args git+ URL + vendored_source.install_cmd/run_cmd), and the SHA pin all
-// agree, so the code users run is exactly the repo/readme/license being presented.
+// TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact locks the
+// Ableton row's provenance-consistency invariant. The catalog must execute the
+// same immutable, reviewed upstream source it advertises in vendored_source and
+// readme_url. In particular, it must not install from the project-owned personal
+// fork used briefly as a build-fixed fork, because marketplace one-click install
+// turns this row into a long-lived daemon that executes as the local user.
 func TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact(t *testing.T) {
 	e := v2CatalogByID(t)["ableton"]
 	if e == nil {
 		t.Fatalf("v2 catalog missing the ableton row")
 	}
 
-	const wantRepo = "https://github.com/applicate2628/ableton-mcp-extended"
+	const wantRepo = "https://github.com/ahujasid/ableton-mcp"
+	const forbiddenFork = "https://github.com/applicate2628/ableton-mcp-extended"
 
 	vs := e.VendoredSource
 	if vs == nil {
 		t.Fatalf("ableton row lost its vendored_source")
 	}
 	if vs.Repo != wantRepo {
-		t.Fatalf("ableton vendored_source.repo = %q, want %q (must be mcphub's build-fixed fork, not upstream uisato whose pyproject fails to build, and not the hijacked PyPI source)", vs.Repo, wantRepo)
+		t.Fatalf("ableton vendored_source.repo = %q, want trusted upstream %q", vs.Repo, wantRepo)
 	}
-	// The pin must be a 40-hex git SHA (immutable), not the prior bare PyPI version
-	// "2.2.0" that resolved to IMNMV's broken/audio2llm-missing package.
 	sha := strings.TrimSpace(vs.PinnedRef)
 	if !gitSHA40.MatchString(sha) {
-		t.Fatalf("ableton vendored_source.pinned_ref = %q, want a 40-hex git SHA (a bare PyPI version like 2.2.0 is a provenance/install hazard)", sha)
+		t.Fatalf("ableton vendored_source.pinned_ref = %q, want a 40-hex git SHA", sha)
 	}
-	// Defense-in-depth: the same gate the catalog/manifest validators use must agree
-	// the SHA is immutable (not a moving branch).
 	if config.IsMovingGitRef(vs.PinnedRef) {
 		t.Fatalf("ableton pinned_ref %q is a moving ref (must be an immutable SHA)", vs.PinnedRef)
 	}
 
-	// The EXECUTED artifact must come from that exact git source + SHA. The PyPI name
-	// `ableton-mcp-extended==<ver>` in --from would silently pull IMNMV's package, so
-	// the args MUST carry the git+<repo>@<sha> form pointing at our build-fixed fork.
 	wantGitFrom := "git+" + wantRepo + "@" + sha
 	joinedArgs := strings.Join(e.Args, " ")
 	if !strings.Contains(joinedArgs, wantGitFrom) {
-		t.Fatalf("ableton args %v do not install from the pinned git source %q (a PyPI-name --from would pull the wrong IMNMV codebase)", e.Args, wantGitFrom)
+		t.Fatalf("ableton args %v do not install from the pinned upstream git source %q", e.Args, wantGitFrom)
 	}
-	// Guard against the prior PyPI-name pin lingering anywhere in the executed args.
-	if strings.Contains(joinedArgs, "ableton-mcp-extended==") {
-		t.Fatalf("ableton args %v still carry a PyPI-version --from pin (==<ver>); must be the git+<repo>@<sha> form", e.Args)
+	if strings.Contains(joinedArgs, forbiddenFork) {
+		t.Fatalf("ableton args %v still install from the untrusted personal fork %q", e.Args, forbiddenFork)
 	}
-	// vendored_source.install_cmd / run_cmd must reflect the same git+SHA source so the
-	// advertised reproduction command matches what `command`+`args` actually run.
 	for label, cmd := range map[string]string{"install_cmd": vs.InstallCmd, "run_cmd": vs.RunCmd} {
 		if !strings.Contains(cmd, wantGitFrom) {
-			t.Fatalf("ableton vendored_source.%s = %q does not reference the pinned git source %q", label, cmd, wantGitFrom)
+			t.Fatalf("ableton vendored_source.%s = %q does not reference the pinned upstream git source %q", label, cmd, wantGitFrom)
+		}
+		if strings.Contains(cmd, forbiddenFork) {
+			t.Fatalf("ableton vendored_source.%s = %q still references the untrusted personal fork %q", label, cmd, forbiddenFork)
 		}
 	}
 }
