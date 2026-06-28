@@ -582,6 +582,260 @@
         "run_cmd": "uvx --from reaper-mcp-server==0.1.1 reaper-mcp-server",
         "license_status": "confirmed"
       }
+    },
+    {
+      "id": "grafana",
+      "name": "Grafana MCP server (official)",
+      "summary": "Drive a Grafana server from an AI client -- search and read dashboards, query Prometheus/Loki/other datasources, manage alerting and incidents, render panel images, and more. OFFICIAL Grafana server (grafana/mcp-grafana, Apache-2.0), pinned to release v0.17.0. The PyPI package mcp-grafana==0.17.0 is a thin Python wheel that bundles the per-platform Go server binary (win/linux/darwin x64+arm64), run via uvx. STDIO by design: the Go binary's default transport is stdio (this row passes -t stdio explicitly to pin it); the SSE / streamable-http modes are opt-in (-t sse / -t streamable-http) and even then bind localhost:8000 (loopback, not 0.0.0.0), so there is no LAN surface. CONFIG BURDEN: this row drives a Grafana SERVER you already run -- set GRAFANA_URL to your instance (defaults to http://localhost:3000) and supply a Grafana service-account token. The token is wired to the mcphub vault as GRAFANA_SERVICE_ACCOUNT_TOKEN = secret:grafana_service_account_token (GRAFANA_API_KEY is the deprecated old env name -- the row uses the current GRAFANA_SERVICE_ACCOUNT_TOKEN). The token is the OPTIONAL-secret posture (not a required_secrets install gate): the server starts without it (auth is enforced per-tool-call at the Grafana API), and read-only tools work against an anonymous-access instance, so a one-click install is not hard-blocked. Supply the token only through the hub vault, never as plaintext. disabled-until-probe: enables when uvx is on PATH.",
+      "homepage": "https://github.com/grafana/mcp-grafana",
+      "readme_url": "https://raw.githubusercontent.com/grafana/mcp-grafana/739be4df43c1b23d9aef3636c50aefae383c3526/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "mcp-grafana==0.17.0",
+        "-t",
+        "stdio"
+      ],
+      "env": {
+        "GRAFANA_URL": "http://localhost:3000",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "secret:grafana_service_account_token"
+      },
+      "categories": [
+        "data",
+        "observability",
+        "bi"
+      ],
+      "license": "Apache-2.0",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/grafana/mcp-grafana",
+        "pinned_ref": "739be4df43c1b23d9aef3636c50aefae383c3526",
+        "install_cmd": "uvx mcp-grafana==0.17.0 -t stdio",
+        "run_cmd": "uvx mcp-grafana==0.17.0 -t stdio",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "tableau",
+      "name": "Tableau MCP server (official)",
+      "summary": "Query and explore your Tableau Server / Tableau Cloud from an AI client -- list and read published data sources, run VizQL queries, browse workbooks, and more. OFFICIAL Tableau server (tableau/tableau-mcp, Apache-2.0), the npm package @tableau/mcp-server pinned to v2.18.1 and run via npx (a Node launcher around build/index.js). STDIO by default: the entry selects stdio unless TRANSPORT=http is set (this row sets no TRANSPORT, so it is stdio); the opt-in http mode binds all interfaces (.listen(port) with no host) and additionally requires OAUTH_ISSUER -- NOT used by this row. REQUIRED auth: the server hard-exits on startup if SERVER / PAT_NAME / PAT_VALUE are unset, so the Personal Access Token is a REQUIRED install gate (required_secrets). Set SERVER to your Tableau URL and SITE_NAME to your site (edit these in the draft), and store the PAT in the mcphub vault: PAT_NAME = secret:tableau_pat_name + PAT_VALUE = secret:tableau_pat_value. A token-less install is BLOCKED at install rather than crash-looping a daemon. Supply the PAT only through the hub vault, never as plaintext.",
+      "homepage": "https://github.com/tableau/tableau-mcp",
+      "readme_url": "https://raw.githubusercontent.com/tableau/tableau-mcp/8bafaba8120f4dfb09b7f5b40e9eaab205cadfee/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@tableau/mcp-server@2.18.1"
+      ],
+      "env": {
+        "SERVER": "https://my-tableau-server.com",
+        "SITE_NAME": "",
+        "PAT_NAME": "secret:tableau_pat_name",
+        "PAT_VALUE": "secret:tableau_pat_value"
+      },
+      "categories": [
+        "data",
+        "bi",
+        "analytics"
+      ],
+      "license": "Apache-2.0",
+      "required_secrets": [
+        "tableau_pat_name",
+        "tableau_pat_value"
+      ],
+      "vendored_source": {
+        "repo": "https://github.com/tableau/tableau-mcp",
+        "pinned_ref": "8bafaba8120f4dfb09b7f5b40e9eaab205cadfee",
+        "install_cmd": "npx -y @tableau/mcp-server@2.18.1",
+        "run_cmd": "npx -y @tableau/mcp-server@2.18.1",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "photoshop",
+      "name": "Adobe Photoshop MCP server",
+      "summary": "Drive Adobe Photoshop from an AI client -- create/open/save documents, add text and solid-color layers, run actions, and inspect the active document -- via the photoshop-python-api COM bridge. Community server loonghao/photoshop-python-api-mcp-server (Python, MIT), published to PyPI as photoshop-mcp-server and pinned to v0.1.11, run via uvx with the version pinned. WINDOWS-ONLY COM: the server talks to a running Photoshop over Windows COM (win32com via pywin32) -- there is NO socket, NO network listener, and NO manual plugin to install (unlike the DAW rows). It is stdio + COM, so loopback-clean by construction. The Adobe classifier and the COM dependency are Windows-only, so the install_probe ARCH-GATES on platforms: [windows/amd64]; on any other OS the row stays inert. REQUIRES a host Adobe Photoshop install -- detected via the glob C:\\Program Files\\Adobe\\Adobe Photoshop *\\Photoshop.exe (the trailing * matches the year-versioned install roots, e.g. Adobe Photoshop 2024 / 2025). Set PS_VERSION (e.g. \"2024\") to the Photoshop version to connect to (a literal config value, not a secret). Photoshop must be RUNNING for tools to act on a document; the host-exe probe detects the install, not whether Photoshop is open. REQUIRES Python 3.10+ and uv on PATH (the README recommends the --python 3.10 pin, which uv satisfies by fetching a managed CPython 3.10 if needed).",
+      "homepage": "https://github.com/loonghao/photoshop-python-api-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/loonghao/photoshop-python-api-mcp-server/57093383228814d634fef05f494dd13b3dd69a22/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--python",
+        "3.10",
+        "photoshop-mcp-server==0.1.11"
+      ],
+      "env": {
+        "PS_VERSION": "2024"
+      },
+      "categories": [
+        "image-editing",
+        "design",
+        "creative"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ],
+        "file_globs": [
+          "C:\\Program Files\\Adobe\\Adobe Photoshop *\\Photoshop.exe"
+        ],
+        "platforms": [
+          "windows/amd64"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/loonghao/photoshop-python-api-mcp-server",
+        "pinned_ref": "57093383228814d634fef05f494dd13b3dd69a22",
+        "install_cmd": "uvx --python 3.10 photoshop-mcp-server==0.1.11",
+        "run_cmd": "uvx --python 3.10 photoshop-mcp-server==0.1.11",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "zotero",
+      "name": "Zotero MCP server",
+      "summary": "Search and read your Zotero reference library from an AI client -- look up items, collections, tags, notes, and full-text content. Community server kujenga/zotero-mcp (Python, MIT), published to PyPI as zotero-mcp and pinned to v0.1.6, run via uvx. LOOPBACK-CLEAN: the server is stdio (default transport stdio; --transport sse is opt-in and not used) and, with ZOTERO_LOCAL=true, acts as a CLIENT to the Zotero desktop application's OWN built-in local API at http://localhost:23119 (verified loopback in the pyzotero dependency) -- NO third-party add-on, NO network listener opened by this server. ZOTERO_LOCAL=true is a literal config value (not a secret), and in local mode ZOTERO_API_KEY / ZOTERO_LIBRARY_ID are NOT required, so this is a clean no-secret row. To enable the local API, run the Zotero 7 desktop app with the local API turned on (Settings -> Advanced). disabled-until-probe: enables when uvx is on PATH; REQUIRES Python 3.11+ and uv plus the Zotero desktop app running for live queries.",
+      "homepage": "https://github.com/kujenga/zotero-mcp",
+      "readme_url": "https://raw.githubusercontent.com/kujenga/zotero-mcp/aeba201601df4a057e14523e7fc02ff9feafd09b/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "zotero-mcp==0.1.6"
+      ],
+      "env": {
+        "ZOTERO_LOCAL": "true"
+      },
+      "categories": [
+        "research",
+        "reference",
+        "pkm"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/kujenga/zotero-mcp",
+        "pinned_ref": "aeba201601df4a057e14523e7fc02ff9feafd09b",
+        "install_cmd": "uvx zotero-mcp==0.1.6",
+        "run_cmd": "uvx zotero-mcp==0.1.6",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "metabase",
+      "name": "Metabase MCP server",
+      "summary": "Query and explore your Metabase BI instance from an AI client -- run questions/cards, browse databases and dashboards, and export card results as CSV/JSON. Community server (NOT official) easecloudio/mcp-metabase-server (Node, MIT), the npm package @easecloudio/mcp-metabase-server pinned to v1.3.0 and run via npx. LOOPBACK-CLEAN: the server uses StdioServerTransport only -- no port bind, no 0.0.0.0, no HTTP listener. REQUIRED auth: the server hard-exits on startup if METABASE_URL is unset and needs API-key (preferred) or username/password auth, so the API key is a REQUIRED install gate (required_secrets). Set METABASE_URL to your Metabase instance (edit it in the draft) and store the key in the mcphub vault as METABASE_API_KEY = secret:metabase_api_key. A key-less install is BLOCKED at install rather than crash-looping a daemon that returns 401s. Supply the key only through the hub vault, never as plaintext.",
+      "homepage": "https://github.com/easecloudio/mcp-metabase-server",
+      "readme_url": "https://raw.githubusercontent.com/easecloudio/mcp-metabase-server/464fc93edd22b40d5edd260c5149202f6a3ea68d/README.md",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@easecloudio/mcp-metabase-server@1.3.0"
+      ],
+      "env": {
+        "METABASE_URL": "https://your-metabase-instance.com",
+        "METABASE_API_KEY": "secret:metabase_api_key"
+      },
+      "categories": [
+        "data",
+        "bi",
+        "analytics"
+      ],
+      "license": "MIT",
+      "required_secrets": [
+        "metabase_api_key"
+      ],
+      "vendored_source": {
+        "repo": "https://github.com/easecloudio/mcp-metabase-server",
+        "pinned_ref": "464fc93edd22b40d5edd260c5149202f6a3ea68d",
+        "install_cmd": "npx -y @easecloudio/mcp-metabase-server@1.3.0",
+        "run_cmd": "npx -y @easecloudio/mcp-metabase-server@1.3.0",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "jupyter",
+      "name": "Jupyter MCP server",
+      "summary": "Drive a running Jupyter (JupyterLab / Jupyter Server) from an AI client -- list and edit notebook cells, execute code, read outputs, and manage kernels. Community server datalayer/jupyter-mcp-server (Python, BSD-3-Clause), published to PyPI as jupyter-mcp-server and pinned to v1.0.2, run via uvx. STDIO-PINNED: the CLI's default transport is stdio, and this row passes --transport stdio EXPLICITLY to pin it -- the alternative streamable-http mode binds host=0.0.0.0 (all interfaces, LAN-reachable) and is NOT used. REQUIRES a RUNNING Jupyter server: set JUPYTER_URL to its URL (defaults to http://localhost:8888) and supply the Jupyter token wired to the mcphub vault as JUPYTER_TOKEN = secret:jupyter_token. The token is the OPTIONAL-secret posture (not a required_secrets gate): the MCP server starts without a reachable Jupyter (it connects lazily), so a one-click install is not hard-blocked, but the tools need the running Jupyter + token to work. The MCP_TOKEN auth knob only applies to the unused streamable-http standalone mode. Supply the token only through the hub vault, never as plaintext. disabled-until-probe: enables when uvx is on PATH (Python 3.10+, uv).",
+      "homepage": "https://github.com/datalayer/jupyter-mcp-server",
+      "readme_url": "https://raw.githubusercontent.com/datalayer/jupyter-mcp-server/17db1a7222d679dd52fda331a6480728b062d0b9/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "jupyter-mcp-server==1.0.2",
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "JUPYTER_URL": "http://localhost:8888",
+        "JUPYTER_TOKEN": "secret:jupyter_token"
+      },
+      "categories": [
+        "data",
+        "notebook",
+        "dev"
+      ],
+      "license": "BSD-3-Clause",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/datalayer/jupyter-mcp-server",
+        "pinned_ref": "17db1a7222d679dd52fda331a6480728b062d0b9",
+        "install_cmd": "uvx jupyter-mcp-server==1.0.2 --transport stdio",
+        "run_cmd": "uvx jupyter-mcp-server==1.0.2 --transport stdio",
+        "license_status": "confirmed"
+      }
+    },
+    {
+      "id": "rmcp",
+      "name": "RMCP -- R statistics MCP server",
+      "summary": "Run R statistical analysis from an AI client -- 52 tools spanning regression, hypothesis testing, time series, and more -- driven through Rscript on PATH. Community server (Python, MIT) published to PyPI as rmcp and pinned to v0.8.1, run via uvx. PROVENANCE: the PyPI rmcp project_urls point to github.com/finite-sample/rmcp (Gaurav Sood), so the vendored_source pins that repo; v0.8.1 has no git tag, so the pin is the HEAD commit that ships version 0.8.1 in its pyproject. STDIO-PINNED: this row runs the `start` subcommand, which is the stdio transport -- the `serve-http --host 0.0.0.0` mode is the opt-in non-default (binds all interfaces, needs the http extras) and is NOT used; plain `start` does not even install the HTTP deps. No secret and no required env. REQUIRES R on PATH (the tools shell out to Rscript); the server starts and degrades gracefully WITHOUT R (it logs a warning and R-dependent tools fail at call time), so the install_probe gates only on uvx -- a host that installs R later does not need to re-probe. disabled-until-probe: enables when uvx is on PATH (Python 3.11+, uv); install R 4.4.0+ separately for the analysis tools.",
+      "homepage": "https://github.com/finite-sample/rmcp",
+      "readme_url": "https://raw.githubusercontent.com/finite-sample/rmcp/389b6ef608a2ebc01b15f7dca3cd7fe71509e406/README.md",
+      "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "rmcp==0.8.1",
+        "rmcp",
+        "start"
+      ],
+      "env": {},
+      "categories": [
+        "science",
+        "statistics",
+        "data-analysis"
+      ],
+      "license": "MIT",
+      "availability": "disabled-until-probe",
+      "install_probe": {
+        "binaries": [
+          "uvx"
+        ]
+      },
+      "vendored_source": {
+        "repo": "https://github.com/finite-sample/rmcp",
+        "pinned_ref": "389b6ef608a2ebc01b15f7dca3cd7fe71509e406",
+        "install_cmd": "uvx --from rmcp==0.8.1 rmcp start",
+        "run_cmd": "uvx --from rmcp==0.8.1 rmcp start",
+        "license_status": "confirmed"
+      }
     }
   ],
   "docs_only": [
