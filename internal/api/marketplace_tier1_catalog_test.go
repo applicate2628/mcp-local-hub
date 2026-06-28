@@ -25,6 +25,13 @@ var gitSHA40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // Apache-2.0, SLSA-provenance-attested) is the §9 cloud-CAD breadth row — like kicad
 // it is a community fork with a pinned vendored_source, but it gates on the npx
 // launcher (cloud server, no host app to detect) rather than a host-binary glob.
+// reaper (community fork bonfire-systems/reaper-mcp, PyPI reaper-mcp-server v0.1.1,
+// uvx --from, MIT) is the music-breadth DAW row — like kicad it is a uvx-launched
+// community fork with a pinned vendored_source and a host-app file glob
+// (REAPER's reaper.exe). Its MCP server is stdio, but the python-reapy distant API
+// it requires binds 0.0.0.0 inside REAPER (LAN-reachable once enabled — SAME risk
+// class as the Ableton row; the row's summary carries the firewall/trusted-network
+// caution + a destructive-write warning).
 // Two rows were DROPPED before merge:
 //   - cst — bbl21/CST_MCP is a CLI toolkit, not an MCP server
 //     (work-items/bugs/2026-06-24-cst-not-an-mcp-server.md).
@@ -36,7 +43,7 @@ var gitSHA40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // Five further EDA/CAD rows are DEFERRED (real MCP servers, but each needs a manual
 // git-clone+build that vendored_source.install_cmd does not execute — see
 // work-items/backlog/2026-06-24-tier3-manual-clone-mcps.md).
-var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys", "kicad", "onshape"}
+var tier1CatalogIDs = []string{"excel", "ableton", "codex-mcp-server", "matlab", "ansys", "kicad", "onshape", "reaper"}
 
 // tierMusicLocalCatalogIDs are the local-stdio music rows that gate the install on
 // a REQUIRED vault secret (required_secrets) rather than a host-app install_probe.
@@ -134,8 +141,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	// kicad is a community fork (oaslananka/kicad-mcp) published to PyPI, so it pins
 	// via vendored_source like excel/ableton. onshape is a community server
 	// (altendky/onshape-mcp) published to npm, pinned via vendored_source to the
-	// v0.4.0 tag SHA.
-	for _, id := range []string{"excel", "ableton", "kicad", "onshape"} {
+	// v0.4.0 tag SHA. reaper is a community fork (bonfire-systems/reaper-mcp)
+	// published to PyPI (reaper-mcp-server), pinned via vendored_source to the
+	// v0.1.1 tag SHA.
+	for _, id := range []string{"excel", "ableton", "kicad", "onshape", "reaper"} {
 		e := byID[id]
 		if e.VendoredSource == nil || strings.TrimSpace(e.VendoredSource.PinnedRef) == "" {
 			t.Fatalf("fork row %q is missing a pinned vendored_source", id)
@@ -357,7 +366,7 @@ func TestV2Tier1Rows_GenerateThenCreateDryRun(t *testing.T) {
 			// The fork rows project the pinned vendored_source; the official rows
 			// (codex, matlab, ansys) do not.
 			switch id {
-			case "excel", "ableton", "kicad", "onshape":
+			case "excel", "ableton", "kicad", "onshape", "reaper":
 				if m.VendoredSource == nil || strings.TrimSpace(m.VendoredSource.PinnedRef) == "" {
 					t.Fatalf("fork row %q drafted manifest lost the pinned vendored_source: %#v", id, m.VendoredSource)
 				}
@@ -450,20 +459,20 @@ func TestV2MatlabRow_ProbeRequiresMatlabOnPATH(t *testing.T) {
 // TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles asserts the catalog-data migration:
 // every version-agnostic glob pattern in the Tier-1 rows lives in the OPT-IN
 // file_globs[] field, NEVER files[] (which is now exact-stat-only). excel + ableton +
-// ansys + kicad carry their patterns in file_globs[]; matlab carries none
+// ansys + kicad + reaper carry their patterns in file_globs[]; matlab carries none
 // (binaries-only); codex carries binaries-only. No Tier-1 row uses files[] (none
 // needs a literal path), and no file_globs[] entry is missing its absolute-path shape.
 func TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles(t *testing.T) {
 	byID := v2CatalogByID(t)
 	// Rows whose probe carries a glob pattern → must be in file_globs[].
-	wantGlobRows := map[string]bool{"excel": true, "ableton": true, "ansys": true, "kicad": true}
+	wantGlobRows := map[string]bool{"excel": true, "ableton": true, "ansys": true, "kicad": true, "reaper": true}
 	for id, e := range byID {
 		if e.InstallProbe == nil {
 			continue
 		}
 		p := e.InstallProbe
 		// No Tier-1 row should use files[] (no literal-path probe in this batch).
-		if id == "excel" || id == "ableton" || id == "codex-mcp-server" || id == "matlab" || id == "ansys" || id == "kicad" {
+		if id == "excel" || id == "ableton" || id == "codex-mcp-server" || id == "matlab" || id == "ansys" || id == "kicad" || id == "reaper" {
 			if len(p.Files) != 0 {
 				t.Fatalf("Tier-1 row %q uses files[] %v — version globs belong in file_globs[]; files[] is exact-stat-only", id, p.Files)
 			}

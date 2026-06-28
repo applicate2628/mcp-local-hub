@@ -166,7 +166,7 @@ describe("groupByTheme — flat list → ordered theme sections", () => {
   });
 
   it("groups the full v2 catalog into the six expected non-empty themes", () => {
-    // The real 22-entry v2 catalog primary categories. Confirms every entry
+    // The real 23-entry v2 catalog primary categories. Confirms every entry
     // lands and the distribution matches the design (no surprise Other).
     const rows: Row[] = [
       { name: "filesystem", categories: ["filesystem", "io"] },
@@ -191,6 +191,7 @@ describe("groupByTheme — flat list → ordered theme sections", () => {
       { name: "kicad", categories: ["engineering", "eda", "pcb", "electronics"] },
       { name: "suno", categories: ["music", "ai", "audio", "generation"] },
       { name: "onshape", categories: ["engineering", "cad", "mechanical", "cloud"] },
+      { name: "reaper", categories: ["music", "daw", "audio"] },
     ];
     const sections = groupByTheme(rows, cats, key);
     // No Other section for the real catalog (every entry maps).
@@ -208,7 +209,7 @@ describe("groupByTheme — flat list → ordered theme sections", () => {
       "Development & Code": 5, // git, everything, sequential-thinking, serena, codex-mcp-server
       "Data & Office": 2, // filesystem, sqlite
       "Research & Docs": 4, // context7, qt-docs, excalidraw, paper-search-mcp
-      "Music & Audio": 2, // ableton, suno
+      "Music & Audio": 3, // ableton, suno, reaper
       "Utilities": 4, // fetch, playwright, memory, time
     });
     // Every input entry is accounted for exactly once.
