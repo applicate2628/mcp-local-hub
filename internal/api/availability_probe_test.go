@@ -117,30 +117,32 @@ func TestGlobProbeMatches_GlobMatchesMultipleVersions(t *testing.T) {
 	}
 }
 
-// TestGlobProbeMatches_AbletonGlobNarrowedToLive11Plus is the Tier-1 acceptance for
-// the NARROWED ableton probe (PR #429 follow-up, codex catalog.json:319 finding):
-// the build-fixed extended fork advertises Ableton Live 11 or NEWER and does NOT
-// support Live 10. The prior probe glob ("…\\Live *\\Program\\Ableton Live *.exe")
-// matched Live 10 too, so a Live-10-only host wrongly passed admission for a server
-// it cannot drive. The narrowed catalog glob uses the version char-class
-// "…\\Live 1[1-9]*\\…\\Ableton Live 1[1-9]*.exe" — the 1[1-9] class matches the
-// supported Live 11-19 (across every edition Suite/Standard/Intro/Lite) and EXCLUDES
-// Live 10 (third version digit 0 is outside the 1-9 class), the same [^7]/[89]-style
-// version-class technique kicad's glob uses. Uses temp dirs + filepath.Join so it is
-// host-OS correct on every build; the real catalog pattern is rooted at
-// C:\ProgramData\Ableton but the version-class + edition-spanning segment shape is
-// identical here.
-func TestGlobProbeMatches_AbletonGlobNarrowedToLive11Plus(t *testing.T) {
+// TestGlobProbeMatches_AbletonGlobNarrowedToLive10Plus is the Tier-1 acceptance for
+// the NARROWED ableton probe (PR #442, codex catalog.json:344 finding): the trusted
+// upstream ahujasid/ableton-mcp advertises "Ableton Live 10 or newer" and does NOT
+// support Live 9 or earlier. The prior probe glob ("…\\Live *\\Program\\Ableton Live
+// *.exe") matched Live 9 too, so a pre-10-only host wrongly passed admission for a
+// server it cannot drive. The narrowed catalog glob uses the version char-class
+// "…\\Live 1[0-9]*\\…\\Ableton Live 1[0-9]*.exe" — the 1[0-9] class matches the
+// supported Live 10-19 (across every edition Suite/Standard/Intro/Lite) and EXCLUDES
+// Live 9 and earlier (their version segment does not begin with '1' followed by a
+// digit), the same version-class technique kicad's glob uses. Live 20+ (when
+// released) will need a glob update — file_globs[] entries are AND-semantics and
+// cannot OR a second version range. Uses temp dirs + filepath.Join so it is host-OS
+// correct on every build; the real catalog pattern is rooted at C:\ProgramData\Ableton
+// but the version-class + edition-spanning segment shape is identical here.
+func TestGlobProbeMatches_AbletonGlobNarrowedToLive10Plus(t *testing.T) {
 	base := t.TempDir()
-	// SUPPORTED installs (Live 11+) differing by EDITION (Suite + Standard), each with
+	// SUPPORTED installs (Live 10+) differing by EDITION (Suite + Standard), each with
 	// the "Ableton Live <ver> <edition>.exe" the shipped installer lays down (verified
-	// against the host's real Live 11/12 Suite layout), PLUS one UNSUPPORTED Live 10
+	// against the host's real Live 11/12 Suite layout), PLUS one UNSUPPORTED Live 9
 	// that the narrowed glob must EXCLUDE.
 	supported := []struct{ dir, exe string }{
+		{"Live 10 Suite", "Ableton Live 10 Suite.exe"},
 		{"Live 11 Suite", "Ableton Live 11 Suite.exe"},
 		{"Live 12 Standard", "Ableton Live 12 Standard.exe"},
 	}
-	unsupported := struct{ dir, exe string }{"Live 10 Suite", "Ableton Live 10 Suite.exe"}
+	unsupported := struct{ dir, exe string }{"Live 9 Suite", "Ableton Live 9 Suite.exe"}
 	mkInstall := func(dir, exe string) {
 		prog := filepath.Join(base, dir, "Program")
 		if err := os.MkdirAll(prog, 0o755); err != nil {
@@ -155,14 +157,14 @@ func TestGlobProbeMatches_AbletonGlobNarrowedToLive11Plus(t *testing.T) {
 	}
 	mkInstall(unsupported.dir, unsupported.exe)
 
-	// NARROWED pattern (this change): the version char-class 1[1-9] matches Live 11-19
-	// in ANY edition (the spanning `*` after it covers "11 Suite", "12 Standard", …)
-	// and EXCLUDES Live 10. This mirrors the shipped catalog glob exactly (temp root).
-	narrowed := filepath.Join(base, "Live 1[1-9]*", "Program", "Ableton Live 1[1-9]*.exe")
+	// NARROWED pattern (this change): the version char-class 1[0-9] matches Live 10-19
+	// in ANY edition (the spanning `*` after it covers "10 Suite", "12 Standard", …)
+	// and EXCLUDES Live 9. This mirrors the shipped catalog glob exactly (temp root).
+	narrowed := filepath.Join(base, "Live 1[0-9]*", "Program", "Ableton Live 1[0-9]*.exe")
 
 	// Narrowed: ANY supported match is a runnable regular file → pass.
 	if ok, why := globProbeMatches(narrowed); !ok {
-		t.Fatalf("narrowed ableton glob over Live 11/12 failed: %q", why)
+		t.Fatalf("narrowed ableton glob over Live 10/11/12 failed: %q", why)
 	}
 	// And through the full availabilityProbePasses owner via the file_globs[] field
 	// (the install/readiness path) — the OPT-IN glob the ableton catalog row declares.
@@ -170,25 +172,25 @@ func TestGlobProbeMatches_AbletonGlobNarrowedToLive11Plus(t *testing.T) {
 		t.Fatalf("availabilityProbePasses with the narrowed ableton file_globs[] failed: %q", why)
 	}
 
-	// EXACT match set: the narrowed glob must match the TWO supported installs
-	// (Live 11 Suite + Live 12 Standard) and NOT the Live 10 Suite — that exclusion is
-	// the whole point of the narrowing.
+	// EXACT match set: the narrowed glob must match the THREE supported installs
+	// (Live 10 Suite + Live 11 Suite + Live 12 Standard) and NOT the Live 9 Suite —
+	// that exclusion is the whole point of the narrowing.
 	matches, err := filepath.Glob(narrowed)
 	if err != nil {
 		t.Fatalf("glob narrowed pattern: %v", err)
 	}
-	if len(matches) != 2 {
-		t.Fatalf("narrowed glob matched %d installs, want exactly 2 (Live 11 Suite + Live 12 Standard, NOT Live 10): %v", len(matches), matches)
+	if len(matches) != 3 {
+		t.Fatalf("narrowed glob matched %d installs, want exactly 3 (Live 10 Suite + Live 11 Suite + Live 12 Standard, NOT Live 9): %v", len(matches), matches)
 	}
 	for _, m := range matches {
-		if strings.Contains(m, "Live 10") {
-			t.Fatalf("narrowed glob wrongly matched a Live 10 install %q — the extended fork drops Live 10 support", m)
+		if strings.Contains(m, "Live 9") {
+			t.Fatalf("narrowed glob wrongly matched a Live 9 install %q — ahujasid/ableton-mcp requires Live 10 or newer", m)
 		}
 	}
 
-	// Remove the supported installs, keep ONLY the unsupported Live 10 → the narrowed
-	// glob now matches NOTHING (it excludes Live 10), so the probe fails inert
-	// (does not exist). Proves a Live-10-only host does NOT pass admission.
+	// Remove the supported installs, keep ONLY the unsupported Live 9 → the narrowed
+	// glob now matches NOTHING (it excludes Live 9), so the probe fails inert
+	// (does not exist). Proves a Live-9-only host does NOT pass admission.
 	for _, in := range supported {
 		if err := os.RemoveAll(filepath.Join(base, in.dir)); err != nil {
 			t.Fatalf("rm supported install dir: %v", err)
@@ -196,7 +198,7 @@ func TestGlobProbeMatches_AbletonGlobNarrowedToLive11Plus(t *testing.T) {
 	}
 	ok, why := globProbeMatches(narrowed)
 	if ok {
-		t.Fatalf("narrowed ableton glob passed with only an unsupported Live 10 install present; want fail (Live 10 is excluded)")
+		t.Fatalf("narrowed ableton glob passed with only an unsupported Live 9 install present; want fail (Live 9 is excluded)")
 	}
 	if !strings.Contains(why, "does not exist") {
 		t.Fatalf("no-match reason %q, want \"does not exist\" (fail-closed)", why)
