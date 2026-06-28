@@ -11,18 +11,13 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
-// defaultMarketplaceRegistryURL is the curated catalog served from this
-// repo's master branch — the same single registry the CLI defaults to
-// (internal/cli.DefaultMarketplaceRegistryURL). It is duplicated here as
-// a GUI-local constant rather than imported from internal/cli because the
-// GUI layer must not depend on the CLI command package; both reference the
-// same canonical source URL (CLAUDE.md "Marketplace (G5, v0.3.0)"). v2 is
-// the current default (Tier-1 desktop-app rows + additive D-2/D-3
-// metadata); frozen v1 is kept only for older clients pinned to its URL.
-// NOTE: this URL string is intentionally duplicated with the CLI const
-// (layering boundary — GUI must not import internal/cli); both MUST be
-// bumped together — see work-items/bugs/2026-06-24-marketplace-url-duplication.md.
-const defaultMarketplaceRegistryURL = "https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v2/catalog.json"
+// defaultMarketplaceRegistryURL re-exports the canonical catalog URL owned by
+// internal/api (api.DefaultMarketplaceRegistryURL). The GUI already imports
+// internal/api (LoadMarketplaceCatalog) but must NOT import internal/cli, so the
+// shared lower api layer is the single owner of the literal — collapsing the
+// prior bump-both-or-drift footgun across cli+gui to one bump point in api
+// (work-items/bugs/2026-06-24-marketplace-url-duplication.md).
+const defaultMarketplaceRegistryURL = api.DefaultMarketplaceRegistryURL
 
 // marketplaceLister is the pin-point subset of api.LoadMarketplaceCatalog
 // backing GET /api/marketplace (§10 v2b — read-only marketplace browse).

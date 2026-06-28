@@ -31,6 +31,18 @@ const (
 	MarketplaceCatalogSchemaVersionV2 = "2"
 )
 
+// DefaultMarketplaceRegistryURL is the SINGLE OWNER of the curated-catalog URL
+// served from this repo's master branch. It lives in internal/api — the shared
+// lower layer that both internal/cli and internal/gui already import for
+// LoadMarketplaceCatalog — so the two front-ends re-export it (cli's exported
+// DefaultMarketplaceRegistryURL, gui's unexported defaultMarketplaceRegistryURL)
+// instead of each hard-coding the literal. This collapses the prior
+// bump-both-or-drift footgun (work-items/bugs/2026-06-24-marketplace-url-duplication.md)
+// to one bump point here, WITHOUT the GUI importing the CLI command package.
+// v2 is the current default (Tier-1 desktop-app rows + additive D-2/D-3 metadata);
+// frozen v1 is kept in-tree only so an OLDER client pinned to the v1 URL resolves.
+const DefaultMarketplaceRegistryURL = "https://raw.githubusercontent.com/applicate2628/mcp-local-hub/master/marketplace/v2/catalog.json"
+
 // marketplaceSchemaVersionAccepted is the SINGLE OWNER of "which catalog
 // schema_version values this build parses", consumed by both the catalog parser
 // (validateMarketplaceCatalog) and the on-disk cache validator (readMarketplaceCache)
