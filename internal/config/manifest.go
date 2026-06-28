@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"mcp-local-hub/internal/secrets"
 	"mcp-local-hub/internal/urlredact"
@@ -207,7 +208,8 @@ type VendoredSource struct {
 // enabled. It carries NO new detection logic — each field maps onto an EXISTING
 // readiness probe primitive (binaryAvailable / entryScriptStatus / a glob over
 // entryScriptStatus). The probe is satisfied iff EVERY declared signal is present
-// (AND semantics across all three fields).
+// (AND semantics across all three signal fields) AND — when platforms[] is
+// non-empty — the running host's GOOS/GOARCH is in the platforms[] allowlist.
 //
 // files[] vs file_globs[] is an EXPLICIT-INTENT split (codex catalog finding,
 // glob-vs-literal ambiguity): a files[] entry is a LITERAL path stat'd verbatim
@@ -224,6 +226,19 @@ type AvailabilityProbe struct {
 	Binaries  []string `yaml:"binaries,omitempty"`   // each must resolve via the readiness binaryAvailable() owner (PATH/toolchain-dir) — e.g. ["matlab"]
 	Files     []string `yaml:"files,omitempty"`      // each LITERAL path must exist as a regular file via the readiness entryScriptStatus() owner — NEVER globbed — e.g. an install marker
 	FileGlobs []string `yaml:"file_globs,omitempty"` // each GLOB PATTERN must filepath.Glob-expand to at least one regular file — the opt-in version-agnostic path (e.g. "…\\Live *\\…\\Ableton Live *.exe")
+
+	// Platforms is the OPT-IN OS/arch allowlist (D-3 arch-aware gate). Each value
+	// is a "GOOS/GOARCH" token (e.g. "windows/amd64", "linux/arm64",
+	// "darwin/arm64"). When NON-EMPTY, the probe ADDITIONALLY requires the running
+	// host's runtime.GOOS+"/"+runtime.GOARCH to be in this list — else the row
+	// stays inert regardless of binaries/files/file_globs matching. This blocks a
+	// launcher-based row (npx/uvx) from passing its probe on an arch the underlying
+	// package does NOT ship for (e.g. an npm package with win32-x64 but not
+	// win32-arm64) and then failing loudly at daemon spawn. EMPTY/ABSENT == no arch
+	// gate (today's behavior — every existing row is unaffected). It is evaluated by
+	// the PURE PlatformMatches predicate (no filesystem touch), so the install gate
+	// AND the browse classifier both apply it.
+	Platforms []string `yaml:"platforms,omitempty"`
 }
 
 type DaemonSpec struct {
@@ -590,6 +605,35 @@ func IsPathShaped(token string) bool {
 	return hasDriveLetterPrefix(token)
 }
 
+// PlatformMatches is the SINGLE OWNER of the D-3 install_probe platforms[] arch
+// gate predicate. Given the running host's goos+goarch and a platforms[]
+// allowlist, it reports whether the host is permitted:
+//
+//   - EMPTY/nil platforms → ALWAYS true (no arch gate; today's behavior, so every
+//     existing probe with no platforms[] is unaffected).
+//   - non-empty platforms → true iff "goos/goarch" appears in the list.
+//
+// It is PURE — goos/goarch are passed in (the api-side callers feed runtime.GOOS /
+// runtime.GOARCH) so this predicate is unit-testable without faking the runtime,
+// and it never touches the filesystem or PATH. Comparison is exact on the
+// canonical "GOOS/GOARCH" form Go itself reports; entries are trimmed so a
+// stray-whitespace catalog value still compares (the ValidatePlatformValues author
+// gate rejects malformed entries before they ship, but the runtime predicate stays
+// tolerant so a hand-edited manifest that slipped a space does not silently
+// permanently-disable a row that should match).
+func PlatformMatches(goos, goarch string, platforms []string) bool {
+	if len(platforms) == 0 {
+		return true
+	}
+	host := goos + "/" + goarch
+	for _, p := range platforms {
+		if strings.TrimSpace(p) == host {
+			return true
+		}
+	}
+	return false
+}
+
 // IsAbsolutePathShape reports whether token LEXICALLY looks like an ABSOLUTE
 // filesystem path on SOME host OS, GOOS-independently. It is the single lexical
 // owner used by the install_probe files[] gate so a catalog files[] entry that
@@ -871,6 +915,36 @@ func ValidateProbeValuesNonEmpty(p *AvailabilityProbe, label string) error {
 		}
 		if !IsAbsolutePathShape(g) {
 			return fmt.Errorf("%s: install_probe.file_globs[%d] %q must be an absolute path pattern — a relative glob is expanded against the process working directory, so the gate would depend on which directory mcphub runs from", label, i, g)
+		}
+	}
+	// platforms[] is the OPT-IN arch gate. Each entry must be a non-empty,
+	// whitespace-free "GOOS/GOARCH" token (exactly one '/', both halves non-empty).
+	// A malformed token (empty, surrounding- OR internal-whitespace, missing '/', a
+	// triple "a/b/c") can never equal the runtime "GOOS/GOARCH" host string (which
+	// Go builds from runtime.GOOS+"/"+runtime.GOARCH — no whitespace possible), so
+	// it would silently narrow the allowlist (or, alone, permanently disable the
+	// row). Reject it up front so a typo'd platforms value fails LOUD at
+	// author/validate time, not silently-inert at runtime. PlatformMatches stays
+	// trim-tolerant on READ (a hand-edited manifest that slipped a SURROUNDING space
+	// still matches), but the author-side validator rejects any whitespace so the
+	// shipped catalog is clean. The exact OS/arch NAME is NOT validated against Go's
+	// known set (forward-compatible by design — a future GOARCH must be declarable
+	// in a shared catalog); only the SHAPE is enforced.
+	for i, plat := range p.Platforms {
+		if strings.TrimSpace(plat) == "" {
+			return fmt.Errorf("%s: install_probe.platforms[%d] is empty — every declared platform must be a non-empty \"GOOS/GOARCH\" token (e.g. \"windows/amd64\")", label, i)
+		}
+		// Reject ANY whitespace (surrounding OR internal). The host string is
+		// whitespace-free, so a token like "windows/ amd64", "win dows/amd64", or
+		// " windows/amd64" can NEVER match and would leave the row permanently inert
+		// — a silent-disable footgun the surrounding-only check below would miss for
+		// the internal cases.
+		if strings.IndexFunc(plat, unicode.IsSpace) >= 0 {
+			return fmt.Errorf("%s: install_probe.platforms[%d] %q contains whitespace — the runtime gate compares the value against the host \"GOOS/GOARCH\" (which is whitespace-free), so a padded token never matches and the row stays permanently inert; remove all whitespace", label, i, plat)
+		}
+		os, arch, ok := strings.Cut(plat, "/")
+		if !ok || strings.Contains(arch, "/") || os == "" || arch == "" {
+			return fmt.Errorf("%s: install_probe.platforms[%d] %q must be a \"GOOS/GOARCH\" token (exactly one '/', both halves non-empty) — e.g. \"windows/amd64\", \"linux/arm64\", \"darwin/arm64\"", label, i, plat)
 		}
 	}
 	return nil

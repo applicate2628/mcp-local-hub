@@ -254,9 +254,13 @@ func cloneVendoredSource(v *config.VendoredSource) *config.VendoredSource {
 	return &c
 }
 
-// cloneAvailabilityProbe deep-copies the D-3 install probe (its Binaries/Files
-// are slices, so the slices are copied — not aliased — to keep the synthesized
-// manifest fully independent of the embed). nil in → nil out.
+// cloneAvailabilityProbe deep-copies the D-3 install probe (Binaries/Files/
+// FileGlobs/Platforms are slices, so each is copied — not aliased — to keep the
+// synthesized manifest fully independent of the embed). nil in → nil out. EVERY
+// AvailabilityProbe field must be carried: dropping one (e.g. Platforms — the
+// arch gate) would make an inert platforms-gated embed lose its allowlist after
+// the serena dynamic-pool projection, so availabilityProbePasses would see an
+// empty list → no arch gate → an unsupported host installs.
 func cloneAvailabilityProbe(p *config.AvailabilityProbe) *config.AvailabilityProbe {
 	if p == nil {
 		return nil
@@ -265,5 +269,6 @@ func cloneAvailabilityProbe(p *config.AvailabilityProbe) *config.AvailabilityPro
 		Binaries:  append([]string(nil), p.Binaries...),
 		Files:     append([]string(nil), p.Files...),
 		FileGlobs: append([]string(nil), p.FileGlobs...),
+		Platforms: append([]string(nil), p.Platforms...),
 	}
 }

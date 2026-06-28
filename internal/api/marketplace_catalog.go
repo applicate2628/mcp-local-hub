@@ -136,12 +136,15 @@ type CatalogVendoredSource struct {
 // CatalogAvailabilityProbe is the catalog-entry (JSON) mirror of
 // config.AvailabilityProbe (D-3, Tier-0). file_globs[] is the OPT-IN glob-pattern
 // field; files[] is the LITERAL-path field (stat'd verbatim, never globbed) — see
-// the config type for the split. Decision:
+// the config type for the split. platforms[] is the OPT-IN "GOOS/GOARCH" arch gate
+// (when non-empty, the host's runtime.GOOS+"/"+runtime.GOARCH must be in the list
+// or the row stays inert). Decision:
 // work-items/decisions/2026-06-23-d3-availability-probe.md
 type CatalogAvailabilityProbe struct {
 	Binaries  []string `json:"binaries,omitempty"`
 	Files     []string `json:"files,omitempty"`
 	FileGlobs []string `json:"file_globs,omitempty"`
+	Platforms []string `json:"platforms,omitempty"`
 }
 
 // AvailabilityAdmissionEntry runs the shared D-3 availability admission gate
@@ -174,6 +177,7 @@ func catalogProbeToConfig(p *CatalogAvailabilityProbe) *config.AvailabilityProbe
 		Binaries:  append([]string(nil), p.Binaries...),
 		Files:     append([]string(nil), p.Files...),
 		FileGlobs: append([]string(nil), p.FileGlobs...),
+		Platforms: append([]string(nil), p.Platforms...),
 	}
 }
 

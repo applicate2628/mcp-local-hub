@@ -144,6 +144,44 @@ func TestSerenaProjection_PreservesInertAvailability(t *testing.T) {
 	}
 }
 
+// TestSerenaProjection_PreservesPlatforms is the bot #447 P2 regression: the
+// serena dynamic-pool projection (cloneAvailabilityProbe) previously copied only
+// Binaries/Files/FileGlobs and DROPPED the new install_probe.platforms[] arch
+// gate. So an inert platforms-gated embed would project to an empty-platforms
+// probe → availabilityProbePasses sees no arch gate → an unsupported host
+// installs. The probe here gates on a PRESENT binary ("go") AND a host-EXCLUDING
+// platforms list, so the ONLY thing that can keep the projection inert downstream
+// is the platforms gate being carried through — a dropped platforms would make the
+// binary-only probe PASS on this host.
+func TestSerenaProjection_PreservesPlatforms(t *testing.T) {
+	excluding := otherPlatform() // a GOOS/GOARCH guaranteed != this host
+	m := globalEmbedSerenaManifest()
+	m.Availability = config.AvailabilityDisabledUntilProbe
+	m.InstallProbe = &config.AvailabilityProbe{
+		Binaries:  []string{"go"}, // present on the test host
+		Platforms: []string{excluding},
+	}
+
+	out, err := BuildInMemorySerenaDynamicPoolManifest(m)
+	if err != nil {
+		t.Fatalf("BuildInMemorySerenaDynamicPoolManifest: %v", err)
+	}
+	if out.InstallProbe == nil || len(out.InstallProbe.Platforms) != 1 || out.InstallProbe.Platforms[0] != excluding {
+		t.Fatalf("projected InstallProbe.Platforms = %+v, want the embed's [%q] carried through", out.InstallProbe, excluding)
+	}
+	// The downstream gate must still see it as inert+blocked SOLELY because of the
+	// platforms mismatch (the binary "go" is present, so a dropped platforms list
+	// would have made this PASS — the exact bug).
+	if err := AvailabilityAdmission(out); err == nil {
+		t.Fatal("projected platforms-gated manifest passed AvailabilityAdmission on an excluded host; the platforms[] arch gate was dropped in the projection")
+	}
+	// Deep-copy: the projected platforms slice is independent of the embed.
+	m.InstallProbe.Platforms[0] = "mutated/arch"
+	if out.InstallProbe.Platforms[0] != excluding {
+		t.Fatalf("projected InstallProbe.Platforms aliases the embed slice (got %q after embed mutation)", out.InstallProbe.Platforms[0])
+	}
+}
+
 // TestSerenaProjection_RejectsUnpinnedVendoredSource proves the projection now
 // carries vendored_source through and out.Validate() catches an unpinned source
 // at build time (D-2), instead of silently dropping it.

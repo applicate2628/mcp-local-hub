@@ -417,6 +417,12 @@ func projectAvailability(draft map[string]any, e *MarketplaceEntry) error {
 			}
 			m["file_globs"] = p.FileGlobs
 		}
+		if len(p.Platforms) > 0 {
+			if err := rejectUnsafeMarketplaceDraftStringSlice("install_probe.platforms", p.Platforms); err != nil {
+				return err
+			}
+			m["platforms"] = p.Platforms
+		}
 		draft["install_probe"] = m
 	}
 	return nil
