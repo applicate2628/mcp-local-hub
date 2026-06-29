@@ -178,6 +178,41 @@ func TestRepairStateFileDACL_WindowsRepairsCurrentUserWriteDACOnlyStaleDACL(t *t
 	}
 }
 
+func TestRepairStateFileDACL_WindowsReportsAllRemovedSIDs(t *testing.T) {
+	stateDir := isolateStateDir(t)
+	t.Setenv(RequireSingleUserHomeEnv, "1")
+
+	target := filepath.Join(stateDir, "workspaces.yaml")
+	if err := os.WriteFile(target, []byte("version: 1\nworkspaces: []\n"), 0o600); err != nil {
+		t.Fatalf("write stale registry: %v", err)
+	}
+	applyFileDACLWithAuthUsersAndEveryoneWriteACEs(t, target)
+
+	report, err := RepairStateFileDACL(target)
+	if err != nil {
+		t.Fatalf("RepairStateFileDACL: %v", err)
+	}
+	if report.Status != StateFileDACLRepairStatusRepaired {
+		t.Fatalf("repair status = %q, want %q (report=%+v)", report.Status, StateFileDACLRepairStatusRepaired, report)
+	}
+	for _, want := range []string{"S-1-5-11", "S-1-1-0"} {
+		if !containsRepairSID(report.RemovedSIDs, want) {
+			t.Fatalf("removed SIDs = %v, want %s", report.RemovedSIDs, want)
+		}
+	}
+
+	event, line := findSupervisorEventByName(t, filepath.Join(stateDir, SupervisorEventLogFileLeaf), "state-file-dacl-operator-repaired")
+	if event == nil {
+		t.Fatalf("missing state-file-dacl-operator-repaired audit event")
+	}
+	for _, want := range []string{"S-1-5-11", "S-1-1-0"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("audit line %q does not name removed SID %s", line, want)
+		}
+	}
+	assertWindowsFileDACLAllowlist(t, target)
+}
+
 func TestRepairStateFileDACL_WindowsForeignOwnerPredicateAndIntegration(t *testing.T) {
 	stateDir := isolateStateDir(t)
 	target := filepath.Join(stateDir, "foreign-owner.yaml")
@@ -330,6 +365,29 @@ func openWindowsFileForShareConflictTest(t *testing.T, target string) windows.Ha
 		t.Fatalf("CreateFile share-conflict fixture: %v", err)
 	}
 	return h
+}
+
+func applyFileDACLWithAuthUsersAndEveryoneWriteACEs(t *testing.T, target string) {
+	t.Helper()
+	currentSID, err := currentUserSID()
+	if err != nil {
+		t.Fatalf("currentUserSID: %v", err)
+	}
+	authUsersSID, err := windows.StringToSid("S-1-5-11")
+	if err != nil {
+		t.Fatalf("Authenticated Users sid: %v", err)
+	}
+	everyoneSID, err := windows.StringToSid("S-1-1-0")
+	if err != nil {
+		t.Fatalf("Everyone sid: %v", err)
+	}
+
+	entries := []windows.EXPLICIT_ACCESS{
+		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.GENERIC_ALL),
+		explicitAccessAllow(authUsersSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_WRITE),
+		explicitAccessAllow(everyoneSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_READ),
+	}
+	applyProtectedDACLFromEntries(t, target, entries)
 }
 
 func applyRepairableCurrentUserWriteDACOnlyDACL(t *testing.T, target string) {

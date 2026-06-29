@@ -5,7 +5,6 @@ package api
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 
 	"golang.org/x/sys/windows"
 )
@@ -63,16 +62,17 @@ func inspectStateFileDACLForRepair(path string) (StateFileDACLRepairCandidate, b
 }
 
 func repairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
-	parentDir := filepath.Dir(path)
-	base := filepath.Base(path)
-	parentHandle, err := openDirHandleNoReparse(parentDir)
+	stateDirAbs, targetAbs, rel, err := stateFileDACLRepairPathUnderStateDir(path)
 	if err != nil {
-		return repairReportFromError(path, err), fmt.Errorf("open parent %s: %w", parentDir, err)
-	}
-	defer windows.CloseHandle(parentHandle)
-	if err := verifyWindowsRepairParentHandle(parentHandle, parentDir); err != nil {
 		return repairReportFromError(path, err), err
 	}
+	path = targetAbs
+
+	parentHandle, base, err := openWindowsStateFileDACLRepairParentFromStateDir(stateDirAbs, rel)
+	if err != nil {
+		return repairReportFromError(path, err), err
+	}
+	defer windows.CloseHandle(parentHandle)
 
 	repairOpen, err := openWindowsStateFileForDACLRepair(parentHandle, base, path)
 	if err != nil {
@@ -106,8 +106,13 @@ func repairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
 			RepairOpenTier:           repairOpen.openTier,
 			FallbackPath:             repairOpen.fallbackPath,
 		}, nil
-	} else if sid := stateFileDACLOffendingSID(err); sid != "" {
-		removedSIDs = []string{sid}
+	} else {
+		removedSIDs = removedWindowsDACLNonAllowlistedSIDs(fileHandle)
+		if len(removedSIDs) == 0 {
+			if sid := stateFileDACLOffendingSID(err); sid != "" {
+				removedSIDs = []string{sid}
+			}
+		}
 	}
 
 	if err := setRestrictiveDACL(fileHandle); err != nil {
@@ -127,6 +132,30 @@ func repairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
 		RepairOpenTier:           repairOpen.openTier,
 		FallbackPath:             repairOpen.fallbackPath,
 	}, nil
+}
+
+func openWindowsStateFileDACLRepairParentFromStateDir(stateDirAbs, rel string) (windows.Handle, string, error) {
+	dirs, base, err := splitStateFileDACLRepairRel(rel)
+	if err != nil {
+		return windows.InvalidHandle, "", err
+	}
+	curHandle, err := openDirHandleNoReparse(stateDirAbs)
+	if err != nil {
+		return windows.InvalidHandle, "", fmt.Errorf("open state dir %s for repair: %w", stateDirAbs, err)
+	}
+	if err := verifyWindowsRepairParentHandle(curHandle, stateDirAbs); err != nil {
+		_ = windows.CloseHandle(curHandle)
+		return windows.InvalidHandle, "", err
+	}
+	for _, comp := range dirs {
+		nextHandle, openErr := openExistingRealDirAt(curHandle, comp)
+		_ = windows.CloseHandle(curHandle)
+		if openErr != nil {
+			return windows.InvalidHandle, "", fmt.Errorf("%w: refuse to descend through reparse point / non-directory at component %q of repair path %s: %v", ErrIrregularFile, comp, rel, openErr)
+		}
+		curHandle = nextHandle
+	}
+	return curHandle, base, nil
 }
 
 func openWindowsStateFileForDACLRepair(parentHandle windows.Handle, base, path string) (windowsStateFileDACLRepairOpen, error) {
@@ -162,6 +191,25 @@ func openWindowsStateFileForDACLRepair(parentHandle windows.Handle, base, path s
 
 func stateFileDACLRepairSharingViolation(path string) error {
 	return fmt.Errorf("%w: a process currently holds %s open; stop it and re-run", ErrStateFileDACLSharingViolation, path)
+}
+
+func removedWindowsDACLNonAllowlistedSIDs(h windows.Handle) []string {
+	violations, err := windowsDACLAllowlistViolationsFromHandle(h, windowsDACLSignificantBits)
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(violations))
+	var removed []string
+	for _, violation := range violations {
+		v := violation
+		sid := stateFileDACLOffendingSID(&v)
+		if sid == "" || seen[sid] {
+			continue
+		}
+		seen[sid] = true
+		removed = append(removed, sid)
+	}
+	return removed
 }
 
 func stateFileOwnerIsCurrentUser(h windows.Handle) (bool, error) {
