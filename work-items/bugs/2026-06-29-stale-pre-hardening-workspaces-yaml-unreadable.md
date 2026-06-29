@@ -10,7 +10,7 @@ affected-surface: >
   %LOCALAPPDATA%\mcp-local-hub\workspaces.yaml file written by a
   pre-2026-06-18 binary on a broadened-DACL parent.
 context: adjacent-finding
-status: open
+status: fixed-by-operator-command (repair-state-dacl)
 ---
 
 ## Symptom (the report that triggered this investigation)
@@ -60,19 +60,35 @@ GUI weekly-membership read) AND the write's own backup-read fail loud with
 The only remediations are the manual icacls owner-only fix or the optional
 owner-verified cold-read self-heal below — NOT a normal Save().
 
-## Possible remediations (for the owner to prioritize)
+## Resolution
+
+Fixed by the operator-initiated `mcphub repair-state-dacl` command. The command
+repairs stale broad-DACL state files without trusting their contents first:
+it opens the target handle-relative under the state directory with no sharing,
+refuses a concurrently-open file, verifies the file owner is the current
+process user, applies the owner-only DACL/mode, and re-verifies the result.
+
+The cold read remains fail-closed on write-broadened files. The previously
+considered owner-verified cold-read self-heal was rejected as unsound per the
+$architect Option-A verdict: a write-broadened file may already or concurrently
+be tampered with, and tightening its DACL is future-tense. DACL repair is
+therefore operator-initiated and separated from any read-trust decision.
+
+## Rejected / superseded remediations
 
 1. Operator remediation already documented: the CLAUDE.md runbook "secret
    daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%" — `icacls
-   workspaces.yaml /inheritance:r` then re-grant owner-only. (No code change.)
-2. OR a one-time self-heal on cold read: when `Registry.Load` hits the
+   workspaces.yaml /inheritance:r` then re-grant owner-only. Superseded by
+   `mcphub repair-state-dacl`, which keeps the same operator-owned posture and
+   adds the no-concurrent-writer check.
+2. A one-time self-heal on cold read: when `Registry.Load` hits the
    file-DACL WRITE/DAC refusal AND the file's OWNER is the current user, treat
    it as a recoverable stale-DACL condition — read the bytes inode-anchored,
    then immediately rewrite via the hardened `Save()` to tighten the DACL.
-   (Review the trust implications: the gate exists precisely to refuse a file a
-   non-allowlisted SID could have tampered with, so an owner-only-owner check
-   is load-bearing before trusting the bytes.)
-3. OR `mcphub setup` / install best-effort-tightens an existing broad-DACL
+   Rejected as unsound because the gate exists precisely to refuse a file a
+   non-allowlisted SID could have tampered with; ownership alone does not make
+   the pre-repair bytes trustworthy.
+3. `mcphub setup` / install best-effort-tightens an existing broad-DACL
    `workspaces.yaml` (and siblings) on upgrade, the same way it tightens other
    migrated state files.
 

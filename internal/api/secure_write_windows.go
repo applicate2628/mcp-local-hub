@@ -533,6 +533,26 @@ func ntCreateRelative(
 	createOptions uint32,
 	securityDescriptor *windows.SECURITY_DESCRIPTOR,
 ) (windows.Handle, error) {
+	return ntCreateRelativeWithShareAccess(
+		dirHandle,
+		name,
+		desiredAccess,
+		disposition,
+		createOptions,
+		securityDescriptor,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+	)
+}
+
+func ntCreateRelativeWithShareAccess(
+	dirHandle windows.Handle,
+	name string,
+	desiredAccess uint32,
+	disposition uint32,
+	createOptions uint32,
+	securityDescriptor *windows.SECURITY_DESCRIPTOR,
+	shareAccess uint32,
+) (windows.Handle, error) {
 	objectName, err := windows.NewNTUnicodeString(name)
 	if err != nil {
 		return windows.InvalidHandle, fmt.Errorf("nt unicode %q: %w", name, err)
@@ -554,7 +574,7 @@ func ntCreateRelative(
 		&iosb,
 		&allocSize,
 		windows.FILE_ATTRIBUTE_NORMAL,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		shareAccess,
 		disposition,
 		createOptions,
 		0,
@@ -588,15 +608,30 @@ func ntOpenRelative(
 	name string,
 	desiredAccess uint32,
 ) (windows.Handle, error) {
+	return ntOpenRelativeWithShareAccess(
+		dirHandle,
+		name,
+		desiredAccess,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+	)
+}
+
+func ntOpenRelativeWithShareAccess(
+	dirHandle windows.Handle,
+	name string,
+	desiredAccess uint32,
+	shareAccess uint32,
+) (windows.Handle, error) {
 	// Opening an existing file — pass nil SD so the existing security
 	// descriptor on disk is preserved.
-	return ntCreateRelative(
+	return ntCreateRelativeWithShareAccess(
 		dirHandle,
 		name,
 		desiredAccess|windows.SYNCHRONIZE,
 		windows.FILE_OPEN,
 		windows.FILE_NON_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT|windows.FILE_OPEN_REPARSE_POINT,
 		nil,
+		shareAccess,
 	)
 }
 
