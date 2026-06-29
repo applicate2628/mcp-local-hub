@@ -229,7 +229,7 @@ backlog reconciliation before a release-ready claim.
 
 Delivered and documented:
 
-- 10 shipped servers plus the direct HTTPS `context7` entry.
+- 15 built-in servers (incl. the gdb/lldb/godbolt/perftools/drmemory/vtune/oneapi-run debug+profile suite) plus a **52-row curated catalog** (one-click install across engineering/CAD, music, data/BI, creative, science, PKM, office) and the direct HTTPS `context7` entry.
 - 22 user-facing CLI commands across install, migration, logs, backups,
   scheduler, secrets, settings, cleanup, and version surfaces.
 - Go rewrites of godbolt and lldb, embedded as dual-entry servers.
@@ -260,7 +260,7 @@ Forward development proposals:
 Roadmap / remaining work:
 
 - **Phase 3B-II release hardening** — execute the D2/D3 live/manual smoke matrix and reconcile the remaining backlog before tagging.
-- **Phase 3C+ candidate work** — optional unified MCP endpoint, richer health/capability status, remote-server manifests, marketplace/import flow, and VS Code workspace/JSON5 import compatibility.
+- **Phase 3C+ candidate work** — optional unified MCP endpoint and VS Code workspace/JSON5 import compatibility. (Richer health/capability status, the curated marketplace + one-click install, and remote-server `http` manifests have since SHIPPED — see the matrix below.)
 - **Phase 4+** — Linux/macOS scheduler backends (systemd user units + launchd agents).
 
 ## Feature & readiness matrix
@@ -288,9 +288,9 @@ A surface-by-surface map of what this project actually does today, with explicit
 | Local manifest authoring (GUI Add server / `mcphub manifest create`) | ⚠ Preview | Form + `Paste YAML` import; YAML smuggling hardened (PR #51) but still surface-may-change before 1.0 |
 | Backups, rollback, migration | ⚠ Preview | `backups.keep_n` enforced + per-write timestamped; tracked race in interleaved migrate/demigrate (`work-items/bugs/b1-backup-file-race.md`) |
 | Per-server HTTP API (`/mcp` per daemon) | ⚠ Preview | DNS-rebind + Content-Type + body-size guards; GET/SSE server-notification semantics still being reconciled |
-| Unified health/status snapshot | 🚧 Roadmap | G2, immediately ahead of preview tag — combines ping/status/version + probes |
-| Capability browser (tools/resources/prompts) | 🚧 Roadmap | G3, post preview-tag |
-| Marketplace / remote manifests | 🚧 Roadmap | G5/G6/G7 — Phase 3C/3D |
+| Unified health/status snapshot | ⚠ Preview | Shipped (G2) — `/api/health` combines ping/status/version + per-daemon capability probes; drives the GUI Dashboard |
+| Capability browser (tools/resources/prompts) | ⚠ Preview | Shipped (G3) — the Capabilities screen lists each daemon's declared tools/resources/prompts |
+| Catalog / marketplace (one-click install) | ⚠ Preview | Shipped — Catalog screen + a **52-row curated marketplace** (33 installable + 19 docs-only pointers) across engineering/CAD, music/audio, data/BI, creative, science, PKM, office; one-click install/uninstall, theme-grouped, arch-aware install-probe; GUI **and** CLI (`mcphub marketplace`). Remote (`http`) + docs-only OAuth shapes supported |
 
 ## License
 
