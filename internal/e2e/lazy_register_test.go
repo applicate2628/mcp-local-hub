@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/daemon"
@@ -162,8 +163,12 @@ func TestE2E_LazyRegisterFullLifecycle(t *testing.T) {
 		// backlog F2 (Linux scheduler) + a follow-up Status test seam.
 		t.Skip("e2e flow exercises api.Status which uses real scheduler.New(); not implemented on non-Windows yet")
 	}
+	stateDir := apitest.HardenedTempDir(t)
+	defer api.SetDaemonStateRootForTest(stateDir)()
+	t.Setenv("MCPHUB_E2E_SCHEDULER", "none")
+
 	dir := t.TempDir()
-	regPath := filepath.Join(dir, "workspaces.yaml")
+	regPath := filepath.Join(stateDir, "workspaces.yaml")
 
 	sch := newFakeScheduler()
 	fc := &fakeClientsMap{

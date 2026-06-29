@@ -20,6 +20,7 @@ package api
 // kill/port seams — NO real schtasks, NO real kills, NO real ports bound.
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -81,6 +82,29 @@ func sliceContainsBare(names []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func freeDistinctLoopbackPortsForHyphenFamilyTest(t *testing.T) (int, int) {
+	t.Helper()
+	l1, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("allocate first free loopback port: %v", err)
+	}
+	defer l1.Close()
+	l2, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("allocate second free loopback port: %v", err)
+	}
+	defer l2.Close()
+	addr1, ok := l1.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("first listener addr = %T, want *net.TCPAddr", l1.Addr())
+	}
+	addr2, ok := l2.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("second listener addr = %T, want *net.TCPAddr", l2.Addr())
+	}
+	return addr1.Port, addr2.Port
 }
 
 // FIX 1 — uninstallSchedulerTasksForServer must NOT return a sibling-owned task
@@ -292,9 +316,10 @@ func TestStop_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {
 // never touch the sibling task name.
 func TestRestart_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
+	ownPort, siblingPort := freeDistinctLoopbackPortsForHyphenFamilyTest(t)
 	seedManifestsWithDaemons(t, map[string]map[string]int{
-		"demo":       {"beta": 9302},
-		"demo-alpha": {"beta": 9402},
+		"demo":       {"beta": ownPort},
+		"demo-alpha": {"beta": siblingPort},
 	})
 	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), &SupervisorIntentFile{Version: 1}); err != nil {
 		t.Fatalf("seed empty supervisor-intent: %v", err)
@@ -321,8 +346,8 @@ func TestRestart_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {
 	}
 
 	for _, p := range queriedPorts {
-		if p == 9402 {
-			t.Fatalf("Restart(demo,beta) probed sibling demo-alpha's beta port 9402; probed=%v (FIX 3 falsified)", queriedPorts)
+		if p == siblingPort {
+			t.Fatalf("Restart(demo,beta) probed sibling demo-alpha's beta port %d; probed=%v (FIX 3 falsified)", siblingPort, queriedPorts)
 		}
 	}
 	if sliceContainsBare(f.runNames, "mcp-local-hub-demo-alpha-beta") || sliceContainsBare(f.stopNames, "mcp-local-hub-demo-alpha-beta") {
@@ -343,9 +368,10 @@ func TestRestart_ServerDaemon_DoesNotKillSiblingPort(t *testing.T) {
 // killDaemonByPort hit its 9402 port.
 func TestRestart_Server_DoesNotKillSiblingDaemon(t *testing.T) {
 	stateDir := daemonIntentTestHelper(t)
+	ownPort, siblingPort := freeDistinctLoopbackPortsForHyphenFamilyTest(t)
 	seedManifestsWithDaemons(t, map[string]map[string]int{
-		"demo":       {"alpha": 9301},
-		"demo-alpha": {"beta": 9402},
+		"demo":       {"alpha": ownPort},
+		"demo-alpha": {"beta": siblingPort},
 	})
 	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), &SupervisorIntentFile{Version: 1}); err != nil {
 		t.Fatalf("seed empty supervisor-intent: %v", err)
@@ -372,8 +398,8 @@ func TestRestart_Server_DoesNotKillSiblingDaemon(t *testing.T) {
 	}
 
 	for _, p := range queriedPorts {
-		if p == 9402 {
-			t.Fatalf("Restart(demo) probed sibling demo-alpha's port 9402; probed=%v (FIX 4 falsified)", queriedPorts)
+		if p == siblingPort {
+			t.Fatalf("Restart(demo) probed sibling demo-alpha's port %d; probed=%v (FIX 4 falsified)", siblingPort, queriedPorts)
 		}
 	}
 	if sliceContainsBare(f.runNames, "mcp-local-hub-demo-alpha-beta") {
