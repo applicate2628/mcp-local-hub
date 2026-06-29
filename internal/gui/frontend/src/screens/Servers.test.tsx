@@ -569,6 +569,103 @@ describe("ServersScreen — LSP matrix rows", () => {
       language: "go",
     });
   });
+
+  // Fresh-machine connect path: a host with ZERO registered workspaces must be
+  // able to register the FIRST workspace from the GUI (no CLI). The
+  // RegisterWorkspacePanel in the LSP daemons section takes a typed path + a
+  // language and POSTs /api/lsp/register directly.
+  it("registers the first workspace from the GUI when no workspace exists yet", async () => {
+    const scan: ScanResult = {
+      at: "2026-06-03T00:00:00Z",
+      entries: [],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+    const registerBodies: unknown[] = [];
+    let workspacesCallCount = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => {
+          workspacesCallCount += 1;
+          // First load: empty registry (fresh machine). After register: the
+          // new workspace appears so the selector + rows reflect it.
+          return workspacesCallCount === 1
+            ? jsonResponse(200, { workspaces: [], entries: [] })
+            : jsonResponse(200, {
+                workspaces: [{ workspace_key: "my-project", workspace_path: "D:/dev/my-project" }],
+                entries: [
+                  {
+                    workspace_key: "my-project",
+                    workspace_path: "D:/dev/my-project",
+                    language: "python",
+                    backend: "mcp-language-server",
+                    port: 9202,
+                    task_name: "\\mcp-local-hub-lsp-my-project-python",
+                  },
+                ],
+              });
+        },
+        "/api/lsp/register": (init?: RequestInit) => {
+          registerBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, {
+            workspace: "D:/dev/my-project",
+            workspace_key: "my-project",
+            entries: [
+              {
+                workspace_key: "my-project",
+                workspace_path: "D:/dev/my-project",
+                language: "python",
+                backend: "mcp-language-server",
+                port: 9202,
+                task_name: "\\mcp-local-hub-lsp-my-project-python",
+              },
+            ],
+            results: [{ language: "python", status: "ok" }],
+          });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    // The first-workspace register panel is present even with zero workspaces.
+    const pathInput = (await screen.findByTestId(
+      "lsp-register-workspace-path",
+    )) as HTMLInputElement;
+    const langSelect = screen.getByTestId(
+      "lsp-register-workspace-language",
+    ) as HTMLSelectElement;
+    const submit = screen.getByTestId(
+      "lsp-register-workspace-submit",
+    ) as HTMLButtonElement;
+
+    // The empty-state intro nudges the operator to register here (not the CLI).
+    expect(screen.getByTestId("lsp-register-workspace-intro").textContent).toContain(
+      "No workspace registered yet",
+    );
+    // Submit is disabled until a path is entered.
+    expect(submit.disabled).toBe(true);
+
+    fireEvent.input(pathInput, { target: { value: "D:/dev/my-project" } });
+    fireEvent.change(langSelect, { target: { value: "python" } });
+    expect(submit.disabled).toBe(false);
+
+    fireEvent.click(submit);
+
+    await waitFor(() => {
+      expect(registerBodies).toHaveLength(1);
+    });
+    expect(registerBodies[0]).toEqual({
+      workspace_path: "D:/dev/my-project",
+      language: "python",
+    });
+    // After a successful register the workspace list reloads (selector reflects it).
+    await waitFor(() => {
+      expect(workspacesCallCount).toBeGreaterThan(1);
+    });
+  });
 });
 
 // The non-core opt-in clients are detection-gated as matrix columns. A

@@ -15,12 +15,14 @@ describe("WorkspaceSelector", () => {
       />,
     );
     expect(screen.getByTestId("workspace-selector")).toBeTruthy();
-    // The placeholder text must read as a single sentence — split into
-    // text + <code>, joined here as plain textContent so the assertion
-    // doesn't fight the inline-code styling.
+    // The empty-state placeholder must point the operator at the in-GUI
+    // register affordance (LSP daemons section), NOT a CLI command — a
+    // fresh-machine connect path must not dead-end here. (Regression guard:
+    // the old copy said "register a workspace first with mcphub register".)
     const text = screen.getByTestId("workspace-selector").textContent ?? "";
-    expect(text).toContain("register a workspace first");
-    expect(text).toContain("mcphub register");
+    expect(text).toContain("register a workspace folder");
+    expect(text).toContain("LSP daemons");
+    expect(text).not.toContain("mcphub register");
     expect(screen.queryByTestId("workspace-selector-select")).toBeNull();
   });
 
