@@ -62,23 +62,26 @@ owner-verified cold-read self-heal below — NOT a normal Save().
 
 ## Resolution
 
-Fixed by the operator-initiated `mcphub repair-state-dacl` command. The command
-repairs stale broad-DACL state files without trusting their contents first:
-it opens the target handle-relative under the state directory, verifies the file
-owner is the current process user, applies the owner-only DACL/mode, and
-re-verifies the result. On Windows, the repair uses a two-tier open. The default
-tier requests no content-read access, but does request `FILE_WRITE_DATA`,
-`DELETE`, `WRITE_DAC`, `READ_CONTROL`, and `FILE_READ_ATTRIBUTES` with no
-sharing. For the normal stale-file shape (owner keeps FullControl; broadening
-only adds a non-allowlisted SID), this rejects a concurrent writer with a sharing
-violation and reports `guarantee=enforced`. Only when that strong open returns
-access denied does the command retry the metadata-only `WRITE_DAC |
-READ_CONTROL | FILE_READ_ATTRIBUTES` fallback; that rare WRITE_DAC-only owner
-shape repairs with `guarantee=best-effort` and an audit `fallback_path` marker.
-On POSIX, the repair remains owner-gated and fd-bound (`O_NOFOLLOW` open,
-`fchmod(0600)`, fd-bound verify), but `chmod` cannot revoke a pre-existing
-writer file descriptor; the operator must stop any process that may already hold
-the file open for writing before running the command.
+Fixed by the operator-initiated
+`mcphub repair-state-dacl --path <state-file>` command. The command repairs
+exactly one named stale broad-DACL state file without trusting its contents
+first: it opens the target handle-relative under the state directory, verifies
+the file owner is the current process user, applies the owner-only DACL/mode,
+and re-verifies the result. There is no directory-wide scan mode; the operator
+uses the exact path printed by the cold-read error. On Windows, the repair uses a
+two-tier open. The default tier requests no content-read access, but does
+request `FILE_WRITE_DATA`, `DELETE`, `WRITE_DAC`, `READ_CONTROL`, and
+`FILE_READ_ATTRIBUTES` with no sharing. For the normal stale-file shape (owner
+keeps FullControl; broadening only adds a non-allowlisted SID), this rejects a
+concurrent writer with a sharing violation and reports `guarantee=enforced`.
+Only when that strong open returns access denied does the command retry the
+metadata-only `WRITE_DAC | READ_CONTROL | FILE_READ_ATTRIBUTES` fallback; that
+rare WRITE_DAC-only owner shape repairs with `guarantee=best-effort` and an
+audit `fallback_path` marker. On POSIX, the repair remains owner-gated and
+fd-bound (`O_NOFOLLOW` open, anchored chmod, fd-bound verify), but `chmod`
+cannot revoke a pre-existing writer file descriptor; the operator must stop any
+process that may already hold the file open for writing before running the
+command.
 
 The cold read remains fail-closed on write-broadened files. The previously
 considered owner-verified cold-read self-heal was rejected as unsound per the
@@ -91,9 +94,9 @@ therefore operator-initiated and separated from any read-trust decision.
 1. Operator remediation already documented: the CLAUDE.md runbook "secret
    daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%" — `icacls
    workspaces.yaml /inheritance:r` then re-grant owner-only. Superseded by
-   `mcphub repair-state-dacl`, which keeps the same operator-owned posture and
-   uses a two-tier Windows repair access mask plus an explicit POSIX
-   existing-writer limitation.
+   `mcphub repair-state-dacl --path <state-file>`, which keeps the same
+   operator-owned posture and uses a two-tier Windows repair access mask plus an
+   explicit POSIX existing-writer limitation.
 2. A one-time self-heal on cold read: when `Registry.Load` hits the
    file-DACL WRITE/DAC refusal AND the file's OWNER is the current user, treat
    it as a recoverable stale-DACL condition — read the bytes inode-anchored,

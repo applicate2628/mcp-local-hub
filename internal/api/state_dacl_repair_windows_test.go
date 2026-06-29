@@ -213,6 +213,46 @@ func TestRepairStateFileDACL_WindowsReportsAllRemovedSIDs(t *testing.T) {
 	assertWindowsFileDACLAllowlist(t, target)
 }
 
+func TestRepairStateFileDACL_WindowsAuditFilesCreatedUnderBroadenedStateDirAreOwnerOnly(t *testing.T) {
+	stateDir := isolateStateDir(t)
+	applyDirDACLWithInheritOnlyAuthUsersReadACE(t, stateDir)
+
+	target := filepath.Join(stateDir, "workspaces.yaml")
+	if err := os.WriteFile(target, []byte("version: 1\nworkspaces: []\n"), 0o600); err != nil {
+		t.Fatalf("write stale registry: %v", err)
+	}
+	applyFileDACLWithAuthUsersWriteACE(t, target)
+
+	report, err := RepairStateFileDACL(target)
+	if err != nil {
+		t.Fatalf("RepairStateFileDACL: %v", err)
+	}
+	if report.Status != StateFileDACLRepairStatusRepaired {
+		t.Fatalf("repair status = %q, want %q (report=%+v)", report.Status, StateFileDACLRepairStatusRepaired, report)
+	}
+
+	eventsPath := filepath.Join(stateDir, SupervisorEventLogFileLeaf)
+	event, line := findSupervisorEventByName(t, eventsPath, "state-file-dacl-operator-repaired")
+	if event == nil {
+		t.Fatalf("missing state-file-dacl-operator-repaired audit event")
+	}
+	body, ok := event["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("audit body missing or wrong type: %#v (line=%s)", event["body"], line)
+	}
+	if got := body["path"]; got != target {
+		t.Fatalf("audit path = %v, want %q (line=%s)", got, target, line)
+	}
+	assertWindowsFileDACLAllowlist(t, eventsPath)
+
+	lockPath := eventsPath + supervisorEventLogLockSuffix
+	if _, statErr := os.Stat(lockPath); statErr == nil {
+		assertWindowsFileDACLAllowlist(t, lockPath)
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("stat supervisor-events lock sidecar: %v", statErr)
+	}
+}
+
 func TestRepairStateFileDACL_WindowsForeignOwnerPredicateAndIntegration(t *testing.T) {
 	stateDir := isolateStateDir(t)
 	target := filepath.Join(stateDir, "foreign-owner.yaml")
@@ -264,31 +304,6 @@ func TestRepairStateFileDACL_WindowsForeignOwnerPredicateAndIntegration(t *testi
 	}
 	if report.Status != StateFileDACLRepairStatusRefused {
 		t.Fatalf("status = %q, want refused", report.Status)
-	}
-}
-
-func TestFindStateFileDACLRepairCandidates_WindowsListsOnlyUnsafeStateFiles(t *testing.T) {
-	stateDir := isolateStateDir(t)
-	unsafe := filepath.Join(stateDir, "workspaces.yaml")
-	safe := filepath.Join(stateDir, "supervisor-intent.json")
-	if err := os.WriteFile(unsafe, []byte("version: 1\nworkspaces: []\n"), 0o600); err != nil {
-		t.Fatalf("write unsafe: %v", err)
-	}
-	if err := os.WriteFile(safe, []byte(`{"strict_mode":false}`), 0o600); err != nil {
-		t.Fatalf("write safe: %v", err)
-	}
-	applyFileDACLWithAuthUsersWriteACE(t, unsafe)
-	applyAllowlistOnlyDACL(t, safe)
-
-	candidates, err := FindStateFileDACLRepairCandidates(stateDir)
-	if err != nil {
-		t.Fatalf("FindStateFileDACLRepairCandidates: %v", err)
-	}
-	if len(candidates) != 1 {
-		t.Fatalf("candidate count = %d, want 1 (%+v)", len(candidates), candidates)
-	}
-	if candidates[0].Path != unsafe {
-		t.Fatalf("candidate path = %q, want %q", candidates[0].Path, unsafe)
 	}
 }
 

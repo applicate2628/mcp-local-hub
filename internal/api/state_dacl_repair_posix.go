@@ -10,25 +10,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func inspectStateFileDACLForRepair(path string) (StateFileDACLRepairCandidate, bool, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return StateFileDACLRepairCandidate{}, false, err
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return repairCandidateFromError(path, ErrIrregularFile), true, nil
-	}
-	if uid, ok := statUID(info); ok && uid != os.Getuid() {
-		err := fmt.Errorf("%w: path=%s uid=%d (need current uid %d)", ErrWrongOwner, path, uid, os.Getuid())
-		return repairCandidateFromError(path, err), true, nil
-	}
-	if mode := info.Mode().Perm(); mode != 0o600 {
-		err := fmt.Errorf("%w: path=%s mode=%04o is not 0600", ErrTooLoose, path, mode)
-		return repairCandidateFromError(path, err), true, nil
-	}
-	return StateFileDACLRepairCandidate{}, false, nil
-}
-
 func repairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
 	stateDirAbs, targetAbs, rel, err := stateFileDACLRepairPathUnderStateDir(path)
 	if err != nil {

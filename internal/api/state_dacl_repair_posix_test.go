@@ -108,29 +108,3 @@ func TestRepairStateFileDACL_POSIXRefusesFIFOWithoutBlocking(t *testing.T) {
 		t.Fatalf("RepairStateFileDACL blocked on FIFO open")
 	}
 }
-
-func TestFindStateFileDACLRepairCandidates_POSIXListsOnlyLooseStateFiles(t *testing.T) {
-	stateDir := isolateStateDir(t)
-	unsafe := filepath.Join(stateDir, "workspaces.yaml")
-	safe := filepath.Join(stateDir, "supervisor-intent.json")
-	if err := os.WriteFile(unsafe, []byte("version: 1\nworkspaces: []\n"), 0o600); err != nil {
-		t.Fatalf("write unsafe: %v", err)
-	}
-	if err := os.WriteFile(safe, []byte(`{"strict_mode":false}`), 0o600); err != nil {
-		t.Fatalf("write safe: %v", err)
-	}
-	if err := os.Chmod(unsafe, 0o660); err != nil {
-		t.Fatalf("chmod unsafe: %v", err)
-	}
-
-	candidates, err := FindStateFileDACLRepairCandidates(stateDir)
-	if err != nil {
-		t.Fatalf("FindStateFileDACLRepairCandidates: %v", err)
-	}
-	if len(candidates) != 1 {
-		t.Fatalf("candidate count = %d, want 1 (%+v)", len(candidates), candidates)
-	}
-	if candidates[0].Path != unsafe {
-		t.Fatalf("candidate path = %q, want %q", candidates[0].Path, unsafe)
-	}
-}

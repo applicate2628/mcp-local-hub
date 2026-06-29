@@ -11,6 +11,20 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
+func TestRepairStateDACL_PathRequired(t *testing.T) {
+	stateDir := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restore)
+
+	stdout, stderr, err := runRepairStateDACLCmd(t, "", "--yes")
+	if err == nil {
+		t.Fatalf("repair-state-dacl without --path succeeded; stdout=%q stderr=%q", stdout, stderr)
+	}
+	if !strings.Contains(err.Error(), "--path is required") {
+		t.Fatalf("error = %q, want --path is required", err.Error())
+	}
+}
+
 func TestRepairStateDACL_PathOutsideStateDirRejected(t *testing.T) {
 	stateDir := t.TempDir()
 	restore := api.SetDaemonStateRootForTest(stateDir)
@@ -66,6 +80,7 @@ func TestRepairStateDACL_HelpDocumentsPOSIXOpenWriterLimitation(t *testing.T) {
 	}
 	help := out.String()
 	for _, want := range []string{
+		"repair-state-dacl --path <state-file> [--yes]",
 		"Windows",
 		"writer-exclusion guarantee",
 		"best-effort",
@@ -76,6 +91,9 @@ func TestRepairStateDACL_HelpDocumentsPOSIXOpenWriterLimitation(t *testing.T) {
 			t.Fatalf("help = %q, want %q", help, want)
 		}
 	}
+	if strings.Contains(help, "--all") {
+		t.Fatalf("help still documents removed --all scan surface: %q", help)
+	}
 }
 
 func TestRepairStateDACL_NonInteractiveWithoutYesRefusesWhenRepairNeeded(t *testing.T) {
@@ -83,12 +101,13 @@ func TestRepairStateDACL_NonInteractiveWithoutYesRefusesWhenRepairNeeded(t *test
 	restore := api.SetDaemonStateRootForTest(stateDir)
 	t.Cleanup(restore)
 
-	restoreScan := setRepairStateDACLScanForTest(func(string) ([]api.StateFileDACLRepairCandidate, error) {
-		return []api.StateFileDACLRepairCandidate{{Path: filepath.Join(stateDir, "workspaces.yaml"), Reason: "test unsafe file"}}, nil
+	target := filepath.Join(stateDir, "workspaces.yaml")
+	restoreRepair := setRepairStateDACLRepairForTest(func(path string) (api.StateFileDACLRepairReport, error) {
+		return api.StateFileDACLRepairReport{Path: path, Status: api.StateFileDACLRepairStatusRepaired}, nil
 	})
-	t.Cleanup(restoreScan)
+	t.Cleanup(restoreRepair)
 
-	stdout, stderr, err := runRepairStateDACLCmd(t, "")
+	stdout, stderr, err := runRepairStateDACLCmd(t, "", "--path", target)
 	if err == nil {
 		t.Fatalf("repair-state-dacl without --yes in non-interactive mode succeeded; stdout=%q stderr=%q", stdout, stderr)
 	}
@@ -101,17 +120,12 @@ func TestRepairStateDACL_NonInteractiveWithoutYesRefusesWhenRepairNeeded(t *test
 	}
 }
 
-func TestRepairStateDACL_AllWithYesRepairsCandidatesAndPrintsSummary(t *testing.T) {
+func TestRepairStateDACL_PathWithYesRepairsTargetAndPrintsSummary(t *testing.T) {
 	stateDir := t.TempDir()
 	restore := api.SetDaemonStateRootForTest(stateDir)
 	t.Cleanup(restore)
 
 	target := filepath.Join(stateDir, "workspaces.yaml")
-	restoreScan := setRepairStateDACLScanForTest(func(string) ([]api.StateFileDACLRepairCandidate, error) {
-		return []api.StateFileDACLRepairCandidate{{Path: target, Reason: "test unsafe file"}}, nil
-	})
-	t.Cleanup(restoreScan)
-
 	var repaired []string
 	restoreRepair := setRepairStateDACLRepairForTest(func(path string) (api.StateFileDACLRepairReport, error) {
 		repaired = append(repaired, path)
@@ -125,15 +139,15 @@ func TestRepairStateDACL_AllWithYesRepairsCandidatesAndPrintsSummary(t *testing.
 	})
 	t.Cleanup(restoreRepair)
 
-	stdout, stderr, err := runRepairStateDACLCmd(t, "", "--all", "--yes")
+	stdout, stderr, err := runRepairStateDACLCmd(t, "", "--path", target, "--yes")
 	if err != nil {
-		t.Fatalf("repair-state-dacl --all --yes: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+		t.Fatalf("repair-state-dacl --path --yes: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
 	}
 	if len(repaired) != 1 || repaired[0] != target {
 		t.Fatalf("repaired = %v, want [%s]", repaired, target)
 	}
-	if !strings.Contains(stdout, "Repaired 1 file") {
-		t.Fatalf("stdout = %q, want repair summary", stdout)
+	if !strings.Contains(stdout, "repaired: "+target) {
+		t.Fatalf("stdout = %q, want repaired target", stdout)
 	}
 	for _, want := range []string{"guarantee=best-effort", "fallback=tier1-access-denied-metadata-only"} {
 		if !strings.Contains(stdout, want) {

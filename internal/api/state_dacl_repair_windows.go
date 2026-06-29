@@ -25,42 +25,6 @@ type windowsStateFileDACLRepairOpen struct {
 	fallbackPath             string
 }
 
-func inspectStateFileDACLForRepair(path string) (StateFileDACLRepairCandidate, bool, error) {
-	pathW, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		return StateFileDACLRepairCandidate{}, false, fmt.Errorf("utf16 %q: %w", path, err)
-	}
-	h, err := windows.CreateFile(
-		pathW,
-		windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		nil,
-		windows.OPEN_EXISTING,
-		windows.FILE_FLAG_OPEN_REPARSE_POINT,
-		0,
-	)
-	if err != nil {
-		return StateFileDACLRepairCandidate{}, false, fmt.Errorf("open %s: %w", path, err)
-	}
-	defer windows.CloseHandle(h)
-
-	if err := refuseIrregularWindowsStateFileHandle(h, path); err != nil {
-		return repairCandidateFromError(path, err), true, nil
-	}
-	currentOwner, err := stateFileOwnerIsCurrentUser(h)
-	if err != nil {
-		return StateFileDACLRepairCandidate{}, false, err
-	}
-	if !currentOwner {
-		err := fmt.Errorf("%w: path=%s owner is not the current process user", ErrWrongOwner, path)
-		return repairCandidateFromError(path, err), true, nil
-	}
-	if err := verifyWindowsDACLFromHandle(h); err != nil {
-		return repairCandidateFromError(path, err), true, nil
-	}
-	return StateFileDACLRepairCandidate{}, false, nil
-}
-
 func repairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
 	stateDirAbs, targetAbs, rel, err := stateFileDACLRepairPathUnderStateDir(path)
 	if err != nil {

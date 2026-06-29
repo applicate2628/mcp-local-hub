@@ -297,10 +297,10 @@ auto-route to the `beta` dist-tag, never `latest`.
   → `E401`). Do not "fix" this by pasting a value into `_authToken` — a
   64-hex OTP/auth-code is NOT a token and will only `E401` AND clobber a
   working interactive-login session token.
-- The CI workflow uses the repo secret **`NPM_TOKEN`** (an npm Automation
-  token) which bypasses the OTP prompt, and `--provenance` (Sigstore
-  attestation) only works from CI (needs the `id-token: write` OIDC), not
-  locally.
+- The CI workflow uses the repository's npm automation credential
+  `NPM_TOKEN`, which bypasses the OTP prompt, and `--provenance` (Sigstore
+  attestation) only works from CI (needs the OIDC id-token permission set to
+  write), not locally.
 
 KOSYAK (2026-06-17): wasted a round fumbling local publish (EOTP →
 mis-set the OTP as `_authToken` → E401 → clobbered the session token)
@@ -432,7 +432,7 @@ jobs:
 - Dashboard: empty-cards state on fresh home, `/api/events` SSE connection opens on mount.
 - Logs: picker + controls render, notice text on no-daemons state, controls disabled when no eligible entries.
 - Secrets: empty-state init, Add modal, Used-by counts from manifest scan, ghost-refs for manifest-only keys, decrypt-failed degraded view, Rotate Save-without-restart with persistent CTA + Restart-now path via POST /restart, Rotate Save-and-restart with 207 partial-failure handling, Delete differential typed-confirm (single-click for unreferenced / typed DELETE for referenced) via D5 escalation flow, scan-incomplete fail-closed path, backend 409 guard verification, sidebar nav link, mcphub secrets edit banner.
-- Add/Edit server env picker: affordance button, auto-open on `secret:` typing with substring-narrowing filter, sort-by-match with `matchTier`-based badge for exact-after-normalization, broken-ref inline marker (red `.broken` for missing, yellow `.unverified` for unverified), conditional compact summary line above env section when count > 1 or vault not ok, in-place AddSecretModal with snapshot revalidate-on-save (savedFiredRef dedup) and Retry-on-load-error, full ARIA combobox semantics with keyboard navigation (Tab/Esc/Arrow/Enter), create-contextual 409 conflict flow (modal stays open + Cancel triggers refresh + marker clears), `[data-action="create-disabled"]` rendering for vault not ok.
+- Add/Edit server env picker: affordance button, auto-open on vault-reference prefix typing with substring-narrowing filter, sort-by-match with `matchTier`-based badge for exact-after-normalization, broken-ref inline marker (red `.broken` for missing, yellow `.unverified` for unverified), conditional compact summary line above env section when count > 1 or vault not ok, in-place AddSecretModal with snapshot revalidate-on-save (savedFiredRef dedup) and Retry-on-load-error, full ARIA combobox semantics with keyboard navigation (Tab/Esc/Arrow/Enter), create-contextual 409 conflict flow (modal stays open + Cancel triggers refresh + marker clears), `[data-action="create-disabled"]` rendering for vault not ok.
 - Settings: sidebar link + 5 section headers + deep-link query-string (#/settings?section=backups) + sticky inner-nav active-on-scroll + Save Appearance round-trip to gui-preferences.yaml + port save validation (below min) + port pending-restart badge after Save (anchored to persisted, not draft — Codex r3+r4 P2.1) + Daemons read-only "Configured schedule (effective in A4-b)" wording + Backups 4-client groups + would-prune badge with locked Codex copy + disabled Clean-now tooltip + Open app-data folder POST (mocked, no real spawn — Codex r2 P2) + dirty-guard navigation prompt + per-section Save isolation + deferred tray field disabled + discard-key remount on intra-Settings confirmed-discard navigation (Codex r2 P1, memo §10.4).
 - About (PR #22): /api/version network round-trip + heading + version/commit/build-date data-testids + external links carry target=_blank rel="noopener noreferrer" + sidebar nav highlights active.
 - A4-b PR #1: SectionDaemons editable section with multi-op save (settings + schedule + membership) + WeeklyMembershipTable (mixed-state render, toggle + Save persistence, Select all/Clear all), cron parse-error inline, ConfirmModal-gated clean-now (cancel preserves backups), export bundle download trigger, force-kill Diagnose → Healthy no-kill-button.
@@ -1159,8 +1159,7 @@ OAuth connector) are decided in
 - `generate <id>` — draft YAML to stdout. **Operator MUST edit before**
   `manifest create`: rename `name:`, pick a real port, **do NOT
   persist raw tokens / passwords / API keys** — replace verbatim
-  `${env:*}` placeholders with a `secret:<key>` reference (from the
-  local vault — see `mcphub secrets`) or the operator-meaningful
+  `${env:*}` placeholders with a vault reference from `mcphub secrets` or the operator-meaningful
   literal when the variable is non-secret. Sensitive env names match
   a broad classifier (suffixes `*_TOKEN`/`*_SECRET`/`*_PASSWORD`/
   `*_KEY`/`*_API_KEY`/`*_AUTH`/`*_DSN`; prefixes `AWS_`/`AZURE_`/
@@ -1335,6 +1334,10 @@ daemon error. Use SID literals, including the leading `*`, because they
 are locale-proof; display names such as `SYSTEM` or `Administrators` can
 vary by language. If the other vault file fails next, repeat the same two
 commands for that file and its observed SID.
+
+The built-in repair command is path-only: run
+`mcphub repair-state-dacl --path "<path>"` for the one refused state file
+named by the error. There is no directory-wide scan mode.
 
 POSIX equivalent on Linux/macOS:
 

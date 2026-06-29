@@ -260,68 +260,9 @@ func (l *SupervisorEventLog) TryEmit(evt SupervisorEvent) error {
 }
 
 func (l *SupervisorEventLog) emit(evt SupervisorEvent, blocking bool) error {
-	if evt.Event == "" {
-		return ErrSupervisorEventMissingEvent
-	}
-	if evt.Source == "" {
-		return ErrSupervisorEventMissingSource
-	}
-
-	// Identity-oversize gate. Identity fields (Event/Source/TaskName)
-	// are never truncated per §35; if any exceeds the 1024-byte cap,
-	// fail closed so the post-truncation re-marshal cannot produce a
-	// silent oversize entry. Mirrors AuditIdentityFieldByteCap
-	// discipline in intent_audit.go (§51).
-	if len(evt.Event) > supervisorEventIdentityCap ||
-		len(evt.Source) > supervisorEventIdentityCap ||
-		len(evt.TaskName) > supervisorEventIdentityCap {
-		return ErrSupervisorEventIdentityOversize
-	}
-
-	// Auto-fill envelope defaults.
-	if evt.SchemaVersion == "" {
-		evt.SchemaVersion = SupervisorEventSchemaVersion
-	}
-	if evt.TS == "" {
-		evt.TS = time.Now().UTC().Format(time.RFC3339Nano)
-	}
-	if evt.Severity == "" {
-		evt.Severity = SupervisorEventSeverityInfo
-	}
-
-	// Marshal once to measure; if oversize, truncate body and
-	// re-marshal. Identity fields are off-limits per §35.
-	raw, err := json.Marshal(evt)
+	raw, err := marshalSupervisorEventLine(evt)
 	if err != nil {
-		return fmt.Errorf("supervisor event log marshal: %w", err)
-	}
-	if len(raw) > supervisorEventMaxBytes {
-		evt.Body = map[string]any{
-			"_truncated_note": fmt.Sprintf("body fields exceeded %dKB cap", supervisorEventMaxBytes/1024),
-		}
-		evt.Truncated = true
-		raw, err = json.Marshal(evt)
-		if err != nil {
-			return fmt.Errorf("supervisor event log re-marshal after truncation: %w", err)
-		}
-		// Post-truncation re-check. With the identity gate above the
-		// envelope (sans Body) is bounded well below 16 KB so this
-		// branch should be unreachable; we keep it as a defense in
-		// depth so a future schema growth (new envelope fields)
-		// cannot silently leak an oversize line into the log. Drop
-		// the entry with a sentinel placeholder.
-		if len(raw) > supervisorEventMaxBytes {
-			placeholder := SupervisorEvent{
-				SchemaVersion: SupervisorEventSchemaVersion,
-				TS:            evt.TS,
-				Severity:      SupervisorEventSeverityWarn,
-				Source:        evt.Source,
-				Event:         "log-entry-dropped-oversize",
-				TaskName:      evt.TaskName,
-				Truncated:     true,
-			}
-			raw, _ = json.Marshal(placeholder)
-		}
+		return err
 	}
 
 	// In-process serialization first — guards against two goroutines
@@ -357,17 +298,84 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, blocking bool) error {
 		}
 	}
 
-	// Append line + newline. O_APPEND + O_CREATE + O_WRONLY 0o600
-	// mirrors gui_event_log.go's defaultGUIEventLogAppend.
+	// Append line. O_APPEND + O_CREATE + O_WRONLY 0o600 mirrors
+	// gui_event_log.go's defaultGUIEventLogAppend.
 	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open supervisor event log %s: %w", l.path, err)
 	}
 	defer func() { _ = f.Close() }()
-	if _, err := f.Write(append(raw, '\n')); err != nil {
+	if _, err := f.Write(raw); err != nil {
 		return fmt.Errorf("write supervisor event log %s: %w", l.path, err)
 	}
 	return nil
+}
+
+func marshalSupervisorEventLine(evt SupervisorEvent) ([]byte, error) {
+	if evt.Event == "" {
+		return nil, ErrSupervisorEventMissingEvent
+	}
+	if evt.Source == "" {
+		return nil, ErrSupervisorEventMissingSource
+	}
+
+	// Identity-oversize gate. Identity fields (Event/Source/TaskName)
+	// are never truncated per §35; if any exceeds the 1024-byte cap,
+	// fail closed so the post-truncation re-marshal cannot produce a
+	// silent oversize entry. Mirrors AuditIdentityFieldByteCap
+	// discipline in intent_audit.go (§51).
+	if len(evt.Event) > supervisorEventIdentityCap ||
+		len(evt.Source) > supervisorEventIdentityCap ||
+		len(evt.TaskName) > supervisorEventIdentityCap {
+		return nil, ErrSupervisorEventIdentityOversize
+	}
+
+	// Auto-fill envelope defaults.
+	if evt.SchemaVersion == "" {
+		evt.SchemaVersion = SupervisorEventSchemaVersion
+	}
+	if evt.TS == "" {
+		evt.TS = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	if evt.Severity == "" {
+		evt.Severity = SupervisorEventSeverityInfo
+	}
+
+	// Marshal once to measure; if oversize, truncate body and
+	// re-marshal. Identity fields are off-limits per §35.
+	raw, err := json.Marshal(evt)
+	if err != nil {
+		return nil, fmt.Errorf("supervisor event log marshal: %w", err)
+	}
+	if len(raw) > supervisorEventMaxBytes {
+		evt.Body = map[string]any{
+			"_truncated_note": fmt.Sprintf("body fields exceeded %dKB cap", supervisorEventMaxBytes/1024),
+		}
+		evt.Truncated = true
+		raw, err = json.Marshal(evt)
+		if err != nil {
+			return nil, fmt.Errorf("supervisor event log re-marshal after truncation: %w", err)
+		}
+		// Post-truncation re-check. With the identity gate above the
+		// envelope (sans Body) is bounded well below 16 KB so this
+		// branch should be unreachable; we keep it as a defense in
+		// depth so a future schema growth (new envelope fields)
+		// cannot silently leak an oversize line into the log. Drop
+		// the entry with a sentinel placeholder.
+		if len(raw) > supervisorEventMaxBytes {
+			placeholder := SupervisorEvent{
+				SchemaVersion: SupervisorEventSchemaVersion,
+				TS:            evt.TS,
+				Severity:      SupervisorEventSeverityWarn,
+				Source:        evt.Source,
+				Event:         "log-entry-dropped-oversize",
+				TaskName:      evt.TaskName,
+				Truncated:     true,
+			}
+			raw, _ = json.Marshal(placeholder)
+		}
+	}
+	return append(raw, '\n'), nil
 }
 
 // ---------------------------------------------------------------------------
