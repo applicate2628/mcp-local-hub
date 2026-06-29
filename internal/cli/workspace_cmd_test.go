@@ -1255,16 +1255,45 @@ func TestWorkspaceList_TabularOutput(t *testing.T) {
 	}
 }
 
-// workspacePrefixForTable returns the observable string for path p as
-// it would appear under the list-table truncation helper. If p is short
-// enough, returns it verbatim; otherwise the first (width-3) chars
-// (the truncate helper appends "..." after position n-3).
-func workspacePrefixForTable(p string) string {
-	width := workspaceTablePathWidth
-	if len(p) <= width {
-		return p
+func TestWorkspaceList_TabularOutputPreservesDefaultMarkerForLongPath(t *testing.T) {
+	const leaf = "alpha-default-leaf"
+	longPath := longWorkspacePathForTable(t, leaf)
+	buf := &bytes.Buffer{}
+	if err := printWorkspaceTable(buf, []api.WorkspaceEntry{{
+		WorkspacePath: longPath,
+		Languages:     []string{"go"},
+		Port:          9121,
+	}}, longPath); err != nil {
+		t.Fatalf("print table: %v", err)
 	}
-	return p[:width-3]
+	out := buf.String()
+	line := firstLineContaining(out, leaf)
+	if line == "" {
+		t.Fatalf("long default workspace row should preserve leaf %q; output:\n%s", leaf, out)
+	}
+	if !strings.Contains(line, "*") {
+		t.Fatalf("default marker '*' should stay visible on long workspace row: %q", line)
+	}
+}
+
+func longWorkspacePathForTable(t *testing.T, leaf string) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), strings.Repeat("shared-parent-", 8), leaf)
+}
+
+func firstLineContaining(s, needle string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	return ""
+}
+
+// workspacePrefixForTable returns the observable string for path p under
+// the list-table helper.
+func workspacePrefixForTable(p string) string {
+	return truncateWorkspacePath(p, workspaceTablePathWidth)
 }
 
 func TestWorkspaceList_JSONOutput(t *testing.T) {

@@ -653,7 +653,7 @@ func printWorkspaceTable(w io.Writer, entries []api.WorkspaceEntry, defaultPath 
 		}
 		fmt.Fprintf(w, "%-*s %-30s %-7s %-6d %-12s\n",
 			workspaceTablePathWidth,
-			truncate(e.WorkspacePath, workspaceTablePathWidth),
+			truncateWorkspacePath(e.WorkspacePath, workspaceTablePathWidth),
 			truncate(strings.Join(e.Languages, ","), 30),
 			def,
 			e.Port,
