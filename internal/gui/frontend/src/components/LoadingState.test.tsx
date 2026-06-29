@@ -5,11 +5,13 @@ import { LoadingState } from "./LoadingState";
 describe("LoadingState", () => {
   afterEach(() => cleanup());
 
-  it("renders an accessible busy status with a hidden Loading label", () => {
+  it("renders an accessible live status that announces a hidden Loading label", () => {
     render(<LoadingState />);
 
     const status = screen.getByRole("status");
-    expect(status.getAttribute("aria-busy")).toBe("true");
+    // role=status + aria-live=polite announces the label; no aria-busy (which
+    // would defer the announcement on a region that only unmounts).
+    expect(status.getAttribute("aria-busy")).toBeNull();
     expect(status.getAttribute("aria-live")).toBe("polite");
     expect(status.querySelector(".visually-hidden")?.textContent).toBe("Loading");
     expect(status.querySelector(".loading-state-skeleton")).not.toBeNull();
