@@ -4,19 +4,19 @@ import "fmt"
 
 // globalDaemonBandStart / globalDaemonBandEnd is the hub daemon port band a
 // single-daemon global server installed via the marketplace one-click flow
-// draws from. It is carved ABOVE every pre-existing band so the marketplace
+// draws from. It is carved outside the other allocator bands so the marketplace
 // allocator can never collide with another allocator's range:
 //
 //	9121–9149  hand-assigned globals (configs/ports.yaml)
 //	9150–9199  serena dynamic pool (serena_dynamic_pool.go)
-//	9200–9299  workspace-scoped LSP daemon port_pool
+//	9300–9399  marketplace single-daemon globals (THIS band) — disjoint from
+//	           the dynamic pools, so the allocators never contend.
+//	9400–9599  workspace-scoped LSP daemon port_pool
 //	           (servers/mcp-language-server/manifest.yaml) — a DYNAMIC pool the
 //	           marketplace allocator must NOT share: scanning installed
 //	           daemons' declared ports does not see a pool slot that is
 //	           intended-but-currently-unbound, so an overlap here could hand a
 //	           marketplace daemon a port the LSP pool later binds.
-//	9300–9399  marketplace single-daemon globals (THIS band) — disjoint from
-//	           all of the above, so the two allocators never contend.
 //
 // Named constants — not a bare 9300 literal — keep this aligned with the §8a
 // live-band guard convention (a port value that reaches a kill/listen sink

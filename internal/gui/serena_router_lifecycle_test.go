@@ -2610,7 +2610,7 @@ func TestSerenaRouter_BackendLoss_IPCReconcileFirstTickPIDChangeAfterBindTearsDo
 	ts := httptest.NewServer(daemon.handler())
 	t.Cleanup(ts.Close)
 	port := testServerPort(t, ts)
-	if port >= 9121 && port <= 9299 {
+	if (port >= 9121 && port <= 9299) || (port >= 9400 && port <= 9599) {
 		t.Skipf("httptest selected live mcphub port %d", port)
 	}
 
@@ -2664,7 +2664,7 @@ func TestSerenaRouter_BackendLoss_SeedPreservesExistingBaselineForFirstBoundSess
 	ts := httptest.NewServer(daemon.handler())
 	t.Cleanup(ts.Close)
 	port := testServerPort(t, ts)
-	if port >= 9121 && port <= 9299 {
+	if (port >= 9121 && port <= 9299) || (port >= 9400 && port <= 9599) {
 		t.Skipf("httptest selected live mcphub port %d", port)
 	}
 
@@ -2719,7 +2719,7 @@ func TestSerenaRouter_BackendLoss_CacheHitPreservesSingleSessionBaseline(t *test
 	ts := httptest.NewServer(daemon.handler())
 	t.Cleanup(ts.Close)
 	port := testServerPort(t, ts)
-	if port >= 9121 && port <= 9299 {
+	if (port >= 9121 && port <= 9299) || (port >= 9400 && port <= 9599) {
 		t.Skipf("httptest selected live mcphub port %d", port)
 	}
 

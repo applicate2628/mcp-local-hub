@@ -199,7 +199,7 @@ func TestE2E_LazyRegisterFullLifecycle(t *testing.T) {
 	m := &config.ServerManifest{
 		Name:     "mcp-language-server",
 		Kind:     config.KindWorkspaceScoped,
-		PortPool: &config.PortPool{Start: 9200, End: 9299},
+		PortPool: &config.PortPool{Start: 9400, End: 9599},
 		Languages: []config.LanguageSpec{
 			{Name: "python", Backend: "mcp-language-server", Transport: "stdio", LspCommand: "pyright-langserver", ExtraFlags: []string{"--stdio"}},
 		},
@@ -236,8 +236,8 @@ func TestE2E_LazyRegisterFullLifecycle(t *testing.T) {
 	if entry.Lifecycle != api.LifecycleConfigured {
 		t.Errorf("initial Lifecycle = %q, want %q", entry.Lifecycle, api.LifecycleConfigured)
 	}
-	if entry.Port < 9200 || entry.Port > 9299 {
-		t.Errorf("Port = %d, outside pool [9200-9299]", entry.Port)
+	if entry.Port < 9400 || entry.Port > 9599 {
+		t.Errorf("Port = %d, outside pool [9400-9599]", entry.Port)
 	}
 	expectedTask := fmt.Sprintf("mcp-local-hub-lsp-%s-python", entry.WorkspaceKey)
 	if entry.TaskName != expectedTask {

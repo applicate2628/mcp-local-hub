@@ -1007,7 +1007,7 @@ func newSafeSerenaHTTPTestServer(t *testing.T, h http.Handler) *httptest.Server 
 			t.Fatalf("listen on ephemeral loopback port: %v", err)
 		}
 		port := ln.Addr().(*net.TCPAddr).Port
-		if port >= 9121 && port <= 9299 {
+		if (port >= 9121 && port <= 9299) || (port >= 9400 && port <= 9599) {
 			_ = ln.Close()
 			continue
 		}
@@ -1017,7 +1017,7 @@ func newSafeSerenaHTTPTestServer(t *testing.T, h http.Handler) *httptest.Server 
 		t.Cleanup(ts.Close)
 		return ts
 	}
-	t.Fatal("could not allocate an httptest port outside 9121-9299")
+	t.Fatal("could not allocate an httptest port outside live mcphub bands")
 	return nil
 }
 

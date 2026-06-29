@@ -66,10 +66,11 @@ const (
 	// cutover, while every shipped global is live).
 	//
 	// Repo port-map convention: globals 9121–9149 (room to grow), serena dynamic
-	// pool 9150–9199, LSP workspace-proxy pool 9200–9299. So start at 9150 (clears
-	// 9121–9132 with a growth buffer) and end at 9199. The upstream child binds
-	// external+NativeHTTPInternalPortOffset (19150+), so the upstream side never
-	// collides either.
+	// pool 9150–9199, legacy LSP workspace-proxy rows 9200–9299, marketplace
+	// globals 9300–9399, and current LSP workspace-proxy pool 9400–9599. So start
+	// at 9150 (clears 9121–9132 with a growth buffer) and end at 9199. The
+	// upstream child binds external+NativeHTTPInternalPortOffset (19150+), so the
+	// upstream side never collides either.
 	//
 	// A static band is the proportionate fix here; a future hardening could make
 	// AllocateSerenaPort skip manifest-bound ports so the pool is collision-proof

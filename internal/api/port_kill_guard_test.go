@@ -66,11 +66,13 @@ import (
 //     (PR #287 moved it off the legacy serena port).
 //   - 9150–9199  serena dynamic pool. Source: serena_dynamic_pool.go:77-78
 //     (serenaDefaultPortPoolStart / serenaDefaultPortPoolEnd).
-//   - 9200–9299  LSP workspace-proxy pool. Source: serena_dynamic_pool.go:69
-//     comment + servers/mcp-language-server/manifest.yaml `start: 9200`.
+//   - 9200–9299  legacy LSP workspace-proxy pool. Existing registries may still
+//     hold rows there after upgrade, so tests must keep treating it as live.
+//   - 9400–9599  current LSP workspace-proxy pool. Source:
+//     servers/mcp-language-server/manifest.yaml.
 //
 // Note 9134–9149 is an intentional gap (not a live band), so the guard checks
-// two ranges: [9121,9133] and [9150,9299].
+// three ranges: [9121,9133], [9150,9299], and [9400,9599].
 //
 // # Scope: SINK-SCOPED, deliberately NOT a blanket `9xxx` grep
 //
@@ -137,7 +139,7 @@ func TestNoLiveBandLiteralReachesKillOrListenSink(t *testing.T) {
 
 	// inLiveBand reports whether p falls in a live daemon-port band.
 	inLiveBand := func(p int) bool {
-		return (p >= 9121 && p <= 9133) || (p >= 9150 && p <= 9299)
+		return (p >= 9121 && p <= 9133) || (p >= 9150 && p <= 9299) || (p >= 9400 && p <= 9599)
 	}
 
 	// litPort extracts the integer port from an *ast.BasicLit if it is a

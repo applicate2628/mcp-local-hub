@@ -75,6 +75,7 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	origBless := registerBlessTrustedRootFn
 	origForceKill := forceKillByPortFn
 	origPortAvailable := portAvailable
+	origExcludedTCPPortRanges := excludedTCPPortRanges
 
 	// Stub the explicit-register bless seam: capture the canonical roots
 	// (so a dedicated test can assert the bless fired) AND keep every
@@ -112,8 +113,9 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	}
 	// Register harness tests exercise registry/scheduler/client wiring, not
 	// the host's live TCP occupancy. Keep the allocator hermetic so a running
-	// developer fleet on 9200-9299 cannot exhaust the test pool.
+	// developer fleet on the LSP workspace pool cannot exhaust the test pool.
 	portAvailable = func(int) bool { return true }
+	excludedTCPPortRanges = func() ([]tcpPortRange, error) { return nil, nil }
 
 	fc := &fakeClientsMap{
 		entries:         map[string]map[string]string{},
@@ -153,6 +155,7 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 			registerBlessTrustedRootFn = origBless
 			forceKillByPortFn = origForceKill
 			portAvailable = origPortAvailable
+			excludedTCPPortRanges = origExcludedTCPPortRanges
 		},
 	}
 }
@@ -178,7 +181,7 @@ func nineLanguageManifest() *config.ServerManifest {
 		Kind:      config.KindWorkspaceScoped,
 		Transport: "stdio-bridge",
 		Command:   "mcp-language-server",
-		PortPool:  &config.PortPool{Start: 9200, End: 9299},
+		PortPool:  &config.PortPool{Start: 9400, End: 9599},
 		Languages: langs,
 		ClientBindings: []config.ClientBinding{
 			{Client: "claude-code", URLPath: "/mcp"},
@@ -1040,8 +1043,8 @@ func TestRegister_RollbackKillsProxyForStartedLanguage(t *testing.T) {
 		t.Fatal("rollback did not invoke killByPortFn — Windows would leak the started proxy process")
 	}
 	for _, p := range killed {
-		if p < 9200 || p > 9299 {
-			t.Errorf("killed port %d outside workspace pool 9200-9299", p)
+		if p < 9400 || p > 9599 {
+			t.Errorf("killed port %d outside workspace pool 9400-9599", p)
 		}
 	}
 }
@@ -1132,7 +1135,7 @@ func TestRegister_RollbackOnPortExhaustion(t *testing.T) {
 	defer h.restore()
 	// Shrink the port pool so only 1 fits; request 2 languages.
 	m := nineLanguageManifest()
-	m.PortPool = &config.PortPool{Start: 9200, End: 9200}
+	m.PortPool = &config.PortPool{Start: 9400, End: 9400}
 	ws := t.TempDir()
 	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python", "typescript"}, RegisterOpts{Writer: &bytes.Buffer{}})
 	if err == nil {
@@ -3300,7 +3303,7 @@ func TestInstall_RefusesWorkspaceScoped(t *testing.T) {
 	m := &config.ServerManifest{
 		Name:     "mcp-language-server",
 		Kind:     config.KindWorkspaceScoped,
-		PortPool: &config.PortPool{Start: 9200, End: 9299},
+		PortPool: &config.PortPool{Start: 9400, End: 9599},
 	}
 	buf := &bytes.Buffer{}
 	err := refuseWorkspaceScopedInstall(m, buf)
@@ -3701,7 +3704,7 @@ func newReadinessHTTPTestServer(t *testing.T, h http.HandlerFunc) (*httptest.Ser
 		t.Fatalf("listen on ephemeral loopback port: %v", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	if port >= 9121 && port <= 9299 {
+	if (port >= 9121 && port <= 9299) || (port >= 9400 && port <= 9599) {
 		_ = ln.Close()
 		t.Fatalf("httptest allocated live mcphub port %d", port)
 	}

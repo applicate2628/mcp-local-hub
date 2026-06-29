@@ -7,11 +7,21 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
+func stubOSExcludedTCPPortRanges(t *testing.T, ranges []tcpPortRange, err error) {
+	t.Helper()
+	orig := excludedTCPPortRanges
+	excludedTCPPortRanges = func() ([]tcpPortRange, error) {
+		return append([]tcpPortRange(nil), ranges...), err
+	}
+	t.Cleanup(func() { excludedTCPPortRanges = orig })
+}
+
 // TestAllocatePort_SkipsOSBoundPorts guards against the "registry says
 // free but something else holds the port" hazard. Without the OS-level
 // bind check, Register would return success but the proxy would
 // immediately fail to bind — a silent-broken registration.
 func TestAllocatePort_SkipsOSBoundPorts(t *testing.T) {
+	stubOSExcludedTCPPortRanges(t, nil, nil)
 	origAvail := portAvailable
 	defer func() { portAvailable = origAvail }()
 	// Simulate 9200 + 9201 being held by unrelated processes. Allocator
@@ -31,6 +41,7 @@ func TestAllocatePort_SkipsOSBoundPorts(t *testing.T) {
 // if every pool port is bound externally, AllocatePort must return
 // ErrPortPoolExhausted rather than silently returning a bad port.
 func TestAllocatePort_ExhaustedWhenEntirePoolOSBound(t *testing.T) {
+	stubOSExcludedTCPPortRanges(t, nil, nil)
 	origAvail := portAvailable
 	defer func() { portAvailable = origAvail }()
 	portAvailable = func(int) bool { return false }
@@ -45,6 +56,7 @@ func TestAllocatePort_ExhaustedWhenEntirePoolOSBound(t *testing.T) {
 }
 
 func TestAllocatePort_FirstFreeInEmptyRegistry(t *testing.T) {
+	stubOSExcludedTCPPortRanges(t, nil, nil)
 	origAvail := portAvailable
 	defer func() { portAvailable = origAvail }()
 	portAvailable = func(int) bool { return true }
@@ -59,6 +71,7 @@ func TestAllocatePort_FirstFreeInEmptyRegistry(t *testing.T) {
 }
 
 func TestAllocatePort_SkipsAllocated(t *testing.T) {
+	stubOSExcludedTCPPortRanges(t, nil, nil)
 	origAvail := portAvailable
 	defer func() { portAvailable = origAvail }()
 	portAvailable = func(int) bool { return true }
@@ -75,6 +88,7 @@ func TestAllocatePort_SkipsAllocated(t *testing.T) {
 }
 
 func TestAllocatePort_FillsHoles(t *testing.T) {
+	stubOSExcludedTCPPortRanges(t, nil, nil)
 	origAvail := portAvailable
 	defer func() { portAvailable = origAvail }()
 	portAvailable = func(int) bool { return true }
@@ -91,6 +105,7 @@ func TestAllocatePort_FillsHoles(t *testing.T) {
 }
 
 func TestAllocatePort_ExhaustedPoolReturnsError(t *testing.T) {
+	stubOSExcludedTCPPortRanges(t, nil, nil)
 	reg := NewRegistry(t.TempDir() + "/reg.yaml")
 	for p := 9200; p <= 9202; p++ {
 		reg.Put(WorkspaceEntry{WorkspaceKey: "k", Language: "l" + string(rune('a'+p-9200)), Port: p})
