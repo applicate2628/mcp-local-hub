@@ -74,6 +74,7 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	origCanonical := testCanonicalMcphubPathOverride
 	origBless := registerBlessTrustedRootFn
 	origForceKill := forceKillByPortFn
+	origPortAvailable := portAvailable
 
 	// Stub the explicit-register bless seam: capture the canonical roots
 	// (so a dedicated test can assert the bless fired) AND keep every
@@ -109,6 +110,10 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		return portKillNoListener, nil
 	}
+	// Register harness tests exercise registry/scheduler/client wiring, not
+	// the host's live TCP occupancy. Keep the allocator hermetic so a running
+	// developer fleet on 9200-9299 cannot exhaust the test pool.
+	portAvailable = func(int) bool { return true }
 
 	fc := &fakeClientsMap{
 		entries:         map[string]map[string]string{},
@@ -147,6 +152,7 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 			testCanonicalMcphubPathOverride = origCanonical
 			registerBlessTrustedRootFn = origBless
 			forceKillByPortFn = origForceKill
+			portAvailable = origPortAvailable
 		},
 	}
 }
