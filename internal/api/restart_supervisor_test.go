@@ -230,7 +230,7 @@ func TestRestartAll_NilLookupPortKillNoOpRunsScheduler(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", stateDir)
 
 	port := pickFreeLocalPort(t)
-	for port >= 9121 && port <= 9299 {
+	for (port >= 9121 && port <= 9299) || (port >= 9400 && port <= 9599) {
 		port = pickFreeLocalPort(t)
 	}
 	const taskName = `\mcp-local-hub-serena-ephemeral`

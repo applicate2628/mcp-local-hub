@@ -91,21 +91,33 @@ func TestPortInGlobalDaemonBand(t *testing.T) {
 
 // TestGlobalDaemonBandDisjointFromOtherAllocators pins the invariant that the
 // marketplace single-daemon band does NOT overlap any other allocator's range
-// — specifically the workspace-scoped LSP daemon port_pool (9200–9299), the
-// serena dynamic pool (9150–9199), or the GUI port (9125). A shared band would
-// let the marketplace allocator hand out a port another allocator later binds
-// (the batch-2 review finding this band move fixes). The band is carved ABOVE
-// the LSP pool ceiling, so band-start must clear 9299.
+// — specifically the current workspace-scoped LSP daemon port_pool (9400–9599),
+// the legacy LSP band (9200-9299; existing registries may still hold rows
+// there), the serena dynamic pool (9150–9199), or the GUI port (9125). A shared
+// band would let the marketplace allocator hand out a port another allocator
+// later binds.
 func TestGlobalDaemonBandDisjointFromOtherAllocators(t *testing.T) {
-	const lspPoolEnd = 9299 // servers/mcp-language-server/manifest.yaml port_pool ceiling
+	overlaps := func(aStart, aEnd, bStart, bEnd int) bool {
+		return aStart <= bEnd && bStart <= aEnd
+	}
+	const legacyLSPPoolStart = 9200
+	const legacyLSPPoolEnd = 9299
+	const lspPoolStart = 9400 // servers/mcp-language-server/manifest.yaml port_pool start
+	const lspPoolEnd = 9599   // servers/mcp-language-server/manifest.yaml port_pool end
+	const serenaPoolStart = 9150
 	const serenaPoolEnd = 9199
 	const guiPort = 9125
-	if globalDaemonBandStart <= lspPoolEnd {
-		t.Errorf("marketplace band start %d overlaps the LSP workspace pool (≤%d) — collision risk",
-			globalDaemonBandStart, lspPoolEnd)
+	if overlaps(globalDaemonBandStart, globalDaemonBandEnd, lspPoolStart, lspPoolEnd) {
+		t.Errorf("marketplace band %d-%d overlaps the LSP workspace pool %d-%d — collision risk",
+			globalDaemonBandStart, globalDaemonBandEnd, lspPoolStart, lspPoolEnd)
 	}
-	if globalDaemonBandStart <= serenaPoolEnd {
-		t.Errorf("marketplace band start %d overlaps the serena pool (≤%d)", globalDaemonBandStart, serenaPoolEnd)
+	if overlaps(globalDaemonBandStart, globalDaemonBandEnd, legacyLSPPoolStart, legacyLSPPoolEnd) {
+		t.Errorf("marketplace band %d-%d overlaps the legacy LSP workspace pool %d-%d — collision risk",
+			globalDaemonBandStart, globalDaemonBandEnd, legacyLSPPoolStart, legacyLSPPoolEnd)
+	}
+	if overlaps(globalDaemonBandStart, globalDaemonBandEnd, serenaPoolStart, serenaPoolEnd) {
+		t.Errorf("marketplace band %d-%d overlaps the serena pool %d-%d",
+			globalDaemonBandStart, globalDaemonBandEnd, serenaPoolStart, serenaPoolEnd)
 	}
 	if PortInGlobalDaemonBand(guiPort) {
 		t.Errorf("GUI port %d must never fall inside the marketplace band", guiPort)

@@ -9,8 +9,8 @@ transport: stdio-bridge
 command: mcp-language-server
 
 port_pool:
-  start: 9200
-  end: 9299
+  start: 9400
+  end: 9599
 
 # Phase 3 lazy mode: register() creates scheduler tasks for lazy proxies.
 # Heavy backends spawn only on first tools/call. weekly_refresh restarts the

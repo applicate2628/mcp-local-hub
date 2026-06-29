@@ -69,7 +69,7 @@ func TestParseManifest_McpLanguageServerShipped(t *testing.T) {
 			}
 		}
 	}
-	if m.PortPool.Start != 9200 || m.PortPool.End != 9299 {
-		t.Errorf("PortPool = %+v, want {9200,9299}", m.PortPool)
+	if m.PortPool.Start != 9400 || m.PortPool.End != 9599 {
+		t.Errorf("PortPool = %+v, want {9400,9599}", m.PortPool)
 	}
 }
