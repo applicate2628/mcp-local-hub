@@ -15,10 +15,12 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"mcp-local-hub/internal/api/apitest"
 )
 
 func TestAcquireSingleInstance_FirstCallerSucceeds(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	lock, err := acquireSingleInstanceAt(pidport, 9100)
 	if err != nil {
@@ -36,7 +38,7 @@ func TestAcquireSingleInstance_FirstCallerSucceeds(t *testing.T) {
 }
 
 func TestAcquireSingleInstance_SecondCallerFails(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	first, err := acquireSingleInstanceAt(pidport, 9100)
 	if err != nil {
@@ -53,7 +55,7 @@ func TestAcquireSingleInstance_SecondCallerFails(t *testing.T) {
 }
 
 func TestReadPidport_ParsesPidAndPort(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte("12345 9100\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -75,7 +77,7 @@ func TestReadPidport_ParsesPidAndPort(t *testing.T) {
 // truth, and the next acquirer's os.WriteFile overwrites the stale
 // file atomically — see Release godoc).
 func TestRelease_UnlocksBeforeRemovingPidport(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	lock, err := acquireSingleInstanceAt(pidport, 9100)
 	if err != nil {
@@ -107,7 +109,7 @@ func TestRelease_UnlocksBeforeRemovingPidport(t *testing.T) {
 // do between our Unlock and any cleanup we might do) and asserts
 // Release leaves whatever pidport is on disk alone.
 func TestRelease_LeavesPidportFileAlone(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	lock, err := acquireSingleInstanceAt(pidport, 9100)
 	if err != nil {
@@ -133,7 +135,7 @@ func TestRelease_LeavesPidportFileAlone(t *testing.T) {
 // (here: an httptest server bound to a real port) returns
 // VerdictHealthy with PingMatch=true.
 func TestProbe_Healthy(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	// Spin up a fake /api/ping that reports our own PID.
@@ -166,7 +168,7 @@ func TestProbe_Healthy(t *testing.T) {
 
 // TestProbe_LiveUnreachable: alive PID, no listener.
 func TestProbe_LiveUnreachable(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	const probablyClosedPort = 1
 	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
@@ -180,7 +182,7 @@ func TestProbe_LiveUnreachable(t *testing.T) {
 
 // TestProbe_DeadPID: pid is impossible.
 func TestProbe_DeadPID(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	const impossible = 2147483646
 	if err := os.WriteFile(pidport, []byte(formatPidport(impossible, 9125)), 0o600); err != nil {
@@ -194,7 +196,7 @@ func TestProbe_DeadPID(t *testing.T) {
 
 // TestProbe_Malformed: garbage in pidport.
 func TestProbe_Malformed(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte("not a pidport file"), 0o600); err != nil {
 		t.Fatal(err)
@@ -210,7 +212,7 @@ func TestProbe_Malformed(t *testing.T) {
 // the three-part identity gate's image-basename check refuses.
 // Asserts Class=VerdictKillRefused, no kill attempted.
 func TestKillRecordedHolder_RefusesNonMcphubImage(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	const port = 9125
 	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), port)), 0o600); err != nil {
@@ -252,7 +254,7 @@ func TestKillRecordedHolder_RefusesNonMcphubImage(t *testing.T) {
 // fix widens the gate from `port==0` to `recent mtime`, so the
 // `Port0` framing no longer accurately describes the contract.
 func TestProbe_RecentPidport_StartupWindow_RetriesAndClassifiesHealthy(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	// Healthy ping server (mirrors the incumbent post-bind state).
@@ -302,7 +304,7 @@ func TestProbe_RecentPidport_StartupWindow_RetriesAndClassifiesHealthy(t *testin
 // fix widens the gate from `port==0` to `recent mtime`, so the
 // `Port0` framing no longer accurately describes the contract.
 func TestProbe_RecentPidport_StartupWindow_GivesUpAfterDeadline(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	// pidport stays {ourPid, 0} for the entire test — no rewrite.
@@ -347,7 +349,7 @@ func TestProbe_RecentPidport_StartupWindow_GivesUpAfterDeadline(t *testing.T) {
 // stuck-incumbent: recent mtime → race-in-progress, retry; old
 // mtime → real stuck, no retry.
 func TestProbe_LiveUnreachable_OldMtimeDoesNotRetry(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	const probablyClosedPort = 1
 	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
@@ -394,7 +396,7 @@ func TestProbe_LiveUnreachable_OldMtimeDoesNotRetry(t *testing.T) {
 // matching ping server. The retry loop must observe the rewrite and
 // flip to VerdictHealthy.
 func TestProbe_LiveUnreachable_RecentPidport_PortN_RetriesAndClassifiesHealthy(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	// Healthy ping server on the eventual port (mirrors the post-bind
@@ -442,7 +444,7 @@ func TestProbe_LiveUnreachable_RecentPidport_PortN_RetriesAndClassifiesHealthy(t
 // guards against a future regression that kept only one field
 // updated (the original RewritePidportPort bug).
 func TestWritePidport_WritesBothPidAndPort(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	// Pre-write something different to make sure WritePidport
 	// actually overwrites it instead of appending.
@@ -474,7 +476,7 @@ func TestWritePidport_WritesBothPidAndPort(t *testing.T) {
 // (ping matches) — KillRecordedHolder must NOT kill, must report
 // VerdictHealthy so the caller can route to handshake.
 func TestKillRecordedHolder_HealthyEarlyExit(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -567,7 +569,7 @@ func TestKillRecordedHolder_LongArgv0_DoesNotPassGate(t *testing.T) {
 		}, nil
 	})
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	const probablyClosedPort = 1
 	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
@@ -637,7 +639,7 @@ func TestProbe_MacOSUnsupported_HealthyPing_StillClassifiesHealthy(t *testing.T)
 		return ProcessIdentity{}, ErrMacOSProbeUnsupportedForTest()
 	})
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	// Healthy ping server reporting our own PID.
@@ -690,7 +692,7 @@ func TestProbe_MacOSUnsupported_NoPing_ClassifiesLiveUnreachable(t *testing.T) {
 		return ProcessIdentity{}, ErrMacOSProbeUnsupportedForTest()
 	})
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	// Port 1 has no listener — ping will fail.
 	const probablyClosedPort = 1
@@ -764,7 +766,7 @@ func TestProbe_MacOSUnsupported_NoPing_ClassifiesLiveUnreachable(t *testing.T) {
 // observation differs from Expected, the function refuses with
 // VerdictRaceLost. (Codex iter-5 P1.)
 func TestKillRecordedHolder_PidportChangedMidPrompt_ReturnsRaceLost(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	// The probe must classify as VerdictLiveUnreachable for the
@@ -835,7 +837,7 @@ func TestKillRecordedHolder_PidportChangedMidPrompt_ReturnsRaceLost(t *testing.T
 // a follow-up probe at a different listener) must also be rejected
 // with VerdictRaceLost. (Codex iter-5 P1.)
 func TestKillRecordedHolder_PidportPortChanged_ReturnsRaceLost(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	pid := os.Getpid()
@@ -877,7 +879,7 @@ func TestKillRecordedHolder_PidportPortChanged_ReturnsRaceLost(t *testing.T) {
 // TestKillRecordedHolder_PidportMtimeChanged_ReturnsRaceLost covers
 // the Mtime axis of the Expected guard. (Codex iter-5 P1.)
 func TestKillRecordedHolder_PidportMtimeChanged_ReturnsRaceLost(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	pid := os.Getpid()
@@ -919,7 +921,7 @@ func TestKillRecordedHolder_PidportMtimeChanged_ReturnsRaceLost(t *testing.T) {
 // older tests) still see the original behavior — the Expected guard
 // is gated on Expected.PID != 0. (Codex iter-5 P1.)
 func TestKillRecordedHolder_ExpectedZeroValueDisablesCheck(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	// Use a non-mcphub image so the production identity gate refuses
@@ -1061,7 +1063,7 @@ func TestKillRecordedHolder_WaitsForKillBeforeAcquirePoll(t *testing.T) {
 		processIDCountAtHook.Store(processIDCallCount.Load())
 	})
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	// Use os.Getpid() so probeOnce treats the PID as alive when
 	// the override seam is bypassed. (The override above replaces
@@ -1155,7 +1157,7 @@ func TestKillRecordedHolder_CancelledContextRefusesKill(t *testing.T) {
 		}, nil
 	})
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), 1)), 0o600); err != nil {
 		t.Fatal(err)

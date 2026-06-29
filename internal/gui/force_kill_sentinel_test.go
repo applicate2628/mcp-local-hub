@@ -37,6 +37,7 @@ import (
 
 	"github.com/gofrs/flock"
 
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/process"
 )
 
@@ -147,7 +148,7 @@ func TestKillRecordedHolder_RaceDeadHolder_ReachesRecovery(t *testing.T) {
 	t.Cleanup(func() { killProcessOverride = prevKill })
 	killProcessOverride = func(pid int) error { return nil }
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	const probablyClosedPort = 1 // ping fails → not Healthy
 	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
@@ -243,7 +244,7 @@ func TestKillRecordedHolder_RaceDeadHolder_DoesNotKill(t *testing.T) {
 		return nil
 	}
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	const probablyClosedPort = 1 // ping fails → not Healthy
 	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
@@ -335,7 +336,7 @@ func TestKillRecordedHolder_LiveMatchedHolder_StillKills(t *testing.T) {
 		return nil
 	}
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), 1)), 0o600); err != nil {
 		t.Fatal(err)
@@ -426,7 +427,7 @@ func TestKillRecordedHolder_LiveMismatchedHolder_StillRefusedAtRecheck(t *testin
 		return nil
 	}
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), 1)), 0o600); err != nil {
 		t.Fatal(err)
