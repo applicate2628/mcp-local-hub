@@ -69,6 +69,13 @@
   --link: #0969da;
   --link-hover: #0550ae;
   --link-visited: #6639ba;
+  /* Primary-button surface (accent-filled CTA bg). LIGHT defaults to the link
+     blues — white text on #0969da is 5.19:1 and on the #0550ae hover 7.59:1, both
+     AA — so the light look is unchanged. The dark contexts below reassign these
+     to the saturated --dark-btn-primary-* blues because the link blues are too
+     light to carry white text on a dark button (see --dark-btn-primary-bg). */
+  --btn-primary-bg: var(--link);
+  --btn-primary-bg-hover: var(--link-hover);
 
   /* Banner + inline-link themed surfaces. LIGHT values here; the dark values
      live in the dark pack below. Making these real tokens lets the .banner-*
@@ -117,6 +124,18 @@
   --dark-link: #58a6ff;
   --dark-link-hover: #79c0ff;
   --dark-link-visited: #b87eff;
+  /* Primary-BUTTON surface (accent-filled CTA bg) — SEPARATE from the link
+     TEXT color above. --dark-link (#58a6ff) is tuned for readable link text ON
+     the dark page, so it is a light/luminous blue; reused as a button BACKGROUND
+     under white text it gave only 2.53:1 (and the lighter hover #79c0ff dropped
+     to 1.95:1) — well below the 4.5:1 AA floor (the pale, low-contrast "New
+     group" / "Add to hub" / "Set up LSP" buttons in dark). These GitHub-Primer
+     dark accent-button blues carry white text at AA: #1f6feb = 4.63:1 and the
+     DARKER hover #1158c7 = 6.47:1 (hover darkens — a press cue — instead of
+     lightening into a worse ratio). Light theme keeps --link as the button bg
+     (see the :root default below), which already passes (5.19:1 / 7.59:1). */
+  --dark-btn-primary-bg: #1f6feb;
+  --dark-btn-primary-bg-hover: #1158c7;
 
   /* A4-a token family (`--*-color`, used by Settings + Backups). Same
      single-source treatment so the explicit-dark and system-dark contexts
@@ -161,6 +180,8 @@
   --link: var(--dark-link);
   --link-hover: var(--dark-link-hover);
   --link-visited: var(--dark-link-visited);
+  --btn-primary-bg: var(--dark-btn-primary-bg);
+  --btn-primary-bg-hover: var(--dark-btn-primary-bg-hover);
   --banner-info-bg: var(--dark-banner-info-bg);
   --banner-info-border: var(--dark-banner-info-border);
   --banner-success-bg: var(--dark-banner-success-bg);
@@ -235,15 +256,17 @@ a:visited {
   outline-offset: 2px;
 }
 
-/* Primary — accent-filled call-to-action (Save / Apply / Install). */
+/* Primary — accent-filled call-to-action (Save / Apply / Install). Uses the
+   --btn-primary-bg token (= --link in light, a saturated AA-passing blue in dark)
+   rather than --link directly so white text clears 4.5:1 on the dark button. */
 .btn.btn-primary:not(:disabled) {
-  background: var(--link);
-  border-color: var(--link);
+  background: var(--btn-primary-bg);
+  border-color: var(--btn-primary-bg);
   color: #ffffff;
 }
 .btn.btn-primary:not(:disabled):hover {
-  background: var(--link-hover);
-  border-color: var(--link-hover);
+  background: var(--btn-primary-bg-hover);
+  border-color: var(--btn-primary-bg-hover);
 }
 
 /* Secondary — the default outline look (explicit class for clarity at
@@ -462,6 +485,28 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
    Neutralize the UA <th> defaults (bold + sidebar background only apply to
    thead) so a body row-header renders byte-identical to the old <td>. */
 .servers-matrix tbody th { font-weight: normal; background: transparent; }
+/* Server-name cell layout: constrain the first column and put the name + its
+   "Details" trigger on a deterministic two-line stack regardless of name length.
+   Without this the cell content (⇄ toggle, the name <a>, the "Details" button)
+   is all inline, so a long name (paper-search-mcp, oneapi-run) wraps mid-word and
+   "Details" lands inline beside the last name fragment on one row but on its own
+   line on another — ragged row heights + inconsistent Details placement. The
+   fixed width caps the column; the name <a> is a block that wraps cleanly
+   (overflow-wrap) so "Details" ALWAYS sits on its own line directly below it. */
+.servers-matrix tbody th {
+  width: 12.5rem;
+  min-width: 12.5rem;
+  vertical-align: top;
+}
+.servers-matrix tbody th a[data-action="edit-server"] {
+  display: inline;
+  overflow-wrap: anywhere;
+}
+.servers-matrix tbody th .matrix-row-details {
+  display: block;
+  margin-left: 0;
+  margin-top: 2px;
+}
 .servers-matrix input[type="checkbox"] { margin: 0; }
 /* v0.4.5 init-button: header cells with a "missing-init-possible"
    client config render a compact Initialize affordance below the
@@ -653,7 +698,17 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
    header buttons render byte-identical to the pre-G5 look. */
 .dashboard-bulk-actions button.btn { padding: var(--cell-padding-y) var(--gap-md); }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--gap-md); margin-top: var(--gap-md); }
-.card { border: 1px solid var(--border); border-radius: 12px; padding: var(--card-padding); background: var(--card-surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04); }
+/* The card border is backed by a 1px box-shadow RING in addition to the CSS
+   `border`. The `.cards` grid below uses `repeat(auto-fit, minmax(240px, 1fr))`,
+   whose `1fr` tracks resolve to FRACTIONAL widths (e.g. 277.25px) at dpr=1; on
+   certain sub-pixel column offsets Chromium's rasterizer drops the 1px hairline
+   `border` on a side entirely, so a card here and there rendered as a borderless
+   floating block (verified: MIDI/Ableton/Suno cards in the Catalog music row —
+   computed `border-top-width:1px` yet no painted edge). The box-shadow ring is
+   composited and immune to that fractional hairline drop, so every card now
+   shows a stable edge regardless of its sub-pixel position; the `border` is kept
+   for the layout box + rounded-corner clip. */
+.card { border: 1px solid var(--border); border-radius: 12px; padding: var(--card-padding); background: var(--card-surface); box-shadow: 0 0 0 1px var(--border), 0 1px 2px rgba(0, 0, 0, 0.04); }
 /* Card titles lay the name + an on-demand InfoTip (ⓘ) inline so cards stay
    compact and uniform across tabs — the long prose description that used to
    wrap under the title now lives in the InfoTip popover. A single text child
@@ -711,7 +766,15 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
   letter-spacing: 0.04em;
 }
 .catalog-marketplace-categories { display: flex; flex-wrap: wrap; gap: var(--gap-xs); margin: var(--gap-xs) 0; }
+/* Equal-height row content: the `.cards` grid already stretches every card in a
+   row to the tallest sibling's height (a short "Add to hub" card next to a tall
+   docs-only card share one outer height). Making the card a flex column and
+   pushing the homepage link to the bottom (margin-top:auto) fills the empty space
+   below a short card's button instead of leaving it floating mid-card, so the
+   Homepage link anchors to the card's foot across the whole row. */
+.catalog-marketplace-card { display: flex; flex-direction: column; }
 .catalog-marketplace-homepage { font-size: 13px; margin: var(--gap-xs) 0 0; }
+.catalog-marketplace-card .catalog-marketplace-homepage { margin-top: auto; padding-top: var(--gap-xs); }
 /* Install affordance + lifecycle. The buttons reuse the .btn-primary accent
    convention from the Settings cards; the secondary "Install directly" toggle
    keeps the base outline look. All colors ride theme tokens (light + dark). */
@@ -728,10 +791,10 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
 }
 .catalog-marketplace-install button:disabled { opacity: 0.5; cursor: not-allowed; }
 .catalog-marketplace-install button.btn-primary:not(:disabled) {
-  background: var(--link); border-color: var(--link); color: #ffffff;
+  background: var(--btn-primary-bg); border-color: var(--btn-primary-bg); color: #ffffff;
 }
 .catalog-marketplace-install button.btn-primary:not(:disabled):hover {
-  background: var(--link-hover); border-color: var(--link-hover);
+  background: var(--btn-primary-bg-hover); border-color: var(--btn-primary-bg-hover);
 }
 /* Direct-mode client multiselect panel. */
 .catalog-marketplace-direct-panel {
@@ -783,11 +846,20 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
 .screen.migration .group-per-session { border-left-color: var(--text-muted, #656d76); }
 .screen.migration .group-rows { list-style: none; padding: 0; margin: 0; }
 .screen.migration .group-rows li {
-    display: flex; align-items: center; gap: 0.5rem;
-    padding: 0.25rem 0; border-bottom: 1px solid var(--border-subtle, #e4e7eb);
+    display: flex; align-items: center; gap: 0.375rem;
+    padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle, #e4e7eb);
 }
 .screen.migration .group-rows li:last-child { border-bottom: none; }
 .screen.migration .server-name { flex: 1 1 auto; font-family: var(--font-mono); }
+/* The "Managed by hub" status text sits with the name side; only the two action
+   controls (Edit manifest + Demigrate) hug the right edge, with a tight gutter
+   between the pair. The status badge stays left of the actions, separated from
+   them by a small margin so the row reads: name … status | [Edit] [Demigrate]. */
+.screen.migration .badge-managed { margin-right: 0.375rem; }
+/* Edit manifest renders as a button-styled link (matches the Demigrate button):
+   strip the underline + link color so the two peer actions look identical. */
+.screen.migration .group-rows a.edit-manifest.btn { text-decoration: none; color: var(--text); }
+.screen.migration .group-rows a.edit-manifest.btn:hover { color: var(--text); }
 .screen.migration .action-error { color: var(--danger, #cf222e); }
 .screen.migration button[disabled] { opacity: 0.5; cursor: not-allowed; }
 /* (Migration buttons now carry the unified `.btn` design-system classes —
@@ -806,6 +878,13 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
   gap: var(--section-gap);
   margin-top: var(--gap-xs);
 }
+/* Column-top parity: the left form column begins with the "Basics" accordion
+   header (a <button> with no top margin), but the right preview column's
+   <h2>YAML preview</h2> carried the browser-default heading top margin, so the
+   right heading + its code box started visibly LOWER than the left card's first
+   row. Zero the heading's top margin (keep a small bottom gap) so both columns'
+   content tops align. */
+.screen.add-server .add-server-preview h2 { margin: 0 0 var(--gap-xs); }
 .screen.add-server .add-server-preview pre {
   background: var(--sidebar-bg);
   border: 1px solid var(--border);
@@ -1589,6 +1668,8 @@ menu button[disabled] {
     --link: var(--dark-link);
     --link-hover: var(--dark-link-hover);
     --link-visited: var(--dark-link-visited);
+    --btn-primary-bg: var(--dark-btn-primary-bg);
+    --btn-primary-bg-hover: var(--dark-btn-primary-bg-hover);
     /* A4-a family (mirrors :root[data-theme="dark"]). */
     --bg-color: var(--dark-bg-color);
     --text-color: var(--dark-text-color);
@@ -1804,13 +1885,13 @@ section[data-section] button:not(.infotip-trigger):disabled {
   cursor: not-allowed;
 }
 section[data-section] button.btn-primary:not(:disabled) {
-  background: var(--link);
-  border-color: var(--link);
+  background: var(--btn-primary-bg);
+  border-color: var(--btn-primary-bg);
   color: #ffffff;
 }
 section[data-section] button.btn-primary:not(:disabled):hover {
-  background: var(--link-hover);
-  border-color: var(--link-hover);
+  background: var(--btn-primary-bg-hover);
+  border-color: var(--btn-primary-bg-hover);
 }
 section[data-section] button.btn-danger:not(:disabled) {
   color: var(--danger);
@@ -1916,7 +1997,13 @@ section[data-section] button.btn-danger:not(:disabled):hover {
   border-color: var(--error-color);
 }
 .settings-field.disabled {
-  opacity: 0.6;
+  /* Was 0.6 — too dim on the dark card: the "(coming in A4-b)" deferred badge
+     (already --muted-color) dropped to 3.31:1 over --dark-card-surface, below the
+     4.5:1 AA floor and the dimmest text on the screen. 0.8 lifts the badge to
+     4.84:1 (label to 7.61:1) so the disabled rows stay subordinate to the active
+     rows but remain legible. Light theme was already legible; 0.8 keeps the
+     clearly-disabled read there too. */
+  opacity: 0.8;
 }
 .settings-section-footer {
   display: flex;
