@@ -8,6 +8,7 @@
 
 | Epic | Status | Closed | Outcome |
 |---|---|---|---|
+| [2026-06-23-desktop-app-mcp-catalog](epics/2026-06-23-desktop-app-mcp-catalog.md) | closed | 2026-06-29 | DONE — desktop/creative-app MCP catalog. All tiers resolved → 52 catalog rows (33 entries + 19 docs-only) across eng/CAD/music/data/BI/creative/science/PKM/office, theme-grouped, arch-aware install_probe. Clean one-click: Excel/codex/MATLAB/Ansys/KiCad/Onshape + the vendor-breadth sweep (Reaper/grafana/tableau/photoshop/zotero/metabase/jupyter/rmcp/obsidian/logseq/origin-pro). Ableton upgraded to the loopback-safe own-fork (#451, fixes 0.0.0.0). Immature/manual-clone Tier-3 = docs-only pointers (superseded the executed-clone blocker). Shipped npm v0.4.9. |
 | [2026-06-19-install-and-it-works-ux](epics/2026-06-19-install-and-it-works-ux.md) | closed | 2026-06-28 | DONE — clean-install + hub-launch + per-project UX. Areas 1/2/5/6 done (#377, #407/#408, #437, #428–#435); area 3 closeable (symlink PRs #409/#410 + hardening #414–#416, residual = accept-disclose posture mitigated by MCPHUB_REQUIRE_SINGLE_USER_HOME=1, decision promoted accepted); area 4 defect fixed (#400) with router-native rewrite DEFERRED; D2 cold re-enable shipped (#439). Deferred follow-ups: area-4 router-native, D1 claude-Local write-back, D2 stash-full-restore, embed-first-shadow bug. |
 
 ## Archived
