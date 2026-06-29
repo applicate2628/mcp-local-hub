@@ -53,10 +53,11 @@ const emptySnapshot: HealthSnapshot = {
 describe("CapabilitiesScreen — Phase 2 LoadState", () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it("renders Loading… while fetch is in flight", () => {
+  it("renders the loading state while fetch is in flight", () => {
     vi.spyOn(api, "fetchOrThrow").mockReturnValue(new Promise(() => { /* never resolves */ }));
-    const { getByText } = render(<CapabilitiesScreen />);
-    expect(getByText("Loading…")).toBeTruthy();
+    const { getByText, container } = render(<CapabilitiesScreen />);
+    expect(getByText("Loading capabilities")).toBeTruthy();
+    expect(container.querySelector(".loading-state")).toBeTruthy();
   });
 
   it("renders the empty state when capabilities.items is empty", async () => {

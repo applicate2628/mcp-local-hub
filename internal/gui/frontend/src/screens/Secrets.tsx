@@ -7,6 +7,7 @@ import type { SecretsEnvelope, SecretRow, SecretsRotateResult, UsageRef, APIErro
 import { AddSecretModal } from "../components/AddSecretModal";
 import { PersistentRotateCTA, RotateResultBanner, RotateSecretModal } from "../components/RotateSecretModal";
 import { DeleteSecretModal } from "../components/DeleteSecretModal";
+import { LoadingState } from "../components/LoadingState";
 import { RESERVED_SECRET_NAMES } from "../lib/reserved-names";
 
 const MCPHUB_EDIT_CMD = "mcphub secrets edit";
@@ -36,7 +37,7 @@ export function SecretsScreen({ route }: { route?: RouterState }) {
     return (
       <section class="secrets-screen">
         <h1>Secrets</h1>
-        <p>Loading…</p>
+        <LoadingState label="Loading secrets" />
       </section>
     );
   }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { fetchOrThrow } from "../api";
+import { LoadingState } from "../components/LoadingState";
 
 // Mirrors versionDTO in internal/gui/version.go. Keep in sync if the
 // backend shape changes — there's a Go-side test asserting field
@@ -43,7 +44,7 @@ export function AboutScreen() {
     return (
       <section class="about-screen" data-testid="about-loading">
         <h1>About</h1>
-        <p>Loading…</p>
+        <LoadingState label="Loading about information" />
       </section>
     );
   }

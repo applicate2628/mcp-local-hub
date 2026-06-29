@@ -11,6 +11,7 @@ import { groupByTheme } from "../lib/catalog-themes";
 import { InfoTip } from "../components/InfoTip";
 import { ReadinessPanel, readinessBlockerCount } from "../components/ReadinessPanel";
 import { AddSecretModal } from "../components/AddSecretModal";
+import { LoadingState } from "../components/LoadingState";
 import type { ClientCapability, DaemonStatus } from "../types";
 
 // Mirrors catalogEntry in internal/gui/manifest.go — one row of the GET
@@ -415,7 +416,7 @@ export function CatalogScreen() {
     return (
       <section class="screen catalog">
         <h1>Catalog</h1>
-        <p>Loading…</p>
+        <LoadingState label="Loading catalog" />
       </section>
     );
   }

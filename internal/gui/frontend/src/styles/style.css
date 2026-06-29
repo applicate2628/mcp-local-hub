@@ -1160,6 +1160,61 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
   background: var(--sidebar-bg);
 }
 
+.loading-state {
+  max-width: 32rem;
+  margin: var(--gap-sm) 0;
+  padding: var(--card-padding);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card-surface) 88%, var(--bg));
+}
+
+.loading-state-skeleton {
+  display: grid;
+  gap: var(--gap-xs);
+}
+
+.loading-state-line {
+  display: block;
+  height: 0.75rem;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--text-muted) 14%, var(--card-surface)),
+    color-mix(in srgb, var(--text-muted) 24%, var(--card-surface)),
+    color-mix(in srgb, var(--text-muted) 14%, var(--card-surface))
+  );
+  background-size: 200% 100%;
+  animation: loading-state-shimmer 1.35s ease-in-out infinite;
+}
+
+.loading-state-line-wide {
+  width: min(100%, 24rem);
+}
+
+.loading-state-line-medium {
+  width: min(78%, 18rem);
+}
+
+.loading-state-line-short {
+  width: min(54%, 12rem);
+}
+
+@keyframes loading-state-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-state-line {
+    animation: none;
+  }
+}
+
 /* === Standalone banner styles (for Secrets, Rotate CTA, Result banner) === */
 /* Existing .banner rules are scoped to .screen.add-server and are not reusable here. */
 

@@ -30,6 +30,7 @@ import { MatrixColumnsMenu } from "../components/MatrixColumnsMenu";
 import { EnvDrawer } from "../components/EnvDrawer";
 import { ServerRowDrawer } from "../components/ServerRowDrawer";
 import { ToggleSwitch } from "../components/ToggleSwitch";
+import { LoadingState } from "../components/LoadingState";
 import type {
   ClientConfigState,
   ClientEntry,
@@ -676,7 +677,7 @@ export function ServersScreen() {
     return (
       <div>
         <h1>Servers</h1>
-        <p>Loading…</p>
+        <LoadingState label="Loading servers" />
       </div>
     );
   }

@@ -33,6 +33,7 @@ import {
   type GroupConnectionDTO,
 } from "../api";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { LoadingState } from "../components/LoadingState";
 import {
   type GroupDraft,
   type GroupErrorField,
@@ -292,7 +293,7 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
     return (
       <section class="groups-screen" data-testid="groups-loading">
         <h1>Groups</h1>
-        <p>Loading…</p>
+        <LoadingState label="Loading groups" />
       </section>
     );
   }

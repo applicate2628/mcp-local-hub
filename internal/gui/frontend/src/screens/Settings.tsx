@@ -10,6 +10,7 @@ import { SectionClients } from "../components/settings/SectionClients";
 import { SectionTrustedRoots } from "../components/settings/SectionTrustedRoots";
 import { SectionMaintenance } from "../components/settings/SectionMaintenance";
 import { SectionAdvanced } from "../components/settings/SectionAdvanced";
+import { LoadingState } from "../components/LoadingState";
 
 export type SettingsScreenProps = {
   route: RouterState;
@@ -109,7 +110,7 @@ export function SettingsScreen({ route, onDirtyChange, snapshot }: SettingsScree
     return (
       <div class="settings-screen loading">
         <h1>Settings</h1>
-        <p>Loading…</p>
+        <LoadingState label="Loading settings" />
       </div>
     );
   }
