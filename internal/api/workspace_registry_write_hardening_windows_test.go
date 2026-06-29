@@ -1,8 +1,12 @@
 //go:build windows
 
 // workspace_registry_write_hardening_windows_test.go — regression guard
-// for the serena-breaking asymmetry described in
-// work-items/bugs/2026-06-29-workspace-registry-write-not-hardened.md.
+// that LOCKS the serena workspace-registry write-hardening invariant
+// (verified already present on HEAD: Save() publishes owner-only, symmetric
+// with the hardened read). It fails if a future change reintroduces the
+// non-hardened os.WriteFile+rename that would make a broadened parent
+// produce an unreadable workspaces.yaml. Real-world cold-read symptom +
+// remediations: work-items/bugs/2026-06-29-stale-pre-hardening-workspaces-yaml-unreadable.md.
 //
 // THE BUG CLASS:
 //

@@ -44,14 +44,21 @@ hardening shipped. The READ-side file-DACL gate
 refuses a WRITE/DAC/DELETE/Modify ACE granted to a non-allowlisted SID in
 EVERY mode (including default-relax), because such a file is tampering-capable.
 
-## Self-heal vs. cold-read gap
+## No write-path self-heal — Save() also refuses first
 
-Any code path that calls `Registry.Save()` (register / unregister / a
-lifecycle update / migrate) rewrites the file owner-only and clears the
-condition. The gap is a COLD READ that happens before any write —
-`mcphub workspace list`, the serena router's startup `ListByWorkspace`, the
-GUI weekly-membership read — which fails loud with `{Access Denied}` and is
-what the operator sees as `-32001 no serena workspace registered`.
+`Registry.Save()` does NOT clear this condition. Before the hardened
+owner-only write, `Save()` first reads the existing file to roll the `.bak`
+backup via `readStateFileInodeAnchored(r.path)` and returns on any
+non-missing error — i.e. it hits the SAME file-DACL refusal this work item
+documents and aborts BEFORE reaching the hardened write. So register /
+unregister / lifecycle / migrate paths that call `Save()` cannot rewrite the
+file owner-only while the broad DACL stands; the write-hardening only keeps a
+file owner-only once it is ALREADY readable. Both the cold READ
+(`mcphub workspace list`, the serena router's startup `ListByWorkspace`, the
+GUI weekly-membership read) AND the write's own backup-read fail loud with
+`{Access Denied}` → the operator sees `-32001 no serena workspace registered`.
+The only remediations are the manual icacls owner-only fix or the optional
+owner-verified cold-read self-heal below — NOT a normal Save().
 
 ## Possible remediations (for the owner to prioritize)
 
