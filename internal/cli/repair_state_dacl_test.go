@@ -30,6 +30,51 @@ func TestRepairStateDACL_PathOutsideStateDirRejected(t *testing.T) {
 	}
 }
 
+func TestRepairStateDACL_RelativePathResolvesUnderStateDir(t *testing.T) {
+	stateDir := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restore)
+
+	want, err := filepath.Abs(filepath.Join(stateDir, "workspaces.yaml"))
+	if err != nil {
+		t.Fatalf("abs target: %v", err)
+	}
+	var repaired []string
+	restoreRepair := setRepairStateDACLRepairForTest(func(path string) (api.StateFileDACLRepairReport, error) {
+		repaired = append(repaired, path)
+		return api.StateFileDACLRepairReport{Path: path, Status: api.StateFileDACLRepairStatusRepaired}, nil
+	})
+	t.Cleanup(restoreRepair)
+
+	stdout, stderr, err := runRepairStateDACLCmd(t, "", "--path", "workspaces.yaml", "--yes")
+	if err != nil {
+		t.Fatalf("repair-state-dacl --path workspaces.yaml --yes: %v\nstdout=%s\nstderr=%s", err, stdout, stderr)
+	}
+	if len(repaired) != 1 || repaired[0] != want {
+		t.Fatalf("repaired = %v, want [%s]", repaired, want)
+	}
+}
+
+func TestRepairStateDACL_HelpDocumentsPOSIXOpenWriterLimitation(t *testing.T) {
+	cmd := newRepairStateDACLCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("repair-state-dacl --help: %v", err)
+	}
+	help := out.String()
+	for _, want := range []string{
+		"POSIX",
+		"must ensure no other process already holds the file open",
+	} {
+		if !strings.Contains(help, want) {
+			t.Fatalf("help = %q, want %q", help, want)
+		}
+	}
+}
+
 func TestRepairStateDACL_NonInteractiveWithoutYesRefusesWhenRepairNeeded(t *testing.T) {
 	stateDir := t.TempDir()
 	restore := api.SetDaemonStateRootForTest(stateDir)

@@ -61,8 +61,7 @@ func repairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
 	fileHandle, err := ntOpenRelativeWithShareAccess(
 		parentHandle,
 		base,
-		windows.FILE_READ_DATA|windows.FILE_WRITE_DATA|windows.FILE_READ_ATTRIBUTES|
-			windows.DELETE|windows.READ_CONTROL|windows.WRITE_DAC,
+		windows.WRITE_DAC|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES,
 		0,
 	)
 	if err != nil {

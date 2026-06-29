@@ -64,9 +64,15 @@ owner-verified cold-read self-heal below — NOT a normal Save().
 
 Fixed by the operator-initiated `mcphub repair-state-dacl` command. The command
 repairs stale broad-DACL state files without trusting their contents first:
-it opens the target handle-relative under the state directory with no sharing,
-refuses a concurrently-open file, verifies the file owner is the current
-process user, applies the owner-only DACL/mode, and re-verifies the result.
+it opens the target handle-relative under the state directory, verifies the file
+owner is the current process user, applies the owner-only DACL/mode, and
+re-verifies the result. On Windows, the repair open requests only `WRITE_DAC`,
+`READ_CONTROL`, and `FILE_READ_ATTRIBUTES`, which is enough for the handle-bound
+DACL setter and verifier without requiring data-write, delete, or content-read
+access. On POSIX, the repair remains owner-gated and fd-bound (`O_NOFOLLOW`
+open, `fchmod(0600)`, fd-bound verify), but `chmod` cannot revoke a pre-existing
+writer file descriptor; the operator must stop any process that may already hold
+the file open for writing before running the command.
 
 The cold read remains fail-closed on write-broadened files. The previously
 considered owner-verified cold-read self-heal was rejected as unsound per the
@@ -80,7 +86,8 @@ therefore operator-initiated and separated from any read-trust decision.
    daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%" — `icacls
    workspaces.yaml /inheritance:r` then re-grant owner-only. Superseded by
    `mcphub repair-state-dacl`, which keeps the same operator-owned posture and
-   adds the no-concurrent-writer check.
+   uses a minimal Windows repair access mask plus an explicit POSIX
+   existing-writer limitation.
 2. A one-time self-heal on cold read: when `Registry.Load` hits the
    file-DACL WRITE/DAC refusal AND the file's OWNER is the current user, treat
    it as a recoverable stale-DACL condition — read the bytes inode-anchored,

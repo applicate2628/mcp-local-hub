@@ -15,6 +15,8 @@ import (
 var repairStateDACLScanFn = api.FindStateFileDACLRepairCandidates
 var repairStateDACLRepairFn = api.RepairStateFileDACL
 
+const repairStateDACLPosixOpenWriterNotice = "POSIX note: chmod cannot revoke already-open writer file descriptors; the operator must ensure no other process already holds the file open for writing before running repair-state-dacl."
+
 func newRepairStateDACLCmd() *cobra.Command {
 	var pathFlag string
 	var all bool
@@ -27,7 +29,11 @@ the owner-only allowlist. This is an operator-initiated remediation only; it
 does not trust or read file contents before repair.
 
 With no flags, the command scans the resolved state directory, lists repair
-candidates, then asks for confirmation. Use --yes in non-interactive shells.`,
+candidates, then asks for confirmation. Use --yes in non-interactive shells.
+
+On Windows, repair requests only DACL-write, security-read, and file-attribute
+rights on the target; it does not read file contents. On POSIX, chmod cannot
+revoke already-open writer file descriptors; the operator must ensure no other process already holds the file open for writing before running this command.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRepairStateDACL(cmd, repairStateDACLOpts{
@@ -37,7 +43,7 @@ candidates, then asks for confirmation. Use --yes in non-interactive shells.`,
 			})
 		},
 	}
-	c.Flags().StringVar(&pathFlag, "path", "", "repair one state file under the resolved state directory")
+	c.Flags().StringVar(&pathFlag, "path", "", "repair one state file under the resolved state directory; relative paths are resolved there")
 	c.Flags().BoolVar(&all, "all", false, "scan the resolved state directory and repair every unsafe state file")
 	c.Flags().BoolVar(&yes, "yes", false, "skip the confirmation prompt (required in non-interactive shells)")
 	return c
@@ -81,6 +87,9 @@ func runRepairStateDACL(cmd *cobra.Command, opts repairStateDACLOpts) error {
 		return nil
 	}
 
+	if runtime.GOOS != "windows" {
+		fmt.Fprintln(cmd.OutOrStdout(), repairStateDACLPosixOpenWriterNotice)
+	}
 	printRepairStateDACLCandidates(cmd.OutOrStdout(), targets)
 	if !opts.yes {
 		if !inputIsTerminal(cmd.InOrStdin()) {
@@ -132,7 +141,11 @@ func resolveRepairStateDACLPath(stateDirAbs, requested string) (string, error) {
 	if strings.TrimSpace(requested) == "" {
 		return "", fmt.Errorf("--path must not be empty")
 	}
-	abs, err := filepath.Abs(requested)
+	target := requested
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(stateDirAbs, target)
+	}
+	abs, err := filepath.Abs(target)
 	if err != nil {
 		return "", fmt.Errorf("resolve --path %s: %w", requested, err)
 	}

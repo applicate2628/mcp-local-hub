@@ -1342,6 +1342,11 @@ POSIX equivalent on Linux/macOS:
 chmod 600 '<path>'
 ```
 
+POSIX `chmod` does not revoke write access from a process that already
+holds the file open. Before manual `chmod` or `mcphub repair-state-dacl`
+on Linux/macOS, stop `mcphub` and any other process that may already hold
+the file open for writing.
+
 `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` additionally makes broadened
 parent directories fail hard. Unsetting it can allow the default
 parent-dir relax on solo-dev hosts, but it does not bypass a broadened

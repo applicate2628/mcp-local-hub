@@ -67,32 +67,49 @@ func TestRepairStateFileDACL_WindowsRepairsBroadCurrentUserFileAndHardenedReadPa
 	}
 }
 
-func TestRepairStateFileDACL_WindowsHeldOpenFileRefusesAndLeavesDACLUnchanged(t *testing.T) {
+func TestRepairStateFileDACL_WindowsRepairsCurrentUserWriteDACOnlyStaleDACL(t *testing.T) {
 	stateDir := isolateStateDir(t)
+	t.Setenv(RequireSingleUserHomeEnv, "1")
+
 	target := filepath.Join(stateDir, "workspaces.yaml")
 	if err := os.WriteFile(target, []byte("version: 1\nworkspaces: []\n"), 0o600); err != nil {
 		t.Fatalf("write stale registry: %v", err)
 	}
-	applyFileDACLWithAuthUsersWriteACE(t, target)
+	applyRepairableCurrentUserWriteDACOnlyDACL(t, target)
 
-	held := openWindowsFileForShareConflictTest(t, target)
-	defer windows.CloseHandle(held)
+	parentHandle, err := openDirHandleNoReparse(filepath.Dir(target))
+	if err != nil {
+		t.Fatalf("open parent: %v", err)
+	}
+	oldAccess := uint32(
+		windows.FILE_READ_DATA | windows.FILE_WRITE_DATA | windows.FILE_READ_ATTRIBUTES |
+			windows.DELETE | windows.READ_CONTROL | windows.WRITE_DAC,
+	)
+	oldHandle, oldErr := ntOpenRelativeWithShareAccess(parentHandle, filepath.Base(target), oldAccess, 0)
+	_ = windows.CloseHandle(parentHandle)
+	if oldErr == nil {
+		_ = windows.CloseHandle(oldHandle)
+		t.Fatalf("fixture unexpectedly allows the pre-fix repair access mask with FILE_WRITE_DATA and DELETE")
+	}
 
 	report, err := RepairStateFileDACL(target)
-	if err == nil {
-		t.Fatalf("RepairStateFileDACL unexpectedly succeeded while file was held open (report=%+v)", report)
+	if err != nil {
+		t.Fatalf("RepairStateFileDACL: %v", err)
 	}
-	if !errors.Is(err, ErrStateFileDACLSharingViolation) {
-		t.Fatalf("err = %v, want ErrStateFileDACLSharingViolation", err)
+	if report.Status != StateFileDACLRepairStatusRepaired {
+		t.Fatalf("repair status = %q, want %q (report=%+v)", report.Status, StateFileDACLRepairStatusRepaired, report)
 	}
-	if !strings.Contains(err.Error(), "a process currently holds") {
-		t.Fatalf("sharing refusal message = %q, want operator guidance", err.Error())
+	if !containsRepairSID(report.RemovedSIDs, "S-1-5-11") {
+		t.Fatalf("removed SIDs = %v, want Authenticated Users SID S-1-5-11", report.RemovedSIDs)
 	}
-	if report.Status != StateFileDACLRepairStatusRefused {
-		t.Fatalf("repair status = %q, want refused (report=%+v)", report.Status, report)
+	assertWindowsFileDACLAllowlist(t, target)
+
+	data, err := readStateFileInodeAnchored(target)
+	if err != nil {
+		t.Fatalf("hardened read after repair: %v", err)
 	}
-	if verifyErr := verifyWriteBroadenedDACLStillPresent(target); verifyErr != nil {
-		t.Fatalf("held-open refusal changed the stale DACL: %v", verifyErr)
+	if string(data) != "version: 1\nworkspaces: []\n" {
+		t.Fatalf("repaired file content = %q", data)
 	}
 }
 
@@ -184,30 +201,6 @@ func assertWindowsFileDACLAllowlist(t *testing.T, target string) {
 	}
 }
 
-func verifyWriteBroadenedDACLStillPresent(target string) error {
-	pathW, err := windows.UTF16PtrFromString(target)
-	if err != nil {
-		return err
-	}
-	h, err := windows.CreateFile(
-		pathW,
-		windows.READ_CONTROL,
-		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
-		nil,
-		windows.OPEN_EXISTING,
-		windows.FILE_ATTRIBUTE_NORMAL,
-		0,
-	)
-	if err != nil {
-		return err
-	}
-	defer windows.CloseHandle(h)
-	if err := verifyWindowsDACLFromHandleWriteOrAdmin(h); !errors.Is(err, ErrDaclOutsideAllowlist) {
-		return err
-	}
-	return nil
-}
-
 func openWindowsFileForDACLTest(t *testing.T, target string, access uint32) windows.Handle {
 	t.Helper()
 	pathW, err := windows.UTF16PtrFromString(target)
@@ -229,25 +222,22 @@ func openWindowsFileForDACLTest(t *testing.T, target string, access uint32) wind
 	return h
 }
 
-func openWindowsFileForShareConflictTest(t *testing.T, target string) windows.Handle {
+func applyRepairableCurrentUserWriteDACOnlyDACL(t *testing.T, target string) {
 	t.Helper()
-	pathW, err := windows.UTF16PtrFromString(target)
+	currentSID, err := currentUserSID()
 	if err != nil {
-		t.Fatalf("UTF16PtrFromString: %v", err)
+		t.Fatalf("currentUserSID: %v", err)
 	}
-	h, err := windows.CreateFile(
-		pathW,
-		windows.GENERIC_WRITE,
-		windows.FILE_SHARE_WRITE,
-		nil,
-		windows.OPEN_EXISTING,
-		windows.FILE_ATTRIBUTE_NORMAL,
-		0,
-	)
+	authUsersSID, err := windows.StringToSid("S-1-5-11")
 	if err != nil {
-		t.Fatalf("CreateFile share-conflict fixture: %v", err)
+		t.Fatalf("Authenticated Users sid: %v", err)
 	}
-	return h
+
+	entries := []windows.EXPLICIT_ACCESS{
+		explicitAccessAllow(currentSID, windows.TRUSTEE_IS_USER, windows.WRITE_DAC|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES),
+		explicitAccessAllow(authUsersSID, windows.TRUSTEE_IS_WELL_KNOWN_GROUP, windows.GENERIC_READ),
+	}
+	applyProtectedDACLFromEntries(t, target, entries)
 }
 
 func containsRepairSID(values []string, want string) bool {
