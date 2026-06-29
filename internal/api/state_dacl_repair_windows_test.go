@@ -35,12 +35,6 @@ func TestRepairStateFileDACL_WindowsRepairsBroadCurrentUserFileAndHardenedReadPa
 	if report.Status != StateFileDACLRepairStatusRepaired {
 		t.Fatalf("repair status = %q, want %q (report=%+v)", report.Status, StateFileDACLRepairStatusRepaired, report)
 	}
-	if report.WriterExclusionGuarantee != StateFileDACLWriterExclusionEnforced {
-		t.Fatalf("writer-exclusion guarantee = %q, want %q (report=%+v)", report.WriterExclusionGuarantee, StateFileDACLWriterExclusionEnforced, report)
-	}
-	if report.RepairOpenTier != StateFileDACLRepairOpenTierStrong {
-		t.Fatalf("repair open tier = %q, want %q (report=%+v)", report.RepairOpenTier, StateFileDACLRepairOpenTierStrong, report)
-	}
 	if !containsRepairSID(report.RemovedSIDs, "S-1-5-11") {
 		t.Fatalf("removed SIDs = %v, want Authenticated Users SID S-1-5-11", report.RemovedSIDs)
 	}
@@ -54,31 +48,9 @@ func TestRepairStateFileDACL_WindowsRepairsBroadCurrentUserFileAndHardenedReadPa
 		t.Fatalf("repaired file content = %q", data)
 	}
 
-	event, line := findSupervisorEventByName(t, filepath.Join(stateDir, SupervisorEventLogFileLeaf), "state-file-dacl-operator-repaired")
-	if event == nil {
-		t.Fatalf("missing state-file-dacl-operator-repaired audit event")
-	}
-	if got := event["severity"]; got != SupervisorEventSeverityInfo {
-		t.Fatalf("audit severity = %v, want %q (line=%s)", got, SupervisorEventSeverityInfo, line)
-	}
-	body, ok := event["body"].(map[string]any)
-	if !ok {
-		t.Fatalf("audit body missing or wrong type: %#v", event["body"])
-	}
-	if got := body["path"]; got != target {
-		t.Fatalf("audit path = %v, want %q", got, target)
-	}
-	if got := body["writer_exclusion_guarantee"]; got != string(StateFileDACLWriterExclusionEnforced) {
-		t.Fatalf("audit writer_exclusion_guarantee = %v, want %q (line=%s)", got, StateFileDACLWriterExclusionEnforced, line)
-	}
-	if got := body["repair_open_tier"]; got != string(StateFileDACLRepairOpenTierStrong) {
-		t.Fatalf("audit repair_open_tier = %v, want %q (line=%s)", got, StateFileDACLRepairOpenTierStrong, line)
-	}
-	if _, ok := body["fallback_path"]; ok {
-		t.Fatalf("audit body must not include fallback_path for strong tier: %v", body)
-	}
-	if !strings.Contains(line, "S-1-5-11") {
-		t.Fatalf("audit line %q does not name removed SID S-1-5-11", line)
+	eventsPath := filepath.Join(stateDir, SupervisorEventLogFileLeaf)
+	if _, statErr := os.Stat(eventsPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("repair created supervisor-events.log at %s: %v", eventsPath, statErr)
 	}
 }
 
@@ -111,7 +83,7 @@ func TestRepairStateFileDACL_WindowsHeldOpenFileRefusesAndLeavesDACLUnchanged(t 
 	}
 }
 
-func TestRepairStateFileDACL_WindowsRepairsCurrentUserWriteDACOnlyStaleDACL(t *testing.T) {
+func TestRepairStateFileDACL_WindowsRefusesCurrentUserWriteDACOnlyStaleDACLWithRunbookPointer(t *testing.T) {
 	stateDir := isolateStateDir(t)
 	t.Setenv(RequireSingleUserHomeEnv, "1")
 
@@ -134,47 +106,20 @@ func TestRepairStateFileDACL_WindowsRepairsCurrentUserWriteDACOnlyStaleDACL(t *t
 	}
 
 	report, err := RepairStateFileDACL(target)
-	if err != nil {
-		t.Fatalf("RepairStateFileDACL: %v", err)
+	if err == nil {
+		t.Fatalf("RepairStateFileDACL unexpectedly repaired WRITE_DAC-only stale DACL (report=%+v)", report)
 	}
-	if report.Status != StateFileDACLRepairStatusRepaired {
-		t.Fatalf("repair status = %q, want %q (report=%+v)", report.Status, StateFileDACLRepairStatusRepaired, report)
+	if !strings.Contains(err.Error(), "strong writer-excluding open") {
+		t.Fatalf("refusal message = %q, want strong-open context", err.Error())
 	}
-	if report.WriterExclusionGuarantee != StateFileDACLWriterExclusionBestEffort {
-		t.Fatalf("writer-exclusion guarantee = %q, want %q (report=%+v)", report.WriterExclusionGuarantee, StateFileDACLWriterExclusionBestEffort, report)
+	if !strings.Contains(err.Error(), "icacls") || !strings.Contains(err.Error(), StateFileDACLRunbookTitle) {
+		t.Fatalf("refusal message = %q, want icacls runbook pointer", err.Error())
 	}
-	if report.RepairOpenTier != StateFileDACLRepairOpenTierMetadataOnlyFallback {
-		t.Fatalf("repair open tier = %q, want %q (report=%+v)", report.RepairOpenTier, StateFileDACLRepairOpenTierMetadataOnlyFallback, report)
+	if report.Status != StateFileDACLRepairStatusRefused {
+		t.Fatalf("repair status = %q, want refused (report=%+v)", report.Status, report)
 	}
-	if !containsRepairSID(report.RemovedSIDs, "S-1-5-11") {
-		t.Fatalf("removed SIDs = %v, want Authenticated Users SID S-1-5-11", report.RemovedSIDs)
-	}
-	assertWindowsFileDACLAllowlist(t, target)
-
-	data, err := readStateFileInodeAnchored(target)
-	if err != nil {
-		t.Fatalf("hardened read after repair: %v", err)
-	}
-	if string(data) != "version: 1\nworkspaces: []\n" {
-		t.Fatalf("repaired file content = %q", data)
-	}
-
-	event, line := findSupervisorEventByName(t, filepath.Join(stateDir, SupervisorEventLogFileLeaf), "state-file-dacl-operator-repaired")
-	if event == nil {
-		t.Fatalf("missing state-file-dacl-operator-repaired audit event")
-	}
-	body, ok := event["body"].(map[string]any)
-	if !ok {
-		t.Fatalf("audit body missing or wrong type: %#v", event["body"])
-	}
-	if got := body["writer_exclusion_guarantee"]; got != string(StateFileDACLWriterExclusionBestEffort) {
-		t.Fatalf("audit writer_exclusion_guarantee = %v, want %q (line=%s)", got, StateFileDACLWriterExclusionBestEffort, line)
-	}
-	if got := body["repair_open_tier"]; got != string(StateFileDACLRepairOpenTierMetadataOnlyFallback) {
-		t.Fatalf("audit repair_open_tier = %v, want %q (line=%s)", got, StateFileDACLRepairOpenTierMetadataOnlyFallback, line)
-	}
-	if got := body["fallback_path"]; got != "tier1-access-denied-metadata-only" {
-		t.Fatalf("audit fallback_path = %v, want tier1-access-denied-metadata-only (line=%s)", got, line)
+	if verifyErr := verifyWriteBroadenedDACLStillPresent(target); verifyErr != nil {
+		t.Fatalf("WRITE_DAC-only refusal changed the stale DACL: %v", verifyErr)
 	}
 }
 
@@ -201,56 +146,7 @@ func TestRepairStateFileDACL_WindowsReportsAllRemovedSIDs(t *testing.T) {
 		}
 	}
 
-	event, line := findSupervisorEventByName(t, filepath.Join(stateDir, SupervisorEventLogFileLeaf), "state-file-dacl-operator-repaired")
-	if event == nil {
-		t.Fatalf("missing state-file-dacl-operator-repaired audit event")
-	}
-	for _, want := range []string{"S-1-5-11", "S-1-1-0"} {
-		if !strings.Contains(line, want) {
-			t.Fatalf("audit line %q does not name removed SID %s", line, want)
-		}
-	}
 	assertWindowsFileDACLAllowlist(t, target)
-}
-
-func TestRepairStateFileDACL_WindowsAuditFilesCreatedUnderBroadenedStateDirAreOwnerOnly(t *testing.T) {
-	stateDir := isolateStateDir(t)
-	applyDirDACLWithInheritOnlyAuthUsersReadACE(t, stateDir)
-
-	target := filepath.Join(stateDir, "workspaces.yaml")
-	if err := os.WriteFile(target, []byte("version: 1\nworkspaces: []\n"), 0o600); err != nil {
-		t.Fatalf("write stale registry: %v", err)
-	}
-	applyFileDACLWithAuthUsersWriteACE(t, target)
-
-	report, err := RepairStateFileDACL(target)
-	if err != nil {
-		t.Fatalf("RepairStateFileDACL: %v", err)
-	}
-	if report.Status != StateFileDACLRepairStatusRepaired {
-		t.Fatalf("repair status = %q, want %q (report=%+v)", report.Status, StateFileDACLRepairStatusRepaired, report)
-	}
-
-	eventsPath := filepath.Join(stateDir, SupervisorEventLogFileLeaf)
-	event, line := findSupervisorEventByName(t, eventsPath, "state-file-dacl-operator-repaired")
-	if event == nil {
-		t.Fatalf("missing state-file-dacl-operator-repaired audit event")
-	}
-	body, ok := event["body"].(map[string]any)
-	if !ok {
-		t.Fatalf("audit body missing or wrong type: %#v (line=%s)", event["body"], line)
-	}
-	if got := body["path"]; got != target {
-		t.Fatalf("audit path = %v, want %q (line=%s)", got, target, line)
-	}
-	assertWindowsFileDACLAllowlist(t, eventsPath)
-
-	lockPath := eventsPath + supervisorEventLogLockSuffix
-	if _, statErr := os.Stat(lockPath); statErr == nil {
-		assertWindowsFileDACLAllowlist(t, lockPath)
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("stat supervisor-events lock sidecar: %v", statErr)
-	}
 }
 
 func TestRepairStateFileDACL_WindowsForeignOwnerPredicateAndIntegration(t *testing.T) {

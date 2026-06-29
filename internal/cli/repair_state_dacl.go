@@ -31,9 +31,9 @@ basenames are resolved under the resolved state directory. Use --yes in
 non-interactive shells.
 
 On Windows, repair first opens the target with a FILE_READ_DATA-free strong mask
-that enforces a writer-exclusion guarantee. If that open is denied because the
-owner has only WRITE_DAC metadata rights, repair retries with a metadata-only
-fallback and reports guarantee=best-effort; it still does not read file contents.
+that enforces a writer-exclusion guarantee. If that open is denied, repair
+refuses and points to the manual icacls runbook; it still does not read file
+contents.
 On POSIX, chmod cannot revoke already-open writer file descriptors; the operator
 must ensure no other process already holds the file open for writing before
 running this command.`,
@@ -91,9 +91,9 @@ func runRepairStateDACL(cmd *cobra.Command, opts repairStateDACLOpts) error {
 	report, err := repairStateDACLRepairFn(target)
 	switch report.Status {
 	case api.StateFileDACLRepairStatusRepaired:
-		fmt.Fprintf(cmd.OutOrStdout(), "repaired: %s%s\n", report.Path, repairStateDACLReportSuffix(report))
+		fmt.Fprintf(cmd.OutOrStdout(), "repaired: %s\n", report.Path)
 	case api.StateFileDACLRepairStatusUnchanged:
-		fmt.Fprintf(cmd.OutOrStdout(), "unchanged: %s%s\n", report.Path, repairStateDACLReportSuffix(report))
+		fmt.Fprintf(cmd.OutOrStdout(), "unchanged: %s\n", report.Path)
 	case api.StateFileDACLRepairStatusRefused:
 		reason := report.Reason
 		if err != nil {
@@ -112,17 +112,6 @@ func runRepairStateDACL(cmd *cobra.Command, opts repairStateDACLOpts) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "unchanged: %s\n", target)
 	}
 	return nil
-}
-
-func repairStateDACLReportSuffix(report api.StateFileDACLRepairReport) string {
-	if report.WriterExclusionGuarantee == "" {
-		return ""
-	}
-	parts := []string{fmt.Sprintf("guarantee=%s", report.WriterExclusionGuarantee)}
-	if report.FallbackPath != "" {
-		parts = append(parts, fmt.Sprintf("fallback=%s", report.FallbackPath))
-	}
-	return " (" + strings.Join(parts, ", ") + ")"
 }
 
 func resolveRepairStateDACLPath(stateDirAbs, requested string) (string, error) {

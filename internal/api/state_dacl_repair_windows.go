@@ -14,15 +14,10 @@ const (
 		windows.FILE_WRITE_DATA | windows.DELETE |
 			windows.WRITE_DAC | windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES,
 	)
-	stateFileDACLRepairMetadataOnlyAccess = uint32(windows.WRITE_DAC | windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES)
-	stateFileDACLRepairFallbackPath       = "tier1-access-denied-metadata-only"
 )
 
 type windowsStateFileDACLRepairOpen struct {
-	handle                   windows.Handle
-	writerExclusionGuarantee StateFileDACLWriterExclusionGuarantee
-	openTier                 StateFileDACLRepairOpenTier
-	fallbackPath             string
+	handle windows.Handle
 }
 
 func repairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
@@ -63,12 +58,9 @@ func repairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
 	var removedSIDs []string
 	if err := verifyWindowsDACLFromHandle(fileHandle); err == nil {
 		return StateFileDACLRepairReport{
-			Path:                     path,
-			Status:                   StateFileDACLRepairStatusUnchanged,
-			Reason:                   "file DACL already matches the owner-only allowlist",
-			WriterExclusionGuarantee: repairOpen.writerExclusionGuarantee,
-			RepairOpenTier:           repairOpen.openTier,
-			FallbackPath:             repairOpen.fallbackPath,
+			Path:   path,
+			Status: StateFileDACLRepairStatusUnchanged,
+			Reason: "file DACL already matches the owner-only allowlist",
 		}, nil
 	} else {
 		removedSIDs = removedWindowsDACLNonAllowlistedSIDs(fileHandle)
@@ -88,13 +80,10 @@ func repairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
 		return report, fmt.Errorf("verify repaired DACL on %s: %w", path, err)
 	}
 	return StateFileDACLRepairReport{
-		Path:                     path,
-		Status:                   StateFileDACLRepairStatusRepaired,
-		Reason:                   "file DACL tightened to owner-only allowlist",
-		RemovedSIDs:              removedSIDs,
-		WriterExclusionGuarantee: repairOpen.writerExclusionGuarantee,
-		RepairOpenTier:           repairOpen.openTier,
-		FallbackPath:             repairOpen.fallbackPath,
+		Path:        path,
+		Status:      StateFileDACLRepairStatusRepaired,
+		Reason:      "file DACL tightened to owner-only allowlist",
+		RemovedSIDs: removedSIDs,
 	}, nil
 }
 
@@ -125,32 +114,15 @@ func openWindowsStateFileDACLRepairParentFromStateDir(stateDirAbs, rel string) (
 func openWindowsStateFileForDACLRepair(parentHandle windows.Handle, base, path string) (windowsStateFileDACLRepairOpen, error) {
 	fileHandle, err := ntOpenRelativeWithShareAccess(parentHandle, base, stateFileDACLRepairStrongAccess, 0)
 	if err == nil {
-		return windowsStateFileDACLRepairOpen{
-			handle:                   fileHandle,
-			writerExclusionGuarantee: StateFileDACLWriterExclusionEnforced,
-			openTier:                 StateFileDACLRepairOpenTierStrong,
-		}, nil
+		return windowsStateFileDACLRepairOpen{handle: fileHandle}, nil
 	}
 	if windowsRepairErrIsSharingViolation(err) {
 		return windowsStateFileDACLRepairOpen{}, stateFileDACLRepairSharingViolation(path)
 	}
-	if !windowsRepairErrIsAccessDenied(err) {
-		return windowsStateFileDACLRepairOpen{}, fmt.Errorf("open %s for DACL repair: %w", path, err)
+	if windowsRepairErrIsAccessDenied(err) {
+		return windowsStateFileDACLRepairOpen{}, fmt.Errorf("strong writer-excluding open denied for %s; refusing DACL repair because the file cannot be repaired while excluding concurrent writers. Use the %q runbook in CLAUDE.md and its icacls commands to tighten this exotic owner-WRITE_DAC-only case manually", path, StateFileDACLRunbookTitle)
 	}
-
-	fileHandle, err = ntOpenRelativeWithShareAccess(parentHandle, base, stateFileDACLRepairMetadataOnlyAccess, 0)
-	if err != nil {
-		if windowsRepairErrIsSharingViolation(err) {
-			return windowsStateFileDACLRepairOpen{}, stateFileDACLRepairSharingViolation(path)
-		}
-		return windowsStateFileDACLRepairOpen{}, fmt.Errorf("open %s for DACL repair metadata-only fallback: %w", path, err)
-	}
-	return windowsStateFileDACLRepairOpen{
-		handle:                   fileHandle,
-		writerExclusionGuarantee: StateFileDACLWriterExclusionBestEffort,
-		openTier:                 StateFileDACLRepairOpenTierMetadataOnlyFallback,
-		fallbackPath:             stateFileDACLRepairFallbackPath,
-	}, nil
+	return windowsStateFileDACLRepairOpen{}, fmt.Errorf("open %s for DACL repair: %w", path, err)
 }
 
 func stateFileDACLRepairSharingViolation(path string) error {

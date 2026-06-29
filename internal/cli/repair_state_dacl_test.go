@@ -83,7 +83,7 @@ func TestRepairStateDACL_HelpDocumentsPOSIXOpenWriterLimitation(t *testing.T) {
 		"repair-state-dacl --path <state-file> [--yes]",
 		"Windows",
 		"writer-exclusion guarantee",
-		"best-effort",
+		"refuses",
 		"POSIX",
 		"must ensure no other process already holds the file open",
 	} {
@@ -93,6 +93,11 @@ func TestRepairStateDACL_HelpDocumentsPOSIXOpenWriterLimitation(t *testing.T) {
 	}
 	if strings.Contains(help, "--all") {
 		t.Fatalf("help still documents removed --all scan surface: %q", help)
+	}
+	for _, forbidden := range []string{"best-effort", "metadata-only", "fallback"} {
+		if strings.Contains(help, forbidden) {
+			t.Fatalf("help still documents removed %q path: %q", forbidden, help)
+		}
 	}
 }
 
@@ -130,11 +135,8 @@ func TestRepairStateDACL_PathWithYesRepairsTargetAndPrintsSummary(t *testing.T) 
 	restoreRepair := setRepairStateDACLRepairForTest(func(path string) (api.StateFileDACLRepairReport, error) {
 		repaired = append(repaired, path)
 		return api.StateFileDACLRepairReport{
-			Path:                     path,
-			Status:                   api.StateFileDACLRepairStatusRepaired,
-			WriterExclusionGuarantee: api.StateFileDACLWriterExclusionBestEffort,
-			RepairOpenTier:           api.StateFileDACLRepairOpenTierMetadataOnlyFallback,
-			FallbackPath:             "tier1-access-denied-metadata-only",
+			Path:   path,
+			Status: api.StateFileDACLRepairStatusRepaired,
 		}, nil
 	})
 	t.Cleanup(restoreRepair)
@@ -149,9 +151,9 @@ func TestRepairStateDACL_PathWithYesRepairsTargetAndPrintsSummary(t *testing.T) 
 	if !strings.Contains(stdout, "repaired: "+target) {
 		t.Fatalf("stdout = %q, want repaired target", stdout)
 	}
-	for _, want := range []string{"guarantee=best-effort", "fallback=tier1-access-denied-metadata-only"} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("stdout = %q, want %q", stdout, want)
+	for _, forbidden := range []string{"guarantee=", "fallback=", "best-effort", "metadata-only"} {
+		if strings.Contains(stdout, forbidden) {
+			t.Fatalf("stdout = %q, want no removed fallback reporting %q", stdout, forbidden)
 		}
 	}
 }

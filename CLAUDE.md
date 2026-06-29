@@ -1353,13 +1353,10 @@ the file open for writing.
 On Windows, `mcphub repair-state-dacl` first uses a strong, content-read-free
 open (`FILE_WRITE_DATA | DELETE | WRITE_DAC | READ_CONTROL |
 FILE_READ_ATTRIBUTES`, with no sharing) so a concurrent writer causes a
-sharing-violation refusal and the DACL is left unchanged. That guarantee is
-reported as `guarantee=enforced` for the normal stale-file case where the owner
-still has FullControl and only a broad non-allowlisted SID was added. If the
-owner's DACL has only metadata repair rights (`WRITE_DAC` plus security-read /
-attributes), the strong open returns access denied and the command retries a
-metadata-only repair path. That rare fallback is reported as
-`guarantee=best-effort` and does not claim writer exclusion.
+sharing-violation refusal and the DACL is left unchanged. If the owner's DACL has
+only metadata repair rights (`WRITE_DAC` plus security-read / attributes), the
+strong open returns access denied and the command refuses; apply the manual
+`icacls` commands above for that exotic case.
 
 `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` additionally makes broadened
 parent directories fail hard. Unsetting it can allow the default
