@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 // newDaemonsTestServer is an alias for newMembershipTestServer used by
@@ -43,7 +44,7 @@ func seedMembershipRegistry(t *testing.T, dir string) {
 // Returns the server and the temp dir path so callers can seed before use.
 func newMembershipTestServer(t *testing.T) (*Server, string) {
 	t.Helper()
-	tmp := t.TempDir()
+	tmp := apitest.HardenedTempDir(t)
 	t.Setenv("LOCALAPPDATA", tmp)
 	t.Setenv("XDG_STATE_HOME", tmp)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})

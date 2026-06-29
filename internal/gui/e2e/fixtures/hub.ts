@@ -1,9 +1,9 @@
 import { test as base } from "@playwright/test";
 import { spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hardenedTempHome } from "./hardened-temp";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -28,7 +28,7 @@ export interface HubHandle {
 // a free port per spawn.
 export const test = base.extend<{ hub: HubHandle }>({
   hub: async ({}, use) => {
-    const home = mkdtempSync(resolve(tmpdir(), "mcphub-e2e-"));
+    const home = hardenedTempHome("mcphub-e2e-");
     // The production binary resolves the Windows state directory via
     // SHGetKnownFolderPath(FOLDERID_LocalAppData), which expands
     // %USERPROFILE%\AppData\Local — it deliberately IGNORES the

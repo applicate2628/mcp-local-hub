@@ -48,7 +48,7 @@ type registerHarness struct {
 
 func newRegisterHarness(t *testing.T) *registerHarness {
 	t.Helper()
-	dir := t.TempDir()
+	dir := hardenedTempDir(t)
 	regPath := filepath.Join(dir, "workspaces.yaml")
 
 	// Redirect the daemon state root to an owner-only temp dir so any
