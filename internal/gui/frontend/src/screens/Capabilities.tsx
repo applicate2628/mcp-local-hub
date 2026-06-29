@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "preact/hooks";
 import { fetchOrThrow } from "../api";
 import type { HealthSnapshot, ProbeRow } from "../types";
+import { LoadingState } from "../components/LoadingState";
 
 // Codex bot PR #144 round-8 P2 + r10 architecture MINOR: the sentinel
 // err string emitted by health.go::computeProbesSection for stopped /
@@ -109,7 +110,7 @@ export function CapabilitiesScreen() {
     return (
       <section class="capabilities-screen" data-testid="capabilities-screen">
         <h1>Capabilities</h1>
-        <p>Loading…</p>
+        <LoadingState label="Loading capabilities" />
       </section>
     );
   }

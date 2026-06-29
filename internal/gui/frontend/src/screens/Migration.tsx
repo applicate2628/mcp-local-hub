@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { fetchOrThrow, postDismiss } from "../api";
 import { InfoTip } from "../components/InfoTip";
 import { ScanRefreshControls } from "../components/ScanRefreshControls";
+import { LoadingState } from "../components/LoadingState";
 import { useAutoScan } from "../hooks/useAutoScan";
 import { useEventSource } from "../hooks/useEventSource";
 import { groupMigrationEntries, type MigrationGroups } from "../lib/migration-grouping";
@@ -263,7 +264,7 @@ export function DiscoveryScreen() {
     return (
       <section class="screen migration discovery">
         <h1>Discovery</h1>
-        <p>Loading…</p>
+        <LoadingState label="Loading discovery results" />
       </section>
     );
   }
