@@ -12,7 +12,7 @@ export function LoadingState({
   const classes = ["loading-state", className].filter(Boolean).join(" ");
 
   return (
-    <div class={classes} role="status" aria-busy="true" aria-live="polite">
+    <div class={classes} role="status" aria-live="polite">
       <span class="visually-hidden">{label}</span>
       <span class="loading-state-skeleton" aria-hidden="true">
         <span class="loading-state-line loading-state-line-wide" />
