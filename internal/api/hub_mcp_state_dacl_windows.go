@@ -151,9 +151,21 @@ func verifyWindowsDACLFromHandleWriteOrAdmin(h windows.Handle) error {
 // the public verifiers above pin which access-bit mask flags an
 // ALLOW ACE as a violation.
 func verifyWindowsDACLFromHandleMasked(h windows.Handle, significantBits uint32) error {
-	currentSID, systemSID, adminSID, err := allowlistSIDs()
+	violations, err := windowsDACLAllowlistViolationsFromHandle(h, significantBits)
 	if err != nil {
 		return err
+	}
+	if len(violations) > 0 {
+		violation := violations[0]
+		return &DACLAllowlistViolation{SID: violation.SID, Mask: violation.Mask}
+	}
+	return nil
+}
+
+func windowsDACLAllowlistViolationsFromHandle(h windows.Handle, significantBits uint32) ([]DACLAllowlistViolation, error) {
+	currentSID, systemSID, adminSID, err := allowlistSIDs()
+	if err != nil {
+		return nil, err
 	}
 	allowlist := []*windows.SID{currentSID, systemSID, adminSID}
 
@@ -163,12 +175,12 @@ func verifyWindowsDACLFromHandleMasked(h windows.Handle, significantBits uint32)
 		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION,
 	)
 	if err != nil {
-		return fmt.Errorf("get security info: %w", err)
+		return nil, fmt.Errorf("get security info: %w", err)
 	}
 
 	ownerSID, _, err := sd.Owner()
 	if err != nil {
-		return fmt.Errorf("get owner: %w", err)
+		return nil, fmt.Errorf("get owner: %w", err)
 	}
 	// Owner allowlist: current user, SYSTEM, BuiltinAdministrators.
 	//
@@ -183,22 +195,23 @@ func verifyWindowsDACLFromHandleMasked(h windows.Handle, significantBits uint32)
 	// party gain access — only allowlist SIDs may hold an ALLOW ACE
 	// with significant bits.
 	if !ownerSIDAllowed(ownerSID, allowlist) {
-		return ErrWrongOwner
+		return nil, ErrWrongOwner
 	}
 
 	dacl, _, err := sd.DACL()
 	if err != nil {
-		return fmt.Errorf("get dacl: %w", err)
+		return nil, fmt.Errorf("get dacl: %w", err)
 	}
 	// A NIL DACL means "all access" — fail closed.
 	if dacl == nil {
-		return fmt.Errorf("%w: nil DACL (implicit allow-all)", ErrDaclOutsideAllowlist)
+		return nil, fmt.Errorf("%w: nil DACL (implicit allow-all)", ErrDaclOutsideAllowlist)
 	}
 
 	// Iterate ACEs via GetAce. The ACL is laid out as a header
 	// followed by AceCount ACE entries; AceCount is exposed via the
 	// x/sys ACL accessor.
 	count := windowsACLAceCount(dacl)
+	var violations []DACLAllowlistViolation
 	// significantBits is the caller-supplied set of access bits whose
 	// presence in an ALLOW ACE for a non-allowlisted SID counts as a
 	// violation. The strict caller (verifyWindowsDACLFromHandle) uses
@@ -217,7 +230,7 @@ func verifyWindowsDACLFromHandleMasked(h windows.Handle, significantBits uint32)
 	for i := uint32(0); i < count; i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, i, &ace); err != nil {
-			return fmt.Errorf("get ace %d: %w", i, err)
+			return nil, fmt.Errorf("get ace %d: %w", i, err)
 		}
 		// ACE types (Microsoft, ntsecapi.h):
 		//   0x00 ACCESS_ALLOWED_ACE_TYPE          (basic ALLOW)
@@ -263,13 +276,13 @@ func verifyWindowsDACLFromHandleMasked(h windows.Handle, significantBits uint32)
 			// we'd rather refuse a managed-environment ACL than risk a
 			// silent fail-open against a Group-Policy-pushed object/
 			// callback ALLOW for a non-allowlisted SID.
-			return fmt.Errorf("%w: ACE %d has type 0x%02x (object/callback ALLOW); allowlist verifier does not parse this variant — fail closed",
+			return nil, fmt.Errorf("%w: ACE %d has type 0x%02x (object/callback ALLOW); allowlist verifier does not parse this variant — fail closed",
 				ErrDaclOutsideAllowlist, i, ace.Header.AceType)
 		default:
 			// Unknown ACE type — also fail closed. New Windows versions
 			// may add types we haven't seen; the conservative read is
 			// "if we don't understand it, we cannot prove it's safe."
-			return fmt.Errorf("%w: ACE %d has unknown type 0x%02x — fail closed",
+			return nil, fmt.Errorf("%w: ACE %d has unknown type 0x%02x — fail closed",
 				ErrDaclOutsideAllowlist, i, ace.Header.AceType)
 		}
 		// INHERIT_ONLY_ACE (0x08) flags an ACE that applies ONLY to
@@ -293,10 +306,10 @@ func verifyWindowsDACLFromHandleMasked(h windows.Handle, significantBits uint32)
 		sid := sidFromAce(ace)
 		if !sidInAllowlist(sid, allowlist) {
 			name := sidString(sid)
-			return &DACLAllowlistViolation{SID: name, Mask: mapped & significantBits}
+			violations = append(violations, DACLAllowlistViolation{SID: name, Mask: mapped & significantBits})
 		}
 	}
-	return nil
+	return violations, nil
 }
 
 // windowsACLAceCount reads the AceCount field from an ACL header.

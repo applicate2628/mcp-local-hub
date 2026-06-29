@@ -14,7 +14,7 @@ import (
 
 const StateFileDACLRunbookTitle = "secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%"
 
-const StateFileDACLRunbookPointer = `tighten this file's DACL to owner-only (your account + SYSTEM + Administrators); see the "` + StateFileDACLRunbookTitle + `" runbook in CLAUDE.md for the exact icacls / chmod command.`
+const StateFileDACLRunbookPointer = `tighten this file's DACL to owner-only (your account + SYSTEM + Administrators); see the "` + StateFileDACLRunbookTitle + `" runbook in CLAUDE.md for the exact icacls / chmod command, or run: mcphub repair-state-dacl --path <file>.`
 
 // ErrIrregularFile is returned when the path is a symlink, junction,
 // or other irregular filesystem object that we refuse to trust.

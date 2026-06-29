@@ -375,6 +375,10 @@ func verifyPosixOwnerAndModeFromFd(fd int, ownerErr func(uid, want int) error, m
 	if err := unix.Fstat(fd, &st); err != nil {
 		return err
 	}
+	return verifyPosixOwnerAndModeFromStat(&st, ownerErr, modeErr)
+}
+
+func verifyPosixOwnerAndModeFromStat(st *unix.Stat_t, ownerErr func(uid, want int) error, modeErr func(mode uint32) error) error {
 	if int(st.Uid) != os.Getuid() {
 		return ownerErr(int(st.Uid), os.Getuid())
 	}
