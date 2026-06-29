@@ -3365,15 +3365,43 @@ func mixedKeyWorkspaceAliasForUnregister(t *testing.T) (string, string, string) 
 	if err := os.MkdirAll(realDir, 0o700); err != nil {
 		t.Fatalf("mkdir real workspace: %v", err)
 	}
-	alias := filepath.Join(t.TempDir(), "alias")
 	if runtime.GOOS == "windows" {
-		out, err := exec.Command("cmd", "/c", "mklink", "/J", alias, realDir).CombinedOutput()
-		if err != nil {
-			t.Fatalf("create temp junction: %v; output=%s", err, out)
+		var diagnostics []string
+		for _, attempt := range []struct {
+			label string
+			flag  string
+		}{
+			{label: "directory symlink", flag: "/D"},
+			{label: "junction", flag: "/J"},
+		} {
+			alias := filepath.Join(t.TempDir(), "alias")
+			out, err := exec.Command("cmd", "/c", "mklink", attempt.flag, alias, realDir).CombinedOutput()
+			if err != nil {
+				diagnostics = append(diagnostics, attempt.label+" failed: "+err.Error()+" output="+strings.TrimSpace(string(out)))
+				continue
+			}
+			canonical, legacy, distinct := mixedKeyWorkspacePathsForUnregister(t, alias)
+			if distinct {
+				return alias, canonical, legacy
+			}
+			diagnostics = append(diagnostics, attempt.label+" collapsed keys: canonical="+canonical+" legacy="+legacy)
 		}
-	} else if err := os.Symlink(realDir, alias); err != nil {
+		t.Fatalf("mixed-key fixture did not produce distinct keys on Windows: %s", strings.Join(diagnostics, "; "))
+	}
+
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(realDir, alias); err != nil {
 		t.Fatalf("create temp symlink: %v", err)
 	}
+	canonical, legacy, distinct := mixedKeyWorkspacePathsForUnregister(t, alias)
+	if !distinct {
+		t.Fatalf("mixed-key fixture did not produce distinct keys: canonical=%q legacy=%q", canonical, legacy)
+	}
+	return alias, canonical, legacy
+}
+
+func mixedKeyWorkspacePathsForUnregister(t *testing.T, alias string) (string, string, bool) {
+	t.Helper()
 	canonical, err := CanonicalWorkspacePathForCleanup(alias)
 	if err != nil {
 		t.Fatalf("CanonicalWorkspacePathForCleanup(alias): %v", err)
@@ -3382,10 +3410,7 @@ func mixedKeyWorkspaceAliasForUnregister(t *testing.T) (string, string, string) 
 	if err != nil {
 		t.Fatalf("CanonicalWorkspacePathLegacyCompat(alias): %v", err)
 	}
-	if WorkspaceKey(canonical) == WorkspaceKey(legacy) {
-		t.Fatalf("mixed-key fixture did not produce distinct keys: canonical=%q legacy=%q", canonical, legacy)
-	}
-	return alias, canonical, legacy
+	return canonical, legacy, WorkspaceKey(canonical) != WorkspaceKey(legacy)
 }
 
 func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
