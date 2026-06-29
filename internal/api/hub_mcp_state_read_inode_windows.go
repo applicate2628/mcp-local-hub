@@ -206,8 +206,10 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			if !healed {
 				return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses file WRITE/DAC/DELETE access granted to a non-allowlisted SID because the state file is tampering-capable.%s", path, wrErr, stateFileReadRemediation(path, wrErr))
 			}
-			// The DACL is now re-verified owner-only on fileHandle;
-			// proceed to the single handle-bound ReadFile below.
+			// The DACL is now re-verified owner-only on fileHandle; proceed to
+			// the single handle-bound ReadFile below — EXCEPT a secret-bearing
+			// file is still refused by the next check (fail-closed by design:
+			// secret files are operator-remediated, never auto-healed-then-read).
 		}
 		if isSecretBearingStateFilePath(path) {
 			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses read access granted to a non-allowlisted SID because the state file is secret-bearing.%s", path, err, stateFileReadRemediation(path, err))
