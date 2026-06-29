@@ -233,7 +233,8 @@ func TestWorkspacePrune_IdleAddsCandidates(t *testing.T) {
 	withStateDir(t)
 
 	// A live, present, non-worktree workspace with stale activity.
-	idleDir := t.TempDir()
+	const idleLeaf = "idle-workspace-leaf"
+	idleDir := makeWorkspaceDirNamed(t, t.TempDir(), strings.Repeat("shared-parent-", 8)+idleLeaf, nil)
 	idleCanon := canonicalForCleanup(t, idleDir)
 	// Seed with an old LastToolsCallAt so the idle signal applies.
 	regPath, _ := api.DefaultRegistryPath()
@@ -283,8 +284,8 @@ func TestWorkspacePrune_IdleAddsCandidates(t *testing.T) {
 	if !strings.Contains(out, string(api.OrphanReasonIdle)) {
 		t.Errorf("--idle run should flag the stale workspace as idle; got:\n%s", out)
 	}
-	if !strings.Contains(out, idleCanon) {
-		t.Errorf("--idle run should name the idle workspace; got:\n%s", out)
+	if !strings.Contains(out, idleLeaf) {
+		t.Errorf("--idle run should preserve the idle workspace identity leaf %q; got:\n%s", idleLeaf, out)
 	}
 }
 

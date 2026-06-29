@@ -452,7 +452,7 @@ func printPruneCandidateTable(w io.Writer, candidates []pruneCandidate) {
 		}
 		fmt.Fprintf(w, "%-*s %-15s %-9d %-7s\n",
 			workspaceTablePathWidth,
-			truncate(cand.path, workspaceTablePathWidth),
+			truncateWorkspacePath(cand.path, workspaceTablePathWidth),
 			string(cand.reason),
 			cand.lspRows,
 			serena)

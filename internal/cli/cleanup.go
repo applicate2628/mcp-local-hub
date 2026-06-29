@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"mcp-local-hub/internal/api"
 
@@ -134,4 +135,34 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n-3] + "..."
+}
+
+// truncateWorkspacePath shortens a path for fixed-width human tables while
+// preserving the right-hand identity component operators use to distinguish
+// long workspace roots.
+func truncateWorkspacePath(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	if n <= len("...") {
+		if n <= 0 {
+			return ""
+		}
+		return s[:n]
+	}
+
+	suffixBudget := n - len("...")
+	suffix := s
+	if idx := strings.LastIndexAny(s, `/\`); idx >= 0 && idx < len(s)-1 {
+		suffix = s[idx:]
+	}
+	if len(suffix) > suffixBudget {
+		suffix = suffix[len(suffix)-suffixBudget:]
+	}
+
+	prefixBudget := n - len("...") - len(suffix)
+	if prefixBudget <= 0 {
+		return "..." + suffix
+	}
+	return s[:prefixBudget] + "..." + suffix
 }
