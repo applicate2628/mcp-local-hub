@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/api/apitest"
 )
 
 // TestHandshake_503ActivateReturnsErrIncumbentNoActivationTarget covers
@@ -33,7 +35,7 @@ func TestHandshake_503ActivateReturnsErrIncumbentNoActivationTarget(t *testing.T
 	defer ts.Close()
 
 	port := parseTestServerPort(t, ts.URL)
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte(formatPidport(111, port)), 0o600); err != nil {
 		t.Fatal(err)
@@ -63,7 +65,7 @@ func TestHandshake_PingOKThenActivate(t *testing.T) {
 	defer ts.Close()
 
 	port := parseTestServerPort(t, ts.URL)
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte(formatPidport(111, port)), 0o600); err != nil {
 		t.Fatal(err)
@@ -80,7 +82,7 @@ func TestHandshake_PingOKThenActivate(t *testing.T) {
 }
 
 func TestHandshake_ConnectionRefusedReturnsError(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte(formatPidport(99999, 1)), 0o600); err != nil {
 		t.Fatal(err)
@@ -99,7 +101,7 @@ func TestHandshake_ConnectionRefusedReturnsError(t *testing.T) {
 // inside the retry loop must catch the RewritePidportPort update and
 // reach the now-live incumbent.
 func TestHandshake_ReReadsPidportDuringStartupWindow(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	// Initial pidport: port=0 (incumbent in pre-bind state).
 	if err := os.WriteFile(pidport, []byte(formatPidport(111, 0)), 0o600); err != nil {
@@ -154,7 +156,7 @@ func TestHandshake_ReReadsPidportDuringStartupWindow(t *testing.T) {
 // would surface an "incumbent ping replied not-ok" error on the first
 // tick and this test would fail fast.
 func TestHandshake_RetriesOnNonJSONPing(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	var attempts int32

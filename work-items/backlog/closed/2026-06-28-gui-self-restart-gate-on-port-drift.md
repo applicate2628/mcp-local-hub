@@ -1,10 +1,31 @@
 ---
-status: open
+status: closed
 context: backlog
 severity: low
 ---
 
 # Backlog: GUI self-restart may orphan gate-ON client URLs if the hub port drifts
+
+## Closure (2026-06-29) — NOT-A-BUG
+
+Verified against live code: the hypothesized "silent different-port rebind"
+is not current behavior. The self-restart bind uses the persisted `ep.Port`
+directly (`internal/api/hub_mcp_bind.go:157` —
+`bindAddr := fmt.Sprintf("127.0.0.1:%d", ep.Port)`) and only takes a fresh
+OS-assigned port when the persisted record had none (port 0, first-start
+path; `loadHubEndpointLocked` at `:129` yields a zero `ep` on a missing
+file). The auto-restart path explicitly OPTS OUT of the port-reset rollback
+(`internal/gui/hub_listener.go:606-611` —
+`preservePortOnReloadHandlerFailure`), precisely so a reload-handler failure
+re-binds the SAME persisted port and does not orphan gate-ON `/clients/` and
+`/g/` URLs; the driver emits `hub-listener-restart-failed` and retries
+against the same port. So the same-port re-bind invariant the original edge
+worried about IS enforced; there is no path that silently re-binds a
+different port and orphans gated URLs while preserving the persisted port
+file. Closed as not-a-bug; the rare genuine port-drift case (old port held
+at re-bind) is already netted by `\mcp-local-hub-liveness` (~1 min) and
+recoverable via `mcphub install --reconcile-hub-mode`, as the doc itself
+noted under "Why low priority".
 
 Found 2026-06-28 during the §B GUI-self-restart verification (analyst ac2f747b).
 
