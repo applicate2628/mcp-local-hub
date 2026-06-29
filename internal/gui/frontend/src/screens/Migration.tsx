@@ -353,7 +353,12 @@ function ManagedByHubGroup(props: {
                 Managed by hub
               </span>
             )}
+            {/* Peer actions render as matching bordered buttons (Edit manifest
+                is a button-styled link, Demigrate is a button) so the two
+                affordances read as a unified pair, not a text link beside a
+                button. */}
             <a
+              class="edit-manifest btn"
               href={`#/edit-server?name=${encodeURIComponent(e.name)}`}
               data-action="edit-manifest"
             >Edit manifest</a>
