@@ -71,11 +71,14 @@ const (
 //     attacker can replace the directory entry but not the inode
 //     our handle points to). File-DACL broadening is stricter:
 //     read-only grants warn and proceed in default-relax mode, while
-//     WRITE/DAC/DELETE/owner grants are refused in every mode because
-//     a non-allowlisted SID could have modified the file before this
-//     read. Strict mode keeps both DACL gates hard. Separate warn
-//     events distinguish parent vs file broadening so operators can
-//     audit the relaxed read-only cases.
+//     WRITE/DAC/DELETE/owner grants are refused in strict mode and
+//     for foreign-owned files because a non-allowlisted SID could
+//     have modified the file before this read. In default-relax mode,
+//     this one refusal class self-heals only when the file owner read
+//     from the held handle is the current process user: the DACL is
+//     tightened on that same handle, re-verified owner-only, and only
+//     then read. Separate warn events distinguish parent/file relaxes
+//     from owner-verified DACL self-heals so operators can audit them.
 func readStateFileInodeAnchored(path string) ([]byte, error) {
 	return readStateFileInodeAnchoredWithStrictPolicy(path, operatorRequiresSingleUserHome)
 }
@@ -145,13 +148,13 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 
 	// Open the file RELATIVE to the parent handle, with
 	// FILE_READ_DATA so we can issue ReadFile on the same handle
-	// after the verify steps below. SYNCHRONIZE is added by
-	// ntOpenRelative internally.
-	fileHandle, err := ntOpenRelative(
-		parentHandle,
-		basename,
-		windows.FILE_READ_DATA|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES,
-	)
+	// after the verify steps below. WRITE_DAC is included so the
+	// owner-verified stale-DACL self-heal below can tighten the DACL
+	// on this same held handle without a path re-open. If WRITE_DAC is
+	// denied, the helper falls back to the historical read-only handle
+	// and disables self-heal so non-healed refusals keep their old
+	// shape. SYNCHRONIZE is added by ntOpenRelative internally.
+	fileHandle, fileHandleCanSetDACL, err := openStateFileReadHandleWindows(parentHandle, basename)
 	if err != nil {
 		if windowsAnchoredReadErrIsNotExist(err) {
 			return nil, &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
@@ -183,9 +186,10 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	}
 
 	// File-DACL gate. Strict mode preserves the single-user DACL
-	// invariant. Default-relax mirrors the write side: inherited
-	// non-allowlisted principals on normal temp/state files warn but
-	// do not block the handle-bound read. Wrong-owner remains hard.
+	// invariant. In default-relax mode, read-only non-secret
+	// broadening warns and proceeds; write/DAC/delete broadening
+	// self-heals only when the held handle says the file owner is the
+	// current process user. Wrong-owner remains hard.
 	if err := verifyWindowsDACLFromHandle(fileHandle); err != nil {
 		if requiresStrict() {
 			return nil, fmt.Errorf("file %s not single-user safe: %w; %s=1 is set, so the strict file-DACL gate is enforced (unset that env var, or tighten the file's DACL to remove the offending principal, to proceed)",
@@ -195,7 +199,15 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			return nil, err
 		}
 		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(fileHandle); wrErr != nil {
-			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses file WRITE/DAC/DELETE access granted to a non-allowlisted SID because the state file is tampering-capable.%s", path, wrErr, stateFileReadRemediation(path, wrErr))
+			healed, healErr := selfHealStateFileDACLForCurrentOwner(fileHandle, fileHandleCanSetDACL, path, wrErr, auditFallbacks)
+			if healErr != nil {
+				return nil, fmt.Errorf("file %s not single-user safe: %w; owner-verified DACL self-heal failed: %v.%s", path, wrErr, healErr, stateFileReadRemediation(path, wrErr))
+			}
+			if !healed {
+				return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses file WRITE/DAC/DELETE access granted to a non-allowlisted SID because the state file is tampering-capable.%s", path, wrErr, stateFileReadRemediation(path, wrErr))
+			}
+			// The DACL is now re-verified owner-only on fileHandle;
+			// proceed to the single handle-bound ReadFile below.
 		}
 		if isSecretBearingStateFilePath(path) {
 			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses read access granted to a non-allowlisted SID because the state file is secret-bearing.%s", path, err, stateFileReadRemediation(path, err))
@@ -250,6 +262,77 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 		buf = []byte{}
 	}
 	return buf, nil
+}
+
+func openStateFileReadHandleWindows(parentHandle windows.Handle, basename string) (windows.Handle, bool, error) {
+	desiredAccess := uint32(windows.FILE_READ_DATA | windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES)
+	fileHandle, err := ntOpenRelative(parentHandle, basename, desiredAccess|windows.WRITE_DAC)
+	if err == nil {
+		return fileHandle, true, nil
+	}
+	if !windowsAccessDenied(err) {
+		return windows.InvalidHandle, false, err
+	}
+	fileHandle, readOnlyErr := ntOpenRelative(parentHandle, basename, desiredAccess)
+	if readOnlyErr != nil {
+		return windows.InvalidHandle, false, err
+	}
+	return fileHandle, false, nil
+}
+
+func selfHealStateFileDACLForCurrentOwner(fileHandle windows.Handle, canSetDACL bool, path string, cause error, auditFallbacks bool) (bool, error) {
+	sd, err := windows.GetSecurityInfo(
+		fileHandle,
+		windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION,
+	)
+	if err != nil {
+		return false, fmt.Errorf("read owner from held handle: %w", err)
+	}
+	ownerSID, _, err := sd.Owner()
+	if err != nil {
+		return false, fmt.Errorf("read owner SID: %w", err)
+	}
+	matches, err := stateFileOwnerIsCurrentUser(ownerSID)
+	if err != nil {
+		return false, err
+	}
+	if !matches {
+		return false, nil
+	}
+	if !canSetDACL {
+		return true, fmt.Errorf("held handle lacks WRITE_DAC")
+	}
+
+	if err := setRestrictiveDACL(fileHandle); err != nil {
+		return true, fmt.Errorf("set owner-only DACL on held handle: %w", err)
+	}
+	if err := verifyWindowsDACLFromHandle(fileHandle); err != nil {
+		return true, fmt.Errorf("re-verify owner-only DACL on held handle: %w", err)
+	}
+	if auditFallbacks {
+		details := StateFileDACLRemediationDetailsFor(path, cause)
+		_ = LogHubMcpEvent("warn", "state-file-dacl-self-healed", map[string]any{
+			"severity":      "warn",
+			"path":          path,
+			"offending_sid": details.OffendingSID,
+			"reason":        "owner-verified cold-read DACL self-heal",
+			"note":          "owner was current process user; DACL tightened on the held file handle and re-verified before the handle-bound read",
+		})
+	}
+	return true, nil
+}
+
+func stateFileOwnerIsCurrentUser(ownerSID *windows.SID) (bool, error) {
+	currentSID, err := currentUserSID()
+	if err != nil {
+		return false, fmt.Errorf("current user SID: %w", err)
+	}
+	return ownerSID != nil && ownerSID.Equals(currentSID), nil
+}
+
+func windowsAccessDenied(err error) bool {
+	return errors.Is(err, windows.ERROR_ACCESS_DENIED) || ntStatusIs(err, windows.STATUS_ACCESS_DENIED)
 }
 
 func windowsAnchoredReadErrIsNotExist(err error) bool {

@@ -279,11 +279,61 @@ func TestReadStateFileInodeAnchored_FileDACLDefaultRelaxesStrictRejects(t *testi
 	}
 }
 
-func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedDefaultRejects(t *testing.T) {
-	statePathsHelper(t)
-	stateDir := hardenedTempDir(t)
-	daemonStateRootOverride = stateDir
+func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedSelfHealsOwnerFile(t *testing.T) {
+	isolateStateDir(t)
 	resetStrictModeIntentCacheForTest()
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+	t.Setenv(RequireSingleUserHomeEnv, "")
+
+	dir := hardenedTempDir(t)
+	target := filepath.Join(dir, "supervisor-intent.json")
+	want := []byte(`{"strict_mode":false}`)
+	if err := os.WriteFile(target, want, 0600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	applyFileDACLWithAuthUsersWriteACE(t, target)
+
+	got, err := readStateFileInodeAnchored(target)
+	if err != nil {
+		t.Fatalf("default mode must self-heal owner-owned file DACL that grants write access to a non-allowlisted SID: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("read payload = %q, want %q", got, want)
+	}
+	assertFileDACLAllowlistOnly(t, target)
+
+	events, err := RecentHubMcpEvents(20)
+	if err != nil {
+		t.Fatalf("read recent events: %v", err)
+	}
+	var found map[string]any
+	for _, ev := range events {
+		if ev["event"] == "state-file-dacl-self-healed" {
+			found = ev
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("no state-file-dacl-self-healed event in last %d entries (got %d events)", 20, len(events))
+	}
+	if found["level"] != "warn" {
+		t.Errorf("event level = %v, want \"warn\"", found["level"])
+	}
+	if found["severity"] != "warn" {
+		t.Errorf("event severity = %v, want \"warn\"", found["severity"])
+	}
+	if path, _ := found["path"].(string); path != target {
+		t.Errorf("event path = %v, want %q", found["path"], target)
+	}
+	if sid, _ := found["offending_sid"].(string); sid != "S-1-5-11" {
+		t.Errorf("event offending_sid = %v, want S-1-5-11", found["offending_sid"])
+	}
+}
+
+func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedForeignOwnerDoesNotSelfHeal(t *testing.T) {
+	isolateStateDir(t)
+	resetStrictModeIntentCacheForTest()
+	t.Cleanup(resetStrictModeIntentCacheForTest)
 	t.Setenv(RequireSingleUserHomeEnv, "")
 
 	dir := hardenedTempDir(t)
@@ -292,16 +342,138 @@ func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedDefaultRejects(t *test
 		t.Fatalf("write target: %v", err)
 	}
 	applyFileDACLWithAuthUsersWriteACE(t, target)
+	setFileOwnerToBuiltinAdministratorsOrSkip(t, target)
 
-	_, err := readStateFileInodeAnchoredWithStrictPolicy(target, func() bool { return false })
+	_, err := readStateFileInodeAnchored(target)
 	if err == nil {
-		t.Fatalf("default mode must reject file DACL that grants write access to a non-allowlisted SID")
+		t.Fatalf("default mode must reject foreign-owned file DACL that grants write access to a non-allowlisted SID")
 	}
 	if !errors.Is(err, ErrDaclOutsideAllowlist) {
 		t.Fatalf("err = %v, want ErrDaclOutsideAllowlist", err)
 	}
 	got := err.Error()
 	assertStateFileRunbookPointer(t, got, target, "S-1-5-11")
+	assertFileDACLWriteBroadened(t, target)
+
+	events, err := RecentHubMcpEvents(20)
+	if err != nil {
+		t.Fatalf("read recent events: %v", err)
+	}
+	for _, ev := range events {
+		if ev["event"] == "state-file-dacl-self-healed" {
+			t.Fatalf("foreign-owned file emitted self-heal event: %+v", ev)
+		}
+	}
+}
+
+func assertFileDACLAllowlistOnly(t *testing.T, target string) {
+	t.Helper()
+	h := openReadControlFileHandleForTest(t, target)
+	defer windows.CloseHandle(h)
+	if err := verifyWindowsDACLFromHandle(h); err != nil {
+		t.Fatalf("file DACL is not allowlist-only after self-heal: %v", err)
+	}
+}
+
+func assertFileDACLWriteBroadened(t *testing.T, target string) {
+	t.Helper()
+	h := openReadControlFileHandleForTest(t, target)
+	defer windows.CloseHandle(h)
+	if err := verifyWindowsDACLFromHandleWriteOrAdmin(h); !errors.Is(err, ErrDaclOutsideAllowlist) {
+		t.Fatalf("file DACL write-broadened state = %v, want ErrDaclOutsideAllowlist", err)
+	}
+}
+
+func openReadControlFileHandleForTest(t *testing.T, target string) windows.Handle {
+	t.Helper()
+	pathW, err := windows.UTF16PtrFromString(target)
+	if err != nil {
+		t.Fatalf("UTF16PtrFromString: %v", err)
+	}
+	h, err := windows.CreateFile(
+		pathW,
+		windows.READ_CONTROL,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("CreateFile(%s): %v", target, err)
+	}
+	return h
+}
+
+func setFileOwnerToBuiltinAdministratorsOrSkip(t *testing.T, target string) {
+	t.Helper()
+	adminSID, err := windows.StringToSid("S-1-5-32-544")
+	if err != nil {
+		t.Fatalf("BuiltinAdministrators sid: %v", err)
+	}
+	if err := windows.SetNamedSecurityInfo(
+		target,
+		windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION,
+		adminSID,
+		nil,
+		nil,
+		nil,
+	); err != nil {
+		t.Skipf("cannot synthesize foreign-owner file by assigning BuiltinAdministrators owner: %v", err)
+	}
+	h := openReadControlFileHandleForTest(t, target)
+	defer windows.CloseHandle(h)
+	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatalf("GetSecurityInfo owner after owner change: %v", err)
+	}
+	ownerSID, _, err := sd.Owner()
+	if err != nil {
+		t.Fatalf("security descriptor Owner: %v", err)
+	}
+	currentSID, err := currentUserSID()
+	if err != nil {
+		t.Fatalf("currentUserSID: %v", err)
+	}
+	if ownerSID.Equals(currentSID) {
+		t.Skipf("foreign-owner synthesis left owner as current user %s", sidString(currentSID))
+	}
+}
+
+func TestStateFileDACLSelfHealOwnerCheckRequiresCurrentUser(t *testing.T) {
+	currentSID, err := currentUserSID()
+	if err != nil {
+		t.Fatalf("currentUserSID: %v", err)
+	}
+	authUsersSID, err := windows.StringToSid("S-1-5-11")
+	if err != nil {
+		t.Fatalf("Authenticated Users sid: %v", err)
+	}
+
+	matches, err := stateFileOwnerIsCurrentUser(currentSID)
+	if err != nil {
+		t.Fatalf("stateFileOwnerIsCurrentUser(current): %v", err)
+	}
+	if !matches {
+		t.Fatalf("stateFileOwnerIsCurrentUser(current) = false, want true")
+	}
+
+	matches, err = stateFileOwnerIsCurrentUser(authUsersSID)
+	if err != nil {
+		t.Fatalf("stateFileOwnerIsCurrentUser(auth-users): %v", err)
+	}
+	if matches {
+		t.Fatalf("stateFileOwnerIsCurrentUser(auth-users) = true, want false")
+	}
+
+	matches, err = stateFileOwnerIsCurrentUser(nil)
+	if err != nil {
+		t.Fatalf("stateFileOwnerIsCurrentUser(nil): %v", err)
+	}
+	if matches {
+		t.Fatalf("stateFileOwnerIsCurrentUser(nil) = true, want false")
+	}
 }
 
 func TestReadStateFileInodeAnchored_FileDACLReadBroadenedDefaultRefusesSecretState(t *testing.T) {
@@ -312,27 +484,27 @@ func TestReadStateFileInodeAnchored_FileDACLReadBroadenedDefaultRefusesSecretSta
 	t.Setenv(RequireSingleUserHomeEnv, "")
 
 	dir := hardenedTempDir(t)
-	nonSecret := filepath.Join(dir, "supervisor-intent.json")
-	if err := os.WriteFile(nonSecret, []byte(`{"strict_mode":false}`), 0600); err != nil {
+	plainState := filepath.Join(dir, "supervisor-intent.json")
+	if err := os.WriteFile(plainState, []byte(`{"strict_mode":false}`), 0600); err != nil {
 		t.Fatalf("write non-secret target: %v", err)
 	}
-	applyFileDACLWithAuthUsersReadACE(t, nonSecret)
-	if _, err := readStateFileInodeAnchored(nonSecret); err != nil {
+	applyFileDACLWithAuthUsersReadACE(t, plainState)
+	if _, err := readStateFileInodeAnchored(plainState); err != nil {
 		t.Fatalf("default mode must still relax read-broadened non-secret state file: %v", err)
 	}
 
-	secret := filepath.Join(dir, hubMcpTokensFileLeaf)
-	if err := os.WriteFile(secret, []byte(`{"tokens":{"claude-code":"`+strings.Repeat("a", 64)+`"}}`), 0600); err != nil {
+	tokenState := filepath.Join(dir, hubMcpTokensFileLeaf)
+	if err := os.WriteFile(tokenState, []byte(`{"tokens":{"claude-code":"`+strings.Repeat("a", 64)+`"}}`), 0600); err != nil {
 		t.Fatalf("write secret target: %v", err)
 	}
-	applyFileDACLWithAuthUsersReadACE(t, secret)
-	if _, err := readStateFileInodeAnchored(secret); err == nil {
+	applyFileDACLWithAuthUsersReadACE(t, tokenState)
+	if _, err := readStateFileInodeAnchored(tokenState); err == nil {
 		t.Fatalf("default mode must refuse read-broadened secret-bearing state file %s", hubMcpTokensFileLeaf)
 	} else if !errors.Is(err, ErrDaclOutsideAllowlist) {
 		t.Fatalf("secret read-broadened error = %v, want ErrDaclOutsideAllowlist", err)
 	} else {
 		got := err.Error()
-		assertStateFileRunbookPointer(t, got, secret, "S-1-5-11")
+		assertStateFileRunbookPointer(t, got, tokenState, "S-1-5-11")
 	}
 }
 

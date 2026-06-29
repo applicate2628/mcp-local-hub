@@ -1,5 +1,5 @@
 ---
-title: Stale pre-2026-06-18 workspaces.yaml (broad inherited DACL) is unreadable by the hardened registry read → serena -32001 until a Save() rewrites it
+title: Stale pre-2026-06-18 workspaces.yaml (broad inherited DACL) self-heals on owner-verified cold read
 severity: low
 found-by: backend-engineer
 found-in-phase: harden serena workspace-registry write investigation (fix/harden-workspace-registry-write)
@@ -10,8 +10,19 @@ affected-surface: >
   %LOCALAPPDATA%\mcp-local-hub\workspaces.yaml file written by a
   pre-2026-06-18 binary on a broadened-DACL parent.
 context: adjacent-finding
-status: open
+status: fixed
 ---
+
+## Resolution
+
+Fixed by the owner-verified cold-read DACL self-heal in
+`readStateFileInodeAnchoredWithOptions`: when the existing file-DACL
+WRITE/DAC/DELETE refusal branch fires, the reader gets the file owner from the
+held handle, tightens the DACL only if the owner is the current process user,
+re-verifies with the same owner-only DACL check used after hardened writes, logs
+`state-file-dacl-self-healed`, and continues the handle-bound read. Foreign-owned
+files, symlinks/reparse points, irregular files, parent-DACL refusals, and strict
+mode remain fail-loud.
 
 ## Symptom (the report that triggered this investigation)
 
@@ -41,8 +52,9 @@ pre-2026-06-18 binary** (plain `os.WriteFile(0600)+os.Rename`, which inherited
 the broadened parent DACL) that has not been re-written by `Save()` since the
 hardening shipped. The READ-side file-DACL gate
 (`readStateFileInodeAnchored` → `verifyWindowsDACLFromHandleWriteOrAdmin`)
-refuses a WRITE/DAC/DELETE/Modify ACE granted to a non-allowlisted SID in
-EVERY mode (including default-relax), because such a file is tampering-capable.
+self-heals this condition only in default-relax mode when the file owner read
+from the held handle is the current process user. Strict mode and foreign-owned
+files still refuse because such a file is tampering-capable.
 
 ## No write-path self-heal — Save() also refuses first
 
@@ -57,24 +69,9 @@ file owner-only once it is ALREADY readable. Both the cold READ
 (`mcphub workspace list`, the serena router's startup `ListByWorkspace`, the
 GUI weekly-membership read) AND the write's own backup-read fail loud with
 `{Access Denied}` → the operator sees `-32001 no serena workspace registered`.
-The only remediations are the manual icacls owner-only fix or the optional
-owner-verified cold-read self-heal below — NOT a normal Save().
-
-## Possible remediations (for the owner to prioritize)
-
-1. Operator remediation already documented: the CLAUDE.md runbook "secret
-   daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%" — `icacls
-   workspaces.yaml /inheritance:r` then re-grant owner-only. (No code change.)
-2. OR a one-time self-heal on cold read: when `Registry.Load` hits the
-   file-DACL WRITE/DAC refusal AND the file's OWNER is the current user, treat
-   it as a recoverable stale-DACL condition — read the bytes inode-anchored,
-   then immediately rewrite via the hardened `Save()` to tighten the DACL.
-   (Review the trust implications: the gate exists precisely to refuse a file a
-   non-allowlisted SID could have tampered with, so an owner-only-owner check
-   is load-bearing before trusting the bytes.)
-3. OR `mcphub setup` / install best-effort-tightens an existing broad-DACL
-   `workspaces.yaml` (and siblings) on upgrade, the same way it tightens other
-   migrated state files.
+The write path still does not own this remediation. The cold read now tightens
+the DACL before `Registry.Save()` reaches its backup-read step, and later writes
+remain owner-only through the existing hardened writer.
 
 Closely related (same read-side gate, test angle):
 `work-items/bugs/2026-06-29-e2e-membership-tests-dacl-reject-on-broadened-temp.md`.

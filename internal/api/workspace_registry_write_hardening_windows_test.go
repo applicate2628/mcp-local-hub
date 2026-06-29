@@ -12,16 +12,17 @@
 //
 //   The serena workspace registry (workspaces.yaml / DefaultRegistryPath)
 //   READ goes through the hardened inode-anchored reader, whose file-DACL
-//   gate REFUSES a file whose own DACL grants WRITE/DAC/DELETE/Modify to a
-//   non-allowlisted SID — in EVERY mode, including default-relax
+//   gate treats a file whose own DACL grants WRITE/DAC/DELETE/Modify to a
+//   non-allowlisted SID as tampering-capable
 //   (readStateFileInodeAnchoredWithOptions, file-DACL gate). On a host whose
 //   %LOCALAPPDATA%\mcp-local-hub parent is broadened (e.g. codex's sandbox
 //   grants Wave\CodexSandboxUsers Modify with OBJECT_INHERIT_ACE), a registry
 //   WRITE that merely inherited the parent's DACL would produce a
-//   workspaces.yaml whose own DACL carries that Modify ACE. The hardened READ
-//   then refuses it → `read registry ...\workspaces.yaml: {Access Denied}` →
-//   the serena router reports `-32001: no serena workspace registered` and
-//   tools/list fails (flagship serena partially down).
+//   workspaces.yaml whose own DACL carries that Modify ACE. Before the
+//   owner-verified cold-read DACL self-heal, the hardened READ refused it →
+//   `read registry ...\workspaces.yaml: {Access Denied}` → the serena router
+//   reported `-32001: no serena workspace registered` and tools/list failed
+//   (flagship serena partially down).
 //
 //   The fix invariant: the registry WRITE must produce an owner-only
 //   workspaces.yaml (PROTECTED DACL installed on the handle at create time,
@@ -45,9 +46,11 @@
 //      register / the serena router call).
 //
 // A regression that reverts Registry.Save() to a non-hardened write (plain
-// os.WriteFile(0600)+os.Rename, which inherits the parent DACL) FAILS both
-// assertions: the file would carry the inherited Modify ACE and the hardened
-// read would refuse it with the WRITE/DAC/DELETE branch.
+// os.WriteFile(0600)+os.Rename, which inherits the parent DACL) FAILS the
+// owner-only DACL assertion and would make the hardened read rely on the
+// cold-read self-heal. This test rejects that: the write path must publish an
+// owner-only file directly, and the read must not need to emit
+// state-file-dacl-self-healed.
 
 package api
 
@@ -161,16 +164,25 @@ func TestRegistrySave_BroadenedParent_PublishesOwnerOnlyAndReadable(t *testing.T
 		t.Errorf("written workspaces.yaml has a non-allowlisted DACL (write did not produce an owner-only file symmetric with the hardened read): %v", err)
 	}
 
-	// Assertion 2 — the hardened READ succeeds. This is the actual symptom
-	// surface: `mcphub workspace list`, register's ListByWorkspace, and the
-	// serena router all read through this reader, and a Modify-broadened file
-	// makes it refuse with the WRITE/DAC/DELETE branch → -32001.
+	// Assertion 2 — the hardened READ succeeds without needing the cold-read
+	// self-heal. This is the actual symptom surface: `mcphub workspace list`,
+	// register's ListByWorkspace, and the serena router all read through this
+	// reader.
 	data, err := readStateFileInodeAnchored(regPath)
 	if err != nil {
 		t.Fatalf("hardened read of written registry failed (this is the -32001 serena breakage): %v", err)
 	}
 	if len(data) == 0 {
 		t.Fatalf("hardened read returned empty content for a non-empty registry")
+	}
+	events, err := RecentHubMcpEvents(20)
+	if err != nil {
+		t.Fatalf("read recent events: %v", err)
+	}
+	for _, ev := range events {
+		if ev["event"] == "state-file-dacl-self-healed" {
+			t.Fatalf("Registry.Save published a DACL-broadened file and relied on read-side self-heal: %+v", ev)
+		}
 	}
 
 	// Sanity: the round-trip parses and contains the serena row.
