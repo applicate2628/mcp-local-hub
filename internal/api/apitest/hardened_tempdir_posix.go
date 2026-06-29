@@ -22,13 +22,21 @@ func HardenedTempDir(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	hardened := filepath.Join(root, "hardened-parent")
-	if err := os.Mkdir(hardened, 0o700); err != nil {
-		t.Fatalf("apitest.HardenedTempDir mkdir: %v", err)
+	return HardenedDir(t, hardened)
+}
+
+// HardenedDir creates dir if needed and chmods it to 0700. Use it
+// when the immediate parent checked by the hardened state reader is a
+// child of the temp root.
+func HardenedDir(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("apitest.HardenedDir mkdir %s: %v", dir, err)
 	}
 	// Defensive: explicit chmod after creation in case umask
 	// stripped bits from the mode arg to os.Mkdir.
-	if err := os.Chmod(hardened, 0o700); err != nil {
-		t.Fatalf("apitest.HardenedTempDir chmod: %v", err)
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("apitest.HardenedDir chmod %s: %v", dir, err)
 	}
-	return hardened
+	return dir
 }

@@ -27,20 +27,28 @@ import (
 func HardenedTempDir(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "hardened-parent")
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		t.Fatalf("apitest.HardenedTempDir mkdir: %v", err)
+	return HardenedDir(t, dir)
+}
+
+// HardenedDir creates dir if needed and applies the same PROTECTED,
+// owner-only DACL as HardenedTempDir. Use it when the immediate parent
+// checked by the hardened state reader is a child of the temp root.
+func HardenedDir(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("apitest.HardenedDir mkdir %s: %v", dir, err)
 	}
 	currentSID, err := currentUserSID()
 	if err != nil {
-		t.Fatalf("apitest.HardenedTempDir currentUserSID: %v", err)
+		t.Fatalf("apitest.HardenedDir currentUserSID: %v", err)
 	}
 	systemSID, err := windows.StringToSid("S-1-5-18")
 	if err != nil {
-		t.Fatalf("apitest.HardenedTempDir system sid: %v", err)
+		t.Fatalf("apitest.HardenedDir system sid: %v", err)
 	}
 	adminSID, err := windows.StringToSid("S-1-5-32-544")
 	if err != nil {
-		t.Fatalf("apitest.HardenedTempDir admin sid: %v", err)
+		t.Fatalf("apitest.HardenedDir admin sid: %v", err)
 	}
 	entries := []windows.EXPLICIT_ACCESS{
 		{
@@ -76,7 +84,7 @@ func HardenedTempDir(t *testing.T) string {
 	}
 	dacl, err := windows.ACLFromEntries(entries, nil)
 	if err != nil {
-		t.Fatalf("apitest.HardenedTempDir ACLFromEntries: %v", err)
+		t.Fatalf("apitest.HardenedDir ACLFromEntries: %v", err)
 	}
 	if err := windows.SetNamedSecurityInfo(
 		dir,
@@ -87,7 +95,7 @@ func HardenedTempDir(t *testing.T) string {
 		dacl,
 		nil,
 	); err != nil {
-		t.Fatalf("apitest.HardenedTempDir SetNamedSecurityInfo: %v", err)
+		t.Fatalf("apitest.HardenedDir SetNamedSecurityInfo %s: %v", dir, err)
 	}
 	return dir
 }

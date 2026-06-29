@@ -6,11 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 // newDaemonsTestServer is an alias for newMembershipTestServer used by
@@ -43,12 +45,57 @@ func seedMembershipRegistry(t *testing.T, dir string) {
 // Returns the server and the temp dir path so callers can seed before use.
 func newMembershipTestServer(t *testing.T) (*Server, string) {
 	t.Helper()
-	tmp := t.TempDir()
+	tmp := apitest.HardenedTempDir(t)
 	t.Setenv("LOCALAPPDATA", tmp)
 	t.Setenv("XDG_STATE_HOME", tmp)
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("DefaultRegistryPath: %v", err)
+	}
+	apitest.HardenedDir(t, filepath.Dir(regPath))
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.port.Store(9125)
 	return s, tmp
+}
+
+func TestMembershipFixture_StrictModeReadsHardenedRegistryParent(t *testing.T) {
+	srv, tmp := newMembershipTestServer(t)
+	regPath := filepath.Join(tmp, "mcp-local-hub", "workspaces.yaml")
+	regParent := filepath.Dir(regPath)
+	info, err := os.Stat(regParent)
+	if err != nil {
+		t.Fatalf("membership fixture must pre-create registry parent %s before strict reads: %v", regParent, err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("membership fixture registry parent %s is not a directory", regParent)
+	}
+
+	t.Setenv(api.RequireSingleUserHomeEnv, "1")
+	if err := api.NewRegistry(regPath).Load(); err != nil {
+		t.Fatalf("strict Load on empty membership registry parent: %v", err)
+	}
+	seedMembershipRegistry(t, tmp)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/daemons/weekly-refresh-membership", nil)
+	req.Header = sameOriginHeaders()
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Rows []struct {
+			WorkspaceKey  string `json:"workspace_key"`
+			Language      string `json:"language"`
+			WeeklyRefresh bool   `json:"weekly_refresh"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Rows) != 1 || resp.Rows[0].WorkspaceKey != "k1" || resp.Rows[0].Language != "python" || !resp.Rows[0].WeeklyRefresh {
+		t.Fatalf("strict membership rows = %+v, want one k1/python weekly-refresh row", resp.Rows)
+	}
 }
 
 func TestMembershipHandler_HappyPath(t *testing.T) {
