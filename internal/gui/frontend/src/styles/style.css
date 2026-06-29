@@ -2033,6 +2033,19 @@ section[data-section] button.btn-danger:not(:disabled):hover {
    styles onto classes so they pick up the density tokens and the
    AA-compliant --text-muted / --warning-color values. */
 .lsp-matrix-intro { color: var(--text-muted); margin-bottom: var(--gap-xs); }
+/* First-workspace register affordance (fresh-machine connect path): a path
+   input + language select + submit on one row, with a guidance line above. */
+.lsp-register-workspace {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.625rem 0.75rem;
+  margin-bottom: var(--gap-sm, 0.75rem);
+  background: var(--surface-alt, #fafcff);
+}
+.lsp-register-workspace-intro { margin: 0 0 0.5rem; color: var(--text-muted); font-size: 0.9rem; }
+.lsp-register-workspace-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.lsp-register-workspace-field { display: inline-flex; align-items: center; }
+.lsp-register-workspace-field input.field-ctl { min-width: 18rem; }
 .lsp-matrix { table-layout: auto; }
 .lsp-matrix th, .lsp-matrix td { padding: 0.25rem 0.5rem; }
 .lsp-row-open { background: #f5fafe; }

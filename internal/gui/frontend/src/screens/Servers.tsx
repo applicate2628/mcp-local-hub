@@ -22,7 +22,7 @@ import {
   clearColumnPrefs,
   type ColumnPrefs,
 } from "../lib/matrix-columns";
-import { collectLspRows, type LspRow, LSP_MANIFEST_SERVER } from "../lib/lsp-rows";
+import { collectLspRows, type LspRow, LSP_MANIFEST_SERVER, LSP_LANGUAGES } from "../lib/lsp-rows";
 import { aggregateStatus, stateShape } from "../lib/status";
 import { pushToast } from "../lib/toast-store";
 import { WorkspaceSelector, ALL_WORKSPACES_KEY } from "../components/WorkspaceSelector";
@@ -200,6 +200,15 @@ export function ServersScreen() {
   const [openDrawerFor, setOpenDrawerFor] = useState<LspRow | null>(null);
   const [lspRegisterBusy, setLspRegisterBusy] = useState<Record<string, boolean>>({});
   const [lspRegisterMsg, setLspRegisterMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
+  // First-workspace registration (fresh-machine connect path): the
+  // operator types a workspace ROOT path + picks a language, and the GUI
+  // POSTs /api/lsp/register directly — no CLI `mcphub register` step. The
+  // LSP-daemons section renders this inline so a host with ZERO registered
+  // workspaces is no longer a dead-end (WorkspaceSelector empty state +
+  // every row's Enable button were both inert without a pre-selected
+  // workspace). Busy guards the in-flight POST against a double-fire.
+  const [workspacePathInput, setWorkspacePathInput] = useState<string>("");
+  const [workspaceRegisterBusy, setWorkspaceRegisterBusy] = useState<boolean>(false);
   // Keeps the latest /api/scan result around so the LSP-row helper has
   // a fresh source after a respawn or apply. Independent of `servers`
   // because the legacy main-matrix flow already mutates `servers` via
@@ -837,6 +846,61 @@ export function ServersScreen() {
     }
   };
 
+  // registerWorkspacePath is the FIRST-workspace register flow (fresh-machine
+  // connect path). It takes a workspace ROOT path the operator typed and a
+  // language, and POSTs /api/lsp/register directly — the same backend seam the
+  // `mcphub register` CLI uses (EnsureLSPRegistered + bless), so no CLI step is
+  // needed for the happy path. On success it reloads /api/workspaces so the new
+  // workspace appears in the selector + the row flips to registered, and (when
+  // the host had zero workspaces) auto-selects the just-registered key so the
+  // operator can immediately enable more languages.
+  const registerWorkspacePath = async (language: string) => {
+    const path = workspacePathInput.trim();
+    if (!path) {
+      setLspRegisterMsg({ kind: "error", text: "Enter a workspace folder path first." });
+      return;
+    }
+    if (!language) {
+      setLspRegisterMsg({ kind: "error", text: "Pick a language to register." });
+      return;
+    }
+    setWorkspaceRegisterBusy(true);
+    setLspRegisterMsg(null);
+    try {
+      const response = await postLspRegister(path, language);
+      if (!mountedRef.current) return;
+      const failed = response.results?.find((result) => result.status === "error");
+      if (failed) {
+        setLspRegisterMsg({
+          kind: "error",
+          text: `Register ${language} failed: ${failed.error ?? response.error ?? "unknown error"}`,
+        });
+        return;
+      }
+      setLspRegisterMsg({
+        kind: "ok",
+        text: `Registered ${language} for ${response.workspace || path}. Refreshing…`,
+      });
+      // Auto-select the newly-registered workspace so the operator can enable
+      // more languages against it without first opening the selector.
+      if (response.workspace_key) {
+        setSelectedWorkspaceKey(response.workspace_key);
+      }
+      setWorkspacePathInput("");
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setLspRegisterMsg({
+        kind: "error",
+        text: `Register ${language} failed: ${(err as Error).message}`,
+      });
+    } finally {
+      if (mountedRef.current) {
+        setWorkspaceRegisterBusy(false);
+      }
+    }
+  };
+
   return (
     <div>
       <div class="screen-header-row">
@@ -1018,6 +1082,11 @@ export function ServersScreen() {
         registerBusy={lspRegisterBusy}
         registerMsg={lspRegisterMsg}
         onRegister={registerLspRow}
+        hasWorkspaces={workspaces.length > 0}
+        workspacePathInput={workspacePathInput}
+        onWorkspacePathInput={setWorkspacePathInput}
+        onRegisterWorkspacePath={registerWorkspacePath}
+        workspaceRegisterBusy={workspaceRegisterBusy}
       />
       {openDrawerFor && openDrawerFor.taskName && (
         <EnvDrawer
@@ -1526,6 +1595,83 @@ function CellView(props: {
   );
 }
 
+// RegisterWorkspacePanel is the GUI-discoverable FIRST-workspace register
+// affordance (fresh-machine connect path). A fresh operator with the
+// toolchains installed but ZERO registered workspaces previously hit a
+// dead-end: the WorkspaceSelector pointed at the CLI and every row's Enable
+// button was disabled until a workspace already existed. This panel lets the
+// operator type a workspace ROOT folder, pick a language, and register it
+// straight from the GUI (POST /api/lsp/register) — no `mcphub register` CLI
+// step. It is rendered ALWAYS (not only on the empty host): once a workspace
+// exists it stays available as the "register another workspace / language"
+// surface, but its copy emphasizes the first-run path when hasWorkspaces is
+// false. Language list mirrors the canonical LSP_LANGUAGES (the 9-language
+// manifest set the rows below render).
+function RegisterWorkspacePanel(props: {
+  hasWorkspaces: boolean;
+  pathValue: string;
+  onPathInput: (value: string) => void;
+  onRegister: (language: string) => void;
+  busy: boolean;
+}) {
+  const { hasWorkspaces, pathValue, onPathInput, onRegister, busy } = props;
+  const [language, setLanguage] = useState<string>(LSP_LANGUAGES[0]);
+  const canSubmit = pathValue.trim().length > 0 && !busy;
+  return (
+    <div class="lsp-register-workspace" data-testid="lsp-register-workspace">
+      <p class="lsp-register-workspace-intro" data-testid="lsp-register-workspace-intro">
+        {hasWorkspaces
+          ? "Register another workspace folder, then enable its languages below."
+          : "No workspace registered yet. Enter a project folder and pick a language to connect a language server — no command line needed."}
+      </p>
+      <div class="lsp-register-workspace-controls">
+        <label class="lsp-register-workspace-field">
+          <span class="visually-hidden">Workspace folder path</span>
+          <input
+            type="text"
+            class="field-ctl"
+            data-testid="lsp-register-workspace-path"
+            placeholder="Workspace folder, e.g. D:\\dev\\my-project"
+            value={pathValue}
+            disabled={busy}
+            onInput={(ev) => onPathInput((ev.currentTarget as HTMLInputElement).value)}
+          />
+        </label>
+        <label class="lsp-register-workspace-field">
+          <span class="visually-hidden">Language</span>
+          <select
+            class="field-ctl"
+            data-testid="lsp-register-workspace-language"
+            value={language}
+            disabled={busy}
+            onChange={(ev) => setLanguage((ev.currentTarget as HTMLSelectElement).value)}
+          >
+            {LSP_LANGUAGES.map((lang) => (
+              <option key={lang} value={lang}>
+                {lang}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          class="btn btn-primary"
+          data-testid="lsp-register-workspace-submit"
+          disabled={!canSubmit}
+          title={
+            canSubmit
+              ? `Register ${language} for ${pathValue.trim()}`
+              : "Enter a workspace folder path first."
+          }
+          onClick={() => onRegister(language)}
+        >
+          {busy ? "Registering…" : "Register workspace"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // LspMatrix renders the 9-row LSP daemons table below the main matrix.
 // Workspace-scoped LSP rows do not use migrate/demigrate checkboxes,
 // but unregistered rows can be enabled from the row action when the
@@ -1545,6 +1691,12 @@ function LspMatrix(props: {
   registerBusy: Record<string, boolean>;
   registerMsg: { text: string; kind: "ok" | "error" } | null;
   onRegister: (row: LspRow) => void;
+  // First-workspace register flow (fresh-machine connect path).
+  hasWorkspaces: boolean;
+  workspacePathInput: string;
+  onWorkspacePathInput: (value: string) => void;
+  onRegisterWorkspacePath: (language: string) => void;
+  workspaceRegisterBusy: boolean;
 }) {
   const {
     rows,
@@ -1555,6 +1707,11 @@ function LspMatrix(props: {
     registerBusy,
     registerMsg,
     onRegister,
+    hasWorkspaces,
+    workspacePathInput,
+    onWorkspacePathInput,
+    onRegisterWorkspacePath,
+    workspaceRegisterBusy,
   } = props;
   return (
     <section class="lsp-matrix-section" data-testid="lsp-matrix-section">
@@ -1562,6 +1719,13 @@ function LspMatrix(props: {
       <p class="lsp-matrix-intro">
         Workspace-scoped language servers route through shared hub proxies.
       </p>
+      <RegisterWorkspacePanel
+        hasWorkspaces={hasWorkspaces}
+        pathValue={workspacePathInput}
+        onPathInput={onWorkspacePathInput}
+        onRegister={onRegisterWorkspacePath}
+        busy={workspaceRegisterBusy}
+      />
       {registerMsg && (
         <div
           class={registerMsg.kind === "error" ? "error" : ""}

@@ -96,9 +96,59 @@ test.describe("servers — LSP matrix", () => {
     await routeStandardLspMocks(page);
     await page.goto(`${hub.url}/#/servers`);
     await page.waitForSelector('[data-testid="workspace-selector"]');
-    // Empty registry → no <select>, just the "register first" hint.
+    // Empty registry → no <select>, just the in-GUI register hint (NOT a CLI
+    // instruction — the fresh-machine connect path must not dead-end here).
     await expect(page.locator('[data-testid="workspace-selector-select"]')).toHaveCount(0);
     const text = (await page.locator('[data-testid="workspace-selector"]').textContent()) ?? "";
-    expect(text).toContain("register a workspace first");
+    expect(text).toContain("register a workspace folder");
+    expect(text).not.toContain("mcphub register");
+  });
+
+  test("fresh-machine: register the first workspace from the GUI (no CLI)", async ({ page, hub }) => {
+    // Start with an empty registry, then mock /api/lsp/register so a fresh
+    // operator can register a workspace path + language straight from the GUI.
+    // No live LSP is exercised — the route is fulfilled synthetically.
+    const registerBodies: unknown[] = [];
+    await routeStandardLspMocks(page, {
+      scan: emptyScanResult,
+      status: [],
+      workspaces: emptyWorkspaces,
+    });
+    await page.route("**/api/lsp/register", async (r) => {
+      registerBodies.push(JSON.parse(r.request().postData() ?? "{}"));
+      await r.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          workspace: "/proj",
+          workspace_key: "proj",
+          entries: [
+            buildWorkspace({ key: "proj", path: "/proj", language: "python", port: 9202 }),
+          ],
+          results: [{ language: "python", status: "ok" }],
+        }),
+      });
+    });
+
+    await page.goto(`${hub.url}/#/servers`);
+    await page.waitForSelector('[data-testid="lsp-register-workspace"]');
+
+    // Empty-state copy nudges the operator to register here, not via the CLI.
+    await expect(
+      page.locator('[data-testid="lsp-register-workspace-intro"]'),
+    ).toContainText("No workspace registered yet");
+
+    const submit = page.locator('[data-testid="lsp-register-workspace-submit"]');
+    await expect(submit).toBeDisabled();
+
+    await page.locator('[data-testid="lsp-register-workspace-path"]').fill("/proj");
+    await page
+      .locator('[data-testid="lsp-register-workspace-language"]')
+      .selectOption("python");
+    await expect(submit).toBeEnabled();
+    await submit.click();
+
+    await expect.poll(() => registerBodies.length).toBe(1);
+    expect(registerBodies[0]).toEqual({ workspace_path: "/proj", language: "python" });
   });
 });

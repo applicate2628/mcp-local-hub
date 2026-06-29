@@ -455,6 +455,15 @@ export function CatalogScreen() {
             // A row is "installed" if /api/status already reports it OR the
             // most recent install POST for this row returned 204.
             const installed = installedServers.has(name) || state.phase === "installed";
+            // Workspace-scoped servers (mcp-language-server) cannot be installed
+            // via POST /api/install — the backend rejects them
+            // (refuseWorkspaceScopedInstall, install.go) because the
+            // (workspace, language) tuples can't be inferred from the manifest
+            // alone. A plain Install button on these rows always fails. Instead
+            // route the operator to the Servers LSP section where the
+            // RegisterWorkspacePanel registers a workspace path + language. We
+            // suppress the install affordance entirely for these rows (no POST).
+            const workspaceScoped = entry.kind === "workspace-scoped";
             return (
               <div class="card catalog-card" key={name} data-testid={`catalog-card-${name}`}>
                 <div class="card-title">
@@ -472,7 +481,19 @@ export function CatalogScreen() {
                   )}
                 </div>
                 <div class="catalog-card-actions">
-                  {installed ? (
+                  {workspaceScoped ? (
+                    // Workspace-scoped server: no POST /api/install (it would be
+                    // rejected). Route to the Servers LSP section to register a
+                    // workspace path + language instead.
+                    <a
+                      class="btn btn-primary"
+                      href="#/servers"
+                      data-testid={`catalog-setup-lsp-${name}`}
+                      title="Register a workspace folder and enable a language server in the Servers screen"
+                    >
+                      Set up LSP / register workspace
+                    </a>
+                  ) : installed ? (
                     <>
                       <span
                         class="lsp-chip lsp-chip-via-hub"
@@ -530,7 +551,7 @@ export function CatalogScreen() {
                     </button>
                   )}
                 </div>
-                {!installed && readinessGate === name && (
+                {!workspaceScoped && !installed && readinessGate === name && (
                   <CatalogInstallGate
                     name={name}
                     installing={state.phase === "installing"}

@@ -8,8 +8,10 @@
 // "render every workspace's entries" behavior available for diagnosis.
 //
 // Data source: GET /api/workspaces returns deduplicated (key, path)
-// pairs. Empty registry → render a "(none — register a workspace
-// first)" placeholder span (per Task 4.3 acceptance criterion 2).
+// pairs. Empty registry → render a "(none — register one in the LSP
+// daemons section below)" placeholder span. This points the operator at
+// the in-GUI RegisterWorkspacePanel (Servers LSP section) rather than the
+// CLI, so a fresh-machine connect path never dead-ends here.
 //
 // Layout: a single <label> wrapping a <select>; the optional path
 // preview is rendered as a sibling <span> so screen readers stay
@@ -44,8 +46,9 @@ export function WorkspaceSelector(props: WorkspaceSelectorProps) {
     return (
       <div class="workspace-selector workspace-selector-empty" data-testid="workspace-selector">
         <span class="workspace-selector-empty-text">
-          (none — register a workspace first with{" "}
-          <code>mcphub register</code>)
+          (none yet — register a workspace folder in the{" "}
+          <strong>LSP daemons</strong> section below to connect a language
+          server)
         </span>
       </div>
     );

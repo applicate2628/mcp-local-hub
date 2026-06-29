@@ -1421,4 +1421,42 @@ describe("CatalogScreen", () => {
     expect(screen.getByTestId("catalog-marketplace-docs-only-logicpro")).toBeTruthy();
     expect(screen.getByTestId("catalog-marketplace-card-ableton")).toBeTruthy();
   });
+
+  // A workspace-scoped catalog entry (mcp-language-server) can't be installed
+  // via POST /api/install — the backend rejects it (refuseWorkspaceScopedInstall).
+  // The Catalog must NOT offer a plain Install (which would always fail); it
+  // routes to the Servers LSP register flow instead.
+  it("routes a workspace-scoped server to the LSP register flow, not POST /api/install", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () =>
+          jsonResponse(200, {
+            catalog: [
+              entry("memory"),
+              entry(
+                "mcp-language-server",
+                "Language-server proxies per workspace",
+                "workspace-scoped",
+              ),
+            ],
+          }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace": emptyMarketplace,
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-card-mcp-language-server")).toBeTruthy();
+    });
+    // No plain Install button for the workspace-scoped row (it would fail).
+    expect(screen.queryByTestId("catalog-install-mcp-language-server")).toBeNull();
+    // Instead, a "Set up LSP" affordance that links to the Servers screen.
+    const setup = screen.getByTestId("catalog-setup-lsp-mcp-language-server");
+    expect(setup.getAttribute("href")).toBe("#/servers");
+    expect(setup.textContent).toContain("Set up LSP");
+    // A non-workspace-scoped row still offers the normal Install affordance.
+    expect(screen.getByTestId("catalog-install-memory")).toBeTruthy();
+    expect(screen.queryByTestId("catalog-setup-lsp-memory")).toBeNull();
+  });
 });
