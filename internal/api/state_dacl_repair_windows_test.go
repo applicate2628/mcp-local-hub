@@ -35,6 +35,12 @@ func TestRepairStateFileDACL_WindowsRepairsBroadCurrentUserFileAndHardenedReadPa
 	if report.Status != StateFileDACLRepairStatusRepaired {
 		t.Fatalf("repair status = %q, want %q (report=%+v)", report.Status, StateFileDACLRepairStatusRepaired, report)
 	}
+	if report.WriterExclusionGuarantee != StateFileDACLWriterExclusionEnforced {
+		t.Fatalf("writer-exclusion guarantee = %q, want %q (report=%+v)", report.WriterExclusionGuarantee, StateFileDACLWriterExclusionEnforced, report)
+	}
+	if report.RepairOpenTier != StateFileDACLRepairOpenTierStrong {
+		t.Fatalf("repair open tier = %q, want %q (report=%+v)", report.RepairOpenTier, StateFileDACLRepairOpenTierStrong, report)
+	}
 	if !containsRepairSID(report.RemovedSIDs, "S-1-5-11") {
 		t.Fatalf("removed SIDs = %v, want Authenticated Users SID S-1-5-11", report.RemovedSIDs)
 	}
@@ -62,8 +68,46 @@ func TestRepairStateFileDACL_WindowsRepairsBroadCurrentUserFileAndHardenedReadPa
 	if got := body["path"]; got != target {
 		t.Fatalf("audit path = %v, want %q", got, target)
 	}
+	if got := body["writer_exclusion_guarantee"]; got != string(StateFileDACLWriterExclusionEnforced) {
+		t.Fatalf("audit writer_exclusion_guarantee = %v, want %q (line=%s)", got, StateFileDACLWriterExclusionEnforced, line)
+	}
+	if got := body["repair_open_tier"]; got != string(StateFileDACLRepairOpenTierStrong) {
+		t.Fatalf("audit repair_open_tier = %v, want %q (line=%s)", got, StateFileDACLRepairOpenTierStrong, line)
+	}
+	if _, ok := body["fallback_path"]; ok {
+		t.Fatalf("audit body must not include fallback_path for strong tier: %v", body)
+	}
 	if !strings.Contains(line, "S-1-5-11") {
 		t.Fatalf("audit line %q does not name removed SID S-1-5-11", line)
+	}
+}
+
+func TestRepairStateFileDACL_WindowsHeldOpenFileRefusesAndLeavesDACLUnchanged(t *testing.T) {
+	stateDir := isolateStateDir(t)
+	target := filepath.Join(stateDir, "workspaces.yaml")
+	if err := os.WriteFile(target, []byte("version: 1\nworkspaces: []\n"), 0o600); err != nil {
+		t.Fatalf("write stale registry: %v", err)
+	}
+	applyFileDACLWithAuthUsersWriteACE(t, target)
+
+	held := openWindowsFileForShareConflictTest(t, target)
+	defer windows.CloseHandle(held)
+
+	report, err := RepairStateFileDACL(target)
+	if err == nil {
+		t.Fatalf("RepairStateFileDACL unexpectedly succeeded while file was held open (report=%+v)", report)
+	}
+	if !errors.Is(err, ErrStateFileDACLSharingViolation) {
+		t.Fatalf("err = %v, want ErrStateFileDACLSharingViolation", err)
+	}
+	if !strings.Contains(err.Error(), "a process currently holds") {
+		t.Fatalf("sharing refusal message = %q, want operator guidance", err.Error())
+	}
+	if report.Status != StateFileDACLRepairStatusRefused {
+		t.Fatalf("repair status = %q, want refused (report=%+v)", report.Status, report)
+	}
+	if verifyErr := verifyWriteBroadenedDACLStillPresent(target); verifyErr != nil {
+		t.Fatalf("held-open refusal changed the stale DACL: %v", verifyErr)
 	}
 }
 
@@ -81,15 +125,12 @@ func TestRepairStateFileDACL_WindowsRepairsCurrentUserWriteDACOnlyStaleDACL(t *t
 	if err != nil {
 		t.Fatalf("open parent: %v", err)
 	}
-	oldAccess := uint32(
-		windows.FILE_READ_DATA | windows.FILE_WRITE_DATA | windows.FILE_READ_ATTRIBUTES |
-			windows.DELETE | windows.READ_CONTROL | windows.WRITE_DAC,
-	)
-	oldHandle, oldErr := ntOpenRelativeWithShareAccess(parentHandle, filepath.Base(target), oldAccess, 0)
+	strongAccess := uint32(windows.FILE_WRITE_DATA | windows.DELETE | windows.WRITE_DAC | windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES)
+	oldHandle, oldErr := ntOpenRelativeWithShareAccess(parentHandle, filepath.Base(target), strongAccess, 0)
 	_ = windows.CloseHandle(parentHandle)
 	if oldErr == nil {
 		_ = windows.CloseHandle(oldHandle)
-		t.Fatalf("fixture unexpectedly allows the pre-fix repair access mask with FILE_WRITE_DATA and DELETE")
+		t.Fatalf("fixture unexpectedly allows the strong repair access mask with FILE_WRITE_DATA and DELETE")
 	}
 
 	report, err := RepairStateFileDACL(target)
@@ -98,6 +139,12 @@ func TestRepairStateFileDACL_WindowsRepairsCurrentUserWriteDACOnlyStaleDACL(t *t
 	}
 	if report.Status != StateFileDACLRepairStatusRepaired {
 		t.Fatalf("repair status = %q, want %q (report=%+v)", report.Status, StateFileDACLRepairStatusRepaired, report)
+	}
+	if report.WriterExclusionGuarantee != StateFileDACLWriterExclusionBestEffort {
+		t.Fatalf("writer-exclusion guarantee = %q, want %q (report=%+v)", report.WriterExclusionGuarantee, StateFileDACLWriterExclusionBestEffort, report)
+	}
+	if report.RepairOpenTier != StateFileDACLRepairOpenTierMetadataOnlyFallback {
+		t.Fatalf("repair open tier = %q, want %q (report=%+v)", report.RepairOpenTier, StateFileDACLRepairOpenTierMetadataOnlyFallback, report)
 	}
 	if !containsRepairSID(report.RemovedSIDs, "S-1-5-11") {
 		t.Fatalf("removed SIDs = %v, want Authenticated Users SID S-1-5-11", report.RemovedSIDs)
@@ -110,6 +157,24 @@ func TestRepairStateFileDACL_WindowsRepairsCurrentUserWriteDACOnlyStaleDACL(t *t
 	}
 	if string(data) != "version: 1\nworkspaces: []\n" {
 		t.Fatalf("repaired file content = %q", data)
+	}
+
+	event, line := findSupervisorEventByName(t, filepath.Join(stateDir, SupervisorEventLogFileLeaf), "state-file-dacl-operator-repaired")
+	if event == nil {
+		t.Fatalf("missing state-file-dacl-operator-repaired audit event")
+	}
+	body, ok := event["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("audit body missing or wrong type: %#v", event["body"])
+	}
+	if got := body["writer_exclusion_guarantee"]; got != string(StateFileDACLWriterExclusionBestEffort) {
+		t.Fatalf("audit writer_exclusion_guarantee = %v, want %q (line=%s)", got, StateFileDACLWriterExclusionBestEffort, line)
+	}
+	if got := body["repair_open_tier"]; got != string(StateFileDACLRepairOpenTierMetadataOnlyFallback) {
+		t.Fatalf("audit repair_open_tier = %v, want %q (line=%s)", got, StateFileDACLRepairOpenTierMetadataOnlyFallback, line)
+	}
+	if got := body["fallback_path"]; got != "tier1-access-denied-metadata-only" {
+		t.Fatalf("audit fallback_path = %v, want tier1-access-denied-metadata-only (line=%s)", got, line)
 	}
 }
 
@@ -201,6 +266,30 @@ func assertWindowsFileDACLAllowlist(t *testing.T, target string) {
 	}
 }
 
+func verifyWriteBroadenedDACLStillPresent(target string) error {
+	pathW, err := windows.UTF16PtrFromString(target)
+	if err != nil {
+		return err
+	}
+	h, err := windows.CreateFile(
+		pathW,
+		windows.READ_CONTROL,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(h)
+	if err := verifyWindowsDACLFromHandleWriteOrAdmin(h); !errors.Is(err, ErrDaclOutsideAllowlist) {
+		return err
+	}
+	return nil
+}
+
 func openWindowsFileForDACLTest(t *testing.T, target string, access uint32) windows.Handle {
 	t.Helper()
 	pathW, err := windows.UTF16PtrFromString(target)
@@ -218,6 +307,27 @@ func openWindowsFileForDACLTest(t *testing.T, target string, access uint32) wind
 	)
 	if err != nil {
 		t.Fatalf("CreateFile(%s): %v", target, err)
+	}
+	return h
+}
+
+func openWindowsFileForShareConflictTest(t *testing.T, target string) windows.Handle {
+	t.Helper()
+	pathW, err := windows.UTF16PtrFromString(target)
+	if err != nil {
+		t.Fatalf("UTF16PtrFromString: %v", err)
+	}
+	h, err := windows.CreateFile(
+		pathW,
+		windows.GENERIC_WRITE,
+		windows.FILE_SHARE_WRITE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("CreateFile share-conflict fixture: %v", err)
 	}
 	return h
 }

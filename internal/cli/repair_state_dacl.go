@@ -31,9 +31,13 @@ does not trust or read file contents before repair.
 With no flags, the command scans the resolved state directory, lists repair
 candidates, then asks for confirmation. Use --yes in non-interactive shells.
 
-On Windows, repair requests only DACL-write, security-read, and file-attribute
-rights on the target; it does not read file contents. On POSIX, chmod cannot
-revoke already-open writer file descriptors; the operator must ensure no other process already holds the file open for writing before running this command.`,
+On Windows, repair first opens the target with a FILE_READ_DATA-free strong mask
+that enforces a writer-exclusion guarantee. If that open is denied because the
+owner has only WRITE_DAC metadata rights, repair retries with a metadata-only
+fallback and reports guarantee=best-effort; it still does not read file contents.
+On POSIX, chmod cannot revoke already-open writer file descriptors; the operator
+must ensure no other process already holds the file open for writing before
+running this command.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRepairStateDACL(cmd, repairStateDACLOpts{
@@ -109,10 +113,10 @@ func runRepairStateDACL(cmd *cobra.Command, opts repairStateDACLOpts) error {
 		switch report.Status {
 		case api.StateFileDACLRepairStatusRepaired:
 			repaired++
-			fmt.Fprintf(cmd.OutOrStdout(), "repaired: %s\n", report.Path)
+			fmt.Fprintf(cmd.OutOrStdout(), "repaired: %s%s\n", report.Path, repairStateDACLReportSuffix(report))
 		case api.StateFileDACLRepairStatusUnchanged:
 			unchanged++
-			fmt.Fprintf(cmd.OutOrStdout(), "unchanged: %s\n", report.Path)
+			fmt.Fprintf(cmd.OutOrStdout(), "unchanged: %s%s\n", report.Path, repairStateDACLReportSuffix(report))
 		case api.StateFileDACLRepairStatusRefused:
 			refused++
 			reason := report.Reason
@@ -135,6 +139,17 @@ func runRepairStateDACL(cmd *cobra.Command, opts repairStateDACLOpts) error {
 		return fmt.Errorf("repair-state-dacl refused %d file(s)", refused)
 	}
 	return nil
+}
+
+func repairStateDACLReportSuffix(report api.StateFileDACLRepairReport) string {
+	if report.WriterExclusionGuarantee == "" {
+		return ""
+	}
+	parts := []string{fmt.Sprintf("guarantee=%s", report.WriterExclusionGuarantee)}
+	if report.FallbackPath != "" {
+		parts = append(parts, fmt.Sprintf("fallback=%s", report.FallbackPath))
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }
 
 func resolveRepairStateDACLPath(stateDirAbs, requested string) (string, error) {

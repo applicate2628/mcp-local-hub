@@ -10,6 +10,22 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+const (
+	stateFileDACLRepairStrongAccess = uint32(
+		windows.FILE_WRITE_DATA | windows.DELETE |
+			windows.WRITE_DAC | windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES,
+	)
+	stateFileDACLRepairMetadataOnlyAccess = uint32(windows.WRITE_DAC | windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES)
+	stateFileDACLRepairFallbackPath       = "tier1-access-denied-metadata-only"
+)
+
+type windowsStateFileDACLRepairOpen struct {
+	handle                   windows.Handle
+	writerExclusionGuarantee StateFileDACLWriterExclusionGuarantee
+	openTier                 StateFileDACLRepairOpenTier
+	fallbackPath             string
+}
+
 func inspectStateFileDACLForRepair(path string) (StateFileDACLRepairCandidate, bool, error) {
 	pathW, err := windows.UTF16PtrFromString(path)
 	if err != nil {
@@ -58,19 +74,11 @@ func repairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
 		return repairReportFromError(path, err), err
 	}
 
-	fileHandle, err := ntOpenRelativeWithShareAccess(
-		parentHandle,
-		base,
-		windows.WRITE_DAC|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES,
-		0,
-	)
+	repairOpen, err := openWindowsStateFileForDACLRepair(parentHandle, base, path)
 	if err != nil {
-		if windowsRepairErrIsSharingViolation(err) {
-			refusal := fmt.Errorf("%w: a process currently holds %s open; stop it and re-run", ErrStateFileDACLSharingViolation, path)
-			return repairReportFromError(path, refusal), refusal
-		}
-		return repairReportFromError(path, err), fmt.Errorf("open %s for DACL repair: %w", path, err)
+		return repairReportFromError(path, err), err
 	}
+	fileHandle := repairOpen.handle
 	defer windows.CloseHandle(fileHandle)
 
 	if err := refuseIrregularWindowsStateFileHandle(fileHandle, path); err != nil {
@@ -91,9 +99,12 @@ func repairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
 	var removedSIDs []string
 	if err := verifyWindowsDACLFromHandle(fileHandle); err == nil {
 		return StateFileDACLRepairReport{
-			Path:   path,
-			Status: StateFileDACLRepairStatusUnchanged,
-			Reason: "file DACL already matches the owner-only allowlist",
+			Path:                     path,
+			Status:                   StateFileDACLRepairStatusUnchanged,
+			Reason:                   "file DACL already matches the owner-only allowlist",
+			WriterExclusionGuarantee: repairOpen.writerExclusionGuarantee,
+			RepairOpenTier:           repairOpen.openTier,
+			FallbackPath:             repairOpen.fallbackPath,
 		}, nil
 	} else if sid := stateFileDACLOffendingSID(err); sid != "" {
 		removedSIDs = []string{sid}
@@ -108,11 +119,49 @@ func repairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
 		return report, fmt.Errorf("verify repaired DACL on %s: %w", path, err)
 	}
 	return StateFileDACLRepairReport{
-		Path:        path,
-		Status:      StateFileDACLRepairStatusRepaired,
-		Reason:      "file DACL tightened to owner-only allowlist",
-		RemovedSIDs: removedSIDs,
+		Path:                     path,
+		Status:                   StateFileDACLRepairStatusRepaired,
+		Reason:                   "file DACL tightened to owner-only allowlist",
+		RemovedSIDs:              removedSIDs,
+		WriterExclusionGuarantee: repairOpen.writerExclusionGuarantee,
+		RepairOpenTier:           repairOpen.openTier,
+		FallbackPath:             repairOpen.fallbackPath,
 	}, nil
+}
+
+func openWindowsStateFileForDACLRepair(parentHandle windows.Handle, base, path string) (windowsStateFileDACLRepairOpen, error) {
+	fileHandle, err := ntOpenRelativeWithShareAccess(parentHandle, base, stateFileDACLRepairStrongAccess, 0)
+	if err == nil {
+		return windowsStateFileDACLRepairOpen{
+			handle:                   fileHandle,
+			writerExclusionGuarantee: StateFileDACLWriterExclusionEnforced,
+			openTier:                 StateFileDACLRepairOpenTierStrong,
+		}, nil
+	}
+	if windowsRepairErrIsSharingViolation(err) {
+		return windowsStateFileDACLRepairOpen{}, stateFileDACLRepairSharingViolation(path)
+	}
+	if !windowsRepairErrIsAccessDenied(err) {
+		return windowsStateFileDACLRepairOpen{}, fmt.Errorf("open %s for DACL repair: %w", path, err)
+	}
+
+	fileHandle, err = ntOpenRelativeWithShareAccess(parentHandle, base, stateFileDACLRepairMetadataOnlyAccess, 0)
+	if err != nil {
+		if windowsRepairErrIsSharingViolation(err) {
+			return windowsStateFileDACLRepairOpen{}, stateFileDACLRepairSharingViolation(path)
+		}
+		return windowsStateFileDACLRepairOpen{}, fmt.Errorf("open %s for DACL repair metadata-only fallback: %w", path, err)
+	}
+	return windowsStateFileDACLRepairOpen{
+		handle:                   fileHandle,
+		writerExclusionGuarantee: StateFileDACLWriterExclusionBestEffort,
+		openTier:                 StateFileDACLRepairOpenTierMetadataOnlyFallback,
+		fallbackPath:             stateFileDACLRepairFallbackPath,
+	}, nil
+}
+
+func stateFileDACLRepairSharingViolation(path string) error {
+	return fmt.Errorf("%w: a process currently holds %s open; stop it and re-run", ErrStateFileDACLSharingViolation, path)
 }
 
 func stateFileOwnerIsCurrentUser(h windows.Handle) (bool, error) {
@@ -167,6 +216,9 @@ func windowsRepairErrIsSharingViolation(err error) bool {
 	if errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
 		return true
 	}
-	var status windows.NTStatus
-	return errors.As(err, &status) && status == windows.STATUS_SHARING_VIOLATION
+	return ntStatusIs(err, windows.STATUS_SHARING_VIOLATION)
+}
+
+func windowsRepairErrIsAccessDenied(err error) bool {
+	return errors.Is(err, windows.ERROR_ACCESS_DENIED) || ntStatusIs(err, windows.STATUS_ACCESS_DENIED)
 }

@@ -17,6 +17,20 @@ const (
 	StateFileDACLRepairStatusUnchanged   StateFileDACLRepairStatus = "unchanged"
 )
 
+type StateFileDACLWriterExclusionGuarantee string
+
+const (
+	StateFileDACLWriterExclusionEnforced   StateFileDACLWriterExclusionGuarantee = "enforced"
+	StateFileDACLWriterExclusionBestEffort StateFileDACLWriterExclusionGuarantee = "best-effort"
+)
+
+type StateFileDACLRepairOpenTier string
+
+const (
+	StateFileDACLRepairOpenTierStrong               StateFileDACLRepairOpenTier = "strong"
+	StateFileDACLRepairOpenTierMetadataOnlyFallback StateFileDACLRepairOpenTier = "metadata-only-fallback"
+)
+
 var ErrStateFileDACLSharingViolation = errors.New("hub-mcp state file DACL repair refused because a process currently holds the file open")
 
 type StateFileDACLRepairCandidate struct {
@@ -26,10 +40,13 @@ type StateFileDACLRepairCandidate struct {
 }
 
 type StateFileDACLRepairReport struct {
-	Path        string
-	Status      StateFileDACLRepairStatus
-	Reason      string
-	RemovedSIDs []string
+	Path                     string
+	Status                   StateFileDACLRepairStatus
+	Reason                   string
+	RemovedSIDs              []string
+	WriterExclusionGuarantee StateFileDACLWriterExclusionGuarantee
+	RepairOpenTier           StateFileDACLRepairOpenTier
+	FallbackPath             string
 }
 
 func FindStateFileDACLRepairCandidates(stateDir string) ([]StateFileDACLRepairCandidate, error) {
@@ -67,7 +84,7 @@ func FindStateFileDACLRepairCandidates(stateDir string) ([]StateFileDACLRepairCa
 func RepairStateFileDACL(path string) (StateFileDACLRepairReport, error) {
 	report, err := repairStateFileDACL(path)
 	if err == nil && report.Status == StateFileDACLRepairStatusRepaired {
-		emitStateFileDACLRepairAudit(report.Path, report.RemovedSIDs)
+		emitStateFileDACLRepairAudit(report)
 	}
 	return report, err
 }
@@ -95,7 +112,7 @@ func repairReportFromError(path string, err error) StateFileDACLRepairReport {
 	return report
 }
 
-func emitStateFileDACLRepairAudit(path string, removedSIDs []string) {
+func emitStateFileDACLRepairAudit(report StateFileDACLRepairReport) {
 	stateDir, err := DaemonStateDir()
 	if err != nil {
 		return
@@ -105,14 +122,24 @@ func emitStateFileDACLRepairAudit(path string, removedSIDs []string) {
 		return
 	}
 	defer logger.Close()
+	body := map[string]any{
+		"path":         report.Path,
+		"removed_sids": report.RemovedSIDs,
+	}
+	if report.WriterExclusionGuarantee != "" {
+		body["writer_exclusion_guarantee"] = string(report.WriterExclusionGuarantee)
+	}
+	if report.RepairOpenTier != "" {
+		body["repair_open_tier"] = string(report.RepairOpenTier)
+	}
+	if report.FallbackPath != "" {
+		body["fallback_path"] = report.FallbackPath
+	}
 	_ = logger.Emit(SupervisorEvent{
 		SchemaVersion: SupervisorEventSchemaVersion,
 		Event:         "state-file-dacl-operator-repaired",
 		Severity:      SupervisorEventSeverityInfo,
 		Source:        SupervisorEventSourceLifecycle,
-		Body: map[string]any{
-			"path":         path,
-			"removed_sids": removedSIDs,
-		},
+		Body:          body,
 	})
 }

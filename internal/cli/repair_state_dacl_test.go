@@ -66,6 +66,9 @@ func TestRepairStateDACL_HelpDocumentsPOSIXOpenWriterLimitation(t *testing.T) {
 	}
 	help := out.String()
 	for _, want := range []string{
+		"Windows",
+		"writer-exclusion guarantee",
+		"best-effort",
 		"POSIX",
 		"must ensure no other process already holds the file open",
 	} {
@@ -112,7 +115,13 @@ func TestRepairStateDACL_AllWithYesRepairsCandidatesAndPrintsSummary(t *testing.
 	var repaired []string
 	restoreRepair := setRepairStateDACLRepairForTest(func(path string) (api.StateFileDACLRepairReport, error) {
 		repaired = append(repaired, path)
-		return api.StateFileDACLRepairReport{Path: path, Status: api.StateFileDACLRepairStatusRepaired}, nil
+		return api.StateFileDACLRepairReport{
+			Path:                     path,
+			Status:                   api.StateFileDACLRepairStatusRepaired,
+			WriterExclusionGuarantee: api.StateFileDACLWriterExclusionBestEffort,
+			RepairOpenTier:           api.StateFileDACLRepairOpenTierMetadataOnlyFallback,
+			FallbackPath:             "tier1-access-denied-metadata-only",
+		}, nil
 	})
 	t.Cleanup(restoreRepair)
 
@@ -125,6 +134,11 @@ func TestRepairStateDACL_AllWithYesRepairsCandidatesAndPrintsSummary(t *testing.
 	}
 	if !strings.Contains(stdout, "Repaired 1 file") {
 		t.Fatalf("stdout = %q, want repair summary", stdout)
+	}
+	for _, want := range []string{"guarantee=best-effort", "fallback=tier1-access-denied-metadata-only"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stdout = %q, want %q", stdout, want)
+		}
 	}
 }
 
