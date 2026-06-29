@@ -88,6 +88,21 @@ func applyFileDACLWithAuthUsersWriteACE(t *testing.T, target string) {
 	applyProtectedDACLFromEntries(t, target, entries)
 }
 
+func applyFileNullDACL(t *testing.T, target string) {
+	t.Helper()
+	if err := windows.SetNamedSecurityInfo(
+		target,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil,
+		nil,
+		nil,
+		nil,
+	); err != nil {
+		t.Fatalf("SetNamedSecurityInfo null DACL on %s: %v", target, err)
+	}
+}
+
 // TestReadStateFileInodeAnchoredAcceptsAllowlistOnly synthesizes the
 // happy-path DACL (current-user + LocalSystem + BuiltinAdministrators
 // GENERIC_ALL) and asserts the reader accepts. Symmetric coverage for
@@ -328,6 +343,11 @@ func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedSelfHealsOwnerFile(t *
 	if sid, _ := found["offending_sid"].(string); sid != "S-1-5-11" {
 		t.Errorf("event offending_sid = %v, want S-1-5-11", found["offending_sid"])
 	}
+	for _, ev := range events {
+		if ev["event"] == "hub-mcp-state-read-unhardened-file-fallback" {
+			t.Fatalf("successful self-heal must not emit read-relax fallback audit: %+v", ev)
+		}
+	}
 }
 
 func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedForeignOwnerDoesNotSelfHeal(t *testing.T) {
@@ -366,6 +386,126 @@ func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedForeignOwnerDoesNotSel
 	}
 }
 
+func TestReadStateFileInodeAnchored_FileDACLWriteBroadenedSecretDoesNotSelfHealOrRetryRead(t *testing.T) {
+	isolateStateDir(t)
+	resetStrictModeIntentCacheForTest()
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+	t.Setenv(RequireSingleUserHomeEnv, "")
+
+	dir := hardenedTempDir(t)
+	target := filepath.Join(dir, hubMcpTokensFileLeaf)
+	if err := os.WriteFile(target, []byte(`{"tokens":{"claude-code":"`+strings.Repeat("a", 64)+`"}}`), 0600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	applyFileDACLWithAuthUsersWriteACE(t, target)
+
+	_, err := readStateFileInodeAnchored(target)
+	if err == nil {
+		t.Fatalf("default mode must refuse write-broadened secret-bearing state file")
+	}
+	if !errors.Is(err, ErrDaclOutsideAllowlist) {
+		t.Fatalf("first read err = %v, want ErrDaclOutsideAllowlist", err)
+	}
+	assertStateFileRunbookPointer(t, err.Error(), target, "S-1-5-11")
+	assertFileDACLWriteBroadened(t, target)
+
+	events, err := RecentHubMcpEvents(20)
+	if err != nil {
+		t.Fatalf("read recent events: %v", err)
+	}
+	for _, ev := range events {
+		if ev["event"] == "state-file-dacl-self-healed" {
+			t.Fatalf("secret-bearing file must not emit self-heal event: %+v", ev)
+		}
+	}
+
+	_, err = readStateFileInodeAnchored(target)
+	if err == nil {
+		t.Fatalf("retry must still refuse the write-broadened secret-bearing state file")
+	}
+	if !errors.Is(err, ErrDaclOutsideAllowlist) {
+		t.Fatalf("retry err = %v, want ErrDaclOutsideAllowlist", err)
+	}
+	assertFileDACLWriteBroadened(t, target)
+}
+
+func TestReadStateFileInodeAnchored_FileDACLUnprovenWriteViolationDoesNotSelfHeal(t *testing.T) {
+	isolateStateDir(t)
+	resetStrictModeIntentCacheForTest()
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+	t.Setenv(RequireSingleUserHomeEnv, "")
+
+	dir := hardenedTempDir(t)
+	target := filepath.Join(dir, "supervisor-intent.json")
+	if err := os.WriteFile(target, []byte(`{"strict_mode":false}`), 0600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	applyFileNullDACL(t, target)
+
+	_, err := readStateFileInodeAnchored(target)
+	if err == nil {
+		t.Fatalf("default mode must refuse an unparsed/null DACL without self-heal")
+	}
+	if !errors.Is(err, ErrDaclOutsideAllowlist) {
+		t.Fatalf("err = %v, want ErrDaclOutsideAllowlist", err)
+	}
+	assertFileDACLIsNull(t, target)
+
+	events, err := RecentHubMcpEvents(20)
+	if err != nil {
+		t.Fatalf("read recent events: %v", err)
+	}
+	for _, ev := range events {
+		if ev["event"] == "state-file-dacl-self-healed" {
+			t.Fatalf("unproven write/admin DACL failure must not self-heal: %+v", ev)
+		}
+	}
+}
+
+func TestReadStateFileInodeAnchored_NoAuditSelfHealStillEmitsMutationAudit(t *testing.T) {
+	isolateStateDir(t)
+	resetStrictModeIntentCacheForTest()
+	t.Cleanup(resetStrictModeIntentCacheForTest)
+	t.Setenv(RequireSingleUserHomeEnv, "")
+
+	dir := hardenedTempDir(t)
+	target := filepath.Join(dir, "supervisor-intent.json")
+	want := []byte(`{"strict_mode":false}`)
+	if err := os.WriteFile(target, want, 0600); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	applyFileDACLWithAuthUsersWriteACE(t, target)
+
+	got, err := readStateFileInodeAnchoredEnvStrictOnlyNoAudit(target)
+	if err != nil {
+		t.Fatalf("no-audit read must still self-heal owner-owned write-broadened DACL: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("read payload = %q, want %q", got, want)
+	}
+	assertFileDACLAllowlistOnly(t, target)
+
+	events, err := RecentHubMcpEvents(20)
+	if err != nil {
+		t.Fatalf("read recent events: %v", err)
+	}
+	var found map[string]any
+	for _, ev := range events {
+		switch ev["event"] {
+		case "state-file-dacl-self-healed":
+			found = ev
+		case "hub-mcp-state-read-unhardened-file-fallback":
+			t.Fatalf("no-audit read must not emit fallback audit: %+v", ev)
+		}
+	}
+	if found == nil {
+		t.Fatalf("no state-file-dacl-self-healed event in last %d entries (got %d events)", 20, len(events))
+	}
+	if path, _ := found["path"].(string); path != target {
+		t.Errorf("event path = %v, want %q", found["path"], target)
+	}
+}
+
 func assertFileDACLAllowlistOnly(t *testing.T, target string) {
 	t.Helper()
 	h := openReadControlFileHandleForTest(t, target)
@@ -381,6 +521,23 @@ func assertFileDACLWriteBroadened(t *testing.T, target string) {
 	defer windows.CloseHandle(h)
 	if err := verifyWindowsDACLFromHandleWriteOrAdmin(h); !errors.Is(err, ErrDaclOutsideAllowlist) {
 		t.Fatalf("file DACL write-broadened state = %v, want ErrDaclOutsideAllowlist", err)
+	}
+}
+
+func assertFileDACLIsNull(t *testing.T, target string) {
+	t.Helper()
+	h := openReadControlFileHandleForTest(t, target)
+	defer windows.CloseHandle(h)
+	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		t.Fatalf("GetSecurityInfo DACL for %s: %v", target, err)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		t.Fatalf("security descriptor DACL for %s: %v", target, err)
+	}
+	if dacl != nil {
+		t.Fatalf("file DACL was mutated away from null DACL")
 	}
 }
 

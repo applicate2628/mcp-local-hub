@@ -198,8 +198,16 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 		if errors.Is(err, ErrWrongOwner) {
 			return nil, err
 		}
+		if isSecretBearingStateFilePath(path) {
+			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses access granted to a non-allowlisted SID because the state file is secret-bearing.%s", path, err, stateFileReadRemediation(path, err))
+		}
+		healed := false
 		if wrErr := verifyWindowsDACLFromHandleWriteOrAdmin(fileHandle); wrErr != nil {
-			healed, healErr := selfHealStateFileDACLForCurrentOwner(fileHandle, fileHandleCanSetDACL, path, wrErr, auditFallbacks)
+			if _, ok := windowsDACLWriteOrAdminAllowlistViolation(wrErr); !ok {
+				return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses owner-verified DACL self-heal because the verifier did not prove a concrete WRITE/DAC/DELETE allowlist violation.%s", path, wrErr, stateFileReadRemediation(path, wrErr))
+			}
+			var healErr error
+			healed, healErr = selfHealStateFileDACLForCurrentOwner(fileHandle, fileHandleCanSetDACL, path, wrErr)
 			if healErr != nil {
 				return nil, fmt.Errorf("file %s not single-user safe: %w; owner-verified DACL self-heal failed: %v.%s", path, wrErr, healErr, stateFileReadRemediation(path, wrErr))
 			}
@@ -207,14 +215,9 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 				return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses file WRITE/DAC/DELETE access granted to a non-allowlisted SID because the state file is tampering-capable.%s", path, wrErr, stateFileReadRemediation(path, wrErr))
 			}
 			// The DACL is now re-verified owner-only on fileHandle; proceed to
-			// the single handle-bound ReadFile below — EXCEPT a secret-bearing
-			// file is still refused by the next check (fail-closed by design:
-			// secret files are operator-remediated, never auto-healed-then-read).
+			// the single handle-bound ReadFile below.
 		}
-		if isSecretBearingStateFilePath(path) {
-			return nil, fmt.Errorf("file %s not single-user safe: %w; default-relax refuses read access granted to a non-allowlisted SID because the state file is secret-bearing.%s", path, err, stateFileReadRemediation(path, err))
-		}
-		if auditFallbacks {
+		if auditFallbacks && !healed {
 			reason := "default-relax-on-solo-host (file grants read-only access to non-allowlisted SID)"
 			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
 				"path":   path,
@@ -282,7 +285,18 @@ func openStateFileReadHandleWindows(parentHandle windows.Handle, basename string
 	return fileHandle, false, nil
 }
 
-func selfHealStateFileDACLForCurrentOwner(fileHandle windows.Handle, canSetDACL bool, path string, cause error, auditFallbacks bool) (bool, error) {
+func windowsDACLWriteOrAdminAllowlistViolation(err error) (*DACLAllowlistViolation, bool) {
+	var violation *DACLAllowlistViolation
+	if !errors.As(err, &violation) || violation == nil {
+		return nil, false
+	}
+	if violation.Mask&windowsDACLWriteOrAdminBits == 0 {
+		return nil, false
+	}
+	return violation, true
+}
+
+func selfHealStateFileDACLForCurrentOwner(fileHandle windows.Handle, canSetDACL bool, path string, cause error) (bool, error) {
 	sd, err := windows.GetSecurityInfo(
 		fileHandle,
 		windows.SE_FILE_OBJECT,
@@ -312,16 +326,14 @@ func selfHealStateFileDACLForCurrentOwner(fileHandle windows.Handle, canSetDACL 
 	if err := verifyWindowsDACLFromHandle(fileHandle); err != nil {
 		return true, fmt.Errorf("re-verify owner-only DACL on held handle: %w", err)
 	}
-	if auditFallbacks {
-		details := StateFileDACLRemediationDetailsFor(path, cause)
-		_ = LogHubMcpEvent("warn", "state-file-dacl-self-healed", map[string]any{
-			"severity":      "warn",
-			"path":          path,
-			"offending_sid": details.OffendingSID,
-			"reason":        "owner-verified cold-read DACL self-heal",
-			"note":          "owner was current process user; DACL tightened on the held file handle and re-verified before the handle-bound read",
-		})
-	}
+	details := StateFileDACLRemediationDetailsFor(path, cause)
+	_ = LogHubMcpEvent("warn", "state-file-dacl-self-healed", map[string]any{
+		"severity":      "warn",
+		"path":          path,
+		"offending_sid": details.OffendingSID,
+		"reason":        "owner-verified cold-read DACL self-heal",
+		"note":          "owner was current process user; DACL tightened on the held file handle and re-verified before the handle-bound read",
+	})
 	return true, nil
 }
 
