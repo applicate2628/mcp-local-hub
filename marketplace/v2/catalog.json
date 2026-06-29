@@ -315,18 +315,20 @@
     },
     {
       "id": "ableton",
-      "name": "Ableton Live MCP server (loopback-safe)",
-      "summary": "Control Ableton Live over a TCP socket — create/edit tracks, clips, devices, and transport via the Live Object Model. This is the loopback-safe fork applicate2628/ableton-mcp-loopback (a security fork of ahujasid/ableton-mcp, Python, MIT), pinned to an immutable commit and run via uvx from that git source. The in-Live Remote Script binds 127.0.0.1 (loopback) as a HARD CONSTANT, so Ableton control is NOT reachable from the LAN — the kernel refuses any non-loopback peer, and no firewall rule is needed. This fixes upstream ahujasid/ableton-mcp's HOST=0.0.0.0 bind (LAN-reachable). Full tool parity with upstream: tracks/clips/notes/transport/devices/browser/arrangement/audio-clip. disabled-until-probe: enables only when a SUPPORTED Ableton Live is installed. REQUIRES Ableton Live 10 or newer — upstream advertises 'Ableton Live 10 or newer' and does NOT support Live 9 or earlier; the install probe therefore narrows to Live 10-19 via the glob C:\\ProgramData\\Ableton\\Live 1[0-9]*\\Program\\Ableton Live 1[0-9]*.exe (the 1[0-9] char-class matches Live 10-19 across all editions Suite/Standard/Intro/Lite and EXCLUDES Live 9 and earlier, whose version segment does not begin with '1' followed by a digit), so a host with only an unsupported pre-10 install does not falsely pass admission for a server it cannot drive. Live 20+ (when released) will need a glob update — file_globs[] entries are AND-semantics and cannot OR a second version range, so a second range is a follow-up. macOS (/Applications/Ableton Live *.app) is NOT covered in this batch — the install_probe uses AND-semantics across entries and cannot OR a second install root, so a macOS row (or file_globs[] OR-group support) is a follow-up. SETUP (operator-side, REQUIRED): install the bundled Remote Script (RemoteScript/__init__.py from the repo) into your Ableton User Library Remote Scripts folder, then select it in Live (Preferences -> Link/Tempo/MIDI -> Control Surface). NOTE: if your Windows Documents are OneDrive-redirected, your User Library is under OneDrive\\Documents\\Ableton\\User Library, not the plain Documents path — install there. The MCP server connects to the script over loopback TCP 9877; the host-exe probe detects Live, not the script, so verify the script is loaded before use.",
-      "homepage": "https://github.com/applicate2628/ableton-mcp-loopback",
-      "readme_url": "https://raw.githubusercontent.com/applicate2628/ableton-mcp-loopback/12e5e8bad363d86cdffccccca266f775a5f90bbf/README.md",
+      "name": "Ableton Live MCP server",
+      "summary": "Control Ableton Live over a TCP socket — create/edit tracks, clips, devices, and transport via the Live Object Model. Community server ahujasid/ableton-mcp (Python, MIT), pinned to an immutable upstream commit and run via uvx from that git source. disabled-until-probe: enables only when a SUPPORTED Ableton Live is installed. REQUIRES Ableton Live 10 or newer — ahujasid/ableton-mcp's README advertises 'Ableton Live 10 or newer' and does NOT support Live 9 or earlier; the install probe therefore narrows to Live 10-19 via the glob C:\\ProgramData\\Ableton\\Live 1[0-9]*\\Program\\Ableton Live 1[0-9]*.exe (the 1[0-9] char-class matches Live 10-19 across all editions Suite/Standard/Intro/Lite and EXCLUDES Live 9 and earlier, whose version segment does not begin with '1' followed by a digit), so a host with only an unsupported pre-10 install does not falsely pass admission for a server it cannot drive. Live 20+ (when released) will need a glob update — file_globs[] entries are AND-semantics and cannot OR a second version range, so a second range is a follow-up. macOS (/Applications/Ableton Live *.app) is NOT covered in this batch — the install_probe uses AND-semantics across entries and cannot OR a second install root, so a macOS row (or file_globs[] OR-group support) is a follow-up. PRIVACY: the pinned ableton-mcp ships telemetry ON by default (anonymous usage data sent to the upstream); this curated row sets ABLETON_MCP_DISABLE_TELEMETRY=true in env to DISABLE the telemetry sender (no usage data leaves your machine), but note a one-time startup telemetry-status line may still log to the daemon stderr (cosmetic, upstream — the data send itself is off). SETUP (operator-side, REQUIRED): install the bundled Ableton Remote Script into Live's MIDI Remote Scripts directory and load it in Live — the MCP server connects to that script over a local TCP socket on port 9877; the host-exe probe detects Live, NOT the Remote Script, so verify the script is loaded before use. SECURITY (upstream limitation): the Remote Script you install into Live binds HOST=0.0.0.0:9877, so Ableton control is reachable from your LAN, not just localhost. Restrict port 9877 to loopback via your firewall, or only run on a trusted network. This is upstream ahujasid/ableton-mcp's bind (the hub cannot patch the operator-installed Remote Script); tracked for an upstream loopback fix.",
+      "homepage": "https://github.com/ahujasid/ableton-mcp",
+      "readme_url": "https://raw.githubusercontent.com/ahujasid/ableton-mcp/5e9ffbd246bae60994699900f4fef34ad7b40407/README.md",
       "transport": "stdio",
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/applicate2628/ableton-mcp-loopback@12e5e8bad363d86cdffccccca266f775a5f90bbf",
-        "ableton-mcp-loopback"
+        "git+https://github.com/ahujasid/ableton-mcp@5e9ffbd246bae60994699900f4fef34ad7b40407",
+        "ableton-mcp"
       ],
-      "env": {},
+      "env": {
+        "ABLETON_MCP_DISABLE_TELEMETRY": "true"
+      },
       "categories": [
         "music",
         "daw",
@@ -343,10 +345,10 @@
         ]
       },
       "vendored_source": {
-        "repo": "https://github.com/applicate2628/ableton-mcp-loopback",
-        "pinned_ref": "12e5e8bad363d86cdffccccca266f775a5f90bbf",
-        "install_cmd": "uvx --from git+https://github.com/applicate2628/ableton-mcp-loopback@12e5e8bad363d86cdffccccca266f775a5f90bbf ableton-mcp-loopback",
-        "run_cmd": "uvx --from git+https://github.com/applicate2628/ableton-mcp-loopback@12e5e8bad363d86cdffccccca266f775a5f90bbf ableton-mcp-loopback",
+        "repo": "https://github.com/ahujasid/ableton-mcp",
+        "pinned_ref": "5e9ffbd246bae60994699900f4fef34ad7b40407",
+        "install_cmd": "uvx --from git+https://github.com/ahujasid/ableton-mcp@5e9ffbd246bae60994699900f4fef34ad7b40407 ableton-mcp",
+        "run_cmd": "uvx --from git+https://github.com/ahujasid/ableton-mcp@5e9ffbd246bae60994699900f4fef34ad7b40407 ableton-mcp",
         "license_status": "confirmed"
       }
     },

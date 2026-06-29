@@ -561,21 +561,21 @@ func TestV2Tier1Rows_GlobsLiveInFileGlobsNotFiles(t *testing.T) {
 
 // TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact locks the
 // Ableton row's provenance-consistency invariant. The catalog must execute the
-// same immutable, reviewed source it advertises in vendored_source and
-// readme_url. The row now installs the reviewed loopback-safe fork
-// applicate2628/ableton-mcp-loopback (security fork of ahujasid/ableton-mcp,
-// MIT): full upstream tool parity, but the in-Live Remote Script binds 127.0.0.1
-// as a hard constant, fixing upstream's HOST=0.0.0.0 LAN exposure. It must still
-// NOT install from the earlier build-fix fork applicate2628/ableton-mcp-extended,
-// which was never security-reviewed for this row.
+// same immutable, reviewed upstream source it advertises in vendored_source and
+// readme_url. In particular, it must not install from project-owned personal
+// forks, because marketplace one-click install turns this row into a long-lived
+// daemon that executes as the local user.
 func TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact(t *testing.T) {
 	e := v2CatalogByID(t)["ableton"]
 	if e == nil {
 		t.Fatalf("v2 catalog missing the ableton row")
 	}
 
-	const wantRepo = "https://github.com/applicate2628/ableton-mcp-loopback"
-	const forbiddenFork = "https://github.com/applicate2628/ableton-mcp-extended"
+	const wantRepo = "https://github.com/ahujasid/ableton-mcp"
+	forbiddenForks := []string{
+		"https://github.com/applicate2628/ableton-mcp-extended",
+		"https://github.com/applicate2628/ableton-mcp-loopback",
+	}
 
 	vs := e.VendoredSource
 	if vs == nil {
@@ -597,15 +597,19 @@ func TestV2AbletonRow_GitPinnedProvenanceMatchesInstalledArtifact(t *testing.T) 
 	if !strings.Contains(joinedArgs, wantGitFrom) {
 		t.Fatalf("ableton args %v do not install from the pinned upstream git source %q", e.Args, wantGitFrom)
 	}
-	if strings.Contains(joinedArgs, forbiddenFork) {
-		t.Fatalf("ableton args %v still install from the untrusted personal fork %q", e.Args, forbiddenFork)
+	for _, forbiddenFork := range forbiddenForks {
+		if strings.Contains(joinedArgs, forbiddenFork) {
+			t.Fatalf("ableton args %v still install from the untrusted personal fork %q", e.Args, forbiddenFork)
+		}
 	}
 	for label, cmd := range map[string]string{"install_cmd": vs.InstallCmd, "run_cmd": vs.RunCmd} {
 		if !strings.Contains(cmd, wantGitFrom) {
 			t.Fatalf("ableton vendored_source.%s = %q does not reference the pinned upstream git source %q", label, cmd, wantGitFrom)
 		}
-		if strings.Contains(cmd, forbiddenFork) {
-			t.Fatalf("ableton vendored_source.%s = %q still references the untrusted personal fork %q", label, cmd, forbiddenFork)
+		for _, forbiddenFork := range forbiddenForks {
+			if strings.Contains(cmd, forbiddenFork) {
+				t.Fatalf("ableton vendored_source.%s = %q still references the untrusted personal fork %q", label, cmd, forbiddenFork)
+			}
 		}
 	}
 }
@@ -960,15 +964,15 @@ func TestV2SecretGatedVendoredRows_RequiredSecretGate(t *testing.T) {
 // config-correctness fixes for the tableau + metabase rows, which the GUI one-click
 // path writes VERBATIM with no operator-edit step:
 //
-//   findings 2+3 — the instance URL must NOT ship as a placeholder http(s):// literal
-//     default (that would silently target a sample URL on every install). Since there
-//     is no required-non-secret-config mechanism, the URL is routed through the
-//     required_secrets gate as a secret: env ref, so a one-click install BLOCKS until
-//     the operator supplies the real URL. The URL env value must therefore be a
-//     `secret:` ref AND the key must be in required_secrets — never a bare URL.
-//   finding 1 — metabase must default to the upstream NON-destructive tool set
-//     (TOOL_MODE=read); omitting it would default upstream to `all` (create/update/
-//     delete). The operator opts into the destructive surface explicitly.
+//	findings 2+3 — the instance URL must NOT ship as a placeholder http(s):// literal
+//	  default (that would silently target a sample URL on every install). Since there
+//	  is no required-non-secret-config mechanism, the URL is routed through the
+//	  required_secrets gate as a secret: env ref, so a one-click install BLOCKS until
+//	  the operator supplies the real URL. The URL env value must therefore be a
+//	  `secret:` ref AND the key must be in required_secrets — never a bare URL.
+//	finding 1 — metabase must default to the upstream NON-destructive tool set
+//	  (TOOL_MODE=read); omitting it would default upstream to `all` (create/update/
+//	  delete). The operator opts into the destructive surface explicitly.
 func TestV2DataRows_NoPlaceholderURLDefaultAndReadOnlyToolMode(t *testing.T) {
 	byID := v2CatalogByID(t)
 
