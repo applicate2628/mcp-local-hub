@@ -69,27 +69,105 @@
   --link: #0969da;
   --link-hover: #0550ae;
   --link-visited: #6639ba;
-}
-[data-theme="dark"] {
-  --bg: #0d1117;
-  --text: #c9d1d9;
-  --border: #30363d;
-  --success: #3fb950;
-  --danger: #f85149;
-  --sidebar-bg: #161b22;
+
+  /* Banner + inline-link themed surfaces. LIGHT values here; the dark values
+     live in the dark pack below. Making these real tokens lets the .banner-*
+     and .linklike base rules be theme-AGNOSTIC (one rule that reads the token
+     in all three contexts: light / explicit-dark / system-dark), which deletes
+     the per-element `[data-theme="dark"] X` descendant rules entirely — those
+     were the descendant half of the system-dark drift (never mirrored). */
+  --banner-info-bg: #eef5ff;
+  --banner-info-border: #4a90e2;
+  --banner-success-bg: #eef9ee;
+  --banner-warn-bg: #fff8e6;
+  --banner-error-bg: #fbeeee;
+  --linklike: #0066cc;
+  --linklike-hover: #004999;
+
+  /* ── Dark palette — SINGLE SOURCE OF TRUTH ──────────────────────────────
+     Every dark color LITERAL lives here once, as inert `--dark-*` source
+     properties. They are defined on :root so they exist in every theme but
+     are never read directly — they are read ONLY by the two dark contexts
+     below (explicit `[data-theme="dark"]` and system-dark
+     `@media (prefers-color-scheme: dark) :root[data-theme="system"]`), each
+     of which assigns the LIVE tokens from these source values.
+
+     WHY: previously the explicit-dark block and the system-dark block each
+     hard-coded their own dark literals, and the system block silently
+     omitted --card-surface / --sidebar-bg / --success / --danger / --link*.
+     On a dark-OS user the DEFAULT theme is "system", so cards rendered WHITE
+     and chrome washed out. Routing both contexts through this one source +
+     one shared assignment pack makes that drift structurally impossible. */
+  --dark-bg: #0d1117;
+  --dark-text: #c9d1d9;
+  --dark-border: #30363d;
+  --dark-success: #3fb950;
+  --dark-danger: #f85149;
+  --dark-sidebar-bg: #161b22;
   /* Dark card surface — a step ABOVE the #0d1117 page so cards read as raised
      panels (matches the sidebar surface). Fixes the flat/blended-into-the-page
      dark cards: they previously used --bg = #0d1117 = the exact page color. */
-  --card-surface: #161b22;
+  --dark-card-surface: #161b22;
   /* Dark-theme muted: 7.45:1 vs --bg #0d1117 (AA pass). Mirrors the A4-a
      --muted-color dark value so both token families agree. */
-  --text-muted: #9ca3af;
+  --dark-text-muted: #9ca3af;
   /* Link colors: GitHub Primer dark. WCAG AA against --bg=#0d1117.
      Default browser blue (#0000EE) was the unreadable bug — reported
      against the Servers screen where every server name is an <a>. */
-  --link: #58a6ff;
-  --link-hover: #79c0ff;
-  --link-visited: #b87eff;
+  --dark-link: #58a6ff;
+  --dark-link-hover: #79c0ff;
+  --dark-link-visited: #b87eff;
+
+  /* A4-a token family (`--*-color`, used by Settings + Backups). Same
+     single-source treatment so the explicit-dark and system-dark contexts
+     can never drift on these either. */
+  --dark-bg-color: #0f172a;
+  --dark-text-color: #e5e7eb;
+  --dark-muted-color: #9ca3af;
+  --dark-border-color: #334155;
+  /* G15 a11y: dark success #10b981 = 7.04:1 on #0f172a (WCAG AA pass). */
+  --dark-success-color: #10b981;
+
+  /* Banner + inline-link dark surfaces (single source for the themed tokens
+     above). The dark link colors reuse the Primer dark link literals. */
+  --dark-banner-info-bg: #0d1f38;
+  --dark-banner-info-border: #4a90e2;
+  --dark-banner-success-bg: #0d1f0d;
+  --dark-banner-warn-bg: #1f1a00;
+  --dark-banner-error-bg: #1f0d0d;
+  --dark-linklike: #58a6ff;
+  --dark-linklike-hover: #79c0ff;
+}
+
+/* ── Dark live-token assignment ─────────────────────────────────────────────
+   Each of the two dark contexts assigns the COMPLETE live-token set from the
+   single-source --dark-* palette above. The color literals exist in exactly
+   ONE place (:root --dark-*), so a value change is a one-line edit that hits
+   BOTH explicit-dark and system-dark. The two assignment lists below MUST stay
+   token-for-token identical — that parity is enforced by the vitest
+   style-dark-token-parity.test.ts, which fails loud if either context gains or
+   loses a token. (Tailwind v4 / Lightning CSS has no portable @mixin to dedupe
+   across the prefers-color-scheme media boundary, so the assignment statements
+   are mirrored, but the *values* are not.) */
+[data-theme="dark"] {
+  --bg: var(--dark-bg);
+  --text: var(--dark-text);
+  --border: var(--dark-border);
+  --success: var(--dark-success);
+  --danger: var(--dark-danger);
+  --sidebar-bg: var(--dark-sidebar-bg);
+  --card-surface: var(--dark-card-surface);
+  --text-muted: var(--dark-text-muted);
+  --link: var(--dark-link);
+  --link-hover: var(--dark-link-hover);
+  --link-visited: var(--dark-link-visited);
+  --banner-info-bg: var(--dark-banner-info-bg);
+  --banner-info-border: var(--dark-banner-info-border);
+  --banner-success-bg: var(--dark-banner-success-bg);
+  --banner-warn-bg: var(--dark-banner-warn-bg);
+  --banner-error-bg: var(--dark-banner-error-bg);
+  --linklike: var(--dark-linklike);
+  --linklike-hover: var(--dark-linklike-hover);
 }
 a {
   color: var(--link);
@@ -675,7 +753,15 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
 
 /* --- Logs screen --- */
 #logs-controls { display: flex; gap: var(--gap-sm); align-items: center; margin-bottom: var(--gap-md); flex-wrap: wrap; }
-#logs-body { background: var(--sidebar-bg); border: 1px solid var(--border); padding: var(--logs-body-padding); overflow: auto; max-height: 70vh; font-family: monospace; font-size: 12px; white-space: pre-wrap; }
+/* white-space: pre-wrap wraps at WHITESPACE and preserves newlines, but a long
+   UNBREAKABLE token (a 400-char trace=, a hash, a base64 blob, a long path with
+   no spaces) has no break opportunity, so it overflows the pane's right edge and
+   is clipped at the viewport — the tail is lost and the horizontal scrollbar is
+   easy to miss. overflow-wrap: anywhere lets such a token break mid-word ONLY
+   when it would otherwise overflow, keeping every character visible inside the
+   pane. (anywhere, not word-break:break-all, so ordinary spaced lines still wrap
+   at word boundaries and short words are never split.) */
+#logs-body { background: var(--sidebar-bg); border: 1px solid var(--border); padding: var(--logs-body-padding); overflow: auto; max-height: 70vh; font-family: monospace; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .logs-filter { padding: var(--input-padding-y) var(--input-padding-x); border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); font: inherit; min-width: 220px; }
 .logs-filter-error { border-color: var(--danger); }
 /* Spec §5.7 line 289: amber/red highlight so warnings and errors are
@@ -842,12 +928,8 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
    outcomes, not errors. Matches the reusable .banner-info accent (#4a90e2 on
    #eef5ff) so the honest-UX notices read as info, never red. */
 .screen.add-server .banner.info {
-  background: #eef5ff;
-  border-left-color: #4a90e2;
-}
-[data-theme="dark"] .screen.add-server .banner.info {
-  background: #0d1f38;
-  border-left-color: #4a90e2;
+  background: var(--banner-info-bg);
+  border-left-color: var(--banner-info-border);
 }
 
 /* A2b Advanced subsections */
@@ -1011,43 +1093,26 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
   font-size: 14px;
 }
 
+/* Theme-AGNOSTIC banner skins — read the themed token, which the dark pack
+   flips for BOTH explicit-dark and system-dark. No `[data-theme="dark"]`
+   descendant twin needed (that twin was the un-mirrored system-dark drift). */
 .banner-info {
-  background: #eef5ff;
-  border-left-color: #4a90e2;
+  background: var(--banner-info-bg);
+  border-left-color: var(--banner-info-border);
 }
 
 .banner-success {
-  background: #eef9ee;
+  background: var(--banner-success-bg);
   border-left-color: var(--success);
 }
 
 .banner-warn {
-  background: #fff8e6;
+  background: var(--banner-warn-bg);
   border-left-color: var(--warning, #bf8700);
 }
 
 .banner-error {
-  background: #fbeeee;
-  border-left-color: var(--danger);
-}
-
-[data-theme="dark"] .banner-info {
-  background: #0d1f38;
-  border-left-color: #4a90e2;
-}
-
-[data-theme="dark"] .banner-success {
-  background: #0d1f0d;
-  border-left-color: var(--success);
-}
-
-[data-theme="dark"] .banner-warn {
-  background: #1f1a00;
-  border-left-color: var(--warning, #bf8700);
-}
-
-[data-theme="dark"] .banner-error {
-  background: #1f0d0d;
+  background: var(--banner-error-bg);
   border-left-color: var(--danger);
 }
 
@@ -1078,33 +1143,26 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
 
 /* === Inline link-styled button === */
 
+/* Theme-agnostic inline-link button — reads the themed --linklike token. */
 .linklike {
   background: none;
   border: none;
   padding: 0;
   margin: 0;
-  color: #0066cc;
+  color: var(--linklike);
   text-decoration: underline;
   cursor: pointer;
   font: inherit;
 }
 
 .linklike:hover {
-  color: #004999;
+  color: var(--linklike-hover);
 }
 
 .linklike:disabled {
   color: var(--text-muted, #656d76);
   cursor: not-allowed;
   text-decoration: none;
-}
-
-[data-theme="dark"] .linklike {
-  color: #58a6ff;
-}
-
-[data-theme="dark"] .linklike:hover {
-  color: #79c0ff;
 }
 
 .hint {
@@ -1497,32 +1555,54 @@ menu button[disabled] {
      r2 P2: comfortable must match pre-density layout. */
   --logs-body-padding: 12px;
 }
+/* A4-a (`--*-color`) family for explicit dark — sourced from the single
+   --dark-*-color palette. Mirrored token-for-token by the system-dark block
+   below; parity is enforced by style-dark-token-parity.test.ts. */
 :root[data-theme="dark"] {
-  --bg-color: #0f172a;
-  --text-color: #e5e7eb;
-  --muted-color: #9ca3af;
-  --border-color: #334155;
-  /* G15 a11y: dark success #10b981 = 7.04:1 on #0f172a (WCAG AA pass). */
-  --success-color: #10b981;
+  --bg-color: var(--dark-bg-color);
+  --text-color: var(--dark-text-color);
+  --muted-color: var(--dark-muted-color);
+  --border-color: var(--dark-border-color);
+  --success-color: var(--dark-success-color);
 }
+/* ── System-dark: the DEFAULT theme on a dark OS ────────────────────────────
+   Applies the FULL dark token set — BOTH the Primer (`--bg`/`--card-surface`/
+   `--link*`/…) family AND the A4-a (`--*-color`) family — so every screen
+   (Dashboard cards, Servers, Catalog, Secrets, Settings, About) renders
+   identically to explicit `[data-theme="dark"]`. Previously this block omitted
+   --card-surface / --sidebar-bg / --success / --danger / --link*, so a dark-OS
+   user on the default `system` theme got WHITE cards + washed-out chrome.
+   Both families are sourced from the one --dark-* / --dark-*-color palette, and
+   this list is kept token-for-token identical to the explicit-dark blocks by
+   style-dark-token-parity.test.ts. */
 @media (prefers-color-scheme: dark) {
   :root[data-theme="system"] {
-    /* New A4-a tokens (Settings + Backups). */
-    --bg-color: #0f172a;
-    --text-color: #e5e7eb;
-    --muted-color: #9ca3af;
-    --border-color: #334155;
-    /* G15 a11y: keep success readable in system-dark too (7.04:1). */
-    --success-color: #10b981;
-    /* Codex PR #20 r10 P2: also override the legacy variables that the
-     * rest of the app reads (Servers, Migration, Add server, Secrets,
-     * Dashboard, Logs use --bg/--text/--border at the top of this file).
-     * Without this, `system` theme on a dark OS would only flip the
-     * Settings screen to dark while every other screen stayed light. */
-    --bg: #0d1117;
-    --text: #c9d1d9;
-    --border: #30363d;
-    --text-muted: #9ca3af;
+    /* Primer family (mirrors [data-theme="dark"]). */
+    --bg: var(--dark-bg);
+    --text: var(--dark-text);
+    --border: var(--dark-border);
+    --success: var(--dark-success);
+    --danger: var(--dark-danger);
+    --sidebar-bg: var(--dark-sidebar-bg);
+    --card-surface: var(--dark-card-surface);
+    --text-muted: var(--dark-text-muted);
+    --link: var(--dark-link);
+    --link-hover: var(--dark-link-hover);
+    --link-visited: var(--dark-link-visited);
+    /* A4-a family (mirrors :root[data-theme="dark"]). */
+    --bg-color: var(--dark-bg-color);
+    --text-color: var(--dark-text-color);
+    --muted-color: var(--dark-muted-color);
+    --border-color: var(--dark-border-color);
+    --success-color: var(--dark-success-color);
+    /* Banner + inline-link family (mirrors [data-theme="dark"]). */
+    --banner-info-bg: var(--dark-banner-info-bg);
+    --banner-info-border: var(--dark-banner-info-border);
+    --banner-success-bg: var(--dark-banner-success-bg);
+    --banner-warn-bg: var(--dark-banner-warn-bg);
+    --banner-error-bg: var(--dark-banner-error-bg);
+    --linklike: var(--dark-linklike);
+    --linklike-hover: var(--dark-linklike-hover);
   }
 }
 :root[data-density="compact"] {
