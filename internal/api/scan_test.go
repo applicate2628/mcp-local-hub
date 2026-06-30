@@ -1663,6 +1663,65 @@ func TestScanFrom_DirectoryAtConfigPathDoesNotFailWholeScan(t *testing.T) {
 	}
 }
 
+// TestScanFrom_MalformedClientConfigDoesNotFailWholeScan pins deep-review P2:
+// once a config path is a readable regular file, an adapter-level parse failure
+// for one client must be recorded per-client and must not abort siblings.
+func TestScanFrom_MalformedClientConfigDoesNotFailWholeScan(t *testing.T) {
+	tmp := t.TempDir()
+
+	claudePath := filepath.Join(tmp, ".claude.json")
+	if err := os.WriteFile(claudePath, []byte(`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9123/mcp"}}}`), 0o600); err != nil {
+		t.Fatalf("seed claude: %v", err)
+	}
+	zedPath := filepath.Join(tmp, "zed-settings.json")
+	if err := os.WriteFile(zedPath, []byte(`{"context_servers":{"filesystem":{"command":"D:/dev/mcphub.exe","args":["relay","--url","http://localhost:9130/mcp"]}}}`), 0o600); err != nil {
+		t.Fatalf("seed zed: %v", err)
+	}
+	codexPath := filepath.Join(tmp, "config.toml")
+	if err := os.WriteFile(codexPath, []byte("mcp_servers = ["), 0o600); err != nil {
+		t.Fatalf("seed malformed codex: %v", err)
+	}
+
+	a := NewAPI()
+	result, err := a.ScanFrom(ScanOpts{
+		ConfigPaths: map[string]string{
+			"claude-code": claudePath,
+			"codex-cli":   codexPath,
+			"zed":         zedPath,
+		},
+		ManifestDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("ScanFrom returned error on one malformed client config: %v (expected partial success)", err)
+	}
+	if got := result.ClientConfigPresence["codex-cli"]; got != "error" {
+		t.Errorf("client_config_presence[codex-cli]=%q, want error for readable malformed file", got)
+	}
+	if got := result.ClientScanErrors["codex-cli"]; !strings.Contains(got, "codex:") {
+		t.Errorf("client_scan_errors[codex-cli]=%q, want prefixed codex parse error", got)
+	}
+	if _, ok := result.ClientScanErrors["claude-code"]; ok {
+		t.Errorf("client_scan_errors unexpectedly recorded valid claude-code: %q", result.ClientScanErrors["claude-code"])
+	}
+	if _, ok := result.ClientScanErrors["zed"]; ok {
+		t.Errorf("client_scan_errors unexpectedly recorded valid zed: %q", result.ClientScanErrors["zed"])
+	}
+
+	byName := map[string]ScanEntry{}
+	for _, e := range result.Entries {
+		byName[e.Name] = e
+	}
+	if got := byName["memory"].ClientPresence["claude-code"].Transport; got != "http" {
+		t.Errorf("memory claude-code transport = %q, want http (valid sibling should still scan)", got)
+	}
+	if got := byName["filesystem"].ClientPresence["zed"].Transport; got != "relay" {
+		t.Errorf("filesystem zed transport = %q, want relay (second valid sibling should still scan)", got)
+	}
+	if _, ok := byName["memory"].ClientPresence["codex-cli"]; ok {
+		t.Errorf("malformed codex config contributed partial memory presence: %+v", byName["memory"].ClientPresence["codex-cli"])
+	}
+}
+
 // TestClassifyMissingClientConfig pins the helper in isolation. It is
 // the canonical place to extend if v0.5.x adds further classification
 // (e.g., "parent-is-symlink" or "parent-not-writable").

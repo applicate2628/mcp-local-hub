@@ -750,6 +750,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	// original code's fixed claude→...→openclaw order is preserved because
 	// that is exactly the registry order.
 	scanners := clientScanners()
+	clientScanErrors := map[string]string{}
 	for _, name := range clients.SupportedClientNames() {
 		sc, ok := scanners[name]
 		if !ok || sc.scan == nil {
@@ -759,9 +760,13 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		if path == "" || !scanIfReadable(name) {
 			continue
 		}
-		if err := sc.scan(entries, path); err != nil {
-			return nil, fmt.Errorf("%s: %w", sc.prefix, err)
+		clientEntries := map[string]*ScanEntry{}
+		if err := sc.scan(clientEntries, path); err != nil {
+			clientScanErrors[name] = fmt.Sprintf("%s: %v", sc.prefix, err)
+			presence[name] = "error"
+			continue
 		}
+		mergeClientScanEntries(entries, clientEntries)
 	}
 
 	manifestNames, err := readManifestNames(opts.ManifestDir)
@@ -828,6 +833,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	out := &ScanResult{
 		At:                   time.Now(),
 		ClientConfigPresence: presence,
+		ClientScanErrors:     clientScanErrors,
 		GUIPort:              opts.GUIPort,
 		ClientCapabilities:   ClientCapabilities(),
 	}
@@ -849,6 +855,25 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		}
 	}
 	return out, nil
+}
+
+func mergeClientScanEntries(dst, src map[string]*ScanEntry) {
+	for name, srcEntry := range src {
+		if srcEntry == nil {
+			continue
+		}
+		dstEntry := dst[name]
+		if dstEntry == nil {
+			dstEntry = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
+			dst[name] = dstEntry
+		}
+		if dstEntry.ClientPresence == nil {
+			dstEntry.ClientPresence = map[string]ClientEntry{}
+		}
+		for client, presence := range srcEntry.ClientPresence {
+			dstEntry.ClientPresence[client] = presence
+		}
+	}
 }
 
 // isOurRelayBinary returns true when the given path points at our CLI
