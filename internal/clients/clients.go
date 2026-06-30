@@ -917,12 +917,39 @@ func AllClients() map[string]Client {
 // for an unknown name, or for a name whose adapter cannot be constructed on
 // the current host (e.g. UserHomeDir failure) — both are non-relay by the
 // same fail-safe rule AllClients() uses to drop unconstructable adapters.
+//
+// Builds the full adapter set via AllClients() on every call. A caller that
+// needs the answer for many names in one pass (e.g. ClientCapabilities
+// iterating every supported client) should build the set once with
+// AllClients() and query each adapter's IsRelayStdio() directly instead of
+// calling this per name — see RelayStdioClientNames for that batch form.
 func IsRelayStdio(name string) bool {
 	c, ok := AllClients()[name]
 	if !ok {
 		return false
 	}
 	return c.IsRelayStdio()
+}
+
+// RelayStdioClientNames returns the set of client ids whose adapter is a
+// relay-stdio adapter (IsRelayStdio() == true), built from exactly one
+// AllClients() pass. This is the batch form of IsRelayStdio for callers
+// that need the answer for every supported client name in one pass (e.g.
+// ClientCapabilities) — calling IsRelayStdio per name would rebuild the
+// full adapter set (including its UserHomeDir factory calls) once per
+// name, which is wasted work for an answer that does not change within a
+// single pass. The returned set still derives from each adapter's own
+// IsRelayStdio() declaration (same single owner as IsRelayStdio), so a
+// future relay adapter needs no edit here.
+func RelayStdioClientNames() map[string]bool {
+	all := AllClients()
+	out := make(map[string]bool, len(all))
+	for name, c := range all {
+		if c.IsRelayStdio() {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 // backupSuffixPrefix is the shared filename fragment that identifies every

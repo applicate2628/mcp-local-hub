@@ -773,6 +773,16 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("manifests: %w", err)
 	}
+	// manifestCache holds each server's parsed manifest at most once for the
+	// lifetime of this ScanFrom call. Without it, manifestDaemonPorts below
+	// (once per entry, twice across the two loops for a server with no
+	// client presence) and patternsForServer under WithProcessCount each
+	// independently re-read + re-parse the same servers/<name>/manifest.yaml
+	// — for a scan with N manifested rows that's up to 3N redundant
+	// load+parse passes of the same N files. The cache is scoped to this
+	// call only (a fresh map per ScanFrom invocation), so it cannot leak
+	// staleness across scans or requests.
+	manifestCache := newScanManifestCache(opts.ManifestDir)
 	for name, e := range entries {
 		e.Name = name
 		e.ManifestExists = manifestNames[name]
@@ -783,7 +793,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		// frontend matrix can mirror the same port-match rule (a stale-port
 		// loopback entry that backend classifies "external" must not render
 		// as a green via-hub cell).
-		e.DaemonPorts = manifestDaemonPorts(opts.ManifestDir, name)
+		e.DaemonPorts = manifestCache.daemonPorts(name)
 		e.Status = classify(e, name, manifestNames, e.DaemonPorts, opts.GUIPort)
 		// Managed is the explicit hub-routed flag — set true iff the
 		// classifier landed on "via-hub". Keeping it derived from Status (one
@@ -809,7 +819,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 			CanMigrate:     !perSessionServers[name],
 			ClientPresence: map[string]ClientEntry{},
 		}
-		e.DaemonPorts = manifestDaemonPorts(opts.ManifestDir, name)
+		e.DaemonPorts = manifestCache.daemonPorts(name)
 		e.Status = classify(e, name, manifestNames, e.DaemonPorts, opts.GUIPort)
 		e.Managed = e.Status == "via-hub" // always false here (empty presence), kept for symmetry with the main loop.
 		entries[name] = e
@@ -847,7 +857,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		// drops the scan to ~1 s.
 		snap := takeProcessSnapshot()
 		for i := range out.Entries {
-			patterns := patternsForServer(out.Entries[i].Name, opts.ManifestDir)
+			patterns := manifestCache.patterns(out.Entries[i].Name)
 			if len(patterns) == 0 {
 				continue
 			}
@@ -907,25 +917,26 @@ var genericInterpreters = map[string]bool{
 // a server's own processes. For non-manifested (unknown/per-session) servers,
 // falls back to the server name — callers treat counts for unknown servers
 // as an upper bound.
+//
+// Kept as a standalone, uncached entry point for callers outside ScanFrom
+// (e.g. cleanup.go, tests). ScanFrom itself goes through scanManifestCache
+// so a server already looked up via manifestDaemonPorts in the same scan
+// is not re-read/re-parsed here.
 func patternsForServer(serverName, manifestDir string) []string {
-	var (
-		data []byte
-		err  error
-	)
-	if manifestDir == "" {
-		// Production path: embed first, disk fallback.
-		data, err = loadManifestYAMLEmbedFirst(serverName)
-	} else {
-		// Test-pathway: explicit dir only.
-		data, err = os.ReadFile(filepath.Join(manifestDir, serverName, "manifest.yaml"))
-	}
-	if err != nil {
+	m, err := loadManifestForServer(manifestDir, serverName)
+	if err != nil || m == nil {
 		return []string{serverName}
 	}
-	m, err := parseManifestForName(serverName, data)
-	if err != nil {
-		return []string{serverName}
-	}
+	return patternsFromManifest(serverName, m)
+}
+
+// patternsFromManifest is the pure transform half of patternsForServer —
+// given an already-loaded manifest, extracts the substring patterns used to
+// identify the server's running processes. Split out so a caller that
+// already holds the parsed manifest (e.g. ScanFrom's per-call manifest
+// cache) can reuse the same filtering logic without re-reading/re-parsing
+// the YAML.
+func patternsFromManifest(serverName string, m *config.ServerManifest) []string {
 	var out []string
 	if m.Command != "" && !genericInterpreters[m.Command] {
 		out = append(out, m.Command)
@@ -1772,6 +1783,69 @@ func readManifestNames(dir string) (map[string]bool, error) {
 	return names, nil
 }
 
+// scanManifestCache memoizes each server's parsed manifest for the lifetime
+// of one ScanFrom call, so manifestDaemonPorts and patternsForServer's
+// underlying load+parse (servers/<name>/manifest.yaml, embed-first or test
+// dir per manifestDir) happens at most once per server name per scan,
+// instead of once per call site per entry. A manifest that fails to
+// load/parse is also cached (as a recorded miss) so a repeated lookup for
+// the same bad/unknown name doesn't re-attempt the load either — matching
+// the existing fail-soft contract of both wrapped functions (nil manifest →
+// nil ports / fallback-to-name patterns).
+//
+// Scoped to a single ScanFrom call (a fresh instance per invocation via
+// newScanManifestCache), so it can never serve a stale manifest across
+// scans or requests — each call re-reads from disk/embed on its first touch
+// of a given name.
+type scanManifestCache struct {
+	dir     string
+	loaded  map[string]*config.ServerManifest // nil value = load/parse failed
+	fetched map[string]bool
+}
+
+func newScanManifestCache(dir string) *scanManifestCache {
+	return &scanManifestCache{
+		dir:     dir,
+		loaded:  map[string]*config.ServerManifest{},
+		fetched: map[string]bool{},
+	}
+}
+
+// get returns the parsed manifest for name, loading + parsing it at most
+// once per cache instance. Returns nil when the manifest could not be
+// loaded or parsed (same fail-soft contract as loadManifestForServer's
+// callers already expect).
+func (c *scanManifestCache) get(name string) *config.ServerManifest {
+	if c.fetched[name] {
+		return c.loaded[name]
+	}
+	c.fetched[name] = true
+	m, err := loadManifestForServer(c.dir, name)
+	if err != nil {
+		m = nil
+	}
+	c.loaded[name] = m
+	return m
+}
+
+// daemonPorts is the cached equivalent of manifestDaemonPorts(c.dir, name).
+func (c *scanManifestCache) daemonPorts(name string) []int {
+	m := c.get(name)
+	if m == nil {
+		return nil
+	}
+	return manifestDaemonPortsFromManifest(m)
+}
+
+// patterns is the cached equivalent of patternsForServer(name, c.dir).
+func (c *scanManifestCache) patterns(name string) []string {
+	m := c.get(name)
+	if m == nil {
+		return []string{name}
+	}
+	return patternsFromManifest(name, m)
+}
+
 // manifestDaemonPorts returns the set of daemon ports declared by the
 // server's manifest. Empty dir → embed-first production path; a non-empty
 // dir reads only that directory (test fixtures). Returns nil on any
@@ -1780,11 +1854,25 @@ func readManifestNames(dir string) (map[string]bool, error) {
 // classifies external, not via-hub. The returned set drives the
 // port-aware via-hub gate in classify() and is surfaced on
 // ScanEntry.DaemonPorts so the frontend matrix mirrors the same rule.
+//
+// Kept as a standalone, uncached entry point for callers outside ScanFrom
+// (e.g. tests, or a future single-row lookup). ScanFrom itself goes through
+// scanManifestCache so repeated lookups for the same server within one scan
+// share a single load+parse.
 func manifestDaemonPorts(dir, name string) []int {
 	m, err := loadManifestForServer(dir, name)
 	if err != nil || m == nil {
 		return nil
 	}
+	return manifestDaemonPortsFromManifest(m)
+}
+
+// manifestDaemonPortsFromManifest is the pure transform half of
+// manifestDaemonPorts — given an already-loaded manifest, extracts the
+// distinct positive daemon ports. Split out so a caller that already holds
+// the parsed manifest (e.g. ScanFrom's per-call manifest cache) can reuse
+// the same de-dup logic without re-reading/re-parsing the YAML.
+func manifestDaemonPortsFromManifest(m *config.ServerManifest) []int {
 	var ports []int
 	seen := map[int]bool{}
 	for _, d := range m.Daemons {

@@ -127,6 +127,17 @@ func startSupervisorLivenessMonitor(
 ) {
 	ticker := time.NewTicker(supervisorLivenessInterval)
 	defer ticker.Stop()
+	// intentCache memoizes the parsed supervisor-intent.json across sweeps,
+	// scoped to this monitor goroutine's lifetime (one instance per
+	// runSupervise call). Every 5s tick previously called
+	// api.ReadSupervisorIntent unconditionally, which hits the full hardened
+	// read pipeline (handle-relative open, DACL/identity checks, JSON parse)
+	// even when the file hasn't changed since the last tick — for a
+	// long-running supervisor that's thousands of redundant reads+parses of
+	// an unchanged file. supervisorIntentMtimeCache stats first (far
+	// cheaper than read+parse) and only re-reads when the mtime actually
+	// moved, so a changed intent is still picked up on the very next sweep.
+	intentCache := newSupervisorIntentMtimeCache()
 	// Immediate first sweep at supervisor start, BEFORE the first ticker
 	// tick. Warm-restart leaves alive-but-port-stale daemons recorded as
 	// running in supervisor-state.json (loadSupervisorCurrentRunning keeps
@@ -137,26 +148,93 @@ func startSupervisorLivenessMonitor(
 	// up front terminates the stale PID immediately, then the ticker drives
 	// the steady-state cadence. Healthy daemons and dead-PID rows are
 	// no-ops here (dead rows were already cleared to CurrentPID=0).
-	sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events)
+	sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent, intentCache), tracker, loop, events)
 	for {
 		select {
 		case <-ctxDone:
 			return
 		case <-ticker.C:
-			sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events)
+			sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent, intentCache), tracker, loop, events)
 		}
 	}
+}
+
+// supervisorIntentMtimeCache memoizes the parsed supervisor-intent.json
+// keyed on the source file's mtime, so livenessSweepIntent only re-reads
+// and re-parses the file when it has actually changed since the last
+// sweep. A plain os.Stat is far cheaper than the hardened read pipeline
+// api.ReadSupervisorIntent goes through (handle-relative open, DACL/
+// identity verification, JSON unmarshal), so gating the heavy path behind
+// a cheap stat is a pure win on the steady-state (no-change) tick, which is
+// the overwhelming majority of ticks in practice.
+type supervisorIntentMtimeCache struct {
+	path    string
+	mtime   time.Time
+	size    int64
+	hasStat bool
+	parsed  *api.SupervisorIntentFile
+}
+
+func newSupervisorIntentMtimeCache() *supervisorIntentMtimeCache {
+	return &supervisorIntentMtimeCache{}
+}
+
+// get returns the freshest parsed intent for path, re-reading only when the
+// file's mtime (or size, as a same-mtime-resolution tiebreaker on
+// filesystems with coarse mtime granularity) differs from the last
+// successfully cached read. Returns (nil, false) when the file cannot be
+// stat'd or, on a forced/first read, cannot be read/parsed — callers fall
+// back to their own prior snapshot on a false result, matching
+// livenessSweepIntent's existing fallback-on-error contract.
+func (c *supervisorIntentMtimeCache) get(path string) (*api.SupervisorIntentFile, bool) {
+	info, statErr := os.Stat(path)
+	if statErr != nil {
+		// Stat failure (e.g. transient deletion/rename window): fall back to
+		// whatever is cached, same as a read failure would. No cached value
+		// yet means a genuine miss.
+		return c.parsed, c.parsed != nil
+	}
+	if c.hasStat && c.path == path && info.ModTime().Equal(c.mtime) && info.Size() == c.size {
+		// Unchanged since last successful read — serve the cached parse,
+		// skip the hardened read pipeline entirely.
+		return c.parsed, c.parsed != nil
+	}
+	refreshed, err := api.ReadSupervisorIntent(path)
+	if err != nil {
+		// Read/parse failed (e.g. mid-write torn read). Do not advance the
+		// cached mtime/size — keep retrying the heavy read on subsequent
+		// ticks until a clean read succeeds, and serve the prior good parse
+		// (if any) in the meantime so a transient write race never regresses
+		// a sweep to "no intent at all".
+		return c.parsed, c.parsed != nil
+	}
+	c.path = path
+	c.mtime = info.ModTime()
+	c.size = info.Size()
+	c.hasStat = true
+	c.parsed = refreshed
+	return c.parsed, true
 }
 
 // livenessSweepIntent returns the freshest supervisor intent for a sweep:
 // the on-disk supervisor-intent.json when stateDir is set (so a mid-run
 // install/migrate that rewrote ports is honored), falling back to the
-// startup snapshot on any read error or when stateDir is empty (tests).
-func livenessSweepIntent(stateDir string, fallback *api.SupervisorIntentFile) *api.SupervisorIntentFile {
+// startup snapshot on any read/stat error or when stateDir is empty
+// (tests). cache memoizes the parsed result keyed on the file's mtime so an
+// unchanged file is not re-read/re-parsed on every call — pass nil to
+// always read uncached (e.g. for the no-cache direct-call test seam).
+func livenessSweepIntent(stateDir string, fallback *api.SupervisorIntentFile, cache *supervisorIntentMtimeCache) *api.SupervisorIntentFile {
 	if stateDir == "" {
 		return fallback
 	}
-	if refreshed, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json")); err == nil {
+	path := filepath.Join(stateDir, "supervisor-intent.json")
+	if cache != nil {
+		if refreshed, ok := cache.get(path); ok {
+			return refreshed
+		}
+		return fallback
+	}
+	if refreshed, err := api.ReadSupervisorIntent(path); err == nil {
 		return refreshed
 	}
 	return fallback

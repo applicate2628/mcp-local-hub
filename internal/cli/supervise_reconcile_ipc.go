@@ -275,6 +275,20 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	drift := make([]api.DriftEntry, 0, len(intent.Daemons)+len(schedTasks))
 	seenIntentTasks := make(map[string]struct{}, len(intent.Daemons))
 	now := time.Now().UTC()
+	// lspRegistry is loaded at most ONCE for this whole reconcile pass
+	// (lazily, on the first LSP workspace-proxy descriptor encountered),
+	// instead of api.LSPRegistryRowBacksDescriptor locking + reading +
+	// parsing workspaces.yaml on every LSP daemon in intent.Daemons below.
+	// lspRegistryLoaded distinguishes "not attempted yet" from "attempted
+	// and failed" so a load failure isn't retried per daemon either; a
+	// failed/absent load keeps lspRegistry nil and the per-descriptor
+	// lookup below fails open via LSPRegistryRowBacksDescriptorIn's own
+	// nil-registry handling, matching the prior per-call fail-open
+	// contract.
+	var (
+		lspRegistry       *api.Registry
+		lspRegistryLoaded bool
+	)
 	for _, d := range intent.Daemons {
 		taskName := canonicalTaskNameForReconcile(d.TaskName)
 		seenIntentTasks[taskName] = struct{}{}
@@ -311,10 +325,17 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		// StRunning) as no_op and leave the unregistered proxy serving until a
 		// supervisor restart. The shared predicate fails open on registry
 		// read/lock failures, preserving the leave-alone posture for uncertain
-		// registry state.
-		if intentDesired == api.ReconcileIntentDesiredRunning &&
-			isLSPWorkspaceProxyDescriptor(d) &&
-			!api.LSPRegistryRowBacksDescriptor(d) {
+		// registry state. lspRegistry is loaded at most once for the whole
+		// pass (see lspRegistryLoaded above) instead of once per LSP daemon.
+		isOrphanedLSP := false
+		if intentDesired == api.ReconcileIntentDesiredRunning && isLSPWorkspaceProxyDescriptor(d) {
+			if !lspRegistryLoaded {
+				lspRegistry, _ = api.OpenLSPRegistryForReconcile()
+				lspRegistryLoaded = true
+			}
+			isOrphanedLSP = !api.LSPRegistryRowBacksDescriptorIn(d, lspRegistry)
+		}
+		if isOrphanedLSP {
 			emitOrphanedLSPDescriptorSkipped(deps.events, d)
 			if smStateIsLiveForOrphanStop(smState) {
 				intentDesired = api.ReconcileIntentDesiredStopped
