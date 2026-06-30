@@ -63,6 +63,7 @@ export function SecretsScreen({ route }: { route?: RouterState }) {
       {state === "ok" && env.secrets.length > 0 && (
         <InitKeyedView env={env} refresh={snap.refresh} prefillKey={prefillKey} />
       )}
+      {state === "access_denied" && <AccessDeniedView env={env} />}
       {(state === "decrypt_failed" || state === "corrupt") && <BrokenView env={env} />}
       <ManifestErrorsBanner env={env} />
     </section>
@@ -450,6 +451,39 @@ function SecretRowComponent(props: {
 
 function formatUsedBy(refs: UsageRef[]): string {
   return refs.map((r) => `${r.server} (env: ${r.env_var})`).join("\n");
+}
+
+// AccessDeniedView (P2.1): the vault files are intact but the fail-closed
+// read-hardening refused them because of a broadened DACL / wrong owner
+// (the corp/sandbox %LOCALAPPDATA% case). This is a remediable PERMISSION
+// problem, so — unlike BrokenView — it must NOT suggest deleting the
+// vault. The remediation matches the runtime daemon-launch path
+// (internal/cli/daemon.go via api.StateFileDACLRunbookPointer): tighten
+// the file DACL to owner-only, or run `mcphub repair-state-dacl`.
+function AccessDeniedView(props: { env: SecretsEnvelope }) {
+  return (
+    <div class="banner banner-error" data-testid="vault-access-denied-banner">
+      <p><strong>Vault access denied</strong> (access_denied). Your vault files are still present — they were NOT deleted or corrupted, so do not re-initialize. mcphub refused to READ them because their file permissions (DACL/owner) are too broad for secret-bearing files (the common corporate / sandbox <code>%LOCALAPPDATA%</code> case).</p>
+      <p><strong>Confidentiality note:</strong> because the vault files (including the <code>.age-key</code> private identity) were reachable by another account, treat any stored credentials as <strong>potentially exposed</strong> — after you tighten permissions, consider rotating them. This is a permission repair, not data loss.</p>
+      <p>Remediate: tighten the vault files (<code>.age-key</code> and <code>secrets.age</code>) to owner-only (your account + SYSTEM + Administrators) — on Windows use <code>icacls</code>, on Linux/macOS use <code>chmod 600 &lt;file&gt;</code>. If your vault is in the default app-data location (<code>%LOCALAPPDATA%\mcp-local-hub</code> / <code>~/.local/share/mcp-local-hub</code>), you can instead run <code>mcphub repair-state-dacl --path &lt;file&gt;</code>; for a vault kept beside the executable or elsewhere, use the <code>icacls</code>/<code>chmod</code> command above. See the <em>"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%"</em> runbook for the exact command.</p>
+      <p>If the refusal names the PARENT DIRECTORY (e.g. <code>%LOCALAPPDATA%\mcp-local-hub</code>) rather than a file, tighten the parent directory's permissions to owner-only too — on Windows use <code>icacls &lt;dir&gt; /inheritance:r /grant:r ...</code>, on Linux/macOS use <code>chmod 700 &lt;dir&gt;</code>. (<code>repair-state-dacl</code> repairs a state file, not a directory.)</p>
+      {props.env.secrets.length > 0 && (
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Used by</th></tr>
+          </thead>
+          <tbody>
+            {props.env.secrets.map((s) => (
+              <tr key={s.name}>
+                <td>{s.name}</td>
+                <td title={formatUsedBy(s.used_by)}>{s.used_by.length}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
 }
 
 function BrokenView(props: { env: SecretsEnvelope }) {

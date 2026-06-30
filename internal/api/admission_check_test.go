@@ -2,12 +2,14 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/secrets"
 )
 
 func TestAdmissionCheckCorpusPreflightReadinessParity(t *testing.T) {
@@ -632,4 +634,116 @@ func admissionFindingByID(findings []AdmissionFinding, id string) (AdmissionFind
 		}
 	}
 	return AdmissionFinding{}, false
+}
+
+// seedAccessDeniedVault makes the canonical vault files exist on disk (so
+// OpenVaultOptional treats the vault as PRESENT-but-unreadable, not absent)
+// and injects a fail-closed DACL-refusal read error — the broadened-DACL /
+// access-denied case (P2.1 finding 2). Returns nothing; cleanup is via
+// t.Cleanup. Requires LOCALAPPDATA/HOME already redirected (caller uses
+// setupAdmissionParityTest).
+func seedAccessDeniedVault(t *testing.T) {
+	t.Helper()
+	keyPath := secrets.DefaultKeyPath()
+	vaultPath := secrets.DefaultVaultPath()
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Files must physically exist: OpenVaultOptional os.Stats the vault path to
+	// distinguish absent (→ optional) from unreadable. SetVaultFileReader only
+	// intercepts the READ, not the stat.
+	if err := os.WriteFile(keyPath, []byte("placeholder-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(vaultPath, []byte("placeholder-vault"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restore := secrets.SetVaultFileReader(func(path string) ([]byte, error) {
+		return nil, fmt.Errorf("file %s not single-user safe: %w",
+			path, &DACLAllowlistViolation{SID: "S-1-5-21-9-9-9", Mask: 0x120089})
+	})
+	t.Cleanup(restore)
+}
+
+// TestReadiness_AccessDeniedVault_BlocksWithPermissionFix (P2.1 finding 2):
+// an access-denied vault still BLOCKS readiness (OK:false — daemon would
+// crash-loop), and the Fix message points at the permission-repair path, not
+// "remove the corrupt vault".
+func TestReadiness_AccessDeniedVault_BlocksWithPermissionFix(t *testing.T) {
+	setupAdmissionParityTest(t)
+	seedAccessDeniedVault(t)
+
+	m := &config.ServerManifest{
+		Name:      "secret-using",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "definitely-absent-launcher-zzzz",
+		Daemons:   []config.DaemonSpec{{Name: "d", Port: 9933}},
+		Env:       map[string]string{"WOLFRAM_APP_ID": "secret:wolfram_app_id"},
+	}
+	rep := CheckServerReadiness(m)
+
+	var vaultReq *ReadinessRequirement
+	for i := range rep.Requirements {
+		if rep.Requirements[i].Name == "secrets vault" {
+			vaultReq = &rep.Requirements[i]
+			break
+		}
+	}
+	if vaultReq == nil {
+		t.Fatalf("no 'secrets vault' requirement emitted; reqs=%#v", rep.Requirements)
+	}
+	// GATE UNCHANGED: access-denied is still blocking.
+	if vaultReq.OK {
+		t.Errorf("access-denied vault must keep OK=false (blocking); got OK=true")
+	}
+	// MESSAGE IMPROVED: points at permission repair, not deletion.
+	if !strings.Contains(vaultReq.Fix, "repair-state-dacl") {
+		t.Errorf("Fix should name the permission repair (canonical vault); got %q", vaultReq.Fix)
+	}
+	if strings.Contains(strings.ToLower(vaultReq.Fix), "remove the corrupt vault") {
+		t.Errorf("Fix must NOT steer toward removing the vault; got %q", vaultReq.Fix)
+	}
+	// bot r4 finding 1: strict mode makes access WORSE, so it must NOT be
+	// suggested as a remediation.
+	if strings.Contains(vaultReq.Fix, "MCPHUB_REQUIRE_SINGLE_USER_HOME") {
+		t.Errorf("Fix must NOT suggest strict mode (it hardens the refusal); got %q", vaultReq.Fix)
+	}
+}
+
+// TestAdmission_AccessDeniedVault_BlocksWithPermissionFix (P2.1 finding 2):
+// same as readiness — admission keeps the finding BLOCKING (Optional=false)
+// but improves the Fix to the permission-repair path.
+func TestAdmission_AccessDeniedVault_BlocksWithPermissionFix(t *testing.T) {
+	setupAdmissionParityTest(t)
+	seedAccessDeniedVault(t)
+
+	m := &config.ServerManifest{
+		Name:      "secret-using",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "definitely-absent-launcher-zzzz",
+		Daemons:   []config.DaemonSpec{{Name: "d", Port: 9933}},
+		Env:       map[string]string{"WOLFRAM_APP_ID": "secret:wolfram_app_id"},
+	}
+	findings := AdmissionCheck(m, AdmissionScope{})
+	f, ok := admissionFindingByID(findings, "secrets-vault-readable")
+	if !ok {
+		t.Fatalf("no 'secrets-vault-readable' finding; findings=%#v", findings)
+	}
+	// GATE UNCHANGED: still blocking.
+	if f.Optional {
+		t.Errorf("access-denied vault finding must stay blocking (Optional=false); got Optional=true")
+	}
+	// MESSAGE IMPROVED.
+	if !strings.Contains(f.Fix, "repair-state-dacl") {
+		t.Errorf("Fix should name the permission repair (canonical vault); got %q", f.Fix)
+	}
+	if strings.Contains(strings.ToLower(f.Fix), "remove the corrupt vault") {
+		t.Errorf("Fix must NOT steer toward removing the vault; got %q", f.Fix)
+	}
+	// bot r4 finding 1: strict mode is not a fix.
+	if strings.Contains(f.Fix, "MCPHUB_REQUIRE_SINGLE_USER_HOME") {
+		t.Errorf("Fix must NOT suggest strict mode; got %q", f.Fix)
+	}
 }

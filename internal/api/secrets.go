@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -245,11 +246,10 @@ func (a *API) SecretsSet(name, value string) error {
 		return &SecretsOpError{Code: "SECRETS_EMPTY_VALUE", Msg: "value must not be empty"}
 	}
 	vaultMutex.Lock()
-	defer vaultMutex.Unlock()
 	// Flock the OpenVault → Get → Set(save) RMW so a concurrent CLI/other-
 	// process vault write cannot lose this update (vaultMutex is in-process
 	// only). Tight critical section — no interactive work inside.
-	return secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
+	err := secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
 		v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 		if err != nil {
 			return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
@@ -262,6 +262,25 @@ func (a *API) SecretsSet(name, value string) error {
 		}
 		return nil
 	})
+	// bot r7 finding 3: release the in-process vaultMutex BEFORE the audit emit.
+	// The vault write is already committed; the emit needs only the key name,
+	// not the mutex. LogHubMcpEvent takes a BLOCKING flock on hub-mcp.log.lock,
+	// so emitting while vaultMutex is held would couple the two locks
+	// (contention/deadlock risk). Explicit Unlock (not defer) so the emit runs
+	// strictly after the critical section.
+	vaultMutex.Unlock()
+	// P2.4 audit trail (finding 1): the GUI Add-Secret path (POST /api/secrets)
+	// previously committed credential material with NO audit record. Emit ONLY
+	// after the committed write (err == nil) — a rejected create
+	// (SECRETS_KEY_EXISTS, vault-not-initialized, set-failed) returns non-nil
+	// and leaves no misleading record. Reuses the SHARED secret-rotated event
+	// (the one credential-set event name across API + CLI); `created:true`
+	// records that this was a fresh create, not an overwrite. `value` is never
+	// passed in.
+	if err == nil {
+		emitSecretAuditEvent("secret-rotated", []string{name}, map[string]any{"source": "api", "created": true})
+	}
+	return err
 }
 
 // SecretsOpError is the typed error returned by every coded Secrets API
@@ -299,8 +318,9 @@ func (a *API) SecretsListWithUsage() (SecretsEnvelope, error) {
 	}, nil
 }
 
-// classifyVault maps OpenVault outcomes to the four-state vault model
-// (memo §5.2). Returns (state, keys); keys is non-nil only when state == "ok".
+// classifyVault maps OpenVault outcomes to the five-state vault model
+// (memo §5.2 + access_denied, P2.1). Returns (state, keys); keys is
+// non-nil only when state == "ok".
 //
 // Codex plan-R1 P3: capture the first OpenVault error and re-use it
 // instead of calling OpenVault twice (the second call is redundant).
@@ -314,21 +334,108 @@ func classifyVault(keyPath, vaultPath string) (string, []string) {
 	if !keyExists || !vaultExists {
 		return "missing", nil
 	}
-	// Files exist but OpenVault failed: distinguish corrupt (key parse
-	// error or post-decrypt JSON garbage) from decrypt_failed (key fine,
-	// age decrypt rejected the cipher) by inspecting the captured error
-	// string. Brittle but acceptable for the GET path.
+	return classifyVaultOpenError(err), nil
+}
+
+// classifyVaultOpenError maps a non-nil OpenVault error (with the vault +
+// key files both present) to a vault state. Split out from classifyVault
+// so the discriminator is unit-testable without constructing a broadened
+// DACL on disk (which is platform-specific and awkward in a test).
+//
+// P2.1: a broadened DACL on .age-key / secrets.age that the fail-closed
+// read-hardening refuses produces "file <path> not single-user safe: ..."
+// wrapping the typed *DACLAllowlistViolation / ErrDaclOutsideAllowlist
+// (internal/api/hub_mcp_state_read_inode_windows.go). That is a remediable
+// permission refusal (one-command icacls / chmod fix — see the CLAUDE.md
+// "secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%" runbook),
+// NOT vault corruption. It MUST classify as "access_denied" so the GUI
+// steers the operator to the DACL fix instead of destroying the vault.
+// This branch is checked FIRST because the read-hardening sits in front of
+// the parse/decrypt stages, so a DACL refusal never reaches them.
+func classifyVaultOpenError(err error) string {
+	if isVaultAccessDenied(err) {
+		return "access_denied"
+	}
+	// Files exist + readable but OpenVault still failed: distinguish
+	// corrupt (key parse error or post-decrypt JSON garbage) from
+	// decrypt_failed (key fine, age decrypt rejected the cipher) by
+	// inspecting the captured error string. Brittle but acceptable for
+	// the GET path.
 	msg := err.Error()
 	switch {
-	case containsAny(msg, "parse identity", "no identity", "not X25519"):
-		return "corrupt", nil
-	case containsAny(msg, "unmarshal vault"):
-		return "corrupt", nil
 	case containsAny(msg, "age decrypt"):
-		return "decrypt_failed", nil
+		return "decrypt_failed"
+	case containsAny(msg, "parse identity", "no identity", "not X25519"):
+		return "corrupt"
+	case containsAny(msg, "unmarshal vault"):
+		return "corrupt"
 	default:
-		return "corrupt", nil
+		return "corrupt"
 	}
+}
+
+// isVaultAccessDenied reports whether err is the fail-closed read-hardening
+// access refusal (a remediable permission/ownership problem) rather than vault
+// corruption. The TYPED error chain is primary (the canonical discriminator
+// the daemon-launch path uses at internal/cli/daemon.go): DACL-broadening
+// (*DACLAllowlistViolation / ErrDaclOutsideAllowlist), wrong owner
+// (ErrWrongOwner), or too-loose POSIX mode (ErrTooLoose).
+//
+// The substring fallback covers ONLY the relax-lane branches that re-wrap a
+// NON-typed cause (e.g. the WRITE/DAC verifier error at
+// hub_mcp_state_read_inode_windows.go:198) but still carry the exact
+// fail-closed sentinel phrase "not single-user safe". bot r7 finding 1: the
+// fallback matches ONLY that precise phrase — NOT the bare token "DACL", which
+// can legitimately appear inside a file PATH (e.g. a profile or CWD named
+// "DACL-test") and would otherwise misclassify a CORRUPT-identity error as
+// access_denied. The sentinel phrase "not single-user safe" is the read
+// hardening's own constructed wording and never appears in a path.
+func isVaultAccessDenied(err error) bool {
+	var daclViolation *DACLAllowlistViolation
+	if errors.As(err, &daclViolation) ||
+		errors.Is(err, ErrDaclOutsideAllowlist) ||
+		errors.Is(err, ErrWrongOwner) ||
+		errors.Is(err, ErrTooLoose) {
+		return true
+	}
+	return strings.Contains(err.Error(), "not single-user safe")
+}
+
+// vaultAccessDeniedFix is the SINGLE OWNER of the access-denied remediation
+// wording shared by readiness + admission. It steers the operator to a
+// permission/ownership repair (never deletion) and branches on the SPECIFIC
+// fail-closed condition in err:
+//
+//   - wrong OWNER (ErrWrongOwner): a swap-attack / wrong-profile-root signal —
+//     the file's OWNER SID/uid is not the current user. The fix is to RESTORE
+//     correct ownership (or move the vault back under the right profile), NOT
+//     to tighten DACL breadth (which would not change the owner). bot r7
+//     finding 2: do not give DACL-breadth/repair-state-dacl guidance here.
+//   - DACL-broadening / too-loose mode (default): permissions are too broad —
+//     tighten files (chmod 600) AND the parent directory (chmod 700) to
+//     owner-only. repair-state-dacl is FILE-only, so it is never offered as a
+//     substitute for the directory step, and ONLY when the active vault is at
+//     the canonical app-data location (for a legacy beside-the-executable / CWD
+//     vault repair-state-dacl may be ineffective — bot r4 finding 3).
+//
+// Strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME) is deliberately NOT mentioned:
+// it makes a broadened read a HARDER refusal, so it is the opposite of a fix
+// (bot r4 finding 1).
+func vaultAccessDeniedFix(err error) string {
+	const runbook = " See the \"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%\" runbook."
+	if errors.Is(err, ErrWrongOwner) {
+		// Wrong-owner is an ownership problem, not a permission-breadth one.
+		return "The vault file's OWNER is not your account (a wrong-profile-root or swap signal), so mcphub refused to read it. Restore correct ownership — Windows: icacls <file> /setowner <you> (or take ownership via takeown /F <file>); Linux/macOS: chown <you> <file> — or move the vault back under your own profile. This is NOT a permission-breadth issue; do not delete the vault." + runbook
+	}
+	// DACL-broadening / too-loose: tighten files (600) AND the parent dir (700)
+	// to owner-only. repair-state-dacl is FILE-only.
+	const base = "Tighten the vault files .age-key + secrets.age to owner-only (Windows: icacls; Linux/macOS: chmod 600) and their parent directory too (Windows: icacls <dir> /inheritance:r /grant:r ...; Linux/macOS: chmod 700 <dir>)."
+	if secrets.VaultAtCanonicalLocation() {
+		// Canonical vault: repair-state-dacl can repair the FILE (not the dir).
+		return base + " To repair just the vault FILE permissions you may also run `mcphub repair-state-dacl --path <file>` (it repairs a state file, not a directory)." + runbook
+	}
+	// Legacy non-canonical vault location: omit repair-state-dacl entirely.
+	return base + runbook
 }
 
 func containsAny(haystack string, needles ...string) bool {
@@ -424,6 +531,18 @@ func (a *API) SecretsRotate(name, value string, restart bool) (SecretsRotateResu
 	// Vault is committed. Restart phase is external orchestration that
 	// does not touch the vault, so neither lock is held here.
 
+	// P2.1/P2.4 audit trail: a credential rotation is the most
+	// security-sensitive operator action in the system, so record it in
+	// the hub-mcp event log (the same owner used for other security-
+	// relevant mutating actions, e.g. client-write-unhardened-fallback).
+	// This emit is reached ONLY after the vault write committed above, so a
+	// failed/aborted rotate (early return at the writeErr branch) never
+	// emits a misleading "rotated" record. Body carries the key NAME, the
+	// actor, and whether a restart was requested — NEVER the secret value
+	// (`value` is not referenced here, and LogHubMcpEvent additionally runs
+	// RedactToken over the rendered line as defense-in-depth).
+	emitSecretAuditEvent("secret-rotated", []string{name}, map[string]any{"restart_requested": restart})
+
 	res := SecretsRotateResult{VaultUpdated: true, RestartResults: []RestartResult{}}
 	if !restart {
 		return res, nil
@@ -431,6 +550,66 @@ func (a *API) SecretsRotate(name, value string, restart bool) (SecretsRotateResu
 	results, err := a.restartServersForKey(name)
 	res.RestartResults = results
 	return res, err
+}
+
+// auditEmitProbeFn is a test-only hook fired at the START of every audit emit.
+// Production leaves it nil. Tests install it (via setAuditEmitProbeForTest) to
+// assert the lock posture at emit time — e.g. that vaultMutex is NOT held when
+// the API paths emit (bot r7 finding 3). nil in production = zero overhead.
+var auditEmitProbeFn func(event string)
+
+func setAuditEmitProbeForTest(fn func(event string)) func() {
+	orig := auditEmitProbeFn
+	auditEmitProbeFn = fn
+	return func() { auditEmitProbeFn = orig }
+}
+
+// emitSecretAuditEvent records a successful credential-material mutation to
+// the hub-mcp event log. It logs only key NAMES, the OS actor, and a count
+// — never the secret value or any decrypted material. Best-effort: a log
+// failure must not fail the (already-committed) vault operation.
+//
+// bot r7 finding 3 contract: callers MUST NOT hold vaultMutex (or a
+// WithVaultLock flock) when invoking this — LogHubMcpEvent takes a BLOCKING
+// flock on hub-mcp.log.lock, and coupling that with the vault lock is a
+// contention/deadlock hazard.
+func emitSecretAuditEvent(event string, keys []string, extra map[string]any) {
+	if auditEmitProbeFn != nil {
+		auditEmitProbeFn(event)
+	}
+	fields := map[string]any{
+		"keys":       keys,
+		"key_count":  len(keys),
+		"actor_user": currentOSUser(),
+	}
+	for k, v := range extra {
+		fields[k] = v
+	}
+	// severity warn: a credential mutation is an operator-significant
+	// security event, matching the warn level the client-write-hardening
+	// and supervisor-state-relax security events use.
+	_ = LogHubMcpEvent("warn", event, fields)
+}
+
+// EmitSecretRotatedAudit / EmitSecretDeletedAudit are the SHARED audit-owner
+// entry points for credential-material mutations performed OUTSIDE the API
+// layer (the CLI `mcphub secrets set` / `secrets delete` commands write the
+// vault directly via secrets.WithVaultLock, bypassing SecretsRotate /
+// SecretsDelete). They delegate to the same unexported emitSecretAuditEvent,
+// so the event name ("secret-rotated" / "secret-deleted") and the value-free
+// body shape (key NAME + actor + count, NEVER the secret value) stay
+// single-owned here and cannot drift between API and CLI. Call ONLY after a
+// committed vault write. Note `secrets set` (create OR overwrite) maps to
+// "secret-rotated" to match the API: SecretsRotate is the only credential-set
+// path that audits today, and a CLI `set` is operationally a rotation of the
+// stored material for that key — using one event keeps the audit stream
+// consistent across both surfaces.
+func EmitSecretRotatedAudit(key string, extra map[string]any) {
+	emitSecretAuditEvent("secret-rotated", []string{key}, extra)
+}
+
+func EmitSecretDeletedAudit(key string, extra map[string]any) {
+	emitSecretAuditEvent("secret-deleted", []string{key}, extra)
 }
 
 // SecretsRestart runs the restart phase only — used by POST /api/secrets/:key/restart.
@@ -527,13 +706,12 @@ func (a *API) restartServersForKey(key string) ([]RestartResult, error) {
 // guards.
 func (a *API) SecretsDelete(name string, confirm bool) error {
 	vaultMutex.Lock()
-	defer vaultMutex.Unlock()
 	// Flock the OpenVault → Get → [scan] → Delete(save) RMW so a concurrent
 	// CLI/other-process vault write cannot lose this delete. The manifest
 	// scan in the no-confirm branch is bounded filesystem I/O (not vault
 	// I/O) and non-interactive, so holding the flock across it matches the
 	// pre-existing vaultMutex critical section.
-	return secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
+	err := secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
 		v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 		if err != nil {
 			return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
@@ -570,4 +748,19 @@ func (a *API) SecretsDelete(name string, confirm bool) error {
 		}
 		return nil
 	})
+	// bot r7 finding 3: release vaultMutex BEFORE the audit emit. The delete is
+	// committed; the emit (which takes a BLOCKING flock on hub-mcp.log.lock)
+	// needs only the key name, not the mutex — so do not hold both locks at
+	// once. Explicit Unlock (not defer) so the emit runs after the critical
+	// section.
+	vaultMutex.Unlock()
+	// P2.4 audit trail: emit ONLY when the delete actually committed
+	// (err == nil). A refused delete (key-not-found, has-refs,
+	// scan-incomplete, vault-not-initialized) returns non-nil and leaves
+	// no misleading "deleted" record. Logs only the key NAME + actor,
+	// never any secret value.
+	if err == nil {
+		emitSecretAuditEvent("secret-deleted", []string{name}, map[string]any{"confirm": confirm})
+	}
+	return err
 }

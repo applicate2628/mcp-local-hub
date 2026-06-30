@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/secrets"
 
@@ -148,6 +149,12 @@ environment after argument parsing.`,
 			}); err != nil {
 				return err
 			}
+			// P2.4 audit trail: emit ONLY after the committed write above (a
+			// failed/aborted set returned in the err branch and never reaches
+			// here). Routes through the SHARED api audit owner so this CLI path
+			// records the exact same value-free secret-rotated event the GUI
+			// SecretsRotate path does — `value` is never passed in.
+			api.EmitSecretRotatedAudit(key, map[string]any{"source": "cli"})
 			cmd.Printf("✓ Stored %s\n", key)
 			return nil
 		},
@@ -225,6 +232,12 @@ func newSecretsDeleteCmd() *cobra.Command {
 			}); err != nil {
 				return err
 			}
+			// P2.4 audit trail: emit ONLY after the committed delete above (a
+			// failed delete returned in the err branch and never reaches here).
+			// Routes through the SHARED api audit owner so this CLI path records
+			// the same value-free secret-deleted event the GUI SecretsDelete
+			// path does.
+			api.EmitSecretDeletedAudit(args[0], map[string]any{"source": "cli"})
 			cmd.Printf("✓ Deleted %s\n", args[0])
 			return nil
 		},
@@ -310,14 +323,39 @@ func newSecretsEditCmd() *cobra.Command {
 			// Flock ONLY the ImportYAML write — NOT the interactive editor
 			// run above — so a concurrent vault write does not block for the
 			// whole edit session. ImportYAML is a wholesale replace from the
-			// editor's output, so re-reading under lock is not needed (the
-			// operator's edit is authoritative). The api layer holds the same
-			// flock via secrets.WithVaultLock.
+			// editor's output (the operator's edit is authoritative). The api
+			// layer holds the same flock via secrets.WithVaultLock.
+			//
+			// P2.4 audit-baseline correctness (bot r4 finding 2): the
+			// BEFORE/AFTER diff that drives the per-key audit events MUST be
+			// computed atomically with the import. Re-open the vault INSIDE the
+			// lock to read the CURRENT on-disk baseline (not the stale snapshot
+			// from before the editor session, which a concurrent rotate/delete
+			// could have invalidated — that would make a concurrently-rotated
+			// key look unchanged or a concurrent add look like ours), then
+			// ImportYAML, then capture the after-state. All three steps happen
+			// under one held lock. The captured maps' VALUES are used only to
+			// detect change in memory — never logged.
+			var beforeKV, afterKV map[string]string
 			if err := secrets.WithVaultLock(defaultVaultPath(), func() error {
-				return v.ImportYAML(updated)
+				locked, oerr := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
+				if oerr != nil {
+					return oerr
+				}
+				beforeKV = snapshotVaultKV(locked)
+				if ierr := locked.ImportYAML(updated); ierr != nil {
+					return ierr
+				}
+				afterKV = snapshotVaultKV(locked)
+				return nil
 			}); err != nil {
 				return err
 			}
+			// Emit OUTSIDE the lock (best-effort observability; keeps the log
+			// write off the critical section). The diff is over the locked
+			// baseline captured above: added/changed → secret-rotated; removed
+			// → secret-deleted. Only key NAMES reach the emit.
+			emitBulkEditAuditEvents(beforeKV, afterKV)
 			cmd.Println("✓ Re-encrypted secrets.age")
 			return nil
 		},
@@ -343,10 +381,14 @@ func newSecretsMigrateCmd() *cobra.Command {
 				cmd.Println("No candidates found.")
 				return nil
 			}
-			v, err := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
-			if err != nil {
-				return err
-			}
+			// bot r7 finding 4: do NOT open the vault once before the loop and
+			// reuse that stale in-memory snapshot across many locked Set writes —
+			// a concurrent vault write between the open and each Set would be
+			// silently clobbered (last-writer-wins on the stale base), the same
+			// TOCTOU class as the round-4 edit-baseline fix. Instead, RE-OPEN the
+			// vault INSIDE each WithVaultLock so every Set is applied to the
+			// CURRENT on-disk state. The audited cand.Key is then the key
+			// actually committed under that same lock.
 			in := bufio.NewReader(os.Stdin)
 			imported := 0
 			for _, cand := range candidates {
@@ -357,13 +399,22 @@ func newSecretsMigrateCmd() *cobra.Command {
 				if line == "y" || line == "yes" {
 					// Flock each individual Set write (NOT the interactive
 					// y/N loop) so a concurrent vault write is not blocked
-					// across the prompts. The api layer holds the same flock
-					// via secrets.WithVaultLock.
+					// across the prompts. Open+Set under one lock so the write
+					// is on the current on-disk state, not a pre-loop snapshot.
 					if err := secrets.WithVaultLock(defaultVaultPath(), func() error {
+						v, oerr := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
+						if oerr != nil {
+							return oerr
+						}
 						return v.Set(cand.Key, cand.Value)
 					}); err != nil {
 						return err
 					}
+					// Audit the committed credential import (key name only, never
+					// the value) — same trail as `secrets set`/`delete`, so the
+					// migrate surface isn't an audit blind spot. Emitted AFTER the
+					// committed write, OUTSIDE the lock.
+					api.EmitSecretRotatedAudit(cand.Key, map[string]any{"source": "cli-migrate"})
 					imported++
 				}
 			}
@@ -374,6 +425,44 @@ func newSecretsMigrateCmd() *cobra.Command {
 	c.Flags().StringVar(&fromClient, "from-client", "", "client name: claude-code | codex-cli | cursor | vscode | gemini-cli | qwen-cli | antigravity")
 	_ = c.MarkFlagRequired("from-client")
 	return c
+}
+
+// snapshotVaultKV reads the current key→value map from an open vault using
+// only the exported Get/List surface. Used in-memory by the `secrets edit`
+// bulk-diff (P2.4 finding 3); the values it captures are compared to detect
+// changed secrets but are NEVER logged.
+func snapshotVaultKV(v *secrets.Vault) map[string]string {
+	out := map[string]string{}
+	for _, k := range v.List() {
+		if val, err := v.Get(k); err == nil {
+			out[k] = val
+		}
+	}
+	return out
+}
+
+// emitBulkEditAuditEvents diffs the before/after vault key→value maps from a
+// `secrets edit` bulk import and emits accurate per-key audit events through
+// the SHARED api owner: a key that is new OR whose value changed → a
+// secret-rotated event; a key removed by the edit → a secret-deleted event.
+// An unchanged key emits nothing. Only key NAMES are passed to the emit —
+// the value comparison happens here in memory and never reaches the log.
+func emitBulkEditAuditEvents(before, after map[string]string) {
+	for k, newVal := range after {
+		oldVal, existed := before[k]
+		if !existed || oldVal != newVal {
+			extra := map[string]any{"source": "cli-edit"}
+			if !existed {
+				extra["created"] = true
+			}
+			api.EmitSecretRotatedAudit(k, extra)
+		}
+	}
+	for k := range before {
+		if _, stillPresent := after[k]; !stillPresent {
+			api.EmitSecretDeletedAudit(k, map[string]any{"source": "cli-edit"})
+		}
+	}
 }
 
 func clientConfigPath(name string) (string, error) {

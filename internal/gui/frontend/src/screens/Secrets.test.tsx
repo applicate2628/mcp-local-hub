@@ -121,6 +121,45 @@ describe("SecretsScreen — `mcphub secrets edit` instructional CTA", () => {
   });
 });
 
+describe("SecretsScreen — access_denied vault state", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders owner-only DACL remediation and does not suggest deleting vault files", async () => {
+    const accessDeniedVault: SecretsEnvelope = {
+      vault_state: "access_denied",
+      secrets: [{ name: "WOLFRAM_APP_ID", state: "referenced_unverified", used_by: [{ server: "wolfram", env_var: "WOLFRAM_APP_ID" }] }],
+      manifest_errors: [],
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/secrets": () => jsonResponse(200, accessDeniedVault),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<SecretsScreen />);
+    const banner = await screen.findByTestId("vault-access-denied-banner");
+    const text = banner.textContent ?? "";
+    expect(text).toContain("Vault access denied");
+    expect(text).toContain("owner-only");
+    expect(text).toContain("icacls");
+    expect(text).toContain("chmod 600");
+    expect(text).toContain("mcphub repair-state-dacl --path");
+    expect(text.toLowerCase()).not.toContain("remove the vault files");
+    expect(text.toLowerCase()).not.toContain("destroys all stored secrets");
+    // Confidentiality hedge (security-reviewer #468): the banner must NOT claim
+    // unconditional "secrets are intact" — a co-resident with read on .age-key
+    // could have decrypted the vault — so it must tell the operator to rotate.
+    expect(text.toLowerCase()).toContain("rotat");
+    expect(text.toLowerCase()).not.toContain("decrypt fine");
+  });
+});
+
 // ── SEAM-D: Catalog "Open Secrets" deep-link (#/secrets?key=<key>) ──────────
 // The Catalog readiness gate links each unset optional secret to
 // #/secrets?key=<key>. SecretsScreen reads route.query and auto-opens the
