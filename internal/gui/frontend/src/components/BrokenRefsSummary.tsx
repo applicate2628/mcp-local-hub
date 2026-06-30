@@ -22,7 +22,7 @@ export function BrokenRefsSummary(props: BrokenRefsSummaryProps) {
     } else if (vaultState === "access_denied") {
       // P2.1: permission refusal, not corruption — point at the DACL fix,
       // never at deletion/recovery.
-      message = "Vault access denied (file permissions too broad). Secrets are intact. Fix vault permissions on Secrets screen.";
+      message = "Vault access denied (file permissions too broad). Files are present (not lost) — fix vault permissions on Secrets screen, and rotate stored secrets if other accounts had access.";
     } else {
       message = "Vault file corrupted. Open Secrets screen to recover.";
     }

@@ -152,6 +152,11 @@ describe("SecretsScreen — access_denied vault state", () => {
     expect(text).toContain("mcphub repair-state-dacl --path");
     expect(text.toLowerCase()).not.toContain("remove the vault files");
     expect(text.toLowerCase()).not.toContain("destroys all stored secrets");
+    // Confidentiality hedge (security-reviewer #468): the banner must NOT claim
+    // unconditional "secrets are intact" — a co-resident with read on .age-key
+    // could have decrypted the vault — so it must tell the operator to rotate.
+    expect(text.toLowerCase()).toContain("rotat");
+    expect(text.toLowerCase()).not.toContain("decrypt fine");
   });
 });
 
