@@ -167,5 +167,14 @@ func dialSupervisorIPCRespawnFromStateDir(ctx context.Context, stateDir, taskNam
 	if !resp.OK {
 		return RespawnResult{}, fmt.Errorf("supervisor IPC respawn: non-OK response without error")
 	}
-	return RespawnResult{Success: true, Code: "OK"}, nil
+	// Code is "" on success, matching the documented contract above
+	// ("" (Success=true) → 200) and the RestartResult{..., Code: ""}
+	// "plain success" invariant restartSupervisorOwnedDaemons (line 190)
+	// and DeferredToIntentWatcherCode's doc comment both rely on (deep-
+	// review P4 fix: this previously returned Code: "OK", a latent
+	// mismatch with the documented contract — restartSupervisorOwnedDaemons
+	// copies result.Code verbatim into the persisted RestartResult.Code on
+	// the success path, so the stray "OK" leaked into a field whose
+	// documented invariant is "empty Code on a plain synchronous success").
+	return RespawnResult{Success: true, Code: ""}, nil
 }
