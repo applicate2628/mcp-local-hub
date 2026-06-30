@@ -75,3 +75,7 @@ no data loss, no crash.
 
 Either is a separate, reviewed change; this entry records the gap so it is
 not silently lost.
+
+## Closure (2026-06-30 bug-triage workflow)
+
+Verified STALE-FIXED against HEAD by the open-bug-triage workflow (file:line evidence in the triage result): the code shows this is resolved; the doc was never closed. No code change owed.

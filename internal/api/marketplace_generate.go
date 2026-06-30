@@ -243,6 +243,15 @@ func generateCommandDraft(e *MarketplaceEntry, opts GenerateOpts, manifestTransp
 	for _, raw := range collectTraversalCandidates(e.Args, e.Env) {
 		if traversalSuffixContainsParentRef(raw) {
 			warnings = append(warnings, fmt.Sprintf("catalog string %q uses ${workspaceFolder} followed by a parent-directory reference (..); the expanded path escapes the workspace — review before saving", raw))
+		} else {
+			// kind:global freeze-to-CWD footgun: the generated draft is always
+			// kind:global (no per-workspace context), but ${workspaceFolder} in a
+			// global daemon is frozen to the operator's current directory at
+			// generate time — it is NOT resolved per-workspace at spawn time the
+			// way a workspace-scoped row's ${workspace.path} is. Warn so the
+			// operator doesn't ship a daemon silently pinned to wherever they ran
+			// generate from. (The escaping `..` case is warned above.)
+			warnings = append(warnings, fmt.Sprintf("catalog string %q uses ${workspaceFolder} in a kind:global draft; a global daemon has no per-workspace context, so this token freezes to your current directory at generate time (not per-workspace at spawn) — use an absolute path or a workspace-scoped registration before saving", raw))
 		}
 	}
 	if err := rejectUnsafeMarketplaceWarnings(warnings); err != nil {

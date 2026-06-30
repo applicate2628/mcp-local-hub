@@ -48,3 +48,7 @@ the design rested on repo names/abstracts rather than a confirmed-entrypoint tre
 (no `pyproject.toml`/console-script/`FastMCP`/`stdio_server` check). Recommendation: promote
 the D-4 "confirm the entrypoint" step to a mandatory pre-design gate for every future catalog
 row, so the architect ships shapes, not name-based guesses.
+
+## Closure (2026-06-30 bug-triage workflow)
+
+Verified STALE-FIXED against HEAD by the open-bug-triage workflow (file:line evidence in the triage result): the code shows this is resolved; the doc was never closed. No code change owed.

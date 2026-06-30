@@ -41,3 +41,7 @@ a new validator-warning rule is a separate behavioral change to a shared validat
 (its own scope, its own tests, its own reviewer pass) and is out of the approved
 change surface. Filed per the adjacent-findings protocol for the orchestrator to
 prioritize.
+
+## Closure (2026-06-30)
+
+Fixed in fix/open-bug-batch: GenerateDraftManifest now warns when a kind:global draft's args/env carry ${workspaceFolder} (freeze-to-CWD footgun). build/vet/tests green.

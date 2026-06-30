@@ -143,3 +143,7 @@ no-managed-shadow branch, referencing this entry.
    managed re-resolve predicate without solving the pre-check/B4 single-owner
    problem (e.g. by having BOTH the pre-check and B4 delegate to one
    merge-aware owner, not by re-splitting the verdict across two readers).
+
+## Closure (2026-06-30 bug-triage workflow)
+
+Verified STALE-FIXED against HEAD by the open-bug-triage workflow (file:line evidence in the triage result): the code shows this is resolved; the doc was never closed. No code change owed.

@@ -1602,6 +1602,13 @@ func TestSupervisorController_CleanExitDuringRestart_OwnDaemon_CompletesRespawn(
 	//    EvManualRestart -> StExiting (issue terminate, queued=respawn).
 	loop.Post(api.LoopEvent{Kind: api.EvManualRestart, TaskName: descriptor.TaskName})
 	waitForSMStateHelper(t, ctrl, descriptor.TaskName, api.StExiting)
+	// terminate() runs as a side-effect on the FIFO loop goroutine; its atomic
+	// increment can lag the SM-state transition the helper waits on, so poll for
+	// the count (race-assertion discipline) rather than checking it bare.
+	terminateDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(terminateDeadline) && terminateCalls.Load() != 1 {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if terminateCalls.Load() != 1 {
 		t.Fatalf("manual restart fired %d terminates; want 1", terminateCalls.Load())
 	}

@@ -65,3 +65,7 @@ Authenticated-Users on the namespace.
 
 On CI (windows-latest, default temp under the runner profile) these tests
 pass — this only bites a dev whose `%TEMP%` is a broadened-DACL volume.
+
+## Closure (2026-06-30 bug-triage workflow)
+
+Verified STALE-FIXED against HEAD by the open-bug-triage workflow (file:line evidence in the triage result): the code shows this is resolved; the doc was never closed. Fixed by merged PR #459 (apitest.HardenedTempDir + hardened e2e temp-home fixtures).

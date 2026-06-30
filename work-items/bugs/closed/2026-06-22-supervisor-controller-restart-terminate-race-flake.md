@@ -77,3 +77,7 @@ with a bounded `Eventually`/poll instead of the bare check at line 1605.
   Scan/Extract/Backup/Rollback/Layer/LanguageServer suites all pass with the
   PR #420 change applied. Live supervisor-intent.json / workspaces.yaml were
   byte-identical before/after (state-path-env isolation held).
+
+## Closure (2026-06-30)
+
+Fixed in fix/open-bug-batch: polled terminateCalls instead of a bare assert after the SM-state wait (race-assertion discipline). build/vet/tests green.
