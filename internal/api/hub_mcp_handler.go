@@ -34,7 +34,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -1044,18 +1043,6 @@ func writeJSONRPCResult(w http.ResponseWriter, reqID json.RawMessage, result any
 //   - any other value           : real request, response required
 func isJSONRPCNotificationID(reqID json.RawMessage) bool {
 	return len(reqID) == 0
-}
-
-// isJSONRPCNullID returns true when the request id is the literal
-// JSON `null` token. MCP §1.5 requires id to be a non-null
-// String/Number; the handler rejects such envelopes with -32600
-// before reaching method dispatch. Helper extracted so the rule is
-// auditable alongside isJSONRPCNotificationID.
-func isJSONRPCNullID(reqID json.RawMessage) bool {
-	if len(reqID) == 0 {
-		return false
-	}
-	return string(bytes.TrimSpace(reqID)) == "null"
 }
 
 // writeJSONRPCErrorStatus emits a JSON-RPC error envelope with an

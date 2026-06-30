@@ -407,17 +407,6 @@ func liveEntryMatchesManifestBinding(live *clients.MCPEntry, server string, bind
 	return false, ""
 }
 
-// managedEntriesPath returns the absolute path to the marker file
-// (used by tests and `mcphub status`). Returns "" if the state-dir
-// resolver fails (extremely rare; surface as missing-marker).
-func managedEntriesPath() string {
-	dir, err := DaemonStateDir()
-	if err != nil {
-		return ""
-	}
-	return joinStateFilePath(dir, managedEntriesFileLeaf)
-}
-
 // joinStateFilePath wraps filepath.Join. Kept as a thin helper so
 // tests can stub the path without importing filepath.
 func joinStateFilePath(dir, name string) string {
