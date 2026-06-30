@@ -467,6 +467,18 @@ func (a *API) SecretsRotate(name, value string, restart bool) (SecretsRotateResu
 	// Vault is committed. Restart phase is external orchestration that
 	// does not touch the vault, so neither lock is held here.
 
+	// P2.1/P2.4 audit trail: a credential rotation is the most
+	// security-sensitive operator action in the system, so record it in
+	// the hub-mcp event log (the same owner used for other security-
+	// relevant mutating actions, e.g. client-write-unhardened-fallback).
+	// This emit is reached ONLY after the vault write committed above, so a
+	// failed/aborted rotate (early return at the writeErr branch) never
+	// emits a misleading "rotated" record. Body carries the key NAME, the
+	// actor, and whether a restart was requested — NEVER the secret value
+	// (`value` is not referenced here, and LogHubMcpEvent additionally runs
+	// RedactToken over the rendered line as defense-in-depth).
+	emitSecretAuditEvent("secret-rotated", []string{name}, map[string]any{"restart_requested": restart})
+
 	res := SecretsRotateResult{VaultUpdated: true, RestartResults: []RestartResult{}}
 	if !restart {
 		return res, nil
@@ -474,6 +486,25 @@ func (a *API) SecretsRotate(name, value string, restart bool) (SecretsRotateResu
 	results, err := a.restartServersForKey(name)
 	res.RestartResults = results
 	return res, err
+}
+
+// emitSecretAuditEvent records a successful credential-material mutation to
+// the hub-mcp event log. It logs only key NAMES, the OS actor, and a count
+// — never the secret value or any decrypted material. Best-effort: a log
+// failure must not fail the (already-committed) vault operation.
+func emitSecretAuditEvent(event string, keys []string, extra map[string]any) {
+	fields := map[string]any{
+		"keys":       keys,
+		"key_count":  len(keys),
+		"actor_user": currentOSUser(),
+	}
+	for k, v := range extra {
+		fields[k] = v
+	}
+	// severity warn: a credential mutation is an operator-significant
+	// security event, matching the warn level the client-write-hardening
+	// and supervisor-state-relax security events use.
+	_ = LogHubMcpEvent("warn", event, fields)
 }
 
 // SecretsRestart runs the restart phase only — used by POST /api/secrets/:key/restart.
@@ -576,7 +607,7 @@ func (a *API) SecretsDelete(name string, confirm bool) error {
 	// scan in the no-confirm branch is bounded filesystem I/O (not vault
 	// I/O) and non-interactive, so holding the flock across it matches the
 	// pre-existing vaultMutex critical section.
-	return secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
+	err := secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
 		v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 		if err != nil {
 			return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
@@ -613,4 +644,13 @@ func (a *API) SecretsDelete(name string, confirm bool) error {
 		}
 		return nil
 	})
+	// P2.4 audit trail: emit ONLY when the delete actually committed
+	// (err == nil). A refused delete (key-not-found, has-refs,
+	// scan-incomplete, vault-not-initialized) returns non-nil and leaves
+	// no misleading "deleted" record. Logs only the key NAME + actor,
+	// never any secret value.
+	if err == nil {
+		emitSecretAuditEvent("secret-deleted", []string{name}, map[string]any{"confirm": confirm})
+	}
+	return err
 }

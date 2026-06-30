@@ -459,6 +459,140 @@ func TestSecretsRotate_OverwritesExisting(t *testing.T) {
 	}
 }
 
+// secretsAuditTestEnv composes secretsTestEnv (vault paths) with a
+// co-located hub-mcp event log so a test can both mutate the vault AND
+// read back the emitted audit line. It points daemonStateRootOverride at
+// the vault's own state dir so LogHubMcpEvent writes
+// <vaultDir>/hub-mcp.log next to the vault, never the operator's real log.
+func secretsAuditTestEnv(t *testing.T) (keyPath, vaultPath, logPath string) {
+	t.Helper()
+	keyPath, vaultPath = secretsTestEnv(t)
+	statePathsHelper(t) // saves+restores daemonStateRootOverride
+	stateDir := filepath.Dir(vaultPath)
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	daemonStateRootOverride = stateDir
+	return keyPath, vaultPath, filepath.Join(stateDir, "hub-mcp.log")
+}
+
+// TestSecretsRotate_EmitsAuditEventWithoutValue (P2.4): a successful rotate
+// must record a secret-rotated audit event carrying the key NAME + actor
+// but NEVER the secret value (old or new).
+func TestSecretsRotate_EmitsAuditEventWithoutValue(t *testing.T) {
+	_, _, logPath := secretsAuditTestEnv(t)
+	a := NewAPI()
+	if _, err := a.SecretsInit(); err != nil {
+		t.Fatal(err)
+	}
+	const oldVal = "old-super-secret-value-OLD"
+	const newVal = "new-super-secret-value-NEW"
+	if err := a.SecretsSet("WOLFRAM_APP_ID", oldVal); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SecretsRotate("WOLFRAM_APP_ID", newVal, false); err != nil {
+		t.Fatalf("SecretsRotate: %v", err)
+	}
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read hub-mcp.log: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, `"event":"secret-rotated"`) {
+		t.Errorf("secret-rotated event missing from log:\n%s", body)
+	}
+	if !strings.Contains(body, "WOLFRAM_APP_ID") {
+		t.Errorf("rotated key name missing from audit log:\n%s", body)
+	}
+	if !strings.Contains(body, `"actor_user"`) {
+		t.Errorf("actor_user missing from audit log:\n%s", body)
+	}
+	// The load-bearing no-value guarantee: neither the old nor the new
+	// secret value may ever appear in the audit log.
+	if strings.Contains(body, oldVal) {
+		t.Errorf("LEAK: old secret value present in audit log:\n%s", body)
+	}
+	if strings.Contains(body, newVal) {
+		t.Errorf("LEAK: new secret value present in audit log:\n%s", body)
+	}
+}
+
+// TestSecretsRotate_FailedWriteEmitsNoAuditEvent (P2.4): a rotate that
+// never commits the vault (key-not-found) must NOT emit a misleading
+// secret-rotated record.
+func TestSecretsRotate_FailedWriteEmitsNoAuditEvent(t *testing.T) {
+	_, _, logPath := secretsAuditTestEnv(t)
+	a := NewAPI()
+	if _, err := a.SecretsInit(); err != nil {
+		t.Fatal(err)
+	}
+	// Rotate a key that does not exist → SECRETS_KEY_NOT_FOUND, no commit.
+	_, err := a.SecretsRotate("NEVER_SET_KEY", "irrelevant", false)
+	if err == nil {
+		t.Fatal("SecretsRotate on missing key: want error, got nil")
+	}
+	if raw, rerr := os.ReadFile(logPath); rerr == nil {
+		if strings.Contains(string(raw), "secret-rotated") {
+			t.Errorf("secret-rotated emitted despite failed (uncommitted) rotate:\n%s", raw)
+		}
+	}
+	// (a missing log file is also acceptable: nothing was emitted.)
+}
+
+// TestSecretsDelete_EmitsAuditEventWithoutValue (P2.4): a successful
+// (confirmed) delete must record a secret-deleted audit event carrying the
+// key NAME + actor but never the secret value.
+func TestSecretsDelete_EmitsAuditEventWithoutValue(t *testing.T) {
+	_, _, logPath := secretsAuditTestEnv(t)
+	a := NewAPI()
+	if _, err := a.SecretsInit(); err != nil {
+		t.Fatal(err)
+	}
+	const val = "delete-me-secret-value-XYZ"
+	if err := a.SecretsSet("UNPAYWALL_EMAIL", val); err != nil {
+		t.Fatal(err)
+	}
+	// confirm=true bypasses the ref/scan guards and commits the delete.
+	if err := a.SecretsDelete("UNPAYWALL_EMAIL", true); err != nil {
+		t.Fatalf("SecretsDelete: %v", err)
+	}
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read hub-mcp.log: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, `"event":"secret-deleted"`) {
+		t.Errorf("secret-deleted event missing from log:\n%s", body)
+	}
+	if !strings.Contains(body, "UNPAYWALL_EMAIL") {
+		t.Errorf("deleted key name missing from audit log:\n%s", body)
+	}
+	if strings.Contains(body, val) {
+		t.Errorf("LEAK: secret value present in audit log:\n%s", body)
+	}
+}
+
+// TestSecretsDelete_RefusedEmitsNoAuditEvent (P2.4): a delete refused by the
+// D5 guard (key-not-found, no commit) must NOT emit secret-deleted.
+func TestSecretsDelete_RefusedEmitsNoAuditEvent(t *testing.T) {
+	_, _, logPath := secretsAuditTestEnv(t)
+	a := NewAPI()
+	if _, err := a.SecretsInit(); err != nil {
+		t.Fatal(err)
+	}
+	err := a.SecretsDelete("NEVER_SET_KEY", true)
+	if err == nil {
+		t.Fatal("SecretsDelete on missing key: want error, got nil")
+	}
+	if raw, rerr := os.ReadFile(logPath); rerr == nil {
+		if strings.Contains(string(raw), "secret-deleted") {
+			t.Errorf("secret-deleted emitted despite refused (uncommitted) delete:\n%s", raw)
+		}
+	}
+}
+
 func TestVaultFlockHelperProcess(t *testing.T) {
 	if os.Getenv("MCPHUB_TEST_HOLD_VAULT_LOCK") != "1" {
 		return
