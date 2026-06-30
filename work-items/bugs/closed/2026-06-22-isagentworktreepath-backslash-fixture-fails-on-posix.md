@@ -8,7 +8,7 @@ affected-surface: >
   {"windows-backslash agent worktree", `d:\dev\x\.claude\worktrees\agent-abc\sub`, true})
   vs internal/api/workspace_prune.go:66-71 (IsAgentWorktreePath → filepath.ToSlash)
 context: adjacent-finding
-status: open
+status: closed
 ---
 
 ## Symptom
@@ -55,3 +55,7 @@ Gate the `windows-backslash` fixture on `runtime.GOOS == "windows"` (the
 same GOOS-gating pattern already used in
 `TestParseGitWorktreePointer_ForeignGitdir`), since a backslash-delimited
 agent-worktree path is only a realistic canonical form on Windows.
+
+## Closure (2026-06-30)
+
+Fixed in fix/open-bug-batch: GOOS-gated the backslash fixture (filepath.ToSlash no-ops on POSIX). build/vet/tests green.

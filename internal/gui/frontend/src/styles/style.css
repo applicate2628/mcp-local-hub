@@ -813,6 +813,22 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
 .catalog-marketplace-status-warn button { margin-left: 0.25rem; }
 .catalog-marketplace-direct-failed { margin: var(--gap-xs) 0 0; padding-left: 1.2rem; color: var(--danger); }
 .catalog-marketplace-direct-failed li { margin: 2px 0; }
+/* Post-install operator notices (success-with-caveats). Non-error: the install
+   succeeded, so this uses the warning idiom (left border + warning bg), never
+   the danger color reserved for failures. */
+.catalog-marketplace-install-warning {
+  margin: var(--gap-sm) 0 0;
+  padding: var(--gap-sm) var(--gap-md);
+  border-left: 4px solid var(--warning, #bf8700);
+  background: var(--warning-bg, #fff8e6);
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.catalog-marketplace-install-warning-title { margin: 0 0 var(--gap-xs); font-weight: 600; }
+.catalog-marketplace-install-warning ul { margin: 0; padding-left: 1.2rem; }
+.catalog-marketplace-install-warning li { margin: 2px 0; }
 
 /* --- Logs screen --- */
 #logs-controls { display: flex; gap: var(--gap-sm); align-items: center; margin-bottom: var(--gap-md); flex-wrap: wrap; }

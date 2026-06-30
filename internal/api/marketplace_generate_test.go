@@ -24,8 +24,12 @@ func TestGenerateDraftManifest_StdioEntryMapsToStdioBridge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateDraftManifest: %v", err)
 	}
-	if len(warns) != 0 {
-		t.Errorf("unexpected warnings: %v", warns)
+	// The generated draft is always kind:global, and ${workspaceFolder} in a
+	// global daemon freezes to the operator's CWD at generate time — so the
+	// generator emits exactly the kind:global freeze-to-CWD footgun warning
+	// for the ${workspaceFolder} arg (see 2026-06-24-workspacefolder-global-daemon-footgun).
+	if len(warns) != 1 || !strings.Contains(warns[0], "freezes to your current directory") {
+		t.Errorf("want exactly the kind:global freeze-to-CWD warning for ${workspaceFolder}; got %v", warns)
 	}
 	// codex deep-sec PR #163 lane 2 P3 closure: use config constants
 	// for transport names instead of string literals. A future rename
@@ -430,8 +434,17 @@ func TestGenerateDraftManifest_WorkspaceTraversalSurfacesWarning(t *testing.T) {
 	if !strings.Contains(joined, "../../etc/passwd") {
 		t.Errorf("warnings missing traversal alert for the bad arg; warnings=%v", warns)
 	}
-	if strings.Contains(joined, "db.sqlite") {
-		t.Errorf("warnings should NOT flag legitimate ${workspaceFolder}/db.sqlite; warnings=%v", warns)
+	// db.sqlite must NOT be flagged as a traversal ESCAPE (it stays inside the
+	// workspace)...
+	for _, w := range warns {
+		if strings.Contains(w, "db.sqlite") && strings.Contains(w, "escapes the workspace") {
+			t.Errorf("db.sqlite wrongly flagged as a traversal escape: %q", w)
+		}
+	}
+	// ...but it DOES get the kind:global freeze-to-CWD footgun warning (the draft
+	// is always kind:global, so any ${workspaceFolder} freezes to CWD).
+	if !strings.Contains(joined, "db.sqlite") || !strings.Contains(joined, "freezes to your current directory") {
+		t.Errorf("db.sqlite should get the kind:global freeze-to-CWD warning; warnings=%v", warns)
 	}
 }
 

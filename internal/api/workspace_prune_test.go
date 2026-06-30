@@ -26,6 +26,12 @@ func TestIsAgentWorktreePath(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			// Backslash paths are Windows-only semantics: IsAgentWorktreePath
+			// normalizes via filepath.ToSlash, a no-op for backslashes on POSIX
+			// (legal filename bytes there), so the match would fail on Linux/WSL.
+			if strings.Contains(c.path, `\`) && runtime.GOOS != "windows" {
+				t.Skip("backslash path is Windows-only (filepath.ToSlash no-ops on POSIX)")
+			}
 			if got := IsAgentWorktreePath(c.path); got != c.want {
 				t.Fatalf("IsAgentWorktreePath(%q) = %v, want %v", c.path, got, c.want)
 			}

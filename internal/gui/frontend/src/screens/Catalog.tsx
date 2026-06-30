@@ -767,7 +767,7 @@ function CatalogInstallGate({
 type MarketplaceInstallState =
   | { phase: "idle" }
   | { phase: "installing" }
-  | { phase: "installed"; name: string; port: number }
+  | { phase: "installed"; name: string; port: number; warnings: string[] }
   | { phase: "name-conflict"; suggestedName: string }
   | { phase: "probe-pending"; reason: string }
   | { phase: "required-secret-missing"; reason: string }
@@ -905,7 +905,12 @@ function MarketplaceSection({
       });
       if (!mountedRef.current) return;
       if (result.kind === "hub-installed") {
-        setState(id, { phase: "installed", name: result.name, port: result.port });
+        setState(id, {
+          phase: "installed",
+          name: result.name,
+          port: result.port,
+          warnings: result.warnings,
+        });
       } else if (result.kind === "name-conflict") {
         setState(id, { phase: "name-conflict", suggestedName: result.suggestedName });
       } else if (result.kind === "probe-pending") {
@@ -1102,14 +1107,30 @@ function MarketplaceCard({
           installed
         </span>
       ) : state.phase === "installed" ? (
-        <p
-          class="catalog-marketplace-status catalog-marketplace-status-ok"
-          role="status"
-          data-testid={`catalog-marketplace-installed-${entry.id}`}
-        >
-          Added to hub as <strong>{state.name}</strong>
-          {state.port > 0 ? ` on port ${state.port}.` : "."}
-        </p>
+        <div role="status" data-testid={`catalog-marketplace-installed-${entry.id}`}>
+          <p class="catalog-marketplace-status catalog-marketplace-status-ok">
+            Added to hub as <strong>{state.name}</strong>
+            {state.port > 0 ? ` on port ${state.port}.` : "."}
+          </p>
+          {/* Operator-facing install notices from GenerateDraftManifest (e.g. the
+              kind:global ${workspaceFolder} freeze-to-CWD footgun). A non-error
+              NOTICE — the install SUCCEEDED, these are caveats the one-click
+              operator must still read, so it uses the warning idiom (left border +
+              warning bg), never the scary danger styling. */}
+          {state.warnings.length > 0 && (
+            <div
+              class="catalog-marketplace-install-warning"
+              data-testid={`catalog-marketplace-install-warnings-${entry.id}`}
+            >
+              <p class="catalog-marketplace-install-warning-title">Heads up:</p>
+              <ul>
+                {state.warnings.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
       ) : showProbeBadge ? (
         /* D-3 (Tier-0): inert-blocked watch / disabled-until-probe row — the host
            app is provably not detected yet (a bare binary absent from PATH, or a

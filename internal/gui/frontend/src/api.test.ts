@@ -285,9 +285,35 @@ describe("installMarketplaceEntry", () => {
       } as unknown as Response;
     });
     const out = await installMarketplaceEntry({ id: "git", mode: "hub" });
-    expect(out).toEqual({ kind: "hub-installed", name: "git", port: 9201 });
+    // No `warnings` in the 201 body → the absent field defaults to [].
+    expect(out).toEqual({ kind: "hub-installed", name: "git", port: 9201, warnings: [] });
     expect(seen.url).toBe("/api/marketplace/install");
     expect(JSON.parse(seen.body!)).toMatchObject({ id: "git", mode: "hub" });
+  });
+
+  it("parses the 201 body's warnings into the hub-installed result", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      statusText: "Created",
+      json: async () => ({
+        name: "filesystem",
+        port: 9301,
+        mode: "hub",
+        warnings: [
+          "kind:global server: ${workspaceFolder} was frozen to the current working directory",
+        ],
+      }),
+    }) as unknown as Response);
+    const out = await installMarketplaceEntry({ id: "filesystem", mode: "hub" });
+    expect(out).toEqual({
+      kind: "hub-installed",
+      name: "filesystem",
+      port: 9301,
+      warnings: [
+        "kind:global server: ${workspaceFolder} was frozen to the current working directory",
+      ],
+    });
   });
 
   it("maps a 409 NAME_CONFLICT to kind:'name-conflict' (not a throw)", async () => {
@@ -360,7 +386,7 @@ describe("installMarketplaceEntry", () => {
       } as unknown as Response;
     });
     const out = await installMarketplaceEntry({ id: "git", mode: "hub", name: "git-2" });
-    expect(out).toEqual({ kind: "hub-installed", name: "git-2", port: 9202 });
+    expect(out).toEqual({ kind: "hub-installed", name: "git-2", port: 9202, warnings: [] });
     expect(JSON.parse(seen.body!)).toMatchObject({ id: "git", mode: "hub", name: "git-2" });
   });
 

@@ -7,7 +7,7 @@ affected-surface: >
   internal/clients/mimocode.go readMergedLayersExcluding (write-target
   match via mimoCodePathsSamePhysical → os.SameFile, inode identity)
 context: adjacent-finding
-status: open
+status: closed
 ---
 
 ## Summary
@@ -115,3 +115,7 @@ A `KNOWN LIMITATION` comment block is recorded inline at the
    "not removable" side).
 2. Leave as documented residual — the realistic blast radius does not
    justify added complexity in the hot re-resolve path.
+
+## Closure (2026-06-30 bug-triage workflow)
+
+Verified STALE-FIXED against HEAD by the open-bug-triage workflow (file:line evidence in the triage result): the code shows this is resolved; the doc was never closed. No code change owed.

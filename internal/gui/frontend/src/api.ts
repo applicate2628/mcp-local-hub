@@ -1073,7 +1073,7 @@ export interface MarketplaceInstallRequest {
 //   "direct"         → 200/207: per-client updated / failed split. `partial`
 //                      is true on 207 (some client writes failed).
 export type MarketplaceInstallResult =
-  | { kind: "hub-installed"; name: string; port: number }
+  | { kind: "hub-installed"; name: string; port: number; warnings: string[] }
   | { kind: "name-conflict"; suggestedName: string }
   | { kind: "probe-pending"; reason: string }
   | { kind: "required-secret-missing"; reason: string }
@@ -1166,12 +1166,20 @@ export async function installMarketplaceEntry(
   }
 
   if (req.mode === "hub") {
-    // 201 hub success: { name, port, mode }.
-    const body = (await resp.json()) as { name?: string; port?: number };
+    // 201 hub success: { name, port, mode, warnings }. `warnings` carries
+    // operator-facing notices from GenerateDraftManifest (notably the
+    // kind:global ${workspaceFolder} freeze-to-CWD footgun) that the one-click
+    // install operator must still see.
+    const body = (await resp.json()) as {
+      name?: string;
+      port?: number;
+      warnings?: string[];
+    };
     return {
       kind: "hub-installed",
       name: body.name ?? req.name ?? req.id,
       port: typeof body.port === "number" ? body.port : 0,
+      warnings: Array.isArray(body.warnings) ? body.warnings : [],
     };
   }
 
