@@ -19,7 +19,9 @@ import (
 // — including this one — propagates as the function's error return. The
 // GUI handler must map that error path to HTTP 503 (the supervisor is
 // unreachable right now, a retryable condition), not 500.
-func TestDialSupervisorIPCRespawn_HandshakeMismatchReturnsTransportError(t *testing.T) {
+// Short name on purpose: HardenedTempDir folds the test name into the POSIX
+// socket path, and a long name overruns the sun_path limit (~104/108 bytes).
+func TestRespawnDialHelloMismatch(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	withDaemonStateRootOverride(t, stateDir)
 	owner := SupervisorLockOwner{PID: 4242, StartedAt: "2026-05-18T10:00:00Z"}
