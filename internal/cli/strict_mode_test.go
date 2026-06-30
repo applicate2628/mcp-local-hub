@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/autostart"
@@ -168,17 +170,17 @@ func (f *strictModeFixture) MakeShimWriteFail() {
 // with a non-dir guarantees the temp create fails.
 //
 // Test seam implementation: the production code calls
-// api.WriteSupervisorIntent through the deps.WriteIntentFn function
-// pointer; revertFail flips that pointer to a stub that returns an
-// error specifically on the revert call. We use a counter to
-// distinguish step-1 write (succeeds) from revert write (fails).
+// api.MutateSupervisorIntentIfChanged through the deps.MutateIntentFn
+// function pointer; revertFail flips that pointer to a stub that returns an
+// error specifically on the revert call. We use a counter to distinguish
+// step-1 write (succeeds) from revert write (fails).
 func (f *strictModeFixture) MakeRevertWriteFail() {
 	f.revertFail = true
 }
 
 // Deps assembles the StrictModeDeps the unit-under-test consumes. The
-// WriteIntentFn override is the canonical seam — production deps leave
-// it nil so RunStrictMode falls back to api.WriteSupervisorIntent.
+// MutateIntentFn override is the canonical seam — production deps leave
+// it nil so RunStrictMode falls back to api.MutateSupervisorIntentIfChanged.
 func (f *strictModeFixture) Deps() StrictModeDeps {
 	d := StrictModeDeps{
 		StateDir:         f.stateDir,
@@ -189,14 +191,20 @@ func (f *strictModeFixture) Deps() StrictModeDeps {
 	}
 	if f.revertFail {
 		writes := 0
-		d.WriteIntentFn = func(path string, intent *api.SupervisorIntentFile) error {
-			writes++
-			if writes == 1 {
-				// First write (step 1) succeeds.
-				return api.WriteSupervisorIntent(path, intent)
-			}
-			// Subsequent writes (the revert) fail.
-			return errors.New("simulated revert write failure")
+		d.MutateIntentFn = func(path string, mutate func(*api.SupervisorIntentFile) (bool, error)) error {
+			return api.MutateSupervisorIntentIfChanged(path, func(file *api.SupervisorIntentFile) (bool, error) {
+				changed, err := mutate(file)
+				if err != nil || !changed {
+					return changed, err
+				}
+				writes++
+				if writes == 1 {
+					// First write (step 1) succeeds.
+					return true, nil
+				}
+				// Subsequent writes (the revert) fail without publishing.
+				return false, errors.New("simulated revert write failure")
+			})
 		}
 	}
 	return d
@@ -810,7 +818,7 @@ func TestStrictModeEnable_TornShimPerPlatformSignatures(t *testing.T) {
 func TestStrictModeEnable_InProgressBreadcrumbDeletedAfterStep1Failure(t *testing.T) {
 	tmp := setupSupervisorFixture(t)
 	deps := tmp.Deps()
-	deps.WriteIntentFn = func(_ string, _ *api.SupervisorIntentFile) error {
+	deps.MutateIntentFn = func(_ string, _ func(*api.SupervisorIntentFile) (bool, error)) error {
 		return errors.New("simulated initial intent write failure")
 	}
 
@@ -851,8 +859,8 @@ func TestStrictModeEnable_InProgressBreadcrumbDeletedAfterStep1Failure(t *testin
 func TestStrictModeEnable_InProgressBreadcrumbKeptAfterLateStep1Error(t *testing.T) {
 	tmp := setupSupervisorFixture(t)
 	deps := tmp.Deps()
-	deps.WriteIntentFn = func(path string, intent *api.SupervisorIntentFile) error {
-		if err := api.WriteSupervisorIntent(path, intent); err != nil {
+	deps.MutateIntentFn = func(path string, mutate func(*api.SupervisorIntentFile) (bool, error)) error {
+		if err := api.MutateSupervisorIntentIfChanged(path, mutate); err != nil {
 			return err
 		}
 		return errors.New("simulated late post-rename verification failure")
@@ -879,7 +887,7 @@ func TestStrictModeEnable_InProgressBreadcrumbKeptAfterLateStep1Error(t *testing
 		t.Fatalf("in-progress breadcrumb missing after ambiguous late step 1 error: %v", statErr)
 	}
 
-	deps.WriteIntentFn = nil
+	deps.MutateIntentFn = nil
 	deps.PromptOperator = func() (string, error) { return "B", nil }
 	if recoverErr := RunStrictModeRecover(deps); recoverErr != nil {
 		t.Fatalf("recover after late step 1 error: %v", recoverErr)
@@ -1145,6 +1153,68 @@ func TestStrictModeDisable_PreservesNonStrictIntentFields(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Stops, original.Stops) {
 		t.Fatalf("stops changed: got %+v want %+v", got.Stops, original.Stops)
+	}
+}
+
+func TestStrictModeEnablePreservesConcurrentIntentWriter(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	path := tmp.IntentPath()
+
+	lock := flock.New(path + ".lock")
+	if err := lock.Lock(); err != nil {
+		t.Fatalf("lock supervisor intent: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- RunStrictMode([]string{"enable"}, tmp.Deps())
+	}()
+
+	select {
+	case err := <-done:
+		_ = lock.Unlock()
+		t.Fatalf("RunStrictMode returned before the flock holder published the concurrent descriptor; err=%v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	concurrent := &api.SupervisorIntentFile{
+		Version:    1,
+		UpdatedAt:  "2026-06-30T00:00:00Z",
+		StrictMode: false,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: `\mcp-local-hub-serena-concurrent`,
+			Server:   "serena",
+			Daemon:   "default",
+			Command:  "mcphub",
+			Args:     []string{"daemon", "serena-proxy"},
+			Port:     9123,
+		}},
+	}
+	raw, err := json.MarshalIndent(concurrent, "", "  ")
+	if err != nil {
+		_ = lock.Unlock()
+		t.Fatalf("marshal concurrent intent: %v", err)
+	}
+	if err := api.WriteStateFileBytesLockHeld(path, raw); err != nil {
+		_ = lock.Unlock()
+		t.Fatalf("publish concurrent intent under held flock: %v", err)
+	}
+	if err := lock.Unlock(); err != nil {
+		t.Fatalf("unlock supervisor intent: %v", err)
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("RunStrictMode after flock release: %v", err)
+	}
+	got, err := api.ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("read supervisor intent: %v", err)
+	}
+	if !got.StrictMode {
+		t.Fatal("strict_mode = false, want true from strict-mode enable")
+	}
+	if len(got.Daemons) != 1 || got.Daemons[0].TaskName != `\mcp-local-hub-serena-concurrent` {
+		t.Fatalf("concurrent daemon row was not preserved: %+v", got.Daemons)
 	}
 }
 

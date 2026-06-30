@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/gofrs/flock"
 )
 
 func TestSupervisorState_RoundTrip(t *testing.T) {
@@ -44,6 +47,60 @@ func TestSupervisorState_RoundTrip(t *testing.T) {
 	}
 	if len(got.TransientPIDs) != 1 {
 		t.Fatalf("transient_pids lost")
+	}
+}
+
+func TestMutateSupervisorStateReadsUnderStateFileFlock(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-state.json")
+	if err := os.WriteFile(path, []byte(`{"version":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	lock := flock.New(path + ".lock")
+	if err := lock.Lock(); err != nil {
+		t.Fatalf("lock supervisor state file: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- MutateSupervisorState(path, func(file *SupervisorStateFile) error {
+			if file.MaintenanceFiredAt == nil {
+				file.MaintenanceFiredAt = map[string]string{}
+			}
+			file.MaintenanceFiredAt["workspace-weekly-refresh"] = "2026-06-30T00:00:00Z"
+			return nil
+		})
+	}()
+
+	select {
+	case err := <-done:
+		_ = lock.Unlock()
+		t.Fatalf("MutateSupervisorState returned before the flock holder published a valid file; err=%v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	valid := []byte(`{"version":1,"daemons":{"task-a":{"state":"running","current_pid":42,"pid_generation":2}}}`)
+	if err := WriteStateFileBytesLockHeld(path, valid); err != nil {
+		_ = lock.Unlock()
+		t.Fatalf("publish valid supervisor state under held flock: %v", err)
+	}
+	if err := lock.Unlock(); err != nil {
+		t.Fatalf("unlock supervisor state file: %v", err)
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("MutateSupervisorState after flock release: %v", err)
+	}
+	got, err := ReadSupervisorState(path)
+	if err != nil {
+		t.Fatalf("read supervisor state: %v", err)
+	}
+	if got.Daemons["task-a"].CurrentPID != 42 {
+		t.Fatalf("daemon state lost after mutation: %+v", got.Daemons)
+	}
+	if got.MaintenanceFiredAt["workspace-weekly-refresh"] != "2026-06-30T00:00:00Z" {
+		t.Fatalf("maintenance fired-at mutation missing: %+v", got.MaintenanceFiredAt)
 	}
 }
 

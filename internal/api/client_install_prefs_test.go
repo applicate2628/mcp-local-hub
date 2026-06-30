@@ -4,6 +4,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/clients"
 )
@@ -82,6 +85,53 @@ func TestSetDefaultInstallClientNames_PreservesOtherKeys(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, []string{"cursor"}) {
 		t.Fatalf("override = %v, want [cursor]", got)
+	}
+}
+
+func TestSetDefaultInstallClientNamesReadsUnderStateFileFlock(t *testing.T) {
+	a := NewAPI()
+	path := tempPrefsPath(t)
+	if err := a.SettingsSetIn(path, "appearance.theme", "dark"); err != nil {
+		t.Fatalf("seed setting: %v", err)
+	}
+
+	lock := flock.New(path + ".lock")
+	if err := lock.Lock(); err != nil {
+		t.Fatalf("lock settings state file: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.SetDefaultInstallClientNamesIn(path, []string{"vscode"})
+	}()
+
+	select {
+	case err := <-done:
+		_ = lock.Unlock()
+		t.Fatalf("SetDefaultInstallClientNamesIn returned before the flock holder published the concurrent setting; err=%v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := WriteStateFileBytesLockHeld(path, []byte("appearance.theme: light\n")); err != nil {
+		_ = lock.Unlock()
+		t.Fatalf("publish concurrent setting under held flock: %v", err)
+	}
+	if err := lock.Unlock(); err != nil {
+		t.Fatalf("unlock settings state file: %v", err)
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("SetDefaultInstallClientNamesIn after flock release: %v", err)
+	}
+	raw, err := readRawSettingsMap(path)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if raw["appearance.theme"] != "light" {
+		t.Fatalf("appearance.theme = %q, want light from concurrent writer", raw["appearance.theme"])
+	}
+	if raw[defaultInstallClientsKey] != "vscode" {
+		t.Fatalf("%s = %q, want vscode", defaultInstallClientsKey, raw[defaultInstallClientsKey])
 	}
 }
 

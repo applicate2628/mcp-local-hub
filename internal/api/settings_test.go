@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 func tmpSettings(t *testing.T) string {
@@ -64,6 +66,53 @@ func TestSettings_SetAndGet(t *testing.T) {
 	}
 	if got != "dark" {
 		t.Errorf("expected 'dark', got %q", got)
+	}
+}
+
+func TestSettingsSetInReadsUnderStateFileFlock(t *testing.T) {
+	a := &API{}
+	path := tmpSettings(t)
+	if err := WriteStateFileBytesAtomic(path, []byte("appearance.theme: [")); err != nil {
+		t.Fatal(err)
+	}
+
+	lock := flock.New(path + ".lock")
+	if err := lock.Lock(); err != nil {
+		t.Fatalf("lock settings state file: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.SettingsSetIn(path, "appearance.density", "compact")
+	}()
+
+	select {
+	case err := <-done:
+		_ = lock.Unlock()
+		t.Fatalf("SettingsSetIn returned before the flock holder published a valid file; err=%v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := WriteStateFileBytesLockHeld(path, []byte("appearance.theme: light\n")); err != nil {
+		_ = lock.Unlock()
+		t.Fatalf("publish valid settings under held flock: %v", err)
+	}
+	if err := lock.Unlock(); err != nil {
+		t.Fatalf("unlock settings state file: %v", err)
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("SettingsSetIn after flock release: %v", err)
+	}
+	raw, err := readRawSettingsMap(path)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if raw["appearance.theme"] != "light" {
+		t.Fatalf("appearance.theme = %q, want light", raw["appearance.theme"])
+	}
+	if raw["appearance.density"] != "compact" {
+		t.Fatalf("appearance.density = %q, want compact", raw["appearance.density"])
 	}
 }
 

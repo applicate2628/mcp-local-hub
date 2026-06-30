@@ -1,9 +1,16 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/gofrs/flock"
 )
 
 // SupervisorStateFile is the on-disk schema for <state-dir>/supervisor-state.json.
@@ -121,4 +128,113 @@ func ReadSupervisorState(path string) (*SupervisorStateFile, error) {
 // WriteSupervisorState goes through WriteStateFileAtomic (Task 1.1).
 func WriteSupervisorState(path string, f *SupervisorStateFile) error {
 	return WriteStateFileAtomic(path, f)
+}
+
+// MutateSupervisorState serializes a supervisor-state.json read/modify/write
+// under the same sibling flock used by WriteSupervisorState's final write.
+func MutateSupervisorState(path string, mutate func(*SupervisorStateFile) error) error {
+	return MutateSupervisorStateIfChanged(path, func(file *SupervisorStateFile) (bool, error) {
+		if mutate == nil {
+			return true, nil
+		}
+		if err := mutate(file); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+}
+
+// MutateSupervisorStateIfChanged is MutateSupervisorState with an explicit
+// changed flag so callers can keep read-only/no-op cases from rewriting the
+// state file. The caller's mutate function runs while path+".lock" is held.
+func MutateSupervisorStateIfChanged(path string, mutate func(*SupervisorStateFile) (bool, error)) error {
+	return MutateSupervisorStateIfChangedContext(context.Background(), path, mutate)
+}
+
+// MutateSupervisorStateIfChangedContext is MutateSupervisorStateIfChanged with
+// a context-aware flock acquire. The caller's mutate function runs while
+// path+".lock" is held.
+func MutateSupervisorStateIfChangedContext(ctx context.Context, path string, mutate func(*SupervisorStateFile) (bool, error)) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("empty supervisor state path")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("mkdir supervisor state dir: %w", err)
+	}
+
+	lockPath := path + ".lock"
+	lk := flock.New(lockPath)
+	if err := lockFlockContext(ctx, lk, lockPath, "supervisor-state"); err != nil {
+		return err
+	}
+	defer func() { _ = lk.Unlock() }()
+
+	file, err := ReadSupervisorState(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read existing supervisor state: %w", err)
+		}
+		file = &SupervisorStateFile{Version: 1}
+	}
+	normalizeSupervisorStateForMutation(file)
+	changed := true
+	if mutate != nil {
+		changed, err = mutate(file)
+		if err != nil {
+			return err
+		}
+	}
+	if !changed {
+		return nil
+	}
+	normalizeSupervisorStateForMutation(file)
+	raw, err := json.MarshalIndent(file, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal supervisor state: %w", err)
+	}
+	return WriteStateFileBytesLockHeld(path, raw)
+}
+
+const stateFileLockPollInterval = 25 * time.Millisecond
+
+func lockFlockContext(ctx context.Context, lk *flock.Flock, lockPath, label string) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		locked, err := lk.TryLock()
+		if err != nil {
+			return fmt.Errorf("%s flock %s: %w", label, lockPath, err)
+		}
+		if locked {
+			return nil
+		}
+		timer := time.NewTimer(stateFileLockPollInterval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func normalizeSupervisorStateForMutation(file *SupervisorStateFile) {
+	if file == nil {
+		return
+	}
+	if file.Version == 0 {
+		file.Version = 1
+	}
+	if file.Daemons == nil {
+		file.Daemons = map[string]SupervisorDaemonState{}
+	}
 }

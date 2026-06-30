@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
@@ -25,21 +23,7 @@ func mutateSupervisorStateFile(path string, mutate func(*api.SupervisorStateFile
 	supervisorStateFileMu.Lock()
 	defer supervisorStateFileMu.Unlock()
 
-	file, err := api.ReadSupervisorState(path)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("read existing supervisor state: %w", err)
-		}
-		file = &api.SupervisorStateFile{Version: 1}
-	}
-	normalizeSupervisorStateFile(file)
-	if mutate != nil {
-		if err := mutate(file); err != nil {
-			return err
-		}
-	}
-	normalizeSupervisorStateFile(file)
-	return api.WriteSupervisorState(path, file)
+	return api.MutateSupervisorState(path, mutate)
 }
 
 func readSupervisorStateFile(path string) (*api.SupervisorStateFile, error) {

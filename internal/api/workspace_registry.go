@@ -155,20 +155,12 @@ func (r *Registry) Load() error {
 	return nil
 }
 
-// Save writes the registry atomically: backup existing file to .bak, write to
-// a temp file, rename into place. A crash between temp-write and rename leaves
-// the previous file intact (os.Rename is atomic on same filesystem).
+// Save writes the registry atomically through a temp file and rename into
+// place. A crash between temp-write and rename leaves the previous file intact
+// (os.Rename is atomic on same filesystem).
 func (r *Registry) Save() error {
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return fmt.Errorf("mkdir registry dir: %w", err)
-	}
-	// Backup existing file (overwrite previous .bak — one rolling copy).
-	if existing, err := readStateFileInodeAnchored(r.path); err == nil {
-		if werr := os.WriteFile(r.path+".bak", existing, 0600); werr != nil {
-			return fmt.Errorf("write .bak: %w", werr)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) && !isHubMcpStateMissingErr(err) {
-		return fmt.Errorf("read existing: %w", err)
 	}
 	if r.Version == 0 {
 		r.Version = registryVersion
@@ -191,7 +183,6 @@ func (r *Registry) Save() error {
 	// so acquiring it again here self-deadlocks (codex review of the Phase 2a
 	// integration; TestRegistry_LockPreventsSimultaneousWriters). Exclusivity
 	// stays the caller's job via r.Lock(), exactly as before this hardening.
-	// The .bak backup above stays a plain rolling copy — not the canonical file.
 	if err := WriteStateFileBytesLockHeld(r.path, out); err != nil {
 		return fmt.Errorf("write registry: %w", err)
 	}

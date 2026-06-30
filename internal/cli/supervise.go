@@ -2220,16 +2220,6 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 	result := map[string]bool{}
 	pids := map[string]runningProcessIdentity{}
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
-	state, err := api.ReadSupervisorState(statePath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return result, pids, nil
-		}
-		return result, pids, fmt.Errorf("read supervisor-state.json: %w", err)
-	}
-	if state == nil {
-		return result, pids, nil
-	}
 	// supervisor-state.json (api.SupervisorDaemonState) carries only the
 	// runtime PID/state — NOT the daemon's exe. The PID-identity proof must
 	// compare against the DAEMON's configured Command (its install path), not
@@ -2242,88 +2232,94 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 	// canonicalMcphubPath() via daemonExpectedIdentityExe.
 	intentCommands := supervisorIntentCommandMapForStateDir(stateDir)
 	intentPorts := supervisorIntentPortMapForStateDir(stateDir)
-	stale := map[string]struct{}{}
-	markStale := func(taskName string) {
-		if taskName != "" {
-			stale[taskName] = struct{}{}
+	err := api.MutateSupervisorStateIfChanged(statePath, func(state *api.SupervisorStateFile) (bool, error) {
+		if state == nil {
+			return false, nil
 		}
-	}
-	for taskName, ds := range state.Daemons {
-		if ds.State != "running" || ds.CurrentPID <= 0 {
-			continue
+		stale := map[string]struct{}{}
+		markStale := func(taskName string) {
+			if taskName != "" {
+				stale[taskName] = struct{}{}
+			}
 		}
-		expectedExe := daemonExpectedIdentityExe(intentCommands[canonicalSupervisorTaskName(taskName)])
-		if ds.PIDGeneration <= 0 || ds.StartedAt == "" || expectedExe == "" {
-			markStale(taskName)
-			continue
-		}
-		proof := process.PIDIdentityProof{
-			PID:            ds.CurrentPID,
-			ExecutablePath: expectedExe,
-			StartedAt:      ds.StartedAt,
-		}
-		if err := currentRunningVerifyPIDIdentityFn(proof); err != nil {
-			if !errors.Is(err, process.ErrProcessIdentityUnsupported) || !currentRunningIsPIDAliveFn(ds.CurrentPID) {
+		for taskName, ds := range state.Daemons {
+			if ds.State != "running" || ds.CurrentPID <= 0 {
+				continue
+			}
+			expectedExe := daemonExpectedIdentityExe(intentCommands[canonicalSupervisorTaskName(taskName)])
+			if ds.PIDGeneration <= 0 || ds.StartedAt == "" || expectedExe == "" {
 				markStale(taskName)
 				continue
 			}
-		}
-		startedAt := time.Time{}
-		if parsed, err := time.Parse(time.RFC3339Nano, ds.StartedAt); err == nil {
-			startedAt = parsed.UTC()
-		}
-		canonicalTask := canonicalSupervisorTaskName(taskName)
-		if port := intentPorts[canonicalTask]; port > 0 {
-			// Carry the daemon's configured Command so the inner liveness
-			// re-check's PID-identity probe (process.VerifyPIDIdentity in
-			// production) compares against the daemon's OWN exe, not the
-			// supervisor's canonicalMcphubPath(). Without it a port-bearing
-			// daemon whose install path differs from the supervisor binary
-			// would false-mismatch here and be cleared as stale (the same bug
-			// the outer identity check fixes — 2026-06-09 supervisor false
-			// pid_identity_mismatch).
-			live, reason := supervisorDaemonEntryLive(api.SupervisorDaemon{
-				TaskName: canonicalTask,
-				Command:  intentCommands[canonicalTask],
-				Port:     port,
-			}, DaemonRuntimeEntry{
-				State:      daemonRuntimeStateRunning,
-				CurrentPID: ds.CurrentPID,
-				StartedAt:  startedAt,
-			}, time.Now().UTC())
-			if !live {
-				// Reason routing mirrors the r9 liveness sweep
-				// (supervise_liveness.go): a port-stale reason whose PID is
-				// STILL ALIVE (port_unbound / port_owner_{mismatch,self,
-				// unverified}) means a live-but-wedged mcphub wrapper. We
-				// must NOT clear its PID here — clearing would (a) leak the
-				// live process (the later liveness sweep reads CurrentPID=0
-				// from the just-cleaned state and skips it) AND (b) make
-				// currentRunning omit the task so the startup reconcile
-				// spawns a DUPLICATE alongside the still-running wrapper
-				// (Codex bot #268 r10 P1). Instead keep the entry running
-				// (state row untouched → tracker hydrates the live PID →
-				// the immediate startup liveness sweep terminates it FIRST
-				// then respawns exactly once). Reconcile sees it as running
-				// and no-ops, so no duplicate is spawned in the meantime.
-				// Only a NOT-alive reason (pid_dead / pid_identity_* via a
-				// TOCTOU race after the outer identity check) falls through
-				// to markStale → cleared → reconcile respawns (no live
-				// process to terminate).
-				if !supervisorLivenessReasonHasLivePID(reason) {
+			proof := process.PIDIdentityProof{
+				PID:            ds.CurrentPID,
+				ExecutablePath: expectedExe,
+				StartedAt:      ds.StartedAt,
+			}
+			if err := currentRunningVerifyPIDIdentityFn(proof); err != nil {
+				if !errors.Is(err, process.ErrProcessIdentityUnsupported) || !currentRunningIsPIDAliveFn(ds.CurrentPID) {
 					markStale(taskName)
 					continue
 				}
 			}
+			startedAt := time.Time{}
+			if parsed, err := time.Parse(time.RFC3339Nano, ds.StartedAt); err == nil {
+				startedAt = parsed.UTC()
+			}
+			canonicalTask := canonicalSupervisorTaskName(taskName)
+			if port := intentPorts[canonicalTask]; port > 0 {
+				// Carry the daemon's configured Command so the inner liveness
+				// re-check's PID-identity probe (process.VerifyPIDIdentity in
+				// production) compares against the daemon's OWN exe, not the
+				// supervisor's canonicalMcphubPath(). Without it a port-bearing
+				// daemon whose install path differs from the supervisor binary
+				// would false-mismatch here and be cleared as stale (the same bug
+				// the outer identity check fixes — 2026-06-09 supervisor false
+				// pid_identity_mismatch).
+				live, reason := supervisorDaemonEntryLive(api.SupervisorDaemon{
+					TaskName: canonicalTask,
+					Command:  intentCommands[canonicalTask],
+					Port:     port,
+				}, DaemonRuntimeEntry{
+					State:      daemonRuntimeStateRunning,
+					CurrentPID: ds.CurrentPID,
+					StartedAt:  startedAt,
+				}, time.Now().UTC())
+				if !live {
+					// Reason routing mirrors the r9 liveness sweep
+					// (supervise_liveness.go): a port-stale reason whose PID is
+					// STILL ALIVE (port_unbound / port_owner_{mismatch,self,
+					// unverified}) means a live-but-wedged mcphub wrapper. We
+					// must NOT clear its PID here — clearing would (a) leak the
+					// live process (the later liveness sweep reads CurrentPID=0
+					// from the just-cleaned state and skips it) AND (b) make
+					// currentRunning omit the task so the startup reconcile
+					// spawns a DUPLICATE alongside the still-running wrapper
+					// (Codex bot #268 r10 P1). Instead keep the entry running
+					// (state row untouched → tracker hydrates the live PID →
+					// the immediate startup liveness sweep terminates it FIRST
+					// then respawns exactly once). Reconcile sees it as running
+					// and no-ops, so no duplicate is spawned in the meantime.
+					// Only a NOT-alive reason (pid_dead / pid_identity_* via a
+					// TOCTOU race after the outer identity check) falls through
+					// to markStale → cleared → reconcile respawns (no live
+					// process to terminate).
+					if !supervisorLivenessReasonHasLivePID(reason) {
+						markStale(taskName)
+						continue
+					}
+				}
+			}
+			result[canonicalTask] = true
+			pids[canonicalTask] = runningProcessIdentity{
+				PID:           ds.CurrentPID,
+				PIDGeneration: ds.PIDGeneration,
+				StartedAt:     ds.StartedAt,
+			}
 		}
-		result[canonicalTask] = true
-		pids[canonicalTask] = runningProcessIdentity{
-			PID:           ds.CurrentPID,
-			PIDGeneration: ds.PIDGeneration,
-			StartedAt:     ds.StartedAt,
+		if len(stale) == 0 {
+			return false, nil
 		}
-	}
-	if len(stale) > 0 {
 		for taskName := range stale {
 			ds := state.Daemons[taskName]
 			ds.State = "idle"
@@ -2332,9 +2328,10 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 			ds.JobProtection = nil
 			state.Daemons[taskName] = ds
 		}
-		if err := api.WriteSupervisorState(statePath, state); err != nil {
-			return result, pids, fmt.Errorf("persist stale supervisor-state cleanup: %w", err)
-		}
+		return true, nil
+	})
+	if err != nil {
+		return result, pids, fmt.Errorf("mutate supervisor-state.json startup cleanup: %w", err)
 	}
 	return result, pids, nil
 }

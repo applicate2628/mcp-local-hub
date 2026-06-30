@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/gofrs/flock"
 	"gopkg.in/yaml.v3"
 )
 
@@ -117,19 +118,45 @@ func (a *API) SettingsSetIn(path, key, value string) error {
 	if err := validate(def, value); err != nil {
 		return fmt.Errorf("invalid value for %s: %v", key, err)
 	}
+	return mutateRawSettingsMapLocked(path, func(raw map[string]string) error {
+		raw[key] = value
+		return nil
+	})
+}
+
+// mutateRawSettingsMapLocked owns gui-preferences.yaml read-modify-write
+// serialization. It combines the in-process settingsMu with the per-file flock
+// so API, GUI, CLI, and sibling-process writers share one RMW boundary.
+func mutateRawSettingsMapLocked(path string, mutate func(map[string]string) error) error {
 	settingsMu.Lock()
 	defer settingsMu.Unlock()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("mkdir settings dir: %w", err)
+	}
+	lockPath := path + ".lock"
+	lk := flock.New(lockPath)
+	if err := lk.Lock(); err != nil {
+		return fmt.Errorf("settings flock %s: %w", lockPath, err)
+	}
+	defer func() { _ = lk.Unlock() }()
+
 	raw, err := readRawSettingsMap(path)
 	if err != nil {
 		return err
 	}
-	raw[key] = value
+	if mutate != nil {
+		if err := mutate(raw); err != nil {
+			return err
+		}
+	}
 	data, err := yaml.Marshal(raw)
 	if err != nil {
 		return err
 	}
 	// G9 P3: route through the single hardened state-file owner
-	// (WriteStateFileBytesAtomic — per-file flock + handle-bound DACL +
+	// (WriteStateFileBytesLockHeld — already-held per-file flock +
+	// handle-bound DACL +
 	// parent-dir relax-gate + audit event) instead of the prior
 	// hand-rolled os.CreateTemp+Chmod(0600)+os.Rename. It still writes
 	// atomically (temp+rename in the destination directory) so a
@@ -137,7 +164,7 @@ func (a *API) SettingsSetIn(path, key, value string) error {
 	// settings.yaml — the property the codex bot phase5 r15 P2 closure on
 	// PR #160 established for this path — and now also installs the
 	// owner-only DACL on the file handle before any bytes hit disk.
-	if err := WriteStateFileBytesAtomic(path, data); err != nil {
+	if err := WriteStateFileBytesLockHeld(path, data); err != nil {
 		return fmt.Errorf("write settings file: %w", err)
 	}
 	return nil

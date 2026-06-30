@@ -149,8 +149,7 @@ type strictModeBreadcrumb struct {
 // StrictModeDeps holds the injected dependencies the strict-mode CLI
 // consumes. Production callers fill only StateDir + IntentPath +
 // BreadcrumbPath + AutostartBackend; PromptOperator defaults to a
-// stdin-reading function, and WriteIntentFn defaults to
-// api.WriteSupervisorIntent.
+// stdin-reading function.
 //
 // The deps struct is exported so the test file in the same package can
 // build a fully-faked harness without exporting internal helpers.
@@ -177,10 +176,10 @@ type StrictModeDeps struct {
 	// non-fatal re-prompt). Production default reads from stdin.
 	PromptOperator func() (string, error)
 
-	// WriteIntentFn overrides api.WriteSupervisorIntent for the
-	// revert-failure injection seam. Production deps leave this nil
-	// and the implementation falls back to api.WriteSupervisorIntent.
-	WriteIntentFn func(path string, intent *api.SupervisorIntentFile) error
+	// MutateIntentFn overrides the supervisor-intent locked RMW mutator for
+	// tests that need to inject write failures. Production deps leave this nil
+	// and the implementation falls back to api.MutateSupervisorIntentIfChanged.
+	MutateIntentFn func(path string, mutate func(*api.SupervisorIntentFile) (bool, error)) error
 
 	// Stdout/Stderr override the default os.Stdout / os.Stderr writers.
 	// Tests may inject capture buffers; production leaves them nil and
@@ -378,21 +377,12 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	// Read current intent so we know the original value to revert to
 	// on failure. Missing file is treated as default StrictMode=false.
 	var originalStrict bool
-	var original *api.SupervisorIntentFile
-	var err error
-	readErr := api.WithStrictModeMutationGateBypass(func() error {
-		original, err = api.ReadSupervisorIntent(deps.IntentPath)
-		return nil
-	})
-	if readErr != nil {
-		return fmt.Errorf("strict-mode: read intent bypass: %w", readErr)
-	}
-	if err == nil {
-		originalStrict = original.StrictMode
-	} else if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "no such file") && !strings.Contains(err.Error(), "cannot find the file") {
-		// Treat ENOENT as default-false; surface every other read
-		// error so we don't silently overwrite a corrupted intent.
+	original, err := readStrictModeIntentSnapshot(deps)
+	if err != nil {
 		return fmt.Errorf("strict-mode: read intent: %w", err)
+	}
+	if original != nil {
+		originalStrict = original.StrictMode
 	}
 
 	// If already in desired state on BOTH surfaces, this is a no-op,
@@ -432,11 +422,7 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	}
 
 	// Step 1: write intent with new strict_mode value.
-	newIntent := supervisorIntentWithStrictMode(original, desired)
-	// #301-3: intent writes run inside the env-only mutation-gate bypass so the
-	// OLD intent.strict_mode cannot self-gate the write of the NEW value.
-	writeFn := resolveStrictModeIntentWriteFn(deps)
-	if err := writeFn(deps.IntentPath, newIntent); err != nil {
+	if err := writeStrictModeIntent(deps, desired); err != nil {
 		// A step-1 write error is only safe to treat as pre-mutation if a
 		// best-effort re-read proves strict_mode is still at its original value.
 		// The production writer publishes with an atomic rename before late
@@ -444,7 +430,7 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 		// leave intent already changed while the shim has not been updated. In
 		// that ambiguous/changed case, keep the in-progress breadcrumb so
 		// `strict-mode --recover` can reconcile any drift.
-		if current, readErr := api.ReadSupervisorIntent(deps.IntentPath); readErr == nil && current.StrictMode == originalStrict {
+		if current, readErr := readStrictModeIntentSnapshot(deps); readErr == nil && current.StrictMode == originalStrict {
 			if rmErr := os.Remove(deps.BreadcrumbPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 				return fmt.Errorf("strict-mode: step 1 (intent write): %w (cleanup in-progress breadcrumb failed: %v)", err, rmErr)
 			}
@@ -455,21 +441,7 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	// Step 2: install/update shim with new strict_mode flag.
 	if err := deps.AutostartBackend.Enable(autostart.Options{StrictMode: desired}); err != nil {
 		// Revert step 1.
-		revertIntent := &api.SupervisorIntentFile{
-			Version:    1,
-			UpdatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
-			StrictMode: originalStrict,
-		}
-		if original != nil {
-			revertIntent.Version = original.Version
-			if revertIntent.Version == 0 {
-				revertIntent.Version = 1
-			}
-			revertIntent.Daemons = original.Daemons
-			revertIntent.MaintenanceTimers = original.MaintenanceTimers
-			revertIntent.Stops = original.Stops
-		}
-		if revertErr := writeFn(deps.IntentPath, revertIntent); revertErr != nil {
+		if revertErr := writeStrictModeIntent(deps, originalStrict); revertErr != nil {
 			// Both writes failed — overwrite the in-progress breadcrumb with
 			// the torn shape + exit 10. The Phase reverts to torn ("") so the
 			// --recover surface treats it as the handled both-failed case.
@@ -583,9 +555,8 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	return nil
 }
 
-// resolveStrictModeIntentWriteFn returns the supervisor-intent.json writer
-// the strict-mode mutation uses, wrapped so every intent write runs inside the
-// env-only mutation-gate bypass (#301-3).
+// readStrictModeIntentSnapshot reads supervisor-intent.json under its
+// file-content lock and the env-only mutation-gate bypass (#301-3).
 //
 // Why the wrap: SEC-F2 made the cached intent.strict_mode=true authoritative
 // for ALL secure state-file writes, including this very intent write. On a
@@ -597,19 +568,41 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 // single write call and is always cleared by WithStrictModeMutationGateBypass's
 // defer.
 //
-// The bypass is deliberately scoped to the intent write, NOT the whole command:
-// the autostart shim Enable call, the operator prompt, and any unrelated
-// secure write outside this wrapper stay governed by the full env+intent gate.
-func resolveStrictModeIntentWriteFn(deps StrictModeDeps) func(string, *api.SupervisorIntentFile) error {
-	inner := deps.WriteIntentFn
-	if inner == nil {
-		inner = api.WriteSupervisorIntent
-	}
-	return func(path string, intent *api.SupervisorIntentFile) error {
-		return api.WithStrictModeMutationGateBypass(func() error {
-			return inner(path, intent)
+// The bypass is deliberately scoped to the intent file-content access, NOT the
+// whole command: the autostart shim Enable call, the operator prompt, and any
+// unrelated secure write outside this wrapper stay governed by the full
+// env+intent gate.
+func readStrictModeIntentSnapshot(deps StrictModeDeps) (*api.SupervisorIntentFile, error) {
+	var snapshot *api.SupervisorIntentFile
+	err := api.WithStrictModeMutationGateBypass(func() error {
+		return api.MutateSupervisorIntentIfChanged(deps.IntentPath, func(file *api.SupervisorIntentFile) (bool, error) {
+			if file == nil {
+				snapshot = &api.SupervisorIntentFile{Version: 1}
+				return false, nil
+			}
+			cp := *file
+			snapshot = &cp
+			return false, nil
 		})
+	})
+	if err != nil {
+		return nil, err
 	}
+	return snapshot, nil
+}
+
+func writeStrictModeIntent(deps StrictModeDeps, strict bool) error {
+	mutate := deps.MutateIntentFn
+	if mutate == nil {
+		mutate = api.MutateSupervisorIntentIfChanged
+	}
+	return api.WithStrictModeMutationGateBypass(func() error {
+		return mutate(deps.IntentPath, func(file *api.SupervisorIntentFile) (bool, error) {
+			next := supervisorIntentWithStrictMode(file, strict)
+			*file = *next
+			return true, nil
+		})
+	})
 }
 
 func supervisorIntentWithStrictMode(existing *api.SupervisorIntentFile, strict bool) *api.SupervisorIntentFile {
@@ -779,25 +772,7 @@ reconcile:
 // sequence of runStrictModeUnderLocks but without revert (recover is
 // the revert path, so a failure here is terminal).
 func reconcileBothResources(target bool, deps StrictModeDeps) error {
-	// Preserve fields we don't own from existing intent.
-	var preserved *api.SupervisorIntentFile
-	var existing *api.SupervisorIntentFile
-	var existingErr error
-	if bypassErr := api.WithStrictModeMutationGateBypass(func() error {
-		existing, existingErr = api.ReadSupervisorIntent(deps.IntentPath)
-		return nil
-	}); bypassErr != nil {
-		return fmt.Errorf("intent read bypass: %w", bypassErr)
-	}
-	if existingErr == nil {
-		preserved = existing
-	}
-	newIntent := supervisorIntentWithStrictMode(preserved, target)
-	// #301-3: --recover also writes the gate-controlling intent; run it inside
-	// the env-only mutation-gate bypass so a broadened parent + stale strict
-	// intent cannot refuse the reconcile write.
-	writeFn := resolveStrictModeIntentWriteFn(deps)
-	if err := writeFn(deps.IntentPath, newIntent); err != nil {
+	if err := writeStrictModeIntent(deps, target); err != nil {
 		return fmt.Errorf("intent write: %w", err)
 	}
 	if err := deps.AutostartBackend.Enable(autostart.Options{StrictMode: target}); err != nil {

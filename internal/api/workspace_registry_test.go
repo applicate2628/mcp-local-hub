@@ -112,19 +112,16 @@ func largeWorkspaceRegistryYAML(t *testing.T) ([]byte, int) {
 	return []byte(b.String()), entries
 }
 
-// TestRegistry_SaveBacksUpPreMutationFile verifies that Save() preserves the
-// prior file contents as a rolling .bak before overwriting. This is the
-// recovery mechanism; it does not simulate a crash — it simply asserts the
-// backup-before-write primitive that makes crash recovery possible.
-func TestRegistry_SaveBacksUpPreMutationFile(t *testing.T) {
+// TestRegistry_SaveDoesNotWriteDeadBakFile verifies that Registry.Save no
+// longer writes the old rolling .bak sidecar. The sidecar was never consumed by
+// rollback/recovery code, bypassed the hardened state-file writer, and added an
+// extra read-before-write failure mode before the canonical save.
+func TestRegistry_SaveDoesNotWriteDeadBakFile(t *testing.T) {
 	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "workspaces.yaml")
 	if err := WriteStateFileBytesLockHeld(path, []byte("version: 1\nworkspaces:\n  - workspace_key: oldentry\n    language: python\n    port: 9200\n")); err != nil {
 		t.Fatal(err)
 	}
-	// Attempt to write invalid YAML via the atomic helper — simulate by passing
-	// bytes that round-trip fine but rename must succeed. We assert the bak
-	// file exists AFTER a successful save, proving pre-mutate backup works.
 	reg := NewRegistry(path)
 	if err := reg.Load(); err != nil {
 		t.Fatalf("Load: %v", err)
@@ -136,13 +133,15 @@ func TestRegistry_SaveBacksUpPreMutationFile(t *testing.T) {
 	if err := reg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	// .bak must exist + contain the old entry.
-	bak, err := os.ReadFile(path + ".bak")
-	if err != nil {
-		t.Fatalf("read bak: %v", err)
+	if _, err := os.Stat(path + ".bak"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Save wrote dead .bak sidecar; stat err=%v", err)
 	}
-	if !bytes.Contains(bak, []byte("oldentry")) {
-		t.Errorf("bak missing old entry; got %s", bak)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	if !bytes.Contains(raw, []byte("newentry")) {
+		t.Errorf("registry missing new entry; got %s", raw)
 	}
 }
 
