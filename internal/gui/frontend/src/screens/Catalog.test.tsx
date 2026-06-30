@@ -850,6 +850,66 @@ describe("CatalogScreen", () => {
     expect(bodies[0]).toMatchObject({ id: "git", mode: "hub" });
   });
 
+  it("hub install renders the 201 body's warnings as a non-error notice", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace/install": () =>
+          jsonResponse(201, {
+            name: "filesystem",
+            port: 9301,
+            mode: "hub",
+            warnings: [
+              "kind:global server: ${workspaceFolder} was frozen to the current working directory",
+            ],
+          }),
+        "/api/marketplace": () =>
+          jsonResponse(200, {
+            entries: [mpEntry("filesystem", "Filesystem", "x", [], "", "stdio")],
+          }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-marketplace-hub-filesystem"));
+
+    // The install succeeded AND the operator-facing warning is rendered as a
+    // distinct notice block (not folded into the success line, not a danger error).
+    const notice = await screen.findByTestId(
+      "catalog-marketplace-install-warnings-filesystem",
+    );
+    expect(notice.textContent).toContain("${workspaceFolder} was frozen");
+    // Still shows the success line in the same installed region.
+    expect(
+      screen.getByTestId("catalog-marketplace-installed-filesystem").textContent,
+    ).toContain("filesystem");
+  });
+
+  it("hub install with no warnings renders no warning notice", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("memory")] }),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/marketplace/install": () =>
+          jsonResponse(201, { name: "git", port: 9201, mode: "hub" }),
+        "/api/marketplace": () =>
+          jsonResponse(200, { entries: [mpEntry("git", "Git", "x", [], "", "stdio")] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    fireEvent.click(await screen.findByTestId("catalog-marketplace-hub-git"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-marketplace-installed-git")).toBeTruthy();
+    });
+    // No `warnings` in the 201 body (and the absent field defaults to []) → no notice.
+    expect(
+      screen.queryByTestId("catalog-marketplace-install-warnings-git"),
+    ).toBeNull();
+  });
+
   it("hub install 409 NAME_CONFLICT offers a one-click suggested-name retry", async () => {
     const bodies: unknown[] = [];
     let installCall = 0;
