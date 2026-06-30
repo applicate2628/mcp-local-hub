@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -892,8 +893,14 @@ func CheckServerReadinessWithScope(m *config.ServerManifest, scope AdmissionScop
 			reason := "the secrets vault exists but could not be read or decrypted"
 			fix := "Fix or remove the corrupt vault — a secret-using server fails to start when it cannot be read."
 			if isVaultAccessDenied(verr) {
-				reason = "the secrets vault exists and is intact but its file permissions are too broad, so mcphub refused to read it (do NOT delete it)"
-				fix = vaultAccessDeniedFix()
+				// bot r7 finding 2: distinguish wrong-owner (ownership repair)
+				// from DACL-breadth (permission repair) in the Reason wording.
+				if errors.Is(verr, ErrWrongOwner) {
+					reason = "the secrets vault exists and is intact but its OWNER is not your account, so mcphub refused to read it (do NOT delete it)"
+				} else {
+					reason = "the secrets vault exists and is intact but its file permissions are too broad, so mcphub refused to read it (do NOT delete it)"
+				}
+				fix = vaultAccessDeniedFix(verr)
 			}
 			add(ReadinessRequirement{
 				Name: "secrets vault",

@@ -276,6 +276,28 @@ func TestClassifyVaultOpenError_AccessDeniedNotCorrupt(t *testing.T) {
 			err:  errors.New("some other failure"),
 			want: "corrupt",
 		},
+		{
+			// bot r7 finding 1: a CORRUPT-identity error whose PATH happens to
+			// contain the bare token "DACL" (e.g. a profile/CWD named
+			// "DACL-test") must NOT be misclassified as access_denied. The
+			// narrowed fallback matches only the exact "not single-user safe"
+			// phrase, which a path never contains.
+			name: "corrupt error with DACL in the path stays corrupt",
+			err:  fmt.Errorf("parse identity: %w", errors.New(`open C:\Users\x\DACL-test\mcp-local-hub\.age-key: bad pem`)),
+			want: "corrupt",
+		},
+		{
+			// Sibling: an unmarshal error mentioning DACL in a path is still corrupt.
+			name: "unmarshal error with DACL-named dir stays corrupt",
+			err:  errors.New(`unmarshal vault: invalid character (vault at /home/u/DACL/secrets.age)`),
+			want: "corrupt",
+		},
+		{
+			// ErrTooLoose (POSIX group/world bits) is an access refusal, not corruption.
+			name: "ErrTooLoose through read-vault wrap is access_denied",
+			err:  fmt.Errorf("read vault: %w", ErrTooLoose),
+			want: "access_denied",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -283,6 +305,47 @@ func TestClassifyVaultOpenError_AccessDeniedNotCorrupt(t *testing.T) {
 				t.Errorf("classifyVaultOpenError(%v) = %q, want %q", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestVaultAccessDeniedFix_WrongOwnerVsDaclBranch (bot r7 finding 2): a
+// wrong-OWNER refusal must yield ownership-repair guidance (NOT DACL-tighten /
+// repair-state-dacl, which would not change the owner); a DACL-breadth refusal
+// keeps the permission-tighten guidance. This setup redirects the vault to a
+// canonical temp location so the DACL branch can legitimately mention
+// repair-state-dacl.
+func TestVaultAccessDeniedFix_WrongOwnerVsDaclBranch(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOCALAPPDATA", dir)
+	t.Setenv("XDG_DATA_HOME", dir)
+	t.Setenv("HOME", dir)
+	stateDir := filepath.Join(dir, "mcp-local-hub")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Make the canonical vault file exist so VaultAtCanonicalLocation() is true
+	// (the DACL branch then may mention repair-state-dacl).
+	if err := os.WriteFile(filepath.Join(stateDir, "secrets.age"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	wrongOwner := vaultAccessDeniedFix(fmt.Errorf("read identity: %w", ErrWrongOwner))
+	if !strings.Contains(strings.ToLower(wrongOwner), "owner") {
+		t.Errorf("wrong-owner Fix should talk about ownership; got %q", wrongOwner)
+	}
+	if strings.Contains(wrongOwner, "repair-state-dacl") {
+		t.Errorf("wrong-owner Fix must NOT suggest repair-state-dacl (does not change owner); got %q", wrongOwner)
+	}
+	if strings.Contains(wrongOwner, "/inheritance:r") {
+		t.Errorf("wrong-owner Fix must NOT give DACL-breadth (icacls /inheritance) guidance; got %q", wrongOwner)
+	}
+
+	dacl := vaultAccessDeniedFix(fmt.Errorf("read vault: %w", ErrDaclOutsideAllowlist))
+	if !strings.Contains(dacl, "repair-state-dacl") {
+		t.Errorf("DACL-breadth Fix (canonical vault) should mention repair-state-dacl; got %q", dacl)
+	}
+	if strings.Contains(strings.ToLower(dacl), "setowner") || strings.Contains(strings.ToLower(dacl), "chown") {
+		t.Errorf("DACL-breadth Fix must NOT give ownership-restore guidance; got %q", dacl)
 	}
 }
 
@@ -655,6 +718,48 @@ func TestSecretsSet_FailedWriteEmitsNoAuditEvent(t *testing.T) {
 		if strings.Contains(string(raw), "secret-rotated") {
 			t.Errorf("secret-rotated emitted despite rejected (uncommitted) SecretsSet:\n%s", raw)
 		}
+	}
+}
+
+// TestAPIAuditEmitsRunWithoutVaultMutexHeld (bot r7 finding 3): the API
+// SecretsSet / SecretsRotate / SecretsDelete audit emits must run AFTER
+// vaultMutex is released (LogHubMcpEvent takes a blocking flock; coupling it
+// with the vault mutex is a contention/deadlock hazard). The probe runs at
+// emit time and asserts vaultMutex is acquirable (TryLock succeeds) — which is
+// only true when the emit is out-of-lock.
+func TestAPIAuditEmitsRunWithoutVaultMutexHeld(t *testing.T) {
+	_, _, _ = secretsAuditTestEnv(t)
+	a := NewAPI()
+	if _, err := a.SecretsInit(); err != nil {
+		t.Fatal(err)
+	}
+
+	var emits int
+	restore := setAuditEmitProbeForTest(func(event string) {
+		// If the emit runs while vaultMutex is held, TryLock fails → finding 3.
+		if !vaultMutex.TryLock() {
+			t.Errorf("audit emit %q ran while vaultMutex was HELD (finding 3: emit must be out-of-lock)", event)
+			return
+		}
+		vaultMutex.Unlock()
+		emits++
+	})
+	defer restore()
+
+	// SecretsSet (create) → secret-rotated emit.
+	if err := a.SecretsSet("K_AUDIT_LOCK", "v1"); err != nil {
+		t.Fatalf("SecretsSet: %v", err)
+	}
+	// SecretsRotate → secret-rotated emit.
+	if _, err := a.SecretsRotate("K_AUDIT_LOCK", "v2", false); err != nil {
+		t.Fatalf("SecretsRotate: %v", err)
+	}
+	// SecretsDelete (confirm) → secret-deleted emit.
+	if err := a.SecretsDelete("K_AUDIT_LOCK", true); err != nil {
+		t.Fatalf("SecretsDelete: %v", err)
+	}
+	if emits != 3 {
+		t.Errorf("expected 3 out-of-lock audit emits (set+rotate+delete); got %d", emits)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/secrets"
@@ -433,5 +434,109 @@ func TestCLISecretsEdit_AuditBaselineComputedUnderLock(t *testing.T) {
 	// No value may leak.
 	if strings.Contains(body, "raceval") || strings.Contains(body, "keepval") {
 		t.Errorf("LEAK: a secret value appears in the edit audit log:\n%s", body)
+	}
+}
+
+// TestCLISecretsMigrate_AuditAndUnderLockBaseline (bot r7 finding 4): migrate
+// must (a) audit each imported key by NAME (never value), and (b) apply each
+// Set to the CURRENT on-disk vault state, not a snapshot taken once before the
+// interactive prompt loop. A key written concurrently DURING the prompt window
+// (here: CONCURRENT_KEY, written by a goroutine that fires after migrate has
+// already opened+scanned and is blocked reading the y/N prompt) must SURVIVE
+// the import — proving migrate re-opens the vault under the lock rather than
+// clobbering with a stale pre-loop snapshot. With the pre-fix code (one v
+// opened before the loop) the concurrent key was clobbered.
+func TestCLISecretsMigrate_AuditAndUnderLockBaseline(t *testing.T) {
+	_, logPath := secretsCliAuditEnv(t)
+	// claude-code's config path resolves via os.UserHomeDir() (Windows:
+	// USERPROFILE), which secretsCliAuditEnv does NOT set — pin it to the same
+	// root so the vault, log, and .claude.json co-locate.
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	initVaultForCliTest(t)
+
+	// Seed the claude-code config at the path clientConfigPath actually
+	// resolves, with one importable candidate (matches secretLineRe: KEY
+	// ending in _TOKEN, non-placeholder).
+	claudeCfg, cperr := clientConfigPath("claude-code")
+	if cperr != nil {
+		t.Fatalf("resolve claude-code config path: %v", cperr)
+	}
+	if err := os.MkdirAll(filepath.Dir(claudeCfg), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const importedVal = "real-migrate-token-ABC123"
+	cfg := `{"mcpServers":{"x":{"env":{"MIGRATE_API_TOKEN":"` + importedVal + `"}}}}`
+	if err := os.WriteFile(claudeCfg, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Concurrent writer: add CONCURRENT_KEY to the vault once the migrate has
+	// started (it blocks on the first y/N prompt). A small delay lets migrate
+	// open+scan the config and reach the prompt before this commits.
+	concurrentDone := make(chan struct{})
+	go func() {
+		defer close(concurrentDone)
+		time.Sleep(150 * time.Millisecond)
+		_ = secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
+			v, oerr := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+			if oerr != nil {
+				return oerr
+			}
+			return v.Set("CONCURRENT_KEY", "raceval")
+		})
+	}()
+
+	// Feed "y\n" after a delay longer than the concurrent write, so the import
+	// commits AFTER CONCURRENT_KEY is on disk — exercising re-open-under-lock.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = origStdin })
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_, _ = w.WriteString("y\n")
+		_ = w.Close()
+	}()
+
+	cmd := newSecretsCmdReal()
+	cmd.SetArgs([]string{"migrate", "--from-client", "claude-code"})
+	cmd.SetOut(&strings.Builder{})
+	cmd.SetErr(&strings.Builder{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("secrets migrate: %v", err)
+	}
+	<-concurrentDone
+
+	// The imported key must be in the vault.
+	v, oerr := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+	if oerr != nil {
+		t.Fatalf("open vault: %v", oerr)
+	}
+	if _, gerr := v.Get("MIGRATE_API_TOKEN"); gerr != nil {
+		t.Errorf("imported key MIGRATE_API_TOKEN missing from vault: %v", gerr)
+	}
+	// UNDER-LOCK PROOF: the concurrently-added key must SURVIVE (not clobbered
+	// by a stale pre-loop snapshot).
+	if _, gerr := v.Get("CONCURRENT_KEY"); gerr != nil {
+		t.Errorf("CONCURRENT_KEY was clobbered by migrate — Set used a stale pre-loop snapshot, not the under-lock baseline (finding 4): %v", gerr)
+	}
+
+	// Audit: secret-rotated with the imported key NAME, source cli-migrate, no value.
+	raw, rerr := os.ReadFile(logPath)
+	if rerr != nil {
+		t.Fatalf("read hub-mcp.log: %v", rerr)
+	}
+	body := string(raw)
+	if !strings.Contains(body, `"event":"secret-rotated"`) || !strings.Contains(body, "MIGRATE_API_TOKEN") {
+		t.Errorf("migrate did not audit the imported key by name:\n%s", body)
+	}
+	if !strings.Contains(body, `"source":"cli-migrate"`) {
+		t.Errorf("migrate audit missing source=cli-migrate:\n%s", body)
+	}
+	if strings.Contains(body, importedVal) {
+		t.Errorf("LEAK: imported secret value present in migrate audit log:\n%s", body)
 	}
 }

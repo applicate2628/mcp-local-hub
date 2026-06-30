@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -241,10 +242,15 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 			detail := fmt.Sprintf("manifest %s uses secret refs but the vault is unreadable: %v", m.Name, err)
 			fix := "Fix or remove the corrupt vault — a secret-using server fails to start when it cannot be read."
 			if isVaultAccessDenied(err) {
-				detail = fmt.Sprintf("manifest %s uses secret refs but the vault is intact and unreadable due to too-broad file permissions (do NOT delete it): %v", m.Name, err)
-				// Shared owner with readiness; gates the repair-state-dacl
-				// suggestion on the canonical vault location (bot r4 finding 3).
-				fix = vaultAccessDeniedFix()
+				// bot r7 finding 2: distinguish wrong-owner from DACL-breadth.
+				if errors.Is(err, ErrWrongOwner) {
+					detail = fmt.Sprintf("manifest %s uses secret refs but the vault is intact and unreadable because its OWNER is not your account (do NOT delete it): %v", m.Name, err)
+				} else {
+					detail = fmt.Sprintf("manifest %s uses secret refs but the vault is intact and unreadable due to too-broad file permissions (do NOT delete it): %v", m.Name, err)
+				}
+				// Shared owner with readiness; branches wrong-owner vs DACL-breadth
+				// and gates repair-state-dacl on the canonical vault location.
+				fix = vaultAccessDeniedFix(err)
 			}
 			add("secrets-vault-readable", "secrets vault", detail, fix, false)
 		}

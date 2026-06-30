@@ -381,10 +381,14 @@ func newSecretsMigrateCmd() *cobra.Command {
 				cmd.Println("No candidates found.")
 				return nil
 			}
-			v, err := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
-			if err != nil {
-				return err
-			}
+			// bot r7 finding 4: do NOT open the vault once before the loop and
+			// reuse that stale in-memory snapshot across many locked Set writes —
+			// a concurrent vault write between the open and each Set would be
+			// silently clobbered (last-writer-wins on the stale base), the same
+			// TOCTOU class as the round-4 edit-baseline fix. Instead, RE-OPEN the
+			// vault INSIDE each WithVaultLock so every Set is applied to the
+			// CURRENT on-disk state. The audited cand.Key is then the key
+			// actually committed under that same lock.
 			in := bufio.NewReader(os.Stdin)
 			imported := 0
 			for _, cand := range candidates {
@@ -395,16 +399,21 @@ func newSecretsMigrateCmd() *cobra.Command {
 				if line == "y" || line == "yes" {
 					// Flock each individual Set write (NOT the interactive
 					// y/N loop) so a concurrent vault write is not blocked
-					// across the prompts. The api layer holds the same flock
-					// via secrets.WithVaultLock.
+					// across the prompts. Open+Set under one lock so the write
+					// is on the current on-disk state, not a pre-loop snapshot.
 					if err := secrets.WithVaultLock(defaultVaultPath(), func() error {
+						v, oerr := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
+						if oerr != nil {
+							return oerr
+						}
 						return v.Set(cand.Key, cand.Value)
 					}); err != nil {
 						return err
 					}
 					// Audit the committed credential import (key name only, never
 					// the value) — same trail as `secrets set`/`delete`, so the
-					// migrate surface isn't an audit blind spot.
+					// migrate surface isn't an audit blind spot. Emitted AFTER the
+					// committed write, OUTSIDE the lock.
 					api.EmitSecretRotatedAudit(cand.Key, map[string]any{"source": "cli-migrate"})
 					imported++
 				}
