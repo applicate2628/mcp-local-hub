@@ -7,7 +7,7 @@ affected-surface: >
   internal/clients/mimocode.go readMergedLayersExcluding (write-target
   match via mimoCodePathsSamePhysical → os.SameFile, inode identity)
 context: adjacent-finding
-status: open
+status: closed
 ---
 
 ## Summary

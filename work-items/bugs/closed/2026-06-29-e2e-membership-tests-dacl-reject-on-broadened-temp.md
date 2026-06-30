@@ -9,7 +9,7 @@ affected-surface: >
   the registry-read DACL gate on api.DefaultRegistryPath consumed by
   GET /api/daemons/weekly-refresh-membership.
 context: adjacent-finding
-status: open
+status: closed
 ---
 
 ## Symptom

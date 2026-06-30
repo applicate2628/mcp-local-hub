@@ -1,5 +1,5 @@
 ---
-status: open
+status: closed
 severity: P3
 date: 2026-06-22
 slug: cli-suite-preexisting-failures-force-kill-dacl-and-controller-race

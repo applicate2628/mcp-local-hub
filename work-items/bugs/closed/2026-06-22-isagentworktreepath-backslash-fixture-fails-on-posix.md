@@ -8,7 +8,7 @@ affected-surface: >
   {"windows-backslash agent worktree", `d:\dev\x\.claude\worktrees\agent-abc\sub`, true})
   vs internal/api/workspace_prune.go:66-71 (IsAgentWorktreePath → filepath.ToSlash)
 context: adjacent-finding
-status: open
+status: closed
 ---
 
 ## Symptom

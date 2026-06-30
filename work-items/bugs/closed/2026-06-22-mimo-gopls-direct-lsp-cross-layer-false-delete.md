@@ -9,7 +9,7 @@ affected-surface: >
   client.RemoveEntry (register.go:341), consuming
   internal/clients/mimocode.go AllStdioEntries (merged-view, all layers)
 context: adjacent-finding
-status: open
+status: closed
 ---
 
 ## Summary

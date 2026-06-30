@@ -240,7 +240,10 @@ func generateCommandDraft(e *MarketplaceEntry, opts GenerateOpts, manifestTransp
 	// after expansion. The operator-edit gate is the last line of
 	// defense; surface the suspect placeholders explicitly so the
 	// operator notices them before piping to manifest create.
-	for _, raw := range collectTraversalCandidates(e.Args, e.Env) {
+	// Include e.Command so a catalog command like `${workspaceFolder}/bin/server`
+	// is scanned too — the draft never expands `command`, so a placeholder there
+	// would otherwise reach the daemon as a literal exec target unwarned.
+	for _, raw := range collectTraversalCandidates(append([]string{e.Command}, e.Args...), e.Env) {
 		if traversalSuffixContainsParentRef(raw) {
 			warnings = append(warnings, fmt.Sprintf("catalog string %q uses ${workspaceFolder} followed by a parent-directory reference (..); the expanded path escapes the workspace — review before saving", raw))
 		} else {

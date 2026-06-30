@@ -1,5 +1,5 @@
 ---
-status: open
+status: closed
 severity: low
 context: adjacent-finding
 ---

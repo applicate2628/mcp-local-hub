@@ -218,13 +218,20 @@ func (s *Server) handleMarketplaceHubInstall(w http.ResponseWriter, req *marketp
 	// global daemon manifest with daemons[0].port:0 for stdio/native-http
 	// transports (which manifest-create rejects), or a remote-http manifest
 	// with no daemon for http transport.
-	draft, _, err := api.GenerateDraftManifest(entry, api.GenerateOpts{})
+	draft, genWarnings, err := api.GenerateDraftManifest(entry, api.GenerateOpts{})
 	if err != nil {
 		// A generator refusal (hostile registry runes, empty url, getwd
 		// failure) is a bad-entry condition; surface it as a 400 with the
 		// generator's own message — it names the catalog defect.
 		writeAPIError(w, err, http.StatusBadRequest, "BAD_ENTRY")
 		return
+	}
+	// Don't silently drop the generator's warnings on the hub-install path
+	// (e.g. the kind:global ${workspaceFolder} freeze-to-CWD footgun): log them
+	// server-side and return them in the install response so the GUI can show
+	// the operator what to review on the freshly-installed manifest.
+	for _, gw := range genWarnings {
+		log.Printf("/api/marketplace/install draft warning name=%q: %s", name, gw)
 	}
 
 	finalYAML := draft
@@ -316,9 +323,10 @@ func (s *Server) handleMarketplaceHubInstall(w http.ResponseWriter, req *marketp
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"name": name,
-		"port": resolvedPort,
-		"mode": "hub",
+		"name":     name,
+		"port":     resolvedPort,
+		"mode":     "hub",
+		"warnings": genWarnings,
 	})
 }
 

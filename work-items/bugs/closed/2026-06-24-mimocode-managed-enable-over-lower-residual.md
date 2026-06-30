@@ -8,7 +8,7 @@ affected-surface: >
   (managed-own-value-only predicate; the managed verdict never reads
   readMergedLayersExcluding / the below-layer merge)
 context: adjacent-finding
-status: open
+status: closed
 ---
 
 ## Summary
