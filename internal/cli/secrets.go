@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/secrets"
 
@@ -148,6 +149,12 @@ environment after argument parsing.`,
 			}); err != nil {
 				return err
 			}
+			// P2.4 audit trail: emit ONLY after the committed write above (a
+			// failed/aborted set returned in the err branch and never reaches
+			// here). Routes through the SHARED api audit owner so this CLI path
+			// records the exact same value-free secret-rotated event the GUI
+			// SecretsRotate path does — `value` is never passed in.
+			api.EmitSecretRotatedAudit(key, map[string]any{"source": "cli"})
 			cmd.Printf("✓ Stored %s\n", key)
 			return nil
 		},
@@ -225,6 +232,12 @@ func newSecretsDeleteCmd() *cobra.Command {
 			}); err != nil {
 				return err
 			}
+			// P2.4 audit trail: emit ONLY after the committed delete above (a
+			// failed delete returned in the err branch and never reaches here).
+			// Routes through the SHARED api audit owner so this CLI path records
+			// the same value-free secret-deleted event the GUI SecretsDelete
+			// path does.
+			api.EmitSecretDeletedAudit(args[0], map[string]any{"source": "cli"})
 			cmd.Printf("✓ Deleted %s\n", args[0])
 			return nil
 		},
@@ -364,6 +377,10 @@ func newSecretsMigrateCmd() *cobra.Command {
 					}); err != nil {
 						return err
 					}
+					// Audit the committed credential import (key name only, never
+					// the value) — same trail as `secrets set`/`delete`, so the
+					// migrate surface isn't an audit blind spot.
+					api.EmitSecretRotatedAudit(cand.Key, map[string]any{"source": "cli-migrate"})
 					imported++
 				}
 			}

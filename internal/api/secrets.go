@@ -507,6 +507,27 @@ func emitSecretAuditEvent(event string, keys []string, extra map[string]any) {
 	_ = LogHubMcpEvent("warn", event, fields)
 }
 
+// EmitSecretRotatedAudit / EmitSecretDeletedAudit are the SHARED audit-owner
+// entry points for credential-material mutations performed OUTSIDE the API
+// layer (the CLI `mcphub secrets set` / `secrets delete` commands write the
+// vault directly via secrets.WithVaultLock, bypassing SecretsRotate /
+// SecretsDelete). They delegate to the same unexported emitSecretAuditEvent,
+// so the event name ("secret-rotated" / "secret-deleted") and the value-free
+// body shape (key NAME + actor + count, NEVER the secret value) stay
+// single-owned here and cannot drift between API and CLI. Call ONLY after a
+// committed vault write. Note `secrets set` (create OR overwrite) maps to
+// "secret-rotated" to match the API: SecretsRotate is the only credential-set
+// path that audits today, and a CLI `set` is operationally a rotation of the
+// stored material for that key — using one event keeps the audit stream
+// consistent across both surfaces.
+func EmitSecretRotatedAudit(key string, extra map[string]any) {
+	emitSecretAuditEvent("secret-rotated", []string{key}, extra)
+}
+
+func EmitSecretDeletedAudit(key string, extra map[string]any) {
+	emitSecretAuditEvent("secret-deleted", []string{key}, extra)
+}
+
 // SecretsRestart runs the restart phase only — used by POST /api/secrets/:key/restart.
 // Does NOT modify the vault.
 func (a *API) SecretsRestart(name string) ([]RestartResult, error) {
