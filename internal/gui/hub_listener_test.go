@@ -129,7 +129,7 @@ func TestHubMcpHTTPServerHasSlowClientTimeouts(t *testing.T) {
 func TestHubListenerSkippedWithGateOff(t *testing.T) {
 	settingsPath := setupGateOverrides(t)
 	writeGate(t, settingsPath, false)
-	if readHubEndpointGateFromSettings() {
+	if readHubEndpointGateFromSettings(nil) {
 		t.Fatal("test setup: gate-read returned true for false setting")
 	}
 
@@ -181,7 +181,7 @@ func TestReadHubEndpointGateFromSettings_AbsentFileReturnsFalse(t *testing.T) {
 	if _, err := os.Stat(settingsPath); err == nil {
 		t.Fatalf("test setup: settings file already exists: %s", settingsPath)
 	}
-	if readHubEndpointGateFromSettings() {
+	if readHubEndpointGateFromSettings(nil) {
 		t.Errorf("gate evaluated as true with no settings file")
 	}
 }
@@ -193,7 +193,7 @@ func TestReadHubEndpointGateFromSettings_CorruptYAMLReturnsFalse(t *testing.T) {
 	if err := api.WriteStateFileBytesAtomic(settingsPath, []byte("{ not valid: yaml: [")); err != nil {
 		t.Fatalf("write corrupt yaml: %v", err)
 	}
-	if readHubEndpointGateFromSettings() {
+	if readHubEndpointGateFromSettings(nil) {
 		t.Errorf("gate evaluated as true on corrupt YAML")
 	}
 }
@@ -208,7 +208,7 @@ func TestReadHubEndpointGateFromSettings_InodeAnchorRejectsSymlink(t *testing.T)
 		t.Skipf("symlink unsupported in this environment: %v", err)
 	}
 
-	if readHubEndpointGateFromSettings() {
+	if readHubEndpointGateFromSettings(nil) {
 		t.Fatalf("gate followed a symlinked true settings file; want fail-closed false")
 	}
 }
@@ -236,7 +236,7 @@ func TestReadHubEndpointGateFromSettings_OnlyTrueIsTrue(t *testing.T) {
 			if err := api.WriteStateFileBytesAtomic(settingsPath, []byte(c.raw+"\n")); err != nil {
 				t.Fatalf("write: %v", err)
 			}
-			got := readHubEndpointGateFromSettings()
+			got := readHubEndpointGateFromSettings(nil)
 			if got != c.want {
 				t.Errorf("%s: got %v, want %v / raw=%q", c.name, got, c.want, c.raw)
 			}

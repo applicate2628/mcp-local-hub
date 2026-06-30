@@ -191,6 +191,49 @@ func TestDaemonRespawnBodyLimit_TrailingGarbageRejected(t *testing.T) {
 	}
 }
 
+// TestDaemonRespawnNoSupervisorReturns503 pins the P4 deep-review 503
+// mapping at the handler/HTTP layer: with no supervisor.lock.owner.json on
+// disk at all, api.DialSupervisorIPCRespawn returns a classified
+// RespawnResult{Code: "SUPERVISOR_UNAVAILABLE"} (dialErr == nil), which the
+// handler's switch already mapped to 503 before this fix. The companion
+// transport-failure case — dialErr != nil from a genuine dial/handshake
+// failure (e.g. an owner file present but a dead/unreachable IPC listener)
+// — is the path the fix actually changed (500 -> 503); that contract is
+// pinned at the transport-client level in
+// internal/api/supervisor_ipc_respawn_client_test.go
+// (TestDialSupervisorIPCRespawn_HandshakeMismatchReturnsTransportError)
+// because reproducing a live fake IPC listener from this package would
+// require duplicating internal/api's OS-specific (unix-socket / named-pipe)
+// test harness for one HTTP-status assertion.
+func TestDaemonRespawnNoSupervisorReturns503(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: `\mcp-local-hub-memory-default`,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     9123,
+		}},
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	s := NewServer(Config{Port: 9125})
+	rec := postDaemonEnvRaw(t, s, "/api/daemon/respawn", `{"task_name":"\\mcp-local-hub-memory-default"}`)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 with no supervisor reachable; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "SUPERVISOR_UNAVAILABLE") {
+		t.Fatalf("body = %s, want SUPERVISOR_UNAVAILABLE error code", rec.Body.String())
+	}
+}
+
 func TestDaemonEnvGETPrefersDescriptorIdentityOverTaskNameParsing(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	restoreState := api.SetDaemonStateRootForTest(stateDir)

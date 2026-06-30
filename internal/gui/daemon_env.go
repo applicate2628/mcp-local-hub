@@ -366,7 +366,17 @@ func (s *Server) daemonRespawnHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	result, dialErr := api.DialSupervisorIPCRespawn(ctx, taskName, req.Force, 5000)
 	if dialErr != nil {
-		writeAPIError(w, dialErr, http.StatusInternalServerError, "IPC_FAILED")
+		// dialErr is exclusively the transport-level failure surface
+		// (api.DialSupervisorIPCRespawn / dialSupervisorIPCRespawnFromStateDir
+		// only return a non-nil error from resolve-state-dir, dial, hello-
+		// handshake, send, read-response, or ID-mismatch — every supervisor-
+		// classified outcome, including SUPERVISOR_UNAVAILABLE, comes back as
+		// a populated RespawnResult with dialErr == nil instead). A transport
+		// failure means the supervisor is unreachable right now, which is a
+		// retryable condition for the caller, not an internal-error condition
+		// in this handler's own logic — so it maps to 503 (P4 deep-review
+		// finding), reserving 500 for a genuine internal error.
+		writeAPIError(w, dialErr, http.StatusServiceUnavailable, "IPC_FAILED")
 		return
 	}
 	if result.Success {
@@ -482,6 +492,18 @@ func (s *Server) loadAllManifestsForOverlay() ([]*config.ServerManifest, error) 
 // ideal to share one implementation, but the install-side helper lives
 // in package cli and depending on cli from gui would create a cycle. The
 // duplication is intentional + small.
+//
+// Error-handling divergence from the CLI sibling (deliberate, P3
+// deep-review finding): cli.seedOverlayFromDiscovery is a best-effort
+// POST-install hook — a Discover failure there degrades to "no rows
+// written" rather than aborting the install the operator already
+// committed to. This GUI path backs an explicit operator-triggered
+// "refresh" action (/api/discovery/refresh); silently reporting success
+// on a partial scan (e.g. the 30s handler timeout firing mid-walk and
+// cancelling ctx) would mask the failure from the very operator who
+// asked for it. So a Discover error here is surfaced as a returned
+// error — same shape the handler's existing writeAPIErrorRedacted path
+// already expects for DISCOVERY_FAILED.
 func seedOverlayFromDiscoveryViaGUI(ctx context.Context, manifests []*config.ServerManifest, overlayPath string) error {
 	binaryToServers := map[string][]string{}
 	for _, m := range manifests {
@@ -507,7 +529,23 @@ func seedOverlayFromDiscoveryViaGUI(ctx context.Context, manifests []*config.Ser
 	sort.Strings(allBinaries)
 
 	start := time.Now()
-	found, _ := binary_discovery.Discover(ctx, allBinaries, binary_discovery.DefaultHints())
+	found, discoverErr := binary_discovery.Discover(ctx, allBinaries, binary_discovery.DefaultHints())
+	if discoverErr != nil {
+		// Surface the error/cancellation rather than silently reporting
+		// success on a partial PATH overlay (P3 deep-review finding —
+		// failure-transparency: a partial/failed discovery must be visible
+		// to the operator who triggered this refresh, not masked as
+		// success). Log server-side first so the audit trail records the
+		// scan duration + partial hit count even though the caller aborts.
+		_ = api.LogHubMcpEvent("warn", "binary-discovery-failed", map[string]any{
+			"error":            discoverErr.Error(),
+			"scan_duration_ms": time.Since(start).Milliseconds(),
+			"manifest_count":   len(manifests),
+			"binary_count":     len(allBinaries),
+			"trigger":          "gui-refresh",
+		})
+		return fmt.Errorf("binary discovery scan: %w", discoverErr)
+	}
 	_ = api.LogHubMcpEvent("info", "binary-discovery-ran", map[string]any{
 		"scan_duration_ms": time.Since(start).Milliseconds(),
 		"manifest_count":   len(manifests),

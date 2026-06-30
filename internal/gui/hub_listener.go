@@ -49,8 +49,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
@@ -440,25 +438,33 @@ func hubListenerRestartSleep(ctx context.Context, d time.Duration) bool {
 }
 
 // readHubEndpointGateFromSettings reads gui_server.hub_endpoint_enabled
-// from the gui-preferences.yaml file directly. The settings registry
-// does not yet carry this key (Phase 5 adds it); we bypass the
-// registry to keep Phase 4 free of cross-task settings work.
+// through the settings registry (the single owner of this setting —
+// internal/api/settings_registry.go's SettingsRegistry — via
+// (*api.API).SettingsGet, which resolves SettingsPath(), validates the
+// persisted value against the registry's TypeBool definition, and falls
+// back to the registry default ("false") on a missing file, an absent
+// key, or an out-of-domain persisted value). a is the caller's shared
+// *api.API handle (Server.Start passes s.api); a nil a falls back to a
+// throwaway instance since SettingsGet has no dependency on API's
+// in-memory state — it is a pure passthrough to SettingsPath()-rooted
+// disk reads.
 //
-// Returns false when the file is absent, the key is absent, the value
-// is not exactly "true", or the YAML is malformed. This is the
-// fail-closed posture spec §"Settings + CLI surface" demands — a
-// corrupt settings file MUST NOT silently flip the gate on.
-func readHubEndpointGateFromSettings() bool {
-	path := api.SettingsPath()
-	data, err := api.ReadStateFileInodeAnchored(path)
+// Returns false when the file is absent, the key is absent, the
+// persisted value is not exactly "true" (SettingsGet falls back to the
+// registry default on any other TypeBool value, including "True"/"1"/
+// "yes"/""), or the YAML is malformed (SettingsGet's read errors are
+// treated as gate-off here). This is the fail-closed posture spec
+// §"Settings + CLI surface" demands — a corrupt settings file MUST NOT
+// silently flip the gate on.
+func readHubEndpointGateFromSettings(a *api.API) bool {
+	if a == nil {
+		a = api.NewAPI()
+	}
+	v, err := a.SettingsGet("gui_server.hub_endpoint_enabled")
 	if err != nil {
 		return false
 	}
-	raw := map[string]string{}
-	if uerr := yaml.Unmarshal(data, &raw); uerr != nil {
-		return false
-	}
-	return raw["gui_server.hub_endpoint_enabled"] == "true"
+	return v == "true"
 }
 
 // startHubMcpListener implements the spec §"Bind ordering" steps 1-9.
