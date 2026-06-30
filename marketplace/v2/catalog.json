@@ -12,7 +12,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-filesystem",
+        "@modelcontextprotocol/server-filesystem@2026.1.14",
         "${workspaceFolder}"
       ],
       "env": {},
@@ -31,7 +31,7 @@
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "mcp-server-git",
+        "mcp-server-git==2026.6.16",
         "--repository",
         "${workspaceFolder}"
       ],
@@ -51,7 +51,7 @@
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "mcp-server-fetch"
+        "mcp-server-fetch==2026.6.4"
       ],
       "env": {},
       "categories": [
@@ -64,12 +64,12 @@
       "id": "sqlite",
       "name": "SQLite MCP server",
       "summary": "Query a SQLite database (read-write).",
-      "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite",
-      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/sqlite/README.md",
+      "homepage": "https://github.com/modelcontextprotocol/servers-archived/tree/main/src/sqlite",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers-archived/main/src/sqlite/README.md",
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "mcp-server-sqlite",
+        "mcp-server-sqlite==2025.4.25",
         "--db-path",
         "${workspaceFolder}/db.sqlite"
       ],
@@ -90,7 +90,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@playwright/mcp"
+        "@playwright/mcp@0.0.77"
       ],
       "env": {},
       "categories": [
@@ -140,7 +140,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "mcp-excalidraw-server"
+        "mcp-excalidraw-server@1.0.7"
       ],
       "env": {},
       "categories": [
@@ -160,7 +160,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-everything"
+        "@modelcontextprotocol/server-everything@2026.1.26"
       ],
       "env": {},
       "categories": [
@@ -179,7 +179,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-memory"
+        "@modelcontextprotocol/server-memory@2026.1.26"
       ],
       "env": {
         "MEMORY_FILE_PATH": "${HOME}/.local/share/mcp-memory/memory.jsonl"
@@ -264,7 +264,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "paper-search-mcp",
+        "paper-search-mcp==0.1.3",
         "python",
         "-m",
         "paper_search_mcp.server"
