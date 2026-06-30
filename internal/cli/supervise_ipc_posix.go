@@ -66,6 +66,17 @@ type SupervisorIPCListener struct {
 // On any failure after net.Listen, the listener is closed before
 // the error returns so a partially-bound socket is never leaked.
 func NewSupervisorIPCListener(socketPath string, ownerOpt ...api.SupervisorLockOwner) (*SupervisorIPCListener, error) {
+	// Pre-validate against the platform sun_path limit BEFORE net.Listen: an
+	// unusually long state directory can push socketPath past the kernel's
+	// fixed sockaddr_un buffer, and net.Listen's resulting error names
+	// neither the limit nor the actual path length. Failing here with an
+	// actionable message beats a cryptic bind error. See
+	// api.ValidateSupervisorIPCSocketPathLen's doc for the platform
+	// constants (Linux 108 / Darwin 104, NUL-terminator-inclusive).
+	if err := api.ValidateSupervisorIPCSocketPathLen(socketPath); err != nil {
+		return nil, err
+	}
+
 	// Best-effort remove stale socket — Linux refuses bind on EADDRINUSE
 	// if the inode already exists, so this is required even on the
 	// happy path of a normal restart.

@@ -23,9 +23,26 @@
 // The normalization is: separators made native (FromSlash), Clean'd
 // (collapsing `.`/`..`/redundant separators), forced to FORWARD slashes
 // (ToSlash) for a separator-agnostic comparison string, the trailing slash
-// trimmed, and case-folded on Windows (NTFS is case-insensitive; the dev
-// host showed mixed-case drive letters in the keys). On POSIX it is
-// case-sensitive and a no-op on separators.
+// trimmed, and case-folded on Windows AND macOS (NTFS and the default
+// APFS/HFS+ are both case-insensitive; the dev host showed mixed-case drive
+// letters in the keys). On Linux it stays case-sensitive (default ext4) and
+// the GOOS check is a no-op on separators.
+//
+// CASE-SENSITIVITY TRADEOFF (deliberate parity call, not an oversight): both
+// APFS and NTFS technically SUPPORT a case-sensitive mode (an opt-in APFS
+// volume format, or NTFS's per-directory case-sensitive flag), and this
+// function folds case unconditionally on both GOOS=windows and GOOS=darwin
+// regardless of the actual volume's mode. The existing Windows branch already
+// made this call for NTFS (ignoring the rare case-sensitive-NTFS host); this
+// extension applies the SAME reasoning to macOS so the two case-insensitive-
+// by-default platforms behave consistently. Matching the platform DEFAULT
+// rather than probing the live filesystem keeps this a pure, fast,
+// dependency-free string function — probing would need a stat/getattrlist
+// syscall per call and still race a volume reformat. A host that deliberately
+// runs a case-sensitive APFS or NTFS volume accepts the same false-collision
+// risk the Windows case already accepted: two distinctly-cased paths that are
+// different directories on disk will fold to the same project key. This is
+// documented, not silently assumed.
 //
 // ABSOLUTE-PATH CONTRACT (deliberately NOT filepath.Abs): every real input is
 // already an absolute path — realRoot is the EvalSymlinks output of an
@@ -72,10 +89,21 @@ func CanonicalProjectKey(p string) string {
 	// keeps the root form intact while still trimming a trailing slash from a
 	// non-root path.
 	cleaned = trimNonRootTrailingSlash(cleaned)
-	if runtime.GOOS == "windows" {
+	if caseFoldsProjectKey(runtime.GOOS) {
 		cleaned = strings.ToLower(cleaned)
 	}
 	return cleaned
+}
+
+// caseFoldsProjectKey reports whether goos's DEFAULT filesystem is
+// case-insensitive, so CanonicalProjectKey must fold case for join keys to
+// match across differently-cased paths to the SAME project. Windows (NTFS)
+// and Darwin (APFS/HFS+) default to case-insensitive; Linux (ext4) defaults
+// to case-sensitive. See the case-sensitivity tradeoff note on
+// CanonicalProjectKey for why this matches the platform default rather than
+// probing the live volume's actual case-sensitivity mode.
+func caseFoldsProjectKey(goos string) bool {
+	return goos == "windows" || goos == "darwin"
 }
 
 // trimNonRootTrailingSlash drops a single trailing forward slash from a

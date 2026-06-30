@@ -104,6 +104,30 @@ func TestCanonicalProjectKey_RootStaysAddressable(t *testing.T) {
 	}
 }
 
+// TestCaseFoldsProjectKey_PlatformPredicate pins the GOOS predicate
+// CanonicalProjectKey folds case on, independent of the GOOS the test binary
+// itself was built for: Windows (NTFS) and Darwin (APFS/HFS+) both default to
+// a case-insensitive filesystem and must fold; Linux (ext4) defaults
+// case-sensitive and must NOT fold. See the case-sensitivity tradeoff note on
+// CanonicalProjectKey for why this matches the platform default rather than
+// the live volume's actual mode.
+func TestCaseFoldsProjectKey_PlatformPredicate(t *testing.T) {
+	cases := []struct {
+		goos string
+		want bool
+	}{
+		{"windows", true},
+		{"darwin", true},
+		{"linux", false},
+		{"freebsd", false},
+	}
+	for _, c := range cases {
+		if got := caseFoldsProjectKey(c.goos); got != c.want {
+			t.Errorf("caseFoldsProjectKey(%q) = %v, want %v", c.goos, got, c.want)
+		}
+	}
+}
+
 // TestCanonicalClaudeKeyIsAliasOfCanonical proves the claude-specific helper is
 // a thin caller of the single owner — they agree on every form, so there is ONE
 // normalizer, not two that could drift (T2).

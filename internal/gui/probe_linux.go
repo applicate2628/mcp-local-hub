@@ -4,10 +4,8 @@
 package gui
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/bits"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,29 +13,25 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"mcp-local-hub/internal/process"
 )
 
-// clkTck reads CLK_TCK (kernel clock-ticks-per-second) from the
-// process's ELF auxiliary vector at /proc/self/auxv. The auxv is a
-// kernel-emitted array of (type, value) pairs; AT_CLKTCK (type 17)
-// carries what sysconf(_SC_CLK_TCK) would return — without needing
-// CGo. Falls back to 100 (the most common kernel default) if the
-// auxv is unreadable or the entry is missing; this keeps probe
-// telemetry usable on minimal containers that hide /proc/self/auxv.
-//
-// Each auxv entry is two C unsigned longs — 16 bytes on 64-bit
-// builds (amd64/arm64), 8 bytes on 32-bit builds (386/arm). The
-// list terminates with type AT_NULL = 0. Word size is constant
-// per Go build, so we pick the right decoder at compile time via
-// math/bits.UintSize. Codex bot review on PR #23 P2 (auxv 32-bit
-// parsing).
-//
-// Cached after first successful read because CLK_TCK is a kernel
-// build-time constant — it never changes for the life of the process.
-var (
-	clkTckOnce  sync.Once
-	clkTckValue int64
+// clkTck returns CLK_TCK (kernel clock-ticks-per-second), used to convert
+// /proc/<pid>/stat jiffy fields to wall-clock durations. The derivation
+// itself (an /proc/self/auxv AT_CLKTCK read, hardened across three rounds of
+// bot review for 32-bit auxv layout, native endianness, and caching) is
+// single-owned in internal/process.ClockTicksPerSecond — internal/cli's
+// supervisor identity-gate start-time proof needs the exact same value, and
+// internal/process is the lower-layer package both internal/gui and
+// internal/cli already depend on. See process.ClockTicksPerSecond's doc for
+// the full history of why the auxv reader (not a unix.Times/unix.Sysinfo
+// estimate) is the correct shared implementation.
+func clkTck() int64 {
+	return process.ClockTicksPerSecond()
+}
 
+var (
 	// bootTime is the wall-clock instant of system boot, computed
 	// once from /proc/uptime + time.Now() at first use and cached for
 	// the process's lifetime. Without caching, every call to
@@ -73,50 +67,6 @@ func systemBootTime() (time.Time, bool) {
 		bootTimeOK = true
 	})
 	return bootTimeValue, bootTimeOK
-}
-
-const (
-	atClkTckType = 17                  // AT_CLKTCK in <elf.h>
-	atNullType   = 0                   // AT_NULL terminator
-	auxvWordSize = bits.UintSize / 8   // 4 on 32-bit, 8 on 64-bit Go builds
-	auxvEntryLen = 2 * auxvWordSize    // 8 on 32-bit, 16 on 64-bit
-)
-
-// readAuxvWord decodes one auxv field (sized to the native pointer)
-// at offset i in data as a uint64. Uses binary.NativeEndian because
-// /proc/self/auxv is emitted in native-endian unsigned long words —
-// the prior LittleEndian decoder produced wrong AT_CLKTCK values on
-// big-endian Linux targets (mips, ppc, s390x), silently falling back
-// to the 100-default and breaking start-time reconstruction. Codex
-// bot review on PR #23 P2 (native endianness). Compile-time constant
-// branching on word size — wrong-arch arm is dead-code-eliminated.
-func readAuxvWord(data []byte, i int) uint64 {
-	if auxvWordSize == 8 {
-		return binary.NativeEndian.Uint64(data[i : i+8])
-	}
-	return uint64(binary.NativeEndian.Uint32(data[i : i+4]))
-}
-
-func clkTck() int64 {
-	clkTckOnce.Do(func() {
-		clkTckValue = 100 // safe default if auxv is unreadable
-		data, err := os.ReadFile("/proc/self/auxv")
-		if err != nil {
-			return
-		}
-		for i := 0; i+auxvEntryLen <= len(data); i += auxvEntryLen {
-			atype := readAuxvWord(data, i)
-			avalue := readAuxvWord(data, i+auxvWordSize)
-			if atype == atNullType {
-				break
-			}
-			if atype == atClkTckType && avalue > 0 {
-				clkTckValue = int64(avalue)
-				return
-			}
-		}
-	})
-	return clkTckValue
 }
 
 // processIDImpl is the Linux implementation. Uses Kill(0) for

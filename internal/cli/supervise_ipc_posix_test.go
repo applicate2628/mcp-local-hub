@@ -219,6 +219,30 @@ func TestSuperviseIPC_POSIXStaleSocketRemoved(t *testing.T) {
 	}
 }
 
+// TestSuperviseIPC_POSIXSocketPathTooLongRefusedWithActionableError verifies
+// that NewSupervisorIPCListener pre-validates the socket path against the
+// platform sun_path limit and refuses BEFORE calling net.Listen, returning an
+// actionable error (naming "too long" and the limit) instead of letting
+// net.Listen fail with an opaque ENAMETOOLONG-derived error that names
+// neither. A long state-dir path (deep nesting, long username, corporate
+// profile redirect) is the realistic trigger.
+func TestSuperviseIPC_POSIXSocketPathTooLongRefusedWithActionableError(t *testing.T) {
+	dir := t.TempDir()
+	// Build a path comfortably past both platform limits (104 darwin / 108
+	// linux) regardless of how long t.TempDir()'s own prefix is.
+	longComponent := strings.Repeat("a", 200)
+	socketPath := filepath.Join(dir, longComponent, "supervisor.sock")
+
+	_, err := NewSupervisorIPCListener(socketPath)
+	if err == nil {
+		t.Fatalf("expected NewSupervisorIPCListener to refuse an over-limit socket path")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "too long") {
+		t.Errorf("error message %q missing expected pre-validation wording \"too long\" — net.Listen may have run instead of the pre-validation gate", msg)
+	}
+}
+
 // TestSuperviseIPC_POSIXSecurityDescriptorEmpty verifies that
 // SecurityDescriptorSDDL returns an empty string on POSIX — the
 // Q11 trust boundary is the 0600 file mode + owner-only parent dir,

@@ -9,8 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 // ProcessStartTime returns the kernel-recorded wall-clock start time of pid.
@@ -27,10 +25,10 @@ func ProcessStartTime(pid int) (time.Time, bool) {
 	if !ok {
 		return time.Time{}, false
 	}
-	hz, ok := clockTicksPerSecond()
-	if !ok {
-		return time.Time{}, false
-	}
+	// ClockTicksPerSecond (clock_ticks_linux.go) is the single owner of the
+	// CLK_TCK derivation — see its doc for why the /proc/self/auxv AT_CLKTCK
+	// reader replaced this package's prior unix.Times/unix.Sysinfo estimate.
+	hz := ClockTicksPerSecond()
 	return processStartTimeFromBootAndJiffies(bootSec, jiffies, hz)
 }
 
@@ -41,23 +39,6 @@ func processStartTimeFromBootAndJiffies(bootSec, jiffies, hz int64) (time.Time, 
 	sec := jiffies / hz
 	nsec := (jiffies % hz) * int64(time.Second) / hz
 	return time.Unix(bootSec+sec, nsec).UTC(), true
-}
-
-func clockTicksPerSecond() (int64, bool) {
-	var tms unix.Tms
-	ticks, err := unix.Times(&tms)
-	if err != nil || ticks == 0 {
-		return 0, false
-	}
-	var info unix.Sysinfo_t
-	if err := unix.Sysinfo(&info); err != nil || info.Uptime <= 0 {
-		return 0, false
-	}
-	hz := int64((ticks + uintptr(info.Uptime/2)) / uintptr(info.Uptime))
-	if hz <= 0 {
-		return 0, false
-	}
-	return hz, true
 }
 
 func readStartJiffies(pid int) (int64, bool) {
