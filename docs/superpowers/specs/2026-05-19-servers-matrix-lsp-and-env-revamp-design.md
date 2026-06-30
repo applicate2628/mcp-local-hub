@@ -325,7 +325,7 @@ The supervisor's spawn-time overlay READ is on the trust boundary for child proc
 
 **POSIX**: `os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)`. The Go runtime honors `O_NOFOLLOW` on POSIX; the open itself refuses to follow symlinks at kernel level.
 
-**Windows**: cannot use `os.OpenFile` with `O_NOFOLLOW` because the Go runtime returns 0 for that flag on Windows ([internal/clients/write_nofollow_windows.go:20-22](../../../internal/clients/write_nofollow_windows.go) `createNoFollowFlag` returns 0). The correct pattern, already used in this repo for hub-mcp state DACL verification at [internal/api/hub_mcp_state_dacl_windows.go:85-99](../../../internal/api/hub_mcp_state_dacl_windows.go):
+**Windows**: cannot use `os.OpenFile` with `O_NOFOLLOW` because the Go runtime returns 0 for that flag on Windows. The correct pattern, already used in this repo for hub-mcp state DACL verification at [internal/api/hub_mcp_state_dacl_windows.go:85-99](../../../internal/api/hub_mcp_state_dacl_windows.go):
 
 ```go
 h, err := windows.CreateFile(

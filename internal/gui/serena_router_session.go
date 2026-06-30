@@ -319,9 +319,9 @@ func (st *routerSessionStore) knownWorkspaceKeys() []string {
 // evictLRULocked drops the least-recently-seen entry (the LRU list BACK) to
 // free room for a new store at capacity and returns the evicted client session
 // id (or "" when the list is empty / nothing was evicted). Caller MUST hold mu.
-// Mirrors the hub's evictLRULocked (internal/api/hub_mcp_session.go) — but the
-// router store has no in-flight concept, so there is no skip-if-busy walk: the
-// eldest entry is always evictable.
+// Modeled on the hub session store's LRU eviction (internal/api/hub_mcp_session.go),
+// but the router store has no in-flight concept, so there is no skip-if-busy walk:
+// the eldest entry is always evictable.
 //
 // Finding 2 (P2, Codex PR #249 round-2): the evicted id is RETURNED rather than
 // silently dropped so the CALLER (handleInitialize, which holds the *Server/deps)

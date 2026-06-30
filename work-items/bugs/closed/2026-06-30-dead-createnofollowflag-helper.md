@@ -74,5 +74,7 @@ files removed). No orphaned imports (`syscall` in the POSIX file was used
 solely by the deleted function, and the whole file was removed).
 
 Done as part of the same PR as the broader P3/P4 dead-code cleanup
-(internal/api 12-function refactor-leftover sweep), worktree
+(11 internal/api refactor-leftover wrappers removed; a 12th candidate,
+`rehydrateSystemEntryFromTrustedSource`, was KEPT because it carries a
+`//nolint:unused // referenced by future Task 9` forward-marker), worktree
 `fix/p3-dead-code-cleanup`.
