@@ -73,6 +73,7 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	origReadiness := proxyReadinessFn
 	origCanonical := testCanonicalMcphubPathOverride
 	origBless := registerBlessTrustedRootFn
+	origKill := killByPortFn
 	origForceKill := forceKillByPortFn
 	origPortAvailable := portAvailable
 	origExcludedTCPPortRanges := excludedTCPPortRanges
@@ -108,6 +109,7 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	// opt into "readiness always succeeds"; specific tests that want
 	// to exercise the readiness-failure path override this again.
 	proxyReadinessFn = func(port int, timeout time.Duration) error { return nil }
+	killByPortFn = func(port int, timeout time.Duration) error { return nil }
 	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
 		return portKillNoListener, nil
 	}
@@ -153,6 +155,7 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 			proxyReadinessFn = origReadiness
 			testCanonicalMcphubPathOverride = origCanonical
 			registerBlessTrustedRootFn = origBless
+			killByPortFn = origKill
 			forceKillByPortFn = origForceKill
 			portAvailable = origPortAvailable
 			excludedTCPPortRanges = origExcludedTCPPortRanges
