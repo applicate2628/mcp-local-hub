@@ -1477,3 +1477,85 @@ describe("ServersScreen — symlink-consent affordance (A3 PR-2)", () => {
     expect(errEl.textContent).toContain("MCPHUB_REQUIRE_SINGLE_USER_HOME");
   });
 });
+
+// P2 scan per-client isolation — a malformed/unreadable client config no
+// longer aborts the whole scan. ScanFrom sets that client's
+// client_config_presence to "error" AND records the parse/read message in the
+// new ScanResult.client_scan_errors map. The Servers matrix must render such a
+// cell DISTINCTLY (the actual parser message) versus a bare stat-error cell
+// (presence "error" with NO client_scan_errors entry → generic stat-anomaly
+// tooltip, no inline note).
+describe("ServersScreen — isolated config parse/read failure (P2 scan isolation)", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    window.location.hash = "#/servers";
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  // A scan with the memory server present, codex-cli's config presence "error"
+  // AND a client_scan_errors entry (the isolated PARSE failure), plus claude-code
+  // presence "error" with NO client_scan_errors entry (the pre-existing bare
+  // stat error). Neither client appears in the server's client_presence, so
+  // both route to config-error.
+  function scanParseError(): ScanResult {
+    return {
+      at: "2026-06-30T00:00:00Z",
+      entries: [
+        {
+          name: "memory",
+          manifest_exists: true,
+          can_migrate: true,
+          client_presence: {},
+        },
+      ],
+      client_config_presence: {
+        "codex-cli": "error",
+        "claude-code": "error",
+      } as ScanResult["client_config_presence"],
+      client_scan_errors: {
+        "codex-cli": "codex: invalid TOML at line 3: unexpected '}'",
+      },
+    };
+  }
+
+  it("renders the parse-failure message on a config-error cell that has a client_scan_errors entry", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scanParseError()),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("scan-error-memory-codex-cli")).toBeTruthy();
+    });
+    const note = screen.getByTestId("scan-error-memory-codex-cli");
+    // The actual parser message is surfaced inline (not the generic
+    // stat-anomaly hint), prefixed with the "config unreadable" framing.
+    expect(note.textContent).toContain("config unreadable");
+    expect(note.textContent).toContain("invalid TOML at line 3");
+    // Accessible: role="note" + the message echoed in the title.
+    expect(note.getAttribute("role")).toBe("note");
+    expect(note.getAttribute("title")).toContain("invalid TOML at line 3");
+  });
+
+  it("does NOT render the parse-failure note on a bare stat-error cell (presence error, no client_scan_errors entry)", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scanParseError()),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    // Wait for the parse-error cell to confirm the matrix has rendered.
+    await waitFor(() => {
+      expect(screen.queryByTestId("scan-error-memory-codex-cli")).toBeTruthy();
+    });
+    // claude-code is presence "error" but has NO client_scan_errors entry, so
+    // it keeps the generic stat-error labeling and renders no inline note.
+    expect(screen.queryByTestId("scan-error-memory-claude-code")).toBeNull();
+  });
+});
