@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 )
 
@@ -213,6 +214,14 @@ func (s *Server) backupsRestoreHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err, http.StatusInternalServerError, "BACKUPS_RESTORE_FAILED")
 		return
 	}
+	// gui-events.log audit row (deep-review P3 finding): emit only after
+	// Restore committed. Identifiers are the client name + restored
+	// backup's basename (not the full absolute path) — no secret
+	// material is in scope for this route.
+	s.events.PublishOperatorAction("backup-restore", api.CurrentOSUser(), map[string]any{
+		"client":   req.Client,
+		"restored": filepath.Base(cleaned),
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"restored": cleaned,
 		"client":   req.Client,
@@ -252,6 +261,13 @@ func (s *Server) backupsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err, http.StatusInternalServerError, "BACKUPS_DELETE_FAILED")
 		return
 	}
+	// gui-events.log audit row (deep-review P3 finding): emit only after
+	// Delete committed. Identifiers are the client name + deleted
+	// backup's basename (not the full absolute path).
+	s.events.PublishOperatorAction("backup-delete", api.CurrentOSUser(), map[string]any{
+		"client":  req.Client,
+		"deleted": filepath.Base(cleaned),
+	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"deleted": cleaned,
 		"client":  req.Client,

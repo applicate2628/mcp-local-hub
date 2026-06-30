@@ -98,6 +98,15 @@ func (s *Server) secretsListOrAddHandler(w http.ResponseWriter, r *http.Request)
 			writeSecretsOpError(w, err)
 			return
 		}
+		// gui-events.log audit row (deep-review P3 finding): emit only
+		// after the vault write committed. KEY NAME ONLY — body.Value
+		// (the credential material) never reaches this call or any log;
+		// mirrors the discipline emitSecretAuditEvent already applies to
+		// the hub-mcp.log audit trail (P2.4, PR #468) for the same
+		// mutation.
+		s.events.PublishOperatorAction("secret-set", api.CurrentOSUser(), map[string]any{
+			"key": body.Name,
+		})
 		w.WriteHeader(http.StatusCreated)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -217,6 +226,14 @@ func (s *Server) secretsKeyRoot(w http.ResponseWriter, r *http.Request, key stri
 		if anyFailed {
 			status = http.StatusMultiStatus
 		}
+		// gui-events.log audit row (deep-review P3 finding): emit only
+		// after the vault rotate committed (this point is unreached on
+		// any error return above). KEY NAME ONLY — body.Value never
+		// reaches this call or any log.
+		s.events.PublishOperatorAction("secret-rotate", api.CurrentOSUser(), map[string]any{
+			"key":               key,
+			"restart_requested": body.Restart,
+		})
 		writeJSON(w, status, res)
 	case http.MethodDelete:
 		confirm := r.URL.Query().Get("confirm") == "true"
@@ -224,6 +241,11 @@ func (s *Server) secretsKeyRoot(w http.ResponseWriter, r *http.Request, key stri
 			writeSecretsDeleteError(w, err)
 			return
 		}
+		// gui-events.log audit row (deep-review P3 finding): emit only
+		// after the vault delete committed. KEY NAME ONLY.
+		s.events.PublishOperatorAction("secret-delete", api.CurrentOSUser(), map[string]any{
+			"key": key,
+		})
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.Header().Set("Allow", "PUT, DELETE")

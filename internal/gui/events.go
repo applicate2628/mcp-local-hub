@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -95,7 +96,35 @@ type Broadcaster struct {
 	// no longer leaks one goroutine per construction, because tests +
 	// handler-only call sites that never Publish never spawn anything.
 	persistStarted bool
+
+	// sseDropped / persistDropped count events dropped because a
+	// subscriber's buffered channel (sseDropped) or the persist channel
+	// (persistDropped) was full when Publish tried to send. Both are
+	// best-effort observability counters (deep-review P3 finding: a
+	// drop used to be completely silent — no counter, no log line). Read
+	// via DroppedCounts(); both are atomic so Publish never needs to take
+	// b.mu just to bump them on the hot path. Plain uint64 (not capped) —
+	// these are diagnostic counters, not security-sensitive state, and a
+	// theoretical wraparound after ~1.8e19 drops is not a practical
+	// concern for a desktop GUI process.
+	sseDropped     atomic.Uint64
+	persistDropped atomic.Uint64
+
+	// lastDropWarnAt throttles the stderr/hub-mcp.log warn emitted on a
+	// drop so a sustained burst of drops (e.g. a wedged subscriber) does
+	// not itself spam the log. Guarded by dropWarnMu, not b.mu, so the
+	// warn path never contends with the SSE fan-out / persist enqueue
+	// critical section. time.Time zero value means "never warned yet".
+	dropWarnMu     sync.Mutex
+	lastDropWarnAt time.Time
 }
+
+// dropWarnInterval bounds how often Publish emits the throttled
+// "events-dropped" warn line, mirroring the transition-throttled
+// pattern api.HubListenerHealthWatcher already uses for
+// hub-listener-unresponsive (one warn per sustained condition, not one
+// per occurrence).
+const dropWarnInterval = 30 * time.Second
 
 // NewBroadcaster constructs an empty Broadcaster with no subscribers.
 // Does NOT spawn any goroutine — the persist drain is started lazily
@@ -275,18 +304,31 @@ func (b *Broadcaster) TrySubscribe(ctx context.Context) (<-chan Event, bool) {
 // channel sequentially and calls AppendGUIEventLog — order survives
 // to disk. The select/default on the channel makes the send non-
 // blocking, so a stalled filesystem cannot block Publish (the entry
-// is dropped instead; future work can add an atomic drop counter).
+// is dropped instead).
+//
+// deep-review P3 finding: a drop on either channel used to be
+// completely silent. Both drop paths now increment an atomic counter
+// (sseDropped / persistDropped, readable via DroppedCounts) and a
+// throttled warn is emitted (at most once per dropWarnInterval) so a
+// sustained drop condition (wedged SSE subscriber, stalled disk) is
+// observable instead of silently losing audit/SSE rows. The select/
+// default itself stays non-blocking — only the COUNTING is new; the
+// publisher is never made to wait on the warn emission (that happens
+// after b.mu is released, see maybeWarnDropped).
 //
 // Set DisableGUIEventLog=true to opt out of persistence entirely
 // (tests + ephemeral subscribers).
 func (b *Broadcaster) Publish(ev Event) {
 	b.mu.Lock()
+	droppedSSE := false
 	for c := range b.subs {
 		select {
 		case c <- ev:
 		default: // drop
+			droppedSSE = true
 		}
 	}
+	droppedPersist := false
 	// Skip the persist enqueue once Close() has flipped the shutdown
 	// flag (Codex P1 on PR #150 line 227 — guards against send-on-
 	// closed-channel panic). Both the flag set and channel close
@@ -300,9 +342,90 @@ func (b *Broadcaster) Publish(ev Event) {
 		select {
 		case b.persistCh <- persistRequest{ev: ev}:
 		default: // persist channel full → drop (matches SSE drop-on-full policy)
+			droppedPersist = true
 		}
 	}
 	b.mu.Unlock()
+
+	if droppedSSE {
+		b.sseDropped.Add(1)
+	}
+	if droppedPersist {
+		b.persistDropped.Add(1)
+	}
+	if droppedSSE || droppedPersist {
+		b.maybeWarnDropped(ev.Type, droppedSSE, droppedPersist)
+	}
+}
+
+// DroppedCounts returns the cumulative number of events dropped because
+// a subscriber's SSE channel (sse) or the persist channel (persist) was
+// full at Publish time. Exposed for /api/status and tests; the GUI
+// status surface can render these as an operator-visible signal that
+// audit/SSE rows were lost.
+func (b *Broadcaster) DroppedCounts() (sse, persist uint64) {
+	return b.sseDropped.Load(), b.persistDropped.Load()
+}
+
+// PublishOperatorAction is the single owner for emitting a gui-events.log
+// row on an operator-initiated, security-relevant GUI mutation (deep-
+// review P3 finding: supervisor restart, migrate, demigrate, install,
+// secret mutation, backup delete/clean previously left no audit row at
+// all). Call ONLY after the mutation has actually committed — a failed
+// op must not emit a misleading success record.
+//
+// action names the operation (e.g. "supervisor-restart", "migrate",
+// "secret-rotate"); detail carries non-sensitive identifiers only
+// (server name, client name, secret KEY NAME — never a secret value or
+// other credential material; callers are responsible for that
+// redaction, mirroring the discipline emitSecretAuditEvent already
+// applies to hub-mcp.log). actor is the OS user performing the
+// mutation (api.CurrentOSUser()).
+//
+// Nil-safe: a *Broadcaster obtained from a bare &Server{} test fixture
+// (no NewServer/NewBroadcaster call) is nil, and every call site below
+// is reached from production handlers registered on a real *Server
+// where s.events is always set — but unit tests construct handler-only
+// servers directly, so this guard keeps every call site simple.
+func (b *Broadcaster) PublishOperatorAction(action, actor string, detail map[string]any) {
+	if b == nil {
+		return
+	}
+	body := make(map[string]any, len(detail)+2)
+	for k, v := range detail {
+		body[k] = v
+	}
+	body["action"] = action
+	body["actor"] = actor
+	b.Publish(Event{Type: "operator-action", Body: body})
+}
+
+// maybeWarnDropped emits a throttled warn to hub-mcp.log when Publish
+// drops an event on either channel. Throttled to at most once per
+// dropWarnInterval (mirrors the transition-throttled warn pattern
+// api.HubListenerHealthWatcher uses for hub-listener-unresponsive) so a
+// sustained burst of drops cannot itself flood the log. Called OUTSIDE
+// b.mu so a slow flock append on hub-mcp.log can never contend with the
+// SSE fan-out / persist enqueue critical section.
+func (b *Broadcaster) maybeWarnDropped(eventType string, droppedSSE, droppedPersist bool) {
+	b.dropWarnMu.Lock()
+	now := time.Now()
+	if !b.lastDropWarnAt.IsZero() && now.Sub(b.lastDropWarnAt) < dropWarnInterval {
+		b.dropWarnMu.Unlock()
+		return
+	}
+	b.lastDropWarnAt = now
+	b.dropWarnMu.Unlock()
+
+	sseTotal, persistTotal := b.DroppedCounts()
+	_ = api.LogHubMcpEvent("warn", "gui-events-dropped", map[string]any{
+		"event_type":            eventType,
+		"dropped_sse":           droppedSSE,
+		"dropped_persist":       droppedPersist,
+		"sse_dropped_total":     sseTotal,
+		"persist_dropped_total": persistTotal,
+		"note":                  "SSE subscriber or gui-events.log persist channel was full; event(s) dropped (best-effort delivery by design — see events.go)",
+	})
 }
 
 // classifyEvent maps the wire event type to (source, severity). Keeps
@@ -330,6 +453,15 @@ func classifyEvent(eventType string) (source string, severity string) {
 		return "poller", api.GUIEventSeverityError
 	case "bulk-action":
 		return "servers", api.GUIEventSeverityInfo
+	case "operator-action":
+		// Operator-initiated, security-relevant GUI mutations (supervisor
+		// restart, migrate, demigrate, install, secret mutation, backup
+		// delete/clean — deep-review P3 finding). Body.action names the
+		// specific operation; warn severity matches the level
+		// emitSecretAuditEvent already uses for credential mutations in
+		// hub-mcp.log, so an operator scanning gui-events.log by severity
+		// sees these alongside other operator-significant events.
+		return "operator", api.GUIEventSeverityWarn
 	default:
 		return "gui", api.GUIEventSeverityInfo
 	}

@@ -2,12 +2,14 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -232,6 +234,62 @@ func TestSecretsAdd_201Created(t *testing.T) {
 	}
 	if len(fake.calledSet) != 1 || fake.calledSet[0].Name != "K1" {
 		t.Errorf("calledSet=%+v", fake.calledSet)
+	}
+}
+
+// TestSecretsAdd_EmitsGUIEventWithKeyNameOnlyNeverValue covers the
+// deep-review P3 observability finding for secrets.go: the POST
+// /api/secrets success path must emit a gui-events.log row (so the
+// operator-significant mutation is auditable from the SSE/log surface,
+// not just hub-mcp.log), and that row must carry the key NAME only —
+// the secret VALUE must never appear in the persisted body.
+//
+// Asserts via the Broadcaster's own SSE subscription (the same channel
+// that feeds the gui-events.log persist drain — see events.go Publish)
+// rather than tailing the shared on-disk gui-events.log: internal/gui's
+// TestMain fences the whole test BINARY to one state root, not one file
+// per test, so multiple tests in this package append to the same
+// physical file and a tail-read race against sibling tests is real (not
+// hypothetical — observed directly: a sibling backups_actions_test.go
+// row was the most-recent entry when this test's own row hadn't landed
+// yet). Subscribing to this server's own Broadcaster instance isolates
+// the assertion to exactly the event this test's handler call produced.
+func TestSecretsAdd_EmitsGUIEventWithKeyNameOnlyNeverValue(t *testing.T) {
+	fake := &fakeSecretsAPI{}
+	s := newServerWithSecretsFake(t, fake)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	const secretValue = "super-secret-credential-material-xyz"
+	body := bytes.NewReader([]byte(`{"name":"MY_API_KEY","value":"` + secretValue + `"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/secrets", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.Type != "operator-action" {
+			t.Fatalf("event type = %q, want operator-action", ev.Type)
+		}
+		if ev.Body["action"] != "secret-set" {
+			t.Errorf("action=%v, want secret-set", ev.Body["action"])
+		}
+		if ev.Body["key"] != "MY_API_KEY" {
+			t.Errorf("key=%v, want MY_API_KEY", ev.Body["key"])
+		}
+		raw, _ := json.Marshal(ev.Body)
+		if bytes.Contains(raw, []byte(secretValue)) {
+			t.Fatalf("gui-events row leaked the secret VALUE: %s", raw)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no operator-action event published after a successful secret Set")
 	}
 }
 

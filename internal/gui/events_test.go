@@ -326,6 +326,68 @@ func (r *sseRecorder) body() string {
 	return r.buf.String()
 }
 
+// TestBroadcaster_Publish_CountsDroppedSSEEvent covers the deep-review P3
+// finding: a full subscriber channel used to drop an event completely
+// silently (no counter, no log line). With the subscriber channel
+// (buffered at 16) saturated, the next Publish must increment the sse
+// drop counter exposed via DroppedCounts.
+func TestBroadcaster_Publish_CountsDroppedSSEEvent(t *testing.T) {
+	b := NewBroadcaster()
+	b.DisableGUIEventLog = true
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := b.Subscribe(ctx)
+
+	// Saturate the subscriber's buffered channel (cap 16) without ever
+	// draining it, so the next Publish hits the full-channel default
+	// branch and counts as dropped.
+	for i := 0; i < 32; i++ {
+		b.Publish(Event{Type: "daemon-state", Body: map[string]any{"i": i}})
+	}
+
+	sse, _ := b.DroppedCounts()
+	if sse == 0 {
+		t.Fatalf("DroppedCounts().sse = 0, want > 0 after saturating a 16-buffer subscriber with 32 publishes")
+	}
+	// Drain so the test doesn't leak a goroutine blocked on send (it
+	// isn't — Publish never blocks — but drain anyway for hygiene).
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
+// TestBroadcaster_Publish_CountsDroppedPersistEvent covers the persist-
+// channel counterpart of the same finding: when the persist channel is
+// saturated, Publish must count the drop via DroppedCounts instead of
+// silently losing the gui-events.log row.
+//
+// The drain goroutine is never started here (persistStarted is forced
+// true directly, bypassing the sync.Once spawn in ensurePersistDrain)
+// so the test can fill persistCh to a known small capacity itself and
+// get a deterministic full-channel drop on the next Publish — no race
+// against a real drain goroutine consuming the buffer concurrently.
+func TestBroadcaster_Publish_CountsDroppedPersistEvent(t *testing.T) {
+	b := NewBroadcaster()
+	b.DisableGUIEventLog = false
+	// Replace persistCh with a small fixed-capacity buffer and mark the
+	// drain as already-started so Publish's ensurePersistDrain() no-ops
+	// instead of spawning a real consumer for it.
+	b.persistCh = make(chan persistRequest, 1)
+	b.persistStarted = true
+
+	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"i": 0}}) // fills the cap-1 buffer
+	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"i": 1}}) // must drop: buffer full, nobody draining
+
+	_, persist := b.DroppedCounts()
+	if persist == 0 {
+		t.Fatalf("DroppedCounts().persist = 0, want > 0 after publishing past a saturated, undrained persistCh")
+	}
+}
+
 func TestEventsSSE_StreamsPublishedEvents(t *testing.T) {
 	s := NewServer(Config{})
 	go func() {
