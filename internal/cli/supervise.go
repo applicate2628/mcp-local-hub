@@ -1442,7 +1442,10 @@ func defaultPipePath(stateDir string) string {
 // (100) transient errors back-to-back, treat the listener as
 // genuinely broken and exit the loop. That keeps the supervisor
 // from spinning forever on a permanently-poisoned pipe.
-const maxConsecutiveAcceptErrs = 100
+const (
+	maxConsecutiveAcceptErrs = 100
+	ipcConnIdleTimeout       = 60 * time.Second
+)
 
 // ipcAcceptor is the narrow interface acceptIPCConnections needs from
 // the listener. Concrete production type is *SupervisorIPCListener;
@@ -1535,6 +1538,7 @@ func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
 	defer func() { _ = conn.Close() }()
 	reader := bufio.NewReader(conn)
 	for {
+		_ = conn.SetReadDeadline(time.Now().Add(ipcConnIdleTimeout))
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			return
