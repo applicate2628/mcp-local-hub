@@ -91,14 +91,93 @@ func (f *fakeAcceptor) Accept() (net.Conn, error) {
 // the test's accumulated goroutine count bounded.
 type fakeConn struct{ closed atomic.Bool }
 
-func (c *fakeConn) Read(p []byte) (int, error)         { return 0, net.ErrClosed }
-func (c *fakeConn) Write(p []byte) (int, error)        { return 0, net.ErrClosed }
-func (c *fakeConn) Close() error                       { c.closed.Store(true); return nil }
-func (c *fakeConn) LocalAddr() net.Addr                { return &net.IPAddr{} }
-func (c *fakeConn) RemoteAddr() net.Addr               { return &net.IPAddr{} }
-func (c *fakeConn) SetDeadline(time.Time) error        { return nil }
-func (c *fakeConn) SetReadDeadline(time.Time) error    { return nil }
-func (c *fakeConn) SetWriteDeadline(time.Time) error   { return nil }
+func (c *fakeConn) Read(p []byte) (int, error)       { return 0, net.ErrClosed }
+func (c *fakeConn) Write(p []byte) (int, error)      { return 0, net.ErrClosed }
+func (c *fakeConn) Close() error                     { c.closed.Store(true); return nil }
+func (c *fakeConn) LocalAddr() net.Addr              { return &net.IPAddr{} }
+func (c *fakeConn) RemoteAddr() net.Addr             { return &net.IPAddr{} }
+func (c *fakeConn) SetDeadline(time.Time) error      { return nil }
+func (c *fakeConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *fakeConn) SetWriteDeadline(time.Time) error { return nil }
+
+type scriptedDeadlineConn struct {
+	mu        sync.Mutex
+	reads     []scriptedRead
+	deadlines []time.Time
+	closed    bool
+}
+
+type scriptedRead struct {
+	data string
+	err  error
+}
+
+func (c *scriptedDeadlineConn) Read(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.reads) == 0 {
+		return 0, net.ErrClosed
+	}
+	next := c.reads[0]
+	c.reads = c.reads[1:]
+	if next.data != "" {
+		return copy(p, next.data), next.err
+	}
+	return 0, next.err
+}
+
+func (c *scriptedDeadlineConn) Write(p []byte) (int, error) { return len(p), nil }
+func (c *scriptedDeadlineConn) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed = true
+	return nil
+}
+func (c *scriptedDeadlineConn) LocalAddr() net.Addr              { return &net.IPAddr{} }
+func (c *scriptedDeadlineConn) RemoteAddr() net.Addr             { return &net.IPAddr{} }
+func (c *scriptedDeadlineConn) SetDeadline(time.Time) error      { return nil }
+func (c *scriptedDeadlineConn) SetWriteDeadline(time.Time) error { return nil }
+func (c *scriptedDeadlineConn) SetReadDeadline(t time.Time) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.deadlines = append(c.deadlines, t)
+	return nil
+}
+
+func TestHandleIPCConnRefreshesIdleReadDeadline(t *testing.T) {
+	conn := &scriptedDeadlineConn{
+		reads: []scriptedRead{
+			{data: "\n"},
+			{err: os.ErrDeadlineExceeded},
+		},
+	}
+	done := make(chan struct{})
+	go func() {
+		handleIPCConn(conn, ipcDispatchDeps{})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleIPCConn did not exit after read deadline error")
+	}
+
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+	if !conn.closed {
+		t.Fatal("handleIPCConn did not close the connection after read error")
+	}
+	if len(conn.deadlines) != 2 {
+		t.Fatalf("SetReadDeadline calls = %d, want 2", len(conn.deadlines))
+	}
+	for i, deadline := range conn.deadlines {
+		remaining := time.Until(deadline)
+		if remaining < 55*time.Second || remaining > ipcConnIdleTimeout+time.Second {
+			t.Fatalf("deadline[%d] remaining = %v, want near %v", i, remaining, ipcConnIdleTimeout)
+		}
+	}
+}
 
 // makeTestDeps returns an ipcDispatchDeps wired with a real
 // SupervisorEventLog under t.TempDir() so emitted events can be
