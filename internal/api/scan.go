@@ -2215,7 +2215,10 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 		var cfg struct {
 			MCP map[string]map[string]any `json:"mcp"`
 		}
-		if err := json.Unmarshal(data, &cfg); err != nil {
+		// OpenCode config is JSONC (comments + trailing commas), same as the
+		// normal read path — strip before Unmarshal so a commented but valid
+		// local MCP entry extracts instead of failing.
+		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 			return "", err
 		}
 		raw = cfg.MCP[serverName]

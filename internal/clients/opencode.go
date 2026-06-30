@@ -237,10 +237,14 @@ func (o *openCodeClient) GetEntry(name string) (*MCPEntry, error) {
 		return &MCPEntry{Name: name, Raw: raw, Disabled: disabled}, nil
 	}
 	if disabled {
-		return &MCPEntry{Name: name, Raw: raw, Disabled: true}, nil
+		// Keep URL populated alongside Raw: read-side ownership checks
+		// (uninstall) compare entry.URL with the manifest URL, so dropping it
+		// would leave a hub-managed remote entry behind. Raw still drives
+		// lossless rollback.
+		return &MCPEntry{Name: name, URL: url, Raw: raw, Disabled: true}, nil
 	}
 	if openCodeRemoteHasExtraFields(raw) {
-		return &MCPEntry{Name: name, Raw: raw}, nil
+		return &MCPEntry{Name: name, URL: url, Raw: raw}, nil
 	}
 	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers")}, nil
 }
