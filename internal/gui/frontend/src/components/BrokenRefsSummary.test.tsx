@@ -50,7 +50,11 @@ describe("BrokenRefsSummary", () => {
     render(<BrokenRefsSummary vaultState="access_denied" brokenRefs={[]} />);
     const text = screen.getByRole("status").textContent ?? "";
     expect(text).toContain("Vault access denied");
-    expect(text).toContain("Fix vault permissions on Secrets screen");
+    expect(text).toContain("fix vault permissions on Secrets screen");
     expect(text).not.toContain("corrupted");
+    // Confidentiality hedge (security-reviewer #468): must steer to rotation,
+    // not claim the secrets are unconditionally intact.
+    expect(text.toLowerCase()).toContain("rotat");
+    expect(text).not.toContain("Secrets are intact");
   });
 });
