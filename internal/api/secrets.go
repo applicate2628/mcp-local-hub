@@ -397,12 +397,17 @@ func isVaultAccessDenied(err error) bool {
 // deliberately NOT mentioned: it makes a broadened-DACL read a HARDER refusal,
 // so it is the opposite of a fix (bot r4 finding 1).
 func vaultAccessDeniedFix() string {
-	const runbook = "; see the \"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%\" runbook."
+	const runbook = " See the \"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%\" runbook."
+	// Common base: tighten files (chmod 600) AND the parent directory (chmod 700)
+	// to owner-only. repair-state-dacl is FILE-only, so it is never offered as a
+	// substitute for the directory step.
+	const base = "Tighten the vault files .age-key + secrets.age to owner-only (Windows: icacls; Linux/macOS: chmod 600) and their parent directory too (Windows: icacls <dir> /inheritance:r /grant:r ...; Linux/macOS: chmod 700 <dir>)."
 	if secrets.VaultAtCanonicalLocation() {
-		return "Tighten the vault files (.age-key, secrets.age) and their parent directory to owner-only (Windows: icacls; Linux/macOS: chmod 600/700), or run `mcphub repair-state-dacl --path <file>`" + runbook
+		// Canonical vault: repair-state-dacl can repair the FILE (not the dir).
+		return base + " To repair just the vault FILE permissions you may also run `mcphub repair-state-dacl --path <file>` (it repairs a state file, not a directory)." + runbook
 	}
-	// Legacy non-canonical vault location: omit repair-state-dacl.
-	return "Tighten the vault files (.age-key, secrets.age) and their parent directory to owner-only (Windows: icacls; Linux/macOS: chmod 600/700)" + runbook
+	// Legacy non-canonical vault location: omit repair-state-dacl entirely.
+	return base + runbook
 }
 
 func containsAny(haystack string, needles ...string) bool {
