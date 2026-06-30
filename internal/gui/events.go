@@ -375,6 +375,17 @@ func (b *Broadcaster) Publish(ev Event) {
 		}
 	}
 	dropped := droppedSSE || droppedPersist
+	// Bump the lock-free counters BEFORE spawning the reporter (and before
+	// releasing b.mu), so a drop racing an immediate Close() is always
+	// reflected in the count the reporter's final-flush-on-stop reads
+	// (bot PR #476 P3). The atomics are cheap; Publish never calls
+	// LogHubMcpEvent on this path — only the reporter goroutine does.
+	if droppedSSE {
+		b.sseDropped.Add(1)
+	}
+	if droppedPersist {
+		b.persistDropped.Add(1)
+	}
 	if dropped && !b.closed {
 		// Lazy-spawn the out-of-band reporter under b.mu (atomic with the
 		// closed check, mirroring ensurePersistDrain) so a Broadcaster
@@ -383,16 +394,6 @@ func (b *Broadcaster) Publish(ev Event) {
 		b.ensureDropReporter()
 	}
 	b.mu.Unlock()
-
-	// Counting is lock-free and cheap; do it off b.mu. The reporter
-	// goroutine reads these atomics on its own ticker — Publish never
-	// calls LogHubMcpEvent itself.
-	if droppedSSE {
-		b.sseDropped.Add(1)
-	}
-	if droppedPersist {
-		b.persistDropped.Add(1)
-	}
 }
 
 // DroppedCounts returns the cumulative number of events dropped because
