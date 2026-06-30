@@ -93,15 +93,24 @@ func scannableClientNames() map[string]bool {
 // behind the backend registry.
 func ClientCapabilities() map[string]ClientCapability {
 	scannable := scannableClientNames()
+	// relayStdio is built once via clients.RelayStdioClientNames (a single
+	// clients.AllClients() pass) instead of calling clients.IsRelayStdio per
+	// client name below — IsRelayStdio rebuilds the full adapter set (every
+	// factory, including UserHomeDir calls) on each call, so doing that once
+	// per SupportedClientNames() entry made this O(N²) in the client count.
+	// The result set is identical: each adapter's own IsRelayStdio()
+	// declaration remains the single source of truth.
+	relayStdio := clients.RelayStdioClientNames()
 	out := make(map[string]ClientCapability, len(clients.SupportedClientNames()))
 	for _, name := range clients.SupportedClientNames() {
 		out[name] = ClientCapability{
 			Scannable: scannable[name],
 			// directInstallable = AddEntry accepts a URL-only entry = NOT
-			// relay-stdio. clients.IsRelayStdio resolves name → adapter and
-			// returns its own IsRelayStdio() declaration (single owner), so a
-			// future URL-native adapter is offered with no edit here.
-			DirectInstallable: !clients.IsRelayStdio(name),
+			// relay-stdio. Derived from the single relayStdio set built
+			// above (same per-adapter IsRelayStdio() declaration as
+			// clients.IsRelayStdio), so a future URL-native adapter is
+			// offered with no edit here.
+			DirectInstallable: !relayStdio[name],
 			RemoteHTTPCapable: isRemoteHTTPCapableClient(name),
 		}
 	}

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -2007,4 +2008,84 @@ func TestSupervisorDaemonEntryLiveWithoutOwnerProbeOnlyUsedForTestSeams(t *testi
 	if !live || reason != "" {
 		t.Fatalf("nil PortOwnerPID test seam live=%v reason=%q, want legacy TCP-only live", live, reason)
 	}
+}
+
+// TestLivenessSweepIntentDetectsSameSizeContentChange is the regression guard
+// for PR #475 bot P2: livenessSweepIntent MUST re-read + re-parse
+// supervisor-intent.json on every sweep, NOT gate the read behind a
+// stat/mtime/size cache. A migration that flips a daemon port 9123→9124 is a
+// SAME-BYTE-LENGTH rewrite (both 4 ASCII digits → identical serialized file
+// size) that can land within the filesystem's mtime resolution, producing an
+// identical (mtime, size) tuple. A stat-only change-detector would then serve
+// the stale parse and the liveness sweep — which DRIVES RESTART DECISIONS —
+// would act on the old port. This test seeds 9123, sweeps, rewrites to 9124
+// (same byte length), sweeps again, and asserts the SECOND sweep observes
+// 9124. A stat-gated cache that returned the cached 9123 here would fail.
+func TestLivenessSweepIntentDetectsSameSizeContentChange(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	taskName := `\mcp-local-hub-memory-default`
+
+	seed := func(port int) {
+		t.Helper()
+		intent := &api.SupervisorIntentFile{
+			Version: 1,
+			Daemons: []api.SupervisorDaemon{{
+				TaskName: taskName,
+				Server:   "memory",
+				Daemon:   "default",
+				Port:     port,
+			}},
+		}
+		if err := api.WriteSupervisorIntent(intentPath, intent); err != nil {
+			t.Fatalf("write supervisor-intent.json port=%d: %v", port, err)
+		}
+	}
+
+	// A distinct fallback so a "returned the fallback instead of disk" bug is
+	// not mistaken for a successful disk read.
+	fallback := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{TaskName: taskName, Port: 1}},
+	}
+
+	portOf := func(got *api.SupervisorIntentFile) int {
+		t.Helper()
+		if got == nil || len(got.Daemons) != 1 {
+			t.Fatalf("sweep intent = %+v, want exactly one daemon", got)
+		}
+		return got.Daemons[0].Port
+	}
+
+	// First sweep: disk says 9123.
+	seed(9123)
+	if got := portOf(livenessSweepIntent(stateDir, fallback)); got != 9123 {
+		t.Fatalf("first sweep port = %d, want 9123 (disk read)", got)
+	}
+
+	// Same-byte-length rewrite: 9123 → 9124. Capture the file size before and
+	// after to PROVE this is the same-size case the bug hinges on — if the
+	// sizes ever diverge, the test would no longer exercise the stat-gate hole
+	// and must be reworked.
+	sizeBefore := fileSizeForTest(t, intentPath)
+	seed(9124)
+	sizeAfter := fileSizeForTest(t, intentPath)
+	if sizeBefore != sizeAfter {
+		t.Fatalf("intent file size changed across the 9123→9124 rewrite (%d → %d): this test requires a SAME-SIZE change to exercise the stat-gate hole", sizeBefore, sizeAfter)
+	}
+
+	// Second sweep: MUST observe the new port. A stat/mtime/size cache would
+	// (wrongly) return the cached 9123 here.
+	if got := portOf(livenessSweepIntent(stateDir, fallback)); got != 9124 {
+		t.Fatalf("second sweep port = %d, want 9124 (same-size content change MUST be detected; a stat-gated cache would return the stale 9123)", got)
+	}
+}
+
+func fileSizeForTest(t *testing.T, path string) int64 {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	return info.Size()
 }

@@ -152,6 +152,21 @@ func startSupervisorLivenessMonitor(
 // the on-disk supervisor-intent.json when stateDir is set (so a mid-run
 // install/migrate that rewrote ports is honored), falling back to the
 // startup snapshot on any read error or when stateDir is empty (tests).
+//
+// This deliberately re-reads + re-parses the file EVERY sweep with no
+// stat/mtime/size cache. An mtime/size stat-gate is NOT a safe
+// change-detector for this file: a same-byte-length rewrite within the
+// filesystem's mtime resolution (e.g. a migration flipping a daemon port
+// 9123→9124 in a same-second write) produces an identical (mtime, size)
+// tuple, so a stat-gated cache would serve the stale parse and the
+// liveness sweep — which DRIVES RESTART DECISIONS — would act on stale
+// intent. The read also goes through the hardened inode-anchored pipeline
+// (handle-relative open + DACL/identity verification), which dominates the
+// per-sweep cost; a content-hash gate that still pays that read every tick
+// would save only the trivial json.Unmarshal, so it is not worth the added
+// cache surface on a correctness-critical path. The unconditional re-read
+// at a 5s cadence is correct and cheap enough; correctness wins over the
+// micro-optimization here.
 func livenessSweepIntent(stateDir string, fallback *api.SupervisorIntentFile) *api.SupervisorIntentFile {
 	if stateDir == "" {
 		return fallback

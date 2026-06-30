@@ -1139,7 +1139,30 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		// without removing the paired intent descriptor is EXCLUDED from the
 		// spawn-desired set instead of spawned, failing "not registered", and
 		// churning into quarantine.
-		reconciler.LSPRegistryHasRow = api.LSPRegistryRowBacksDescriptor
+		//
+		// lspRegistryForReconcilePass is a once-per-Reconcile-call cache: the
+		// reconciler's loop (supervise_reconcile.go) calls this predicate once
+		// per LSP daemon in intent.Daemons, and api.LSPRegistryRowBacksDescriptor
+		// would lock+read+parse workspaces.yaml fresh on every one of those
+		// calls. Reconcile is invoked exactly once per startup pass (the single
+		// call below), so loading the registry lazily on the first LSP
+		// descriptor and reusing it for the rest of this same pass is safe and
+		// cannot serve a stale registry across passes (a fresh closure variable
+		// is created for each runSupervise startup). A load failure is cached
+		// too (loaded stays true, registry stays nil), matching
+		// LSPRegistryRowBacksDescriptorIn's fail-open contract on a nil
+		// registry — no repeated failed-load retries within the pass.
+		var (
+			lspRegistryForReconcilePass       *api.Registry
+			lspRegistryForReconcilePassLoaded bool
+		)
+		reconciler.LSPRegistryHasRow = func(d api.SupervisorDaemon) bool {
+			if !lspRegistryForReconcilePassLoaded {
+				lspRegistryForReconcilePass, _ = api.OpenLSPRegistryForReconcile()
+				lspRegistryForReconcilePassLoaded = true
+			}
+			return api.LSPRegistryRowBacksDescriptorIn(d, lspRegistryForReconcilePass)
+		}
 		// Phase 4-E1: Reconcile reads stops via the unified source (same as
 		// the cache seed above) so the startup spawn/terminate decision and
 		// the SM read the new canonical stop path.

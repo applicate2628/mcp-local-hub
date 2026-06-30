@@ -59,17 +59,74 @@ func BuildSupervisorDaemonForLSP(entry WorkspaceEntry, mcphubBinaryPath string) 
 // (via the Reconciler.LSPRegistryHasRow seam) to EXCLUDE orphaned LSP
 // descriptors from the spawn-desired set rather than spawn-and-quarantine them.
 //
-// The (workspace_path, language) pair is read from the descriptor's flat argv
-// (--workspace / --language), falling back to the Workspace field for the path.
-// The lookup mirrors the unregister path's canonical/legacy-key tolerance:
-// the canonical EvalSymlinks key is tried first, then the pre-symlink legacy
-// key, so a row written under either canonicalization scheme is found. A
-// non-LSP descriptor, a descriptor missing its language, or any registry
-// read/lock failure returns true (fail OPEN — never suppress a legitimate spawn
-// on a transient registry hiccup; the worst case is the pre-fix behavior of
-// spawning a row that then fails loud, which is strictly safer than silently
-// dropping a backed daemon).
+// This single-descriptor form loads (locks + reads + parses
+// workspaces.yaml) on every call — fine for a one-off lookup, but a
+// reconcile pass calling it once per LSP daemon repeats that full
+// lock+load for every descriptor. A caller iterating many descriptors in
+// one pass (the supervisor reconciler) should instead load the registry
+// once with OpenLSPRegistryForReconcile and call
+// LSPRegistryRowBacksDescriptorIn for each descriptor against that single
+// loaded registry. See LSPRegistryRowBacksDescriptorIn for the shared
+// predicate and fail-open contract; this wrapper just adds the per-call
+// load around it.
 func LSPRegistryRowBacksDescriptor(d SupervisorDaemon) bool {
+	reg, ok := OpenLSPRegistryForReconcile()
+	if !ok {
+		// Load/lock failure — fail OPEN (never suppress a legitimate spawn
+		// on a transient registry hiccup).
+		return true
+	}
+	return LSPRegistryRowBacksDescriptorIn(d, reg)
+}
+
+// OpenLSPRegistryForReconcile loads workspaces.yaml ONCE (brief-retry lock,
+// read, parse) and returns the loaded *Registry for repeated
+// LSPRegistryRowBacksDescriptorIn lookups within one reconcile pass. The
+// second return is false when the registry path can't be resolved, the
+// lock can't be acquired, or the load fails — callers must treat a false
+// ok the same way LSPRegistryRowBacksDescriptor's single-call form does:
+// fail OPEN (do not exclude any descriptor) rather than guess.
+//
+// The returned Registry holds an in-memory snapshot; it does not need to
+// stay locked for the lookups (Get is a pure in-memory map read), so this
+// releases the flock immediately after Load succeeds — a long-held lock
+// across an entire reconcile pass would otherwise contend with concurrent
+// registry writers (workspace register/unregister) for no benefit.
+func OpenLSPRegistryForReconcile() (*Registry, bool) {
+	regPath, err := DefaultRegistryPath()
+	if err != nil {
+		return nil, false
+	}
+	reg := NewRegistry(regPath)
+	unlock, ok, err := tryLockRegistryBrief(reg)
+	if err != nil || !ok {
+		return nil, false
+	}
+	loadErr := reg.Load()
+	unlock()
+	if loadErr != nil {
+		return nil, false
+	}
+	return reg, true
+}
+
+// LSPRegistryRowBacksDescriptorIn is the registry-injected form of
+// LSPRegistryRowBacksDescriptor: same predicate, same fail-open contract,
+// but against an already-loaded *Registry (e.g. from
+// OpenLSPRegistryForReconcile) instead of locking + loading
+// workspaces.yaml on every call. Use this when checking many descriptors
+// against the same registry snapshot in one pass.
+//
+// The (workspace_path, language) pair is read from the descriptor's flat
+// argv (--workspace / --language), falling back to the Workspace field for
+// the path. The lookup mirrors the unregister path's canonical/legacy-key
+// tolerance: the canonical EvalSymlinks key is tried first, then the
+// pre-symlink legacy key, so a row written under either canonicalization
+// scheme is found. A non-LSP descriptor or a descriptor missing its
+// language returns true (fail OPEN — never suppress a legitimate spawn;
+// the worst case is the pre-fix behavior of spawning a row that then fails
+// loud, which is strictly safer than silently dropping a backed daemon).
+func LSPRegistryRowBacksDescriptorIn(d SupervisorDaemon, reg *Registry) bool {
 	lang := lspDescriptorArgValue(d.Args, "--language")
 	if lang == "" {
 		return true
@@ -81,17 +138,7 @@ func LSPRegistryRowBacksDescriptor(d SupervisorDaemon) bool {
 	if wsPath == "" {
 		return true
 	}
-	regPath, err := DefaultRegistryPath()
-	if err != nil {
-		return true
-	}
-	reg := NewRegistry(regPath)
-	unlock, ok, err := tryLockRegistryBrief(reg)
-	if err != nil || !ok {
-		return true
-	}
-	defer unlock()
-	if err := reg.Load(); err != nil {
+	if reg == nil {
 		return true
 	}
 	// Canonical (EvalSymlinks) key first, then the legacy pre-symlink key —
