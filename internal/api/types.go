@@ -287,10 +287,11 @@ type ScanResult struct {
 	//                                     non-directory) — client
 	//                                     genuinely not installed and not
 	//                                     securely creatable.
-	//   "error"                           stat returned an unexpected
-	//                                     error (permissions, ACL/I-O
-	//                                     anomaly) OR the path is a
-	//                                     non-regular non-symlink shape
+	//   "error"                           stat/read/parse returned an
+	//                                     unexpected error (permissions,
+	//                                     malformed config, ACL/I-O
+	//                                     anomaly) OR the path is a non-
+	//                                     regular non-symlink shape
 	//                                     (directory, pipe, device).
 	//   "error-symlink"                   the config path is a symlink
 	//                                     (resolvable or dangling) and
@@ -316,6 +317,11 @@ type ScanResult struct {
 	// "Initialize <client>" affordance in the matrix header so the
 	// operator can create the empty stub without leaving the GUI.
 	ClientConfigPresence map[string]string `json:"client_config_presence,omitempty"`
+
+	// ClientScanErrors reports adapter-level parse/read failures keyed by client
+	// id. These are per-client failures: ScanFrom keeps scanning sibling clients
+	// and records the failed client here instead of returning a whole-scan error.
+	ClientScanErrors map[string]string `json:"client_scan_errors,omitempty"`
 
 	// ClientCapabilities reports the per-client capability flags the GUI
 	// uses to decide which clients it may safely offer, keyed by every

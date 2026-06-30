@@ -56,6 +56,19 @@ func renderScanGroups(w io.Writer, result *api.ScanResult, withProcs bool) {
 			fmt.Fprintf(w, "  %-25s %s%s\n", e.Name, presenceSummary(e), procs)
 		}
 	}
+	renderClientScanErrors(w, result.ClientScanErrors)
+}
+
+func renderClientScanErrors(w io.Writer, clientErrors map[string]string) {
+	if len(clientErrors) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "\nclient scan errors:")
+	for _, client := range clients.SupportedClientNames() {
+		if err, ok := clientErrors[client]; ok {
+			fmt.Fprintf(w, "  %s: %s\n", client, err)
+		}
+	}
 }
 
 func newScanCmdReal() *cobra.Command {
