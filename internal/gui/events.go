@@ -110,21 +110,28 @@ type Broadcaster struct {
 	sseDropped     atomic.Uint64
 	persistDropped atomic.Uint64
 
-	// lastDropWarnAt throttles the stderr/hub-mcp.log warn emitted on a
-	// drop so a sustained burst of drops (e.g. a wedged subscriber) does
-	// not itself spam the log. Guarded by dropWarnMu, not b.mu, so the
-	// warn path never contends with the SSE fan-out / persist enqueue
-	// critical section. time.Time zero value means "never warned yet".
-	dropWarnMu     sync.Mutex
-	lastDropWarnAt time.Time
+	// dropReporter* drive the OUT-OF-BAND drop warn. Publish only bumps
+	// the atomic counters (cheap, lock-free); a single lazily-spawned
+	// reporter goroutine polls them on a ticker and emits at most one
+	// hub-mcp.log warn per dropReportInterval when the totals grew. This
+	// keeps the blocking api.LogHubMcpEvent flock+write entirely OFF the
+	// Publish hot path (PR #476 bot P2: a synchronous warn inside Publish
+	// — even after b.mu is released — still blocks the publisher, which
+	// defeats the non-blocking select). Lazy spawn (via dropReporterOnce
+	// under b.mu) means a Broadcaster that never drops never starts the
+	// goroutine, matching the persist-drain lazy-spawn discipline.
+	dropReporterOnce    sync.Once
+	dropReporterStarted bool
+	dropReporterStop    chan struct{}
+	dropReporterDone    chan struct{}
 }
 
-// dropWarnInterval bounds how often Publish emits the throttled
-// "events-dropped" warn line, mirroring the transition-throttled
-// pattern api.HubListenerHealthWatcher already uses for
+// dropReportInterval bounds how often the out-of-band reporter goroutine
+// emits the "gui-events-dropped" warn line, mirroring the transition-
+// throttled pattern api.HubListenerHealthWatcher already uses for
 // hub-listener-unresponsive (one warn per sustained condition, not one
 // per occurrence).
-const dropWarnInterval = 30 * time.Second
+const dropReportInterval = 30 * time.Second
 
 // NewBroadcaster constructs an empty Broadcaster with no subscribers.
 // Does NOT spawn any goroutine — the persist drain is started lazily
@@ -133,9 +140,11 @@ const dropWarnInterval = 30 * time.Second
 // call sites that never publish.
 func NewBroadcaster() *Broadcaster {
 	return &Broadcaster{
-		subs:          map[chan Event]struct{}{},
-		persistCh:     make(chan persistRequest, persistChannelCap),
-		persistDoneCh: make(chan struct{}),
+		subs:             map[chan Event]struct{}{},
+		persistCh:        make(chan persistRequest, persistChannelCap),
+		persistDoneCh:    make(chan struct{}),
+		dropReporterStop: make(chan struct{}),
+		dropReporterDone: make(chan struct{}),
 	}
 }
 
@@ -192,11 +201,22 @@ func (b *Broadcaster) Close() {
 		b.mu.Lock()
 		b.closed = true
 		started := b.persistStarted
+		reporterStarted := b.dropReporterStarted
 		close(b.persistCh)
+		// Signal the out-of-band drop reporter (if it ever spawned) to
+		// flush a final report and exit. Closing dropReporterStop is the
+		// only writer to it and runs once (under closeOnce), so it never
+		// double-closes.
+		close(b.dropReporterStop)
 		if !started {
 			// No drain goroutine ever spawned — close the done
 			// channel ourselves so callers waiting on it return.
 			close(b.persistDoneCh)
+		}
+		if !reporterStarted {
+			// No reporter goroutine ever spawned — close its done
+			// channel ourselves so the wait below returns immediately.
+			close(b.dropReporterDone)
 		}
 		b.mu.Unlock()
 	})
@@ -210,6 +230,13 @@ func (b *Broadcaster) Close() {
 		// the worst case it leaks past process exit, but shutdown
 		// won't hang. Any unflushed entries are lost — best-effort
 		// persist semantics already documented in Publish.
+	}
+	// Bound the wait on the drop reporter too: its final report() calls
+	// LogHubMcpEvent (a blocking flock), so a stalled lock there must not
+	// hang shutdown past the same budget.
+	select {
+	case <-b.dropReporterDone:
+	case <-time.After(closeDrainTimeout):
 	}
 }
 
@@ -308,13 +335,15 @@ func (b *Broadcaster) TrySubscribe(ctx context.Context) (<-chan Event, bool) {
 //
 // deep-review P3 finding: a drop on either channel used to be
 // completely silent. Both drop paths now increment an atomic counter
-// (sseDropped / persistDropped, readable via DroppedCounts) and a
-// throttled warn is emitted (at most once per dropWarnInterval) so a
+// (sseDropped / persistDropped, readable via DroppedCounts) so a
 // sustained drop condition (wedged SSE subscriber, stalled disk) is
 // observable instead of silently losing audit/SSE rows. The select/
-// default itself stays non-blocking — only the COUNTING is new; the
-// publisher is never made to wait on the warn emission (that happens
-// after b.mu is released, see maybeWarnDropped).
+// default itself stays non-blocking, and the COUNTING is lock-free.
+// The actual hub-mcp.log warn is emitted OUT OF BAND by a lazily-
+// spawned reporter goroutine (see runDropReporter) so the blocking
+// flock+write never lands on the Publish caller's stack (PR #476 bot
+// P2: a synchronous warn inside Publish — even after b.mu is released —
+// still blocks the publisher and defeats the non-blocking select).
 //
 // Set DisableGUIEventLog=true to opt out of persistence entirely
 // (tests + ephemeral subscribers).
@@ -345,16 +374,24 @@ func (b *Broadcaster) Publish(ev Event) {
 			droppedPersist = true
 		}
 	}
+	dropped := droppedSSE || droppedPersist
+	if dropped && !b.closed {
+		// Lazy-spawn the out-of-band reporter under b.mu (atomic with the
+		// closed check, mirroring ensurePersistDrain) so a Broadcaster
+		// that never drops never starts the goroutine, and a drop racing
+		// Close() can never spawn a reporter after teardown began.
+		b.ensureDropReporter()
+	}
 	b.mu.Unlock()
 
+	// Counting is lock-free and cheap; do it off b.mu. The reporter
+	// goroutine reads these atomics on its own ticker — Publish never
+	// calls LogHubMcpEvent itself.
 	if droppedSSE {
 		b.sseDropped.Add(1)
 	}
 	if droppedPersist {
 		b.persistDropped.Add(1)
-	}
-	if droppedSSE || droppedPersist {
-		b.maybeWarnDropped(ev.Type, droppedSSE, droppedPersist)
 	}
 }
 
@@ -400,32 +437,55 @@ func (b *Broadcaster) PublishOperatorAction(action, actor string, detail map[str
 	b.Publish(Event{Type: "operator-action", Body: body})
 }
 
-// maybeWarnDropped emits a throttled warn to hub-mcp.log when Publish
-// drops an event on either channel. Throttled to at most once per
-// dropWarnInterval (mirrors the transition-throttled warn pattern
-// api.HubListenerHealthWatcher uses for hub-listener-unresponsive) so a
-// sustained burst of drops cannot itself flood the log. Called OUTSIDE
-// b.mu so a slow flock append on hub-mcp.log can never contend with the
-// SSE fan-out / persist enqueue critical section.
-func (b *Broadcaster) maybeWarnDropped(eventType string, droppedSSE, droppedPersist bool) {
-	b.dropWarnMu.Lock()
-	now := time.Now()
-	if !b.lastDropWarnAt.IsZero() && now.Sub(b.lastDropWarnAt) < dropWarnInterval {
-		b.dropWarnMu.Unlock()
-		return
-	}
-	b.lastDropWarnAt = now
-	b.dropWarnMu.Unlock()
-
-	sseTotal, persistTotal := b.DroppedCounts()
-	_ = api.LogHubMcpEvent("warn", "gui-events-dropped", map[string]any{
-		"event_type":            eventType,
-		"dropped_sse":           droppedSSE,
-		"dropped_persist":       droppedPersist,
-		"sse_dropped_total":     sseTotal,
-		"persist_dropped_total": persistTotal,
-		"note":                  "SSE subscriber or gui-events.log persist channel was full; event(s) dropped (best-effort delivery by design — see events.go)",
+// ensureDropReporter spawns the out-of-band drop-reporter goroutine once
+// (sync.Once). Called from Publish under b.mu so dropReporterStarted is
+// set atomically with the spawn — Close() reads the same field under the
+// same lock to decide whether to signal + wait on the reporter.
+func (b *Broadcaster) ensureDropReporter() {
+	b.dropReporterOnce.Do(func() {
+		b.dropReporterStarted = true
+		go b.runDropReporter(dropReportInterval)
 	})
+}
+
+// runDropReporter polls the drop counters on a ticker and emits at most
+// one hub-mcp.log warn per tick when either total grew since the last
+// report. This is the OUT-OF-BAND drop-reporting path (PR #476 bot P2):
+// it runs on its own goroutine, so the blocking api.LogHubMcpEvent
+// flock+write never lands on a Publish caller. It exits when
+// dropReporterStop is closed (by Close()), emitting one final report
+// for any drops observed since the last tick so a shutdown-time drop is
+// not lost.
+func (b *Broadcaster) runDropReporter(interval time.Duration) {
+	defer close(b.dropReporterDone)
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	var lastSSE, lastPersist uint64
+	report := func() {
+		sse, persist := b.DroppedCounts()
+		if sse == lastSSE && persist == lastPersist {
+			return // no new drops since the last report
+		}
+		newSSE := sse - lastSSE
+		newPersist := persist - lastPersist
+		lastSSE, lastPersist = sse, persist
+		_ = api.LogHubMcpEvent("warn", "gui-events-dropped", map[string]any{
+			"new_sse_dropped":       newSSE,
+			"new_persist_dropped":   newPersist,
+			"sse_dropped_total":     sse,
+			"persist_dropped_total": persist,
+			"note":                  "SSE subscriber or gui-events.log persist channel was full; event(s) dropped (best-effort delivery by design — see events.go)",
+		})
+	}
+	for {
+		select {
+		case <-b.dropReporterStop:
+			report() // flush any drops observed since the last tick
+			return
+		case <-t.C:
+			report()
+		}
+	}
 }
 
 // classifyEvent maps the wire event type to (source, severity). Keeps
