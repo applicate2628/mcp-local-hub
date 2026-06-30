@@ -139,7 +139,15 @@ func clkTckFromUptimeEstimate() (int64, bool) {
 		return 0, false
 	}
 	hz := int64((ticks + uintptr(info.Uptime/2)) / uintptr(info.Uptime))
-	if hz <= 0 {
+	// Sanity-bound the estimate: unix.Times reports ticks since an ARBITRARY
+	// point (not guaranteed boot) and Sysinfo.Uptime is whole seconds, so on
+	// some runtimes ticks÷uptime yields a wildly bogus number (bot PR #474 P1).
+	// Every real Linux kernel HZ is a "nice" value (100/250/300/1000, rarely
+	// up to a few thousand). Reject anything outside a generous plausible band
+	// so a bogus estimate falls through to the safe 100 default rather than
+	// being cached and trusted by the supervisor identity-gate.
+	const minPlausibleHz, maxPlausibleHz = 25, 10000
+	if hz < minPlausibleHz || hz > maxPlausibleHz {
 		return 0, false
 	}
 	return hz, true
