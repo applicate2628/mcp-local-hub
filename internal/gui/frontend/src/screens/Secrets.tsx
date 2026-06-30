@@ -63,6 +63,7 @@ export function SecretsScreen({ route }: { route?: RouterState }) {
       {state === "ok" && env.secrets.length > 0 && (
         <InitKeyedView env={env} refresh={snap.refresh} prefillKey={prefillKey} />
       )}
+      {state === "access_denied" && <AccessDeniedView env={env} />}
       {(state === "decrypt_failed" || state === "corrupt") && <BrokenView env={env} />}
       <ManifestErrorsBanner env={env} />
     </section>
@@ -450,6 +451,38 @@ function SecretRowComponent(props: {
 
 function formatUsedBy(refs: UsageRef[]): string {
   return refs.map((r) => `${r.server} (env: ${r.env_var})`).join("\n");
+}
+
+// AccessDeniedView (P2.1): the vault files are intact but the fail-closed
+// read-hardening refused them because of a broadened DACL / wrong owner
+// (the corp/sandbox %LOCALAPPDATA% case). This is a remediable PERMISSION
+// problem, so — unlike BrokenView — it must NOT suggest deleting the
+// vault. The remediation matches the runtime daemon-launch path
+// (internal/cli/daemon.go via api.StateFileDACLRunbookPointer): tighten
+// the file DACL to owner-only, or run `mcphub repair-state-dacl`.
+function AccessDeniedView(props: { env: SecretsEnvelope }) {
+  return (
+    <div class="banner banner-error" data-testid="vault-access-denied-banner">
+      <p><strong>Vault access denied</strong> (access_denied). Your stored secrets are intact — they are NOT lost. The vault files exist and decrypt fine, but mcphub refused to read them because their file permissions (DACL/owner) are too broad for secret-bearing files (the common corporate / sandbox <code>%LOCALAPPDATA%</code> case).</p>
+      <p><strong>This is a one-command permission repair, not recovery.</strong> Do not re-initialize the vault.</p>
+      <p>Remediate: tighten the vault files (<code>.age-key</code> and <code>secrets.age</code>) to owner-only (your account + SYSTEM + Administrators), or run <code>mcphub repair-state-dacl --path &lt;file&gt;</code>. On Windows use <code>icacls</code>; on Linux/macOS use <code>chmod 600 &lt;file&gt;</code>. See the <em>"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%"</em> runbook for the exact command.</p>
+      {props.env.secrets.length > 0 && (
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Used by</th></tr>
+          </thead>
+          <tbody>
+            {props.env.secrets.map((s) => (
+              <tr key={s.name}>
+                <td>{s.name}</td>
+                <td title={formatUsedBy(s.used_by)}>{s.used_by.length}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
 }
 
 function BrokenView(props: { env: SecretsEnvelope }) {

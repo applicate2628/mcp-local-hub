@@ -1,6 +1,11 @@
 // internal/gui/frontend/src/lib/secrets-api.ts
 
-export type VaultState = "ok" | "missing" | "decrypt_failed" | "corrupt";
+// "access_denied" (P2.1): the vault files exist and are intact, but the
+// fail-closed read-hardening refused them because of a broadened DACL /
+// wrong owner (the corp/sandbox %LOCALAPPDATA% case). This is a remediable
+// permission problem, NOT corruption — the GUI must steer the operator to
+// the icacls/chmod owner-only fix and NEVER suggest deleting the vault.
+export type VaultState = "ok" | "missing" | "decrypt_failed" | "corrupt" | "access_denied";
 
 export interface UsageRef {
   server: string;

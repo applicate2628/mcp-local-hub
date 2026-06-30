@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -299,8 +300,9 @@ func (a *API) SecretsListWithUsage() (SecretsEnvelope, error) {
 	}, nil
 }
 
-// classifyVault maps OpenVault outcomes to the four-state vault model
-// (memo §5.2). Returns (state, keys); keys is non-nil only when state == "ok".
+// classifyVault maps OpenVault outcomes to the five-state vault model
+// (memo §5.2 + access_denied, P2.1). Returns (state, keys); keys is
+// non-nil only when state == "ok".
 //
 // Codex plan-R1 P3: capture the first OpenVault error and re-use it
 // instead of calling OpenVault twice (the second call is redundant).
@@ -314,21 +316,62 @@ func classifyVault(keyPath, vaultPath string) (string, []string) {
 	if !keyExists || !vaultExists {
 		return "missing", nil
 	}
-	// Files exist but OpenVault failed: distinguish corrupt (key parse
-	// error or post-decrypt JSON garbage) from decrypt_failed (key fine,
-	// age decrypt rejected the cipher) by inspecting the captured error
-	// string. Brittle but acceptable for the GET path.
+	return classifyVaultOpenError(err), nil
+}
+
+// classifyVaultOpenError maps a non-nil OpenVault error (with the vault +
+// key files both present) to a vault state. Split out from classifyVault
+// so the discriminator is unit-testable without constructing a broadened
+// DACL on disk (which is platform-specific and awkward in a test).
+//
+// P2.1: a broadened DACL on .age-key / secrets.age that the fail-closed
+// read-hardening refuses produces "file <path> not single-user safe: ..."
+// wrapping the typed *DACLAllowlistViolation / ErrDaclOutsideAllowlist
+// (internal/api/hub_mcp_state_read_inode_windows.go). That is a remediable
+// permission refusal (one-command icacls / chmod fix — see the CLAUDE.md
+// "secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%" runbook),
+// NOT vault corruption. It MUST classify as "access_denied" so the GUI
+// steers the operator to the DACL fix instead of destroying the vault.
+// This branch is checked FIRST because the read-hardening sits in front of
+// the parse/decrypt stages, so a DACL refusal never reaches them.
+func classifyVaultOpenError(err error) string {
+	if isVaultAccessDenied(err) {
+		return "access_denied"
+	}
+	// Files exist + readable but OpenVault still failed: distinguish
+	// corrupt (key parse error or post-decrypt JSON garbage) from
+	// decrypt_failed (key fine, age decrypt rejected the cipher) by
+	// inspecting the captured error string. Brittle but acceptable for
+	// the GET path.
 	msg := err.Error()
 	switch {
-	case containsAny(msg, "parse identity", "no identity", "not X25519"):
-		return "corrupt", nil
-	case containsAny(msg, "unmarshal vault"):
-		return "corrupt", nil
 	case containsAny(msg, "age decrypt"):
-		return "decrypt_failed", nil
+		return "decrypt_failed"
+	case containsAny(msg, "parse identity", "no identity", "not X25519"):
+		return "corrupt"
+	case containsAny(msg, "unmarshal vault"):
+		return "corrupt"
 	default:
-		return "corrupt", nil
+		return "corrupt"
 	}
+}
+
+// isVaultAccessDenied reports whether err is the fail-closed read-hardening
+// DACL/owner refusal (a remediable permission problem) rather than vault
+// corruption. Prefers the typed error chain (the canonical discriminator
+// the daemon-launch path uses at internal/cli/daemon.go) with a substring
+// fallback for the relax-lane branches that re-wrap a non-typed cause but
+// still carry the "not single-user safe" sentinel text.
+func isVaultAccessDenied(err error) bool {
+	var daclViolation *DACLAllowlistViolation
+	if errors.As(err, &daclViolation) ||
+		errors.Is(err, ErrDaclOutsideAllowlist) ||
+		errors.Is(err, ErrWrongOwner) ||
+		errors.Is(err, ErrTooLoose) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not single-user safe") || strings.Contains(msg, "DACL")
 }
 
 func containsAny(haystack string, needles ...string) bool {

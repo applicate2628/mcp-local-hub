@@ -44,4 +44,13 @@ describe("BrokenRefsSummary", () => {
     render(<BrokenRefsSummary vaultState="corrupt" brokenRefs={[]} />);
     expect(screen.getByRole("status").textContent).toContain("Vault file corrupted");
   });
+
+  it("renders access-denied remediation for vault_state='access_denied'", () => {
+    cleanup();
+    render(<BrokenRefsSummary vaultState="access_denied" brokenRefs={[]} />);
+    const text = screen.getByRole("status").textContent ?? "";
+    expect(text).toContain("Vault access denied");
+    expect(text).toContain("Fix vault permissions on Secrets screen");
+    expect(text).not.toContain("corrupted");
+  });
 });

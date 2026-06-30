@@ -19,6 +19,10 @@ export function BrokenRefsSummary(props: BrokenRefsSummaryProps) {
       message = "Vault not readable (decrypt_failed). Cannot verify any secret: references. Fix vault on Secrets screen first.";
     } else if (vaultState === "missing") {
       message = "Vault not initialized. Open Secrets screen to create one.";
+    } else if (vaultState === "access_denied") {
+      // P2.1: permission refusal, not corruption — point at the DACL fix,
+      // never at deletion/recovery.
+      message = "Vault access denied (file permissions too broad). Secrets are intact. Fix vault permissions on Secrets screen.";
     } else {
       message = "Vault file corrupted. Open Secrets screen to recover.";
     }
