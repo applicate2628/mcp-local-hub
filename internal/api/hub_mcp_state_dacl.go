@@ -14,7 +14,7 @@ import (
 
 const StateFileDACLRunbookTitle = "secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%"
 
-const StateFileDACLRunbookPointer = `tighten this file's DACL to owner-only (your account + SYSTEM + Administrators); see the "` + StateFileDACLRunbookTitle + `" runbook in CLAUDE.md for the exact icacls / chmod command, or run: mcphub repair-state-dacl --path <file>.`
+const StateFileDACLRunbookPointer = `tighten this file's DACL to owner-only (your account + SYSTEM + Administrators); see the "` + StateFileDACLRunbookTitle + `" runbook in CLAUDE.md for the exact icacls / chmod command, or run: mcphub repair-state-dacl --path <file>. If the refusal names the PARENT DIRECTORY instead of a file, tighten the parent directory to owner-only (mcphub repair-state-dacl --path <dir>) or set MCPHUB_REQUIRE_SINGLE_USER_HOME=1.`
 
 // ErrIrregularFile is returned when the path is a symlink, junction,
 // or other irregular filesystem object that we refuse to trust.

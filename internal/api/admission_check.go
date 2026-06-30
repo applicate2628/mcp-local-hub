@@ -232,7 +232,19 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 
 	if secrets.HasSecretRef(m.Env) {
 		if _, err := secrets.OpenVaultOptional(secrets.DefaultKeyPath(), secrets.DefaultVaultPath()); err != nil {
-			add("secrets-vault-readable", "secrets vault", fmt.Sprintf("manifest %s uses secret refs but the vault is unreadable: %v", m.Name, err), "Fix or remove the corrupt vault — a secret-using server fails to start when it cannot be read.", false)
+			// P2.1 finding 2: an access-denied vault is STILL unreadable to the
+			// daemon, so this finding stays BLOCKING (Optional=false → Install
+			// aborts) — only the MESSAGE changes to the permission-repair path so
+			// the operator is not steered toward destroying intact secrets. The
+			// detail still embeds the raw err (admission Detail is operator-facing
+			// CLI/GUI text, same as today's `%v`); the FIX is the actionable line.
+			detail := fmt.Sprintf("manifest %s uses secret refs but the vault is unreadable: %v", m.Name, err)
+			fix := "Fix or remove the corrupt vault — a secret-using server fails to start when it cannot be read."
+			if isVaultAccessDenied(err) {
+				detail = fmt.Sprintf("manifest %s uses secret refs but the vault is intact and unreadable due to too-broad file permissions (do NOT delete it): %v", m.Name, err)
+				fix = "Tighten the vault files (.age-key, secrets.age) and their parent directory to owner-only, or run `mcphub repair-state-dacl --path <file>`; see the \"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%\" runbook."
+			}
+			add("secrets-vault-readable", "secrets vault", detail, fix, false)
 		}
 	}
 	// REQUIRED secrets (opt-in install gate). A key declared in

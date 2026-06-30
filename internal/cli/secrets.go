@@ -257,6 +257,12 @@ func newSecretsEditCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// P2.4 audit trail (finding 3): snapshot the BEFORE key→value map
+			// (in memory only — already decrypted in v) so that, after the
+			// committed ImportYAML below, we can diff and emit accurate per-key
+			// audit events. Values are compared IN MEMORY to detect a changed
+			// secret; they are NEVER logged — only key NAMES reach the emit.
+			beforeKV := snapshotVaultKV(v)
 			// Temp file lives INSIDE the user-private UserDataDir
 			// (%LOCALAPPDATA%\mcp-local-hub on Windows, $XDG_DATA_HOME
 			// or ~/.local/share/mcp-local-hub on Unix). The old
@@ -331,6 +337,16 @@ func newSecretsEditCmd() *cobra.Command {
 			}); err != nil {
 				return err
 			}
+			// P2.4 audit trail (finding 3): emit ONLY after the committed
+			// ImportYAML above (a failed import returned in the err branch and
+			// never reaches here). ImportYAML is a wholesale replace that can
+			// add / rotate / remove many keys at once, so diff the BEFORE/AFTER
+			// key→value maps and emit accurate per-key events through the SHARED
+			// api audit owner: added-or-changed → secret-rotated; removed →
+			// secret-deleted. Values drive the changed-detection IN MEMORY only;
+			// only key NAMES are ever logged.
+			afterKV := snapshotVaultKV(v)
+			emitBulkEditAuditEvents(beforeKV, afterKV)
 			cmd.Println("✓ Re-encrypted secrets.age")
 			return nil
 		},
@@ -391,6 +407,44 @@ func newSecretsMigrateCmd() *cobra.Command {
 	c.Flags().StringVar(&fromClient, "from-client", "", "client name: claude-code | codex-cli | cursor | vscode | gemini-cli | qwen-cli | antigravity")
 	_ = c.MarkFlagRequired("from-client")
 	return c
+}
+
+// snapshotVaultKV reads the current key→value map from an open vault using
+// only the exported Get/List surface. Used in-memory by the `secrets edit`
+// bulk-diff (P2.4 finding 3); the values it captures are compared to detect
+// changed secrets but are NEVER logged.
+func snapshotVaultKV(v *secrets.Vault) map[string]string {
+	out := map[string]string{}
+	for _, k := range v.List() {
+		if val, err := v.Get(k); err == nil {
+			out[k] = val
+		}
+	}
+	return out
+}
+
+// emitBulkEditAuditEvents diffs the before/after vault key→value maps from a
+// `secrets edit` bulk import and emits accurate per-key audit events through
+// the SHARED api owner: a key that is new OR whose value changed → a
+// secret-rotated event; a key removed by the edit → a secret-deleted event.
+// An unchanged key emits nothing. Only key NAMES are passed to the emit —
+// the value comparison happens here in memory and never reaches the log.
+func emitBulkEditAuditEvents(before, after map[string]string) {
+	for k, newVal := range after {
+		oldVal, existed := before[k]
+		if !existed || oldVal != newVal {
+			extra := map[string]any{"source": "cli-edit"}
+			if !existed {
+				extra["created"] = true
+			}
+			api.EmitSecretRotatedAudit(k, extra)
+		}
+	}
+	for k := range before {
+		if _, stillPresent := after[k]; !stillPresent {
+			api.EmitSecretDeletedAudit(k, map[string]any{"source": "cli-edit"})
+		}
+	}
 }
 
 func clientConfigPath(name string) (string, error) {

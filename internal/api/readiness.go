@@ -882,13 +882,26 @@ func CheckServerReadinessWithScope(m *config.ServerManifest, scope AdmissionScop
 	// (Codex #377 r5).
 	if secrets.HasSecretRef(m.Env) {
 		if _, verr := secrets.OpenVaultOptional(secrets.DefaultKeyPath(), secrets.DefaultVaultPath()); verr != nil {
+			// P2.1 finding 2: an access-denied vault (broadened DACL / wrong
+			// owner refused by the fail-closed read) is STILL unreadable to the
+			// daemon, so the gate stays BLOCKING (OK:false) — the daemon would
+			// crash-loop without it. Only the operator MESSAGE changes: point at
+			// the one-command permission repair instead of "fix or remove the
+			// corrupt vault" (which would steer toward destroying intact
+			// secrets). Reason/Fix name NO path or value (redaction posture).
+			reason := "the secrets vault exists but could not be read or decrypted"
+			fix := "Fix or remove the corrupt vault — a secret-using server fails to start when it cannot be read."
+			if isVaultAccessDenied(verr) {
+				reason = "the secrets vault exists and is intact but its file permissions are too broad, so mcphub refused to read it (do NOT delete it)"
+				fix = "Tighten the vault files (.age-key, secrets.age) and their parent directory to owner-only, or run `mcphub repair-state-dacl --path <file>`; see the \"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%\" runbook."
+			}
 			add(ReadinessRequirement{
 				Name: "secrets vault",
 				OK:   false,
 				// Redacted: verr wraps the absolute vault/key file path (Codex
 				// pre-catch r9).
-				Reason: "the secrets vault exists but could not be read or decrypted",
-				Fix:    "Fix or remove the corrupt vault — a secret-using server fails to start when it cannot be read.",
+				Reason: reason,
+				Fix:    fix,
 			})
 		}
 	}

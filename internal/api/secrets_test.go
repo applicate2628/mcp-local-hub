@@ -593,6 +593,71 @@ func TestSecretsDelete_RefusedEmitsNoAuditEvent(t *testing.T) {
 	}
 }
 
+// TestSecretsSet_EmitsAuditEventWithoutValue (P2.4 finding 1): the GUI
+// Add-Secret path (POST /api/secrets → SecretsSet) must record a
+// secret-rotated audit event with the key NAME + actor + created marker, and
+// NEVER the secret value.
+func TestSecretsSet_EmitsAuditEventWithoutValue(t *testing.T) {
+	_, _, logPath := secretsAuditTestEnv(t)
+	a := NewAPI()
+	if _, err := a.SecretsInit(); err != nil {
+		t.Fatal(err)
+	}
+	const val = "gui-add-secret-value-NEW"
+	if err := a.SecretsSet("PAPER_SEARCH_KEY", val); err != nil {
+		t.Fatalf("SecretsSet: %v", err)
+	}
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read hub-mcp.log: %v", err)
+	}
+	body := string(raw)
+	if !strings.Contains(body, `"event":"secret-rotated"`) {
+		t.Errorf("secret-rotated event missing after SecretsSet:\n%s", body)
+	}
+	if !strings.Contains(body, "PAPER_SEARCH_KEY") {
+		t.Errorf("set key name missing from audit log:\n%s", body)
+	}
+	if !strings.Contains(body, `"created":true`) {
+		t.Errorf("created:true marker missing from audit log:\n%s", body)
+	}
+	if !strings.Contains(body, `"actor_user"`) {
+		t.Errorf("actor_user missing from audit log:\n%s", body)
+	}
+	if strings.Contains(body, val) {
+		t.Errorf("LEAK: SecretsSet value present in audit log:\n%s", body)
+	}
+}
+
+// TestSecretsSet_FailedWriteEmitsNoAuditEvent (P2.4 finding 1): a rejected
+// SecretsSet (duplicate key → SECRETS_KEY_EXISTS, no commit) must NOT emit a
+// misleading secret-rotated record.
+func TestSecretsSet_FailedWriteEmitsNoAuditEvent(t *testing.T) {
+	_, _, logPath := secretsAuditTestEnv(t)
+	a := NewAPI()
+	if _, err := a.SecretsInit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.SecretsSet("DUP_KEY", "first"); err != nil {
+		t.Fatal(err)
+	}
+	// Truncate the log so the legitimate first-set event does not pollute the
+	// assertion; we are testing that the SECOND (rejected) set emits nothing.
+	if err := os.WriteFile(logPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := a.SecretsSet("DUP_KEY", "second")
+	if err == nil {
+		t.Fatal("SecretsSet on existing key: want SECRETS_KEY_EXISTS, got nil")
+	}
+	if raw, rerr := os.ReadFile(logPath); rerr == nil {
+		if strings.Contains(string(raw), "secret-rotated") {
+			t.Errorf("secret-rotated emitted despite rejected (uncommitted) SecretsSet:\n%s", raw)
+		}
+	}
+}
+
 func TestVaultFlockHelperProcess(t *testing.T) {
 	if os.Getenv("MCPHUB_TEST_HOLD_VAULT_LOCK") != "1" {
 		return

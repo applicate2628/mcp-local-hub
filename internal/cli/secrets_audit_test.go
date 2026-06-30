@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -163,6 +164,143 @@ func TestCLISecretsDelete_FailedWriteEmitsNoAuditEvent(t *testing.T) {
 	if raw, rerr := os.ReadFile(logPath); rerr == nil {
 		if strings.Contains(string(raw), "secret-deleted") {
 			t.Errorf("secret-deleted emitted despite failed (uncommitted) CLI delete:\n%s", raw)
+		}
+	}
+}
+
+// writeEditorScript writes an OS-appropriate fake $EDITOR script that
+// overwrites its first argument (the temp vault file `secrets edit` passes)
+// with editedYAML, then returns the script's path. `secrets edit` execs the
+// editor as `exec.Command(editor, tmpPath)` — a single executable + one arg —
+// so a script (not a binary+flags string) is the portable way to inject
+// content. The YAML is written to a sibling file (not embedded in the script)
+// so quoting/escaping never corrupts it.
+func writeEditorScript(t *testing.T, editedYAML string) string {
+	t.Helper()
+	dir := t.TempDir()
+	yamlFile := filepath.Join(dir, "edited.yaml")
+	if err := os.WriteFile(yamlFile, []byte(editedYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		script := filepath.Join(dir, "editor.bat")
+		// %1 = the tmp vault path; copy our YAML over it. /Y suppresses prompt.
+		body := "@echo off\r\ncopy /Y \"" + yamlFile + "\" \"%~1\" >nul\r\n"
+		if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return script
+	}
+	script := filepath.Join(dir, "editor.sh")
+	body := "#!/bin/sh\ncp \"" + yamlFile + "\" \"$1\"\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+// runSecretsEdit drives `secrets edit` with a fake $EDITOR that rewrites the
+// vault YAML to editedYAML, exercising the real ExportYAML → editor →
+// ImportYAML → audit-diff path.
+func runSecretsEdit(t *testing.T, editedYAML string) error {
+	t.Helper()
+	t.Setenv("EDITOR", writeEditorScript(t, editedYAML))
+	cmd := newSecretsCmdReal()
+	cmd.SetArgs([]string{"edit"})
+	cmd.SetOut(&strings.Builder{})
+	cmd.SetErr(&strings.Builder{})
+	return cmd.Execute()
+}
+
+// TestCLISecretsEdit_EmitsPerKeyAuditEventsWithoutValues (P2.4 finding 3):
+// `secrets edit` (bulk ImportYAML) must emit accurate per-key audit events —
+// secret-rotated for added/changed keys, secret-deleted for removed keys —
+// carrying key NAMES only, never values, and only after the committed import.
+func TestCLISecretsEdit_EmitsPerKeyAuditEventsWithoutValues(t *testing.T) {
+	_, logPath := secretsCliAuditEnv(t)
+	initVaultForCliTest(t)
+
+	// Seed three keys via the audited set path, then truncate the log so the
+	// edit-diff assertion sees ONLY the edit's events.
+	const keepVal = "unchanged-value-KEEP"
+	const oldChangedVal = "old-value-CHANGED"
+	const removedVal = "removed-value-GONE"
+	for k, v := range map[string]string{
+		"KEEP_KEY":    keepVal,
+		"CHANGE_KEY":  oldChangedVal,
+		"REMOVE_KEY":  removedVal,
+	} {
+		if err := runSecretsCmd(t, v, "set", k, "--from-stdin"); err != nil {
+			t.Fatalf("seed set %s: %v", k, err)
+		}
+	}
+	if err := os.WriteFile(logPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Edited YAML: KEEP unchanged, CHANGE rotated, REMOVE dropped, ADD new.
+	const newChangedVal = "new-value-CHANGED"
+	const addedVal = "added-value-NEW"
+	edited := "KEEP_KEY: " + keepVal + "\n" +
+		"CHANGE_KEY: " + newChangedVal + "\n" +
+		"ADD_KEY: " + addedVal + "\n"
+	if err := runSecretsEdit(t, edited); err != nil {
+		t.Fatalf("secrets edit: %v", err)
+	}
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read hub-mcp.log: %v", err)
+	}
+	body := string(raw)
+
+	// CHANGE_KEY (value changed) and ADD_KEY (new) → secret-rotated.
+	if !strings.Contains(body, "CHANGE_KEY") {
+		t.Errorf("changed key CHANGE_KEY missing a rotated event:\n%s", body)
+	}
+	if !strings.Contains(body, "ADD_KEY") {
+		t.Errorf("added key ADD_KEY missing a rotated event:\n%s", body)
+	}
+	if !strings.Contains(body, `"event":"secret-rotated"`) {
+		t.Errorf("no secret-rotated event for added/changed keys:\n%s", body)
+	}
+	// REMOVE_KEY → secret-deleted.
+	if !strings.Contains(body, `"event":"secret-deleted"`) || !strings.Contains(body, "REMOVE_KEY") {
+		t.Errorf("removed key REMOVE_KEY missing a secret-deleted event:\n%s", body)
+	}
+	// KEEP_KEY unchanged → NO event for it.
+	if strings.Contains(body, "KEEP_KEY") {
+		t.Errorf("unchanged key KEEP_KEY must emit no event:\n%s", body)
+	}
+	// NO secret VALUE may appear in the audit log.
+	for _, v := range []string{keepVal, oldChangedVal, newChangedVal, removedVal, addedVal} {
+		if strings.Contains(body, v) {
+			t.Errorf("LEAK: secret value %q present in edit audit log:\n%s", v, body)
+		}
+	}
+}
+
+// TestCLISecretsEdit_FailedImportEmitsNoAuditEvent (P2.4 finding 3): if the
+// editor writes invalid YAML, ImportYAML fails, the RMW returns non-nil, and
+// NO audit event is emitted.
+func TestCLISecretsEdit_FailedImportEmitsNoAuditEvent(t *testing.T) {
+	_, logPath := secretsCliAuditEnv(t)
+	initVaultForCliTest(t)
+	if err := runSecretsCmd(t, "v1", "set", "K1", "--from-stdin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Invalid YAML (a bare scalar that does not unmarshal into map[string]string).
+	err := runSecretsEdit(t, ":\n  - not a map\n:::bad")
+	if err == nil {
+		t.Fatal("secrets edit with invalid YAML: want error, got nil")
+	}
+	if raw, rerr := os.ReadFile(logPath); rerr == nil {
+		b := string(raw)
+		if strings.Contains(b, "secret-rotated") || strings.Contains(b, "secret-deleted") {
+			t.Errorf("audit event emitted despite failed (uncommitted) edit import:\n%s", b)
 		}
 	}
 }

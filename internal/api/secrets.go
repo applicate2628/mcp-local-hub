@@ -250,7 +250,7 @@ func (a *API) SecretsSet(name, value string) error {
 	// Flock the OpenVault → Get → Set(save) RMW so a concurrent CLI/other-
 	// process vault write cannot lose this update (vaultMutex is in-process
 	// only). Tight critical section — no interactive work inside.
-	return secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
+	err := secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
 		v, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 		if err != nil {
 			return &SecretsOpError{Code: "SECRETS_VAULT_NOT_INITIALIZED", Msg: err.Error()}
@@ -263,6 +263,18 @@ func (a *API) SecretsSet(name, value string) error {
 		}
 		return nil
 	})
+	// P2.4 audit trail (finding 1): the GUI Add-Secret path (POST /api/secrets)
+	// previously committed credential material with NO audit record. Emit ONLY
+	// after the committed write (err == nil) — a rejected create
+	// (SECRETS_KEY_EXISTS, vault-not-initialized, set-failed) returns non-nil
+	// and leaves no misleading record. Reuses the SHARED secret-rotated event
+	// (the one credential-set event name across API + CLI); `created:true`
+	// records that this was a fresh create, not an overwrite. `value` is never
+	// passed in.
+	if err == nil {
+		emitSecretAuditEvent("secret-rotated", []string{name}, map[string]any{"source": "api", "created": true})
+	}
+	return err
 }
 
 // SecretsOpError is the typed error returned by every coded Secrets API
