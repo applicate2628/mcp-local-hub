@@ -7,6 +7,8 @@ import (
 	"math/bits"
 	"os"
 	"sync"
+
+	"golang.org/x/sys/unix"
 )
 
 // ClockTicksPerSecond returns the kernel's CLK_TCK (clock-ticks-per-second)
@@ -22,16 +24,29 @@ import (
 // drift on a freshly-booted host), while internal/gui read the
 // kernel-published value directly from /proc/self/auxv's AT_CLKTCK entry —
 // an exact, zero-drift source already hardened across three rounds of bot
-// review (32-bit auxv layout, native endianness, jiffy-precision loss). The
-// auxv reader is migrated here verbatim as the shared, more correct
-// implementation; internal/gui now calls this function instead of keeping
-// its own copy.
+// review (32-bit auxv layout, native endianness, jiffy-precision loss). This
+// unified owner uses the auxv reader as the primary source AND keeps the old
+// runtime estimate as a secondary fallback (see the resolution-order list
+// below); internal/gui now calls this function instead of keeping its own
+// copy.
 //
 // Reads /proc/self/auxv once per process and caches the result, since
 // CLK_TCK is a kernel build-time constant that never changes for the life of
-// the process. Falls back to 100 (the most common kernel default) if the
-// auxv is unreadable or the entry is missing, so probe/start-time logic
-// stays usable on minimal containers that hide /proc/self/auxv.
+// the process. Resolution order, best-to-worst (bot PR #474 P2 — do NOT
+// blindly trust the 100 default on an auxv-unavailable host):
+//
+//  1. AT_CLKTCK from /proc/self/auxv — exact, kernel-published, zero drift.
+//  2. A unix.Times/unix.Sysinfo runtime ESTIMATE (ticks-since-boot ÷ uptime)
+//     when auxv is unreadable or lacks AT_CLKTCK. This is the value the
+//     pre-unification internal/process derived; restored here as the SECONDARY
+//     fallback because on a kernel built with HZ=250 or HZ=1000 (where auxv is
+//     hidden, e.g. some hardened/minimal containers) a blind 100 would make
+//     ProcessStartTime off by 2.5x/10x and mis-judge the supervisor identity
+//     gate. The estimate has sub-1% drift on a freshly-booted host — far
+//     closer to a non-100 true HZ than the 100 default is.
+//  3. 100 (the most common kernel default) ONLY when BOTH the auxv read and
+//     the estimate fail, so probe/start-time logic stays usable on minimal
+//     containers that hide both surfaces.
 //
 // Each auxv entry is two C unsigned longs — 16 bytes on 64-bit builds
 // (amd64/arm64), 8 bytes on 32-bit builds (386/arm). The list terminates with
@@ -66,25 +81,66 @@ func readAuxvWord(data []byte, i int) uint64 {
 }
 
 // ClockTicksPerSecond returns the cached CLK_TCK value, reading
-// /proc/self/auxv on first call. See the package-level doc above.
+// /proc/self/auxv on first call. See the package-level doc above for the
+// three-tier resolution order (auxv → estimate → 100).
 func ClockTicksPerSecond() int64 {
 	clkTckOnce.Do(func() {
-		clkTckValue = 100 // safe default if auxv is unreadable
-		data, err := os.ReadFile("/proc/self/auxv")
-		if err != nil {
+		// Tier 1 (primary): exact value from /proc/self/auxv AT_CLKTCK.
+		if hz, ok := clkTckFromAuxv(); ok {
+			clkTckValue = hz
 			return
 		}
-		for i := 0; i+auxvEntryLen <= len(data); i += auxvEntryLen {
-			atype := readAuxvWord(data, i)
-			avalue := readAuxvWord(data, i+auxvWordSize)
-			if atype == atNullType {
-				break
-			}
-			if atype == atClkTckType && avalue > 0 {
-				clkTckValue = int64(avalue)
-				return
-			}
+		// Tier 2 (fallback): runtime estimate from unix.Times/unix.Sysinfo —
+		// better than a blind 100 on a HZ=250/1000 kernel that hides auxv.
+		if hz, ok := clkTckFromUptimeEstimate(); ok {
+			clkTckValue = hz
+			return
 		}
+		// Tier 3 (last resort): the most common kernel default.
+		clkTckValue = 100
 	})
 	return clkTckValue
+}
+
+// clkTckFromAuxv reads the kernel-published AT_CLKTCK entry from
+// /proc/self/auxv. Returns (0, false) if the auxv is unreadable or the entry
+// is absent. This is the exact, zero-drift primary source.
+func clkTckFromAuxv() (int64, bool) {
+	data, err := os.ReadFile("/proc/self/auxv")
+	if err != nil {
+		return 0, false
+	}
+	for i := 0; i+auxvEntryLen <= len(data); i += auxvEntryLen {
+		atype := readAuxvWord(data, i)
+		avalue := readAuxvWord(data, i+auxvWordSize)
+		if atype == atNullType {
+			break
+		}
+		if atype == atClkTckType && avalue > 0 {
+			return int64(avalue), true
+		}
+	}
+	return 0, false
+}
+
+// clkTckFromUptimeEstimate derives CLK_TCK as ticks-since-boot ÷ uptime via
+// unix.Times + unix.Sysinfo (rounded). This is the pre-unification estimate
+// internal/process used; it is the SECONDARY fallback (better than a blind
+// 100 on a non-100-HZ kernel that hides auxv — bot PR #474 P2). Returns
+// (0, false) if either syscall fails or yields a non-positive denominator.
+func clkTckFromUptimeEstimate() (int64, bool) {
+	var tms unix.Tms
+	ticks, err := unix.Times(&tms)
+	if err != nil || ticks == 0 {
+		return 0, false
+	}
+	var info unix.Sysinfo_t
+	if err := unix.Sysinfo(&info); err != nil || info.Uptime <= 0 {
+		return 0, false
+	}
+	hz := int64((ticks + uintptr(info.Uptime/2)) / uintptr(info.Uptime))
+	if hz <= 0 {
+		return 0, false
+	}
+	return hz, true
 }

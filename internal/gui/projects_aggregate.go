@@ -176,14 +176,27 @@ func (s *Server) projectsAggregateHandler(w http.ResponseWriter, r *http.Request
 // (design §10.1): a group is visible in a project's lens when it is bound to THAT
 // project (its canonical ProjectPath equals the project's canonical key) OR it is
 // UNBOUND / GLOBAL (ProjectPath == "" — every pre-P3c group, plus any group the
-// operator explicitly made global). Both sides are already canonical keys: the
-// stored ProjectPath was normalized via clients.CanonicalProjectKey by the
-// binding write owner, and projectKey is the aggregate's CanonicalProjectKey, so
-// this is a direct string compare with no re-normalization here. The frontend
-// reads the filtered per-project Groups list this predicate produces and never
-// re-implements it.
+// operator explicitly made global).
+//
+// Both sides are RE-NORMALIZED through clients.CanonicalProjectKey before the
+// compare (bot PR #474 P2). The binding write owner already stores a canonical
+// ProjectPath, but the canonical FORM is platform-dependent: the darwin
+// case-fold (added in the same P3 portability batch) means a groups.yaml entry
+// persisted on macOS by an OLDER, pre-fold binary holds a CASE-PRESERVING
+// ProjectPath (e.g. "/Users/Dev/Proj") while projectKey is now folded
+// ("/users/dev/proj"). A raw string compare would then strand that pre-existing
+// binding. Folding both sides at compare time is idempotent for an
+// already-canonical value (no behavior change on Linux/Windows or on any
+// freshly-written entry) and forward/backward-compatible for a pre-fold macOS
+// entry. The empty-string UNBIND sentinel is checked on the RAW stored value
+// (CanonicalProjectKey("") == "", so this is equivalent and avoids a needless
+// call). The frontend reads the filtered per-project Groups list this predicate
+// produces and never re-implements it.
 func groupVisibleInProject(g api.Group, projectKey string) bool {
-	return g.ProjectPath == "" || g.ProjectPath == projectKey
+	if g.ProjectPath == "" {
+		return true // unbound / global
+	}
+	return clients.CanonicalProjectKey(g.ProjectPath) == clients.CanonicalProjectKey(projectKey)
 }
 
 // filterGroupsForProject returns the project-lens-visible subset of groups

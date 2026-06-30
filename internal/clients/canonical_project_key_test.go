@@ -37,6 +37,20 @@ func TestCanonicalProjectKey_Normalization(t *testing.T) {
 				t.Errorf("CanonicalProjectKey(%q) = %q, want %q", c.in, got, c.want)
 			}
 		}
+		// MIXED-CASE POSIX inputs: the expected form depends on whether this
+		// GOOS case-folds. On Darwin (default-case-insensitive APFS/HFS+) the
+		// key folds to lower; on Linux (case-sensitive ext4) it is preserved.
+		// This is the only branch that actually exercises the darwin fold on a
+		// macOS build — the all-lowercase cases above are fold-invariant and
+		// would pass even if the darwin fold regressed (bot PR #474 P2).
+		mixedCase := "/Dev/Proj"
+		wantMixed := mixedCase
+		if caseFoldsProjectKey(runtime.GOOS) {
+			wantMixed = "/dev/proj"
+		}
+		if got := CanonicalProjectKey(mixedCase); got != wantMixed {
+			t.Errorf("CanonicalProjectKey(%q) on GOOS=%s = %q, want %q (fold=%v)", mixedCase, runtime.GOOS, got, wantMixed, caseFoldsProjectKey(runtime.GOOS))
+		}
 	}
 	if CanonicalProjectKey("") != "" {
 		t.Errorf("empty input must return empty")
@@ -140,5 +154,29 @@ func TestCanonicalClaudeKeyIsAliasOfCanonical(t *testing.T) {
 		if a, b := canonicalClaudeProjectKey(in), CanonicalProjectKey(in); a != b {
 			t.Errorf("canonicalClaudeProjectKey(%q)=%q diverged from CanonicalProjectKey=%q", in, a, b)
 		}
+	}
+}
+
+// TestCanonicalClaudeKey_FoldsPerPlatform pins that the claude alias case-folds
+// EXACTLY on the platforms caseFoldsProjectKey says it should — i.e. it folds on
+// Darwin too, not only Windows (bot PR #474 P2). Driven by the GOOS-independent
+// predicate so the darwin expectation is asserted on every build (the actual
+// fold for darwin only runs on a darwin binary, but the predicate-linked
+// expectation cannot silently route darwin through the non-fold branch). A
+// mixed-case POSIX-shaped input is used so the fold is observable; on Windows
+// the drive-letter form folds for the same reason.
+func TestCanonicalClaudeKey_FoldsPerPlatform(t *testing.T) {
+	var in, wantFolded, wantPreserved string
+	if runtime.GOOS == "windows" {
+		in, wantFolded, wantPreserved = `C:\Dev\Proj`, "c:/dev/proj", "C:/Dev/Proj"
+	} else {
+		in, wantFolded, wantPreserved = "/Dev/Proj", "/dev/proj", "/Dev/Proj"
+	}
+	want := wantPreserved
+	if caseFoldsProjectKey(runtime.GOOS) {
+		want = wantFolded
+	}
+	if got := canonicalClaudeProjectKey(in); got != want {
+		t.Errorf("canonicalClaudeProjectKey(%q) on GOOS=%s = %q, want %q (fold=%v)", in, runtime.GOOS, got, want, caseFoldsProjectKey(runtime.GOOS))
 	}
 }

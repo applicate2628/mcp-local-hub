@@ -12,15 +12,24 @@ import (
 // long a unix-domain-socket path can be before bind(2)/connect(2) refuses it
 // with a cryptic ENAMETOOLONG-derived Go error. The kernel buffer is a fixed
 // C char[] in struct sockaddr_un — there is no portable syscall to query it
-// at runtime, so the documented constants are the only source: Linux's
-// <linux/un.h> UNIX_PATH_MAX is 108; Darwin's <sys/un.h> SUN_LEN bound is 104.
-// Both reserve the LAST byte for the NUL terminator, so the actual usable
-// path length is one less than the buffer size.
+// at runtime, so the documented constants are the only source:
+//
+//   - Linux <linux/un.h> UNIX_PATH_MAX = 108.
+//   - Darwin <sys/un.h> sun_path = 104.
+//   - The BSDs (FreeBSD/NetBSD/OpenBSD/DragonFly) also use 104 — golang.org/x/
+//     sys/unix.RawSockaddrUnix.Path is [104]int8 on every BSD GOOS (bot PR
+//     #474 P3); returning Linux's 108 for them would over-estimate the limit
+//     by 4 bytes and let a too-long path through to a cryptic bind failure.
+//
+// Every platform reserves the LAST byte for the NUL terminator, so the actual
+// usable path length is one less than the buffer size.
 func maxUnixSocketPathLen() int {
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin", "freebsd", "netbsd", "openbsd", "dragonfly":
 		return 104
+	default:
+		return 108 // Linux (and any other POSIX target) uses UNIX_PATH_MAX = 108.
 	}
-	return 108 // Linux and other POSIX targets default to the Linux value.
 }
 
 // ValidateSupervisorIPCSocketPathLen pre-validates socketPath against the
