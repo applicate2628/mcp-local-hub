@@ -68,6 +68,13 @@ import type {
 // short-circuits the redundant render.
 const EMPTY_CLIENT_CONFIG_PRESENCE: Record<string, ClientConfigState> = {};
 
+// EMPTY_CLIENT_SCAN_ERRORS is the stable empty reference for the per-client
+// parse/read-error map, mirroring EMPTY_CLIENT_CONFIG_PRESENCE so a scan that
+// omits client_scan_errors (the common no-error case + older mocks) does not
+// churn a fresh `{}` into state on every refresh and trip the render-timing
+// bailout above.
+const EMPTY_CLIENT_SCAN_ERRORS: Record<string, string> = {};
+
 // Per-cell dirty tracking with direction preserved. Outer key: server name.
 // Inner map: client → Direction.
 //
@@ -138,6 +145,16 @@ export function ServersScreen() {
   // the button disappears once the empty stub lands on disk.
   const [clientConfigPresence, setClientConfigPresence] = useState<
     Record<string, ClientConfigState>
+  >({});
+  // P2 scan per-client isolation: the adapter-level parse/read error message
+  // (keyed by client id) recorded when a client's config could not be parsed
+  // or read. ScanFrom now isolates such a failure to that one client (presence
+  // → "error") and records the message here instead of aborting the whole scan.
+  // Threaded into CellView so a config-error cell whose client has an entry
+  // here renders a PARSE/read-failure diagnostic with the actual message,
+  // distinct from the generic stat/permission anomaly.
+  const [clientScanErrors, setClientScanErrors] = useState<
+    Record<string, string>
   >({});
   // Per-client "initializing" flag: the operator clicked the
   // Initialize button and the POST is in flight. Used to disable the
@@ -321,6 +338,7 @@ export function ServersScreen() {
       setWorkspaces(workspacesResp.workspaces);
       setWorkspaceEntries(workspacesResp.entries);
       setClientConfigPresence(scan.client_config_presence ?? EMPTY_CLIENT_CONFIG_PRESENCE);
+      setClientScanErrors(scan.client_scan_errors ?? EMPTY_CLIENT_SCAN_ERRORS);
       // Clear any success banner once the authoritative refresh lands
       // (the matrix has already redrawn with the new "ok" state).
       // Error banners stay sticky so the operator sees the failure
@@ -1057,6 +1075,7 @@ export function ServersScreen() {
               key={server.name}
               server={server}
               clients={clientColumns}
+              scanErrors={clientScanErrors}
               status={statusByServer[server.name]}
               outcomes={outcomes.get(server.name)}
               pending={dirty.get(server.name)}
@@ -1158,6 +1177,11 @@ function OtherMCPEntriesSection(props: { servers: ServerRow[] }) {
 function ServerRowView(props: {
   server: ServerRow;
   clients: readonly string[];
+  // Per-client parse/read-error messages from ScanResult.client_scan_errors
+  // (keyed by client id). Threaded through to each CellView so a config-error
+  // cell can render the actual parse-failure message instead of the generic
+  // stat-anomaly tooltip. Empty/absent for the common no-error scan.
+  scanErrors: Record<string, string>;
   status?: { state: string; port: number | null };
   outcomes?: Map<string, Outcome>;
   // Per-server dirty direction map (client → "migrate" | "demigrate").
@@ -1186,7 +1210,7 @@ function ServerRowView(props: {
   onSymlinkResolved: () => void;
   applying: boolean;
 }) {
-  const { server, clients, status, outcomes, pending, onToggle, onRowToggle, onRowToggleHover, hoverScope, onOpenDrawer, onSymlinkResolved, applying } = props;
+  const { server, clients, scanErrors, status, outcomes, pending, onToggle, onRowToggle, onRowToggleHover, hoverScope, onOpenDrawer, onSymlinkResolved, applying } = props;
   // Row-toggle affordance state: a cell is "checked" if a pending dirty
   // edit says so, else the scan baseline (via-hub). rowInteractive uses the
   // same cellInteractive gate as the per-cell checkbox + the column toggle,
@@ -1262,6 +1286,7 @@ function ServerRowView(props: {
           key={`${client}-${props.applyGen}`}
           server={server}
           client={client}
+          scanError={scanErrors[client]}
           lastOutcome={outcomes?.get(client)}
           pendingDirection={pending?.get(client)}
           // G1 hover-scope preview: this cell is inside the hovered group when
@@ -1407,6 +1432,13 @@ function SymlinkResolveAffordance(props: {
 function CellView(props: {
   server: ServerRow;
   client: string;
+  // P2 scan per-client isolation: the adapter-level parse/read-error message
+  // for THIS cell's client from ScanResult.client_scan_errors, if any. Present
+  // only when ScanFrom isolated a malformed/unreadable config for this client
+  // (presence → "error"). When set on a config-error cell, the cell renders a
+  // PARSE/read-failure diagnostic with this message, distinct from the generic
+  // stat/permission anomaly label used when no message is recorded.
+  scanError?: string;
   onSymlinkResolved?: () => void;
   lastOutcome?: Outcome;
   // Pending dirty direction for THIS cell (from the parent's dirty map).
@@ -1426,7 +1458,7 @@ function CellView(props: {
   onToggle: (server: string, client: string, nextChecked: boolean, initialChecked: boolean) => void;
   applying: boolean;
 }) {
-  const { server, client, onSymlinkResolved, lastOutcome, pendingDirection, inHoverScope, onToggle, applying } = props;
+  const { server, client, scanError, onSymlinkResolved, lastOutcome, pendingDirection, inHoverScope, onToggle, applying } = props;
   // Treat undefined routing as "not-installed" — perClientRouting only
   // populates keys present in /api/scan's client_presence map.
   const routing: Routing = server.routing[client] ?? "not-installed";
@@ -1492,12 +1524,23 @@ function CellView(props: {
   } else if (routing === "unsupported") {
     title = `${client} cannot route this server through the hub (e.g., per-session servers).`;
   } else if (routing === "config-error") {
-    // v0.4.5 PR #208 deep-sec Lane B follow-up: distinguish "stat
-    // returned an error" from "file absent" so the operator sees an
-    // actionable diagnostic instead of the misleading "not present"
-    // tooltip. Typical causes: parent-directory permissions blocked,
-    // antivirus quarantine, or I/O fault on the underlying volume.
-    title = `${client}'s MCP config file could not be read (stat error). Check file permissions and disk health, then refresh.`;
+    // P2 scan per-client isolation: a config-error cell now has TWO distinct
+    // causes. The backend records a message in ScanResult.client_scan_errors
+    // ONLY for an isolated adapter-level parse/read failure (malformed JSON/
+    // TOML, unreadable body) — the pre-existing stat/wrong-shape failure leaves
+    // the map empty for this client. Surface them differently so an operator
+    // with a malformed config sees the actual parser message instead of the
+    // misleading "check permissions and disk health" stat-anomaly hint.
+    if (scanError) {
+      title = `${client}'s MCP config could not be parsed/read: ${scanError}. Fix the config file (e.g. invalid JSON/TOML), then refresh. Other clients were scanned normally.`;
+    } else {
+      // v0.4.5 PR #208 deep-sec Lane B follow-up: distinguish "stat
+      // returned an error" from "file absent" so the operator sees an
+      // actionable diagnostic instead of the misleading "not present"
+      // tooltip. Typical causes: parent-directory permissions blocked,
+      // antivirus quarantine, or I/O fault on the underlying volume.
+      title = `${client}'s MCP config file could not be read (stat error). Check file permissions and disk health, then refresh.`;
+    }
   } else if (routing === "config-error-symlink") {
     // 2026-05-19 message-accuracy fix: the config path is a symlink.
     // The prior generic "stat error" tooltip sent operators to inspect
@@ -1583,6 +1626,24 @@ function CellView(props: {
           title={`A legacy non-hub entry for ${server.name} also exists in ${client}'s config alongside the hub binding. Resolve in ${client}'s mcp config directly.`}
         >
           legacy
+        </span>
+      )}
+      {/* P2 scan per-client isolation: an isolated adapter-level parse/read
+          failure for THIS client (presence "error" + a client_scan_errors
+          message). Renders a DISTINCT inline note — the actual parser message,
+          not the generic stat-anomaly label — so the operator sees "config
+          unreadable: <message>". role="note" + the message in both the visible
+          text and the title keeps it accessible. A bare stat-error cell
+          (routing config-error with no scanError) renders nothing here and
+          keeps its generic tooltip. */}
+      {routing === "config-error" && scanError && (
+        <span
+          class="matrix-cell-parse-error"
+          role="note"
+          data-testid={`scan-error-${server.name}-${client}`}
+          title={`${client}'s MCP config could not be parsed/read: ${scanError}`}
+        >
+          config unreadable: {scanError}
         </span>
       )}
       {/* A3 PR-2: the explicit per-config symlink-follow ENABLE the operator

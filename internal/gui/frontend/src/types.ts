@@ -98,6 +98,18 @@ export interface ScanResult {
   // to deterministically fail with INIT_FAILED.
   client_config_presence?: Record<string, ClientConfigState>;
 
+  // client_scan_errors mirrors api.ScanResult.ClientScanErrors
+  // (`json:"client_scan_errors,omitempty"`). Keys are client ids; values are
+  // the adapter-level parse/read-error message recorded when that client's
+  // config could not be parsed or read. P2 scan per-client isolation: ScanFrom
+  // now keeps scanning sibling clients and records the failed client here
+  // instead of aborting the whole scan with one bad config. A client present
+  // here also has client_config_presence "error"; the Servers matrix renders
+  // such a cell with the parse-failure message (distinct from the generic
+  // stat/permission anomaly used when presence is "error" with NO entry here).
+  // Absent/empty for the common no-error scan + older mocks.
+  client_scan_errors?: Record<string, string>;
+
   // client_capabilities is the backend's per-client capability map (keyed by
   // every clients.SupportedClientNames() id) that the GUI uses to decide which
   // clients it may safely offer, derived from the single backend owner so it
@@ -272,11 +284,19 @@ export type ClientEntry = ClientPresence;
 //   "config-error"  — `os.Stat` on the client config returned an error
 //                     OTHER than IsNotExist (typically a permissions /
 //                     ACL / I/O anomaly), OR the path is a non-regular
-//                     non-symlink shape (directory, pipe, device).
+//                     non-symlink shape (directory, pipe, device), OR
+//                     (P2 scan per-client isolation) the config existed
+//                     but could not be PARSED/read — that isolated
+//                     adapter-level failure also records the parser
+//                     message in ScanResult.client_scan_errors[client].
 //                     Distinct from "not-installed" so the matrix can
 //                     render an actionable diagnostic instead of
-//                     silently dropping the cell. Surfaced by the
-//                     v0.4.5 PR #208 deep-sec Lane B follow-up.
+//                     silently dropping the cell. The matrix renders the
+//                     two sub-causes differently: with a client_scan_errors
+//                     entry it shows the parse-failure message; without one
+//                     it shows the generic stat/permission anomaly hint.
+//                     Surfaced by the v0.4.5 PR #208 deep-sec Lane B
+//                     follow-up; parse sub-case added by the P2 isolation PR.
 //   "config-error-symlink" — the client config path is a symlink that
 //                     the secure-write pipeline refuses in all modes
 //                     (post-PR #209 confused-deputy closure). Split
