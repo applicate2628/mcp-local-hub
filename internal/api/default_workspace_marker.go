@@ -21,9 +21,12 @@
 package api
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/gofrs/flock"
 )
 
 // DefaultWorkspaceFilename is the sidecar file (alongside workspaces.yaml) that
@@ -62,6 +65,17 @@ func ReadDefaultWorkspace(stateDir string) (string, error) {
 // `workspace unregister --backend serena|all` and the GUI auto-prune sweeper
 // run so a stale default cannot outlive the workspace it pointed at.
 func ClearDefaultWorkspaceIfMatches(stateDir, canonical string) error {
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		return fmt.Errorf("mkdir default workspace state dir: %w", err)
+	}
+	path := filepath.Join(stateDir, DefaultWorkspaceFilename)
+	lockPath := path + ".lock"
+	lock := flock.New(lockPath)
+	if err := lock.Lock(); err != nil {
+		return fmt.Errorf("default-workspace flock %s: %w", lockPath, err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
 	got, err := ReadDefaultWorkspace(stateDir)
 	if err != nil {
 		return err
@@ -69,5 +83,5 @@ func ClearDefaultWorkspaceIfMatches(stateDir, canonical string) error {
 	if got != canonical {
 		return nil
 	}
-	return WriteDefaultWorkspace(stateDir, "")
+	return WriteStateFileBytesLockHeld(path, []byte(""))
 }

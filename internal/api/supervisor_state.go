@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gofrs/flock"
 )
@@ -146,6 +148,16 @@ func MutateSupervisorState(path string, mutate func(*SupervisorStateFile) error)
 // changed flag so callers can keep read-only/no-op cases from rewriting the
 // state file. The caller's mutate function runs while path+".lock" is held.
 func MutateSupervisorStateIfChanged(path string, mutate func(*SupervisorStateFile) (bool, error)) error {
+	return MutateSupervisorStateIfChangedContext(context.Background(), path, mutate)
+}
+
+// MutateSupervisorStateIfChangedContext is MutateSupervisorStateIfChanged with
+// a context-aware flock acquire. The caller's mutate function runs while
+// path+".lock" is held.
+func MutateSupervisorStateIfChangedContext(ctx context.Context, path string, mutate func(*SupervisorStateFile) (bool, error)) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("empty supervisor state path")
 	}
@@ -155,8 +167,8 @@ func MutateSupervisorStateIfChanged(path string, mutate func(*SupervisorStateFil
 
 	lockPath := path + ".lock"
 	lk := flock.New(lockPath)
-	if err := lk.Lock(); err != nil {
-		return fmt.Errorf("supervisor-state flock %s: %w", lockPath, err)
+	if err := lockFlockContext(ctx, lk, lockPath, "supervisor-state"); err != nil {
+		return err
 	}
 	defer func() { _ = lk.Unlock() }()
 
@@ -184,6 +196,35 @@ func MutateSupervisorStateIfChanged(path string, mutate func(*SupervisorStateFil
 		return fmt.Errorf("marshal supervisor state: %w", err)
 	}
 	return WriteStateFileBytesLockHeld(path, raw)
+}
+
+const stateFileLockPollInterval = 25 * time.Millisecond
+
+func lockFlockContext(ctx context.Context, lk *flock.Flock, lockPath, label string) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		locked, err := lk.TryLock()
+		if err != nil {
+			return fmt.Errorf("%s flock %s: %w", label, lockPath, err)
+		}
+		if locked {
+			return nil
+		}
+		timer := time.NewTimer(stateFileLockPollInterval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func normalizeSupervisorStateForMutation(file *SupervisorStateFile) {

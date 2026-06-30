@@ -204,7 +204,7 @@ func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, er
 	}
 
 	if !customStateIO {
-		if err := api.MutateSupervisorStateIfChanged(statePath, reapState); err != nil {
+		if err := api.MutateSupervisorStateIfChangedContext(ctx, statePath, reapState); err != nil {
 			return res, fmt.Errorf("mutate supervisor state: %w", err)
 		}
 		return res, nil

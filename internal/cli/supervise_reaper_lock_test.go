@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -60,5 +61,48 @@ func TestReapStaleTransientsReadsUnderSupervisorStateFlock(t *testing.T) {
 	}
 	if len(got.TransientPIDs) != 0 {
 		t.Fatalf("dead transient PID was not cleared: %+v", got.TransientPIDs)
+	}
+}
+
+func TestReapStaleTransientsCancelsWhileWaitingForSupervisorStateFlock(t *testing.T) {
+	stateDir := t.TempDir()
+	statePath := filepath.Join(stateDir, "supervisor-state.json")
+	if err := api.WriteStateFileBytesAtomic(statePath, []byte(`{"version":1}`)); err != nil {
+		t.Fatal(err)
+	}
+
+	lock := flock.New(statePath + ".lock")
+	if err := lock.Lock(); err != nil {
+		t.Fatalf("lock supervisor state file: %v", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := ReapStaleTransients(ctx, ReaperDeps{
+			StateDir: stateDir,
+			PIDAlive: func(int) bool {
+				return false
+			},
+			SettleDuration: 10 * time.Millisecond,
+		})
+		done <- err
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("ReapStaleTransients err = %v, want context.Canceled", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		_ = lock.Unlock()
+		if err := <-done; err == nil {
+			t.Fatal("ReapStaleTransients only returned after the test released the flock; want ctx cancellation while waiting")
+		}
+		t.Fatal("ReapStaleTransients did not return promptly after context cancellation while waiting for the flock")
 	}
 }

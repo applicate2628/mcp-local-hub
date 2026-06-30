@@ -118,6 +118,16 @@ func (a *API) SettingsSetIn(path, key, value string) error {
 	if err := validate(def, value); err != nil {
 		return fmt.Errorf("invalid value for %s: %v", key, err)
 	}
+	return mutateRawSettingsMapLocked(path, func(raw map[string]string) error {
+		raw[key] = value
+		return nil
+	})
+}
+
+// mutateRawSettingsMapLocked owns gui-preferences.yaml read-modify-write
+// serialization. It combines the in-process settingsMu with the per-file flock
+// so API, GUI, CLI, and sibling-process writers share one RMW boundary.
+func mutateRawSettingsMapLocked(path string, mutate func(map[string]string) error) error {
 	settingsMu.Lock()
 	defer settingsMu.Unlock()
 
@@ -135,7 +145,11 @@ func (a *API) SettingsSetIn(path, key, value string) error {
 	if err != nil {
 		return err
 	}
-	raw[key] = value
+	if mutate != nil {
+		if err := mutate(raw); err != nil {
+			return err
+		}
+	}
 	data, err := yaml.Marshal(raw)
 	if err != nil {
 		return err

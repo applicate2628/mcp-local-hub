@@ -33,8 +33,6 @@ import (
 	"fmt"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
 	"mcp-local-hub/internal/clients"
 )
 
@@ -114,10 +112,9 @@ func (a *API) SetDefaultInstallClientNames(names []string) error {
 }
 
 // SetDefaultInstallClientNamesIn is the tempdir-capable form. The
-// read-modify-write is serialized via settingsMu and committed with the
-// same atomic temp-then-rename + 0600 chmod pipeline SettingsSetIn uses, so
-// the override coexists with every other gui-preferences.yaml key and a
-// concurrent reader never observes a partially-written file.
+// read-modify-write uses the same gui-preferences.yaml locked mutator as
+// SettingsSetIn, so the override coexists with every other key across
+// goroutines and sibling processes.
 func (a *API) SetDefaultInstallClientNamesIn(path string, names []string) error {
 	supported := map[string]bool{}
 	for _, n := range clients.SupportedClientNames() {
@@ -143,29 +140,10 @@ func (a *API) SetDefaultInstallClientNamesIn(path string, names []string) error 
 		return fmt.Errorf("default-install client set must name at least one supported client")
 	}
 
-	settingsMu.Lock()
-	defer settingsMu.Unlock()
-	raw, err := readRawSettingsMap(path)
-	if err != nil {
-		return err
-	}
-	raw[defaultInstallClientsKey] = strings.Join(cleaned, ",")
-	data, err := yaml.Marshal(raw)
-	if err != nil {
-		return err
-	}
-	// G9 P3: route through the single hardened state-file owner
-	// (WriteStateFileBytesAtomic — per-file flock + handle-bound DACL +
-	// parent-dir relax-gate + audit event) instead of the prior
-	// hand-rolled os.CreateTemp+Chmod(0600)+os.Rename mirror of
-	// SettingsSetIn. It still writes atomically (temp+rename in the
-	// destination directory) so a cross-process reader never observes a
-	// partially-truncated gui-preferences.yaml, and now installs the
-	// owner-only DACL on the file handle before any bytes hit disk.
-	if err := WriteStateFileBytesAtomic(path, data); err != nil {
-		return fmt.Errorf("write settings file: %w", err)
-	}
-	return nil
+	return mutateRawSettingsMapLocked(path, func(raw map[string]string) error {
+		raw[defaultInstallClientsKey] = strings.Join(cleaned, ",")
+		return nil
+	})
 }
 
 // splitClientCSV splits a comma-separated scalar into trimmed, non-empty
