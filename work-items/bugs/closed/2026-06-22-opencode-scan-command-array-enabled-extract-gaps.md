@@ -10,7 +10,7 @@ affected-surface: >
   case → hits the `default` "extract not yet supported" branch); internal/gui/extract_manifest.go
   realExtractor (does not populate OpenCodeConfigPath)
 context: adjacent-finding
-status: open
+status: fixed
 ---
 
 ## Summary
@@ -96,3 +96,10 @@ PR #420 scope is the mimocode adapter; opencode behavior is explicitly PROTECTED
 `shapeURLOrCommandEntry` helper is shared across ~30 clients. The `MCPEntry.Raw` infrastructure for
 gap 5 is now in place (added scoped for mimo), so the OpenCode side of gap 5 is a small, low-risk
 follow-up. The orchestrator decides priority and whether to widen scope.
+
+## Fixed
+
+Fixed on 2026-06-30 by mirroring the MiMoCode PR #420 OpenCode-shape patterns for scan, extract,
+CLI/GUI extract path wiring, and `MCPEntry.Raw` rollback preservation. Verification: targeted
+OpenCode/MiMoCode scan/extract tests, `go build ./...`, `go vet ./...`, Linux/Darwin cross-builds,
+and publication-safety scan all passed.

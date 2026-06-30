@@ -1370,7 +1370,8 @@ func scanMCPServersJSONWithDecoder(entries map[string]*ScanEntry, path, client s
 // scanOpenCode reads OpenCode's config. Its MCP map lives under the top-level
 // `mcp` key (not `mcpServers`) and a remote hub entry is
 // `{"type":"remote","url":...}`. The url key is the standard `url`, so the
-// generic url/command shaper recognises the loopback hub entry.
+// OpenCode's local command-array and enabled:false fields need an
+// OpenCode-local shaper; do not widen the generic JSON-family shaper here.
 func scanOpenCode(entries map[string]*ScanEntry, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -1391,9 +1392,65 @@ func scanOpenCode(entries map[string]*ScanEntry, path string) error {
 			e = &ScanEntry{ClientPresence: map[string]ClientEntry{}}
 			entries[name] = e
 		}
-		e.ClientPresence["opencode"] = shapeURLOrCommandEntry(raw)
+		e.ClientPresence["opencode"] = shapeOpenCodeEntry(raw)
 	}
 	return nil
+}
+
+// shapeOpenCodeEntry classifies an OpenCode `mcp` entry FAITHFULLY.
+// OpenCode uses the same local/remote entry shape as MiMoCode: remote entries
+// have `url`, local entries store `command` as an ARRAY, and `enabled:false`
+// disables the server. Keep this OpenCode-local instead of widening
+// shapeURLOrCommandEntry's behavior for every JSON-family client.
+func shapeOpenCodeEntry(raw map[string]any) ClientEntry {
+	if enabled, present := raw["enabled"]; present {
+		if b, ok := enabled.(bool); ok && !b {
+			return ClientEntry{Transport: "absent", Raw: raw}
+		}
+	}
+	if url, ok := raw["url"].(string); ok && url != "" {
+		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+	}
+	if cmd, tail := openCodeCommandArray(raw); cmd != "" {
+		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: openCodeRawWithNormalizedArgs(raw, tail)}
+	}
+	if cmd, ok := raw["command"].(string); ok && cmd != "" {
+		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	}
+	return ClientEntry{Transport: "absent", Raw: raw}
+}
+
+func openCodeRawWithNormalizedArgs(raw map[string]any, cmdTail []string) map[string]any {
+	out := make(map[string]any, len(raw)+1)
+	for k, v := range raw {
+		out[k] = v
+	}
+	merged := make([]any, 0, len(cmdTail))
+	for _, a := range cmdTail {
+		merged = append(merged, a)
+	}
+	if existing, ok := raw["args"].([]any); ok {
+		merged = append(merged, existing...)
+	}
+	out["args"] = merged
+	return out
+}
+
+func openCodeCommandArray(raw map[string]any) (string, []string) {
+	arr, ok := raw["command"].([]any)
+	if !ok || len(arr) == 0 {
+		return "", nil
+	}
+	var parts []string
+	for _, v := range arr {
+		if s, ok := v.(string); ok {
+			parts = append(parts, s)
+		}
+	}
+	if len(parts) == 0 {
+		return "", nil
+	}
+	return parts[0], parts[1:]
 }
 
 // scanMimoCode reads MiMoCode's config FAITHFULLY (MiMoCode is an OpenCode
@@ -2146,6 +2203,54 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 				}
 			}
 		}
+
+	case "opencode":
+		if opts.OpenCodeConfigPath == "" {
+			return "", fmt.Errorf("OpenCodeConfigPath empty")
+		}
+		data, err := os.ReadFile(opts.OpenCodeConfigPath)
+		if err != nil {
+			return "", err
+		}
+		var cfg struct {
+			MCP map[string]map[string]any `json:"mcp"`
+		}
+		// OpenCode config is JSONC (comments + trailing commas), same as the
+		// normal read path — strip before Unmarshal so a commented but valid
+		// local MCP entry extracts instead of failing.
+		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
+			return "", err
+		}
+		raw = cfg.MCP[serverName]
+		if raw == nil {
+			return "", fmt.Errorf("server %q not found in client %q config", serverName, client)
+		}
+		// OpenCode local entries use a `command` ARRAY and `environment`, the
+		// same two extract-time translations MiMoCode needs.
+		cmd, args := openCodeCommandArray(raw)
+		if cmd == "" {
+			break
+		}
+		if extraArgs, ok := raw["args"].([]any); ok {
+			for _, v := range extraArgs {
+				if s, ok := v.(string); ok {
+					args = append(args, s)
+				}
+			}
+		}
+		envMap := map[string]string{}
+		if envAny, ok := raw["environment"].(map[string]any); ok {
+			for k, v := range envAny {
+				if s, ok := v.(string); ok {
+					envMap[k] = s
+				}
+			}
+		}
+		port, err := pickNextFreePort(opts.ManifestDir)
+		if err != nil {
+			return "", err
+		}
+		return renderDraftManifestYAML(serverName, cmd, args, envMap, port), nil
 
 	case "mimocode":
 		if opts.MimoCodeConfigPath == "" {

@@ -157,6 +157,63 @@ func TestOpenCode_GetEntry_RoundTrips(t *testing.T) {
 	}
 }
 
+// TestOpenCode_GetEntryAddEntry_RawRoundTripPreservesLocalArray pins the
+// rollback/read-modify-write contract: a user-authored local OpenCode entry is
+// not representable as URL+Headers, so GetEntry must carry Raw and AddEntry must
+// write it back verbatim instead of corrupting it to a remote url:"" entry.
+func TestOpenCode_GetEntryAddEntry_RawRoundTripPreservesLocalArray(t *testing.T) {
+	o := newOpenCodeForTest(t, `{
+  "mcp": {
+    "fetch": {
+      "type": "local",
+      "command": ["uvx", "mcp-server-fetch"],
+      "environment": {"FETCH_TOKEN": "secret-x"},
+      "enabled": true
+    }
+  }
+}`)
+	prior, err := o.GetEntry("fetch")
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if prior == nil {
+		t.Fatal("GetEntry returned nil")
+	}
+	if prior.Raw == nil {
+		t.Fatalf("local command-array entry must carry Raw for rollback, got %+v", prior)
+	}
+
+	// Simulate rollback restoring the prior entry after the hub temporarily wrote
+	// its managed remote shape.
+	if err := o.AddEntry(MCPEntry{Name: "fetch", URL: "http://localhost:9121/mcp"}); err != nil {
+		t.Fatalf("hub AddEntry: %v", err)
+	}
+	if err := o.AddEntry(*prior); err != nil {
+		t.Fatalf("raw restore AddEntry: %v", err)
+	}
+
+	rawBytes, _ := os.ReadFile(o.path)
+	var parsed map[string]any
+	if err := json.Unmarshal(rawBytes, &parsed); err != nil {
+		t.Fatalf("parse restored config: %v", err)
+	}
+	fetch := parsed["mcp"].(map[string]any)["fetch"].(map[string]any)
+	cmd, ok := fetch["command"].([]any)
+	if !ok {
+		t.Fatalf("restored entry command = %#v, want command array", fetch["command"])
+	}
+	if len(cmd) != 2 || cmd[0] != "uvx" || cmd[1] != "mcp-server-fetch" {
+		t.Errorf("restored command = %#v, want [uvx mcp-server-fetch]", cmd)
+	}
+	env := fetch["environment"].(map[string]any)
+	if env["FETCH_TOKEN"] != "secret-x" {
+		t.Errorf("environment not preserved: %#v", env)
+	}
+	if _, has := fetch["url"]; has {
+		t.Errorf("raw restore must not leave remote url field: %#v", fetch)
+	}
+}
+
 // TestOpenCode_RemoveEntry confirms removal is scoped and idempotent.
 func TestOpenCode_RemoveEntry(t *testing.T) {
 	o := newOpenCodeForTest(t, `{"mcp":{"serena":{"type":"remote","url":"http://localhost:9121/mcp","enabled":true},"other":{"type":"remote","url":"http://x/mcp","enabled":true}}}`)

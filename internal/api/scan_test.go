@@ -487,6 +487,72 @@ func TestScanCoversWave2Clients(t *testing.T) {
 	}
 }
 
+// TestScanOpenCode_Faithful pins the OpenCode-local mirror of MiMoCode PR #420:
+// local entries store `command` as an ARRAY, and `enabled:false` means disabled.
+func TestScanOpenCode_Faithful(t *testing.T) {
+	manifestFixture := func(dir string) string {
+		manifestDir := filepath.Join(dir, "servers")
+		_ = os.MkdirAll(filepath.Join(manifestDir, "memory"), 0755)
+		_ = os.WriteFile(filepath.Join(manifestDir, "memory", "manifest.yaml"),
+			[]byte("name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9123\n"), 0644)
+		return manifestDir
+	}
+	entryFor := func(t *testing.T, res *ScanResult, name string) *ScanEntry {
+		t.Helper()
+		for i := range res.Entries {
+			if res.Entries[i].Name == name {
+				return &res.Entries[i]
+			}
+		}
+		return nil
+	}
+
+	t.Run("local command array surfaces executable as endpoint", func(t *testing.T) {
+		tmp := t.TempDir()
+		opencodePath := filepath.Join(tmp, "opencode.json")
+		_ = os.WriteFile(opencodePath, []byte(`{"mcp":{"localsrv":{"type":"local","command":["npx","-y","some-mcp"],"enabled":true}}}`), 0600)
+		manifestDir := manifestFixture(tmp)
+
+		res, err := NewAPI().ScanFrom(ScanOpts{OpenCodeConfigPath: opencodePath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("ScanFrom: %v", err)
+		}
+		ent := entryFor(t, res, "localsrv")
+		if ent == nil {
+			t.Fatal("localsrv entry missing")
+		}
+		ce := ent.ClientPresence["opencode"]
+		if ce.Transport != "stdio" {
+			t.Errorf("Transport = %q, want stdio", ce.Transport)
+		}
+		if ce.Endpoint != "npx" {
+			t.Errorf("Endpoint = %q, want npx (first command-array element)", ce.Endpoint)
+		}
+	})
+
+	t.Run("enabled false records absent and never classifies via hub", func(t *testing.T) {
+		tmp := t.TempDir()
+		opencodePath := filepath.Join(tmp, "opencode.json")
+		_ = os.WriteFile(opencodePath, []byte(`{"mcp":{"memory":{"type":"remote","url":"http://localhost:9123/mcp","enabled":false}}}`), 0600)
+		manifestDir := manifestFixture(tmp)
+
+		res, err := NewAPI().ScanFrom(ScanOpts{OpenCodeConfigPath: opencodePath, ManifestDir: manifestDir})
+		if err != nil {
+			t.Fatalf("ScanFrom: %v", err)
+		}
+		mem := entryFor(t, res, "memory")
+		if mem == nil {
+			t.Fatal("memory entry missing")
+		}
+		if got := mem.ClientPresence["opencode"].Transport; got != "absent" {
+			t.Errorf("disabled entry Transport = %q, want absent", got)
+		}
+		if mem.Status == "via-hub" {
+			t.Errorf("disabled hub entry must not classify via-hub: got %q", mem.Status)
+		}
+	})
+}
+
 // TestScanCoversMimoCode is the scan-pipeline counterpart of the mimocode
 // adapter wiring: the clientScanners() registry must have a mimocode entry so
 // ScanFrom records ClientPresence["mimocode"] for an installed mimo config.
@@ -2170,7 +2236,7 @@ func TestScanMimoCode_PresenceFromLowerLayerWhenWriteTargetAbsent(t *testing.T) 
 		// it — yet MimoCodeMergedConfig WOULD import those servers. The scan must
 		// promote presence to "ok" on a parseable claude import so scanMimoCode runs
 		// and the imported servers appear in the matrix.
-		isolateMimoCodeScanEnv(t)            // clears MIMOCODE_* and SETS the disable flag
+		isolateMimoCodeScanEnv(t)                            // clears MIMOCODE_* and SETS the disable flag
 		t.Setenv(clients.MimoCodeDisableClaudeImportEnv, "") // re-enable the import for this test
 		home := t.TempDir()
 		t.Setenv("HOME", home)

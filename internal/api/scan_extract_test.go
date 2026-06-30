@@ -460,6 +460,50 @@ func TestExtractManifestFromClient_MimoCode_LocalArrayAndEnvironment(t *testing.
 	}
 }
 
+// TestExtractManifestFromClient_OpenCode_LocalArrayAndEnvironment pins the
+// OpenCode extract case: local entries use a command ARRAY and store env vars
+// under `environment`, matching the MiMoCode PR #420 pattern.
+func TestExtractManifestFromClient_OpenCode_LocalArrayAndEnvironment(t *testing.T) {
+	tmp := t.TempDir()
+	opencodePath := filepath.Join(tmp, "opencode.json")
+	cfg := `{
+  "mcp": {
+    "fetch": {
+      "type": "local",
+      "command": ["uvx", "mcp-server-fetch"],
+      "environment": {"FETCH_TOKEN": "secret-x"},
+      "enabled": true
+    }
+  }
+}`
+	if err := os.WriteFile(opencodePath, []byte(cfg), 0600); err != nil {
+		t.Fatal(err)
+	}
+	manifestDir := filepath.Join(tmp, "servers")
+	_ = os.MkdirAll(manifestDir, 0755)
+
+	yaml, err := NewAPI().ExtractManifestFromClient("opencode", "fetch", ScanOpts{
+		OpenCodeConfigPath: opencodePath,
+		ManifestDir:        manifestDir,
+	})
+	if err != nil {
+		t.Fatalf("ExtractManifestFromClient(opencode): %v", err)
+	}
+	m, err := config.ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v\n%s", err, yaml)
+	}
+	if m.Command != "uvx" {
+		t.Errorf("Command = %q, want uvx (first command-array element)", m.Command)
+	}
+	if len(m.BaseArgs) != 1 || m.BaseArgs[0] != "mcp-server-fetch" {
+		t.Errorf("BaseArgs = %v, want [mcp-server-fetch] (rest of command array)", m.BaseArgs)
+	}
+	if m.Env["FETCH_TOKEN"] != "secret-x" {
+		t.Errorf("env not translated from `environment`: %#v", m.Env)
+	}
+}
+
 // TestExtractManifestFromClient_MimoCode_RemoteRejected confirms a remote/hub
 // MiMoCode entry (no local command array) is rejected via the shared tail's
 // HTTP-only guidance rather than producing an empty-command manifest.
