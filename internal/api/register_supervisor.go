@@ -692,10 +692,6 @@ func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorD
 	_ = writeSupervisorIntentLockHeld(path, desired)
 }
 
-func removeSupervisorIntentDescriptor(path, taskName string, removeFileIfEmpty bool) {
-	removeSupervisorIntentDescriptorAndStop(path, taskName, removeFileIfEmpty, DaemonIntent{}, false)
-}
-
 func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIfEmpty bool, stop DaemonIntent, restoreStop bool) {
 	lock := flock.New(path + supervisorIntentLockSuffix)
 	if err := lock.Lock(); err != nil {
@@ -730,29 +726,6 @@ func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIf
 		_ = os.Remove(path)
 		return
 	}
-	desired.Version = 1
-	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	_ = writeSupervisorIntentLockHeld(path, desired)
-}
-
-func upsertSupervisorIntentDescriptor(path string, descriptor SupervisorDaemon) {
-	lock := flock.New(path + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return
-	}
-	defer func() { _ = lock.Unlock() }()
-	current, _, err := readSupervisorIntentForMerge(path)
-	if err != nil {
-		return
-	}
-	desired := cloneSupervisorIntentFile(current)
-	kept := desired.Daemons[:0]
-	for _, daemon := range desired.Daemons {
-		if daemon.TaskName != descriptor.TaskName {
-			kept = append(kept, daemon)
-		}
-	}
-	desired.Daemons = append(kept, descriptor)
 	desired.Version = 1
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	_ = writeSupervisorIntentLockHeld(path, desired)

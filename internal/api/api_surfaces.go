@@ -64,7 +64,7 @@ var restartContextSrcFn func(server, daemonFilter string) ([]RestartResult, erro
 var schedulerFactoryFn func() (scheduler.Scheduler, error)
 
 // appendIntentAuditFn, when non-nil, replaces the audit-append path
-// behind the appendAudit dispatcher. intent_audit.go's init() binds the
+// callers invoke directly. intent_audit.go's init() binds the
 // production implementation; tests verify the audit-entry shape.
 var appendIntentAuditFn func(IntentAuditEntry) error
 
@@ -299,15 +299,4 @@ func newScheduler() (scheduler.Scheduler, error) {
 		return schedulerFactoryFn()
 	}
 	return scheduler.New()
-}
-
-// appendAudit is the package-level audit dispatcher. Routes through the
-// appendIntentAuditFn seam, which intent_audit.go's init() binds to the
-// production AppendIntentAudit. Before that binding it is a no-op rather
-// than fail-closed.
-func appendAudit(e IntentAuditEntry) error {
-	if appendIntentAuditFn != nil {
-		return appendIntentAuditFn(e)
-	}
-	return nil
 }

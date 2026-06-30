@@ -566,17 +566,6 @@ func (s *HubSessionStore) deleteLocked(id string) bool {
 	return true
 }
 
-// evictLRULocked removes the eldest session from the LRU list to free
-// space for a new Create call. Caller MUST hold s.mu (Lock).
-func (s *HubSessionStore) evictLRULocked() {
-	back := s.lru.Back()
-	if back == nil {
-		return
-	}
-	id, _ := back.Value.(string)
-	s.deleteLocked(id)
-}
-
 // evictIdleLRULocked walks the LRU list from tail (oldest) toward head
 // (newest) and evicts the first session it finds with inFlightCount
 // == 0. Returns true if a session was evicted; false if ALL sessions

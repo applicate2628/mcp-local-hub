@@ -1087,10 +1087,6 @@ func warnNoRunningSupervisor(w io.Writer) {
 	}
 }
 
-func supervisorIntentHasServerDaemonRows(intent *SupervisorIntentFile, server string) bool {
-	return supervisorIntentHasServerDaemonRowsScope(intent, server, nil)
-}
-
 func supervisorIntentHasServerDaemonRowsScope(intent *SupervisorIntentFile, server string, scope *supervisorIntentOwnershipScope) bool {
 	if intent == nil {
 		return false
@@ -1101,10 +1097,6 @@ func supervisorIntentHasServerDaemonRowsScope(intent *SupervisorIntentFile, serv
 		}
 	}
 	return false
-}
-
-func supervisorIntentHasServerLifecycleArtifacts(intent *SupervisorIntentFile, server string) bool {
-	return supervisorIntentHasServerLifecycleArtifactsScope(intent, server, nil)
 }
 
 func supervisorIntentHasServerLifecycleArtifactsScope(intent *SupervisorIntentFile, server string, scope *supervisorIntentOwnershipScope) bool {
@@ -1122,19 +1114,11 @@ func supervisorIntentHasServerLifecycleArtifactsScope(intent *SupervisorIntentFi
 	return false
 }
 
-func removedSupervisorTargetsForFullInstall(prior, merged *SupervisorIntentFile, server, daemonFilter string) []SupervisorDaemon {
-	return removedSupervisorTargetsForFullInstallScope(prior, merged, server, daemonFilter, nil)
-}
-
 func removedSupervisorTargetsForFullInstallScope(prior, merged *SupervisorIntentFile, server, daemonFilter string, scope *supervisorIntentOwnershipScope) []SupervisorDaemon {
 	if daemonFilter != "" {
 		return nil
 	}
 	return removedSupervisorTargetsForServerMergeScope(prior, merged, server, scope)
-}
-
-func removedSupervisorTargetsForServerMerge(prior, merged *SupervisorIntentFile, server string) []SupervisorDaemon {
-	return removedSupervisorTargetsForServerMergeScope(prior, merged, server, nil)
 }
 
 func removedSupervisorTargetsForServerMergeScope(prior, merged *SupervisorIntentFile, server string, scope *supervisorIntentOwnershipScope) []SupervisorDaemon {
@@ -1180,10 +1164,6 @@ func pruneStopsForRemovedSupervisorTargets(stops map[string]DaemonIntent, remove
 		return nil
 	}
 	return kept
-}
-
-func preliminarySupervisorTargetsForServer(intentPath, server string) ([]SupervisorDaemon, error) {
-	return preliminarySupervisorTargetsForServerScope(intentPath, server, nil)
 }
 
 func preliminarySupervisorTargetsForServerScope(intentPath, server string, scope *supervisorIntentOwnershipScope) ([]SupervisorDaemon, error) {
