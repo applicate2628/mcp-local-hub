@@ -165,6 +165,7 @@ func (d ReaperDeps) withDefaults() ReaperDeps {
 // re-attempts the reap pass and finds the PIDs already dead (via the
 // kill we did execute before noticing cancellation).
 func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
+	customStateIO := deps.ReadState != nil || deps.WriteState != nil
 	deps = deps.withDefaults()
 	var res ReaperResult
 
@@ -173,6 +174,136 @@ func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, er
 	}
 
 	statePath := filepath.Join(deps.StateDir, "supervisor-state.json")
+	reapState := func(state *api.SupervisorStateFile) (bool, error) {
+		if state == nil || len(state.TransientPIDs) == 0 {
+			return false, nil
+		}
+		res.ClearedTransients = len(state.TransientPIDs)
+
+		uid := deps.CurrentUID()
+		killAttempted := false
+		// retained collects TransientPID entries that must SURVIVE the
+		// reaper pass — currently only entries whose kill returned a
+		// non-ESRCH error (Lane F P0 #5 / Lane B P0). They are re-attempted
+		// on the next supervisor cold start.
+		var retained []api.TransientPID
+
+		for _, t := range state.TransientPIDs {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			pid := t.PID
+			if pid <= 0 {
+				// Claim slot (PID=0) — never alive, treat as dead so the
+				// state-clear still happens but no kill is attempted.
+				res.DeadPIDs = append(res.DeadPIDs, pid)
+				continue
+			}
+			if !deps.PIDAlive(pid) {
+				res.DeadPIDs = append(res.DeadPIDs, pid)
+				continue
+			}
+			basename, cmdline, procUID, ok := deps.ProcessIdentity(pid)
+			if !ok || !ownershipGate(t.Kind, basename, cmdline, procUID, uid) {
+				res.SkippedPIDs = append(res.SkippedPIDs, pid)
+				continue
+			}
+			// Lane F P0 #4 — StartedAt gate. Compare recorded vs computed
+			// start time; reject if outside tolerance (treat as PID
+			// recycling). On Darwin processStartTime returns ok=false,
+			// causing every PID to fail this gate and be skipped — the
+			// safe failure mode (no kills > wrong kills on a platform
+			// where we can't probe identity reliably).
+			if !startedAtGate(t.StartedAt, pid, deps) {
+				res.SkippedPIDs = append(res.SkippedPIDs, pid)
+				continue
+			}
+			// All gates passed — kill the process group, then handle the
+			// outcome per Lane F P0 #5 / Lane B P0:
+			//
+			//   nil err     → KilledPIDs, entry cleared from state.
+			//   ESRCH       → identity re-check: PIDAlive==false confirms
+			//                 the process is gone (kernel reaped it
+			//                 between alive-check and kill — common
+			//                 benign race) → DeadPIDs, cleared.
+			//                 Otherwise it's the "no such process group"
+			//                 case — POSIX spawn paths in this codebase
+			//                 do NOT currently call Setpgid (audited as
+			//                 of v0.5.0 phase 16; see also
+			//                 internal/process/pdeathsig_linux.go which
+			//                 only sets Pdeathsig). Fall back to per-PID
+			//                 kill via KillProcess. If that succeeds the
+			//                 PID is killed; if it ALSO returns ESRCH
+			//                 the process is gone; on any other error,
+			//                 KillErrors + retain in state.
+			//   other err   → KillErrors[pid]=err; retain entry for the
+			//                 next cold-start to re-try.
+			err := deps.KillProcessGroup(pid)
+			if err == nil {
+				res.KilledPIDs = append(res.KilledPIDs, pid)
+				killAttempted = true
+				continue
+			}
+			if errors.Is(err, syscall.ESRCH) {
+				// Differentiate "process gone" from "no pgroup leader".
+				if !deps.PIDAlive(pid) {
+					res.DeadPIDs = append(res.DeadPIDs, pid)
+					continue
+				}
+				// Process is alive — pgroup kill failed because the daemon
+				// never became a process-group leader. Fall back.
+				fallbackErr := deps.KillProcess(pid)
+				if fallbackErr == nil {
+					res.KilledPIDs = append(res.KilledPIDs, pid)
+					killAttempted = true
+					continue
+				}
+				if errors.Is(fallbackErr, syscall.ESRCH) {
+					// Race won by kernel between pgroup-ESRCH and per-PID.
+					res.DeadPIDs = append(res.DeadPIDs, pid)
+					continue
+				}
+				if res.KillErrors == nil {
+					res.KillErrors = map[int]error{}
+				}
+				res.KillErrors[pid] = fallbackErr
+				retained = append(retained, t)
+				continue
+			}
+			if res.KillErrors == nil {
+				res.KillErrors = map[int]error{}
+			}
+			res.KillErrors[pid] = err
+			retained = append(retained, t)
+		}
+
+		if killAttempted {
+			if err := sleepWithCtx(ctx, deps.SettleDuration); err != nil {
+				return false, err
+			}
+			res.SettleDuration = deps.SettleDuration
+		}
+
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+
+		// Rewrite transient_pids[] preserving only entries whose kill
+		// returned an unrecoverable error (so the next cold-start can
+		// retry). Everything else — killed / dead / skipped — is cleared.
+		// Skipped PIDs surface via res.SkippedPIDs for the caller's event
+		// log; the operator must intervene manually for those.
+		state.TransientPIDs = retained
+		return true, nil
+	}
+
+	if !customStateIO {
+		if err := api.MutateSupervisorStateIfChanged(statePath, reapState); err != nil {
+			return res, fmt.Errorf("mutate supervisor state: %w", err)
+		}
+		return res, nil
+	}
+
 	state, err := deps.ReadState(statePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || isUnderlyingNotExist(err) {
@@ -181,128 +312,14 @@ func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, er
 		}
 		return res, fmt.Errorf("read supervisor state: %w", err)
 	}
-
-	if state == nil || len(state.TransientPIDs) == 0 {
-		return res, nil
-	}
-	res.ClearedTransients = len(state.TransientPIDs)
-
-	uid := deps.CurrentUID()
-	killAttempted := false
-	// retained collects TransientPID entries that must SURVIVE the
-	// reaper pass — currently only entries whose kill returned a
-	// non-ESRCH error (Lane F P0 #5 / Lane B P0). They are re-attempted
-	// on the next supervisor cold start.
-	var retained []api.TransientPID
-
-	for _, t := range state.TransientPIDs {
-		if err := ctx.Err(); err != nil {
-			return res, err
-		}
-		pid := t.PID
-		if pid <= 0 {
-			// Claim slot (PID=0) — never alive, treat as dead so the
-			// state-clear still happens but no kill is attempted.
-			res.DeadPIDs = append(res.DeadPIDs, pid)
-			continue
-		}
-		if !deps.PIDAlive(pid) {
-			res.DeadPIDs = append(res.DeadPIDs, pid)
-			continue
-		}
-		basename, cmdline, procUID, ok := deps.ProcessIdentity(pid)
-		if !ok || !ownershipGate(t.Kind, basename, cmdline, procUID, uid) {
-			res.SkippedPIDs = append(res.SkippedPIDs, pid)
-			continue
-		}
-		// Lane F P0 #4 — StartedAt gate. Compare recorded vs computed
-		// start time; reject if outside tolerance (treat as PID
-		// recycling). On Darwin processStartTime returns ok=false,
-		// causing every PID to fail this gate and be skipped — the
-		// safe failure mode (no kills > wrong kills on a platform
-		// where we can't probe identity reliably).
-		if !startedAtGate(t.StartedAt, pid, deps) {
-			res.SkippedPIDs = append(res.SkippedPIDs, pid)
-			continue
-		}
-		// All gates passed — kill the process group, then handle the
-		// outcome per Lane F P0 #5 / Lane B P0:
-		//
-		//   nil err     → KilledPIDs, entry cleared from state.
-		//   ESRCH       → identity re-check: PIDAlive==false confirms
-		//                 the process is gone (kernel reaped it
-		//                 between alive-check and kill — common
-		//                 benign race) → DeadPIDs, cleared.
-		//                 Otherwise it's the "no such process group"
-		//                 case — POSIX spawn paths in this codebase
-		//                 do NOT currently call Setpgid (audited as
-		//                 of v0.5.0 phase 16; see also
-		//                 internal/process/pdeathsig_linux.go which
-		//                 only sets Pdeathsig). Fall back to per-PID
-		//                 kill via KillProcess. If that succeeds the
-		//                 PID is killed; if it ALSO returns ESRCH
-		//                 the process is gone; on any other error,
-		//                 KillErrors + retain in state.
-		//   other err   → KillErrors[pid]=err; retain entry for the
-		//                 next cold-start to re-try.
-		err := deps.KillProcessGroup(pid)
-		if err == nil {
-			res.KilledPIDs = append(res.KilledPIDs, pid)
-			killAttempted = true
-			continue
-		}
-		if errors.Is(err, syscall.ESRCH) {
-			// Differentiate "process gone" from "no pgroup leader".
-			if !deps.PIDAlive(pid) {
-				res.DeadPIDs = append(res.DeadPIDs, pid)
-				continue
-			}
-			// Process is alive — pgroup kill failed because the daemon
-			// never became a process-group leader. Fall back.
-			fallbackErr := deps.KillProcess(pid)
-			if fallbackErr == nil {
-				res.KilledPIDs = append(res.KilledPIDs, pid)
-				killAttempted = true
-				continue
-			}
-			if errors.Is(fallbackErr, syscall.ESRCH) {
-				// Race won by kernel between pgroup-ESRCH and per-PID.
-				res.DeadPIDs = append(res.DeadPIDs, pid)
-				continue
-			}
-			if res.KillErrors == nil {
-				res.KillErrors = map[int]error{}
-			}
-			res.KillErrors[pid] = fallbackErr
-			retained = append(retained, t)
-			continue
-		}
-		if res.KillErrors == nil {
-			res.KillErrors = map[int]error{}
-		}
-		res.KillErrors[pid] = err
-		retained = append(retained, t)
-	}
-
-	if killAttempted {
-		if err := sleepWithCtx(ctx, deps.SettleDuration); err != nil {
-			return res, err
-		}
-		res.SettleDuration = deps.SettleDuration
-	}
-
-	if err := ctx.Err(); err != nil {
+	changed, err := reapState(state)
+	if err != nil {
 		return res, err
 	}
-
-	// Rewrite transient_pids[] preserving only entries whose kill
-	// returned an unrecoverable error (so the next cold-start can
-	// retry). Everything else — killed / dead / skipped — is cleared.
-	// Skipped PIDs surface via res.SkippedPIDs for the caller's event
-	// log; the operator must intervene manually for those.
-	state.TransientPIDs = retained
-	if err := deps.WriteState(statePath, state); err != nil {
-		return res, fmt.Errorf("write supervisor state: %w", err)
+	if changed {
+		if err := deps.WriteState(statePath, state); err != nil {
+			return res, fmt.Errorf("write supervisor state: %w", err)
+		}
 	}
 	return res, nil
 }

@@ -88,6 +88,7 @@ type ReaperDeps struct {
 func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, error) {
 	res := ReaperResult{}
 
+	customStateIO := deps.ReadState != nil || deps.WriteState != nil
 	readState := deps.ReadState
 	if readState == nil {
 		readState = api.ReadSupervisorState
@@ -114,6 +115,101 @@ func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, er
 	}
 
 	statePath := filepath.Join(deps.StateDir, "supervisor-state.json")
+	reapState := func(state *api.SupervisorStateFile) (bool, error) {
+		if state == nil || len(state.TransientPIDs) == 0 {
+			return false, nil
+		}
+		res.ClearedTransients = len(state.TransientPIDs)
+
+		var retained []api.TransientPID
+		killAttempted := false
+		for _, t := range state.TransientPIDs {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			pid := t.PID
+			if pid <= 0 {
+				// Claim slot — never alive, no kill; clear it.
+				res.DeadPIDs = append(res.DeadPIDs, pid)
+				continue
+			}
+			if !pidAlive(pid) {
+				res.DeadPIDs = append(res.DeadPIDs, pid)
+				continue
+			}
+
+			// Alive: verify this is still OUR maintenance child before
+			// killing, so a recycled PID belonging to an unrelated process
+			// is never terminated.
+			observed, ok := startTime(pid)
+			recorded, perr := time.Parse(time.RFC3339Nano, t.StartedAt)
+			if !ok || perr != nil {
+				// Cannot verify identity — leave the process alone and
+				// retain the entry for the next cold start to retry.
+				res.SkippedPIDs = append(res.SkippedPIDs, pid)
+				retained = append(retained, t)
+				continue
+			}
+			delta := observed.UTC().Sub(recorded.UTC())
+			if delta < 0 {
+				delta = -delta
+			}
+			if delta > tolerance {
+				// Start times disagree → PID recycled to an unrelated
+				// process. Not ours: do NOT kill; clear the stale entry.
+				res.SkippedPIDs = append(res.SkippedPIDs, pid)
+				continue
+			}
+
+			// Confirmed: our orphaned maintenance child. Tree-kill it.
+			//
+			// Residual TOCTOU (PR #243 bot round-2 review): the start-time
+			// probe and the taskkill below are separate operations on a
+			// PID, not one handle-atomic op, so in principle the PID could
+			// exit and be reused between them. This window is the same one
+			// the POSIX reaper (killProcessGroupSIGKILL after its gates) and
+			// `mcphub gui --force --kill` (start-time-precedes-mtime gate)
+			// already accept. It is not practically reachable here: the
+			// recorded started_at belongs to a PRIOR (crashed) supervisor
+			// generation, so a process that grabbed this PID after the crash
+			// has a start time of ~now — far outside the 2s tolerance — and
+			// fails the gate above. The only way past it is a recycle within
+			// 2s of the original fire AND surviving until this cold-start
+			// reap, which the crash→restart→reap latency makes implausible.
+			if kerr := killTree(pid); kerr != nil {
+				if res.KillErrors == nil {
+					res.KillErrors = map[int]error{}
+				}
+				res.KillErrors[pid] = kerr
+				retained = append(retained, t)
+				continue
+			}
+			res.KilledPIDs = append(res.KilledPIDs, pid)
+			killAttempted = true
+		}
+
+		if killAttempted && deps.SettleDuration > 0 {
+			timer := time.NewTimer(deps.SettleDuration)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return false, ctx.Err()
+			case <-timer.C:
+			}
+			res.SettleDuration = deps.SettleDuration
+		}
+
+		state.TransientPIDs = retained
+		return true, nil
+	}
+
+	if !customStateIO {
+		if err := api.MutateSupervisorStateIfChanged(statePath, reapState); err != nil {
+			return res, fmt.Errorf("mutate supervisor state: %w", err)
+		}
+		return res, nil
+	}
+
 	state, err := readState(statePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -121,92 +217,14 @@ func ReapStaleTransients(ctx context.Context, deps ReaperDeps) (ReaperResult, er
 		}
 		return res, fmt.Errorf("read supervisor state: %w", err)
 	}
-	if state == nil || len(state.TransientPIDs) == 0 {
-		return res, nil
+	changed, err := reapState(state)
+	if err != nil {
+		return res, err
 	}
-	res.ClearedTransients = len(state.TransientPIDs)
-
-	var retained []api.TransientPID
-	killAttempted := false
-	for _, t := range state.TransientPIDs {
-		if err := ctx.Err(); err != nil {
-			return res, err
+	if changed {
+		if err := writeState(statePath, state); err != nil {
+			return res, fmt.Errorf("write supervisor state: %w", err)
 		}
-		pid := t.PID
-		if pid <= 0 {
-			// Claim slot — never alive, no kill; clear it.
-			res.DeadPIDs = append(res.DeadPIDs, pid)
-			continue
-		}
-		if !pidAlive(pid) {
-			res.DeadPIDs = append(res.DeadPIDs, pid)
-			continue
-		}
-
-		// Alive: verify this is still OUR maintenance child before
-		// killing, so a recycled PID belonging to an unrelated process
-		// is never terminated.
-		observed, ok := startTime(pid)
-		recorded, perr := time.Parse(time.RFC3339Nano, t.StartedAt)
-		if !ok || perr != nil {
-			// Cannot verify identity — leave the process alone and
-			// retain the entry for the next cold start to retry.
-			res.SkippedPIDs = append(res.SkippedPIDs, pid)
-			retained = append(retained, t)
-			continue
-		}
-		delta := observed.UTC().Sub(recorded.UTC())
-		if delta < 0 {
-			delta = -delta
-		}
-		if delta > tolerance {
-			// Start times disagree → PID recycled to an unrelated
-			// process. Not ours: do NOT kill; clear the stale entry.
-			res.SkippedPIDs = append(res.SkippedPIDs, pid)
-			continue
-		}
-
-		// Confirmed: our orphaned maintenance child. Tree-kill it.
-		//
-		// Residual TOCTOU (PR #243 bot round-2 review): the start-time
-		// probe and the taskkill below are separate operations on a
-		// PID, not one handle-atomic op, so in principle the PID could
-		// exit and be reused between them. This window is the same one
-		// the POSIX reaper (killProcessGroupSIGKILL after its gates) and
-		// `mcphub gui --force --kill` (start-time-precedes-mtime gate)
-		// already accept. It is not practically reachable here: the
-		// recorded started_at belongs to a PRIOR (crashed) supervisor
-		// generation, so a process that grabbed this PID after the crash
-		// has a start time of ~now — far outside the 2s tolerance — and
-		// fails the gate above. The only way past it is a recycle within
-		// 2s of the original fire AND surviving until this cold-start
-		// reap, which the crash→restart→reap latency makes implausible.
-		if kerr := killTree(pid); kerr != nil {
-			if res.KillErrors == nil {
-				res.KillErrors = map[int]error{}
-			}
-			res.KillErrors[pid] = kerr
-			retained = append(retained, t)
-			continue
-		}
-		res.KilledPIDs = append(res.KilledPIDs, pid)
-		killAttempted = true
-	}
-
-	if killAttempted && deps.SettleDuration > 0 {
-		timer := time.NewTimer(deps.SettleDuration)
-		defer timer.Stop()
-		select {
-		case <-ctx.Done():
-			return res, ctx.Err()
-		case <-timer.C:
-		}
-		res.SettleDuration = deps.SettleDuration
-	}
-
-	state.TransientPIDs = retained
-	if err := writeState(statePath, state); err != nil {
-		return res, fmt.Errorf("write supervisor state: %w", err)
 	}
 	return res, nil
 }

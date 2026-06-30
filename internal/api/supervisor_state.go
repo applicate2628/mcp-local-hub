@@ -2,8 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/gofrs/flock"
 )
 
 // SupervisorStateFile is the on-disk schema for <state-dir>/supervisor-state.json.
@@ -121,4 +126,74 @@ func ReadSupervisorState(path string) (*SupervisorStateFile, error) {
 // WriteSupervisorState goes through WriteStateFileAtomic (Task 1.1).
 func WriteSupervisorState(path string, f *SupervisorStateFile) error {
 	return WriteStateFileAtomic(path, f)
+}
+
+// MutateSupervisorState serializes a supervisor-state.json read/modify/write
+// under the same sibling flock used by WriteSupervisorState's final write.
+func MutateSupervisorState(path string, mutate func(*SupervisorStateFile) error) error {
+	return MutateSupervisorStateIfChanged(path, func(file *SupervisorStateFile) (bool, error) {
+		if mutate == nil {
+			return true, nil
+		}
+		if err := mutate(file); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+}
+
+// MutateSupervisorStateIfChanged is MutateSupervisorState with an explicit
+// changed flag so callers can keep read-only/no-op cases from rewriting the
+// state file. The caller's mutate function runs while path+".lock" is held.
+func MutateSupervisorStateIfChanged(path string, mutate func(*SupervisorStateFile) (bool, error)) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("empty supervisor state path")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("mkdir supervisor state dir: %w", err)
+	}
+
+	lockPath := path + ".lock"
+	lk := flock.New(lockPath)
+	if err := lk.Lock(); err != nil {
+		return fmt.Errorf("supervisor-state flock %s: %w", lockPath, err)
+	}
+	defer func() { _ = lk.Unlock() }()
+
+	file, err := ReadSupervisorState(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read existing supervisor state: %w", err)
+		}
+		file = &SupervisorStateFile{Version: 1}
+	}
+	normalizeSupervisorStateForMutation(file)
+	changed := true
+	if mutate != nil {
+		changed, err = mutate(file)
+		if err != nil {
+			return err
+		}
+	}
+	if !changed {
+		return nil
+	}
+	normalizeSupervisorStateForMutation(file)
+	raw, err := json.MarshalIndent(file, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal supervisor state: %w", err)
+	}
+	return WriteStateFileBytesLockHeld(path, raw)
+}
+
+func normalizeSupervisorStateForMutation(file *SupervisorStateFile) {
+	if file == nil {
+		return
+	}
+	if file.Version == 0 {
+		file.Version = 1
+	}
+	if file.Daemons == nil {
+		file.Daemons = map[string]SupervisorDaemonState{}
+	}
 }
