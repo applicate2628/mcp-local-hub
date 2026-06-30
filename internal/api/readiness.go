@@ -893,7 +893,7 @@ func CheckServerReadinessWithScope(m *config.ServerManifest, scope AdmissionScop
 			fix := "Fix or remove the corrupt vault — a secret-using server fails to start when it cannot be read."
 			if isVaultAccessDenied(verr) {
 				reason = "the secrets vault exists and is intact but its file permissions are too broad, so mcphub refused to read it (do NOT delete it)"
-				fix = "Tighten the vault files (.age-key, secrets.age) and their parent directory to owner-only, or run `mcphub repair-state-dacl --path <file>`; see the \"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%\" runbook."
+				fix = vaultAccessDeniedFix()
 			}
 			add(ReadinessRequirement{
 				Name: "secrets vault",

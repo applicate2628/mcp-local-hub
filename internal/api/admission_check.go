@@ -242,7 +242,9 @@ func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionF
 			fix := "Fix or remove the corrupt vault — a secret-using server fails to start when it cannot be read."
 			if isVaultAccessDenied(err) {
 				detail = fmt.Sprintf("manifest %s uses secret refs but the vault is intact and unreadable due to too-broad file permissions (do NOT delete it): %v", m.Name, err)
-				fix = "Tighten the vault files (.age-key, secrets.age) and their parent directory to owner-only, or run `mcphub repair-state-dacl --path <file>`; see the \"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%\" runbook."
+				// Shared owner with readiness; gates the repair-state-dacl
+				// suggestion on the canonical vault location (bot r4 finding 3).
+				fix = vaultAccessDeniedFix()
 			}
 			add("secrets-vault-readable", "secrets vault", detail, fix, false)
 		}

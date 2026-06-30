@@ -304,3 +304,134 @@ func TestCLISecretsEdit_FailedImportEmitsNoAuditEvent(t *testing.T) {
 		}
 	}
 }
+
+// TestSecretsConcurrentSetHelperProcess is invoked AS A SUBPROCESS by the
+// editor script in the concurrency test below. When MCPHUB_TEST_CONCURRENT_SET
+// is set, it writes that key (value from MCPHUB_TEST_CONCURRENT_VAL) directly
+// into the PARENT's vault and exits, simulating a concurrent CLI/GUI write that
+// lands on disk WHILE the operator's editor session is open (before
+// `secrets edit` acquires the flock).
+//
+// It uses EXPLICIT vault/key paths passed via MCPHUB_TEST_VAULT_PATH /
+// MCPHUB_TEST_KEY_PATH rather than secrets.Default*Path(): the cli test binary's
+// own TestMain (settings_registry_test.go) re-points LOCALAPPDATA to a fresh
+// per-invocation fence dir, so a subprocess that resolved Default*Path() would
+// write to a DIFFERENT vault than the parent. The explicit paths bypass that
+// re-resolution so the concurrent write lands in the parent's vault.
+func TestSecretsConcurrentSetHelperProcess(t *testing.T) {
+	key := os.Getenv("MCPHUB_TEST_CONCURRENT_SET")
+	if key == "" {
+		return // normal test run, not the helper invocation
+	}
+	val := os.Getenv("MCPHUB_TEST_CONCURRENT_VAL")
+	vaultPath := os.Getenv("MCPHUB_TEST_VAULT_PATH")
+	keyPath := os.Getenv("MCPHUB_TEST_KEY_PATH")
+	err := secrets.WithVaultLock(vaultPath, func() error {
+		v, oerr := secrets.OpenVault(keyPath, vaultPath)
+		if oerr != nil {
+			return oerr
+		}
+		return v.Set(key, val)
+	})
+	if err != nil {
+		os.Stderr.WriteString(err.Error())
+		os.Exit(3)
+	}
+	os.Exit(0)
+}
+
+// writeConcurrentEditorScript writes a fake $EDITOR that FIRST performs a
+// concurrent vault write (re-invoking this test binary's concurrent-set helper
+// to add concurrentKey into the parent's vault at the EXPLICIT paths) and THEN
+// copies editedYAML over the temp file. The concurrent write therefore commits
+// to disk BEFORE `secrets edit` acquires the flock — exactly the race the
+// under-lock baseline must capture.
+func writeConcurrentEditorScript(t *testing.T, editedYAML, concurrentKey, concurrentVal, vaultPath, keyPath string) string {
+	t.Helper()
+	dir := t.TempDir()
+	yamlFile := filepath.Join(dir, "edited.yaml")
+	if err := os.WriteFile(yamlFile, []byte(editedYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	self := os.Args[0]
+	if runtime.GOOS == "windows" {
+		script := filepath.Join(dir, "editor.bat")
+		body := "@echo off\r\n" +
+			"set \"MCPHUB_TEST_CONCURRENT_SET=" + concurrentKey + "\"\r\n" +
+			"set \"MCPHUB_TEST_CONCURRENT_VAL=" + concurrentVal + "\"\r\n" +
+			"set \"MCPHUB_TEST_VAULT_PATH=" + vaultPath + "\"\r\n" +
+			"set \"MCPHUB_TEST_KEY_PATH=" + keyPath + "\"\r\n" +
+			"\"" + self + "\" -test.run=^TestSecretsConcurrentSetHelperProcess$ >nul 2>&1\r\n" +
+			"copy /Y \"" + yamlFile + "\" \"%~1\" >nul\r\n"
+		if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return script
+	}
+	script := filepath.Join(dir, "editor.sh")
+	body := "#!/bin/sh\n" +
+		"MCPHUB_TEST_CONCURRENT_SET=" + concurrentKey +
+		" MCPHUB_TEST_CONCURRENT_VAL=" + concurrentVal +
+		" MCPHUB_TEST_VAULT_PATH=\"" + vaultPath + "\"" +
+		" MCPHUB_TEST_KEY_PATH=\"" + keyPath + "\"" +
+		" \"" + self + "\" -test.run=^TestSecretsConcurrentSetHelperProcess$ >/dev/null 2>&1\n" +
+		"cp \"" + yamlFile + "\" \"$1\"\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+// TestCLISecretsEdit_AuditBaselineComputedUnderLock (bot r4 finding 2): the
+// before/after diff that drives the per-key audit events must be computed from
+// the on-disk state captured UNDER the same lock as the ImportYAML — NOT a
+// stale snapshot taken before the editor session. A concurrent write that
+// lands during the edit (here: CONCURRENT_KEY, added by the editor script's
+// helper subprocess before the flock is taken) is wholesale-clobbered by
+// ImportYAML; the audit MUST report that clobber as secret-deleted. With the
+// pre-fix stale-snapshot baseline the concurrent key was invisible, so the
+// delete went unrecorded — this test fails on the old code and passes on the
+// under-lock baseline.
+func TestCLISecretsEdit_AuditBaselineComputedUnderLock(t *testing.T) {
+	_, logPath := secretsCliAuditEnv(t)
+	initVaultForCliTest(t)
+
+	// Seed one key the operator will keep.
+	if err := runSecretsCmd(t, "keepval", "set", "KEEP_KEY", "--from-stdin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The operator's edit (derived from the PRE-editor export) keeps only
+	// KEEP_KEY. It does NOT mention CONCURRENT_KEY because that key did not
+	// exist when the export was taken — the editor script adds it concurrently.
+	// Pass the PARENT's resolved vault/key paths so the subprocess writes into
+	// THIS test's vault (not its own TestMain fence).
+	t.Setenv("EDITOR", writeConcurrentEditorScript(t,
+		"KEEP_KEY: keepval\n", "CONCURRENT_KEY", "raceval",
+		secrets.DefaultVaultPath(), secrets.DefaultKeyPath()))
+	cmd := newSecretsCmdReal()
+	cmd.SetArgs([]string{"edit"})
+	cmd.SetOut(&strings.Builder{})
+	cmd.SetErr(&strings.Builder{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("secrets edit: %v", err)
+	}
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read hub-mcp.log: %v", err)
+	}
+	body := string(raw)
+	// The concurrent key was clobbered by the wholesale ImportYAML; the
+	// under-lock baseline must have seen it, so the diff reports it deleted.
+	if !strings.Contains(body, `"event":"secret-deleted"`) || !strings.Contains(body, "CONCURRENT_KEY") {
+		t.Errorf("under-lock baseline missed the concurrently-added-then-clobbered key (expected secret-deleted CONCURRENT_KEY):\n%s", body)
+	}
+	// No value may leak.
+	if strings.Contains(body, "raceval") || strings.Contains(body, "keepval") {
+		t.Errorf("LEAK: a secret value appears in the edit audit log:\n%s", body)
+	}
+}

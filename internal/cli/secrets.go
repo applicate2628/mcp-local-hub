@@ -257,12 +257,6 @@ func newSecretsEditCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// P2.4 audit trail (finding 3): snapshot the BEFORE key→value map
-			// (in memory only — already decrypted in v) so that, after the
-			// committed ImportYAML below, we can diff and emit accurate per-key
-			// audit events. Values are compared IN MEMORY to detect a changed
-			// secret; they are NEVER logged — only key NAMES reach the emit.
-			beforeKV := snapshotVaultKV(v)
 			// Temp file lives INSIDE the user-private UserDataDir
 			// (%LOCALAPPDATA%\mcp-local-hub on Windows, $XDG_DATA_HOME
 			// or ~/.local/share/mcp-local-hub on Unix). The old
@@ -329,23 +323,38 @@ func newSecretsEditCmd() *cobra.Command {
 			// Flock ONLY the ImportYAML write — NOT the interactive editor
 			// run above — so a concurrent vault write does not block for the
 			// whole edit session. ImportYAML is a wholesale replace from the
-			// editor's output, so re-reading under lock is not needed (the
-			// operator's edit is authoritative). The api layer holds the same
-			// flock via secrets.WithVaultLock.
+			// editor's output (the operator's edit is authoritative). The api
+			// layer holds the same flock via secrets.WithVaultLock.
+			//
+			// P2.4 audit-baseline correctness (bot r4 finding 2): the
+			// BEFORE/AFTER diff that drives the per-key audit events MUST be
+			// computed atomically with the import. Re-open the vault INSIDE the
+			// lock to read the CURRENT on-disk baseline (not the stale snapshot
+			// from before the editor session, which a concurrent rotate/delete
+			// could have invalidated — that would make a concurrently-rotated
+			// key look unchanged or a concurrent add look like ours), then
+			// ImportYAML, then capture the after-state. All three steps happen
+			// under one held lock. The captured maps' VALUES are used only to
+			// detect change in memory — never logged.
+			var beforeKV, afterKV map[string]string
 			if err := secrets.WithVaultLock(defaultVaultPath(), func() error {
-				return v.ImportYAML(updated)
+				locked, oerr := secrets.OpenVault(defaultKeyPath(), defaultVaultPath())
+				if oerr != nil {
+					return oerr
+				}
+				beforeKV = snapshotVaultKV(locked)
+				if ierr := locked.ImportYAML(updated); ierr != nil {
+					return ierr
+				}
+				afterKV = snapshotVaultKV(locked)
+				return nil
 			}); err != nil {
 				return err
 			}
-			// P2.4 audit trail (finding 3): emit ONLY after the committed
-			// ImportYAML above (a failed import returned in the err branch and
-			// never reaches here). ImportYAML is a wholesale replace that can
-			// add / rotate / remove many keys at once, so diff the BEFORE/AFTER
-			// key→value maps and emit accurate per-key events through the SHARED
-			// api audit owner: added-or-changed → secret-rotated; removed →
-			// secret-deleted. Values drive the changed-detection IN MEMORY only;
-			// only key NAMES are ever logged.
-			afterKV := snapshotVaultKV(v)
+			// Emit OUTSIDE the lock (best-effort observability; keeps the log
+			// write off the critical section). The diff is over the locked
+			// baseline captured above: added/changed → secret-rotated; removed
+			// → secret-deleted. Only key NAMES reach the emit.
 			emitBulkEditAuditEvents(beforeKV, afterKV)
 			cmd.Println("✓ Re-encrypted secrets.age")
 			return nil

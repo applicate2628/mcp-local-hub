@@ -386,6 +386,25 @@ func isVaultAccessDenied(err error) bool {
 	return strings.Contains(msg, "not single-user safe") || strings.Contains(msg, "DACL")
 }
 
+// vaultAccessDeniedFix is the SINGLE OWNER of the access-denied remediation
+// wording shared by readiness + admission. It steers the operator to a
+// permission repair (never deletion). The `mcphub repair-state-dacl --path`
+// command is suggested ONLY when the active vault is at the canonical
+// app-data location (repair-state-dacl targets the canonical state surface;
+// for a legacy beside-the-executable / CWD vault it may be wrong or
+// ineffective, so those get generic chmod/icacls owner-only guidance instead
+// — bot r4 finding 3). Strict mode (MCPHUB_REQUIRE_SINGLE_USER_HOME) is
+// deliberately NOT mentioned: it makes a broadened-DACL read a HARDER refusal,
+// so it is the opposite of a fix (bot r4 finding 1).
+func vaultAccessDeniedFix() string {
+	const runbook = "; see the \"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%\" runbook."
+	if secrets.VaultAtCanonicalLocation() {
+		return "Tighten the vault files (.age-key, secrets.age) and their parent directory to owner-only (Windows: icacls; Linux/macOS: chmod 600/700), or run `mcphub repair-state-dacl --path <file>`" + runbook
+	}
+	// Legacy non-canonical vault location: omit repair-state-dacl.
+	return "Tighten the vault files (.age-key, secrets.age) and their parent directory to owner-only (Windows: icacls; Linux/macOS: chmod 600/700)" + runbook
+}
+
 func containsAny(haystack string, needles ...string) bool {
 	for _, n := range needles {
 		if strings.Contains(haystack, n) {

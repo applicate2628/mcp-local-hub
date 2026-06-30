@@ -42,6 +42,18 @@ func UserDataDir() string {
 	return filepath.Join(home, ".local", "share", "mcp-local-hub")
 }
 
+// VaultAtCanonicalLocation reports whether the ACTIVE vault file resolves to
+// the canonical OS-standard app-data path (UserDataDir()/secrets.age) rather
+// than a legacy beside-the-executable or CWD location that resolveSecretPath
+// also accepts. Callers that want to suggest `mcphub repair-state-dacl --path`
+// must gate that suggestion on this: repair-state-dacl targets the canonical
+// state surface, so it may be wrong/ineffective for a legacy vault — those
+// should get generic chmod/icacls owner-only guidance instead. Single owner of
+// the canonical-vs-legacy distinction (the path-resolution rules live here).
+func VaultAtCanonicalLocation() bool {
+	return DefaultVaultPath() == filepath.Join(UserDataDir(), "secrets.age")
+}
+
 // resolveSecretPath returns the first existing path among (in order):
 //  1. UserDataDir()/<name>               (canonical, OS-standard user data)
 //  2. <exe_dir>/<name>                   (legacy: single-dir install)

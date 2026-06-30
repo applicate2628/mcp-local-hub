@@ -699,10 +699,15 @@ func TestReadiness_AccessDeniedVault_BlocksWithPermissionFix(t *testing.T) {
 	}
 	// MESSAGE IMPROVED: points at permission repair, not deletion.
 	if !strings.Contains(vaultReq.Fix, "repair-state-dacl") {
-		t.Errorf("Fix should name the permission repair; got %q", vaultReq.Fix)
+		t.Errorf("Fix should name the permission repair (canonical vault); got %q", vaultReq.Fix)
 	}
 	if strings.Contains(strings.ToLower(vaultReq.Fix), "remove the corrupt vault") {
 		t.Errorf("Fix must NOT steer toward removing the vault; got %q", vaultReq.Fix)
+	}
+	// bot r4 finding 1: strict mode makes access WORSE, so it must NOT be
+	// suggested as a remediation.
+	if strings.Contains(vaultReq.Fix, "MCPHUB_REQUIRE_SINGLE_USER_HOME") {
+		t.Errorf("Fix must NOT suggest strict mode (it hardens the refusal); got %q", vaultReq.Fix)
 	}
 }
 
@@ -732,9 +737,13 @@ func TestAdmission_AccessDeniedVault_BlocksWithPermissionFix(t *testing.T) {
 	}
 	// MESSAGE IMPROVED.
 	if !strings.Contains(f.Fix, "repair-state-dacl") {
-		t.Errorf("Fix should name the permission repair; got %q", f.Fix)
+		t.Errorf("Fix should name the permission repair (canonical vault); got %q", f.Fix)
 	}
 	if strings.Contains(strings.ToLower(f.Fix), "remove the corrupt vault") {
 		t.Errorf("Fix must NOT steer toward removing the vault; got %q", f.Fix)
+	}
+	// bot r4 finding 1: strict mode is not a fix.
+	if strings.Contains(f.Fix, "MCPHUB_REQUIRE_SINGLE_USER_HOME") {
+		t.Errorf("Fix must NOT suggest strict mode; got %q", f.Fix)
 	}
 }
