@@ -48,22 +48,22 @@ type MCPEntry struct {
 
 	// Raw, when non-nil, carries an adapter's verbatim on-disk entry value
 	// (the parsed JSON/TOML map under the server's name) so an entry shape the
-	// lean MCPEntry CANNOT represent — currently only MiMoCode's LOCAL entry
-	// (type:"local", `command` as an ARRAY, env under `environment`) — survives
-	// a GetEntry → AddEntry rollback round-trip byte-identical instead of being
-	// projected onto a lossy {URL,Headers} shape (which would rewrite the
-	// operator's local entry as a broken `url:""` remote) or skipped entirely
-	// (which makes the install rollback's nil-prior else-branch RemoveEntry
-	// DELETE the operator's original entry).
+	// lean MCPEntry CANNOT represent — currently MiMoCode/OpenCode LOCAL entries
+	// (type:"local", `command` as an ARRAY, env under `environment`) and
+	// same-shape disabled/rich remote entries — survives a GetEntry → AddEntry
+	// rollback round-trip byte-identical instead of being projected onto a lossy
+	// {URL,Headers} shape (which would rewrite the operator's local entry as a
+	// broken `url:""` remote) or skipped entirely (which makes the install
+	// rollback's nil-prior else-branch RemoveEntry DELETE the operator's
+	// original entry).
 	//
 	// CONTRACT: Raw is ADDITIVE and defaults nil. The hub's normal install path
 	// (install.go / register.go) builds MCPEntry WITHOUT Raw, so every adapter
-	// that ignores Raw (all of them except MiMoCode) is byte-unchanged. Only the
-	// MiMoCode adapter reads it: GetEntry sets Raw (and leaves URL empty) for a
-	// url-less local entry; AddEntry, when Raw != nil, writes Raw verbatim and
-	// IGNORES URL/Headers (Raw wins). For a URL entry MiMoCode leaves Raw nil and
-	// returns {URL,Headers} as before, so the normal hub-install/restore polarity
-	// is unchanged. No other adapter populates or consumes Raw.
+	// that ignores Raw is byte-unchanged. MiMoCode/OpenCode read it: GetEntry sets
+	// Raw for non-representable entries; AddEntry, when Raw != nil, writes Raw
+	// verbatim and IGNORES URL/Headers (Raw wins). For clean URL entries these
+	// adapters leave Raw nil and return {URL,Headers} as before, so the normal
+	// hub-install/restore polarity is unchanged.
 	Raw map[string]any
 
 	// SourceBelowWriteTarget, when true, marks that this entry was projected by a
@@ -87,8 +87,9 @@ type MCPEntry struct {
 	SourceBelowWriteTarget bool
 
 	// Disabled, when true, marks that this entry is present in the client config
-	// but in a DISABLED state the client will NOT load (currently only MiMoCode's
-	// `enabled:false`). It exists so a read-membership consumer can keep SEEING
+	// but in a DISABLED state the client will NOT load (currently
+	// MiMoCode/OpenCode's `enabled:false`). It exists so a read-membership
+	// consumer can keep SEEING
 	// the entry (GetEntry returns a non-nil entry so discovery/idempotency/rollback
 	// callers behave) while a GATING consumer that asks "is this an ACTIVE entry
 	// the client actually loads" can exclude it. The only gating consumer today is
@@ -96,14 +97,14 @@ type MCPEntry struct {
 	// `mcphub-hub` aggregate must NOT count as gate-on, because the client never
 	// loads it, so resetting the hub port would orphan nothing — blocking the
 	// reset on a disabled aggregate is a false positive (bot PR #420 finding 5).
-	// This mirrors the scan path's shapeMimoCodeEntry, which classifies an
-	// enabled:false entry as Transport "absent" (absent for gating).
+	// This mirrors the scan paths' shapeMimoCodeEntry/shapeOpenCodeEntry, which
+	// classify an enabled:false entry as Transport "absent" (absent for gating).
 	//
 	// CONTRACT: Disabled is ADDITIVE and defaults FALSE = "active / loaded" — the
-	// historical behavior of EVERY adapter. Only MiMoCode's GetEntry sets it true
-	// (for an enabled:false projected entry); every other adapter leaves it zero,
-	// so their gating behavior is byte-unchanged. GatedOnClients is the ONLY
-	// consumer; every other GetEntry caller ignores it.
+	// historical behavior of EVERY adapter. Only MiMoCode/OpenCode GetEntry sets
+	// it true (for an enabled:false projected entry); every other adapter leaves
+	// it zero, so their gating behavior is byte-unchanged. GatedOnClients is the
+	// ONLY consumer; every other GetEntry caller ignores it.
 	Disabled bool
 }
 

@@ -196,6 +196,9 @@ func (o *openCodeClient) deleteMember(name string) error {
 // "enabled":true}`; an optional `headers` object is emitted when
 // MCPEntry.Headers is non-empty.
 func (o *openCodeClient) AddEntry(entry MCPEntry) error {
+	if entry.Raw != nil {
+		return o.setMember(entry.Name, entry.Raw)
+	}
 	serverEntry := map[string]any{
 		"type":    "remote",
 		"url":     entry.URL,
@@ -229,7 +232,35 @@ func (o *openCodeClient) GetEntry(name string) (*MCPEntry, error) {
 		return nil, nil
 	}
 	url, _ := raw["url"].(string)
+	disabled := openCodeEntryDisabled(raw)
+	if url == "" {
+		return &MCPEntry{Name: name, Raw: raw, Disabled: disabled}, nil
+	}
+	if disabled {
+		return &MCPEntry{Name: name, Raw: raw, Disabled: true}, nil
+	}
+	if openCodeRemoteHasExtraFields(raw) {
+		return &MCPEntry{Name: name, Raw: raw}, nil
+	}
 	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers")}, nil
+}
+
+func openCodeEntryDisabled(raw map[string]any) bool {
+	if enabled, present := raw["enabled"]; present {
+		if b, ok := enabled.(bool); ok && !b {
+			return true
+		}
+	}
+	return false
+}
+
+func openCodeRemoteHasExtraFields(raw map[string]any) bool {
+	for k := range raw {
+		if k != "type" && k != "url" && k != "enabled" && k != "headers" {
+			return true
+		}
+	}
+	return false
 }
 
 func (o *openCodeClient) LatestBackupPath() (string, bool, error) {

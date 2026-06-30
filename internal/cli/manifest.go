@@ -210,11 +210,11 @@ func newManifestDeleteCmd() *cobra.Command {
 
 // manifestExtractSupportedClients is the SINGLE OWNER of the source clients
 // `mcphub manifest extract --client` wires a config path for (the
-// claude/codex/gemini/antigravity/mimocode subset of ExtractManifestFromClient
-// whose ScanOpts paths this command actually populates below). Both the
-// required-client error and the --client flag help render from it so the two
-// can't drift again (bot PR #420 finding 6 — mimocode was missing from both).
-var manifestExtractSupportedClients = []string{"claude-code", "codex-cli", "gemini-cli", "antigravity", "mimocode"}
+// claude/codex/gemini/antigravity/opencode/mimocode subset of
+// ExtractManifestFromClient whose ScanOpts paths this command actually
+// populates below). Both the required-client error and the --client flag help
+// render from it so the two can't drift again.
+var manifestExtractSupportedClients = []string{"claude-code", "codex-cli", "gemini-cli", "antigravity", "opencode", "mimocode"}
 
 // manifestExtractClientsHelp renders the supported-client list as a
 // pipe-separated string for the error message and flag help.
@@ -237,19 +237,19 @@ func newManifestExtractCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// mimocode's config path is resolved through the adapter (the SAME
-			// resolver the GUI extract path uses via guiClientConfigPath →
-			// clients.ConfigPathForName), so `mcphub manifest extract --client
-			// mimocode` populates MimoCodeConfigPath instead of failing the
-			// scan's "MimoCodeConfigPath empty" guard. An unknown/unconstructable
-			// client resolves to "" (extract then surfaces its own
-			// not-supported / empty-path error), so this never panics.
+			// opencode/mimocode config paths are resolved through the adapter
+			// (the SAME resolver the GUI extract path uses via
+			// guiClientConfigPath → clients.ConfigPathForName), so extract
+			// populates their named ScanOpts fields instead of failing the
+			// empty-path guards.
+			openCodePath, _ := clients.ConfigPathForName("opencode")
 			mimoCodePath, _ := clients.ConfigPathForName("mimocode")
 			yaml, err := a.ExtractManifestFromClient(clientFlag, args[0], api.ScanOpts{
 				ClaudeConfigPath:      filepath.Join(home, ".claude.json"),
 				CodexConfigPath:       filepath.Join(home, ".codex", "config.toml"),
 				GeminiConfigPath:      filepath.Join(home, ".gemini", "settings.json"),
 				AntigravityConfigPath: filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
+				OpenCodeConfigPath:    openCodePath,
 				MimoCodeConfigPath:    mimoCodePath,
 				ManifestDir:           scanManifestDir(),
 			})
