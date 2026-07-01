@@ -223,6 +223,21 @@ func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 	}, nil
 }
 
+// closePipeChildEnd closes an exec.Cmd child-side stream (cmd.Stdin /
+// cmd.Stdout / cmd.Stderr) if it is a Closer. After a *Pipe() helper
+// succeeds, exec's StdinPipe/StdoutPipe/StderrPipe store the child end of the
+// pipe pair on the corresponding cmd.Std* field (a *os.File) and only reclaim
+// it inside cmd.Start(). On a partial-init early return — a LATER *Pipe()
+// failed, so Start() never runs — that child end must be closed manually or it
+// leaks until GC. Called only from the *Pipe()-failure branches of Start,
+// where the process has not been launched, so there is no double-close with
+// Start's own cleanup.
+func closePipeChildEnd(stream any) {
+	if c, ok := stream.(io.Closer); ok {
+		_ = c.Close()
+	}
+}
+
 // Start spawns the subprocess and begins the stdout reader goroutine.
 // Returns an error if the subprocess fails to start.
 func (h *StdioHost) Start(ctx context.Context) error {
@@ -244,12 +259,31 @@ func (h *StdioHost) Start(ctx context.Context) error {
 		cmd.Env = composeChildEnv(h.cfg.Env, h.cfg.UnsetEnv)
 	}
 
+	// Partial-init pipe cleanup: each successful *Pipe() call opens a pipe
+	// PAIR (2 fds). One end is returned to us (the parent end: stdin/stdout);
+	// the OTHER end is stored on cmd.Stdin/cmd.Stdout (the child end, appended
+	// to exec's childIOFiles) and is only auto-closed once cmd.Start() runs.
+	// If a LATER *Pipe() call fails before Start(), BOTH ends of each earlier
+	// pair leak — closing only the returned parent end still leaks the child
+	// end held on cmd.Std* until GC. These paths are the in-process
+	// LazyProxy.ensureMaterialized re-materialize routes (idle-reap,
+	// onSendFailure, client-retry), so a leak compounds under fd pressure on a
+	// long-lived process. Close the parent end AND the child end (via
+	// closePipeChildEnd) before the early return.
+	//
+	// StdinPipe failure needs NO cleanup: os.Pipe() itself failed, so nothing
+	// is open yet. cmd.Start() failure needs NO manual cleanup either: Go's
+	// exec.Cmd.Start defers closeDescriptors on any error return before the
+	// process spawns (verified against os/exec/exec.go), closing both parent
+	// and child ends, so closing here would be a redundant double-close.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("stdin pipe: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()            // parent write end (StdinPipe return)
+		closePipeChildEnd(cmd.Stdin) // child read end (stored on cmd.Stdin)
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
 	// Stderr is NOT part of the JSON-RPC protocol channel. openStderrSink
@@ -257,6 +291,10 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// (durable) + os.Stderr (TTY only) / io.Discard (non-TTY).
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		_ = stdin.Close()             // parent write end
+		_ = stdout.Close()            // parent read end (StdoutPipe return)
+		closePipeChildEnd(cmd.Stdin)  // child read end (stored on cmd.Stdin)
+		closePipeChildEnd(cmd.Stdout) // child write end (stored on cmd.Stdout)
 		return fmt.Errorf("stderr pipe: %w", err)
 	}
 

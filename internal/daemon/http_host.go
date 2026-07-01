@@ -185,6 +185,17 @@ func (h *HTTPHost) Start(ctx context.Context) error {
 	h.logCloser = logCloser
 
 	if err := cmd.Start(); err != nil {
+		// h.started is still false, so stopLocked() would short-circuit and
+		// never reclaim the just-opened log file handle. Close it directly
+		// on this early return. (Unlike a stdio pipe, Go's exec package does
+		// NOT auto-close an operator-supplied cmd.Stdout/Stderr writer, so
+		// this handle really would leak.) Callers here are single-shot daemon
+		// processes so process-exit usually reclaims it, but close it anyway
+		// for correctness.
+		if h.logCloser != nil {
+			_ = h.logCloser.Close()
+			h.logCloser = nil
+		}
 		return fmt.Errorf("start upstream subprocess: %w", err)
 	}
 	h.cmd = cmd
