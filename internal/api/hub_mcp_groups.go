@@ -249,6 +249,17 @@ func checkGroupNamesUnique(groups []Group) (idx int, err error) {
 	return -1, nil
 }
 
+// groupsConfigVersionOnly is a lenient (no KnownFields) pre-decode shape
+// used solely to read the `version` field before the strict decode runs.
+// It MUST stay structurally compatible with GroupsConfig's `version` key
+// but otherwise ignores every other field — that is the point: a newer
+// binary may have added fields this binary doesn't know about, and the
+// version check needs to succeed (or fail with the friendly message)
+// without first tripping over them.
+type groupsConfigVersionOnly struct {
+	Version int `yaml:"version"`
+}
+
 // parseGroupsConfig decodes + validates groups.yaml bytes. Unknown YAML
 // keys are rejected (KnownFields(true)) so a typo'd field surfaces rather
 // than silently dropping config. Every group name is validated; the FIRST
@@ -259,25 +270,47 @@ func checkGroupNamesUnique(groups []Group) (idx int, err error) {
 // An empty / whitespace-only input yields a zero GroupsConfig with no
 // groups and no error — "no groups configured" is a valid state, not a
 // corruption.
+//
+// The version check runs BEFORE the strict KnownFields(true) decode (P4
+// deep-review finding): a groups.yaml written by a NEWER mcphub that added
+// a field is an unsupported-version document, and the operator needs the
+// friendly "unsupported version, upgrade mcphub" message — not a cryptic
+// "field X not found in type GroupsConfig" decode error. A lenient
+// pre-decode (no KnownFields) reads just the version first; only once the
+// version is confirmed known does the strict decode run, so a genuinely
+// unknown field on a KNOWN version still hard-fails as before.
 func parseGroupsConfig(raw []byte) (GroupsConfig, error) {
 	var cfg GroupsConfig
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return cfg, nil
 	}
+	// Step 1: lenient pre-decode of just the version field. A malformed
+	// document (not even valid YAML) still fails here with the generic
+	// decode error — there is no friendly version message to give when the
+	// document isn't parseable YAML at all.
+	var versionProbe groupsConfigVersionOnly
+	if err := yaml.Unmarshal(raw, &versionProbe); err != nil {
+		return GroupsConfig{}, fmt.Errorf("groups.yaml decode: %w", err)
+	}
+	// C1 (consultant — cheapest paint-into-corner): reject an unknown schema
+	// version up front, BEFORE the strict decode. version 0 is the
+	// absent/default form (writeGroupsLocked stamps it to 1); version 1 is
+	// this binary's schema. Anything else is a config written by a newer
+	// binary this one cannot safely interpret — including a newer binary
+	// that only ADDED a field (which the strict decode below would
+	// otherwise reject with a cryptic unknown-field error instead of this
+	// friendly upgrade message).
+	if versionProbe.Version != 0 && versionProbe.Version != 1 {
+		return GroupsConfig{}, fmt.Errorf("groups.yaml: unsupported version %d (this binary supports version 1; upgrade mcphub to read a newer groups.yaml)", versionProbe.Version)
+	}
+	// Step 2: the document is a known (or absent/default) version — now run
+	// the strict decode so a genuinely unknown field on a KNOWN version
+	// still surfaces as an authoring error (typo'd key, not a forward-compat
+	// addition).
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
 		return GroupsConfig{}, fmt.Errorf("groups.yaml decode: %w", err)
-	}
-	// C1 (consultant — cheapest paint-into-corner): reject an unknown schema
-	// version up front. With KnownFields(true) a future v2 that adds a field
-	// would hard-break an OLD binary anyway (unknown-key decode error), but a
-	// v2 that only CHANGES the MEANING of an existing field would be silently
-	// misread as v1. version 0 is the absent/default form (writeGroupsLocked
-	// stamps it to 1); version 1 is this binary's schema. Anything else is a
-	// config written by a newer binary this one cannot safely interpret.
-	if cfg.Version != 0 && cfg.Version != 1 {
-		return GroupsConfig{}, fmt.Errorf("groups.yaml: unsupported version %d (this binary supports version 1; upgrade mcphub to read a newer groups.yaml)", cfg.Version)
 	}
 	for i := range cfg.Groups {
 		if err := validateGroupName(cfg.Groups[i].Name); err != nil {

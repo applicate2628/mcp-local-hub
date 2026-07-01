@@ -242,6 +242,26 @@ func TestGroups_UnsupportedVersionRejected(t *testing.T) {
 	}
 }
 
+// TestGroups_UnsupportedVersionWithUnknownFieldYieldsFriendlyError pins the
+// P4 deep-review reachability fix: a groups.yaml written by a NEWER mcphub
+// that both bumped the version AND added a field this binary doesn't know
+// about must surface the FRIENDLY "unsupported version, upgrade mcphub"
+// message, not the cryptic KnownFields(true) "field not found" decode
+// error. Before the fix, the strict decode ran before the version check,
+// so this exact case (new field + new version together — the realistic
+// forward-compat scenario) hit the unknown-field branch first and the
+// friendly version message was unreachable.
+func TestGroups_UnsupportedVersionWithUnknownFieldYieldsFriendlyError(t *testing.T) {
+	raw := []byte("version: 2\nfuture_field: something\ngroups:\n  - name: frontend\n    servers: [memory]\n")
+	_, err := parseGroupsConfig(raw)
+	if err == nil {
+		t.Fatal("parseGroupsConfig accepted version 2 with an unknown field — must reject")
+	}
+	if !strings.Contains(err.Error(), "unsupported version") {
+		t.Fatalf("parseGroupsConfig error = %q; want the friendly \"unsupported version\" message, not a raw decode error (reachability regression)", err.Error())
+	}
+}
+
 // TestGroups_NameLengthCapRejected pins C5-length (consultant): a group name
 // longer than maxGroupNameLen (64) is rejected; a 64-char name is accepted.
 func TestGroups_NameLengthCapRejected(t *testing.T) {

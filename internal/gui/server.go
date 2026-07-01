@@ -1022,7 +1022,7 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	// goroutine so the goroutine does NOT later store a live
 	// listener into s.hubMcpComp after Start has already returned —
 	// the explicit cancel + defer below covers both shutdown paths.
-	hubEnabled := readHubEndpointGateFromSettings()
+	hubEnabled := readHubEndpointGateFromSettings(s.api)
 	hubInitCtx, hubInitCancel := context.WithCancel(ctx)
 	defer hubInitCancel()
 	hubInitDone := make(chan struct{})
