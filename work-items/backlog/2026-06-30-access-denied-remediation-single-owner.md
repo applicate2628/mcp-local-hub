@@ -1,12 +1,27 @@
 ---
-status: open
+status: closed
 type: refactor
 severity: P3
 date: 2026-06-30
+closed: 2026-07-01
 origin: PR #468 round-4/5 churn analysis
 ---
 
 # Single-owner for access-denied vault remediation text
+
+## Resolution (2026-07-01)
+Done in the same PR as the deep-review findings closeout. `classifyVault` now
+threads the access-denied error out (`(state, keys, accessErr)`), and the
+`/api/secrets` list response ships a single-owner `remediation` field
+(`vaultAccessDeniedFix(accessErr)`, omitempty, populated only for
+`access_denied`). The frontend `AccessDeniedView` renders `env.remediation`
+verbatim (keeping only its intact-vault + confidentiality FRAMING paragraphs)
+instead of re-authoring the icacls/chmod/repair-state-dacl guidance — collapsing
+the Go↔frontend copies to one backend owner and ending the wording-drift defect
+class. The generic `StateFileDACLRunbookPointer` (runtime daemon-launch path,
+not vault-specific) is left as a distinct surface. Tests: Go
+`TestSecretsListWithUsage_RemediationSingleOwner` + 2 frontend AccessDeniedView
+cases (renders verbatim / falls back when omitted).
 
 ## Problem
 The access-denied (DACL-refused vault) operator remediation text is duplicated

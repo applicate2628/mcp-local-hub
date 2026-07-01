@@ -395,6 +395,9 @@ func TestSecretsListWithUsage_OkVault(t *testing.T) {
 	if len(env.Secrets[1].UsedBy) != 0 {
 		t.Errorf("secrets[1].used_by should be empty")
 	}
+	if env.Remediation != "" {
+		t.Errorf("remediation = %q, want empty for vault_state=ok", env.Remediation)
+	}
 }
 
 func TestSecretsListWithUsage_ReferencedMissingWhenVaultOk(t *testing.T) {
@@ -449,6 +452,52 @@ func TestSecretsListWithUsage_UnverifiedWhenVaultMissing(t *testing.T) {
 	if len(env.Secrets) != 1 || env.Secrets[0].State != "referenced_unverified" {
 		t.Errorf("secrets[0] = %+v, want referenced_unverified", env.Secrets[0])
 	}
+	if env.Remediation != "" {
+		t.Errorf("remediation = %q, want empty for vault_state=missing", env.Remediation)
+	}
+}
+
+// TestSecretsListWithUsage_RemediationSingleOwner pins the deep-review P3
+// single-owner refactor: the /api/secrets envelope carries the backend's
+// vaultAccessDeniedFix text verbatim in Remediation when vault_state ==
+// "access_denied", and Remediation is empty for a non-access_denied state
+// (already covered above/elsewhere, re-asserted here for the "ok" case to
+// keep the two states pinned side by side).
+func TestSecretsListWithUsage_RemediationSingleOwner(t *testing.T) {
+	keyPath, vaultPath := secretsTestEnv(t)
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte("placeholder-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(vaultPath, []byte("placeholder-vault"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wantErr := fmt.Errorf("file %s not single-user safe: %w",
+		vaultPath,
+		&DACLAllowlistViolation{SID: "S-1-5-21-1234", Mask: 0x120089},
+	)
+	restore := secrets.SetVaultFileReader(func(path string) ([]byte, error) {
+		return nil, wantErr
+	})
+	defer restore()
+
+	a := NewAPI()
+	env, err := a.SecretsListWithUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.VaultState != "access_denied" {
+		t.Fatalf("vault_state = %q, want access_denied", env.VaultState)
+	}
+	want := vaultAccessDeniedFix(wantErr)
+	if env.Remediation != want {
+		t.Errorf("remediation = %q, want %q (vaultAccessDeniedFix output)", env.Remediation, want)
+	}
+	if env.Remediation == "" {
+		t.Error("remediation must not be empty for vault_state=access_denied")
+	}
 }
 
 func TestClassifyVault_DACLRefusalIsAccessDenied(t *testing.T) {
@@ -470,12 +519,15 @@ func TestClassifyVault_DACLRefusalIsAccessDenied(t *testing.T) {
 	})
 	defer restore()
 
-	state, keys := classifyVault(keyPath, vaultPath)
+	state, keys, accessErr := classifyVault(keyPath, vaultPath)
 	if state != "access_denied" {
 		t.Fatalf("classifyVault state = %q, want access_denied", state)
 	}
 	if keys != nil {
 		t.Fatalf("classifyVault keys = %+v, want nil", keys)
+	}
+	if accessErr == nil {
+		t.Fatal("classifyVault accessErr = nil, want the underlying OpenVault error")
 	}
 }
 
@@ -495,9 +547,12 @@ func TestClassifyVault_DACLSubstringFallbackIsAccessDenied(t *testing.T) {
 	})
 	defer restore()
 
-	state, _ := classifyVault(keyPath, vaultPath)
+	state, _, accessErr := classifyVault(keyPath, vaultPath)
 	if state != "access_denied" {
 		t.Fatalf("classifyVault state = %q, want access_denied", state)
+	}
+	if accessErr == nil {
+		t.Fatal("classifyVault accessErr = nil, want the underlying OpenVault error")
 	}
 }
 

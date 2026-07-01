@@ -1,12 +1,47 @@
 ---
-status: open
+status: closed
 context: deep-review-findings
 date: 2026-06-30
+closed: 2026-07-01
 ---
 
 # Deep multi-angle review findings (2026-06-30, 14 angles, waved)
 
 3M-token review. **0 P1**, 5 P2 (all verified+agent-closable), 35 P3/P4. Source: tasks/wzbh4f0s0.output.
+
+## Resolution (2026-07-01) — ALL RESOLVED
+
+**5 P2** → shipped in v0.4.17 (#468 vault DACL-refusal→access_denied + secret audit-trail, #469 per-client scan isolation, #470 marketplace npx/uvx pin, #471 supervisor IPC read-deadline).
+
+**35 P3/P4** → 27 merged, 3 documented-accepted, 5 won't-fix:
+
+| PR | Findings closed |
+|---|---|
+| #472 | dead-code (U1000 wrappers + createNoFollowFlag) — L76,77 |
+| #473 | state-RMW + Registry.bak — L56,57,58,59 |
+| #475 | perf 4 hot paths — L61,62,63,64 |
+| #478 | api-contract (status fail-loud + RespawnResult Code) — L65,66 |
+| #476 | observability (GUI-mutation audit + drop-visibility) — L69,70 |
+| #474 | portability (CanonicalProjectKey write/compare split, Linux HZ/AT_CLKTCK, sun_path, AIX) — L73,74,75 |
+| #479 | arch-ownership (HubLoopbackURL wiring + route-grammar export) — L53,54 |
+| #477 | error-handling + registry-gate + version-check reachability — L51,52,55,60 |
+| #480 | parseJSONCBytes defensive copy — L47 |
+| #481 | IntentWatcher size-aware detect + isOwnerLive→IsPidAlive — L48,50 |
+| #482 | single-owner strict-vs-relax parent-DACL gate — L67 |
+
+**Documented-accepted** (fix-risk/coupling > value; rationale in the finding or a PR body):
+- **L49** backoff respawn timers no per-task registry — SM state-recheck absorbs the harmful cases; residual same-generation premature respawn is self-healing; a timer registry risks dropping a valid respawn. Accepted (matches the code's own "no registry needed" design note).
+- **L71** npm meta package no package-lock — the meta's deps are its OWN not-yet-published platform binaries, so a committed lock can't stay coherent across a version bump; supply-chain control is exact-version optionalDependencies + CI `--provenance` (Sigstore). Documented intentional.
+- **L80** Nav 'Discovery' label vs '#/migration' route — needs a product-naming decision (Discovery-with-stable-legacy-URL vs rename); deferred, surfaced to the operator.
+
+**Won't-fix (closable=False)** — accepted as documented posture, no code change:
+- **L45** security angle clean (no defect).
+- **L46** requireSameOrigin allows no-Origin/no-Sec-Fetch-Site (documented tradeoff behind host-allowlist, not exploitable).
+- **L68** serena/LSP routing in internal/gui vs hub in internal/api — layering asymmetry (large, structural; noted).
+- **L78** runSupervise/serenaRouterHandler/runMigrateSerenaDynamicPool ~900-line functions (readability; large refactor, noted).
+- **L79** internal/clients/mimocode.go 4843-line adapter (wrong-abstraction signal; large, noted).
+
+Separate follow-up (NOT one of the 35): the #468-churn 3-copy access-denied remediation single-owner (work-items/backlog/2026-06-30-access-denied-remediation-single-owner.md) is closed in the same PR as this closeout.
 
 ## P2 (fix)
 

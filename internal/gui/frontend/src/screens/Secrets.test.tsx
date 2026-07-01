@@ -130,11 +130,20 @@ describe("SecretsScreen — access_denied vault state", () => {
     cleanup();
   });
 
+  // The `remediation` value below mirrors the shape vaultAccessDeniedFix
+  // (internal/api/secrets.go) actually produces for the DACL-broadening /
+  // canonical-vault branch — the backend is the single owner of this text
+  // (deep-review P3); the fixture pins the CONTRACT (what fields the backend
+  // is expected to send), not a re-authored copy of the wording.
+  const daclBreadthRemediation =
+    "Tighten the vault files .age-key + secrets.age to owner-only (Windows: icacls; Linux/macOS: chmod 600) and their parent directory too (Windows: icacls <dir> /inheritance:r /grant:r ...; Linux/macOS: chmod 700 <dir>). To repair just the vault FILE permissions you may also run `mcphub repair-state-dacl --path <file>` (it repairs a state file, not a directory). See the \"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%\" runbook.";
+
   it("renders owner-only DACL remediation and does not suggest deleting vault files", async () => {
     const accessDeniedVault: SecretsEnvelope = {
       vault_state: "access_denied",
       secrets: [{ name: "WOLFRAM_APP_ID", state: "referenced_unverified", used_by: [{ server: "wolfram", env_var: "WOLFRAM_APP_ID" }] }],
       manifest_errors: [],
+      remediation: daclBreadthRemediation,
     };
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
@@ -157,6 +166,44 @@ describe("SecretsScreen — access_denied vault state", () => {
     // could have decrypted the vault — so it must tell the operator to rotate.
     expect(text.toLowerCase()).toContain("rotat");
     expect(text.toLowerCase()).not.toContain("decrypt fine");
+  });
+
+  it("renders the backend-owned env.remediation verbatim (single-owner refactor, deep-review P3)", async () => {
+    const accessDeniedVault: SecretsEnvelope = {
+      vault_state: "access_denied",
+      secrets: [],
+      manifest_errors: [],
+      remediation: daclBreadthRemediation,
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/secrets": () => jsonResponse(200, accessDeniedVault),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<SecretsScreen />);
+    const remediationEl = await screen.findByTestId("vault-access-denied-remediation");
+    expect(remediationEl.textContent).toBe(daclBreadthRemediation);
+  });
+
+  it("falls back to a generic pointer when the backend omits remediation (older backend / defensive)", async () => {
+    const accessDeniedVault: SecretsEnvelope = {
+      vault_state: "access_denied",
+      secrets: [],
+      manifest_errors: [],
+      // remediation intentionally omitted
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/secrets": () => jsonResponse(200, accessDeniedVault),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<SecretsScreen />);
+    const remediationEl = await screen.findByTestId("vault-access-denied-remediation");
+    // Never renders blank; the fallback still points at the runbook.
+    expect(remediationEl.textContent ?? "").not.toBe("");
+    expect((remediationEl.textContent ?? "").toLowerCase()).toContain("runbook");
   });
 });
 

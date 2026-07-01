@@ -17,6 +17,12 @@ type SecretsEnvelope struct {
 	VaultState     string          `json:"vault_state"`
 	Secrets        []SecretRow     `json:"secrets"`
 	ManifestErrors []ManifestError `json:"manifest_errors"`
+	// Remediation is the single-owner actionable fix text for
+	// VaultState == "access_denied" (vaultAccessDeniedFix's output, deep-review
+	// P3). Empty for every other vault state. The GUI renders this verbatim
+	// instead of re-authoring its own copy — see AccessDeniedView in
+	// internal/gui/frontend/src/screens/Secrets.tsx.
+	Remediation string `json:"remediation,omitempty"`
 }
 
 // SecretRow is one row in the registry. State distinguishes:
@@ -308,33 +314,47 @@ func (a *API) SecretsListWithUsage() (SecretsEnvelope, error) {
 
 	vaultMutex.Lock()
 	defer vaultMutex.Unlock()
-	state, keys := classifyVault(keyPath, vaultPath)
+	state, keys, accessErr := classifyVault(keyPath, vaultPath)
 
 	rows := buildSecretRows(state, keys, usage)
-	return SecretsEnvelope{
+	envelope := SecretsEnvelope{
 		VaultState:     state,
 		Secrets:        rows,
 		ManifestErrors: manifestErrs,
-	}, nil
+	}
+	if state == "access_denied" {
+		// Single-owner remediation text (deep-review P3): the backend is the
+		// sole author of the actionable access-denied guidance; the GUI
+		// renders this string verbatim instead of re-authoring its own copy.
+		envelope.Remediation = vaultAccessDeniedFix(accessErr)
+	}
+	return envelope, nil
 }
 
 // classifyVault maps OpenVault outcomes to the five-state vault model
-// (memo §5.2 + access_denied, P2.1). Returns (state, keys); keys is
-// non-nil only when state == "ok".
+// (memo §5.2 + access_denied, P2.1). Returns (state, keys, accessErr); keys
+// is non-nil only when state == "ok". accessErr is the underlying OpenVault
+// error when state == "access_denied" (nil otherwise) so the caller can
+// build the single-owner remediation text via vaultAccessDeniedFix without
+// re-deriving or re-classifying the error itself.
 //
 // Codex plan-R1 P3: capture the first OpenVault error and re-use it
 // instead of calling OpenVault twice (the second call is redundant).
-func classifyVault(keyPath, vaultPath string) (string, []string) {
+func classifyVault(keyPath, vaultPath string) (string, []string, error) {
 	v, err := secrets.OpenVault(keyPath, vaultPath)
 	if err == nil {
-		return "ok", v.List()
+		return "ok", v.List(), nil
 	}
 	keyExists := fileExists(keyPath)
 	vaultExists := fileExists(vaultPath)
 	if !keyExists || !vaultExists {
-		return "missing", nil
+		return "missing", nil, nil
 	}
-	return classifyVaultOpenError(err), nil
+	state := classifyVaultOpenError(err)
+	if state == "access_denied" {
+		return state, nil, err
+	}
+	return state, nil, nil
 }
 
 // classifyVaultOpenError maps a non-nil OpenVault error (with the vault +
