@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -827,5 +828,46 @@ func TestJSONC_OpenClaw_RestoreEntryFromJSONCBackup(t *testing.T) {
 	serena, _ := servers["serena"].(map[string]any)
 	if got, _ := serena["url"].(string); got != "https://remote.example.com/mcp" {
 		t.Errorf("serena url = %q, want the pre-hub url restored from the JSONC backup", got)
+	}
+}
+
+// -------------------- parseJSONCBytes helper contracts --------------------
+
+// TestParseJSONCBytes_DoesNotMutateInput pins the single-owner defensive-copy
+// fix (deep-review P4): hujson.Standardize overwrites comment bytes with spaces
+// IN PLACE, so without the internal copy parseJSONCBytes would clobber the
+// caller's slice — corrupting a later comment-preserving Pack() of the same
+// bytes. The input must be byte-for-byte unchanged after the call.
+func TestParseJSONCBytes_DoesNotMutateInput(t *testing.T) {
+	src := []byte("{\n  // a line comment\n  \"a\": 1, /* trailing */\n}")
+	orig := make([]byte, len(src))
+	copy(orig, src)
+
+	m, err := parseJSONCBytes(src)
+	if err != nil {
+		t.Fatalf("parseJSONCBytes: %v", err)
+	}
+	if got, ok := m["a"]; !ok || got != float64(1) {
+		t.Fatalf("parsed map = %#v, want a==1 (parse must still work on the internal copy)", m)
+	}
+	if !bytes.Equal(src, orig) {
+		t.Fatalf("parseJSONCBytes mutated its input in place:\n got: %q\nwant: %q", src, orig)
+	}
+}
+
+// TestParseJSONCBytes_EmptyAndNull covers the empty/whitespace and literal-null
+// coercions the doc guarantees (a nil map must never escape to callers).
+func TestParseJSONCBytes_EmptyAndNull(t *testing.T) {
+	for _, in := range [][]byte{nil, {}, []byte("  \n\t "), []byte("null")} {
+		m, err := parseJSONCBytes(in)
+		if err != nil {
+			t.Fatalf("parseJSONCBytes(%q): %v", in, err)
+		}
+		if m == nil {
+			t.Fatalf("parseJSONCBytes(%q) returned a nil map; callers must never have to nil-check", in)
+		}
+		if len(m) != 0 {
+			t.Fatalf("parseJSONCBytes(%q) = %#v, want empty map", in, m)
+		}
 	}
 }

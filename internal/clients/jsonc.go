@@ -55,22 +55,24 @@ func readRawConfig(path string) ([]byte, error) {
 // A nil top-level (literal JSON `null`) is also coerced to an empty map so
 // callers never have to nil-check the result.
 //
-// CAUTION (input-mutation hazard): hujson.Standardize MUTATES its input slice
-// IN PLACE (it overwrites comment bytes with spaces while standardizing), so the
-// `data` slice this function receives is clobbered after the call. A
-// read-then-comment-preserving-write caller (one that parses to inspect, then
-// later Pack()s the ORIGINAL bytes to keep comments) MUST pass a COPY of the
-// on-disk bytes here — never the same slice it intends to comment-preserve-write
-// later. Today no caller depends on `data` staying intact after this call (the
-// comment-preserving write path in applyJSONCObjectMemberPath re-reads via
-// hujson.Parse on a fresh read), so this is documented as a hazard, not a live
-// bug. Proper single-owner fix (defensive copy inside this helper) is deferred:
-// work-items/backlog/2026-06-25-jsonc-parsebytes-defensive-copy.md.
+// SAFETY (input is NOT mutated): hujson.Standardize MUTATES its input slice IN
+// PLACE (it overwrites comment bytes with spaces while standardizing). To make
+// this helper safe for EVERY caller — including a read-then-comment-preserving-
+// write path that parses to inspect, then later Pack()s the ORIGINAL bytes to
+// keep comments — parseJSONCBytes standardizes a DEFENSIVE COPY, so the `data`
+// slice the caller passes is never clobbered. This is the single-owner fix
+// (deep-review P4, closing work-items/backlog/2026-06-25-jsonc-parsebytes-
+// defensive-copy.md): no caller needs to copy at the call site. An existing
+// belt-and-suspenders copy at a call site (e.g. currentClaudeToggleArrays
+// passing copyBytes(original)) is now redundant but harmless.
 func parseJSONCBytes(data []byte) (map[string]any, error) {
 	if len(data) == 0 || len(strings.TrimSpace(string(data))) == 0 {
 		return map[string]any{}, nil
 	}
-	std, err := hujson.Standardize(data)
+	// Standardize a copy so the caller's `data` slice is never mutated in place.
+	buf := make([]byte, len(data))
+	copy(buf, data)
+	std, err := hujson.Standardize(buf)
 	if err != nil {
 		return nil, err
 	}
