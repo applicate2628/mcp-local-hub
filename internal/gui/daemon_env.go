@@ -366,16 +366,24 @@ func (s *Server) daemonRespawnHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	result, dialErr := api.DialSupervisorIPCRespawn(ctx, taskName, req.Force, 5000)
 	if dialErr != nil {
-		// dialErr is exclusively the transport-level failure surface
-		// (api.DialSupervisorIPCRespawn / dialSupervisorIPCRespawnFromStateDir
-		// only return a non-nil error from resolve-state-dir, dial, hello-
-		// handshake, send, read-response, or ID-mismatch — every supervisor-
-		// classified outcome, including SUPERVISOR_UNAVAILABLE, comes back as
-		// a populated RespawnResult with dialErr == nil instead). A transport
-		// failure means the supervisor is unreachable right now, which is a
-		// retryable condition for the caller, not an internal-error condition
-		// in this handler's own logic — so it maps to 503 (P4 deep-review
-		// finding), reserving 500 for a genuine internal error.
+		// dialErr is the DialSupervisorIPCRespawn failure surface (every
+		// supervisor-CLASSIFIED outcome, including SUPERVISOR_UNAVAILABLE, comes
+		// back as a populated RespawnResult with dialErr == nil instead, handled
+		// by the result.Code switch below). Split it two ways (bot PR #477 P3):
+		//
+		//   - A LOCAL setup failure (api.ErrRespawnSetupFailure — the state dir
+		//     cannot be resolved, or the supervisor owner sidecar is present but
+		//     unreadable/corrupt) is NOT a retryable supervisor outage: retrying
+		//     will not repair a broken state dir or owner file. It maps to 500
+		//     so the caller does not treat it as "come back later".
+		//   - Every other non-nil dialErr is a genuine transport-level failure
+		//     (dial, hello handshake, send, read-response, or ID mismatch)
+		//     meaning the supervisor is unreachable right now — a retryable
+		//     condition — so it maps to 503.
+		if errors.Is(dialErr, api.ErrRespawnSetupFailure) {
+			writeAPIError(w, dialErr, http.StatusInternalServerError, "RESPAWN_SETUP_FAILED")
+			return
+		}
 		writeAPIError(w, dialErr, http.StatusServiceUnavailable, "IPC_FAILED")
 		return
 	}

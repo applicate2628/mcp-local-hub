@@ -2,6 +2,10 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -56,6 +60,12 @@ func TestRespawnDialHelloMismatch(t *testing.T) {
 	// pins.
 	if result.Code != "" || result.Success {
 		t.Fatalf("result = %+v, want zero-value RespawnResult alongside a transport error", result)
+	}
+	// A hello-mismatch is a TRANSPORT failure, NOT a local setup failure — it
+	// must NOT match ErrRespawnSetupFailure, so the GUI handler keeps mapping it
+	// to 503 (retryable) rather than 500 (bot PR #477 P3).
+	if errors.Is(err, ErrRespawnSetupFailure) {
+		t.Fatalf("hello-mismatch err = %v matched ErrRespawnSetupFailure; a transport failure must stay 503, not 500", err)
 	}
 }
 
@@ -125,5 +135,52 @@ func TestDialSupervisorIPCRespawn_RefusalCodePropagated(t *testing.T) {
 	}
 	if result.Code != "QUARANTINED" {
 		t.Fatalf("result.Code = %q, want QUARANTINED (refusal codes pass through unchanged)", result.Code)
+	}
+}
+
+// TestRespawnSetupErrorSentinel_ClassifiesAndPreservesCause pins the
+// ErrRespawnSetupFailure multi-%w wrapping contract (bot PR #477 P3): a wrapped
+// setup error classifies via errors.Is AND still exposes its underlying cause,
+// while a plain transport error does NOT match the sentinel. This is the
+// invariant the GUI respawn handler's 500-vs-503 split relies on.
+func TestRespawnSetupErrorSentinel_ClassifiesAndPreservesCause(t *testing.T) {
+	cause := errors.New("resolve state dir: permission denied")
+	setup := fmt.Errorf("supervisor IPC respawn: resolve state dir: %w: %w", ErrRespawnSetupFailure, cause)
+	if !errors.Is(setup, ErrRespawnSetupFailure) {
+		t.Fatalf("errors.Is(setup, ErrRespawnSetupFailure) = false; a setup failure must classify so the handler maps it to 500")
+	}
+	if !errors.Is(setup, cause) {
+		t.Fatalf("multi-%%w must preserve the underlying cause for diagnosis")
+	}
+	transport := fmt.Errorf("supervisor IPC respawn: dial: %w", errors.New("connection refused"))
+	if errors.Is(transport, ErrRespawnSetupFailure) {
+		t.Fatalf("a transport failure must NOT match ErrRespawnSetupFailure (it stays 503, not 500)")
+	}
+}
+
+// TestRespawnDialCorruptOwnerIsSetupError exercises the REAL owner-read setup
+// path (bot PR #477 P3): a present-but-corrupt supervisor owner sidecar makes
+// ReadSupervisorLockOwner return a non-IsNotExist error (readStateFileInodeAnchored
+// reads the bytes, then json.Unmarshal fails), which
+// dialSupervisorIPCRespawnFromStateDir must wrap with ErrRespawnSetupFailure so
+// the GUI handler maps it to HTTP 500 (a broken owner file is not repaired by a
+// retry), not the 503 reserved for transport unavailability. An ABSENT owner
+// file, by contrast, returns the structured SUPERVISOR_UNAVAILABLE result
+// (dialErr == nil) and is NOT this path.
+func TestRespawnDialCorruptOwnerIsSetupError(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	withDaemonStateRootOverride(t, stateDir)
+	// A present-but-unparseable sidecar. Mirrors the corrupt-sidecar seed in
+	// supervisor_lock_test.go.
+	ownerPath := filepath.Join(stateDir, "supervisor.lock.owner.json")
+	if err := os.WriteFile(ownerPath, []byte(`{"pid":`), 0o600); err != nil {
+		t.Fatalf("seed corrupt owner sidecar: %v", err)
+	}
+	_, err := dialSupervisorIPCRespawnFromStateDir(context.Background(), stateDir, `\mcp-local-hub-memory-default`, false, 5000)
+	if err == nil {
+		t.Fatalf("expected a setup error on a corrupt owner sidecar, got nil")
+	}
+	if !errors.Is(err, ErrRespawnSetupFailure) {
+		t.Fatalf("err = %v, want errors.Is(ErrRespawnSetupFailure) — a corrupt owner sidecar is a local setup failure (HTTP 500), not transport unavailability (503)", err)
 	}
 }

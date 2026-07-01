@@ -9,6 +9,18 @@ import (
 	"time"
 )
 
+// ErrRespawnSetupFailure marks a LOCAL setup/state-file failure inside the
+// respawn dial path — the state directory cannot be resolved, or the supervisor
+// owner sidecar is present but unreadable/corrupt — as distinct from a
+// transport-level unavailability (dial / hello handshake / send / read). The
+// GUI respawn handler maps a setup failure to HTTP 500 (retrying will NOT
+// repair a broken state dir or owner file), reserving 503 for a transport
+// unavailability the caller can usefully retry (bot PR #477 P3). It is wrapped
+// ALONGSIDE the underlying cause via multi-%w, so errors.Is(err,
+// ErrRespawnSetupFailure) classifies the failure while the cause stays
+// inspectable in the error string.
+var ErrRespawnSetupFailure = errors.New("supervisor IPC respawn: local setup failure")
+
 // RespawnRefusedIntentStoppedCode is the distinct supervisor-side
 // respawn refusal code returned when an idle daemon's respawn is
 // refused because its daemon-intent.json still records Desired=stopped
@@ -103,7 +115,10 @@ func DialSupervisorIPCRespawn(ctx context.Context, taskName string, force bool, 
 	}
 	stateDir, err := DaemonStateDir()
 	if err != nil {
-		return RespawnResult{}, fmt.Errorf("supervisor IPC respawn: resolve state dir: %w", err)
+		// Local setup failure (state dir unresolvable) — wrap the sentinel
+		// alongside the cause so the GUI handler maps this to 500, not the 503
+		// reserved for transport unavailability (bot PR #477 P3).
+		return RespawnResult{}, fmt.Errorf("supervisor IPC respawn: resolve state dir: %w: %w", ErrRespawnSetupFailure, err)
 	}
 	return dialSupervisorIPCRespawnFromStateDir(ctx, stateDir, taskName, force, timeoutMs)
 }
@@ -118,7 +133,11 @@ func dialSupervisorIPCRespawnFromStateDir(ctx context.Context, stateDir, taskNam
 				Message: fmt.Sprintf("supervisor.lock.owner.json not found at %s.owner.json", lockPath),
 			}, nil
 		}
-		return RespawnResult{}, fmt.Errorf("supervisor IPC respawn: read %s.owner.json: %w", lockPath, err)
+		// The owner sidecar exists (not IsNotExist — that returns the structured
+		// SUPERVISOR_UNAVAILABLE result above) but is unreadable/corrupt: a local
+		// setup failure, not a transport outage. Wrap the sentinel so the GUI
+		// handler maps it to 500 (bot PR #477 P3).
+		return RespawnResult{}, fmt.Errorf("supervisor IPC respawn: read %s.owner.json: %w: %w", lockPath, ErrRespawnSetupFailure, err)
 	}
 	address := SupervisorIPCAddress(stateDir)
 	conn, err := dialSupervisorIPC(ctx, address)
