@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -88,15 +89,22 @@ var supervisorMonitorStderr io.Writer = os.Stderr
 func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode bool, waitFor time.Duration) (*supervisorOwner, error) {
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
-		// A state-dir resolution failure is a LOCAL setup fault (unresolvable
-		// root, or the parent-dir gate rejected it) — the same class the
-		// probe's own ErrStatusSetupFailure covers. Classify it identically:
-		// probeSupervisor -> dialSupervisorIPCStatusFromStateDir also resolves
-		// the state dir and wraps that failure with ErrStatusSetupFailure, but
-		// this top-of-function resolve returns BEFORE the probe runs, so
-		// without this the setup-fault remediation would never be surfaced for
-		// a rejected state root (bot r2 P2).
-		return nil, supervisorSetupFaultError(fmt.Errorf("resolve state dir: %w", err))
+		// A state-dir RESOLVE failure has different causes and different
+		// remediation than the probe-path setup fault (present-but-unreadable
+		// owner sidecar), so it does NOT route through supervisorSetupFaultError
+		// — the three sidecar remediations (repair-state-dacl / delete-sidecar /
+		// unset MCPHUB_REQUIRE_SINGLE_USER_HOME) are all dead ends here:
+		//   - Windows (GA): DaemonStateDir fails only via errKnownFolderUnavailable
+		//     (SHGetKnownFolderPath(FOLDERID_LocalAppData) failed/empty) or a
+		//     mkdir-state-root failure — no sidecar, no DACL, and the env var is
+		//     never consulted in the resolve path.
+		//   - POSIX: the state-root parent is group/world-writable or not owned
+		//     by the caller (errStateParentInsecure), which fires UNCONDITIONALLY;
+		//     MCPHUB_REQUIRE_SINGLE_USER_HOME is not consulted in state_paths*.go.
+		// So this gets a dedicated, platform-correct error naming the real cause
+		// and fix, keeping the underlying cause wrapped for diagnosis (bot r2 P2 /
+		// Fable-5 P3 correction).
+		return nil, supervisorStateDirResolveError(err)
 	}
 	if ok, probeErr := probeSupervisor(ctx, 2*time.Second); ok {
 		return &supervisorOwner{spawned: false, stateDir: stateDir}, nil
@@ -712,34 +720,69 @@ func (s *supervisorOwner) Pid() int {
 	return s.proc.Pid
 }
 
-// supervisorSetupFaultError wraps a LOCAL setup fault into an
+// supervisorSetupFaultError wraps the PROBE-path LOCAL setup fault into an
 // operator-actionable startup error that names remediation for EACH of the
 // distinct causes this path covers, not just a DACL refusal. It is reached
-// from two places: (1) the top-of-function api.DaemonStateDir() resolve
-// failure (the state root itself is unresolvable or rejected by the
-// parent-dir gate), and (2) probeSupervisor returning api.ErrStatusSetupFailure
-// — which dialSupervisorIPCStatusFromStateDir attaches to ALL non-IsNotExist
-// owner-read failures: a DACL/mode refusal, corrupt/malformed sidecar JSON, a
-// wrong-owner/irregular file, or a parent-dir gate rejection. (An ABSENT
-// sidecar classifies as api.ErrSupervisorIPCUnavailable → the normal spawn
-// path, so reaching here means NO supervisor is proven and spawning a
-// duplicate would only re-hit the same local fault.)
+// ONLY from probeSupervisor returning api.ErrStatusSetupFailure — which
+// dialSupervisorIPCStatusFromStateDir attaches to ALL non-IsNotExist
+// owner-read failures on a PRESENT supervisor.lock.owner.json sidecar: a
+// DACL/mode refusal, corrupt/malformed sidecar JSON, or a wrong-owner/
+// irregular file (including one refused under MCPHUB_REQUIRE_SINGLE_USER_HOME=1).
+// (An ABSENT sidecar classifies as api.ErrSupervisorIPCUnavailable → the normal
+// spawn path, so reaching here means NO supervisor is proven and spawning a
+// duplicate would only re-hit the same local fault. The top-of-function
+// api.DaemonStateDir() RESOLVE failure has its own dedicated error —
+// supervisorStateDirResolveError — because its causes and fixes differ.)
 //
 // Because the cause varies, a single "run repair-state-dacl" instruction
-// would be a dead end for the corrupt-JSON and rejected-parent cases (that
-// command only fixes a file's DACL/mode — it does not rewrite invalid JSON or
-// widen/tighten a parent directory). So the message enumerates the
-// cause-appropriate remediation and keeps the underlying cause wrapped (%w)
-// so the operator can see which one applies.
+// would be a dead end for the corrupt-JSON case (that command only fixes a
+// file's DACL/mode — it does not rewrite invalid JSON). So the message
+// enumerates the cause-appropriate remediation and keeps the underlying cause
+// wrapped (%w) so the operator can see which one applies.
 func supervisorSetupFaultError(cause error) error {
 	return fmt.Errorf("supervisor owner: local supervisor state is unreadable (NOT a running supervisor); "+
 		"remediation depends on the wrapped cause below: "+
-		"(a) DACL/mode refusal on supervisor.lock.owner.json or the state dir → repair to owner-only "+
+		"(a) DACL/mode refusal on supervisor.lock.owner.json → repair to owner-only "+
 		"(`mcphub repair-state-dacl --path <refused-file>`, or tighten the parent DACL; see the "+
 		"\"secret daemons exit 1 on a sandbox-broadened %%LOCALAPPDATA%%\" runbook in CLAUDE.md); "+
 		"(b) corrupt/malformed supervisor.lock.owner.json → delete the sidecar so it regenerates on next start; "+
-		"(c) rejected state dir under MCPHUB_REQUIRE_SINGLE_USER_HOME=1 → tighten the parent directory's DACL or unset that env var. "+
+		"(c) sidecar refused under MCPHUB_REQUIRE_SINGLE_USER_HOME=1 → tighten the parent directory's DACL or unset that env var. "+
 		"Then restart: %w", cause)
+}
+
+// supervisorStateDirResolveError wraps a top-of-function api.DaemonStateDir()
+// RESOLVE failure into an operator-actionable startup error. This is a
+// DIFFERENT fault from the probe-path setup fault above: no supervisor state
+// file is even read here — the per-user state ROOT itself could not be
+// resolved/created — so the three sidecar remediations do not apply. The
+// causes (and fixes) are platform-specific, so the guidance line is selected
+// by runtime.GOOS:
+//
+//   - Windows (GA): api.DaemonStateDir fails only when
+//     SHGetKnownFolderPath(FOLDERID_LocalAppData) fails or returns empty
+//     (errKnownFolderUnavailable), or when the state dir cannot be created
+//     (mkdir failure). MCPHUB_REQUIRE_SINGLE_USER_HOME is never consulted in
+//     the resolve path, and no DACL is evaluated. Fix: ensure %LOCALAPPDATA%
+//     is set and its tree is writable.
+//   - POSIX: the state-root parent is group/world-writable or not owned by the
+//     caller (errStateParentInsecure), which fires UNCONDITIONALLY — the env
+//     var is irrelevant here too. Fix: chmod go-w / chown the state-root
+//     parent, or point $XDG_STATE_HOME at a private directory.
+//
+// The underlying cause stays wrapped (%w) so the operator sees the exact
+// resolver error (e.g. the failing known-folder call or the offending
+// parent-dir mode/owner).
+func supervisorStateDirResolveError(cause error) error {
+	var remediation string
+	if runtime.GOOS == "windows" {
+		remediation = "the %LOCALAPPDATA% known-folder lookup failed or the state dir could not be created " +
+			"→ ensure %LOCALAPPDATA% is set and its directory tree is writable by your account"
+	} else {
+		remediation = "the state-root parent is group/world-writable or not owned by you " +
+			"→ `chmod go-w` / `chown` the state-root parent, or set $XDG_STATE_HOME to a private directory"
+	}
+	return fmt.Errorf("supervisor owner: cannot resolve the per-user state directory (NOT a running supervisor); "+
+		"%s. Then restart: %w", remediation, cause)
 }
 
 // probeSupervisor performs a single IPC handshake + status query

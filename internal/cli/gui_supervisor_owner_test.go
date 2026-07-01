@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -872,30 +873,79 @@ func TestArmSupervisorManager_NilOwnerReturnsNil(t *testing.T) {
 }
 
 // TestSupervisorSetupFaultError_BroadRemediationAndCause pins the bot r2
-// findings on this helper: because it now covers multiple causes (DACL/mode
-// refusal, corrupt sidecar JSON, and a rejected state dir — plus the
-// top-of-function DaemonStateDir resolve failure routed through it), the
-// message must NOT prescribe `repair-state-dacl` as the only fix (a dead end
-// for the corrupt-JSON and rejected-parent cases) and must keep the underlying
-// cause wrapped so the operator can tell which remediation applies.
+// findings on this helper: it covers multiple PROBE-path sidecar causes
+// (DACL/mode refusal, corrupt sidecar JSON, and a sidecar refused under
+// MCPHUB_REQUIRE_SINGLE_USER_HOME=1), so the message must NOT prescribe
+// `repair-state-dacl` as the only fix (a dead end for the corrupt-JSON case)
+// and must keep the underlying cause wrapped so the operator can tell which
+// remediation applies. The cause example is a present-but-unreadable owner
+// sidecar (the actual domain of this helper) — the state-dir RESOLVE failure
+// now has its own dedicated error (supervisorStateDirResolveError) and no
+// longer routes through here (Fable-5 P3 correction).
 func TestSupervisorSetupFaultError_BroadRemediationAndCause(t *testing.T) {
-	cause := errors.New("resolve state dir: parent directory not single-user safe")
+	cause := errors.New("read supervisor.lock.owner.json: DACL refused for path")
 	err := supervisorSetupFaultError(cause)
 	if err == nil {
 		t.Fatal("supervisorSetupFaultError returned nil")
 	}
 	msg := err.Error()
 	// Each of the three distinct remediations must be named — a single
-	// repair-state-dacl instruction would strand two of the three causes.
+	// repair-state-dacl instruction would strand the corrupt-JSON case.
 	for _, want := range []string{
 		"repair-state-dacl",               // (a) DACL/mode refusal
 		"delete the sidecar",              // (b) corrupt/malformed JSON
-		"MCPHUB_REQUIRE_SINGLE_USER_HOME", // (c) rejected state dir
+		"MCPHUB_REQUIRE_SINGLE_USER_HOME", // (c) sidecar refused under strict mode
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message missing remediation hint %q; got: %s", want, msg)
 		}
 	}
+	// Cause stays wrapped for diagnosis (errors.Is reaches it).
+	if !errors.Is(err, cause) {
+		t.Errorf("cause not preserved through wrap; got: %s", msg)
+	}
+}
+
+// TestSupervisorStateDirResolveError_PlatformRemediationAndCause pins the
+// Fable-5 P3 fix: the top-of-function api.DaemonStateDir() RESOLVE failure has
+// a DEDICATED error (not routed through supervisorSetupFaultError), because its
+// causes and fixes differ from the present-but-unreadable owner-sidecar fault.
+// The remediation line must be platform-correct (runtime.GOOS-selected) and the
+// underlying resolver cause must stay wrapped for diagnosis.
+func TestSupervisorStateDirResolveError_PlatformRemediationAndCause(t *testing.T) {
+	cause := errors.New("SHGetKnownFolderPath(LocalAppData) unavailable")
+	err := supervisorStateDirResolveError(cause)
+	if err == nil {
+		t.Fatal("supervisorStateDirResolveError returned nil")
+	}
+	msg := err.Error()
+
+	// Platform-appropriate remediation hint must be present, and the WRONG
+	// platform's hint must NOT leak in.
+	if runtime.GOOS == "windows" {
+		if !strings.Contains(msg, "%LOCALAPPDATA%") {
+			t.Errorf("Windows message missing the %%LOCALAPPDATA%% remediation hint; got: %s", msg)
+		}
+		if strings.Contains(msg, "XDG_STATE_HOME") {
+			t.Errorf("Windows message leaked the POSIX XDG_STATE_HOME hint; got: %s", msg)
+		}
+	} else {
+		if !strings.Contains(msg, "XDG_STATE_HOME") {
+			t.Errorf("POSIX message missing the $XDG_STATE_HOME remediation hint; got: %s", msg)
+		}
+		if strings.Contains(msg, "%LOCALAPPDATA%") {
+			t.Errorf("POSIX message leaked the Windows %%LOCALAPPDATA%% hint; got: %s", msg)
+		}
+	}
+
+	// This dedicated error must NOT prescribe the sidecar remediations —
+	// they are all dead ends for a state-root RESOLVE failure.
+	for _, forbidden := range []string{"repair-state-dacl", "delete the sidecar"} {
+		if strings.Contains(msg, forbidden) {
+			t.Errorf("state-dir resolve error leaked the sidecar remediation %q (dead end here); got: %s", forbidden, msg)
+		}
+	}
+
 	// Cause stays wrapped for diagnosis (errors.Is reaches it).
 	if !errors.Is(err, cause) {
 		t.Errorf("cause not preserved through wrap; got: %s", msg)
