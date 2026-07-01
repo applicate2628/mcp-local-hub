@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"io"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -110,4 +111,70 @@ func TestStdioHostStartFailureNoGoroutineLeak(t *testing.T) {
 	if after > before+2 {
 		t.Errorf("goroutine leak after failed StdioHost.Start: before=%d after=%d", before, after)
 	}
+}
+
+// TestClosePipeChildEndReclaimsLeakedChildDescriptor proves the fix for the
+// child-end descriptor leak on the partial-init pipe-failure paths. When a
+// *Pipe() helper succeeds it opens a pipe PAIR: the parent end is returned to
+// the caller, while the CHILD end is stored on cmd.Std* (a *os.File) and is
+// only reclaimed inside cmd.Start(). On a partial-init early return (a LATER
+// *Pipe() failed, so Start never runs), closing only the returned parent end
+// leaves that child end open — the exact leak the fix's closePipeChildEnd
+// calls close.
+//
+// This reproduces the state right before a StderrPipe failure (StdinPipe +
+// StdoutPipe already succeeded), then asserts closePipeChildEnd actually
+// closes the child *os.File exec stashed on cmd.Stdin/cmd.Stdout. The
+// StdoutPipe/StderrPipe-fail branches themselves are not injectable through
+// StdioHost's public API (no seam wrapping the stdlib *exec.Cmd), so the
+// branch WIRING is covered by inspection while this test pins the cleanup
+// primitive's semantics — a no-op or wrong type-assertion here would resurface
+// the leak and fail this test.
+func TestClosePipeChildEndReclaimsLeakedChildDescriptor(t *testing.T) {
+	cmd := exec.Command("this-binary-does-not-exist-fdleak-9999")
+	stdinParent, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("StdinPipe: %v", err)
+	}
+	stdoutParent, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("StdoutPipe: %v", err)
+	}
+	// The child ends exec stored on cmd.Std* — these are the fds that leak if
+	// only the parent ends are closed.
+	childStdin, ok := cmd.Stdin.(io.Closer)
+	if !ok {
+		t.Fatal("cmd.Stdin is not an io.Closer (*os.File expected)")
+	}
+	childStdout, ok := cmd.Stdout.(io.Closer)
+	if !ok {
+		t.Fatal("cmd.Stdout is not an io.Closer (*os.File expected)")
+	}
+
+	// The OLD (buggy) cleanup closed only the parent ends.
+	_ = stdinParent.Close()
+	_ = stdoutParent.Close()
+
+	// The fix additionally reclaims the child ends.
+	closePipeChildEnd(cmd.Stdin)
+	closePipeChildEnd(cmd.Stdout)
+
+	// A second close on each child end must now error (already closed),
+	// proving closePipeChildEnd closed the fd. Without the fix these ends
+	// would still be open and a first close here would return nil.
+	if err := childStdin.Close(); err == nil {
+		t.Error("child stdin end was left open (leaked) — closePipeChildEnd did not close it")
+	}
+	if err := childStdout.Close(); err == nil {
+		t.Error("child stdout end was left open (leaked) — closePipeChildEnd did not close it")
+	}
+}
+
+// TestClosePipeChildEndIsNilSafe guards the helper against a nil or
+// non-Closer cmd.Std* value (e.g. a stream never set): it must be a silent
+// no-op, never a panic, since it runs on error-cleanup paths.
+func TestClosePipeChildEndIsNilSafe(t *testing.T) {
+	closePipeChildEnd(nil)              // untyped nil
+	closePipeChildEnd((io.Reader)(nil)) // typed-nil interface
+	closePipeChildEnd("not-a-closer")   // non-Closer value
 }
