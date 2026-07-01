@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -84,6 +85,13 @@ func TestDialSupervisorIPCStatus_HandshakeMismatch(t *testing.T) {
 	if !strings.Contains(err.Error(), "hello mismatch") {
 		t.Fatalf("err = %v, want hello mismatch", err)
 	}
+	// A hello-mismatch is a TRANSPORT failure (supervisor up but broken), NOT a
+	// local setup failure — it must NOT match ErrStatusSetupFailure, so the GUI
+	// startup probe keeps the "existing supervisor IPC broken" wording rather
+	// than mis-surfacing the DACL-repair remediation (bot PR #477 P3 status twin).
+	if errors.Is(err, ErrStatusSetupFailure) {
+		t.Fatalf("hello-mismatch err = %v matched ErrStatusSetupFailure; a transport failure must stay 'supervisor up but broken', not a local setup fault", err)
+	}
 }
 
 func TestDialSupervisorIPCStatus_NoSupervisor(t *testing.T) {
@@ -99,6 +107,60 @@ func TestDialSupervisorIPCStatus_NoSupervisor(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "supervisor.lock.owner.json") {
 		t.Fatalf("err = %v, want supervisor.lock.owner.json path context", err)
+	}
+}
+
+// TestStatusSetupErrorSentinel_ClassifiesAndPreservesCause pins the
+// ErrStatusSetupFailure multi-%w wrapping contract (bot PR #477 P3, status
+// twin): a wrapped setup error classifies via errors.Is AND still exposes its
+// underlying cause, while a plain transport error does NOT match the sentinel.
+// This is the invariant the GUI startup probe's setup-fault-vs-transport split
+// (internal/cli/gui_supervisor_owner.go) relies on.
+func TestStatusSetupErrorSentinel_ClassifiesAndPreservesCause(t *testing.T) {
+	cause := errors.New("read supervisor.lock.owner.json: DACL refused")
+	setup := fmt.Errorf("supervisor IPC status: read x.owner.json: %w: %w", ErrStatusSetupFailure, cause)
+	if !errors.Is(setup, ErrStatusSetupFailure) {
+		t.Fatalf("errors.Is(setup, ErrStatusSetupFailure) = false; a setup failure must classify so the startup probe surfaces the DACL-repair remediation")
+	}
+	if !errors.Is(setup, cause) {
+		t.Fatalf("multi-%%w must preserve the underlying cause for diagnosis")
+	}
+	transport := fmt.Errorf("supervisor IPC status: %w", errors.New("hello mismatch"))
+	if errors.Is(transport, ErrStatusSetupFailure) {
+		t.Fatalf("a transport failure must NOT match ErrStatusSetupFailure (it stays 'supervisor up but broken', not a local setup fault)")
+	}
+}
+
+// TestStatusDialCorruptOwnerIsSetupError exercises the REAL owner-read setup
+// path (bot PR #477 P3, status twin): a present-but-corrupt supervisor owner
+// sidecar makes ReadSupervisorLockOwner return a non-IsNotExist error
+// (readStateFileInodeAnchored reads the bytes, then json.Unmarshal fails) — the
+// same failure class a DACL/mode refusal produces on a sandbox-broadened
+// %LOCALAPPDATA%. dialSupervisorIPCStatusFromStateDir must wrap it with
+// ErrStatusSetupFailure so the GUI startup probe surfaces the repair-state-dacl
+// remediation instead of mis-diagnosing "existing supervisor IPC broken". An
+// ABSENT owner file, by contrast, returns ErrSupervisorIPCUnavailable (covered
+// by TestDialSupervisorIPCStatus_NoSupervisor) and is NOT this path.
+func TestStatusDialCorruptOwnerIsSetupError(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	// A present-but-unparseable sidecar. Mirrors the corrupt-sidecar seed in
+	// supervisor_ipc_respawn_client_test.go / supervisor_lock_test.go.
+	ownerPath := filepath.Join(stateDir, "supervisor.lock.owner.json")
+	if err := os.WriteFile(ownerPath, []byte(`{"pid":`), 0o600); err != nil {
+		t.Fatalf("seed corrupt owner sidecar: %v", err)
+	}
+	_, err := dialSupervisorIPCStatusFromStateDir(context.Background(), stateDir)
+	if err == nil {
+		t.Fatalf("expected a setup error on a corrupt owner sidecar, got nil")
+	}
+	if !errors.Is(err, ErrStatusSetupFailure) {
+		t.Fatalf("err = %v, want errors.Is(ErrStatusSetupFailure) — a present-but-unreadable owner sidecar is a local setup failure (repair-state-dacl), not a live-but-broken supervisor", err)
+	}
+	// It must NOT collapse into the SUPERVISOR_UNAVAILABLE (absent-sidecar)
+	// classification — that path is reserved for os.IsNotExist and is what the
+	// startup probe treats as "just spawn one".
+	if errors.Is(err, ErrSupervisorIPCUnavailable) {
+		t.Fatalf("err = %v matched ErrSupervisorIPCUnavailable; a present-but-corrupt sidecar must classify as a setup fault, not absence", err)
 	}
 }
 

@@ -93,6 +93,19 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 	if ok, probeErr := probeSupervisor(ctx, 2*time.Second); ok {
 		return &supervisorOwner{spawned: false, stateDir: stateDir}, nil
 	} else if probeErr != nil {
+		// A LOCAL setup failure (api.ErrStatusSetupFailure — the supervisor
+		// owner sidecar is PRESENT but unreadable: a DACL/mode refusal on a
+		// sandbox-broadened %LOCALAPPDATA% or under
+		// MCPHUB_REQUIRE_SINGLE_USER_HOME=1, or corrupt bytes) is NOT a
+		// live-but-broken supervisor — no supervisor is proven to be running.
+		// Spawning a duplicate would not help: the fresh supervisor would hit
+		// the same DACL refusal writing its own owner sidecar. Surface the
+		// local-fault remediation (mcphub repair-state-dacl) instead of the
+		// misleading "existing supervisor IPC broken (refusing to spawn
+		// duplicate)" (bot PR #477 P3 respawn-twin classification).
+		if errors.Is(probeErr, api.ErrStatusSetupFailure) {
+			return nil, supervisorSetupFaultError(probeErr)
+		}
 		return nil, fmt.Errorf("supervisor owner: existing supervisor IPC broken (refusing to spawn duplicate): %w", probeErr)
 	}
 
@@ -152,6 +165,16 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 		if probeErr != nil {
 			_ = proc.Kill()
 			_, _ = proc.Wait()
+			// Same classification as the pre-spawn probe: a local setup fault
+			// (unreadable/DACL-refused owner sidecar) is not a transport/handshake
+			// failure of the freshly-spawned supervisor — the spawned child could
+			// not write (or the reader could not read) its own owner sidecar
+			// because of the DACL. Surface the repair-state-dacl remediation
+			// instead of "IPC handshake broken" (bot PR #477 P3 respawn-twin
+			// classification).
+			if errors.Is(probeErr, api.ErrStatusSetupFailure) {
+				return nil, supervisorSetupFaultError(probeErr)
+			}
 			return nil, fmt.Errorf("supervisor owner: spawned PID %d but IPC handshake broken: %w", proc.Pid, probeErr)
 		}
 		if time.Now().After(deadline) {
@@ -681,14 +704,37 @@ func (s *supervisorOwner) Pid() int {
 	return s.proc.Pid
 }
 
+// supervisorSetupFaultError wraps a status-dial LOCAL setup fault
+// (api.ErrStatusSetupFailure — a present-but-unreadable/DACL-refused supervisor
+// owner sidecar, or an unresolvable state dir) into an operator-actionable
+// startup error that names the remediation. The status dial returns this only
+// when the sidecar is present but unreadable (an ABSENT sidecar classifies as
+// api.ErrSupervisorIPCUnavailable → the normal spawn path), so reaching here
+// means NO supervisor is proven and spawning a duplicate would only re-hit the
+// same DACL refusal. The message points at `mcphub repair-state-dacl` + the
+// "secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%" runbook (see
+// CLAUDE.md) rather than the misleading "existing supervisor IPC broken" /
+// "IPC handshake broken" wording. The underlying cause stays wrapped for
+// diagnosis.
+func supervisorSetupFaultError(cause error) error {
+	return fmt.Errorf("supervisor owner: supervisor.lock.owner.json is present but unreadable (local state-file DACL/mode fault, not a running supervisor); "+
+		"repair the refused file's permissions to owner-only (run `mcphub repair-state-dacl --path <supervisor.lock.owner.json>`; "+
+		"see the \"secret daemons exit 1 on a sandbox-broadened %%LOCALAPPDATA%%\" runbook in CLAUDE.md), then restart: %w", cause)
+}
+
 // probeSupervisor performs a single IPC handshake + status query
 // against the running supervisor. Returns (true, nil) when reachable.
 // Returns (false, nil) ONLY for the expected pre-bind state
 // (ErrSupervisorIPCUnavailable — no lock owner sidecar, no pipe, or
-// connect-refused). Any other failure (hello-version mismatch, JSON
-// decode error, ID mismatch) returns (false, error) so the caller
-// can distinguish "supervisor not yet up" from "supervisor up but
-// broken" and surface the actionable error to the operator.
+// connect-refused). Any other failure returns (false, error) so the
+// caller can distinguish "supervisor not yet up" from a real fault and
+// surface the actionable error to the operator. The caller further
+// splits that error path: a LOCAL setup fault (api.ErrStatusSetupFailure
+// — present-but-unreadable/DACL-refused owner sidecar) is NOT a
+// live-but-broken supervisor and is surfaced via supervisorSetupFaultError
+// (repair-state-dacl remediation), while a genuine transport/handshake
+// failure (hello-version mismatch, JSON decode error, ID mismatch) keeps
+// the "supervisor up but broken" wording.
 //
 // PR #212 r5 silent-failure-hunt finding 1: the previous bool-only
 // signature collapsed handshake failures into "not reachable", which
