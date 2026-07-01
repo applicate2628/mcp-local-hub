@@ -282,6 +282,139 @@ func TestStrictModeEnable_AtomicTwoResource(t *testing.T) {
 	}
 }
 
+// TestStrictModeEnable_CleanSuccessEmitsSupervisorEvent covers the
+// deep-review round-2 P4 finding: the clean-success branch of
+// runStrictModeUnderLocks previously returned nil with NO
+// supervisor-events.log emission — only the torn/failure recovery
+// breadcrumb path was observable. A successful strict-mode flip now
+// must leave a timestamped "strict-mode-changed" audit row recording
+// the old->new value, matching the audit discipline every other
+// supervisor-events.log mutation gets (e.g. supervisor-start in
+// supervise.go, the liveness action in supervise_ensure_alive.go).
+func TestStrictModeEnable_CleanSuccessEmitsSupervisorEvent(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+
+	if err := RunStrictMode([]string{"enable"}, tmp.Deps()); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+
+	events := readSupervisorEventLogLines(t, filepath.Join(tmp.stateDir, api.SupervisorEventLogFileLeaf))
+	found := findSupervisorEventByName(events, "strict-mode-changed")
+	if found == nil {
+		t.Fatalf("no strict-mode-changed event found in supervisor-events.log; got %d lines: %+v", len(events), events)
+	}
+	if found.Severity != api.SupervisorEventSeverityInfo {
+		t.Errorf("severity = %q, want %q", found.Severity, api.SupervisorEventSeverityInfo)
+	}
+	if found.Source != api.SupervisorEventSourceAutostart {
+		t.Errorf("source = %q, want %q", found.Source, api.SupervisorEventSourceAutostart)
+	}
+	fromVal, _ := found.Body["from"].(bool)
+	toVal, _ := found.Body["to"].(bool)
+	if fromVal != false {
+		t.Errorf("body.from = %v, want false", found.Body["from"])
+	}
+	if toVal != true {
+		t.Errorf("body.to = %v, want true", found.Body["to"])
+	}
+	// Actor attribution (bot r2 P3): a copied log / multi-account host must
+	// be able to tell WHO flipped the posture. This also confirms the
+	// TryEmit (non-blocking) switch still writes on the uncontended happy
+	// path — an empty/missing actor here would mean the row never landed.
+	if actor, _ := found.Body["actor"].(string); actor == "" {
+		t.Errorf("body.actor = %q, want non-empty OS user", found.Body["actor"])
+	}
+}
+
+// TestStrictModeDisable_CleanSuccessEmitsSupervisorEvent is the
+// disable-direction counterpart, asserting the from/to values flip.
+func TestStrictModeDisable_CleanSuccessEmitsSupervisorEvent(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	tmp.SeedInitialStrict(true)
+
+	if err := RunStrictMode([]string{"disable"}, tmp.Deps()); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+
+	events := readSupervisorEventLogLines(t, filepath.Join(tmp.stateDir, api.SupervisorEventLogFileLeaf))
+	found := findSupervisorEventByName(events, "strict-mode-changed")
+	if found == nil {
+		t.Fatalf("no strict-mode-changed event found in supervisor-events.log; got %d lines: %+v", len(events), events)
+	}
+	fromVal, _ := found.Body["from"].(bool)
+	toVal, _ := found.Body["to"].(bool)
+	if fromVal != true {
+		t.Errorf("body.from = %v, want true", found.Body["from"])
+	}
+	if toVal != false {
+		t.Errorf("body.to = %v, want false", found.Body["to"])
+	}
+}
+
+// TestStrictModeEnable_RevertOnShimFailure_NoSupervisorEventEmitted
+// asserts the negative case: a failed mutation (shim write fails,
+// intent reverted) must NOT emit the clean-success
+// "strict-mode-changed" event — only the clean-success branch emits
+// it, per the finding's scope (the torn/failure recovery breadcrumb
+// path is the pre-existing observable signal for failure cases).
+func TestStrictModeEnable_RevertOnShimFailure_NoSupervisorEventEmitted(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	tmp.MakeShimWriteFail()
+
+	if err := RunStrictMode([]string{"enable"}, tmp.Deps()); err == nil {
+		t.Fatal("expected non-zero exit when shim write fails")
+	}
+
+	path := filepath.Join(tmp.stateDir, api.SupervisorEventLogFileLeaf)
+	if _, statErr := os.Stat(path); statErr == nil {
+		events := readSupervisorEventLogLines(t, path)
+		if found := findSupervisorEventByName(events, "strict-mode-changed"); found != nil {
+			t.Fatalf("strict-mode-changed event must not be emitted on a failed mutation, got %+v", found)
+		}
+	}
+	// Absent log file is also an acceptable outcome (event log is opened
+	// lazily on first Emit; the failure path never reaches the emit call).
+}
+
+// readSupervisorEventLogLines parses every JSONL line in path into a
+// slice of api.SupervisorEvent. Fails the test on any malformed line;
+// a missing file is treated as zero events (mirrors the log's own
+// lazy-create-on-first-Emit semantics).
+func readSupervisorEventLogLines(t *testing.T, path string) []api.SupervisorEvent {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var events []api.SupervisorEvent
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if line == "" {
+			continue
+		}
+		var evt api.SupervisorEvent
+		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+			t.Fatalf("unmarshal supervisor event line %q: %v", line, err)
+		}
+		events = append(events, evt)
+	}
+	return events
+}
+
+// findSupervisorEventByName returns the last event in events whose
+// Event field matches name, or nil if none match.
+func findSupervisorEventByName(events []api.SupervisorEvent, name string) *api.SupervisorEvent {
+	var found *api.SupervisorEvent
+	for i := range events {
+		if events[i].Event == name {
+			found = &events[i]
+		}
+	}
+	return found
+}
+
 // ============================================================================
 // Plan §2569 — revert-on-shim-failure leaves intent at original value.
 // ============================================================================

@@ -46,6 +46,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -235,8 +236,39 @@ func (l *SupervisorEventLog) Close() error { return nil }
 // supervisorEventMaxBytes, the body is replaced with a sentinel
 // `{"_truncated_note": "..."}` map and `_truncated:true` is set.
 // Identity fields (Event, Source, TaskName) are NEVER touched.
+// eventLogEmitMode selects how emit acquires the cross-process flock on
+// supervisor-events.log.
+type eventLogEmitMode int
+
+const (
+	emitBlocking eventLogEmitMode = iota // block until the flock is acquired (durable; may wait indefinitely)
+	emitTry                              // single non-blocking attempt; skip on contention
+	emitTimeout                          // bounded wait via TryLockContext; skip on timeout
+)
+
+// eventLogEmitRetryDelay is the flock re-poll cadence for emitTimeout, matching
+// readDaemonIntentPathWithTimeout's TryLockContext usage (daemon_intent.go).
+const eventLogEmitRetryDelay = 10 * time.Millisecond
+
 func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
-	return l.emit(evt, true)
+	return l.emit(evt, emitBlocking, 0)
+}
+
+// EmitWithTimeout serializes the entry and appends it, waiting up to timeout
+// for the cross-process flock via TryLockContext. On timeout (or a defensive
+// not-locked) it treats the contention as a best-effort skip and returns nil,
+// like TryEmit — it does NOT block indefinitely.
+//
+// Use this for an audit row that is the ONLY record of a state mutation AND is
+// emitted while the caller still holds another lock (e.g. the strict-mode CLI
+// under migration.lock + --once.lock). The bounded wait keeps the common-case
+// durability of a blocking Emit — momentary contention with the supervisor's
+// own event stream is ridden out rather than silently dropped, so the row is
+// NOT lossy under normal contention (unlike TryEmit) — while capping how long
+// the caller's outer lock can be held if the event-log flock is wedged, so a
+// stalled writer can never make the caller hang forever holding its lock.
+func (l *SupervisorEventLog) EmitWithTimeout(evt SupervisorEvent, timeout time.Duration) error {
+	return l.emit(evt, emitTimeout, timeout)
 }
 
 // TryEmit serializes the entry as a JSON Line and appends it only if the
@@ -256,34 +288,53 @@ func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
 // losing the observability row never loses the repair itself. Do not adopt
 // TryEmit for an event that is the only record of a state mutation.
 func (l *SupervisorEventLog) TryEmit(evt SupervisorEvent) error {
-	return l.emit(evt, false)
+	return l.emit(evt, emitTry, 0)
 }
 
-func (l *SupervisorEventLog) emit(evt SupervisorEvent, blocking bool) error {
+func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, timeout time.Duration) error {
 	raw, err := marshalSupervisorEventLine(evt)
 	if err != nil {
 		return err
 	}
 
 	// In-process serialization first — guards against two goroutines
-	// in the same supervisor binary racing past the flock acquire.
-	if blocking {
+	// in the same supervisor binary racing past the flock acquire. Only the
+	// pure non-blocking mode (emitTry) skips on in-process contention; the
+	// timeout mode blocks briefly here (same-process mu is fast) and bounds
+	// its wait at the cross-process flock below.
+	if mode == emitTry {
+		if !l.mu.TryLock() {
+			return nil
+		}
+	} else {
 		l.mu.Lock()
-	} else if !l.mu.TryLock() {
-		return nil
 	}
 	defer l.mu.Unlock()
 
 	// OS-level serialization across processes (e.g. supervisor +
 	// install CLI emitting migration events concurrently).
 	var lockErr error
-	if blocking {
+	switch mode {
+	case emitBlocking:
 		lockErr = l.lock.Lock()
-	} else {
+	case emitTry:
 		var locked bool
 		locked, lockErr = l.lock.TryLock()
 		if lockErr == nil && !locked {
 			return nil
+		}
+	case emitTimeout:
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		var locked bool
+		locked, lockErr = l.lock.TryLockContext(ctx, eventLogEmitRetryDelay)
+		if !locked {
+			// Timed out under contention (DeadlineExceeded) or a defensive
+			// (false, nil): best-effort skip, same as TryEmit. Only a genuine
+			// non-timeout lock error falls through to be reported below.
+			if lockErr == nil || errors.Is(lockErr, context.DeadlineExceeded) {
+				return nil
+			}
 		}
 	}
 	if lockErr != nil {

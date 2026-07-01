@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gofrs/flock"
 )
@@ -295,5 +296,78 @@ func TestSupervisorEventLog_TryEmitSkipsContendedLock(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("TryEmit under contention wrote log or returned unexpected stat error: %v", err)
+	}
+}
+
+// TestSupervisorEventLog_EmitWithTimeoutSkipsWedgedLock pins the bounded
+// contention behavior EmitWithTimeout adds for the strict-mode audit: with the
+// flock held for the whole call, it must (1) best-effort skip (return nil, not
+// error), (2) NOT write, and (3) return within a bound of its budget rather
+// than blocking indefinitely. The held lock makes the timeout window
+// deterministic (every TryLock fails until the deadline).
+func TestSupervisorEventLog_EmitWithTimeoutSkipsWedgedLock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "supervisor-events.log")
+	lock := flock.New(path + supervisorEventLogLockSuffix)
+	if err := lock.Lock(); err != nil {
+		t.Fatalf("lock supervisor event log: %v", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = logger.Close() }()
+
+	const timeout = 150 * time.Millisecond
+	start := time.Now()
+	if err := logger.EmitWithTimeout(SupervisorEvent{
+		Severity: "info",
+		Source:   "autostart",
+		Event:    "emit-timeout-wedged",
+	}, timeout); err != nil {
+		t.Fatalf("EmitWithTimeout under a wedged lock must best-effort skip (nil), got: %v", err)
+	}
+	elapsed := time.Since(start)
+	// Waited ~the budget (proving it is the bounded-retry path, not an instant
+	// TryEmit-style skip)...
+	if elapsed < timeout/2 {
+		t.Errorf("EmitWithTimeout returned in %s, well under the %s budget — did it actually wait for the flock?", elapsed, timeout)
+	}
+	// ...but returned bounded — never blocking indefinitely on the held flock.
+	if elapsed > 10*time.Second {
+		t.Errorf("EmitWithTimeout blocked %s, far past its %s budget — the bound is not enforced", elapsed, timeout)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("EmitWithTimeout under contention wrote the log or returned unexpected stat error: %v", err)
+	}
+}
+
+// TestSupervisorEventLog_EmitWithTimeoutWritesUncontended confirms the common
+// case: with no contention, EmitWithTimeout durably appends the row (it is NOT
+// lossy like TryEmit — the whole point vs the round-2 TryEmit attempt).
+func TestSupervisorEventLog_EmitWithTimeoutWritesUncontended(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "supervisor-events.log")
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = logger.Close() }()
+
+	if err := logger.EmitWithTimeout(SupervisorEvent{
+		Severity: "info",
+		Source:   "autostart",
+		Event:    "emit-timeout-ok",
+	}, 5*time.Second); err != nil {
+		t.Fatalf("EmitWithTimeout uncontended: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(raw), "emit-timeout-ok") {
+		t.Fatalf("EmitWithTimeout uncontended did not write the event; log=%q", raw)
 	}
 }

@@ -552,8 +552,82 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	if rmErr := os.Remove(deps.BreadcrumbPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 		fmt.Fprintf(stderrOrDefault(deps), "strict-mode: cleanup in-progress breadcrumb after success: %v\n", rmErr)
 	}
+	// Deep-review round-2 P4 finding: the clean-success branch previously
+	// left no supervisor-events.log row at all — only the torn/failure
+	// recovery breadcrumb path was observable. strict_mode governs a
+	// fail-closed security posture (Job-Object fallback refusal +
+	// DACL-gate strictness), so a successful flip deserves the same
+	// timestamped/actor audit trail every other supervisor-events.log
+	// mutation gets. Best-effort: mirrors emitLivenessEvent
+	// (supervise_ensure_alive.go) — a missing audit row must never fail
+	// an otherwise-successful command.
+	//
+	// Bot r2 P2 (rounds 2+3): emit UNDER the still-held migration.lock +
+	// --once.lock so the audit row is serialized WITH the mutation. A
+	// concurrent strict-mode invocation cannot acquire the locks and append
+	// its own strict-mode-changed row before this one, so the log order always
+	// matches mutation order (round-3 caught that releasing first let a rapid
+	// enable→disable log the events out of order). To keep the in-lock emit
+	// from hanging the command on a wedged event-log flock — which WOULD make
+	// unrelated mutations see STRICT_MODE_BUSY (round-2's concern) — the emit
+	// uses the BOUNDED EmitWithTimeout: it rides out momentary contention (so
+	// the sole audit row is not silently dropped the way TryEmit would) but
+	// gives up after a short budget instead of blocking forever. RunStrictMode's
+	// deferred locks.Release() runs after this returns.
+	emitStrictModeChangedEvent(deps.StateDir, originalStrict, desired)
 	return nil
 }
+
+// emitStrictModeChangedEvent records a best-effort
+// "strict-mode-changed" row to supervisor-events.log after a clean
+// two-resource strict-mode mutation. Mirrors the open-emit-close idiom
+// in emitLivenessEvent (supervise_ensure_alive.go:316): the strict-mode
+// CLI is a short-lived process, not the long-lived supervisor, so it
+// opens its own handle rather than threading one through StrictModeDeps.
+// Source is "autostart" because the observable half of this mutation
+// operators care about at a glance is the autostart shim flip; the
+// intent-file write is the other half of the same atomic pair recorded
+// in the body. The body also carries the OS user that performed the flip
+// (actor) so a copied log or a multi-account host can still attribute the
+// security-posture change — matching the adjacent trusted-root audit which
+// records api.CurrentOSUser().
+//
+// Emission uses the BOUNDED EmitWithTimeout, called while the caller still
+// holds the state-dir locks (so the row is serialized with the mutation and
+// the log order matches mutation order). EmitWithTimeout is NOT lossy under
+// momentary contention the way TryEmit is — it waits up to
+// strictModeAuditEmitTimeout for the event-log flock, so this sole audit
+// record of the posture change is not silently dropped — but it gives up
+// after that budget instead of the blocking Emit's indefinite wait, so a
+// wedged supervisor-events.log writer can never hang the command while it
+// holds migration.lock/--once.lock (which would make unrelated mutations see
+// STRICT_MODE_BUSY). A failure to open/emit is still silently swallowed —
+// this is observability, not a gate, and the command has already succeeded.
+func emitStrictModeChangedEvent(stateDir string, from, to bool) {
+	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+	if err != nil {
+		return
+	}
+	defer func() { _ = logger.Close() }()
+	_ = logger.EmitWithTimeout(api.SupervisorEvent{
+		Severity: api.SupervisorEventSeverityInfo,
+		Source:   api.SupervisorEventSourceAutostart,
+		Event:    "strict-mode-changed",
+		Body: map[string]any{
+			"from":  from,
+			"to":    to,
+			"actor": api.CurrentOSUser(),
+		},
+	}, strictModeAuditEmitTimeout)
+}
+
+// strictModeAuditEmitTimeout bounds how long the clean-success audit emit may
+// wait for the supervisor-events.log flock while the strict-mode CLI still
+// holds migration.lock + --once.lock. Generous vs the sub-millisecond append
+// the supervisor's own event stream performs, but finite so a wedged writer
+// cannot hang the command (and thereby STRICT_MODE_BUSY-block unrelated
+// mutations) indefinitely.
+const strictModeAuditEmitTimeout = 5 * time.Second
 
 // readStrictModeIntentSnapshot reads supervisor-intent.json under its
 // file-content lock and the env-only mutation-gate bypass (#301-3).
