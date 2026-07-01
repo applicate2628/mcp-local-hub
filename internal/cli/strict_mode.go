@@ -302,7 +302,7 @@ func RunStrictMode(args []string, deps StrictModeDeps) error {
 	}
 	defer locks.Release()
 
-	return runStrictModeUnderLocks(desired, deps)
+	return runStrictModeUnderLocks(desired, deps, locks)
 }
 
 // acquireStrictModeStateLocks acquires the universal state-dir locks for a
@@ -373,7 +373,7 @@ func strictModeShimDriftFingerprint(snapshot autostart.StatusSnapshot) strictMod
 // runStrictModeUnderLocks performs the two-resource mutation with the
 // locks already held. Extracted so RunStrictMode and the test seam can
 // share the body without duplicating the lock + breadcrumb scaffolding.
-func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
+func runStrictModeUnderLocks(desired bool, deps StrictModeDeps, locks *api.StateDirLockSet) error {
 	// Read current intent so we know the original value to revert to
 	// on failure. Missing file is treated as default StrictMode=false.
 	var originalStrict bool
@@ -561,6 +561,17 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	// mutation gets. Best-effort: mirrors emitLivenessEvent
 	// (supervise_ensure_alive.go) — a missing audit row must never fail
 	// an otherwise-successful command.
+	//
+	// Bot r2 P2: release the state-dir locks BEFORE the audit emit. The
+	// two-resource mutation is fully committed at this point, so the locked
+	// critical section is over; the emit takes a BLOCKING flock on
+	// supervisor-events.log, and running it while still holding migration.lock
+	// + --once.lock could hang the command behind a stalled log writer and
+	// make unrelated state mutations see STRICT_MODE_BUSY. Releasing here lets
+	// the emit use the durable blocking Emit (never dropping the sole audit
+	// row) with no lock-holding hang. Release is idempotent, so RunStrictMode's
+	// deferred locks.Release() stays a panic-safety net for the error paths.
+	locks.Release()
 	emitStrictModeChangedEvent(deps.StateDir, originalStrict, desired)
 	return nil
 }
@@ -579,22 +590,21 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 // security-posture change — matching the adjacent trusted-root audit which
 // records api.CurrentOSUser().
 //
-// Emission uses TryEmit (NON-blocking flock), not Emit: this runs on the
-// success path while RunStrictMode still holds migration.lock + --once.lock
-// (RunStrictMode's defer locks.Release() has not fired yet). A blocking
-// flock on supervisor-events.log — held or stalled by another writer, e.g.
-// the supervisor's own event stream — would hang the command WHILE holding
-// those locks, making unrelated state mutations see STRICT_MODE_BUSY. The
-// mutation has already committed, so a skipped audit row under contention is
-// the correct best-effort tradeoff. A failure to open/emit is silently
-// swallowed — this is observability, not a gate.
+// Emission uses the DURABLE blocking Emit (not TryEmit): this is the ONLY
+// audit record of a successful posture change, so it must not be dropped
+// under log contention. The blocking flock is safe here because the caller
+// (runStrictModeUnderLocks) releases the state-dir locks BEFORE calling this,
+// so a stalled supervisor-events.log writer can only delay this already-
+// committed command, never make unrelated mutations see STRICT_MODE_BUSY.
+// A failure to open/emit is still silently swallowed — this is observability,
+// not a gate, and the command has already succeeded.
 func emitStrictModeChangedEvent(stateDir string, from, to bool) {
 	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
 	if err != nil {
 		return
 	}
 	defer func() { _ = logger.Close() }()
-	_ = logger.TryEmit(api.SupervisorEvent{
+	_ = logger.Emit(api.SupervisorEvent{
 		Severity: api.SupervisorEventSeverityInfo,
 		Source:   api.SupervisorEventSourceAutostart,
 		Event:    "strict-mode-changed",

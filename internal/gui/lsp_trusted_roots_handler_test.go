@@ -29,7 +29,20 @@ func trustedRootsHandlerTestServer(t *testing.T) (*Server, string) {
 	if err != nil {
 		t.Fatalf("resolve trusted-roots path: %v", err)
 	}
-	return NewServer(Config{}), path
+	srv := NewServer(Config{})
+	// The Broadcaster lazily spawns an async gui-events.log persist drain on
+	// the first operator-action Publish (the POST/DELETE trusted-root audit
+	// added in this PR). Without an explicit Close, that drain goroutine can
+	// still be writing <root>/gui-events.log while t.TempDir's RemoveAll runs,
+	// failing with "directory not empty" under repeated runs (bot r2 P2,
+	// reproduced via `go test -run TestTrustedRoots_ -count=10`). Close blocks
+	// until the drain flushes + exits and is idempotent + safe even if no
+	// drain ever ran. t.Cleanup is LIFO, so this Close (registered after
+	// t.TempDir and after restore) runs BEFORE both the state-root restore and
+	// the temp-dir removal — the drain flushes to the still-redirected root,
+	// then teardown proceeds with no live writer.
+	t.Cleanup(func() { srv.Broadcaster().Close() })
+	return srv, path
 }
 
 // mkTrustedDir makes a real directory under base so canonicalization
