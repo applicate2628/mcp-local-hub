@@ -466,8 +466,8 @@ function formatUsedBy(refs: UsageRef[]): string {
 function AccessDeniedView(props: { env: SecretsEnvelope }) {
   return (
     <div class="banner banner-error" data-testid="vault-access-denied-banner">
-      <p><strong>Vault access denied</strong> (access_denied). Your vault files are still present — they were NOT deleted or corrupted, so do not re-initialize. mcphub refused to READ them because their file permissions (DACL/owner) are too broad for secret-bearing files (the common corporate / sandbox <code>%LOCALAPPDATA%</code> case).</p>
-      <p><strong>Confidentiality note:</strong> because the vault files (including the <code>.age-key</code> private identity) were reachable by another account, treat any stored credentials as <strong>potentially exposed</strong> — after you tighten permissions, consider rotating them. This is a permission repair, not data loss.</p>
+      <p><strong>Vault access denied</strong> (access_denied). Your vault files are still present — they were NOT deleted or corrupted, so do not re-initialize. mcphub's fail-closed read-hardening refused them because their file permissions or ownership are not restricted to your account alone (the common corporate / sandbox <code>%LOCALAPPDATA%</code> case). The exact cause and the exact fix are below.</p>
+      <p><strong>Confidentiality note:</strong> if another account could read or owned the vault files (including the <code>.age-key</code> private identity), treat any stored credentials as <strong>potentially exposed</strong> — after you restore correct permissions/ownership, consider rotating them. This is a permission/ownership repair, not data loss.</p>
       <p data-testid="vault-access-denied-remediation">
         {props.env.remediation ||
           "Tighten the vault files (.age-key and secrets.age) and their parent directory to owner-only permissions, then reload this page. See the \"secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%\" runbook in CLAUDE.md for the exact commands."}
