@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -24,14 +25,14 @@ type fakeBackups struct {
 
 	// Per-client (bug-bash B2 closure #21) — captures the client arg
 	// + retention so tests can assert the handler forwards them.
-	cleanInClient    string
-	cleanInN         int
-	cleanInResult    []string
-	cleanInErr       error
-	previewInClient  string
-	previewInN       int
-	previewInResult  []string
-	previewInErr     error
+	cleanInClient   string
+	cleanInN        int
+	cleanInResult   []string
+	cleanInErr      error
+	previewInClient string
+	previewInN      int
+	previewInResult []string
+	previewInErr    error
 }
 
 func (f *fakeBackups) List() ([]api.BackupInfo, error) { return f.list, f.listErr }
@@ -218,6 +219,76 @@ func TestBackupsClean_POST_HappyPath(t *testing.T) {
 	}
 	if resp.Cleaned != 2 {
 		t.Errorf("cleaned = %d, want 2", resp.Cleaned)
+	}
+}
+
+// TestBackupsClean_EmitsAuditOnDeletion covers PR #476 bot P3:
+// backupsCleanHandler deleted timestamped backups with no gui-events
+// audit row. A clean that actually removes files must emit a
+// backup-clean operator-action row (client + count + basenames, no
+// sensitive data).
+func TestBackupsClean_EmitsAuditOnDeletion(t *testing.T) {
+	s, fb := newBackupsTestServer(t)
+	fb.cleanInResult = []string{"/home/u/.cursor.json.bak-mcp-local-hub-1", "/home/u/.cursor.json.bak-mcp-local-hub-2"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	req := httptest.NewRequest("POST", "/api/backups/clean?client=cursor&keep_n=1", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.Type != "operator-action" || ev.Body["action"] != "backup-clean" {
+			t.Fatalf("event = %+v, want operator-action/backup-clean", ev)
+		}
+		if ev.Body["client"] != "cursor" {
+			t.Errorf("client=%v, want cursor", ev.Body["client"])
+		}
+		// Subscribe delivers the live Event struct (no JSON round-trip),
+		// so cleaned_count stays the original Go int from len(removed).
+		if cnt, _ := ev.Body["cleaned_count"].(int); cnt != 2 {
+			t.Errorf("cleaned_count=%v, want 2", ev.Body["cleaned_count"])
+		}
+		// Deleted entries must be BASENAMES, not full absolute paths.
+		raw, _ := json.Marshal(ev.Body)
+		if strings.Contains(string(raw), "/home/u/") {
+			t.Errorf("audit row leaked full absolute path (should be basename only): %s", raw)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no backup-clean audit event after a clean that deleted files (PR #476 P3)")
+	}
+}
+
+// TestBackupsClean_NoAuditWhenNothingDeleted guards the inverse: a clean
+// that pruned nothing must NOT emit an audit row (no mutation occurred).
+func TestBackupsClean_NoAuditWhenNothingDeleted(t *testing.T) {
+	s, fb := newBackupsTestServer(t)
+	fb.cleaned = []string{} // nothing eligible to prune
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	req := httptest.NewRequest("POST", "/api/backups/clean", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+
+	select {
+	case ev := <-ch:
+		t.Fatalf("unexpected audit event on a no-op clean: %+v", ev)
+	case <-time.After(200 * time.Millisecond):
+		// expected: no event
 	}
 }
 

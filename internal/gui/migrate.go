@@ -58,6 +58,21 @@ func registerMigrateRoutes(s *Server) {
 		if len(report.Failed) > 0 {
 			status = http.StatusMultiStatus
 		}
+		// gui-events.log audit row (deep-review P3 finding): emit one row
+		// per server/client pair that actually committed. A fully-failed
+		// request (Applied empty) leaves no row, matching "emit only on
+		// committed mutation". Identifiers only (server/client names,
+		// already non-sensitive); no secret material is ever in scope here.
+		if len(report.Applied) > 0 {
+			applied := make([]map[string]any, 0, len(report.Applied))
+			for _, a := range report.Applied {
+				applied = append(applied, map[string]any{"server": a.Server, "client": a.Client})
+			}
+			s.events.PublishOperatorAction("migrate", api.CurrentOSUser(), map[string]any{
+				"applied":      applied,
+				"failed_count": len(report.Failed),
+			})
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(report)

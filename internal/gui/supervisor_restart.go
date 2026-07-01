@@ -139,6 +139,18 @@ func (s *Server) supervisorRestartHandler(w http.ResponseWriter, r *http.Request
 		"spawned":     resp.Spawned,
 		"step_errors": resp.PerStepError,
 	})
+	// gui-events.log audit row (deep-review P3 finding): emit ONLY when the
+	// mutation actually committed (a fresh supervisor was spawned) so a
+	// failed restart attempt never leaves a misleading success record. The
+	// per-step kill outcome rides along as non-sensitive identifiers
+	// (PIDs); no secret material is ever in scope for this handler.
+	if resp.Spawned {
+		s.events.PublishOperatorAction("supervisor-restart", api.CurrentOSUser(), map[string]any{
+			"killed_pid":  resp.KilledPID,
+			"killed":      resp.Killed,
+			"spawned_pid": resp.SpawnedPID,
+		})
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	// Always return 200 — per-step status lives in the body. Surfacing

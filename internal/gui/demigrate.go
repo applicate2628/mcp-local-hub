@@ -58,6 +58,20 @@ func registerDemigrateRoutes(s *Server) {
 		if len(report.Failed) > 0 {
 			status = http.StatusMultiStatus
 		}
+		// gui-events.log audit row (deep-review P3 finding): emit one row
+		// per server/client pair that actually rolled back. A fully-failed
+		// request (Restored empty) leaves no row. Identifiers only
+		// (server/client names); no secret material is ever in scope here.
+		if len(report.Restored) > 0 {
+			restored := make([]map[string]any, 0, len(report.Restored))
+			for _, r := range report.Restored {
+				restored = append(restored, map[string]any{"server": r.Server, "client": r.Client})
+			}
+			s.events.PublishOperatorAction("demigrate", api.CurrentOSUser(), map[string]any{
+				"restored":     restored,
+				"failed_count": len(report.Failed),
+			})
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(report)

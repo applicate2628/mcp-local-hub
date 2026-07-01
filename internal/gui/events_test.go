@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -324,6 +326,127 @@ func (r *sseRecorder) body() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.buf.String()
+}
+
+// TestBroadcaster_Publish_CountsDroppedSSEEvent covers the deep-review P3
+// finding: a full subscriber channel used to drop an event completely
+// silently (no counter, no log line). With the subscriber channel
+// (buffered at 16) saturated, the next Publish must increment the sse
+// drop counter exposed via DroppedCounts.
+func TestBroadcaster_Publish_CountsDroppedSSEEvent(t *testing.T) {
+	b := NewBroadcaster()
+	b.DisableGUIEventLog = true
+	// A dropped Publish lazily spawns the out-of-band drop reporter;
+	// Close() in cleanup stops + joins it so the test leaks no goroutine.
+	t.Cleanup(b.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := b.Subscribe(ctx)
+
+	// Saturate the subscriber's buffered channel (cap 16) without ever
+	// draining it, so the next Publish hits the full-channel default
+	// branch and counts as dropped.
+	for i := 0; i < 32; i++ {
+		b.Publish(Event{Type: "daemon-state", Body: map[string]any{"i": i}})
+	}
+
+	sse, _ := b.DroppedCounts()
+	if sse == 0 {
+		t.Fatalf("DroppedCounts().sse = 0, want > 0 after saturating a 16-buffer subscriber with 32 publishes")
+	}
+	// Drain so the test doesn't leak a goroutine blocked on send (it
+	// isn't — Publish never blocks — but drain anyway for hygiene).
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
+	}
+}
+
+// TestBroadcaster_Publish_CountsDroppedPersistEvent covers the persist-
+// channel counterpart of the same finding: when the persist channel is
+// saturated, Publish must count the drop via DroppedCounts instead of
+// silently losing the gui-events.log row.
+//
+// The drain goroutine must be DETERMINISTICALLY bypassed here so the
+// test's manually-pre-filled buffer actually stays full when Publish
+// tries to enqueue (PR #476 bot P3: setting persistStarted=true alone
+// did NOT bypass ensurePersistDrain — the sync.Once tracks its own
+// internal done flag, not the struct field, so the first Publish could
+// still spawn a real drain that drains the buffer and the drop would
+// not fire). We consume the sync.Once ourselves with an empty func, so
+// ensurePersistDrain's persistStart.Do(...) becomes a true no-op and no
+// real drainPersist goroutine ever runs. persistStarted is kept in sync
+// for Close()'s wait logic.
+func TestBroadcaster_Publish_CountsDroppedPersistEvent(t *testing.T) {
+	b := NewBroadcaster()
+	b.DisableGUIEventLog = false
+	// Replace persistCh with a cap-1 buffer and FIRE the sync.Once now
+	// with a no-op so ensurePersistDrain() never spawns a consumer.
+	// persistStarted stays false, so Close() (in cleanup) closes
+	// persistDoneCh itself without a 3s wait on a drain that never ran.
+	b.persistCh = make(chan persistRequest, 1)
+	b.persistStart.Do(func() {})
+	// The first dropped Publish lazily spawns the out-of-band drop
+	// reporter; Close() in cleanup stops + joins it (no goroutine leak).
+	t.Cleanup(b.Close)
+
+	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"i": 0}}) // fills the cap-1 buffer
+	b.Publish(Event{Type: "daemon-state", Body: map[string]any{"i": 1}}) // must drop: buffer full, nobody draining
+
+	_, persist := b.DroppedCounts()
+	if persist == 0 {
+		t.Fatalf("DroppedCounts().persist = 0, want > 0 after publishing past a saturated, undrained persistCh")
+	}
+}
+
+// TestBroadcaster_DropReporter_EmitsWarnOutOfBand proves the PR #476 bot
+// P2 fix: the drop warn is emitted by the out-of-band reporter
+// goroutine reading the atomic counters, NOT synchronously on the
+// Publish hot path. Drives runDropReporter with a tiny interval against
+// a per-test-isolated hub-mcp.log (so a sibling test's row in the
+// binary-shared log can't be mistaken for this one's) and asserts a
+// `gui-events-dropped` warn lands carrying the counter totals.
+func TestBroadcaster_DropReporter_EmitsWarnOutOfBand(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+
+	b := NewBroadcaster()
+	// Simulate observed drops WITHOUT going through Publish, so the test
+	// targets exactly the reporter's read-counters-and-warn path.
+	b.sseDropped.Store(3)
+	b.persistDropped.Store(2)
+
+	done := make(chan struct{})
+	go func() {
+		b.runDropReporter(10 * time.Millisecond)
+		close(done)
+	}()
+
+	logPath := filepath.Join(root, "hub-mcp.log")
+	deadline := time.Now().Add(3 * time.Second)
+	found := false
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(logPath); err == nil &&
+			strings.Contains(string(data), "gui-events-dropped") &&
+			strings.Contains(string(data), `"sse_dropped_total":3`) &&
+			strings.Contains(string(data), `"persist_dropped_total":2`) {
+			found = true
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	// Stop the reporter (closeOnce-protected close of dropReporterStop)
+	// and join it so the goroutine doesn't outlive the test.
+	close(b.dropReporterStop)
+	<-done
+	if !found {
+		data, _ := os.ReadFile(logPath)
+		t.Fatalf("out-of-band reporter never emitted a gui-events-dropped warn with the expected totals; hub-mcp.log=%q", data)
+	}
 }
 
 func TestEventsSSE_StreamsPublishedEvents(t *testing.T) {

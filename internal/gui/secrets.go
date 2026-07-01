@@ -98,6 +98,15 @@ func (s *Server) secretsListOrAddHandler(w http.ResponseWriter, r *http.Request)
 			writeSecretsOpError(w, err)
 			return
 		}
+		// gui-events.log audit row (deep-review P3 finding): emit only
+		// after the vault write committed. KEY NAME ONLY — body.Value
+		// (the credential material) never reaches this call or any log;
+		// mirrors the discipline emitSecretAuditEvent already applies to
+		// the hub-mcp.log audit trail (P2.4, PR #468) for the same
+		// mutation.
+		s.events.PublishOperatorAction("secret-set", api.CurrentOSUser(), map[string]any{
+			"key": body.Name,
+		})
 		w.WriteHeader(http.StatusCreated)
 	default:
 		w.Header().Set("Allow", "GET, POST")
@@ -138,8 +147,9 @@ func opErrorStatus(code string) int {
 
 // secretsByKeyHandler handles all /api/secrets/<key>[/<action>] paths.
 // Routing:
-//   /api/secrets/<key>          → secretsKeyRoot  (PUT, DELETE)
-//   /api/secrets/<key>/restart  → secretsKeyRestart (POST)
+//
+//	/api/secrets/<key>          → secretsKeyRoot  (PUT, DELETE)
+//	/api/secrets/<key>/restart  → secretsKeyRestart (POST)
 //
 // The /api/secrets/init pattern is registered more specifically and wins
 // over this handler in Go's ServeMux.
@@ -179,6 +189,24 @@ func (s *Server) secretsKeyRoot(w http.ResponseWriter, r *http.Request, key stri
 			return
 		}
 		res, err := s.secrets.Rotate(key, body.Value, body.Restart)
+		// gui-events.log audit row (deep-review P3 finding): the credential
+		// mutation is COMMITTED the moment res.VaultUpdated is true, even
+		// when the subsequent restart orchestration fails (PR #476 bot P2:
+		// the old emit sat AFTER the orchestration-error return, so a
+		// rotate that changed the vault but failed the restart left NO
+		// audit row for a committed credential change). Emit on the
+		// committed-rotation fact, independent of the restart outcome —
+		// matching the API-side emitSecretAuditEvent which audits right
+		// after the vault commit, before the restart phase. A pre-commit
+		// failure (*SecretsOpError: invalid name / empty value / vault not
+		// initialized) returns res.VaultUpdated==false, so no row fires.
+		// KEY NAME ONLY — body.Value never reaches this call or any log.
+		if res.VaultUpdated {
+			s.events.PublishOperatorAction("secret-rotate", api.CurrentOSUser(), map[string]any{
+				"key":               key,
+				"restart_requested": body.Restart,
+			})
+		}
 		if err != nil {
 			// Validation / vault-access errors carry *api.SecretsOpError.
 			var opErr *api.SecretsOpError
@@ -224,6 +252,11 @@ func (s *Server) secretsKeyRoot(w http.ResponseWriter, r *http.Request, key stri
 			writeSecretsDeleteError(w, err)
 			return
 		}
+		// gui-events.log audit row (deep-review P3 finding): emit only
+		// after the vault delete committed. KEY NAME ONLY.
+		s.events.PublishOperatorAction("secret-delete", api.CurrentOSUser(), map[string]any{
+			"key": key,
+		})
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		w.Header().Set("Allow", "PUT, DELETE")

@@ -157,6 +157,12 @@ func registerInstallRoutes(s *Server) {
 			writeAPIError(w, err, http.StatusInternalServerError, "INSTALL_FAILED")
 			return
 		}
+		// gui-events.log audit row (deep-review P3 finding): emit only
+		// after Install committed successfully. Identifier is the server
+		// name only — no secret material is ever in scope for this route.
+		s.events.PublishOperatorAction("install", api.CurrentOSUser(), map[string]any{
+			"server": name,
+		})
 		w.WriteHeader(http.StatusNoContent)
 	}))
 

@@ -3,11 +3,13 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -63,6 +65,89 @@ func TestMigrate_CallsAPIWithServerList(t *testing.T) {
 	}
 	if len(resp.Failed) != 0 {
 		t.Errorf("failed=%+v, want empty", resp.Failed)
+	}
+}
+
+// TestMigrate_EmitsGUIEventOnSuccess covers the deep-review P3
+// observability finding: a successful /api/migrate mutation previously
+// left no row in gui-events.log at all. The handler must now publish an
+// "operator-action" event (SSE-visible immediately, and persisted to
+// gui-events.log via the same Broadcaster path bulk-action already
+// uses) carrying the server/client identifiers — non-sensitive, no
+// credential material is ever in scope for this route.
+func TestMigrate_EmitsGUIEventOnSuccess(t *testing.T) {
+	fm := &fakeMigrator{
+		report: &api.MigrateReport{
+			Applied: []api.AppliedMigration{
+				{Server: "memory", Client: "claude-code", URL: "http://127.0.0.1:9128/mcp"},
+			},
+		},
+	}
+	s := NewServer(Config{})
+	s.migrator = fm
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/migrate",
+		bytes.NewReader([]byte(`{"servers":["memory"]}`)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%q", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.Type != "operator-action" {
+			t.Fatalf("event type = %q, want operator-action", ev.Type)
+		}
+		if ev.Body["action"] != "migrate" {
+			t.Errorf("action = %v, want migrate", ev.Body["action"])
+		}
+		if _, ok := ev.Body["actor"]; !ok {
+			t.Errorf("body missing actor field: %+v", ev.Body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no operator-action event published after a successful migrate")
+	}
+}
+
+// TestMigrate_NoGUIEventOnFullFailure guards the "emit only after the
+// mutation committed" contract: when every row failed (Applied is
+// empty), no operator-action event should fire — a failed op must not
+// leave a misleading success record in gui-events.log.
+func TestMigrate_NoGUIEventOnFullFailure(t *testing.T) {
+	fm := &fakeMigrator{
+		report: &api.MigrateReport{
+			Failed: []api.FailedMigration{
+				{Server: "memory", Client: "claude-code", Err: "boom"},
+			},
+		},
+	}
+	s := NewServer(Config{})
+	s.migrator = fm
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/migrate",
+		bytes.NewReader([]byte(`{"servers":["memory"]}`)))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMultiStatus {
+		t.Fatalf("status = %d, want 207, body=%q", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case ev := <-ch:
+		t.Fatalf("unexpected event published on full-failure migrate: %+v", ev)
+	case <-time.After(200 * time.Millisecond):
+		// expected: no event
 	}
 }
 
