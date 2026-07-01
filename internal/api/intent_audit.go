@@ -425,6 +425,16 @@ func currentOSUser() string {
 	return name
 }
 
+// CurrentOSUser is the exported wrapper over currentOSUser. It is the
+// single owner of "who is the actor for an audit/observability event"
+// across this codebase (mirrors the actor_user field emitSecretAuditEvent
+// already writes to hub-mcp.log) — callers outside this package (e.g.
+// internal/gui's gui-events.log emit sites) reuse this instead of
+// re-deriving the OS username themselves.
+func CurrentOSUser() string {
+	return currentOSUser()
+}
+
 // ---------------------------------------------------------------------------
 // AppendIntentAudit — production write path (§9, §20, §25, §26, §35).
 // ---------------------------------------------------------------------------

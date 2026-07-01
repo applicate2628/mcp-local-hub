@@ -454,17 +454,38 @@ func (a *API) resolveDefaultClientsOverride(opts InstallOpts) []string {
 	return override
 }
 
+// statusInternalDialFn is the test seam for the IPC status dial used by
+// statusInternal. Defaults to the production DialSupervisorIPCStatus;
+// tests swap it (and restore via t.Cleanup) to drive the
+// ErrSupervisorIPCUnavailable fail-loud path hermetically, without a real
+// supervisor.lock on disk. Mirrors the SupervisorIPCStatusFn seam in
+// health.go.
+var statusInternalDialFn = DialSupervisorIPCStatus
+
 // Status returns the slice of MCP daemons under supervisor management
 // (v0.5.0+) — same source DaemonStatusSnapshot uses for /api/status,
 // so CLI `mcphub status` and the GUI poller (which feeds the tray
 // icon) see the canonical 13-daemon view rather than scheduler.List's
 // single supervisor-task row.
 //
-// Fallback contract: when the supervisor IPC is unreachable
-// (ErrSupervisorIPCUnavailable — no lock owner sidecar, no pipe), the
-// legacy scheduler scan via StatusWithOpts is used. Hosts mid-
-// migration or running v0.4.x compat tooling still get a meaningful
-// response that way.
+// Fail-loud contract (deep-review P3, operational-contract divergence
+// fix): when the supervisor IPC is unreachable
+// (ErrSupervisorIPCUnavailable — no lock owner sidecar, no pipe), this
+// surfaces ErrSupervisorDown instead of silently falling back to the
+// legacy scheduler scan. Mirrors health.go's DaemonsSection fail-loud
+// contract for the SAME condition (health.go:424-437) — pre-fix, `mcphub
+// status` (this path) and GET /api/status (health.go, when wired)
+// diverged: the GUI failed loud while the CLI silently served stale
+// scheduler rows for the deleted v0.4.x task model, misleading an
+// operator or monitoring script relying on `mcphub status` into reading
+// the legacy scan as current state.
+//
+// Unlike health.go's SupervisorIPCStatusFn (a nil-by-default package var
+// gated on GUI startup wiring, internal/cli/gui.go:398), this path calls
+// DialSupervisorIPCStatus unconditionally — there is no "unwired host"
+// case to preserve here: `mcphub status` always attempts the real
+// supervisor dial, so an IPC-unavailable outcome always means the
+// supervisor itself is down, never an unwired seam.
 //
 // PR #215 fix: before this routing, poller + CLI both saw only the
 // supervisor scheduler task, deriveState classified it as Failed
@@ -488,22 +509,23 @@ func (a *API) Status() ([]DaemonStatus, error) {
 // derived from context.Background() which severed the caller's
 // cancellation chain — a CLI Ctrl+C or HTTP request cancel could
 // not interrupt a stalled supervisor IPC dial mid-call.
+//
+// Deep-review P3 fix: an unreachable supervisor (errors.Is
+// ErrSupervisorIPCUnavailable) now returns ErrSupervisorDown instead of
+// silently falling through to StatusWithOpts (the legacy scheduler
+// scan). See the Status() doc comment for the full rationale and why no
+// nil-seam fallback applies on this path.
 func (a *API) statusInternal(ctx context.Context) ([]DaemonStatus, error) {
 	ipcCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	rows, err := DialSupervisorIPCStatus(ipcCtx)
+	rows, err := statusInternalDialFn(ipcCtx)
 	if err == nil {
 		return rows, nil
 	}
-	if !errors.Is(err, ErrSupervisorIPCUnavailable) {
-		return nil, err
+	if errors.Is(err, ErrSupervisorIPCUnavailable) {
+		return nil, ErrSupervisorDown
 	}
-	// Supervisor not reachable; fall back to legacy scheduler scan.
-	// StatusWithOpts is schtasks-driven and ctx-blind; callers that
-	// need best-effort cancellation during the fallback path go
-	// through StatusContext (api_surfaces.go) which wraps in a
-	// goroutine per §32.
-	return a.StatusWithOpts(StatusOpts{})
+	return nil, err
 }
 
 // StatusWithHealth is the pre-M5 shim kept for backwards compatibility. New

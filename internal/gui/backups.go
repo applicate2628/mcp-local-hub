@@ -39,9 +39,11 @@ type backupsAPI interface {
 
 type realBackupsAPI struct{}
 
-func (realBackupsAPI) List() ([]api.BackupInfo, error)      { return api.NewAPI().BackupsList() }
-func (realBackupsAPI) CleanPreview(n int) ([]string, error) { return api.NewAPI().BackupsCleanPreview(n) }
-func (realBackupsAPI) Clean(n int) ([]string, error)        { return api.NewAPI().BackupsClean(n) }
+func (realBackupsAPI) List() ([]api.BackupInfo, error) { return api.NewAPI().BackupsList() }
+func (realBackupsAPI) CleanPreview(n int) ([]string, error) {
+	return api.NewAPI().BackupsCleanPreview(n)
+}
+func (realBackupsAPI) Clean(n int) ([]string, error) { return api.NewAPI().BackupsClean(n) }
 
 // CleanPreviewInClient resolves the client's config path and previews
 // what BackupsCleanIn(dir, basename, keepN) would prune (dryRun=true
@@ -222,6 +224,25 @@ func (s *Server) backupsCleanHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if removed == nil {
 		removed = []string{}
+	}
+	// gui-events.log audit row (deep-review P3 finding; PR #476 bot P3 —
+	// backupsCleanHandler was the one backup mutation left unaudited).
+	// Emit ONLY when files were actually deleted (a clean that pruned
+	// nothing is not a mutation worth a row), matching the "emit only on
+	// committed mutation" contract. Identifiers are the client name
+	// (empty = all managed clients), the count, and deleted basenames
+	// (not full absolute paths) — same non-sensitive shape as
+	// backup-delete; no secret material is ever in scope for this route.
+	if len(removed) > 0 {
+		basenames := make([]string, 0, len(removed))
+		for _, p := range removed {
+			basenames = append(basenames, filepath.Base(p))
+		}
+		s.events.PublishOperatorAction("backup-clean", api.CurrentOSUser(), map[string]any{
+			"client":        client,
+			"cleaned_count": len(removed),
+			"deleted":       basenames,
+		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"cleaned": len(removed),

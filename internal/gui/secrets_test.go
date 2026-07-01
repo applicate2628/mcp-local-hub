@@ -2,12 +2,14 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -26,8 +28,8 @@ type fakeSecretsAPI struct {
 	restartErr     error
 	deleteErr      error
 
-	calledSet     []struct{ Name, Value string }
-	calledRotate  []struct {
+	calledSet    []struct{ Name, Value string }
+	calledRotate []struct {
 		Name, Value string
 		Restart     bool
 	}
@@ -235,6 +237,62 @@ func TestSecretsAdd_201Created(t *testing.T) {
 	}
 }
 
+// TestSecretsAdd_EmitsGUIEventWithKeyNameOnlyNeverValue covers the
+// deep-review P3 observability finding for secrets.go: the POST
+// /api/secrets success path must emit a gui-events.log row (so the
+// operator-significant mutation is auditable from the SSE/log surface,
+// not just hub-mcp.log), and that row must carry the key NAME only —
+// the secret VALUE must never appear in the persisted body.
+//
+// Asserts via the Broadcaster's own SSE subscription (the same channel
+// that feeds the gui-events.log persist drain — see events.go Publish)
+// rather than tailing the shared on-disk gui-events.log: internal/gui's
+// TestMain fences the whole test BINARY to one state root, not one file
+// per test, so multiple tests in this package append to the same
+// physical file and a tail-read race against sibling tests is real (not
+// hypothetical — observed directly: a sibling backups_actions_test.go
+// row was the most-recent entry when this test's own row hadn't landed
+// yet). Subscribing to this server's own Broadcaster instance isolates
+// the assertion to exactly the event this test's handler call produced.
+func TestSecretsAdd_EmitsGUIEventWithKeyNameOnlyNeverValue(t *testing.T) {
+	fake := &fakeSecretsAPI{}
+	s := newServerWithSecretsFake(t, fake)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	const secretValue = "super-secret-credential-material-xyz"
+	body := bytes.NewReader([]byte(`{"name":"MY_API_KEY","value":"` + secretValue + `"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/secrets", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.Type != "operator-action" {
+			t.Fatalf("event type = %q, want operator-action", ev.Type)
+		}
+		if ev.Body["action"] != "secret-set" {
+			t.Errorf("action=%v, want secret-set", ev.Body["action"])
+		}
+		if ev.Body["key"] != "MY_API_KEY" {
+			t.Errorf("key=%v, want MY_API_KEY", ev.Body["key"])
+		}
+		raw, _ := json.Marshal(ev.Body)
+		if bytes.Contains(raw, []byte(secretValue)) {
+			t.Fatalf("gui-events row leaked the secret VALUE: %s", raw)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no operator-action event published after a successful secret Set")
+	}
+}
+
 func TestSecretsAdd_409KeyExists(t *testing.T) {
 	fake := &fakeSecretsAPI{setErr: &api.SecretsOpError{Code: "SECRETS_KEY_EXISTS", Msg: "exists"}}
 	s := newServerWithSecretsFake(t, fake)
@@ -351,6 +409,83 @@ func TestSecretsRotate_500OrchestrationFailureCarriesPartial(t *testing.T) {
 	}
 	if results, _ := body["restart_results"].([]any); len(results) != 1 {
 		t.Errorf("partial results dropped: %v", body["restart_results"])
+	}
+}
+
+// TestSecretsRotate_AuditsCommittedRotationEvenWhenRestartFails covers
+// the PR #476 bot P2 regression: a rotate that successfully updates the
+// vault (VaultUpdated:true) but then fails the restart orchestration
+// (500 RESTART_FAILED) must STILL emit the secret-rotate gui-events
+// audit row — the credential DID change, so it must be auditable. The
+// old code emitted only on the clean-success path, leaving a committed
+// credential mutation with no row. KEY NAME only, never value.
+func TestSecretsRotate_AuditsCommittedRotationEvenWhenRestartFails(t *testing.T) {
+	const secretValue = "rotated-credential-material-abc"
+	fake := &fakeSecretsAPI{
+		rotateResult: api.SecretsRotateResult{
+			VaultUpdated:   true,
+			RestartResults: []api.RestartResult{{TaskName: "a", Err: ""}},
+		},
+		rotateErr: errors.New("scheduler unavailable"),
+	}
+	s := newServerWithSecretsFake(t, fake)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/secrets/K1",
+		bytes.NewReader([]byte(`{"value":"`+secretValue+`","restart":true}`)))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500 (restart failed), body=%q", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.Type != "operator-action" || ev.Body["action"] != "secret-rotate" {
+			t.Fatalf("event = %+v, want operator-action/secret-rotate", ev)
+		}
+		if ev.Body["key"] != "K1" {
+			t.Errorf("key=%v, want K1", ev.Body["key"])
+		}
+		raw, _ := json.Marshal(ev.Body)
+		if bytes.Contains(raw, []byte(secretValue)) {
+			t.Fatalf("secret-rotate audit row leaked the secret VALUE: %s", raw)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no secret-rotate audit event after a committed rotate whose restart failed (PR #476 P2 regression)")
+	}
+}
+
+// TestSecretsRotate_NoAuditOnPreCommitFailure guards the inverse: a
+// pre-commit validation failure (*SecretsOpError, VaultUpdated:false)
+// must NOT emit an audit row — nothing changed in the vault.
+func TestSecretsRotate_NoAuditOnPreCommitFailure(t *testing.T) {
+	fake := &fakeSecretsAPI{
+		rotateResult: api.SecretsRotateResult{VaultUpdated: false},
+		rotateErr:    &api.SecretsOpError{Code: "SECRETS_EMPTY_VALUE", Msg: "value must not be empty"},
+	}
+	s := newServerWithSecretsFake(t, fake)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/secrets/K1",
+		bytes.NewReader([]byte(`{"value":"x","restart":false}`)))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400 (empty value), body=%q", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case ev := <-ch:
+		t.Fatalf("unexpected audit event on pre-commit rotate failure: %+v", ev)
+	case <-time.After(200 * time.Millisecond):
+		// expected: no event (vault unchanged)
 	}
 }
 

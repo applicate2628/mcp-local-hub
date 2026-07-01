@@ -62,7 +62,7 @@ func TestRestartUsesSupervisorRespawnForIntentDaemon(t *testing.T) {
 		if force {
 			t.Fatal("Restart must not force quarantine override by default")
 		}
-		return RespawnResult{Success: true, Code: "OK"}, nil
+		return RespawnResult{Success: true, Code: ""}, nil
 	})
 	defer restoreRespawn()
 
@@ -83,6 +83,18 @@ func TestRestartUsesSupervisorRespawnForIntentDaemon(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].TaskName != `\mcp-local-hub-memory-default` || results[0].Err != "" {
 		t.Fatalf("results = %+v, want one supervisor success row", results)
+	}
+	// Deep-review P4 fix: DialSupervisorIPCRespawn's documented contract
+	// ("" (Success=true) → 200, supervisor_ipc_respawn_client.go:63) means a
+	// plain synchronous-success RespawnResult carries Code == "". restartSupervisorOwnedDaemons
+	// (restart_supervisor.go:190) copies result.Code verbatim into the
+	// persisted RestartResult on the success path, so a stray "OK" would
+	// leak into a field whose own doc comment (DeferredToIntentWatcherCode,
+	// supervisor_ipc_respawn_client.go:25-34) states a plain success row is
+	// "empty Err, empty Code". Pin that here so a regression back to
+	// Code: "OK" is caught.
+	if results[0].Code != "" {
+		t.Fatalf("plain success row Code = %q, want empty (RespawnResult success contract is Code=\"\")", results[0].Code)
 	}
 }
 
@@ -109,7 +121,7 @@ func TestRestartAllSkipsWatchdogMaintenanceRow(t *testing.T) {
 	var respawned []string
 	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
 		respawned = append(respawned, taskName)
-		return RespawnResult{Success: true, Code: "OK"}, nil
+		return RespawnResult{Success: true, Code: ""}, nil
 	})
 	defer restoreRespawn()
 
@@ -148,7 +160,7 @@ func TestRestartSupervisorOwnedDaemonsUsesDescriptorIdentityForWorkspaceLSP(t *t
 	var gotTask string
 	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
 		gotTask = taskName
-		return RespawnResult{Success: true, Code: "OK"}, nil
+		return RespawnResult{Success: true, Code: ""}, nil
 	})
 	defer restoreRespawn()
 
@@ -190,7 +202,7 @@ func TestRestartAllFallsThroughToLegacySchedulerAndSkipsSupervisorHandledTasks(t
 	var respawned []string
 	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
 		respawned = append(respawned, taskName)
-		return RespawnResult{Success: true, Code: "OK"}, nil
+		return RespawnResult{Success: true, Code: ""}, nil
 	})
 	defer restoreRespawn()
 
@@ -711,7 +723,7 @@ func TestRestartSuccessFirstTryWritesRunningIntentOnlyPostSuccess(t *testing.T) 
 	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
 		dials++
 		intentDesiredAtDial = subBlockDesiredForTest(taskName)
-		return RespawnResult{Success: true, Code: "OK"}, nil
+		return RespawnResult{Success: true, Code: ""}, nil
 	})
 	defer restoreRespawn()
 
@@ -748,7 +760,7 @@ func TestRestartFallsBackWhenNoSupervisorIntentMatches(t *testing.T) {
 	called := false
 	restoreRespawn := setSupervisorRestartHooksForTest(func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
 		called = true
-		return RespawnResult{Success: true, Code: "OK"}, nil
+		return RespawnResult{Success: true, Code: ""}, nil
 	})
 	defer restoreRespawn()
 
