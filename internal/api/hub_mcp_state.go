@@ -125,33 +125,24 @@ func writeHubMcpStateFile(name string, payload []byte) error {
 	// secondary parent gate here would strand operators in a half-functional
 	// state (reads succeed, writes fail) on the very hosts the read-side
 	// relaxation was meant to unblock.
-	if err := SecureWriteClientConfig(target, payload); err != nil {
-		if !errors.Is(err, ErrSecureWriteParentInsecure) {
-			return fmt.Errorf("hub-mcp state write %s: %w", name, err)
-		}
-		if operatorRequiresSingleUserHome() {
-			return fmt.Errorf("hub-mcp state write %s: %w; strict mode is active (via %s=1, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
-				name, err, RequireSingleUserHomeEnv)
-		}
-		if !stateFileParentGateAllowsDefaultRelax(err) {
-			return fmt.Errorf("hub-mcp state write %s: %w", name, err)
-		}
-		// Best-effort audit log; never block the write on log failure. Default
-		// relax skips only the parent gate: the per-file DACL/mode remains
-		// handle-bound at temp-create, and publish remains dirHandle-relative.
-		reason := "default-relax-on-solo-host (parent-dir gate rejected; hardened skip-parent-gate writer still applies per-file owner-only permissions at temp-create and publishes via a dirHandle-relative atomic rename)"
-		_ = LogHubMcpEvent("warn", "hub-mcp-state-write-unhardened-parent-fallback", map[string]any{
-			"path":   target,
-			"parent": dir,
-			"reason": reason,
-			"err":    err.Error(),
-			"note":   "per-file DACL/mode applied at temp-create time (handle-bound); rename is dirHandle-relative; published file is owner-only regardless of parent DACL",
+	// The strict-vs-relax parent-gate decision is delegated to the shared single
+	// owner secureWriteStateFileWithParentRelax (state_file_helper.go); this
+	// caller supplies only the hub-mcp domain's audit event (hub-mcp.log). The
+	// relax lane skips only the parent gate — the per-file DACL/mode stays
+	// handle-bound at temp-create and the publish stays dirHandle-relative, so
+	// the published file is owner-only regardless of the parent DACL.
+	return secureWriteStateFileWithParentRelax(target, payload,
+		fmt.Sprintf("hub-mcp state write %s", name),
+		func(p, parentDir string, gateErr error) {
+			// Best-effort audit log; never block the write on log failure.
+			_ = LogHubMcpEvent("warn", "hub-mcp-state-write-unhardened-parent-fallback", map[string]any{
+				"path":   p,
+				"parent": parentDir,
+				"reason": "default-relax-on-solo-host (parent-dir gate rejected; hardened skip-parent-gate writer still applies per-file owner-only permissions at temp-create and publishes via a dirHandle-relative atomic rename)",
+				"err":    gateErr.Error(),
+				"note":   "per-file DACL/mode applied at temp-create time (handle-bound); rename is dirHandle-relative; published file is owner-only regardless of parent DACL",
+			})
 		})
-		if err := secureWriteClientConfigSkipParentGate(target, payload); err != nil {
-			return fmt.Errorf("hub-mcp state write %s (relax lane): %w", name, err)
-		}
-	}
-	return nil
 }
 
 // readHubMcpStateFile reads a hub-mcp state file via the inode-
