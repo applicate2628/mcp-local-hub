@@ -245,6 +245,66 @@ func TestIntentWatcher_FiresOnFileDeletion(t *testing.T) {
 	}
 }
 
+// TestIntentWatcher_DetectsSameMtimeSizeChange pins the deep-review P4 fix:
+// a replace-in-place write that lands within the filesystem mtime-granularity
+// window (identical mtime, different content/length) must still be detected
+// via the paired lastSizes map, not just lastMtimes. Without the size check,
+// detectChange would report "no change" whenever the OS mtime clock hasn't
+// ticked between two writes — a real occurrence on filesystems with coarse
+// mtime resolution (e.g. FAT32's 2s granularity, or two writes inside the
+// same tick on any filesystem).
+//
+// The test drives snapshotMtimes()/detectChange() directly (not via Run's
+// poll loop) so the mtime pinning via os.Chtimes is deterministic and the
+// test has no dependency on wall-clock poll timing.
+func TestIntentWatcher_DetectsSameMtimeSizeChange(t *testing.T) {
+	dir := t.TempDir()
+	intentPath := filepath.Join(dir, "supervisor-intent.json")
+	pinned := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	if err := os.WriteFile(intentPath, []byte(`{"version":1}`), 0600); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	if err := os.Chtimes(intentPath, pinned, pinned); err != nil {
+		t.Fatalf("pin initial mtime: %v", err)
+	}
+
+	w := NewIntentWatcher(dir, time.Hour, func() {})
+	w.snapshotMtimes()
+	if got := w.detectChange(); got {
+		t.Fatalf("expected no change immediately after baseline snapshot, got true")
+	}
+
+	// Rewrite with a DIFFERENT byte length but pin the SAME mtime — this is
+	// the mtime-granularity-window replace-in-place case the fix targets.
+	if err := os.WriteFile(intentPath, []byte(`{"version":1,"daemons":[],"strict_mode":true}`), 0600); err != nil {
+		t.Fatalf("rewrite supervisor-intent.json with different length: %v", err)
+	}
+	if err := os.Chtimes(intentPath, pinned, pinned); err != nil {
+		t.Fatalf("re-pin mtime to identical value: %v", err)
+	}
+
+	if got := w.detectChange(); !got {
+		t.Fatalf("expected detectChange to return true for a same-mtime, different-size rewrite, got false")
+	}
+
+	// Re-baseline and confirm the mtime-change case (different mtime, same
+	// or different size) still fires — the size check must be additive,
+	// not a replacement for the existing mtime check.
+	w.snapshotMtimes()
+	if got := w.detectChange(); got {
+		t.Fatalf("expected no change immediately after re-baseline, got true")
+	}
+
+	laterMtime := pinned.Add(time.Hour)
+	if err := os.Chtimes(intentPath, laterMtime, laterMtime); err != nil {
+		t.Fatalf("advance mtime without changing content: %v", err)
+	}
+	if got := w.detectChange(); !got {
+		t.Fatalf("expected detectChange to return true for an mtime-only change, got false")
+	}
+}
+
 // TestIntentWatcher_DefaultsPollIntervalTo60s asserts the spec-mandated
 // 60s default applies when caller passes 0 or negative. A regression
 // (e.g. accidentally defaulting to 0 — busy-loop) would crater CPU on

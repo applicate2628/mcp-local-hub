@@ -241,3 +241,20 @@ func writeStaleOwner(path string, pid int, started string) error {
 	raw, _ := json.Marshal(SupervisorLockOwner{PID: pid, StartedAt: started})
 	return os.WriteFile(path+".owner.json", raw, 0600)
 }
+
+// TestIsOwnerLive pins the deep-review P4 fix: isOwnerLive must report the
+// CURRENT process (a genuinely live PID) as live on every platform, including
+// Windows where the prior POSIX-only signal-0 probe unconditionally returned
+// false (Go's Windows Process.Signal supports only os.Kill and errors on
+// signal 0), wrongly flipping the AcquireSupervisorLock contention
+// diagnostic to "stale or unobservable" for a live supervisor.
+func TestIsOwnerLive(t *testing.T) {
+	if got := isOwnerLive(SupervisorLockOwner{PID: 0}); got {
+		t.Fatalf("isOwnerLive(PID:0) = true, want false (0 is the canonical unset sentinel)")
+	}
+
+	self := os.Getpid()
+	if got := isOwnerLive(SupervisorLockOwner{PID: self}); !got {
+		t.Fatalf("isOwnerLive(PID:%d) = false, want true (this is the current, definitely-live test process)", self)
+	}
+}
