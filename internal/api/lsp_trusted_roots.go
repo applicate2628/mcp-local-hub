@@ -350,23 +350,37 @@ func WorkspaceRootTrusted(workspaceRoot string) (bool, error) {
 // explicit register because the bless did not land). Callers log it
 // rather than failing the register.
 func BlessTrustedRoot(path, workspaceRoot string) error {
-	canonical, err := canonicalizeTrustedRoot(workspaceRoot)
+	_, _, err := BlessTrustedRootDetailed(path, workspaceRoot)
+	return err
+}
+
+// BlessTrustedRootDetailed is BlessTrustedRoot with the mutation's own results
+// surfaced: the CANONICAL root it applied (the exact string it compared/stored,
+// computed ONCE inside the held flock — an out-of-band audit that re-canonicalizes
+// the raw request could resolve a symlink differently and name a path the store
+// never trusted) and whether the store actually CHANGED (false for the idempotent
+// already-present no-op). Audit callers use `changed` to avoid logging a no-op
+// retry as a real authorization-boundary change, and `canonical` so the audit
+// row names the path the boundary actually trusts. All error returns yield
+// ("", false, err); the idempotent no-op yields (canonical, false, nil).
+func BlessTrustedRootDetailed(path, workspaceRoot string) (canonical string, changed bool, err error) {
+	canonical, err = canonicalizeTrustedRoot(workspaceRoot)
 	if err != nil {
-		return fmt.Errorf("bless trusted root: canonicalize %q: %w", workspaceRoot, err)
+		return "", false, fmt.Errorf("bless trusted root: canonicalize %q: %w", workspaceRoot, err)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("bless trusted root: mkdir state dir: %w", err)
+		return "", false, fmt.Errorf("bless trusted root: mkdir state dir: %w", err)
 	}
 	lock := flock.New(path + lspTrustedRootsLockSuffix)
 	if err := lock.Lock(); err != nil {
-		return fmt.Errorf("bless trusted root: flock %s: %w", path+lspTrustedRootsLockSuffix, err)
+		return "", false, fmt.Errorf("bless trusted root: flock %s: %w", path+lspTrustedRootsLockSuffix, err)
 	}
 	defer func() { _ = lock.Unlock() }()
 
 	f, err := LoadLSPTrustedRoots(path)
 	if err != nil {
-		return fmt.Errorf("bless trusted root: load %s: %w", path, err)
+		return "", false, fmt.Errorf("bless trusted root: load %s: %w", path, err)
 	}
 
 	// Idempotency: if the canonical root already EXACTLY matches a
@@ -376,7 +390,7 @@ func BlessTrustedRoot(path, workspaceRoot string) error {
 	// silently de-trust the explicitly-registered child.)
 	for stored := range f.canonicalizedRootSet() {
 		if storedEqualsCanonical(stored, canonical) {
-			return nil
+			return canonical, false, nil
 		}
 	}
 
@@ -389,22 +403,31 @@ func BlessTrustedRoot(path, workspaceRoot string) error {
 
 	raw, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
-		return fmt.Errorf("bless trusted root: marshal: %w", err)
+		return "", false, fmt.Errorf("bless trusted root: marshal: %w", err)
 	}
 	if err := WriteStateFileBytesLockHeld(path, raw); err != nil {
-		return fmt.Errorf("bless trusted root: write %s: %w", path, err)
+		return "", false, fmt.Errorf("bless trusted root: write %s: %w", path, err)
 	}
-	return nil
+	return canonical, true, nil
 }
 
 // BlessDefaultTrustedRoot resolves the default store path and blesses
 // workspaceRoot there. The explicit register call sites use this.
 func BlessDefaultTrustedRoot(workspaceRoot string) error {
+	_, _, err := BlessDefaultTrustedRootDetailed(workspaceRoot)
+	return err
+}
+
+// BlessDefaultTrustedRootDetailed is BlessDefaultTrustedRoot returning the
+// applied canonical root + whether the store changed (see BlessTrustedRootDetailed).
+// The GUI trusted-root audit uses it so its row names the canonical path the
+// boundary trusts and is only emitted when the store actually changed.
+func BlessDefaultTrustedRootDetailed(workspaceRoot string) (canonical string, changed bool, err error) {
 	path, err := DefaultLSPTrustedRootsPath()
 	if err != nil {
-		return err
+		return "", false, err
 	}
-	return BlessTrustedRoot(path, workspaceRoot)
+	return BlessTrustedRootDetailed(path, workspaceRoot)
 }
 
 // RemoveTrustedRoot canonicalizes root and idempotently removes every
@@ -428,23 +451,35 @@ func BlessDefaultTrustedRoot(workspaceRoot string) error {
 // surviving roots are re-normalized + sorted so a hand-edited file is
 // also cleaned up on the next remove.
 func RemoveTrustedRoot(path, root string) error {
-	canonical, err := canonicalizeTrustedRoot(root)
+	_, _, err := RemoveTrustedRootDetailed(path, root)
+	return err
+}
+
+// RemoveTrustedRootDetailed is RemoveTrustedRoot with the mutation's own results
+// surfaced: the CANONICAL form of the requested root (computed ONCE inside the
+// held flock) and whether the store actually CHANGED (false for the idempotent
+// remove-an-absent-root no-op). Audit callers use `changed` to avoid logging a
+// stale-UI delete of an absent root as a real de-trust, and `canonical` so the
+// row names the path actually removed. Errors yield ("", false, err); the no-op
+// yields (canonical, false, nil).
+func RemoveTrustedRootDetailed(path, root string) (canonical string, changed bool, err error) {
+	canonical, err = canonicalizeTrustedRoot(root)
 	if err != nil {
-		return fmt.Errorf("remove trusted root: canonicalize %q: %w", root, err)
+		return "", false, fmt.Errorf("remove trusted root: canonicalize %q: %w", root, err)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("remove trusted root: mkdir state dir: %w", err)
+		return "", false, fmt.Errorf("remove trusted root: mkdir state dir: %w", err)
 	}
 	lock := flock.New(path + lspTrustedRootsLockSuffix)
 	if err := lock.Lock(); err != nil {
-		return fmt.Errorf("remove trusted root: flock %s: %w", path+lspTrustedRootsLockSuffix, err)
+		return "", false, fmt.Errorf("remove trusted root: flock %s: %w", path+lspTrustedRootsLockSuffix, err)
 	}
 	defer func() { _ = lock.Unlock() }()
 
 	f, err := LoadLSPTrustedRoots(path)
 	if err != nil {
-		return fmt.Errorf("remove trusted root: load %s: %w", path, err)
+		return "", false, fmt.Errorf("remove trusted root: load %s: %w", path, err)
 	}
 
 	// Drop every stored entry whose canonical form equals the target.
@@ -465,7 +500,7 @@ func RemoveTrustedRoot(path, root string) error {
 	if !removedAny {
 		// No matching entry: no-op success, leave the file untouched so
 		// the mtime is not churned on a removing-an-absent-root call.
-		return nil
+		return canonical, false, nil
 	}
 
 	f.Version = lspTrustedRootsVersion
@@ -476,22 +511,31 @@ func RemoveTrustedRoot(path, root string) error {
 
 	raw, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
-		return fmt.Errorf("remove trusted root: marshal: %w", err)
+		return "", false, fmt.Errorf("remove trusted root: marshal: %w", err)
 	}
 	if err := WriteStateFileBytesLockHeld(path, raw); err != nil {
-		return fmt.Errorf("remove trusted root: write %s: %w", path, err)
+		return "", false, fmt.Errorf("remove trusted root: write %s: %w", path, err)
 	}
-	return nil
+	return canonical, true, nil
 }
 
 // RemoveDefaultTrustedRoot resolves the default store path and removes
 // root there. The GUI Settings "Trusted Roots" panel uses this.
 func RemoveDefaultTrustedRoot(root string) error {
+	_, _, err := RemoveDefaultTrustedRootDetailed(root)
+	return err
+}
+
+// RemoveDefaultTrustedRootDetailed is RemoveDefaultTrustedRoot returning the
+// canonical form of the requested root + whether the store changed (see
+// RemoveTrustedRootDetailed). The GUI trusted-root audit uses it so its row
+// names the canonical path removed and only fires when the store changed.
+func RemoveDefaultTrustedRootDetailed(root string) (canonical string, changed bool, err error) {
 	path, err := DefaultLSPTrustedRootsPath()
 	if err != nil {
-		return err
+		return "", false, err
 	}
-	return RemoveTrustedRoot(path, root)
+	return RemoveTrustedRootDetailed(path, root)
 }
 
 // storedEqualsCanonical compares two already-canonical roots with the

@@ -227,6 +227,55 @@ func TestTrustedRoots_DeleteEmitsGUIEvent(t *testing.T) {
 	}
 }
 
+// TestTrustedRoots_IdempotentNoOpDoesNotEmit covers bot r2 P3: an
+// already-trusted add and an absent-root remove are idempotent no-ops that do
+// NOT change the store, so they must NOT publish an operator-action audit row
+// (which would falsely claim the authorization boundary changed). Relies on the
+// *Detailed variants' `changed=false` return gating the emit.
+func TestTrustedRoots_IdempotentNoOpDoesNotEmit(t *testing.T) {
+	s, path := trustedRootsHandlerTestServer(t)
+	base := t.TempDir()
+	root := mkTrustedDir(t, base, "proj")
+
+	// Seed so the POST below is a no-op (already trusted).
+	if err := api.BlessTrustedRoot(path, root); err != nil {
+		t.Fatalf("seed bless: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	// (1) POST an already-trusted root → no-op add, must not emit.
+	addBody, _ := json.Marshal(map[string]string{"root": root})
+	addRec := httptest.NewRecorder()
+	s.mux.ServeHTTP(addRec, httptest.NewRequest(http.MethodPost, "/api/lsp/trusted-roots", bytes.NewReader(addBody)))
+	if addRec.Code != http.StatusOK {
+		t.Fatalf("no-op POST status=%d body=%q", addRec.Code, addRec.Body.String())
+	}
+
+	// (2) DELETE a never-trusted root → no-op remove, must not emit.
+	absent := mkTrustedDir(t, base, "never-trusted")
+	delBody, _ := json.Marshal(map[string]string{"root": absent})
+	delRec := httptest.NewRecorder()
+	s.mux.ServeHTTP(delRec, httptest.NewRequest(http.MethodDelete, "/api/lsp/trusted-roots", bytes.NewReader(delBody)))
+	if delRec.Code != http.StatusOK {
+		t.Fatalf("no-op DELETE status=%d body=%q", delRec.Code, delRec.Body.String())
+	}
+
+	// Neither no-op may publish an operator-action row. Allow a settle window;
+	// any operator-action arriving is a spurious change-audit failure.
+	select {
+	case ev := <-ch:
+		if ev.Type == "operator-action" {
+			t.Fatalf("idempotent no-op published a spurious operator-action: action=%v root=%v",
+				ev.Body["action"], ev.Body["root"])
+		}
+	case <-time.After(500 * time.Millisecond):
+		// No event — correct: neither no-op audited a change.
+	}
+}
+
 func TestTrustedRoots_DeleteRemoves(t *testing.T) {
 	s, path := trustedRootsHandlerTestServer(t)
 	base := t.TempDir()
