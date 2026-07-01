@@ -282,7 +282,7 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		_ = stdin.Close()          // parent write end (StdinPipe return)
+		_ = stdin.Close()            // parent write end (StdinPipe return)
 		closePipeChildEnd(cmd.Stdin) // child read end (stored on cmd.Stdin)
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
@@ -291,8 +291,8 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// (durable) + os.Stderr (TTY only) / io.Discard (non-TTY).
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		_ = stdin.Close()           // parent write end
-		_ = stdout.Close()          // parent read end (StdoutPipe return)
+		_ = stdin.Close()             // parent write end
+		_ = stdout.Close()            // parent read end (StdoutPipe return)
 		closePipeChildEnd(cmd.Stdin)  // child read end (stored on cmd.Stdin)
 		closePipeChildEnd(cmd.Stdout) // child write end (stored on cmd.Stdout)
 		return fmt.Errorf("stderr pipe: %w", err)
