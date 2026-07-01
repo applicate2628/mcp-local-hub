@@ -28,6 +28,11 @@ export interface SecretsEnvelope {
   vault_state: VaultState;
   secrets: SecretRow[];
   manifest_errors: ManifestError[];
+  // Single-owner backend remediation text (deep-review P3): populated only
+  // when vault_state === "access_denied". The backend (vaultAccessDeniedFix,
+  // internal/api/secrets.go) is the sole author of this actionable guidance;
+  // AccessDeniedView renders it verbatim instead of re-authoring its own copy.
+  remediation?: string;
 }
 
 export interface RestartResult {
