@@ -60,6 +60,22 @@ type SupervisorDaemon struct {
 	Port         int               `json:"port"`
 	ManifestHash string            `json:"manifest_hash"`
 
+	// StartupBindDeadlineSeconds bounds how long a freshly-spawned child may
+	// take to FIRST bind its port before the liveness sweep treats port_unbound
+	// as a restart trigger (P1b first-bind deadline). Before the first observed
+	// bind of the current generation the sweep grants this deadline instead of
+	// the flat 5s post-bind grace, so a slow-starting daemon (e.g. a
+	// serena-proxy whose language-server subprocess takes tens of seconds to
+	// come up — measured go LSP cold = 46s) is no longer terminate-first-then-
+	// respawned mid-startup. After the first bind, the 5s post-bind rule applies
+	// byte-for-byte as before.
+	//
+	// 0 = default: 60s for global/legacy daemons, 120s for serena-proxy
+	// descriptors (resolved by supervisorStartupBindDeadline). Additive +
+	// omitempty: old binaries ignore it; old intent files read as 0 → default
+	// resolution. Config validation caps it at 600s.
+	StartupBindDeadlineSeconds int `json:"startup_bind_deadline_seconds,omitempty"`
+
 	// RuntimeSpec is the MATERIALIZED child runtime spec for daemons whose
 	// launcher (e.g. `mcphub daemon serena-proxy`) must NOT re-read the
 	// server manifest at spawn. It carries the final child command + args

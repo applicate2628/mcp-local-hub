@@ -422,3 +422,69 @@ func TestSupervisorCleanStartHydratesFromExistingState(t *testing.T) {
 		t.Fatalf("hydrated runtime entry = %+v, want running pid=4321 generation=7 started_at", entry)
 	}
 }
+
+// TestMarkExitedIfCurrent_StaleGenerationIsNoop is the P1a source-side guard:
+// a late exit stamped with an OLDER generation must leave the CURRENT child's
+// tracking untouched and return false (the drop signal the wait goroutine acts
+// on). This is the mechanism that stops the lost-child factory — a superseded
+// child's cmd.Wait must never clear the live current child's CurrentPID.
+func TestMarkExitedIfCurrent_StaleGenerationIsNoop(t *testing.T) {
+	tracker := NewDaemonRuntimeTracker()
+	taskName := `\mcp-local-hub-serena-default`
+	now := time.Now().UTC()
+
+	gen1 := tracker.MarkSpawned(taskName, 100, now)
+	if gen1 != 1 {
+		t.Fatalf("first MarkSpawned returned generation %d, want 1", gen1)
+	}
+	gen2 := tracker.MarkSpawned(taskName, 200, now.Add(time.Second))
+	if gen2 != 2 {
+		t.Fatalf("second MarkSpawned returned generation %d, want 2", gen2)
+	}
+
+	// A late exit for the SUPERSEDED gen1 child must be a no-op returning false.
+	if tracker.MarkExitedIfCurrent(taskName, gen1) {
+		t.Fatalf("MarkExitedIfCurrent(gen1=1) returned true; a stale exit must be dropped")
+	}
+	entry, ok := tracker.Get(taskName)
+	if !ok {
+		t.Fatal("entry missing after stale-exit drop")
+	}
+	if entry.State != daemonRuntimeStateRunning || entry.CurrentPID != 200 || entry.PIDGeneration != 2 {
+		t.Fatalf("stale exit mutated current tracking: %+v, want running pid=200 generation=2", entry)
+	}
+
+	// The CURRENT gen2 child's exit clears normally and returns true.
+	if !tracker.MarkExitedIfCurrent(taskName, gen2) {
+		t.Fatalf("MarkExitedIfCurrent(gen2=2) returned false; the current generation must clear")
+	}
+	entry, _ = tracker.Get(taskName)
+	if entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 {
+		t.Fatalf("current exit did not clear: %+v, want idle pid=0", entry)
+	}
+}
+
+// TestMarkExitedIfCurrent_IdempotentForCurrentGeneration verifies the
+// current-generation clear is idempotent: clearing twice at the same generation
+// both return true (an already-cleared current-gen entry is still "current").
+func TestMarkExitedIfCurrent_IdempotentForCurrentGeneration(t *testing.T) {
+	tracker := NewDaemonRuntimeTracker()
+	taskName := `\mcp-local-hub-memory-default`
+	gen := tracker.MarkSpawned(taskName, 4321, time.Now().UTC())
+
+	if !tracker.MarkExitedIfCurrent(taskName, gen) {
+		t.Fatalf("first MarkExitedIfCurrent(gen=%d) returned false", gen)
+	}
+	// The generation is preserved across MarkExited-style clears, so a second
+	// clear at the same generation is still current → true.
+	if !tracker.MarkExitedIfCurrent(taskName, gen) {
+		t.Fatalf("second MarkExitedIfCurrent(gen=%d) returned false; current-gen clear must be idempotent", gen)
+	}
+	entry, ok := tracker.Get(taskName)
+	if !ok {
+		t.Fatal("entry missing after idempotent clears")
+	}
+	if entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 || entry.PIDGeneration != gen {
+		t.Fatalf("entry after idempotent clears = %+v, want idle pid=0 generation=%d preserved", entry, gen)
+	}
+}

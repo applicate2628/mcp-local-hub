@@ -178,12 +178,19 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 		}
 		stalePID := 0
 		if ok && runtimeState.State == daemonRuntimeStateRunning {
-			live, reason := supervisorDaemonEntryLiveWithProbe(api.SupervisorDaemon{
-				TaskName: d.TaskName,
-				Server:   server,
-				Daemon:   daemon,
-				Port:     port,
-			}, runtimeState, time.Now().UTC(), livenessProbe)
+			// Status has no bind latch (it is a stateless per-refresh view), so
+			// pass the descriptor's P1b startup deadline as grace and discard the
+			// portBoundByCurrentPID return. Tradeoff: a bound-then-lost port shows
+			// Stale in status only after the deadline instead of 5s — display-only;
+			// restart decisions run exclusively through the latch-owning sweep.
+			live, reason, _ := supervisorDaemonEntryLiveWithProbe(api.SupervisorDaemon{
+				TaskName:                   d.TaskName,
+				Server:                     server,
+				Daemon:                     daemon,
+				Port:                       port,
+				Args:                       d.Args,
+				StartupBindDeadlineSeconds: d.StartupBindDeadlineSeconds,
+			}, runtimeState, time.Now().UTC(), livenessProbe, supervisorStartupBindDeadline(d))
 			// port_owner_unverified is a probe ERROR (e.g. netstat blocked),
 			// not a restart: the liveness sweep deliberately only observes it
 			// (no EvManualRestart), so the status must not report "Restarting"

@@ -2450,6 +2450,9 @@ func supervisorDaemonsFromPlan(m *config.ServerManifest, daemonFilter string) []
 			Args:     []string{"daemon", "--server", m.Name, "--daemon", d.Name},
 			Env:      cloneStringMap(m.Env),
 			Port:     d.Port,
+			// P1b: carry the manifest-declared first-bind deadline into the
+			// descriptor the liveness sweep reads (0 = default resolution).
+			StartupBindDeadlineSeconds: d.StartupBindDeadlineSeconds,
 		})
 	}
 	return out

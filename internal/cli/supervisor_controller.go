@@ -2384,6 +2384,49 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// descriptor), so the canonical TaskName on the in-memory copy changes no spawn arg.
 	routeKey := canonicalSupervisorTaskName(ev.TaskName)
 	ev.TaskName = routeKey
+	// P1a generation-stamped exit attribution — authoritative processing-time
+	// stale guard. An EvChildExit carrying a pid_generation OLDER than the
+	// tracker's current generation for the task is a late cmd.Wait exit of a
+	// SUPERSEDED child. Drop it BEFORE any bookkeeping:
+	//   - before reaperOutstanding.Delete (below): the CURRENT child's reaper
+	//     is still live; clearing its marker on a stale exit would re-open the
+	//     Conc-F3 synthesize race;
+	//   - before the clean-exit-at-StRunning drop (:~2519): a stale CLEAN exit
+	//     would otherwise store smStates=StIdle while the current child is alive
+	//     (a second latent instance of this bug class).
+	// Judge staleness by GENERATION, not PID equality: terminate clears
+	// CurrentPID to 0 (via MarkTerminated→MarkExited) BEFORE the deliberately-
+	// killed child's real exit arrives, and StExiting's queued respawn NEEDS
+	// that exit — a PID guard would deadlock it. The just-terminated current
+	// child's exit carries gen == current (passes). Exits WITHOUT a
+	// pid_generation (the pre-child synthetic self-post, synthesizeForeignChildExit,
+	// and the liveness sweep's missing_pid/pid_dead/pid_identity_* EvChildExit)
+	// carry gen <= 0 and pass through unchanged — they are "about the tracked
+	// child now" by construction.
+	if ev.Kind == api.EvChildExit && c.tracker != nil && ev.Body != nil {
+		if gen, ok := ev.Body["pid_generation"].(int); ok && gen > 0 {
+			if entry, ok2 := c.tracker.Get(ev.TaskName); ok2 && gen < entry.PIDGeneration {
+				if c.events != nil {
+					smState, _ := c.GetSMState(ev.TaskName)
+					stalePID, _ := ev.Body["pid"].(int)
+					_ = c.events.Emit(api.SupervisorEvent{
+						Severity: "info",
+						Source:   "lifecycle",
+						Event:    "daemon-stale-exit-ignored",
+						TaskName: ev.TaskName,
+						Body: map[string]any{
+							"pid":                stalePID,
+							"pid_generation":     gen,
+							"current_generation": entry.PIDGeneration,
+							"sm_state":           string(smState),
+							"note":               "late child exit of a superseded generation; no SM transition, reaperOutstanding left intact for the current child",
+						},
+					})
+				}
+				return
+			}
+		}
+	}
 	// Any EvChildExit reaching the controller is an observation that the
 	// task's real own reaper (if it had one) has fired its exit — clear
 	// the reaperOutstanding marker so a subsequent terminate is free to
@@ -3358,6 +3401,16 @@ func runCrashEventBridge(
 			if ev.WaitErr != nil {
 				body["wait_err"] = ev.WaitErr.Error()
 			}
+			// P1a: carry the child's PID + tracker generation so the
+			// controller's processing-time stale guard (handleLoopEvent) can
+			// drop a late exit of a superseded child. These are in-process
+			// ints (the loop is not JSON) so handleLoopEvent's int assertion
+			// matches — same as the existing exit_code int assertion in
+			// handleBackoffWaiting. pid_generation > 0 for every real spawned
+			// child (MarkSpawned bumps from 0); the guard treats <= 0 (absent
+			// / synthetic) as current, so gen-less exits pass through.
+			body["pid"] = ev.PID
+			body["pid_generation"] = ev.PIDGeneration
 			// clean_exit lets handleLoopEvent distinguish a deliberate
 			// clean shutdown (exit 0, no wait error) from a crash. The
 			// controller honors a clean exit ONLY when a controller-driven

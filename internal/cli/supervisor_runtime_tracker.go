@@ -204,9 +204,17 @@ func (t *DaemonRuntimeTracker) MarkJobProtection(taskName string, protected *boo
 	t.entries[taskName] = entry
 }
 
-func (t *DaemonRuntimeTracker) MarkSpawned(taskName string, pid int, startedAt time.Time) {
+// MarkSpawned records a fresh child PID for the task and bumps the tracker's
+// monotonic PIDGeneration. It RETURNS the new generation so the production
+// spawn closure can stamp the exit channel + wait goroutine with the exact
+// generation this child belongs to (P1a generation-stamped exit attribution).
+// A late cmd.Wait exit of a superseded (older-generation) child can then be
+// dropped by MarkExitedIfCurrent / the controller stale guard instead of
+// clearing the CURRENT child's tracking. Non-production callers ignore the
+// return value, so the signature change is compile-compatible.
+func (t *DaemonRuntimeTracker) MarkSpawned(taskName string, pid int, startedAt time.Time) int {
 	if t == nil {
-		return
+		return 0
 	}
 	taskName = canonicalSupervisorTaskName(taskName)
 	t.mu.Lock()
@@ -222,6 +230,7 @@ func (t *DaemonRuntimeTracker) MarkSpawned(taskName string, pid int, startedAt t
 	entry.LastError = ""
 	clearOrphanPIDLocked(&entry)
 	t.entries[taskName] = entry
+	return entry.PIDGeneration
 }
 
 func (t *DaemonRuntimeTracker) MarkSpawnFailed(taskName string, err error) {
@@ -302,6 +311,40 @@ func (t *DaemonRuntimeTracker) MarkExited(taskName string) {
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
 	t.entries[taskName] = entry
+}
+
+// MarkExitedIfCurrent clears the runtime entry (identical clears to MarkExited)
+// ONLY when pidGeneration is the tracker's current generation for the task —
+// i.e. pidGeneration >= entry.PIDGeneration. Returns false, entry UNTOUCHED,
+// when the exit is STALE (pidGeneration < entry.PIDGeneration: an older
+// generation's late cmd.Wait exit arriving after a MarkSpawned superseded it).
+//
+// This is the source-side half of P1a generation-stamped exit attribution: the
+// per-child wait goroutine calls it with the generation MarkSpawned returned for
+// THIS child, so a late exit of a superseded child never clears the CURRENT
+// child's CurrentPID (the lost-child factory). The > case is impossible by
+// monotonicity (only MarkSpawned bumps the generation, always by +1) and is
+// treated as current defensively. Idempotent for the current generation: an
+// already-cleared current-gen entry (CurrentPID already 0) still returns true.
+func (t *DaemonRuntimeTracker) MarkExitedIfCurrent(taskName string, pidGeneration int) bool {
+	if t == nil {
+		return false
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry := t.entries[taskName]
+	if pidGeneration < entry.PIDGeneration {
+		return false
+	}
+	entry.State = daemonRuntimeStateIdle
+	entry.CurrentPID = 0
+	entry.StartedAt = time.Time{}
+	entry.LastError = ""
+	clearOrphanPIDLocked(&entry)
+	clearJobProtectionLocked(&entry)
+	t.entries[taskName] = entry
+	return true
 }
 
 func (t *DaemonRuntimeTracker) MarkTerminated(taskName string) {

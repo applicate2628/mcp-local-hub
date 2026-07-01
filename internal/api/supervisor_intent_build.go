@@ -280,7 +280,14 @@ func BuildSupervisorDaemonsForSerena(
 			Workspace:    ws.WorkspacePath,
 			Port:         ws.Port,
 			ManifestHash: manifestHash,
-			RuntimeSpec:  materializeSerenaRuntimeSpec(m, ws),
+			// P1b: serena-proxy children bind their port only after the
+			// language-server subprocess is up (tens of seconds; measured go
+			// LSP cold = 46s), so stamp the longer 120s first-bind deadline
+			// explicitly on the descriptor. (supervisorStartupBindDeadline also
+			// defends pre-field serena rows via isSerenaProxyDescriptor, but the
+			// explicit field makes the on-disk descriptor self-describing.)
+			StartupBindDeadlineSeconds: 120,
+			RuntimeSpec:                materializeSerenaRuntimeSpec(m, ws),
 		})
 	}
 	return out
