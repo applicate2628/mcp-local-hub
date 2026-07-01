@@ -36,15 +36,27 @@ func (a *API) CountProcesses(patterns []string) (int, error) {
 // snapshotting the process table across all entries. Empty string is
 // the zero value — CountProcessesFromSnapshot treats it as "no
 // processes match" (same behavior as CountProcesses on non-Windows).
+//
+// lines is the raw CSV tokenized into one entry per line, populated
+// ONCE by takeProcessSnapshot (deep-review r2 P4-5). CountProcessesFromSnapshot
+// used to re-run a bufio.Scanner over the full `raw` string from byte
+// zero for every scan entry (O(entries x processes) — a multi-hundred-
+// line re-tokenization per entry); it now matches patterns directly
+// against this pre-split slice (O(entries x patterns), zero
+// re-tokenization of raw text after the snapshot is taken). Counting
+// semantics are unchanged: a line matching any of an entry's patterns
+// counts once for that entry.
 type processSnapshot struct {
-	raw string
+	raw   string
+	lines []string
 }
 
 // takeProcessSnapshot captures the current process list ONCE so
 // multiple entries can be scored against it without re-invoking wmic
 // per call. Returns an empty snapshot on non-Windows or on snapshot
 // failure — callers then see zero counts instead of an error, matching
-// the contract of CountProcesses.
+// the contract of CountProcesses. Also splits the CSV into lines once
+// here so CountProcessesFromSnapshot never re-tokenizes the raw text.
 func takeProcessSnapshot() processSnapshot {
 	if runtime.GOOS != "windows" {
 		return processSnapshot{}
@@ -53,19 +65,55 @@ func takeProcessSnapshot() processSnapshot {
 	if err != nil {
 		return processSnapshot{}
 	}
-	return processSnapshot{raw: out}
+	return processSnapshot{raw: out, lines: splitSnapshotLines(out)}
+}
+
+// splitSnapshotLines tokenizes a wmic/PowerShell CSV snapshot into one
+// string per line using the same bufio.Scanner + buffer sizing as
+// parseWmicCount (a snapshot line — a full CommandLine plus surrounding
+// CSV fields — can exceed the default 64 KiB scanner token limit for a
+// process with a very long command line). Scan errors are treated the
+// same way parseWmicCount's caller does: whatever was tokenized before
+// the error is still used, since CountProcessesFromSnapshot has no error
+// return to propagate a mid-scan failure through.
+func splitSnapshotLines(raw string) []string {
+	var lines []string
+	s := bufio.NewScanner(strings.NewReader(raw))
+	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for s.Scan() {
+		lines = append(lines, s.Text())
+	}
+	return lines
 }
 
 // CountProcessesFromSnapshot is the batch variant of CountProcesses —
 // reuses a single process-snapshot across many pattern sets. Intended
 // for scan --processes which probes 20+ entries; doing one wmic per
-// entry was measured at ~13 s vs ~1 s with this variant.
+// entry was measured at ~13 s vs ~1 s with this variant. Matches each
+// entry's patterns against the snapshot's pre-split lines (deep-review
+// r2 P4-5) instead of re-scanning the raw CSV text per entry.
 func (a *API) CountProcessesFromSnapshot(snap processSnapshot, patterns []string) int {
 	if snap.raw == "" {
 		return 0
 	}
-	n, _ := parseWmicCount(strings.NewReader(snap.raw), patterns)
-	return n
+	return countMatchingLines(snap.lines, patterns)
+}
+
+// countMatchingLines returns how many of the given lines contain at
+// least one of the patterns as a substring, deduplicating so a line
+// matching multiple patterns still counts once — the same semantics
+// parseWmicCount applies over an io.Reader.
+func countMatchingLines(lines []string, patterns []string) int {
+	count := 0
+	for _, line := range lines {
+		for _, p := range patterns {
+			if strings.Contains(line, p) {
+				count++
+				break
+			}
+		}
+	}
+	return count
 }
 
 // runProcessSnapshot returns a CSV-formatted process list compatible with
@@ -115,20 +163,19 @@ func runProcessSnapshot() (string, error) {
 // parseWmicCount scans the CSV `wmic process get` output and returns the
 // number of lines whose CommandLine field contains at least one of the given
 // substring patterns. Deduplicates: a line matching multiple patterns counts once.
+//
+// Single-shot callers only (CountProcesses, direct unit tests). The batch
+// path (CountProcessesFromSnapshot, deep-review r2 P4-5) tokenizes once via
+// splitSnapshotLines and reuses countMatchingLines directly instead of
+// going through this io.Reader-based entry point per call.
 func parseWmicCount(r io.Reader, patterns []string) (int, error) {
-	count := 0
 	s := bufio.NewScanner(r)
 	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var lines []string
 	for s.Scan() {
-		line := s.Text()
-		for _, p := range patterns {
-			if strings.Contains(line, p) {
-				count++
-				break
-			}
-		}
+		lines = append(lines, s.Text())
 	}
-	return count, s.Err()
+	return countMatchingLines(lines, patterns), s.Err()
 }
 
 // ProcessInfo describes one live process match.
