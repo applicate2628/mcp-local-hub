@@ -88,7 +88,15 @@ var supervisorMonitorStderr io.Writer = os.Stderr
 func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode bool, waitFor time.Duration) (*supervisorOwner, error) {
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
-		return nil, fmt.Errorf("supervisor owner: resolve state dir: %w", err)
+		// A state-dir resolution failure is a LOCAL setup fault (unresolvable
+		// root, or the parent-dir gate rejected it) — the same class the
+		// probe's own ErrStatusSetupFailure covers. Classify it identically:
+		// probeSupervisor -> dialSupervisorIPCStatusFromStateDir also resolves
+		// the state dir and wraps that failure with ErrStatusSetupFailure, but
+		// this top-of-function resolve returns BEFORE the probe runs, so
+		// without this the setup-fault remediation would never be surfaced for
+		// a rejected state root (bot r2 P2).
+		return nil, supervisorSetupFaultError(fmt.Errorf("resolve state dir: %w", err))
 	}
 	if ok, probeErr := probeSupervisor(ctx, 2*time.Second); ok {
 		return &supervisorOwner{spawned: false, stateDir: stateDir}, nil
@@ -704,22 +712,34 @@ func (s *supervisorOwner) Pid() int {
 	return s.proc.Pid
 }
 
-// supervisorSetupFaultError wraps a status-dial LOCAL setup fault
-// (api.ErrStatusSetupFailure — a present-but-unreadable/DACL-refused supervisor
-// owner sidecar, or an unresolvable state dir) into an operator-actionable
-// startup error that names the remediation. The status dial returns this only
-// when the sidecar is present but unreadable (an ABSENT sidecar classifies as
-// api.ErrSupervisorIPCUnavailable → the normal spawn path), so reaching here
-// means NO supervisor is proven and spawning a duplicate would only re-hit the
-// same DACL refusal. The message points at `mcphub repair-state-dacl` + the
-// "secret daemons exit 1 on a sandbox-broadened %LOCALAPPDATA%" runbook (see
-// CLAUDE.md) rather than the misleading "existing supervisor IPC broken" /
-// "IPC handshake broken" wording. The underlying cause stays wrapped for
-// diagnosis.
+// supervisorSetupFaultError wraps a LOCAL setup fault into an
+// operator-actionable startup error that names remediation for EACH of the
+// distinct causes this path covers, not just a DACL refusal. It is reached
+// from two places: (1) the top-of-function api.DaemonStateDir() resolve
+// failure (the state root itself is unresolvable or rejected by the
+// parent-dir gate), and (2) probeSupervisor returning api.ErrStatusSetupFailure
+// — which dialSupervisorIPCStatusFromStateDir attaches to ALL non-IsNotExist
+// owner-read failures: a DACL/mode refusal, corrupt/malformed sidecar JSON, a
+// wrong-owner/irregular file, or a parent-dir gate rejection. (An ABSENT
+// sidecar classifies as api.ErrSupervisorIPCUnavailable → the normal spawn
+// path, so reaching here means NO supervisor is proven and spawning a
+// duplicate would only re-hit the same local fault.)
+//
+// Because the cause varies, a single "run repair-state-dacl" instruction
+// would be a dead end for the corrupt-JSON and rejected-parent cases (that
+// command only fixes a file's DACL/mode — it does not rewrite invalid JSON or
+// widen/tighten a parent directory). So the message enumerates the
+// cause-appropriate remediation and keeps the underlying cause wrapped (%w)
+// so the operator can see which one applies.
 func supervisorSetupFaultError(cause error) error {
-	return fmt.Errorf("supervisor owner: supervisor.lock.owner.json is present but unreadable (local state-file DACL/mode fault, not a running supervisor); "+
-		"repair the refused file's permissions to owner-only (run `mcphub repair-state-dacl --path <supervisor.lock.owner.json>`; "+
-		"see the \"secret daemons exit 1 on a sandbox-broadened %%LOCALAPPDATA%%\" runbook in CLAUDE.md), then restart: %w", cause)
+	return fmt.Errorf("supervisor owner: local supervisor state is unreadable (NOT a running supervisor); "+
+		"remediation depends on the wrapped cause below: "+
+		"(a) DACL/mode refusal on supervisor.lock.owner.json or the state dir → repair to owner-only "+
+		"(`mcphub repair-state-dacl --path <refused-file>`, or tighten the parent DACL; see the "+
+		"\"secret daemons exit 1 on a sandbox-broadened %%LOCALAPPDATA%%\" runbook in CLAUDE.md); "+
+		"(b) corrupt/malformed supervisor.lock.owner.json → delete the sidecar so it regenerates on next start; "+
+		"(c) rejected state dir under MCPHUB_REQUIRE_SINGLE_USER_HOME=1 → tighten the parent directory's DACL or unset that env var. "+
+		"Then restart: %w", cause)
 }
 
 // probeSupervisor performs a single IPC handshake + status query

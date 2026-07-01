@@ -870,3 +870,34 @@ func TestArmSupervisorManager_NilOwnerReturnsNil(t *testing.T) {
 		t.Fatalf("armSupervisorManager(nil owner) = %p; want nil", manager)
 	}
 }
+
+// TestSupervisorSetupFaultError_BroadRemediationAndCause pins the bot r2
+// findings on this helper: because it now covers multiple causes (DACL/mode
+// refusal, corrupt sidecar JSON, and a rejected state dir — plus the
+// top-of-function DaemonStateDir resolve failure routed through it), the
+// message must NOT prescribe `repair-state-dacl` as the only fix (a dead end
+// for the corrupt-JSON and rejected-parent cases) and must keep the underlying
+// cause wrapped so the operator can tell which remediation applies.
+func TestSupervisorSetupFaultError_BroadRemediationAndCause(t *testing.T) {
+	cause := errors.New("resolve state dir: parent directory not single-user safe")
+	err := supervisorSetupFaultError(cause)
+	if err == nil {
+		t.Fatal("supervisorSetupFaultError returned nil")
+	}
+	msg := err.Error()
+	// Each of the three distinct remediations must be named — a single
+	// repair-state-dacl instruction would strand two of the three causes.
+	for _, want := range []string{
+		"repair-state-dacl",               // (a) DACL/mode refusal
+		"delete the sidecar",              // (b) corrupt/malformed JSON
+		"MCPHUB_REQUIRE_SINGLE_USER_HOME", // (c) rejected state dir
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message missing remediation hint %q; got: %s", want, msg)
+		}
+	}
+	// Cause stays wrapped for diagnosis (errors.Is reaches it).
+	if !errors.Is(err, cause) {
+		t.Errorf("cause not preserved through wrap; got: %s", msg)
+	}
+}
