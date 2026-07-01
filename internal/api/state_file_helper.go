@@ -115,67 +115,74 @@ func WriteStateFileBytesLockHeld(path string, raw []byte) error {
 	return secureWriteStateFileWithOperatorOpt(path, raw)
 }
 
-// secureWriteStateFileWithOperatorOpt is the state-file analogue of
-// secureWriteWithOperatorOpt (internal/api/client_write_init.go).
-// Same hardened-pipeline + operator-opt-in policy, with a DISTINCT
-// audit event name so the two policy domains stay separable in the
-// audit log.
+// secureWriteStateFileWithParentRelax is the SINGLE OWNER of the strict-vs-relax
+// parent-directory-DACL-gate decision shared by every state-file write path
+// (deep-review P3 arch-abstraction): writeHubMcpStateFile and
+// secureWriteStateFileWithOperatorOpt previously open-coded the SAME four-step
+// gate, so a future security change to the gate risked touching only one path.
+// The security-critical decision now lives here once:
 //
-// Pipeline:
+//  1. SecureWriteClientConfig(path, payload) succeeds → done.
+//  2. A non-parent-gate failure (open temp, write, rename, post-rename DACL
+//     re-verify, pre-existing symlink/reparse-point at destination) →
+//     propagate, wrapped with `label`.
+//  3. Strict mode (operatorRequiresSingleUserHome — MCPHUB_REQUIRE_SINGLE_USER_HOME=1
+//     or a persisted strict_mode) → hard-fail with the strict-mode remediation
+//     hint appended.
+//  4. A wrong-owner parent (stateFileParentGateAllowsDefaultRelax == false) →
+//     propagate, wrapped — only an OWNER-CORRECT broadened parent may relax.
+//  5. Default solo-host relax → emit the caller's domain audit event, then
+//     re-run via secureWriteClientConfigSkipParentGate. The per-file owner-only
+//     DACL/mode is installed handle-bound at temp-create and the publish is
+//     dir-handle-relative, so the destination file is owner-only regardless of
+//     the parent DACL/mode.
 //
-//  1. SecureWriteClientConfig(path, payload) — full hardened path
-//     with parent-dir DACL/mode gate.
-//  2. On ErrSecureWriteParentInsecure:
-//     a. If operatorRequiresSingleUserHome() returns true, return
-//     the strict error verbatim (with an env-var hint appended
-//     so the operator knows which knob to flip).
-//     b. Else, log the warn event
-//     "state-file-write-unhardened-fallback" and re-run the
-//     pipeline via secureWriteClientConfigSkipParentGate(path,
-//     payload). The per-file DACL/mode hardening still applies
-//     at temp-create time (handle-bound), and the publish path is
-//     dir-handle-relative, so the published file is owner-only
-//     regardless of parent DACL/mode.
-//
-// All other secure-write failures (open temp, write, rename, post-
-// rename DACL re-verify, pre-existing symlink/reparse-point at
-// destination) propagate unchanged.
-func secureWriteStateFileWithOperatorOpt(path string, payload []byte) error {
+// The caller supplies only the domain-specific bits: `label` identifies the
+// write in the operator error message, and `emitRelaxAudit(path, parentDir,
+// gateErr)` records the relax-lane fallback to the caller's policy-domain audit
+// channel (hub-mcp.log for hub-mcp state, supervisor-events.log for supervisor
+// state) — the two audit domains stay separable while the GATE decision is one.
+func secureWriteStateFileWithParentRelax(path string, payload []byte, label string, emitRelaxAudit func(path, parentDir string, gateErr error)) error {
 	err := SecureWriteClientConfig(path, payload)
 	if err == nil {
 		return nil
 	}
 	if !errors.Is(err, ErrSecureWriteParentInsecure) {
-		return err
+		return fmt.Errorf("%s: %w", label, err)
 	}
 	if operatorRequiresSingleUserHome() {
-		return fmt.Errorf("state-file secure write %s: %w; strict mode is active (via %s=1, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
-			path, err, RequireSingleUserHomeEnv)
+		return fmt.Errorf("%s: %w; strict mode is active (via %s=1, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
+			label, err, RequireSingleUserHomeEnv)
 	}
 	if !stateFileParentGateAllowsDefaultRelax(err) {
-		return err
+		return fmt.Errorf("%s: %w", label, err)
 	}
+	emitRelaxAudit(path, filepath.Dir(path), err)
+	if err := secureWriteClientConfigSkipParentGate(path, payload); err != nil {
+		return fmt.Errorf("%s (relax lane): %w", label, err)
+	}
+	return nil
+}
 
-	parentDir := filepath.Dir(path)
-
-	// Default-relax lane: emit the distinct state-file audit event and proceed
-	// via the skip-parent-gate hardened writer. The per-file DACL/mode applies
-	// at temp-create time, and the publish path is dir-handle-relative, so the
-	// destination file remains owner-only even when the parent gate rejected.
-	//
-	// Audit channel: supervisor-events.log (NOT hub-mcp.log). State-
-	// file fallbacks are supervisor-domain events — operators
-	// monitoring supervisor-events.log for audit-posture downgrades
-	// must see the relax-lane fire there, alongside the lifecycle /
-	// IPC / restart-policy events that share the same envelope.
-	// hub-mcp.log remains the audit channel for client-config
-	// fallbacks ("client-write-unhardened-fallback") so the two
-	// policy domains stay separable. Spec §Q13: supervisor-events.log
-	// is the canonical audit log for supervisor-domain events with
-	// the {schema_version, ts, severity, source, event, task_name,
-	// body, _truncated} envelope.
-	emitStateFileFallbackEvent(path, parentDir, err)
-	return secureWriteClientConfigSkipParentGate(path, payload)
+// secureWriteStateFileWithOperatorOpt is the state-file analogue of
+// secureWriteWithOperatorOpt (internal/api/client_write_init.go). It delegates
+// the strict-vs-relax parent-gate decision to the shared single owner
+// secureWriteStateFileWithParentRelax and supplies the state-file domain's audit
+// event via emitStateFileFallbackEvent.
+//
+// Audit channel: supervisor-events.log (NOT hub-mcp.log). State-file fallbacks
+// are supervisor-domain events — operators monitoring supervisor-events.log for
+// audit-posture downgrades must see the relax-lane fire there, alongside the
+// lifecycle / IPC / restart-policy events that share the same envelope.
+// hub-mcp.log remains the audit channel for client-config fallbacks
+// ("client-write-unhardened-fallback") so the two policy domains stay separable.
+// Spec §Q13: supervisor-events.log is the canonical audit log for
+// supervisor-domain events with the {schema_version, ts, severity, source,
+// event, task_name, body, _truncated} envelope.
+func secureWriteStateFileWithOperatorOpt(path string, payload []byte) error {
+	return secureWriteStateFileWithParentRelax(path, payload,
+		fmt.Sprintf("state-file secure write %s", path),
+		emitStateFileFallbackEvent)
 }
 
 // stateFileParentGateAllowsDefaultRelax is the single parent-relax decision for
