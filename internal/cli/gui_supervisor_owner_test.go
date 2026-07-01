@@ -893,12 +893,19 @@ func TestSupervisorSetupFaultError_BroadRemediationAndCause(t *testing.T) {
 	// repair-state-dacl instruction would strand the corrupt-JSON case.
 	for _, want := range []string{
 		"repair-state-dacl",               // (a) DACL/mode refusal
-		"delete the sidecar",              // (b) corrupt/malformed JSON
+		"delete the corrupt sidecar",      // (b) corrupt/malformed JSON
 		"MCPHUB_REQUIRE_SINGLE_USER_HOME", // (c) sidecar refused under strict mode
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message missing remediation hint %q; got: %s", want, msg)
 		}
+	}
+	// Round-2 correction: the (b) corrupt-sidecar remediation is ORDER-SENSITIVE
+	// — deleting the sidecar while a supervisor still holds supervisor.lock.lock
+	// makes the next AcquireSupervisorLock fail closed (supervisor_lock.go:76-83).
+	// The message must tell the operator to stop the running supervisor FIRST.
+	if !strings.Contains(msg, "stop any running supervisor") {
+		t.Errorf("message missing the order-sensitive 'stop the supervisor first' guard for the corrupt-sidecar case; got: %s", msg)
 	}
 	// Cause stays wrapped for diagnosis (errors.Is reaches it).
 	if !errors.Is(err, cause) {
@@ -907,11 +914,18 @@ func TestSupervisorSetupFaultError_BroadRemediationAndCause(t *testing.T) {
 }
 
 // TestSupervisorStateDirResolveError_PlatformRemediationAndCause pins the
-// Fable-5 P3 fix: the top-of-function api.DaemonStateDir() RESOLVE failure has
-// a DEDICATED error (not routed through supervisorSetupFaultError), because its
-// causes and fixes differ from the present-but-unreadable owner-sidecar fault.
-// The remediation line must be platform-correct (runtime.GOOS-selected) and the
-// underlying resolver cause must stay wrapped for diagnosis.
+// Fable-5 P3 fix AND the round-2 correction: the top-of-function
+// api.DaemonStateDir() RESOLVE failure has a DEDICATED error (not routed through
+// supervisorSetupFaultError), and every remediation hint must name ONLY inputs
+// the resolver actually honors (verified against internal/api/state_paths*.go):
+//   - Linux → $XDG_DATA_HOME (fallback ~/.local/share); the resolver does NOT
+//     read $XDG_STATE_HOME.
+//   - macOS → ~/Library/Application Support (no XDG at all).
+//   - Windows → windows.KnownFolderPath(FOLDERID_LocalAppData) DIRECTLY, with NO
+//     %LOCALAPPDATA% env fallback, so the message must NOT tell the user to set
+//     %LOCALAPPDATA%.
+//
+// The underlying resolver cause must stay wrapped for diagnosis.
 func TestSupervisorStateDirResolveError_PlatformRemediationAndCause(t *testing.T) {
 	cause := errors.New("SHGetKnownFolderPath(LocalAppData) unavailable")
 	err := supervisorStateDirResolveError(cause)
@@ -920,22 +934,44 @@ func TestSupervisorStateDirResolveError_PlatformRemediationAndCause(t *testing.T
 	}
 	msg := err.Error()
 
-	// Platform-appropriate remediation hint must be present, and the WRONG
-	// platform's hint must NOT leak in.
-	if runtime.GOOS == "windows" {
-		if !strings.Contains(msg, "%LOCALAPPDATA%") {
-			t.Errorf("Windows message missing the %%LOCALAPPDATA%% remediation hint; got: %s", msg)
+	// Platform-appropriate remediation hint must be present; hints for other
+	// platforms and stale/incorrect env-var guidance must NOT appear.
+	switch runtime.GOOS {
+	case "windows":
+		if !strings.Contains(msg, "Known Folder") {
+			t.Errorf("Windows message missing the Known-Folder remediation hint; got: %s", msg)
 		}
-		if strings.Contains(msg, "XDG_STATE_HOME") {
-			t.Errorf("Windows message leaked the POSIX XDG_STATE_HOME hint; got: %s", msg)
+		// The resolver has NO %LOCALAPPDATA% env fallback → the message must not
+		// tell the operator to set that env var (round-2 correction).
+		if strings.Contains(msg, "set %LOCALAPPDATA%") {
+			t.Errorf("Windows message wrongly prescribes setting %%LOCALAPPDATA%% (no env fallback in the resolver); got: %s", msg)
 		}
-	} else {
-		if !strings.Contains(msg, "XDG_STATE_HOME") {
-			t.Errorf("POSIX message missing the $XDG_STATE_HOME remediation hint; got: %s", msg)
+		if strings.Contains(msg, "Library/Application Support") || strings.Contains(msg, "XDG_DATA_HOME") {
+			t.Errorf("Windows message leaked a POSIX remediation hint; got: %s", msg)
 		}
-		if strings.Contains(msg, "%LOCALAPPDATA%") {
-			t.Errorf("POSIX message leaked the Windows %%LOCALAPPDATA%% hint; got: %s", msg)
+	case "darwin":
+		if !strings.Contains(msg, "Library/Application Support") {
+			t.Errorf("macOS message missing the ~/Library/Application Support hint; got: %s", msg)
 		}
+		if strings.Contains(msg, "XDG_DATA_HOME") || strings.Contains(msg, "Known Folder") {
+			t.Errorf("macOS message leaked a wrong-platform hint; got: %s", msg)
+		}
+	default: // linux
+		if !strings.Contains(msg, "XDG_DATA_HOME") {
+			t.Errorf("Linux message missing the $XDG_DATA_HOME hint; got: %s", msg)
+		}
+		if strings.Contains(msg, "Library/Application Support") || strings.Contains(msg, "Known Folder") {
+			t.Errorf("Linux message leaked a wrong-platform hint; got: %s", msg)
+		}
+	}
+
+	// The stale $XDG_STATE_HOME guidance (resolver never reads it) must NEVER
+	// appear on ANY platform, and neither must the %LOCALAPPDATA%-set guidance.
+	if strings.Contains(msg, "XDG_STATE_HOME") {
+		t.Errorf("message references $XDG_STATE_HOME, which the state-dir resolver never reads; got: %s", msg)
+	}
+	if strings.Contains(msg, "set %LOCALAPPDATA%") {
+		t.Errorf("message prescribes setting %%LOCALAPPDATA%%, which the resolver ignores; got: %s", msg)
 	}
 
 	// This dedicated error must NOT prescribe the sidecar remediations —

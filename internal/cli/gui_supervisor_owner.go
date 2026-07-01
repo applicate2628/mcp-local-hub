@@ -739,13 +739,24 @@ func (s *supervisorOwner) Pid() int {
 // file's DACL/mode — it does not rewrite invalid JSON). So the message
 // enumerates the cause-appropriate remediation and keeps the underlying cause
 // wrapped (%w) so the operator can see which one applies.
+//
+// The (b) corrupt-sidecar remediation is ORDER-SENSITIVE: deleting
+// supervisor.lock.owner.json while a supervisor still holds supervisor.lock.lock
+// makes the next AcquireSupervisorLock fail closed — with a held flock and no
+// (or corrupt) owner metadata, it returns "supervisor.lock held but owner
+// metadata invalid" (internal/api/supervisor_lock.go:76-83) after only a ~2s
+// retry, so the next GUI/supervisor start refuses. The operator must stop the
+// running supervisor first (or confirm none holds the lock), THEN delete the
+// corrupt sidecar so a fresh start regenerates it.
 func supervisorSetupFaultError(cause error) error {
 	return fmt.Errorf("supervisor owner: local supervisor state is unreadable (NOT a running supervisor); "+
 		"remediation depends on the wrapped cause below: "+
 		"(a) DACL/mode refusal on supervisor.lock.owner.json → repair to owner-only "+
 		"(`mcphub repair-state-dacl --path <refused-file>`, or tighten the parent DACL; see the "+
 		"\"secret daemons exit 1 on a sandbox-broadened %%LOCALAPPDATA%%\" runbook in CLAUDE.md); "+
-		"(b) corrupt/malformed supervisor.lock.owner.json → delete the sidecar so it regenerates on next start; "+
+		"(b) corrupt/malformed supervisor.lock.owner.json → FIRST stop any running supervisor (or confirm "+
+		"none holds supervisor.lock.lock), THEN delete the corrupt sidecar so it regenerates on next start "+
+		"(deleting it while the lock is still held makes the next start fail closed); "+
 		"(c) sidecar refused under MCPHUB_REQUIRE_SINGLE_USER_HOME=1 → tighten the parent directory's DACL or unset that env var. "+
 		"Then restart: %w", cause)
 }
@@ -756,30 +767,46 @@ func supervisorSetupFaultError(cause error) error {
 // file is even read here — the per-user state ROOT itself could not be
 // resolved/created — so the three sidecar remediations do not apply. The
 // causes (and fixes) are platform-specific, so the guidance line is selected
-// by runtime.GOOS:
+// by runtime.GOOS. Every hint below names ONLY inputs the resolver actually
+// honors (verified against internal/api/state_paths*.go):
 //
-//   - Windows (GA): api.DaemonStateDir fails only when
-//     SHGetKnownFolderPath(FOLDERID_LocalAppData) fails or returns empty
-//     (errKnownFolderUnavailable), or when the state dir cannot be created
-//     (mkdir failure). MCPHUB_REQUIRE_SINGLE_USER_HOME is never consulted in
-//     the resolve path, and no DACL is evaluated. Fix: ensure %LOCALAPPDATA%
-//     is set and its tree is writable.
-//   - POSIX: the state-root parent is group/world-writable or not owned by the
-//     caller (errStateParentInsecure), which fires UNCONDITIONALLY — the env
-//     var is irrelevant here too. Fix: chmod go-w / chown the state-root
-//     parent, or point $XDG_STATE_HOME at a private directory.
+//   - Windows (GA): api.DaemonStateDir resolves LocalAppData by calling
+//     windows.KnownFolderPath(FOLDERID_LocalAppData) DIRECTLY — there is NO
+//     %LOCALAPPDATA% env fallback in production (state_paths_prod.go /
+//     state_paths_windows.go), and MCPHUB_REQUIRE_SINGLE_USER_HOME is never
+//     consulted here. Two distinct sub-causes, told apart by the wrapped cause:
+//     (a) the Known-Folder lookup itself failed → repair the Windows
+//     Known-Folder / user-profile registration (this is NOT an env-var
+//     setting); (b) the state directory could not be created under the resolved
+//     path → ensure the resolved LocalAppData path is writable.
+//   - Linux: the state root lives under $XDG_DATA_HOME (fallback
+//     ~/.local/share); state_paths.go:249. It does NOT read $XDG_STATE_HOME.
+//   - macOS: the state root lives under ~/Library/Application Support (no XDG
+//     at all); state_paths.go:262.
+//   - POSIX parent-insecure case (errStateParentInsecure): the state-root
+//     parent is group/world-writable or not owned by you, which fires
+//     UNCONDITIONALLY → `chmod go-w` / `chown` the parent so it is owner-only.
 //
 // The underlying cause stays wrapped (%w) so the operator sees the exact
 // resolver error (e.g. the failing known-folder call or the offending
-// parent-dir mode/owner).
+// parent-dir mode/owner) and can tell the sub-causes apart.
 func supervisorStateDirResolveError(cause error) error {
 	var remediation string
-	if runtime.GOOS == "windows" {
-		remediation = "the %LOCALAPPDATA% known-folder lookup failed or the state dir could not be created " +
-			"→ ensure %LOCALAPPDATA% is set and its directory tree is writable by your account"
-	} else {
-		remediation = "the state-root parent is group/world-writable or not owned by you " +
-			"→ `chmod go-w` / `chown` the state-root parent, or set $XDG_STATE_HOME to a private directory"
+	switch runtime.GOOS {
+	case "windows":
+		remediation = "either the LocalAppData Known Folder could not be resolved " +
+			"(SHGetKnownFolderPath(FOLDERID_LocalAppData) failed — repair the Windows " +
+			"Known-Folder / user-profile registration; this is NOT an env-var setting) " +
+			"OR the state directory could not be created under the resolved path " +
+			"(ensure the resolved LocalAppData path is writable); the wrapped cause below distinguishes them"
+	case "darwin":
+		remediation = "the state root under ~/Library/Application Support could not be resolved or created " +
+			"→ ensure $HOME is set and that ~/Library/Application Support is owner-only " +
+			"(`chmod go-w` / `chown` it if the parent is group/world-writable or not owned by you)"
+	default: // linux and other POSIX
+		remediation = "the state root under $XDG_DATA_HOME (fallback ~/.local/share) could not be resolved or created " +
+			"→ ensure $XDG_DATA_HOME (or ~/.local/share) is owner-only " +
+			"(`chmod go-w` / `chown` the parent if it is group/world-writable or not owned by you)"
 	}
 	return fmt.Errorf("supervisor owner: cannot resolve the per-user state directory (NOT a running supervisor); "+
 		"%s. Then restart: %w", remediation, cause)
