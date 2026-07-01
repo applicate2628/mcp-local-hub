@@ -21,6 +21,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/serena_routing"
+	"mcp-local-hub/internal/clients"
 )
 
 // ErrWorkspaceNotFound re-exports the A1 package sentinel so callers
@@ -2073,12 +2074,12 @@ func (s *Server) forwardSerenaCancelledUpstream(ctx context.Context, httpClient 
 }
 
 // defaultUpstreamURL points at the workspace's serena daemon. Per the
-// plan: http://localhost:<workspace.Port>/mcp.
+// plan: http://127.0.0.1:<workspace.Port>/mcp.
 func defaultUpstreamURL(ws *api.WorkspaceEntry) string {
 	if ws == nil || ws.Port <= 0 {
 		return ""
 	}
-	return fmt.Sprintf("http://127.0.0.1:%d/mcp", ws.Port)
+	return clients.HubLoopbackURL(ws.Port, "/mcp")
 }
 
 // copyHeaders threads upstream -> downstream headers, skipping the

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/buildinfo"
+	"mcp-local-hub/internal/clients"
 )
 
 // SupervisorIPCStatusFn is the v0.5.0 Phase 12 status-seam pivot. When
@@ -798,7 +799,7 @@ func (a *API) realCapabilityRow(d DaemonStatus) (CapabilityRow, error) {
 func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) CapabilitySubSection {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", d.Port)
+	url := clients.HubLoopbackURL(d.Port, "/mcp")
 	client := &http.Client{Timeout: 3 * time.Second}
 
 	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"mcphub-health","version":"1"}}}`

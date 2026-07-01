@@ -38,7 +38,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -792,7 +791,7 @@ func (h *HubMcpHandler) handleDelete(w http.ResponseWriter, r *http.Request, sco
 // but swallowed at the call site (the spec contract is "best-effort
 // fan-out; 204 regardless").
 func bestEffortDeleteDaemonSession(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) error {
-	u := fmt.Sprintf("http://127.0.0.1:%d/mcp", ref.Port)
+	u := clients.HubLoopbackURL(ref.Port, "/mcp")
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
 	if err != nil {
 		return err
@@ -825,14 +824,16 @@ const (
 	kindGroup
 )
 
-// hubClientPrefix / hubGroupPrefix / hubPathSuffix are the URL grammar
+// HubClientPrefix / HubGroupPrefix / HubPathSuffix are the URL grammar
 // the hub mux routes on (mounted in internal/gui/hub_listener.go). Named
 // constants so the parser and the listener mount reference the same
-// literals.
+// literals. Exported so other packages (e.g. internal/gui/groups.go) build
+// hub route URLs from this single owner instead of maintaining a mirrored
+// copy of the same literals.
 const (
-	hubClientPrefix = "/clients/"
-	hubGroupPrefix  = "/g/"
-	hubPathSuffix   = "/mcp"
+	HubClientPrefix = "/clients/"
+	HubGroupPrefix  = "/g/"
+	HubPathSuffix   = "/mcp"
 )
 
 // parseHubPathFromURL extracts (kind, name) from the two hub request
@@ -853,10 +854,10 @@ const (
 // scope key (resolveHubScopeKey) keeps the two keyspaces disjoint so a
 // group and a client of the same name can never collide downstream.
 func parseHubPathFromURL(p string) (hubScopeKind, string, bool) {
-	if name, ok := parseHubSegment(p, hubClientPrefix); ok {
+	if name, ok := parseHubSegment(p, HubClientPrefix); ok {
 		return kindClient, name, true
 	}
-	if name, ok := parseHubSegment(p, hubGroupPrefix); ok {
+	if name, ok := parseHubSegment(p, HubGroupPrefix); ok {
 		return kindGroup, name, true
 	}
 	return kindClient, "", false
@@ -872,10 +873,10 @@ func parseHubSegment(p, prefix string) (string, bool) {
 		return "", false
 	}
 	rest := p[len(prefix):]
-	if !strings.HasSuffix(rest, hubPathSuffix) {
+	if !strings.HasSuffix(rest, HubPathSuffix) {
 		return "", false
 	}
-	name := rest[:len(rest)-len(hubPathSuffix)]
+	name := rest[:len(rest)-len(HubPathSuffix)]
 	// Empty name, embedded slash, or whitespace → reject.
 	if name == "" || strings.ContainsAny(name, "/ \t\r\n") {
 		return "", false
@@ -894,7 +895,7 @@ func parseHubSegment(p, prefix string) (string, bool) {
 // (could collide with a future route) and `/clients/foo/mcp/bar`
 // (drives the gate's lookup against an unrelated client id).
 func parseClientPathFromURL(p string) (string, bool) {
-	return parseHubSegment(p, hubClientPrefix)
+	return parseHubSegment(p, HubClientPrefix)
 }
 
 // resolveHubScopeKey maps a parsed (kind, name) to the kind-namespaced

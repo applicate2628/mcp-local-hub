@@ -188,10 +188,10 @@ func validateGroupName(name string) error {
 		if i >= 0 {
 			bad = string([]rune(name[i:])[0])
 		}
-		return fmt.Errorf("group name %q contains a route-unsafe character %q (a group name may contain only ASCII letters, digits, '.', '_', and '-'; it must be reachable as the %s<name>%s route segment)", name, bad, hubGroupPrefix, hubPathSuffix)
+		return fmt.Errorf("group name %q contains a route-unsafe character %q (a group name may contain only ASCII letters, digits, '.', '_', and '-'; it must be reachable as the %s<name>%s route segment)", name, bad, HubGroupPrefix, HubPathSuffix)
 	}
 	if name == "." || name == ".." {
-		return fmt.Errorf("group name %q is a path-traversal segment (a name of %q or %q is rewritten by the route mux and could never reach the %s<name>%s route)", name, ".", "..", hubGroupPrefix, hubPathSuffix)
+		return fmt.Errorf("group name %q is a path-traversal segment (a name of %q or %q is rewritten by the route mux and could never reach the %s<name>%s route)", name, ".", "..", HubGroupPrefix, HubPathSuffix)
 	}
 	// C5-length (consultant): cap the name length. A group name is a single
 	// URL path segment; 64 chars is a generous sanity bound that keeps the

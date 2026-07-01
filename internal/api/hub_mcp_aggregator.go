@@ -71,6 +71,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/buildinfo"
+	"mcp-local-hub/internal/clients"
 )
 
 // daemonHTTPError is the error doDaemonPost returns when the daemon RECEIVED the
@@ -1431,7 +1432,7 @@ func daemonStillBound(snap *ResolverSnapshot, client string, ref canonicalToolRe
 // itself, callers pass "" — initialize is the negotiation step and
 // the header is not yet known.
 func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVer string, timeout time.Duration, expectResponse bool) ([]byte, http.Header, error) {
-	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
+	url := clients.HubLoopbackURL(port, "/mcp")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err

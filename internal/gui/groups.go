@@ -55,6 +55,7 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 )
 
 // errGroupNotFound is the sentinel a ReadModifyWriteGroups DELETE callback
@@ -62,16 +63,6 @@ import (
 // GROUPS_NOT_FOUND rather than a generic 500. The error never leaves the
 // package (the handler translates it before writing the response).
 var errGroupNotFound = errors.New("group not found")
-
-// hubGroupRoutePrefix / hubMcpRouteSuffix mirror hubGroupPrefix / hubPathSuffix
-// in internal/api/hub_mcp_handler.go (which are unexported). Used to build the
-// /g/<group>/mcp connection URL the Groups GET path surfaces (B4). They are the
-// route grammar the api handler's parseHubPathFromURL recognizes, so the URL
-// the GUI hands the operator is the exact path the hub serves.
-const (
-	hubGroupRoutePrefix = "/g/"
-	hubMcpRouteSuffix   = "/mcp"
-)
 
 // groupsAPI is the narrow seam the groups handler needs over the api data
 // layer. Behind an interface so handler tests inject a fake and never
@@ -301,7 +292,7 @@ func (s *Server) groupConnection(name string, port int, hubLive bool, instanceID
 	}
 	return &groupConnectionDTO{
 		Available:  true,
-		URL:        fmt.Sprintf("http://127.0.0.1:%d%s%s%s", port, hubGroupRoutePrefix, name, hubMcpRouteSuffix),
+		URL:        clients.HubLoopbackURL(port, api.HubGroupPrefix+name+api.HubPathSuffix),
 		InstanceID: instanceID,
 		Token:      token,
 	}
