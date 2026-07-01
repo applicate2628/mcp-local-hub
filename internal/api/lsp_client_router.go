@@ -212,7 +212,7 @@ func (a *API) RollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClie
 					continue
 				}
 				legacyNames[entryName] = true
-				targetURL := fmt.Sprintf("http://127.0.0.1:%d/mcp", regEntry.Port)
+				targetURL := clients.HubLoopbackURL(regEntry.Port, "/mcp")
 				live, readErr := adapter.GetEntry(entryName)
 				if readErr != nil {
 					report.Failed = append(report.Failed, lspFailure(clientName, language, entryName, "read", readErr))

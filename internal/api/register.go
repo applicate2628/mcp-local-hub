@@ -1269,7 +1269,7 @@ const readinessResponseMaxBytes = 1 << 20
 
 func verifyProxyReadyForServerNames(port int, timeout time.Duration, allowedServerNames map[string]struct{}) error {
 	deadline := time.Now().Add(timeout)
-	url := fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
+	url := clients.HubLoopbackURL(port, "/mcp")
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"mcphub-register-readiness","version":"1.0.0"},"capabilities":{}}}`)
 	client := &http.Client{Timeout: 2 * time.Second}
 	var lastErr error
