@@ -724,41 +724,65 @@ func (s *supervisorOwner) Pid() int {
 // operator-actionable startup error that names remediation for EACH of the
 // distinct causes this path covers, not just a DACL refusal. It is reached
 // ONLY from probeSupervisor returning api.ErrStatusSetupFailure — which
-// dialSupervisorIPCStatusFromStateDir attaches to ALL non-IsNotExist
-// owner-read failures on a PRESENT supervisor.lock.owner.json sidecar: a
-// DACL/mode refusal, corrupt/malformed sidecar JSON, or a wrong-owner/
-// irregular file (including one refused under MCPHUB_REQUIRE_SINGLE_USER_HOME=1).
+// dialSupervisorIPCStatusFromStateDir attaches to ALL non-IsNotExist read
+// failures on a PRESENT supervisor.lock.owner.json sidecar. That failure set is
+// EXACTLY these five (verified against ReadSupervisorLockOwner →
+// readStateFileInodeAnchored + json.Unmarshal, internal/api/supervisor_lock.go:158,
+// internal/api/hub_mcp_state_read_inode_windows.go, internal/api/hub_mcp_state_dacl.go):
+//
+//	(a) DACL/mode refusal (api.ErrDaclOutsideAllowlist / ErrTooLoose — a
+//	    non-allowlisted SID has read/write access) → `mcphub repair-state-dacl`.
+//	(b) corrupt/malformed JSON (json.Unmarshal failed) → delete + regenerate.
+//	(c) api.ErrWrongOwner (the sidecar's owner SID/uid is NOT the current user)
+//	    → repair-state-dacl REFUSES a wrong-owner file (state_dacl_repair_windows.go:47-56,
+//	    state_dacl_repair_posix.go:95-97), so take ownership or delete + regenerate.
+//	(d) api.ErrIrregularFile (the sidecar is a symlink / reparse point /
+//	    non-regular file) → repair-state-dacl REFUSES an irregular file too
+//	    (state_dacl_repair_windows.go:43+171, state_dacl_repair_posix.go:33+91), so
+//	    delete the symlink/irregular sidecar and let it regenerate.
+//	(e) strict-parent gate (MCPHUB_REQUIRE_SINGLE_USER_HOME=1 rejected a
+//	    broadened parent directory) → tighten the parent DACL or unset the env var.
+//
 // (An ABSENT sidecar classifies as api.ErrSupervisorIPCUnavailable → the normal
 // spawn path, so reaching here means NO supervisor is proven and spawning a
 // duplicate would only re-hit the same local fault. The top-of-function
 // api.DaemonStateDir() RESOLVE failure has its own dedicated error —
 // supervisorStateDirResolveError — because its causes and fixes differ.)
 //
-// Because the cause varies, a single "run repair-state-dacl" instruction
-// would be a dead end for the corrupt-JSON case (that command only fixes a
-// file's DACL/mode — it does not rewrite invalid JSON). So the message
-// enumerates the cause-appropriate remediation and keeps the underlying cause
-// wrapped (%w) so the operator can see which one applies.
+// A single "run repair-state-dacl" instruction would be a dead end for (b),
+// (c), and (d) — that command only re-grants the DACL/mode of an OWNED, REGULAR
+// file; it does not rewrite invalid JSON, take ownership of a wrong-owner file,
+// or replace a symlink. So the message enumerates all five and keeps the
+// underlying cause wrapped (%w) so the operator sees which one applies.
 //
-// The (b) corrupt-sidecar remediation is ORDER-SENSITIVE: deleting
-// supervisor.lock.owner.json while a supervisor still holds supervisor.lock.lock
-// makes the next AcquireSupervisorLock fail closed — with a held flock and no
-// (or corrupt) owner metadata, it returns "supervisor.lock held but owner
-// metadata invalid" (internal/api/supervisor_lock.go:76-83) after only a ~2s
-// retry, so the next GUI/supervisor start refuses. The operator must stop the
-// running supervisor first (or confirm none holds the lock), THEN delete the
-// corrupt sidecar so a fresh start regenerates it.
+// The DESTRUCTIVE remediations — (b) delete+regenerate, (c)/(d) take-ownership
+// or delete — are ORDER-SENSITIVE: deleting or replacing supervisor.lock.owner.json
+// while a supervisor still holds supervisor.lock.lock makes the next
+// AcquireSupervisorLock fail closed. With a held flock and missing/invalid owner
+// metadata it returns "supervisor.lock held but owner metadata invalid"
+// (internal/api/supervisor_lock.go:76-83) after only a ~2s retry, so the next
+// GUI/supervisor start refuses. Each destructive remediation therefore names the
+// "stop any running supervisor first" ordering guard.
 func supervisorSetupFaultError(cause error) error {
+	var takeOwnership string
+	if runtime.GOOS == "windows" {
+		takeOwnership = "`icacls <sidecar> /setowner \"<you>\"` (or `takeown /F <sidecar>`) then re-grant owner-only"
+	} else {
+		takeOwnership = "`chown <you> <sidecar>`"
+	}
 	return fmt.Errorf("supervisor owner: local supervisor state is unreadable (NOT a running supervisor); "+
-		"remediation depends on the wrapped cause below: "+
-		"(a) DACL/mode refusal on supervisor.lock.owner.json → repair to owner-only "+
-		"(`mcphub repair-state-dacl --path <refused-file>`, or tighten the parent DACL; see the "+
+		"remediation depends on the wrapped error below, which names the exact cause: "+
+		"(a) DACL/mode refusal on supervisor.lock.owner.json (non-allowlisted SID has access) → repair to owner-only "+
+		"(`mcphub repair-state-dacl --path <sidecar>`, or tighten the parent DACL; see the "+
 		"\"secret daemons exit 1 on a sandbox-broadened %%LOCALAPPDATA%%\" runbook in CLAUDE.md); "+
-		"(b) corrupt/malformed supervisor.lock.owner.json → FIRST stop any running supervisor (or confirm "+
-		"none holds supervisor.lock.lock), THEN delete the corrupt sidecar so it regenerates on next start "+
-		"(deleting it while the lock is still held makes the next start fail closed); "+
-		"(c) sidecar refused under MCPHUB_REQUIRE_SINGLE_USER_HOME=1 → tighten the parent directory's DACL or unset that env var. "+
-		"Then restart: %w", cause)
+		"(b) corrupt/malformed supervisor.lock.owner.json (invalid JSON) → FIRST stop any running supervisor "+
+		"(or confirm none holds supervisor.lock.lock), THEN delete the corrupt sidecar so it regenerates on next start; "+
+		"(c) wrong-owner sidecar (owner is not your account) → repair-state-dacl refuses this, so FIRST stop any running supervisor, "+
+		"THEN take ownership ("+takeOwnership+") or delete + regenerate the sidecar; "+
+		"(d) irregular sidecar (a symlink / reparse point / non-regular file) → repair-state-dacl refuses this too, so FIRST stop any "+
+		"running supervisor, THEN delete the symlink/irregular sidecar and let it regenerate; "+
+		"(e) sidecar or its parent refused under MCPHUB_REQUIRE_SINGLE_USER_HOME=1 → tighten the parent directory's DACL to owner-only or unset that env var. "+
+		"The wrapped error below names the exact cause. Then restart: %w", cause)
 }
 
 // supervisorStateDirResolveError wraps a top-of-function api.DaemonStateDir()

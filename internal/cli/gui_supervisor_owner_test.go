@@ -872,16 +872,18 @@ func TestArmSupervisorManager_NilOwnerReturnsNil(t *testing.T) {
 	}
 }
 
-// TestSupervisorSetupFaultError_BroadRemediationAndCause pins the bot r2
-// findings on this helper: it covers multiple PROBE-path sidecar causes
-// (DACL/mode refusal, corrupt sidecar JSON, and a sidecar refused under
-// MCPHUB_REQUIRE_SINGLE_USER_HOME=1), so the message must NOT prescribe
-// `repair-state-dacl` as the only fix (a dead end for the corrupt-JSON case)
-// and must keep the underlying cause wrapped so the operator can tell which
-// remediation applies. The cause example is a present-but-unreadable owner
-// sidecar (the actual domain of this helper) — the state-dir RESOLVE failure
-// now has its own dedicated error (supervisorStateDirResolveError) and no
-// longer routes through here (Fable-5 P3 correction).
+// TestSupervisorSetupFaultError_BroadRemediationAndCause pins the EXHAUSTIVE
+// enumeration on this helper. ReadSupervisorLockOwner →
+// readStateFileInodeAnchored + json.Unmarshal fails on a PRESENT sidecar via
+// exactly FIVE non-IsNotExist classes, and the message must name a
+// cause-appropriate remediation for each — a single `repair-state-dacl`
+// instruction is a dead end for the corrupt-JSON, wrong-owner, and irregular
+// cases (that command only re-grants an OWNED, REGULAR file's DACL). The
+// destructive remediations (delete / take-ownership) must carry the
+// "stop the supervisor first" ordering guard, and the underlying cause must
+// stay wrapped so the operator can tell which class applies. The state-dir
+// RESOLVE failure has its own dedicated error (supervisorStateDirResolveError)
+// and no longer routes through here.
 func TestSupervisorSetupFaultError_BroadRemediationAndCause(t *testing.T) {
 	cause := errors.New("read supervisor.lock.owner.json: DACL refused for path")
 	err := supervisorSetupFaultError(cause)
@@ -889,23 +891,46 @@ func TestSupervisorSetupFaultError_BroadRemediationAndCause(t *testing.T) {
 		t.Fatal("supervisorSetupFaultError returned nil")
 	}
 	msg := err.Error()
-	// Each of the three distinct remediations must be named — a single
-	// repair-state-dacl instruction would strand the corrupt-JSON case.
+	// All FIVE distinct remediation classes must be named.
 	for _, want := range []string{
 		"repair-state-dacl",               // (a) DACL/mode refusal
 		"delete the corrupt sidecar",      // (b) corrupt/malformed JSON
-		"MCPHUB_REQUIRE_SINGLE_USER_HOME", // (c) sidecar refused under strict mode
+		"take ownership",                  // (c) wrong-owner sidecar
+		"symlink/irregular sidecar",       // (d) irregular/symlink sidecar
+		"MCPHUB_REQUIRE_SINGLE_USER_HOME", // (e) strict-parent gate
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message missing remediation hint %q; got: %s", want, msg)
 		}
 	}
-	// Round-2 correction: the (b) corrupt-sidecar remediation is ORDER-SENSITIVE
-	// — deleting the sidecar while a supervisor still holds supervisor.lock.lock
+	// The platform-specific take-ownership command must be the correct one.
+	if runtime.GOOS == "windows" {
+		if !strings.Contains(msg, "/setowner") {
+			t.Errorf("Windows message missing the icacls /setowner take-ownership command; got: %s", msg)
+		}
+		if strings.Contains(msg, "chown") {
+			t.Errorf("Windows message leaked the POSIX chown command; got: %s", msg)
+		}
+	} else {
+		if !strings.Contains(msg, "chown") {
+			t.Errorf("POSIX message missing the chown take-ownership command; got: %s", msg)
+		}
+		if strings.Contains(msg, "/setowner") {
+			t.Errorf("POSIX message leaked the Windows icacls /setowner command; got: %s", msg)
+		}
+	}
+	// The DESTRUCTIVE remediations (b/c/d) are ORDER-SENSITIVE — deleting or
+	// replacing the sidecar while a supervisor still holds supervisor.lock.lock
 	// makes the next AcquireSupervisorLock fail closed (supervisor_lock.go:76-83).
-	// The message must tell the operator to stop the running supervisor FIRST.
-	if !strings.Contains(msg, "stop any running supervisor") {
-		t.Errorf("message missing the order-sensitive 'stop the supervisor first' guard for the corrupt-sidecar case; got: %s", msg)
+	// The message must carry the "stop the supervisor first" guard, and it must
+	// appear for MORE than one case (the delete AND the take-ownership paths).
+	if strings.Count(msg, "stop any running supervisor") < 2 {
+		t.Errorf("message missing the 'stop the supervisor first' ordering guard on the destructive remediations (want it on the delete AND take-ownership paths); got: %s", msg)
+	}
+	// The final catch-all line must point the operator at the wrapped cause so a
+	// future 6th class is still diagnosable.
+	if !strings.Contains(msg, "wrapped error below names the exact cause") {
+		t.Errorf("message missing the 'wrapped error names the exact cause' catch-all line; got: %s", msg)
 	}
 	// Cause stays wrapped for diagnosis (errors.Is reaches it).
 	if !errors.Is(err, cause) {
