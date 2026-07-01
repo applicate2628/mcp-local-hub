@@ -292,6 +292,50 @@ func TestGroupBinding_FilterBoundShowsOnlyInItsProject(t *testing.T) {
 	}
 }
 
+// TestGroupVisibleInProject_PreFoldPersistedStillMatches pins bot PR #474 P2:
+// groupVisibleInProject re-normalizes the STORED ProjectPath through
+// CanonicalProjectKey at compare time, so a groups.yaml entry persisted on a
+// case-folding platform (Windows / macOS) by an OLDER binary that stored a
+// CASE-PRESERVING ProjectPath still matches the now-folded project key. On a
+// non-folding platform (Linux) the same mixed-case stored value is genuinely a
+// DIFFERENT project and must NOT match — the predicate is driven by the same
+// caseFoldsProjectKey decision, so this asserts both directions per GOOS.
+func TestGroupVisibleInProject_PreFoldPersistedStillMatches(t *testing.T) {
+	// A stored binding in the OLD case-preserving form (what a pre-fold binary
+	// would have written on macOS), and the lookup key in the NEW folded form
+	// the current aggregate produces.
+	var storedPreFold, foldedKey string
+	if runtime.GOOS == "windows" {
+		storedPreFold, foldedKey = "C:/Dev/Proj", "c:/dev/proj"
+	} else {
+		storedPreFold, foldedKey = "/Dev/Proj", "/dev/proj"
+	}
+
+	g := api.Group{Name: "frontend", ProjectPath: storedPreFold}
+	got := groupVisibleInProject(g, foldedKey)
+	// The expected outcome is DERIVED from the single owner's actual fold
+	// behavior on this GOOS, not a re-typed predicate: the pre-fold stored
+	// value matches iff CanonicalProjectKey reduces it to the same key (true
+	// where the platform folds, false where it preserves case). Driving the
+	// expectation off the owner keeps the invariant single-sourced.
+	wantVisible := clients.CanonicalProjectKey(storedPreFold) == clients.CanonicalProjectKey(foldedKey)
+	if got != wantVisible {
+		t.Errorf("groupVisibleInProject(stored=%q, key=%q) on GOOS=%s = %v, want %v (a pre-fold-persisted binding must still match where the platform folds, and must NOT match where it does not)",
+			storedPreFold, foldedKey, runtime.GOOS, got, wantVisible)
+	}
+
+	// An UNBOUND group is always visible regardless of platform/fold.
+	if !groupVisibleInProject(api.Group{Name: "global"}, foldedKey) {
+		t.Errorf("unbound group must be visible in every project")
+	}
+
+	// Sanity: an already-canonical bound value still matches (no regression for
+	// freshly-written entries).
+	if !groupVisibleInProject(api.Group{Name: "fresh", ProjectPath: foldedKey}, foldedKey) {
+		t.Errorf("a freshly-written canonical binding must still match its own project key")
+	}
+}
+
 func groupNames(gs []groupDTO) []string {
 	out := make([]string, 0, len(gs))
 	for _, g := range gs {
