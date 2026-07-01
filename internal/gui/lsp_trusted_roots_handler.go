@@ -91,6 +91,7 @@ func (s *Server) lspTrustedRootsAdd(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err, http.StatusInternalServerError, "LSP_TRUSTED_ROOTS_ADD_FAILED")
 		return
 	}
+	s.publishTrustedRootAudit("lsp-trusted-root-add", root)
 	respondWithTrustedRoots(w)
 }
 
@@ -115,6 +116,7 @@ func (s *Server) lspTrustedRootsRemove(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err, http.StatusInternalServerError, "LSP_TRUSTED_ROOTS_REMOVE_FAILED")
 		return
 	}
+	s.publishTrustedRootAudit("lsp-trusted-root-remove", root)
 	respondWithTrustedRoots(w)
 }
 
@@ -148,6 +150,27 @@ func loadTrustedRootsResponse() (lspTrustedRootsResponse, error) {
 		roots = []string{}
 	}
 	return lspTrustedRootsResponse{Roots: roots, Path: path}, nil
+}
+
+// publishTrustedRootAudit emits a gui-events.log "operator-action" row
+// (deep-review round-2 P3 finding: this handler mutates the LSP
+// trusted-roots authorization boundary — the store the GUI LSP router
+// and the serena router's WorkspaceRootTrusted consult before
+// first-touch auto-register — but previously emitted no audit trail at
+// all, unlike every sibling mutation handler such as secrets.go and
+// backups_actions.go). Called ONLY after the mutation has actually
+// committed (api.BlessDefaultTrustedRoot / api.RemoveDefaultTrustedRoot
+// already returned success). detail carries the root path (not secret
+// material, so logging it verbatim is fine) plus the resulting
+// trusted-root count; a best-effort re-read failure to compute the
+// count is tolerated (count omitted) rather than blocking the audit
+// row or the response.
+func (s *Server) publishTrustedRootAudit(action, root string) {
+	detail := map[string]any{"root": root}
+	if resp, err := loadTrustedRootsResponse(); err == nil {
+		detail["count"] = len(resp.Roots)
+	}
+	s.events.PublishOperatorAction(action, api.CurrentOSUser(), detail)
 }
 
 // respondWithTrustedRoots reloads the store after a successful mutation

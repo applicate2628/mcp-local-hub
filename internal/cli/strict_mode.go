@@ -552,7 +552,45 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	if rmErr := os.Remove(deps.BreadcrumbPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 		fmt.Fprintf(stderrOrDefault(deps), "strict-mode: cleanup in-progress breadcrumb after success: %v\n", rmErr)
 	}
+	// Deep-review round-2 P4 finding: the clean-success branch previously
+	// left no supervisor-events.log row at all — only the torn/failure
+	// recovery breadcrumb path was observable. strict_mode governs a
+	// fail-closed security posture (Job-Object fallback refusal +
+	// DACL-gate strictness), so a successful flip deserves the same
+	// timestamped/actor audit trail every other supervisor-events.log
+	// mutation gets. Best-effort: mirrors emitLivenessEvent
+	// (supervise_ensure_alive.go) — a missing audit row must never fail
+	// an otherwise-successful command.
+	emitStrictModeChangedEvent(deps.StateDir, originalStrict, desired)
 	return nil
+}
+
+// emitStrictModeChangedEvent records a best-effort
+// "strict-mode-changed" row to supervisor-events.log after a clean
+// two-resource strict-mode mutation. Mirrors the open-emit-close idiom
+// in emitLivenessEvent (supervise_ensure_alive.go:316): the strict-mode
+// CLI is a short-lived process, not the long-lived supervisor, so it
+// opens its own handle rather than threading one through StrictModeDeps.
+// Source is "autostart" because the observable half of this mutation
+// operators care about at a glance is the autostart shim flip; the
+// intent-file write is the other half of the same atomic pair recorded
+// in the body. A failure to open/emit is silently swallowed — this is
+// observability, not a gate, and the command has already succeeded.
+func emitStrictModeChangedEvent(stateDir string, from, to bool) {
+	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+	if err != nil {
+		return
+	}
+	defer func() { _ = logger.Close() }()
+	_ = logger.Emit(api.SupervisorEvent{
+		Severity: api.SupervisorEventSeverityInfo,
+		Source:   api.SupervisorEventSourceAutostart,
+		Event:    "strict-mode-changed",
+		Body: map[string]any{
+			"from": from,
+			"to":   to,
+		},
+	})
 }
 
 // readStrictModeIntentSnapshot reads supervisor-intent.json under its

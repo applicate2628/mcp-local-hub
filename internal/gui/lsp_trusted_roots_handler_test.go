@@ -2,12 +2,14 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -109,6 +111,95 @@ func TestTrustedRoots_PostAddAppearsInGetAndOnDisk(t *testing.T) {
 	}
 	if !f.LSPWorkspaceRootTrusted(root) {
 		t.Fatalf("added root %q must be trusted by the on-disk store", root)
+	}
+}
+
+// TestTrustedRoots_PostAddEmitsGUIEvent covers the deep-review round-2
+// P3 observability finding: adding a trusted root mutates the LSP
+// trusted-roots authorization boundary but previously emitted no
+// gui-events.log audit row at all, unlike every sibling mutation
+// handler (secrets.go, backups_actions.go). Asserts via the
+// Broadcaster's own SSE subscription, mirroring
+// TestSecretsAdd_EmitsGUIEventWithKeyNameOnlyNeverValue.
+func TestTrustedRoots_PostAddEmitsGUIEvent(t *testing.T) {
+	s, _ := trustedRootsHandlerTestServer(t)
+	base := t.TempDir()
+	root := mkTrustedDir(t, base, "proj")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	body, _ := json.Marshal(map[string]string{"root": root})
+	req := httptest.NewRequest(http.MethodPost, "/api/lsp/trusted-roots", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.Type != "operator-action" {
+			t.Fatalf("event type = %q, want operator-action", ev.Type)
+		}
+		if ev.Body["action"] != "lsp-trusted-root-add" {
+			t.Errorf("action=%v, want lsp-trusted-root-add", ev.Body["action"])
+		}
+		if ev.Body["root"] != root {
+			t.Errorf("root=%v, want %v", ev.Body["root"], root)
+		}
+		if count, ok := ev.Body["count"].(int); !ok || count != 1 {
+			t.Errorf("count=%v, want 1", ev.Body["count"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no operator-action event published after a successful trusted-root add")
+	}
+}
+
+// TestTrustedRoots_DeleteEmitsGUIEvent covers the same P3 finding for
+// the remove path.
+func TestTrustedRoots_DeleteEmitsGUIEvent(t *testing.T) {
+	s, path := trustedRootsHandlerTestServer(t)
+	base := t.TempDir()
+	root := mkTrustedDir(t, base, "proj")
+
+	// Seed via the api store directly so this test isolates the DELETE
+	// audit emission from the POST one.
+	if err := api.BlessTrustedRoot(path, root); err != nil {
+		t.Fatalf("seed bless: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	body, _ := json.Marshal(map[string]string{"root": root})
+	req := httptest.NewRequest(http.MethodDelete, "/api/lsp/trusted-roots", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("DELETE status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	select {
+	case ev := <-ch:
+		if ev.Type != "operator-action" {
+			t.Fatalf("event type = %q, want operator-action", ev.Type)
+		}
+		if ev.Body["action"] != "lsp-trusted-root-remove" {
+			t.Errorf("action=%v, want lsp-trusted-root-remove", ev.Body["action"])
+		}
+		if ev.Body["root"] != root {
+			t.Errorf("root=%v, want %v", ev.Body["root"], root)
+		}
+		if count, ok := ev.Body["count"].(int); !ok || count != 0 {
+			t.Errorf("count=%v, want 0", ev.Body["count"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no operator-action event published after a successful trusted-root remove")
 	}
 }
 
