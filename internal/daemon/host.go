@@ -244,12 +244,26 @@ func (h *StdioHost) Start(ctx context.Context) error {
 		cmd.Env = composeChildEnv(h.cfg.Env, h.cfg.UnsetEnv)
 	}
 
+	// Partial-init pipe cleanup: each successful *Pipe() call opens a parent
+	// pipe end (2 fds) that Go's exec package only auto-closes once cmd.Start()
+	// runs its deferred cleanup. If a LATER *Pipe() call fails before Start(),
+	// the already-obtained earlier pipes would leak. These paths are the
+	// in-process LazyProxy.ensureMaterialized re-materialize routes (idle-reap,
+	// onSendFailure, client-retry), so a leak compounds under fd pressure on a
+	// long-lived process. Close the earlier pipe(s) before the early return.
+	//
+	// StdinPipe failure needs NO cleanup: os.Pipe() itself failed, so nothing
+	// is open yet. cmd.Start() failure needs NO manual cleanup either: Go's
+	// exec.Cmd.Start defers closeDescriptors(parentIOPipes) on any error return
+	// before the process spawns (verified against os/exec/exec.go), so closing
+	// here would be a redundant double-close.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return fmt.Errorf("stdin pipe: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
 	// Stderr is NOT part of the JSON-RPC protocol channel. openStderrSink
@@ -257,6 +271,8 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// (durable) + os.Stderr (TTY only) / io.Discard (non-TTY).
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return fmt.Errorf("stderr pipe: %w", err)
 	}
 
