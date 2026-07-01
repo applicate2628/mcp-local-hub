@@ -192,6 +192,10 @@ export type LogWatcher = {
   kill_err?: string;
 };
 
+// CleanupOrphansResponse is the single owner of the POST /api/cleanup/orphans
+// envelope shape. src/api.ts re-exports it as `CleanupOrphansResult` (its
+// Dashboard-facing cleanupOrphans() wrapper returns that alias), so this type
+// is the one place to change if the wire shape changes — deep-review r2 P4.
 export type CleanupOrphansResponse = {
   orphans: OrphanProcess[];
   killed: number;

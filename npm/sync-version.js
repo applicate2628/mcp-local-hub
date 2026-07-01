@@ -94,22 +94,35 @@ function readScriptVersion(file, pattern, label) {
   return { text, version: m[2], pattern };
 }
 
-// authorityVersionQuad parses the authority's X.Y.Z semver into the
-// {Major, Minor, Patch, Build} quad goversioninfo's FixedFileInfo expects,
-// plus the X.Y.Z.0 dotted-string form StringFileInfo expects. Build is
-// always 0 — the authority version has no fourth component and none of the
-// existing three duplicate copies (build.sh/build.ps1/package.json) carry
-// one either. Fails loudly on a non-numeric X.Y.Z so a prerelease suffix
-// (e.g. "0.4.19-beta.1") is never silently truncated into a wrong PE
-// resource version — an operator must resolve that case by hand.
+// authorityVersionQuad parses the authority's X.Y.Z[-prerelease][+build]
+// semver into the {Major, Minor, Patch, Build} quad goversioninfo's
+// FixedFileInfo expects, plus the X.Y.Z.0 dotted-string form StringFileInfo
+// expects. Build is always 0 — the authority version has no fourth numeric
+// component and none of the existing three duplicate copies
+// (build.sh/build.ps1/package.json) carry one either.
+//
+// A prerelease/build-metadata suffix (e.g. "0.5.0-beta.1") is TOLERATED: the
+// publish workflow tags prereleases as `vX.Y.Z-beta.N` and routes them to the
+// `beta` dist-tag, so `--check`/`--inject` must not reject them. A Windows
+// FILEVERSION resource can only encode four 16-bit integers — it cannot carry
+// a `-beta.N` suffix — so the quad and the dotted string use the numeric
+// X.Y.Z core (Build stays 0). This mirrors build.sh/build.ps1, which write
+// the full version string verbatim into their ldflags-only VERSION literal
+// (accepting any suffix) while the PE resource comes from this numeric core.
+// The `mcphub version` ldflags string still carries the full "-beta.N"
+// suffix; only the Explorer-"Details"/SBOM PE resource is the numeric core.
+// Fails loudly only when the X.Y.Z core itself is absent/malformed.
 function authorityVersionQuad(want) {
-  const m = want.match(/^(\d+)\.(\d+)\.(\d+)$/);
+  // Match the leading numeric X.Y.Z core; ignore any `-prerelease`/`+build`
+  // suffix (SemVer 2.0 §9/§10) — the PE resource cannot encode it.
+  const m = want.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
   if (!m) {
     fail(
-      `npm/package.json version "${want}" is not a plain X.Y.Z semver; ` +
+      `npm/package.json version "${want}" has no parseable X.Y.Z core; ` +
         `cannot derive a Windows FixedFileInfo quad for versioninfo.json. ` +
-        `(Prerelease/build-metadata suffixes are not supported by this ` +
-        `script's --inject/--check for versioninfo.json.)`,
+        `(A leading numeric "MAJOR.MINOR.PATCH" is required; an optional ` +
+        `"-prerelease"/"+build" suffix is tolerated and contributes nothing ` +
+        `to the PE resource version.)`,
     );
   }
   const [, major, minor, patch] = m;
@@ -228,9 +241,15 @@ function injectInto(file, pattern, label, want) {
 // injectVersionInfoJSON rewrites versioninfo.json's four version fields
 // (FixedFileInfo.{FileVersion,ProductVersion} quads + StringFileInfo.
 // {FileVersion,ProductVersion} dotted strings) to the authority version.
-// Preserves every other field (IconPath, FileFlags, CompanyName,
-// FileDescription, etc.) and the file's key order via JSON.parse +
-// targeted field assignment rather than a full re-serialize-from-scratch.
+// Every other field's VALUE (IconPath, FileFlags, CompanyName,
+// FileDescription, etc.) is preserved, and key ORDER is preserved because
+// JSON.stringify emits keys in the object's insertion order (which JSON.parse
+// preserves from the source). It does NOT preserve the committed file's
+// hand-alignment/whitespace: it FULLY re-serializes the parsed object via
+// `JSON.stringify(parsed, null, 4)`, so the single-line quad objects in the
+// committed source (`"FileVersion":    { "Major": 0, ... }`) are expanded into
+// multi-line 4-space-indented JSON. That is fine — versioninfo.json is a
+// build input consumed by goversioninfo, not a hand-formatted artifact.
 // Returns true if anything changed. Mirrors injectInto's shape: read,
 // compare, write only on drift, ok()-log the from->to transition.
 function injectVersionInfoJSON(want, wantQuad) {

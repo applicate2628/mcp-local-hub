@@ -1,5 +1,5 @@
 import type { ScanResult } from "./types";
-import type { OrphanProcess } from "./lib/settings-api";
+import type { CleanupOrphansResponse } from "./lib/settings-api";
 
 // fetchOrThrow is the shared API wrapper mirroring the legacy fetchOrThrow
 // from servers.js. Backend handlers surface errors via the {error, code}
@@ -625,23 +625,20 @@ export async function postLspRegister(
 // Dashboard recovery actions (PR #222 ops UX gap)
 // ───────────────────────────────────────────────────────────────────
 
-// CleanupOrphansResult mirrors gui.cleanupResponse — the wire shape of
-// POST /api/cleanup/orphans. The handler returns both dry-run and
-// apply outputs with the same envelope; `killed` / `skipped` stay
-// zero on dry-run.
-//
-// `orphans` reuses the `OrphanProcess` type from lib/settings-api.ts (the
-// correct mirror of the Go producer api.OrphanProcess in
-// internal/api/cleanup.go) instead of a divergent inline shape — the
-// inline shape previously declared `name`/`cmdline`/`matched_server`/
-// `age_seconds`, none of which the Go struct emits on the wire (it emits
-// `server`/`cmdline_display`/`age_sec`, and `Cmdline` is `json:"-"`) —
-// deep-review r2 P4-3.
-export interface CleanupOrphansResult {
-  orphans: OrphanProcess[];
-  killed: number;
-  skipped: number;
-}
+// CleanupOrphansResult is the wire shape of POST /api/cleanup/orphans
+// (gui.cleanupResponse). It is the SAME envelope as
+// lib/settings-api.ts's CleanupOrphansResponse — both fetch wrappers
+// (api.ts::cleanupOrphans() here, settings-api.ts::cleanupOrphans(apply)
+// there) parse the identical `{orphans, killed, skipped}` body — so this
+// is a single-owner re-export of that type rather than a second mirror
+// that could drift (deep-review r2 P4 Fable-5). The import direction is
+// safe: settings-api.ts imports only from ./settings-types, never from
+// ./api, so no circular import. `orphans` therefore carries the
+// OrphanProcess mirror of the Go producer api.OrphanProcess
+// (internal/api/cleanup.go): wire fields `server`/`cmdline_display`/
+// `age_sec` (`Cmdline` is `json:"-"`), NOT the old divergent inline
+// `name`/`cmdline`/`matched_server`/`age_seconds` shape.
+export type CleanupOrphansResult = CleanupOrphansResponse;
 
 // cleanupOrphans posts to /api/cleanup/orphans with `apply: true`
 // (kill mode). Returns the per-process kill outcome list so the UI
