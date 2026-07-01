@@ -95,6 +95,13 @@ type IntentWatcher struct {
 	// from "file still absent (no-op)" without conflating the two
 	// against time.Time{} sentinel comparisons.
 	lastPresent map[string]bool
+
+	// lastSizes records the last observed file size (bytes) per tracked file.
+	// Paired with lastMtimes so a replace-in-place write that lands within the
+	// filesystem mtime-granularity window (same mtime, different content) is
+	// still detected when the byte length changed — the common case for a
+	// JSON intent edit (deep-review P4). Mutated only by Run's goroutine.
+	lastSizes map[string]int64
 }
 
 // NewIntentWatcher returns a watcher that polls supervisor-intent.json
@@ -119,6 +126,7 @@ func NewIntentWatcher(stateDir string, pollInterval time.Duration, onChange func
 		onChange:     onChange,
 		lastMtimes:   map[string]time.Time{},
 		lastPresent:  map[string]bool{},
+		lastSizes:    map[string]int64{},
 	}
 }
 
@@ -180,9 +188,11 @@ func (w *IntentWatcher) snapshotMtimes() {
 		if err == nil {
 			w.lastMtimes[name] = info.ModTime()
 			w.lastPresent[name] = true
+			w.lastSizes[name] = info.Size()
 		} else {
 			delete(w.lastMtimes, name)
 			w.lastPresent[name] = false
+			delete(w.lastSizes, name)
 		}
 	}
 }
@@ -209,12 +219,18 @@ func (w *IntentWatcher) detectChange() bool {
 		if currentPresent != w.lastPresent[name] {
 			return true
 		}
-		// Both present: mtime difference is a change. Use !Equal not
-		// != because time.Time carries a monotonic-clock reading on
+		// Both present: mtime OR size difference is a change. Use !Equal
+		// not != because time.Time carries a monotonic-clock reading on
 		// some platforms and direct equality compares the monotonic
-		// portion, which is not what file mtime semantics want.
-		if currentPresent && !currentMtime.Equal(w.lastMtimes[name]) {
-			return true
+		// portion, which is not what file mtime semantics want. The size
+		// check catches a replace-in-place write that lands within the
+		// filesystem mtime-granularity window (same mtime, different
+		// content) — the common case for a byte-length-changing JSON
+		// intent edit (deep-review P4).
+		if currentPresent {
+			if !currentMtime.Equal(w.lastMtimes[name]) || info.Size() != w.lastSizes[name] {
+				return true
+			}
 		}
 	}
 	return false

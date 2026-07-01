@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"mcp-local-hub/internal/process"
 )
 
 // SupervisorLock is the singleton lock primitive used by `mcphub supervise`
@@ -190,42 +191,24 @@ func (l *SupervisorLock) Release() {
 	l.fl = nil
 }
 
-// isOwnerLive probes whether the recorded PID is still running by
-// sending signal 0. PID 0 is treated as not-live (canonical "unset"
-// sentinel; any owner sidecar with PID 0 is malformed).
+// isOwnerLive probes whether the recorded PID is still running. It delegates
+// to internal/process.IsPidAlive — the single cross-platform owner of PID
+// liveness (Windows OpenProcess + WaitForSingleObject; Linux kill(0) with
+// /proc zombie exclusion; other POSIX kill(0)) — rather than re-implementing a
+// per-platform probe here (deep-review P4: the old inline probe used Go's
+// Process.Signal(0), a no-op on Windows that reported every live PID as dead
+// and wrongly degraded the AcquireSupervisorLock contention diagnostic).
+// IsPidAlive treats a non-positive PID as dead, so the canonical "unset"
+// sentinel PID 0 in a malformed owner sidecar reads as not-live.
 //
-// IMPORTANT — this probe is POSIX-effective only. On POSIX, kill(pid, 0)
-// returns ESRCH for a dead PID and EPERM when the PID is alive but owned by a
-// different user — both cases this function treats as "not ours to assume
-// live", returning false to allow reclaim. On Windows os.FindProcess always
-// succeeds, but Go's Process.Signal implements ONLY os.Kill and returns an
-// error for signal 0 (empirically verified — see TestSupervisorRunningUnderStateDir),
-// so this returns false even for a LIVE PID. Callers that need a cross-platform
-// "is the supervisor running" answer must use the flock (the authoritative
-// ownership signal), as SupervisorRunningUnderStateDir does; isOwnerLive here is
-// only the diagnostic refinement AcquireSupervisorLock applies AFTER its flock
-// TryLock has already failed, so its Windows weakness degrades a message, not a
-// decision. The repo ALREADY ships the correct cross-platform primitive —
-// internal/process.IsPidAlive (Windows OpenProcess + WaitForSingleObject(0));
-// migrating isOwnerLive onto it is a cheap, contained follow-up tracked
-// separately (it would change only the AcquireSupervisorLock diagnostic string).
-//
-// Pattern intentionally simpler than internal/gui/single_instance.go's
-// processID probe — that one needs image basename, argv, and start time
-// for the kill identity gate; the supervisor lock only needs the
-// liveness signal.
+// This is the diagnostic refinement AcquireSupervisorLock applies AFTER its
+// flock TryLock has already failed; it never gates a decision by itself, and a
+// PID-liveness check is inherently racy against PID reuse. Callers needing an
+// authoritative cross-platform "is the supervisor running" answer must use the
+// flock, as SupervisorRunningUnderStateDir does (only liveness is needed here,
+// not the full image/argv/start-time identity gate single_instance.go uses).
 func isOwnerLive(o SupervisorLockOwner) bool {
-	if o.PID == 0 {
-		return false
-	}
-	p, err := os.FindProcess(o.PID)
-	if err != nil {
-		return false
-	}
-	if err := p.Signal(syscall.Signal(0)); err != nil {
-		return false
-	}
-	return true
+	return process.IsPidAlive(o.PID)
 }
 
 // SupervisorRunningUnderStateDir reports whether a LIVE supervisor process
@@ -238,16 +221,16 @@ func isOwnerLive(o SupervisorLockOwner) bool {
 //   - (false, 0, err)    — UNDETERMINABLE (the lock probe itself errored).
 //
 // The authoritative signal is the gofrs/flock itself, NOT the owner sidecar +
-// isOwnerLive: isOwnerLive's PID-signal probe is POSIX-effective only (Go's
-// Windows Process.Signal supports only Kill and errors on signal 0, so it
-// reports a LIVE PID as not-live — see isOwnerLive's note), which would make
-// this probe a no-op on the Windows GA platform. Instead we attempt a
-// non-blocking TryLock on the supervisor's own flock file: if it is held we
-// could not acquire (a live supervisor holds it → running); if we acquire it we
-// release immediately (no holder → not running). flock ownership is released by
-// the kernel on holder exit, so a crashed supervisor frees the lock and reads as
-// not running — exactly when the NEXT supervisor start is a fresh process on the
-// current binary.
+// isOwnerLive: even though isOwnerLive now has a real per-platform liveness
+// probe (supervisor_lock_liveness_posix.go / _windows.go), a PID-liveness
+// check is inherently racy against PID reuse and gives no exclusion
+// guarantee — it can only ever be a diagnostic hint, never the ownership
+// decision. Instead we attempt a non-blocking TryLock on the supervisor's own
+// flock file: if it is held we could not acquire (a live supervisor holds it
+// → running); if we acquire it we release immediately (no holder → not
+// running). flock ownership is released by the kernel on holder exit, so a
+// crashed supervisor frees the lock and reads as not running — exactly when
+// the NEXT supervisor start is a fresh process on the current binary.
 //
 // FAIL-CLOSED CONTRACT (consultant PR #246 r2 #1): a non-nil err means liveness
 // could not be determined (a rare open/lock syscall failure — e.g. a
