@@ -20,6 +20,12 @@ import (
 //     sys/unix.RawSockaddrUnix.Path is [104]int8 on every BSD GOOS (bot PR
 //     #474 P3); returning Linux's 108 for them would over-estimate the limit
 //     by 4 bytes and let a too-long path through to a cryptic bind failure.
+//   - AIX <sys/un.h> sun_path is char[1023] — x/sys/unix.RawSockaddrUnix.Path
+//     is [1023]uint8 on GOOS=aix (bot PR #474 P3, other direction): returning
+//     the 108 default there would UNDER-estimate the limit by 915 bytes and
+//     wrongly reject a long-but-valid AIX socket path. mcphub does not
+//     officially target AIX, but naming it keeps the catch-all honest rather
+//     than silently misclaiming "any other POSIX target uses 108".
 //
 // Every platform reserves the LAST byte for the NUL terminator, so the actual
 // usable path length is one less than the buffer size.
@@ -27,8 +33,13 @@ func maxUnixSocketPathLen() int {
 	switch runtime.GOOS {
 	case "darwin", "freebsd", "netbsd", "openbsd", "dragonfly":
 		return 104
+	case "aix":
+		return 1023
 	default:
-		return 108 // Linux (and any other POSIX target) uses UNIX_PATH_MAX = 108.
+		// Linux (UNIX_PATH_MAX = 108) and the other 108-byte-sun_path POSIX
+		// targets (Solaris/illumos also use 108). AIX (1023) and the BSDs (104)
+		// are handled explicitly above.
+		return 108
 	}
 }
 

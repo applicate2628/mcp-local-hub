@@ -70,6 +70,41 @@ import (
 // absolute-path contract and the deliberate omission of filepath.Abs. An empty
 // input returns "".
 func CanonicalProjectKey(p string) string {
+	cleaned := canonicalProjectPathNormalize(p)
+	if cleaned != "" && caseFoldsProjectKey(runtime.GOOS) {
+		cleaned = strings.ToLower(cleaned)
+	}
+	return cleaned
+}
+
+// canonicalProjectWriteKey is the FRESH-ENTRY write-key normalizer: the SAME
+// separator/Clean/trailing-slash normalization as CanonicalProjectKey but
+// WITHOUT the case-fold, so a first-ever projects.<key> entry preserves the
+// operator's actual path case.
+//
+// WHY a separate key from the compare key (write ≠ compare — bot PR #474 P2):
+// Claude Code looks up ~/.claude.json projects.<key> by the project's actual
+// path. A case-FOLDED write key (e.g. darwin /Users/Alice/Proj →
+// /users/alice/proj, or Windows C:/Dev/Proj → c:/dev/proj) risks not matching
+// Claude Code's own lookup, so a fresh toggle would write an entry Claude Code
+// never reads — a silent no-op. Preserving case in the write key is strictly
+// safer than folding on EVERY platform: if Claude Code folds its own lookup a
+// case-preserved key still matches; if it does not, only a case-preserved key
+// matches. The COMPARE side (CanonicalProjectKey) still folds on the case-
+// insensitive-default platforms, so a later toggle re-matches this case-
+// preserved entry regardless of the spelling divergence the fold absorbs. See
+// ToggleClaudeMcpjsonMembership's fresh-entry writeKey fallback.
+func canonicalProjectWriteKey(p string) string {
+	return canonicalProjectPathNormalize(p)
+}
+
+// canonicalProjectPathNormalize applies the separator/Clean/trailing-slash
+// normalization shared by the compare key (CanonicalProjectKey) and the fresh-
+// entry write key (canonicalProjectWriteKey), WITHOUT the case-fold. Both keys
+// MUST agree on separators, Clean, and the trailing-slash rule so a case-
+// preserved write key and a later fold-compare of it reduce to the same string;
+// they differ ONLY in whether case is folded. An empty input returns "".
+func canonicalProjectPathNormalize(p string) string {
 	if p == "" {
 		return ""
 	}
@@ -88,11 +123,7 @@ func CanonicalProjectKey(p string) string {
 	// no-match, so a root project became unreachable. trimNonRootTrailingSlash
 	// keeps the root form intact while still trimming a trailing slash from a
 	// non-root path.
-	cleaned = trimNonRootTrailingSlash(cleaned)
-	if caseFoldsProjectKey(runtime.GOOS) {
-		cleaned = strings.ToLower(cleaned)
-	}
-	return cleaned
+	return trimNonRootTrailingSlash(cleaned)
 }
 
 // caseFoldsProjectKey reports whether goos's DEFAULT filesystem is

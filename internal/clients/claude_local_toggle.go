@@ -179,10 +179,17 @@ func ToggleClaudeMcpjsonMembership(root, server string, enable, allowSymlink boo
 		newEnabled, newDisabled := computeMcpjsonToggleMove(server, curEnabled, curDisabled, enable)
 
 		// The raw key to write under: an existing matched raw key (preserve the
-		// operator's exact key spelling) or, when none, the canonical key.
+		// operator's exact key spelling) or, for a FRESH entry, the case-
+		// PRESERVED write key. Folding the fresh key (as the compare key wantKey
+		// does on darwin/APFS + windows/NTFS) risks writing a projects.<key>
+		// entry Claude Code's own path lookup never matches — a silent no-op
+		// (bot PR #474 P2). canonicalProjectWriteKey preserves case; the compare
+		// side still folds so a later toggle re-matches this entry. wantKey != ""
+		// was asserted above, and the write key shares the same non-fold
+		// normalization core, so it is likewise non-empty.
 		writeKey := rawKey
 		if writeKey == "" {
-			writeKey = wantKey
+			writeKey = canonicalProjectWriteKey(root)
 		}
 
 		out, err := applyClaudeMcpjsonToggleArrays(original, writeKey, newEnabled, newDisabled)

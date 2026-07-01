@@ -7,6 +7,7 @@ package clients
 
 import (
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -178,5 +179,44 @@ func TestCanonicalClaudeKey_FoldsPerPlatform(t *testing.T) {
 	}
 	if got := canonicalClaudeProjectKey(in); got != want {
 		t.Errorf("canonicalClaudeProjectKey(%q) on GOOS=%s = %q, want %q (fold=%v)", in, runtime.GOOS, got, want, caseFoldsProjectKey(runtime.GOOS))
+	}
+}
+
+// TestCanonicalProjectWriteKey_PreservesCase pins the write ≠ compare split
+// (bot PR #474 P2): the FRESH-entry write key must NOT case-fold, so a first-
+// ever ~/.claude.json projects.<key> entry keeps the operator's actual path
+// case and matches Claude Code's own path lookup. CanonicalProjectKey (the
+// compare key) folds on windows/darwin; canonicalProjectWriteKey never does —
+// on EVERY build. A folded write key would write a projects.<key> entry Claude
+// Code's exact-path lookup never reads (a silent toggle no-op).
+func TestCanonicalProjectWriteKey_PreservesCase(t *testing.T) {
+	var inputs []string
+	if runtime.GOOS == "windows" {
+		inputs = []string{`C:\Dev\MyProj`, `C:\Dev\MyProj\`, `C:/Dev/MyProj`}
+	} else {
+		inputs = []string{"/Users/Alice/Proj", "/srv/App/Sub", "/Users/Alice/Proj/"}
+	}
+	for _, in := range inputs {
+		w := canonicalProjectWriteKey(in)
+		// (1) case preserved: every input has upper-case letters, so a write key
+		// equal to its own lower-case means the fold leaked into the write path.
+		if w == strings.ToLower(w) {
+			t.Errorf("canonicalProjectWriteKey(%q) = %q lost case (write key must NOT fold)", in, w)
+		}
+		// (2) write and compare share the SAME pre-fold normalization: folding
+		// the write key yields exactly the compare key on a folding platform; on
+		// a non-folding platform the two are already identical.
+		cmp := CanonicalProjectKey(in)
+		foldAdjusted := w
+		if caseFoldsProjectKey(runtime.GOOS) {
+			foldAdjusted = strings.ToLower(w)
+		}
+		if foldAdjusted != cmp {
+			t.Errorf("write/compare normalization mismatch for %q: fold-adjusted write=%q, CanonicalProjectKey=%q", in, foldAdjusted, cmp)
+		}
+	}
+	// Empty stays empty (shared with the compare key).
+	if canonicalProjectWriteKey("") != "" {
+		t.Errorf("canonicalProjectWriteKey(\"\") must return empty")
 	}
 }
