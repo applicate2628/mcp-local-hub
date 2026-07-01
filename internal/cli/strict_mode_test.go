@@ -317,6 +317,13 @@ func TestStrictModeEnable_CleanSuccessEmitsSupervisorEvent(t *testing.T) {
 	if toVal != true {
 		t.Errorf("body.to = %v, want true", found.Body["to"])
 	}
+	// Actor attribution (bot r2 P3): a copied log / multi-account host must
+	// be able to tell WHO flipped the posture. This also confirms the
+	// TryEmit (non-blocking) switch still writes on the uncontended happy
+	// path — an empty/missing actor here would mean the row never landed.
+	if actor, _ := found.Body["actor"].(string); actor == "" {
+		t.Errorf("body.actor = %q, want non-empty OS user", found.Body["actor"])
+	}
 }
 
 // TestStrictModeDisable_CleanSuccessEmitsSupervisorEvent is the

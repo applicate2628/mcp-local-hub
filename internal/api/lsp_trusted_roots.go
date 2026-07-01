@@ -139,6 +139,19 @@ func canonicalizeTrustedRoot(p string) (string, error) {
 	return abs, nil
 }
 
+// CanonicalizeTrustedRoot is the exported wrapper over canonicalizeTrustedRoot
+// so out-of-package callers (e.g. the GUI trusted-root audit) can compute the
+// SAME canonical form BlessTrustedRoot / RemoveTrustedRoot apply before they
+// mutate the store. Sharing the one canonicalizer keeps the audit trail
+// honest: a symlinked or non-clean request string canonicalizes to the path
+// the authorization boundary actually trusts/removes, so the audit records
+// that path rather than the misleading raw request. Best-effort for gone or
+// aliased components (it does not require the path to exist), so an audit
+// caller may treat a returned error as "canonical unknown" and omit the field.
+func CanonicalizeTrustedRoot(p string) (string, error) {
+	return canonicalizeTrustedRoot(p)
+}
+
 // LoadLSPTrustedRoots reads the trusted-roots store from path. An absent
 // file is NOT an error — it returns an empty file (Version set to the
 // current schema, Roots nil) so callers treat "no file" as "no trusted

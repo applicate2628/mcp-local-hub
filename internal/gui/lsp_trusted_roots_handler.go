@@ -160,13 +160,21 @@ func loadTrustedRootsResponse() (lspTrustedRootsResponse, error) {
 // all, unlike every sibling mutation handler such as secrets.go and
 // backups_actions.go). Called ONLY after the mutation has actually
 // committed (api.BlessDefaultTrustedRoot / api.RemoveDefaultTrustedRoot
-// already returned success). detail carries the root path (not secret
-// material, so logging it verbatim is fine) plus the resulting
-// trusted-root count; a best-effort re-read failure to compute the
-// count is tolerated (count omitted) rather than blocking the audit
-// row or the response.
+// already returned success). detail carries the raw requested root path
+// (not secret material, so logging it verbatim is fine), the CANONICAL
+// root the mutation actually applied (canonical_root — a symlinked or
+// non-clean request canonicalizes to the path the authorization boundary
+// really trusts/removes, so the raw string alone would be a misleading
+// audit trail; computed via the same api.CanonicalizeTrustedRoot the store
+// uses, best-effort so a canonicalize failure just omits the field), plus
+// the resulting trusted-root count; a best-effort re-read failure to
+// compute the count is tolerated (count omitted) rather than blocking the
+// audit row or the response.
 func (s *Server) publishTrustedRootAudit(action, root string) {
 	detail := map[string]any{"root": root}
+	if canonical, err := api.CanonicalizeTrustedRoot(root); err == nil {
+		detail["canonical_root"] = canonical
+	}
 	if resp, err := loadTrustedRootsResponse(); err == nil {
 		detail["count"] = len(resp.Roots)
 	}

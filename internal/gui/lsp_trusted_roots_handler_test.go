@@ -150,6 +150,17 @@ func TestTrustedRoots_PostAddEmitsGUIEvent(t *testing.T) {
 		if ev.Body["root"] != root {
 			t.Errorf("root=%v, want %v", ev.Body["root"], root)
 		}
+		// canonical_root (bot r2 P3): the audit must record the path the
+		// store ACTUALLY trusts (canonicalized), not the raw request — else
+		// a symlinked request would name a different path than the boundary
+		// enforces. Compare against the same api canonicalizer the store uses.
+		wantCanon, canonErr := api.CanonicalizeTrustedRoot(root)
+		if canonErr != nil {
+			t.Fatalf("canonicalize test root: %v", canonErr)
+		}
+		if ev.Body["canonical_root"] != wantCanon {
+			t.Errorf("canonical_root=%v, want %v", ev.Body["canonical_root"], wantCanon)
+		}
 		if count, ok := ev.Body["count"].(int); !ok || count != 1 {
 			t.Errorf("count=%v, want 1", ev.Body["count"])
 		}

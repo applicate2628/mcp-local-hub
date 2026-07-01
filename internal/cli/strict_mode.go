@@ -574,21 +574,34 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 // Source is "autostart" because the observable half of this mutation
 // operators care about at a glance is the autostart shim flip; the
 // intent-file write is the other half of the same atomic pair recorded
-// in the body. A failure to open/emit is silently swallowed — this is
-// observability, not a gate, and the command has already succeeded.
+// in the body. The body also carries the OS user that performed the flip
+// (actor) so a copied log or a multi-account host can still attribute the
+// security-posture change — matching the adjacent trusted-root audit which
+// records api.CurrentOSUser().
+//
+// Emission uses TryEmit (NON-blocking flock), not Emit: this runs on the
+// success path while RunStrictMode still holds migration.lock + --once.lock
+// (RunStrictMode's defer locks.Release() has not fired yet). A blocking
+// flock on supervisor-events.log — held or stalled by another writer, e.g.
+// the supervisor's own event stream — would hang the command WHILE holding
+// those locks, making unrelated state mutations see STRICT_MODE_BUSY. The
+// mutation has already committed, so a skipped audit row under contention is
+// the correct best-effort tradeoff. A failure to open/emit is silently
+// swallowed — this is observability, not a gate.
 func emitStrictModeChangedEvent(stateDir string, from, to bool) {
 	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
 	if err != nil {
 		return
 	}
 	defer func() { _ = logger.Close() }()
-	_ = logger.Emit(api.SupervisorEvent{
+	_ = logger.TryEmit(api.SupervisorEvent{
 		Severity: api.SupervisorEventSeverityInfo,
 		Source:   api.SupervisorEventSourceAutostart,
 		Event:    "strict-mode-changed",
 		Body: map[string]any{
-			"from": from,
-			"to":   to,
+			"from":  from,
+			"to":    to,
+			"actor": api.CurrentOSUser(),
 		},
 	})
 }
