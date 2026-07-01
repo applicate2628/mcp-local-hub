@@ -83,7 +83,21 @@ jobs:
           V="$VERSION"
           node -e "const f='npm/package.json';const p=require('./'+f);p.version='$V';for(const k in p.optionalDependencies)p.optionalDependencies[k]='$V';require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
           node npm/generate-platform-packages.js
-          node npm/sync-version.js --inject   # push $V into build.sh so the binary matches
+          node npm/sync-version.js --inject   # push $V into build.sh + versioninfo.json so the binary matches
+
+      # sync-version.js --inject rewrites cmd/mcphub/versioninfo.json (the
+      # SOURCE of the Windows PE FileVersion/ProductVersion resource) but NOT
+      # the compiled cmd/mcphub/resource.syso that `go build` embeds. `go build`
+      # never runs `go generate` implicitly (see `go help generate`), so without
+      # this step a workflow-time version bump would embed a STALE PE resource
+      # in the Windows binaries. Regenerate resource.syso from the freshly
+      # injected versioninfo.json BEFORE the cross-build. The //go:generate
+      # directive (cmd/mcphub/main.go) uses `go run …/goversioninfo@v1.5.0`, so
+      # no separate tool install is needed (same as build.sh / build.ps1).
+      - name: Regenerate Windows version resource (resource.syso) from injected versioninfo.json
+        shell: bash
+        run: |
+          go generate ./cmd/mcphub
 
       - name: Cross-build the 6 platform binaries
         shell: bash

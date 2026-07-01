@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"strings"
 	"testing"
 )
 
@@ -569,12 +570,15 @@ func TestGroupsPhase4b_GroupTokenRowMatchesAllowsInitialize(t *testing.T) {
 func buildHubMcpMuxForTest(t *testing.T, h *HubMcpHandler) http.Handler {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.Handle("/clients/", h)
-	mux.Handle("/g/", h)
-	mux.HandleFunc("/clients", func(w http.ResponseWriter, r *http.Request) {
+	// Derive from the single-owner constants (deep-review r2 P4-4) so this
+	// test-only mux reproduction can never silently drift from the
+	// production mux built in internal/gui/hub_listener.go.
+	mux.Handle(HubClientPrefix, h)
+	mux.Handle(HubGroupPrefix, h)
+	mux.HandleFunc(strings.TrimSuffix(HubClientPrefix, "/"), func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
-	mux.HandleFunc("/g", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc(strings.TrimSuffix(HubGroupPrefix, "/"), func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
