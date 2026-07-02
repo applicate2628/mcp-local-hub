@@ -2302,43 +2302,66 @@ func TestLazyProxy_ProbationWatchdog_ReapsOrphanStartingRowWithNoEndpoint(t *tes
 	}
 }
 
-// TestLazyProxy_DocLifecycle_ProbationBounded503_ThenWarmSetsWarmed is the F2
-// guard: a didOpen during the indexing window fast-fails 503-warming (never a
-// bare deadline-exceeded 200), and a later successful didOpen sets warmed.
-func TestLazyProxy_DocLifecycle_ProbationBounded503_ThenWarmSetsWarmed(t *testing.T) {
+// TestLazyProxy_DocLifecycle_ProbationDeadlineDeliversOnceNoReplay is the
+// Finding 1 guard: a didOpen whose (first) send blocks past our probation budget
+// was ALREADY written to the backend before the deadline fired (writeStdin
+// precedes the response wait). Treating it as delivered (202, refcount KEPT)
+// rather than 503+rollback prevents the client from re-forwarding a duplicate
+// didOpen on retry. No teardown, warmed stays false (no response yet).
+func TestLazyProxy_DocLifecycle_ProbationDeadlineDeliversOnceNoReplay(t *testing.T) {
 	f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
 	p, _ := newTestProxy(t, "mcp-language-server", f)
 	p.cfg.MaterializeWaitBudget = 40 * time.Millisecond
 	h := p.Handler()
 	const uri = "file:///ws/foo.go"
 
-	// First didOpen: the (first) send blocks on the gate until our probation
-	// budget fires → 503-warming, not 200/deadline-exceeded.
+	// Cold didOpen: the send is written to the backend, then blocks on the gate
+	// until our budget fires. The notification is delivered → 202, NOT 503.
 	rr := postDocNotification(t, h, "textDocument/didOpen", uri)
-	if rr.Code != http.StatusServiceUnavailable {
-		t.Fatalf("cold didOpen code = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("cold didOpen code = %d, want 202 (delivered once, no replay); body=%s", rr.Code, rr.Body.String())
 	}
-	if ra := rr.Header().Get("Retry-After"); ra != "15" {
-		t.Fatalf("Retry-After = %q, want 15", ra)
-	}
-	if !strings.Contains(rr.Body.String(), "cold start in progress") {
-		t.Fatalf("body = %s, want cold-start-in-progress", rr.Body.String())
+	if got := f.sendCount.Load(); got != 1 {
+		t.Fatalf("sendCount = %d, want 1 (notification written exactly once)", got)
 	}
 	if p.isWarmed() {
-		t.Fatal("warmed despite probation deadline")
+		t.Fatal("warmed set despite no backend response (only a deadline)")
 	}
 	if sc := f.stopCount.Load(); sc != 0 {
-		t.Fatalf("probation didOpen tore down backend: stopCount=%d", sc)
+		t.Fatalf("probation deadline tore down backend: stopCount=%d", sc)
 	}
 
-	// A second didOpen (first-send gate already consumed, endpoint cached)
-	// succeeds and warms the proxy.
+	// The refcount was NOT rolled back, so a genuine second open of the same URI
+	// is ABSORBED (1->2) and never re-forwarded — proving no duplicate replay. If
+	// the first open had been rolled back (old bug), this would be a 0->1 forward
+	// and reach the backend (sendCount would climb).
 	rr = postDocNotification(t, h, "textDocument/didOpen", uri)
 	if rr.Code != http.StatusAccepted {
-		t.Fatalf("warm didOpen code = %d, want 202; body=%s", rr.Code, rr.Body.String())
+		t.Fatalf("duplicate didOpen code = %d, want 202", rr.Code)
+	}
+	if got := f.sendCount.Load(); got != 1 {
+		t.Fatalf("sendCount = %d after duplicate didOpen, want 1 (first open's refcount must be retained — no replay)", got)
+	}
+}
+
+// TestLazyProxy_DocLifecycle_WarmForwardsOnceAndSetsWarmed confirms a genuinely
+// fast (non-probation) doc-lifecycle forward still works: it reaches the backend
+// exactly once and warms the proxy.
+func TestLazyProxy_DocLifecycle_WarmForwardsOnceAndSetsWarmed(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"} // no gate → instant response
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	h := p.Handler()
+	const uri = "file:///ws/foo.go"
+
+	rr := postDocNotification(t, h, "textDocument/didOpen", uri)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("didOpen code = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := f.sendCount.Load(); got != 1 {
+		t.Fatalf("sendCount = %d, want 1 (forwarded exactly once)", got)
 	}
 	if !p.isWarmed() {
-		t.Fatal("didOpen success did not set warmed")
+		t.Fatal("fast didOpen forward did not set warmed")
 	}
 }
 
@@ -2528,5 +2551,90 @@ func TestLazyProxy_ProbationDwellRowRendersAsStartingContract(t *testing.T) {
 	e := readEntry(t, regPath)
 	if e.Lifecycle != api.LifecycleStarting {
 		t.Fatalf("probation-dwell lifecycle = %q, want the literal %q", e.Lifecycle, api.LifecycleStarting)
+	}
+}
+
+// --- PR #489 commission round: Findings 2 & 3 concurrency guards --------------
+
+// TestLazyProxy_PublishMaterialized_DoesNotRepublishOverConcurrentWarm is the
+// Finding 2 guard: publishMaterializedEndpoint must NOT overwrite an endpoint a
+// concurrent caller already published (and warmed). Materialize returns a fresh
+// wrapper around the SAME running host; republishing would reset warmed=false /
+// bump the generation and throw an ACTIVE backend back under probation. The
+// redundant wrapper is closed but the shared host is NOT stopped.
+func TestLazyProxy_PublishMaterialized_DoesNotRepublishOverConcurrentWarm(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+
+	// Simulate caller 1 having published + warmed an endpoint.
+	existing := &fakeEndpoint{parent: f}
+	p.mu.Lock()
+	p.endpoint = existing
+	p.warmed = true
+	p.endpointGeneration = 7
+	p.endpointPublishedAt = time.Now().Add(-time.Hour)
+	p.mu.Unlock()
+
+	// Caller 2's fn publishes a redundant fresh wrapper — must be a no-op vs the
+	// live warm endpoint.
+	redundant := &fakeEndpoint{parent: f}
+	if err := p.publishMaterializedEndpoint(redundant); err != nil {
+		t.Fatalf("publishMaterializedEndpoint returned err: %v", err)
+	}
+
+	p.mu.Lock()
+	gotEp := p.endpoint
+	gotWarmed := p.warmed
+	gotGen := p.endpointGeneration
+	p.mu.Unlock()
+
+	if gotEp != MCPEndpoint(existing) {
+		t.Fatal("warm endpoint was overwritten by a redundant publish (Finding 2)")
+	}
+	if !gotWarmed {
+		t.Fatal("warmed reset by redundant publish (Finding 2)")
+	}
+	if gotGen != 7 {
+		t.Fatalf("generation bumped 7 -> %d by redundant publish (Finding 2)", gotGen)
+	}
+	if !redundant.closed.Load() {
+		t.Fatal("redundant wrapper was not closed")
+	}
+	if sc := f.stopCount.Load(); sc != 0 {
+		t.Fatalf("Lifecycle.Stop called on redundant publish (would kill the shared host): stopCount=%d", sc)
+	}
+}
+
+// TestLazyProxy_MarkWarmed_ConcurrentTeardownDoesNotOverwriteFailed is the
+// Finding 3 guard: the LifecycleActive write must not overwrite a Failed that a
+// concurrent teardown stamped. markWarmed and onSendFailure run concurrently
+// (under -race); onSendFailure always bumps the generation + stamps Failed, so
+// the registry must ALWAYS end Failed — markWarmed either skips on the generation
+// mismatch or writes Active first (superseded by Failed), never a stale Active
+// last. Repeated to widen the interleaving window.
+func TestLazyProxy_MarkWarmed_ConcurrentTeardownDoesNotOverwriteFailed(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		f := &fakeLifecycle{kind: "mcp-language-server"}
+		p, regPath := newTestProxy(t, "mcp-language-server", f)
+
+		_, gen, err := p.ensureMaterialized(context.Background())
+		if err != nil {
+			t.Fatalf("iter %d: ensureMaterialized: %v", i, err)
+		}
+		p.endBackendRequest()
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); p.markWarmedOnFirstSuccess(gen) }()
+		go func() { defer wg.Done(); p.onSendFailure(errors.New("backend died")) }()
+		wg.Wait()
+
+		if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleFailed {
+			t.Fatalf("iter %d: lifecycle = %q, want Failed (stale Active overwrote a real failure — Finding 3)", i, e.Lifecycle)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = p.Stop(ctx)
+		cancel()
 	}
 }

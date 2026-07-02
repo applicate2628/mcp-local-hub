@@ -719,15 +719,24 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 	defer cancel()
 	resp, err := ep.SendRequest(callCtx, req)
 	if err != nil {
-		// The notification was not delivered, so roll back the transition.
-		p.rollbackDocRef(uri, isOpen)
-		// Probation deadline: our budget elapsed while the backend was indexing
-		// and the client ctx is still live → emit the same 503 "cold start in
-		// progress" (never a bare deadline-exceeded), no teardown (F2).
+		// Probation deadline (Finding 1): our MaterializeWaitBudget elapsed while
+		// the backend was still indexing, and the client ctx is still live. But
+		// SendRequest writes the notification to the backend's stdin BEFORE it
+		// waits for a reply (SendRPC: writeStdin precedes the ctx select), so a
+		// DeadlineExceeded here means the notification has ALREADY been handed to
+		// the backend. A textDocument/didOpen|didClose is fire-and-forget, so
+		// treat it as delivered: 202 and KEEP the refcount. Rolling back + 503
+		// (the earlier F2 behavior) would make the client re-forward the SAME
+		// notification on retry → a duplicate didOpen (protocol violation) or a
+		// premature repeated didClose. No teardown — the backend is healthy, just
+		// slow; warmed stays false (the backend has not yet RESPONDED).
 		if p.isProbationDeadline(r.Context(), warmed, err) {
-			p.writeColdStartInProgress(w, req.ID)
+			w.WriteHeader(http.StatusAccepted)
 			return
 		}
+		// Any other error means the notification was NOT delivered, so roll back
+		// the optimistic refcount transition to keep the count consistent.
+		p.rollbackDocRef(uri, isOpen)
 		// Client-cancel is not a backend failure — see handleToolsCall.
 		if isClientCancelErr(r.Context(), err) {
 			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
@@ -910,6 +919,21 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, uint64
 		return nil, 0, errors.New("lazy proxy is closed")
 	}
 
+	// Finding 2: a concurrent caller may have published (and warmed) an endpoint
+	// between our fast-path miss above and here. Re-check under the lock before
+	// reserving a slot — reserveMaterializedSlot would otherwise downgrade the
+	// registry row Active->Starting and the gate would re-materialize a redundant
+	// wrapper that throws the warm backend back under probation.
+	p.mu.Lock()
+	if p.endpoint != nil {
+		ep := p.endpoint
+		gen := p.endpointGeneration
+		p.beginBackendRequestLocked(time.Now().UTC())
+		p.mu.Unlock()
+		return ep, gen, nil
+	}
+	p.mu.Unlock()
+
 	// Slow path: reserve a cold-start slot (marks Starting BEFORE entering the
 	// gate so `status` shows "starting" while the singleflight is in flight),
 	// then go through the gate.
@@ -920,6 +944,16 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, uint64
 
 	key := p.inflightKey()
 	_, err := p.gate.DoBounded(ctx, key, p.cfg.MaterializeWaitBudget, func(fnCtx context.Context) (any, error) {
+		// Finding 2 (tight-race backstop): if a concurrent caller published an
+		// endpoint after we reserved but before this singleflight fn ran, do NOT
+		// re-materialize — return the live endpoint so publishMaterializedEndpoint
+		// is skipped and warmed/generation are preserved.
+		p.mu.Lock()
+		if live := p.endpoint; live != nil {
+			p.mu.Unlock()
+			return live, nil
+		}
+		p.mu.Unlock()
 		ep, mErr := p.cfg.Lifecycle.Materialize(fnCtx)
 		if mErr != nil {
 			// Stamp the failure from INSIDE the fn so lifecycle bookkeeping does
@@ -1012,6 +1046,20 @@ func (p *LazyProxy) publishMaterializedEndpoint(ep MCPEndpoint) error {
 		p.gate.Forget(p.inflightKey())
 		return errLazyProxyUnpublishable
 	}
+	// Finding 2: a concurrent caller already published an endpoint (and may have
+	// warmed it) while this materialize was in flight. Materialize is idempotent
+	// and returned a fresh wrapper around the SAME already-running host
+	// (b.host != nil), so overwriting p.endpoint here would reset warmed=false /
+	// endpointPublishedAt and bump the generation, throwing an ACTIVE backend
+	// back under probation (spurious 503s + Starting-slot occupancy). Keep the
+	// existing endpoint and discard the redundant wrapper. Close ONLY the wrapper
+	// — do NOT call Lifecycle.Stop(), which would kill the shared host the live
+	// endpoint depends on. The caller re-reads the live p.endpoint.
+	if p.endpoint != nil {
+		p.mu.Unlock()
+		_ = ep.Close()
+		return nil
+	}
 	p.endpoint = ep
 	p.endpointGeneration++
 	p.warmed = false
@@ -1042,14 +1090,24 @@ func (p *LazyProxy) markStartingReserved(now time.Time) {
 // teardown replaced or removed the endpoint and likely stamped Failed), this
 // no-ops so a late success cannot overwrite that Failed with Active (F6a).
 // Idempotent: subsequent calls for the same generation are a no-op too.
+//
+// The generation re-check AND the LifecycleActive write both happen while
+// holding p.mu (Finding 3): a concurrent teardown (onSendFailure / reap*) bumps
+// the generation UNDER p.mu before its own lock-free Failed write, so holding
+// p.mu across our re-check+write forces a safe order — either the teardown's
+// bump lands first (we observe the mismatch and skip) or our Active write lands
+// first and the teardown's Failed supersedes it. Without the lock across the
+// write, the bump could slip between our check and our write and our stale Active
+// would overwrite the teardown's Failed, hiding a real backend death. The write
+// is registry-only (no p.mu re-entry) and warming is a once-per-cold-start event,
+// so the brief I/O under the lock is acceptable.
 func (p *LazyProxy) markWarmedOnFirstSuccess(gen uint64) {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.warmed || p.endpoint == nil || p.endpointGeneration != gen {
-		p.mu.Unlock()
 		return
 	}
 	p.warmed = true
-	p.mu.Unlock()
 	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycleWithTimestamps(
 		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleActive, "",
 		time.Now().UTC(), time.Time{},
