@@ -314,7 +314,7 @@ construct the backend lifecycle. Human invocation is not supported.`,
 	c.Flags().StringVar(&languageFlag, "language", "", "language name matching a manifest entry (required)")
 	c.Flags().StringVar(&serverFlag, "server", "mcp-language-server", "embedded manifest to read LanguageSpec from")
 	c.Flags().IntVar(&hardCapFlag, "materialized-hard-cap", daemon.DefaultLSPMaterializedHardCap, "maximum concurrently materialized LSP backends; 0 disables the cap")
-	c.Flags().DurationVar(&idleTTLFlag, "idle-backend-ttl", daemon.DefaultLSPIdleBackendTTL, "stop materialized LSP backend after this idle duration; 0 disables reaping")
+	c.Flags().DurationVar(&idleTTLFlag, "idle-backend-ttl", daemon.DefaultLSPIdleBackendTTL, "stop materialized LSP backend after this idle duration; 0 disables idle reaping (the cold-start probation watchdog stays active)")
 	// Hidden override for tests and for operators repointing at a non-default
 	// registry layout. Users should never touch this.
 	c.Flags().StringVar(&registryOverride, "registry", "", "override registry YAML path (test/ops)")

@@ -305,6 +305,49 @@ func TestInflightGate_DoBounded_CtxCancelReturnsCtxErr(t *testing.T) {
 	<-winnerDone
 }
 
+// TestInflightGate_HasActiveFlight_TrueWhileFnRunsThenFalse verifies the
+// activeFlights accounting the cold-start-slot gate keys on (F3): HasActiveFlight
+// is false before any flight, true while the singleflight fn is executing, and
+// false again after it returns.
+func TestInflightGate_HasActiveFlight_TrueWhileFnRunsThenFalse(t *testing.T) {
+	g := NewInflightGate(10 * time.Millisecond)
+	if g.HasActiveFlight("k") {
+		t.Fatal("HasActiveFlight true before any flight started")
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		_, _ = g.DoBounded(context.Background(), "k", 10*time.Second, func(ctx context.Context) (any, error) {
+			close(started)
+			<-release
+			return "ep", nil
+		})
+		close(done)
+	}()
+	<-started
+	if !g.HasActiveFlight("k") {
+		t.Fatal("HasActiveFlight false while the materialize fn is running")
+	}
+	if g.HasActiveFlight("other") {
+		t.Fatal("HasActiveFlight true for an unrelated key")
+	}
+
+	close(release)
+	<-done
+	// Poll: the deferred decrement runs on the singleflight goroutine after the
+	// caller returns, so allow a brief settle.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !g.HasActiveFlight("k") {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("HasActiveFlight still true after the flight completed")
+}
+
 func TestInflight_IndependentKeysDoNotInterfere(t *testing.T) {
 	g := NewInflightGate(100 * time.Millisecond)
 	boom := errors.New("boom")

@@ -761,7 +761,7 @@ func TestLazyProxy_EnsureMaterializedReservesCachedEndpointAgainstIdleReaper(t *
 	p.lastBackendActivity = time.Now().Add(-time.Minute)
 	p.mu.Unlock()
 
-	ep, err := p.ensureMaterialized(context.Background())
+	ep, _, err := p.ensureMaterialized(context.Background())
 	if err != nil {
 		t.Fatalf("ensureMaterialized: %v", err)
 	}
@@ -786,7 +786,7 @@ func TestLazyProxy_EnsureMaterializedWaitsForIdleReapStopBeforeLifecycleReuse(t 
 	p.cfg.Lifecycle = f
 	p.cfg.IdleBackendTTL = 10 * time.Millisecond
 
-	first, err := p.ensureMaterialized(context.Background())
+	first, _, err := p.ensureMaterialized(context.Background())
 	if err != nil {
 		t.Fatalf("initial ensureMaterialized: %v", err)
 	}
@@ -808,7 +808,7 @@ func TestLazyProxy_EnsureMaterializedWaitsForIdleReapStopBeforeLifecycleReuse(t 
 	}
 	result := make(chan materializedResult, 1)
 	go func() {
-		ep, err := p.ensureMaterialized(context.Background())
+		ep, _, err := p.ensureMaterialized(context.Background())
 		result <- materializedResult{ep: ep, err: err}
 	}()
 
@@ -844,7 +844,7 @@ func TestLazyProxy_OnSendFailureWaitsForStopBeforeLifecycleReuse(t *testing.T) {
 	p, _ := newTestProxy(t, "mcp-language-server", nil)
 	p.cfg.Lifecycle = f
 
-	first, err := p.ensureMaterialized(context.Background())
+	first, _, err := p.ensureMaterialized(context.Background())
 	if err != nil {
 		t.Fatalf("initial ensureMaterialized: %v", err)
 	}
@@ -863,7 +863,7 @@ func TestLazyProxy_OnSendFailureWaitsForStopBeforeLifecycleReuse(t *testing.T) {
 	}
 	result := make(chan materializedResult, 1)
 	go func() {
-		ep, err := p.ensureMaterialized(context.Background())
+		ep, _, err := p.ensureMaterialized(context.Background())
 		result <- materializedResult{ep: ep, err: err}
 	}()
 
@@ -905,7 +905,7 @@ func TestLazyProxy_StopDuringMaterializeFailsClosed(t *testing.T) {
 	}
 	result := make(chan materializedResult, 1)
 	go func() {
-		ep, err := p.ensureMaterialized(context.Background())
+		ep, _, err := p.ensureMaterialized(context.Background())
 		result <- materializedResult{ep: ep, err: err}
 	}()
 	<-f.materializeStarted
@@ -1343,7 +1343,7 @@ func TestLazyProxy_DefaultMaterializedHardCapAllowsNineConcurrentWorkspaceProbes
 		wg.Add(1)
 		go func(p *LazyProxy) {
 			defer wg.Done()
-			_, err := p.ensureMaterialized(context.Background())
+			_, _, err := p.ensureMaterialized(context.Background())
 			errs <- err
 		}(proxy)
 	}
@@ -1357,11 +1357,43 @@ func TestLazyProxy_DefaultMaterializedHardCapAllowsNineConcurrentWorkspaceProbes
 }
 
 func TestLazyProxy_IdleTTLStopsMaterializedBackend(t *testing.T) {
+	// The idle config must be set on the LazyProxyConfig BEFORE NewLazyProxy so
+	// the background ticker (which NewLazyProxy now starts unconditionally when
+	// the probation watchdog is configured, F4) starts with the fast test
+	// interval. Reconfiguring p.cfg after construction no longer works because
+	// idleStartOnce is already consumed by the watchdog-only ticker.
 	f := &fakeLifecycle{kind: "mcp-language-server"}
-	p, regPath := newTestProxyWithCfg(t, "mcp-language-server", f, 10*time.Millisecond, 100*time.Millisecond)
-	p.cfg.IdleBackendTTL = 30 * time.Millisecond
-	p.cfg.IdleBackendCheckEvery = 10 * time.Millisecond
-	p.startIdleReaper()
+	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	seed := api.NewRegistry(regPath)
+	seed.Put(api.WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "D:/test/ws",
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		TaskName:      "mcp-local-hub-lsp-abcd1234-python",
+		Lifecycle:     "",
+	})
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	p := NewLazyProxy(LazyProxyConfig{
+		WorkspaceKey:          "abcd1234",
+		WorkspacePath:         "D:/test/ws",
+		Language:              "python",
+		BackendKind:           "mcp-language-server",
+		Port:                  0,
+		Lifecycle:             f,
+		RegistryPath:          regPath,
+		InflightMinRetryGap:   10 * time.Millisecond,
+		ToolsCallDebounce:     100 * time.Millisecond,
+		IdleBackendTTL:        30 * time.Millisecond,
+		IdleBackendCheckEvery: 10 * time.Millisecond,
+	})
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = p.Stop(ctx)
+	})
 
 	if rr := postRPC(t, p.Handler(), "tools/call", 1); rr.Code != http.StatusOK {
 		t.Fatalf("tools/call code=%d body=%s", rr.Code, rr.Body.String())
@@ -2164,5 +2196,329 @@ func TestLazyProxy_WarmGoesCold_ReentersBoundedColdPath(t *testing.T) {
 	}
 	if mc := f.materializeCount.Load(); mc != 2 {
 		t.Fatalf("materializeCount = %d, want 2 (initial + re-materialize)", mc)
+	}
+}
+
+// --- P2c commission fixes: F1 abandon-publish, F2 doc-lifecycle probation, ----
+// --- F3 own-flight join, F5 bounded Stop, F6a generation guard ----------------
+
+// TestLazyProxy_AbandonedMaterialize_StillPublishesAndLeavesStarting is the
+// primary F1 guard: the only cold caller abandons on budget expiry (503), yet
+// the detached materialize must STILL publish the endpoint (no leak), so a later
+// call hits the cache, warms, and the row can leave Starting → Active.
+func TestLazyProxy_AbandonedMaterialize_StillPublishesAndLeavesStarting(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server", materializeDelay: 150 * time.Millisecond}
+	p, regPath := newTestProxy(t, "mcp-language-server", f)
+	p.cfg.MaterializeWaitBudget = 20 * time.Millisecond
+	h := p.Handler()
+
+	// Caller abandons at 20ms while the 150ms materialize is still running.
+	rr := postRPC(t, h, "tools/call", 1)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("cold code = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleStarting {
+		t.Fatalf("lifecycle at abandonment = %q, want Starting", e.Lifecycle)
+	}
+
+	// F1: the detached materialize must publish the endpoint even though no
+	// caller was left waiting.
+	waitForCond(t, "endpoint published by detached materialize", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.endpoint != nil
+	})
+	if got := f.materializeCount.Load(); got != 1 {
+		t.Fatalf("materializeCount = %d, want 1", got)
+	}
+
+	// A later call hits the published endpoint (no re-materialize), warms, and
+	// the row leaves Starting → Active.
+	rr = postRPC(t, h, "tools/call", 2)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("warm code = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := f.materializeCount.Load(); got != 1 {
+		t.Fatalf("materializeCount = %d after warm call, want 1 (endpoint was published, not leaked)", got)
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleActive {
+		t.Fatalf("lifecycle after warm = %q, want Active", e.Lifecycle)
+	}
+}
+
+// TestLazyProxy_AbandonedMaterialize_FailureStampsFailed is the F1 failure twin:
+// the only caller abandons on budget expiry, then the detached materialize FAILS
+// — the fn must stamp Failed so the row does not stay Starting forever.
+func TestLazyProxy_AbandonedMaterialize_FailureStampsFailed(t *testing.T) {
+	boom := errors.New("handshake timeout while indexing")
+	f := &fakeLifecycle{kind: "mcp-language-server", materializeErr: boom, materializeDelay: 150 * time.Millisecond}
+	p, regPath := newTestProxy(t, "mcp-language-server", f)
+	p.cfg.MaterializeWaitBudget = 20 * time.Millisecond
+
+	rr := postRPC(t, p.Handler(), "tools/call", 1)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("cold code = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+	// The detached fn fails at ~150ms and MUST stamp Failed with no waiter present.
+	waitForCond(t, "detached failure stamps Failed", func() bool {
+		return readEntry(t, regPath).Lifecycle == api.LifecycleFailed
+	})
+	if le := readEntry(t, regPath).LastError; !strings.Contains(le, "handshake timeout") {
+		t.Fatalf("LastError = %q, want the materialize error", le)
+	}
+}
+
+// TestLazyProxy_ProbationWatchdog_ReapsOrphanStartingRowWithNoEndpoint is the F1
+// belt-and-braces branch: a Starting row with NO endpoint published and no flight
+// running is torn down + stamped Failed so its cold-start slot frees.
+func TestLazyProxy_ProbationWatchdog_ReapsOrphanStartingRowWithNoEndpoint(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, regPath := newTestProxy(t, "mcp-language-server", f)
+	p.cfg.ColdStartMaxProbation = 50 * time.Millisecond
+
+	// Orphan: row Starting, no endpoint, startingSince long ago, no flight.
+	_ = api.NewRegistry(regPath).PutLifecycle("abcd1234", "python", api.LifecycleStarting, "")
+	p.mu.Lock()
+	p.endpoint = nil
+	p.startingSince = time.Now().Add(-time.Minute)
+	p.mu.Unlock()
+
+	p.reapWedgedProbation(time.Now().UTC())
+
+	e := readEntry(t, regPath)
+	if e.Lifecycle != api.LifecycleFailed {
+		t.Fatalf("orphan Starting row not reaped: lifecycle = %q, want Failed", e.Lifecycle)
+	}
+	if got := f.stopCount.Load(); got != 1 {
+		t.Fatalf("Lifecycle.Stop count = %d, want 1 (best-effort teardown)", got)
+	}
+}
+
+// TestLazyProxy_DocLifecycle_ProbationBounded503_ThenWarmSetsWarmed is the F2
+// guard: a didOpen during the indexing window fast-fails 503-warming (never a
+// bare deadline-exceeded 200), and a later successful didOpen sets warmed.
+func TestLazyProxy_DocLifecycle_ProbationBounded503_ThenWarmSetsWarmed(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	p.cfg.MaterializeWaitBudget = 40 * time.Millisecond
+	h := p.Handler()
+	const uri = "file:///ws/foo.go"
+
+	// First didOpen: the (first) send blocks on the gate until our probation
+	// budget fires → 503-warming, not 200/deadline-exceeded.
+	rr := postDocNotification(t, h, "textDocument/didOpen", uri)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("cold didOpen code = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+	if ra := rr.Header().Get("Retry-After"); ra != "15" {
+		t.Fatalf("Retry-After = %q, want 15", ra)
+	}
+	if !strings.Contains(rr.Body.String(), "cold start in progress") {
+		t.Fatalf("body = %s, want cold-start-in-progress", rr.Body.String())
+	}
+	if p.isWarmed() {
+		t.Fatal("warmed despite probation deadline")
+	}
+	if sc := f.stopCount.Load(); sc != 0 {
+		t.Fatalf("probation didOpen tore down backend: stopCount=%d", sc)
+	}
+
+	// A second didOpen (first-send gate already consumed, endpoint cached)
+	// succeeds and warms the proxy.
+	rr = postDocNotification(t, h, "textDocument/didOpen", uri)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("warm didOpen code = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	if !p.isWarmed() {
+		t.Fatal("didOpen success did not set warmed")
+	}
+}
+
+// TestLazyProxy_ColdStartSlots_OwnInFlightJoinNotRefused is the F3 guard: with
+// ColdStartConcurrency other backends already warming, a RETRY that merely joins
+// this proxy's OWN in-flight materialize must be allowed through (it spawns
+// nothing), not refused as slots-busy.
+func TestLazyProxy_ColdStartSlots_OwnInFlightJoinNotRefused(t *testing.T) {
+	// Two foreign Starting rows become port-live only AFTER this proxy's own
+	// flight has started, modeling: cold start begins (0 foreign live) → 503 on
+	// budget → two other backends start → retry must JOIN, not be refused.
+	var foreignLive atomic.Bool
+	orig := materializedSlotPortLiveFn
+	materializedSlotPortLiveFn = func(port int) bool {
+		if port == 9301 || port == 9302 {
+			return foreignLive.Load()
+		}
+		return true
+	}
+	t.Cleanup(func() { materializedSlotPortLiveFn = orig })
+
+	f := &fakeLifecycle{kind: "mcp-language-server", materializeDelay: 400 * time.Millisecond}
+	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	seed := api.NewRegistry(regPath)
+	seed.Put(api.WorkspaceEntry{WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python", Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python", Port: 9200, Lifecycle: api.LifecycleConfigured})
+	seed.Put(api.WorkspaceEntry{WorkspaceKey: "warm0001", WorkspacePath: "D:/test/w1", Language: "go", Backend: "gopls-mcp", TaskName: "mcp-local-hub-lsp-warm0001-go", Port: 9301, Lifecycle: api.LifecycleStarting})
+	seed.Put(api.WorkspaceEntry{WorkspaceKey: "warm0002", WorkspacePath: "D:/test/w2", Language: "rust", Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-warm0002-rust", Port: 9302, Lifecycle: api.LifecycleStarting})
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	p := NewLazyProxy(LazyProxyConfig{
+		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
+		BackendKind: "mcp-language-server", Port: 9200, Lifecycle: f, RegistryPath: regPath,
+		InflightMinRetryGap: 20 * time.Millisecond, ToolsCallDebounce: 100 * time.Millisecond,
+		ColdStartConcurrency:  2,
+		MaterializeWaitBudget: 5 * time.Second,
+	})
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = p.Stop(ctx)
+	})
+	h := p.Handler()
+
+	firstCode := make(chan int, 1)
+	go func() {
+		rr := postRPC(t, h, "tools/call", 1)
+		firstCode <- rr.Code
+	}()
+
+	// Wait until this proxy's own materialize flight is active (endpoint not yet
+	// published — still in the 400ms materialize delay).
+	waitForCond(t, "own materialize flight active", func() bool {
+		return p.gate.HasActiveFlight(p.inflightKey())
+	})
+	// Two foreign Starting rows now go live — the cold-start gate WOULD refuse a
+	// fresh cold start, but this retry joins the running flight (F3).
+	foreignLive.Store(true)
+
+	rr := postRPC(t, h, "tools/call", 2)
+	if strings.Contains(rr.Body.String(), "cold-start slots busy") {
+		t.Fatalf("own in-flight join refused by cold-start gate (F3 regression): %s", rr.Body.String())
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("join code = %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := f.materializeCount.Load(); got != 1 {
+		t.Fatalf("materializeCount = %d, want 1 (retry joined, did not spawn)", got)
+	}
+	if code := <-firstCode; code != http.StatusOK {
+		t.Fatalf("first call code = %d, want 200", code)
+	}
+}
+
+// slowStopLifecycle models the real BackendLifecycle mutex contract: Materialize
+// holds the lifecycle mutex for its whole (blockable) duration, and Stop() must
+// acquire the same mutex — so a slow Materialize makes Stop() block. Used by the
+// F5 bounded-Stop test.
+type slowStopLifecycle struct {
+	mu                 sync.Mutex
+	materializeStarted chan struct{}
+	releaseMaterialize chan struct{}
+	startedOnce        sync.Once
+	stopCount          atomic.Int32
+}
+
+func newSlowStopLifecycle() *slowStopLifecycle {
+	return &slowStopLifecycle{
+		materializeStarted: make(chan struct{}),
+		releaseMaterialize: make(chan struct{}),
+	}
+}
+
+func (f *slowStopLifecycle) Kind() string { return "mcp-language-server" }
+
+func (f *slowStopLifecycle) Materialize(ctx context.Context) (MCPEndpoint, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startedOnce.Do(func() { close(f.materializeStarted) })
+	select {
+	case <-f.releaseMaterialize:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return &fakeEndpoint{parent: &fakeLifecycle{kind: "mcp-language-server"}}, nil
+}
+
+func (f *slowStopLifecycle) Stop() error {
+	f.stopCount.Add(1)
+	f.mu.Lock() // blocks until Materialize releases the mutex, like the real impl
+	defer f.mu.Unlock()
+	return nil
+}
+
+// TestLazyProxy_Stop_BoundedByCtxWhileMaterializeHoldsLifecycleMutex is the F5
+// guard: Lifecycle.Stop() blocks behind a slow Materialize holding the lifecycle
+// mutex, but LazyProxy.Stop must return within its ctx budget rather than wait.
+func TestLazyProxy_Stop_BoundedByCtxWhileMaterializeHoldsLifecycleMutex(t *testing.T) {
+	f := newSlowStopLifecycle()
+	p, _ := newTestProxy(t, "mcp-language-server", nil)
+	p.cfg.Lifecycle = f
+
+	go func() { _, _, _ = p.ensureMaterialized(context.Background()) }()
+	<-f.materializeStarted
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	err := p.Stop(ctx)
+	elapsed := time.Since(start)
+
+	if elapsed > time.Second {
+		t.Fatalf("Stop blocked %v behind the lifecycle mutex; want bounded by ctx (F5)", elapsed)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Stop err = %v, want context.DeadlineExceeded (bounded return)", err)
+	}
+	// Release the materialize so the detached Stop goroutine can finish.
+	close(f.releaseMaterialize)
+}
+
+// TestLazyProxy_MarkWarmed_GenerationGuardSkipsAfterTeardown is the F6a guard: a
+// stale-generation first-success must NOT stamp Active over a Failed that a
+// concurrent teardown wrote.
+func TestLazyProxy_MarkWarmed_GenerationGuardSkipsAfterTeardown(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, regPath := newTestProxy(t, "mcp-language-server", f)
+
+	_, gen, err := p.ensureMaterialized(context.Background())
+	if err != nil {
+		t.Fatalf("ensureMaterialized: %v", err)
+	}
+	p.endBackendRequest()
+
+	// A concurrent teardown stamps Failed and bumps the endpoint generation.
+	p.onSendFailure(errors.New("backend subprocess exited"))
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleFailed {
+		t.Fatalf("pre-condition: lifecycle = %q, want Failed after teardown", e.Lifecycle)
+	}
+
+	// A late first-success carrying the STALE generation must be a no-op.
+	p.markWarmedOnFirstSuccess(gen)
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleFailed {
+		t.Fatalf("stale-generation markWarmed overwrote Failed with %q (F6a regression)", e.Lifecycle)
+	}
+}
+
+// TestLazyProxy_ProbationDwellRowRendersAsStartingContract is the F6b
+// consumer-contract sweep: while a backend dwells in probation the registry row
+// stays Starting, and the lifecycle string is exactly "starting" — the literal
+// downstream consumers (`mcphub status` renderHealthCell, GUI LspMatrix badge)
+// switch on. A dwell that reported anything else would silently break them.
+func TestLazyProxy_ProbationDwellRowRendersAsStartingContract(t *testing.T) {
+	if api.LifecycleStarting != "starting" {
+		t.Fatalf("LifecycleStarting constant = %q, want %q (consumer string contract)", api.LifecycleStarting, "starting")
+	}
+	f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
+	p, regPath := newTestProxy(t, "mcp-language-server", f)
+	p.cfg.MaterializeWaitBudget = 40 * time.Millisecond
+
+	// Cold tools/call: materialize succeeds, first send blocks (indexing), our
+	// budget fires → 503. Throughout the dwell the row is Starting.
+	rr := postRPC(t, p.Handler(), "tools/call", 1)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d, want 503", rr.Code)
+	}
+	e := readEntry(t, regPath)
+	if e.Lifecycle != api.LifecycleStarting {
+		t.Fatalf("probation-dwell lifecycle = %q, want the literal %q", e.Lifecycle, api.LifecycleStarting)
 	}
 }

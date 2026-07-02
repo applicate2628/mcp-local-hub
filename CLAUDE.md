@@ -1644,3 +1644,48 @@ listener takes the `/g/<group>/mcp` group routes down alongside the
 `hub-listener-unresponsive` warn + the "restart the GUI" recovery above
 apply identically to groups; there is no separate group-listener health
 signal.
+
+## LSP router — cold-start 503-warming contract (P2c)
+
+The GUI LSP router (`127.0.0.1:<guiport>/lsp/<lang>/mcp`) fans forwarded
+methods (`tools/call` and other non-handshake methods) to a per-
+(workspace, language) lazy-proxy daemon that materializes its heavy
+backend (gopls / mcp-language-server) on first use. Handshake methods
+(`initialize`, `tools/list`, `resources/list`, `prompts/list`, `ping`,
+`notifications/*`) are answered SYNTHETICALLY (no backend touch) and stay
+fast — so `claude mcp list` never sees a 503 from this router (its own
+slowness is claude-side npx/remote-sweep cost, NOT this router; do not
+re-file that as a router bug).
+
+**Cold forwarded calls fast-fail with 503 + retry, they do not hang.**
+The first forwarded call per (workspace, language) after the backend is
+cold no longer holds the connection for the full upstream budget. The
+daemon bounds the wait by `MaterializeWaitBudget` (default 15s) and then
+returns `HTTP 503` + a JSON-RPC error whose MESSAGE is the load-bearing
+retry signal (`Retry-After` header is decoration for clients that honor
+it). The router forwards the 503 + `Retry-After` verbatim. Two cold
+refusals exist:
+
+- **Materialize / probation in progress** → `503`, `Retry-After: 15`,
+  message `language backend cold start in progress (...); retry in ~15s`.
+  Covers both the bounded materialize wait AND the post-handshake
+  indexing pause (gopls indexes ~35-45s after the MCP handshake; the row
+  stays `starting` — NOT `active` — until the first successful forwarded
+  response, so `mcphub status` / GUI truthfully shows the backend is not
+  yet usable).
+- **Cold-start slots busy** → `503`, `Retry-After: 30`, message
+  `LSP cold-start slots busy (<n> backends warming); retry in ~30s`. At
+  most `ColdStartConcurrency` (default 2) OTHER backends may be in the
+  cold-start/indexing window at once; further colds are refused WITHOUT
+  spawning. A retry that merely joins THIS proxy's own already-running
+  materialize is exempt (it spawns nothing).
+
+The client (claude / codex) surfaces the 503 as a tool error to the
+model, which retries on the "retry" message — exactly like the serena
+idle-wake 503 already behaves. Retry IS the queue; there is no held
+connection. A backend wedged in the indexing window past
+`ColdStartMaxProbation` (default 5m) is torn down by a probation
+watchdog on the idle-reaper tick (which now runs whenever idle-reaping
+OR probation is configured, so `--idle-backend-ttl=0` no longer disables
+the watchdog), freeing its cold-start slot. Config defaults live in
+`daemon.NewLazyProxy`; no manifest/GUI knobs this round.

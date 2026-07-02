@@ -49,6 +49,14 @@ type InflightGate struct {
 
 	mu          sync.Mutex
 	lastFailure map[string]failureEntry
+	// activeFlights counts, per key, how many singleflight fn executions are
+	// currently in flight (0 or 1 under singleflight, but tracked as a count for
+	// robustness against overlapping forget/re-enter). HasActiveFlight exposes
+	// this so a caller that already has a materialize running for its key can
+	// distinguish "join my own in-flight work (spawns nothing)" from "start a
+	// fresh cold start" — used by the cold-start-slot gate to avoid refusing a
+	// retry that merely joins the flight it started (F3).
+	activeFlights map[string]int
 }
 
 type failureEntry struct {
@@ -64,8 +72,9 @@ func NewInflightGate(minRetryGap time.Duration) *InflightGate {
 		minRetryGap = 0
 	}
 	return &InflightGate{
-		minRetryGap: minRetryGap,
-		lastFailure: map[string]failureEntry{},
+		minRetryGap:   minRetryGap,
+		lastFailure:   map[string]failureEntry{},
+		activeFlights: map[string]int{},
 	}
 }
 
@@ -96,6 +105,14 @@ func (g *InflightGate) Do(ctx context.Context, key string, fn func(context.Conte
 //
 // After a failure, further calls within minRetryGap return the cached error
 // without invoking fn. A successful call clears the failure state for key.
+//
+// Panic semantics (accepted tradeoff): singleflight re-raises a panic from fn
+// in the goroutine that reads the result channel. The lazy-proxy materialize fn
+// does not recover panics, so a panic during a cold start crashes the daemon
+// process. That is intentional — the supervisor's Job-Object reaper respawns the
+// proxy from persisted intent, and a crash is a louder, more debuggable signal
+// than a silently-poisoned singleflight key. The activeFlights bookkeeping below
+// is unwound by a deferred decrement even on the panic path.
 func (g *InflightGate) DoBounded(ctx context.Context, key string, budget time.Duration, fn func(context.Context) (any, error)) (any, error) {
 	// Fast-path throttle check.
 	g.mu.Lock()
@@ -108,6 +125,22 @@ func (g *InflightGate) DoBounded(ctx context.Context, key string, budget time.Du
 	g.mu.Unlock()
 
 	ch := g.sf.DoChan(key, func() (any, error) {
+		// Mark this key as having an in-flight materialize for its whole
+		// singleflight execution so HasActiveFlight can report it. The deferred
+		// decrement runs even on the fn-panic unwind path.
+		g.mu.Lock()
+		g.activeFlights[key]++
+		g.mu.Unlock()
+		defer func() {
+			g.mu.Lock()
+			if g.activeFlights[key] <= 1 {
+				delete(g.activeFlights, key)
+			} else {
+				g.activeFlights[key]--
+			}
+			g.mu.Unlock()
+		}()
+
 		// Re-check throttle inside the singleflight winner path so callers
 		// that raced past the outer fast-path cannot bypass minRetryGap.
 		g.mu.Lock()
@@ -164,4 +197,14 @@ func (g *InflightGate) Forget(key string) {
 	g.mu.Lock()
 	delete(g.lastFailure, key)
 	g.mu.Unlock()
+}
+
+// HasActiveFlight reports whether a materialize fn for key is currently running
+// under the gate. The cold-start-slot gate uses it to let a retry that would
+// merely JOIN this proxy's own in-flight materialize through, instead of
+// refusing it as if it were a fresh cold start that spawns another backend (F3).
+func (g *InflightGate) HasActiveFlight(key string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.activeFlights[key] > 0
 }

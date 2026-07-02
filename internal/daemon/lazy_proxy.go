@@ -118,6 +118,13 @@ var materializedSlotPortLiveFn = lazyProxyPortLive
 // count for the operator-facing 503 message.
 var errColdStartSlotsBusy = errors.New("cold-start slots busy")
 
+// errLazyProxyUnpublishable is returned by publishMaterializedEndpoint (and
+// surfaced by the materialize fn) when a freshly materialized endpoint cannot be
+// installed because the proxy is closing or mid-teardown. The endpoint is torn
+// down before it is returned; the caller treats it like any other materialize
+// failure but does NOT stamp the row Failed (see ensureMaterialized).
+var errLazyProxyUnpublishable = errors.New("lazy proxy closed before endpoint publish")
+
 type coldStartSlotsBusyError struct{ warming int }
 
 func (e *coldStartSlotsBusyError) Error() string {
@@ -166,6 +173,18 @@ type LazyProxy struct {
 	// stays !warmed past ColdStartMaxProbation from this instant. Zero when no
 	// endpoint is published.
 	endpointPublishedAt time.Time
+	// endpointGeneration is bumped on every endpoint publish AND every teardown.
+	// A request captures the generation when it obtains the endpoint and passes
+	// it to markWarmedOnFirstSuccess, which no-ops if the generation changed in
+	// the meantime — so a late first-success cannot stamp LifecycleActive over a
+	// Failed that a concurrent teardown just wrote (F6a).
+	endpointGeneration uint64
+	// startingSince is when reserveMaterializedSlot last set this row Starting
+	// without an endpoint yet published. Cleared on publish and on every
+	// teardown. The probation watchdog's belt-and-braces branch uses it to reap
+	// an orphan Starting row that never got an endpoint published (e.g. if the
+	// publish-from-fn path were ever skipped), so the cold-start slot frees (F1).
+	startingSince time.Time
 
 	inflightBackendRequests int
 	lastBackendActivity     time.Time
@@ -306,12 +325,14 @@ func (p *LazyProxy) Stop(ctx context.Context) error {
 		_ = p.endpoint.Close()
 		p.endpoint = nil
 	}
+	p.endpointGeneration++
 	p.warmed = false
 	p.endpointPublishedAt = time.Time{}
+	p.startingSince = time.Time{}
 	p.lastBackendActivity = time.Time{}
 	p.mu.Unlock()
 	p.resetDocRefs()
-	stopErr := p.cfg.Lifecycle.Stop()
+	stopErr := p.stopLifecycleBounded(ctx)
 	if stopErr != nil {
 		fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: lifecycle stop: %v\n", stopErr)
 	}
@@ -330,6 +351,25 @@ func (p *LazyProxy) Stop(ctx context.Context) error {
 		return stopErr
 	}
 	return stopErr
+}
+
+// stopLifecycleBounded runs Lifecycle.Stop() on a detached goroutine and waits
+// for it bounded by ctx. BackendLifecycle.Stop takes no context and serializes
+// on the lifecycle impl's own mutex, which a slow Materialize can hold for up to
+// the detached materializeHardCeiling (120s). Blocking the proxy's graceful
+// Stop() on that would make it miss its (typically 5s) shutdown budget (F5).
+// On ctx expiry we return ctx.Err() and let the process-exit / supervisor
+// Job-Object reaper collect the still-materializing backend; the detached
+// goroutine still completes Lifecycle.Stop() once Materialize releases the mutex.
+func (p *LazyProxy) stopLifecycleBounded(ctx context.Context) error {
+	done := make(chan error, 1)
+	go func() { done <- p.cfg.Lifecycle.Stop() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (p *LazyProxy) inflightKey() string {
@@ -468,7 +508,7 @@ func isAllowedOrigin(origin string) bool {
 }
 
 func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req *JSONRPCRequest) {
-	ep, err := p.ensureMaterialized(r.Context())
+	ep, gen, err := p.ensureMaterialized(r.Context())
 	if err != nil {
 		if p.writeColdStartRefusal(w, req.ID, err) {
 			return
@@ -512,7 +552,7 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 		return
 	}
 	// First successful response ends probation and stamps LifecycleActive.
-	p.markWarmedOnFirstSuccess()
+	p.markWarmedOnFirstSuccess(gen)
 	// Only record the tools-call timestamp on successful forward.
 	p.debounceWriteToolsCallTimestamp()
 	out, err := json.Marshal(resp)
@@ -524,7 +564,7 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 }
 
 func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *JSONRPCRequest) {
-	ep, err := p.ensureMaterialized(r.Context())
+	ep, gen, err := p.ensureMaterialized(r.Context())
 	if err != nil {
 		if p.writeColdStartRefusal(w, req.ID, err) {
 			return
@@ -556,7 +596,7 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 		return
 	}
-	p.markWarmedOnFirstSuccess()
+	p.markWarmedOnFirstSuccess(gen)
 	out, err := json.Marshal(resp)
 	if err != nil {
 		writeRPCError(w, req.ID, rpcErrInternalError, "marshal response: "+err.Error())
@@ -652,7 +692,7 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 
-	ep, err := p.ensureMaterialized(r.Context())
+	ep, gen, err := p.ensureMaterialized(r.Context())
 	if err != nil {
 		// Materialization did not yield an endpoint: the upstream forward will
 		// not happen, so roll back the refcount transition we optimistically
@@ -669,11 +709,26 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	defer p.endBackendRequest()
-	resp, err := ep.SendRequest(r.Context(), req)
+	// Probation-bound the forward while !warmed, exactly like handleToolsCall/
+	// handleForward. Without this a didOpen/didClose that arrives during the
+	// backend's post-handshake indexing window would hold the connection until
+	// the client's own deadline and surface a bare "context deadline exceeded"
+	// (HTTP 200) to a client on a direct per-daemon port (F2).
+	warmed := p.isWarmed()
+	callCtx, cancel := p.boundedCallCtx(r.Context(), warmed)
+	defer cancel()
+	resp, err := ep.SendRequest(callCtx, req)
 	if err != nil {
-		// Client-cancel is not a backend failure — see handleToolsCall.
 		// The notification was not delivered, so roll back the transition.
 		p.rollbackDocRef(uri, isOpen)
+		// Probation deadline: our budget elapsed while the backend was indexing
+		// and the client ctx is still live → emit the same 503 "cold start in
+		// progress" (never a bare deadline-exceeded), no teardown (F2).
+		if p.isProbationDeadline(r.Context(), warmed, err) {
+			p.writeColdStartInProgress(w, req.ID)
+			return
+		}
+		// Client-cancel is not a backend failure — see handleToolsCall.
 		if isClientCancelErr(r.Context(), err) {
 			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 			return
@@ -682,6 +737,8 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 		return
 	}
+	// The backend served a request → first success ends probation (F2).
+	p.markWarmedOnFirstSuccess(gen)
 	if resp != nil && resp.Error != nil {
 		// Backend rejected the lifecycle notification, so do not retain a
 		// refcount that would suppress a future legitimate open/close. The
@@ -812,20 +869,30 @@ func (p *LazyProxy) handleSSE(w http.ResponseWriter, r *http.Request) {
 // --- materialization -------------------------------------------------------
 
 // ensureMaterialized returns the cached endpoint or materializes a new one
-// via the inflight gate. Classifies failures to pick Missing vs Failed in
-// the registry.
-func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error) {
+// via the inflight gate, and returns the endpoint generation the caller must
+// pass to markWarmedOnFirstSuccess. Classifies failures to pick Missing vs
+// Failed in the registry.
+//
+// Endpoint publication and lifecycle bookkeeping happen INSIDE the singleflight
+// fn (the detached winner goroutine), not in the caller after DoBounded returns.
+// This is load-bearing for F1: if every bounded waiter abandons the join
+// (budget-expiry 503 or ctx-cancel) before the materialize finishes, a
+// caller-side publish would never run — leaking the spawned backend and leaving
+// a permanent Starting row that counts against every other proxy's cold-start
+// slot. Publishing from the fn makes publication independent of any waiter.
+func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, uint64, error) {
 	// Fast path: cache hit.
 	for {
 		if p.closed.Load() {
-			return nil, errors.New("lazy proxy is closed")
+			return nil, 0, errors.New("lazy proxy is closed")
 		}
 		p.mu.Lock()
 		if p.endpoint != nil {
 			ep := p.endpoint
+			gen := p.endpointGeneration
 			p.beginBackendRequestLocked(time.Now().UTC())
 			p.mu.Unlock()
-			return ep, nil
+			return ep, gen, nil
 		}
 		if !p.reaping {
 			p.mu.Unlock()
@@ -835,94 +902,154 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error)
 
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, 0, ctx.Err()
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
 	if p.closed.Load() {
-		return nil, errors.New("lazy proxy is closed")
+		return nil, 0, errors.New("lazy proxy is closed")
 	}
 
-	// Slow path: go through the gate. Mark Starting BEFORE entering the gate
-	// so `status` shows "starting" while the singleflight is in-flight.
-	reg := api.NewRegistry(p.cfg.RegistryPath)
+	// Slow path: reserve a cold-start slot (marks Starting BEFORE entering the
+	// gate so `status` shows "starting" while the singleflight is in flight),
+	// then go through the gate.
 	if err := p.reserveMaterializedSlot(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
+	p.markStartingReserved(time.Now().UTC())
 
 	key := p.inflightKey()
-	v, err := p.gate.DoBounded(ctx, key, p.cfg.MaterializeWaitBudget, func(ctx context.Context) (any, error) {
-		return p.cfg.Lifecycle.Materialize(ctx)
+	_, err := p.gate.DoBounded(ctx, key, p.cfg.MaterializeWaitBudget, func(fnCtx context.Context) (any, error) {
+		ep, mErr := p.cfg.Lifecycle.Materialize(fnCtx)
+		if mErr != nil {
+			// Stamp the failure from INSIDE the fn so lifecycle bookkeeping does
+			// not depend on a bounded waiter still being present. An
+			// abandoned-but-FAILED materialize must still leave the row
+			// Failed/Missing, never stuck Starting (F1).
+			state := api.LifecycleFailed
+			if IsMissingBinaryErr(mErr) {
+				state = api.LifecycleMissing
+			}
+			_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
+				p.cfg.WorkspaceKey, p.cfg.Language, state, mErr.Error())
+			return nil, mErr
+		}
+		// Publish from INSIDE the fn too, so an abandoned-but-SUCCESSFUL
+		// materialize (every bounded waiter left on budget-expiry / ctx-cancel)
+		// still installs the endpoint instead of leaking the spawned backend and
+		// a permanent Starting row (F1). The row stays Starting here; the
+		// LifecycleActive write is DEFERRED to the first successful forwarded
+		// response (markWarmedOnFirstSuccess), because a gopls-style backend
+		// indexes for tens of seconds after the MCP handshake and is not usable
+		// until then.
+		if pErr := p.publishMaterializedEndpoint(ep); pErr != nil {
+			return nil, pErr
+		}
+		return ep, nil
 	})
 	if err != nil {
-		// Bounded-wait expiry: the materialize is still running in the
-		// background and will land in the gate cache-line for the next caller.
-		// This is NOT a backend failure — leave the row Starting (do not stamp
-		// Failed/Missing) and let the handler emit a 503 "cold start in progress".
-		if errors.Is(err, ErrMaterializeInFlight) {
-			return nil, err
+		// ErrMaterializeInFlight: the materialize is still running (and will
+		// publish or stamp Failed from the fn); the handler maps it to a 503
+		// "cold start in progress". A caller-ctx cancel while joining is likewise
+		// not a failure this caller must record — the detached materialize
+		// continues and its fn owns the outcome. A genuine materialize error was
+		// already stamped inside the fn; a THROTTLE-cached error skipped the fn,
+		// so re-stamp here so the optimistic Starting row does not linger. Skip
+		// the stamp when closing (errLazyProxyUnpublishable) so a clean shutdown
+		// is not recorded as a failure.
+		if errors.Is(err, ErrMaterializeInFlight) || ctx.Err() != nil || p.closed.Load() {
+			return nil, 0, err
 		}
-		// The CALLER's own context was canceled / timed out while joining the
-		// bounded materialize (the DoBounded ctx.Done arm). The materialize
-		// continues detached; a client disconnect is not a backend failure, so
-		// leave the row Starting rather than flipping it to Failed.
-		if ctx.Err() != nil {
-			return nil, err
+		if errors.Is(err, errLazyProxyUnpublishable) {
+			return nil, 0, err
 		}
 		state := api.LifecycleFailed
 		if IsMissingBinaryErr(err) {
 			state = api.LifecycleMissing
 		}
-		_ = reg.PutLifecycle(p.cfg.WorkspaceKey, p.cfg.Language, state, err.Error())
-		return nil, err
+		_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
+			p.cfg.WorkspaceKey, p.cfg.Language, state, err.Error())
+		return nil, 0, err
 	}
-	ep, ok := v.(MCPEndpoint)
-	if !ok {
-		_ = reg.PutLifecycle(p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleFailed,
-			fmt.Sprintf("gate returned non-endpoint type %T", v))
-		return nil, fmt.Errorf("gate returned non-endpoint type %T", v)
-	}
-	// Publish the cached endpoint. Race note: two goroutines can exit the
-	// gate's singleflight simultaneously (one winner + N losers) and each
-	// observes the same ep. Storing ep twice is harmless since both point
-	// at the same underlying object.
-	//
-	// The row stays LifecycleStarting here: the LifecycleActive write is
-	// DEFERRED to the first successful forwarded response (markWarmedOnFirstSuccess),
-	// because a gopls-style backend indexes for tens of seconds after the MCP
-	// handshake and is not usable until then. A Starting-count-based cold-start
-	// gate would under-protect if Active were stamped at materialize-success.
-	now := time.Now().UTC()
+	// The fn published the endpoint. Re-read it under the lock together with the
+	// current generation and register this caller's in-flight request. Losers of
+	// the singleflight all arrive here and re-read the same published endpoint,
+	// so publication is idempotent. If a teardown niled it between publish and
+	// now, surface that as an error rather than hand back a stale object.
 	p.mu.Lock()
 	if p.closed.Load() {
 		p.mu.Unlock()
+		return nil, 0, errors.New("lazy proxy is closed")
+	}
+	ep := p.endpoint
+	if ep == nil {
+		p.mu.Unlock()
+		return nil, 0, errors.New("materialized endpoint torn down before use")
+	}
+	gen := p.endpointGeneration
+	p.beginBackendRequestLocked(time.Now().UTC())
+	p.mu.Unlock()
+	return ep, gen, nil
+}
+
+// publishMaterializedEndpoint installs a freshly materialized endpoint as the
+// live backend. It runs INSIDE the singleflight fn (the detached winner
+// goroutine) so the endpoint is published even when every bounded waiter has
+// already abandoned the join (F1). Bumps the endpoint generation and clears the
+// probation flags (warmed false, freshly published, startingSince cleared).
+// Returns errLazyProxyUnpublishable — after tearing the endpoint down — when the
+// proxy is closing or mid-teardown, so the fn reports failure rather than
+// publishing into a dead proxy.
+func (p *LazyProxy) publishMaterializedEndpoint(ep MCPEndpoint) error {
+	now := time.Now().UTC()
+	p.mu.Lock()
+	if p.closed.Load() || p.reaping {
+		p.mu.Unlock()
 		_ = ep.Close()
 		if stopErr := p.cfg.Lifecycle.Stop(); stopErr != nil {
-			fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: lifecycle stop after closed materialize: %v\n", stopErr)
+			fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: lifecycle stop after unpublishable materialize: %v\n", stopErr)
 		}
 		p.gate.Forget(p.inflightKey())
-		return nil, errors.New("lazy proxy is closed")
+		return errLazyProxyUnpublishable
 	}
 	p.endpoint = ep
+	p.endpointGeneration++
 	p.warmed = false
 	p.endpointPublishedAt = now
-	p.beginBackendRequestLocked(now)
+	p.startingSince = time.Time{}
 	p.mu.Unlock()
-	return ep, nil
+	return nil
+}
+
+// markStartingReserved records when reserveMaterializedSlot set this row Starting
+// without an endpoint yet published, so the probation watchdog's belt-and-braces
+// branch can reap an orphan Starting row (F1).
+func (p *LazyProxy) markStartingReserved(now time.Time) {
+	p.mu.Lock()
+	// Only arm the orphan timer while no endpoint is published; a concurrent
+	// publish/warm must win over a late reserve stamp.
+	if p.endpoint == nil {
+		p.startingSince = now
+	}
+	p.mu.Unlock()
 }
 
 // markWarmedOnFirstSuccess flips warmed true on the FIRST successful forwarded
 // response and, on that transition only, performs the deferred LifecycleActive
 // registry write (with LastMaterializedAt) that ensureMaterialized no longer
-// does at materialize-success. Idempotent: subsequent calls are a no-op.
-func (p *LazyProxy) markWarmedOnFirstSuccess() {
+// does at materialize-success. gen is the endpoint generation the caller
+// captured when it obtained the endpoint: if the generation has since changed (a
+// teardown replaced or removed the endpoint and likely stamped Failed), this
+// no-ops so a late success cannot overwrite that Failed with Active (F6a).
+// Idempotent: subsequent calls for the same generation are a no-op too.
+func (p *LazyProxy) markWarmedOnFirstSuccess(gen uint64) {
 	p.mu.Lock()
-	firstSuccess := !p.warmed
-	p.warmed = true
-	p.mu.Unlock()
-	if !firstSuccess {
+	if p.warmed || p.endpoint == nil || p.endpointGeneration != gen {
+		p.mu.Unlock()
 		return
 	}
+	p.warmed = true
+	p.mu.Unlock()
 	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycleWithTimestamps(
 		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleActive, "",
 		time.Now().UTC(), time.Time{},
@@ -986,7 +1113,12 @@ func (p *LazyProxy) reserveMaterializedSlot() error {
 	// Cold-start-concurrency gate: refuse to ENTER the materialize path (no
 	// spawn, no gate) when too many other backends are already warming. The
 	// client retry IS the queue — no in-process waiting, no held connection.
-	if coldGateOn && startingLive >= p.cfg.ColdStartConcurrency {
+	// EXCEPTION (F3): skip the gate when this proxy already has its OWN
+	// materialize in flight. A retry after a bounded-wait 503 merely JOINS the
+	// running singleflight (spawns nothing), so refusing it here would starve the
+	// very retry the 503 asked for and keep this backend from ever warming.
+	if coldGateOn && startingLive >= p.cfg.ColdStartConcurrency &&
+		!p.gate.HasActiveFlight(p.inflightKey()) {
 		return &coldStartSlotsBusyError{warming: startingLive}
 	}
 	entry.Lifecycle = api.LifecycleStarting
@@ -1030,12 +1162,16 @@ func lazyProxyPortLive(port int) bool {
 }
 
 func (p *LazyProxy) startIdleReaper() {
-	// The single background ticker drives both the idle reaper AND the
-	// cold-start probation watchdog. It is gated on IdleBackendTTL (the
-	// production workspace-proxy always sets it, so the probation watchdog
-	// piggybacks there per design); a proxy with idle reaping disabled runs no
-	// background goroutine and relies on direct reapWedgedProbation calls.
-	if p.cfg.IdleBackendTTL <= 0 {
+	// The single background ticker drives BOTH the idle reaper AND the cold-start
+	// probation watchdog. Start it when EITHER is configured (F4): gating it on
+	// IdleBackendTTL alone meant `--idle-backend-ttl=0` silently disabled the
+	// probation watchdog while the cold-start gate stayed on, so a wedged Starting
+	// backend would hold its slot forever. Each per-tick reaper self-skips when
+	// its own knob is off (reapIdleBackend on IdleBackendTTL<=0; reapWedgedProbation
+	// on ColdStartMaxProbation<=0), so a watchdog-only ticker never idle-reaps.
+	idleOn := p.cfg.IdleBackendTTL > 0
+	watchdogOn := p.cfg.ColdStartMaxProbation > 0 && p.cfg.ColdStartConcurrency > 0
+	if !idleOn && !watchdogOn {
 		return
 	}
 	interval := p.cfg.IdleBackendCheckEvery
@@ -1085,8 +1221,10 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 	ep = p.endpoint
 	p.reaping = true
 	p.endpoint = nil
+	p.endpointGeneration++
 	p.warmed = false
 	p.endpointPublishedAt = time.Time{}
+	p.startingSince = time.Time{}
 	p.lastBackendActivity = time.Time{}
 	p.mu.Unlock()
 
@@ -1110,49 +1248,107 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 	p.mu.Unlock()
 }
 
-// reapWedgedProbation tears down a materialized backend that has been published
-// for longer than ColdStartMaxProbation without ever serving a first successful
-// response (still !warmed). Such a backend is wedged in the cold-start window —
-// holding a cold-start slot and a Starting registry row that would otherwise
-// suppress a healthy retry. Teardown (Stop + gate.Forget + LifecycleFailed)
-// frees the slot: the row leaves Starting so the cold-start gate stops counting
-// it, and the next request re-enters the bounded cold path cleanly. Unlike the
-// idle reaper it deliberately does NOT skip on inflightBackendRequests > 0 — the
-// in-flight request IS the wedged one.
+// reapWedgedProbation frees a cold-start slot held by a backend wedged in the
+// probation window. It has two branches:
+//
+//	Branch A (primary): a materialized backend that has been published for longer
+//	than ColdStartMaxProbation without ever serving a first successful response
+//	(still !warmed). It holds a cold-start slot and a Starting registry row that
+//	would otherwise suppress a healthy retry. Unlike the idle reaper it
+//	deliberately does NOT skip on inflightBackendRequests > 0 — the in-flight
+//	request IS the wedged one.
+//
+//	Branch B (belt-and-braces, F1): NO endpoint was ever published, but
+//	reserveMaterializedSlot set a Starting row that neither a publish nor a
+//	teardown cleared, and no materialize flight is currently running. Left alone
+//	this orphan Starting row would count against every other proxy's cold-start
+//	slots forever. This branch should be unreachable because publication now
+//	happens inside the singleflight fn, but it backstops any path that leaves a
+//	Starting row without an endpoint.
+//
+// Both stamp LifecycleFailed and best-effort Stop the lifecycle so the slot frees
+// and the next request re-enters the bounded cold path cleanly.
 func (p *LazyProxy) reapWedgedProbation(now time.Time) {
 	if p.closed.Load() || p.cfg.ColdStartMaxProbation <= 0 {
 		return
 	}
-	var ep MCPEndpoint
 	p.mu.Lock()
-	if p.endpoint == nil ||
-		p.reaping ||
-		p.warmed ||
-		p.endpointPublishedAt.IsZero() ||
-		now.Sub(p.endpointPublishedAt) < p.cfg.ColdStartMaxProbation {
+	if p.reaping {
 		p.mu.Unlock()
 		return
 	}
-	ep = p.endpoint
+	// Branch A — published-but-never-warmed backend.
+	if p.endpoint != nil {
+		if p.warmed ||
+			p.endpointPublishedAt.IsZero() ||
+			now.Sub(p.endpointPublishedAt) < p.cfg.ColdStartMaxProbation {
+			p.mu.Unlock()
+			return
+		}
+		ep := p.endpoint
+		p.reaping = true
+		p.endpoint = nil
+		p.endpointGeneration++
+		p.warmed = false
+		p.endpointPublishedAt = time.Time{}
+		p.startingSince = time.Time{}
+		p.lastBackendActivity = time.Time{}
+		p.mu.Unlock()
+
+		_ = ep.Close()
+		p.resetDocRefs()
+		p.teardownWedgedLifecycle(fmt.Sprintf("backend never served a first response within %s", p.cfg.ColdStartMaxProbation))
+		return
+	}
+	// Branch B — orphan Starting row with no endpoint.
+	if p.startingSince.IsZero() ||
+		now.Sub(p.startingSince) < p.cfg.ColdStartMaxProbation ||
+		p.gate.HasActiveFlight(p.inflightKey()) {
+		p.mu.Unlock()
+		return
+	}
 	p.reaping = true
-	p.endpoint = nil
-	p.warmed = false
-	p.endpointPublishedAt = time.Time{}
-	p.lastBackendActivity = time.Time{}
+	p.startingSince = time.Time{}
 	p.mu.Unlock()
 
-	_ = ep.Close()
+	// Only reap if the registry row really is still Starting; if it has already
+	// advanced (a teardown stamped Failed/Configured, or a warm stamped Active
+	// elsewhere) there is no orphan slot to free.
+	if !p.registryRowIsStarting() {
+		p.mu.Lock()
+		p.reaping = false
+		p.mu.Unlock()
+		return
+	}
 	p.resetDocRefs()
+	p.teardownWedgedLifecycle("backend never published an endpoint within " + p.cfg.ColdStartMaxProbation.String())
+}
+
+// teardownWedgedLifecycle is the shared tail of reapWedgedProbation's two
+// branches: best-effort Stop the lifecycle, forget the gate, stamp Failed, and
+// clear the reaping flag.
+func (p *LazyProxy) teardownWedgedLifecycle(reason string) {
 	if err := p.cfg.Lifecycle.Stop(); err != nil {
 		fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: probation watchdog lifecycle stop: %v\n", err)
 	}
 	p.gate.Forget(p.inflightKey())
 	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
-		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleFailed,
-		fmt.Sprintf("backend never served a first response within %s", p.cfg.ColdStartMaxProbation))
+		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleFailed, reason)
 	p.mu.Lock()
 	p.reaping = false
 	p.mu.Unlock()
+}
+
+// registryRowIsStarting reports whether this proxy's registry row is currently
+// Lifecycle==Starting. Used by reapWedgedProbation's orphan branch to avoid
+// re-stamping a row that already advanced away from Starting.
+func (p *LazyProxy) registryRowIsStarting() bool {
+	reg := api.NewRegistry(p.cfg.RegistryPath)
+	if err := reg.Load(); err != nil {
+		return false
+	}
+	e, ok := reg.Get(p.cfg.WorkspaceKey, p.cfg.Language)
+	return ok && e.Lifecycle == api.LifecycleStarting
 }
 
 // onSendFailure handles mid-stream backend death: evict the cached endpoint,
@@ -1181,8 +1377,10 @@ func (p *LazyProxy) onSendFailure(err error) {
 		_ = p.endpoint.Close()
 		p.endpoint = nil
 	}
+	p.endpointGeneration++
 	p.warmed = false
 	p.endpointPublishedAt = time.Time{}
+	p.startingSince = time.Time{}
 	p.lastBackendActivity = time.Time{}
 	p.mu.Unlock()
 	p.resetDocRefs()
