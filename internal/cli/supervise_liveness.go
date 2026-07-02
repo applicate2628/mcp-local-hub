@@ -319,7 +319,7 @@ func sweepSupervisorLivenessOnce(
 						"port":             d.Port,
 						"deadline_seconds": int(startupDeadline / time.Second),
 						"waited_seconds":   int(waited / time.Second),
-						"note":             "child never bound its port before the first-bind deadline; restarting",
+						"note":             "no port bind observed this supervisor session before the first-bind deadline; restarting (the bind latch is per-session, so a daemon that bound before a supervisor restart also reads here — the restart is still correct)",
 					},
 				})
 			}
