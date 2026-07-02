@@ -17,6 +17,17 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
+// lspForwardUpstreamTimeout is the LSP-forward upstream HTTP timeout, DECOUPLED
+// from serenaUpstreamTimeout (reliability #3) so tuning cold-LSP indexing does not
+// silently change serena's 60s tool-call budget. It is sized so the DAEMON proxy's
+// request-hold ceiling (daemon.DefaultLSPColdRequestHoldCeiling, 120s) fires
+// STRICTLY BEFORE this router timeout — the client must see the proxy's controlled
+// non-retryable error, never a raw router 504. The timeout-ordering invariant
+// (daemon.DefaultLSPColdStartMaxProbation > lspForwardUpstreamTimeout >
+// daemon.DefaultLSPColdRequestHoldCeiling > daemon.DefaultLSPMaterializeWaitBudget)
+// is asserted by TestLSPRouter_ForwardTimeoutOrderingInvariant.
+const lspForwardUpstreamTimeout = 150 * time.Second
+
 type lspWorkspaceResolver interface {
 	ResolveByPath(path, language string) (*lsp_routing.ResolveResult, error)
 	HasProjectMarker(root, language string) bool
@@ -138,7 +149,9 @@ func (s *Server) lspRouterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	upstreamTimeout := deps.UpstreamTimeout
 	if upstreamTimeout <= 0 {
-		upstreamTimeout = serenaUpstreamTimeout
+		// Reliability #3: LSP forwards use their OWN upstream timeout (decoupled
+		// from serena's 60s), sized so the proxy's request-hold ceiling fires first.
+		upstreamTimeout = lspForwardUpstreamTimeout
 	}
 	httpClient := serenaHTTPClient(deps.HTTPClient, upstreamTimeout)
 

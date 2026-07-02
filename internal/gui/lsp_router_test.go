@@ -17,7 +17,30 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/lsp_routing"
+	"mcp-local-hub/internal/daemon"
 )
+
+// TestLSPRouter_ForwardTimeoutOrderingInvariant asserts the cross-component
+// timeout-ordering invariant (reliability #4): ColdStartMaxProbation >
+// lspForwardUpstreamTimeout > ColdRequestHoldCeiling > MaterializeWaitBudget. This
+// keeps the DAEMON proxy's request-hold ceiling firing (controlled non-retryable
+// error) STRICTLY before the router's LSP upstream timeout (so the client never
+// sees a raw router 504) and strictly before the probation watchdog (so the
+// watchdog never reaps a still-progressing request).
+func TestLSPRouter_ForwardTimeoutOrderingInvariant(t *testing.T) {
+	if !(daemon.DefaultLSPColdStartMaxProbation > lspForwardUpstreamTimeout) {
+		t.Fatalf("ColdStartMaxProbation %s must be > lspForwardUpstreamTimeout %s",
+			daemon.DefaultLSPColdStartMaxProbation, lspForwardUpstreamTimeout)
+	}
+	if !(lspForwardUpstreamTimeout > daemon.DefaultLSPColdRequestHoldCeiling) {
+		t.Fatalf("lspForwardUpstreamTimeout %s must be > ColdRequestHoldCeiling %s (proxy ceiling must fire before the router timeout)",
+			lspForwardUpstreamTimeout, daemon.DefaultLSPColdRequestHoldCeiling)
+	}
+	if !(daemon.DefaultLSPColdRequestHoldCeiling > daemon.DefaultLSPMaterializeWaitBudget) {
+		t.Fatalf("ColdRequestHoldCeiling %s must be > MaterializeWaitBudget %s",
+			daemon.DefaultLSPColdRequestHoldCeiling, daemon.DefaultLSPMaterializeWaitBudget)
+	}
+}
 
 type stubLSPResolver struct {
 	mu            sync.Mutex

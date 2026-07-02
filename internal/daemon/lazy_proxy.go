@@ -63,14 +63,29 @@ type LazyProxyConfig struct {
 	// IdleBackendTTL is enabled and this value is zero.
 	IdleBackendCheckEvery time.Duration
 
-	// MaterializeWaitBudget bounds how long a single cold forwarded request
-	// (first tools/call / forward per (workspace, language) after the backend
-	// is cold) is held before the proxy fast-fails with a 503 "cold start in
-	// progress; retry" while the materialize continues in the background. It
-	// also bounds the first-request probation window (the gopls-style indexing
-	// pause after the MCP handshake). Defaults to DefaultLSPMaterializeWaitBudget
-	// (15s) when zero.
+	// MaterializeWaitBudget bounds the MATERIALIZE phase only: how long a caller
+	// waits in gate.DoBounded for the spawn + MCP handshake + singleflight-dedup
+	// before the proxy fast-fails with a 503 "cold start in progress; retry"
+	// (ErrMaterializeInFlight) while the materialize continues in the background.
+	// That 503 is PRE-delivery (nothing has been written to the backend yet) so it
+	// is retry-safe. It ALSO bounds the NOTIFICATION first-request probation window
+	// (didOpen/didClose → 202-delivered). It does NOT bound a REQUEST's post-
+	// handshake SendRequest — see ColdRequestHoldCeiling. Defaults to
+	// DefaultLSPMaterializeWaitBudget (15s) when zero.
 	MaterializeWaitBudget time.Duration
+	// ColdRequestHoldCeiling bounds a REQUEST-path (tools/call, generic forward)
+	// post-handshake SendRequest — the send is awaited under min(client-ctx,
+	// ColdRequestHoldCeiling). A tools/call is a REQUEST whose response the client
+	// needs and whose bytes SendRPC writes to the backend BEFORE awaiting, so a
+	// probation-style fast-fail after delivery would make the client retry a fresh
+	// (duplicate) side-effecting call. On ceiling expiry (the call WAS delivered)
+	// the proxy returns a NON-retryable controlled error, never a retry 503. Must
+	// be sized >= the slowest fronted backend's realistic worst-case cold index
+	// (rust-analyzer / clangd / large-TS routinely exceed 60s) and STRICTLY between
+	// MaterializeWaitBudget and ColdStartMaxProbation. Defaults to
+	// DefaultLSPColdRequestHoldCeiling (120s) when zero; clamped up on a misordered
+	// config (see NewLazyProxy).
+	ColdRequestHoldCeiling time.Duration
 	// ColdStartConcurrency caps how many OTHER LSP backends may be concurrently
 	// in the expensive cold-start window (registry Lifecycle == Starting AND
 	// port-live) before this proxy refuses to enter the materialize path and
@@ -94,13 +109,22 @@ const (
 	DefaultLSPIdleBackendCheckEvery = time.Minute
 
 	// DefaultLSPMaterializeWaitBudget is the default LazyProxyConfig
-	// MaterializeWaitBudget: the per-request cold-start hold + probation bound.
+	// MaterializeWaitBudget: the materialize-phase 503 hold + notification probation.
 	DefaultLSPMaterializeWaitBudget = 15 * time.Second
+	// DefaultLSPColdRequestHoldCeiling is the default request-path SendRequest hold
+	// ceiling. Sized well above a slow cold LSP index (rust-analyzer / clangd /
+	// large-TS can exceed 60s) and strictly between MaterializeWaitBudget and
+	// DefaultLSPColdStartMaxProbation, so the proxy returns a controlled non-retryable
+	// error before either the router upstream timeout or the probation watchdog fires.
+	DefaultLSPColdRequestHoldCeiling = 120 * time.Second
 	// DefaultLSPColdStartConcurrency is the default cap on OTHER Starting +
 	// port-live LSP backends before this proxy refuses to cold-start.
 	DefaultLSPColdStartConcurrency = 2
 	// DefaultLSPColdStartMaxProbation is the default probation-watchdog window
-	// after which a materialized-but-never-warmed backend is torn down.
+	// after which a materialized-but-never-warmed backend is torn down. It MUST
+	// stay strictly greater than the LSP-forward upstream timeout (and thus the
+	// request hold ceiling), so the watchdog only ever reaps a backend after its
+	// longest single request has already been severed — never a progressing one.
 	DefaultLSPColdStartMaxProbation = 5 * time.Minute
 
 	// Bounds attacker-controlled document lifecycle state retained by the
@@ -185,6 +209,15 @@ type LazyProxy struct {
 	// an orphan Starting row that never got an endpoint published (e.g. if the
 	// publish-from-fn path were ever skipped), so the cold-start slot frees (F1).
 	startingSince time.Time
+	// lastWrittenLifecycle is the running-state lifecycle value this proxy last
+	// wrote to the registry via reconcileRegistryLifecycleLocked. It makes the
+	// reconcile idempotent — YAML is written only when the derived state differs,
+	// so warm request traffic does not churn the registry (Predicate 2). It is a
+	// SHADOW of the registry, so it MUST be reset ("") whenever an out-of-band
+	// writer changes the row: every endpointGeneration bump (publish + all four
+	// teardowns) and reserveMaterializedSlot's flock Starting write. The gen guard
+	// prevents a WRONG write; the shadow reset prevents a MISSING write.
+	lastWrittenLifecycle string
 
 	inflightBackendRequests int
 	lastBackendActivity     time.Time
@@ -228,11 +261,36 @@ func NewLazyProxy(cfg LazyProxyConfig) *LazyProxy {
 	if cfg.MaterializeWaitBudget == 0 {
 		cfg.MaterializeWaitBudget = DefaultLSPMaterializeWaitBudget
 	}
+	if cfg.ColdRequestHoldCeiling == 0 {
+		cfg.ColdRequestHoldCeiling = DefaultLSPColdRequestHoldCeiling
+	}
 	if cfg.ColdStartConcurrency == 0 {
 		cfg.ColdStartConcurrency = DefaultLSPColdStartConcurrency
 	}
 	if cfg.ColdStartMaxProbation == 0 {
 		cfg.ColdStartMaxProbation = DefaultLSPColdStartMaxProbation
+	}
+	// Enforce the timeout-ordering invariant that keeps the request-hold, the
+	// materialize budget, and the probation watchdog from inverting (reliability
+	// constraint): ColdStartMaxProbation > ColdRequestHoldCeiling > MaterializeWaitBudget.
+	// Clamp + warn on a misordered config so a misconfiguration can never let the
+	// request ceiling fire before the materialize budget, nor let the probation
+	// watchdog reap a still-progressing request. (The cross-component upper bound
+	// ColdStartMaxProbation > LSP-forward upstream timeout > ColdRequestHoldCeiling
+	// is asserted against the router constant by a gui-package test.)
+	if cfg.ColdRequestHoldCeiling <= cfg.MaterializeWaitBudget {
+		clamped := 2 * cfg.MaterializeWaitBudget
+		fmt.Fprintf(daemonDiagWriter(),
+			"warn: lazy_proxy: ColdRequestHoldCeiling (%s) <= MaterializeWaitBudget (%s); clamping ceiling to %s to preserve the timeout ordering\n",
+			cfg.ColdRequestHoldCeiling, cfg.MaterializeWaitBudget, clamped)
+		cfg.ColdRequestHoldCeiling = clamped
+	}
+	if cfg.ColdStartMaxProbation <= cfg.ColdRequestHoldCeiling {
+		clamped := 2 * cfg.ColdRequestHoldCeiling
+		fmt.Fprintf(daemonDiagWriter(),
+			"warn: lazy_proxy: ColdStartMaxProbation (%s) <= ColdRequestHoldCeiling (%s); clamping probation to %s to preserve the timeout ordering\n",
+			cfg.ColdStartMaxProbation, cfg.ColdRequestHoldCeiling, clamped)
+		cfg.ColdStartMaxProbation = clamped
 	}
 	if cfg.IdleBackendTTL > 0 && cfg.IdleBackendCheckEvery == 0 {
 		cfg.IdleBackendCheckEvery = DefaultLSPIdleBackendCheckEvery
@@ -326,6 +384,7 @@ func (p *LazyProxy) Stop(ctx context.Context) error {
 		p.endpoint = nil
 	}
 	p.endpointGeneration++
+	p.lastWrittenLifecycle = "" // Predicate 2: reset the shadow on the gen bump
 	p.warmed = false
 	p.endpointPublishedAt = time.Time{}
 	p.startingSince = time.Time{}
@@ -521,25 +580,30 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 		return
 	}
 	defer p.endBackendRequest()
-	warmed := p.isWarmed()
-	callCtx, cancel := p.boundedCallCtx(r.Context(), warmed)
+	// Predicate 1 (await-after-delivery): a tools/call is a REQUEST whose response
+	// the client needs and whose bytes SendRPC writes to the backend BEFORE it
+	// awaits, so a probation-style fast-fail after delivery would make the client
+	// retry a FRESH, duplicate side-effecting call. Await it under
+	// min(client-ctx, ColdRequestHoldCeiling) — NO probation 503 on the send path.
+	// (The materialize-phase ErrMaterializeInFlight 503 handled above is pre-
+	// delivery and stays retryable.) On ceiling expiry the call was delivered →
+	// a NON-retryable controlled error, never a retry hint.
+	callCtx, cancel := context.WithTimeout(r.Context(), p.cfg.ColdRequestHoldCeiling)
 	defer cancel()
+	stopHeld := p.armColdForwardHeldEvent(req.Method)
 	resp, err := ep.SendRequest(callCtx, req)
+	stopHeld()
 	if err != nil {
-		// Probation deadline: our MaterializeWaitBudget elapsed while the
-		// backend was still indexing, and the CLIENT context is still live.
-		// Emit the same 503 "cold start in progress" (never a bare "context
-		// deadline exceeded") and leave the backend up for the retry.
-		if p.isProbationDeadline(r.Context(), warmed, err) {
-			p.writeColdStartInProgress(w, req.ID)
+		// Our request-hold-ceiling fired (client ctx still live): the request was
+		// delivered and may have partially executed → non-retryable controlled error.
+		if p.isColdHoldCeilingDeadline(r.Context(), err) {
+			p.writeColdRequestHeldError(w, req.ID)
 			return
 		}
-		// Differentiate client-cancel from backend failure. SendRequest
-		// is driven by r.Context(); a client disconnect or timeout
-		// returns context.Canceled / context.DeadlineExceeded even
-		// when the backend is healthy. Tearing down on client cancel
-		// would force avoidable rematerialization for every other
-		// caller of the same proxy.
+		// Differentiate client-cancel from backend failure. A client disconnect or
+		// its own timeout returns context.Canceled / DeadlineExceeded even when the
+		// backend is healthy; tearing down on client cancel would force avoidable
+		// rematerialization for every other caller of the same proxy.
 		if isClientCancelErr(r.Context(), err) {
 			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 			return
@@ -551,7 +615,7 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 		return
 	}
-	// First successful response ends probation and stamps LifecycleActive.
+	// First successful response ends probation and reconciles LifecycleActive.
 	p.markWarmedOnFirstSuccess(gen)
 	// Only record the tools-call timestamp on successful forward.
 	p.debounceWriteToolsCallTimestamp()
@@ -577,14 +641,18 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 		return
 	}
 	defer p.endBackendRequest()
-	warmed := p.isWarmed()
-	callCtx, cancel := p.boundedCallCtx(r.Context(), warmed)
+	// Predicate 1: a generic forwarded method is a REQUEST — await under
+	// min(client-ctx, ColdRequestHoldCeiling), no send-path probation 503. See
+	// handleToolsCall for the delivered-then-do-not-retry rationale.
+	callCtx, cancel := context.WithTimeout(r.Context(), p.cfg.ColdRequestHoldCeiling)
 	defer cancel()
+	stopHeld := p.armColdForwardHeldEvent(req.Method)
 	resp, err := ep.SendRequest(callCtx, req)
+	stopHeld()
 	if err != nil {
-		// Probation deadline — see handleToolsCall.
-		if p.isProbationDeadline(r.Context(), warmed, err) {
-			p.writeColdStartInProgress(w, req.ID)
+		// Request-hold-ceiling fired (delivered) → non-retryable controlled error.
+		if p.isColdHoldCeilingDeadline(r.Context(), err) {
+			p.writeColdRequestHeldError(w, req.ID)
 			return
 		}
 		// Client-cancel is not a backend failure — see handleToolsCall.
@@ -606,9 +674,11 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 }
 
 // boundedCallCtx wraps the client request context in a MaterializeWaitBudget
-// timeout while the backend is in first-request probation (!warmed), so a
-// cold gopls-style indexing pause fast-fails to a 503 retry instead of holding
-// the connection. Once warmed the client context passes through unmodified.
+// timeout while the backend is in first-request probation (!warmed). NOTIFICATION-
+// ONLY (Predicate 1): the request handlers now await under ColdRequestHoldCeiling
+// instead. handleDocLifecycle uses this so a didOpen/didClose during cold indexing
+// fast-fails to a 202-delivered at the budget instead of holding the connection.
+// Once warmed the client context passes through unmodified.
 func (p *LazyProxy) boundedCallCtx(ctx context.Context, warmed bool) (context.Context, context.CancelFunc) {
 	if warmed {
 		return ctx, func() {}
@@ -617,27 +687,74 @@ func (p *LazyProxy) boundedCallCtx(ctx context.Context, warmed bool) (context.Co
 }
 
 // isProbationDeadline reports whether err is our own probation-budget deadline
-// (not the client's own cancel/deadline). It fires only while !warmed, only
-// when the CLIENT context is still live (so a client that set a shorter
-// deadline is still classified as a client cancel), and only for a
-// DeadlineExceeded error.
+// (not the client's own cancel/deadline). NOTIFICATION-ONLY (Predicate 1): only
+// handleDocLifecycle consults it, to classify the 202-delivered notification case.
+// Fires only while !warmed, only when the CLIENT context is still live, and only
+// for a DeadlineExceeded error.
 func (p *LazyProxy) isProbationDeadline(clientCtx context.Context, warmed bool, err error) bool {
 	return !warmed && clientCtx.Err() == nil && errors.Is(err, context.DeadlineExceeded)
 }
 
-// coldStartInProgressMessage is the operator/agent-facing body for a
-// bounded-wait cold-start 503 (materialize-in-flight OR first-request
-// probation deadline).
+// coldForwardHeldEventFn emits the structured lsp-cold-forward-held observability
+// event. Injectable as a test seam (like materializedSlotPortLiveFn); production
+// writes a warn line through the best-effort daemon diag writer.
+var coldForwardHeldEventFn = func(backendKind, workspacePath, method, heldBeyond, ceiling string) {
+	fmt.Fprintf(daemonDiagWriter(),
+		"warn: lazy_proxy: lsp-cold-forward-held backend=%s workspace=%s method=%s held_beyond=%s ceiling=%s\n",
+		backendKind, workspacePath, method, heldBeyond, ceiling)
+}
+
+// armColdForwardHeldEvent (Predicate 1, reliability #5) emits the structured
+// lsp-cold-forward-held observability event if a forwarded REQUEST is still in
+// flight after ~MaterializeWaitBudget — the only fleet-visible signal for a
+// 40-60s cold hold now that the request path no longer 503s at 15s. Returns a
+// stop func the caller invokes once SendRequest returns (a fast/warm forward
+// stops the timer before it fires, so no event).
+func (p *LazyProxy) armColdForwardHeldEvent(method string) func() {
+	t := time.AfterFunc(p.cfg.MaterializeWaitBudget, func() {
+		coldForwardHeldEventFn(p.cfg.BackendKind, p.cfg.WorkspacePath, method,
+			p.cfg.MaterializeWaitBudget.String(), p.cfg.ColdRequestHoldCeiling.String())
+	})
+	return func() { t.Stop() }
+}
+
+// isColdHoldCeilingDeadline reports whether err is our OWN request-hold-ceiling
+// deadline (Predicate 1): the client's own context is still live and err is
+// DeadlineExceeded (from the min(client, ColdRequestHoldCeiling) timeout). Applies
+// to warm and cold requests alike — the ceiling is the universal request bound.
+func (p *LazyProxy) isColdHoldCeilingDeadline(clientCtx context.Context, err error) bool {
+	return clientCtx.Err() == nil && errors.Is(err, context.DeadlineExceeded)
+}
+
+// coldStartInProgressMessage is the operator/agent-facing body for the
+// NOTIFICATION-path bounded-wait 503-warming message (retryable; notifications
+// only). Request paths use writeColdRequestHeldError instead.
 func (p *LazyProxy) coldStartInProgressMessage() string {
 	return fmt.Sprintf("language backend cold start in progress (%s, %s); retry in ~15s",
 		p.cfg.BackendKind, p.cfg.WorkspacePath)
 }
 
 // writeColdStartInProgress emits the 503 + JSON-RPC -32603 + Retry-After: 15
-// cold-start-in-progress response.
+// cold-start-in-progress response. NOTIFICATION-ONLY now (Predicate 1).
 func (p *LazyProxy) writeColdStartInProgress(w http.ResponseWriter, id json.RawMessage) {
 	writeRPCErrorStatus(w, id, http.StatusServiceUnavailable, rpcErrInternalError,
 		p.coldStartInProgressMessage(), 15)
+}
+
+// writeColdRequestHeldError emits the NON-retryable controlled error for a REQUEST
+// that was DELIVERED to the backend but did not complete within ColdRequestHoldCeiling
+// (Predicate 1, reliability #2). It deliberately carries NO retry wording and NO
+// Retry-After header — the call may have partially executed, so an auto-retry of a
+// mutating tool would double-execute. HTTP 500 is chosen (NOT the retryable 503-
+// cold-start, NOT a raw router 504): a fail-loud, terminal, non-retryable status the
+// router passes through verbatim, distinct from both the retryable materialize 503
+// and the router's own upstream-timeout 504 (which the proxy's earlier-firing
+// ceiling prevents the client from ever seeing). The lsp-cold-forward-held event is
+// the fleet monitoring signal, so operators alert on the event, not the raw 500.
+func (p *LazyProxy) writeColdRequestHeldError(w http.ResponseWriter, id json.RawMessage) {
+	msg := fmt.Sprintf("language backend still indexing after %s; the call was delivered and may have partially executed — do not auto-retry mutating calls (%s, %s)",
+		p.cfg.ColdRequestHoldCeiling, p.cfg.BackendKind, p.cfg.WorkspacePath)
+	writeRPCErrorStatus(w, id, http.StatusInternalServerError, rpcErrInternalError, msg, 0)
 }
 
 // writeColdStartRefusal maps the two cold-start throttle sentinels returned by
@@ -899,6 +1016,11 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, uint64
 		if p.endpoint != nil {
 			ep := p.endpoint
 			gen := p.endpointGeneration
+			// Predicate 2: reconcile the row to its derived running-state at every
+			// endpoint acquisition. Idempotent (shadow) so warm traffic does not
+			// churn; authoritative so a row a concurrent reserve downgraded to
+			// Starting is restored to Active here.
+			p.reconcileRegistryLifecycleLocked(gen)
 			p.beginBackendRequestLocked(time.Now().UTC())
 			p.mu.Unlock()
 			return ep, gen, nil
@@ -928,6 +1050,7 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, uint64
 	if p.endpoint != nil {
 		ep := p.endpoint
 		gen := p.endpointGeneration
+		p.reconcileRegistryLifecycleLocked(gen)
 		p.beginBackendRequestLocked(time.Now().UTC())
 		p.mu.Unlock()
 		return ep, gen, nil
@@ -937,19 +1060,35 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, uint64
 	// Slow path: reserve a cold-start slot (marks Starting BEFORE entering the
 	// gate so `status` shows "starting" while the singleflight is in flight),
 	// then go through the gate.
-	if err := p.reserveMaterializedSlot(); err != nil {
+	wroteStarting, err := p.reserveMaterializedSlot()
+	if err != nil {
 		return nil, 0, err
+	}
+	if wroteStarting {
+		// reserve wrote Starting out-of-band under the flock — invalidate the
+		// reconcile shadow so the acquisition-return reconcile re-derives and
+		// re-writes the TRUE state (Active if a concurrent caller warmed the
+		// endpoint after our reserve). Without this the shadow could still read
+		// Active from a prior reconcile while the registry now reads Starting,
+		// leaving the row stuck Starting (Predicate 2).
+		p.mu.Lock()
+		p.lastWrittenLifecycle = ""
+		p.mu.Unlock()
 	}
 	p.markStartingReserved(time.Now().UTC())
 
 	key := p.inflightKey()
-	_, err := p.gate.DoBounded(ctx, key, p.cfg.MaterializeWaitBudget, func(fnCtx context.Context) (any, error) {
+	_, err = p.gate.DoBounded(ctx, key, p.cfg.MaterializeWaitBudget, func(fnCtx context.Context) (any, error) {
 		// Finding 2 (tight-race backstop): if a concurrent caller published an
 		// endpoint after we reserved but before this singleflight fn ran, do NOT
 		// re-materialize — return the live endpoint so publishMaterializedEndpoint
 		// is skipped and warmed/generation are preserved.
 		p.mu.Lock()
 		if live := p.endpoint; live != nil {
+			// Predicate 2: restore the derived state (Active if the concurrent
+			// publisher already warmed) — this is a load-bearing site for the
+			// stuck-Starting fix when our own reserve downgraded the row.
+			p.reconcileRegistryLifecycleLocked(p.endpointGeneration)
 			p.mu.Unlock()
 			return live, nil
 		}
@@ -1021,6 +1160,10 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, uint64
 		return nil, 0, errors.New("materialized endpoint torn down before use")
 	}
 	gen := p.endpointGeneration
+	// Predicate 2: the authoritative acquisition-return reconcile. Every caller
+	// (winner + losers) passes here, so a row a concurrent reserve downgraded to
+	// Starting is reconciled back to its derived state before use.
+	p.reconcileRegistryLifecycleLocked(gen)
 	p.beginBackendRequestLocked(time.Now().UTC())
 	p.mu.Unlock()
 	return ep, gen, nil
@@ -1062,9 +1205,13 @@ func (p *LazyProxy) publishMaterializedEndpoint(ep MCPEndpoint) error {
 	}
 	p.endpoint = ep
 	p.endpointGeneration++
+	p.lastWrittenLifecycle = "" // Predicate 2: reset the shadow on the gen bump
 	p.warmed = false
 	p.endpointPublishedAt = now
 	p.startingSince = time.Time{}
+	// Reconcile the freshly published (unwarmed) endpoint to Starting under the
+	// new generation. Idempotent; the acquisition-return reconcile is the backstop.
+	p.reconcileRegistryLifecycleLocked(p.endpointGeneration)
 	p.mu.Unlock()
 	return nil
 }
@@ -1082,36 +1229,78 @@ func (p *LazyProxy) markStartingReserved(now time.Time) {
 	p.mu.Unlock()
 }
 
-// markWarmedOnFirstSuccess flips warmed true on the FIRST successful forwarded
-// response and, on that transition only, performs the deferred LifecycleActive
-// registry write (with LastMaterializedAt) that ensureMaterialized no longer
-// does at materialize-success. gen is the endpoint generation the caller
-// captured when it obtained the endpoint: if the generation has since changed (a
-// teardown replaced or removed the endpoint and likely stamped Failed), this
-// no-ops so a late success cannot overwrite that Failed with Active (F6a).
-// Idempotent: subsequent calls for the same generation are a no-op too.
+// reconcileRegistryLifecycleLocked is the SINGLE authoritative writer of the
+// running-state lifecycle transitions (Configured / Starting / Active). It MUST
+// be called while holding p.mu, in the SAME critical section that mutated the
+// state it derives from (endpoint, warmed, startingSince), so there is no
+// check-then-write gap (Predicate 2). Death/missing states (Failed / Missing) are
+// NOT written here — they are written by the teardown / fn-error paths, which
+// bump the generation (resetting the shadow) so the next reconcile starts fresh.
 //
-// The generation re-check AND the LifecycleActive write both happen while
-// holding p.mu (Finding 3): a concurrent teardown (onSendFailure / reap*) bumps
-// the generation UNDER p.mu before its own lock-free Failed write, so holding
-// p.mu across our re-check+write forces a safe order — either the teardown's
-// bump lands first (we observe the mismatch and skip) or our Active write lands
-// first and the teardown's Failed supersedes it. Without the lock across the
-// write, the bump could slip between our check and our write and our stale Active
-// would overwrite the teardown's Failed, hiding a real backend death. The write
-// is registry-only (no p.mu re-entry) and warming is a once-per-cold-start event,
-// so the brief I/O under the lock is acceptable.
+// gen is the endpoint generation the caller captured; a stale caller
+// (gen != p.endpointGeneration) is a no-op, preserving the "a late success can
+// not overwrite a Failed a concurrent teardown just wrote" guarantee (F6a). This
+// generalizes the old markWarmedOnFirstSuccess lock-across-write posture: a
+// concurrent teardown bumps the generation UNDER p.mu before its own lock-free
+// Failed write, so holding p.mu across our re-check + write forces a safe order.
+//
+// Idempotent via the lastWrittenLifecycle shadow: it writes YAML only when the
+// derived state differs from what this proxy last wrote, so warm request traffic
+// (derived Active, shadow Active) does not churn the registry. The shadow is
+// reset on every generation bump and after reserveMaterializedSlot's out-of-band
+// Starting write, so a genuine transition is never missed.
+//
+// Lock order: p.mu is held across PutLifecycle (which takes the workspaces.yaml
+// flock internally) — i.e. p.mu → flock. This is safe because no path takes the
+// flock and THEN p.mu: reserveMaterializedSlot snapshots p.mu BEFORE its flock and
+// never re-acquires p.mu while holding it. A write only happens on an actual
+// state change (shadow miss), so warm traffic never holds p.mu across I/O.
+func (p *LazyProxy) reconcileRegistryLifecycleLocked(gen uint64) {
+	if gen != p.endpointGeneration {
+		return
+	}
+	var derived string
+	switch {
+	case p.endpoint != nil && p.warmed:
+		derived = api.LifecycleActive
+	case p.endpoint != nil || !p.startingSince.IsZero():
+		derived = api.LifecycleStarting
+	default:
+		derived = api.LifecycleConfigured
+	}
+	if derived == p.lastWrittenLifecycle {
+		return
+	}
+	p.lastWrittenLifecycle = derived
+	if derived == api.LifecycleActive {
+		// Stamp LastMaterializedAt on the Starting→Active transition; a zero
+		// LastToolsCallAt preserves any existing value.
+		_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycleWithTimestamps(
+			p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleActive, "",
+			time.Now().UTC(), time.Time{},
+		)
+		return
+	}
+	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
+		p.cfg.WorkspaceKey, p.cfg.Language, derived, "")
+}
+
+// markWarmedOnFirstSuccess flips warmed true on a gen-matching successful
+// forwarded response and reconciles the row to Active. It is the fix for the
+// stuck-Starting class (Predicate 2): warmed is dropped from the WRITE decision
+// (it only avoids re-flipping) so that EVEN a "second" success (warmed already
+// true) reconciles→Active idempotently — restoring Active if a concurrent
+// reserveMaterializedSlot downgraded the row to Starting. gen-guarded (a stale
+// caller no-ops, preserving F6a). Registry I/O happens inside
+// reconcileRegistryLifecycleLocked, under p.mu.
 func (p *LazyProxy) markWarmedOnFirstSuccess(gen uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.warmed || p.endpoint == nil || p.endpointGeneration != gen {
+	if p.endpoint == nil || p.endpointGeneration != gen {
 		return
 	}
 	p.warmed = true
-	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycleWithTimestamps(
-		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleActive, "",
-		time.Now().UTC(), time.Time{},
-	)
+	p.reconcileRegistryLifecycleLocked(gen)
 }
 
 // isWarmed reports whether the current backend has already served a first
@@ -1122,24 +1311,43 @@ func (p *LazyProxy) isWarmed() bool {
 	return p.warmed
 }
 
-func (p *LazyProxy) reserveMaterializedSlot() error {
+// reserveMaterializedSlot marks this proxy's row Starting under the workspaces.yaml
+// flock (load-bearing for the cross-proxy cold-start gate's atomic check-and-set)
+// and reports whether it actually wrote Starting. It returns wroteStarting=false
+// without any registry write when this proxy already holds a published endpoint
+// (Predicate 2): a concurrent caller materialized after our fast-path miss, so
+// downgrading the row Active→Starting would flicker it — the acquisition-return
+// reconcile is the authoritative writer. The alreadyLive snapshot is taken under
+// p.mu strictly BEFORE the flock and p.mu is released before the flock, so the
+// p.mu→flock lock order is preserved (no AB-BA with reconcile).
+func (p *LazyProxy) reserveMaterializedSlot() (bool, error) {
+	p.mu.Lock()
+	alreadyLive := p.endpoint != nil
+	p.mu.Unlock()
+	if alreadyLive {
+		return false, nil
+	}
+
 	reg := api.NewRegistry(p.cfg.RegistryPath)
 	capOn := p.cfg.MaterializedHardCap > 0
 	coldGateOn := p.cfg.ColdStartConcurrency > 0
 	if !capOn && !coldGateOn {
-		return reg.PutLifecycle(p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleStarting, "")
+		if err := reg.PutLifecycle(p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleStarting, ""); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	unlock, err := reg.Lock()
 	if err != nil {
-		return fmt.Errorf("reserve materialized LSP backend slot: %w", err)
+		return false, fmt.Errorf("reserve materialized LSP backend slot: %w", err)
 	}
 	defer unlock()
 	if err := reg.Load(); err != nil {
-		return fmt.Errorf("reserve materialized LSP backend slot: %w", err)
+		return false, fmt.Errorf("reserve materialized LSP backend slot: %w", err)
 	}
 	entry, ok := reg.Get(p.cfg.WorkspaceKey, p.cfg.Language)
 	if !ok {
-		return fmt.Errorf("reserve materialized LSP backend slot: registry entry missing for %s/%s",
+		return false, fmt.Errorf("reserve materialized LSP backend slot: registry entry missing for %s/%s",
 			p.cfg.WorkspaceKey, p.cfg.Language)
 	}
 	// Count OTHER live LSP rows under the same flock: `active` (Starting|Active)
@@ -1153,19 +1361,24 @@ func (p *LazyProxy) reserveMaterializedSlot() error {
 		if e.WorkspaceKey == p.cfg.WorkspaceKey && e.Language == p.cfg.Language {
 			continue
 		}
+		// Predicate 3: only Starting/Active rows contribute to the cap/gate, so
+		// gate the 300ms port dial behind the Lifecycle filter — a Configured /
+		// Failed / Missing row's dial is pure waste that lengthens the workspaces.yaml
+		// flock hold. This bounds the flock hold to (#Starting|Active) × 300ms.
+		if e.Lifecycle != api.LifecycleStarting && e.Lifecycle != api.LifecycleActive {
+			continue
+		}
 		live := e.Port > 0 && materializedSlotPortLiveFn != nil && materializedSlotPortLiveFn(e.Port)
 		if !live {
 			continue
 		}
-		if e.Lifecycle == api.LifecycleStarting || e.Lifecycle == api.LifecycleActive {
-			active++
-		}
+		active++
 		if e.Lifecycle == api.LifecycleStarting {
 			startingLive++
 		}
 	}
 	if capOn && active >= p.cfg.MaterializedHardCap {
-		return fmt.Errorf("materialized LSP backend cap reached: %d active/starting backends, cap %d",
+		return false, fmt.Errorf("materialized LSP backend cap reached: %d active/starting backends, cap %d",
 			active, p.cfg.MaterializedHardCap)
 	}
 	// Cold-start-concurrency gate: refuse to ENTER the materialize path (no
@@ -1177,15 +1390,15 @@ func (p *LazyProxy) reserveMaterializedSlot() error {
 	// very retry the 503 asked for and keep this backend from ever warming.
 	if coldGateOn && startingLive >= p.cfg.ColdStartConcurrency &&
 		!p.gate.HasActiveFlight(p.inflightKey()) {
-		return &coldStartSlotsBusyError{warming: startingLive}
+		return false, &coldStartSlotsBusyError{warming: startingLive}
 	}
 	entry.Lifecycle = api.LifecycleStarting
 	entry.LastError = ""
 	reg.Put(entry)
 	if err := reg.Save(); err != nil {
-		return fmt.Errorf("reserve materialized LSP backend slot: %w", err)
+		return false, fmt.Errorf("reserve materialized LSP backend slot: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func (p *LazyProxy) beginBackendRequest() {
@@ -1280,6 +1493,7 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 	p.reaping = true
 	p.endpoint = nil
 	p.endpointGeneration++
+	p.lastWrittenLifecycle = "" // Predicate 2: reset the shadow on the gen bump
 	p.warmed = false
 	p.endpointPublishedAt = time.Time{}
 	p.startingSince = time.Time{}
@@ -1347,6 +1561,7 @@ func (p *LazyProxy) reapWedgedProbation(now time.Time) {
 		p.reaping = true
 		p.endpoint = nil
 		p.endpointGeneration++
+		p.lastWrittenLifecycle = "" // Predicate 2: reset the shadow on the gen bump
 		p.warmed = false
 		p.endpointPublishedAt = time.Time{}
 		p.startingSince = time.Time{}
@@ -1436,6 +1651,7 @@ func (p *LazyProxy) onSendFailure(err error) {
 		p.endpoint = nil
 	}
 	p.endpointGeneration++
+	p.lastWrittenLifecycle = "" // Predicate 2: reset the shadow on the gen bump
 	p.warmed = false
 	p.endpointPublishedAt = time.Time{}
 	p.startingSince = time.Time{}
@@ -1479,9 +1695,13 @@ func (p *LazyProxy) debounceWriteToolsCallTimestamp() {
 	if !due {
 		return
 	}
-	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycleWithTimestamps(
-		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleActive, "",
-		time.Time{}, now.UTC(),
+	// Predicate 2: update ONLY LastToolsCallAt — do NOT write the Lifecycle column
+	// here. reconcileRegistryLifecycleLocked is the single owner of the running
+	// state; a tools/call timestamp refresh must not be a second Active-writer
+	// (which could otherwise overwrite a concurrent Failed on a dying backend).
+	// PutLastToolsCallAt preserves Lifecycle + LastError.
+	_ = api.NewRegistry(p.cfg.RegistryPath).PutLastToolsCallAt(
+		p.cfg.WorkspaceKey, p.cfg.Language, now.UTC(),
 	)
 }
 
