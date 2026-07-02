@@ -36,6 +36,18 @@ import (
 // ordering and the client sees a raw router 504 instead of the controlled error.
 const lspForwardUpstreamTimeout = 150 * time.Second
 
+// defaultLSPForwardClient is the shared production http.Client for LSP forwards
+// when deps leave HTTPClient nil — the LSP twin of defaultSerenaClient (F3, bot
+// r3): serenaHTTPClient special-cased only the 60s serena timeout, so once the
+// LSP path moved to lspForwardUpstreamTimeout every nil-dep /lsp request built a
+// FRESH http.Transport (connection-pool loss + per-request idle conns lingering).
+// Client.Timeout stays 0 for the same SSE reason as defaultSerenaClient; the
+// transport's dial timeout + ResponseHeaderTimeout carry the LSP forward budget.
+var defaultLSPForwardClient = &http.Client{
+	Timeout:   0,
+	Transport: newSerenaTransport(lspForwardUpstreamTimeout),
+}
+
 type lspWorkspaceResolver interface {
 	ResolveByPath(path, language string) (*lsp_routing.ResolveResult, error)
 	HasProjectMarker(root, language string) bool

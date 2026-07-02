@@ -42,6 +42,34 @@ func TestLSPRouter_ForwardTimeoutOrderingInvariant(t *testing.T) {
 	}
 }
 
+// TestLSPRouter_SharedClientForNilDepsLSPForward is F3 (bot r3): with production
+// deps leaving HTTPClient nil, the LSP forward path must reuse ONE shared
+// http.Client (shared transport / connection pool) instead of building a fresh
+// http.Transport per /lsp request — the LSP twin of the defaultSerenaClient
+// sharing pattern. serenaHTTPClient runs per request, so pointer equality across
+// calls is the load-bearing assertion.
+func TestLSPRouter_SharedClientForNilDepsLSPForward(t *testing.T) {
+	c1 := serenaHTTPClient(nil, lspForwardUpstreamTimeout)
+	c2 := serenaHTTPClient(nil, lspForwardUpstreamTimeout)
+	if c1 != c2 {
+		t.Fatal("nil-dep LSP forwards got per-request clients (fresh transport per request — pool loss, F3 regression)")
+	}
+	if c1 != defaultLSPForwardClient {
+		t.Fatal("nil-dep LSP forward did not select the shared defaultLSPForwardClient")
+	}
+	if c1 == defaultSerenaClient {
+		t.Fatal("LSP shared client must be distinct from the 60s serena client (decoupled timeouts)")
+	}
+	// The serena sharing case and the explicit-client passthrough are unchanged.
+	if got := serenaHTTPClient(nil, serenaUpstreamTimeout); got != defaultSerenaClient {
+		t.Fatal("serena timeout no longer selects the shared serena client")
+	}
+	custom := &http.Client{}
+	if got := serenaHTTPClient(custom, lspForwardUpstreamTimeout); got != custom {
+		t.Fatal("explicit HTTPClient must pass through untouched")
+	}
+}
+
 type stubLSPResolver struct {
 	mu            sync.Mutex
 	results       map[string]*lsp_routing.ResolveResult

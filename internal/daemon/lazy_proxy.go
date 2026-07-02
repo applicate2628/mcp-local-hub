@@ -757,10 +757,23 @@ func (p *LazyProxy) isProbationDeadline(clientCtx context.Context, warmed bool, 
 	return !warmed && clientCtx.Err() == nil && errors.Is(err, context.DeadlineExceeded)
 }
 
-// coldForwardHeldEventFn emits the structured lsp-cold-forward-held observability
-// event. Injectable as a test seam (like materializedSlotPortLiveFn); production
-// writes a warn line through the best-effort daemon diag writer.
-var coldForwardHeldEventFn = func(backendKind, workspacePath, method, heldBeyond, ceiling string) {
+// coldForwardHeldEventFn is the injectable test seam for the
+// lsp-cold-forward-held observability event. It is read by DETACHED
+// time.AfterFunc callbacks: timer.Stop() does not wait for a callback that has
+// already started, so a callback can outlive the arming request (and, in tests,
+// the arming test) — a plain package var would DATA-RACE a test's cleanup
+// restore-write against such a late read (caught under -race). Atomic access
+// makes the seam race-free by construction; nil selects the production diag
+// write in emitColdForwardHeldEvent.
+var coldForwardHeldEventFn atomic.Pointer[func(backendKind, workspacePath, method, heldBeyond, ceiling string)]
+
+// emitColdForwardHeldEvent routes the lsp-cold-forward-held event through the
+// atomic seam (test override) or the best-effort daemon diag writer (production).
+func emitColdForwardHeldEvent(backendKind, workspacePath, method, heldBeyond, ceiling string) {
+	if fn := coldForwardHeldEventFn.Load(); fn != nil {
+		(*fn)(backendKind, workspacePath, method, heldBeyond, ceiling)
+		return
+	}
 	fmt.Fprintf(daemonDiagWriter(),
 		"warn: lazy_proxy: lsp-cold-forward-held backend=%s workspace=%s method=%s held_beyond=%s ceiling=%s\n",
 		backendKind, workspacePath, method, heldBeyond, ceiling)
@@ -774,7 +787,7 @@ var coldForwardHeldEventFn = func(backendKind, workspacePath, method, heldBeyond
 // stops the timer before it fires, so no event).
 func (p *LazyProxy) armColdForwardHeldEvent(method string) func() {
 	t := time.AfterFunc(p.cfg.MaterializeWaitBudget, func() {
-		coldForwardHeldEventFn(p.cfg.BackendKind, p.cfg.WorkspacePath, method,
+		emitColdForwardHeldEvent(p.cfg.BackendKind, p.cfg.WorkspacePath, method,
 			p.cfg.MaterializeWaitBudget.String(), p.cfg.ColdRequestHoldCeiling.String())
 	})
 	return func() { t.Stop() }
@@ -1221,6 +1234,23 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, uint64
 		// the stamp when closing (errLazyProxyUnpublishable) so a clean shutdown
 		// is not recorded as a failure.
 		if errors.Is(err, ErrMaterializeInFlight) || ctx.Err() != nil || p.closed.Load() {
+			// F2 (bot r3): this caller may have downgraded the row to Starting via
+			// its reserve and is now aborting WITHOUT reaching the acquisition-
+			// return reconcile. In the known race (a concurrent caller publishes +
+			// warms between our pre-reserve snapshot and the reserve's flock write)
+			// the registry would linger Starting while the proxy is live+warmed,
+			// until some later request reconciles. Restore the derived state here.
+			// Gated on endpoint != nil so the common budget-expiry 503 (no endpoint
+			// yet — the detached fn owns that outcome and reconciles at publish)
+			// does not churn a redundant Starting write; skipped when closing
+			// (Stop owns final state).
+			if !p.closed.Load() {
+				p.mu.Lock()
+				if p.endpoint != nil {
+					p.reconcileRegistryLifecycleLocked(p.endpointGeneration)
+				}
+				p.mu.Unlock()
+			}
 			return nil, 0, err
 		}
 		if errors.Is(err, errLazyProxyUnpublishable) {
@@ -1361,18 +1391,32 @@ func (p *LazyProxy) reconcileRegistryLifecycleLocked(gen uint64) {
 	if derived == p.lastWrittenLifecycle {
 		return
 	}
-	p.lastWrittenLifecycle = derived
+	var writeErr error
 	if derived == api.LifecycleActive {
 		// Stamp LastMaterializedAt on the Starting→Active transition; a zero
 		// LastToolsCallAt preserves any existing value.
-		_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycleWithTimestamps(
+		writeErr = api.NewRegistry(p.cfg.RegistryPath).PutLifecycleWithTimestamps(
 			p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleActive, "",
 			time.Now().UTC(), time.Time{},
 		)
+	} else {
+		writeErr = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
+			p.cfg.WorkspaceKey, p.cfg.Language, derived, "")
+	}
+	if writeErr != nil {
+		// F1 (bot r3): do NOT record the shadow on a FAILED write. The shadow is a
+		// mirror of what the registry actually holds; recording `derived` here
+		// would make every later reconcile hit the shadow fast-path and never
+		// retry the write — a transiently-failed Starting→Active move would leave
+		// the row stuck Starting forever (mis-status + consuming cold-start
+		// capacity while actually warm). Left untouched, the next reconcile
+		// re-derives, misses the shadow, and retries.
+		fmt.Fprintf(daemonDiagWriter(),
+			"warn: lazy_proxy: lifecycle reconcile write (%s) failed (will retry on next reconcile): %v\n",
+			derived, writeErr)
 		return
 	}
-	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
-		p.cfg.WorkspaceKey, p.cfg.Language, derived, "")
+	p.lastWrittenLifecycle = derived
 }
 
 // markWarmedOnFirstSuccess flips warmed true on a gen-matching successful

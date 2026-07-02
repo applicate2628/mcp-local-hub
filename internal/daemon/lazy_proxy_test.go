@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -336,7 +337,30 @@ func newTestProxyWithCfg(t *testing.T, kind string, f *fakeLifecycle, retryGap, 
 		InflightMinRetryGap: retryGap,
 		ToolsCallDebounce:   toolsDebounce,
 	})
+	// Stop the proxy at cleanup (idempotent — tests that Stop themselves are
+	// unaffected). NewLazyProxy starts the probation-watchdog ticker by default;
+	// without this, every test leaked a live 1-minute ticker whose later fire
+	// (the -race package run exceeds 60s) did registry IO against deleted
+	// TempDirs — the recurring "TempDir RemoveAll: directory not empty /
+	// r.yaml.lock in use" flake class.
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = p.Stop(ctx)
+	})
 	return p, regPath
+}
+
+// stopProxyOnCleanup registers a bounded idempotent Stop for an ad-hoc test
+// proxy — same leaked-watchdog-ticker rationale as the newTestProxyWithCfg
+// cleanup (see comment there).
+func stopProxyOnCleanup(t *testing.T, p *LazyProxy) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = p.Stop(ctx)
+	})
 }
 
 func postRPC(t *testing.T, h http.Handler, method string, id int) *httptest.ResponseRecorder {
@@ -1090,6 +1114,15 @@ func TestLazyProxy_ClientCancelDoesNotTearDownBackend(t *testing.T) {
 	if e.Lifecycle == api.LifecycleFailed {
 		t.Errorf("client-cancel flipped lifecycle to Failed (regression): %+v", e)
 	}
+	// Settle: the abandoned caller left a DETACHED materialize running; wait for
+	// its publish (whose reconcile registry write completes before p.endpoint
+	// becomes observable under p.mu) so no registry file handle is open in the
+	// TempDir when the test's cleanup removes it (Windows: "directory not empty").
+	waitForCond(t, "detached materialize published", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.endpoint != nil
+	})
 }
 
 // TestLazyProxy_ServeBeforeBindErrors guards the Bind/Serve split contract:
@@ -1227,6 +1260,7 @@ func TestLazyProxy_MaterializedHardCapRejectsWhenOtherBackendActive(t *testing.T
 		IdleBackendTTL:        0,
 		IdleBackendCheckEvery: 0,
 	})
+	stopProxyOnCleanup(t, p)
 
 	rr := postRPC(t, p.Handler(), "tools/call", 1)
 	if rr.Code != http.StatusOK {
@@ -1288,6 +1322,7 @@ func TestLazyProxy_MaterializedHardCapIgnoresStaleDeadRows(t *testing.T) {
 		IdleBackendTTL:        0,
 		IdleBackendCheckEvery: 0,
 	})
+	stopProxyOnCleanup(t, p)
 
 	rr := postRPC(t, p.Handler(), "tools/call", 1)
 	if rr.Code != http.StatusOK {
@@ -1358,6 +1393,7 @@ func TestLazyProxy_DefaultMaterializedHardCapAllowsNineConcurrentWorkspaceProbes
 			MaterializedHardCap: DefaultLSPMaterializedHardCap,
 			IdleBackendTTL:      0,
 		}))
+		stopProxyOnCleanup(t, proxies[len(proxies)-1])
 	}
 
 	errs := make(chan error, len(proxies))
@@ -1600,6 +1636,7 @@ func newRecordingProxy(t *testing.T) (*LazyProxy, *recordingLifecycle) {
 		InflightMinRetryGap: 10 * time.Millisecond,
 		ToolsCallDebounce:   100 * time.Millisecond,
 	})
+	stopProxyOnCleanup(t, p)
 	return p, f
 }
 
@@ -1894,6 +1931,13 @@ func TestLazyProxy_ColdToolsCall_BoundedWaitReturns503RetryAfter(t *testing.T) {
 	if e.LastError != "" {
 		t.Fatalf("LastError = %q, want empty", e.LastError)
 	}
+	// Settle: wait for the detached materialize (500ms) to publish so its registry
+	// write is not racing the TempDir cleanup (Windows: "directory not empty").
+	waitForCond(t, "detached materialize published", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.endpoint != nil
+	})
 }
 
 func TestLazyProxy_ColdToolsCall_FastMaterializeAnswersInline(t *testing.T) {
@@ -1948,6 +1992,13 @@ func TestLazyProxy_ConcurrentColdCallers_OneMaterialize_AllBoundedAtBudget(t *te
 			t.Errorf("caller[%d] code = %d, want 503 (all bounded at budget)", i, c)
 		}
 	}
+	// Settle: wait for the detached materialize (800ms) to publish so its registry
+	// write is not racing the TempDir cleanup (Windows: "directory not empty").
+	waitForCond(t, "detached materialize published", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.endpoint != nil
+	})
 }
 
 func TestLazyProxy_ColdToolsCall_AwaitsDeliveredResponse_ThenWarmActive(t *testing.T) {
@@ -2174,6 +2225,7 @@ func TestLazyProxy_ColdStartSlots_BusyReturns503WithoutMaterialize(t *testing.T)
 		InflightMinRetryGap: 20 * time.Millisecond, ToolsCallDebounce: 100 * time.Millisecond,
 		ColdStartConcurrency: 2,
 	})
+	stopProxyOnCleanup(t, p)
 
 	rr := postRPC(t, p.Handler(), "tools/call", 1)
 	if rr.Code != http.StatusServiceUnavailable {
@@ -2212,6 +2264,7 @@ func TestLazyProxy_ColdStartSlots_StalePortDeadStartingRowIgnored(t *testing.T) 
 		InflightMinRetryGap: 20 * time.Millisecond, ToolsCallDebounce: 100 * time.Millisecond,
 		ColdStartConcurrency: 2,
 	})
+	stopProxyOnCleanup(t, p)
 
 	rr := postRPC(t, p.Handler(), "tools/call", 1)
 	if rr.Code != http.StatusOK {
@@ -2355,6 +2408,12 @@ func TestLazyProxy_AbandonedMaterialize_FailureStampsFailed(t *testing.T) {
 	if le := readEntry(t, regPath).LastError; !strings.Contains(le, "handshake timeout") {
 		t.Fatalf("LastError = %q, want the materialize error", le)
 	}
+	// Settle: the Failed observation proves the fn RAN; wait for its flight to
+	// fully exit (deferred activeFlights decrement runs after the fn's registry
+	// write + flock unlock returned) so no handle races the TempDir cleanup.
+	waitForCond(t, "detached flight exited", func() bool {
+		return !p.gate.HasActiveFlight(p.inflightKey())
+	})
 }
 
 // TestLazyProxy_ProbationWatchdog_ReapsOrphanStartingRowWithNoEndpoint is the F1
@@ -2477,8 +2536,12 @@ func TestLazyProxy_ColdStartSlots_OwnInFlightJoinNotRefused(t *testing.T) {
 		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
 		BackendKind: "mcp-language-server", Port: 9200, Lifecycle: f, RegistryPath: regPath,
 		InflightMinRetryGap: 20 * time.Millisecond, ToolsCallDebounce: 100 * time.Millisecond,
-		ColdStartConcurrency:  2,
-		MaterializeWaitBudget: 5 * time.Second,
+		ColdStartConcurrency: 2,
+		// Generous join budget: it only bounds how long the retry WAITS (the pass
+		// path returns as soon as the 400ms materialize completes), but a tight
+		// value flakes to a 503 when host load stretches the fake's timer — the
+		// full-package run has observed the 400ms delay starved past 5s.
+		MaterializeWaitBudget: 60 * time.Second,
 	})
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -2910,6 +2973,7 @@ func TestLazyProxy_ColdRequestHoldCeilingInvariantClamped(t *testing.T) {
 		ColdRequestHoldCeiling: 10 * time.Second, // < budget -> clamp up
 		ColdStartMaxProbation:  5 * time.Second,  // < ceiling -> clamp up
 	})
+	stopProxyOnCleanup(t, p)
 	if !(p.cfg.MaterializeWaitBudget < p.cfg.ColdRequestHoldCeiling) {
 		t.Fatalf("after clamp: ceiling %s not > budget %s", p.cfg.ColdRequestHoldCeiling, p.cfg.MaterializeWaitBudget)
 	}
@@ -2924,12 +2988,14 @@ func TestLazyProxy_ColdRequestHoldCeilingInvariantClamped(t *testing.T) {
 func TestLazyProxy_ColdForwardHeldEvent_FiresBeyondBudget(t *testing.T) {
 	var fired atomic.Int32
 	var gotMethod atomic.Value
-	orig := coldForwardHeldEventFn
-	coldForwardHeldEventFn = func(backendKind, workspacePath, method, heldBeyond, ceiling string) {
+	override := func(backendKind, workspacePath, method, heldBeyond, ceiling string) {
 		gotMethod.Store(method)
 		fired.Add(1)
 	}
-	t.Cleanup(func() { coldForwardHeldEventFn = orig })
+	// Atomic seam: a detached timer callback can outlive this test, so the
+	// override + restore go through the atomic pointer (plain-var swap raced).
+	coldForwardHeldEventFn.Store(&override)
+	t.Cleanup(func() { coldForwardHeldEventFn.Store(nil) })
 
 	f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
 	p, _ := newTestProxy(t, "mcp-language-server", f)
@@ -3074,12 +3140,14 @@ func TestLazyProxy_ColdForward_CeilingExceeded_NonRetryableControlledError(t *te
 func TestLazyProxy_ColdForward_HeldEventFires(t *testing.T) {
 	var fired atomic.Int32
 	var gotMethod atomic.Value
-	orig := coldForwardHeldEventFn
-	coldForwardHeldEventFn = func(backendKind, workspacePath, method, heldBeyond, ceiling string) {
+	override := func(backendKind, workspacePath, method, heldBeyond, ceiling string) {
 		gotMethod.Store(method)
 		fired.Add(1)
 	}
-	t.Cleanup(func() { coldForwardHeldEventFn = orig })
+	// Atomic seam: a detached timer callback can outlive this test, so the
+	// override + restore go through the atomic pointer (plain-var swap raced).
+	coldForwardHeldEventFn.Store(&override)
+	t.Cleanup(func() { coldForwardHeldEventFn.Store(nil) })
 
 	f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
 	p, _ := newTestProxy(t, "mcp-language-server", f)
@@ -3184,4 +3252,129 @@ func TestLazyProxy_ColdRequestHeldError_MessageDistinguishesWarmVsCold(t *testin
 	if !strings.Contains(warmBody, "do not auto-retry") || strings.Contains(warmBody, "retry in") {
 		t.Fatalf("warm message broke the non-retry contract: %s", warmBody)
 	}
+}
+
+// --- PR #489 bot round-3: F1 shadow-on-failed-write, F2 abort-reconcile --------
+
+// TestLazyProxy_Reconcile_FailedWriteDoesNotRecordShadow_RetriesNext is F1 (bot
+// r3): a FAILED registry write must NOT record the lastWrittenLifecycle shadow —
+// otherwise later warm requests hit the shadow fast-path and never retry the
+// failed Starting->Active move, leaving the row stuck while actually warm. The
+// registry write is failed deterministically by making the registry path's parent
+// a FILE (Registry.Lock's MkdirAll then errors), then healed.
+func TestLazyProxy_Reconcile_FailedWriteDoesNotRecordShadow_RetriesNext(t *testing.T) {
+	tmp := t.TempDir()
+	blocker := filepath.Join(tmp, "blocked")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatalf("blocker: %v", err)
+	}
+	regPath := filepath.Join(blocker, "r.yaml") // parent is a FILE -> registry writes fail
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p := NewLazyProxy(LazyProxyConfig{
+		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
+		BackendKind: "mcp-language-server", Lifecycle: f, RegistryPath: regPath,
+	})
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = p.Stop(ctx)
+	})
+
+	// Manufacture a live not-yet-warmed endpoint at a known generation.
+	p.mu.Lock()
+	p.endpoint = &fakeEndpoint{parent: f}
+	p.endpointGeneration = 5
+	p.warmed = false
+	p.mu.Unlock()
+
+	// First success: the Active reconcile write FAILS (unwritable registry path).
+	p.markWarmedOnFirstSuccess(5)
+	p.mu.Lock()
+	shadow := p.lastWrittenLifecycle
+	warmed := p.warmed
+	p.mu.Unlock()
+	if !warmed {
+		t.Fatal("warmed flag not set on first success")
+	}
+	if shadow != "" {
+		t.Fatalf("shadow = %q recorded despite FAILED registry write (F1 regression: write never retried)", shadow)
+	}
+
+	// Heal the path: replace the blocker file with a real directory + seeded row.
+	if err := os.Remove(blocker); err != nil {
+		t.Fatalf("remove blocker: %v", err)
+	}
+	seed := api.NewRegistry(regPath)
+	seed.Put(api.WorkspaceEntry{
+		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
+		Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python",
+		Lifecycle: api.LifecycleStarting,
+	})
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// Next gen-matching success retries the write (shadow still empty -> miss)
+	// and succeeds -> row Active + shadow recorded.
+	p.markWarmedOnFirstSuccess(5)
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleActive {
+		t.Fatalf("lifecycle after retry = %q, want Active (failed write must be retried)", e.Lifecycle)
+	}
+	p.mu.Lock()
+	shadow = p.lastWrittenLifecycle
+	p.mu.Unlock()
+	if shadow != api.LifecycleActive {
+		t.Fatalf("shadow after successful retry = %q, want Active", shadow)
+	}
+}
+
+// TestLazyProxy_CallerAbortAfterConcurrentWarm_ReconcilesActive is F2 (bot r3):
+// a caller that wrote Starting (reserve) and then aborts on its own canceled ctx
+// must NOT leave the registry downgraded when a concurrent publisher made the
+// endpoint live+warmed in the race window — the abort path reconciles to Active.
+func TestLazyProxy_CallerAbortAfterConcurrentWarm_ReconcilesActive(t *testing.T) {
+	f := newStopAfterMaterializeLifecycle()
+	p, regPath := newTestProxy(t, "mcp-language-server", nil)
+	p.cfg.Lifecycle = f
+	p.cfg.MaterializeWaitBudget = 5 * time.Second // budget must not fire; ctx-cancel drives the abort
+
+	ctx, cancel := context.WithCancel(context.Background())
+	res := make(chan error, 1)
+	go func() {
+		_, _, err := p.ensureMaterialized(ctx)
+		res <- err
+	}()
+	// B reserved (row Starting) and its flight is blocked inside Materialize.
+	<-f.materializeStarted
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleStarting {
+		t.Fatalf("precondition: row = %q, want Starting (B's reserve)", e.Lifecycle)
+	}
+
+	// A concurrent publisher (modeled directly under p.mu, as the race window
+	// leaves it) installs a live WARMED endpoint while the registry still carries
+	// B's Starting downgrade and the shadow is reset.
+	parent := &fakeLifecycle{kind: "mcp-language-server"}
+	p.mu.Lock()
+	p.endpoint = &fakeEndpoint{parent: parent}
+	p.endpointGeneration++
+	p.lastWrittenLifecycle = ""
+	p.warmed = true
+	p.startingSince = time.Time{}
+	p.mu.Unlock()
+
+	cancel() // B aborts while joining its (still-blocked) flight
+	if err := <-res; !errors.Is(err, context.Canceled) {
+		t.Fatalf("aborted caller err = %v, want context.Canceled", err)
+	}
+	// The abort path must have reconciled the live+warmed endpoint -> Active.
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleActive {
+		t.Fatalf("row after caller abort = %q, want Active (F2 regression: stuck Starting until a later request)", e.Lifecycle)
+	}
+
+	// Cleanup: unblock the detached flight (its publish sees the live endpoint,
+	// closes the redundant wrapper, and keeps state intact), then stop the proxy.
+	close(f.releaseMaterialize)
+	sctx, scancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer scancel()
+	_ = p.Stop(sctx)
 }
