@@ -1699,11 +1699,18 @@ timeout (150s, DECOUPLED from serena's 60s) > ColdRequestHoldCeiling (120s) >
 MaterializeWaitBudget (15s)`. `daemon.NewLazyProxy` clamps + warns a misordered
 config; a gui test asserts the cross-component ordering against the router
 constant. The proxy request ceiling therefore always fires BEFORE the router
-upstream timeout (client sees the controlled error, never a raw router 504) and
-BEFORE the probation watchdog (which never reaps a still-progressing request). A
-backend wedged past `ColdStartMaxProbation` is torn down by the probation watchdog
-on the idle-reaper tick (which runs whenever idle-reaping OR probation is
-configured, so `--idle-backend-ttl=0` no longer disables it), freeing its slot.
+upstream timeout (client sees the controlled error, never a raw router 504). The
+probation>ceiling ordering bounds a SINGLE request's own hold only: a request
+started at publish is severed by its own 120s ceiling long before the 5m watchdog.
+The watchdog MAY still sever a LATE-ARRIVING in-flight request near the probation
+boundary (started at e.g. publish+4:30, only 30s into its ceiling at the 5:00
+reap) — by design, since the never-warmed backend is presumed wedged; the severed
+request receives the same controlled non-retryable 500 (never a retryable-looking
+error). A backend wedged past `ColdStartMaxProbation` is torn down by the
+probation watchdog on the idle-reaper tick (which runs whenever idle-reaping OR
+probation is configured — `--idle-backend-ttl=0` does not disable it, and neither
+does disabling the cold-start gate via `ColdStartConcurrency < 0`), freeing its
+slot.
 
 **Registry lifecycle is single-owner.** The `Configured`/`Starting`/`Active`
 running-state column is written by ONE authoritative reconcile

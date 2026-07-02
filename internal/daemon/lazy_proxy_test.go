@@ -1892,10 +1892,14 @@ func TestLazyProxy_DocRefsResetOnBackendTeardown(t *testing.T) {
 // --- P2c cold-materialize: bounded wait, probation, cold-start slots ---------
 
 // waitForCond polls a deterministic condition (e.g. a background goroutine
-// reaching a known state) instead of sleeping a fixed duration.
+// reaching a known state) instead of sleeping a fixed duration. The deadline
+// only bounds FAILURE reporting — a passing condition returns as soon as it
+// holds — so it is deliberately generous: a 2s deadline was observed starving
+// under loaded -race package runs (a 50ms AfterFunc took >2s to get scheduled),
+// flaking tests that are otherwise deterministic.
 func waitForCond(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -3179,15 +3183,20 @@ func TestLazyProxy_NegativeColdStartMaxProbation_NotClamped(t *testing.T) {
 	p := NewLazyProxy(LazyProxyConfig{
 		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
 		BackendKind: "mcp-language-server", Lifecycle: f, RegistryPath: regPath,
-		MaterializeWaitBudget:  30 * time.Second, // > ceiling below: WOULD clamp the ceiling
-		ColdRequestHoldCeiling: 10 * time.Second, // < budget: WOULD clamp if probation enabled
-		ColdStartMaxProbation:  -1 * time.Second, // disabled → skip BOTH clamps
+		MaterializeWaitBudget:  30 * time.Second, // > ceiling below → ceiling clamp fires
+		ColdRequestHoldCeiling: 10 * time.Second, // < budget → clamped to 2×budget
+		ColdStartMaxProbation:  -1 * time.Second, // disabled → skip ONLY the probation clamp
 	})
+	stopProxyOnCleanup(t, p)
+	// r3-F3: the documented negative-probation disable is preserved (the probation
+	// clamp must not silently re-arm the watchdog).
 	if p.cfg.ColdStartMaxProbation != -1*time.Second {
-		t.Fatalf("negative probation clamped to %s (F3 regression); want preserved -1s", p.cfg.ColdStartMaxProbation)
+		t.Fatalf("negative probation clamped to %s (r3-F3 regression); want preserved -1s", p.cfg.ColdStartMaxProbation)
 	}
-	if p.cfg.ColdRequestHoldCeiling != 10*time.Second {
-		t.Fatalf("ceiling clamped to %s despite disabled probation (F3: skip BOTH); want 10s", p.cfg.ColdRequestHoldCeiling)
+	// r4-F5: the UNRELATED ceiling>budget clamp still applies with the watchdog
+	// disabled — the request-hold/materialize tiers govern their phases regardless.
+	if want := 60 * time.Second; p.cfg.ColdRequestHoldCeiling != want {
+		t.Fatalf("ceiling = %s with disabled probation, want clamped %s (r4-F5: ceiling>budget clamp is unconditional)", p.cfg.ColdRequestHoldCeiling, want)
 	}
 }
 
@@ -3377,4 +3386,193 @@ func TestLazyProxy_CallerAbortAfterConcurrentWarm_ReconcilesActive(t *testing.T)
 	sctx, scancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer scancel()
 	_ = p.Stop(sctx)
+}
+
+// --- pre-bot round (r4): F1 rollback-vs-reset epoch, F2 watchdog gating,
+// --- F4 Branch-B load-error retention -----------------------------------------
+
+// TestLazyProxy_DocRefRollback_AfterTeardownReset_NoPhantomRefcount is r4-F1:
+// a doc-lifecycle rollback racing a teardown's resetDocRefs must NOT inject a
+// phantom refcount into the fresh map (which would permanently absorb the next
+// legitimate didOpen). Covers the deterministic reset-then-rollback order at the
+// primitive level, then the full Branch-A interleave through the handler.
+func TestLazyProxy_DocRefRollback_AfterTeardownReset_NoPhantomRefcount(t *testing.T) {
+	const uri = "file:///ws/foo.go"
+
+	// Primitive-level deterministic order: apply (1->0 close, forward) ->
+	// teardown reset -> rollback. The rollback must no-op on the epoch mismatch.
+	{
+		f := &fakeLifecycle{kind: "mcp-language-server"}
+		p, _ := newTestProxy(t, "mcp-language-server", f)
+		p.docRefsMu.Lock()
+		p.docRefs[uri] = 1
+		p.docRefsMu.Unlock()
+
+		forward, epoch, err := p.applyDocRef(uri, false) // didClose 1->0
+		if err != nil || !forward {
+			t.Fatalf("applyDocRef close: forward=%v err=%v, want forward=true", forward, err)
+		}
+		p.resetDocRefs()                    // teardown clears the map + bumps the epoch
+		p.rollbackDocRef(uri, false, epoch) // late rollback for the PRE-reset transition
+
+		p.docRefsMu.Lock()
+		n := len(p.docRefs)
+		p.docRefsMu.Unlock()
+		if n != 0 {
+			t.Fatalf("rollback injected a phantom refcount into the fresh map (r4-F1 regression): %d entries", n)
+		}
+
+		// The next didOpen must be a genuine first-open (0->1 forward).
+		forward, _, err = p.applyDocRef(uri, true)
+		if err != nil || !forward {
+			t.Fatalf("post-reset didOpen absorbed by phantom refcount (r4-F1 regression): forward=%v err=%v", forward, err)
+		}
+	}
+
+	// Full interleave through the handler: didClose delivered + in flight over a
+	// never-warmed backend; Branch A reaps (resets docRefs, severs the send); the
+	// handler's failure-path rollback must leave the map EMPTY and a subsequent
+	// didOpen must be FORWARDED (sendCount increments).
+	f := &fakeLifecycle{kind: "mcp-language-server", firstSendGate: make(chan struct{})}
+	p, regPath := newTestProxy(t, "mcp-language-server", f)
+	h := p.Handler()
+
+	// A prior open is outstanding so the didClose is the forwarded 1->0 close.
+	p.docRefsMu.Lock()
+	p.docRefs[uri] = 1
+	p.docRefsMu.Unlock()
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { done <- postDocNotification(t, h, "textDocument/didClose", uri) }()
+	waitForCond(t, "didClose delivered + in flight", func() bool { return f.sendCount.Load() == 1 })
+
+	// Branch A: age the publish and reap — severs the in-flight send
+	// ("backend host stopped", NOT DeadlineExceeded, so the probation-202 branch
+	// is skipped and the failure-path rollback runs), resets docRefs, bumps gen.
+	p.mu.Lock()
+	p.endpointPublishedAt = time.Now().Add(-time.Hour)
+	p.mu.Unlock()
+	p.reapWedgedProbation(time.Now().UTC())
+	<-done
+
+	p.docRefsMu.Lock()
+	n := len(p.docRefs)
+	p.docRefsMu.Unlock()
+	if n != 0 {
+		t.Fatalf("docRefs = %d entries after severed didClose rollback, want 0 (phantom refcount, r4-F1)", n)
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleFailed {
+		t.Fatalf("lifecycle after reap = %q, want Failed", e.Lifecycle)
+	}
+
+	// A subsequent didOpen is a genuine first-open on the fresh backend and MUST
+	// be forwarded (send #2; the fake gates only send #1).
+	rr := postDocNotification(t, h, "textDocument/didOpen", uri)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("post-reap didOpen code = %d, want 202; body=%s", rr.Code, rr.Body.String())
+	}
+	if got := f.sendCount.Load(); got != 2 {
+		t.Fatalf("sendCount = %d, want 2 (didOpen absorbed by phantom refcount — never forwarded, r4-F1)", got)
+	}
+}
+
+// TestLazyProxy_Watchdog_RunsWithColdStartGateDisabled is r4-F2: the probation
+// watchdog TICKER must run whenever probation is configured, INDEPENDENT of the
+// cold-start gate — ColdStartConcurrency<0 (documented gate-disable) + idle-ttl=0
+// previously left watchdogOn false, so a wedged never-warmed backend held its
+// Starting row + live port forever against the MaterializedHardCap.
+func TestLazyProxy_Watchdog_RunsWithColdStartGateDisabled(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	seed := api.NewRegistry(regPath)
+	seed.Put(api.WorkspaceEntry{WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python", Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python", Lifecycle: api.LifecycleStarting})
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Explicit tiny tiers keep the ordering clamps quiet (20ms>10ms, 50ms>20ms)
+	// so the constructor-time watchdog config is exactly what the test sets.
+	p := NewLazyProxy(LazyProxyConfig{
+		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
+		BackendKind: "mcp-language-server", Lifecycle: f, RegistryPath: regPath,
+		MaterializeWaitBudget:  10 * time.Millisecond,
+		ColdRequestHoldCeiling: 20 * time.Millisecond,
+		ColdStartMaxProbation:  50 * time.Millisecond,
+		ColdStartConcurrency:   -1, // gate DISABLED — watchdog must still run
+		IdleBackendTTL:         0,  // idle reaping off — ticker is watchdog-only
+		IdleBackendCheckEvery:  10 * time.Millisecond,
+	})
+	stopProxyOnCleanup(t, p)
+
+	// Wedged never-warmed backend published long ago.
+	p.mu.Lock()
+	p.endpoint = &fakeEndpoint{parent: f}
+	p.endpointGeneration++
+	p.warmed = false
+	p.endpointPublishedAt = time.Now().Add(-time.Minute)
+	p.mu.Unlock()
+
+	// The watchdog TICKER (not a direct reap call) must tear it down.
+	waitForCond(t, "watchdog reaped the wedged backend with the gate disabled", func() bool {
+		return readEntry(t, regPath).Lifecycle == api.LifecycleFailed
+	})
+	if sc := f.stopCount.Load(); sc < 1 {
+		t.Fatalf("Lifecycle.Stop count = %d, want >= 1 (watchdog teardown)", sc)
+	}
+}
+
+// TestLazyProxy_WatchdogBranchB_TransientLoadErrorRetainsOrphanTimer is r4-F4:
+// Branch B must NOT clear startingSince when the row verification FAILED to load
+// (indistinguishable-from-advanced was the bug) — the orphan timer stays armed and
+// the next tick reaps once the registry is readable again.
+func TestLazyProxy_WatchdogBranchB_TransientLoadErrorRetainsOrphanTimer(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, regPath := newTestProxy(t, "mcp-language-server", f)
+	p.cfg.ColdStartMaxProbation = 50 * time.Millisecond
+
+	// Orphan: Starting reserved long ago, no endpoint, no flight.
+	p.mu.Lock()
+	p.endpoint = nil
+	p.startingSince = time.Now().Add(-time.Minute)
+	p.mu.Unlock()
+
+	// Tick 1: the registry is transiently unreadable (garbage YAML -> Load error).
+	if err := os.WriteFile(regPath, []byte("{{{ not yaml"), 0o600); err != nil {
+		t.Fatalf("corrupt registry: %v", err)
+	}
+	p.reapWedgedProbation(time.Now().UTC())
+	p.mu.Lock()
+	retained := !p.startingSince.IsZero()
+	reaping := p.reaping
+	p.mu.Unlock()
+	if !retained {
+		t.Fatal("transient registry load error cleared startingSince — Branch B permanently disarmed (r4-F4 regression)")
+	}
+	if reaping {
+		t.Fatal("reaping flag not restored after load-error early return")
+	}
+	if sc := f.stopCount.Load(); sc != 0 {
+		t.Fatalf("load-error tick tore down the lifecycle: stopCount=%d", sc)
+	}
+
+	// Heal the registry with the genuine orphan Starting row.
+	seed := api.NewRegistry(regPath)
+	seed.Put(api.WorkspaceEntry{WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python", Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python", Lifecycle: api.LifecycleStarting})
+	if err := seed.Save(); err != nil {
+		t.Fatalf("heal registry: %v", err)
+	}
+
+	// Tick 2: the retained timer lets the reap proceed -> row Failed, timer cleared.
+	p.reapWedgedProbation(time.Now().UTC())
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleFailed {
+		t.Fatalf("lifecycle after healed tick = %q, want Failed (orphan reaped on retry)", e.Lifecycle)
+	}
+	p.mu.Lock()
+	cleared := p.startingSince.IsZero()
+	p.mu.Unlock()
+	if !cleared {
+		t.Fatal("startingSince not cleared after the reap committed")
+	}
+	if sc := f.stopCount.Load(); sc < 1 {
+		t.Fatalf("Lifecycle.Stop count = %d, want >= 1 (orphan teardown)", sc)
+	}
 }

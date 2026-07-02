@@ -135,8 +135,14 @@ const (
 	// DefaultLSPColdStartMaxProbation is the default probation-watchdog window
 	// after which a materialized-but-never-warmed backend is torn down. It MUST
 	// stay strictly greater than the LSP-forward upstream timeout (and thus the
-	// request hold ceiling), so the watchdog only ever reaps a backend after its
-	// longest single request has already been severed — never a progressing one.
+	// request hold ceiling); that ordering bounds a SINGLE request's own hold — a
+	// request started at publish is severed by its own ceiling well before the
+	// watchdog fires. It does NOT prevent Branch A from severing a LATE-ARRIVING
+	// in-flight request (one that started near the probation boundary, e.g. at
+	// publish+4:30, is only partway into its ceiling when the reap fires at 5:00).
+	// That sever is BY DESIGN — the never-warmed backend is presumed wedged — and
+	// the severed request receives the controlled non-retryable 500 via
+	// reapSeveredGeneration, never a retryable-looking error.
 	DefaultLSPColdStartMaxProbation = 5 * time.Minute
 
 	// Bounds attacker-controlled document lifecycle state retained by the
@@ -268,6 +274,16 @@ type LazyProxy struct {
 	// after a restart and silently desynchronize the proxy from upstream.
 	docRefsMu sync.Mutex
 	docRefs   map[string]int
+	// docRefsEpoch identifies the CURRENT docRefs map instance; resetDocRefs bumps
+	// it under docRefsMu. applyDocRef returns the epoch its transition landed in,
+	// and rollbackDocRef no-ops when the epoch has moved on (r4-F1): a rollback for
+	// a transition applied to a map that a teardown has since RESET must not inject
+	// a phantom refcount into the fresh map (which would permanently absorb the
+	// next legitimate didOpen). Epoch-under-docRefsMu (not endpointGeneration under
+	// p.mu) is deliberate: the epoch is captured atomically WITH the apply, so
+	// there is no capture-vs-apply window, and no cross-mutex ordering to reason
+	// about.
+	docRefsEpoch uint64
 }
 
 // NewLazyProxy constructs a proxy with defaulted InflightMinRetryGap (2s)
@@ -296,31 +312,36 @@ func NewLazyProxy(cfg LazyProxyConfig) *LazyProxy {
 	// materialize budget, and the probation watchdog from inverting (reliability
 	// constraint): ColdStartMaxProbation > ColdRequestHoldCeiling > MaterializeWaitBudget.
 	// Clamp + warn on a misordered config so a misconfiguration can never let the
-	// request ceiling fire before the materialize budget, nor let the probation
-	// watchdog reap a still-progressing request. (The cross-component upper bound
+	// request ceiling fire before the materialize budget. NOTE (r4-F3): the
+	// probation>ceiling ordering bounds a SINGLE request's own hold only — Branch A
+	// MAY still sever a late-arriving in-flight request near the probation
+	// boundary (by design; the severed request gets the controlled non-retryable
+	// 500 via reapSeveredGeneration). (The cross-component upper bound
 	// ColdStartMaxProbation > LSP-forward upstream timeout > ColdRequestHoldCeiling
 	// is asserted against the router constant by a gui-package test.)
 	//
-	// SKIP the clamps entirely when the watchdog is DISABLED via a negative
+	// The ceiling>budget clamp applies UNCONDITIONALLY: the ceiling/budget tiers
+	// govern the request-hold and materialize phases regardless of whether the
+	// probation watchdog is enabled, so a disabled watchdog must not silently
+	// permit a ceiling that fires before the materialize budget (r4-F5).
+	if cfg.ColdRequestHoldCeiling <= cfg.MaterializeWaitBudget {
+		clamped := 2 * cfg.MaterializeWaitBudget
+		fmt.Fprintf(daemonDiagWriter(),
+			"warn: lazy_proxy: ColdRequestHoldCeiling (%s) <= MaterializeWaitBudget (%s); clamping ceiling to %s to preserve the timeout ordering\n",
+			cfg.ColdRequestHoldCeiling, cfg.MaterializeWaitBudget, clamped)
+		cfg.ColdRequestHoldCeiling = clamped
+	}
+	// SKIP ONLY the probation clamp when the watchdog is DISABLED via a negative
 	// ColdStartMaxProbation sentinel (documented disable, mirrors ColdStartConcurrency<0):
 	// the operator has taken manual control for a backend whose cold index legitimately
 	// exceeds 5m, and the probation clamp would otherwise silently re-arm the watchdog
-	// at 2×ceiling, reaping every cold start in a churn loop (F3).
-	if cfg.ColdStartMaxProbation > 0 {
-		if cfg.ColdRequestHoldCeiling <= cfg.MaterializeWaitBudget {
-			clamped := 2 * cfg.MaterializeWaitBudget
-			fmt.Fprintf(daemonDiagWriter(),
-				"warn: lazy_proxy: ColdRequestHoldCeiling (%s) <= MaterializeWaitBudget (%s); clamping ceiling to %s to preserve the timeout ordering\n",
-				cfg.ColdRequestHoldCeiling, cfg.MaterializeWaitBudget, clamped)
-			cfg.ColdRequestHoldCeiling = clamped
-		}
-		if cfg.ColdStartMaxProbation <= cfg.ColdRequestHoldCeiling {
-			clamped := 2 * cfg.ColdRequestHoldCeiling
-			fmt.Fprintf(daemonDiagWriter(),
-				"warn: lazy_proxy: ColdStartMaxProbation (%s) <= ColdRequestHoldCeiling (%s); clamping probation to %s to preserve the timeout ordering\n",
-				cfg.ColdStartMaxProbation, cfg.ColdRequestHoldCeiling, clamped)
-			cfg.ColdStartMaxProbation = clamped
-		}
+	// at 2×ceiling, reaping every cold start in a churn loop (r3-F3).
+	if cfg.ColdStartMaxProbation > 0 && cfg.ColdStartMaxProbation <= cfg.ColdRequestHoldCeiling {
+		clamped := 2 * cfg.ColdRequestHoldCeiling
+		fmt.Fprintf(daemonDiagWriter(),
+			"warn: lazy_proxy: ColdStartMaxProbation (%s) <= ColdRequestHoldCeiling (%s); clamping probation to %s to preserve the timeout ordering\n",
+			cfg.ColdStartMaxProbation, cfg.ColdRequestHoldCeiling, clamped)
+		cfg.ColdStartMaxProbation = clamped
 	}
 	if cfg.IdleBackendTTL > 0 && cfg.IdleBackendCheckEvery == 0 {
 		cfg.IdleBackendCheckEvery = DefaultLSPIdleBackendCheckEvery
@@ -900,7 +921,10 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 	}
 
 	isOpen := req.Method == "textDocument/didOpen"
-	forward, err := p.applyDocRef(uri, isOpen)
+	// docEpoch identifies the docRefs map instance the transition landed in; the
+	// rollback sites below pass it so a rollback racing a teardown's resetDocRefs
+	// no-ops instead of injecting a phantom count into the fresh map (r4-F1).
+	forward, docEpoch, err := p.applyDocRef(uri, isOpen)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusTooManyRequests)
 		return
@@ -917,7 +941,7 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 		// Materialization did not yield an endpoint: the upstream forward will
 		// not happen, so roll back the refcount transition we optimistically
 		// applied to keep the count consistent with what the backend saw.
-		p.rollbackDocRef(uri, isOpen)
+		p.rollbackDocRef(uri, isOpen, docEpoch)
 		if p.writeColdStartRefusal(w, req.ID, err) {
 			return
 		}
@@ -956,7 +980,7 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 		}
 		// Any other error means the notification was NOT delivered, so roll back
 		// the optimistic refcount transition to keep the count consistent.
-		p.rollbackDocRef(uri, isOpen)
+		p.rollbackDocRef(uri, isOpen, docEpoch)
 		// Client-cancel is not a backend failure — see handleToolsCall.
 		if isClientCancelErr(r.Context(), err) {
 			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
@@ -972,52 +996,63 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 		// Backend rejected the lifecycle notification, so do not retain a
 		// refcount that would suppress a future legitimate open/close. The
 		// client-visible HTTP contract remains notification-like (202/no body).
-		p.rollbackDocRef(uri, isOpen)
+		p.rollbackDocRef(uri, isOpen, docEpoch)
 	}
 	// Notification delivered. JSON-RPC notifications take no response body.
 	w.WriteHeader(http.StatusAccepted)
 }
 
 // applyDocRef records an open/close against uri and reports whether the
-// operation should be forwarded to the upstream backend. didOpen forwards on
-// the 0->1 transition; didClose forwards on the 1->0 transition. A didClose
+// operation should be forwarded to the upstream backend, plus the docRefs map
+// EPOCH the transition landed in (pass it to rollbackDocRef). didOpen forwards
+// on the 0->1 transition; didClose forwards on the 1->0 transition. A didClose
 // against an already-zero count is absorbed and never drives the count
 // negative (a spurious or duplicate close from one agent must not affect the
 // document state another agent still depends on).
-func (p *LazyProxy) applyDocRef(uri string, open bool) (bool, error) {
+func (p *LazyProxy) applyDocRef(uri string, open bool) (bool, uint64, error) {
 	if len(uri) > maxDocURIBytes {
-		return false, fmt.Errorf("textDocument.uri exceeds %d bytes", maxDocURIBytes)
+		return false, 0, fmt.Errorf("textDocument.uri exceeds %d bytes", maxDocURIBytes)
 	}
 	p.docRefsMu.Lock()
 	defer p.docRefsMu.Unlock()
 	if open {
 		prev := p.docRefs[uri]
 		if prev == 0 && len(p.docRefs) >= maxTrackedDocRefs {
-			return false, fmt.Errorf("too many tracked text documents (max %d)", maxTrackedDocRefs)
+			return false, 0, fmt.Errorf("too many tracked text documents (max %d)", maxTrackedDocRefs)
 		}
 		p.docRefs[uri] = prev + 1
-		return prev == 0, nil
+		return prev == 0, p.docRefsEpoch, nil
 	}
 	prev := p.docRefs[uri]
 	if prev <= 0 {
 		// Close with no recorded open — nothing upstream to release.
-		return false, nil
+		return false, p.docRefsEpoch, nil
 	}
 	if prev == 1 {
 		delete(p.docRefs, uri)
-		return true, nil
+		return true, p.docRefsEpoch, nil
 	}
 	p.docRefs[uri] = prev - 1
-	return false, nil
+	return false, p.docRefsEpoch, nil
 }
 
 // rollbackDocRef undoes the most recent applyDocRef transition for uri when
 // the corresponding upstream forward could not be delivered. It is the exact
 // inverse: a failed didOpen decrements (back toward 0), a failed didClose
 // re-increments (restoring the open the close was about to release).
-func (p *LazyProxy) rollbackDocRef(uri string, open bool) {
+//
+// epoch is the value applyDocRef returned. The rollback no-ops when the map
+// epoch has moved on (r4-F1): a concurrent teardown's resetDocRefs replaced the
+// map, so the transition being "undone" no longer exists — applying the inverse
+// anyway would inject a phantom refcount into the FRESH map (e.g. a rolled-back
+// didClose re-incrementing to 1 on a backend with zero open docs), permanently
+// absorbing the next legitimate didOpen for that URI.
+func (p *LazyProxy) rollbackDocRef(uri string, open bool, epoch uint64) {
 	p.docRefsMu.Lock()
 	defer p.docRefsMu.Unlock()
+	if p.docRefsEpoch != epoch {
+		return
+	}
 	if open {
 		if cur := p.docRefs[uri]; cur <= 1 {
 			delete(p.docRefs, uri)
@@ -1029,13 +1064,16 @@ func (p *LazyProxy) rollbackDocRef(uri string, open bool) {
 	p.docRefs[uri] = p.docRefs[uri] + 1
 }
 
-// resetDocRefs clears all per-URI open counts. Called whenever the backend is
-// torn down (Stop / onSendFailure / reapIdleBackend): the fresh backend that
-// the next request materializes has no open documents, so any retained count
-// would wrongly absorb the first didOpen after the restart.
+// resetDocRefs clears all per-URI open counts and bumps the map epoch so a
+// late rollbackDocRef for a pre-reset transition no-ops (r4-F1). Called
+// whenever the backend is torn down (Stop / onSendFailure / reapIdleBackend /
+// reapWedgedProbation): the fresh backend that the next request materializes
+// has no open documents, so any retained (or re-injected) count would wrongly
+// absorb the first didOpen after the restart.
 func (p *LazyProxy) resetDocRefs() {
 	p.docRefsMu.Lock()
 	p.docRefs = make(map[string]int)
+	p.docRefsEpoch++
 	p.docRefsMu.Unlock()
 }
 
@@ -1574,8 +1612,16 @@ func (p *LazyProxy) startIdleReaper() {
 	// backend would hold its slot forever. Each per-tick reaper self-skips when
 	// its own knob is off (reapIdleBackend on IdleBackendTTL<=0; reapWedgedProbation
 	// on ColdStartMaxProbation<=0), so a watchdog-only ticker never idle-reaps.
+	//
+	// watchdogOn deliberately does NOT depend on ColdStartConcurrency (r4-F2): the
+	// watchdog's usefulness is independent of the cold-start GATE — a wedged
+	// never-warmed backend holds a Starting row + live port against the
+	// MaterializedHardCap (and mis-reports status) even when the gate is disabled
+	// (ColdStartConcurrency < 0), and reapWedgedProbation itself self-skips only on
+	// ColdStartMaxProbation <= 0. This also makes the flag-help / CLAUDE.md claim
+	// ("the probation watchdog stays active whenever probation is configured") true.
 	idleOn := p.cfg.IdleBackendTTL > 0
-	watchdogOn := p.cfg.ColdStartMaxProbation > 0 && p.cfg.ColdStartConcurrency > 0
+	watchdogOn := p.cfg.ColdStartMaxProbation > 0
 	if !idleOn && !watchdogOn {
 		return
 	}
@@ -1722,18 +1768,36 @@ func (p *LazyProxy) reapWedgedProbation(now time.Time) {
 		return
 	}
 	p.reaping = true
-	p.startingSince = time.Time{}
 	p.mu.Unlock()
 
 	// Only reap if the registry row really is still Starting; if it has already
 	// advanced (a teardown stamped Failed/Configured, or a warm stamped Active
-	// elsewhere) there is no orphan slot to free.
-	if !p.registryRowIsStarting() {
+	// elsewhere) there is no orphan slot to free. startingSince is NOT cleared
+	// before this verification (r4-F4): a transient registry-read failure must
+	// leave the orphan timer armed so the next tick retries — clearing first
+	// permanently disarmed Branch B for the very orphan it exists to clean.
+	rowStarting, loadErr := p.registryRowIsStarting()
+	if loadErr != nil {
+		// Transient read failure (flock contention, torn write): retain
+		// startingSince and retry on the next tick.
+		fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: probation watchdog registry read (will retry next tick): %v\n", loadErr)
 		p.mu.Lock()
 		p.reaping = false
 		p.mu.Unlock()
 		return
 	}
+	if !rowStarting {
+		// Row genuinely advanced (or was unregistered) — no orphan to free;
+		// disarm the orphan timer.
+		p.mu.Lock()
+		p.startingSince = time.Time{}
+		p.reaping = false
+		p.mu.Unlock()
+		return
+	}
+	p.mu.Lock()
+	p.startingSince = time.Time{}
+	p.mu.Unlock()
 	p.resetDocRefs()
 	p.teardownWedgedLifecycle("backend never published an endpoint within " + p.cfg.ColdStartMaxProbation.String())
 }
@@ -1755,14 +1819,18 @@ func (p *LazyProxy) teardownWedgedLifecycle(reason string) {
 
 // registryRowIsStarting reports whether this proxy's registry row is currently
 // Lifecycle==Starting. Used by reapWedgedProbation's orphan branch to avoid
-// re-stamping a row that already advanced away from Starting.
-func (p *LazyProxy) registryRowIsStarting() bool {
+// re-stamping a row that already advanced away from Starting. A registry LOAD
+// error is returned distinctly (r4-F4): the caller must treat it as
+// "unknown, retry later" — NOT as "row advanced" — or a transient read failure
+// would permanently disarm the orphan reap. A missing row reads as (false, nil):
+// genuinely nothing to reap (unregistered).
+func (p *LazyProxy) registryRowIsStarting() (bool, error) {
 	reg := api.NewRegistry(p.cfg.RegistryPath)
 	if err := reg.Load(); err != nil {
-		return false
+		return false, err
 	}
 	e, ok := reg.Get(p.cfg.WorkspaceKey, p.cfg.Language)
-	return ok && e.Lifecycle == api.LifecycleStarting
+	return ok && e.Lifecycle == api.LifecycleStarting, nil
 }
 
 // onSendFailure handles mid-stream backend death: evict the cached endpoint,
