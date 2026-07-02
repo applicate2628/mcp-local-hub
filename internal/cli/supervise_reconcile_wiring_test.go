@@ -1478,6 +1478,16 @@ func TestProductionSpawnFn_EmitsDaemonExitedOnChildExit(t *testing.T) {
 // goroutines MUST block on the send. With the old non-blocking send,
 // 70-4 = 66 events would be dropped; with the blocking send, all 70 are
 // delivered once the channel is drained.
+//
+// Each child uses a DISTINCT TaskName. This isolates the property under
+// test (blocking send never drops) from P1a's generation-based staleness
+// drop: 70 spawns under ONE task would bump that task's shared generation
+// 1..70, and MarkExitedIfCurrent would drop the 69 superseded-generation
+// exits at source BEFORE the crashCh send (the intended P1a behavior — a
+// stale generation's exit must not drive the current generation's SM). With
+// distinct tasks every exit is its own task's current generation, so the
+// crashCh delivery path — the thing this test guards — is exercised for all
+// 70. (P1a's stale-drop is covered separately by the stale-exit tests.)
 func TestProductionSpawnFn_BlockingCrashSendNeverDropsExit(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
@@ -1501,7 +1511,7 @@ func TestProductionSpawnFn_BlockingCrashSendNeverDropsExit(t *testing.T) {
 	// wait goroutines fill crashCh and then block on the blocking send.
 	for i := 0; i < numChildren; i++ {
 		descriptor := api.SupervisorDaemon{
-			TaskName: reconcileWiringTestTaskName,
+			TaskName: reconcileWiringTestTaskName + "-" + strconv.Itoa(i), // distinct per child: no shared-generation supersession (see doc)
 			Server:   "memory",
 			Daemon:   "default",
 			Command:  command,

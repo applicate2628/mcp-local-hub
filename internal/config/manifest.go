@@ -255,6 +255,15 @@ type DaemonSpec struct {
 	// ${ENV} / ${HOME} tokens are expanded at parse time (like base_args /
 	// env) so a shipped manifest stays portable.
 	Cwd string `yaml:"cwd,omitempty" json:"cwd,omitempty"`
+
+	// StartupBindDeadlineSeconds bounds how long a freshly-spawned daemon may
+	// take to FIRST bind its port before the supervisor's liveness sweep treats
+	// port_unbound as a restart trigger (P1b first-bind deadline). It is copied
+	// verbatim into the derived api.SupervisorDaemon descriptor and resolved
+	// there. 0 = default (60s global / 120s serena-proxy). Validate() rejects a
+	// negative value or one above 600 (the cap that bounds wedged-child
+	// detection latency).
+	StartupBindDeadlineSeconds int `yaml:"startup_bind_deadline_seconds,omitempty" json:"startup_bind_deadline_seconds,omitempty"`
 }
 
 // DaemonTemplate describes a per-workspace daemon spawn template for the
@@ -1300,6 +1309,15 @@ func (m *ServerManifest) Validate() error {
 		if c := m.Daemons[i].Cwd; c != "" && !filepath.IsAbs(c) {
 			return fmt.Errorf("manifest %s: daemons[%d] (%q) cwd %q must be an absolute path (a relative cwd has no stable base across the supervisor / scheduler / interactive launch surfaces)",
 				m.Name, i, m.Daemons[i].Name, c)
+		}
+		// startup_bind_deadline_seconds (P1b) is a per-daemon first-bind
+		// budget the supervisor's liveness sweep honors before treating an
+		// unbound port as a restart trigger. Negative is nonsensical; the
+		// 600s cap bounds how long a genuinely-wedged child (alive, never
+		// binds, never exits) can linger before detection.
+		if s := m.Daemons[i].StartupBindDeadlineSeconds; s < 0 || s > 600 {
+			return fmt.Errorf("manifest %s: daemons[%d] (%q) startup_bind_deadline_seconds %d out of range (must be 0..600; 0 = default 60s global / 120s serena-proxy)",
+				m.Name, i, m.Daemons[i].Name, s)
 		}
 	}
 	if m.Kind == KindWorkspaceScoped {

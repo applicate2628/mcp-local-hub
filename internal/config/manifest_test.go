@@ -3,6 +3,7 @@ package config
 import (
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -152,6 +153,53 @@ daemons:
 	}
 	if !strings.Contains(err.Error(), "absolute path") {
 		t.Errorf("error should explain the absolute-path requirement: %v", err)
+	}
+}
+
+// TestParseManifest_StartupBindDeadlineSeconds_Accepted confirms an in-range
+// per-daemon first-bind deadline (P1b) parses + validates and is retained on the
+// DaemonSpec.
+func TestParseManifest_StartupBindDeadlineSeconds_Accepted(t *testing.T) {
+	yaml := `
+name: t
+kind: global
+transport: stdio-bridge
+command: bash
+daemons:
+  - name: default
+    port: 9999
+    startup_bind_deadline_seconds: 240
+`
+	m, err := ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if got := m.Daemons[0].StartupBindDeadlineSeconds; got != 240 {
+		t.Errorf("Daemons[0].StartupBindDeadlineSeconds = %d, want 240", got)
+	}
+}
+
+// TestParseManifest_StartupBindDeadlineSeconds_OutOfRangeRejected is the P1b
+// validation guard: a negative value or one above the 600s cap is rejected.
+func TestParseManifest_StartupBindDeadlineSeconds_OutOfRangeRejected(t *testing.T) {
+	for _, val := range []int{-1, 601, 100000} {
+		yaml := `
+name: t
+kind: global
+transport: stdio-bridge
+command: bash
+daemons:
+  - name: default
+    port: 9999
+    startup_bind_deadline_seconds: ` + strconv.Itoa(val) + `
+`
+		_, err := ParseManifest(strings.NewReader(yaml))
+		if err == nil {
+			t.Fatalf("startup_bind_deadline_seconds=%d must be rejected (out of 0..600 range)", val)
+		}
+		if !strings.Contains(err.Error(), "startup_bind_deadline_seconds") {
+			t.Errorf("error for %d should name startup_bind_deadline_seconds: %v", val, err)
+		}
 	}
 }
 

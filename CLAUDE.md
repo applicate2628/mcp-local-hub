@@ -749,6 +749,26 @@ Cross-channel routing: structured `warn`-severity events like
 operator-visible stderr line is the human-readable shadow of the same
 event.
 
+Supervisor lost-child / first-bind events (PR-1, P1a+P1b):
+
+- `daemon-stale-exit-ignored` (`severity: info`, `source: lifecycle`) —
+  a late `cmd.Wait` exit of a SUPERSEDED child (an older `pid_generation`
+  than the tracker's current one for the task) was dropped instead of
+  clearing the CURRENT child's tracking / driving an SM transition. Two
+  emit sites, distinguishable by body: the wait goroutine (body carries
+  `pid`, `pid_generation`, `exit_code`) and the controller processing-time
+  guard (body adds `current_generation`, `sm_state`). This is the
+  generation-stamped exit attribution (P1a) that stops the supervisor from
+  manufacturing forgotten port squatters.
+- `daemon-bind-timeout` (`severity: warn`, `source: liveness`) — a
+  freshly-spawned daemon never bound its port before its first-bind
+  deadline (P1b); body carries `pid`, `port`, `deadline_seconds`,
+  `waited_seconds`. Emitted before the existing `daemon-running-state-stale`
+  + `EvManualRestart`. Deadline is per-descriptor
+  (`startup_bind_deadline_seconds`, default 60s global / 120s serena-proxy);
+  it replaces the flat 5s grace ONLY for the pre-first-bind window, so a
+  slow-starting daemon is no longer killed mid-startup.
+
 ### Hardened state-file writes — corp-policy posture
 
 Every supervisor state file (`supervisor-intent.json`,

@@ -3062,9 +3062,19 @@ func makeProductionSpawnFn(events *api.SupervisorEventLog, tracker *DaemonRuntim
 // events, computes backoff via the per-task sliding window in the
 // DaemonRuntimeTracker, and schedules a respawn (or quarantines).
 type crashEvent struct {
-	Daemon   api.SupervisorDaemon
-	ExitCode int
-	WaitErr  error
+	Daemon api.SupervisorDaemon
+	// PID is the pid of the exited child (== the spawnedPID the wait
+	// goroutine observed for THIS spawn). Carried so the controller can
+	// audit exactly which child exited.
+	PID int
+	// PIDGeneration is the tracker generation MarkSpawned stamped for THIS
+	// child. The controller's processing-time stale guard (P1a) drops the
+	// event when this is < the tracker's current generation for the task —
+	// a late cmd.Wait exit of a superseded child must not drive an SM
+	// transition against the CURRENT child.
+	PIDGeneration int
+	ExitCode      int
+	WaitErr       error
 }
 
 // makeProductionSpawnFnWithStatePath constructs the production spawn
@@ -3575,7 +3585,12 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			return fmt.Errorf("%w: %v", errSpawnPreChild, startErr)
 		}
 		startedAt := time.Now().UTC()
-		tracker.MarkSpawned(d.TaskName, pid, startedAt)
+		// Capture the generation MarkSpawned stamped for THIS child. The
+		// wait goroutine passes it to MarkExitedIfCurrent + the crashEvent so
+		// a late exit of a superseded child (an older generation) is dropped
+		// instead of clearing the CURRENT child's tracking / driving an SM
+		// transition (P1a generation-stamped exit attribution).
+		spawnGen := tracker.MarkSpawned(d.TaskName, pid, startedAt)
 		taskName := d.TaskName
 		spawnedPID := pid
 		// Emit daemon-spawned BEFORE starting the wait goroutine. A
@@ -3646,11 +3661,38 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 				TaskName: taskName,
 				Body:     body,
 			})
-			tracker.MarkExited(taskName)
+			// P1a generation-stamped exit attribution: clear the runtime
+			// entry + post the exit downstream ONLY when THIS child is still
+			// the tracker's current generation. A late cmd.Wait exit of a
+			// SUPERSEDED child (a slow-binding daemon the liveness sweep
+			// already terminate-first-then-respawned, so a newer MarkSpawned
+			// bumped the generation) must NOT clear the CURRENT child's
+			// CurrentPID (that is the lost-child factory: the terminate path
+			// only ever targets tracker.CurrentPID, so a mis-cleared current
+			// child becomes a forgotten port squatter) and must NOT reach the
+			// SM (a stale exit during StExiting would consume the queued
+			// respawn prematurely). Dropping it at the SOURCE — not only at the
+			// controller guard — keeps the crashCh free of stale exits.
+			current := tracker.MarkExitedIfCurrent(taskName, spawnGen)
+			if !current {
+				_ = events.Emit(api.SupervisorEvent{
+					Severity: "info",
+					Source:   "lifecycle",
+					Event:    "daemon-stale-exit-ignored",
+					TaskName: taskName,
+					Body: map[string]any{
+						"pid":            spawnedPID,
+						"pid_generation": spawnGen,
+						"exit_code":      exitCode,
+						"note":           "late cmd.Wait exit of a superseded child; current tracking untouched and no crash event posted",
+					},
+				})
+				return
+			}
 			_ = persistDaemonRuntimeTracker(events, tracker, statePath, taskName)
-			// Child-exit notification: post EVERY exit (clean and
-			// non-clean) onto crashCh so the controller's single FIFO
-			// event loop observes the real exit and can drive the SM
+			// Child-exit notification: post EVERY (current-generation) exit
+			// (clean and non-clean) onto crashCh so the controller's single
+			// FIFO event loop observes the real exit and can drive the SM
 			// transition for the task. Cleanliness (exit_code==0 &&
 			// no waitErr) is carried implicitly in the crashEvent fields
 			// and re-derived by runCrashEventBridge into the LoopEvent's
@@ -3701,7 +3743,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			// send (the historical behavior when no shutdown signal exists).
 			if crashCh != nil {
 				select {
-				case crashCh <- crashEvent{Daemon: d, ExitCode: exitCode, WaitErr: waitErr}:
+				case crashCh <- crashEvent{Daemon: d, PID: spawnedPID, PIDGeneration: spawnGen, ExitCode: exitCode, WaitErr: waitErr}:
 				case <-crashShutdown:
 					// Supervisor is shutting down; the bridge has stopped
 					// draining crashCh. Abandon the send so this wait

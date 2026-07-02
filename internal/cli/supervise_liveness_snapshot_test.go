@@ -42,7 +42,7 @@ func runSweepCollectingEvents(t *testing.T, stateDir string, intent *api.Supervi
 	defer cancel()
 	go loop.Run(ctx)
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
 
 	// Drain: collect every event posted during the sweep, then stop on the
 	// first quiet window.
