@@ -1399,16 +1399,24 @@ func TestLazyProxy_IdleTTLStopsMaterializedBackend(t *testing.T) {
 		t.Fatalf("tools/call code=%d body=%s", rr.Code, rr.Body.String())
 	}
 
+	// Poll for BOTH the lifecycle stop AND the registry write. The reaper's
+	// order is Stop() THEN PutLifecycle(Configured) (correct: don't claim
+	// Configured until the backend is actually stopped), so observing
+	// stopCount>=1 does NOT yet imply the registry row flipped — reading it
+	// immediately raced the reaper's write and flaked under -race load.
 	deadline := time.Now().Add(2 * time.Second)
+	lastLifecycle := "<never-read>"
 	for time.Now().Before(deadline) {
 		if f.stopCount.Load() >= 1 {
-			e := readEntry(t, regPath)
-			if e.Lifecycle != api.LifecycleConfigured {
-				t.Fatalf("lifecycle after idle reap = %q, want %q", e.Lifecycle, api.LifecycleConfigured)
+			lastLifecycle = readEntry(t, regPath).Lifecycle
+			if lastLifecycle == api.LifecycleConfigured {
+				return
 			}
-			return
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	if f.stopCount.Load() >= 1 {
+		t.Fatalf("lifecycle after idle reap = %q, want %q (registry write never landed)", lastLifecycle, api.LifecycleConfigured)
 	}
 	t.Fatalf("idle reaper did not stop backend; stopCount=%d", f.stopCount.Load())
 }
