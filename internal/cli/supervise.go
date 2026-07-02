@@ -1021,7 +1021,12 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// receive crash events and don't need this goroutine.
 	if reconcileSpawnFn == nil {
 		go runCrashEventBridge(loopCtx, crashCh, loop, events)
-		go startSupervisorLivenessMonitor(loopCtx.Done(), stateDir, intent, runtimeTracker, loop, events)
+		// P2a: the port-squatter reap capability (single owner, beside the
+		// spawn/terminate closures above) wraps TerminatePIDWithIdentity. The
+		// monitor owns the rate-limit state; the sweep classifies + reaps a
+		// verified-own port squatter on port_owner_mismatch.
+		squatterReapFn := makeProductionSquatterReapFn(events)
+		go startSupervisorLivenessMonitor(loopCtx.Done(), stateDir, intent, runtimeTracker, loop, events, squatterReapFn)
 	}
 
 	// IntentWatcher: poll <state-dir>/{supervisor,daemon}-intent.json

@@ -42,7 +42,7 @@ func runSweepCollectingEvents(t *testing.T, stateDir string, intent *api.Supervi
 	defer cancel()
 	go loop.Run(ctx)
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	// Drain: collect every event posted during the sweep, then stop on the
 	// first quiet window.
@@ -127,12 +127,14 @@ func TestSupervisorLivenessSweepSnapshotErrorPostsNoRestart(t *testing.T) {
 	}
 }
 
-// TestSupervisorLivenessSweepSnapshotOwnerMismatchRestarts asserts a daemon
-// whose port is owned by a DIFFERENT live PID in the shared snapshot posts
-// EvManualRestart with reason port_owner_mismatch — byte-identical to the
-// per-port netstat verdict. Daemons whose ports map to their own tracked PID
-// post no event. Still ONE snapshot for the whole sweep.
-func TestSupervisorLivenessSweepSnapshotOwnerMismatchRestarts(t *testing.T) {
+// TestSupervisorLivenessSweepSnapshotOwnerMismatchObserveOnly is the P2a
+// (decision D-A, MUST-FIX #10) rewrite of ...SnapshotOwnerMismatchRestarts: a
+// daemon whose port is owned by a DIFFERENT live PID in the shared snapshot no
+// longer posts an unconditional EvManualRestart. With the reap capability
+// unwired (runSweepCollectingEvents passes a nil reaper), the foreign owner is
+// handled observe-only → ZERO loop events. The single-snapshot perf invariant
+// is unchanged (still exactly ONE snapshot for the whole sweep).
+func TestSupervisorLivenessSweepSnapshotOwnerMismatchObserveOnly(t *testing.T) {
 	const n = 3
 	stateDir, tracker, meta := seedRunningDaemons(t, n)
 	installProductionPortOwnerProbeForSweep(t)
@@ -145,12 +147,10 @@ func TestSupervisorLivenessSweepSnapshotOwnerMismatchRestarts(t *testing.T) {
 	t.Cleanup(func() { supervisorSelfPIDFn = prevSelf })
 
 	var squattedTask string
-	var squattedPort int
 	snap := map[int]int{}
 	for task, m := range meta {
 		if squattedTask == "" {
 			squattedTask = task
-			squattedPort = m.port
 			snap[m.port] = m.pid + 999999 // foreign owner
 			continue
 		}
@@ -164,14 +164,7 @@ func TestSupervisorLivenessSweepSnapshotOwnerMismatchRestarts(t *testing.T) {
 	if *calls != 1 {
 		t.Fatalf("snapshot taken %d times, want 1", *calls)
 	}
-	if len(events) != 1 {
-		t.Fatalf("sweep posted %d events, want exactly 1 (only the squatted daemon restarts): %+v", len(events), events)
-	}
-	ev := events[0]
-	if ev.Kind != api.EvManualRestart || ev.TaskName != squattedTask {
-		t.Fatalf("event = %+v, want EvManualRestart for squatted task %q", ev, squattedTask)
-	}
-	if ev.Body["reason"] != supervisorLivenessReasonPortOwnerMismatch {
-		t.Fatalf("event reason = %v (port %d), want %s", ev.Body["reason"], squattedPort, supervisorLivenessReasonPortOwnerMismatch)
+	if len(events) != 0 {
+		t.Fatalf("sweep posted %d events, want 0 (a foreign port owner is observe-only under P2a, not an unconditional restart): %+v", len(events), events)
 	}
 }

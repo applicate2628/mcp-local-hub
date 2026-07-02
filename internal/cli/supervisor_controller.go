@@ -2962,7 +2962,7 @@ func (c *supervisorController) executeSideEffect(
 				Event:    "daemon-quarantined",
 				TaskName: d.TaskName,
 				Body: map[string]any{
-					"reason": "EvTimerDue at or beyond quarantine threshold",
+					"reason": c.quarantineReasonMessage(d.TaskName),
 					// workspace lets a future GUI serena-session-cleanup consumer
 					// key teardown by the dead daemon's workspace path (empty for
 					// global daemons). Sourced from the descriptor in scope here.
@@ -3179,7 +3179,7 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 				TaskName: d.TaskName,
 				Body: map[string]any{
 					"failures_in_30m": failures,
-					"reason":          "10+ failures in 30-min sliding window; respawn attempts suspended until supervisor restart",
+					"reason":          c.quarantineReasonMessage(d.TaskName),
 					"exit_code":       exitCode,
 					// workspace lets a future GUI serena-session-cleanup consumer
 					// key teardown by the dead daemon's workspace path (empty for
@@ -3333,6 +3333,30 @@ const respawnFailureWindow = 30 * time.Minute
 // failures the controller stops respawning the daemon until the
 // supervisor cold-restarts (which clears the in-memory window).
 const respawnQuarantineThreshold = 10
+
+// quarantineReasonMessage is the single owner of the daemon-quarantined
+// `reason` string, emitted from both the backoff-path threshold breach and the
+// EvTimerDue-at-threshold arm (Step-8 consistency — no stale duplicate wording).
+// It parametrizes the threshold + window from the controller's own config
+// (un-hardcoding the old literal "10+" / "30-min") and NAMES the honest
+// recovery lever: quarantine no longer implies a supervisor restart is the ONLY
+// way out — `mcphub daemon recover <task>` (P2b) reaps any port squatter and
+// forces a respawn through the existing force path.
+func (c *supervisorController) quarantineReasonMessage(taskName string) string {
+	return fmt.Sprintf(
+		"%d+ failures in %s sliding window; automatic respawns suspended — run 'mcphub daemon recover %s' (or POST /api/daemon/respawn with force=true) to reap any port squatter and force a respawn; a supervisor restart also clears the window",
+		c.quarantineThreshold, formatQuarantineWindow(c.failureWindow), taskName)
+}
+
+// formatQuarantineWindow renders the failure window as a compact human string
+// ("30-min" for a whole-minute window, else the Duration's own String()).
+func formatQuarantineWindow(d time.Duration) string {
+	mins := d.Minutes()
+	if mins == float64(int64(mins)) {
+		return fmt.Sprintf("%d-min", int64(mins))
+	}
+	return d.String()
+}
 
 // respawnBackoffStep is the base unit for the exponential backoff
 // schedule: 1s, 2s, 4s, 8s, 16s, 32s, then capped at respawnBackoffMax.
