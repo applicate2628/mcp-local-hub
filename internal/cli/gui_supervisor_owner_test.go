@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -868,5 +869,146 @@ func TestArmSupervisorManager_NilOwnerReturnsNil(t *testing.T) {
 	manager := armSupervisorManager(ctx, nil, "mcphub-test", false)
 	if manager != nil {
 		t.Fatalf("armSupervisorManager(nil owner) = %p; want nil", manager)
+	}
+}
+
+// TestSupervisorSetupFaultError_BroadRemediationAndCause pins the EXHAUSTIVE
+// enumeration on this helper. ReadSupervisorLockOwner →
+// readStateFileInodeAnchored + json.Unmarshal fails on a PRESENT sidecar via
+// exactly FIVE non-IsNotExist classes, and the message must name a
+// cause-appropriate remediation for each — a single `repair-state-dacl`
+// instruction is a dead end for the corrupt-JSON, wrong-owner, and irregular
+// cases (that command only re-grants an OWNED, REGULAR file's DACL). The
+// destructive remediations (delete / take-ownership) must carry the
+// "stop the supervisor first" ordering guard, and the underlying cause must
+// stay wrapped so the operator can tell which class applies. The state-dir
+// RESOLVE failure has its own dedicated error (supervisorStateDirResolveError)
+// and no longer routes through here.
+func TestSupervisorSetupFaultError_BroadRemediationAndCause(t *testing.T) {
+	cause := errors.New("read supervisor.lock.owner.json: DACL refused for path")
+	err := supervisorSetupFaultError(cause)
+	if err == nil {
+		t.Fatal("supervisorSetupFaultError returned nil")
+	}
+	msg := err.Error()
+	// All FIVE distinct remediation classes must be named.
+	for _, want := range []string{
+		"repair-state-dacl",               // (a) DACL/mode refusal
+		"delete the corrupt sidecar",      // (b) corrupt/malformed JSON
+		"take ownership",                  // (c) wrong-owner sidecar
+		"symlink/irregular sidecar",       // (d) irregular/symlink sidecar
+		"MCPHUB_REQUIRE_SINGLE_USER_HOME", // (e) strict-parent gate
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message missing remediation hint %q; got: %s", want, msg)
+		}
+	}
+	// The platform-specific take-ownership command must be the correct one.
+	if runtime.GOOS == "windows" {
+		if !strings.Contains(msg, "/setowner") {
+			t.Errorf("Windows message missing the icacls /setowner take-ownership command; got: %s", msg)
+		}
+		if strings.Contains(msg, "chown") {
+			t.Errorf("Windows message leaked the POSIX chown command; got: %s", msg)
+		}
+	} else {
+		if !strings.Contains(msg, "chown") {
+			t.Errorf("POSIX message missing the chown take-ownership command; got: %s", msg)
+		}
+		if strings.Contains(msg, "/setowner") {
+			t.Errorf("POSIX message leaked the Windows icacls /setowner command; got: %s", msg)
+		}
+	}
+	// The DESTRUCTIVE remediations (b/c/d) are ORDER-SENSITIVE — deleting or
+	// replacing the sidecar while a supervisor still holds supervisor.lock.lock
+	// makes the next AcquireSupervisorLock fail closed (supervisor_lock.go:76-83).
+	// The message must carry the "stop the supervisor first" guard, and it must
+	// appear for MORE than one case (the delete AND the take-ownership paths).
+	if strings.Count(msg, "stop any running supervisor") < 2 {
+		t.Errorf("message missing the 'stop the supervisor first' ordering guard on the destructive remediations (want it on the delete AND take-ownership paths); got: %s", msg)
+	}
+	// The final catch-all line must point the operator at the wrapped cause so a
+	// future 6th class is still diagnosable.
+	if !strings.Contains(msg, "wrapped error below names the exact cause") {
+		t.Errorf("message missing the 'wrapped error names the exact cause' catch-all line; got: %s", msg)
+	}
+	// Cause stays wrapped for diagnosis (errors.Is reaches it).
+	if !errors.Is(err, cause) {
+		t.Errorf("cause not preserved through wrap; got: %s", msg)
+	}
+}
+
+// TestSupervisorStateDirResolveError_PlatformRemediationAndCause pins the
+// Fable-5 P3 fix AND the round-2 correction: the top-of-function
+// api.DaemonStateDir() RESOLVE failure has a DEDICATED error (not routed through
+// supervisorSetupFaultError), and every remediation hint must name ONLY inputs
+// the resolver actually honors (verified against internal/api/state_paths*.go):
+//   - Linux → $XDG_DATA_HOME (fallback ~/.local/share); the resolver does NOT
+//     read $XDG_STATE_HOME.
+//   - macOS → ~/Library/Application Support (no XDG at all).
+//   - Windows → windows.KnownFolderPath(FOLDERID_LocalAppData) DIRECTLY, with NO
+//     %LOCALAPPDATA% env fallback, so the message must NOT tell the user to set
+//     %LOCALAPPDATA%.
+//
+// The underlying resolver cause must stay wrapped for diagnosis.
+func TestSupervisorStateDirResolveError_PlatformRemediationAndCause(t *testing.T) {
+	cause := errors.New("SHGetKnownFolderPath(LocalAppData) unavailable")
+	err := supervisorStateDirResolveError(cause)
+	if err == nil {
+		t.Fatal("supervisorStateDirResolveError returned nil")
+	}
+	msg := err.Error()
+
+	// Platform-appropriate remediation hint must be present; hints for other
+	// platforms and stale/incorrect env-var guidance must NOT appear.
+	switch runtime.GOOS {
+	case "windows":
+		if !strings.Contains(msg, "Known Folder") {
+			t.Errorf("Windows message missing the Known-Folder remediation hint; got: %s", msg)
+		}
+		// The resolver has NO %LOCALAPPDATA% env fallback → the message must not
+		// tell the operator to set that env var (round-2 correction).
+		if strings.Contains(msg, "set %LOCALAPPDATA%") {
+			t.Errorf("Windows message wrongly prescribes setting %%LOCALAPPDATA%% (no env fallback in the resolver); got: %s", msg)
+		}
+		if strings.Contains(msg, "Library/Application Support") || strings.Contains(msg, "XDG_DATA_HOME") {
+			t.Errorf("Windows message leaked a POSIX remediation hint; got: %s", msg)
+		}
+	case "darwin":
+		if !strings.Contains(msg, "Library/Application Support") {
+			t.Errorf("macOS message missing the ~/Library/Application Support hint; got: %s", msg)
+		}
+		if strings.Contains(msg, "XDG_DATA_HOME") || strings.Contains(msg, "Known Folder") {
+			t.Errorf("macOS message leaked a wrong-platform hint; got: %s", msg)
+		}
+	default: // linux
+		if !strings.Contains(msg, "XDG_DATA_HOME") {
+			t.Errorf("Linux message missing the $XDG_DATA_HOME hint; got: %s", msg)
+		}
+		if strings.Contains(msg, "Library/Application Support") || strings.Contains(msg, "Known Folder") {
+			t.Errorf("Linux message leaked a wrong-platform hint; got: %s", msg)
+		}
+	}
+
+	// The stale $XDG_STATE_HOME guidance (resolver never reads it) must NEVER
+	// appear on ANY platform, and neither must the %LOCALAPPDATA%-set guidance.
+	if strings.Contains(msg, "XDG_STATE_HOME") {
+		t.Errorf("message references $XDG_STATE_HOME, which the state-dir resolver never reads; got: %s", msg)
+	}
+	if strings.Contains(msg, "set %LOCALAPPDATA%") {
+		t.Errorf("message prescribes setting %%LOCALAPPDATA%%, which the resolver ignores; got: %s", msg)
+	}
+
+	// This dedicated error must NOT prescribe the sidecar remediations —
+	// they are all dead ends for a state-root RESOLVE failure.
+	for _, forbidden := range []string{"repair-state-dacl", "delete the sidecar"} {
+		if strings.Contains(msg, forbidden) {
+			t.Errorf("state-dir resolve error leaked the sidecar remediation %q (dead end here); got: %s", forbidden, msg)
+		}
+	}
+
+	// Cause stays wrapped for diagnosis (errors.Is reaches it).
+	if !errors.Is(err, cause) {
+		t.Errorf("cause not preserved through wrap; got: %s", msg)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -88,11 +89,39 @@ var supervisorMonitorStderr io.Writer = os.Stderr
 func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode bool, waitFor time.Duration) (*supervisorOwner, error) {
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
-		return nil, fmt.Errorf("supervisor owner: resolve state dir: %w", err)
+		// A state-dir RESOLVE failure has different causes and different
+		// remediation than the probe-path setup fault (present-but-unreadable
+		// owner sidecar), so it does NOT route through supervisorSetupFaultError
+		// — the three sidecar remediations (repair-state-dacl / delete-sidecar /
+		// unset MCPHUB_REQUIRE_SINGLE_USER_HOME) are all dead ends here:
+		//   - Windows (GA): DaemonStateDir fails only via errKnownFolderUnavailable
+		//     (SHGetKnownFolderPath(FOLDERID_LocalAppData) failed/empty) or a
+		//     mkdir-state-root failure — no sidecar, no DACL, and the env var is
+		//     never consulted in the resolve path.
+		//   - POSIX: the state-root parent is group/world-writable or not owned
+		//     by the caller (errStateParentInsecure), which fires UNCONDITIONALLY;
+		//     MCPHUB_REQUIRE_SINGLE_USER_HOME is not consulted in state_paths*.go.
+		// So this gets a dedicated, platform-correct error naming the real cause
+		// and fix, keeping the underlying cause wrapped for diagnosis (bot r2 P2 /
+		// Fable-5 P3 correction).
+		return nil, supervisorStateDirResolveError(err)
 	}
 	if ok, probeErr := probeSupervisor(ctx, 2*time.Second); ok {
 		return &supervisorOwner{spawned: false, stateDir: stateDir}, nil
 	} else if probeErr != nil {
+		// A LOCAL setup failure (api.ErrStatusSetupFailure — the supervisor
+		// owner sidecar is PRESENT but unreadable: a DACL/mode refusal on a
+		// sandbox-broadened %LOCALAPPDATA% or under
+		// MCPHUB_REQUIRE_SINGLE_USER_HOME=1, or corrupt bytes) is NOT a
+		// live-but-broken supervisor — no supervisor is proven to be running.
+		// Spawning a duplicate would not help: the fresh supervisor would hit
+		// the same DACL refusal writing its own owner sidecar. Surface the
+		// local-fault remediation (mcphub repair-state-dacl) instead of the
+		// misleading "existing supervisor IPC broken (refusing to spawn
+		// duplicate)" (bot PR #477 P3 respawn-twin classification).
+		if errors.Is(probeErr, api.ErrStatusSetupFailure) {
+			return nil, supervisorSetupFaultError(probeErr)
+		}
 		return nil, fmt.Errorf("supervisor owner: existing supervisor IPC broken (refusing to spawn duplicate): %w", probeErr)
 	}
 
@@ -152,6 +181,16 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 		if probeErr != nil {
 			_ = proc.Kill()
 			_, _ = proc.Wait()
+			// Same classification as the pre-spawn probe: a local setup fault
+			// (unreadable/DACL-refused owner sidecar) is not a transport/handshake
+			// failure of the freshly-spawned supervisor — the spawned child could
+			// not write (or the reader could not read) its own owner sidecar
+			// because of the DACL. Surface the repair-state-dacl remediation
+			// instead of "IPC handshake broken" (bot PR #477 P3 respawn-twin
+			// classification).
+			if errors.Is(probeErr, api.ErrStatusSetupFailure) {
+				return nil, supervisorSetupFaultError(probeErr)
+			}
 			return nil, fmt.Errorf("supervisor owner: spawned PID %d but IPC handshake broken: %w", proc.Pid, probeErr)
 		}
 		if time.Now().After(deadline) {
@@ -681,14 +720,135 @@ func (s *supervisorOwner) Pid() int {
 	return s.proc.Pid
 }
 
+// supervisorSetupFaultError wraps the PROBE-path LOCAL setup fault into an
+// operator-actionable startup error that names remediation for EACH of the
+// distinct causes this path covers, not just a DACL refusal. It is reached
+// ONLY from probeSupervisor returning api.ErrStatusSetupFailure — which
+// dialSupervisorIPCStatusFromStateDir attaches to ALL non-IsNotExist read
+// failures on a PRESENT supervisor.lock.owner.json sidecar. That failure set is
+// EXACTLY these five (verified against ReadSupervisorLockOwner →
+// readStateFileInodeAnchored + json.Unmarshal, internal/api/supervisor_lock.go:158,
+// internal/api/hub_mcp_state_read_inode_windows.go, internal/api/hub_mcp_state_dacl.go):
+//
+//	(a) DACL/mode refusal (api.ErrDaclOutsideAllowlist / ErrTooLoose — a
+//	    non-allowlisted SID has read/write access) → `mcphub repair-state-dacl`.
+//	(b) corrupt/malformed JSON (json.Unmarshal failed) → delete + regenerate.
+//	(c) api.ErrWrongOwner (the sidecar's owner SID/uid is NOT the current user)
+//	    → repair-state-dacl REFUSES a wrong-owner file (state_dacl_repair_windows.go:47-56,
+//	    state_dacl_repair_posix.go:95-97), so take ownership or delete + regenerate.
+//	(d) api.ErrIrregularFile (the sidecar is a symlink / reparse point /
+//	    non-regular file) → repair-state-dacl REFUSES an irregular file too
+//	    (state_dacl_repair_windows.go:43+171, state_dacl_repair_posix.go:33+91), so
+//	    delete the symlink/irregular sidecar and let it regenerate.
+//	(e) strict-parent gate (MCPHUB_REQUIRE_SINGLE_USER_HOME=1 rejected a
+//	    broadened parent directory) → tighten the parent DACL or unset the env var.
+//
+// (An ABSENT sidecar classifies as api.ErrSupervisorIPCUnavailable → the normal
+// spawn path, so reaching here means NO supervisor is proven and spawning a
+// duplicate would only re-hit the same local fault. The top-of-function
+// api.DaemonStateDir() RESOLVE failure has its own dedicated error —
+// supervisorStateDirResolveError — because its causes and fixes differ.)
+//
+// A single "run repair-state-dacl" instruction would be a dead end for (b),
+// (c), and (d) — that command only re-grants the DACL/mode of an OWNED, REGULAR
+// file; it does not rewrite invalid JSON, take ownership of a wrong-owner file,
+// or replace a symlink. So the message enumerates all five and keeps the
+// underlying cause wrapped (%w) so the operator sees which one applies.
+//
+// The DESTRUCTIVE remediations — (b) delete+regenerate, (c)/(d) take-ownership
+// or delete — are ORDER-SENSITIVE: deleting or replacing supervisor.lock.owner.json
+// while a supervisor still holds supervisor.lock.lock makes the next
+// AcquireSupervisorLock fail closed. With a held flock and missing/invalid owner
+// metadata it returns "supervisor.lock held but owner metadata invalid"
+// (internal/api/supervisor_lock.go:76-83) after only a ~2s retry, so the next
+// GUI/supervisor start refuses. Each destructive remediation therefore names the
+// "stop any running supervisor first" ordering guard.
+func supervisorSetupFaultError(cause error) error {
+	var takeOwnership string
+	if runtime.GOOS == "windows" {
+		takeOwnership = "`icacls <sidecar> /setowner \"<you>\"` (or `takeown /F <sidecar>`) then re-grant owner-only"
+	} else {
+		takeOwnership = "`chown <you> <sidecar>`"
+	}
+	return fmt.Errorf("supervisor owner: local supervisor state is unreadable (NOT a running supervisor); "+
+		"remediation depends on the wrapped error below, which names the exact cause: "+
+		"(a) DACL/mode refusal on supervisor.lock.owner.json (non-allowlisted SID has access) → repair to owner-only "+
+		"(`mcphub repair-state-dacl --path <sidecar>`, or tighten the parent DACL; see the "+
+		"\"secret daemons exit 1 on a sandbox-broadened %%LOCALAPPDATA%%\" runbook in CLAUDE.md); "+
+		"(b) corrupt/malformed supervisor.lock.owner.json (invalid JSON) → FIRST stop any running supervisor "+
+		"(or confirm none holds supervisor.lock.lock), THEN delete the corrupt sidecar so it regenerates on next start; "+
+		"(c) wrong-owner sidecar (owner is not your account) → repair-state-dacl refuses this, so FIRST stop any running supervisor, "+
+		"THEN take ownership ("+takeOwnership+") or delete + regenerate the sidecar; "+
+		"(d) irregular sidecar (a symlink / reparse point / non-regular file) → repair-state-dacl refuses this too, so FIRST stop any "+
+		"running supervisor, THEN delete the symlink/irregular sidecar and let it regenerate; "+
+		"(e) sidecar or its parent refused under MCPHUB_REQUIRE_SINGLE_USER_HOME=1 → tighten the parent directory's DACL to owner-only or unset that env var. "+
+		"The wrapped error below names the exact cause. Then restart: %w", cause)
+}
+
+// supervisorStateDirResolveError wraps a top-of-function api.DaemonStateDir()
+// RESOLVE failure into an operator-actionable startup error. This is a
+// DIFFERENT fault from the probe-path setup fault above: no supervisor state
+// file is even read here — the per-user state ROOT itself could not be
+// resolved/created — so the three sidecar remediations do not apply. The
+// causes (and fixes) are platform-specific, so the guidance line is selected
+// by runtime.GOOS. Every hint below names ONLY inputs the resolver actually
+// honors (verified against internal/api/state_paths*.go):
+//
+//   - Windows (GA): api.DaemonStateDir resolves LocalAppData by calling
+//     windows.KnownFolderPath(FOLDERID_LocalAppData) DIRECTLY — there is NO
+//     %LOCALAPPDATA% env fallback in production (state_paths_prod.go /
+//     state_paths_windows.go), and MCPHUB_REQUIRE_SINGLE_USER_HOME is never
+//     consulted here. Two distinct sub-causes, told apart by the wrapped cause:
+//     (a) the Known-Folder lookup itself failed → repair the Windows
+//     Known-Folder / user-profile registration (this is NOT an env-var
+//     setting); (b) the state directory could not be created under the resolved
+//     path → ensure the resolved LocalAppData path is writable.
+//   - Linux: the state root lives under $XDG_DATA_HOME (fallback
+//     ~/.local/share); state_paths.go:249. It does NOT read $XDG_STATE_HOME.
+//   - macOS: the state root lives under ~/Library/Application Support (no XDG
+//     at all); state_paths.go:262.
+//   - POSIX parent-insecure case (errStateParentInsecure): the state-root
+//     parent is group/world-writable or not owned by you, which fires
+//     UNCONDITIONALLY → `chmod go-w` / `chown` the parent so it is owner-only.
+//
+// The underlying cause stays wrapped (%w) so the operator sees the exact
+// resolver error (e.g. the failing known-folder call or the offending
+// parent-dir mode/owner) and can tell the sub-causes apart.
+func supervisorStateDirResolveError(cause error) error {
+	var remediation string
+	switch runtime.GOOS {
+	case "windows":
+		remediation = "either the LocalAppData Known Folder could not be resolved " +
+			"(SHGetKnownFolderPath(FOLDERID_LocalAppData) failed — repair the Windows " +
+			"Known-Folder / user-profile registration; this is NOT an env-var setting) " +
+			"OR the state directory could not be created under the resolved path " +
+			"(ensure the resolved LocalAppData path is writable); the wrapped cause below distinguishes them"
+	case "darwin":
+		remediation = "the state root under ~/Library/Application Support could not be resolved or created " +
+			"→ ensure $HOME is set and that ~/Library/Application Support is owner-only " +
+			"(`chmod go-w` / `chown` it if the parent is group/world-writable or not owned by you)"
+	default: // linux and other POSIX
+		remediation = "the state root under $XDG_DATA_HOME (fallback ~/.local/share) could not be resolved or created " +
+			"→ ensure $XDG_DATA_HOME (or ~/.local/share) is owner-only " +
+			"(`chmod go-w` / `chown` the parent if it is group/world-writable or not owned by you)"
+	}
+	return fmt.Errorf("supervisor owner: cannot resolve the per-user state directory (NOT a running supervisor); "+
+		"%s. Then restart: %w", remediation, cause)
+}
+
 // probeSupervisor performs a single IPC handshake + status query
 // against the running supervisor. Returns (true, nil) when reachable.
 // Returns (false, nil) ONLY for the expected pre-bind state
 // (ErrSupervisorIPCUnavailable — no lock owner sidecar, no pipe, or
-// connect-refused). Any other failure (hello-version mismatch, JSON
-// decode error, ID mismatch) returns (false, error) so the caller
-// can distinguish "supervisor not yet up" from "supervisor up but
-// broken" and surface the actionable error to the operator.
+// connect-refused). Any other failure returns (false, error) so the
+// caller can distinguish "supervisor not yet up" from a real fault and
+// surface the actionable error to the operator. The caller further
+// splits that error path: a LOCAL setup fault (api.ErrStatusSetupFailure
+// — present-but-unreadable/DACL-refused owner sidecar) is NOT a
+// live-but-broken supervisor and is surfaced via supervisorSetupFaultError
+// (repair-state-dacl remediation), while a genuine transport/handshake
+// failure (hello-version mismatch, JSON decode error, ID mismatch) keeps
+// the "supervisor up but broken" wording.
 //
 // PR #212 r5 silent-failure-hunt finding 1: the previous bool-only
 // signature collapsed handshake failures into "not reachable", which

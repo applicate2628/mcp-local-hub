@@ -22,6 +22,25 @@ const (
 // scheduler-backed status path instead of treating this as a supervisor fault.
 var ErrSupervisorIPCUnavailable = errors.New("supervisor IPC unavailable")
 
+// ErrStatusSetupFailure marks a LOCAL setup/state-file failure inside the
+// status dial path — the state directory cannot be resolved, or the supervisor
+// owner sidecar (supervisor.lock.owner.json) is PRESENT but unreadable (a
+// DACL/mode refusal from readStateFileInodeAnchored on a sandbox-broadened
+// %LOCALAPPDATA% or under MCPHUB_REQUIRE_SINGLE_USER_HOME=1, or corrupt bytes) —
+// as distinct from a transport-level unavailability (dial / hello handshake /
+// send / read). It is the status twin of ErrRespawnSetupFailure
+// (supervisor_ipc_respawn_client.go, bot PR #477 P3): a setup failure means NO
+// live supervisor is proven, just a broken local state file, so a caller such
+// as the GUI startup probe (internal/cli/gui_supervisor_owner.go) must NOT
+// classify it as "supervisor up but broken" and refuse to spawn — it must
+// surface the local-fault remediation (mcphub repair-state-dacl) instead. It is
+// wrapped ALONGSIDE the underlying cause via multi-%w, so errors.Is(err,
+// ErrStatusSetupFailure) classifies the failure while the cause stays
+// inspectable in the error string. Distinct from ErrSupervisorIPCUnavailable:
+// an ABSENT owner sidecar (os.IsNotExist) stays SUPERVISOR_UNAVAILABLE — a
+// present-but-unreadable one is this setup fault.
+var ErrStatusSetupFailure = errors.New("supervisor IPC status: local setup failure")
+
 // DialSupervisorIPCStatus is the production IPC client used by the GUI via
 // SupervisorIPCStatusFn. It reads supervisor.lock.owner.json, validates the
 // supervisor hello frame against that owner, sends a status request, and
@@ -39,7 +58,11 @@ func DialSupervisorIPCStatus(ctx context.Context) ([]DaemonStatus, error) {
 	}
 	stateDir, err := DaemonStateDir()
 	if err != nil {
-		return nil, fmt.Errorf("supervisor IPC status: resolve state dir: %w", err)
+		// Local setup failure (state dir unresolvable) — wrap the sentinel
+		// alongside the cause so the startup probe treats it as a local fault to
+		// remediate, not a live-but-broken supervisor (mirrors the respawn twin,
+		// bot PR #477 P3).
+		return nil, fmt.Errorf("supervisor IPC status: resolve state dir: %w: %w", ErrStatusSetupFailure, err)
 	}
 	return dialSupervisorIPCStatusFromStateDir(ctx, stateDir)
 }
@@ -52,7 +75,14 @@ func dialSupervisorIPCStatusFromStateDir(ctx context.Context, stateDir string) (
 			return nil, fmt.Errorf("supervisor IPC status: supervisor.lock.owner.json not found at %s.owner.json: %w: %w",
 				lockPath, ErrSupervisorIPCUnavailable, err)
 		}
-		return nil, fmt.Errorf("supervisor IPC status: read %s.owner.json: %w", lockPath, err)
+		// The owner sidecar exists (not IsNotExist — that returns the
+		// ErrSupervisorIPCUnavailable branch above) but is unreadable/corrupt: a
+		// DACL/mode refusal or corrupt bytes. This is a LOCAL setup failure, not
+		// a transport outage and not a live-but-broken supervisor — wrap the
+		// sentinel so the startup probe surfaces the repair-state-dacl
+		// remediation instead of "refusing to spawn duplicate" (bot PR #477 P3
+		// respawn-twin shape).
+		return nil, fmt.Errorf("supervisor IPC status: read %s.owner.json: %w: %w", lockPath, ErrStatusSetupFailure, err)
 	}
 	address := SupervisorIPCAddress(stateDir)
 	conn, err := dialSupervisorIPC(ctx, address)
