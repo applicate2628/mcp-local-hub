@@ -26,6 +26,14 @@ import (
 // (daemon.DefaultLSPColdStartMaxProbation > lspForwardUpstreamTimeout >
 // daemon.DefaultLSPColdRequestHoldCeiling > daemon.DefaultLSPMaterializeWaitBudget)
 // is asserted by TestLSPRouter_ForwardTimeoutOrderingInvariant.
+//
+// LANDMINE (F6): this router tier is a SEPARATE-package constant the daemon's
+// NewLazyProxy runtime clamp cannot see — it is protected ONLY by the compile-time
+// ordering test. If a future PR exposes daemon.ColdRequestHoldCeiling or
+// ColdStartMaxProbation as a runtime flag, that clamp MUST be extended to bound
+// against this router tier (pass lspForwardUpstreamTimeout into NewLazyProxy, or
+// re-assert the ordering at wiring time); otherwise a misconfigured knob inverts the
+// ordering and the client sees a raw router 504 instead of the controlled error.
 const lspForwardUpstreamTimeout = 150 * time.Second
 
 type lspWorkspaceResolver interface {

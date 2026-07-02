@@ -116,6 +116,18 @@ const (
 	// large-TS can exceed 60s) and strictly between MaterializeWaitBudget and
 	// DefaultLSPColdStartMaxProbation, so the proxy returns a controlled non-retryable
 	// error before either the router upstream timeout or the probation watchdog fires.
+	//
+	// REQUIRED 4-tier ordering (F6):
+	//   DefaultLSPColdStartMaxProbation > gui.lspForwardUpstreamTimeout >
+	//   DefaultLSPColdRequestHoldCeiling > DefaultLSPMaterializeWaitBudget
+	// NewLazyProxy clamps the 3 daemon-side tiers; the router tier lives in another
+	// package and is guarded only by the compile-time
+	// gui.TestLSPRouter_ForwardTimeoutOrderingInvariant. LANDMINE: exposing
+	// ColdRequestHoldCeiling or ColdStartMaxProbation as a runtime flag REQUIRES
+	// extending the NewLazyProxy clamp to also bound against the router tier (or
+	// wiring lspForwardUpstreamTimeout into the clamp as a passed-in value), or a
+	// misconfigured knob could invert the ordering and let the client see a raw
+	// router 504 instead of the controlled non-retryable error.
 	DefaultLSPColdRequestHoldCeiling = 120 * time.Second
 	// DefaultLSPColdStartConcurrency is the default cap on OTHER Starting +
 	// port-live LSP backends before this proxy refuses to cold-start.
@@ -218,6 +230,16 @@ type LazyProxy struct {
 	// teardowns) and reserveMaterializedSlot's flock Starting write. The gen guard
 	// prevents a WRONG write; the shadow reset prevents a MISSING write.
 	lastWrittenLifecycle string
+	// reapSeveredGeneration records the endpoint generation of an in-flight request
+	// that the probation watchdog (reapWedgedProbation Branch A) severed by tearing
+	// the backend down while inflightBackendRequests > 0. The request handler
+	// compares its captured generation against this: on a match, the DELIVERED
+	// in-flight request gets the same NON-retryable controlled error as a hold-
+	// ceiling expiry (HTTP 500 + do-not-retry) instead of a generic retryable-looking
+	// -32603 (which would let an agent duplicate a partially-executed mutating tool).
+	// Generations are strictly monotonic, so a recorded value matches only the exact
+	// severed flight and is never reused (F1).
+	reapSeveredGeneration uint64
 
 	inflightBackendRequests int
 	lastBackendActivity     time.Time
@@ -278,19 +300,27 @@ func NewLazyProxy(cfg LazyProxyConfig) *LazyProxy {
 	// watchdog reap a still-progressing request. (The cross-component upper bound
 	// ColdStartMaxProbation > LSP-forward upstream timeout > ColdRequestHoldCeiling
 	// is asserted against the router constant by a gui-package test.)
-	if cfg.ColdRequestHoldCeiling <= cfg.MaterializeWaitBudget {
-		clamped := 2 * cfg.MaterializeWaitBudget
-		fmt.Fprintf(daemonDiagWriter(),
-			"warn: lazy_proxy: ColdRequestHoldCeiling (%s) <= MaterializeWaitBudget (%s); clamping ceiling to %s to preserve the timeout ordering\n",
-			cfg.ColdRequestHoldCeiling, cfg.MaterializeWaitBudget, clamped)
-		cfg.ColdRequestHoldCeiling = clamped
-	}
-	if cfg.ColdStartMaxProbation <= cfg.ColdRequestHoldCeiling {
-		clamped := 2 * cfg.ColdRequestHoldCeiling
-		fmt.Fprintf(daemonDiagWriter(),
-			"warn: lazy_proxy: ColdStartMaxProbation (%s) <= ColdRequestHoldCeiling (%s); clamping probation to %s to preserve the timeout ordering\n",
-			cfg.ColdStartMaxProbation, cfg.ColdRequestHoldCeiling, clamped)
-		cfg.ColdStartMaxProbation = clamped
+	//
+	// SKIP the clamps entirely when the watchdog is DISABLED via a negative
+	// ColdStartMaxProbation sentinel (documented disable, mirrors ColdStartConcurrency<0):
+	// the operator has taken manual control for a backend whose cold index legitimately
+	// exceeds 5m, and the probation clamp would otherwise silently re-arm the watchdog
+	// at 2×ceiling, reaping every cold start in a churn loop (F3).
+	if cfg.ColdStartMaxProbation > 0 {
+		if cfg.ColdRequestHoldCeiling <= cfg.MaterializeWaitBudget {
+			clamped := 2 * cfg.MaterializeWaitBudget
+			fmt.Fprintf(daemonDiagWriter(),
+				"warn: lazy_proxy: ColdRequestHoldCeiling (%s) <= MaterializeWaitBudget (%s); clamping ceiling to %s to preserve the timeout ordering\n",
+				cfg.ColdRequestHoldCeiling, cfg.MaterializeWaitBudget, clamped)
+			cfg.ColdRequestHoldCeiling = clamped
+		}
+		if cfg.ColdStartMaxProbation <= cfg.ColdRequestHoldCeiling {
+			clamped := 2 * cfg.ColdRequestHoldCeiling
+			fmt.Fprintf(daemonDiagWriter(),
+				"warn: lazy_proxy: ColdStartMaxProbation (%s) <= ColdRequestHoldCeiling (%s); clamping probation to %s to preserve the timeout ordering\n",
+				cfg.ColdStartMaxProbation, cfg.ColdRequestHoldCeiling, clamped)
+			cfg.ColdStartMaxProbation = clamped
+		}
 	}
 	if cfg.IdleBackendTTL > 0 && cfg.IdleBackendCheckEvery == 0 {
 		cfg.IdleBackendCheckEvery = DefaultLSPIdleBackendCheckEvery
@@ -335,23 +365,32 @@ func (p *LazyProxy) Bind() error {
 	if err != nil {
 		return fmt.Errorf("bind %s: %w", addr, err)
 	}
-	p.listener = ln
-	p.server = &http.Server{
+	srv := &http.Server{
 		Addr:              addr,
 		Handler:           p.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		// WriteTimeout 0: handlers own cancellation via r.Context().
 	}
+	// Publish listener + server under p.mu: Stop reads p.server on a different
+	// goroutine (the ListenAndServe-in-a-goroutine + concurrent Stop pattern), so
+	// an unsynchronized write here races that read.
+	p.mu.Lock()
+	p.listener = ln
+	p.server = srv
+	p.mu.Unlock()
 	return nil
 }
 
 // Serve runs the request loop on the listener populated by Bind. Returns
 // http.ErrServerClosed after a clean Stop.
 func (p *LazyProxy) Serve() error {
-	if p.listener == nil || p.server == nil {
+	p.mu.Lock()
+	ln, srv := p.listener, p.server
+	p.mu.Unlock()
+	if ln == nil || srv == nil {
 		return errors.New("proxy not bound — call Bind() first")
 	}
-	return p.server.Serve(p.listener)
+	return srv.Serve(ln)
 }
 
 // ListenAndServe writes the initial Configured state, binds, and serves
@@ -396,8 +435,13 @@ func (p *LazyProxy) Stop(ctx context.Context) error {
 		fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: lifecycle stop: %v\n", stopErr)
 	}
 	p.gate.Forget(p.inflightKey())
-	if p.server != nil {
-		shutdownErr := p.server.Shutdown(ctx)
+	// Read p.server under p.mu — Bind writes it on a different goroutine under the
+	// same lock (the ListenAndServe-in-a-goroutine + concurrent Stop pattern).
+	p.mu.Lock()
+	srv := p.server
+	p.mu.Unlock()
+	if srv != nil {
+		shutdownErr := srv.Shutdown(ctx)
 		// Codex CLI xhigh re-review on 479cbc3 (P2): embed lifecycle
 		// stop error in the returned err so callers get durable
 		// visibility, not just stderr (which scheduled paths drop).
@@ -587,7 +631,10 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 	// min(client-ctx, ColdRequestHoldCeiling) — NO probation 503 on the send path.
 	// (The materialize-phase ErrMaterializeInFlight 503 handled above is pre-
 	// delivery and stays retryable.) On ceiling expiry the call was delivered →
-	// a NON-retryable controlled error, never a retry hint.
+	// a NON-retryable controlled error, never a retry hint. NOTE: this ceiling is
+	// the UNIVERSAL request bound — it applies to WARM requests too (a behavior
+	// change from the old !warmed-only probation), deliberately, to protect the
+	// direct-per-daemon-port path from a no-client-timeout hang up to the 5m watchdog.
 	callCtx, cancel := context.WithTimeout(r.Context(), p.cfg.ColdRequestHoldCeiling)
 	defer cancel()
 	stopHeld := p.armColdForwardHeldEvent(req.Method)
@@ -597,7 +644,15 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 		// Our request-hold-ceiling fired (client ctx still live): the request was
 		// delivered and may have partially executed → non-retryable controlled error.
 		if p.isColdHoldCeilingDeadline(r.Context(), err) {
-			p.writeColdRequestHeldError(w, req.ID)
+			p.writeColdRequestHeldError(w, req.ID, p.isWarmed())
+			return
+		}
+		// The probation watchdog severed this DELIVERED in-flight request (F1):
+		// same non-retryable controlled error, not a retryable-looking -32603. Branch A
+		// only reaps a !warmed backend and already tore it down, so pass warmed=false
+		// and do NOT onSendFailure again.
+		if p.wasReapSevered(gen) {
+			p.writeColdRequestHeldError(w, req.ID, false)
 			return
 		}
 		// Differentiate client-cancel from backend failure. A client disconnect or
@@ -609,9 +664,9 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 			return
 		}
 		// Backend died mid-stream or stdio channel failed. Evict the cached
-		// endpoint, clear the inflight gate (so the next call re-materializes),
-		// and mark the registry as Failed so `status` surfaces the incident.
-		p.onSendFailure(err)
+		// endpoint (gen-guarded), clear the inflight gate (so the next call
+		// re-materializes), and mark the registry as Failed so `status` surfaces it.
+		p.onSendFailure(gen, err)
 		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 		return
 	}
@@ -643,7 +698,8 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 	defer p.endBackendRequest()
 	// Predicate 1: a generic forwarded method is a REQUEST — await under
 	// min(client-ctx, ColdRequestHoldCeiling), no send-path probation 503. See
-	// handleToolsCall for the delivered-then-do-not-retry rationale.
+	// handleToolsCall for the delivered-then-do-not-retry rationale and the
+	// universal-warm-bound note.
 	callCtx, cancel := context.WithTimeout(r.Context(), p.cfg.ColdRequestHoldCeiling)
 	defer cancel()
 	stopHeld := p.armColdForwardHeldEvent(req.Method)
@@ -652,7 +708,13 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 	if err != nil {
 		// Request-hold-ceiling fired (delivered) → non-retryable controlled error.
 		if p.isColdHoldCeilingDeadline(r.Context(), err) {
-			p.writeColdRequestHeldError(w, req.ID)
+			p.writeColdRequestHeldError(w, req.ID, p.isWarmed())
+			return
+		}
+		// Probation watchdog severed this delivered in-flight request (F1) — see
+		// handleToolsCall.
+		if p.wasReapSevered(gen) {
+			p.writeColdRequestHeldError(w, req.ID, false)
 			return
 		}
 		// Client-cancel is not a backend failure — see handleToolsCall.
@@ -660,7 +722,7 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 			return
 		}
-		p.onSendFailure(err)
+		p.onSendFailure(gen, err)
 		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 		return
 	}
@@ -726,16 +788,22 @@ func (p *LazyProxy) isColdHoldCeilingDeadline(clientCtx context.Context, err err
 	return clientCtx.Err() == nil && errors.Is(err, context.DeadlineExceeded)
 }
 
-// coldStartInProgressMessage is the operator/agent-facing body for the
-// NOTIFICATION-path bounded-wait 503-warming message (retryable; notifications
-// only). Request paths use writeColdRequestHeldError instead.
+// coldStartInProgressMessage is the operator/agent-facing body for the retryable
+// 503-warming message. It serves two PRE-delivery / fire-and-forget cases (both
+// retry-safe): the NOTIFICATION probation deadline, AND the request-path
+// materialize-in-flight refusal (ErrMaterializeInFlight, via writeColdStartRefusal)
+// which fires BEFORE anything is written to the backend. The POST-delivery request
+// hold-ceiling case uses writeColdRequestHeldError (500, non-retryable) instead.
 func (p *LazyProxy) coldStartInProgressMessage() string {
 	return fmt.Sprintf("language backend cold start in progress (%s, %s); retry in ~15s",
 		p.cfg.BackendKind, p.cfg.WorkspacePath)
 }
 
 // writeColdStartInProgress emits the 503 + JSON-RPC -32603 + Retry-After: 15
-// cold-start-in-progress response. NOTIFICATION-ONLY now (Predicate 1).
+// cold-start-in-progress response. Used by the NOTIFICATION probation path AND the
+// request-path PRE-delivery materialize-in-flight refusal (writeColdStartRefusal) —
+// both retry-safe (nothing written to the backend yet). Distinct from the
+// POST-delivery writeColdRequestHeldError (500, non-retryable).
 func (p *LazyProxy) writeColdStartInProgress(w http.ResponseWriter, id json.RawMessage) {
 	writeRPCErrorStatus(w, id, http.StatusServiceUnavailable, rpcErrInternalError,
 		p.coldStartInProgressMessage(), 15)
@@ -743,18 +811,40 @@ func (p *LazyProxy) writeColdStartInProgress(w http.ResponseWriter, id json.RawM
 
 // writeColdRequestHeldError emits the NON-retryable controlled error for a REQUEST
 // that was DELIVERED to the backend but did not complete within ColdRequestHoldCeiling
-// (Predicate 1, reliability #2). It deliberately carries NO retry wording and NO
-// Retry-After header — the call may have partially executed, so an auto-retry of a
-// mutating tool would double-execute. HTTP 500 is chosen (NOT the retryable 503-
-// cold-start, NOT a raw router 504): a fail-loud, terminal, non-retryable status the
-// router passes through verbatim, distinct from both the retryable materialize 503
-// and the router's own upstream-timeout 504 (which the proxy's earlier-firing
-// ceiling prevents the client from ever seeing). The lsp-cold-forward-held event is
-// the fleet monitoring signal, so operators alert on the event, not the raw 500.
-func (p *LazyProxy) writeColdRequestHeldError(w http.ResponseWriter, id json.RawMessage) {
-	msg := fmt.Sprintf("language backend still indexing after %s; the call was delivered and may have partially executed — do not auto-retry mutating calls (%s, %s)",
-		p.cfg.ColdRequestHoldCeiling, p.cfg.BackendKind, p.cfg.WorkspacePath)
+// (Predicate 1, reliability #2), OR that a probation reap severed mid-flight (F1). It
+// deliberately carries NO retry wording and NO Retry-After header — the call may have
+// partially executed, so an auto-retry of a mutating tool would double-execute. HTTP
+// 500 is chosen (NOT the retryable 503-cold-start, NOT a raw router 504): a fail-loud,
+// terminal, non-retryable status the router passes through verbatim, distinct from both
+// the retryable materialize 503 and the router's own upstream-timeout 504 (which the
+// proxy's earlier-firing ceiling prevents the client from ever seeing). The
+// lsp-cold-forward-held event is the fleet monitoring signal, so operators alert on the
+// event, not the raw 500.
+//
+// warmed distinguishes the two hold causes for an accurate operator/agent message
+// (F5): a COLD backend was still indexing; a WARM backend's single query exceeded the
+// universal request-hold ceiling (a legitimately slow workspace/symbol on a huge repo,
+// not indexing) — misreporting "still indexing" on the warm case would misdirect
+// diagnosis. Both keep the 500 + do-not-retry semantics.
+func (p *LazyProxy) writeColdRequestHeldError(w http.ResponseWriter, id json.RawMessage, warmed bool) {
+	var cause string
+	if warmed {
+		cause = fmt.Sprintf("request exceeded the %s hold ceiling on a warm backend (slow query, not indexing)", p.cfg.ColdRequestHoldCeiling)
+	} else {
+		cause = fmt.Sprintf("language backend still indexing after %s (cold start)", p.cfg.ColdRequestHoldCeiling)
+	}
+	msg := fmt.Sprintf("%s; the call was delivered and may have partially executed — do not auto-retry mutating calls (%s, %s)",
+		cause, p.cfg.BackendKind, p.cfg.WorkspacePath)
 	writeRPCErrorStatus(w, id, http.StatusInternalServerError, rpcErrInternalError, msg, 0)
+}
+
+// wasReapSevered reports whether the probation watchdog (reapWedgedProbation Branch A)
+// severed a delivered in-flight request of this exact generation (F1). Generations are
+// strictly monotonic so a recorded match is unambiguous and never reused.
+func (p *LazyProxy) wasReapSevered(gen uint64) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.reapSeveredGeneration != 0 && p.reapSeveredGeneration == gen
 }
 
 // writeColdStartRefusal maps the two cold-start throttle sentinels returned by
@@ -859,7 +949,7 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 			return
 		}
-		p.onSendFailure(err)
+		p.onSendFailure(gen, err)
 		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 		return
 	}
@@ -1558,6 +1648,13 @@ func (p *LazyProxy) reapWedgedProbation(now time.Time) {
 			return
 		}
 		ep := p.endpoint
+		// F1: if a delivered request is in flight over this never-warmed backend,
+		// record its generation so the severed handler emits the non-retryable
+		// controlled error (delivered, may have partially executed) rather than a
+		// retryable-looking -32603 when its SendRPC returns "backend host stopped".
+		if p.inflightBackendRequests > 0 {
+			p.reapSeveredGeneration = p.endpointGeneration
+		}
 		p.reaping = true
 		p.endpoint = nil
 		p.endpointGeneration++
@@ -1639,9 +1736,15 @@ func (p *LazyProxy) registryRowIsStarting() bool {
 // dying host — producing an extra dead-endpoint round-trip before
 // self-correction. "Disable-then-publish": kill the shared resource, THEN
 // signal that new callers may enter.
-func (p *LazyProxy) onSendFailure(err error) {
+// gen is the endpoint generation the failing request captured. onSendFailure
+// no-ops on a generation mismatch (F4): a late failure surfacing from an OLD,
+// already-torn-down endpoint must not evict + stamp Failed over a freshly
+// republished newer-generation healthy endpoint. Symmetric with the gen guard in
+// markWarmedOnFirstSuccess / reconcileRegistryLifecycleLocked — the whole refactor
+// gen-guards every lifecycle mutation.
+func (p *LazyProxy) onSendFailure(gen uint64, err error) {
 	p.mu.Lock()
-	if p.reaping {
+	if p.reaping || p.endpointGeneration != gen {
 		p.mu.Unlock()
 		return
 	}
