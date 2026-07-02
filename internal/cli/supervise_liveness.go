@@ -138,9 +138,18 @@ func startSupervisorLivenessMonitor(
 	tracker *DaemonRuntimeTracker,
 	loop *api.EventLoop,
 	events *api.SupervisorEventLog,
+	squatterReapFn squatterReapFunc,
 ) {
 	ticker := time.NewTicker(supervisorLivenessInterval)
 	defer ticker.Stop()
+	// P2a reap capability + rate-limit state, owned solely by this monitor
+	// goroutine (same single-owner discipline as the P1b bind latch below). nil
+	// squatterReapFn (no wiring) leaves squatterReap nil → the sweep handles a
+	// port_owner_mismatch observe-only.
+	var squatterReap *squatterSweepReaper
+	if squatterReapFn != nil {
+		squatterReap = &squatterSweepReaper{reapFn: squatterReapFn, limiter: newSquatterReapLimiter()}
+	}
 	// bindLatch (P1b) records the generation at which each task's port was
 	// FIRST observed bound by its current PID. It is owned solely by this
 	// monitor goroutine and threaded into every sweep — no tracker/persist
@@ -164,13 +173,13 @@ func startSupervisorLivenessMonitor(
 	// deadline), so even the longer P1b deadline is already expired at this
 	// first sweep and they terminate immediately — the handoff behavior is
 	// preserved.
-	sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events, bindLatch)
+	sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events, bindLatch, squatterReap)
 	for {
 		select {
 		case <-ctxDone:
 			return
 		case <-ticker.C:
-			sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events, bindLatch)
+			sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events, bindLatch, squatterReap)
 		}
 	}
 }
@@ -211,6 +220,7 @@ func sweepSupervisorLivenessOnce(
 	loop *api.EventLoop,
 	events *api.SupervisorEventLog,
 	bindLatch map[string]int,
+	squatterReap *squatterSweepReaper,
 ) {
 	if tracker == nil || loop == nil || intent == nil {
 		return
@@ -265,7 +275,11 @@ func sweepSupervisorLivenessOnce(
 	// be pruned at the end (a removed / never-running daemon must not keep a
 	// stale latch alive forever).
 	seenTasks := map[string]struct{}{}
-	for taskName, entry := range tracker.Snapshot() {
+	// One tracker snapshot for the whole sweep: the outer loop iterates it, and
+	// the port-squatter classifier's tracked-sibling gate (P2a gate 2) scans it
+	// for every OTHER task's CurrentPID/OrphanPID.
+	snap := tracker.Snapshot()
+	for taskName, entry := range snap {
 		taskName = canonicalSupervisorTaskName(taskName)
 		if entry.State != daemonRuntimeStateRunning || entry.CurrentPID <= 0 {
 			continue
@@ -349,6 +363,31 @@ func sweepSupervisorLivenessOnce(
 			}
 			continue
 		}
+		// P2a (decision D-A): port_owner_mismatch is no longer an unconditional
+		// restart. A DIFFERENT live process owns the port; identity-gate it and
+		// reap ONLY a verified disowned child of THIS task, then fall through to
+		// the normal restart so the SM rebinds the freed port. A foreign /
+		// unverifiable owner is observe-only (restarting our own child cannot
+		// displace a foreign holder — that futile loop is the quarantine
+		// factory, defect C). All identity/kill work stays on this sweep
+		// goroutine; SM consequences travel only via the EvManualRestart post.
+		if reason == supervisorLivenessReasonPortOwnerMismatch {
+			ownerPID := 0
+			if livenessProbe.PortOwnerPID != nil {
+				if pid, ok, probeErr := livenessProbe.PortOwnerPID(d.Port); probeErr == nil && ok {
+					ownerPID = pid
+				}
+			}
+			selfPID := 0
+			if supervisorSelfPIDFn != nil {
+				selfPID = supervisorSelfPIDFn()
+			}
+			if handleSquatterMismatchOnSweep(d, ownerPID, selfPID, snap, events, squatterReap, now) == squatterSweepObserveOnly {
+				continue
+			}
+			// squatterSweepReapedFallThrough: the verified-own squatter was
+			// reaped — fall through to the stale + EvManualRestart post below.
+		}
 		if events != nil {
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "warn",
@@ -401,6 +440,11 @@ func sweepSupervisorLivenessOnce(
 				delete(bindLatch, taskName)
 			}
 		}
+	}
+	// Same key-sweep for the squatter reap limiter's per-task state (F5) so its
+	// lastLookup/reapAttempts maps cannot grow unbounded on task churn.
+	if squatterReap != nil {
+		squatterReap.limiter.pruneAbsent(seenTasks)
 	}
 }
 

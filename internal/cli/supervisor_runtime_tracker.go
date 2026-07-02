@@ -379,7 +379,11 @@ func (t *DaemonRuntimeTracker) MarkBackoff(taskName string) {
 // MarkQuarantined transitions a task into the quarantine state —
 // reached when the per-task crash count crosses
 // respawnQuarantineThreshold (10 failures in 30 min). Quarantine
-// suspends further respawn attempts until supervisor cold-restart.
+// suspends AUTOMATIC respawns; an operator clears it without a full
+// supervisor restart via `mcphub daemon recover <task>` (P2b — reap
+// any port squatter then force a respawn) or a force respawn
+// (POST /api/daemon/respawn {force:true}); a supervisor cold-restart
+// also clears the in-memory window.
 // Per codex bot P2 PR #230 round 2: "Transition runtime state to
 // quarantine on threshold breach" + "Persist quarantined runtime
 // state before returning".

@@ -1323,6 +1323,56 @@ from having parent-dir write rights, so the race is unreachable.
 
 ## Stuck-instance recovery
 
+### Quarantined daemon with a port squatter — `mcphub daemon recover <task>`
+
+Symptom: a daemon (typically `serena`) is quarantined
+(`10+ failures in 30-min sliding window; automatic respawns suspended —
+run 'mcphub daemon recover <task>' …`) while a **forgotten own-child**
+(a live mcphub daemon the supervisor lost track of) still squats the
+daemon's TCP port, so the hub looks "red" but a working server is
+answering on the port. This is the supervisor lost-child class
+(`work-items/bugs/2026-07-02-supervisor-lost-child-quarantine-class.md`).
+
+**When to use.** A quarantined daemon whose port is held by a squatter,
+OR any daemon you want to force-respawn after clearing a port squatter,
+WITHOUT a full supervisor restart (which would reap the whole fleet and
+mask the defect).
+
+**What it does.** Resolves the descriptor from `supervisor-intent.json`,
+checks who owns the port, and:
+
+1. If a **verified-own** squatter holds it (our binary at the configured
+   path, our argv naming THIS task exactly, start-time-proven via a held
+   handle), reaps it with `TerminatePIDWithIdentity` (confirm prompt
+   unless `--yes`). A **foreign or unverifiable** owner is REFUSED —
+   never killed (fail-closed). Windows only in v1; on other platforms a
+   bound foreign owner is refused (no kill).
+2. Forces a respawn through the supervisor (`force=true`), which resets
+   the quarantine window.
+
+Every verdict/kill is audited to `supervisor-events.log`
+(`daemon-port-squatter-reaped` / `-foreign` / `-unverified` /
+`-reap-failed`, with `source:"recover"` + `actor`).
+
+```bash
+mcphub daemon recover \mcp-local-hub-serena-b133f336        # prompts before killing
+mcphub daemon recover \mcp-local-hub-serena-b133f336 --yes  # no prompt; for scripts
+```
+
+Exit codes:
+
+```text
+0 — recovered (reaped if needed, force respawn accepted)
+2 — unknown task (not in supervisor-intent.json) OR intent unreadable
+3 — refused: the port owner is foreign / unverifiable (no kill), or the
+    operator declined the confirmation prompt
+4 — force respawn returned a non-success supervisor code
+5 — supervisor unreachable (start `mcphub supervise` / enable autostart)
+```
+
+`POST /api/daemon/respawn {force:true}` remains the GUI/programmatic
+equivalent of step 2 (without the port-squatter reap).
+
 ### Secret daemons exit 1 / quarantine on sandbox-broadened `%LOCALAPPDATA%`
 
 Symptom: secret-using daemons such as `wolfram` or `paper-search`

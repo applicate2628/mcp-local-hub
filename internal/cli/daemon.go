@@ -87,7 +87,7 @@ func newDaemonCmdReal() *cobra.Command {
 	var server, daemonName string
 	c := &cobra.Command{
 		Use:   "daemon",
-		Short: "Run a daemon (invoked by scheduler, not by humans)",
+		Short: "Run or recover a daemon (the run path is invoked by the supervisor, not by humans)",
 		Long: `Run a single mcp-local-hub daemon. This is the actual server process
 that Task Scheduler launches per the scheduler task XML's <Exec>/<Command>
 and <Arguments> fields. Not intended for interactive use.
@@ -394,6 +394,9 @@ See also: install, logs, restart, status.`,
 	// subcommand the supervisor launches per registered serena workspace.
 	// Hidden — supervisor-intent.json descriptors point here.
 	c.AddCommand(newDaemonSerenaProxyCmd())
+	// P2b: operator recovery verb — reap a verified-own port squatter masking a
+	// stuck/quarantined daemon, then force a respawn through the supervisor.
+	c.AddCommand(newDaemonRecoverCmd())
 	return c
 }
 

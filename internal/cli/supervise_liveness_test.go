@@ -265,7 +265,7 @@ func TestSupervisorStartupRuntimeDoesNotHydrateStaleCleanedStoppedDaemon(t *test
 	})
 	defer restoreProbe()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 	select {
 	case ev := <-events:
 		t.Fatalf("liveness reposted stale cleaned daemon: %+v", ev)
@@ -424,7 +424,7 @@ func TestLoadSupervisorStartupRuntimeTerminatesAliveExpiredUnboundPortBeforeResp
 	// The immediate startup liveness sweep (the same call
 	// startSupervisorLivenessMonitor makes before its first ticker tick)
 	// drives the terminate-first restart.
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	// Terminate-first ordering: the live stale PID is terminated BEFORE any
 	// respawn (no spawn-over-live duplicate).
@@ -676,7 +676,7 @@ func TestSupervisorLivenessSweepPostsChildExitForDeadRunningPID(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -720,7 +720,7 @@ func TestSupervisorLivenessSweepPostsChildExitForDeadPIDWithForeignListener(t *t
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -732,7 +732,16 @@ func TestSupervisorLivenessSweepPostsChildExitForDeadPIDWithForeignListener(t *t
 	}
 }
 
-func TestSupervisorLivenessSweepRestartsAlivePIDWithForeignPortOwner(t *testing.T) {
+// TestSupervisorLivenessSweepForeignPortOwnerObserveOnly is the P2a (decision
+// D-A) rewrite of the old
+// TestSupervisorLivenessSweepRestartsAlivePIDWithForeignPortOwner: a
+// port_owner_mismatch is no longer an UNCONDITIONAL restart (MUST-FIX #10).
+// With no reap capability wired (nil reaper — the direct-sweep unit-test path),
+// the mismatch is handled OBSERVE-ONLY: no EvManualRestart is posted, because
+// restarting our own child cannot displace a foreign process holding the port
+// (that futile loop is the quarantine factory — defect C). Only a verified-own
+// squatter reap falls through to EvManualRestart.
+func TestSupervisorLivenessSweepForeignPortOwnerObserveOnly(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	taskName := `\mcp-local-hub-memory-default`
 	intent := &api.SupervisorIntentFile{
@@ -764,18 +773,13 @@ func TestSupervisorLivenessSweepRestartsAlivePIDWithForeignPortOwner(t *testing.
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	select {
 	case ev := <-events:
-		if ev.Kind != api.EvManualRestart || ev.TaskName != taskName {
-			t.Fatalf("event = %+v, want EvManualRestart for %s", ev, taskName)
-		}
-		if ev.Body["reason"] != "port_owner_mismatch" {
-			t.Fatalf("event reason = %v, want port_owner_mismatch", ev.Body["reason"])
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("liveness sweep did not post EvManualRestart for foreign port owner")
+		t.Fatalf("liveness sweep posted %+v for a foreign port owner; want observe-only (NO restart) under P2a", ev)
+	case <-time.After(200 * time.Millisecond):
+		// No event posted — correct: foreign mismatch is observe-only.
 	}
 }
 
@@ -808,7 +812,7 @@ func TestSupervisorLivenessSweepDoesNotRestartAlivePIDOwningPort(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -849,7 +853,7 @@ func TestSupervisorLivenessSweepRejectsRecycledPID(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -897,7 +901,7 @@ func TestSupervisorLivenessSweepRejectsSelfOwnedPort(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -944,7 +948,7 @@ func TestSupervisorLivenessSweepRestartsAlivePIDWithUnboundPort(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -991,7 +995,7 @@ func TestSupervisorLivenessSweepKeepsLivePIDBeforeRestartPost(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -1079,7 +1083,7 @@ func TestSupervisorLivenessRestartForAliveUnboundPortTerminatesBeforeRespawn(t *
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	// Terminate-first ordering: the old live PID is terminated BEFORE any
 	// respawn (no spawn-over-live).
@@ -1269,7 +1273,7 @@ func TestSupervisorLivenessForeignWarmStartPIDSynthesizesChildExitAndRespawns(t 
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	// Terminate fires FIRST against the foreign live PID; no respawn yet.
 	select {
@@ -1455,7 +1459,7 @@ func TestSupervisorLivenessForeignTerminateFailureNoSynthesizeNoRespawn(t *testi
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	// Terminate is attempted against the foreign live PID and fails.
 	select {
@@ -1647,7 +1651,7 @@ func TestSupervisorLivenessSweepConcurrentWithHandlerNoRace(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 200; i++ {
-			sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+			sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 		}
 	}()
 	// Handler-feeder goroutine: concurrently drives spawn/exit transitions for
@@ -1854,7 +1858,7 @@ func TestSupervisorLivenessSweepNoRestartOnPortOwnerProbeErrorTCPUp(t *testing.T
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -1910,7 +1914,7 @@ func TestSupervisorLivenessSweepObservesProbeErrorTCPDownWithoutRestart(t *testi
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog, nil, nil)
 
 	// No event posted — neither restart nor teardown.
 	select {
@@ -1933,12 +1937,16 @@ func TestSupervisorLivenessSweepObservesProbeErrorTCPDownWithoutRestart(t *testi
 	}
 }
 
-// TestSupervisorLivenessSweepConfirmedOwnerMismatchStillRestarts is the
-// negative control: a CONFIRMED owner mismatch (a DIFFERENT live PID owns the
-// port, no probe error) must STILL route to EvManualRestart with reason
-// port_owner_mismatch. The #268 P2 fix narrows ONLY the probe-error path; a
-// real foreign owner is unchanged.
-func TestSupervisorLivenessSweepConfirmedOwnerMismatchStillRestarts(t *testing.T) {
+// TestSupervisorLivenessSweepConfirmedOwnerMismatchObserveOnly is the P2a
+// (decision D-A, MUST-FIX #10) replacement for the old
+// ...ConfirmedOwnerMismatchStillRestarts: a CONFIRMED owner mismatch (a
+// DIFFERENT live PID owns the port, no probe error) is NO LONGER an
+// unconditional restart. With the reap capability unwired (nil reaper), the
+// mismatch is handled observe-only and posts NO loop event — restarting our own
+// child cannot free a foreign-held port. The `supervisorLivenessReasonNeedsRestart`
+// predicate still classifies port_owner_mismatch as a restart reason (the
+// verified-own reap path relies on it); the sweep intercepts BEFORE posting.
+func TestSupervisorLivenessSweepConfirmedOwnerMismatchObserveOnly(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	taskName := `\mcp-local-hub-memory-default`
 	intent := &api.SupervisorIntentFile{
@@ -1969,18 +1977,19 @@ func TestSupervisorLivenessSweepConfirmedOwnerMismatchStillRestarts(t *testing.T
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil)
+	// Sanity: the reason still qualifies as a restart reason at the predicate
+	// level; only the sweep's squatter interception changes the outcome.
+	if !supervisorLivenessReasonNeedsRestart(supervisorLivenessReasonPortOwnerMismatch) {
+		t.Fatal("port_owner_mismatch must still be a NeedsRestart reason (the own-squatter reap path uses it)")
+	}
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
 
 	select {
 	case ev := <-events:
-		if ev.Kind != api.EvManualRestart || ev.TaskName != taskName {
-			t.Fatalf("event = %+v, want EvManualRestart for %s", ev, taskName)
-		}
-		if ev.Body["reason"] != supervisorLivenessReasonPortOwnerMismatch {
-			t.Fatalf("event reason = %v, want %s", ev.Body["reason"], supervisorLivenessReasonPortOwnerMismatch)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("confirmed owner mismatch did not post EvManualRestart")
+		t.Fatalf("confirmed foreign owner mismatch posted %+v; want observe-only (NO restart) under P2a", ev)
+	case <-time.After(200 * time.Millisecond):
+		// No event posted — correct.
 	}
 }
 
