@@ -48,6 +48,14 @@ func BuildSupervisorDaemonForLSP(entry WorkspaceEntry, mcphubBinaryPath string) 
 		},
 		Workspace: entry.WorkspacePath,
 		Port:      entry.Port,
+		// LSP workspace-proxy children bind their port promptly (before the
+		// heavy stdio LSP backend materializes lazily on the first tools/call),
+		// but the same slow-bind allowance the serena-proxy builder stamps
+		// (#488, P1b) is applied here so a proxy that is momentarily slow to
+		// bind post-spawn is not terminate-first-then-respawned by the liveness
+		// sweep. The field exists on SupervisorDaemon since #488; 120s matches
+		// the serena-proxy precedent (supervisor_intent_build.go).
+		StartupBindDeadlineSeconds: 120,
 	}
 }
 

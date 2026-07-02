@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -61,12 +62,46 @@ type LazyProxyConfig struct {
 	// IdleBackendCheckEvery defaults to DefaultLSPIdleBackendCheckEvery when
 	// IdleBackendTTL is enabled and this value is zero.
 	IdleBackendCheckEvery time.Duration
+
+	// MaterializeWaitBudget bounds how long a single cold forwarded request
+	// (first tools/call / forward per (workspace, language) after the backend
+	// is cold) is held before the proxy fast-fails with a 503 "cold start in
+	// progress; retry" while the materialize continues in the background. It
+	// also bounds the first-request probation window (the gopls-style indexing
+	// pause after the MCP handshake). Defaults to DefaultLSPMaterializeWaitBudget
+	// (15s) when zero.
+	MaterializeWaitBudget time.Duration
+	// ColdStartConcurrency caps how many OTHER LSP backends may be concurrently
+	// in the expensive cold-start window (registry Lifecycle == Starting AND
+	// port-live) before this proxy refuses to enter the materialize path and
+	// returns a 503 "cold-start slots busy; retry" without spawning. Because
+	// the row stays Starting through indexing (see the probation warmed flag),
+	// this bounds the indexing window, not just spawn+handshake. Defaults to
+	// DefaultLSPColdStartConcurrency (2) when zero; a negative value disables
+	// the cold-start gate.
+	ColdStartConcurrency int
+	// ColdStartMaxProbation bounds how long a materialized-but-never-warmed
+	// backend may hold its cold-start slot before the probation watchdog
+	// (piggybacked on the idle-reaper tick) tears it down and frees the slot.
+	// Defaults to DefaultLSPColdStartMaxProbation (5m) when zero; a negative
+	// value disables the watchdog.
+	ColdStartMaxProbation time.Duration
 }
 
 const (
 	DefaultLSPMaterializedHardCap   = api.DefaultLSPMaterializedHardCap
 	DefaultLSPIdleBackendTTL        = 30 * time.Minute
 	DefaultLSPIdleBackendCheckEvery = time.Minute
+
+	// DefaultLSPMaterializeWaitBudget is the default LazyProxyConfig
+	// MaterializeWaitBudget: the per-request cold-start hold + probation bound.
+	DefaultLSPMaterializeWaitBudget = 15 * time.Second
+	// DefaultLSPColdStartConcurrency is the default cap on OTHER Starting +
+	// port-live LSP backends before this proxy refuses to cold-start.
+	DefaultLSPColdStartConcurrency = 2
+	// DefaultLSPColdStartMaxProbation is the default probation-watchdog window
+	// after which a materialized-but-never-warmed backend is torn down.
+	DefaultLSPColdStartMaxProbation = 5 * time.Minute
 
 	// Bounds attacker-controlled document lifecycle state retained by the
 	// long-lived lazy proxy. Normal editors keep far fewer concurrently-open
@@ -77,6 +112,19 @@ const (
 )
 
 var materializedSlotPortLiveFn = lazyProxyPortLive
+
+// errColdStartSlotsBusy is the sentinel a cold-start-slot refusal satisfies via
+// errors.Is; the concrete coldStartSlotsBusyError carries the observed warming
+// count for the operator-facing 503 message.
+var errColdStartSlotsBusy = errors.New("cold-start slots busy")
+
+type coldStartSlotsBusyError struct{ warming int }
+
+func (e *coldStartSlotsBusyError) Error() string {
+	return fmt.Sprintf("LSP cold-start slots busy (%d backends warming); retry in ~30s", e.warming)
+}
+
+func (e *coldStartSlotsBusyError) Is(target error) bool { return target == errColdStartSlotsBusy }
 
 // LazyProxy is the per-port HTTP proxy that answers synthetic handshake
 // traffic (initialize, tools/list, notifications/*) from the embedded tool
@@ -103,6 +151,21 @@ type LazyProxy struct {
 	endpoint MCPEndpoint
 	reaping  bool
 	closed   atomic.Bool
+
+	// warmed reports whether the materialized backend has served at least one
+	// SUCCESSFUL forwarded request since it was published. gopls-style backends
+	// index for tens of seconds AFTER the MCP handshake, so materialize-success
+	// is not usable-success; while !warmed the request handlers bound the
+	// upstream call with MaterializeWaitBudget and 503-retry on our deadline.
+	// The first successful response flips warmed true and performs the
+	// LifecycleActive registry write (the row stays Starting through indexing).
+	// Reset false at every endpoint publish and every teardown.
+	warmed bool
+	// endpointPublishedAt is when the current endpoint was published (cold
+	// materialize succeeded). The probation watchdog tears down a backend that
+	// stays !warmed past ColdStartMaxProbation from this instant. Zero when no
+	// endpoint is published.
+	endpointPublishedAt time.Time
 
 	inflightBackendRequests int
 	lastBackendActivity     time.Time
@@ -142,6 +205,15 @@ func NewLazyProxy(cfg LazyProxyConfig) *LazyProxy {
 	}
 	if cfg.ToolsCallDebounce == 0 {
 		cfg.ToolsCallDebounce = 5 * time.Second
+	}
+	if cfg.MaterializeWaitBudget == 0 {
+		cfg.MaterializeWaitBudget = DefaultLSPMaterializeWaitBudget
+	}
+	if cfg.ColdStartConcurrency == 0 {
+		cfg.ColdStartConcurrency = DefaultLSPColdStartConcurrency
+	}
+	if cfg.ColdStartMaxProbation == 0 {
+		cfg.ColdStartMaxProbation = DefaultLSPColdStartMaxProbation
 	}
 	if cfg.IdleBackendTTL > 0 && cfg.IdleBackendCheckEvery == 0 {
 		cfg.IdleBackendCheckEvery = DefaultLSPIdleBackendCheckEvery
@@ -234,6 +306,8 @@ func (p *LazyProxy) Stop(ctx context.Context) error {
 		_ = p.endpoint.Close()
 		p.endpoint = nil
 	}
+	p.warmed = false
+	p.endpointPublishedAt = time.Time{}
 	p.lastBackendActivity = time.Time{}
 	p.mu.Unlock()
 	p.resetDocRefs()
@@ -396,6 +470,9 @@ func isAllowedOrigin(origin string) bool {
 func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req *JSONRPCRequest) {
 	ep, err := p.ensureMaterialized(r.Context())
 	if err != nil {
+		if p.writeColdStartRefusal(w, req.ID, err) {
+			return
+		}
 		code := rpcErrInternalError
 		if IsMissingBinaryErr(err) {
 			code = rpcErrMissingBinary
@@ -404,8 +481,19 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 		return
 	}
 	defer p.endBackendRequest()
-	resp, err := ep.SendRequest(r.Context(), req)
+	warmed := p.isWarmed()
+	callCtx, cancel := p.boundedCallCtx(r.Context(), warmed)
+	defer cancel()
+	resp, err := ep.SendRequest(callCtx, req)
 	if err != nil {
+		// Probation deadline: our MaterializeWaitBudget elapsed while the
+		// backend was still indexing, and the CLIENT context is still live.
+		// Emit the same 503 "cold start in progress" (never a bare "context
+		// deadline exceeded") and leave the backend up for the retry.
+		if p.isProbationDeadline(r.Context(), warmed, err) {
+			p.writeColdStartInProgress(w, req.ID)
+			return
+		}
 		// Differentiate client-cancel from backend failure. SendRequest
 		// is driven by r.Context(); a client disconnect or timeout
 		// returns context.Canceled / context.DeadlineExceeded even
@@ -423,6 +511,8 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 		return
 	}
+	// First successful response ends probation and stamps LifecycleActive.
+	p.markWarmedOnFirstSuccess()
 	// Only record the tools-call timestamp on successful forward.
 	p.debounceWriteToolsCallTimestamp()
 	out, err := json.Marshal(resp)
@@ -436,6 +526,9 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *JSONRPCRequest) {
 	ep, err := p.ensureMaterialized(r.Context())
 	if err != nil {
+		if p.writeColdStartRefusal(w, req.ID, err) {
+			return
+		}
 		code := rpcErrInternalError
 		if IsMissingBinaryErr(err) {
 			code = rpcErrMissingBinary
@@ -444,8 +537,16 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 		return
 	}
 	defer p.endBackendRequest()
-	resp, err := ep.SendRequest(r.Context(), req)
+	warmed := p.isWarmed()
+	callCtx, cancel := p.boundedCallCtx(r.Context(), warmed)
+	defer cancel()
+	resp, err := ep.SendRequest(callCtx, req)
 	if err != nil {
+		// Probation deadline — see handleToolsCall.
+		if p.isProbationDeadline(r.Context(), warmed, err) {
+			p.writeColdStartInProgress(w, req.ID)
+			return
+		}
 		// Client-cancel is not a backend failure — see handleToolsCall.
 		if isClientCancelErr(r.Context(), err) {
 			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
@@ -455,12 +556,63 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 		return
 	}
+	p.markWarmedOnFirstSuccess()
 	out, err := json.Marshal(resp)
 	if err != nil {
 		writeRPCError(w, req.ID, rpcErrInternalError, "marshal response: "+err.Error())
 		return
 	}
 	writeJSON(w, out)
+}
+
+// boundedCallCtx wraps the client request context in a MaterializeWaitBudget
+// timeout while the backend is in first-request probation (!warmed), so a
+// cold gopls-style indexing pause fast-fails to a 503 retry instead of holding
+// the connection. Once warmed the client context passes through unmodified.
+func (p *LazyProxy) boundedCallCtx(ctx context.Context, warmed bool) (context.Context, context.CancelFunc) {
+	if warmed {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, p.cfg.MaterializeWaitBudget)
+}
+
+// isProbationDeadline reports whether err is our own probation-budget deadline
+// (not the client's own cancel/deadline). It fires only while !warmed, only
+// when the CLIENT context is still live (so a client that set a shorter
+// deadline is still classified as a client cancel), and only for a
+// DeadlineExceeded error.
+func (p *LazyProxy) isProbationDeadline(clientCtx context.Context, warmed bool, err error) bool {
+	return !warmed && clientCtx.Err() == nil && errors.Is(err, context.DeadlineExceeded)
+}
+
+// coldStartInProgressMessage is the operator/agent-facing body for a
+// bounded-wait cold-start 503 (materialize-in-flight OR first-request
+// probation deadline).
+func (p *LazyProxy) coldStartInProgressMessage() string {
+	return fmt.Sprintf("language backend cold start in progress (%s, %s); retry in ~15s",
+		p.cfg.BackendKind, p.cfg.WorkspacePath)
+}
+
+// writeColdStartInProgress emits the 503 + JSON-RPC -32603 + Retry-After: 15
+// cold-start-in-progress response.
+func (p *LazyProxy) writeColdStartInProgress(w http.ResponseWriter, id json.RawMessage) {
+	writeRPCErrorStatus(w, id, http.StatusServiceUnavailable, rpcErrInternalError,
+		p.coldStartInProgressMessage(), 15)
+}
+
+// writeColdStartRefusal maps the two cold-start throttle sentinels returned by
+// ensureMaterialized to their 503 responses and reports whether it handled err.
+// Any other error is left for the caller's generic mapping.
+func (p *LazyProxy) writeColdStartRefusal(w http.ResponseWriter, id json.RawMessage, err error) bool {
+	switch {
+	case errors.Is(err, ErrMaterializeInFlight):
+		p.writeColdStartInProgress(w, id)
+		return true
+	case errors.Is(err, errColdStartSlotsBusy):
+		writeRPCErrorStatus(w, id, http.StatusServiceUnavailable, rpcErrInternalError, err.Error(), 30)
+		return true
+	}
+	return false
 }
 
 // handleDocLifecycle gates textDocument/didOpen and textDocument/didClose
@@ -502,10 +654,13 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 
 	ep, err := p.ensureMaterialized(r.Context())
 	if err != nil {
-		// Materialization failed: the upstream forward will not happen, so
-		// roll back the refcount transition we optimistically applied to
-		// keep the count consistent with what the backend actually saw.
+		// Materialization did not yield an endpoint: the upstream forward will
+		// not happen, so roll back the refcount transition we optimistically
+		// applied to keep the count consistent with what the backend saw.
 		p.rollbackDocRef(uri, isOpen)
+		if p.writeColdStartRefusal(w, req.ID, err) {
+			return
+		}
 		code := rpcErrInternalError
 		if IsMissingBinaryErr(err) {
 			code = rpcErrMissingBinary
@@ -696,10 +851,24 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error)
 	}
 
 	key := p.inflightKey()
-	v, err := p.gate.Do(ctx, key, func(ctx context.Context) (any, error) {
+	v, err := p.gate.DoBounded(ctx, key, p.cfg.MaterializeWaitBudget, func(ctx context.Context) (any, error) {
 		return p.cfg.Lifecycle.Materialize(ctx)
 	})
 	if err != nil {
+		// Bounded-wait expiry: the materialize is still running in the
+		// background and will land in the gate cache-line for the next caller.
+		// This is NOT a backend failure — leave the row Starting (do not stamp
+		// Failed/Missing) and let the handler emit a 503 "cold start in progress".
+		if errors.Is(err, ErrMaterializeInFlight) {
+			return nil, err
+		}
+		// The CALLER's own context was canceled / timed out while joining the
+		// bounded materialize (the DoBounded ctx.Done arm). The materialize
+		// continues detached; a client disconnect is not a backend failure, so
+		// leave the row Starting rather than flipping it to Failed.
+		if ctx.Err() != nil {
+			return nil, err
+		}
 		state := api.LifecycleFailed
 		if IsMissingBinaryErr(err) {
 			state = api.LifecycleMissing
@@ -717,6 +886,12 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error)
 	// gate's singleflight simultaneously (one winner + N losers) and each
 	// observes the same ep. Storing ep twice is harmless since both point
 	// at the same underlying object.
+	//
+	// The row stays LifecycleStarting here: the LifecycleActive write is
+	// DEFERRED to the first successful forwarded response (markWarmedOnFirstSuccess),
+	// because a gopls-style backend indexes for tens of seconds after the MCP
+	// handshake and is not usable until then. A Starting-count-based cold-start
+	// gate would under-protect if Active were stamped at materialize-success.
 	now := time.Now().UTC()
 	p.mu.Lock()
 	if p.closed.Load() {
@@ -729,18 +904,44 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, error)
 		return nil, errors.New("lazy proxy is closed")
 	}
 	p.endpoint = ep
+	p.warmed = false
+	p.endpointPublishedAt = now
 	p.beginBackendRequestLocked(now)
 	p.mu.Unlock()
-	_ = reg.PutLifecycleWithTimestamps(
-		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleActive, "",
-		now, time.Time{},
-	)
 	return ep, nil
+}
+
+// markWarmedOnFirstSuccess flips warmed true on the FIRST successful forwarded
+// response and, on that transition only, performs the deferred LifecycleActive
+// registry write (with LastMaterializedAt) that ensureMaterialized no longer
+// does at materialize-success. Idempotent: subsequent calls are a no-op.
+func (p *LazyProxy) markWarmedOnFirstSuccess() {
+	p.mu.Lock()
+	firstSuccess := !p.warmed
+	p.warmed = true
+	p.mu.Unlock()
+	if !firstSuccess {
+		return
+	}
+	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycleWithTimestamps(
+		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleActive, "",
+		time.Now().UTC(), time.Time{},
+	)
+}
+
+// isWarmed reports whether the current backend has already served a first
+// successful response (so the request handlers can skip the probation bound).
+func (p *LazyProxy) isWarmed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.warmed
 }
 
 func (p *LazyProxy) reserveMaterializedSlot() error {
 	reg := api.NewRegistry(p.cfg.RegistryPath)
-	if p.cfg.MaterializedHardCap <= 0 {
+	capOn := p.cfg.MaterializedHardCap > 0
+	coldGateOn := p.cfg.ColdStartConcurrency > 0
+	if !capOn && !coldGateOn {
 		return reg.PutLifecycle(p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleStarting, "")
 	}
 	unlock, err := reg.Lock()
@@ -756,19 +957,37 @@ func (p *LazyProxy) reserveMaterializedSlot() error {
 		return fmt.Errorf("reserve materialized LSP backend slot: registry entry missing for %s/%s",
 			p.cfg.WorkspaceKey, p.cfg.Language)
 	}
+	// Count OTHER live LSP rows under the same flock: `active` (Starting|Active)
+	// for the total-materialized hard cap, `startingLive` (Starting only) for the
+	// cold-start-concurrency gate. Both exclude stale rows from crashed daemons
+	// via the port-live self-heal. Because the row stays Starting through indexing
+	// (probation), the cold-start gate bounds the expensive index window.
 	active := 0
+	startingLive := 0
 	for _, e := range reg.LSPEntries() {
 		if e.WorkspaceKey == p.cfg.WorkspaceKey && e.Language == p.cfg.Language {
 			continue
 		}
-		if (e.Lifecycle == api.LifecycleStarting || e.Lifecycle == api.LifecycleActive) &&
-			e.Port > 0 && materializedSlotPortLiveFn != nil && materializedSlotPortLiveFn(e.Port) {
+		live := e.Port > 0 && materializedSlotPortLiveFn != nil && materializedSlotPortLiveFn(e.Port)
+		if !live {
+			continue
+		}
+		if e.Lifecycle == api.LifecycleStarting || e.Lifecycle == api.LifecycleActive {
 			active++
 		}
+		if e.Lifecycle == api.LifecycleStarting {
+			startingLive++
+		}
 	}
-	if active >= p.cfg.MaterializedHardCap {
+	if capOn && active >= p.cfg.MaterializedHardCap {
 		return fmt.Errorf("materialized LSP backend cap reached: %d active/starting backends, cap %d",
 			active, p.cfg.MaterializedHardCap)
+	}
+	// Cold-start-concurrency gate: refuse to ENTER the materialize path (no
+	// spawn, no gate) when too many other backends are already warming. The
+	// client retry IS the queue — no in-process waiting, no held connection.
+	if coldGateOn && startingLive >= p.cfg.ColdStartConcurrency {
+		return &coldStartSlotsBusyError{warming: startingLive}
 	}
 	entry.Lifecycle = api.LifecycleStarting
 	entry.LastError = ""
@@ -811,6 +1030,11 @@ func lazyProxyPortLive(port int) bool {
 }
 
 func (p *LazyProxy) startIdleReaper() {
+	// The single background ticker drives both the idle reaper AND the
+	// cold-start probation watchdog. It is gated on IdleBackendTTL (the
+	// production workspace-proxy always sets it, so the probation watchdog
+	// piggybacks there per design); a proxy with idle reaping disabled runs no
+	// background goroutine and relies on direct reapWedgedProbation calls.
 	if p.cfg.IdleBackendTTL <= 0 {
 		return
 	}
@@ -825,7 +1049,9 @@ func (p *LazyProxy) startIdleReaper() {
 			for {
 				select {
 				case <-ticker.C:
-					p.reapIdleBackend(time.Now().UTC())
+					now := time.Now().UTC()
+					p.reapIdleBackend(now)
+					p.reapWedgedProbation(now)
 				case <-p.idleStop:
 					return
 				}
@@ -859,6 +1085,8 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 	ep = p.endpoint
 	p.reaping = true
 	p.endpoint = nil
+	p.warmed = false
+	p.endpointPublishedAt = time.Time{}
 	p.lastBackendActivity = time.Time{}
 	p.mu.Unlock()
 
@@ -877,6 +1105,51 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 	p.gate.Forget(p.inflightKey())
 	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
 		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleConfigured, "")
+	p.mu.Lock()
+	p.reaping = false
+	p.mu.Unlock()
+}
+
+// reapWedgedProbation tears down a materialized backend that has been published
+// for longer than ColdStartMaxProbation without ever serving a first successful
+// response (still !warmed). Such a backend is wedged in the cold-start window —
+// holding a cold-start slot and a Starting registry row that would otherwise
+// suppress a healthy retry. Teardown (Stop + gate.Forget + LifecycleFailed)
+// frees the slot: the row leaves Starting so the cold-start gate stops counting
+// it, and the next request re-enters the bounded cold path cleanly. Unlike the
+// idle reaper it deliberately does NOT skip on inflightBackendRequests > 0 — the
+// in-flight request IS the wedged one.
+func (p *LazyProxy) reapWedgedProbation(now time.Time) {
+	if p.closed.Load() || p.cfg.ColdStartMaxProbation <= 0 {
+		return
+	}
+	var ep MCPEndpoint
+	p.mu.Lock()
+	if p.endpoint == nil ||
+		p.reaping ||
+		p.warmed ||
+		p.endpointPublishedAt.IsZero() ||
+		now.Sub(p.endpointPublishedAt) < p.cfg.ColdStartMaxProbation {
+		p.mu.Unlock()
+		return
+	}
+	ep = p.endpoint
+	p.reaping = true
+	p.endpoint = nil
+	p.warmed = false
+	p.endpointPublishedAt = time.Time{}
+	p.lastBackendActivity = time.Time{}
+	p.mu.Unlock()
+
+	_ = ep.Close()
+	p.resetDocRefs()
+	if err := p.cfg.Lifecycle.Stop(); err != nil {
+		fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: probation watchdog lifecycle stop: %v\n", err)
+	}
+	p.gate.Forget(p.inflightKey())
+	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
+		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleFailed,
+		fmt.Sprintf("backend never served a first response within %s", p.cfg.ColdStartMaxProbation))
 	p.mu.Lock()
 	p.reaping = false
 	p.mu.Unlock()
@@ -908,6 +1181,8 @@ func (p *LazyProxy) onSendFailure(err error) {
 		_ = p.endpoint.Close()
 		p.endpoint = nil
 	}
+	p.warmed = false
+	p.endpointPublishedAt = time.Time{}
 	p.lastBackendActivity = time.Time{}
 	p.mu.Unlock()
 	p.resetDocRefs()
@@ -986,5 +1261,30 @@ func writeRPCError(w http.ResponseWriter, id json.RawMessage, code int, msg stri
 	// JSON-RPC errors ride a 200 OK body per convention; status-level codes
 	// are reserved for transport errors (4xx/5xx) the proxy does not emit.
 	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(b)
+}
+
+// writeRPCErrorStatus is the transport-status sibling of writeRPCError: it
+// emits a JSON-RPC error envelope under an explicit non-200 HTTP status (used
+// for the cold-start 503 retry contract) and, when retryAfterSecs > 0, a
+// standard Retry-After header. The LSP router forwards this status + header
+// verbatim; the message text is the load-bearing agent-level retry signal, the
+// header is decoration for clients that honor it.
+func writeRPCErrorStatus(w http.ResponseWriter, id json.RawMessage, httpStatus, code int, msg string, retryAfterSecs int) {
+	envelope := map[string]any{
+		"jsonrpc": "2.0",
+		"error":   map[string]any{"code": code, "message": msg},
+	}
+	if len(id) > 0 {
+		envelope["id"] = id
+	} else {
+		envelope["id"] = nil
+	}
+	b, _ := json.Marshal(envelope)
+	w.Header().Set("Content-Type", "application/json")
+	if retryAfterSecs > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSecs))
+	}
+	w.WriteHeader(httpStatus)
 	_, _ = w.Write(b)
 }
