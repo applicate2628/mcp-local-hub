@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +28,11 @@ type recoverTestEnv struct {
 	killCalls    []process.PIDIdentityProof
 	killErr      error
 	order        []string
+	// stateDir is where the audit log lands (also fed to the injected
+	// intent/state readers, which ignore it). stateDirOverride forces a
+	// specific (possibly unwritable) dir to exercise the best-effort audit path.
+	stateDir         string
+	stateDirOverride string
 }
 
 type respawnCall struct {
@@ -45,7 +52,11 @@ func newRecoverTestEnv(t *testing.T, env *recoverTestEnv) {
 	prevPollInterval := recoverPortFreePollInterval
 	prevTimeout := recoverPortFreeTimeout
 
-	recoverStateDirFn = func() (string, error) { return t.TempDir(), nil }
+	env.stateDir = t.TempDir()
+	if env.stateDirOverride != "" {
+		env.stateDir = env.stateDirOverride
+	}
+	recoverStateDirFn = func() (string, error) { return env.stateDir, nil }
 	recoverReadIntentFn = func(string) (*api.SupervisorIntentFile, error) { return env.intent, nil }
 	recoverReadStateFn = func(string) (*api.SupervisorStateFile, error) { return env.state, nil }
 	recoverPortOwnerFn = func(port int) (int, bool, error) {
@@ -186,6 +197,35 @@ func TestDaemonRecover_OwnSquatterReapThenRespawn(t *testing.T) {
 	if len(env.order) < 2 || env.order[0] != "kill" || env.order[len(env.order)-1] != "respawn" {
 		t.Fatalf("order = %v, want kill before respawn", env.order)
 	}
+	// F1: the operator kill is audited to supervisor-events.log with bounded
+	// identity fields + actor + source=recover (D-A clause 6).
+	log := readRecoverAuditLog(t, env.stateDir)
+	if !strings.Contains(log, "daemon-port-squatter-reaped") {
+		t.Fatalf("audit log missing daemon-port-squatter-reaped; log:\n%s", log)
+	}
+	if !strings.Contains(log, `"source":"recover"`) {
+		t.Fatalf("audit log missing source=recover; log:\n%s", log)
+	}
+	if !strings.Contains(log, `"actor":`) {
+		t.Fatalf("audit log missing actor; log:\n%s", log)
+	}
+	if !strings.Contains(log, `"squatter_pid":44000`) {
+		t.Fatalf("audit log missing squatter_pid; log:\n%s", log)
+	}
+	if !strings.Contains(log, `"executable_path":`) {
+		t.Fatalf("audit log missing executable_path; log:\n%s", log)
+	}
+}
+
+// readRecoverAuditLog returns the contents of supervisor-events.log in stateDir
+// (empty string if absent).
+func readRecoverAuditLog(t *testing.T, stateDir string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 func TestDaemonRecover_ForeignSquatterRefusesExit3(t *testing.T) {
@@ -214,6 +254,50 @@ func TestDaemonRecover_ForeignSquatterRefusesExit3(t *testing.T) {
 	}
 	if !strings.Contains(errBuf.String(), "refused") {
 		t.Fatalf("stderr should explain the refusal; got:\n%s", errBuf.String())
+	}
+	// F1: the refusal is audited too (attributable no-kill decision).
+	log := readRecoverAuditLog(t, env.stateDir)
+	if !strings.Contains(log, "daemon-port-squatter-foreign") {
+		t.Fatalf("audit log missing daemon-port-squatter-foreign; log:\n%s", log)
+	}
+	if !strings.Contains(log, `"source":"recover"`) {
+		t.Fatalf("audit log missing source=recover; log:\n%s", log)
+	}
+}
+
+// TestDaemonRecover_AuditEmitFailureDoesNotFailCommand is F1's best-effort
+// requirement: an unwritable audit log (here, a non-existent state dir) must NOT
+// fail the command — the kill + respawn still complete and exit 0.
+func TestDaemonRecover_AuditEmitFailureDoesNotFailCommand(t *testing.T) {
+	d := globalDaemonDescriptor()
+	const owner = 44000
+	portCalls := 0
+	env := &recoverTestEnv{
+		intent:           &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{d}},
+		stateDirOverride: filepath.Join(t.TempDir(), "does", "not", "exist"), // OpenSupervisorEventLog will fail
+		portOwner: func(int) (int, bool, error) {
+			portCalls++
+			if portCalls == 1 {
+				return owner, true, nil
+			}
+			return 0, false, nil
+		},
+		respawnRes: api.RespawnResult{Success: true},
+	}
+	newRecoverTestEnv(t, env)
+	setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
+		return squatterIdentityFor(owner, d), nil
+	}, alwaysExeMatch)
+
+	cmd, _, _ := recoverCmd("")
+	if err := runDaemonRecover(cmd, d.TaskName, true); err != nil {
+		t.Fatalf("recover must succeed despite an unwritable audit log; got: %v", err)
+	}
+	if len(env.killCalls) != 1 {
+		t.Fatalf("kill should still happen; got %d", len(env.killCalls))
+	}
+	if len(env.respawnCalls) != 1 {
+		t.Fatalf("respawn should still happen; got %d", len(env.respawnCalls))
 	}
 }
 

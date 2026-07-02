@@ -110,7 +110,7 @@ uvx → uv → python serena (порт 19121)
 **PR #230** — auto-respawn dispatcher:
 - Channel-based goroutine `runRespawnDispatcher` ([internal/cli/supervise_respawn_dispatcher.go](../../../internal/cli/supervise_respawn_dispatcher.go))
 - При `daemon-exited` non-clean: запись в sliding window (30 мин) → если < 10 в окне → backoff 1s/2s/4s/8s/16s/32s/60s cap → respawn
-- При >= 10 fails в окне → `MarkQuarantined` + persist supervisor-state.json → respawn stops до cold restart
+- При >= 10 fails в окне → `MarkQuarantined` + persist supervisor-state.json → авто-respawn останавливается; оператор снимает карантин без полного рестарта через `mcphub daemon recover <task>` (identity-gated reap порт-скваттера + force-respawn) или force-respawn (`POST /api/daemon/respawn {force:true}`); cold restart тоже чистит окно
 - Operator-stop respect: проверяет `daemon-intent.json` IsActiveStop → suppress respawn если оператор сам остановил
 - Validated live 2026-05-20 16:12Z: kill серена → cycle exited→scheduled→fired→spawned за 1.1 секунды
 

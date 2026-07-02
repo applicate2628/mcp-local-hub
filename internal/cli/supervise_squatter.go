@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -151,20 +152,12 @@ func classifyPortSquatter(d api.SupervisorDaemon, ownerPID, selfPID int, tracked
 		return squatterForeign, id
 	}
 
-	// Gate 5 (argv, SOLE task-discriminator, MUST-FIX #4): the owner's command
-	// line must carry every discriminating flag/value pair for THIS task as
-	// adjacent whitespace tokens with exact per-token equality.
-	pairs, ok := squatterRequiredArgvPairs(d)
-	if !ok {
-		// Unknown descriptor shape (should not occur among supervisor-intent.json
-		// daemon rows). Cannot prove this-task ownership → refuse.
+	// Gate 5 (argv, SOLE task-discriminator, MUST-FIX #4 + F2): the owner's
+	// command line must anchor THIS descriptor's subcommand in command position
+	// AND carry every discriminating flag/value pair for the task, each matched
+	// exact-token. An unknown descriptor shape → Foreign (fail-closed).
+	if !commandLineMatchesTaskArgv(tokenizeWindowsCommandLine(id.CommandLine), d) {
 		return squatterForeign, id
-	}
-	tokens := tokenizeWindowsCommandLine(id.CommandLine)
-	for _, p := range pairs {
-		if !commandLineHasAdjacentTokenPair(tokens, p[0], p[1]) {
-			return squatterForeign, id
-		}
 	}
 	return squatterOwnTask, id
 }
@@ -193,38 +186,41 @@ func squatterStartedAt(id process.ProcessIdentity) string {
 	return time.Unix(id.CreationDateUnix, 0).UTC().Format(time.RFC3339Nano)
 }
 
-// squatterRequiredArgvPairs returns the flag/value token pairs that must ALL
-// appear (adjacent, exact) in a squatter's command line for it to be THIS
-// task's child, plus ok=false when the descriptor shape yields no unique
-// discriminator (→ the caller refuses / Foreign). The three daemon-row shapes:
-//   - serena-proxy: `--task-name <canonical>` — unique per workspace.
-//   - LSP workspace-proxy: `--workspace <path>` AND `--language <lang>` (it
-//     carries no --task-name/--server/--daemon), the workspace path being
-//     unique per task.
-//   - global/legacy daemon: `--server <server>` AND `--daemon <daemon>`.
-func squatterRequiredArgvPairs(d api.SupervisorDaemon) ([][2]string, bool) {
+// commandLineMatchesTaskArgv is gate 5 — the SOLE task-discriminator (MUST-FIX
+// #4): the observed argv must (a) begin with THIS descriptor's subcommand token
+// sequence in command position, AND (b) carry every discriminating flag/value
+// pair for the task, each matched exact-token. The subcommand anchor (F2)
+// rejects sibling subcommands that ALSO register --server/--daemon flags
+// (relay/restart/stop/install → `mcphub relay --server X --daemon Y` is NOT a
+// daemon). The three daemon-row shapes:
+//   - serena-proxy: `daemon serena-proxy` + `--task-name <canonical>` (unique per workspace).
+//   - LSP workspace-proxy: `daemon workspace-proxy` + `--workspace <path>` + `--language <lang>`
+//     (it carries no --task-name/--server/--daemon; the workspace path is unique per task).
+//   - global/legacy daemon: `daemon --…` + `--server <server>` + `--daemon <daemon>`.
+//
+// An unknown descriptor shape yields false (→ Foreign, fail-closed).
+func commandLineMatchesTaskArgv(tokens []string, d api.SupervisorDaemon) bool {
 	if isSerenaProxyDescriptor(d) {
 		tn := canonicalSupervisorTaskName(d.TaskName)
-		if tn == "" {
-			return nil, false
-		}
-		return [][2]string{{"--task-name", tn}}, true
+		return tn != "" &&
+			hasSubcommandAnchor(tokens, "daemon", "serena-proxy") &&
+			commandLineHasAdjacentTokenPair(tokens, "--task-name", tn)
 	}
 	if isLSPWorkspaceProxyDescriptor(d) {
 		ws := lspWorkspaceProxyArgValue(d, "--workspace")
 		lang := lspWorkspaceProxyArgValue(d, "--language")
-		if ws == "" || lang == "" {
-			return nil, false
-		}
-		return [][2]string{{"--workspace", ws}, {"--language", lang}}, true
+		return ws != "" && lang != "" &&
+			hasSubcommandAnchor(tokens, "daemon", "workspace-proxy") &&
+			commandLineHasAdjacentTokenPair(tokens, "--workspace", ws) &&
+			commandLineHasAdjacentTokenPair(tokens, "--language", lang)
 	}
 	if isGlobalDaemonDescriptor(d) {
-		if d.Server == "" || d.Daemon == "" {
-			return nil, false
-		}
-		return [][2]string{{"--server", d.Server}, {"--daemon", d.Daemon}}, true
+		return d.Server != "" && d.Daemon != "" &&
+			hasGlobalDaemonAnchor(tokens) &&
+			commandLineHasAdjacentTokenPair(tokens, "--server", d.Server) &&
+			commandLineHasAdjacentTokenPair(tokens, "--daemon", d.Daemon)
 	}
-	return nil, false
+	return false
 }
 
 // isGlobalDaemonDescriptor reports whether a descriptor is a global/legacy
@@ -235,6 +231,32 @@ func squatterRequiredArgvPairs(d api.SupervisorDaemon) ([][2]string, bool) {
 func isGlobalDaemonDescriptor(d api.SupervisorDaemon) bool {
 	return len(d.Args) >= 1 && d.Args[0] == "daemon" &&
 		!isSerenaProxyDescriptor(d) && !isLSPWorkspaceProxyDescriptor(d)
+}
+
+// hasSubcommandAnchor reports whether the observed argv begins (after argv[0],
+// the exe) with the exact subcommand token sequence sub. tokens[0] is the exe;
+// the subcommand starts at tokens[1].
+func hasSubcommandAnchor(tokens []string, sub ...string) bool {
+	if len(tokens) < 1+len(sub) {
+		return false
+	}
+	for i, s := range sub {
+		if tokens[1+i] != s {
+			return false
+		}
+	}
+	return true
+}
+
+// hasGlobalDaemonAnchor requires the observed argv to be `<exe> daemon --…`:
+// tokens[1] == "daemon" AND the token after it is a flag (not a proxy
+// subcommand). A global daemon is spawned as `mcphub daemon --server X --daemon
+// Y`; a sibling `mcphub relay --server X --daemon Y` has tokens[1]=="relay" and
+// a `mcphub daemon serena-proxy …` has a non-flag token after "daemon" — both
+// rejected (F2: sibling-subcommand rejection is required by D-A even though
+// those siblings do not bind the daemon port today).
+func hasGlobalDaemonAnchor(tokens []string) bool {
+	return len(tokens) >= 3 && tokens[1] == "daemon" && strings.HasPrefix(tokens[2], "-")
 }
 
 // commandLineHasAdjacentTokenPair reports whether tokens contains flag
@@ -249,67 +271,85 @@ func commandLineHasAdjacentTokenPair(tokens []string, flag, value string) bool {
 	return false
 }
 
-// tokenizeWindowsCommandLine splits a Windows command line into argv tokens
-// following the CommandLineToArgvW quoting/backslash rules so a value with
-// embedded (quoted) spaces — e.g. a workspace path `--workspace "C:\My Proj"` —
-// tokenizes to the single unquoted value `C:\My Proj`, and quotes cannot be
-// used to smuggle a cross-task match (MUST-FIX #4). The parser is deliberately
-// conservative: any ambiguity produces a token that fails EXACT equality, so
-// the failure direction is Foreign (no kill), never a false OwnTask.
+// tokenizeWindowsCommandLine splits a Windows command line into argv tokens.
+// It is a direct port of the Go standard library's os package
+// commandLineToArgv/readNextArg parser (the "Prior to 2008" CommandLineToArgvW
+// rule set — see http://daviddeley.com/autohotkey/parameters/parameters.htm),
+// which is validated byte-for-byte against golang.org/x/sys/windows.CommandLineToArgv
+// for the security-relevant ARGUMENT tokens by the differential test in
+// supervise_squatter_tokenizer_windows_test.go.
 //
-// Rules: 2n backslashes before a quote → n backslashes + toggle quote mode;
-// 2n+1 backslashes before a quote → n backslashes + a literal quote;
-// backslashes not before a quote are literal; unquoted whitespace delimits.
+// It does NOT replicate CommandLineToArgvW's special program-name (argv[0])
+// parsing; the classifier only ever inspects tokens[1:] (the subcommand +
+// flags), so argv[0] fidelity is irrelevant and intentionally not claimed.
+// Divergence bias is fail-closed: any parse that does not reproduce the
+// descriptor's exact argument tokens yields a token that fails exact equality →
+// Foreign (no kill), never a false OwnTask.
+//
+// Key quoting rules: 2n backslashes before a quote → n backslashes + toggle
+// quote mode; 2n+1 → n backslashes + a literal quote; a `""` inside a quoted
+// span emits one literal `"` (the double-double-quote rule); backslashes not
+// before a quote are literal; unquoted whitespace delimits.
 func tokenizeWindowsCommandLine(s string) []string {
 	var tokens []string
-	var cur []rune
-	inArg := false
-	inQuotes := false
-	backslashes := 0
-
-	emitBackslashes := func(n int) {
-		for i := 0; i < n; i++ {
-			cur = append(cur, '\\')
+	for len(s) > 0 {
+		if s[0] == ' ' || s[0] == '\t' {
+			s = s[1:]
+			continue
 		}
-	}
-	endArg := func() {
-		tokens = append(tokens, string(cur))
-		cur = cur[:0]
-		inArg = false
-	}
-
-	for _, r := range s {
-		switch {
-		case r == '\\':
-			backslashes++
-			inArg = true
-		case r == '"':
-			emitBackslashes(backslashes / 2)
-			if backslashes%2 == 1 {
-				cur = append(cur, '"')
-			} else {
-				inQuotes = !inQuotes
-			}
-			backslashes = 0
-			inArg = true
-		case (r == ' ' || r == '\t') && !inQuotes:
-			emitBackslashes(backslashes)
-			backslashes = 0
-			if inArg {
-				endArg()
-			}
-		default:
-			emitBackslashes(backslashes)
-			backslashes = 0
-			cur = append(cur, r)
-			inArg = true
-		}
-	}
-	emitBackslashes(backslashes)
-	if inArg {
-		endArg()
+		var arg []byte
+		arg, s = readNextWindowsArg(s)
+		tokens = append(tokens, string(arg))
 	}
 	return tokens
+}
+
+// readNextWindowsArg splits the leading argument off cmd and returns it plus the
+// remainder. Byte-oriented (multi-byte UTF-8 literal bytes fall through the
+// default case unchanged, reconstructing valid UTF-8). Mirrors os.readNextArg.
+func readNextWindowsArg(cmd string) (arg []byte, rest string) {
+	var b []byte
+	var inquote bool
+	var nslash int
+	for ; len(cmd) > 0; cmd = cmd[1:] {
+		c := cmd[0]
+		switch c {
+		case ' ', '\t':
+			if !inquote {
+				return appendWindowsBackslashes(b, nslash), cmd[1:]
+			}
+		case '"':
+			b = appendWindowsBackslashes(b, nslash/2)
+			if nslash%2 == 0 {
+				// Double-double-quote rule: a `""` inside a quoted span is one
+				// literal quote (matches shell32 CommandLineToArgvW empirically —
+				// see the differential test).
+				if inquote && len(cmd) > 1 && cmd[1] == '"' {
+					b = append(b, c)
+					cmd = cmd[1:]
+				}
+				inquote = !inquote
+			} else {
+				b = append(b, c)
+			}
+			nslash = 0
+			continue
+		case '\\':
+			nslash++
+			continue
+		}
+		b = appendWindowsBackslashes(b, nslash)
+		nslash = 0
+		b = append(b, c)
+	}
+	return appendWindowsBackslashes(b, nslash), ""
+}
+
+func appendWindowsBackslashes(b []byte, n int) []byte {
+	for ; n > 0; n-- {
+		b = append(b, '\\')
+	}
+	return b
 }
 
 // boundSquatterField caps an attacker-influenceable observed string to
@@ -351,6 +391,8 @@ func makeProductionSquatterReapFn(events *api.SupervisorEventLog) squatterReapFu
 					"executable_path": boundSquatterField(proof.ExecutablePath),
 					"started_at":      proof.StartedAt,
 					"port":            d.Port,
+					"source":          "sweep",
+					"actor":           api.CurrentOSUser(),
 				},
 			})
 		}
@@ -399,6 +441,26 @@ func (l *squatterReapLimiter) recordLookup(task string, now time.Time) {
 		return
 	}
 	l.lastLookup[task] = now
+}
+
+// pruneAbsent drops per-task rate-limit state (lastLookup + reapAttempts) for
+// tasks not in the current sweep's running set, so the maps cannot grow
+// unbounded across the supervisor's lifetime on task churn (F5 — parity with
+// the P1b bind-latch key-sweep). Called at the end of each sweep.
+func (l *squatterReapLimiter) pruneAbsent(seen map[string]struct{}) {
+	if l == nil {
+		return
+	}
+	for task := range l.lastLookup {
+		if _, ok := seen[task]; !ok {
+			delete(l.lastLookup, task)
+		}
+	}
+	for task := range l.reapAttempts {
+		if _, ok := seen[task]; !ok {
+			delete(l.reapAttempts, task)
+		}
+	}
 }
 
 func (l *squatterReapLimiter) pruneWindow(task string, now time.Time) {
@@ -486,7 +548,7 @@ func handleSquatterMismatchOnSweep(
 	// process holds the port is the exact futile loop that manufactures the
 	// quarantine (defect C), so post NOTHING.
 	if reap == nil || reap.reapFn == nil {
-		emitSquatterEvent(events, "daemon-port-squatter-unverified", squatterUnverified, d, ownerPID, process.ProcessIdentity{}, map[string]any{
+		emitSquatterEvent(events, "daemon-port-squatter-unverified", "sweep", squatterUnverified, d, ownerPID, process.ProcessIdentity{}, map[string]any{
 			"note": "port owner mismatch observed; no reap capability wired — observe-only, no restart",
 		})
 		return squatterSweepObserveOnly
@@ -494,7 +556,7 @@ func handleSquatterMismatchOnSweep(
 
 	// Lookup rate limit: at most one identity lookup per task per 30s.
 	if !reap.limiter.allowLookup(task, now) {
-		emitSquatterEvent(events, "daemon-port-squatter-unverified", squatterUnverified, d, ownerPID, process.ProcessIdentity{}, map[string]any{
+		emitSquatterEvent(events, "daemon-port-squatter-unverified", "sweep", squatterUnverified, d, ownerPID, process.ProcessIdentity{}, map[string]any{
 			"rate_limited": true,
 			"note":         "identity lookup rate-limited (<=1/30s per task); run 'mcphub daemon recover " + task + "' to force recovery now",
 		})
@@ -505,18 +567,18 @@ func handleSquatterMismatchOnSweep(
 	verdict, id := classifyPortSquatter(d, ownerPID, selfPID, tracked)
 	switch verdict {
 	case squatterForeign:
-		emitSquatterEvent(events, "daemon-port-squatter-foreign", verdict, d, ownerPID, id, map[string]any{
+		emitSquatterEvent(events, "daemon-port-squatter-foreign", "sweep", verdict, d, ownerPID, id, map[string]any{
 			"note": "port owner is NOT a disowned child of this task (tracked sibling, different binary, or argv does not name this task); NOT killed — observe-only",
 		})
 		return squatterSweepObserveOnly
 	case squatterUnverified:
-		emitSquatterEvent(events, "daemon-port-squatter-unverified", verdict, d, ownerPID, id, map[string]any{
+		emitSquatterEvent(events, "daemon-port-squatter-unverified", "sweep", verdict, d, ownerPID, id, map[string]any{
 			"note": "port owner identity could not be verified (lookup failed / non-Windows); fail-closed, no kill",
 		})
 		return squatterSweepObserveOnly
 	case squatterOwnTask:
 		if !reap.limiter.allowReap(task, now) {
-			emitSquatterEvent(events, "daemon-port-squatter-unverified", squatterUnverified, d, ownerPID, id, map[string]any{
+			emitSquatterEvent(events, "daemon-port-squatter-unverified", "sweep", squatterUnverified, d, ownerPID, id, map[string]any{
 				"rate_limited": true,
 				"note":         "reap attempts exhausted for this failure window (per-task or global cap); run 'mcphub daemon recover " + task + "' to force recovery",
 			})
@@ -526,14 +588,14 @@ func handleSquatterMismatchOnSweep(
 		proof := squatterKillProof(id)
 		err := reap.reapFn(d, proof)
 		if err != nil && !errors.Is(err, process.ErrProcessAlreadyExited) {
-			emitSquatterEvent(events, "daemon-port-squatter-reap-failed", verdict, d, ownerPID, id, map[string]any{
+			emitSquatterEvent(events, "daemon-port-squatter-reap-failed", "sweep", verdict, d, ownerPID, id, map[string]any{
 				"err":               err.Error(),
 				"reap_count_window": globalCount,
 				"note":              "identity-gated reap failed; NOT restarting while the port is still held",
 			})
 			return squatterSweepObserveOnly
 		}
-		emitSquatterEvent(events, "daemon-port-squatter-reaped", verdict, d, ownerPID, id, map[string]any{
+		emitSquatterEvent(events, "daemon-port-squatter-reaped", "sweep", verdict, d, ownerPID, id, map[string]any{
 			"reap_count_window": globalCount,
 			"already_exited":    errors.Is(err, process.ErrProcessAlreadyExited),
 			"note":              "verified-own port squatter reaped; restarting this task to rebind its port",
@@ -544,10 +606,13 @@ func handleSquatterMismatchOnSweep(
 }
 
 // emitSquatterEvent writes a warn audit event with pre-bounded identity fields.
-// The forensic scalars (squatter_pid, verdict, port) plus the bounded
-// command_line/executable_path/started_at keep the whole body well under the
-// 16 KB whole-body cap so the identity can never be evicted (MUST-FIX #1).
-func emitSquatterEvent(events *api.SupervisorEventLog, event string, verdict squatterVerdict, d api.SupervisorDaemon, ownerPID int, id process.ProcessIdentity, extra map[string]any) {
+// The forensic scalars (squatter_pid, verdict, port, source, actor) plus the
+// bounded command_line/executable_path/started_at keep the whole body well
+// under the 16 KB whole-body cap so the identity can never be evicted
+// (MUST-FIX #1). source distinguishes the sweep from the operator recover verb
+// ("sweep" vs "recover"); actor names the OS user so an operator-driven kill is
+// attributable (F1 / D-A Security-argument clause 6).
+func emitSquatterEvent(events *api.SupervisorEventLog, event, source string, verdict squatterVerdict, d api.SupervisorDaemon, ownerPID int, id process.ProcessIdentity, extra map[string]any) {
 	if events == nil {
 		return
 	}
@@ -555,6 +620,8 @@ func emitSquatterEvent(events *api.SupervisorEventLog, event string, verdict squ
 		"squatter_pid": ownerPID,
 		"verdict":      verdict.String(),
 		"port":         d.Port,
+		"source":       source,
+		"actor":        api.CurrentOSUser(),
 	}
 	if id.ExecutablePath != "" {
 		body["executable_path"] = boundSquatterField(id.ExecutablePath)

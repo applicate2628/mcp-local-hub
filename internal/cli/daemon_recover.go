@@ -190,6 +190,11 @@ func recoverReapPortSquatter(cmd *cobra.Command, desc api.SupervisorDaemon, norm
 			fmt.Fprintf(errOut, "  command line: %s\n", boundSquatterField(id.CommandLine))
 		}
 		fmt.Fprintf(errOut, "  This tool will not kill a foreign or unverifiable process. Investigate and stop it yourself, then retry.\n")
+		// Audit the REFUSAL too (D-A clause 6): even a not-killed foreign/
+		// unverifiable owner is an operator-attributable decision.
+		recoverEmitSquatterAudit(stateDir, "daemon-port-squatter-"+verdict.String(), verdict, desc, ownerPID, id, map[string]any{
+			"note": "operator recover refused: port owner is not a verified disowned child of this task; NOT killed",
+		})
 		return forceExit(daemonRecoverExitRefused)
 	case squatterOwnTask:
 		fmt.Fprintf(out, "port %d is squatted by a verified-own disowned child of %s:\n", desc.Port, norm)
@@ -206,13 +211,35 @@ func recoverReapPortSquatter(cmd *cobra.Command, desc api.SupervisorDaemon, norm
 		proof := squatterKillProof(id)
 		if killErr := squatterTerminatePIDFn(proof); killErr != nil && !errors.Is(killErr, process.ErrProcessAlreadyExited) {
 			fmt.Fprintf(errOut, "error: reap pid %d failed: %v\n", ownerPID, killErr)
+			recoverEmitSquatterAudit(stateDir, "daemon-port-squatter-reap-failed", verdict, desc, ownerPID, id, map[string]any{
+				"err":  killErr.Error(),
+				"note": "operator recover: identity-gated reap failed",
+			})
 			return forceExit(daemonRecoverExitRefused)
 		}
 		fmt.Fprintf(out, "reaped pid %d.\n", ownerPID)
+		// Audit the KILL (D-A clause 6) with the operator as actor.
+		recoverEmitSquatterAudit(stateDir, "daemon-port-squatter-reaped", verdict, desc, ownerPID, id, map[string]any{
+			"note": "operator recover: verified-own port squatter reaped, forcing a respawn",
+		})
 		waitRecoverPortFree(cmd, desc.Port)
 		return nil
 	}
 	return nil
+}
+
+// recoverEmitSquatterAudit writes a supervisor-events.log entry for an
+// operator-driven recover outcome, reusing emitSquatterEvent's H1 field-bounding
+// and setting source="recover" + actor=OS user (D-A Security-argument clause 6:
+// every verdict/kill audited). Best-effort — an audit failure (unwritable log)
+// must NEVER fail the command (mirrors emitStrictModeChangedEvent).
+func recoverEmitSquatterAudit(stateDir, event string, verdict squatterVerdict, d api.SupervisorDaemon, ownerPID int, id process.ProcessIdentity, extra map[string]any) {
+	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+	if err != nil {
+		return
+	}
+	defer func() { _ = logger.Close() }()
+	emitSquatterEvent(logger, event, "recover", verdict, d, ownerPID, id, extra)
 }
 
 // recoverTrackedEntries reads supervisor-state.json into the minimal

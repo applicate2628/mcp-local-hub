@@ -441,6 +441,11 @@ func sweepSupervisorLivenessOnce(
 			}
 		}
 	}
+	// Same key-sweep for the squatter reap limiter's per-task state (F5) so its
+	// lastLookup/reapAttempts maps cannot grow unbounded on task churn.
+	if squatterReap != nil {
+		squatterReap.limiter.pruneAbsent(seenTasks)
+	}
 }
 
 func supervisorLivenessRestartClearedRuntime(ev api.LoopEvent) bool {

@@ -45,6 +45,22 @@ func serenaProxyDescriptor() api.SupervisorDaemon {
 	}
 }
 
+func lspWorkspaceProxyDescriptor() api.SupervisorDaemon {
+	return api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-mcp-language-server-go-abc`,
+		Server:   "mcp-language-server",
+		Daemon:   "go-abc",
+		Command:  `C:\mcphub.exe`,
+		Args: []string{
+			"daemon", "workspace-proxy",
+			"--port", "9401",
+			"--workspace", `C:\ws`,
+			"--language", "go",
+		},
+		Port: 9401,
+	}
+}
+
 // squatterIdentityFor builds a ProcessIdentity whose CommandLine is what the
 // supervisor would have spawned for descriptor d (exe + verbatim args), so a
 // disowned own-child of d passes the argv gate.
@@ -217,6 +233,78 @@ func TestClassifyPortSquatter_NonWindowsUnverified(t *testing.T) {
 	}
 }
 
+// TestClassifyPortSquatter_GlobalDaemonSubcommandAnchor is F2: a sibling
+// subcommand that ALSO registers --server/--daemon flags (relay, restart, stop,
+// install) must NOT pass the global-daemon gate — the observed argv must anchor
+// the `daemon` subcommand in command position. The real `daemon --server X
+// --daemon Y` still matches.
+func TestClassifyPortSquatter_GlobalDaemonSubcommandAnchor(t *testing.T) {
+	d := globalDaemonDescriptor() // Server=memory, Daemon=default
+	const owner = 44000
+	set := func(cl string) {
+		setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
+			return process.ProcessIdentity{PID: owner, Basename: "mcphub.exe", CommandLine: cl, ExecutablePath: d.Command, CreationDateUnix: time.Now().Unix()}, nil
+		}, alwaysExeMatch)
+	}
+
+	foreign := []string{
+		`"C:\mcphub.exe" relay --server memory --daemon default`,
+		`"C:\mcphub.exe" restart --server memory --daemon default`,
+		`"C:\mcphub.exe" stop --server memory --daemon default`,
+		`"C:\mcphub.exe" install --server memory --daemon default`,
+		`"C:\mcphub.exe" daemon serena-proxy --server memory --daemon default`, // proxy subcommand, not a global daemon
+	}
+	for _, cl := range foreign {
+		set(cl)
+		if v, _ := classifyPortSquatter(d, owner, 1, nil); v != squatterForeign {
+			t.Fatalf("verdict = %v for %q, want squatterForeign (subcommand anchor must reject siblings)", v, cl)
+		}
+	}
+
+	set(`"C:\mcphub.exe" daemon --server memory --daemon default`)
+	if v, _ := classifyPortSquatter(d, owner, 1, nil); v != squatterOwnTask {
+		t.Fatalf("verdict = %v for a real global daemon argv, want squatterOwnTask", v)
+	}
+}
+
+// TestClassifyPortSquatter_LSPWorkspaceProxy is F4: the LSP workspace-proxy argv
+// shape (--workspace + --language, anchored on `daemon workspace-proxy`).
+func TestClassifyPortSquatter_LSPWorkspaceProxy(t *testing.T) {
+	d := lspWorkspaceProxyDescriptor()
+	const owner = 47001
+	set := func(cl string) {
+		setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
+			return process.ProcessIdentity{PID: owner, Basename: "mcphub.exe", CommandLine: cl, ExecutablePath: d.Command, CreationDateUnix: time.Now().Unix()}, nil
+		}, alwaysExeMatch)
+	}
+
+	t.Run("own task", func(t *testing.T) {
+		set(joinCmdLine(append([]string{d.Command}, d.Args...)))
+		if v, _ := classifyPortSquatter(d, owner, 1, nil); v != squatterOwnTask {
+			t.Fatalf("verdict = %v, want squatterOwnTask", v)
+		}
+	})
+	t.Run("different workspace foreign", func(t *testing.T) {
+		set(`"C:\mcphub.exe" daemon workspace-proxy --port 9401 --workspace C:\other --language go`)
+		if v, _ := classifyPortSquatter(d, owner, 1, nil); v != squatterForeign {
+			t.Fatalf("verdict = %v, want squatterForeign (different workspace)", v)
+		}
+	})
+	t.Run("different language foreign", func(t *testing.T) {
+		set(`"C:\mcphub.exe" daemon workspace-proxy --port 9401 --workspace C:\ws --language python`)
+		if v, _ := classifyPortSquatter(d, owner, 1, nil); v != squatterForeign {
+			t.Fatalf("verdict = %v, want squatterForeign (different language)", v)
+		}
+	})
+	t.Run("unknown descriptor shape foreign", func(t *testing.T) {
+		unknown := api.SupervisorDaemon{TaskName: `\mcp-local-hub-weird`, Command: `C:\mcphub.exe`, Args: []string{"restart", "--server", "x"}, Port: 9401}
+		set(`"C:\mcphub.exe" restart --server x`)
+		if v, _ := classifyPortSquatter(unknown, owner, 1, nil); v != squatterForeign {
+			t.Fatalf("verdict = %v, want squatterForeign (unknown descriptor shape fails closed)", v)
+		}
+	})
+}
+
 func TestClassifyPortSquatter_Gate1SelfAndOwnChild(t *testing.T) {
 	d := globalDaemonDescriptor()
 	setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
@@ -303,7 +391,7 @@ func TestSquatterEventBody_OversizedCommandLinePreservesIdentity(t *testing.T) {
 	huge := "daemon --server memory --daemon default " + strings.Repeat("A", 100*1024)
 	id := process.ProcessIdentity{PID: owner, Basename: "mcphub.exe", CommandLine: huge, ExecutablePath: `C:\mcphub.exe`, CreationDateUnix: time.Now().Unix()}
 
-	emitSquatterEvent(log, "daemon-port-squatter-reaped", squatterOwnTask, d, owner, id, map[string]any{"note": "test"})
+	emitSquatterEvent(log, "daemon-port-squatter-reaped", "sweep", squatterOwnTask, d, owner, id, map[string]any{"note": "test"})
 
 	data, err := os.ReadFile(eventsPath)
 	if err != nil {
@@ -321,6 +409,12 @@ func TestSquatterEventBody_OversizedCommandLinePreservesIdentity(t *testing.T) {
 	}
 	if !strings.Contains(line, `"verdict":"own_task"`) {
 		t.Fatalf("verdict missing from bounded event; line:\n%.400s", line)
+	}
+	if !strings.Contains(line, `"source":"sweep"`) {
+		t.Fatalf("source missing from bounded event; line:\n%.400s", line)
+	}
+	if !strings.Contains(line, `"actor":`) {
+		t.Fatalf("actor missing from bounded event; line:\n%.400s", line)
 	}
 	if len(line) > 12*1024 {
 		t.Fatalf("event line %d bytes — expected well under the 16 KB cap after field bounding", len(line))
