@@ -239,7 +239,7 @@ func (a *API) Install(opts InstallOpts) error {
 	// shipped server name that the embed-first read below ignores). Warn only —
 	// never delete the operator's file; NEW such files are refused at
 	// ManifestCreateIn.
-	if warn := embeddedDiskShadowWarning(opts.Server, defaultManifestDir()); warn != "" {
+	if warn := embeddedDiskShadowWarning(opts.Server, installShadowWarnDir()); warn != "" {
 		fmt.Fprintf(w, "warning: %s\n", warn)
 	}
 	// 1. Load manifest (embed FS first, disk fallback for dev flow).
@@ -374,6 +374,14 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 	return results
 }
 
+// installShadowWarnDir resolves the disk-fallback dir the pre-existing
+// embed-vs-disk collision warn (embeddedDiskShadowWarning) inspects at the
+// Install / installUsingEmbedFirst emit sites. Package var following the
+// statusInternalDialFn / forceMaterializeProbe seam idiom: production stays
+// on defaultManifestDir (exe-location-derived, not seedable from a test);
+// emit-site tests point it at a temp dir and restore via t.Cleanup.
+var installShadowWarnDir = defaultManifestDir
+
 // installUsingEmbedFirst is the install entry that loads the manifest
 // via loadManifestYAMLEmbedFirst. Mirrors Install's audit-first +
 // intent-after wiring per Task 10 (plan §62 audit-first canonical).
@@ -384,7 +392,7 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	}
 	// Same pre-existing embed-vs-disk collision warn as Install (this is the
 	// InstallAllWithOpts per-server entry). Warn only — never delete.
-	if warn := embeddedDiskShadowWarning(opts.Server, defaultManifestDir()); warn != "" {
+	if warn := embeddedDiskShadowWarning(opts.Server, installShadowWarnDir()); warn != "" {
 		fmt.Fprintf(w, "warning: %s\n", warn)
 	}
 	data, err := loadManifestYAMLEmbedFirst(opts.Server)

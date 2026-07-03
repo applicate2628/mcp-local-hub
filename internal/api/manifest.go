@@ -425,11 +425,11 @@ func (a *API) ManifestExists(name string) (bool, error) {
 	return manifestExistsIn(defaultManifestDir(), name)
 }
 
-// manifestExistsIn is the single-owner, dir-parametric existence check that
-// backs both ManifestExists (defaultManifestDir) and the embedded-vs-disk
-// shadow warn (embeddedDiskShadowWarning, which passes the disk-fallback dir
-// the loader would consult — defaultManifestDir for install, the explicit test
-// dir for scan). It stats dir/name/manifest.yaml without reading the contents.
+// manifestExistsIn is the dir-parametric existence check backing
+// ManifestExists (defaultManifestDir). It stats dir/name/manifest.yaml
+// without reading the contents. (The embedded-vs-disk shadow warn reads the
+// disk file's bytes directly — it needs them for the identical-copy
+// suppression — so it no longer routes through this stat-only check.)
 func manifestExistsIn(dir, name string) (bool, error) {
 	if err := checkManifestName(name); err != nil {
 		return false, err

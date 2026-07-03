@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,6 +150,152 @@ func TestEmbeddedDiskShadowWarning_FiresForShippedNameAndLeavesFileUntouched(t *
 	// A shipped name with NO disk file present → no warn.
 	if w := embeddedDiskShadowWarning("wolfram", t.TempDir()); w != "" {
 		t.Errorf("shipped name without a disk shadow must not warn; got %q", w)
+	}
+}
+
+// F2 (Fable pre-bot review of 27bcb3b9) — identical-bytes suppression: a disk
+// copy byte-equal to the embed manifest changes nothing (the embed read serving
+// instead of the disk read is unobservable), so it must NOT warn — otherwise a
+// dev checkout beside the built binary warns for every shipped server on every
+// install --all / scan. A differing copy still warns (the truthful case).
+func TestEmbeddedDiskShadowWarning_IdenticalBytesSuppressed(t *testing.T) {
+	embedBytes, err := fs.ReadFile(servers.Manifests, "wolfram/manifest.yaml")
+	if err != nil {
+		t.Fatalf("read embed: %v", err)
+	}
+	// Identical copy → no warn.
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "wolfram"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "wolfram", "manifest.yaml"), embedBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if w := embeddedDiskShadowWarning("wolfram", dir); w != "" {
+		t.Errorf("identical-bytes disk copy must not warn (pure noise); got %q", w)
+	}
+	// A differing copy (trailing operator edit) → the warn stays.
+	edited := append(append([]byte{}, embedBytes...), []byte("\n# operator edit\n")...)
+	if err := os.WriteFile(filepath.Join(dir, "wolfram", "manifest.yaml"), edited, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if w := embeddedDiskShadowWarning("wolfram", dir); w == "" {
+		t.Error("differing disk copy must still warn")
+	}
+}
+
+// F3a (Fable pre-bot review) — emit-site test for (*API).Install: the warn line
+// actually reaches the install writer, and the embed manifest is what the flow
+// consumes. The seeded disk shadow is deliberately UNPARSEABLE: if the install
+// path (incorrectly) read the disk file instead of the embed,
+// parseManifestForName would fail with a parse error — its absence proves
+// embed-wins held. Install runs DryRun (installPlanCore: "DRY RUN → print the
+// plan and return", no mutation, no intent) with state redirected to a temp
+// dir; the warn is emitted before preflight, so the assertion holds regardless
+// of the host's admission-check outcome (tolerated: e.g. a missing command on
+// PATH).
+func TestInstall_EmitsEmbeddedDiskShadowWarnToWriter(t *testing.T) {
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmpState)
+	t.Setenv("XDG_DATA_HOME", tmpState)
+	t.Setenv("XDG_STATE_HOME", tmpState)
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "memory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Differing AND unparseable — the embed-wins discriminator (see doc above).
+	if err := os.WriteFile(filepath.Join(dir, "memory", "manifest.yaml"), []byte("{{{ not yaml [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prev := installShadowWarnDir
+	installShadowWarnDir = func() string { return dir }
+	t.Cleanup(func() { installShadowWarnDir = prev })
+
+	var buf bytes.Buffer
+	err := NewAPI().Install(InstallOpts{Server: "memory", DryRun: true, Writer: &buf})
+	if !strings.Contains(buf.String(), `disk manifest for shipped server "memory" is ignored`) {
+		t.Fatalf("install writer output missing the shadow warn; output:\n%s", buf.String())
+	}
+	if err != nil && strings.Contains(err.Error(), "parse") {
+		t.Fatalf("install error looks like a disk-manifest parse failure — embed-wins violated: %v", err)
+	}
+}
+
+// F3b (Fable pre-bot review) — emit-site test for the InstallAllWithOpts lane:
+// installUsingEmbedFirst IS the per-server entry InstallAllWithOpts drives for
+// every embedded name (install.go:308) and owns that lane's warn emit, so it is
+// exercised DIRECTLY with the one shadowed server. A full InstallAllWithOpts
+// dry-run was measured at ~8s of scheduler/port probing PER embedded server on
+// a live Windows host (16 servers → >2 min wall + a per-server exec-spawn
+// storm) for zero additional emit-site coverage — the loop driver contains no
+// warn logic of its own. Deleting the emit in installUsingEmbedFirst fails
+// this test.
+func TestInstallUsingEmbedFirst_EmitsEmbeddedDiskShadowWarnToWriter(t *testing.T) {
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmpState)
+	t.Setenv("XDG_DATA_HOME", tmpState)
+	t.Setenv("XDG_STATE_HOME", tmpState)
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "memory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Differing AND unparseable — same embed-wins discriminator as the Install
+	// emit test above.
+	if err := os.WriteFile(filepath.Join(dir, "memory", "manifest.yaml"), []byte("{{{ not yaml [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prev := installShadowWarnDir
+	installShadowWarnDir = func() string { return dir }
+	t.Cleanup(func() { installShadowWarnDir = prev })
+
+	var buf bytes.Buffer
+	err := NewAPI().installUsingEmbedFirst(InstallOpts{Server: "memory", DryRun: true, Writer: &buf})
+	if !strings.Contains(buf.String(), `disk manifest for shipped server "memory" is ignored`) {
+		t.Fatalf("bulk-install per-server writer output missing the shadow warn; output:\n%s", buf.String())
+	}
+	if err != nil && strings.Contains(err.Error(), "parse") {
+		t.Fatalf("install error looks like a disk-manifest parse failure — embed-wins violated: %v", err)
+	}
+	// A non-shadowed shipped server stays silent through the same entry (the F2
+	// anti-spam posture): no disk file under the seam dir → no warn line.
+	var quiet bytes.Buffer
+	_ = NewAPI().installUsingEmbedFirst(InstallOpts{Server: "fetch", DryRun: true, Writer: &quiet})
+	if strings.Contains(quiet.String(), "is ignored; the shipped built-in manifest") {
+		t.Errorf("non-shadowed server must not warn; output:\n%s", quiet.String())
+	}
+}
+
+// F3c (Fable pre-bot review) — emit-site test for scan's readManifestNames: the
+// warn reaches the log sink for a differing colliding file in an explicit
+// manifest dir (the same dir the loader's disk-fallback would consult in that
+// mode), and the name still lands in the scanned set (warn, never drop).
+func TestReadManifestNames_LogsEmbeddedDiskShadowWarn(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "memory"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Differing but VALID yaml (readManifestNames parses it for the companion
+	// filter; valid keeps the test focused on the warn).
+	body := "name: memory\nkind: global\ntransport: stdio-bridge\ncommand: node\ndaemons:\n  - name: default\n    port: 9410\n"
+	if err := os.WriteFile(filepath.Join(dir, "memory", "manifest.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var logBuf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	names, err := readManifestNames(dir)
+	if err != nil {
+		t.Fatalf("readManifestNames: %v", err)
+	}
+	if !names["memory"] {
+		t.Fatal("memory missing from the scanned name set — the warn must never drop the row")
+	}
+	if !strings.Contains(logBuf.String(), `disk manifest for shipped server "memory" is ignored`) {
+		t.Fatalf("scan log sink missing the shadow warn; log:\n%s", logBuf.String())
 	}
 }
 

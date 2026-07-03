@@ -248,6 +248,17 @@ func registerManifestRoutes(s *Server) {
 			return
 		}
 		if err := s.manifestCreator.ManifestCreate(name, req.YAML); err != nil {
+			// Embed-vs-disk collision (decision 2026-07-03): ManifestCreateIn
+			// refuses a shipped/embedded server name with ErrManifestNameEmbedded.
+			// Surface it as a loud, actionable 400 — mirroring the marketplace
+			// handler's mapping — instead of collapsing it into the opaque 500
+			// below, which would strip the rename hint the operator needs. The
+			// crafted message carries only the server name (no filesystem paths),
+			// so it is redaction-safe to echo.
+			if errors.Is(err, api.ErrManifestNameEmbedded) {
+				writeAPIError(w, fmt.Errorf("%q is a built-in shipped server; a disk manifest under this name is ignored at install (the shipped manifest installs) — rename the server (e.g. %q) to save a customized copy", name, name+"-custom"), http.StatusBadRequest, "EMBEDDED_NAME_COLLISION")
+				return
+			}
 			// Codex R1 (#16 P2): err may be an *os.PathError that includes an
 			// absolute filesystem path. Log the real error server-side; send
 			// a stable sanitized message to the client.

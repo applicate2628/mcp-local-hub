@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
@@ -100,8 +101,10 @@ func isEmbeddedManifestName(name string) bool {
 }
 
 // IsEmbeddedManifestName is the exported gate for callers outside this package
-// (internal/gui readiness + marketplace mirrors) that must reflect the same
-// embed-membership decision the ManifestCreateIn write gate applies. It mirrors
+// (the internal/gui readiness Save-&-Install dry-run mirror) that must reflect
+// the same embed-membership decision the ManifestCreateIn write gate applies.
+// (The marketplace handler does NOT use this predicate — it maps the write
+// gate's ErrManifestNameEmbedded refusal via errors.Is instead.) It mirrors
 // the CheckManifestName/checkManifestName exported-wrapper idiom so the
 // predicate stays single-owner across package boundaries.
 func IsEmbeddedManifestName(name string) bool {
@@ -123,6 +126,15 @@ func IsEmbeddedManifestName(name string) bool {
 // emit nothing. Single owner of the collision predicate + message; each
 // consumer routes the returned string to its own sink (install → writer,
 // scan → log).
+//
+// IDENTICAL-BYTES SUPPRESSION: a disk copy whose bytes EQUAL the embed
+// manifest changes nothing — the embed read serving instead of the disk read
+// is unobservable — so warning about it is pure noise. The dominant producer
+// of identical copies is a dev checkout / built binary sitting next to the
+// source `servers/` tree, where defaultManifestDir() resolves to the source
+// tree and EVERY shipped server would otherwise warn on every install --all
+// and every scan. Only a DIFFERING disk copy (the operator actually edited
+// something the embed read silently discards) warns.
 func embeddedDiskShadowWarning(name, manifestDir string) string {
 	if !isEmbeddedManifestName(name) {
 		return ""
@@ -130,8 +142,19 @@ func embeddedDiskShadowWarning(name, manifestDir string) string {
 	if manifestDir == "" {
 		return ""
 	}
-	exists, err := manifestExistsIn(manifestDir, name)
-	if err != nil || !exists {
+	// isEmbeddedManifestName(name) == true implies `name` literally matched an
+	// embed FS directory entry, so it is join-safe by construction (no
+	// separators / traversal). Read the disk shadow directly: any read failure
+	// (IsNotExist, permission) means there is no observable shadow to warn
+	// about — same no-warn outcome the earlier stat-based check produced.
+	diskBytes, err := os.ReadFile(filepath.Join(manifestDir, name, "manifest.yaml"))
+	if err != nil {
+		return ""
+	}
+	// Identical bytes → pure noise, skip (see header). An embed read failure
+	// cannot really happen for a name proven in the embed set; if it somehow
+	// does, fall through to the truthful warn (conservative).
+	if embedBytes, err := fs.ReadFile(servers.Manifests, name+"/manifest.yaml"); err == nil && bytes.Equal(diskBytes, embedBytes) {
 		return ""
 	}
 	return fmt.Sprintf(
