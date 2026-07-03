@@ -265,6 +265,57 @@ func TestDaemonRecover_ForeignSquatterRefusesExit3(t *testing.T) {
 	}
 }
 
+// TestDaemonRecover_ForeignSquatterTerminalControlsStripped (deep-audit P2
+// STRONG): the attacker-controlled command line / exe path of a FOREIGN
+// squatter is printed to the operator's TTY, so terminal-control bytes
+// (ESC/OSC/BEL) must be stripped before printing — otherwise a crafted command
+// line could erase/forge the "refused / NOT a verified child" warning or inject
+// an OSC-8 phishing hyperlink, subverting the trust decision. The strip is
+// TERMINAL-only: the audit log keeps the raw bytes (JSON-escaped) for forensics.
+func TestDaemonRecover_ForeignSquatterTerminalControlsStripped(t *testing.T) {
+	d := globalDaemonDescriptor()
+	const owner = 44000
+	env := &recoverTestEnv{
+		intent:    &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{d}},
+		portOwner: func(int) (int, bool, error) { return owner, true, nil },
+	}
+	newRecoverTestEnv(t, env)
+	const esc = "\x1b"
+	const bel = "\x07"
+	malicious := `"C:\evil.exe" ` + esc + `[2K` + esc + `]8;;http://phish.example` + bel + `click-here`
+	setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
+		return process.ProcessIdentity{
+			PID:              owner,
+			Basename:         "evil.exe",
+			CommandLine:      malicious,
+			ExecutablePath:   `C:\evil.exe` + esc + `[31m`,
+			CreationDateUnix: time.Now().Add(-time.Minute).Unix(),
+		}, nil
+	}, func(int, string) bool { return false })
+
+	cmd, _, errBuf := recoverCmd("")
+	err := runDaemonRecover(cmd, d.TaskName, true)
+	if got := exitCodeOf(t, err); got != daemonRecoverExitRefused {
+		t.Fatalf("exit = %d, want %d (foreign refusal)", got, daemonRecoverExitRefused)
+	}
+	out := errBuf.String()
+	if strings.ContainsRune(out, 0x1b) {
+		t.Fatalf("stderr leaked a raw ESC (0x1b) — a crafted command line could erase/forge the refusal warning; out=%q", out)
+	}
+	if strings.ContainsRune(out, 0x07) {
+		t.Fatalf("stderr leaked a raw BEL (0x07); out=%q", out)
+	}
+	if !strings.Contains(out, "refused") || !strings.Contains(out, "command line:") {
+		t.Fatalf("sanitized output must still show the refusal + the (stripped) fields; out=%q", out)
+	}
+	// Forensics: the audit event keeps the raw bytes, JSON-escaped (strip is
+	// terminal-only, not inside boundSquatterField).
+	log := readRecoverAuditLog(t, env.stateDir)
+	if !strings.Contains(log, "\\u001b") {
+		t.Fatalf("audit log must preserve the raw ESC as \\u001b for forensics; log:\n%s", log)
+	}
+}
+
 // TestDaemonRecover_AuditEmitFailureDoesNotFailCommand is F1's best-effort
 // requirement: an unwritable audit log (here, a non-existent state dir) must NOT
 // fail the command — the kill + respawn still complete and exit 0.

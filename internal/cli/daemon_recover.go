@@ -180,14 +180,23 @@ func recoverReapPortSquatter(cmd *cobra.Command, desc api.SupervisorDaemon, norm
 	}
 
 	verdict, id := classifyPortSquatter(desc, ownerPID, recoverSelfPIDFn(), tracked)
+	// id.ExecutablePath / id.CommandLine come from a FOREIGN (or unverified) process
+	// whose command line the attacker fully controls (Windows CreateProcessW accepts
+	// arbitrary strings). Strip terminal-control bytes before printing to the
+	// operator's TTY: ESC/OSC/CSI/BEL in a crafted command line could otherwise
+	// overwrite or hide the "refused / NOT a verified child" warning, forge a benign
+	// command line, or inject an OSC-8 phishing hyperlink — subverting the very
+	// trust decision this output exists to inform. stripTerminalControls is applied
+	// at the TERMINAL sink only (not inside boundSquatterField), so the audit event
+	// body keeps the raw bytes (json.Marshal escapes them faithfully for forensics).
 	switch verdict {
 	case squatterForeign, squatterUnverified:
 		fmt.Fprintf(errOut, "refused: port %d is held by pid %d, which is NOT a verified disowned child of %s (%s).\n", desc.Port, ownerPID, norm, verdict)
 		if id.ExecutablePath != "" {
-			fmt.Fprintf(errOut, "  executable: %s\n", boundSquatterField(id.ExecutablePath))
+			fmt.Fprintf(errOut, "  executable: %s\n", boundSquatterField(stripTerminalControls(id.ExecutablePath)))
 		}
 		if id.CommandLine != "" {
-			fmt.Fprintf(errOut, "  command line: %s\n", boundSquatterField(id.CommandLine))
+			fmt.Fprintf(errOut, "  command line: %s\n", boundSquatterField(stripTerminalControls(id.CommandLine)))
 		}
 		fmt.Fprintf(errOut, "  This tool will not kill a foreign or unverifiable process. Investigate and stop it yourself, then retry.\n")
 		// Audit the REFUSAL too (D-A clause 6): even a not-killed foreign/
@@ -199,8 +208,8 @@ func recoverReapPortSquatter(cmd *cobra.Command, desc api.SupervisorDaemon, norm
 	case squatterOwnTask:
 		fmt.Fprintf(out, "port %d is squatted by a verified-own disowned child of %s:\n", desc.Port, norm)
 		fmt.Fprintf(out, "  pid:        %d\n", ownerPID)
-		fmt.Fprintf(out, "  executable: %s\n", boundSquatterField(id.ExecutablePath))
-		fmt.Fprintf(out, "  command line: %s\n", boundSquatterField(id.CommandLine))
+		fmt.Fprintf(out, "  executable: %s\n", boundSquatterField(stripTerminalControls(id.ExecutablePath)))
+		fmt.Fprintf(out, "  command line: %s\n", boundSquatterField(stripTerminalControls(id.CommandLine)))
 		if started := squatterStartedAt(id); started != "" {
 			fmt.Fprintf(out, "  started_at: %s\n", started)
 		}
