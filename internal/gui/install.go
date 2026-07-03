@@ -193,6 +193,15 @@ func registerInstallRoutes(s *Server) {
 			writeAPIError(w, err, http.StatusInternalServerError, "UNINSTALL_FAILED")
 			return
 		}
+		// gui-events.log audit row: uninstall commits real fleet mutations
+		// (scheduler/supervisor-intent teardown + hub-managed client-config
+		// removal), the same audit class as the single-install row above.
+		// Emitted after Uninstall returned nil (structural success) so it
+		// covers both the clean 200 and the partial-warning 207 below; the
+		// identifier is the server name only (no secret material in scope).
+		s.events.PublishOperatorAction("uninstall", api.CurrentOSUser(), map[string]any{
+			"server": server,
+		})
 		dto := newUninstallResultDTO(report)
 		status := http.StatusOK
 		if len(dto.TaskDeleteWarns) > 0 || len(dto.ClientWarns) > 0 {
@@ -218,14 +227,33 @@ func registerInstallRoutes(s *Server) {
 		results := s.installBulk.InstallAll(servers, s.Port())
 		rows := make([]installResultDTO, 0, len(results))
 		anyFailed := false
+		installed := 0
+		failed := 0
 		for _, res := range results {
 			row := installResultDTO{Server: res.Server}
 			if res.Err != nil {
 				row.Error = res.Err.Error()
 				anyFailed = true
+				failed++
+			} else {
+				installed++
 			}
 			rows = append(rows, row)
 		}
+		// gui-events.log audit row: one summary row for the bulk install
+		// (each row is a real fleet mutation, same audit class as the single
+		// /api/install row). `requested` is the explicit ?servers subset or
+		// "all"; installed/failed are the committed counts — no secret
+		// material is in scope for install identifiers.
+		requested := any("all")
+		if len(servers) > 0 {
+			requested = servers
+		}
+		s.events.PublishOperatorAction("install-all", api.CurrentOSUser(), map[string]any{
+			"requested": requested,
+			"installed": installed,
+			"failed":    failed,
+		})
 		status := http.StatusOK
 		if anyFailed {
 			status = http.StatusMultiStatus // 207
