@@ -1712,15 +1712,25 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 	// Edge 1: route the terminal Configured write through the SINGLE authoritative
 	// lifecycle writer (reconcileRegistryLifecycleLocked) under p.mu instead of an
 	// out-of-band PutLifecycle. Post-teardown the derived state is Configured
-	// (endpoint nil, not starting), and the reconcile is gen-guarded on the
-	// generation this reap bumped: if a materialize republished an endpoint after
-	// our teardown it bumped the generation again, so this stale reap's write
-	// no-ops rather than stomping the newer row back to Configured for the ~30-45s
-	// cold window (which would make other proxies' cold-start gate / hard cap
-	// undercount by one). Folding it in also keeps the lastWrittenLifecycle shadow
-	// consistent with the registry — the last non-reconcile Configured writer is
-	// removed. Stop() still precedes the Configured write (see above), preserving
-	// "don't claim Configured until the backend is actually stopped".
+	// (endpoint nil, not starting). Two distinct protections replace the old bare
+	// write's stomp exposure:
+	//   - The gen guard: every OTHER generation bumper except LazyProxy.Stop
+	//     refuses while p.reaping is held, so the guard's real production trigger
+	//     is a concurrent proxy Stop() mid-reap — a stale reap's write then no-ops
+	//     instead of resurrecting a Configured row over a torn-down proxy.
+	//   - The reserve race (the bug doc's original stomp: a cold-path reserve's
+	//     flock Starting write landing before this reconcile): the reconcile
+	//     derives Starting from startingSince, so once markStartingReserved has
+	//     run this write preserves Starting instead of stomping it. RESIDUAL: a
+	//     reserve that has written its flock Starting but not yet returned to
+	//     markStartingReserved leaves a microseconds-wide gap where this
+	//     reconcile still derives Configured — narrowed from the old ~Stop()-wide
+	//     window, not fully closed; self-heals at publish-time reconcile.
+	// Folding it in also keeps the lastWrittenLifecycle shadow consistent with
+	// the registry — the last non-reconcile RUNNING-lifecycle Configured writer is
+	// removed (the pre-concurrency startup seeds in ListenAndServe and the CLI
+	// pre-Bind remain, both gen-0 before Serve). Stop() still precedes the write,
+	// preserving "don't claim Configured until the backend is actually stopped".
 	p.mu.Lock()
 	p.reconcileRegistryLifecycleLocked(gen)
 	p.reaping = false
