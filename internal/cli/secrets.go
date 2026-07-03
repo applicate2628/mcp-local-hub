@@ -369,9 +369,17 @@ func newSecretsEditCmd() *cobra.Command {
 				// implementation overwrote only the first 4 KB; a larger
 				// edited vault would leak every byte past that). Grows as
 				// needed, single syscall, then delete.
-				if st, err := os.Stat(tmpPath); err == nil {
+				//
+				// Lstat + IsRegular gate (mirrors the read-back symlink guard
+				// below): refuse to write the zero-fill THROUGH a symlink /
+				// reparse point / non-regular entry that an attacker on a
+				// broadened editDir could plant at tmpPath after the editor
+				// exits — otherwise the wipe writes into a victim-writable
+				// target (integrity/DoS). os.Remove still runs on the entry
+				// itself (removing a symlink drops the link, not its target).
+				if lst, err := os.Lstat(tmpPath); err == nil && lst.Mode().IsRegular() {
 					if f, err := os.OpenFile(tmpPath, os.O_WRONLY, 0o600); err == nil {
-						n := st.Size()
+						n := lst.Size()
 						const chunk = 64 * 1024
 						buf := make([]byte, chunk)
 						for remaining := n; remaining > 0; {
