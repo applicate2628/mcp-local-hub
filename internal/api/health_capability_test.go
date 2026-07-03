@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -57,7 +58,7 @@ func TestCapabilityListSubSection_MethodNotFoundNon32601(t *testing.T) {
 			defer closeSrv()
 
 			a := &API{}
-			got := a.capabilityListSubSection(DaemonStatus{Server: "lldb", Daemon: "default", Port: port}, "test-session", "prompts/list", "prompt")
+			got := a.capabilityListSubSection(DaemonStatus{Server: "lldb", Daemon: "default", Port: port}, "test-session", 2, "prompts/list", "prompt")
 			if got.State != "unsupported" {
 				t.Errorf("State = %q, want %q (err=%q)", got.State, "unsupported", got.Err)
 			}
@@ -76,7 +77,7 @@ func TestCapabilityListSubSection_NonMethodNotFoundStillError(t *testing.T) {
 	defer closeSrv()
 
 	a := &API{}
-	got := a.capabilityListSubSection(DaemonStatus{Server: "lldb", Daemon: "default", Port: port}, "test-session", "tools/list", "tool")
+	got := a.capabilityListSubSection(DaemonStatus{Server: "lldb", Daemon: "default", Port: port}, "test-session", 2, "tools/list", "tool")
 	if got.State != "error" {
 		t.Errorf("State = %q, want %q (err=%q)", got.State, "error", got.Err)
 	}
@@ -92,7 +93,7 @@ func TestCapabilityListSubSection_Code32601StillUnsupported(t *testing.T) {
 	defer closeSrv()
 
 	a := &API{}
-	got := a.capabilityListSubSection(DaemonStatus{Server: "lldb", Daemon: "default", Port: port}, "test-session", "prompts/list", "prompt")
+	got := a.capabilityListSubSection(DaemonStatus{Server: "lldb", Daemon: "default", Port: port}, "test-session", 2, "prompts/list", "prompt")
 	if got.State != "unsupported" {
 		t.Errorf("State = %q, want %q", got.State, "unsupported")
 	}
@@ -106,7 +107,7 @@ func TestCapabilityListSubSection_GenuineErrorStillError(t *testing.T) {
 	defer closeSrv()
 
 	a := &API{}
-	got := a.capabilityListSubSection(DaemonStatus{Server: "lldb", Daemon: "default", Port: port}, "test-session", "prompts/list", "prompt")
+	got := a.capabilityListSubSection(DaemonStatus{Server: "lldb", Daemon: "default", Port: port}, "test-session", 2, "prompts/list", "prompt")
 	if got.State != "error" {
 		t.Errorf("State = %q, want %q", got.State, "error")
 	}
@@ -129,6 +130,7 @@ type capabilityRowRecorder struct {
 	initCount    int
 	listCounts   map[string]int    // method -> count
 	sessionSeen  map[string]string // method -> Mcp-Session-Id sent on that list call
+	idSeen       map[string]int    // method -> JSON-RPC id sent on that list call
 	capabilities string            // raw JSON for result.capabilities, or "" to OMIT the key
 	listResults  map[string]string // method -> verbatim list response
 }
@@ -140,6 +142,9 @@ func newCapabilityRowServer(t *testing.T, rec *capabilityRowRecorder) (int, func
 	}
 	if rec.sessionSeen == nil {
 		rec.sessionSeen = map[string]string{}
+	}
+	if rec.idSeen == nil {
+		rec.idSeen = map[string]int{}
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		buf := make([]byte, 8192)
@@ -163,6 +168,11 @@ func newCapabilityRowServer(t *testing.T, rec *capabilityRowRecorder) (int, func
 			if strings.Contains(body, `"`+method+`"`) {
 				rec.listCounts[method]++
 				rec.sessionSeen[method] = r.Header.Get("Mcp-Session-Id")
+				var idEnv struct {
+					ID int `json:"id"`
+				}
+				_ = json.Unmarshal([]byte(body), &idEnv)
+				rec.idSeen[method] = idEnv.ID
 				out := rec.listResults[method]
 				if out == "" {
 					out = `{"jsonrpc":"2.0","id":2,"result":{}}` // empty list
@@ -292,6 +302,21 @@ func TestRealCapabilityRow_SingleInitAndSessionReuse(t *testing.T) {
 		if rec.sessionSeen[m] != "sess-xyz" {
 			t.Errorf("%s carried Mcp-Session-Id %q, want the minted sess-xyz", m, rec.sessionSeen[m])
 		}
+	}
+	// UNIQUE JSON-RPC ids within the one reused session (MCP spec: a request id
+	// MUST NOT be reused within a session). initialize used id 1, so the three
+	// lists must carry 2/3/4 — all distinct, none == 1.
+	seen := map[int]string{1: "initialize"}
+	for _, m := range []string{"tools/list", "prompts/list", "resources/list"} {
+		id := rec.idSeen[m]
+		if id == 0 {
+			t.Errorf("%s carried no parseable JSON-RPC id", m)
+			continue
+		}
+		if prev, dup := seen[id]; dup {
+			t.Errorf("%s reused JSON-RPC id %d (already used by %s) — spec violation within the session", m, id, prev)
+		}
+		seen[id] = m
 	}
 }
 

@@ -795,7 +795,7 @@ func (a *API) realCapabilityRow(d DaemonStatus) (CapabilityRow, error) {
 		row.Tools, row.Prompts, row.Resources = sub, sub, sub
 		return row, nil
 	}
-	for _, c := range []struct {
+	for i, c := range []struct {
 		set    *CapabilitySubSection
 		key    string
 		method string
@@ -805,17 +805,24 @@ func (a *API) realCapabilityRow(d DaemonStatus) (CapabilityRow, error) {
 		{&row.Prompts, "prompts", "prompts/list", "prompt"},
 		{&row.Resources, "resources", "resources/list", "resource"},
 	} {
+		// UNIQUE JSON-RPC id per list call within the one reused session:
+		// initialize used id 1, so the list calls take 2/3/4. The MCP spec
+		// (2025-03-26, the revision this probe declares) requires a request id
+		// MUST NOT be reused within a session — a strict stateful server would
+		// otherwise reject the 2nd/3rd list and redden a healthy declared
+		// category, the exact false-alarm this Phase-2 change removes.
+		id := i + 2
 		if !capsPresent {
 			// Fallback: capabilities absent, present-but-empty ({}), or the
 			// initialize result was unparseable — probe every category (the
 			// prior behavior). A non-conforming server that lists without
 			// declaring must never be read as "everything unsupported".
-			*c.set = a.capabilityListSubSection(d, sessionID, c.method, c.kind)
+			*c.set = a.capabilityListSubSection(d, sessionID, id, c.method, c.kind)
 			continue
 		}
 		if _, declared := caps[c.key]; declared {
 			// Declared → probe, reusing the one session.
-			*c.set = a.capabilityListSubSection(d, sessionID, c.method, c.kind)
+			*c.set = a.capabilityListSubSection(d, sessionID, id, c.method, c.kind)
 			continue
 		}
 		// Declared-set non-empty but this category absent → unsupported, with
@@ -890,13 +897,13 @@ func (a *API) initializeCapabilitySession(d DaemonStatus) (sessionID string, cap
 //   - response with empty list      → "empty"
 //   - JSON-RPC error code -32601    → "unsupported" (method not found)
 //   - any other failure             → "error" + Err populated
-func (a *API) capabilityListSubSection(d DaemonStatus, sessionID, method, kind string) CapabilitySubSection {
+func (a *API) capabilityListSubSection(d DaemonStatus, sessionID string, id int, method, kind string) CapabilitySubSection {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	url := clients.HubLoopbackURL(d.Port, "/mcp")
 	client := &http.Client{Timeout: 3 * time.Second}
 
-	listBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"%s"}`, method)
+	listBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"%s"}`, id, method)
 	req2, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(listBody))
 	req2.Header.Set("Content-Type", "application/json")
 	req2.Header.Set("Accept", "application/json, text/event-stream")
