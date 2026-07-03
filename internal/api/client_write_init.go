@@ -92,7 +92,7 @@ func secureCreateClientConfigIfMissingWithOperatorOpt(path string, stub []byte) 
 	}); logErr != nil {
 		_ = logErr
 	}
-	return secureCreateClientConfigIfMissingSkipParentGate(path, stub)
+	return SecureCreateOwnerOnlyFile(path, stub)
 }
 
 // SecureCreateClientConfigParentDirWithOperatorOpt securely creates the

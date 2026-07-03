@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bufio"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -244,6 +246,56 @@ func newSecretsDeleteCmd() *cobra.Command {
 	}
 }
 
+// secureCreateOwnerOnlyFileFn is the owner-only secure-create used by
+// `mcphub secrets edit` to write the decrypted vault into the temp the
+// operator's editor opens. Production = api.SecureCreateOwnerOnlyFile,
+// which installs a PROTECTED allowlist-only DACL (Windows) / 0600
+// O_NOFOLLOW (POSIX) at create time so the cleartext is owner-only
+// regardless of the parent dir's ACL — NEVER os.CreateTemp, which on
+// Windows would inherit a broadened %LOCALAPPDATA% ACL. It is a seam
+// ONLY so tests can spy that the edit temp routes through the hardened
+// primitive; production callers never reassign it.
+var secureCreateOwnerOnlyFileFn = api.SecureCreateOwnerOnlyFile
+
+// secretsEditTempMaxNameAttempts bounds the crypto/rand unique-name
+// retry loop below. With 128 bits of entropy a collision is
+// astronomically unlikely; the bound exists only so a pathological
+// condition (e.g. a directory saturated with attacker-planted
+// same-prefix names) fails loud instead of spinning forever.
+const secretsEditTempMaxNameAttempts = 8
+
+// secureCreateSecretsEditTemp writes `contents` (the decrypted vault
+// YAML) into a freshly-created, owner-only temp file under editDir and
+// returns its path. The file is created via secureCreateOwnerOnlyFileFn
+// (PROTECTED owner-only DACL / 0600 O_NOFOLLOW), so the cleartext bytes
+// only ever land in an owner-only inode — never an inheriting one.
+//
+// The name is mcp-secrets-<hex>.yaml with a 128-bit crypto/rand suffix.
+// Because the secure-create is O_EXCL / create-if-missing, a name
+// already taken returns created=false with no error; we retry with a
+// fresh name rather than reuse (or edit) a file we did not write. A hard
+// error is surfaced immediately (no retry).
+func secureCreateSecretsEditTemp(editDir string, contents []byte) (string, error) {
+	for attempt := 0; attempt < secretsEditTempMaxNameAttempts; attempt++ {
+		var suffix [16]byte
+		if _, err := rand.Read(suffix[:]); err != nil {
+			return "", fmt.Errorf("secrets edit temp: crypto/rand: %w", err)
+		}
+		path := filepath.Join(editDir, "mcp-secrets-"+hex.EncodeToString(suffix[:])+".yaml")
+		created, err := secureCreateOwnerOnlyFileFn(path, contents)
+		if err != nil {
+			return "", fmt.Errorf("secrets edit temp: secure create %s: %w", path, err)
+		}
+		if created {
+			return path, nil
+		}
+		// created=false, err=nil: a regular file already occupies this
+		// (random) name. Do NOT edit it — it is not our owner-only vault
+		// temp. Retry with a fresh name.
+	}
+	return "", fmt.Errorf("secrets edit temp: exhausted %d unique-name attempts under %s", secretsEditTempMaxNameAttempts, editDir)
+}
+
 func newSecretsEditCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "edit",
@@ -259,22 +311,59 @@ func newSecretsEditCmd() *cobra.Command {
 			}
 			// Temp file lives INSIDE the user-private UserDataDir
 			// (%LOCALAPPDATA%\mcp-local-hub on Windows, $XDG_DATA_HOME
-			// or ~/.local/share/mcp-local-hub on Unix). The old
-			// implementation used os.CreateTemp("", ...) which picks
-			// the system-global temp — /tmp on Unix (world-readable
-			// in some distros) or %TEMP% on Windows (typically
-			// user-private but shared across apps). Moving the file
-			// into the app's own data dir keeps it on the same ACL
-			// boundary as secrets.age itself.
+			// or ~/.local/share/mcp-local-hub on Unix). It carries the
+			// ENTIRE decrypted vault in cleartext for the whole editor
+			// session, so it MUST be owner-only regardless of the parent
+			// directory's ACL.
+			//
+			// It is created via the vault's own owner-only secure-create
+			// pipeline (api.SecureCreateOwnerOnlyFile): a PROTECTED
+			// allowlist-only DACL is installed on the file HANDLE at
+			// create time on Windows (SE_DACL_PROTECTED blocks inherited
+			// ACEs) / O_CREAT|O_EXCL|O_NOFOLLOW mode 0600 on POSIX, and
+			// the cleartext is written into that owner-only handle — so
+			// it is readable ONLY by the current user, independent of the
+			// parent ACL.
+			//
+			// The previous implementation used os.CreateTemp(editDir,
+			// ...), which does NOT install a restrictive DACL on Windows:
+			// Go does not translate the 0600 mode arg into a Windows DACL,
+			// so the temp INHERITED the parent %LOCALAPPDATA% ACL. On a
+			// sandbox-broadened %LOCALAPPDATA% (Wave\CodexSandboxUsers /
+			// orphan AD SID — the exact scenario the vault read-hardening
+			// exists for), a co-resident principal covered by the
+			// inherited ACE could read all cleartext secrets for the full
+			// editor session, bypassing BOTH the age encryption AND the
+			// .age-key owner-only DACL. The old comment here claimed the
+			// temp was "on the same ACL boundary as secrets.age itself" —
+			// false whenever the parent ACL is broadened, which is exactly
+			// when the vault files' own PROTECTED DACLs matter.
+			//
+			// Residual (documented, not silently left): after the editor
+			// SAVES, the read-back below re-opens by path. In-place editors
+			// (notepad — the default fallback — truncate+write) PRESERVE
+			// the owner-only DACL. A write-new-then-rename editor (vim with
+			// backupcopy=no, etc.) replaces the inode with a fresh file
+			// that inherits the parent ACL; the saved cleartext then sits
+			// parent-ACL-readable for the brief window between the editor's
+			// own write and our wipe+delete. That window is inherent to how
+			// such editors persist (they create the replacement inode
+			// themselves; we cannot harden a file they have not written
+			// yet) and is milliseconds versus the multi-minute session the
+			// owner-only create closes. $EDITOR is operator-controlled;
+			// operators who point it at a rename-style editor also accept
+			// its swap sidecars (vim .swp / <name>~) landing in the
+			// broadened dir — mcphub does not manage editor sidecar files.
+			// The read-back below still fails closed on a symlink / non-
+			// regular entry planted at the temp path.
 			editDir := secrets.UserDataDir()
 			if err := os.MkdirAll(editDir, 0o700); err != nil {
 				return fmt.Errorf("create edit dir: %w", err)
 			}
-			tmp, err := os.CreateTemp(editDir, "mcp-secrets-*.yaml")
+			tmpPath, err := secureCreateSecretsEditTemp(editDir, yamlBytes)
 			if err != nil {
 				return err
 			}
-			tmpPath := tmp.Name()
 			defer func() {
 				// Secure wipe sized to the actual file length (the previous
 				// implementation overwrote only the first 4 KB; a larger
@@ -299,11 +388,8 @@ func newSecretsEditCmd() *cobra.Command {
 				}
 				_ = os.Remove(tmpPath)
 			}()
-			if _, err := tmp.Write(yamlBytes); err != nil {
-				tmp.Close()
-				return err
-			}
-			tmp.Close()
+			// The decrypted vault was already written into the owner-only
+			// temp by secureCreateSecretsEditTemp; nothing more to write.
 
 			editor := os.Getenv("EDITOR")
 			if editor == "" {
@@ -315,6 +401,17 @@ func newSecretsEditCmd() *cobra.Command {
 			c.Stderr = os.Stderr
 			if err := c.Run(); err != nil {
 				return fmt.Errorf("editor: %w", err)
+			}
+			// Read-back residual defense (fail closed): refuse to read
+			// through a symlink or any non-regular entry sitting at the
+			// temp path after the editor session. The random temp name
+			// makes an in-session plant near-impossible, but following a
+			// planted symlink on read would redirect the re-encrypt input
+			// to attacker-chosen content — refuse rather than follow.
+			if fi, lerr := os.Lstat(tmpPath); lerr != nil {
+				return fmt.Errorf("secrets edit: stat edited temp: %w", lerr)
+			} else if fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+				return fmt.Errorf("secrets edit: refusing to read edited temp %s (not a regular file: mode %s)", tmpPath, fi.Mode())
 			}
 			updated, err := os.ReadFile(tmpPath)
 			if err != nil {
