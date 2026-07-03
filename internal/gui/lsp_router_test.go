@@ -17,7 +17,58 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/lsp_routing"
+	"mcp-local-hub/internal/daemon"
 )
+
+// TestLSPRouter_ForwardTimeoutOrderingInvariant asserts the cross-component
+// timeout-ordering invariant (reliability #4): ColdStartMaxProbation >
+// lspForwardUpstreamTimeout > ColdRequestHoldCeiling > MaterializeWaitBudget. This
+// keeps the DAEMON proxy's request-hold ceiling firing (controlled non-retryable
+// error) STRICTLY before the router's LSP upstream timeout (so the client never
+// sees a raw router 504) and strictly before the probation watchdog (so the
+// watchdog never reaps a still-progressing request).
+func TestLSPRouter_ForwardTimeoutOrderingInvariant(t *testing.T) {
+	if !(daemon.DefaultLSPColdStartMaxProbation > lspForwardUpstreamTimeout) {
+		t.Fatalf("ColdStartMaxProbation %s must be > lspForwardUpstreamTimeout %s",
+			daemon.DefaultLSPColdStartMaxProbation, lspForwardUpstreamTimeout)
+	}
+	if !(lspForwardUpstreamTimeout > daemon.DefaultLSPColdRequestHoldCeiling) {
+		t.Fatalf("lspForwardUpstreamTimeout %s must be > ColdRequestHoldCeiling %s (proxy ceiling must fire before the router timeout)",
+			lspForwardUpstreamTimeout, daemon.DefaultLSPColdRequestHoldCeiling)
+	}
+	if !(daemon.DefaultLSPColdRequestHoldCeiling > daemon.DefaultLSPMaterializeWaitBudget) {
+		t.Fatalf("ColdRequestHoldCeiling %s must be > MaterializeWaitBudget %s",
+			daemon.DefaultLSPColdRequestHoldCeiling, daemon.DefaultLSPMaterializeWaitBudget)
+	}
+}
+
+// TestLSPRouter_SharedClientForNilDepsLSPForward is F3 (bot r3): with production
+// deps leaving HTTPClient nil, the LSP forward path must reuse ONE shared
+// http.Client (shared transport / connection pool) instead of building a fresh
+// http.Transport per /lsp request — the LSP twin of the defaultSerenaClient
+// sharing pattern. serenaHTTPClient runs per request, so pointer equality across
+// calls is the load-bearing assertion.
+func TestLSPRouter_SharedClientForNilDepsLSPForward(t *testing.T) {
+	c1 := serenaHTTPClient(nil, lspForwardUpstreamTimeout)
+	c2 := serenaHTTPClient(nil, lspForwardUpstreamTimeout)
+	if c1 != c2 {
+		t.Fatal("nil-dep LSP forwards got per-request clients (fresh transport per request — pool loss, F3 regression)")
+	}
+	if c1 != defaultLSPForwardClient {
+		t.Fatal("nil-dep LSP forward did not select the shared defaultLSPForwardClient")
+	}
+	if c1 == defaultSerenaClient {
+		t.Fatal("LSP shared client must be distinct from the 60s serena client (decoupled timeouts)")
+	}
+	// The serena sharing case and the explicit-client passthrough are unchanged.
+	if got := serenaHTTPClient(nil, serenaUpstreamTimeout); got != defaultSerenaClient {
+		t.Fatal("serena timeout no longer selects the shared serena client")
+	}
+	custom := &http.Client{}
+	if got := serenaHTTPClient(custom, lspForwardUpstreamTimeout); got != custom {
+		t.Fatal("explicit HTTPClient must pass through untouched")
+	}
+}
 
 type stubLSPResolver struct {
 	mu            sync.Mutex
@@ -1258,5 +1309,56 @@ func TestLSPRouter_UntrustedRoot_RefusalUsesResolvedRootNotFileArg(t *testing.T)
 	}
 	if strings.Contains(resp.Error.Message, fileArg) {
 		t.Errorf("message %q must not name the file arg; it should name the resolved root %q", resp.Error.Message, root)
+	}
+}
+
+// TestLSPRouter_ForwardsDaemon503AndRetryAfterVerbatim_StillTouchesSession is the
+// P2c router passthrough guard: the router does NOT change, so a daemon
+// cold-start 503 + Retry-After: 15 + JSON-RPC error body must pass through
+// verbatim (status + header + body), and the session must STILL be bound to the
+// workspace so the agent's retry routes pathlessly to the same backend.
+func TestLSPRouter_ForwardsDaemon503AndRetryAfterVerbatim_StillTouchesSession(t *testing.T) {
+	const daemonBody = `{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"language backend cold start in progress (mcp-language-server, /repo/alpha); retry in ~15s"}}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "15")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(daemonBody))
+	}))
+	t.Cleanup(upstream.Close)
+
+	entry := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/repo/alpha", Language: "python", Backend: "mcp-language-server", Port: 9201}
+	resolver := &stubLSPResolver{results: map[string]*lsp_routing.ResolveResult{
+		"python|/repo/alpha/main.py": {WorkspaceRoot: "/repo/alpha", WorkspaceKey: "alpha", Registered: true, Entry: entry, ProjectMarker: true},
+	}}
+	sessions := lsp_routing.NewSessionRouter()
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver:               resolver,
+		Sessions:               sessions,
+		BackendKindForLanguage: func(lang string) (string, bool) { return "mcp-language-server", true },
+		UpstreamURLFn:          func(ws *api.WorkspaceEntry) string { return upstream.URL },
+	})
+
+	body := rpcBody("tools/call", "1", `{"name":"diagnostics","arguments":{"filePath":"/repo/alpha/main.py"}}`)
+	rr := postLSP(t, s, "python", body, map[string]string{"Mcp-Session-Id": "client-session"})
+
+	// Status forwarded verbatim.
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503 (daemon status must pass through verbatim); body=%s", rr.Code, rr.Body.String())
+	}
+	// Retry-After header forwarded verbatim.
+	if ra := rr.Header().Get("Retry-After"); ra != "15" {
+		t.Fatalf("Retry-After = %q, want 15 (forwarded verbatim)", ra)
+	}
+	// JSON-RPC error body forwarded verbatim.
+	if rr.Body.String() != daemonBody {
+		t.Fatalf("body not passed through verbatim:\n got=%s\nwant=%s", rr.Body.String(), daemonBody)
+	}
+	// The session is STILL bound after a forwarded 503 so the agent's retry
+	// routes pathlessly to the same workspace.
+	cands := sessions.Candidates("client-session")
+	if len(cands) != 1 || cands[0].WorkspaceKey != "alpha" {
+		t.Fatalf("session not bound to workspace after 503 forward: %+v", cands)
 	}
 }

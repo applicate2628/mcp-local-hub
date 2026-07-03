@@ -191,6 +191,15 @@ func serenaHTTPClient(httpClient *http.Client, upstreamTimeout time.Duration) *h
 	if upstreamTimeout == serenaUpstreamTimeout {
 		return defaultSerenaClient
 	}
+	// F3 (bot r3): the LSP forward path (nil HTTPClient + lspForwardUpstreamTimeout)
+	// must reuse the shared LSP client — this function runs PER REQUEST, so the
+	// fall-through below would build a fresh http.Transport per /lsp forward
+	// (connection-pool loss + lingering idle conns). Mirror of the serena case.
+	if upstreamTimeout == lspForwardUpstreamTimeout {
+		return defaultLSPForwardClient
+	}
+	// Non-default timeout (tests overriding UpstreamTimeout): a fresh client is
+	// acceptable — production deps only ever reach the two shared cases above.
 	return &http.Client{
 		Timeout:   0,
 		Transport: newSerenaTransport(upstreamTimeout),

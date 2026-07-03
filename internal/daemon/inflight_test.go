@@ -145,91 +145,207 @@ func TestInflight_ForgetClearsThrottle(t *testing.T) {
 }
 
 // TestInflight_WinnerCancellationDoesNotAbortLosers guards the context-
-// isolation fix: the singleflight winner's request context must NOT
-// propagate into fn(ctx). Otherwise a short-lived or disconnected
-// winner would abort the shared materialization AND cache the cancel
-// error for the retry-gap window, causing healthy concurrent callers
-// to see the canceled error as if their own requests had failed.
+// isolation invariant under the bounded-join model: a winner that cancels
+// its OWN request context gets ctx.Err() back from the bounded join (the join
+// is ctx-aware), but the shared materialization must NOT observe that cancel
+// (fn's context is detached) and the retry throttle must NOT cache a
+// canceled-error, so healthy concurrent callers are unaffected.
 func TestInflight_WinnerCancellationDoesNotAbortLosers(t *testing.T) {
 	g := NewInflightGate(10 * time.Millisecond)
 	started := make(chan struct{})
 	release := make(chan struct{})
+	fnReturned := make(chan struct{})
 	var observedCancel atomic.Bool
 
 	fn := func(ctx context.Context) (any, error) {
 		close(started)
 		<-release
 		// Observe whether the detached context was canceled. It must NOT
-		// be: the gate must detach from the winner's request context.
+		// be: the gate must detach fn from the winner's request context.
 		if ctx.Err() != nil {
 			observedCancel.Store(true)
 		}
+		close(fnReturned)
 		return "ok", nil
 	}
 
 	winnerCtx, cancel := context.WithCancel(context.Background())
 	winnerErr := make(chan error, 1)
 	go func() {
-		_, err := g.Do(winnerCtx, "k", fn)
+		_, err := g.DoBounded(winnerCtx, "k", 10*time.Second, fn)
 		winnerErr <- err
 	}()
 	<-started
 	cancel() // winner disconnects mid-materialize
-	close(release)
 
-	// Winner's Do returns without error because fn completed successfully.
-	if err := <-winnerErr; err != nil {
-		t.Errorf("winner should see success despite its own cancel: %v", err)
+	// The bounded join is ctx-aware: the winner's own cancel returns ctx.Err().
+	if err := <-winnerErr; !errors.Is(err, context.Canceled) {
+		t.Errorf("winner bounded join should return ctx cancel, got: %v", err)
 	}
+
+	// The shared materialize continues detached; release it and confirm it
+	// never saw the winner's cancel.
+	close(release)
+	<-fnReturned
 	if observedCancel.Load() {
 		t.Error("fn observed canceled context — materialization aborted by winner's cancel (regression)")
 	}
 	// Critical: the retry throttle must NOT hold a cached canceled-error.
-	// A fresh Do on the same key should run fn again (fresh state).
-	var reran atomic.Int32
-	if _, err := g.Do(context.Background(), "k", func(ctx context.Context) (any, error) {
-		reran.Add(1)
+	// A fresh call on the same key must not be blocked by a stale error.
+	if _, err := g.DoBounded(context.Background(), "k", 10*time.Second, func(ctx context.Context) (any, error) {
 		return "ok2", nil
 	}); err != nil {
-		t.Errorf("subsequent Do must not be blocked by stale canceled-error: %v", err)
-	}
-	if reran.Load() != 1 {
-		t.Errorf("fresh call did not run fn (ran=%d); gate still throttling", reran.Load())
+		t.Errorf("subsequent call blocked by stale canceled-error (throttle poisoned): %v", err)
 	}
 }
 
-// TestInflight_DeadlinePropagatedToFn guards the "deadline survives
-// detach" fix: WithoutCancel drops BOTH cancellation and deadline by
-// design, but materialization must still honor the winner's timeout
-// so backend startup can't drift past it and keep singleflight busy.
-// The gate re-applies ctx.Deadline() via WithDeadline after detaching
-// cancellation.
-func TestInflight_DeadlinePropagatedToFn(t *testing.T) {
+// TestInflight_MaterializeContextUsesFixedHardCeilingNotWinnerDeadline
+// replaces the old winner-deadline-propagation guard. Under the bounded-join
+// model, fn's detached context must carry the FIXED materializeHardCeiling —
+// NOT the winner's short per-request deadline — so a short-budget bounded
+// caller cannot abort the shared background materialize early.
+func TestInflight_MaterializeContextUsesFixedHardCeilingNotWinnerDeadline(t *testing.T) {
 	g := NewInflightGate(10 * time.Millisecond)
-	// 50ms deadline on the caller's context.
+	// A short 50ms caller deadline must NOT bound fn.
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
 	var fnDeadlineOK atomic.Bool
-	_, err := g.Do(ctx, "k", func(fctx context.Context) (any, error) {
+	_, err := g.DoBounded(ctx, "k", 0, func(fctx context.Context) (any, error) {
 		dl, ok := fctx.Deadline()
 		if !ok {
-			return nil, errors.New("fn context has no deadline — winner deadline was dropped")
+			return nil, errors.New("fn context has no deadline — the fixed hard ceiling was dropped")
 		}
-		// Deadline should fire within ~50ms of now (not 10s+ as the
-		// backend default would be). Allow generous slack for CI.
-		if remaining := time.Until(dl); remaining > 200*time.Millisecond {
-			return nil, fmt.Errorf("deadline too far out: %v (expected ~50ms)", remaining)
+		// Remaining should be ~materializeHardCeiling (120s), i.e. WAY beyond
+		// the 50ms caller deadline. Assert it exceeds any plausible caller bound.
+		if remaining := time.Until(dl); remaining < 60*time.Second {
+			return nil, fmt.Errorf("deadline too near: %v (expected ~%v hard ceiling)", remaining, materializeHardCeiling)
 		}
 		fnDeadlineOK.Store(true)
 		return "ok", nil
 	})
 	if err != nil {
-		t.Fatalf("Do: %v", err)
+		t.Fatalf("DoBounded: %v", err)
 	}
 	if !fnDeadlineOK.Load() {
-		t.Error("fn did not observe the caller's deadline on the detached context")
+		t.Error("fn did not observe the fixed hard ceiling on the detached context")
 	}
+}
+
+// TestInflightGate_DoBounded_TimerExpiryReturnsInFlightWhileWinnerContinues
+// verifies the core bounded-join contract: a joiner whose budget elapses gets
+// ErrMaterializeInFlight while the shared materialization keeps running and
+// eventually completes (its result lands for the next caller).
+func TestInflightGate_DoBounded_TimerExpiryReturnsInFlightWhileWinnerContinues(t *testing.T) {
+	g := NewInflightGate(10 * time.Millisecond)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var winnerDone atomic.Bool
+
+	winnerRes := make(chan any, 1)
+	go func() {
+		v, _ := g.DoBounded(context.Background(), "k", 10*time.Second, func(ctx context.Context) (any, error) {
+			close(started)
+			<-release
+			winnerDone.Store(true)
+			return "ep", nil
+		})
+		winnerRes <- v
+	}()
+	<-started
+
+	// A joiner with a tiny budget must time out to ErrMaterializeInFlight while
+	// the winner's fn is still blocked on release.
+	_, err := g.DoBounded(context.Background(), "k", 20*time.Millisecond, func(ctx context.Context) (any, error) {
+		return "should-not-run", nil
+	})
+	if !errors.Is(err, ErrMaterializeInFlight) {
+		t.Fatalf("bounded joiner err = %v, want ErrMaterializeInFlight", err)
+	}
+	if winnerDone.Load() {
+		t.Fatal("winner materialization aborted by the joiner's budget expiry (regression)")
+	}
+
+	// Release the winner; the shared materialize completes normally.
+	close(release)
+	if v := <-winnerRes; v != "ep" {
+		t.Fatalf("winner result = %v, want ep", v)
+	}
+}
+
+// TestInflightGate_DoBounded_CtxCancelReturnsCtxErr verifies a bounded joiner
+// whose OWN context is canceled returns ctx.Err() (not ErrMaterializeInFlight)
+// while the shared materialization is unaffected.
+func TestInflightGate_DoBounded_CtxCancelReturnsCtxErr(t *testing.T) {
+	g := NewInflightGate(10 * time.Millisecond)
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	winnerDone := make(chan struct{})
+	go func() {
+		_, _ = g.DoBounded(context.Background(), "k", 10*time.Second, func(ctx context.Context) (any, error) {
+			close(started)
+			<-release
+			return "ep", nil
+		})
+		close(winnerDone)
+	}()
+	<-started
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := g.DoBounded(ctx, "k", 10*time.Second, func(ctx context.Context) (any, error) {
+		return "should-not-run", nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled joiner err = %v, want context.Canceled", err)
+	}
+
+	close(release)
+	<-winnerDone
+}
+
+// TestInflightGate_HasActiveFlight_TrueWhileFnRunsThenFalse verifies the
+// activeFlights accounting the cold-start-slot gate keys on (F3): HasActiveFlight
+// is false before any flight, true while the singleflight fn is executing, and
+// false again after it returns.
+func TestInflightGate_HasActiveFlight_TrueWhileFnRunsThenFalse(t *testing.T) {
+	g := NewInflightGate(10 * time.Millisecond)
+	if g.HasActiveFlight("k") {
+		t.Fatal("HasActiveFlight true before any flight started")
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		_, _ = g.DoBounded(context.Background(), "k", 10*time.Second, func(ctx context.Context) (any, error) {
+			close(started)
+			<-release
+			return "ep", nil
+		})
+		close(done)
+	}()
+	<-started
+	if !g.HasActiveFlight("k") {
+		t.Fatal("HasActiveFlight false while the materialize fn is running")
+	}
+	if g.HasActiveFlight("other") {
+		t.Fatal("HasActiveFlight true for an unrelated key")
+	}
+
+	close(release)
+	<-done
+	// Poll: the deferred decrement runs on the singleflight goroutine after the
+	// caller returns, so allow a brief settle.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if !g.HasActiveFlight("k") {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("HasActiveFlight still true after the flight completed")
 }
 
 func TestInflight_IndependentKeysDoNotInterfere(t *testing.T) {

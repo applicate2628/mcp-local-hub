@@ -17,6 +17,37 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
+// lspForwardUpstreamTimeout is the LSP-forward upstream HTTP timeout, DECOUPLED
+// from serenaUpstreamTimeout (reliability #3) so tuning cold-LSP indexing does not
+// silently change serena's 60s tool-call budget. It is sized so the DAEMON proxy's
+// request-hold ceiling (daemon.DefaultLSPColdRequestHoldCeiling, 120s) fires
+// STRICTLY BEFORE this router timeout — the client must see the proxy's controlled
+// non-retryable error, never a raw router 504. The timeout-ordering invariant
+// (daemon.DefaultLSPColdStartMaxProbation > lspForwardUpstreamTimeout >
+// daemon.DefaultLSPColdRequestHoldCeiling > daemon.DefaultLSPMaterializeWaitBudget)
+// is asserted by TestLSPRouter_ForwardTimeoutOrderingInvariant.
+//
+// LANDMINE (F6): this router tier is a SEPARATE-package constant the daemon's
+// NewLazyProxy runtime clamp cannot see — it is protected ONLY by the compile-time
+// ordering test. If a future PR exposes daemon.ColdRequestHoldCeiling or
+// ColdStartMaxProbation as a runtime flag, that clamp MUST be extended to bound
+// against this router tier (pass lspForwardUpstreamTimeout into NewLazyProxy, or
+// re-assert the ordering at wiring time); otherwise a misconfigured knob inverts the
+// ordering and the client sees a raw router 504 instead of the controlled error.
+const lspForwardUpstreamTimeout = 150 * time.Second
+
+// defaultLSPForwardClient is the shared production http.Client for LSP forwards
+// when deps leave HTTPClient nil — the LSP twin of defaultSerenaClient (F3, bot
+// r3): serenaHTTPClient special-cased only the 60s serena timeout, so once the
+// LSP path moved to lspForwardUpstreamTimeout every nil-dep /lsp request built a
+// FRESH http.Transport (connection-pool loss + per-request idle conns lingering).
+// Client.Timeout stays 0 for the same SSE reason as defaultSerenaClient; the
+// transport's dial timeout + ResponseHeaderTimeout carry the LSP forward budget.
+var defaultLSPForwardClient = &http.Client{
+	Timeout:   0,
+	Transport: newSerenaTransport(lspForwardUpstreamTimeout),
+}
+
 type lspWorkspaceResolver interface {
 	ResolveByPath(path, language string) (*lsp_routing.ResolveResult, error)
 	HasProjectMarker(root, language string) bool
@@ -138,7 +169,9 @@ func (s *Server) lspRouterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	upstreamTimeout := deps.UpstreamTimeout
 	if upstreamTimeout <= 0 {
-		upstreamTimeout = serenaUpstreamTimeout
+		// Reliability #3: LSP forwards use their OWN upstream timeout (decoupled
+		// from serena's 60s), sized so the proxy's request-hold ceiling fires first.
+		upstreamTimeout = lspForwardUpstreamTimeout
 	}
 	httpClient := serenaHTTPClient(deps.HTTPClient, upstreamTimeout)
 

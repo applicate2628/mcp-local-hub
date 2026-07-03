@@ -68,3 +68,28 @@ func TestSerenaProxyDescriptor_StampsStartupBindDeadline120(t *testing.T) {
 		t.Fatalf("serena-proxy StartupBindDeadlineSeconds = %d, want 120", got)
 	}
 }
+
+// TestBuildSupervisorDaemonForLSP_StampsStartupBindDeadline120 is the P2c
+// adjacent fix (mirrors the serena builder): the workspace LSP proxy descriptor
+// must carry the same explicit 120s first-bind deadline (field exists on
+// SupervisorDaemon since #488) so a slow-to-bind LSP proxy is not
+// terminate-first-then-respawned mid-startup by the liveness sweep.
+func TestBuildSupervisorDaemonForLSP_StampsStartupBindDeadline120(t *testing.T) {
+	entry := WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: t.TempDir(),
+		Language:      "python",
+		Port:          9210,
+	}
+	d := BuildSupervisorDaemonForLSP(entry, "mcphub")
+	if got := d.StartupBindDeadlineSeconds; got != 120 {
+		t.Fatalf("LSP workspace-proxy StartupBindDeadlineSeconds = %d, want 120", got)
+	}
+	// Sanity: the descriptor is still the workspace-proxy launcher on its port.
+	if d.Port != 9210 {
+		t.Fatalf("Port = %d, want 9210", d.Port)
+	}
+	if len(d.Args) == 0 || d.Args[0] != "daemon" {
+		t.Fatalf("Args = %v, want a `daemon workspace-proxy ...` launcher argv", d.Args)
+	}
+}

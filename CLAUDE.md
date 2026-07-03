@@ -1644,3 +1644,84 @@ listener takes the `/g/<group>/mcp` group routes down alongside the
 `hub-listener-unresponsive` warn + the "restart the GUI" recovery above
 apply identically to groups; there is no separate group-listener health
 signal.
+
+## LSP router — cold-start contract (P2c; requests await, notifications 202)
+
+The GUI LSP router (`127.0.0.1:<guiport>/lsp/<lang>/mcp`) fans forwarded
+methods (`tools/call` and other non-handshake methods) to a per-
+(workspace, language) lazy-proxy daemon that materializes its heavy
+backend (gopls / mcp-language-server) on first use. Handshake methods
+(`initialize`, `tools/list`, `resources/list`, `prompts/list`, `ping`,
+`notifications/*`) are answered SYNTHETICALLY (no backend touch) and stay
+fast — so `claude mcp list` never sees a 503 from this router (its own
+slowness is claude-side npx/remote-sweep cost, NOT this router; do not
+re-file that as a router bug).
+
+**Requests AWAIT (they do not 503 after delivery); notifications 202.** A
+forwarded method is classified by whether the client needs its response:
+
+- **REQUESTS** (`tools/call`, generic forwards) are AWAITED, NOT 503-ed after
+  delivery. `StdioHost.SendRPC` writes the request to the backend stdin BEFORE
+  awaiting a reply, so fast-failing with a retry-503 after delivery would make the
+  client retry a FRESH, DUPLICATE side-effecting call (`edit_file`,
+  `rename_symbol`, …). The request is awaited under `min(client-ctx,
+  ColdRequestHoldCeiling)` — default **120s**, sized above the slowest cold LSP
+  index (rust-analyzer / clangd / large-TS routinely exceed 60s; gopls-only
+  optimism is wrong). On ceiling expiry the call WAS delivered, so the proxy
+  returns a **NON-retryable controlled error**: `HTTP 500`, NO `Retry-After`,
+  message `"language backend still indexing after Ns; the call was delivered and
+  may have partially executed — do not auto-retry mutating calls"` — never a retry
+  hint. A `lsp-cold-forward-held` warn event fires once a request holds past
+  `MaterializeWaitBudget` (~15s): the fleet-visible signal for a long cold hold.
+- **NOTIFICATIONS** (`textDocument/didOpen`/`didClose`) keep the round-1 contract:
+  bounded by `MaterializeWaitBudget` (15s) while cold; on the budget deadline the
+  notification (already written to the backend) is treated as DELIVERED → `HTTP
+  202`, refcount retained, no retry. Fire-and-forget: there is no result to await.
+
+**Pre-delivery materialize refusals are still retryable 503s.** These fire BEFORE
+anything is written to the backend (spawn + handshake + singleflight dedup only),
+so a retry is safe:
+
+- **Materialize in progress** → `503`, `Retry-After: 15`, message `language
+  backend cold start in progress (...); retry in ~15s`. The caller's
+  `MaterializeWaitBudget` (15s) elapsed while the shared materialize keeps running
+  detached; the retry joins it. The row stays `starting` — NOT `active` — until the
+  first successful forwarded response, so `mcphub status` / GUI truthfully show the
+  backend is not yet usable.
+- **Cold-start slots busy** → `503`, `Retry-After: 30`, message `LSP cold-start
+  slots busy (<n> backends warming); retry in ~30s`. At most `ColdStartConcurrency`
+  (default 2) OTHER backends may be cold-starting at once; further colds are refused
+  WITHOUT spawning. A retry that merely joins THIS proxy's own already-running
+  materialize is exempt (spawns nothing).
+
+**Timeout ordering (enforced).** `ColdStartMaxProbation (5m) > LSP-forward upstream
+timeout (150s, DECOUPLED from serena's 60s) > ColdRequestHoldCeiling (120s) >
+MaterializeWaitBudget (15s)`. `daemon.NewLazyProxy` clamps + warns a misordered
+config; a gui test asserts the cross-component ordering against the router
+constant. The proxy request ceiling therefore always fires BEFORE the router
+upstream timeout (client sees the controlled error, never a raw router 504). The
+probation>ceiling ordering bounds a SINGLE request's own hold only: a request
+started at publish is severed by its own 120s ceiling long before the 5m watchdog.
+The watchdog MAY still sever a LATE-ARRIVING in-flight request near the probation
+boundary (started at e.g. publish+4:30, only 30s into its ceiling at the 5:00
+reap) — by design, since the never-warmed backend is presumed wedged; the severed
+request receives the same controlled non-retryable 500 (never a retryable-looking
+error). A backend wedged past `ColdStartMaxProbation` is torn down by the
+probation watchdog on the idle-reaper tick (which runs whenever idle-reaping OR
+probation is configured — `--idle-backend-ttl=0` does not disable it, and neither
+does disabling the cold-start gate via `ColdStartConcurrency < 0`), freeing its
+slot.
+
+**Registry lifecycle is single-owner.** The `Configured`/`Starting`/`Active`
+running-state column is written by ONE authoritative reconcile
+(`reconcileRegistryLifecycleLocked`, gen-guarded + shadow-idempotent, called at
+every endpoint acquisition under `p.mu`), which fixed a stuck-`Starting` class
+where a concurrent slot-reserve downgraded a warmed `Active` row and nothing
+restored it. `Failed`/`Missing` stay owned by the teardown / fn-error paths.
+
+**SLO.** Cold first LSP `tools/call` first-byte: p50 ≈ backend cold-index time
+(gopls ~35-45s), p99 ≤ `ColdRequestHoldCeiling` (120s), beyond which a controlled
+non-retryable error — never a silent hang, never a raw 504. Notifications: 15s →
+202-delivered, unchanged. `claude mcp list` never sees any of this (the handshake
+surface is synthetic-200). Config defaults live in `daemon.NewLazyProxy`; no
+manifest/GUI knobs this round.
