@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1752,6 +1753,19 @@ func readManifestNames(dir string) (map[string]bool, error) {
 	add := func(n string) {
 		if m, err := loadManifestForServer(dir, n); err == nil && m != nil && m.Kind == config.KindCompanion {
 			return
+		}
+		// Pre-existing embed-vs-disk collision surface (mirrors the install warn):
+		// a disk manifest shadowing a shipped server name is ignored by the
+		// embed-first read path. Log (never delete). The shadow lives under the
+		// loader's disk-fallback dir: the explicit test dir when set, else
+		// defaultManifestDir(). embeddedDiskShadowWarning is override-symmetric, so
+		// hermetic scans under MCPHUB_MANIFEST_DIR_OVERRIDE stay quiet.
+		shadowDir := dir
+		if shadowDir == "" {
+			shadowDir = defaultManifestDir()
+		}
+		if warn := embeddedDiskShadowWarning(n, shadowDir); warn != "" {
+			log.Printf("scan: %s", warn)
 		}
 		names[n] = true
 	}

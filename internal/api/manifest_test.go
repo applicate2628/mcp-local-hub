@@ -215,10 +215,14 @@ func TestManifestDeleteRemovesDir(t *testing.T) {
 func TestManifestGetIn_ReturnsContentHash(t *testing.T) {
 	dir := t.TempDir()
 	a := &API{}
-	name := "memory"
+	// A NON-embedded name: ManifestCreateIn now refuses shipped/embedded names
+	// (embed-vs-disk precedence, decision 2026-07-03), and this test only needs
+	// any valid name to exercise the hash round-trip. "memnote" used to be
+	// "memory" (an embedded name) incidentally.
+	name := "memnote"
 	// Must satisfy api.ManifestValidate (which ManifestCreateIn gates on):
 	// requires kind, transport, command, and at least one daemon.
-	yaml := "name: memory\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9210\n"
+	yaml := "name: memnote\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9210\n"
 	if err := a.ManifestCreateIn(dir, name, yaml); err != nil {
 		t.Fatalf("create: %v", err)
 	}

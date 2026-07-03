@@ -1,10 +1,25 @@
 ---
-status: open
+status: fixed
 severity: medium
 context: adjacent-finding
 ---
 
 # Embed-first install silently shadows a same-named DISK manifest for any embedded server name
+
+> **FIXED 2026-07-03** by `work-items/decisions/2026-07-03-embed-vs-disk-manifest-precedence.md`
+> (Option B — embed always wins; the collision is made LOUD at the WRITE gate).
+> Read precedence is UNCHANGED (embed-first stays); the fix stops the *silent*
+> part. Implemented on branch `feat/embed-name-create-refusal`:
+>
+> - `isEmbeddedManifestName` predicate (`internal/api/manifest_source.go`,
+>   override-symmetric) + exported `IsEmbeddedManifestName` wrapper.
+> - `ManifestCreateIn` now HARD-REFUSES a disk manifest under a shipped/embedded
+>   name (wrapping `ErrManifestNameEmbedded`), BEFORE the disk-stat guard — so a
+>   re-created shipped server can no longer be written to disk and then ignored.
+> - Warn surface for PRE-EXISTING collisions (install + scan) via
+>   `embeddedDiskShadowWarning`; the user's file is NEVER deleted.
+> - GUI mirrors: readiness Save-&-Install dry-run reports the refusal, and the
+>   marketplace one-click maps the refusal to a friendly 400 (no opaque 500).
 
 ## Finding (adjacent finding surfaced during D2 r3 — NOT fixed here)
 

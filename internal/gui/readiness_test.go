@@ -183,6 +183,40 @@ func TestReadinessHandler_DraftPOST_CreateModeExistingManifestBlocks(t *testing.
 	}
 }
 
+// Test 6 (decision 2026-07-03) — the Save & Install dry-run mirrors the embed
+// collision refusal: a create-mode draft under a shipped (built-in) server name
+// reports Ready=false with a "shipped server name" blocker instead of showing
+// "Ready to install" and then failing the create at ManifestCreateIn.
+func TestReadinessHandler_DraftPOST_EmbeddedShippedNameBlocks(t *testing.T) {
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	// "wolfram" is a shipped/embedded server. The create write gate refuses a
+	// disk manifest under it (embed reads win); readiness must mirror that.
+	yaml := "name: wolfram\nkind: global\ntransport: stdio-bridge\ncommand: go\n" +
+		"daemons:\n  - name: default\n    port: 9420\n" +
+		"client_bindings:\n  - client: claude-code\n    daemon: default\n    url_path: /mcp\n"
+	body, _ := json.Marshal(map[string]string{"yaml": yaml, "mode": "create"})
+	rr := sameOriginPostJSON(s, "/api/server/readiness", string(body))
+	if rr.Code != 200 {
+		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
+	}
+	var rep api.ReadinessReport
+	if err := json.Unmarshal(rr.Body.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Ready {
+		t.Error("shipped-server name 'wolfram' reported Ready=true; the embed-collision gate should block it")
+	}
+	found := false
+	for _, r := range rep.Requirements {
+		if r.Name == "shipped server name" && !r.OK {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no 'shipped server name' blocker in report; requirements=%+v", rep.Requirements)
+	}
+}
+
 func TestReadinessHandler_DraftPOST_EditTargetExistingManifestDoesNotBlock(t *testing.T) {
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.manifestPresence = fakeManifestPresence{"saved": true}

@@ -310,6 +310,22 @@ func (s *Server) handleMarketplaceHubInstall(w http.ResponseWriter, req *marketp
 	}
 
 	if err := s.manifestCreator.ManifestCreate(name, finalYAML); err != nil {
+		// Graceful embed-vs-disk collision handling (decision 2026-07-03): if the
+		// resolved name collides with a shipped (built-in) server, ManifestCreateIn
+		// refuses with ErrManifestNameEmbedded. Map it to a friendly 400 naming the
+		// collision + a rename suggestion rather than letting it fall through to the
+		// generic 500 below. We do NOT silently route to Install of the shipped
+		// manifest: the catalog draft's command/args/env may differ from the shipped
+		// one, so installing the shipped server under the hood would give the operator
+		// something other than what the catalog described, with no signal — an honest
+		// refusal lets them decide (rename to keep the catalog draft, or use the
+		// already-shipped server directly). In production a colliding name is usually
+		// already refused by the NAME_CONFLICT gate above (ManifestList unions the
+		// embed set); this maps the write-gate refusal for the residual path.
+		if errors.Is(err, api.ErrManifestNameEmbedded) {
+			writeAPIError(w, fmt.Errorf("%q is a built-in shipped server; installing it would draft a disk manifest the hub ignores in favor of the shipped one — pick a different name (e.g. %q) to install a customized copy", name, name+"-custom"), http.StatusBadRequest, "EMBEDDED_NAME_COLLISION")
+			return
+		}
 		log.Printf("/api/marketplace/install ManifestCreate name=%q: %v", name, err)
 		writeAPIError(w, errors.New("internal error creating manifest"), http.StatusInternalServerError, "INSTALL_FAILED")
 		return

@@ -235,6 +235,13 @@ func (a *API) Install(opts InstallOpts) error {
 	if w == nil {
 		w = os.Stderr
 	}
+	// Surface a PRE-EXISTING embed-vs-disk collision (a disk manifest shadowing a
+	// shipped server name that the embed-first read below ignores). Warn only —
+	// never delete the operator's file; NEW such files are refused at
+	// ManifestCreateIn.
+	if warn := embeddedDiskShadowWarning(opts.Server, defaultManifestDir()); warn != "" {
+		fmt.Fprintf(w, "warning: %s\n", warn)
+	}
 	// 1. Load manifest (embed FS first, disk fallback for dev flow).
 	//    The canonical installed binary resolves manifests from its
 	//    embedded FS so an install launched from any cwd finds the same
@@ -374,6 +381,11 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	w := opts.Writer
 	if w == nil {
 		w = os.Stderr
+	}
+	// Same pre-existing embed-vs-disk collision warn as Install (this is the
+	// InstallAllWithOpts per-server entry). Warn only — never delete.
+	if warn := embeddedDiskShadowWarning(opts.Server, defaultManifestDir()); warn != "" {
+		fmt.Fprintf(w, "warning: %s\n", warn)
 	}
 	data, err := loadManifestYAMLEmbedFirst(opts.Server)
 	if err != nil {

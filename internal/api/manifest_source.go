@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -56,6 +57,87 @@ func embeddedManifestNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// embeddedManifestNamesContains reports RAW membership in the binary's embed
+// FS — the OVERRIDE-INDEPENDENT core of the embed-name question. It reads the
+// real embed set directly (embeddedManifestNames ignores
+// MCPHUB_MANIFEST_DIR_OVERRIDE), so it answers "is this exact name baked into
+// servers.Manifests?" regardless of any test seam.
+//
+// CatalogManifestGet dedups its inline membership loop onto this core: that
+// endpoint is DELIBERATELY override-independent (it reads the embed FS directly
+// for secret-safety, so a disk manifest with a literal secret is unreachable),
+// so it must NOT go through the override-symmetric isEmbeddedManifestName below.
+func embeddedManifestNamesContains(name string) bool {
+	for _, n := range embeddedManifestNames() {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// isEmbeddedManifestName is the WRITE-GATE / warn / readiness / marketplace
+// membership predicate: it mirrors loadManifestYAMLEmbedFirst's embed branch
+// EXACTLY, INCLUDING the test-override symmetry. When
+// MCPHUB_MANIFEST_DIR_OVERRIDE is set the loader bypasses the embed FS and
+// reads the override dir (manifest_source.go:77-79), so for the purposes of
+// "would a disk create/read shadow a SHIPPED manifest?" the answer is false —
+// there is no shipped manifest in play under the override. That keeps the
+// predicate byte-symmetric with the read path it guards, so hermetic tests
+// that seed a temp manifest dir via the override are unaffected by the
+// embed-name write refusal.
+//
+// It is layered on the override-independent core embeddedManifestNamesContains,
+// so the raw membership loop is single-owner; only the override symmetry is
+// added here (that is the sole difference from the CatalogManifestGet core).
+func isEmbeddedManifestName(name string) bool {
+	if manifestDirForTests() != "" {
+		return false
+	}
+	return embeddedManifestNamesContains(name)
+}
+
+// IsEmbeddedManifestName is the exported gate for callers outside this package
+// (internal/gui readiness + marketplace mirrors) that must reflect the same
+// embed-membership decision the ManifestCreateIn write gate applies. It mirrors
+// the CheckManifestName/checkManifestName exported-wrapper idiom so the
+// predicate stays single-owner across package boundaries.
+func IsEmbeddedManifestName(name string) bool {
+	return isEmbeddedManifestName(name)
+}
+
+// embeddedDiskShadowWarning returns a human-readable warn line when `name` is a
+// shipped (embedded) server AND a same-named manifest.yaml ALSO exists on disk
+// under manifestDir — the disk-fallback location the embed-first loader
+// (loadManifestYAMLEmbedFirst) consults only on an embed MISS. Because the
+// embed read wins for a shipped name, that disk manifest is silently ignored at
+// install: the operator's edits never take effect. The warn says so and points
+// at the rename remedy.
+//
+// This is the READ-side surface for PRE-EXISTING collisions (new ones are
+// refused at the ManifestCreateIn write gate); it NEVER deletes the user's
+// file. Empty string == no collision (name not embedded — which includes the
+// test-override case via isEmbeddedManifestName — or no disk file), so callers
+// emit nothing. Single owner of the collision predicate + message; each
+// consumer routes the returned string to its own sink (install → writer,
+// scan → log).
+func embeddedDiskShadowWarning(name, manifestDir string) string {
+	if !isEmbeddedManifestName(name) {
+		return ""
+	}
+	if manifestDir == "" {
+		return ""
+	}
+	exists, err := manifestExistsIn(manifestDir, name)
+	if err != nil || !exists {
+		return ""
+	}
+	return fmt.Sprintf(
+		"disk manifest for shipped server %q is ignored; the shipped built-in manifest is what installs — rename your copy (e.g. %q) to install a customized version",
+		name, name+"-custom",
+	)
 }
 
 // loadManifestYAMLEmbedFirst returns the raw YAML bytes for the named
