@@ -4157,3 +4157,45 @@ func TestLazyProxy_ToolsCall_BrokenPipeUnderCanceledCtx_TearsDownGenericError(t 
 		t.Fatalf("lifecycle = %q, want Failed (dead endpoint must be evicted + stamped, not left cached)", e.Lifecycle)
 	}
 }
+
+// TestLazyProxy_ToolsCall_PendingCapSaturation_Retryable503NoTeardown covers
+// the caller layer of work-items/bugs/2026-07-02-sendrpc-pending-uncapped.md
+// (fable pre-bot P1): a SendRPC pending-cap refusal (ErrTooManyPending) is a
+// THIRD identity class — the backend is HEALTHY and nothing was written
+// (pre-delivery), so the handler must answer a retryable 503 (Retry-After)
+// and must NOT run onSendFailure. Tearing down a merely-saturated backend
+// would kill every delivered in-flight request (up to maxPendingRequests of
+// them, each possibly partially executed) and re-enter the same fan-out
+// cold — a self-inflicted outage loop.
+func TestLazyProxy_ToolsCall_PendingCapSaturation_Retryable503NoTeardown(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, regPath := newTestProxy(t, "mcp-language-server", f)
+	h := p.Handler()
+
+	// Warm first (success path), then arm the saturation refusal.
+	if rr := postRPC(t, h, "tools/call", 1); rr.Code != http.StatusOK {
+		t.Fatalf("warm tools/call code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	f.sendRequestErr = fmt.Errorf("%w (128 in flight)", ErrTooManyPending)
+
+	rr := postRPC(t, h, "tools/call", 2)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d, want 503 (retryable saturation refusal); body=%s", rr.Code, rr.Body.String())
+	}
+	if ra := rr.Header().Get("Retry-After"); ra == "" {
+		t.Fatal("saturation 503 must carry Retry-After (the refusal is pre-delivery, retry-safe)")
+	}
+	if sc := f.stopCount.Load(); sc != 0 {
+		t.Fatalf("stopCount = %d, want 0 (a saturated backend is HEALTHY — teardown here is the self-inflicted-outage class)", sc)
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleActive {
+		t.Fatalf("lifecycle = %q, want Active retained (no Failed stamp for saturation)", e.Lifecycle)
+	}
+
+	// Saturation clears → the SAME cached endpoint serves the retry (no
+	// re-materialization happened during the refusal).
+	f.sendRequestErr = nil
+	if rr := postRPC(t, h, "tools/call", 3); rr.Code != http.StatusOK {
+		t.Fatalf("retry after saturation cleared: code=%d body=%s", rr.Code, rr.Body.String())
+	}
+}

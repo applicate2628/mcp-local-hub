@@ -684,6 +684,16 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 			return
 		}
+		// Saturation refusal (SendRPC pending cap): the backend is HEALTHY and
+		// nothing was written (pre-delivery) — retryable 503, NEVER teardown.
+		// Tearing down here would kill every delivered in-flight request on a
+		// merely-saturated backend and re-enter the same fan-out cold (the
+		// third identity class in the #492 error-shape model; see
+		// ErrTooManyPending in host.go).
+		if errors.Is(err, ErrTooManyPending) {
+			writeRPCErrorStatus(w, req.ID, http.StatusServiceUnavailable, rpcErrInternalError, err.Error(), 5)
+			return
+		}
 		// Backend died mid-stream or stdio channel failed. Evict the cached
 		// endpoint (gen-guarded), clear the inflight gate (so the next call
 		// re-materializes), and mark the registry as Failed so `status` surfaces it.
@@ -741,6 +751,11 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 		// Client-cancel is not a backend failure — see handleToolsCall.
 		if isClientCancelErr(r.Context(), err) {
 			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
+			return
+		}
+		// Saturation refusal — retryable, never teardown (see handleToolsCall).
+		if errors.Is(err, ErrTooManyPending) {
+			writeRPCErrorStatus(w, req.ID, http.StatusServiceUnavailable, rpcErrInternalError, err.Error(), 5)
 			return
 		}
 		p.onSendFailure(gen, err)
@@ -1020,6 +1035,14 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 				return
 			}
 			err = fmt.Errorf("backend dead at doc-notification cancel/deadline (delivered, endpoint unusable): %w", err)
+		}
+		// Saturation refusal (SendRPC pending cap): pre-delivery, backend
+		// HEALTHY — roll back the optimistic refcount (nothing was written) but
+		// do NOT tear down; retryable 503 (see handleToolsCall's branch).
+		if errors.Is(err, ErrTooManyPending) {
+			p.rollbackDocRef(uri, isOpen, docEpoch)
+			writeRPCErrorStatus(w, req.ID, http.StatusServiceUnavailable, rpcErrInternalError, err.Error(), 5)
+			return
 		}
 		// Send failure with the backend dead or the write never committed: roll
 		// back the optimistic refcount transition and tear down so the next request

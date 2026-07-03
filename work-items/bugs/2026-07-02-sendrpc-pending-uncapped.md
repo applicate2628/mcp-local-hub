@@ -13,3 +13,7 @@
 ## Not blocking
 
 Pre-existing (not introduced by P2c); the await-after-delivery change makes it marginally more reachable. Fix: apply the same `maxPendingRequests` bound in `SendRPC` that `handlePOST` uses. Low priority — a bound if fan-out grows.
+
+## Caller-layer discrimination (fable pre-bot P1, same branch)
+
+The raw cap refusal would have classified as a backend failure in the #492 error-shape model (non-context error → onSendFailure → teardown), killing every delivered in-flight request on a merely-saturated HEALTHY backend and re-entering the same fan-out cold — a self-inflicted outage loop strictly worse than the unbounded map. Fixed with a THIRD identity class: `ErrTooManyPending` sentinel (host.go), `%w`-wrapped by SendRPC, and an `errors.Is` branch in all three request handlers BEFORE the failure fall-through → retryable 503 + Retry-After, NO teardown (doc-lifecycle also rolls back its optimistic refcount — the refusal is pre-delivery). Caller-layer regression: `TestLazyProxy_ToolsCall_PendingCapSaturation_Retryable503NoTeardown` (negative-controlled: pre-fix 200/-32603 + teardown).

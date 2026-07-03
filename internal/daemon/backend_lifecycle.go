@@ -109,7 +109,7 @@ func (h *StdioHost) SendRPC(ctx context.Context, body []byte) ([]byte, error) {
 	// error is pre-delivery — nothing reached the backend, retry-safe.
 	if len(h.pending) >= maxPendingRequests {
 		h.pendingMu.Unlock()
-		return nil, fmt.Errorf("too many pending requests (%d in flight)", maxPendingRequests)
+		return nil, fmt.Errorf("%w (%d in flight)", ErrTooManyPending, maxPendingRequests)
 	}
 	h.pending[internalID] = respCh
 	h.pendingMu.Unlock()
