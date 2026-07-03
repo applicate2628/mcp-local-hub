@@ -33,11 +33,69 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
 )
+
+// trustAuditEmitTimeout bounds the best-effort supervisor-events.log write
+// so a wedged log writer can never hang the (already-succeeded) trust verb.
+// Mirrors strictModeAuditEmitTimeout.
+const trustAuditEmitTimeout = 5 * time.Second
+
+// trustAuditStateDirFn resolves the state dir that holds
+// supervisor-events.log for the trust-root audit emit. A package var so a
+// unit test can point it at a temp dir; production resolves the real state
+// dir. A resolve failure skips the (non-fatal) audit.
+var trustAuditStateDirFn = api.DaemonStateDir
+
+// emitTrustRootChangedEvent records a best-effort trust-root-{add,remove}
+// row to supervisor-events.log after a trust-boundary mutation ACTUALLY
+// changed the store (the caller gates on the *Detailed `changed` flag, so
+// an idempotent already-trusted add / absent-root remove never logs a
+// spurious authorization-boundary change — mirroring the GUI handler's
+// publishTrustedRootAudit discipline).
+//
+// The CLI `trust`/`untrust` verbs run as a short-lived process with no GUI
+// *Broadcaster (the mechanism that persists gui-events.log), so — unlike the
+// GUI POST/DELETE /api/lsp/trusted-roots handler — they open the
+// process-agnostic on-disk supervisor-events.log directly, the same
+// open-emit-close idiom as emitStrictModeChangedEvent / emitLivenessEvent.
+// The body carries the raw requested root, the CANONICAL root the store
+// actually applied (passed in from the *Detailed mutation, computed once
+// inside the store's held flock — a second out-of-band canonicalize could
+// resolve a symlink differently and name a path the store never touched),
+// the acting OS user, and the resulting trusted-root count (best-effort
+// re-read; count omitted on a read failure). Best-effort throughout: an
+// open/emit failure must NEVER fail the command — this is observability, not
+// a gate, and the mutation has already succeeded.
+func emitTrustRootChangedEvent(event, root, canonicalRoot string) {
+	stateDir, err := trustAuditStateDirFn()
+	if err != nil || stateDir == "" {
+		return
+	}
+	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+	if err != nil {
+		return
+	}
+	defer func() { _ = logger.Close() }()
+	body := map[string]any{
+		"root":           root,
+		"canonical_root": canonicalRoot,
+		"actor":          api.CurrentOSUser(),
+	}
+	if f, loadErr := api.LoadDefaultLSPTrustedRoots(); loadErr == nil && f != nil {
+		body["count"] = len(f.Roots)
+	}
+	_ = logger.EmitWithTimeout(api.SupervisorEvent{
+		Severity: api.SupervisorEventSeverityInfo,
+		Source:   api.SupervisorEventSourceLifecycle,
+		Event:    event,
+		Body:     body,
+	}, trustAuditEmitTimeout)
+}
 
 // newTrustCmd builds the `mcphub trust` command group: a default
 // `trust <path>` (bless) plus a `trust list` subcommand. `untrust` is a
@@ -135,10 +193,14 @@ func runTrustAdd(out io.Writer, raw string) error {
 	if err != nil {
 		return err
 	}
-	if err := api.BlessDefaultTrustedRoot(root); err != nil {
+	canonical, changed, err := api.BlessDefaultTrustedRootDetailed(root)
+	if err != nil {
 		return fmt.Errorf("trust %q: %w", root, err)
 	}
 	fmt.Fprintf(out, "Trusted workspace folder: %s\n", root)
+	if changed {
+		emitTrustRootChangedEvent("trust-root-add", root, canonical)
+	}
 	return nil
 }
 
@@ -150,10 +212,14 @@ func runUntrust(out io.Writer, raw string) error {
 	if err != nil {
 		return err
 	}
-	if err := api.RemoveDefaultTrustedRoot(root); err != nil {
+	canonical, changed, err := api.RemoveDefaultTrustedRootDetailed(root)
+	if err != nil {
 		return fmt.Errorf("untrust %q: %w", root, err)
 	}
 	fmt.Fprintf(out, "Untrusted workspace folder: %s\n", root)
+	if changed {
+		emitTrustRootChangedEvent("trust-root-remove", root, canonical)
+	}
 	return nil
 }
 

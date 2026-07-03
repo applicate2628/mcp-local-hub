@@ -1,12 +1,14 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -350,5 +352,116 @@ func TestInstallAllHandler_EmptyResults_200EmptyArray(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"install_results":[]`) {
 		t.Errorf("empty results must serialize as []: %q", rec.Body.String())
+	}
+}
+
+// ---- operator-action audit rows (bug
+// 2026-07-01-gui-events-coverage-gaps-uninstall-cleanbackups) ----
+//
+// The single-install /api/install route already emits a gui-events.log
+// operator-action row (install.go), but its two sibling fleet-mutation
+// routes — DELETE /api/install/:server (uninstall) and POST /api/install-all
+// (bulk) — did not. Both commit real fleet mutations, so both must leave an
+// audit row via the single-owner PublishOperatorAction. The other install
+// test servers build a bare &Server{} whose events *Broadcaster is nil (the
+// row no-ops); these tests wire a LIVE Broadcaster so the row is observable.
+
+func newAuditingInstallRoutesServer(t *testing.T, u *fakeUninstaller, b *fakeInstallBulk) *Server {
+	t.Helper()
+	s := &Server{mux: http.NewServeMux(), uninstaller: u, installBulk: b, events: NewBroadcaster()}
+	t.Cleanup(func() { s.events.Close() })
+	registerInstallRoutes(s)
+	return s
+}
+
+func TestUninstallHandler_EmitsOperatorActionAudit(t *testing.T) {
+	u := &fakeUninstaller{report: &api.UninstallReport{Server: "demo"}}
+	s := newAuditingInstallRoutesServer(t, u, &fakeInstallBulk{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	rec := deleteReq(t, s, "/api/install/demo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	select {
+	case ev := <-ch:
+		if ev.Type != "operator-action" || ev.Body["action"] != "uninstall" {
+			t.Fatalf("event = %+v, want operator-action/uninstall", ev)
+		}
+		if ev.Body["server"] != "demo" {
+			t.Errorf("server = %v, want demo", ev.Body["server"])
+		}
+		if actor, _ := ev.Body["actor"].(string); actor == "" {
+			t.Errorf("actor empty, want the OS user")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no operator-action event after a successful uninstall")
+	}
+}
+
+func TestInstallAllHandler_EmitsOperatorActionAudit(t *testing.T) {
+	// One row succeeds, one fails → a single summary row with installed=1,
+	// failed=1, and the explicit ?servers subset echoed as `requested`.
+	b := &fakeInstallBulk{results: []api.InstallResult{
+		{Server: "memory"},
+		{Server: "time", Err: errors.New("port 9131 already in use")},
+	}}
+	s := newAuditingInstallRoutesServer(t, &fakeUninstaller{}, b)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	rec := postNoBody(t, s, "/api/install-all?servers=memory,time")
+	if rec.Code != http.StatusMultiStatus {
+		t.Fatalf("status = %d, want 207; body=%s", rec.Code, rec.Body.String())
+	}
+	select {
+	case ev := <-ch:
+		if ev.Type != "operator-action" || ev.Body["action"] != "install-all" {
+			t.Fatalf("event = %+v, want operator-action/install-all", ev)
+		}
+		// Subscribe delivers the live Event struct (no JSON round-trip), so
+		// the counts stay the original Go ints.
+		if inst, _ := ev.Body["installed"].(int); inst != 1 {
+			t.Errorf("installed = %v, want 1", ev.Body["installed"])
+		}
+		if failed, _ := ev.Body["failed"].(int); failed != 1 {
+			t.Errorf("failed = %v, want 1", ev.Body["failed"])
+		}
+		reqd, _ := ev.Body["requested"].([]string)
+		if len(reqd) != 2 || reqd[0] != "memory" || reqd[1] != "time" {
+			t.Errorf("requested = %v, want [memory time]", ev.Body["requested"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no operator-action event after install-all")
+	}
+}
+
+func TestInstallAllHandler_AuditRequestedAllWhenNoFilter(t *testing.T) {
+	b := &fakeInstallBulk{results: []api.InstallResult{{Server: "memory"}}}
+	s := newAuditingInstallRoutesServer(t, &fakeUninstaller{}, b)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	rec := postNoBody(t, s, "/api/install-all")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	select {
+	case ev := <-ch:
+		if ev.Body["requested"] != "all" {
+			t.Errorf("requested = %v, want \"all\" when no ?servers filter", ev.Body["requested"])
+		}
+		if inst, _ := ev.Body["installed"].(int); inst != 1 {
+			t.Errorf("installed = %v, want 1", ev.Body["installed"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no operator-action event after install-all")
 	}
 }

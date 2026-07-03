@@ -213,3 +213,105 @@ func trustListContainsRoot(listOut, root string) bool {
 	}
 	return strings.Contains(listOut, filepath.Clean(root))
 }
+
+// ---------------------------------------------------------------------------
+// Audit trail (bug 2026-07-01-cli-trust-command-no-audit-trail): a
+// trust/untrust that CHANGES the shared authorization boundary must leave a
+// supervisor-events.log row (the CLI verbs run as a short-lived process with
+// no GUI *Broadcaster, so they open the process-agnostic on-disk event log
+// directly, mirroring emitStrictModeChangedEvent). An idempotent no-op must
+// NOT emit a spurious authorization-boundary-change row — matching the GUI
+// handler's changed-gated publishTrustedRootAudit. withTrustStore points
+// DaemonStateDir (where supervisor-events.log lands) at a temp tree, so the
+// real event log is never touched.
+// ---------------------------------------------------------------------------
+
+func TestTrustAdd_ChangedEmitsSupervisorAuditEvent(t *testing.T) {
+	dir := withTrustStore(t)
+	ws := absForTest(t)
+	if out, err := runTrustCmdGroup(t, ws); err != nil {
+		t.Fatalf("trust %s: %v\noutput: %s", ws, err, out)
+	}
+	events := readSupervisorEventLogLines(t, filepath.Join(dir, api.SupervisorEventLogFileLeaf))
+	found := findSupervisorEventByName(events, "trust-root-add")
+	if found == nil {
+		t.Fatalf("no trust-root-add event in supervisor-events.log; got %d lines: %+v", len(events), events)
+	}
+	if found.Severity != api.SupervisorEventSeverityInfo {
+		t.Errorf("severity = %q, want %q", found.Severity, api.SupervisorEventSeverityInfo)
+	}
+	if found.Source != api.SupervisorEventSourceLifecycle {
+		t.Errorf("source = %q, want %q", found.Source, api.SupervisorEventSourceLifecycle)
+	}
+	if root, _ := found.Body["root"].(string); root == "" {
+		t.Errorf("body.root empty, want the requested root")
+	}
+	if cr, _ := found.Body["canonical_root"].(string); cr == "" {
+		t.Errorf("body.canonical_root empty, want the store's applied canonical root")
+	}
+	// Numbers survive the JSONL round-trip as float64.
+	if cnt, _ := found.Body["count"].(float64); cnt != 1 {
+		t.Errorf("body.count = %v, want 1", found.Body["count"])
+	}
+	if actor, _ := found.Body["actor"].(string); actor == "" {
+		t.Errorf("body.actor empty, want the OS user")
+	}
+}
+
+func TestTrustAdd_IdempotentNoOp_NoAuditEvent(t *testing.T) {
+	dir := withTrustStore(t)
+	ws := absForTest(t)
+	if _, err := runTrustCmdGroup(t, ws); err != nil {
+		t.Fatalf("first trust: %v", err)
+	}
+	if _, err := runTrustCmdGroup(t, ws); err != nil {
+		t.Fatalf("second (idempotent) trust: %v", err)
+	}
+	events := readSupervisorEventLogLines(t, filepath.Join(dir, api.SupervisorEventLogFileLeaf))
+	n := 0
+	for i := range events {
+		if events[i].Event == "trust-root-add" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("trust-root-add emitted %d times, want exactly 1 (the second add is an idempotent no-op that must not audit)", n)
+	}
+}
+
+func TestUntrust_ChangedEmitsSupervisorAuditEvent(t *testing.T) {
+	dir := withTrustStore(t)
+	ws := absForTest(t)
+	if _, err := runTrustCmdGroup(t, ws); err != nil {
+		t.Fatalf("seed trust: %v", err)
+	}
+	if _, err := runUntrustCmdGroup(t, ws); err != nil {
+		t.Fatalf("untrust: %v", err)
+	}
+	events := readSupervisorEventLogLines(t, filepath.Join(dir, api.SupervisorEventLogFileLeaf))
+	found := findSupervisorEventByName(events, "trust-root-remove")
+	if found == nil {
+		t.Fatalf("no trust-root-remove event; got %d lines: %+v", len(events), events)
+	}
+	if found.Source != api.SupervisorEventSourceLifecycle {
+		t.Errorf("source = %q, want %q", found.Source, api.SupervisorEventSourceLifecycle)
+	}
+	cnt, ok := found.Body["count"].(float64)
+	if !ok {
+		t.Errorf("body.count missing or non-numeric: %v", found.Body["count"])
+	} else if cnt != 0 {
+		t.Errorf("body.count = %v, want 0 (store empty after removing the sole root)", cnt)
+	}
+}
+
+func TestUntrust_AbsentRoot_NoAuditEvent(t *testing.T) {
+	dir := withTrustStore(t)
+	ws := absForTest(t) // never trusted
+	if _, err := runUntrustCmdGroup(t, ws); err != nil {
+		t.Fatalf("untrust of an absent root should be an idempotent no-op success: %v", err)
+	}
+	events := readSupervisorEventLogLines(t, filepath.Join(dir, api.SupervisorEventLogFileLeaf))
+	if found := findSupervisorEventByName(events, "trust-root-remove"); found != nil {
+		t.Fatalf("untrust of an absent root must NOT audit (idempotent no-op); got %+v", found)
+	}
+}
