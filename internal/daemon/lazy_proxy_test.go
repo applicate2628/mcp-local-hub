@@ -3576,3 +3576,264 @@ func TestLazyProxy_WatchdogBranchB_TransientLoadErrorRetainsOrphanTimer(t *testi
 		t.Fatalf("Lifecycle.Stop count = %d, want >= 1 (orphan teardown)", sc)
 	}
 }
+
+// --- Edge 1 (idle-reap Configured-stomp) + Edge 2 (warm doc-lifecycle
+// --- delivered-then-cancel refcount desync) test doubles + tests -------------
+
+// gatedStopLifecycle lets a test pause an idle reap mid-teardown: Materialize
+// returns instantly (so a tools/call can warm the backend), but Stop() blocks on
+// releaseStop after signaling stopEntered — so the reap is parked AFTER its
+// generation bump + endpoint-nil but BEFORE its terminal Configured write.
+type gatedStopLifecycle struct {
+	stopEntered chan struct{}
+	releaseStop chan struct{}
+	enteredOnce sync.Once
+	stopCount   atomic.Int32
+}
+
+func (f *gatedStopLifecycle) Kind() string { return "mcp-language-server" }
+
+func (f *gatedStopLifecycle) Materialize(ctx context.Context) (MCPEndpoint, error) {
+	return &fakeEndpoint{parent: &fakeLifecycle{kind: "mcp-language-server"}}, nil
+}
+
+func (f *gatedStopLifecycle) Stop() error {
+	f.stopCount.Add(1)
+	f.enteredOnce.Do(func() { close(f.stopEntered) })
+	<-f.releaseStop
+	return nil
+}
+
+// warmDocLifecycle models a WARM backend for the doc-lifecycle refcount tests.
+// Non-doc sends (the warming tools/call) return success instantly. A
+// didOpen/didClose send signals docReached (delivered) and then either blocks on
+// the request ctx and returns ctx.Err() (docBlockOnCtx: DELIVERED-then-await-cut)
+// or returns docErr immediately (a pre-delivery send failure). docSendCount counts
+// only doc sends that actually reached the backend — the refcount-retained
+// assertion checks it does not climb on an absorbed duplicate open.
+type warmDocLifecycle struct {
+	kind          string
+	docBlockOnCtx bool
+	docErr        error
+
+	docReached   chan struct{}
+	reachedOnce  sync.Once
+	sendCount    atomic.Int32
+	docSendCount atomic.Int32
+	stopCount    atomic.Int32
+}
+
+func (f *warmDocLifecycle) Kind() string { return f.kind }
+
+func (f *warmDocLifecycle) Materialize(ctx context.Context) (MCPEndpoint, error) {
+	return &warmDocEndpoint{parent: f}, nil
+}
+
+func (f *warmDocLifecycle) Stop() error { f.stopCount.Add(1); return nil }
+
+type warmDocEndpoint struct {
+	parent *warmDocLifecycle
+	closed atomic.Bool
+}
+
+func (e *warmDocEndpoint) SendRequest(ctx context.Context, req *JSONRPCRequest) (*JSONRPCResponse, error) {
+	if e.closed.Load() {
+		return nil, errors.New("endpoint closed")
+	}
+	e.parent.sendCount.Add(1)
+	if req.Method == "textDocument/didOpen" || req.Method == "textDocument/didClose" {
+		e.parent.docSendCount.Add(1)
+		e.parent.reachedOnce.Do(func() {
+			if e.parent.docReached != nil {
+				close(e.parent.docReached)
+			}
+		})
+		if e.parent.docBlockOnCtx {
+			<-ctx.Done() // delivered; the await outlives the client → ctx.Err()
+			return nil, ctx.Err()
+		}
+		if e.parent.docErr != nil {
+			return nil, e.parent.docErr
+		}
+	}
+	return &JSONRPCResponse{Jsonrpc: "2.0", ID: req.ID, Result: json.RawMessage(`{"ok":true}`)}, nil
+}
+
+func (e *warmDocEndpoint) Close() error { e.closed.Store(true); return nil }
+
+// postDocNotificationCtx is postDocNotification with a caller-supplied context so
+// a test can cancel the client request AFTER the notification is delivered.
+func postDocNotificationCtx(t *testing.T, h http.Handler, method, uri string, ctx context.Context) *httptest.ResponseRecorder {
+	t.Helper()
+	body := fmt.Sprintf(`{"jsonrpc":"2.0","method":%q,"params":{"textDocument":{"uri":%q}}}`, method, uri)
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/mcp", strings.NewReader(body)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	return rr
+}
+
+// TestLazyProxy_IdleReap_StaleConfiguredWriteNoStompsNewerStarting is the Edge 1
+// guard: the idle reaper's terminal Configured write is routed through the
+// single-owner gen-guarded reconcile, so a reap whose generation was superseded by
+// a concurrent republish/reserve NO-OPs instead of stomping the newer Starting row
+// back to Configured for the cold-materialize window (which would make other
+// proxies' cold-start gate / hard cap undercount by one).
+func TestLazyProxy_IdleReap_StaleConfiguredWriteNoStompsNewerStarting(t *testing.T) {
+	f := &gatedStopLifecycle{stopEntered: make(chan struct{}), releaseStop: make(chan struct{})}
+	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	seed := api.NewRegistry(regPath)
+	seed.Put(api.WorkspaceEntry{
+		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
+		Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python", Lifecycle: "",
+	})
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	p := NewLazyProxy(LazyProxyConfig{
+		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
+		BackendKind: "mcp-language-server", Lifecycle: f, RegistryPath: regPath,
+		InflightMinRetryGap:   10 * time.Millisecond,
+		ToolsCallDebounce:     100 * time.Millisecond,
+		IdleBackendTTL:        50 * time.Millisecond,
+		IdleBackendCheckEvery: time.Hour, // no auto-tick; the reap is driven manually
+	})
+	stopProxyOnCleanup(t, p)
+	h := p.Handler()
+
+	// Warm the backend so the idle reaper has an Active row to reap.
+	if rr := postRPC(t, h, "tools/call", 1); rr.Code != http.StatusOK {
+		t.Fatalf("warm code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleActive {
+		t.Fatalf("setup lifecycle=%q, want Active", e.Lifecycle)
+	}
+
+	// Drive the reap with a far-future `now` so the idle-TTL check passes. It bumps
+	// the generation, nils the endpoint, then blocks in the gated Stop() BEFORE its
+	// terminal Configured write.
+	reapDone := make(chan struct{})
+	go func() { p.reapIdleBackend(time.Now().Add(time.Hour)); close(reapDone) }()
+	<-f.stopEntered
+
+	// While the reap is parked mid-teardown, a materialize republishes an endpoint
+	// and claims the row Starting under a NEWER generation — exactly what
+	// publishMaterializedEndpoint does. In production the reaping flag serializes
+	// this; here the superseded-generation state is constructed directly to prove
+	// the gen guard. The reap's captured generation is now stale.
+	p.mu.Lock()
+	p.endpoint = &fakeEndpoint{parent: &fakeLifecycle{kind: "mcp-language-server"}}
+	p.endpointGeneration++
+	p.lastWrittenLifecycle = ""
+	p.warmed = false
+	p.endpointPublishedAt = time.Now()
+	p.startingSince = time.Time{}
+	newGen := p.endpointGeneration
+	p.reconcileRegistryLifecycleLocked(newGen) // sanctioned Starting write (endpoint!=nil, !warmed)
+	p.mu.Unlock()
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleStarting {
+		t.Fatalf("post-republish lifecycle=%q, want Starting", e.Lifecycle)
+	}
+
+	// Let the stale reap finish; its gen-guarded Configured write must no-op.
+	close(f.releaseStop)
+	<-reapDone
+
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleStarting {
+		t.Fatalf("lifecycle after stale reap = %q, want Starting (stale idle-reap Configured write must not stomp the newer row — Edge 1)", e.Lifecycle)
+	}
+}
+
+// TestLazyProxy_DocLifecycle_WarmDeliveredThenClientCancel_KeepsRefcount is the
+// Edge 2 guard: on the WARM notification path (raw client ctx, no probation budget),
+// a didOpen that is DELIVERED to the backend and then outlives the client deadline
+// must answer 202 with the refcount KEPT — not roll it back (which desynced the
+// count and duplicated the next upstream open).
+func TestLazyProxy_DocLifecycle_WarmDeliveredThenClientCancel_KeepsRefcount(t *testing.T) {
+	f := &warmDocLifecycle{kind: "mcp-language-server", docBlockOnCtx: true, docReached: make(chan struct{})}
+	p, _ := newTestProxy(t, "mcp-language-server", nil)
+	p.cfg.Lifecycle = f
+	h := p.Handler()
+	const uri = "file:///ws/foo.go"
+
+	// Warm so the doc forward runs on the WARM path.
+	if rr := postRPC(t, h, "tools/call", 1); rr.Code != http.StatusOK {
+		t.Fatalf("warm tools/call code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !p.isWarmed() {
+		t.Fatal("backend not warmed after tools/call")
+	}
+
+	// First didOpen: delivered, then the client cancels while the backend is still
+	// (slowly) processing. Delivered → 202 with the refcount kept.
+	ctx, cancel := context.WithCancel(context.Background())
+	rrCh := make(chan *httptest.ResponseRecorder, 1)
+	go func() { rrCh <- postDocNotificationCtx(t, h, "textDocument/didOpen", uri, ctx) }()
+	<-f.docReached // delivered to the backend
+	cancel()       // client gives up AFTER delivery
+	rr := <-rrCh
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("delivered-then-cancel didOpen code = %d, want 202 (delivered, refcount kept); body=%s", rr.Code, rr.Body.String())
+	}
+	if sc := f.stopCount.Load(); sc != 0 {
+		t.Fatalf("client-cancel after delivery tore down the backend: stopCount=%d", sc)
+	}
+	if got := f.docSendCount.Load(); got != 1 {
+		t.Fatalf("docSendCount = %d after first didOpen, want 1", got)
+	}
+
+	// The refcount was KEPT (0->1 retained), so a duplicate didOpen for the same URI
+	// is ABSORBED (1->2) and never re-forwarded. Under the desync bug the first open
+	// was rolled back, so this would be a fresh 0->1 forward reaching the backend
+	// again (docSendCount climbs to 2). A bounded ctx keeps the assertion from
+	// hanging on the bug path (where the second open forwards and blocks on ctx).
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+	rr2 := postDocNotificationCtx(t, h, "textDocument/didOpen", uri, ctx2)
+	if rr2.Code != http.StatusAccepted {
+		t.Fatalf("duplicate didOpen code = %d, want 202 (absorbed); body=%s", rr2.Code, rr2.Body.String())
+	}
+	if got := f.docSendCount.Load(); got != 1 {
+		t.Fatalf("docSendCount = %d after duplicate didOpen, want 1 (first open's refcount must be retained — no duplicate upstream open)", got)
+	}
+}
+
+// TestLazyProxy_DocLifecycle_WarmPreDeliveryFailure_RollsBackAndTearsDown proves
+// the Edge 2 delivered⇒keep classification does NOT swallow a genuine send failure:
+// a didOpen whose send fails with a NON-context error before the write commits is
+// NOT delivered, so the handler still rolls back the refcount and tears the backend
+// down (row Failed, 200 JSON-RPC error — never a 202-delivered).
+func TestLazyProxy_DocLifecycle_WarmPreDeliveryFailure_RollsBackAndTearsDown(t *testing.T) {
+	f := &warmDocLifecycle{kind: "mcp-language-server", docErr: errors.New("backend host stopped"), docReached: make(chan struct{})}
+	p, regPath := newTestProxy(t, "mcp-language-server", nil)
+	p.cfg.Lifecycle = f
+	h := p.Handler()
+	const uri = "file:///ws/foo.go"
+
+	if rr := postRPC(t, h, "tools/call", 1); rr.Code != http.StatusOK {
+		t.Fatalf("warm tools/call code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !p.isWarmed() {
+		t.Fatal("backend not warmed after tools/call")
+	}
+
+	rr := postDocNotificationCtx(t, h, "textDocument/didOpen", uri, context.Background())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("pre-delivery-failed didOpen code = %d, want 200 (JSON-RPC error, NOT 202-delivered); body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "backend host stopped") {
+		t.Fatalf("error body = %s, want it to carry the backend failure", rr.Body.String())
+	}
+	if sc := f.stopCount.Load(); sc != 1 {
+		t.Fatalf("stopCount = %d after pre-delivery send failure, want 1 (teardown must fire)", sc)
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleFailed {
+		t.Fatalf("lifecycle after send failure = %q, want Failed", e.Lifecycle)
+	}
+	p.docRefsMu.Lock()
+	n := len(p.docRefs)
+	p.docRefsMu.Unlock()
+	if n != 0 {
+		t.Fatalf("docRefs = %d entries after failed didOpen, want 0 (rolled back + teardown reset)", n)
+	}
+}

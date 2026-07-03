@@ -963,29 +963,40 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 	defer cancel()
 	resp, err := ep.SendRequest(callCtx, req)
 	if err != nil {
-		// Probation deadline (Finding 1): our MaterializeWaitBudget elapsed while
-		// the backend was still indexing, and the client ctx is still live. But
-		// SendRequest writes the notification to the backend's stdin BEFORE it
-		// waits for a reply (SendRPC: writeStdin precedes the ctx select), so a
-		// DeadlineExceeded here means the notification has ALREADY been handed to
-		// the backend. A textDocument/didOpen|didClose is fire-and-forget, so
-		// treat it as delivered: 202 and KEEP the refcount. Rolling back + 503
-		// (the earlier F2 behavior) would make the client re-forward the SAME
-		// notification on retry → a duplicate didOpen (protocol violation) or a
-		// premature repeated didClose. No teardown — the backend is healthy, just
-		// slow; warmed stays false (the backend has not yet RESPONDED).
-		if p.isProbationDeadline(r.Context(), warmed, err) {
+		// DELIVERED-then-await-cut classification (Edge 2). SendRPC writes the
+		// notification to the backend's stdin BEFORE it awaits a reply (writeStdin
+		// precedes the ctx-select), and the endpoint's ONLY context-error surface is
+		// that post-write select — so ANY context cancel/deadline error means the
+		// notification was ALREADY handed to the backend. A textDocument/
+		// didOpen|didClose is fire-and-forget, so both DELIVERED shapes answer 202
+		// and KEEP the refcount:
+		//   (a) our own probation budget fired while the client ctx is still live
+		//       (cold path, !warmed — isProbationDeadline); and
+		//   (b) the client's own ctx canceled/deadlined AFTER delivery — the WARM
+		//       path awaits under the raw client ctx with NO budget bound (see
+		//       boundedCallCtx), so a slow-but-delivered notification that outlives
+		//       the client deadline lands here (isClientCancelErr). Before this fix
+		//       the warm path rolled the refcount back on (b), desyncing the count:
+		//       the proxy thought the doc was closed while the backend held it open,
+		//       so the next didOpen duplicated the upstream open (protocol violation)
+		//       / a didClose fired a premature repeated close. Keeping the refcount +
+		//       202-delivered is the established notification contract. No teardown —
+		//       the backend is healthy, just slow; warmed stays false until it
+		//       actually RESPONDS.
+		// RESIDUAL: isClientCancelErr also fires if the client ctx is canceled at the
+		// same instant writeStdin fails (broken pipe, pre-delivery). That rare
+		// double-fault keeps a phantom refcount instead of rolling back, but it
+		// self-heals — the broken pipe makes the next real forward fail into
+		// onSendFailure → resetDocRefs, clearing it.
+		if p.isProbationDeadline(r.Context(), warmed, err) || isClientCancelErr(r.Context(), err) {
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
-		// Any other error means the notification was NOT delivered, so roll back
-		// the optimistic refcount transition to keep the count consistent.
+		// Genuine send failure BEFORE the write committed (backend dead/stopped,
+		// endpoint closed, marshal error): the notification was NOT delivered. Roll
+		// back the optimistic refcount transition and tear down so the next request
+		// re-materializes a fresh backend.
 		p.rollbackDocRef(uri, isOpen, docEpoch)
-		// Client-cancel is not a backend failure — see handleToolsCall.
-		if isClientCancelErr(r.Context(), err) {
-			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
-			return
-		}
 		p.onSendFailure(gen, err)
 		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 		return
@@ -1660,6 +1671,7 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 		return
 	}
 	var ep MCPEndpoint
+	var gen uint64
 	p.mu.Lock()
 	if p.endpoint == nil ||
 		p.reaping ||
@@ -1673,6 +1685,10 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 	p.reaping = true
 	p.endpoint = nil
 	p.endpointGeneration++
+	// Capture the generation THIS reap bumped so the terminal Configured write
+	// (below) can no-op if a materialize republished an endpoint over our teardown
+	// and bumped the generation again (Edge 1).
+	gen = p.endpointGeneration
 	p.lastWrittenLifecycle = "" // Predicate 2: reset the shadow on the gen bump
 	p.warmed = false
 	p.endpointPublishedAt = time.Time{}
@@ -1693,9 +1709,20 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 		return
 	}
 	p.gate.Forget(p.inflightKey())
-	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
-		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleConfigured, "")
+	// Edge 1: route the terminal Configured write through the SINGLE authoritative
+	// lifecycle writer (reconcileRegistryLifecycleLocked) under p.mu instead of an
+	// out-of-band PutLifecycle. Post-teardown the derived state is Configured
+	// (endpoint nil, not starting), and the reconcile is gen-guarded on the
+	// generation this reap bumped: if a materialize republished an endpoint after
+	// our teardown it bumped the generation again, so this stale reap's write
+	// no-ops rather than stomping the newer row back to Configured for the ~30-45s
+	// cold window (which would make other proxies' cold-start gate / hard cap
+	// undercount by one). Folding it in also keeps the lastWrittenLifecycle shadow
+	// consistent with the registry — the last non-reconcile Configured writer is
+	// removed. Stop() still precedes the Configured write (see above), preserving
+	// "don't claim Configured until the backend is actually stopped".
 	p.mu.Lock()
+	p.reconcileRegistryLifecycleLocked(gen)
 	p.reaping = false
 	p.mu.Unlock()
 }
