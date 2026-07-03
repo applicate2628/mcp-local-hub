@@ -223,6 +223,47 @@ describe("CatalogScreen", () => {
     expect(installCalls).toEqual(["POST"]);
   });
 
+  it("treats a 200 {warning} install as success and surfaces the warning (bot PR #494 P2)", async () => {
+    let statusCallCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/catalog": () => jsonResponse(200, { catalog: [entry("time")] }),
+        "/api/status": () => {
+          statusCallCount += 1;
+          return statusCallCount === 1
+            ? jsonResponse(200, [] as DaemonStatus[])
+            : jsonResponse(200, [
+                { server: "time", daemon: "default", port: 9131, state: "Running" } as DaemonStatus,
+              ]);
+        },
+        "/api/server/readiness": () => readyReadiness("time"),
+        // The shipped manifest installed, but a shadowing disk copy was ignored:
+        // 200 + a warning body instead of 204. Must NOT fall to the error path.
+        "/api/install": () =>
+          jsonResponse(200, {
+            warning: `disk manifest for shipped server "time" is ignored; rename your copy to customize`,
+          }),
+        "/api/marketplace": emptyMarketplace,
+      }) as unknown as typeof fetch,
+    );
+
+    render(<CatalogScreen />);
+    const installBtn = await screen.findByTestId("catalog-install-time");
+    fireEvent.click(installBtn);
+    const confirmBtn = await screen.findByTestId("catalog-install-confirm-time");
+    await waitFor(() => expect((confirmBtn as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(confirmBtn);
+
+    // Installed badge appears (200 is success) AND the warning is surfaced;
+    // no bogus "OK" error row.
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-installed-time")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("catalog-error-time")).toBeNull();
+    const warn = await screen.findByTestId("catalog-install-warning-time");
+    expect(warn.textContent).toContain("is ignored");
+  });
+
   it("shows an inline error and keeps the Install button when /api/install fails", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
