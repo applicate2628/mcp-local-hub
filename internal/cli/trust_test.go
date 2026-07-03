@@ -296,8 +296,11 @@ func TestUntrust_ChangedEmitsSupervisorAuditEvent(t *testing.T) {
 	if found.Source != api.SupervisorEventSourceLifecycle {
 		t.Errorf("source = %q, want %q", found.Source, api.SupervisorEventSourceLifecycle)
 	}
-	if cnt, _ := found.Body["count"].(float64); cnt != 0 {
-		t.Errorf("body.count = %v, want 0 (store empty after removing the sole root)", found.Body["count"])
+	cnt, ok := found.Body["count"].(float64)
+	if !ok {
+		t.Errorf("body.count missing or non-numeric: %v", found.Body["count"])
+	} else if cnt != 0 {
+		t.Errorf("body.count = %v, want 0 (store empty after removing the sole root)", cnt)
 	}
 }
 

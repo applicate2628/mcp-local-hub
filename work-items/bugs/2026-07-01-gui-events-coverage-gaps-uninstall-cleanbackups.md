@@ -1,7 +1,8 @@
 ---
-status: open
+status: fixed
 severity: low
 context: adjacent-finding
+fixed: 2026-07-03 — feat/audit-trail-coverage-completion (e7c828a0). DELETE /api/install/:server and POST /api/install-all now emit gui-events.log operator-action rows via the single-owner PublishOperatorAction after the mutation commits (uninstall: {server}; install-all: one summary row {requested, installed, failed}). The backups/clean row was already closed in #476 (noted below) — that part stays accurate.
 ---
 
 # gui-events.log operator-action coverage gaps: uninstall, install-all

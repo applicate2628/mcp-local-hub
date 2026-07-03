@@ -1,7 +1,8 @@
 ---
-status: open
+status: fixed
 severity: low
 context: adjacent-finding
+fixed: 2026-07-03 — feat/audit-trail-coverage-completion (e7c828a0). runTrustAdd/runUntrust switched to the *Detailed store mutators; a changed==true mutation emits a best-effort trust-root-{add,remove} supervisor-events.log row (source=lifecycle, body={root, canonical_root, actor, count}) via emitTrustRootChangedEvent — the suggested emitStrictModeChangedEvent idiom exactly. Idempotent no-ops audit nothing. Tests cover changed-emits + no-op-silent for both verbs.
 ---
 
 # `mcphub trust`/`untrust` CLI verbs mutate the trusted-roots boundary with no audit trail
