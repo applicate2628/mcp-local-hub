@@ -3681,6 +3681,18 @@ func postDocNotificationCtx(t *testing.T, h http.Handler, method, uri string, ct
 	return rr
 }
 
+// postRPCCtx is postRPC with a caller-supplied context (e.g. pre-canceled, to
+// model a client that disconnected while the send failure surfaced).
+func postRPCCtx(t *testing.T, h http.Handler, method string, id int, ctx context.Context) *httptest.ResponseRecorder {
+	t.Helper()
+	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":%q,"params":{}}`, id, method)
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/mcp", strings.NewReader(body)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	return rr
+}
+
 // TestLazyProxy_IdleReap_StaleConfiguredWriteNoStompsNewerStarting is the Edge 1
 // guard: the idle reaper's terminal Configured write is routed through the
 // single-owner gen-guarded reconcile, so a reap whose generation was superseded by
@@ -4028,5 +4040,120 @@ func TestLazyProxy_DocLifecycle_CancelWithDeadBackend_TearsDownNotKeep(t *testin
 	}
 	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleActive {
 		t.Fatalf("lifecycle after fresh forward = %q, want Active", e.Lifecycle)
+	}
+}
+
+// TestLazyProxy_DocLifecycle_BrokenPipeUnderCanceledCtx_RollsBackAndTearsDown is
+// the bot PR #492 r3 P2 guard (the ROOT defect): the delivered classification
+// must key on the ERROR IDENTITY, never on ambient ctx state. A broken-pipe
+// send failure (the notification was NEVER written) arriving while the client
+// ctx happens to be already canceled classified as delivered⇒keep under the old
+// ctx-state isClientCancelErr — composed with an alive-reading probe (the
+// procExited drain window), that kept a refcount for an undelivered
+// notification PERMANENTLY (the retained count absorbs the retry, so no
+// subsequent send ever fires onSendFailure/resetDocRefs). With the
+// identity-keyed predicate the io error classifies NOT-delivered regardless of
+// ctx state → rollback + teardown.
+func TestLazyProxy_DocLifecycle_BrokenPipeUnderCanceledCtx_RollsBackAndTearsDown(t *testing.T) {
+	f := &warmDocLifecycle{kind: "mcp-language-server", docErr: errors.New("write stdin: broken pipe"), docReached: make(chan struct{})}
+	// backendDead stays FALSE: the probe reads ALIVE (models the drain window the
+	// bot composed with — the classification must not even reach the probe).
+	p, regPath := newTestProxy(t, "mcp-language-server", nil)
+	p.cfg.Lifecycle = f
+	h := p.Handler()
+	const uri = "file:///ws/foo.go"
+
+	// Warm so the doc forward runs on the WARM path (raw client ctx).
+	if rr := postRPC(t, h, "tools/call", 1); rr.Code != http.StatusOK {
+		t.Fatalf("warm tools/call code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !p.isWarmed() {
+		t.Fatal("backend not warmed after tools/call")
+	}
+
+	// didOpen under a PRE-CANCELED client ctx; the send fails with a non-context
+	// io error (never delivered). Old predicate: ctx.Err()!=nil → "client cancel"
+	// → 202 + keep (phantom). New predicate: identity fails → failure path.
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	rr := postDocNotificationCtx(t, h, "textDocument/didOpen", uri, canceled)
+	if rr.Code == http.StatusAccepted {
+		t.Fatalf("broken-pipe under canceled ctx answered 202 (delivered⇒keep for an UNDELIVERED notification — PR #492 r3 P2); body=%s", rr.Body.String())
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("broken-pipe under canceled ctx code = %d, want 200 (JSON-RPC error envelope); body=%s", rr.Code, rr.Body.String())
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "broken pipe") {
+		t.Fatalf("error body = %s, want it to carry the io failure", body)
+	}
+	if sc := f.stopCount.Load(); sc != 1 {
+		t.Fatalf("stopCount = %d, want 1 (undelivered send failure must tear down)", sc)
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleFailed {
+		t.Fatalf("lifecycle = %q, want Failed", e.Lifecycle)
+	}
+	p.docRefsMu.Lock()
+	n := len(p.docRefs)
+	p.docRefsMu.Unlock()
+	if n != 0 {
+		t.Fatalf("docRefs = %d entries, want 0 (refcount for an undelivered didOpen must be rolled back)", n)
+	}
+
+	// A later didOpen must be a genuine first-open forward on a fresh backend —
+	// under the phantom bug it would be absorbed forever.
+	f.docErr = nil
+	time.Sleep(20 * time.Millisecond) // past the inflight retry-throttle gap
+	rr2 := postDocNotificationCtx(t, h, "textDocument/didOpen", uri, context.Background())
+	if rr2.Code != http.StatusAccepted {
+		t.Fatalf("fresh didOpen after teardown code = %d, want 202; body=%s", rr2.Code, rr2.Body.String())
+	}
+	if got := f.docSendCount.Load(); got != 2 {
+		t.Fatalf("docSendCount = %d, want 2 (fresh didOpen must FORWARD, not be absorbed by a phantom refcount)", got)
+	}
+}
+
+// TestLazyProxy_ToolsCall_BrokenPipeUnderCanceledCtx_TearsDownGenericError is
+// the request-path arm of the PR #492 r3 P2 root fix: the same identity-keyed
+// isClientCancelErr serves handleToolsCall/handleForward, so a broken-pipe send
+// failure under an already-canceled client ctx must take the BACKEND-FAILURE
+// path (teardown + generic -32603) — never the client-cancel skip-teardown
+// branch (which left a dead endpoint cached), and never the non-retryable
+// "delivered" 500 (isColdHoldCeilingDeadline requires a DeadlineExceeded
+// identity + live client, so an io error cannot reach it).
+func TestLazyProxy_ToolsCall_BrokenPipeUnderCanceledCtx_TearsDownGenericError(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, regPath := newTestProxy(t, "mcp-language-server", f)
+	h := p.Handler()
+
+	// Warm first (success path), then arm the broken-pipe send failure.
+	if rr := postRPC(t, h, "tools/call", 1); rr.Code != http.StatusOK {
+		t.Fatalf("warm tools/call code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleActive {
+		t.Fatalf("setup lifecycle=%q, want Active", e.Lifecycle)
+	}
+	f.sendRequestErr = errors.New("write stdin: broken pipe")
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	rr := postRPCCtx(t, h, "tools/call", 2, canceled)
+	if rr.Code == http.StatusInternalServerError {
+		t.Fatalf("broken-pipe under canceled ctx returned the non-retryable delivered 500 (duplicate-safety inverted); body=%s", rr.Body.String())
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200 (generic JSON-RPC error envelope); body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "broken pipe") {
+		t.Fatalf("error body = %s, want the io failure", body)
+	}
+	if strings.Contains(body, "delivered") {
+		t.Fatalf("error body claims delivery for an undelivered request: %s", body)
+	}
+	if sc := f.stopCount.Load(); sc != 1 {
+		t.Fatalf("stopCount = %d, want 1 (backend send failure must tear down even under a canceled client ctx)", sc)
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleFailed {
+		t.Fatalf("lifecycle = %q, want Failed (dead endpoint must be evicted + stamped, not left cached)", e.Lifecycle)
 	}
 }

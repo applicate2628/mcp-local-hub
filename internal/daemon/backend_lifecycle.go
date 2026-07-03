@@ -478,22 +478,35 @@ func (e *stdioHostEndpoint) Close() error {
 	return nil
 }
 
-// BackendAlive reports whether the backing host's death channels are still open
-// — i.e. whether SendRPC's failure arms (h.done / h.childExited) could have been
-// READY when a context-cancel arm won its select (bot PR #492 r2 P2). Go's
-// select picks pseudo-randomly among ready cases, so a SendRPC ctx error does
-// NOT prove the backend outlived the call; the doc-lifecycle delivered⇒keep
-// classification probes this before retaining a refcount against a possibly-dead
-// backend. Race-correctness: both channels are close-only broadcasts (done is
-// closed exactly once by Stop under the stopped guard; childExited exactly once
-// by the watcher goroutine), and a select-default read of a possibly-closed
-// channel is non-blocking and race-free per the Go memory model. Deliberately
-// matches SendRPC's own death arms — procExited (Phase-1 OS-exit before pipe
-// drain) is excluded because SendRPC does not select on it either, so during
-// the drain window SendRPC itself still classifies as pure ctx-cancel. The
-// probe is a point-in-time read: a backend dying a microsecond AFTER it returns
-// true is indistinguishable from a pure cancel and is caught by the next
-// forwarded request's send failure, exactly as before.
+// BackendAlive reports whether the backing subprocess is still OS-alive and the
+// host usable — the question the doc-lifecycle delivered⇒keep classification
+// needs answered before retaining a refcount (bot PR #492 r2 P2): Go's select
+// picks pseudo-randomly among ready cases, so a SendRPC ctx error does NOT
+// prove the backend outlived the call. Keeping a refcount is sound only if the
+// backend can still HONOR the delivered notification, so the probe covers all
+// three death signals:
+//
+//   - done (closed exactly once by Stop under the stopped guard) — host stopped;
+//   - childExited (closed exactly once by the watcher at Phase 4, after the
+//     bounded pipe drain) — child fully reaped;
+//   - procExited (closed exactly once by the watcher at Phase 1, at OS-exit) —
+//     ADDED in r3 (bot PR #492 r3 P2 point 3): during the drain window
+//     (procExited closed, childExited still open for up to pipeDrainTimeout) a
+//     post-write ctx cancel is a genuine context-shaped "delivered" error, but
+//     the bytes went into a DEAD process's pipe buffer — delivered-to-nowhere.
+//     An OS-dead child can never honor the notification, so keeping would pin a
+//     refcount no backend owns and cache an endpoint whose next use is
+//     guaranteed to fail. (The r2 exclusion rationale — "match SendRPC's own
+//     select arms" — answered which arms could have RACED the ctx arm; the
+//     decision this probe actually serves is whether KEEPING is sound, and that
+//     is OS-liveness.)
+//
+// Race-correctness: all three channels are close-only broadcasts closed exactly
+// once, and a select-default read of a possibly-closed channel is non-blocking
+// and race-free per the Go memory model. The probe is a point-in-time read: a
+// backend dying a microsecond AFTER it returns true is indistinguishable from a
+// pure cancel and is caught by the next forwarded request's send failure,
+// exactly as before.
 func (e *stdioHostEndpoint) BackendAlive() bool {
 	if e.closed.Load() {
 		return false
@@ -502,6 +515,8 @@ func (e *stdioHostEndpoint) BackendAlive() bool {
 	case <-e.host.done:
 		return false
 	case <-e.host.childExited:
+		return false
+	case <-e.host.procExited:
 		return false
 	default:
 		return true

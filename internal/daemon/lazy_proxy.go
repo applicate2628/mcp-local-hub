@@ -963,13 +963,22 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 	defer cancel()
 	resp, err := ep.SendRequest(callCtx, req)
 	if err != nil {
-		// DELIVERED-then-await-cut classification (Edge 2). SendRPC writes the
-		// notification to the backend's stdin BEFORE it awaits a reply (writeStdin
-		// precedes the ctx-select), and the endpoint's ONLY context-error surface is
-		// that post-write select — so ANY context cancel/deadline error means the
-		// notification was ALREADY handed to the backend. A textDocument/
-		// didOpen|didClose is fire-and-forget, so both DELIVERED shapes answer 202
-		// and KEEP the refcount:
+		// DELIVERED-then-await-cut classification (Edge 2), keyed on ERROR IDENTITY
+		// (bot PR #492 r3 P2). The SendRPC invariant this rests on: SendRPC returns
+		// a context-shaped error (bare ctx.Err() — context.Canceled/
+		// DeadlineExceeded) ONLY from its post-write select, i.e. only after
+		// writeStdin returned nil; and per the io.Writer contract a nil write error
+		// means the FULL notification line was accepted by the backend's stdin.
+		// Every pre-/mid-write failure surfaces as a wrapped NON-context error
+		// ("invalid JSON-RPC request:", "marshal rewritten:", "write stdin: %w" —
+		// writeStdin takes no ctx, so a context error can never hide inside it) or
+		// as the death-arm strings ("backend host stopped"/"backend subprocess
+		// exited"). Therefore: err is context-shaped ⇔ the notification was fully
+		// written before the wait was cut ⇔ DELIVERED. A broken-pipe/EOF/host-
+		// stopped error must NEVER classify as delivered — even under an already-
+		// canceled client ctx (isClientCancelErr now enforces this by identity, not
+		// ctx state). A textDocument/didOpen|didClose is fire-and-forget, so both
+		// DELIVERED shapes answer 202 and KEEP the refcount:
 		//   (a) our own probation budget fired while the client ctx is still live
 		//       (cold path, !warmed — isProbationDeadline); and
 		//   (b) the client's own ctx canceled/deadlined AFTER delivery — the WARM
@@ -983,11 +992,10 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 		//       202-delivered is the established notification contract. No teardown —
 		//       the backend is healthy, just slow; warmed stays false until it
 		//       actually RESPONDS.
-		// RESIDUAL: isClientCancelErr also fires if the client ctx is canceled at the
-		// same instant writeStdin fails (broken pipe, pre-delivery). That rare
-		// double-fault keeps a phantom refcount instead of rolling back, but it
-		// self-heals — the broken pipe makes the next real forward fail into
-		// onSendFailure → resetDocRefs, clearing it.
+		// (The r2 RESIDUAL — "client-cancel + broken-pipe keeps a phantom refcount"
+		// — is CLOSED by the identity-keyed isClientCancelErr: a pre-delivery io
+		// failure under a canceled ctx now classifies NOT-delivered and takes the
+		// failure path below.)
 		if p.isProbationDeadline(r.Context(), warmed, err) || isClientCancelErr(r.Context(), err) {
 			// Bot PR #492 r2 P2: a ctx-shaped error does NOT prove the backend
 			// outlived the call — Go's select picks pseudo-randomly among READY
@@ -1128,21 +1136,38 @@ func docURIFromParams(params json.RawMessage) string {
 	return p.TextDocument.URI
 }
 
-// isClientCancelErr reports whether err is the consequence of the client's
-// request context being canceled or timing out, rather than a backend
-// failure. Treats any error with the request context already canceled as
-// client-cancel — SendRequest commonly wraps context.Canceled inside a
-// "write stdin:" or "send rpc:" wrapper, and errors.Is would miss the
-// unwrapped case. If the context is still Live we fall back to
-// errors.Is(err, context.Canceled|DeadlineExceeded) for belt-and-braces.
+// isClientCancelErr reports whether err IS a context cancel/deadline error
+// attributable to the client's own request context — the single owner of the
+// client-cancel classification for all three forward handlers (tools/call,
+// generic forward, doc lifecycle).
+//
+// Both conjuncts are load-bearing (bot PR #492 r3 P2 — the ROOT fix):
+//
+//   - ERROR IDENTITY (errors.Is Canceled/DeadlineExceeded): the classification
+//     keys on what the returned error IS, never on ambient ctx state. The old
+//     shape ("ctx.Err() != nil → true for ANY err") classified a broken-pipe /
+//     EOF / host-stopped send failure as client-cancel whenever the client had
+//     ALSO canceled — for the doc path that kept a refcount for a notification
+//     that was NEVER delivered (permanent phantom: the retained count absorbs
+//     the retry, so no later send ever trips teardown), and for the request
+//     paths it skipped the teardown of a genuinely dead backend. The old
+//     comment's fear ("SendRequest wraps context.Canceled where errors.Is would
+//     miss it") is false for the actual error surface: SendRPC returns ctx.Err()
+//     BARE from its post-write select, and every pre-/mid-write failure wraps a
+//     NON-context io/marshal error ("write stdin: %w" — writeStdin takes no
+//     ctx), so errors.Is is exact.
+//   - CLIENT ATTRIBUTION (ctx.Err() != nil, on the CLIENT's ctx, not the
+//     ceiling/budget-wrapped callCtx): a context-shaped error while the client
+//     is still live came from an internal bound (hold ceiling / probation
+//     budget) and is owned by the earlier isColdHoldCeilingDeadline /
+//     isProbationDeadline checks — this conjunct keeps the predicate correct
+//     even if a caller reorders those checks.
 func isClientCancelErr(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
 	}
-	if ctx.Err() != nil {
-		return true
-	}
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	return (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) &&
+		ctx.Err() != nil
 }
 
 // backendAliveProber is the OPTIONAL MCPEndpoint facet the doc-lifecycle
