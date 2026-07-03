@@ -3,7 +3,7 @@ package api
 import "testing"
 
 // TestExtractSSEPayload pins the adapter the three G3 health-path probes
-// (singleHealthProbe, sendForceMaterializeTools, liveCapabilitySubSection)
+// (singleHealthProbe, sendForceMaterializeTools, capabilityListSubSection)
 // use to pull a JSON-RPC response out of a fully-buffered Streamable-HTTP
 // body. extractSSEPayload routes SSE bodies through the package's event-aware
 // readSSEResponse, so the matrix here asserts EVENT-BOUNDARY-aware,
