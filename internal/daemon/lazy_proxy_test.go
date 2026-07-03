@@ -3605,22 +3605,26 @@ func (f *gatedStopLifecycle) Stop() error {
 }
 
 // warmDocLifecycle models a WARM backend for the doc-lifecycle refcount tests.
-// Non-doc sends (the warming tools/call) return success instantly. A
+// Non-doc sends (the warming tools/call) return success instantly. The FIRST
 // didOpen/didClose send signals docReached (delivered) and then either blocks on
-// the request ctx and returns ctx.Err() (docBlockOnCtx: DELIVERED-then-await-cut)
-// or returns docErr immediately (a pre-delivery send failure). docSendCount counts
+// the request ctx and returns ctx.Err() (docBlockFirstOnCtx: DELIVERED-then-
+// await-cut; first-only so a post-teardown re-forward completes normally) or
+// returns docErr immediately (a pre-delivery send failure). docSendCount counts
 // only doc sends that actually reached the backend — the refcount-retained
-// assertion checks it does not climb on an absorbed duplicate open.
+// assertion checks it does not climb on an absorbed duplicate open. backendDead
+// drives the BackendAlive probe: true models the child having exited at the same
+// instant the ctx arm won SendRPC's select (PR #492 r2 P2).
 type warmDocLifecycle struct {
-	kind          string
-	docBlockOnCtx bool
-	docErr        error
+	kind               string
+	docBlockFirstOnCtx bool
+	docErr             error
 
 	docReached   chan struct{}
 	reachedOnce  sync.Once
 	sendCount    atomic.Int32
 	docSendCount atomic.Int32
 	stopCount    atomic.Int32
+	backendDead  atomic.Bool
 }
 
 func (f *warmDocLifecycle) Kind() string { return f.kind }
@@ -3642,13 +3646,13 @@ func (e *warmDocEndpoint) SendRequest(ctx context.Context, req *JSONRPCRequest) 
 	}
 	e.parent.sendCount.Add(1)
 	if req.Method == "textDocument/didOpen" || req.Method == "textDocument/didClose" {
-		e.parent.docSendCount.Add(1)
+		n := e.parent.docSendCount.Add(1)
 		e.parent.reachedOnce.Do(func() {
 			if e.parent.docReached != nil {
 				close(e.parent.docReached)
 			}
 		})
-		if e.parent.docBlockOnCtx {
+		if e.parent.docBlockFirstOnCtx && n == 1 {
 			<-ctx.Done() // delivered; the await outlives the client → ctx.Err()
 			return nil, ctx.Err()
 		}
@@ -3660,6 +3664,10 @@ func (e *warmDocEndpoint) SendRequest(ctx context.Context, req *JSONRPCRequest) 
 }
 
 func (e *warmDocEndpoint) Close() error { e.closed.Store(true); return nil }
+
+// BackendAlive implements the optional backendAliveProber facet: the probe the
+// delivered⇒keep classification consults on a ctx-shaped error (PR #492 r2 P2).
+func (e *warmDocEndpoint) BackendAlive() bool { return !e.parent.backendDead.Load() }
 
 // postDocNotificationCtx is postDocNotification with a caller-supplied context so
 // a test can cancel the client request AFTER the notification is delivered.
@@ -3847,9 +3855,12 @@ func TestLazyProxy_RejectedPublish_ClearsStaleStartingSince_ReapSettlesConfigure
 // Edge 2 guard: on the WARM notification path (raw client ctx, no probation budget),
 // a didOpen that is DELIVERED to the backend and then outlives the client deadline
 // must answer 202 with the refcount KEPT — not roll it back (which desynced the
-// count and duplicated the next upstream open).
+// count and duplicated the next upstream open). The backend stays ALIVE here
+// (backendDead false), so this also pins the probe-positive side of the PR #492
+// r2 P2 guard: a pure post-delivery cancel with a live backend keeps exactly as
+// before.
 func TestLazyProxy_DocLifecycle_WarmDeliveredThenClientCancel_KeepsRefcount(t *testing.T) {
-	f := &warmDocLifecycle{kind: "mcp-language-server", docBlockOnCtx: true, docReached: make(chan struct{})}
+	f := &warmDocLifecycle{kind: "mcp-language-server", docBlockFirstOnCtx: true, docReached: make(chan struct{})}
 	p, _ := newTestProxy(t, "mcp-language-server", nil)
 	p.cfg.Lifecycle = f
 	h := p.Handler()
@@ -3934,5 +3945,88 @@ func TestLazyProxy_DocLifecycle_WarmPreDeliveryFailure_RollsBackAndTearsDown(t *
 	p.docRefsMu.Unlock()
 	if n != 0 {
 		t.Fatalf("docRefs = %d entries after failed didOpen, want 0 (rolled back + teardown reset)", n)
+	}
+}
+
+// TestLazyProxy_DocLifecycle_CancelWithDeadBackend_TearsDownNotKeep is the bot
+// PR #492 r2 P2 guard: Go's select picks pseudo-randomly among READY cases, so a
+// doc notification whose client cancel fires at the same instant the subprocess
+// dies can surface as a ctx error from SendRPC even though done/childExited was
+// ALSO ready. The delivered⇒keep classification must NOT keep on that shape —
+// keeping would cache a DEAD endpoint (onSendFailure skipped) and retain a
+// refcount the dead backend no longer honors, so the next didOpen for the uri
+// would be absorbed (never forwarded) until some unrelated forward tripped
+// teardown. Select-arm forcing is impractical, so the test engineers the
+// observable state the race produces: err = ctx.Canceled AND the backend's death
+// probe reads dead when the classification runs → assert the FAILURE path
+// (rollback + teardown + row Failed + error response, never 202), and a fresh
+// didOpen afterwards re-materializes and forwards. The probe-positive twin
+// (ctx.Canceled + live backend → 202 + keep) is pinned by
+// TestLazyProxy_DocLifecycle_WarmDeliveredThenClientCancel_KeepsRefcount.
+func TestLazyProxy_DocLifecycle_CancelWithDeadBackend_TearsDownNotKeep(t *testing.T) {
+	f := &warmDocLifecycle{kind: "mcp-language-server", docBlockFirstOnCtx: true, docReached: make(chan struct{})}
+	p, regPath := newTestProxy(t, "mcp-language-server", nil)
+	p.cfg.Lifecycle = f
+	h := p.Handler()
+	const uri = "file:///ws/foo.go"
+
+	// Warm so the doc forward runs on the WARM path (raw client ctx).
+	if rr := postRPC(t, h, "tools/call", 1); rr.Code != http.StatusOK {
+		t.Fatalf("warm tools/call code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if !p.isWarmed() {
+		t.Fatal("backend not warmed after tools/call")
+	}
+
+	// didOpen delivered, then the backend dies AND the client cancels — SendRPC
+	// returns the ctx arm (the fake models select picking ctx over childExited).
+	ctx, cancel := context.WithCancel(context.Background())
+	rrCh := make(chan *httptest.ResponseRecorder, 1)
+	go func() { rrCh <- postDocNotificationCtx(t, h, "textDocument/didOpen", uri, ctx) }()
+	<-f.docReached            // delivered to the backend
+	f.backendDead.Store(true) // child exits...
+	cancel()                  // ...as the client cancel fires (both arms "ready")
+	rr := <-rrCh
+
+	// FAILURE path, not delivered⇒keep: error response (JSON-RPC 200 envelope),
+	// teardown fired, row Failed, refcount not retained.
+	if rr.Code == http.StatusAccepted {
+		t.Fatalf("cancel-with-dead-backend didOpen answered 202 (delivered⇒keep) — dead endpoint cached + refcount desync (PR #492 r2 P2); body=%s", rr.Body.String())
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("cancel-with-dead-backend didOpen code = %d, want 200 (JSON-RPC error envelope); body=%s", rr.Code, rr.Body.String())
+	}
+	if body := rr.Body.String(); !strings.Contains(body, "backend dead at doc-notification cancel/deadline") {
+		t.Fatalf("error body = %s, want the dead-backend classification message", body)
+	}
+	if sc := f.stopCount.Load(); sc != 1 {
+		t.Fatalf("stopCount = %d, want 1 (onSendFailure teardown must fire — dead endpoint must not stay cached)", sc)
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleFailed {
+		t.Fatalf("lifecycle = %q, want Failed (teardown stamps the registry)", e.Lifecycle)
+	}
+	p.docRefsMu.Lock()
+	n := len(p.docRefs)
+	p.docRefsMu.Unlock()
+	if n != 0 {
+		t.Fatalf("docRefs = %d entries, want 0 (rollback + teardown reset — no phantom refcount against the dead backend)", n)
+	}
+
+	// The next didOpen must re-materialize a FRESH backend and forward (0->1) —
+	// under the keep bug it would be absorbed by the retained refcount and the
+	// dead endpoint would still be cached. docBlockFirstOnCtx blocks only the
+	// first doc send, so this re-forward completes; the fake's backend is healthy
+	// again for the fresh endpoint.
+	f.backendDead.Store(false)
+	time.Sleep(20 * time.Millisecond) // past the inflight retry-throttle gap
+	rr2 := postDocNotificationCtx(t, h, "textDocument/didOpen", uri, context.Background())
+	if rr2.Code != http.StatusAccepted {
+		t.Fatalf("fresh didOpen after teardown code = %d, want 202; body=%s", rr2.Code, rr2.Body.String())
+	}
+	if got := f.docSendCount.Load(); got != 2 {
+		t.Fatalf("docSendCount = %d, want 2 (fresh didOpen must FORWARD to the re-materialized backend, not be absorbed)", got)
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleActive {
+		t.Fatalf("lifecycle after fresh forward = %q, want Active", e.Lifecycle)
 	}
 }

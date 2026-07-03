@@ -989,11 +989,31 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 		// self-heals — the broken pipe makes the next real forward fail into
 		// onSendFailure → resetDocRefs, clearing it.
 		if p.isProbationDeadline(r.Context(), warmed, err) || isClientCancelErr(r.Context(), err) {
-			w.WriteHeader(http.StatusAccepted)
-			return
+			// Bot PR #492 r2 P2: a ctx-shaped error does NOT prove the backend
+			// outlived the call — Go's select picks pseudo-randomly among READY
+			// cases, so SendRPC can return its ctx arm even though done/childExited
+			// was ALSO ready after the write. Keeping on that shape would cache a
+			// DEAD endpoint (skipping onSendFailure) and retain a refcount the
+			// dead backend no longer honors: the next didOpen for this uri would be
+			// absorbed (never forwarded) and the dead endpoint would linger until
+			// some unrelated forward trips teardown. So before keeping, probe the
+			// backend's own death arms (BackendAlive: non-blocking select-default
+			// on the SAME done/childExited channels SendRPC selects on). Alive →
+			// genuine post-delivery cancel/budget-expiry: 202 + keep, exactly as
+			// before. Dead → fall through to the failure path: the refcount
+			// bookkeeping is moot (teardown's resetDocRefs clears it anyway) and
+			// teardown-now beats a lingering cached dead endpoint. BOTH delivered
+			// arms are guarded — the probation-budget deadline (a) races childExited
+			// identically (our budget and the child's exit simultaneously ready).
+			// Endpoints without the optional probe facet keep the prior contract
+			// (assumed alive).
+			if endpointBackendAlive(ep) {
+				w.WriteHeader(http.StatusAccepted)
+				return
+			}
+			err = fmt.Errorf("backend dead at doc-notification cancel/deadline (delivered, endpoint unusable): %w", err)
 		}
-		// Genuine send failure BEFORE the write committed (backend dead/stopped,
-		// endpoint closed, marshal error): the notification was NOT delivered. Roll
+		// Send failure with the backend dead or the write never committed: roll
 		// back the optimistic refcount transition and tear down so the next request
 		// re-materializes a fresh backend.
 		p.rollbackDocRef(uri, isOpen, docEpoch)
@@ -1123,6 +1143,26 @@ func isClientCancelErr(ctx context.Context, err error) bool {
 		return true
 	}
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// backendAliveProber is the OPTIONAL MCPEndpoint facet the doc-lifecycle
+// delivered⇒keep classification consults before retaining a refcount on a
+// ctx-shaped SendRequest error (bot PR #492 r2 P2). It is a separate facet
+// rather than a new MCPEndpoint method because the probe is stdio-host
+// death-channel knowledge: stdioHostEndpoint (the only production endpoint the
+// lazy proxy fronts) implements it; an endpoint without the facet is assumed
+// alive, which preserves the prior delivered⇒keep contract exactly.
+type backendAliveProber interface {
+	BackendAlive() bool
+}
+
+// endpointBackendAlive probes ep through the optional backendAliveProber facet.
+// Returns true (assume alive → keep) when the endpoint does not expose a probe.
+func endpointBackendAlive(ep MCPEndpoint) bool {
+	if pr, ok := ep.(backendAliveProber); ok {
+		return pr.BackendAlive()
+	}
+	return true
 }
 
 // handleSSE answers GET /mcp. v1 minimal behavior: before materialization,

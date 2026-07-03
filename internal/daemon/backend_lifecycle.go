@@ -478,6 +478,36 @@ func (e *stdioHostEndpoint) Close() error {
 	return nil
 }
 
+// BackendAlive reports whether the backing host's death channels are still open
+// — i.e. whether SendRPC's failure arms (h.done / h.childExited) could have been
+// READY when a context-cancel arm won its select (bot PR #492 r2 P2). Go's
+// select picks pseudo-randomly among ready cases, so a SendRPC ctx error does
+// NOT prove the backend outlived the call; the doc-lifecycle delivered⇒keep
+// classification probes this before retaining a refcount against a possibly-dead
+// backend. Race-correctness: both channels are close-only broadcasts (done is
+// closed exactly once by Stop under the stopped guard; childExited exactly once
+// by the watcher goroutine), and a select-default read of a possibly-closed
+// channel is non-blocking and race-free per the Go memory model. Deliberately
+// matches SendRPC's own death arms — procExited (Phase-1 OS-exit before pipe
+// drain) is excluded because SendRPC does not select on it either, so during
+// the drain window SendRPC itself still classifies as pure ctx-cancel. The
+// probe is a point-in-time read: a backend dying a microsecond AFTER it returns
+// true is indistinguishable from a pure cancel and is caught by the next
+// forwarded request's send failure, exactly as before.
+func (e *stdioHostEndpoint) BackendAlive() bool {
+	if e.closed.Load() {
+		return false
+	}
+	select {
+	case <-e.host.done:
+		return false
+	case <-e.host.childExited:
+		return false
+	default:
+		return true
+	}
+}
+
 // wrapInitErr preserves the concrete init error but annotates it so the lazy
 // proxy can distinguish startup failures from missing-binary failures. Any
 // error here becomes LifecycleFailed (not Missing) since the binary WAS found
