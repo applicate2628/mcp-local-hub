@@ -59,14 +59,38 @@ func SecureCreateClientConfigIfMissing(path string, contents []byte) (created bo
 	return secureCreateClientConfigIfMissingImpl(path, contents, false /*skipParentGate*/)
 }
 
-// secureCreateClientConfigIfMissingSkipParentGate is the relax-lane
-// sibling — runs the same hardened pipeline with the parent-dir gate
-// BYPASSED. Used by secureCreateClientConfigIfMissingWithOperatorOpt
-// when the operator (implicitly via default-relax, or explicitly via
-// MCPHUB_ALLOW_UNHARDENED_CLIENT_WRITE) opted out of the strict
-// parent gate. Per-file allowlist-DACL hardening at create time
-// still applies, so the new stub is owner-only regardless of
-// parent broadening.
-func secureCreateClientConfigIfMissingSkipParentGate(path string, contents []byte) (created bool, err error) {
+// SecureCreateOwnerOnlyFile is the generic owner-only secure-create
+// primitive: it creates a NEW file at `path` with a PROTECTED
+// allowlist-only DACL installed on the handle at NtCreateFile time
+// (Windows) / O_CREAT|O_EXCL|O_NOFOLLOW mode 0600 (POSIX), writes
+// `contents` into that owner-only handle (the bytes never touch an
+// inheriting file), then publishes it via a no-replace atomic rename.
+//
+// The parent-dir DACL/mode gate is BYPASSED (this is the relax-lane
+// sibling of SecureCreateClientConfigIfMissing). The new file is
+// therefore owner-only REGARDLESS of how broad the parent directory's
+// ACL is, and a broadened parent does NOT block the create — the same
+// posture the vault READ-hardening path uses (relax the parent, keep
+// the file owner-only), so a caller on a sandbox-broadened
+// %LOCALAPPDATA% still writes an owner-only file.
+//
+// Semantics are create-if-missing:
+//
+//   - created=true,  err=nil: this call wrote `contents` via the
+//     hardened owner-only pipeline.
+//   - created=false, err=nil: a regular file already existed at `path`
+//     (idempotent success; `contents` were NOT written). A caller that
+//     needs a guaranteed-fresh file (e.g. a random-named temp) must
+//     treat this as "name taken — retry with a new name", never as a
+//     write to an owner-only file.
+//   - created=false, err!=nil: refusal (symlink / non-regular entry at
+//     the destination) or a hard pipeline failure.
+//
+// This primitive is NOT client-config-specific: it does no JSON/schema
+// validation of `contents`. Both the client-config init-stub relax
+// lane (secureCreateClientConfigIfMissingWithOperatorOpt) and the
+// `mcphub secrets edit` decrypted-vault temp create call it, so the
+// owner-only-create logic has a single owner.
+func SecureCreateOwnerOnlyFile(path string, contents []byte) (created bool, err error) {
 	return secureCreateClientConfigIfMissingImpl(path, contents, true /*skipParentGate*/)
 }
