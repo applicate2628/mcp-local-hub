@@ -3744,6 +3744,105 @@ func TestLazyProxy_IdleReap_StaleConfiguredWriteNoStompsNewerStarting(t *testing
 	}
 }
 
+// TestLazyProxy_RejectedPublish_ClearsStaleStartingSince_ReapSettlesConfigured is
+// the bot PR #492 r1 P2 guard: a flight that RESERVED (flock Starting write +
+// markStartingReserved) and then died at the publish-rejection gate
+// (errLazyProxyUnpublishable, mid-reap) must NOT leave its startingSince marker
+// armed — the reap's final single-owner reconcile would otherwise derive a phantom
+// Starting row (no endpoint, no active flight) that counts against every other
+// proxy's cold-start gate / hard cap until Branch B's ≤5m probation timer. The
+// rejection branch zeroes the marker at the flight's terminal moment, so the reap
+// settles the row to Configured and a fresh cold request finds a clean slate.
+func TestLazyProxy_RejectedPublish_ClearsStaleStartingSince_ReapSettlesConfigured(t *testing.T) {
+	f := &gatedStopLifecycle{stopEntered: make(chan struct{}), releaseStop: make(chan struct{})}
+	regPath := filepath.Join(t.TempDir(), "r.yaml")
+	seed := api.NewRegistry(regPath)
+	seed.Put(api.WorkspaceEntry{
+		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
+		Backend: "mcp-language-server", TaskName: "mcp-local-hub-lsp-abcd1234-python", Lifecycle: "",
+	})
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	p := NewLazyProxy(LazyProxyConfig{
+		WorkspaceKey: "abcd1234", WorkspacePath: "D:/test/ws", Language: "python",
+		BackendKind: "mcp-language-server", Lifecycle: f, RegistryPath: regPath,
+		InflightMinRetryGap:   10 * time.Millisecond,
+		ToolsCallDebounce:     100 * time.Millisecond,
+		IdleBackendTTL:        50 * time.Millisecond,
+		IdleBackendCheckEvery: time.Hour, // no auto-tick; the reap is driven manually
+	})
+	stopProxyOnCleanup(t, p)
+	h := p.Handler()
+
+	// Warm the backend so the idle reaper has an Active row to reap.
+	if rr := postRPC(t, h, "tools/call", 1); rr.Code != http.StatusOK {
+		t.Fatalf("warm code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleActive {
+		t.Fatalf("setup lifecycle=%q, want Active", e.Lifecycle)
+	}
+
+	// Park the reap mid-teardown: it bumps the generation, nils the endpoint, then
+	// blocks in the gated Stop() BEFORE its final reconcile.
+	reapDone := make(chan struct{})
+	go func() { p.reapIdleBackend(time.Now().Add(time.Hour)); close(reapDone) }()
+	<-f.stopEntered
+
+	// Model the pre-reap-cohort caller mid-flow during the reap window: its
+	// reserve writes the flock Starting row and markStartingReserved arms
+	// startingSince (endpoint is nil while the reap is in flight).
+	if _, err := p.reserveMaterializedSlot(); err != nil {
+		t.Fatalf("reserve during reap window: %v", err)
+	}
+	p.markStartingReserved(time.Now().UTC())
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleStarting {
+		t.Fatalf("post-reserve lifecycle=%q, want Starting", e.Lifecycle)
+	}
+
+	// The cohort flight's materialize reaches publishMaterializedEndpoint while
+	// p.reaping is still held → rejection (errLazyProxyUnpublishable). The FIX
+	// zeroes startingSince under the same p.mu hold that observed reaping, BEFORE
+	// the rejection's own (gated, blocking) Lifecycle.Stop call.
+	pubErr := make(chan error, 1)
+	go func() {
+		pubErr <- p.publishMaterializedEndpoint(&fakeEndpoint{parent: &fakeLifecycle{kind: "mcp-language-server"}})
+	}()
+	// stopCount 2 = the rejection path entered its Stop → its marker-clear already ran.
+	waitForCond(t, "publish rejection reached its lifecycle Stop", func() bool {
+		return f.stopCount.Load() >= 2
+	})
+
+	// Release both parked Stops; the reap's final reconcile now derives the row
+	// state with the dead flight's marker GONE.
+	close(f.releaseStop)
+	<-reapDone
+	if err := <-pubErr; !errors.Is(err, errLazyProxyUnpublishable) {
+		t.Fatalf("publish during reap returned %v, want errLazyProxyUnpublishable", err)
+	}
+
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleConfigured {
+		t.Fatalf("lifecycle after reap = %q, want Configured (dead flight's stale startingSince must not persist a phantom Starting — PR #492 r1 P2)", e.Lifecycle)
+	}
+	p.mu.Lock()
+	marker := p.startingSince
+	p.mu.Unlock()
+	if !marker.IsZero() {
+		t.Fatalf("startingSince = %v after rejected publish, want zero (flight-terminal clear)", marker)
+	}
+
+	// A fresh cold request must find a clean slate (Configured row — the state the
+	// cold-start gate / hard cap scans — not a phantom Starting) and warm normally,
+	// proving the normal publish path still reserves, publishes, and reconciles
+	// through to Active.
+	if rr := postRPC(t, h, "tools/call", 2); rr.Code != http.StatusOK {
+		t.Fatalf("fresh cold request after reap: code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleActive {
+		t.Fatalf("lifecycle after fresh warm = %q, want Active", e.Lifecycle)
+	}
+}
+
 // TestLazyProxy_DocLifecycle_WarmDeliveredThenClientCancel_KeepsRefcount is the
 // Edge 2 guard: on the WARM notification path (raw client ctx, no probation budget),
 // a didOpen that is DELIVERED to the backend and then outlives the client deadline

@@ -1350,6 +1350,24 @@ func (p *LazyProxy) publishMaterializedEndpoint(ep MCPEndpoint) error {
 	now := time.Now().UTC()
 	p.mu.Lock()
 	if p.closed.Load() || p.reaping {
+		// This flight is ending WITHOUT a publish (bot PR #492 r1 P2): release its
+		// startingSince marker so a mid-reap final reconcile cannot derive a
+		// phantom Starting row from it — a marker whose flight is dead counts
+		// against every other proxy's cold-start gate / hard cap (until Branch B's
+		// ≤5m probation timer) while no materialize exists to ever warm it. The
+		// clear is FLIGHT-SCOPED by the atomicity of this closed/reaping
+		// observation under p.mu: while reaping is held, ensureMaterialized's spin
+		// blocks every new caller BEFORE reserve/markStartingReserved, and a
+		// closed proxy refuses new callers outright — so no post-rejection flight
+		// can have re-armed the marker; any armed value was set by a caller
+		// feeding THIS singleflight (the fn is the flight's guaranteed terminal
+		// executor even when every bounded waiter abandoned the join, which is why
+		// the clear lives here and not in ensureMaterialized's error branch). No
+		// reconcile here: for the reaping case the reap's own final reconcile
+		// settles the row to derived truth (and writing Configured now would
+		// violate the Stop()-before-Configured ordering); for the closed case
+		// LazyProxy.Stop owns the final state (and clears the marker itself).
+		p.startingSince = time.Time{}
 		p.mu.Unlock()
 		_ = ep.Close()
 		if stopErr := p.cfg.Lifecycle.Stop(); stopErr != nil {
@@ -1388,6 +1406,24 @@ func (p *LazyProxy) publishMaterializedEndpoint(ep MCPEndpoint) error {
 // markStartingReserved records when reserveMaterializedSlot set this row Starting
 // without an endpoint yet published, so the probation watchdog's belt-and-braces
 // branch can reap an orphan Starting row (F1).
+//
+// Marker lifecycle (who clears startingSince, and why the not-cleared paths are
+// deliberate — bot PR #492 r1 P2 triage of every post-mark exit):
+//   - publish success → publishMaterializedEndpoint zeroes it (endpoint installed).
+//   - publish REJECTED (errLazyProxyUnpublishable) → the rejection branch zeroes it
+//     at the fn's terminal moment, so a mid-reap reconcile cannot derive a phantom
+//     Starting from a dead flight's marker (see the comment there).
+//   - teardowns (Stop / onSendFailure / both probation-reap branches / idle reap)
+//     zero it in their own critical sections.
+//   - ErrMaterializeInFlight / waiter ctx-cancel → KEPT armed: the detached flight
+//     is still running; the marker is the truthful "materializing" signal that the
+//     reconcile derives Starting from, and Branch B exempts active flights.
+//   - genuine materialize error (fn ran, failed) and throttle-cached error → KEPT
+//     armed DELIBERATELY: the fn/caller stamps Failed, and the armed marker is
+//     Branch B's only handle on the double-fault where that swallowed registry
+//     write fails (row stuck Starting with no flight — Branch B reaps it ≤5m via
+//     the marker; clearing here would orphan that row forever). When the Failed
+//     stamp landed, Branch B disarms the marker at its next tick without a write.
 func (p *LazyProxy) markStartingReserved(now time.Time) {
 	p.mu.Lock()
 	// Only arm the orphan timer while no endpoint is published; a concurrent
@@ -1726,6 +1762,11 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 	//     markStartingReserved leaves a microseconds-wide gap where this
 	//     reconcile still derives Configured — narrowed from the old ~Stop()-wide
 	//     window, not fully closed; self-heals at publish-time reconcile.
+	//     The INVERSE hazard — a DEAD flight's stale startingSince making this
+	//     reconcile persist a phantom Starting (bot PR #492 r1 P2) — is closed at
+	//     the flight's terminal moment: publishMaterializedEndpoint's rejection
+	//     branch zeroes the marker before this reconcile can observe it (full
+	//     marker lifecycle: markStartingReserved doc).
 	// Folding it in also keeps the lastWrittenLifecycle shadow consistent with
 	// the registry — the last non-reconcile RUNNING-lifecycle Configured writer is
 	// removed (the pre-concurrency startup seeds in ListenAndServe and the CLI
