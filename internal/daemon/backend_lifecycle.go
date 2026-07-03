@@ -102,6 +102,15 @@ func (h *StdioHost) SendRPC(ctx context.Context, body []byte) ([]byte, error) {
 
 	respCh := make(chan json.RawMessage, 1)
 	h.pendingMu.Lock()
+	// Same maxPendingRequests bound handlePOST enforces (host.go): the
+	// await-after-delivery model holds first cold requests longer, so a
+	// fan-out spike on a cold backend would otherwise grow h.pending
+	// unbounded on this path. Refused BEFORE the stdin write, so the
+	// error is pre-delivery — nothing reached the backend, retry-safe.
+	if len(h.pending) >= maxPendingRequests {
+		h.pendingMu.Unlock()
+		return nil, fmt.Errorf("too many pending requests (%d in flight)", maxPendingRequests)
+	}
 	h.pending[internalID] = respCh
 	h.pendingMu.Unlock()
 	defer func() {

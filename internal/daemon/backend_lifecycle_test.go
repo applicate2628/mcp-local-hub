@@ -374,3 +374,63 @@ func TestBackendLifecycle_MaterializeReturnsExistingEndpoint(t *testing.T) {
 		t.Fatal("endpoints must be non-nil on both Materialize calls")
 	}
 }
+
+// TestBackendLifecycle_SendRPCPendingCapRefusesPreDelivery covers
+// work-items/bugs/2026-07-02-sendrpc-pending-uncapped.md: SendRPC must
+// enforce the same maxPendingRequests bound handlePOST does — the
+// await-after-delivery model holds first cold requests longer, so a fan-out
+// spike on a cold backend would otherwise grow h.pending without bound on
+// this path. The refusal fires BEFORE the stdin write (pre-delivery), so a
+// caller can safely retry once slots drain — proven by the drain-then-retry
+// half of the test.
+func TestBackendLifecycle_SendRPCPendingCapRefusesPreDelivery(t *testing.T) {
+	// echoLSPCommand (not fakeLSPCommand): the drain-retry half needs a fake
+	// that actually answers tools/list, mirroring SendRequestPreservesClientID.
+	cmd, args := echoLSPCommand(t)
+	b := NewMcpLanguageServerStdio(McpLanguageServerStdioConfig{
+		WrapperCommand: cmd, WrapperArgs: args, Workspace: t.TempDir(),
+		Language: "python", HandshakeTimeout: 3 * time.Second,
+	})
+	defer func() { _ = b.Stop() }()
+	ep, err := b.Materialize(context.Background())
+	if err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	host := ep.(*stdioHostEndpoint).host
+
+	// Park synthetic pending entries up to the cap (keys far above the
+	// internal counter so they can't collide with the real request below).
+	host.pendingMu.Lock()
+	for i := 0; i < maxPendingRequests; i++ {
+		host.pending[int64(1_000_000+i)] = make(chan json.RawMessage, 1)
+	}
+	host.pendingMu.Unlock()
+	defer func() {
+		host.pendingMu.Lock()
+		for i := 0; i < maxPendingRequests; i++ {
+			delete(host.pending, int64(1_000_000+i))
+		}
+		host.pendingMu.Unlock()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err = host.SendRPC(ctx, []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	if err == nil {
+		t.Fatal("SendRPC at the pending cap must refuse")
+	}
+	if !strings.Contains(err.Error(), "too many pending requests") {
+		t.Fatalf("error = %v, want the too-many-pending refusal", err)
+	}
+
+	// Drain one slot → the retry must go through (pre-delivery refusal is
+	// retry-safe; nothing was written to the backend on the refused call).
+	host.pendingMu.Lock()
+	delete(host.pending, int64(1_000_000))
+	host.pendingMu.Unlock()
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel2()
+	if _, err := host.SendRPC(ctx2, []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)); err != nil {
+		t.Fatalf("SendRPC after draining one slot: %v", err)
+	}
+}
