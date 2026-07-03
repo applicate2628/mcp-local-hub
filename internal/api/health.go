@@ -885,11 +885,18 @@ func (a *API) initializeCapabilitySession(d DaemonStatus) (sessionID string, cap
 		return "", nil, false, fmt.Errorf("initialize: %s", redactErrorDetail(err.Error()))
 	}
 	sessionID = resp.Header.Get("Mcp-Session-Id")
-	raw, readErr := readCapabilityProbeBody(resp)
-	_ = resp.Body.Close()
+	// Status BEFORE body: an initialize rejected with HTTP >= 400 that leaves an
+	// SSE error body open would otherwise make readCapabilityProbeBody wait for a
+	// JSON-RPC response event that never comes (up to the 3s client timeout)
+	// before we return the HTTP error we already have — and the body is discarded
+	// on this path anyway (bot PR #495 P2; the old init likewise closed without
+	// reading on >= 400).
 	if resp.StatusCode >= 400 {
+		_ = resp.Body.Close()
 		return "", nil, false, fmt.Errorf("initialize: HTTP %d", resp.StatusCode)
 	}
+	raw, readErr := readCapabilityProbeBody(resp)
+	_ = resp.Body.Close()
 	// Parse the declared capabilities. Any read/size/parse problem is
 	// non-fatal — caps stays nil and capsPresent false, so realCapabilityRow
 	// falls back to probing all three categories rather than reading the

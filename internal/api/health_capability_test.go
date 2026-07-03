@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // capabilityProbeServer spins up an httptest server that answers the
@@ -398,6 +399,45 @@ func TestRealCapabilityRow_SSEInitStreamStaysOpen_ParsesCapsNoStall(t *testing.T
 	defer mu.Unlock()
 	if counts["prompts/list"] != 0 || counts["resources/list"] != 0 {
 		t.Errorf("undeclared categories PROBED (prompts=%d resources=%d) — the SSE init caps were not parsed (likely a stall→fallback regression)", counts["prompts/list"], counts["resources/list"])
+	}
+}
+
+// TestRealCapabilityRow_SSEInitHTTPErrorFailsFast — bot PR #495 r2 P2: an
+// initialize rejected with HTTP >= 400 that leaves an SSE error body OPEN must
+// return the HTTP error immediately, not wait for readCapabilityProbeBody to
+// look for a JSON-RPC response event that never arrives (up to the 3s client
+// timeout). The status check now precedes the body read. Deterministic
+// window: the regression stalls a hard 3s (the client timeout), the fix
+// returns in ms — a 1.5s bound cleanly separates them without relying on a
+// natural window. All three sub-sections map to the init-error path.
+func TestRealCapabilityRow_SSEInitHTTPErrorFailsFast(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// HTTP 500 with a text/event-stream body that is flushed but never
+		// carries a JSON-RPC response event, and the connection is held open.
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusInternalServerError)
+		if fl, ok := w.(http.Flusher); ok {
+			_, _ = w.Write([]byte(": keep-alive comment\n\n"))
+			fl.Flush()
+		}
+		<-r.Context().Done() // hold the stream open until the client closes it
+	}))
+	defer srv.Close()
+
+	a := &API{}
+	start := time.Now()
+	row, err := a.realCapabilityRow(DaemonStatus{Server: "srv", Daemon: "default", Port: parsePort(t, srv.URL)})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("realCapabilityRow: %v", err)
+	}
+	if elapsed > 1500*time.Millisecond {
+		t.Errorf("realCapabilityRow took %v on an HTTP-500 SSE init — status must be checked BEFORE reading the body (regression stalls to the 3s client timeout)", elapsed)
+	}
+	for name, sub := range map[string]CapabilitySubSection{"Tools": row.Tools, "Prompts": row.Prompts, "Resources": row.Resources} {
+		if sub.State != "error" {
+			t.Errorf("%s.State = %q, want error (initialize HTTP 500 → all categories error)", name, sub.State)
+		}
 	}
 }
 
