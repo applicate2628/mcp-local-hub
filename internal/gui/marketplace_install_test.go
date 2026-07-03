@@ -261,6 +261,33 @@ func TestMarketplaceInstall_HubForwardsRequestedPort(t *testing.T) {
 	}
 }
 
+// Test 7 (decision 2026-07-03) — a one-click hub install whose resolved name
+// collides with a shipped (built-in) server is handled GRACEFULLY, never as an
+// opaque 500. ManifestCreateIn refuses such a name with ErrManifestNameEmbedded;
+// the handler maps that (via errors.Is) to a friendly 400 EMBEDDED_NAME_COLLISION
+// and does not proceed to install. The fake creator returns the sentinel the
+// real write gate produces (Test 1 in the api package proves the real gate wraps
+// it).
+func TestMarketplaceInstall_HubEmbeddedNameCollisionGraceful(t *testing.T) {
+	loader := &fakeMarketplaceEntryLoader{entry: stdioEntry("wolfram"), found: true}
+	picker := &fakeGlobalPortPicker{port: 9205}
+	presence := &fakeServerNamePresence{exists: false}
+	creator := &fakeManifestCreator{err: api.ErrManifestNameEmbedded}
+	installer := &fakeInstaller{}
+	s := newMarketplaceInstallTestServer(loader, picker, presence, &fakeDirectClientWriter{}, creator, installer)
+
+	rec := postInstall(t, s, `{"id":"wolfram","mode":"hub"}`, "same-origin")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (graceful), body=%q", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "EMBEDDED_NAME_COLLISION") {
+		t.Errorf("body missing EMBEDDED_NAME_COLLISION code: %q", rec.Body.String())
+	}
+	if installer.called {
+		t.Error("install must not run after an embedded-name collision refusal")
+	}
+}
+
 func TestMarketplaceInstall_HubNameConflict409(t *testing.T) {
 	loader := &fakeMarketplaceEntryLoader{entry: stdioEntry("memory"), found: true}
 	presence := &fakeServerNamePresence{exists: true}

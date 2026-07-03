@@ -235,6 +235,13 @@ func (a *API) Install(opts InstallOpts) error {
 	if w == nil {
 		w = os.Stderr
 	}
+	// Surface a PRE-EXISTING embed-vs-disk collision (a disk manifest shadowing a
+	// shipped server name that the embed-first read below ignores). Warn only —
+	// never delete the operator's file; NEW such files are refused at
+	// ManifestCreateIn.
+	if warn := embeddedDiskShadowWarning(opts.Server, installShadowWarnDir()); warn != "" {
+		fmt.Fprintf(w, "warning: %s\n", warn)
+	}
 	// 1. Load manifest (embed FS first, disk fallback for dev flow).
 	//    The canonical installed binary resolves manifests from its
 	//    embedded FS so an install launched from any cwd finds the same
@@ -367,6 +374,27 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 	return results
 }
 
+// installShadowWarnDir resolves the disk-fallback dir the pre-existing
+// embed-vs-disk collision warn (embeddedDiskShadowWarning) inspects at the
+// Install / installUsingEmbedFirst emit sites. Package var following the
+// statusInternalDialFn / forceMaterializeProbe seam idiom: production stays
+// on defaultManifestDir (exe-location-derived, not seedable from a test);
+// emit-site tests point it at a temp dir and restore via t.Cleanup.
+var installShadowWarnDir = defaultManifestDir
+
+// EmbeddedDiskShadowWarning returns the operator-facing pre-existing
+// embed-vs-disk collision warning for a server (empty when there is none),
+// computed against the SAME dir + byte-compare the Install / installUsingEmbedFirst
+// emit sites use. It exists so GUI callers can surface the warning in their HTTP
+// RESPONSE (visible to the operator) rather than relying on the CLI Writer, which
+// for a nil-Writer GUI install lands on os.Stderr the operator never sees (bot PR
+// #494 P2). Single owner: embeddedDiskShadowWarning; this is the exported wrapper
+// idiom mirroring IsEmbeddedManifestName. The CLI Install path keeps its own
+// stderr warn for `mcphub install` operators.
+func EmbeddedDiskShadowWarning(server string) string {
+	return embeddedDiskShadowWarning(server, installShadowWarnDir())
+}
+
 // installUsingEmbedFirst is the install entry that loads the manifest
 // via loadManifestYAMLEmbedFirst. Mirrors Install's audit-first +
 // intent-after wiring per Task 10 (plan §62 audit-first canonical).
@@ -374,6 +402,11 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	w := opts.Writer
 	if w == nil {
 		w = os.Stderr
+	}
+	// Same pre-existing embed-vs-disk collision warn as Install (this is the
+	// InstallAllWithOpts per-server entry). Warn only — never delete.
+	if warn := embeddedDiskShadowWarning(opts.Server, installShadowWarnDir()); warn != "" {
+		fmt.Fprintf(w, "warning: %s\n", warn)
 	}
 	data, err := loadManifestYAMLEmbedFirst(opts.Server)
 	if err != nil {

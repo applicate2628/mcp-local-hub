@@ -1095,6 +1095,21 @@ export function AddServerScreen(props: {
         pushToast("danger", `Install failed for ${name}: ${err}`);
         return;
       }
+      // A 200 body carries a pre-existing embed-vs-disk collision warning (a
+      // shadowing disk manifest the shipped install ignored); a 204 is the
+      // common no-warning success. Surface the warning so the operator is not
+      // left believing their edited disk copy was installed (bot PR #494 P2).
+      let installWarning = "";
+      if (resp.status === 200) {
+        const body = (await resp.json().catch(() => ({}))) as { warning?: string };
+        installWarning = (body.warning ?? "").trim();
+      }
+      if (installWarning) {
+        setWarnings([installWarning]);
+        setBanner({ kind: "info", text: `Installed the shipped ${name}. ${installWarning}` });
+        pushToast("warning", `Installed shipped ${name}; a disk copy was ignored.`);
+        return;
+      }
       setWarnings(null);
       setBanner({ kind: "success", text: `Installed ${name}. Daemons will start at next logon (or run "mcphub restart --server ${name}" now).` });
       pushToast("success", `Installed ${name}.`);

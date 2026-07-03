@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -122,6 +123,33 @@ func TestManifestCreateHandler_SurfacesCreateError(t *testing.T) {
 	}
 	if !strings.Contains(body, "internal error") {
 		t.Errorf("body=%q missing sanitized message", body)
+	}
+}
+
+// F1 (Fable pre-bot review of 27bcb3b9) — the AddServer Save path must surface
+// the embed-vs-disk collision refusal as a loud, actionable 400 (code +
+// rename hint), NOT collapse it into the generic 500 MANIFEST_CREATE_FAILED
+// "internal error" which strips the hint. The fake returns a WRAPPED sentinel
+// (the real ManifestCreateIn wraps ErrManifestNameEmbedded with fmt.Errorf %w)
+// so the handler's errors.Is unwrapping is exercised.
+func TestManifestCreateHandler_EmbeddedNameCollision400(t *testing.T) {
+	create := &fakeManifestCreator{
+		err: fmt.Errorf("manifest %q collides with a shipped (built-in) server: %w", "wolfram", api.ErrManifestNameEmbedded),
+	}
+	s := newManifestTestServer(create, &fakeManifestValidator{})
+	rec := postJSON(t, s, "/api/manifest/create", `{"name":"wolfram","yaml":"name: wolfram"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%q", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "EMBEDDED_NAME_COLLISION") {
+		t.Errorf("body=%q missing EMBEDDED_NAME_COLLISION code", body)
+	}
+	if !strings.Contains(body, "wolfram-custom") {
+		t.Errorf("body=%q missing the rename hint", body)
+	}
+	if strings.Contains(body, "internal error") {
+		t.Errorf("body=%q still carries the opaque internal-error message", body)
 	}
 }
 

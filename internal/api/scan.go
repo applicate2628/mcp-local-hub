@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1734,6 +1735,13 @@ func shapeWindsurfEntry(raw map[string]any) ClientEntry {
 	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
 }
 
+// scanShadowWarnDir resolves the disk-fallback dir the embed-first scan path
+// (dir == "") inspects for a pre-existing embed-vs-disk collision. Package var
+// following the installShadowWarnDir seam idiom: production stays on
+// defaultManifestDir (exe-location-derived, not seedable); the embed-first warn
+// test points it at a temp dir and restores via t.Cleanup.
+var scanShadowWarnDir = defaultManifestDir
+
 // readManifestNames returns the set of available server names.
 // Empty dir selects the production path (embedded manifests union
 // on-disk defaultManifestDir). A non-empty dir restricts to that
@@ -1752,6 +1760,21 @@ func readManifestNames(dir string) (map[string]bool, error) {
 	add := func(n string) {
 		if m, err := loadManifestForServer(dir, n); err == nil && m != nil && m.Kind == config.KindCompanion {
 			return
+		}
+		// Pre-existing embed-vs-disk collision surface (mirrors the install warn):
+		// a disk manifest shadowing a shipped server name is ignored by the
+		// embed-first read path. Log (never delete). ONLY on the embed-first path
+		// (dir == ""): an EXPLICIT dir makes loadManifestForServer read
+		// dir/name/manifest.yaml DIRECTLY (migrate.go — disk wins, embed is NOT
+		// consulted), so the disk manifest is actually USED there and the
+		// "ignored" warn would be false (bot PR #494 P3). The embed-first path
+		// shadows against scanShadowWarnDir(); embeddedDiskShadowWarning is
+		// override-symmetric, so hermetic scans under MCPHUB_MANIFEST_DIR_OVERRIDE
+		// stay quiet regardless.
+		if dir == "" {
+			if warn := embeddedDiskShadowWarning(n, scanShadowWarnDir()); warn != "" {
+				log.Printf("scan: %s", warn)
+			}
 		}
 		names[n] = true
 	}

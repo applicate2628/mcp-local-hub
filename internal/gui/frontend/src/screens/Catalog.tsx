@@ -142,7 +142,7 @@ interface MarketplaceListResponse {
 type InstallState =
   | { phase: "idle" }
   | { phase: "installing" }
-  | { phase: "installed" }
+  | { phase: "installed"; warning?: string }
   | { phase: "error"; message: string };
 
 const IDLE: InstallState = { phase: "idle" };
@@ -295,15 +295,30 @@ export function CatalogScreen() {
     if (installStates[name]?.phase === "installing") return;
     setInstallStates((prev) => ({ ...prev, [name]: { phase: "installing" } }));
     try {
-      // POST /api/install?name=<server> → 204 on success, {error, code}
-      // envelope on failure. The query path mirrors the backend handler's
-      // documented frontend contract (shell-greppable install triggers).
+      // POST /api/install?name=<server> → 204 on clean success, 200
+      // {"warning": ...} when the shipped manifest installed but a pre-existing
+      // disk copy was shadowed, or the {error, code} envelope on failure. The
+      // query path mirrors the backend handler's documented frontend contract
+      // (shell-greppable install triggers).
       const resp = await fetch(`/api/install?name=${encodeURIComponent(name)}`, {
         method: "POST",
       });
-      if (resp.status === 204) {
+      // 204 = clean success; 200 = success carrying a pre-existing embed-vs-disk
+      // collision warning (a shadowing disk manifest the shipped install ignored
+      // — bot PR #494 P2). BOTH mark the row installed; the 200 body's warning is
+      // surfaced on the installed row. Treating 200 as failure showed a bogus
+      // "OK" error even though the backend install succeeded.
+      if (resp.status === 204 || resp.status === 200) {
+        let warning = "";
+        if (resp.status === 200) {
+          const body = (await resp.json().catch(() => ({}))) as { warning?: string };
+          warning = (body.warning ?? "").trim();
+        }
         if (!mountedRef.current) return;
-        setInstallStates((prev) => ({ ...prev, [name]: { phase: "installed" } }));
+        setInstallStates((prev) => ({
+          ...prev,
+          [name]: warning ? { phase: "installed", warning } : { phase: "installed" },
+        }));
         // Close the pre-install readiness gate (if it was open for this row).
         setReadinessGate((g) => (g === name ? null : g));
         // Re-fetch /api/status so the server flips into the installed set
@@ -563,6 +578,14 @@ export function CatalogScreen() {
                 {state.phase === "error" && (
                   <p class="error" data-testid={`catalog-error-${name}`}>
                     {state.message}
+                  </p>
+                )}
+                {state.phase === "installed" && state.warning && (
+                  <p
+                    class="catalog-marketplace-install-warning"
+                    data-testid={`catalog-install-warning-${name}`}
+                  >
+                    {state.warning}
                   </p>
                 )}
                 {unstate.phase === "error" && (

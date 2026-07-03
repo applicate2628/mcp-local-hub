@@ -337,14 +337,15 @@ func (a *API) CatalogManifestGet(name string) (string, error) {
 	// Membership gate BEFORE the read. A name that is not in the embed
 	// set (disk-only dev manifest, or a hand-planted disk manifest) is
 	// refused here with ErrManifestNotEmbedded.
-	embedded := false
-	for _, n := range embeddedManifestNames() {
-		if n == name {
-			embedded = true
-			break
-		}
-	}
-	if !embedded {
+	//
+	// Dedups onto embeddedManifestNamesContains — the OVERRIDE-INDEPENDENT
+	// membership core (NOT isEmbeddedManifestName, which is override-symmetric).
+	// This endpoint is deliberately override-independent: it reads the embed FS
+	// directly for secret-safety, and TestCatalogManifestGet_EmbeddedNameWith
+	// OverrideStillReadsEmbed pins that an embedded name resolves to the embed
+	// YAML even when MCPHUB_MANIFEST_DIR_OVERRIDE points at a disk copy with a
+	// literal secret. Behavior is byte-identical to the prior inline loop.
+	if !embeddedManifestNamesContains(name) {
 		return "", ErrManifestNotEmbedded
 	}
 	// name proven embedded + checkManifestName already ran → read the embed
@@ -421,10 +422,19 @@ func (a *API) ManifestCreate(name, yaml string) error {
 // target manifest file. It mirrors ManifestCreateIn's pre-create existence
 // gate without reading the file contents.
 func (a *API) ManifestExists(name string) (bool, error) {
+	return manifestExistsIn(defaultManifestDir(), name)
+}
+
+// manifestExistsIn is the dir-parametric existence check backing
+// ManifestExists (defaultManifestDir). It stats dir/name/manifest.yaml
+// without reading the contents. (The embedded-vs-disk shadow warn reads the
+// disk file's bytes directly — it needs them for the identical-copy
+// suppression — so it no longer routes through this stat-only check.)
+func manifestExistsIn(dir, name string) (bool, error) {
 	if err := checkManifestName(name); err != nil {
 		return false, err
 	}
-	target := filepath.Join(defaultManifestDir(), name, "manifest.yaml")
+	target := filepath.Join(dir, name, "manifest.yaml")
 	if _, err := os.Stat(target); err == nil {
 		return true, nil
 	} else if os.IsNotExist(err) {
@@ -434,10 +444,30 @@ func (a *API) ManifestExists(name string) (bool, error) {
 	}
 }
 
+// ErrManifestNameEmbedded is returned (wrapped) by ManifestCreateIn when the
+// requested name collides with a shipped (embedded) server. The embed-first
+// read path (loadManifestYAMLEmbedFirst) ALWAYS serves the shipped manifest for
+// such a name, so a disk manifest written under it would be silently ignored at
+// install — the operator's edits would never take effect. Callers that want a
+// friendly HTTP surface (the marketplace one-click install) map it via
+// errors.Is to a 4xx instead of an opaque 500. See
+// work-items/decisions/2026-07-03-embed-vs-disk-manifest-precedence.md.
+var ErrManifestNameEmbedded = errors.New("manifest name collides with a shipped (built-in) server")
+
 // ManifestCreateIn is the tempdir-capable form of ManifestCreate.
 func (a *API) ManifestCreateIn(dir, name, yaml string) error {
 	if err := checkManifestName(name); err != nil {
 		return err
+	}
+	// Embed-vs-disk precedence gate, BEFORE the disk-stat guard: refuse creating
+	// a disk manifest under a shipped (embedded) server name. Because install
+	// reads embed-first, such a file is silently shadowed by the shipped manifest
+	// — so an already-broken workflow (re-creating a shipped server on disk was
+	// always ignored) now fails honestly rather than persisting a dead file.
+	// isEmbeddedManifestName is override-symmetric, so hermetic tests that set
+	// MCPHUB_MANIFEST_DIR_OVERRIDE (embed FS bypassed) are unaffected.
+	if isEmbeddedManifestName(name) {
+		return fmt.Errorf("manifest %q collides with a shipped (built-in) server; the shipped manifest is what installs, so a disk manifest under this name would be silently ignored — pick a different name (e.g. %q) to save a customized copy: %w", name, name+"-custom", ErrManifestNameEmbedded)
 	}
 	target := filepath.Join(dir, name, "manifest.yaml")
 	if _, err := os.Stat(target); err == nil {

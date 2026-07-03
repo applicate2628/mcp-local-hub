@@ -109,20 +109,37 @@ func (s *Server) readinessDraft(w http.ResponseWriter, r *http.Request) {
 			Reason: nameErr.Error(),
 			Fix:    "choose a name the backend accepts (avoid reserved names like con/nul/aux and a `__` substring)",
 		})
-	} else if s.manifestPresence != nil {
+	} else {
 		if mode == "create" && m.Name != editName {
-			exists, err := s.manifestPresence.ManifestExists(m.Name)
-			if err != nil {
-				log.Printf("readiness: check manifest existence %q: %v", m.Name, err)
-			} else if exists {
+			// Mirror the ManifestCreateIn embed-collision refusal (CALL the gate
+			// predicate api.IsEmbeddedManifestName — do NOT re-derive it, per
+			// feedback_readiness_mirror_gate_via_dryrun_not_reimpl): a shipped
+			// (built-in) server name cannot be saved as a disk manifest because
+			// install reads embed-first, so Save & Install would refuse it. Surfacing
+			// it here keeps the panel from showing "Ready to install" then failing the
+			// create. Independent of manifestPresence (a pure membership predicate).
+			if api.IsEmbeddedManifestName(m.Name) {
 				blockers = append(blockers, api.ReadinessRequirement{
-					Name:   "manifest exists",
+					Name:   "shipped server name",
 					OK:     false,
-					Reason: fmt.Sprintf("manifest %q already exists; use edit instead", m.Name),
-					Fix:    "choose a new server name, or open the saved manifest in edit mode",
+					Reason: fmt.Sprintf("%q is a built-in shipped server; a disk manifest under this name is ignored at install (the shipped manifest installs)", m.Name),
+					Fix:    fmt.Sprintf("rename the server (e.g. %q) to save a customized copy", m.Name+"-custom"),
 				})
 			}
-		} else if mode == "edit" && editName != "" {
+			if s.manifestPresence != nil {
+				exists, err := s.manifestPresence.ManifestExists(m.Name)
+				if err != nil {
+					log.Printf("readiness: check manifest existence %q: %v", m.Name, err)
+				} else if exists {
+					blockers = append(blockers, api.ReadinessRequirement{
+						Name:   "manifest exists",
+						OK:     false,
+						Reason: fmt.Sprintf("manifest %q already exists; use edit instead", m.Name),
+						Fix:    "choose a new server name, or open the saved manifest in edit mode",
+					})
+				}
+			}
+		} else if mode == "edit" && editName != "" && s.manifestPresence != nil {
 			exists, err := s.manifestPresence.ManifestExists(editName)
 			if err != nil {
 				log.Printf("readiness: check edit manifest existence %q: %v", editName, err)
