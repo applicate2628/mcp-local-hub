@@ -153,6 +153,15 @@ const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
 // concurrent requests per client, so 128 is a generous bound.
 const maxPendingRequests = 128
 
+// ErrTooManyPending is the sentinel a SendRPC pending-cap refusal satisfies
+// via errors.Is. It is a THIRD identity class in the #492 error-shape model
+// (context-shaped ⇔ delivered; other io errors ⇔ backend failure ⇒ teardown):
+// a saturation refusal is neither — the backend is HEALTHY and nothing was
+// written (pre-delivery), so callers must map it to a retryable signal
+// WITHOUT tearing the backend down. handlePOST expresses the same condition
+// as HTTP 429.
+var ErrTooManyPending = errors.New("too many pending requests")
+
 // pipeDrainTimeout caps how long the watcher goroutine waits for
 // stdout/stderr scanners to drain to EOF before calling cmd.Wait.
 //

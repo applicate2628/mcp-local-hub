@@ -4157,3 +4157,84 @@ func TestLazyProxy_ToolsCall_BrokenPipeUnderCanceledCtx_TearsDownGenericError(t 
 		t.Fatalf("lifecycle = %q, want Failed (dead endpoint must be evicted + stamped, not left cached)", e.Lifecycle)
 	}
 }
+
+// TestLazyProxy_ToolsCall_PendingCapSaturation_Retryable503NoTeardown covers
+// the caller layer of work-items/bugs/2026-07-02-sendrpc-pending-uncapped.md
+// (fable pre-bot P1): a SendRPC pending-cap refusal (ErrTooManyPending) is a
+// THIRD identity class — the backend is HEALTHY and nothing was written
+// (pre-delivery), so the handler must answer a retryable 503 (Retry-After)
+// and must NOT run onSendFailure. Tearing down a merely-saturated backend
+// would kill every delivered in-flight request (up to maxPendingRequests of
+// them, each possibly partially executed) and re-enter the same fan-out
+// cold — a self-inflicted outage loop.
+func TestLazyProxy_ToolsCall_PendingCapSaturation_Retryable503NoTeardown(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, regPath := newTestProxy(t, "mcp-language-server", f)
+	h := p.Handler()
+
+	// Warm first (success path), then arm the saturation refusal.
+	if rr := postRPC(t, h, "tools/call", 1); rr.Code != http.StatusOK {
+		t.Fatalf("warm tools/call code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	f.sendRequestErr = fmt.Errorf("%w (128 in flight)", ErrTooManyPending)
+
+	rr := postRPC(t, h, "tools/call", 2)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d, want 503 (retryable saturation refusal); body=%s", rr.Code, rr.Body.String())
+	}
+	if ra := rr.Header().Get("Retry-After"); ra == "" {
+		t.Fatal("saturation 503 must carry Retry-After (the refusal is pre-delivery, retry-safe)")
+	}
+	if sc := f.stopCount.Load(); sc != 0 {
+		t.Fatalf("stopCount = %d, want 0 (a saturated backend is HEALTHY — teardown here is the self-inflicted-outage class)", sc)
+	}
+	if e := readEntry(t, regPath); e.Lifecycle != api.LifecycleActive {
+		t.Fatalf("lifecycle = %q, want Active retained (no Failed stamp for saturation)", e.Lifecycle)
+	}
+
+	// Saturation clears → the SAME cached endpoint serves the retry (no
+	// re-materialization happened during the refusal).
+	f.sendRequestErr = nil
+	if rr := postRPC(t, h, "tools/call", 3); rr.Code != http.StatusOK {
+		t.Fatalf("retry after saturation cleared: code=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestLazyProxy_ToolsCall_SaturationOutranksReapSeveredMarker covers bot PR
+// #493 P2: the ErrTooManyPending branch must run BEFORE wasReapSevered — the
+// sentinel's identity PROVES the refusal was pre-delivery (nothing written),
+// which outranks the delivered-shaped reap-severed classification. A
+// saturated never-warmed backend crossing the probation-reap boundary must
+// answer the retryable 503, never the non-retryable "delivered / do not
+// auto-retry" 500 (which would stop an agent from retrying a call that never
+// happened).
+func TestLazyProxy_ToolsCall_SaturationOutranksReapSeveredMarker(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	h := p.Handler()
+
+	// Warm (publishes an endpoint + sets the generation)...
+	if rr := postRPC(t, h, "tools/call", 1); rr.Code != http.StatusOK {
+		t.Fatalf("warm tools/call code=%d body=%s", rr.Code, rr.Body.String())
+	}
+	// ...then arm BOTH: the reap-severed marker for the CURRENT generation and
+	// the saturation refusal.
+	p.mu.Lock()
+	p.reapSeveredGeneration = p.endpointGeneration
+	p.mu.Unlock()
+	f.sendRequestErr = fmt.Errorf("%w (128 in flight)", ErrTooManyPending)
+
+	rr := postRPC(t, h, "tools/call", 2)
+	if rr.Code == http.StatusInternalServerError {
+		t.Fatalf("saturation refusal classified as the non-retryable delivered 500 (reap-severed branch won over the pre-delivery sentinel); body=%s", rr.Body.String())
+	}
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "delivered") {
+		t.Fatalf("body claims delivery for a pre-delivery refusal: %s", rr.Body.String())
+	}
+	if sc := f.stopCount.Load(); sc != 0 {
+		t.Fatalf("stopCount = %d, want 0", sc)
+	}
+}

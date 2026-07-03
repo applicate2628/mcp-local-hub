@@ -662,6 +662,20 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 	resp, err := ep.SendRequest(callCtx, req)
 	stopHeld()
 	if err != nil {
+		// Saturation refusal (SendRPC pending cap) FIRST: the error's identity
+		// proves nothing was written (pre-delivery) — that fact outranks every
+		// delivered-shaped classification below, including the reap-severed
+		// marker (a saturated never-warmed backend crossing the probation-reap
+		// boundary must NOT convert a pre-delivery refusal into the
+		// non-retryable "delivered" 500 — bot #493 P2). Retryable 503, NEVER
+		// teardown: the backend is HEALTHY; tearing down would kill every
+		// delivered in-flight request and re-enter the same fan-out cold (the
+		// third identity class in the #492 error-shape model; see
+		// ErrTooManyPending in host.go).
+		if errors.Is(err, ErrTooManyPending) {
+			writeRPCErrorStatus(w, req.ID, http.StatusServiceUnavailable, rpcErrInternalError, err.Error(), 5)
+			return
+		}
 		// Our request-hold-ceiling fired (client ctx still live): the request was
 		// delivered and may have partially executed → non-retryable controlled error.
 		if p.isColdHoldCeilingDeadline(r.Context(), err) {
@@ -728,6 +742,12 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 	stopHeld()
 	if err != nil {
 		// Request-hold-ceiling fired (delivered) → non-retryable controlled error.
+		// Saturation refusal FIRST — pre-delivery identity outranks every
+		// delivered-shaped branch below (see handleToolsCall; bot #493 P2).
+		if errors.Is(err, ErrTooManyPending) {
+			writeRPCErrorStatus(w, req.ID, http.StatusServiceUnavailable, rpcErrInternalError, err.Error(), 5)
+			return
+		}
 		if p.isColdHoldCeilingDeadline(r.Context(), err) {
 			p.writeColdRequestHeldError(w, req.ID, p.isWarmed())
 			return
@@ -1020,6 +1040,14 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 				return
 			}
 			err = fmt.Errorf("backend dead at doc-notification cancel/deadline (delivered, endpoint unusable): %w", err)
+		}
+		// Saturation refusal (SendRPC pending cap): pre-delivery, backend
+		// HEALTHY — roll back the optimistic refcount (nothing was written) but
+		// do NOT tear down; retryable 503 (see handleToolsCall's branch).
+		if errors.Is(err, ErrTooManyPending) {
+			p.rollbackDocRef(uri, isOpen, docEpoch)
+			writeRPCErrorStatus(w, req.ID, http.StatusServiceUnavailable, rpcErrInternalError, err.Error(), 5)
+			return
 		}
 		// Send failure with the backend dead or the write never committed: roll
 		// back the optimistic refcount transition and tear down so the next request
