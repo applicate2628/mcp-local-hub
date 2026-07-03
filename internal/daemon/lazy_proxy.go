@@ -963,29 +963,68 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 	defer cancel()
 	resp, err := ep.SendRequest(callCtx, req)
 	if err != nil {
-		// Probation deadline (Finding 1): our MaterializeWaitBudget elapsed while
-		// the backend was still indexing, and the client ctx is still live. But
-		// SendRequest writes the notification to the backend's stdin BEFORE it
-		// waits for a reply (SendRPC: writeStdin precedes the ctx select), so a
-		// DeadlineExceeded here means the notification has ALREADY been handed to
-		// the backend. A textDocument/didOpen|didClose is fire-and-forget, so
-		// treat it as delivered: 202 and KEEP the refcount. Rolling back + 503
-		// (the earlier F2 behavior) would make the client re-forward the SAME
-		// notification on retry → a duplicate didOpen (protocol violation) or a
-		// premature repeated didClose. No teardown — the backend is healthy, just
-		// slow; warmed stays false (the backend has not yet RESPONDED).
-		if p.isProbationDeadline(r.Context(), warmed, err) {
-			w.WriteHeader(http.StatusAccepted)
-			return
+		// DELIVERED-then-await-cut classification (Edge 2), keyed on ERROR IDENTITY
+		// (bot PR #492 r3 P2). The SendRPC invariant this rests on: SendRPC returns
+		// a context-shaped error (bare ctx.Err() — context.Canceled/
+		// DeadlineExceeded) ONLY from its post-write select, i.e. only after
+		// writeStdin returned nil; and per the io.Writer contract a nil write error
+		// means the FULL notification line was accepted by the backend's stdin.
+		// Every pre-/mid-write failure surfaces as a wrapped NON-context error
+		// ("invalid JSON-RPC request:", "marshal rewritten:", "write stdin: %w" —
+		// writeStdin takes no ctx, so a context error can never hide inside it) or
+		// as the death-arm strings ("backend host stopped"/"backend subprocess
+		// exited"). Therefore: err is context-shaped ⇔ the notification was fully
+		// written before the wait was cut ⇔ DELIVERED. A broken-pipe/EOF/host-
+		// stopped error must NEVER classify as delivered — even under an already-
+		// canceled client ctx (isClientCancelErr now enforces this by identity, not
+		// ctx state). A textDocument/didOpen|didClose is fire-and-forget, so both
+		// DELIVERED shapes answer 202 and KEEP the refcount:
+		//   (a) our own probation budget fired while the client ctx is still live
+		//       (cold path, !warmed — isProbationDeadline); and
+		//   (b) the client's own ctx canceled/deadlined AFTER delivery — the WARM
+		//       path awaits under the raw client ctx with NO budget bound (see
+		//       boundedCallCtx), so a slow-but-delivered notification that outlives
+		//       the client deadline lands here (isClientCancelErr). Before this fix
+		//       the warm path rolled the refcount back on (b), desyncing the count:
+		//       the proxy thought the doc was closed while the backend held it open,
+		//       so the next didOpen duplicated the upstream open (protocol violation)
+		//       / a didClose fired a premature repeated close. Keeping the refcount +
+		//       202-delivered is the established notification contract. No teardown —
+		//       the backend is healthy, just slow; warmed stays false until it
+		//       actually RESPONDS.
+		// (The r2 RESIDUAL — "client-cancel + broken-pipe keeps a phantom refcount"
+		// — is CLOSED by the identity-keyed isClientCancelErr: a pre-delivery io
+		// failure under a canceled ctx now classifies NOT-delivered and takes the
+		// failure path below.)
+		if p.isProbationDeadline(r.Context(), warmed, err) || isClientCancelErr(r.Context(), err) {
+			// Bot PR #492 r2 P2: a ctx-shaped error does NOT prove the backend
+			// outlived the call — Go's select picks pseudo-randomly among READY
+			// cases, so SendRPC can return its ctx arm even though done/childExited
+			// was ALSO ready after the write. Keeping on that shape would cache a
+			// DEAD endpoint (skipping onSendFailure) and retain a refcount the
+			// dead backend no longer honors: the next didOpen for this uri would be
+			// absorbed (never forwarded) and the dead endpoint would linger until
+			// some unrelated forward trips teardown. So before keeping, probe the
+			// backend's own death arms (BackendAlive: non-blocking select-default
+			// on the SAME done/childExited channels SendRPC selects on). Alive →
+			// genuine post-delivery cancel/budget-expiry: 202 + keep, exactly as
+			// before. Dead → fall through to the failure path: the refcount
+			// bookkeeping is moot (teardown's resetDocRefs clears it anyway) and
+			// teardown-now beats a lingering cached dead endpoint. BOTH delivered
+			// arms are guarded — the probation-budget deadline (a) races childExited
+			// identically (our budget and the child's exit simultaneously ready).
+			// Endpoints without the optional probe facet keep the prior contract
+			// (assumed alive).
+			if endpointBackendAlive(ep) {
+				w.WriteHeader(http.StatusAccepted)
+				return
+			}
+			err = fmt.Errorf("backend dead at doc-notification cancel/deadline (delivered, endpoint unusable): %w", err)
 		}
-		// Any other error means the notification was NOT delivered, so roll back
-		// the optimistic refcount transition to keep the count consistent.
+		// Send failure with the backend dead or the write never committed: roll
+		// back the optimistic refcount transition and tear down so the next request
+		// re-materializes a fresh backend.
 		p.rollbackDocRef(uri, isOpen, docEpoch)
-		// Client-cancel is not a backend failure — see handleToolsCall.
-		if isClientCancelErr(r.Context(), err) {
-			writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
-			return
-		}
 		p.onSendFailure(gen, err)
 		writeRPCError(w, req.ID, rpcErrInternalError, err.Error())
 		return
@@ -1097,21 +1136,58 @@ func docURIFromParams(params json.RawMessage) string {
 	return p.TextDocument.URI
 }
 
-// isClientCancelErr reports whether err is the consequence of the client's
-// request context being canceled or timing out, rather than a backend
-// failure. Treats any error with the request context already canceled as
-// client-cancel — SendRequest commonly wraps context.Canceled inside a
-// "write stdin:" or "send rpc:" wrapper, and errors.Is would miss the
-// unwrapped case. If the context is still Live we fall back to
-// errors.Is(err, context.Canceled|DeadlineExceeded) for belt-and-braces.
+// isClientCancelErr reports whether err IS a context cancel/deadline error
+// attributable to the client's own request context — the single owner of the
+// client-cancel classification for all three forward handlers (tools/call,
+// generic forward, doc lifecycle).
+//
+// Both conjuncts are load-bearing (bot PR #492 r3 P2 — the ROOT fix):
+//
+//   - ERROR IDENTITY (errors.Is Canceled/DeadlineExceeded): the classification
+//     keys on what the returned error IS, never on ambient ctx state. The old
+//     shape ("ctx.Err() != nil → true for ANY err") classified a broken-pipe /
+//     EOF / host-stopped send failure as client-cancel whenever the client had
+//     ALSO canceled — for the doc path that kept a refcount for a notification
+//     that was NEVER delivered (permanent phantom: the retained count absorbs
+//     the retry, so no later send ever trips teardown), and for the request
+//     paths it skipped the teardown of a genuinely dead backend. The old
+//     comment's fear ("SendRequest wraps context.Canceled where errors.Is would
+//     miss it") is false for the actual error surface: SendRPC returns ctx.Err()
+//     BARE from its post-write select, and every pre-/mid-write failure wraps a
+//     NON-context io/marshal error ("write stdin: %w" — writeStdin takes no
+//     ctx), so errors.Is is exact.
+//   - CLIENT ATTRIBUTION (ctx.Err() != nil, on the CLIENT's ctx, not the
+//     ceiling/budget-wrapped callCtx): a context-shaped error while the client
+//     is still live came from an internal bound (hold ceiling / probation
+//     budget) and is owned by the earlier isColdHoldCeilingDeadline /
+//     isProbationDeadline checks — this conjunct keeps the predicate correct
+//     even if a caller reorders those checks.
 func isClientCancelErr(ctx context.Context, err error) bool {
 	if err == nil {
 		return false
 	}
-	if ctx.Err() != nil {
-		return true
+	return (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) &&
+		ctx.Err() != nil
+}
+
+// backendAliveProber is the OPTIONAL MCPEndpoint facet the doc-lifecycle
+// delivered⇒keep classification consults before retaining a refcount on a
+// ctx-shaped SendRequest error (bot PR #492 r2 P2). It is a separate facet
+// rather than a new MCPEndpoint method because the probe is stdio-host
+// death-channel knowledge: stdioHostEndpoint (the only production endpoint the
+// lazy proxy fronts) implements it; an endpoint without the facet is assumed
+// alive, which preserves the prior delivered⇒keep contract exactly.
+type backendAliveProber interface {
+	BackendAlive() bool
+}
+
+// endpointBackendAlive probes ep through the optional backendAliveProber facet.
+// Returns true (assume alive → keep) when the endpoint does not expose a probe.
+func endpointBackendAlive(ep MCPEndpoint) bool {
+	if pr, ok := ep.(backendAliveProber); ok {
+		return pr.BackendAlive()
 	}
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	return true
 }
 
 // handleSSE answers GET /mcp. v1 minimal behavior: before materialization,
@@ -1339,6 +1415,24 @@ func (p *LazyProxy) publishMaterializedEndpoint(ep MCPEndpoint) error {
 	now := time.Now().UTC()
 	p.mu.Lock()
 	if p.closed.Load() || p.reaping {
+		// This flight is ending WITHOUT a publish (bot PR #492 r1 P2): release its
+		// startingSince marker so a mid-reap final reconcile cannot derive a
+		// phantom Starting row from it — a marker whose flight is dead counts
+		// against every other proxy's cold-start gate / hard cap (until Branch B's
+		// ≤5m probation timer) while no materialize exists to ever warm it. The
+		// clear is FLIGHT-SCOPED by the atomicity of this closed/reaping
+		// observation under p.mu: while reaping is held, ensureMaterialized's spin
+		// blocks every new caller BEFORE reserve/markStartingReserved, and a
+		// closed proxy refuses new callers outright — so no post-rejection flight
+		// can have re-armed the marker; any armed value was set by a caller
+		// feeding THIS singleflight (the fn is the flight's guaranteed terminal
+		// executor even when every bounded waiter abandoned the join, which is why
+		// the clear lives here and not in ensureMaterialized's error branch). No
+		// reconcile here: for the reaping case the reap's own final reconcile
+		// settles the row to derived truth (and writing Configured now would
+		// violate the Stop()-before-Configured ordering); for the closed case
+		// LazyProxy.Stop owns the final state (and clears the marker itself).
+		p.startingSince = time.Time{}
 		p.mu.Unlock()
 		_ = ep.Close()
 		if stopErr := p.cfg.Lifecycle.Stop(); stopErr != nil {
@@ -1377,6 +1471,24 @@ func (p *LazyProxy) publishMaterializedEndpoint(ep MCPEndpoint) error {
 // markStartingReserved records when reserveMaterializedSlot set this row Starting
 // without an endpoint yet published, so the probation watchdog's belt-and-braces
 // branch can reap an orphan Starting row (F1).
+//
+// Marker lifecycle (who clears startingSince, and why the not-cleared paths are
+// deliberate — bot PR #492 r1 P2 triage of every post-mark exit):
+//   - publish success → publishMaterializedEndpoint zeroes it (endpoint installed).
+//   - publish REJECTED (errLazyProxyUnpublishable) → the rejection branch zeroes it
+//     at the fn's terminal moment, so a mid-reap reconcile cannot derive a phantom
+//     Starting from a dead flight's marker (see the comment there).
+//   - teardowns (Stop / onSendFailure / both probation-reap branches / idle reap)
+//     zero it in their own critical sections.
+//   - ErrMaterializeInFlight / waiter ctx-cancel → KEPT armed: the detached flight
+//     is still running; the marker is the truthful "materializing" signal that the
+//     reconcile derives Starting from, and Branch B exempts active flights.
+//   - genuine materialize error (fn ran, failed) and throttle-cached error → KEPT
+//     armed DELIBERATELY: the fn/caller stamps Failed, and the armed marker is
+//     Branch B's only handle on the double-fault where that swallowed registry
+//     write fails (row stuck Starting with no flight — Branch B reaps it ≤5m via
+//     the marker; clearing here would orphan that row forever). When the Failed
+//     stamp landed, Branch B disarms the marker at its next tick without a write.
 func (p *LazyProxy) markStartingReserved(now time.Time) {
 	p.mu.Lock()
 	// Only arm the orphan timer while no endpoint is published; a concurrent
@@ -1660,6 +1772,7 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 		return
 	}
 	var ep MCPEndpoint
+	var gen uint64
 	p.mu.Lock()
 	if p.endpoint == nil ||
 		p.reaping ||
@@ -1673,6 +1786,10 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 	p.reaping = true
 	p.endpoint = nil
 	p.endpointGeneration++
+	// Capture the generation THIS reap bumped so the terminal Configured write
+	// (below) can no-op if a materialize republished an endpoint over our teardown
+	// and bumped the generation again (Edge 1).
+	gen = p.endpointGeneration
 	p.lastWrittenLifecycle = "" // Predicate 2: reset the shadow on the gen bump
 	p.warmed = false
 	p.endpointPublishedAt = time.Time{}
@@ -1693,9 +1810,35 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 		return
 	}
 	p.gate.Forget(p.inflightKey())
-	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
-		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleConfigured, "")
+	// Edge 1: route the terminal Configured write through the SINGLE authoritative
+	// lifecycle writer (reconcileRegistryLifecycleLocked) under p.mu instead of an
+	// out-of-band PutLifecycle. Post-teardown the derived state is Configured
+	// (endpoint nil, not starting). Two distinct protections replace the old bare
+	// write's stomp exposure:
+	//   - The gen guard: every OTHER generation bumper except LazyProxy.Stop
+	//     refuses while p.reaping is held, so the guard's real production trigger
+	//     is a concurrent proxy Stop() mid-reap — a stale reap's write then no-ops
+	//     instead of resurrecting a Configured row over a torn-down proxy.
+	//   - The reserve race (the bug doc's original stomp: a cold-path reserve's
+	//     flock Starting write landing before this reconcile): the reconcile
+	//     derives Starting from startingSince, so once markStartingReserved has
+	//     run this write preserves Starting instead of stomping it. RESIDUAL: a
+	//     reserve that has written its flock Starting but not yet returned to
+	//     markStartingReserved leaves a microseconds-wide gap where this
+	//     reconcile still derives Configured — narrowed from the old ~Stop()-wide
+	//     window, not fully closed; self-heals at publish-time reconcile.
+	//     The INVERSE hazard — a DEAD flight's stale startingSince making this
+	//     reconcile persist a phantom Starting (bot PR #492 r1 P2) — is closed at
+	//     the flight's terminal moment: publishMaterializedEndpoint's rejection
+	//     branch zeroes the marker before this reconcile can observe it (full
+	//     marker lifecycle: markStartingReserved doc).
+	// Folding it in also keeps the lastWrittenLifecycle shadow consistent with
+	// the registry — the last non-reconcile RUNNING-lifecycle Configured writer is
+	// removed (the pre-concurrency startup seeds in ListenAndServe and the CLI
+	// pre-Bind remain, both gen-0 before Serve). Stop() still precedes the write,
+	// preserving "don't claim Configured until the backend is actually stopped".
 	p.mu.Lock()
+	p.reconcileRegistryLifecycleLocked(gen)
 	p.reaping = false
 	p.mu.Unlock()
 }
