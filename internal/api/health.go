@@ -848,6 +848,28 @@ func (a *API) realCapabilityRow(d DaemonStatus) (CapabilityRow, error) {
 // Transport failure or HTTP >= 400 → err (the caller marks all three
 // sub-sections "error"). Body-read / parse trouble is NON-fatal: the session is
 // already minted, so the list probes proceed via the fallback path.
+// readCapabilityProbeBody reads an MCP probe response body content-type-aware.
+// A text/event-stream body goes through readSSEResponse, which returns at the
+// FIRST JSON-RPC response event instead of waiting for stream EOF — a
+// Streamable-HTTP daemon may keep the connection open to send post-response
+// notifications, and a plain io.ReadAll would then block until the client
+// timeout (bot PR #495 P2; the same reason the aggregator's outbound path
+// branches on content-type). Plain application/json uses a size-capped
+// io.ReadAll. maxHealthProbeResponseBytes is enforced in both branches.
+func readCapabilityProbeBody(resp *http.Response) ([]byte, error) {
+	if isSSEContentType(resp.Header.Get("Content-Type")) {
+		return readSSEResponse(resp.Body, maxHealthProbeResponseBytes)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxHealthProbeResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxHealthProbeResponseBytes {
+		return nil, fmt.Errorf("response too large (> %d bytes)", maxHealthProbeResponseBytes)
+	}
+	return raw, nil
+}
+
 func (a *API) initializeCapabilitySession(d DaemonStatus) (sessionID string, caps map[string]json.RawMessage, capsPresent bool, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -863,7 +885,7 @@ func (a *API) initializeCapabilitySession(d DaemonStatus) (sessionID string, cap
 		return "", nil, false, fmt.Errorf("initialize: %s", redactErrorDetail(err.Error()))
 	}
 	sessionID = resp.Header.Get("Mcp-Session-Id")
-	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, maxHealthProbeResponseBytes+1))
+	raw, readErr := readCapabilityProbeBody(resp)
 	_ = resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return "", nil, false, fmt.Errorf("initialize: HTTP %d", resp.StatusCode)
@@ -915,12 +937,12 @@ func (a *API) capabilityListSubSection(d DaemonStatus, sessionID string, id int,
 		return CapabilitySubSection{State: "error", Err: method + ": " + redactErrorDetail(err.Error())}
 	}
 	defer resp2.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp2.Body, maxHealthProbeResponseBytes+1))
+	// Content-type-aware read: an SSE list response that keeps the stream open
+	// returns at the first response event instead of stalling to the client
+	// timeout (bot PR #495 P2 — same helper as the initialize read).
+	raw, err := readCapabilityProbeBody(resp2)
 	if err != nil {
 		return CapabilitySubSection{State: "error", Err: method + ": read: " + redactErrorDetail(err.Error())}
-	}
-	if len(raw) > maxHealthProbeResponseBytes {
-		return CapabilitySubSection{State: "error", Err: fmt.Sprintf("%s: response too large (> %d bytes)", method, maxHealthProbeResponseBytes)}
 	}
 	// SSE-or-JSON: extractSSEPayload pulls the JSON envelope out of a
 	// text/event-stream frame (multi-line data:, CRLF, optional space

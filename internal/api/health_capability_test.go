@@ -336,6 +336,71 @@ func TestRealCapabilityRow_RoundTripCeiling(t *testing.T) {
 	}
 }
 
+// TestRealCapabilityRow_SSEInitStreamStaysOpen_ParsesCapsNoStall — bot PR #495
+// P2: a daemon that answers initialize as text/event-stream and keeps the
+// stream OPEN after the response event must not stall the probe to the client
+// timeout. The handler writes the SSE response event (declaring only tools),
+// flushes, then holds the connection until the client closes it. If the read
+// regressed to io.ReadAll-to-EOF, initialize would block until the 3s client
+// timeout → readErr != nil → the caps would be dropped → fallback probe-all,
+// which the assertion below catches WITHOUT any wall-clock timing: a correct
+// (streaming) read parses {"tools":{}} and gates prompts/resources to
+// unsupported with ZERO probes.
+func TestRealCapabilityRow_SSEInitStreamStaysOpen_ParsesCapsNoStall(t *testing.T) {
+	var mu sync.Mutex
+	counts := map[string]int{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 8192)
+		n, _ := r.Body.Read(buf)
+		body := string(buf[:n])
+		w.Header().Set("Mcp-Session-Id", "sse-sess")
+		if strings.Contains(body, `"initialize"`) {
+			// SSE initialize that declares ONLY tools, then keeps the stream open.
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			fl, _ := w.(http.Flusher)
+			_, _ = w.Write([]byte("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capabilities\":{\"tools\":{}}}}\n\n"))
+			if fl != nil {
+				fl.Flush()
+			}
+			// Hold the connection open (post-response notifications a
+			// Streamable-HTTP daemon may keep the stream for). Returns only
+			// when the client (the probe, after readSSEResponse) closes it.
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		for _, method := range []string{"tools/list", "prompts/list", "resources/list"} {
+			if strings.Contains(body, `"`+method+`"`) {
+				mu.Lock()
+				counts[method]++
+				mu.Unlock()
+				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo"}]}}`))
+				return
+			}
+		}
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{}}`))
+	}))
+	defer srv.Close()
+
+	a := &API{}
+	row, err := a.realCapabilityRow(DaemonStatus{Server: "srv", Daemon: "default", Port: parsePort(t, srv.URL)})
+	if err != nil {
+		t.Fatalf("realCapabilityRow: %v", err)
+	}
+	if row.Tools.State != "ok" {
+		t.Errorf("Tools.State = %q, want ok (SSE init declared tools + list non-empty)", row.Tools.State)
+	}
+	if row.Prompts.State != "unsupported" || row.Resources.State != "unsupported" {
+		t.Errorf("declared-gating lost — Prompts=%q Resources=%q, want unsupported/unsupported. A stalled SSE init would drop caps and fall back to probing all.", row.Prompts.State, row.Resources.State)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if counts["prompts/list"] != 0 || counts["resources/list"] != 0 {
+		t.Errorf("undeclared categories PROBED (prompts=%d resources=%d) — the SSE init caps were not parsed (likely a stall→fallback regression)", counts["prompts/list"], counts["resources/list"])
+	}
+}
+
 // TestRealCapabilityRow_DeclaredButListErrors_MapsError — a DECLARED category
 // whose list genuinely fails stays red "error", not "unsupported" (the state
 // vocabulary must survive the refactor).
