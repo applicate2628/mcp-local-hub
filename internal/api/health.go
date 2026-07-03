@@ -745,10 +745,12 @@ func (a *API) computeCapabilitiesSection(nowMs int64, refresh bool, probes Probe
 	return v.(CapabilitiesSection), nil
 }
 
-// realCapabilityRow does the live MCP roundtrip for one daemon. Calls
-// tools/list, prompts/list, resources/list and projects each into one
-// CapabilitySubSection per spec's 5-state vocabulary
-// (ok|empty|unsupported|error|stale).
+// realCapabilityRow does the live MCP roundtrip for one daemon. It runs one
+// initialize handshake, then probes tools/list, prompts/list, resources/list
+// gated on the server's declared capabilities (a category the server does not
+// declare is reported "unsupported" with no list round-trip; the fallback
+// probes all three when the declaration is absent or empty). Each sub-section
+// is projected per spec's 5-state vocabulary (ok|empty|unsupported|error|stale).
 //
 // Synthetic-source rows (Health.Source=="proxy-synthetic") answer from
 // the embedded ToolCatalogForBackend(d.Backend) catalog — same path the
@@ -781,22 +783,94 @@ func (a *API) realCapabilityRow(d DaemonStatus) (CapabilityRow, error) {
 		return row, nil
 	}
 
-	row.Tools = a.liveCapabilitySubSection(d, "tools/list", "tool")
-	row.Prompts = a.liveCapabilitySubSection(d, "prompts/list", "prompt")
-	row.Resources = a.liveCapabilitySubSection(d, "resources/list", "resource")
+	// Phase 2 — one initialize handshake per daemon, then gate each category's
+	// list probe on the server's declared capabilities (MCP spec: "Only use
+	// capabilities that were successfully negotiated"). A single Mcp-Session-Id
+	// is minted once and reused across the list calls, so a cold refresh is at
+	// most 1 initialize + 3 lists = 4 round-trips and as few as 2 (1 initialize
+	// + 1 declared list) — strictly below the prior fixed 6.
+	sessionID, caps, capsPresent, initErr := a.initializeCapabilitySession(d)
+	if initErr != nil {
+		sub := CapabilitySubSection{State: "error", Err: initErr.Error()}
+		row.Tools, row.Prompts, row.Resources = sub, sub, sub
+		return row, nil
+	}
+	for i, c := range []struct {
+		set    *CapabilitySubSection
+		key    string
+		method string
+		kind   string
+	}{
+		{&row.Tools, "tools", "tools/list", "tool"},
+		{&row.Prompts, "prompts", "prompts/list", "prompt"},
+		{&row.Resources, "resources", "resources/list", "resource"},
+	} {
+		// UNIQUE JSON-RPC id per list call within the one reused session:
+		// initialize used id 1, so the list calls take 2/3/4. The MCP spec
+		// (2025-03-26, the revision this probe declares) requires a request id
+		// MUST NOT be reused within a session — a strict stateful server would
+		// otherwise reject the 2nd/3rd list and redden a healthy declared
+		// category, the exact false-alarm this Phase-2 change removes.
+		id := i + 2
+		if !capsPresent {
+			// Fallback: capabilities absent, present-but-empty ({}), or the
+			// initialize result was unparseable — probe every category (the
+			// prior behavior). A non-conforming server that lists without
+			// declaring must never be read as "everything unsupported".
+			*c.set = a.capabilityListSubSection(d, sessionID, id, c.method, c.kind)
+			continue
+		}
+		if _, declared := caps[c.key]; declared {
+			// Declared → probe, reusing the one session.
+			*c.set = a.capabilityListSubSection(d, sessionID, id, c.method, c.kind)
+			continue
+		}
+		// Declared-set non-empty but this category absent → unsupported, with
+		// NO list round-trip (the spec-correct path).
+		*c.set = CapabilitySubSection{State: "unsupported"}
+	}
 	return row, nil
 }
 
-// liveCapabilitySubSection does one JSON-RPC call against the daemon's
-// MCP endpoint and projects the response. Mirrors singleHealthProbe's
-// shape (initialize → method call → SSE-or-JSON parse).
+// initializeCapabilitySession performs the single MCP `initialize` handshake
+// that gates and drives the capability list probes for one daemon. It returns
+// the minted Mcp-Session-Id (which may legitimately be empty — callers keep the
+// `if sessionID != ""` guard), the server-declared capabilities map, and
+// capsPresent (the capabilities object existed AND declared >= 1 category).
 //
-// State mapping per spec:
-//   - response with non-empty list  → "ok"
-//   - response with empty list      → "empty"
-//   - JSON-RPC error code -32601    → "unsupported" (method not found)
-//   - any other failure             → "error" + Err populated
-func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) CapabilitySubSection {
+// Per the MCP spec (revision 2025-06-18) the initialize result carries a
+// `capabilities` object whose category keys (tools/prompts/resources/...) are
+// each an object, possibly empty `{}`; presence of the key = the category is
+// offered. realCapabilityRow uses this declaration to skip probing undeclared
+// categories. A missing, empty, or unparseable capabilities object leaves
+// capsPresent false, which routes realCapabilityRow to the probe-all fallback.
+//
+// Transport failure or HTTP >= 400 → err (the caller marks all three
+// sub-sections "error"). Body-read / parse trouble is NON-fatal: the session is
+// already minted, so the list probes proceed via the fallback path.
+// readCapabilityProbeBody reads an MCP probe response body content-type-aware.
+// A text/event-stream body goes through readSSEResponse, which returns at the
+// FIRST JSON-RPC response event instead of waiting for stream EOF — a
+// Streamable-HTTP daemon may keep the connection open to send post-response
+// notifications, and a plain io.ReadAll would then block until the client
+// timeout (bot PR #495 P2; the same reason the aggregator's outbound path
+// branches on content-type). Plain application/json uses a size-capped
+// io.ReadAll. maxHealthProbeResponseBytes is enforced in both branches.
+func readCapabilityProbeBody(resp *http.Response) ([]byte, error) {
+	if isSSEContentType(resp.Header.Get("Content-Type")) {
+		return readSSEResponse(resp.Body, maxHealthProbeResponseBytes)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxHealthProbeResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxHealthProbeResponseBytes {
+		return nil, fmt.Errorf("response too large (> %d bytes)", maxHealthProbeResponseBytes)
+	}
+	return raw, nil
+}
+
+func (a *API) initializeCapabilitySession(d DaemonStatus) (sessionID string, caps map[string]json.RawMessage, capsPresent bool, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	url := clients.HubLoopbackURL(d.Port, "/mcp")
@@ -808,15 +882,57 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	resp, err := client.Do(req)
 	if err != nil {
-		return CapabilitySubSection{State: "error", Err: "initialize: " + redactErrorDetail(err.Error())}
+		return "", nil, false, fmt.Errorf("initialize: %s", redactErrorDetail(err.Error()))
 	}
-	sessionID := resp.Header.Get("Mcp-Session-Id")
-	_ = resp.Body.Close()
+	sessionID = resp.Header.Get("Mcp-Session-Id")
+	// Status BEFORE body: an initialize rejected with HTTP >= 400 that leaves an
+	// SSE error body open would otherwise make readCapabilityProbeBody wait for a
+	// JSON-RPC response event that never comes (up to the 3s client timeout)
+	// before we return the HTTP error we already have — and the body is discarded
+	// on this path anyway (bot PR #495 P2; the old init likewise closed without
+	// reading on >= 400).
 	if resp.StatusCode >= 400 {
-		return CapabilitySubSection{State: "error", Err: fmt.Sprintf("initialize: HTTP %d", resp.StatusCode)}
+		_ = resp.Body.Close()
+		return "", nil, false, fmt.Errorf("initialize: HTTP %d", resp.StatusCode)
 	}
+	raw, readErr := readCapabilityProbeBody(resp)
+	_ = resp.Body.Close()
+	// Parse the declared capabilities. Any read/size/parse problem is
+	// non-fatal — caps stays nil and capsPresent false, so realCapabilityRow
+	// falls back to probing all three categories rather than reading the
+	// absence as "everything unsupported".
+	if readErr == nil && len(raw) <= maxHealthProbeResponseBytes {
+		var env struct {
+			Result struct {
+				Capabilities map[string]json.RawMessage `json:"capabilities"`
+			} `json:"result"`
+		}
+		if json.Unmarshal(extractSSEPayload(raw), &env) == nil {
+			caps = env.Result.Capabilities
+			capsPresent = len(caps) > 0
+		}
+	}
+	return sessionID, caps, capsPresent, nil
+}
 
-	listBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":2,"method":"%s"}`, method)
+// capabilityListSubSection does the <category>/list JSON-RPC call for one
+// daemon, reusing the Mcp-Session-Id minted by initializeCapabilitySession, and
+// projects the response into one CapabilitySubSection. It is the post-initialize
+// half of the capability probe — the initialize is lifted into
+// initializeCapabilitySession so a single session drives all three list calls.
+//
+// State mapping per spec:
+//   - response with non-empty list  → "ok"
+//   - response with empty list      → "empty"
+//   - JSON-RPC error code -32601    → "unsupported" (method not found)
+//   - any other failure             → "error" + Err populated
+func (a *API) capabilityListSubSection(d DaemonStatus, sessionID string, id int, method, kind string) CapabilitySubSection {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	url := clients.HubLoopbackURL(d.Port, "/mcp")
+	client := &http.Client{Timeout: 3 * time.Second}
+
+	listBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"%s"}`, id, method)
 	req2, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(listBody))
 	req2.Header.Set("Content-Type", "application/json")
 	req2.Header.Set("Accept", "application/json, text/event-stream")
@@ -828,12 +944,12 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 		return CapabilitySubSection{State: "error", Err: method + ": " + redactErrorDetail(err.Error())}
 	}
 	defer resp2.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp2.Body, maxHealthProbeResponseBytes+1))
+	// Content-type-aware read: an SSE list response that keeps the stream open
+	// returns at the first response event instead of stalling to the client
+	// timeout (bot PR #495 P2 — same helper as the initialize read).
+	raw, err := readCapabilityProbeBody(resp2)
 	if err != nil {
 		return CapabilitySubSection{State: "error", Err: method + ": read: " + redactErrorDetail(err.Error())}
-	}
-	if len(raw) > maxHealthProbeResponseBytes {
-		return CapabilitySubSection{State: "error", Err: fmt.Sprintf("%s: response too large (> %d bytes)", method, maxHealthProbeResponseBytes)}
 	}
 	// SSE-or-JSON: extractSSEPayload pulls the JSON envelope out of a
 	// text/event-stream frame (multi-line data:, CRLF, optional space
@@ -854,16 +970,22 @@ func (a *API) liveCapabilitySubSection(d DaemonStatus, method, kind string) Capa
 		if errEnv.Error.Code == -32601 {
 			return CapabilitySubSection{State: "unsupported"}
 		}
-		// G2: some MCP servers report method-absence with a NON-(-32601)
-		// JSON-RPC error code but a "method not found" message (e.g. lldb
-		// has no prompts). The strict code check above misses those, so they
-		// fall through to the red "error" state below — alarming the operator
-		// for what is really just an unsupported category. Treat a
-		// method-absence message (case-insensitive) the same as code -32601:
-		// neutral "unsupported", not "error".
-		// PROPER fix (Phase 2): parse the initialize response's declared
-		// capabilities and skip probing undeclared categories entirely — the
-		// init body is currently discarded around health.go:813.
+		// G2 (non-conforming-server backstop, probed path only): some MCP
+		// servers report method-absence with a NON-(-32601) JSON-RPC error
+		// code but a "method not found" message (e.g. lldb has no prompts).
+		// The strict code check above misses those, so they fall through to
+		// the red "error" state below — alarming the operator for what is
+		// really just an unsupported category. Treat a method-absence message
+		// (case-insensitive) the same as code -32601: neutral "unsupported",
+		// not "error".
+		//
+		// Since Phase 2, realCapabilityRow gates probes on the initialize
+		// response's declared capabilities, so an UNDECLARED category is
+		// classified "unsupported" with no list round-trip. G2 no longer
+		// carries the primary unsupported signal; it only neutralizes a
+		// category that WAS declared (or probed via the absent/empty-
+		// capabilities fallback) yet answers a self-contradicting non-(-32601)
+		// method-not-found.
 		if isMethodNotFoundMessage(errEnv.Error.Message) {
 			return CapabilitySubSection{State: "unsupported"}
 		}

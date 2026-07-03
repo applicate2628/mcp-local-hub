@@ -956,7 +956,7 @@ func sendForceMaterializeTools(port int, backend string) string {
 	// envelope out of an SSE frame (multi-line data:, CRLF, optional space
 	// after the colon all handled) and returns the body unchanged when it
 	// is plain application/json. One shared owner with singleHealthProbe +
-	// liveCapabilitySubSection.
+	// capabilityListSubSection.
 	jsonBytes := extractSSEPayload(payload)
 	var env struct {
 		Error *struct {
@@ -1100,7 +1100,7 @@ func singleHealthProbe(port int) *HealthProbe {
 	// SSE-or-JSON: extractSSEPayload (sse.go) pulls the JSON envelope out
 	// of a text/event-stream frame and returns the body unchanged when it
 	// is plain application/json. One shared owner with
-	// liveCapabilitySubSection + sendForceMaterializeTools.
+	// capabilityListSubSection + sendForceMaterializeTools.
 	payload := extractSSEPayload(raw)
 	var parsed struct {
 		Error  json.RawMessage `json:"error"`

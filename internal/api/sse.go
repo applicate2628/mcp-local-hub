@@ -3,7 +3,7 @@
 // plain application/json or a text/event-stream frame.
 //
 // MCP daemons answer either as plain application/json or as SSE. The probes
-// (singleHealthProbe, sendForceMaterializeTools, liveCapabilitySubSection)
+// (singleHealthProbe, sendForceMaterializeTools, capabilityListSubSection)
 // io.ReadAll the WHOLE body (under their own size cap) before parsing, so they
 // need a []byte adapter. Before this they each carried an independent,
 // incomplete inline SSE parser (mandatory space after `data:`, first-`data:`-
