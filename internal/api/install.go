@@ -382,6 +382,19 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 // emit-site tests point it at a temp dir and restore via t.Cleanup.
 var installShadowWarnDir = defaultManifestDir
 
+// EmbeddedDiskShadowWarning returns the operator-facing pre-existing
+// embed-vs-disk collision warning for a server (empty when there is none),
+// computed against the SAME dir + byte-compare the Install / installUsingEmbedFirst
+// emit sites use. It exists so GUI callers can surface the warning in their HTTP
+// RESPONSE (visible to the operator) rather than relying on the CLI Writer, which
+// for a nil-Writer GUI install lands on os.Stderr the operator never sees (bot PR
+// #494 P2). Single owner: embeddedDiskShadowWarning; this is the exported wrapper
+// idiom mirroring IsEmbeddedManifestName. The CLI Install path keeps its own
+// stderr warn for `mcphub install` operators.
+func EmbeddedDiskShadowWarning(server string) string {
+	return embeddedDiskShadowWarning(server, installShadowWarnDir())
+}
+
 // installUsingEmbedFirst is the install entry that loads the manifest
 // via loadManifestYAMLEmbedFirst. Mirrors Install's audit-first +
 // intent-after wiring per Task 10 (plan §62 audit-first canonical).

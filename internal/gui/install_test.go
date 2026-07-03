@@ -465,3 +465,101 @@ func TestInstallAllHandler_AuditRequestedAllWhenNoFilter(t *testing.T) {
 		t.Fatal("no operator-action event after install-all")
 	}
 }
+
+// ---- embed-vs-disk collision warning surfacing (bot PR #494 P2) ----
+//
+// The install shadow warning must reach the operator through the HTTP
+// RESPONSE, not only api.Install's nil-Writer→os.Stderr fallback. These drive
+// the installShadowWarnFn seam so both shapes are deterministic without
+// depending on the api package's exe-derived defaultManifestDir.
+
+func TestInstallHandler_EmbeddedShadowWarningSurfacedAs200Body(t *testing.T) {
+	prev := installShadowWarnFn
+	installShadowWarnFn = func(name string) string {
+		if name == "wolfram" {
+			return `disk manifest for shipped server "wolfram" is ignored; the shipped built-in manifest is what installs — rename your copy to customize`
+		}
+		return ""
+	}
+	t.Cleanup(func() { installShadowWarnFn = prev })
+
+	inst := &fakeInstaller{}
+	s := newInstallTestServer(inst)
+	rec := postNoBody(t, s, "/api/install?name=wolfram")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (warning body); body=%q", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Warning string `json:"warning"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v; raw=%q", err, rec.Body.String())
+	}
+	if !strings.Contains(body.Warning, "is ignored") || !strings.Contains(body.Warning, "rename") {
+		t.Fatalf("warning body missing the shadow notice + rename hint: %q", body.Warning)
+	}
+	if !inst.called {
+		t.Fatal("install must still run (embed manifest installs); the warning is post-success")
+	}
+}
+
+func TestInstallHandler_NoShadowKeeps204(t *testing.T) {
+	prev := installShadowWarnFn
+	installShadowWarnFn = func(string) string { return "" }
+	t.Cleanup(func() { installShadowWarnFn = prev })
+
+	inst := &fakeInstaller{}
+	s := newInstallTestServer(inst)
+	rec := postNoBody(t, s, "/api/install?name=serena")
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 (no collision → unchanged contract); body=%q", rec.Code, rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("204 must carry no body; got %q", rec.Body.String())
+	}
+}
+
+func TestInstallAllHandler_EmbeddedShadowWarningInRow(t *testing.T) {
+	prev := installShadowWarnFn
+	installShadowWarnFn = func(name string) string {
+		if name == "wolfram" {
+			return `disk manifest for shipped server "wolfram" is ignored`
+		}
+		return ""
+	}
+	t.Cleanup(func() { installShadowWarnFn = prev })
+
+	b := &fakeInstallBulk{results: []api.InstallResult{
+		{Server: "wolfram"},
+		{Server: "fetch"},
+	}}
+	s := newInstallAllTestServer(b)
+	rec := postNoBody(t, s, "/api/install-all")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%q", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		InstallResults []installResultDTO `json:"install_results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var wolframWarn, fetchWarn string
+	for _, r := range body.InstallResults {
+		switch r.Server {
+		case "wolfram":
+			wolframWarn = r.Warning
+		case "fetch":
+			fetchWarn = r.Warning
+		}
+	}
+	if !strings.Contains(wolframWarn, "is ignored") {
+		t.Fatalf("wolfram row missing the shadow warning: %q", wolframWarn)
+	}
+	if fetchWarn != "" {
+		t.Fatalf("non-colliding fetch row must have no warning; got %q", fetchWarn)
+	}
+}

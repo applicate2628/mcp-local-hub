@@ -85,6 +85,14 @@ type installRequest struct {
 	Name string `json:"name"`
 }
 
+// installShadowWarnFn resolves the pre-existing embed-vs-disk collision warning
+// for a just-installed server (empty when none). Package-var seam mirroring the
+// installer/uninstaller injection idiom so the route tests can drive both the
+// no-warning (204) and warning (200-body) shapes deterministically without
+// depending on the api package's exe-derived defaultManifestDir. Production
+// binds the api single owner.
+var installShadowWarnFn = api.EmbeddedDiskShadowWarning
+
 // uninstallResultDTO is the snake_case wire shape for one api.UninstallReport.
 // api.UninstallReport carries no JSON tags (Go-default PascalCase), so we map
 // it explicitly to keep the /api/* surface snake_case-consistent. Slices are
@@ -126,6 +134,11 @@ func newUninstallResultDTO(rep *api.UninstallReport) uninstallResultDTO {
 type installResultDTO struct {
 	Server string `json:"server"`
 	Error  string `json:"error"`
+	// Warning carries the pre-existing embed-vs-disk collision notice (a disk
+	// manifest shadowing a shipped name that the embed-first install ignores)
+	// so the operator sees it in the response, not only on process stderr
+	// (bot PR #494 P2). Empty for the common case; omitted from the wire.
+	Warning string `json:"warning,omitempty"`
 }
 
 // registerInstallRoutes wires POST /api/install onto the server's mux.
@@ -163,6 +176,16 @@ func registerInstallRoutes(s *Server) {
 		s.events.PublishOperatorAction("install", api.CurrentOSUser(), map[string]any{
 			"server": name,
 		})
+		// Surface a pre-existing embed-vs-disk collision to the operator (bot PR
+		// #494 P2): the shipped manifest installed, but a shadowing disk copy was
+		// ignored. Only then does the route return a body — the common no-collision
+		// case keeps the 204 contract the frontend already handles.
+		if warn := installShadowWarnFn(name); warn != "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_ = json.NewEncoder(w).Encode(map[string]any{"warning": warn})
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
@@ -237,6 +260,10 @@ func registerInstallRoutes(s *Server) {
 				failed++
 			} else {
 				installed++
+				// Surface a pre-existing embed-vs-disk collision to the operator in
+				// the response row (bot PR #494 P2) — the shipped manifest installed,
+				// but a shadowing disk copy was ignored.
+				row.Warning = installShadowWarnFn(res.Server)
 			}
 			rows = append(rows, row)
 		}

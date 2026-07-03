@@ -267,17 +267,56 @@ func TestInstallUsingEmbedFirst_EmitsEmbeddedDiskShadowWarnToWriter(t *testing.T
 	}
 }
 
-// F3c (Fable pre-bot review) — emit-site test for scan's readManifestNames: the
-// warn reaches the log sink for a differing colliding file in an explicit
-// manifest dir (the same dir the loader's disk-fallback would consult in that
-// mode), and the name still lands in the scanned set (warn, never drop).
-func TestReadManifestNames_LogsEmbeddedDiskShadowWarn(t *testing.T) {
+// F3c (Fable pre-bot review) — emit-site test for scan's readManifestNames on
+// the EMBED-FIRST path (dir == ""): the warn reaches the log sink for a
+// differing colliding file under the embed-first shadow dir, and the name still
+// lands in the scanned set (warn, never drop). Seeded via the scanShadowWarnDir
+// seam (defaultManifestDir is exe-derived, not seedable).
+func TestReadManifestNames_EmbedFirstPathLogsEmbeddedDiskShadowWarn(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "wolfram"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A DIFFERING copy of the shipped wolfram manifest (append a comment) so the
+	// byte-compare in embeddedDiskShadowWarning does not suppress it.
+	embed, err := fs.ReadFile(servers.Manifests, "wolfram/manifest.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "wolfram", "manifest.yaml"), append(embed, []byte("\n# operator edit\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prevDir := scanShadowWarnDir
+	scanShadowWarnDir = func() string { return dir }
+	t.Cleanup(func() { scanShadowWarnDir = prevDir })
+
+	var logBuf bytes.Buffer
+	prevLog := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(prevLog) })
+
+	// dir == "" → embed-first path (listManifestNamesEmbedFirst yields wolfram).
+	names, err := readManifestNames("")
+	if err != nil {
+		t.Fatalf("readManifestNames: %v", err)
+	}
+	if !names["wolfram"] {
+		t.Fatal("wolfram missing from the scanned name set — the warn must never drop the row")
+	}
+	if !strings.Contains(logBuf.String(), `disk manifest for shipped server "wolfram" is ignored`) {
+		t.Fatalf("scan log sink missing the embed-first shadow warn; log:\n%s", logBuf.String())
+	}
+}
+
+// TestReadManifestNames_ExplicitDirDoesNotWarnShadow (bot PR #494 P3) — an
+// EXPLICIT dir scan reads dir/name/manifest.yaml DIRECTLY (loadManifestForServer
+// non-empty-dir branch, migrate.go), so the disk manifest is actually USED, not
+// shadowed by embed — the "ignored" warn must NOT fire in that mode.
+func TestReadManifestNames_ExplicitDirDoesNotWarnShadow(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "memory"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Differing but VALID yaml (readManifestNames parses it for the companion
-	// filter; valid keeps the test focused on the warn).
 	body := "name: memory\nkind: global\ntransport: stdio-bridge\ncommand: node\ndaemons:\n  - name: default\n    port: 9410\n"
 	if err := os.WriteFile(filepath.Join(dir, "memory", "manifest.yaml"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -292,10 +331,10 @@ func TestReadManifestNames_LogsEmbeddedDiskShadowWarn(t *testing.T) {
 		t.Fatalf("readManifestNames: %v", err)
 	}
 	if !names["memory"] {
-		t.Fatal("memory missing from the scanned name set — the warn must never drop the row")
+		t.Fatal("memory missing from the scanned name set")
 	}
-	if !strings.Contains(logBuf.String(), `disk manifest for shipped server "memory" is ignored`) {
-		t.Fatalf("scan log sink missing the shadow warn; log:\n%s", logBuf.String())
+	if strings.Contains(logBuf.String(), "is ignored") {
+		t.Fatalf("explicit-dir scan emitted a FALSE shadow warn (the disk manifest is actually used in that mode); log:\n%s", logBuf.String())
 	}
 }
 
