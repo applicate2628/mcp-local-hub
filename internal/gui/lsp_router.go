@@ -769,8 +769,70 @@ func (s *Server) handleLSPNotification(
 		return
 	}
 	ws := candidates[0]
-	if s.forwardLSPToWorkspace(w, r, body, httpClient, upstreamURLFn, &ws, upstreamTimeout) {
+	// Genuine notification: answer 202 immediately and forward best-effort in a
+	// DETACHED goroutine. A JSON-RPC notification has no response, so a transport
+	// failure or a non-2xx upstream status must NEVER be propagated to the client
+	// as a 502/504/JSON-RPC-error — the pre-fix synchronous forwardLSPToWorkspace
+	// did exactly that, violating the notifications->202 contract (and, on a
+	// wedged daemon, blocked the client for the full upstream timeout). Mirrors
+	// the serena router's notifications/cancelled detach (finding 2). Detaching
+	// (cleanupContext, not r.Context) also lets the forward survive the client
+	// closing its connection right after the 202.
+	upstreamURL := upstreamURLFn(&ws)
+	if upstreamURL != "" {
+		hdrs := map[string]string{
+			"Content-Type":         r.Header.Get("Content-Type"),
+			"Accept":               r.Header.Get("Accept"),
+			"MCP-Protocol-Version": r.Header.Get("MCP-Protocol-Version"),
+		}
+		method, port := tb.Method, ws.Port
+		fwdCtx, cancel := cleanupContext(upstreamTimeout)
+		go func() {
+			defer cancel()
+			forwardLSPNotificationDetached(fwdCtx, httpClient, upstreamURL, method, hdrs, body, port)
+		}()
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+// forwardLSPNotificationDetached POSTs a genuine notifications/* body to the
+// bound workspace daemon's /mcp on a DETACHED, bounded context. Best-effort:
+// the router already answered the client 202 (a notification has no response),
+// so a transport failure or a non-2xx upstream status is audited (warn to
+// hub-mcp.log) but NEVER propagated. Mirrors serena's
+// forwardSerenaCancelledUpstream. All inputs are value snapshots taken before
+// the goroutine launched, so nothing here touches the (now-returned) handler's
+// ResponseWriter or *http.Request.
+func forwardLSPNotificationDetached(ctx context.Context, httpClient *http.Client, upstreamURL, method string, hdrs map[string]string, body []byte, port int) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
+	if err != nil {
+		_ = api.LogHubMcpEvent("warn", "lsp-notification-forward-failed", map[string]any{
+			"port": port, "method": method, "err": "build request: " + err.Error(),
+		})
 		return
+	}
+	for k, v := range hdrs {
+		if v != "" {
+			req.Header.Set(k, v)
+		}
+	}
+	if req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Del("Mcp-Session-Id")
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		_ = api.LogHubMcpEvent("warn", "lsp-notification-forward-failed", map[string]any{
+			"port": port, "method": method, "err": err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_ = api.LogHubMcpEvent("warn", "lsp-notification-forward-non2xx", map[string]any{
+			"port": port, "method": method, "status": resp.StatusCode,
+		})
 	}
 }
 
