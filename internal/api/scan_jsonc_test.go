@@ -355,3 +355,38 @@ func TestExtractManifestFromClient_Antigravity_TolerateJSONC(t *testing.T) {
 		t.Fatalf("extracted manifest missing expected fields from a JSONC antigravity config:\n%s", yaml)
 	}
 }
+
+// Bot #499 r2 (P2, import_vscode.go:617): a config that ends with a `// line
+// comment` and NO final newline is a real hand-edited shape. hujson reports
+// "parsing comment: unexpected EOF" for `{...} // note<EOF>`, so
+// clients.StandardizeJSONC appends a trailing newline. The scanner (and the
+// adapters, which share StandardizeJSONC) must accept it — the previous
+// byte-stripper did, and dropping it would regress valid JSONC. A truly
+// unterminated /* block */ comment still (correctly) errors
+// (TestStripJSONC_MalformedComment_RejectedLikeAdapter is unaffected).
+func TestScanVSCode_TrailingLineCommentNoTrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "settings.json")
+	// No '\n' after the trailing // comment.
+	if err := os.WriteFile(cfg, []byte(`{"servers":{"mem":{"url":"http://x"}}} // trailing note, no newline`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entries := map[string]*ScanEntry{}
+	if err := scanVSCode(entries, cfg); err != nil {
+		t.Fatalf("scanVSCode must tolerate a trailing // comment with no final newline, got: %v", err)
+	}
+	if _, ok := entries["mem"]; !ok {
+		t.Fatalf("mem row dropped from a JSONC config ending in a newline-less // comment; got %v", entries)
+	}
+}
+
+func TestStripJSONC_TrailingLineCommentNoNewline_Parses(t *testing.T) {
+	out := stripJSONCommentsAndTrailingCommas([]byte(`{"a":1} // note no newline`))
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("trailing // comment without a final newline must standardize to valid JSON, got: %v\n%s", err, out)
+	}
+	if got["a"] != float64(1) {
+		t.Fatalf("value corrupted: %v", got)
+	}
+}

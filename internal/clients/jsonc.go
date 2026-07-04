@@ -96,9 +96,18 @@ func parseJSONCBytes(data []byte) (map[string]any, error) {
 // SAFETY (input is NOT mutated): hujson.Standardize overwrites comment bytes
 // with spaces IN PLACE, so this standardizes a DEFENSIVE COPY — the caller's
 // slice is never clobbered.
+//
+// A trailing newline is appended to the copy before standardizing so a config
+// that ends with a `// line comment` and NO final newline still parses: hujson
+// otherwise reports "parsing comment: unexpected EOF" for `{...} // note<EOF>`
+// (a real shape for hand-edited VS Code / Zed / OpenCode configs). The extra
+// newline is invariant for valid JSON (trailing whitespace is ignored) and only
+// terminates an otherwise-unterminated FINAL LINE comment; a truly unterminated
+// `/* block */` comment still (correctly) errors.
 func StandardizeJSONC(data []byte) ([]byte, error) {
-	buf := make([]byte, len(data))
+	buf := make([]byte, len(data)+1)
 	copy(buf, data)
+	buf[len(data)] = '\n'
 	return hujson.Standardize(buf)
 }
 

@@ -46,7 +46,7 @@ func assertCommentsAndUnrelatedSurvive(t *testing.T, path, unrelatedKey string) 
 	}
 	out := string(raw)
 	for _, want := range []string{
-		"// Zed settings header",       // line comment
+		"// Zed settings header",        // line comment
 		"/* hand-written block note */", // block comment
 		unrelatedKey,                    // operator's unrelated key
 	} {
@@ -869,5 +869,21 @@ func TestParseJSONCBytes_EmptyAndNull(t *testing.T) {
 		if len(m) != 0 {
 			t.Fatalf("parseJSONCBytes(%q) = %#v, want empty map", in, m)
 		}
+	}
+}
+
+// A config ending with a `// line comment` and NO final newline is a real
+// hand-edited shape. StandardizeJSONC appends a trailing newline so hujson does
+// not reject it with "parsing comment: unexpected EOF"; the READ path
+// (parseJSONCBytes) must therefore parse it. (The scanner side shares
+// StandardizeJSONC — see internal/api/scan_jsonc_test.go.)
+func TestParseJSONCBytes_TrailingLineCommentNoNewline(t *testing.T) {
+	m, err := parseJSONCBytes([]byte(`{"mcpServers":{"x":{"url":"http://y"}}} // note, no newline`))
+	if err != nil {
+		t.Fatalf("parseJSONCBytes must tolerate a trailing // comment with no final newline, got: %v", err)
+	}
+	servers, _ := m["mcpServers"].(map[string]any)
+	if _, ok := servers["x"]; !ok {
+		t.Fatalf("entry x lost from a newline-less trailing-// config: %v", m)
 	}
 }
