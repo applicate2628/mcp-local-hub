@@ -275,3 +275,120 @@ func TestRefreshStalePortRecheckCatchesInWindowRestart(t *testing.T) {
 		t.Fatal("reinit never reached the daemon — the re-check did not trigger a reinit")
 	}
 }
+
+// TestRefreshStalePortFollowerDoesNotClearNewerRestart reproduces fable Defect 1
+// / Codex #500 P2: two proactive callers coalesce onto ONE singleflight reinit
+// flight; a genuine restart lands AFTER the flight started but BEFORE the second
+// (follower) caller's snapshot. Pre-fix, the follower's clear token carried its
+// OWN newer snapshot generation, so it cleared stale=false even though the
+// shared flight's session id predates that restart — wedging every later
+// dispatch on a dead daemon session (-32000, no transport failure to trigger
+// selfHealRetry). The fix reads the flight's OWN start generation once (shared by
+// all joiners) and clears only if no restart landed since; here one did, so
+// neither caller may clear.
+func TestRefreshStalePortFollowerDoesNotClearNewerRestart(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "follower-old-sid"
+	const flightSID = "follower-flight-sid"
+	const proto = "2025-11-25"
+
+	gate := make(chan struct{})
+	var gateOnce sync.Once
+	releaseGate := func() { gateOnce.Do(func() { close(gate) }) }
+	t.Cleanup(releaseGate)
+
+	daemon := newStubDaemon(t, flightSID)
+	daemon.onInit = func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-gate:
+		case <-r.Context().Done():
+			return
+		}
+		w.Header().Set("Mcp-Session-Id", flightSID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+	port := daemon.port
+
+	sess := sessionWithParticipants(daemon)
+	sess.ClientSessionID = "follower-sess"
+	ref := sess.IntendedParticipants[0]
+	sess.InitSuccesses[ref] = oldSID
+	sess.DaemonProtoVer[ref] = proto
+	callRef := canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: port, RawName: "read"}
+
+	// R1: mark the port stale (generation 0→1).
+	if !sess.markStalePort(port) {
+		t.Fatalf("setup: port %d not tracked by the session", port)
+	}
+
+	// Leader A: starts the flight, blocks in the daemon initialize on `gate`.
+	aReturned := make(chan string, 1)
+	go func() {
+		sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
+		aReturned <- sid
+	}()
+
+	// Wait until A's flight actually reached the daemon initialize (flight is
+	// genuinely in-flight, so the follower joins it rather than starting a new one).
+	deadline := time.Now().Add(3 * time.Second)
+	for daemon.initCount.Load() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("leader flight never reached the daemon initialize")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	// R2: a SECOND genuine restart lands WHILE the flight is still in-flight
+	// (generation 1→2). The gate holds the flight open, so this is deterministic.
+	if !sess.markStalePort(port) {
+		t.Fatal("R2 markStalePort failed")
+	}
+
+	// Follower B: joins the SAME in-flight singleflight call. Its snapshot sees
+	// generation 2 (post-R2). The gate keeps the flight open, so B has unbounded
+	// time to reach the DoChan join — not a wall-clock race.
+	bReturned := make(chan string, 1)
+	go func() {
+		sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
+		bReturned <- sid
+	}()
+	time.Sleep(50 * time.Millisecond) // let B's goroutine reach the singleflight join
+
+	releaseGate()
+
+	select {
+	case <-aReturned:
+	case <-time.After(PerDaemonInitTimeout + 3*time.Second):
+		t.Fatal("leader did not return")
+	}
+	select {
+	case <-bReturned:
+	case <-time.After(PerDaemonInitTimeout + 3*time.Second):
+		t.Fatal("follower did not return")
+	}
+
+	// Coalesced: exactly ONE handshake served both callers (proves B joined the
+	// leader's flight; if B had started a new flight it would read gen=2 and this
+	// count would be 2, a different scenario).
+	if got := daemon.initCount.Load(); got != 1 {
+		t.Fatalf("expected 1 coalesced handshake for the leader+follower, got %d", got)
+	}
+
+	// THE FIX: the shared flight started at generation 1 (pre-R2); R2 bumped it to
+	// 2. The flight's result predates R2, so NEITHER caller may clear stale.
+	// Pre-fix, follower B (its own token generation == current 2) cleared it.
+	st, ok := sess.stalePortStateFor(port)
+	if !ok {
+		t.Fatal("stale state vanished")
+	}
+	st.mu.Lock()
+	stillStale := st.stale
+	st.mu.Unlock()
+	if !stillStale {
+		t.Fatal("a singleflight follower cleared the newer restart's stale mark (fable Defect 1): a shared pre-restart flight result must NOT clear stale")
+	}
+}
