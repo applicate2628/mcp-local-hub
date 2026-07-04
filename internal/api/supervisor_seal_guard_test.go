@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -113,15 +112,71 @@ func TestNoUnsealedLiveSeam(t *testing.T) {
 		t.Fatal("recurrence guard found ZERO live-seam vars — the AST detection is broken (it should find registerSupervisorReconcileFn, proxyReadinessFn, et al.)")
 	}
 
-	mainSrc, err := os.ReadFile("main_test.go")
-	if err != nil {
-		t.Fatalf("read main_test.go: %v", err)
-	}
+	// Collect only the assignments that run BEFORE m.Run() in TestMain. A raw-text
+	// search of main_test.go would be satisfied by the POST-m.Run() RESTORE
+	// assignment (`foo = prevFoo`) even if the pre-run SEAL were removed (Codex #503
+	// r2) — so parse TestMain and count only pre-m.Run() assignment targets.
+	sealed := sealAssignmentsBeforeRun(t, fset)
 	for v, loc := range seamVars {
-		if !bytes.Contains(mainSrc, []byte(v+" =")) {
-			t.Errorf("live-fleet/slow seam %s (%s) defaults to a real sink function but is NOT sealed in TestMain (main_test.go). Add a hermetic default-stub to the seal block so `go test ./internal/api/` never dials the live supervisor / scans or kills real processes / HTTP-polls a real port.", v, loc)
+		if !sealed[v] {
+			t.Errorf("live-fleet/slow seam %s (%s) defaults to a real sink function but is NOT sealed BEFORE m.Run() in TestMain (main_test.go). Add a hermetic default-stub to the seal block so `go test ./internal/api/` never dials the live supervisor / scans or kills real processes / HTTP-polls a real port. (A restore assignment after m.Run() does NOT count.)", v, loc)
 		}
 	}
+}
+
+// sealAssignmentsBeforeRun parses main_test.go and returns the set of identifiers
+// assigned inside TestMain BEFORE the `code := m.Run()` statement — i.e. the real
+// seals, excluding the post-run restore assignments.
+func sealAssignmentsBeforeRun(t *testing.T, fset *token.FileSet) map[string]bool {
+	t.Helper()
+	f, err := parser.ParseFile(fset, "main_test.go", nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse main_test.go: %v", err)
+	}
+	sealed := map[string]bool{}
+	for _, decl := range f.Decls {
+		fd, ok := decl.(*ast.FuncDecl)
+		if !ok || fd.Name.Name != "TestMain" || fd.Body == nil {
+			continue
+		}
+		for _, stmt := range fd.Body.List {
+			if isMRunAssign(stmt) {
+				break // everything after m.Run() is a restore, not a seal
+			}
+			as, ok := stmt.(*ast.AssignStmt)
+			if !ok {
+				continue
+			}
+			for _, lhs := range as.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok {
+					sealed[id.Name] = true
+				}
+			}
+		}
+	}
+	return sealed
+}
+
+// isMRunAssign reports whether a statement is `... = m.Run()` — the boundary
+// between the seal block and the restore block in TestMain.
+func isMRunAssign(stmt ast.Stmt) bool {
+	as, ok := stmt.(*ast.AssignStmt)
+	if !ok {
+		return false
+	}
+	for _, rhs := range as.Rhs {
+		call, ok := rhs.(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if ok && sel.Sel.Name == "Run" {
+			if x, ok := sel.X.(*ast.Ident); ok && x.Name == "m" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // referencesLiveSeamSink reports whether an expression references a live-seam sink
@@ -131,6 +186,14 @@ func TestNoUnsealedLiveSeam(t *testing.T) {
 func referencesLiveSeamSink(e ast.Expr) bool {
 	found := false
 	ast.Inspect(e, func(n ast.Node) bool {
+		// `autostart.New` (the backend factory) — matched as a selector so the
+		// generic bare name "New" is NOT a false-positive sink (Codex #503 r2 P3).
+		if sel, ok := n.(*ast.SelectorExpr); ok {
+			if x, ok := sel.X.(*ast.Ident); ok && x.Name == "autostart" && sel.Sel.Name == "New" {
+				found = true
+				return false
+			}
+		}
 		id, ok := n.(*ast.Ident)
 		if !ok {
 			return true
