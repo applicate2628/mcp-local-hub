@@ -184,6 +184,24 @@ func TestRestartAllFallsThroughToLegacySchedulerAndSkipsSupervisorHandledTasks(t
 	restoreState := SetDaemonStateRootForTest(stateDir)
 	defer restoreState()
 
+	// Seal RestartAll's legacy-scheduler-loop host I/O. Without these seams,
+	// killDaemonByPort + waitForPortFree run against the legacy task's REAL
+	// manifest port (memory-default → 9123, baked into the embedded manifest and
+	// unaffected by the isolated state dir) and taskkill the developer's LIVE
+	// memory daemon — the identity gate accepts any same-user mcphub.exe, so it
+	// does NOT refuse. Recording the dispatched ports also lets the test assert the
+	// kill/wait fired for the legacy port (a stronger check than the fake-Run alone).
+	var killedPorts, waitedPorts []int
+	origKill := killByPortFn
+	origWait := waitForPortFreeFn
+	killByPortFn = func(port int, _ time.Duration) error { killedPorts = append(killedPorts, port); return nil }
+	waitForPortFreeFn = func(port int, _ time.Duration) error { waitedPorts = append(waitedPorts, port); return nil }
+	t.Cleanup(func() { killByPortFn = origKill; waitForPortFreeFn = origWait })
+	// Pin the read-only registry scan (workspaceTasksByName → DefaultRegistryPath)
+	// away from the real %LOCALAPPDATA% / XDG state dir.
+	t.Setenv("LOCALAPPDATA", filepath.Join(stateDir, "Local"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(stateDir, "State"))
+
 	const supervisorTask = `\mcp-local-hub-lsp-deadbeef-go`
 	const legacyTask = `\mcp-local-hub-memory-default`
 	intent := &SupervisorIntentFile{
@@ -231,6 +249,15 @@ func TestRestartAllFallsThroughToLegacySchedulerAndSkipsSupervisorHandledTasks(t
 	}
 	if results[0].TaskName != supervisorTask || results[1].TaskName != legacyTask {
 		t.Fatalf("results = %+v, want supervisor then legacy", results)
+	}
+	// The legacy task's kill + wait were dispatched for its real manifest port
+	// (memory-default → 9123) THROUGH the seams — never a real taskkill against the
+	// live daemon. The supervisor task is respawn-handled, so exactly one kill.
+	if len(killedPorts) != 1 || killedPorts[0] != 9123 {
+		t.Fatalf("killByPortFn ports = %v, want [9123] (legacy memory-default port, sealed)", killedPorts)
+	}
+	if len(waitedPorts) != 1 || waitedPorts[0] != 9123 {
+		t.Fatalf("waitForPortFreeFn ports = %v, want [9123]", waitedPorts)
 	}
 }
 

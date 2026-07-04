@@ -3051,7 +3051,7 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 		}
 		port := portForTask(normalized, ports, wsByTask)
 		if port != 0 {
-			if err := killDaemonByPort(port, 5*time.Second); err != nil {
+			if err := killByPortFn(port, 5*time.Second); err != nil {
 				results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 				continue
 			}
@@ -3063,7 +3063,7 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 			// last_result=1 with no useful diagnostic. 3s is small enough
 			// to be invisible in normal restarts and large enough to ride
 			// out the typical TIME_WAIT window.
-			if err := waitForPortFree(port, 3*time.Second); err != nil {
+			if err := waitForPortFreeFn(port, 3*time.Second); err != nil {
 				results = append(results, RestartResult{TaskName: t.Name, Err: "wait for port: " + err.Error()})
 				continue
 			}
@@ -3279,14 +3279,14 @@ func (a *API) RestartAll() ([]RestartResult, error) {
 			continue
 		}
 		port := portForTask(normalized, ports, wsByTask)
-		if err := killDaemonByPort(port, 5*time.Second); err != nil {
+		if err := killByPortFn(port, 5*time.Second); err != nil {
 			results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 			continue
 		}
 		if port != 0 {
 			// DM-3: see Restart() comment. Same TIME_WAIT race applies
 			// to RestartAll's per-task kill-then-Run.
-			if err := waitForPortFree(port, 3*time.Second); err != nil {
+			if err := waitForPortFreeFn(port, 3*time.Second); err != nil {
 				results = append(results, RestartResult{TaskName: t.Name, Err: "wait for port: " + err.Error()})
 				continue
 			}
@@ -3407,6 +3407,11 @@ func (a *API) StopAll() ([]RestartResult, error) {
 // paths can be unit-tested without spawning real processes bound to ports.
 // Tests assign a fake in their setup and restore the default in defer.
 var killByPortFn = killDaemonByPort
+
+// waitForPortFreeFn is the sibling test seam for waitForPortFree, for the same
+// reason: the Restart / RestartAll legacy-scheduler loops must be unit-testable
+// without a real net.Listen bind probe against a live daemon's port.
+var waitForPortFreeFn = waitForPortFree
 
 var errPortKillUnsupported = errors.New("port kill unsupported: process lookup unavailable")
 
