@@ -239,6 +239,57 @@ func TestBackfillIntentDaemonPorts_SkipsEmptyServerDaemonTimerRow(t *testing.T) 
 	}
 }
 
+// TestBackfillIntentDaemonPorts_BlankFieldsRecoveredFromArgs is the bot PR #504
+// regression: a REAL daemon row whose Server/Daemon struct fields are blank (an
+// older intent shape) but whose args carry the canonical --server/--daemon must
+// be backfilled via args-derivation, NOT skipped as if it were a portless timer.
+func TestBackfillIntentDaemonPorts_BlankFieldsRecoveredFromArgs(t *testing.T) {
+	dir := t.TempDir()
+	stubPortResolver(t, map[string][2]int{"memory/default": {9123, 0}})
+	path := writeTestIntent(t, dir, []SupervisorDaemon{
+		{TaskName: `\mcp-local-hub-memory-default`, Server: "", Daemon: "", Port: 0,
+			Args: []string{"daemon", "--server", "memory", "--daemon", "default"}},
+	})
+
+	res, err := BackfillIntentDaemonPorts(dir)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if len(res.Applied) != 1 || res.Applied[0].Port != 9123 {
+		t.Fatalf("blank-field daemon row must be backfilled via args-derivation, got %+v", res.Applied)
+	}
+	if res.Applied[0].Server != "memory" || res.Applied[0].Daemon != "default" {
+		t.Errorf("Applied must carry the derived server/daemon, got server=%q daemon=%q", res.Applied[0].Server, res.Applied[0].Daemon)
+	}
+	if len(res.UnresolvedPortZero) != 0 {
+		t.Fatalf("a real daemon row must not be reported unresolved, got %v", res.UnresolvedPortZero)
+	}
+	if got := readTestIntentPorts(t, path)[`\mcp-local-hub-memory-default`]; got != 9123 {
+		t.Errorf("blank-field daemon port not persisted: got %d, want 9123", got)
+	}
+	// The identity fields must be HEALED on the persisted descriptor, not left
+	// blank — otherwise the squatter classifier's argv gate (supervise_squatter.go)
+	// and `mcphub daemon recover` misclassify a genuine own-child as foreign and
+	// never reap it, defeating the protection this backfill restores (bot PR #504
+	// + opus delta review).
+	intent, rerr := ReadSupervisorIntent(path)
+	if rerr != nil {
+		t.Fatalf("re-read: %v", rerr)
+	}
+	var found bool
+	for _, d := range intent.Daemons {
+		if d.TaskName == `\mcp-local-hub-memory-default` {
+			found = true
+			if d.Server != "memory" || d.Daemon != "default" {
+				t.Errorf("identity not healed on persisted row: server=%q daemon=%q, want memory/default", d.Server, d.Daemon)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("memory row disappeared from persisted intent")
+	}
+}
+
 func TestBackfillIntentDaemonPorts_ManifestPortZeroIsUnresolved(t *testing.T) {
 	dir := t.TempDir()
 	// Resolver MATCHES the daemon (ok=true) but the manifest declares port 0 —

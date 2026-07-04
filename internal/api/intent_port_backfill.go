@@ -19,8 +19,11 @@
 // primitive is the supervisor's own startup self-heal: the SUPERVISOR calls it
 // ONCE at startup, BEFORE it loads the intent for its first reconcile pass, so
 // every existing host is repaired on its next supervisor restart WITHOUT an
-// operator-run migration. It only ever RAISES a 0 to the manifest port; it never
-// rewrites a non-zero port, a Command/Args/Env, or a runtime_spec descriptor.
+// operator-run migration. It RAISES a 0 to the manifest port and, when an older
+// intent shape left the identity fields blank, heals Server/Daemon from the row's
+// own `daemon --server/--daemon` args (so the squatter classifier + recover engage);
+// it never rewrites a non-zero port, a populated identity, Command/Args, Env, or a
+// runtime_spec descriptor.
 package api
 
 import (
@@ -54,6 +57,46 @@ func resolveManifestPortAndDeadline(server, daemon string) (port int, deadlineSe
 		return 0, 0, false
 	}
 	return d.Port, d.StartupBindDeadlineSeconds, true
+}
+
+// descriptorServerDaemon resolves the (server, daemon) identity of a supervisor
+// descriptor and reports whether it is a manifest-backed `mcphub daemon` row at
+// all. It prefers the struct fields; when EITHER is blank (an older intent shape
+// that populated only the args) it recovers them from the canonical daemon args
+// the install fan-out always writes: ["daemon", "--server", <s>, "--daemon", <d>].
+//
+// Args are the authoritative fallback, NOT the task name: server names contain
+// hyphens (paper-search-mcp, sequential-thinking), so splitting a
+// "\mcp-local-hub-<server>-<daemon>" task name is ambiguous, whereas --server /
+// --daemon are unambiguous tokens. A row that is neither field-populated nor
+// daemon-arg-shaped (a maintenance timer / one-shot such as
+// workspace-weekly-refresh, args ["workspace-weekly-refresh"]) returns ok=false —
+// it is portless by design and must be skipped, not reported unresolvable.
+func descriptorServerDaemon(d SupervisorDaemon) (server, daemon string, ok bool) {
+	server, daemon = d.Server, d.Daemon
+	if server != "" && daemon != "" {
+		return server, daemon, true
+	}
+	if len(d.Args) > 0 && d.Args[0] == "daemon" {
+		argVal := func(flag string) string {
+			for i := 0; i+1 < len(d.Args); i++ {
+				if d.Args[i] == flag {
+					return d.Args[i+1]
+				}
+			}
+			return ""
+		}
+		if server == "" {
+			server = argVal("--server")
+		}
+		if daemon == "" {
+			daemon = argVal("--daemon")
+		}
+	}
+	if server == "" || daemon == "" {
+		return "", "", false
+	}
+	return server, daemon, true
 }
 
 // IntentPortBackfill is the structured outcome of BackfillIntentDaemonPorts,
@@ -136,21 +179,35 @@ func BackfillIntentDaemonPorts(stateDir string) (IntentPortBackfill, error) {
 		if d.Port > 0 || d.RuntimeSpec != nil {
 			continue
 		}
-		// Maintenance-timer / non-manifest descriptors (e.g. the
-		// workspace-weekly-refresh row, args ["workspace-weekly-refresh"]) carry
-		// empty Server/Daemon and are portless BY DESIGN — they can never match a
-		// manifest daemon. Skip them SILENTLY (no UnresolvedPortZero, no warn):
-		// otherwise F5 would emit an "every port-based protection stays disabled"
-		// warn for a non-listening timer on every supervisor startup, forever.
-		if d.Server == "" || d.Daemon == "" {
+		// Resolve the (server, daemon) identity — from the struct fields, or
+		// recovered from the canonical `daemon --server/--daemon` args when an
+		// older intent shape left the fields blank. A row that is NOT a manifest
+		// daemon (a maintenance timer / one-shot such as workspace-weekly-refresh,
+		// whose args carry no --server/--daemon) is portless BY DESIGN and skipped
+		// SILENTLY — never a UnresolvedPortZero warn on every startup. Crucially
+		// this does NOT skip a real daemon row just because its Server/Daemon
+		// fields are blank: such a row still carries --server/--daemon in its args
+		// and gets its port restored (bot PR #504).
+		server, daemon, isManifestDaemon := descriptorServerDaemon(*d)
+		if !isManifestDaemon {
 			continue
 		}
-		port, deadlineSecs, ok := resolveManifestPortAndDeadlineFn(d.Server, d.Daemon)
+		port, deadlineSecs, ok := resolveManifestPortAndDeadlineFn(server, daemon)
 		if !ok || port <= 0 {
 			res.UnresolvedPortZero = append(res.UnresolvedPortZero, d.TaskName)
 			continue
 		}
 		d.Port = port
+		// Heal the identity fields too when they were blank (recovered from args
+		// above). A row left `Port>0, Server="", Daemon=""` is a state install never
+		// produces, and it DEFEATS the very protection F5 restores: the squatter
+		// classifier's argv gate (supervise_squatter.go:218) and `mcphub daemon
+		// recover` both require Server/Daemon != "" — a genuine own-child would be
+		// misclassified foreign and never reaped. The values came from THIS row's
+		// own `daemon --server/--daemon` args (what the spawn itself uses), so they
+		// cannot be wrong; when the fields were already populated this is a no-op.
+		d.Server = server
+		d.Daemon = daemon
 		// Match the install fan-out (supervisorDaemonsFromPlan carries both fields):
 		// stamp the manifest's first-bind deadline too, so the backfilled row is
 		// byte-identical to what a fresh install would write. Additive — a manifest
@@ -161,8 +218,8 @@ func BackfillIntentDaemonPorts(stateDir string) (IntentPortBackfill, error) {
 		changed = true
 		res.Applied = append(res.Applied, IntentPortBackfillRow{
 			TaskName:         d.TaskName,
-			Server:           d.Server,
-			Daemon:           d.Daemon,
+			Server:           server,
+			Daemon:           daemon,
 			Port:             d.Port,
 			BindDeadlineSecs: d.StartupBindDeadlineSeconds,
 		})
