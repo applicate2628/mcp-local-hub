@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1360,5 +1361,62 @@ func TestLSPRouter_ForwardsDaemon503AndRetryAfterVerbatim_StillTouchesSession(t 
 	cands := sessions.Candidates("client-session")
 	if len(cands) != 1 || cands[0].WorkspaceKey != "alpha" {
 		t.Fatalf("session not bound to workspace after 503 forward: %+v", cands)
+	}
+}
+
+// TestLSPRouter_NotificationForwardIsDetached202 covers the deep-audit finding
+// (lsp-router notification non-202): a genuine notifications/* to a
+// single-candidate bound session must answer HTTP 202 IMMEDIATELY and forward
+// best-effort in a detached goroutine — a JSON-RPC notification has no
+// response, so an upstream failure must NEVER surface as 502/504/JSON-RPC-error
+// (the pre-fix synchronous forward did exactly that). Two cases: (A) reachable
+// upstream → 202 + the notification is actually delivered; (B) unreachable
+// upstream → still 202, never 502/504.
+func TestLSPRouter_NotificationForwardIsDetached202(t *testing.T) {
+	got := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		select {
+		case got <- string(b):
+		default:
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(upstream.Close)
+
+	newBound := func(upstreamURL string) *Server {
+		sessions := lsp_routing.NewSessionRouter()
+		ws := api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/repo/alpha", Language: "go", Backend: "gopls-mcp", Port: 9201}
+		sessions.TouchWorkspace("client-session", &ws)
+		s := NewServer(Config{Port: 9125})
+		s.SetLSPRouterDeps(&lspRouterDeps{
+			Resolver:               &stubLSPResolver{},
+			Sessions:               sessions,
+			BackendKindForLanguage: func(string) (string, bool) { return "gopls-mcp", true },
+			UpstreamURLFn:          func(*api.WorkspaceEntry) string { return upstreamURL },
+		})
+		return s
+	}
+
+	notif := []byte(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"7"}}`)
+
+	// (A) reachable upstream → 202 immediately + delivered.
+	rrA := postLSP(t, newBound(upstream.URL), "go", notif, map[string]string{"Mcp-Session-Id": "client-session"})
+	if rrA.Code != http.StatusAccepted {
+		t.Fatalf("reachable notification status = %d, want 202; body=%s", rrA.Code, rrA.Body.String())
+	}
+	select {
+	case b := <-got:
+		if !strings.Contains(b, "notifications/cancelled") {
+			t.Fatalf("upstream received %q, want the forwarded notification", b)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("notification was not forwarded to the upstream within 3s (detached forward lost)")
+	}
+
+	// (B) unreachable upstream → still 202, NEVER 502/504 (the core contract fix).
+	rrB := postLSP(t, newBound("http://127.0.0.1:1"), "go", notif, map[string]string{"Mcp-Session-Id": "client-session"})
+	if rrB.Code != http.StatusAccepted {
+		t.Fatalf("unreachable-upstream notification status = %d, want 202 (must not propagate 502/504 to a notification); body=%s", rrB.Code, rrB.Body.String())
 	}
 }
