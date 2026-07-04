@@ -38,8 +38,10 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -247,7 +249,7 @@ func TestRefreshStalePortLoopReinitsPastMidFlightRestart(t *testing.T) {
 
 	returned := make(chan string, 1)
 	go func() {
-		sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
+		sid, _, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
 		returned <- sid
 	}()
 
@@ -311,7 +313,7 @@ func TestRefreshStalePortGenerationStampPredicate(t *testing.T) {
 		sess.InitSuccessGen = map[canonicalDaemonRef]uint64{ref: 1} // stamp == curGen
 		sess.mu.Unlock()
 
-		sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, "caller-sid", proto)
+		sid, _, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, "caller-sid", proto)
 		if sid != cachedSID {
 			t.Fatalf("fresh stamp (>= curGen) must REUSE the cached sid; got %q want %q", sid, cachedSID)
 		}
@@ -335,7 +337,7 @@ func TestRefreshStalePortGenerationStampPredicate(t *testing.T) {
 		sess.InitSuccessGen = map[canonicalDaemonRef]uint64{ref: 1} // stamp 1 < curGen 2
 		sess.mu.Unlock()
 
-		sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, "caller-sid", proto)
+		sid, _, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, "caller-sid", proto)
 		if sid != reinitSID {
 			t.Fatalf("stale stamp (< curGen) must REINIT; got %q want fresh %q", sid, reinitSID)
 		}
@@ -387,7 +389,7 @@ func TestRefreshStalePortExhaustionReturnsFreshestCached(t *testing.T) {
 	}
 	callRef := canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: port, RawName: "read"}
 
-	sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, callerSID, proto)
+	sid, _, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, callerSID, proto)
 
 	// Exhausted after maxProactiveReinitAttempts reinits. The returned sid must be a
 	// reinit RESULT (the freshest cached), never the caller's original snapshot.
@@ -437,12 +439,70 @@ func TestRefreshStalePortConvergesWhenDaemonMovedPort(t *testing.T) {
 	})
 
 	callRef := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: oldPort, RawName: "read"}
-	sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
+	sid, _, resolvedPort := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
 
 	if sid != freshSID {
 		t.Fatalf("moved-port reinit did not converge to the fresh sid; got %q want %q", sid, freshSID)
 	}
+	// The RESOLVED port must be returned to the caller so dispatchToolsCall posts
+	// to the daemon the fresh sid was minted for (newPort), not the stale ref.Port
+	// (oldPort) — Codex #500 r6 P2. A fresh sid dispatched to oldPort would target
+	// a dead/absent daemon.
+	if resolvedPort != newPort {
+		t.Fatalf("refresh returned port %d; want the moved-to port %d so dispatch targets the fresh daemon (a stale %d would orphan the call)", resolvedPort, newPort, oldPort)
+	}
 	if got := daemon.initCount.Load(); got != 1 {
 		t.Fatalf("moved-port must reinit exactly ONCE (no loop-forever on the deleted old-port key); got %d handshakes", got)
+	}
+}
+
+// TestDispatchToolsCallPostsToResolvedMovedPort is the END-TO-END guard for Codex
+// #500 r6 P2: it drives the full dispatchToolsCall path (not just the refresh
+// helper) for a daemon that moved P1→P2 and proves the tools/call HTTP POST lands
+// on the RESOLVED port (P2), not the stale ref.Port (P1). Before the fix,
+// refreshStalePortBeforeDispatch cached the fresh sid under P2 but returned only
+// (sid, proto); dispatch then posted that fresh sid to P1 → a dead/absent daemon.
+func TestDispatchToolsCallPostsToResolvedMovedPort(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldPort = 49148
+	const freshSID = "e2e-moved-sid"
+	const oldSID = "e2e-old-sid"
+	const proto = "2025-11-25"
+
+	newDaemon := newStubDaemon(t, freshSID) // the moved-to daemon: serves reinit + tools/call
+	newPort := newDaemon.port
+
+	sess := sessionWithParticipants()
+	sess.ScopeKey = "claude-code"
+	sess.ProtocolVersion = proto
+	oldKey := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: oldPort}
+	sess.InitSuccesses[oldKey] = oldSID
+	sess.DaemonProtoVer[oldKey] = proto
+	if !sess.markStalePort(oldPort) { // old port marked stale (gen 1)
+		t.Fatalf("setup: old port %d not tracked", oldPort)
+	}
+	// Live resolver: (srv1,claude-code) now bound to newPort.
+	resolverSnapshot.Store(&ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {{Server: "srv1", Daemon: "claude-code", Port: newPort}}},
+	})
+
+	ref := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: oldPort, RawName: "read"}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	params := json.RawMessage(`{"name":"srv1__read","arguments":{}}`)
+
+	body, err := dispatchToolsCall(ctx, sess, json.RawMessage(`1`), params, ref, oldSID, proto)
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if !strings.Contains(string(body), "called=read") {
+		t.Fatalf("dispatch body missing called=read: %s", body)
+	}
+	// The tools/call MUST have hit the RESOLVED (moved-to) port exactly once.
+	if got := newDaemon.callCount.Load(); got != 1 {
+		t.Fatalf("moved-to daemon callCount=%d want 1 — dispatch must POST to the RESOLVED port, not the stale ref.Port", got)
 	}
 }

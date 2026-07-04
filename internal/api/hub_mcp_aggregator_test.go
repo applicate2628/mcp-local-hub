@@ -972,7 +972,7 @@ func TestReinitDetachedCacheClearsCachedSessionStaleMarkerForProactiveConsumer(t
 		t.Fatalf("detached reinit left stale port marker set for cached fresh port %d", freshRef.Port)
 	}
 	initAfterCache := d.initCount.Load()
-	sid, proto := sess.refreshStalePortBeforeDispatch(
+	sid, proto, _ := sess.refreshStalePortBeforeDispatch(
 		context.Background(),
 		canonicalToolRef{Server: freshRef.Server, Daemon: freshRef.Daemon, Port: freshRef.Port, RawName: "read"},
 		oldSID,

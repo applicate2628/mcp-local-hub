@@ -918,7 +918,15 @@ func resolveToolsCallRoute(ctx context.Context, sess *hubSession, clientReqID, p
 // the daemon's response id back to the client's id. Removes the
 // in-flight row via defer.
 func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, paramsRaw json.RawMessage, ref canonicalToolRef, daemonSID, daemonProto string) ([]byte, error) {
-	daemonSID, daemonProto = sess.refreshStalePortBeforeDispatch(ctx, ref, daemonSID, daemonProto)
+	// The refresh may re-resolve the daemon's port (a dynamic-pool daemon can
+	// come back on a NEW port across a restart) and cache the fresh sid under
+	// that RESOLVED port. Re-point ref at the resolved port so the in-flight row
+	// AND postToolsCall below target the daemon the sid was actually minted for —
+	// otherwise a fresh moved-port sid would be dispatched to the stale ref.Port
+	// (Codex #500 r6 P2). A same-port daemon resolves back to the original port.
+	var resolvedPort int
+	daemonSID, daemonProto, resolvedPort = sess.refreshStalePortBeforeDispatch(ctx, ref, daemonSID, daemonProto)
+	ref.Port = resolvedPort
 
 	// Build the rewritten body. params.name → RawName.
 	rewrittenParams, err := buildRewrittenParams(ref.RawName, paramsRaw)
@@ -1041,9 +1049,9 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 // step. See the loop below and work-items/decisions/2026-07-04-generation-
 // stamped-hub-cache.md.
 
-func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref canonicalToolRef, daemonSID, daemonProto string) (string, string) {
+func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref canonicalToolRef, daemonSID, daemonProto string) (string, string, int) {
 	if _, ok := s.stalePortStateFor(ref.Port); !ok {
-		return daemonSID, daemonProto // port never restarted → the caller's sid is current
+		return daemonSID, daemonProto, ref.Port // port never restarted → the caller's sid is current
 	}
 
 	// Freshness is a monotone generation compare, safe WITHOUT holding a lock
@@ -1067,13 +1075,21 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 	//     final reinit and returned the caller's pre-restart snapshot → -32000).
 	//   - On exhaustion (a restart landed during EACH reinit — a restart storm) the
 	//     freshest CACHED sid is returned (strictly newer than the caller's
-	//     pre-restart snapshot; the reactive selfHealRetry path backstops the
-	//     residual at-most-one-call staleness), not the caller's stale copy.
+	//     pre-restart snapshot), not the caller's stale copy. If that sid is itself
+	//     stale (a further restart raced the last reinit), dispatch converges on the
+	//     NEXT client call (which reinits for the newer generation); selfHealRetry
+	//     only backstops the transport-failure case, NOT an HTTP-level stale-session
+	//     rejection — so this is the at-most-one-call staleness, not a guaranteed
+	//     reactive recovery.
 	//
 	// The reinit is singleflight-coalesced and caches its sid in-fn, stamped with
 	// its own start generation, so there is no cross-lock clear window to re-check.
+	// Resolved outside the loop so the final (exhaustion-break) return can hand
+	// the caller the current port. Each pass re-resolves it (a dynamic-pool
+	// daemon can move ports across a restart — fable Defect 2).
+	port := ref.Port
 	for attempt := 0; ; attempt++ {
-		port := s.currentDaemonPort(ref)
+		port = s.currentDaemonPort(ref)
 		daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}
 		s.mu.Lock()
 		freshSID, hasSID := s.InitSuccesses[daemonKey]
@@ -1093,21 +1109,22 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 			if freshProto == "" {
 				freshProto = sessProto
 			}
-			return freshSID, freshProto
+			return freshSID, freshProto, port
 		}
 
 		if attempt >= maxProactiveReinitAttempts {
-			// Exhausted without converging. Return the freshest CACHED sid if any
-			// (newer than the caller's pre-restart snapshot; reactive path backstops
-			// the residual), else the caller's own sid.
+			// Exhausted without converging (a restart landed during each reinit).
+			// Return the freshest CACHED sid if any (newer than the caller's
+			// pre-restart snapshot; a subsequent client call converges), else the
+			// caller's own sid. Logged on BOTH paths so the operator signal survives.
+			_ = LogHubMcpEvent("debug", "proactive-reinit-exhausted", map[string]any{
+				"server": ref.Server, "daemon": ref.Daemon, "port": port, "cached": hasSID,
+			})
 			if hasSID {
 				if freshProto == "" {
 					freshProto = sessProto
 				}
-				_ = LogHubMcpEvent("debug", "proactive-reinit-exhausted", map[string]any{
-					"server": ref.Server, "daemon": ref.Daemon, "port": port,
-				})
-				return freshSID, freshProto
+				return freshSID, freshProto, port
 			}
 			break
 		}
@@ -1117,10 +1134,10 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 			_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
 				"server": ref.Server, "daemon": ref.Daemon, "port": port,
 			})
-			return daemonSID, daemonProto
+			return daemonSID, daemonProto, port
 		}
 	}
-	return daemonSID, daemonProto
+	return daemonSID, daemonProto, port
 }
 
 // maxProactiveReinitAttempts bounds refreshStalePortBeforeDispatch's reuse/reinit
