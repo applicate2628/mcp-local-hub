@@ -19,8 +19,30 @@ func hermeticHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	// APPDATA (Windows Roaming) MUST be pinned: several client-config resolvers
+	// read os.Getenv("APPDATA") FIRST and only fall back to a home-derived path
+	// when it is unset — vscode (clients.go defaultVSCodeConfigPath →
+	// %APPDATA%\Code\User\mcp.json), amp, cline, devin, kilocode, roo, zed. Without
+	// this, the gate-detect walk reads the developer's REAL %APPDATA% client configs
+	// and a live mcphub-hub entry leaks in as a false gate-ON (the bug this closes).
+	// Mirrors internal/gui/e2e/fixtures/hub.ts, which pins the same set.
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	// Client-specific override env vars that resolve a config path with ABSOLUTE
+	// precedence and no home fallback — clear them so a real value in the host env
+	// cannot leak a real client config into the hermetic home.
+	for _, k := range []string{
+		"COPILOT_HOME", "KIMI_CODE_HOME",
+		"MIMOCODE_HOME", "MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_CONFIG_CONTENT",
+	} {
+		t.Setenv(k, "")
+	}
+	// mimocode's machine-wide managed layer reads %ProgramData%\opencode (or the
+	// MIMOCODE_TEST_MANAGED_CONFIG_DIR override) regardless of home — redirect it
+	// into the hermetic tree so it reads an empty dir, never a real MDM config.
+	t.Setenv("MIMOCODE_TEST_MANAGED_CONFIG_DIR", filepath.Join(home, "ProgramData", "opencode"))
 	return home
 }
 
