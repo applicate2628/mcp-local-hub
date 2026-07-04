@@ -98,6 +98,24 @@ func TestCheckServerReadinessByName_UnknownServerErrors(t *testing.T) {
 }
 
 func TestAllServerReadiness_CoversEmbeddedServers(t *testing.T) {
+	// Isolate from the real host. Without this, AllServerReadiness reads the
+	// developer's real client configs / workspace registry / secrets vault, and —
+	// because the live fleet holds every embedded server's fixed port — each probe
+	// falls into the per-port ownership chain (netstat + wmic + schtasks), an
+	// unbounded subprocess storm that blows the package's 5-minute timeout on a dev
+	// host. Stubbing the two port seams makes the `&&` in AdmissionCheck +
+	// fixedPortStatus short-circuit BEFORE portHeldByOurDaemonForPortArm, so that
+	// chain is never reached. The ">= 5 embedded servers" assertion is unaffected:
+	// enumeration comes from the embed FS (listManifestNamesEmbedFirst), not the
+	// port probe. Commission (opus + sonnet + fable) + bug
+	// work-items/bugs/2026-07-04-api-tests-read-real-home-hub-on-dev-host.md.
+	hermeticHome(t)
+	origAvail := portAvailable
+	origPreflight := preflightPortInUse
+	t.Cleanup(func() { portAvailable = origAvail; preflightPortInUse = origPreflight })
+	portAvailable = func(int) bool { return true }
+	preflightPortInUse = func(int) bool { return false }
+
 	reports := AllServerReadiness()
 	if len(reports) < 5 {
 		t.Fatalf("AllServerReadiness returned %d reports; want >= 5 embedded servers", len(reports))
