@@ -12,12 +12,13 @@
 // ENTIRE store (all clients, all aggregated MCP traffic) for the handshake's
 // duration (~5-10s).
 //
-// Fix: (1) refreshStalePortBeforeDispatch snapshots the stale flag + generation
-// under a brief state.mu, RELEASES it, runs the singleflight-deduped handshake
-// WITHOUT the lock, then re-acquires state.mu only to guard-clear; (2)
-// MarkPortStale snapshots the session pointers under the store RLock and
-// RELEASES it before calling markStalePort, so the store lock is never held
-// behind a per-port lock.
+// Fix: (1) refreshStalePortBeforeDispatch never holds state.mu across the
+// handshake — it decides reuse-vs-reinit with a monotone generation compare
+// (cached InitSuccessGen stamp vs the port's current generation), and the reinit
+// runs singleflight-deduped WITHOUT any lock held; (2) MarkPortStale snapshots
+// the session pointers under the store RLock and RELEASES it before calling
+// markStalePort, so the store lock is never held behind a per-port lock. See
+// work-items/decisions/2026-07-04-generation-stamped-hub-cache.md.
 //
 // This test reproduces the freeze CLASS: it holds a proactive reinit handshake
 // open for a bounded window and asserts a concurrent MarkPortStale AND a
@@ -29,12 +30,9 @@
 // mutex, so the overall deadline fires via `gotMark==false` (with the store
 // itself — hence Touch — still free, because fix #2 already decoupled the store
 // RLock). Reverting BOTH fixes reproduces the full store freeze (Touch blocks
-// too). Fix #2 alone is defense-in-depth: with fix #1 present, state.mu is never
-// held across I/O, so markStalePort never stalls under the RLock and this test
-// still passes with fix #2 reverted — fix #2 guards a FUTURE long per-port hold,
-// not a hold this test can currently exercise. The follower-branch re-check race
-// (a restart landing in the not-stale fast-path window) is covered separately by
-// TestRefreshStalePortRecheckCatchesInWindowRestart.
+// too). The singleflight-follower lost-restart (a restart landing mid-flight, so
+// a coalesced follower must not stamp the cache fresh for the superseded
+// generation) is covered by TestRefreshStalePortFollowerDoesNotClearNewerRestart.
 
 package api
 
@@ -42,7 +40,6 @@ import (
 	"context"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -185,94 +182,14 @@ func TestRefreshStalePortDoesNotFreezeStoreDuringReinit(t *testing.T) {
 		t.Fatalf("proactive reinit did not cache the fresh session id: cached=%+v ok=%v want %q", cached, ok, freshSID)
 	}
 
-	// Contract preserved #2 (generation guard survives releasing state.mu): the
-	// MarkPortStale we fired DURING the handshake bumped state.generation before
-	// this caller's guard-clear ran, so the newer restart mark is correctly
-	// PRESERVED (stale stays true) rather than being clobbered by a handshake
-	// that predates it. Pre-fix, state.mu was held across the whole handshake, so
-	// MarkPortStale could never interleave here and this guard was untestable;
-	// the fix both removes the freeze AND exercises the guard for real.
-	state, ok := sess1.stalePortStateFor(port)
-	if !ok {
-		t.Fatalf("stale port state for port %d vanished", port)
-	}
-	state.mu.Lock()
-	stillStale := state.stale
-	state.mu.Unlock()
-	if !stillStale {
-		t.Fatalf("newer restart mark (concurrent MarkPortStale during handshake) was clobbered — generation guard lost across the state.mu-release refactor")
-	}
-}
-
-// TestRefreshStalePortRecheckCatchesInWindowRestart covers the follower
-// (not-stale) fast-path window that narrowing the lock scope reopened: a genuine
-// daemon restart (MarkPortStale) landing AFTER the not-stale snapshot but BEFORE
-// the cache read/return would make the follower return a PRE-restart session id.
-// The restarted daemon rejects that id as an HTTP-level error that
-// isRetriableTransportFailure does NOT retry, so the client would get a bare
-// -32000 — the exact stale-session failure the proactive path exists to prevent.
-// The else-branch re-check closes the window; this test drives the window
-// deterministically via the refreshStaleRecheckHook seam (not a wall-clock race).
-func TestRefreshStalePortRecheckCatchesInWindowRestart(t *testing.T) {
-	resetResolverForTest(t)
-	t.Cleanup(func() { resetResolverForTest(t) })
-
-	const oldCachedSID = "recheck-old-cached-sid"
-	const freshSID = "recheck-fresh-sid"
-	const proto = "2025-11-25"
-
-	// Stub daemon serves the fresh sid on reinit via the default init handler
-	// (returns sd.sessionID). No gate — the reinit completes promptly.
-	daemon := newStubDaemon(t, freshSID)
-	port := daemon.port
-
-	sess := sessionWithParticipants(daemon)
-	sess.ClientSessionID = "recheck-sess"
-	ref := sess.IntendedParticipants[0] // {srv1, claude-code, port}
-	sess.InitSuccesses[ref] = oldCachedSID
-	sess.DaemonProtoVer[ref] = proto
-
-	// Create the per-port stale state, then clear stale so the NOT-STALE fast
-	// path (the branch under test) is entered. markStalePort creates the state
-	// (stale=true, gen=1); clearing stale leaves the generation at 1.
-	if !sess.markStalePort(port) {
-		t.Fatalf("setup: port %d not tracked by the session", port)
-	}
-	st, ok := sess.stalePortStateFor(port)
-	if !ok {
-		t.Fatalf("setup: stale state for port %d missing", port)
-	}
-	st.mu.Lock()
-	st.stale = false
-	st.mu.Unlock()
-
-	// Seam: land a genuine restart (MarkPortStale → generation++, stale=true) in
-	// the exact window the else-branch re-check guards — after the fast-path
-	// cache read, before the re-check. Fires once.
-	var fired int32
-	refreshStaleRecheckHook = func() {
-		if atomic.CompareAndSwapInt32(&fired, 0, 1) {
-			sess.markStalePort(port)
-		}
-	}
-	t.Cleanup(func() { refreshStaleRecheckHook = nil })
-
-	callRef := canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: port, RawName: "read"}
-	sid, gotProto := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldCachedSID, proto)
-
-	if atomic.LoadInt32(&fired) != 1 {
-		t.Fatal("refreshStaleRecheckHook never fired — the fast-path window was not exercised")
-	}
-	// Pre-fix (no re-check) this returned the PRE-restart cached sid → -32000.
-	// The re-check must instead detect the flip, reinit, and return the FRESH sid.
-	if sid != freshSID {
-		t.Fatalf("fast-path re-check missed the in-window restart: got sid %q, want fresh %q (pre-fix: the stale cached %q → client -32000)", sid, freshSID, oldCachedSID)
-	}
-	if gotProto != proto {
-		t.Fatalf("proto = %q, want %q", gotProto, proto)
-	}
-	if daemon.initCount.Load() == 0 {
-		t.Fatal("reinit never reached the daemon — the re-check did not trigger a reinit")
+	// Contract preserved #2 (the generation stamp survives releasing state.mu): the
+	// MarkPortStale we fired DURING the handshake bumped the port generation. Under
+	// the generation-stamped cache the reinit stamps its sid with the FLIGHT's
+	// (older) generation, so the cached stamp < the current generation — the newer
+	// restart is NOT masked and the port still reads stale. Pre-fix, state.mu was
+	// held across the whole handshake, so MarkPortStale could never interleave here.
+	if !portStaleForTest(t, sess1, ref) {
+		t.Fatalf("newer restart mark (concurrent MarkPortStale during handshake) was masked — the cache was stamped fresh for the superseded generation")
 	}
 }
 
@@ -325,15 +242,24 @@ func TestRefreshStalePortFollowerDoesNotClearNewerRestart(t *testing.T) {
 		t.Fatalf("setup: port %d not tracked by the session", port)
 	}
 
+	// Deterministic join barrier: the seam fires once per caller AFTER it reaches
+	// the singleflight DoChan, so we never rely on a wall-clock sleep to know the
+	// follower joined (a loaded CI worker could otherwise delay it past the gate
+	// release, letting the leader complete and the follower start a second flight).
+	joined := make(chan struct{}, 4)
+	reinitJoinedFlightHook = func() { joined <- struct{}{} }
+	t.Cleanup(func() { reinitJoinedFlightHook = nil })
+
 	// Leader A: starts the flight, blocks in the daemon initialize on `gate`.
 	aReturned := make(chan string, 1)
 	go func() {
 		sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
 		aReturned <- sid
 	}()
+	<-joined // leader reached DoChan (flight started)
 
-	// Wait until A's flight actually reached the daemon initialize (flight is
-	// genuinely in-flight, so the follower joins it rather than starting a new one).
+	// Wait until A's flight actually reached the daemon initialize (in-flight, so
+	// the follower joins it rather than starting a new one).
 	deadline := time.Now().Add(3 * time.Second)
 	for daemon.initCount.Load() == 0 {
 		if time.Now().After(deadline) {
@@ -349,14 +275,14 @@ func TestRefreshStalePortFollowerDoesNotClearNewerRestart(t *testing.T) {
 	}
 
 	// Follower B: joins the SAME in-flight singleflight call. Its snapshot sees
-	// generation 2 (post-R2). The gate keeps the flight open, so B has unbounded
-	// time to reach the DoChan join — not a wall-clock race.
+	// generation 2 (post-R2). The gate keeps the leader's flight open, so B
+	// provably JOINS rather than starting a new flight.
 	bReturned := make(chan string, 1)
 	go func() {
 		sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
 		bReturned <- sid
 	}()
-	time.Sleep(50 * time.Millisecond) // let B's goroutine reach the singleflight join
+	<-joined // DETERMINISTIC barrier: B reached the DoChan join (no wall-clock sleep)
 
 	releaseGate()
 
@@ -378,84 +304,77 @@ func TestRefreshStalePortFollowerDoesNotClearNewerRestart(t *testing.T) {
 		t.Fatalf("expected 1 coalesced handshake for the leader+follower, got %d", got)
 	}
 
-	// THE FIX: the shared flight started at generation 1 (pre-R2); R2 bumped it to
-	// 2. The flight's result predates R2, so NEITHER caller may clear stale.
-	// Pre-fix, follower B (its own token generation == current 2) cleared it.
-	st, ok := sess.stalePortStateFor(port)
-	if !ok {
-		t.Fatal("stale state vanished")
-	}
-	st.mu.Lock()
-	stillStale := st.stale
-	st.mu.Unlock()
-	if !stillStale {
-		t.Fatal("a singleflight follower cleared the newer restart's stale mark (fable Defect 1): a shared pre-restart flight result must NOT clear stale")
+	// THE FIX: the shared flight started at generation 1 (pre-R2); R2 bumped the
+	// port to generation 2. The flight stamps its cached sid with its OWN start
+	// generation (1) — NOT the follower's later snapshot (2) — so the cached stamp
+	// (1) < the current generation (2): the port still reads stale, and the newer
+	// restart is not masked. Pre-fix, follower B (its own token generation == 2)
+	// cleared the mark, wedging every later dispatch on a dead session id.
+	if !portStaleForTest(t, sess, ref) {
+		t.Fatal("a singleflight follower masked the newer restart (fable Defect 1): a shared pre-restart flight stamped the cache fresh for the superseded generation")
 	}
 }
 
-// TestRefreshStalePortReusesCachedSidWhenLeaderClearedBeforeReinit covers Codex
-// #500 P2: with the per-port lock released, a caller can snapshot stale=true then
-// be descheduled until a concurrent leader completed the reinit, CLEARED stale,
-// and cached a fresh sid. Starting a second initialize for the SAME restart then
-// leaks the superseded daemon session. The pre-reinit re-check reuses the cached
-// fresh sid instead — no redundant flight, no leak. Driven deterministically via
-// the refreshStalePreReinitHook seam.
-func TestRefreshStalePortReusesCachedSidWhenLeaderClearedBeforeReinit(t *testing.T) {
+// TestRefreshStalePortGenerationStampPredicate directly pins the core decision of
+// the generation-stamped cache: reuse the cached sid iff its InitSuccessGen stamp
+// is >= the port's current restart generation; otherwise reinit. This is the one
+// predicate that replaced the stale-bool + the three cross-lock re-checks.
+func TestRefreshStalePortGenerationStampPredicate(t *testing.T) {
 	resetResolverForTest(t)
 	t.Cleanup(func() { resetResolverForTest(t) })
-
-	const oldSID = "prereinit-old-sid"
-	const leaderSID = "prereinit-leader-fresh-sid"
+	const cachedSID = "stamp-cached-sid"
+	const reinitSID = "stamp-reinit-sid"
 	const proto = "2025-11-25"
 
-	daemon := newStubDaemon(t, "should-not-be-dialed")
-	port := daemon.port
-
-	sess := sessionWithParticipants(daemon)
-	sess.ClientSessionID = "prereinit-sess"
-	ref := sess.IntendedParticipants[0]
-	sess.InitSuccesses[ref] = oldSID
-	sess.DaemonProtoVer[ref] = proto
-	callRef := canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: port, RawName: "read"}
-
-	// Port is stale at the caller's snapshot.
-	if !sess.markStalePort(port) {
-		t.Fatalf("setup: port %d not tracked", port)
-	}
-
-	// Seam: simulate a concurrent leader finishing the reinit for THIS restart —
-	// cache the fresh sid then clear stale — in the window before the pre-reinit
-	// re-check. Fires once.
-	var fired int32
-	refreshStalePreReinitHook = func() {
-		if atomic.CompareAndSwapInt32(&fired, 0, 1) {
-			daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}
-			sess.mu.Lock()
-			sess.InitSuccesses[daemonKey] = leaderSID
-			sess.DaemonProtoVer[daemonKey] = proto
-			sess.mu.Unlock()
-			st, _ := sess.stalePortStateFor(port)
-			st.mu.Lock()
-			st.stale = false
-			st.mu.Unlock()
+	t.Run("fresh_stamp_reuses_no_dial", func(t *testing.T) {
+		daemon := newStubDaemon(t, reinitSID)
+		sess := sessionWithParticipants(daemon)
+		ref := sess.IntendedParticipants[0]
+		callRef := canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: daemon.port, RawName: "read"}
+		sess.InitSuccesses[ref] = cachedSID
+		sess.DaemonProtoVer[ref] = proto
+		if !sess.markStalePort(daemon.port) { // gen 1
+			t.Fatalf("setup: port %d not tracked", daemon.port)
 		}
-	}
-	t.Cleanup(func() { refreshStalePreReinitHook = nil })
+		sess.mu.Lock()
+		sess.InitSuccessGen = map[canonicalDaemonRef]uint64{ref: 1} // stamp == curGen
+		sess.mu.Unlock()
 
-	sid, gotProto := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
+		sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, "caller-sid", proto)
+		if sid != cachedSID {
+			t.Fatalf("fresh stamp (>= curGen) must REUSE the cached sid; got %q want %q", sid, cachedSID)
+		}
+		if got := daemon.initCount.Load(); got != 0 {
+			t.Fatalf("fresh stamp must NOT dial a reinit; initCount=%d", got)
+		}
+	})
 
-	if atomic.LoadInt32(&fired) != 1 {
-		t.Fatal("pre-reinit seam never fired")
-	}
-	// Reused the leader's cached fresh sid — NOT a redundant reinit.
-	if sid != leaderSID {
-		t.Fatalf("expected the leader's cached sid %q, got %q", leaderSID, sid)
-	}
-	if gotProto != proto {
-		t.Fatalf("proto = %q, want %q", gotProto, proto)
-	}
-	// No second initialize was dialed (no redundant flight → no leaked session).
-	if got := daemon.initCount.Load(); got != 0 {
-		t.Fatalf("a redundant reinit flight was started (initCount=%d) despite a cached fresh sid — leaks a superseded daemon session", got)
-	}
+	t.Run("stale_stamp_reinits_once", func(t *testing.T) {
+		daemon := newStubDaemon(t, reinitSID)
+		sess := sessionWithParticipants(daemon)
+		ref := sess.IntendedParticipants[0]
+		callRef := canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: daemon.port, RawName: "read"}
+		sess.InitSuccesses[ref] = cachedSID
+		sess.DaemonProtoVer[ref] = proto
+		if !sess.markStalePort(daemon.port) { // gen 1
+			t.Fatalf("setup: port %d not tracked", daemon.port)
+		}
+		sess.markStalePort(daemon.port) // gen 2
+		sess.mu.Lock()
+		sess.InitSuccessGen = map[canonicalDaemonRef]uint64{ref: 1} // stamp 1 < curGen 2
+		sess.mu.Unlock()
+
+		sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, "caller-sid", proto)
+		if sid != reinitSID {
+			t.Fatalf("stale stamp (< curGen) must REINIT; got %q want fresh %q", sid, reinitSID)
+		}
+		if got := daemon.initCount.Load(); got != 1 {
+			t.Fatalf("stale stamp must dial exactly one reinit; initCount=%d", got)
+		}
+		// The reinit re-stamps the cache with the flight generation (2 == curGen) →
+		// the port now reads fresh.
+		if portStaleForTest(t, sess, ref) {
+			t.Fatalf("after a reinit at the current generation the port must read fresh")
+		}
+	})
 }

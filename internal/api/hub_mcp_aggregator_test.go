@@ -961,21 +961,15 @@ func TestReinitDetachedCacheClearsCachedSessionStaleMarkerForProactiveConsumer(t
 	if _, ok := sess.cachedDaemonInitState(oldRef); ok {
 		t.Fatalf("detached reinit left stale cached init entry for old port %d", oldPort)
 	}
-	if state, ok := sess.stalePortStateFor(oldPort); ok {
-		state.mu.Lock()
-		stale := state.stale
-		state.mu.Unlock()
-		if !stale {
-			t.Fatalf("detached reinit cleared stale port marker for old port %d; only proactive dispatch may consume markers", oldPort)
-		}
+	// The detached reinit of freshRef must NOT make the OLD port fresh (it stamps
+	// only freshRef); oldRef is superseded (same-daemon-identity delete), so it
+	// reads stale.
+	if !portStaleForTest(t, sess, oldRef) {
+		t.Fatalf("detached reinit cleared stale port marker for old port %d; only proactive dispatch may consume markers", oldPort)
 	}
-	if state, ok := sess.stalePortStateFor(freshRef.Port); ok {
-		state.mu.Lock()
-		stale := state.stale
-		state.mu.Unlock()
-		if stale {
-			t.Fatalf("detached reinit left stale port marker set for cached fresh port %d", freshRef.Port)
-		}
+	// freshRef was reinited: its cache stamp == its current generation → fresh.
+	if portStaleForTest(t, sess, freshRef) {
+		t.Fatalf("detached reinit left stale port marker set for cached fresh port %d", freshRef.Port)
 	}
 	initAfterCache := d.initCount.Load()
 	sid, proto := sess.refreshStalePortBeforeDispatch(
@@ -1075,15 +1069,12 @@ func TestReinitPreservesNewerSamePortStaleMarker(t *testing.T) {
 		t.Fatalf("reinitialized session id=%q want %q", result.state.SessionID, freshSID)
 	}
 
-	staleState, ok := sess.stalePortStateFor(ref.Port)
-	if !ok {
-		t.Fatalf("stale port state for port %d missing", ref.Port)
-	}
-	staleState.mu.Lock()
-	stale := staleState.stale
-	staleState.mu.Unlock()
-	if !stale {
-		t.Fatalf("newer same-port stale marker was cleared by restart-A reinit")
+	// The reinit started at generation 1; a concurrent restart bumped the port to
+	// generation 2. The reinit stamps its sid with the FLIGHT's generation (1), so
+	// the cached stamp (1) < current generation (2) → still stale: the newer
+	// restart is not masked.
+	if !portStaleForTest(t, sess, ref) {
+		t.Fatalf("newer same-port stale marker was masked by restart-A reinit (cache stamped fresh for the superseded generation)")
 	}
 }
 
@@ -4479,4 +4470,25 @@ func TestAggregateToolsCall_ConcurrentProactiveReinitRereadsFreshSID(t *testing.
 	if got := d1.initCount.Load(); got != 2 {
 		t.Fatalf("initCount=%d want 2 (initial + one coalesced proactive re-init)", got)
 	}
+}
+
+// portStaleForTest reports whether refreshStalePortBeforeDispatch would treat the
+// port's cached sid as stale (→ reinit) rather than fresh (→ reuse), under the
+// generation-stamped model. Mirrors the production predicate: fresh iff a sid is
+// cached AND its InitSuccessGen stamp >= the port's current restart generation.
+// Replaces the removed stalePortState.stale bool in tests.
+func portStaleForTest(t *testing.T, sess *hubSession, ref canonicalDaemonRef) bool {
+	t.Helper()
+	state, ok := sess.stalePortStateFor(ref.Port)
+	if !ok {
+		return false // no restart state recorded → never stale
+	}
+	state.mu.Lock()
+	curGen := state.generation
+	state.mu.Unlock()
+	sess.mu.Lock()
+	_, hasSID := sess.InitSuccesses[ref]
+	stampGen := sess.InitSuccessGen[ref]
+	sess.mu.Unlock()
+	return !(hasSID && stampGen >= curGen)
 }
