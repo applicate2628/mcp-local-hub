@@ -918,7 +918,15 @@ func resolveToolsCallRoute(ctx context.Context, sess *hubSession, clientReqID, p
 // the daemon's response id back to the client's id. Removes the
 // in-flight row via defer.
 func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, paramsRaw json.RawMessage, ref canonicalToolRef, daemonSID, daemonProto string) ([]byte, error) {
-	daemonSID, daemonProto = sess.refreshStalePortBeforeDispatch(ctx, ref, daemonSID, daemonProto)
+	// The refresh may re-resolve the daemon's port (a dynamic-pool daemon can
+	// come back on a NEW port across a restart) and cache the fresh sid under
+	// that RESOLVED port. Re-point ref at the resolved port so the in-flight row
+	// AND postToolsCall below target the daemon the sid was actually minted for —
+	// otherwise a fresh moved-port sid would be dispatched to the stale ref.Port
+	// (Codex #500 r6 P2). A same-port daemon resolves back to the original port.
+	var resolvedPort int
+	daemonSID, daemonProto, resolvedPort = sess.refreshStalePortBeforeDispatch(ctx, ref, daemonSID, daemonProto)
+	ref.Port = resolvedPort
 
 	// Build the rewritten body. params.name → RawName.
 	rewrittenParams, err := buildRewrittenParams(ref.RawName, paramsRaw)
@@ -998,10 +1006,11 @@ func dispatchToolsCall(ctx context.Context, sess *hubSession, clientReqID, param
 // response; (nil, false) when the re-init or the retry itself failed (the caller
 // then returns the original -32000). Hard-capped at one attempt; never recurses.
 func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, inflightKey requestIDKey, params json.RawMessage) ([]byte, bool) {
-	sid, proto, port, ok := s.reinitDaemonSession(ctx, ref, nil)
+	initState, port, ok := s.reinitDaemonSession(ctx, ref)
 	if !ok {
 		return nil, false // daemon still down → caller returns the original -32000
 	}
+	sid, proto := initState.SessionID, initState.ProtocolVersion
 
 	retryReqID, err := generateDaemonRequestID()
 	if err != nil {
@@ -1035,56 +1044,143 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 // dispatching so the client never sees the stale-session failure that (a)
 // recovers only reactively (one-call lag).
 //
-// Concurrent callers may have already resolved the old daemonSID before the
-// first caller refreshed it. They all serialize on the retained per-port state:
-// the first caller performs the refresh and clears state.stale; followers then
-// re-read InitSuccesses/DaemonProtoVer under sess.mu and dispatch with the fresh
-// daemon session id instead of their stale local copy.
-func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref canonicalToolRef, daemonSID, daemonProto string) (string, string) {
-	state, ok := s.stalePortStateFor(ref.Port)
-	if !ok {
-		return daemonSID, daemonProto
+// Concurrent callers coalesce on ONE singleflight reinit and each reads the
+// generation-stamped cache to decide reuse-vs-reinit — there is no shared clear
+// step. See the loop below and work-items/decisions/2026-07-04-generation-
+// stamped-hub-cache.md.
+
+func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref canonicalToolRef, daemonSID, daemonProto string) (string, string, int) {
+	if _, ok := s.stalePortStateFor(ref.Port); !ok {
+		return daemonSID, daemonProto, ref.Port // port never restarted → the caller's sid is current
 	}
 
-	state.mu.Lock()
-	defer state.mu.Unlock()
+	// Freshness is a monotone generation compare, safe WITHOUT holding a lock
+	// across the blocking handshake (holding state.mu across it was the store
+	// freeze). A bounded reuse/reinit loop guarantees the caller ALWAYS dispatches
+	// a sid fresh for the CURRENT daemon incarnation:
+	//
+	//   - RESOLVE the daemon's current port each pass (currentDaemonPort). A
+	//     dynamic-pool daemon (serena) can come back on a NEW port, and the flight
+	//     caches under the RESOLVED port; keying the freshness read on the stale
+	//     ref.Port would never observe the fresh entry and would loop forever
+	//     (fable-review Defect 2). Same-port daemons resolve back to ref.Port.
+	//   - Read (sid, stampGen) under s.mu FIRST, then that port's current
+	//     generation. `stampGen >= curGen` ⇒ the sid was produced for the current
+	//     (or newer) incarnation ⇒ reuse. A restart landing between the reads bumps
+	//     curGen → reinit (conservative). The stamp is co-located under s.mu with
+	//     the sid, so observe-and-act on "(sid, its freshness)" is atomic.
+	//   - The freshness CHECK runs before the reinit-count bound is tested, so the
+	//     FINAL reinit's result is always re-checked before exhaustion (N reinits,
+	//     N+1 checks — fable-review Defect 1: an off-by-one that discarded a fresh
+	//     final reinit and returned the caller's pre-restart snapshot → -32000).
+	//   - On exhaustion (a restart landed during EACH reinit — a restart storm) the
+	//     freshest CACHED sid is returned (strictly newer than the caller's
+	//     pre-restart snapshot), not the caller's stale copy. If that sid is itself
+	//     stale (a further restart raced the last reinit), dispatch converges on the
+	//     NEXT client call (which reinits for the newer generation); selfHealRetry
+	//     only backstops the transport-failure case, NOT an HTTP-level stale-session
+	//     rejection — so this is the at-most-one-call staleness, not a guaranteed
+	//     reactive recovery.
+	//
+	// The reinit is singleflight-coalesced and caches its sid in-fn, stamped with
+	// its own start generation, so there is no cross-lock clear window to re-check.
+	//
+	// `port` is the port re-resolved on each pass (a dynamic-pool daemon can move
+	// ports across a restart — fable Defect 2); a FRESH sid is returned WITH this
+	// resolved port because that is the port it was minted at. The caller's ORIGINAL
+	// sid (returned on the reinit-fail / exhaustion-break paths) is instead paired
+	// with ref.Port — see the invariant note on the reinit-fail return below.
+	port := ref.Port
+	for attempt := 0; ; attempt++ {
+		port = s.currentDaemonPort(ref)
+		daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}
+		s.mu.Lock()
+		freshSID, hasSID := s.InitSuccesses[daemonKey]
+		freshProto := s.DaemonProtoVer[daemonKey]
+		stampGen := s.InitSuccessGen[daemonKey]
+		sessProto := s.ProtocolVersion
+		s.mu.Unlock()
 
-	if state.stale {
-		clearToken := &staleClearToken{state: state, generation: state.generation, liveCallerClears: true}
-		if sid, proto, _, ok := s.reinitDaemonSession(ctx, ref, clearToken); ok {
-			if state.generation == clearToken.generation {
-				state.stale = false
-			}
-			return sid, proto
+		var curGen uint64
+		if st, ok := s.stalePortStateFor(port); ok {
+			st.mu.Lock()
+			curGen = st.generation
+			st.mu.Unlock()
 		}
-		_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
-			"server": ref.Server, "daemon": ref.Daemon, "port": ref.Port,
-		})
-		return daemonSID, daemonProto
-	}
 
-	daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}
-	s.mu.Lock()
-	freshSID, hasSID := s.InitSuccesses[daemonKey]
-	freshProto := s.DaemonProtoVer[daemonKey]
-	sessProto := s.ProtocolVersion
-	s.mu.Unlock()
-	if !hasSID {
-		// Follower woke after the first caller cleared stale, but no fresh sid
-		// is cached for this daemonKey (e.g. reinitDaemonSession hit a nil/empty
-		// InitSuccesses and skipped the write). Fall back to the caller's sid —
-		// (a)'s reactive self-heal backstops a stale dispatch — but log it so the
-		// silent degradation is observable (mirrors the reinit-failed debug above).
-		_ = LogHubMcpEvent("warn", "proactive-reinit-follower-no-fresh-sid", map[string]any{
-			"server": ref.Server, "daemon": ref.Daemon, "port": ref.Port,
-		})
-		return daemonSID, daemonProto
+		if hasSID && stampGen >= curGen {
+			if freshProto == "" {
+				freshProto = sessProto
+			}
+			return freshSID, freshProto, port
+		}
+
+		if attempt >= maxProactiveReinitAttempts {
+			// Exhausted without converging (a restart landed during each reinit).
+			// Return the freshest CACHED sid if any (newer than the caller's
+			// pre-restart snapshot; a subsequent client call converges), else the
+			// caller's own sid. Logged on BOTH paths so the operator signal survives.
+			_ = LogHubMcpEvent("debug", "proactive-reinit-exhausted", map[string]any{
+				"server": ref.Server, "daemon": ref.Daemon, "port": port, "cached": hasSID,
+			})
+			if hasSID {
+				if freshProto == "" {
+					freshProto = sessProto
+				}
+				return freshSID, freshProto, port
+			}
+			break
+		}
+
+		if _, _, ok := s.reinitDaemonSession(ctx, ref); !ok {
+			// reinit failed → dispatch proceeds with the caller's cached sid and the
+			// reactive selfHealRetry path backstops it.
+			//
+			// INVARIANT: the returned port is always the port the returned sid was
+			// minted for. This path returns the caller's OLD sid, which was minted for
+			// ref.Port — so it is returned WITH ref.Port, NOT the freshly-resolved port.
+			// A session id is only valid at the daemon incarnation that issued it;
+			// pairing the old sid with a moved-to port would post it to a daemon that
+			// never issued it → HTTP-error rejection → non-retriable
+			// (isRetriableTransportFailure is false for HTTP errors) → a hard fail.
+			// Crucially, a mismatched pair also CORRUPTS that classifier: its "HTTP
+			// error ⇒ the daemon received the request, a side effect may have executed"
+			// premise is only true when the sid belongs to the port. Returning ref.Port
+			// instead reproduces the pre-refresh baseline and keeps the pair coherent.
+			//
+			// Recovery is narrow, not guaranteed: on the moved-daemon case the old port
+			// is usually dead, so the dial-refused transport failure is retriable and
+			// selfHealRetry re-resolves + reinits — but that reinit repeats the same
+			// handshake that just failed here, so it only recovers a sub-second
+			// transient (the daemon rebound between the two attempts). Most of the
+			// failure space still converges to -32000; the win is that ref.Port keeps
+			// the recovery PATH open where the resolved port would guarantee a hard fail.
+			//
+			// Safety of "a foreign daemon at a recycled port rejects the old sid with a
+			// 404" rests on the only port-moving family being serena's dynamic pool,
+			// which is HTTPHost-bridged — the upstream (serena) validates the
+			// Mcp-Session-Id and 404s an unknown one. StdioHost does NOT validate the
+			// sid on POST, but StdioHost daemons sit on fixed manifest ports and never
+			// enter this moved-port branch. Revisit this invariant if a sessionless
+			// host ever joins a dynamic (port-moving) pool. (Codex #500 r7 P2; fable r8.)
+			_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
+				"server": ref.Server, "daemon": ref.Daemon, "port": port,
+			})
+			return daemonSID, daemonProto, ref.Port
+		}
 	}
-	if freshProto == "" {
-		freshProto = sessProto
-	}
-	return freshSID, freshProto
+	// Exhaustion break (no cached sid after the reinit storm): same invariant —
+	// the caller's old sid is returned with its own minting port (ref.Port), not
+	// the last-resolved port.
+	return daemonSID, daemonProto, ref.Port
 }
+
+// maxProactiveReinitAttempts bounds refreshStalePortBeforeDispatch's reuse/reinit
+// loop so a daemon restart storm (a restart landing during each successive
+// reinit) cannot spin it forever. 3 covers a double-restart-during-flight (the
+// realistic worst case: reinit, restart, reinit, restart, reinit) and then yields
+// to the reactive selfHealRetry backstop.
+const maxProactiveReinitAttempts = 3
 
 // reinitDaemonSession re-initializes the hub's MCP session to a daemon that was
 // restarted, refreshing the cached session id + negotiated proto under the
@@ -1094,14 +1190,14 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 // (sid, proto, port, true), or ("","",0,false) if the daemon is still
 // unreachable. SHARED by the (a) failure-driven self-heal (selfHealRetry) and the
 // (b) event-driven proactive re-init (the supervisor-state restart watcher).
-func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolRef, clearToken *staleClearToken) (string, string, int, bool) {
+func (s *hubSession) reinitDaemonSession(ctx context.Context, ref canonicalToolRef) (daemonInitState, int, bool) {
 	port := s.currentDaemonPort(ref)
 	daemonRef := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}
-	state, err := s.reinitializeDaemonBindingWithStaleClear(ctx, daemonRef, clearToken)
+	state, err := s.reinitializeDaemonBinding(ctx, daemonRef)
 	if err != nil {
-		return "", "", 0, false
+		return daemonInitState{}, 0, false
 	}
-	return state.SessionID, state.ProtocolVersion, port, true
+	return state, port, true
 }
 
 func (s *hubSession) cachedDaemonInitState(ref canonicalDaemonRef) (daemonInitState, bool) {
@@ -1119,51 +1215,6 @@ func (s *hubSession) cachedDaemonInitState(ref canonicalDaemonRef) (daemonInitSt
 }
 
 func (s *hubSession) reinitializeDaemonBinding(ctx context.Context, daemonRef canonicalDaemonRef) (daemonInitState, error) {
-	return s.reinitializeDaemonBindingWithStaleClear(ctx, daemonRef, nil)
-}
-
-type staleClearToken struct {
-	state            *stalePortState
-	generation       uint64
-	liveCallerClears bool
-}
-
-func (s *hubSession) staleClearTokenForPort(port int) *staleClearToken {
-	state, ok := s.stalePortStateFor(port)
-	if !ok {
-		return nil
-	}
-	state.mu.Lock()
-	defer state.mu.Unlock()
-	if !state.stale {
-		return nil
-	}
-	return &staleClearToken{state: state, generation: state.generation}
-}
-
-func (s *hubSession) clearCachedReinitStaleFlag(daemonRef canonicalDaemonRef, sid string, clearToken *staleClearToken) {
-	if clearToken == nil || clearToken.state == nil {
-		return
-	}
-
-	s.mu.Lock()
-	cachedSID, ok := s.InitSuccesses[daemonRef]
-	s.mu.Unlock()
-	if !ok || cachedSID != sid {
-		return
-	}
-
-	clearToken.state.mu.Lock()
-	if clearToken.state.generation == clearToken.generation {
-		clearToken.state.stale = false
-	}
-	clearToken.state.mu.Unlock()
-}
-
-func (s *hubSession) reinitializeDaemonBindingWithStaleClear(ctx context.Context, daemonRef canonicalDaemonRef, clearToken *staleClearToken) (daemonInitState, error) {
-	if clearToken == nil {
-		clearToken = s.staleClearTokenForPort(daemonRef.Port)
-	}
 	s.mu.Lock()
 	protoVer := s.ProtocolVersion
 	s.mu.Unlock()
@@ -1173,70 +1224,73 @@ func (s *hubSession) reinitializeDaemonBindingWithStaleClear(ctx context.Context
 		// The shared initialize runs under a DETACHED context — NOT the first
 		// caller's ctx. singleflight runs the work function for the FIRST caller
 		// only and shares its result with all coalesced followers; binding it to
-		// the first caller's ctx would let that one caller's cancellation fail
-		// the re-handshake for everyone. initializeDaemonSession owns the
-		// PerDaemonInitTimeout caps for the daemon initialize lifecycle; adding
-		// another equal cap here would double-cap same-port self-heal and
-		// detached moved-reinit. Each caller's OWN ctx still bounds its wait via
+		// the first caller's ctx would let that one caller's cancellation fail the
+		// re-handshake for everyone. initializeDaemonSession owns the
+		// PerDaemonInitTimeout caps. Each caller's OWN ctx still bounds its wait via
 		// the select below.
+		//
+		// Read the port's restart generation BEFORE dialing — this becomes the
+		// cache stamp (InitSuccessGen) for the sid this flight produces. Read once,
+		// shared by every coalesced follower, so a follower whose own snapshot
+		// postdates a restart that landed AFTER this flight started never
+		// over-stamps: the sid is stamped with the FLIGHT's generation, and a later
+		// reader compares that against the port's current generation (the durable
+		// form of the fable Defect 1 fix). 0 when the port has no stalePortState.
+		var flightGen uint64
+		if st, ok := s.stalePortStateFor(daemonRef.Port); ok {
+			st.mu.Lock()
+			flightGen = st.generation
+			st.mu.Unlock()
+		}
 		sid, negotiated, err := initializeDaemonSession(context.Background(), daemonRef, protoVer)
 		if err != nil {
 			return nil, err
 		}
-		return initResult{sid: sid, proto: negotiated}, nil
+		// CACHE the result HERE, inside the singleflight work fn, while the group
+		// key is still held — so a caller arriving AFTER the key is removed sees the
+		// fresh cache and does NOT start a redundant second initialize (closes the
+		// key-forget→cache-write window, Codex #500 P3). The fn runs on the detached
+		// singleflight goroutine and completes regardless of any caller's ctx, so it
+		// also removes the need for a detached-drain goroutine: the handshake always
+		// caches, so a completed reinit never orphans a session. If a session DELETE
+		// is in progress the result is not cacheable → best-effort DELETE it.
+		proto, cached := s.cacheReinitResult(daemonRef, sid, negotiated, protoVer, flightGen)
+		if !cached {
+			s.deleteUncachedReinitResult(daemonRef, sid, proto)
+			return nil, errHubSessionDeletedDuringReinit
+		}
+		return initResult{sid: sid, proto: proto}, nil
 	})
 
-	var v any
 	select {
 	case result := <-ch:
 		if result.Err != nil {
 			return daemonInitState{}, result.Err
 		}
-		v = result.Val
+		ir := result.Val.(initResult)
+		return daemonInitState{SessionID: ir.sid, ProtocolVersion: ir.proto}, nil
 	case <-ctx.Done():
-		// This caller stopped waiting, but the DETACHED singleflight work is
-		// still running (it is NOT bound to this ctx) and will COMPLETE a full
-		// MCP handshake — producing a live daemon-side session. If this caller
-		// is the last/only waiter on this DoChan call, nobody would consume that
-		// channel and the freshly-initialized daemon session would ORPHAN until
-		// the daemon's idle GC. Drain the result on a detached goroutine and
-		// CACHE it (the natural consumer — the next request for this daemonKey
-		// reuses it) so a completed detached reinit never leaks a session. On a
-		// work-fn error there is nothing to cache: initializeDaemonSession has
-		// already best-effort-DELETEd any half-initialized session it allocated.
-		go func() {
-			res := <-ch
-			if res.Err != nil {
-				return
-			}
-			ir := res.Val.(initResult)
-			if proto, cached := s.cacheReinitResult(daemonRef, ir.sid, ir.proto, protoVer, clearToken, true); !cached {
-				s.deleteUncachedReinitResult(daemonRef, ir.sid, proto)
-			}
-		}()
+		// This caller stopped waiting, but the DETACHED singleflight fn is still
+		// running (NOT bound to this ctx); it completes the handshake AND caches the
+		// result itself (the in-fn cache above), so nothing orphans and no drain
+		// goroutine is needed. Just return the caller's cancellation.
 		return daemonInitState{}, ctx.Err()
 	}
-	res := v.(initResult)
-	clearCachedStale := clearToken == nil || !clearToken.liveCallerClears
-	proto, cached := s.cacheReinitResult(daemonRef, res.sid, res.proto, protoVer, clearToken, clearCachedStale)
-	if !cached {
-		s.deleteUncachedReinitResult(daemonRef, res.sid, proto)
-		return daemonInitState{}, errHubSessionDeletedDuringReinit
-	}
-	return daemonInitState{SessionID: res.sid, ProtocolVersion: proto}, nil
 }
 
 // cacheReinitResult records a completed reinit handshake's daemon session id +
-// negotiated protocol under the session mu so a later request for the same
-// daemonRef reuses it (cachedDaemonInitState). Shared by the live-waiter path
-// and the detached drain that fires when the triggering caller's ctx cancelled.
-// When requested, it also clears the matching stale-port generation so a cached
-// fresh session is not immediately treated as stale again.
+// negotiated protocol + freshness stamp under the session mu so a later request
+// for the same daemonRef can decide reuse-vs-reinit with the monotone generation
+// compare in refreshStalePortBeforeDispatch. Shared by the live-waiter path and
+// the detached drain that fires when the triggering caller's ctx cancelled.
+// `flightGen` is the port's restart generation read once before the handshake;
+// it is the SINGLE writer of InitSuccessGen (the freshness authority), co-located
+// under s.mu with the sid it qualifies so the two are always read coherently.
 // If a session DELETE has already started, the completed daemon-side session is
 // not cacheable: the caller must best-effort DELETE it so the DELETE intent holds.
 // Falls back to the session-requested protoVer when the daemon emitted no
 // negotiated version. Returns the effective proto and whether it was cached.
-func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negotiated, protoVer string, clearToken *staleClearToken, clearCachedStale bool) (string, bool) {
+func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negotiated, protoVer string, flightGen uint64) (string, bool) {
 	proto := negotiated
 	if proto == "" {
 		proto = protoVer
@@ -1250,15 +1304,20 @@ func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negoti
 	if s.InitSuccesses == nil {
 		s.InitSuccesses = map[canonicalDaemonRef]string{}
 	}
+	if s.InitSuccessGen == nil {
+		s.InitSuccessGen = map[canonicalDaemonRef]uint64{}
+	}
 	for cachedRef := range s.InitSuccesses {
 		if !sameDaemonIdentity(cachedRef, daemonRef) {
 			continue
 		}
 		if cachedRef != daemonRef {
 			delete(s.InitSuccesses, cachedRef)
+			delete(s.InitSuccessGen, cachedRef)
 		}
 	}
 	s.InitSuccesses[daemonRef] = sid
+	s.InitSuccessGen[daemonRef] = flightGen
 	if s.DaemonProtoVer == nil {
 		s.DaemonProtoVer = map[canonicalDaemonRef]string{}
 	}
@@ -1272,9 +1331,6 @@ func (s *hubSession) cacheReinitResult(daemonRef canonicalDaemonRef, sid, negoti
 	}
 	s.DaemonProtoVer[daemonRef] = proto
 	s.mu.Unlock()
-	if clearCachedStale {
-		s.clearCachedReinitStaleFlag(daemonRef, sid, clearToken)
-	}
 	return proto, true
 }
 

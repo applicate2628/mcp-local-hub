@@ -142,7 +142,18 @@ type hubSession struct {
 	// daemon-negotiated value or strict daemons reject with 400.
 	// Populated by AggregateInitialize alongside InitSuccesses; protected
 	// by the same `mu`. codex bot r17 P1 closure on PR #157.
-	DaemonProtoVer   map[canonicalDaemonRef]string
+	DaemonProtoVer map[canonicalDaemonRef]string
+	// InitSuccessGen stamps each InitSuccesses entry with the per-port restart
+	// generation observed BEFORE the handshake that produced the sid (the flight's
+	// start generation). A cached sid is fresh for the current daemon incarnation
+	// iff its stamp >= the port's current stalePortState.generation. Written ONLY
+	// in cacheReinitResult (the single writer of fresh reinit sids) under the same
+	// `mu` as InitSuccesses/DaemonProtoVer, so the sid and its freshness are read
+	// coherently in one critical section. AggregateInitialize's entries are left
+	// unstamped (gen 0): after any restart 0 < currentGen forces a conservative
+	// reinit. Supersedes the stale-bool + clear-token machinery
+	// (work-items/decisions/2026-07-04-generation-stamped-hub-cache.md).
+	InitSuccessGen   map[canonicalDaemonRef]uint64
 	InitFailures     []DaemonFailure
 	RouteMap         atomic.Pointer[map[string]canonicalToolRef] // session-local; atomic swap
 	InFlightRequests map[requestIDKey]inflightEntry
@@ -171,10 +182,13 @@ type hubSession struct {
 }
 
 type stalePortState struct {
-	mu    sync.Mutex
-	stale bool
-	// generation increments on every restart mark, so a reinit can clear only
-	// the stale mark it observed and not a newer mark for the same port.
+	mu sync.Mutex
+	// generation is the monotone per-port restart counter — the single freshness
+	// authority. A cached sid stamped (InitSuccessGen) with generation < the
+	// current generation is stale: its daemon incarnation was superseded by a
+	// later restart. Only markStalePort mutates it (++ under mu); it is never
+	// reset, so cachedGen <= currentGen always holds. There is no separate `stale`
+	// bool — staleness is derived from the stamp vs this counter.
 	generation uint64
 }
 
@@ -190,7 +204,6 @@ func (s *hubSession) markStalePort(port int) bool {
 	state := v.(*stalePortState)
 	state.mu.Lock()
 	state.generation++
-	state.stale = true
 	state.mu.Unlock()
 	return true
 }
@@ -242,10 +255,32 @@ func (s *hubSession) stalePortStateFor(port int) (*stalePortState, bool) {
 // tools/call to that port re-initializes proactively (no client-visible
 // stale-session failure). Returns the number of sessions actually marked.
 func (st *HubSessionStore) MarkPortStale(port int) int {
+	// SNAPSHOT the live session pointers under the store RLock, then RELEASE the
+	// RLock BEFORE calling markStalePort. markStalePort locks each session's
+	// per-port stalePortState.mu; a concurrent proactive reinit
+	// (refreshStalePortBeforeDispatch) briefly holds that same per-port mutex.
+	// Holding st.mu.RLock() across a per-port-mutex wait would keep the store
+	// RLock held behind a per-session lock, and any store writer that queues in
+	// the meantime (Touch/GetAndTouch/Create/sweep) blocks that RLock's release
+	// — Go's RWMutex then also blocks every subsequent RLock-er, so one stalled
+	// markStalePort would freeze the whole store. Snapshotting decouples the
+	// store lock from the per-port locks entirely: the store lock is held only
+	// for the bounded pointer copy.
+	//
+	// A session Deleted after the snapshot is harmless — markStalePort on it
+	// only sets an in-memory flag a swept/dead session never dispatches from
+	// (mirrors the sweeper's own collect-ids-then-act discipline). A session
+	// Created after the snapshot is skipped, which is correct: it initialized
+	// against the post-restart daemon, so it needs no stale mark.
 	st.mu.RLock()
-	defer st.mu.RUnlock()
-	marked := 0
+	snapshot := make([]*hubSession, 0, len(st.sessions))
 	for _, sess := range st.sessions {
+		snapshot = append(snapshot, sess)
+	}
+	st.mu.RUnlock()
+
+	marked := 0
+	for _, sess := range snapshot {
 		if sess.markStalePort(port) {
 			marked++
 		}
