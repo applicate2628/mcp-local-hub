@@ -1133,18 +1133,36 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 		}
 
 		if _, _, ok := s.reinitDaemonSession(ctx, ref); !ok {
-			// reinit failed (daemon still down) → reactive selfHealRetry backstops.
+			// reinit failed → dispatch proceeds with the caller's cached sid and the
+			// reactive selfHealRetry path backstops it.
+			//
 			// INVARIANT: the returned port is always the port the returned sid was
 			// minted for. This path returns the caller's OLD sid, which was minted for
 			// ref.Port — so it is returned WITH ref.Port, NOT the freshly-resolved port.
 			// A session id is only valid at the daemon incarnation that issued it;
 			// pairing the old sid with a moved-to port would post it to a daemon that
 			// never issued it → HTTP-error rejection → non-retriable
-			// (isRetriableTransportFailure is false for HTTP errors) → a hard fail with
-			// no recovery. Returning ref.Port instead reproduces the pre-refresh
-			// baseline: in the common moved-daemon case the old port is dead, so the
-			// dial-refused transport failure IS retriable and selfHealRetry re-resolves
-			// the live port and recovers. (Codex #500 r7 P2.)
+			// (isRetriableTransportFailure is false for HTTP errors) → a hard fail.
+			// Crucially, a mismatched pair also CORRUPTS that classifier: its "HTTP
+			// error ⇒ the daemon received the request, a side effect may have executed"
+			// premise is only true when the sid belongs to the port. Returning ref.Port
+			// instead reproduces the pre-refresh baseline and keeps the pair coherent.
+			//
+			// Recovery is narrow, not guaranteed: on the moved-daemon case the old port
+			// is usually dead, so the dial-refused transport failure is retriable and
+			// selfHealRetry re-resolves + reinits — but that reinit repeats the same
+			// handshake that just failed here, so it only recovers a sub-second
+			// transient (the daemon rebound between the two attempts). Most of the
+			// failure space still converges to -32000; the win is that ref.Port keeps
+			// the recovery PATH open where the resolved port would guarantee a hard fail.
+			//
+			// Safety of "a foreign daemon at a recycled port rejects the old sid with a
+			// 404" rests on the only port-moving family being serena's dynamic pool,
+			// which is HTTPHost-bridged — the upstream (serena) validates the
+			// Mcp-Session-Id and 404s an unknown one. StdioHost does NOT validate the
+			// sid on POST, but StdioHost daemons sit on fixed manifest ports and never
+			// enter this moved-port branch. Revisit this invariant if a sessionless
+			// host ever joins a dynamic (port-moving) pool. (Codex #500 r7 P2; fable r8.)
 			_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
 				"server": ref.Server, "daemon": ref.Daemon, "port": port,
 			})

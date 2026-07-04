@@ -567,3 +567,71 @@ func TestRefreshStalePortReinitFailReturnsOriginalPort(t *testing.T) {
 		t.Fatalf("expected exactly one (failed) reinit attempt at the resolved port; got %d", got)
 	}
 }
+
+// TestRefreshStalePortExhaustionBreakReturnsOriginalPort pins the SECOND changed
+// return (the exhaustion-break path) for the same Codex #500 r7 P2 / fable r8
+// pairing invariant. It engineers a restart STORM: the daemon port flips on every
+// successful handshake, so the sameDaemonIdentity cache sweep deletes the previous
+// pass's cached sid and the freshness re-check always misses — the loop reinits on
+// every pass and never converges. After maxProactiveReinitAttempts it breaks with
+// hasSID == false and must return the caller's original sid paired with ref.Port
+// (not the last-resolved port). Reverting only the exhaustion-break return line to
+// the resolved port is caught here but NOT by the reinit-fail test above.
+func TestRefreshStalePortExhaustionBreakReturnsOriginalPort(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const proto = "2025-11-25"
+	const callerSID = "storm-caller-sid"
+
+	daemonA := newStubDaemon(t, "unused")
+	daemonB := newStubDaemon(t, "unused")
+	portA, portB := daemonA.port, daemonB.port
+
+	sess := sessionWithParticipants()
+	sess.ScopeKey = "claude-code"
+	sess.ProtocolVersion = proto
+
+	setResolver := func(p int) {
+		resolverSnapshot.Store(&ResolverSnapshot{
+			Gen:      1,
+			Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {{Server: "srv1", Daemon: "claude-code", Port: p}}},
+		})
+	}
+	writeInitOK := func(w http.ResponseWriter, sid string) {
+		w.Header().Set("Mcp-Session-Id", sid)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+	// Each handshake succeeds AND flips the resolver to the OTHER port, so the next
+	// pass resolves a port whose cache the sweep just deleted → perpetual miss.
+	daemonA.onInit = func(w http.ResponseWriter, r *http.Request) { setResolver(portB); writeInitOK(w, "sid-a") }
+	daemonB.onInit = func(w http.ResponseWriter, r *http.Request) { setResolver(portA); writeInitOK(w, "sid-b") }
+
+	// Make both ports trackable (markStalePort requires tracksDaemonPort). Seeding
+	// SnapshotAtInit — not InitSuccesses — keeps the cache empty so every pass is a
+	// clean miss → reinit (no stale-but-cached early exit). ref.Port = portA is the
+	// entry-gate port.
+	keyA := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: portA}
+	keyB := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: portB}
+	sess.SnapshotAtInit = &ResolverSnapshot{Gen: 1, Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {keyA, keyB}}}
+	if !sess.markStalePort(portA) || !sess.markStalePort(portB) {
+		t.Fatal("setup: ports not tracked")
+	}
+	setResolver(portA)
+
+	callRef := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: portA, RawName: "read"}
+	sid, _, resolvedPort := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, callerSID, proto)
+
+	if sid != callerSID {
+		t.Fatalf("exhaustion-break must return the caller's original sid; got %q want %q", sid, callerSID)
+	}
+	if resolvedPort != portA {
+		t.Fatalf("exhaustion-break returned port %d; want the original ref.Port %d, not a last-resolved port", resolvedPort, portA)
+	}
+	// The storm reinits every pass up to the bound (never converging).
+	if got := daemonA.initCount.Load() + daemonB.initCount.Load(); got != maxProactiveReinitAttempts {
+		t.Fatalf("expected %d handshakes across the reinit storm; got %d", maxProactiveReinitAttempts, got)
+	}
+}
