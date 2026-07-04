@@ -1036,48 +1036,45 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 // dispatching so the client never sees the stale-session failure that (a)
 // recovers only reactively (one-call lag).
 //
-// Concurrent callers may have already resolved the old daemonSID before the
-// first caller refreshed it. They all serialize on the retained per-port state:
-// the first caller performs the refresh and clears state.stale; followers then
-// re-read InitSuccesses/DaemonProtoVer under sess.mu and dispatch with the fresh
-// daemon session id instead of their stale local copy.
+// Concurrent callers coalesce on ONE singleflight reinit and each reads the
+// generation-stamped cache to decide reuse-vs-reinit — there is no shared clear
+// step. See the loop below and work-items/decisions/2026-07-04-generation-
+// stamped-hub-cache.md.
 
 func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref canonicalToolRef, daemonSID, daemonProto string) (string, string) {
-	state, ok := s.stalePortStateFor(ref.Port)
-	if !ok {
-		return daemonSID, daemonProto
+	if _, ok := s.stalePortStateFor(ref.Port); !ok {
+		return daemonSID, daemonProto // port never restarted → the caller's sid is current
 	}
 
-	// Freshness is a SINGLE monotone comparison — safe WITHOUT holding a lock
+	// Freshness is a monotone generation compare, safe WITHOUT holding a lock
 	// across the blocking handshake (holding state.mu across it was the store
-	// freeze: HubSessionStore.MarkPortStale locks this same per-port state.mu
-	// while holding the store RLock, so a wedged handshake would freeze the whole
-	// store). Read the cached sid AND its generation stamp together under s.mu
-	// FIRST, then the port's current restart generation under state.mu. A restart
-	// landing between the two reads bumps curGen, so `stampGen >= curGen` goes
-	// false → reinit (conservative: never reuse a stale sid). Reading the cache
-	// BEFORE curGen (not the reverse) minimizes reliance on the reactive
-	// selfHealRetry backstop, which is the whole point of this proactive path.
+	// freeze). A bounded reuse/reinit loop guarantees the caller ALWAYS dispatches
+	// a sid fresh for the CURRENT daemon incarnation:
 	//
-	// This one predicate replaces the fable-Defect-1 clear-token guard, the
-	// not-stale fast-path re-check, and the pre-reinit re-check: the stamp (written
-	// once by the flight in cacheReinitResult, with the flight's start generation)
-	// is co-located under s.mu with the sid it qualifies, so observe-and-act on
-	// "(sid, its freshness)" is atomic and needs no cross-lock re-check. See
-	// work-items/decisions/2026-07-04-generation-stamped-hub-cache.md.
-	daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}
-	// Bounded retry so the caller ALWAYS dispatches a sid fresh for the CURRENT
-	// daemon incarnation. Each pass: reuse the cache iff its stamp is fresh, else
-	// reinit — then re-read and RE-VALIDATE the just-cached sid against the current
-	// generation on the next pass. A restart landing DURING the flight (so the
-	// flight — and any singleflight follower that joined it — produced a sid for the
-	// SUPERSEDED incarnation) is caught on the next pass and reinited again, rather
-	// than returned as a stale sid the restarted daemon rejects with a NON-retryable
-	// -32000 (isRetriableTransportFailure is false for an HTTP-level rejection, so
-	// selfHealRetry would NOT backstop it — Codex #500 P2). Bounded so a restart
-	// storm cannot spin forever; on exhaustion the caller's own sid is returned and
-	// the reactive path backstops the eventual at-most-one-call staleness.
-	for attempt := 0; attempt < maxProactiveReinitAttempts; attempt++ {
+	//   - RESOLVE the daemon's current port each pass (currentDaemonPort). A
+	//     dynamic-pool daemon (serena) can come back on a NEW port, and the flight
+	//     caches under the RESOLVED port; keying the freshness read on the stale
+	//     ref.Port would never observe the fresh entry and would loop forever
+	//     (fable-review Defect 2). Same-port daemons resolve back to ref.Port.
+	//   - Read (sid, stampGen) under s.mu FIRST, then that port's current
+	//     generation. `stampGen >= curGen` ⇒ the sid was produced for the current
+	//     (or newer) incarnation ⇒ reuse. A restart landing between the reads bumps
+	//     curGen → reinit (conservative). The stamp is co-located under s.mu with
+	//     the sid, so observe-and-act on "(sid, its freshness)" is atomic.
+	//   - The freshness CHECK runs before the reinit-count bound is tested, so the
+	//     FINAL reinit's result is always re-checked before exhaustion (N reinits,
+	//     N+1 checks — fable-review Defect 1: an off-by-one that discarded a fresh
+	//     final reinit and returned the caller's pre-restart snapshot → -32000).
+	//   - On exhaustion (a restart landed during EACH reinit — a restart storm) the
+	//     freshest CACHED sid is returned (strictly newer than the caller's
+	//     pre-restart snapshot; the reactive selfHealRetry path backstops the
+	//     residual at-most-one-call staleness), not the caller's stale copy.
+	//
+	// The reinit is singleflight-coalesced and caches its sid in-fn, stamped with
+	// its own start generation, so there is no cross-lock clear window to re-check.
+	for attempt := 0; ; attempt++ {
+		port := s.currentDaemonPort(ref)
+		daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}
 		s.mu.Lock()
 		freshSID, hasSID := s.InitSuccesses[daemonKey]
 		freshProto := s.DaemonProtoVer[daemonKey]
@@ -1085,28 +1082,44 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 		sessProto := s.ProtocolVersion
 		s.mu.Unlock()
 
-		state.mu.Lock()
-		curGen := state.generation
-		state.mu.Unlock()
+		var curGen uint64
+		if st, ok := s.stalePortStateFor(port); ok {
+			st.mu.Lock()
+			curGen = st.generation
+			st.mu.Unlock()
+		}
 
 		if hasSID && stampGen >= curGen {
-			// Fresh for the current (or a newer) incarnation → reuse, no reinit.
-			// (stampGen == curGen is the common case; >= is defensive.)
 			if freshProto == "" {
 				freshProto = sessProto
 			}
 			return freshSID, freshProto
 		}
 
-		// Stale-or-absent → reinit (singleflight-coalesced; the flight caches its sid
-		// in-fn, stamped with its own start generation). Loop to re-validate.
+		if attempt >= maxProactiveReinitAttempts {
+			// Exhausted without converging. Return the freshest CACHED sid if any
+			// (newer than the caller's pre-restart snapshot; reactive path backstops
+			// the residual), else the caller's own sid.
+			if hasSID {
+				if freshProto == "" {
+					freshProto = sessProto
+				}
+				_ = LogHubMcpEvent("debug", "proactive-reinit-exhausted", map[string]any{
+					"server": ref.Server, "daemon": ref.Daemon, "port": port,
+				})
+				return freshSID, freshProto
+			}
+			break
+		}
+
 		if _, _, ok := s.reinitDaemonSession(ctx, ref); !ok {
-			break // reinit failed (daemon still down) → reactive selfHealRetry backstops
+			// reinit failed (daemon still down) → reactive selfHealRetry backstops.
+			_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
+				"server": ref.Server, "daemon": ref.Daemon, "port": port,
+			})
+			return daemonSID, daemonProto
 		}
 	}
-	_ = LogHubMcpEvent("debug", "proactive-reinit-exhausted", map[string]any{
-		"server": ref.Server, "daemon": ref.Daemon, "port": ref.Port,
-	})
 	return daemonSID, daemonProto
 }
 

@@ -349,3 +349,100 @@ func TestRefreshStalePortGenerationStampPredicate(t *testing.T) {
 		}
 	})
 }
+
+// TestRefreshStalePortExhaustionReturnsFreshestCached covers fable-review Defect 1
+// (the off-by-one): under a restart storm (a restart landing during EACH reinit)
+// the loop exhausts, but it must return the FRESHEST CACHED sid (the last reinit's
+// result) — NOT the caller's pre-all-restarts snapshot, which would be dispatched
+// to a superseded daemon and rejected with a non-retryable -32000.
+func TestRefreshStalePortExhaustionReturnsFreshestCached(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const callerSID = "exhaust-caller-sid"
+	const proto = "2025-11-25"
+
+	daemon := newStubDaemon(t, "unused")
+	var sess *hubSession
+	daemon.onInit = func(w http.ResponseWriter, r *http.Request) {
+		n := daemon.initCount.Load()
+		// A restart lands during EVERY reinit: bump the generation so the flight's
+		// stamp is always < the current generation → the loop never converges and
+		// exhausts.
+		sess.markStalePort(daemon.port)
+		sid := fmt.Sprintf("exhaust-sid-%d", n)
+		w.Header().Set("Mcp-Session-Id", sid)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"stub","version":"1"}}}`))
+	}
+	port := daemon.port
+
+	sess = sessionWithParticipants(daemon)
+	ref := sess.IntendedParticipants[0]
+	sess.InitSuccesses[ref] = callerSID
+	sess.DaemonProtoVer[ref] = proto
+	if !sess.markStalePort(port) { // R1
+		t.Fatalf("setup: port %d not tracked", port)
+	}
+	callRef := canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: port, RawName: "read"}
+
+	sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, callerSID, proto)
+
+	// Exhausted after maxProactiveReinitAttempts reinits. The returned sid must be a
+	// reinit RESULT (the freshest cached), never the caller's original snapshot.
+	if sid == callerSID {
+		t.Fatalf("exhaustion returned the caller's pre-restart snapshot %q (fable Defect 1 off-by-one) — a fresh reinit sid was discarded", callerSID)
+	}
+	if got := daemon.initCount.Load(); got != maxProactiveReinitAttempts {
+		t.Fatalf("expected exactly %d reinits before exhaustion, got %d", maxProactiveReinitAttempts, got)
+	}
+	// The last reinit's sid is the freshest cached one.
+	want := fmt.Sprintf("exhaust-sid-%d", int32(maxProactiveReinitAttempts))
+	if sid != want {
+		t.Fatalf("exhaustion returned %q; want the freshest cached (last reinit) sid %q", sid, want)
+	}
+}
+
+// TestRefreshStalePortConvergesWhenDaemonMovedPort covers fable-review Defect 2: a
+// dynamic-pool daemon (serena) comes back on a NEW port. The flight caches under
+// the RESOLVED port and the same-daemon-identity sweep deletes the old-port entry;
+// if the loop kept re-reading the stale ref.Port it would never see the fresh
+// entry and reinit forever (extra handshakes + orphaned sessions). The loop
+// re-resolves the port each pass, so it converges in one reinit.
+func TestRefreshStalePortConvergesWhenDaemonMovedPort(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldPort = 49150
+	const freshSID = "moved-fresh-sid"
+	const oldSID = "moved-old-sid"
+	const proto = "2025-11-25"
+
+	daemon := newStubDaemon(t, freshSID) // runs at the NEW (moved-to) port
+	newPort := daemon.port
+
+	sess := sessionWithParticipants() // build the (Server,Daemon) binding manually
+	sess.ScopeKey = "claude-code"
+	oldRef := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: oldPort}
+	sess.InitSuccesses[oldRef] = oldSID
+	sess.DaemonProtoVer[oldRef] = proto
+	if !sess.markStalePort(oldPort) { // the OLD port was marked stale (gen 1)
+		t.Fatalf("setup: old port %d not tracked", oldPort)
+	}
+	// Live resolver snapshot: the daemon moved (srv1,claude-code) → newPort.
+	resolverSnapshot.Store(&ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {{Server: "srv1", Daemon: "claude-code", Port: newPort}}},
+	})
+
+	callRef := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: oldPort, RawName: "read"}
+	sid, _ := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
+
+	if sid != freshSID {
+		t.Fatalf("moved-port reinit did not converge to the fresh sid; got %q want %q", sid, freshSID)
+	}
+	if got := daemon.initCount.Load(); got != 1 {
+		t.Fatalf("moved-port must reinit exactly ONCE (no loop-forever on the deleted old-port key); got %d handshakes", got)
+	}
+}
