@@ -132,6 +132,120 @@ func TestBackfillIntentDaemonPorts_SkipsRuntimeSpecDaemon(t *testing.T) {
 	}
 }
 
+// TestBackfillIntentDaemonPorts_SkipsLegacyUnifiedSerena is the regression
+// guard for the F5 serena-clobber defect: a LEGACY-unified serena descriptor
+// (kind=global, RuntimeSpec==nil, Port=0, args `daemon --server serena --daemon
+// unified`) slips past the RuntimeSpec!=nil guard, and the serena manifest DOES
+// resolve a real port (9121). Before the by-server skip, F5 stamped Port=9121 —
+// turning on the liveness port-check with the 60s DEFAULT deadline (the descriptor
+// args are not the `daemon serena-proxy` shape supervisorStartupBindDeadline keys
+// on for 120s), which restart-cycles serena on its slow cold start. F5 must leave
+// EVERY serena descriptor untouched: Port stays 0 (port-check disabled, pre-F5
+// behavior), and it is NOT reported unresolved (skipped before the resolve).
+func TestBackfillIntentDaemonPorts_SkipsLegacyUnifiedSerena(t *testing.T) {
+	dir := t.TempDir()
+	// The serena manifest WOULD resolve a real port; the skip must fire before
+	// the resolver is consulted, so even a present entry must not be stamped.
+	stubPortResolver(t, map[string][2]int{"serena/unified": {9121, 0}})
+	path := writeTestIntent(t, dir, []SupervisorDaemon{
+		{
+			TaskName: `\mcp-local-hub-serena-unified`,
+			Server:   "serena",
+			Daemon:   "unified",
+			Port:     0,
+			// Legacy-unified: NO runtime_spec, global daemon arg shape.
+			Args: []string{"daemon", "--server", "serena", "--daemon", "unified"},
+		},
+	})
+
+	res, err := BackfillIntentDaemonPorts(dir)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if len(res.Applied) != 0 {
+		t.Fatalf("legacy-unified serena must be skipped, got applied %+v", res.Applied)
+	}
+	if len(res.UnresolvedPortZero) != 0 {
+		t.Fatalf("serena skip must fire BEFORE the resolve, so it must not be reported unresolved, got %v", res.UnresolvedPortZero)
+	}
+	if got := readTestIntentPorts(t, path)[`\mcp-local-hub-serena-unified`]; got != 0 {
+		t.Errorf("legacy-unified serena port was mutated: got %d, want 0 (port-check must stay disabled, as pre-F5)", got)
+	}
+}
+
+// TestBackfillIntentDaemonPorts_SkipsLegacyUnifiedSerenaBlankFields is the same
+// guard for the blank-identity vintage: even when Server/Daemon are empty and the
+// identity is recovered from args, the by-server skip must still catch serena.
+func TestBackfillIntentDaemonPorts_SkipsLegacyUnifiedSerenaBlankFields(t *testing.T) {
+	dir := t.TempDir()
+	stubPortResolver(t, map[string][2]int{"serena/unified": {9121, 0}})
+	path := writeTestIntent(t, dir, []SupervisorDaemon{
+		{
+			TaskName: `\mcp-local-hub-serena-unified`,
+			// Server/Daemon blank — recovered from args by descriptorServerDaemon.
+			Port: 0,
+			Args: []string{"daemon", "--server", "serena", "--daemon", "unified"},
+		},
+	})
+
+	res, err := BackfillIntentDaemonPorts(dir)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if len(res.Applied) != 0 {
+		t.Fatalf("blank-field legacy serena must be skipped, got applied %+v", res.Applied)
+	}
+	if got := readTestIntentPorts(t, path)[`\mcp-local-hub-serena-unified`]; got != 0 {
+		t.Errorf("blank-field legacy serena port was mutated: got %d, want 0", got)
+	}
+	// And the blank identity fields must NOT have been healed either — F5 does not
+	// touch serena at all.
+	intent, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("re-read intent: %v", err)
+	}
+	for _, d := range intent.Daemons {
+		if d.TaskName == `\mcp-local-hub-serena-unified` && (d.Server != "" || d.Daemon != "") {
+			t.Errorf("serena identity fields were healed by F5: server=%q daemon=%q, want both blank (F5 must not touch serena)", d.Server, d.Daemon)
+		}
+	}
+}
+
+// TestBackfillIntentDaemonPorts_SkipsLegacyWorkspaceHashSerena pins the
+// daemon-name-agnostic behavior the by-SERVER (not by-daemon) guard gives: the
+// OLDER legacy serena shape is a workspace-hash-named nil-RuntimeSpec row (e.g.
+// `\mcp-local-hub-serena-6935d24c`, daemon "6935d24c") predating the runtime_spec
+// redesign (serena_intent_repair.go). It too must be skipped — the guard keys on
+// server=="serena", so the workspace-hash daemon name is irrelevant.
+func TestBackfillIntentDaemonPorts_SkipsLegacyWorkspaceHashSerena(t *testing.T) {
+	dir := t.TempDir()
+	stubPortResolver(t, map[string][2]int{"serena/6935d24c": {9121, 0}})
+	path := writeTestIntent(t, dir, []SupervisorDaemon{
+		{
+			TaskName: `\mcp-local-hub-serena-6935d24c`,
+			Server:   "serena",
+			Daemon:   "6935d24c",
+			Port:     0,
+			// Legacy workspace-hash serena: NO runtime_spec.
+			Args: []string{"daemon", "--server", "serena", "--daemon", "6935d24c"},
+		},
+	})
+
+	res, err := BackfillIntentDaemonPorts(dir)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if len(res.Applied) != 0 {
+		t.Fatalf("legacy workspace-hash serena must be skipped, got applied %+v", res.Applied)
+	}
+	if len(res.UnresolvedPortZero) != 0 {
+		t.Fatalf("serena skip must fire before the resolve, got unresolved %v", res.UnresolvedPortZero)
+	}
+	if got := readTestIntentPorts(t, path)[`\mcp-local-hub-serena-6935d24c`]; got != 0 {
+		t.Errorf("legacy workspace-hash serena port was mutated: got %d, want 0", got)
+	}
+}
+
 func TestBackfillIntentDaemonPorts_UnresolvedPortZeroLeftUntouched(t *testing.T) {
 	dir := t.TempDir()
 	stubPortResolver(t, map[string][2]int{}) // resolver returns !ok for everything

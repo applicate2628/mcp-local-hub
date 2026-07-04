@@ -813,12 +813,12 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		}
 		for _, tn := range bf.UnresolvedPortZero {
 			// DEBUG, not warn: an unresolved row recurs on every startup and never
-			// self-heals, so a warn here cries wolf. The common unresolved cases
-			// (a renamed/removed server manifest, a legacy nil-RuntimeSpec serena
-			// row keyed on a workspace hash the dynamic-pool template has no daemon
-			// for) are not per-boot-actionable; a genuinely stuck daemon already
-			// surfaces as red in the GUI/status. Empty Server/Daemon timer rows are
-			// skipped entirely upstream and never reach here.
+			// self-heals, so a warn here cries wolf. The common unresolved case is a
+			// renamed/removed server manifest; it is not per-boot-actionable, and a
+			// genuinely stuck daemon already surfaces as red in the GUI/status. Empty
+			// Server/Daemon timer rows are skipped upstream and never reach here; so
+			// is EVERY serena row (skipped by server identity BEFORE the resolve), so
+			// a serena descriptor can never land in UnresolvedPortZero.
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "debug",
 				Source:   "reconcile",

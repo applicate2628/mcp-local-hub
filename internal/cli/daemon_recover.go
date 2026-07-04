@@ -164,12 +164,21 @@ func recoverReapPortSquatter(cmd *cobra.Command, desc api.SupervisorDaemon, norm
 	if desc.Port <= 0 {
 		// F4a: the descriptor carries no port, so the squatter reap below cannot
 		// run — a lost-child squatter (if any) is NOT reaped, and the force
-		// respawn that follows will loop on EADDRINUSE against it. This is almost
-		// always a legacy supervisor-intent.json row written before the port field
-		// existed; a `mcphub supervise` restart backfills it (F5). Warn loudly
+		// respawn that follows will loop on EADDRINUSE against it. Warn loudly
 		// rather than skip silently, then proceed to the force respawn.
 		fmt.Fprintf(errOut, "warning: descriptor for %s carries no port; the port-squatter check was SKIPPED (a lost-child squatter, if present, was NOT reaped).\n", norm)
-		fmt.Fprintf(errOut, "hint: this is usually a legacy supervisor-intent.json row missing its port — restart `mcphub supervise` to backfill it, then retry `mcphub daemon recover %s`.\n", norm)
+		if desc.Server == api.SerenaServerName {
+			// A serena row is DELIBERATELY never port-backfilled by F5 (its
+			// lifecycle is owned by serena-migrate/build). Pointing the operator at
+			// `mcphub supervise` would loop forever — the correct remediation for a
+			// port-0 legacy serena row is the dynamic-pool migration.
+			fmt.Fprintf(errOut, "hint: this is a legacy serena row that F5 never backfills — run `mcphub migrate serena legacy-to-dynamic-pool` to give it a runtime_spec (with the correct 120s bind deadline), then retry `mcphub daemon recover %s`.\n", norm)
+		} else {
+			// Any other server: this is almost always a legacy supervisor-intent.json
+			// row written before the port field existed; a `mcphub supervise` restart
+			// backfills it (F5).
+			fmt.Fprintf(errOut, "hint: this is usually a legacy supervisor-intent.json row missing its port — restart `mcphub supervise` to backfill it, then retry `mcphub daemon recover %s`.\n", norm)
+		}
 		return nil // no port to fight over
 	}
 	ownerPID, ok, err := recoverPortOwnerFn(desc.Port)
