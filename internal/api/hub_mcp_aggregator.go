@@ -1040,50 +1040,116 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 // the first caller performs the refresh and clears state.stale; followers then
 // re-read InitSuccesses/DaemonProtoVer under sess.mu and dispatch with the fresh
 // daemon session id instead of their stale local copy.
+
+// refreshStaleRecheckHook, when non-nil, runs in the not-stale fast path AFTER
+// the cache read and BEFORE the stale/generation re-check. Test-only seam (nil
+// in production) that lets a test deterministically land a MarkPortStale in the
+// window the re-check closes. Mirrors the collapseAfterFirstSupervisorReadHook
+// seam in intent_collapse.go.
+var refreshStaleRecheckHook func()
+
 func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref canonicalToolRef, daemonSID, daemonProto string) (string, string) {
 	state, ok := s.stalePortStateFor(ref.Port)
 	if !ok {
 		return daemonSID, daemonProto
 	}
 
+	// Read the stale flag and SNAPSHOT the generation under state.mu, then
+	// RELEASE state.mu BEFORE running the blocking initialize handshake. The
+	// handshake (reinitDaemonSession → a full MCP initialize +
+	// notifications/initialized, bounded by PerDaemonInitTimeout per stage,
+	// ~10s worst case) MUST NOT run while state.mu is held:
+	// HubSessionStore.MarkPortStale locks this same per-port state.mu (via
+	// markStalePort) WHILE holding the store's RLock, so holding state.mu
+	// across the handshake wedges MarkPortStale, and — because a stuck RLock
+	// holder blocks every queued store writer (Touch/GetAndTouch/Create/sweep,
+	// and then all subsequent RLock-ers) — freezes the entire hub session
+	// store for the handshake's duration.
+	//
+	// Correctness after releasing state.mu is preserved by two existing
+	// mechanisms, NOT by state.mu:
+	//   - handshake dedup: reinitializeDaemonBindingWithStaleClear coalesces
+	//     concurrent callers for the same (Server,Daemon,Port) through its
+	//     singleflight (reinitGroup.DoChan), so followers share one handshake
+	//     instead of stampeding — exactly as they do on the reactive
+	//     selfHealRetry path, which already runs the handshake without state.mu.
+	//   - stale-clear race safety: the generation snapshot below is the guard.
+	//     A MarkPortStale that lands DURING the handshake bumps
+	//     state.generation, so the post-handshake clear becomes a no-op and the
+	//     port stays stale for the next caller (no lost restart). This is the
+	//     same generation guard clearCachedReinitStaleFlag applies on the
+	//     recovery path.
 	state.mu.Lock()
-	defer state.mu.Unlock()
+	stale := state.stale
+	observedGen := state.generation
+	state.mu.Unlock()
 
-	if state.stale {
-		clearToken := &staleClearToken{state: state, generation: state.generation, liveCallerClears: true}
-		if sid, proto, _, ok := s.reinitDaemonSession(ctx, ref, clearToken); ok {
-			if state.generation == clearToken.generation {
-				state.stale = false
-			}
-			return sid, proto
+	if !stale {
+		// Fast path: the port was fresh at the snapshot above. Read the cached
+		// sid, then RE-CHECK the stale flag + generation under state.mu before
+		// trusting it. A MarkPortStale (a genuine daemon restart) landing between
+		// the not-stale snapshot and this cache read would otherwise make us
+		// return a PRE-restart session id; the restarted daemon rejects it as an
+		// HTTP-level error, and isRetriableTransportFailure does NOT retry a
+		// *daemonHTTPError, so the client would get a bare -32000 — exactly the
+		// stale-session failure this proactive path exists to prevent. Releasing
+		// state.mu before this read (necessary to avoid the store freeze) reopened
+		// that window for the follower branch; the re-check closes it. If it
+		// flipped, fall through to the reinit path below.
+		daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}
+		s.mu.Lock()
+		freshSID, hasSID := s.InitSuccesses[daemonKey]
+		freshProto := s.DaemonProtoVer[daemonKey]
+		sessProto := s.ProtocolVersion
+		s.mu.Unlock()
+
+		if refreshStaleRecheckHook != nil {
+			refreshStaleRecheckHook()
 		}
-		_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
-			"server": ref.Server, "daemon": ref.Daemon, "port": ref.Port,
-		})
-		return daemonSID, daemonProto
+		state.mu.Lock()
+		flippedStale := state.stale
+		curGen := state.generation
+		state.mu.Unlock()
+
+		if !flippedStale && curGen == observedGen {
+			if !hasSID {
+				// Follower woke after the first caller cleared stale, but no fresh
+				// sid is cached for this daemonKey (e.g. reinitDaemonSession hit a
+				// nil/empty InitSuccesses and skipped the write). Fall back to the
+				// caller's sid — (a)'s reactive self-heal backstops a stale
+				// dispatch — but log it so the silent degradation is observable.
+				_ = LogHubMcpEvent("warn", "proactive-reinit-follower-no-fresh-sid", map[string]any{
+					"server": ref.Server, "daemon": ref.Daemon, "port": ref.Port,
+				})
+				return daemonSID, daemonProto
+			}
+			if freshProto == "" {
+				freshProto = sessProto
+			}
+			return freshSID, freshProto
+		}
+		// A restart landed during the fast-path cache read: the cached sid may be
+		// pre-restart. Reinit exactly like the stale case, re-snapshotting the
+		// generation so the post-reinit clear guards against the CURRENT restart
+		// (a further concurrent restart is still not lost).
+		observedGen = curGen
 	}
 
-	daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}
-	s.mu.Lock()
-	freshSID, hasSID := s.InitSuccesses[daemonKey]
-	freshProto := s.DaemonProtoVer[daemonKey]
-	sessProto := s.ProtocolVersion
-	s.mu.Unlock()
-	if !hasSID {
-		// Follower woke after the first caller cleared stale, but no fresh sid
-		// is cached for this daemonKey (e.g. reinitDaemonSession hit a nil/empty
-		// InitSuccesses and skipped the write). Fall back to the caller's sid —
-		// (a)'s reactive self-heal backstops a stale dispatch — but log it so the
-		// silent degradation is observable (mirrors the reinit-failed debug above).
-		_ = LogHubMcpEvent("warn", "proactive-reinit-follower-no-fresh-sid", map[string]any{
-			"server": ref.Server, "daemon": ref.Daemon, "port": ref.Port,
-		})
-		return daemonSID, daemonProto
+	// Stale (at the snapshot, or flipped during the fast-path read): reinit and
+	// clear stale only if no newer restart bumped the generation meanwhile.
+	clearToken := &staleClearToken{state: state, generation: observedGen, liveCallerClears: true}
+	if sid, proto, _, ok := s.reinitDaemonSession(ctx, ref, clearToken); ok {
+		state.mu.Lock()
+		if state.generation == clearToken.generation {
+			state.stale = false
+		}
+		state.mu.Unlock()
+		return sid, proto
 	}
-	if freshProto == "" {
-		freshProto = sessProto
-	}
-	return freshSID, freshProto
+	_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
+		"server": ref.Server, "daemon": ref.Daemon, "port": ref.Port,
+	})
+	return daemonSID, daemonProto
 }
 
 // reinitDaemonSession re-initializes the hub's MCP session to a daemon that was

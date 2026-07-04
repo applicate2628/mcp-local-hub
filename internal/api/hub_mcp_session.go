@@ -242,10 +242,32 @@ func (s *hubSession) stalePortStateFor(port int) (*stalePortState, bool) {
 // tools/call to that port re-initializes proactively (no client-visible
 // stale-session failure). Returns the number of sessions actually marked.
 func (st *HubSessionStore) MarkPortStale(port int) int {
+	// SNAPSHOT the live session pointers under the store RLock, then RELEASE the
+	// RLock BEFORE calling markStalePort. markStalePort locks each session's
+	// per-port stalePortState.mu; a concurrent proactive reinit
+	// (refreshStalePortBeforeDispatch) briefly holds that same per-port mutex.
+	// Holding st.mu.RLock() across a per-port-mutex wait would keep the store
+	// RLock held behind a per-session lock, and any store writer that queues in
+	// the meantime (Touch/GetAndTouch/Create/sweep) blocks that RLock's release
+	// — Go's RWMutex then also blocks every subsequent RLock-er, so one stalled
+	// markStalePort would freeze the whole store. Snapshotting decouples the
+	// store lock from the per-port locks entirely: the store lock is held only
+	// for the bounded pointer copy.
+	//
+	// A session Deleted after the snapshot is harmless — markStalePort on it
+	// only sets an in-memory flag a swept/dead session never dispatches from
+	// (mirrors the sweeper's own collect-ids-then-act discipline). A session
+	// Created after the snapshot is skipped, which is correct: it initialized
+	// against the post-restart daemon, so it needs no stale mark.
 	st.mu.RLock()
-	defer st.mu.RUnlock()
-	marked := 0
+	snapshot := make([]*hubSession, 0, len(st.sessions))
 	for _, sess := range st.sessions {
+		snapshot = append(snapshot, sess)
+	}
+	st.mu.RUnlock()
+
+	marked := 0
+	for _, sess := range snapshot {
 		if sess.markStalePort(port) {
 			marked++
 		}
