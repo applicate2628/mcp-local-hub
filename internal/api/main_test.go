@@ -1,8 +1,13 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"os"
 	"testing"
+	"time"
+
+	"mcp-local-hub/internal/autostart"
 )
 
 // TestMain installs the supervisor IPC test-pipe discriminator for the whole
@@ -74,9 +79,144 @@ func TestMain(m *testing.M) {
 	prevOverride := daemonStateRootOverride
 	daemonStateRootOverride = tmp
 
+	// ── PRIMARY seal: the process-lookup / wmic family ──────────────────────
+	// lookupProcess + lookupProcessBatch are wired at processes.go init() to real
+	// `netstat -ano` + `wmic` shell-outs on Windows (~31s per wmic call on Win11
+	// 24H2). killByPortFn / forceKillByPortFn / status enrichment all funnel
+	// through them, so a test that seeds a real manifest port and reaches a
+	// kill/enrich path shells out to the live OS process table — and a seeded port
+	// can COLLIDE with a live daemon on the developer host (e.g. serena on 19150),
+	// touching the live fleet. Nil-ing them makes the Windows test binary behave
+	// like the always-green ubuntu-latest CI lane (where these are already nil) and
+	// makes every port-kill seam short-circuit to portKillLookupUnavailable/nil
+	// (install.go ~3461). This is the dominant timeout cost; several tests already
+	// nil lookupProcess manually (restart_supervisor_test.go, status_workspace_test.go).
+	prevLookupProcess := lookupProcess
+	prevLookupProcessBatch := lookupProcessBatch
+	lookupProcess = nil
+	lookupProcessBatch = nil
+
+	// ── Belt-and-suspenders seal: the supervisor-IPC dial seams ─────────────
+	// The daemonStateRootOverride temp-dir pin above already makes these dials
+	// fast-fail (no supervisor.lock.owner.json in the temp dir → the dial returns
+	// the unavailable shape before touching the pipe). This default closes the
+	// narrow edge where a test clears the override (statePathsHelper) without
+	// stubbing the KnownFolder resolver — which would otherwise resolve the real
+	// %LOCALAPPDATA% and dial the developer's LIVE supervisor pipe (on Windows the
+	// pipe name keys off the process SID, not the state dir). Each default returns
+	// exactly the shape a no-supervisor host produces, so no caller branch flips.
+	// Tests needing a specific response override + restore to this default.
+	prevRegisterReconcile := registerSupervisorReconcileFn
+	prevReconcileApply := supervisorReconcileApplyFn
+	prevRestartRespawn := supervisorRestartRespawnFn
+	prevStatusInternalDial := statusInternalDialFn
+	prevSupervisorIPCStatus := supervisorIPCStatusFn
+	registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, ErrSupervisorIPCUnavailable
+	}
+	supervisorReconcileApplyFn = func(context.Context, bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, ErrSupervisorIPCUnavailable
+	}
+	// NOTE: respawn returns a POPULATED result with a nil error — matching
+	// DialSupervisorIPCRespawn's own no-owner-sidecar contract
+	// (supervisor_ipc_respawn_client.go: RespawnResult{Code:"SUPERVISOR_UNAVAILABLE"},
+	// nil). Its callers branch on result.Success / result.Code, NEVER the err; an
+	// ErrSupervisorIPCUnavailable error return here would manufacture an error row
+	// the real no-supervisor path never produces.
+	supervisorRestartRespawnFn = func(context.Context, string, bool, int) (RespawnResult, error) {
+		return RespawnResult{Code: "SUPERVISOR_UNAVAILABLE", Message: "test default: no supervisor"}, nil
+	}
+	statusInternalDialFn = func(context.Context) ([]DaemonStatus, error) {
+		return nil, ErrSupervisorIPCUnavailable
+	}
+	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
+		return nil, ErrSupervisorIPCUnavailable
+	}
+	// installSupervisorRunningProbeFn is LEFT REAL: it is a non-blocking flock
+	// TryLock on the already-fenced temp state dir (fast, returns not-running), and
+	// several tests acquire a real lock under their own state dir and rely on it
+	// returning true. SupervisorIPCStatusFn (health.go) is LEFT NIL: nil already
+	// means "no IPC seam wired" (falls to the scheduler-scan default).
+
+	// ── Additional live-fleet / real-I/O seams (fable-review, second pass) ──
+	// serenaWakeReconcileFn is an 8th supervisor-IPC dial. loopbackPortOwnerFn
+	// shells out to netstat. installAutostart* run a REAL `schtasks /Run` of the
+	// live supervisor task (a fleet-touch NOT covered by lookupProcess=nil; the
+	// call sites warn-and-continue on error). proxyReadinessFn is a 10s HTTP retry.
+	// taskkillProcessTreeByPIDFn is sealed defense-in-depth so the default test
+	// path can NEVER taskkill a real process tree even if a future kill site
+	// bypasses the lookupProcess short-circuit.
+	prevSerenaWakeReconcile := serenaWakeReconcileFn
+	prevAutoRegisterReconcile := autoRegisterReconcileFn
+	prevLoopbackPortOwner := loopbackPortOwnerFn
+	prevAutostartOwnerStart := installAutostartOwnerStartFn
+	prevAutostartBackendFactory := installAutostartBackendFactoryFn
+	prevProxyReadiness := proxyReadinessFn
+	prevAutoRegisterReadiness := autoRegisterReadinessFn
+	prevTaskkillTree := taskkillProcessTreeByPIDFn
+	prevStopForceKillPID := stopForceKillPIDFn
+	prevSnapshotProcesses := snapshotProcessesFn
+	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, ErrSupervisorIPCUnavailable
+	}
+	autoRegisterReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, ErrSupervisorIPCUnavailable
+	}
+	loopbackPortOwnerFn = func(int) (int, bool, error) { return 0, false, nil }
+	installAutostartOwnerStartFn = func() error {
+		return errors.New("autostart owner start sealed by TestMain default-stub")
+	}
+	installAutostartBackendFactoryFn = func() (autostart.Backend, error) {
+		return nil, errors.New("autostart backend sealed by TestMain default-stub")
+	}
+	proxyReadinessFn = func(int, time.Duration) error {
+		return errors.New("proxy readiness sealed by TestMain default-stub")
+	}
+	// Serena auto-register has its OWN readiness seam (verifyProxyReady, up to a 20s
+	// poll) distinct from proxyReadinessFn.
+	autoRegisterReadinessFn = func(int, time.Duration) error {
+		return errors.New("auto-register readiness sealed by TestMain default-stub")
+	}
+	// serenaWakeReadinessFn is deliberately NOT sealed here: the WakeIdleSerena
+	// tests integration-exercise the real wake-readiness flow with their OWN
+	// controlled supervisor-PID / port-owner deps (which ARE sealed) plus a fake
+	// serena listener, so a global seal would short-circuit the exact logic they
+	// test. Its slow deps (supervisorIPCStatusFn / loopbackPortOwnerFn) are sealed
+	// above, so a test that does NOT control them cannot reach a live poll.
+	taskkillProcessTreeByPIDFn = func(int) error {
+		return errors.New("taskkill sealed by TestMain default-stub (a test must not reap a real process tree)")
+	}
+	// POSIX force-kill goes through a SEPARATE seam (process.TreeKillByPID) that the
+	// Windows-only taskkill seam does not cover — seal it too so a portless
+	// force-stop test can never SIGKILL a real process group.
+	stopForceKillPIDFn = func(int) error {
+		return errors.New("force-kill PID sealed by TestMain default-stub")
+	}
+	// CleanupLogWatchers shells out to wmic/ps through snapshotProcessesFn, then
+	// kills matched PIDs via killOnePID (not the taskkill seams) — seal to an empty
+	// snapshot so the default test path scans nothing and kills nothing.
+	snapshotProcessesFn = func() ([]processRow, error) { return nil, nil }
+
 	code := m.Run()
 
 	daemonStateRootOverride = prevOverride
+	lookupProcess = prevLookupProcess
+	lookupProcessBatch = prevLookupProcessBatch
+	registerSupervisorReconcileFn = prevRegisterReconcile
+	supervisorReconcileApplyFn = prevReconcileApply
+	supervisorRestartRespawnFn = prevRestartRespawn
+	statusInternalDialFn = prevStatusInternalDial
+	supervisorIPCStatusFn = prevSupervisorIPCStatus
+	serenaWakeReconcileFn = prevSerenaWakeReconcile
+	autoRegisterReconcileFn = prevAutoRegisterReconcile
+	loopbackPortOwnerFn = prevLoopbackPortOwner
+	installAutostartOwnerStartFn = prevAutostartOwnerStart
+	installAutostartBackendFactoryFn = prevAutostartBackendFactory
+	proxyReadinessFn = prevProxyReadiness
+	autoRegisterReadinessFn = prevAutoRegisterReadiness
+	taskkillProcessTreeByPIDFn = prevTaskkillTree
+	stopForceKillPIDFn = prevStopForceKillPID
+	snapshotProcessesFn = prevSnapshotProcesses
 	_ = os.RemoveAll(tmp)
 	os.Exit(code)
 }
