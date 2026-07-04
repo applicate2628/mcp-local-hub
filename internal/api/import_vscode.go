@@ -601,11 +601,15 @@ func expandStringMap(raw map[string]any, exp *PlaceholderExpander) map[string]st
 }
 
 // stripJSONCommentsAndTrailingCommas removes // line comments,
-// /* block comments */, and trailing commas before }/]. Operates on
-// bytes — does NOT understand strings, so a `//` inside a string
-// would be eaten. VS Code's mcp.json is small and rarely contains
-// strings with // tokens; the conservative approach is to document
-// this limitation rather than implement a proper JSON5 parser.
+// /* block comments */, and trailing commas before }/]. It is
+// string-aware: a quoted string value is copied verbatim (tracking the
+// opening delimiter and honoring backslash escapes), so `//` inside a
+// string — a URL like "http://127.0.0.1:9121/mcp" or a Windows path
+// "C:\\x" — is preserved, NOT treated as a comment. This matters because
+// every MCP client config the scanners read is dense with URL values;
+// the client-config adapters parse the same files via hujson, and this
+// helper keeps the read-only scanner path JSONC-tolerant to match them.
+// It is behavior-preserving (identity) on comment-free valid JSON.
 func stripJSONCommentsAndTrailingCommas(raw []byte) []byte {
 	// First pass: strip block comments.
 	out := make([]byte, 0, len(raw))

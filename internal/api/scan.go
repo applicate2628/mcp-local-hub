@@ -977,7 +977,7 @@ func scanClaude(entries map[string]*ScanEntry, path string) error {
 	var cfg struct {
 		MCPServers map[string]map[string]any `json:"mcpServers"`
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 		return err
 	}
 	for name, raw := range cfg.MCPServers {
@@ -1043,7 +1043,7 @@ func scanCursor(entries map[string]*ScanEntry, path string) error {
 	var cfg struct {
 		MCPServers map[string]map[string]any `json:"mcpServers"`
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 		return err
 	}
 	for name, raw := range cfg.MCPServers {
@@ -1112,7 +1112,7 @@ func scanGemini(entries map[string]*ScanEntry, path string) error {
 	var cfg struct {
 		MCPServers map[string]map[string]any `json:"mcpServers"`
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 		return err
 	}
 	for name, raw := range cfg.MCPServers {
@@ -1148,7 +1148,7 @@ func scanQwen(entries map[string]*ScanEntry, path string) error {
 	var cfg struct {
 		MCPServers map[string]map[string]any `json:"mcpServers"`
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 		return err
 	}
 	for name, raw := range cfg.MCPServers {
@@ -1184,7 +1184,7 @@ func scanAntigravity(entries map[string]*ScanEntry, path string) error {
 	var cfg struct {
 		MCPServers map[string]map[string]any `json:"mcpServers"`
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 		return err
 	}
 	for name, raw := range cfg.MCPServers {
@@ -1372,7 +1372,7 @@ func scanTabnineCLI(entries map[string]*ScanEntry, path string) error {
 // kilocode). The per-client url-shape difference is captured by the shaper
 // callback, keeping the read/parse logic in one owner.
 func scanMCPServersJSON(entries map[string]*ScanEntry, path, client string, shaper func(map[string]any) ClientEntry) error {
-	return scanMCPServersJSONWithDecoder(entries, path, client, shaper, func(data []byte) []byte { return data })
+	return scanMCPServersJSONWithDecoder(entries, path, client, shaper, stripJSONCommentsAndTrailingCommas)
 }
 
 func scanMCPServersJSONC(entries map[string]*ScanEntry, path, client string, shaper func(map[string]any) ClientEntry) error {
@@ -1420,7 +1420,7 @@ func scanOpenCode(entries map[string]*ScanEntry, path string) error {
 	var cfg struct {
 		MCP map[string]map[string]any `json:"mcp"`
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 		return err
 	}
 	for name, raw := range cfg.MCP {
@@ -1693,7 +1693,7 @@ func scanOpenClaw(entries map[string]*ScanEntry, path string) error {
 			Servers map[string]map[string]any `json:"servers"`
 		} `json:"mcp"`
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 		return err
 	}
 	for name, raw := range cfg.MCP.Servers {
@@ -2220,7 +2220,7 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 		var cfg struct {
 			MCPServers map[string]map[string]any `json:"mcpServers"`
 		}
-		if err := json.Unmarshal(data, &cfg); err != nil {
+		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 			return "", err
 		}
 		raw = cfg.MCPServers[serverName]
@@ -2253,7 +2253,7 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 		var cfg struct {
 			MCPServers map[string]map[string]any `json:"mcpServers"`
 		}
-		if err := json.Unmarshal(data, &cfg); err != nil {
+		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 			return "", err
 		}
 		raw = cfg.MCPServers[serverName]
@@ -2269,7 +2269,7 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 		var cfg struct {
 			Servers map[string]map[string]any `json:"servers"`
 		}
-		if err := json.Unmarshal(data, &cfg); err != nil {
+		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 			return "", err
 		}
 		raw = cfg.Servers[serverName]
@@ -2285,7 +2285,7 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 		var cfg struct {
 			MCPServers map[string]map[string]any `json:"mcpServers"`
 		}
-		if err := json.Unmarshal(data, &cfg); err != nil {
+		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 			return "", err
 		}
 		raw = cfg.MCPServers[serverName]
@@ -2301,7 +2301,7 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 		var cfg struct {
 			MCPServers map[string]map[string]any `json:"mcpServers"`
 		}
-		if err := json.Unmarshal(data, &cfg); err != nil {
+		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 			return "", err
 		}
 		raw = cfg.MCPServers[serverName]
@@ -2317,7 +2317,7 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 		var cfg struct {
 			MCPServers map[string]map[string]any `json:"mcpServers"`
 		}
-		if err := json.Unmarshal(data, &cfg); err != nil {
+		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
 			return "", err
 		}
 		raw = cfg.MCPServers[serverName]

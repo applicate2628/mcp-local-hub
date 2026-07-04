@@ -125,7 +125,7 @@ func extractLegacyFromCodexTOML(raw []byte) ([]LegacyLSEntry, error) {
 // actively-used — ignored.
 func extractLegacyFromClaudeJSON(raw []byte) ([]LegacyLSEntry, error) {
 	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
+	if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(raw), &m); err != nil {
 		return nil, err
 	}
 	servers, _ := m["mcpServers"].(map[string]any)
