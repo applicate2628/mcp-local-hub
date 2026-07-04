@@ -505,4 +505,65 @@ func TestDispatchToolsCallPostsToResolvedMovedPort(t *testing.T) {
 	if got := newDaemon.callCount.Load(); got != 1 {
 		t.Fatalf("moved-to daemon callCount=%d want 1 — dispatch must POST to the RESOLVED port, not the stale ref.Port", got)
 	}
+	// initCount == 1 is the load-bearing assertion (fable-review, r7): callCount
+	// and body alone are VACUOUS because the reactive selfHealRetry layer silently
+	// repairs the pre-fix wiring — posting the fresh sid to the dead oldPort fails
+	// with a retriable transport error, selfHealRetry re-resolves to newPort and
+	// reinits a SECOND time, so callCount still lands at 1. The fix does exactly
+	// ONE proactive handshake (dispatch posts straight to newPort → success → no
+	// selfHeal); the pre-fix path does TWO (proactive + reactive). Asserting the
+	// handshake COUNT — the mechanism, not the converged outcome — is what
+	// distinguishes fixed (1) from unfixed (2).
+	if got := newDaemon.initCount.Load(); got != 1 {
+		t.Fatalf("moved-to daemon initCount=%d want 1 — exactly one proactive handshake; 2 means dispatch posted to the stale port and the reactive selfHealRetry silently re-handshook (the fix was not applied)", got)
+	}
+}
+
+// TestRefreshStalePortReinitFailReturnsOriginalPort guards Codex #500 r7 P2 (the
+// pairing invariant): when the daemon moved P1→P2 but the proactive reinit at the
+// resolved port FAILS, the helper returns the caller's ORIGINAL sid — which was
+// minted for ref.Port — and it MUST be paired with ref.Port, not the resolved
+// port. Pairing the old sid with the moved-to daemon (which never issued it) would
+// hard-fail non-retriably; pairing it with the (now-dead) original port lets the
+// dial-refused transport failure reach selfHealRetry for recovery.
+func TestRefreshStalePortReinitFailReturnsOriginalPort(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldPort = 49147
+	const oldSID = "reinitfail-old-sid"
+	const proto = "2025-11-25"
+
+	movedDaemon := newStubDaemon(t, "unused") // moved-to daemon whose initialize FAILS
+	movedDaemon.onInit = func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable) // reinit at the resolved port fails
+	}
+	newPort := movedDaemon.port
+
+	sess := sessionWithParticipants()
+	sess.ScopeKey = "claude-code"
+	sess.ProtocolVersion = proto
+	oldKey := canonicalDaemonRef{Server: "srv1", Daemon: "claude-code", Port: oldPort}
+	sess.InitSuccesses[oldKey] = oldSID
+	sess.DaemonProtoVer[oldKey] = proto
+	if !sess.markStalePort(oldPort) {
+		t.Fatalf("setup: old port %d not tracked", oldPort)
+	}
+	resolverSnapshot.Store(&ResolverSnapshot{
+		Gen:      1,
+		Bindings: map[string][]canonicalDaemonRef{sess.ScopeKey: {{Server: "srv1", Daemon: "claude-code", Port: newPort}}},
+	})
+
+	callRef := canonicalToolRef{Server: "srv1", Daemon: "claude-code", Port: oldPort, RawName: "read"}
+	sid, _, resolvedPort := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
+
+	if sid != oldSID {
+		t.Fatalf("reinit-fail must return the caller's original sid; got %q want %q", sid, oldSID)
+	}
+	if resolvedPort != oldPort {
+		t.Fatalf("reinit-fail returned port %d; want the original ref.Port %d (the old sid's minting port), not the resolved %d — posting the old sid to the moved-to daemon would hard-fail non-retriably", resolvedPort, oldPort, newPort)
+	}
+	if got := movedDaemon.initCount.Load(); got != 1 {
+		t.Fatalf("expected exactly one (failed) reinit attempt at the resolved port; got %d", got)
+	}
 }

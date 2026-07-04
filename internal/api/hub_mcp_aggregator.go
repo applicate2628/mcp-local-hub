@@ -1084,9 +1084,12 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 	//
 	// The reinit is singleflight-coalesced and caches its sid in-fn, stamped with
 	// its own start generation, so there is no cross-lock clear window to re-check.
-	// Resolved outside the loop so the final (exhaustion-break) return can hand
-	// the caller the current port. Each pass re-resolves it (a dynamic-pool
-	// daemon can move ports across a restart — fable Defect 2).
+	//
+	// `port` is the port re-resolved on each pass (a dynamic-pool daemon can move
+	// ports across a restart — fable Defect 2); a FRESH sid is returned WITH this
+	// resolved port because that is the port it was minted at. The caller's ORIGINAL
+	// sid (returned on the reinit-fail / exhaustion-break paths) is instead paired
+	// with ref.Port — see the invariant note on the reinit-fail return below.
 	port := ref.Port
 	for attempt := 0; ; attempt++ {
 		port = s.currentDaemonPort(ref)
@@ -1131,13 +1134,27 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 
 		if _, _, ok := s.reinitDaemonSession(ctx, ref); !ok {
 			// reinit failed (daemon still down) → reactive selfHealRetry backstops.
+			// INVARIANT: the returned port is always the port the returned sid was
+			// minted for. This path returns the caller's OLD sid, which was minted for
+			// ref.Port — so it is returned WITH ref.Port, NOT the freshly-resolved port.
+			// A session id is only valid at the daemon incarnation that issued it;
+			// pairing the old sid with a moved-to port would post it to a daemon that
+			// never issued it → HTTP-error rejection → non-retriable
+			// (isRetriableTransportFailure is false for HTTP errors) → a hard fail with
+			// no recovery. Returning ref.Port instead reproduces the pre-refresh
+			// baseline: in the common moved-daemon case the old port is dead, so the
+			// dial-refused transport failure IS retriable and selfHealRetry re-resolves
+			// the live port and recovers. (Codex #500 r7 P2.)
 			_ = LogHubMcpEvent("debug", "proactive-reinit-failed", map[string]any{
 				"server": ref.Server, "daemon": ref.Daemon, "port": port,
 			})
-			return daemonSID, daemonProto, port
+			return daemonSID, daemonProto, ref.Port
 		}
 	}
-	return daemonSID, daemonProto, port
+	// Exhaustion break (no cached sid after the reinit storm): same invariant —
+	// the caller's old sid is returned with its own minting port (ref.Port), not
+	// the last-resolved port.
+	return daemonSID, daemonProto, ref.Port
 }
 
 // maxProactiveReinitAttempts bounds refreshStalePortBeforeDispatch's reuse/reinit
