@@ -69,10 +69,7 @@ func parseJSONCBytes(data []byte) (map[string]any, error) {
 	if len(data) == 0 || len(strings.TrimSpace(string(data))) == 0 {
 		return map[string]any{}, nil
 	}
-	// Standardize a copy so the caller's `data` slice is never mutated in place.
-	buf := make([]byte, len(data))
-	copy(buf, data)
-	std, err := hujson.Standardize(buf)
+	std, err := StandardizeJSONC(data)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +81,25 @@ func parseJSONCBytes(data []byte) (map[string]any, error) {
 		m = map[string]any{}
 	}
 	return m, nil
+}
+
+// StandardizeJSONC converts a JWCC/JSONC document (JSON with `//` and `/* */`
+// comments plus trailing commas) into strict JSON bytes using hujson — the
+// SAME parser the client-config adapters use. It is the single owner of
+// "how mcphub standardizes a JSONC client config", so the read-only scan and
+// manifest-extraction paths (internal/api) accept exactly what the read/write
+// adapters accept: a malformed document (e.g. an unterminated `/*` comment, or
+// a `//` inside a string literal that a naive byte-stripper would mishandle) is
+// REJECTED with an error here, rather than silently transformed into something
+// the adapter would later fail to read.
+//
+// SAFETY (input is NOT mutated): hujson.Standardize overwrites comment bytes
+// with spaces IN PLACE, so this standardizes a DEFENSIVE COPY — the caller's
+// slice is never clobbered.
+func StandardizeJSONC(data []byte) ([]byte, error) {
+	buf := make([]byte, len(data))
+	copy(buf, data)
+	return hujson.Standardize(buf)
 }
 
 // jsonPointerEscape escapes a single JSON object key for use as one reference

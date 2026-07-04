@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -173,22 +174,50 @@ func TestScanKiro_TolerateJSONC_FamilyDelegate(t *testing.T) {
 	}
 }
 
-// Regression lock: the JSONC strip is string-aware, so a `//` inside a
-// quoted value (URL / Windows path) survives — critical because every
-// scanned MCP client config is dense with "url":"http://..." values. A
-// future refactor that broke string-awareness would silently corrupt
-// every URL-based config the scanners read; this test fails loudly first.
-func TestStripJSONC_PreservesDoubleSlashInStrings(t *testing.T) {
-	in := []byte(`{"url":"http://127.0.0.1:9121/mcp","path":"C:\a\b","n":1,}`)
-	out := string(stripJSONCommentsAndTrailingCommas(in))
-	if want := `"http://127.0.0.1:9121/mcp"`; !containsSub(out, want) {
-		t.Fatalf("URL `//` eaten by strip (string-awareness broken): %s", out)
+// Regression lock: the JSONC read now uses hujson (clients.StandardizeJSONC),
+// the SAME parser the client-config adapters use. A `//` inside a quoted value
+// (a URL / Windows path) is preserved and comments + trailing commas are
+// removed — verified by re-parsing the strip output and comparing the decoded
+// values, so string escaping in the test source can't give a false pass.
+func TestStripJSONC_WellFormed_PreservesStringValues(t *testing.T) {
+	src := map[string]any{
+		"url":  "http://127.0.0.1:9121/mcp", // a `//` inside a string value
+		"path": `C:\Users\x`,                // literal backslashes (json.Marshal escapes them correctly)
+		"n":    float64(1),
 	}
-	if want := `"C:\a\b"`; !containsSub(out, want) {
-		t.Fatalf("Windows path escape mangled by strip: %s", out)
+	clean, err := json.Marshal(src)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if containsSub(out, "1,}") {
-		t.Fatalf("trailing comma not stripped: %s", out)
+	// Decorate valid JSON into JWCC: a leading // comment + a trailing comma.
+	jsonc := []byte("// operator hand-edited\n" + string(clean[:len(clean)-1]) + ",}")
+	out := stripJSONCommentsAndTrailingCommas(jsonc)
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("strip output is not valid JSON (comment/comma not standardized): %v\n%s", err, out)
+	}
+	if got["url"] != "http://127.0.0.1:9121/mcp" {
+		t.Fatalf("URL `//` corrupted through strip: %v", got["url"])
+	}
+	if got["path"] != `C:\Users\x` {
+		t.Fatalf("Windows path backslashes corrupted through strip: %v", got["path"])
+	}
+}
+
+// The bot's exact P2 concern (PR #499): a naive byte-stripper silently ACCEPTS
+// an unterminated `/*` comment that hujson (the adapter's parser) REJECTS, so
+// the Servers matrix would show a row a subsequent adapter-backed action can't
+// read. With clients.StandardizeJSONC, hujson errors → strip returns the raw
+// bytes → the caller's json.Unmarshal fails → the client is reported errored,
+// matching the adapter's rejection (no scanner-vs-adapter divergence).
+func TestStripJSONC_MalformedComment_RejectedLikeAdapter(t *testing.T) {
+	in := []byte(`{"mcpServers":{"x":{"command":"uvx"}}} /* unterminated`)
+	out := stripJSONCommentsAndTrailingCommas(in)
+	var cfg struct {
+		MCPServers map[string]map[string]any `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(out, &cfg); err == nil {
+		t.Fatalf("malformed JSONC (unterminated /*) parsed cleanly — hujson must reject it so the scanner errors like the adapter; got %+v", cfg)
 	}
 }
 
