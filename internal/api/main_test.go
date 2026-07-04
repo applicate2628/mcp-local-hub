@@ -152,7 +152,10 @@ func TestMain(m *testing.M) {
 	prevAutostartOwnerStart := installAutostartOwnerStartFn
 	prevAutostartBackendFactory := installAutostartBackendFactoryFn
 	prevProxyReadiness := proxyReadinessFn
+	prevAutoRegisterReadiness := autoRegisterReadinessFn
 	prevTaskkillTree := taskkillProcessTreeByPIDFn
+	prevStopForceKillPID := stopForceKillPIDFn
+	prevSnapshotProcesses := snapshotProcessesFn
 	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
 		return ReconcileResponse{}, ErrSupervisorIPCUnavailable
 	}
@@ -169,9 +172,30 @@ func TestMain(m *testing.M) {
 	proxyReadinessFn = func(int, time.Duration) error {
 		return errors.New("proxy readiness sealed by TestMain default-stub")
 	}
+	// Serena auto-register has its OWN readiness seam (verifyProxyReady, up to a 20s
+	// poll) distinct from proxyReadinessFn.
+	autoRegisterReadinessFn = func(int, time.Duration) error {
+		return errors.New("auto-register readiness sealed by TestMain default-stub")
+	}
+	// serenaWakeReadinessFn is deliberately NOT sealed here: the WakeIdleSerena
+	// tests integration-exercise the real wake-readiness flow with their OWN
+	// controlled supervisor-PID / port-owner deps (which ARE sealed) plus a fake
+	// serena listener, so a global seal would short-circuit the exact logic they
+	// test. Its slow deps (supervisorIPCStatusFn / loopbackPortOwnerFn) are sealed
+	// above, so a test that does NOT control them cannot reach a live poll.
 	taskkillProcessTreeByPIDFn = func(int) error {
 		return errors.New("taskkill sealed by TestMain default-stub (a test must not reap a real process tree)")
 	}
+	// POSIX force-kill goes through a SEPARATE seam (process.TreeKillByPID) that the
+	// Windows-only taskkill seam does not cover — seal it too so a portless
+	// force-stop test can never SIGKILL a real process group.
+	stopForceKillPIDFn = func(int) error {
+		return errors.New("force-kill PID sealed by TestMain default-stub")
+	}
+	// CleanupLogWatchers shells out to wmic/ps through snapshotProcessesFn, then
+	// kills matched PIDs via killOnePID (not the taskkill seams) — seal to an empty
+	// snapshot so the default test path scans nothing and kills nothing.
+	snapshotProcessesFn = func() ([]processRow, error) { return nil, nil }
 
 	code := m.Run()
 
@@ -189,7 +213,10 @@ func TestMain(m *testing.M) {
 	installAutostartOwnerStartFn = prevAutostartOwnerStart
 	installAutostartBackendFactoryFn = prevAutostartBackendFactory
 	proxyReadinessFn = prevProxyReadiness
+	autoRegisterReadinessFn = prevAutoRegisterReadiness
 	taskkillProcessTreeByPIDFn = prevTaskkillTree
+	stopForceKillPIDFn = prevStopForceKillPID
+	snapshotProcessesFn = prevSnapshotProcesses
 	_ = os.RemoveAll(tmp)
 	os.Exit(code)
 }
