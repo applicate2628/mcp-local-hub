@@ -64,7 +64,7 @@ func resolveManifestPortAndDeadline(server, daemon string) (port int, deadlineSe
 	return d.Port, d.StartupBindDeadlineSeconds, true
 }
 
-// descriptorServerDaemon resolves the (server, daemon) identity of a supervisor
+// DescriptorServerDaemon resolves the (server, daemon) identity of a supervisor
 // descriptor and reports whether it is a manifest-backed `mcphub daemon` row at
 // all. It prefers the struct fields; when EITHER is blank (an older intent shape
 // that populated only the args) it recovers them from the canonical daemon args
@@ -77,7 +77,13 @@ func resolveManifestPortAndDeadline(server, daemon string) (port int, deadlineSe
 // daemon-arg-shaped (a maintenance timer / one-shot such as
 // workspace-weekly-refresh, args ["workspace-weekly-refresh"]) returns ok=false —
 // it is portless by design and must be skipped, not reported unresolvable.
-func descriptorServerDaemon(d SupervisorDaemon) (server, daemon string, ok bool) {
+//
+// Exported so it is the SINGLE owner of "what (server, daemon) is this descriptor,
+// with blank-field args-recovery": both the F5 backfill loop and the
+// `mcphub daemon recover` port-0 hint resolve identity through THIS function, so a
+// blank-field legacy row (Server=="" but args carry `--server serena`) is
+// classified identically on both paths — no duplicated argv parsing to drift.
+func DescriptorServerDaemon(d SupervisorDaemon) (server, daemon string, ok bool) {
 	server, daemon = d.Server, d.Daemon
 	if server != "" && daemon != "" {
 		return server, daemon, true
@@ -192,7 +198,7 @@ func BackfillIntentDaemonPorts(stateDir string) (IntentPortBackfill, error) {
 		// this does NOT skip a real daemon row just because its Server/Daemon
 		// fields are blank: such a row still carries --server/--daemon in its args
 		// and gets its port restored (bot PR #504).
-		server, daemon, isManifestDaemon := descriptorServerDaemon(*d)
+		server, daemon, isManifestDaemon := DescriptorServerDaemon(*d)
 		if !isManifestDaemon {
 			continue
 		}

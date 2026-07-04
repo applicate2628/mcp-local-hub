@@ -167,7 +167,12 @@ func recoverReapPortSquatter(cmd *cobra.Command, desc api.SupervisorDaemon, norm
 		// respawn that follows will loop on EADDRINUSE against it. Warn loudly
 		// rather than skip silently, then proceed to the force respawn.
 		fmt.Fprintf(errOut, "warning: descriptor for %s carries no port; the port-squatter check was SKIPPED (a lost-child squatter, if present, was NOT reaped).\n", norm)
-		if desc.Server == api.SerenaServerName {
+		// Resolve the server through the SAME owner F5 uses (args-recovery when the
+		// Server field is blank), so a blank-identity legacy serena row (Server=="",
+		// args `--server serena`) still gets the serena migration hint instead of the
+		// generic F5-backfill hint that can never fix a serena port-0 (bot PR #504).
+		hintServer, _, _ := api.DescriptorServerDaemon(desc)
+		if hintServer == api.SerenaServerName {
 			// A serena row is DELIBERATELY never port-backfilled by F5 (its
 			// lifecycle is owned by serena-migrate/build). Pointing the operator at
 			// `mcphub supervise` would loop forever — the correct remediation for a
