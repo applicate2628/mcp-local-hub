@@ -69,10 +69,7 @@ func parseJSONCBytes(data []byte) (map[string]any, error) {
 	if len(data) == 0 || len(strings.TrimSpace(string(data))) == 0 {
 		return map[string]any{}, nil
 	}
-	// Standardize a copy so the caller's `data` slice is never mutated in place.
-	buf := make([]byte, len(data))
-	copy(buf, data)
-	std, err := hujson.Standardize(buf)
+	std, err := StandardizeJSONC(data)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +81,50 @@ func parseJSONCBytes(data []byte) (map[string]any, error) {
 		m = map[string]any{}
 	}
 	return m, nil
+}
+
+// StandardizeJSONC converts a JWCC/JSONC document (JSON with `//` and `/* */`
+// comments plus trailing commas) into strict JSON bytes using hujson — the
+// SAME parser the client-config adapters use. It is the single owner of
+// "how mcphub standardizes a JSONC client config", so the read-only scan and
+// manifest-extraction paths (internal/api) accept exactly what the read/write
+// adapters accept: a malformed document (e.g. an unterminated `/*` comment, or
+// a `//` inside a string literal that a naive byte-stripper would mishandle) is
+// REJECTED with an error here, rather than silently transformed into something
+// the adapter would later fail to read.
+//
+// SAFETY (input is NOT mutated): hujson.Standardize overwrites comment bytes
+// with spaces IN PLACE, so this standardizes a DEFENSIVE COPY (via
+// jsoncTrailingNewline) — the caller's slice is never clobbered.
+func StandardizeJSONC(data []byte) ([]byte, error) {
+	return hujson.Standardize(jsoncTrailingNewline(data))
+}
+
+// jsoncTrailingNewline returns a COPY of data with a single trailing '\n'
+// appended when data is not already newline-terminated, so a config ending in a
+// `// line comment` with no final newline is parseable by hujson — which
+// otherwise reports "parsing comment: unexpected EOF" for `{...} // note<EOF>`
+// (a real hand-edited shape for VS Code / Zed / OpenCode configs). The single
+// owner of that normalization for BOTH the read path (StandardizeJSONC /
+// parseJSONCBytes) AND the comment-preserving WRITE path
+// (applyJSONCObjectMemberPath's hujson.Parse), so an operator's newline-less
+// trailing-comment config is BOTH scannable and writable — no read-accepts /
+// write-rejects divergence. Always a copy (hujson.Standardize/Parse alias +
+// mutate their input in place). The extra newline is invariant for valid JSON
+// (trailing whitespace is ignored) and only terminates an otherwise-unterminated
+// FINAL LINE comment; a truly unterminated `/* block */` comment still
+// (correctly) errors. The conditional append avoids adding a redundant blank
+// line to an already-terminated file on every comment-preserving write.
+func jsoncTrailingNewline(data []byte) []byte {
+	if n := len(data); n > 0 && data[n-1] == '\n' {
+		buf := make([]byte, n)
+		copy(buf, data)
+		return buf
+	}
+	buf := make([]byte, len(data)+1)
+	copy(buf, data)
+	buf[len(data)] = '\n'
+	return buf
 }
 
 // jsonPointerEscape escapes a single JSON object key for use as one reference
@@ -131,7 +172,11 @@ func applyJSONCObjectMember(original []byte, sectionKey, name string, value any,
 // formatting of `original` are preserved exactly as in the single-key case.
 // sectionPath must be non-empty.
 func applyJSONCObjectMemberPath(original []byte, sectionPath []string, name string, value any, del bool) ([]byte, error) {
-	v, err := hujson.Parse(original)
+	// Normalize a newline-less trailing `// comment` the SAME way the read path
+	// does (jsoncTrailingNewline), so a config the scan/read side now accepts is
+	// also writable here — otherwise AddEntry/RemoveEntry/migrate would fail with
+	// "parsing comment: unexpected EOF" on a file Scan just reported as valid.
+	v, err := hujson.Parse(jsoncTrailingNewline(original))
 	if err != nil {
 		return nil, fmt.Errorf("parse JSONC: %w", err)
 	}

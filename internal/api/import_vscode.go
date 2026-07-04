@@ -42,6 +42,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"mcp-local-hub/internal/clients"
 )
 
 // VSCodeImportResult is the structured output of ImportVSCodeWorkspace.
@@ -600,102 +602,23 @@ func expandStringMap(raw map[string]any, exp *PlaceholderExpander) map[string]st
 	return out
 }
 
-// stripJSONCommentsAndTrailingCommas removes // line comments,
-// /* block comments */, and trailing commas before }/]. Operates on
-// bytes — does NOT understand strings, so a `//` inside a string
-// would be eaten. VS Code's mcp.json is small and rarely contains
-// strings with // tokens; the conservative approach is to document
-// this limitation rather than implement a proper JSON5 parser.
+// stripJSONCommentsAndTrailingCommas standardizes a JWCC/JSONC client config
+// to strict JSON using clients.StandardizeJSONC — hujson, the SAME parser the
+// client-config read/write adapters use. This is what makes the read-only scan
+// and manifest-extraction paths accept EXACTLY what the adapters accept: no
+// naive byte-level stripping (which would silently accept an unterminated `/*`
+// comment or mis-merge a `//` inside a string literal that hujson rejects, so
+// the Servers matrix could show a row a subsequent adapter-backed action can't
+// read). On a malformed document hujson errors; we return the ORIGINAL bytes so
+// the caller's json.Unmarshal surfaces the syntax error and the client is
+// reported as errored — exactly as the adapter would reject it. It is
+// behavior-preserving on comment-free valid JSON.
 func stripJSONCommentsAndTrailingCommas(raw []byte) []byte {
-	// First pass: strip block comments.
-	out := make([]byte, 0, len(raw))
-	inString := false
-	var stringDelim byte
-	for i := 0; i < len(raw); i++ {
-		b := raw[i]
-		if inString {
-			if b == '\\' && i+1 < len(raw) {
-				out = append(out, b, raw[i+1])
-				i++
-				continue
-			}
-			out = append(out, b)
-			if b == stringDelim {
-				inString = false
-			}
-			continue
-		}
-		if b == '"' {
-			inString = true
-			stringDelim = b
-			out = append(out, b)
-			continue
-		}
-		if b == '/' && i+1 < len(raw) {
-			next := raw[i+1]
-			if next == '/' {
-				// Line comment — skip to end of line.
-				for i < len(raw) && raw[i] != '\n' {
-					i++
-				}
-				if i < len(raw) {
-					out = append(out, raw[i])
-				}
-				continue
-			}
-			if next == '*' {
-				// Block comment — skip until */.
-				i += 2
-				for i+1 < len(raw) && !(raw[i] == '*' && raw[i+1] == '/') {
-					i++
-				}
-				i++ // consume the */ closing pair
-				continue
-			}
-		}
-		out = append(out, b)
+	std, err := clients.StandardizeJSONC(raw)
+	if err != nil {
+		return raw
 	}
-	// Second pass: drop trailing commas before } or ].
-	return stripTrailingCommas(out)
-}
-
-func stripTrailingCommas(raw []byte) []byte {
-	out := make([]byte, 0, len(raw))
-	inString := false
-	var stringDelim byte
-	for i := 0; i < len(raw); i++ {
-		b := raw[i]
-		if inString {
-			out = append(out, b)
-			if b == '\\' && i+1 < len(raw) {
-				out = append(out, raw[i+1])
-				i++
-				continue
-			}
-			if b == stringDelim {
-				inString = false
-			}
-			continue
-		}
-		if b == '"' {
-			inString = true
-			stringDelim = b
-			out = append(out, b)
-			continue
-		}
-		if b == ',' {
-			// Peek ahead skipping whitespace; if next non-ws is ] or }, drop the comma.
-			j := i + 1
-			for j < len(raw) && (raw[j] == ' ' || raw[j] == '\t' || raw[j] == '\n' || raw[j] == '\r') {
-				j++
-			}
-			if j < len(raw) && (raw[j] == '}' || raw[j] == ']') {
-				continue
-			}
-		}
-		out = append(out, b)
-	}
-	return out
+	return std
 }
 
 // yamlEscape minimally quotes strings that contain characters

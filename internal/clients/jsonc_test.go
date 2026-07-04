@@ -46,7 +46,7 @@ func assertCommentsAndUnrelatedSurvive(t *testing.T, path, unrelatedKey string) 
 	}
 	out := string(raw)
 	for _, want := range []string{
-		"// Zed settings header",       // line comment
+		"// Zed settings header",        // line comment
 		"/* hand-written block note */", // block comment
 		unrelatedKey,                    // operator's unrelated key
 	} {
@@ -869,5 +869,50 @@ func TestParseJSONCBytes_EmptyAndNull(t *testing.T) {
 		if len(m) != 0 {
 			t.Fatalf("parseJSONCBytes(%q) = %#v, want empty map", in, m)
 		}
+	}
+}
+
+// A config ending with a `// line comment` and NO final newline is a real
+// hand-edited shape. StandardizeJSONC appends a trailing newline so hujson does
+// not reject it with "parsing comment: unexpected EOF"; the READ path
+// (parseJSONCBytes) must therefore parse it. (The scanner side shares
+// StandardizeJSONC — see internal/api/scan_jsonc_test.go.)
+func TestParseJSONCBytes_TrailingLineCommentNoNewline(t *testing.T) {
+	m, err := parseJSONCBytes([]byte(`{"mcpServers":{"x":{"url":"http://y"}}} // note, no newline`))
+	if err != nil {
+		t.Fatalf("parseJSONCBytes must tolerate a trailing // comment with no final newline, got: %v", err)
+	}
+	servers, _ := m["mcpServers"].(map[string]any)
+	if _, ok := servers["x"]; !ok {
+		t.Fatalf("entry x lost from a newline-less trailing-// config: %v", m)
+	}
+}
+
+// Bot #499 r3 (P2, jsonc.go): the read path (StandardizeJSONC) tolerates a
+// config ending in a `// comment` with no final newline; the comment-preserving
+// WRITE path (applyJSONCObjectMember → hujson.Parse, normalized via
+// jsoncTrailingNewline) must too — else Scan reports the file valid while
+// AddEntry/RemoveEntry/migrate fail "parsing comment: unexpected EOF" on it.
+func TestJSONC_AddEntry_TrailingLineCommentNoNewline(t *testing.T) {
+	// original ends with a // comment and NO trailing newline.
+	original := []byte(`{"mcpServers":{"keep":{"url":"http://keep"}}} // trailing note`)
+	out, err := applyJSONCObjectMember(original, "mcpServers", "serena",
+		map[string]any{"url": "http://localhost:9121/mcp"}, false)
+	if err != nil {
+		t.Fatalf("write path must tolerate a newline-less trailing // comment, got: %v", err)
+	}
+	m, perr := parseJSONCBytes(out)
+	if perr != nil {
+		t.Fatalf("written bytes are not valid JSONC: %v\n%s", perr, out)
+	}
+	servers, _ := m["mcpServers"].(map[string]any)
+	if _, ok := servers["serena"]; !ok {
+		t.Fatalf("serena not added by the write: %s", out)
+	}
+	if _, ok := servers["keep"]; !ok {
+		t.Fatalf("pre-existing keep entry dropped by the write: %s", out)
+	}
+	if !bytes.Contains(out, []byte("// trailing note")) {
+		t.Fatalf("trailing comment not preserved through the comment-preserving write: %s", out)
 	}
 }
