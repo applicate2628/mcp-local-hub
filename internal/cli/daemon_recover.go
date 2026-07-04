@@ -162,6 +162,14 @@ func recoverReapPortSquatter(cmd *cobra.Command, desc api.SupervisorDaemon, norm
 	errOut := cmd.ErrOrStderr()
 
 	if desc.Port <= 0 {
+		// F4a: the descriptor carries no port, so the squatter reap below cannot
+		// run — a lost-child squatter (if any) is NOT reaped, and the force
+		// respawn that follows will loop on EADDRINUSE against it. This is almost
+		// always a legacy supervisor-intent.json row written before the port field
+		// existed; a `mcphub supervise` restart backfills it (F5). Warn loudly
+		// rather than skip silently, then proceed to the force respawn.
+		fmt.Fprintf(errOut, "warning: descriptor for %s carries no port; the port-squatter check was SKIPPED (a lost-child squatter, if present, was NOT reaped).\n", norm)
+		fmt.Fprintf(errOut, "hint: this is usually a legacy supervisor-intent.json row missing its port — restart `mcphub supervise` to backfill it, then retry `mcphub daemon recover %s`.\n", norm)
 		return nil // no port to fight over
 	}
 	ownerPID, ok, err := recoverPortOwnerFn(desc.Port)
