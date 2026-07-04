@@ -188,6 +188,9 @@ func captureToolsList(t *testing.T, bin string, args []string, workspace string)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
+	// Bound the deferred Wait even if a leaked child keeps a pipe open past the
+	// ctx-fired kill (Go 1.20+ WaitDelay).
+	cmd.WaitDelay = 5 * time.Second
 	if workspace != "" {
 		cmd.Dir = workspace
 	}
@@ -208,11 +211,48 @@ func captureToolsList(t *testing.T, bin string, args []string, workspace string)
 		return nil, err
 	}
 	defer func() {
-		_ = cmd.Process.Kill()
+		// Kill the whole child TREE, not just the parent. mcp-language-server /
+		// gopls spawn a descendant tree; a parent-only Kill can leave an orphan
+		// holding the stdout write-handle. The goroutine+select below already
+		// bounds the CALLER, but the tree-kill prevents a leaked process (and a
+		// downstream t.TempDir cleanup failure from a held file handle).
+		if cmd.Process != nil {
+			_ = taskkillProcessTreeByPID(cmd.Process.Pid)
+			_ = cmd.Process.Kill()
+		}
 		_ = cmd.Wait()
 	}()
 	go func() { _, _ = io.Copy(io.Discard, stderr) }()
 
+	// Run the initialize + tools/list exchange on a goroutine so the caller can
+	// bound it on ctx.Done() regardless of whether a stalled or orphaned child
+	// holds the stdout pipe open. A bare scanner.Scan() blocks in the pipe Read
+	// until EOF, so the 20s ctx alone (which only fires a parent-PID kill) would
+	// not stop it if a descendant kept the write-handle — an unbounded hang by
+	// construction. The select makes the caller return within the ctx budget.
+	type probeResult struct {
+		probe *upstreamProbe
+		err   error
+	}
+	done := make(chan probeResult, 1)
+	go func() {
+		probe, err := runToolsListExchange(stdin, stdout)
+		done <- probeResult{probe: probe, err: err}
+	}()
+
+	select {
+	case r := <-done:
+		return r.probe, r.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// runToolsListExchange drives the initialize → initialized → tools/list JSON-RPC
+// handshake over the child's stdio and returns the captured upstream probe. It is
+// the blocking body of captureToolsList, extracted so it can run on a goroutine
+// bounded by the caller's context (see captureToolsList).
+func runToolsListExchange(stdin io.Writer, stdout io.Reader) (*upstreamProbe, error) {
 	send := func(id int, method string, params any) error {
 		payload := map[string]any{"jsonrpc": "2.0", "method": method, "params": params}
 		if id >= 0 {
