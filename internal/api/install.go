@@ -3051,7 +3051,7 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 		}
 		port := portForTask(normalized, ports, wsByTask)
 		if port != 0 {
-			if err := killDaemonByPort(port, 5*time.Second); err != nil {
+			if err := killByPortFn(port, 5*time.Second); err != nil {
 				results = append(results, RestartResult{TaskName: t.Name, Err: "kill daemon: " + err.Error()})
 				continue
 			}

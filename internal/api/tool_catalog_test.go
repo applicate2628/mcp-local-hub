@@ -188,6 +188,19 @@ func captureToolsList(t *testing.T, bin string, args []string, workspace string)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
+	// Override CommandContext's default Cancel (a parent-only Process.Kill). On the
+	// ctx deadline, reap the whole process TREE while the root PID is still alive to
+	// anchor taskkill /T's walk — the default kills the root FIRST, after which /T
+	// is handed a dead PID and the orphaned descendants (gopls → go toolchain)
+	// survive holding stdout / tempdir handles (Codex #502 r2). cmd.Process is set
+	// by the time Cancel can fire (Cancel only runs after a successful Start).
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			_ = taskkillProcessTreeByPID(cmd.Process.Pid)
+			return cmd.Process.Kill()
+		}
+		return nil
+	}
 	// Bound the deferred Wait even if a leaked child keeps a pipe open past the
 	// ctx-fired kill (Go 1.20+ WaitDelay).
 	cmd.WaitDelay = 5 * time.Second
