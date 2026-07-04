@@ -1059,6 +1059,12 @@ func (s *hubSession) selfHealRetry(ctx context.Context, ref canonicalToolRef, in
 // seam in intent_collapse.go.
 var refreshStaleRecheckHook func()
 
+// refreshStalePreReinitHook, when non-nil, runs in the stale branch BEFORE the
+// pre-reinit stale re-check. Test-only seam (nil in production) that lets a test
+// deterministically simulate a concurrent leader completing the reinit (clearing
+// stale + caching a fresh sid) in the window that re-check closes.
+var refreshStalePreReinitHook func()
+
 func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref canonicalToolRef, daemonSID, daemonProto string) (string, string) {
 	state, ok := s.stalePortStateFor(ref.Port)
 	if !ok {
@@ -1143,6 +1149,37 @@ func (s *hubSession) refreshStalePortBeforeDispatch(ctx context.Context, ref can
 		// pre-restart. Fall through to the reinit path — the flight reads its own
 		// start generation, so the post-reinit clear is guarded correctly against
 		// that (and any further) restart regardless of this caller's snapshot.
+	}
+
+	// Recheck before committing to a NEW flight (Codex #500 P2): with the per-port
+	// lock no longer held across the handshake, a concurrent leader can complete
+	// the reinit, CLEAR stale, and cache a fresh sid between our snapshot and now.
+	// Starting a second initialize for the SAME restart then leaks a superseded
+	// daemon-side session — cacheReinitResult overwrites InitSuccesses[daemonKey]
+	// without deleting the old sid, so bursts around one restart leak sessions
+	// until daemon GC. If stale is already cleared AND a fresh sid is cached, reuse
+	// it. (If stale is still set — including the fast-path-flipped fall-through —
+	// reinit; a still-in-flight leader is coalesced by singleflight, and a genuinely
+	// newer restart legitimately needs its own flight.)
+	if refreshStalePreReinitHook != nil {
+		refreshStalePreReinitHook()
+	}
+	state.mu.Lock()
+	stillStale := state.stale
+	state.mu.Unlock()
+	if !stillStale {
+		daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: ref.Port}
+		s.mu.Lock()
+		freshSID, hasSID := s.InitSuccesses[daemonKey]
+		freshProto := s.DaemonProtoVer[daemonKey]
+		sessProto := s.ProtocolVersion
+		s.mu.Unlock()
+		if hasSID {
+			if freshProto == "" {
+				freshProto = sessProto
+			}
+			return freshSID, freshProto
+		}
 	}
 
 	// Stale (at the snapshot, or flipped during the fast-path read): reinit, then

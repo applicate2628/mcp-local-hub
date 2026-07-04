@@ -392,3 +392,70 @@ func TestRefreshStalePortFollowerDoesNotClearNewerRestart(t *testing.T) {
 		t.Fatal("a singleflight follower cleared the newer restart's stale mark (fable Defect 1): a shared pre-restart flight result must NOT clear stale")
 	}
 }
+
+// TestRefreshStalePortReusesCachedSidWhenLeaderClearedBeforeReinit covers Codex
+// #500 P2: with the per-port lock released, a caller can snapshot stale=true then
+// be descheduled until a concurrent leader completed the reinit, CLEARED stale,
+// and cached a fresh sid. Starting a second initialize for the SAME restart then
+// leaks the superseded daemon session. The pre-reinit re-check reuses the cached
+// fresh sid instead — no redundant flight, no leak. Driven deterministically via
+// the refreshStalePreReinitHook seam.
+func TestRefreshStalePortReusesCachedSidWhenLeaderClearedBeforeReinit(t *testing.T) {
+	resetResolverForTest(t)
+	t.Cleanup(func() { resetResolverForTest(t) })
+
+	const oldSID = "prereinit-old-sid"
+	const leaderSID = "prereinit-leader-fresh-sid"
+	const proto = "2025-11-25"
+
+	daemon := newStubDaemon(t, "should-not-be-dialed")
+	port := daemon.port
+
+	sess := sessionWithParticipants(daemon)
+	sess.ClientSessionID = "prereinit-sess"
+	ref := sess.IntendedParticipants[0]
+	sess.InitSuccesses[ref] = oldSID
+	sess.DaemonProtoVer[ref] = proto
+	callRef := canonicalToolRef{Server: ref.Server, Daemon: ref.Daemon, Port: port, RawName: "read"}
+
+	// Port is stale at the caller's snapshot.
+	if !sess.markStalePort(port) {
+		t.Fatalf("setup: port %d not tracked", port)
+	}
+
+	// Seam: simulate a concurrent leader finishing the reinit for THIS restart —
+	// cache the fresh sid then clear stale — in the window before the pre-reinit
+	// re-check. Fires once.
+	var fired int32
+	refreshStalePreReinitHook = func() {
+		if atomic.CompareAndSwapInt32(&fired, 0, 1) {
+			daemonKey := canonicalDaemonRef{Server: ref.Server, Daemon: ref.Daemon, Port: port}
+			sess.mu.Lock()
+			sess.InitSuccesses[daemonKey] = leaderSID
+			sess.DaemonProtoVer[daemonKey] = proto
+			sess.mu.Unlock()
+			st, _ := sess.stalePortStateFor(port)
+			st.mu.Lock()
+			st.stale = false
+			st.mu.Unlock()
+		}
+	}
+	t.Cleanup(func() { refreshStalePreReinitHook = nil })
+
+	sid, gotProto := sess.refreshStalePortBeforeDispatch(context.Background(), callRef, oldSID, proto)
+
+	if atomic.LoadInt32(&fired) != 1 {
+		t.Fatal("pre-reinit seam never fired")
+	}
+	// Reused the leader's cached fresh sid — NOT a redundant reinit.
+	if sid != leaderSID {
+		t.Fatalf("expected the leader's cached sid %q, got %q", leaderSID, sid)
+	}
+	if gotProto != proto {
+		t.Fatalf("proto = %q, want %q", gotProto, proto)
+	}
+	// No second initialize was dialed (no redundant flight → no leaked session).
+	if got := daemon.initCount.Load(); got != 0 {
+		t.Fatalf("a redundant reinit flight was started (initCount=%d) despite a cached fresh sid — leaks a superseded daemon session", got)
+	}
+}
