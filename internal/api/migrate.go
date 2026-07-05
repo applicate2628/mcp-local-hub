@@ -359,24 +359,15 @@ func findDaemonPort(m *config.ServerManifest, daemonName string) (int, bool) {
 	return d.Port, true
 }
 
-// ResolveManifestDaemonPort is the exported convenience wrapper around
-// loadManifestForServer + findDaemonPort. Looks up the canonical port
-// for the (server, daemon) pair from the embedded-first manifest store.
-// Returns (0, false) on any error (missing manifest, daemon name
-// mismatch) so callers can treat 0 as "not authoritative" rather than
-// fail-closed.
-//
-// Use case: the supervisor IPC status response reports each daemon's
-// Port from the SupervisorDaemon descriptor in supervisor-intent.json.
-// Existing intent files (PR #211 and earlier) wrote Port=0; the GUI
-// matrix renders "—" for those daemons even though the daemon is
-// listening on the manifest-declared port. Wrapping this lookup at
-// status-build time enriches the displayed port without requiring an
-// intent-file migration.
+// ResolveManifestDaemonPort is the exported port-only convenience wrapper. It
+// now DELEGATES to the port-resolution owner's resolveManifestPortAndDeadline
+// (supervisor_port_owner.go) so the tree holds exactly ONE embed-first manifest
+// port+deadline reader — this wrapper drops its own loadManifestForServer call
+// (design Phase 1, Claim #1). Returns (0, false) on any error (missing manifest,
+// daemon name mismatch) so callers can treat 0 as "not authoritative" rather
+// than fail-closed. Signature preserved; port-only by design (callers that need
+// the deadline call the owner directly).
 func ResolveManifestDaemonPort(server, daemon string) (int, bool) {
-	m, err := loadManifestForServer("", server)
-	if err != nil || m == nil {
-		return 0, false
-	}
-	return findDaemonPort(m, daemon)
+	port, _, ok := resolveManifestPortAndDeadline(server, daemon)
+	return port, ok
 }
