@@ -3258,6 +3258,12 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			cmd.Env = appendDaemonOverlayKeys(cmd.Env, overlayKeySet(overlayEnv))
 		}
 
+		// Resolve the server through the OWNER for the spawn-time PATH gates below:
+		// a legacy blank-field gdb/lldb row (Server=="", args `--server gdb`) would
+		// otherwise miss these operator-critical DLL/toolchain PATH injections now
+		// that F5 no longer heals the Server field before spawn (bot PR #505 r3).
+		spawnServer := api.DescriptorServerName(d)
+
 		// Intel oneAPI PATH injection (operator-CRITICAL: MKL-linked inferior
 		// exes fail to load DLLs under gdb/lldb because the daemon + inferior
 		// don't inherit the oneAPI component DLL dirs). For a TARGET-set daemon
@@ -3272,7 +3278,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// single env-composition path (no parallel spawn flow). See
 		// internal/oneapi + the makeProductionSpawnFnWithStatePath oneAPIInj
 		// doc.
-		if oneAPIInj.applies(d.Server) {
+		if oneAPIInj.applies(spawnServer) {
 			merged, applied := injectOneAPIEnv(cmd.Env, oneAPIInj.Dirs)
 			cmd.Env = merged
 			if len(applied) > 0 && events != nil {
@@ -3282,7 +3288,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 					Event:    "oneapi-path-injected",
 					TaskName: d.TaskName,
 					Body: map[string]any{
-						"server": d.Server,
+						"server": spawnServer,
 						"daemon": d.Daemon,
 						"dirs":   applied,
 					},
@@ -3301,7 +3307,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// gdb/lldb resolves. INDEPENDENT of the oneAPI gate (fires on a
 		// non-oneAPI host too); same {gdb,lldb} target set. No-op when nothing is
 		// detected (POSIX with debuggers on PATH, or no MSYS2 install).
-		if defaultOneAPITargetServers[d.Server] {
+		if defaultOneAPITargetServers[spawnServer] {
 			if dbgDirs := toolchain.DebuggerDirs(); len(dbgDirs) > 0 {
 				merged, applied := injectOneAPIEnv(cmd.Env, dbgDirs)
 				cmd.Env = merged
@@ -3312,7 +3318,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 						Event:    "debugger-path-injected",
 						TaskName: d.TaskName,
 						Body: map[string]any{
-							"server": d.Server,
+							"server": spawnServer,
 							"daemon": d.Daemon,
 							"dirs":   applied,
 						},

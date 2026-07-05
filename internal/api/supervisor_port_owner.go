@@ -14,6 +14,8 @@
 // work-items/decisions/2026-07-05-daemon-port-resolution-single-owner.md.
 package api
 
+import "strconv"
+
 // Port/deadline defaults, homed here as the SINGLE owner of the magic values
 // (design §4b): the resolver is the sole authority, so the deadline no longer
 // lives as a cli-package constant + an argv-keyed liveness arm.
@@ -58,9 +60,22 @@ func EffectiveStartupBindDeadlineSeconds(d SupervisorDaemon) int {
 }
 
 // effectivePort is the shared port-decision logic (pure + memoized callers).
+// Resolution order: the stamped descriptor Port (>0) → the descriptor's own
+// `--port` arg (LAUNCH TRUTH) → the manifest port for the resolved (server,daemon).
 func effectivePort(d SupervisorDaemon, resolve manifestPortDeadlineResolveFn) (int, bool) {
 	if d.Port > 0 {
 		return d.Port, true
+	}
+	// The descriptor's own `--port` arg is the launch truth for a proxy row: a
+	// workspace-proxy (`daemon workspace-proxy --port 94xx …`) or serena-proxy
+	// (`daemon serena-proxy --port 915x …`) binds exactly that port, and its
+	// dynamic daemon name (lsp-<ws>-<lang> / <workspace-hash>) is not declared in
+	// any manifest — so the manifest fallback below would wrongly report it
+	// portless and every port protection would stay off (bot PR #505 r3). A global
+	// daemon carries no `--port` arg, so this is a no-op there and it falls to the
+	// manifest as before.
+	if p := descriptorArgPort(d); p > 0 {
+		return p, true
 	}
 	server, daemon, idOK := DescriptorServerDaemon(d)
 	if !idOK {
@@ -71,6 +86,24 @@ func effectivePort(d SupervisorDaemon, resolve manifestPortDeadlineResolveFn) (i
 		return 0, false
 	}
 	return port, true
+}
+
+// descriptorArgPort returns the `--port` value from a `daemon …` descriptor's
+// args, or 0 when absent/unparseable. It is the launch-truth port for the proxy
+// shapes (workspace-proxy, serena-proxy) whose dynamic daemon name is not in a
+// manifest.
+func descriptorArgPort(d SupervisorDaemon) int {
+	if len(d.Args) == 0 || d.Args[0] != "daemon" {
+		return 0
+	}
+	for i := 0; i+1 < len(d.Args); i++ {
+		if d.Args[i] == "--port" {
+			if p, err := strconv.Atoi(d.Args[i+1]); err == nil && p > 0 {
+				return p
+			}
+		}
+	}
+	return 0
 }
 
 // effectiveDeadline is the shared deadline-decision logic (§4b).

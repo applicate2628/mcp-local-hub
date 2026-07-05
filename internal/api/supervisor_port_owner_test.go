@@ -45,6 +45,33 @@ func TestEffectiveDaemonPort_ManifestFallbackForPortZero(t *testing.T) {
 	}
 }
 
+// TestEffectiveDaemonPort_RecoversArgPortForProxyShape is the bot PR #505 r3
+// guard: a legacy Port=0 workspace-proxy / serena-proxy row carries its real port
+// in `--port` args (launch truth), and its dynamic daemon name is not in any
+// manifest — so the port must be recovered from the args BEFORE the manifest
+// fallback declares it portless.
+func TestEffectiveDaemonPort_RecoversArgPortForProxyShape(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{}) // manifest resolves nothing for the dynamic daemon
+	// LSP workspace-proxy: daemon workspace-proxy --port 9204 --workspace … --language go
+	wp := SupervisorDaemon{TaskName: `\mcp-local-hub-lsp-abcd-go`, Port: 0,
+		Args: []string{"daemon", "workspace-proxy", "--port", "9204", "--workspace", "d:\\ws", "--language", "go"}}
+	if got, ok := EffectiveDaemonPort(wp); !ok || got != 9204 {
+		t.Fatalf("workspace-proxy EffectiveDaemonPort = (%d,%v), want (9204,true) from --port arg", got, ok)
+	}
+	// serena-proxy: daemon serena-proxy --server serena --port 9151 …
+	sp := SupervisorDaemon{TaskName: `\mcp-local-hub-serena-hash`, Port: 0,
+		Args: []string{"daemon", "serena-proxy", "--server", "serena", "--port", "9151", "--workspace", "d:\\ws"}}
+	if got, ok := EffectiveDaemonPort(sp); !ok || got != 9151 {
+		t.Fatalf("serena-proxy EffectiveDaemonPort = (%d,%v), want (9151,true) from --port arg", got, ok)
+	}
+	// A global daemon carries NO --port arg → still falls to the manifest (nil here → unresolved).
+	gd := SupervisorDaemon{TaskName: `\mcp-local-hub-ghost-default`, Port: 0,
+		Args: []string{"daemon", "--server", "ghost", "--daemon", "default"}}
+	if got, ok := EffectiveDaemonPort(gd); ok || got != 0 {
+		t.Fatalf("global daemon w/o --port + no manifest = (%d,%v), want (0,false)", got, ok)
+	}
+}
+
 func TestEffectiveDaemonPort_RenamedManifestNotOK(t *testing.T) {
 	stubOwnerResolver(t, map[string][2]int{}) // resolver returns !ok for all
 	d := SupervisorDaemon{Server: "ghost", Daemon: "default", Port: 0,
