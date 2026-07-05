@@ -32,57 +32,6 @@ var rssByPID = process.ResidentSetSizeByPID
 // and keeps the per-daemon PortLive TCP fallback.
 var loopbackPortOwnersSnapshotFn = api.LoopbackPortOwnersSnapshot
 
-// resolveManifestDaemonPortFn is the per-(server, daemon) manifest port
-// lookup the status producer calls for daemons whose intent Port is 0 (the
-// PR #211-and-earlier installs that wrote Port=0 for every daemon).
-// Indirected through a package var so status tests can inject a deterministic
-// resolver AND assert it is loaded AT MOST ONCE PER SERVER per refresh — the
-// per-server-manifest memo (newManifestPortResolver) wraps this fn so a
-// server with N Port=0 daemons reads + parses that server's manifest.yaml
-// ONCE, not N times. Defaults to the production embed-first lookup.
-var resolveManifestDaemonPortFn = api.ResolveManifestDaemonPort
-
-// newManifestPortResolver returns a closure that resolves a daemon's port
-// from its server manifest, MEMOIZED PER SERVER for the lifetime of the
-// returned closure (one supervisorStatusDaemons refresh).
-//
-// Perf: ResolveManifestDaemonPort reads + parses the WHOLE server manifest
-// YAML on every call (loadManifestForServer → loadManifestYAMLEmbedFirst →
-// config.ParseManifest). A server with multiple daemons whose intent Port is
-// 0 (e.g. serena's dynamic workspace-proxy pool, or any multi-daemon server
-// from a pre-port-seeding install) used to re-parse the SAME manifest once
-// per daemon row. The memo collapses that to ONE parse per server per status
-// refresh — the same per-iteration-redundant-parse class the port-owner
-// snapshot already fixed for netstat. The lookup result is unchanged: the
-// underlying fn is keyed on (server, daemon) and the memo stores the exact
-// (port, ok) pair it returned, so the resolved value is byte-identical.
-func newManifestPortResolver() func(server, daemon string) (int, bool) {
-	type portResult struct {
-		port int
-		ok   bool
-	}
-	// memo[server][daemon] → resolved (port, ok). The server-level map is
-	// allocated lazily on the first daemon seen for that server; its mere
-	// presence records that the server's manifest was already consulted, so
-	// a second daemon of the same server reuses the cached entry instead of
-	// re-reading the manifest.
-	memo := map[string]map[string]portResult{}
-	return func(server, daemon string) (int, bool) {
-		byDaemon, seenServer := memo[server]
-		if seenServer {
-			if r, ok := byDaemon[daemon]; ok {
-				return r.port, r.ok
-			}
-		} else {
-			byDaemon = map[string]portResult{}
-			memo[server] = byDaemon
-		}
-		port, ok := resolveManifestDaemonPortFn(server, daemon)
-		byDaemon[daemon] = portResult{port: port, ok: ok}
-		return port, ok
-	}
-}
-
 func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]map[string]any, error) {
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 	intent, err := api.ReadSupervisorIntent(intentPath)
@@ -128,17 +77,12 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 		}
 	}
 
-	// Per-refresh memo so a server with multiple Port=0 daemons reads +
-	// parses that server's manifest.yaml ONCE, not once per daemon row.
-	//
-	// This is the READ-fallback for a Port=0 descriptor and is NOT made
-	// redundant by the F5 startup port backfill (api.BackfillIntentDaemonPorts):
-	// F5 is the WRITE-convergence that persists the manifest port into the
-	// descriptor on the next supervise start, while THIS resolves it for display
-	// in the windows F5 has not covered yet — a contended/unresolved backfill, a
-	// pre-F5-restart host, or an old binary. Do not delete it as "F5 already fills
-	// the port."
-	resolveManifestPort := newManifestPortResolver()
+	// The port-resolution owner, memoized per refresh (one manifest parse per
+	// server). It resolves each daemon's EFFECTIVE port + first-bind deadline —
+	// the single authority the liveness sweep, squatter, and recover paths also
+	// use, so a Port=0 descriptor shows its manifest port for display exactly as
+	// the sweep protects it.
+	portResolver := api.NewDaemonPortResolver()
 
 	rows := make([]map[string]any, 0, len(intent.Daemons))
 	for _, d := range intent.Daemons {
@@ -169,21 +113,21 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 		if args == nil {
 			args = []string{}
 		}
-		// Port enrichment fallback: supervisor-intent.json from PR
-		// #211 and earlier wrote Port=0 for every daemon (migration
-		// did not seed the field from the manifest). The GUI matrix
-		// then renders "—" even though the daemon is listening on the
-		// manifest-declared port. Look up the canonical port from the
-		// manifest when the intent value is 0 so existing installs
-		// see the right port without needing an intent-file
-		// migration. Future migrate code should populate Port at
-		// write time — when it does, this lookup becomes a no-op.
-		port := d.Port
-		if port == 0 && server != "" {
-			if p, ok := resolveManifestPort(server, daemon); ok {
-				port = p
-			}
+		// Resolve the EFFECTIVE port + first-bind deadline through the owner. A
+		// Port=0 descriptor (PR #211-and-earlier installs wrote Port=0 for every
+		// daemon) shows its manifest port instead of "—"; a Port>0 row short-
+		// circuits. The derived server/daemon (parsed from the task name when the
+		// intent fields are blank) is threaded into the descriptor so a blank-field
+		// row still resolves.
+		effDesc := api.SupervisorDaemon{
+			TaskName:                   d.TaskName,
+			Server:                     server,
+			Daemon:                     daemon,
+			Port:                       d.Port,
+			Args:                       d.Args,
+			StartupBindDeadlineSeconds: d.StartupBindDeadlineSeconds,
 		}
+		port, deadlineSecs, _ := portResolver.Resolve(effDesc)
 		stalePID := 0
 		if ok && runtimeState.State == daemonRuntimeStateRunning {
 			// Status has no bind latch (it is a stateless per-refresh view), so
@@ -197,8 +141,8 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 				Daemon:                     daemon,
 				Port:                       port,
 				Args:                       d.Args,
-				StartupBindDeadlineSeconds: d.StartupBindDeadlineSeconds,
-			}, runtimeState, time.Now().UTC(), livenessProbe, supervisorStartupBindDeadline(d))
+				StartupBindDeadlineSeconds: deadlineSecs,
+			}, runtimeState, time.Now().UTC(), livenessProbe, time.Duration(deadlineSecs)*time.Second)
 			// port_owner_unverified is a probe ERROR (e.g. netstat blocked),
 			// not a restart: the liveness sweep deliberately only observes it
 			// (no EvManualRestart), so the status must not report "Restarting"
