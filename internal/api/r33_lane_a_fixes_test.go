@@ -181,6 +181,55 @@ func TestSelectSupervisorOwnedTargets_HyphenatedDaemon_ExactNameMatch(t *testing
 	}
 }
 
+// TestSelectSupervisorOwnedTargets_CorruptGlobalArgvFailsClosed is bot PR #505 r6:
+// a PARTIAL/corrupt global argv (`daemon --server demo`, no --daemon) is
+// owner-rejected. selectSupervisorOwnedTargets must NOT fall back to the ambiguous
+// canonical task-name match — `mcphub restart` / `stop --force` on the ambiguous
+// name would otherwise respawn/kill a descriptor whose argv proves it is out of the
+// requested scope. Fail closed for BOTH colliding sibling queries.
+func TestSelectSupervisorOwnedTargets_CorruptGlobalArgvFailsClosed(t *testing.T) {
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-demo-alpha-beta`, Args: []string{"daemon", "--server", "demo"}, Port: 19010},
+		},
+	}
+	if got := selectSupervisorOwnedTargets(intent, "demo", "alpha-beta"); len(got) != 0 {
+		t.Fatalf("corrupt global argv selected %d targets for (demo, alpha-beta), want 0 (fail closed)", len(got))
+	}
+	if got := selectSupervisorOwnedTargets(intent, "demo-alpha", "beta"); len(got) != 0 {
+		t.Fatalf("corrupt global argv selected %d targets for sibling (demo-alpha, beta), want 0", len(got))
+	}
+
+	// commission PR #505 r6 P1: a FULLY-POPULATED row whose fields contradict its
+	// launch argv must not be selected by its stale field — restart/stop must not act
+	// on a descriptor whose argv proves it belongs elsewhere.
+	lyingIntent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-memory-default`, Server: "memory", Daemon: "default",
+				Args: []string{"daemon", "--server", "time", "--daemon", "default"}, Port: 19011},
+		},
+	}
+	if got := selectSupervisorOwnedTargets(lyingIntent, "memory", "default"); len(got) != 0 {
+		t.Fatalf("populated field/argv-contradicting row selected %d for (memory,default), want 0 (fail closed)", len(got))
+	}
+	if got := selectSupervisorOwnedTargets(lyingIntent, "memory", ""); len(got) != 0 {
+		t.Fatalf("server-only restart selected %d for the lying memory row, want 0 (DescriptorServerName='' on --server mismatch)", len(got))
+	}
+	// A well-formed populated row still selects (common-path neutral).
+	okIntent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{TaskName: `\mcp-local-hub-memory-default`, Server: "memory", Daemon: "default",
+				Args: []string{"daemon", "--server", "memory", "--daemon", "default"}, Port: 19012},
+		},
+	}
+	if got := selectSupervisorOwnedTargets(okIntent, "memory", "default"); len(got) != 1 {
+		t.Fatalf("well-formed populated row selected %d for (memory,default), want 1 (no common-path regression)", len(got))
+	}
+}
+
 // TestSelectSupervisorOwnedTargets_PopulatedFieldsDisambiguateHyphenSplit is the
 // FIX 2 negative control proper: a POPULATED-field row whose identity is
 // server=demo-alpha / daemon=beta must match ONLY the (demo-alpha, beta) query

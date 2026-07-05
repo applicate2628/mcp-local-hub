@@ -52,51 +52,38 @@ func selectSupervisorOwnedTargets(intent *SupervisorIntentFile, server, daemonFi
 		}
 		rowServer := strings.TrimSpace(d.Server)
 		rowDaemon := strings.TrimSpace(d.Daemon)
-		// Both identity components KNOWN + blank descriptor fields: match by the
-		// EXACT canonical task name, never by ParseManagedTaskName. The last-hyphen
-		// split misattributes hyphenated daemon names — \mcp-local-hub-demo-alpha-beta
-		// (server demo, daemon alpha-beta) parses as server demo-alpha / daemon beta,
-		// so the (server,daemonFilter) filter below would skip the real target or
-		// hit the wrong one. Mirrors supervisorIntentRowMatchesServerDaemon
-		// (install.go — bot PR #288 r26, third member of the r19-F1/r20-F4 family).
-		if server != "" && daemonFilter != "" && (rowServer == "" || rowDaemon == "") {
-			// Prefer the OWNER's argv-recovered identity: the process spawns from its
-			// args, and the canonical task name is AMBIGUOUS (demo/alpha-beta and
-			// demo-alpha/beta reconstruct the same \mcp-local-hub-demo-alpha-beta).
-			// A row the owner can't resolve (no --server/--daemon args) falls back to
-			// the canonical-task-name match (bot PR #505; F5 no longer heals fields).
-			if rs, rd, ok := DescriptorServerDaemon(d); ok {
+		// PAIR-scoped (server + daemonFilter both KNOWN): resolve identity through
+		// the single owner for EVERY row — blank OR fully-populated — so a Server/
+		// Daemon field that CONTRADICTS the launch argv fails closed instead of
+		// selecting a descriptor its own argv proves is out of scope (commission PR
+		// #505 r6 P1). A well-formed populated row resolves IdentityFromArgvOrField
+		// (byte-identical to the old field compare); a TRUE task-name-only row uses
+		// the exact canonical name (the last-hyphen split misattributes hyphenated
+		// daemons: \mcp-local-hub-demo-alpha-beta is demo/alpha-beta, not
+		// demo-alpha/beta); a corrupt global argv → default → fail closed.
+		if server != "" && daemonFilter != "" {
+			switch rs, rd, src := ResolveDescriptorMatchIdentity(d); src {
+			case IdentityFromArgvOrField:
 				if rs == server && rd == daemonFilter {
 					d.TaskName = normalizeSupervisorRestartTaskName(d.TaskName)
 					targets = append(targets, d)
 				}
-				continue
+			case IdentityTaskNameSafe:
+				if canonicalIntentTaskKey(d.TaskName) == canonicalIntentTaskKey("mcp-local-hub-"+server+"-"+daemonFilter) {
+					d.TaskName = normalizeSupervisorRestartTaskName(d.TaskName)
+					targets = append(targets, d)
+				}
+			default:
+				// CorruptGlobalArgv + any future IdentitySource → fail closed.
 			}
-			want := canonicalIntentTaskKey("mcp-local-hub-" + server + "-" + daemonFilter)
-			if canonicalIntentTaskKey(d.TaskName) != want {
-				continue
-			}
-			d.TaskName = normalizeSupervisorRestartTaskName(d.TaskName)
-			targets = append(targets, d)
 			continue
 		}
-		// r36-3 (bot r35-3): the SERVER-ONLY case (daemonFilter=="") with a
-		// blank-field row never had an exact-name arm — it fell straight to the
-		// ParseManagedTaskName last-hyphen split below, which for
-		// \mcp-local-hub-demo-alpha-beta derives rowServer="demo-alpha" and the
-		// `rowServer != server` filter then WRONGLY skips the real demo target.
-		// Decide ownership with the longest-installed-prefix disambiguator
-		// instead: claim the blank row for `server` only when no longer-installed
-		// hyphen sibling owns it (mirrors supervisorIntentRowOwnedByScope Arm 2).
-		// Kept ahead of the ParseManagedTaskName fallback so the lossy split never
-		// runs for this case; the both-args exact branch above and the
-		// populated-field path below are unchanged.
-		if server != "" && daemonFilter == "" && (rowServer == "" || rowDaemon == "") {
-			// Prefer the argv-recovered server: the process spawns from `--server X`,
-			// authoritative over the task-name longest-prefix disambiguator, which
-			// would otherwise let an installed sibling (demo-alpha) claim a demo row
-			// now that F5 no longer heals the field (bot PR #505). A row with no
-			// --server arg falls back to the longest-prefix rule.
+		// SERVER-scoped (daemonFilter==""): the permissive owner DescriptorServerName
+		// — a partial `--server X` still resolves the server, and a POPULATED Server
+		// that CONTRADICTS the argv returns "" (fails closed, r6 P1). Handles every
+		// row (blank or populated); only the unfiltered server=="" case falls to the
+		// general filter below.
+		if server != "" {
 			if rs := DescriptorServerName(d); rs != "" {
 				if rs != server {
 					continue
@@ -105,17 +92,19 @@ func selectSupervisorOwnedTargets(intent *SupervisorIntentFile, server, daemonFi
 				targets = append(targets, d)
 				continue
 			}
-			if !blankServerRowOwnedByLongestInstalledPrefix(d.TaskName, server, installedServers) {
+			// DescriptorServerName=="" → a corrupt global argv (--server mismatch or
+			// no --server) fails closed; a proxy / non-daemon-shaped row falls to the
+			// longest-installed-prefix disambiguator (mirrors supervisorIntentRowOwnedByScope).
+			if DescriptorHasGlobalDaemonArgv(d) || !blankServerRowOwnedByLongestInstalledPrefix(d.TaskName, server, installedServers) {
 				continue
 			}
 			d.TaskName = normalizeSupervisorRestartTaskName(d.TaskName)
 			targets = append(targets, d)
 			continue
 		}
-		// Populated-field rows, and the single-arg (server-only / unfiltered)
-		// callers, keep the existing identity-derivation + filter. ParseManagedTaskName
-		// only runs when at least one filter side is empty, so a hyphenated-daemon
-		// mis-split can no longer reject the exact target above.
+		// Unfiltered (server==""): restart-all. Keep the existing identity-derivation
+		// + filter. ParseManagedTaskName only runs when a filter side is empty; with
+		// server=="" there is no server misattribution risk.
 		if rowServer == "" || rowDaemon == "" {
 			parsedServer, parsedDaemon := ParseManagedTaskName(d.TaskName)
 			if rowServer == "" {

@@ -43,6 +43,41 @@ func TestSupervisorStatusPortEnrichedViaOwner(t *testing.T) {
 	}
 }
 
+// TestSupervisorStatusPortResolvedForPartialArgvCompletedByField is commission PR
+// #505 r6b P1: a well-formed row whose PARTIAL argv (`daemon --server memory`, no
+// --daemon) is COMPLETED by its populated Daemon field must still resolve its
+// manifest port. An earlier r6 revision rebuilt the status effDesc without the
+// fields and refused to reattach them for any global argv, regressing this shape to
+// port 0; the fix copies the whole row (like gui/daemon_env.go) and only gates the
+// overwrite.
+func TestSupervisorStatusPortResolvedForPartialArgvCompletedByField(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	task := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{{
+		TaskName: task,
+		Server:   "memory",
+		Daemon:   "default", // completes the missing --daemon
+		Args:     []string{"daemon", "--server", "memory"},
+		Port:     0,
+	}}}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(task, 600003, time.Now().UTC().Add(-time.Hour))
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	if err != nil {
+		t.Fatalf("supervisorStatusDaemons: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0]["port"] != 9123 {
+		t.Fatalf("row port = %v, want 9123 (partial argv completed by the populated Daemon field must resolve — r6b P1 regression guard)", rows[0]["port"])
+	}
+}
+
 // TestSupervisorStatusIdentityRecoveredViaOwnerForHyphenatedDaemon is the bot
 // PR #505 guard: a legacy blank-field row whose args carry a hyphenated
 // server+daemon (mcp-language-server / vscode-css) must recover identity via the

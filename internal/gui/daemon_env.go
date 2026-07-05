@@ -285,17 +285,18 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 		// returned (0,false) because the owner refuses task-name parsing (bot PR #505
 		// r5 F1; mirrors the status path).
 		//
-		// A daemon-shaped argv (`daemon --server… --daemon…` global, or a `daemon
-		// <kind>…` proxy) is the OWNER'S authority: its own DescriptorServerDaemon /
-		// descriptorArgPort accept-or-reject must stand. Overriding it with the
-		// task-name split would paper over a PARTIAL/corrupt daemon argv — e.g.
-		// `daemon --server time` with no --daemon, which the owner rejects — and
-		// display a spurious manifest port (codex PR #505 r5 P3). A full-argv legacy
-		// row still resolves fine WITHOUT synthesis (the owner recovers identity from
-		// its own args), and a proxy row resolves via its `--port` arg, so narrowing
-		// the synthesis costs nothing for the well-formed shapes.
+		// A GLOBAL daemon argv (`daemon --server… --daemon…`) is the OWNER'S
+		// authority: its own DescriptorServerDaemon accept-or-reject must stand.
+		// Overriding it with the task-name split would paper over a PARTIAL/corrupt
+		// global argv — e.g. `daemon --server time` with no --daemon, which the owner
+		// rejects — and display a spurious manifest port (codex PR #505 r5 P3). Gated
+		// on the single owner predicate (r6): a well-formed global resolves via its
+		// own args (no synthesis needed), a proxy row via its `--port` arg, and a true
+		// task-name-only row via the synthesized identity — so the synthesis costs
+		// nothing for the well-formed shapes and never fabricates a port for a corrupt
+		// global.
 		effDesc := d
-		if len(d.Args) == 0 || d.Args[0] != "daemon" {
+		if !api.DescriptorHasGlobalDaemonArgv(d) {
 			effDesc.Server = server
 			effDesc.Daemon = daemonName
 		}

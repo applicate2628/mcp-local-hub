@@ -173,6 +173,29 @@ func TestSupervisorIntentManagedServerSignals_PopulatedServerPathUnchanged(t *te
 	}
 }
 
+// TestSupervisorIntentManagedServerSignals_PopulatedLyingFieldFailsClosed is
+// commission PR #505 r6b: a fully-populated row whose Server field CONTRADICTS its
+// launch argv must NOT publish its stale field as a managed-server signal (the
+// signal gates hub client-config reconcile writes — a publish decision).
+func TestSupervisorIntentManagedServerSignals_PopulatedLyingFieldFailsClosed(t *testing.T) {
+	stateDir, _ := setupWatchdogTestHelper(t)
+	writeSetupHyphenIntent(t, stateDir, api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-memory-default`,
+		Server:   "memory", Daemon: "default",
+		Args: []string{"daemon", "--server", "time", "--daemon", "default"},
+	})
+	got, err := supervisorIntentManagedServerSignals()
+	if err != nil {
+		t.Fatalf("supervisorIntentManagedServerSignals: %v", err)
+	}
+	if _, ok := got["memory"]; ok {
+		t.Fatalf("lying row (field memory, argv --server time) must NOT publish 'memory' signal; got %v (r6b)", got)
+	}
+	if _, ok := got["time"]; ok {
+		t.Fatalf("lying row must not publish the argv 'time' as an installed-server signal either; got %v", got)
+	}
+}
+
 // TestShouldRemoveGlobalWatchdog_BlankServerHyphenatedTask_GateDecidesByRealOwner
 // is the falsifying regression for r37-1b. Uninstalling "demo" when the only
 // remaining real scheduler task is \mcp-local-hub-demo-alpha-beta (real server

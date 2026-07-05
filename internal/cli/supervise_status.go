@@ -133,16 +133,21 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 		// Resolve the EFFECTIVE port + first-bind deadline through the owner. A
 		// Port=0 descriptor (PR #211-and-earlier installs wrote Port=0 for every
 		// daemon) shows its manifest port instead of "—"; a Port>0 row short-
-		// circuits. The derived server/daemon (parsed from the task name when the
-		// intent fields are blank) is threaded into the descriptor so a blank-field
-		// row still resolves.
-		effDesc := api.SupervisorDaemon{
-			TaskName:                   d.TaskName,
-			Server:                     server,
-			Daemon:                     daemon,
-			Port:                       d.Port,
-			Args:                       d.Args,
-			StartupBindDeadlineSeconds: d.StartupBindDeadlineSeconds,
+		// circuits.
+		//
+		// Copy the WHOLE row (mirrors gui/daemon_env.go) so a populated field that a
+		// partial argv COMPLETES (`{Server:memory,Daemon:default,Args:[daemon --server
+		// memory]}`) keeps its Daemon field and resolves the manifest port — rebuilding
+		// effDesc without the fields dropped that completion and regressed the port to
+		// 0 (commission fable r6b P1). Then OVERWRITE Server/Daemon with the
+		// task-name-recovered identity ONLY when it is SAFE (not a corrupt/partial
+		// GLOBAL argv): for a corrupt global the kept fields still disagree with the
+		// args, so the owner fails closed and reports an HONEST port 0 rather than
+		// fabricating a manifest port for a malformed row.
+		effDesc := d
+		if !api.DescriptorHasGlobalDaemonArgv(d) {
+			effDesc.Server = server
+			effDesc.Daemon = daemon
 		}
 		port, deadlineSecs, _ := portResolver.Resolve(effDesc)
 		stalePID := 0

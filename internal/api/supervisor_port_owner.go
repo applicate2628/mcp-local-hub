@@ -114,6 +114,26 @@ func IsWorkspaceLSPProxyDescriptor(d SupervisorDaemon) bool {
 	return len(d.Args) >= 2 && d.Args[0] == "daemon" && d.Args[1] == "workspace-proxy"
 }
 
+// DescriptorHasGlobalDaemonArgv reports whether d's argv is a GLOBAL
+// `mcphub daemon --server X --daemon Y` launch — the ONLY shape whose argv
+// ASSERTS the authoritative (server, daemon) identity DescriptorServerDaemon
+// parses. It is the discriminator for the round-6 leak class: when
+// DescriptorServerDaemon returns ok=false AND this returns true, the argv is a
+// PARTIAL/corrupt global (a `daemon --server X` with no --daemon, or a field/argv
+// mismatch) whose launch truth CONTRADICTS the ambiguous task-name split — so a
+// task-name fallback is UNSAFE and the consumer must fail closed. The proxy shapes
+// are daemon-shaped but legitimately carry no --daemon identity (their daemon is a
+// dynamic workspace key), so they are EXCLUDED: a fieldless proxy row MUST stay
+// recoverable by its task name, which its own owner paths (DescriptorServerName,
+// descriptorArgPort, Is*ProxyDescriptor) depend on. It is the owner-package home of
+// cli's isGlobalDaemonDescriptor (which re-exports it), so "is a global daemon
+// argv" is single-owned and the port-resolve, squatter-classify, and match-select
+// sides can never drift on the shape (PR #505 r5 F3 lesson).
+func DescriptorHasGlobalDaemonArgv(d SupervisorDaemon) bool {
+	return len(d.Args) >= 1 && d.Args[0] == "daemon" &&
+		!IsSerenaProxyDescriptor(d) && !IsWorkspaceLSPProxyDescriptor(d)
+}
+
 // descriptorArgPort returns the `--port` value from a `daemon …` descriptor's
 // args, or 0 when absent/unparseable. It is the launch-truth port for the proxy
 // shapes (workspace-proxy, serena-proxy) whose dynamic daemon name is not in a
@@ -339,4 +359,51 @@ func DescriptorServerDaemon(d SupervisorDaemon) (server, daemon string, ok bool)
 		return "", "", false
 	}
 	return server, daemon, true
+}
+
+// IdentitySource classifies WHY a descriptor's (server, daemon) pair did or did
+// not resolve from argv/fields, so a match/select consumer can react correctly
+// instead of collapsing every DescriptorServerDaemon miss into a task-name
+// fallback (the round-6 leak class).
+type IdentitySource int
+
+const (
+	// IdentityFromArgvOrField — the authoritative (server, daemon) resolved from
+	// the struct fields and/or the `--server`/`--daemon` argv tokens. Use it.
+	IdentityFromArgvOrField IdentitySource = iota
+	// IdentityCorruptGlobalArgv — a GLOBAL `daemon …` argv is present but
+	// DescriptorServerDaemon rejected it (partial: no --daemon; or a field/argv
+	// mismatch). The argv is launch truth and CONTRADICTS the ambiguous task-name
+	// split, so the consumer MUST fail closed — never fall back to the task name
+	// (bot PR #505 r6: install-preflight self-owned-port bypass, status wrong-port
+	// probe, restart/stop out-of-scope kill).
+	IdentityCorruptGlobalArgv
+	// IdentityTaskNameSafe — no GLOBAL daemon argv asserts an identity to
+	// contradict (a true task-name-only row, OR a proxy shape whose real identity
+	// comes from its own owner paths). The consumer's task-name recovery
+	// (ParseManagedTaskName + its own exact-name / longest-installed-prefix
+	// disambiguator) is safe here.
+	IdentityTaskNameSafe
+)
+
+// ResolveDescriptorMatchIdentity folds the round-6 decision into ONE owner call so
+// no PAIR consumer (a consumer that matches/selects on a full (server, daemon)
+// identity) re-implements the unsafe `DescriptorServerDaemon ok==false →
+// task-name fallback` pattern. It returns the CLASSIFICATION, not a forced match:
+// match semantics legitimately differ across consumers (exact canonical-name vs
+// longest-installed-prefix vs display), so each switches on the source and applies
+// its own recovery only for IdentityTaskNameSafe.
+//
+// SERVER-ONLY consumers (which resolve a server alone and must stay MORE permissive
+// — a partial `daemon --server demo` with no --daemon SHOULD still restart under
+// `mcphub restart demo`) do NOT use this; they keep DescriptorServerName and gate
+// only their downstream longest-prefix fallback on !DescriptorHasGlobalDaemonArgv.
+func ResolveDescriptorMatchIdentity(d SupervisorDaemon) (server, daemon string, source IdentitySource) {
+	if s, dm, ok := DescriptorServerDaemon(d); ok {
+		return s, dm, IdentityFromArgvOrField
+	}
+	if DescriptorHasGlobalDaemonArgv(d) {
+		return "", "", IdentityCorruptGlobalArgv
+	}
+	return "", "", IdentityTaskNameSafe
 }

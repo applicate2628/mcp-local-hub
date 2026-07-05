@@ -665,6 +665,48 @@ func TestSupervisorIntentRowMatchesServerDaemon_ArgvDisambiguatesAmbiguousCanoni
 	if !supervisorIntentRowMatchesServerDaemon(bare, "demo", "alpha-beta") {
 		t.Fatal("argv-less blank row must still match via canonical task name (r26 fallback)")
 	}
+	// bot PR #505 r6: a PARTIAL/corrupt global argv (`daemon --server demo`, no
+	// --daemon) is owner-rejected. It must NOT fall back to the ambiguous canonical
+	// task-name match — otherwise a sibling's preflight claims the live daemon's port
+	// as self-owned and bypasses a real port collision. Fail closed for BOTH siblings.
+	corrupt := SupervisorDaemon{
+		TaskName: `\mcp-local-hub-demo-alpha-beta`,
+		Args:     []string{"daemon", "--server", "demo"}, // partial: no --daemon
+	}
+	if supervisorIntentRowMatchesServerDaemon(corrupt, "demo", "alpha-beta") {
+		t.Fatal("corrupt/partial global argv must NOT match demo/alpha-beta via task name (fail closed)")
+	}
+	if supervisorIntentRowMatchesServerDaemon(corrupt, "demo-alpha", "beta") {
+		t.Fatal("corrupt/partial global argv must NOT match sibling demo-alpha/beta either")
+	}
+	// commission PR #505 r6 P1: a FULLY-POPULATED row whose fields CONTRADICT its
+	// launch argv (a lying cache) must fail closed — the match no longer trusts the
+	// stale field. Fields say memory/default; argv says time/default.
+	lying := SupervisorDaemon{
+		TaskName: `\mcp-local-hub-memory-default`,
+		Server:   "memory", Daemon: "default",
+		Args: []string{"daemon", "--server", "time", "--daemon", "default"},
+	}
+	if supervisorIntentRowMatchesServerDaemon(lying, "memory", "default") {
+		t.Fatal("populated field/argv-contradicting row must NOT match its stale field memory/default (fail closed, r6 P1)")
+	}
+	if supervisorIntentRowMatchesServerDaemon(lying, "time", "default") {
+		t.Fatal("populated field/argv-contradicting row must NOT match the argv identity either (corrupt → no match)")
+	}
+	// A well-formed populated row still matches (common-path neutral).
+	wellFormed := SupervisorDaemon{
+		TaskName: `\mcp-local-hub-memory-default`,
+		Server:   "memory", Daemon: "default",
+		Args: []string{"daemon", "--server", "memory", "--daemon", "default"},
+	}
+	if !supervisorIntentRowMatchesServerDaemon(wellFormed, "memory", "default") {
+		t.Fatal("well-formed populated row must still match memory/default (dropping the blank-field gate must be common-path neutral)")
+	}
+	// A populated row with EMPTY Args (legacy) still matches on its fields.
+	legacyNoArgs := SupervisorDaemon{TaskName: `\mcp-local-hub-memory-default`, Server: "memory", Daemon: "default"}
+	if !supervisorIntentRowMatchesServerDaemon(legacyNoArgs, "memory", "default") {
+		t.Fatal("populated empty-Args legacy row must still match on its fields")
+	}
 }
 
 // TestPortHeldBySupervisorIntentDaemon_Port0StdioBridgeRecognized is the

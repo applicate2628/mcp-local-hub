@@ -288,6 +288,109 @@ func TestSupervisorIntentRowOwnedByScope_LegacyFallbackArms(t *testing.T) {
 	})
 }
 
+// TestSupervisorIntentRowOwnedByScope_ArgvVetoPreventsSiblingReap is commission PR
+// #505 r6 F1: the install/uninstall REAP-on-reinstall ownership predicate must not
+// claim a blank-Server row whose LAUNCH ARGV names a DIFFERENT server, even when the
+// row's ambiguous canonical task name is in the reaping scope's manifest task set.
+// `mcphub uninstall demo-alpha` reaping demo's live `--server demo` daemon is the
+// bug. The argv veto only SUBTRACTS — it never grants a claim the arms would refuse.
+func TestSupervisorIntentRowOwnedByScope_ArgvVetoPreventsSiblingReap(t *testing.T) {
+	// Scope mirroring `uninstall demo-alpha` (daemon beta) with demo + demo-alpha
+	// both installed. The task \mcp-local-hub-demo-alpha-beta IS in demo-alpha's
+	// manifest task set (its daemon is `beta`), so Arm 1 alone would claim it.
+	scope := &supervisorIntentOwnershipScope{legacyPrefixFallback: true}
+	scope.addTaskName("mcp-local-hub-demo-alpha-beta")
+	scope.addInstalledServer("demo")
+	scope.addInstalledServer("demo-alpha")
+
+	// The row's argv unambiguously says server=demo. demo-alpha must NOT reap it.
+	demoRow := SupervisorDaemon{
+		TaskName: `\mcp-local-hub-demo-alpha-beta`,
+		Args:     []string{"daemon", "--server", "demo", "--daemon", "alpha-beta"},
+	}
+	if supervisorIntentRowOwnedByScope(demoRow, "demo-alpha", scope) {
+		t.Fatal("uninstall demo-alpha must NOT reap demo's live daemon (argv says --server demo) — veto failed")
+	}
+
+	// Same row under DEMO's own scope IS owned (argv agrees → arms claim it).
+	demoScope := &supervisorIntentOwnershipScope{legacyPrefixFallback: true}
+	demoScope.addTaskName("mcp-local-hub-demo-alpha-beta")
+	demoScope.addInstalledServer("demo")
+	demoScope.addInstalledServer("demo-alpha")
+	if !supervisorIntentRowOwnedByScope(demoRow, "demo", demoScope) {
+		t.Fatal("demo's own scope must still own its --server demo row (veto must never subtract an argv-agreeing claim)")
+	}
+
+	// A partial/corrupt global argv (--server demo, no --daemon) is also vetoed for
+	// the sibling scope.
+	corruptRow := SupervisorDaemon{
+		TaskName: `\mcp-local-hub-demo-alpha-beta`,
+		Args:     []string{"daemon", "--server", "demo"},
+	}
+	if supervisorIntentRowOwnedByScope(corruptRow, "demo-alpha", scope) {
+		t.Fatal("partial global argv (--server demo) must not be reaped under demo-alpha's scope")
+	}
+
+	// commission PR #505 r6b: a FULLY-POPULATED row whose Server field CONTRADICTS
+	// its launch argv must not be reaped by its stale field either — the reap path
+	// obeys the same launch-truth rule as match/select.
+	lying := SupervisorDaemon{
+		TaskName: `\mcp-local-hub-memory-default`,
+		Server:   "memory", Daemon: "default",
+		Args: []string{"daemon", "--server", "time", "--daemon", "default"},
+	}
+	if supervisorIntentRowOwnedByScope(lying, "memory", scope) {
+		t.Fatal("populated lying row (field memory, argv --server time) must NOT be reaped under uninstall memory (r6b)")
+	}
+	// A well-formed populated row is still owned (common-path neutral).
+	wellFormed := SupervisorDaemon{
+		TaskName: `\mcp-local-hub-memory-default`,
+		Server:   "memory", Daemon: "default",
+		Args: []string{"daemon", "--server", "memory", "--daemon", "default"},
+	}
+	if !supervisorIntentRowOwnedByScope(wellFormed, "memory", scope) {
+		t.Fatal("well-formed populated memory row must still be owned by memory (dropping the field short-circuit is common-path neutral)")
+	}
+}
+
+// TestMaintenanceTimerOwnedBy_ArgvVetoPreventsSiblingDrop is the maintenance-timer
+// twin of the reap-leak veto (commission PR #505 r6 Q5): a blank-Server timer whose
+// argv `restart --server demo` names demo must not be dropped when a hyphen sibling
+// (demo-alpha) is uninstalled, and must be owned by demo.
+func TestMaintenanceTimerOwnedBy_ArgvVetoPreventsSiblingDrop(t *testing.T) {
+	tm := MaintenanceTimer{
+		Name: `\mcp-local-hub-demo-alpha-weekly-refresh`,
+		Kind: "server-weekly-refresh",
+		Args: []string{"restart", "--server", "demo-alpha"},
+	}
+	if maintenanceTimerOwnedBy(tm, "demo") {
+		t.Fatal("a demo-alpha timer (argv --server demo-alpha) must NOT be owned by demo via the ambiguous task-name split")
+	}
+	if !maintenanceTimerOwnedBy(tm, "demo-alpha") {
+		t.Fatal("the timer's argv names demo-alpha — it must be owned by demo-alpha")
+	}
+	// A populated Server field that disagrees is not claimed by task name.
+	populated := MaintenanceTimer{Name: `\mcp-local-hub-demo-weekly-refresh`, Kind: "server-weekly-refresh", Server: "other"}
+	if maintenanceTimerOwnedBy(populated, "demo") {
+		t.Fatal("populated Server=other timer must not be owned by demo")
+	}
+	// commission PR #505 r6b: a POPULATED timer whose Server field CONTRADICTS its
+	// argv fails closed — owned by NEITHER the stale field nor the argv server
+	// (consistent with the SupervisorDaemon reap rule).
+	lying := MaintenanceTimer{Name: `\mcp-local-hub-demo-alpha-weekly-refresh`, Kind: "server-weekly-refresh", Server: "demo-alpha", Args: []string{"restart", "--server", "demo"}}
+	if maintenanceTimerOwnedBy(lying, "demo-alpha") {
+		t.Fatal("lying timer (field demo-alpha, argv --server demo) must not be owned by its stale field demo-alpha (r6b)")
+	}
+	if maintenanceTimerOwnedBy(lying, "demo") {
+		t.Fatal("lying timer (field/argv mismatch) must fail closed — not owned by demo either")
+	}
+	// A well-formed populated timer (field agrees with argv) is still owned.
+	wf := MaintenanceTimer{Name: `\mcp-local-hub-demo-weekly-refresh`, Kind: "server-weekly-refresh", Server: "demo", Args: []string{"restart", "--server", "demo"}}
+	if !maintenanceTimerOwnedBy(wf, "demo") {
+		t.Fatal("well-formed populated timer must still be owned by demo (common-path neutral)")
+	}
+}
+
 // TestSupervisorIntentOwnershipScopeForManifest_PopulatesInstalledSet confirms
 // the full-cleanup scope builder enables the fallback and captures the
 // installed-server catalog from the manifest-dir override.

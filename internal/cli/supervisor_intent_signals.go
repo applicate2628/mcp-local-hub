@@ -36,18 +36,18 @@ func supervisorIntentManagedServerSignals() (map[string]struct{}, error) {
 		if taskName != "" && api.IsMaintenanceTaskName(taskName) {
 			continue
 		}
-		server := strings.TrimSpace(d.Server)
-		if server == "" {
-			// Blank-Server legacy row. Prefer the OWNER's argv-recovered server (the
-			// process spawns from `--server X`), which is authoritative and unambiguous
-			// for a hyphenated daemon name — F5 no longer heals the Server field on
-			// restart (bot PR #505). Only when the args carry no --server (a
-			// non-daemon-shaped row) fall back to the longest-installed-prefix rule,
-			// which mis-attributes a hyphenated daemon via ServerFromTaskName's
-			// last-hyphen split otherwise. ok=false there → the taskName fallback below.
-			if rs := api.DescriptorServerName(d); rs != "" {
-				server = rs
-			} else if owner, ok := api.ServerOwningTaskByLongestInstalledPrefix(taskName, installed); ok {
+		// Resolve the published server through the OWNER for EVERY row — not just
+		// blank-field ones. DescriptorServerName returns the Server field when it
+		// agrees with (or there is no) `--server` arg, and "" on a field/argv
+		// MISMATCH — so a lying-cache row ({Server:memory, args --server time}) does
+		// NOT publish `memory` (this signal gates hub client-config reconcile writes,
+		// a publish decision, commission PR #505 r6b). Only when the args carry no
+		// --server (a proxy / non-daemon-shaped row) fall back to the
+		// longest-installed-prefix rule; a corrupt global argv (DescriptorServerName==""
+		// but a global daemon argv) fails closed to the taskName signal below.
+		server := api.DescriptorServerName(d)
+		if server == "" && !api.DescriptorHasGlobalDaemonArgv(d) {
+			if owner, ok := api.ServerOwningTaskByLongestInstalledPrefix(taskName, installed); ok {
 				server = owner
 			}
 		}

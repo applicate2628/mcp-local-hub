@@ -286,6 +286,15 @@ func (s *MaintenanceScheduler) SetClock(c func() time.Time) {
 }
 
 func maintenanceTimerIdentityKey(t api.MaintenanceTimer) string {
+	// Prefer the launch-truth argv `--server X` over a possibly-stale/lying Server
+	// field so a timer keys by the server it ACTUALLY restarts (commission PR #505
+	// r6b): a lying-cache timer ({Server:demo-alpha, args restart --server demo})
+	// must key under demo, not demo-alpha. Only the server-weekly-refresh timer
+	// carries `--server`; a workspace timer has none, so this is inert for it and
+	// falls to the field / task-name split below.
+	if as := api.MaintenanceTimerArgvServer(t); as != "" {
+		return t.Kind + ":" + as
+	}
 	if t.Server != "" {
 		return t.Kind + ":" + t.Server
 	}

@@ -2120,24 +2120,29 @@ func supervisorIntentRowMatchesServerDaemon(row SupervisorDaemon, server, daemon
 	if server == "" || daemon == "" {
 		return false
 	}
-	// A blank-field legacy row: prefer the OWNER's argv identity — the process
-	// spawns from `--server`/`--daemon`, so that is authoritative and unambiguous.
-	// The canonical task-name reconstruction is AMBIGUOUS (demo/alpha-beta and
-	// demo-alpha/beta both rebuild \mcp-local-hub-demo-alpha-beta), so a sibling's
-	// preflight would wrongly claim the live daemon's port now that F5 no longer
-	// heals the fields (bot PR #505 r4). Only a row the owner can't resolve (no
-	// --server/--daemon args) falls back to the canonical-task-name match — the
-	// bot PR #288 r26 path for a v0.6 global with no scheduler-task fallback.
-	if row.Server == "" || row.Daemon == "" {
-		if rs, rd, ok := DescriptorServerDaemon(row); ok {
-			return rs == server && rd == daemon
-		}
+	// ALWAYS resolve identity through the owner — INCLUDING a fully-populated row —
+	// so a Server/Daemon field that CONTRADICTS the launch argv (a lying cache) fails
+	// closed instead of matching on the stale field (commission codex/architect PR
+	// #505 r6 P1). A well-formed row (fields agree with argv, empty Args, a proxy
+	// subcommand, or a partial `--server X` completed by the field) resolves
+	// IdentityFromArgvOrField — byte-identical to the old populated field-compare and
+	// the r6 blank-field switch; ONLY a contradicting global argv changes, to
+	// fail-closed. The canonical task-name reconstruction stays reserved for a TRUE
+	// task-name-only row (no daemon argv to contradict it), which is AMBIGUOUS
+	// (demo/alpha-beta and demo-alpha/beta both rebuild \mcp-local-hub-demo-alpha-beta)
+	// — so a corrupt global that DOES carry an argv must never reach it.
+	rs, rd, src := ResolveDescriptorMatchIdentity(row)
+	switch src {
+	case IdentityFromArgvOrField:
+		return rs == server && rd == daemon
+	case IdentityTaskNameSafe:
 		want := canonicalIntentTaskKey("mcp-local-hub-" + server + "-" + daemon)
-		if canonicalIntentTaskKey(row.TaskName) == want {
-			return true
-		}
+		return canonicalIntentTaskKey(row.TaskName) == want
+	default:
+		// CorruptGlobalArgv AND any future IdentitySource → fail closed (F3: never
+		// let an added source fall open into the task-name match).
+		return false
 	}
-	return row.Server == server && row.Daemon == daemon
 }
 
 func supervisorIntentDaemonTaskName(row SupervisorDaemon, server, daemon string) string {

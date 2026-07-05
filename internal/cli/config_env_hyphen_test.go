@@ -88,6 +88,45 @@ func TestResolveConfigEnvTargetsBlankServerHyphenatedDaemonExactMatch(t *testing
 	}
 }
 
+// TestResolveConfigEnvTargetsServerOnlyPermissiveForPartialGlobal is commission PR
+// #505 r6 F2: a partial global row (argv `--server demo`, no --daemon, blank fields)
+// must appear under the SERVER-ONLY selector `demo` — consistent with `restart demo`
+// selecting it. My r6 derivation gate wrongly wiped the server; the F2 split recovers
+// it via the permissive DescriptorServerName.
+func TestResolveConfigEnvTargetsServerOnlyPermissiveForPartialGlobal(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	seedConfigEnvInstalledManifests(t, "demo")
+	seedConfigEnvIntent(t, stateDir, api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-demo-default`,
+		Args:     []string{"daemon", "--server", "demo"}, // partial global: no --daemon
+	})
+	got, err := resolveConfigEnvTargets(stateDir, "demo")
+	if err != nil {
+		t.Fatalf("resolveConfigEnvTargets(demo): %v", err)
+	}
+	if len(got) != 1 || got[0].Server != "demo" {
+		t.Fatalf("server-only 'demo' selected %d targets (want 1, server=demo) for a partial --server demo row: %+v", len(got), got)
+	}
+}
+
+// TestResolveConfigEnvTargetsPopulatedMismatchFailsClosed is commission PR #505 r6
+// P1: a fully-populated row whose fields (memory/default) CONTRADICT its launch argv
+// (--server time) must not be selected/mutated by its stale field.
+func TestResolveConfigEnvTargetsPopulatedMismatchFailsClosed(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	seedConfigEnvInstalledManifests(t, "memory", "time")
+	seedConfigEnvIntent(t, stateDir, api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-memory-default`,
+		Server:   "memory", Daemon: "default",
+		Args: []string{"daemon", "--server", "time", "--daemon", "default"},
+	})
+	if got, err := resolveConfigEnvTargets(stateDir, "memory/default"); err != nil {
+		t.Fatalf("resolveConfigEnvTargets(memory/default): %v", err)
+	} else if len(got) != 0 {
+		t.Fatalf("populated field/argv-mismatch selected %d for memory/default, want 0 (fail closed)", len(got))
+	}
+}
+
 // TestResolveConfigEnvTargetsBlankServerLongerInstalledSiblingOwnsRow pins the
 // other direction of the r31-F1 / r33-2 tension at the config-env layer: when
 // BOTH "demo" and "demo-alpha" are installed, "demo-alpha" is the LONGER prefix

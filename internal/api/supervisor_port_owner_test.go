@@ -333,6 +333,65 @@ func TestProxyShapePredicates_ArgvOnly(t *testing.T) {
 	}
 }
 
+// --- round-6 leak class: global-argv discriminator + match-identity owner ---
+
+// TestDescriptorHasGlobalDaemonArgv pins the proxy-aware discriminator: ONLY a
+// `daemon --server…/--daemon…` global argv (well-formed OR partial/corrupt) is a
+// global daemon argv; the proxy shapes and non-daemon rows are NOT — so a fieldless
+// proxy stays recoverable by task name while a corrupt global fails closed.
+func TestDescriptorHasGlobalDaemonArgv(t *testing.T) {
+	cases := []struct {
+		name string
+		d    SupervisorDaemon
+		want bool
+	}{
+		{"well-formed global", SupervisorDaemon{Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}, true},
+		{"partial global (no --daemon)", SupervisorDaemon{Args: []string{"daemon", "--server", "demo"}}, true},
+		{"bare daemon", SupervisorDaemon{Args: []string{"daemon"}}, true},
+		{"serena-proxy", SupervisorDaemon{Args: []string{"daemon", "serena-proxy", "--server", "serena", "--port", "9150"}}, false},
+		{"workspace-proxy", SupervisorDaemon{Args: []string{"daemon", "workspace-proxy", "--port", "9401", "--workspace", `C:\ws`, "--language", "go"}}, false},
+		{"task-name-only timer", SupervisorDaemon{Args: []string{"workspace-weekly-refresh"}}, false},
+		{"no args", SupervisorDaemon{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DescriptorHasGlobalDaemonArgv(tc.d); got != tc.want {
+				t.Fatalf("DescriptorHasGlobalDaemonArgv = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveDescriptorMatchIdentity pins the 3-way classification a pair consumer
+// switches on: authoritative identity, corrupt-global (fail-closed), or
+// task-name-safe (proxy / true task-name-only row).
+func TestResolveDescriptorMatchIdentity(t *testing.T) {
+	// (a) well-formed → FromArgvOrField.
+	if s, dm, src := ResolveDescriptorMatchIdentity(SupervisorDaemon{
+		Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}); src != IdentityFromArgvOrField || s != "memory" || dm != "default" {
+		t.Fatalf("well-formed = (%q,%q,%v), want (memory,default,FromArgvOrField)", s, dm, src)
+	}
+	// (b) partial global → CorruptGlobalArgv (fail closed).
+	if _, _, src := ResolveDescriptorMatchIdentity(SupervisorDaemon{
+		Args: []string{"daemon", "--server", "demo"}}); src != IdentityCorruptGlobalArgv {
+		t.Fatalf("partial global src = %v, want IdentityCorruptGlobalArgv", src)
+	}
+	// (b') field/argv mismatch → CorruptGlobalArgv.
+	if _, _, src := ResolveDescriptorMatchIdentity(SupervisorDaemon{Server: "memory", Daemon: "default",
+		Args: []string{"daemon", "--server", "time", "--daemon", "default"}}); src != IdentityCorruptGlobalArgv {
+		t.Fatalf("field/argv mismatch src = %v, want IdentityCorruptGlobalArgv", src)
+	}
+	// (c) proxy → TaskNameSafe.
+	if _, _, src := ResolveDescriptorMatchIdentity(SupervisorDaemon{
+		Args: []string{"daemon", "workspace-proxy", "--port", "9401", "--workspace", `C:\ws`, "--language", "go"}}); src != IdentityTaskNameSafe {
+		t.Fatalf("proxy src = %v, want IdentityTaskNameSafe", src)
+	}
+	// (c') true task-name-only → TaskNameSafe.
+	if _, _, src := ResolveDescriptorMatchIdentity(SupervisorDaemon{TaskName: `\mcp-local-hub-time-default`}); src != IdentityTaskNameSafe {
+		t.Fatalf("task-name-only src = %v, want IdentityTaskNameSafe", src)
+	}
+}
+
 // TestEffectiveDaemonPort_FieldlessWorkspaceProxyResolvesArgPort is the F3 root:
 // the owner resolves a fieldless workspace-proxy's LAUNCH-TRUTH `--port` even
 // though its dynamic daemon name is in no manifest and its Server field is blank —
