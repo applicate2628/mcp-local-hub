@@ -87,31 +87,45 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 	rows := make([]map[string]any, 0, len(intent.Daemons))
 	for _, d := range intent.Daemons {
 		taskName := canonicalSupervisorTaskName(d.TaskName)
+		// SERVER: field-first, but fail closed on a real `--server`-flag MISMATCH.
+		// DescriptorServerName returns the Server field when it agrees with (or the row
+		// has no) `--server` FLAG, the flag value when the field is blank, and "" ONLY
+		// on a field/argv `--server` MISMATCH — so it doubles as the mismatch detector.
+		// Critically, this status server feeds the secret-rotation restart bucketing
+		// (`runningByServer` in internal/api/secrets.go): a lying-cache row
+		// ({Server:memory, args --server time}) must NOT display/route as "memory".
+		//   - populated field → keep DescriptorServerName's result: the field if it
+		//     agrees / has no --server flag, "" if it contradicts the flag (fail closed).
+		//   - blank field + --server flag → the flag value.
+		//   - blank field + NO --server flag → task-name recovery. This covers the LEGACY
+		//     POSITIONAL argv shape (`daemon <server>` / `daemon <server> --daemon <d>`,
+		//     e.g. Args ["daemon","memory"]) whose server lives only in the task name —
+		//     the earlier !DescriptorHasGlobalDaemonArgv gate wrongly blocked it because
+		//     that predicate is true for any `daemon …` argv incl. positional (bot #506).
+		resolvedServer := api.DescriptorServerName(d)
 		server := strings.TrimSpace(d.Server)
-		daemon := strings.TrimSpace(d.Daemon)
-		if server == "" || daemon == "" {
-			// Recover a blank identity through the OWNER (args-recovery), NOT
-			// ParseManagedTaskName: the greedy LastIndex('-') task-name split is wrong
-			// for a hyphenated daemon name (e.g. `mcp-language-server` / `vscode-css`),
-			// and pre-filling those wrong fields would DISAGREE with the args and make
-			// DescriptorServerDaemon fail closed → effective port 0 forever now that F5
-			// no longer heals the fields (bot PR #505). The task-name parse is only a
-			// last resort for a non-daemon-shaped row the owner can't resolve.
-			if rs, rd, ok := api.DescriptorServerDaemon(d); ok {
-				if server == "" {
-					server = rs
-				}
-				if daemon == "" {
-					daemon = rd
-				}
-			}
+		if server != "" {
+			server = resolvedServer // keep-if-agrees / "" on --server-flag mismatch
+		} else if resolvedServer != "" {
+			server = resolvedServer // blank field + --server flag
+		} else {
+			parsedServer, _ := api.ParseManagedTaskName(taskName)
+			server = parsedServer // positional / true task-name-only row
 		}
-		if server == "" || daemon == "" {
-			parsedServer, parsedDaemon := api.ParseManagedTaskName(taskName)
-			if server == "" {
-				server = parsedServer
-			}
-			if daemon == "" {
+		// DAEMON: field-first, recovering a BLANK field via the owner args then the
+		// task name. A populated Daemon field is PRESERVED (bot #506 P2) — the daemon
+		// column within a resolved server is secondary, and a corrupt row cannot be
+		// restarted regardless (the pair restart selector fails closed on the
+		// field/argv mismatch), so a populated-daemon-that-contradicts-its-argv is a
+		// fail-safe display residual, not an outcome bug. The positional shape recovers
+		// its daemon from the task name (DescriptorServerDaemon fails without a --server
+		// flag, then ParseManagedTaskName splits \mcp-local-hub-<server>-<daemon>).
+		daemon := strings.TrimSpace(d.Daemon)
+		if daemon == "" {
+			if _, rd, ok := api.DescriptorServerDaemon(d); ok {
+				daemon = rd
+			} else {
+				_, parsedDaemon := api.ParseManagedTaskName(taskName)
 				daemon = parsedDaemon
 			}
 		}
