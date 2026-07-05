@@ -341,6 +341,21 @@ func TestClassifyPortSquatter_LSPWorkspaceProxy(t *testing.T) {
 			t.Fatalf("verdict = %v, want squatterForeign (unknown descriptor shape fails closed)", v)
 		}
 	})
+	// bot PR #505 r5 F3: a FIELDLESS legacy workspace-proxy row (Server=="",
+	// Daemon=="" — the shape F5's identity-heal used to fix) whose port the owner
+	// resolves from argv must ALSO be reapable. Before the classifier went argv-only
+	// it fell to the global-daemon arm, DescriptorServerDaemon failed (no
+	// --server/--daemon), and a lost own-child squatting the port was observed-Foreign
+	// forever → EADDRINUSE wedge. It must now classify own-task like the field-set row.
+	t.Run("fieldless legacy workspace-proxy own task", func(t *testing.T) {
+		fieldless := d
+		fieldless.Server = ""
+		fieldless.Daemon = ""
+		set(joinCmdLine(append([]string{fieldless.Command}, fieldless.Args...)))
+		if v, _ := classifyPortSquatter(fieldless, owner, 1, nil); v != squatterOwnTask {
+			t.Fatalf("verdict = %v, want squatterOwnTask (fieldless workspace-proxy is argv-classified, F3)", v)
+		}
+	})
 }
 
 func TestClassifyPortSquatter_Gate1SelfAndOwnChild(t *testing.T) {

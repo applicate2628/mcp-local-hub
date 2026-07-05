@@ -2898,21 +2898,30 @@ func overlayKeySet(overlay map[string]string) []string {
 // intent-path env-channel injection share, so they can never diverge on what
 // counts as a serena-proxy row.
 func isSerenaProxyDescriptor(d api.SupervisorDaemon) bool {
-	return len(d.Args) >= 2 && d.Args[0] == "daemon" && d.Args[1] == "serena-proxy"
+	return api.IsSerenaProxyDescriptor(d)
 }
 
 // isLSPWorkspaceProxyDescriptor reports whether a SupervisorDaemon descriptor is
-// a workspace-scoped LSP proxy row, identified by Server == "mcp-language-server"
-// AND its wrapper argv carrying the `daemon workspace-proxy` subcommand (the
-// shape api.BuildSupervisorDaemonForLSP emits:
+// a workspace-scoped LSP proxy row, identified from ARGV ALONE by its wrapper
+// carrying the `daemon workspace-proxy` subcommand (the shape
+// api.BuildSupervisorDaemonForLSP emits:
 // `daemon workspace-proxy --port … --workspace … --language …`). Serena-proxy
 // rows (`daemon serena-proxy …`) and global/legacy daemon rows
 // (`daemon --server … --daemon …`) return false. This is the single
 // classification the reconcile orphan-exclusion guard uses, so it can never
 // diverge from the descriptor the LSP register/unregister path builds.
+//
+// It re-exports the argv-only api.IsWorkspaceLSPProxyDescriptor — the SAME
+// predicate the port owner's descriptorArgPort scoping uses — so the port-resolve
+// side and the squatter/reconcile protect side can never disagree about the shape.
+// The old `Server == "mcp-language-server"` conjunct was DROPPED (bot PR #505 r5
+// F3): the `daemon workspace-proxy` argv is the launch truth (only
+// mcp-language-server emits that subcommand), so a FIELDLESS legacy row (Server=="")
+// whose port the owner already resolves must classify here too — otherwise a lost
+// child squatting its port is observed-Foreign, never reaped, and the daemon wedges
+// on EADDRINUSE.
 func isLSPWorkspaceProxyDescriptor(d api.SupervisorDaemon) bool {
-	return d.Server == "mcp-language-server" &&
-		len(d.Args) >= 2 && d.Args[0] == "daemon" && d.Args[1] == "workspace-proxy"
+	return api.IsWorkspaceLSPProxyDescriptor(d)
 }
 
 // lspWorkspaceProxyArgValue returns the value of the named flag (e.g.

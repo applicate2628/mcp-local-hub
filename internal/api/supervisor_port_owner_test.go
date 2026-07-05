@@ -291,3 +291,58 @@ func TestDescriptorServerDaemon_RejectsFieldArgvMismatch(t *testing.T) {
 		t.Fatalf("daemon field/argv mismatch must be ok=false")
 	}
 }
+
+// --- proxy-shape argv predicates (bot PR #505 r5 F3 chokepoint) ---
+
+// TestProxyShapePredicates_ArgvOnly pins that Is{Serena,WorkspaceLSP}ProxyDescriptor
+// classify from ARGV ALONE — a fieldless legacy row (Server=="") and even a
+// wrong-Server row classify by their `daemon <kind>` subcommand, and a global
+// daemon / non-daemon row does not. This is the single owner of "which proxy
+// shape is this" that both the port owner (descriptorArgPort scoping) and the cli
+// squatter/reconcile classifiers share, so the argv-vs-field drift (F3) cannot recur.
+func TestProxyShapePredicates_ArgvOnly(t *testing.T) {
+	fieldlessWSProxy := SupervisorDaemon{TaskName: `\mcp-local-hub-lsp-abc-go`,
+		Args: []string{"daemon", "workspace-proxy", "--port", "9401", "--workspace", `C:\ws`, "--language", "go"}}
+	if !IsWorkspaceLSPProxyDescriptor(fieldlessWSProxy) {
+		t.Fatalf("fieldless (Server=='') workspace-proxy must classify by argv")
+	}
+	if IsSerenaProxyDescriptor(fieldlessWSProxy) {
+		t.Fatalf("workspace-proxy is not a serena-proxy")
+	}
+	// A stale/wrong Server field must not change the argv-derived shape.
+	wrongServerWSProxy := fieldlessWSProxy
+	wrongServerWSProxy.Server = "something-else"
+	if !IsWorkspaceLSPProxyDescriptor(wrongServerWSProxy) {
+		t.Fatalf("workspace-proxy shape is argv-derived; a wrong Server field must not hide it")
+	}
+	fieldlessSerena := SupervisorDaemon{Args: []string{"daemon", "serena-proxy", "--server", "serena", "--port", "9150"}}
+	if !IsSerenaProxyDescriptor(fieldlessSerena) {
+		t.Fatalf("fieldless serena-proxy must classify by argv")
+	}
+	if IsWorkspaceLSPProxyDescriptor(fieldlessSerena) {
+		t.Fatalf("serena-proxy is not a workspace-proxy")
+	}
+	// Global daemon + non-daemon rows are neither proxy shape.
+	global := SupervisorDaemon{Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}
+	if IsSerenaProxyDescriptor(global) || IsWorkspaceLSPProxyDescriptor(global) {
+		t.Fatalf("global daemon must not classify as any proxy shape")
+	}
+	timer := SupervisorDaemon{Args: []string{"workspace-weekly-refresh"}}
+	if IsSerenaProxyDescriptor(timer) || IsWorkspaceLSPProxyDescriptor(timer) {
+		t.Fatalf("maintenance timer must not classify as any proxy shape")
+	}
+}
+
+// TestEffectiveDaemonPort_FieldlessWorkspaceProxyResolvesArgPort is the F3 root:
+// the owner resolves a fieldless workspace-proxy's LAUNCH-TRUTH `--port` even
+// though its dynamic daemon name is in no manifest and its Server field is blank —
+// so port protection stays ON. The cli squatter classifier now agrees (both call
+// the same argv predicate), closing the resolve-vs-protect drift.
+func TestEffectiveDaemonPort_FieldlessWorkspaceProxyResolvesArgPort(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{}) // no manifest — argv --port is the only source
+	d := SupervisorDaemon{TaskName: `\mcp-local-hub-lsp-abc-go`, Port: 0,
+		Args: []string{"daemon", "workspace-proxy", "--port", "9401", "--workspace", `C:\ws`, "--language", "go"}}
+	if got, ok := EffectiveDaemonPort(d); !ok || got != 9401 {
+		t.Fatalf("fieldless workspace-proxy port = (%d,%v), want (9401,true) via argv --port", got, ok)
+	}
+}

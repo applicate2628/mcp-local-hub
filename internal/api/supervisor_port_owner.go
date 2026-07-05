@@ -1,7 +1,8 @@
 // Package api — the single owner of "what port + first-bind deadline does this
 // supervisor daemon descriptor use". Every port-DECISION path (liveness sweep,
 // P1b deadline, squatter classifier, `mcphub daemon recover`, startup
-// running-scan, status display) resolves through this file, so a Port=0 legacy
+// running-scan, status display, serena-unregister pre-removal force-kill)
+// resolves through this file, so a Port=0 legacy
 // descriptor no longer STRUCTURALLY disables port protections — they resolve the
 // manifest port lazily instead. `SupervisorDaemon.Port` STAYS a persisted
 // spawn-cache (the spawn contract, the sole source for runtime_spec rows, and a
@@ -88,22 +89,46 @@ func effectivePort(d SupervisorDaemon, resolve manifestPortDeadlineResolveFn) (i
 	return port, true
 }
 
+// IsSerenaProxyDescriptor / IsWorkspaceLSPProxyDescriptor classify a descriptor's
+// LAUNCH shape from ARGV ALONE (`daemon serena-proxy …` / `daemon workspace-proxy
+// …`), independent of the persisted Server field. The `daemon <kind>` subcommand
+// handler decides identity at spawn — a workspace-proxy row spawned with those
+// args IS an LSP proxy whether or not its Server field was ever stamped — so a
+// FIELDLESS legacy row (Server=="" — the shape F5's identity-heal used to fix)
+// still classifies. These are the SINGLE owner of "which proxy shape is this",
+// shared by descriptorArgPort's port-scoping (below) and the cli squatter/reconcile
+// classifiers (isSerenaProxyDescriptor / isLSPWorkspaceProxyDescriptor re-export
+// them). Single-owning the 2-token argv check makes it structurally impossible for
+// the port-resolve side and the port-protect side to disagree about a shape — the
+// exact argv-vs-field drift bot PR #505 r5 (F3) found when the classifier keyed on
+// d.Server while the resolver keyed on argv.
+func IsSerenaProxyDescriptor(d SupervisorDaemon) bool {
+	return len(d.Args) >= 2 && d.Args[0] == "daemon" && d.Args[1] == "serena-proxy"
+}
+
+// IsWorkspaceLSPProxyDescriptor — see IsSerenaProxyDescriptor. Only
+// mcp-language-server emits the `daemon workspace-proxy` subcommand, so the argv
+// shape uniquely identifies an LSP workspace proxy; the Server field is redundant
+// for a well-formed row and wrong for the fieldless legacy shape.
+func IsWorkspaceLSPProxyDescriptor(d SupervisorDaemon) bool {
+	return len(d.Args) >= 2 && d.Args[0] == "daemon" && d.Args[1] == "workspace-proxy"
+}
+
 // descriptorArgPort returns the `--port` value from a `daemon …` descriptor's
 // args, or 0 when absent/unparseable. It is the launch-truth port for the proxy
 // shapes (workspace-proxy, serena-proxy) whose dynamic daemon name is not in a
 // manifest.
 func descriptorArgPort(d SupervisorDaemon) int {
 	// ONLY the proxy shapes carry an authoritative `--port` arg. Scoping the
-	// recovery to `daemon serena-proxy` / `daemon workspace-proxy` prevents a
-	// corrupt or non-proxy global descriptor with a stray `--port` token from
-	// being treated as the protected daemon port — which would let stop-force fall
-	// through to the by-port kill path against a DIFFERENT mcphub listener instead
-	// of treating the unresolved descriptor as portless (bot PR #505 r4). A global
-	// daemon (`daemon --server X --daemon Y`) never carries `--port` anyway.
-	if len(d.Args) < 2 || d.Args[0] != "daemon" {
-		return 0
-	}
-	if d.Args[1] != "serena-proxy" && d.Args[1] != "workspace-proxy" {
+	// recovery to `daemon serena-proxy` / `daemon workspace-proxy` (via the shared
+	// argv predicates) prevents a corrupt or non-proxy global descriptor with a
+	// stray `--port` token from being treated as the protected daemon port — which
+	// would let stop-force fall through to the by-port kill path against a DIFFERENT
+	// mcphub listener instead of treating the unresolved descriptor as portless
+	// (bot PR #505 r4). A global daemon (`daemon --server X --daemon Y`) never
+	// carries `--port` anyway. Using the SAME predicates the cli classifier uses
+	// keeps the resolve side and the protect side provably in lock-step (r5 F3).
+	if !IsSerenaProxyDescriptor(d) && !IsWorkspaceLSPProxyDescriptor(d) {
 		return 0
 	}
 	for i := 2; i+1 < len(d.Args); i++ {

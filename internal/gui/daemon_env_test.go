@@ -281,3 +281,109 @@ func TestDaemonEnvGETPrefersDescriptorIdentityOverTaskNameParsing(t *testing.T) 
 		t.Fatalf("daemon row identity = %+v, want descriptor mcp-language-server/lsp-deadbeef-go", got)
 	}
 }
+
+// TestDaemonEnvGETResolvesManifestPortForTaskNameOnlyLegacyRow is bot PR #505 r5
+// F1: a TASK-NAME-ONLY legacy row (blank Server/Daemon, no --server/--daemon argv,
+// Port=0 — the pre-F5-heal shape) must show its MANIFEST port, not 0. The handler
+// recovers time/default from the task name (ParseManagedTaskName) and threads it
+// into the descriptor it hands the port owner; before the fix it passed the raw
+// descriptor and the owner (which refuses task-name parsing) returned 0.
+func TestDaemonEnvGETResolvesManifestPortForTaskNameOnlyLegacyRow(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			// No Server/Daemon fields and no Args — identity is recoverable ONLY
+			// from the task name. time@9128 is a shipped embedded manifest.
+			TaskName: `\mcp-local-hub-time-default`,
+			Port:     0,
+		}},
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	s := NewServer(Config{Port: 9125})
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9125/api/daemon/env", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.httpHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Daemons []struct {
+			TaskName string `json:"task_name"`
+			Server   string `json:"server"`
+			Daemon   string `json:"daemon"`
+			Port     int    `json:"port"`
+		} `json:"daemons"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Daemons) != 1 {
+		t.Fatalf("daemons len = %d, want 1: %+v", len(body.Daemons), body)
+	}
+	got := body.Daemons[0]
+	if got.Server != "time" || got.Daemon != "default" {
+		t.Fatalf("recovered identity = %s/%s, want time/default", got.Server, got.Daemon)
+	}
+	if got.Port != 9128 {
+		t.Fatalf("port = %d, want 9128 (manifest port resolved via task-name-recovered identity, F1)", got.Port)
+	}
+}
+
+// TestDaemonEnvGETPartialDaemonArgvStaysUnresolved is codex PR #505 r5 P3: a
+// PARTIAL daemon-shaped argv (`daemon --server time` with NO --daemon) is a
+// corrupt descriptor the port owner deliberately rejects. The task-name-only F1
+// synthesis must NOT paper over it — a daemon-shaped argv is the owner's
+// authority, so the port stays 0 (not a spurious manifest 9128). Only a TRUE
+// task-name-only row (no daemon argv at all) gets the task-name synthesis.
+func TestDaemonEnvGETPartialDaemonArgvStaysUnresolved(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	defer restoreState()
+
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: `\mcp-local-hub-time-default`,
+			Port:     0,
+			// Daemon-shaped argv but MISSING --daemon → corrupt/partial. The owner
+			// rejects it; synthesis must not override the rejection.
+			Args: []string{"daemon", "--server", "time"},
+		}},
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	s := NewServer(Config{Port: 9125})
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:9125/api/daemon/env", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.httpHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Daemons []struct {
+			Port int `json:"port"`
+		} `json:"daemons"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Daemons) != 1 {
+		t.Fatalf("daemons len = %d, want 1: %+v", len(body.Daemons), body)
+	}
+	if body.Daemons[0].Port != 0 {
+		t.Fatalf("port = %d, want 0 (partial daemon argv is owner-rejected, not synthesized)", body.Daemons[0].Port)
+	}
+}

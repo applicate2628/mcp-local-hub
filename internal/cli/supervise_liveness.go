@@ -324,20 +324,29 @@ func sweepSupervisorLivenessOnce(
 		effPort, effDeadlineSecs, portOK := portResolver.Resolve(d)
 		if portOK {
 			d.Port = effPort
-		} else if _, _, isManifestDaemon := api.DescriptorServerDaemon(d); isManifestDaemon && d.Port <= 0 && events != nil {
+		} else if _, _, isManifestDaemon := api.DescriptorServerDaemon(d); (isManifestDaemon || api.IsSerenaProxyDescriptor(d) || api.IsWorkspaceLSPProxyDescriptor(d)) && d.Port <= 0 && events != nil {
+			// A row that SHOULD carry a port but did not resolve one — a manifest-backed
+			// global daemon whose server was renamed/removed, OR a proxy shape whose
+			// argv `--port` recovery missed (a corrupt fieldless workspace/serena-proxy
+			// row that also lost its `--port` pair). Both run with port protections off,
+			// so both must be audited, not just the field-resolvable global case — a
+			// proxy has no --server/--daemon argv so DescriptorServerDaemon alone would
+			// leave the exact rows the argv-port recovery serves SILENT (commission
+			// fable-P3-1). A genuinely portless timer row (not a manifest daemon, not a
+			// proxy) is still skipped silently — it is portless by design.
+			//
 			// Latch to ONCE per (stateDir, task) for this supervisor process — a
-			// persistently-unresolvable row (renamed/removed server, a pre-#211 serena
-			// claude/codex row vs the current unified manifest) must NOT re-emit every
-			// 5s sweep and wash the audit log's 10MB/.log.1 rotation out with ~17k
-			// debug entries/day (commission fable-F3). A supervisor restart (new
-			// process) resets the latch; distinct test temp dirs never collide.
+			// persistently-unresolvable row must NOT re-emit every 5s sweep and wash the
+			// audit log's 10MB/.log.1 rotation out with ~17k debug entries/day
+			// (commission fable-F3). A supervisor restart (new process) resets the latch;
+			// distinct test temp dirs never collide.
 			if _, seen := daemonPortUnresolvedEmitted.LoadOrStore(stateDir+"\x00"+taskName, struct{}{}); !seen {
 				_ = events.Emit(api.SupervisorEvent{
 					Severity: "debug",
 					Source:   "liveness",
 					Event:    "daemon-port-unresolved",
 					TaskName: taskName,
-					Body:     map[string]any{"reason": "descriptor port is 0 and the server manifest did not resolve a port>0; port-based protections remain inactive for this daemon"},
+					Body:     map[string]any{"reason": "descriptor port is 0 and neither the descriptor argv --port nor the server manifest resolved a port>0; port-based protections remain inactive for this daemon"},
 				})
 			}
 		}

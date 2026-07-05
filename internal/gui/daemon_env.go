@@ -232,6 +232,11 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows := make([]daemonEnvListRow, 0, len(intent.Daemons))
+	// One memoizing resolver for the whole list so N Port=0 rows of the same
+	// server reparse that server's manifest ONCE, not once per row (bot PR #505 r5
+	// F2 — the pure api.EffectiveDaemonPort reloads the manifest every call). Mirrors
+	// the status path's per-refresh api.NewDaemonPortResolver.
+	portResolver := api.NewDaemonPortResolver()
 	for _, d := range intent.Daemons {
 		taskName := daemon_env_overlay.NormalizeOverlayKey(d.TaskName)
 		// Skip maintenance/watchdog rows: they are one-shot scheduler jobs,
@@ -274,9 +279,27 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		// Resolve the effective port through the owner so a legacy Port=0 row shows
 		// its manifest port instead of 0 (F5 no longer persists it — commission
-		// fable-F5). EffectiveDaemonPort returns d.Port when >0, the manifest port
-		// for a resolvable Port=0 row, else 0 (kept as 0 for a genuinely unknown row).
-		port, _ := api.EffectiveDaemonPort(d)
+		// fable-F5). The task-name-recovered server/daemonName are threaded into
+		// effDesc ONLY for a TRUE task-name-only row (no daemon-shaped argv), whose
+		// identity came from ParseManagedTaskName above — passing the raw d there
+		// returned (0,false) because the owner refuses task-name parsing (bot PR #505
+		// r5 F1; mirrors the status path).
+		//
+		// A daemon-shaped argv (`daemon --server… --daemon…` global, or a `daemon
+		// <kind>…` proxy) is the OWNER'S authority: its own DescriptorServerDaemon /
+		// descriptorArgPort accept-or-reject must stand. Overriding it with the
+		// task-name split would paper over a PARTIAL/corrupt daemon argv — e.g.
+		// `daemon --server time` with no --daemon, which the owner rejects — and
+		// display a spurious manifest port (codex PR #505 r5 P3). A full-argv legacy
+		// row still resolves fine WITHOUT synthesis (the owner recovers identity from
+		// its own args), and a proxy row resolves via its `--port` arg, so narrowing
+		// the synthesis costs nothing for the well-formed shapes.
+		effDesc := d
+		if len(d.Args) == 0 || d.Args[0] != "daemon" {
+			effDesc.Server = server
+			effDesc.Daemon = daemonName
+		}
+		port, _, _ := portResolver.Resolve(effDesc)
 		row := daemonEnvListRow{
 			TaskName:  taskName,
 			Server:    server,
