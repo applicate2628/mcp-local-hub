@@ -130,6 +130,14 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 
 	// Per-refresh memo so a server with multiple Port=0 daemons reads +
 	// parses that server's manifest.yaml ONCE, not once per daemon row.
+	//
+	// This is the READ-fallback for a Port=0 descriptor and is NOT made
+	// redundant by the F5 startup port backfill (api.BackfillIntentDaemonPorts):
+	// F5 is the WRITE-convergence that persists the manifest port into the
+	// descriptor on the next supervise start, while THIS resolves it for display
+	// in the windows F5 has not covered yet — a contended/unresolved backfill, a
+	// pre-F5-restart host, or an old binary. Do not delete it as "F5 already fills
+	// the port."
 	resolveManifestPort := newManifestPortResolver()
 
 	rows := make([]map[string]any, 0, len(intent.Daemons))

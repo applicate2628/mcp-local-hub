@@ -348,14 +348,15 @@ func loadManifestForServer(dir, name string) (*config.ServerManifest, error) {
 
 // findDaemonPort returns the port of the named daemon from the manifest.
 // Returns (0, false) when the name does not match any daemon, so callers can
-// treat that as a manifest integrity error without a panic.
+// treat that as a manifest integrity error without a panic. Reuses the
+// canonical findDaemon (install.go) so the manifest daemon-name match lives in
+// exactly one place.
 func findDaemonPort(m *config.ServerManifest, daemonName string) (int, bool) {
-	for _, d := range m.Daemons {
-		if d.Name == daemonName {
-			return d.Port, true
-		}
+	d, ok := findDaemon(m, daemonName)
+	if !ok {
+		return 0, false
 	}
-	return 0, false
+	return d.Port, true
 }
 
 // ResolveManifestDaemonPort is the exported convenience wrapper around

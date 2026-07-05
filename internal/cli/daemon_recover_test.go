@@ -159,6 +159,118 @@ func TestDaemonRecover_NoSquatterGoesStraightToForceRespawn(t *testing.T) {
 	}
 }
 
+// TestDaemonRecover_Port0HintRoutesSerenaByResolvedIdentity is the regression
+// guard for bot PR #504's blank-serena finding: the port-0 recover hint must
+// route a serena row to the `migrate serena` remediation (F5 never backfills
+// serena, so a `supervise` restart would loop), and it must do so by resolving
+// the server through the SAME args-recovery owner F5 uses — so a blank-identity
+// legacy serena row (Server=="", args carry `--server serena`) still gets the
+// serena hint, not the generic F5 hint.
+func TestDaemonRecover_Port0HintRoutesSerenaByResolvedIdentity(t *testing.T) {
+	const (
+		serenaHint      = "migrate serena legacy-to-dynamic-pool"
+		genericHint     = "restart `mcphub supervise`"
+		unresolvantHint = "not a manifest-backed daemon"
+	)
+	cases := []struct {
+		name     string
+		desc     api.SupervisorDaemon
+		wantHint string
+		notHint  string
+	}{
+		{
+			name: "blank-field legacy serena resolves via args",
+			desc: api.SupervisorDaemon{
+				TaskName: `\mcp-local-hub-serena-unified`,
+				// Server blank — must be recovered from args, exactly the vintage
+				// the bot flagged.
+				Args: []string{"daemon", "--server", "serena", "--daemon", "unified"},
+				Port: 0,
+			},
+			wantHint: serenaHint,
+			notHint:  genericHint,
+		},
+		{
+			name: "populated-field serena",
+			desc: api.SupervisorDaemon{
+				TaskName: `\mcp-local-hub-serena-unified`,
+				Server:   "serena",
+				Daemon:   "unified",
+				Args:     []string{"daemon", "--server", "serena", "--daemon", "unified"},
+				Port:     0,
+			},
+			wantHint: serenaHint,
+			notHint:  genericHint,
+		},
+		{
+			name: "non-serena manifest daemon keeps the F5 backfill hint",
+			desc: api.SupervisorDaemon{
+				TaskName: `\mcp-local-hub-memory-default`,
+				Server:   "memory",
+				Daemon:   "default",
+				Args:     []string{"daemon", "--server", "memory", "--daemon", "default"},
+				Port:     0,
+			},
+			wantHint: genericHint,
+			notHint:  serenaHint,
+		},
+		{
+			name: "unresolvable non-daemon row promises no backfill",
+			desc: api.SupervisorDaemon{
+				// A maintenance-timer / one-shot shape: DescriptorServerDaemon returns
+				// ok=false, F5 leaves it untouched, so the hint must NOT promise a
+				// `supervise`-restart backfill (fable/codex deep-sec PR #504).
+				TaskName: `\mcp-local-hub-workspace-weekly-refresh`,
+				Args:     []string{"workspace-weekly-refresh"},
+				Port:     0,
+			},
+			wantHint: unresolvantHint,
+			notHint:  genericHint,
+		},
+		{
+			name: "populated identity but missing manifest promises no backfill",
+			desc: api.SupervisorDaemon{
+				// Bot PR #504 case: Server/Daemon populated so identity resolves, but
+				// the manifest is missing/renamed → ResolveManifestDaemonPort returns
+				// !ok, exactly what F5 treats as UnresolvedPortZero (no backfill). The
+				// hint must mirror F5 and NOT promise a supervise-restart backfill.
+				TaskName: `\mcp-local-hub-ghost-server-default`,
+				Server:   "ghost-server-that-does-not-exist",
+				Daemon:   "default",
+				Args:     []string{"daemon", "--server", "ghost-server-that-does-not-exist", "--daemon", "default"},
+				Port:     0,
+			},
+			wantHint: unresolvantHint,
+			notHint:  genericHint,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := &recoverTestEnv{
+				intent:     &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{tc.desc}},
+				respawnRes: api.RespawnResult{Success: true},
+			}
+			newRecoverTestEnv(t, env)
+			cmd, _, errBuf := recoverCmd("")
+
+			if err := runDaemonRecover(cmd, tc.desc.TaskName, true); err != nil {
+				t.Fatalf("recover errored: %v", err)
+			}
+			got := errBuf.String()
+			if !strings.Contains(got, tc.wantHint) {
+				t.Errorf("hint missing %q; got:\n%s", tc.wantHint, got)
+			}
+			if strings.Contains(got, tc.notHint) {
+				t.Errorf("hint wrongly contained %q; got:\n%s", tc.notHint, got)
+			}
+			// Port-0 always proceeds to the force respawn regardless of hint.
+			if len(env.respawnCalls) != 1 || !env.respawnCalls[0].force {
+				t.Fatalf("expected one force=true respawn; got %+v", env.respawnCalls)
+			}
+		})
+	}
+}
+
 func TestDaemonRecover_OwnSquatterReapThenRespawn(t *testing.T) {
 	d := globalDaemonDescriptor()
 	const owner = 44000
