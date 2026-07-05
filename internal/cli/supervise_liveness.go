@@ -238,6 +238,13 @@ func sweepSupervisorLivenessOnce(
 	}
 	now := time.Now().UTC()
 
+	// One port-resolution owner per sweep (memoizes the manifest read per server).
+	// A Port=0 legacy descriptor whose manifest declares a port now resolves to
+	// that port, so the d.Port<=0 early-healthy guard no longer STRUCTURALLY
+	// disables the bind check / P1b deadline / P2a squatter re-probe for it — the
+	// whole point of the refactor. A Port>0 row short-circuits to its own port.
+	portResolver := api.NewDaemonPortResolver()
+
 	// Perf: take ONE OS port-owner snapshot for the whole sweep and resolve
 	// every running daemon against it, instead of letting each daemon's
 	// liveness check spawn its own `netstat -ano` (15 running daemons → 15
@@ -291,6 +298,26 @@ func sweepSupervisorLivenessOnce(
 			continue
 		}
 		seenTasks[taskName] = struct{}{}
+		// Resolve the effective port through the owner. A Port>0 row short-circuits
+		// (unchanged). A Port=0 legacy row whose manifest declares a port gets it
+		// here → the downstream bind check / deadline / squatter re-probe all see
+		// the resolved port. A genuine resolve-miss (a manifest-backed daemon whose
+		// server was renamed/removed) leaves d.Port=0 so the early-healthy guard
+		// still fires (no false protection) but is surfaced as daemon-port-unresolved
+		// — the successor to F5's intent-port-unresolved event, so a genuinely
+		// unprotected daemon stays visible. A portless timer row (DescriptorServerDaemon
+		// ok=false) is skipped silently.
+		if effPort, _, portOK := portResolver.Resolve(d); portOK {
+			d.Port = effPort
+		} else if _, _, isManifestDaemon := api.DescriptorServerDaemon(d); isManifestDaemon && d.Port <= 0 && events != nil {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "debug",
+				Source:   "liveness",
+				Event:    "daemon-port-unresolved",
+				TaskName: taskName,
+				Body:     map[string]any{"reason": "descriptor port is 0 and the server manifest did not resolve a port>0; port-based protections remain inactive for this daemon"},
+			})
+		}
 		// P1b first-bind deadline: BEFORE the current generation's first
 		// observed bind, grant the (longer) per-descriptor startup deadline so a
 		// slow-starting daemon is not killed mid-startup; AFTER first bind fall
@@ -704,8 +731,14 @@ func supervisorIntentPortMapForStateDir(stateDir string) map[string]int {
 	if err != nil || intent == nil {
 		return out
 	}
+	// Map the RESOLVED effective port (owner) so a Port=0 legacy row that resolves
+	// a manifest port is no longer bypassed by the startup running-scan's
+	// `port > 0` gate. A Port>0 row resolves to itself; an unresolvable row maps
+	// to 0 (the gate then skips it, as before).
+	resolver := api.NewDaemonPortResolver()
 	for _, d := range intent.Daemons {
-		out[canonicalSupervisorTaskName(d.TaskName)] = d.Port
+		port, _, _ := resolver.Resolve(d)
+		out[canonicalSupervisorTaskName(d.TaskName)] = port
 	}
 	return out
 }

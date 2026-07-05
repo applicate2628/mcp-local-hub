@@ -691,6 +691,60 @@ func TestSupervisorLivenessSweepPostsChildExitForDeadRunningPID(t *testing.T) {
 	}
 }
 
+// TestSweep_PortZeroLegacyRowResolvesEffectivePort is the P3a load-bearing
+// guard: a legacy descriptor with Port=0 whose manifest declares a port
+// (memory → 9123) is no longer early-healthy at the d.Port<=0 guard — the
+// owner resolves the effective port so the sweep runs the bind check. A live
+// PID whose port is unbound past the deadline drives an EvManualRestart, and
+// the probe is called with the RESOLVED port (9123), proving the resolver, not
+// the raw Port=0, drives the decision. Pre-refactor this row was skipped
+// (no protection) — no event would fire.
+func TestSweep_PortZeroLegacyRowResolvesEffectivePort(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	taskName := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Port:     0, // legacy Port=0 — resolver must raise it to the manifest 9123
+			Args:     []string{"daemon", "--server", "memory", "--daemon", "default"},
+		}},
+	}
+	tracker := NewDaemonRuntimeTracker()
+	// StartedAt well past the 60s first-bind deadline so an unbound port is a
+	// restart trigger (nil bindLatch → grace is the startup deadline).
+	tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-(supervisorDefaultStartupBindDeadline + time.Second)))
+	loop := api.NewEventLoop(16)
+	events := make(chan api.LoopEvent, 1)
+	loop.RegisterHandler(func(e api.LoopEvent) { events <- e })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	var probedPort int
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(pid int) bool { return pid == 22036 }, // live PID
+		PortLive: func(port int) bool { probedPort = port; return false }, // port unbound
+	})
+	defer restore()
+
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+
+	select {
+	case ev := <-events:
+		if ev.Kind != api.EvManualRestart || ev.TaskName != taskName {
+			t.Fatalf("event = %+v, want EvManualRestart for %s", ev, taskName)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no restart posted — Port=0 row was early-healthy; the owner resolver did not activate the port check")
+	}
+	if probedPort != 9123 {
+		t.Fatalf("PortLive probed port %d, want 9123 (resolved from the memory manifest, not the raw Port=0)", probedPort)
+	}
+}
+
 func TestSupervisorLivenessSweepPostsChildExitForDeadPIDWithForeignListener(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	taskName := `\mcp-local-hub-memory-default`
