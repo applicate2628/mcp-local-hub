@@ -90,6 +90,23 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 		server := strings.TrimSpace(d.Server)
 		daemon := strings.TrimSpace(d.Daemon)
 		if server == "" || daemon == "" {
+			// Recover a blank identity through the OWNER (args-recovery), NOT
+			// ParseManagedTaskName: the greedy LastIndex('-') task-name split is wrong
+			// for a hyphenated daemon name (e.g. `mcp-language-server` / `vscode-css`),
+			// and pre-filling those wrong fields would DISAGREE with the args and make
+			// DescriptorServerDaemon fail closed → effective port 0 forever now that F5
+			// no longer heals the fields (bot PR #505). The task-name parse is only a
+			// last resort for a non-daemon-shaped row the owner can't resolve.
+			if rs, rd, ok := api.DescriptorServerDaemon(d); ok {
+				if server == "" {
+					server = rs
+				}
+				if daemon == "" {
+					daemon = rd
+				}
+			}
+		}
+		if server == "" || daemon == "" {
 			parsedServer, parsedDaemon := api.ParseManagedTaskName(taskName)
 			if server == "" {
 				server = parsedServer

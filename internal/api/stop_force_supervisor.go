@@ -107,6 +107,15 @@ func stopForceKillSupervisorOwned(ctx context.Context, server, daemonFilter stri
 // table so a dropped descriptor cannot kill a foreign process that re-bound the
 // port after our daemon already died.
 func forceKillOneSupervisorTarget(d SupervisorDaemon, pidByTask map[string]int) RestartResult {
+	// Resolve the EFFECTIVE port through the owner: a legacy Port=0 descriptor
+	// still binds its manifest port, and F5 no longer persists it, so reading the
+	// raw field would skip the port-release wait AND the by-port kill fallback —
+	// `mcphub stop --force` would then miss a surviving child that still holds the
+	// manifest port (bot PR #505). EffectiveDaemonPort returns d.Port when >0, the
+	// manifest port for a resolvable Port=0 row, else 0 (a genuinely portless row).
+	if port, ok := EffectiveDaemonPort(d); ok && port > 0 {
+		d.Port = port
+	}
 	var pidKillErr error
 	var pidKillContext string
 	pidSeen := false

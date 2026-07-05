@@ -258,16 +258,31 @@ func resolveConfigEnvTargets(stateDir, selector string) ([]configEnvTarget, erro
 		}
 		server := strings.TrimSpace(d.Server)
 		daemon := strings.TrimSpace(d.Daemon)
-		if server == "" {
+		if server == "" || daemon == "" {
+			// Recover a blank identity through the OWNER (args-recovery), NOT
+			// ParseManagedTaskName: the greedy task-name split derives the wrong
+			// server for a hyphenated daemon name (e.g. `mcp-language-server` /
+			// `vscode-css` → server `mcp-language-server-vscode`), so a server-wide
+			// env operation would target the wrong daemon. F5 used to heal these
+			// fields on restart; it is gone, so resolve identity from the args the
+			// spawn actually uses (bot PR #505).
+			if rs, rd, ok := api.DescriptorServerDaemon(d); ok {
+				if server == "" {
+					server = rs
+				}
+				if daemon == "" {
+					daemon = rd
+				}
+			}
+		}
+		if server == "" || daemon == "" {
 			parsedServer, parsedDaemon := api.ParseManagedTaskName(taskName)
-			server = parsedServer
+			if server == "" {
+				server = parsedServer
+			}
 			if daemon == "" {
 				daemon = parsedDaemon
 			}
-		}
-		if daemon == "" {
-			_, parsedDaemon := api.ParseManagedTaskName(taskName)
-			daemon = parsedDaemon
 		}
 		if daemon == "" {
 			daemon = "default"

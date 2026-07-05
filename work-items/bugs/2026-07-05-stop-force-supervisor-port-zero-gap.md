@@ -1,7 +1,12 @@
 ---
-status: open
+status: resolved
 severity: medium
 found-by: $architect (adjacent finding during port-resolution design, 2026-07-05)
+resolved-by: PR #505 (port-resolution owner) — the Codex bot escalated it from
+  deferred-backlog to a live REGRESSION (deleting F5 activated the gap), so it was
+  fixed in-PR rather than deferred: forceKillOneSupervisorTarget now resolves
+  api.EffectiveDaemonPort(d) at entry, so a legacy Port=0 row engages the port
+  wait/kill path on its resolved manifest port.
 depends-on: 2026-07-05-unify-port-resolution-owner
 ---
 

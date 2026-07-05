@@ -89,7 +89,11 @@ func TestForceKillOneSupervisorTarget_OwnerSIDSentinel_PortlessReportsSuccess(t 
 // not relax a genuinely unverifiable live target.
 func TestForceKillOneSupervisorTarget_OwnerSIDLiveUnverifiable_StillFailsClosed(t *testing.T) {
 	const (
-		taskName = `\mcp-local-hub-memory-default`
+		// A genuinely PORTLESS descriptor: a server with NO manifest, so the owner
+		// (EffectiveDaemonPort) resolves nothing and d.Port stays 0. `memory` Port=0
+		// is no longer portless — the owner resolves 9123 (bot PR #505) — which would
+		// engage the port-kill fallback and defeat this test's portless premise.
+		taskName = `\mcp-local-hub-phantomsrv-default`
 		pid      = 51011
 	)
 
@@ -121,8 +125,9 @@ func TestForceKillOneSupervisorTarget_OwnerSIDLiveUnverifiable_StillFailsClosed(
 		return portKillNoListener, nil
 	}
 
-	d := SupervisorDaemon{TaskName: taskName, Server: "memory", Daemon: "default"} // Port == 0
-	result := forceKillOneSupervisorTarget(d, map[string]int{"mcp-local-hub-memory-default": pid})
+	d := SupervisorDaemon{TaskName: taskName, Server: "phantomsrv", Daemon: "default", // Port == 0, no manifest
+		Args: []string{"daemon", "--server", "phantomsrv", "--daemon", "default"}}
+	result := forceKillOneSupervisorTarget(d, map[string]int{"mcp-local-hub-phantomsrv-default": pid})
 
 	if result.Err == "" {
 		t.Fatal("SEC-F3 regression: a LIVE process whose owner cannot be verified must FAIL " +

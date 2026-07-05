@@ -243,6 +243,20 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 		server := d.Server
 		daemonName := d.Daemon
 		if server == "" || daemonName == "" {
+			// Recover a blank identity through the OWNER (args-recovery), NOT
+			// ParseManagedTaskName, so a hyphenated daemon name (mcp-language-server /
+			// vscode-css) is not mis-split now that F5 no longer heals the fields
+			// (same class as bot PR #505's status/config-env findings).
+			if rs, rd, ok := api.DescriptorServerDaemon(d); ok {
+				if server == "" {
+					server = rs
+				}
+				if daemonName == "" {
+					daemonName = rd
+				}
+			}
+		}
+		if server == "" || daemonName == "" {
 			parsedServer, parsedDaemon := api.ParseManagedTaskName(taskName)
 			if server == "" {
 				server = parsedServer

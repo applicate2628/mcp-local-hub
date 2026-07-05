@@ -42,3 +42,40 @@ func TestSupervisorStatusPortEnrichedViaOwner(t *testing.T) {
 		t.Fatalf("row port = %v, want 9123 (Port=0 resolved via the owner from the memory manifest)", rows[0]["port"])
 	}
 }
+
+// TestSupervisorStatusIdentityRecoveredViaOwnerForHyphenatedDaemon is the bot
+// PR #505 guard: a legacy blank-field row whose args carry a hyphenated
+// server+daemon (mcp-language-server / vscode-css) must recover identity via the
+// OWNER (args), not the greedy ParseManagedTaskName split — which would derive
+// server=mcp-language-server-vscode and, worse, disagree with the args so
+// DescriptorServerDaemon fails closed and the port stays 0. F5 used to heal the
+// blank fields; it is gone.
+func TestSupervisorStatusIdentityRecoveredViaOwnerForHyphenatedDaemon(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	task := `\mcp-local-hub-mcp-language-server-vscode-css`
+	intent := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{{
+		TaskName: task,
+		// Blank Server/Daemon — identity lives only in the args.
+		Args: []string{"daemon", "--server", "mcp-language-server", "--daemon", "vscode-css"},
+		Port: 0,
+	}}}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(task, 600002, time.Now().UTC().Add(-time.Hour))
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	if err != nil {
+		t.Fatalf("supervisorStatusDaemons: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0]["server"] != "mcp-language-server" {
+		t.Fatalf("server = %v, want mcp-language-server (owner args-recovery, not the greedy task-name split)", rows[0]["server"])
+	}
+	if rows[0]["daemon"] != "vscode-css" {
+		t.Fatalf("daemon = %v, want vscode-css", rows[0]["daemon"])
+	}
+}
