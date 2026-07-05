@@ -258,12 +258,17 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 		if env == nil {
 			env = map[string]string{}
 		}
+		// Resolve the effective port through the owner so a legacy Port=0 row shows
+		// its manifest port instead of 0 (F5 no longer persists it — commission
+		// fable-F5). EffectiveDaemonPort returns d.Port when >0, the manifest port
+		// for a resolvable Port=0 row, else 0 (kept as 0 for a genuinely unknown row).
+		port, _ := api.EffectiveDaemonPort(d)
 		row := daemonEnvListRow{
 			TaskName:  taskName,
 			Server:    server,
 			Daemon:    daemonName,
 			Workspace: d.Workspace,
-			Port:      d.Port,
+			Port:      port,
 			Env:       env,
 		}
 		if ov != nil {

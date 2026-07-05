@@ -3613,6 +3613,11 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// failure this PR exists to surface. The spawnLogged channel
 		// then gates the goroutine so daemon-exited never precedes
 		// daemon-spawned in the log even if Emit itself is slow.
+		// Effective port (owner), not the raw field: a legacy Port=0 row still binds
+		// its manifest port, so log that for a meaningful audit trail instead of 0
+		// (commission arch-F3 / fable-F5). EffectiveDaemonPort returns d.Port when
+		// >0, the manifest port for a resolvable Port=0 row, else 0.
+		auditPort, _ := api.EffectiveDaemonPort(d)
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -3622,7 +3627,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 				"pid":       pid,
 				"command":   d.Command,
 				"workspace": d.Workspace,
-				"port":      d.Port,
+				"port":      auditPort,
 			},
 		})
 		spawnLogged := make(chan struct{})

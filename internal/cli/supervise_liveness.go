@@ -9,11 +9,19 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sync"
 	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/process"
 )
+
+// daemonPortUnresolvedEmitted latches the daemon-port-unresolved liveness event
+// to ONCE per (stateDir, task) for the supervisor process's lifetime, so a
+// persistently-unresolvable Port=0 row does not re-emit on every 5s sweep and
+// wash out the audit log (commission fable-F3). Keyed by stateDir so parallel
+// tests with distinct temp dirs never collide; a supervisor restart resets it.
+var daemonPortUnresolvedEmitted sync.Map
 
 const (
 	supervisorPortProbeTimeout = 300 * time.Millisecond
@@ -216,7 +224,7 @@ func livenessSweepIntent(stateDir string, fallback *api.SupervisorIntentFile) *a
 }
 
 func sweepSupervisorLivenessOnce(
-	_ string,
+	stateDir string,
 	intent *api.SupervisorIntentFile,
 	tracker *DaemonRuntimeTracker,
 	loop *api.EventLoop,
@@ -307,16 +315,31 @@ func sweepSupervisorLivenessOnce(
 		// — the successor to F5's intent-port-unresolved event, so a genuinely
 		// unprotected daemon stays visible. A portless timer row (DescriptorServerDaemon
 		// ok=false) is skipped silently.
-		if effPort, _, portOK := portResolver.Resolve(d); portOK {
+		// One memoized resolve per daemon yields BOTH the effective port and the
+		// first-bind deadline (effectiveDeadline is independent of the port
+		// short-circuit, so effDeadlineSecs is correct even when portOK is false).
+		// Use both from this single call — do NOT re-derive the deadline via
+		// supervisorStartupBindDeadline, which would bypass this instance's memo and
+		// re-parse the manifest every 5s (arch review F1).
+		effPort, effDeadlineSecs, portOK := portResolver.Resolve(d)
+		if portOK {
 			d.Port = effPort
 		} else if _, _, isManifestDaemon := api.DescriptorServerDaemon(d); isManifestDaemon && d.Port <= 0 && events != nil {
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "debug",
-				Source:   "liveness",
-				Event:    "daemon-port-unresolved",
-				TaskName: taskName,
-				Body:     map[string]any{"reason": "descriptor port is 0 and the server manifest did not resolve a port>0; port-based protections remain inactive for this daemon"},
-			})
+			// Latch to ONCE per (stateDir, task) for this supervisor process — a
+			// persistently-unresolvable row (renamed/removed server, a pre-#211 serena
+			// claude/codex row vs the current unified manifest) must NOT re-emit every
+			// 5s sweep and wash the audit log's 10MB/.log.1 rotation out with ~17k
+			// debug entries/day (commission fable-F3). A supervisor restart (new
+			// process) resets the latch; distinct test temp dirs never collide.
+			if _, seen := daemonPortUnresolvedEmitted.LoadOrStore(stateDir+"\x00"+taskName, struct{}{}); !seen {
+				_ = events.Emit(api.SupervisorEvent{
+					Severity: "debug",
+					Source:   "liveness",
+					Event:    "daemon-port-unresolved",
+					TaskName: taskName,
+					Body:     map[string]any{"reason": "descriptor port is 0 and the server manifest did not resolve a port>0; port-based protections remain inactive for this daemon"},
+				})
+			}
 		}
 		// P1b first-bind deadline: BEFORE the current generation's first
 		// observed bind, grant the (longer) per-descriptor startup deadline so a
@@ -324,7 +347,7 @@ func sweepSupervisorLivenessOnce(
 		// back to the byte-identical 5s post-bind grace. The latch is keyed by
 		// generation, so a respawn (new generation) invalidates it and the
 		// startup deadline re-applies.
-		startupDeadline := supervisorStartupBindDeadline(d)
+		startupDeadline := time.Duration(effDeadlineSecs) * time.Second
 		grace := supervisorPortBindGrace
 		latchedGen, latched := bindLatch[taskName]
 		if !latched || latchedGen != entry.PIDGeneration {
@@ -736,10 +759,12 @@ func supervisorIntentPortMapForStateDir(stateDir string) map[string]int {
 	// startup optimization scoped to explicit-port daemons (architect design §3.4:
 	// the startup-scan is port-only; the liveness sweep is the AUTHORITATIVE port
 	// protection path). A legacy Port=0 row is intentionally not re-checked here —
-	// the sweep (which DOES resolve the effective port) protects it within 5s. This
-	// keeps the "Port=0 skips the inner re-check" contract the startup-scan relies
-	// on, rather than extending the inner re-check to every legacy row (planner
-	// AC2's broader scope, superseded by the architect's secondary-path scoping).
+	// the sweep (which DOES resolve the effective port) picks it up on the next
+	// tick (≤5s), then applies the full first-bind deadline (60/120s) before any
+	// restart, since an adopted row's bind latch starts empty. This keeps the
+	// "Port=0 skips the inner re-check" contract the startup-scan relies on, rather
+	// than extending the inner re-check to every legacy row (planner AC2's broader
+	// scope, superseded by the architect's secondary-path scoping).
 	for _, d := range intent.Daemons {
 		out[canonicalSupervisorTaskName(d.TaskName)] = d.Port
 	}

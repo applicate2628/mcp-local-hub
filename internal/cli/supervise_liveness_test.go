@@ -745,6 +745,59 @@ func TestSweep_PortZeroLegacyRowResolvesEffectivePort(t *testing.T) {
 	}
 }
 
+// TestSweep_DaemonPortUnresolvedEmittedOncePerSession is the fable-F3 guard: a
+// persistently-unresolvable Port=0 manifest-daemon row (server with no manifest)
+// must emit daemon-port-unresolved EXACTLY ONCE across repeated sweeps, not every
+// 5s tick — otherwise the debug event washes the audit log's rotation out.
+func TestSweep_DaemonPortUnresolvedEmittedOncePerSession(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(stateDir, "supervisor-events.log")
+	auditLog, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer auditLog.Close()
+
+	// Manifest-backed daemon shape (args carry --server/--daemon → DescriptorServerDaemon
+	// ok) but the server has NO manifest → resolver miss → the unresolved branch.
+	d := api.SupervisorDaemon{
+		TaskName: `\mcp-local-hub-ghostsrv-default`,
+		Server:   "ghostsrv-does-not-exist",
+		Daemon:   "default",
+		Port:     0,
+		Args:     []string{"daemon", "--server", "ghostsrv-does-not-exist", "--daemon", "default"},
+	}
+	intent := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{d}}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(d.TaskName, 22036, time.Now().UTC().Add(-time.Minute))
+	loop := api.NewEventLoop(16)
+	loop.RegisterHandler(func(api.LoopEvent) {})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(ctx)
+
+	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+		PIDAlive: func(int) bool { return true },
+		PortLive: func(int) bool { return true },
+	})
+	defer restore()
+
+	// Two sweeps, same stateDir → the once-per-(stateDir,task) latch must emit the
+	// event exactly once.
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog, map[string]int{}, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog, map[string]int{}, nil)
+
+	count := 0
+	for _, e := range readSupervisorEventLogLines(t, eventsPath) {
+		if e.Event == "daemon-port-unresolved" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("daemon-port-unresolved emitted %d times across 2 sweeps, want exactly 1 (once-per-session latch)", count)
+	}
+}
+
 func TestSupervisorLivenessSweepPostsChildExitForDeadPIDWithForeignListener(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	taskName := `\mcp-local-hub-memory-default`

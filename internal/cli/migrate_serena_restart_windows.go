@@ -87,8 +87,13 @@ func defaultMigrateSerenaReap(ctx context.Context, w io.Writer) error {
 		}
 	} else if intent != nil {
 		for _, d := range intent.Daemons {
-			if d.Port > 0 {
-				expectedPorts = append(expectedPorts, d.Port)
+			// Resolve the EFFECTIVE port through the owner, not the raw field: a
+			// legacy Port=0 row still declares a manifest port its daemon binds, and
+			// dropping it here would skip the post-reap unbound verification, letting a
+			// surviving transient hold the port and the successor spawn a duplicate
+			// (commission fable-F1; same class as the upgrade path).
+			if port, ok := api.EffectiveDaemonPort(d); ok && port > 0 {
+				expectedPorts = append(expectedPorts, port)
 			}
 		}
 	}

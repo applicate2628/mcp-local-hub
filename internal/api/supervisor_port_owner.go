@@ -93,11 +93,15 @@ func effectiveDeadline(d SupervisorDaemon, resolve manifestPortDeadlineResolveFn
 }
 
 // DaemonPortResolver memoizes the manifest read so a hot loop (the liveness
-// sweep, the status refresh) parses each server's manifest at most ONCE per
-// instance, not once per daemon row. It is a direct generalization of
-// supervise_status.go's private newManifestPortResolver, extended to carry the
-// deadline alongside the port and to short-circuit on d.Port. NOT safe for
-// concurrent use — construct one per sweep/refresh on the owning goroutine.
+// sweep, the status refresh) resolves each (server, daemon) at most ONCE per
+// instance — a single Resolve returns both the port and the deadline from one
+// cached read, and a repeated Resolve of the same descriptor reuses it (N
+// DISTINCT daemons of one server still cost N reads, but never a duplicate for
+// the same pair or the intra-Resolve port+deadline double-read). It is a direct
+// generalization of supervise_status.go's private newManifestPortResolver,
+// extended to carry the deadline alongside the port and to short-circuit on
+// d.Port. NOT safe for concurrent use — construct one per sweep/refresh on the
+// owning goroutine.
 type DaemonPortResolver struct {
 	// memo[server][daemon] → the resolved (port, deadline, ok) triple. The
 	// server-level map's mere presence records that the manifest was consulted.
