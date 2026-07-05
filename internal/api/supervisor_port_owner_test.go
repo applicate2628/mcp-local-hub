@@ -182,6 +182,24 @@ func TestDescriptorServerDaemon_RecoversBlankFieldsFromArgs(t *testing.T) {
 	}
 }
 
+// TestEffectiveDaemonPort_RealEmbeddedManifest exercises the DEFAULT embed-first
+// manifest reader (no stub): a Port=0 descriptor for a shipped server resolves
+// its declared port, and an unknown server resolves (0,false). Preserves the
+// coverage of the deleted ResolveManifestDaemonPort embed-first tests.
+func TestEffectiveDaemonPort_RealEmbeddedManifest(t *testing.T) {
+	// time@9128 is a shipped global manifest (servers/time/manifest.yaml).
+	got, ok := EffectiveDaemonPort(SupervisorDaemon{Server: "time", Daemon: "default",
+		Args: []string{"daemon", "--server", "time", "--daemon", "default"}, Port: 0})
+	if !ok || got != 9128 {
+		t.Fatalf("EffectiveDaemonPort(time/default, Port=0) = (%d,%v), want (9128,true)", got, ok)
+	}
+	// unknown server → not authoritative.
+	if got, ok := EffectiveDaemonPort(SupervisorDaemon{Server: "does-not-exist", Daemon: "default",
+		Args: []string{"daemon", "--server", "does-not-exist", "--daemon", "default"}, Port: 0}); ok || got != 0 {
+		t.Fatalf("EffectiveDaemonPort(unknown) = (%d,%v), want (0,false)", got, ok)
+	}
+}
+
 func TestDescriptorServerDaemon_RejectsFieldArgvMismatch(t *testing.T) {
 	// Server field disagrees with the --server argv token → fail-closed ok=false,
 	// so no port-decision stamps a port the process (which launches from args)

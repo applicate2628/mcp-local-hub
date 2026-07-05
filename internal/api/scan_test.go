@@ -224,48 +224,6 @@ func TestScanExternalAndManagedFlag(t *testing.T) {
 	}
 }
 
-// TestResolveManifestDaemonPort_EmbedFirst pins the port-lookup helper
-// the supervisor status seam uses to enrich Port=0 supervisor-intent
-// rows. PR #211 and earlier wrote supervisor-intent.json with Port=0
-// for every daemon (migration did not seed the field from the
-// manifest); the GUI matrix renders "—" for those daemons even though
-// the daemon is listening on the manifest-declared port.
-// ResolveManifestDaemonPort is the read-time enrichment that surfaces
-// the correct port without requiring an intent-file migration.
-//
-// The empty manifestDir parameter forces the embedded-first lookup
-// (production path). For one of the shipped mcphub manifests, port
-// must be returned verbatim. (Shipped manifests do not change ports
-// at runtime — this is a stable contract.)
-func TestResolveManifestDaemonPort_EmbedFirst(t *testing.T) {
-	// time is one of the global mcphub manifests with a stable port
-	// (9128) declared at servers/time/manifest.yaml. The embed loader
-	// returns the same yaml the supervisor reads, so the manifest is
-	// guaranteed to exist in the embedded FS.
-	port, ok := ResolveManifestDaemonPort("time", "default")
-	if !ok {
-		t.Fatalf("ResolveManifestDaemonPort(time, default) returned !ok; want a port")
-	}
-	if port != 9128 {
-		t.Errorf("port: got %d, want 9128 (shipped manifest)", port)
-	}
-}
-
-// TestResolveManifestDaemonPort_UnknownReturnsZeroFalse pins the
-// fail-safe contract — callers can treat (0, false) as "not
-// authoritative" without crashing. Used by the supervisor status seam
-// to fall back to the intent-stored Port=0 when no manifest exists
-// (e.g. a hand-edited supervisor-intent.json with an unknown server).
-func TestResolveManifestDaemonPort_UnknownReturnsZeroFalse(t *testing.T) {
-	port, ok := ResolveManifestDaemonPort("does-not-exist", "default")
-	if ok {
-		t.Errorf("expected !ok for unknown server; got port=%d", port)
-	}
-	if port != 0 {
-		t.Errorf("port: got %d, want 0", port)
-	}
-}
-
 // TestScanIncludesManifestOnlyServers pins the visibility fix on the
 // matrix-row-vanishes UX bug. Before the fix, ScanFrom assembled its
 // entries map purely from per-client scan output — so a server whose

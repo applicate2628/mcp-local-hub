@@ -774,60 +774,11 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		})
 	}
 
-	// F5 legacy-descriptor port backfill. BEFORE loadIntentFiles reads the
-	// intent for the first reconcile, raise any Port=0 legacy/global descriptor
-	// to the manifest-declared port (memory@9123, time@9128, gdb@9129, …) so the
-	// port-based protections — liveness bind check, P1b first-bind deadline, P2a
-	// squatter reap, and `mcphub daemon recover` — work for pre-port-field rows.
-	// NON-FATAL: a backfill failure never blocks startup; the daemons still run,
-	// they just keep the pre-F5 port=0 protection gap until the next clean start.
-	if bf, bfErr := api.BackfillIntentDaemonPorts(stateDir); bfErr != nil {
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: "warn",
-			Source:   "reconcile",
-			Event:    "intent-port-backfill-failed",
-			Body:     map[string]any{"err": bfErr.Error()},
-		})
-	} else {
-		if bf.Contended {
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "info",
-				Source:   "reconcile",
-				Event:    "intent-port-backfill-skipped-contended",
-				Body:     map[string]any{"reason": "another writer held the supervisor-intent flock; retries next startup"},
-			})
-		}
-		for _, r := range bf.Applied {
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "info",
-				Source:   "reconcile",
-				Event:    "intent-port-backfilled",
-				TaskName: r.TaskName,
-				Body: map[string]any{
-					"server":                        r.Server,
-					"daemon":                        r.Daemon,
-					"port":                          r.Port,
-					"startup_bind_deadline_seconds": r.BindDeadlineSecs,
-				},
-			})
-		}
-		for _, tn := range bf.UnresolvedPortZero {
-			// DEBUG, not warn: an unresolved row recurs on every startup and never
-			// self-heals, so a warn here cries wolf. The common unresolved case is a
-			// renamed/removed server manifest; it is not per-boot-actionable, and a
-			// genuinely stuck daemon already surfaces as red in the GUI/status. Empty
-			// Server/Daemon timer rows are skipped upstream and never reach here; so
-			// is EVERY serena row (skipped by server identity BEFORE the resolve), so
-			// a serena descriptor can never land in UnresolvedPortZero.
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "debug",
-				Source:   "reconcile",
-				Event:    "intent-port-unresolved",
-				TaskName: tn,
-				Body:     map[string]any{"reason": "descriptor port is 0 and the server manifest did not resolve a port>0; port-based protections remain inactive for this daemon"},
-			})
-		}
-	}
+	// (F5 legacy-descriptor port backfill DELETED here — the port-resolution
+	// owner now resolves a Port=0 legacy descriptor's manifest port lazily at
+	// every decision point (liveness sweep, P1b deadline, squatter, recover), so
+	// there is no startup write-pass rewriting supervisor-intent.json. A genuine
+	// resolve-miss surfaces as the liveness sweep's daemon-port-unresolved event.)
 
 	// Read the two intent files before exposing IPC. daemon-intent.json
 	// parse/schema failures are fail-closed: a corrupt stop/quarantine

@@ -359,15 +359,3 @@ func findDaemonPort(m *config.ServerManifest, daemonName string) (int, bool) {
 	return d.Port, true
 }
 
-// ResolveManifestDaemonPort is the exported port-only convenience wrapper. It
-// now DELEGATES to the port-resolution owner's resolveManifestPortAndDeadline
-// (supervisor_port_owner.go) so the tree holds exactly ONE embed-first manifest
-// port+deadline reader — this wrapper drops its own loadManifestForServer call
-// (design Phase 1, Claim #1). Returns (0, false) on any error (missing manifest,
-// daemon name mismatch) so callers can treat 0 as "not authoritative" rather
-// than fail-closed. Signature preserved; port-only by design (callers that need
-// the deadline call the owner directly).
-func ResolveManifestDaemonPort(server, daemon string) (int, bool) {
-	port, _, ok := resolveManifestPortAndDeadline(server, daemon)
-	return port, ok
-}

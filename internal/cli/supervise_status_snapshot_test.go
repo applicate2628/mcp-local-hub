@@ -29,9 +29,9 @@ func withFakePortOwnersSnapshot(t *testing.T, fn func() (map[int]int, error)) *i
 }
 
 // seedRunningDaemons writes a state-safe supervisor-intent.json with n Running
-// daemons (ports preset so the status producer never reaches
-// ResolveManifestDaemonPort / the registry) and returns the stateDir, the
-// populated tracker, and a task -> (pid, port) map for assertions. StartedAt is
+// daemons (ports preset so the status producer's port resolver short-circuits on
+// Port>0 and never reaches the manifest / the registry) and returns the stateDir,
+// the populated tracker, and a task -> (pid, port) map for assertions. StartedAt is
 // set well past the bind grace so a not-live classification is not masked by
 // the grace window.
 func seedRunningDaemons(t *testing.T, n int) (string, *DaemonRuntimeTracker, map[string]struct{ pid, port int }) {

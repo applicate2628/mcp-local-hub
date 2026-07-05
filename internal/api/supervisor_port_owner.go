@@ -7,11 +7,11 @@
 // spawn-cache (the spawn contract, the sole source for runtime_spec rows, and a
 // reconcile drift-detection input); only ownership of the DECISION moves here.
 //
-// This supersedes the two pre-existing manifest resolvers (F5's
-// BackfillIntentDaemonPorts write-convergence and supervise_status.go's private
-// read-fallback memo) and the accreted deadline special-cases (F5's
-// server==serena skip, the argv-keyed isSerenaProxyDescriptor deadline arm) —
-// see work-items/decisions/2026-07-05-daemon-port-resolution-single-owner.md.
+// This replaced two pre-existing manifest resolvers (a startup write-convergence
+// pass and supervise_status.go's private read-fallback memo) and the accreted
+// deadline special-cases (a server==serena backfill skip and an argv-keyed
+// serena-proxy deadline arm), all now deleted — see
+// work-items/decisions/2026-07-05-daemon-port-resolution-single-owner.md.
 package api
 
 // Port/deadline defaults, homed here as the SINGLE owner of the magic values
