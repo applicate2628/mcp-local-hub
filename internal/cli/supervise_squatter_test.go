@@ -128,6 +128,44 @@ func TestClassifyPortSquatter_OwnGlobalDaemon(t *testing.T) {
 	}
 }
 
+// TestClassifyPortSquatter_OwnGlobalDaemonBlankFieldsRecoveredFromArgs is the
+// P3b guard: a blank-identity legacy row (Server=="", Daemon=="", args carry
+// --server/--daemon) now classifies its own squatter via the owner's
+// args-recovery — the protection F5's PR #504 blank-field identity-heal used to
+// provide, now provided WITHOUT F5. Pre-P3b the raw `d.Server != ""` gate made
+// this Foreign (unreapable own child).
+func TestClassifyPortSquatter_OwnGlobalDaemonBlankFieldsRecoveredFromArgs(t *testing.T) {
+	d := globalDaemonDescriptor()
+	d.Server = "" // blank fields; identity lives only in Args
+	d.Daemon = ""
+	const owner = 44000
+	setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
+		return squatterIdentityFor(owner, d), nil
+	}, alwaysExeMatch)
+	tracked := map[string]DaemonRuntimeEntry{
+		canonicalSupervisorTaskName(d.TaskName): {CurrentPID: 22036},
+	}
+	if verdict, _ := classifyPortSquatter(d, owner, 1, tracked); verdict != squatterOwnTask {
+		t.Fatalf("verdict = %v, want squatterOwnTask (identity recovered from args)", verdict)
+	}
+}
+
+// TestClassifyPortSquatter_FieldArgvMismatchForeign is the fail-closed guard: a
+// descriptor whose struct field DISAGREES with its argv token → owner ok=false →
+// classifier Foreign (never reap on a corrupt/mixed identity).
+func TestClassifyPortSquatter_FieldArgvMismatchForeign(t *testing.T) {
+	d := globalDaemonDescriptor()
+	d.Server = "memory"
+	d.Args = []string{"daemon", "--server", "time", "--daemon", "default"} // field says memory, argv says time
+	const owner = 44000
+	setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
+		return squatterIdentityFor(owner, d), nil
+	}, alwaysExeMatch)
+	if verdict, _ := classifyPortSquatter(d, owner, 1, nil); verdict != squatterForeign {
+		t.Fatalf("verdict = %v, want squatterForeign (field/argv mismatch is fail-closed)", verdict)
+	}
+}
+
 func TestClassifyPortSquatter_OwnSerenaProxyByTaskName(t *testing.T) {
 	d := serenaProxyDescriptor()
 	const owner = 55001
@@ -301,6 +339,21 @@ func TestClassifyPortSquatter_LSPWorkspaceProxy(t *testing.T) {
 		set(`"C:\mcphub.exe" restart --server x`)
 		if v, _ := classifyPortSquatter(unknown, owner, 1, nil); v != squatterForeign {
 			t.Fatalf("verdict = %v, want squatterForeign (unknown descriptor shape fails closed)", v)
+		}
+	})
+	// bot PR #505 r5 F3: a FIELDLESS legacy workspace-proxy row (Server=="",
+	// Daemon=="" — the shape F5's identity-heal used to fix) whose port the owner
+	// resolves from argv must ALSO be reapable. Before the classifier went argv-only
+	// it fell to the global-daemon arm, DescriptorServerDaemon failed (no
+	// --server/--daemon), and a lost own-child squatting the port was observed-Foreign
+	// forever → EADDRINUSE wedge. It must now classify own-task like the field-set row.
+	t.Run("fieldless legacy workspace-proxy own task", func(t *testing.T) {
+		fieldless := d
+		fieldless.Server = ""
+		fieldless.Daemon = ""
+		set(joinCmdLine(append([]string{fieldless.Command}, fieldless.Args...)))
+		if v, _ := classifyPortSquatter(fieldless, owner, 1, nil); v != squatterOwnTask {
+			t.Fatalf("verdict = %v, want squatterOwnTask (fieldless workspace-proxy is argv-classified, F3)", v)
 		}
 	})
 }

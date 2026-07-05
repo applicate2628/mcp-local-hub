@@ -774,60 +774,11 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		})
 	}
 
-	// F5 legacy-descriptor port backfill. BEFORE loadIntentFiles reads the
-	// intent for the first reconcile, raise any Port=0 legacy/global descriptor
-	// to the manifest-declared port (memory@9123, time@9128, gdb@9129, …) so the
-	// port-based protections — liveness bind check, P1b first-bind deadline, P2a
-	// squatter reap, and `mcphub daemon recover` — work for pre-port-field rows.
-	// NON-FATAL: a backfill failure never blocks startup; the daemons still run,
-	// they just keep the pre-F5 port=0 protection gap until the next clean start.
-	if bf, bfErr := api.BackfillIntentDaemonPorts(stateDir); bfErr != nil {
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: "warn",
-			Source:   "reconcile",
-			Event:    "intent-port-backfill-failed",
-			Body:     map[string]any{"err": bfErr.Error()},
-		})
-	} else {
-		if bf.Contended {
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "info",
-				Source:   "reconcile",
-				Event:    "intent-port-backfill-skipped-contended",
-				Body:     map[string]any{"reason": "another writer held the supervisor-intent flock; retries next startup"},
-			})
-		}
-		for _, r := range bf.Applied {
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "info",
-				Source:   "reconcile",
-				Event:    "intent-port-backfilled",
-				TaskName: r.TaskName,
-				Body: map[string]any{
-					"server":                        r.Server,
-					"daemon":                        r.Daemon,
-					"port":                          r.Port,
-					"startup_bind_deadline_seconds": r.BindDeadlineSecs,
-				},
-			})
-		}
-		for _, tn := range bf.UnresolvedPortZero {
-			// DEBUG, not warn: an unresolved row recurs on every startup and never
-			// self-heals, so a warn here cries wolf. The common unresolved case is a
-			// renamed/removed server manifest; it is not per-boot-actionable, and a
-			// genuinely stuck daemon already surfaces as red in the GUI/status. Empty
-			// Server/Daemon timer rows are skipped upstream and never reach here; so
-			// is EVERY serena row (skipped by server identity BEFORE the resolve), so
-			// a serena descriptor can never land in UnresolvedPortZero.
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "debug",
-				Source:   "reconcile",
-				Event:    "intent-port-unresolved",
-				TaskName: tn,
-				Body:     map[string]any{"reason": "descriptor port is 0 and the server manifest did not resolve a port>0; port-based protections remain inactive for this daemon"},
-			})
-		}
-	}
+	// (F5 legacy-descriptor port backfill DELETED here — the port-resolution
+	// owner now resolves a Port=0 legacy descriptor's manifest port lazily at
+	// every decision point (liveness sweep, P1b deadline, squatter, recover), so
+	// there is no startup write-pass rewriting supervisor-intent.json. A genuine
+	// resolve-miss surfaces as the liveness sweep's daemon-port-unresolved event.)
 
 	// Read the two intent files before exposing IPC. daemon-intent.json
 	// parse/schema failures are fail-closed: a corrupt stop/quarantine
@@ -2947,21 +2898,30 @@ func overlayKeySet(overlay map[string]string) []string {
 // intent-path env-channel injection share, so they can never diverge on what
 // counts as a serena-proxy row.
 func isSerenaProxyDescriptor(d api.SupervisorDaemon) bool {
-	return len(d.Args) >= 2 && d.Args[0] == "daemon" && d.Args[1] == "serena-proxy"
+	return api.IsSerenaProxyDescriptor(d)
 }
 
 // isLSPWorkspaceProxyDescriptor reports whether a SupervisorDaemon descriptor is
-// a workspace-scoped LSP proxy row, identified by Server == "mcp-language-server"
-// AND its wrapper argv carrying the `daemon workspace-proxy` subcommand (the
-// shape api.BuildSupervisorDaemonForLSP emits:
+// a workspace-scoped LSP proxy row, identified from ARGV ALONE by its wrapper
+// carrying the `daemon workspace-proxy` subcommand (the shape
+// api.BuildSupervisorDaemonForLSP emits:
 // `daemon workspace-proxy --port … --workspace … --language …`). Serena-proxy
 // rows (`daemon serena-proxy …`) and global/legacy daemon rows
 // (`daemon --server … --daemon …`) return false. This is the single
 // classification the reconcile orphan-exclusion guard uses, so it can never
 // diverge from the descriptor the LSP register/unregister path builds.
+//
+// It re-exports the argv-only api.IsWorkspaceLSPProxyDescriptor — the SAME
+// predicate the port owner's descriptorArgPort scoping uses — so the port-resolve
+// side and the squatter/reconcile protect side can never disagree about the shape.
+// The old `Server == "mcp-language-server"` conjunct was DROPPED (bot PR #505 r5
+// F3): the `daemon workspace-proxy` argv is the launch truth (only
+// mcp-language-server emits that subcommand), so a FIELDLESS legacy row (Server=="")
+// whose port the owner already resolves must classify here too — otherwise a lost
+// child squatting its port is observed-Foreign, never reaped, and the daemon wedges
+// on EADDRINUSE.
 func isLSPWorkspaceProxyDescriptor(d api.SupervisorDaemon) bool {
-	return d.Server == "mcp-language-server" &&
-		len(d.Args) >= 2 && d.Args[0] == "daemon" && d.Args[1] == "workspace-proxy"
+	return api.IsWorkspaceLSPProxyDescriptor(d)
 }
 
 // lspWorkspaceProxyArgValue returns the value of the named flag (e.g.
@@ -3307,6 +3267,12 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			cmd.Env = appendDaemonOverlayKeys(cmd.Env, overlayKeySet(overlayEnv))
 		}
 
+		// Resolve the server through the OWNER for the spawn-time PATH gates below:
+		// a legacy blank-field gdb/lldb row (Server=="", args `--server gdb`) would
+		// otherwise miss these operator-critical DLL/toolchain PATH injections now
+		// that F5 no longer heals the Server field before spawn (bot PR #505 r3).
+		spawnServer := api.DescriptorServerName(d)
+
 		// Intel oneAPI PATH injection (operator-CRITICAL: MKL-linked inferior
 		// exes fail to load DLLs under gdb/lldb because the daemon + inferior
 		// don't inherit the oneAPI component DLL dirs). For a TARGET-set daemon
@@ -3321,7 +3287,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// single env-composition path (no parallel spawn flow). See
 		// internal/oneapi + the makeProductionSpawnFnWithStatePath oneAPIInj
 		// doc.
-		if oneAPIInj.applies(d.Server) {
+		if oneAPIInj.applies(spawnServer) {
 			merged, applied := injectOneAPIEnv(cmd.Env, oneAPIInj.Dirs)
 			cmd.Env = merged
 			if len(applied) > 0 && events != nil {
@@ -3331,7 +3297,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 					Event:    "oneapi-path-injected",
 					TaskName: d.TaskName,
 					Body: map[string]any{
-						"server": d.Server,
+						"server": spawnServer,
 						"daemon": d.Daemon,
 						"dirs":   applied,
 					},
@@ -3350,7 +3316,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// gdb/lldb resolves. INDEPENDENT of the oneAPI gate (fires on a
 		// non-oneAPI host too); same {gdb,lldb} target set. No-op when nothing is
 		// detected (POSIX with debuggers on PATH, or no MSYS2 install).
-		if defaultOneAPITargetServers[d.Server] {
+		if defaultOneAPITargetServers[spawnServer] {
 			if dbgDirs := toolchain.DebuggerDirs(); len(dbgDirs) > 0 {
 				merged, applied := injectOneAPIEnv(cmd.Env, dbgDirs)
 				cmd.Env = merged
@@ -3361,7 +3327,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 						Event:    "debugger-path-injected",
 						TaskName: d.TaskName,
 						Body: map[string]any{
-							"server": d.Server,
+							"server": spawnServer,
 							"daemon": d.Daemon,
 							"dirs":   applied,
 						},
@@ -3662,6 +3628,11 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// failure this PR exists to surface. The spawnLogged channel
 		// then gates the goroutine so daemon-exited never precedes
 		// daemon-spawned in the log even if Emit itself is slow.
+		// Effective port (owner), not the raw field: a legacy Port=0 row still binds
+		// its manifest port, so log that for a meaningful audit trail instead of 0
+		// (commission arch-F3 / fable-F5). EffectiveDaemonPort returns d.Port when
+		// >0, the manifest port for a resolvable Port=0 row, else 0.
+		auditPort, _ := api.EffectiveDaemonPort(d)
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -3671,7 +3642,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 				"pid":       pid,
 				"command":   d.Command,
 				"workspace": d.Workspace,
-				"port":      d.Port,
+				"port":      auditPort,
 			},
 		})
 		spawnLogged := make(chan struct{})

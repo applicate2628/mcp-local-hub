@@ -159,89 +159,43 @@ func TestDaemonRecover_NoSquatterGoesStraightToForceRespawn(t *testing.T) {
 	}
 }
 
-// TestDaemonRecover_Port0HintRoutesSerenaByResolvedIdentity is the regression
-// guard for bot PR #504's blank-serena finding: the port-0 recover hint must
-// route a serena row to the `migrate serena` remediation (F5 never backfills
-// serena, so a `supervise` restart would loop), and it must do so by resolving
-// the server through the SAME args-recovery owner F5 uses — so a blank-identity
-// legacy serena row (Server=="", args carry `--server serena`) still gets the
-// serena hint, not the generic F5 hint.
-func TestDaemonRecover_Port0HintRoutesSerenaByResolvedIdentity(t *testing.T) {
-	const (
-		serenaHint      = "migrate serena legacy-to-dynamic-pool"
-		genericHint     = "restart `mcphub supervise`"
-		unresolvantHint = "not a manifest-backed daemon"
-	)
+// TestDaemonRecover_Port0ResolvesEffectivePortOrWarns is the P3c guard: recover
+// no longer skips a Port=0 descriptor + prints a 3-way F5-modelling hint. It
+// resolves the effective port through the owner: a legacy Port=0 row whose
+// manifest declares a port PROCEEDS into the squatter/respawn path (no
+// no-resolvable-port warning); a genuine resolve-miss (renamed/removed manifest,
+// or a non-manifest-daemon / portless row) warns and returns. The force respawn
+// runs in every case.
+func TestDaemonRecover_Port0ResolvesEffectivePortOrWarns(t *testing.T) {
+	const noPortWarn = "no resolvable port"
 	cases := []struct {
 		name     string
 		desc     api.SupervisorDaemon
-		wantHint string
-		notHint  string
+		wantWarn bool // true → unresolvable → warn; false → resolved → proceeds
 	}{
 		{
-			name: "blank-field legacy serena resolves via args",
-			desc: api.SupervisorDaemon{
-				TaskName: `\mcp-local-hub-serena-unified`,
-				// Server blank — must be recovered from args, exactly the vintage
-				// the bot flagged.
-				Args: []string{"daemon", "--server", "serena", "--daemon", "unified"},
-				Port: 0,
-			},
-			wantHint: serenaHint,
-			notHint:  genericHint,
+			name: "resolvable memory Port=0 proceeds (manifest 9123)",
+			desc: api.SupervisorDaemon{TaskName: `\mcp-local-hub-memory-default`, Server: "memory", Daemon: "default",
+				Args: []string{"daemon", "--server", "memory", "--daemon", "default"}, Port: 0},
+			wantWarn: false,
 		},
 		{
-			name: "populated-field serena",
-			desc: api.SupervisorDaemon{
-				TaskName: `\mcp-local-hub-serena-unified`,
-				Server:   "serena",
-				Daemon:   "unified",
-				Args:     []string{"daemon", "--server", "serena", "--daemon", "unified"},
-				Port:     0,
-			},
-			wantHint: serenaHint,
-			notHint:  genericHint,
+			name: "resolvable blank-field serena Port=0 proceeds (args-recovered, manifest 9121)",
+			desc: api.SupervisorDaemon{TaskName: `\mcp-local-hub-serena-unified`,
+				Args: []string{"daemon", "--server", "serena", "--daemon", "unified"}, Port: 0},
+			wantWarn: false,
 		},
 		{
-			name: "non-serena manifest daemon keeps the F5 backfill hint",
-			desc: api.SupervisorDaemon{
-				TaskName: `\mcp-local-hub-memory-default`,
-				Server:   "memory",
-				Daemon:   "default",
-				Args:     []string{"daemon", "--server", "memory", "--daemon", "default"},
-				Port:     0,
-			},
-			wantHint: genericHint,
-			notHint:  serenaHint,
+			name: "unresolvable renamed server warns",
+			desc: api.SupervisorDaemon{TaskName: `\mcp-local-hub-ghost-default`, Server: "ghost-server-x", Daemon: "default",
+				Args: []string{"daemon", "--server", "ghost-server-x", "--daemon", "default"}, Port: 0},
+			wantWarn: true,
 		},
 		{
-			name: "unresolvable non-daemon row promises no backfill",
-			desc: api.SupervisorDaemon{
-				// A maintenance-timer / one-shot shape: DescriptorServerDaemon returns
-				// ok=false, F5 leaves it untouched, so the hint must NOT promise a
-				// `supervise`-restart backfill (fable/codex deep-sec PR #504).
-				TaskName: `\mcp-local-hub-workspace-weekly-refresh`,
-				Args:     []string{"workspace-weekly-refresh"},
-				Port:     0,
-			},
-			wantHint: unresolvantHint,
-			notHint:  genericHint,
-		},
-		{
-			name: "populated identity but missing manifest promises no backfill",
-			desc: api.SupervisorDaemon{
-				// Bot PR #504 case: Server/Daemon populated so identity resolves, but
-				// the manifest is missing/renamed → ResolveManifestDaemonPort returns
-				// !ok, exactly what F5 treats as UnresolvedPortZero (no backfill). The
-				// hint must mirror F5 and NOT promise a supervise-restart backfill.
-				TaskName: `\mcp-local-hub-ghost-server-default`,
-				Server:   "ghost-server-that-does-not-exist",
-				Daemon:   "default",
-				Args:     []string{"daemon", "--server", "ghost-server-that-does-not-exist", "--daemon", "default"},
-				Port:     0,
-			},
-			wantHint: unresolvantHint,
-			notHint:  genericHint,
+			name: "unresolvable non-daemon timer row warns",
+			desc: api.SupervisorDaemon{TaskName: `\mcp-local-hub-workspace-weekly-refresh`,
+				Args: []string{"workspace-weekly-refresh"}, Port: 0},
+			wantWarn: true,
 		},
 	}
 	for _, tc := range cases {
@@ -257,13 +211,13 @@ func TestDaemonRecover_Port0HintRoutesSerenaByResolvedIdentity(t *testing.T) {
 				t.Fatalf("recover errored: %v", err)
 			}
 			got := errBuf.String()
-			if !strings.Contains(got, tc.wantHint) {
-				t.Errorf("hint missing %q; got:\n%s", tc.wantHint, got)
+			if tc.wantWarn && !strings.Contains(got, noPortWarn) {
+				t.Errorf("want no-resolvable-port warning; got:\n%s", got)
 			}
-			if strings.Contains(got, tc.notHint) {
-				t.Errorf("hint wrongly contained %q; got:\n%s", tc.notHint, got)
+			if !tc.wantWarn && strings.Contains(got, noPortWarn) {
+				t.Errorf("resolvable row wrongly warned no-port; got:\n%s", got)
 			}
-			// Port-0 always proceeds to the force respawn regardless of hint.
+			// The force respawn runs in every case (recoverReapPortSquatter → nil).
 			if len(env.respawnCalls) != 1 || !env.respawnCalls[0].force {
 				t.Fatalf("expected one force=true respawn; got %+v", env.respawnCalls)
 			}

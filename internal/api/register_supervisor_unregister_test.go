@@ -166,6 +166,74 @@ func TestRemoveSerenaSupervisorIntentForWorkspace_KillsLiveProxyBeforeDescriptor
 	}
 }
 
+// TestRemoveSerenaSupervisorIntentForWorkspace_KillsLegacyPortZeroProxyByArgvPort
+// is bot PR #505 r5 completeness sweep (sonnet): a LEGACY Port=0 serena-proxy row
+// (F5 no longer persists the port into the field) still binds the `--port` from its
+// argv. Keying the pre-removal force-kill on the raw descriptor.Port would skip the
+// kill entirely for that row — the descriptor is removed but the live child keeps
+// squatting its port (lost-own-child). Resolving through EffectiveDaemonPort makes
+// the kill fire on the argv-recovered port.
+func TestRemoveSerenaSupervisorIntentForWorkspace_KillsLegacyPortZeroProxyByArgvPort(t *testing.T) {
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	workspace := t.TempDir()
+	canonical, err := CanonicalWorkspacePath(workspace)
+	if err != nil {
+		t.Fatalf("CanonicalWorkspacePath: %v", err)
+	}
+	taskName := SerenaTaskNameForWorkspace(canonical)
+	// Port=0 in the field, but the serena-proxy argv carries --port 9150 (launch truth).
+	descriptor := SupervisorDaemon{
+		TaskName:  taskName,
+		Workspace: canonical,
+		Port:      0,
+		Args:      []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", canonical, "--port", "9150", "--task-name", taskName},
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{descriptor},
+	}); err != nil {
+		t.Fatalf("WriteSupervisorIntent: %v", err)
+	}
+
+	origKill := forceKillByPortFn
+	origReconcile := registerSupervisorReconcileFn
+	var killedPort int
+	var events []string
+	forceKillByPortFn = func(port int, timeout time.Duration) (portKillOutcome, error) {
+		events = append(events, "kill")
+		killedPort = port
+		return portKillKilled, nil
+	}
+	registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+		events = append(events, "reconcile")
+		return ReconcileResponse{}, nil
+	}
+	defer func() {
+		forceKillByPortFn = origKill
+		registerSupervisorReconcileFn = origReconcile
+	}()
+
+	removed, err := NewAPI().RemoveSerenaSupervisorIntentForWorkspace(canonical)
+	if err != nil {
+		t.Fatalf("RemoveSerenaSupervisorIntentForWorkspace: %v", err)
+	}
+	if !removed {
+		t.Fatal("RemoveSerenaSupervisorIntentForWorkspace removed=false")
+	}
+	if got, want := events, []string{"kill", "reconcile"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("events=%v, want %v (a Port=0 legacy proxy must still be killed via its argv --port)", got, want)
+	}
+	if killedPort != 9150 {
+		t.Fatalf("killed port=%d, want 9150 (resolved from serena-proxy argv --port, not the 0 field)", killedPort)
+	}
+}
+
 func TestRemoveSerenaSupervisorIntentForWorkspace_KillFailurePreservesDescriptor(t *testing.T) {
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
 	defer restoreState()

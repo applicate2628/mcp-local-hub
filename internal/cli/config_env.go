@@ -256,18 +256,28 @@ func resolveConfigEnvTargets(stateDir, selector string) ([]configEnvTarget, erro
 		if taskName == "" || isSupervisorMaintenanceTask(taskName) {
 			continue
 		}
-		server := strings.TrimSpace(d.Server)
-		daemon := strings.TrimSpace(d.Daemon)
-		if server == "" {
-			parsedServer, parsedDaemon := api.ParseManagedTaskName(taskName)
-			server = parsedServer
-			if daemon == "" {
-				daemon = parsedDaemon
-			}
+		// SERVER-scoped derivation via the PERMISSIVE argv-first owner: returns the
+		// Server field when it agrees with (or there is no) `--server` arg, and ""
+		// on a field/argv MISMATCH. So a populated Server that CONTRADICTS the launch
+		// argv fails closed (dropped, not mutated — commission PR #505 r6 P1), while a
+		// partial `--server demo` (no --daemon) still resolves server "demo" — keeping
+		// `config env list demo` consistent with `restart demo` selecting it (F2). The
+		// greedy task-name split is a last resort ONLY for a non-global-argv row (proxy
+		// / true task-name-only), never for a corrupt global whose args contradict it.
+		server := api.DescriptorServerName(d)
+		if server == "" && !api.DescriptorHasGlobalDaemonArgv(d) {
+			server, _ = api.ParseManagedTaskName(taskName)
 		}
+		// DAEMON column via the STRICT pair owner (needs both components; fails closed
+		// on a field/argv mismatch). Cosmetic for the server-only path; the pair
+		// selector below re-resolves strictly via ResolveDescriptorMatchIdentity.
+		daemon := strings.TrimSpace(d.Daemon)
 		if daemon == "" {
-			_, parsedDaemon := api.ParseManagedTaskName(taskName)
-			daemon = parsedDaemon
+			if _, rd, ok := api.DescriptorServerDaemon(d); ok {
+				daemon = rd
+			} else if !api.DescriptorHasGlobalDaemonArgv(d) {
+				_, daemon = api.ParseManagedTaskName(taskName)
+			}
 		}
 		if daemon == "" {
 			daemon = "default"
@@ -311,13 +321,29 @@ func resolveConfigEnvTargets(stateDir, selector string) ([]configEnvTarget, erro
 			// (taskName == want) AND the longest-prefix ownership of serverSelector
 			// must BOTH hold. installedServers empty (catalog read failed) → no
 			// sibling proof, any prefix-matching row is claimed (safe outcome).
-			if d.Server == "" || d.Daemon == "" {
+			// Prefer the OWNER's argv-recovered identity: the process spawns from its
+			// args, so `--server`/`--daemon` are authoritative. A blank-field row like
+			// \mcp-local-hub-demo-alpha-beta with args `--server demo --daemon
+			// alpha-beta` is exactly demo/alpha-beta — match it directly, instead of
+			// the greedy task-name longest-prefix disambiguator which would let an
+			// installed sibling (demo-alpha) wrongly claim it now that F5 no longer
+			// heals the fields (bot PR #505). Only a row the owner CANNOT resolve
+			// (no --server/--daemon args AND blank fields) falls back to the
+			// task-name prefix rule.
+			switch rs, rd, src := api.ResolveDescriptorMatchIdentity(d); src {
+			case api.IdentityFromArgvOrField:
+				if rs == serverSelector && rd == daemonSelector {
+					out = append(out, target)
+				}
+			case api.IdentityTaskNameSafe:
 				want := daemon_env_overlay.NormalizeOverlayKey("mcp-local-hub-" + serverSelector + "-" + daemonSelector)
 				if taskName == want && blankServerTaskOwnedByLongestInstalledPrefix(taskName, serverSelector, ensureInstalledServers()) {
 					out = append(out, target)
 				}
-			} else if server == serverSelector && daemon == daemonSelector {
-				out = append(out, target)
+			default:
+				// CorruptGlobalArgv (its args contradict the ambiguous task name) AND
+				// any future IdentitySource → fail closed: never mutate a mis-selected
+				// sibling's env (commission PR #505 r6).
 			}
 		default:
 			if server == serverSelector {

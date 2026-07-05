@@ -1,0 +1,407 @@
+package api
+
+import "testing"
+
+// stubOwnerResolver swaps resolveManifestPortAndDeadlineFn (the owner's manifest
+// reader) for a hermetic table keyed "server/daemon" → (port, deadlineSecs).
+func stubOwnerResolver(t *testing.T, table map[string][2]int) {
+	t.Helper()
+	prev := resolveManifestPortAndDeadlineFn
+	t.Cleanup(func() { resolveManifestPortAndDeadlineFn = prev })
+	resolveManifestPortAndDeadlineFn = func(server, daemon string) (int, int, bool) {
+		v, ok := table[server+"/"+daemon]
+		if !ok {
+			return 0, 0, false
+		}
+		return v[0], v[1], true
+	}
+}
+
+// --- EffectiveDaemonPort (AC1) ---
+
+func TestEffectiveDaemonPort_PortShortCircuit(t *testing.T) {
+	// A row with Port>0 resolves to that port WITHOUT consulting the manifest —
+	// prove it by making the resolver panic if called.
+	prev := resolveManifestPortAndDeadlineFn
+	t.Cleanup(func() { resolveManifestPortAndDeadlineFn = prev })
+	resolveManifestPortAndDeadlineFn = func(string, string) (int, int, bool) {
+		t.Fatalf("manifest resolver must not be consulted for a Port>0 row")
+		return 0, 0, false
+	}
+	d := SupervisorDaemon{Server: "memory", Daemon: "default", Port: 9123}
+	got, ok := EffectiveDaemonPort(d)
+	if !ok || got != 9123 {
+		t.Fatalf("EffectiveDaemonPort(Port=9123) = (%d,%v), want (9123,true)", got, ok)
+	}
+}
+
+func TestEffectiveDaemonPort_ManifestFallbackForPortZero(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{"memory/default": {9123, 0}})
+	d := SupervisorDaemon{Server: "memory", Daemon: "default", Port: 0,
+		Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}
+	got, ok := EffectiveDaemonPort(d)
+	if !ok || got != 9123 {
+		t.Fatalf("Port=0 manifest fallback = (%d,%v), want (9123,true)", got, ok)
+	}
+}
+
+// TestEffectiveDaemonPort_RecoversArgPortForProxyShape is the bot PR #505 r3
+// guard: a legacy Port=0 workspace-proxy / serena-proxy row carries its real port
+// in `--port` args (launch truth), and its dynamic daemon name is not in any
+// manifest — so the port must be recovered from the args BEFORE the manifest
+// fallback declares it portless.
+func TestEffectiveDaemonPort_RecoversArgPortForProxyShape(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{}) // manifest resolves nothing for the dynamic daemon
+	// LSP workspace-proxy: daemon workspace-proxy --port 9204 --workspace … --language go
+	wp := SupervisorDaemon{TaskName: `\mcp-local-hub-lsp-abcd-go`, Port: 0,
+		Args: []string{"daemon", "workspace-proxy", "--port", "9204", "--workspace", "d:\\ws", "--language", "go"}}
+	if got, ok := EffectiveDaemonPort(wp); !ok || got != 9204 {
+		t.Fatalf("workspace-proxy EffectiveDaemonPort = (%d,%v), want (9204,true) from --port arg", got, ok)
+	}
+	// serena-proxy: daemon serena-proxy --server serena --port 9151 …
+	sp := SupervisorDaemon{TaskName: `\mcp-local-hub-serena-hash`, Port: 0,
+		Args: []string{"daemon", "serena-proxy", "--server", "serena", "--port", "9151", "--workspace", "d:\\ws"}}
+	if got, ok := EffectiveDaemonPort(sp); !ok || got != 9151 {
+		t.Fatalf("serena-proxy EffectiveDaemonPort = (%d,%v), want (9151,true) from --port arg", got, ok)
+	}
+	// A global daemon carries NO --port arg → still falls to the manifest (nil here → unresolved).
+	gd := SupervisorDaemon{TaskName: `\mcp-local-hub-ghost-default`, Port: 0,
+		Args: []string{"daemon", "--server", "ghost", "--daemon", "default"}}
+	if got, ok := EffectiveDaemonPort(gd); ok || got != 0 {
+		t.Fatalf("global daemon w/o --port + no manifest = (%d,%v), want (0,false)", got, ok)
+	}
+	// A non-proxy global with a STRAY --port must NOT recover it (bot #505 r4) — the
+	// --port arg is only authoritative for the proxy shapes; a stray token falls to
+	// the manifest (nil → unresolved) so stop-force treats it as portless rather
+	// than by-port-killing a different listener.
+	stray := SupervisorDaemon{TaskName: `\mcp-local-hub-ghost-default`, Port: 0,
+		Args: []string{"daemon", "--server", "ghost", "--daemon", "default", "--port", "9999"}}
+	if got, ok := EffectiveDaemonPort(stray); ok || got != 0 {
+		t.Fatalf("non-proxy global w/ stray --port = (%d,%v), want (0,false)", got, ok)
+	}
+}
+
+// TestDescriptorServerName_FailsClosedOnFieldArgMismatch is the bot PR #505 r4
+// guard: DescriptorServerName must apply the SAME fail-closed rule as
+// DescriptorServerDaemon — a struct field disagreeing with the --server arg
+// resolves to "" so a server-only decision (restart/stop, serena deadline) never
+// acts on the wrong daemon.
+func TestDescriptorServerName_FailsClosedOnFieldArgMismatch(t *testing.T) {
+	// field memory vs arg time → mismatch → "".
+	if got := DescriptorServerName(SupervisorDaemon{Server: "memory", Args: []string{"daemon", "--server", "time", "--daemon", "default"}}); got != "" {
+		t.Fatalf("field/arg mismatch = %q, want \"\" (fail closed)", got)
+	}
+	// agreeing field+arg → the server.
+	if got := DescriptorServerName(SupervisorDaemon{Server: "memory", Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}); got != "memory" {
+		t.Fatalf("agreeing = %q, want memory", got)
+	}
+	// blank field, arg present → recovered from args.
+	if got := DescriptorServerName(SupervisorDaemon{Args: []string{"daemon", "serena-proxy", "--server", "serena"}}); got != "serena" {
+		t.Fatalf("blank-field recovery = %q, want serena", got)
+	}
+	// field present, no arg → the field (not a mismatch).
+	if got := DescriptorServerName(SupervisorDaemon{Server: "gdb"}); got != "gdb" {
+		t.Fatalf("field w/o arg = %q, want gdb", got)
+	}
+}
+
+func TestEffectiveDaemonPort_RenamedManifestNotOK(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{}) // resolver returns !ok for all
+	d := SupervisorDaemon{Server: "ghost", Daemon: "default", Port: 0,
+		Args: []string{"daemon", "--server", "ghost", "--daemon", "default"}}
+	if got, ok := EffectiveDaemonPort(d); ok || got != 0 {
+		t.Fatalf("renamed/removed manifest = (%d,%v), want (0,false)", got, ok)
+	}
+}
+
+func TestEffectiveDaemonPort_TimerRowNotOK(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{})
+	// A portless maintenance-timer row: no --server/--daemon args → identity !ok.
+	d := SupervisorDaemon{TaskName: `\mcp-local-hub-workspace-weekly-refresh`,
+		Args: []string{"workspace-weekly-refresh"}, Port: 0}
+	if got, ok := EffectiveDaemonPort(d); ok || got != 0 {
+		t.Fatalf("timer row = (%d,%v), want (0,false)", got, ok)
+	}
+}
+
+// --- EffectiveStartupBindDeadlineSeconds (AC2 + §4b) ---
+
+func TestEffectiveStartupBindDeadline_ExplicitWins(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{"memory/default": {9123, 45}})
+	d := SupervisorDaemon{Server: "memory", Daemon: "default", StartupBindDeadlineSeconds: 300,
+		Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}
+	if got := EffectiveStartupBindDeadlineSeconds(d); got != 300 {
+		t.Fatalf("explicit field = %d, want 300", got)
+	}
+}
+
+func TestEffectiveStartupBindDeadline_ManifestOverDefault(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{"gdb/default": {9129, 45}})
+	d := SupervisorDaemon{Server: "gdb", Daemon: "default",
+		Args: []string{"daemon", "--server", "gdb", "--daemon", "default"}}
+	if got := EffectiveStartupBindDeadlineSeconds(d); got != 45 {
+		t.Fatalf("manifest deadline = %d, want 45", got)
+	}
+}
+
+func TestEffectiveStartupBindDeadline_DefaultSixty(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{"memory/default": {9123, 0}}) // manifest declares no deadline
+	d := SupervisorDaemon{Server: "memory", Daemon: "default",
+		Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}
+	if got := EffectiveStartupBindDeadlineSeconds(d); got != defaultStartupBindDeadlineSeconds {
+		t.Fatalf("global default = %d, want %d", got, defaultStartupBindDeadlineSeconds)
+	}
+}
+
+// §4b: serena by SERVER IDENTITY gets 120 for BOTH shapes — the legacy-unified
+// `unified` daemon AND the dynamic-pool proxy whose daemon name is a workspace
+// hash the manifest does not declare.
+func TestEffectiveStartupBindDeadline_SerenaUnifiedIdentity120(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{"serena/unified": {9121, 0}}) // no manifest deadline
+	d := SupervisorDaemon{Server: "serena", Daemon: "unified",
+		Args: []string{"daemon", "--server", "serena", "--daemon", "unified"}}
+	if got := EffectiveStartupBindDeadlineSeconds(d); got != serenaStartupBindDeadlineSeconds {
+		t.Fatalf("legacy-unified serena = %d, want %d", got, serenaStartupBindDeadlineSeconds)
+	}
+}
+
+func TestEffectiveStartupBindDeadline_SerenaWorkspaceHashIdentity120(t *testing.T) {
+	// The workspace-hash daemon name MISSES the manifest (resolver !ok), so only
+	// server-identity keying gives it 120 — the §4a-regression this fixes.
+	stubOwnerResolver(t, map[string][2]int{}) // manifest lookup misses the hash
+	d := SupervisorDaemon{Server: "serena", Daemon: "6935d24c",
+		Args: []string{"daemon", "--server", "serena", "--daemon", "6935d24c"}}
+	if got := EffectiveStartupBindDeadlineSeconds(d); got != serenaStartupBindDeadlineSeconds {
+		t.Fatalf("workspace-hash serena = %d, want %d (server-identity, not manifest)", got, serenaStartupBindDeadlineSeconds)
+	}
+}
+
+func TestEffectiveStartupBindDeadline_NonSerenaMissStaysSixty(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{}) // non-serena manifest miss
+	d := SupervisorDaemon{Server: "memory", Daemon: "default",
+		Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}
+	if got := EffectiveStartupBindDeadlineSeconds(d); got != defaultStartupBindDeadlineSeconds {
+		t.Fatalf("non-serena miss = %d, want %d (identity default is only for serena)", got, defaultStartupBindDeadlineSeconds)
+	}
+}
+
+// TestEffectiveStartupBindDeadline_FieldlessSerenaProxy120 is the bot PR #505
+// guard: a serena-proxy row recognizable ONLY by its args (daemon serena-proxy
+// --server serena ...), with NO --daemon and blank Server/Daemon fields, still
+// gets 120s. DescriptorServerDaemon fails for it (daemon blank), but the deadline
+// keys on the server ALONE (descriptorServerName recovers --server serena), so it
+// does not drop to the 60s default and get restarted mid-cold-start.
+func TestEffectiveStartupBindDeadline_FieldlessSerenaProxy120(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{}) // no manifest deadline
+	d := SupervisorDaemon{TaskName: `\mcp-local-hub-serena-abc`,
+		Args: []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", "d:\\x", "--port", "9150", "--task-name", `\mcp-local-hub-serena-abc`}}
+	if got := EffectiveStartupBindDeadlineSeconds(d); got != serenaStartupBindDeadlineSeconds {
+		t.Fatalf("fieldless serena-proxy deadline = %d, want %d (server identity via --server arg, not the 60s default)", got, serenaStartupBindDeadlineSeconds)
+	}
+}
+
+func TestEffectiveStartupBindDeadline_IndependentOfPort(t *testing.T) {
+	// A port-stamped (Port>0) but deadline-zero row still resolves the manifest
+	// deadline — the port short-circuit must not gate the deadline.
+	stubOwnerResolver(t, map[string][2]int{"gdb/default": {9129, 45}})
+	d := SupervisorDaemon{Server: "gdb", Daemon: "default", Port: 9129,
+		Args: []string{"daemon", "--server", "gdb", "--daemon", "default"}}
+	if got := EffectiveStartupBindDeadlineSeconds(d); got != 45 {
+		t.Fatalf("deadline with Port>0 = %d, want 45 (independent of port)", got)
+	}
+}
+
+// --- DaemonPortResolver memo (AC3) ---
+
+func TestDaemonPortResolver_ParsesManifestOncePerServer(t *testing.T) {
+	calls := map[string]int{}
+	prev := resolveManifestPortAndDeadlineFn
+	t.Cleanup(func() { resolveManifestPortAndDeadlineFn = prev })
+	resolveManifestPortAndDeadlineFn = func(server, daemon string) (int, int, bool) {
+		calls[server+"/"+daemon]++
+		return 9123, 0, true
+	}
+	r := NewDaemonPortResolver()
+	d := SupervisorDaemon{Server: "memory", Daemon: "default", Port: 0,
+		Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}
+	// Resolve twice: EffectiveDaemonPort + EffectiveStartupBindDeadline both hit
+	// the memo, and a second Resolve of the same descriptor must not re-read.
+	r.Resolve(d)
+	r.Resolve(d)
+	if calls["memory/default"] != 1 {
+		t.Fatalf("manifest read %d times, want exactly 1 (memoized)", calls["memory/default"])
+	}
+	// And the memoized values match the pure calls.
+	port, deadline, ok := r.Resolve(d)
+	if !ok || port != 9123 || deadline != defaultStartupBindDeadlineSeconds {
+		t.Fatalf("memoized Resolve = (%d,%d,%v), want (9123,%d,true)", port, deadline, ok, defaultStartupBindDeadlineSeconds)
+	}
+}
+
+// --- DescriptorServerDaemon identity + fail-closed mismatch (AC4) ---
+
+func TestDescriptorServerDaemon_AgreeingFields(t *testing.T) {
+	d := SupervisorDaemon{Server: "memory", Daemon: "default",
+		Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}
+	s, dm, ok := DescriptorServerDaemon(d)
+	if !ok || s != "memory" || dm != "default" {
+		t.Fatalf("agreeing fields = (%q,%q,%v), want (memory,default,true)", s, dm, ok)
+	}
+}
+
+func TestDescriptorServerDaemon_RecoversBlankFieldsFromArgs(t *testing.T) {
+	d := SupervisorDaemon{Args: []string{"daemon", "--server", "paper-search-mcp", "--daemon", "default"}}
+	s, dm, ok := DescriptorServerDaemon(d)
+	if !ok || s != "paper-search-mcp" || dm != "default" {
+		t.Fatalf("blank-field recovery = (%q,%q,%v), want (paper-search-mcp,default,true)", s, dm, ok)
+	}
+}
+
+// TestEffectiveDaemonPort_RealEmbeddedManifest exercises the DEFAULT embed-first
+// manifest reader (no stub): a Port=0 descriptor for a shipped server resolves
+// its declared port, and an unknown server resolves (0,false). Preserves the
+// coverage of the deleted ResolveManifestDaemonPort embed-first tests.
+func TestEffectiveDaemonPort_RealEmbeddedManifest(t *testing.T) {
+	// time@9128 is a shipped global manifest (servers/time/manifest.yaml).
+	got, ok := EffectiveDaemonPort(SupervisorDaemon{Server: "time", Daemon: "default",
+		Args: []string{"daemon", "--server", "time", "--daemon", "default"}, Port: 0})
+	if !ok || got != 9128 {
+		t.Fatalf("EffectiveDaemonPort(time/default, Port=0) = (%d,%v), want (9128,true)", got, ok)
+	}
+	// unknown server → not authoritative.
+	if got, ok := EffectiveDaemonPort(SupervisorDaemon{Server: "does-not-exist", Daemon: "default",
+		Args: []string{"daemon", "--server", "does-not-exist", "--daemon", "default"}, Port: 0}); ok || got != 0 {
+		t.Fatalf("EffectiveDaemonPort(unknown) = (%d,%v), want (0,false)", got, ok)
+	}
+}
+
+func TestDescriptorServerDaemon_RejectsFieldArgvMismatch(t *testing.T) {
+	// Server field disagrees with the --server argv token → fail-closed ok=false,
+	// so no port-decision stamps a port the process (which launches from args)
+	// never binds.
+	d := SupervisorDaemon{Server: "memory", Daemon: "default",
+		Args: []string{"daemon", "--server", "time", "--daemon", "default"}}
+	if s, dm, ok := DescriptorServerDaemon(d); ok {
+		t.Fatalf("field/argv mismatch = (%q,%q,%v), want ok=false", s, dm, ok)
+	}
+	// Daemon field disagrees.
+	d2 := SupervisorDaemon{Server: "memory", Daemon: "alpha",
+		Args: []string{"daemon", "--server", "memory", "--daemon", "beta"}}
+	if _, _, ok := DescriptorServerDaemon(d2); ok {
+		t.Fatalf("daemon field/argv mismatch must be ok=false")
+	}
+}
+
+// --- proxy-shape argv predicates (bot PR #505 r5 F3 chokepoint) ---
+
+// TestProxyShapePredicates_ArgvOnly pins that Is{Serena,WorkspaceLSP}ProxyDescriptor
+// classify from ARGV ALONE — a fieldless legacy row (Server=="") and even a
+// wrong-Server row classify by their `daemon <kind>` subcommand, and a global
+// daemon / non-daemon row does not. This is the single owner of "which proxy
+// shape is this" that both the port owner (descriptorArgPort scoping) and the cli
+// squatter/reconcile classifiers share, so the argv-vs-field drift (F3) cannot recur.
+func TestProxyShapePredicates_ArgvOnly(t *testing.T) {
+	fieldlessWSProxy := SupervisorDaemon{TaskName: `\mcp-local-hub-lsp-abc-go`,
+		Args: []string{"daemon", "workspace-proxy", "--port", "9401", "--workspace", `C:\ws`, "--language", "go"}}
+	if !IsWorkspaceLSPProxyDescriptor(fieldlessWSProxy) {
+		t.Fatalf("fieldless (Server=='') workspace-proxy must classify by argv")
+	}
+	if IsSerenaProxyDescriptor(fieldlessWSProxy) {
+		t.Fatalf("workspace-proxy is not a serena-proxy")
+	}
+	// A stale/wrong Server field must not change the argv-derived shape.
+	wrongServerWSProxy := fieldlessWSProxy
+	wrongServerWSProxy.Server = "something-else"
+	if !IsWorkspaceLSPProxyDescriptor(wrongServerWSProxy) {
+		t.Fatalf("workspace-proxy shape is argv-derived; a wrong Server field must not hide it")
+	}
+	fieldlessSerena := SupervisorDaemon{Args: []string{"daemon", "serena-proxy", "--server", "serena", "--port", "9150"}}
+	if !IsSerenaProxyDescriptor(fieldlessSerena) {
+		t.Fatalf("fieldless serena-proxy must classify by argv")
+	}
+	if IsWorkspaceLSPProxyDescriptor(fieldlessSerena) {
+		t.Fatalf("serena-proxy is not a workspace-proxy")
+	}
+	// Global daemon + non-daemon rows are neither proxy shape.
+	global := SupervisorDaemon{Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}
+	if IsSerenaProxyDescriptor(global) || IsWorkspaceLSPProxyDescriptor(global) {
+		t.Fatalf("global daemon must not classify as any proxy shape")
+	}
+	timer := SupervisorDaemon{Args: []string{"workspace-weekly-refresh"}}
+	if IsSerenaProxyDescriptor(timer) || IsWorkspaceLSPProxyDescriptor(timer) {
+		t.Fatalf("maintenance timer must not classify as any proxy shape")
+	}
+}
+
+// --- round-6 leak class: global-argv discriminator + match-identity owner ---
+
+// TestDescriptorHasGlobalDaemonArgv pins the proxy-aware discriminator: ONLY a
+// `daemon --server…/--daemon…` global argv (well-formed OR partial/corrupt) is a
+// global daemon argv; the proxy shapes and non-daemon rows are NOT — so a fieldless
+// proxy stays recoverable by task name while a corrupt global fails closed.
+func TestDescriptorHasGlobalDaemonArgv(t *testing.T) {
+	cases := []struct {
+		name string
+		d    SupervisorDaemon
+		want bool
+	}{
+		{"well-formed global", SupervisorDaemon{Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}, true},
+		{"partial global (no --daemon)", SupervisorDaemon{Args: []string{"daemon", "--server", "demo"}}, true},
+		{"bare daemon", SupervisorDaemon{Args: []string{"daemon"}}, true},
+		{"serena-proxy", SupervisorDaemon{Args: []string{"daemon", "serena-proxy", "--server", "serena", "--port", "9150"}}, false},
+		{"workspace-proxy", SupervisorDaemon{Args: []string{"daemon", "workspace-proxy", "--port", "9401", "--workspace", `C:\ws`, "--language", "go"}}, false},
+		{"task-name-only timer", SupervisorDaemon{Args: []string{"workspace-weekly-refresh"}}, false},
+		{"no args", SupervisorDaemon{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := DescriptorHasGlobalDaemonArgv(tc.d); got != tc.want {
+				t.Fatalf("DescriptorHasGlobalDaemonArgv = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveDescriptorMatchIdentity pins the 3-way classification a pair consumer
+// switches on: authoritative identity, corrupt-global (fail-closed), or
+// task-name-safe (proxy / true task-name-only row).
+func TestResolveDescriptorMatchIdentity(t *testing.T) {
+	// (a) well-formed → FromArgvOrField.
+	if s, dm, src := ResolveDescriptorMatchIdentity(SupervisorDaemon{
+		Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}); src != IdentityFromArgvOrField || s != "memory" || dm != "default" {
+		t.Fatalf("well-formed = (%q,%q,%v), want (memory,default,FromArgvOrField)", s, dm, src)
+	}
+	// (b) partial global → CorruptGlobalArgv (fail closed).
+	if _, _, src := ResolveDescriptorMatchIdentity(SupervisorDaemon{
+		Args: []string{"daemon", "--server", "demo"}}); src != IdentityCorruptGlobalArgv {
+		t.Fatalf("partial global src = %v, want IdentityCorruptGlobalArgv", src)
+	}
+	// (b') field/argv mismatch → CorruptGlobalArgv.
+	if _, _, src := ResolveDescriptorMatchIdentity(SupervisorDaemon{Server: "memory", Daemon: "default",
+		Args: []string{"daemon", "--server", "time", "--daemon", "default"}}); src != IdentityCorruptGlobalArgv {
+		t.Fatalf("field/argv mismatch src = %v, want IdentityCorruptGlobalArgv", src)
+	}
+	// (c) proxy → TaskNameSafe.
+	if _, _, src := ResolveDescriptorMatchIdentity(SupervisorDaemon{
+		Args: []string{"daemon", "workspace-proxy", "--port", "9401", "--workspace", `C:\ws`, "--language", "go"}}); src != IdentityTaskNameSafe {
+		t.Fatalf("proxy src = %v, want IdentityTaskNameSafe", src)
+	}
+	// (c') true task-name-only → TaskNameSafe.
+	if _, _, src := ResolveDescriptorMatchIdentity(SupervisorDaemon{TaskName: `\mcp-local-hub-time-default`}); src != IdentityTaskNameSafe {
+		t.Fatalf("task-name-only src = %v, want IdentityTaskNameSafe", src)
+	}
+}
+
+// TestEffectiveDaemonPort_FieldlessWorkspaceProxyResolvesArgPort is the F3 root:
+// the owner resolves a fieldless workspace-proxy's LAUNCH-TRUTH `--port` even
+// though its dynamic daemon name is in no manifest and its Server field is blank —
+// so port protection stays ON. The cli squatter classifier now agrees (both call
+// the same argv predicate), closing the resolve-vs-protect drift.
+func TestEffectiveDaemonPort_FieldlessWorkspaceProxyResolvesArgPort(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{}) // no manifest — argv --port is the only source
+	d := SupervisorDaemon{TaskName: `\mcp-local-hub-lsp-abc-go`, Port: 0,
+		Args: []string{"daemon", "workspace-proxy", "--port", "9401", "--workspace", `C:\ws`, "--language", "go"}}
+	if got, ok := EffectiveDaemonPort(d); !ok || got != 9401 {
+		t.Fatalf("fieldless workspace-proxy port = (%d,%v), want (9401,true) via argv --port", got, ok)
+	}
+}

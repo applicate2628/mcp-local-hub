@@ -161,41 +161,17 @@ func recoverReapPortSquatter(cmd *cobra.Command, desc api.SupervisorDaemon, norm
 	out := cmd.OutOrStdout()
 	errOut := cmd.ErrOrStderr()
 
-	if desc.Port <= 0 {
-		// F4a: the descriptor carries no port, so the squatter reap below cannot
-		// run — a lost-child squatter (if any) is NOT reaped, and the force
-		// respawn that follows will loop on EADDRINUSE against it. Warn loudly
-		// rather than skip silently, then proceed to the force respawn.
-		fmt.Fprintf(errOut, "warning: descriptor for %s carries no port; the port-squatter check was SKIPPED (a lost-child squatter, if present, was NOT reaped).\n", norm)
-		// The hint must model F5's EXACT backfill decision, not a proxy for it —
-		// otherwise it promises a `supervise`-restart backfill that F5 will never
-		// deliver for a row it leaves untouched (fable/codex/bot deep-sec PR #504).
-		// F5 stamps a port ONLY when (a) the row is not serena AND (b) the manifest
-		// resolves port>0 for this (server,daemon). Mirror that by resolving identity
-		// through the SAME owner F5 uses (DescriptorServerDaemon, with args-recovery)
-		// AND calling the SAME manifest port resolver (ResolveManifestDaemonPort,
-		// embed-first, the exact lookup F5's resolveManifestPortAndDeadline wraps) —
-		// re-deriving the predicate instead of calling it is what let the earlier
-		// `identity resolved` proxy over-promise (bot PR #504).
-		hintServer, hintDaemon, _ := api.DescriptorServerDaemon(desc)
-		port, portOK := api.ResolveManifestDaemonPort(hintServer, hintDaemon)
-		switch {
-		case hintServer == api.SerenaServerName:
-			// serena is DELIBERATELY never port-backfilled by F5 (its lifecycle is
-			// owned by serena-migrate/build). A `supervise` restart would loop
-			// forever — the correct remediation is the dynamic-pool migration.
-			fmt.Fprintf(errOut, "hint: this is a legacy serena row that F5 never backfills — run `mcphub migrate serena legacy-to-dynamic-pool` to give it a runtime_spec (with the correct 120s bind deadline), then retry `mcphub daemon recover %s`.\n", norm)
-		case portOK && port > 0:
-			// The manifest resolves a real port for this (server,daemon), so F5 WILL
-			// raise it on the next supervise start (the case this hint was written for).
-			fmt.Fprintf(errOut, "hint: this is usually a legacy supervisor-intent.json row missing its port — restart `mcphub supervise` to backfill it, then retry `mcphub daemon recover %s`.\n", norm)
-		default:
-			// Not a manifest-backed daemon row (maintenance-timer / one-shot shape),
-			// OR its server manifest cannot resolve a port>0 (renamed/removed server,
-			// port-0 manifest → F5 reports it UnresolvedPortZero). F5 leaves ALL of
-			// these untouched, so a `supervise` restart will NOT backfill a port.
-			fmt.Fprintf(errOut, "hint: this descriptor's server manifest does not resolve a port (missing/renamed server, or not a manifest-backed daemon), so F5 cannot backfill it and restarting `mcphub supervise` will not help. Verify the server is still installed (`mcphub install`), or remove this stale supervisor-intent row.\n")
-		}
+	// Resolve the effective port through the owner: a legacy Port=0 descriptor
+	// whose manifest declares a port is now reaped like any other, not skipped.
+	// (This replaces the old desc.Port<=0 skip + the 3-way F5-modelling hint —
+	// once recover resolves the port itself, a "restart supervise to backfill"
+	// hint is obsolete, and F5 is being deleted.) A genuine resolve-miss
+	// (manifest missing/renamed, or a non-manifest-daemon / portless row) has no
+	// port to fight over — warn and return to the force respawn.
+	if port, ok := api.EffectiveDaemonPort(desc); ok && port > 0 {
+		desc.Port = port
+	} else {
+		fmt.Fprintf(errOut, "warning: descriptor for %s has no resolvable port (its server manifest is missing/renamed, or it is not a manifest-backed daemon); the port-squatter check was SKIPPED (a lost-child squatter, if present, was NOT reaped). Verify the server is still installed (`mcphub install`), or remove this stale supervisor-intent row.\n", norm)
 		return nil // no port to fight over
 	}
 	ownerPID, ok, err := recoverPortOwnerFn(desc.Port)

@@ -359,24 +359,3 @@ func findDaemonPort(m *config.ServerManifest, daemonName string) (int, bool) {
 	return d.Port, true
 }
 
-// ResolveManifestDaemonPort is the exported convenience wrapper around
-// loadManifestForServer + findDaemonPort. Looks up the canonical port
-// for the (server, daemon) pair from the embedded-first manifest store.
-// Returns (0, false) on any error (missing manifest, daemon name
-// mismatch) so callers can treat 0 as "not authoritative" rather than
-// fail-closed.
-//
-// Use case: the supervisor IPC status response reports each daemon's
-// Port from the SupervisorDaemon descriptor in supervisor-intent.json.
-// Existing intent files (PR #211 and earlier) wrote Port=0; the GUI
-// matrix renders "—" for those daemons even though the daemon is
-// listening on the manifest-declared port. Wrapping this lookup at
-// status-build time enriches the displayed port without requiring an
-// intent-file migration.
-func ResolveManifestDaemonPort(server, daemon string) (int, bool) {
-	m, err := loadManifestForServer("", server)
-	if err != nil || m == nil {
-		return 0, false
-	}
-	return findDaemonPort(m, daemon)
-}

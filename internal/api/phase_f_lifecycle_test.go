@@ -964,10 +964,16 @@ func TestStopForceKillSupervisorOwned_PortlessFallsBackToPID(t *testing.T) {
 
 func TestStopForceKillSupervisorOwned_PortlessNoPIDReturnsError(t *testing.T) {
 	stateDir := phaseFStateDir(t)
+	// A GENUINELY portless supervisor-owned daemon: a server with NO manifest, so
+	// the owner (EffectiveDaemonPort) resolves nothing and d.Port stays 0. NOTE a
+	// `time` Port=0 row is no longer portless — the owner resolves its manifest
+	// port 9128 (bot PR #505) — so it can no longer exercise the no-kill-surface
+	// path; use an unknown server to keep testing the genuinely-portless case.
 	intent := &SupervisorIntentFile{
 		Version: 1,
 		Daemons: []SupervisorDaemon{
-			{TaskName: `\mcp-local-hub-time-default`, Server: "time", Daemon: "default", Port: 0},
+			{TaskName: `\mcp-local-hub-phantomsrv-default`, Server: "phantomsrv", Daemon: "default", Port: 0,
+				Args: []string{"daemon", "--server", "phantomsrv", "--daemon", "default"}},
 		},
 	}
 	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), intent); err != nil {
@@ -983,7 +989,7 @@ func TestStopForceKillSupervisorOwned_PortlessNoPIDReturnsError(t *testing.T) {
 		forceKillByPortFn = origForceKill
 	})
 	supervisorIPCStatusFn = func(context.Context) ([]DaemonStatus, error) {
-		return []DaemonStatus{{TaskName: `\mcp-local-hub-time-default`, PID: 0, State: "Running"}}, nil
+		return []DaemonStatus{{TaskName: `\mcp-local-hub-phantomsrv-default`, PID: 0, State: "Running"}}, nil
 	}
 	stopForceKillPIDFn = func(pid int) error {
 		t.Fatalf("stopForceKillPIDFn called with pid %d; no live PID was available", pid)
@@ -994,7 +1000,7 @@ func TestStopForceKillSupervisorOwned_PortlessNoPIDReturnsError(t *testing.T) {
 		return portKillNoListener, nil
 	}
 
-	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "time", "")
+	results, handled, err := stopForceKillSupervisorOwned(context.Background(), "phantomsrv", "")
 	if err != nil {
 		t.Fatalf("stopForceKillSupervisorOwned: %v", err)
 	}
@@ -1009,6 +1015,31 @@ func TestStopForceKillSupervisorOwned_PortlessNoPIDReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(results[0].Err, "no kill surface") || !strings.Contains(results[0].Err, "portless descriptor") {
 		t.Fatalf("result error = %q, want no kill surface / portless descriptor wording", results[0].Err)
+	}
+}
+
+// TestForceKillOneSupervisorTarget_LegacyPortZeroEngagesResolvedPortKill is the
+// bot PR #505 positive guard: a legacy Port=0 row resolves its manifest port
+// (memory → 9123) through the owner, so the by-port kill fallback engages on the
+// RESOLVED port instead of skipping the descriptor as portless — catching a
+// surviving child that still holds the manifest port after F5's deletion.
+func TestForceKillOneSupervisorTarget_LegacyPortZeroEngagesResolvedPortKill(t *testing.T) {
+	orig := forceKillByPortFn
+	t.Cleanup(func() { forceKillByPortFn = orig })
+	var killedPort int
+	forceKillByPortFn = func(port int, _ time.Duration) (portKillOutcome, error) {
+		killedPort = port
+		return portKillKilled, nil
+	}
+	d := SupervisorDaemon{TaskName: `\mcp-local-hub-memory-default`, Server: "memory", Daemon: "default", Port: 0,
+		Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}
+	// No PID in the map → skip the PID arm → the resolved-port kill fallback runs.
+	result := forceKillOneSupervisorTarget(d, map[string]int{})
+	if killedPort != 9123 {
+		t.Fatalf("forceKillByPortFn port = %d, want 9123 (resolved from the memory manifest, not the raw Port=0)", killedPort)
+	}
+	if result.Err != "" {
+		t.Fatalf("portKillKilled outcome should be a success row; got Err=%q", result.Err)
 	}
 }
 

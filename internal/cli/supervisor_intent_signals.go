@@ -36,15 +36,17 @@ func supervisorIntentManagedServerSignals() (map[string]struct{}, error) {
 		if taskName != "" && api.IsMaintenanceTaskName(taskName) {
 			continue
 		}
-		server := strings.TrimSpace(d.Server)
-		if server == "" {
-			// Blank-Server legacy row: api.ServerFromTaskName's last-hyphen split
-			// mis-attributes a hyphenated daemon name (\mcp-local-hub-demo-alpha-beta,
-			// real server "demo", daemon "alpha-beta" → "demo-alpha"). Resolve the
-			// true owner via the longest-installed-prefix rule instead so the gate
-			// (install.go reconcile-hub filter + setup.go last-server maintenance
-			// gate) keys on the real server. ok=false (no installed prefix — an
-			// orphan/foreign row) → preserve the EXISTING taskName fallback below.
+		// Resolve the published server through the OWNER for EVERY row — not just
+		// blank-field ones. DescriptorServerName returns the Server field when it
+		// agrees with (or there is no) `--server` arg, and "" on a field/argv
+		// MISMATCH — so a lying-cache row ({Server:memory, args --server time}) does
+		// NOT publish `memory` (this signal gates hub client-config reconcile writes,
+		// a publish decision, commission PR #505 r6b). Only when the args carry no
+		// --server (a proxy / non-daemon-shaped row) fall back to the
+		// longest-installed-prefix rule; a corrupt global argv (DescriptorServerName==""
+		// but a global daemon argv) fails closed to the taskName signal below.
+		server := api.DescriptorServerName(d)
+		if server == "" && !api.DescriptorHasGlobalDaemonArgv(d) {
 			if owner, ok := api.ServerOwningTaskByLongestInstalledPrefix(taskName, installed); ok {
 				server = owner
 			}

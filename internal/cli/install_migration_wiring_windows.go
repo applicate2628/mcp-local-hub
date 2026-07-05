@@ -85,8 +85,15 @@ func runV5UpgradeWindows(cmd *cobra.Command) error {
 	}
 	var expectedPorts []int
 	for _, d := range intent.Daemons {
-		if d.Port > 0 {
-			expectedPorts = append(expectedPorts, d.Port)
+		// Resolve the EFFECTIVE port through the owner, not the raw field: a legacy
+		// Port=0 row (no longer backfilled since F5's deletion) still declares a
+		// manifest port that its daemon binds, and this list gates the post-
+		// force-terminate unbound check (ROLLBACK_DETACHED_DAEMONS_REMAIN). Reading
+		// the raw field would silently drop every legacy row from verification, so a
+		// transient that survived /T and still holds the port goes undetected and the
+		// new supervisor spawns a duplicate → EADDRINUSE cycle (commission fable-F1).
+		if port, ok := api.EffectiveDaemonPort(d); ok && port > 0 {
+			expectedPorts = append(expectedPorts, port)
 		}
 	}
 

@@ -1501,10 +1501,6 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 	// PR #284 P2). Empty daemonFilter -> empty filteredTaskName -> the
 	// task-name fallback is inert (the full-install branch already drops every
 	// row for m.Name).
-	var filteredTaskName string
-	if daemonFilter != "" {
-		filteredTaskName = canonicalIntentTaskKey("mcp-local-hub-" + m.Name + "-" + daemonFilter)
-	}
 	kept := make([]SupervisorDaemon, 0, len(prior.Daemons))
 	for _, d := range prior.Daemons {
 		// Full install: drop every row this server owns. The Server-field
@@ -1524,11 +1520,14 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 			kept = append(kept, d)
 			continue
 		}
-		// Filtered install: drop the selected daemon's row. Match on the
-		// populated fields first, then fall back to the canonical task name so
-		// a blank-/stale-Daemon legacy row for the same task is not duplicated.
-		if (d.Server == m.Name && d.Daemon == daemonFilter) ||
-			canonicalIntentTaskKey(d.TaskName) == filteredTaskName {
+		// Filtered install: drop the selected daemon's row. Route through the
+		// hardened pair predicate (same owner as install preflight) instead of a
+		// hand-rolled field-OR-taskname compare, so a populated row whose fields
+		// CONTRADICT its launch argv fails closed (kept, not replaced — commission PR
+		// #505 r6b) and a blank-field row is disambiguated by its argv when present
+		// rather than the ambiguous canonical name. A true task-name-only row still
+		// matches on the canonical name (the #284/#288-F4 replacement behavior).
+		if supervisorIntentRowMatchesServerDaemon(d, m.Name, daemonFilter) {
 			continue // replaced below
 		}
 		kept = append(kept, d)
@@ -1699,11 +1698,31 @@ func supervisorIntentRowOwnedByScope(d SupervisorDaemon, server string, scope *s
 	if server == "" {
 		return false
 	}
-	if d.Server == server {
-		return true
-	}
+	// POPULATED Server field: trust it for a reap claim ONLY when the launch argv
+	// does not CONTRADICT it. DescriptorServerName returns the field when it agrees
+	// with (or there is no) `--server` arg, and "" on a field/argv MISMATCH — so a
+	// lying-cache row ({Server:memory, args --server time}) is NOT reaped under
+	// `uninstall memory` (commission PR #505 r6b: reap obeys the same launch-truth
+	// rule as match/select). A well-formed populated row is byte-identical to the old
+	// `d.Server == server` grant.
 	if d.Server != "" {
-		return false
+		return DescriptorServerName(d) == server
+	}
+	// Blank Server field: the launch argv is authoritative over the AMBIGUOUS task
+	// name (\mcp-local-hub-demo-alpha-beta collides between demo/alpha-beta and
+	// demo-alpha/beta). PURE VETO — this block only ever SUBTRACTS a claim the
+	// task-name arms below would wrongly grant; it never grants one they would
+	// refuse, so the scope.taskNames/daemonKeys narrowing stays the sole claim
+	// authority and there is no over-claim vs a daemon-restricted scope (commission
+	// PR #505 r6: `mcphub uninstall demo-alpha` must not reap demo's live daemon
+	// whose argv says `--server demo`).
+	if rs := DescriptorServerName(d); rs != "" {
+		if rs != server {
+			return false // argv names a DIFFERENT server — never reap it under this scope
+		}
+		// rs == server: argv agrees; defer the grant to the existing arms unchanged.
+	} else if DescriptorHasGlobalDaemonArgv(d) {
+		return false // corrupt/partial global argv (--server mismatch/absent) — never task-name-reap
 	}
 	if scope != nil {
 		// Arm 1 — exact manifest-derived task membership (r31-F1, precise).
@@ -1818,11 +1837,43 @@ func maintenanceTimerOwnedBy(tm MaintenanceTimer, server string) bool {
 	if server == "" {
 		return false
 	}
-	if tm.Server == server {
-		return true
+	// POPULATED Server field: trust it ONLY when the timer's own argv (`restart
+	// --server X`) does not CONTRADICT it — a lying-cache timer must not be reaped on
+	// the stale field (commission PR #505 r6b, the MaintenanceTimer twin of the
+	// SupervisorDaemon reap rule). A well-formed timer (argv agrees or absent) is
+	// byte-identical to the old `tm.Server == server` grant.
+	if tm.Server != "" {
+		if as := MaintenanceTimerArgvServer(tm); as != "" && as != tm.Server {
+			return false // field/argv mismatch — never reap on the lie
+		}
+		return tm.Server == server
+	}
+	// Blank Server field: the timer's own argv (`restart --server X`) is
+	// authoritative over its ambiguous canonical Name, so an uninstall of a
+	// hyphen-sibling never drops THIS server's timer by a task-name collision
+	// (commission PR #505 r6 — the MaintenanceTimer twin of the supervisorIntentRow
+	// leak class). DescriptorServerName is hardwired to a `daemon …` argv, so a
+	// timer needs its own reader.
+	if as := MaintenanceTimerArgvServer(tm); as != "" {
+		return as == server
 	}
 	parsedServer, _ := ParseManagedTaskName(tm.Name)
 	return parsedServer == server
+}
+
+// MaintenanceTimerArgvServer returns the `--server` value from a maintenance
+// timer's argv (`restart --server X`), or "" if absent. The argv is the launch
+// truth for a blank-Server-field legacy timer, disambiguating a hyphenated
+// canonical name the greedy ParseManagedTaskName split would misattribute. Exported
+// so the cli MaintenanceScheduler's identity key shares this one reader (single
+// owner of "which server does this timer's argv name").
+func MaintenanceTimerArgvServer(tm MaintenanceTimer) string {
+	for i := 0; i+1 < len(tm.Args); i++ {
+		if tm.Args[i] == "--server" {
+			return tm.Args[i+1]
+		}
+	}
+	return ""
 }
 
 // removeServerFromSupervisorIntent removes every supervisor-intent artifact a

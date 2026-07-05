@@ -215,10 +215,17 @@ func commandLineMatchesTaskArgv(tokens []string, d api.SupervisorDaemon) bool {
 			commandLineHasAdjacentTokenPair(tokens, "--language", lang)
 	}
 	if isGlobalDaemonDescriptor(d) {
-		return d.Server != "" && d.Daemon != "" &&
+		// Resolve identity through the owner (args-recovery when the struct fields
+		// are blank), so a blank-field legacy row (Server=="" but args carry
+		// --server/--daemon) classifies its own squatter correctly WITHOUT F5's
+		// identity-heal. A field/argv mismatch → owner ok=false → gate fails →
+		// Foreign (fail-closed), the correct conservative outcome for a corrupt
+		// descriptor.
+		server, daemon, ok := api.DescriptorServerDaemon(d)
+		return ok && server != "" && daemon != "" &&
 			hasGlobalDaemonAnchor(tokens) &&
-			commandLineHasAdjacentTokenPair(tokens, "--server", d.Server) &&
-			commandLineHasAdjacentTokenPair(tokens, "--daemon", d.Daemon)
+			commandLineHasAdjacentTokenPair(tokens, "--server", server) &&
+			commandLineHasAdjacentTokenPair(tokens, "--daemon", daemon)
 	}
 	return false
 }
@@ -227,10 +234,12 @@ func commandLineMatchesTaskArgv(tokens []string, d api.SupervisorDaemon) bool {
 // server daemon (`daemon --server … --daemon …`). It EXCLUDES the proxy shapes
 // and anything that is not a bare `daemon` subcommand, so sibling subcommands
 // (gui / supervise / status / restart / relay / daemon recover) never resolve a
-// discriminator (MUST-FIX #4 — those must classify Foreign).
+// discriminator (MUST-FIX #4 — those must classify Foreign). Re-exports the
+// owner-package api.DescriptorHasGlobalDaemonArgv so "is a global daemon argv" is
+// single-owned and the squatter classifier can never drift from the match-select
+// consumers that gate their task-name fallback on the same shape (bot PR #505 r6).
 func isGlobalDaemonDescriptor(d api.SupervisorDaemon) bool {
-	return len(d.Args) >= 1 && d.Args[0] == "daemon" &&
-		!isSerenaProxyDescriptor(d) && !isLSPWorkspaceProxyDescriptor(d)
+	return api.DescriptorHasGlobalDaemonArgv(d)
 }
 
 // hasSubcommandAnchor reports whether the observed argv begins (after argv[0],

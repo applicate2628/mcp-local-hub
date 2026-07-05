@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,124 +9,108 @@ import (
 	"mcp-local-hub/internal/api/apitest"
 )
 
-// withFakeManifestPortResolver swaps the package-level
-// resolveManifestDaemonPortFn for the duration of a test and returns a pointer
-// to a per-(server,daemon) call counter so the test can assert the underlying
-// manifest read+parse happens AT MOST ONCE PER SERVER regardless of how many
-// same-server Port=0 daemons need port enrichment.
-func withFakeManifestPortResolver(t *testing.T, fn func(server, daemon string) (int, bool)) *map[string]int {
-	t.Helper()
-	calls := map[string]int{}
-	prev := resolveManifestDaemonPortFn
-	resolveManifestDaemonPortFn = func(server, daemon string) (int, bool) {
-		calls[server]++
-		return fn(server, daemon)
-	}
-	t.Cleanup(func() { resolveManifestDaemonPortFn = prev })
-	return &calls
-}
-
-// seedZeroPortDaemonsOneServer writes a state-safe supervisor-intent.json with
-// n Running daemons that ALL belong to ONE server and ALL have Port=0 (the
-// PR #211-and-earlier shape the manifest port-enrichment fallback covers).
-// Distinct daemon names so each row resolves a distinct manifest daemon.
-func seedZeroPortDaemonsOneServer(t *testing.T, server string, n int) (string, *DaemonRuntimeTracker) {
-	t.Helper()
+// TestSupervisorStatusPortEnrichedViaOwner is the P3d guard: a Port=0 legacy
+// descriptor for a real manifest-backed server (memory) shows its manifest port
+// (9123) in the status row, resolved through the port-resolution owner
+// (api.NewDaemonPortResolver) — the same authority the liveness sweep, squatter,
+// and recover paths use. The private newManifestPortResolver memo is gone; the
+// once-per-server manifest-parse guarantee is covered api-side in
+// TestDaemonPortResolver_ParsesManifestOncePerServer.
+func TestSupervisorStatusPortEnrichedViaOwner(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
-	intent := &api.SupervisorIntentFile{Version: 1}
+	task := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{{
+		TaskName: task,
+		Server:   "memory",
+		Daemon:   "default",
+		Port:     0, // legacy Port=0 — the owner resolves the manifest 9123 for display
+	}}}
 	tracker := NewDaemonRuntimeTracker()
-	startedAt := time.Now().UTC().Add(-1 * time.Hour)
-	for i := 0; i < n; i++ {
-		daemon := fmt.Sprintf("d%d", i)
-		task := fmt.Sprintf(`\mcp-local-hub-%s-%s`, server, daemon)
-		intent.Daemons = append(intent.Daemons, api.SupervisorDaemon{
-			TaskName: task,
-			Server:   server,
-			Daemon:   daemon,
-			Port:     0, // forces the manifest port-enrichment fallback
-		})
-		tracker.MarkSpawned(task, 600000+i, startedAt)
-	}
+	tracker.MarkSpawned(task, 600001, time.Now().UTC().Add(-time.Hour))
 	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
-	return stateDir, tracker
-}
-
-// TestSupervisorStatusManifestPortResolvedOncePerServer is the per-server
-// manifest-parse perf guarantee: N Port=0 daemons under ONE server read +
-// parse that server's manifest ONCE, not N times. Before the per-refresh
-// memo, supervisorStatusDaemons called ResolveManifestDaemonPort per daemon
-// row, re-parsing the same manifest YAML for every same-server daemon.
-func TestSupervisorStatusManifestPortResolvedOncePerServer(t *testing.T) {
-	const n = 5
-	const server = "srvmemo"
-	stateDir, tracker := seedZeroPortDaemonsOneServer(t, server, n)
-	// No OS port-owner snapshot branch needed; leave the global probe as is.
-	// The fake resolver returns a distinct port per daemon so each row still
-	// gets its own enriched port (behavior preservation).
-	calls := withFakeManifestPortResolver(t, func(s, daemon string) (int, bool) {
-		// Echo a deterministic non-zero port derived from the daemon name's
-		// trailing index so the row's port reflects the per-daemon lookup.
-		return 9400 + int(daemon[len(daemon)-1]-'0'), true
-	})
 
 	rows, err := supervisorStatusDaemons(stateDir, tracker)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
-	if got := (*calls)[server]; got != n {
-		// The MEMO is keyed per server but stores per (server, daemon); with
-		// n DISTINCT daemons each daemon is resolved exactly once. The memo's
-		// job is to never resolve the SAME (server, daemon) twice AND to avoid
-		// re-reading the manifest for an already-seen server+daemon. With
-		// distinct daemons the underlying fn fires once per daemon (n), which
-		// is the correct minimum. The regression the memo guards is a DUPLICATE
-		// daemon name (below).
-		t.Fatalf("manifest resolver fired %d times for %d distinct daemons, want %d", got, n, n)
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
 	}
-	if len(rows) != n {
-		t.Fatalf("rows len = %d, want %d", len(rows), n)
+	if rows[0]["port"] != 9123 {
+		t.Fatalf("row port = %v, want 9123 (Port=0 resolved via the owner from the memory manifest)", rows[0]["port"])
+	}
+}
+
+// TestSupervisorStatusPortResolvedForPartialArgvCompletedByField is commission PR
+// #505 r6b P1: a well-formed row whose PARTIAL argv (`daemon --server memory`, no
+// --daemon) is COMPLETED by its populated Daemon field must still resolve its
+// manifest port. An earlier r6 revision rebuilt the status effDesc without the
+// fields and refused to reattach them for any global argv, regressing this shape to
+// port 0; the fix copies the whole row (like gui/daemon_env.go) and only gates the
+// overwrite.
+func TestSupervisorStatusPortResolvedForPartialArgvCompletedByField(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	task := `\mcp-local-hub-memory-default`
+	intent := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{{
+		TaskName: task,
+		Server:   "memory",
+		Daemon:   "default", // completes the missing --daemon
+		Args:     []string{"daemon", "--server", "memory"},
+		Port:     0,
+	}}}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(task, 600003, time.Now().UTC().Add(-time.Hour))
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
 
-	// Now prove the memo: re-running with a DUPLICATE daemon name across rows
-	// must resolve that (server, daemon) exactly once even though two rows ask
-	// for it. Seed two daemons sharing the same daemon name within one server.
-	stateDir2 := apitest.HardenedTempDir(t)
-	intent := &api.SupervisorIntentFile{Version: 1}
-	tracker2 := NewDaemonRuntimeTracker()
-	startedAt := time.Now().UTC().Add(-1 * time.Hour)
-	for i := 0; i < 2; i++ {
-		// Same server + same daemon name, distinct task names so both rows
-		// are emitted and both reach the Port=0 enrichment branch.
-		task := fmt.Sprintf(`\mcp-local-hub-%s-default-%d`, server, i)
-		intent.Daemons = append(intent.Daemons, api.SupervisorDaemon{
-			TaskName: task,
-			Server:   server,
-			Daemon:   "default",
-			Port:     0,
-		})
-		tracker2.MarkSpawned(task, 700000+i, startedAt)
-	}
-	if err := api.WriteSupervisorIntent(filepath.Join(stateDir2, "supervisor-intent.json"), intent); err != nil {
-		t.Fatalf("seed supervisor-intent.json (dup): %v", err)
-	}
-	calls2 := withFakeManifestPortResolver(t, func(s, daemon string) (int, bool) {
-		return 9500, true
-	})
-	rows2, err := supervisorStatusDaemons(stateDir2, tracker2)
+	rows, err := supervisorStatusDaemons(stateDir, tracker)
 	if err != nil {
-		t.Fatalf("supervisorStatusDaemons (dup): %v", err)
+		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
-	if got := (*calls2)[server]; got != 1 {
-		t.Fatalf("manifest resolver fired %d times for 2 rows sharing (server=%s, daemon=default), want EXACTLY 1 (per-server memo)", got, server)
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
 	}
-	if len(rows2) != 2 {
-		t.Fatalf("dup rows len = %d, want 2", len(rows2))
+	if rows[0]["port"] != 9123 {
+		t.Fatalf("row port = %v, want 9123 (partial argv completed by the populated Daemon field must resolve — r6b P1 regression guard)", rows[0]["port"])
 	}
-	for _, row := range rows2 {
-		if row["port"] != 9500 {
-			t.Fatalf("dup row port = %v, want 9500 (memoized result applied to both rows): %+v", row["port"], row)
-		}
+}
+
+// TestSupervisorStatusIdentityRecoveredViaOwnerForHyphenatedDaemon is the bot
+// PR #505 guard: a legacy blank-field row whose args carry a hyphenated
+// server+daemon (mcp-language-server / vscode-css) must recover identity via the
+// OWNER (args), not the greedy ParseManagedTaskName split — which would derive
+// server=mcp-language-server-vscode and, worse, disagree with the args so
+// DescriptorServerDaemon fails closed and the port stays 0. F5 used to heal the
+// blank fields; it is gone.
+func TestSupervisorStatusIdentityRecoveredViaOwnerForHyphenatedDaemon(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	task := `\mcp-local-hub-mcp-language-server-vscode-css`
+	intent := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{{
+		TaskName: task,
+		// Blank Server/Daemon — identity lives only in the args.
+		Args: []string{"daemon", "--server", "mcp-language-server", "--daemon", "vscode-css"},
+		Port: 0,
+	}}}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(task, 600002, time.Now().UTC().Add(-time.Hour))
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	if err != nil {
+		t.Fatalf("supervisorStatusDaemons: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0]["server"] != "mcp-language-server" {
+		t.Fatalf("server = %v, want mcp-language-server (owner args-recovery, not the greedy task-name split)", rows[0]["server"])
+	}
+	if rows[0]["daemon"] != "vscode-css" {
+		t.Fatalf("daemon = %v, want vscode-css", rows[0]["daemon"])
 	}
 }

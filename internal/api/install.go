@@ -2120,19 +2120,29 @@ func supervisorIntentRowMatchesServerDaemon(row SupervisorDaemon, server, daemon
 	if server == "" || daemon == "" {
 		return false
 	}
-	// Both identity components are KNOWN here, so a blank-field legacy row is
-	// matched by the exact canonical task name — never by ParseManagedTaskName,
-	// whose last-hyphen split misattributes hyphenated daemon names
-	// (\mcp-local-hub-demo-alpha-beta parses as demo-alpha/beta and a v0.6
-	// global, having no scheduler-task fallback, then fails Preflight on its
-	// OWN port; bot PR #288 r26 — third member of the r19-F1/r20-F4 family).
-	if row.Server == "" || row.Daemon == "" {
+	// ALWAYS resolve identity through the owner — INCLUDING a fully-populated row —
+	// so a Server/Daemon field that CONTRADICTS the launch argv (a lying cache) fails
+	// closed instead of matching on the stale field (commission codex/architect PR
+	// #505 r6 P1). A well-formed row (fields agree with argv, empty Args, a proxy
+	// subcommand, or a partial `--server X` completed by the field) resolves
+	// IdentityFromArgvOrField — byte-identical to the old populated field-compare and
+	// the r6 blank-field switch; ONLY a contradicting global argv changes, to
+	// fail-closed. The canonical task-name reconstruction stays reserved for a TRUE
+	// task-name-only row (no daemon argv to contradict it), which is AMBIGUOUS
+	// (demo/alpha-beta and demo-alpha/beta both rebuild \mcp-local-hub-demo-alpha-beta)
+	// — so a corrupt global that DOES carry an argv must never reach it.
+	rs, rd, src := ResolveDescriptorMatchIdentity(row)
+	switch src {
+	case IdentityFromArgvOrField:
+		return rs == server && rd == daemon
+	case IdentityTaskNameSafe:
 		want := canonicalIntentTaskKey("mcp-local-hub-" + server + "-" + daemon)
-		if canonicalIntentTaskKey(row.TaskName) == want {
-			return true
-		}
+		return canonicalIntentTaskKey(row.TaskName) == want
+	default:
+		// CorruptGlobalArgv AND any future IdentitySource → fail closed (F3: never
+		// let an added source fall open into the task-name match).
+		return false
 	}
-	return row.Server == server && row.Daemon == daemon
 }
 
 func supervisorIntentDaemonTaskName(row SupervisorDaemon, server, daemon string) string {

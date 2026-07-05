@@ -20,8 +20,8 @@ func withFakeRSS(t *testing.T, fn func(pid int) (uint64, bool)) {
 }
 
 // runningStatusRow seeds a single Running daemon (Port preset so the
-// status producer never reaches ResolveManifestDaemonPort / the registry —
-// keeps the test fully state-safe per the live-state safety rule) and
+// status producer's port resolver short-circuits on Port>0 and never reaches
+// the manifest / the registry — keeps the test fully state-safe) and
 // returns the producer's row for it. The liveness probe is forced to
 // "alive + owns port" so the row stays Running (not flipped to Restarting,
 // which would zero current_pid and suppress the RAM lookup).

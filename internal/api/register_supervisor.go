@@ -557,7 +557,13 @@ func (a *API) RemoveSerenaSupervisorIntentForWorkspace(workspacePath string) (bo
 	if err != nil || !found {
 		return false, err
 	}
-	if port := descriptor.Port; port != 0 && forceKillByPortFn != nil {
+	// Resolve the EFFECTIVE port through the owner, not the raw descriptor.Port: a
+	// legacy Port=0 serena-proxy row still binds the `--port` from its argv (F5 no
+	// longer persists it into the field), so keying the pre-removal force-kill on the
+	// raw field would skip the kill for exactly that row — the descriptor is removed
+	// but the live child keeps squatting its port → the lost-own-child class this PR
+	// closes elsewhere (bot PR #505 r5 completeness sweep; mirrors daemon_recover.go).
+	if port, ok := EffectiveDaemonPort(descriptor); ok && port != 0 && forceKillByPortFn != nil {
 		outcome, killErr := forceKillByPortFn(port, 5*time.Second)
 		if killErr != nil && outcome != portKillNoListener && outcome != portKillIdentityMismatch {
 			return false, fmt.Errorf("kill live serena proxy on port %d before removing %s: %w", port, taskName, killErr)

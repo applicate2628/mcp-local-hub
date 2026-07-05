@@ -232,6 +232,11 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows := make([]daemonEnvListRow, 0, len(intent.Daemons))
+	// One memoizing resolver for the whole list so N Port=0 rows of the same
+	// server reparse that server's manifest ONCE, not once per row (bot PR #505 r5
+	// F2 — the pure api.EffectiveDaemonPort reloads the manifest every call). Mirrors
+	// the status path's per-refresh api.NewDaemonPortResolver.
+	portResolver := api.NewDaemonPortResolver()
 	for _, d := range intent.Daemons {
 		taskName := daemon_env_overlay.NormalizeOverlayKey(d.TaskName)
 		// Skip maintenance/watchdog rows: they are one-shot scheduler jobs,
@@ -242,6 +247,20 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		server := d.Server
 		daemonName := d.Daemon
+		if server == "" || daemonName == "" {
+			// Recover a blank identity through the OWNER (args-recovery), NOT
+			// ParseManagedTaskName, so a hyphenated daemon name (mcp-language-server /
+			// vscode-css) is not mis-split now that F5 no longer heals the fields
+			// (same class as bot PR #505's status/config-env findings).
+			if rs, rd, ok := api.DescriptorServerDaemon(d); ok {
+				if server == "" {
+					server = rs
+				}
+				if daemonName == "" {
+					daemonName = rd
+				}
+			}
+		}
 		if server == "" || daemonName == "" {
 			parsedServer, parsedDaemon := api.ParseManagedTaskName(taskName)
 			if server == "" {
@@ -258,12 +277,36 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 		if env == nil {
 			env = map[string]string{}
 		}
+		// Resolve the effective port through the owner so a legacy Port=0 row shows
+		// its manifest port instead of 0 (F5 no longer persists it — commission
+		// fable-F5). The task-name-recovered server/daemonName are threaded into
+		// effDesc ONLY for a TRUE task-name-only row (no daemon-shaped argv), whose
+		// identity came from ParseManagedTaskName above — passing the raw d there
+		// returned (0,false) because the owner refuses task-name parsing (bot PR #505
+		// r5 F1; mirrors the status path).
+		//
+		// A GLOBAL daemon argv (`daemon --server… --daemon…`) is the OWNER'S
+		// authority: its own DescriptorServerDaemon accept-or-reject must stand.
+		// Overriding it with the task-name split would paper over a PARTIAL/corrupt
+		// global argv — e.g. `daemon --server time` with no --daemon, which the owner
+		// rejects — and display a spurious manifest port (codex PR #505 r5 P3). Gated
+		// on the single owner predicate (r6): a well-formed global resolves via its
+		// own args (no synthesis needed), a proxy row via its `--port` arg, and a true
+		// task-name-only row via the synthesized identity — so the synthesis costs
+		// nothing for the well-formed shapes and never fabricates a port for a corrupt
+		// global.
+		effDesc := d
+		if !api.DescriptorHasGlobalDaemonArgv(d) {
+			effDesc.Server = server
+			effDesc.Daemon = daemonName
+		}
+		port, _, _ := portResolver.Resolve(effDesc)
 		row := daemonEnvListRow{
 			TaskName:  taskName,
 			Server:    server,
 			Daemon:    daemonName,
 			Workspace: d.Workspace,
-			Port:      d.Port,
+			Port:      port,
 			Env:       env,
 		}
 		if ov != nil {
