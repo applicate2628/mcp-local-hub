@@ -1,0 +1,43 @@
+# Supervisor "lost-child" port-fight → serena quarantine (recurring class)
+
+- **status:** REOPENED 2026-07-04 — recurred (time-default quarantine + live lost-child squatter on 9128, hub flapped red/yellow). Fable root-cause (`.reports/2026-07/report(fable)-2026-07-04_17-30_lostchild-recurrence-rootcause.md`, all CONFIRMED vs code+supervisor-events.log) found the prior "Residual: none" was WRONG — three residuals survived:
+  1. **Legacy `port: 0` in supervisor-intent.json for 10 of 21 descriptors** (all old globals: time/memory/gdb/godbolt/lldb/paper-search/perftools/sequential-thinking/wolfram/weekly-refresh). Port=0 STRUCTURALLY disables every port-based protection — liveness port check, P1b bind-deadline, P2a sweep-reap, AND the reap inside `mcphub daemon recover` (daemon_recover.go:164 `if desc.Port<=0 {return nil}` → silent skip; explains why the recover said "forced respawn accepted" but the squatter survived).
+  2. **A SECOND lost-child factory: a false `pid_identity_mismatch`** disowning a live healthy child. `startedAt := time.Now()` (supervise.go:3592, event-loop, AFTER cmd.Start) is compared to kernel creation-time truncated to whole seconds (pid_identity_windows.go:122) with a 2s tolerance (pid_identity_common.go:9). Loop lag (1.46s under the storm) + ≤1s truncation pierce the 2s tolerance → the identity proof fires on the supervisor's OWN children under load → `daemon-running-state-stale` posts EvChildExit (assume-dead, NO kill) → the live child becomes a forgotten squatter. NOT P1a (which worked — `daemon-stale-exit-ignored` fired correctly at 17:09:51).
+  3. **P2a's reap is wired to ONLY the liveness `port_owner_mismatch` trigger** (running-state only, ~4s child-life vs 5s tick) — unreachable on the crash/backoff/spawn path where the port fight actually happens.
+
+  The external kill-storm caused only 2 of 10 failures; the supervisor manufactured the other 8. Fix package F1-F6 (F5 port-backfill = foundation; F1 pre-spawn own-squatter reap = highest-leverage, needs `$security-reviewer`; F3 quarantine sweep self-heal; F2 quarantine parole; F6 kernel-sourced StartedAt; F4 recover honesty). Reopen owner: main conversation.
+
+- **status (historical):** closed (2026-07-02 — all 4 parts merged)
+- **closure:** P1a (generation-stamped exit) + P1b (first-bind deadline) shipped in **#488** (v0.4.19, live-proven: cold supervisor restart no longer quarantines serena — all 3 serena Running + pid-stable across 4min). P2a (identity-gated reap-verified-own-squatter, `$security-engineer`+`$security-reviewer` PASS, D-A accepted) + P2b (`mcphub daemon recover`) shipped in **#490** (master d4dec6cb). Decisions: D-A accepted (`2026-07-02-da-supervisor-reap-verified-own-port-squatter.md`), D-B proposed-deferred (`2026-07-02-db-strunning-requires-port-bind-readiness.md`). Residual: none for this class. Deploy of P2a/P2b pending v0.4.20 (P1 already deployed in v0.4.19 and is the root-cause fix; P2a/P2b are recovery belt-and-braces). The LSP-router cold-materialize issue (`2026-07-02-lsp-router-cold-materialize-hang.md`, PR #489) is a SEPARATE class, not this one.
+- **severity:** high (recurring hub breakage; every `install --upgrade` / GUI restart on a slow-binding workspace can retrigger)
+- **filed:** 2026-07-02
+- **context:** live-fleet / supervisor lifecycle
+- **reviews:** architect design package (inline, gate PASS) + Fable-5 empirical review (`.reports/2026-07/report(main)-2026-07-01_23-58_hub-red-incident-review.md`, gate PASS). Both converged on the same 3-defect composition and mitigation.
+
+## Symptom
+
+`serena · mcp-local-hub` quarantines (`10+ failures in 30-min window; respawn suspended until supervisor restart`); the hub appears "red" because the quarantined serena's port is squatted by a forgotten own-child (a LIVE working serena answering TCP), masking the outage on the MCP surface. Reproduced 2026-07-01 after an `install --upgrade` cold restart.
+
+## Root cause — a 3-defect composition (verified against code + supervisor-events.log + live probes)
+
+The supervisor **manufactures its own port squatter**, then quarantines the legitimate replacements it can't spawn:
+
+- **Defect A — no port-bind readiness gate ("healthy = process started").** `internal/cli/supervisor_controller.go:2779-2786` posts `EvHealthOK → StRunning` on `cmd.Start` success. serena-proxy binds its port only after its language-server subprocess is up (tens of seconds; measured go LSP cold = 46s). The liveness sweep's flat `supervisorPortBindGrace = 5s` (`internal/cli/supervise_liveness.go:20`) then sees `port_unbound` and terminate+respawns a daemon that was still legitimately starting → overlapping-children storm.
+- **Defect B — generation-blind exit attribution (the lost-child core).** A late real `cmd.Wait` exit of an OLD-generation pid is attributed to the CURRENT child: the wait goroutine (`internal/cli/supervise.go:3612-3723`) calls `tracker.MarkExited(taskName)` (~:3649) with no pid guard; `MarkExited` (`supervisor_runtime_tracker.go:290-305`) clears `CurrentPID` unconditionally; `crashEvent` (`supervise.go:3704`) carries NO pid; `handleLoopEvent` routes `EvChildExit` by task name only. The SM thinks the current child died and spawns a duplicate while the real child is alive → the alive child becomes a forgotten squatter (terminate only ever targets `tracker.CurrentPID`). `PIDGeneration` already exists in the tracker (`MarkSpawned` increments it) — it is just not threaded into the exit channel.
+- **Defect C — no foreign-owner reap on `port_owner_mismatch`.** The liveness probe already computes `ownerPID` (`supervise_liveness.go:466-467, :428`) but on mismatch posts `EvManualRestart` → kills the supervisor's OWN fresh child and retries; the squatter is never a terminate target. → 10 failures → `StQuarantined` (`supervisor_state_machine.go:191-194`).
+
+Not-a-cause (both reviewers verified): the `install --upgrade` handoff correctly verified ports unbound (`install_migration_wiring_windows.go:98-99`); the IPC-flap restart-watcher is benign (log-only, `daemon_restart_watcher.go:101-118`); the hub aggregator already degrades gracefully (a single dead backend does not fail tools/list — `hub_mcp_aggregator.go:733,772-793`).
+
+## Fix design (class, not instance)
+
+- **P1a — generation-stamped exit attribution.** `crashEvent` gains `PID` + `PIDGeneration` (snapshot at spawn); wait goroutine calls `MarkExitedIfCurrent(task, pid)` (no-op + `daemon-stale-exit-ignored` event when `pid != entry.CurrentPID`); stale `EvChildExit` dropped (bookkeeping only, no SM transition). Kills the orphan factory.
+- **P1b — first-bind deadline instead of flat 5s.** `port_unbound` before the FIRST successful bind of the current generation is not a restart trigger; a per-descriptor `startup_bind_deadline` (runtime_spec/manifest; serena ≈ 120s, default 60s) gates it. After first bind, the current 5s logic stays. Kills the churn generator. **P1a+P1b ship as ONE PR** (they close the class together).
+- **P2a — reap-or-adopt on `port_owner_mismatch`.** Identity-gate the `ownerPID` with the same proof the terminate path uses (`PIDIdentityProof`, image = `daemonExpectedIdentityExe(d.Command)`, `supervise.go:2426-2431`). If it is our binary under our descriptor+port → reap (verified kill) or adopt; foreign process → honest `port-squatter-foreign` fail, no kill (fail-closed on unverifiable). **Needs `$security-reviewer` gate (grants the supervisor kill-authority over an untracked PID) — decision D-A.**
+- **P2b — operator verb `mcphub daemon recover <task>`.** Compose identity-gated reap of the port squatter → IPC respawn force=true (gate exists) → window reset (exists). Fix the quarantine reason string ("respawn suspended until supervisor restart" is misleading — the force path already exists via `POST /api/daemon/respawn {force:true}` / `supervise_respawn.go:231-248`).
+
+## Decisions to register (`work-items/decisions/`)
+- **D-A:** "Supervisor may reap a verified-own port squatter" (lifecycle-authority expansion; `$security-reviewer` gate).
+- **D-B:** "StRunning requires port-bind readiness, not process-start" (changes health definition + per-kind grace budget).
+
+## Immediate mitigation (applied 2026-07-02, no fix yet)
+Killed squatter pid 192316 (identity triple-verified) → freed 9151 → `POST /api/daemon/respawn {task:"\\mcp-local-hub-serena-b133f336", force:true}` → serena rebound cleanly + stable. NO supervisor restart (would nuke fleet + mask the defects). A full supervisor restart "works" only because job-close incidentally reaps the orphan — masking all 3 defects until the next cold restart.

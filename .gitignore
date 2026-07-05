@@ -98,3 +98,17 @@ work-items/roadmap-scan-*.md
 *test_out.txt
 /null
 graphify-out/
+
+# Multi-platform release binaries staged into the npm sub-packages by the
+# publish workflow / local build. NEVER commit binaries into history — only the
+# per-arch `bin/.gitkeep` placeholders are tracked. This pattern also stops a
+# broad `git add`/`git add -A` from sweeping the built binaries in.
+npm/packages/*/bin/mcphub
+npm/packages/*/bin/mcphub.exe
+
+# Local per-session scratch / private operating notes that must never reach the
+# public repo (goal-claude.md carries the operator's private workflow directives;
+# .dev/ and excalidraw.log are local dev scratch / a stray MCP server log).
+/.dev/
+/excalidraw.log
+/goal-claude.md
