@@ -38,14 +38,16 @@ func supervisorIntentManagedServerSignals() (map[string]struct{}, error) {
 		}
 		server := strings.TrimSpace(d.Server)
 		if server == "" {
-			// Blank-Server legacy row: api.ServerFromTaskName's last-hyphen split
-			// mis-attributes a hyphenated daemon name (\mcp-local-hub-demo-alpha-beta,
-			// real server "demo", daemon "alpha-beta" → "demo-alpha"). Resolve the
-			// true owner via the longest-installed-prefix rule instead so the gate
-			// (install.go reconcile-hub filter + setup.go last-server maintenance
-			// gate) keys on the real server. ok=false (no installed prefix — an
-			// orphan/foreign row) → preserve the EXISTING taskName fallback below.
-			if owner, ok := api.ServerOwningTaskByLongestInstalledPrefix(taskName, installed); ok {
+			// Blank-Server legacy row. Prefer the OWNER's argv-recovered server (the
+			// process spawns from `--server X`), which is authoritative and unambiguous
+			// for a hyphenated daemon name — F5 no longer heals the Server field on
+			// restart (bot PR #505). Only when the args carry no --server (a
+			// non-daemon-shaped row) fall back to the longest-installed-prefix rule,
+			// which mis-attributes a hyphenated daemon via ServerFromTaskName's
+			// last-hyphen split otherwise. ok=false there → the taskName fallback below.
+			if rs := api.DescriptorServerName(d); rs != "" {
+				server = rs
+			} else if owner, ok := api.ServerOwningTaskByLongestInstalledPrefix(taskName, installed); ok {
 				server = owner
 			}
 		}

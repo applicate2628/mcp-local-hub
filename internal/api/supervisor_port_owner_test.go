@@ -125,6 +125,21 @@ func TestEffectiveStartupBindDeadline_NonSerenaMissStaysSixty(t *testing.T) {
 	}
 }
 
+// TestEffectiveStartupBindDeadline_FieldlessSerenaProxy120 is the bot PR #505
+// guard: a serena-proxy row recognizable ONLY by its args (daemon serena-proxy
+// --server serena ...), with NO --daemon and blank Server/Daemon fields, still
+// gets 120s. DescriptorServerDaemon fails for it (daemon blank), but the deadline
+// keys on the server ALONE (descriptorServerName recovers --server serena), so it
+// does not drop to the 60s default and get restarted mid-cold-start.
+func TestEffectiveStartupBindDeadline_FieldlessSerenaProxy120(t *testing.T) {
+	stubOwnerResolver(t, map[string][2]int{}) // no manifest deadline
+	d := SupervisorDaemon{TaskName: `\mcp-local-hub-serena-abc`,
+		Args: []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", "d:\\x", "--port", "9150", "--task-name", `\mcp-local-hub-serena-abc`}}
+	if got := EffectiveStartupBindDeadlineSeconds(d); got != serenaStartupBindDeadlineSeconds {
+		t.Fatalf("fieldless serena-proxy deadline = %d, want %d (server identity via --server arg, not the 60s default)", got, serenaStartupBindDeadlineSeconds)
+	}
+}
+
 func TestEffectiveStartupBindDeadline_IndependentOfPort(t *testing.T) {
 	// A port-stamped (Port>0) but deadline-zero row still resolves the manifest
 	// deadline — the port short-circuit must not gate the deadline.

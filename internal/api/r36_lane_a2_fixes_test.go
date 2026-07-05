@@ -343,6 +343,30 @@ func TestSelectSupervisorOwnedTargets_ServerOnly_BlankRow_ClaimsViaLongestPrefix
 	})
 }
 
+// TestSelectSupervisorOwnedTargets_ServerOnly_ArgvBeatsLongestPrefix is the bot
+// PR #505 guard: a blank-field row whose ARGS carry `--server demo` is demo's,
+// even when the installed sibling `demo-alpha` would win the task-name
+// longest-prefix disambiguator — the argv is authoritative now that F5 no longer
+// heals the Server field on restart.
+func TestSelectSupervisorOwnedTargets_ServerOnly_ArgvBeatsLongestPrefix(t *testing.T) {
+	intent := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			// Blank fields, but the args prove the real server is demo.
+			{TaskName: `\mcp-local-hub-demo-alpha-beta`, Port: 19102,
+				Args: []string{"daemon", "--server", "demo", "--daemon", "alpha-beta"}},
+		},
+	}
+	seedInstalledServerManifests(t, "demo", "demo-alpha")
+	got := selectSupervisorOwnedTargets(intent, "demo", "")
+	if len(got) != 1 || got[0].TaskName != `\mcp-local-hub-demo-alpha-beta` {
+		t.Fatalf("selectSupervisorOwnedTargets(demo, \"\") = %+v, want the row (args --server demo authoritative over the demo-alpha longest-prefix)", got)
+	}
+	if other := selectSupervisorOwnedTargets(intent, "demo-alpha", ""); len(other) != 0 {
+		t.Fatalf("demo-alpha wrongly claimed the argv-proven demo row: %+v", other)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // FIX 5 — SchedulerUpgrade must recreate a hyphenated-daemon task with the
 // CORRECT (server, daemon) Args resolved from the task name (exact-name match

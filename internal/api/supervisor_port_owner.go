@@ -83,13 +83,39 @@ func effectiveDeadline(d SupervisorDaemon, resolve manifestPortDeadlineResolveFn
 		if _, deadlineSecs, ok := resolve(server, daemon); ok && deadlineSecs > 0 {
 			return deadlineSecs
 		}
-		// §4b: serena by server identity, so the workspace-hash proxy rows
-		// (whose Daemon name misses the manifest) still get 120s, not 60s.
-		if server == SerenaServerName {
-			return serenaStartupBindDeadlineSeconds
-		}
+	}
+	// §4b: serena by SERVER identity → 120s, even when the FULL (server,daemon)
+	// identity did not resolve. A serena-proxy row carries `--server serena` but
+	// no `--daemon`, so DescriptorServerDaemon returns ok=false for that fieldless
+	// shape — yet the old isSerenaProxyDescriptor arm gave it 120s. Recovering the
+	// server alone (descriptorServerName) covers EVERY serena shape — unified,
+	// workspace-hash proxy, and fieldless serena-proxy — so none drops to 60s and
+	// gets restarted mid-cold-start (bot PR #505).
+	if DescriptorServerName(d) == SerenaServerName {
+		return serenaStartupBindDeadlineSeconds
 	}
 	return defaultStartupBindDeadlineSeconds
+}
+
+// DescriptorServerName resolves ONLY the server identity of a descriptor — the
+// struct field, else the `--server` arg — without requiring the daemon. Used
+// where the decision keys on server alone (the serena first-bind deadline, the
+// managed-server signal gate, the server-only stop/restart selector), so a
+// serena-proxy row whose `--daemon` is absent still classifies as serena and a
+// blank-field row's true server is taken from its args rather than the greedy
+// task-name longest-prefix split.
+func DescriptorServerName(d SupervisorDaemon) string {
+	if d.Server != "" {
+		return d.Server
+	}
+	if len(d.Args) > 0 && d.Args[0] == "daemon" {
+		for i := 0; i+1 < len(d.Args); i++ {
+			if d.Args[i] == "--server" {
+				return d.Args[i+1]
+			}
+		}
+	}
+	return ""
 }
 
 // DaemonPortResolver memoizes the manifest read so a hot loop (the liveness

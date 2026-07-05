@@ -326,13 +326,24 @@ func resolveConfigEnvTargets(stateDir, selector string) ([]configEnvTarget, erro
 			// (taskName == want) AND the longest-prefix ownership of serverSelector
 			// must BOTH hold. installedServers empty (catalog read failed) → no
 			// sibling proof, any prefix-matching row is claimed (safe outcome).
-			if d.Server == "" || d.Daemon == "" {
+			// Prefer the OWNER's argv-recovered identity: the process spawns from its
+			// args, so `--server`/`--daemon` are authoritative. A blank-field row like
+			// \mcp-local-hub-demo-alpha-beta with args `--server demo --daemon
+			// alpha-beta` is exactly demo/alpha-beta — match it directly, instead of
+			// the greedy task-name longest-prefix disambiguator which would let an
+			// installed sibling (demo-alpha) wrongly claim it now that F5 no longer
+			// heals the fields (bot PR #505). Only a row the owner CANNOT resolve
+			// (no --server/--daemon args AND blank fields) falls back to the
+			// task-name prefix rule.
+			if rs, rd, ok := api.DescriptorServerDaemon(d); ok {
+				if rs == serverSelector && rd == daemonSelector {
+					out = append(out, target)
+				}
+			} else {
 				want := daemon_env_overlay.NormalizeOverlayKey("mcp-local-hub-" + serverSelector + "-" + daemonSelector)
 				if taskName == want && blankServerTaskOwnedByLongestInstalledPrefix(taskName, serverSelector, ensureInstalledServers()) {
 					out = append(out, target)
 				}
-			} else if server == serverSelector && daemon == daemonSelector {
-				out = append(out, target)
 			}
 		default:
 			if server == serverSelector {

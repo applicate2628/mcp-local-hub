@@ -60,6 +60,18 @@ func selectSupervisorOwnedTargets(intent *SupervisorIntentFile, server, daemonFi
 		// hit the wrong one. Mirrors supervisorIntentRowMatchesServerDaemon
 		// (install.go — bot PR #288 r26, third member of the r19-F1/r20-F4 family).
 		if server != "" && daemonFilter != "" && (rowServer == "" || rowDaemon == "") {
+			// Prefer the OWNER's argv-recovered identity: the process spawns from its
+			// args, and the canonical task name is AMBIGUOUS (demo/alpha-beta and
+			// demo-alpha/beta reconstruct the same \mcp-local-hub-demo-alpha-beta).
+			// A row the owner can't resolve (no --server/--daemon args) falls back to
+			// the canonical-task-name match (bot PR #505; F5 no longer heals fields).
+			if rs, rd, ok := DescriptorServerDaemon(d); ok {
+				if rs == server && rd == daemonFilter {
+					d.TaskName = normalizeSupervisorRestartTaskName(d.TaskName)
+					targets = append(targets, d)
+				}
+				continue
+			}
 			want := canonicalIntentTaskKey("mcp-local-hub-" + server + "-" + daemonFilter)
 			if canonicalIntentTaskKey(d.TaskName) != want {
 				continue
@@ -80,6 +92,19 @@ func selectSupervisorOwnedTargets(intent *SupervisorIntentFile, server, daemonFi
 		// runs for this case; the both-args exact branch above and the
 		// populated-field path below are unchanged.
 		if server != "" && daemonFilter == "" && (rowServer == "" || rowDaemon == "") {
+			// Prefer the argv-recovered server: the process spawns from `--server X`,
+			// authoritative over the task-name longest-prefix disambiguator, which
+			// would otherwise let an installed sibling (demo-alpha) claim a demo row
+			// now that F5 no longer heals the field (bot PR #505). A row with no
+			// --server arg falls back to the longest-prefix rule.
+			if rs := DescriptorServerName(d); rs != "" {
+				if rs != server {
+					continue
+				}
+				d.TaskName = normalizeSupervisorRestartTaskName(d.TaskName)
+				targets = append(targets, d)
+				continue
+			}
 			if !blankServerRowOwnedByLongestInstalledPrefix(d.TaskName, server, installedServers) {
 				continue
 			}
