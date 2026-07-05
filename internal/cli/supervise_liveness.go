@@ -26,13 +26,15 @@ const (
 	supervisorPortBindGrace    = 5 * time.Second
 	supervisorLivenessInterval = 5 * time.Second
 
-	// supervisorDefaultStartupBindDeadline / supervisorSerenaStartupBindDeadline
-	// are the P1b first-bind deadlines applied BEFORE a daemon's first observed
-	// bind of the current generation (a fresh spawn that has not yet bound its
-	// port). They replace the flat 5s grace for that startup phase so a
-	// slow-starting daemon is not terminate-first-then-respawned mid-startup.
+	// supervisorDefaultStartupBindDeadline is the global P1b first-bind deadline
+	// applied BEFORE a daemon's first observed bind of the current generation (a
+	// fresh spawn that has not yet bound its port). It replaces the flat 5s grace
+	// for that startup phase so a slow-starting daemon is not
+	// terminate-first-then-respawned mid-startup. The full deadline decision
+	// (explicit field > manifest > serena-by-identity 120 > this 60s default) is
+	// owned by api.EffectiveStartupBindDeadlineSeconds; this constant is retained
+	// as the documented 60s value the owner also uses, referenced by tests.
 	supervisorDefaultStartupBindDeadline = 60 * time.Second
-	supervisorSerenaStartupBindDeadline  = 120 * time.Second
 
 	supervisorLivenessRuntimeClearedBodyKey = "runtime_pid_cleared"
 
@@ -508,19 +510,17 @@ func daemonExpectedIdentityExe(command string) string {
 }
 
 // supervisorStartupBindDeadline resolves the P1b first-bind deadline for a
-// descriptor: an explicit StartupBindDeadlineSeconds>0 wins; otherwise a
-// serena-proxy descriptor (whose language-server subprocess is slow to come
-// up) gets 120s; everything else gets the 60s default. The isSerenaProxyDescriptor
-// arm is defense for pre-field serena rows written before StartupBindDeadlineSeconds
-// existed — a fresh install stamps 120 explicitly.
+// descriptor. It DELEGATES to the port-resolution owner
+// (api.EffectiveStartupBindDeadlineSeconds), which decides: an explicit
+// StartupBindDeadlineSeconds>0 wins; else the manifest-declared deadline; else
+// serena by SERVER IDENTITY gets 120s (covering the legacy-unified `unified`
+// daemon AND the dynamic-pool proxy rows whose Daemon name is a workspace hash
+// the manifest never declares); else the 60s default. The old argv-keyed
+// isSerenaProxyDescriptor arm was replaced by the owner's identity keying
+// (design §4b) — it under-covered the workspace-hash proxy rows, dropping them
+// to 60s.
 func supervisorStartupBindDeadline(d api.SupervisorDaemon) time.Duration {
-	if d.StartupBindDeadlineSeconds > 0 {
-		return time.Duration(d.StartupBindDeadlineSeconds) * time.Second
-	}
-	if isSerenaProxyDescriptor(d) {
-		return supervisorSerenaStartupBindDeadline
-	}
-	return supervisorDefaultStartupBindDeadline
+	return time.Duration(api.EffectiveStartupBindDeadlineSeconds(d)) * time.Second
 }
 
 // supervisorDaemonEntryLive evaluates one daemon's liveness against the GLOBAL

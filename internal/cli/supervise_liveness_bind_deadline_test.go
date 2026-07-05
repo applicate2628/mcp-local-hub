@@ -249,13 +249,29 @@ func TestSupervisorStartupBindDeadline_Resolution(t *testing.T) {
 			want: 60 * time.Second,
 		},
 		{
-			name: "serena proxy zero field",
-			d:    api.SupervisorDaemon{TaskName: `\mcp-local-hub-serena-abc`, Args: []string{"daemon", "serena-proxy"}},
+			// §4b: a field-0 serena-proxy pool row (real rows carry Server/Daemon +
+			// --server in args) resolves serena by SERVER IDENTITY → 120s, covering
+			// the workspace-hash daemon name the manifest never declares. This is the
+			// #234→#488 population the old argv-arm gave 120s and §4a would have
+			// dropped to 60s.
+			name: "serena proxy zero field (workspace-hash identity)",
+			d: api.SupervisorDaemon{TaskName: `\mcp-local-hub-serena-abc`, Server: "serena", Daemon: "6935d24c",
+				Args: []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", "d:\\dev\\x", "--port", "9150", "--task-name", `\mcp-local-hub-serena-abc`}},
+			want: 120 * time.Second,
+		},
+		{
+			// legacy-unified serena (args `daemon --server serena --daemon unified`,
+			// field 0): the old argv-shape arm MISSED this (args[1] != serena-proxy)
+			// and gave 60s — the PR #504 regression. §4b's server-identity keying
+			// gives it 120s.
+			name: "legacy-unified serena identity",
+			d: api.SupervisorDaemon{TaskName: `\mcp-local-hub-serena-unified`, Server: "serena", Daemon: "unified",
+				Args: []string{"daemon", "--server", "serena", "--daemon", "unified"}},
 			want: 120 * time.Second,
 		},
 		{
 			name: "explicit field wins",
-			d:    api.SupervisorDaemon{TaskName: `\mcp-local-hub-serena-abc`, Args: []string{"daemon", "serena-proxy"}, StartupBindDeadlineSeconds: 300},
+			d:    api.SupervisorDaemon{TaskName: `\mcp-local-hub-serena-abc`, Server: "serena", Daemon: "abc", Args: []string{"daemon", "serena-proxy"}, StartupBindDeadlineSeconds: 300},
 			want: 300 * time.Second,
 		},
 		{
