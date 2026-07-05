@@ -227,6 +227,22 @@ func TestDaemonRecover_Port0HintRoutesSerenaByResolvedIdentity(t *testing.T) {
 			wantHint: unresolvantHint,
 			notHint:  genericHint,
 		},
+		{
+			name: "populated identity but missing manifest promises no backfill",
+			desc: api.SupervisorDaemon{
+				// Bot PR #504 case: Server/Daemon populated so identity resolves, but
+				// the manifest is missing/renamed → ResolveManifestDaemonPort returns
+				// !ok, exactly what F5 treats as UnresolvedPortZero (no backfill). The
+				// hint must mirror F5 and NOT promise a supervise-restart backfill.
+				TaskName: `\mcp-local-hub-ghost-server-default`,
+				Server:   "ghost-server-that-does-not-exist",
+				Daemon:   "default",
+				Args:     []string{"daemon", "--server", "ghost-server-that-does-not-exist", "--daemon", "default"},
+				Port:     0,
+			},
+			wantHint: unresolvantHint,
+			notHint:  genericHint,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
