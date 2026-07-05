@@ -168,8 +168,9 @@ func TestDaemonRecover_NoSquatterGoesStraightToForceRespawn(t *testing.T) {
 // serena hint, not the generic F5 hint.
 func TestDaemonRecover_Port0HintRoutesSerenaByResolvedIdentity(t *testing.T) {
 	const (
-		serenaHint  = "migrate serena legacy-to-dynamic-pool"
-		genericHint = "restart `mcphub supervise`"
+		serenaHint      = "migrate serena legacy-to-dynamic-pool"
+		genericHint     = "restart `mcphub supervise`"
+		unresolvantHint = "not a manifest-backed daemon"
 	)
 	cases := []struct {
 		name     string
@@ -202,7 +203,7 @@ func TestDaemonRecover_Port0HintRoutesSerenaByResolvedIdentity(t *testing.T) {
 			notHint:  genericHint,
 		},
 		{
-			name: "non-serena legacy row keeps the F5 hint",
+			name: "non-serena manifest daemon keeps the F5 backfill hint",
 			desc: api.SupervisorDaemon{
 				TaskName: `\mcp-local-hub-memory-default`,
 				Server:   "memory",
@@ -212,6 +213,19 @@ func TestDaemonRecover_Port0HintRoutesSerenaByResolvedIdentity(t *testing.T) {
 			},
 			wantHint: genericHint,
 			notHint:  serenaHint,
+		},
+		{
+			name: "unresolvable non-daemon row promises no backfill",
+			desc: api.SupervisorDaemon{
+				// A maintenance-timer / one-shot shape: DescriptorServerDaemon returns
+				// ok=false, F5 leaves it untouched, so the hint must NOT promise a
+				// `supervise`-restart backfill (fable/codex deep-sec PR #504).
+				TaskName: `\mcp-local-hub-workspace-weekly-refresh`,
+				Args:     []string{"workspace-weekly-refresh"},
+				Port:     0,
+			},
+			wantHint: unresolvantHint,
+			notHint:  genericHint,
 		},
 	}
 	for _, tc := range cases {
