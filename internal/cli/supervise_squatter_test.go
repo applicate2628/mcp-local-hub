@@ -128,6 +128,44 @@ func TestClassifyPortSquatter_OwnGlobalDaemon(t *testing.T) {
 	}
 }
 
+// TestClassifyPortSquatter_OwnGlobalDaemonBlankFieldsRecoveredFromArgs is the
+// P3b guard: a blank-identity legacy row (Server=="", Daemon=="", args carry
+// --server/--daemon) now classifies its own squatter via the owner's
+// args-recovery — the protection F5's PR #504 blank-field identity-heal used to
+// provide, now provided WITHOUT F5. Pre-P3b the raw `d.Server != ""` gate made
+// this Foreign (unreapable own child).
+func TestClassifyPortSquatter_OwnGlobalDaemonBlankFieldsRecoveredFromArgs(t *testing.T) {
+	d := globalDaemonDescriptor()
+	d.Server = "" // blank fields; identity lives only in Args
+	d.Daemon = ""
+	const owner = 44000
+	setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
+		return squatterIdentityFor(owner, d), nil
+	}, alwaysExeMatch)
+	tracked := map[string]DaemonRuntimeEntry{
+		canonicalSupervisorTaskName(d.TaskName): {CurrentPID: 22036},
+	}
+	if verdict, _ := classifyPortSquatter(d, owner, 1, tracked); verdict != squatterOwnTask {
+		t.Fatalf("verdict = %v, want squatterOwnTask (identity recovered from args)", verdict)
+	}
+}
+
+// TestClassifyPortSquatter_FieldArgvMismatchForeign is the fail-closed guard: a
+// descriptor whose struct field DISAGREES with its argv token → owner ok=false →
+// classifier Foreign (never reap on a corrupt/mixed identity).
+func TestClassifyPortSquatter_FieldArgvMismatchForeign(t *testing.T) {
+	d := globalDaemonDescriptor()
+	d.Server = "memory"
+	d.Args = []string{"daemon", "--server", "time", "--daemon", "default"} // field says memory, argv says time
+	const owner = 44000
+	setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
+		return squatterIdentityFor(owner, d), nil
+	}, alwaysExeMatch)
+	if verdict, _ := classifyPortSquatter(d, owner, 1, nil); verdict != squatterForeign {
+		t.Fatalf("verdict = %v, want squatterForeign (field/argv mismatch is fail-closed)", verdict)
+	}
+}
+
 func TestClassifyPortSquatter_OwnSerenaProxyByTaskName(t *testing.T) {
 	d := serenaProxyDescriptor()
 	const owner = 55001

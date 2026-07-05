@@ -215,10 +215,17 @@ func commandLineMatchesTaskArgv(tokens []string, d api.SupervisorDaemon) bool {
 			commandLineHasAdjacentTokenPair(tokens, "--language", lang)
 	}
 	if isGlobalDaemonDescriptor(d) {
-		return d.Server != "" && d.Daemon != "" &&
+		// Resolve identity through the owner (args-recovery when the struct fields
+		// are blank), so a blank-field legacy row (Server=="" but args carry
+		// --server/--daemon) classifies its own squatter correctly WITHOUT F5's
+		// identity-heal. A field/argv mismatch → owner ok=false → gate fails →
+		// Foreign (fail-closed), the correct conservative outcome for a corrupt
+		// descriptor.
+		server, daemon, ok := api.DescriptorServerDaemon(d)
+		return ok && server != "" && daemon != "" &&
 			hasGlobalDaemonAnchor(tokens) &&
-			commandLineHasAdjacentTokenPair(tokens, "--server", d.Server) &&
-			commandLineHasAdjacentTokenPair(tokens, "--daemon", d.Daemon)
+			commandLineHasAdjacentTokenPair(tokens, "--server", server) &&
+			commandLineHasAdjacentTokenPair(tokens, "--daemon", daemon)
 	}
 	return false
 }
