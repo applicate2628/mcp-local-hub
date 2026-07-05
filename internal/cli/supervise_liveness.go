@@ -731,14 +731,17 @@ func supervisorIntentPortMapForStateDir(stateDir string) map[string]int {
 	if err != nil || intent == nil {
 		return out
 	}
-	// Map the RESOLVED effective port (owner) so a Port=0 legacy row that resolves
-	// a manifest port is no longer bypassed by the startup running-scan's
-	// `port > 0` gate. A Port>0 row resolves to itself; an unresolvable row maps
-	// to 0 (the gate then skips it, as before).
-	resolver := api.NewDaemonPortResolver()
+	// Deliberately the RAW descriptor port, NOT the owner-resolved effective port.
+	// The startup running-scan's inner port-liveness re-check is a secondary
+	// startup optimization scoped to explicit-port daemons (architect design §3.4:
+	// the startup-scan is port-only; the liveness sweep is the AUTHORITATIVE port
+	// protection path). A legacy Port=0 row is intentionally not re-checked here —
+	// the sweep (which DOES resolve the effective port) protects it within 5s. This
+	// keeps the "Port=0 skips the inner re-check" contract the startup-scan relies
+	// on, rather than extending the inner re-check to every legacy row (planner
+	// AC2's broader scope, superseded by the architect's secondary-path scoping).
 	for _, d := range intent.Daemons {
-		port, _, _ := resolver.Resolve(d)
-		out[canonicalSupervisorTaskName(d.TaskName)] = port
+		out[canonicalSupervisorTaskName(d.TaskName)] = d.Port
 	}
 	return out
 }
