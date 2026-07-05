@@ -70,6 +70,39 @@ func TestEffectiveDaemonPort_RecoversArgPortForProxyShape(t *testing.T) {
 	if got, ok := EffectiveDaemonPort(gd); ok || got != 0 {
 		t.Fatalf("global daemon w/o --port + no manifest = (%d,%v), want (0,false)", got, ok)
 	}
+	// A non-proxy global with a STRAY --port must NOT recover it (bot #505 r4) — the
+	// --port arg is only authoritative for the proxy shapes; a stray token falls to
+	// the manifest (nil → unresolved) so stop-force treats it as portless rather
+	// than by-port-killing a different listener.
+	stray := SupervisorDaemon{TaskName: `\mcp-local-hub-ghost-default`, Port: 0,
+		Args: []string{"daemon", "--server", "ghost", "--daemon", "default", "--port", "9999"}}
+	if got, ok := EffectiveDaemonPort(stray); ok || got != 0 {
+		t.Fatalf("non-proxy global w/ stray --port = (%d,%v), want (0,false)", got, ok)
+	}
+}
+
+// TestDescriptorServerName_FailsClosedOnFieldArgMismatch is the bot PR #505 r4
+// guard: DescriptorServerName must apply the SAME fail-closed rule as
+// DescriptorServerDaemon — a struct field disagreeing with the --server arg
+// resolves to "" so a server-only decision (restart/stop, serena deadline) never
+// acts on the wrong daemon.
+func TestDescriptorServerName_FailsClosedOnFieldArgMismatch(t *testing.T) {
+	// field memory vs arg time → mismatch → "".
+	if got := DescriptorServerName(SupervisorDaemon{Server: "memory", Args: []string{"daemon", "--server", "time", "--daemon", "default"}}); got != "" {
+		t.Fatalf("field/arg mismatch = %q, want \"\" (fail closed)", got)
+	}
+	// agreeing field+arg → the server.
+	if got := DescriptorServerName(SupervisorDaemon{Server: "memory", Args: []string{"daemon", "--server", "memory", "--daemon", "default"}}); got != "memory" {
+		t.Fatalf("agreeing = %q, want memory", got)
+	}
+	// blank field, arg present → recovered from args.
+	if got := DescriptorServerName(SupervisorDaemon{Args: []string{"daemon", "serena-proxy", "--server", "serena"}}); got != "serena" {
+		t.Fatalf("blank-field recovery = %q, want serena", got)
+	}
+	// field present, no arg → the field (not a mismatch).
+	if got := DescriptorServerName(SupervisorDaemon{Server: "gdb"}); got != "gdb" {
+		t.Fatalf("field w/o arg = %q, want gdb", got)
+	}
 }
 
 func TestEffectiveDaemonPort_RenamedManifestNotOK(t *testing.T) {

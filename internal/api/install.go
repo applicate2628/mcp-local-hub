@@ -2120,13 +2120,18 @@ func supervisorIntentRowMatchesServerDaemon(row SupervisorDaemon, server, daemon
 	if server == "" || daemon == "" {
 		return false
 	}
-	// Both identity components are KNOWN here, so a blank-field legacy row is
-	// matched by the exact canonical task name — never by ParseManagedTaskName,
-	// whose last-hyphen split misattributes hyphenated daemon names
-	// (\mcp-local-hub-demo-alpha-beta parses as demo-alpha/beta and a v0.6
-	// global, having no scheduler-task fallback, then fails Preflight on its
-	// OWN port; bot PR #288 r26 — third member of the r19-F1/r20-F4 family).
+	// A blank-field legacy row: prefer the OWNER's argv identity — the process
+	// spawns from `--server`/`--daemon`, so that is authoritative and unambiguous.
+	// The canonical task-name reconstruction is AMBIGUOUS (demo/alpha-beta and
+	// demo-alpha/beta both rebuild \mcp-local-hub-demo-alpha-beta), so a sibling's
+	// preflight would wrongly claim the live daemon's port now that F5 no longer
+	// heals the fields (bot PR #505 r4). Only a row the owner can't resolve (no
+	// --server/--daemon args) falls back to the canonical-task-name match — the
+	// bot PR #288 r26 path for a v0.6 global with no scheduler-task fallback.
 	if row.Server == "" || row.Daemon == "" {
+		if rs, rd, ok := DescriptorServerDaemon(row); ok {
+			return rs == server && rd == daemon
+		}
 		want := canonicalIntentTaskKey("mcp-local-hub-" + server + "-" + daemon)
 		if canonicalIntentTaskKey(row.TaskName) == want {
 			return true

@@ -93,10 +93,20 @@ func effectivePort(d SupervisorDaemon, resolve manifestPortDeadlineResolveFn) (i
 // shapes (workspace-proxy, serena-proxy) whose dynamic daemon name is not in a
 // manifest.
 func descriptorArgPort(d SupervisorDaemon) int {
-	if len(d.Args) == 0 || d.Args[0] != "daemon" {
+	// ONLY the proxy shapes carry an authoritative `--port` arg. Scoping the
+	// recovery to `daemon serena-proxy` / `daemon workspace-proxy` prevents a
+	// corrupt or non-proxy global descriptor with a stray `--port` token from
+	// being treated as the protected daemon port — which would let stop-force fall
+	// through to the by-port kill path against a DIFFERENT mcphub listener instead
+	// of treating the unresolved descriptor as portless (bot PR #505 r4). A global
+	// daemon (`daemon --server X --daemon Y`) never carries `--port` anyway.
+	if len(d.Args) < 2 || d.Args[0] != "daemon" {
 		return 0
 	}
-	for i := 0; i+1 < len(d.Args); i++ {
+	if d.Args[1] != "serena-proxy" && d.Args[1] != "workspace-proxy" {
+		return 0
+	}
+	for i := 2; i+1 < len(d.Args); i++ {
 		if d.Args[i] == "--port" {
 			if p, err := strconv.Atoi(d.Args[i+1]); err == nil && p > 0 {
 				return p
@@ -138,17 +148,28 @@ func effectiveDeadline(d SupervisorDaemon, resolve manifestPortDeadlineResolveFn
 // blank-field row's true server is taken from its args rather than the greedy
 // task-name longest-prefix split.
 func DescriptorServerName(d SupervisorDaemon) string {
-	if d.Server != "" {
-		return d.Server
-	}
+	fieldServer := d.Server
+	var argServer string
 	if len(d.Args) > 0 && d.Args[0] == "daemon" {
 		for i := 0; i+1 < len(d.Args); i++ {
 			if d.Args[i] == "--server" {
-				return d.Args[i+1]
+				argServer = d.Args[i+1]
+				break
 			}
 		}
 	}
-	return ""
+	// Fail-closed on a field/arg mismatch, the SAME rule DescriptorServerDaemon
+	// applies: a struct field that DISAGREES with the launch `--server` arg is a
+	// corrupt cache and must not resolve — otherwise a decision keyed on the stale
+	// field (restart/stop server selection, the serena deadline) acts on the wrong
+	// daemon (bot PR #505 r4). A blank field or an absent arg is not a mismatch.
+	if fieldServer != "" && argServer != "" && fieldServer != argServer {
+		return ""
+	}
+	if fieldServer != "" {
+		return fieldServer
+	}
+	return argServer
 }
 
 // DaemonPortResolver memoizes the manifest read so a hot loop (the liveness
