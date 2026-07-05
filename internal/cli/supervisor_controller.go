@@ -246,6 +246,288 @@ type supervisorController struct {
 	// default for production wiring).
 	failureWindow       time.Duration
 	quarantineThreshold int
+
+	// quarantineParole is the F2 in-memory parole ladder for threshold-quarantine
+	// daemons (map[canonicalTaskName]*quarantineParoleEntry). A daemon that hits
+	// the failure threshold used to stay quarantined "until supervisor restart" —
+	// an external kill-storm (or the false-mismatch bursts F6 fixes) then wedged
+	// it forever with no self-recovery. Parole gives a quarantined daemon an
+	// automatic EvManualRestart after a bounded cooldown (15m, then exponential to
+	// a 2h ceiling), clearing the quarantine if it stabilizes and re-quarantining
+	// on the preserved ladder if it re-fails.
+	//
+	// Ownership discipline (entirely loop-owned): the parole map AND every entry
+	// field are read and mutated ONLY on the event-loop goroutine, so nothing ever
+	// races. Entries are CREATED (create-if-absent, ladder-preserving) via
+	// recordQuarantineParoleEligible, DELETED at the absorbing-quarantine store
+	// sites (clearQuarantineParole, class-flip) and by the parole tick (stabilize /
+	// recovery / prune), and their fields advanced by the tick — every one of those
+	// on the loop. The tick used to run on the parole monitor goroutine, which split
+	// its map Delete + field mutation OFF the loop from the on-loop record/clear and
+	// left a real (low-probability) TOCTOU: a graduation Delete could erase a just-
+	// recorded threshold eligibility, wedging the daemon at StQuarantined with no
+	// ladder. The monitor now only POSTS evParoleTick and the tick runs on the loop
+	// (runQuarantineParoleTick, dispatched from handleLoopEvent), so record/clear and
+	// Delete/field-advance are serialized by construction. The tick reads smStates +
+	// daemonIntent (both already loop-consistent) and the ONLY supervisor-state
+	// mutation it drives is the EvManualRestart it self-posts onto the loop —
+	// preserving Conc-F2/Conc-F4 (it posts EvManualRestart, never EvTimerDue, and
+	// adds no SM row). In-memory only: never persisted (no supervisor-state.json
+	// schema change), resets on cold restart by design.
+	quarantineParole sync.Map // canonicalTaskName -> *quarantineParoleEntry
+}
+
+// quarantineParoleEntry is the per-task F2 parole ladder state (in-memory only).
+type quarantineParoleEntry struct {
+	// attempts counts parole EvManualRestart posts fired so far; it drives the
+	// exponential cooldown and is PRESERVED across a re-quarantine so a repeatedly-
+	// failing daemon backs off rather than tight-looping at the base delay.
+	attempts int
+	// nextAttemptAt is the earliest wall-clock time the next parole may fire.
+	nextAttemptAt time.Time
+	// healthySince is the time the daemon was first observed continuously in
+	// StRunning since its last parole; once it dwells past
+	// quarantineParoleStabilizeDwell the ladder is reset (entry deleted). Zeroed
+	// whenever the daemon is observed outside StRunning.
+	healthySince time.Time
+}
+
+const (
+	// quarantineParoleBaseDelay is the cooldown before the FIRST parole attempt
+	// after a daemon enters threshold-quarantine.
+	quarantineParoleBaseDelay = 15 * time.Minute
+	// quarantineParoleMaxDelay caps the exponential parole cooldown ceiling so a
+	// persistently-failing daemon retries at most this often (bounded, not a tight
+	// loop). Within the report's 2-4h band.
+	quarantineParoleMaxDelay = 2 * time.Hour
+	// quarantineParoleStabilizeDwell is how long a paroled daemon must stay
+	// continuously in StRunning before its parole ladder is reset (treated as
+	// recovered). A daemon that reaches StRunning only briefly before re-failing
+	// does NOT reset the ladder, so re-quarantine stays on the exponential
+	// schedule.
+	quarantineParoleStabilizeDwell = 2 * time.Minute
+	// quarantineParoleTickInterval is the parole monitor's scan cadence. It is far
+	// shorter than the base delay, so the ~cooldown granularity is bounded by this
+	// tick, not by the tick itself firing paroles.
+	quarantineParoleTickInterval = 30 * time.Second
+)
+
+// quarantineParoleDelay returns the parole cooldown for the given prior-attempt
+// count: base * 2^attempts, capped at quarantineParoleMaxDelay. attempts<=0
+// yields the base delay.
+func quarantineParoleDelay(attempts int) time.Duration {
+	if attempts < 0 {
+		attempts = 0
+	}
+	d := quarantineParoleBaseDelay
+	for i := 0; i < attempts && d < quarantineParoleMaxDelay; i++ {
+		d *= 2
+	}
+	if d > quarantineParoleMaxDelay {
+		d = quarantineParoleMaxDelay
+	}
+	return d
+}
+
+// recordQuarantineParoleEligible marks a task as parole-eligible when it enters
+// THRESHOLD quarantine (called from the two threshold-quarantine sites only —
+// NOT the strict-job-protection or legacy-serena-nil-spec quarantines, which are
+// deliberately absorbing per their own contracts). Create-if-absent: an existing
+// entry (a task re-quarantining while still on the ladder) is left untouched so
+// the exponential cooldown is preserved across the re-quarantine. Called on the
+// event-loop goroutine.
+func (c *supervisorController) recordQuarantineParoleEligible(taskName string, now time.Time) {
+	if c == nil {
+		return
+	}
+	key := canonicalSupervisorTaskName(taskName)
+	c.quarantineParole.LoadOrStore(key, &quarantineParoleEntry{
+		attempts:      0,
+		nextAttemptAt: now.Add(quarantineParoleDelay(0)),
+	})
+}
+
+// clearQuarantineParole drops any parole ladder entry for a task. Called at the
+// ABSORBING quarantine store sites (strict-job-protection / legacy-serena-nil-
+// spec) so a class-flip — a threshold-quarantined daemon whose later parole
+// respawn hits an absorbing refusal — removes the now-stale threshold entry and
+// stops being paroled into a permanent spawn-refuse loop (commission P2-2). Runs
+// on the event-loop goroutine (the absorbing store sites are handleLoopEvent
+// side-effects), the SAME goroutine as recordQuarantineParoleEligible and the
+// parole tick, so nothing here is concurrent with them — the map is entirely
+// loop-owned (see the quarantineParole ownership doc).
+func (c *supervisorController) clearQuarantineParole(taskName string) {
+	if c == nil {
+		return
+	}
+	c.quarantineParole.Delete(canonicalSupervisorTaskName(taskName))
+}
+
+// runQuarantineParoleMonitor drives the parole scan on a fixed cadence until ctx
+// is canceled. Production wiring starts it once per supervisor (runSupervise); it
+// is the F2 counterpart of the liveness monitor goroutine. It does NOT run the
+// scan itself — it only POSTS evParoleTick onto the event loop, so the scan (and
+// all parole map mutation it performs) runs ON the loop goroutine, serialized
+// against recordQuarantineParoleEligible / clearQuarantineParole. The post is
+// best-effort non-blocking: a dropped post on a momentarily-full buffer just
+// delays that scan by one interval (parole is not latency-critical), which is
+// strictly safer than blocking the monitor on a wedged loop.
+func (c *supervisorController) runQuarantineParoleMonitor(ctx context.Context) {
+	if c == nil || c.eventLoop == nil {
+		return
+	}
+	ticker := time.NewTicker(quarantineParoleTickInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.eventLoop.TryPost(api.LoopEvent{Kind: evParoleTick})
+		}
+	}
+}
+
+// runQuarantineParoleTick evaluates every parole-eligible task once. `now` is
+// injected so tests drive the ladder deterministically without wall-clock waits.
+// It POSTS EvManualRestart (the legal StQuarantined->StSpawning "reset failures"
+// transition — the SAME one `mcphub daemon recover` / force-respawn use) for a
+// quarantined, running-intent daemon whose cooldown has elapsed; it mutates ONLY
+// its own in-memory ladder, never smStates/tracker directly.
+func (c *supervisorController) runQuarantineParoleTick(now time.Time) {
+	if c == nil || c.eventLoop == nil {
+		return
+	}
+	// Never parole while the supervisor is gracefully draining — respawning a
+	// daemon into a shutting-down supervisor is pointless churn.
+	if c.graceful != nil && c.graceful.InProgress() {
+		return
+	}
+	c.quarantineParole.Range(func(k, v any) bool {
+		taskName, _ := k.(string)
+		entry, _ := v.(*quarantineParoleEntry)
+		if entry == nil {
+			c.quarantineParole.Delete(k)
+			return true
+		}
+		// getSMStateCanonical (NOT GetSMState) probes BOTH key forms as post-r8
+		// belt-and-suspenders. Since the SM ingestion boundary canonicalizes
+		// ev.TaskName once, smStates is a single canonical key space (see
+		// getSMStateCanonical), so this parole entry's canonical "\foo" key and the
+		// smStates row line up. The toggled probe is cheap insurance for a legacy
+		// bare-keyed remnant the boundary structurally prevents; a strict
+		// GetSMState(canonical) miss on such a remnant would delete the ladder as "no
+		// longer tracked" and silently un-parole the daemon (commission P2-3).
+		state, ok := c.getSMStateCanonical(taskName)
+		if !ok {
+			// Task no longer tracked (removed from intent). Drop the ladder.
+			c.quarantineParole.Delete(k)
+			return true
+		}
+		if state != api.StQuarantined {
+			switch state {
+			case api.StRunning:
+				// A parole respawn reached healthy StRunning. Reset the ladder
+				// only after it DWELLS — a daemon that reaches StRunning briefly
+				// then re-fails must keep the exponential schedule.
+				if entry.healthySince.IsZero() {
+					entry.healthySince = now
+				}
+				if now.Sub(entry.healthySince) >= quarantineParoleStabilizeDwell {
+					c.quarantineParole.Delete(k)
+					c.emitQuarantineParoleEvent(taskName, "daemon-quarantine-parole-cleared", map[string]any{
+						"attempts": entry.attempts,
+						"note":     "paroled daemon stabilized in Running past the dwell; quarantine parole ladder reset",
+					})
+				}
+			case api.StIdle:
+				// Settled idle (operator stop drained it, or it reached a
+				// non-restart terminal). Drop the ladder.
+				c.quarantineParole.Delete(k)
+			default:
+				// StSpawning / StBackoffWaiting / StExiting: a parole respawn is
+				// in flight (or re-failing). Keep the ladder; reset the dwell so a
+				// later StRunning must accrue the full dwell afresh.
+				entry.healthySince = time.Time{}
+			}
+			return true
+		}
+		// state == StQuarantined
+		entry.healthySince = time.Time{}
+		if now.Before(entry.nextAttemptAt) {
+			return true // cooldown not yet elapsed
+		}
+		// Respect intent: never auto-respawn a daemon the operator has stopped.
+		// The SM's StQuarantined + EvManualRestart transition spawns
+		// UNCONDITIONALLY (unlike StIdle + EvManualRestart, which refuses on
+		// stopped intent), so the stop gate MUST live here (commission P3-4).
+		//
+		// Stop-read + post are loop-serialized AND priority-drained: this tick runs
+		// on the event-loop goroutine — the SAME goroutine that applies EvIntentUpdate
+		// and swaps the stops cache (handleReapScan) — so no loop event interleaves
+		// between the snapshot read below and the PostSelf, and any operator stop
+		// already applied on the loop is observed here. For a stop that lands AFTER
+		// this tick's snapshot (queued behind this tick as evReapScan stop-swap +
+		// EvIntentUpdate(stopped)), the PostSelf restart priority-drains via selfCh
+		// BEFORE those queued external events: EvManualRestart transitions
+		// StQuarantined→StSpawning first, then the queued EvIntentUpdate(stopped)
+		// lands at StSpawning and records queued_action=stop, so the just-spawned
+		// child is terminated by the stop's OWN event — no reliance on a later delta.
+		// The result is at most a brief spawn that the stop itself reaps; the stop is
+		// honored. The durable fix (intent-gating the StQuarantined + EvManualRestart
+		// SM row itself) also changes `mcphub daemon recover`-on-stopped semantics and
+		// stays a separate SM-contract decision.
+		di := c.daemonIntent.Lookup(taskName)
+		activeStop, _ := di.IsActiveStop(now)
+		desired := di.Desired
+		if desired == "" {
+			desired = api.IntentDesiredRunning
+		}
+		if desired != api.IntentDesiredRunning || activeStop {
+			return true // keep the entry; do not parole a stopped daemon
+		}
+		// Cooldown elapsed and intent still running → parole. This tick runs INSIDE
+		// the evParoleTick handler (on the loop goroutine), so the restart MUST go
+		// through PostSelf, not the main-channel TryPost: PostSelf is the only
+		// contract-safe handler-context post (supervisor_event_loop.go), and the
+		// loop priority-drains selfCh BEFORE any pre-queued external event. That
+		// ordering is load-bearing for the stop gate — a stop queued behind this
+		// tick (evReapScan stop-swap + EvIntentUpdate(stopped)) would, via a
+		// main-channel TryPost to the TAIL, let EvIntentUpdate(stopped) hit
+		// StQuarantined as an absorbing no-op FIRST and then this EvManualRestart
+		// spawn cleanly against an already-applied stop that no later delta reaps.
+		// With PostSelf the EvManualRestart drains first (StQuarantined→StSpawning)
+		// and the queued EvIntentUpdate(stopped) then lands at StSpawning, recording
+		// queued_action=stop so the stop is honored. On a full selfCh, leave the
+		// ladder unchanged so the next tick retries rather than burning a step.
+		if !c.eventLoop.PostSelf(api.LoopEvent{Kind: api.EvManualRestart, TaskName: taskName}) {
+			c.emitQuarantineParoleEvent(taskName, "daemon-quarantine-parole-deferred", map[string]any{
+				"note": "event loop self-channel full; parole retry deferred to the next tick",
+			})
+			return true
+		}
+		entry.attempts++
+		entry.nextAttemptAt = now.Add(quarantineParoleDelay(entry.attempts))
+		c.emitQuarantineParoleEvent(taskName, "daemon-quarantine-parole-retry", map[string]any{
+			"attempt":            entry.attempts,
+			"next_retry_seconds": int(quarantineParoleDelay(entry.attempts) / time.Second),
+			"note":               "posted EvManualRestart to give a quarantined daemon an automatic recovery attempt (F2 parole) without a supervisor restart",
+		})
+		return true
+	})
+}
+
+func (c *supervisorController) emitQuarantineParoleEvent(taskName, event string, body map[string]any) {
+	if c == nil || c.events == nil {
+		return
+	}
+	_ = c.events.Emit(api.SupervisorEvent{
+		Severity: "info",
+		Source:   "restart-policy",
+		Event:    event,
+		TaskName: canonicalSupervisorTaskName(taskName),
+		Body:     body,
+	})
 }
 
 const idleRespawnResultBodyKey = "idle_respawn_result"
@@ -284,6 +566,19 @@ const (
 	// happens-before the test goroutine's post-barrier reads.
 	evReapBarrier api.SMEvent = "reap-barrier"
 )
+
+// evParoleTick is the F2 quarantine-parole scan, run as a controller-internal
+// loop event. Like the evReap* events above it is an api.SMEvent VALUE (so it
+// fits LoopEvent.Kind) but is NOT a row in api.Transition's table — it is
+// intercepted at the top of handleLoopEvent and dispatched to
+// runQuarantineParoleTick, never passed to api.Transition. The parole monitor
+// goroutine (runQuarantineParoleMonitor) now only DETECTS the tick cadence and
+// POSTS this event; ALL parole map mutation (create / clear / Delete / field
+// advance) and the EvManualRestart post then run on the single loop goroutine,
+// serialized against recordQuarantineParoleEligible / clearQuarantineParole
+// (which already run there). That removes the pre-fix cross-goroutine TOCTOU
+// between the off-loop tick's Delete and an on-loop threshold record.
+const evParoleTick api.SMEvent = "parole-tick"
 
 // reapBarrierResultBodyKey carries the chan struct{} a test waits on for the
 // evReapBarrier synchronization event.
@@ -1497,20 +1792,18 @@ func taskNameSetFromIntent(intent *api.SupervisorIntentFile) map[string]struct{}
 }
 
 // getSMStateCanonical resolves the controller's SM state for a task by BOTH the
-// canonical leading-backslash key AND the raw bare key (pr302 r7 finding 4 — the
-// SM-state mirror of LookupCanonical). The reap path canonicalizes the task name
-// at its boundary (reapRemovedDaemon / smStateIsReapable receive a canonical
-// "\foo"), but smStates is keyed by the RAW ev.TaskName the SM saw at spawn time
-// (handleLoopEvent stores under ev.TaskName, supervisor_controller.go:2341). A
-// daemon started by this supervisor from a LEGACY / hand-written intent row whose
-// TaskName LACKS the leading backslash therefore has its live StRunning state
-// stored under the BARE key, while smStateIsReapable(canonical) probes the
-// canonical key and MISSES it — taking the clear-only branch and never
-// terminating the removed child (exactly the orphan the reap exists to kill). This
-// getter tries the requested key first (the common canonical case), then the
-// toggled form (strip-or-add the leading "\"), so a canonical query resolves a
-// bare-keyed legacy SM state and vice versa. GetSMState itself keeps strict
-// exact-key semantics for callers that depend on it.
+// canonical leading-backslash key AND the toggled bare key (pr302 r7 finding 4 —
+// the SM-state mirror of LookupCanonical). Since pr302 r8 the whole SM keys ONE
+// canonical space: handleLoopEvent canonicalizes ev.TaskName ONCE at the SM
+// ingestion boundary (routeKey := canonicalSupervisorTaskName(ev.TaskName)) so
+// every smStates.Store downstream keys canonical, and hydrateControllerRunningStates
+// seeds smStates canonical too. The both-form probe here is therefore post-r8
+// belt-and-suspenders: the ingestion boundary structurally prevents a bare-keyed
+// StRunning row, so the toggled lookup is cheap insurance for a legacy remnant, not
+// a live divergence any current write path produces. The getter tries the requested
+// key first (the common canonical case), then the toggled form (strip-or-add the
+// leading "\"). GetSMState itself keeps strict exact-key semantics for callers that
+// depend on it.
 func (c *supervisorController) getSMStateCanonical(taskName string) (api.SMState, bool) {
 	if st, ok := c.GetSMState(taskName); ok {
 		return st, true
@@ -1524,15 +1817,16 @@ func (c *supervisorController) getSMStateCanonical(taskName string) (api.SMState
 }
 
 // loadReapMarkerCanonical probes a controller bookkeeping sync.Map (ownSpawned /
-// reaperOutstanding) under BOTH the canonical and the raw bare key (pr302 r7
-// finding 4 sweep). Those markers are stored under the RAW descriptor / event
-// TaskName at spawn time (executeSideEffect's spawn-success branch stores under
-// d.TaskName, supervisor_controller.go:2578/2585), so a legacy bare-key daemon's
-// markers live under the bare key while the reap path looks them up under the
-// canonical name. Without the toggled probe, the F1 own-reaper deferral decision
-// (owned || reaperPending) would read FALSE for a legacy bare-key own-spawned
-// daemon and wrongly take the non-deferred clear path. Mirrors getSMStateCanonical
-// / LookupCanonical.
+// reaperOutstanding) under BOTH the canonical and the toggled bare key (pr302 r7
+// finding 4 sweep). Since pr302 r8 those markers are stored under the CANONICAL
+// key: executeSideEffect's spawn-success branch stores under d.TaskName, and d is
+// the canonicalized descriptor copy handleLoopEvent resolves after the SM ingestion
+// boundary canonicalizes ev.TaskName. The both-form probe is therefore post-r8
+// belt-and-suspenders — the ingestion boundary structurally prevents a bare-keyed
+// marker, so the toggled lookup is cheap insurance for a legacy remnant, not a live
+// divergence any current write path produces. Without it the F1 own-reaper deferral
+// decision (owned || reaperPending) would read FALSE for such a remnant and wrongly
+// take the non-deferred clear path. Mirrors getSMStateCanonical / LookupCanonical.
 func (c *supervisorController) loadReapMarkerCanonical(m *sync.Map, taskName string) bool {
 	if m == nil {
 		return false
@@ -2356,6 +2650,14 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 			close(ch)
 		}
 		return
+	case evParoleTick:
+		// F2 quarantine-parole scan, run ON the loop goroutine (posted by
+		// runQuarantineParoleMonitor). Running it here serializes the parole map
+		// mutations (create / clear / Delete / field advance) + the EvManualRestart
+		// self-post against every other parole and SM mutation, closing the pre-fix
+		// off-loop TOCTOU. Carries no TaskName (a fleet-wide scan), like evReapScan.
+		c.runQuarantineParoleTick(time.Now().UTC())
+		return
 	}
 	// pr302 r8 single-key-space invariant: canonicalize ev.TaskName ONCE at the SM
 	// ingestion boundary so the ENTIRE SM + reap + loop bookkeeping system (smStates /
@@ -2399,10 +2701,15 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// killed child's real exit arrives, and StExiting's queued respawn NEEDS
 	// that exit — a PID guard would deadlock it. The just-terminated current
 	// child's exit carries gen == current (passes). Exits WITHOUT a
-	// pid_generation (the pre-child synthetic self-post, synthesizeForeignChildExit,
-	// and the liveness sweep's missing_pid/pid_dead/pid_identity_* EvChildExit)
-	// carry gen <= 0 and pass through unchanged — they are "about the tracked
-	// child now" by construction.
+	// pid_generation (the pre-child synthetic self-post and
+	// synthesizeForeignChildExit) carry gen <= 0 and pass through unchanged — they
+	// are "about the tracked child now" by construction. The liveness sweep's
+	// assume-dead EvChildExit (pid_dead / pid_identity_missing /
+	// pid_identity_mismatch disown) NOW stamps its SWEEP-TIME pid_generation
+	// (commission P1): it reads the tracker at sweep time and the post can land
+	// AFTER a respawn bumped the generation, so this guard must drop the stale
+	// disown rather than attribute it to the fresh child (which would clear the
+	// live new PID → the lost-child this PR exists to kill).
 	if ev.Kind == api.EvChildExit && c.tracker != nil && ev.Body != nil {
 		if gen, ok := ev.Body["pid_generation"].(int); ok && gen > 0 {
 			if entry, ok2 := c.tracker.Get(ev.TaskName); ok2 && gen < entry.PIDGeneration {
@@ -2794,6 +3101,9 @@ func (c *supervisorController) executeSideEffect(
 		// so an operator stop of a running legacy row is still honored.
 		if isSerenaProxyDescriptor(*d) && d.RuntimeSpec == nil {
 			c.smStates.Store(ev.TaskName, api.StQuarantined)
+			// Absorbing quarantine: drop any stale threshold parole entry so a
+			// class-flip (threshold → nil-spec) is never paroled (commission P2-2).
+			c.clearQuarantineParole(ev.TaskName)
 			if c.tracker != nil {
 				c.tracker.MarkQuarantined(ev.TaskName)
 			}
@@ -2900,6 +3210,11 @@ func (c *supervisorController) executeSideEffect(
 		// self-post fires for this case (the switch below matches neither).
 		if errors.Is(err, errSpawnJobProtectionRefused) {
 			c.smStates.Store(ev.TaskName, api.StQuarantined)
+			// Absorbing quarantine: drop any stale threshold parole entry so a
+			// class-flip (a paroled threshold daemon whose respawn now hits the
+			// fail-closed job-protection refusal) is never paroled again into a
+			// permanent spawn-refuse loop (commission P2-2).
+			c.clearQuarantineParole(ev.TaskName)
 			if c.events != nil {
 				_ = c.events.Emit(api.SupervisorEvent{
 					Severity: "error",
@@ -2951,10 +3266,20 @@ func (c *supervisorController) executeSideEffect(
 		return nil
 
 	case api.StQuarantined:
-		// Reached via EvTimerDue while at threshold. Emit the
-		// quarantine audit row if it has not already been emitted
-		// from the backoff path. The SM transition table sets
-		// persistBefore=true here so the state is already mirrored.
+		// This case runs for EVERY matched transition landing in StQuarantined:
+		// the THRESHOLD entry (StBackoffWaiting + EvTimerDue at threshold, side
+		// "clear timer") AND the absorbing SELF-LOOPS (StQuarantined +
+		// EvIntentUpdate(stopped) / + EvRequestGraceful — supervisor_state_
+		// machine.go). F2: mark parole-eligible ONLY on the EvTimerDue threshold
+		// ENTRY. Recording on a self-loop would let an ABSORBING quarantine
+		// (strict-job-protection / legacy-serena-nil-spec, which deliberately
+		// record NO eligibility) leak into the parole ladder via a later
+		// stopped/graceful self-loop and get paroled every cooldown forever
+		// (commission P2-1). The SM sets persistBefore=true here so the state is
+		// already mirrored; the audit row below always emits.
+		if ev.Kind == api.EvTimerDue {
+			c.recordQuarantineParoleEligible(d.TaskName, time.Now().UTC())
+		}
 		if c.events != nil {
 			_ = c.events.Emit(api.SupervisorEvent{
 				Severity: "error",
@@ -3160,6 +3485,10 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 		// quarantine row immediately rather than after the backoff
 		// timer would have fired.
 		c.smStates.Store(d.TaskName, api.StQuarantined)
+		// F2: mark this THRESHOLD quarantine parole-eligible (idempotent /
+		// ladder-preserving) so the parole monitor auto-recovers it after a
+		// bounded cooldown instead of requiring a supervisor restart.
+		c.recordQuarantineParoleEligible(d.TaskName, now)
 		// Mirror SM state into the tracker so IPC status snapshots
 		// + the respawn IPC guard see "quarantined", not stale "idle"
 		// (closes codex r1 BLOCKER-2: smStates and tracker were

@@ -168,6 +168,12 @@ func startSupervisorLivenessMonitor(
 	// respawn (new generation) invalidates the latch and the startup deadline
 	// re-applies. Absent tasks are pruned at the end of each sweep.
 	bindLatch := map[string]int{}
+	// mismatchLatch (F6.2) records, per task, the generation+PID that reported a
+	// pid_identity_mismatch on the previous sweep, so a disown fires only on a
+	// SECOND consecutive mismatch of the SAME live child. Owned solely by this
+	// monitor goroutine (same single-writer discipline as bindLatch) and threaded
+	// into every sweep — no tracker/persist mutation.
+	mismatchLatch := map[string]identityMismatchStrike{}
 	// Immediate first sweep at supervisor start, BEFORE the first ticker
 	// tick. Warm-restart leaves alive-but-port-stale daemons recorded as
 	// running in supervisor-state.json (loadSupervisorCurrentRunning keeps
@@ -183,13 +189,13 @@ func startSupervisorLivenessMonitor(
 	// deadline), so even the longer P1b deadline is already expired at this
 	// first sweep and they terminate immediately — the handoff behavior is
 	// preserved.
-	sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events, bindLatch, squatterReap)
+	sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events, bindLatch, squatterReap, mismatchLatch)
 	for {
 		select {
 		case <-ctxDone:
 			return
 		case <-ticker.C:
-			sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events, bindLatch, squatterReap)
+			sweepSupervisorLivenessOnce(stateDir, livenessSweepIntent(stateDir, intent), tracker, loop, events, bindLatch, squatterReap, mismatchLatch)
 		}
 	}
 }
@@ -223,6 +229,18 @@ func livenessSweepIntent(stateDir string, fallback *api.SupervisorIntentFile) *a
 	return fallback
 }
 
+// identityMismatchStrike is the per-(task) F6.2 two-strike latch value: the
+// generation + PID that reported a pid_identity_mismatch on the PREVIOUS sweep.
+// A disown fires only when a SECOND consecutive sweep reports the SAME
+// generation+PID still mismatching — a single-sweep mismatch on a LIVE PID never
+// manufactures a forgotten orphan (the lost-child factory the kernel-sourced
+// StartedAt in F6.1 already makes structurally impossible; this is the
+// defense-in-depth belt).
+type identityMismatchStrike struct {
+	Generation int
+	PID        int
+}
+
 func sweepSupervisorLivenessOnce(
 	stateDir string,
 	intent *api.SupervisorIntentFile,
@@ -231,6 +249,7 @@ func sweepSupervisorLivenessOnce(
 	events *api.SupervisorEventLog,
 	bindLatch map[string]int,
 	squatterReap *squatterSweepReaper,
+	mismatchLatch map[string]identityMismatchStrike,
 ) {
 	if tracker == nil || loop == nil || intent == nil {
 		return
@@ -240,11 +259,23 @@ func sweepSupervisorLivenessOnce(
 	// startup deadline as grace (never the 5s post-bind rule) and no latch is
 	// recorded — which for a slow-startup daemon is the correct, more-lenient
 	// side. Production always passes the monitor-owned map.
+	//
+	// mismatchLatch is likewise nil-safe (F6.2 two-strike disown): a nil map
+	// DISABLES the two-strike gate, so a pid_identity_mismatch disowns on the
+	// first sweep — the pre-F6.2 behavior the existing direct-call tests assert.
+	// Production always passes the monitor-owned map, so the two-strike gate is
+	// active in the real supervisor.
 	byTask := map[string]api.SupervisorDaemon{}
 	for _, d := range intent.Daemons {
 		byTask[canonicalSupervisorTaskName(d.TaskName)] = d
 	}
 	now := time.Now().UTC()
+
+	// mismatchedThisSweep records which tasks reported a pid_identity_mismatch on
+	// THIS sweep so the two-strike latch can be pruned to only CONSECUTIVE
+	// mismatches: a task that is live (or reports any other reason) this sweep
+	// breaks the streak and its strike is cleared at the end.
+	mismatchedThisSweep := map[string]struct{}{}
 
 	// One port-resolution owner per sweep (memoizes the manifest read per server).
 	// A Port=0 legacy descriptor whose manifest declares a port now resolves to
@@ -362,7 +393,7 @@ func sweepSupervisorLivenessOnce(
 		if !latched || latchedGen != entry.PIDGeneration {
 			grace = startupDeadline
 		}
-		live, reason, bound := supervisorDaemonEntryLiveWithProbe(d, entry, now, livenessProbe, grace)
+		live, reason, bound, mismatchDetail := supervisorDaemonEntryLiveWithProbe(d, entry, now, livenessProbe, grace)
 		if bound && bindLatch != nil {
 			bindLatch[taskName] = entry.PIDGeneration
 		}
@@ -449,17 +480,71 @@ func sweepSupervisorLivenessOnce(
 			// squatterSweepReapedFallThrough: the verified-own squatter was
 			// reaped — fall through to the stale + EvManualRestart post below.
 		}
+		// F6.2 two-strike disown. A pid_identity_mismatch here means the PID is
+		// ALIVE (PIDAlive passed before the identity check) but its recorded
+		// start-time / exe no longer matches — historically this posted an
+		// immediate EvChildExit "assume-dead, NO kill", which on a FALSE mismatch
+		// disowned the supervisor's own live child and manufactured a forgotten
+		// port squatter. Require a SECOND consecutive sweep confirming the SAME
+		// generation+PID still mismatching before disowning; a single-sweep
+		// mismatch on a live PID is deferred.
+		//
+		// What this covers vs F6.1: F6.1 (kernel-sourced StartedAt) removes the
+		// loop-lag-drift false mismatch on the kernel path. Two-strike does NOT
+		// paper over a PERSISTENT wrong recorded StartedAt (e.g. the wall-clock
+		// fallback, or a pre-fix daemon's persisted wall-clock time on the first
+		// warm handoff) — that confirms on strike-2 and disowns anyway (a bounded,
+		// one-cycle correction; see the deploy caveat at the spawn site). Its
+		// distinct value is TRANSIENT identity-probe failures — e.g. a transient
+		// ACCESS_DENIED / handle-open hiccup the verifier classifies as a mismatch,
+		// or a genuine PID-reuse race that resolves — which clear by the next sweep
+		// and so never disown a healthy child.
+		//
+		// nil mismatchLatch disables the gate (pre-F6.2 first-sweep disown) for the
+		// direct-call tests; production always passes the monitor-owned map.
+		if reason == supervisorLivenessReasonPIDIdentityMismatch && mismatchLatch != nil {
+			mismatchedThisSweep[taskName] = struct{}{}
+			cur := identityMismatchStrike{Generation: entry.PIDGeneration, PID: entry.CurrentPID}
+			prev, had := mismatchLatch[taskName]
+			if !had || prev != cur {
+				mismatchLatch[taskName] = cur
+				if events != nil {
+					_ = events.Emit(api.SupervisorEvent{
+						Severity: "warn",
+						Source:   "liveness",
+						Event:    "daemon-identity-mismatch-pending",
+						TaskName: taskName,
+						Body: map[string]any{
+							"pid":             entry.CurrentPID,
+							"port":            d.Port,
+							"pid_generation":  entry.PIDGeneration,
+							"identity_detail": mismatchDetail,
+							"note":            "identity mismatch on a LIVE pid; deferring disown until a second consecutive sweep confirms it (F6.2 two-strike, avoids manufacturing a lost-child from a transient false mismatch)",
+						},
+					})
+				}
+				continue
+			}
+			// Second consecutive strike (same generation+PID): confirmed. Fall
+			// through to the stale + EvChildExit disown below.
+		}
 		if events != nil {
+			staleBody := map[string]any{
+				"pid":    entry.CurrentPID,
+				"port":   d.Port,
+				"reason": reason,
+			}
+			// F6.3: surface the recorded=… observed=… identity error so an
+			// operator can diagnose a disown attributed to pid_identity_mismatch.
+			if reason == supervisorLivenessReasonPIDIdentityMismatch && mismatchDetail != "" {
+				staleBody["identity_detail"] = mismatchDetail
+			}
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: "warn",
 				Source:   "liveness",
 				Event:    "daemon-running-state-stale",
 				TaskName: taskName,
-				Body: map[string]any{
-					"pid":    entry.CurrentPID,
-					"port":   d.Port,
-					"reason": reason,
-				},
+				Body:     staleBody,
 			})
 		}
 		eventKind := api.EvChildExit
@@ -470,6 +555,17 @@ func sweepSupervisorLivenessOnce(
 			"pid":    entry.CurrentPID,
 			"port":   d.Port,
 			"reason": reason,
+			// P1a generation stamp (commission P1): the controller's stale-exit
+			// guard (handleLoopEvent) only runs when the EvChildExit body carries
+			// pid_generation. Without it, a liveness-posted assume-dead EvChildExit
+			// (the pid_identity_mismatch / pid_dead / pid_identity_missing disown)
+			// that races behind an already-processed respawn is attributed to the
+			// FRESH current child → StRunning+EvChildExit→StBackoffWaiting clears
+			// the live new PID → forgotten lost-child (the exact defect F6 exists to
+			// kill, WIDENED by the two-strike's one-sweep delay). Stamping the
+			// sweep-time generation lets P1a drop the disown when a respawn has
+			// superseded it, and pass it through when it is still current.
+			"pid_generation": entry.PIDGeneration,
 		}
 		// Single-writer discipline (Codex deep-sec PR #268 Conc-F2): the
 		// sweep runs on its own goroutine, but tracker mutations + the
@@ -499,6 +595,18 @@ func sweepSupervisorLivenessOnce(
 		for taskName := range bindLatch {
 			if _, ok := seenTasks[taskName]; !ok {
 				delete(bindLatch, taskName)
+			}
+		}
+	}
+	// F6.2: prune the two-strike latch to only CONSECUTIVE mismatches. Any task
+	// that did NOT report a pid_identity_mismatch this sweep (it is live again,
+	// reported a different reason, was disowned, or is gone) breaks the streak
+	// and its strike is cleared — so a fresh mismatch always starts the two-sweep
+	// count over rather than disowning on a stale first strike.
+	if mismatchLatch != nil {
+		for taskName := range mismatchLatch {
+			if _, ok := mismatchedThisSweep[taskName]; !ok {
+				delete(mismatchLatch, taskName)
 			}
 		}
 	}
@@ -597,7 +705,7 @@ func supervisorStartupBindDeadline(d api.SupervisorDaemon) time.Duration {
 // only after the (longer) deadline instead of 5s — display-only; restart
 // decisions run exclusively through the sweep, which DOES latch.
 func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time) (bool, string) {
-	live, reason, _ := supervisorDaemonEntryLiveWithProbe(d, entry, now, supervisorLivenessProbeFns, supervisorStartupBindDeadline(d))
+	live, reason, _, _ := supervisorDaemonEntryLiveWithProbe(d, entry, now, supervisorLivenessProbeFns, supervisorStartupBindDeadline(d))
 	return live, reason
 }
 
@@ -609,19 +717,26 @@ func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry,
 // confirmed bound by the tracked current PID (the verified-owner success return
 // and the PortLive-fallback success); the sweep latches on it so subsequent
 // unbound windows fall under the 5s post-bind rule.
-func supervisorDaemonEntryLiveWithProbe(d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time, probe supervisorLivenessProbe, bindGrace time.Duration) (bool, string, bool) {
+//
+// The 4th return (identityDetail) carries the VerifyPIDIdentity error text
+// (which for a start-time mismatch spells out `recorded=… observed=…`, pid_
+// identity_windows.go) so the sweep can surface it into the
+// daemon-running-state-stale / daemon-identity-mismatch-pending event bodies
+// (F6.3 observability). It is populated ONLY for the pid_identity_mismatch
+// reason; every other return leaves it "".
+func supervisorDaemonEntryLiveWithProbe(d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time, probe supervisorLivenessProbe, bindGrace time.Duration) (bool, string, bool, string) {
 	if probe.PIDAlive == nil {
 		probe.PIDAlive = process.IsPidAlive
 	}
 	if entry.CurrentPID <= 0 {
-		return false, supervisorLivenessReasonMissingPID, false
+		return false, supervisorLivenessReasonMissingPID, false, ""
 	}
 	if !probe.PIDAlive(entry.CurrentPID) {
-		return false, supervisorLivenessReasonPIDDead, false
+		return false, supervisorLivenessReasonPIDDead, false, ""
 	}
 	if probe.PIDIdentity != nil {
 		if entry.StartedAt.IsZero() {
-			return false, supervisorLivenessReasonPIDIdentityMissing, false
+			return false, supervisorLivenessReasonPIDIdentityMissing, false, ""
 		}
 		// The daemon runs from its CONFIGURED command (d.Command — the exact
 		// exe the supervisor exec'd), which may differ from the supervisor's
@@ -631,7 +746,7 @@ func supervisorDaemonEntryLiveWithProbe(d api.SupervisorDaemon, entry DaemonRunt
 		// 2026-06-09-supervisor-loses-current-pid-false-quarantine.md).
 		expectedExe := daemonExpectedIdentityExe(d.Command)
 		if expectedExe == "" {
-			return false, supervisorLivenessReasonPIDIdentityMissing, false
+			return false, supervisorLivenessReasonPIDIdentityMissing, false, ""
 		}
 		err := probe.PIDIdentity(process.PIDIdentityProof{
 			PID:            entry.CurrentPID,
@@ -642,16 +757,18 @@ func supervisorDaemonEntryLiveWithProbe(d api.SupervisorDaemon, entry DaemonRunt
 			if errors.Is(err, process.ErrProcessIdentityUnsupported) {
 				// Keep the PIDAlive result on platforms without start-time proof.
 			} else if errors.Is(err, process.ErrProcessAlreadyExited) {
-				return false, supervisorLivenessReasonPIDDead, false
+				return false, supervisorLivenessReasonPIDDead, false, ""
 			} else {
-				return false, supervisorLivenessReasonPIDIdentityMismatch, false
+				// F6.3: surface the exact identity error (recorded=… observed=…)
+				// so the disown/pending event is diagnosable by an operator.
+				return false, supervisorLivenessReasonPIDIdentityMismatch, false, err.Error()
 			}
 		}
 	}
 	if d.Port <= 0 {
 		// No port to bind — nothing to latch (portBoundByCurrentPID stays false
 		// so the sweep never treats a port-less daemon as "bound").
-		return true, "", false
+		return true, "", false, ""
 	}
 	if probe.PortOwnerPID != nil {
 		ownerPID, ok, err := probe.PortOwnerPID(d.Port)
@@ -672,7 +789,7 @@ func supervisorDaemonEntryLiveWithProbe(d api.SupervisorDaemon, entry DaemonRunt
 			// The owner is unverifiable, so we CANNOT confirm the current PID
 			// bound the port — portBoundByCurrentPID stays false.
 			if !entry.StartedAt.IsZero() && now.Sub(entry.StartedAt) < bindGrace {
-				return true, "", false
+				return true, "", false, ""
 			}
 			// Past grace, port not answering, owner unverifiable. This is
 			// genuinely ambiguous: it is still NOT proof a FOREIGN process owns
@@ -683,39 +800,39 @@ func supervisorDaemonEntryLiveWithProbe(d api.SupervisorDaemon, entry DaemonRunt
 			// supervisorLivenessReasonNeedsRestart). The live PID is retained
 			// for handoff because the reason stays in
 			// supervisorLivenessReasonHasLivePID.
-			return false, supervisorLivenessReasonPortOwnerUnverified, false
+			return false, supervisorLivenessReasonPortOwnerUnverified, false, ""
 		}
 		if !ok {
 			if !entry.StartedAt.IsZero() && now.Sub(entry.StartedAt) < bindGrace {
-				return true, "", false
+				return true, "", false, ""
 			}
-			return false, supervisorLivenessReasonPortUnbound, false
+			return false, supervisorLivenessReasonPortUnbound, false, ""
 		}
 		if supervisorSelfPIDFn != nil && ownerPID == supervisorSelfPIDFn() {
-			return false, supervisorLivenessReasonPortOwnerSelf, false
+			return false, supervisorLivenessReasonPortOwnerSelf, false, ""
 		}
 		if ownerPID != entry.CurrentPID {
-			return false, supervisorLivenessReasonPortOwnerMismatch, false
+			return false, supervisorLivenessReasonPortOwnerMismatch, false, ""
 		}
 		// Verified: the tracked current PID owns the port. This is the positive
 		// first-bind proof the sweep latches on so subsequent unbound windows
 		// fall under the 5s post-bind grace.
-		return true, "", true
+		return true, "", true, ""
 	}
 	if probe.PortLive == nil {
 		probe.PortLive = supervisorPortLive
 	}
 	if !probe.PortLive(d.Port) {
 		if !entry.StartedAt.IsZero() && now.Sub(entry.StartedAt) < bindGrace {
-			return true, "", false
+			return true, "", false, ""
 		}
-		return false, supervisorLivenessReasonPortUnbound, false
+		return false, supervisorLivenessReasonPortUnbound, false, ""
 	}
 	// PortLive-fallback (macOS / POSIX with no OS owner probe): TCP confirms a
 	// listener answers on the port. We cannot prove WHICH pid owns it, but the
 	// PID-identity gate above already confirmed the tracked PID is our binary,
 	// so treat the answering port as bound-by-current for latch purposes.
-	return true, "", true
+	return true, "", true, ""
 }
 
 // supervisorLivenessReasonNeedsRestart reports whether a not-live reason

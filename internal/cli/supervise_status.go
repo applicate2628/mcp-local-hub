@@ -171,7 +171,7 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 			// portBoundByCurrentPID return. Tradeoff: a bound-then-lost port shows
 			// Stale in status only after the deadline instead of 5s — display-only;
 			// restart decisions run exclusively through the latch-owning sweep.
-			live, reason, _ := supervisorDaemonEntryLiveWithProbe(api.SupervisorDaemon{
+			live, reason, _, _ := supervisorDaemonEntryLiveWithProbe(api.SupervisorDaemon{
 				TaskName:                   d.TaskName,
 				Server:                     server,
 				Daemon:                     daemon,

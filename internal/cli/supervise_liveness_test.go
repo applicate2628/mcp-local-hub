@@ -265,7 +265,7 @@ func TestSupervisorStartupRuntimeDoesNotHydrateStaleCleanedStoppedDaemon(t *test
 	})
 	defer restoreProbe()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 	select {
 	case ev := <-events:
 		t.Fatalf("liveness reposted stale cleaned daemon: %+v", ev)
@@ -424,7 +424,7 @@ func TestLoadSupervisorStartupRuntimeTerminatesAliveExpiredUnboundPortBeforeResp
 	// The immediate startup liveness sweep (the same call
 	// startSupervisorLivenessMonitor makes before its first ticker tick)
 	// drives the terminate-first restart.
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	// Terminate-first ordering: the live stale PID is terminated BEFORE any
 	// respawn (no spawn-over-live duplicate).
@@ -676,7 +676,7 @@ func TestSupervisorLivenessSweepPostsChildExitForDeadRunningPID(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -730,7 +730,7 @@ func TestSweep_PortZeroLegacyRowResolvesEffectivePort(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -784,8 +784,8 @@ func TestSweep_DaemonPortUnresolvedEmittedOncePerSession(t *testing.T) {
 
 	// Two sweeps, same stateDir → the once-per-(stateDir,task) latch must emit the
 	// event exactly once.
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog, map[string]int{}, nil)
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog, map[string]int{}, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog, map[string]int{}, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog, map[string]int{}, nil, nil)
 
 	count := 0
 	for _, e := range readSupervisorEventLogLines(t, eventsPath) {
@@ -827,7 +827,7 @@ func TestSupervisorLivenessSweepPostsChildExitForDeadPIDWithForeignListener(t *t
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -880,7 +880,7 @@ func TestSupervisorLivenessSweepForeignPortOwnerObserveOnly(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -919,7 +919,7 @@ func TestSupervisorLivenessSweepDoesNotRestartAlivePIDOwningPort(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -960,7 +960,7 @@ func TestSupervisorLivenessSweepRejectsRecycledPID(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -1008,7 +1008,7 @@ func TestSupervisorLivenessSweepRejectsSelfOwnedPort(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -1055,7 +1055,7 @@ func TestSupervisorLivenessSweepRestartsAlivePIDWithUnboundPort(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -1102,7 +1102,7 @@ func TestSupervisorLivenessSweepKeepsLivePIDBeforeRestartPost(t *testing.T) {
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -1190,7 +1190,7 @@ func TestSupervisorLivenessRestartForAliveUnboundPortTerminatesBeforeRespawn(t *
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	// Terminate-first ordering: the old live PID is terminated BEFORE any
 	// respawn (no spawn-over-live).
@@ -1380,7 +1380,7 @@ func TestSupervisorLivenessForeignWarmStartPIDSynthesizesChildExitAndRespawns(t 
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	// Terminate fires FIRST against the foreign live PID; no respawn yet.
 	select {
@@ -1566,7 +1566,7 @@ func TestSupervisorLivenessForeignTerminateFailureNoSynthesizeNoRespawn(t *testi
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	// Terminate is attempted against the foreign live PID and fails.
 	select {
@@ -1758,7 +1758,7 @@ func TestSupervisorLivenessSweepConcurrentWithHandlerNoRace(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 200; i++ {
-			sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+			sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 		}
 	}()
 	// Handler-feeder goroutine: concurrently drives spawn/exit transitions for
@@ -1965,7 +1965,7 @@ func TestSupervisorLivenessSweepNoRestartOnPortOwnerProbeErrorTCPUp(t *testing.T
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -2021,7 +2021,7 @@ func TestSupervisorLivenessSweepObservesProbeErrorTCPDownWithoutRestart(t *testi
 	})
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog, nil, nil, nil)
 
 	// No event posted — neither restart nor teardown.
 	select {
@@ -2090,7 +2090,7 @@ func TestSupervisorLivenessSweepConfirmedOwnerMismatchObserveOnly(t *testing.T) 
 		t.Fatal("port_owner_mismatch must still be a NeedsRestart reason (the own-squatter reap path uses it)")
 	}
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, nil, nil, nil, nil)
 
 	select {
 	case ev := <-events:
