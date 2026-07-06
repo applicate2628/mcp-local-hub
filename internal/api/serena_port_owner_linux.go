@@ -3,8 +3,10 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -34,7 +36,7 @@ func loopbackPortOwnerPIDContext(ctx context.Context, port int) (int, bool, erro
 	if port <= 0 || port > 65535 {
 		return 0, false, fmt.Errorf("loopbackPortOwnerPID: port %d out of range", port)
 	}
-	inode, ok, err := loopbackTCPListenInode(port)
+	inode, ok, err := loopbackTCPListenInodeContext(ctx, port)
 	if err != nil || !ok {
 		return 0, ok, err
 	}
@@ -192,6 +194,10 @@ func pidsForSocketInodes(wantInodes map[int]string) (map[string]int, bool, error
 }
 
 func loopbackTCPListenInode(port int) (string, bool, error) {
+	return loopbackTCPListenInodeContext(context.Background(), port)
+}
+
+func loopbackTCPListenInodeContext(ctx context.Context, port int) (string, bool, error) {
 	// Liveness is tied to the IPv4 127.0.0.1 listener ONLY: this repo writes
 	// client URLs as http://127.0.0.1:<port> and the proxy bind path uses
 	// 127.0.0.1, so a daemon that is alive but listening only on ::1 (IPv6
@@ -200,11 +206,18 @@ func loopbackTCPListenInode(port int) (string, bool, error) {
 	// PID would make supervisorDaemonEntryLive report healthy for a daemon whose
 	// 127.0.0.1 socket is dead, suppressing the restart clients need (Codex bot
 	// #271 r2 P2).
-	return loopbackTCPListenInodeFromProcNet("/proc/net/tcp", port)
+	return loopbackTCPListenInodeFromProcNetContext(ctx, "/proc/net/tcp", port)
 }
 
 func loopbackTCPListenInodeFromProcNet(path string, port int) (string, bool, error) {
-	data, err := os.ReadFile(path)
+	return loopbackTCPListenInodeFromProcNetContext(context.Background(), path, port)
+}
+
+func loopbackTCPListenInodeFromProcNetContext(ctx context.Context, path string, port int) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		// /proc/net/tcp always exists on Linux (IPv4 is always present), so a
 		// read failure here is a genuine probe error — not a benign missing table.
@@ -212,8 +225,14 @@ func loopbackTCPListenInodeFromProcNet(path string, port int) (string, bool, err
 		// removed in favor of IPv4-only liveness; see loopbackTCPListenInode.)
 		return "", false, fmt.Errorf("loopbackPortOwnerPID: read %s: %w", path, err)
 	}
+	defer f.Close()
 	wantPort := strings.ToUpper(fmt.Sprintf("%04X", port))
-	for _, line := range strings.Split(string(data), "\n") {
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return "", false, err
+		}
+		line := scanner.Text()
 		fields := strings.Fields(line)
 		if len(fields) < 10 || fields[0] == "sl" || fields[3] != "0A" {
 			continue
@@ -226,6 +245,12 @@ func loopbackTCPListenInodeFromProcNet(path string, port int) (string, bool, err
 			return "", false, fmt.Errorf("loopbackPortOwnerPID: listening socket on port %d has no inode", port)
 		}
 		return fields[9], true, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", false, fmt.Errorf("loopbackPortOwnerPID: read %s: %w", path, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", false, err
 	}
 	return "", false, nil
 }
@@ -248,48 +273,74 @@ func pidForSocketInode(inode string) (int, bool, error) {
 // pidForSocketInode delegates here with context.Background() (never trips), so the
 // non-ctx behavior is byte-identical.
 func pidForSocketInodeContext(ctx context.Context, inode string) (int, bool, error) {
-	entries, err := os.ReadDir("/proc")
+	proc, err := os.Open("/proc")
 	if err != nil {
 		return 0, false, fmt.Errorf("loopbackPortOwnerPID: read /proc: %w", err)
 	}
+	defer proc.Close()
 	want := "socket:[" + inode + "]"
 	var sawPermissionError bool
-	for _, entry := range entries {
+	for {
 		if err := ctx.Err(); err != nil {
 			return 0, false, err
 		}
-		if !entry.IsDir() {
-			continue
+		entries, err := proc.Readdirnames(64)
+		if err != nil && err != io.EOF {
+			return 0, false, fmt.Errorf("loopbackPortOwnerPID: read /proc: %w", err)
 		}
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil || pid <= 0 {
-			continue
-		}
-		fds, err := os.ReadDir(filepath.Join("/proc", entry.Name(), "fd"))
-		if err != nil {
-			if os.IsPermission(err) {
-				sawPermissionError = true
-			}
-			continue
-		}
-		for _, fd := range fds {
-			// P2-iv (Codex PR-3): also honor the deadline INSIDE a single entry's fd
-			// scan — one process before the socket owner with a huge /proc/<pid>/fd
-			// dir would otherwise let this inner loop run past the deadline even
-			// though the per-entry check passed. ctx.Err() is a cheap atomic load.
+		for _, entry := range entries {
 			if err := ctx.Err(); err != nil {
 				return 0, false, err
 			}
-			target, err := os.Readlink(filepath.Join("/proc", entry.Name(), "fd", fd.Name()))
-			if err != nil {
-				if os.IsPermission(err) {
+			pid, convErr := strconv.Atoi(entry)
+			if convErr != nil || pid <= 0 {
+				continue
+			}
+			fdDir, openErr := os.Open(filepath.Join("/proc", entry, "fd"))
+			if openErr != nil {
+				if os.IsPermission(openErr) {
 					sawPermissionError = true
 				}
 				continue
 			}
-			if target == want {
-				return pid, true, nil
+			fds, readErr := fdDir.Readdirnames(64)
+			for {
+				if readErr != nil && readErr != io.EOF {
+					if os.IsPermission(readErr) {
+						sawPermissionError = true
+					}
+					break
+				}
+				for _, fd := range fds {
+					// P2-iv (Codex PR-3): also honor the deadline INSIDE a single entry's fd
+					// scan — one process before the socket owner with a huge /proc/<pid>/fd
+					// dir would otherwise let this inner loop run past the deadline even
+					// though the per-entry check passed. ctx.Err() is a cheap atomic load.
+					if err := ctx.Err(); err != nil {
+						fdDir.Close()
+						return 0, false, err
+					}
+					target, err := os.Readlink(filepath.Join("/proc", entry, "fd", fd))
+					if err != nil {
+						if os.IsPermission(err) {
+							sawPermissionError = true
+						}
+						continue
+					}
+					if target == want {
+						fdDir.Close()
+						return pid, true, nil
+					}
+				}
+				if readErr == io.EOF {
+					break
+				}
+				fds, readErr = fdDir.Readdirnames(64)
 			}
+			fdDir.Close()
+		}
+		if err == io.EOF {
+			break
 		}
 	}
 	if sawPermissionError {

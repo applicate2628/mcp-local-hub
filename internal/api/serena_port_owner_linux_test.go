@@ -158,3 +158,25 @@ func TestPidForSocketInodeContext_DeadlineTripsMidWalk(t *testing.T) {
 		t.Fatalf("ctx.Err() polled %d times; expected the walk to poll past the trigger", calls)
 	}
 }
+
+func TestLoopbackTCPListenInodeFromProcNetContext_DeadlineTripsMidScan(t *testing.T) {
+	path := t.TempDir() + "/tcp"
+	content := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n" +
+		"   0: 0100007F:238B 00000000:0000 01 00000000:00000000 00:00000000 00000000 1000 0 12345 1 0000000000000000 100 0 0 10 0\n" +
+		"   1: 0100007F:238C 00000000:0000 01 00000000:00000000 00:00000000 00000000 1000 0 12346 1 0000000000000000 100 0 0 10 0\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write proc fixture: %v", err)
+	}
+	calls := 0
+	ctx := &countingErrCtx{Context: context.Background(), calls: &calls, trigger: 1}
+	_, ok, err := loopbackTCPListenInodeFromProcNetContext(ctx, path, 9099)
+	if ok {
+		t.Fatalf("ok=true, want false on a mid-scan deadline")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v, want context.DeadlineExceeded", err)
+	}
+	if calls <= 1 {
+		t.Fatalf("ctx.Err() polled %d times; expected proc-net scan to poll past the trigger", calls)
+	}
+}
