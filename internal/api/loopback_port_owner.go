@@ -1,11 +1,34 @@
 package api
 
+import "context"
+
 // LoopbackPortOwnerPID resolves the PID that owns the LISTENING socket on
 // 127.0.0.1:<port>. Windows uses the existing netstat-backed owner lookup;
 // Linux maps /proc/net/tcp socket inodes back to /proc/<pid>/fd owners; other
 // platforms fail closed until an OS-level owner proof is implemented.
+//
+// It is now a context.Background() delegate of LoopbackPortOwnerPIDContext so
+// every existing caller (serena reconcile, status enrichment, `daemon recover`)
+// stays byte-identical — a background context never cancels, so the Windows
+// exec.CommandContext behaves exactly like the prior exec.Command.
 func LoopbackPortOwnerPID(port int) (int, bool, error) {
-	return loopbackPortOwnerPID(port)
+	return LoopbackPortOwnerPIDContext(context.Background(), port)
+}
+
+// LoopbackPortOwnerPIDContext is the context-bounded owner probe: on Windows the
+// underlying `netstat -ano` runs under exec.CommandContext, so a canceled or
+// deadline-exceeded ctx kills the shell-out instead of blocking the caller. It
+// is the seam the supervisor's F1 pre-spawn gate uses so the netstat probe on
+// the controller event-loop goroutine can never hang the loop: the gate wraps a
+// short deadline around this and treats ctx cancellation as a probe error →
+// fail-open (proceed to spawn), exactly like any other netstat failure. On
+// Linux/other platforms the underlying lookup does not shell out, so ctx is
+// honored as a pre-read cancellation check only.
+func LoopbackPortOwnerPIDContext(ctx context.Context, port int) (int, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return loopbackPortOwnerPIDContext(ctx, port)
 }
 
 // LoopbackPortOwnersSnapshot returns a single map of every IPv4-loopback

@@ -1036,12 +1036,46 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// receive crash events and don't need this goroutine.
 	if reconcileSpawnFn == nil {
 		go runCrashEventBridge(loopCtx, crashCh, loop, events)
+		// F1 pre-spawn port-owner gate wiring (decision D-A). Split loop/worker so
+		// NO blocking work runs on the event loop (codex-P1):
+		//   - portOwnerFn: the LOOP's owner probe, wrapped in a short deadline via
+		//     LoopbackPortOwnerPIDContext so a wedged netstat is killed at the
+		//     deadline (→ probe error → fail-open) and can never hang the loop.
+		//   - portGateCh + runPortGateWorker: the OFF-LOOP worker (exactly ONE
+		//     goroutine) is the SOLE owner of squatterLimiter and runs the WMI
+		//     classify + terminate-wait. squatterLimiter stays single-goroutine-
+		//     owned + lock-free; it is a SEPARATE instance from the liveness sweep's
+		//     limiter (P2a + F3). The loop must NEVER reference squatterLimiter.
+		// Wired only here (production path); direct-construction tests leave these
+		// nil, which disables the gate (spawn as today).
+		ctrl.portOwnerFn = func(port int) (int, bool, error) {
+			probeCtx, cancel := context.WithTimeout(context.Background(), portGateProbeDeadline)
+			defer cancel()
+			return api.LoopbackPortOwnerPIDContext(probeCtx, port)
+		}
+		ctrl.squatterLimiter = newSquatterReapLimiter()
+		ctrl.portGateCh = make(chan portGateReq, portGateChCapacity)
+		go ctrl.runPortGateWorker(loopCtx)
 		// P2a: the port-squatter reap capability (single owner, beside the
 		// spawn/terminate closures above) wraps TerminatePIDWithIdentity. The
 		// monitor owns the rate-limit state; the sweep classifies + reaps a
-		// verified-own port squatter on port_owner_mismatch.
+		// verified-own port squatter on port_owner_mismatch. F3 (quarantine
+		// self-heal, added to the sweep) reuses that same monitor-owned limiter.
 		squatterReapFn := makeProductionSquatterReapFn(events)
-		go startSupervisorLivenessMonitor(loopCtx.Done(), stateDir, intent, runtimeTracker, loop, events, squatterReapFn)
+		// P2-3 (Codex PR-3): F3 quarantine self-heal must respect an operator stop —
+		// mirror the F2 quarantine-parole stop gate (runQuarantineParoleTick) over the
+		// controller's daemonIntent cache. The daemonIntentCache is atomic.Value-backed,
+		// so this read is safe from the liveness goroutine.
+		f3StoppedFn := func(task string) bool {
+			di := ctrl.daemonIntent.Lookup(task)
+			activeStop, _ := di.IsActiveStop(time.Now().UTC())
+			desired := di.Desired
+			if desired == "" {
+				desired = api.IntentDesiredRunning
+			}
+			return desired != api.IntentDesiredRunning || activeStop
+		}
+		go startSupervisorLivenessMonitor(loopCtx.Done(), stateDir, intent, runtimeTracker, loop, events, squatterReapFn, f3StoppedFn)
 		// F2: quarantine parole monitor. A threshold-quarantined daemon used to
 		// stay dead "until supervisor restart"; this ticks the in-memory parole
 		// ladder and posts an automatic EvManualRestart after a bounded cooldown

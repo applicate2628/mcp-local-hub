@@ -79,6 +79,17 @@ var squatterTerminatePIDFn = process.TerminatePIDWithIdentity
 // the whole body well under the 16 KB cap so the identity survives.
 const squatterEventFieldCap = 2048
 
+// Audit `source` discriminators (MUST-FIX #8): every verdict/kill is tagged
+// with the trigger that produced it so an operator can tell the automatic
+// pre-spawn gate (F1), the automatic quarantine self-heal sweep (F3), the
+// existing liveness port_owner_mismatch sweep (P2a), and the operator-driven
+// recover verb apart in supervisor-events.log. "sweep"/"recover" are the
+// pre-existing literals; these name the two NEW automatic triggers.
+const (
+	squatterSourcePreSpawn        = "prespawn"        // F1: pre-spawn port-owner gate on the controller loop
+	squatterSourceQuarantineSweep = "quarantine-sweep" // F3: quarantine self-heal second pass on the liveness sweep
+)
+
 // classifyPortSquatter decides whether ownerPID (the live foreign owner of
 // d.Port, per a port_owner_mismatch verdict) may be reaped as a disowned child
 // of THIS task. It is pure — no rate limiting, no kill, no event emission — so
@@ -522,6 +533,14 @@ func (l *squatterReapLimiter) recordReap(task string, now time.Time) int {
 type squatterSweepReaper struct {
 	reapFn  squatterReapFunc
 	limiter *squatterReapLimiter
+	// stoppedFn reports whether the operator has STOPPED a task (desired != running
+	// OR an active stop window). F3's quarantine self-heal (supervise_liveness.go)
+	// must NOT reap + auto-restart a daemon the operator deliberately stopped — the
+	// stop owns cleanup (Codex PR-3 P2-3). It mirrors the F2 quarantine-parole stop
+	// gate (supervisor_controller.go's runQuarantineParoleTick). Wired in production
+	// over the controller's daemonIntent cache; nil in direct-sweep tests → treated
+	// as not-stopped (today's behavior).
+	stoppedFn func(task string) bool
 }
 
 type squatterSweepOutcome int
@@ -646,9 +665,134 @@ func emitSquatterEvent(events *api.SupervisorEventLog, event, source string, ver
 	}
 	_ = events.Emit(api.SupervisorEvent{
 		Severity: "warn",
-		Source:   "liveness",
+		Source:   squatterEnvelopeSource(source),
 		Event:    event,
 		TaskName: canonicalSupervisorTaskName(d.TaskName),
 		Body:     body,
 	})
+}
+
+// squatterEnvelopeSource maps the body `source` discriminator to an accurate
+// event-envelope Source (OBS-2). The liveness sweep (P2a "sweep" + F3
+// "quarantine-sweep") genuinely runs on the liveness goroutine → "liveness"; the
+// F1 "prespawn" trigger runs on the controller's restart-policy port-gate worker,
+// NOT the liveness sweep, so tagging its envelope "liveness" was inaccurate →
+// "restart-policy". The body `source` keeps the fine-grained discriminator
+// (prespawn / sweep / quarantine-sweep / recover) unchanged.
+func squatterEnvelopeSource(source string) string {
+	if source == squatterSourcePreSpawn {
+		return "restart-policy"
+	}
+	return "liveness"
+}
+
+// squatterAutoOutcome is the result of the shared automatic-trigger port-owner
+// gate (F1 pre-spawn + F3 quarantine self-heal). It reports WHAT the classifier
+// found and whether a reap happened; the caller maps it to its own consequence
+// (F1: spawn / hold-in-backoff; F3: post EvManualRestart / observe-only). The
+// helper itself drives NO SM transition and takes NO port-free wait — those are
+// caller-owned so the single classify+reap+audit core stays reusable.
+type squatterAutoOutcome int
+
+const (
+	// squatterAutoForeign: the port owner exists and was identity-read but is
+	// NOT a disowned child of this task — NEVER killed (observe-only).
+	squatterAutoForeign squatterAutoOutcome = iota
+	// squatterAutoUnverified: the owner's identity could not be established
+	// (lookup failure / non-Windows / owner is this task's own tracked child) —
+	// fail closed, no kill.
+	squatterAutoUnverified
+	// squatterAutoReaped: a verified-own disowned child was reaped (or was
+	// already gone). The caller may proceed to (re)spawn into the freed port.
+	squatterAutoReaped
+	// squatterAutoReapFailed: the owner was verified-own but the identity-gated
+	// kill failed — the port is still held; the caller must NOT spawn over it.
+	squatterAutoReapFailed
+	// squatterAutoRateLimited: the per-task lookup or reap budget was exhausted
+	// this failure window — no classify/kill this pass; the caller must NOT
+	// spawn (it cannot know the owner is reapable) and should retry later.
+	squatterAutoRateLimited
+)
+
+// reapSquatterForAutomaticTrigger is the single owner of the rate-limited
+// classify → identity-gated reap → audit flow for the two NEW automatic
+// triggers (F1 pre-spawn gate, F3 quarantine self-heal). The caller has already
+// resolved the effective port and probed a live foreign owner (ownerPID > 0);
+// this decides whether that owner is a reapable disowned child of THIS task and,
+// if so, kills it EXCLUSIVELY via squatterTerminatePIDFn (MUST-FIX #2 — the same
+// held-handle-re-verifying primitive `daemon recover` uses; no raw
+// TerminateProcess, no ACCESS_DENIED retry). Every verdict/kill is audited with
+// the caller's `source` (MUST-FIX #8) and H1-bounded identity fields.
+//
+// It deliberately mirrors handleSquatterMismatchOnSweep's rate-limit + classify
+// structure but (a) reaps via squatterTerminatePIDFn directly rather than the
+// sweep's reapFn closure (so its audit `source` is not the closure-baked
+// "sweep"), and (b) returns a richer outcome the caller maps to its own action.
+// The shipped P2a mismatch path (handleSquatterMismatchOnSweep) is left
+// untouched. limiter may be nil (tests / no wiring): its methods are nil-safe,
+// so a nil limiter simply disables rate-limiting.
+func reapSquatterForAutomaticTrigger(
+	d api.SupervisorDaemon,
+	ownerPID, selfPID int,
+	tracked map[string]DaemonRuntimeEntry,
+	limiter *squatterReapLimiter,
+	events *api.SupervisorEventLog,
+	source string,
+	now time.Time,
+) squatterAutoOutcome {
+	task := canonicalSupervisorTaskName(d.TaskName)
+
+	// Lookup rate limit (D-A "Rate limit"): at most one identity lookup per task
+	// per 30s. The identity read (LookupProcessIdentity) is the expensive gate;
+	// the caller's cheap port-owner probe already ran, so throttling here bounds
+	// the WMI/CIM cost without hiding a freed port (a freed port has ownerPID<=0
+	// and never reaches this helper).
+	if !limiter.allowLookup(task, now) {
+		emitSquatterEvent(events, "daemon-port-squatter-unverified", source, squatterUnverified, d, ownerPID, process.ProcessIdentity{}, map[string]any{
+			"rate_limited": true,
+			"note":         "identity lookup rate-limited (<=1/30s per task); run 'mcphub daemon recover " + task + "' to force recovery now",
+		})
+		return squatterAutoRateLimited
+	}
+	limiter.recordLookup(task, now)
+
+	verdict, id := classifyPortSquatter(d, ownerPID, selfPID, tracked)
+	switch verdict {
+	case squatterForeign:
+		emitSquatterEvent(events, "daemon-port-squatter-foreign", source, verdict, d, ownerPID, id, map[string]any{
+			"note": "port owner is NOT a disowned child of this task (tracked sibling, different binary, or argv does not name this task); NOT killed",
+		})
+		return squatterAutoForeign
+	case squatterUnverified:
+		emitSquatterEvent(events, "daemon-port-squatter-unverified", source, verdict, d, ownerPID, id, map[string]any{
+			"note": "port owner identity could not be verified (lookup failed / non-Windows / this task's own child); fail-closed, no kill",
+		})
+		return squatterAutoUnverified
+	case squatterOwnTask:
+		if !limiter.allowReap(task, now) {
+			emitSquatterEvent(events, "daemon-port-squatter-unverified", source, squatterUnverified, d, ownerPID, id, map[string]any{
+				"rate_limited": true,
+				"note":         "reap attempts exhausted for this failure window (per-task or global cap); run 'mcphub daemon recover " + task + "' to force recovery",
+			})
+			return squatterAutoRateLimited
+		}
+		globalCount := limiter.recordReap(task, now)
+		proof := squatterKillProof(id)
+		err := squatterTerminatePIDFn(proof)
+		if err != nil && !errors.Is(err, process.ErrProcessAlreadyExited) {
+			emitSquatterEvent(events, "daemon-port-squatter-reap-failed", source, verdict, d, ownerPID, id, map[string]any{
+				"err":               err.Error(),
+				"reap_count_window": globalCount,
+				"note":              "identity-gated reap failed; NOT spawning/restarting while the port is still held",
+			})
+			return squatterAutoReapFailed
+		}
+		emitSquatterEvent(events, "daemon-port-squatter-reaped", source, verdict, d, ownerPID, id, map[string]any{
+			"reap_count_window": globalCount,
+			"already_exited":    errors.Is(err, process.ErrProcessAlreadyExited),
+			"note":              "verified-own port squatter reaped",
+		})
+		return squatterAutoReaped
+	}
+	return squatterAutoUnverified
 }

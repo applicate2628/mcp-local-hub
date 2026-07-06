@@ -3,6 +3,7 @@
 package process
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,6 +30,11 @@ const (
 // Production binds it to realLookupBackend (PowerShell primary,
 // wmic fallback). Tests swap it via swapLookupBackend(t, ...) to
 // exercise transient-error paths without shelling powershell.exe.
+//
+// It takes a context so the retry loop's per-attempt shell-out can be bounded
+// by a caller deadline (LookupProcessIdentityContext) — the supervisor's F1
+// port-gate worker wraps a deadline around this so one wedged host WMI cannot
+// stall the single worker forever.
 var lookupBackendFn = realLookupBackend
 
 // LookupProcessIdentity resolves a Windows PID into a ProcessIdentity.
@@ -49,14 +55,33 @@ var lookupBackendFn = realLookupBackend
 // shelling out. PID 0 is the Idle Process pseudo-entry on Windows
 // and Win32_Process never returns it; rejecting it here is faster
 // than letting CIM return an empty result set.
+// It is a context.Background() delegate of LookupProcessIdentityContext, so the
+// public signature and behavior are unchanged for every existing caller.
 func LookupProcessIdentity(pid int) (ProcessIdentity, error) {
+	return LookupProcessIdentityContext(context.Background(), pid)
+}
+
+// LookupProcessIdentityContext is the context-bounded form of
+// LookupProcessIdentity. The retry loop and the underlying PowerShell/wmic
+// shell-outs honor ctx: a canceled or deadline-exceeded ctx short-circuits the
+// loop AND kills any in-flight child process (exec.CommandContext), so one
+// wedged host WMI query cannot block the caller past its deadline. On a ctx
+// deadline the caller sees ctx.Err() (DeadlineExceeded / Canceled) — the F1
+// port-gate worker maps that to the unverified (fail-closed, no kill) path.
+func LookupProcessIdentityContext(ctx context.Context, pid int) (ProcessIdentity, error) {
 	if pid < 0 {
 		return ProcessIdentity{}, fmt.Errorf("process: invalid PID %d (must be non-negative)", pid)
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	var lastErr error
 	for attempt := 1; attempt <= lookupRetries; attempt++ {
-		id, err := lookupBackendFn(pid)
+		if err := ctx.Err(); err != nil {
+			return ProcessIdentity{}, err
+		}
+		id, err := lookupBackendFn(ctx, pid)
 		if err == nil {
 			return id, nil
 		}
@@ -65,9 +90,19 @@ func LookupProcessIdentity(pid int) (ProcessIdentity, error) {
 		if errors.Is(err, ErrProcessNotFound) {
 			return ProcessIdentity{}, err
 		}
+		// ctx cancellation is terminal too — a deadline that fired mid-attempt
+		// must not consume more of the retry budget.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return ProcessIdentity{}, err
+		}
 		lastErr = err
 		if attempt < lookupRetries {
-			time.Sleep(lookupRetryDelay)
+			// Context-aware backoff: abandon the wait the instant ctx fires.
+			select {
+			case <-ctx.Done():
+				return ProcessIdentity{}, ctx.Err()
+			case <-time.After(lookupRetryDelay):
+			}
 		}
 	}
 	return ProcessIdentity{}, fmt.Errorf("process: lookup PID %d failed after %d attempts: %w", pid, lookupRetries, lastErr)
@@ -76,9 +111,9 @@ func LookupProcessIdentity(pid int) (ProcessIdentity, error) {
 // probePowerShellCLMFn is the injectable CLM probe the production
 // dispatcher consults. Tests swap it via swapProbePowerShellCLM to
 // drive the (psOK, err) decision matrix without shelling out to
-// powershell.exe. Defaults to the real ProbePowerShellCLM exported
-// function.
-var probePowerShellCLMFn = ProbePowerShellCLM
+// powershell.exe. Defaults to the ctx-bounded probePowerShellCLMContext
+// (ProbePowerShellCLM() is its context.Background() delegate).
+var probePowerShellCLMFn = probePowerShellCLMContext
 
 // lookupViaPowerShellFn and lookupViaWmicFn are the injectable
 // terminal-path backends the production dispatcher fans out to once
@@ -89,6 +124,12 @@ var (
 	lookupViaPowerShellFn = lookupViaPowerShell
 	lookupViaWmicFn       = lookupViaWmic
 )
+
+// squatterLookupIdentity note: all four seams above now take a context so the
+// shell-outs they front (Get-CimInstance / wmic / the CLM probe) run under
+// exec.CommandContext and are killed on a caller deadline. The public
+// ProbePowerShellCLM() / LookupProcessIdentity() keep their non-ctx signatures
+// as context.Background() delegates.
 
 // wmicPathLookupFn is the injectable PATH probe for wmic.exe. Tests
 // swap it to simulate "wmic present" vs "wmic absent" hosts without
@@ -123,8 +164,8 @@ var wmicPathLookupFn = func() error {
 // production callers typically resolve many PIDs per migration tick,
 // so an in-memory cache could be added if profiling shows the probe
 // dominating wall-time. For now correctness > micro-optimization.
-func realLookupBackend(pid int) (ProcessIdentity, error) {
-	clmAvailable, probeErr := probePowerShellCLMFn()
+func realLookupBackend(ctx context.Context, pid int) (ProcessIdentity, error) {
+	clmAvailable, probeErr := probePowerShellCLMFn(ctx)
 	if probeErr != nil {
 		// Probe transport failed (powershell.exe missing, language-mode
 		// shell-out hung, etc.). Do NOT silently fall through to wmic;
@@ -138,13 +179,13 @@ func realLookupBackend(pid int) (ProcessIdentity, error) {
 		// covers transient stalls. wmic is intentionally NOT
 		// consulted: it is a CLM-locked-host fallback, not an
 		// alternative path on healthy hosts.
-		return lookupViaPowerShellFn(pid)
+		return lookupViaPowerShellFn(ctx, pid)
 	}
 	// CLM-locked (probe returned (false, nil)). Use wmic.exe if
 	// present; otherwise emit a clear error naming both conditions
 	// so operators know what to change.
 	if err := wmicPathLookupFn(); err == nil {
-		return lookupViaWmicFn(pid)
+		return lookupViaWmicFn(ctx, pid)
 	}
 	return ProcessIdentity{}, fmt.Errorf("process: PowerShell CLM-locked AND wmic.exe absent: cannot resolve PID %d", pid)
 }
@@ -181,7 +222,7 @@ type psCimRecord struct {
 // ProcessId so a single-PID filter always returns 0 or 1 rows.
 // Empty result = ConvertTo-Json emits nothing (zero bytes), which we
 // detect and map to ErrProcessNotFound.
-func lookupViaPowerShell(pid int) (ProcessIdentity, error) {
+func lookupViaPowerShell(ctx context.Context, pid int) (ProcessIdentity, error) {
 	// Note: the embedded `$_` is a PowerShell automatic variable for
 	// the current pipeline item — must NOT be escaped on the Go side
 	// (no Go string interpolation collides with `$`).
@@ -192,7 +233,7 @@ func lookupViaPowerShell(pid int) (ProcessIdentity, error) {
 			"ConvertTo-Json -Compress",
 		pid,
 	)
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
 	NoConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -238,8 +279,8 @@ func lookupViaPowerShell(pid int) (ProcessIdentity, error) {
 // wmic CreationDate format is the WMI DATETIME string
 // `yyyymmddHHMMSS.mmmmmm+UTCminutes`. parsing is fragile but adequate
 // for the fallback role.
-func lookupViaWmic(pid int) (ProcessIdentity, error) {
-	cmd := exec.Command("wmic.exe", "process", "where",
+func lookupViaWmic(ctx context.Context, pid int) (ProcessIdentity, error) {
+	cmd := exec.CommandContext(ctx, "wmic.exe", "process", "where",
 		fmt.Sprintf("ProcessId=%d", pid),
 		"get", "Name,CommandLine,CreationDate,ExecutablePath",
 		"/format:csv",
@@ -355,12 +396,20 @@ func splitWmicCSVLine(line string) []string {
 // — the operator needs to know whether to install PS or to relax
 // the security policy.
 func ProbePowerShellCLM() (bool, error) {
+	return probePowerShellCLMContext(context.Background())
+}
+
+// probePowerShellCLMContext is the context-bounded probe: both PowerShell
+// shell-outs run under exec.CommandContext so a caller deadline kills a hung
+// language-mode / CIM dry-run probe. ProbePowerShellCLM() delegates here with
+// context.Background(), keeping its public non-ctx signature byte-identical.
+func probePowerShellCLMContext(ctx context.Context) (bool, error) {
 	if _, err := exec.LookPath("powershell.exe"); err != nil {
 		return false, fmt.Errorf("powershell.exe not on PATH: %w", err)
 	}
 
 	// Step (a): language mode probe.
-	cmdLang := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+	cmdLang := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
 		"$ExecutionContext.SessionState.LanguageMode")
 	NoConsole(cmdLang)
 	outLang, errLang := cmdLang.Output()
@@ -375,7 +424,7 @@ func ProbePowerShellCLM() (bool, error) {
 	// Step (b): dry-run Get-CimInstance with ProcessId=0 — always
 	// returns empty result set in FullLanguage; any non-zero exit
 	// means the cmdlet itself is blocked.
-	cmdCim := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+	cmdCim := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
 		"Get-CimInstance -ClassName Win32_Process -Filter 'ProcessId=0' | "+
 			"Select-Object ProcessId | ConvertTo-Json -Compress")
 	NoConsole(cmdCim)

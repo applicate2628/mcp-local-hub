@@ -3,6 +3,7 @@
 package process
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strings"
@@ -89,7 +90,7 @@ func TestLookupProcessIdentity_NegativePID(t *testing.T) {
 func TestLookupProcessIdentity_RetriesOnTransient(t *testing.T) {
 	calls := 0
 	transient := errors.New("transient: AV scanner stall")
-	swapLookupBackend(t, func(pid int) (ProcessIdentity, error) {
+	swapLookupBackend(t, func(_ context.Context, pid int) (ProcessIdentity, error) {
 		calls++
 		if calls < 3 {
 			return ProcessIdentity{}, transient
@@ -121,7 +122,7 @@ func TestLookupProcessIdentity_RetriesOnTransient(t *testing.T) {
 // can distinguish "tried 3 times" from "first-shot failure".
 func TestLookupProcessIdentity_RetryExhaustion(t *testing.T) {
 	calls := 0
-	swapLookupBackend(t, func(pid int) (ProcessIdentity, error) {
+	swapLookupBackend(t, func(_ context.Context, pid int) (ProcessIdentity, error) {
 		calls++
 		return ProcessIdentity{}, errors.New("transient: stall")
 	})
@@ -181,7 +182,7 @@ func TestLookupProcessIdentity_CommandLineNonEmpty(t *testing.T) {
 // that need to exercise the retry loop deterministically MUST go
 // through this helper rather than mutating lookupBackendFn directly,
 // so a panicking test does not leak the fake into sibling tests.
-func swapLookupBackend(t *testing.T, fn func(int) (ProcessIdentity, error)) {
+func swapLookupBackend(t *testing.T, fn func(context.Context, int) (ProcessIdentity, error)) {
 	t.Helper()
 	original := lookupBackendFn
 	lookupBackendFn = fn
@@ -206,7 +207,7 @@ func swapRealLookupBackendForDispatchTests(t *testing.T) {
 // for the duration of the test and restores the original on Cleanup.
 // Use it to drive realLookupBackend's (clmAvailable, probeErr) decision
 // matrix without shelling out to powershell.exe.
-func swapProbePowerShellCLM(t *testing.T, fn func() (bool, error)) {
+func swapProbePowerShellCLM(t *testing.T, fn func(context.Context) (bool, error)) {
 	t.Helper()
 	original := probePowerShellCLMFn
 	probePowerShellCLMFn = fn
@@ -217,7 +218,7 @@ func swapProbePowerShellCLM(t *testing.T, fn func() (bool, error)) {
 
 // swapLookupViaPowerShell installs fn as the package-level PowerShell
 // terminal-path backend for the duration of the test.
-func swapLookupViaPowerShell(t *testing.T, fn func(int) (ProcessIdentity, error)) {
+func swapLookupViaPowerShell(t *testing.T, fn func(context.Context, int) (ProcessIdentity, error)) {
 	t.Helper()
 	original := lookupViaPowerShellFn
 	lookupViaPowerShellFn = fn
@@ -228,7 +229,7 @@ func swapLookupViaPowerShell(t *testing.T, fn func(int) (ProcessIdentity, error)
 
 // swapLookupViaWmic installs fn as the package-level wmic terminal-path
 // backend for the duration of the test.
-func swapLookupViaWmic(t *testing.T, fn func(int) (ProcessIdentity, error)) {
+func swapLookupViaWmic(t *testing.T, fn func(context.Context, int) (ProcessIdentity, error)) {
 	t.Helper()
 	original := lookupViaWmicFn
 	lookupViaWmicFn = fn
@@ -258,12 +259,12 @@ func swapWmicPathLookup(t *testing.T, fn func() error) {
 // wmic's. (codex-r2-b-p1, round-1 remains.)
 func TestLookupProcessIdentity_CLMAvailablePathStaysOnPowerShellOnTransient(t *testing.T) {
 	swapRealLookupBackendForDispatchTests(t)
-	swapProbePowerShellCLM(t, func() (bool, error) {
+	swapProbePowerShellCLM(t, func(_ context.Context) (bool, error) {
 		return true, nil
 	})
 	psCalls := 0
 	transient := errors.New("transient: AV scanner stall")
-	swapLookupViaPowerShell(t, func(pid int) (ProcessIdentity, error) {
+	swapLookupViaPowerShell(t, func(_ context.Context, pid int) (ProcessIdentity, error) {
 		psCalls++
 		if psCalls < 3 {
 			return ProcessIdentity{}, transient
@@ -277,7 +278,7 @@ func TestLookupProcessIdentity_CLMAvailablePathStaysOnPowerShellOnTransient(t *t
 		}, nil
 	})
 	wmicCalls := 0
-	swapLookupViaWmic(t, func(pid int) (ProcessIdentity, error) {
+	swapLookupViaWmic(t, func(_ context.Context, pid int) (ProcessIdentity, error) {
 		wmicCalls++
 		return ProcessIdentity{}, errors.New("wmic must not be invoked when CLM is available")
 	})
@@ -311,16 +312,16 @@ func TestLookupProcessIdentity_CLMAvailablePathStaysOnPowerShellOnTransient(t *t
 // (codex-r2-b-p1, round-1 remains.)
 func TestLookupProcessIdentity_CLMLockedRoutesToWmic(t *testing.T) {
 	swapRealLookupBackendForDispatchTests(t)
-	swapProbePowerShellCLM(t, func() (bool, error) {
+	swapProbePowerShellCLM(t, func(_ context.Context) (bool, error) {
 		return false, nil
 	})
 	psCalls := 0
-	swapLookupViaPowerShell(t, func(pid int) (ProcessIdentity, error) {
+	swapLookupViaPowerShell(t, func(_ context.Context, pid int) (ProcessIdentity, error) {
 		psCalls++
 		return ProcessIdentity{}, errors.New("PS must not be invoked when CLM is locked")
 	})
 	wmicCalls := 0
-	swapLookupViaWmic(t, func(pid int) (ProcessIdentity, error) {
+	swapLookupViaWmic(t, func(_ context.Context, pid int) (ProcessIdentity, error) {
 		wmicCalls++
 		return ProcessIdentity{
 			PID:              pid,
@@ -356,16 +357,16 @@ func TestLookupProcessIdentity_CLMLockedRoutesToWmic(t *testing.T) {
 // policy or install wmic. (codex-r2-b-p1, round-1 remains.)
 func TestLookupProcessIdentity_CLMLockedNoWmicReturnsError(t *testing.T) {
 	swapRealLookupBackendForDispatchTests(t)
-	swapProbePowerShellCLM(t, func() (bool, error) {
+	swapProbePowerShellCLM(t, func(_ context.Context) (bool, error) {
 		return false, nil
 	})
 	psCalls := 0
-	swapLookupViaPowerShell(t, func(pid int) (ProcessIdentity, error) {
+	swapLookupViaPowerShell(t, func(_ context.Context, pid int) (ProcessIdentity, error) {
 		psCalls++
 		return ProcessIdentity{}, errors.New("PS must not be invoked when CLM is locked")
 	})
 	wmicCalls := 0
-	swapLookupViaWmic(t, func(pid int) (ProcessIdentity, error) {
+	swapLookupViaWmic(t, func(_ context.Context, pid int) (ProcessIdentity, error) {
 		wmicCalls++
 		return ProcessIdentity{}, errors.New("wmic must not be invoked when wmic is absent")
 	})
@@ -409,16 +410,16 @@ func TestLookupProcessIdentity_CLMLockedNoWmicReturnsError(t *testing.T) {
 func TestLookupProcessIdentity_ProbeErrorIsFatalNotFallback(t *testing.T) {
 	swapRealLookupBackendForDispatchTests(t)
 	probeErr := errors.New("transport: powershell.exe not on PATH")
-	swapProbePowerShellCLM(t, func() (bool, error) {
+	swapProbePowerShellCLM(t, func(_ context.Context) (bool, error) {
 		return false, probeErr
 	})
 	psCalls := 0
-	swapLookupViaPowerShell(t, func(pid int) (ProcessIdentity, error) {
+	swapLookupViaPowerShell(t, func(_ context.Context, pid int) (ProcessIdentity, error) {
 		psCalls++
 		return ProcessIdentity{}, errors.New("PS must not be invoked when probe failed")
 	})
 	wmicCalls := 0
-	swapLookupViaWmic(t, func(pid int) (ProcessIdentity, error) {
+	swapLookupViaWmic(t, func(_ context.Context, pid int) (ProcessIdentity, error) {
 		wmicCalls++
 		return ProcessIdentity{}, errors.New("wmic must not be invoked when probe failed")
 	})
