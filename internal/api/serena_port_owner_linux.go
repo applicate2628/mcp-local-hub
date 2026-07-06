@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,6 +16,21 @@ import (
 // plain TCP connect: any local process can bind a stale daemon port, but it
 // cannot make /proc attribute that listener to the tracked daemon PID.
 func loopbackPortOwnerPID(port int) (int, bool, error) {
+	return loopbackPortOwnerPIDContext(context.Background(), port)
+}
+
+// loopbackPortOwnerPIDContext is the context-bounded form. The Linux owner lookup
+// walks /proc/<pid>/fd to map the listening socket inode back to its owner — an
+// O(processes × fds) scan that on a host with a large/slow /proc tree can take
+// meaningfully long. P2-C: ctx is honored DURING that walk (pidForSocketInodeContext
+// checks ctx.Err() per /proc entry) so the caller's deadline (the supervisor's 2s
+// portGateProbeDeadline) is actually enforced and the controller loop cannot block
+// past it. loopbackPortOwnerPID delegates here with context.Background(), which
+// never trips, so the non-ctx path stays byte-identical.
+func loopbackPortOwnerPIDContext(ctx context.Context, port int) (int, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, false, err
+	}
 	if port <= 0 || port > 65535 {
 		return 0, false, fmt.Errorf("loopbackPortOwnerPID: port %d out of range", port)
 	}
@@ -22,11 +38,7 @@ func loopbackPortOwnerPID(port int) (int, bool, error) {
 	if err != nil || !ok {
 		return 0, ok, err
 	}
-	pid, ok, err := pidForSocketInode(inode)
-	if err != nil || !ok {
-		return 0, ok, err
-	}
-	return pid, true, nil
+	return pidForSocketInodeContext(ctx, inode)
 }
 
 // loopbackPortOwnersSnapshot maps every IPv4 loopback LISTENING port to its
@@ -226,6 +238,16 @@ func isProcNetLoopbackAddress(addr string) bool {
 }
 
 func pidForSocketInode(inode string) (int, bool, error) {
+	return pidForSocketInodeContext(context.Background(), inode)
+}
+
+// pidForSocketInodeContext is the context-bounded /proc walk (P2-C). It checks
+// ctx.Err() at the top of each /proc-entry iteration — BEFORE that entry's
+// per-fd readlink scan — so a canceled/deadline-exceeded ctx aborts promptly with
+// the ctx error instead of walking the whole (possibly large/slow) process tree.
+// pidForSocketInode delegates here with context.Background() (never trips), so the
+// non-ctx behavior is byte-identical.
+func pidForSocketInodeContext(ctx context.Context, inode string) (int, bool, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return 0, false, fmt.Errorf("loopbackPortOwnerPID: read /proc: %w", err)
@@ -233,6 +255,9 @@ func pidForSocketInode(inode string) (int, bool, error) {
 	want := "socket:[" + inode + "]"
 	var sawPermissionError bool
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return 0, false, err
+		}
 		if !entry.IsDir() {
 			continue
 		}
@@ -248,6 +273,13 @@ func pidForSocketInode(inode string) (int, bool, error) {
 			continue
 		}
 		for _, fd := range fds {
+			// P2-iv (Codex PR-3): also honor the deadline INSIDE a single entry's fd
+			// scan — one process before the socket owner with a huge /proc/<pid>/fd
+			// dir would otherwise let this inner loop run past the deadline even
+			// though the per-entry check passed. ctx.Err() is a cheap atomic load.
+			if err := ctx.Err(); err != nil {
+				return 0, false, err
+			}
 			target, err := os.Readlink(filepath.Join("/proc", entry.Name(), "fd", fd.Name()))
 			if err != nil {
 				if os.IsPermission(err) {

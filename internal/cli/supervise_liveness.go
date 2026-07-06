@@ -149,16 +149,18 @@ func startSupervisorLivenessMonitor(
 	loop *api.EventLoop,
 	events *api.SupervisorEventLog,
 	squatterReapFn squatterReapFunc,
+	stoppedFn func(task string) bool,
 ) {
 	ticker := time.NewTicker(supervisorLivenessInterval)
 	defer ticker.Stop()
 	// P2a reap capability + rate-limit state, owned solely by this monitor
 	// goroutine (same single-owner discipline as the P1b bind latch below). nil
 	// squatterReapFn (no wiring) leaves squatterReap nil → the sweep handles a
-	// port_owner_mismatch observe-only.
+	// port_owner_mismatch observe-only. stoppedFn gates F3 quarantine self-heal on
+	// operator stop (P2-3).
 	var squatterReap *squatterSweepReaper
 	if squatterReapFn != nil {
-		squatterReap = &squatterSweepReaper{reapFn: squatterReapFn, limiter: newSquatterReapLimiter()}
+		squatterReap = &squatterSweepReaper{reapFn: squatterReapFn, limiter: newSquatterReapLimiter(), stoppedFn: stoppedFn}
 	}
 	// bindLatch (P1b) records the generation at which each task's port was
 	// FIRST observed bound by its current PID. It is owned solely by this
@@ -588,6 +590,112 @@ func sweepSupervisorLivenessOnce(
 			TaskName: taskName,
 			Body:     body,
 		})
+	}
+	// F3 (decision D-A): quarantine self-heal second pass. The running-pass
+	// above SKIPS every non-running entry, so a QUARANTINED daemon whose OWN
+	// live lost-child squats its intended port is never detected — the hub looks
+	// dead while a forgotten server answers on the port, and nothing recovers it
+	// until a supervisor restart. Detect exactly that state here: for a
+	// quarantined task whose effective port is held by a VERIFIED-OWN disowned
+	// child, reap it (the SAME identity gate + rate limiter as P2a) and post the
+	// legal EvManualRestart — the automatic equivalent of `mcphub daemon recover`
+	// (quarantine exit + failure-window reset). A foreign / unverifiable owner is
+	// observe-only, so the operator sees why the daemon will not self-recover.
+	//
+	// The reap uses the tracker snapshot's quarantine state (the same snapshot
+	// the running-pass reads), which the controller mirrors from the SM's
+	// StQuarantined via MarkQuarantined on the loop goroutine — the shared
+	// authoritative source, no new controller dependency threaded into the sweep.
+	// Gated on squatterReap != nil (a wired reap capability + rate-limit budget),
+	// mirroring the running-pass "no reaper wired → observe-only" contract; the
+	// port-owner probe reuses the sweep's snapshot-backed livenessProbe.
+	// Reaped-then-EvManualRestart deliberately does NOT wait for the port to
+	// free here: the EvManualRestart is loop-queued and re-enters the F1
+	// pre-spawn gate, which re-probes and reaps-or-holds so the actual spawn
+	// never races the socket close (F1+F3 compose — see the fix report).
+	if squatterReap != nil {
+		selfPID := 0
+		if supervisorSelfPIDFn != nil {
+			selfPID = supervisorSelfPIDFn()
+		}
+		for taskName, entry := range snap {
+			taskName = canonicalSupervisorTaskName(taskName)
+			if entry.State != daemonRuntimeStateQuarantine {
+				continue
+			}
+			d, ok := byTask[taskName]
+			if !ok {
+				continue
+			}
+			// P2-3 (Codex PR-3): never reap + auto-restart a daemon the operator
+			// STOPPED. StQuarantined+EvManualRestart spawns unconditionally, so
+			// self-healing a stopped daemon would fight the operator's stop. This
+			// mirrors the F2 quarantine-parole stop gate; the operator stop owns
+			// cleanup, so there is nothing to self-heal. nil stoppedFn (direct-sweep
+			// tests) → treated as not-stopped.
+			if squatterReap.stoppedFn != nil && squatterReap.stoppedFn(taskName) {
+				continue
+			}
+			port, _, portOK := portResolver.Resolve(d)
+			if !portOK || port <= 0 {
+				continue // no port protection resolvable for this daemon
+			}
+			d.Port = port
+			ownerPID := 0
+			occupied := false
+			if livenessProbe.PortOwnerPID != nil {
+				if pid, probeOK, probeErr := livenessProbe.PortOwnerPID(port); probeErr == nil && probeOK {
+					ownerPID = pid
+					occupied = true
+				}
+			}
+			// P2-4 (Codex PR-3): the FREE signal is `!occupied` (the probe reported
+			// no owner), NOT ownerPID<=0. On Linux the probe returns (0, true) when
+			// the loopback socket EXISTS but belongs to an unreadable different-UID
+			// process (occupied-hidden) — that is OCCUPIED, not free. Do NOT skip it
+			// as free; let it reach the classifier, where a non-positive PID fails
+			// gate 1 → Unverified → observe-only (no reap, no restart), which is
+			// correct: F3 cannot self-heal a quarantined daemon whose port is held by
+			// a hidden cross-UID process.
+			if !occupied {
+				continue // port free — F2 quarantine parole owns cooldown-based recovery
+			}
+			seenTasks[taskName] = struct{}{}
+			// P2-iii (Codex PR-3): the sweep-start `snap` can be STALE — F2 parole or
+			// operator recover may have restarted this task between the snapshot and
+			// this port probe. The healthy new child would then own the port, but the
+			// stale snap has this task's CurrentPID=0 → classifyPortSquatter gates 1/2
+			// would NOT recognize the new child → it exe+argv-matches → verified-own →
+			// F3 would REAP THE HEALTHY JUST-RESTARTED CHILD (friendly-fire: the kill
+			// proof is built from the new child's own fresh identity, so
+			// TerminatePIDWithIdentity's start-time re-verify matches itself and the
+			// kill goes through). Re-read the CURRENT tracker state immediately before
+			// the reap: DROP if the task is no longer quarantined (it recovered — the
+			// running-pass / operator owns it now), and classify against the FRESH
+			// snapshot so gate 1 recognizes a just-restarted current PID as the current
+			// child (never reaped).
+			freshSnap := tracker.Snapshot()
+			if entryNow, stillTracked := freshSnap[taskName]; !stillTracked || entryNow.State != daemonRuntimeStateQuarantine {
+				continue // task recovered / gone since the sweep snapshot — nothing to self-heal
+			}
+			if reapSquatterForAutomaticTrigger(d, ownerPID, selfPID, freshSnap, squatterReap.limiter, events, squatterSourceQuarantineSweep, now) == squatterAutoReaped {
+				// Legal quarantine exit: EvManualRestart resets the failure window
+				// and drives StQuarantined -> StSpawning -> respawn into the port
+				// the reap just freed. foreign / unverified / reap-failed /
+				// rate-limited are observe-only (the audit event already fired).
+				//
+				// P2-A (Codex PR-3): the stoppedFn check above ran on THIS off-loop
+				// sweep goroutine, so an operator stop can race it. Flag the post with
+				// require_running_intent so handleLoopEvent re-checks the stop intent
+				// ON THE LOOP (race-free) and drops the restart if the daemon is now
+				// stopped — F3 must never resurrect a just-stopped daemon.
+				loop.Post(api.LoopEvent{
+					Kind:     api.EvManualRestart,
+					TaskName: taskName,
+					Body:     map[string]any{autoRestartRequireRunningIntentBodyKey: true},
+				})
+			}
+		}
 	}
 	// Prune latch entries whose task is no longer running/tracked so the map
 	// cannot leak entries for removed daemons across the supervisor's lifetime.

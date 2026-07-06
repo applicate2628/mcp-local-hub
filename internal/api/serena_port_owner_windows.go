@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -39,10 +40,19 @@ import (
 // (processes.go:254) so the LISTENING-state + exact-address gate is identical
 // to status enrichment.
 func loopbackPortOwnerPID(port int) (int, bool, error) {
+	return loopbackPortOwnerPIDContext(context.Background(), port)
+}
+
+// loopbackPortOwnerPIDContext is the context-bounded form: the `netstat -ano`
+// shell-out runs under exec.CommandContext, so a canceled/deadline-exceeded ctx
+// kills the child process instead of leaving the caller blocked on a wedged
+// netstat. loopbackPortOwnerPID delegates to it with context.Background(), so
+// existing (non-ctx) callers behave byte-identically.
+func loopbackPortOwnerPIDContext(ctx context.Context, port int) (int, bool, error) {
 	if port <= 0 || port > 65535 {
 		return 0, false, fmt.Errorf("loopbackPortOwnerPID: port %d out of range", port)
 	}
-	cmd := exec.Command("netstat", "-ano")
+	cmd := exec.CommandContext(ctx, "netstat", "-ano")
 	process.NoConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {

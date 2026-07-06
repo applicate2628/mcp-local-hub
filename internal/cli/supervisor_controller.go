@@ -247,6 +247,42 @@ type supervisorController struct {
 	failureWindow       time.Duration
 	quarantineThreshold int
 
+	// F1 pre-spawn port-owner gate (decision D-A) — split across the loop and a
+	// dedicated off-loop worker so the loop NEVER runs the blocking classify/reap
+	// (codex-P1: WMI identity lookup + 5s terminate-wait on the event loop would
+	// freeze the whole fleet). Before a StBackoffWaiting+EvTimerDue respawn or a
+	// force-respawn (EvManualRestart) fires create-process:
+	//   - the LOOP runs ONLY the fast, deadline-bounded owner probe (portOwnerFn).
+	//     Port free / probe error → spawn as today. Port owned → hold the daemon
+	//     in backoff (no crash increment) and hand the request to the worker.
+	//   - the WORKER (runPortGateWorker, exactly one goroutine) runs the identity
+	//     classify + identity-gated reap and maps the outcome back to the loop via
+	//     an EvManualRestart post (+ the gateCleared one-shot flag for the
+	//     unverified→proceed contract).
+	//
+	// portOwnerFn is the per-port owner probe. Production wires it to a
+	// short-deadline api.LoopbackPortOwnerPIDContext closure so a wedged netstat
+	// cannot hang the loop; nil DISABLES the gate (spawn as today) for the
+	// direct-construction controller tests. squatterLimiter is F1's rate-limit
+	// budget, owned SOLELY by the worker goroutine (the loop must never touch it),
+	// so it stays single-goroutine-owned + lock-free; it is a SEPARATE instance
+	// from the liveness sweep's limiter (P2a + F3). portGateCh carries requests
+	// loop→worker (buffered; a full channel drops the dispatch and the 30s backoff
+	// timer re-probes). gateCleared is the worker→loop one-shot short-circuit that
+	// lets an unverified-owned re-probe spawn WITHOUT re-running the gate. All are
+	// wired only in the production runSupervise path (reconcileSpawnFn==nil).
+	squatterLimiter *squatterReapLimiter
+	portOwnerFn     func(port int) (pid int, ok bool, err error)
+	portGateCh      chan portGateReq
+	gateCleared     sync.Map // canonical taskName -> struct{} (one-shot worker→loop proceed flag)
+	// portGateInFlight dedupes worker requests per task: at most one dispatch for a
+	// given task is queued/processing at a time, so a delayed worker + a re-firing
+	// 30s backoff timer cannot pile up duplicate requests whose stale results would
+	// restart an already-recovered daemon or leave a stale gateCleared bypass
+	// (Codex PR-3 round-2 P2). Set on a successful dispatch, cleared when the worker
+	// finishes. Combined with the worker's port re-probe staleness guard.
+	portGateInFlight sync.Map // canonical taskName -> struct{}
+
 	// quarantineParole is the F2 in-memory parole ladder for threshold-quarantine
 	// daemons (map[canonicalTaskName]*quarantineParoleEntry). A daemon that hits
 	// the failure threshold used to stay quarantined "until supervisor restart" —
@@ -500,7 +536,16 @@ func (c *supervisorController) runQuarantineParoleTick(now time.Time) {
 		// and the queued EvIntentUpdate(stopped) then lands at StSpawning, recording
 		// queued_action=stop so the stop is honored. On a full selfCh, leave the
 		// ladder unchanged so the next tick retries rather than burning a step.
-		if !c.eventLoop.PostSelf(api.LoopEvent{Kind: api.EvManualRestart, TaskName: taskName}) {
+		// P2-ii: carry the require_running_intent flag for one uniform rule (every
+		// automatic EvManualRestart is stop-gated on the loop). This parole tick
+		// already re-checked the stop intent on the loop above, but PostSelf lands on
+		// the NEXT loop iteration, so the flag closes the residual window where a stop
+		// is queued between this tick and the posted restart being processed.
+		if !c.eventLoop.PostSelf(api.LoopEvent{
+			Kind:     api.EvManualRestart,
+			TaskName: taskName,
+			Body:     map[string]any{autoRestartRequireRunningIntentBodyKey: true},
+		}) {
 			c.emitQuarantineParoleEvent(taskName, "daemon-quarantine-parole-deferred", map[string]any{
 				"note": "event loop self-channel full; parole retry deferred to the next tick",
 			})
@@ -2257,9 +2302,14 @@ func (c *supervisorController) clearRemovedTaskRuntime(taskName string) {
 	bareKey := toggleSupervisorTaskNameBackslash(taskName)
 	c.smStates.Delete(taskName)
 	c.queuedActions.Delete(taskName)
+	// P2-2 (Codex PR-3): a removed/de-registered task must not leave a stale F1
+	// gateCleared bypass that a same-name re-registration would consume to skip the
+	// port probe. Cheap no-op when unset.
+	c.gateCleared.Delete(taskName)
 	if bareKey != taskName {
 		c.smStates.Delete(bareKey)
 		c.queuedActions.Delete(bareKey)
+		c.gateCleared.Delete(bareKey)
 	}
 	// Drop any pending orphan-reap candidate: a removal that reaches the
 	// bookkeeping clear (either after a confirmed reap drove the terminate, or
@@ -2686,6 +2736,51 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// descriptor), so the canonical TaskName on the in-memory copy changes no spawn arg.
 	routeKey := canonicalSupervisorTaskName(ev.TaskName)
 	ev.TaskName = routeKey
+	// P2-A / P2-ii (Codex PR-3): loop-side stop re-check for EVERY automatic-trigger
+	// EvManualRestart (F3 quarantine self-heal AND the F1 port-gate worker's reaped +
+	// unverified arms — all flagged require_running_intent). Those triggers decide to
+	// restart OFF-LOOP (sweep / worker goroutines), so an operator stop can land
+	// between their decision and this Post (or be queued ahead of it). Re-check the
+	// stop intent HERE, on the loop, where the intent read and the drop are serialized
+	// against the stop's own EvIntentUpdate — and DROP the restart if the task is now
+	// stopped, so an automatic trigger can never resurrect a just-stopped daemon. Any
+	// off-loop cleanup already done (F3 reaped the forgotten own-child; F1 reaped its
+	// squatter) is correct; only the RESTART is gated. `mcphub daemon recover` posts
+	// an UNFLAGGED EvManualRestart → unconditional (unaffected). Uses the SAME stopped
+	// predicate as the F2 parole gate + the F3 off-loop stoppedFn.
+	if ev.Kind == api.EvManualRestart && ev.Body != nil && c.daemonIntent != nil {
+		if req, _ := ev.Body[autoRestartRequireRunningIntentBodyKey].(bool); req {
+			di := c.daemonIntent.Lookup(ev.TaskName)
+			activeStop, _ := di.IsActiveStop(time.Now().UTC())
+			desired := di.Desired
+			if desired == "" {
+				desired = api.IntentDesiredRunning
+			}
+			if desired != api.IntentDesiredRunning || activeStop {
+				// Clear any one-shot gateCleared the F1 worker's unverified arm set
+				// alongside this flagged EvManualRestart: dropping the restart here
+				// leaves the SM untouched (we return before the general non-StSpawning
+				// clear), so an unconsumed gateCleared would linger and let the NEXT
+				// respawn skip the port probe. Both key forms (P2-B class).
+				c.gateCleared.Delete(ev.TaskName)
+				if bareKey := toggleSupervisorTaskNameBackslash(ev.TaskName); bareKey != ev.TaskName {
+					c.gateCleared.Delete(bareKey)
+				}
+				if c.events != nil {
+					_ = c.events.Emit(api.SupervisorEvent{
+						Severity: "info",
+						Source:   "reconcile",
+						Event:    "automatic-restart-skipped-stopped",
+						TaskName: ev.TaskName,
+						Body: map[string]any{
+							"note": "automatic restart (F3 self-heal or F1 port-gate worker) skipped: the daemon is stopped (an operator stop landed after the off-loop decision); any reaped forgotten own-child / squatter is cleaned up but the daemon is NOT restarted",
+						},
+					})
+				}
+				return
+			}
+		}
+	}
 	// P1a generation-stamped exit attribution — authoritative processing-time
 	// stale guard. An EvChildExit carrying a pid_generation OLDER than the
 	// tracker's current generation for the task is a late cmd.Wait exit of a
@@ -2773,6 +2868,17 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 					"kind": string(ev.Kind),
 				},
 			})
+		}
+		// P2-B (Codex PR-3): a task removed while a port-gate request was in flight
+		// can have clearRemovedTaskRuntime run BEFORE the off-loop worker stored
+		// gateCleared, leaving a stale one-shot bypass for the removed task. The
+		// worker's now-orphan EvManualRestart is dropped HERE (descriptor not found),
+		// so clear the stale flag on this same drop — a same-name re-registration
+		// must not inherit it and skip its port probe. Both key forms, matching
+		// clearRemovedTaskRuntime; a Delete on an absent key is a cheap no-op.
+		c.gateCleared.Delete(ev.TaskName)
+		if bareKey := toggleSupervisorTaskNameBackslash(ev.TaskName); bareKey != ev.TaskName {
+			c.gateCleared.Delete(bareKey)
 		}
 		completeIdleRespawnEvent(ev, fmt.Errorf("task %s not found in controller intent cache", ev.TaskName))
 		return
@@ -2964,6 +3070,21 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// took effect. The SM transition matched (matched=true), so smStates
 	// reflects the new state immediately; persistence is a separate axis.
 	c.smStates.Store(ev.TaskName, newState)
+
+	// P2-2 (Codex PR-3): drop a stale F1 gateCleared bypass. The flag is a one-shot
+	// the port-gate worker sets for its IMMEDIATE StSpawning re-entry (unverified →
+	// spawn-as-today); the ONLY consumer is the gate's LoadAndDelete on a transition
+	// TO StSpawning. If the task instead settles/stops before that re-entry — a
+	// queued stop/graceful drives StBackoffWaiting/StQuarantined → StIdle, or any
+	// other matched transition that is NOT to StSpawning — the flag would linger and
+	// the NEXT unrelated respawn would skip the port probe and spawn over whatever
+	// now owns the port. Clear it on every non-StSpawning matched transition; the
+	// legitimate StSpawning re-entry (newState==StSpawning) is left for the gate to
+	// consume, so this never races that consumption. Delete on an absent key is a
+	// cheap no-op.
+	if newState != api.StSpawning {
+		c.gateCleared.Delete(ev.TaskName)
+	}
 
 	// Apply queued_action updates encoded in the SM's `side` string per
 	// spec §"queued_action preservation". Closes bot PR#222 P1-3:
@@ -3192,6 +3313,41 @@ func (c *supervisorController) executeSideEffect(
 		// deadlock we are avoiding.
 		if c.spawn == nil {
 			return errors.New("spawn function unavailable")
+		}
+		// F1 pre-spawn port-owner gate (decision D-A), loop half. Scoped to the
+		// create-process paths where a lost child may squat the port. This is the
+		// CONVERGENT scope (Codex PR-3 P2-i): the per-event allowlist kept missing
+		// paths (round-1 missed EvIntentUpdate, round-3 missed EvStart), so gate EVERY
+		// create-process transition and EXCLUDE only the ONE that spawns into a
+		// provably-own/free port. The complete create-process set in api.Transition
+		// (grep "create-process") is: EvStart (StIdle), EvIntentUpdate(running)
+		// (StIdle/StBackoffWaiting/StQuarantined), EvManualRestart
+		// (StIdle/StBackoffWaiting/StQuarantined), EvTimerDue (StBackoffWaiting), and
+		// EvChildExit (StExiting — the queued respawn after a CONTROLLED restart). Only
+		// EvChildExit-at-StExiting reclaims our OWN just-terminated child's port (the
+		// terminate side effect already ran + cleared CurrentPID), so gating it would
+		// just probe our own dying child; exclude it. Every other event either spawns
+		// into a possibly-squatted port (EvStart cold start with stale supervisor
+		// state, EvIntentUpdate re-enable, EvManualRestart/EvTimerDue respawn) — and a
+		// genuinely-free port simply probes free → proceeds (fail-open). Structurally
+		// covers any FUTURE create-process event.
+		//
+		// The loop runs ONLY the fast deadline-bounded owner probe — NEVER the WMI
+		// classify or the terminate-wait (codex-P1: those blocking calls belong on
+		// the off-loop worker). Two short-circuits precede the probe:
+		//   1. gateCleared: the worker classified the owner UNVERIFIABLE (no kill)
+		//      and re-posted EvManualRestart with this one-shot flag so the loop
+		//      spawns "as today" WITHOUT re-probing (else the still-owned port would
+		//      loop forever). LoadAndDelete consumes it so the NEXT respawn re-gates.
+		//   2. preSpawnPortGateHold: probe the owner. Free / error / deadline →
+		//      proceed. Owned → hold in backoff (no crash increment) + dispatch the
+		//      classify+reap to the worker, and return the sentinel.
+		if ev.Kind != api.EvChildExit {
+			if _, cleared := c.gateCleared.LoadAndDelete(ev.TaskName); !cleared {
+				if held := c.preSpawnPortGateHold(d, ev); held != nil {
+					return held
+				}
+			}
 		}
 		err := c.spawn(*d)
 		// FAIL-CLOSED job-protection refusal (ROADMAP §11.3). The production
@@ -3545,6 +3701,15 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 		})
 	}
 
+	c.armRespawnBackoffTimer(*d, d.TaskName, backoff)
+}
+
+// armRespawnBackoffTimer arms the cancel-respecting backoff timer that re-posts
+// EvTimerDue after `backoff`. Extracted from handleBackoffWaiting so the F1
+// pre-spawn port-owner gate (holdSpawnInBackoff) can re-arm the SAME timer
+// mechanism when it holds a doomed spawn back WITHOUT recording a crash — one
+// owner for "arm the respawn timer", no duplicated timer-goroutine logic.
+func (c *supervisorController) armRespawnBackoffTimer(descriptor api.SupervisorDaemon, taskName string, backoff time.Duration) {
 	// Arm the backoff timer in a goroutine so the event loop stays
 	// responsive. When the timer fires, post EvTimerDue so the SM
 	// moves StBackoffWaiting -> StSpawning (or StQuarantined per the
@@ -3558,8 +3723,6 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 	// SM state at fire time and drop the EvTimerDue/spawn if the
 	// state has already moved. This honors the SM's "cancel timer"
 	// side effect without needing a per-task timer registry.
-	descriptor := *d
-	taskName := d.TaskName
 	ctx := c.ctx
 	if ctx == nil {
 		ctx = context.Background()
@@ -3622,6 +3785,297 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 			}
 		}
 	}()
+}
+
+// errSpawnHeldPortSquatter is the sentinel executeSideEffect returns when the
+// F1 pre-spawn gate holds a spawn back rather than firing it: the intended port
+// is held (foreign / reap-failed / rate-limited) or a verified-own squatter was
+// just reaped and the respawn is deferred one short cycle so the freed port
+// settles. On the backoff path the error is dropped (the re-armed timer drives
+// the retry); on the force-respawn IPC path it surfaces as RESPAWN_FAILED with
+// this honest message (the daemon self-heals on the re-armed retry regardless).
+var errSpawnHeldPortSquatter = errors.New("spawn deferred: intended port held by a process the pre-spawn gate would not spawn over (a respawn is scheduled)")
+
+// autoRestartRequireRunningIntentBodyKey is the CONVERGED marker (Codex PR-3
+// P2-ii) that EVERY automatic-trigger EvManualRestart carries so handleLoopEvent
+// re-checks the stop intent ON THE LOOP before spawning — the single race-free
+// gate. It is set by F3 quarantine self-heal (supervise_liveness.go) AND by the F1
+// port-gate worker (both the reaped and unverified arms), whose stop checks would
+// otherwise race an operator stop off-loop. The ONLY unflagged EvManualRestart is
+// `mcphub daemon recover` (operator-initiated) → unconditional restart, as today.
+// The rule is uniform: automatic ⟹ flagged ⟹ stop-gated; operator ⟹ unflagged ⟹
+// unconditional. (F2 parole already re-checks the stop intent ON the loop before
+// posting — runQuarantineParoleTick runs in the loop handler — so it is race-free
+// without the flag; it also carries the flag now for one uniform rule.)
+const autoRestartRequireRunningIntentBodyKey = "require_running_intent"
+
+const (
+	// squatterForeignHoldDelay is the backoff re-probe cadence the loop half of
+	// the F1 gate uses whenever it hands a request to the worker. The daemon stays
+	// in backoff WITHOUT a crash increment — a spawn doomed to EADDRINUSE against a
+	// process we cannot displace is not a daemon crash, so it must not fuel the
+	// quarantine march — and the armed 30s timer keeps re-probing. When the worker
+	// reaps a verified-own squatter it accelerates recovery by posting
+	// EvManualRestart immediately (rather than waiting for this timer); a foreign /
+	// reap-failed / rate-limited owner just rides this 30s cadence. 30s also
+	// matches the worker's identity-lookup rate limit so a persistent foreign
+	// holder yields one foreign event per interval, not a log-washing storm.
+	squatterForeignHoldDelay = 30 * time.Second
+	// portGateProbeDeadline bounds the owner probe the LOOP runs (production wires
+	// portOwnerFn to a LoopbackPortOwnerPIDContext closure with this deadline). A
+	// wedged netstat is killed at the deadline and surfaces as a probe error →
+	// fail-open (proceed to spawn), so the controller event loop can never hang on
+	// the probe. It is deliberately short: the probe is only a "is anyone on this
+	// port" check, and a slow answer is treated as "no verifiable squatter".
+	portGateProbeDeadline = 2 * time.Second
+	// portGateChCapacity buffers loop→worker dispatches so a burst of respawns
+	// never blocks the loop on the send. A full channel drops the dispatch
+	// (port-gate-dispatch-dropped) and the armed 30s timer re-probes + re-dispatches.
+	portGateChCapacity = 64
+)
+
+// portGateReq is one loop→worker F1 request: the resolved descriptor copy (its
+// Port is the EffectiveDaemonPort the loop probed) plus the owner PID the loop
+// observed. The worker re-derives everything else it needs (a fresh tracker
+// snapshot + selfPID) so nothing mutable is shared across the loop/worker
+// boundary except this immutable value.
+type portGateReq struct {
+	d        api.SupervisorDaemon
+	ownerPID int
+}
+
+// preSpawnPortGateHold is the LOOP half of the F1 pre-spawn gate. It runs ONLY
+// the fast, deadline-bounded owner probe (portOwnerFn) — NEVER the identity
+// classify (WMI) or the terminate-wait, which belong on the off-loop worker
+// (codex-P1). It returns nil to let the caller PROCEED to spawn (gate disabled /
+// no resolvable port / port free / probe error or deadline → fail-open, matches
+// today), or the errSpawnHeldPortSquatter sentinel after HOLDING the daemon in
+// backoff (no crash increment) and dispatching the classify+reap to the worker.
+//
+// The reaped/unverified/foreign decision is the worker's; the loop only decides
+// "is anyone on the port". Everything the loop does here is O(one bounded probe).
+func (c *supervisorController) preSpawnPortGateHold(d *api.SupervisorDaemon, ev api.LoopEvent) error {
+	// Gate disabled unless BOTH the probe and the worker channel are wired
+	// (production runSupervise), so a half-wired controller never holds a daemon
+	// in backoff with no worker to reap it. Direct-construction tests leave these
+	// nil → spawn as today.
+	if c == nil || d == nil || c.portOwnerFn == nil || c.portGateCh == nil {
+		return nil
+	}
+	port, ok := api.EffectiveDaemonPort(*d)
+	if !ok || port <= 0 {
+		return nil // no resolvable port → nothing to gate on
+	}
+	ownerPID, ownerOK, err := c.portOwnerFn(port)
+	if err != nil || !ownerOK {
+		return nil // probe error / deadline / port genuinely FREE (!ok) → spawn (fail-open, matches today)
+	}
+	// P2-4 (Codex PR-3): the FREE signal is `!ownerOK`, NOT ownerPID<=0. On Linux
+	// the probe returns (0, true) when the loopback socket EXISTS but belongs to an
+	// unreadable different-UID process (occupied-hidden) — that is OCCUPIED, and
+	// spawning into it EADDRINUSEs. Do NOT treat it as free: hold + dispatch. The
+	// worker classifies (a non-positive PID fails gate 1 → Unverified) and its
+	// occupied-hidden arm HOLDS without a kill or a spawn (never spawn over a
+	// cross-user-held port). (On Windows the netstat parser rejects PID 0, so a
+	// non-positive ownerPID with ownerOK=true only occurs on Linux.)
+	//
+	// Port owned: hand the classify+reap to the worker (non-blocking) and hold the
+	// daemon in backoff. Dispatch a copy carrying the resolved port so the worker's
+	// audit body records the port F1 gated on (classifyPortSquatter ignores Port).
+	dResolved := *d
+	dResolved.Port = port
+	c.tryDispatchPortGate(portGateReq{d: dResolved, ownerPID: ownerPID})
+	return c.holdSpawnInBackoff(d, ev, squatterForeignHoldDelay)
+}
+
+// tryDispatchPortGate hands a port-gate request to the off-loop worker WITHOUT
+// blocking the loop. A full channel means the single worker is saturated; drop
+// the dispatch (the daemon is already held with an armed 30s timer that will
+// re-probe + re-dispatch) and emit port-gate-dispatch-dropped so a saturated
+// worker is operator-visible. Called only from the loop goroutine.
+func (c *supervisorController) tryDispatchPortGate(req portGateReq) {
+	if c == nil || c.portGateCh == nil {
+		return
+	}
+	task := canonicalSupervisorTaskName(req.d.TaskName)
+	// Per-task dedupe (Codex PR-3 round-2 P2): skip if a request for this task is
+	// already queued/processing. The in-flight request + the daemon's armed 30s
+	// timer (which re-probes and re-dispatches once this one completes) cover the
+	// task, so a delayed worker cannot accumulate stale duplicates.
+	if _, loaded := c.portGateInFlight.LoadOrStore(task, struct{}{}); loaded {
+		return
+	}
+	select {
+	case c.portGateCh <- req:
+	default:
+		// Send failed (worker saturated): un-mark so a later dispatch is not
+		// permanently suppressed; the armed 30s timer re-probes + re-dispatches.
+		c.portGateInFlight.Delete(task)
+		if c.events != nil {
+			_ = c.events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "restart-policy",
+				Event:    "port-gate-dispatch-dropped",
+				TaskName: task,
+				Body: map[string]any{
+					"port":   req.d.Port,
+					"reason": "port-gate worker channel full; the daemon stays held in backoff and its armed 30s timer will re-probe and re-dispatch",
+				},
+			})
+		}
+	}
+}
+
+// runPortGateWorker is the OFF-LOOP half of the F1 gate: exactly ONE goroutine
+// per controller (started in runSupervise's production block), so it is the SOLE
+// owner of c.squatterLimiter and the limiter stays lock-free (the loop must
+// never touch it). It drains portGateCh and, per request, runs the blocking
+// identity classify + identity-gated reap — the WMI lookup + up-to-5s
+// terminate-wait that MUST NOT run on the event loop. It maps the outcome back to
+// the loop via an EvManualRestart post (bounded by ctx so a stopped loop cannot
+// leak the worker). It holds NO lock and shares no mutable state with the loop
+// beyond the sync.Map gateCleared (worker Store / loop LoadAndDelete).
+func (c *supervisorController) runPortGateWorker(ctx context.Context) {
+	if c == nil || c.portGateCh == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case req := <-c.portGateCh:
+			c.handlePortGateReq(ctx, req)
+		}
+	}
+}
+
+// handlePortGateReq runs the classify+reap for one request and maps the outcome
+// back to the loop. Concurrency: the reaped PID is always DISOWNED —
+// classifyPortSquatter gate 1 excludes this task's own CurrentPID and gate 2
+// excludes every other tracked task's CurrentPID/OrphanPID, and the loop HELD
+// this task (it will not spawn while the worker reaps), so the worker never
+// targets a live tracked child. PID reuse is closed inside TerminatePIDWithIdentity
+// (held-handle exe+basename+start-time re-verify), untouched here.
+func (c *supervisorController) handlePortGateReq(ctx context.Context, req portGateReq) {
+	if c == nil {
+		return
+	}
+	task := canonicalSupervisorTaskName(req.d.TaskName)
+	// Clear the dedupe marker on the way out so the daemon's 30s timer can
+	// re-dispatch if it is still held after this request settles.
+	defer c.portGateInFlight.Delete(task)
+
+	// Staleness guard (Codex PR-3 round-2 P2): a request can go stale between the
+	// loop's dispatch and the single FIFO worker processing it — a PRIOR request
+	// for this task may already have reaped the squatter and respawned the daemon.
+	// Acting on the stale request would classify the now-gone owner PID as
+	// Unverified → post EvManualRestart (restarting the healthy StRunning daemon:
+	// StRunning+EvManualRestart = terminate+respawn) and leave a stale gateCleared
+	// bypass. Re-probe the intended port: if the SAME owner PID no longer holds it
+	// (reaped, freed, or replaced by the respawned child), the squatter this request
+	// targeted is gone → drop (no reap, no post, no gateCleared). If the squatter is
+	// still there, the daemon cannot have recovered on that port, so acting is
+	// correct. The re-probe runs off-loop (worker goroutine), so it does not
+	// reintroduce the loop-blocking the round-1 fix removed.
+	if c.portOwnerFn != nil {
+		if port, ok := api.EffectiveDaemonPort(req.d); ok && port > 0 {
+			ownerNow, ownerOK, probeErr := c.portOwnerFn(port)
+			if probeErr != nil || !ownerOK || ownerNow != req.ownerPID {
+				if c.events != nil {
+					_ = c.events.Emit(api.SupervisorEvent{
+						Severity: "info",
+						Source:   "restart-policy",
+						Event:    "port-gate-stale-drop",
+						TaskName: task,
+						Body: map[string]any{
+							"port":           port,
+							"dispatched_pid": req.ownerPID,
+							"reason":         "the port owner changed since dispatch (a prior request reaped it, the port freed, or the respawned child now owns it) — the targeted squatter is gone; dropping the stale request without a reap/restart",
+							"probe_error":    probeErr != nil,
+							"port_owner_now": ownerNow,
+						},
+					})
+				}
+				return
+			}
+		}
+	}
+
+	selfPID := 0
+	if supervisorSelfPIDFn != nil {
+		selfPID = supervisorSelfPIDFn()
+	}
+	var tracked map[string]DaemonRuntimeEntry
+	if c.tracker != nil {
+		tracked = c.tracker.Snapshot()
+	}
+	switch reapSquatterForAutomaticTrigger(req.d, req.ownerPID, selfPID, tracked, c.squatterLimiter, c.events, squatterSourcePreSpawn, time.Now().UTC()) {
+	case squatterAutoReaped:
+		// TerminatePIDWithIdentity waited for process exit, so the LISTEN socket
+		// is already released. Re-enter the gate (WITHOUT gateCleared) so the loop
+		// re-probes the now-free port and spawns. If, exceptionally, the port is
+		// still held, the re-probe simply re-holds + re-dispatches — self-healing.
+		// P2-ii: flag require_running_intent so handleLoopEvent drops this automatic
+		// restart if an operator stop raced this off-loop reap.
+		if c.eventLoop != nil {
+			_ = c.eventLoop.PostCtx(ctx, api.LoopEvent{
+				Kind:     api.EvManualRestart,
+				TaskName: task,
+				Body:     map[string]any{autoRestartRequireRunningIntentBodyKey: true},
+			})
+		}
+	case squatterAutoUnverified:
+		// P2-4 (Codex PR-3): distinguish occupied-hidden from same-user-unverifiable.
+		// A non-positive dispatched owner PID (Linux (0,true): a different-UID process
+		// holds the port with an unreadable PID) is definitely NOT our child and is
+		// unkillable — treat it like a foreign holder: HOLD (post nothing, do NOT set
+		// gateCleared) so the loop never spawns into a cross-user-held port
+		// (→ EADDRINUSE). The armed 30s timer re-probes; when the holder releases, the
+		// freed port spawns.
+		if req.ownerPID <= 0 {
+			return
+		}
+		// A real owner PID we could not classify (e.g. a same-user process we could
+		// not OpenProcess — transient ACCESS_DENIED). Preserve today's
+		// unverified→proceed: set the one-shot gateCleared flag then re-enter, so the
+		// loop spawns "as today" WITHOUT re-probing the still-owned port (which would
+		// loop forever). P2-ii: flag require_running_intent so a raced operator stop
+		// drops the restart on the loop; the loop-side drop also clears the gateCleared
+		// it set here, so a dropped restart leaves no stale probe-skip bypass.
+		c.gateCleared.Store(task, struct{}{})
+		if c.eventLoop != nil {
+			_ = c.eventLoop.PostCtx(ctx, api.LoopEvent{
+				Kind:     api.EvManualRestart,
+				TaskName: task,
+				Body:     map[string]any{autoRestartRequireRunningIntentBodyKey: true},
+			})
+		}
+	default:
+		// squatterAutoForeign / squatterAutoReapFailed / squatterAutoRateLimited:
+		// post NOTHING. The daemon is already held in backoff and its armed 30s
+		// timer owns the re-probe cadence (today's foreign hold, no crash increment).
+	}
+}
+
+// holdSpawnInBackoff returns a spawning daemon to StBackoffWaiting and re-arms
+// its respawn timer WITHOUT recording a crash, so the F1 gate can defer a spawn
+// (foreign holder / just-reaped / rate-limited) while the doomed-spawn crash
+// march never advances. It mirrors handleBackoffWaiting's tracker/timer wiring
+// minus the RecordCrashAndCountInWindow increment. Returns the sentinel so the
+// force-respawn IPC path reports the deferral (the backoff path drops it).
+func (c *supervisorController) holdSpawnInBackoff(d *api.SupervisorDaemon, ev api.LoopEvent, rearm time.Duration) error {
+	if c == nil || d == nil {
+		return errSpawnHeldPortSquatter
+	}
+	c.smStates.Store(ev.TaskName, api.StBackoffWaiting)
+	if c.tracker != nil {
+		c.tracker.MarkBackoff(ev.TaskName)
+		if c.statePath != "" {
+			_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, ev.TaskName)
+		}
+	}
+	c.armRespawnBackoffTimer(*d, d.TaskName, rearm)
+	return errSpawnHeldPortSquatter
 }
 
 // computeRespawnBackoff returns the wait duration before the
