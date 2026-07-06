@@ -94,7 +94,7 @@ func TestSweep_PortUnboundWithinStartupDeadlineNoRestart(t *testing.T) {
 	restore := setSupervisorLivenessProbeForTest(probe)
 	defer restore()
 
-	sweepSupervisorLivenessOnce(f.stateDir, f.intent, f.tracker, f.loop, nil, map[string]int{}, nil)
+	sweepSupervisorLivenessOnce(f.stateDir, f.intent, f.tracker, f.loop, nil, map[string]int{}, nil, nil)
 	f.expectNoEvent(t, "unbound within startup deadline")
 }
 
@@ -135,7 +135,7 @@ func TestSweep_PortUnboundPastStartupDeadlineRestartsAndEmitsBindTimeout(t *test
 	restore := setSupervisorLivenessProbeForTest(probe)
 	defer restore()
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog, map[string]int{}, nil)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, auditLog, map[string]int{}, nil, nil)
 
 	select {
 	case ev := <-events:
@@ -182,7 +182,7 @@ func TestSweep_PostFirstBindUnboundRestartsAt5s(t *testing.T) {
 		PortOwnerPID: func(int) (int, bool, error) { return 22036, true, nil }, // owned by current PID
 	}
 	restore1 := setSupervisorLivenessProbeForTest(boundProbe)
-	sweepSupervisorLivenessOnce(f.stateDir, f.intent, f.tracker, f.loop, nil, latch, nil)
+	sweepSupervisorLivenessOnce(f.stateDir, f.intent, f.tracker, f.loop, nil, latch, nil, nil)
 	restore1()
 	f.expectNoEvent(t, "sweep 1 bound is live")
 	if latch[f.taskName] != 1 {
@@ -197,7 +197,7 @@ func TestSweep_PostFirstBindUnboundRestartsAt5s(t *testing.T) {
 	}
 	restore2 := setSupervisorLivenessProbeForTest(unboundProbe)
 	defer restore2()
-	sweepSupervisorLivenessOnce(f.stateDir, f.intent, f.tracker, f.loop, nil, latch, nil)
+	sweepSupervisorLivenessOnce(f.stateDir, f.intent, f.tracker, f.loop, nil, latch, nil, nil)
 	f.expectManualRestart(t)
 }
 
@@ -231,7 +231,7 @@ func TestSweep_BindLatchResetsOnNewGeneration(t *testing.T) {
 
 	// The latch is stale (gen1 != gen2), so the startup deadline re-applies. The
 	// fresh gen2 StartedAt is well within 120s → no restart.
-	sweepSupervisorLivenessOnce(f.stateDir, f.intent, f.tracker, f.loop, nil, latch, nil)
+	sweepSupervisorLivenessOnce(f.stateDir, f.intent, f.tracker, f.loop, nil, latch, nil, nil)
 	f.expectNoEvent(t, "unbound within re-applied startup deadline after new generation")
 }
 

@@ -638,6 +638,15 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	var gracefulInProgress gracefulCounter
 
 	loop.RegisterHandler(func(e api.LoopEvent) {
+		// evParoleTick is an internal cadence tick that fires unconditionally every
+		// ~30s (runQuarantineParoleMonitor). Emitting a blocking flock+disk debug row
+		// for each one would add ~2880 no-signal rows/day on an idle supervisor,
+		// diluting the audit stream and accelerating the 10MB rotation. The tick
+		// emits its own meaningful daemon-quarantine-parole-* events when it actually
+		// acts, so the bare cadence tick has no per-event audit value — skip it.
+		if e.Kind == evParoleTick {
+			return
+		}
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "debug",
 			Source:   "lifecycle",
@@ -1033,6 +1042,12 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		// verified-own port squatter on port_owner_mismatch.
 		squatterReapFn := makeProductionSquatterReapFn(events)
 		go startSupervisorLivenessMonitor(loopCtx.Done(), stateDir, intent, runtimeTracker, loop, events, squatterReapFn)
+		// F2: quarantine parole monitor. A threshold-quarantined daemon used to
+		// stay dead "until supervisor restart"; this ticks the in-memory parole
+		// ladder and posts an automatic EvManualRestart after a bounded cooldown
+		// so an external kill-storm (or a transient false-mismatch burst) self-
+		// heals without a full supervisor restart.
+		go ctrl.runQuarantineParoleMonitor(loopCtx)
 	}
 
 	// IntentWatcher: poll <state-dir>/{supervisor,daemon}-intent.json
@@ -3610,7 +3625,38 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			// Close runs because handedOff stays false.
 			return fmt.Errorf("%w: %v", errSpawnPreChild, startErr)
 		}
+		// F6.1 (lost-child fix): stamp the recorded start time from the CHILD'S
+		// KERNEL creation time — the SAME source the liveness identity check reads
+		// (process.ProcessStartTime and the pid-identity verifier both derive from
+		// GetProcessTimes / /proc creation time). The old wall-clock time.Now() here
+		// recorded a value the check never observes: it was captured on the event
+		// loop AFTER cmd.Start, so under loop lag (~1.5s measured under a spawn
+		// storm) the recorded time drifted past the kernel creation time; added to
+		// the verifier's ≤1s whole-second truncation that drift pierced the 2s
+		// identity tolerance and falsely flagged the supervisor's OWN live child as
+		// pid_identity_mismatch → disown → forgotten port squatter (the lost-child
+		// factory, bug 2026-07-02-supervisor-lost-child-quarantine-class.md F6).
+		// Sourcing the recorded time from the kernel makes recorded == observed
+		// (modulo the check's own sub-second truncation, always <1s), so the false
+		// mismatch is structurally impossible ON THE KERNEL PATH. Fall back to
+		// wall-clock on any lookup error (non-Windows preview stub, or the PID
+		// already gone) — strictly no worse than the prior behavior; the fallback
+		// is near-unreachable on the GA/beta targets (Windows + Linux always
+		// resolve a real ProcessStartTime for a just-spawned child we still hold).
+		//
+		// Deploy caveat (self-limited, one restart cycle): a daemon originally
+		// spawned by a PRE-fix binary persisted a WALL-CLOCK StartedAt into
+		// supervisor-state.json. On the first warm handoff after this binary
+		// deploys, the new supervisor hydrates that drifted wall-clock time and the
+		// liveness check may still false-mismatch — persistently, so the F6.2
+		// two-strike gate does NOT suppress it; it confirms on strike-2 and
+		// disowns→respawns the child ONCE, after which the fresh spawn records a
+		// kernel StartedAt and the daemon is stable. Bounded to that single cycle
+		// per pre-fix daemon; acceptable.
 		startedAt := time.Now().UTC()
+		if kernelStart, ok := process.ProcessStartTime(pid); ok {
+			startedAt = kernelStart
+		}
 		// Capture the generation MarkSpawned stamped for THIS child. The
 		// wait goroutine passes it to MarkExitedIfCurrent + the crashEvent so
 		// a late exit of a superseded child (an older generation) is dropped

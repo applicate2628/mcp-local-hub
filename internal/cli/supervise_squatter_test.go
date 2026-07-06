@@ -500,7 +500,7 @@ func runSweepOnce(t *testing.T, d api.SupervisorDaemon, tracker *DaemonRuntimeTr
 	supervisorSelfPIDFn = func() int { return 1 }
 	t.Cleanup(func() { supervisorSelfPIDFn = prevSelf })
 
-	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, events, map[string]int{}, reap)
+	sweepSupervisorLivenessOnce(stateDir, intent, tracker, loop, events, map[string]int{}, reap, nil)
 
 	var out []api.LoopEvent
 	for {
