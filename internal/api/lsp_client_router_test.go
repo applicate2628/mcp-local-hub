@@ -295,6 +295,47 @@ func TestEnsureLSPRouterClientEntries_HonorsEffectiveClientEnablement(t *testing
 		}
 	})
 
+	t.Run("disabled hub evidence does not opt in client", func(t *testing.T) {
+		seedLSPRouterManifest(t, []string{"go", "python"})
+		seedManifestWithClientBinding(t, "memory", "antigravity", 9123)
+		if err := NewAPI().SetDefaultInstallClientNames([]string{"claude-code"}); err != nil {
+			t.Fatalf("set default-install clients: %v", err)
+		}
+
+		disabledOnly := newLSPRouterFakeClient(t, "antigravity", true)
+		disabledOnly.entries[LSPRouterEntryName("go")] = clients.MCPEntry{
+			Name:     LSPRouterEntryName("go"),
+			RelayURL: LSPRouterURL(7777, "go"),
+			Disabled: true,
+		}
+		disabledOnly.entries["memory"] = clients.MCPEntry{
+			Name:         "memory",
+			RelayServer:  "memory",
+			RelayDaemon:  "default",
+			RelayExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
+			Disabled:     true,
+		}
+		opts := LSPClientRouterOpts{
+			GUIPort:       7777,
+			Clients:       map[string]clients.Client{"antigravity": disabledOnly},
+			McphubExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
+		}
+
+		report, err := NewAPI().EnsureLSPRouterClientEntries(opts)
+		if err != nil {
+			t.Fatalf("EnsureLSPRouterClientEntries: %v", err)
+		}
+		if len(report.Backups) != 0 || len(report.Applied) != 0 || len(report.Removed) != 0 {
+			t.Fatalf("disabled-only evidence mutated config: %+v", report)
+		}
+		if got, err := disabledOnly.GetEntry(LSPRouterEntryName("python")); err != nil || got != nil {
+			t.Fatalf("disabled-only evidence added python entry = %+v err=%v, want nil", got, err)
+		}
+		if disabledOnly.addCalls != 0 || len(disabledOnly.backupPaths) != 0 {
+			t.Fatalf("disabled-only client was mutated: addCalls=%d backups=%v entries=%v", disabledOnly.addCalls, disabledOnly.backupPaths, disabledOnly.entries)
+		}
+	})
+
 	t.Run("pre-existing router entry keeps upgrade client eligible", func(t *testing.T) {
 		seedLSPRouterManifest(t, []string{"go", "python"})
 		if err := NewAPI().SetDefaultInstallClientNames([]string{"claude-code"}); err != nil {
@@ -459,6 +500,51 @@ func TestLSPRouterEnableThenEnsureReaddsPersistedClient(t *testing.T) {
 	}
 	if got, err := codex.GetEntry(name); err != nil || got == nil || got.URL != LSPRouterURL(7777, "go") {
 		t.Fatalf("entry after enable = %+v err=%v, want router URL", got, err)
+	}
+}
+
+func TestEnsureLSPRouterClientEntries_ForceClientReaddsOptInAfterDisable(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+	if err := NewAPI().SetDefaultInstallClientNames([]string{"claude-code"}); err != nil {
+		t.Fatalf("set default-install clients: %v", err)
+	}
+
+	a := NewAPI()
+	if err := a.SetLSPRouterDisabledClients([]string{"antigravity"}); err != nil {
+		t.Fatalf("persist disabled client: %v", err)
+	}
+	antigravity := newLSPRouterFakeClient(t, "antigravity", true)
+	opts := LSPClientRouterOpts{
+		GUIPort:       7777,
+		Clients:       map[string]clients.Client{"antigravity": antigravity},
+		McphubExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
+	}
+	name := LSPRouterEntryName("go")
+
+	skipped, err := a.EnsureLSPRouterClientEntries(opts)
+	if err != nil {
+		t.Fatalf("Ensure while disabled: %v", err)
+	}
+	if len(skipped.Backups) != 0 || len(skipped.Applied) != 0 {
+		t.Fatalf("disabled ensure mutated config: %+v", skipped)
+	}
+	if got, err := antigravity.GetEntry(name); err != nil || got != nil {
+		t.Fatalf("entry while disabled = %+v err=%v, want nil", got, err)
+	}
+
+	if err := a.SetLSPRouterDisabledClients(nil); err != nil {
+		t.Fatalf("clear disabled client: %v", err)
+	}
+	opts.ForceClientName = "antigravity"
+	report, err := a.EnsureLSPRouterClientEntries(opts)
+	if err != nil {
+		t.Fatalf("Ensure after explicit enable: %v", err)
+	}
+	if len(report.Applied) != 1 || report.Applied[0].Client != "antigravity" || report.Applied[0].EntryName != name {
+		t.Fatalf("applied = %+v, want antigravity %s", report.Applied, name)
+	}
+	if got, err := antigravity.GetEntry(name); err != nil || got == nil || got.RelayURL != LSPRouterURL(7777, "go") {
+		t.Fatalf("entry after explicit enable = %+v err=%v, want relay router URL", got, err)
 	}
 }
 

@@ -29,8 +29,9 @@ mcphub setup writes into eligible present MCP client configs.
 
 Disabling a client persists an opt-out in gui-preferences.yaml and removes
 that client's current router entries immediately. Future 'mcphub setup'
-runs will skip disabled clients. Enabling clears the opt-out and runs the
-normal ensure pass so eligible present clients can receive router entries again.`,
+runs will skip disabled clients. Enabling clears the opt-out and forces the
+requested present client back into the ensure pass so its router entries are
+restored even when disable removed its prior opt-in evidence.`,
 	}
 	root.AddCommand(newLSPRouterDisableCmd())
 	root.AddCommand(newLSPRouterEnableCmd())
@@ -119,7 +120,9 @@ func runLSPRouterEnable(cmd *cobra.Command, rawClient string) error {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "✓ %s enabled for LSP router setup.\n", clientName)
-	report, err := a.EnsureLSPRouterClientEntries(api.LSPClientRouterOpts{})
+	report, err := a.EnsureLSPRouterClientEntries(api.LSPClientRouterOpts{
+		ForceClientName: clientName,
+	})
 	if report == nil {
 		report = &api.LSPClientRouterReport{}
 	}

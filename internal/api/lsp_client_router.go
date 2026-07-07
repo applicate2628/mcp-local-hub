@@ -31,6 +31,9 @@ type LSPClientRouterOpts struct {
 	// BackupKeepN optionally overrides the per-client backup retention count.
 	// Zero means EffectiveBackupKeepN().
 	BackupKeepN int
+	// ForceClientName bypasses inferred enablement evidence for one explicitly
+	// requested client. A persisted lsp_router_disabled opt-out still wins.
+	ForceClientName string
 	// McphubExePath is used only by relay-shaped clients such as Antigravity.
 	// Empty means canonicalMcphubPath().
 	McphubExePath string
@@ -125,13 +128,14 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 	if keepN == 0 {
 		keepN = a.EffectiveBackupKeepN()
 	}
+	forceClientName := strings.TrimSpace(opts.ForceClientName)
 
 	for _, clientName := range sortedLSPClientNames(clientMap) {
 		adapter := clientMap[clientName]
 		if adapter == nil || !adapter.Exists() || disabledClients[clientName] {
 			continue
 		}
-		if !enabledClients[clientName] {
+		if !enabledClients[clientName] && clientName != forceClientName {
 			hasEvidence, err := clientHasLSPRouterEnablementEvidence(clientName, adapter, languages, regEntries, portsByLanguage)
 			if err != nil {
 				report.Failed = append(report.Failed, lspFailure(clientName, "", "", "enablement", err))
@@ -209,7 +213,7 @@ func clientHasLSPRouterEnablementEvidence(
 		if err != nil {
 			return false, fmt.Errorf("read %s entry %s: %w", clientName, targetName, err)
 		}
-		if entryIsHubOwnedLSPClientEntry(live, language, portsByLanguage[language]) {
+		if activeHubOwnedLSPClientEntry(live, language, portsByLanguage[language]) {
 			return true, nil
 		}
 		for _, legacyName := range lspLegacyCandidateEntryNames(regEntries, language, clientName) {
@@ -220,7 +224,7 @@ func clientHasLSPRouterEnablementEvidence(
 			if err != nil {
 				return false, fmt.Errorf("read %s entry %s: %w", clientName, legacyName, err)
 			}
-			if entryPointsAtLegacyLSPPort(legacy, portsByLanguage[language]) {
+			if activeEntryPointsAtLegacyLSPPort(legacy, portsByLanguage[language]) {
 				return true, nil
 			}
 		}
@@ -248,6 +252,9 @@ func clientHasLSPRouterEnablementEvidence(
 				return false, fmt.Errorf("read %s entry %s: %w", clientName, server, err)
 			}
 			if live == nil {
+				break
+			}
+			if live.Disabled {
 				break
 			}
 			if matched, _ := liveEntryMatchesManifestBinding(live, server, binding, m); matched {
@@ -622,7 +629,7 @@ func lspLegacyMCPEntryForClient(opts LSPClientRouterOpts, adapter clients.Client
 }
 
 func entryMatchesLSPRouter(entry *clients.MCPEntry, targetURL string) bool {
-	return entryMatchesURL(entry, targetURL)
+	return entry != nil && !entry.Disabled && entryMatchesURL(entry, targetURL)
 }
 
 func entryMatchesURL(entry *clients.MCPEntry, targetURL string) bool {
@@ -634,6 +641,10 @@ func entryMatchesURL(entry *clients.MCPEntry, targetURL string) bool {
 
 func entryIsHubOwnedLSPClientEntry(entry *clients.MCPEntry, language string, ports map[int]bool) bool {
 	return entryIsLSPRouterForLanguage(entry, language) || entryPointsAtLegacyLSPPort(entry, ports)
+}
+
+func activeHubOwnedLSPClientEntry(entry *clients.MCPEntry, language string, ports map[int]bool) bool {
+	return entry != nil && !entry.Disabled && entryIsHubOwnedLSPClientEntry(entry, language, ports)
 }
 
 func entryIsLSPRouterForLanguage(entry *clients.MCPEntry, language string) bool {
@@ -679,6 +690,10 @@ func entryPointsAtLegacyLSPPort(entry *clients.MCPEntry, ports map[int]bool) boo
 		}
 	}
 	return false
+}
+
+func activeEntryPointsAtLegacyLSPPort(entry *clients.MCPEntry, ports map[int]bool) bool {
+	return entry != nil && !entry.Disabled && entryPointsAtLegacyLSPPort(entry, ports)
 }
 
 func lspLegacyURLPort(raw string) (int, bool) {

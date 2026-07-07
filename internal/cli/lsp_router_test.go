@@ -15,6 +15,7 @@ type fakeLSPRouterCLIAPI struct {
 	setCalls        [][]string
 	rollbackClients []string
 	ensureCalls     int
+	ensureOpts      []api.LSPClientRouterOpts
 
 	rollbackReport *api.LSPClientRouterReport
 	ensureReport   *api.LSPClientRouterReport
@@ -46,8 +47,9 @@ func (f *fakeLSPRouterCLIAPI) RollbackLSPRouterClientEntriesForClient(clientName
 	return &api.LSPClientRouterReport{}, nil
 }
 
-func (f *fakeLSPRouterCLIAPI) EnsureLSPRouterClientEntries(api.LSPClientRouterOpts) (*api.LSPClientRouterReport, error) {
+func (f *fakeLSPRouterCLIAPI) EnsureLSPRouterClientEntries(opts api.LSPClientRouterOpts) (*api.LSPClientRouterReport, error) {
 	f.ensureCalls++
+	f.ensureOpts = append(f.ensureOpts, opts)
 	if f.ensureReport != nil {
 		return f.ensureReport, nil
 	}
@@ -126,11 +128,45 @@ func TestLSPRouterEnablePersistsAndRunsEnsure(t *testing.T) {
 	if fake.ensureCalls != 1 {
 		t.Fatalf("ensure calls = %d, want 1", fake.ensureCalls)
 	}
+	if len(fake.ensureOpts) != 1 || fake.ensureOpts[0].ForceClientName != "codex-cli" {
+		t.Fatalf("ensure opts = %+v, want ForceClientName codex-cli", fake.ensureOpts)
+	}
 	if !strings.Contains(out, "codex-cli enabled for LSP router setup") {
 		t.Fatalf("output missing enable confirmation:\n%s", out)
 	}
 	if !strings.Contains(out, "codex-cli") || !strings.Contains(out, "http://127.0.0.1:7777/lsp/go/mcp") {
 		t.Fatalf("output missing ensure result:\n%s", out)
+	}
+}
+
+func TestLSPRouterEnableForcesRequestedOptInClientEnsure(t *testing.T) {
+	fake := &fakeLSPRouterCLIAPI{
+		disabled: map[string]bool{"antigravity": true},
+		ensureReport: &api.LSPClientRouterReport{
+			Applied: []api.LSPClientRouterChange{{
+				Client:    "antigravity",
+				Language:  "go",
+				EntryName: "mcp-language-server-go",
+				URL:       "http://127.0.0.1:7777/lsp/go/mcp",
+			}},
+		},
+	}
+
+	out, err := runLSPRouterCommandWithFake(t, fake, "enable", "--client", "antigravity")
+	if err != nil {
+		t.Fatalf("enable command: %v\n%s", err, out)
+	}
+	if len(fake.setCalls) != 1 || len(fake.setCalls[0]) != 0 {
+		t.Fatalf("set calls = %+v, want cleared disabled list", fake.setCalls)
+	}
+	if len(fake.ensureOpts) != 1 || fake.ensureOpts[0].ForceClientName != "antigravity" {
+		t.Fatalf("ensure opts = %+v, want ForceClientName antigravity", fake.ensureOpts)
+	}
+	if !strings.Contains(out, "antigravity enabled for LSP router setup") {
+		t.Fatalf("output missing enable confirmation:\n%s", out)
+	}
+	if !strings.Contains(out, "antigravity") || !strings.Contains(out, "mcp-language-server-go") {
+		t.Fatalf("output missing forced ensure result:\n%s", out)
 	}
 }
 
