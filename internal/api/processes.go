@@ -122,17 +122,21 @@ func countMatchingLines(lines []string, patterns []string) int {
 //
 // Output format:
 //
-//	Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-//	HOST,"cmdline text",20260417180000.000000+000,555,1001,40000000
+//	Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+//	HOST,"cmdline text",20260417180000.000000+000,"C:\...\node.exe",555,1001,40000000
 //	...
 //
 // CommandLine is quoted with "" escaping (wmic-compatible). CreationDate is
-// formatted as CIM_DATETIME so parseWmicDate works unchanged. Returned as a
-// single string for convenience; callers wrap in strings.NewReader.
+// formatted as CIM_DATETIME so parseWmicDate works unchanged. ExecutablePath
+// (added so parseProcessRows can build the PID-recycle-safe identity proof the
+// cleanup reapers kill through — see reapOrphans) sits between CreationDate and
+// ParentProcessId, which is exactly where wmic's alphabetical `/format:csv`
+// column order places it. Returned as a single string for convenience; callers
+// wrap in strings.NewReader.
 func runProcessSnapshot() (string, error) {
 	// Legacy path: wmic (present on Windows 10 and older Windows 11).
 	wmicCmd := exec.Command("wmic", "process", "get",
-		"CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize",
+		"CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize",
 		"/format:csv")
 	process.NoConsole(wmicCmd)
 	wmicOut, wmicErr := wmicCmd.Output()
@@ -145,10 +149,14 @@ func runProcessSnapshot() (string, error) {
 	// Emit rows in wmic CSV shape so the parsers don't need a second path.
 	// Uses [string]::Format instead of backtick-escaping to keep the Go
 	// raw-string literal clean (PowerShell's backtick would close the literal).
+	// ExecutablePath is quoted (like CommandLine) so a path is always a single
+	// CSV field for parseProcessRows's right-anchor; a Windows path can never
+	// contain a `"` (illegal filename char), so no quote-escaping is needed.
 	const psScript = `Get-CimInstance Win32_Process | ForEach-Object {
 		$cmdline = if ($_.CommandLine) { ($_.CommandLine -replace '"', '""') } else { '' }
 		$created = $_.CreationDate.ToString('yyyyMMddHHmmss') + '.000000+000'
-		[string]::Format('HOST,"{0}",{1},{2},{3},{4}', $cmdline, $created, $_.ParentProcessId, $_.ProcessId, $_.WorkingSetSize)
+		$exe = if ($_.ExecutablePath) { $_.ExecutablePath } else { '' }
+		[string]::Format('HOST,"{0}",{1},"{2}",{3},{4},{5}', $cmdline, $created, $exe, $_.ParentProcessId, $_.ProcessId, $_.WorkingSetSize)
 	}`
 	psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 	process.NoConsole(psCmd)
@@ -156,7 +164,7 @@ func runProcessSnapshot() (string, error) {
 	if psErr != nil {
 		return "", fmt.Errorf("both wmic and PowerShell process snapshot failed: wmic=%v; powershell=%v", wmicErr, psErr)
 	}
-	header := "Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize\n"
+	header := "Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize\n"
 	return header + string(psOut), nil
 }
 

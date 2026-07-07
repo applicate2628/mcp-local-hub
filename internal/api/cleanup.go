@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"runtime"
 	"slices"
 	"sort"
@@ -61,8 +60,11 @@ func isOurOwnProcess(cmdline string) bool {
 }
 
 // OrphanProcess describes one orphan MCP subprocess discovered by CleanupOrphans.
-// KillErr is populated only when DryRun=false and taskkill failed for this PID
-// (access denied, process already gone, etc.); empty on success or dry-run.
+// KillErr is populated only when DryRun=false and the identity-gated reap did not
+// cleanly terminate this PID; it distinguishes an identity mismatch (PID recycled
+// or process replaced since the census scan — the friendly-fire guard refused the
+// kill), an access-denied refusal, an already-exited process, and a missing
+// identity proof. It is empty on a clean kill and on dry-run.
 //
 // Wire-format note (Cleanup-6 security fix): the raw Cmdline is kept on
 // the struct for server-side use (manifest-pattern match in CleanupOrphans,
@@ -83,6 +85,19 @@ type OrphanProcess struct {
 	CmdlineDisplay string `json:"cmdline_display"` // basename of executable for GUI display
 	AgeSec         int64  `json:"age_sec"`
 	KillErr        string `json:"kill_err,omitempty"`
+
+	// ExecutablePath is the process image path captured at census, and
+	// StartedAt is the RFC3339Nano process start time (from the snapshot
+	// CreationDate). Together with PID they form the PIDIdentityProof that
+	// process.TerminatePIDWithIdentity re-verifies on a held handle at kill
+	// time (see reapOrphans), so a PID recycled between the census scan and
+	// the kill fails the proof and is left untouched — the PID-recycle
+	// friendly-fire guard. Both are server-side only (json:"-"): the image
+	// path can embed a username / workspace segment, same rationale as
+	// Cmdline. Empty when the snapshot could not report a path → the proof
+	// fails closed and the process is NOT killed.
+	ExecutablePath string `json:"-"`
+	StartedAt      string `json:"-"`
 
 	// MatchSource explains why an AGGRESSIVE candidate was included:
 	// the ancestor basename that anchored the scope (e.g. "codex") for
@@ -856,23 +871,13 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 		filtered = append(filtered, o)
 	}
 
-	// Kill if not dry-run. Preserve taskkill's stderr on each failure so the
-	// caller can distinguish "access denied" from "PID already gone" in the
-	// per-orphan report instead of silently swallowing the error.
-	if !opts.DryRun {
-		for i := range filtered {
-			cmd := exec.Command("taskkill", "/PID", strconv.Itoa(filtered[i].PID), "/F")
-			process.NoConsole(cmd)
-			out, err := cmd.CombinedOutput()
-			if err != nil {
-				msg := strings.TrimSpace(string(out))
-				if msg == "" {
-					msg = err.Error()
-				}
-				filtered[i].KillErr = msg
-			}
-		}
-	}
+	// Kill if not dry-run. Each reap goes through the identity-re-verifying
+	// primitive (process.TerminatePIDWithIdentity), NOT a raw taskkill against
+	// the census-captured PID: a PID recycled between the census scan and the
+	// kill fails the {executable, basename, start-time} re-verify on a held
+	// handle and is left untouched (PID-recycle friendly-fire guard —
+	// work-items/bugs/2026-07-05-cleanuporphans-raw-taskkill-no-identity-reverify.md).
+	reapOrphans(filtered, opts.DryRun)
 
 	return filtered, nil
 }
@@ -933,12 +938,13 @@ func isBroadLauncherToken(pattern string) bool {
 type procRow struct {
 	pid, ppid int
 	created   time.Time
+	exePath   string
 	cmdline   string
 	ram       uint64
 }
 
 // parseProcessRows reads the wmic/CIM CSV process snapshot
-// (`CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize`)
+// (`CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize`)
 // and returns the parsed rows plus an index by PID for ancestor walks.
 // It is the single owner of the CSV-shape parse logic that both the
 // default orphan sweep and the aggressive sweep rely on.
@@ -960,20 +966,19 @@ func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
 			continue
 		}
 		fields := splitCSVLine(line)
-		if len(fields) < 6 {
+		if len(fields) < 7 {
 			continue
 		}
 		// WMIC's `/format:csv` output does NOT quote the cmdline
 		// field. When cmdline contains commas (very common:
 		// `--setting-sources=user,project,local`,
 		// `--allow-list=a,b,c`, anything with CSV-shaped values),
-		// splitCSVLine produces MORE than 6 fields and naive
-		// fields[3]/fields[4] indexing returns pieces of the
-		// cmdline instead of ppid/pid. Garbage PIDs then poison
-		// byPID, and the ancestor-walk in the orphan detector
-		// can't find live client launchers — silently flagging
-		// LIVE stdio MCP children for killing on
-		// `cleanup --scan-clients --confirm`.
+		// splitCSVLine produces MORE than 7 fields and naive
+		// fixed-index indexing returns pieces of the cmdline instead
+		// of ppid/pid. Garbage PIDs then poison byPID, and the
+		// ancestor-walk in the orphan detector can't find live client
+		// launchers — silently flagging LIVE stdio MCP children for
+		// killing on `cleanup --scan-clients --confirm`.
 		//
 		// Manual smoke on PR #190 caught this with claude.exe
 		// whose cmdline included
@@ -982,15 +987,18 @@ func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
 		// --permission-mode bypassPermissions ...` and the gopls
 		// child of that claude session was flagged as orphan.
 		//
-		// Fix: anchor from the RIGHT. The trailing 4 fields
-		// (created date, ppid, pid, ram) are well-shaped
-		// integers/dates with no embedded commas, so they
-		// align reliably regardless of how many commas the
-		// cmdline contributed. The cmdline is reassembled by
-		// rejoining the middle slice with commas.
+		// Fix: anchor from the RIGHT. The trailing 5 fields (creation
+		// date, executable path, ppid, pid, ram) are well-shaped
+		// values with no embedded commas — a Windows executable path
+		// effectively never contains a comma, and the PowerShell
+		// fallback quotes the path field so splitCSVLine keeps it whole
+		// regardless — so they align reliably no matter how many commas
+		// the unquoted cmdline contributed. The cmdline is reassembled
+		// by rejoining the middle slice with commas.
 		n := len(fields)
-		cmdline := strings.Join(fields[1:n-4], ",")
-		created := parseWmicDate(strings.TrimSpace(fields[n-4]))
+		cmdline := strings.Join(fields[1:n-5], ",")
+		created := parseWmicDate(strings.TrimSpace(fields[n-5]))
+		exePath := strings.TrimSpace(fields[n-4])
 		ppid, err1 := strconv.Atoi(strings.TrimSpace(fields[n-3]))
 		pid, err2 := strconv.Atoi(strings.TrimSpace(fields[n-2]))
 		ram, err3 := strconv.ParseUint(strings.TrimSpace(fields[n-1]), 10, 64)
@@ -1000,7 +1008,7 @@ func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
 			// lookups for other rows.
 			continue
 		}
-		rows = append(rows, procRow{pid: pid, ppid: ppid, created: created, cmdline: cmdline, ram: ram})
+		rows = append(rows, procRow{pid: pid, ppid: ppid, created: created, exePath: exePath, cmdline: cmdline, ram: ram})
 	}
 	// A scan error (e.g. bufio.ErrTooLong on a pathologically long CommandLine
 	// row) ends the loop early and silently truncates the process snapshot,
@@ -1019,7 +1027,7 @@ func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
 	return rows, byPID
 }
 
-// parseOrphans reads `wmic process get CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize`
+// parseOrphans reads `wmic process get CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize`
 // CSV output and returns processes whose CommandLine matches any of the given
 // patterns BUT whose parent is NOT an `mcp.exe daemon` process.
 //
@@ -1128,6 +1136,8 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 			Cmdline:        r.cmdline,
 			CmdlineDisplay: redactCmdlineForDisplay(r.cmdline),
 			AgeSec:         age,
+			ExecutablePath: r.exePath,
+			StartedAt:      orphanStartedAt(r.created),
 		})
 	}
 	return out
@@ -1241,6 +1251,8 @@ func parseAggressiveCandidates(r io.Reader, clientBasename string, rootPID int, 
 			Cmdline:        r.cmdline,
 			CmdlineDisplay: redactCmdlineForDisplay(r.cmdline),
 			AgeSec:         age,
+			ExecutablePath: r.exePath,
+			StartedAt:      orphanStartedAt(r.created),
 			MatchSource:    matchSource,
 		})
 	}
@@ -1308,20 +1320,11 @@ func (a *API) AggressiveCleanup(opts CleanupOpts) ([]OrphanProcess, error) {
 		filtered = filterToExpectedPIDs(filtered, opts.ExpectPIDs)
 	}
 
-	if !opts.DryRun {
-		for i := range filtered {
-			cmd := exec.Command("taskkill", "/PID", strconv.Itoa(filtered[i].PID), "/F")
-			process.NoConsole(cmd)
-			killOut, killErr := cmd.CombinedOutput()
-			if killErr != nil {
-				msg := strings.TrimSpace(string(killOut))
-				if msg == "" {
-					msg = killErr.Error()
-				}
-				filtered[i].KillErr = msg
-			}
-		}
-	}
+	// Same identity-re-verifying reap as the default sweep — never a raw
+	// taskkill against a census-captured PID, so a PID recycled between the
+	// census scan and the kill can never friendly-fire an unrelated process
+	// (PID-recycle guard, shared with CleanupOrphans via reapOrphans).
+	reapOrphans(filtered, opts.DryRun)
 	return filtered, nil
 }
 
@@ -1344,4 +1347,77 @@ func filterToExpectedPIDs(candidates []OrphanProcess, expectPIDs []int) []Orphan
 		}
 	}
 	return out
+}
+
+// orphanTerminateFn is the identity-re-verifying kill primitive the cleanup
+// reapers use. It re-opens a handle for the PID and re-verifies
+// {ExecutablePath, basename, kernel start-time} BEFORE terminating, failing
+// closed on ACCESS_DENIED / identity mismatch / a PID recycled between the
+// census scan and the kill. It is the SAME primitive the supervisor's
+// port-squatter reap kills through (internal/cli/supervise_squatter.go).
+// Injectable so tests exercise the recycle / mismatch / already-gone paths
+// without killing a real process. process.TerminatePIDWithIdentity is defined
+// on every platform (Windows handle re-verify, Linux pidfd, other →
+// unsupported), so this compiles cross-platform even though CleanupOrphans and
+// AggressiveCleanup only reach the kill path on Windows.
+var orphanTerminateFn = process.TerminatePIDWithIdentity
+
+// orphanStartedAt renders a census-captured process creation time as the
+// RFC3339Nano proof timestamp consumed by process.TerminatePIDWithIdentity's
+// start-time re-verify. A zero time (missing / unparseable CreationDate) yields
+// "" so the proof fails closed on a missing started_at rather than matching a
+// bogus year-1 epoch. The census CreationDate is floored to whole seconds (as
+// is the kernel start time the primitive re-reads), and the primitive tolerates
+// a 2s skew, so a genuinely-same process always re-verifies.
+func orphanStartedAt(created time.Time) string {
+	if created.IsZero() {
+		return ""
+	}
+	return created.UTC().Format(time.RFC3339Nano)
+}
+
+// reapOrphans kills each already-filtered orphan through the identity-gated
+// primitive (orphanTerminateFn), recording the per-orphan outcome on KillErr.
+// It is the SINGLE OWNER of the cleanup kill primitive, shared by CleanupOrphans
+// (default safe sweep) and AggressiveCleanup (operator-confirmed live-rooted
+// sweep) so neither can regress to a raw taskkill. No-op on dryRun. Mutates
+// filtered in place.
+func reapOrphans(filtered []OrphanProcess, dryRun bool) {
+	if dryRun {
+		return
+	}
+	for i := range filtered {
+		filtered[i].KillErr = reapOneOrphan(filtered[i])
+	}
+}
+
+// reapOneOrphan performs the identity-gated kill of a single orphan and returns
+// the KillErr string ("" on a clean kill). The census-captured ExecutablePath +
+// StartedAt (plus the PID) form the proof re-verified on a held handle inside
+// process.TerminatePIDWithIdentity, so a PID recycled onto an unrelated process
+// between the census scan and this kill fails the proof and is NOT killed. The
+// returned strings distinguish the four non-clean outcomes so the CLI/GUI report
+// stays informative (all of them count as "skipped" — KillErr != "").
+func reapOneOrphan(o OrphanProcess) string {
+	if o.ExecutablePath == "" || o.StartedAt == "" {
+		// No identity captured at census (e.g. a process whose image path the
+		// snapshot could not read) → cannot build a proof → do NOT kill.
+		return "skipped: process identity unavailable at census (no executable path or start time); not killed"
+	}
+	err := orphanTerminateFn(process.PIDIdentityProof{
+		PID:            o.PID,
+		ExecutablePath: o.ExecutablePath,
+		StartedAt:      o.StartedAt,
+	})
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, process.ErrProcessAlreadyExited):
+		return "already exited before kill (no action needed)"
+	case errors.Is(err, process.ErrProcessIdentityMismatch):
+		return "skipped: identity mismatch — PID recycled or process replaced since census; not killed"
+	default:
+		// ACCESS_DENIED, unsupported platform, or any other terminate failure.
+		return err.Error()
+	}
 }

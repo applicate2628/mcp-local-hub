@@ -577,9 +577,9 @@ func TestParseOrphans_SkipsRowThatIsClientLauncher(t *testing.T) {
 	// claude.exe directly — parent is explorer.exe (no client in
 	// ancestor chain). Pattern "claude" matches the row's cmdline.
 	// Without the row-level guard, claude.exe would be flagged.
-	csv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-host,"C:\Windows\explorer.exe",20260515090000.000000+000,1000,4000,200000000
-host,"C:\Users\u\AppData\Local\Programs\claude\claude.exe --foo",20260515100000.000000+000,4000,5000,300000000
+	csv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+host,"C:\Windows\explorer.exe",20260515090000.000000+000,C:\Windows\explorer.exe,1000,4000,200000000
+host,"C:\Users\u\AppData\Local\Programs\claude\claude.exe --foo",20260515100000.000000+000,C:\Users\u\AppData\Local\Programs\claude\claude.exe,4000,5000,300000000
 `
 	patterns := []string{"claude"}
 	out := parseOrphans(strings.NewReader(csv), patterns)
@@ -598,10 +598,10 @@ host,"C:\Users\u\AppData\Local\Programs\claude\claude.exe --foo",20260515100000.
 func TestParseOrphans_SkipsClientLauncherDescendant(t *testing.T) {
 	// 3-row CSV: claude.exe (root) → node.exe (child).
 	// Header line is required (parseOrphans skips it).
-	// Fields: Node, CommandLine, CreationDate, ParentProcessId, ProcessId, WorkingSetSize
-	csv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-host,"C:\Users\u\AppData\Local\Programs\claude\claude.exe",20260515103000.000000+000,1000,2000,150000000
-host,"node.exe c:\path\to\server.js",20260515102000.000000+000,2000,3000,80000000
+	// Fields: Node, CommandLine, CreationDate, ExecutablePath, ParentProcessId, ProcessId, WorkingSetSize
+	csv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+host,"C:\Users\u\AppData\Local\Programs\claude\claude.exe",20260515103000.000000+000,C:\Users\u\AppData\Local\Programs\claude\claude.exe,1000,2000,150000000
+host,"node.exe c:\path\to\server.js",20260515102000.000000+000,C:\Program Files\nodejs\node.exe,2000,3000,80000000
 `
 	patterns := []string{"server.js"}
 	out := parseOrphans(strings.NewReader(csv), patterns)
@@ -620,9 +620,9 @@ host,"node.exe c:\path\to\server.js",20260515102000.000000+000,2000,3000,8000000
 func TestParseOrphans_FlagsClientLessOrphan(t *testing.T) {
 	// node.exe (PID 3000) parent=explorer.exe (PID 4000). Neither
 	// is mcphub daemon nor a known client → orphan.
-	csv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-host,"C:\Windows\explorer.exe",20260515090000.000000+000,1000,4000,200000000
-host,"node.exe c:\path\to\server.js",20260515102000.000000+000,4000,3000,80000000
+	csv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+host,"C:\Windows\explorer.exe",20260515090000.000000+000,C:\Windows\explorer.exe,1000,4000,200000000
+host,"node.exe c:\path\to\server.js",20260515102000.000000+000,C:\Program Files\nodejs\node.exe,4000,3000,80000000
 `
 	patterns := []string{"server.js"}
 	out := parseOrphans(strings.NewReader(csv), patterns)

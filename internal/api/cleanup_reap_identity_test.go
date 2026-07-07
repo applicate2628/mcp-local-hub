@@ -1,0 +1,240 @@
+package api
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"mcp-local-hub/internal/process"
+)
+
+// fakeLiveProc models the live identity of a PID as
+// process.TerminatePIDWithIdentity sees it on a held handle.
+type fakeLiveProc struct {
+	exePath      string
+	startedAt    string // RFC3339Nano; the live kernel start time for the PID
+	gone         bool   // simulate a process that exited before terminate
+	accessDenied bool   // simulate an ACCESS_DENIED refusal
+}
+
+// fakeTerminator returns a stand-in for orphanTerminateFn that faithfully
+// mirrors process.TerminatePIDWithIdentity's fail-closed contract: it kills a
+// PID ONLY when the proof's {ExecutablePath, StartedAt} match the PID's LIVE
+// identity. A PID recycled onto a different process between census and kill
+// (different exe / start time) yields ErrProcessIdentityMismatch — no kill.
+// Every proof it receives is appended to calls so tests can assert the reaper
+// went through the identity-gated primitive with the census-captured proof.
+func fakeTerminator(live map[int]fakeLiveProc, calls *[]process.PIDIdentityProof) func(process.PIDIdentityProof) error {
+	return func(p process.PIDIdentityProof) error {
+		*calls = append(*calls, p)
+		lp, ok := live[p.PID]
+		if !ok || lp.gone {
+			return fmt.Errorf("process: PID %d gone: %w", p.PID, process.ErrProcessAlreadyExited)
+		}
+		if lp.accessDenied {
+			return fmt.Errorf("process: terminate PID %d: Access is denied.", p.PID)
+		}
+		if !strings.EqualFold(lp.exePath, p.ExecutablePath) || lp.startedAt != p.StartedAt {
+			return fmt.Errorf("%w: PID %d identity re-verify failed", process.ErrProcessIdentityMismatch, p.PID)
+		}
+		return nil
+	}
+}
+
+func swapOrphanTerminator(t *testing.T, fn func(process.PIDIdentityProof) error) {
+	t.Helper()
+	prev := orphanTerminateFn
+	orphanTerminateFn = fn
+	t.Cleanup(func() { orphanTerminateFn = prev })
+}
+
+// TestParseOrphans_CapturesIdentityProof verifies the census wires the
+// ExecutablePath column and the RFC3339Nano StartedAt (derived from the
+// snapshot CreationDate) onto each detected orphan — the two fields that,
+// with the PID, form the kill-time identity proof.
+func TestParseOrphans_CapturesIdentityProof(t *testing.T) {
+	const created = "20250101120000.000000+000"
+	const exe = `C:\Program Files\nodejs\node.exe`
+	csv := "Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize\n" +
+		`HOST,"C:\Windows\explorer.exe",` + created + `,C:\Windows\explorer.exe,1,4000,10000000` + "\n" +
+		`HOST,"node.exe c:\path\to\wolfram-server.js",` + created + `,` + exe + `,4000,5000,80000000` + "\n"
+
+	orphans := parseOrphans(strings.NewReader(csv), []string{"wolfram-server"})
+	if len(orphans) != 1 {
+		t.Fatalf("expected exactly 1 orphan (PID 5000), got %d: %+v", len(orphans), orphans)
+	}
+	o := orphans[0]
+	if o.PID != 5000 {
+		t.Fatalf("orphan PID = %d, want 5000", o.PID)
+	}
+	if o.ExecutablePath != exe {
+		t.Errorf("orphan.ExecutablePath = %q, want %q", o.ExecutablePath, exe)
+	}
+	if o.StartedAt == "" {
+		t.Fatal("orphan.StartedAt is empty; census must capture the process start time for the identity proof")
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, o.StartedAt)
+	if err != nil {
+		t.Fatalf("orphan.StartedAt %q is not RFC3339Nano: %v", o.StartedAt, err)
+	}
+	// StartedAt must be the SAME instant the census CreationDate parses to
+	// (the instant the kill-time kernel re-read compares against).
+	wantInstant := parseWmicDate(created).UTC()
+	if !parsed.Equal(wantInstant) {
+		t.Errorf("orphan.StartedAt instant = %s, want %s (census CreationDate instant)", parsed, wantInstant)
+	}
+}
+
+// TestReapOrphans_IdentityMatchKills verifies a genuine orphan whose census
+// proof matches its live identity IS killed (KillErr empty), and that the
+// reaper drove the identity-gated primitive with the exact census proof.
+func TestReapOrphans_IdentityMatchKills(t *testing.T) {
+	const exe = `C:\Program Files\nodejs\node.exe`
+	const started = "2025-01-01T12:00:00Z"
+	var calls []process.PIDIdentityProof
+	swapOrphanTerminator(t, fakeTerminator(map[int]fakeLiveProc{
+		5000: {exePath: exe, startedAt: started}, // live identity == census proof
+	}, &calls))
+
+	orphans := []OrphanProcess{{PID: 5000, ExecutablePath: exe, StartedAt: started}}
+	reapOrphans(orphans, false)
+
+	if orphans[0].KillErr != "" {
+		t.Errorf("KillErr = %q, want empty (identity match should kill)", orphans[0].KillErr)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("terminator called %d times, want 1", len(calls))
+	}
+	got := calls[0]
+	if got.PID != 5000 || got.ExecutablePath != exe || got.StartedAt != started {
+		t.Errorf("proof = %+v, want PID=5000 exe=%q started=%q (census-captured proof)", got, exe, started)
+	}
+}
+
+// TestReapOrphans_PIDRecycleRefused is the core friendly-fire guard: an orphan
+// whose census-captured {ExecutablePath, StartedAt} no longer match the LIVE
+// process at that PID (the PID was recycled onto an unrelated process between
+// census and kill) is REFUSED by the identity-gated primitive and NOT killed —
+// recorded as an identity mismatch, not a successful kill. Mirrors the
+// supervisor squatter reap's PID-reuse test.
+func TestReapOrphans_PIDRecycleRefused(t *testing.T) {
+	const censusExe = `C:\Program Files\nodejs\node.exe`
+	const censusStarted = "2025-01-01T12:00:00Z"
+	var calls []process.PIDIdentityProof
+	// PID 5000 is now a DIFFERENT process (svchost, started later) — the OS
+	// recycled the PID after the census scan recorded the node orphan.
+	swapOrphanTerminator(t, fakeTerminator(map[int]fakeLiveProc{
+		5000: {exePath: `C:\Windows\System32\svchost.exe`, startedAt: "2025-01-01T12:05:00Z"},
+	}, &calls))
+
+	orphans := []OrphanProcess{{PID: 5000, ExecutablePath: censusExe, StartedAt: censusStarted}}
+	reapOrphans(orphans, false)
+
+	if len(calls) != 1 {
+		t.Fatalf("terminator called %d times, want 1 (proof must be attempted so the primitive can refuse)", len(calls))
+	}
+	if orphans[0].KillErr == "" {
+		t.Fatal("KillErr empty; a recycled PID must be recorded as skipped, not reported as killed")
+	}
+	if !strings.Contains(orphans[0].KillErr, "identity mismatch") || !strings.Contains(orphans[0].KillErr, "recycled") {
+		t.Errorf("KillErr = %q, want an identity-mismatch / PID-recycled note", orphans[0].KillErr)
+	}
+}
+
+// TestReapOrphans_DryRunNeverKills verifies dry-run never touches the kill
+// primitive regardless of a matching proof.
+func TestReapOrphans_DryRunNeverKills(t *testing.T) {
+	var calls []process.PIDIdentityProof
+	swapOrphanTerminator(t, fakeTerminator(map[int]fakeLiveProc{
+		5000: {exePath: `C:\node.exe`, startedAt: "2025-01-01T12:00:00Z"},
+	}, &calls))
+
+	orphans := []OrphanProcess{{PID: 5000, ExecutablePath: `C:\node.exe`, StartedAt: "2025-01-01T12:00:00Z"}}
+	reapOrphans(orphans, true) // dryRun
+
+	if len(calls) != 0 {
+		t.Errorf("terminator called %d times in dry-run, want 0", len(calls))
+	}
+	if orphans[0].KillErr != "" {
+		t.Errorf("KillErr = %q in dry-run, want empty (nothing was attempted)", orphans[0].KillErr)
+	}
+}
+
+// TestReapOrphans_MissingProofSkips verifies an orphan with no census-captured
+// identity (empty ExecutablePath or StartedAt) is NOT killed — the primitive is
+// never even called, and the outcome is recorded as skipped (fail-closed).
+func TestReapOrphans_MissingProofSkips(t *testing.T) {
+	var calls []process.PIDIdentityProof
+	swapOrphanTerminator(t, fakeTerminator(map[int]fakeLiveProc{}, &calls))
+
+	orphans := []OrphanProcess{
+		{PID: 5000, ExecutablePath: "", StartedAt: "2025-01-01T12:00:00Z"},    // no exe path
+		{PID: 5001, ExecutablePath: `C:\node.exe`, StartedAt: ""},             // no start time
+	}
+	reapOrphans(orphans, false)
+
+	if len(calls) != 0 {
+		t.Errorf("terminator called %d times, want 0 (no proof → never attempt a kill)", len(calls))
+	}
+	for i, o := range orphans {
+		if o.KillErr == "" || !strings.Contains(o.KillErr, "identity unavailable") {
+			t.Errorf("orphan[%d].KillErr = %q, want an 'identity unavailable' skip note", i, o.KillErr)
+		}
+	}
+}
+
+// TestReapOrphans_AlreadyExitedRecorded verifies a process that has already
+// exited by kill time is recorded distinctly (not a hard failure, not a
+// silent success), and that ErrProcessAlreadyExited is classified separately
+// from an identity mismatch.
+func TestReapOrphans_AlreadyExitedRecorded(t *testing.T) {
+	var calls []process.PIDIdentityProof
+	swapOrphanTerminator(t, fakeTerminator(map[int]fakeLiveProc{
+		5000: {gone: true},
+	}, &calls))
+
+	orphans := []OrphanProcess{{PID: 5000, ExecutablePath: `C:\node.exe`, StartedAt: "2025-01-01T12:00:00Z"}}
+	reapOrphans(orphans, false)
+
+	if len(calls) != 1 {
+		t.Fatalf("terminator called %d times, want 1", len(calls))
+	}
+	if !strings.Contains(orphans[0].KillErr, "already exited") {
+		t.Errorf("KillErr = %q, want an 'already exited' note", orphans[0].KillErr)
+	}
+	if strings.Contains(orphans[0].KillErr, "identity mismatch") {
+		t.Errorf("KillErr = %q, an already-exited process must not be reported as an identity mismatch", orphans[0].KillErr)
+	}
+}
+
+// TestReapOneOrphan_AccessDeniedPropagated verifies a terminate failure that is
+// neither already-exited nor an identity mismatch (e.g. ACCESS_DENIED) surfaces
+// its message verbatim so operators keep the diagnostic.
+func TestReapOneOrphan_AccessDeniedPropagated(t *testing.T) {
+	swapOrphanTerminator(t, fakeTerminator(map[int]fakeLiveProc{
+		5000: {accessDenied: true},
+	}, &[]process.PIDIdentityProof{}))
+
+	got := reapOneOrphan(OrphanProcess{PID: 5000, ExecutablePath: `C:\node.exe`, StartedAt: "2025-01-01T12:00:00Z"})
+	if !strings.Contains(got, "Access is denied") {
+		t.Errorf("KillErr = %q, want the underlying access-denied message preserved", got)
+	}
+}
+
+// Guard: ErrProcessIdentityMismatch classification is by errors.Is on the
+// wrapped sentinel, not string matching, so a wrapped mismatch anywhere in the
+// chain is caught.
+func TestReapOneOrphan_MismatchClassifiedByErrorsIs(t *testing.T) {
+	swapOrphanTerminator(t, func(process.PIDIdentityProof) error {
+		return fmt.Errorf("outer wrap: %w", fmt.Errorf("inner: %w", process.ErrProcessIdentityMismatch))
+	})
+	got := reapOneOrphan(OrphanProcess{PID: 1, ExecutablePath: `C:\x.exe`, StartedAt: "2025-01-01T12:00:00Z"})
+	if !strings.Contains(got, "identity mismatch") {
+		t.Errorf("KillErr = %q, want identity-mismatch classification via errors.Is", got)
+	}
+	if !errors.Is(process.ErrProcessIdentityMismatch, process.ErrProcessIdentityMismatch) {
+		t.Fatal("sanity: sentinel identity")
+	}
+}
