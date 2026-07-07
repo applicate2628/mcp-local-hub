@@ -536,6 +536,14 @@ func runSetupLSPClientRouter(out io.Writer, rollback bool) error {
 	if rollback {
 		action = "rollback"
 	}
+	printLSPClientRouterReport(out, report, action)
+	return err
+}
+
+func printLSPClientRouterReport(out io.Writer, report *api.LSPClientRouterReport, action string) {
+	if report == nil {
+		return
+	}
 	for _, backup := range report.Backups {
 		fmt.Fprintf(out, "✓ %s backup before LSP router %s: %s\n", backup.Client, action, backup.Path)
 	}
@@ -552,7 +560,6 @@ func runSetupLSPClientRouter(out io.Writer, rollback bool) error {
 		fmt.Fprintf(out, "✗ %s %s entry %s failed during %s: %s\n",
 			failed.Client, failed.Language, failed.EntryName, failed.Op, failed.Err)
 	}
-	return err
 }
 
 // ---------------------------------------------------------------------------

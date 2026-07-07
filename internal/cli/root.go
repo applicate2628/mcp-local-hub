@@ -52,6 +52,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newWorkspacesCmd())
 	root.AddCommand(newWorkspaceCmd())
 	root.AddCommand(newLanguageServerCmd())
+	root.AddCommand(newLSPRouterCmd())
 	root.AddCommand(newMigrateLegacyCmd())
 	root.AddCommand(newImportCmd())
 	root.AddCommand(newWeeklyRefreshCmd())
@@ -114,6 +115,7 @@ func newWorkspacesCmd() *cobra.Command { return newWorkspacesCmdReal() }
 func newLanguageServerCmd() *cobra.Command {
 	return newLanguageServerCmdReal()
 }
+func newLSPRouterCmd() *cobra.Command     { return newLSPRouterCmdReal() }
 func newMigrateLegacyCmd() *cobra.Command { return newMigrateLegacyCmdReal() }
 func newImportCmd() *cobra.Command        { return newImportCmdReal() }
 func newWeeklyRefreshCmd() *cobra.Command { return newWeeklyRefreshCmdReal() }

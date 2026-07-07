@@ -315,6 +315,93 @@ func TestEnsureLSPRouterClientEntries_HonorsLSPRouterDisabledPrefs(t *testing.T)
 	})
 }
 
+func TestLSPRouterDisableThenSetupDoesNotReaddPersistedClient(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+
+	a := NewAPI()
+	codex := newLSPRouterFakeClient(t, "codex-cli", true)
+	opts := LSPClientRouterOpts{
+		GUIPort: 7777,
+		Clients: map[string]clients.Client{"codex-cli": codex},
+	}
+	name := LSPRouterEntryName("go")
+
+	if _, err := a.EnsureLSPRouterClientEntries(opts); err != nil {
+		t.Fatalf("initial EnsureLSPRouterClientEntries: %v", err)
+	}
+	if got, err := codex.GetEntry(name); err != nil || got == nil || got.URL != LSPRouterURL(7777, "go") {
+		t.Fatalf("initial router entry = %+v err=%v, want router URL", got, err)
+	}
+
+	if err := a.SetLSPRouterDisabledClients([]string{"codex-cli"}); err != nil {
+		t.Fatalf("persist disabled client: %v", err)
+	}
+	rollback, err := a.RollbackLSPRouterClientEntriesForClient("codex-cli", opts)
+	if err != nil {
+		t.Fatalf("RollbackLSPRouterClientEntriesForClient: %v", err)
+	}
+	if len(rollback.Removed) != 1 || rollback.Removed[0].Client != "codex-cli" || rollback.Removed[0].EntryName != name {
+		t.Fatalf("rollback removed = %+v, want codex-cli %s", rollback.Removed, name)
+	}
+	if got, err := codex.GetEntry(name); err != nil || got != nil {
+		t.Fatalf("entry after disable rollback = %+v err=%v, want removed", got, err)
+	}
+
+	second, err := a.EnsureLSPRouterClientEntries(opts)
+	if err != nil {
+		t.Fatalf("second EnsureLSPRouterClientEntries: %v", err)
+	}
+	if len(second.Backups) != 0 || len(second.Applied) != 0 || len(second.Removed) != 0 {
+		t.Fatalf("disabled client was mutated by setup rerun: %+v", second)
+	}
+	if got, err := codex.GetEntry(name); err != nil || got != nil {
+		t.Fatalf("disabled client was re-added by setup: entry=%+v err=%v", got, err)
+	}
+	if len(codex.backupPaths) != 2 {
+		t.Fatalf("backup count = %d, want initial ensure + immediate rollback only", len(codex.backupPaths))
+	}
+}
+
+func TestLSPRouterEnableThenEnsureReaddsPersistedClient(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+
+	a := NewAPI()
+	if err := a.SetLSPRouterDisabledClients([]string{"codex-cli"}); err != nil {
+		t.Fatalf("persist disabled client: %v", err)
+	}
+	codex := newLSPRouterFakeClient(t, "codex-cli", true)
+	opts := LSPClientRouterOpts{
+		GUIPort: 7777,
+		Clients: map[string]clients.Client{"codex-cli": codex},
+	}
+	name := LSPRouterEntryName("go")
+
+	skipped, err := a.EnsureLSPRouterClientEntries(opts)
+	if err != nil {
+		t.Fatalf("Ensure while disabled: %v", err)
+	}
+	if len(skipped.Backups) != 0 || len(skipped.Applied) != 0 {
+		t.Fatalf("disabled ensure mutated config: %+v", skipped)
+	}
+	if got, err := codex.GetEntry(name); err != nil || got != nil {
+		t.Fatalf("entry while disabled = %+v err=%v, want nil", got, err)
+	}
+
+	if err := a.SetLSPRouterDisabledClients(nil); err != nil {
+		t.Fatalf("clear disabled client: %v", err)
+	}
+	report, err := a.EnsureLSPRouterClientEntries(opts)
+	if err != nil {
+		t.Fatalf("Ensure after enable: %v", err)
+	}
+	if len(report.Applied) != 1 || report.Applied[0].Client != "codex-cli" || report.Applied[0].EntryName != name {
+		t.Fatalf("applied = %+v, want codex-cli %s", report.Applied, name)
+	}
+	if got, err := codex.GetEntry(name); err != nil || got == nil || got.URL != LSPRouterURL(7777, "go") {
+		t.Fatalf("entry after enable = %+v err=%v, want router URL", got, err)
+	}
+}
+
 func TestEnsureLSPRouterClientEntries_MigratesPerPairEntryToRouterAndKeepsRegistry(t *testing.T) {
 	seedLSPRouterManifest(t, []string{"go"})
 	restoreRegistry := overrideLSPRouterRegistry(t)

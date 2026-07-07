@@ -68,6 +68,14 @@ type LSPClientRouterReport struct {
 	Failed   []LSPClientRouterFailure
 }
 
+type LSPRouterClientStatus struct {
+	Client          string
+	ConfigPath      string
+	Disabled        bool
+	ExistingEntries []string
+	MissingEntries  []string
+}
+
 type lspClientRouterOp struct {
 	kind      string
 	language  string
@@ -320,6 +328,51 @@ func (a *API) RollbackLSPRouterClientEntriesForClient(clientName string, opts LS
 	}
 	applyLSPRouterOps(opts, adapter, clientName, keepN, ops, report)
 	return report, lspRouterReportError(report, "lsp client router per-client rollback")
+}
+
+// LSPRouterClientStatuses reports the current shared-router entry presence for
+// every present client config. It is read-only and shares the same language
+// manifest, disabled-list, adapter map, and router-entry detector as ensure.
+func (a *API) LSPRouterClientStatuses(opts LSPClientRouterOpts) ([]LSPRouterClientStatus, error) {
+	languages, err := loadLSPRouterLanguages(opts.Languages)
+	if err != nil {
+		return nil, err
+	}
+	disabledClients, err := a.LSPRouterDisabledClientSet()
+	if err != nil {
+		return nil, err
+	}
+	clientMap := opts.Clients
+	if clientMap == nil {
+		clientMap = clients.AllClients()
+	}
+
+	statuses := make([]LSPRouterClientStatus, 0, len(clientMap))
+	for _, clientName := range sortedLSPClientNames(clientMap) {
+		adapter := clientMap[clientName]
+		if adapter == nil || !adapter.Exists() {
+			continue
+		}
+		status := LSPRouterClientStatus{
+			Client:     clientName,
+			ConfigPath: adapter.ConfigPath(),
+			Disabled:   disabledClients[clientName],
+		}
+		for _, language := range languages {
+			entryName := LSPRouterEntryName(language)
+			live, err := adapter.GetEntry(entryName)
+			if err != nil {
+				return statuses, fmt.Errorf("read %s entry %s: %w", clientName, entryName, err)
+			}
+			if entryIsLSPRouterForLanguage(live, language) {
+				status.ExistingEntries = append(status.ExistingEntries, entryName)
+				continue
+			}
+			status.MissingEntries = append(status.MissingEntries, entryName)
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses, nil
 }
 
 // LSPRouterEntryName is the canonical client-config entry name for one
