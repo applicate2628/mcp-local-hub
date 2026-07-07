@@ -86,7 +86,7 @@ func (r *Resolver) Resolve(ref string) (string, error) {
 			return "", fmt.Errorf("resolve %q: key %q not in local config", ref, key)
 		}
 		return v, nil
-	case strings.HasPrefix(ref, "${env:") && strings.HasSuffix(ref, "}"):
+	case strings.HasPrefix(ref, "${env:") && envPlaceholderRE.FindString(ref) == ref:
 		name := strings.TrimSuffix(strings.TrimPrefix(ref, "${env:"), "}")
 		if name == "" {
 			return "", fmt.Errorf("resolve %q: environment variable name is empty", ref)

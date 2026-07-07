@@ -85,11 +85,83 @@ func TestResolver_EnvBracePlaceholderCompositeMultipleTokens(t *testing.T) {
 	}
 }
 
+func TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens(t *testing.T) {
+	t.Setenv("MCP_TEST_BIN", "/usr/bin")
+	t.Setenv("MCP_TEST_EXTRA", "/opt/bin")
+	t.Setenv("MCP_TEST_HOST", "localhost")
+	t.Setenv("MCP_TEST_PORT", "5432")
+
+	r := NewResolver(nil, nil)
+	tests := []struct {
+		name string
+		ref  string
+		want string
+	}{
+		{
+			name: "path-like separator",
+			ref:  "${env:MCP_TEST_BIN}:${env:MCP_TEST_EXTRA}",
+			want: "/usr/bin:/opt/bin",
+		},
+		{
+			name: "hyphen separator",
+			ref:  "${env:MCP_TEST_HOST}-${env:MCP_TEST_PORT}",
+			want: "localhost-5432",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := r.Resolve(tc.ref)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("Resolve = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolver_EnvBracePlaceholderCompositeMissingIsError(t *testing.T) {
 	os.Unsetenv("MCP_DEFINITELY_NOT_SET")
 	r := NewResolver(nil, nil)
 	if _, err := r.Resolve("prefix-${env:MCP_DEFINITELY_NOT_SET}-suffix"); err == nil {
 		t.Error("expected error for missing composite env var, got nil")
+	}
+}
+
+func TestResolver_EnvBracePlaceholderMissingErrorsNameToken(t *testing.T) {
+	os.Unsetenv("MCP_DEFINITELY_NOT_SET")
+	t.Setenv("MCP_TEST_PRESENT", "present")
+
+	r := NewResolver(nil, nil)
+	tests := []struct {
+		name    string
+		ref     string
+		wantErr string
+	}{
+		{
+			name:    "single token",
+			ref:     "${env:MCP_DEFINITELY_NOT_SET}",
+			wantErr: "resolve \"${env:MCP_DEFINITELY_NOT_SET}\": environment variable \"MCP_DEFINITELY_NOT_SET\" not set",
+		},
+		{
+			name:    "composite token",
+			ref:     "${env:MCP_TEST_PRESENT}:${env:MCP_DEFINITELY_NOT_SET}",
+			wantErr: "resolve \"${env:MCP_TEST_PRESENT}:${env:MCP_DEFINITELY_NOT_SET}\": environment variable \"MCP_DEFINITELY_NOT_SET\" not set",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := r.Resolve(tc.ref)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if err.Error() != tc.wantErr {
+				t.Errorf("Resolve error = %q, want %q", err.Error(), tc.wantErr)
+			}
+		})
 	}
 }
 
