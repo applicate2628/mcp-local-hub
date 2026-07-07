@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -1284,6 +1285,11 @@ var orphanTerminateFn = process.TerminatePIDWithIdentity
 
 const cleanupIdentityStartTolerance = 500 * time.Millisecond
 
+var (
+	orphanIdentityLookupTimeout = 5 * time.Second
+	errOrphanIdentityUnverified = errors.New("cleanup: process identity unverified")
+)
+
 // orphanStartedAt renders a census-captured process creation time as the
 // RFC3339Nano proof timestamp consumed by process.TerminatePIDWithIdentity's
 // start-time re-verify. A zero time (missing / unparseable CreationDate) yields
@@ -1338,14 +1344,25 @@ func reapOneOrphan(o OrphanProcess) string {
 }
 
 func revalidateOrphanCommandLine(o OrphanProcess) error {
-	live, err := orphanLookupIdentityFn(o.PID)
+	ctx, cancel := context.WithTimeout(context.Background(), orphanIdentityLookupTimeout)
+	defer cancel()
+	live, err := orphanLookupIdentityFn(ctx, o.PID)
 	if err != nil {
-		return fmt.Errorf("%w: PID %d command-line proof unavailable: %v", process.ErrProcessIdentityMismatch, o.PID, err)
+		return fmt.Errorf("%w: %w: PID %d command-line proof unavailable: %v", process.ErrProcessIdentityMismatch, errOrphanIdentityUnverified, o.PID, err)
 	}
-	if live.CommandLine != o.Cmdline {
+	liveCmdline := normalizeOrphanCommandLineForIdentityCompare(live.CommandLine)
+	censusCmdline := normalizeOrphanCommandLineForIdentityCompare(o.Cmdline)
+	if liveCmdline == "" || censusCmdline == "" || liveCmdline != censusCmdline {
 		return fmt.Errorf("%w: PID %d command-line mismatch", process.ErrProcessIdentityMismatch, o.PID)
 	}
 	return nil
+}
+
+func normalizeOrphanCommandLineForIdentityCompare(s string) string {
+	// WMIC CSV drops quote delimiters that PowerShell preserves. Keep this
+	// deliberately narrow: remove only double-quote bytes and collapse
+	// whitespace. Do not case-fold or shell-parse arguments here.
+	return strings.Join(strings.Fields(strings.ReplaceAll(s, `"`, "")), " ")
 }
 
 func classifyReapError(err error) string {
@@ -1354,6 +1371,8 @@ func classifyReapError(err error) string {
 		return ""
 	case errors.Is(err, process.ErrProcessAlreadyExited):
 		return "already exited before kill (no action needed)"
+	case errors.Is(err, errOrphanIdentityUnverified):
+		return "skipped: identity unverified - command-line proof unavailable; not killed"
 	case errors.Is(err, process.ErrProcessIdentityMismatch):
 		return "skipped: identity mismatch — PID recycled or process replaced since census; not killed"
 	default:

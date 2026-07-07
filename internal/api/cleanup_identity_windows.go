@@ -4,4 +4,4 @@ package api
 
 import "mcp-local-hub/internal/process"
 
-var orphanLookupIdentityFn = process.LookupProcessIdentity
+var orphanLookupIdentityFn = process.LookupProcessIdentityContext

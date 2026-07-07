@@ -38,10 +38,17 @@ func ReadWmicCSVRecords(r io.Reader) ([]string, error) {
 	var records []string
 	var cur strings.Builder
 	for scanner.Scan() {
+		line := scanner.Text()
+		if cur.Len() > 0 &&
+			wmicCSVRecordQuoteOpen(cur.String()) &&
+			wmicCSVLineStartsRecord(line, wmicCSVRecordNodePrefix(cur.String())) {
+			records = append(records, cur.String())
+			cur.Reset()
+		}
 		if cur.Len() > 0 {
 			cur.WriteByte('\n')
 		}
-		cur.WriteString(scanner.Text())
+		cur.WriteString(line)
 		if wmicCSVRecordQuoteOpen(cur.String()) {
 			continue
 		}
@@ -52,6 +59,26 @@ func ReadWmicCSVRecords(r io.Reader) ([]string, error) {
 		records = append(records, cur.String())
 	}
 	return records, scanner.Err()
+}
+
+func wmicCSVRecordNodePrefix(record string) string {
+	firstLine := record
+	if idx := strings.IndexByte(firstLine, '\n'); idx >= 0 {
+		firstLine = firstLine[:idx]
+	}
+	firstLine = strings.TrimSuffix(firstLine, "\r")
+	node, _, ok := strings.Cut(firstLine, ",")
+	if !ok || node == "" {
+		return ""
+	}
+	return node + ","
+}
+
+func wmicCSVLineStartsRecord(line, nodePrefix string) bool {
+	if nodePrefix == "" {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSuffix(line, "\r"), nodePrefix)
 }
 
 // ParseWmicCSVHeader parses and validates a WMIC header line. required names

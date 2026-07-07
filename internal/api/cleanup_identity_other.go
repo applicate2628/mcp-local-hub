@@ -2,8 +2,12 @@
 
 package api
 
-import "mcp-local-hub/internal/process"
+import (
+	"context"
 
-var orphanLookupIdentityFn = func(int) (process.ProcessIdentity, error) {
+	"mcp-local-hub/internal/process"
+)
+
+var orphanLookupIdentityFn = func(context.Context, int) (process.ProcessIdentity, error) {
 	return process.ProcessIdentity{}, process.ErrProcessIdentityUnsupported
 }
