@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -50,6 +49,17 @@ func (a *API) CountProcesses(patterns []string) (int, error) {
 type processSnapshot struct {
 	raw   string
 	lines []string
+}
+
+// procRow is one parsed runProcessSnapshot row. It is shared by process count
+// parsing, orphan cleanup, and log-watcher cleanup so every consumer of the
+// shared WMIC/PowerShell snapshot gets the same comma-safe row parse.
+type procRow struct {
+	pid, ppid int
+	created   time.Time
+	exePath   string
+	cmdline   string
+	ram       uint64
 }
 
 // takeProcessSnapshot captures the current process list ONCE so
@@ -137,6 +147,28 @@ func processSnapshotCommandLine(line string) (string, bool) {
 		return "", false
 	}
 	return strings.Join(fields[1:n-2], ","), true
+}
+
+func parseProcessSnapshotRow(line string) (procRow, bool) {
+	parsed, ok := process.ParseWmicProcessCSVFields(line, 3)
+	if !ok || len(parsed.Tail) != 3 {
+		return procRow{}, false
+	}
+	ppid, err1 := strconv.Atoi(parsed.Tail[0])
+	pid, err2 := strconv.Atoi(parsed.Tail[1])
+	ram, err3 := strconv.ParseUint(parsed.Tail[2], 10, 64)
+	if err1 != nil || err2 != nil || err3 != nil || pid == 0 {
+		return procRow{}, false
+	}
+	created := parseWmicDate(parsed.CreationDate)
+	return procRow{
+		pid:     pid,
+		ppid:    ppid,
+		created: created,
+		exePath: parsed.ExecutablePath,
+		cmdline: parsed.CommandLine,
+		ram:     ram,
+	}, true
 }
 
 // runProcessSnapshot returns a CSV-formatted process list compatible with
@@ -302,28 +334,10 @@ func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
 	return results, nil
 }
 
-// splitCSVLine splits a simple comma-separated wmic line. Quoted fields with
-// embedded commas are preserved. wmic output doesn't escape quotes inside
-// quoted fields, so a minimal state machine suffices.
+// splitCSVLine preserves the existing api-local helper name while delegating
+// the WMIC splitting rules to the process package's shared implementation.
 func splitCSVLine(line string) []string {
-	var out []string
-	var cur strings.Builder
-	inQuote := false
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		if c == '"' {
-			inQuote = !inQuote
-			continue
-		}
-		if c == ',' && !inQuote {
-			out = append(out, cur.String())
-			cur.Reset()
-			continue
-		}
-		cur.WriteByte(c)
-	}
-	out = append(out, cur.String())
-	return out
+	return process.SplitWmicCSVLine(line)
 }
 
 func isUnsignedDecimalField(s string) bool {
@@ -337,12 +351,6 @@ func isUnsignedDecimalField(s string) bool {
 		}
 	}
 	return true
-}
-
-var wmicCreationDateRE = regexp.MustCompile(`^\d{14}\.\d+[+-]\d+$`)
-
-func isWmicCreationDateField(s string) bool {
-	return wmicCreationDateRE.MatchString(strings.TrimSpace(s))
 }
 
 // netstatLineLoopbackPortPID parses a single `netstat -ano` line and, when it

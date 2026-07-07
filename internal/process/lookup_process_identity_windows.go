@@ -272,9 +272,7 @@ func lookupViaPowerShell(ctx context.Context, pid int) (ProcessIdentity, error) 
 // lookupViaWmic is the legacy fallback for hosts where PowerShell is
 // CLM-locked but wmic.exe is still installed (pre-24H2 builds and
 // older LTSC channels). Output format: /format:csv emits a header
-// line followed by Node,CommandLine,CreationDate,ExecutablePath,Name
-// (column order is documented but historically varies — parse by
-// header position rather than fixed index).
+// line followed by Node,CommandLine,CreationDate,ExecutablePath,Name.
 //
 // wmic CreationDate format is the WMI DATETIME string
 // `yyyymmddHHMMSS.mmmmmm+UTCminutes`. parsing is fragile but adequate
@@ -291,45 +289,19 @@ func lookupViaWmic(ctx context.Context, pid int) (ProcessIdentity, error) {
 		return ProcessIdentity{}, fmt.Errorf("wmic process: %w", err)
 	}
 
-	lines := strings.Split(string(out), "\n")
-	var headers []string
-	var values []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	var row WmicProcessCSVFields
+	for _, line := range strings.Split(string(out), "\n") {
+		parsed, ok := ParseWmicProcessCSVFields(line, 1)
+		if !ok {
 			continue
 		}
-		fields := splitWmicCSVLine(line)
-		if len(fields) == 0 {
-			continue
-		}
-		if strings.EqualFold(fields[0], "Node") {
-			headers = fields
-			continue
-		}
-		if headers == nil {
-			// Some wmic builds emit data without a header (locale
-			// fallback). Skip — we need the header to know column
-			// positions.
-			continue
-		}
-		values = fields
+		row = parsed
 		break
 	}
-	if headers == nil || values == nil {
+	if row.CreationDate == "" {
 		return ProcessIdentity{}, ErrProcessNotFound
 	}
-
-	get := func(col string) string {
-		for i, h := range headers {
-			if strings.EqualFold(h, col) && i < len(values) {
-				return strings.TrimSpace(values[i])
-			}
-		}
-		return ""
-	}
-
-	createdStr := get("CreationDate")
+	createdStr := row.CreationDate
 	var createdUnix int64
 	if createdStr != "" {
 		// WMI DATETIME: yyyymmddHHMMSS.mmmmmm+UTCminutes.
@@ -345,9 +317,12 @@ func lookupViaWmic(ctx context.Context, pid int) (ProcessIdentity, error) {
 		}
 	}
 
-	name := get("Name")
-	cmdLine := get("CommandLine")
-	exePath := get("ExecutablePath")
+	name := ""
+	if len(row.Tail) > 0 {
+		name = row.Tail[0]
+	}
+	cmdLine := row.CommandLine
+	exePath := row.ExecutablePath
 	if name == "" && cmdLine == "" && exePath == "" {
 		return ProcessIdentity{}, ErrProcessNotFound
 	}
@@ -359,20 +334,6 @@ func lookupViaWmic(ctx context.Context, pid int) (ProcessIdentity, error) {
 		ExecutablePath:   exePath,
 		CreationDateUnix: createdUnix,
 	}, nil
-}
-
-// splitWmicCSVLine splits one wmic /format:csv line on commas. wmic
-// CSV does NOT quote fields containing commas; in practice
-// CommandLine is the only field with commas and they survive split
-// because wmic also collapses repeated commas. The split is best-
-// effort — the wmic path is fallback-only, so callers should prefer
-// PowerShell whenever it works.
-func splitWmicCSVLine(line string) []string {
-	parts := strings.Split(line, ",")
-	for i, p := range parts {
-		parts[i] = strings.TrimSpace(p)
-	}
-	return parts
 }
 
 // ProbePowerShellCLM verifies PowerShell is available in FullLanguage

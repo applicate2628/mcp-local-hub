@@ -931,23 +931,12 @@ func isBroadLauncherToken(pattern string) bool {
 	return false
 }
 
-// procRow is one parsed process-snapshot row. Shared by parseOrphans
-// (default safe sweep) and parseAggressiveCandidates (the operator-
-// confirmed live-rooted sweep) so both consume the SAME well-tested
-// anchor-from-right CSV parse and identical byPID ancestor index.
-type procRow struct {
-	pid, ppid int
-	created   time.Time
-	exePath   string
-	cmdline   string
-	ram       uint64
-}
-
 // parseProcessRows reads the wmic/CIM CSV process snapshot
 // (`CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize`)
 // and returns the parsed rows plus an index by PID for ancestor walks.
-// It is the single owner of the CSV-shape parse logic that both the
-// default orphan sweep and the aggressive sweep rely on.
+// It delegates row parsing to the shared snapshot parser in processes.go so
+// the default orphan sweep, aggressive sweep, process counting, and log-watcher
+// cleanup all consume the same comma-safe row shape.
 //
 // Known limitation (codex deep-sec PR #143 round 4 finding Q2): the
 // bufio.Scanner below splits strictly on newline, so a CommandLine field
@@ -983,50 +972,6 @@ func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
 		byPID[r.pid] = r
 	}
 	return rows, byPID
-}
-
-func parseProcessSnapshotRow(line string) (procRow, bool) {
-	if strings.HasPrefix(line, "Node,") || strings.TrimSpace(line) == "" {
-		return procRow{}, false
-	}
-	return parseProcessSnapshotFields(splitCSVLine(line))
-}
-
-func parseProcessSnapshotFields(fields []string) (procRow, bool) {
-	if len(fields) < 7 {
-		return procRow{}, false
-	}
-
-	// WMIC's `/format:csv` output does NOT quote the cmdline or
-	// ExecutablePath fields. Either can contain commas: command-line flags
-	// often carry CSV-shaped values, and Windows user/profile paths may be
-	// named like `Doe, Jane`. Anchor only the three trailing numeric fields
-	// from the right, then scan left for the CIM CreationDate field. The
-	// command line is everything before CreationDate; ExecutablePath is
-	// everything after CreationDate and before the numeric tail.
-	n := len(fields)
-	ppid, err1 := strconv.Atoi(strings.TrimSpace(fields[n-3]))
-	pid, err2 := strconv.Atoi(strings.TrimSpace(fields[n-2]))
-	ram, err3 := strconv.ParseUint(strings.TrimSpace(fields[n-1]), 10, 64)
-	if err1 != nil || err2 != nil || err3 != nil || pid == 0 {
-		return procRow{}, false
-	}
-
-	createdIdx := -1
-	for i := n - 4; i >= 1; i-- {
-		if isWmicCreationDateField(fields[i]) {
-			createdIdx = i
-			break
-		}
-	}
-	if createdIdx == -1 {
-		return procRow{}, false
-	}
-
-	cmdline := strings.Join(fields[1:createdIdx], ",")
-	created := parseWmicDate(strings.TrimSpace(fields[createdIdx]))
-	exePath := strings.TrimSpace(strings.Join(fields[createdIdx+1:n-3], ","))
-	return procRow{pid: pid, ppid: ppid, created: created, exePath: exePath, cmdline: cmdline, ram: ram}, true
 }
 
 // parseOrphans reads `wmic process get CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize`

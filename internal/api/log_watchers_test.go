@@ -168,14 +168,14 @@ func TestCleanupLogWatchers_ApplyRevalidatesPIDIdentity(t *testing.T) {
 			// First call: filter step sees a real watcher candidate.
 			return []processRow{
 				{PID: 1234, ParentPID: 99999, Name: "tail.exe",
-					Cmdline: `tail -F /d/dev/.scratch/x.log`,
+					Cmdline:   `tail -F /d/dev/.scratch/x.log`,
 					StartTime: 1000},
 			}, nil
 		}
 		// Second call: PID 1234 is now an unrelated recycled process.
 		return []processRow{
 			{PID: 1234, ParentPID: 1, Name: "explorer.exe",
-				Cmdline: "C:\\Windows\\explorer.exe",
+				Cmdline:   "C:\\Windows\\explorer.exe",
 				StartTime: 9999},
 		}, nil
 	}
@@ -212,7 +212,7 @@ func TestCleanupLogWatchers_ApplySkipsExitedPID(t *testing.T) {
 		if calls == 1 {
 			return []processRow{
 				{PID: 1234, ParentPID: 99999, Name: "tail.exe",
-					Cmdline: `tail -F /d/dev/.scratch/x.log`,
+					Cmdline:   `tail -F /d/dev/.scratch/x.log`,
 					StartTime: 1000},
 			}, nil
 		}
@@ -321,12 +321,11 @@ func TestCleanupLogWatchers_FailClosedOnZeroStartTime(t *testing.T) {
 func TestParseWmicProcessRows_LeadingBlankLine(t *testing.T) {
 	// Three blank lines, then header, then two rows. Paths kept
 	// space-free because basenameFromCmdline splits on first space
-	// when the path isn't surrounded by inner quotes (existing helper
-	// semantics, unchanged here — see processes.go:184 and the
+	// when the path isn't surrounded by inner quotes (existing
 	// basenameFromCmdline contract).
-	sample := "\n\n\nNode,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize\n" +
-		`HOST,"C:\Apps\app.exe --flag",20260507030000.000000+000,500,1234,1048576` + "\n" +
-		`HOST,"powershell.exe -NoProfile",20260507031500.000000+000,500,5678,2097152` + "\n"
+	sample := "\n\n\nNode,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize\n" +
+		`HOST,"C:\Apps\app.exe --flag",20260507030000.000000+000,C:\Apps\app.exe,500,1234,1048576` + "\n" +
+		`HOST,"powershell.exe -NoProfile",20260507031500.000000+000,C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe,500,5678,2097152` + "\n"
 	rows, err := parseWmicProcessRows(strings.NewReader(sample))
 	if err != nil {
 		t.Fatalf("parseWmicProcessRows: %v", err)
@@ -355,10 +354,10 @@ func TestParseWmicProcessRows_UnescapedQuotesInCommandLine(t *testing.T) {
 	// quote that strict RFC 4180 csv.Reader rejects but the tolerant
 	// splitCSVLine handles (simple state machine that toggles inQuote
 	// on every quote regardless of escaping).
-	sample := "Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize\n" +
-		`HOST,"normal.exe",20260507030000.000000+000,500,1000,1024` + "\n" +
-		`HOST,"weird.exe --json={"key":"value"}",20260507030500.000000+000,500,2000,2048` + "\n" +
-		`HOST,"trailing.exe",20260507031000.000000+000,500,3000,4096` + "\n"
+	sample := "Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize\n" +
+		`HOST,"normal.exe",20260507030000.000000+000,C:\Tools\normal.exe,500,1000,1024` + "\n" +
+		`HOST,"weird.exe --json={"key":"value"}",20260507030500.000000+000,C:\Tools\weird.exe,500,2000,2048` + "\n" +
+		`HOST,"trailing.exe",20260507031000.000000+000,C:\Tools\trailing.exe,500,3000,4096` + "\n"
 	rows, err := parseWmicProcessRows(strings.NewReader(sample))
 	if err != nil {
 		t.Fatalf("parseWmicProcessRows must NOT error on unescaped quotes; got: %v", err)
@@ -380,10 +379,10 @@ func TestParseWmicProcessRows_UnescapedQuotesInCommandLine(t *testing.T) {
 // whole-snapshot `return nil, err` the prior code did. Codex Cloud
 // bot P1 on PR #131 commit 1f59a65.
 func TestParseWmicProcessRows_MalformedPIDRowSkipped(t *testing.T) {
-	sample := "Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize\n" +
-		`HOST,"good.exe",20260507030000.000000+000,500,1000,1024` + "\n" +
-		`HOST,"bad.exe",20260507030500.000000+000,500,NOTANUMBER,2048` + "\n" +
-		`HOST,"alsogood.exe",20260507031000.000000+000,500,2000,4096` + "\n"
+	sample := "Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize\n" +
+		`HOST,"good.exe",20260507030000.000000+000,C:\Tools\good.exe,500,1000,1024` + "\n" +
+		`HOST,"bad.exe",20260507030500.000000+000,C:\Tools\bad.exe,500,NOTANUMBER,2048` + "\n" +
+		`HOST,"alsogood.exe",20260507031000.000000+000,C:\Tools\alsogood.exe,500,2000,4096` + "\n"
 	rows, err := parseWmicProcessRows(strings.NewReader(sample))
 	if err != nil {
 		t.Fatalf("parseWmicProcessRows: %v", err)
@@ -394,5 +393,35 @@ func TestParseWmicProcessRows_MalformedPIDRowSkipped(t *testing.T) {
 	if rows[0].PID != 1000 || rows[1].PID != 2000 {
 		t.Errorf("PIDs = %d/%d, want 1000/2000 (the malformed-PID row must be skipped between them)",
 			rows[0].PID, rows[1].PID)
+	}
+}
+
+// TestParseWmicProcessRows_CommaExecutablePathKeepsWatcherPIDAndParentPID
+// guards the apply-mode kill-authority path: runProcessSnapshot includes
+// ExecutablePath before ParentProcessId/ProcessId, and legacy WMIC can emit
+// ExecutablePath unquoted. A comma-bearing image path must not shift the
+// watcher row's PID into the parent PID slot.
+func TestParseWmicProcessRows_CommaExecutablePathKeepsWatcherPIDAndParentPID(t *testing.T) {
+	sample := "Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize\n" +
+		`HOST,"tail.exe -F C:\Users\Doe, Jane\.scratch\watch.log",20260707090000.000000+000,C:\Users\Doe, Jane\AppData\Local\tail.exe,7000,8123,4096` + "\n"
+
+	rows, err := parseWmicProcessRows(strings.NewReader(sample))
+	if err != nil {
+		t.Fatalf("parseWmicProcessRows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1; got %+v", len(rows), rows)
+	}
+	if rows[0].PID == rows[0].ParentPID {
+		t.Fatalf("watcher PID collapsed to parent PID: row=%+v", rows[0])
+	}
+	if rows[0].PID != 8123 {
+		t.Fatalf("watcher PID = %d, want 8123 (must not parse parent PID as PID)", rows[0].PID)
+	}
+	if rows[0].ParentPID != 7000 {
+		t.Fatalf("watcher ParentPID = %d, want 7000", rows[0].ParentPID)
+	}
+	if !strings.Contains(rows[0].Cmdline, `Doe, Jane`) {
+		t.Fatalf("Cmdline lost comma-bearing path: %q", rows[0].Cmdline)
 	}
 }
