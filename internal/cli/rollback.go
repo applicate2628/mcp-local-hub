@@ -116,7 +116,26 @@ func findLatestBackup(configPath string) (string, error) {
 		if suffix == sentinel {
 			continue
 		}
-		if _, err := time.Parse("20060102-150405", suffix); err != nil {
+		// A backup suffix is the timestamp, optionally followed by the
+		// collision counter nextBackupPath appends when two backups land in
+		// the same second ("20060102-150405" or "20060102-150405-%09d").
+		// Both shapes must be accepted — rejecting the counter form made
+		// `mcphub rollback` silently restore the second-newest snapshot (or
+		// report no backup at all) whenever a same-second collision had
+		// occurred (fable acceptance MEDIUM-1). The lexicographic comparison
+		// below stays correct: within one second the counter form sorts
+		// after the bare form (prefix rule), and the zero-padded counter
+		// compares numerically.
+		const tsLayout = "20060102-150405"
+		tsPart := suffix
+		if len(suffix) > len(tsLayout) {
+			rest := suffix[len(tsLayout):]
+			if len(rest) != 10 || rest[0] != '-' || strings.Trim(rest[1:], "0123456789") != "" {
+				continue
+			}
+			tsPart = suffix[:len(tsLayout)]
+		}
+		if _, err := time.Parse(tsLayout, tsPart); err != nil {
 			continue
 		}
 		info, err := e.Info()

@@ -130,6 +130,26 @@ func TestResolver_EnvBracePlaceholderCompositeMissingIsError(t *testing.T) {
 	}
 }
 
+// TestResolver_EnvBracePlaceholderMalformedTokenIsError locks in the fable
+// acceptance LOW-6 hardening: a "${env:...}" token the placeholder regex
+// cannot match (bad name charset, embedded space) must FAIL LOUD instead of
+// passing through as literal text into a child environment — master's
+// parse-time behavior for such values was a hard error, and fail-quiet would
+// hide the misconfiguration.
+func TestResolver_EnvBracePlaceholderMalformedTokenIsError(t *testing.T) {
+	t.Setenv("MCP_TEST_PRESENT", "present")
+	r := NewResolver(nil, nil)
+	for _, ref := range []string{
+		"${env:foo-bar}",
+		"${env: MCP_TEST_PRESENT}",
+		"${env:MCP_TEST_PRESENT}:${env:bad name}",
+	} {
+		if _, err := r.Resolve(ref); err == nil {
+			t.Errorf("Resolve(%q): expected malformed-placeholder error, got nil", ref)
+		}
+	}
+}
+
 func TestResolver_EnvBracePlaceholderMissingErrorsNameToken(t *testing.T) {
 	os.Unsetenv("MCP_DEFINITELY_NOT_SET")
 	t.Setenv("MCP_TEST_PRESENT", "present")

@@ -113,6 +113,14 @@ func (r *Resolver) Resolve(ref string) (string, error) {
 		if resolveErr != nil {
 			return "", resolveErr
 		}
+		// Fail loud on malformed tokens the placeholder regex could not
+		// match (e.g. "${env:foo-bar}", "${env: FOO}"): silently passing the
+		// literal text into a child environment converts a misconfiguration
+		// into a fail-quiet launch (fable acceptance LOW-6; master's
+		// parse-time behavior for such values was a hard error).
+		if strings.Contains(resolved, "${env:") {
+			return "", fmt.Errorf("resolve %q: malformed ${env:...} placeholder (variable names match [A-Za-z_][A-Za-z0-9_]*)", ref)
+		}
 		return resolved, nil
 	case strings.HasPrefix(ref, "$"):
 		name := strings.TrimPrefix(ref, "$")

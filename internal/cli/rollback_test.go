@@ -46,6 +46,44 @@ func TestFindLatestBackupSkipsSentinel(t *testing.T) {
 	}
 }
 
+// TestFindLatestBackupAcceptsCollisionSuffixedBackups locks in the fable
+// acceptance MEDIUM-1 fix: nextBackupPath appends a "-%09d" collision counter
+// when two backups of the same file land within one second, and rollback's
+// latest-backup scan must SEE those names. Before the fix the counter form
+// failed the bare time.Parse gate and was skipped — `mcphub rollback` then
+// silently restored the second-newest snapshot (or found no backup at all if
+// pruning had kept only counter-suffixed names).
+func TestFindLatestBackupAcceptsCollisionSuffixedBackups(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(live, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(suffix string) string {
+		p := live + ".bak-mcp-local-hub-" + suffix
+		if err := os.WriteFile(p, []byte("{}"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	_ = write("original")
+	_ = write("20260708-153000")               // same-second bare form (older)
+	newest := write("20260708-153000-000000002") // same-second collision form (newer)
+	_ = write("20260708-152959")                 // earlier second
+	_ = write("20260708-153000-bogus")           // malformed counter — must be ignored
+	_ = write("20260708-1530")                   // malformed timestamp — must be ignored
+
+	got, err := findLatestBackup(live)
+	if err != nil {
+		t.Fatalf("findLatestBackup: %v", err)
+	}
+	if got != newest {
+		t.Errorf("got %q, want the collision-suffixed newest %q",
+			filepath.Base(got), filepath.Base(newest))
+	}
+}
+
 // TestFindLatestBackupNoBackups exercises the empty-result path (no
 // sentinel, no timestamped backups) so the function returns "" not error.
 func TestFindLatestBackupNoBackups(t *testing.T) {
