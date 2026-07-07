@@ -898,16 +898,15 @@ func TestMimoCode_RemoveEntry_TopLayerOnly_PreservesLowerOriginal(t *testing.T) 
 }
 
 // TestMimoCode_GetEntry_LowerLayerOnly_RollbackRemovesNotCopiesUp pins bot PR
-// #420 finding 1 (r14 read-vs-rollback split): when the prior entry the
-// install/register rollback snapshots lives ONLY in the config.json layer BELOW
-// the write target, GetEntry now RETURNS it (non-nil, read-membership) but STAMPS
-// SourceBelowWriteTarget=true. The rollback condition
-// (`savedPrior != nil && !savedPrior.SourceBelowWriteTarget` at install.go /
-// register.go) then routes such a prior to RemoveEntry the hub's write-target key
-// — NOT AddEntry(*prior), which would copy the operator's lower-layer entry UP
-// into the write target (mimocode.json) and SHADOW their config.json forever.
-// This test drives the EXACT rollback contract (snapshot prior → AddEntry hub
-// entry → on failure: copy-up only when prior != nil AND not below-sourced).
+// #420 finding 1 (r14 read-vs-rollback split): when the prior entry a register
+// rollback snapshots lives ONLY in the config.json layer BELOW the write target,
+// GetEntry now RETURNS it (non-nil, read-membership) but STAMPS
+// SourceBelowWriteTarget=true. The register rollback condition then routes such
+// a prior to RemoveEntry the hub's write-target key — NOT AddEntry(*prior),
+// which would copy the operator's lower-layer entry UP into the write target
+// (mimocode.json) and SHADOW their config.json forever. This test drives that
+// rollback contract (snapshot prior → AddEntry hub entry → on failure: copy-up
+// only when prior != nil AND not below-sourced).
 func TestMimoCode_GetEntry_LowerLayerOnly_RollbackRemovesNotCopiesUp(t *testing.T) {
 	isolateMimoCodeEnv(t)
 	dir := t.TempDir()

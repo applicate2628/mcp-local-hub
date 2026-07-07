@@ -275,8 +275,8 @@ func (g *goose) RestoreEntryFromBackup(backupPath, name string) error {
 
 // RestoreEntryFromBackupForRollback restores the backup's entry verbatim,
 // bypassing the ErrBackupEntryAlreadyMigrated guard (see the interface doc on
-// Client.RestoreEntryFromBackupForRollback). Used only by the serena
-// dynamic-pool migrate abort-rollback.
+// Client.RestoreEntryFromBackupForRollback). Install rollback and Serena
+// migrate rollback use it when the timestamped backup is the source of truth.
 func (g *goose) RestoreEntryFromBackupForRollback(backupPath, name string) error {
 	return g.restoreEntryFromBackup(backupPath, name, true)
 }

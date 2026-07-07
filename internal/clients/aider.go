@@ -56,9 +56,9 @@ import (
 //
 // Entry shape written (stdio relay, mirroring antigravity.go):
 //
-//	- name: <server-name>
-//	  command: <abs-path>/mcphub.exe
-//	  args: ['relay', '--server', '<s>', '--daemon', '<d>']   # or ['relay','--url',<u>]
+//   - name: <server-name>
+//     command: <abs-path>/mcphub.exe
+//     args: ['relay', '--server', '<s>', '--daemon', '<d>']   # or ['relay','--url',<u>]
 //
 // Requires MCPEntry.RelayExePath to be set (absolute), plus RelayServer +
 // RelayDaemon for the manifest-lookup form (or RelayURL for the direct form).
@@ -327,8 +327,8 @@ func (a *aider) RestoreEntryFromBackup(backupPath, name string) error {
 
 // RestoreEntryFromBackupForRollback restores the backup's entry verbatim,
 // bypassing the ErrBackupEntryAlreadyMigrated guard (see the interface doc on
-// Client.RestoreEntryFromBackupForRollback). Used only by the serena
-// dynamic-pool migrate abort-rollback.
+// Client.RestoreEntryFromBackupForRollback). Install rollback and Serena
+// migrate rollback use it when the timestamped backup is the source of truth.
 func (a *aider) RestoreEntryFromBackupForRollback(backupPath, name string) error {
 	return a.restoreEntryFromBackup(backupPath, name, true)
 }

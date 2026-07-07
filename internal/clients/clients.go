@@ -238,16 +238,11 @@ type Client interface {
 	// RestoreEntryFromBackup (restore the snapshotted entry, or remove
 	// the live entry when the backup lacks it; other entries untouched).
 	//
-	// This exists for ONE caller: the serena dynamic-pool migrate's
-	// controlled abort-rollback (RestoreSerenaReconcileApplied). When
-	// the migrate rewrites pre-cutover clients legacy-9121 → /serena/mcp
-	// and then aborts before committing the dynamic-pool intent, each
-	// rewritten client's pre-reconcile backup IS the legacy hub entry
-	// (`http://localhost:9121/mcp`, or Antigravity's `mcphub relay`
-	// form). Restoring that known pre-reconcile snapshot is exactly what
-	// the rollback must do, but RestoreEntryFromBackup would reject it
-	// with ErrBackupEntryAlreadyMigrated. The rollback path uses this
-	// variant to put the verbatim pre-reconcile bytes back; the
+	// This exists for abort-rollback paths that have just taken a
+	// timestamped backup and must put that exact entry state back. Examples:
+	// the shared install rollback restores a direct stdio prior after a
+	// later client or intent write fails, and the serena dynamic-pool
+	// migrate rollback restores a pre-reconcile legacy hub entry. The
 	// demigrate guard stays in force for the normal demigrate flow.
 	RestoreEntryFromBackupForRollback(backupPath, name string) error
 

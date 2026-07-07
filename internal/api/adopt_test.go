@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/secrets"
 
@@ -184,6 +186,68 @@ args = ["version"]
 	}
 }
 
+func TestExecuteAdoptRollbackRestoresDirectStdioPriorFromBackupOnSecondClientFailure(t *testing.T) {
+	entry := "mui-adopt-rollback"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-rollback]
+command = "go"
+args = ["version"]
+`)
+	home := filepath.Dir(filepath.Dir(codexPath))
+	claudePath := filepath.Join(home, ".claude.json")
+	originalClaudeEntry := map[string]any{
+		"type":    "stdio",
+		"command": "go",
+		"args":    []any{"version"},
+		"env":     map[string]any{"KEEP": "yes"},
+	}
+	claudeRaw, err := json.Marshal(map[string]any{
+		"mcpServers": map[string]any{entry: originalClaudeEntry},
+	})
+	if err != nil {
+		t.Fatalf("marshal claude config: %v", err)
+	}
+	if err := os.WriteFile(claudePath, claudeRaw, 0o600); err != nil {
+		t.Fatalf("seed claude config: %v", err)
+	}
+	failClientConfigWritesForAdoptTest(t, codexPath)
+
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         9315,
+		Clients:      []string{"claude-code", "codex-cli"},
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	var out bytes.Buffer
+	err = NewAPI().ExecuteAdopt(plan, &out)
+	if err == nil {
+		t.Fatalf("ExecuteAdopt succeeded; want induced codex write failure\noutput:\n%s", out.String())
+	}
+
+	var root map[string]any
+	afterBytes, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatalf("read claude config after rollback: %v", err)
+	}
+	if err := json.Unmarshal(afterBytes, &root); err != nil {
+		t.Fatalf("decode claude config after rollback: %v\n%s", err, afterBytes)
+	}
+	servers, ok := root["mcpServers"].(map[string]any)
+	if !ok {
+		t.Fatalf("mcpServers missing after rollback: %#v", root)
+	}
+	got, ok := servers[entry].(map[string]any)
+	if !ok {
+		t.Fatalf("entry %q missing after rollback: %#v", entry, servers)
+	}
+	if !reflect.DeepEqual(got, originalClaudeEntry) {
+		t.Fatalf("claude entry after rollback:\n got: %#v\nwant: %#v\noutput:\n%s", got, originalClaudeEntry, out.String())
+	}
+}
+
 func TestAdoptSensitiveLiteralRoutesToVaultAndRedactsPlan(t *testing.T) {
 	entry := "mui-adopt-secret"
 	_, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-secret]
@@ -239,6 +303,101 @@ VISIBLE = "not-secret"
 	}
 	if strings.Contains(string(manifestBytes), "literal-secret-value") {
 		t.Fatalf("persisted manifest leaked secret value:\n%s", manifestBytes)
+	}
+}
+
+func TestBuildAdoptPlanRejectsExplicitPortOutsideAdoptRangeBeforeMutation(t *testing.T) {
+	entry := "mui-adopt-port-range"
+	codexPath, manifestRoot, stateRoot := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-port-range]
+command = "go"
+args = ["version"]
+`)
+	before := mustReadFileForAdoptTest(t, codexPath)
+
+	_, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         9128,
+	})
+	if err == nil {
+		t.Fatal("BuildAdoptPlan accepted explicit port outside adopt range")
+	}
+	if !strings.Contains(err.Error(), "9300-9399") {
+		t.Fatalf("explicit port range error = %v, want adopt range", err)
+	}
+	assertAdoptPlanMutationFree(t, codexPath, before, manifestRoot, stateRoot, entry)
+}
+
+func TestBuildAdoptPlanRejectsExplicitUsedPortBeforeMutation(t *testing.T) {
+	entry := "mui-adopt-port-used"
+	codexPath, manifestRoot, stateRoot := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-port-used]
+command = "go"
+args = ["version"]
+`)
+	usedPort := nextBindableAdoptPortForTest(t, map[int]bool{})
+	usedName := "mui-adopt-port-owner"
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(manifestRoot, usedName)) })
+	if err := os.MkdirAll(filepath.Join(manifestRoot, usedName), 0o700); err != nil {
+		t.Fatalf("mkdir used-port manifest: %v", err)
+	}
+	usedManifest := "name: " + usedName + "\nkind: global\ntransport: stdio-bridge\ncommand: go\ndaemons:\n  - name: default\n    port: " + strconv.Itoa(usedPort) + "\n"
+	if err := os.WriteFile(filepath.Join(manifestRoot, usedName, "manifest.yaml"), []byte(usedManifest), 0o600); err != nil {
+		t.Fatalf("write used-port manifest: %v", err)
+	}
+	before := mustReadFileForAdoptTest(t, codexPath)
+
+	_, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         usedPort,
+	})
+	if err == nil {
+		t.Fatal("BuildAdoptPlan accepted explicit port already present in manifest pool")
+	}
+	if !strings.Contains(err.Error(), "already in use") {
+		t.Fatalf("explicit used-port error = %v, want already in use", err)
+	}
+	assertAdoptPlanMutationFree(t, codexPath, before, manifestRoot, stateRoot, entry)
+}
+
+func TestExecuteAdoptInstallFailureRemovesAdoptCreatedManifestAndSaysRerun(t *testing.T) {
+	entry := "mui-adopt-install-fail"
+	codexPath, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-install-fail]
+command = "go"
+args = ["version"]
+`)
+	failClientConfigWritesForAdoptTest(t, codexPath)
+
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         9316,
+		Clients:      []string{"codex-cli"},
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	err = NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{})
+	if err == nil {
+		t.Fatal("ExecuteAdopt succeeded; want induced install failure")
+	}
+	if !strings.Contains(err.Error(), "adopt can be re-run") {
+		t.Fatalf("ExecuteAdopt error = %v, want re-run guidance", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(manifestRoot, entry, "manifest.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("adopt install failure left orphan manifest: %v", statErr)
+	}
+	if _, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         9316,
+		Clients:      []string{"codex-cli"},
+	}); err != nil {
+		t.Fatalf("BuildAdoptPlan after failed adopt: %v", err)
 	}
 }
 
@@ -358,6 +517,47 @@ func TestPickNextFreeAdoptPortSkipsDiskEmbedIntentAndBoundPorts(t *testing.T) {
 type ioDiscardForAdoptTest struct{}
 
 func (ioDiscardForAdoptTest) Write(p []byte) (int, error) { return len(p), nil }
+
+func failClientConfigWritesForAdoptTest(t *testing.T, failPath string) {
+	t.Helper()
+	cleanFailPath := filepath.Clean(failPath)
+	orig := clients.WriteConfigFile
+	clients.WriteConfigFile = func(path string, contents []byte) error {
+		if filepath.Clean(path) == cleanFailPath {
+			return fmt.Errorf("induced client config write failure for %s", filepath.Base(path))
+		}
+		if dir := filepath.Dir(path); dir != "" {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return err
+			}
+		}
+		return os.WriteFile(path, contents, 0o600)
+	}
+	t.Cleanup(func() { clients.WriteConfigFile = orig })
+}
+
+func mustReadFileForAdoptTest(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return data
+}
+
+func assertAdoptPlanMutationFree(t *testing.T, codexPath string, before []byte, manifestRoot, stateRoot, entry string) {
+	t.Helper()
+	after := mustReadFileForAdoptTest(t, codexPath)
+	if !bytes.Equal(before, after) {
+		t.Fatalf("codex config changed despite BuildAdoptPlan refusal\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if _, err := os.Stat(filepath.Join(manifestRoot, entry, "manifest.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("manifest side effect after BuildAdoptPlan refusal: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
+		t.Fatalf("intent side effect after BuildAdoptPlan refusal: %v", err)
+	}
+}
 
 func nextBindableAdoptPortForTest(t *testing.T, used map[int]bool) int {
 	t.Helper()

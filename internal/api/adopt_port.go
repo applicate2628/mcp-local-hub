@@ -21,10 +21,7 @@ const (
 var collectEmbeddedManifestPortsFn = collectEmbeddedManifestPorts
 
 func pickNextFreeAdoptPort() (int, error) {
-	used := map[int]bool{}
-	collectDiskManifestPorts(defaultManifestDir(), used)
-	collectEmbeddedManifestPortsFn(used)
-	collectSupervisorIntentPorts(used)
+	used := collectUsedAdoptPorts()
 	for p := adoptPortStart; p <= adoptPortEnd; p++ {
 		if used[p] {
 			continue
@@ -34,6 +31,27 @@ func pickNextFreeAdoptPort() (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("no free adopted-server port in %d-%d range", adoptPortStart, adoptPortEnd)
+}
+
+func validateExplicitAdoptPort(port int) error {
+	if port < adoptPortStart || port > adoptPortEnd {
+		return fmt.Errorf("adopt port %d is outside the adopted-server port range %d-%d", port, adoptPortStart, adoptPortEnd)
+	}
+	if collectUsedAdoptPorts()[port] {
+		return fmt.Errorf("adopt port %d is already in use by an existing manifest, manifest port pool, or supervisor intent", port)
+	}
+	if !adoptPortBindable(port) {
+		return fmt.Errorf("adopt port %d is not bindable on 127.0.0.1; choose a free port in %d-%d", port, adoptPortStart, adoptPortEnd)
+	}
+	return nil
+}
+
+func collectUsedAdoptPorts() map[int]bool {
+	used := map[int]bool{}
+	collectDiskManifestPorts(defaultManifestDir(), used)
+	collectEmbeddedManifestPortsFn(used)
+	collectSupervisorIntentPorts(used)
+	return used
 }
 
 func collectDiskManifestPorts(dir string, used map[int]bool) {

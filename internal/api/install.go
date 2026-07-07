@@ -2629,23 +2629,22 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 			fmt.Fprintf(w, "\u26a0 Client %s not installed on this machine \u2014 skipping\n", u.Client)
 			continue
 		}
-		// Snapshot the prior entry BEFORE backing up the file or adding
-		// the new one. This is the piece that makes rollback atomic on
-		// reinstall/replace: if the install fails downstream and the
-		// entry already existed with a different URL or relay config,
-		// we AddEntry(prior) to restore — instead of RemoveEntry, which
-		// would leave the client with no entry at all.
+		// Read the prior entry BEFORE backing up the file or adding the new
+		// one. This remains a health gate: adapters such as mimocode can
+		// confirm a write-target prior while also surfacing a malformed lower
+		// layer. Rollback itself restores from the timestamped backup below,
+		// because GetEntry intentionally projects many client schemas into a
+		// small MCPEntry shape and can be lossy for direct stdio entries.
 		//
 		// A GetEntry error MUST abort BEFORE the backup/AddEntry below
 		// (bot PR #420 finding 1, data-loss). For a multi-layer adapter
 		// (mimocode) GetEntry can confirm a write-target prior yet still
 		// fail reading a malformed lower layer, returning (nil, err).
-		// Dropping that error would treat prior as nil → AddEntry
-		// overwrites the write target → the nil-prior rollback branch
-		// RemoveEntry-s and DELETES the operator's entry. So fail loud and
-		// run the rollback-so-far instead of snapshotting a corrupt prior.
-		priorEntry, err := client.GetEntry(m.Name)
-		if err != nil {
+		// Dropping that error would let AddEntry overwrite the write target
+		// while the adapter has already said its layered read is corrupt. So
+		// fail loud and run the rollback-so-far instead of proceeding from an
+		// untrusted read.
+		if _, err := client.GetEntry(m.Name); err != nil {
 			runRollback()
 			return fmt.Errorf("snapshot prior entry for %s in %s: %w", m.Name, u.Client, err)
 		}
@@ -2673,33 +2672,20 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 			runRollback()
 			return fmt.Errorf("add entry to %s: %w", u.Client, err)
 		}
-		// Compensating op: restore the PRIOR entry (if any) or remove
-		// the entry we just added (if this was a first-time install).
-		// Wholesale-restoring the backup file is still avoided — a
-		// concurrent install of a different server would lose its entry
-		// if we did that. Entry-level capture+restore keeps the rollback
-		// surgical while preserving the full prior state of THIS server.
+		// Compensating op: restore this entry's exact prior state from the
+		// timestamped backup that was taken immediately before AddEntry. The
+		// adapter-level restore is still surgical: it restores/removes only
+		// entryName, leaving other live entries untouched.
 		clientRef := client
 		entryName := m.Name
-		savedPrior := priorEntry
+		clientName := u.Client
+		backupPath := bak
 		rollback = append(rollback, func() {
-			// A non-nil prior from a multi-layer adapter (mimocode) MAY be sourced
-			// from a layer the hub never writes — config.json strictly BELOW the
-			// write target, or the ~/.claude.json import. Copying THAT up into the
-			// write target would shadow the operator's lower/import layer forever
-			// and, for the import, leak its credentials into the hub file (bot PR
-			// #420 finding 1). For such a prior take the REMOVE branch: drop the
-			// hub's write-target key and let the lower/import layer re-emerge via
-			// the merge. The zero value (every other adapter, and an at/above
-			// mimo prior) keeps the copy-up path.
-			if savedPrior != nil && !savedPrior.SourceBelowWriteTarget {
-				if err := clientRef.AddEntry(*savedPrior); err == nil {
-					fmt.Fprintf(w, "  rollback: restored prior %s entry in %s\n", entryName, u.Client)
-					return
-				}
+			if err := clientRef.RestoreEntryFromBackupForRollback(backupPath, entryName); err != nil {
+				fmt.Fprintf(w, "  rollback: restore %s entry in %s from backup failed: %v\n", entryName, clientName, err)
+				return
 			}
-			_ = clientRef.RemoveEntry(entryName)
-			fmt.Fprintf(w, "  rollback: removed %s entry from %s\n", entryName, u.Client)
+			fmt.Fprintf(w, "  rollback: restored %s entry state in %s from backup\n", entryName, clientName)
 		})
 		fmt.Fprintf(w, "\u2713 %s \u2192 %s\n", u.Client, displayURLOf(u))
 	}

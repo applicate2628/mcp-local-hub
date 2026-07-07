@@ -163,8 +163,9 @@ func (c *codexCLI) RestoreEntryFromBackup(backupPath, name string) error {
 
 // RestoreEntryFromBackupForRollback restores the backup's entry verbatim,
 // bypassing the ErrBackupEntryAlreadyMigrated guard (see the interface
-// doc on Client.RestoreEntryFromBackupForRollback). Used only by the
-// serena dynamic-pool migrate abort-rollback.
+// doc on Client.RestoreEntryFromBackupForRollback). Install rollback and
+// Serena migrate rollback use it when the timestamped backup is the source of
+// truth.
 func (c *codexCLI) RestoreEntryFromBackupForRollback(backupPath, name string) error {
 	return c.restoreEntryFromBackup(backupPath, name, true)
 }

@@ -99,6 +99,8 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		if err != nil {
 			return nil, err
 		}
+	} else if err := validateExplicitAdoptPort(port); err != nil {
+		return nil, err
 	}
 	m.Name = manifestName
 	m.Kind = config.KindGlobal
@@ -149,7 +151,16 @@ func (a *API) ExecuteAdopt(plan *AdoptPlan, w io.Writer) error {
 		ClientsInclude: plan.AdoptClients,
 		Writer:         w,
 	}); err != nil {
-		return err
+		vaultNote := ""
+		if len(plan.SecretRoutedKeys) > 0 {
+			keys := append([]string(nil), plan.SecretRoutedKeys...)
+			sort.Strings(keys)
+			vaultNote = "; routed vault keys were left intact: " + strings.Join(keys, ",")
+		}
+		if cleanupErr := a.ManifestDelete(plan.ManifestName); cleanupErr != nil {
+			return fmt.Errorf("adopt install failed after creating manifest %q; failed to remove the adopt-created manifest (%v), so remove it before re-running adopt%s: %w", plan.ManifestName, cleanupErr, vaultNote, err)
+		}
+		return fmt.Errorf("adopt install failed after creating manifest %q; removed the adopt-created manifest so adopt can be re-run%s: %w", plan.ManifestName, vaultNote, err)
 	}
 	emitAdoptExecutedEvent(plan)
 	fmt.Fprintf(w, "Adopted %q from %s as manifest %q on port %d.\n", plan.EntryName, plan.SourceClient, plan.ManifestName, plan.Port)

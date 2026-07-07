@@ -158,7 +158,8 @@ func (w *windsurfClient) RestoreEntryFromBackup(backupPath, name string) error {
 }
 
 // RestoreEntryFromBackupForRollback restores the backup's entry verbatim,
-// bypassing the hub-managed guard (serena dynamic-pool migrate abort-rollback).
+// bypassing the hub-managed guard. Install rollback and Serena migrate rollback
+// use it when the timestamped backup is the source of truth.
 func (w *windsurfClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
 	return w.restoreEntryFromBackupServerURL(backupPath, name, true)
 }
