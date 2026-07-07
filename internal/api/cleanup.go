@@ -962,53 +962,11 @@ func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
 	var rows []procRow
 	for s.Scan() {
 		line := s.Text()
-		if strings.HasPrefix(line, "Node,") || strings.TrimSpace(line) == "" {
+		row, ok := parseProcessSnapshotRow(line)
+		if !ok {
 			continue
 		}
-		fields := splitCSVLine(line)
-		if len(fields) < 7 {
-			continue
-		}
-		// WMIC's `/format:csv` output does NOT quote the cmdline
-		// field. When cmdline contains commas (very common:
-		// `--setting-sources=user,project,local`,
-		// `--allow-list=a,b,c`, anything with CSV-shaped values),
-		// splitCSVLine produces MORE than 7 fields and naive
-		// fixed-index indexing returns pieces of the cmdline instead
-		// of ppid/pid. Garbage PIDs then poison byPID, and the
-		// ancestor-walk in the orphan detector can't find live client
-		// launchers — silently flagging LIVE stdio MCP children for
-		// killing on `cleanup --scan-clients --confirm`.
-		//
-		// Manual smoke on PR #190 caught this with claude.exe
-		// whose cmdline included
-		// `--setting-sources=user,project,local`: PID 173992 was
-		// stored under a garbage integer parsed from `local
-		// --permission-mode bypassPermissions ...` and the gopls
-		// child of that claude session was flagged as orphan.
-		//
-		// Fix: anchor from the RIGHT. The trailing 5 fields (creation
-		// date, executable path, ppid, pid, ram) are well-shaped
-		// values with no embedded commas — a Windows executable path
-		// effectively never contains a comma, and the PowerShell
-		// fallback quotes the path field so splitCSVLine keeps it whole
-		// regardless — so they align reliably no matter how many commas
-		// the unquoted cmdline contributed. The cmdline is reassembled
-		// by rejoining the middle slice with commas.
-		n := len(fields)
-		cmdline := strings.Join(fields[1:n-5], ",")
-		created := parseWmicDate(strings.TrimSpace(fields[n-5]))
-		exePath := strings.TrimSpace(fields[n-4])
-		ppid, err1 := strconv.Atoi(strings.TrimSpace(fields[n-3]))
-		pid, err2 := strconv.Atoi(strings.TrimSpace(fields[n-2]))
-		ram, err3 := strconv.ParseUint(strings.TrimSpace(fields[n-1]), 10, 64)
-		if err1 != nil || err2 != nil || err3 != nil || pid == 0 {
-			// Malformed row — skip rather than poison byPID with
-			// garbage that would corrupt downstream parent-chain
-			// lookups for other rows.
-			continue
-		}
-		rows = append(rows, procRow{pid: pid, ppid: ppid, created: created, exePath: exePath, cmdline: cmdline, ram: ram})
+		rows = append(rows, row)
 	}
 	// A scan error (e.g. bufio.ErrTooLong on a pathologically long CommandLine
 	// row) ends the loop early and silently truncates the process snapshot,
@@ -1025,6 +983,50 @@ func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
 		byPID[r.pid] = r
 	}
 	return rows, byPID
+}
+
+func parseProcessSnapshotRow(line string) (procRow, bool) {
+	if strings.HasPrefix(line, "Node,") || strings.TrimSpace(line) == "" {
+		return procRow{}, false
+	}
+	return parseProcessSnapshotFields(splitCSVLine(line))
+}
+
+func parseProcessSnapshotFields(fields []string) (procRow, bool) {
+	if len(fields) < 7 {
+		return procRow{}, false
+	}
+
+	// WMIC's `/format:csv` output does NOT quote the cmdline or
+	// ExecutablePath fields. Either can contain commas: command-line flags
+	// often carry CSV-shaped values, and Windows user/profile paths may be
+	// named like `Doe, Jane`. Anchor only the three trailing numeric fields
+	// from the right, then scan left for the CIM CreationDate field. The
+	// command line is everything before CreationDate; ExecutablePath is
+	// everything after CreationDate and before the numeric tail.
+	n := len(fields)
+	ppid, err1 := strconv.Atoi(strings.TrimSpace(fields[n-3]))
+	pid, err2 := strconv.Atoi(strings.TrimSpace(fields[n-2]))
+	ram, err3 := strconv.ParseUint(strings.TrimSpace(fields[n-1]), 10, 64)
+	if err1 != nil || err2 != nil || err3 != nil || pid == 0 {
+		return procRow{}, false
+	}
+
+	createdIdx := -1
+	for i := n - 4; i >= 1; i-- {
+		if isWmicCreationDateField(fields[i]) {
+			createdIdx = i
+			break
+		}
+	}
+	if createdIdx == -1 {
+		return procRow{}, false
+	}
+
+	cmdline := strings.Join(fields[1:createdIdx], ",")
+	created := parseWmicDate(strings.TrimSpace(fields[createdIdx]))
+	exePath := strings.TrimSpace(strings.Join(fields[createdIdx+1:n-3], ","))
+	return procRow{pid: pid, ppid: ppid, created: created, exePath: exePath, cmdline: cmdline, ram: ram}, true
 }
 
 // parseOrphans reads `wmic process get CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize`

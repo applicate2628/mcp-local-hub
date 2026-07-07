@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -99,21 +100,43 @@ func (a *API) CountProcessesFromSnapshot(snap processSnapshot, patterns []string
 	return countMatchingLines(snap.lines, patterns)
 }
 
-// countMatchingLines returns how many of the given lines contain at
-// least one of the patterns as a substring, deduplicating so a line
-// matching multiple patterns still counts once — the same semantics
-// parseWmicCount applies over an io.Reader.
+// countMatchingLines returns how many of the given rows' CommandLine
+// fields contain at least one of the patterns as a substring,
+// deduplicating so a row matching multiple patterns still counts once —
+// the same semantics parseWmicCount applies over an io.Reader.
 func countMatchingLines(lines []string, patterns []string) int {
 	count := 0
 	for _, line := range lines {
+		cmdline, ok := processSnapshotCommandLine(line)
+		if !ok {
+			continue
+		}
 		for _, p := range patterns {
-			if strings.Contains(line, p) {
+			if strings.Contains(cmdline, p) {
 				count++
 				break
 			}
 		}
 	}
 	return count
+}
+
+func processSnapshotCommandLine(line string) (string, bool) {
+	if row, ok := parseProcessSnapshotRow(line); ok {
+		return row.cmdline, true
+	}
+	if strings.HasPrefix(line, "Node,") || strings.TrimSpace(line) == "" {
+		return "", false
+	}
+	fields := splitCSVLine(line)
+	if len(fields) < 4 {
+		return "", false
+	}
+	n := len(fields)
+	if !isUnsignedDecimalField(fields[n-2]) || !isUnsignedDecimalField(fields[n-1]) {
+		return "", false
+	}
+	return strings.Join(fields[1:n-2], ","), true
 }
 
 // runProcessSnapshot returns a CSV-formatted process list compatible with
@@ -301,6 +324,25 @@ func splitCSVLine(line string) []string {
 	}
 	out = append(out, cur.String())
 	return out
+}
+
+func isUnsignedDecimalField(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+var wmicCreationDateRE = regexp.MustCompile(`^\d{14}\.\d+[+-]\d+$`)
+
+func isWmicCreationDateField(s string) bool {
+	return wmicCreationDateRE.MatchString(strings.TrimSpace(s))
 }
 
 // netstatLineLoopbackPortPID parses a single `netstat -ano` line and, when it

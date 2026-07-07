@@ -34,6 +34,20 @@ HOST,"some-other-process",9999,1000000
 	}
 }
 
+func TestCountProcessesMatchesCommandLineOnly(t *testing.T) {
+	wmicCsv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+HOST,"node unrelated.js",20260417180000.000000+180,C:\Users\server-memory\node.exe,555,1001,40000000
+HOST,"node server-memory/dist/index.js",20260417180000.000000+180,C:\Tools\node.exe,555,1002,41000000
+`
+	got, err := parseWmicCount(strings.NewReader(wmicCsv), []string{"server-memory"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 1 {
+		t.Errorf("got %d, want 1 (only CommandLine should be matched)", got)
+	}
+}
+
 func TestNetstatLinePIDForLoopbackPort_ExactPortMatch(t *testing.T) {
 	line := "  TCP    127.0.0.1:9121         0.0.0.0:0              LISTENING       1234"
 	pid, ok := netstatLinePIDForLoopbackPort(line, 9121)

@@ -78,6 +78,41 @@ HOST,"uv run --directory .../GDB-MCP python server.py",20260417170000.000000+180
 	}
 }
 
+func TestParseProcessRowsKeepsCommaBearingExecutablePathAligned(t *testing.T) {
+	const created = "20260417180000.123456+180"
+	const cmdline = "node server.js --setting-sources=user,project,local"
+	const exePath = `C:\Users\Doe, Jane\AppData\Local\Programs\nodejs\node.exe`
+	wmicCsv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+HOST,` + cmdline + `,` + created + `,` + exePath + `,555,1001,40000000
+`
+	rows, byPID := parseProcessRows(strings.NewReader(wmicCsv))
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.cmdline != cmdline {
+		t.Errorf("cmdline = %q, want %q", row.cmdline, cmdline)
+	}
+	if !row.created.Equal(parseWmicDate(created)) {
+		t.Errorf("created = %s, want %s", row.created, parseWmicDate(created))
+	}
+	if row.exePath != exePath {
+		t.Errorf("exePath = %q, want %q", row.exePath, exePath)
+	}
+	if row.ppid != 555 {
+		t.Errorf("ppid = %d, want 555", row.ppid)
+	}
+	if row.pid != 1001 {
+		t.Errorf("pid = %d, want 1001", row.pid)
+	}
+	if row.ram != 40000000 {
+		t.Errorf("ram = %d, want 40000000", row.ram)
+	}
+	if _, ok := byPID[1001]; !ok {
+		t.Fatalf("byPID missing parsed PID 1001")
+	}
+}
+
 // TestRedactCmdlineForDisplay covers Cleanup-6 wire-format redaction:
 // the GUI orphan table renders OrphanProcess.cmdline_display; that field
 // must hold only the executable basename (no path, no arguments) so
