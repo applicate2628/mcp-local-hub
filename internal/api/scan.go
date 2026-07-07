@@ -2221,9 +2221,10 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 }
 
 type extractedStdioEntry struct {
-	Command string
-	Args    []string
-	Env     map[string]string
+	Command  string
+	Args     []string
+	Env      map[string]string
+	Disabled bool
 }
 
 func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOpts) (extractedStdioEntry, error) {
@@ -2382,6 +2383,7 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 		if raw == nil {
 			return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config", serverName, client)
 		}
+		disabled := rawClientEntryDisabled(raw)
 		// OpenCode local entries use a `command` ARRAY and `environment`, the
 		// same two extract-time translations MiMoCode needs.
 		cmd, args := openCodeCommandArray(raw)
@@ -2403,7 +2405,7 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 				}
 			}
 		}
-		return extractedStdioEntry{Command: cmd, Args: args, Env: envMap}, nil
+		return extractedStdioEntry{Command: cmd, Args: args, Env: envMap, Disabled: disabled}, nil
 
 	case "mimocode":
 		if opts.MimoCodeConfigPath == "" {
@@ -2425,6 +2427,7 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 		if raw == nil {
 			return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config", serverName, client)
 		}
+		disabled := rawClientEntryDisabled(raw)
 		// MiMoCode local entries use a `command` ARRAY (["npx","-y",...]) and
 		// store env under `environment` (NOT `env`). Translate both here and
 		// render directly — the generic string-`command`/`env` tail below does
@@ -2460,7 +2463,7 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 				}
 			}
 		}
-		return extractedStdioEntry{Command: cmd, Args: args, Env: envMap}, nil
+		return extractedStdioEntry{Command: cmd, Args: args, Env: envMap, Disabled: disabled}, nil
 
 	default:
 		return extractedStdioEntry{}, fmt.Errorf("extract not yet supported for client %q (extend here when needed)", client)
@@ -2468,6 +2471,7 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 	if raw == nil {
 		return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config", serverName, client)
 	}
+	disabled := rawClientEntryDisabled(raw)
 
 	cmd, _ := raw["command"].(string)
 	// Reject HTTP-only / hub-managed entries early. Extract is for stdio
@@ -2498,7 +2502,17 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 		}
 	}
 
-	return extractedStdioEntry{Command: cmd, Args: args, Env: envMap}, nil
+	return extractedStdioEntry{Command: cmd, Args: args, Env: envMap, Disabled: disabled}, nil
+}
+
+func rawClientEntryDisabled(raw map[string]any) bool {
+	if disabled, ok := raw["disabled"].(bool); ok && disabled {
+		return true
+	}
+	if enabled, ok := raw["enabled"].(bool); ok && !enabled {
+		return true
+	}
+	return false
 }
 
 func pickNextFreePort(manifestDir string) (int, error) {

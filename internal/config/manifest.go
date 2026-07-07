@@ -386,12 +386,12 @@ func ParseManifest(r io.Reader) (*ServerManifest, error) {
 	}
 	var missing []string
 	for i, a := range m.BaseArgs {
-		expanded, miss := expandEnvCrossPlatform(a)
+		expanded, miss := expandEnvCrossPlatform(a, false)
 		m.BaseArgs[i] = expanded
 		missing = append(missing, miss...)
 	}
 	for k, v := range m.Env {
-		expanded, miss := expandEnvCrossPlatform(v)
+		expanded, miss := expandEnvCrossPlatform(v, true)
 		m.Env[k] = expanded
 		for _, name := range miss {
 			missing = append(missing, k+":"+name)
@@ -405,7 +405,7 @@ func ParseManifest(r io.Reader) (*ServerManifest, error) {
 		if m.Daemons[i].Cwd == "" {
 			continue
 		}
-		expanded, miss := expandEnvCrossPlatform(m.Daemons[i].Cwd)
+		expanded, miss := expandEnvCrossPlatform(m.Daemons[i].Cwd, false)
 		m.Daemons[i].Cwd = expanded
 		for _, name := range miss {
 			missing = append(missing, fmt.Sprintf("daemons[%d].cwd:%s", i, name))
@@ -456,20 +456,25 @@ func ParseCatalogFields(r io.Reader) (CatalogFields, error) {
 	return c, nil
 }
 
-// expandEnvCrossPlatform expands $VAR and ${VAR} tokens against the host
-// environment. Returns the expanded string plus a list of variable
-// names that were referenced but not set — callers can decide whether
-// to treat empty expansion as an error or accept the empty value.
+// expandEnvCrossPlatform expands $VAR, ${VAR}, and ${env:VAR} tokens against
+// the host environment. When preserveEnvColonRefs is true, ${env:VAR} is left
+// literal so manifest env values can be resolved by secrets.Resolver at daemon
+// launch time. Returns the expanded string plus a list of variable names that
+// were referenced but not set — callers can decide whether to treat empty
+// expansion as an error or accept the empty value.
 //
 // Cross-platform niceness: ${HOME} on Windows (where HOME is typically
 // unset) falls back to USERPROFILE, and vice-versa, so the same
 // manifest works under bash, cmd.exe, and PowerShell without dual
 // templating. Both unset → the name is reported as missing.
-func expandEnvCrossPlatform(s string) (string, []string) {
+func expandEnvCrossPlatform(s string, preserveEnvColonRefs bool) (string, []string) {
 	var missing []string
 	expanded := os.Expand(s, func(name string) string {
 		if strings.HasPrefix(name, "env:") && len(name) > len("env:") {
-			return "${" + name + "}"
+			if preserveEnvColonRefs {
+				return "${" + name + "}"
+			}
+			name = strings.TrimPrefix(name, "env:")
 		}
 		if v := os.Getenv(name); v != "" {
 			return v

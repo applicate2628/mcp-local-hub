@@ -271,7 +271,7 @@ VISIBLE = "not-secret"
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
 	}
-	wantVaultKey := entry + ".API_KEY"
+	wantVaultKey := "MUI_ADOPT_SECRET_API_KEY"
 	if !reflect.DeepEqual(plan.SecretRoutedKeys, []string{wantVaultKey}) {
 		t.Fatalf("SecretRoutedKeys = %#v, want [%s]", plan.SecretRoutedKeys, wantVaultKey)
 	}
@@ -410,7 +410,7 @@ API_KEY = "second-secret"
 		if err != nil {
 			t.Fatalf("BuildAdoptPlan(%s): %v", tc.entry, err)
 		}
-		wantKey := tc.entry + ".API_KEY"
+		wantKey := strings.ToUpper(strings.ReplaceAll(tc.entry, "-", "_")) + "_API_KEY"
 		if !reflect.DeepEqual(plan.SecretRoutedKeys, []string{wantKey}) {
 			t.Fatalf("%s SecretRoutedKeys = %#v, want [%s]", tc.entry, plan.SecretRoutedKeys, wantKey)
 		}
@@ -430,8 +430,8 @@ API_KEY = "second-secret"
 		key  string
 		want string
 	}{
-		{first + ".API_KEY", "first-secret"},
-		{second + ".API_KEY", "second-secret"},
+		{"MUI_ADOPT_SECRET_ONE_API_KEY", "first-secret"},
+		{"MUI_ADOPT_SECRET_TWO_API_KEY", "second-secret"},
 	} {
 		got, err := vault.Get(tc.key)
 		if err != nil {
@@ -459,7 +459,7 @@ API_KEY = "new-adopt-secret"
 	if err != nil {
 		t.Fatalf("OpenVault: %v", err)
 	}
-	collisionKey := entry + ".API_KEY"
+	collisionKey := "MUI_ADOPT_SECRET_COLLISION_API_KEY"
 	if err := vault.Set(collisionKey, "user-managed-secret"); err != nil {
 		t.Fatalf("seed collision secret: %v", err)
 	}
@@ -643,6 +643,98 @@ API_TOKEN = "literal-token"
 	}
 	if _, statErr := os.Stat(filepath.Join(manifestRoot, entry, "manifest.yaml")); !os.IsNotExist(statErr) {
 		t.Fatalf("manifest written despite vault refusal: %v", statErr)
+	}
+}
+
+func TestBuildAdoptPlanRejectsExistingDiskManifestBeforeMutation(t *testing.T) {
+	entry := "mui-adopt-disk-collision"
+	codexPath, manifestRoot, stateRoot := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-disk-collision]
+command = "go"
+args = ["version"]
+
+[mcp_servers.mui-adopt-disk-collision.env]
+API_TOKEN = "literal-token"
+`)
+	if err := os.MkdirAll(filepath.Join(manifestRoot, entry), 0o700); err != nil {
+		t.Fatalf("mkdir existing manifest dir: %v", err)
+	}
+	existingManifestPath := filepath.Join(manifestRoot, entry, "manifest.yaml")
+	beforeManifest := []byte("name: " + entry + "\nkind: global\ntransport: stdio-bridge\ncommand: go\n")
+	if err := os.WriteFile(existingManifestPath, beforeManifest, 0o600); err != nil {
+		t.Fatalf("write existing manifest: %v", err)
+	}
+	before := mustReadFileForAdoptTest(t, codexPath)
+
+	_, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         9317,
+	})
+	if err == nil {
+		t.Fatal("BuildAdoptPlan accepted a name that already exists on disk")
+	}
+	if !strings.Contains(err.Error(), "already exists") || !strings.Contains(err.Error(), "adopt") {
+		t.Fatalf("disk-manifest collision error = %v, want adopt refusal guidance", err)
+	}
+	after := mustReadFileForAdoptTest(t, codexPath)
+	if !bytes.Equal(before, after) {
+		t.Fatalf("codex config changed despite BuildAdoptPlan refusal\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	afterManifest := mustReadFileForAdoptTest(t, existingManifestPath)
+	if !bytes.Equal(beforeManifest, afterManifest) {
+		t.Fatalf("existing manifest changed despite BuildAdoptPlan refusal\nbefore:\n%s\nafter:\n%s", beforeManifest, afterManifest)
+	}
+	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
+		t.Fatalf("intent side effect after BuildAdoptPlan refusal: %v", err)
+	}
+}
+
+func TestExecuteAdoptManifestCreateFailureDeletesRoutedVaultKeys(t *testing.T) {
+	entry := "mui-adopt-create-fail"
+	_, _, _ = setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-create-fail]
+command = "go"
+args = ["version"]
+
+[mcp_servers.mui-adopt-create-fail.env]
+API_TOKEN = "literal-token"
+`)
+	if _, err := NewAPI().SecretsInit(); err != nil {
+		t.Fatalf("SecretsInit: %v", err)
+	}
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         port,
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	if !reflect.DeepEqual(plan.SecretRoutedKeys, []string{"MUI_ADOPT_CREATE_FAIL_API_TOKEN"}) {
+		t.Fatalf("SecretRoutedKeys = %#v, want sanitized API_TOKEN key", plan.SecretRoutedKeys)
+	}
+
+	blockingFile := filepath.Join(t.TempDir(), "manifest-root-is-file")
+	if err := os.WriteFile(blockingFile, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("seed blocking manifest root file: %v", err)
+	}
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", blockingFile)
+
+	err = NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{})
+	if err == nil {
+		t.Fatal("ExecuteAdopt succeeded despite manifest-create failure")
+	}
+	if !strings.Contains(err.Error(), "removed routed vault keys") {
+		t.Fatalf("ExecuteAdopt error = %v, want routed-key cleanup note", err)
+	}
+	vault, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+	if err != nil {
+		t.Fatalf("OpenVault after failed ExecuteAdopt: %v", err)
+	}
+	if keys := vault.List(); len(keys) != 0 {
+		t.Fatalf("manifest-create failure left orphaned vault keys: %v", keys)
 	}
 }
 
@@ -995,6 +1087,71 @@ SHARED = "1"
 	}
 }
 
+func TestBuildAdoptPlanDefaultClientsCompareEnvValuesAndRedactMismatchReport(t *testing.T) {
+	entry := "mui-adopt-env-signature"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-env-signature]
+command = "go"
+args = ["version"]
+
+[mcp_servers.mui-adopt-env-signature.env]
+API_KEY = "staging-secret"
+`)
+	home := filepath.Dir(filepath.Dir(codexPath))
+	claudePath := filepath.Join(home, ".claude.json")
+	writeJSONForAdoptTest(t, claudePath, map[string]any{
+		"mcpServers": map[string]any{
+			entry: map[string]any{
+				"command": "go",
+				"args":    []any{"version"},
+				"env":     map[string]any{"API_KEY": "staging-secret"},
+			},
+		},
+	})
+	cursorPath := filepath.Join(home, ".cursor", "mcp.json")
+	writeJSONForAdoptTest(t, cursorPath, map[string]any{
+		"mcpServers": map[string]any{
+			entry: map[string]any{
+				"command": "go",
+				"args":    []any{"version"},
+				"env":     map[string]any{"API_KEY": "prod-secret"},
+			},
+		},
+	})
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         port,
+		ScanOpts: ScanOpts{
+			CodexConfigPath:  codexPath,
+			ClaudeConfigPath: claudePath,
+			CursorConfigPath: cursorPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	if !containsAdoptString(plan.AdoptClients, "claude-code") {
+		t.Fatalf("same env value claude-code entry not auto-selected: %#v", plan.AdoptClients)
+	}
+	if containsAdoptString(plan.AdoptClients, "cursor") {
+		t.Fatalf("different env value cursor entry auto-selected: %#v", plan.AdoptClients)
+	}
+	var out bytes.Buffer
+	PrintAdoptPlan(&out, plan)
+	msg := out.String()
+	if !strings.Contains(msg, "env values differ for keys: API_KEY") {
+		t.Fatalf("dry-run did not report env-value mismatch by key name only:\n%s", msg)
+	}
+	for _, leaked := range []string{"staging-secret", "prod-secret"} {
+		if strings.Contains(msg, leaked) {
+			t.Fatalf("dry-run leaked env value %q in mismatch report:\n%s", leaked, msg)
+		}
+	}
+}
+
 func TestBuildAdoptPlanExplicitClientsAllowMismatchedSameNameEntry(t *testing.T) {
 	entry := "mui-adopt-signature-explicit"
 	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-signature-explicit]
@@ -1029,6 +1186,201 @@ args = ["version"]
 	}
 	if !reflect.DeepEqual(plan.AdoptClients, []string{"codex-cli", "claude-code"}) {
 		t.Fatalf("AdoptClients = %#v, want explicit codex-cli + claude-code", plan.AdoptClients)
+	}
+}
+
+func TestAdoptSanitizesRoutedVaultKeyAndResolverAcceptsIt(t *testing.T) {
+	entry := "mui-mcp"
+	_, _, _ = setupAdoptTestEnv(t, entry, `[mcp_servers.mui-mcp]
+command = "go"
+args = ["version"]
+
+[mcp_servers.mui-mcp.env]
+API_KEY = "literal-secret-value"
+`)
+	if _, err := NewAPI().SecretsInit(); err != nil {
+		t.Fatalf("SecretsInit: %v", err)
+	}
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         port,
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	wantKey := "MUI_MCP_API_KEY"
+	if !reflect.DeepEqual(plan.SecretRoutedKeys, []string{wantKey}) {
+		t.Fatalf("SecretRoutedKeys = %#v, want [%s]", plan.SecretRoutedKeys, wantKey)
+	}
+	if err := secrets.ValidateSettableKeyName(wantKey); err != nil {
+		t.Fatalf("sanitized adopt key is not SecretsSet-compatible: %v", err)
+	}
+	if !strings.Contains(plan.ManifestYAML, "secret:"+wantKey) {
+		t.Fatalf("manifest does not reference sanitized secret key:\n%s", plan.ManifestYAML)
+	}
+	if err := NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{}); err != nil {
+		t.Fatalf("ExecuteAdopt: %v", err)
+	}
+	vault, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+	if err != nil {
+		t.Fatalf("OpenVault: %v", err)
+	}
+	got, err := secrets.NewResolver(vault, nil).Resolve("secret:" + wantKey)
+	if err != nil {
+		t.Fatalf("Resolve(secret:%s): %v", wantKey, err)
+	}
+	if got != "literal-secret-value" {
+		t.Fatalf("resolved secret = %q, want literal-secret-value", got)
+	}
+}
+
+func TestAdoptShellEnvReferenceBecomesRuntimeEnvPlaceholderWithoutVaultWrite(t *testing.T) {
+	entry := "mui-adopt-shell-env"
+	_, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-shell-env]
+command = "go"
+args = ["version"]
+
+[mcp_servers.mui-adopt-shell-env.env]
+API_KEY = "$API_KEY"
+`)
+	t.Setenv("API_KEY", "runtime-secret-value")
+	if _, err := NewAPI().SecretsInit(); err != nil {
+		t.Fatalf("SecretsInit: %v", err)
+	}
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         port,
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	if len(plan.SecretRoutedKeys) != 0 {
+		t.Fatalf("SecretRoutedKeys = %#v, want none for shell env indirection", plan.SecretRoutedKeys)
+	}
+	if !strings.Contains(plan.ManifestYAML, `${env:API_KEY}`) {
+		t.Fatalf("manifest did not normalize $API_KEY to runtime ${env:API_KEY} placeholder:\n%s", plan.ManifestYAML)
+	}
+	if strings.Contains(plan.ManifestYAML, "runtime-secret-value") {
+		t.Fatalf("manifest leaked runtime env value:\n%s", plan.ManifestYAML)
+	}
+	if err := NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{}); err != nil {
+		t.Fatalf("ExecuteAdopt: %v", err)
+	}
+	vault, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+	if err != nil {
+		t.Fatalf("OpenVault: %v", err)
+	}
+	if keys := vault.List(); len(keys) != 0 {
+		t.Fatalf("vault keys = %v, want no adopt write for shell env indirection", keys)
+	}
+	manifestBytes, err := os.ReadFile(filepath.Join(manifestRoot, entry, "manifest.yaml"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	m, err := config.ParseManifest(bytes.NewReader(manifestBytes))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v\n%s", err, manifestBytes)
+	}
+	if got := m.Env["API_KEY"]; got != `${env:API_KEY}` {
+		t.Fatalf("parsed env API_KEY = %q, want ${env:API_KEY}", got)
+	}
+	resolved, err := secrets.NewResolver(nil, nil).Resolve(m.Env["API_KEY"])
+	if err != nil {
+		t.Fatalf("Resolve runtime env placeholder: %v", err)
+	}
+	if resolved != "runtime-secret-value" {
+		t.Fatalf("resolved runtime env value = %q, want runtime-secret-value", resolved)
+	}
+}
+
+func TestBuildAdoptPlanDefaultClientsSkipDisabledSameNameEntryAndReport(t *testing.T) {
+	entry := "mui-adopt-disabled-target"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-disabled-target]
+command = "go"
+args = ["version"]
+`)
+	home := filepath.Dir(filepath.Dir(codexPath))
+	cursorPath := filepath.Join(home, ".cursor", "mcp.json")
+	writeJSONForAdoptTest(t, cursorPath, map[string]any{
+		"mcpServers": map[string]any{
+			entry: map[string]any{
+				"command":  "go",
+				"args":     []any{"version"},
+				"disabled": true,
+			},
+		},
+	})
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         port,
+		ScanOpts: ScanOpts{
+			CodexConfigPath:  codexPath,
+			CursorConfigPath: cursorPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	if containsAdoptString(plan.AdoptClients, "cursor") {
+		t.Fatalf("disabled cursor entry auto-selected by default: %#v", plan.AdoptClients)
+	}
+	var out bytes.Buffer
+	PrintAdoptPlan(&out, plan)
+	if !strings.Contains(out.String(), entry+" in cursor is disabled") ||
+		!strings.Contains(out.String(), "--clients cursor") {
+		t.Fatalf("dry-run did not report disabled same-name entry with explicit override guidance:\n%s", out.String())
+	}
+
+	explicit, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         port,
+		Clients:      []string{"codex-cli", "cursor"},
+		ScanOpts: ScanOpts{
+			CodexConfigPath:  codexPath,
+			CursorConfigPath: cursorPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan explicit --clients: %v", err)
+	}
+	if !containsAdoptString(explicit.AdoptClients, "cursor") {
+		t.Fatalf("explicit --clients did not include disabled cursor target: %#v", explicit.AdoptClients)
+	}
+}
+
+func TestBuildAdoptPlanRefusesDisabledSourceEntry(t *testing.T) {
+	entry := "mui-adopt-disabled-source"
+	setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-disabled-source]
+command = "go"
+args = ["version"]
+disabled = true
+`)
+
+	_, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         9318,
+	})
+	if err == nil {
+		t.Fatal("BuildAdoptPlan accepted a disabled source entry")
+	}
+	if !strings.Contains(err.Error(), "disabled") || !strings.Contains(err.Error(), "enable it first") {
+		t.Fatalf("disabled source error = %v, want enable-it-first guidance", err)
 	}
 }
 

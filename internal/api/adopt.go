@@ -50,6 +50,7 @@ type AdoptPlan struct {
 	AdoptClients        []string
 	AlsoPresent         []string
 	SignatureMismatches []AdoptClientSignatureMismatch
+	DisabledSameName    []AdoptClientDisabled
 	SecretRoutedKeys    []string
 	ManifestYAML        string
 
@@ -59,6 +60,10 @@ type AdoptPlan struct {
 type AdoptClientSignatureMismatch struct {
 	Client string
 	Reason string
+}
+
+type AdoptClientDisabled struct {
+	Client string
 }
 
 // BuildAdoptPlan extracts an existing direct stdio client entry and renders the
@@ -85,11 +90,19 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	if embeddedManifestNamesContains(manifestName) {
 		return nil, fmt.Errorf("manifest %q collides with a shipped (built-in) server; adopt refuses to shadow shipped manifests", manifestName)
 	}
+	if exists, err := manifestExistsIn(defaultManifestDir(), manifestName); err != nil {
+		return nil, fmt.Errorf("adopt: check existing disk manifest %q: %w", manifestName, err)
+	} else if exists {
+		return nil, fmt.Errorf("adopt refuses to create manifest %q because a disk manifest already exists; remove or rename the existing manifest before re-running adopt", manifestName)
+	}
 
 	scanOpts := adoptScanOpts(opts.ScanOpts)
 	entry, err := a.extractStdioEntryFromClient(sourceClient, entryName, scanOpts)
 	if err != nil {
 		return nil, err
+	}
+	if entry.Disabled {
+		return nil, fmt.Errorf("server %q in source client %q is disabled; enable it first before adopting", entryName, sourceClient)
 	}
 	port := opts.Port
 	if port == 0 {
@@ -102,14 +115,19 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	}
 
 	env := cloneStringMap(entry.Env)
-	routedKeys, secretValues := rewriteAdoptSensitiveEnv(manifestName, env)
+	routedKeys, secretValues, err := rewriteAdoptSensitiveEnv(manifestName, env)
+	if err != nil {
+		return nil, err
+	}
 
 	clientScan := a.adoptClientsWithSameNameEntry(entryName, scanOpts, sourceClient, newAdoptEntrySignature(entry))
 	foundClients := clientScan.Matching
 	mismatches := clientScan.Mismatched
+	disabledSameName := clientScan.Disabled
 	if len(opts.Clients) > 0 {
 		foundClients = clientScan.Found
 		mismatches = nil
+		disabledSameName = nil
 	}
 	adoptClients, err := normalizeAdoptClients(opts.Clients, foundClients, sourceClient)
 	if err != nil {
@@ -129,6 +147,7 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		AdoptClients:        adoptClients,
 		AlsoPresent:         alsoPresent,
 		SignatureMismatches: mismatches,
+		DisabledSameName:    disabledSameName,
 		SecretRoutedKeys:    routedKeys,
 		ManifestYAML:        manifestYAML,
 		secretValues:        secretValues,
@@ -147,7 +166,13 @@ func (a *API) ExecuteAdopt(plan *AdoptPlan, w io.Writer) error {
 		return err
 	}
 	if err := a.ManifestCreate(plan.ManifestName, plan.ManifestYAML); err != nil {
-		return err
+		if len(plan.SecretRoutedKeys) == 0 {
+			return err
+		}
+		if cleanupErr := deleteAdoptRoutedSecrets(plan.SecretRoutedKeys); cleanupErr != nil {
+			return fmt.Errorf("adopt manifest create failed after writing routed vault keys; failed to remove routed vault keys %s: %v: %w", strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ","), cleanupErr, err)
+		}
+		return fmt.Errorf("adopt manifest create failed after writing routed vault keys; removed routed vault keys %s so adopt can be re-run: %w", strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ","), err)
 	}
 	if err := a.Install(InstallOpts{
 		Server:         plan.ManifestName,
@@ -155,13 +180,16 @@ func (a *API) ExecuteAdopt(plan *AdoptPlan, w io.Writer) error {
 		Writer:         w,
 	}); err != nil {
 		vaultNote := ""
-		if len(plan.SecretRoutedKeys) > 0 {
-			keys := append([]string(nil), plan.SecretRoutedKeys...)
-			sort.Strings(keys)
-			vaultNote = "; routed vault keys were left intact: " + strings.Join(keys, ",")
-		}
 		if cleanupErr := a.ManifestDelete(plan.ManifestName); cleanupErr != nil {
+			if len(plan.SecretRoutedKeys) > 0 {
+				vaultNote = "; routed vault keys were left intact because the manifest still exists: " + strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ",")
+			}
 			return fmt.Errorf("adopt install failed after creating manifest %q; failed to remove the adopt-created manifest (%v), so remove it before re-running adopt%s: %w", plan.ManifestName, cleanupErr, vaultNote, err)
+		}
+		if cleanupErr := deleteAdoptRoutedSecrets(plan.SecretRoutedKeys); cleanupErr != nil {
+			vaultNote = "; failed to remove routed vault keys " + strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ",") + ": " + cleanupErr.Error()
+		} else if len(plan.SecretRoutedKeys) > 0 {
+			vaultNote = "; removed routed vault keys: " + strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ",")
 		}
 		return fmt.Errorf("adopt install failed after creating manifest %q; removed the adopt-created manifest so adopt can be re-run%s: %w", plan.ManifestName, vaultNote, err)
 	}
@@ -189,6 +217,9 @@ func PrintAdoptPlan(w io.Writer, plan *AdoptPlan) {
 	for _, mismatch := range plan.SignatureMismatches {
 		fmt.Fprintf(w, "  %s in %s differs (%s) - re-run with --clients %s to adopt it explicitly\n", plan.EntryName, mismatch.Client, mismatch.Reason, mismatch.Client)
 	}
+	for _, disabled := range plan.DisabledSameName {
+		fmt.Fprintf(w, "  %s in %s is disabled - not adopted; use --clients %s to override\n", plan.EntryName, disabled.Client, disabled.Client)
+	}
 	fmt.Fprintln(w, "No changes made. Re-run with --yes to apply.")
 }
 
@@ -215,24 +246,20 @@ type adoptClientScanResult struct {
 	Found      []string
 	Matching   []string
 	Mismatched []AdoptClientSignatureMismatch
+	Disabled   []AdoptClientDisabled
 }
 
 type adoptEntrySignature struct {
 	Command string
 	Args    []string
-	EnvKeys []string
+	Env     map[string]string
 }
 
 func newAdoptEntrySignature(entry extractedStdioEntry) adoptEntrySignature {
-	envKeys := make([]string, 0, len(entry.Env))
-	for key := range entry.Env {
-		envKeys = append(envKeys, key)
-	}
-	sort.Strings(envKeys)
 	return adoptEntrySignature{
 		Command: entry.Command,
 		Args:    append([]string(nil), entry.Args...),
-		EnvKeys: envKeys,
+		Env:     cloneStringMap(entry.Env),
 	}
 }
 
@@ -244,8 +271,20 @@ func (sig adoptEntrySignature) diffReasons(other adoptEntrySignature) []string {
 	if !slices.Equal(sig.Args, other.Args) {
 		reasons = append(reasons, "args")
 	}
-	if !slices.Equal(sig.EnvKeys, other.EnvKeys) {
+	sigKeys := sortedAdoptMapKeys(sig.Env)
+	otherKeys := sortedAdoptMapKeys(other.Env)
+	if !slices.Equal(sigKeys, otherKeys) {
 		reasons = append(reasons, "env keys")
+	} else {
+		var valueDiffKeys []string
+		for _, key := range sigKeys {
+			if sig.Env[key] != other.Env[key] {
+				valueDiffKeys = append(valueDiffKeys, key)
+			}
+		}
+		if len(valueDiffKeys) > 0 {
+			reasons = append(reasons, "env values differ for keys: "+strings.Join(valueDiffKeys, ", "))
+		}
 	}
 	return reasons
 }
@@ -265,6 +304,12 @@ func (a *API) adoptClientsWithSameNameEntry(entryName string, scanOpts ScanOpts,
 			continue
 		}
 		result.Found = append(result.Found, client)
+		if entry.Disabled {
+			if client != sourceClient {
+				result.Disabled = append(result.Disabled, AdoptClientDisabled{Client: client})
+			}
+			continue
+		}
 		reasons := sourceSignature.diffReasons(newAdoptEntrySignature(entry))
 		if len(reasons) == 0 {
 			result.Matching = append(result.Matching, client)
@@ -364,6 +409,21 @@ func containsAdoptString(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func sortedAdoptMapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedAdoptStrings(values []string) []string {
+	out := append([]string(nil), values...)
+	sort.Strings(out)
+	return out
 }
 
 func emitAdoptExecutedEvent(plan *AdoptPlan) {
