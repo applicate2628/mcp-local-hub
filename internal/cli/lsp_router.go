@@ -25,12 +25,12 @@ func newLSPRouterCmdReal() *cobra.Command {
 		Use:   "lsp-router",
 		Short: "Manage shared LSP router entries in MCP client configs",
 		Long: `Manage the shared mcp-language-server router entries that
-mcphub setup writes into present MCP client configs.
+mcphub setup writes into eligible present MCP client configs.
 
 Disabling a client persists an opt-out in gui-preferences.yaml and removes
 that client's current router entries immediately. Future 'mcphub setup'
 runs will skip disabled clients. Enabling clears the opt-out and runs the
-normal ensure pass so present clients can receive router entries again.`,
+normal ensure pass so eligible present clients can receive router entries again.`,
 	}
 	root.AddCommand(newLSPRouterDisableCmd())
 	root.AddCommand(newLSPRouterEnableCmd())

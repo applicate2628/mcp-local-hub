@@ -213,18 +213,18 @@ func TestEnsureLSPRouterClientEntries_WiresManifestLanguagesToPresentClientsAndI
 	}
 }
 
-func TestEnsureLSPRouterClientEntries_HonorsLSPRouterDisabledPrefs(t *testing.T) {
-	t.Run("default install set does not gate present explicit clients", func(t *testing.T) {
+func TestEnsureLSPRouterClientEntries_HonorsEffectiveClientEnablement(t *testing.T) {
+	t.Run("default install set writes but fresh opt-in client without evidence is skipped", func(t *testing.T) {
 		seedLSPRouterManifest(t, []string{"go"})
 		if err := NewAPI().SetDefaultInstallClientNames([]string{"claude-code"}); err != nil {
 			t.Fatalf("set default-install clients: %v", err)
 		}
 
 		defaultClient := newLSPRouterFakeClient(t, "claude-code", true)
-		explicitClient := newLSPRouterFakeClient(t, "antigravity", true)
+		freshOptIn := newLSPRouterFakeClient(t, "antigravity", true)
 		clientMap := map[string]clients.Client{
 			"claude-code": defaultClient,
-			"antigravity": explicitClient,
+			"antigravity": freshOptIn,
 		}
 		opts := LSPClientRouterOpts{
 			GUIPort:       7777,
@@ -237,20 +237,17 @@ func TestEnsureLSPRouterClientEntries_HonorsLSPRouterDisabledPrefs(t *testing.T)
 			t.Fatalf("EnsureLSPRouterClientEntries: %v", err)
 		}
 		name := LSPRouterEntryName("go")
-		for _, client := range []*lspRouterFakeClient{defaultClient, explicitClient} {
-			got, err := client.GetEntry(name)
-			if err != nil {
-				t.Fatalf("%s GetEntry(%s): %v", client.name, name, err)
-			}
-			if got == nil || got.URL != LSPRouterURL(7777, "go") {
-				t.Fatalf("%s entry = %+v, want router URL", client.name, got)
-			}
-			if len(client.backupPaths) != 1 {
-				t.Fatalf("%s backups = %v, want one backup", client.name, client.backupPaths)
-			}
+		if got, err := defaultClient.GetEntry(name); err != nil || got == nil || got.URL != LSPRouterURL(7777, "go") {
+			t.Fatalf("default client entry = %+v err=%v, want router URL", got, err)
 		}
-		if len(report.Backups) != 2 {
-			t.Fatalf("Backups = %+v, want both present clients", report.Backups)
+		if got, err := freshOptIn.GetEntry(name); err != nil || got != nil {
+			t.Fatalf("fresh opt-in entry = %+v err=%v, want no router entry", got, err)
+		}
+		if len(report.Backups) != 1 || report.Backups[0].Client != "claude-code" {
+			t.Fatalf("Backups = %+v, want only default-install client", report.Backups)
+		}
+		if freshOptIn.addCalls != 0 || len(freshOptIn.backupPaths) != 0 {
+			t.Fatalf("fresh opt-in client was mutated: addCalls=%d backups=%v entries=%v", freshOptIn.addCalls, freshOptIn.backupPaths, freshOptIn.entries)
 		}
 
 		second, err := NewAPI().EnsureLSPRouterClientEntries(opts)
@@ -260,8 +257,71 @@ func TestEnsureLSPRouterClientEntries_HonorsLSPRouterDisabledPrefs(t *testing.T)
 		if len(second.Backups) != 0 || len(second.Applied) != 0 || len(second.Removed) != 0 {
 			t.Fatalf("idempotent rerun changed config: %+v", second)
 		}
-		if len(defaultClient.backupPaths) != 1 || len(explicitClient.backupPaths) != 1 {
-			t.Fatalf("idempotent rerun wrote backups: default=%d explicit=%d", len(defaultClient.backupPaths), len(explicitClient.backupPaths))
+		if len(defaultClient.backupPaths) != 1 || len(freshOptIn.backupPaths) != 0 {
+			t.Fatalf("idempotent rerun wrote unexpected backups: default=%d fresh=%d", len(defaultClient.backupPaths), len(freshOptIn.backupPaths))
+		}
+	})
+
+	t.Run("explicit install evidence keeps opt-in client eligible", func(t *testing.T) {
+		seedLSPRouterManifest(t, []string{"go"})
+		seedManifestWithClientBinding(t, "memory", "antigravity", 9123)
+		if err := NewAPI().SetDefaultInstallClientNames([]string{"claude-code"}); err != nil {
+			t.Fatalf("set default-install clients: %v", err)
+		}
+
+		explicitClient := newLSPRouterFakeClient(t, "antigravity", true)
+		explicitClient.entries["memory"] = clients.MCPEntry{
+			Name:         "memory",
+			RelayServer:  "memory",
+			RelayDaemon:  "default",
+			RelayExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
+		}
+		opts := LSPClientRouterOpts{
+			GUIPort:       7777,
+			Clients:       map[string]clients.Client{"antigravity": explicitClient},
+			McphubExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
+		}
+
+		report, err := NewAPI().EnsureLSPRouterClientEntries(opts)
+		if err != nil {
+			t.Fatalf("EnsureLSPRouterClientEntries: %v", err)
+		}
+		name := LSPRouterEntryName("go")
+		if got, err := explicitClient.GetEntry(name); err != nil || got == nil || got.RelayURL != LSPRouterURL(7777, "go") {
+			t.Fatalf("explicit client router entry = %+v err=%v, want relay router URL", got, err)
+		}
+		if len(report.Backups) != 1 || report.Backups[0].Client != "antigravity" {
+			t.Fatalf("Backups = %+v, want explicit Antigravity backup", report.Backups)
+		}
+	})
+
+	t.Run("pre-existing router entry keeps upgrade client eligible", func(t *testing.T) {
+		seedLSPRouterManifest(t, []string{"go", "python"})
+		if err := NewAPI().SetDefaultInstallClientNames([]string{"claude-code"}); err != nil {
+			t.Fatalf("set default-install clients: %v", err)
+		}
+
+		upgradeClient := newLSPRouterFakeClient(t, "antigravity", true)
+		upgradeClient.entries[LSPRouterEntryName("go")] = clients.MCPEntry{
+			Name:     LSPRouterEntryName("go"),
+			RelayURL: LSPRouterURL(7777, "go"),
+		}
+		opts := LSPClientRouterOpts{
+			GUIPort:       7777,
+			Clients:       map[string]clients.Client{"antigravity": upgradeClient},
+			McphubExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
+		}
+
+		report, err := NewAPI().EnsureLSPRouterClientEntries(opts)
+		if err != nil {
+			t.Fatalf("EnsureLSPRouterClientEntries: %v", err)
+		}
+		name := LSPRouterEntryName("python")
+		if got, err := upgradeClient.GetEntry(name); err != nil || got == nil || got.RelayURL != LSPRouterURL(7777, "python") {
+			t.Fatalf("upgrade client new router entry = %+v err=%v, want python relay router URL", got, err)
+		}
+		if len(report.Backups) != 1 || report.Backups[0].Client != "antigravity" {
+			t.Fatalf("Backups = %+v, want upgrade Antigravity backup", report.Backups)
 		}
 	})
 
@@ -842,6 +902,34 @@ func seedLSPRouterManifest(t *testing.T, languages []string) {
 		t.Fatalf("write manifest: %v", err)
 	}
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", dir)
+}
+
+func seedManifestWithClientBinding(t *testing.T, name, client string, port int) {
+	t.Helper()
+	dir := os.Getenv("MCPHUB_MANIFEST_DIR_OVERRIDE")
+	if dir == "" {
+		dir = t.TempDir()
+		t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", dir)
+	}
+	serverDir := filepath.Join(dir, name)
+	if err := os.MkdirAll(serverDir, 0o700); err != nil {
+		t.Fatalf("mkdir manifest dir: %v", err)
+	}
+	body := fmt.Sprintf(`name: %s
+kind: global
+transport: stdio-bridge
+command: %s
+daemons:
+  - name: default
+    port: %d
+client_bindings:
+  - client: %s
+    daemon: default
+    url_path: /mcp
+`, name, name, port, client)
+	if err := os.WriteFile(filepath.Join(serverDir, "manifest.yaml"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
 }
 
 func overrideLSPRouterRegistry(t *testing.T) func() {

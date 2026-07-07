@@ -289,7 +289,7 @@ What setup does:
      (does NOT modify rc files automatically)
   4. Verifies the watchdog state directory is reachable (plan §16);
      fails with exit 8 if not.
-  5. Attempts to ensure every enabled present MCP client has mcp-language-server-<lang>
+  5. Attempts to ensure every eligible present MCP client has mcp-language-server-<lang>
      entries pointing at the GUI LSP router URL
      http://localhost:<gui_server.port>/lsp/<lang>/mcp, migrating old
      per-project LSP proxy URLs after timestamped backups. Failures are

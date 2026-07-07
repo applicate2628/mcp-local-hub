@@ -17,7 +17,7 @@ const (
 )
 
 // LSPClientRouterOpts controls the client-config reconcile that points
-// every present MCP client at the workspace-agnostic LSP router.
+// eligible present MCP clients at the workspace-agnostic LSP router.
 type LSPClientRouterOpts struct {
 	// GUIPort is the configured GUI/router port. Zero means read the
 	// validated gui_server.port setting through SettingsGet.
@@ -84,9 +84,13 @@ type lspClientRouterOp struct {
 	entry     clients.MCPEntry
 }
 
-// EnsureLSPRouterClientEntries ensures every present client not explicitly
-// opted out has one mcp-language-server-<language> entry pointing at the GUI
-// LSP router.
+// EnsureLSPRouterClientEntries ensures every effectively-enabled present
+// client has one mcp-language-server-<language> entry pointing at the GUI LSP
+// router. Effective enablement is the single rule for setup writes:
+// (client is in clients.default_install OR its live config has mcphub evidence)
+// AND client is not in clients.lsp_router_disabled. Live mcphub evidence means
+// an existing manifest-managed entry matching mcphub's install shape or an
+// existing hub-owned mcp-language-server-* router/per-project entry.
 // Existing per-project entries that point at registry-owned proxy ports are
 // migrated away after a per-client backup. The workspace registry is kept
 // intact; those rows are harmless warm preregistrations.
@@ -109,6 +113,10 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 	if err != nil {
 		return report, err
 	}
+	enabledClients, err := a.ClientInstallEnabledSet()
+	if err != nil {
+		return report, err
+	}
 	clientMap := opts.Clients
 	if clientMap == nil {
 		clientMap = clients.AllClients()
@@ -122,6 +130,16 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 		adapter := clientMap[clientName]
 		if adapter == nil || !adapter.Exists() || disabledClients[clientName] {
 			continue
+		}
+		if !enabledClients[clientName] {
+			hasEvidence, err := clientHasLSPRouterEnablementEvidence(clientName, adapter, languages, regEntries, portsByLanguage)
+			if err != nil {
+				report.Failed = append(report.Failed, lspFailure(clientName, "", "", "enablement", err))
+				continue
+			}
+			if !hasEvidence {
+				continue
+			}
 		}
 		ops := make([]lspClientRouterOp, 0, len(languages))
 		for _, language := range languages {
@@ -176,6 +194,68 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 		applyLSPRouterOps(opts, adapter, clientName, keepN, ops, report)
 	}
 	return report, lspRouterReportError(report, "lsp client router wiring")
+}
+
+func clientHasLSPRouterEnablementEvidence(
+	clientName string,
+	adapter clients.Client,
+	languages []string,
+	regEntries []WorkspaceEntry,
+	portsByLanguage map[string]map[int]bool,
+) (bool, error) {
+	for _, language := range languages {
+		targetName := LSPRouterEntryName(language)
+		live, err := adapter.GetEntry(targetName)
+		if err != nil {
+			return false, fmt.Errorf("read %s entry %s: %w", clientName, targetName, err)
+		}
+		if entryIsHubOwnedLSPClientEntry(live, language, portsByLanguage[language]) {
+			return true, nil
+		}
+		for _, legacyName := range lspLegacyCandidateEntryNames(regEntries, language, clientName) {
+			if legacyName == targetName {
+				continue
+			}
+			legacy, err := adapter.GetEntry(legacyName)
+			if err != nil {
+				return false, fmt.Errorf("read %s entry %s: %w", clientName, legacyName, err)
+			}
+			if entryPointsAtLegacyLSPPort(legacy, portsByLanguage[language]) {
+				return true, nil
+			}
+		}
+	}
+
+	names, err := listManifestNamesEmbedFirst()
+	if err != nil {
+		return false, fmt.Errorf("list manifests for %s enablement evidence: %w", clientName, err)
+	}
+	for _, server := range names {
+		data, err := loadManifestYAMLEmbedFirst(server)
+		if err != nil {
+			return false, fmt.Errorf("load manifest %s for %s enablement evidence: %w", server, clientName, err)
+		}
+		m, err := parseManifestForName(server, data)
+		if err != nil {
+			return false, fmt.Errorf("parse manifest %s for %s enablement evidence: %w", server, clientName, err)
+		}
+		for _, binding := range m.ClientBindings {
+			if strings.TrimSpace(binding.Client) != clientName {
+				continue
+			}
+			live, err := adapter.GetEntry(server)
+			if err != nil {
+				return false, fmt.Errorf("read %s entry %s: %w", clientName, server, err)
+			}
+			if live == nil {
+				break
+			}
+			if matched, _ := liveEntryMatchesManifestBinding(live, server, binding, m); matched {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // RollbackLSPRouterClientEntries reconstructs the pre-router per-workspace

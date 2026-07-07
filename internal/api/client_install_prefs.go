@@ -43,10 +43,10 @@ const (
 	defaultInstallClientsKey = "clients.default_install"
 
 	// lspRouterDisabledClientsKey is a narrow LSP-router opt-out list, not an
-	// install target set. Absent/blank means every present client remains
-	// eligible for EnsureLSPRouterClientEntries; a listed client is skipped by
-	// future ensure runs, and RollbackLSPRouterClientEntriesForClient remains
-	// the explicit removal path for any existing router entries.
+	// install target set. Absent/blank means it contributes no explicit opt-out
+	// to EnsureLSPRouterClientEntries' effective-enable rule; a listed client is
+	// skipped by future ensure runs, and RollbackLSPRouterClientEntriesForClient
+	// remains the explicit removal path for any existing router entries.
 	lspRouterDisabledClientsKey = "clients.lsp_router_disabled"
 )
 
@@ -149,7 +149,7 @@ func (a *API) ClientInstallEnabledSetIn(path string) (map[string]bool, error) {
 // the default-install preference controls only installs that omit an explicit
 // client target, while this list means "do not auto-maintain LSP router entries
 // for this present client." Absent/blank/unknown-only config returns an empty
-// set, preserving pre-opt-out behavior for every client.
+// set; the effective setup-write rule lives in EnsureLSPRouterClientEntries.
 func (a *API) LSPRouterDisabledClientSet() (map[string]bool, error) {
 	return a.LSPRouterDisabledClientSetIn(SettingsPath())
 }
