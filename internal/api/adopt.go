@@ -1,10 +1,10 @@
 package api
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -43,16 +43,22 @@ type AdoptOpts struct {
 
 // AdoptPlan is the side-effect-free preview returned by BuildAdoptPlan.
 type AdoptPlan struct {
-	EntryName        string
-	SourceClient     string
-	ManifestName     string
-	Port             int
-	AdoptClients     []string
-	AlsoPresent      []string
-	SecretRoutedKeys []string
-	ManifestYAML     string
+	EntryName           string
+	SourceClient        string
+	ManifestName        string
+	Port                int
+	AdoptClients        []string
+	AlsoPresent         []string
+	SignatureMismatches []AdoptClientSignatureMismatch
+	SecretRoutedKeys    []string
+	ManifestYAML        string
 
 	secretValues map[string]string
+}
+
+type AdoptClientSignatureMismatch struct {
+	Client string
+	Reason string
 }
 
 // BuildAdoptPlan extracts an existing direct stdio client entry and renders the
@@ -81,18 +87,10 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	}
 
 	scanOpts := adoptScanOpts(opts.ScanOpts)
-	draft, err := a.ExtractManifestFromClient(sourceClient, entryName, scanOpts)
+	entry, err := a.extractStdioEntryFromClient(sourceClient, entryName, scanOpts)
 	if err != nil {
 		return nil, err
 	}
-	m, err := config.ParseManifest(bytes.NewReader([]byte(draft)))
-	if err != nil {
-		return nil, fmt.Errorf("parse extracted manifest draft: %w", err)
-	}
-	if len(m.Daemons) == 0 {
-		return nil, fmt.Errorf("extracted manifest for %q has no daemon row", entryName)
-	}
-
 	port := opts.Port
 	if port == 0 {
 		port, err = pickNextFreeAdoptPort()
@@ -102,33 +100,38 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	} else if err := validateExplicitAdoptPort(port); err != nil {
 		return nil, err
 	}
-	m.Name = manifestName
-	m.Kind = config.KindGlobal
-	m.Transport = config.TransportStdioBridge
-	m.Daemons = []config.DaemonSpec{{Name: "default", Port: port}}
-	routedKeys, secretValues := rewriteAdoptSensitiveEnv(m.Env)
 
-	foundClients := a.adoptClientsWithSameNameEntry(entryName, scanOpts)
+	env := cloneStringMap(entry.Env)
+	routedKeys, secretValues := rewriteAdoptSensitiveEnv(manifestName, env)
+
+	clientScan := a.adoptClientsWithSameNameEntry(entryName, scanOpts, sourceClient, newAdoptEntrySignature(entry))
+	foundClients := clientScan.Matching
+	mismatches := clientScan.Mismatched
+	if len(opts.Clients) > 0 {
+		foundClients = clientScan.Found
+		mismatches = nil
+	}
 	adoptClients, err := normalizeAdoptClients(opts.Clients, foundClients, sourceClient)
 	if err != nil {
 		return nil, err
 	}
 	alsoPresent := clientsOutsideSelection(foundClients, adoptClients)
-	manifestYAML := renderStdioBridgeManifestYAML(manifestName, m.Command, m.BaseArgs, m.Env, port, adoptClientBindings(adoptClients))
+	manifestYAML := renderStdioBridgeManifestYAML(manifestName, entry.Command, entry.Args, env, port, adoptClientBindings(adoptClients))
 	if _, err := config.ParseManifest(strings.NewReader(manifestYAML)); err != nil {
 		return nil, fmt.Errorf("render adopted manifest: %w", err)
 	}
 
 	return &AdoptPlan{
-		EntryName:        entryName,
-		SourceClient:     sourceClient,
-		ManifestName:     manifestName,
-		Port:             port,
-		AdoptClients:     adoptClients,
-		AlsoPresent:      alsoPresent,
-		SecretRoutedKeys: routedKeys,
-		ManifestYAML:     manifestYAML,
-		secretValues:     secretValues,
+		EntryName:           entryName,
+		SourceClient:        sourceClient,
+		ManifestName:        manifestName,
+		Port:                port,
+		AdoptClients:        adoptClients,
+		AlsoPresent:         alsoPresent,
+		SignatureMismatches: mismatches,
+		SecretRoutedKeys:    routedKeys,
+		ManifestYAML:        manifestYAML,
+		secretValues:        secretValues,
 	}, nil
 }
 
@@ -178,10 +181,13 @@ func PrintAdoptPlan(w io.Writer, plan *AdoptPlan) {
 	fmt.Fprintf(w, "  port: %d\n", plan.Port)
 	fmt.Fprintf(w, "  clients: %s\n", strings.Join(plan.AdoptClients, ","))
 	if len(plan.SecretRoutedKeys) > 0 {
-		fmt.Fprintf(w, "  secret-routed env keys: %s\n", strings.Join(plan.SecretRoutedKeys, ","))
+		fmt.Fprintf(w, "  secret-routed vault keys: %s\n", strings.Join(plan.SecretRoutedKeys, ","))
 	}
 	for _, client := range plan.AlsoPresent {
 		fmt.Fprintf(w, "  also present in %s - re-run with --client %s or include it via --clients\n", client, client)
+	}
+	for _, mismatch := range plan.SignatureMismatches {
+		fmt.Fprintf(w, "  %s in %s differs (%s) - re-run with --clients %s to adopt it explicitly\n", plan.EntryName, mismatch.Client, mismatch.Reason, mismatch.Client)
 	}
 	fmt.Fprintln(w, "No changes made. Re-run with --yes to apply.")
 }
@@ -205,14 +211,79 @@ func adoptScanOpts(opts ScanOpts) ScanOpts {
 	return out
 }
 
-func (a *API) adoptClientsWithSameNameEntry(entryName string, scanOpts ScanOpts) []string {
-	var found []string
+type adoptClientScanResult struct {
+	Found      []string
+	Matching   []string
+	Mismatched []AdoptClientSignatureMismatch
+}
+
+type adoptEntrySignature struct {
+	Command string
+	Args    []string
+	EnvKeys []string
+}
+
+func newAdoptEntrySignature(entry extractedStdioEntry) adoptEntrySignature {
+	envKeys := make([]string, 0, len(entry.Env))
+	for key := range entry.Env {
+		envKeys = append(envKeys, key)
+	}
+	sort.Strings(envKeys)
+	return adoptEntrySignature{
+		Command: entry.Command,
+		Args:    append([]string(nil), entry.Args...),
+		EnvKeys: envKeys,
+	}
+}
+
+func (sig adoptEntrySignature) diffReasons(other adoptEntrySignature) []string {
+	var reasons []string
+	if sig.Command != other.Command {
+		reasons = append(reasons, "command")
+	}
+	if !slices.Equal(sig.Args, other.Args) {
+		reasons = append(reasons, "args")
+	}
+	if !slices.Equal(sig.EnvKeys, other.EnvKeys) {
+		reasons = append(reasons, "env keys")
+	}
+	return reasons
+}
+
+func formatAdoptSignatureReasons(reasons []string) string {
+	if slices.Equal(reasons, []string{"command", "args"}) {
+		return "command/args"
+	}
+	return strings.Join(reasons, ", ")
+}
+
+func (a *API) adoptClientsWithSameNameEntry(entryName string, scanOpts ScanOpts, sourceClient string, sourceSignature adoptEntrySignature) adoptClientScanResult {
+	var result adoptClientScanResult
 	for _, client := range adoptSupportedClients {
-		if _, err := a.ExtractManifestFromClient(client, entryName, scanOpts); err == nil {
-			found = append(found, client)
+		entry, err := a.extractStdioEntryFromClient(client, entryName, scanOpts)
+		if err != nil {
+			continue
+		}
+		result.Found = append(result.Found, client)
+		reasons := sourceSignature.diffReasons(newAdoptEntrySignature(entry))
+		if len(reasons) == 0 {
+			result.Matching = append(result.Matching, client)
+			continue
+		}
+		if client != sourceClient {
+			result.Mismatched = append(result.Mismatched, AdoptClientSignatureMismatch{
+				Client: client,
+				Reason: formatAdoptSignatureReasons(reasons),
+			})
 		}
 	}
-	return found
+	if !containsAdoptString(result.Matching, sourceClient) {
+		result.Matching = append(result.Matching, sourceClient)
+	}
+	if !containsAdoptString(result.Found, sourceClient) {
+		result.Found = append(result.Found, sourceClient)
+	}
+	return result
 }
 
 func normalizeAdoptClients(requested, found []string, sourceClient string) ([]string, error) {

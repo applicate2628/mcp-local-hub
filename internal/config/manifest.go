@@ -468,6 +468,9 @@ func ParseCatalogFields(r io.Reader) (CatalogFields, error) {
 func expandEnvCrossPlatform(s string) (string, []string) {
 	var missing []string
 	expanded := os.Expand(s, func(name string) string {
+		if strings.HasPrefix(name, "env:") && len(name) > len("env:") {
+			return "${" + name + "}"
+		}
 		if v := os.Getenv(name); v != "" {
 			return v
 		}
@@ -846,12 +849,14 @@ func (m *ServerManifest) validateRequiredSecretsBackEnv() error {
 //  1. NON-EMPTY: a blank (empty / whitespace-only) entry is rejected — the
 //     runtime probe would look up an empty name and can never pass (a confusing
 //     permanently-disabled row).
+//
 //  2. NO SURROUNDING WHITESPACE: a value with leading/trailing whitespace (e.g.
 //     "go ") is rejected. The non-empty check above trims before testing, so a
 //     padded-but-non-blank value would otherwise slip past, yet the runtime
 //     probe passes the ORIGINAL padded token to exec.LookPath / os.Stat and the
 //     row never enables even when the tool is installed (invisible-whitespace
 //     permanent-disable). Fail loud on the malformed value instead.
+//
 //  3. BARE binaries[] (not a path): each binaries[] entry must be a bare
 //     PATH-searchable command name, NOT a path. binaries[] are resolved via
 //     exec.LookPath (PATH search), so a path-shaped value (e.g. "/net/slow/tool",
@@ -860,6 +865,7 @@ func (m *ServerManifest) validateRequiredSecretsBackEnv() error {
 //     a literal path or never resolve it, so the row silently never enables. Use
 //     files[] for a fixed path instead. The path-shape taxonomy is the single
 //     lexical owner config.IsPathShaped (platform-neutral).
+//
 //  4. ABSOLUTE files[] PATHS: each files[] entry must be an absolute-path SHAPE on
 //     SOME host OS (IsAbsolutePathShape — drive-letter "C:\\…", leading "/", or
 //     leading "\\" incl UNC). A relative file-probe path is os.Stat'd as-is by the

@@ -7,7 +7,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
+	"strings"
 
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/servers"
@@ -18,7 +20,17 @@ const (
 	adoptPortEnd   = 9399
 )
 
-var collectEmbeddedManifestPortsFn = collectEmbeddedManifestPorts
+var (
+	adoptManifestDirFn             = defaultManifestDir
+	collectEmbeddedManifestPortsFn = collectEmbeddedManifestPorts
+)
+
+var (
+	adoptPortLineRE       = regexp.MustCompile(`^\s*port:\s*([0-9]+)\b`)
+	adoptPortPoolInlineRE = regexp.MustCompile(`^\s*port_pool:\s*\{[^}]*start:\s*([0-9]+)[^}]*end:\s*([0-9]+)`)
+	adoptPoolStartLineRE  = regexp.MustCompile(`^start:\s*([0-9]+)\b`)
+	adoptPoolEndLineRE    = regexp.MustCompile(`^end:\s*([0-9]+)\b`)
+)
 
 func pickNextFreeAdoptPort() (int, error) {
 	used := collectUsedAdoptPorts()
@@ -48,9 +60,10 @@ func validateExplicitAdoptPort(port int) error {
 
 func collectUsedAdoptPorts() map[int]bool {
 	used := map[int]bool{}
-	collectDiskManifestPorts(defaultManifestDir(), used)
+	collectDiskManifestPorts(adoptManifestDirFn(), used)
 	collectEmbeddedManifestPortsFn(used)
 	collectSupervisorIntentPorts(used)
+	collectConfiguredGUIPort(used)
 	return used
 }
 
@@ -65,9 +78,10 @@ func collectDiskManifestPorts(dir string, used map[int]bool) {
 		}
 		data, err := os.ReadFile(filepath.Join(dir, entry.Name(), "manifest.yaml"))
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "mcphub adopt port allocator: unreadable manifest %s: %v\n", filepath.Join(dir, entry.Name(), "manifest.yaml"), err)
 			continue
 		}
-		collectManifestPorts(data, used)
+		collectManifestPorts(filepath.Join(dir, entry.Name(), "manifest.yaml"), data, used)
 	}
 }
 
@@ -77,7 +91,7 @@ func collectEmbeddedManifestPorts(used map[int]bool) {
 		if err != nil {
 			continue
 		}
-		collectManifestPorts(data, used)
+		collectManifestPorts(name+"/manifest.yaml", data, used)
 	}
 }
 
@@ -97,20 +111,130 @@ func collectSupervisorIntentPorts(used map[int]bool) {
 	}
 }
 
-func collectManifestPorts(data []byte, used map[int]bool) {
-	m, err := config.ParseManifest(bytes.NewReader(data))
+func collectConfiguredGUIPort(used map[int]bool) {
+	raw, err := NewAPI().SettingsGet("gui_server.port")
 	if err != nil {
 		return
 	}
+	port, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return
+	}
+	markUsedAdoptPort(port, used)
+}
+
+func collectManifestPorts(source string, data []byte, used map[int]bool) {
+	m, err := config.ParseManifest(bytes.NewReader(data))
+	if err != nil {
+		count := collectManifestPortsTolerant(data, used)
+		fmt.Fprintf(os.Stderr, "mcphub adopt port allocator: manifest %s did not parse (%v); reserved %d port(s) from raw scrape\n", source, err, count)
+		return
+	}
 	for _, daemon := range m.Daemons {
-		if daemon.Port >= adoptPortStart && daemon.Port <= adoptPortEnd {
-			used[daemon.Port] = true
-		}
+		markUsedAdoptPort(daemon.Port, used)
 	}
 	collectPortPool(m.PortPool, used)
 	if m.DaemonTemplate != nil {
 		collectPortPool(m.DaemonTemplate.PortPool, used)
 	}
+}
+
+func collectManifestPortsTolerant(data []byte, used map[int]bool) int {
+	lines := strings.Split(string(data), "\n")
+	count := 0
+	for _, raw := range lines {
+		line := stripAdoptPortComment(raw)
+		if m := adoptPortLineRE.FindStringSubmatch(line); len(m) == 2 {
+			if port, err := strconv.Atoi(m[1]); err == nil && markUsedAdoptPort(port, used) {
+				count++
+			}
+		}
+	}
+	return count + collectManifestPortPoolsTolerant(lines, used)
+}
+
+func collectManifestPortPoolsTolerant(lines []string, used map[int]bool) int {
+	count := 0
+	inPool := false
+	poolIndent := 0
+	start, end := 0, 0
+	flush := func() {
+		if start > 0 && end > 0 {
+			count += markUsedAdoptPortRange(start, end, used)
+		}
+		start, end = 0, 0
+	}
+	for _, raw := range lines {
+		line := stripAdoptPortComment(raw)
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		trimmed := strings.TrimSpace(line)
+		if inPool && indent <= poolIndent {
+			flush()
+			inPool = false
+		}
+		if m := adoptPortPoolInlineRE.FindStringSubmatch(trimmed); len(m) == 3 {
+			poolStart, startErr := strconv.Atoi(m[1])
+			poolEnd, endErr := strconv.Atoi(m[2])
+			if startErr == nil && endErr == nil {
+				count += markUsedAdoptPortRange(poolStart, poolEnd, used)
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "port_pool:") {
+			inPool = true
+			poolIndent = indent
+			start, end = 0, 0
+			continue
+		}
+		if !inPool {
+			continue
+		}
+		if m := adoptPoolStartLineRE.FindStringSubmatch(trimmed); len(m) == 2 {
+			start, _ = strconv.Atoi(m[1])
+			continue
+		}
+		if m := adoptPoolEndLineRE.FindStringSubmatch(trimmed); len(m) == 2 {
+			end, _ = strconv.Atoi(m[1])
+		}
+	}
+	if inPool {
+		flush()
+	}
+	return count
+}
+
+func stripAdoptPortComment(line string) string {
+	if before, _, ok := strings.Cut(line, "#"); ok {
+		return before
+	}
+	return line
+}
+
+func markUsedAdoptPortRange(start, end int, used map[int]bool) int {
+	if end < start {
+		return 0
+	}
+	count := 0
+	for p := start; p <= end; p++ {
+		if markUsedAdoptPort(p, used) {
+			count++
+		}
+	}
+	return count
+}
+
+func markUsedAdoptPort(port int, used map[int]bool) bool {
+	if port < adoptPortStart || port > adoptPortEnd {
+		return false
+	}
+	if used[port] {
+		return false
+	}
+	used[port] = true
+	return true
 }
 
 func collectPortPool(pool *config.PortPool, used map[int]bool) {

@@ -48,6 +48,18 @@ func TestResolver_Env(t *testing.T) {
 	}
 }
 
+func TestResolver_EnvBracePlaceholder(t *testing.T) {
+	t.Setenv("MCP_TEST_VAR", "env-value")
+	r := NewResolver(nil, nil)
+	got, err := r.Resolve("${env:MCP_TEST_VAR}")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != "env-value" {
+		t.Errorf("Resolve = %q, want env-value", got)
+	}
+}
+
 func TestResolver_Literal(t *testing.T) {
 	r := NewResolver(nil, nil)
 	got, err := r.Resolve("plain-text")

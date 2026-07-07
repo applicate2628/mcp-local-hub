@@ -8,7 +8,7 @@ import (
 	"mcp-local-hub/internal/secrets"
 )
 
-func rewriteAdoptSensitiveEnv(env map[string]string) (routedKeys []string, secretValues map[string]string) {
+func rewriteAdoptSensitiveEnv(manifestName string, env map[string]string) (routedKeys []string, secretValues map[string]string) {
 	if len(env) == 0 {
 		return nil, nil
 	}
@@ -25,11 +25,16 @@ func rewriteAdoptSensitiveEnv(env map[string]string) (routedKeys []string, secre
 		if secretValues == nil {
 			secretValues = map[string]string{}
 		}
-		secretValues[key] = value
-		env[key] = "secret:" + key
-		routedKeys = append(routedKeys, key)
+		vaultKey := adoptVaultKey(manifestName, key)
+		secretValues[vaultKey] = value
+		env[key] = "secret:" + vaultKey
+		routedKeys = append(routedKeys, vaultKey)
 	}
 	return routedKeys, secretValues
+}
+
+func adoptVaultKey(manifestName, envName string) string {
+	return manifestName + "." + envName
 }
 
 func isLiteralAdoptEnvValue(value string) bool {
@@ -53,6 +58,11 @@ func persistAdoptRoutedSecrets(secretValues map[string]string) error {
 		vault, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 		if err != nil {
 			return fmt.Errorf("adopt secret routing: open vault: %w", err)
+		}
+		for _, key := range keys {
+			if _, err := vault.Get(key); err == nil {
+				return fmt.Errorf("adopt secret routing: vault key %q already exists; refusing to overwrite an existing secret", key)
+			}
 		}
 		for _, key := range keys {
 			if err := vault.Set(key, secretValues[key]); err != nil {
