@@ -5,8 +5,10 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -191,5 +193,70 @@ func TestPidForSocketInodeContext_DeadlineTripsMidWalk(t *testing.T) {
 	}
 	if calls <= 1 {
 		t.Fatalf("ctx.Err() polled %d times; expected the walk to poll past the trigger", calls)
+	}
+}
+
+func TestPortOwnerPidsForSocketInodes_ReturnsCompleteBeforeCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	found, sawPermission, err := pidsForSocketInodes(ctx, map[int]string{})
+	if err != nil {
+		t.Fatalf("pidsForSocketInodes with complete data returned err=%v, want nil", err)
+	}
+	if sawPermission {
+		t.Fatalf("sawPermission = true, want false for empty wanted inode set")
+	}
+	if len(found) != 0 {
+		t.Fatalf("found = %+v, want empty", found)
+	}
+}
+
+func TestPortOwnerScanProcFDDirLinksChecksContextBeforeOpen(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	matched, _, err := scanProcFDDirLinks(ctx, t.TempDir(), func(string) bool {
+		t.Fatal("visitor must not run for a pre-canceled context")
+		return false
+	})
+	if matched {
+		t.Fatalf("matched = true, want false")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestPortOwnerScanProcFDDirLinksReadsFdDirectoryInBatches(t *testing.T) {
+	fdDir := t.TempDir()
+	wantTarget := "socket:[12345]"
+	total := procFDReadDirBatchSize + 3
+	for i := 0; i < total; i++ {
+		target := fmt.Sprintf("pipe:[%d]", i)
+		if i == total-1 {
+			target = wantTarget
+		}
+		if err := os.Symlink(target, filepath.Join(fdDir, fmt.Sprintf("%03d", i))); err != nil {
+			t.Fatalf("symlink fd fixture %d: %v", i, err)
+		}
+	}
+
+	var seen int
+	matched, sawPermission, err := scanProcFDDirLinks(context.Background(), fdDir, func(target string) bool {
+		seen++
+		return target == wantTarget
+	})
+	if err != nil {
+		t.Fatalf("scanProcFDDirLinks: %v", err)
+	}
+	if sawPermission {
+		t.Fatalf("sawPermission = true, want false")
+	}
+	if !matched {
+		t.Fatalf("matched = false, want true")
+	}
+	if seen != total {
+		t.Fatalf("visited %d fd links, want %d across multiple ReadDir batches", seen, total)
 	}
 }

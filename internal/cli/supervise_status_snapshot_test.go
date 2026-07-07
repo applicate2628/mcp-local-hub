@@ -221,12 +221,14 @@ func TestSupervisorStatusSnapshotOwnerMismatchFlipsRestarting(t *testing.T) {
 
 func TestStatusPortOwnersCoalescerCoalescesWithinTTL(t *testing.T) {
 	var calls int32
+	var gen atomic.Uint64
 	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
 	c := &statusPortOwnersCoalescer{
 		snapshotFn: func(context.Context) (map[int]int, error) {
 			atomic.AddInt32(&calls, 1)
 			return map[int]int{9123: 1234}, nil
 		},
+		genFn:   gen.Load,
 		nowFn:   func() time.Time { return now },
 		timeout: time.Second,
 	}
@@ -248,6 +250,7 @@ func TestStatusPortOwnersCoalescerCoalescesWithinTTL(t *testing.T) {
 func TestStatusPortOwnersCoalescerSingleflightsConcurrentMiss(t *testing.T) {
 	const callers = 16
 	var calls int32
+	var gen atomic.Uint64
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
@@ -262,6 +265,7 @@ func TestStatusPortOwnersCoalescerSingleflightsConcurrentMiss(t *testing.T) {
 			<-release
 			return want, nil
 		},
+		genFn:   gen.Load,
 		nowFn:   func() time.Time { return now },
 		timeout: time.Second,
 	}
@@ -299,6 +303,7 @@ func TestStatusPortOwnersCoalescerSingleflightsConcurrentMiss(t *testing.T) {
 func TestStatusPortOwnersCoalescerSlowProbeCachesAtCompletionForWaiters(t *testing.T) {
 	const callers = 8
 	var calls int32
+	var gen atomic.Uint64
 	var nowCalls int32
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -313,6 +318,7 @@ func TestStatusPortOwnersCoalescerSlowProbeCachesAtCompletionForWaiters(t *testi
 			<-release
 			return map[int]int{9123: 1234}, nil
 		},
+		genFn: gen.Load,
 		nowFn: func() time.Time {
 			if atomic.AddInt32(&nowCalls, 1) == 1 {
 				return base
@@ -348,12 +354,14 @@ func TestStatusPortOwnersCoalescerSlowProbeCachesAtCompletionForWaiters(t *testi
 
 func TestStatusPortOwnersCoalescerRefreshesAfterTTL(t *testing.T) {
 	var calls int32
+	var gen atomic.Uint64
 	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
 	c := &statusPortOwnersCoalescer{
 		snapshotFn: func(context.Context) (map[int]int, error) {
 			call := int(atomic.AddInt32(&calls, 1))
 			return map[int]int{9123: call}, nil
 		},
+		genFn:   gen.Load,
 		nowFn:   func() time.Time { return now },
 		timeout: time.Second,
 	}
@@ -378,18 +386,20 @@ func TestStatusPortOwnersCoalescerRefreshesAfterTTL(t *testing.T) {
 	}
 }
 
-// Invalidate must force the very next Get to re-probe even WITHIN the TTL — the
-// read-your-writes guarantee for the respawn/recover -> poll flow (Codex
-// flap-review P3): a caller that invalidates after mutating the fleet must not be
-// served the pre-mutation cached owner map.
-func TestStatusPortOwnersCoalescerInvalidateForcesReprobeWithinTTL(t *testing.T) {
+// A fleet-generation change must force the very next Get to re-probe even WITHIN
+// the TTL — the read-your-writes guarantee for any respawn path (manual or
+// automatic): status must not combine fresh tracker state with a pre-respawn
+// owner map.
+func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChanges(t *testing.T) {
 	var calls int32
+	var gen atomic.Uint64
 	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
 	c := &statusPortOwnersCoalescer{
 		snapshotFn: func(context.Context) (map[int]int, error) {
 			call := int(atomic.AddInt32(&calls, 1))
 			return map[int]int{9123: call}, nil
 		},
+		genFn:   gen.Load,
 		nowFn:   func() time.Time { return now },
 		timeout: time.Second,
 	}
@@ -397,34 +407,31 @@ func TestStatusPortOwnersCoalescerInvalidateForcesReprobeWithinTTL(t *testing.T)
 	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
 		t.Fatalf("first Get = (%+v, %v), want call marker 1", snap, err)
 	}
-	// Still within the TTL (now unchanged): a plain Get would be served from cache.
-	c.Invalidate()
+	// Still within the TTL (now unchanged): only the generation bump should force
+	// the fresh probe.
+	gen.Add(1)
 	snap, err := c.Get()
 	if err != nil {
-		t.Fatalf("post-invalidate Get: %v", err)
+		t.Fatalf("post-generation-bump Get: %v", err)
 	}
 	if snap[9123] != 2 {
-		t.Fatalf("post-invalidate snapshot = %+v, want a fresh re-probe (marker 2) despite same-TTL", snap)
+		t.Fatalf("post-generation-bump snapshot = %+v, want a fresh re-probe (marker 2) despite same-TTL", snap)
 	}
 	if got := atomic.LoadInt32(&calls); got != 2 {
-		t.Fatalf("snapshotFn calls = %d, want 2 (invalidate forced a re-probe within TTL)", got)
+		t.Fatalf("snapshotFn calls = %d, want 2 (generation bump forced a re-probe within TTL)", got)
 	}
-}
-
-// A nil coalescer Invalidate is a no-op (the nil-coalescer status path must not panic).
-func TestStatusPortOwnersCoalescerInvalidateNilSafe(t *testing.T) {
-	var c *statusPortOwnersCoalescer
-	c.Invalidate() // must not panic
 }
 
 func TestStatusPortOwnersCoalescerCachesErrorAndReprobesAfterTTL(t *testing.T) {
 	var calls int32
+	var gen atomic.Uint64
 	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
 	c := &statusPortOwnersCoalescer{
 		snapshotFn: func(context.Context) (map[int]int, error) {
 			call := atomic.AddInt32(&calls, 1)
 			return nil, fmt.Errorf("netstat failed %d", call)
 		},
+		genFn:   gen.Load,
 		nowFn:   func() time.Time { return now },
 		timeout: time.Second,
 	}

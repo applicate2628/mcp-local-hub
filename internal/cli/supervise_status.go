@@ -56,16 +56,23 @@ const statusPortOwnersProbeTimeout = 3 * time.Second
 type statusPortOwnersCoalescer struct {
 	mu         sync.Mutex
 	takenAt    time.Time
+	genAtProbe uint64
 	snapshot   map[int]int
 	err        error
 	snapshotFn func(context.Context) (map[int]int, error) // seam; default api.LoopbackPortOwnersSnapshotContext
+	genFn      func() uint64                              // seam; default DaemonRuntimeTracker.Generation
 	nowFn      func() time.Time                           // seam; default time.Now
 	timeout    time.Duration                              // default statusPortOwnersProbeTimeout
 }
 
-func newStatusPortOwnersCoalescer() *statusPortOwnersCoalescer {
+func newStatusPortOwnersCoalescer(tracker *DaemonRuntimeTracker) *statusPortOwnersCoalescer {
+	genFn := func() uint64 { return 0 }
+	if tracker != nil {
+		genFn = tracker.Generation
+	}
 	return &statusPortOwnersCoalescer{
 		snapshotFn: api.LoopbackPortOwnersSnapshotContext,
+		genFn:      genFn,
 		nowFn:      time.Now,
 		timeout:    statusPortOwnersProbeTimeout,
 	}
@@ -79,32 +86,23 @@ func (c *statusPortOwnersCoalescer) Get() (map[int]int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := c.nowFn()
-	if !c.takenAt.IsZero() && now.Sub(c.takenAt) < statusPortOwnersTTL {
+	gen := c.currentGeneration()
+	if !c.takenAt.IsZero() && now.Sub(c.takenAt) < statusPortOwnersTTL && gen == c.genAtProbe {
 		return c.snapshot, c.err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 	c.snapshot, c.err = c.snapshotFn(ctx)
 	c.takenAt = c.nowFn()
+	c.genAtProbe = c.currentGeneration()
 	return c.snapshot, c.err
 }
 
-// Invalidate forces the next Get to take a FRESH snapshot regardless of the TTL.
-// It is called right after a respawn/recover mutates the fleet so a status poll
-// immediately afterward does not combine fresh tracker state (a just-spawned new
-// PID) with a STALE pre-respawn port-owner map — which would otherwise report a
-// healthy just-respawned daemon as Restarting with stale_pid=<newPID> for up to
-// one TTL, and the GUI/API would cache that false row for its own daemons TTL
-// (Codex flap-review P3). This preserves the read-your-writes contract for the
-// operator's `daemon recover`/Restart → poll-status flow that the coalescer would
-// otherwise break. Cheap (a single state-change, respawns are rare) and nil-safe.
-func (c *statusPortOwnersCoalescer) Invalidate() {
-	if c == nil {
-		return
+func (c *statusPortOwnersCoalescer) currentGeneration() uint64 {
+	if c.genFn == nil {
+		return 0
 	}
-	c.mu.Lock()
-	c.takenAt = time.Time{}
-	c.mu.Unlock()
+	return c.genFn()
 }
 
 func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coalescer *statusPortOwnersCoalescer) ([]map[string]any, error) {

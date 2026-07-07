@@ -4,12 +4,16 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
+
+const procFDReadDirBatchSize = 256
 
 // loopbackPortOwnerPID resolves the PID that owns a LISTENING socket on
 // 127.0.0.1:<port> using Linux's kernel socket tables. This avoids trusting a
@@ -178,15 +182,15 @@ func pidsForSocketInodes(ctx context.Context, wantInodes map[int]string) (map[st
 	found := map[string]int{}
 	var sawPermissionError bool
 	for _, entry := range entries {
+		if len(found) == len(want) {
+			break
+		}
 		// Honor the deadline at the top of each /proc entry (before its per-fd
 		// readlink scan) so a canceled/deadline-exceeded ctx aborts promptly
 		// instead of walking the whole (possibly large/slow) tree — the same
 		// guard the per-port pidForSocketInodeContext uses (Codex PR #510 P2).
 		if err := ctx.Err(); err != nil {
 			return found, sawPermissionError, err
-		}
-		if len(found) == len(want) {
-			break
 		}
 		if !entry.IsDir() {
 			continue
@@ -195,28 +199,7 @@ func pidsForSocketInodes(ctx context.Context, wantInodes map[int]string) (map[st
 		if err != nil || pid <= 0 {
 			continue
 		}
-		fds, err := os.ReadDir(filepath.Join("/proc", entry.Name(), "fd"))
-		if err != nil {
-			if os.IsPermission(err) {
-				sawPermissionError = true
-			}
-			continue
-		}
-		for _, fd := range fds {
-			// Also honor the deadline INSIDE a single entry's fd scan — one
-			// process with a huge /proc/<pid>/fd dir would otherwise run past
-			// the deadline even though the per-entry check passed (mirrors
-			// pidForSocketInodeContext's inner ctx.Err()).
-			if err := ctx.Err(); err != nil {
-				return found, sawPermissionError, err
-			}
-			target, err := os.Readlink(filepath.Join("/proc", entry.Name(), "fd", fd.Name()))
-			if err != nil {
-				if os.IsPermission(err) {
-					sawPermissionError = true
-				}
-				continue
-			}
+		_, sawPermission, err := scanProcFDDirLinks(ctx, filepath.Join("/proc", entry.Name(), "fd"), func(target string) bool {
 			if _, ok := want[target]; ok {
 				// target is "socket:[<inode>]"; strip back to the bare inode key.
 				inode := strings.TrimSuffix(strings.TrimPrefix(target, "socket:["), "]")
@@ -224,6 +207,13 @@ func pidsForSocketInodes(ctx context.Context, wantInodes map[int]string) (map[st
 					found[inode] = pid
 				}
 			}
+			return len(found) == len(want)
+		})
+		if err != nil {
+			return found, sawPermissionError, err
+		}
+		if sawPermission {
+			sawPermissionError = true
 		}
 	}
 	return found, sawPermissionError, nil
@@ -303,31 +293,17 @@ func pidForSocketInodeContext(ctx context.Context, inode string) (int, bool, err
 		if err != nil || pid <= 0 {
 			continue
 		}
-		fds, err := os.ReadDir(filepath.Join("/proc", entry.Name(), "fd"))
+		matched, sawPermission, err := scanProcFDDirLinks(ctx, filepath.Join("/proc", entry.Name(), "fd"), func(target string) bool {
+			return target == want
+		})
 		if err != nil {
-			if os.IsPermission(err) {
-				sawPermissionError = true
-			}
-			continue
+			return 0, false, err
 		}
-		for _, fd := range fds {
-			// P2-iv (Codex PR-3): also honor the deadline INSIDE a single entry's fd
-			// scan — one process before the socket owner with a huge /proc/<pid>/fd
-			// dir would otherwise let this inner loop run past the deadline even
-			// though the per-entry check passed. ctx.Err() is a cheap atomic load.
-			if err := ctx.Err(); err != nil {
-				return 0, false, err
-			}
-			target, err := os.Readlink(filepath.Join("/proc", entry.Name(), "fd", fd.Name()))
-			if err != nil {
-				if os.IsPermission(err) {
-					sawPermissionError = true
-				}
-				continue
-			}
-			if target == want {
-				return pid, true, nil
-			}
+		if sawPermission {
+			sawPermissionError = true
+		}
+		if matched {
+			return pid, true, nil
 		}
 	}
 	if sawPermissionError {
@@ -342,6 +318,56 @@ func pidForSocketInodeContext(ctx context.Context, inode string) (int, bool, err
 		return 0, true, nil
 	}
 	return 0, false, nil
+}
+
+func scanProcFDDirLinks(ctx context.Context, fdDir string, visit func(target string) bool) (bool, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return false, false, err
+	}
+	f, err := os.Open(fdDir)
+	if err != nil {
+		if os.IsPermission(err) {
+			return false, true, nil
+		}
+		return false, false, nil
+	}
+	defer f.Close()
+
+	var sawPermissionError bool
+	for {
+		if err := ctx.Err(); err != nil {
+			return false, sawPermissionError, err
+		}
+		fds, err := f.ReadDir(procFDReadDirBatchSize)
+		for _, fd := range fds {
+			if err := ctx.Err(); err != nil {
+				return false, sawPermissionError, err
+			}
+			target, err := os.Readlink(filepath.Join(fdDir, fd.Name()))
+			if err != nil {
+				if os.IsPermission(err) {
+					sawPermissionError = true
+				}
+				continue
+			}
+			if visit != nil && visit(target) {
+				return true, sawPermissionError, nil
+			}
+		}
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, io.EOF) {
+			return false, sawPermissionError, nil
+		}
+		if os.IsPermission(err) {
+			sawPermissionError = true
+		}
+		return false, sawPermissionError, nil
+	}
 }
 
 // guiImageForPID is the POSIX counterpart to the Windows image lookup. The

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -62,9 +63,10 @@ type DaemonRuntimeEntry struct {
 }
 
 type DaemonRuntimeTracker struct {
-	mu       sync.RWMutex
-	entries  map[string]DaemonRuntimeEntry
-	failures map[string][]time.Time // per-task crash timestamps (sliding window, not persisted)
+	mu                  sync.RWMutex
+	entries             map[string]DaemonRuntimeEntry
+	failures            map[string][]time.Time // per-task crash timestamps (sliding window, not persisted)
+	ownershipGeneration atomic.Uint64
 }
 
 func NewDaemonRuntimeTracker() *DaemonRuntimeTracker {
@@ -72,6 +74,28 @@ func NewDaemonRuntimeTracker() *DaemonRuntimeTracker {
 		entries:  map[string]DaemonRuntimeEntry{},
 		failures: map[string][]time.Time{},
 	}
+}
+
+// Generation returns the fleet-wide port-ownership generation. It changes when
+// the tracker records a daemon gaining or losing CurrentPID, so status can
+// invalidate a cached OS port-owner snapshot for every spawn/exit path without
+// a separate manual invalidation side channel.
+func (t *DaemonRuntimeTracker) Generation() uint64 {
+	if t == nil {
+		return 0
+	}
+	return t.ownershipGeneration.Load()
+}
+
+// setCurrentPIDLocked updates CurrentPID and bumps the fleet ownership generation
+// only when the ownership-relevant PID value actually changes.
+//
+// Caller MUST hold t.mu.
+func (t *DaemonRuntimeTracker) setCurrentPIDLocked(entry *DaemonRuntimeEntry, pid int) {
+	if entry.CurrentPID != pid {
+		t.ownershipGeneration.Add(1)
+	}
+	entry.CurrentPID = pid
 }
 
 // RecordCrashAndCountInWindow appends `now` to the per-task failures
@@ -224,7 +248,7 @@ func (t *DaemonRuntimeTracker) MarkSpawned(taskName string, pid int, startedAt t
 		entry.RestartCount++
 	}
 	entry.State = daemonRuntimeStateRunning
-	entry.CurrentPID = pid
+	t.setCurrentPIDLocked(&entry, pid)
 	entry.StartedAt = startedAt.UTC()
 	entry.PIDGeneration++
 	entry.LastError = ""
@@ -245,7 +269,7 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailed(taskName string, err error) {
 		entry.RestartCount++
 	}
 	entry.State = daemonRuntimeStateBackoff
-	entry.CurrentPID = 0
+	t.setCurrentPIDLocked(&entry, 0)
 	entry.StartedAt = time.Time{}
 	entry.LastError = errorString(err)
 	clearOrphanPIDLocked(&entry)
@@ -288,7 +312,7 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailedPreservePID(taskName string, err e
 		entry.RestartCount++
 	}
 	entry.State = daemonRuntimeStateBackoff
-	entry.CurrentPID = 0
+	t.setCurrentPIDLocked(&entry, 0)
 	entry.OrphanPID = orphanPID
 	entry.StartedAt = time.Time{}
 	entry.LastError = errorString(err)
@@ -305,7 +329,7 @@ func (t *DaemonRuntimeTracker) MarkExited(taskName string) {
 	defer t.mu.Unlock()
 	entry := t.entries[taskName]
 	entry.State = daemonRuntimeStateIdle
-	entry.CurrentPID = 0
+	t.setCurrentPIDLocked(&entry, 0)
 	entry.StartedAt = time.Time{}
 	entry.LastError = ""
 	clearOrphanPIDLocked(&entry)
@@ -338,7 +362,7 @@ func (t *DaemonRuntimeTracker) MarkExitedIfCurrent(taskName string, pidGeneratio
 		return false
 	}
 	entry.State = daemonRuntimeStateIdle
-	entry.CurrentPID = 0
+	t.setCurrentPIDLocked(&entry, 0)
 	entry.StartedAt = time.Time{}
 	entry.LastError = ""
 	clearOrphanPIDLocked(&entry)
@@ -369,7 +393,7 @@ func (t *DaemonRuntimeTracker) MarkBackoff(taskName string) {
 	defer t.mu.Unlock()
 	entry := t.entries[taskName]
 	entry.State = daemonRuntimeStateBackoff
-	entry.CurrentPID = 0
+	t.setCurrentPIDLocked(&entry, 0)
 	entry.StartedAt = time.Time{}
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
@@ -399,7 +423,7 @@ func (t *DaemonRuntimeTracker) MarkQuarantined(taskName string) {
 	defer t.mu.Unlock()
 	entry := t.entries[taskName]
 	entry.State = daemonRuntimeStateQuarantine
-	entry.CurrentPID = 0
+	t.setCurrentPIDLocked(&entry, 0)
 	entry.StartedAt = time.Time{}
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
@@ -413,6 +437,9 @@ func (t *DaemonRuntimeTracker) Remove(taskName string) {
 	taskName = canonicalSupervisorTaskName(taskName)
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if entry, ok := t.entries[taskName]; ok && entry.CurrentPID != 0 {
+		t.ownershipGeneration.Add(1)
+	}
 	delete(t.entries, taskName)
 	if t.failures != nil {
 		delete(t.failures, taskName)

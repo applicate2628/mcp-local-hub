@@ -893,7 +893,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			stateDir:           stateDir,
 			events:             events,
 			runtimeTracker:     runtimeTracker,
-			statusCoalescer:    newStatusPortOwnersCoalescer(),
+			statusCoalescer:    newStatusPortOwnersCoalescer(runtimeTracker),
 			reconcileReady:     &reconcileReady,
 			intentFilesLoaded:  &intentFilesLoaded,
 			gracefulInProgress: &gracefulInProgress,
