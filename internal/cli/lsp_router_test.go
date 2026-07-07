@@ -131,6 +131,9 @@ func TestLSPRouterEnablePersistsAndRunsEnsure(t *testing.T) {
 	if len(fake.ensureOpts) != 1 || fake.ensureOpts[0].ForceClientName != "codex-cli" {
 		t.Fatalf("ensure opts = %+v, want ForceClientName codex-cli", fake.ensureOpts)
 	}
+	if len(fake.ensureOpts[0].Clients) != 1 || fake.ensureOpts[0].Clients["codex-cli"] == nil {
+		t.Fatalf("ensure Clients scope = %+v, want only codex-cli", fake.ensureOpts[0].Clients)
+	}
 	if !strings.Contains(out, "codex-cli enabled for LSP router setup") {
 		t.Fatalf("output missing enable confirmation:\n%s", out)
 	}

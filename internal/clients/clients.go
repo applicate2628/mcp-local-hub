@@ -1424,3 +1424,19 @@ func extractHeaders(raw map[string]any, field string) map[string]string {
 	}
 	return hdrs
 }
+
+// mcpEntryDisabled reports whether a parsed client entry is configured but
+// inactive. Most JSON-family clients use disabled:true; OpenCode/MiMoCode-style
+// clients use enabled:false. Missing flags preserve the historical active
+// default.
+func mcpEntryDisabled(raw map[string]any) bool {
+	if disabled, ok := raw["disabled"].(bool); ok && disabled {
+		return true
+	}
+	if enabled, present := raw["enabled"]; present {
+		if b, ok := enabled.(bool); ok && !b {
+			return true
+		}
+	}
+	return false
+}

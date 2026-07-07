@@ -366,6 +366,35 @@ func TestEnsureLSPRouterClientEntries_HonorsEffectiveClientEnablement(t *testing
 		}
 	})
 
+	t.Run("aggregate hub entry keeps opt-in client eligible", func(t *testing.T) {
+		seedLSPRouterManifest(t, []string{"go"})
+		if err := NewAPI().SetDefaultInstallClientNames([]string{"claude-code"}); err != nil {
+			t.Fatalf("set default-install clients: %v", err)
+		}
+
+		aggregateClient := newLSPRouterFakeClient(t, "gemini-cli", true)
+		aggregateClient.entries[hubReconcileAggregateEntryName] = clients.MCPEntry{
+			Name: hubReconcileAggregateEntryName,
+			URL:  clients.HubLoopbackURL(3439, "/clients/gemini-cli/mcp"),
+		}
+		opts := LSPClientRouterOpts{
+			GUIPort: 7777,
+			Clients: map[string]clients.Client{"gemini-cli": aggregateClient},
+		}
+
+		report, err := NewAPI().EnsureLSPRouterClientEntries(opts)
+		if err != nil {
+			t.Fatalf("EnsureLSPRouterClientEntries: %v", err)
+		}
+		name := LSPRouterEntryName("go")
+		if got, err := aggregateClient.GetEntry(name); err != nil || got == nil || got.URL != LSPRouterURL(7777, "go") {
+			t.Fatalf("aggregate evidence router entry = %+v err=%v, want router URL", got, err)
+		}
+		if len(report.Backups) != 1 || report.Backups[0].Client != "gemini-cli" {
+			t.Fatalf("Backups = %+v, want aggregate-evidence client backup", report.Backups)
+		}
+	})
+
 	t.Run("explicit lsp router opt-out skips only listed clients", func(t *testing.T) {
 		seedLSPRouterManifest(t, []string{"go"})
 		prefs := []byte("clients.default_install: claude-code,antigravity\nclients.lsp_router_disabled: antigravity\n")

@@ -253,7 +253,7 @@ func (g *goose) GetEntry(name string) (*MCPEntry, error) {
 	}
 	// Goose's endpoint field is `uri`, not `url`.
 	uri, _ := raw["uri"].(string)
-	return &MCPEntry{Name: name, URL: uri, Headers: extractHeaders(raw, "headers")}, nil
+	return &MCPEntry{Name: name, URL: uri, Headers: extractHeaders(raw, "headers"), Disabled: mcpEntryDisabled(raw)}, nil
 }
 
 // LatestBackupPath delegates to the shared helper.

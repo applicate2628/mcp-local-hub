@@ -207,6 +207,14 @@ func clientHasLSPRouterEnablementEvidence(
 	regEntries []WorkspaceEntry,
 	portsByLanguage map[string]map[int]bool,
 ) (bool, error) {
+	aggregate, err := adapter.GetEntry(hubReconcileAggregateEntryName)
+	if err != nil {
+		return false, fmt.Errorf("read %s entry %s: %w", clientName, hubReconcileAggregateEntryName, err)
+	}
+	if activeHubAggregateEntry(aggregate, clientName) {
+		return true, nil
+	}
+
 	for _, language := range languages {
 		targetName := LSPRouterEntryName(language)
 		live, err := adapter.GetEntry(targetName)
@@ -658,6 +666,43 @@ func entryIsLSPRouterForLanguage(entry *clients.MCPEntry, language string) bool 
 		}
 	}
 	return false
+}
+
+func activeHubAggregateEntry(entry *clients.MCPEntry, clientName string) bool {
+	if entry == nil || entry.Disabled {
+		return false
+	}
+	for _, raw := range []string{entry.URL, entry.RelayURL} {
+		parsedClient, ok := hubAggregateURLClient(raw)
+		if ok && parsedClient == clientName {
+			return true
+		}
+	}
+	return false
+}
+
+func hubAggregateURLClient(raw string) (string, bool) {
+	if raw == "" {
+		return "", false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "http" {
+		return "", false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+		return "", false
+	}
+	port := parsed.Port()
+	n, err := strconv.Atoi(port)
+	if port == "" || err != nil || n <= 0 || n > 65535 {
+		return "", false
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) != 3 || parts[0] != "clients" || parts[2] != "mcp" || parts[1] == "" {
+		return "", false
+	}
+	return parts[1], true
 }
 
 func lspRouterURLLanguage(raw string) (string, bool) {

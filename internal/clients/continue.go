@@ -272,7 +272,7 @@ func (c *continueClient) GetEntry(name string) (*MCPEntry, error) {
 			continue
 		}
 		url, _ := raw["url"].(string)
-		return &MCPEntry{Name: name, URL: url, Headers: continueEntryHeaders(raw)}, nil
+		return &MCPEntry{Name: name, URL: url, Headers: continueEntryHeaders(raw), Disabled: mcpEntryDisabled(raw)}, nil
 	}
 	return nil, nil
 }

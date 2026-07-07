@@ -136,6 +136,28 @@ func TestAntigravity_GetEntry_ReconstructsRelayArgs(t *testing.T) {
 	}
 }
 
+func TestAntigravity_GetEntry_MapsDisabledFlag(t *testing.T) {
+	a := newAntigravityForTest(t, `{
+  "mcpServers": {
+    "serena": {
+      "command": "D:\\dev\\mcp-local-hub\\mcphub.exe",
+      "args": ["relay", "--server", "serena", "--daemon", "claude"],
+      "disabled": true
+    }
+  }
+}`)
+	e, err := a.GetEntry("serena")
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if e == nil {
+		t.Fatal("GetEntry returned nil")
+	}
+	if !e.Disabled {
+		t.Fatalf("Disabled = false, want true for antigravity disabled:true entry")
+	}
+}
+
 // TestAntigravity_RemoveEntry_Inherited confirms the inherited RemoveEntry
 // still works even with the new stdio-relay entry shape.
 func TestAntigravity_RemoveEntry_Inherited(t *testing.T) {

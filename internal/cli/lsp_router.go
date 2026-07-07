@@ -120,8 +120,10 @@ func runLSPRouterEnable(cmd *cobra.Command, rawClient string) error {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "✓ %s enabled for LSP router setup.\n", clientName)
+	allClients := clients.AllClients()
 	report, err := a.EnsureLSPRouterClientEntries(api.LSPClientRouterOpts{
 		ForceClientName: clientName,
+		Clients:         map[string]clients.Client{clientName: allClients[clientName]},
 	})
 	if report == nil {
 		report = &api.LSPClientRouterReport{}

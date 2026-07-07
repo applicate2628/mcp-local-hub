@@ -56,9 +56,9 @@ import (
 //
 // Entry shape written (stdio relay, mirroring antigravity.go):
 //
-//	- name: <server-name>
-//	  command: <abs-path>/mcphub.exe
-//	  args: ['relay', '--server', '<s>', '--daemon', '<d>']   # or ['relay','--url',<u>]
+//   - name: <server-name>
+//     command: <abs-path>/mcphub.exe
+//     args: ['relay', '--server', '<s>', '--daemon', '<d>']   # or ['relay','--url',<u>]
 //
 // Requires MCPEntry.RelayExePath to be set (absolute), plus RelayServer +
 // RelayDaemon for the manifest-lookup form (or RelayURL for the direct form).
@@ -280,7 +280,7 @@ func (a *aider) GetEntry(name string) (*MCPEntry, error) {
 		}
 		// The stdio entry stores `command`/`args`, not a URL. Reconstruct
 		// the relay identifiers for diagnostic parity with antigravity.
-		e := &MCPEntry{Name: name}
+		e := &MCPEntry{Name: name, Disabled: mcpEntryDisabled(em)}
 		if cmd, _ := em["command"].(string); cmd != "" {
 			e.RelayExePath = cmd
 		}
