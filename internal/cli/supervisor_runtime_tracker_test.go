@@ -72,6 +72,50 @@ func TestDaemonRuntimeTracker_LifecycleTransitions(t *testing.T) {
 	}
 }
 
+func TestDaemonRuntimeTracker_FleetGenerationTracksPortOwnershipChanges(t *testing.T) {
+	tracker := NewDaemonRuntimeTracker()
+	taskName := `mcp-local-hub-memory-default`
+	startedAt := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+
+	if got := tracker.Generation(); got != 0 {
+		t.Fatalf("new tracker Generation = %d, want 0", got)
+	}
+
+	gen1 := tracker.MarkSpawned(taskName, 4321, startedAt)
+	if gen1 != 1 {
+		t.Fatalf("MarkSpawned returned PIDGeneration %d, want 1", gen1)
+	}
+	if got := tracker.Generation(); got != 1 {
+		t.Fatalf("Generation after spawn = %d, want 1", got)
+	}
+
+	tracker.MarkJobProtection(taskName, nil)
+	if got := tracker.Generation(); got != 1 {
+		t.Fatalf("Generation after non-ownership metadata update = %d, want 1", got)
+	}
+
+	if tracker.MarkExitedIfCurrent(taskName, gen1-1) {
+		t.Fatalf("stale MarkExitedIfCurrent returned true; want false")
+	}
+	if got := tracker.Generation(); got != 1 {
+		t.Fatalf("Generation after stale exit = %d, want 1", got)
+	}
+
+	if !tracker.MarkExitedIfCurrent(taskName, gen1) {
+		t.Fatalf("current MarkExitedIfCurrent returned false; want true")
+	}
+	if got := tracker.Generation(); got != 2 {
+		t.Fatalf("Generation after current exit = %d, want 2", got)
+	}
+
+	if !tracker.MarkExitedIfCurrent(taskName, gen1) {
+		t.Fatalf("idempotent MarkExitedIfCurrent returned false; want true")
+	}
+	if got := tracker.Generation(); got != 2 {
+		t.Fatalf("Generation after idempotent current exit = %d, want 2", got)
+	}
+}
+
 func TestDaemonRuntimeTracker_ClearsJobProtectionWhenNoCurrentSpawn(t *testing.T) {
 	tracker := NewDaemonRuntimeTracker()
 	taskName := `mcp-local-hub-memory-default`
