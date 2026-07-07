@@ -65,23 +65,31 @@ func loopbackPortOwnersSnapshot() (map[int]int, error) {
 	return loopbackPortOwnersSnapshotContext(context.Background())
 }
 
-// loopbackPortOwnersSnapshotContext honors the caller's deadline as a pre-read
-// cancellation check before the /proc/net/tcp read + /proc walk. Linux is beta;
-// the coalescer deadline is primarily a Windows-netstat guard, so a ctx already
-// past its deadline short-circuits here and everything else runs as before.
+// loopbackPortOwnersSnapshotContext bounds the batch owner lookup by ctx. The
+// deadline is enforced NOT just as a pre-read check but THROUGH the /proc walk
+// itself (pidsForSocketInodes checks ctx.Err() per /proc entry, mirroring the
+// per-port pidForSocketInodeContext) — on a host with a large/slow /proc tree
+// the walk is the expensive part, so a pre-read-only check would let the status
+// coalescer's 3s deadline be exceeded once the walk begins and the status IPC
+// could still blow past the 5s client timeout and flap (Codex PR #510 P2).
 func loopbackPortOwnersSnapshotContext(ctx context.Context) (map[int]int, error) {
-	if ctx != nil {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	return loopbackPortOwnersSnapshotFromProcNet("/proc/net/tcp")
+	return loopbackPortOwnersSnapshotFromProcNet(ctx, "/proc/net/tcp")
 }
 
 // loopbackPortOwnersSnapshotFromProcNet is the path-injectable core of
 // loopbackPortOwnersSnapshot (the procNetPath seam mirrors
-// loopbackTCPListenInodeFromProcNet so tests can feed a canned table).
-func loopbackPortOwnersSnapshotFromProcNet(procNetPath string) (map[int]int, error) {
+// loopbackTCPListenInodeFromProcNet so tests can feed a canned table). ctx is
+// honored before the /proc/net/tcp read and threaded through the /proc walk.
+func loopbackPortOwnersSnapshotFromProcNet(ctx context.Context, procNetPath string) (map[int]int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	portInodes, err := loopbackListenPortInodesFromProcNet(procNetPath)
 	if err != nil {
 		return nil, err
@@ -90,7 +98,7 @@ func loopbackPortOwnersSnapshotFromProcNet(procNetPath string) (map[int]int, err
 	if len(portInodes) == 0 {
 		return owners, nil
 	}
-	inodePIDs, sawPermissionError, err := pidsForSocketInodes(portInodes)
+	inodePIDs, sawPermissionError, err := pidsForSocketInodes(ctx, portInodes)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +163,10 @@ func loopbackListenPortInodesFromProcNet(path string) (map[int]string, error) {
 // inodes that map to a readable /proc/<pid>/fd owner, plus whether any
 // permission error was seen while walking (so the caller can classify
 // unresolved inodes as foreign-owned). Batch form of pidForSocketInode.
-func pidsForSocketInodes(wantInodes map[int]string) (map[string]int, bool, error) {
+func pidsForSocketInodes(ctx context.Context, wantInodes map[int]string) (map[string]int, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, false, fmt.Errorf("loopbackPortOwnersSnapshot: read /proc: %w", err)
@@ -167,6 +178,13 @@ func pidsForSocketInodes(wantInodes map[int]string) (map[string]int, bool, error
 	found := map[string]int{}
 	var sawPermissionError bool
 	for _, entry := range entries {
+		// Honor the deadline at the top of each /proc entry (before its per-fd
+		// readlink scan) so a canceled/deadline-exceeded ctx aborts promptly
+		// instead of walking the whole (possibly large/slow) tree — the same
+		// guard the per-port pidForSocketInodeContext uses (Codex PR #510 P2).
+		if err := ctx.Err(); err != nil {
+			return found, sawPermissionError, err
+		}
 		if len(found) == len(want) {
 			break
 		}
@@ -185,6 +203,13 @@ func pidsForSocketInodes(wantInodes map[int]string) (map[string]int, bool, error
 			continue
 		}
 		for _, fd := range fds {
+			// Also honor the deadline INSIDE a single entry's fd scan — one
+			// process with a huge /proc/<pid>/fd dir would otherwise run past
+			// the deadline even though the per-entry check passed (mirrors
+			// pidForSocketInodeContext's inner ctx.Err()).
+			if err := ctx.Err(); err != nil {
+				return found, sawPermissionError, err
+			}
 			target, err := os.Readlink(filepath.Join("/proc", entry.Name(), "fd", fd.Name()))
 			if err != nil {
 				if os.IsPermission(err) {

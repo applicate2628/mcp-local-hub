@@ -26,6 +26,41 @@ func TestPidForSocketInodeContext_CanceledCtxAborts(t *testing.T) {
 	}
 }
 
+// TestLoopbackPortOwnersSnapshotContext_CanceledCtxAborts (Codex PR #510 P2): the
+// BATCH owner snapshot must honor the caller deadline THROUGH the /proc walk, not
+// just as a pre-read check — a pre-canceled ctx returns the ctx error so the
+// status coalescer's 3s deadline actually bounds the Linux status IPC and cannot
+// blow past the 5s client timeout and re-introduce the flap.
+func TestLoopbackPortOwnersSnapshotContext_CanceledCtxAborts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := loopbackPortOwnersSnapshotContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("loopbackPortOwnersSnapshotContext(canceled) err = %v, want context.Canceled", err)
+	}
+	// And the /proc walk itself (pidsForSocketInodes) aborts on a canceled ctx
+	// rather than walking the whole tree.
+	if _, _, err := pidsForSocketInodes(ctx, map[int]string{9301: "12345"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pidsForSocketInodes(canceled) err = %v, want context.Canceled", err)
+	}
+}
+
+// TestLoopbackPortOwnersSnapshot_BackgroundDelegate: the non-ctx entry point (a
+// context.Background() delegate) never trips and returns a real snapshot map.
+func TestLoopbackPortOwnersSnapshot_BackgroundDelegate(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	owners, err := loopbackPortOwnersSnapshot()
+	if err != nil {
+		t.Fatalf("loopbackPortOwnersSnapshot: %v", err)
+	}
+	if owners == nil {
+		t.Fatalf("owners map is nil, want a (possibly empty) map")
+	}
+}
+
 // TestLoopbackPortOwnerPIDContext_CanceledCtx (P2-C): the context-bounded owner
 // probe returns the ctx error on a canceled ctx (fail-closed → the F1 gate treats
 // it as a probe error → fail-open proceed, matching the Windows deadline path).
