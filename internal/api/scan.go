@@ -2524,6 +2524,10 @@ func pickNextFreePort(manifestDir string) (int, error) {
 }
 
 func renderDraftManifestYAML(name, cmd string, args []string, env map[string]string, port int) string {
+	return renderStdioBridgeManifestYAML(name, cmd, args, env, port, draftClientBindings())
+}
+
+func renderStdioBridgeManifestYAML(name, cmd string, args []string, env map[string]string, port int, bindings []map[string]any) string {
 	doc := struct {
 		Name           string            `yaml:"name"`
 		Kind           string            `yaml:"kind"`
@@ -2544,13 +2548,7 @@ func renderDraftManifestYAML(name, cmd string, args []string, env map[string]str
 		Daemons: []map[string]any{
 			{"name": "default", "port": port},
 		},
-		// Derive the draft client_bindings from the canonical client registry
-		// (clients.SupportedClientNames) so the preview never drifts from the
-		// adapters this build actually supports — the original seven plus the
-		// eight opt-in wave-2 clients. Previously these were hardcoded to the
-		// seven core ids, so a GUI-extracted draft silently omitted bindings
-		// for zed/kiro/windsurf/cline/kilocode/opencode/hermes/openclaw.
-		ClientBindings: draftClientBindings(),
+		ClientBindings: bindings,
 		WeeklyRefresh:  false,
 	}
 	out, err := yaml.Marshal(doc)
