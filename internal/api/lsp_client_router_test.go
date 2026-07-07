@@ -303,22 +303,24 @@ func TestEnsureLSPRouterClientEntries_HonorsEffectiveClientEnablement(t *testing
 		}
 
 		disabledOnly := newLSPRouterFakeClient(t, "antigravity", true)
+		mcphub := filepath.Join(t.TempDir(), "mcphub.exe")
 		disabledOnly.entries[LSPRouterEntryName("go")] = clients.MCPEntry{
-			Name:     LSPRouterEntryName("go"),
-			RelayURL: LSPRouterURL(7777, "go"),
-			Disabled: true,
+			Name:         LSPRouterEntryName("go"),
+			RelayURL:     LSPRouterURL(7777, "go"),
+			RelayExePath: mcphub,
+			Disabled:     true,
 		}
 		disabledOnly.entries["memory"] = clients.MCPEntry{
 			Name:         "memory",
 			RelayServer:  "memory",
 			RelayDaemon:  "default",
-			RelayExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
+			RelayExePath: mcphub,
 			Disabled:     true,
 		}
 		opts := LSPClientRouterOpts{
 			GUIPort:       7777,
 			Clients:       map[string]clients.Client{"antigravity": disabledOnly},
-			McphubExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
+			McphubExePath: mcphub,
 		}
 
 		report, err := NewAPI().EnsureLSPRouterClientEntries(opts)
@@ -343,14 +345,16 @@ func TestEnsureLSPRouterClientEntries_HonorsEffectiveClientEnablement(t *testing
 		}
 
 		upgradeClient := newLSPRouterFakeClient(t, "antigravity", true)
+		mcphub := filepath.Join(t.TempDir(), "mcphub.exe")
 		upgradeClient.entries[LSPRouterEntryName("go")] = clients.MCPEntry{
-			Name:     LSPRouterEntryName("go"),
-			RelayURL: LSPRouterURL(7777, "go"),
+			Name:         LSPRouterEntryName("go"),
+			RelayURL:     LSPRouterURL(7777, "go"),
+			RelayExePath: mcphub,
 		}
 		opts := LSPClientRouterOpts{
 			GUIPort:       7777,
 			Clients:       map[string]clients.Client{"antigravity": upgradeClient},
-			McphubExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
+			McphubExePath: mcphub,
 		}
 
 		report, err := NewAPI().EnsureLSPRouterClientEntries(opts)
@@ -739,11 +743,13 @@ func TestRollbackLSPRouterClientEntriesForClient_RemovesOnlyTargetRouterEntries(
 
 	target := newLSPRouterFakeClient(t, "antigravity", true)
 	sibling := newLSPRouterFakeClient(t, "codex-cli", true)
+	mcphub := filepath.Join(t.TempDir(), "mcphub.exe")
 	for _, language := range languages {
 		name := LSPRouterEntryName(language)
 		target.entries[name] = clients.MCPEntry{
-			Name:     name,
-			RelayURL: LSPRouterURL(7777, language),
+			Name:         name,
+			RelayURL:     LSPRouterURL(7777, language),
+			RelayExePath: mcphub,
 		}
 		sibling.entries[name] = clients.MCPEntry{
 			Name: name,
@@ -783,6 +789,73 @@ func TestRollbackLSPRouterClientEntriesForClient_RemovesOnlyTargetRouterEntries(
 	}
 	if len(sibling.backupPaths) != 0 || sibling.removeCalls != 0 {
 		t.Fatalf("sibling was mutated: backups=%v removeCalls=%d", sibling.backupPaths, sibling.removeCalls)
+	}
+}
+
+func TestRollbackLSPRouterClientEntriesForClient_LeavesForeignLSPRouterLikeEntries(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go", "python", "rust", "typescript"})
+
+	target := newLSPRouterFakeClient(t, "antigravity", true)
+	stalePort := 6666
+	mcphub := filepath.Join(t.TempDir(), "mcphub.exe")
+	target.entries[LSPRouterEntryName("go")] = clients.MCPEntry{
+		Name: LSPRouterEntryName("go"),
+		URL:  LSPRouterURL(7777, "go"),
+	}
+	target.entries[LSPRouterEntryName("python")] = clients.MCPEntry{
+		Name: LSPRouterEntryName("python"),
+		URL:  LSPRouterURL(stalePort, "python"),
+	}
+	target.entries[LSPRouterEntryName("rust")] = clients.MCPEntry{
+		Name:         LSPRouterEntryName("rust"),
+		RelayURL:     LSPRouterURL(7777, "rust"),
+		RelayExePath: mcphub,
+	}
+	target.entries[LSPRouterEntryName("typescript")] = clients.MCPEntry{
+		Name:         LSPRouterEntryName("typescript"),
+		RelayURL:     LSPRouterURL(7777, "typescript"),
+		RelayExePath: filepath.Join(t.TempDir(), "mcp.exe"),
+	}
+	target.entries["operator-lsp-go"] = clients.MCPEntry{
+		Name: "operator-lsp-go",
+		URL:  LSPRouterURL(stalePort, "go"),
+	}
+
+	report, err := NewAPI().RollbackLSPRouterClientEntriesForClient("antigravity", LSPClientRouterOpts{
+		GUIPort: 7777,
+		Clients: map[string]clients.Client{"antigravity": target},
+	})
+	if err != nil {
+		t.Fatalf("RollbackLSPRouterClientEntriesForClient: %v", err)
+	}
+
+	removed := map[string]bool{}
+	for _, change := range report.Removed {
+		removed[change.EntryName] = true
+	}
+	for _, language := range []string{"go", "python", "rust"} {
+		name := LSPRouterEntryName(language)
+		if !removed[name] {
+			t.Fatalf("removed entries = %+v, want %s removed", report.Removed, name)
+		}
+		if _, ok := target.entries[name]; ok {
+			t.Fatalf("owned router entry %s survived: entries=%v", name, target.entries)
+		}
+	}
+	if _, ok := target.entries[LSPRouterEntryName("typescript")]; !ok {
+		t.Fatalf("foreign relay entry was removed: entries=%v", target.entries)
+	}
+	if _, ok := target.entries["operator-lsp-go"]; !ok {
+		t.Fatalf("foreign non-reserved LSP-like entry was removed: entries=%v", target.entries)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("foreign LSP-like entries should be skipped, not failed: %+v", report.Failed)
+	}
+	if len(report.Skipped) != 1 || report.Skipped[0].EntryName != LSPRouterEntryName("typescript") {
+		t.Fatalf("Skipped = %+v, want one skipped foreign typescript entry", report.Skipped)
+	}
+	if target.removeCalls != 3 {
+		t.Fatalf("removeCalls = %d, want only 3 owned router removals", target.removeCalls)
 	}
 }
 

@@ -556,6 +556,9 @@ func printLSPClientRouterReport(out io.Writer, report *api.LSPClientRouterReport
 	for _, restored := range report.Restored {
 		fmt.Fprintf(out, "✓ restored %s entry %s\n", restored.Client, restored.EntryName)
 	}
+	for _, skipped := range report.Skipped {
+		fmt.Fprintf(out, "skipped foreign LSP-like entry %s for %s\n", skipped.EntryName, skipped.Client)
+	}
 	for _, failed := range report.Failed {
 		fmt.Fprintf(out, "✗ %s %s entry %s failed during %s: %s\n",
 			failed.Client, failed.Language, failed.EntryName, failed.Op, failed.Err)

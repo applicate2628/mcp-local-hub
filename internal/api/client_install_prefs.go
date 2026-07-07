@@ -108,23 +108,6 @@ func (a *API) DefaultInstallClientNamesEffectiveIn(path string) ([]string, error
 	return clients.DefaultInstallClientNames(), nil
 }
 
-// ClientInstallEnabled reports whether name is selected in the effective
-// operator-managed client install set. This is the single-owner predicate for
-// backend flows that need to honor the GUI client toggle without reading or
-// interpreting gui-preferences.yaml themselves.
-func (a *API) ClientInstallEnabled(name string) (bool, error) {
-	return a.ClientInstallEnabledIn(SettingsPath(), name)
-}
-
-// ClientInstallEnabledIn is the tempdir-capable form.
-func (a *API) ClientInstallEnabledIn(path, name string) (bool, error) {
-	enabled, err := a.ClientInstallEnabledSetIn(path)
-	if err != nil {
-		return false, err
-	}
-	return enabled[strings.TrimSpace(name)], nil
-}
-
 // ClientInstallEnabledSet returns the effective operator-managed client set as
 // a lookup map. An absent override falls back to clients.DefaultInstallClientNames().
 func (a *API) ClientInstallEnabledSet() (map[string]bool, error) {

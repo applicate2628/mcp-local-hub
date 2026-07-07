@@ -84,6 +84,11 @@ func TestLSPRouterDisablePersistsAndRollsBackClientImmediately(t *testing.T) {
 				Language:  "go",
 				EntryName: "mcp-language-server-go",
 			}},
+			Skipped: []api.LSPClientRouterChange{{
+				Client:    "codex-cli",
+				Language:  "typescript",
+				EntryName: "mcp-language-server-typescript",
+			}},
 		},
 	}
 
@@ -99,6 +104,9 @@ func TestLSPRouterDisablePersistsAndRollsBackClientImmediately(t *testing.T) {
 	}
 	if !strings.Contains(out, "removed codex-cli entry mcp-language-server-go") {
 		t.Fatalf("output missing removed entry line:\n%s", out)
+	}
+	if !strings.Contains(out, "skipped foreign LSP-like entry mcp-language-server-typescript") {
+		t.Fatalf("output missing skipped foreign entry line:\n%s", out)
 	}
 	if !strings.Contains(out, "future `mcphub setup` runs will not re-add") {
 		t.Fatalf("output missing setup no-readd line:\n%s", out)
