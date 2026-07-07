@@ -99,6 +99,42 @@ func (a *API) DefaultInstallClientNamesEffectiveIn(path string) ([]string, error
 	return clients.DefaultInstallClientNames(), nil
 }
 
+// ClientInstallEnabled reports whether name is selected in the effective
+// operator-managed client install set. This is the single-owner predicate for
+// backend flows that need to honor the GUI client toggle without reading or
+// interpreting gui-preferences.yaml themselves.
+func (a *API) ClientInstallEnabled(name string) (bool, error) {
+	return a.ClientInstallEnabledIn(SettingsPath(), name)
+}
+
+// ClientInstallEnabledIn is the tempdir-capable form.
+func (a *API) ClientInstallEnabledIn(path, name string) (bool, error) {
+	enabled, err := a.ClientInstallEnabledSetIn(path)
+	if err != nil {
+		return false, err
+	}
+	return enabled[strings.TrimSpace(name)], nil
+}
+
+// ClientInstallEnabledSet returns the effective operator-managed client set as
+// a lookup map. An absent override falls back to clients.DefaultInstallClientNames().
+func (a *API) ClientInstallEnabledSet() (map[string]bool, error) {
+	return a.ClientInstallEnabledSetIn(SettingsPath())
+}
+
+// ClientInstallEnabledSetIn is the tempdir-capable form.
+func (a *API) ClientInstallEnabledSetIn(path string) (map[string]bool, error) {
+	names, err := a.DefaultInstallClientNamesEffectiveIn(path)
+	if err != nil {
+		return nil, err
+	}
+	enabled := make(map[string]bool, len(names))
+	for _, name := range names {
+		enabled[name] = true
+	}
+	return enabled, nil
+}
+
 // SetDefaultInstallClientNames persists the operator's chosen default-install
 // client set to gui-preferences.yaml. Every name must be a supported client
 // (validated against clients.SupportedClientNames()); an unknown name is a

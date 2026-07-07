@@ -76,7 +76,7 @@ type lspClientRouterOp struct {
 	entry     clients.MCPEntry
 }
 
-// EnsureLSPRouterClientEntries ensures every present client has one
+// EnsureLSPRouterClientEntries ensures every enabled present client has one
 // mcp-language-server-<language> entry pointing at the GUI LSP router.
 // Existing per-project entries that point at registry-owned proxy ports are
 // migrated away after a per-client backup. The workspace registry is kept
@@ -96,6 +96,10 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 		return report, err
 	}
 	portsByLanguage := lspRegistryPortsByLanguage(regEntries)
+	enabledClients, err := a.ClientInstallEnabledSet()
+	if err != nil {
+		return report, err
+	}
 	clientMap := opts.Clients
 	if clientMap == nil {
 		clientMap = clients.AllClients()
@@ -107,7 +111,7 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 
 	for _, clientName := range sortedLSPClientNames(clientMap) {
 		adapter := clientMap[clientName]
-		if adapter == nil || !adapter.Exists() {
+		if adapter == nil || !adapter.Exists() || !enabledClients[clientName] {
 			continue
 		}
 		ops := make([]lspClientRouterOp, 0, len(languages))
@@ -260,6 +264,61 @@ func (a *API) RollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClie
 		applyLSPRouterOps(opts, adapter, clientName, keepN, ops, report)
 	}
 	return report, lspRouterReportError(report, "lsp client router rollback")
+}
+
+// RollbackLSPRouterClientEntriesForClient removes this client's shared
+// mcp-language-server-<language> router entries without restoring legacy
+// per-workspace entries and without touching sibling clients.
+func (a *API) RollbackLSPRouterClientEntriesForClient(clientName string, opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
+	report := &LSPClientRouterReport{}
+	clientName = strings.TrimSpace(clientName)
+	if clientName == "" {
+		return report, fmt.Errorf("client name is required")
+	}
+	languages, err := loadLSPRouterLanguages(opts.Languages)
+	if err != nil {
+		return report, err
+	}
+	clientMap := opts.Clients
+	if clientMap == nil {
+		clientMap = clients.AllClients()
+	}
+	adapter, ok := clientMap[clientName]
+	if !ok {
+		return report, fmt.Errorf("unknown client %q", clientName)
+	}
+	if adapter == nil || !adapter.Exists() {
+		return report, nil
+	}
+	keepN := opts.BackupKeepN
+	if keepN == 0 {
+		keepN = a.EffectiveBackupKeepN()
+	}
+
+	ops := make([]lspClientRouterOp, 0, len(languages))
+	for _, language := range languages {
+		entryName := LSPRouterEntryName(language)
+		live, err := adapter.GetEntry(entryName)
+		if err != nil {
+			report.Failed = append(report.Failed, lspFailure(clientName, language, entryName, "read", err))
+			continue
+		}
+		if live == nil {
+			continue
+		}
+		if !entryIsLSPRouterForLanguage(live, language) {
+			report.Failed = append(report.Failed, lspFailure(clientName, language, entryName, "ownership",
+				errors.New("live entry is not a hub-owned LSP router entry; refusing to remove")))
+			continue
+		}
+		ops = append(ops, lspClientRouterOp{
+			kind:      "remove",
+			language:  language,
+			entryName: entryName,
+		})
+	}
+	applyLSPRouterOps(opts, adapter, clientName, keepN, ops, report)
+	return report, lspRouterReportError(report, "lsp client router per-client rollback")
 }
 
 // LSPRouterEntryName is the canonical client-config entry name for one

@@ -213,6 +213,56 @@ func TestEnsureLSPRouterClientEntries_WiresManifestLanguagesToPresentClientsAndI
 	}
 }
 
+func TestEnsureLSPRouterClientEntries_HonorsClientInstallPrefs(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", "")
+	if err := NewAPI().SetDefaultInstallClientNames([]string{"claude-code"}); err != nil {
+		t.Fatalf("set default-install clients: %v", err)
+	}
+
+	enabled := newLSPRouterFakeClient(t, "claude-code", true)
+	disabled := newLSPRouterFakeClient(t, "antigravity", true)
+	clientMap := map[string]clients.Client{
+		"claude-code": enabled,
+		"antigravity": disabled,
+	}
+	opts := LSPClientRouterOpts{
+		GUIPort:       7777,
+		Clients:       clientMap,
+		McphubExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
+	}
+
+	report, err := NewAPI().EnsureLSPRouterClientEntries(opts)
+	if err != nil {
+		t.Fatalf("EnsureLSPRouterClientEntries: %v", err)
+	}
+	name := LSPRouterEntryName("go")
+	if got, err := enabled.GetEntry(name); err != nil || got == nil || got.URL != LSPRouterURL(7777, "go") {
+		t.Fatalf("enabled client entry = %+v err=%v, want router URL", got, err)
+	}
+	if got, err := disabled.GetEntry(name); err != nil || got != nil {
+		t.Fatalf("disabled client entry = %+v err=%v, want no entry", got, err)
+	}
+	if len(report.Backups) != 1 || report.Backups[0].Client != "claude-code" {
+		t.Fatalf("Backups = %+v, want only enabled client backup", report.Backups)
+	}
+	if disabled.addCalls != 0 || len(disabled.backupPaths) != 0 {
+		t.Fatalf("disabled client was mutated: addCalls=%d backups=%v entries=%v", disabled.addCalls, disabled.backupPaths, disabled.entries)
+	}
+
+	second, err := NewAPI().EnsureLSPRouterClientEntries(opts)
+	if err != nil {
+		t.Fatalf("second EnsureLSPRouterClientEntries: %v", err)
+	}
+	if len(second.Backups) != 0 || len(second.Applied) != 0 || len(second.Removed) != 0 {
+		t.Fatalf("idempotent rerun changed config: %+v", second)
+	}
+	if disabled.addCalls != 0 || len(disabled.entries) != 0 {
+		t.Fatalf("disabled client was re-added on rerun: addCalls=%d entries=%v", disabled.addCalls, disabled.entries)
+	}
+}
+
 func TestEnsureLSPRouterClientEntries_MigratesPerPairEntryToRouterAndKeepsRegistry(t *testing.T) {
 	seedLSPRouterManifest(t, []string{"go"})
 	restoreRegistry := overrideLSPRouterRegistry(t)
@@ -366,6 +416,59 @@ func TestRollbackLSPRouterClientEntries_RestoresPerPairEntryFromBackup(t *testin
 	}
 	if len(codex.backupPaths) != 2 {
 		t.Fatalf("total backups = %d, want setup backup + rollback backup", len(codex.backupPaths))
+	}
+}
+
+func TestRollbackLSPRouterClientEntriesForClient_RemovesOnlyTargetRouterEntries(t *testing.T) {
+	languages := []string{"clangd", "fortran", "go", "javascript", "python", "rust", "typescript", "vscode-css", "vscode-html"}
+	seedLSPRouterManifest(t, languages)
+
+	target := newLSPRouterFakeClient(t, "antigravity", true)
+	sibling := newLSPRouterFakeClient(t, "codex-cli", true)
+	for _, language := range languages {
+		name := LSPRouterEntryName(language)
+		target.entries[name] = clients.MCPEntry{
+			Name:     name,
+			RelayURL: LSPRouterURL(7777, language),
+		}
+		sibling.entries[name] = clients.MCPEntry{
+			Name: name,
+			URL:  LSPRouterURL(7777, language),
+		}
+	}
+	target.entries["operator-entry"] = clients.MCPEntry{Name: "operator-entry", URL: "https://example.invalid/mcp"}
+	opts := LSPClientRouterOpts{
+		GUIPort: 7777,
+		Clients: map[string]clients.Client{
+			"antigravity": target,
+			"codex-cli":   sibling,
+		},
+	}
+
+	report, err := NewAPI().RollbackLSPRouterClientEntriesForClient("antigravity", opts)
+	if err != nil {
+		t.Fatalf("RollbackLSPRouterClientEntriesForClient: %v", err)
+	}
+	if len(report.Removed) != len(languages) {
+		t.Fatalf("Removed len = %d, want %d: %+v", len(report.Removed), len(languages), report.Removed)
+	}
+	if len(report.Backups) != 1 || report.Backups[0].Client != "antigravity" {
+		t.Fatalf("Backups = %+v, want only target client backup", report.Backups)
+	}
+	for _, language := range languages {
+		name := LSPRouterEntryName(language)
+		if _, ok := target.entries[name]; ok {
+			t.Fatalf("target router entry %s survived: entries=%v", name, target.entries)
+		}
+		if _, ok := sibling.entries[name]; !ok {
+			t.Fatalf("sibling router entry %s was removed: entries=%v", name, sibling.entries)
+		}
+	}
+	if _, ok := target.entries["operator-entry"]; !ok {
+		t.Fatalf("non-router target entry was removed: entries=%v", target.entries)
+	}
+	if len(sibling.backupPaths) != 0 || sibling.removeCalls != 0 {
+		t.Fatalf("sibling was mutated: backups=%v removeCalls=%d", sibling.backupPaths, sibling.removeCalls)
 	}
 }
 
@@ -568,6 +671,8 @@ func TestEnsureLSPRouterClientEntries_AddFailureSkipsLegacyRemove(t *testing.T) 
 
 func seedLSPRouterManifest(t *testing.T, languages []string) {
 	t.Helper()
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", "")
 	dir := t.TempDir()
 	serverDir := filepath.Join(dir, "mcp-language-server")
 	if err := os.MkdirAll(serverDir, 0o700); err != nil {
