@@ -36,10 +36,19 @@ import (
 	"mcp-local-hub/internal/clients"
 )
 
-// defaultInstallClientsKey is the gui-preferences.yaml key under which the
-// operator's chosen default-install client set is stored as a
-// comma-separated scalar string. Absent ⇒ compile-time default trio.
-const defaultInstallClientsKey = "clients.default_install"
+const (
+	// defaultInstallClientsKey is the gui-preferences.yaml key under which the
+	// operator's chosen default-install client set is stored as a
+	// comma-separated scalar string. Absent ⇒ compile-time default trio.
+	defaultInstallClientsKey = "clients.default_install"
+
+	// lspRouterDisabledClientsKey is a narrow LSP-router opt-out list, not an
+	// install target set. Absent/blank means every present client remains
+	// eligible for EnsureLSPRouterClientEntries; a listed client is skipped by
+	// future ensure runs, and RollbackLSPRouterClientEntriesForClient remains
+	// the explicit removal path for any existing router entries.
+	lspRouterDisabledClientsKey = "clients.lsp_router_disabled"
+)
 
 // DefaultInstallClientNamesOverride returns the persisted operator override
 // for the default-install client set, or nil when no override is configured.
@@ -133,6 +142,32 @@ func (a *API) ClientInstallEnabledSetIn(path string) (map[string]bool, error) {
 		enabled[name] = true
 	}
 	return enabled, nil
+}
+
+// LSPRouterDisabledClientSet returns the explicit per-client LSP-router
+// opt-out set. This is intentionally separate from clients.default_install:
+// the default-install preference controls only installs that omit an explicit
+// client target, while this list means "do not auto-maintain LSP router entries
+// for this present client." Absent/blank/unknown-only config returns an empty
+// set, preserving pre-opt-out behavior for every client.
+func (a *API) LSPRouterDisabledClientSet() (map[string]bool, error) {
+	return a.LSPRouterDisabledClientSetIn(SettingsPath())
+}
+
+// LSPRouterDisabledClientSetIn is the tempdir-capable form.
+func (a *API) LSPRouterDisabledClientSetIn(path string) (map[string]bool, error) {
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	raw, err := readRawSettingsMap(path)
+	if err != nil {
+		return nil, err
+	}
+	names := sanitizeClientNames(splitClientCSV(raw[lspRouterDisabledClientsKey]))
+	disabled := make(map[string]bool, len(names))
+	for _, name := range names {
+		disabled[name] = true
+	}
+	return disabled, nil
 }
 
 // SetDefaultInstallClientNames persists the operator's chosen default-install

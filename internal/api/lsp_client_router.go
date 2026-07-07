@@ -76,8 +76,9 @@ type lspClientRouterOp struct {
 	entry     clients.MCPEntry
 }
 
-// EnsureLSPRouterClientEntries ensures every enabled present client has one
-// mcp-language-server-<language> entry pointing at the GUI LSP router.
+// EnsureLSPRouterClientEntries ensures every present client not explicitly
+// opted out has one mcp-language-server-<language> entry pointing at the GUI
+// LSP router.
 // Existing per-project entries that point at registry-owned proxy ports are
 // migrated away after a per-client backup. The workspace registry is kept
 // intact; those rows are harmless warm preregistrations.
@@ -96,7 +97,7 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 		return report, err
 	}
 	portsByLanguage := lspRegistryPortsByLanguage(regEntries)
-	enabledClients, err := a.ClientInstallEnabledSet()
+	disabledClients, err := a.LSPRouterDisabledClientSet()
 	if err != nil {
 		return report, err
 	}
@@ -111,7 +112,7 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 
 	for _, clientName := range sortedLSPClientNames(clientMap) {
 		adapter := clientMap[clientName]
-		if adapter == nil || !adapter.Exists() || !enabledClients[clientName] {
+		if adapter == nil || !adapter.Exists() || disabledClients[clientName] {
 			continue
 		}
 		ops := make([]lspClientRouterOp, 0, len(languages))

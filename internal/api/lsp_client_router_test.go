@@ -213,54 +213,106 @@ func TestEnsureLSPRouterClientEntries_WiresManifestLanguagesToPresentClientsAndI
 	}
 }
 
-func TestEnsureLSPRouterClientEntries_HonorsClientInstallPrefs(t *testing.T) {
-	seedLSPRouterManifest(t, []string{"go"})
-	t.Setenv("LOCALAPPDATA", t.TempDir())
-	t.Setenv("XDG_DATA_HOME", "")
-	if err := NewAPI().SetDefaultInstallClientNames([]string{"claude-code"}); err != nil {
-		t.Fatalf("set default-install clients: %v", err)
-	}
+func TestEnsureLSPRouterClientEntries_HonorsLSPRouterDisabledPrefs(t *testing.T) {
+	t.Run("default install set does not gate present explicit clients", func(t *testing.T) {
+		seedLSPRouterManifest(t, []string{"go"})
+		if err := NewAPI().SetDefaultInstallClientNames([]string{"claude-code"}); err != nil {
+			t.Fatalf("set default-install clients: %v", err)
+		}
 
-	enabled := newLSPRouterFakeClient(t, "claude-code", true)
-	disabled := newLSPRouterFakeClient(t, "antigravity", true)
-	clientMap := map[string]clients.Client{
-		"claude-code": enabled,
-		"antigravity": disabled,
-	}
-	opts := LSPClientRouterOpts{
-		GUIPort:       7777,
-		Clients:       clientMap,
-		McphubExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
-	}
+		defaultClient := newLSPRouterFakeClient(t, "claude-code", true)
+		explicitClient := newLSPRouterFakeClient(t, "antigravity", true)
+		clientMap := map[string]clients.Client{
+			"claude-code": defaultClient,
+			"antigravity": explicitClient,
+		}
+		opts := LSPClientRouterOpts{
+			GUIPort:       7777,
+			Clients:       clientMap,
+			McphubExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
+		}
 
-	report, err := NewAPI().EnsureLSPRouterClientEntries(opts)
-	if err != nil {
-		t.Fatalf("EnsureLSPRouterClientEntries: %v", err)
-	}
-	name := LSPRouterEntryName("go")
-	if got, err := enabled.GetEntry(name); err != nil || got == nil || got.URL != LSPRouterURL(7777, "go") {
-		t.Fatalf("enabled client entry = %+v err=%v, want router URL", got, err)
-	}
-	if got, err := disabled.GetEntry(name); err != nil || got != nil {
-		t.Fatalf("disabled client entry = %+v err=%v, want no entry", got, err)
-	}
-	if len(report.Backups) != 1 || report.Backups[0].Client != "claude-code" {
-		t.Fatalf("Backups = %+v, want only enabled client backup", report.Backups)
-	}
-	if disabled.addCalls != 0 || len(disabled.backupPaths) != 0 {
-		t.Fatalf("disabled client was mutated: addCalls=%d backups=%v entries=%v", disabled.addCalls, disabled.backupPaths, disabled.entries)
-	}
+		report, err := NewAPI().EnsureLSPRouterClientEntries(opts)
+		if err != nil {
+			t.Fatalf("EnsureLSPRouterClientEntries: %v", err)
+		}
+		name := LSPRouterEntryName("go")
+		for _, client := range []*lspRouterFakeClient{defaultClient, explicitClient} {
+			got, err := client.GetEntry(name)
+			if err != nil {
+				t.Fatalf("%s GetEntry(%s): %v", client.name, name, err)
+			}
+			if got == nil || got.URL != LSPRouterURL(7777, "go") {
+				t.Fatalf("%s entry = %+v, want router URL", client.name, got)
+			}
+			if len(client.backupPaths) != 1 {
+				t.Fatalf("%s backups = %v, want one backup", client.name, client.backupPaths)
+			}
+		}
+		if len(report.Backups) != 2 {
+			t.Fatalf("Backups = %+v, want both present clients", report.Backups)
+		}
 
-	second, err := NewAPI().EnsureLSPRouterClientEntries(opts)
-	if err != nil {
-		t.Fatalf("second EnsureLSPRouterClientEntries: %v", err)
-	}
-	if len(second.Backups) != 0 || len(second.Applied) != 0 || len(second.Removed) != 0 {
-		t.Fatalf("idempotent rerun changed config: %+v", second)
-	}
-	if disabled.addCalls != 0 || len(disabled.entries) != 0 {
-		t.Fatalf("disabled client was re-added on rerun: addCalls=%d entries=%v", disabled.addCalls, disabled.entries)
-	}
+		second, err := NewAPI().EnsureLSPRouterClientEntries(opts)
+		if err != nil {
+			t.Fatalf("second EnsureLSPRouterClientEntries: %v", err)
+		}
+		if len(second.Backups) != 0 || len(second.Applied) != 0 || len(second.Removed) != 0 {
+			t.Fatalf("idempotent rerun changed config: %+v", second)
+		}
+		if len(defaultClient.backupPaths) != 1 || len(explicitClient.backupPaths) != 1 {
+			t.Fatalf("idempotent rerun wrote backups: default=%d explicit=%d", len(defaultClient.backupPaths), len(explicitClient.backupPaths))
+		}
+	})
+
+	t.Run("explicit lsp router opt-out skips only listed clients", func(t *testing.T) {
+		seedLSPRouterManifest(t, []string{"go"})
+		prefs := []byte("clients.default_install: claude-code,antigravity\nclients.lsp_router_disabled: antigravity\n")
+		if err := WriteStateFileBytesAtomic(SettingsPath(), prefs); err != nil {
+			t.Fatalf("write lsp-router disabled prefs: %v", err)
+		}
+
+		enabled := newLSPRouterFakeClient(t, "claude-code", true)
+		disabled := newLSPRouterFakeClient(t, "antigravity", true)
+		clientMap := map[string]clients.Client{
+			"claude-code": enabled,
+			"antigravity": disabled,
+		}
+		opts := LSPClientRouterOpts{
+			GUIPort:       7777,
+			Clients:       clientMap,
+			McphubExePath: filepath.Join(t.TempDir(), "mcphub.exe"),
+		}
+
+		report, err := NewAPI().EnsureLSPRouterClientEntries(opts)
+		if err != nil {
+			t.Fatalf("EnsureLSPRouterClientEntries: %v", err)
+		}
+		name := LSPRouterEntryName("go")
+		if got, err := enabled.GetEntry(name); err != nil || got == nil || got.URL != LSPRouterURL(7777, "go") {
+			t.Fatalf("enabled client entry = %+v err=%v, want router URL", got, err)
+		}
+		if got, err := disabled.GetEntry(name); err != nil || got != nil {
+			t.Fatalf("disabled client entry = %+v err=%v, want no entry", got, err)
+		}
+		if len(report.Backups) != 1 || report.Backups[0].Client != "claude-code" {
+			t.Fatalf("Backups = %+v, want only enabled client backup", report.Backups)
+		}
+		if disabled.addCalls != 0 || len(disabled.backupPaths) != 0 {
+			t.Fatalf("disabled client was mutated: addCalls=%d backups=%v entries=%v", disabled.addCalls, disabled.backupPaths, disabled.entries)
+		}
+
+		second, err := NewAPI().EnsureLSPRouterClientEntries(opts)
+		if err != nil {
+			t.Fatalf("second EnsureLSPRouterClientEntries: %v", err)
+		}
+		if len(second.Backups) != 0 || len(second.Applied) != 0 || len(second.Removed) != 0 {
+			t.Fatalf("idempotent rerun changed config: %+v", second)
+		}
+		if disabled.addCalls != 0 || len(disabled.entries) != 0 {
+			t.Fatalf("disabled client was re-added on rerun: addCalls=%d entries=%v", disabled.addCalls, disabled.entries)
+		}
+	})
 }
 
 func TestEnsureLSPRouterClientEntries_MigratesPerPairEntryToRouterAndKeepsRegistry(t *testing.T) {
