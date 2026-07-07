@@ -215,12 +215,19 @@ func PrintAdoptPlan(w io.Writer, plan *AdoptPlan) {
 		fmt.Fprintf(w, "  also present in %s - re-run with --client %s or include it via --clients\n", client, client)
 	}
 	for _, mismatch := range plan.SignatureMismatches {
-		fmt.Fprintf(w, "  %s in %s differs (%s) - re-run with --clients %s to adopt it explicitly\n", plan.EntryName, mismatch.Client, mismatch.Reason, mismatch.Client)
+		fmt.Fprintf(w, "  %s in %s differs (%s) - re-run with --clients %s to adopt it explicitly\n", plan.EntryName, mismatch.Client, mismatch.Reason, adoptExplicitClientsArg(plan.SourceClient, mismatch.Client))
 	}
 	for _, disabled := range plan.DisabledSameName {
-		fmt.Fprintf(w, "  %s in %s is disabled - not adopted; use --clients %s to override\n", plan.EntryName, disabled.Client, disabled.Client)
+		fmt.Fprintf(w, "  %s in %s is disabled - not adopted; use --clients %s to override\n", plan.EntryName, disabled.Client, adoptExplicitClientsArg(plan.SourceClient, disabled.Client))
 	}
 	fmt.Fprintln(w, "No changes made. Re-run with --yes to apply.")
+}
+
+func adoptExplicitClientsArg(sourceClient, otherClient string) string {
+	if sourceClient == "" || sourceClient == otherClient {
+		return otherClient
+	}
+	return sourceClient + "," + otherClient
 }
 
 func adoptScanOpts(opts ScanOpts) ScanOpts {

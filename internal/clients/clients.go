@@ -170,8 +170,9 @@ type Client interface {
 	// scratch on a fresh host" surface.
 	InitEmpty() (created bool, err error)
 
-	// Backup copies the current config to a sibling file ending in ".bak-mcp-local-hub-<timestamp>"
-	// and returns the path. Overwrites any previous backup with the same timestamp-second.
+	// Backup copies the current config to a sibling file ending in
+	// ".bak-mcp-local-hub-<timestamp>" or a collision suffix for the same
+	// timestamp-second, and returns the path.
 	//
 	// As a side effect, the first ever Backup call also writes a one-shot pristine
 	// sentinel "<path>.bak-mcp-local-hub-original" that captures the config as it
@@ -205,9 +206,10 @@ type Client interface {
 	GetEntry(name string) (*MCPEntry, error)
 
 	// LatestBackupPath returns the absolute path to the most recent
-	// mcp-local-hub backup of this client's config. Timestamped
-	// backups (.bak-mcp-local-hub-<YYYYMMDD-HHMMSS>) take precedence
-	// over the pristine -original sentinel. Returns (path, true, nil)
+	// mcp-local-hub backup of this client's config. Timestamped backups
+	// (.bak-mcp-local-hub-<YYYYMMDD-HHMMSS> with an optional collision
+	// suffix) take precedence over the pristine -original sentinel.
+	// Returns (path, true, nil)
 	// when a backup exists, ("", false, nil) when none do, (_, _, err)
 	// on a filesystem error.
 	LatestBackupPath() (string, bool, error)
@@ -985,11 +987,10 @@ func writeBackup(livePath, clientName string, keepN int) (string, error) {
 		}
 	}
 
-	// Timestamped rolling backup. Windows filesystems give second-resolution
-	// mtime only, so two calls in the same second land on the same filename
-	// and the second call overwrites the first — harmless, since the content
-	// is the current live config either way.
-	bakPath := livePath + backupSuffixPrefix + time.Now().Format("20060102-150405")
+	bakPath, err := nextBackupPath(livePath)
+	if err != nil {
+		return "", err
+	}
 	if err := copyFile(livePath, bakPath, 0600); err != nil {
 		return "", err
 	}
@@ -998,6 +999,25 @@ func writeBackup(livePath, clientName string, keepN int) (string, error) {
 		pruneOldTimestamped(livePath, keepN)
 	}
 	return bakPath, nil
+}
+
+func nextBackupPath(livePath string) (string, error) {
+	base := livePath + backupSuffixPrefix + time.Now().Format("20060102-150405")
+	if _, err := os.Stat(base); err != nil {
+		if os.IsNotExist(err) {
+			return base, nil
+		}
+		return "", err
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%09d", base, i)
+		if _, err := os.Stat(candidate); err != nil {
+			if os.IsNotExist(err) {
+				return candidate, nil
+			}
+			return "", err
+		}
+	}
 }
 
 // copyFileTornWindowHook, when non-nil (tests only), is invoked AFTER the
@@ -1078,6 +1098,9 @@ func pruneOldTimestamped(livePath string, keepN int) {
 	}
 	// Newest first, then drop everything past index keepN-1.
 	sort.Slice(timestamped, func(i, j int) bool {
+		if timestamped[i].modTime.Equal(timestamped[j].modTime) {
+			return timestamped[i].path > timestamped[j].path
+		}
 		return timestamped[i].modTime.After(timestamped[j].modTime)
 	})
 	for _, b := range timestamped[keepN:] {
@@ -1087,9 +1110,10 @@ func pruneOldTimestamped(livePath string, keepN int) {
 
 // BackupsNewestFirst returns every mcp-local-hub backup path for
 // livePath, sorted newest-first. Timestamped copies
-// (livePath + ".bak-mcp-local-hub-<ts>") come first in
+// (livePath + ".bak-mcp-local-hub-<ts>[-n]") come first in
 // lexicographic-reverse order (timestamps use the 20060102-150405
-// layout, which sorts correctly as a string), then the pristine
+// layout and same-second collision suffixes sort after the base name),
+// then the pristine
 // "-original" sentinel (semantically the oldest snapshot — taken
 // on first Backup() call before any timestamped backup).
 // Directories with matching names are ignored.
@@ -1347,10 +1371,11 @@ func legacyBackupsNewestFirstLocked(livePath, _ string) ([]string, error) {
 }
 
 // latestBackup returns the most recent mcp-local-hub backup path for
-// livePath. Timestamped copies (livePath + ".bak-mcp-local-hub-<ts>")
+// livePath. Timestamped copies (livePath + ".bak-mcp-local-hub-<ts>[-n]")
 // take precedence over the pristine "-original" sentinel; within
 // timestamped copies the lexicographically-largest name wins (timestamps
-// use the 20060102-150405 layout, which sorts correctly as a string).
+// use the 20060102-150405 layout and same-second collision suffixes sort
+// after the base name).
 // Directories with matching names are ignored. Returns ("", false, nil)
 // when no backup files are present and (_, _, err) on filesystem error.
 // The second parameter (clientName) is currently unused but reserved for

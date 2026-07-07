@@ -11,6 +11,8 @@ import (
 // remote-http URL and header placeholders. Capture group 1 is the vault key.
 var SecretPlaceholderRE = regexp.MustCompile(`\$\{secret:([A-Za-z0-9_\-.]+)\}`)
 
+var envPlaceholderRE = regexp.MustCompile(`\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}`)
+
 // MalformedSecretPrefixRE matches any `${secret:` prefix so callers can detect
 // intended placeholders that failed the stricter SecretPlaceholderRE shape.
 var MalformedSecretPrefixRE = regexp.MustCompile(`\$\{secret:`)
@@ -94,6 +96,24 @@ func (r *Resolver) Resolve(ref string) (string, error) {
 			return "", fmt.Errorf("resolve %q: environment variable %q not set", ref, name)
 		}
 		return v, nil
+	case strings.Contains(ref, "${env:"):
+		var resolveErr error
+		resolved := envPlaceholderRE.ReplaceAllStringFunc(ref, func(token string) string {
+			if resolveErr != nil {
+				return token
+			}
+			name := strings.TrimSuffix(strings.TrimPrefix(token, "${env:"), "}")
+			v, ok := os.LookupEnv(name)
+			if !ok {
+				resolveErr = fmt.Errorf("resolve %q: environment variable %q not set", ref, name)
+				return token
+			}
+			return v
+		})
+		if resolveErr != nil {
+			return "", resolveErr
+		}
+		return resolved, nil
 	case strings.HasPrefix(ref, "$"):
 		name := strings.TrimPrefix(ref, "$")
 		v, ok := os.LookupEnv(name)

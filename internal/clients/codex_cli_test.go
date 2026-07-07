@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func setupCodexConfig(t *testing.T, initial string) string {
@@ -149,6 +150,110 @@ url = "http://localhost:9999/mcp"
 	data, _ := os.ReadFile(path)
 	if strings.Contains(string(data), "newserver") {
 		t.Errorf("newserver should have been removed, got:\n%s", string(data))
+	}
+}
+
+func TestCodexCLI_BackupKeepSameSecondSnapshotsRemainDistinctForRollback(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	c := &codexCLI{path: path}
+	first := `[mcp_servers.memory]
+command = "npx"
+args = ["first"]
+`
+	second := `[mcp_servers.memory]
+command = "npx"
+args = ["second"]
+`
+
+	var bak1, bak2 string
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		removeTimestampedBackupsForTest(t, path)
+		waitForFreshBackupSecondForTest()
+		if err := os.WriteFile(path, []byte(first), 0600); err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		bak1, err = c.BackupKeep(0)
+		if err != nil {
+			t.Fatalf("first BackupKeep: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(second), 0600); err != nil {
+			t.Fatal(err)
+		}
+		bak2, err = c.BackupKeep(0)
+		if err != nil {
+			t.Fatalf("second BackupKeep: %v", err)
+		}
+		if backupSecondStampForTest(bak1) == backupSecondStampForTest(bak2) {
+			break
+		}
+	}
+	if backupSecondStampForTest(bak1) != backupSecondStampForTest(bak2) {
+		t.Fatalf("could not exercise same-second backups; got %q and %q", bak1, bak2)
+	}
+	if bak1 == bak2 {
+		t.Fatalf("same-second BackupKeep calls returned the same path %q", bak1)
+	}
+	if err := c.RestoreEntryFromBackupForRollback(bak1, "memory"); err != nil {
+		t.Fatalf("RestoreEntryFromBackupForRollback(%s): %v", bak1, err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read restored config: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "first") || strings.Contains(s, "second") {
+		t.Fatalf("rollback from first backup restored wrong snapshot:\n%s", s)
+	}
+	secondData, err := os.ReadFile(bak2)
+	if err != nil {
+		t.Fatalf("read second backup: %v", err)
+	}
+	if !strings.Contains(string(secondData), "second") {
+		t.Fatalf("second backup does not hold its own snapshot:\n%s", secondData)
+	}
+}
+
+func waitForFreshBackupSecondForTest() {
+	stamp := time.Now().Format("20060102-150405")
+	for time.Now().Format("20060102-150405") == stamp {
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func backupSecondStampForTest(path string) string {
+	idx := strings.LastIndex(path, backupSuffixPrefix)
+	if idx < 0 {
+		return ""
+	}
+	suffix := path[idx+len(backupSuffixPrefix):]
+	if len(suffix) < len("20060102-150405") {
+		return suffix
+	}
+	return suffix[:len("20060102-150405")]
+}
+
+func removeTimestampedBackupsForTest(t *testing.T, livePath string) {
+	t.Helper()
+	dir := filepath.Dir(livePath)
+	base := filepath.Base(livePath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		t.Fatalf("read backup dir: %v", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, base+backupSuffixPrefix) || name == base+originalSentinelSuffix {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("remove old backup %s: %v", name, err)
+		}
 	}
 }
 

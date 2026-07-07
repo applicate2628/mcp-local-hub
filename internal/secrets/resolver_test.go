@@ -60,6 +60,39 @@ func TestResolver_EnvBracePlaceholder(t *testing.T) {
 	}
 }
 
+func TestResolver_EnvBracePlaceholderComposite(t *testing.T) {
+	t.Setenv("MCP_TEST_PATH", "/usr/bin")
+	r := NewResolver(nil, nil)
+	got, err := r.Resolve("${env:MCP_TEST_PATH}:/opt/bin")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != "/usr/bin:/opt/bin" {
+		t.Errorf("Resolve = %q, want /usr/bin:/opt/bin", got)
+	}
+}
+
+func TestResolver_EnvBracePlaceholderCompositeMultipleTokens(t *testing.T) {
+	t.Setenv("MCP_TEST_FIRST", "one")
+	t.Setenv("MCP_TEST_SECOND", "two")
+	r := NewResolver(nil, nil)
+	got, err := r.Resolve("prefix-${env:MCP_TEST_FIRST}-${env:MCP_TEST_SECOND}-suffix")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != "prefix-one-two-suffix" {
+		t.Errorf("Resolve = %q, want prefix-one-two-suffix", got)
+	}
+}
+
+func TestResolver_EnvBracePlaceholderCompositeMissingIsError(t *testing.T) {
+	os.Unsetenv("MCP_DEFINITELY_NOT_SET")
+	r := NewResolver(nil, nil)
+	if _, err := r.Resolve("prefix-${env:MCP_DEFINITELY_NOT_SET}-suffix"); err == nil {
+		t.Error("expected error for missing composite env var, got nil")
+	}
+}
+
 func TestResolver_Literal(t *testing.T) {
 	r := NewResolver(nil, nil)
 	got, err := r.Resolve("plain-text")
