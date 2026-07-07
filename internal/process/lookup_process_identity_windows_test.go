@@ -454,3 +454,57 @@ func TestLookupProcessIdentity_ProbeErrorIsFatalNotFallback(t *testing.T) {
 		t.Fatalf("probe error must not surface as ErrProcessNotFound: %v", err)
 	}
 }
+
+// TestParseWmicProcessCSVFields_CommaExecutablePathKeepsNameTail covers the
+// legacy lookupViaWmic shape: Node,CommandLine,CreationDate,ExecutablePath,Name.
+// ExecutablePath can be unquoted by WMIC, so commas in profile paths must be
+// rejoined before the final Name tail field is read.
+func TestParseWmicProcessCSVFields_CommaExecutablePathKeepsNameTail(t *testing.T) {
+	row, ok := ParseWmicProcessCSVFields(
+		`HOST,"mcphub.exe daemon --server S --daemon D",20260707090000.000000+000,C:\Users\Doe, Jane\bin\mcphub.exe,mcphub.exe`,
+		1,
+	)
+	if !ok {
+		t.Fatal("expected comma-bearing WMIC identity row to parse")
+	}
+	if row.CommandLine != `mcphub.exe daemon --server S --daemon D` {
+		t.Fatalf("CommandLine = %q", row.CommandLine)
+	}
+	if row.ExecutablePath != `C:\Users\Doe, Jane\bin\mcphub.exe` {
+		t.Fatalf("ExecutablePath = %q", row.ExecutablePath)
+	}
+	if len(row.Tail) != 1 || row.Tail[0] != "mcphub.exe" {
+		t.Fatalf("Tail = %#v, want [mcphub.exe]", row.Tail)
+	}
+}
+
+func TestParseWmicIdentityCSV_MissingHeaderFailsClosed(t *testing.T) {
+	_, err := parseWmicIdentityCSV([]byte(
+		`HOST,"mcphub.exe daemon --server S --daemon D",20260707090000.000000+000,C:\mcphub.exe,mcphub.exe`+"\n",
+	), 1234)
+	if !errors.Is(err, ErrProcessNotFound) {
+		t.Fatalf("missing WMIC header error = %v, want ErrProcessNotFound", err)
+	}
+}
+
+func TestParseWmicIdentityCSV_ReorderedHeaderParses(t *testing.T) {
+	id, err := parseWmicIdentityCSV([]byte(
+		"Node,ExecutablePath,CreationDate,CommandLine,Name\n"+
+			`HOST,C:\Users\Doe, Jane\bin\mcphub.exe,20260707090000.000000+000,"mcphub.exe daemon --server S,with-comma",mcphub.exe`+"\n",
+	), 1234)
+	if err != nil {
+		t.Fatalf("parse reordered WMIC identity CSV: %v", err)
+	}
+	if id.PID != 1234 {
+		t.Fatalf("PID = %d, want 1234", id.PID)
+	}
+	if id.CommandLine != `mcphub.exe daemon --server S,with-comma` {
+		t.Fatalf("CommandLine = %q", id.CommandLine)
+	}
+	if id.ExecutablePath != `C:\Users\Doe, Jane\bin\mcphub.exe` {
+		t.Fatalf("ExecutablePath = %q", id.ExecutablePath)
+	}
+	if id.Basename != "mcphub.exe" {
+		t.Fatalf("Basename = %q", id.Basename)
+	}
+}

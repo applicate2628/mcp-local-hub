@@ -2,7 +2,6 @@ package api
 
 import (
 	"bufio"
-	"encoding/csv"
 	"fmt"
 	"io"
 	"os"
@@ -64,18 +63,18 @@ const (
 // match rule. Mirrors scripts/cleanup-orphan-watchers.ps1's NeverKill.
 var neverKillLogWatcher = map[string]bool{
 	// Active simulation runners
-	"em.exe":          true,
-	"python.exe":      true,
-	"pythonw.exe":     true,
-	"python":          true,
-	"python3":         true,
+	"em.exe":      true,
+	"python.exe":  true,
+	"pythonw.exe": true,
+	"python":      true,
+	"python3":     true,
 	// Agent runtimes
-	"mcphub.exe":      true,
-	"mcphub":          true,
-	"codex.exe":       true,
-	"codex":           true,
-	"claude.exe":      true,
-	"claude":          true,
+	"mcphub.exe": true,
+	"mcphub":     true,
+	"codex.exe":  true,
+	"codex":      true,
+	"claude.exe": true,
+	"claude":     true,
 	// Editors
 	"cursor.exe":      true,
 	"cursor":          true,
@@ -84,9 +83,9 @@ var neverKillLogWatcher = map[string]bool{
 	"antigravity.exe": true,
 	"antigravity":     true,
 	// Shells (legitimate active shells)
-	"powershell.exe":  true,
-	"pwsh.exe":        true,
-	"cmd.exe":         true,
+	"powershell.exe": true,
+	"pwsh.exe":       true,
+	"cmd.exe":        true,
 }
 
 // watcherProcessNames are the only process names we INSPECT for the
@@ -272,10 +271,11 @@ func effectiveParentAlive(ppid int, pidSet map[int]bool) bool {
 
 // filterWatcherCandidates is the platform-agnostic filter step. Two
 // passes are unioned by PID:
-//   1. Path-matched: process name in watcherProcessNames + cmdline
-//      matches PathRegex.
-//   2. Orphan-grep: process name == "grep[.exe]" + parent absent +
-//      cmdline matches OrphanGrepRegex.
+//  1. Path-matched: process name in watcherProcessNames + cmdline
+//     matches PathRegex.
+//  2. Orphan-grep: process name == "grep[.exe]" + parent absent +
+//     cmdline matches OrphanGrepRegex.
+//
 // NeverKill names are excluded from both passes.
 func filterWatcherCandidates(rows []processRow, pidSet map[int]bool, pathRe, orphanRe *regexp.Regexp) []LogWatcher {
 	now := time.Now().Unix()
@@ -343,8 +343,8 @@ func snapshotProcessesForWatcherScan() ([]processRow, error) {
 // parse without depending on the locale's BSD vs. SysV argv quirks.
 // Output sample (Linux):
 //
-//	  PID  PPID COMMAND        ELAPSED ARGS
-//	 1234   500 bash           00:01:23 /bin/bash -c "tail -F ...| grep ..."
+//	 PID  PPID COMMAND        ELAPSED ARGS
+//	1234   500 bash           00:01:23 /bin/bash -c "tail -F ...| grep ..."
 //
 // Codex Cloud bot P2 on PR #131 commit 1f59a65: without `-ww`, ps
 // truncates the ARGS column at the controlling terminal width (or
@@ -497,71 +497,27 @@ func parseEtime(s string) int64 {
 	return days*86400 + h*3600 + m*60 + sec
 }
 
-// parseWmicProcessRows reads wmic-CSV (Windows snapshot) into the
-// neutral processRow shape. Reuses CIM_DATETIME via parseWmicDate().
-//
-// Codex Cloud bot 3 P1 findings on PR #131 commit 1f59a65 / kosyak
-// 2026-05-07-wmic-csv-parse-not-tolerant-shipped-parallel-mechanism.md:
-// the prior implementation used encoding/csv.Reader, which is RFC 4180
-// strict. wmic /format:csv violates RFC 4180 in three real-world ways:
-//
-//  1. Quotes inside quoted fields are NOT doubled (wmic predates the
-//     RFC). csv.Reader rejects with ErrBareQuote on those rows.
-//  2. wmic emits leading blank lines on some Windows versions; the
-//     prior loop treated blank as the header and lost colIdx entirely.
-//  3. csv.Reader.Read() returning err on a single malformed row caused
-//     return nil, err, killing the whole snapshot.
-//
-// Fix: use encoding/csv.Reader with LazyQuotes to preserve multiline
-// quoted records while tolerating wmic quote oddities. Keep per-row
-// continue semantics for malformed rows and blank-line skip.
+// parseWmicProcessRows reads the shared Windows process snapshot into the
+// neutral processRow shape. It routes every row through parseProcessSnapshotRow
+// instead of csv.Reader/header indexes because runProcessSnapshot includes
+// ExecutablePath, and legacy WMIC can emit comma-bearing paths unquoted.
 func parseWmicProcessRows(r io.Reader) ([]processRow, error) {
-	cr := csv.NewReader(r)
-	cr.FieldsPerRecord = -1
-	cr.LazyQuotes = true
-	cr.TrimLeadingSpace = true
-
+	snapRows, err := parseProcessSnapshotRows(r)
 	var rows []processRow
-	var colIdx map[string]int
-	for {
-		fields, err := cr.Read()
-		if err == io.EOF {
-			return rows, nil
-		}
-		if err != nil {
-			// Keep snapshot resilient: malformed rows should not abort
-			// the whole cleanup pass.
-			continue
-		}
-		if len(fields) == 1 && strings.TrimSpace(fields[0]) == "" {
-			continue
-		}
-		if colIdx == nil {
-			colIdx = make(map[string]int, len(fields))
-			for i, h := range fields {
-				colIdx[strings.TrimSpace(h)] = i
-			}
-			continue
-		}
-		get := func(name string) string {
-			if i, ok := colIdx[name]; ok && i < len(fields) {
-				return fields[i]
-			}
-			return ""
-		}
-		pid, err := strconv.Atoi(strings.TrimSpace(get("ProcessId")))
-		if err != nil {
-			continue
-		}
-		ppid, _ := strconv.Atoi(strings.TrimSpace(get("ParentProcessId")))
-		cmd := get("CommandLine")
-		name := basenameFromCmdline(cmd)
+	for _, snapRow := range snapRows {
 		startTime := int64(0)
-		if dt := parseWmicDate(get("CreationDate")); !dt.IsZero() {
-			startTime = dt.Unix()
+		if !snapRow.created.IsZero() {
+			startTime = snapRow.created.Unix()
 		}
-		rows = append(rows, processRow{PID: pid, ParentPID: ppid, Name: name, Cmdline: cmd, StartTime: startTime})
+		rows = append(rows, processRow{
+			PID:       snapRow.pid,
+			ParentPID: snapRow.ppid,
+			Name:      basenameFromCmdline(snapRow.cmdline),
+			Cmdline:   snapRow.cmdline,
+			StartTime: startTime,
+		})
 	}
+	return rows, err
 }
 
 func basenameFromCmdline(cmd string) string {
