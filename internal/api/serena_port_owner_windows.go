@@ -80,7 +80,17 @@ func loopbackPortOwnerPIDContext(ctx context.Context, port int) (int, bool, erro
 // single bound socket, but netstat can surface duplicates), the FIRST row
 // wins — matching loopbackPortOwnerPID, which returns the first matching line.
 func loopbackPortOwnersSnapshot() (map[int]int, error) {
-	cmd := exec.Command("netstat", "-ano")
+	return loopbackPortOwnersSnapshotContext(context.Background())
+}
+
+// loopbackPortOwnersSnapshotContext runs the single `netstat -ano` under
+// exec.CommandContext so a deadline-exceeded/canceled ctx kills the netstat
+// child instead of blocking the caller on a wedged system network stack
+// (observed >20s under NSI/svchost contention). The seam the supervisor status
+// coalescer wraps a short deadline around. Non-ctx delegate uses
+// context.Background() -> byte-identical to the prior exec.Command.
+func loopbackPortOwnersSnapshotContext(ctx context.Context) (map[int]int, error) {
+	cmd := exec.CommandContext(ctx, "netstat", "-ano")
 	process.NoConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {

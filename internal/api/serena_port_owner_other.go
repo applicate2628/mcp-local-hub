@@ -39,6 +39,17 @@ func loopbackPortOwnerPIDContext(ctx context.Context, port int) (int, bool, erro
 // returning the same errPortOwnerUnsupported sentinel so a caller batching the
 // snapshot gets the identical fail-closed signal as the per-port path.
 func loopbackPortOwnersSnapshot() (map[int]int, error) {
+	return loopbackPortOwnersSnapshotContext(context.Background())
+}
+
+// loopbackPortOwnersSnapshotContext is the context-bounded fail-closed stub, so
+// the cross-platform LoopbackPortOwnersSnapshotContext seam links on every target.
+func loopbackPortOwnersSnapshotContext(ctx context.Context) (map[int]int, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	return nil, errPortOwnerUnsupported
 }
 

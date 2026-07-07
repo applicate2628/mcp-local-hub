@@ -41,7 +41,7 @@ func TestSupervisorStatusDoesNotReportRunningForDeadRecordedPID(t *testing.T) {
 	})
 	defer restore()
 
-	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestSupervisorStatusDaemonsUsesDescriptorIdentityForWorkspaceLSP(t *testing
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
 
-	rows, err := supervisorStatusDaemons(stateDir, NewDaemonRuntimeTracker())
+	rows, err := supervisorStatusDaemons(stateDir, NewDaemonRuntimeTracker(), nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestSupervisorStartupRuntimeDoesNotHydrateStaleCleanedStoppedDaemon(t *test
 		t.Fatal("stale cleaned daemon with stopped daemon-intent was respawned")
 	}
 
-	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
@@ -725,7 +725,7 @@ func TestSweep_PortZeroLegacyRowResolvesEffectivePort(t *testing.T) {
 
 	var probedPort int
 	restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
-		PIDAlive: func(pid int) bool { return pid == 22036 }, // live PID
+		PIDAlive: func(pid int) bool { return pid == 22036 },              // live PID
 		PortLive: func(port int) bool { probedPort = port; return false }, // port unbound
 	})
 	defer restore()

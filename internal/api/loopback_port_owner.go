@@ -51,5 +51,20 @@ func LoopbackPortOwnerPIDContext(ctx context.Context, port int) (int, bool, erro
 // On unsupported platforms (macOS / other POSIX) it returns the same
 // errPortOwnerUnsupported sentinel the per-port path returns.
 func LoopbackPortOwnersSnapshot() (map[int]int, error) {
-	return loopbackPortOwnersSnapshot()
+	return LoopbackPortOwnersSnapshotContext(context.Background())
+}
+
+// LoopbackPortOwnersSnapshotContext is the context-bounded batch snapshot: the
+// deadline is enforced on the OS query (Windows: netstat -ano under
+// exec.CommandContext; Linux/other: honored as a pre-read cancellation check).
+// The seam the supervisor status coalescer uses to bound how long a status
+// refresh can wait on netstat, so a pathologically slow network stack degrades
+// to a snapshot error (-> per-daemon port_owner_unverified) instead of a hung
+// status IPC that trips the GUI restart-watcher timeout. LoopbackPortOwnersSnapshot
+// delegates here with context.Background(), so non-ctx callers are byte-identical.
+func LoopbackPortOwnersSnapshotContext(ctx context.Context) (map[int]int, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return loopbackPortOwnersSnapshotContext(ctx)
 }

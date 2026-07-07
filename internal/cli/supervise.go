@@ -389,6 +389,7 @@ type ipcDispatchDeps struct {
 	stateDir          string
 	events            *api.SupervisorEventLog
 	runtimeTracker    *DaemonRuntimeTracker
+	statusCoalescer   *statusPortOwnersCoalescer
 	reconcileReady    *atomic.Bool
 	intentFilesLoaded *atomic.Bool
 	// gracefulInProgress is a refcount-style counter (codex-r4-b-p2)
@@ -892,6 +893,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			stateDir:           stateDir,
 			events:             events,
 			runtimeTracker:     runtimeTracker,
+			statusCoalescer:    newStatusPortOwnersCoalescer(),
 			reconcileReady:     &reconcileReady,
 			intentFilesLoaded:  &intentFilesLoaded,
 			gracefulInProgress: &gracefulInProgress,
@@ -1703,7 +1705,7 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 	}
 	switch req.Cmd {
 	case "status":
-		daemons, err := supervisorStatusDaemons(deps.stateDir, deps.runtimeTracker)
+		daemons, err := supervisorStatusDaemons(deps.stateDir, deps.runtimeTracker, deps.statusCoalescer)
 		if err != nil {
 			return writeIPCFrame(conn, api.IPCResponse{
 				ID: req.ID,

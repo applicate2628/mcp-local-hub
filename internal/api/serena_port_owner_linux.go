@@ -62,6 +62,19 @@ func loopbackPortOwnerPIDContext(ctx context.Context, port int) (int, bool, erro
 // returned as (nil, err) so every port the caller asks about fails closed to
 // port_owner_unverified — never a restart.
 func loopbackPortOwnersSnapshot() (map[int]int, error) {
+	return loopbackPortOwnersSnapshotContext(context.Background())
+}
+
+// loopbackPortOwnersSnapshotContext honors the caller's deadline as a pre-read
+// cancellation check before the /proc/net/tcp read + /proc walk. Linux is beta;
+// the coalescer deadline is primarily a Windows-netstat guard, so a ctx already
+// past its deadline short-circuits here and everything else runs as before.
+func loopbackPortOwnersSnapshotContext(ctx context.Context) (map[int]int, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	return loopbackPortOwnersSnapshotFromProcNet("/proc/net/tcp")
 }
 

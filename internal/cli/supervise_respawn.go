@@ -310,6 +310,10 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 				Final: true,
 			})
 		}
+		// A respawn changed the fleet: drop the cached status port-owner snapshot
+		// so an immediate status poll re-probes and does not report the fresh PID
+		// as stale against a pre-respawn owner map (Codex flap-review P3).
+		deps.statusCoalescer.Invalidate()
 		_ = deps.events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "ipc",
@@ -441,6 +445,10 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 		})
 	}
 
+	// A respawn changed the fleet: drop the cached status port-owner snapshot so
+	// an immediate status poll re-probes and does not report the fresh PID as
+	// stale against a pre-respawn owner map (Codex flap-review P3).
+	deps.statusCoalescer.Invalidate()
 	_ = deps.events.Emit(api.SupervisorEvent{
 		Severity: "info",
 		Source:   "ipc",
