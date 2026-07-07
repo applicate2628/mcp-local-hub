@@ -94,7 +94,7 @@ func (c *statusPortOwnersCoalescer) Get() (map[int]int, error) {
 	defer cancel()
 	c.snapshot, c.err = c.snapshotFn(ctx)
 	c.takenAt = c.nowFn()
-	c.genAtProbe = c.currentGeneration()
+	c.genAtProbe = gen
 	return c.snapshot, c.err
 }
 

@@ -46,6 +46,26 @@ func TestLoopbackPortOwnersSnapshotContext_CanceledCtxAborts(t *testing.T) {
 	}
 }
 
+func TestPortOwnerPidsForSocketInodesFromProcChecksContextBeforeOpen(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	missingProc := filepath.Join(t.TempDir(), "missing-proc")
+
+	if _, _, err := pidsForSocketInodesFromProc(ctx, missingProc, map[int]string{9301: "12345"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pidsForSocketInodesFromProc(canceled) err = %v, want context.Canceled before reading proc dir", err)
+	}
+}
+
+func TestPortOwnerPidForSocketInodeFromProcChecksContextBeforeOpen(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	missingProc := filepath.Join(t.TempDir(), "missing-proc")
+
+	if _, _, err := pidForSocketInodeFromProc(ctx, missingProc, "12345"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pidForSocketInodeFromProc(canceled) err = %v, want context.Canceled before reading proc dir", err)
+	}
+}
+
 // TestLoopbackPortOwnersSnapshot_BackgroundDelegate: the non-ctx entry point (a
 // context.Background() delegate) never trips and returns a real snapshot map.
 func TestLoopbackPortOwnersSnapshot_BackgroundDelegate(t *testing.T) {
@@ -234,16 +254,15 @@ func TestPortOwnerScanProcFDDirLinksReadsFdDirectoryInBatches(t *testing.T) {
 	total := procFDReadDirBatchSize + 3
 	for i := 0; i < total; i++ {
 		target := fmt.Sprintf("pipe:[%d]", i)
-		if i == total-1 {
-			target = wantTarget
-		}
 		if err := os.Symlink(target, filepath.Join(fdDir, fmt.Sprintf("%03d", i))); err != nil {
 			t.Fatalf("symlink fd fixture %d: %v", i, err)
 		}
 	}
 
 	var seen int
-	matched, sawPermission, err := scanProcFDDirLinks(context.Background(), fdDir, func(target string) bool {
+	ctxPolls := 0
+	ctx := &countingErrCtx{Context: context.Background(), calls: &ctxPolls}
+	matched, sawPermission, err := scanProcFDDirLinks(ctx, fdDir, func(target string) bool {
 		seen++
 		return target == wantTarget
 	})
@@ -253,10 +272,14 @@ func TestPortOwnerScanProcFDDirLinksReadsFdDirectoryInBatches(t *testing.T) {
 	if sawPermission {
 		t.Fatalf("sawPermission = true, want false")
 	}
-	if !matched {
-		t.Fatalf("matched = false, want true")
+	if matched {
+		t.Fatalf("matched = true, want false for absent target")
 	}
 	if seen != total {
 		t.Fatalf("visited %d fd links, want %d across multiple ReadDir batches", seen, total)
+	}
+	wantMinPolls := (total + procFDReadDirBatchSize - 1) / procFDReadDirBatchSize
+	if ctxPolls < wantMinPolls {
+		t.Fatalf("ctx.Err() polled %d times, want at least %d across ReadDir batches", ctxPolls, wantMinPolls)
 	}
 }

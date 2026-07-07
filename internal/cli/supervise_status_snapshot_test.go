@@ -422,6 +422,41 @@ func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChanges(t *tes
 	}
 }
 
+func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChangesDuringProbe(t *testing.T) {
+	var calls int32
+	var gen atomic.Uint64
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	c := &statusPortOwnersCoalescer{
+		snapshotFn: func(context.Context) (map[int]int, error) {
+			call := int(atomic.AddInt32(&calls, 1))
+			if call == 1 {
+				gen.Add(1)
+			}
+			return map[int]int{9123: call}, nil
+		},
+		genFn:   gen.Load,
+		nowFn:   func() time.Time { return now },
+		timeout: time.Second,
+	}
+
+	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
+		t.Fatalf("first Get = (%+v, %v), want call marker 1", snap, err)
+	}
+	// Still within the TTL (now unchanged): the first probe's mid-flight
+	// generation bump must invalidate the cache stamped with the pre-probe
+	// generation.
+	snap, err := c.Get()
+	if err != nil {
+		t.Fatalf("post-mid-probe-generation-bump Get: %v", err)
+	}
+	if snap[9123] != 2 {
+		t.Fatalf("post-mid-probe-generation-bump snapshot = %+v, want a fresh re-probe (marker 2) despite same-TTL", snap)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("snapshotFn calls = %d, want 2 (mid-probe generation bump forced a re-probe within TTL)", got)
+	}
+}
+
 func TestStatusPortOwnersCoalescerCachesErrorAndReprobesAfterTTL(t *testing.T) {
 	var calls int32
 	var gen atomic.Uint64

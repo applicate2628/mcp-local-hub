@@ -13,7 +13,10 @@ import (
 	"strings"
 )
 
-const procFDReadDirBatchSize = 256
+const (
+	procDirReadDirBatchSize = 256
+	procFDReadDirBatchSize  = 256
+)
 
 // loopbackPortOwnerPID resolves the PID that owns a LISTENING socket on
 // 127.0.0.1:<port> using Linux's kernel socket tables. This avoids trusting a
@@ -29,8 +32,10 @@ func loopbackPortOwnerPID(port int) (int, bool, error) {
 // meaningfully long. P2-C: ctx is honored DURING that walk (pidForSocketInodeContext
 // checks ctx.Err() per /proc entry) so the caller's deadline (the supervisor's 2s
 // portGateProbeDeadline) is actually enforced and the controller loop cannot block
-// past it. loopbackPortOwnerPID delegates here with context.Background(), which
-// never trips, so the non-ctx path stays byte-identical.
+// past it. The owner walk checks cancellation before opening /proc, before each
+// /proc ReadDir batch, and inside each fd scan. loopbackPortOwnerPID delegates
+// here with context.Background(), which never trips, so the non-ctx path keeps
+// the same owner-resolution contract.
 func loopbackPortOwnerPIDContext(ctx context.Context, port int) (int, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, false, err
@@ -168,55 +173,78 @@ func loopbackListenPortInodesFromProcNet(path string) (map[int]string, error) {
 // permission error was seen while walking (so the caller can classify
 // unresolved inodes as foreign-owned). Batch form of pidForSocketInode.
 func pidsForSocketInodes(ctx context.Context, wantInodes map[int]string) (map[string]int, bool, error) {
+	return pidsForSocketInodesFromProc(ctx, "/proc", wantInodes)
+}
+
+func pidsForSocketInodesFromProc(ctx context.Context, procDir string, wantInodes map[int]string) (map[string]int, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return nil, false, fmt.Errorf("loopbackPortOwnersSnapshot: read /proc: %w", err)
 	}
 	want := map[string]struct{}{}
 	for _, inode := range wantInodes {
 		want["socket:["+inode+"]"] = struct{}{}
 	}
 	found := map[string]int{}
+	if len(want) == 0 {
+		return found, false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	f, err := os.Open(procDir)
+	if err != nil {
+		return nil, false, fmt.Errorf("loopbackPortOwnersSnapshot: read %s: %w", procDir, err)
+	}
+	defer f.Close()
+
 	var sawPermissionError bool
-	for _, entry := range entries {
+	for {
 		if len(found) == len(want) {
-			break
+			return found, sawPermissionError, nil
 		}
-		// Honor the deadline at the top of each /proc entry (before its per-fd
-		// readlink scan) so a canceled/deadline-exceeded ctx aborts promptly
-		// instead of walking the whole (possibly large/slow) tree — the same
-		// guard the per-port pidForSocketInodeContext uses (Codex PR #510 P2).
 		if err := ctx.Err(); err != nil {
 			return found, sawPermissionError, err
 		}
-		if !entry.IsDir() {
-			continue
-		}
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil || pid <= 0 {
-			continue
-		}
-		_, sawPermission, err := scanProcFDDirLinks(ctx, filepath.Join("/proc", entry.Name(), "fd"), func(target string) bool {
-			if _, ok := want[target]; ok {
-				// target is "socket:[<inode>]"; strip back to the bare inode key.
-				inode := strings.TrimSuffix(strings.TrimPrefix(target, "socket:["), "]")
-				if _, already := found[inode]; !already {
-					found[inode] = pid
-				}
+		entries, err := f.ReadDir(procDirReadDirBatchSize)
+		for _, entry := range entries {
+			if len(found) == len(want) {
+				return found, sawPermissionError, nil
 			}
-			return len(found) == len(want)
-		})
-		if err != nil {
-			return found, sawPermissionError, err
+			if err := ctx.Err(); err != nil {
+				return found, sawPermissionError, err
+			}
+			if !entry.IsDir() {
+				continue
+			}
+			pid, err := strconv.Atoi(entry.Name())
+			if err != nil || pid <= 0 {
+				continue
+			}
+			_, sawPermission, err := scanProcFDDirLinks(ctx, filepath.Join(procDir, entry.Name(), "fd"), func(target string) bool {
+				if _, ok := want[target]; ok {
+					// target is "socket:[<inode>]"; strip back to the bare inode key.
+					inode := strings.TrimSuffix(strings.TrimPrefix(target, "socket:["), "]")
+					if _, already := found[inode]; !already {
+						found[inode] = pid
+					}
+				}
+				return len(found) == len(want)
+			})
+			if err != nil {
+				return found, sawPermissionError, err
+			}
+			if sawPermission {
+				sawPermissionError = true
+			}
 		}
-		if sawPermission {
-			sawPermissionError = true
+		if err == nil {
+			continue
 		}
+		if errors.Is(err, io.EOF) {
+			return found, sawPermissionError, nil
+		}
+		return found, sawPermissionError, fmt.Errorf("loopbackPortOwnersSnapshot: read %s: %w", procDir, err)
 	}
-	return found, sawPermissionError, nil
 }
 
 func loopbackTCPListenInode(port int) (string, bool, error) {
@@ -270,41 +298,66 @@ func pidForSocketInode(inode string) (int, bool, error) {
 }
 
 // pidForSocketInodeContext is the context-bounded /proc walk (P2-C). It checks
-// ctx.Err() at the top of each /proc-entry iteration — BEFORE that entry's
-// per-fd readlink scan — so a canceled/deadline-exceeded ctx aborts promptly with
-// the ctx error instead of walking the whole (possibly large/slow) process tree.
-// pidForSocketInode delegates here with context.Background() (never trips), so the
-// non-ctx behavior is byte-identical.
+// ctx.Err() before opening /proc, before each /proc ReadDir batch, and before
+// each entry's per-fd readlink scan, so a canceled/deadline-exceeded ctx aborts
+// promptly with the ctx error instead of walking the whole (possibly large/slow)
+// process tree. pidForSocketInode delegates here with context.Background(), which
+// never trips, so the non-ctx path keeps the same owner-resolution contract.
 func pidForSocketInodeContext(ctx context.Context, inode string) (int, bool, error) {
-	entries, err := os.ReadDir("/proc")
-	if err != nil {
-		return 0, false, fmt.Errorf("loopbackPortOwnerPID: read /proc: %w", err)
+	return pidForSocketInodeFromProc(ctx, "/proc", inode)
+}
+
+func pidForSocketInodeFromProc(ctx context.Context, procDir, inode string) (int, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	if err := ctx.Err(); err != nil {
+		return 0, false, err
+	}
+	f, err := os.Open(procDir)
+	if err != nil {
+		return 0, false, fmt.Errorf("loopbackPortOwnerPID: read %s: %w", procDir, err)
+	}
+	defer f.Close()
+
 	want := "socket:[" + inode + "]"
 	var sawPermissionError bool
-	for _, entry := range entries {
+	for {
 		if err := ctx.Err(); err != nil {
 			return 0, false, err
 		}
-		if !entry.IsDir() {
+		entries, err := f.ReadDir(procDirReadDirBatchSize)
+		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return 0, false, err
+			}
+			if !entry.IsDir() {
+				continue
+			}
+			pid, err := strconv.Atoi(entry.Name())
+			if err != nil || pid <= 0 {
+				continue
+			}
+			matched, sawPermission, err := scanProcFDDirLinks(ctx, filepath.Join(procDir, entry.Name(), "fd"), func(target string) bool {
+				return target == want
+			})
+			if err != nil {
+				return 0, false, err
+			}
+			if sawPermission {
+				sawPermissionError = true
+			}
+			if matched {
+				return pid, true, nil
+			}
+		}
+		if err == nil {
 			continue
 		}
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil || pid <= 0 {
-			continue
+		if errors.Is(err, io.EOF) {
+			break
 		}
-		matched, sawPermission, err := scanProcFDDirLinks(ctx, filepath.Join("/proc", entry.Name(), "fd"), func(target string) bool {
-			return target == want
-		})
-		if err != nil {
-			return 0, false, err
-		}
-		if sawPermission {
-			sawPermissionError = true
-		}
-		if matched {
-			return pid, true, nil
-		}
+		return 0, false, fmt.Errorf("loopbackPortOwnerPID: read %s: %w", procDir, err)
 	}
 	if sawPermissionError {
 		// The socket inode exists in /proc/net/tcp but its owning /proc/<pid>/fd
