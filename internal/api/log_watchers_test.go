@@ -425,3 +425,25 @@ func TestParseWmicProcessRows_CommaExecutablePathKeepsWatcherPIDAndParentPID(t *
 		t.Fatalf("Cmdline lost comma-bearing path: %q", rows[0].Cmdline)
 	}
 }
+
+func TestParseWmicProcessRows_MultilineQuotedCommandLineKeepsPIDAndParentPID(t *testing.T) {
+	sample := "Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize\n" +
+		"HOST,\"bash -c \"\"printf one\nprintf two\"\"\",20260707090000.000000+000,C:\\Tools\\bash.exe,7000,8123,4096\n"
+
+	rows, err := parseWmicProcessRows(strings.NewReader(sample))
+	if err != nil {
+		t.Fatalf("parseWmicProcessRows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1; got %+v", len(rows), rows)
+	}
+	if rows[0].PID != 8123 {
+		t.Fatalf("PID = %d, want 8123", rows[0].PID)
+	}
+	if rows[0].ParentPID != 7000 {
+		t.Fatalf("ParentPID = %d, want 7000", rows[0].ParentPID)
+	}
+	if !strings.Contains(rows[0].Cmdline, "printf one\nprintf two") {
+		t.Fatalf("Cmdline = %q, want embedded newline preserved", rows[0].Cmdline)
+	}
+}

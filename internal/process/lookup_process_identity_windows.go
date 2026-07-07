@@ -289,19 +289,38 @@ func lookupViaWmic(ctx context.Context, pid int) (ProcessIdentity, error) {
 		return ProcessIdentity{}, fmt.Errorf("wmic process: %w", err)
 	}
 
-	var row WmicProcessCSVFields
-	for _, line := range strings.Split(string(out), "\n") {
-		parsed, ok := ParseWmicProcessCSVFields(line, 1)
+	return parseWmicIdentityCSV(out, pid)
+}
+
+func parseWmicIdentityCSV(out []byte, pid int) (ProcessIdentity, error) {
+	records, err := ReadWmicCSVRecords(strings.NewReader(string(out)))
+	if err != nil {
+		return ProcessIdentity{}, fmt.Errorf("wmic process parse: %w", err)
+	}
+
+	var header WmicCSVHeader
+	headerOK := false
+	var row map[string]string
+	for _, record := range records {
+		if !headerOK {
+			var ok bool
+			header, ok = ParseWmicCSVHeader(record, "Node", "CommandLine", "CreationDate", "ExecutablePath", "Name")
+			if ok {
+				headerOK = true
+			}
+			continue
+		}
+		parsed, ok := ParseWmicProcessCSVRecord(record, header)
 		if !ok {
 			continue
 		}
 		row = parsed
 		break
 	}
-	if row.CreationDate == "" {
+	if !headerOK || row == nil {
 		return ProcessIdentity{}, ErrProcessNotFound
 	}
-	createdStr := row.CreationDate
+	createdStr := row["CreationDate"]
 	var createdUnix int64
 	if createdStr != "" {
 		// WMI DATETIME: yyyymmddHHMMSS.mmmmmm+UTCminutes.
@@ -317,12 +336,9 @@ func lookupViaWmic(ctx context.Context, pid int) (ProcessIdentity, error) {
 		}
 	}
 
-	name := ""
-	if len(row.Tail) > 0 {
-		name = row.Tail[0]
-	}
-	cmdLine := row.CommandLine
-	exePath := row.ExecutablePath
+	name := row["Name"]
+	cmdLine := row["CommandLine"]
+	exePath := row["ExecutablePath"]
 	if name == "" && cmdLine == "" && exePath == "" {
 		return ProcessIdentity{}, ErrProcessNotFound
 	}

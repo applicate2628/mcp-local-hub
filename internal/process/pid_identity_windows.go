@@ -15,9 +15,9 @@ import (
 const terminateWaitMilliseconds = 5000
 
 type processHandleIdentity struct {
-	Basename         string
-	ExecutablePath   string
-	CreationDateUnix int64
+	Basename       string
+	ExecutablePath string
+	CreationTime   time.Time
 }
 
 func PIDExecutableMatches(pid int, expectedPath string) bool {
@@ -100,8 +100,8 @@ func verifyHandleIdentity(proof PIDIdentityProof, h windows.Handle) error {
 	if err != nil {
 		return err
 	}
-	observed := time.Unix(ident.CreationDateUnix, 0).UTC()
-	if !startTimesMatch(recorded, observed) {
+	observed := ident.CreationTime.UTC()
+	if !startTimesMatchWithin(recorded, observed, pidIdentityStartToleranceFor(proof)) {
 		return fmt.Errorf("%w: PID %d started_at mismatch recorded=%s observed=%s", ErrProcessIdentityMismatch, proof.PID, recorded.Format(time.RFC3339Nano), observed.Format(time.RFC3339Nano))
 	}
 	return nil
@@ -117,9 +117,9 @@ func identityFromHandle(pid int, h windows.Handle) (processHandleIdentity, error
 		return processHandleIdentity{}, fmt.Errorf("process: query PID %d process times: %w", pid, err)
 	}
 	return processHandleIdentity{
-		Basename:         filepath.Base(exe),
-		ExecutablePath:   exe,
-		CreationDateUnix: time.Unix(0, creation.Nanoseconds()).UTC().Unix(),
+		Basename:       filepath.Base(exe),
+		ExecutablePath: exe,
+		CreationTime:   time.Unix(0, creation.Nanoseconds()).UTC(),
 	}, nil
 }
 

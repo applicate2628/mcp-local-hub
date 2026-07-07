@@ -502,14 +502,9 @@ func parseEtime(s string) int64 {
 // instead of csv.Reader/header indexes because runProcessSnapshot includes
 // ExecutablePath, and legacy WMIC can emit comma-bearing paths unquoted.
 func parseWmicProcessRows(r io.Reader) ([]processRow, error) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	snapRows, err := parseProcessSnapshotRows(r)
 	var rows []processRow
-	for scanner.Scan() {
-		snapRow, ok := parseProcessSnapshotRow(scanner.Text())
-		if !ok {
-			continue
-		}
+	for _, snapRow := range snapRows {
 		startTime := int64(0)
 		if !snapRow.created.IsZero() {
 			startTime = snapRow.created.Unix()
@@ -522,7 +517,7 @@ func parseWmicProcessRows(r io.Reader) ([]processRow, error) {
 			StartTime: startTime,
 		})
 	}
-	return rows, scanner.Err()
+	return rows, err
 }
 
 func basenameFromCmdline(cmd string) string {

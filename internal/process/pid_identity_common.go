@@ -20,11 +20,22 @@ func parseExpectedStartedAt(s string) (time.Time, error) {
 }
 
 func startTimesMatch(recorded, observed time.Time) bool {
+	return startTimesMatchWithin(recorded, observed, pidIdentityStartTolerance)
+}
+
+func startTimesMatchWithin(recorded, observed time.Time, tolerance time.Duration) bool {
 	delta := recorded.Sub(observed)
 	if delta < 0 {
 		delta = -delta
 	}
-	return delta <= pidIdentityStartTolerance
+	return delta <= tolerance
+}
+
+func pidIdentityStartToleranceFor(proof PIDIdentityProof) time.Duration {
+	if proof.StartTolerance > 0 {
+		return proof.StartTolerance
+	}
+	return pidIdentityStartTolerance
 }
 
 func normalizeExpectedExecutablePath(path string) (string, error) {

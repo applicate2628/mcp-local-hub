@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -937,32 +936,14 @@ func isBroadLauncherToken(pattern string) bool {
 // It delegates row parsing to the shared snapshot parser in processes.go so
 // the default orphan sweep, aggressive sweep, process counting, and log-watcher
 // cleanup all consume the same comma-safe row shape.
-//
-// Known limitation (codex deep-sec PR #143 round 4 finding Q2): the
-// bufio.Scanner below splits strictly on newline, so a CommandLine field
-// that contains an embedded `\n` (rare; quotes around such fields would
-// normally protect them) would prematurely end the row. Real WMIC /
-// CIM output never produces this shape in practice; rewriting the
-// parser to a state-machine CSV reader is deferred until a real-world
-// case appears.
 func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
-	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	var rows []procRow
-	for s.Scan() {
-		line := s.Text()
-		row, ok := parseProcessSnapshotRow(line)
-		if !ok {
-			continue
-		}
-		rows = append(rows, row)
-	}
-	// A scan error (e.g. bufio.ErrTooLong on a pathologically long CommandLine
-	// row) ends the loop early and silently truncates the process snapshot,
+	rows, err := parseProcessSnapshotRows(r)
+	// A read error (e.g. bufio.ErrTooLong on a pathologically long CommandLine
+	// row) ends the loop early and can truncate the process snapshot,
 	// which would drop rows the orphan-detector's parent-chain walk relies on.
 	// Surface it rather than swallow it; the rows parsed so far are still
 	// returned best-effort.
-	if err := s.Err(); err != nil {
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcphub: warning: process snapshot scan ended early: %v\n", err)
 	}
 
@@ -979,14 +960,6 @@ func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
 // patterns BUT whose parent is NOT an `mcp.exe daemon` process.
 //
 // Visible for unit tests so fixture CSVs can drive the logic without wmic.
-//
-// Known limitation (codex deep-sec PR #143 round 4 finding Q2): the
-// bufio.Scanner below splits strictly on newline, so a CommandLine field
-// that contains an embedded `\n` (rare; quotes around such fields would
-// normally protect them) would prematurely end the row. Real WMIC /
-// CIM output never produces this shape in practice; rewriting the
-// parser to a state-machine CSV reader is deferred until a real-world
-// case appears.
 func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 	rows, byPID := parseProcessRows(r)
 
@@ -1309,13 +1282,14 @@ func filterToExpectedPIDs(candidates []OrphanProcess, expectPIDs []int) []Orphan
 // AggressiveCleanup only reach the kill path on Windows.
 var orphanTerminateFn = process.TerminatePIDWithIdentity
 
+const cleanupIdentityStartTolerance = 500 * time.Millisecond
+
 // orphanStartedAt renders a census-captured process creation time as the
 // RFC3339Nano proof timestamp consumed by process.TerminatePIDWithIdentity's
 // start-time re-verify. A zero time (missing / unparseable CreationDate) yields
 // "" so the proof fails closed on a missing started_at rather than matching a
-// bogus year-1 epoch. The census CreationDate is floored to whole seconds (as
-// is the kernel start time the primitive re-reads), and the primitive tolerates
-// a 2s skew, so a genuinely-same process always re-verifies.
+// bogus year-1 epoch. Fractional seconds are preserved when the snapshot
+// provides them so cleanup can use a tight PID-reuse tolerance.
 func orphanStartedAt(created time.Time) string {
 	if created.IsZero() {
 		return ""
@@ -1346,16 +1320,35 @@ func reapOrphans(filtered []OrphanProcess, dryRun bool) {
 // returned strings distinguish the four non-clean outcomes so the CLI/GUI report
 // stays informative (all of them count as "skipped" — KillErr != "").
 func reapOneOrphan(o OrphanProcess) string {
-	if o.ExecutablePath == "" || o.StartedAt == "" {
+	if o.ExecutablePath == "" || o.StartedAt == "" || o.Cmdline == "" {
 		// No identity captured at census (e.g. a process whose image path the
 		// snapshot could not read) → cannot build a proof → do NOT kill.
-		return "skipped: process identity unavailable at census (no executable path or start time); not killed"
+		return "skipped: process identity unavailable at census (no executable path, start time, or command line); not killed"
+	}
+	if err := revalidateOrphanCommandLine(o); err != nil {
+		return classifyReapError(err)
 	}
 	err := orphanTerminateFn(process.PIDIdentityProof{
 		PID:            o.PID,
 		ExecutablePath: o.ExecutablePath,
 		StartedAt:      o.StartedAt,
+		StartTolerance: cleanupIdentityStartTolerance,
 	})
+	return classifyReapError(err)
+}
+
+func revalidateOrphanCommandLine(o OrphanProcess) error {
+	live, err := orphanLookupIdentityFn(o.PID)
+	if err != nil {
+		return fmt.Errorf("%w: PID %d command-line proof unavailable: %v", process.ErrProcessIdentityMismatch, o.PID, err)
+	}
+	if live.CommandLine != o.Cmdline {
+		return fmt.Errorf("%w: PID %d command-line mismatch", process.ErrProcessIdentityMismatch, o.PID)
+	}
+	return nil
+}
+
+func classifyReapError(err error) string {
 	switch {
 	case err == nil:
 		return ""
