@@ -226,6 +226,18 @@ func (l *lockingClient) AddEntry(entry MCPEntry) error {
 	})
 }
 
+func (l *lockingClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
+	return withConfigLock(l.Client.ConfigPath(), func() error {
+		scoped, ok := l.Client.(interface {
+			AddEntryWithConfigWriter(MCPEntry, WriteConfigFileFunc) error
+		})
+		if !ok {
+			return fmt.Errorf("client %s does not support scoped config writer", l.Client.Name())
+		}
+		return scoped.AddEntryWithConfigWriter(entry, writer)
+	})
+}
+
 func (l *lockingClient) RemoveEntry(name string) error {
 	return withConfigLock(l.Client.ConfigPath(), func() error {
 		return l.Client.RemoveEntry(name)
@@ -241,6 +253,18 @@ func (l *lockingClient) RestoreEntryFromBackup(backupPath, name string) error {
 func (l *lockingClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
 	return withConfigLock(l.Client.ConfigPath(), func() error {
 		return l.Client.RestoreEntryFromBackupForRollback(backupPath, name)
+	})
+}
+
+func (l *lockingClient) RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error {
+	return withConfigLock(l.Client.ConfigPath(), func() error {
+		scoped, ok := l.Client.(interface {
+			RestoreEntryFromBackupForRollbackWithConfigWriter(string, string, WriteConfigFileFunc) error
+		})
+		if !ok {
+			return fmt.Errorf("client %s does not support scoped config writer rollback", l.Client.Name())
+		}
+		return scoped.RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name, writer)
 	})
 }
 

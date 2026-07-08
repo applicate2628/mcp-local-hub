@@ -2793,7 +2793,11 @@ func mimoCodeClientForScanPath(path string) *mimoCodeClient {
 // already has JSONC content. Writes always target the top layer; the bytes
 // route through the UNCHANGED WriteConfigFile pipeline.
 func (o *mimoCodeClient) setMember(name string, value any) error {
-	return mutateJSONObjectMember(o.path, mimoCodeMCPKey, name, value, false)
+	return o.setMemberWithWriter(name, value, nil)
+}
+
+func (o *mimoCodeClient) setMemberWithWriter(name string, value any, writer WriteConfigFileFunc) error {
+	return mutateJSONObjectMemberWithWriter(o.path, mimoCodeMCPKey, name, value, false, writer)
 }
 
 // deleteMember removes mcp.<name> from the WRITE-target file (o.path) ONLY —
@@ -2807,7 +2811,11 @@ func (o *mimoCodeClient) setMember(name string, value any) error {
 // Delete-of-absent is a no-op (mutateJSONObjectMember returns nil on an
 // empty/absent file), so this is idempotent.
 func (o *mimoCodeClient) deleteMember(name string) error {
-	return mutateJSONObjectMember(o.path, mimoCodeMCPKey, name, nil, true)
+	return o.deleteMemberWithWriter(name, nil)
+}
+
+func (o *mimoCodeClient) deleteMemberWithWriter(name string, writer WriteConfigFileFunc) error {
+	return mutateJSONObjectMemberWithWriter(o.path, mimoCodeMCPKey, name, nil, true, writer)
 }
 
 // AddEntry writes either the operator's verbatim prior entry (rollback restore
@@ -2817,6 +2825,10 @@ func (o *mimoCodeClient) deleteMember(name string) error {
 // entry shape is `{"type":"remote","url":...,"enabled":true}`; an optional
 // `headers` object is emitted when MCPEntry.Headers is non-empty.
 func (o *mimoCodeClient) AddEntry(entry MCPEntry) error {
+	return o.AddEntryWithConfigWriter(entry, nil)
+}
+
+func (o *mimoCodeClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
 	// Raw-restore path FIRST: when GetEntry captured a non-representable prior
 	// (a local command-array entry, or any url-less entry), the rollback calls
 	// AddEntry(*prior). Write that raw value verbatim so the operator's original
@@ -2825,7 +2837,7 @@ func (o *mimoCodeClient) AddEntry(entry MCPEntry) error {
 	// re-asserts a prior state on the write target (o.path), not a new
 	// hub-managed install, and must never be blocked.
 	if entry.Raw != nil {
-		return o.setMember(entry.Name, entry.Raw)
+		return o.setMemberWithWriter(entry.Name, entry.Raw, writer)
 	}
 	// Higher-layer-shadow guard (normal install path only, bot PR #420 findings
 	// 4+7). The hub writes ONLY the global write target (o.path = mimocode.json);
@@ -2883,7 +2895,7 @@ func (o *mimoCodeClient) AddEntry(entry MCPEntry) error {
 	// Comment-preserving set: patches mcp.<name> into the original on-disk
 	// bytes via hujson so the operator's comments and unrelated keys survive (a
 	// full map re-marshal would drop both).
-	return o.setMember(entry.Name, serverEntry)
+	return o.setMemberWithWriter(entry.Name, serverEntry, writer)
 }
 
 func (o *mimoCodeClient) RemoveEntry(name string) error {
@@ -4011,6 +4023,10 @@ func (o *mimoCodeClient) RestoreEntryFromBackupForRollback(backupPath, name stri
 	return o.restoreEntryFromBackup(backupPath, name, true)
 }
 
+func (o *mimoCodeClient) RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error {
+	return o.restoreEntryFromBackupWithWriter(backupPath, name, true, writer)
+}
+
 // restoreEntryFromBackup is the shared body. When allowHubEntry is false
 // (demigrate) it refuses a backup entry already in hub-HTTP shape (a hub
 // loopback URL under `url` with no `command`) with
@@ -4019,6 +4035,10 @@ func (o *mimoCodeClient) RestoreEntryFromBackupForRollback(backupPath, name stri
 // top write layer only (setMember/deleteMember on o.path), so a lower-layer
 // operator original is preserved and re-emerges via the merge.
 func (o *mimoCodeClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
+	return o.restoreEntryFromBackupWithWriter(backupPath, name, allowHubEntry, nil)
+}
+
+func (o *mimoCodeClient) restoreEntryFromBackupWithWriter(backupPath, name string, allowHubEntry bool, writer WriteConfigFileFunc) error {
 	// os.ReadFile (NOT readRawConfig): a named backup that is missing is a
 	// genuine read error the demigrate caller must see, not a silent
 	// treat-as-empty. Empty / comment-only / malformed bytes are then
@@ -4046,10 +4066,10 @@ func (o *mimoCodeClient) restoreEntryFromBackup(backupPath, name string, allowHu
 			}
 			// Comment-preserving set into the LIVE config (its comments +
 			// unrelated keys survive; the backup's entry VALUE is written).
-			return o.setMember(name, backupEntry)
+			return o.setMemberWithWriter(name, backupEntry, writer)
 		}
 	}
-	return o.deleteMember(name)
+	return o.deleteMemberWithWriter(name, writer)
 }
 
 // AllStdioEntries returns every stdio entry from MiMoCode's merged top-level

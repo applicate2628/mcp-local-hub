@@ -3,6 +3,7 @@ package gui
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 
 	toml "github.com/pelletier/go-toml/v2"
@@ -275,9 +277,21 @@ args = ["version"]
 		t.Fatalf("code=%#v, want SYMLINK_CONSENT_REQUIRED", code)
 	}
 
-	withConsent := postAdoptTest(t, "/api/adopt", `{"entry":"gui-adopt-symlink","client":"codex-cli","port":9324,"allow_symlink":true}`)
+	withConsentBody, err := json.Marshal(map[string]any{
+		"entry":           "gui-adopt-symlink",
+		"client":          "codex-cli",
+		"port":            9324,
+		"symlink_consent": targets,
+	})
+	if err != nil {
+		t.Fatalf("marshal consent body: %v", err)
+	}
+	withConsent := postAdoptTest(t, "/api/adopt", string(withConsentBody))
 	if withConsent.Code != http.StatusCreated {
 		t.Fatalf("status=%d, want 201; body=%s", withConsent.Code, withConsent.Body.String())
+	}
+	if api.InteractiveSymlinkConsent != nil {
+		t.Fatalf("GUI adopt must not install process-global InteractiveSymlinkConsent")
 	}
 	if info, err := os.Lstat(codexPath); err != nil {
 		t.Fatalf("lstat original codex path: %v", err)
@@ -295,6 +309,108 @@ args = ["version"]
 	adopted := root["mcp_servers"].(map[string]any)[entry].(map[string]any)
 	if adopted["url"] != "http://127.0.0.1:9324/mcp" {
 		t.Fatalf("target adopted url=%#v, want hub URL", adopted["url"])
+	}
+}
+
+func TestAdoptRouteRejectsFreshSymlinkTargetMissingFromReviewedConsent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Log("attempting Windows symlink test; host may require Developer Mode or elevation")
+	}
+	entry := "gui-adopt-stale-symlink"
+	codexPath, _, _ := setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-adopt-stale-symlink]
+command = "go"
+args = ["version"]
+`)
+	home := filepath.Dir(filepath.Dir(codexPath))
+	cursorPath := filepath.Join(home, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(cursorPath), 0o700); err != nil {
+		t.Fatalf("mkdir cursor config parent: %v", err)
+	}
+	if err := os.WriteFile(cursorPath, []byte(`{
+  "mcpServers": {
+    "gui-adopt-stale-symlink": {
+      "command": "go",
+      "args": ["version"]
+    }
+  }
+}
+`), 0o600); err != nil {
+		t.Fatalf("seed cursor config: %v", err)
+	}
+
+	planBody, err := json.Marshal(map[string]any{
+		"entry":   entry,
+		"client":  "codex-cli",
+		"clients": []string{"codex-cli", "cursor"},
+		"port":    9326,
+	})
+	if err != nil {
+		t.Fatalf("marshal plan body: %v", err)
+	}
+	plan := postAdoptTest(t, "/api/adopt/plan", string(planBody))
+	if plan.Code != http.StatusOK {
+		t.Fatalf("plan status=%d, want 200; body=%s", plan.Code, plan.Body.String())
+	}
+	if targets, _ := decodeAdoptJSON(t, plan)["symlink_targets"].([]any); len(targets) != 0 {
+		t.Fatalf("initial symlink_targets=%#v, want none", targets)
+	}
+
+	realTarget := filepath.Join(home, "dotfiles", ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(realTarget), 0o700); err != nil {
+		t.Fatalf("mkdir cursor real target parent: %v", err)
+	}
+	if err := os.Rename(cursorPath, realTarget); err != nil {
+		t.Fatalf("move cursor config to real target: %v", err)
+	}
+	if err := os.Symlink(realTarget, cursorPath); err != nil {
+		t.Skipf("symlink unsupported on this host: %v", err)
+	}
+
+	executeBody, err := json.Marshal(map[string]any{
+		"entry":           entry,
+		"client":          "codex-cli",
+		"clients":         []string{"codex-cli", "cursor"},
+		"port":            9326,
+		"symlink_consent": []any{},
+	})
+	if err != nil {
+		t.Fatalf("marshal execute body: %v", err)
+	}
+	rec := postAdoptTest(t, "/api/adopt", string(executeBody))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status=%d, want 409 for unreviewed fresh symlink target; body=%s", rec.Code, rec.Body.String())
+	}
+	if code := decodeAdoptJSON(t, rec)["code"]; code != "SYMLINK_CONSENT_REQUIRED" {
+		t.Fatalf("code=%#v, want SYMLINK_CONSENT_REQUIRED", code)
+	}
+}
+
+func TestAdoptRouteExecuteFailureRedactsAbsolutePath(t *testing.T) {
+	entry := "gui-adopt-redact-path"
+	codexPath, _, _ := setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-adopt-redact-path]
+command = "go"
+args = ["version"]
+`)
+	leakyPath := filepath.Join(filepath.Dir(codexPath), "private-user-path", "config.toml")
+	orig := clients.WriteConfigFile
+	clients.WriteConfigFile = func(path string, contents []byte) error {
+		return fmt.Errorf("synthetic write failure at %s", leakyPath)
+	}
+	t.Cleanup(func() { clients.WriteConfigFile = orig })
+
+	rec := postAdoptTest(t, "/api/adopt", `{"entry":"gui-adopt-redact-path","client":"codex-cli","port":9327}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	body := decodeAdoptJSON(t, rec)
+	if body["code"] != "ADOPT_FAILED" {
+		t.Fatalf("code=%#v, want ADOPT_FAILED", body["code"])
+	}
+	if body["error"] != "internal error" {
+		t.Fatalf("error=%#v, want redacted internal error", body["error"])
+	}
+	if strings.Contains(rec.Body.String(), leakyPath) {
+		t.Fatalf("execute error leaked absolute path %q in response: %s", leakyPath, rec.Body.String())
 	}
 }
 

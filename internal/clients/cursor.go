@@ -71,6 +71,10 @@ func (c *cursorClient) InitEmpty() (created bool, err error) {
 }
 
 func (c *cursorClient) AddEntry(entry MCPEntry) error {
+	return c.AddEntryWithConfigWriter(entry, nil)
+}
+
+func (c *cursorClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
 	serverEntry := map[string]any{
 		"type": "http",
 		"url":  entry.URL,
@@ -81,5 +85,5 @@ func (c *cursorClient) AddEntry(entry MCPEntry) error {
 	// Comment-preserving set via the embedded seam: Cursor's mcp.json is
 	// JSONC (operators hand-edit it), so patch mcpServers.<name> into the
 	// original bytes instead of a lossy full-map re-marshal.
-	return c.setMember(entry.Name, serverEntry)
+	return c.setMemberWithWriter(entry.Name, serverEntry, writer)
 }

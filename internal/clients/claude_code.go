@@ -93,14 +93,26 @@ func (c *claudeCode) readJSON() (map[string]any, error) {
 // indented marshal. The bytes route through the UNCHANGED WriteConfigFile
 // pipeline.
 func (c *claudeCode) setMember(name string, value any) error {
-	return mutateJSONObjectMember(c.path, claudeCodeMCPServersKey, name, value, false)
+	return c.setMemberWithWriter(name, value, nil)
+}
+
+func (c *claudeCode) setMemberWithWriter(name string, value any, writer WriteConfigFileFunc) error {
+	return mutateJSONObjectMemberWithWriter(c.path, claudeCodeMCPServersKey, name, value, false, writer)
 }
 
 func (c *claudeCode) deleteMember(name string) error {
-	return mutateJSONObjectMember(c.path, claudeCodeMCPServersKey, name, nil, true)
+	return c.deleteMemberWithWriter(name, nil)
+}
+
+func (c *claudeCode) deleteMemberWithWriter(name string, writer WriteConfigFileFunc) error {
+	return mutateJSONObjectMemberWithWriter(c.path, claudeCodeMCPServersKey, name, nil, true, writer)
 }
 
 func (c *claudeCode) AddEntry(entry MCPEntry) error {
+	return c.AddEntryWithConfigWriter(entry, nil)
+}
+
+func (c *claudeCode) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
 	// Claude Code's per-transport schema requires an explicit `type` field.
 	// For HTTP-transport servers the correct value is "http"; stdio servers use
 	// "stdio" and include command/args/env instead. This adapter only produces
@@ -115,7 +127,7 @@ func (c *claudeCode) AddEntry(entry MCPEntry) error {
 	// Comment-preserving set: patches mcpServers.<name> into the original
 	// on-disk bytes via hujson so any comments and unrelated keys survive (a
 	// full map re-marshal would drop both).
-	return c.setMember(entry.Name, serverEntry)
+	return c.setMemberWithWriter(entry.Name, serverEntry, writer)
 }
 
 func (c *claudeCode) RemoveEntry(name string) error {
@@ -168,11 +180,19 @@ func (c *claudeCode) RestoreEntryFromBackupForRollback(backupPath, name string) 
 	return c.restoreEntryFromBackup(backupPath, name, true)
 }
 
+func (c *claudeCode) RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error {
+	return c.restoreEntryFromBackupWithWriter(backupPath, name, true, writer)
+}
+
 // restoreEntryFromBackup is the shared body. When allowHubEntry is false
 // (the demigrate flow) it refuses a hub-HTTP-shaped backup entry with
 // ErrBackupEntryAlreadyMigrated; when true (the migrate rollback) it
 // writes the backup bytes verbatim regardless of shape.
 func (c *claudeCode) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
+	return c.restoreEntryFromBackupWithWriter(backupPath, name, allowHubEntry, nil)
+}
+
+func (c *claudeCode) restoreEntryFromBackupWithWriter(backupPath, name string, allowHubEntry bool, writer WriteConfigFileFunc) error {
 	// os.ReadFile (NOT readRawConfig): a named backup that is missing is a
 	// genuine read error the demigrate caller must see, not a silent
 	// treat-as-empty. Empty / comment-only / malformed bytes are then
@@ -205,10 +225,10 @@ func (c *claudeCode) restoreEntryFromBackup(backupPath, name string, allowHubEnt
 			}
 			// Comment-preserving set into the LIVE config (its comments +
 			// unrelated keys survive; the backup's entry VALUE is written).
-			return c.setMember(name, backupEntry)
+			return c.setMemberWithWriter(name, backupEntry, writer)
 		}
 	}
-	return c.deleteMember(name)
+	return c.deleteMemberWithWriter(name, writer)
 }
 
 // AllStdioEntries returns every stdio entry from mcpServers.

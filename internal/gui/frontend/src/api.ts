@@ -80,7 +80,7 @@ export interface AdoptRequest {
   clients?: string[];
   name?: string;
   port?: number;
-  allow_symlink?: boolean;
+  symlink_consent?: AdoptSymlinkTarget[];
 }
 
 export interface AdoptSymlinkTarget {

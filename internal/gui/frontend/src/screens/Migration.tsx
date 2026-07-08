@@ -293,7 +293,10 @@ export function DiscoveryScreen() {
       port: adoptPlan.Port,
     };
     try {
-      await postAdopt({ ...req, allow_symlink: adoptConsent });
+      await postAdopt({
+        ...req,
+        symlink_consent: adoptConsent ? adoptPlan.symlink_targets : [],
+      });
       pushToast("success", `Adopted ${adoptPlan.ManifestName} into hub.`);
       setAdoptPlan(null);
       setAdoptConsent(false);

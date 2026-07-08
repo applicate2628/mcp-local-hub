@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"mcp-local-hub/internal/clients"
@@ -183,6 +184,99 @@ args = ["version"]
 	}
 	if !strings.Contains(string(logBytes), `"source":"adopt"`) || !strings.Contains(string(logBytes), `"entry":"`+entry+`"`) {
 		t.Fatalf("adopt audit row missing from supervisor-events.log:\n%s", logBytes)
+	}
+}
+
+func TestExecuteAdoptScopedConsentDoesNotAuthorizeConcurrentNonAdoptWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Log("attempting Windows symlink test; host may require Developer Mode or elevation")
+	}
+	entry := "mui-adopt-scoped-concurrent"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-scoped-concurrent]
+command = "go"
+args = ["version"]
+`)
+	home := filepath.Dir(filepath.Dir(codexPath))
+	realTarget := filepath.Join(home, "dotfiles", ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(realTarget), 0o700); err != nil {
+		t.Fatalf("mkdir adopt real target parent: %v", err)
+	}
+	if err := os.Rename(codexPath, realTarget); err != nil {
+		t.Fatalf("move codex config to real target: %v", err)
+	}
+	if err := os.Symlink(realTarget, codexPath); err != nil {
+		t.Skipf("symlink unsupported on this host: %v", err)
+	}
+	_, pinned, was := ResolveClientConfigSymlink(codexPath)
+	if !was {
+		t.Fatalf("codex config was not detected as symlink")
+	}
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName: entry,
+		Client:    "codex-cli",
+		Port:      9318,
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+
+	otherRoot := hardenedTempDir(t)
+	otherLink := filepath.Join(otherRoot, "other-client.json")
+	otherTarget := filepath.Join(otherRoot, "dotfiles", "other-client.json")
+	if err := os.MkdirAll(filepath.Dir(otherTarget), 0o700); err != nil {
+		t.Fatalf("mkdir other real target parent: %v", err)
+	}
+	if err := os.WriteFile(otherTarget, []byte(`{"before":true}`), 0o600); err != nil {
+		t.Fatalf("write other real target: %v", err)
+	}
+	if err := os.Symlink(otherTarget, otherLink); err != nil {
+		t.Skipf("symlink unsupported on this host: %v", err)
+	}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	prevHook := afterResolveBeforePinHook
+	afterResolveBeforePinHook = func() {
+		once.Do(func() { close(entered) })
+		<-release
+	}
+	t.Cleanup(func() { afterResolveBeforePinHook = prevHook })
+
+	adoptErr := make(chan error, 1)
+	go func() {
+		adoptErr <- NewAPI().ExecuteAdoptWithOpts(plan, ioDiscardForAdoptTest{}, ExecuteAdoptOpts{
+			SymlinkConsents: []ResolvedSymlinkConsent{{
+				Client:             "codex-cli",
+				OriginalPath:       codexPath,
+				PinnedResolvedPath: pinned,
+			}},
+		})
+	}()
+	<-entered
+
+	err = SecureWriteClientConfig(otherLink, []byte(`{"after":true}`))
+	if err == nil {
+		close(release)
+		t.Fatal("concurrent non-adopt symlink write succeeded without scoped consent")
+	}
+	if got := strings.ToLower(err.Error()); !strings.Contains(got, "symlink") && !strings.Contains(got, "reparse") {
+		close(release)
+		t.Fatalf("concurrent non-adopt error = %v, want symlink/reparse refusal", err)
+	}
+	otherBytes, err := os.ReadFile(otherTarget)
+	if err != nil {
+		close(release)
+		t.Fatalf("read other target: %v", err)
+	}
+	if string(otherBytes) != `{"before":true}` {
+		close(release)
+		t.Fatalf("concurrent non-adopt write changed target: %s", otherBytes)
+	}
+
+	close(release)
+	if err := <-adoptErr; err != nil {
+		t.Fatalf("ExecuteAdoptWithOpts: %v", err)
 	}
 }
 

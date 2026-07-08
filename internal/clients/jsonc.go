@@ -244,6 +244,10 @@ func mutateJSONObjectMember(path, sectionKey, name string, value any, del bool) 
 	return mutateJSONObjectMemberPath(path, []string{sectionKey}, name, value, del)
 }
 
+func mutateJSONObjectMemberWithWriter(path, sectionKey, name string, value any, del bool, writer WriteConfigFileFunc) error {
+	return mutateJSONObjectMemberPathWithWriter(path, []string{sectionKey}, name, value, del, writer)
+}
+
 // mutateJSONObjectMemberPath is the multi-level generalization of
 // mutateJSONObjectMember: `sectionPath` is the chain of nested object keys under
 // which the member `<name>` lives (single-element {"mcpServers"} for the JSON
@@ -254,6 +258,10 @@ func mutateJSONObjectMember(path, sectionKey, name string, value any, del bool) 
 // differs from the single-key form; WriteConfigFile is invoked exactly as
 // before. sectionPath must be non-empty.
 func mutateJSONObjectMemberPath(path string, sectionPath []string, name string, value any, del bool) error {
+	return mutateJSONObjectMemberPathWithWriter(path, sectionPath, name, value, del, nil)
+}
+
+func mutateJSONObjectMemberPathWithWriter(path string, sectionPath []string, name string, value any, del bool, writer WriteConfigFileFunc) error {
 	original, err := readRawConfig(path)
 	if err != nil {
 		return err
@@ -273,14 +281,14 @@ func mutateJSONObjectMemberPath(path string, sectionPath []string, name string, 
 		if mErr != nil {
 			return mErr
 		}
-		return WriteConfigFile(path, append(out, '\n'))
+		return writeConfigFileWith(writer, path, append(out, '\n'))
 	}
 
 	out, err := applyJSONCObjectMemberPath(original, sectionPath, name, value, del)
 	if err != nil {
 		return fmt.Errorf("rewrite %s: %w", path, err)
 	}
-	return WriteConfigFile(path, out)
+	return writeConfigFileWith(writer, path, out)
 }
 
 // patchValue marshals ops to an RFC-6902 patch document and applies it to v.

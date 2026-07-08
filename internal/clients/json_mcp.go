@@ -108,17 +108,33 @@ func (j *jsonMCPClient) setMember(name string, value any) error {
 	return j.mutateMember(name, value, false)
 }
 
+func (j *jsonMCPClient) setMemberWithWriter(name string, value any, writer WriteConfigFileFunc) error {
+	return j.mutateMemberWithWriter(name, value, false, writer)
+}
+
 // deleteMember removes mcpServers.<name> from the live config, preserving the
 // operator's comments and unrelated keys. Absence is a no-op.
 func (j *jsonMCPClient) deleteMember(name string) error {
 	return j.mutateMember(name, nil, true)
 }
 
+func (j *jsonMCPClient) deleteMemberWithWriter(name string, writer WriteConfigFileFunc) error {
+	return j.mutateMemberWithWriter(name, nil, true, writer)
+}
+
 func (j *jsonMCPClient) mutateMember(name string, value any, del bool) error {
-	return mutateJSONObjectMember(j.path, j.sectionKey(), name, value, del)
+	return j.mutateMemberWithWriter(name, value, del, nil)
+}
+
+func (j *jsonMCPClient) mutateMemberWithWriter(name string, value any, del bool, writer WriteConfigFileFunc) error {
+	return mutateJSONObjectMemberWithWriter(j.path, j.sectionKey(), name, value, del, writer)
 }
 
 func (j *jsonMCPClient) AddEntry(entry MCPEntry) error {
+	return j.AddEntryWithConfigWriter(entry, nil)
+}
+
+func (j *jsonMCPClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
 	serverEntry := map[string]any{
 		j.urlField: entry.URL,
 		"disabled": false,
@@ -129,7 +145,7 @@ func (j *jsonMCPClient) AddEntry(entry MCPEntry) error {
 	// Comment-preserving set: patches mcpServers.<name> into the original
 	// on-disk bytes via hujson so the operator's comments and unrelated keys
 	// survive (a full map re-marshal would drop both).
-	return j.setMember(entry.Name, serverEntry)
+	return j.setMemberWithWriter(entry.Name, serverEntry, writer)
 }
 
 func (j *jsonMCPClient) RemoveEntry(name string) error {
@@ -188,12 +204,20 @@ func (j *jsonMCPClient) RestoreEntryFromBackupForRollback(backupPath, name strin
 	return j.restoreEntryFromBackup(backupPath, name, true)
 }
 
+func (j *jsonMCPClient) RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error {
+	return j.restoreEntryFromBackupWithWriter(backupPath, name, true, writer)
+}
+
 // restoreEntryFromBackup is the shared body. When allowHubEntry is false
 // (demigrate) it refuses a backup entry already in hub-managed shape
 // (hub-HTTP loopback URL for URL clients; mcphub `relay` invocation for
 // Antigravity) with ErrBackupEntryAlreadyMigrated; when true (migrate
 // rollback) it writes the backup bytes verbatim regardless of shape.
 func (j *jsonMCPClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
+	return j.restoreEntryFromBackupWithWriter(backupPath, name, allowHubEntry, nil)
+}
+
+func (j *jsonMCPClient) restoreEntryFromBackupWithWriter(backupPath, name string, allowHubEntry bool, writer WriteConfigFileFunc) error {
 	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
@@ -217,10 +241,10 @@ func (j *jsonMCPClient) restoreEntryFromBackup(backupPath, name string, allowHub
 			}
 			// Comment-preserving set into the LIVE config (its comments +
 			// unrelated keys survive; the backup's entry VALUE is written).
-			return j.setMember(name, backupEntry)
+			return j.setMemberWithWriter(name, backupEntry, writer)
 		}
 	}
-	return j.deleteMember(name)
+	return j.deleteMemberWithWriter(name, writer)
 }
 
 // AllStdioEntries returns every stdio entry from mcpServers.

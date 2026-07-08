@@ -55,6 +55,10 @@ type AdoptPlan struct {
 	secretValues map[string]string
 }
 
+type ExecuteAdoptOpts struct {
+	SymlinkConsents []ResolvedSymlinkConsent
+}
+
 type AdoptClientSignatureMismatch struct {
 	Client string
 	Reason string
@@ -154,6 +158,12 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 
 // ExecuteAdopt applies a plan built by BuildAdoptPlan.
 func (a *API) ExecuteAdopt(plan *AdoptPlan, w io.Writer) error {
+	return a.ExecuteAdoptWithOpts(plan, w, ExecuteAdoptOpts{})
+}
+
+// ExecuteAdoptWithOpts applies a plan built by BuildAdoptPlan with scoped
+// request data that should affect only this execution.
+func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdoptOpts) error {
 	if plan == nil {
 		return fmt.Errorf("adopt plan is nil")
 	}
@@ -173,9 +183,10 @@ func (a *API) ExecuteAdopt(plan *AdoptPlan, w io.Writer) error {
 		return fmt.Errorf("adopt manifest create failed after writing routed vault keys; removed routed vault keys %s so adopt can be re-run: %w", strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ","), err)
 	}
 	if err := a.Install(InstallOpts{
-		Server:         plan.ManifestName,
-		ClientsInclude: plan.AdoptClients,
-		Writer:         w,
+		Server:          plan.ManifestName,
+		ClientsInclude:  plan.AdoptClients,
+		Writer:          w,
+		SymlinkConsents: opts.SymlinkConsents,
 	}); err != nil {
 		vaultNote := ""
 		if cleanupErr := a.ManifestDelete(plan.ManifestName); cleanupErr != nil {

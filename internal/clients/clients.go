@@ -331,6 +331,36 @@ type Client interface {
 	FindStdioLanguageServerEntries() ([]LanguageServerStdioEntry, error)
 }
 
+// ScopedConfigWriterClient is implemented by the locking client wrapper for
+// call sites that need one specific write to use an already-authorized writer
+// without mutating the process-global WriteConfigFile hook.
+type ScopedConfigWriterClient interface {
+	AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error
+	RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error
+}
+
+func AddEntryWithConfigWriter(client Client, entry MCPEntry, writer WriteConfigFileFunc) error {
+	if writer == nil {
+		return client.AddEntry(entry)
+	}
+	scoped, ok := client.(ScopedConfigWriterClient)
+	if !ok {
+		return fmt.Errorf("client %s does not support scoped config writer", client.Name())
+	}
+	return scoped.AddEntryWithConfigWriter(entry, writer)
+}
+
+func RestoreEntryFromBackupForRollbackWithConfigWriter(client Client, backupPath, name string, writer WriteConfigFileFunc) error {
+	if writer == nil {
+		return client.RestoreEntryFromBackupForRollback(backupPath, name)
+	}
+	scoped, ok := client.(ScopedConfigWriterClient)
+	if !ok {
+		return fmt.Errorf("client %s does not support scoped config writer rollback", client.Name())
+	}
+	return scoped.RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name, writer)
+}
+
 // StdioEntry is the format-agnostic shape of one stdio MCP server
 // entry surfaced by AllStdioEntries. Name is the entry key in the
 // client config; Command is the raw `command` value; Args is the

@@ -287,7 +287,9 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
       clients: ["codex-cli", "claude-code"],
       name: "local-stdio",
       port: 9325,
-      allow_symlink: true,
+      symlink_consent: [
+        { client: "codex-cli", resolved_path: "C:\\Users\\d\\.codex\\config.toml" },
+      ],
     });
     await vi.waitFor(() => expect(scanCalls).toBeGreaterThan(beforeConfirmScanCalls));
   });

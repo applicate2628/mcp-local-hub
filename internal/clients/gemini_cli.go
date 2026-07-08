@@ -42,6 +42,10 @@ type geminiCLI struct {
 const defaultGeminiHTTPTimeoutMs = 10000
 
 func (g *geminiCLI) AddEntry(entry MCPEntry) error {
+	return g.AddEntryWithConfigWriter(entry, nil)
+}
+
+func (g *geminiCLI) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
 	serverEntry := map[string]any{
 		"url":     entry.URL,
 		"type":    "http",
@@ -51,7 +55,7 @@ func (g *geminiCLI) AddEntry(entry MCPEntry) error {
 		serverEntry["headers"] = entry.Headers
 	}
 	// Comment-preserving set via the embedded seam.
-	return g.setMember(entry.Name, serverEntry)
+	return g.setMemberWithWriter(entry.Name, serverEntry, writer)
 }
 
 func (g *geminiCLI) GetEntry(name string) (*MCPEntry, error) {

@@ -172,6 +172,7 @@ type InstallOpts struct {
 	DryRun            bool
 	Writer            io.Writer // progress output destination; nil = os.Stderr
 	GUIPort           int       // live GUI/router port injected by CLI/GUI; zero means unknown
+	SymlinkConsents   []ResolvedSymlinkConsent
 }
 
 // InstallAllOpts controls a bulk install.
@@ -279,7 +280,7 @@ func (a *API) Install(opts InstallOpts) error {
 	// global daemons spawn from supervisor-intent.json (installPlanCore writes
 	// the descriptor rows + defers the spawn to the supervisor reconcile loop)
 	// rather than from per-daemon scheduler tasks.
-	return a.installPlanCore(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w)
+	return a.installPlanCoreWithSymlinkConsents(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
 }
 
 // InstallAll is the production entry point for bulk install. Reads
@@ -428,7 +429,7 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
-	return a.installPlanCore(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w)
+	return a.installPlanCoreWithSymlinkConsents(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
 }
 
 // installFromManifestDir is Install-like but with an explicit manifestDir
@@ -462,7 +463,7 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err != nil {
 		return err
 	}
-	return a.installPlanCore(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w)
+	return a.installPlanCoreWithSymlinkConsents(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
 }
 
 // resolveDefaultClientsOverride returns the operator's persisted
@@ -2383,6 +2384,9 @@ type installPlanOpts struct {
 	// intent/scheduler mutation. Legacy callers leave it nil and keep the
 	// manifest-derived audit task list (installAuditTaskNames) exactly.
 	AuditTaskNames []string
+	// SymlinkConsents carries request-scoped, per-client consent pins for
+	// client-config symlink writes. Nil preserves the ordinary default refusal.
+	SymlinkConsents []ResolvedSymlinkConsent
 }
 
 // installPlan is the shared materialization core between api.Install (and
@@ -2417,7 +2421,7 @@ func (a *API) installPlan(ctx context.Context, m *config.ServerManifest, plan *P
 	if err := a.recordInstallAuditForTasks(installAuditTaskNamesOrOverride(m, opts.DaemonFilter, opts.AuditTaskNames)); err != nil {
 		return err
 	}
-	return executeInstallTo(w, m, plan, a.effectiveBackupKeepN(), opts.StartTasks, opts.Intermediate, opts.SkipSchedulerPrune, opts.SkipSchedulerTasks)
+	return executeInstallToWithSymlinkConsents(w, m, plan, a.effectiveBackupKeepN(), opts.StartTasks, opts.Intermediate, opts.SkipSchedulerPrune, opts.SkipSchedulerTasks, opts.SymlinkConsents)
 }
 
 // createdTask pairs a scheduler.TaskSpec created in Pass A with the
@@ -2470,6 +2474,10 @@ type intentWriteStep func() (rollback func(), err error)
 // mcp-local-hub-<server>-* scheduler task for that server. Legacy callers pass
 // false and keep the reconcile.
 func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool, skipTasks bool) error {
+	return executeInstallToWithSymlinkConsents(w, m, p, keepN, startTasks, intermediate, skipPrune, skipTasks, nil)
+}
+
+func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool, skipTasks bool, symlinkConsents []ResolvedSymlinkConsent) error {
 	// v0.6 Phase F: when skipTasks is set (GLOBAL manifest install routed to the
 	// supervisor model) NEITHER Pass A scheduler-task creation NOR Pass B start
 	// runs — the daemons live in supervisor-intent.json and the supervisor
@@ -2620,6 +2628,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 	// Use an absolute canonical path to avoid PATH/CWD lookup when clients
 	// spawn the relay command.
 	allClients := clients.AllClients()
+	symlinkConsentWriters := clientConfigSymlinkConsentWriters(symlinkConsents)
 	for _, u := range p.ClientUpdates {
 		client := allClients[u.Client]
 		if client == nil {
@@ -2676,7 +2685,8 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 			RelayExePath: canonical,
 			RelayURL:     u.RelayURL,
 		}
-		if err := client.AddEntry(entry); err != nil {
+		configWriter := symlinkConsentWriters[u.Client]
+		if err := clients.AddEntryWithConfigWriter(client, entry, configWriter); err != nil {
 			runRollback()
 			return fmt.Errorf("add entry to %s: %w", u.Client, err)
 		}
@@ -2688,8 +2698,9 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 		entryName := m.Name
 		clientName := u.Client
 		backupPath := bak
+		rollbackWriter := configWriter
 		rollback = append(rollback, func() {
-			if err := clientRef.RestoreEntryFromBackupForRollback(backupPath, entryName); err != nil {
+			if err := clients.RestoreEntryFromBackupForRollbackWithConfigWriter(clientRef, backupPath, entryName, rollbackWriter); err != nil {
 				fmt.Fprintf(w, "  rollback: restore %s entry in %s from backup failed: %v\n", entryName, clientName, err)
 				return
 			}
@@ -2734,6 +2745,35 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 	}
 	fmt.Fprintln(w, "\nInstall complete.")
 	return nil
+}
+
+func clientConfigSymlinkConsentWriters(consents []ResolvedSymlinkConsent) map[string]clients.WriteConfigFileFunc {
+	if len(consents) == 0 {
+		return nil
+	}
+	writers := make(map[string]clients.WriteConfigFileFunc, len(consents))
+	for _, consent := range consents {
+		consent := consent
+		if strings.TrimSpace(consent.Client) == "" || strings.TrimSpace(consent.OriginalPath) == "" {
+			continue
+		}
+		writers[consent.Client] = func(path string, contents []byte) error {
+			if !sameInstallPath(path, consent.OriginalPath) {
+				return fmt.Errorf("scoped symlink consent for %s applies to %s, not %s", consent.Client, consent.OriginalPath, path)
+			}
+			return SecureWriteClientConfigWithConsent(consent, contents)
+		}
+	}
+	return writers
+}
+
+func sameInstallPath(a, b string) bool {
+	cleanA := filepath.Clean(a)
+	cleanB := filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(cleanA, cleanB)
+	}
+	return cleanA == cleanB
 }
 
 // schedulerLister is the narrow scheduler subset pruneObsoleteServerTasks

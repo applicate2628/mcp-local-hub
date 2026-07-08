@@ -70,6 +70,10 @@ func (q *qwenCLI) InitEmpty() (created bool, err error) {
 }
 
 func (q *qwenCLI) AddEntry(entry MCPEntry) error {
+	return q.AddEntryWithConfigWriter(entry, nil)
+}
+
+func (q *qwenCLI) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
 	serverEntry := map[string]any{
 		"httpUrl": entry.URL,
 		"timeout": defaultQwenHTTPTimeoutMs,
@@ -78,7 +82,7 @@ func (q *qwenCLI) AddEntry(entry MCPEntry) error {
 		serverEntry["headers"] = entry.Headers
 	}
 	// Comment-preserving set via the embedded seam.
-	return q.setMember(entry.Name, serverEntry)
+	return q.setMemberWithWriter(entry.Name, serverEntry, writer)
 }
 
 func (q *qwenCLI) GetEntry(name string) (*MCPEntry, error) {
