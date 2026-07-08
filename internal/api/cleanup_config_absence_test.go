@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/process"
 )
 
@@ -122,6 +123,35 @@ func TestApplyReapEligibilityGate_DryRunNeverKills(t *testing.T) {
 	}
 }
 
+// TestApplyReapEligibilityGate_DryRunLeavesKillErrEmpty is the direct regression guard for
+// the PR #520 P1 consent-surface bug: a dry-run stamps the structured ReapVerdict but must
+// leave the human KillErr EMPTY on every row (spared AND eligible). The GUI renders
+// `kill_err || "killed"` and shows a result column once ANY row carries kill_err, so a
+// dry-run that stamped spare-reasons would render a reap-ELIGIBLE row's empty kill_err as a
+// false "killed" alongside a spared row's reason — before the operator pressed Clean.
+func TestApplyReapEligibilityGate_DryRunLeavesKillErrEmpty(t *testing.T) {
+	swapScanClientConfigsFailClosed(t, func() ([]string, []string) { return nil, nil })
+	swapOrphanTerminator(t, func(p process.PIDIdentityProof) error { t.Fatalf("dry-run must not kill"); return nil })
+
+	filtered := []OrphanProcess{
+		{PID: 1, AgeSec: 100, Cmdline: `node npx -y @mui/mcp`, ExecutablePath: `C:\node.exe`, StartedAt: "2026-01-01T00:00:00Z"},   // below floor → spared
+		{PID: 2, AgeSec: 700, Cmdline: `node npx -y @other/pkg`, ExecutablePath: `C:\node.exe`, StartedAt: "2026-01-01T00:00:00Z"}, // config-absent + old → eligible
+	}
+	applyReapEligibilityGate(filtered, true /*dryRun*/, false)
+
+	if filtered[0].ReapVerdict != ReapVerdictSparedBelowKillAgeFloor {
+		t.Errorf("below-floor dry-run verdict = %q, want %q", filtered[0].ReapVerdict, ReapVerdictSparedBelowKillAgeFloor)
+	}
+	if filtered[1].ReapVerdict != ReapVerdictReapEligible {
+		t.Errorf("above-floor dry-run verdict = %q, want %q", filtered[1].ReapVerdict, ReapVerdictReapEligible)
+	}
+	for i := range filtered {
+		if filtered[i].KillErr != "" {
+			t.Errorf("dry-run must leave KillErr EMPTY (GUI renders kill_err||\"killed\"); row %d got %q", i, filtered[i].KillErr)
+		}
+	}
+}
+
 // TestReapOrphans_AggressivePathNotConfigGated pins the S13 scope boundary: reapOrphans
 // (AggressiveCleanup's kill path) must NOT inherit the config-absence gate — it kills a
 // candidate regardless of whether its signature is still config-referenced (the aggressive
@@ -195,29 +225,72 @@ func TestApplyReapEligibilityGate_BelowKillAgeFloorSparesButListed(t *testing.T)
 	}
 }
 
-// TestManifestPatternsDropBareNameFallback pins the T3 bare-name demotion
-// ($security-reviewer P2): a server whose manifest patterns collapsed to just the bare
-// server name (corrupt/empty manifest) must NOT contribute a kill-nomination pattern —
-// a bare generic word matches arbitrary unrelated user processes the config-absence gate
-// cannot protect. A real (command+arg) manifest is unaffected.
-func TestManifestPatternsDropBareNameFallback(t *testing.T) {
+// TestPatternsFromManifestExFallbackFlag pins the T3 bare-name demotion at its SOURCE
+// ($security-reviewer P2 + bot PR #520 P2): patternsFromManifestEx must flag fallback=true
+// ONLY when the manifest yields no discriminating command/arg and collapses to the bare
+// server name — and flag fallback=false for a REAL manifest whose command basename
+// legitimately equals the server name (e.g. the shipped `mcp-language-server`). Getting
+// this wrong in either direction is a bug: a false positive drops a real self-named server
+// (the bot regression); a false negative nominates a bare generic word for the auto-ticker.
+func TestPatternsFromManifestExFallbackFlag(t *testing.T) {
+	cases := []struct {
+		name         string
+		server       string
+		m            config.ServerManifest
+		wantFallback bool
+		wantContains string // a pattern that MUST be present
+	}{
+		{"empty manifest collapses to bare name", "memory", config.ServerManifest{}, true, "memory"},
+		{"real self-named binary is NOT a fallback", "mcp-language-server",
+			config.ServerManifest{Command: "mcp-language-server"}, false, "mcp-language-server"},
+		{"real command+arg manifest", "wolfram",
+			config.ServerManifest{Command: "wolfram-server", BaseArgs: []string{"@wolf/pkg"}}, false, "wolfram-server"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pats, fallback := patternsFromManifestEx(tc.server, &tc.m)
+			if fallback != tc.wantFallback {
+				t.Errorf("fallback = %v, want %v (pats %v)", fallback, tc.wantFallback, pats)
+			}
+			found := false
+			for _, p := range pats {
+				if p == tc.wantContains {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("pattern %q must be present; got %v", tc.wantContains, pats)
+			}
+		})
+	}
+}
+
+// TestManifestNominationPreservesRealSelfNamedPattern is the direct regression guard for
+// bot PR #520 P2: manifestNominationPatterns must NOT drop a real self-named pattern like
+// `mcp-language-server` (the source-level nominatable gate already discarded true bare-name
+// fallbacks, so anything reaching this flattener is real). It still drops broad launcher
+// tokens.
+func TestManifestNominationPreservesRealSelfNamedPattern(t *testing.T) {
 	patterns := map[string][]string{
-		"memory":  {"memory"},                  // bare-name fallback → dropped
-		"wolfram": {"wolfram-server", "@wolf"}, // real manifest → kept
+		"mcp-language-server": {"mcp-language-server"},   // real self-named binary → kept
+		"wolfram":             {"wolfram-server", "npx"}, // real + a broad launcher token
 	}
 	got := manifestNominationPatterns(patterns)
-	for _, p := range got {
-		if p == "memory" {
-			t.Errorf("bare-name fallback pattern %q must be dropped from the kill-nomination set; got %v", p, got)
+	has := func(want string) bool {
+		for _, p := range got {
+			if p == want {
+				return true
+			}
 		}
+		return false
 	}
-	found := false
-	for _, p := range got {
-		if p == "wolfram-server" {
-			found = true
-		}
+	if !has("mcp-language-server") {
+		t.Errorf("real self-named pattern must survive nomination; got %v", got)
 	}
-	if !found {
-		t.Errorf("a real manifest's discriminating pattern must survive; got %v", got)
+	if !has("wolfram-server") {
+		t.Errorf("real discriminating pattern must survive nomination; got %v", got)
+	}
+	if has("npx") {
+		t.Errorf("broad launcher token must be dropped from nomination; got %v", got)
 	}
 }

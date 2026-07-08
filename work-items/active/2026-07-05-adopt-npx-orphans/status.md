@@ -50,32 +50,37 @@ reaper (PR5) remains parked on the revised gate.
    verdict = SHIP_WITH_FIXES; the two kill-hole must-haves (snapshot-fail-closed +
    T3-demotion) are IN this PR.**
 
-   **PR5 fast-follows (tracked, NOT in this PR — must land before any ticker-policy
-   expansion / broad npx-adopt fleet rollout):**
-   - **parent-verified-dead explicit probe** (fable/sonnet P2, lane-disagreement per H5
-     doc): the 16-deep ancestor-walk relies on snapshot presence; a SILENTLY-dropped
-     live-ancestor row (a per-process WMI property race, not caught by the P1 snapshot
-     error) orphanizes a live subtree whose hub signature is NOT config-referenced →
-     ticker-kill. Fix: at the byPID-miss walk break, probe with
-     `process.IsPidAlive`/`GetExitCodeProcess==STILL_ACTIVE`; alive-but-unenumerated →
-     spare (fail closed). Cite the silent-row-drop scenario, not just ErrTooLong.
-   - **Exists() stat-error fail-closed gap** (fable P2): adapter `Exists()` collapses
-     ANY `os.Stat` error (incl ACCESS_DENIED) into "not installed" → a DACL-refused
-     config (documented sandbox-broadened %LOCALAPPDATA% host class) contributes
-     neither patterns nor a degraded entry → a signature referenced ONLY there reads
-     as config-absent → killed. Fix: stat `ConfigPath()` directly; non-IsNotExist error
-     → degraded.
-   - **candidateConfigReferenced false-negatives** (fable P2): the reference side uses
-     `argIsDiscriminatingPattern` (≥8-char) so a short config arg like `serena` (6 ch)
-     that the manifest side nominates can never count as a reference → a live serena's
-     un-migrated direct entry is not spared. Fix: relax the reference-side arg filter
-     (over-broad only spares) + normalize the Contains (lowercase, fold `\`→`/`).
-   - **per-candidate SupervisorEventLog audit** (fable/sonnet P3): emit source="cleanup"
-     orphan-reaped/-spared events (pid/basename/verdict, never raw cmdline) so the
-     false-positive rate is measurable before unattended-policy expansion.
-   - Also still deferred per H5: supervisor-state PID exclusion, ticker apply:false
-     policy decision, knownClientLauncher 8→45 expansion, project-scoped-config
-     enumeration (R1 shrink), PEB step-5.
+   **PR5 round-2 (bot #520 + codex army + workflow — ALL fixed in this PR):**
+   - **T3 over-drop regression FIXED** (bot P2 #1 / codex B): `len(ps)==1 && ps[0]==name`
+     wrongly emptied the REAL `mcp-language-server` manifest. Moved the bare-name demotion
+     to its SOURCE — `patternsForServerNominatable` + `patternsFromManifestEx` (fallback
+     flag) return nil ONLY for a true synthesized fallback; a real self-named binary
+     survives. Scan process-count keeps the bare-name fallback (unchanged).
+   - **Reference-side short-token FIXED** (bot P2 #2): `argIsReferenceCandidate` (relaxed,
+     inclusive=true) keeps a short real token like `serena` on the config-REFERENCE side
+     (over-match only SPARES); nomination side stays strict.
+   - **Exists() stat-error → degraded FIXED** (bot P2 #3 / codex A P0#2): stat
+     `ConfigPath()` when `Exists()==false`; a non-IsNotExist error (ACCESS_DENIED) counts
+     as degraded, not absent.
+   - **Dry-run KillErr consent-surface P1 FIXED** (workflow sonnet+fable CONFIRMED):
+     stamping KillErr in dry-run made the GUI Preview render a reap-ELIGIBLE row (empty
+     kill_err) as a false "killed". `classifyReapVerdict` extracted; KillErr stamped ONLY
+     on apply; ReapVerdict is the dry-run-safe audit field.
+   - **Aggressive snapshot-scanner-error fail-closed FIXED** (codex A P2 / B MH1,
+     all-return-paths): `parseAggressiveCandidates` propagates the parseProcessRows error;
+     `AggressiveCleanup` refuses APPLY kills on a truncated census.
+
+   **Deferred to a coherent tracked bug** —
+   `work-items/bugs/2026-07-08-cleanup-ancestor-walk-fails-open-on-uncertainty.md`
+   (PRE-EXISTING walk fail-opens, NOT introduced by #520; one refactor, not two touches):
+   - Case A (codex A P0): byPID-miss can't tell dead-parent orphan from dropped-live-row →
+     needs a `process.IsPidAlive` parent-probe with an injectable seam (a blunt spare would
+     inert the reaper — byPID-miss is ALSO the normal real-orphan signature).
+   - Case B (codex A P1): depth-16 exhaustion falls through to orphan → spare-on-exhaustion.
+   - CLI aggressive `ExpectPIDs==nil` validated-set-binding gap (codex A P2 secondary).
+   - Still deferred per H5: per-candidate SupervisorEventLog audit, supervisor-state PID
+     exclusion, ticker apply:false policy, knownClientLauncher 8→45, project-scoped-config
+     enum (R1), PEB step-5.
 2. **Anti-drift "unmanaged detected" surface** (GUI) — surface bypass servers
    so the operator can adopt them; reduces reaper need.
 3. **Phase-2 de-adopt / revert-to-native** (hub→native): interim = `mcphub

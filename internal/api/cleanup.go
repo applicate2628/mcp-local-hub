@@ -611,17 +611,27 @@ func patternsFromClientStdio() []string {
 			// scanClientConfigsFailClosed instead.
 			continue
 		}
-		appendPatternsFromEntries(entries, add)
+		appendPatternsFromEntries(entries, add, false) // strict: nomination can KILL
 	}
 	return out
 }
 
-// appendPatternsFromEntries emits the discriminating cleanup-match patterns for a set
-// of client stdio entries via `add`. Shared by patternsFromClientStdio (best-effort
-// NOMINATION) and scanClientConfigsFailClosed (fail-closed KILL-ELIGIBILITY) so both
-// derive IDENTICAL patterns from the same entries — only the per-client error posture
-// differs. Skips an mcphub-relay-form entry whole (see the Antigravity note below).
-func appendPatternsFromEntries(entries []clients.StdioEntry, add func(string)) {
+// appendPatternsFromEntries emits the cleanup-match patterns for a set of client stdio
+// entries via `add`. Shared by two callers whose arg-inclusion posture DIFFERS:
+//
+//   - NOMINATION (patternsFromClientStdio, inclusive=false): a pattern here can KILL, so
+//     args pass the strict argIsDiscriminatingPattern filter (≥8 chars, has a path/pkg
+//     separator) — a short token must not sweep unrelated processes into a kill.
+//   - fail-closed KILL-ELIGIBILITY / config REFERENCE (scanClientConfigsFailClosed,
+//     inclusive=true): a pattern here can only ever SPARE (candidateConfigReferenced widens
+//     the spare set), so it uses the relaxed argIsReferenceCandidate filter and keeps a
+//     short-but-real package token like "serena" — otherwise an adopted/manifest pattern
+//     could nominate a still-configured `uvx serena` after its parent chain breaks and the
+//     reference scan would have no pattern to spare it (bot PR #520 P2).
+//
+// The command-basename branch and patternIsTooBroad gate are identical for both. Skips an
+// mcphub-relay-form entry whole (see the Antigravity note below).
+func appendPatternsFromEntries(entries []clients.StdioEntry, add func(string), inclusive bool) {
 	for _, e := range entries {
 		base := stripExtension(basenameAcrossSeparators(e.Command))
 		// Codex security finding e8745334 (Antigravity relay args → kill patterns):
@@ -637,7 +647,11 @@ func appendPatternsFromEntries(entries []clients.StdioEntry, add func(string)) {
 			add(base)
 		}
 		for _, arg := range e.Args {
-			if !argIsDiscriminatingPattern(arg) {
+			if inclusive {
+				if !argIsReferenceCandidate(arg) {
+					continue
+				}
+			} else if !argIsDiscriminatingPattern(arg) {
 				continue
 			}
 			if patternIsTooBroad(arg) {
@@ -646,6 +660,25 @@ func appendPatternsFromEntries(entries []clients.StdioEntry, add func(string)) {
 			add(arg)
 		}
 	}
+}
+
+// argIsReferenceCandidate is the RELAXED arg filter used ONLY by the fail-closed config
+// REFERENCE side (scanClientConfigsFailClosed, inclusive=true). Over-inclusion here can only
+// SPARE a candidate — never kill — so it drops the nomination side's 8-char / discriminating
+// -separator requirement and keeps a short but real package token like "serena". It still
+// excludes flags (leading `-`), all-digit tokens (ports/PIDs/timeouts), and <3-char noise
+// that would substring-match almost anything.
+func argIsReferenceCandidate(arg string) bool {
+	if len(arg) < 3 {
+		return false
+	}
+	if strings.HasPrefix(arg, "-") {
+		return false
+	}
+	if isAllDigits(arg) {
+		return false
+	}
+	return true
 }
 
 // scanClientConfigsFailClosed collects the discriminating stdio patterns from every
@@ -676,6 +709,19 @@ func scanClientConfigsFailClosedImpl() (patterns []string, degradedClients []str
 	}
 	for _, c := range clients.AllClients() {
 		if !c.Exists() {
+			// Exists()==false conflates "genuinely absent" with "stat errored":
+			// adapters implement Exists as os.Stat(path)==nil, so an unreadable
+			// installed config (ACCESS_DENIED on a sandbox-broadened %LOCALAPPDATA%,
+			// see the CLAUDE.md secret-DACL runbook) reads as not-installed. Re-stat
+			// ConfigPath to CLASSIFY: a non-IsNotExist error means we CANNOT prove the
+			// config is absent, so it must count as DEGRADED (fail closed) — a candidate
+			// referenced only by that unreadable config would otherwise pass the absence
+			// check and be killed (bot PR #520 + $security-reviewer P2).
+			if p := c.ConfigPath(); p != "" {
+				if _, err := os.Stat(p); err != nil && !os.IsNotExist(err) {
+					degradedClients = append(degradedClients, c.Name())
+				}
+			}
 			continue
 		}
 		entries, err := c.AllStdioEntries()
@@ -683,7 +729,7 @@ func scanClientConfigsFailClosedImpl() (patterns []string, degradedClients []str
 			degradedClients = append(degradedClients, c.Name())
 			continue
 		}
-		appendPatternsFromEntries(entries, add)
+		appendPatternsFromEntries(entries, add, true) // inclusive: reference side only SPARES
 	}
 	return patterns, degradedClients
 }
@@ -878,14 +924,14 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 	// Collect patterns per manifest.
 	patterns := map[string][]string{}
 	if opts.Server != "" {
-		patterns[opts.Server] = patternsForServer(opts.Server, opts.ManifestDir)
+		patterns[opts.Server] = patternsForServerNominatable(opts.Server, opts.ManifestDir)
 	} else {
 		names, err := readManifestNames(opts.ManifestDir)
 		if err != nil {
 			return nil, err
 		}
 		for name := range names {
-			patterns[name] = patternsForServer(name, opts.ManifestDir)
+			patterns[name] = patternsForServerNominatable(name, opts.ManifestDir)
 		}
 	}
 
@@ -969,29 +1015,18 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 func applyReapEligibilityGate(filtered []OrphanProcess, dryRun bool, snapshotDegraded bool) {
 	cfgPatterns, degradedClients := scanClientConfigsFailClosed()
 	for i := range filtered {
-		switch {
-		case snapshotDegraded:
-			// The process snapshot was truncated (a dropped live-ancestor row can
-			// mis-classify a live-rooted child as an orphan), so the ancestor-walk's
-			// orphan verdict cannot be trusted this run — spare EVERY candidate
-			// (fail closed). $security-reviewer P1.
-			filtered[i].ReapVerdict = ReapVerdictSparedSnapshotDegraded
-			filtered[i].KillErr = "skipped: process snapshot was truncated this run; kills disabled (fail closed)"
-		case candidateConfigReferenced(filtered[i], cfgPatterns):
-			filtered[i].ReapVerdict = ReapVerdictSparedConfigReferenced
-			filtered[i].KillErr = "skipped: signature still referenced by an installed client config"
-		case len(degradedClients) > 0:
-			filtered[i].ReapVerdict = ReapVerdictSparedConfigScanDegraded
-			filtered[i].KillErr = "skipped: a client config was unreadable this run (" + strings.Join(degradedClients, ",") + "); reaper fails closed"
-		case filtered[i].AgeSec < cleanupKillMinAgeSec:
-			// Kill-eligibility age floor (A2 PR5, design.md P2 "age>~10min"): a
-			// candidate is LISTED at the 60s default but not KILLED until it is old
-			// enough that a just-orphaned-mid-restart child has had several ticker
-			// re-evaluations on fresh snapshots. Defense-in-depth on the kill side only.
-			filtered[i].ReapVerdict = ReapVerdictSparedBelowKillAgeFloor
-			filtered[i].KillErr = "skipped: below the kill-age floor (needs a longer orphan age before an auto-kill)"
-		default:
-			filtered[i].ReapVerdict = ReapVerdictReapEligible
+		verdict, skipReason := classifyReapVerdict(filtered[i], cfgPatterns, degradedClients, snapshotDegraded)
+		filtered[i].ReapVerdict = verdict
+		// KillErr carries the per-row OUTCOME, which exists only on the APPLY path. A
+		// dry-run preview must NOT stamp a spare-reason into KillErr: the GUI renders
+		// `kill_err || "killed"` and treats a listed row with an empty kill_err as killed,
+		// so a preview that stamped spare-reasons would (a) surface a result column master
+		// never shows in preview and (b) render a reap-ELIGIBLE row (empty KillErr) as a
+		// false "killed" before the operator ever pressed Clean — consent-surface
+		// misinformation on a destructive action (workflow + bot PR #520 P1). The
+		// structured ReapVerdict above is the dry-run-safe audit field the GUI can render.
+		if !dryRun && verdict != ReapVerdictReapEligible {
+			filtered[i].KillErr = skipReason
 		}
 	}
 	if dryRun {
@@ -1005,22 +1040,49 @@ func applyReapEligibilityGate(filtered []OrphanProcess, dryRun bool, snapshotDeg
 	}
 }
 
+// classifyReapVerdict computes the H5-revised reap-eligibility verdict for one candidate
+// plus the human, path-free skip-reason the APPLY path records in KillErr. Pure: no kill,
+// no dry-run branch, no OS access — the caller decides whether to record the reason (apply
+// only) and whether to kill. The precedence is deliberate: snapshot-degraded (a dropped
+// live-ancestor row can mis-classify a live child as an orphan) and config-referenced both
+// spare BEFORE the age floor, and the 600s kill-age floor (design.md P2 "age>~10min") is
+// the last defense-in-depth check so a just-orphaned-mid-restart child gets several ticker
+// re-evaluations on fresh snapshots before any auto-kill.
+func classifyReapVerdict(o OrphanProcess, cfgPatterns, degradedClients []string, snapshotDegraded bool) (verdict, skipReason string) {
+	switch {
+	case snapshotDegraded:
+		return ReapVerdictSparedSnapshotDegraded,
+			"skipped: process snapshot was truncated this run; kills disabled (fail closed)"
+	case candidateConfigReferenced(o, cfgPatterns):
+		return ReapVerdictSparedConfigReferenced,
+			"skipped: signature still referenced by an installed client config"
+	case len(degradedClients) > 0:
+		return ReapVerdictSparedConfigScanDegraded,
+			"skipped: a client config was unreadable this run (" + strings.Join(degradedClients, ",") + "); reaper fails closed"
+	case o.AgeSec < cleanupKillMinAgeSec:
+		return ReapVerdictSparedBelowKillAgeFloor,
+			"skipped: below the kill-age floor (needs a longer orphan age before an auto-kill)"
+	default:
+		return ReapVerdictReapEligible, ""
+	}
+}
+
 // manifestNominationPatterns flattens the per-server manifest patterns into the flat
-// kill-nomination pattern set, dropping (a) broad launcher tokens (node/npx/python/...)
-// that would match unrelated dev-tooling, and (b) BARE-NAME FALLBACK patterns — a server
-// whose patterns collapsed to just its own name (a corrupt / no-discriminating-pattern
-// manifest — patternsForServer returns []string{serverName}). A bare generic server name
-// ("time"/"memory"/"fetch") substring-matches arbitrary UNRELATED user processes that the
-// config-absence gate cannot protect (they are not config-referenced); on the live 5-min
-// apply:true auto-ticker that would be a force-kill of a bystander, so it is never
-// nominated (T3 demotion, A2 PR5 $security-reviewer P2). A real manifest yields
-// command+arg patterns, not a lone server name, and is unaffected.
+// kill-nomination pattern set, dropping broad launcher tokens (node/npx/python/...) that
+// would match unrelated dev-tooling.
+//
+// The synthesized BARE-NAME FALLBACK is dropped upstream at the source now, not here: the
+// caller builds this map with patternsForServerNominatable, which returns nil for a corrupt
+// or no-discriminating-pattern manifest so a bare generic server name ("time"/"memory"/
+// "fetch") is never nominated for the unattended apply:true auto-ticker (T3 demotion, A2 PR5
+// $security-reviewer). Doing the drop at the source (rather than a len(ps)==1 && ps[0]==name
+// check here) preserves a REAL self-named manifest whose command basename legitimately equals
+// the server name — e.g. the shipped `mcp-language-server` — which a name-equality check here
+// would have wrongly dropped, silently emptying `cleanup --server mcp-language-server` (bot
+// PR #520 P2).
 func manifestNominationPatterns(patterns map[string][]string) []string {
 	var out []string
-	for name, ps := range patterns {
-		if len(ps) == 1 && ps[0] == name {
-			continue // bare-name fallback — never nominate
-		}
+	for _, ps := range patterns {
 		for _, p := range ps {
 			if isBroadLauncherToken(p) {
 				continue
@@ -1255,11 +1317,13 @@ func isAggressiveDenyClass(cmdline string, includeClasses []string) bool {
 // Exactly one of clientBasename / rootPID must be set; the caller
 // (AggressiveCleanup) enforces that before calling. clientBasename is
 // the already-normalized lowercase launcher basename.
-func parseAggressiveCandidates(r io.Reader, clientBasename string, rootPID int, includeClasses []string) []OrphanProcess {
-	// Aggressive is operator-scoped + confirm-gated; snapshot-truncation fail-closed
-	// for THIS path is a separate concern (tracked fast-follow) and is intentionally
-	// not wired here — the config-absence / snapshot-degraded gate is CleanupOrphans-only.
-	rows, byPID, _ := parseProcessRows(r)
+func parseAggressiveCandidates(r io.Reader, clientBasename string, rootPID int, includeClasses []string) ([]OrphanProcess, error) {
+	// snapErr surfaces a truncated census: a dropped live `mcphub.exe daemon` ancestor
+	// row would let the ancestor walk mis-scope a hub-managed child as an aggressive
+	// candidate, violating the "hub-managed processes are ALWAYS spared" invariant. The
+	// caller (AggressiveCleanup) fails closed on it before any APPLY kill (all-return-paths
+	// of the parseProcessRows snapshot-error contract; codex PR #520).
+	rows, byPID, snapErr := parseProcessRows(r)
 
 	var out []OrphanProcess
 	for _, r := range rows {
@@ -1331,7 +1395,7 @@ func parseAggressiveCandidates(r io.Reader, clientBasename string, rootPID int, 
 			MatchSource:    matchSource,
 		})
 	}
-	return out
+	return out, snapErr
 }
 
 // AggressiveCleanup (Phase H.1) reports — and, when DryRun=false, kills
@@ -1373,7 +1437,7 @@ func (a *API) AggressiveCleanup(opts CleanupOpts) ([]OrphanProcess, error) {
 	if err != nil {
 		return nil, err
 	}
-	candidates := parseAggressiveCandidates(
+	candidates, snapErr := parseAggressiveCandidates(
 		strings.NewReader(string(out)), clientBasename, opts.RootPID, opts.IncludeClasses)
 
 	// Age filter — same floor as the default sweep so a just-spawned
@@ -1393,6 +1457,16 @@ func (a *API) AggressiveCleanup(opts CleanupOpts) ([]OrphanProcess, error) {
 	// since died simply drops out. nil → no binding (CLI / dry-run preview).
 	if opts.ExpectPIDs != nil {
 		filtered = filterToExpectedPIDs(filtered, opts.ExpectPIDs)
+	}
+
+	// Fail closed on a truncated census before any APPLY kill: a dropped live
+	// `mcphub.exe daemon` ancestor row can mis-scope a hub-managed child as an
+	// aggressive candidate, so an unreliable snapshot must never drive a kill
+	// (all-return-paths of the parseProcessRows snapshot-error contract; codex
+	// PR #520). The dry-run preview stays best-effort — it lists the candidates
+	// but touches nothing — so the operator can see and retry.
+	if !opts.DryRun && snapErr != nil {
+		return filtered, fmt.Errorf("aggressive cleanup: process snapshot was truncated this run; kills disabled (fail closed): %w", snapErr)
 	}
 
 	// Same identity-re-verifying reap as the default sweep — never a raw
