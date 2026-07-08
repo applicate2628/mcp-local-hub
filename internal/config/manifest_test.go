@@ -45,6 +45,35 @@ daemons:
 	}
 }
 
+func TestParseManifest_EnvColonPlaceholderOnlyPreservedForEnvValues(t *testing.T) {
+	t.Setenv("MCPHUB_ARG_ENV_COLON_TEST", "arg-expanded")
+	t.Setenv("MCPHUB_SECRET_ENV_COLON_TEST", "secret-resolved-at-runtime")
+
+	yaml := `
+name: t
+kind: global
+transport: stdio-bridge
+command: bash
+base_args:
+  - "${env:MCPHUB_ARG_ENV_COLON_TEST}"
+env:
+  API_KEY: "${env:MCPHUB_SECRET_ENV_COLON_TEST}"
+daemons:
+  - name: default
+    port: 9999
+`
+	m, err := ParseManifest(strings.NewReader(yaml))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if got := m.BaseArgs[0]; got != "arg-expanded" {
+		t.Fatalf("BaseArgs[0] = %q, want parse-time expansion", got)
+	}
+	if got := m.Env["API_KEY"]; got != "${env:MCPHUB_SECRET_ENV_COLON_TEST}" {
+		t.Fatalf("Env[API_KEY] = %q, want runtime placeholder preserved", got)
+	}
+}
+
 // TestParseManifest_MissingEnvIsErrorNotSilentEmpty is the regression
 // guard for the finding 'manifest env expansion returns empty string
 // up to resolver validation'. Previously expandEnvCrossPlatform

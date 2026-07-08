@@ -11,6 +11,8 @@ import (
 // remote-http URL and header placeholders. Capture group 1 is the vault key.
 var SecretPlaceholderRE = regexp.MustCompile(`\$\{secret:([A-Za-z0-9_\-.]+)\}`)
 
+var envPlaceholderRE = regexp.MustCompile(`\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}`)
+
 // MalformedSecretPrefixRE matches any `${secret:` prefix so callers can detect
 // intended placeholders that failed the stricter SecretPlaceholderRE shape.
 var MalformedSecretPrefixRE = regexp.MustCompile(`\$\{secret:`)
@@ -84,6 +86,42 @@ func (r *Resolver) Resolve(ref string) (string, error) {
 			return "", fmt.Errorf("resolve %q: key %q not in local config", ref, key)
 		}
 		return v, nil
+	case strings.HasPrefix(ref, "${env:") && envPlaceholderRE.FindString(ref) == ref:
+		name := strings.TrimSuffix(strings.TrimPrefix(ref, "${env:"), "}")
+		if name == "" {
+			return "", fmt.Errorf("resolve %q: environment variable name is empty", ref)
+		}
+		v, ok := os.LookupEnv(name)
+		if !ok {
+			return "", fmt.Errorf("resolve %q: environment variable %q not set", ref, name)
+		}
+		return v, nil
+	case strings.Contains(ref, "${env:"):
+		var resolveErr error
+		resolved := envPlaceholderRE.ReplaceAllStringFunc(ref, func(token string) string {
+			if resolveErr != nil {
+				return token
+			}
+			name := strings.TrimSuffix(strings.TrimPrefix(token, "${env:"), "}")
+			v, ok := os.LookupEnv(name)
+			if !ok {
+				resolveErr = fmt.Errorf("resolve %q: environment variable %q not set", ref, name)
+				return token
+			}
+			return v
+		})
+		if resolveErr != nil {
+			return "", resolveErr
+		}
+		// Fail loud on malformed tokens the placeholder regex could not
+		// match (e.g. "${env:foo-bar}", "${env: FOO}"): silently passing the
+		// literal text into a child environment converts a misconfiguration
+		// into a fail-quiet launch (fable acceptance LOW-6; master's
+		// parse-time behavior for such values was a hard error).
+		if strings.Contains(resolved, "${env:") {
+			return "", fmt.Errorf("resolve %q: malformed ${env:...} placeholder (variable names match [A-Za-z_][A-Za-z0-9_]*)", ref)
+		}
+		return resolved, nil
 	case strings.HasPrefix(ref, "$"):
 		name := strings.TrimPrefix(ref, "$")
 		v, ok := os.LookupEnv(name)

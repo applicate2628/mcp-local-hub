@@ -48,6 +48,143 @@ func TestResolver_Env(t *testing.T) {
 	}
 }
 
+func TestResolver_EnvBracePlaceholder(t *testing.T) {
+	t.Setenv("MCP_TEST_VAR", "env-value")
+	r := NewResolver(nil, nil)
+	got, err := r.Resolve("${env:MCP_TEST_VAR}")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != "env-value" {
+		t.Errorf("Resolve = %q, want env-value", got)
+	}
+}
+
+func TestResolver_EnvBracePlaceholderComposite(t *testing.T) {
+	t.Setenv("MCP_TEST_PATH", "/usr/bin")
+	r := NewResolver(nil, nil)
+	got, err := r.Resolve("${env:MCP_TEST_PATH}:/opt/bin")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != "/usr/bin:/opt/bin" {
+		t.Errorf("Resolve = %q, want /usr/bin:/opt/bin", got)
+	}
+}
+
+func TestResolver_EnvBracePlaceholderCompositeMultipleTokens(t *testing.T) {
+	t.Setenv("MCP_TEST_FIRST", "one")
+	t.Setenv("MCP_TEST_SECOND", "two")
+	r := NewResolver(nil, nil)
+	got, err := r.Resolve("prefix-${env:MCP_TEST_FIRST}-${env:MCP_TEST_SECOND}-suffix")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != "prefix-one-two-suffix" {
+		t.Errorf("Resolve = %q, want prefix-one-two-suffix", got)
+	}
+}
+
+func TestResolver_EnvBracePlaceholderCompositeWholeStringMultipleTokens(t *testing.T) {
+	t.Setenv("MCP_TEST_BIN", "/usr/bin")
+	t.Setenv("MCP_TEST_EXTRA", "/opt/bin")
+	t.Setenv("MCP_TEST_HOST", "localhost")
+	t.Setenv("MCP_TEST_PORT", "5432")
+
+	r := NewResolver(nil, nil)
+	tests := []struct {
+		name string
+		ref  string
+		want string
+	}{
+		{
+			name: "path-like separator",
+			ref:  "${env:MCP_TEST_BIN}:${env:MCP_TEST_EXTRA}",
+			want: "/usr/bin:/opt/bin",
+		},
+		{
+			name: "hyphen separator",
+			ref:  "${env:MCP_TEST_HOST}-${env:MCP_TEST_PORT}",
+			want: "localhost-5432",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := r.Resolve(tc.ref)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("Resolve = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestResolver_EnvBracePlaceholderCompositeMissingIsError(t *testing.T) {
+	os.Unsetenv("MCP_DEFINITELY_NOT_SET")
+	r := NewResolver(nil, nil)
+	if _, err := r.Resolve("prefix-${env:MCP_DEFINITELY_NOT_SET}-suffix"); err == nil {
+		t.Error("expected error for missing composite env var, got nil")
+	}
+}
+
+// TestResolver_EnvBracePlaceholderMalformedTokenIsError locks in the fable
+// acceptance LOW-6 hardening: a "${env:...}" token the placeholder regex
+// cannot match (bad name charset, embedded space) must FAIL LOUD instead of
+// passing through as literal text into a child environment — master's
+// parse-time behavior for such values was a hard error, and fail-quiet would
+// hide the misconfiguration.
+func TestResolver_EnvBracePlaceholderMalformedTokenIsError(t *testing.T) {
+	t.Setenv("MCP_TEST_PRESENT", "present")
+	r := NewResolver(nil, nil)
+	for _, ref := range []string{
+		"${env:foo-bar}",
+		"${env: MCP_TEST_PRESENT}",
+		"${env:MCP_TEST_PRESENT}:${env:bad name}",
+	} {
+		if _, err := r.Resolve(ref); err == nil {
+			t.Errorf("Resolve(%q): expected malformed-placeholder error, got nil", ref)
+		}
+	}
+}
+
+func TestResolver_EnvBracePlaceholderMissingErrorsNameToken(t *testing.T) {
+	os.Unsetenv("MCP_DEFINITELY_NOT_SET")
+	t.Setenv("MCP_TEST_PRESENT", "present")
+
+	r := NewResolver(nil, nil)
+	tests := []struct {
+		name    string
+		ref     string
+		wantErr string
+	}{
+		{
+			name:    "single token",
+			ref:     "${env:MCP_DEFINITELY_NOT_SET}",
+			wantErr: "resolve \"${env:MCP_DEFINITELY_NOT_SET}\": environment variable \"MCP_DEFINITELY_NOT_SET\" not set",
+		},
+		{
+			name:    "composite token",
+			ref:     "${env:MCP_TEST_PRESENT}:${env:MCP_DEFINITELY_NOT_SET}",
+			wantErr: "resolve \"${env:MCP_TEST_PRESENT}:${env:MCP_DEFINITELY_NOT_SET}\": environment variable \"MCP_DEFINITELY_NOT_SET\" not set",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := r.Resolve(tc.ref)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if err.Error() != tc.wantErr {
+				t.Errorf("Resolve error = %q, want %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestResolver_Literal(t *testing.T) {
 	r := NewResolver(nil, nil)
 	got, err := r.Resolve("plain-text")

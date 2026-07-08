@@ -188,6 +188,38 @@ func TestBackupKeepZero_DoesNotPrune(t *testing.T) {
 	}
 }
 
+func TestNextBackupPathAllocatesAboveHighestSameSecondSuffix(t *testing.T) {
+	tmp := t.TempDir()
+	livePath := filepath.Join(tmp, ".claude.json")
+
+	var got string
+	var seeded string
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		removeTimestampedBackupsForTest(t, livePath)
+		waitForFreshBackupSecondForTest()
+		stamp := time.Now().Format("20060102-150405")
+		seeded = livePath + backupSuffixPrefix + stamp + "-000000002"
+		if err := os.WriteFile(seeded, []byte("seed"), 0o600); err != nil {
+			t.Fatalf("seed suffixed backup: %v", err)
+		}
+		var err error
+		got, err = nextBackupPath(livePath)
+		if err != nil {
+			t.Fatalf("nextBackupPath: %v", err)
+		}
+		if backupSecondStampForTest(got) == stamp {
+			break
+		}
+	}
+	if backupSecondStampForTest(got) != backupSecondStampForTest(seeded) {
+		t.Fatalf("could not exercise same-second allocation; seeded %q got %q", seeded, got)
+	}
+	if want := strings.TrimSuffix(seeded, "-000000002") + "-000000003"; got != want {
+		t.Fatalf("nextBackupPath = %q, want %q", got, want)
+	}
+}
+
 func TestLatestBackup_PrefersMostRecentTimestamped(t *testing.T) {
 	dir := t.TempDir()
 	live := filepath.Join(dir, "foo.json")

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -172,8 +173,9 @@ type Client interface {
 	// scratch on a fresh host" surface.
 	InitEmpty() (created bool, err error)
 
-	// Backup copies the current config to a sibling file ending in ".bak-mcp-local-hub-<timestamp>"
-	// and returns the path. Overwrites any previous backup with the same timestamp-second.
+	// Backup copies the current config to a sibling file ending in
+	// ".bak-mcp-local-hub-<timestamp>" or a collision suffix for the same
+	// timestamp-second, and returns the path.
 	//
 	// As a side effect, the first ever Backup call also writes a one-shot pristine
 	// sentinel "<path>.bak-mcp-local-hub-original" that captures the config as it
@@ -207,9 +209,10 @@ type Client interface {
 	GetEntry(name string) (*MCPEntry, error)
 
 	// LatestBackupPath returns the absolute path to the most recent
-	// mcp-local-hub backup of this client's config. Timestamped
-	// backups (.bak-mcp-local-hub-<YYYYMMDD-HHMMSS>) take precedence
-	// over the pristine -original sentinel. Returns (path, true, nil)
+	// mcp-local-hub backup of this client's config. Timestamped backups
+	// (.bak-mcp-local-hub-<YYYYMMDD-HHMMSS> with an optional collision
+	// suffix) take precedence over the pristine -original sentinel.
+	// Returns (path, true, nil)
 	// when a backup exists, ("", false, nil) when none do, (_, _, err)
 	// on a filesystem error.
 	LatestBackupPath() (string, bool, error)
@@ -240,16 +243,11 @@ type Client interface {
 	// RestoreEntryFromBackup (restore the snapshotted entry, or remove
 	// the live entry when the backup lacks it; other entries untouched).
 	//
-	// This exists for ONE caller: the serena dynamic-pool migrate's
-	// controlled abort-rollback (RestoreSerenaReconcileApplied). When
-	// the migrate rewrites pre-cutover clients legacy-9121 → /serena/mcp
-	// and then aborts before committing the dynamic-pool intent, each
-	// rewritten client's pre-reconcile backup IS the legacy hub entry
-	// (`http://localhost:9121/mcp`, or Antigravity's `mcphub relay`
-	// form). Restoring that known pre-reconcile snapshot is exactly what
-	// the rollback must do, but RestoreEntryFromBackup would reject it
-	// with ErrBackupEntryAlreadyMigrated. The rollback path uses this
-	// variant to put the verbatim pre-reconcile bytes back; the
+	// This exists for abort-rollback paths that have just taken a
+	// timestamped backup and must put that exact entry state back. Examples:
+	// the shared install rollback restores a direct stdio prior after a
+	// later client or intent write fails, and the serena dynamic-pool
+	// migrate rollback restores a pre-reconcile legacy hub entry. The
 	// demigrate guard stays in force for the normal demigrate flow.
 	RestoreEntryFromBackupForRollback(backupPath, name string) error
 
@@ -958,6 +956,7 @@ func RelayStdioClientNames() map[string]bool {
 // backup file produced by mcp-local-hub. Both the pristine sentinel and the
 // rolling timestamped copies start with this prefix.
 const backupSuffixPrefix = ".bak-mcp-local-hub-"
+const backupTimestampLayout = "20060102-150405"
 
 // originalSentinelSuffix names the one-shot pristine backup written the very
 // first time an adapter backs up a config file. It captures the user's
@@ -992,11 +991,10 @@ func writeBackup(livePath, clientName string, keepN int) (string, error) {
 		}
 	}
 
-	// Timestamped rolling backup. Windows filesystems give second-resolution
-	// mtime only, so two calls in the same second land on the same filename
-	// and the second call overwrites the first — harmless, since the content
-	// is the current live config either way.
-	bakPath := livePath + backupSuffixPrefix + time.Now().Format("20060102-150405")
+	bakPath, err := nextBackupPath(livePath)
+	if err != nil {
+		return "", err
+	}
 	if err := copyFile(livePath, bakPath, 0600); err != nil {
 		return "", err
 	}
@@ -1005,6 +1003,58 @@ func writeBackup(livePath, clientName string, keepN int) (string, error) {
 		pruneOldTimestamped(livePath, keepN)
 	}
 	return bakPath, nil
+}
+
+func nextBackupPath(livePath string) (string, error) {
+	stamp := time.Now().Format(backupTimestampLayout)
+	base := livePath + backupSuffixPrefix + stamp
+	dir := filepath.Dir(livePath)
+	prefix := filepath.Base(livePath) + backupSuffixPrefix + stamp
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return base, nil
+		}
+		return "", err
+	}
+
+	maxCounter := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		counter, ok := sameSecondBackupCounter(entry.Name(), prefix)
+		if ok && counter > maxCounter {
+			maxCounter = counter
+		}
+	}
+	if maxCounter == 0 {
+		return base, nil
+	}
+	for i := maxCounter + 1; ; i++ {
+		candidate := fmt.Sprintf("%s-%09d", base, i)
+		if _, err := os.Stat(candidate); err != nil {
+			if os.IsNotExist(err) {
+				return candidate, nil
+			}
+			return "", err
+		}
+	}
+}
+
+func sameSecondBackupCounter(name, prefix string) (int, bool) {
+	if name == prefix {
+		return 1, true
+	}
+	suffix, ok := strings.CutPrefix(name, prefix+"-")
+	if !ok || len(suffix) != 9 {
+		return 0, false
+	}
+	counter, err := strconv.Atoi(suffix)
+	if err != nil || counter < 2 {
+		return 0, false
+	}
+	return counter, true
 }
 
 // copyFileTornWindowHook, when non-nil (tests only), is invoked AFTER the
@@ -1085,6 +1135,9 @@ func pruneOldTimestamped(livePath string, keepN int) {
 	}
 	// Newest first, then drop everything past index keepN-1.
 	sort.Slice(timestamped, func(i, j int) bool {
+		if timestamped[i].modTime.Equal(timestamped[j].modTime) {
+			return timestamped[i].path > timestamped[j].path
+		}
 		return timestamped[i].modTime.After(timestamped[j].modTime)
 	})
 	for _, b := range timestamped[keepN:] {
@@ -1092,11 +1145,62 @@ func pruneOldTimestamped(livePath string, keepN int) {
 	}
 }
 
+// PruneBackupsForBackupPath applies the rolling timestamped-backup retention
+// cap for the live config that produced backupPath. It is best-effort like
+// BackupKeep pruning: malformed/non-mcphub paths and remove/list failures do
+// not fail the already-successful caller.
+func PruneBackupsForBackupPath(backupPath string, keepN int) {
+	if keepN <= 0 {
+		return
+	}
+	livePath, ok := livePathFromTimestampedBackupPath(backupPath)
+	if !ok {
+		return
+	}
+	_ = withConfigLock(livePath, func() error {
+		pruneOldTimestamped(livePath, keepN)
+		return nil
+	})
+}
+
+func livePathFromTimestampedBackupPath(backupPath string) (string, bool) {
+	dir := filepath.Dir(backupPath)
+	name := filepath.Base(backupPath)
+	idx := strings.LastIndex(name, backupSuffixPrefix)
+	if idx < 0 {
+		return "", false
+	}
+	suffix := name[idx+len(backupSuffixPrefix):]
+	if !isTimestampedBackupSuffix(suffix) {
+		return "", false
+	}
+	return filepath.Join(dir, name[:idx]), true
+}
+
+func isTimestampedBackupSuffix(suffix string) bool {
+	if len(suffix) < len(backupTimestampLayout) {
+		return false
+	}
+	if _, err := time.Parse(backupTimestampLayout, suffix[:len(backupTimestampLayout)]); err != nil {
+		return false
+	}
+	rest := suffix[len(backupTimestampLayout):]
+	if rest == "" {
+		return true
+	}
+	if len(rest) != 10 || rest[0] != '-' {
+		return false
+	}
+	counter, err := strconv.Atoi(rest[1:])
+	return err == nil && counter >= 2
+}
+
 // BackupsNewestFirst returns every mcp-local-hub backup path for
 // livePath, sorted newest-first. Timestamped copies
-// (livePath + ".bak-mcp-local-hub-<ts>") come first in
+// (livePath + ".bak-mcp-local-hub-<ts>[-n]") come first in
 // lexicographic-reverse order (timestamps use the 20060102-150405
-// layout, which sorts correctly as a string), then the pristine
+// layout and same-second collision suffixes sort after the base name),
+// then the pristine
 // "-original" sentinel (semantically the oldest snapshot — taken
 // on first Backup() call before any timestamped backup).
 // Directories with matching names are ignored.
@@ -1354,10 +1458,11 @@ func legacyBackupsNewestFirstLocked(livePath, _ string) ([]string, error) {
 }
 
 // latestBackup returns the most recent mcp-local-hub backup path for
-// livePath. Timestamped copies (livePath + ".bak-mcp-local-hub-<ts>")
+// livePath. Timestamped copies (livePath + ".bak-mcp-local-hub-<ts>[-n]")
 // take precedence over the pristine "-original" sentinel; within
 // timestamped copies the lexicographically-largest name wins (timestamps
-// use the 20060102-150405 layout, which sorts correctly as a string).
+// use the 20060102-150405 layout and same-second collision suffixes sort
+// after the base name).
 // Directories with matching names are ignored. Returns ("", false, nil)
 // when no backup files are present and (_, _, err) on filesystem error.
 // The second parameter (clientName) is currently unused but reserved for

@@ -180,11 +180,10 @@ func (j *jsonMCPClient) RestoreEntryFromBackup(backupPath, name string) error {
 
 // RestoreEntryFromBackupForRollback restores the backup's entry verbatim,
 // bypassing the ErrBackupEntryAlreadyMigrated guard (see the interface
-// doc on Client.RestoreEntryFromBackupForRollback). Used only by the
-// serena dynamic-pool migrate abort-rollback. Inherited by geminiCLI,
-// qwenCLI, cursorClient, and antigravityClient via struct embedding —
-// which is exactly why the serena reconcile (which rewrites all of those)
-// can roll each one back through this one method.
+// doc on Client.RestoreEntryFromBackupForRollback). Install rollback and
+// Serena migrate rollback use it when the timestamped backup is the source of
+// truth. Inherited by geminiCLI, qwenCLI, cursorClient, and antigravityClient
+// via struct embedding, so shared rollback behavior stays one owner.
 func (j *jsonMCPClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
 	return j.restoreEntryFromBackup(backupPath, name, true)
 }

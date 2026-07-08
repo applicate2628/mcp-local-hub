@@ -2206,36 +2206,58 @@ func defaultManifestDir() string {
 // manifest" flow. The draft includes bindings for every supported managed
 // client; users edit as desired before saving.
 func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts) (string, error) {
+	entry, err := a.extractStdioEntryFromClient(client, serverName, opts)
+	if err != nil {
+		return "", err
+	}
+	// Pick next free port in 9121-9139 range not already used by other manifests.
+	// This legacy draft-port behavior belongs to standalone manifest extraction;
+	// adopt uses extractStdioEntryFromClient directly and assigns its own port.
+	port, err := pickNextFreePort(opts.ManifestDir)
+	if err != nil {
+		return "", err
+	}
+	return renderDraftManifestYAML(serverName, entry.Command, entry.Args, entry.Env, port), nil
+}
+
+type extractedStdioEntry struct {
+	Command  string
+	Args     []string
+	Env      map[string]string
+	Disabled bool
+}
+
+func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOpts) (extractedStdioEntry, error) {
 	var raw map[string]any
 
 	switch client {
 	case "claude-code":
 		if opts.ClaudeConfigPath == "" {
-			return "", fmt.Errorf("ClaudeConfigPath empty")
+			return extractedStdioEntry{}, fmt.Errorf("ClaudeConfigPath empty")
 		}
 		data, err := os.ReadFile(opts.ClaudeConfigPath)
 		if err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		var cfg struct {
 			MCPServers map[string]map[string]any `json:"mcpServers"`
 		}
 		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		raw = cfg.MCPServers[serverName]
 
 	case "codex-cli":
 		if opts.CodexConfigPath == "" {
-			return "", fmt.Errorf("CodexConfigPath empty")
+			return extractedStdioEntry{}, fmt.Errorf("CodexConfigPath empty")
 		}
 		data, err := os.ReadFile(opts.CodexConfigPath)
 		if err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		var root map[string]any
 		if err := toml.Unmarshal(data, &root); err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		servers, _ := root["mcp_servers"].(map[string]any)
 		if servers != nil {
@@ -2244,81 +2266,81 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 
 	case "cursor":
 		if opts.CursorConfigPath == "" {
-			return "", fmt.Errorf("CursorConfigPath empty")
+			return extractedStdioEntry{}, fmt.Errorf("CursorConfigPath empty")
 		}
 		data, err := os.ReadFile(opts.CursorConfigPath)
 		if err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		var cfg struct {
 			MCPServers map[string]map[string]any `json:"mcpServers"`
 		}
 		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		raw = cfg.MCPServers[serverName]
 
 	case "vscode":
 		if opts.VSCodeConfigPath == "" {
-			return "", fmt.Errorf("VSCodeConfigPath empty")
+			return extractedStdioEntry{}, fmt.Errorf("VSCodeConfigPath empty")
 		}
 		data, err := os.ReadFile(opts.VSCodeConfigPath)
 		if err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		var cfg struct {
 			Servers map[string]map[string]any `json:"servers"`
 		}
 		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		raw = cfg.Servers[serverName]
 
 	case "gemini-cli":
 		if opts.GeminiConfigPath == "" {
-			return "", fmt.Errorf("GeminiConfigPath empty")
+			return extractedStdioEntry{}, fmt.Errorf("GeminiConfigPath empty")
 		}
 		data, err := os.ReadFile(opts.GeminiConfigPath)
 		if err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		var cfg struct {
 			MCPServers map[string]map[string]any `json:"mcpServers"`
 		}
 		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		raw = cfg.MCPServers[serverName]
 
 	case "qwen-cli":
 		if opts.QwenConfigPath == "" {
-			return "", fmt.Errorf("QwenConfigPath empty")
+			return extractedStdioEntry{}, fmt.Errorf("QwenConfigPath empty")
 		}
 		data, err := os.ReadFile(opts.QwenConfigPath)
 		if err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		var cfg struct {
 			MCPServers map[string]map[string]any `json:"mcpServers"`
 		}
 		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		raw = cfg.MCPServers[serverName]
 
 	case "antigravity":
 		if opts.AntigravityConfigPath == "" {
-			return "", fmt.Errorf("AntigravityConfigPath empty")
+			return extractedStdioEntry{}, fmt.Errorf("AntigravityConfigPath empty")
 		}
 		data, err := os.ReadFile(opts.AntigravityConfigPath)
 		if err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		var cfg struct {
 			MCPServers map[string]map[string]any `json:"mcpServers"`
 		}
 		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		raw = cfg.MCPServers[serverName]
 		// Antigravity entries written by mcphub migrate use command=mcphub,
@@ -2334,7 +2356,7 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 			if clients.IsMcphubBinary(cmd) {
 				if args, ok := raw["args"].([]any); ok && len(args) > 0 {
 					if first, ok := args[0].(string); ok && first == "relay" {
-						return "", fmt.Errorf("entry %q is a mcphub-managed relay stdio (command is mcphub binary + args[0]==\"relay\") — not user-configured stdio, cannot extract a manifest from it", serverName)
+						return extractedStdioEntry{}, fmt.Errorf("entry %q is a mcphub-managed relay stdio (command is mcphub binary + args[0]==\"relay\") — not user-configured stdio, cannot extract a manifest from it", serverName)
 					}
 				}
 			}
@@ -2342,11 +2364,11 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 
 	case "opencode":
 		if opts.OpenCodeConfigPath == "" {
-			return "", fmt.Errorf("OpenCodeConfigPath empty")
+			return extractedStdioEntry{}, fmt.Errorf("OpenCodeConfigPath empty")
 		}
 		data, err := os.ReadFile(opts.OpenCodeConfigPath)
 		if err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		var cfg struct {
 			MCP map[string]map[string]any `json:"mcp"`
@@ -2355,12 +2377,13 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 		// normal read path — strip before Unmarshal so a commented but valid
 		// local MCP entry extracts instead of failing.
 		if err := json.Unmarshal(stripJSONCommentsAndTrailingCommas(data), &cfg); err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		raw = cfg.MCP[serverName]
 		if raw == nil {
-			return "", fmt.Errorf("server %q not found in client %q config", serverName, client)
+			return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config", serverName, client)
 		}
+		disabled := rawClientEntryDisabled(raw)
 		// OpenCode local entries use a `command` ARRAY and `environment`, the
 		// same two extract-time translations MiMoCode needs.
 		cmd, args := openCodeCommandArray(raw)
@@ -2382,15 +2405,11 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 				}
 			}
 		}
-		port, err := pickNextFreePort(opts.ManifestDir)
-		if err != nil {
-			return "", err
-		}
-		return renderDraftManifestYAML(serverName, cmd, args, envMap, port), nil
+		return extractedStdioEntry{Command: cmd, Args: args, Env: envMap, Disabled: disabled}, nil
 
 	case "mimocode":
 		if opts.MimoCodeConfigPath == "" {
-			return "", fmt.Errorf("MimoCodeConfigPath empty")
+			return extractedStdioEntry{}, fmt.Errorf("MimoCodeConfigPath empty")
 		}
 		// MiMoCode's config is JSONC and split across mimocode.json +
 		// mimocode.jsonc layers; reuse the adapter's merged read so a commented
@@ -2399,15 +2418,16 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 		// dir) by the same layer resolver the scan/adapter use.
 		merged, err := clients.MimoCodeMergedConfig(opts.MimoCodeConfigPath)
 		if err != nil {
-			return "", err
+			return extractedStdioEntry{}, err
 		}
 		servers, _ := merged["mcp"].(map[string]any)
 		if servers != nil {
 			raw, _ = servers[serverName].(map[string]any)
 		}
 		if raw == nil {
-			return "", fmt.Errorf("server %q not found in client %q config", serverName, client)
+			return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config", serverName, client)
 		}
+		disabled := rawClientEntryDisabled(raw)
 		// MiMoCode local entries use a `command` ARRAY (["npx","-y",...]) and
 		// store env under `environment` (NOT `env`). Translate both here and
 		// render directly — the generic string-`command`/`env` tail below does
@@ -2443,18 +2463,15 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 				}
 			}
 		}
-		port, err := pickNextFreePort(opts.ManifestDir)
-		if err != nil {
-			return "", err
-		}
-		return renderDraftManifestYAML(serverName, cmd, args, envMap, port), nil
+		return extractedStdioEntry{Command: cmd, Args: args, Env: envMap, Disabled: disabled}, nil
 
 	default:
-		return "", fmt.Errorf("extract not yet supported for client %q (extend here when needed)", client)
+		return extractedStdioEntry{}, fmt.Errorf("extract not yet supported for client %q (extend here when needed)", client)
 	}
 	if raw == nil {
-		return "", fmt.Errorf("server %q not found in client %q config", serverName, client)
+		return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config", serverName, client)
 	}
+	disabled := rawClientEntryDisabled(raw)
 
 	cmd, _ := raw["command"].(string)
 	// Reject HTTP-only / hub-managed entries early. Extract is for stdio
@@ -2466,7 +2483,7 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 	// hub-HTTP (HTTP-native clients) or hub-relay with empty-command
 	// downgrades — so we guide them toward demigrate instead.
 	if cmd == "" {
-		return "", fmt.Errorf("server %q in client %q has no `command` field — it is an HTTP-only or hub-managed entry, not user-configured stdio (run `mcphub demigrate %s` to restore the pre-migrate shape first if this server was migrated)", serverName, client, serverName)
+		return extractedStdioEntry{}, fmt.Errorf("server %q in client %q has no `command` field — it is an HTTP-only or hub-managed entry, not user-configured stdio (run `mcphub demigrate %s` to restore the pre-migrate shape first if this server was migrated)", serverName, client, serverName)
 	}
 	var args []string
 	if arr, ok := raw["args"].([]any); ok {
@@ -2485,13 +2502,17 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 		}
 	}
 
-	// Pick next free port in 9121-9139 range not already used by other manifests.
-	port, err := pickNextFreePort(opts.ManifestDir)
-	if err != nil {
-		return "", err
-	}
+	return extractedStdioEntry{Command: cmd, Args: args, Env: envMap, Disabled: disabled}, nil
+}
 
-	return renderDraftManifestYAML(serverName, cmd, args, envMap, port), nil
+func rawClientEntryDisabled(raw map[string]any) bool {
+	if disabled, ok := raw["disabled"].(bool); ok && disabled {
+		return true
+	}
+	if enabled, ok := raw["enabled"].(bool); ok && !enabled {
+		return true
+	}
+	return false
 }
 
 func pickNextFreePort(manifestDir string) (int, error) {
@@ -2524,6 +2545,10 @@ func pickNextFreePort(manifestDir string) (int, error) {
 }
 
 func renderDraftManifestYAML(name, cmd string, args []string, env map[string]string, port int) string {
+	return renderStdioBridgeManifestYAML(name, cmd, args, env, port, draftClientBindings())
+}
+
+func renderStdioBridgeManifestYAML(name, cmd string, args []string, env map[string]string, port int, bindings []map[string]any) string {
 	doc := struct {
 		Name           string            `yaml:"name"`
 		Kind           string            `yaml:"kind"`
@@ -2544,13 +2569,7 @@ func renderDraftManifestYAML(name, cmd string, args []string, env map[string]str
 		Daemons: []map[string]any{
 			{"name": "default", "port": port},
 		},
-		// Derive the draft client_bindings from the canonical client registry
-		// (clients.SupportedClientNames) so the preview never drifts from the
-		// adapters this build actually supports — the original seven plus the
-		// eight opt-in wave-2 clients. Previously these were hardcoded to the
-		// seven core ids, so a GUI-extracted draft silently omitted bindings
-		// for zed/kiro/windsurf/cline/kilocode/opencode/hermes/openclaw.
-		ClientBindings: draftClientBindings(),
+		ClientBindings: bindings,
 		WeeklyRefresh:  false,
 	}
 	out, err := yaml.Marshal(doc)
