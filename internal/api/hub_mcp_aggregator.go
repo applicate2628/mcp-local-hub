@@ -1670,45 +1670,80 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 // is opened per call and the daemon response id is not validated —
 // the hub-generated id used downstream by the aggregator is the
 // session-level client_session_id, not this internal id.
+// maxToolsListPages bounds the pagination drain so a malicious or buggy
+// daemon that always returns a fresh nextCursor cannot loop the hub forever.
+// MCP pages are small; a legitimate backend needs only a handful.
+const maxToolsListPages = 100
+
 func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) ([]json.RawMessage, error) {
-	body := []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
-	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonListTimeout, true)
-	if err != nil {
-		return nil, err
+	// MCP `tools/list` is paginated: a daemon MAY return a `nextCursor` and
+	// expects the client to re-request with `params.cursor` until the cursor
+	// is absent. The hub must drain every page server-side before publishing
+	// the merged route map — a single un-cursored request drops page-2+ tools,
+	// which then 404 with -32601 on tools/call (bug 2026-07-03). A
+	// non-paginating daemon (no nextCursor) makes exactly one request, so this
+	// is behaviour-preserving for the common case.
+	// Non-nil so an all-empty (tools:[]) daemon returns [] — not null —
+	// preserving the pre-change `return *env.Result.Tools` slice semantics for
+	// any downstream serialization (bot review compat point).
+	tools := []json.RawMessage{}
+	cursor := ""
+	for page := 0; ; page++ {
+		if page >= maxToolsListPages {
+			return nil, fmt.Errorf("daemon tools/list exceeded %d pages (runaway nextCursor)", maxToolsListPages)
+		}
+		req := map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+		if cursor != "" {
+			req["params"] = map[string]any{"cursor": cursor}
+		}
+		body, err := json.Marshal(req)
+		if err != nil {
+			return nil, fmt.Errorf("marshal tools/list request: %w", err)
+		}
+		raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonListTimeout, true)
+		if err != nil {
+			return nil, err
+		}
+		// `raw` is the JSON-RPC envelope; doDaemonPost peeled off any SSE
+		// framing (codex bot r12 P1 closures on PR #157).
+		//
+		// codex bot r17 P1 closure on PR #157: pointer types let us
+		// distinguish "result absent / result.tools absent" from "valid
+		// empty tools list". A daemon returning {"jsonrpc":"2.0","id":2}
+		// (no result, no error) must be surfaced as a list-stage failure
+		// — counting it as success would publish an empty route map and
+		// silently wipe routes from a previous good list, then later
+		// tools/call would 404 with -32601 instead of the operator
+		// seeing the real malformed-response error.
+		var env struct {
+			Error *struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+			Result *struct {
+				Tools      *[]json.RawMessage `json:"tools"`
+				NextCursor string             `json:"nextCursor"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return nil, fmt.Errorf("parse: %w", err)
+		}
+		if env.Error != nil {
+			return nil, fmt.Errorf("daemon error code=%d: %s", env.Error.Code, env.Error.Message)
+		}
+		if env.Result == nil {
+			return nil, fmt.Errorf("daemon tools/list response missing `result` field")
+		}
+		if env.Result.Tools == nil {
+			return nil, fmt.Errorf("daemon tools/list response missing `result.tools` field")
+		}
+		tools = append(tools, *env.Result.Tools...)
+		if env.Result.NextCursor == "" {
+			break
+		}
+		cursor = env.Result.NextCursor
 	}
-	// `raw` is the JSON-RPC envelope; doDaemonPost peeled off any SSE
-	// framing (codex bot r12 P1 closures on PR #157).
-	//
-	// codex bot r17 P1 closure on PR #157: pointer types let us
-	// distinguish "result absent / result.tools absent" from "valid
-	// empty tools list". A daemon returning {"jsonrpc":"2.0","id":2}
-	// (no result, no error) must be surfaced as a list-stage failure
-	// — counting it as success would publish an empty route map and
-	// silently wipe routes from a previous good list, then later
-	// tools/call would 404 with -32601 instead of the operator
-	// seeing the real malformed-response error.
-	var env struct {
-		Error *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-		Result *struct {
-			Tools *[]json.RawMessage `json:"tools"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, fmt.Errorf("parse: %w", err)
-	}
-	if env.Error != nil {
-		return nil, fmt.Errorf("daemon error code=%d: %s", env.Error.Code, env.Error.Message)
-	}
-	if env.Result == nil {
-		return nil, fmt.Errorf("daemon tools/list response missing `result` field")
-	}
-	if env.Result.Tools == nil {
-		return nil, fmt.Errorf("daemon tools/list response missing `result.tools` field")
-	}
-	return *env.Result.Tools, nil
+	return tools, nil
 }
 
 // postToolsCall forwards a tools/call to a single daemon with the

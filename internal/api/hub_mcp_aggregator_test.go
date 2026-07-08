@@ -4492,3 +4492,85 @@ func portStaleForTest(t *testing.T, sess *hubSession, ref canonicalDaemonRef) bo
 	sess.mu.Unlock()
 	return !(hasSID && stampGen >= curGen)
 }
+
+// TestPostToolsListDrainsPaginatedDaemon guards the MCP tools/list pagination
+// fix (bug 2026-07-03): a daemon that returns a nextCursor must have ALL its
+// pages drained server-side before the merged route map is built. A single
+// un-cursored request would drop page-2+ tools → -32601 on tools/call.
+func TestPostToolsListDrainsPaginatedDaemon(t *testing.T) {
+	sd := newStubDaemon(t, "pag-sid")
+	var mu sync.Mutex
+	var cursors []string
+	sd.onList = func(w http.ResponseWriter, r *http.Request) {
+		sd.bodyMu.Lock()
+		body := append([]byte(nil), sd.lastListBody...)
+		sd.bodyMu.Unlock()
+		var env struct {
+			Params struct {
+				Cursor string `json:"cursor"`
+			} `json:"params"`
+		}
+		_ = json.Unmarshal(body, &env)
+		mu.Lock()
+		cursors = append(cursors, env.Params.Cursor)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		switch env.Params.Cursor {
+		case "":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"p1a"},{"name":"p1b"}],"nextCursor":"c1"}}`))
+		case "c1":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"p2a"},{"name":"p2b"}]}}`))
+		default:
+			t.Errorf("unexpected cursor %q", env.Params.Cursor)
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}`))
+		}
+	}
+	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
+	tools, err := postToolsList(context.Background(), ref, "pag-sid", "2025-11-25")
+	if err != nil {
+		t.Fatalf("postToolsList: %v", err)
+	}
+	if len(tools) != 4 {
+		t.Fatalf("drained %d tools, want 4 (both pages)", len(tools))
+	}
+	if n := sd.listCount.Load(); n != 2 {
+		t.Fatalf("listCount=%d, want 2 (one request per page)", n)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(cursors) != 2 || cursors[0] != "" || cursors[1] != "c1" {
+		t.Fatalf("cursors=%v, want ['' , 'c1'] (first un-cursored, second carries nextCursor)", cursors)
+	}
+	joined := ""
+	for _, tl := range tools {
+		joined += string(tl)
+	}
+	for _, name := range []string{"p1a", "p1b", "p2a", "p2b"} {
+		if !strings.Contains(joined, `"`+name+`"`) {
+			t.Errorf("merged tools missing %q from a page", name)
+		}
+	}
+}
+
+// TestPostToolsListRunawayCursorCapped ensures a daemon that always returns a
+// fresh nextCursor cannot loop the hub forever — the drain stops at the page cap.
+func TestPostToolsListRunawayCursorCapped(t *testing.T) {
+	sd := newStubDaemon(t, "loop-sid")
+	sd.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"x"}],"nextCursor":"always"}}`))
+	}
+	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
+	_, err := postToolsList(context.Background(), ref, "loop-sid", "2025-11-25")
+	if err == nil {
+		t.Fatal("expected runaway-cursor error, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeded") {
+		t.Fatalf("err=%v, want 'exceeded N pages'", err)
+	}
+	if n := int(sd.listCount.Load()); n != maxToolsListPages {
+		t.Fatalf("listCount=%d, want cap %d", n, maxToolsListPages)
+	}
+}
