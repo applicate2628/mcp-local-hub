@@ -7,7 +7,10 @@ import (
 
 // The CSV fixtures below mirror the wmic/CIM snapshot shape that
 // runProcessSnapshot emits and parseProcessRows consumes:
-//   Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
+//   Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+// The ExecutablePath column feeds the identity proof the reaper kills through;
+// these parser-only candidate-selection tests do not exercise the kill path, so
+// each row carries a plausible image path purely to keep the column aligned.
 // Ages are set far in the past so the snapshot's CreationDate is old;
 // parseAggressiveCandidates itself does not age-filter (AggressiveCleanup
 // does), so these unit tests over the parser ignore age.
@@ -26,10 +29,10 @@ func candidatePIDs(out []OrphanProcess) map[int]OrphanProcess {
 // SPARE it; aggressive mode reclaims it under the explicit --client
 // scope).
 func TestParseAggressiveCandidates_FindsLiveRootedUnderClient(t *testing.T) {
-	csv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-host,"C:\Windows\explorer.exe",20250101090000.000000+000,1000,2000,200000000
-host,"C:\Users\u\AppData\Local\Programs\codex\codex.exe",20250101090000.000000+000,2000,3000,150000000
-host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,3000,4000,80000000
+	csv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+host,"C:\Windows\explorer.exe",20250101090000.000000+000,C:\Windows\explorer.exe,1000,2000,200000000
+host,"C:\Users\u\AppData\Local\Programs\codex\codex.exe",20250101090000.000000+000,C:\Users\u\AppData\Local\Programs\codex\codex.exe,2000,3000,150000000
+host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,C:\Program Files\nodejs\node.exe,3000,4000,80000000
 `
 	out := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
 	got := candidatePIDs(out)
@@ -51,10 +54,10 @@ host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,3000,4000,800
 func TestParseAggressiveCandidates_SparesHubDaemonDescendant(t *testing.T) {
 	// codex.exe(3000) -> mcphub.exe daemon(4000) -> node.exe(5000).
 	// The hub daemon is the nearer ancestor, so PID 5000 is hub-managed.
-	csv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-host,"C:\Users\u\codex.exe",20250101090000.000000+000,1000,3000,150000000
-host,"C:\Program Files\mcphub\mcphub.exe daemon --server serena",20250101090000.000000+000,3000,4000,90000000
-host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,4000,5000,80000000
+	csv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+host,"C:\Users\u\codex.exe",20250101090000.000000+000,C:\Users\u\codex.exe,1000,3000,150000000
+host,"C:\Program Files\mcphub\mcphub.exe daemon --server serena",20250101090000.000000+000,C:\Program Files\mcphub\mcphub.exe,3000,4000,90000000
+host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,C:\Program Files\nodejs\node.exe,4000,5000,80000000
 `
 	out := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
 	if _, ok := candidatePIDs(out)[5000]; ok {
@@ -65,9 +68,9 @@ host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,4000,5000,800
 // TestParseAggressiveCandidates_SkipsOwnBinaries verifies our own
 // binaries are never aggressive targets.
 func TestParseAggressiveCandidates_SkipsOwnBinaries(t *testing.T) {
-	csv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-host,"C:\Users\u\codex.exe",20250101090000.000000+000,1000,3000,150000000
-host,"C:\Program Files\mcphub\godbolt.exe",20250101090000.000000+000,3000,4000,80000000
+	csv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+host,"C:\Users\u\codex.exe",20250101090000.000000+000,C:\Users\u\codex.exe,1000,3000,150000000
+host,"C:\Program Files\mcphub\godbolt.exe",20250101090000.000000+000,C:\Program Files\mcphub\godbolt.exe,3000,4000,80000000
 `
 	out := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
 	if _, ok := candidatePIDs(out)[4000]; ok {
@@ -79,10 +82,10 @@ host,"C:\Program Files\mcphub\godbolt.exe",20250101090000.000000+000,3000,4000,8
 // scope: descendants of an arbitrary PID are candidates regardless of
 // whether the root is a recognized client.
 func TestParseAggressiveCandidates_RootPIDScope(t *testing.T) {
-	csv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-host,"C:\some\custom-agent.exe",20250101090000.000000+000,1000,7777,150000000
-host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,7777,8888,80000000
-host,"node.exe c:\unrelated\other.js",20250101090000.000000+000,1000,9999,80000000
+	csv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+host,"C:\some\custom-agent.exe",20250101090000.000000+000,C:\some\custom-agent.exe,1000,7777,150000000
+host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,C:\Program Files\nodejs\node.exe,7777,8888,80000000
+host,"node.exe c:\unrelated\other.js",20250101090000.000000+000,C:\Program Files\nodejs\node.exe,1000,9999,80000000
 `
 	out := parseAggressiveCandidates(strings.NewReader(csv), "", 7777, nil)
 	got := candidatePIDs(out)
@@ -103,10 +106,10 @@ host,"node.exe c:\unrelated\other.js",20250101090000.000000+000,1000,9999,800000
 // is itself below an mcphub daemon. The root match must not stop the
 // ancestor walk before the daemon guard can see the higher ancestor.
 func TestParseAggressiveCandidates_RootPIDScopeSparesHubDaemonAncestor(t *testing.T) {
-	csv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-host,"C:\Program Files\mcphub\mcphub.exe daemon --server serena",20250101090000.000000+000,1000,4000,90000000
-host,"uv.exe run server",20250101090000.000000+000,4000,7777,150000000
-host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,7777,8888,80000000
+	csv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+host,"C:\Program Files\mcphub\mcphub.exe daemon --server serena",20250101090000.000000+000,C:\Program Files\mcphub\mcphub.exe,1000,4000,90000000
+host,"uv.exe run server",20250101090000.000000+000,C:\Users\u\.local\bin\uv.exe,4000,7777,150000000
+host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,C:\Program Files\nodejs\node.exe,7777,8888,80000000
 `
 	out := parseAggressiveCandidates(strings.NewReader(csv), "", 7777, nil)
 	if _, ok := candidatePIDs(out)[8888]; ok {
@@ -117,10 +120,10 @@ host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,7777,8888,800
 // TestParseAggressiveCandidates_DenyListExcludesDangerousClassesByDefault
 // verifies a chrome.exe under the scoped client is excluded by default.
 func TestParseAggressiveCandidates_DenyListExcludesDangerousClassesByDefault(t *testing.T) {
-	csv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-host,"C:\Users\u\codex.exe",20250101090000.000000+000,1000,3000,150000000
-host,"C:\Program Files\Google\Chrome\chrome.exe --type=renderer",20250101090000.000000+000,3000,4000,300000000
-host,"C:\Windows\System32\cmd.exe /c something",20250101090000.000000+000,3000,4100,5000000
+	csv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+host,"C:\Users\u\codex.exe",20250101090000.000000+000,C:\Users\u\codex.exe,1000,3000,150000000
+host,"C:\Program Files\Google\Chrome\chrome.exe --type=renderer",20250101090000.000000+000,C:\Program Files\Google\Chrome\chrome.exe,3000,4000,300000000
+host,"C:\Windows\System32\cmd.exe /c something",20250101090000.000000+000,C:\Windows\System32\cmd.exe,3000,4100,5000000
 `
 	out := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
 	got := candidatePIDs(out)
@@ -135,10 +138,10 @@ host,"C:\Windows\System32\cmd.exe /c something",20250101090000.000000+000,3000,4
 // TestParseAggressiveCandidates_IncludeClassOverridesWithWarning verifies
 // --include-class chrome opts that class back in.
 func TestParseAggressiveCandidates_IncludeClassOverrides(t *testing.T) {
-	csv := `Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-host,"C:\Users\u\codex.exe",20250101090000.000000+000,1000,3000,150000000
-host,"C:\Program Files\Google\Chrome\chrome.exe --type=renderer",20250101090000.000000+000,3000,4000,300000000
-host,"C:\Windows\System32\cmd.exe /c something",20250101090000.000000+000,3000,4100,5000000
+	csv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+host,"C:\Users\u\codex.exe",20250101090000.000000+000,C:\Users\u\codex.exe,1000,3000,150000000
+host,"C:\Program Files\Google\Chrome\chrome.exe --type=renderer",20250101090000.000000+000,C:\Program Files\Google\Chrome\chrome.exe,3000,4000,300000000
+host,"C:\Windows\System32\cmd.exe /c something",20250101090000.000000+000,C:\Windows\System32\cmd.exe,3000,4100,5000000
 `
 	out := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, []string{"chrome"})
 	got := candidatePIDs(out)

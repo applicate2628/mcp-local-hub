@@ -116,7 +116,7 @@ func (a *antigravityClient) GetEntry(name string) (*MCPEntry, error) {
 		return nil, nil
 	}
 	// Reconstruct relay args if present, for debugging convenience.
-	e := &MCPEntry{Name: name}
+	e := &MCPEntry{Name: name, Disabled: mcpEntryDisabled(raw)}
 	if cmd, _ := raw["command"].(string); cmd != "" {
 		e.RelayExePath = cmd
 	}

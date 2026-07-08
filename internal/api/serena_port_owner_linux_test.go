@@ -5,8 +5,10 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -23,6 +25,61 @@ func TestPidForSocketInodeContext_CanceledCtxAborts(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled (the /proc walk must abort promptly on the deadline)", err)
+	}
+}
+
+// TestLoopbackPortOwnersSnapshotContext_CanceledCtxAborts (Codex PR #510 P2): the
+// BATCH owner snapshot must honor the caller deadline THROUGH the /proc walk, not
+// just as a pre-read check — a pre-canceled ctx returns the ctx error so the
+// status coalescer's 3s deadline actually bounds the Linux status IPC and cannot
+// blow past the 5s client timeout and re-introduce the flap.
+func TestLoopbackPortOwnersSnapshotContext_CanceledCtxAborts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := loopbackPortOwnersSnapshotContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("loopbackPortOwnersSnapshotContext(canceled) err = %v, want context.Canceled", err)
+	}
+	// And the /proc walk itself (pidsForSocketInodes) aborts on a canceled ctx
+	// rather than walking the whole tree.
+	if _, _, err := pidsForSocketInodes(ctx, map[int]string{9301: "12345"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pidsForSocketInodes(canceled) err = %v, want context.Canceled", err)
+	}
+}
+
+func TestPortOwnerPidsForSocketInodesFromProcChecksContextBeforeOpen(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	missingProc := filepath.Join(t.TempDir(), "missing-proc")
+
+	if _, _, err := pidsForSocketInodesFromProc(ctx, missingProc, map[int]string{9301: "12345"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pidsForSocketInodesFromProc(canceled) err = %v, want context.Canceled before reading proc dir", err)
+	}
+}
+
+func TestPortOwnerPidForSocketInodeFromProcChecksContextBeforeOpen(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	missingProc := filepath.Join(t.TempDir(), "missing-proc")
+
+	if _, _, err := pidForSocketInodeFromProc(ctx, missingProc, "12345"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("pidForSocketInodeFromProc(canceled) err = %v, want context.Canceled before reading proc dir", err)
+	}
+}
+
+// TestLoopbackPortOwnersSnapshot_BackgroundDelegate: the non-ctx entry point (a
+// context.Background() delegate) never trips and returns a real snapshot map.
+func TestLoopbackPortOwnersSnapshot_BackgroundDelegate(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	owners, err := loopbackPortOwnersSnapshot()
+	if err != nil {
+		t.Fatalf("loopbackPortOwnersSnapshot: %v", err)
+	}
+	if owners == nil {
+		t.Fatalf("owners map is nil, want a (possibly empty) map")
 	}
 }
 
@@ -159,11 +216,86 @@ func TestPidForSocketInodeContext_DeadlineTripsMidWalk(t *testing.T) {
 	}
 }
 
+func TestPortOwnerPidsForSocketInodes_ReturnsCompleteBeforeCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	found, sawPermission, err := pidsForSocketInodes(ctx, map[int]string{})
+	if err != nil {
+		t.Fatalf("pidsForSocketInodes with complete data returned err=%v, want nil", err)
+	}
+	if sawPermission {
+		t.Fatalf("sawPermission = true, want false for empty wanted inode set")
+	}
+	if len(found) != 0 {
+		t.Fatalf("found = %+v, want empty", found)
+	}
+}
+
+func TestPortOwnerScanProcFDDirLinksChecksContextBeforeOpen(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	matched, _, err := scanProcFDDirLinks(ctx, t.TempDir(), func(string) bool {
+		t.Fatal("visitor must not run for a pre-canceled context")
+		return false
+	})
+	if matched {
+		t.Fatalf("matched = true, want false")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestPortOwnerScanProcFDDirLinksReadsFdDirectoryInBatches(t *testing.T) {
+	fdDir := t.TempDir()
+	wantTarget := "socket:[12345]"
+	total := procFDReadDirBatchSize + 3
+	for i := 0; i < total; i++ {
+		target := fmt.Sprintf("pipe:[%d]", i)
+		if err := os.Symlink(target, filepath.Join(fdDir, fmt.Sprintf("%03d", i))); err != nil {
+			t.Fatalf("symlink fd fixture %d: %v", i, err)
+		}
+	}
+
+	var seen int
+	ctxPolls := 0
+	ctx := &countingErrCtx{Context: context.Background(), calls: &ctxPolls}
+	matched, sawPermission, err := scanProcFDDirLinks(ctx, fdDir, func(target string) bool {
+		seen++
+		return target == wantTarget
+	})
+	if err != nil {
+		t.Fatalf("scanProcFDDirLinks: %v", err)
+	}
+	if sawPermission {
+		t.Fatalf("sawPermission = true, want false")
+	}
+	if matched {
+		t.Fatalf("matched = true, want false for absent target")
+	}
+	if seen != total {
+		t.Fatalf("visited %d fd links, want %d across multiple ReadDir batches", seen, total)
+	}
+	wantMinPolls := (total + procFDReadDirBatchSize - 1) / procFDReadDirBatchSize
+	if ctxPolls < wantMinPolls {
+		t.Fatalf("ctx.Err() polled %d times, want at least %d across ReadDir batches", ctxPolls, wantMinPolls)
+	}
+}
+
+
+// TestLoopbackTCPListenInodeFromProcNetContext_DeadlineTripsMidScan (PR #509):
+// the per-port listen-inode read streams /proc/net/tcp with a per-line ctx
+// check, so a deadline expiring mid-scan aborts with the ctx error instead of
+// scanning the whole (possibly huge) socket table past the caller's 2s
+// pre-spawn gate deadline.
 func TestLoopbackTCPListenInodeFromProcNetContext_DeadlineTripsMidScan(t *testing.T) {
 	path := t.TempDir() + "/tcp"
-	content := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n" +
-		"   0: 0100007F:238B 00000000:0000 01 00000000:00000000 00:00000000 00000000 1000 0 12345 1 0000000000000000 100 0 0 10 0\n" +
-		"   1: 0100007F:238C 00000000:0000 01 00000000:00000000 00:00000000 00000000 1000 0 12346 1 0000000000000000 100 0 0 10 0\n"
+	content := `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:238B 00000000:0000 01 00000000:00000000 00:00000000 00000000 1000 0 12345 1 0000000000000000 100 0 0 10 0
+   1: 0100007F:238C 00000000:0000 01 00000000:00000000 00:00000000 00000000 1000 0 12346 1 0000000000000000 100 0 0 10 0
+`
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write proc fixture: %v", err)
 	}

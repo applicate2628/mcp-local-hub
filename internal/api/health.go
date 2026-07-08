@@ -266,8 +266,10 @@ func (a *API) HealthSnapshot(ctx context.Context, opts HealthOpts) (HealthSnapsh
 // DaemonStatusSnapshot returns the cached []DaemonStatus rows that
 // /api/status consumes. Shares the daemons-section cache with
 // HealthSnapshot — one StatusWithOpts call serves both endpoints
-// within the daemons TTL, preventing drift and amortizing the wmic
-// (Windows) / ps (POSIX) cost.
+// within the daemons TTL, preventing drift, amortizing the IPC round-trip, and
+// collapsing concurrent HTTP callers into one flight. The supervisor-side status
+// coalescer in internal/cli/supervise_status.go owns netstat frequency; this
+// client cache must not re-own OS-probe amortization.
 //
 // Returns the rich canonical form (TaskName, NextRun, Health,
 // workspace-scoped fields) so /api/status preserves its existing

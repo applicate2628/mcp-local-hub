@@ -321,7 +321,7 @@ func (o *openHands) GetEntry(name string) (*MCPEntry, error) {
 		}
 		tbl, _ := member.(map[string]any)
 		url, _ := tbl["url"].(string)
-		return &MCPEntry{Name: name, URL: url}, nil
+		return &MCPEntry{Name: name, URL: url, Disabled: mcpEntryDisabled(tbl)}, nil
 	}
 	return nil, nil
 }

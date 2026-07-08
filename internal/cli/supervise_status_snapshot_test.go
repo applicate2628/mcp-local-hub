@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -94,7 +98,7 @@ func TestSupervisorStatusTakesPortOwnerSnapshotExactlyOnce(t *testing.T) {
 	}
 	calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) { return snap, nil })
 
-	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
@@ -127,7 +131,7 @@ func TestSupervisorStatusSnapshotErrorStaysRunning(t *testing.T) {
 		return nil, errors.New("netstat policy-blocked")
 	})
 
-	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
@@ -182,7 +186,7 @@ func TestSupervisorStatusSnapshotOwnerMismatchFlipsRestarting(t *testing.T) {
 	}
 	calls := withFakePortOwnersSnapshot(t, func() (map[int]int, error) { return snap, nil })
 
-	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
@@ -213,4 +217,347 @@ func TestSupervisorStatusSnapshotOwnerMismatchFlipsRestarting(t *testing.T) {
 	if !sawSquatted {
 		t.Fatalf("squatted task %q not found in rows", squattedTask)
 	}
+}
+
+func TestStatusPortOwnersCoalescerCoalescesWithinTTL(t *testing.T) {
+	var calls int32
+	var gen atomic.Uint64
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	c := &statusPortOwnersCoalescer{
+		snapshotFn: func(context.Context) (map[int]int, error) {
+			atomic.AddInt32(&calls, 1)
+			return map[int]int{9123: 1234}, nil
+		},
+		genFn:   gen.Load,
+		nowFn:   func() time.Time { return now },
+		timeout: time.Second,
+	}
+
+	for i := 0; i < 5; i++ {
+		snap, err := c.Get()
+		if err != nil {
+			t.Fatalf("Get #%d: %v", i, err)
+		}
+		if snap[9123] != 1234 {
+			t.Fatalf("Get #%d snapshot = %+v, want port 9123 owner 1234", i, snap)
+		}
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("snapshotFn calls = %d, want 1 within TTL", got)
+	}
+}
+
+func TestStatusPortOwnersCoalescerSingleflightsConcurrentMiss(t *testing.T) {
+	const callers = 16
+	var calls int32
+	var gen atomic.Uint64
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	want := map[int]int{9123: 1234}
+	c := &statusPortOwnersCoalescer{
+		snapshotFn: func(context.Context) (map[int]int, error) {
+			atomic.AddInt32(&calls, 1)
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+			return want, nil
+		},
+		genFn:   gen.Load,
+		nowFn:   func() time.Time { return now },
+		timeout: time.Second,
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, callers)
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			snap, err := c.Get()
+			if err != nil {
+				errs <- err
+				return
+			}
+			if snap[9123] != 1234 {
+				errs <- fmt.Errorf("snapshot = %+v, want port 9123 owner 1234", snap)
+			}
+		}()
+	}
+	<-started
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("snapshotFn calls = %d, want 1 for concurrent miss", got)
+	}
+}
+
+func TestStatusPortOwnersCoalescerSlowProbeCachesAtCompletionForWaiters(t *testing.T) {
+	const callers = 8
+	var calls int32
+	var gen atomic.Uint64
+	var nowCalls int32
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	base := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	c := &statusPortOwnersCoalescer{
+		snapshotFn: func(context.Context) (map[int]int, error) {
+			atomic.AddInt32(&calls, 1)
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+			return map[int]int{9123: 1234}, nil
+		},
+		genFn: gen.Load,
+		nowFn: func() time.Time {
+			if atomic.AddInt32(&nowCalls, 1) == 1 {
+				return base
+			}
+			return base.Add(statusPortOwnersTTL + time.Second)
+		},
+		timeout: time.Second,
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			snap, err := c.Get()
+			if err != nil {
+				t.Errorf("Get: %v", err)
+				return
+			}
+			if snap[9123] != 1234 {
+				t.Errorf("snapshot = %+v, want port 9123 owner 1234", snap)
+			}
+		}()
+	}
+	<-started
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("snapshotFn calls = %d, want 1 even when the first probe spans the TTL", got)
+	}
+}
+
+func TestStatusPortOwnersCoalescerRefreshesAfterTTL(t *testing.T) {
+	var calls int32
+	var gen atomic.Uint64
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	c := &statusPortOwnersCoalescer{
+		snapshotFn: func(context.Context) (map[int]int, error) {
+			call := int(atomic.AddInt32(&calls, 1))
+			return map[int]int{9123: call}, nil
+		},
+		genFn:   gen.Load,
+		nowFn:   func() time.Time { return now },
+		timeout: time.Second,
+	}
+
+	snap, err := c.Get()
+	if err != nil {
+		t.Fatalf("first Get: %v", err)
+	}
+	if snap[9123] != 1 {
+		t.Fatalf("first snapshot = %+v, want call marker 1", snap)
+	}
+	now = now.Add(statusPortOwnersTTL + time.Nanosecond)
+	snap, err = c.Get()
+	if err != nil {
+		t.Fatalf("second Get: %v", err)
+	}
+	if snap[9123] != 2 {
+		t.Fatalf("second snapshot = %+v, want refreshed call marker 2", snap)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("snapshotFn calls = %d, want 2 after TTL", got)
+	}
+}
+
+// A fleet-generation change must force the very next Get to re-probe even WITHIN
+// the TTL — the read-your-writes guarantee for any respawn path (manual or
+// automatic): status must not combine fresh tracker state with a pre-respawn
+// owner map.
+func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChanges(t *testing.T) {
+	var calls int32
+	var gen atomic.Uint64
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	c := &statusPortOwnersCoalescer{
+		snapshotFn: func(context.Context) (map[int]int, error) {
+			call := int(atomic.AddInt32(&calls, 1))
+			return map[int]int{9123: call}, nil
+		},
+		genFn:   gen.Load,
+		nowFn:   func() time.Time { return now },
+		timeout: time.Second,
+	}
+
+	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
+		t.Fatalf("first Get = (%+v, %v), want call marker 1", snap, err)
+	}
+	// Still within the TTL (now unchanged): only the generation bump should force
+	// the fresh probe.
+	gen.Add(1)
+	snap, err := c.Get()
+	if err != nil {
+		t.Fatalf("post-generation-bump Get: %v", err)
+	}
+	if snap[9123] != 2 {
+		t.Fatalf("post-generation-bump snapshot = %+v, want a fresh re-probe (marker 2) despite same-TTL", snap)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("snapshotFn calls = %d, want 2 (generation bump forced a re-probe within TTL)", got)
+	}
+}
+
+func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChangesDuringProbe(t *testing.T) {
+	var calls int32
+	var gen atomic.Uint64
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	c := &statusPortOwnersCoalescer{
+		snapshotFn: func(context.Context) (map[int]int, error) {
+			call := int(atomic.AddInt32(&calls, 1))
+			if call == 1 {
+				gen.Add(1)
+			}
+			return map[int]int{9123: call}, nil
+		},
+		genFn:   gen.Load,
+		nowFn:   func() time.Time { return now },
+		timeout: time.Second,
+	}
+
+	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
+		t.Fatalf("first Get = (%+v, %v), want call marker 1", snap, err)
+	}
+	// Still within the TTL (now unchanged): the first probe's mid-flight
+	// generation bump must invalidate the cache stamped with the pre-probe
+	// generation.
+	snap, err := c.Get()
+	if err != nil {
+		t.Fatalf("post-mid-probe-generation-bump Get: %v", err)
+	}
+	if snap[9123] != 2 {
+		t.Fatalf("post-mid-probe-generation-bump snapshot = %+v, want a fresh re-probe (marker 2) despite same-TTL", snap)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("snapshotFn calls = %d, want 2 (mid-probe generation bump forced a re-probe within TTL)", got)
+	}
+}
+
+func TestStatusPortOwnersCoalescerCachesErrorAndReprobesAfterTTL(t *testing.T) {
+	var calls int32
+	var gen atomic.Uint64
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	c := &statusPortOwnersCoalescer{
+		snapshotFn: func(context.Context) (map[int]int, error) {
+			call := atomic.AddInt32(&calls, 1)
+			return nil, fmt.Errorf("netstat failed %d", call)
+		},
+		genFn:   gen.Load,
+		nowFn:   func() time.Time { return now },
+		timeout: time.Second,
+	}
+
+	_, err1 := c.Get()
+	_, err2 := c.Get()
+	if err1 == nil || err2 == nil {
+		t.Fatalf("cached error path returned err1=%v err2=%v, want errors", err1, err2)
+	}
+	if err1.Error() != err2.Error() {
+		t.Fatalf("within-TTL errors differ: %q vs %q", err1, err2)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("snapshotFn calls within TTL = %d, want 1", got)
+	}
+
+	now = now.Add(statusPortOwnersTTL + time.Nanosecond)
+	_, err3 := c.Get()
+	if err3 == nil || err3.Error() == err1.Error() {
+		t.Fatalf("after TTL error = %v, want fresh reprobe error distinct from %v", err3, err1)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("snapshotFn calls after TTL = %d, want 2", got)
+	}
+}
+
+func TestStatusPortOwnersCoalescerBoundsSnapshotWithContext(t *testing.T) {
+	c := &statusPortOwnersCoalescer{
+		snapshotFn: func(ctx context.Context) (map[int]int, error) {
+			<-ctx.Done()
+			return nil, fmt.Errorf("snapshot stopped: %w", ctx.Err())
+		},
+		nowFn:   func() time.Time { return time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC) },
+		timeout: 20 * time.Millisecond,
+	}
+
+	start := time.Now()
+	_, err := c.Get()
+	elapsed := time.Since(start)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Get err = %v, want context deadline exceeded", err)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("Get took %s, want bounded by coalescer timeout", elapsed)
+	}
+}
+
+func TestSupervisorStatusDaemonsFailLoudAndSnapshotErrorWithCoalescer(t *testing.T) {
+	t.Run("intent read failure is still top-level error", func(t *testing.T) {
+		stateDir := apitest.HardenedTempDir(t)
+		if err := os.Mkdir(filepath.Join(stateDir, "supervisor-intent.json"), 0o700); err != nil {
+			t.Fatalf("mkdir supervisor-intent.json directory: %v", err)
+		}
+		c := &statusPortOwnersCoalescer{
+			snapshotFn: func(context.Context) (map[int]int, error) {
+				t.Fatal("snapshotFn must not run when intent read fails")
+				return nil, nil
+			},
+			nowFn:   func() time.Time { return time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC) },
+			timeout: time.Second,
+		}
+
+		rows, err := supervisorStatusDaemons(stateDir, NewDaemonRuntimeTracker(), c)
+		if err == nil {
+			t.Fatalf("supervisorStatusDaemons rows=%+v err=nil, want intent read error", rows)
+		}
+	})
+
+	t.Run("snapshot error keeps rows and no top-level error", func(t *testing.T) {
+		stateDir, tracker, _ := seedRunningDaemons(t, 1)
+		installOwnsPortProbe(t)
+		c := &statusPortOwnersCoalescer{
+			snapshotFn: func(context.Context) (map[int]int, error) {
+				return nil, errors.New("netstat deadline exceeded")
+			},
+			nowFn:   func() time.Time { return time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC) },
+			timeout: time.Second,
+		}
+
+		rows, err := supervisorStatusDaemons(stateDir, tracker, c)
+		if err != nil {
+			t.Fatalf("supervisorStatusDaemons returned top-level err on snapshot failure: %v", err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("rows len = %d, want 1", len(rows))
+		}
+		if rows[0]["state"] != "Running" {
+			t.Fatalf("snapshot error row state = %v, want Running via port_owner_unverified: %+v", rows[0]["state"], rows[0])
+		}
+		if _, hasStale := rows[0]["stale_pid"]; hasStale {
+			t.Fatalf("snapshot error row carried stale_pid, want none: %+v", rows[0])
+		}
+	})
 }

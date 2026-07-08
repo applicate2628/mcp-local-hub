@@ -58,7 +58,7 @@ func VerifyPIDIdentity(proof PIDIdentityProof) error {
 		}
 		return fmt.Errorf("%w: PID %d start-time proof unavailable", ErrProcessIdentityMismatch, proof.PID)
 	}
-	if !startTimesMatch(recorded, observed) {
+	if !startTimesMatchWithin(recorded, observed, pidIdentityStartToleranceFor(proof)) {
 		return fmt.Errorf("%w: PID %d started_at mismatch recorded=%s observed=%s", ErrProcessIdentityMismatch, proof.PID, recorded.Format(timeFormatRFC3339Nano()), observed.Format(timeFormatRFC3339Nano()))
 	}
 	return nil

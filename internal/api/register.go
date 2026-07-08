@@ -1181,7 +1181,8 @@ func shouldPreserveSharedLSPRouterEntry(client registerClient, entryName, langua
 	if err != nil {
 		return false
 	}
-	return entryIsLSPRouterForLanguage(live, language)
+	owned, _ := entryIsOwnedLSPRouterForLanguage(entryName, live, language, 0)
+	return owned
 }
 
 // ResolveEntryName returns the client-config entry name to use for a given

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os/exec"
@@ -51,6 +50,17 @@ type processSnapshot struct {
 	lines []string
 }
 
+// procRow is one parsed runProcessSnapshot row. It is shared by process count
+// parsing, orphan cleanup, and log-watcher cleanup so every consumer of the
+// shared WMIC/PowerShell snapshot gets the same comma-safe row parse.
+type procRow struct {
+	pid, ppid int
+	created   time.Time
+	exePath   string
+	cmdline   string
+	ram       uint64
+}
+
 // takeProcessSnapshot captures the current process list ONCE so
 // multiple entries can be scored against it without re-invoking wmic
 // per call. Returns an empty snapshot on non-Windows or on snapshot
@@ -68,22 +78,12 @@ func takeProcessSnapshot() processSnapshot {
 	return processSnapshot{raw: out, lines: splitSnapshotLines(out)}
 }
 
-// splitSnapshotLines tokenizes a wmic/PowerShell CSV snapshot into one
-// string per line using the same bufio.Scanner + buffer sizing as
-// parseWmicCount (a snapshot line — a full CommandLine plus surrounding
-// CSV fields — can exceed the default 64 KiB scanner token limit for a
-// process with a very long command line). Scan errors are treated the
-// same way parseWmicCount's caller does: whatever was tokenized before
-// the error is still used, since CountProcessesFromSnapshot has no error
-// return to propagate a mid-scan failure through.
+// splitSnapshotLines tokenizes a wmic/PowerShell CSV snapshot into logical
+// records. A quoted CommandLine can contain embedded newlines, so this must use
+// the shared WMIC record assembler rather than a plain line scanner.
 func splitSnapshotLines(raw string) []string {
-	var lines []string
-	s := bufio.NewScanner(strings.NewReader(raw))
-	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for s.Scan() {
-		lines = append(lines, s.Text())
-	}
-	return lines
+	records, _ := process.ReadWmicCSVRecords(strings.NewReader(raw))
+	return records
 }
 
 // CountProcessesFromSnapshot is the batch variant of CountProcesses —
@@ -99,15 +99,23 @@ func (a *API) CountProcessesFromSnapshot(snap processSnapshot, patterns []string
 	return countMatchingLines(snap.lines, patterns)
 }
 
-// countMatchingLines returns how many of the given lines contain at
-// least one of the patterns as a substring, deduplicating so a line
-// matching multiple patterns still counts once — the same semantics
-// parseWmicCount applies over an io.Reader.
-func countMatchingLines(lines []string, patterns []string) int {
+// countMatchingLines returns how many of the given rows' CommandLine
+// fields contain at least one of the patterns as a substring,
+// deduplicating so a row matching multiple patterns still counts once —
+// the same semantics parseWmicCount applies over an io.Reader.
+func countMatchingLines(records []string, patterns []string) int {
 	count := 0
-	for _, line := range lines {
+	header, ok := parseWmicHeaderFromRecords(records, "Node", "CommandLine")
+	if !ok {
+		return 0
+	}
+	for _, record := range records {
+		cmdline, ok := processRecordCommandLine(record, header)
+		if !ok {
+			continue
+		}
 		for _, p := range patterns {
-			if strings.Contains(line, p) {
+			if strings.Contains(cmdline, p) {
 				count++
 				break
 			}
@@ -116,23 +124,84 @@ func countMatchingLines(lines []string, patterns []string) int {
 	return count
 }
 
+func processRecordCommandLine(record string, header process.WmicCSVHeader) (string, bool) {
+	row, ok := process.ParseWmicProcessCSVRecord(record, header)
+	if !ok {
+		return "", false
+	}
+	return row["CommandLine"], true
+}
+
+func parseProcessSnapshotRows(r io.Reader) ([]procRow, error) {
+	records, err := process.ReadWmicCSVRecords(r)
+	header, ok := parseWmicHeaderFromRecords(records,
+		"Node", "CommandLine", "CreationDate", "ExecutablePath", "ParentProcessId", "ProcessId", "WorkingSetSize")
+	if !ok {
+		return nil, err
+	}
+	var rows []procRow
+	for _, record := range records {
+		row, ok := parseProcessSnapshotRow(record, header)
+		if ok {
+			rows = append(rows, row)
+		}
+	}
+	return rows, err
+}
+
+func parseWmicHeaderFromRecords(records []string, required ...string) (process.WmicCSVHeader, bool) {
+	for _, record := range records {
+		header, ok := process.ParseWmicCSVHeader(record, required...)
+		if ok {
+			return header, true
+		}
+	}
+	return process.WmicCSVHeader{}, false
+}
+
+func parseProcessSnapshotRow(record string, header process.WmicCSVHeader) (procRow, bool) {
+	parsed, ok := process.ParseWmicProcessCSVRecord(record, header)
+	if !ok {
+		return procRow{}, false
+	}
+	ppid, err1 := strconv.Atoi(parsed["ParentProcessId"])
+	pid, err2 := strconv.Atoi(parsed["ProcessId"])
+	ram, err3 := strconv.ParseUint(parsed["WorkingSetSize"], 10, 64)
+	if err1 != nil || err2 != nil || err3 != nil || pid == 0 {
+		return procRow{}, false
+	}
+	created := parseWmicDate(parsed["CreationDate"])
+	return procRow{
+		pid:     pid,
+		ppid:    ppid,
+		created: created,
+		exePath: parsed["ExecutablePath"],
+		cmdline: parsed["CommandLine"],
+		ram:     ram,
+	}, true
+}
+
 // runProcessSnapshot returns a CSV-formatted process list compatible with
 // the shape wmic historically produced. Tries wmic first (legacy Windows),
 // falls back to PowerShell Get-CimInstance (Windows 11 24H2+ removed wmic).
 //
 // Output format:
 //
-//	Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize
-//	HOST,"cmdline text",20260417180000.000000+000,555,1001,40000000
+//	Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+//	HOST,"cmdline text",20260417180000.000000+000,"C:\...\node.exe",555,1001,40000000
 //	...
 //
 // CommandLine is quoted with "" escaping (wmic-compatible). CreationDate is
-// formatted as CIM_DATETIME so parseWmicDate works unchanged. Returned as a
-// single string for convenience; callers wrap in strings.NewReader.
+// formatted as CIM_DATETIME so parseWmicDate works unchanged. ExecutablePath
+// (added so parseProcessRows can build the PID-recycle-safe identity proof the
+// cleanup reapers kill through — see reapOrphans) sits between CreationDate and
+// ParentProcessId, which is exactly where wmic's alphabetical `/format:csv`
+// column order places it. Returned as a single string for convenience; callers
+// wrap in strings.NewReader.
 func runProcessSnapshot() (string, error) {
 	// Legacy path: wmic (present on Windows 10 and older Windows 11).
 	wmicCmd := exec.Command("wmic", "process", "get",
-		"CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize",
+		"CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize",
 		"/format:csv")
 	process.NoConsole(wmicCmd)
 	wmicOut, wmicErr := wmicCmd.Output()
@@ -145,10 +214,16 @@ func runProcessSnapshot() (string, error) {
 	// Emit rows in wmic CSV shape so the parsers don't need a second path.
 	// Uses [string]::Format instead of backtick-escaping to keep the Go
 	// raw-string literal clean (PowerShell's backtick would close the literal).
+	// ExecutablePath is quoted (like CommandLine) so a path is always a single
+	// CSV field for parseProcessRows's right-anchor; a Windows path can never
+	// contain a `"` (illegal filename char), so no quote-escaping is needed.
 	const psScript = `Get-CimInstance Win32_Process | ForEach-Object {
 		$cmdline = if ($_.CommandLine) { ($_.CommandLine -replace '"', '""') } else { '' }
-		$created = $_.CreationDate.ToString('yyyyMMddHHmmss') + '.000000+000'
-		[string]::Format('HOST,"{0}",{1},{2},{3},{4}', $cmdline, $created, $_.ParentProcessId, $_.ProcessId, $_.WorkingSetSize)
+		$offset = [int]([TimeZoneInfo]::Local.GetUtcOffset($_.CreationDate).TotalMinutes)
+		$sign = if ($offset -lt 0) { '-' } else { '+' }
+		$created = $_.CreationDate.ToString('yyyyMMddHHmmss.ffffff') + $sign + [Math]::Abs($offset).ToString('000')
+		$exe = if ($_.ExecutablePath) { $_.ExecutablePath } else { '' }
+		[string]::Format('HOST,"{0}",{1},"{2}",{3},{4},{5}', $cmdline, $created, $exe, $_.ParentProcessId, $_.ProcessId, $_.WorkingSetSize)
 	}`
 	psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 	process.NoConsole(psCmd)
@@ -156,7 +231,7 @@ func runProcessSnapshot() (string, error) {
 	if psErr != nil {
 		return "", fmt.Errorf("both wmic and PowerShell process snapshot failed: wmic=%v; powershell=%v", wmicErr, psErr)
 	}
-	header := "Node,CommandLine,CreationDate,ParentProcessId,ProcessId,WorkingSetSize\n"
+	header := "Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize\n"
 	return header + string(psOut), nil
 }
 
@@ -169,13 +244,8 @@ func runProcessSnapshot() (string, error) {
 // splitSnapshotLines and reuses countMatchingLines directly instead of
 // going through this io.Reader-based entry point per call.
 func parseWmicCount(r io.Reader, patterns []string) (int, error) {
-	s := bufio.NewScanner(r)
-	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	var lines []string
-	for s.Scan() {
-		lines = append(lines, s.Text())
-	}
-	return countMatchingLines(lines, patterns), s.Err()
+	records, err := process.ReadWmicCSVRecords(r)
+	return countMatchingLines(records, patterns), err
 }
 
 // ProcessInfo describes one live process match.
@@ -243,12 +313,21 @@ func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
 	for _, p := range patterns {
 		lowerPatterns = append(lowerPatterns, strings.ToLower(p))
 	}
+	records, err := process.ReadWmicCSVRecords(strings.NewReader(string(out)))
+	if err != nil {
+		return nil, err
+	}
+	header, ok := parseWmicHeaderFromRecords(records, "Node", "CommandLine", "ProcessId", "WorkingSetSize")
+	if !ok {
+		return nil, nil
+	}
 	var results []ProcessInfo
-	s := bufio.NewScanner(strings.NewReader(string(out)))
-	s.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for s.Scan() {
-		line := s.Text()
-		lineLower := strings.ToLower(line)
+	for _, record := range records {
+		row, ok := process.ParseWmicProcessCSVRecord(record, header)
+		if !ok {
+			continue
+		}
+		lineLower := strings.ToLower(row["CommandLine"])
 		matched := false
 		for _, p := range lowerPatterns {
 			if strings.Contains(lineLower, p) {
@@ -259,40 +338,31 @@ func (a *API) ListMatchingProcesses(patterns []string) ([]ProcessInfo, error) {
 		if !matched {
 			continue
 		}
-		fields := splitCSVLine(line)
-		if len(fields) < 4 {
-			continue
-		}
-		pid, _ := strconv.Atoi(strings.TrimSpace(fields[len(fields)-2]))
-		ram, _ := strconv.ParseUint(strings.TrimSpace(fields[len(fields)-1]), 10, 64)
-		cmdline := fields[1]
+		pid, _ := strconv.Atoi(row["ProcessId"])
+		ram, _ := strconv.ParseUint(row["WorkingSetSize"], 10, 64)
+		cmdline := row["CommandLine"]
 		results = append(results, ProcessInfo{PID: pid, RAMBytes: ram, Cmdline: cmdline})
 	}
 	return results, nil
 }
 
-// splitCSVLine splits a simple comma-separated wmic line. Quoted fields with
-// embedded commas are preserved. wmic output doesn't escape quotes inside
-// quoted fields, so a minimal state machine suffices.
+// splitCSVLine preserves the existing api-local helper name while delegating
+// the WMIC splitting rules to the process package's shared implementation.
 func splitCSVLine(line string) []string {
-	var out []string
-	var cur strings.Builder
-	inQuote := false
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		if c == '"' {
-			inQuote = !inQuote
-			continue
-		}
-		if c == ',' && !inQuote {
-			out = append(out, cur.String())
-			cur.Reset()
-			continue
-		}
-		cur.WriteByte(c)
+	return process.SplitWmicCSVLine(line)
+}
+
+func isUnsignedDecimalField(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
 	}
-	out = append(out, cur.String())
-	return out
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // netstatLineLoopbackPortPID parses a single `netstat -ano` line and, when it
@@ -580,18 +650,47 @@ func init() {
 }
 
 // parseWmicDate parses wmic's CIM_DATETIME format: YYYYMMDDHHMMSS.mmmmmm+ZZZ.
-// The timestamp is in local time (the +ZZZ offset is discarded); using
-// time.Local gives correct time.Since() results. Parsing as UTC would
-// produce negative uptime on non-UTC hosts.
+// The fractional seconds are preserved so cleanup's PID-reuse proof can use a
+// tighter-than-seconds tolerance.
 func parseWmicDate(s string) time.Time {
 	if len(s) < 14 {
 		return time.Time{}
 	}
-	t, err := time.ParseInLocation("20060102150405", s[:14], time.Local)
+	base, err := time.Parse("20060102150405", s[:14])
 	if err != nil {
 		return time.Time{}
 	}
-	return t
+	nsec := 0
+	pos := 14
+	if pos < len(s) && s[pos] == '.' {
+		pos++
+		start := pos
+		for pos < len(s) && s[pos] >= '0' && s[pos] <= '9' {
+			pos++
+		}
+		frac := s[start:pos]
+		if len(frac) > 9 {
+			frac = frac[:9]
+		}
+		for len(frac) < 9 {
+			frac += "0"
+		}
+		if frac != "" {
+			if parsed, err := strconv.Atoi(frac); err == nil {
+				nsec = parsed
+			}
+		}
+	}
+	loc := time.Local
+	if pos+4 <= len(s) && (s[pos] == '+' || s[pos] == '-') {
+		if minutes, err := strconv.Atoi(s[pos+1 : pos+4]); err == nil {
+			if s[pos] == '-' {
+				minutes = -minutes
+			}
+			loc = time.FixedZone("", minutes*60)
+		}
+	}
+	return time.Date(base.Year(), base.Month(), base.Day(), base.Hour(), base.Minute(), base.Second(), nsec, loc)
 }
 
 // procNameAndParent returns the image basename and parent-PID for one

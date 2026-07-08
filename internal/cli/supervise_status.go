@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -32,7 +34,78 @@ var rssByPID = process.ResidentSetSizeByPID
 // and keeps the per-daemon PortLive TCP fallback.
 var loopbackPortOwnersSnapshotFn = api.LoopbackPortOwnersSnapshot
 
-func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]map[string]any, error) {
+// statusPortOwnersTTL bounds how often the supervisor status handler takes a
+// fresh netstat snapshot. Concurrent AND rapid status IPC calls within the TTL
+// share ONE snapshot: the mutex held across the (ctx-bounded) netstat IS the
+// singleflight for this single-key cache -- concurrent misses serialize and the
+// later waiter finds a fresh value on lock acquire.
+const statusPortOwnersTTL = 1 * time.Second
+
+// statusPortOwnersProbeTimeout caps a single netstat snapshot. On a host whose
+// system network stack is wedged (netstat -ano observed >20s), the probe is
+// killed at this deadline and returns a snapshot error -> per-daemon
+// port_owner_unverified -> a FAST status IPC reply, never a >5s hang that trips
+// the restart-watcher. 3s < the 5s status-IPC client timeout by design.
+const statusPortOwnersProbeTimeout = 3 * time.Second
+
+// statusPortOwnersCoalescer owns "how often to netstat for status" -- the single
+// owner of netstat-frequency on the status path (the client-side DaemonStatusSnapshot
+// cache is re-scoped to IPC/HTTP fan-in amortization only; see decision doc). It
+// caches BOTH the snapshot AND the error for the TTL so a persistently-failing
+// netstat is rate-limited to one probe/TTL instead of storming.
+type statusPortOwnersCoalescer struct {
+	mu         sync.Mutex
+	takenAt    time.Time
+	genAtProbe uint64
+	snapshot   map[int]int
+	err        error
+	snapshotFn func(context.Context) (map[int]int, error) // seam; default api.LoopbackPortOwnersSnapshotContext
+	genFn      func() uint64                              // seam; default DaemonRuntimeTracker.Generation
+	nowFn      func() time.Time                           // seam; default time.Now
+	timeout    time.Duration                              // default statusPortOwnersProbeTimeout
+}
+
+func newStatusPortOwnersCoalescer(tracker *DaemonRuntimeTracker) *statusPortOwnersCoalescer {
+	genFn := func() uint64 { return 0 }
+	if tracker != nil {
+		genFn = tracker.Generation
+	}
+	return &statusPortOwnersCoalescer{
+		snapshotFn: api.LoopbackPortOwnersSnapshotContext,
+		genFn:      genFn,
+		nowFn:      time.Now,
+		timeout:    statusPortOwnersProbeTimeout,
+	}
+}
+
+// Get returns the coalesced port-owner snapshot. Within statusPortOwnersTTL it
+// returns the cached (snapshot, err); otherwise it takes ONE fresh ctx-bounded
+// snapshot under the lock and caches both. Holding mu across the netstat is the
+// singleflight.
+func (c *statusPortOwnersCoalescer) Get() (map[int]int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.nowFn()
+	gen := c.currentGeneration()
+	if !c.takenAt.IsZero() && now.Sub(c.takenAt) < statusPortOwnersTTL && gen == c.genAtProbe {
+		return c.snapshot, c.err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	defer cancel()
+	c.snapshot, c.err = c.snapshotFn(ctx)
+	c.takenAt = c.nowFn()
+	c.genAtProbe = gen
+	return c.snapshot, c.err
+}
+
+func (c *statusPortOwnersCoalescer) currentGeneration() uint64 {
+	if c.genFn == nil {
+		return 0
+	}
+	return c.genFn()
+}
+
+func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coalescer *statusPortOwnersCoalescer) ([]map[string]any, error) {
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 	intent, err := api.ReadSupervisorIntent(intentPath)
 	if err != nil {
@@ -56,7 +129,15 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker) ([]
 	// unchanged — no snapshot, no behavior change.
 	livenessProbe := supervisorLivenessProbeFns
 	if livenessProbe.PortOwnerPID != nil {
-		snapshot, snapErr := loopbackPortOwnersSnapshotFn()
+		var snapshot map[int]int
+		var snapErr error
+		if coalescer != nil {
+			snapshot, snapErr = coalescer.Get()
+		} else {
+			// nil coalescer -> direct non-ctx probe, byte-identical to pre-fix
+			// (keeps the existing direct-call status tests valid).
+			snapshot, snapErr = loopbackPortOwnersSnapshotFn()
+		}
 		// Replace the per-port netstat lookup with a closure that resolves from
 		// the single shared snapshot. Semantics match the per-port path EXACTLY:
 		//   - snapshot error → every port returns that err → the daemon is

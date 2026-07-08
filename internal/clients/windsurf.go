@@ -144,7 +144,7 @@ func (w *windsurfClient) GetEntry(name string) (*MCPEntry, error) {
 		return nil, nil
 	}
 	url, _ := raw[windsurfURLField].(string)
-	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers")}, nil
+	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers"), Disabled: mcpEntryDisabled(raw)}, nil
 }
 
 // RestoreEntryFromBackup restores mcpServers[name] from the backup, refusing

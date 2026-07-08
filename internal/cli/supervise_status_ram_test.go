@@ -63,7 +63,7 @@ func runningStatusRow(t *testing.T) map[string]any {
 	loopbackPortOwnersSnapshotFn = func() (map[int]int, error) { return map[int]int{9123: livePID}, nil }
 	defer func() { loopbackPortOwnersSnapshotFn = prevSnap }()
 
-	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}

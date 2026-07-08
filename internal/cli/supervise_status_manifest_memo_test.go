@@ -31,7 +31,7 @@ func TestSupervisorStatusPortEnrichedViaOwner(t *testing.T) {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
 
-	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestSupervisorStatusPortResolvedForPartialArgvCompletedByField(t *testing.T
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
 
-	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestSupervisorStatusIdentityRecoveredViaOwnerForHyphenatedDaemon(t *testing
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
 
-	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestSupervisorStatusLyingServerFieldFailsClosed(t *testing.T) {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
 
-	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestSupervisorStatusPositionalAndPartialLegacyShapes(t *testing.T) {
 	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
-	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestSupervisorStatusWellFormedPopulatedRowNeutral(t *testing.T) {
 	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), intent); err != nil {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
 	}
-	rows, err := supervisorStatusDaemons(stateDir, tracker)
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
 	if err != nil {
 		t.Fatalf("supervisorStatusDaemons: %v", err)
 	}

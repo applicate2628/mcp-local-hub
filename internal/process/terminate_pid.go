@@ -1,6 +1,9 @@
 package process
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 // ErrProcessAlreadyExited marks a terminate request that lost a race
 // because the target PID was already gone by the time the signal ran.
@@ -32,4 +35,8 @@ type PIDIdentityProof struct {
 	PID            int
 	ExecutablePath string
 	StartedAt      string
+	// StartTolerance optionally tightens or widens the start-time proof for a
+	// specific destructive call. Zero keeps the package default used by existing
+	// supervisor call sites.
+	StartTolerance time.Duration
 }
