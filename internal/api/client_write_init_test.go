@@ -442,3 +442,53 @@ func TestSecureWriteWithOperatorOpt_NonGateErrorPropagatesUnchanged(t *testing.T
 		t.Errorf("non-gate error matched ErrSecureWriteParentInsecure; opt-in should not mask other failure classes: %v", err)
 	}
 }
+
+// TestClientConfigParentGateWrongOwnerHardFails pins bug 2026-07-03: the
+// client-config write relax lane must refuse a WRONG-OWNER parent (mirroring
+// the state-file lane's stateFileParentGateAllowsDefaultRelax), because the
+// wrong-owner error is wrapped INSIDE ErrSecureWriteParentInsecure and a bare
+// errors.Is(ErrSecureWriteParentInsecure) check would wrongly relax it.
+func TestClientConfigParentGateWrongOwnerHardFails(t *testing.T) {
+	// broadened-but-owner-correct parent → relax-eligible on a solo host.
+	broadened := errors.Join(ErrSecureWriteParentInsecure, errors.New("broadened ACL"))
+	if !clientConfigParentGateAllowsDefaultRelax(broadened) {
+		t.Errorf("broadened owner-correct parent should be relax-eligible")
+	}
+	// wrong-owner parent (ErrWrongOwner wrapped inside ErrSecureWriteParentInsecure,
+	// the secure_write_windows.go:201 shape) → must NOT relax.
+	wrongOwner := errors.Join(ErrSecureWriteParentInsecure, ErrWrongOwner)
+	if clientConfigParentGateAllowsDefaultRelax(wrongOwner) {
+		t.Errorf("wrong-owner parent must NOT be relax-eligible (would write into a foreign-owned dir)")
+	}
+	// non-parent-gate error → propagate, not relax.
+	if clientConfigParentGateAllowsDefaultRelax(errors.New("some unrelated write failure")) {
+		t.Errorf("non-parent-gate error should not be relax-eligible")
+	}
+	// The refusal wraps ErrWrongOwner (callers can inspect) and names the condition.
+	refusal := clientWriteRefuseWrongOwnerParent(wrongOwner)
+	if !errors.Is(refusal, ErrWrongOwner) {
+		t.Errorf("refusal must wrap ErrWrongOwner for callers that inspect it")
+	}
+	if !strings.Contains(refusal.Error(), "foreign-owned") {
+		t.Errorf("refusal message should name the foreign-owned condition: %v", refusal)
+	}
+
+	// A BARE ErrWrongOwner (no ErrSecureWriteParentInsecure) — e.g. a post-rename
+	// FILE-owner verify failure — is NOT a parent-gate error (bot/fable review
+	// F2). It stays fail-closed (not relax-eligible) but must NOT be rewritten
+	// with the "parent directory" message; the write lanes return it raw so its
+	// accurate diagnostic survives. This is the exact condition both lanes use.
+	bareWrongOwner := ErrWrongOwner
+	if clientConfigParentGateAllowsDefaultRelax(bareWrongOwner) {
+		t.Errorf("bare ErrWrongOwner must not be relax-eligible")
+	}
+	parentRefusalApplies := func(e error) bool {
+		return errors.Is(e, ErrWrongOwner) && errors.Is(e, ErrSecureWriteParentInsecure)
+	}
+	if parentRefusalApplies(bareWrongOwner) {
+		t.Errorf("bare ErrWrongOwner (post-rename file verify) must NOT get the parent-directory refusal message")
+	}
+	if !parentRefusalApplies(wrongOwner) {
+		t.Errorf("parent-gate wrong-owner SHOULD get the parent-directory refusal message")
+	}
+}
