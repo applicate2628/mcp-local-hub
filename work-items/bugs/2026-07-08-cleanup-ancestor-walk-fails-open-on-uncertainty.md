@@ -1,24 +1,36 @@
 ---
 id: 2026-07-08-cleanup-ancestor-walk-fails-open-on-uncertainty
-status: in-progress
+status: fixed
 severity: high
-area: internal/api/cleanup.go (parseOrphans ancestor walk)
+area: internal/api/cleanup.go (parseOrphans + parseAggressiveCandidates ancestor walks)
 found-by: codex deep-security lane A + lane B (A2 PR5 adversarial re-verify)
 context: adjacent to 2026-07-05-adopt-npx-orphans (A2 PR5)
+fixed-by: PR #521 (master 509afa31), deployed + live-verified 2026-07-08
 ---
 
-## Status 2026-07-08
+## Status — FIXED (PR #521 → master 509afa31, deployed + live-verified 2026-07-08)
 
-Case A + Case B FIXED on branch `fix/reaper-walk-fail-closed-uncertainty` (PR pending):
-the `parseOrphans` walk is now a 3-state verdict — protected descendant / genuine orphan /
-UNCERTAIN(spare). Case A: byPID-miss probes `orphanParentAliveFn` (=`process.IsPidAlive`,
-injectable seam) — a live-but-absent parent (dropped census row) spares, a dead-and-absent
-parent (real orphan) reaps. Case B: depth-16 exhaustion without resolving to a protected
-ancestor or a genuine root spares. Falsifying-probe tests added
-(`cleanup_walk_failclosed_test.go`); the 5 existing parseOrphans fixture tests set the seam
-deterministically. The CLI aggressive `ExpectPIDs==nil` gap + the aggressive walk's identical
-byPID-miss are folded into the aggressive-path follow-up
-(`2026-07-08-aggressive-cleanup-token-omits-started-at.md`), not this PR (default-reaper P0).
+Both reaper ancestor walks (`parseOrphans` default + `parseAggressiveCandidates` aggressive)
+are now a 3-state verdict — protected descendant / genuine orphan / UNCERTAIN(spare):
+- **Case A (byPID-miss):** probes the absent parent via a TRI-STATE seam
+  (`orphanParentStateFn = process.QueryPIDState`); `orphanParentProvenDead` reaps ONLY on an
+  explicit, error-free `PIDStateDead` — Alive, Unknown (OpenProcess ACCESS_DENIED / unexpected
+  wait), or any probe error all SPARE. (A boolean `IsPidAlive` probe — the first attempt —
+  collapsed Unknown into "dead" and was itself a P0 fail-open, caught by codex + bot.)
+- **Case B (depth-cap):** depth-16 exhaustion without resolving to a protected ancestor or a
+  genuine root (`ppid==0`) spares.
+- **Self-loop:** `ppid==cur` (malformed row) is now UNCERTAIN→spare, split from the real-root
+  `ppid==0` case (was a second P0 fail-open).
+
+Falsifying-probe tests (`cleanup_walk_failclosed_test.go`): dead→reap, alive/unknown/probe-
+error→spare, self-loop→spare vs genuine-root→reap, depth-cap→spare. All parseOrphans +
+parseAggressiveCandidates fixture tests inject a deterministic `deadParent` seam (no host PID
+probes). Reviewed: codex deep-security lane + 3 bot rounds → FULL PASS. Deployed via the
+cross-volume staged `install --upgrade`; fleet respawned healthy (serena×3 + LSPs, 0
+quarantined) + MCP routing live-verified.
+
+The aggressive path's SEPARATE identity-binding gap (confirm-token omits started_at, kill is
+PID-bound) remains tracked in `2026-07-08-aggressive-cleanup-token-omits-started-at.md`.
 
 ## Summary
 
