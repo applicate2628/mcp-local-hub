@@ -137,6 +137,46 @@ func TestBuildPlanWithOpts_SerenaRouterEntryNotRevertedToLegacyURL(t *testing.T)
 	}
 }
 
+func TestExecuteInstallToPreservesPendingRollbackBackupsUntilRollback(t *testing.T) {
+	entry := "rollbackkeep"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.rollbackkeep]
+command = "go"
+args = ["orig"]
+`)
+	m := &config.ServerManifest{Name: entry}
+	plan := &Plan{
+		ClientUpdates: []ClientUpdatePlan{
+			{Client: "codex-cli", URL: "http://127.0.0.1:9310/mcp"},
+			{Client: "codex-cli", URL: "http://127.0.0.1:9311/mcp"},
+		},
+	}
+
+	var out bytes.Buffer
+	err := executeInstallTo(&out, m, plan, 1, false, func() (func(), error) {
+		return nil, errors.New("synthetic post-client failure")
+	}, true, true)
+	if err == nil || !strings.Contains(err.Error(), "synthetic post-client failure") {
+		t.Fatalf("executeInstallTo err = %v, want synthetic post-client failure\noutput:\n%s", err, out.String())
+	}
+
+	after, readErr := os.ReadFile(codexPath)
+	if readErr != nil {
+		t.Fatalf("read codex config after rollback: %v", readErr)
+	}
+	configText := string(after)
+	for _, want := range []string{"command", "go", "args", "orig"} {
+		if !strings.Contains(configText, want) {
+			t.Fatalf("rollback did not restore original codex entry; missing %q:\n%s\noutput:\n%s", want, configText, out.String())
+		}
+	}
+	if strings.Contains(configText, "startup_timeout_sec") {
+		t.Fatalf("rollback did not restore original codex entry:\n%s\noutput:\n%s", configText, out.String())
+	}
+	if strings.Contains(configText, "9310") || strings.Contains(configText, "9311") {
+		t.Fatalf("rollback left installed URL after failure:\n%s\noutput:\n%s", configText, out.String())
+	}
+}
+
 func TestPrintPlanTo_SerenaDryRunShowsRouterURLAndDeferredNotice(t *testing.T) {
 	m := serenaManifest()
 	wantURL := SerenaRouterClientURL(9125)

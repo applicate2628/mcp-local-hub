@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -953,6 +954,7 @@ func RelayStdioClientNames() map[string]bool {
 // backup file produced by mcp-local-hub. Both the pristine sentinel and the
 // rolling timestamped copies start with this prefix.
 const backupSuffixPrefix = ".bak-mcp-local-hub-"
+const backupTimestampLayout = "20060102-150405"
 
 // originalSentinelSuffix names the one-shot pristine backup written the very
 // first time an adapter backs up a config file. It captures the user's
@@ -1002,14 +1004,32 @@ func writeBackup(livePath, clientName string, keepN int) (string, error) {
 }
 
 func nextBackupPath(livePath string) (string, error) {
-	base := livePath + backupSuffixPrefix + time.Now().Format("20060102-150405")
-	if _, err := os.Stat(base); err != nil {
+	stamp := time.Now().Format(backupTimestampLayout)
+	base := livePath + backupSuffixPrefix + stamp
+	dir := filepath.Dir(livePath)
+	prefix := filepath.Base(livePath) + backupSuffixPrefix + stamp
+	entries, err := os.ReadDir(dir)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return base, nil
 		}
 		return "", err
 	}
-	for i := 2; ; i++ {
+
+	maxCounter := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		counter, ok := sameSecondBackupCounter(entry.Name(), prefix)
+		if ok && counter > maxCounter {
+			maxCounter = counter
+		}
+	}
+	if maxCounter == 0 {
+		return base, nil
+	}
+	for i := maxCounter + 1; ; i++ {
 		candidate := fmt.Sprintf("%s-%09d", base, i)
 		if _, err := os.Stat(candidate); err != nil {
 			if os.IsNotExist(err) {
@@ -1018,6 +1038,21 @@ func nextBackupPath(livePath string) (string, error) {
 			return "", err
 		}
 	}
+}
+
+func sameSecondBackupCounter(name, prefix string) (int, bool) {
+	if name == prefix {
+		return 1, true
+	}
+	suffix, ok := strings.CutPrefix(name, prefix+"-")
+	if !ok || len(suffix) != 9 {
+		return 0, false
+	}
+	counter, err := strconv.Atoi(suffix)
+	if err != nil || counter < 2 {
+		return 0, false
+	}
+	return counter, true
 }
 
 // copyFileTornWindowHook, when non-nil (tests only), is invoked AFTER the
@@ -1106,6 +1141,56 @@ func pruneOldTimestamped(livePath string, keepN int) {
 	for _, b := range timestamped[keepN:] {
 		_ = os.Remove(b.path)
 	}
+}
+
+// PruneBackupsForBackupPath applies the rolling timestamped-backup retention
+// cap for the live config that produced backupPath. It is best-effort like
+// BackupKeep pruning: malformed/non-mcphub paths and remove/list failures do
+// not fail the already-successful caller.
+func PruneBackupsForBackupPath(backupPath string, keepN int) {
+	if keepN <= 0 {
+		return
+	}
+	livePath, ok := livePathFromTimestampedBackupPath(backupPath)
+	if !ok {
+		return
+	}
+	_ = withConfigLock(livePath, func() error {
+		pruneOldTimestamped(livePath, keepN)
+		return nil
+	})
+}
+
+func livePathFromTimestampedBackupPath(backupPath string) (string, bool) {
+	dir := filepath.Dir(backupPath)
+	name := filepath.Base(backupPath)
+	idx := strings.LastIndex(name, backupSuffixPrefix)
+	if idx < 0 {
+		return "", false
+	}
+	suffix := name[idx+len(backupSuffixPrefix):]
+	if !isTimestampedBackupSuffix(suffix) {
+		return "", false
+	}
+	return filepath.Join(dir, name[:idx]), true
+}
+
+func isTimestampedBackupSuffix(suffix string) bool {
+	if len(suffix) < len(backupTimestampLayout) {
+		return false
+	}
+	if _, err := time.Parse(backupTimestampLayout, suffix[:len(backupTimestampLayout)]); err != nil {
+		return false
+	}
+	rest := suffix[len(backupTimestampLayout):]
+	if rest == "" {
+		return true
+	}
+	if len(rest) != 10 || rest[0] != '-' {
+		return false
+	}
+	counter, err := strconv.Atoi(rest[1:])
+	return err == nil && counter >= 2
 }
 
 // BackupsNewestFirst returns every mcp-local-hub backup path for

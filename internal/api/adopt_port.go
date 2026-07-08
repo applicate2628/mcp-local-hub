@@ -26,10 +26,9 @@ var (
 )
 
 var (
-	adoptPortLineRE       = regexp.MustCompile(`^\s*port:\s*([0-9]+)\b`)
-	adoptPortPoolInlineRE = regexp.MustCompile(`^\s*port_pool:\s*\{[^}]*start:\s*([0-9]+)[^}]*end:\s*([0-9]+)`)
-	adoptPoolStartLineRE  = regexp.MustCompile(`^start:\s*([0-9]+)\b`)
-	adoptPoolEndLineRE    = regexp.MustCompile(`^end:\s*([0-9]+)\b`)
+	adoptPortLineRE      = regexp.MustCompile(`\bport:\s*([0-9]+)\b`)
+	adoptPoolStartLineRE = regexp.MustCompile(`\bstart:\s*([0-9]+)\b`)
+	adoptPoolEndLineRE   = regexp.MustCompile(`\bend:\s*([0-9]+)\b`)
 )
 
 func pickNextFreeAdoptPort() (int, error) {
@@ -175,18 +174,16 @@ func collectManifestPortPoolsTolerant(lines []string, used map[int]bool) int {
 			flush()
 			inPool = false
 		}
-		if m := adoptPortPoolInlineRE.FindStringSubmatch(trimmed); len(m) == 3 {
-			poolStart, startErr := strconv.Atoi(m[1])
-			poolEnd, endErr := strconv.Atoi(m[2])
-			if startErr == nil && endErr == nil {
+		if strings.Contains(trimmed, "port_pool:") {
+			if poolStart, poolEnd, ok := parseAdoptPortPoolBounds(trimmed); ok {
 				count += markUsedAdoptPortRange(poolStart, poolEnd, used)
+				continue
 			}
-			continue
-		}
-		if strings.HasPrefix(trimmed, "port_pool:") {
-			inPool = true
-			poolIndent = indent
-			start, end = 0, 0
+			if strings.HasPrefix(trimmed, "port_pool:") {
+				inPool = true
+				poolIndent = indent
+				start, end = 0, 0
+			}
 			continue
 		}
 		if !inPool {
@@ -204,6 +201,20 @@ func collectManifestPortPoolsTolerant(lines []string, used map[int]bool) int {
 		flush()
 	}
 	return count
+}
+
+func parseAdoptPortPoolBounds(s string) (int, int, bool) {
+	startMatch := adoptPoolStartLineRE.FindStringSubmatch(s)
+	endMatch := adoptPoolEndLineRE.FindStringSubmatch(s)
+	if len(startMatch) != 2 || len(endMatch) != 2 {
+		return 0, 0, false
+	}
+	start, startErr := strconv.Atoi(startMatch[1])
+	end, endErr := strconv.Atoi(endMatch[1])
+	if startErr != nil || endErr != nil {
+		return 0, 0, false
+	}
+	return start, end, true
 }
 
 func stripAdoptPortComment(line string) string {

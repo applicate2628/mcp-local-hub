@@ -2522,6 +2522,7 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 	// state (scheduler tasks for a server whose client entries were never
 	// written, or vice-versa).
 	var rollback []func()
+	var installBackupPaths []string
 	runRollback := func() {
 		for i := len(rollback) - 1; i >= 0; i-- {
 			rollback[i]()
@@ -2649,14 +2650,21 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 			return fmt.Errorf("snapshot prior entry for %s in %s: %w", m.Name, u.Client, err)
 		}
 
-		// keepN is the user's `backups.keep_n` setting (default 5). The
-		// adapter writes a fresh timestamped backup, then prunes older
-		// timestamped copies in-place so the on-disk set stays bounded.
-		// The pristine `-original` sentinel is never affected.
-		bak, err := client.BackupKeep(keepN)
+		// keepN is the user's `backups.keep_n` setting (default 5). During
+		// install, rollback closures hold the returned backup paths until
+		// this run commits or rolls back. Take backups without pruning while
+		// those closures are live, then prune after the run commits.
+		backupKeepN := keepN
+		if keepN > 0 {
+			backupKeepN = 0
+		}
+		bak, err := client.BackupKeep(backupKeepN)
 		if err != nil {
 			runRollback()
 			return fmt.Errorf("backup %s: %w", u.Client, err)
+		}
+		if keepN > 0 {
+			installBackupPaths = append(installBackupPaths, bak)
 		}
 		fmt.Fprintf(w, "  backup: %s\n", bak)
 		entry := clients.MCPEntry{
@@ -2702,6 +2710,9 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 		if undo != nil {
 			rollback = append(rollback, undo)
 		}
+	}
+	for _, backupPath := range installBackupPaths {
+		clients.PruneBackupsForBackupPath(backupPath, keepN)
 	}
 	// Pass B - start daemons immediately (without waiting for next logon).
 	// Gated by startTasks: the migrate driver passes false to defer daemon

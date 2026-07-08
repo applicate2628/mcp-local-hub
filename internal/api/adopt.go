@@ -8,8 +8,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"mcp-local-hub/internal/config"
 )
 
 var adoptSupportedClients = []string{
@@ -135,8 +133,8 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	}
 	alsoPresent := clientsOutsideSelection(foundClients, adoptClients)
 	manifestYAML := renderStdioBridgeManifestYAML(manifestName, entry.Command, entry.Args, env, port, adoptClientBindings(adoptClients))
-	if _, err := config.ParseManifest(strings.NewReader(manifestYAML)); err != nil {
-		return nil, fmt.Errorf("render adopted manifest: %w", err)
+	if _, err := a.ManifestValidateMode(manifestYAML, ValidateModeStrict); err != nil {
+		return nil, fmt.Errorf("entry name %q is not a valid manifest name: %w; adopt with a valid --name is not supported in v1", manifestName, err)
 	}
 
 	return &AdoptPlan{

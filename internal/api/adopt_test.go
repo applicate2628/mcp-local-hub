@@ -915,6 +915,31 @@ args = ["version"]
 	}
 }
 
+func TestBuildAdoptPlanRejectsStrictInvalidEntryNameBeforeMutation(t *testing.T) {
+	entry := "bad__name"
+	codexPath, manifestRoot, stateRoot := setupAdoptTestEnv(t, entry, `[mcp_servers.bad__name]
+command = "go"
+args = ["version"]
+`)
+	before := mustReadFileForAdoptTest(t, codexPath)
+
+	_, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName: entry,
+		Client:    "codex-cli",
+		Port:      9311,
+	})
+	if err == nil {
+		t.Fatal("BuildAdoptPlan accepted a strict-invalid '__' manifest name")
+	}
+	msg := err.Error()
+	for _, want := range []string{"entry name", entry, "not a valid manifest name", "__", "valid --name is not supported in v1"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("BuildAdoptPlan error = %q, want substring %q", msg, want)
+		}
+	}
+	assertAdoptPlanMutationFree(t, codexPath, before, manifestRoot, stateRoot, entry)
+}
+
 func TestPickNextFreeAdoptPortSkipsDiskEmbedIntentAndBoundPorts(t *testing.T) {
 	embedPort := 9300
 	prevEmbeddedCollector := collectEmbeddedManifestPortsFn
@@ -1009,6 +1034,40 @@ daemons:
 	}
 	if got != expected {
 		t.Fatalf("pickNextFreeAdoptPort = %d, want %d (unparseable manifest port=%d pool=%d)", got, expected, daemonPort, poolPort)
+	}
+}
+
+func TestPickNextFreeAdoptPortScrapesFlowPortAndReversedInlinePool(t *testing.T) {
+	manifestRoot := isolateAdoptPortAllocatorForTest(t)
+	used := map[int]bool{}
+	daemonPort := nextBindableAdoptPortForTest(t, used)
+	used[daemonPort] = true
+	poolPort := nextBindableAdoptPortForTest(t, used)
+	used[poolPort] = true
+	expected := nextBindableAdoptPortForTest(t, used)
+
+	manifestName := "adopt-port-flow"
+	if err := os.MkdirAll(filepath.Join(manifestRoot, manifestName), 0o700); err != nil {
+		t.Fatalf("mkdir manifest: %v", err)
+	}
+	raw := fmt.Sprintf(`name: %s
+kind: global
+transport: stdio-bridge
+command: go
+future_unknown_field: true
+daemons: [{name: default, port: %d}]
+port_pool: {end: %d, start: %d}
+`, manifestName, daemonPort, poolPort, poolPort)
+	if err := os.WriteFile(filepath.Join(manifestRoot, manifestName, "manifest.yaml"), []byte(raw), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	got, err := pickNextFreeAdoptPort()
+	if err != nil {
+		t.Fatalf("pickNextFreeAdoptPort: %v", err)
+	}
+	if got != expected {
+		t.Fatalf("pickNextFreeAdoptPort = %d, want %d (flow daemon port=%d reversed pool port=%d)", got, expected, daemonPort, poolPort)
 	}
 }
 
