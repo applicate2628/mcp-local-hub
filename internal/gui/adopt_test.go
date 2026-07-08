@@ -2,6 +2,7 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
@@ -432,7 +434,82 @@ args = ["version"]
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d, want 400; body=%s", rec.Code, rec.Body.String())
 	}
-	if code := decodeAdoptJSON(t, rec)["code"]; code != "BAD_INPUT" {
+	body := decodeAdoptJSON(t, rec)
+	if code := body["code"]; code != "BAD_INPUT" {
 		t.Fatalf("code=%#v, want BAD_INPUT", code)
+	}
+	// bot PR #516 P3: a path-free input-validation failure must surface the
+	// ACTIONABLE message, not the opaque redacted "internal error" — otherwise
+	// the operator cannot tell what input to fix.
+	if msg, _ := body["error"].(string); msg == "internal error" || !strings.Contains(msg, "must be one of") {
+		t.Fatalf("error=%#v, want actionable '--client must be one of ...' (not redacted)", body["error"])
+	}
+}
+
+// TestAdoptErrorMessageHasPath is the P3a redaction discriminator: adopt's
+// input-validation errors carry only ids/names (no separator) and must be
+// treated as actionable, while any message embedding a filesystem path is
+// path-bearing and must be redacted before reaching the wire.
+func TestAdoptErrorMessageHasPath(t *testing.T) {
+	actionable := []string{
+		"adopt entry name is required",
+		`--client must be one of claude-code | codex-cli | cursor`,
+		`unknown adopt client "zed" (expected claude-code | codex-cli)`,
+		`server "x" in source client "codex-cli" is disabled; enable it first before adopting`,
+		`--clients must include source --client "codex-cli"`,
+	}
+	for _, msg := range actionable {
+		if adoptErrorMessageHasPath(msg) {
+			t.Errorf("actionable validation message wrongly flagged as path-bearing: %q", msg)
+		}
+	}
+	pathBearing := []string{
+		`resolve client config path for "codex-cli": open C:\Users\dima_\AppData\config.toml: denied`,
+		`resolve client config path for "codex-cli": open /home/user/.config/x.json: denied`,
+		`check existing disk manifest "x": open \\host\share\manifest.yaml: denied`,
+	}
+	for _, msg := range pathBearing {
+		if !adoptErrorMessageHasPath(msg) {
+			t.Errorf("path-bearing message not flagged (would leak path): %q", msg)
+		}
+	}
+}
+
+// TestAdoptRoutePublishesOperatorActionEvent guards the P3b audit contract: a
+// committed GUI adopt (manifest create + client-config rewrite) must publish an
+// operator-action row like the sibling migrate/demigrate routes, so
+// gui-events.log can reconstruct that the GUI performed the adoption.
+func TestAdoptRoutePublishesOperatorActionEvent(t *testing.T) {
+	entry := "gui-adopt-audit"
+	setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-adopt-audit]
+command = "go"
+args = ["version"]
+`)
+	s := NewServer(Config{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/adopt",
+		strings.NewReader(`{"entry":"gui-adopt-audit","client":"codex-cli","port":9328}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	select {
+	case ev := <-ch:
+		if ev.Type != "operator-action" {
+			t.Fatalf("event type=%q, want operator-action", ev.Type)
+		}
+		if ev.Body["action"] != "adopt" {
+			t.Errorf("action=%v, want adopt", ev.Body["action"])
+		}
+		if _, ok := ev.Body["actor"]; !ok {
+			t.Errorf("body missing actor field: %+v", ev.Body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no operator-action event published after a successful adopt")
 	}
 }

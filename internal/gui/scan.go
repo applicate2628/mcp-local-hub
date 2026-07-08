@@ -32,7 +32,8 @@ func registerScanRoutes(s *Server) {
 	// choices (direct_installable) from the same single owner the Servers
 	// matrix consumes via the scan result. The body is the static
 	// api.ClientCapabilities() projection of clientScanners() + IsRelayStdio
-	// + remoteHTTPCapableClients — no host I/O, no caching concern.
+	// + remoteHTTPCapableClients + AdoptSupportedClients — no host I/O, no
+	// caching concern.
 	s.mux.HandleFunc("/api/client-capabilities", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")

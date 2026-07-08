@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -102,6 +103,17 @@ func (s *Server) adoptHandler(w http.ResponseWriter, r *http.Request) {
 		writeAdoptExecuteError(w, err, status, code)
 		return
 	}
+	// gui-events.log audit row: adopt is a committed operator mutation (it
+	// creates a manifest and rewrites client configs), so it must publish an
+	// operator action like the sibling migrate/demigrate routes do (bot PR
+	// #516 P3). Emitted only here, AFTER ExecuteAdopt committed. Identifiers
+	// only (manifest name, port, repointed client names — non-sensitive);
+	// routed secret KEY names are deliberately NOT included.
+	s.events.PublishOperatorAction("adopt", api.CurrentOSUser(), map[string]any{
+		"name":    plan.ManifestName,
+		"port":    plan.Port,
+		"clients": plan.AdoptClients,
+	})
 	writeJSON(w, http.StatusCreated, adoptExecuteResponse{
 		Name:           plan.ManifestName,
 		Port:           plan.Port,
@@ -151,11 +163,31 @@ func adoptSymlinkTargets(clientNames []string) ([]adoptSymlinkTarget, error) {
 
 func writeAdoptPlanError(w http.ResponseWriter, err error) {
 	status, code := adoptPlanErrorStatus(err)
-	if code == "BAD_INPUT" {
+	// A BAD_INPUT plan failure is one of two shapes: an actionable
+	// input-validation message (unknown/unsupported client, disabled entry,
+	// invalid --name/--port, must-include-source — built from ids and names
+	// only, no filesystem path) OR a path-bearing read/parse failure (a
+	// wrapped ConfigPathForName / disk-manifest-check error that can embed an
+	// absolute path). The validation message is safe and must reach the
+	// operator so they can fix the input; only the path-bearing one is redacted
+	// (bot PR #516 P3 — the earlier blanket redaction turned every fixable
+	// input error into an opaque "internal error").
+	if code == "BAD_INPUT" && adoptErrorMessageHasPath(err.Error()) {
 		writeAPIErrorRedacted(w, err, status, code, "/api/adopt/plan")
 		return
 	}
 	writeAPIError(w, err, status, code)
+}
+
+// adoptErrorPathRe matches a Windows drive-absolute path (`C:\` / `C:/`), a UNC
+// path (`\\host`), or a POSIX absolute path (a `/`-led segment after start or
+// whitespace) embedded anywhere in a message. Adopt's input-validation errors
+// carry only ids/names and never a path separator, so a match reliably flags a
+// path-bearing read/parse failure whose absolute path must not reach the wire.
+var adoptErrorPathRe = regexp.MustCompile(`[A-Za-z]:[\\/]|\\\\[^\s\\]|(?:^|\s)/\S`)
+
+func adoptErrorMessageHasPath(msg string) bool {
+	return adoptErrorPathRe.MatchString(msg)
 }
 
 func adoptPlanErrorStatus(err error) (int, string) {

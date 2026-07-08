@@ -1390,7 +1390,7 @@ SHARED = "1"
 	var out bytes.Buffer
 	PrintAdoptPlan(&out, plan)
 	if !strings.Contains(out.String(), entry+" in claude-code differs (command/args)") ||
-		!strings.Contains(out.String(), "--clients codex-cli,claude-code") {
+		!strings.Contains(out.String(), "not adopted") {
 		t.Fatalf("dry-run did not report mismatched same-name entry:\n%s", out.String())
 	}
 }
@@ -1460,9 +1460,9 @@ API_KEY = "staging-secret"
 	}
 }
 
-func TestBuildAdoptPlanExplicitClientsAllowMismatchedSameNameEntry(t *testing.T) {
+func TestBuildAdoptPlanExplicitClientsReexcludeMismatchedSameNameEntry(t *testing.T) {
 	entry := "mui-adopt-signature-explicit"
-	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-signature-explicit]
+	codexPath, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-signature-explicit]
 command = "go"
 args = ["version"]
 `)
@@ -1492,8 +1492,31 @@ args = ["version"]
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
 	}
-	if !reflect.DeepEqual(plan.AdoptClients, []string{"codex-cli", "claude-code"}) {
-		t.Fatalf("AdoptClients = %#v, want explicit codex-cli + claude-code", plan.AdoptClients)
+	if !reflect.DeepEqual(plan.AdoptClients, []string{"codex-cli"}) {
+		t.Fatalf("AdoptClients = %#v, want source only after re-excluding mismatched claude-code", plan.AdoptClients)
+	}
+	if len(plan.SignatureMismatches) != 1 || plan.SignatureMismatches[0].Client != "claude-code" {
+		t.Fatalf("SignatureMismatches = %#v, want claude-code surfaced", plan.SignatureMismatches)
+	}
+	if err := NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{}); err != nil {
+		t.Fatalf("ExecuteAdopt: %v", err)
+	}
+	manifestBytes := mustReadFileForAdoptTest(t, filepath.Join(manifestRoot, entry, "manifest.yaml"))
+	m, err := config.ParseManifest(bytes.NewReader(manifestBytes))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v\n%s", err, manifestBytes)
+	}
+	if len(m.ClientBindings) != 1 || m.ClientBindings[0].Client != "codex-cli" {
+		t.Fatalf("client_bindings = %#v, want only codex-cli", m.ClientBindings)
+	}
+	var claudeRoot map[string]any
+	afterClaude := mustReadFileForAdoptTest(t, claudePath)
+	if err := json.Unmarshal(afterClaude, &claudeRoot); err != nil {
+		t.Fatalf("decode claude after ExecuteAdopt: %v\n%s", err, afterClaude)
+	}
+	claudeEntry := claudeRoot["mcpServers"].(map[string]any)[entry].(map[string]any)
+	if claudeEntry["command"] != "node" {
+		t.Fatalf("mismatched claude entry was repointed: %#v", claudeEntry)
 	}
 }
 
@@ -1647,8 +1670,8 @@ args = ["version"]
 	var out bytes.Buffer
 	PrintAdoptPlan(&out, plan)
 	if !strings.Contains(out.String(), entry+" in cursor is disabled") ||
-		!strings.Contains(out.String(), "--clients codex-cli,cursor") {
-		t.Fatalf("dry-run did not report disabled same-name entry with explicit override guidance:\n%s", out.String())
+		!strings.Contains(out.String(), "not adopted") {
+		t.Fatalf("dry-run did not report disabled same-name entry:\n%s", out.String())
 	}
 
 	explicit, err := NewAPI().BuildAdoptPlan(AdoptOpts{
@@ -1665,8 +1688,67 @@ args = ["version"]
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan explicit --clients: %v", err)
 	}
-	if !containsAdoptString(explicit.AdoptClients, "cursor") {
-		t.Fatalf("explicit --clients did not include disabled cursor target: %#v", explicit.AdoptClients)
+	if containsAdoptString(explicit.AdoptClients, "cursor") {
+		t.Fatalf("explicit --clients included disabled cursor target: %#v", explicit.AdoptClients)
+	}
+	if len(explicit.DisabledSameName) != 1 || explicit.DisabledSameName[0].Client != "cursor" {
+		t.Fatalf("explicit DisabledSameName = %#v, want cursor surfaced", explicit.DisabledSameName)
+	}
+}
+
+func TestBuildAdoptPlanExplicitClientsAllCleanStayFrozenAndDoNotSweepInNewSameName(t *testing.T) {
+	entry := "mui-adopt-explicit-frozen"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-explicit-frozen]
+command = "go"
+args = ["version"]
+`)
+	home := filepath.Dir(filepath.Dir(codexPath))
+	claudePath := filepath.Join(home, ".claude.json")
+	writeJSONForAdoptTest(t, claudePath, map[string]any{
+		"mcpServers": map[string]any{
+			entry: map[string]any{
+				"command": "go",
+				"args":    []any{"version"},
+			},
+		},
+	})
+	cursorPath := filepath.Join(home, ".cursor", "mcp.json")
+	writeJSONForAdoptTest(t, cursorPath, map[string]any{
+		"mcpServers": map[string]any{
+			entry: map[string]any{
+				"command": "go",
+				"args":    []any{"version"},
+			},
+		},
+	})
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         port,
+		Clients:      []string{"codex-cli", "claude-code"},
+		ScanOpts: ScanOpts{
+			CodexConfigPath:  codexPath,
+			ClaudeConfigPath: claudePath,
+			CursorConfigPath: cursorPath,
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	if !reflect.DeepEqual(plan.AdoptClients, []string{"codex-cli", "claude-code"}) {
+		t.Fatalf("AdoptClients = %#v, want exactly the requested clean clients", plan.AdoptClients)
+	}
+	if !reflect.DeepEqual(plan.AlsoPresent, []string{"cursor"}) {
+		t.Fatalf("AlsoPresent = %#v, want unrequested clean cursor only", plan.AlsoPresent)
+	}
+	if len(plan.SignatureMismatches) != 0 {
+		t.Fatalf("SignatureMismatches = %#v, want none for all-clean requested set", plan.SignatureMismatches)
+	}
+	if len(plan.DisabledSameName) != 0 {
+		t.Fatalf("DisabledSameName = %#v, want none for all-clean requested set", plan.DisabledSameName)
 	}
 }
 

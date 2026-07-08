@@ -14,7 +14,7 @@ import { useAutoScan } from "../hooks/useAutoScan";
 import { useEventSource } from "../hooks/useEventSource";
 import { groupMigrationEntries, type MigrationGroups } from "../lib/migration-grouping";
 import { pushToast } from "../lib/toast-store";
-import type { ScanEntry, ScanResult } from "../types";
+import type { ClientCapability, ScanEntry, ScanResult } from "../types";
 
 // DismissedResponse mirrors the /api/dismissed handler shape from
 // internal/gui/dismiss.go. Declared inline here rather than in
@@ -260,8 +260,8 @@ export function DiscoveryScreen() {
     }
   }
 
-  async function runAdoptPlan(entry: ScanEntry) {
-    const client = firstClientFor(entry);
+  async function runAdoptPlan(entry: ScanEntry, sourceClient?: string) {
+    const client = sourceClient || firstClientFor(entry);
     if (!client) {
       setActionError(`Adopt ${entry.name}: no stdio client found`);
       return;
@@ -386,6 +386,7 @@ export function DiscoveryScreen() {
           <UnmanagedExternalGroup
             unknownEntries={groups.unknown}
             externalEntries={groups.external}
+            clientCapabilities={scan.client_capabilities ?? {}}
             actionBusy={actionBusy}
             onAdopt={runAdoptPlan}
             onDismiss={runDismiss}
@@ -565,8 +566,9 @@ function ReadyToMigrateGroup(props: {
 function UnmanagedExternalGroup(props: {
   unknownEntries: ScanEntry[];
   externalEntries: ScanEntry[];
+  clientCapabilities: Record<string, ClientCapability>;
   actionBusy: string | null;
-  onAdopt: (entry: ScanEntry) => void;
+  onAdopt: (entry: ScanEntry, sourceClient: string) => void;
   onDismiss: (entry: ScanEntry) => void;
 }) {
   const total = props.unknownEntries.length + props.externalEntries.length;
@@ -589,43 +591,48 @@ function UnmanagedExternalGroup(props: {
       </div>
       {props.unknownEntries.length > 0 && (
         <ul class="group-rows group-rows-unknown" data-subgroup="unknown">
-          {props.unknownEntries.map((e) => (
-            <li key={e.name} data-server={e.name}>
-              <span class="server-name">{e.name}</span>
-              <span class="badge badge-unknown">Unknown stdio</span>
-              <button
-                type="button"
-                class="adopt btn btn-primary"
-                data-action="adopt"
-                disabled={props.actionBusy != null}
-                onClick={() => props.onAdopt(e)}
-              >
-                {props.actionBusy === adoptActionKey(e.name) ? "Planning..." : "Adopt into hub"}
-              </button>
-              <button
-                type="button"
-                class="create-manifest btn"
-                data-action="create-manifest"
-                onClick={() => {
-                  const client = firstClientFor(e);
-                  const url = client
-                    ? `#/add-server?server=${encodeURIComponent(e.name)}&from-client=${encodeURIComponent(client)}`
-                    : `#/add-server?server=${encodeURIComponent(e.name)}`;
-                  window.location.hash = url;
-                }}
-              >
-                Create manifest
-              </button>
-              <button
-                type="button"
-                class="dismiss btn btn-danger"
-                data-action="dismiss"
-                onClick={() => props.onDismiss(e)}
-              >
-                Dismiss
-              </button>
-            </li>
-          ))}
+          {props.unknownEntries.map((e) => {
+            const adoptClient = firstAdoptClientFor(e, props.clientCapabilities);
+            return (
+              <li key={e.name} data-server={e.name}>
+                <span class="server-name">{e.name}</span>
+                <span class="badge badge-unknown">Unknown stdio</span>
+                {adoptClient && (
+                  <button
+                    type="button"
+                    class="adopt btn btn-primary"
+                    data-action="adopt"
+                    disabled={props.actionBusy != null}
+                    onClick={() => props.onAdopt(e, adoptClient)}
+                  >
+                    {props.actionBusy === adoptActionKey(e.name) ? "Planning..." : "Adopt into hub"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  class="create-manifest btn"
+                  data-action="create-manifest"
+                  onClick={() => {
+                    const client = firstClientFor(e);
+                    const url = client
+                      ? `#/add-server?server=${encodeURIComponent(e.name)}&from-client=${encodeURIComponent(client)}`
+                      : `#/add-server?server=${encodeURIComponent(e.name)}`;
+                    window.location.hash = url;
+                  }}
+                >
+                  Create manifest
+                </button>
+                <button
+                  type="button"
+                  class="dismiss btn btn-danger"
+                  data-action="dismiss"
+                  onClick={() => props.onDismiss(e)}
+                >
+                  Dismiss
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
       {props.externalEntries.length > 0 && (
@@ -725,6 +732,19 @@ function firstClientFor(entry: { client_presence?: Record<string, { transport?: 
   const presence = entry.client_presence ?? {};
   for (const [client, info] of Object.entries(presence)) {
     if (info?.transport === "stdio") return client;
+  }
+  return "";
+}
+
+function firstAdoptClientFor(
+  entry: { client_presence?: Record<string, { transport?: string }> },
+  clientCapabilities: Record<string, ClientCapability>,
+): string {
+  const presence = entry.client_presence ?? {};
+  for (const [client, info] of Object.entries(presence)) {
+    if (info?.transport === "stdio" && clientCapabilities[client]?.adopt_supported === true) {
+      return client;
+    }
   }
   return "";
 }

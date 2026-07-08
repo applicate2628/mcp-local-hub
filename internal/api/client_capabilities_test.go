@@ -171,3 +171,29 @@ func TestClientCapabilitiesRemoteHTTPMatchesMatrix(t *testing.T) {
 		}
 	}
 }
+
+func TestClientCapabilitiesAdoptSupportedMatchesAdoptRegistry(t *testing.T) {
+	caps := ClientCapabilities()
+	adoptSupported := map[string]bool{}
+	for _, name := range AdoptSupportedClients() {
+		adoptSupported[name] = true
+	}
+
+	for name, cap := range caps {
+		want := adoptSupported[name]
+		if cap.AdoptSupported != want {
+			t.Errorf("client %q: AdoptSupported = %v, want %v (matches AdoptSupportedClients)", name, cap.AdoptSupported, want)
+		}
+	}
+
+	for _, name := range []string{"zed", "kiro", "windsurf", "cline"} {
+		cap, ok := caps[name]
+		if !ok {
+			t.Errorf("expected unsupported adopt-discovery client %q in capability map", name)
+			continue
+		}
+		if cap.AdoptSupported {
+			t.Errorf("client %q is adopt_supported=true but /api/adopt/plan rejects it", name)
+		}
+	}
+}

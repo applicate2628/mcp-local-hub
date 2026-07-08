@@ -75,6 +75,55 @@ function unmanagedDiscoveryScan(): ScanResult {
       },
     ],
     client_config_presence: {},
+    client_capabilities: {
+      "codex-cli": {
+        scannable: true,
+        direct_installable: true,
+        remote_http_capable: true,
+        adopt_supported: true,
+      },
+    },
+  };
+}
+
+function unsupportedAdoptDiscoveryScan(): ScanResult {
+  return {
+    at: "2026-06-15T00:00:00Z",
+    entries: [
+      {
+        name: "zed-local-stdio",
+        status: "unknown",
+        manifest_exists: false,
+        can_migrate: false,
+        client_presence: {
+          zed: { transport: "stdio" },
+        },
+      },
+      {
+        name: "codex-local-stdio",
+        status: "unknown",
+        manifest_exists: false,
+        can_migrate: false,
+        client_presence: {
+          "codex-cli": { transport: "stdio" },
+        },
+      },
+    ],
+    client_config_presence: {},
+    client_capabilities: {
+      zed: {
+        scannable: true,
+        direct_installable: false,
+        remote_http_capable: false,
+        adopt_supported: false,
+      },
+      "codex-cli": {
+        scannable: true,
+        direct_installable: true,
+        remote_http_capable: true,
+        adopt_supported: true,
+      },
+    },
   };
 }
 
@@ -220,6 +269,26 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     expect(
       within(externalRow as HTMLElement).queryByRole("button", { name: "Adopt into hub" }),
     ).toBeNull();
+  });
+
+  it("omits Adopt into hub for unknown stdio rows from unsupported adopt clients", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, unsupportedAdoptDiscoveryScan()),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+    render(<DiscoveryScreen />);
+    const unsupportedRow = (await screen.findByText("zed-local-stdio")).closest("li");
+    const supportedRow = screen.getByText("codex-local-stdio").closest("li");
+    expect(unsupportedRow).not.toBeNull();
+    expect(supportedRow).not.toBeNull();
+    expect(
+      within(unsupportedRow as HTMLElement).queryByRole("button", { name: "Adopt into hub" }),
+    ).toBeNull();
+    expect(
+      within(supportedRow as HTMLElement).getByRole("button", { name: "Adopt into hub" }),
+    ).toBeTruthy();
   });
 
   it("plans, requires symlink consent, confirms adopt, and refreshes scan", async () => {

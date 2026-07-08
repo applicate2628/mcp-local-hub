@@ -2,7 +2,7 @@
 // per-client CAPABILITY flags the GUI needs to decide which client columns
 // and direct-install choices it may safely offer.
 //
-// Three capabilities are surfaced, each derived from the one backend owner of
+// Four capabilities are surfaced, each derived from the one backend owner of
 // that fact so the GUI cannot drift:
 //
 //   - scannable          — the client has a clientScanners() parser, so
@@ -33,11 +33,16 @@
 //                          the marketplace remote-http DRAFT emission, NOT by
 //                          the Catalog direct-install client choices. The owner
 //                          is remoteHTTPCapableClients (remote_http_matrix.go).
+//   - adoptSupported     — the client id is accepted by mcphub adopt's plan
+//                          and execute paths. The owner is AdoptSupportedClients
+//                          (adopt.go), so Discovery can hide impossible Adopt
+//                          actions for scanned-but-unsupported clients.
 //
-// Both sets already exist and are independently tested; this file only
+// These owners already exist and are independently tested; this file only
 // PROJECTS them onto a per-client struct the GUI consumes, keyed by every
 // clients.SupportedClientNames() id, so the GUI derives its column / direct-
-// install universe from the backend instead of a hard-coded mirror.
+// install / adopt-action universe from the backend instead of a hard-coded
+// mirror.
 
 package api
 
@@ -64,6 +69,11 @@ type ClientCapability struct {
 	// install PLAN gate and the marketplace remote-http DRAFT emission — NOT
 	// by the Catalog direct-install client choices (those use DirectInstallable).
 	RemoteHTTPCapable bool `json:"remote_http_capable"`
+	// AdoptSupported is true when /api/adopt/plan accepts this client as a
+	// source/target for adopting an unmanaged stdio entry. Derived from
+	// AdoptSupportedClients so GUI Discovery never offers an Adopt action that
+	// the API will deterministically reject.
+	AdoptSupported bool `json:"adopt_supported"`
 }
 
 // scannableClientNames returns the set of client ids that have a
@@ -88,11 +98,16 @@ func scannableClientNames() map[string]bool {
 //   - the Servers matrix non-core columns (scannable clients only),
 //   - the Catalog direct-install client choices (directInstallable only), and
 //   - the remote-http manifest/header surfaces (remoteHTTPCapable only),
+//   - the Discovery Adopt action (adoptSupported only),
 //
 // so none of these surfaces needs a hard-coded client list that could drift
 // behind the backend registry.
 func ClientCapabilities() map[string]ClientCapability {
 	scannable := scannableClientNames()
+	adoptSupported := map[string]bool{}
+	for _, name := range AdoptSupportedClients() {
+		adoptSupported[name] = true
+	}
 	// relayStdio is built once via clients.RelayStdioClientNames (a single
 	// clients.AllClients() pass) instead of calling clients.IsRelayStdio per
 	// client name below — IsRelayStdio rebuilds the full adapter set (every
@@ -112,6 +127,7 @@ func ClientCapabilities() map[string]ClientCapability {
 			// offered with no edit here.
 			DirectInstallable: !relayStdio[name],
 			RemoteHTTPCapable: isRemoteHTTPCapableClient(name),
+			AdoptSupported:    adoptSupported[name],
 		}
 	}
 	return out

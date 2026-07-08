@@ -123,19 +123,11 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	}
 
 	clientScan := a.adoptClientsWithSameNameEntry(entryName, scanOpts, sourceClient, newAdoptEntrySignature(entry))
-	foundClients := clientScan.Matching
-	mismatches := clientScan.Mismatched
-	disabledSameName := clientScan.Disabled
-	if len(opts.Clients) > 0 {
-		foundClients = clientScan.Found
-		mismatches = nil
-		disabledSameName = nil
-	}
-	adoptClients, err := normalizeAdoptClients(opts.Clients, foundClients, sourceClient)
+	adoptClients, err := normalizeAdoptClients(opts.Clients, clientScan.Matching, sourceClient, clientScan.Mismatched, clientScan.Disabled)
 	if err != nil {
 		return nil, err
 	}
-	alsoPresent := clientsOutsideSelection(foundClients, adoptClients)
+	alsoPresent := clientsOutsideSelection(clientScan.Matching, adoptClients)
 	manifestYAML := renderStdioBridgeManifestYAML(manifestName, entry.Command, entry.Args, env, port, adoptClientBindings(adoptClients))
 	if _, err := a.ManifestValidateMode(manifestYAML, ValidateModeStrict); err != nil {
 		return nil, fmt.Errorf("entry name %q is not a valid manifest name: %w; adopt with a valid --name is not supported in v1", manifestName, err)
@@ -148,8 +140,8 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		Port:                port,
 		AdoptClients:        adoptClients,
 		AlsoPresent:         alsoPresent,
-		SignatureMismatches: mismatches,
-		DisabledSameName:    disabledSameName,
+		SignatureMismatches: clientScan.Mismatched,
+		DisabledSameName:    clientScan.Disabled,
 		SecretRoutedKeys:    routedKeys,
 		ManifestYAML:        manifestYAML,
 		secretValues:        secretValues,
@@ -224,19 +216,12 @@ func PrintAdoptPlan(w io.Writer, plan *AdoptPlan) {
 		fmt.Fprintf(w, "  also present in %s - re-run with --client %s or include it via --clients\n", client, client)
 	}
 	for _, mismatch := range plan.SignatureMismatches {
-		fmt.Fprintf(w, "  %s in %s differs (%s) - re-run with --clients %s to adopt it explicitly\n", plan.EntryName, mismatch.Client, mismatch.Reason, adoptExplicitClientsArg(plan.SourceClient, mismatch.Client))
+		fmt.Fprintf(w, "  %s in %s differs (%s) - not adopted; make that client entry match %s before adopting it\n", plan.EntryName, mismatch.Client, mismatch.Reason, plan.SourceClient)
 	}
 	for _, disabled := range plan.DisabledSameName {
-		fmt.Fprintf(w, "  %s in %s is disabled - not adopted; use --clients %s to override\n", plan.EntryName, disabled.Client, adoptExplicitClientsArg(plan.SourceClient, disabled.Client))
+		fmt.Fprintf(w, "  %s in %s is disabled - not adopted; enable that client entry before adopting it\n", plan.EntryName, disabled.Client)
 	}
 	fmt.Fprintln(w, "No changes made. Re-run with --yes to apply.")
-}
-
-func adoptExplicitClientsArg(sourceClient, otherClient string) string {
-	if sourceClient == "" || sourceClient == otherClient {
-		return otherClient
-	}
-	return sourceClient + "," + otherClient
 }
 
 func adoptScanOpts(opts ScanOpts) ScanOpts {
@@ -347,7 +332,7 @@ func (a *API) adoptClientsWithSameNameEntry(entryName string, scanOpts ScanOpts,
 	return result
 }
 
-func normalizeAdoptClients(requested, found []string, sourceClient string) ([]string, error) {
+func normalizeAdoptClients(requested, found []string, sourceClient string, mismatches []AdoptClientSignatureMismatch, disabled []AdoptClientDisabled) ([]string, error) {
 	var selected []string
 	if len(requested) == 0 {
 		selected = append(selected, found...)
@@ -366,7 +351,7 @@ func normalizeAdoptClients(requested, found []string, sourceClient string) ([]st
 	if !containsAdoptString(selected, sourceClient) {
 		return nil, fmt.Errorf("--clients must include source --client %q", sourceClient)
 	}
-	return selected, nil
+	return filterAdoptExcludedClients(selected, sourceClient, mismatches, disabled), nil
 }
 
 func dedupeTrimmedClients(in []string) []string {
@@ -393,6 +378,27 @@ func clientsOutsideSelection(found, selected []string) []string {
 		if !selectedSet[client] {
 			out = append(out, client)
 		}
+	}
+	return out
+}
+
+func filterAdoptExcludedClients(selected []string, sourceClient string, mismatches []AdoptClientSignatureMismatch, disabled []AdoptClientDisabled) []string {
+	excluded := make(map[string]bool, len(mismatches)+len(disabled))
+	for _, mismatch := range mismatches {
+		excluded[mismatch.Client] = true
+	}
+	for _, disabledClient := range disabled {
+		excluded[disabledClient.Client] = true
+	}
+	if len(excluded) == 0 {
+		return selected
+	}
+	out := make([]string, 0, len(selected))
+	for _, client := range selected {
+		if client != sourceClient && excluded[client] {
+			continue
+		}
+		out = append(out, client)
 	}
 	return out
 }
