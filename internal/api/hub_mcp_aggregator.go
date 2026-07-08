@@ -1487,11 +1487,37 @@ func daemonStillBound(snap *ResolverSnapshot, client string, ref canonicalToolRe
 // (codex bot r4 P1 closure on PR #157). For the initialize call
 // itself, callers pass "" — initialize is the negotiation step and
 // the header is not yet known.
+// countingReader wraps a reader and tracks the total bytes read through it, so
+// the aggregator can charge the ACTUAL wire bytes consumed — including SSE
+// framing that readSSEResponse reads then discards — against a per-daemon budget
+// (bot PR #517 r4).
+type countingReader struct {
+	r io.Reader
+	n int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
+}
+
 func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVer string, timeout time.Duration, expectResponse bool) ([]byte, http.Header, error) {
+	raw, _, hdr, err := doDaemonPostSized(ctx, port, body, daemonSID, protoVer, timeout, expectResponse)
+	return raw, hdr, err
+}
+
+// doDaemonPostSized is doDaemonPost plus bytesRead — the number of bytes
+// actually read off the wire. For the SSE path this is the FULL framed stream
+// length (via countingReader), not just the extracted JSON-RPC event, so a
+// caller draining pagination can enforce a cumulative read budget that a
+// framing-padded SSE daemon cannot evade (bot PR #517 r4). doDaemonPost keeps
+// its original signature for the other five callers.
+func doDaemonPostSized(ctx context.Context, port int, body []byte, daemonSID, protoVer string, timeout time.Duration, expectResponse bool) (payload []byte, bytesRead int, header http.Header, err error) {
 	url := clients.HubLoopbackURL(port, "/mcp")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
@@ -1504,7 +1530,7 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, nil, err
 	}
 	defer resp.Body.Close()
 
@@ -1516,7 +1542,7 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 		// Typed error so callers (hot-swap (a) self-heal) can tell a
 		// received-but-rejected HTTP failure from a never-landed transport
 		// failure. Error() still renders "HTTP %d", so messages are unchanged.
-		return raw, resp.Header, &daemonHTTPError{code: resp.StatusCode, body: raw}
+		return raw, len(raw), resp.Header, &daemonHTTPError{code: resp.StatusCode, body: raw}
 	}
 
 	// Notification path: return IMMEDIATELY on 2xx without reading
@@ -1533,25 +1559,30 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 	// whose body wasn't fully drained), but we open a fresh
 	// connection per call regardless.
 	if !expectResponse {
-		return nil, resp.Header, nil
+		return nil, 0, resp.Header, nil
 	}
 
 	if isSSEContentType(resp.Header.Get("Content-Type")) {
-		payload, err := readSSEResponse(resp.Body, maxAggregatorResponseBytes)
+		// Count every byte the SSE scanner reads off the wire — a daemon can
+		// precede a tiny response event with near-maxAggregatorResponseBytes of
+		// ignored notification/comment framing, and that read cost must be
+		// charged to the cumulative budget (bot PR #517 r4).
+		cr := &countingReader{r: resp.Body}
+		payload, err := readSSEResponse(cr, maxAggregatorResponseBytes)
 		if err != nil {
-			return nil, resp.Header, err
+			return nil, cr.n, resp.Header, err
 		}
-		return payload, resp.Header, nil
+		return payload, cr.n, resp.Header, nil
 	}
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAggregatorResponseBytes+1))
 	if err != nil {
-		return nil, resp.Header, fmt.Errorf("read: %w", err)
+		return nil, len(raw), resp.Header, fmt.Errorf("read: %w", err)
 	}
 	if len(raw) > maxAggregatorResponseBytes {
-		return nil, resp.Header, fmt.Errorf("response too large (> %d bytes)", maxAggregatorResponseBytes)
+		return nil, len(raw), resp.Header, fmt.Errorf("response too large (> %d bytes)", maxAggregatorResponseBytes)
 	}
-	return raw, resp.Header, nil
+	return raw, len(raw), resp.Header, nil
 }
 
 // postInitialize sends an initialize call to a single daemon and
@@ -1721,17 +1752,17 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 		if err != nil {
 			return nil, fmt.Errorf("marshal tools/list request: %w", err)
 		}
-		raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonListTimeout, true)
+		raw, bytesRead, _, err := doDaemonPostSized(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonListTimeout, true)
 		if err != nil {
 			return nil, err
 		}
-		// Count the FULL page payload against the cumulative budget BEFORE
-		// unmarshalling. doDaemonPost reads up to maxAggregatorResponseBytes per
-		// page regardless of how much is tools vs ignored fields, so len(raw) —
-		// not the extracted tool/cursor bytes — is the true per-daemon read+parse
-		// bound (bot PR #517 r3; restores the pre-pagination per-daemon 4 MiB cap,
-		// now summed across pages).
-		totalBytes += len(raw)
+		// Charge the ACTUAL wire bytes read this page against the cumulative
+		// budget. bytesRead is the full framed stream length even for an SSE
+		// response (where raw is only the extracted event), so a daemon padding
+		// each page with ignored SSE framing cannot evade the per-daemon read
+		// bound (bot PR #517 r3/r4; restores the pre-pagination 4 MiB per-daemon
+		// cap, now summed across pages).
+		totalBytes += bytesRead
 		if totalBytes > maxToolsListTotalBytes {
 			return nil, fmt.Errorf("daemon tools/list exceeded %d cumulative response bytes across pages (runaway payload)", maxToolsListTotalBytes)
 		}

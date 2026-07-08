@@ -4689,3 +4689,34 @@ func TestPostToolsListLargeCursorCapped(t *testing.T) {
 		t.Fatalf("err=%v, want 'cumulative bytes'", err)
 	}
 }
+
+// TestPostToolsListSSEFramingCharged pins that the cumulative budget charges the
+// FULL wire bytes even for an SSE response, where doDaemonPost returns only the
+// extracted JSON-RPC event. A daemon padding each page with large ignored SSE
+// comment framing must not evade the per-daemon read bound (bot PR #517 r4).
+func TestPostToolsListSSEFramingCharged(t *testing.T) {
+	orig := maxToolsListTotalBytes
+	maxToolsListTotalBytes = 1000
+	t.Cleanup(func() { maxToolsListTotalBytes = orig })
+
+	sd := newStubDaemon(t, "sse-sid")
+	padding := strings.Repeat("x", 3000) // ignored SSE comment framing, far over the cap
+	sd.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// The extracted event is ~90 bytes (well under the 1000 cap); only
+		// charging the wire bytes (framing) trips the budget on this page. If the
+		// framing were NOT charged, the drain would continue and hit the
+		// repeated-cursor guard instead — so asserting the byte-cap error proves
+		// the framing is counted.
+		_, _ = w.Write([]byte(": " + padding + "\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"a\"}],\"nextCursor\":\"c1\"}}\n\n"))
+	}
+	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
+	_, err := postToolsList(context.Background(), ref, "sse-sid", "2025-11-25")
+	if err == nil {
+		t.Fatal("expected cumulative-byte-cap error from SSE framing, got nil")
+	}
+	if !strings.Contains(err.Error(), "cumulative response bytes") {
+		t.Fatalf("err=%v, want 'cumulative response bytes' (SSE framing must be charged)", err)
+	}
+}
