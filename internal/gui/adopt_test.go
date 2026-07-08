@@ -1,0 +1,322 @@
+package gui
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/config"
+
+	toml "github.com/pelletier/go-toml/v2"
+)
+
+func setupGUIAdoptTestEnv(t *testing.T, entryName, codexBody string) (codexPath, manifestRoot, stateRoot string) {
+	t.Helper()
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("LOCALAPPDATA", filepath.Join(root, "localappdata"))
+	t.Setenv("APPDATA", filepath.Join(root, "appdata"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "xdg-data"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg-state"))
+	t.Setenv("MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK", "")
+	t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "")
+	t.Cleanup(api.ResetStrictModeIntentCacheForTest)
+
+	canonical := filepath.Join(root, "bin", api.MCPHubBinaryName())
+	if err := os.MkdirAll(filepath.Dir(canonical), 0o700); err != nil {
+		t.Fatalf("mkdir canonical parent: %v", err)
+	}
+	if err := os.WriteFile(canonical, []byte("test mcphub"), 0o700); err != nil {
+		t.Fatalf("write canonical mcphub stub: %v", err)
+	}
+	t.Cleanup(api.SetTestCanonicalMcphubPath(canonical))
+
+	codexPath = filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0o700); err != nil {
+		t.Fatalf("mkdir codex config parent: %v", err)
+	}
+	if err := os.WriteFile(codexPath, []byte(codexBody), 0o600); err != nil {
+		t.Fatalf("seed codex config: %v", err)
+	}
+
+	manifestRoot = guiAdoptDefaultManifestDir(t)
+	if err := os.MkdirAll(manifestRoot, 0o700); err != nil {
+		t.Fatalf("mkdir manifest root: %v", err)
+	}
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestRoot)
+
+	stateRoot = filepath.Join(root, "state")
+	t.Cleanup(api.SetDaemonStateRootForTest(stateRoot))
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(manifestRoot, entryName)) })
+	return codexPath, manifestRoot, stateRoot
+}
+
+func guiAdoptDefaultManifestDir(t *testing.T) string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		return filepath.Join(string(os.PathSeparator), "nonexistent", "mcphub", "servers")
+	}
+	exeDir := filepath.Dir(exe)
+	sibling := filepath.Join(exeDir, "servers")
+	if st, err := os.Stat(sibling); err == nil && st.IsDir() {
+		return sibling
+	}
+	parent := filepath.Join(exeDir, "..", "servers")
+	if st, err := os.Stat(parent); err == nil && st.IsDir() {
+		return parent
+	}
+	return sibling
+}
+
+func postAdoptTest(t *testing.T, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	s := NewServer(Config{})
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	return rec
+}
+
+func decodeAdoptJSON(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v\n%s", err, rec.Body.String())
+	}
+	return body
+}
+
+func TestAdoptPlanRouteReturnsPreviewWithoutMutating(t *testing.T) {
+	entry := "gui-adopt-plan"
+	codexPath, manifestRoot, stateRoot := setupGUIAdoptTestEnv(t, entry, `[profile.default]
+model = "gpt-5"
+
+[mcp_servers.gui-adopt-plan]
+command = "go"
+args = ["version"]
+`)
+	before, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatalf("read codex config before plan: %v", err)
+	}
+
+	rec := postAdoptTest(t, "/api/adopt/plan", `{"entry":"gui-adopt-plan","client":"codex-cli","port":9321}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	body := decodeAdoptJSON(t, rec)
+	if body["ManifestName"] != entry {
+		t.Fatalf("ManifestName=%#v, want %q", body["ManifestName"], entry)
+	}
+	if body["Port"] != float64(9321) {
+		t.Fatalf("Port=%#v, want 9321", body["Port"])
+	}
+	adoptClients, _ := body["AdoptClients"].([]any)
+	if len(adoptClients) != 1 || adoptClients[0] != "codex-cli" {
+		t.Fatalf("AdoptClients=%#v, want [codex-cli]", body["AdoptClients"])
+	}
+	if targets, _ := body["symlink_targets"].([]any); len(targets) != 0 {
+		t.Fatalf("symlink_targets=%#v, want []", body["symlink_targets"])
+	}
+	after, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatalf("read codex config after plan: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("plan route mutated codex config\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if _, err := os.Stat(filepath.Join(manifestRoot, entry, "manifest.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("plan route wrote manifest; stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stateRoot, "supervisor-intent.json")); !os.IsNotExist(err) {
+		t.Fatalf("plan route wrote supervisor intent; stat err=%v", err)
+	}
+}
+
+func TestAdoptRouteExecutesManifestIntentAndRepointsClient(t *testing.T) {
+	entry := "gui-adopt-execute"
+	codexPath, manifestRoot, stateRoot := setupGUIAdoptTestEnv(t, entry, `[profile.default]
+model = "gpt-5"
+
+[mcp_servers.keep]
+url = "http://example.invalid/mcp"
+
+[mcp_servers.gui-adopt-execute]
+command = "go"
+args = ["version"]
+`)
+
+	rec := postAdoptTest(t, "/api/adopt", `{"entry":"gui-adopt-execute","client":"codex-cli","port":9322}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	body := decodeAdoptJSON(t, rec)
+	if body["name"] != entry || body["port"] != float64(9322) {
+		t.Fatalf("response=%#v, want name %q port 9322", body, entry)
+	}
+
+	manifestBytes, err := os.ReadFile(filepath.Join(manifestRoot, entry, "manifest.yaml"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	manifest, err := config.ParseManifest(bytes.NewReader(manifestBytes))
+	if err != nil {
+		t.Fatalf("parse manifest: %v\n%s", err, manifestBytes)
+	}
+	if manifest.Name != entry || manifest.Daemons[0].Port != 9322 {
+		t.Fatalf("manifest name/port = %q/%d, want %q/9322", manifest.Name, manifest.Daemons[0].Port, entry)
+	}
+	intent, err := api.ReadSupervisorIntent(filepath.Join(stateRoot, "supervisor-intent.json"))
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if len(intent.Daemons) != 1 || intent.Daemons[0].Server != entry {
+		t.Fatalf("intent daemons=%#v, want one daemon for %q", intent.Daemons, entry)
+	}
+
+	var root map[string]any
+	after, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatalf("read codex config: %v", err)
+	}
+	if err := toml.Unmarshal(after, &root); err != nil {
+		t.Fatalf("decode codex TOML: %v\n%s", err, after)
+	}
+	servers := root["mcp_servers"].(map[string]any)
+	adopted := servers[entry].(map[string]any)
+	if adopted["url"] != "http://127.0.0.1:9322/mcp" {
+		t.Fatalf("adopted url=%#v, want hub URL", adopted["url"])
+	}
+	if _, hasCommand := adopted["command"]; hasCommand {
+		t.Fatalf("adopted client entry still has command: %#v", adopted)
+	}
+	if _, ok := servers["keep"]; !ok {
+		t.Fatalf("foreign mcp_servers.keep table not preserved: %#v", servers)
+	}
+}
+
+func TestAdoptPlanRouteNeverSerializesSecretValues(t *testing.T) {
+	entry := "gui-adopt-secret"
+	setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-adopt-secret]
+command = "go"
+args = ["version"]
+
+[mcp_servers.gui-adopt-secret.env]
+API_KEY = "literal-secret-value"
+VISIBLE = "not-secret"
+`)
+
+	rec := postAdoptTest(t, "/api/adopt/plan", `{"entry":"gui-adopt-secret","client":"codex-cli","port":9323}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	raw := rec.Body.String()
+	if strings.Contains(raw, "literal-secret-value") {
+		t.Fatalf("plan JSON leaked secret value:\n%s", raw)
+	}
+	if strings.Contains(raw, "secretValues") {
+		t.Fatalf("plan JSON serialized unexported secretValues field:\n%s", raw)
+	}
+	if !strings.Contains(raw, "GUI_ADOPT_SECRET_API_KEY") {
+		t.Fatalf("plan JSON omitted secret-routed key name:\n%s", raw)
+	}
+}
+
+func TestAdoptRouteSymlinkConsentRequiredThenAllowed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Log("attempting Windows symlink test; host may require Developer Mode or elevation")
+	}
+	entry := "gui-adopt-symlink"
+	codexPath, _, _ := setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-adopt-symlink]
+command = "go"
+args = ["version"]
+`)
+	realTarget := filepath.Join(filepath.Dir(filepath.Dir(codexPath)), "dotfiles", ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(realTarget), 0o700); err != nil {
+		t.Fatalf("mkdir real target parent: %v", err)
+	}
+	if err := os.Rename(codexPath, realTarget); err != nil {
+		t.Fatalf("move codex config to real target: %v", err)
+	}
+	if err := os.Symlink(realTarget, codexPath); err != nil {
+		t.Skipf("symlink unsupported on this host: %v", err)
+	}
+
+	plan := postAdoptTest(t, "/api/adopt/plan", `{"entry":"gui-adopt-symlink","client":"codex-cli","port":9324}`)
+	if plan.Code != http.StatusOK {
+		t.Fatalf("plan status=%d, want 200; body=%s", plan.Code, plan.Body.String())
+	}
+	planBody := decodeAdoptJSON(t, plan)
+	targets, _ := planBody["symlink_targets"].([]any)
+	if len(targets) != 1 {
+		t.Fatalf("symlink_targets=%#v, want one target", planBody["symlink_targets"])
+	}
+	target := targets[0].(map[string]any)
+	if target["client"] != "codex-cli" || !sameGUIAdoptPath(target["resolved_path"].(string), realTarget) {
+		t.Fatalf("symlink target=%#v, want codex-cli -> %s", target, realTarget)
+	}
+
+	withoutConsent := postAdoptTest(t, "/api/adopt", `{"entry":"gui-adopt-symlink","client":"codex-cli","port":9324}`)
+	if withoutConsent.Code != http.StatusConflict {
+		t.Fatalf("status=%d, want 409; body=%s", withoutConsent.Code, withoutConsent.Body.String())
+	}
+	if code := decodeAdoptJSON(t, withoutConsent)["code"]; code != "SYMLINK_CONSENT_REQUIRED" {
+		t.Fatalf("code=%#v, want SYMLINK_CONSENT_REQUIRED", code)
+	}
+
+	withConsent := postAdoptTest(t, "/api/adopt", `{"entry":"gui-adopt-symlink","client":"codex-cli","port":9324,"allow_symlink":true}`)
+	if withConsent.Code != http.StatusCreated {
+		t.Fatalf("status=%d, want 201; body=%s", withConsent.Code, withConsent.Body.String())
+	}
+	if info, err := os.Lstat(codexPath); err != nil {
+		t.Fatalf("lstat original codex path: %v", err)
+	} else if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("codex config link type not preserved; mode=%v", info.Mode())
+	}
+	targetBytes, err := os.ReadFile(realTarget)
+	if err != nil {
+		t.Fatalf("read real target after adopt: %v", err)
+	}
+	var root map[string]any
+	if err := toml.Unmarshal(targetBytes, &root); err != nil {
+		t.Fatalf("decode real target TOML: %v\n%s", err, targetBytes)
+	}
+	adopted := root["mcp_servers"].(map[string]any)[entry].(map[string]any)
+	if adopted["url"] != "http://127.0.0.1:9324/mcp" {
+		t.Fatalf("target adopted url=%#v, want hub URL", adopted["url"])
+	}
+}
+
+func sameGUIAdoptPath(a, b string) bool {
+	cleanA := filepath.Clean(a)
+	cleanB := filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(cleanA, cleanB)
+	}
+	return cleanA == cleanB
+}
+
+func TestAdoptPlanBadInputMaps400(t *testing.T) {
+	setupGUIAdoptTestEnv(t, "gui-adopt-bad", `[mcp_servers.gui-adopt-bad]
+command = "go"
+args = ["version"]
+`)
+	rec := postAdoptTest(t, "/api/adopt/plan", `{"entry":"gui-adopt-bad","client":"not-a-client"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	if code := decodeAdoptJSON(t, rec)["code"]; code != "BAD_INPUT" {
+		t.Fatalf("code=%#v, want BAD_INPUT", code)
+	}
+}

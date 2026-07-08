@@ -1,6 +1,25 @@
 import { test, expect } from "../fixtures/hub";
+import { seededHubFor } from "../fixtures/seeded-hub";
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+function seedAdoptUnknown(home: string) {
+  writeFileSync(
+    join(home, ".claude.json"),
+    JSON.stringify({
+      mcpServers: {
+        "e2e-adopt-stdio": {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "e2e-adopt-stdio"],
+        },
+      },
+    }),
+    "utf-8",
+  );
+}
+
+const seededAdoptTest = seededHubFor(seedAdoptUnknown);
 
 test.describe("Discovery screen", () => {
   test("renders h1 + empty-state copy on fresh tmp home", async ({ page, hub }) => {
@@ -129,5 +148,42 @@ test.describe("Discovery screen", () => {
     };
     const postNames = (postBody.entries ?? []).map((e) => e.name);
     expect(postNames).toContain("e2e-unknown-guard");
+  });
+});
+
+seededAdoptTest.describe("Discovery adopt", () => {
+  seededAdoptTest("adopts a seeded unknown stdio row through the modal", async ({
+    page,
+    hub,
+  }) => {
+    await page.goto(`${hub.url}/#/migration`);
+    const row = page.locator('li[data-server="e2e-adopt-stdio"]');
+    await expect(row).toBeVisible();
+    await row.getByRole("button", { name: "Adopt into hub" }).click();
+
+    const modal = page.locator('[data-testid="adopt-confirm-modal"]');
+    await expect(modal).toBeVisible();
+    await expect(modal).toContainText("Manifest: e2e-adopt-stdio");
+    await modal.getByRole("button", { name: "Adopt into hub" }).click();
+    await expect(page.getByText("Adopted e2e-adopt-stdio into hub.")).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        const resp = await page.request.get(`${hub.url}/api/scan`);
+        expect(resp.status()).toBe(200);
+        const body = (await resp.json()) as {
+          entries: Array<{ name: string; status?: string }> | null;
+        };
+        return (body.entries ?? []).find((entry) => entry.name === "e2e-adopt-stdio")
+          ?.status;
+      })
+      .toBe("via-hub");
+
+    const claude = JSON.parse(readFileSync(join(hub.home, ".claude.json"), "utf-8")) as {
+      mcpServers: Record<string, { command?: string; url?: string }>;
+    };
+    const adopted = claude.mcpServers["e2e-adopt-stdio"];
+    expect(adopted.command).toBeUndefined();
+    expect(adopted.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
   });
 });

@@ -6,7 +6,7 @@
 // SCAN_POLL_MS while mounted and visible, and the "Rescan now" button
 // fires an immediate refetch.
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, cleanup, fireEvent, screen, act } from "@testing-library/preact";
+import { render, cleanup, fireEvent, screen, act, within } from "@testing-library/preact";
 import { DiscoveryScreen } from "./Migration";
 import type { ScanResult } from "../types";
 
@@ -51,6 +51,33 @@ function scan(name = "memory"): ScanResult {
   };
 }
 
+function unmanagedDiscoveryScan(): ScanResult {
+  return {
+    at: "2026-06-15T00:00:00Z",
+    entries: [
+      {
+        name: "local-stdio",
+        status: "unknown",
+        manifest_exists: false,
+        can_migrate: false,
+        client_presence: {
+          "codex-cli": { transport: "stdio" },
+        },
+      },
+      {
+        name: "context7",
+        status: "external",
+        manifest_exists: false,
+        can_migrate: false,
+        client_presence: {
+          "codex-cli": { transport: "http", endpoint: "https://mcp.context7.com/mcp" },
+        },
+      },
+    ],
+    client_config_presence: {},
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => {
@@ -67,6 +94,14 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     cleanup();
     vi.restoreAllMocks();
     vi.useFakeTimers();
+    HTMLDialogElement.prototype.showModal = function () {
+      this.open = true;
+      this.setAttribute("open", "");
+    };
+    HTMLDialogElement.prototype.close = function () {
+      this.open = false;
+      this.removeAttribute("open");
+    };
     Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
     window.location.hash = "#/migration";
   });
@@ -165,6 +200,96 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     });
     await vi.waitFor(() => expect(screen.queryByText("stale-memory")).toBeNull());
     expect(screen.queryByText("fresh-memory")).toBeTruthy();
+  });
+
+  it("shows Adopt into hub only on unknown stdio rows", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, unmanagedDiscoveryScan()),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+    render(<DiscoveryScreen />);
+    const unknownRow = (await screen.findByText("local-stdio")).closest("li");
+    const externalRow = screen.getByText("context7").closest("li");
+    expect(unknownRow).not.toBeNull();
+    expect(externalRow).not.toBeNull();
+    expect(
+      within(unknownRow as HTMLElement).getByRole("button", { name: "Adopt into hub" }),
+    ).toBeTruthy();
+    expect(
+      within(externalRow as HTMLElement).queryByRole("button", { name: "Adopt into hub" }),
+    ).toBeNull();
+  });
+
+  it("plans, requires symlink consent, confirms adopt, and refreshes scan", async () => {
+    const planRequests: unknown[] = [];
+    const adoptRequests: unknown[] = [];
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/adopt/plan": (init) => {
+          planRequests.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, {
+            EntryName: "local-stdio",
+            SourceClient: "codex-cli",
+            ManifestName: "local-stdio",
+            Port: 9325,
+            AdoptClients: ["codex-cli", "claude-code"],
+            AlsoPresent: ["cursor"],
+            SignatureMismatches: [{ Client: "vscode", Reason: "args differ" }],
+            DisabledSameName: [{ Client: "gemini-cli" }],
+            SecretRoutedKeys: ["LOCAL_STDIO_API_KEY"],
+            ManifestYAML: "name: local-stdio\n",
+            symlink_targets: [
+              { client: "codex-cli", resolved_path: "C:\\Users\\d\\.codex\\config.toml" },
+            ],
+          });
+        },
+        "/api/adopt": (init) => {
+          adoptRequests.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(201, { name: "local-stdio", port: 9325 });
+        },
+        "/api/scan": () => {
+          scanCalls += 1;
+          return jsonResponse(200, unmanagedDiscoveryScan());
+        },
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+    render(<DiscoveryScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "Adopt into hub" }));
+
+    const modal = await screen.findByTestId("adopt-confirm-modal");
+    await vi.waitFor(() => expect((modal as HTMLDialogElement).open).toBe(true));
+    expect(planRequests).toEqual([{ entry: "local-stdio", client: "codex-cli" }]);
+    expect(within(modal).getByText("Manifest: local-stdio")).toBeTruthy();
+    expect(within(modal).getByText("Port: 9325")).toBeTruthy();
+    expect(within(modal).getByText("codex-cli")).toBeTruthy();
+    expect(within(modal).getByText("claude-code")).toBeTruthy();
+    expect(within(modal).getByText("cursor: also present, not selected")).toBeTruthy();
+    expect(within(modal).getByText("vscode: args differ")).toBeTruthy();
+    expect(within(modal).getByText("gemini-cli: disabled")).toBeTruthy();
+    expect(within(modal).getByText("LOCAL_STDIO_API_KEY")).toBeTruthy();
+    expect(within(modal).getByText(/codex-cli config is a symlink/)).toBeTruthy();
+
+    const confirm = within(modal).getByRole("button", { name: "Adopt into hub" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(within(modal).getByLabelText(/I understand/));
+    expect(confirm.disabled).toBe(false);
+    const beforeConfirmScanCalls = scanCalls;
+    fireEvent.click(confirm);
+
+    await vi.waitFor(() => expect(adoptRequests).toHaveLength(1));
+    expect(adoptRequests[0]).toEqual({
+      entry: "local-stdio",
+      client: "codex-cli",
+      clients: ["codex-cli", "claude-code"],
+      name: "local-stdio",
+      port: 9325,
+      allow_symlink: true,
+    });
+    await vi.waitFor(() => expect(scanCalls).toBeGreaterThan(beforeConfirmScanCalls));
   });
 
   it("skips the poll tick while the tab is hidden", async () => {
