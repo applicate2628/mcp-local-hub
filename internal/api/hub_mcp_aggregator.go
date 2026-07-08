@@ -1487,11 +1487,37 @@ func daemonStillBound(snap *ResolverSnapshot, client string, ref canonicalToolRe
 // (codex bot r4 P1 closure on PR #157). For the initialize call
 // itself, callers pass "" — initialize is the negotiation step and
 // the header is not yet known.
+// countingReader wraps a reader and tracks the total bytes read through it, so
+// the aggregator can charge the ACTUAL wire bytes consumed — including SSE
+// framing that readSSEResponse reads then discards — against a per-daemon budget
+// (bot PR #517 r4).
+type countingReader struct {
+	r io.Reader
+	n int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
+}
+
 func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVer string, timeout time.Duration, expectResponse bool) ([]byte, http.Header, error) {
+	raw, _, hdr, err := doDaemonPostSized(ctx, port, body, daemonSID, protoVer, timeout, expectResponse)
+	return raw, hdr, err
+}
+
+// doDaemonPostSized is doDaemonPost plus bytesRead — the number of bytes
+// actually read off the wire. For the SSE path this is the FULL framed stream
+// length (via countingReader), not just the extracted JSON-RPC event, so a
+// caller draining pagination can enforce a cumulative read budget that a
+// framing-padded SSE daemon cannot evade (bot PR #517 r4). doDaemonPost keeps
+// its original signature for the other five callers.
+func doDaemonPostSized(ctx context.Context, port int, body []byte, daemonSID, protoVer string, timeout time.Duration, expectResponse bool) (payload []byte, bytesRead int, header http.Header, err error) {
 	url := clients.HubLoopbackURL(port, "/mcp")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
@@ -1504,7 +1530,7 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, nil, err
 	}
 	defer resp.Body.Close()
 
@@ -1516,7 +1542,7 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 		// Typed error so callers (hot-swap (a) self-heal) can tell a
 		// received-but-rejected HTTP failure from a never-landed transport
 		// failure. Error() still renders "HTTP %d", so messages are unchanged.
-		return raw, resp.Header, &daemonHTTPError{code: resp.StatusCode, body: raw}
+		return raw, len(raw), resp.Header, &daemonHTTPError{code: resp.StatusCode, body: raw}
 	}
 
 	// Notification path: return IMMEDIATELY on 2xx without reading
@@ -1533,25 +1559,30 @@ func doDaemonPost(ctx context.Context, port int, body []byte, daemonSID, protoVe
 	// whose body wasn't fully drained), but we open a fresh
 	// connection per call regardless.
 	if !expectResponse {
-		return nil, resp.Header, nil
+		return nil, 0, resp.Header, nil
 	}
 
 	if isSSEContentType(resp.Header.Get("Content-Type")) {
-		payload, err := readSSEResponse(resp.Body, maxAggregatorResponseBytes)
+		// Count every byte the SSE scanner reads off the wire — a daemon can
+		// precede a tiny response event with near-maxAggregatorResponseBytes of
+		// ignored notification/comment framing, and that read cost must be
+		// charged to the cumulative budget (bot PR #517 r4).
+		cr := &countingReader{r: resp.Body}
+		payload, err := readSSEResponse(cr, maxAggregatorResponseBytes)
 		if err != nil {
-			return nil, resp.Header, err
+			return nil, cr.n, resp.Header, err
 		}
-		return payload, resp.Header, nil
+		return payload, cr.n, resp.Header, nil
 	}
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxAggregatorResponseBytes+1))
 	if err != nil {
-		return nil, resp.Header, fmt.Errorf("read: %w", err)
+		return nil, len(raw), resp.Header, fmt.Errorf("read: %w", err)
 	}
 	if len(raw) > maxAggregatorResponseBytes {
-		return nil, resp.Header, fmt.Errorf("response too large (> %d bytes)", maxAggregatorResponseBytes)
+		return nil, len(raw), resp.Header, fmt.Errorf("response too large (> %d bytes)", maxAggregatorResponseBytes)
 	}
-	return raw, resp.Header, nil
+	return raw, len(raw), resp.Header, nil
 }
 
 // postInitialize sends an initialize call to a single daemon and
@@ -1670,45 +1701,121 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 // is opened per call and the daemon response id is not validated —
 // the hub-generated id used downstream by the aggregator is the
 // session-level client_session_id, not this internal id.
+// The paginated tools/list drain is bounded THREE ways so a compliant
+// small-page daemon is never falsely cut off yet a buggy or hostile one cannot
+// exhaust the hub (bot PR #517 review + fable F3):
+//   - a CUMULATIVE byte budget (maxToolsListTotalBytes) — restores the
+//     per-daemon 4 MiB bound doDaemonPost enforced per-response before
+//     pagination existed, bounding heap across pages × FanOutConcurrency;
+//   - repeated-cursor detection — a daemon returning a cursor already seen is
+//     looping;
+//   - a generous page backstop (maxToolsListPages) — last resort for an
+//     always-new-cursor empty-page loop; PerDaemonListTimeout (10s) is the
+//     primary bound there.
+// Page COUNT is deliberately NOT the primary limit: an MCP server may choose
+// page_size=1, so a legitimate 101-tool daemon pages 101 times (the old cap of
+// 100 wrongly failed it).
+const maxToolsListPages = 10000
+
+// maxToolsListTotalBytes caps the cumulative tool JSON one daemon may return
+// across ALL pages. var (not const) so tests can lower it.
+var maxToolsListTotalBytes = maxAggregatorResponseBytes
+
 func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) ([]json.RawMessage, error) {
-	body := []byte(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
-	raw, _, err := doDaemonPost(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonListTimeout, true)
-	if err != nil {
-		return nil, err
+	// MCP `tools/list` is paginated: a daemon MAY return a `nextCursor` and
+	// expects the client to re-request with `params.cursor` until the cursor
+	// is absent. The hub must drain every page server-side before publishing
+	// the merged route map — a single un-cursored request drops page-2+ tools,
+	// which then 404 with -32601 on tools/call (bug 2026-07-03). A
+	// non-paginating daemon (no nextCursor) makes exactly one request, so this
+	// is behaviour-preserving for the common case.
+	// Non-nil so an all-empty (tools:[]) daemon returns [] — not null —
+	// preserving the pre-change `return *env.Result.Tools` slice semantics for
+	// any downstream serialization (bot review compat point).
+	tools := []json.RawMessage{}
+	seenCursors := map[string]struct{}{}
+	totalBytes := 0
+	hasCursor := false
+	cursor := ""
+	for page := 0; ; page++ {
+		if page >= maxToolsListPages {
+			return nil, fmt.Errorf("daemon tools/list exceeded %d pages (runaway pagination)", maxToolsListPages)
+		}
+		req := map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+		// Send params.cursor whenever a cursor is PRESENT — including the empty
+		// string, which is a valid opaque MCP token (bot PR #517 r2). The first
+		// page has no cursor at all, so params is omitted only there.
+		if hasCursor {
+			req["params"] = map[string]any{"cursor": cursor}
+		}
+		body, err := json.Marshal(req)
+		if err != nil {
+			return nil, fmt.Errorf("marshal tools/list request: %w", err)
+		}
+		raw, bytesRead, _, err := doDaemonPostSized(ctx, ref.Port, body, daemonSID, protoVer, PerDaemonListTimeout, true)
+		if err != nil {
+			return nil, err
+		}
+		// Charge the ACTUAL wire bytes read this page against the cumulative
+		// budget. bytesRead is the full framed stream length even for an SSE
+		// response (where raw is only the extracted event), so a daemon padding
+		// each page with ignored SSE framing cannot evade the per-daemon read
+		// bound (bot PR #517 r3/r4; restores the pre-pagination 4 MiB per-daemon
+		// cap, now summed across pages).
+		totalBytes += bytesRead
+		if totalBytes > maxToolsListTotalBytes {
+			return nil, fmt.Errorf("daemon tools/list exceeded %d cumulative response bytes across pages (runaway payload)", maxToolsListTotalBytes)
+		}
+		// `raw` is the JSON-RPC envelope; doDaemonPost peeled off any SSE
+		// framing (codex bot r12 P1 closures on PR #157).
+		//
+		// codex bot r17 P1 closure on PR #157: pointer types let us
+		// distinguish "result absent / result.tools absent" from "valid
+		// empty tools list". A daemon returning {"jsonrpc":"2.0","id":2}
+		// (no result, no error) must be surfaced as a list-stage failure
+		// — counting it as success would publish an empty route map and
+		// silently wipe routes from a previous good list, then later
+		// tools/call would 404 with -32601 instead of the operator
+		// seeing the real malformed-response error.
+		var env struct {
+			Error *struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+			Result *struct {
+				Tools *[]json.RawMessage `json:"tools"`
+				// *string so an ABSENT nextCursor (nil → done) is distinguished
+				// from a PRESENT empty-string cursor (a valid MCP token → keep
+				// paging). bot PR #517 r2.
+				NextCursor *string `json:"nextCursor"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(raw, &env); err != nil {
+			return nil, fmt.Errorf("parse: %w", err)
+		}
+		if env.Error != nil {
+			return nil, fmt.Errorf("daemon error code=%d: %s", env.Error.Code, env.Error.Message)
+		}
+		if env.Result == nil {
+			return nil, fmt.Errorf("daemon tools/list response missing `result` field")
+		}
+		if env.Result.Tools == nil {
+			return nil, fmt.Errorf("daemon tools/list response missing `result.tools` field")
+		}
+		tools = append(tools, *env.Result.Tools...)
+		nc := env.Result.NextCursor
+		if nc == nil {
+			// Absent nextCursor → the MCP spec says results are complete.
+			break
+		}
+		if _, seen := seenCursors[*nc]; seen {
+			return nil, fmt.Errorf("daemon tools/list returned a repeated cursor (pagination loop)")
+		}
+		seenCursors[*nc] = struct{}{}
+		cursor = *nc
+		hasCursor = true
 	}
-	// `raw` is the JSON-RPC envelope; doDaemonPost peeled off any SSE
-	// framing (codex bot r12 P1 closures on PR #157).
-	//
-	// codex bot r17 P1 closure on PR #157: pointer types let us
-	// distinguish "result absent / result.tools absent" from "valid
-	// empty tools list". A daemon returning {"jsonrpc":"2.0","id":2}
-	// (no result, no error) must be surfaced as a list-stage failure
-	// — counting it as success would publish an empty route map and
-	// silently wipe routes from a previous good list, then later
-	// tools/call would 404 with -32601 instead of the operator
-	// seeing the real malformed-response error.
-	var env struct {
-		Error *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-		Result *struct {
-			Tools *[]json.RawMessage `json:"tools"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, fmt.Errorf("parse: %w", err)
-	}
-	if env.Error != nil {
-		return nil, fmt.Errorf("daemon error code=%d: %s", env.Error.Code, env.Error.Message)
-	}
-	if env.Result == nil {
-		return nil, fmt.Errorf("daemon tools/list response missing `result` field")
-	}
-	if env.Result.Tools == nil {
-		return nil, fmt.Errorf("daemon tools/list response missing `result.tools` field")
-	}
-	return *env.Result.Tools, nil
+	return tools, nil
 }
 
 // postToolsCall forwards a tools/call to a single daemon with the

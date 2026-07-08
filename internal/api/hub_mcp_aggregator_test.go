@@ -4492,3 +4492,231 @@ func portStaleForTest(t *testing.T, sess *hubSession, ref canonicalDaemonRef) bo
 	sess.mu.Unlock()
 	return !(hasSID && stampGen >= curGen)
 }
+
+// TestPostToolsListDrainsPaginatedDaemon guards the MCP tools/list pagination
+// fix (bug 2026-07-03): a daemon that returns a nextCursor must have ALL its
+// pages drained server-side before the merged route map is built. A single
+// un-cursored request would drop page-2+ tools → -32601 on tools/call.
+func TestPostToolsListDrainsPaginatedDaemon(t *testing.T) {
+	sd := newStubDaemon(t, "pag-sid")
+	var mu sync.Mutex
+	var cursors []string
+	sd.onList = func(w http.ResponseWriter, r *http.Request) {
+		sd.bodyMu.Lock()
+		body := append([]byte(nil), sd.lastListBody...)
+		sd.bodyMu.Unlock()
+		var env struct {
+			Params struct {
+				Cursor string `json:"cursor"`
+			} `json:"params"`
+		}
+		_ = json.Unmarshal(body, &env)
+		mu.Lock()
+		cursors = append(cursors, env.Params.Cursor)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		switch env.Params.Cursor {
+		case "":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"p1a"},{"name":"p1b"}],"nextCursor":"c1"}}`))
+		case "c1":
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"p2a"},{"name":"p2b"}]}}`))
+		default:
+			t.Errorf("unexpected cursor %q", env.Params.Cursor)
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}`))
+		}
+	}
+	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
+	tools, err := postToolsList(context.Background(), ref, "pag-sid", "2025-11-25")
+	if err != nil {
+		t.Fatalf("postToolsList: %v", err)
+	}
+	if len(tools) != 4 {
+		t.Fatalf("drained %d tools, want 4 (both pages)", len(tools))
+	}
+	if n := sd.listCount.Load(); n != 2 {
+		t.Fatalf("listCount=%d, want 2 (one request per page)", n)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(cursors) != 2 || cursors[0] != "" || cursors[1] != "c1" {
+		t.Fatalf("cursors=%v, want ['' , 'c1'] (first un-cursored, second carries nextCursor)", cursors)
+	}
+	joined := ""
+	for _, tl := range tools {
+		joined += string(tl)
+	}
+	for _, name := range []string{"p1a", "p1b", "p2a", "p2b"} {
+		if !strings.Contains(joined, `"`+name+`"`) {
+			t.Errorf("merged tools missing %q from a page", name)
+		}
+	}
+}
+
+// TestPostToolsListRepeatedCursorRejected ensures a daemon that returns a
+// cursor it already handed out (a pagination loop) is rejected immediately on
+// the second page — NOT after a large fixed page count (bot PR #517 review:
+// page COUNT must not be the primary limit, so a compliant small-page daemon
+// is never falsely cut off).
+func TestPostToolsListRepeatedCursorRejected(t *testing.T) {
+	sd := newStubDaemon(t, "loop-sid")
+	sd.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"x"}],"nextCursor":"always"}}`))
+	}
+	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
+	_, err := postToolsList(context.Background(), ref, "loop-sid", "2025-11-25")
+	if err == nil {
+		t.Fatal("expected repeated-cursor error, got nil")
+	}
+	if !strings.Contains(err.Error(), "repeated cursor") {
+		t.Fatalf("err=%v, want 'repeated cursor'", err)
+	}
+	// Page 0 requests (no cursor) + page 1 re-requests the same "always" cursor
+	// and detects the repeat → exactly 2 requests, not the page backstop.
+	if n := int(sd.listCount.Load()); n != 2 {
+		t.Fatalf("listCount=%d, want 2 (repeat caught on the 2nd page)", n)
+	}
+}
+
+// TestPostToolsListCumulativeByteCapRejected ensures the CUMULATIVE tool-JSON
+// budget bounds heap across pages — restoring the per-daemon 4 MiB bound that
+// doDaemonPost enforced per-response before pagination existed (bot PR #517
+// review + fable F3). Each page stays under the per-response cap, but their sum
+// exceeds the cumulative budget.
+func TestPostToolsListCumulativeByteCapRejected(t *testing.T) {
+	orig := maxToolsListTotalBytes
+	maxToolsListTotalBytes = 300 // page0 raw (~220 bytes) passes; cumulative page0+page1 exceeds
+	t.Cleanup(func() { maxToolsListTotalBytes = orig })
+
+	sd := newStubDaemon(t, "bytes-sid")
+	big := strings.Repeat("y", 150) // one ~150-byte tool per page
+	page := 0
+	sd.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// distinct cursors each page so the repeated-cursor guard does NOT fire —
+		// the byte budget is what must stop this.
+		page++
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"` + big + `"}],"nextCursor":"c` + string(rune('0'+page)) + `"}}`))
+	}
+	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
+	_, err := postToolsList(context.Background(), ref, "bytes-sid", "2025-11-25")
+	if err == nil {
+		t.Fatal("expected cumulative-byte-cap error, got nil")
+	}
+	if !strings.Contains(err.Error(), "cumulative response bytes") {
+		t.Fatalf("err=%v, want 'cumulative bytes'", err)
+	}
+}
+
+// TestPostToolsListEmptyStringCursorContinues pins that a PRESENT but
+// empty-string nextCursor is a valid MCP token — the drain must keep paging
+// (sending params.cursor="") and only stop when the field is ABSENT (bot PR
+// #517 r2). A value-only check would wrongly stop and drop later pages.
+func TestPostToolsListEmptyStringCursorContinues(t *testing.T) {
+	sd := newStubDaemon(t, "empty-cursor-sid")
+	var mu sync.Mutex
+	var reqs []string
+	sd.onList = func(w http.ResponseWriter, r *http.Request) {
+		sd.bodyMu.Lock()
+		body := append([]byte(nil), sd.lastListBody...)
+		sd.bodyMu.Unlock()
+		var env struct {
+			Params *struct {
+				Cursor string `json:"cursor"`
+			} `json:"params"`
+		}
+		_ = json.Unmarshal(body, &env)
+		mu.Lock()
+		if env.Params == nil {
+			reqs = append(reqs, "<no-params>")
+		} else {
+			reqs = append(reqs, "cursor="+env.Params.Cursor)
+		}
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if env.Params == nil {
+			// page 1: present-but-empty nextCursor — must continue, not stop.
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"a"}],"nextCursor":""}}`))
+		} else {
+			// page 2 (cursor ""): final page, nextCursor ABSENT.
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"b"}]}}`))
+		}
+	}
+	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
+	tools, err := postToolsList(context.Background(), ref, "empty-cursor-sid", "2025-11-25")
+	if err != nil {
+		t.Fatalf("postToolsList: %v", err)
+	}
+	if len(tools) != 2 {
+		t.Fatalf("drained %d tools, want 2 (empty-string cursor must NOT stop the drain)", len(tools))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reqs) != 2 || reqs[0] != "<no-params>" || reqs[1] != "cursor=" {
+		t.Fatalf("reqs=%v, want [<no-params>, cursor=] (2nd page sends params.cursor even when empty)", reqs)
+	}
+}
+
+// TestPostToolsListLargeCursorCapped pins that the cumulative byte budget counts
+// CURSOR bytes too — a daemon returning empty tools but huge unique cursors would
+// otherwise evade a tool-bytes-only budget while growing heap unbounded (bot PR
+// #517 r2).
+func TestPostToolsListLargeCursorCapped(t *testing.T) {
+	orig := maxToolsListTotalBytes
+	maxToolsListTotalBytes = 500
+	t.Cleanup(func() { maxToolsListTotalBytes = orig })
+
+	sd := newStubDaemon(t, "bigcursor-sid")
+	page := 0
+	sd.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		page++
+		// empty tools, but a large UNIQUE cursor (~400+ bytes) each page.
+		bigCursor := strings.Repeat("z", 400) + string(rune('0'+page))
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[],"nextCursor":"` + bigCursor + `"}}`))
+	}
+	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
+	_, err := postToolsList(context.Background(), ref, "bigcursor-sid", "2025-11-25")
+	if err == nil {
+		t.Fatal("expected cumulative-byte-cap error from large cursors, got nil")
+	}
+	if !strings.Contains(err.Error(), "cumulative response bytes") {
+		t.Fatalf("err=%v, want 'cumulative bytes'", err)
+	}
+}
+
+// TestPostToolsListSSEFramingCharged pins that the cumulative budget charges the
+// FULL wire bytes even for an SSE response, where doDaemonPost returns only the
+// extracted JSON-RPC event. A daemon padding each page with large ignored SSE
+// comment framing must not evade the per-daemon read bound (bot PR #517 r4).
+func TestPostToolsListSSEFramingCharged(t *testing.T) {
+	orig := maxToolsListTotalBytes
+	maxToolsListTotalBytes = 1000
+	t.Cleanup(func() { maxToolsListTotalBytes = orig })
+
+	sd := newStubDaemon(t, "sse-sid")
+	padding := strings.Repeat("x", 3000) // ignored SSE comment framing, far over the cap
+	sd.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		// The extracted event is ~90 bytes (well under the 1000 cap); only
+		// charging the wire bytes (framing) trips the budget on this page. If the
+		// framing were NOT charged, the drain would continue and hit the
+		// repeated-cursor guard instead — so asserting the byte-cap error proves
+		// the framing is counted.
+		_, _ = w.Write([]byte(": " + padding + "\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"a\"}],\"nextCursor\":\"c1\"}}\n\n"))
+	}
+	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
+	_, err := postToolsList(context.Background(), ref, "sse-sid", "2025-11-25")
+	if err == nil {
+		t.Fatal("expected cumulative-byte-cap error from SSE framing, got nil")
+	}
+	if !strings.Contains(err.Error(), "cumulative response bytes") {
+		t.Fatalf("err=%v, want 'cumulative response bytes' (SSE framing must be charged)", err)
+	}
+}

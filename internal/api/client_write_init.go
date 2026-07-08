@@ -615,7 +615,17 @@ func secureWriteFollowingSymlink(originalPath string, contents []byte, consent *
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, ErrSecureWriteParentInsecure) {
+	if !clientConfigParentGateAllowsDefaultRelax(err) {
+		// Only a PARENT-gate wrong-owner (ErrWrongOwner wrapped INSIDE
+		// ErrSecureWriteParentInsecure) gets the parent-directory refusal
+		// message. A bare ErrWrongOwner from a post-rename FILE-owner verify
+		// (secure_write_*.go, no parent-gate wrap) is a different diagnostic and
+		// was already fail-closed before this change — return it raw so its
+		// accurate message survives instead of being overwritten with a
+		// misleading "parent directory" wording (bot/fable review F2).
+		if errors.Is(err, ErrWrongOwner) && errors.Is(err, ErrSecureWriteParentInsecure) {
+			return clientWriteRefuseWrongOwnerParent(err)
+		}
 		return err
 	}
 	if operatorRequiresSingleUserHome() {
@@ -640,6 +650,36 @@ func secureWriteFollowingSymlink(originalPath string, contents []byte, consent *
 	return nil
 }
 
+// clientConfigParentGateAllowsDefaultRelax reports whether a client-config
+// secure-write parent-gate error is eligible for the default-relax lane. It
+// mirrors the state-file lane's stateFileParentGateAllowsDefaultRelax: a
+// broadened-but-owner-correct parent (ErrSecureWriteParentInsecure WITHOUT
+// ErrWrongOwner) may relax on a solo host; a wrong-owner parent, or any
+// non-parent-gate error, may NOT (bug 2026-07-03 — the two lanes are meant to
+// be symmetric; the wrong-owner error is WRAPPED inside ErrSecureWriteParentInsecure
+// by secure_write_windows.go, so a bare errors.Is(ErrSecureWriteParentInsecure)
+// check would wrongly relax it).
+func clientConfigParentGateAllowsDefaultRelax(err error) bool {
+	return errors.Is(err, ErrSecureWriteParentInsecure) && !errors.Is(err, ErrWrongOwner)
+}
+
+// clientWriteRefuseWrongOwnerParent fails a client-config write CLOSED when the
+// parent directory is owned by a DIFFERENT account. The default-relax lane
+// exists only for a BROADENED-but-owner-correct parent on a solo host; a
+// foreign-owned parent is a stronger signal — its owner holds implicit
+// WRITE_DAC / WRITE_OWNER and could rewrite the DACL to grant itself
+// FILE_DELETE_CHILD, then swap the token-bearing client-config entry the
+// external app (Claude Desktop / Codex) loads via an ordinary path read, which
+// nothing backstops (unlike mcphub's own inode-anchored state reads). Refused
+// regardless of strict mode, mirroring the state-file lane's
+// stateFileParentGateAllowsDefaultRelax ErrWrongOwner hard-fail — the two lanes
+// are meant to be symmetric (bug 2026-07-03). On a solo-dev host the operator
+// owns their config dirs, so this never fires; it only bites a genuinely
+// foreign-owned parent, where failing closed is the correct behaviour.
+func clientWriteRefuseWrongOwnerParent(err error) error {
+	return fmt.Errorf("%w; the client-config parent directory is owned by a different account — refusing to write into a foreign-owned directory (default-relax applies only to a broadened but owner-correct parent). Move the client config under a directory you own, or correct the parent directory's ownership, to proceed", err)
+}
+
 // secureWritePathBased is the non-symlink standard pipeline: the hardened
 // path-based secure-write WITH the parent-dir gate, falling back to the
 // gate-skipped relax lane on ErrSecureWriteParentInsecure when strict mode
@@ -655,7 +695,17 @@ func secureWritePathBased(path string, contents []byte) error {
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, ErrSecureWriteParentInsecure) {
+	if !clientConfigParentGateAllowsDefaultRelax(err) {
+		// Only a PARENT-gate wrong-owner (ErrWrongOwner wrapped INSIDE
+		// ErrSecureWriteParentInsecure) gets the parent-directory refusal
+		// message. A bare ErrWrongOwner from a post-rename FILE-owner verify
+		// (secure_write_*.go, no parent-gate wrap) is a different diagnostic and
+		// was already fail-closed before this change — return it raw so its
+		// accurate message survives instead of being overwritten with a
+		// misleading "parent directory" wording (bot/fable review F2).
+		if errors.Is(err, ErrWrongOwner) && errors.Is(err, ErrSecureWriteParentInsecure) {
+			return clientWriteRefuseWrongOwnerParent(err)
+		}
 		return err
 	}
 	if operatorRequiresSingleUserHome() {
