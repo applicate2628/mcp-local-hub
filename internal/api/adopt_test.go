@@ -1395,6 +1395,147 @@ SHARED = "1"
 	}
 }
 
+// TestAdoptExtractionErrorClass pins the leak-safe classification (bug 2026-07-08
+// adopt Area-3): only a present-but-unreadable config is "corrupted", and the
+// returned reason is ALWAYS path-free — no err.Error() / filesystem path can reach
+// the /api wire (the fail-closed path-redaction posture of PR #516).
+func TestAdoptExtractionErrorClass(t *testing.T) {
+	secretPath := `C:\Users\alice\.cursor\mcp.json`
+	cases := []struct {
+		name      string
+		err       error
+		corrupted bool
+		reasonHas string // if set, the reason must contain this (reason-class check)
+	}{
+		{"nil", nil, false, ""},
+		{"absent file", &os.PathError{Op: "open", Path: secretPath, Err: os.ErrNotExist}, false, ""},
+		{"entry not present (sentinel)", fmt.Errorf("server %q not found in client %q config: %w", "foo", "cursor", ErrClientEntryNotPresent), false, ""},
+		{"permission denied", &os.PathError{Op: "open", Path: secretPath, Err: os.ErrPermission}, true, "permission denied"},
+		{"parse error", fmt.Errorf("invalid character '}' looking for beginning of value"), true, "parsed"},
+		{"http-only/hub-managed (sentinel)", fmt.Errorf("server has no command field: %w", ErrClientEntryNotStdio), true, "hub-managed"},
+		{"relay-managed (sentinel)", fmt.Errorf("entry is a mcphub-managed relay stdio: %w", ErrClientEntryHubRelay), true, "relay"},
+		{"path-unset (no sentinel) fails closed", fmt.Errorf("CursorConfigPath empty"), true, ""},
+		// ADVERSARIAL (codex D2/D3 P1): classification is by TYPED SENTINEL, never by
+		// substring on err.Error(). A read/parse failure whose PATH contains a
+		// classifier phrase must NOT be fooled into a not-corrupted verdict —
+		// reopening this re-enables the silent partial apply.
+		{"permission denied at path containing 'not found in client'", &os.PathError{Op: "open", Path: `C:\Users\alice\not found in client\mcp.json`, Err: os.ErrPermission}, true, "permission denied"},
+		{"other read failure at path containing 'ConfigPath empty'", &os.PathError{Op: "open", Path: `C:\Users\alice\ConfigPath empty\mcp.json`, Err: os.ErrInvalid}, true, ""},
+		// codex D3: a MiMoCode-style parse error WRAPS the layer path (not a
+		// *PathError, no sentinel); an adversarial path must still fail closed.
+		{"mimocode parse error at path containing 'not found in client'", fmt.Errorf(`parse %s: %w`, `C:\Users\alice\not found in client\mimocode.jsonc`, fmt.Errorf("unexpected end of JSON")), true, ""},
+	}
+	for _, tc := range cases {
+		reason, corrupted := adoptExtractionErrorClass(tc.err)
+		if corrupted != tc.corrupted {
+			t.Errorf("%s: corrupted=%v, want %v (reason=%q)", tc.name, corrupted, tc.corrupted, reason)
+		}
+		if strings.Contains(reason, secretPath) || strings.Contains(reason, "alice") {
+			t.Errorf("%s: reason leaked a filesystem path: %q", tc.name, reason)
+		}
+		if tc.reasonHas != "" && !strings.Contains(reason, tc.reasonHas) {
+			t.Errorf("%s: reason %q must contain %q (wrong reason class)", tc.name, reason, tc.reasonHas)
+		}
+	}
+}
+
+// TestBuildAdoptPlanFailsLoudOnRequestedUnreadableClient: an EXPLICITLY-requested
+// client whose config is present-but-unreadable makes BuildAdoptPlan ERROR before
+// any mutation (fail-loud, path-free) — no silent partial adopt (bug Area-3; the
+// pre-fix behavior let it survive to AddEntry and roll back the whole adopt).
+func TestBuildAdoptPlanFailsLoudOnRequestedUnreadableClient(t *testing.T) {
+	entry := "mui-adopt-errored"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-errored]
+command = "go"
+args = ["version"]
+`)
+	home := filepath.Dir(filepath.Dir(codexPath))
+	cursorPath := filepath.Join(home, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(cursorPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cursorPath, []byte(`{"mcpServers": {`), 0o600); err != nil { // malformed JSON
+		t.Fatal(err)
+	}
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+	_, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: port,
+		Clients:  []string{"codex-cli", "cursor"},
+		ScanOpts: ScanOpts{CodexConfigPath: codexPath, CursorConfigPath: cursorPath},
+	})
+	if err == nil {
+		t.Fatal("expected a fail-loud error for a requested unreadable client; got nil")
+	}
+	if !strings.Contains(err.Error(), "cursor") || !strings.Contains(strings.ToLower(err.Error()), "adopt") {
+		t.Errorf("error must name the client + refuse to adopt: %v", err)
+	}
+	if strings.Contains(err.Error(), cursorPath) {
+		t.Errorf("error leaked the filesystem path (must be path-free): %v", err)
+	}
+}
+
+// TestBuildAdoptPlanDefaultModeIgnoresUnrequestedUnreadableClient: a corrupted
+// client that is NOT explicitly requested must not block a default-mode adopt.
+func TestBuildAdoptPlanDefaultModeIgnoresUnrequestedUnreadableClient(t *testing.T) {
+	entry := "mui-adopt-errored-default"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-errored-default]
+command = "go"
+args = ["version"]
+`)
+	home := filepath.Dir(filepath.Dir(codexPath))
+	cursorPath := filepath.Join(home, ".cursor", "mcp.json")
+	if err := os.MkdirAll(filepath.Dir(cursorPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cursorPath, []byte(`{"mcpServers": {`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: port,
+		// no --clients (default mode): cursor's broken config must not block adopt.
+		ScanOpts: ScanOpts{CodexConfigPath: codexPath, CursorConfigPath: cursorPath},
+	})
+	if err != nil {
+		t.Fatalf("default-mode adopt must not fail on an unrequested broken client: %v", err)
+	}
+	if containsAdoptString(plan.AdoptClients, "cursor") {
+		t.Errorf("broken cursor must not be adopted: %#v", plan.AdoptClients)
+	}
+	if !containsAdoptString(plan.AdoptClients, "codex-cli") {
+		t.Errorf("source codex-cli must be adopted: %#v", plan.AdoptClients)
+	}
+}
+
+// TestBuildAdoptPlanPreservesFanoutToEntrylessClient: explicitly requesting a
+// client with a VALID config that simply lacks the entry is NOT an error — the hub
+// entry is fanned out to it. Only a CORRUPTED config blocks (Area-3 scope: the fix
+// must not narrow this previously-working fan-out).
+func TestBuildAdoptPlanPreservesFanoutToEntrylessClient(t *testing.T) {
+	entry := "mui-adopt-fanout"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-fanout]
+command = "go"
+args = ["version"]
+`)
+	home := filepath.Dir(filepath.Dir(codexPath))
+	cursorPath := filepath.Join(home, ".cursor", "mcp.json")
+	writeJSONForAdoptTest(t, cursorPath, map[string]any{
+		"mcpServers": map[string]any{"someOther": map[string]any{"command": "x"}},
+	})
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: port,
+		Clients:  []string{"codex-cli", "cursor"},
+		ScanOpts: ScanOpts{CodexConfigPath: codexPath, CursorConfigPath: cursorPath},
+	})
+	if err != nil {
+		t.Fatalf("fan-out to an entryless valid-config client must not error: %v", err)
+	}
+	if !containsAdoptString(plan.AdoptClients, "cursor") {
+		t.Errorf("cursor (valid config, entry absent) must be fanned out to: %#v", plan.AdoptClients)
+	}
+}
+
 func TestBuildAdoptPlanDefaultClientsCompareEnvValuesAndRedactMismatchReport(t *testing.T) {
 	entry := "mui-adopt-env-signature"
 	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-env-signature]
