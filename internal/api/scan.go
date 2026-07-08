@@ -932,6 +932,33 @@ func patternsForServer(serverName, manifestDir string) []string {
 	return patternsFromManifest(serverName, m)
 }
 
+// patternsForServerNominatable is the KILL-NOMINATION view of patternsForServer.
+// It returns nil (nominates NOTHING) whenever the only available "pattern" would be
+// the synthesized bare server-name fallback — either because the manifest could not
+// be loaded, or because the manifest yielded no discriminating command/arg and
+// patternsFromManifest fell back to the server name. A REAL manifest whose command
+// basename legitimately equals the server name (e.g. the shipped `mcp-language-server`,
+// command `mcp-language-server`, no base args) is NOT a fallback and is returned
+// unchanged.
+//
+// The distinction matters only on the unattended kill path: nominating a bare generic
+// server name ("time"/"memory"/"fetch") would substring-match arbitrary innocent user
+// processes the config-absence gate cannot protect, and the 5-min apply:true auto-ticker
+// would force-kill them (T3, A2 PR5 $security-reviewer + bot PR #520 P2). The scan
+// process-count view keeps using patternsForServer (bare-name fallback intact for
+// display), so only nomination refuses the bare-name guess.
+func patternsForServerNominatable(serverName, manifestDir string) []string {
+	m, err := loadManifestForServer(manifestDir, serverName)
+	if err != nil || m == nil {
+		return nil
+	}
+	pats, fallback := patternsFromManifestEx(serverName, m)
+	if fallback {
+		return nil
+	}
+	return pats
+}
+
 // patternsFromManifest is the pure transform half of patternsForServer —
 // given an already-loaded manifest, extracts the substring patterns used to
 // identify the server's running processes. Split out so a caller that
@@ -939,6 +966,18 @@ func patternsForServer(serverName, manifestDir string) []string {
 // cache) can reuse the same filtering logic without re-reading/re-parsing
 // the YAML.
 func patternsFromManifest(serverName string, m *config.ServerManifest) []string {
+	pats, _ := patternsFromManifestEx(serverName, m)
+	return pats
+}
+
+// patternsFromManifestEx is the pure transform behind patternsFromManifest. It
+// returns fallback=true when the manifest yielded NO discriminating command/arg
+// pattern and the result is the synthesized bare server-name (the len(out)==0
+// path). Callers that must not act on a bare generic name — chiefly the unattended
+// kill-nomination path (patternsForServerNominatable) — check this flag; callers
+// that only display a best-effort match (scan process-count) ignore it and keep
+// the bare-name fallback.
+func patternsFromManifestEx(serverName string, m *config.ServerManifest) (patterns []string, fallback bool) {
 	var out []string
 	if m.Command != "" && !genericInterpreters[m.Command] {
 		out = append(out, m.Command)
@@ -962,9 +1001,9 @@ func patternsFromManifest(serverName string, m *config.ServerManifest) []string 
 		out = append(out, arg)
 	}
 	if len(out) == 0 {
-		out = append(out, serverName)
+		return []string{serverName}, true
 	}
-	return out
+	return out, false
 }
 
 func scanClaude(entries map[string]*ScanEntry, path string) error {

@@ -582,7 +582,7 @@ host,"C:\Windows\explorer.exe",20260515090000.000000+000,C:\Windows\explorer.exe
 host,"C:\Users\u\AppData\Local\Programs\claude\claude.exe --foo",20260515100000.000000+000,C:\Users\u\AppData\Local\Programs\claude\claude.exe,4000,5000,300000000
 `
 	patterns := []string{"claude"}
-	out := parseOrphans(strings.NewReader(csv), patterns)
+	out, _ := parseOrphans(strings.NewReader(csv), patterns)
 	for _, o := range out {
 		if o.PID == 5000 {
 			t.Errorf("PID 5000 (claude.exe itself) was flagged as orphan despite being a known launcher; row-level guard is failing. cmdline=%q", o.Cmdline)
@@ -604,7 +604,7 @@ host,"C:\Users\u\AppData\Local\Programs\claude\claude.exe",20260515103000.000000
 host,"node.exe c:\path\to\server.js",20260515102000.000000+000,C:\Program Files\nodejs\node.exe,2000,3000,80000000
 `
 	patterns := []string{"server.js"}
-	out := parseOrphans(strings.NewReader(csv), patterns)
+	out, _ := parseOrphans(strings.NewReader(csv), patterns)
 	for _, o := range out {
 		if o.PID == 3000 {
 			t.Errorf("PID 3000 (node.exe child of claude.exe) was flagged as orphan; should be skipped via known-client allowlist. cmdline=%q", o.Cmdline)
@@ -625,7 +625,7 @@ host,"C:\Windows\explorer.exe",20260515090000.000000+000,C:\Windows\explorer.exe
 host,"node.exe c:\path\to\server.js",20260515102000.000000+000,C:\Program Files\nodejs\node.exe,4000,3000,80000000
 `
 	patterns := []string{"server.js"}
-	out := parseOrphans(strings.NewReader(csv), patterns)
+	out, _ := parseOrphans(strings.NewReader(csv), patterns)
 	var found bool
 	for _, o := range out {
 		if o.PID == 3000 {

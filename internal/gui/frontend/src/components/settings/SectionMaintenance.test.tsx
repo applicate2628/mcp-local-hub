@@ -171,6 +171,75 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
     expect(killedCells.length).toBe(1);
   });
 
+  it("preview shows per-row reap_verdict and Clean counts only eligible rows (bot PR #520 P2)", async () => {
+    vi.spyOn(api, "cleanupOrphans").mockImplementation(async () => ({
+      orphans: [
+        { pid: 1234, parent_pid: 1, server: "fs", cmdline_display: "uvx",
+          age_sec: 700, ram_bytes: 1024 * 1024, reap_verdict: "reap-eligible" },
+        { pid: 5678, parent_pid: 1, server: "weather", cmdline_display: "uvx",
+          age_sec: 120, ram_bytes: 2 * 1024 * 1024, reap_verdict: "spared-below-kill-age-floor" },
+        { pid: 9999, parent_pid: 1, server: "memory", cmdline_display: "uvx",
+          age_sec: 800, ram_bytes: 1024 * 1024, reap_verdict: "spared-config-referenced" },
+      ],
+      killed: 0,
+      skipped: 0,
+    }));
+
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
+
+    fireEvent.click(cardActionButton(card));
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+
+    // Preview now HAS a Result column because rows carry reap_verdict...
+    const headers = Array.from(card.querySelectorAll("th")).map((h) => h.textContent);
+    expect(headers).toContain("Result");
+
+    // ...and NO row renders a false "killed" during a preview (the PR #520 P1 bug).
+    const killedInPreview = Array.from(card.querySelectorAll("td")).filter((td) => td.textContent === "killed");
+    expect(killedInPreview.length).toBe(0);
+
+    // Eligible row shows "will clean"; each spared row shows its skip reason.
+    const cellTexts = Array.from(card.querySelectorAll("td")).map((td) => td.textContent ?? "");
+    expect(cellTexts).toContain("will clean");
+    expect(cellTexts.some((t) => t.startsWith("skip: below the kill-age floor"))).toBe(true);
+    expect(cellTexts.some((t) => t.startsWith("skip: still referenced"))).toBe(true);
+
+    // Clean button counts ONLY the 1 eligible row, not all 3 previewed.
+    const cleanBtn = card.querySelector('[data-testid="orphan-mcp-clean-button"]')!;
+    expect(cleanBtn.textContent).toMatch(/Clean \(1\)/);
+  });
+
+  it("apply binds expect (identity) to the confirmed ELIGIBLE rows only (bot PR #520 P2 TOCTOU)", async () => {
+    const spy = vi.spyOn(api, "cleanupOrphans").mockImplementation(async (apply: boolean) => ({
+      orphans: [
+        { pid: 1234, parent_pid: 1, server: "fs", cmdline_display: "uvx", started_at: "2026-01-01T00:00:00Z",
+          age_sec: 700, ram_bytes: 1024 * 1024, reap_verdict: "reap-eligible" },
+        { pid: 5678, parent_pid: 1, server: "weather", cmdline_display: "uvx", started_at: "2026-01-01T00:05:00Z",
+          age_sec: 120, ram_bytes: 2 * 1024 * 1024, reap_verdict: "spared-below-kill-age-floor" },
+      ],
+      killed: apply ? 1 : 0,
+      skipped: 0,
+    }));
+
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
+    fireEvent.click(cardActionButton(card)); // Preview
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+    fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
+    await waitFor(() =>
+      expect(container.ownerDocument!.querySelector('[data-testid="confirm-modal-confirm"]')).toBeTruthy(),
+    );
+    clickConfirmModal(container as HTMLElement);
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+
+    // apply binds expect to ONLY the eligible row's {pid, started_at} (1234); the spared
+    // 5678 (below age floor) is excluded, and a recycled PID would carry a different
+    // started_at — so neither can be killed unacknowledged.
+    expect(spy.mock.calls[1][0]).toBe(true);
+    expect(spy.mock.calls[1][1]).toEqual([{ pid: 1234, started_at: "2026-01-01T00:00:00Z" }]);
+  });
+
   it("does NOT render Result column when no row has kill_err (e.g. all-clean apply)", async () => {
     vi.spyOn(api, "cleanupOrphans").mockImplementation(async () => ({
       orphans: [

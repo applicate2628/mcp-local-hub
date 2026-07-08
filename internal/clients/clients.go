@@ -924,15 +924,30 @@ func defaultVSCodeConfigPath(home string) string {
 // could be constructed on the current host. This is the shared accessor
 // used by both internal/api and internal/cli.
 func AllClients() map[string]Client {
-	result := map[string]Client{}
+	m, _ := AllClientsWithErrors()
+	return m
+}
+
+// AllClientsWithErrors is AllClients plus the names of every REGISTERED client
+// whose factory failed to construct (e.g. a UserHomeDir / config-path
+// resolution failure). AllClients drops those silently, which is fine for
+// display but UNSAFE for a fail-closed path: the orphan reaper's config-absence
+// gate must treat a failed factory as DEGRADED — it cannot even determine where
+// that client's config lives, so it cannot prove a candidate's signature is
+// absent from it, and silently omitting the client would let the gate fail OPEN
+// and kill a still-referenced process (bot PR #520 P2). failedNames is nil when
+// every factory constructed.
+func AllClientsWithErrors() (constructed map[string]Client, failedNames []string) {
+	constructed = map[string]Client{}
 	for _, d := range clientRegistry() {
 		c, err := d.factory()
 		if err != nil {
+			failedNames = append(failedNames, d.name)
 			continue
 		}
-		result[c.Name()] = c
+		constructed[c.Name()] = c
 	}
-	return result
+	return constructed, failedNames
 }
 
 // IsRelayStdio reports whether the supported client identified by name is a

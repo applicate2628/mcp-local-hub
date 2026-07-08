@@ -55,7 +55,7 @@ HOST,"uv run --directory .../GDB-MCP python server.py",20260417180000.000000+180
 HOST,"D:\dev\mcp-local-hub\mcphub.exe daemon --server gdb --daemon default",20260417180000.000000+180,D:\dev\mcp-local-hub\mcphub.exe,999,555,15000000
 HOST,"uv run --directory .../GDB-MCP python server.py",20260417170000.000000+180,C:\Users\u\.local\bin\uv.exe,1,2002,42000000
 `
-	orphans := parseOrphans(strings.NewReader(wmicCsv), []string{"GDB-MCP"})
+	orphans, _ := parseOrphans(strings.NewReader(wmicCsv), []string{"GDB-MCP"})
 	// PID 1001 has parent 555 which is mcphub.exe daemon — NOT orphan.
 	// PID 2002 has parent 1 — ORPHAN.
 	if len(orphans) != 1 {
@@ -85,7 +85,7 @@ func TestParseProcessRowsKeepsCommaBearingExecutablePathAligned(t *testing.T) {
 	wmicCsv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
 HOST,` + cmdline + `,` + created + `,` + exePath + `,555,1001,40000000
 `
-	rows, byPID := parseProcessRows(strings.NewReader(wmicCsv))
+	rows, byPID, _ := parseProcessRows(strings.NewReader(wmicCsv))
 	if len(rows) != 1 {
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}

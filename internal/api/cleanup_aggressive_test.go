@@ -34,7 +34,7 @@ host,"C:\Windows\explorer.exe",20250101090000.000000+000,C:\Windows\explorer.exe
 host,"C:\Users\u\AppData\Local\Programs\codex\codex.exe",20250101090000.000000+000,C:\Users\u\AppData\Local\Programs\codex\codex.exe,2000,3000,150000000
 host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,C:\Program Files\nodejs\node.exe,3000,4000,80000000
 `
-	out := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
+	out, _ := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
 	got := candidatePIDs(out)
 	c, ok := got[4000]
 	if !ok {
@@ -59,7 +59,7 @@ host,"C:\Users\u\codex.exe",20250101090000.000000+000,C:\Users\u\codex.exe,1000,
 host,"C:\Program Files\mcphub\mcphub.exe daemon --server serena",20250101090000.000000+000,C:\Program Files\mcphub\mcphub.exe,3000,4000,90000000
 host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,C:\Program Files\nodejs\node.exe,4000,5000,80000000
 `
-	out := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
+	out, _ := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
 	if _, ok := candidatePIDs(out)[5000]; ok {
 		t.Errorf("PID 5000 (descendant of mcphub.exe daemon) must be SPARED even under --client codex")
 	}
@@ -72,7 +72,7 @@ func TestParseAggressiveCandidates_SkipsOwnBinaries(t *testing.T) {
 host,"C:\Users\u\codex.exe",20250101090000.000000+000,C:\Users\u\codex.exe,1000,3000,150000000
 host,"C:\Program Files\mcphub\godbolt.exe",20250101090000.000000+000,C:\Program Files\mcphub\godbolt.exe,3000,4000,80000000
 `
-	out := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
+	out, _ := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
 	if _, ok := candidatePIDs(out)[4000]; ok {
 		t.Errorf("PID 4000 (our own godbolt.exe) must NOT be an aggressive candidate")
 	}
@@ -87,7 +87,7 @@ host,"C:\some\custom-agent.exe",20250101090000.000000+000,C:\some\custom-agent.e
 host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,C:\Program Files\nodejs\node.exe,7777,8888,80000000
 host,"node.exe c:\unrelated\other.js",20250101090000.000000+000,C:\Program Files\nodejs\node.exe,1000,9999,80000000
 `
-	out := parseAggressiveCandidates(strings.NewReader(csv), "", 7777, nil)
+	out, _ := parseAggressiveCandidates(strings.NewReader(csv), "", 7777, nil)
 	got := candidatePIDs(out)
 	c, ok := got[8888]
 	if !ok {
@@ -111,7 +111,7 @@ host,"C:\Program Files\mcphub\mcphub.exe daemon --server serena",20250101090000.
 host,"uv.exe run server",20250101090000.000000+000,C:\Users\u\.local\bin\uv.exe,4000,7777,150000000
 host,"node.exe c:\path\to\mcp-server.js",20250101090000.000000+000,C:\Program Files\nodejs\node.exe,7777,8888,80000000
 `
-	out := parseAggressiveCandidates(strings.NewReader(csv), "", 7777, nil)
+	out, _ := parseAggressiveCandidates(strings.NewReader(csv), "", 7777, nil)
 	if _, ok := candidatePIDs(out)[8888]; ok {
 		t.Errorf("PID 8888 (descendant of mcphub.exe daemon above root-pid 7777) must be SPARED")
 	}
@@ -125,7 +125,7 @@ host,"C:\Users\u\codex.exe",20250101090000.000000+000,C:\Users\u\codex.exe,1000,
 host,"C:\Program Files\Google\Chrome\chrome.exe --type=renderer",20250101090000.000000+000,C:\Program Files\Google\Chrome\chrome.exe,3000,4000,300000000
 host,"C:\Windows\System32\cmd.exe /c something",20250101090000.000000+000,C:\Windows\System32\cmd.exe,3000,4100,5000000
 `
-	out := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
+	out, _ := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
 	got := candidatePIDs(out)
 	if _, ok := got[4000]; ok {
 		t.Errorf("PID 4000 (chrome.exe) must be excluded by the default deny-list")
@@ -143,7 +143,7 @@ host,"C:\Users\u\codex.exe",20250101090000.000000+000,C:\Users\u\codex.exe,1000,
 host,"C:\Program Files\Google\Chrome\chrome.exe --type=renderer",20250101090000.000000+000,C:\Program Files\Google\Chrome\chrome.exe,3000,4000,300000000
 host,"C:\Windows\System32\cmd.exe /c something",20250101090000.000000+000,C:\Windows\System32\cmd.exe,3000,4100,5000000
 `
-	out := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, []string{"chrome"})
+	out, _ := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, []string{"chrome"})
 	got := candidatePIDs(out)
 	if _, ok := got[4000]; !ok {
 		t.Errorf("PID 4000 (chrome.exe) should be INCLUDED when --include-class chrome is set")
@@ -219,5 +219,23 @@ func TestFilterToExpectedPIDs(t *testing.T) {
 	}
 	if g := filterToExpectedPIDs(cands, []int{}); len(g) != 0 {
 		t.Errorf("empty allowlist → %d kept, want 0 (validated-empty kills nothing)", len(g))
+	}
+}
+
+// TestParseAggressiveCandidates_TruncatedSnapshotErrors pins the PR #520 all-return-paths
+// fail-closed fix: a census row longer than the scanner buffer ends the scan early and
+// drops every later row — possibly a live `mcphub.exe daemon` ancestor whose absence would
+// mis-scope a hub-managed child as an aggressive candidate. parseAggressiveCandidates must
+// surface that error so AggressiveCleanup refuses to kill from a truncated snapshot.
+func TestParseAggressiveCandidates_TruncatedSnapshotErrors(t *testing.T) {
+	header := "Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize"
+	normal := `host,"C:\Users\u\codex.exe",20250101090000.000000+000,C:\Users\u\codex.exe,2000,3000,150000000`
+	// A CommandLine field past the 1 MiB scanner cap trips bufio.ErrTooLong.
+	overlong := `host,"` + strings.Repeat("x", 1100000) + `",20250101090000.000000+000,C:\x.exe,3000,4000,80000000`
+	csv := header + "\n" + normal + "\n" + overlong + "\n"
+
+	_, err := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
+	if err == nil {
+		t.Fatal("a truncated census must surface an error so AggressiveCleanup fails closed on apply; got nil")
 	}
 }
