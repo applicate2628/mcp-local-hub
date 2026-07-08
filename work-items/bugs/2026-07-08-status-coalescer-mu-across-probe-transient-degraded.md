@@ -1,5 +1,5 @@
 ---
-status: open
+status: closed (fixed by PR #514, merged 2026-07-08 03:42Z as c2171b44; deploy-proven: 0 degraded / 45min / ~9 cleanup ticks)
 severity: low
 filed: 2026-07-08
 context: post-deploy tail of the hub-flap fix (PR #510); predicted by fable acceptance INFO-1
@@ -36,3 +36,27 @@ Under a deliberately slowed netstat (injectable snapshotFn sleeping 3s) + N conc
 callers: every call returns < 2s; no caller ever runs a second serial probe behind a completed
 one; degraded events under synthetic load = 0. Live falsifier: zero degraded blips over 24h of
 normal operation (measure before/after).
+
+
+## Closure (2026-07-08)
+
+Three mechanisms shipped in PR #514, each pinned by a RED-proven test:
+1. **Single-flight + serve-stale** — one probe ever in flight; warm TTL-stale
+   cache served immediately with background refresh; cold waiters join the
+   shared probe (no serial re-probes → no stacking past the IPC deadline).
+2. **Generation-join, capped** — a fleet-generation change joins the probe for
+   a FRESH result (read-your-writes after respawn), capped at ONE probe wait
+   (3s < 5s IPC); a mid-probe fleet race returns the freshest completed result
+   and kicks a background re-probe.
+3. **TryEmit for the ipc-command audit row** — the ACTUAL root of the
+   minutes-long windows (lock-trace verdict H3): handleIPCConn emitted the
+   per-command audit with a blocking Emit, and the supervisor-events.log
+   flock (contended with the GUI) stalled every IPC response behind an audit
+   write. The 2s-cadence observability row is now best-effort; kill/reap
+   audit rows keep blocking semantics.
+
+Live proof: differential probes during a degraded window showed CLI status
+fast (0.97-1.75s) while the watcher timed out — client-sparse vs
+continuous-sampling tail behavior that H3 explains; after the flock fix the
+decisive watch held ZERO degraded events for 45 minutes across ~9 auto-cleanup
+ticks (the exact trigger of the prior 4-5.5-minute RED windows).
