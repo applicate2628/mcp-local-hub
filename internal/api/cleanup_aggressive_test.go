@@ -209,25 +209,10 @@ func TestAggressiveDenyClasses_ReturnsCopy(t *testing.T) {
 	}
 }
 
-// TestFilterToExpectedPIDs pins the kill-binding contract (bot #373 R5): a
-// freshly-snapshotted candidate set is reduced to ONLY the previously
-// token-validated PIDs, so a process spawned after validation is excluded and
-// a validated PID that has since exited simply drops out.
-func TestFilterToExpectedPIDs(t *testing.T) {
-	cands := []OrphanProcess{
-		{PID: 100, CmdlineDisplay: "a"},
-		{PID: 200, CmdlineDisplay: "b"},
-		{PID: 300, CmdlineDisplay: "c"}, // spawned AFTER validation — not in the allowlist
-	}
-	// Validated set {100, 200, 999}: 300 (new) is excluded; 999 (died) is absent.
-	got := filterToExpectedPIDs(cands, []int{100, 200, 999})
-	if len(got) != 2 || got[0].PID != 100 || got[1].PID != 200 {
-		t.Fatalf("filterToExpectedPIDs = %+v, want only PIDs [100 200] (300 excluded, 999 absent)", got)
-	}
-	if g := filterToExpectedPIDs(cands, []int{}); len(g) != 0 {
-		t.Errorf("empty allowlist → %d kept, want 0 (validated-empty kills nothing)", len(g))
-	}
-}
+// The aggressive kill-binding contract (bot #373 R5) is now identity-keyed and covered
+// by TestFilterToExpectedIdentities_ExcludesRecycledPID (cleanup_config_absence_test.go);
+// the PID-only filterToExpectedPIDs was retired when both reaper paths converged onto
+// {PID, StartedAt} binding (bug 2026-07-08 aggressive-cleanup-token-omits-started-at).
 
 // TestParseAggressiveCandidates_TruncatedSnapshotErrors pins the PR #520 all-return-paths
 // fail-closed fix: a census row longer than the scanner buffer ends the scan early and
@@ -245,5 +230,34 @@ func TestParseAggressiveCandidates_TruncatedSnapshotErrors(t *testing.T) {
 	_, err := parseAggressiveCandidates(strings.NewReader(csv), "codex", 0, nil)
 	if err == nil {
 		t.Fatal("a truncated census must surface an error so AggressiveCleanup fails closed on apply; got nil")
+	}
+}
+
+// TestAggressiveConfirmToken_StartedAtDrift pins bug 2026-07-08: the confirm token includes
+// StartedAt, so a PID recycled onto a DIFFERENT process (same basename + match-source, new
+// start time) between preview and confirm produces a DIFFERENT token → the recompute-and-
+// compare refuses the kill instead of killing the replacement.
+func TestAggressiveConfirmToken_StartedAtDrift(t *testing.T) {
+	base := []OrphanProcess{{PID: 4000, CmdlineDisplay: "node.exe", MatchSource: "codex", StartedAt: "2026-01-01T00:00:00Z"}}
+	reused := []OrphanProcess{{PID: 4000, CmdlineDisplay: "node.exe", MatchSource: "codex", StartedAt: "2026-01-01T00:11:00Z"}}
+
+	if AggressiveConfirmToken(base) == AggressiveConfirmToken(reused) {
+		t.Error("a PID recycled onto a different-start-time process must change the confirm token (started_at drift)")
+	}
+	// Same identity → stable token (determinism).
+	if AggressiveConfirmToken(base) != AggressiveConfirmToken([]OrphanProcess{{PID: 4000, CmdlineDisplay: "node.exe", MatchSource: "codex", StartedAt: "2026-01-01T00:00:00Z"}}) {
+		t.Error("the same candidate identity must produce a stable token")
+	}
+}
+
+// TestIdentitiesOf projects a candidate set onto {PID, StartedAt} identities for the
+// identity-keyed kill binding.
+func TestIdentitiesOf(t *testing.T) {
+	got := IdentitiesOf([]OrphanProcess{
+		{PID: 100, StartedAt: "2026-01-01T00:00:00Z"},
+		{PID: 200, StartedAt: "2026-01-01T00:05:00Z"},
+	})
+	if len(got) != 2 || got[0] != (ProcIdentity{PID: 100, StartedAt: "2026-01-01T00:00:00Z"}) || got[1] != (ProcIdentity{PID: 200, StartedAt: "2026-01-01T00:05:00Z"}) {
+		t.Errorf("IdentitiesOf = %+v, want [{100 ...} {200 ...}]", got)
 	}
 }

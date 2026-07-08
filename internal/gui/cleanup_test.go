@@ -580,19 +580,17 @@ func TestCleanupAggressiveHandler_Apply_OK(t *testing.T) {
 	if len(killOpts.IncludeClasses) != 1 || killOpts.IncludeClasses[0] != "chrome" {
 		t.Errorf("CleanupOpts.IncludeClasses = %v, want [chrome]", killOpts.IncludeClasses)
 	}
-	// The kill MUST be bound to the token-validated PID set (bot #373 R5), so a
-	// process spawned after validation cannot be killed unacknowledged: the
-	// kill call carries ExpectPIDs = the validated candidate set's PIDs.
-	wantPIDs := make([]int, 0)
-	for _, c := range aggressiveCandidatesFor() {
-		wantPIDs = append(wantPIDs, c.PID)
-	}
-	if len(killOpts.ExpectPIDs) != len(wantPIDs) {
-		t.Errorf("kill ExpectPIDs = %v, want %v (kill bound to the validated set)", killOpts.ExpectPIDs, wantPIDs)
+	// The kill MUST be bound to the token-validated {PID, StartedAt} IDENTITY set
+	// (bot #373 R5; identity-keyed since bug 2026-07-08), so a process spawned after
+	// validation — or a PID recycled onto a different process — cannot be killed
+	// unacknowledged: the kill call carries Expect = the validated set's identities.
+	wantIDs := api.IdentitiesOf(aggressiveCandidatesFor())
+	if len(killOpts.Expect) != len(wantIDs) {
+		t.Errorf("kill Expect = %v, want %v (kill bound to the validated identity set)", killOpts.Expect, wantIDs)
 	} else {
-		for i := range wantPIDs {
-			if killOpts.ExpectPIDs[i] != wantPIDs[i] {
-				t.Errorf("kill ExpectPIDs[%d] = %d, want %d", i, killOpts.ExpectPIDs[i], wantPIDs[i])
+		for i := range wantIDs {
+			if killOpts.Expect[i] != wantIDs[i] {
+				t.Errorf("kill Expect[%d] = %+v, want %+v", i, killOpts.Expect[i], wantIDs[i])
 			}
 		}
 	}

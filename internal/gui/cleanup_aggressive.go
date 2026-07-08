@@ -92,16 +92,6 @@ type aggressiveCleanupResponse struct {
 // this exact string (bot #373 R2 Finding 1).
 const cleanupAggressiveTokenMismatchCode = "CLEANUP_AGGRESSIVE_TOKEN_MISMATCH"
 
-// pidsOf extracts the PID list from a candidate set — the token-validated
-// allowlist the apply path binds the real kill to (api.CleanupOpts.ExpectPIDs)
-// so a process spawned after validation can never be killed (bot #373 R5).
-func pidsOf(orphans []api.OrphanProcess) []int {
-	pids := make([]int, 0, len(orphans))
-	for _, o := range orphans {
-		pids = append(pids, o.PID)
-	}
-	return pids
-}
 
 // cleanupAggressiveHandler handles POST /api/cleanup/aggressive. It
 // mirrors cleanupOrphansHandler's method/OS-gate/error contract:
@@ -171,13 +161,14 @@ func (s *Server) cleanupAggressiveHandler(w http.ResponseWriter, r *http.Request
 	// same way for every call (dry-run preview, apply recompute, real kill).
 	// Returns (orphans, true) on success; on error it has already written
 	// the response and returns (_, false).
-	// expectPIDs is nil for a recompute (dry-run preview / token recompute) and
-	// the token-validated PID set for the real kill, so the kill touches ONLY
-	// the validated processes (bot #373 R5).
-	runAggressive := func(dryRun bool, expectPIDs []int) ([]api.OrphanProcess, bool) {
+	// expect is nil for a recompute (dry-run preview / token recompute) and the
+	// token-validated {PID, StartedAt} identity set for the real kill, so the kill
+	// touches ONLY the validated processes and a recycled PID (different StartedAt)
+	// is excluded (bot #373 R5; identity-keyed since bug 2026-07-08).
+	runAggressive := func(dryRun bool, expect []api.ProcIdentity) ([]api.OrphanProcess, bool) {
 		opts := baseOpts
 		opts.DryRun = dryRun
-		opts.ExpectPIDs = expectPIDs
+		opts.Expect = expect
 		orphans, err := s.cleanup.AggressiveCleanup(opts)
 		if err != nil {
 			// A malformed scope or unknown client is operator error → 400;
@@ -242,10 +233,11 @@ func (s *Server) cleanupAggressiveHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Token matched — execute the real kill, BOUND to the validated PID set so
-	// a process spawned since the validation snapshot cannot be killed
-	// unacknowledged (bot #373 R5).
-	killed, ok := runAggressive(false, pidsOf(fresh))
+	// Token matched — execute the real kill, BOUND to the validated {PID, StartedAt}
+	// identity set so a process spawned since the validation snapshot, or a PID
+	// recycled onto a different process in the validate→kill window, cannot be killed
+	// unacknowledged (bot #373 R5; identity-keyed since bug 2026-07-08).
+	killed, ok := runAggressive(false, api.IdentitiesOf(fresh))
 	if !ok {
 		return
 	}

@@ -134,8 +134,13 @@ See also: cleanup (safe sweep), stop, status.`,
 					strings.TrimSpace(token), computedToken)
 			}
 
-			// Token matches — execute the kill.
+			// Token matches — execute the kill, BOUND to the validated
+			// {PID, StartedAt} identities so a process spawned since the
+			// preview, or a PID recycled onto a different process in the
+			// validate→kill window, cannot be killed unacknowledged (the CLI
+			// aggressive kill was previously UNBOUND; bug 2026-07-08).
 			opts.DryRun = false
+			opts.Expect = api.IdentitiesOf(candidates)
 			killed, err := a.AggressiveCleanup(opts)
 			if err != nil {
 				return err

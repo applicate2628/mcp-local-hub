@@ -420,20 +420,15 @@ type CleanupOpts struct {
 	// Mutually exclusive with Client.
 	RootPID int
 
-	// ExpectPIDs, when non-nil, BINDS an AggressiveCleanup kill to a previously
-	// resolved + confirmed candidate set by PID (bot #373 R5). nil → no binding.
-	// An empty (but non-nil) slice kills nothing. The DEFAULT reaper (CleanupOrphans)
-	// uses the stronger identity-keyed Expect below instead — a bare PID is recyclable.
-	ExpectPIDs []int
-
-	// Expect, when non-nil, BINDS a DEFAULT CleanupOrphans kill to a previously
-	// confirmed candidate set by {PID, StartedAt} — the SAME identity key the kill
-	// primitive (TerminatePIDWithIdentity) re-verifies. A process whose reap verdict
-	// drifted to eligible while the confirm dialog was open, OR a PID recycled onto a
-	// DIFFERENT process before apply (its fresh StartedAt differs), is excluded and
-	// never killed unacknowledged (bot PR #520 P2; architect verdict — identity, not
-	// PID, is the binding fixed point). nil → no binding (CLI and every dry-run
-	// recompute the full current set). Empty (non-nil) → kills nothing.
+	// Expect, when non-nil, BINDS a kill (default CleanupOrphans AND aggressive
+	// AggressiveCleanup) to a previously confirmed candidate set by {PID, StartedAt} —
+	// the SAME identity key the kill primitive (TerminatePIDWithIdentity) re-verifies.
+	// A process whose reap verdict drifted to eligible while the confirm dialog was
+	// open, a process spawned after validation, OR a PID recycled onto a DIFFERENT
+	// process before apply (its fresh StartedAt differs), is excluded and never killed
+	// unacknowledged (bot PR #520 P2 + bug 2026-07-08 aggressive-cleanup-token; architect
+	// verdict — identity, not a recyclable PID, is the binding fixed point). nil → no
+	// binding (CLI/GUI dry-run + token recompute). Empty (non-nil) → kills nothing.
 	Expect []ProcIdentity
 
 	// IncludeClasses lists dangerous process classes the operator has
@@ -471,10 +466,15 @@ func AggressiveDenyClasses() []string {
 
 // AggressiveConfirmToken derives a deterministic confirmation token bound
 // to the candidate snapshot. The token is the first 16 hex chars of
-// SHA-256 over the SORTED (PID, exe-basename, match-source) tuples. Two
-// runs over the same candidate set produce the same token; any
+// SHA-256 over the SORTED (PID, exe-basename, match-source, started-at)
+// tuples. Two runs over the same candidate set produce the same token; any
 // add/remove/identity-change produces a different token, so a stale token
 // is rejected by recompute-and-compare in the kill path.
+//
+// StartedAt is part of the tuple so a PID recycled onto a DIFFERENT process
+// between preview and confirm (same basename + match-source, new start time)
+// changes the token → the recompute-and-compare refuses the kill instead of
+// killing the replacement (bug 2026-07-08 aggressive-cleanup-token-omits-started-at).
 //
 // This is the SINGLE OWNER of the preview-token contract. Both the CLI
 // (`mcphub cleanup aggressive` --confirm-aggressive-token) and the GUI
@@ -483,11 +483,24 @@ func AggressiveDenyClasses() []string {
 func AggressiveConfirmToken(candidates []OrphanProcess) string {
 	lines := make([]string, 0, len(candidates))
 	for _, o := range candidates {
-		lines = append(lines, fmt.Sprintf("%d|%s|%s", o.PID, o.CmdlineDisplay, o.MatchSource))
+		lines = append(lines, fmt.Sprintf("%d|%s|%s|%s", o.PID, o.CmdlineDisplay, o.MatchSource, o.StartedAt))
 	}
 	sort.Strings(lines)
 	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// IdentitiesOf projects a candidate set onto the {PID, StartedAt} identities the
+// kill path binds to (CleanupOpts.Expect → filterToExpectedIdentities), so a PID
+// recycled onto a different process between validation and kill is excluded — the
+// aggressive counterpart of the default reaper's identity binding (bug 2026-07-08
+// aggressive-cleanup-token-omits-started-at).
+func IdentitiesOf(orphans []OrphanProcess) []ProcIdentity {
+	ids := make([]ProcIdentity, 0, len(orphans))
+	for _, o := range orphans {
+		ids = append(ids, ProcIdentity{PID: o.PID, StartedAt: o.StartedAt})
+	}
+	return ids
 }
 
 // errAggressiveScopeRequired is returned by AggressiveCleanup when
@@ -1596,13 +1609,15 @@ func (a *API) AggressiveCleanup(opts CleanupOpts) ([]OrphanProcess, error) {
 		filtered = append(filtered, c)
 	}
 
-	// Validated-set binding (bot #373 R5): when ExpectPIDs is non-nil the
-	// caller has already token-validated a specific candidate set, so the
-	// kill must touch ONLY those PIDs. A process that spawned between the
-	// validation snapshot and this one is excluded; a validated PID that has
-	// since died simply drops out. nil → no binding (CLI / dry-run preview).
-	if opts.ExpectPIDs != nil {
-		filtered = filterToExpectedPIDs(filtered, opts.ExpectPIDs)
+	// Validated-set binding (bot #373 R5, identity-keyed since bug 2026-07-08):
+	// when Expect is non-nil the caller has token-validated a specific candidate
+	// set, so the kill must touch ONLY those {PID, StartedAt} identities. A process
+	// that spawned — or a PID recycled onto a different process — between the
+	// validation snapshot and this one is excluded (its StartedAt differs); a
+	// validated identity that has since died simply drops out. nil → no binding
+	// (dry-run preview / token recompute).
+	if opts.Expect != nil {
+		filtered = filterToExpectedIdentities(filtered, opts.Expect)
 	}
 
 	// Fail closed on a truncated census before any APPLY kill: a dropped live
@@ -1623,27 +1638,6 @@ func (a *API) AggressiveCleanup(opts CleanupOpts) ([]OrphanProcess, error) {
 	return filtered, nil
 }
 
-// filterToExpectedPIDs binds a freshly-snapshotted candidate set to a
-// previously token-validated PID allowlist: it returns only the candidates
-// whose PID is in expectPIDs, in their original order. A process that spawned
-// after the validation snapshot (PID not in the allowlist) is therefore never
-// killed, and a validated PID that has since exited simply drops out (no
-// longer a candidate). This is the api-level half of the GUI apply path's
-// "bind the kill to the token-validated set" contract (bot #373 R5).
-func filterToExpectedPIDs(candidates []OrphanProcess, expectPIDs []int) []OrphanProcess {
-	allow := make(map[int]bool, len(expectPIDs))
-	for _, p := range expectPIDs {
-		allow[p] = true
-	}
-	out := candidates[:0]
-	for _, c := range candidates {
-		if allow[c.PID] {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
 // ProcIdentity names one operator-confirmed candidate by PID AND its census start
 // time — the SAME {pid, started_at} key the kill primitive (TerminatePIDWithIdentity)
 // re-verifies on a held handle. Binding the confirmed set by this identity instead of a
@@ -1657,11 +1651,12 @@ type ProcIdentity struct {
 
 // filterToExpectedIdentities binds a freshly-snapshotted candidate set to a previously
 // confirmed {PID, StartedAt} allowlist: it returns only the candidates whose identity is
-// in expect, in their original order. Unlike filterToExpectedPIDs (aggressive path, PID
-// only), this excludes a recycled-PID replacement whose StartedAt differs from what the
-// operator confirmed — the identity-keyed default-reaper binding (bot PR #520 P2; architect
-// verdict). Both scans derive StartedAt through the same orphanStartedAt path, so one live
-// process is byte-stable across scans while a reused PID differs.
+// in expect, in their original order. Binding by full identity (not a bare, recyclable
+// PID) excludes a recycled-PID replacement whose StartedAt differs from what the operator
+// confirmed. It is the SINGLE kill-binding owner for BOTH the default reaper (bot PR #520
+// P2) and the aggressive sweep (bug 2026-07-08). Both scans derive StartedAt through the
+// same orphanStartedAt path, so one live process is byte-stable across scans while a reused
+// PID differs.
 func filterToExpectedIdentities(candidates []OrphanProcess, expect []ProcIdentity) []OrphanProcess {
 	allow := make(map[ProcIdentity]bool, len(expect))
 	for _, e := range expect {

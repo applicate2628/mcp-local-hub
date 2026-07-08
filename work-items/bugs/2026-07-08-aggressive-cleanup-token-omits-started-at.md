@@ -1,11 +1,22 @@
 ---
 id: 2026-07-08-aggressive-cleanup-token-omits-started-at
-status: open
+status: fixed
 severity: low
 area: internal/api/cleanup.go (AggressiveConfirmToken) + internal/gui/cleanup_aggressive.go
 found-by: architect (A2 PR5 r5 consent-binding review)
 context: adjacent-finding
+fixed-by: fix/aggressive-cleanup-identity-binding (PR pending)
 ---
+
+## Status — FIXED (branch fix/aggressive-cleanup-identity-binding)
+
+Both gaps closed: (1) `AggressiveConfirmToken` now includes StartedAt in the hash tuple, so
+a same-basename PID reuse changes the token → recompute-and-compare refuses the kill; (2) the
+kill binds by {PID, StartedAt} identity via `api.IdentitiesOf(fresh)` →
+`CleanupOpts.Expect` → `filterToExpectedIdentities` on BOTH surfaces (the GUI apply was
+PID-only; the CLI aggressive kill was entirely UNBOUND). The dead PID-only path
+(`CleanupOpts.ExpectPIDs`, `filterToExpectedPIDs`, GUI `pidsOf`) is removed — both reaper
+paths now share the single identity-keyed kill-binding owner. Tests + review pending merge.
 
 ## Summary
 
