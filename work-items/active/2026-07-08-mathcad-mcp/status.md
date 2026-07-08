@@ -1,8 +1,12 @@
 # status — native Mathcad Prime MCP server
 
-Template: full-delivery. Orchestrator: main conversation. Branch: feat/mathcad-mcp.
-State: DESIGN done + acceptance panel RUNNING. User priority (surfaced 2026-07-08 after a 2-week gap;
-was consulted 2026-06-23 + deferred 2026-06-24 PR#426 for 3 blockers the native design closes).
+Template: full-delivery. Orchestrator: main conversation. Branch: feat/mathcad-mcp (design docs only, no code).
+State: **PARKED into the general plan (2026-07-08) — NOT implementing.** Design + 3-lens acceptance done
+(ACCEPT-WITH-REVISIONS; see design.md §4b). User decision: don't build now — requirements need more thought
+("подумать что от него нужно") + near-singular feasibility is uncertain (host-smoke would decide). Un-park when
+the requirements are settled. Belongs under the desktop-app epic where it was (orig deferral 2026-06-24). NOTE:
+MATLAB was prioritized + delivered instead (quick-connected + verified). This is NOT a closeable/done item —
+it is deliberately parked; do not archive.
 
 ## Decision
 Native Go + go-ole late-binding COM, in-hub `internal/mathcad` subcommand (like godbolt/gdb). NOT the GPL

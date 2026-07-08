@@ -1,8 +1,23 @@
 # Design — Native Supervised Mathcad Prime MCP Server
 
-Status: PROPOSED (awaiting acceptance panel). Author: architect (a2170f). Date: 2026-07-08.
-Target: d:/dev/mcp-local-hub. Closes: work-items/backlog/2026-06-24-mathcad-mcp-row-deferred.md.
-User decision: NATIVE server (no GPL, no vendored Python fork).
+Status: **PARKED into the general plan (2026-07-08) — NOT implementing now.** Design + 3-lens acceptance panel
+(fable+sonnet+codex) complete; verdict ACCEPT-WITH-REVISIONS. User decision: do NOT build yet — the REQUIREMENTS
+(exactly what's needed from Mathcad) need more thought, and the near-singular-integration feasibility is uncertain
+(a host smoke would decide). Parked where it was before, under the desktop-app epic (original deferral:
+work-items/backlog/2026-06-24-mathcad-mcp-row-deferred.md). Author: architect (a2170f). Date: 2026-07-08.
+User decision on approach (if/when built): NATIVE Go+go-ole server (no GPL, no vendored Python fork).
+
+> **Authoritative post-acceptance state = §4b (acceptance outcome + all revisions) + §7-REVISED (corrected plan).**
+> The older §3.3 (destructive CloseAll teardown), §4 (SetStringValue mechanism), and §7 below are the PRE-acceptance
+> draft and are SUPERSEDED by §4b/§7-REVISED (data-safe per-handle close; SetSExprValue-or-parametric-template
+> mechanism; the P0.5 host-smoke gate). Do not implement from the pre-acceptance sections.
+
+## OPEN QUESTIONS to settle before this un-parks (user: "подумать что от него нужно")
+- What EXACTLY is needed from Mathcad vs what Wolfram/MATLAB already cover? (The user's near-singular 1/R³ case
+  needed an analytic transform even in Wolfram — so is the value "generic integrate arbitrary expr" (fragile per
+  the acceptance) or "drive MY reference worksheets + sweep params" (robust)? This reframes the whole tool surface.)
+- Can Prime hit the near-singular acceptance test (6265.5263429603 @1e-9, converged) AT ALL — the P0.5 host smoke.
+- SetSExprValue expression-injection vs pre-authored parametric templates (host smoke).
 
 ## 0. Accepted facts (session-verified)
 - **F1.** Mathcad Prime Automation COM is fully drivable by LATE-BINDING IDispatch. MathcadPy
