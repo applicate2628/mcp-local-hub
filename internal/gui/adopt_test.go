@@ -494,6 +494,10 @@ func TestAdoptPlanErrorIsActionable(t *testing.T) {
 		`--clients must include source --client "codex-cli"`,
 		`manifest "x" collides with a shipped (built-in) server`,
 		`adopt refuses to create manifest "x" because a disk manifest already exists`,
+		// adopt Area-3 fail-loud: a requested client's config is unreadable. The
+		// reason is a fixed path-free class label, so this must be FORWARDED so the
+		// GUI operator learns which client + why (else fail-loud becomes fail-mute).
+		`cannot adopt into client "cursor": config could not be read or parsed; fix that config or drop "cursor" from --clients`,
 	}
 	for _, msg := range actionable {
 		if !adoptPlanErrorIsActionable(msg) {
@@ -508,6 +512,10 @@ func TestAdoptPlanErrorIsActionable(t *testing.T) {
 		`Cannot create a file when that file already exists: C:\Users\dima_\x.toml`,
 		// Path-bearing, no recognized phrase.
 		`open /home/user/.config/mcphub/x.json: permission denied`,
+		// Even the Area-3 fail-loud phrase must redact if a path ever appears in the
+		// reason — adoptErrorMessageHasPath is the fail-closed backstop ahead of the
+		// allowlist.
+		`cannot adopt into client "cursor": open C:\Users\dima_\.cursor\mcp.json: denied`,
 	}
 	for _, msg := range redacted {
 		if adoptPlanErrorIsActionable(msg) {

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -2227,6 +2228,24 @@ type extractedStdioEntry struct {
 	Disabled bool
 }
 
+// Sentinels for adopt-relevant extractStdioEntryFromClient outcomes, so callers
+// classify by errors.Is instead of substring-matching err.Error() — whose text
+// may embed a filesystem path (a *fs.PathError, or a MiMoCode parse error that
+// wraps the layer path) and could otherwise force a wrong verdict. See
+// adoptExtractionErrorClass (adopt.go). Wrapped so the original human text is
+// preserved for logs.
+var (
+	// ErrClientEntryNotPresent: the client config is valid but has no entry with
+	// the requested name (a normal not-a-candidate; adopt fan-out may still add it).
+	ErrClientEntryNotPresent = errors.New("client config has no such server entry")
+	// ErrClientEntryNotStdio: the same-name entry exists but is HTTP-only / already
+	// hub-managed (no local `command`), so no stdio manifest can be extracted.
+	ErrClientEntryNotStdio = errors.New("client entry is HTTP-only or already hub-managed")
+	// ErrClientEntryHubRelay: the same-name entry is a mcphub-managed relay stdio
+	// (command is the mcphub binary + args[0]=="relay") — adopting it would loop.
+	ErrClientEntryHubRelay = errors.New("client entry is a mcphub-managed relay")
+)
+
 func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOpts) (extractedStdioEntry, error) {
 	var raw map[string]any
 
@@ -2356,7 +2375,7 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 			if clients.IsMcphubBinary(cmd) {
 				if args, ok := raw["args"].([]any); ok && len(args) > 0 {
 					if first, ok := args[0].(string); ok && first == "relay" {
-						return extractedStdioEntry{}, fmt.Errorf("entry %q is a mcphub-managed relay stdio (command is mcphub binary + args[0]==\"relay\") — not user-configured stdio, cannot extract a manifest from it", serverName)
+						return extractedStdioEntry{}, fmt.Errorf("entry %q is a mcphub-managed relay stdio (command is mcphub binary + args[0]==\"relay\") — not user-configured stdio, cannot extract a manifest from it: %w", serverName, ErrClientEntryHubRelay)
 					}
 				}
 			}
@@ -2381,7 +2400,7 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 		}
 		raw = cfg.MCP[serverName]
 		if raw == nil {
-			return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config", serverName, client)
+			return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config: %w", serverName, client, ErrClientEntryNotPresent)
 		}
 		disabled := rawClientEntryDisabled(raw)
 		// OpenCode local entries use a `command` ARRAY and `environment`, the
@@ -2425,7 +2444,7 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 			raw, _ = servers[serverName].(map[string]any)
 		}
 		if raw == nil {
-			return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config", serverName, client)
+			return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config: %w", serverName, client, ErrClientEntryNotPresent)
 		}
 		disabled := rawClientEntryDisabled(raw)
 		// MiMoCode local entries use a `command` ARRAY (["npx","-y",...]) and
@@ -2469,7 +2488,7 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 		return extractedStdioEntry{}, fmt.Errorf("extract not yet supported for client %q (extend here when needed)", client)
 	}
 	if raw == nil {
-		return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config", serverName, client)
+		return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config: %w", serverName, client, ErrClientEntryNotPresent)
 	}
 	disabled := rawClientEntryDisabled(raw)
 
@@ -2483,7 +2502,7 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 	// hub-HTTP (HTTP-native clients) or hub-relay with empty-command
 	// downgrades — so we guide them toward demigrate instead.
 	if cmd == "" {
-		return extractedStdioEntry{}, fmt.Errorf("server %q in client %q has no `command` field — it is an HTTP-only or hub-managed entry, not user-configured stdio (run `mcphub demigrate %s` to restore the pre-migrate shape first if this server was migrated)", serverName, client, serverName)
+		return extractedStdioEntry{}, fmt.Errorf("server %q in client %q has no `command` field — it is an HTTP-only or hub-managed entry, not user-configured stdio (run `mcphub demigrate %s` to restore the pre-migrate shape first if this server was migrated): %w", serverName, client, serverName, ErrClientEntryNotStdio)
 	}
 	var args []string
 	if arr, ok := raw["args"].([]any); ok {

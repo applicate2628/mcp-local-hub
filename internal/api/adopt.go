@@ -1,8 +1,10 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -68,6 +70,57 @@ type AdoptClientDisabled struct {
 	Client string
 }
 
+// AdoptClientErrored records a same-name client whose config is PRESENT but
+// UNREADABLE (parse failure, permission denied, or an already-hub-managed relay
+// entry) — the class that would trip a downstream AddEntry rollback if the
+// operator explicitly repointed it. Reason is a PATH-FREE class label (never raw
+// err.Error(), which may embed an absolute filesystem path / username), so it is
+// safe on the /api wire — mirroring the fail-closed path-redaction posture of the
+// client-config write path (PR #516). bug 2026-07-08 adopt Area-3.
+type AdoptClientErrored struct {
+	Client string
+	Reason string
+}
+
+// adoptExtractionErrorClass maps an extractStdioEntryFromClient failure to a
+// PATH-FREE reason class and reports whether it represents a CORRUPTED /
+// unadoptable client config. Only corrupted configs are recorded in the Errored
+// bucket; an ABSENT config (no file) or an entry-not-present in an otherwise-valid
+// config is a normal not-a-candidate that stays a silent skip — so the adopt is
+// not blocked by every unconfigured client and the accidental fan-out to a
+// valid-but-entryless client is preserved.
+//
+// Classification is BY TYPED SENTINEL ONLY (errors.Is) — it NEVER substring-matches
+// err.Error(). The text of a failure may embed an absolute filesystem path (a
+// *fs.PathError from os.ReadFile, OR a MiMoCode parse error that wraps its layer
+// path via `fmt.Errorf("parse %s: %w", ...)`), and an adversarial config path
+// could otherwise contain one of the classifier phrases and force a wrong verdict
+// — a permission-denied / malformed config at C:\...\not found in client\mcp.json
+// would misclassify as "entry not present" and reopen the silent partial-apply
+// class (codex D2/D3 P1). The returned reason is always a fixed path-free label.
+func adoptExtractionErrorClass(err error) (reason string, corrupted bool) {
+	switch {
+	case err == nil:
+		return "", false
+	case errors.Is(err, fs.ErrNotExist):
+		return "", false // absent config file — normal not-a-candidate
+	case errors.Is(err, ErrClientEntryNotPresent):
+		return "", false // valid config, entry simply absent — preserve fan-out
+	case errors.Is(err, fs.ErrPermission):
+		return "config file could not be read (permission denied)", true
+	case errors.Is(err, ErrClientEntryNotStdio):
+		return "same-name entry is HTTP-only or already hub-managed (demigrate it first)", true
+	case errors.Is(err, ErrClientEntryHubRelay):
+		return "already a hub-managed relay entry — cannot re-adopt", true
+	default:
+		// Any other failure — a parse error, an unreadable file, or an
+		// unrecognized shape — is treated as corrupted (fail closed), so a
+		// genuinely-broken config is never silently fanned-out to, and no
+		// path-bearing error text is ever inspected.
+		return "config could not be read or parsed", true
+	}
+}
+
 // BuildAdoptPlan extracts an existing direct stdio client entry and renders the
 // manifest that ExecuteAdopt would persist. It mutates no disk state.
 func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
@@ -123,7 +176,7 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	}
 
 	clientScan := a.adoptClientsWithSameNameEntry(entryName, scanOpts, sourceClient, newAdoptEntrySignature(entry))
-	adoptClients, err := normalizeAdoptClients(opts.Clients, clientScan.Matching, sourceClient, clientScan.Mismatched, clientScan.Disabled)
+	adoptClients, err := normalizeAdoptClients(opts.Clients, clientScan.Matching, sourceClient, clientScan.Mismatched, clientScan.Disabled, clientScan.Errored)
 	if err != nil {
 		return nil, err
 	}
@@ -248,6 +301,7 @@ type adoptClientScanResult struct {
 	Matching   []string
 	Mismatched []AdoptClientSignatureMismatch
 	Disabled   []AdoptClientDisabled
+	Errored    []AdoptClientErrored
 }
 
 type adoptEntrySignature struct {
@@ -302,6 +356,17 @@ func (a *API) adoptClientsWithSameNameEntry(entryName string, scanOpts ScanOpts,
 	for _, client := range adoptSupportedClients {
 		entry, err := a.extractStdioEntryFromClient(client, entryName, scanOpts)
 		if err != nil {
+			// A client whose config is PRESENT but UNREADABLE (corrupted) is
+			// recorded so normalizeAdoptClients can fail LOUD if the operator
+			// explicitly repointed it — silently excluding it would leave that
+			// client running its old direct stdio entry (a duplicate process) after
+			// a "successful" adopt (bug 2026-07-08 adopt Area-3). An ABSENT config or
+			// entry-not-present is a normal not-a-candidate and stays a silent skip.
+			// The source client is exempt: its extraction was already validated in
+			// BuildAdoptPlan and it is force-added to Found/Matching below.
+			if reason, corrupted := adoptExtractionErrorClass(err); corrupted && client != sourceClient {
+				result.Errored = append(result.Errored, AdoptClientErrored{Client: client, Reason: reason})
+			}
 			continue
 		}
 		result.Found = append(result.Found, client)
@@ -332,7 +397,7 @@ func (a *API) adoptClientsWithSameNameEntry(entryName string, scanOpts ScanOpts,
 	return result
 }
 
-func normalizeAdoptClients(requested, found []string, sourceClient string, mismatches []AdoptClientSignatureMismatch, disabled []AdoptClientDisabled) ([]string, error) {
+func normalizeAdoptClients(requested, found []string, sourceClient string, mismatches []AdoptClientSignatureMismatch, disabled []AdoptClientDisabled, errored []AdoptClientErrored) ([]string, error) {
 	var selected []string
 	if len(requested) == 0 {
 		selected = append(selected, found...)
@@ -350,6 +415,17 @@ func normalizeAdoptClients(requested, found []string, sourceClient string, misma
 	}
 	if !containsAdoptString(selected, sourceClient) {
 		return nil, fmt.Errorf("--clients must include source --client %q", sourceClient)
+	}
+	// Fail LOUD if a SELECTED client's config is corrupted/unreadable. Silently
+	// excluding it would leave that client running its old direct stdio entry (a
+	// duplicate process) after a "successful" adopt — and --yes / the GUI never
+	// print the dry-run plan (bug 2026-07-08 adopt Area-3). This only fires for an
+	// EXPLICITLY-requested client (a corrupted client is never in `found`, so the
+	// default no-clients mode never trips it). Reason is a path-free class label.
+	for _, e := range errored {
+		if containsAdoptString(selected, e.Client) {
+			return nil, fmt.Errorf("cannot adopt into client %q: %s; fix that config or drop %q from --clients", e.Client, e.Reason, e.Client)
+		}
 	}
 	return filterAdoptExcludedClients(selected, sourceClient, mismatches, disabled), nil
 }

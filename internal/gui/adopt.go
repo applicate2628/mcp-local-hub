@@ -206,6 +206,11 @@ var adoptActionablePlanErrorRe = regexp.MustCompile(strings.Join([]string{
 	`is not a valid manifest name`,
 	`already exists`,
 	`collides with a shipped`,
+	// adopt Area-3 fail-loud: a requested client's config is unreadable. Provably
+	// path-free — the client id is a member of adoptSupportedClients and the reason
+	// is one of the fixed adoptExtractionErrorClass strings; adoptErrorMessageHasPath
+	// still runs first as the fail-closed backstop.
+	`cannot adopt into client`,
 }, "|"))
 
 // adoptErrorPathRe matches a Windows drive-absolute path (`C:\` / `C:/`), a
