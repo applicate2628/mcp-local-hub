@@ -1647,15 +1647,17 @@ func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
 			})
 			continue
 		}
-		_ = deps.events.Emit(api.SupervisorEvent{
-			Severity: "info",
-			Source:   "ipc",
-			Event:    "ipc-command",
-			Body: map[string]any{
-				"cmd": req.Cmd,
-				"id":  req.ID,
-			},
-		})
+		if deps.events != nil {
+			_ = deps.events.TryEmit(api.SupervisorEvent{
+				Severity: "info",
+				Source:   "ipc",
+				Event:    "ipc-command",
+				Body: map[string]any{
+					"cmd": req.Cmd,
+					"id":  req.ID,
+				},
+			})
+		}
 		if err := dispatchIPCRequest(conn, req, deps); err != nil {
 			// Write failure on the response side — tear down the
 			// connection. Other dispatch errors are surfaced inside
