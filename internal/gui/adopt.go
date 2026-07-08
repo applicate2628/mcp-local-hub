@@ -163,28 +163,60 @@ func adoptSymlinkTargets(clientNames []string) ([]adoptSymlinkTarget, error) {
 
 func writeAdoptPlanError(w http.ResponseWriter, err error) {
 	status, code := adoptPlanErrorStatus(err)
-	// A BAD_INPUT plan failure is one of two shapes: an actionable
-	// input-validation message (unknown/unsupported client, disabled entry,
-	// invalid --name/--port, must-include-source — built from ids and names
-	// only, no filesystem path) OR a path-bearing read/parse failure (a
-	// wrapped ConfigPathForName / disk-manifest-check error that can embed an
-	// absolute path). The validation message is safe and must reach the
-	// operator so they can fix the input; only the path-bearing one is redacted
-	// (bot PR #516 P3 — the earlier blanket redaction turned every fixable
-	// input error into an opaque "internal error").
-	if code == "BAD_INPUT" && adoptErrorMessageHasPath(err.Error()) {
-		writeAPIErrorRedacted(w, err, status, code, "/api/adopt/plan")
+	// Fail closed: forward the error text ONLY when it is a recognized,
+	// path-free adopt validation / name-conflict message the operator can act
+	// on (unknown/unsupported client, disabled entry, invalid --name, name
+	// collision, ...); redact everything else. A default-redact posture means a
+	// path can never evade to the wire and an unrecognized or wrapped-OS error
+	// degrades to a safe generic body instead of leaking (fable PR #516
+	// P3-A/P3-B: the earlier path-only heuristic left both a quoted/rooted-path
+	// evasion and the "... already exists: <path>" NAME_CONFLICT lane
+	// un-redacted; the blanket-redact before THAT lost every actionable message
+	// — this allowlist keeps the actionable ones while failing closed).
+	if adoptPlanErrorIsActionable(err.Error()) {
+		writeAPIError(w, err, status, code)
 		return
 	}
-	writeAPIError(w, err, status, code)
+	writeAPIErrorRedacted(w, err, status, code, "/api/adopt/plan")
 }
 
-// adoptErrorPathRe matches a Windows drive-absolute path (`C:\` / `C:/`), a UNC
-// path (`\\host`), or a POSIX absolute path (a `/`-led segment after start or
-// whitespace) embedded anywhere in a message. Adopt's input-validation errors
-// carry only ids/names and never a path separator, so a match reliably flags a
+// adoptPlanErrorIsActionable reports whether a BuildAdoptPlan error is a known
+// operator-actionable validation / name-conflict message carrying no filesystem
+// path. It is deliberately an ALLOWLIST with a default-redact fallback: any
+// detected path forces redaction, and an unrecognized or newly-wrapped error
+// shape is redacted (safe degradation) rather than forwarded (potential leak).
+func adoptPlanErrorIsActionable(msg string) bool {
+	if adoptErrorMessageHasPath(msg) {
+		return false
+	}
+	return adoptActionablePlanErrorRe.MatchString(msg)
+}
+
+// adoptActionablePlanErrorRe is the allowlist of stable, path-free phrases the
+// BuildAdoptPlan validation / name-conflict errors carry (see internal/api/
+// adopt.go). A new validation message not listed here is redacted, not leaked —
+// the fail-safe direction for a redaction gate.
+var adoptActionablePlanErrorRe = regexp.MustCompile(strings.Join([]string{
+	`adopt entry name is required`,
+	`--client must be one of`,
+	`must include source`,
+	`unknown adopt client`,
+	`requires --name to equal`,
+	`is disabled; enable it`,
+	`is not a valid manifest name`,
+	`already exists`,
+	`collides with a shipped`,
+}, "|"))
+
+// adoptErrorPathRe matches a Windows drive-absolute path (`C:\` / `C:/`), a
+// Windows path segment (`\host\`, `\Users\` — UNC or rooted), or a POSIX
+// absolute path (a `/`-led segment after start, whitespace, or a quote /
+// delimiter) embedded anywhere in a message. Adopt's validation errors carry
+// only ids/names and never a path separator, so a match reliably flags a
 // path-bearing read/parse failure whose absolute path must not reach the wire.
-var adoptErrorPathRe = regexp.MustCompile(`[A-Za-z]:[\\/]|\\\\[^\s\\]|(?:^|\s)/\S`)
+// Broadened for fable PR #516 P3-A (quoted `"/home/x"` and rooted `\Users\x`
+// shapes the prior `(?:^|\s)/\S` + `\\\\` form missed).
+var adoptErrorPathRe = regexp.MustCompile(`[A-Za-z]:[\\/]|\\[A-Za-z][^\s\\]*\\|(?:^|[\s"'(=:,])/\S`)
 
 func adoptErrorMessageHasPath(msg string) bool {
 	return adoptErrorPathRe.MatchString(msg)
@@ -210,7 +242,18 @@ func adoptExecuteErrorStatus(err error) (int, string) {
 }
 
 func writeAdoptExecuteError(w http.ResponseWriter, err error, status int, code string) {
-	if status >= http.StatusInternalServerError || code == "BAD_INPUT" {
+	// SYMLINK_CONSENT_REQUIRED deliberately names the resolved symlink target —
+	// the operator already sees resolved_path in the plan, so surfacing it here
+	// is consistent, not a leak.
+	if code == "SYMLINK_CONSENT_REQUIRED" {
+		writeAPIError(w, err, status, code)
+		return
+	}
+	// Everything else path-bearing or 5xx is redacted. NAME_CONFLICT is
+	// normally a path-free "manifest X already exists" message, but a wrapped OS
+	// error ("... already exists: C:\path") would ride this lane, so redact it
+	// too when a path is present (fable PR #516 P3-B).
+	if status >= http.StatusInternalServerError || code == "BAD_INPUT" || adoptErrorMessageHasPath(err.Error()) {
 		writeAPIErrorRedacted(w, err, status, code, "/api/adopt")
 		return
 	}

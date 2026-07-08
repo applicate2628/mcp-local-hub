@@ -467,10 +467,51 @@ func TestAdoptErrorMessageHasPath(t *testing.T) {
 		`resolve client config path for "codex-cli": open C:\Users\dima_\AppData\config.toml: denied`,
 		`resolve client config path for "codex-cli": open /home/user/.config/x.json: denied`,
 		`check existing disk manifest "x": open \\host\share\manifest.yaml: denied`,
+		// fable PR #516 P3-A evasion shapes: a quoted POSIX path and a rooted
+		// (single-backslash) Windows path the prior regex missed.
+		`entry name "/home/evil/secret.toml" is not a valid manifest name`,
+		`open \Users\dima_\AppData\Local\vault.age: access is denied`,
+		`config=/etc/mcphub/secret.yaml unreadable`,
 	}
 	for _, msg := range pathBearing {
 		if !adoptErrorMessageHasPath(msg) {
 			t.Errorf("path-bearing message not flagged (would leak path): %q", msg)
+		}
+	}
+}
+
+// TestAdoptPlanErrorIsActionable pins the FAIL-CLOSED contract (fable PR #516
+// P3-A/P3-B): a message is forwarded to the operator ONLY when it is a
+// recognized, path-free validation/name-conflict phrase; an unrecognized
+// message, or any message embedding a path (even one that also contains a
+// recognized phrase), is redacted.
+func TestAdoptPlanErrorIsActionable(t *testing.T) {
+	actionable := []string{
+		"adopt entry name is required",
+		`--client must be one of claude-code | codex-cli`,
+		`unknown adopt client "zed" (expected claude-code | codex-cli)`,
+		`server "x" in source client "codex-cli" is disabled; enable it first before adopting`,
+		`--clients must include source --client "codex-cli"`,
+		`manifest "x" collides with a shipped (built-in) server`,
+		`adopt refuses to create manifest "x" because a disk manifest already exists`,
+	}
+	for _, msg := range actionable {
+		if !adoptPlanErrorIsActionable(msg) {
+			t.Errorf("recognized path-free validation message wrongly redacted: %q", msg)
+		}
+	}
+	redacted := []string{
+		// Unrecognized shape -> default-redact (fail closed), not forwarded.
+		`some brand new backend error we never enumerated`,
+		// Recognized phrase BUT path-bearing -> redact wins (P3-B: a wrapped OS
+		// "already exists: <path>" must not ride the actionable lane).
+		`Cannot create a file when that file already exists: C:\Users\dima_\x.toml`,
+		// Path-bearing, no recognized phrase.
+		`open /home/user/.config/mcphub/x.json: permission denied`,
+	}
+	for _, msg := range redacted {
+		if adoptPlanErrorIsActionable(msg) {
+			t.Errorf("message should be redacted (fail closed) but was forwarded: %q", msg)
 		}
 	}
 }
