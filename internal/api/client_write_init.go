@@ -72,8 +72,13 @@ func secureCreateClientConfigIfMissingWithOperatorOpt(path string, stub []byte) 
 	if err == nil {
 		return created, nil
 	}
-	if !errors.Is(err, ErrSecureWriteParentInsecure) {
-		return false, err
+	// Foreign-owned parent → refuse; non-parent-gate error → raw; only a
+	// broadened-but-owner-correct parent falls through to strict + relax. Same
+	// single-owner decision the write lanes use (bug 2026-07-08 F1 — this create
+	// lane previously relaxed a wrong-owner parent because it hand-rolled a bare
+	// ErrSecureWriteParentInsecure check).
+	if refuse, relaxEligible := clientConfigParentGateRefusalOrRelax(err); !relaxEligible {
+		return false, refuse
 	}
 	if operatorRequiresSingleUserHome() {
 		return false, fmt.Errorf("%w; strict mode is active (via %s, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced for init-stub creation (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
@@ -99,9 +104,11 @@ func secureCreateClientConfigIfMissingWithOperatorOpt(path string, stub []byte) 
 // missing parent directory of `configPath` (G17) applying the SAME
 // operator-opt-in policy as the file create: try the hardened pipeline
 // (home-anchor DACL/mode gate ENFORCED) first; on
-// ErrSecureWriteParentInsecure, return the strict error when strict mode
-// is active, else re-run with the anchor gate bypassed and log a warn
-// event. Created directories are owner-only and the symlink /
+// ErrSecureWriteParentInsecure, route through clientConfigParentGateRefusalOrRelax
+// — a WRONG-OWNER (foreign-owned) parent is REFUSED regardless of strict mode
+// (bug 2026-07-08 F1), a broadened-but-owner-correct parent returns the strict
+// error when strict mode is active, else re-runs with the anchor gate bypassed
+// and logs a warn event. Created directories are owner-only and the symlink /
 // home-containment refusals apply on BOTH lanes.
 //
 // Exported so the GUI /api/init-client-config endpoint
@@ -113,8 +120,9 @@ func SecureCreateClientConfigParentDirWithOperatorOpt(configPath string) error {
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, ErrSecureWriteParentInsecure) {
-		return err
+	// Same single-owner parent-gate decision as the write lanes (F1).
+	if refuse, relaxEligible := clientConfigParentGateRefusalOrRelax(err); !relaxEligible {
+		return refuse
 	}
 	if operatorRequiresSingleUserHome() {
 		return fmt.Errorf("%w; strict mode is active (via %s, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced for init-parent creation (unset that env var or run `mcphub strict-mode disable`, or tighten the home directory's DACL to remove the offending principal, to proceed)",
@@ -140,10 +148,13 @@ func SecureCreateClientConfigParentDirWithOperatorOpt(configPath string) error {
 // chokepoint (internal/clients/config_lock.go), applying the SAME
 // operator-opt-in policy as the file create: try the hardened pipeline
 // (the strict-mode DACL/mode gate ENFORCED on the deepest existing prefix)
-// first; on ErrSecureWriteParentInsecure, return the strict error when strict
-// mode is active, else re-run with the parent-dir gate bypassed and log a warn
-// event. Created directories are owner-only and the symlink / reparse-point
-// refusals apply on BOTH lanes.
+// first; on ErrSecureWriteParentInsecure, route through
+// clientConfigParentGateRefusalOrRelax — a WRONG-OWNER (foreign-owned) parent is
+// REFUSED regardless of strict mode (bug 2026-07-08 F1), a broadened-but-owner-
+// correct parent returns the strict error when strict mode is active, else
+// re-runs with the parent-dir gate bypassed and logs a warn event. Created
+// directories are owner-only and the symlink / reparse-point refusals apply on
+// BOTH lanes.
 //
 // DIFFERENCE from SecureCreateClientConfigParentDirWithOperatorOpt (the G17
 // Init-button parent creator): that creator REFUSES any path outside the user
@@ -171,8 +182,9 @@ func SecureCreateParentDirForConfigLock(dir string) error {
 	if err == nil {
 		return nil
 	}
-	if !errors.Is(err, ErrSecureWriteParentInsecure) {
-		return err
+	// Same single-owner parent-gate decision as the write lanes (F1).
+	if refuse, relaxEligible := clientConfigParentGateRefusalOrRelax(err); !relaxEligible {
+		return refuse
 	}
 	if operatorRequiresSingleUserHome() {
 		return fmt.Errorf("%w; strict mode is active (via %s, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced for config-lock parent creation (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
@@ -615,18 +627,8 @@ func secureWriteFollowingSymlink(originalPath string, contents []byte, consent *
 	if err == nil {
 		return nil
 	}
-	if !clientConfigParentGateAllowsDefaultRelax(err) {
-		// Only a PARENT-gate wrong-owner (ErrWrongOwner wrapped INSIDE
-		// ErrSecureWriteParentInsecure) gets the parent-directory refusal
-		// message. A bare ErrWrongOwner from a post-rename FILE-owner verify
-		// (secure_write_*.go, no parent-gate wrap) is a different diagnostic and
-		// was already fail-closed before this change — return it raw so its
-		// accurate message survives instead of being overwritten with a
-		// misleading "parent directory" wording (bot/fable review F2).
-		if errors.Is(err, ErrWrongOwner) && errors.Is(err, ErrSecureWriteParentInsecure) {
-			return clientWriteRefuseWrongOwnerParent(err)
-		}
-		return err
+	if refuse, relaxEligible := clientConfigParentGateRefusalOrRelax(err); !relaxEligible {
+		return refuse
 	}
 	if operatorRequiresSingleUserHome() {
 		return fmt.Errorf("%w; strict mode is active (via %s=1, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",
@@ -677,7 +679,77 @@ func clientConfigParentGateAllowsDefaultRelax(err error) bool {
 // owns their config dirs, so this never fires; it only bites a genuinely
 // foreign-owned parent, where failing closed is the correct behaviour.
 func clientWriteRefuseWrongOwnerParent(err error) error {
-	return fmt.Errorf("%w; the client-config parent directory is owned by a different account — refusing to write into a foreign-owned directory (default-relax applies only to a broadened but owner-correct parent). Move the client config under a directory you own, or correct the parent directory's ownership, to proceed", err)
+	// Operation-neutral wording: this refusal now surfaces from BOTH the write
+	// lanes AND the three create/parent-lock lanes (via clientConfigParentGate-
+	// RefusalOrRelax), and SecureCreateParentDirForConfigLock can create a lock
+	// parent that is not itself a "client config" file (e.g. a global config-lock
+	// dir), so the message avoids write-specific / client-config-specific phrasing.
+	return fmt.Errorf("%w; the parent directory is owned by a different account — refusing to operate on a foreign-owned directory (default-relax applies only to a broadened but owner-correct parent). Move the config under a directory you own, or correct the parent directory's ownership, to proceed", err)
+}
+
+// clientConfigParentGateRefusalOrRelax is the SINGLE owner of the decision every
+// client-config lane makes on a non-nil error from a secure create/write
+// pipeline. Both write lanes (secureWritePathBased, secureWriteFollowingSymlink)
+// AND the three create lanes (secureCreateClientConfigIfMissingWithOperatorOpt,
+// SecureCreateClientConfigParentDirWithOperatorOpt, SecureCreateParentDirForConfigLock)
+// call it, so the classification cannot drift between them.
+//
+// Bug 2026-07-08 (F1): the create lanes had NOT adopted this decision — they
+// hand-rolled a bare errors.Is(err, ErrSecureWriteParentInsecure) check, so a
+// FOREIGN-OWNED parent relaxed (wrote anyway) in the create lanes while the write
+// lanes refused it. A duplicated security decision drifted. Collapsing it here
+// makes all five lanes provably identical and prevents the next drift.
+//
+// Returns (refuse, relaxEligible):
+//
+//   - relaxEligible=true, refuse=nil: a broadened-but-owner-correct parent on a
+//     solo host. The caller may fall through to its strict-mode check + the
+//     default-relax retry.
+//   - relaxEligible=false, refuse!=nil: NOT relax-eligible. refuse is either the
+//     wrong-owner-PARENT refusal (ErrWrongOwner wrapped INSIDE
+//     ErrSecureWriteParentInsecure — a foreign-owned parent, failed closed) or
+//     the raw error verbatim (a bare ErrWrongOwner from a post-rename FILE verify,
+//     or any non-parent-gate error — returned as-is so its accurate diagnostic
+//     survives instead of being overwritten with a misleading "parent directory"
+//     wording, bot/fable review F2).
+//
+// Wrong-owner detectability depends on the pipelines wrapping their underlying
+// owner/DACL-verify error with %w (not %v) via wrapParentGateRefusal below. The
+// write pipelines already did; the F1 fix routed the create pipelines through the
+// same wrap owner so ErrWrongOwner survives into this classifier on the create
+// paths too.
+//
+// nil err is unreachable in production — every call site guards err != nil first
+// (a nil pipeline error is success, handled at the call site). It is treated
+// defensively as relax-eligible ("no gate error, nothing to refuse") so the
+// documented (relaxEligible=false => refuse!=nil) invariant holds even on misuse.
+func clientConfigParentGateRefusalOrRelax(err error) (refuse error, relaxEligible bool) {
+	if err == nil {
+		return nil, true
+	}
+	if clientConfigParentGateAllowsDefaultRelax(err) {
+		return nil, true
+	}
+	if errors.Is(err, ErrWrongOwner) && errors.Is(err, ErrSecureWriteParentInsecure) {
+		return clientWriteRefuseWrongOwnerParent(err), false
+	}
+	return err, false
+}
+
+// wrapParentGateRefusal is the SINGLE owner of the parent-dir gate refusal error
+// shape produced by every secure create/write pipeline (Windows + POSIX legs). It
+// wraps BOTH ErrSecureWriteParentInsecure AND the underlying owner/DACL verify
+// error with %w, so errors.Is downstream matches either sentinel — critically
+// ErrWrongOwner, which clientConfigParentGateRefusalOrRelax keys on to refuse a
+// foreign-owned parent.
+//
+// Bug 2026-07-08 (F1) root cause 1: the create pipelines wrapped verr with %v
+// here, FLATTENING ErrWrongOwner out of the chain so a foreign-owned parent
+// relaxed. Collapsing all gate-site wraps (both platforms, write + create) into
+// this one owner makes a %v regression a single-file review + unit-test target
+// instead of scattered ones (see TestWrapParentGateRefusalPreservesSentinels).
+func wrapParentGateRefusal(path string, verr error) error {
+	return fmt.Errorf("%w (path %s): %w", ErrSecureWriteParentInsecure, path, verr)
 }
 
 // secureWritePathBased is the non-symlink standard pipeline: the hardened
@@ -695,18 +767,8 @@ func secureWritePathBased(path string, contents []byte) error {
 	if err == nil {
 		return nil
 	}
-	if !clientConfigParentGateAllowsDefaultRelax(err) {
-		// Only a PARENT-gate wrong-owner (ErrWrongOwner wrapped INSIDE
-		// ErrSecureWriteParentInsecure) gets the parent-directory refusal
-		// message. A bare ErrWrongOwner from a post-rename FILE-owner verify
-		// (secure_write_*.go, no parent-gate wrap) is a different diagnostic and
-		// was already fail-closed before this change — return it raw so its
-		// accurate message survives instead of being overwritten with a
-		// misleading "parent directory" wording (bot/fable review F2).
-		if errors.Is(err, ErrWrongOwner) && errors.Is(err, ErrSecureWriteParentInsecure) {
-			return clientWriteRefuseWrongOwnerParent(err)
-		}
-		return err
+	if refuse, relaxEligible := clientConfigParentGateRefusalOrRelax(err); !relaxEligible {
+		return refuse
 	}
 	if operatorRequiresSingleUserHome() {
 		return fmt.Errorf("%w; strict mode is active (via %s=1, or via persisted supervisor-intent.json strict_mode set by `mcphub strict-mode enable`), so the strict parent-dir gate is enforced (unset that env var or run `mcphub strict-mode disable`, or tighten the parent's DACL to remove the offending principal, to proceed)",

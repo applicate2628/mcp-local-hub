@@ -57,7 +57,7 @@ func secureCreateClientConfigIfMissingImpl(path string, contents []byte, skipPar
 	// security boundary on POSIX and stays in force.
 	if !skipParentGate {
 		if err := verifyPosixParentDirFromFd(dirFd); err != nil {
-			return false, fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, parentDir, err)
+			return false, wrapParentGateRefusal(parentDir, err)
 		}
 	}
 

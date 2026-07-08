@@ -167,9 +167,9 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 				// absolute RemoveDirectory is safe here; a residual cleanup failure is
 				// surfaced but does not mask the gate refusal.
 				if rmErr := os.Remove(nextPath); rmErr != nil {
-					return fmt.Errorf("%w (path %s); ALSO failed to remove the just-created child %s: %v", ErrSecureWriteParentInsecure, curPath, nextPath, rmErr)
+					return fmt.Errorf("%w; ALSO failed to remove the just-created child %s: %v", wrapParentGateRefusal(curPath, verr), nextPath, rmErr)
 				}
-				return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, curPath, verr)
+				return wrapParentGateRefusal(curPath, verr)
 			}
 		}
 		if created {
@@ -207,7 +207,7 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 	// Mirrors the POSIX leg's trailing !gated gate.
 	if !gated {
 		if verr := verifyWindowsDACLFromHandle(curHandle); verr != nil {
-			return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, curPath, verr)
+			return wrapParentGateRefusal(curPath, verr)
 		}
 	}
 	return nil

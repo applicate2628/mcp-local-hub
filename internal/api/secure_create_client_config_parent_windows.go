@@ -68,7 +68,7 @@ func secureCreateClientConfigParentDirImpl(configPath string, skipParentGate boo
 	if !skipParentGate {
 		if verr := verifyWindowsDACLFromHandle(anchorHandle); verr != nil {
 			windows.CloseHandle(anchorHandle)
-			return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, home, verr)
+			return wrapParentGateRefusal(home, verr)
 		}
 	}
 	curHandle := anchorHandle
@@ -171,7 +171,7 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 		}()
 		if verifyDACL {
 			if verr := verifyWindowsDACLFromHandle(h); verr != nil {
-				return windows.InvalidHandle, false, fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, full, verr)
+				return windows.InvalidHandle, false, wrapParentGateRefusal(full, verr)
 			}
 		}
 		closeOnErr = false
@@ -194,7 +194,7 @@ func mkdirOrVerifyRealDirWindows(parentHandle windows.Handle, name, full string,
 	}
 	if verifyDACL {
 		if verr := verifyWindowsDACLFromHandle(h); verr != nil {
-			return windows.InvalidHandle, false, fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, full, verr)
+			return windows.InvalidHandle, false, wrapParentGateRefusal(full, verr)
 		}
 	}
 	closeOnErr = false

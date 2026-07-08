@@ -43,9 +43,14 @@
 // internal/gui/init_client_config.go). Instead this function's
 // ErrSecureWriteParentInsecure flows up through the
 // secureCreateClientConfigIfMissingWithOperatorOpt wrapper in
-// client_write_init.go, which returns the strict error in strict mode
-// (mapped to INIT_FAILED) and relaxes (parent gate skipped) otherwise.
-// So this function IS reached in strict mode, and it refuses on
+// client_write_init.go, which routes it through the shared
+// clientConfigParentGateRefusalOrRelax classifier: a WRONG-OWNER
+// (foreign-owned) parent is REFUSED regardless of strict mode (bug
+// 2026-07-08 F1 — the wrong-owner error is wrapped inside
+// ErrSecureWriteParentInsecure and must not relax); a broadened-but-
+// owner-correct parent returns the strict error in strict mode (mapped
+// to INIT_FAILED) and relaxes (parent gate skipped) otherwise. So this
+// function IS reached in strict mode, and it refuses on
 // `ErrSecureWriteParentInsecure` regardless — that refusal is the
 // load-bearing strict enforcement (and also blocks any future caller
 // from using it as a strict-mode bypass), not a redundant defense

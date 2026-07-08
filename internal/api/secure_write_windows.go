@@ -198,7 +198,7 @@ func secureWriteClientConfigToResolvedParent(dirHandle windows.Handle, parentDir
 			// Wrap with ErrSecureWriteParentInsecure so the cross-package
 			// wrapper in client_write_init.go can match via errors.Is
 			// (issue #161 P1).
-			return fmt.Errorf("%w (path %s): %w", ErrSecureWriteParentInsecure, parentDirForDiag, err)
+			return wrapParentGateRefusal(parentDirForDiag, err)
 		}
 	}
 
