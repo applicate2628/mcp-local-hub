@@ -1,7 +1,8 @@
 ---
-status: open
+status: fixed
 severity: medium
 filed: 2026-07-03
+fixed: 2026-07-08 (branch fix/backlog-bug-sweep, commit a112d059 — postToolsList drains all nextCursor pages server-side, bounded by maxToolsListPages; behaviour-preserving for non-paginating daemons; tests TestPostToolsListDrainsPaginatedDaemon + TestPostToolsListRunawayCursorCapped)
 context: deep-audit finding (multi-agent audit, hub-aggregator × wire lens, CONFIRMED by 1 verifier before session-limit cut the rest)
 ---
 
