@@ -173,6 +173,14 @@ export type OrphanProcess = {
   ram_bytes: number;
   kill_err?: string;
   /**
+   * started_at is the RFC3339Nano process start time from the census. Together
+   * with pid it is the identity the apply path confirms: the GUI binds the kill
+   * to {pid, started_at} pairs so a PID recycled onto a different process between
+   * the confirm dialog and apply is excluded (bot PR #520 P2). A plain timestamp,
+   * no path/PII. Empty if the snapshot could not report it.
+   */
+  started_at?: string;
+  /**
    * reap_verdict is the config-absence-gate verdict for a DEFAULT-sweep row
    * (POST /api/cleanup/orphans): "reap-eligible" (will be cleaned on Apply),
    * or a "spared-*" reason (config-referenced / below-kill-age-floor /
@@ -235,14 +243,18 @@ export type CleanupLogWatchersResponse = {
   skipped: number;
 };
 
-// cleanupOrphans posts POST /api/cleanup/orphans. On an apply, expectPIDs binds the
-// kill to the exact PIDs the operator confirmed in the modal, so a candidate whose
-// reap verdict drifted to eligible while the dialog was open is not killed
-// unacknowledged (bot PR #520 P2). Omit expectPIDs (or pass undefined) for a preview
+// cleanupOrphans posts POST /api/cleanup/orphans. On an apply, expect binds the kill
+// to the exact {pid, started_at} identities the operator confirmed in the modal, so a
+// candidate whose reap verdict drifted to eligible while the dialog was open — or a PID
+// recycled onto a different process before apply (its fresh started_at differs) — is not
+// killed unacknowledged (bot PR #520 P2). Omit expect (or pass undefined) for a preview
 // or to keep the pre-existing "kill every currently-eligible candidate" contract.
-export async function cleanupOrphans(apply: boolean, expectPIDs?: number[]): Promise<CleanupOrphansResponse> {
-  const body: { apply: boolean; expect_pids?: number[] } = { apply };
-  if (apply && expectPIDs) body.expect_pids = expectPIDs;
+export async function cleanupOrphans(
+  apply: boolean,
+  expect?: { pid: number; started_at: string }[],
+): Promise<CleanupOrphansResponse> {
+  const body: { apply: boolean; expect?: { pid: number; started_at: string }[] } = { apply };
+  if (apply && expect) body.expect = expect;
   const res = await fetch("/api/cleanup/orphans", {
     method: "POST",
     credentials: "same-origin",

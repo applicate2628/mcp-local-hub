@@ -210,12 +210,12 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
     expect(cleanBtn.textContent).toMatch(/Clean \(1\)/);
   });
 
-  it("apply binds expect_pids to the confirmed ELIGIBLE rows only (bot PR #520 P2 TOCTOU)", async () => {
+  it("apply binds expect (identity) to the confirmed ELIGIBLE rows only (bot PR #520 P2 TOCTOU)", async () => {
     const spy = vi.spyOn(api, "cleanupOrphans").mockImplementation(async (apply: boolean) => ({
       orphans: [
-        { pid: 1234, parent_pid: 1, server: "fs", cmdline_display: "uvx",
+        { pid: 1234, parent_pid: 1, server: "fs", cmdline_display: "uvx", started_at: "2026-01-01T00:00:00Z",
           age_sec: 700, ram_bytes: 1024 * 1024, reap_verdict: "reap-eligible" },
-        { pid: 5678, parent_pid: 1, server: "weather", cmdline_display: "uvx",
+        { pid: 5678, parent_pid: 1, server: "weather", cmdline_display: "uvx", started_at: "2026-01-01T00:05:00Z",
           age_sec: 120, ram_bytes: 2 * 1024 * 1024, reap_verdict: "spared-below-kill-age-floor" },
       ],
       killed: apply ? 1 : 0,
@@ -233,11 +233,11 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
     clickConfirmModal(container as HTMLElement);
     await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
 
-    // apply call binds expect_pids to ONLY the eligible PID (1234); the spared
-    // 5678 (below age floor) is excluded, so it can never be killed unacknowledged
-    // even if its verdict drifts to eligible while the modal is open.
+    // apply binds expect to ONLY the eligible row's {pid, started_at} (1234); the spared
+    // 5678 (below age floor) is excluded, and a recycled PID would carry a different
+    // started_at — so neither can be killed unacknowledged.
     expect(spy.mock.calls[1][0]).toBe(true);
-    expect(spy.mock.calls[1][1]).toEqual([1234]);
+    expect(spy.mock.calls[1][1]).toEqual([{ pid: 1234, started_at: "2026-01-01T00:00:00Z" }]);
   });
 
   it("does NOT render Result column when no row has kill_err (e.g. all-clean apply)", async () => {

@@ -325,3 +325,53 @@ func TestReapVerdictLabelAndEligibility(t *testing.T) {
 		}
 	}
 }
+
+// TestArgIsReferenceCandidate_DropsCommonWords pins bot PR #520 P2: the relaxed config-
+// reference arg filter keeps a real short package token ("serena") but drops generic common
+// words ("server"/"dev"/"run"/"mcp") that would substring-spare unrelated candidates
+// globally, plus flags/all-digit/<3-char noise.
+func TestArgIsReferenceCandidate_DropsCommonWords(t *testing.T) {
+	keep := []string{"serena", "wolfram", "@mui/mcp", "mcp-server-time", "context7"}
+	for _, a := range keep {
+		if !argIsReferenceCandidate(a) {
+			t.Errorf("argIsReferenceCandidate(%q) = false, want true (real package token must be kept)", a)
+		}
+	}
+	drop := []string{"server", "Dev", "RUN", "mcp", "start", "src", "-y", "9200", "ab"}
+	for _, a := range drop {
+		if argIsReferenceCandidate(a) {
+			t.Errorf("argIsReferenceCandidate(%q) = true, want false (generic/noise must be dropped)", a)
+		}
+	}
+}
+
+// TestFilterToExpectedIdentities_ExcludesRecycledPID is the falsifying probe for the
+// architect's identity-binding verdict (bot PR #520 P2): a candidate whose PID matches a
+// confirmed entry but whose StartedAt DIFFERS (a PID recycled onto a different process
+// between confirm and apply) MUST be excluded — identity, not bare PID, is the key.
+func TestFilterToExpectedIdentities_ExcludesRecycledPID(t *testing.T) {
+	confirmed := []ProcIdentity{{PID: 1234, StartedAt: "2026-01-01T00:00:00Z"}}
+
+	// Same PID, SAME start time → the confirmed process → kept.
+	same := []OrphanProcess{{PID: 1234, StartedAt: "2026-01-01T00:00:00Z", Cmdline: "a"}}
+	if got := filterToExpectedIdentities(same, confirmed); len(got) != 1 {
+		t.Errorf("a matching {pid, started_at} must be kept; got %d", len(got))
+	}
+
+	// Same PID, DIFFERENT start time → a recycled-PID replacement → excluded.
+	recycled := []OrphanProcess{{PID: 1234, StartedAt: "2026-01-01T00:11:00Z", Cmdline: "b"}}
+	if got := filterToExpectedIdentities(recycled, confirmed); len(got) != 0 {
+		t.Errorf("a recycled PID (same pid, different started_at) must be excluded; got %d", len(got))
+	}
+
+	// A different PID entirely → excluded.
+	other := []OrphanProcess{{PID: 9999, StartedAt: "2026-01-01T00:00:00Z", Cmdline: "c"}}
+	if got := filterToExpectedIdentities(other, confirmed); len(got) != 0 {
+		t.Errorf("an unconfirmed PID must be excluded; got %d", len(got))
+	}
+
+	// Empty (non-nil) confirmed set kills nothing (validated-empty safe outcome).
+	if got := filterToExpectedIdentities(same, []ProcIdentity{}); len(got) != 0 {
+		t.Errorf("an empty confirmed set must keep nothing; got %d", len(got))
+	}
+}

@@ -138,11 +138,11 @@ func TestCleanupOrphansHandler_Apply_OK(t *testing.T) {
 	}
 }
 
-// TestCleanupOrphansHandler_Apply_BindsExpectPIDs pins bot PR #520 P2: on an apply
-// the handler threads the operator-confirmed expect_pids into CleanupOpts so the
-// backend binds the kill to exactly those PIDs (a candidate whose verdict drifted to
-// eligible while the confirm modal was open is not killed unacknowledged).
-func TestCleanupOrphansHandler_Apply_BindsExpectPIDs(t *testing.T) {
+// TestCleanupOrphansHandler_Apply_BindsExpectIdentities pins bot PR #520 P2 (architect
+// verdict): on an apply the handler threads the operator-confirmed {pid, started_at}
+// identities into CleanupOpts.Expect so the backend binds the kill to exactly those
+// identities — a bare PID is recyclable, so identity (not PID) is the binding key.
+func TestCleanupOrphansHandler_Apply_BindsExpectIdentities(t *testing.T) {
 	gotOpts := api.CleanupOpts{}
 	s := newCleanupTestServer(t, fakeCleanupAPI{
 		CleanupOrphansFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
@@ -151,7 +151,7 @@ func TestCleanupOrphansHandler_Apply_BindsExpectPIDs(t *testing.T) {
 		},
 	})
 
-	body := strings.NewReader(`{"apply": true, "expect_pids": [1234, 5678]}`)
+	body := strings.NewReader(`{"apply": true, "expect": [{"pid": 1234, "started_at": "2026-01-01T00:00:00Z"}]}`)
 	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
 	req.Header.Set("Origin", "http://127.0.0.1:9125")
 	req.Header.Set("Content-Type", "application/json")
@@ -161,14 +161,14 @@ func TestCleanupOrphansHandler_Apply_BindsExpectPIDs(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
-	if len(gotOpts.ExpectPIDs) != 2 || gotOpts.ExpectPIDs[0] != 1234 || gotOpts.ExpectPIDs[1] != 5678 {
-		t.Errorf("CleanupOpts.ExpectPIDs = %v, want [1234 5678] (apply must bind to the confirmed set)", gotOpts.ExpectPIDs)
+	if len(gotOpts.Expect) != 1 || gotOpts.Expect[0].PID != 1234 || gotOpts.Expect[0].StartedAt != "2026-01-01T00:00:00Z" {
+		t.Errorf("CleanupOpts.Expect = %v, want [{1234 2026-01-01T00:00:00Z}] (apply must bind to the confirmed identity set)", gotOpts.Expect)
 	}
 }
 
-// TestCleanupOrphansHandler_DryRun_IgnoresExpectPIDs: a dry-run preview must recompute
-// the FULL current candidate set — expect_pids is an apply-only binding.
-func TestCleanupOrphansHandler_DryRun_IgnoresExpectPIDs(t *testing.T) {
+// TestCleanupOrphansHandler_DryRun_IgnoresExpect: a dry-run preview must recompute the
+// FULL current candidate set — expect is an apply-only binding.
+func TestCleanupOrphansHandler_DryRun_IgnoresExpect(t *testing.T) {
 	gotOpts := api.CleanupOpts{}
 	s := newCleanupTestServer(t, fakeCleanupAPI{
 		CleanupOrphansFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
@@ -177,7 +177,7 @@ func TestCleanupOrphansHandler_DryRun_IgnoresExpectPIDs(t *testing.T) {
 		},
 	})
 
-	body := strings.NewReader(`{"apply": false, "expect_pids": [1234]}`)
+	body := strings.NewReader(`{"apply": false, "expect": [{"pid": 1234, "started_at": "2026-01-01T00:00:00Z"}]}`)
 	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
 	req.Header.Set("Origin", "http://127.0.0.1:9125")
 	req.Header.Set("Content-Type", "application/json")
@@ -187,8 +187,8 @@ func TestCleanupOrphansHandler_DryRun_IgnoresExpectPIDs(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
 	}
-	if gotOpts.ExpectPIDs != nil {
-		t.Errorf("CleanupOpts.ExpectPIDs = %v, want nil (dry-run must not bind)", gotOpts.ExpectPIDs)
+	if gotOpts.Expect != nil {
+		t.Errorf("CleanupOpts.Expect = %v, want nil (dry-run must not bind)", gotOpts.Expect)
 	}
 }
 

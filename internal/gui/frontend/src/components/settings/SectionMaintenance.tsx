@@ -178,12 +178,16 @@ function CardOrphanMcpServers(): preact.JSX.Element {
       // apply=true → explicit destructive opt-in. Backend re-resolves the orphan
       // set from a fresh process snapshot; the per-row identity gate (PID-reuse,
       // start-time precedes snapshot, etc.) is the authoritative kill filter.
-      // We ALSO bind the kill to the exact PIDs the modal listed as eligible
-      // (expect_pids), so a candidate whose reap verdict drifted to eligible while
-      // the confirm dialog was open cannot be killed unacknowledged (bot PR #520
-      // P2). This mirrors the eligible subset the confirm modal counted/listed.
-      const confirmedEligiblePIDs = orphansSnapshot.filter(orphanIsEligible).map((o) => o.pid);
-      const r = await cleanupOrphans(true, confirmedEligiblePIDs);
+      // We ALSO bind the kill to the exact {pid, started_at} identities the modal
+      // listed as eligible, so a candidate whose reap verdict drifted to eligible while
+      // the confirm dialog was open — or a PID recycled onto a DIFFERENT process before
+      // apply (its fresh started_at differs) — cannot be killed unacknowledged (bot PR
+      // #520 P2). Identity, not a bare recyclable PID, is the binding key the backend
+      // kill primitive re-verifies. Mirrors the eligible subset the modal counted/listed.
+      const confirmedEligible = orphansSnapshot
+        .filter(orphanIsEligible)
+        .map((o) => ({ pid: o.pid, started_at: o.started_at ?? "" }));
+      const r = await cleanupOrphans(true, confirmedEligible);
       // Retain the row list so the post-apply table can render per-row
       // kill_err. Bot P2 on commit 72757c6 / kosyak
       // 2026-05-07-startime-zero-fail-open-bypasses-pid-reuse-guard.md

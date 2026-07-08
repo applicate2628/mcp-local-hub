@@ -60,16 +60,18 @@ func isOurOwnProcess(cmdline string) bool {
 }
 
 // OrphanProcess describes one orphan MCP subprocess discovered by CleanupOrphans.
-// KillErr carries the per-candidate outcome text. On a kill attempt (DryRun=false,
-// ReapVerdict=reap-eligible) it distinguishes an identity mismatch (PID recycled or
-// process replaced since the census scan — the friendly-fire guard refused the kill),
-// an access-denied refusal, an already-exited process, and a missing identity proof;
-// it is empty on a clean kill. It is ALSO populated (on BOTH dry-run and apply) with a
-// human "skipped: <reason>" note for a candidate the A2 PR5 reap-eligibility gate SPARED
-// (config-referenced / config-scan-degraded / snapshot-degraded / below-kill-age-floor) —
-// so a dry-run preview shows WHY a candidate would not be reaped. The structured reason
-// is ReapVerdict; downstream consumers branch on KillErr != "" (an outcome exists), never
-// on its message text.
+// KillErr carries the per-candidate APPLY OUTCOME and is populated ONLY on apply
+// (DryRun=false). On a kill attempt (ReapVerdict=reap-eligible) it distinguishes an
+// identity mismatch (PID recycled or process replaced since the census scan — the
+// friendly-fire guard refused the kill), an access-denied refusal, an already-exited
+// process, and a missing identity proof; it is empty on a clean kill. For a SPARED
+// candidate (config-referenced / config-scan-degraded / snapshot-degraded /
+// below-kill-age-floor) it carries the human "skipped: <reason>" note on apply. On a
+// DRY-RUN preview KillErr is left EMPTY — the preview verdict is exposed only through the
+// structured ReapVerdict field, so a consumer that renders `kill_err || "killed"` never
+// mis-renders a reap-eligible preview row as a false "killed" (A2 PR5 r2, bot PR #520 P1).
+// Downstream consumers branch on ReapVerdict for the verdict and on KillErr != "" (an
+// apply outcome exists) never on its message text.
 //
 // Wire-format note (Cleanup-6 security fix): the raw Cmdline is kept on
 // the struct for server-side use (manifest-pattern match in CleanupOrphans,
@@ -103,12 +105,19 @@ type OrphanProcess struct {
 	// process.TerminatePIDWithIdentity re-verifies on a held handle at kill
 	// time (see reapOrphans), so a PID recycled between the census scan and
 	// the kill fails the proof and is left untouched — the PID-recycle
-	// friendly-fire guard. Both are server-side only (json:"-"): the image
-	// path can embed a username / workspace segment, same rationale as
-	// Cmdline. Empty when the snapshot could not report a path → the proof
-	// fails closed and the process is NOT killed.
+	// friendly-fire guard.
+	//
+	// ExecutablePath is server-side only (json:"-"): the image path can embed a
+	// username / workspace segment, same rationale as Cmdline. StartedAt IS on the
+	// wire (json:"started_at"): it is a plain timestamp (no path/PII, already
+	// derivable from age_sec) and the GUI apply path binds the confirmed kill set by
+	// {pid, started_at} — the SAME identity key the kill primitive re-verifies — so a
+	// PID recycled onto a different process between the confirm dialog and apply
+	// cannot be killed unacknowledged (bot PR #520 P2; architect verdict). Empty
+	// when the snapshot could not report a path/time → the proof fails closed and
+	// the process is NOT killed.
 	ExecutablePath string `json:"-"`
-	StartedAt      string `json:"-"`
+	StartedAt      string `json:"started_at,omitempty"`
 
 	// MatchSource explains why an AGGRESSIVE candidate was included:
 	// the ancestor basename that anchored the scope (e.g. "codex") for
@@ -411,16 +420,21 @@ type CleanupOpts struct {
 	// Mutually exclusive with Client.
 	RootPID int
 
-	// ExpectPIDs, when non-nil, BINDS a KILL to a previously resolved + confirmed
-	// candidate set: only candidates whose PID is in this allowlist are killed, so
-	// a process that spawned AFTER the set was validated — or whose reap verdict
-	// drifted to eligible while the confirm dialog was open — is excluded and never
-	// killed unacknowledged. Used by BOTH AggressiveCleanup (bot #373 R5) and the
-	// default CleanupOrphans (bot PR #520 P2); the GUI apply path passes the exact
-	// eligible PIDs the operator confirmed in the modal. nil → no binding (the CLI
-	// and every dry-run recompute the full current set). An empty (but non-nil)
-	// slice kills nothing, which is the correct safe outcome for a validated-empty set.
+	// ExpectPIDs, when non-nil, BINDS an AggressiveCleanup kill to a previously
+	// resolved + confirmed candidate set by PID (bot #373 R5). nil → no binding.
+	// An empty (but non-nil) slice kills nothing. The DEFAULT reaper (CleanupOrphans)
+	// uses the stronger identity-keyed Expect below instead — a bare PID is recyclable.
 	ExpectPIDs []int
+
+	// Expect, when non-nil, BINDS a DEFAULT CleanupOrphans kill to a previously
+	// confirmed candidate set by {PID, StartedAt} — the SAME identity key the kill
+	// primitive (TerminatePIDWithIdentity) re-verifies. A process whose reap verdict
+	// drifted to eligible while the confirm dialog was open, OR a PID recycled onto a
+	// DIFFERENT process before apply (its fresh StartedAt differs), is excluded and
+	// never killed unacknowledged (bot PR #520 P2; architect verdict — identity, not
+	// PID, is the binding fixed point). nil → no binding (CLI and every dry-run
+	// recompute the full current set). Empty (non-nil) → kills nothing.
+	Expect []ProcIdentity
 
 	// IncludeClasses lists dangerous process classes the operator has
 	// explicitly opted to include in an aggressive kill (e.g. "chrome"
@@ -663,12 +677,30 @@ func appendPatternsFromEntries(entries []clients.StdioEntry, add func(string), i
 	}
 }
 
+// commonNonDiscriminatingArgs are generic subcommand / directory / protocol words that
+// appear in countless UNRELATED command lines and paths (`C:\dev\...`, `mcp-server-time`,
+// `npx serve`). A client stdio arg equal to one of these must NOT become a config-REFERENCE
+// pattern: candidateConfigReferenced does a substring match, so a single client config with
+// a `server` / `dev` / `mcp` arg would spare every unrelated candidate globally and the
+// periodic reaper would never reclaim otherwise-eligible orphans (bot PR #520 P2). A real
+// short package token like "serena" / "wolfram" is deliberately NOT in this set. The words
+// here are lowercase; the check case-folds the arg before lookup.
+var commonNonDiscriminatingArgs = map[string]bool{
+	"server": true, "serve": true, "run": true, "dev": true, "start": true, "stop": true,
+	"test": true, "build": true, "main": true, "app": true, "index": true,
+	"src": true, "lib": true, "bin": true, "dist": true, "cli": true, "api": true, "web": true,
+	"core": true, "data": true, "config": true, "mcp": true, "exec": true, "cmd": true,
+	"tool": true, "tools": true, "proxy": true, "agent": true, "worker": true, "http": true,
+}
+
 // argIsReferenceCandidate is the RELAXED arg filter used ONLY by the fail-closed config
 // REFERENCE side (scanClientConfigsFailClosed, inclusive=true). Over-inclusion here can only
 // SPARE a candidate — never kill — so it drops the nomination side's 8-char / discriminating
 // -separator requirement and keeps a short but real package token like "serena". It still
-// excludes flags (leading `-`), all-digit tokens (ports/PIDs/timeouts), and <3-char noise
-// that would substring-match almost anything.
+// excludes flags (leading `-`), all-digit tokens (ports/PIDs/timeouts), <3-char noise, and
+// generic common words (commonNonDiscriminatingArgs) that would substring-spare unrelated
+// candidates globally — enough specificity to keep a real package token without turning one
+// config's `dev`/`server` arg into a fleet-wide spare (bot PR #520 P2).
 func argIsReferenceCandidate(arg string) bool {
 	if len(arg) < 3 {
 		return false
@@ -677,6 +709,9 @@ func argIsReferenceCandidate(arg string) bool {
 		return false
 	}
 	if isAllDigits(arg) {
+		return false
+	}
+	if commonNonDiscriminatingArgs[strings.ToLower(arg)] {
 		return false
 	}
 	return true
@@ -1006,14 +1041,15 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 		filtered = append(filtered, o)
 	}
 
-	// Validated-set binding (bot PR #520 P2): on APPLY the GUI passes the exact
-	// eligible PIDs the operator confirmed in the modal. A candidate whose reap
-	// verdict drifted to eligible while the confirm dialog was open (e.g. it crossed
-	// the 600s kill-age floor) is then NOT killed unless it was in the confirmed set,
-	// so the kill matches the confirmation exactly — the same contract AggressiveCleanup
-	// uses. nil → no binding (dry-run preview / CLI recompute the full current set).
-	if opts.ExpectPIDs != nil {
-		filtered = filterToExpectedPIDs(filtered, opts.ExpectPIDs)
+	// Validated-set binding (bot PR #520 P2; architect verdict): on APPLY the GUI passes
+	// the exact {pid, started_at} identities the operator confirmed in the modal. A
+	// candidate whose reap verdict drifted to eligible while the confirm dialog was open
+	// (crossed the 600s floor), OR a PID recycled onto a DIFFERENT process before apply
+	// (its fresh started_at differs), is then NOT killed unless its full identity was in
+	// the confirmed set — the kill matches the confirmation exactly, keyed by the same
+	// identity the kill primitive re-verifies. nil → no binding (dry-run / CLI recompute).
+	if opts.Expect != nil {
+		filtered = filterToExpectedIdentities(filtered, opts.Expect)
 	}
 
 	applyReapEligibilityGate(filtered, opts.DryRun, snapErr != nil)
@@ -1549,6 +1585,38 @@ func filterToExpectedPIDs(candidates []OrphanProcess, expectPIDs []int) []Orphan
 	out := candidates[:0]
 	for _, c := range candidates {
 		if allow[c.PID] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// ProcIdentity names one operator-confirmed candidate by PID AND its census start
+// time — the SAME {pid, started_at} key the kill primitive (TerminatePIDWithIdentity)
+// re-verifies on a held handle. Binding the confirmed set by this identity instead of a
+// bare (recyclable) PID means a PID reused by a DIFFERENT process between the confirm
+// dialog and apply is excluded: the reused process's fresh StartedAt is ~now, which for
+// an aged (≥600s) orphan can never match the confirmed start time (bot PR #520 P2).
+type ProcIdentity struct {
+	PID       int    `json:"pid"`
+	StartedAt string `json:"started_at"`
+}
+
+// filterToExpectedIdentities binds a freshly-snapshotted candidate set to a previously
+// confirmed {PID, StartedAt} allowlist: it returns only the candidates whose identity is
+// in expect, in their original order. Unlike filterToExpectedPIDs (aggressive path, PID
+// only), this excludes a recycled-PID replacement whose StartedAt differs from what the
+// operator confirmed — the identity-keyed default-reaper binding (bot PR #520 P2; architect
+// verdict). Both scans derive StartedAt through the same orphanStartedAt path, so one live
+// process is byte-stable across scans while a reused PID differs.
+func filterToExpectedIdentities(candidates []OrphanProcess, expect []ProcIdentity) []OrphanProcess {
+	allow := make(map[ProcIdentity]bool, len(expect))
+	for _, e := range expect {
+		allow[e] = true
+	}
+	out := candidates[:0]
+	for _, c := range candidates {
+		if allow[ProcIdentity{PID: c.PID, StartedAt: c.StartedAt}] {
 			out = append(out, c)
 		}
 	}
