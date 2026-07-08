@@ -423,7 +423,7 @@ API_KEY = "secret:foreign-text"
 	}
 }
 
-func TestAdoptSecretPrefixedExistingVaultKeyStaysHubRef(t *testing.T) {
+func TestAdoptSecretPrefixedExistingVaultKeyRoutesAsForeignLiteral(t *testing.T) {
 	entry := "mui-adopt-existing-secret-ref"
 	_, _, _ = setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-existing-secret-ref]
 command = "go"
@@ -453,14 +453,37 @@ API_KEY = "secret:EXISTING_API_KEY"
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
 	}
-	if len(plan.SecretRoutedKeys) != 0 {
-		t.Fatalf("SecretRoutedKeys = %#v, want none for existing hub secret ref", plan.SecretRoutedKeys)
+	wantKey := "MUI_ADOPT_EXISTING_SECRET_REF_API_KEY"
+	if !reflect.DeepEqual(plan.SecretRoutedKeys, []string{wantKey}) {
+		t.Fatalf("SecretRoutedKeys = %#v, want [%s]", plan.SecretRoutedKeys, wantKey)
 	}
-	if !strings.Contains(plan.ManifestYAML, "secret:EXISTING_API_KEY") {
-		t.Fatalf("manifest did not keep existing hub secret ref:\n%s", plan.ManifestYAML)
+	if !strings.Contains(plan.ManifestYAML, "secret:"+wantKey) {
+		t.Fatalf("manifest did not route foreign secret-prefixed value to namespaced ref:\n%s", plan.ManifestYAML)
 	}
-	if strings.Contains(plan.ManifestYAML, "MUI_ADOPT_EXISTING_SECRET_REF_API_KEY") {
-		t.Fatalf("manifest routed existing hub secret ref under a new key:\n%s", plan.ManifestYAML)
+	if strings.Contains(plan.ManifestYAML, "secret:EXISTING_API_KEY") {
+		t.Fatalf("manifest kept existing hub secret ref from foreign config:\n%s", plan.ManifestYAML)
+	}
+
+	if err := NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{}); err != nil {
+		t.Fatalf("ExecuteAdopt: %v", err)
+	}
+	vault, err = secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+	if err != nil {
+		t.Fatalf("OpenVault after adopt: %v", err)
+	}
+	got, err := vault.Get(wantKey)
+	if err != nil {
+		t.Fatalf("vault.Get(%s): %v", wantKey, err)
+	}
+	if got != "secret:EXISTING_API_KEY" {
+		t.Fatalf("routed vault secret = %q, want original foreign literal", got)
+	}
+	existing, err := vault.Get("EXISTING_API_KEY")
+	if err != nil {
+		t.Fatalf("vault.Get(EXISTING_API_KEY): %v", err)
+	}
+	if existing != "hub-managed-value" {
+		t.Fatalf("existing hub secret changed: got %q", existing)
 	}
 }
 

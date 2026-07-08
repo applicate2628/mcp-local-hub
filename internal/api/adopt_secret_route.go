@@ -31,9 +31,6 @@ func rewriteAdoptSensitiveEnv(manifestName string, env map[string]string) (route
 			continue
 		}
 		secretPrefixed := isSecretPrefixedAdoptEnvValue(value)
-		if secretPrefixed && adoptHubSecretRefExists(value) {
-			continue
-		}
 		if !secretPrefixed && (!IsSensitiveEnvName(key) || !isLiteralAdoptEnvValue(value)) {
 			continue
 		}
@@ -100,23 +97,6 @@ func isLiteralAdoptEnvValue(value string) bool {
 
 func isSecretPrefixedAdoptEnvValue(value string) bool {
 	return strings.HasPrefix(strings.TrimSpace(value), "secret:")
-}
-
-func adoptHubSecretRefExists(value string) bool {
-	trimmed := strings.TrimSpace(value)
-	if !strings.HasPrefix(trimmed, "secret:") {
-		return false
-	}
-	key := strings.TrimPrefix(trimmed, "secret:")
-	if key == "" {
-		return false
-	}
-	vault, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
-	if err != nil {
-		return false
-	}
-	_, err = vault.Get(key)
-	return err == nil
 }
 
 func persistAdoptRoutedSecrets(secretValues map[string]string) error {
