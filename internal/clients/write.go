@@ -48,6 +48,17 @@ import (
 // value and restore in t.Cleanup.
 var WriteConfigFile = fallbackWriteConfigFile
 
+// WriteConfigFileFunc is the per-call writer shape used when a higher layer has
+// already resolved and authorized a specific client-config write target.
+type WriteConfigFileFunc func(path string, contents []byte) error
+
+func writeConfigFileWith(writer WriteConfigFileFunc, path string, contents []byte) error {
+	if writer == nil {
+		writer = WriteConfigFile
+	}
+	return writer(path, contents)
+}
+
 // CreateConfigFileIfMissing is the production swap point for the
 // init-time atomic create-new helper. The test default is the same
 // temp+hardlink pattern that's safe on POSIX (mode 0o600 honored

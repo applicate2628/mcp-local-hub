@@ -74,6 +74,89 @@ export async function postDismiss(server: string): Promise<void> {
   throw new Error(`/api/dismiss: ${body?.error ?? resp.statusText}`);
 }
 
+export interface AdoptRequest {
+  entry: string;
+  client: string;
+  clients?: string[];
+  name?: string;
+  port?: number;
+  symlink_consent?: AdoptSymlinkTarget[];
+}
+
+export interface AdoptSymlinkTarget {
+  client: string;
+  resolved_path: string;
+}
+
+export interface AdoptSignatureMismatch {
+  Client: string;
+  Reason: string;
+}
+
+export interface AdoptDisabledSameName {
+  Client: string;
+}
+
+export interface AdoptPlan {
+  EntryName: string;
+  SourceClient: string;
+  ManifestName: string;
+  Port: number;
+  AdoptClients: string[];
+  AlsoPresent: string[];
+  SignatureMismatches: AdoptSignatureMismatch[];
+  DisabledSameName: AdoptDisabledSameName[];
+  SecretRoutedKeys: string[];
+  ManifestYAML: string;
+  symlink_targets: AdoptSymlinkTarget[];
+}
+
+export interface AdoptResult {
+  name: string;
+  port: number;
+  adopt_clients?: string[];
+  symlink_targets?: AdoptSymlinkTarget[];
+}
+
+export async function postAdoptPlan(req: AdoptRequest): Promise<AdoptPlan> {
+  const plan = await postJSONObject<AdoptPlan>("/api/adopt/plan", req);
+  return normalizeAdoptPlan(plan);
+}
+
+export async function postAdopt(req: AdoptRequest): Promise<AdoptResult> {
+  return postJSONObject<AdoptResult>("/api/adopt", req);
+}
+
+async function postJSONObject<T>(path: string, body: unknown): Promise<T> {
+  const resp = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json().catch(() => null);
+  if (!resp.ok) {
+    const envelope = data as { error?: string; code?: string } | null;
+    const msg = envelope?.error ?? resp.statusText ?? "unknown";
+    throw makeAPIError(resp.status, envelope?.code, `${path}: ${msg}`, data);
+  }
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error(`${path}: expected object, got ${Array.isArray(data) ? "array" : typeof data}`);
+  }
+  return data as T;
+}
+
+function normalizeAdoptPlan(plan: AdoptPlan): AdoptPlan {
+  return {
+    ...plan,
+    AdoptClients: plan.AdoptClients ?? [],
+    AlsoPresent: plan.AlsoPresent ?? [],
+    SignatureMismatches: plan.SignatureMismatches ?? [],
+    DisabledSameName: plan.DisabledSameName ?? [],
+    SecretRoutedKeys: plan.SecretRoutedKeys ?? [],
+    symlink_targets: plan.symlink_targets ?? [],
+  };
+}
+
 // ManifestMutationResult carries the R4-2 (bot R4) restart signal a manifest
 // create / edit returns. restartRequired is true when the durable manifest
 // write committed but the live gate-ON hub's in-place republish failed, so

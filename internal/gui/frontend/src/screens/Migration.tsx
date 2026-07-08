@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { fetchOrThrow, postDismiss } from "../api";
+import {
+  fetchOrThrow,
+  postAdopt,
+  postAdoptPlan,
+  postDismiss,
+  type APIError,
+  type AdoptPlan,
+} from "../api";
 import { InfoTip } from "../components/InfoTip";
 import { ScanRefreshControls } from "../components/ScanRefreshControls";
 import { LoadingState } from "../components/LoadingState";
 import { useAutoScan } from "../hooks/useAutoScan";
 import { useEventSource } from "../hooks/useEventSource";
 import { groupMigrationEntries, type MigrationGroups } from "../lib/migration-grouping";
-import type { ScanEntry, ScanResult } from "../types";
+import { pushToast } from "../lib/toast-store";
+import type { ClientCapability, ScanEntry, ScanResult } from "../types";
 
 // DismissedResponse mirrors the /api/dismissed handler shape from
 // internal/gui/dismiss.go. Declared inline here rather than in
@@ -40,6 +48,10 @@ export function DiscoveryScreen() {
   const [scanReloadToken, setScanReloadToken] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [migrateBusy, setMigrateBusy] = useState<boolean>(false);
+  const [adoptPlan, setAdoptPlan] = useState<AdoptPlan | null>(null);
+  const [adoptConsent, setAdoptConsent] = useState(false);
+  const [adoptConfirmBusy, setAdoptConfirmBusy] = useState(false);
+  const [adoptModalError, setAdoptModalError] = useState<string | null>(null);
   // Monotonic guard for scan refreshes. Auto-refresh, manual Rescan,
   // reload-token effects, and SSE can overlap; only the newest request may
   // publish state so a slow older response cannot replace fresher results.
@@ -248,6 +260,66 @@ export function DiscoveryScreen() {
     }
   }
 
+  async function runAdoptPlan(entry: ScanEntry, sourceClient?: string) {
+    const client = sourceClient || firstClientFor(entry);
+    if (!client) {
+      setActionError(`Adopt ${entry.name}: no stdio client found`);
+      return;
+    }
+    const busyKey = adoptActionKey(entry.name);
+    setActionBusy(busyKey);
+    setActionError(null);
+    setAdoptModalError(null);
+    try {
+      const plan = await postAdoptPlan({ entry: entry.name, client });
+      setAdoptPlan(plan);
+      setAdoptConsent(false);
+    } catch (err) {
+      setActionError(`Adopt ${entry.name}: ${(err as Error).message}`);
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  async function confirmAdopt() {
+    if (!adoptPlan) return;
+    setAdoptConfirmBusy(true);
+    setAdoptModalError(null);
+    const req = {
+      entry: adoptPlan.EntryName,
+      client: adoptPlan.SourceClient,
+      clients: adoptPlan.AdoptClients,
+      name: adoptPlan.ManifestName,
+      port: adoptPlan.Port,
+    };
+    try {
+      await postAdopt({
+        ...req,
+        symlink_consent: adoptConsent ? adoptPlan.symlink_targets : [],
+      });
+      pushToast("success", `Adopted ${adoptPlan.ManifestName} into hub.`);
+      setAdoptPlan(null);
+      setAdoptConsent(false);
+      setScanReloadToken((n) => n + 1);
+    } catch (err) {
+      const apiErr = err as APIError;
+      if (apiErr.code === "SYMLINK_CONSENT_REQUIRED") {
+        setAdoptModalError("Symlink consent is required before adopting this entry.");
+        try {
+          const refreshed = await postAdoptPlan(req);
+          setAdoptPlan(refreshed);
+          setAdoptConsent(false);
+        } catch (refreshErr) {
+          setAdoptModalError((refreshErr as Error).message);
+        }
+        return;
+      }
+      setAdoptModalError((err as Error).message);
+    } finally {
+      setAdoptConfirmBusy(false);
+    }
+  }
+
   const groups: MigrationGroups = scan
     ? groupMigrationEntries(scan, dismissedUnknown)
     : { viaHub: [], viaHubInherited: [], canMigrate: [], unknown: [], external: [], perSession: [], dismissed: [] };
@@ -314,6 +386,9 @@ export function DiscoveryScreen() {
           <UnmanagedExternalGroup
             unknownEntries={groups.unknown}
             externalEntries={groups.external}
+            clientCapabilities={scan.client_capabilities ?? {}}
+            actionBusy={actionBusy}
+            onAdopt={runAdoptPlan}
             onDismiss={runDismiss}
           />
           <PerSessionGroup entries={groups.perSession} />
@@ -322,6 +397,20 @@ export function DiscoveryScreen() {
           />
         </div>
       )}
+      <AdoptConfirmModal
+        plan={adoptPlan}
+        consent={adoptConsent}
+        busy={adoptConfirmBusy}
+        error={adoptModalError}
+        onConsent={setAdoptConsent}
+        onCancel={() => {
+          if (adoptConfirmBusy) return;
+          setAdoptPlan(null);
+          setAdoptConsent(false);
+          setAdoptModalError(null);
+        }}
+        onConfirm={confirmAdopt}
+      />
     </section>
   );
 }
@@ -477,6 +566,9 @@ function ReadyToMigrateGroup(props: {
 function UnmanagedExternalGroup(props: {
   unknownEntries: ScanEntry[];
   externalEntries: ScanEntry[];
+  clientCapabilities: Record<string, ClientCapability>;
+  actionBusy: string | null;
+  onAdopt: (entry: ScanEntry, sourceClient: string) => void;
   onDismiss: (entry: ScanEntry) => void;
 }) {
   const total = props.unknownEntries.length + props.externalEntries.length;
@@ -494,39 +586,53 @@ function UnmanagedExternalGroup(props: {
         <h2>Unmanaged / External</h2>
         <InfoTip
           label="About unmanaged / external entries"
-          text="Unknown stdio entries (no mcphub manifest) can be adopted with Create manifest. External remotes are real off-host MCP servers (e.g. context7, qt-docs) routed directly by the client — they are shown read-only so you can see every MCP server, not just hub-managed ones. Dismiss parks an entry in the collapsed Dismissed section below."
+          text="Unknown stdio entries (no mcphub manifest) can be adopted into the hub or used to create a manifest draft. External remotes are real off-host MCP servers (e.g. context7, qt-docs) routed directly by the client — they are shown read-only so you can see every MCP server, not just hub-managed ones. Dismiss parks an entry in the collapsed Dismissed section below."
         />
       </div>
       {props.unknownEntries.length > 0 && (
         <ul class="group-rows group-rows-unknown" data-subgroup="unknown">
-          {props.unknownEntries.map((e) => (
-            <li key={e.name} data-server={e.name}>
-              <span class="server-name">{e.name}</span>
-              <span class="badge badge-unknown">Unknown stdio</span>
-              <button
-                type="button"
-                class="create-manifest btn"
-                data-action="create-manifest"
-                onClick={() => {
-                  const client = firstClientFor(e);
-                  const url = client
-                    ? `#/add-server?server=${encodeURIComponent(e.name)}&from-client=${encodeURIComponent(client)}`
-                    : `#/add-server?server=${encodeURIComponent(e.name)}`;
-                  window.location.hash = url;
-                }}
-              >
-                Create manifest
-              </button>
-              <button
-                type="button"
-                class="dismiss btn btn-danger"
-                data-action="dismiss"
-                onClick={() => props.onDismiss(e)}
-              >
-                Dismiss
-              </button>
-            </li>
-          ))}
+          {props.unknownEntries.map((e) => {
+            const adoptClient = firstAdoptClientFor(e, props.clientCapabilities);
+            return (
+              <li key={e.name} data-server={e.name}>
+                <span class="server-name">{e.name}</span>
+                <span class="badge badge-unknown">Unknown stdio</span>
+                {adoptClient && (
+                  <button
+                    type="button"
+                    class="adopt btn btn-primary"
+                    data-action="adopt"
+                    disabled={props.actionBusy != null}
+                    onClick={() => props.onAdopt(e, adoptClient)}
+                  >
+                    {props.actionBusy === adoptActionKey(e.name) ? "Planning..." : "Adopt into hub"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  class="create-manifest btn"
+                  data-action="create-manifest"
+                  onClick={() => {
+                    const client = firstClientFor(e);
+                    const url = client
+                      ? `#/add-server?server=${encodeURIComponent(e.name)}&from-client=${encodeURIComponent(client)}`
+                      : `#/add-server?server=${encodeURIComponent(e.name)}`;
+                    window.location.hash = url;
+                  }}
+                >
+                  Create manifest
+                </button>
+                <button
+                  type="button"
+                  class="dismiss btn btn-danger"
+                  data-action="dismiss"
+                  onClick={() => props.onDismiss(e)}
+                >
+                  Dismiss
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
       {props.externalEntries.length > 0 && (
@@ -628,6 +734,139 @@ function firstClientFor(entry: { client_presence?: Record<string, { transport?: 
     if (info?.transport === "stdio") return client;
   }
   return "";
+}
+
+function firstAdoptClientFor(
+  entry: { client_presence?: Record<string, { transport?: string }> },
+  clientCapabilities: Record<string, ClientCapability>,
+): string {
+  const presence = entry.client_presence ?? {};
+  for (const [client, info] of Object.entries(presence)) {
+    if (info?.transport === "stdio" && clientCapabilities[client]?.adopt_supported === true) {
+      return client;
+    }
+  }
+  return "";
+}
+
+function adoptActionKey(name: string): string {
+  return `adopt:${name}`;
+}
+
+function AdoptConfirmModal(props: {
+  plan: AdoptPlan | null;
+  consent: boolean;
+  busy: boolean;
+  error: string | null;
+  onConsent: (next: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const { plan } = props;
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (plan && !dialog.open) {
+      dialog.showModal();
+    } else if (!plan && dialog.open) {
+      dialog.close();
+    }
+  }, [plan]);
+  if (!plan) return null;
+
+  const symlinkTargets = plan.symlink_targets ?? [];
+  const needsSymlinkConsent = symlinkTargets.length > 0;
+  return (
+    <dialog
+      ref={dialogRef}
+      data-testid="adopt-confirm-modal"
+      onCancel={(ev) => {
+        ev.preventDefault();
+        props.onCancel();
+      }}
+    >
+      <h2>Adopt into hub</h2>
+      <div class="adopt-plan-summary">
+        <p>Manifest: {plan.ManifestName}</p>
+        <p>Port: {plan.Port}</p>
+        <section>
+          <h3>Clients to repoint</h3>
+          <ul>
+            {plan.AdoptClients.map((client) => (
+              <li key={client}>{client}</li>
+            ))}
+          </ul>
+        </section>
+        {(plan.AlsoPresent.length > 0 ||
+          plan.SignatureMismatches.length > 0 ||
+          plan.DisabledSameName.length > 0) && (
+          <section>
+            <h3>Excluded same-name clients</h3>
+            <ul>
+              {plan.AlsoPresent.map((client) => (
+                <li key={`also-${client}`}>{client}: also present, not selected</li>
+              ))}
+              {plan.SignatureMismatches.map((mismatch) => (
+                <li key={`mismatch-${mismatch.Client}`}>
+                  {mismatch.Client}: {mismatch.Reason}
+                </li>
+              ))}
+              {plan.DisabledSameName.map((disabled) => (
+                <li key={`disabled-${disabled.Client}`}>{disabled.Client}: disabled</li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {plan.SecretRoutedKeys.length > 0 && (
+          <section>
+            <h3>Secret-routed keys</h3>
+            <ul>
+              {plan.SecretRoutedKeys.map((key) => (
+                <li key={key}>{key}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {needsSymlinkConsent && (
+          <section>
+            <h3>Symlink write consent</h3>
+            <ul>
+              {symlinkTargets.map((target) => (
+                <li key={`${target.client}:${target.resolved_path}`}>
+                  {target.client} config is a symlink -&gt; {target.resolved_path}; adopting
+                  writes through the resolved target.
+                </li>
+              ))}
+            </ul>
+            <label class="adopt-symlink-consent">
+              <input
+                type="checkbox"
+                checked={props.consent}
+                onChange={(ev) => props.onConsent((ev.currentTarget as HTMLInputElement).checked)}
+              />
+              <span>I understand and consent to writing through the resolved target.</span>
+            </label>
+          </section>
+        )}
+      </div>
+      {props.error && <p class="error">{props.error}</p>}
+      <menu>
+        <button type="button" onClick={props.onCancel} disabled={props.busy}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="primary"
+          data-action="confirm-adopt"
+          disabled={props.busy || (needsSymlinkConsent && !props.consent)}
+          onClick={props.onConfirm}
+        >
+          {props.busy ? "Adopting..." : "Adopt into hub"}
+        </button>
+      </menu>
+    </dialog>
+  );
 }
 
 // externalEndpointFor returns a display string for an external remote's

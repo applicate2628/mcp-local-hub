@@ -348,6 +348,9 @@ type ScanResult struct {
 	//                           manifest/header matrix (the 6 legacy clients);
 	//                           used by the remote-http install plan + draft
 	//                           surfaces, NOT the direct-install client choices.
+	//   - adopt_supported     — /api/adopt/plan accepts this client for adopting
+	//                           unknown stdio rows. Discovery offers Adopt only
+	//                           for stdio rows whose source client has this flag.
 	//
 	// See client_capabilities.go (ClientCapabilities()) for the owner.
 	ClientCapabilities map[string]ClientCapability `json:"client_capabilities,omitempty"`

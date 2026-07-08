@@ -113,14 +113,26 @@ func (v *vscodeClient) readJSON() (map[string]any, error) {
 // indented marshal. The bytes route through the UNCHANGED WriteConfigFile
 // pipeline.
 func (v *vscodeClient) setMember(name string, value any) error {
-	return mutateJSONObjectMember(v.path, vscodeServersKey, name, value, false)
+	return v.setMemberWithWriter(name, value, nil)
+}
+
+func (v *vscodeClient) setMemberWithWriter(name string, value any, writer WriteConfigFileFunc) error {
+	return mutateJSONObjectMemberWithWriter(v.path, vscodeServersKey, name, value, false, writer)
 }
 
 func (v *vscodeClient) deleteMember(name string) error {
-	return mutateJSONObjectMember(v.path, vscodeServersKey, name, nil, true)
+	return v.deleteMemberWithWriter(name, nil)
+}
+
+func (v *vscodeClient) deleteMemberWithWriter(name string, writer WriteConfigFileFunc) error {
+	return mutateJSONObjectMemberWithWriter(v.path, vscodeServersKey, name, nil, true, writer)
 }
 
 func (v *vscodeClient) AddEntry(entry MCPEntry) error {
+	return v.AddEntryWithConfigWriter(entry, nil)
+}
+
+func (v *vscodeClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
 	serverEntry := map[string]any{
 		"type": "http",
 		"url":  entry.URL,
@@ -131,7 +143,7 @@ func (v *vscodeClient) AddEntry(entry MCPEntry) error {
 	// Comment-preserving set: patches servers.<name> into the original on-disk
 	// bytes via hujson so the operator's comments and unrelated keys survive (a
 	// full map re-marshal would drop both).
-	return v.setMember(entry.Name, serverEntry)
+	return v.setMemberWithWriter(entry.Name, serverEntry, writer)
 }
 
 func (v *vscodeClient) RemoveEntry(name string) error {
@@ -173,11 +185,19 @@ func (v *vscodeClient) RestoreEntryFromBackupForRollback(backupPath, name string
 	return v.restoreEntryFromBackup(backupPath, name, true)
 }
 
+func (v *vscodeClient) RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error {
+	return v.restoreEntryFromBackupWithWriter(backupPath, name, true, writer)
+}
+
 // restoreEntryFromBackup is the shared body. When allowHubEntry is false
 // (demigrate) it refuses a hub-HTTP-shaped backup entry with
 // ErrBackupEntryAlreadyMigrated; when true (migrate rollback) it writes
 // the backup bytes verbatim regardless of shape.
 func (v *vscodeClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
+	return v.restoreEntryFromBackupWithWriter(backupPath, name, allowHubEntry, nil)
+}
+
+func (v *vscodeClient) restoreEntryFromBackupWithWriter(backupPath, name string, allowHubEntry bool, writer WriteConfigFileFunc) error {
 	// os.ReadFile (NOT readRawConfig): a named backup that is missing is a
 	// genuine read error the demigrate caller must see, not a silent
 	// treat-as-empty. Empty / comment-only / malformed bytes are then
@@ -205,10 +225,10 @@ func (v *vscodeClient) restoreEntryFromBackup(backupPath, name string, allowHubE
 			}
 			// Comment-preserving set into the LIVE config (its comments +
 			// unrelated keys survive; the backup's entry VALUE is written).
-			return v.setMember(name, backupEntry)
+			return v.setMemberWithWriter(name, backupEntry, writer)
 		}
 	}
-	return v.deleteMember(name)
+	return v.deleteMemberWithWriter(name, writer)
 }
 
 // AllStdioEntries returns every stdio entry from VS Code's

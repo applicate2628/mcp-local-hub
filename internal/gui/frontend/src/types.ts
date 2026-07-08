@@ -132,6 +132,9 @@ export interface ScanResult {
   //                           manifest/header matrix (the 6 legacy clients);
   //                           used by the remote-http install plan + draft
   //                           surfaces, NOT the direct-install client choices.
+  //   - adopt_supported     — /api/adopt/plan accepts this client for adopting
+  //                           unknown stdio rows. Discovery offers Adopt only
+  //                           for stdio rows whose source client has this flag.
   // Absent (older backend) → visibleClients() falls back to the conservative
   // "no non-core client is scannable" view (core-only matrix), never overflow.
   client_capabilities?: Record<string, ClientCapability>;
@@ -154,6 +157,8 @@ export interface ClientCapability {
   // legacy clients) — the remote-http install plan + draft surfaces, NOT the
   // direct-install client choices.
   remote_http_capable: boolean;
+  // adopt_supported: true when the backend adopt API accepts this client id.
+  adopt_supported?: boolean;
 }
 
 export type ClientConfigState =

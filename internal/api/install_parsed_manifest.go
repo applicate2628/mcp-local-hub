@@ -531,6 +531,10 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 // for each planned task exactly as the legacy path did
 // (recordInstallIntentPostSuccess).
 func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, plan *Plan, daemonFilter string, dryRun bool, w io.Writer) error {
+	return a.installPlanCoreWithSymlinkConsents(ctx, m, plan, daemonFilter, dryRun, w, nil)
+}
+
+func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.ServerManifest, plan *Plan, daemonFilter string, dryRun bool, w io.Writer, symlinkConsents []ResolvedSymlinkConsent) error {
 	// Phase F: a global manifest's daemon lifecycle is owned by
 	// supervisor-intent.json, not by per-daemon scheduler tasks. Full global
 	// installs must enter this merge even when the NEW manifest contributes zero
@@ -690,6 +694,7 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 				Intermediate:       intermediate,
 				SkipSchedulerTasks: true,
 				SkipSchedulerPrune: true,
+				SymlinkConsents:    symlinkConsents,
 			}); err != nil {
 				return err
 			}
@@ -738,6 +743,7 @@ func (a *API) installPlanCore(ctx context.Context, m *config.ServerManifest, pla
 			StartTasks:         false,
 			SkipSchedulerTasks: true,
 			SkipSchedulerPrune: true,
+			SymlinkConsents:    symlinkConsents,
 		}); err != nil {
 			return err
 		}

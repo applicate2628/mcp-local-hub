@@ -81,6 +81,10 @@ func (c *codexCLI) readTOML() (map[string]any, error) {
 }
 
 func (c *codexCLI) writeTOML(m map[string]any) error {
+	return c.writeTOMLWithWriter(m, nil)
+}
+
+func (c *codexCLI) writeTOMLWithWriter(m map[string]any, writer WriteConfigFileFunc) error {
 	out, err := toml.Marshal(m)
 	if err != nil {
 		return err
@@ -88,10 +92,14 @@ func (c *codexCLI) writeTOML(m map[string]any) error {
 	// Route through WriteConfigFile so production gets the
 	// SecureWriteClientConfig pipeline (handle-relative + DACL-bound)
 	// for token-bearing rewrites; tests get the os.WriteFile fallback.
-	return WriteConfigFile(c.path, out)
+	return writeConfigFileWith(writer, c.path, out)
 }
 
 func (c *codexCLI) AddEntry(entry MCPEntry) error {
+	return c.AddEntryWithConfigWriter(entry, nil)
+}
+
+func (c *codexCLI) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
 	m, err := c.readTOML()
 	if err != nil {
 		return err
@@ -110,7 +118,7 @@ func (c *codexCLI) AddEntry(entry MCPEntry) error {
 	}
 	servers[entry.Name] = entryMap
 	m["mcp_servers"] = servers
-	return c.writeTOML(m)
+	return c.writeTOMLWithWriter(m, writer)
 }
 
 func (c *codexCLI) RemoveEntry(name string) error {
@@ -170,11 +178,19 @@ func (c *codexCLI) RestoreEntryFromBackupForRollback(backupPath, name string) er
 	return c.restoreEntryFromBackup(backupPath, name, true)
 }
 
+func (c *codexCLI) RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error {
+	return c.restoreEntryFromBackupWithWriter(backupPath, name, true, writer)
+}
+
 // restoreEntryFromBackup is the shared body. When allowHubEntry is false
 // (demigrate) it refuses a hub-HTTP-shaped backup entry with
 // ErrBackupEntryAlreadyMigrated; when true (migrate rollback) it writes
 // the backup bytes verbatim regardless of shape.
 func (c *codexCLI) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
+	return c.restoreEntryFromBackupWithWriter(backupPath, name, allowHubEntry, nil)
+}
+
+func (c *codexCLI) restoreEntryFromBackupWithWriter(backupPath, name string, allowHubEntry bool, writer WriteConfigFileFunc) error {
 	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
@@ -214,12 +230,12 @@ func (c *codexCLI) restoreEntryFromBackup(backupPath, name string, allowHubEntry
 			}
 			liveServers[name] = backupEntry
 			liveMap["mcp_servers"] = liveServers
-			return c.writeTOML(liveMap)
+			return c.writeTOMLWithWriter(liveMap, writer)
 		}
 	}
 	delete(liveServers, name)
 	liveMap["mcp_servers"] = liveServers
-	return c.writeTOML(liveMap)
+	return c.writeTOMLWithWriter(liveMap, writer)
 }
 
 // AllStdioEntries returns every stdio entry from [mcp_servers.*].

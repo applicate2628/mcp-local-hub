@@ -62,6 +62,10 @@ type antigravityClient struct {
 func (a *antigravityClient) IsRelayStdio() bool { return true }
 
 func (a *antigravityClient) AddEntry(entry MCPEntry) error {
+	return a.AddEntryWithConfigWriter(entry, nil)
+}
+
+func (a *antigravityClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
 	if entry.RelayExePath == "" {
 		return fmt.Errorf("antigravity adapter requires MCPEntry.RelayExePath (absolute path to mcphub.exe for the 'command' field)")
 	}
@@ -94,7 +98,7 @@ func (a *antigravityClient) AddEntry(entry MCPEntry) error {
 	// mcpServers.<name> into the original bytes so any operator comments +
 	// unrelated keys in mcp_config.json survive (Antigravity's config is the
 	// same JSONC-tolerant family). RemoveEntry/Restore are promoted unchanged.
-	return a.setMember(entry.Name, serverEntry)
+	return a.setMemberWithWriter(entry.Name, serverEntry, writer)
 }
 
 // GetEntry returns a minimal MCPEntry with just Name populated. The

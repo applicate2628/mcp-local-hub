@@ -184,11 +184,19 @@ func (o *openCodeClient) readJSON() (map[string]any, error) {
 // falls back to a clean indented marshal. The bytes route through the
 // UNCHANGED WriteConfigFile pipeline.
 func (o *openCodeClient) setMember(name string, value any) error {
-	return mutateJSONObjectMember(o.path, openCodeMCPKey, name, value, false)
+	return o.setMemberWithWriter(name, value, nil)
+}
+
+func (o *openCodeClient) setMemberWithWriter(name string, value any, writer WriteConfigFileFunc) error {
+	return mutateJSONObjectMemberWithWriter(o.path, openCodeMCPKey, name, value, false, writer)
 }
 
 func (o *openCodeClient) deleteMember(name string) error {
-	return mutateJSONObjectMember(o.path, openCodeMCPKey, name, nil, true)
+	return o.deleteMemberWithWriter(name, nil)
+}
+
+func (o *openCodeClient) deleteMemberWithWriter(name string, writer WriteConfigFileFunc) error {
+	return mutateJSONObjectMemberWithWriter(o.path, openCodeMCPKey, name, nil, true, writer)
 }
 
 // AddEntry writes the hub-managed remote-HTTP entry under mcp.<name>.
@@ -196,8 +204,12 @@ func (o *openCodeClient) deleteMember(name string) error {
 // "enabled":true}`; an optional `headers` object is emitted when
 // MCPEntry.Headers is non-empty.
 func (o *openCodeClient) AddEntry(entry MCPEntry) error {
+	return o.AddEntryWithConfigWriter(entry, nil)
+}
+
+func (o *openCodeClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
 	if entry.Raw != nil {
-		return o.setMember(entry.Name, entry.Raw)
+		return o.setMemberWithWriter(entry.Name, entry.Raw, writer)
 	}
 	serverEntry := map[string]any{
 		"type":    "remote",
@@ -210,7 +222,7 @@ func (o *openCodeClient) AddEntry(entry MCPEntry) error {
 	// Comment-preserving set: patches mcp.<name> into the original on-disk
 	// bytes via hujson so the operator's comments and unrelated keys survive (a
 	// full map re-marshal would drop both).
-	return o.setMember(entry.Name, serverEntry)
+	return o.setMemberWithWriter(entry.Name, serverEntry, writer)
 }
 
 func (o *openCodeClient) RemoveEntry(name string) error {
@@ -283,12 +295,20 @@ func (o *openCodeClient) RestoreEntryFromBackupForRollback(backupPath, name stri
 	return o.restoreEntryFromBackup(backupPath, name, true)
 }
 
+func (o *openCodeClient) RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error {
+	return o.restoreEntryFromBackupWithWriter(backupPath, name, true, writer)
+}
+
 // restoreEntryFromBackup is the shared body. When allowHubEntry is false
 // (demigrate) it refuses a backup entry already in hub-HTTP shape (a hub
 // loopback URL under `url` with no `command`) with
 // ErrBackupEntryAlreadyMigrated; when true (migrate rollback) it writes
 // the backup bytes verbatim regardless of shape.
 func (o *openCodeClient) restoreEntryFromBackup(backupPath, name string, allowHubEntry bool) error {
+	return o.restoreEntryFromBackupWithWriter(backupPath, name, allowHubEntry, nil)
+}
+
+func (o *openCodeClient) restoreEntryFromBackupWithWriter(backupPath, name string, allowHubEntry bool, writer WriteConfigFileFunc) error {
 	// os.ReadFile (NOT readRawConfig): a named backup that is missing is a
 	// genuine read error the demigrate caller must see, not a silent
 	// treat-as-empty. Empty / comment-only / malformed bytes are then
@@ -316,10 +336,10 @@ func (o *openCodeClient) restoreEntryFromBackup(backupPath, name string, allowHu
 			}
 			// Comment-preserving set into the LIVE config (its comments +
 			// unrelated keys survive; the backup's entry VALUE is written).
-			return o.setMember(name, backupEntry)
+			return o.setMemberWithWriter(name, backupEntry, writer)
 		}
 	}
-	return o.deleteMember(name)
+	return o.deleteMemberWithWriter(name, writer)
 }
 
 // AllStdioEntries returns every stdio entry from OpenCode's top-level `mcp`
