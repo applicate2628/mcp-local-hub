@@ -22,10 +22,18 @@ Python fork, NOT C#/.NET (evidence F1-F3: full surface is late-binding IDispatch
 ## Plan
 Acceptance panel (fable+sonnet+codex) → host feasibility-smoke (the acceptance test) → phased build P0-P6.
 
-## Related quick add (separate)
-MATLAB MCP = FAST via the OFFICIAL MathWorks server `github.com/matlab/matlab-mcp-server` (Go, OSS, maintained) —
-a catalog row + MATLAB-install probe, no custom build. Gated on: is MATLAB installed on the host (unconfirmed;
-none found under C:\Program Files\MATLAB). Do as a small separate PR once confirmed.
+## MATLAB MCP — QUICK-CONNECTED 2026-07-08 (direct, for immediate work) + hub-catalog DEFERRED to plan
+- Host: MATLAB **R2025b** confirmed at `C:\Program Files\MATLAB\R2025b` (registry MathWorks\MATLAB 25.2; NOT on PATH).
+- **DONE (quick):** official MathWorks server `matlab-mcp-server-windows-x64.exe` v0.11.1 downloaded to
+  `C:\Users\dima_\.local\bin\matlab-mcp-server.exe`; added to CLAUDE user-config (`claude mcp add -s user matlab`)
+  with `--matlab-root "C:\Program Files\MATLAB\R2025b" --matlab-display-mode nodesktop --disable-telemetry true`.
+  `claude mcp get matlab` = ✔ Connected. Server starts MATLAB lazily on first tool call. (go install is broken —
+  the module go.mod has exclude directives; release binary is the supported path.)
+- NOT done (deliberate, user: "в магазин хаба в план потом, чтобы не распыляться"): the **hub-catalog/Store
+  integration** — a `servers/matlab/manifest.yaml` (kind:global, stdio-bridge to the matlab-mcp-server binary) +
+  a MATLAB-install file_glob probe (`C:\Program Files\MATLAB\R*\bin\matlab.exe`) so it's hub-managed + appears in
+  the GUI Store like the built-in servers. DEFERRED to the plan (small separate PR). Also optional: add to codex config.
+- License: official MathWorks OSS (LICENSE.md in the repo) — driven directly, not redistributed by us; clean for direct-connect.
 
 ## ============ DURABLE QUEUE (do NOT lose on compaction) — the pre-MCP work still pending ============
 After Mathcad (commission-ranked 2026-07-08, fable+sonnet+codex consensus):
