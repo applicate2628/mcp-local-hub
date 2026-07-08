@@ -5,10 +5,10 @@ severity: low
 area: internal/api/cleanup.go (AggressiveConfirmToken) + internal/gui/cleanup_aggressive.go
 found-by: architect (A2 PR5 r5 consent-binding review)
 context: adjacent-finding
-fixed-by: fix/aggressive-cleanup-identity-binding (PR pending)
+fixed-by: PR #522 (master 669951e3), deployed + live-verified 2026-07-08
 ---
 
-## Status — FIXED (branch fix/aggressive-cleanup-identity-binding)
+## Status — FIXED (PR #522 → master 669951e3, deployed + live-verified 2026-07-08; bot FULL PASS first round)
 
 Both gaps closed: (1) `AggressiveConfirmToken` now includes StartedAt in the hash tuple, so
 a same-basename PID reuse changes the token → recompute-and-compare refuses the kill; (2) the
