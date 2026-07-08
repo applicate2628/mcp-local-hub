@@ -3,6 +3,7 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -43,7 +44,10 @@ func loopbackPortOwnerPIDContext(ctx context.Context, port int) (int, bool, erro
 	if port <= 0 || port > 65535 {
 		return 0, false, fmt.Errorf("loopbackPortOwnerPID: port %d out of range", port)
 	}
-	inode, ok, err := loopbackTCPListenInode(port)
+	// PR #509: the listen-inode read is ctx-bounded too — the pre-spawn port
+	// gate calls this on a 2s deadline from the controller path, and an
+	// unbounded /proc/net/tcp read could stall past it on a huge/slow table.
+	inode, ok, err := loopbackTCPListenInodeContext(ctx, port)
 	if err != nil || !ok {
 		return 0, ok, err
 	}
@@ -248,6 +252,16 @@ func pidsForSocketInodesFromProc(ctx context.Context, procDir string, wantInodes
 }
 
 func loopbackTCPListenInode(port int) (string, bool, error) {
+	return loopbackTCPListenInodeContext(context.Background(), port)
+}
+
+// loopbackTCPListenInodeContext is the ctx-bounded listen-inode lookup (PR
+// #509). The pre-spawn port gate runs the per-port owner probe on a 2s
+// deadline from the controller path; the /proc/net/tcp read is streamed line
+// by line with a per-line ctx check so a huge/slow socket table cannot stall
+// past the caller's deadline. loopbackTCPListenInode delegates with
+// context.Background() (never trips) so non-ctx callers are byte-identical.
+func loopbackTCPListenInodeContext(ctx context.Context, port int) (string, bool, error) {
 	// Liveness is tied to the IPv4 127.0.0.1 listener ONLY: this repo writes
 	// client URLs as http://127.0.0.1:<port> and the proxy bind path uses
 	// 127.0.0.1, so a daemon that is alive but listening only on ::1 (IPv6
@@ -256,11 +270,21 @@ func loopbackTCPListenInode(port int) (string, bool, error) {
 	// PID would make supervisorDaemonEntryLive report healthy for a daemon whose
 	// 127.0.0.1 socket is dead, suppressing the restart clients need (Codex bot
 	// #271 r2 P2).
-	return loopbackTCPListenInodeFromProcNet("/proc/net/tcp", port)
+	return loopbackTCPListenInodeFromProcNetContext(ctx, "/proc/net/tcp", port)
 }
 
 func loopbackTCPListenInodeFromProcNet(path string, port int) (string, bool, error) {
-	data, err := os.ReadFile(path)
+	return loopbackTCPListenInodeFromProcNetContext(context.Background(), path, port)
+}
+
+func loopbackTCPListenInodeFromProcNetContext(ctx context.Context, path string, port int) (string, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		// /proc/net/tcp always exists on Linux (IPv4 is always present), so a
 		// read failure here is a genuine probe error — not a benign missing table.
@@ -268,8 +292,14 @@ func loopbackTCPListenInodeFromProcNet(path string, port int) (string, bool, err
 		// removed in favor of IPv4-only liveness; see loopbackTCPListenInode.)
 		return "", false, fmt.Errorf("loopbackPortOwnerPID: read %s: %w", path, err)
 	}
+	defer f.Close()
 	wantPort := strings.ToUpper(fmt.Sprintf("%04X", port))
-	for _, line := range strings.Split(string(data), "\n") {
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return "", false, err
+		}
+		line := scanner.Text()
 		fields := strings.Fields(line)
 		if len(fields) < 10 || fields[0] == "sl" || fields[3] != "0A" {
 			continue
@@ -282,6 +312,12 @@ func loopbackTCPListenInodeFromProcNet(path string, port int) (string, bool, err
 			return "", false, fmt.Errorf("loopbackPortOwnerPID: listening socket on port %d has no inode", port)
 		}
 		return fields[9], true, nil
+	}
+	if err := scanner.Err(); err != nil {
+		return "", false, fmt.Errorf("loopbackPortOwnerPID: read %s: %w", path, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", false, err
 	}
 	return "", false, nil
 }
