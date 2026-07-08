@@ -42,6 +42,12 @@ type cleanupRequest struct {
 	Apply     bool   `json:"apply"`
 	MinAgeSec int64  `json:"min_age_sec"`
 	Server    string `json:"server"`
+	// ExpectPIDs, on an apply, binds the kill to the exact PIDs the operator
+	// confirmed in the GUI modal, so a candidate whose reap verdict drifted to
+	// eligible while the dialog was open is not killed unacknowledged (bot PR
+	// #520 P2). Omitted / null → no binding (kills every currently-eligible
+	// candidate, the pre-existing contract). Ignored on a dry-run preview.
+	ExpectPIDs []int `json:"expect_pids"`
 }
 
 // cleanupResponse is the JSON body returned for both dry-run and apply
@@ -125,11 +131,18 @@ func (s *Server) cleanupOrphansHandler(w http.ResponseWriter, r *http.Request) {
 	// api.CleanupOpts still uses DryRun semantics — flip Apply at the
 	// boundary so the wire shape is safe-by-default while the backend
 	// helper keeps its existing contract.
+	// Bind the kill to the confirmed PID set on APPLY only — a dry-run preview
+	// must recompute + show the full current candidate set (bot PR #520 P2).
+	var expectPIDs []int
+	if req.Apply {
+		expectPIDs = req.ExpectPIDs
+	}
 	orphans, err := s.cleanup.CleanupOrphans(api.CleanupOpts{
 		ManifestDir: "",
 		Server:      req.Server,
 		DryRun:      !req.Apply,
 		MinAgeSec:   req.MinAgeSec,
+		ExpectPIDs:  expectPIDs,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{

@@ -210,6 +210,36 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
     expect(cleanBtn.textContent).toMatch(/Clean \(1\)/);
   });
 
+  it("apply binds expect_pids to the confirmed ELIGIBLE rows only (bot PR #520 P2 TOCTOU)", async () => {
+    const spy = vi.spyOn(api, "cleanupOrphans").mockImplementation(async (apply: boolean) => ({
+      orphans: [
+        { pid: 1234, parent_pid: 1, server: "fs", cmdline_display: "uvx",
+          age_sec: 700, ram_bytes: 1024 * 1024, reap_verdict: "reap-eligible" },
+        { pid: 5678, parent_pid: 1, server: "weather", cmdline_display: "uvx",
+          age_sec: 120, ram_bytes: 2 * 1024 * 1024, reap_verdict: "spared-below-kill-age-floor" },
+      ],
+      killed: apply ? 1 : 0,
+      skipped: 0,
+    }));
+
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
+    fireEvent.click(cardActionButton(card)); // Preview
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+    fireEvent.click(card.querySelector('[data-testid="orphan-mcp-clean-button"]')!);
+    await waitFor(() =>
+      expect(container.ownerDocument!.querySelector('[data-testid="confirm-modal-confirm"]')).toBeTruthy(),
+    );
+    clickConfirmModal(container as HTMLElement);
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+
+    // apply call binds expect_pids to ONLY the eligible PID (1234); the spared
+    // 5678 (below age floor) is excluded, so it can never be killed unacknowledged
+    // even if its verdict drifts to eligible while the modal is open.
+    expect(spy.mock.calls[1][0]).toBe(true);
+    expect(spy.mock.calls[1][1]).toEqual([1234]);
+  });
+
   it("does NOT render Result column when no row has kill_err (e.g. all-clean apply)", async () => {
     vi.spyOn(api, "cleanupOrphans").mockImplementation(async () => ({
       orphans: [

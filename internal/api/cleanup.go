@@ -411,14 +411,15 @@ type CleanupOpts struct {
 	// Mutually exclusive with Client.
 	RootPID int
 
-	// ExpectPIDs, when non-nil, BINDS an aggressive KILL to a previously
-	// resolved + confirmed candidate set: only candidates whose PID is in
-	// this allowlist are killed, so a process that spawned AFTER the set was
-	// validated is excluded — never killed unacknowledged (bot #373 R5; the
-	// GUI apply path passes the token-validated PIDs). nil → no binding (the
-	// CLI and every dry-run recompute the full current set). An empty (but
-	// non-nil) slice kills nothing, which is the correct safe outcome for a
-	// validated-empty set.
+	// ExpectPIDs, when non-nil, BINDS a KILL to a previously resolved + confirmed
+	// candidate set: only candidates whose PID is in this allowlist are killed, so
+	// a process that spawned AFTER the set was validated — or whose reap verdict
+	// drifted to eligible while the confirm dialog was open — is excluded and never
+	// killed unacknowledged. Used by BOTH AggressiveCleanup (bot #373 R5) and the
+	// default CleanupOrphans (bot PR #520 P2); the GUI apply path passes the exact
+	// eligible PIDs the operator confirmed in the modal. nil → no binding (the CLI
+	// and every dry-run recompute the full current set). An empty (but non-nil)
+	// slice kills nothing, which is the correct safe outcome for a validated-empty set.
 	ExpectPIDs []int
 
 	// IncludeClasses lists dangerous process classes the operator has
@@ -748,11 +749,18 @@ func scanClientConfigsFailClosedImpl() (patterns []string, degradedClients []str
 // without deeper inspection). Reuses isBroadLauncherToken so the exclusion side shares
 // the inclusion side's broad-token safety net (a bare `node` never counts as a reference).
 func candidateConfigReferenced(o OrphanProcess, configPatterns []string) bool {
+	// Case-INSENSITIVE substring: this cleanup is Windows-only, where a config
+	// path/command token can be spelled with different capitalization than the
+	// live process cmdline (drive letters, %LOCALAPPDATA% casing, PascalCase
+	// package dirs). A case-only mismatch must NOT drop a still-configured
+	// candidate to reap-eligible (bot PR #520 P2). Over-matching here only ever
+	// SPARES, so the broader case-folded compare is the safe direction.
+	cmd := strings.ToLower(o.Cmdline)
 	for _, p := range configPatterns {
 		if isBroadLauncherToken(p) {
 			continue
 		}
-		if strings.Contains(o.Cmdline, p) {
+		if strings.Contains(cmd, strings.ToLower(p)) {
 			return true
 		}
 	}
@@ -996,6 +1004,16 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 			}
 		}
 		filtered = append(filtered, o)
+	}
+
+	// Validated-set binding (bot PR #520 P2): on APPLY the GUI passes the exact
+	// eligible PIDs the operator confirmed in the modal. A candidate whose reap
+	// verdict drifted to eligible while the confirm dialog was open (e.g. it crossed
+	// the 600s kill-age floor) is then NOT killed unless it was in the confirmed set,
+	// so the kill matches the confirmation exactly — the same contract AggressiveCleanup
+	// uses. nil → no binding (dry-run preview / CLI recompute the full current set).
+	if opts.ExpectPIDs != nil {
+		filtered = filterToExpectedPIDs(filtered, opts.ExpectPIDs)
 	}
 
 	applyReapEligibilityGate(filtered, opts.DryRun, snapErr != nil)

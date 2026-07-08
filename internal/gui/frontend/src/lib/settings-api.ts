@@ -235,12 +235,19 @@ export type CleanupLogWatchersResponse = {
   skipped: number;
 };
 
-export async function cleanupOrphans(apply: boolean): Promise<CleanupOrphansResponse> {
+// cleanupOrphans posts POST /api/cleanup/orphans. On an apply, expectPIDs binds the
+// kill to the exact PIDs the operator confirmed in the modal, so a candidate whose
+// reap verdict drifted to eligible while the dialog was open is not killed
+// unacknowledged (bot PR #520 P2). Omit expectPIDs (or pass undefined) for a preview
+// or to keep the pre-existing "kill every currently-eligible candidate" contract.
+export async function cleanupOrphans(apply: boolean, expectPIDs?: number[]): Promise<CleanupOrphansResponse> {
+  const body: { apply: boolean; expect_pids?: number[] } = { apply };
+  if (apply && expectPIDs) body.expect_pids = expectPIDs;
   const res = await fetch("/api/cleanup/orphans", {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ apply }),
+    body: JSON.stringify(body),
   });
   return await jsonOrThrow(res);
 }

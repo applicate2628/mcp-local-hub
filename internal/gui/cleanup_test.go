@@ -138,6 +138,60 @@ func TestCleanupOrphansHandler_Apply_OK(t *testing.T) {
 	}
 }
 
+// TestCleanupOrphansHandler_Apply_BindsExpectPIDs pins bot PR #520 P2: on an apply
+// the handler threads the operator-confirmed expect_pids into CleanupOpts so the
+// backend binds the kill to exactly those PIDs (a candidate whose verdict drifted to
+// eligible while the confirm modal was open is not killed unacknowledged).
+func TestCleanupOrphansHandler_Apply_BindsExpectPIDs(t *testing.T) {
+	gotOpts := api.CleanupOpts{}
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		CleanupOrphansFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			gotOpts = opts
+			return []api.OrphanProcess{}, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": true, "expect_pids": [1234, 5678]}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if len(gotOpts.ExpectPIDs) != 2 || gotOpts.ExpectPIDs[0] != 1234 || gotOpts.ExpectPIDs[1] != 5678 {
+		t.Errorf("CleanupOpts.ExpectPIDs = %v, want [1234 5678] (apply must bind to the confirmed set)", gotOpts.ExpectPIDs)
+	}
+}
+
+// TestCleanupOrphansHandler_DryRun_IgnoresExpectPIDs: a dry-run preview must recompute
+// the FULL current candidate set — expect_pids is an apply-only binding.
+func TestCleanupOrphansHandler_DryRun_IgnoresExpectPIDs(t *testing.T) {
+	gotOpts := api.CleanupOpts{}
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		CleanupOrphansFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			gotOpts = opts
+			return []api.OrphanProcess{}, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": false, "expect_pids": [1234]}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if gotOpts.ExpectPIDs != nil {
+		t.Errorf("CleanupOpts.ExpectPIDs = %v, want nil (dry-run must not bind)", gotOpts.ExpectPIDs)
+	}
+}
+
 // TestCleanupOrphansHandler_EmptyBody_DryRun is the regression test
 // for Codex bot P2 / kosyak
 // 2026-05-07-destructive-endpoint-with-unsafe-zero-value-default.md:
