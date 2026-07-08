@@ -1670,10 +1670,25 @@ func postInitialize(ctx context.Context, ref canonicalDaemonRef, protoVer string
 // is opened per call and the daemon response id is not validated —
 // the hub-generated id used downstream by the aggregator is the
 // session-level client_session_id, not this internal id.
-// maxToolsListPages bounds the pagination drain so a malicious or buggy
-// daemon that always returns a fresh nextCursor cannot loop the hub forever.
-// MCP pages are small; a legitimate backend needs only a handful.
-const maxToolsListPages = 100
+// The paginated tools/list drain is bounded THREE ways so a compliant
+// small-page daemon is never falsely cut off yet a buggy or hostile one cannot
+// exhaust the hub (bot PR #517 review + fable F3):
+//   - a CUMULATIVE byte budget (maxToolsListTotalBytes) — restores the
+//     per-daemon 4 MiB bound doDaemonPost enforced per-response before
+//     pagination existed, bounding heap across pages × FanOutConcurrency;
+//   - repeated-cursor detection — a daemon returning a cursor already seen is
+//     looping;
+//   - a generous page backstop (maxToolsListPages) — last resort for an
+//     always-new-cursor empty-page loop; PerDaemonListTimeout (10s) is the
+//     primary bound there.
+// Page COUNT is deliberately NOT the primary limit: an MCP server may choose
+// page_size=1, so a legitimate 101-tool daemon pages 101 times (the old cap of
+// 100 wrongly failed it).
+const maxToolsListPages = 10000
+
+// maxToolsListTotalBytes caps the cumulative tool JSON one daemon may return
+// across ALL pages. var (not const) so tests can lower it.
+var maxToolsListTotalBytes = maxAggregatorResponseBytes
 
 func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, protoVer string) ([]json.RawMessage, error) {
 	// MCP `tools/list` is paginated: a daemon MAY return a `nextCursor` and
@@ -1687,10 +1702,12 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 	// preserving the pre-change `return *env.Result.Tools` slice semantics for
 	// any downstream serialization (bot review compat point).
 	tools := []json.RawMessage{}
+	seenCursors := map[string]struct{}{}
+	totalBytes := 0
 	cursor := ""
 	for page := 0; ; page++ {
 		if page >= maxToolsListPages {
-			return nil, fmt.Errorf("daemon tools/list exceeded %d pages (runaway nextCursor)", maxToolsListPages)
+			return nil, fmt.Errorf("daemon tools/list exceeded %d pages (runaway pagination)", maxToolsListPages)
 		}
 		req := map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
 		if cursor != "" {
@@ -1737,10 +1754,20 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 		if env.Result.Tools == nil {
 			return nil, fmt.Errorf("daemon tools/list response missing `result.tools` field")
 		}
+		for _, t := range *env.Result.Tools {
+			totalBytes += len(t)
+		}
+		if totalBytes > maxToolsListTotalBytes {
+			return nil, fmt.Errorf("daemon tools/list exceeded %d cumulative bytes across pages (runaway payload)", maxToolsListTotalBytes)
+		}
 		tools = append(tools, *env.Result.Tools...)
 		if env.Result.NextCursor == "" {
 			break
 		}
+		if _, seen := seenCursors[env.Result.NextCursor]; seen {
+			return nil, fmt.Errorf("daemon tools/list returned a repeated cursor (pagination loop)")
+		}
+		seenCursors[env.Result.NextCursor] = struct{}{}
 		cursor = env.Result.NextCursor
 	}
 	return tools, nil

@@ -4553,9 +4553,12 @@ func TestPostToolsListDrainsPaginatedDaemon(t *testing.T) {
 	}
 }
 
-// TestPostToolsListRunawayCursorCapped ensures a daemon that always returns a
-// fresh nextCursor cannot loop the hub forever — the drain stops at the page cap.
-func TestPostToolsListRunawayCursorCapped(t *testing.T) {
+// TestPostToolsListRepeatedCursorRejected ensures a daemon that returns a
+// cursor it already handed out (a pagination loop) is rejected immediately on
+// the second page — NOT after a large fixed page count (bot PR #517 review:
+// page COUNT must not be the primary limit, so a compliant small-page daemon
+// is never falsely cut off).
+func TestPostToolsListRepeatedCursorRejected(t *testing.T) {
 	sd := newStubDaemon(t, "loop-sid")
 	sd.onList = func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -4565,12 +4568,45 @@ func TestPostToolsListRunawayCursorCapped(t *testing.T) {
 	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
 	_, err := postToolsList(context.Background(), ref, "loop-sid", "2025-11-25")
 	if err == nil {
-		t.Fatal("expected runaway-cursor error, got nil")
+		t.Fatal("expected repeated-cursor error, got nil")
 	}
-	if !strings.Contains(err.Error(), "exceeded") {
-		t.Fatalf("err=%v, want 'exceeded N pages'", err)
+	if !strings.Contains(err.Error(), "repeated cursor") {
+		t.Fatalf("err=%v, want 'repeated cursor'", err)
 	}
-	if n := int(sd.listCount.Load()); n != maxToolsListPages {
-		t.Fatalf("listCount=%d, want cap %d", n, maxToolsListPages)
+	// Page 0 requests (no cursor) + page 1 re-requests the same "always" cursor
+	// and detects the repeat → exactly 2 requests, not the page backstop.
+	if n := int(sd.listCount.Load()); n != 2 {
+		t.Fatalf("listCount=%d, want 2 (repeat caught on the 2nd page)", n)
+	}
+}
+
+// TestPostToolsListCumulativeByteCapRejected ensures the CUMULATIVE tool-JSON
+// budget bounds heap across pages — restoring the per-daemon 4 MiB bound that
+// doDaemonPost enforced per-response before pagination existed (bot PR #517
+// review + fable F3). Each page stays under the per-response cap, but their sum
+// exceeds the cumulative budget.
+func TestPostToolsListCumulativeByteCapRejected(t *testing.T) {
+	orig := maxToolsListTotalBytes
+	maxToolsListTotalBytes = 200 // lower the cap so a couple of small pages exceed it
+	t.Cleanup(func() { maxToolsListTotalBytes = orig })
+
+	sd := newStubDaemon(t, "bytes-sid")
+	big := strings.Repeat("y", 150) // one ~150-byte tool per page; 2 pages > 200
+	page := 0
+	sd.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// distinct cursors each page so the repeated-cursor guard does NOT fire —
+		// the byte budget is what must stop this.
+		page++
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"` + big + `"}],"nextCursor":"c` + string(rune('0'+page)) + `"}}`))
+	}
+	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
+	_, err := postToolsList(context.Background(), ref, "bytes-sid", "2025-11-25")
+	if err == nil {
+		t.Fatal("expected cumulative-byte-cap error, got nil")
+	}
+	if !strings.Contains(err.Error(), "cumulative bytes") {
+		t.Fatalf("err=%v, want 'cumulative bytes'", err)
 	}
 }
