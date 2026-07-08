@@ -27,16 +27,33 @@ reaper (PR5) remains parked on the revised gate.
   identity-reverify (PEB-stdio-state optional fail-closed supplement).
 
 ## Remaining (parked)
-1. **PR5 — auto-reaper** (kill orphaned bypass npx-stdio daemons): gate on the
-   revised config-presence predicate (NOT pipe-peer); dry-run-first +
-   operator-confirm. Depends-on the A1 F1/F3 kill-authority primitives.
+1. **PR5 — auto-reaper** (kill orphaned bypass npx-stdio daemons). **READY TO
+   START** (deps verified: `process.PIDIdentityProof` + `TerminatePIDWithIdentity`
+   ship; #511 already replaced the raw-taskkill with the identity-gated kill in
+   `CleanupOrphans`). Remaining delta vs current `CleanupOrphans` (which has
+   signature-match + age + identity-kill) = the H5-revised gate additions, per
+   `work-items/decisions/2026-07-08-pipe-peer-unreliable-reaper-gate.md` §Decision.3:
+   (2) parent verified dead via `GetExitCodeProcess == STILL_ACTIVE`-false (NOT
+   bare OpenProcess); (4) candidate signature ABSENT from EVERY parseable on-disk
+   client config (content-keyed; unparseable/unknown/unreadable → fail-closed = do
+   NOT reap — this closes the documented T1 foreign-client hole where a post-adopt
+   hub signature matches Antigravity/Cursor/Windsurf instances mcphub can't scan);
+   (5 optional) PEB-isolated stdio NamedPipeState (amd64-only, hang-risk, fail-
+   closed); (6) exclusions. Ship the MANUAL/operator-confirmed path first
+   (unattended-timer is a SEPARATE gated decision). **$security-reviewer MANDATORY
+   (highest-risk surface: kill authority over never-spawned PIDs; data-destruction
+   hazard H1).** NOT rushed at 2026-07-08 session-end (a fatigued kill-authority
+   push is poor engineering); warrants its own focused security-gated effort with
+   the same multi-model rigor #519 needed.
 2. **Anti-drift "unmanaged detected" surface** (GUI) — surface bypass servers
    so the operator can adopt them; reduces reaper need.
 3. **Phase-2 de-adopt / revert-to-native** (hub→native): interim = `mcphub
    uninstall --server X` + restore client backup.
-4. **fable Area-3 follow-up** (#516 review): an explicitly-requested client
-   whose config EXTRACTION errors survives the mismatch/disabled filter —
-   fail-closed in effect (AddEntry → rollback), harden to an explicit exclusion.
+4. **fable Area-3 follow-up** (#516 review) — **DONE 2026-07-08 (PR #519, master
+   f52d3ccb, deployed).** An explicitly-requested client whose config extraction
+   errors now FAILS LOUD at plan-build time (path-free error) instead of silently
+   surviving the filter to an AddEntry rollback; classification is by typed
+   sentinel (errors.Is), never substring on path-bearing err.Error().
 
 ## Artifacts
 - design.md — architect package (this dir).
