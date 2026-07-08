@@ -1,10 +1,30 @@
 # npx-stdio MCP servers orphan-accumulate because they bypass mcphub (hub-purpose failure)
 
-- **status:** open (root-cause CONFIRMED; fix design DONE — see `## Fix design` below; implementation not started)
-- **severity:** high — defeats mcphub's raison d'être (process-tail compression); ~360 node.exe accumulated on the dev host, 200+ were a single MCP server
+- **status:** closed — P0+P1 shipped as `mcphub adopt` (PR #513, merged 2026-07-08 01:21Z as d518a511); @mui/mcp leak swept (124 procs) + adopted into the hub (mui-mcp@9301, claude+codex repointed); reaper identity-hardening shipped separately (PR #511). Residual: reaper ScanClientConfigs auto-path (A2 PR5, pipe-peer gate) stays open in the design.
+- **severity:** CRITICAL (raised from high 2026-07-07 by operator) — defeats mcphub's raison d'être (process-tail compression); ~360 node.exe accumulated on the dev host, 200+ were a single MCP server
 - **filed:** 2026-07-04
 - **context:** live-fleet / mcphub purpose / client-config routing
 - **owner:** main conversation
+
+## 2026-07-07 — operator P0 reframe + live re-confirmation (CRITICAL)
+
+A fable-commanded 5-lane forensic (workflow `wf_e08d5606-406`) re-confirmed this LIVE: on
+the dev host **65 `@mui/mcp` stdio servers + 60 orphaned `npx-cli` launchers = 125 processes
+(52% of a 240-process sample)** accumulated **monotonically over 8 days** (2026-06-29 18:54 →
+2026-07-07 18:29), one orphan per external-client reconnect, dead parents directly confirmed.
+It bypasses the hub via a direct `npx -y @mui/mcp` entry in an external client config and is
+NEVER registered with the hub, so neither the supervisor nor the 5-min auto-reaper touches it.
+
+**Operator directive (verbatim intent):** this is NOT "external / not our bug" — **"хаб
+ОБЯЗАН ВБИРАТЬ ТАКИЕ СЛУЧАИ В СЕБЯ"**: absorbing exactly these bypass npx-stdio servers is
+the hub's whole purpose. The missing `mcphub adopt` / auto-onboard capability is therefore a
+**CRITICAL mcphub недоработка (shortfall), not an external factor** — the fable lane's
+`is_mcphub_fault:false` label is REJECTED at the product level. Ship the adopt verb (PR4) +
+an auto-absorb / anti-drift surface so the hub self-onboards unmanaged npx-stdio servers, plus
+the reaper `ScanClientConfigs` gap (PR5) so the leak cannot re-accumulate. Interim relief:
+identity-gated sweep of the 125 leaked procs + manual `mcphub manifest create` of @mui +
+repoint the spawner config (find via `grep '@mui/mcp'` across all client configs — every live
+spawner parent is dead so the process table can't name the client).
 
 ## Symptom
 

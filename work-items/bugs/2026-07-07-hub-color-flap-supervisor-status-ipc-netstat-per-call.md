@@ -1,5 +1,5 @@
 ---
-status: open
+status: closed (fixed by PR #510, merged 2026-07-07 23:35Z as 1aeec052; hotfix-deployed 2026-07-07 23:10 local, final master redeployed 2026-07-08 04:31 local)
 severity: medium
 filed: 2026-07-07
 context: GUI hub health flap; root-caused by Opus against live logs + HEAD
@@ -55,3 +55,21 @@ finalize the exact split so no cache layer re-owns the other's concern.
 ## Not-a-cause (ruled out)
 - The 2026-07-07 A1 deploy (flap predates it by 4 days). The fleet + lost-child class
   (healthy, 0 symptoms). Duplicate supervisor/GUI (exactly one each).
+
+
+## Closure (2026-07-08)
+
+Fix shipped as PR #510 (`1aeec052`): supervisor-side `statusPortOwnersCoalescer`
+(TTL 1s, mutex-singleflight, fleet-generation invalidation sampled pre-probe) +
+ctx-bounded netstat/proc walks (3s probe < 5s IPC timeout) across win/linux.
+Deploy-proven twice: the pre-merge hotfix (f0a08773) took status IPC from
+0.9-4.7s (with timeouts) to ~0.5s stable and held ZERO degraded events for
+hours under load; the merged-master redeploy showed one transition-window
+degraded (74s after supervisor start, recovered in 0.76s) and none after
+settle. The dominant HOST netstat term was the @mui/mcp orphan pile (125
+procs) — swept + adopted into the hub (`mui-mcp`@9301 via the new `mcphub
+adopt`, PR #513), so both the amplifier and the hub-side defect are gone.
+
+Secondary (Servers-toggles-inactive) was root-caused separately as the
+LSP-router per-client-disable gap — fixed in PR #512, bug
+2026-07-07-lsp-router-relay-entries-ignore-per-client-disable.md.
