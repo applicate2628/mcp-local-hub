@@ -60,11 +60,16 @@ func isOurOwnProcess(cmdline string) bool {
 }
 
 // OrphanProcess describes one orphan MCP subprocess discovered by CleanupOrphans.
-// KillErr is populated only when DryRun=false and the identity-gated reap did not
-// cleanly terminate this PID; it distinguishes an identity mismatch (PID recycled
-// or process replaced since the census scan — the friendly-fire guard refused the
-// kill), an access-denied refusal, an already-exited process, and a missing
-// identity proof. It is empty on a clean kill and on dry-run.
+// KillErr carries the per-candidate outcome text. On a kill attempt (DryRun=false,
+// ReapVerdict=reap-eligible) it distinguishes an identity mismatch (PID recycled or
+// process replaced since the census scan — the friendly-fire guard refused the kill),
+// an access-denied refusal, an already-exited process, and a missing identity proof;
+// it is empty on a clean kill. It is ALSO populated (on BOTH dry-run and apply) with a
+// human "skipped: <reason>" note for a candidate the A2 PR5 reap-eligibility gate SPARED
+// (config-referenced / config-scan-degraded / snapshot-degraded / below-kill-age-floor) —
+// so a dry-run preview shows WHY a candidate would not be reaped. The structured reason
+// is ReapVerdict; downstream consumers branch on KillErr != "" (an outcome exists), never
+// on its message text.
 //
 // Wire-format note (Cleanup-6 security fix): the raw Cmdline is kept on
 // the struct for server-side use (manifest-pattern match in CleanupOrphans,
@@ -86,6 +91,12 @@ type OrphanProcess struct {
 	AgeSec         int64  `json:"age_sec"`
 	KillErr        string `json:"kill_err,omitempty"`
 
+	// ReapVerdict is the kill-eligibility outcome stamped by the H5-revised gate,
+	// populated on BOTH dry-run and apply so a preview shows WHY a candidate would or
+	// would not be reaped. It is a fixed enum label (never a path/cmdline), wire-safe.
+	// bug 2026-07-04 npx-orphan-accumulation / A2 PR5.
+	ReapVerdict string `json:"reap_verdict,omitempty"`
+
 	// ExecutablePath is the process image path captured at census, and
 	// StartedAt is the RFC3339Nano process start time (from the snapshot
 	// CreationDate). Together with PID they form the PIDIdentityProof that
@@ -106,6 +117,23 @@ type OrphanProcess struct {
 	// label only — never a full cmdline — so it is wire-safe.
 	MatchSource string `json:"match_source,omitempty"`
 }
+
+// Reap-eligibility verdicts stamped by CleanupOrphans's H5-revised gate (A2 PR5).
+// A candidate is killed ONLY on ReapVerdictReapEligible; every other verdict SPARES it
+// (fail-safe direction). The verdict is surfaced in the dry-run preview + the audit log.
+const (
+	ReapVerdictReapEligible             = "reap-eligible"
+	ReapVerdictSparedConfigReferenced   = "spared-config-referenced"    // signature still in an installed client config
+	ReapVerdictSparedConfigScanDegraded = "spared-config-scan-degraded" // an existing client config was unparseable → whole run fails closed
+	ReapVerdictSparedSnapshotDegraded   = "spared-snapshot-degraded"    // the process snapshot was truncated → whole run fails closed
+	ReapVerdictSparedBelowKillAgeFloor  = "spared-below-kill-age-floor" // younger than the kill-eligibility age floor
+)
+
+// cleanupKillMinAgeSec is the kill-eligibility age floor for the auto-reaper
+// (design.md P2 "age>~10min"): a candidate is LISTED at the 60s default but not
+// KILLED until it is this old, so a just-orphaned-mid-restart child gets several
+// ticker re-evaluations on fresh snapshots before an auto-kill (A2 PR5).
+const cleanupKillMinAgeSec = 600
 
 // firstTokenBasename returns the basename (no directory prefix) of the
 // FIRST token of a cmdline string — the executable path component before
@@ -565,10 +593,7 @@ func patternsFromClientStdio() []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(p string) {
-		if p == "" {
-			return
-		}
-		if seen[p] {
+		if p == "" || seen[p] {
 			return
 		}
 		seen[p] = true
@@ -580,46 +605,105 @@ func patternsFromClientStdio() []string {
 		}
 		entries, err := c.AllStdioEntries()
 		if err != nil {
+			// Nomination is best-effort: a parse error just means fewer
+			// candidate patterns (missing a candidate is the SAFE direction
+			// for NOMINATION). The kill-eligibility side uses the fail-closed
+			// scanClientConfigsFailClosed instead.
 			continue
 		}
-		for _, e := range entries {
-			base := stripExtension(basenameAcrossSeparators(e.Command))
-			// Codex security finding e8745334 (Antigravity relay
-			// args → kill patterns): when an adapter writes
-			// mcphub-relay-form entries (command=mcphub.exe
-			// args=[relay,--server,X,--daemon,Y]) — Antigravity
-			// is the only such adapter today — the args are
-			// CONTROL-PLANE tokens (server name, daemon name),
-			// not external-process signatures. Emitting them as
-			// kill-match patterns causes strings.Contains to
-			// match unrelated processes whose cmdline mentions
-			// the same generic word (e.g. a `time-tracker.exe
-			// --relay-mode` user app vs. the manifest's "time"
-			// server). Skip the ENTIRE entry when command is
-			// mcphub — no basename pattern, no arg patterns,
-			// nothing. patternIsTooBroad already rejects
-			// "mcphub" as the basename pattern, but the
-			// security finding pointed out that args still
-			// leaked through. This per-entry skip closes the
-			// hole at the source.
-			if isMcphubBinaryBasename(strings.ToLower(base)) {
-				continue
-			}
-			if !patternIsTooBroad(base) {
-				add(base)
-			}
-			for _, arg := range e.Args {
-				if !argIsDiscriminatingPattern(arg) {
-					continue
-				}
-				if patternIsTooBroad(arg) {
-					continue
-				}
-				add(arg)
-			}
-		}
+		appendPatternsFromEntries(entries, add)
 	}
 	return out
+}
+
+// appendPatternsFromEntries emits the discriminating cleanup-match patterns for a set
+// of client stdio entries via `add`. Shared by patternsFromClientStdio (best-effort
+// NOMINATION) and scanClientConfigsFailClosed (fail-closed KILL-ELIGIBILITY) so both
+// derive IDENTICAL patterns from the same entries — only the per-client error posture
+// differs. Skips an mcphub-relay-form entry whole (see the Antigravity note below).
+func appendPatternsFromEntries(entries []clients.StdioEntry, add func(string)) {
+	for _, e := range entries {
+		base := stripExtension(basenameAcrossSeparators(e.Command))
+		// Codex security finding e8745334 (Antigravity relay args → kill patterns):
+		// an mcphub-relay-form entry (command=mcphub.exe args=[relay,--server,X,
+		// --daemon,Y]) carries CONTROL-PLANE tokens (server/daemon names), not
+		// external-process signatures. Emitting them as kill-match patterns would
+		// substring-match unrelated processes (e.g. a `time-tracker.exe` user app vs.
+		// the manifest's "time" server). Skip the ENTIRE entry when command is mcphub.
+		if isMcphubBinaryBasename(strings.ToLower(base)) {
+			continue
+		}
+		if !patternIsTooBroad(base) {
+			add(base)
+		}
+		for _, arg := range e.Args {
+			if !argIsDiscriminatingPattern(arg) {
+				continue
+			}
+			if patternIsTooBroad(arg) {
+				continue
+			}
+			add(arg)
+		}
+	}
+}
+
+// scanClientConfigsFailClosed collects the discriminating stdio patterns from every
+// INSTALLED, PARSEABLE client config, and separately reports the Name() of every config
+// that EXISTS but could NOT be parsed. This is the KILL-ELIGIBILITY substrate for the
+// reaper's config-absence gate (H5 step 4): a config that exists but is unreadable /
+// unparseable means the reaper CANNOT prove a candidate's signature is absent from it,
+// so the caller must FAIL CLOSED (spare every otherwise-eligible candidate for the run).
+// A not-installed client (Exists()==false) is NOT degraded — it contributes no patterns.
+// Partial degradation still collects patterns from the OTHER (parseable) clients so one
+// broken config does not blind the whole scan.
+//
+// Injectable for tests via scanClientConfigsFailClosedFn.
+var scanClientConfigsFailClosedFn = scanClientConfigsFailClosedImpl
+
+func scanClientConfigsFailClosed() (patterns []string, degradedClients []string) {
+	return scanClientConfigsFailClosedFn()
+}
+
+func scanClientConfigsFailClosedImpl() (patterns []string, degradedClients []string) {
+	seen := map[string]bool{}
+	add := func(p string) {
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		patterns = append(patterns, p)
+	}
+	for _, c := range clients.AllClients() {
+		if !c.Exists() {
+			continue
+		}
+		entries, err := c.AllStdioEntries()
+		if err != nil {
+			degradedClients = append(degradedClients, c.Name())
+			continue
+		}
+		appendPatternsFromEntries(entries, add)
+	}
+	return patterns, degradedClients
+}
+
+// candidateConfigReferenced reports whether the orphan candidate's cmdline still matches
+// a discriminating pattern derived from an installed client config — i.e. some client
+// STILL WANTS this signature, so the candidate must be SPARED (a live client may hold
+// its stdio pipes through a broken process chain, indistinguishable from a true orphan
+// without deeper inspection). Reuses isBroadLauncherToken so the exclusion side shares
+// the inclusion side's broad-token safety net (a bare `node` never counts as a reference).
+func candidateConfigReferenced(o OrphanProcess, configPatterns []string) bool {
+	for _, p := range configPatterns {
+		if isBroadLauncherToken(p) {
+			continue
+		}
+		if strings.Contains(o.Cmdline, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // patternIsTooBroad reports whether tok would substring-match too
@@ -814,18 +898,8 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 	}
 
 	// Flat list of patterns — any match counts this PID as a candidate orphan.
-	// Drop broad launcher tokens (node, npx, uv, uvx, python, ...) so we
-	// don't sweep the operator's unrelated dev-tooling processes that
-	// happen to share an interpreter with one of our manifest commands.
-	var allPatterns []string
-	for _, ps := range patterns {
-		for _, p := range ps {
-			if isBroadLauncherToken(p) {
-				continue
-			}
-			allPatterns = append(allPatterns, p)
-		}
-	}
+	// Drops broad launcher tokens AND bare-name-fallback patterns (T3 demotion).
+	allPatterns := manifestNominationPatterns(patterns)
 	// A6: when --scan-clients is set, fold in patterns derived from
 	// every installed client's live stdio entries. Reverse-lookup
 	// catches MCP-server children whose spawning client has died and
@@ -844,7 +918,7 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 	if opts.ScanClientConfigs && opts.Server == "" {
 		allPatterns = append(allPatterns, patternsFromClientStdio()...)
 	}
-	orphans := parseOrphans(strings.NewReader(string(out)), allPatterns)
+	orphans, snapErr := parseOrphans(strings.NewReader(string(out)), allPatterns)
 
 	// Age filter + assign server. Same broad-token filter applies here:
 	// matching o.Cmdline against `node` would label any unrelated node
@@ -871,15 +945,90 @@ func (a *API) CleanupOrphans(opts CleanupOpts) ([]OrphanProcess, error) {
 		filtered = append(filtered, o)
 	}
 
-	// Kill if not dry-run. Each reap goes through the identity-re-verifying
-	// primitive (process.TerminatePIDWithIdentity), NOT a raw taskkill against
-	// the census-captured PID: a PID recycled between the census scan and the
-	// kill fails the {executable, basename, start-time} re-verify on a held
-	// handle and is left untouched (PID-recycle friendly-fire guard —
-	// work-items/bugs/2026-07-05-cleanuporphans-raw-taskkill-no-identity-reverify.md).
-	reapOrphans(filtered, opts.DryRun)
+	applyReapEligibilityGate(filtered, opts.DryRun, snapErr != nil)
 
 	return filtered, nil
+}
+
+// applyReapEligibilityGate stamps the H5-revised config-absence reap-eligibility verdict
+// (A2 PR5) on every candidate and kills ONLY the reap-eligible ones (when !dryRun).
+//
+// A candidate whose signature is still referenced by an installed, PARSEABLE client config
+// is SPARED — a live client may hold its stdio pipes through a broken process chain,
+// indistinguishable from a true orphan without deeper inspection (H5 §Decision.3 step 4).
+// If ANY existing client config could not be parsed this run, the reaper cannot prove
+// absence, so every otherwise-eligible candidate is spared (fail closed). Only a
+// reap-eligible candidate is killed, via the unchanged identity-re-verifying reapOneOrphan
+// (process.TerminatePIDWithIdentity) — a PID recycled between census and kill fails the
+// {executable, basename, start-time} re-verify on a held handle and is left untouched.
+//
+// Extracted so it is unit-testable via the scanClientConfigsFailClosedFn + orphanTerminateFn
+// seams without a live process snapshot. AggressiveCleanup deliberately does NOT call this:
+// it reaps live-rooted processes under an operator-confirmed scope and must not inherit the
+// config-absence gate (which would make it inert — a live client's config is still present).
+func applyReapEligibilityGate(filtered []OrphanProcess, dryRun bool, snapshotDegraded bool) {
+	cfgPatterns, degradedClients := scanClientConfigsFailClosed()
+	for i := range filtered {
+		switch {
+		case snapshotDegraded:
+			// The process snapshot was truncated (a dropped live-ancestor row can
+			// mis-classify a live-rooted child as an orphan), so the ancestor-walk's
+			// orphan verdict cannot be trusted this run — spare EVERY candidate
+			// (fail closed). $security-reviewer P1.
+			filtered[i].ReapVerdict = ReapVerdictSparedSnapshotDegraded
+			filtered[i].KillErr = "skipped: process snapshot was truncated this run; kills disabled (fail closed)"
+		case candidateConfigReferenced(filtered[i], cfgPatterns):
+			filtered[i].ReapVerdict = ReapVerdictSparedConfigReferenced
+			filtered[i].KillErr = "skipped: signature still referenced by an installed client config"
+		case len(degradedClients) > 0:
+			filtered[i].ReapVerdict = ReapVerdictSparedConfigScanDegraded
+			filtered[i].KillErr = "skipped: a client config was unreadable this run (" + strings.Join(degradedClients, ",") + "); reaper fails closed"
+		case filtered[i].AgeSec < cleanupKillMinAgeSec:
+			// Kill-eligibility age floor (A2 PR5, design.md P2 "age>~10min"): a
+			// candidate is LISTED at the 60s default but not KILLED until it is old
+			// enough that a just-orphaned-mid-restart child has had several ticker
+			// re-evaluations on fresh snapshots. Defense-in-depth on the kill side only.
+			filtered[i].ReapVerdict = ReapVerdictSparedBelowKillAgeFloor
+			filtered[i].KillErr = "skipped: below the kill-age floor (needs a longer orphan age before an auto-kill)"
+		default:
+			filtered[i].ReapVerdict = ReapVerdictReapEligible
+		}
+	}
+	if dryRun {
+		return
+	}
+	for i := range filtered {
+		if filtered[i].ReapVerdict != ReapVerdictReapEligible {
+			continue // spared by the config-absence / snapshot-degraded gate
+		}
+		filtered[i].KillErr = reapOneOrphan(filtered[i])
+	}
+}
+
+// manifestNominationPatterns flattens the per-server manifest patterns into the flat
+// kill-nomination pattern set, dropping (a) broad launcher tokens (node/npx/python/...)
+// that would match unrelated dev-tooling, and (b) BARE-NAME FALLBACK patterns — a server
+// whose patterns collapsed to just its own name (a corrupt / no-discriminating-pattern
+// manifest — patternsForServer returns []string{serverName}). A bare generic server name
+// ("time"/"memory"/"fetch") substring-matches arbitrary UNRELATED user processes that the
+// config-absence gate cannot protect (they are not config-referenced); on the live 5-min
+// apply:true auto-ticker that would be a force-kill of a bystander, so it is never
+// nominated (T3 demotion, A2 PR5 $security-reviewer P2). A real manifest yields
+// command+arg patterns, not a lone server name, and is unaffected.
+func manifestNominationPatterns(patterns map[string][]string) []string {
+	var out []string
+	for name, ps := range patterns {
+		if len(ps) == 1 && ps[0] == name {
+			continue // bare-name fallback — never nominate
+		}
+		for _, p := range ps {
+			if isBroadLauncherToken(p) {
+				continue
+			}
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // isBroadLauncherToken returns true if the manifest pattern is a bare
@@ -937,13 +1086,15 @@ func isBroadLauncherToken(pattern string) bool {
 // It delegates row parsing to the shared snapshot parser in processes.go so
 // the default orphan sweep, aggressive sweep, process counting, and log-watcher
 // cleanup all consume the same comma-safe row shape.
-func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
+func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow, error) {
 	rows, err := parseProcessSnapshotRows(r)
 	// A read error (e.g. bufio.ErrTooLong on a pathologically long CommandLine
-	// row) ends the loop early and can truncate the process snapshot,
-	// which would drop rows the orphan-detector's parent-chain walk relies on.
-	// Surface it rather than swallow it; the rows parsed so far are still
-	// returned best-effort.
+	// row) ends the loop early and can truncate the process snapshot, dropping
+	// rows the orphan-detector's parent-chain walk relies on — a fail-OPEN input
+	// (a dropped live-ancestor row makes its protected descendant look orphaned).
+	// Surface it: the rows parsed so far are returned best-effort for the dry-run
+	// listing, but the error is propagated so the caller can DISABLE kills for the
+	// run (snapshot-degraded fail-closed — A2 PR5). $security-reviewer P1.
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcphub: warning: process snapshot scan ended early: %v\n", err)
 	}
@@ -953,7 +1104,7 @@ func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
 	for _, r := range rows {
 		byPID[r.pid] = r
 	}
-	return rows, byPID
+	return rows, byPID, err
 }
 
 // parseOrphans reads `wmic process get CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize`
@@ -961,8 +1112,8 @@ func parseProcessRows(r io.Reader) ([]procRow, map[int]procRow) {
 // patterns BUT whose parent is NOT an `mcp.exe daemon` process.
 //
 // Visible for unit tests so fixture CSVs can drive the logic without wmic.
-func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
-	rows, byPID := parseProcessRows(r)
+func parseOrphans(r io.Reader, patterns []string) ([]OrphanProcess, error) {
+	rows, byPID, snapErr := parseProcessRows(r)
 
 	var out []OrphanProcess
 	for _, r := range rows {
@@ -1061,7 +1212,7 @@ func parseOrphans(r io.Reader, patterns []string) []OrphanProcess {
 			StartedAt:      orphanStartedAt(r.created),
 		})
 	}
-	return out
+	return out, snapErr
 }
 
 // isAggressiveDenyClass reports whether cmdline's executable basename is
@@ -1105,7 +1256,10 @@ func isAggressiveDenyClass(cmdline string, includeClasses []string) bool {
 // (AggressiveCleanup) enforces that before calling. clientBasename is
 // the already-normalized lowercase launcher basename.
 func parseAggressiveCandidates(r io.Reader, clientBasename string, rootPID int, includeClasses []string) []OrphanProcess {
-	rows, byPID := parseProcessRows(r)
+	// Aggressive is operator-scoped + confirm-gated; snapshot-truncation fail-closed
+	// for THIS path is a separate concern (tracked fast-follow) and is intentionally
+	// not wired here — the config-absence / snapshot-degraded gate is CleanupOrphans-only.
+	rows, byPID, _ := parseProcessRows(r)
 
 	var out []OrphanProcess
 	for _, r := range rows {
@@ -1303,12 +1457,16 @@ func orphanStartedAt(created time.Time) string {
 	return created.UTC().Format(time.RFC3339Nano)
 }
 
-// reapOrphans kills each already-filtered orphan through the identity-gated
-// primitive (orphanTerminateFn), recording the per-orphan outcome on KillErr.
-// It is the SINGLE OWNER of the cleanup kill primitive, shared by CleanupOrphans
-// (default safe sweep) and AggressiveCleanup (operator-confirmed live-rooted
-// sweep) so neither can regress to a raw taskkill. No-op on dryRun. Mutates
-// filtered in place.
+// reapOrphans kills each already-filtered orphan through the identity-gated kill
+// primitive (reapOneOrphan → orphanTerminateFn), recording the per-orphan outcome on
+// KillErr. It is now AggressiveCleanup's kill loop ONLY (operator-confirmed live-rooted
+// sweep); the default safe sweep (CleanupOrphans) kills through applyReapEligibilityGate
+// instead, which applies the A2 PR5 config-absence / snapshot-degraded / age-floor
+// reap-eligibility gate BEFORE reapOneOrphan — reapOneOrphan is the single kill primitive
+// both paths share, so neither can regress to a raw taskkill. AggressiveCleanup
+// deliberately does NOT go through the reap-eligibility gate (a live client's config is
+// definitionally present, which would make the aggressive sweep inert). No-op on dryRun.
+// Mutates filtered in place.
 func reapOrphans(filtered []OrphanProcess, dryRun bool) {
 	if dryRun {
 		return
