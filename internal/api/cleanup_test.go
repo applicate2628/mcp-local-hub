@@ -55,6 +55,7 @@ HOST,"uv run --directory .../GDB-MCP python server.py",20260417180000.000000+180
 HOST,"D:\dev\mcp-local-hub\mcphub.exe daemon --server gdb --daemon default",20260417180000.000000+180,D:\dev\mcp-local-hub\mcphub.exe,999,555,15000000
 HOST,"uv run --directory .../GDB-MCP python server.py",20260417170000.000000+180,C:\Users\u\.local\bin\uv.exe,1,2002,42000000
 `
+	swapOrphanParentState(t, deadParent) // deterministic: absent parent = dead = real orphan
 	orphans, _ := parseOrphans(strings.NewReader(wmicCsv), []string{"GDB-MCP"})
 	// PID 1001 has parent 555 which is mcphub.exe daemon — NOT orphan.
 	// PID 2002 has parent 1 — ORPHAN.

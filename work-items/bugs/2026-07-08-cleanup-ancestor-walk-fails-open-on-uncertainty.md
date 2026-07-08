@@ -1,11 +1,24 @@
 ---
 id: 2026-07-08-cleanup-ancestor-walk-fails-open-on-uncertainty
-status: open
+status: in-progress
 severity: high
 area: internal/api/cleanup.go (parseOrphans ancestor walk)
 found-by: codex deep-security lane A + lane B (A2 PR5 adversarial re-verify)
 context: adjacent to 2026-07-05-adopt-npx-orphans (A2 PR5)
 ---
+
+## Status 2026-07-08
+
+Case A + Case B FIXED on branch `fix/reaper-walk-fail-closed-uncertainty` (PR pending):
+the `parseOrphans` walk is now a 3-state verdict — protected descendant / genuine orphan /
+UNCERTAIN(spare). Case A: byPID-miss probes `orphanParentAliveFn` (=`process.IsPidAlive`,
+injectable seam) — a live-but-absent parent (dropped census row) spares, a dead-and-absent
+parent (real orphan) reaps. Case B: depth-16 exhaustion without resolving to a protected
+ancestor or a genuine root spares. Falsifying-probe tests added
+(`cleanup_walk_failclosed_test.go`); the 5 existing parseOrphans fixture tests set the seam
+deterministically. The CLI aggressive `ExpectPIDs==nil` gap + the aggressive walk's identical
+byPID-miss are folded into the aggressive-path follow-up
+(`2026-07-08-aggressive-cleanup-token-omits-started-at.md`), not this PR (default-reaper P0).
 
 ## Summary
 
