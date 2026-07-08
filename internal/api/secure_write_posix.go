@@ -109,7 +109,7 @@ func secureWriteClientConfigToResolvedParent(dirFd int, parentDirForDiag, base s
 	// the new file regardless of how loose the parent dir mode is.
 	if !skipParentGate {
 		if err := verifyPosixParentDirFromFd(dirFd); err != nil {
-			return fmt.Errorf("%w (path %s): %w", ErrSecureWriteParentInsecure, parentDirForDiag, err)
+			return wrapParentGateRefusal(parentDirForDiag, err)
 		}
 	}
 

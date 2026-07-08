@@ -1276,6 +1276,21 @@ inherited ACEs), and on Windows the restrictive DACL is installed
 at NtCreateFile time via `OBJECT_ATTRIBUTES.SecurityDescriptor` so
 there is no pre-DACL window during which the file could be opened.
 
+**The ONE parent-gate case the relax lane does NOT write through: a
+WRONG-OWNER parent.** A parent directory OWNED by a *different account*
+(not merely broadened to extra principals) is refused fail-closed
+REGARDLESS of strict mode. Both the write lanes AND the client-config
+create / parent-lock lanes route their parent-gate error through the
+single `clientConfigParentGateRefusalOrRelax` classifier (via the
+`ErrWrongOwner`-preserving `wrapParentGateRefusal` owner): a foreign
+owner holds implicit `WRITE_DAC` / `WRITE_OWNER` and could rewrite the
+DACL to grant itself `FILE_DELETE_CHILD` then swap the token-bearing
+config an external app loads via an ordinary path read, which nothing
+backstops — so a foreign-owned parent never gets the solo-host relax,
+only a broadened-but-owner-correct one does (bug 2026-07-03 for the
+write lanes; bug 2026-07-08 F1 closed the same hole in the create lanes,
+where a `%v` wrap had flattened `ErrWrongOwner` out of the chain).
+
 **What the relax lane does NOT protect against:** parent-directory
 namespace rights. If a co-resident principal has been granted
 `FILE_DELETE_CHILD` on the parent directory (one of the more

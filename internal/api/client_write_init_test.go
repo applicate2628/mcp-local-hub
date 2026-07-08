@@ -492,3 +492,95 @@ func TestClientConfigParentGateWrongOwnerHardFails(t *testing.T) {
 		t.Errorf("parent-gate wrong-owner SHOULD get the parent-directory refusal message")
 	}
 }
+
+// TestClientConfigParentGateRefusalOrRelax pins bug 2026-07-08 (F1): the single
+// owner of the parent-gate decision that ALL client-config lanes (both write and
+// the three create lanes) now share. Before F1 the create lanes hand-rolled a
+// bare errors.Is(ErrSecureWriteParentInsecure) check, so a foreign-owned parent
+// RELAXED there while the write lanes refused it — a duplicated security decision
+// drifted. This asserts the collapsed classifier behaves identically for every
+// lane, so the drift cannot recur.
+func TestClientConfigParentGateRefusalOrRelax(t *testing.T) {
+	// broadened-but-owner-correct parent → relax-eligible, no refusal.
+	broadened := errors.Join(ErrSecureWriteParentInsecure, errors.New("broadened ACL"))
+	if refuse, relaxEligible := clientConfigParentGateRefusalOrRelax(broadened); !relaxEligible || refuse != nil {
+		t.Errorf("broadened owner-correct parent: got (refuse=%v, relaxEligible=%v), want (nil, true)", refuse, relaxEligible)
+	}
+
+	// wrong-owner PARENT (ErrWrongOwner wrapped inside ErrSecureWriteParentInsecure,
+	// the create/write %w shape) → NOT relax-eligible; refusal wraps ErrWrongOwner
+	// AND names the foreign-owned condition. This is the case the create lanes used
+	// to relax (F1) because %v flattened ErrWrongOwner before it reached here.
+	wrongOwner := errors.Join(ErrSecureWriteParentInsecure, ErrWrongOwner)
+	refuse, relaxEligible := clientConfigParentGateRefusalOrRelax(wrongOwner)
+	if relaxEligible {
+		t.Errorf("wrong-owner parent must NOT be relax-eligible (would write into a foreign-owned dir)")
+	}
+	if !errors.Is(refuse, ErrWrongOwner) {
+		t.Errorf("wrong-owner parent refusal must wrap ErrWrongOwner; got %v", refuse)
+	}
+	if !strings.Contains(refuse.Error(), "foreign-owned") {
+		t.Errorf("wrong-owner parent refusal must name the foreign-owned condition; got %v", refuse)
+	}
+
+	// bare ErrWrongOwner (post-rename FILE verify, no parent-gate wrap) → NOT
+	// relax-eligible, but returned RAW — must NOT be rewritten with the misleading
+	// "parent directory" wording (bot/fable review F2).
+	if refuse, relaxEligible := clientConfigParentGateRefusalOrRelax(ErrWrongOwner); relaxEligible || refuse != ErrWrongOwner {
+		t.Errorf("bare ErrWrongOwner: got (refuse=%v, relaxEligible=%v), want (bare ErrWrongOwner, false)", refuse, relaxEligible)
+	}
+	if strings.Contains(clientConfigParentGateRefusalOrRelaxRefuse(t, ErrWrongOwner).Error(), "foreign-owned") {
+		t.Errorf("bare ErrWrongOwner must NOT get the parent-directory 'foreign-owned' message")
+	}
+
+	// non-parent-gate error → NOT relax-eligible, returned RAW.
+	unrelated := errors.New("some unrelated write failure")
+	if refuse, relaxEligible := clientConfigParentGateRefusalOrRelax(unrelated); relaxEligible || refuse != unrelated {
+		t.Errorf("non-parent-gate error: got (refuse=%v, relaxEligible=%v), want (raw err, false)", refuse, relaxEligible)
+	}
+
+	// nil err (unreachable in production — every call site guards err != nil) →
+	// relax-eligible, no refusal, so the documented (relaxEligible=false =>
+	// refuse!=nil) invariant holds even on misuse (fable F1 P3).
+	if refuse, relaxEligible := clientConfigParentGateRefusalOrRelax(nil); !relaxEligible || refuse != nil {
+		t.Errorf("nil err: got (refuse=%v, relaxEligible=%v), want (nil, true)", refuse, relaxEligible)
+	}
+}
+
+// TestWrapParentGateRefusalPreservesSentinels pins bug 2026-07-08 (F1) root cause
+// 1: the single wrap owner MUST keep BOTH ErrSecureWriteParentInsecure AND the
+// underlying verify error (ErrWrongOwner) in the chain via %w, so the classifier
+// can detect a foreign-owned parent. A regression of the verr verb back to %v
+// (the shape every create pipeline carried before F1) would flatten ErrWrongOwner
+// and silently re-open the relax hole — this test fails on that regression, which
+// no build/vet check would catch.
+func TestWrapParentGateRefusalPreservesSentinels(t *testing.T) {
+	wrapped := wrapParentGateRefusal("/some/foreign/parent", ErrWrongOwner)
+	if !errors.Is(wrapped, ErrSecureWriteParentInsecure) {
+		t.Errorf("wrap must preserve ErrSecureWriteParentInsecure in the chain; got %v", wrapped)
+	}
+	if !errors.Is(wrapped, ErrWrongOwner) {
+		t.Errorf("wrap must preserve the underlying verify error (ErrWrongOwner) — a %%v regression would flatten it; got %v", wrapped)
+	}
+	if !strings.Contains(wrapped.Error(), "/some/foreign/parent") {
+		t.Errorf("wrap must name the offending path; got %v", wrapped)
+	}
+	// End-to-end: the classifier keys on both sentinels, so a wrapped wrong-owner
+	// parent must be refused (not relaxed) with ErrWrongOwner carried through.
+	refuse, relaxEligible := clientConfigParentGateRefusalOrRelax(wrapped)
+	if relaxEligible {
+		t.Errorf("a wrapped wrong-owner parent must NOT be relax-eligible")
+	}
+	if !errors.Is(refuse, ErrWrongOwner) {
+		t.Errorf("classifier refusal must carry ErrWrongOwner through the wrap; got %v", refuse)
+	}
+}
+
+// clientConfigParentGateRefusalOrRelaxRefuse is a tiny test helper that returns
+// just the refusal error, so the bare-ErrWrongOwner "no foreign-owned wording"
+// assertion above reads cleanly.
+func clientConfigParentGateRefusalOrRelaxRefuse(t *testing.T, err error) error {
+	t.Helper()
+	refuse, _ := clientConfigParentGateRefusalOrRelax(err)
+	return refuse
+}

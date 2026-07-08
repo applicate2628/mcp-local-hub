@@ -98,7 +98,7 @@ func secureCreateClientConfigParentDirImpl(configPath string, skipParentGate boo
 	// stay 0700 regardless.
 	if !skipParentGate {
 		if err := verifyPosixParentDirFromFd(anchorFd); err != nil {
-			return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, home, err)
+			return wrapParentGateRefusal(home, err)
 		}
 	}
 

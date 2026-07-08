@@ -70,7 +70,7 @@ func secureCreateClientConfigIfMissingImpl(path string, contents []byte, skipPar
 	// Mirror of secure_write_windows.go's skipParentGate semantics.
 	if !skipParentGate {
 		if err := verifyWindowsDACLFromHandle(dirHandle); err != nil {
-			return false, fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, parentDir, err)
+			return false, wrapParentGateRefusal(parentDir, err)
 		}
 	}
 

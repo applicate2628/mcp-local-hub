@@ -110,7 +110,7 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 			// secure_create_client_config_parent_posix.go's package doc).
 			if verr := verifyPosixParentDirFromFd(curFd); verr != nil {
 				closeCur()
-				return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, curPath, verr)
+				return wrapParentGateRefusal(curPath, verr)
 			}
 			gated = true
 		}
@@ -159,7 +159,7 @@ func secureCreateParentDirAnywhereImpl(dir string, skipParentGate bool) error {
 	if !gated {
 		if verr := verifyPosixParentDirFromFd(curFd); verr != nil {
 			closeCur()
-			return fmt.Errorf("%w (path %s): %v", ErrSecureWriteParentInsecure, curPath, verr)
+			return wrapParentGateRefusal(curPath, verr)
 		}
 	}
 	closeCur()
