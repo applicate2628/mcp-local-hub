@@ -36,9 +36,8 @@ var loopbackPortOwnersSnapshotFn = api.LoopbackPortOwnersSnapshot
 
 // statusPortOwnersTTL bounds how often the supervisor status handler takes a
 // fresh netstat snapshot. Concurrent AND rapid status IPC calls within the TTL
-// share ONE snapshot: the mutex held across the (ctx-bounded) netstat IS the
-// singleflight for this single-key cache -- concurrent misses serialize and the
-// later waiter finds a fresh value on lock acquire.
+// share ONE snapshot. Stale warm-cache callers kick at most one background
+// refresh and keep serving the cached result instead of stacking behind netstat.
 const statusPortOwnersTTL = 1 * time.Second
 
 // statusPortOwnersProbeTimeout caps a single netstat snapshot. On a host whose
@@ -54,15 +53,17 @@ const statusPortOwnersProbeTimeout = 3 * time.Second
 // caches BOTH the snapshot AND the error for the TTL so a persistently-failing
 // netstat is rate-limited to one probe/TTL instead of storming.
 type statusPortOwnersCoalescer struct {
-	mu         sync.Mutex
-	takenAt    time.Time
-	genAtProbe uint64
-	snapshot   map[int]int
-	err        error
-	snapshotFn func(context.Context) (map[int]int, error) // seam; default api.LoopbackPortOwnersSnapshotContext
-	genFn      func() uint64                              // seam; default DaemonRuntimeTracker.Generation
-	nowFn      func() time.Time                           // seam; default time.Now
-	timeout    time.Duration                              // default statusPortOwnersProbeTimeout
+	mu           sync.Mutex
+	takenAt      time.Time
+	genAtProbe   uint64
+	snapshot     map[int]int
+	err          error
+	inflight     bool
+	inflightDone chan struct{}
+	snapshotFn   func(context.Context) (map[int]int, error) // seam; default api.LoopbackPortOwnersSnapshotContext
+	genFn        func() uint64                              // seam; default DaemonRuntimeTracker.Generation
+	nowFn        func() time.Time                           // seam; default time.Now
+	timeout      time.Duration                              // default statusPortOwnersProbeTimeout
 }
 
 func newStatusPortOwnersCoalescer(tracker *DaemonRuntimeTracker) *statusPortOwnersCoalescer {
@@ -79,23 +80,68 @@ func newStatusPortOwnersCoalescer(tracker *DaemonRuntimeTracker) *statusPortOwne
 }
 
 // Get returns the coalesced port-owner snapshot. Within statusPortOwnersTTL it
-// returns the cached (snapshot, err); otherwise it takes ONE fresh ctx-bounded
-// snapshot under the lock and caches both. Holding mu across the netstat is the
-// singleflight.
+// returns the cached (snapshot, err). A cold miss waits for the single shared
+// ctx-bounded probe; a warm but stale cache serves the stale result immediately
+// while one background probe refreshes it for later callers.
 func (c *statusPortOwnersCoalescer) Get() (map[int]int, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	now := c.nowFn()
 	gen := c.currentGeneration()
+
+	c.mu.Lock()
 	if !c.takenAt.IsZero() && now.Sub(c.takenAt) < statusPortOwnersTTL && gen == c.genAtProbe {
-		return c.snapshot, c.err
+		snapshot, err := c.snapshot, c.err
+		c.mu.Unlock()
+		return snapshot, err
 	}
+
+	if !c.takenAt.IsZero() {
+		if !c.inflight {
+			c.startProbeLocked(gen)
+		}
+		snapshot, err := c.snapshot, c.err
+		c.mu.Unlock()
+		return snapshot, err
+	}
+
+	done := c.inflightDone
+	if !c.inflight {
+		done = c.startProbeLocked(gen)
+	}
+	c.mu.Unlock()
+
+	<-done
+
+	c.mu.Lock()
+	snapshot, err := c.snapshot, c.err
+	c.mu.Unlock()
+	return snapshot, err
+}
+
+func (c *statusPortOwnersCoalescer) startProbeLocked(gen uint64) chan struct{} {
+	done := make(chan struct{})
+	c.inflight = true
+	c.inflightDone = done
+	go c.runProbe(gen, done)
+	return done
+}
+
+func (c *statusPortOwnersCoalescer) runProbe(gen uint64, done chan struct{}) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
-	c.snapshot, c.err = c.snapshotFn(ctx)
-	c.takenAt = c.nowFn()
+	snapshot, err := c.snapshotFn(ctx)
+	takenAt := c.nowFn()
+
+	c.mu.Lock()
+	c.snapshot = snapshot
+	c.err = err
+	c.takenAt = takenAt
 	c.genAtProbe = gen
-	return c.snapshot, c.err
+	c.inflight = false
+	if c.inflightDone == done {
+		c.inflightDone = nil
+	}
+	c.mu.Unlock()
+	close(done)
 }
 
 func (c *statusPortOwnersCoalescer) currentGeneration() uint64 {

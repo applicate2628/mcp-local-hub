@@ -219,6 +219,35 @@ func TestSupervisorStatusSnapshotOwnerMismatchFlipsRestarting(t *testing.T) {
 	}
 }
 
+func waitForCoalescerCalls(t *testing.T, calls *int32, want int32) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := atomic.LoadInt32(calls); got >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("snapshotFn calls = %d, want at least %d", atomic.LoadInt32(calls), want)
+}
+
+func waitForCoalescerSnapshotValue(t *testing.T, c *statusPortOwnersCoalescer, port, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		snap, err := c.Get()
+		if err != nil {
+			t.Fatalf("Get while waiting for refreshed snapshot: %v", err)
+		}
+		if snap[port] == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	snap, err := c.Get()
+	t.Fatalf("refreshed snapshot value for port %d = %v, err=%v, want %d", port, snap[port], err, want)
+}
+
 func TestStatusPortOwnersCoalescerCoalescesWithinTTL(t *testing.T) {
 	var calls int32
 	var gen atomic.Uint64
@@ -244,6 +273,95 @@ func TestStatusPortOwnersCoalescerCoalescesWithinTTL(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("snapshotFn calls = %d, want 1 within TTL", got)
+	}
+}
+
+func TestStatusPortOwnersCoalescerServesStaleDuringSlowRefresh(t *testing.T) {
+	const callers = 12
+	var calls int32
+	var gen atomic.Uint64
+	base := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	now := base
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	closeRelease := func() { releaseOnce.Do(func() { close(release) }) }
+	defer closeRelease()
+
+	c := &statusPortOwnersCoalescer{
+		snapshotFn: func(context.Context) (map[int]int, error) {
+			call := atomic.AddInt32(&calls, 1)
+			if call == 1 {
+				return map[int]int{9123: 1}, nil
+			}
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+			return map[int]int{9123: 2}, nil
+		},
+		genFn:   gen.Load,
+		nowFn:   func() time.Time { return now },
+		timeout: time.Second,
+	}
+
+	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
+		t.Fatalf("warm-up Get = (%+v, %v), want stale marker 1", snap, err)
+	}
+	now = base.Add(statusPortOwnersTTL + time.Nanosecond)
+
+	startLine := make(chan struct{})
+	done := make(chan error, callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			<-startLine
+			start := time.Now()
+			snap, err := c.Get()
+			elapsed := time.Since(start)
+			if err != nil {
+				done <- err
+				return
+			}
+			if snap[9123] != 1 {
+				done <- fmt.Errorf("stale Get snapshot = %+v, want cached marker 1", snap)
+				return
+			}
+			if elapsed >= 100*time.Millisecond {
+				done <- fmt.Errorf("stale Get took %s, want <100ms", elapsed)
+				return
+			}
+			done <- nil
+		}()
+	}
+	close(startLine)
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("background refresh did not start")
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("snapshotFn calls during slow refresh = %d, want exactly 2 (warm-up + one refresh)", got)
+	}
+
+	for i := 0; i < callers; i++ {
+		select {
+		case err := <-done:
+			if err != nil {
+				closeRelease()
+				t.Fatal(err)
+			}
+		case <-time.After(100 * time.Millisecond):
+			closeRelease()
+			t.Fatalf("stale Get caller %d did not return within 100ms while refresh was in flight", i)
+		}
+	}
+
+	closeRelease()
+	waitForCoalescerSnapshotValue(t, c, 9123, 2)
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("snapshotFn calls after refresh completion = %d, want 2", got)
 	}
 }
 
@@ -298,6 +416,47 @@ func TestStatusPortOwnersCoalescerSingleflightsConcurrentMiss(t *testing.T) {
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("snapshotFn calls = %d, want 1 for concurrent miss", got)
 	}
+}
+
+func TestStatusPortOwnersCoalescerRepeatedWarmStaleGetsDoNotBlockOnSlowRefresh(t *testing.T) {
+	var calls int32
+	var gen atomic.Uint64
+	base := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	var nowUnix atomic.Int64
+	nowUnix.Store(base.UnixNano())
+	c := &statusPortOwnersCoalescer{
+		snapshotFn: func(context.Context) (map[int]int, error) {
+			call := int(atomic.AddInt32(&calls, 1))
+			time.Sleep(75 * time.Millisecond)
+			return map[int]int{9123: call}, nil
+		},
+		genFn:   gen.Load,
+		nowFn:   func() time.Time { return time.Unix(0, nowUnix.Load()).UTC() },
+		timeout: time.Second,
+	}
+
+	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
+		t.Fatalf("cold warm-up Get = (%+v, %v), want marker 1", snap, err)
+	}
+
+	for i := 0; i < 8; i++ {
+		next := time.Unix(0, nowUnix.Load()).UTC().Add(statusPortOwnersTTL + time.Nanosecond)
+		nowUnix.Store(next.UnixNano())
+		start := time.Now()
+		snap, err := c.Get()
+		elapsed := time.Since(start)
+		if err != nil {
+			t.Fatalf("warm stale Get #%d: %v", i, err)
+		}
+		if len(snap) == 0 {
+			t.Fatalf("warm stale Get #%d returned empty snapshot", i)
+		}
+		if elapsed >= 40*time.Millisecond {
+			t.Fatalf("warm stale Get #%d took %s, want <40ms despite slow refresh", i, elapsed)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestStatusPortOwnersCoalescerSlowProbeCachesAtCompletionForWaiters(t *testing.T) {
@@ -378,9 +537,11 @@ func TestStatusPortOwnersCoalescerRefreshesAfterTTL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Get: %v", err)
 	}
-	if snap[9123] != 2 {
-		t.Fatalf("second snapshot = %+v, want refreshed call marker 2", snap)
+	if snap[9123] != 1 {
+		t.Fatalf("second snapshot = %+v, want cached marker 1 while refresh runs", snap)
 	}
+	waitForCoalescerCalls(t, &calls, 2)
+	waitForCoalescerSnapshotValue(t, c, 9123, 2)
 	if got := atomic.LoadInt32(&calls); got != 2 {
 		t.Fatalf("snapshotFn calls = %d, want 2 after TTL", got)
 	}
@@ -408,15 +569,18 @@ func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChanges(t *tes
 		t.Fatalf("first Get = (%+v, %v), want call marker 1", snap, err)
 	}
 	// Still within the TTL (now unchanged): only the generation bump should force
-	// the fresh probe.
+	// a refresh. The current call serves the last owner map immediately, and the
+	// background refresh updates the cache for the next call.
 	gen.Add(1)
 	snap, err := c.Get()
 	if err != nil {
 		t.Fatalf("post-generation-bump Get: %v", err)
 	}
-	if snap[9123] != 2 {
-		t.Fatalf("post-generation-bump snapshot = %+v, want a fresh re-probe (marker 2) despite same-TTL", snap)
+	if snap[9123] != 1 {
+		t.Fatalf("post-generation-bump snapshot = %+v, want cached marker 1 while refresh runs", snap)
 	}
+	waitForCoalescerCalls(t, &calls, 2)
+	waitForCoalescerSnapshotValue(t, c, 9123, 2)
 	if got := atomic.LoadInt32(&calls); got != 2 {
 		t.Fatalf("snapshotFn calls = %d, want 2 (generation bump forced a re-probe within TTL)", got)
 	}
@@ -444,14 +608,17 @@ func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChangesDuringP
 	}
 	// Still within the TTL (now unchanged): the first probe's mid-flight
 	// generation bump must invalidate the cache stamped with the pre-probe
-	// generation.
+	// generation. The current call still serves that cached value immediately
+	// while the refresh updates the cache for the next call.
 	snap, err := c.Get()
 	if err != nil {
 		t.Fatalf("post-mid-probe-generation-bump Get: %v", err)
 	}
-	if snap[9123] != 2 {
-		t.Fatalf("post-mid-probe-generation-bump snapshot = %+v, want a fresh re-probe (marker 2) despite same-TTL", snap)
+	if snap[9123] != 1 {
+		t.Fatalf("post-mid-probe-generation-bump snapshot = %+v, want cached marker 1 while refresh runs", snap)
 	}
+	waitForCoalescerCalls(t, &calls, 2)
+	waitForCoalescerSnapshotValue(t, c, 9123, 2)
 	if got := atomic.LoadInt32(&calls); got != 2 {
 		t.Fatalf("snapshotFn calls = %d, want 2 (mid-probe generation bump forced a re-probe within TTL)", got)
 	}
@@ -485,8 +652,21 @@ func TestStatusPortOwnersCoalescerCachesErrorAndReprobesAfterTTL(t *testing.T) {
 
 	now = now.Add(statusPortOwnersTTL + time.Nanosecond)
 	_, err3 := c.Get()
+	if err3 == nil || err3.Error() != err1.Error() {
+		t.Fatalf("after TTL immediate error = %v, want cached error %v while refresh runs", err3, err1)
+	}
+	waitForCoalescerCalls(t, &calls, 2)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		_, refreshedErr := c.Get()
+		if refreshedErr != nil && refreshedErr.Error() != err1.Error() {
+			err3 = refreshedErr
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
 	if err3 == nil || err3.Error() == err1.Error() {
-		t.Fatalf("after TTL error = %v, want fresh reprobe error distinct from %v", err3, err1)
+		t.Fatalf("after TTL refreshed error = %v, want fresh reprobe error distinct from %v", err3, err1)
 	}
 	if got := atomic.LoadInt32(&calls); got != 2 {
 		t.Fatalf("snapshotFn calls after TTL = %d, want 2", got)
