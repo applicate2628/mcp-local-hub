@@ -1704,13 +1704,17 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 	tools := []json.RawMessage{}
 	seenCursors := map[string]struct{}{}
 	totalBytes := 0
+	hasCursor := false
 	cursor := ""
 	for page := 0; ; page++ {
 		if page >= maxToolsListPages {
 			return nil, fmt.Errorf("daemon tools/list exceeded %d pages (runaway pagination)", maxToolsListPages)
 		}
 		req := map[string]any{"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
-		if cursor != "" {
+		// Send params.cursor whenever a cursor is PRESENT — including the empty
+		// string, which is a valid opaque MCP token (bot PR #517 r2). The first
+		// page has no cursor at all, so params is omitted only there.
+		if hasCursor {
 			req["params"] = map[string]any{"cursor": cursor}
 		}
 		body, err := json.Marshal(req)
@@ -1738,8 +1742,11 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 				Message string `json:"message"`
 			} `json:"error"`
 			Result *struct {
-				Tools      *[]json.RawMessage `json:"tools"`
-				NextCursor string             `json:"nextCursor"`
+				Tools *[]json.RawMessage `json:"tools"`
+				// *string so an ABSENT nextCursor (nil → done) is distinguished
+				// from a PRESENT empty-string cursor (a valid MCP token → keep
+				// paging). bot PR #517 r2.
+				NextCursor *string `json:"nextCursor"`
 			} `json:"result"`
 		}
 		if err := json.Unmarshal(raw, &env); err != nil {
@@ -1761,14 +1768,25 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 			return nil, fmt.Errorf("daemon tools/list exceeded %d cumulative bytes across pages (runaway payload)", maxToolsListTotalBytes)
 		}
 		tools = append(tools, *env.Result.Tools...)
-		if env.Result.NextCursor == "" {
+		nc := env.Result.NextCursor
+		if nc == nil {
+			// Absent nextCursor → the MCP spec says results are complete.
 			break
 		}
-		if _, seen := seenCursors[env.Result.NextCursor]; seen {
+		// Count the cursor bytes toward the cumulative budget too: a daemon
+		// returning tiny/empty tools but huge UNIQUE cursors would otherwise
+		// keep totalBytes low while growing seenCursors + the echoed request
+		// unbounded across pages (bot PR #517 r2).
+		totalBytes += len(*nc)
+		if totalBytes > maxToolsListTotalBytes {
+			return nil, fmt.Errorf("daemon tools/list exceeded %d cumulative bytes across pages (runaway payload)", maxToolsListTotalBytes)
+		}
+		if _, seen := seenCursors[*nc]; seen {
 			return nil, fmt.Errorf("daemon tools/list returned a repeated cursor (pagination loop)")
 		}
-		seenCursors[env.Result.NextCursor] = struct{}{}
-		cursor = env.Result.NextCursor
+		seenCursors[*nc] = struct{}{}
+		cursor = *nc
+		hasCursor = true
 	}
 	return tools, nil
 }

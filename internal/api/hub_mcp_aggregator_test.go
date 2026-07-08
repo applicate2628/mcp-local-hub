@@ -4610,3 +4610,82 @@ func TestPostToolsListCumulativeByteCapRejected(t *testing.T) {
 		t.Fatalf("err=%v, want 'cumulative bytes'", err)
 	}
 }
+
+// TestPostToolsListEmptyStringCursorContinues pins that a PRESENT but
+// empty-string nextCursor is a valid MCP token — the drain must keep paging
+// (sending params.cursor="") and only stop when the field is ABSENT (bot PR
+// #517 r2). A value-only check would wrongly stop and drop later pages.
+func TestPostToolsListEmptyStringCursorContinues(t *testing.T) {
+	sd := newStubDaemon(t, "empty-cursor-sid")
+	var mu sync.Mutex
+	var reqs []string
+	sd.onList = func(w http.ResponseWriter, r *http.Request) {
+		sd.bodyMu.Lock()
+		body := append([]byte(nil), sd.lastListBody...)
+		sd.bodyMu.Unlock()
+		var env struct {
+			Params *struct {
+				Cursor string `json:"cursor"`
+			} `json:"params"`
+		}
+		_ = json.Unmarshal(body, &env)
+		mu.Lock()
+		if env.Params == nil {
+			reqs = append(reqs, "<no-params>")
+		} else {
+			reqs = append(reqs, "cursor="+env.Params.Cursor)
+		}
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if env.Params == nil {
+			// page 1: present-but-empty nextCursor — must continue, not stop.
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"a"}],"nextCursor":""}}`))
+		} else {
+			// page 2 (cursor ""): final page, nextCursor ABSENT.
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"b"}]}}`))
+		}
+	}
+	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
+	tools, err := postToolsList(context.Background(), ref, "empty-cursor-sid", "2025-11-25")
+	if err != nil {
+		t.Fatalf("postToolsList: %v", err)
+	}
+	if len(tools) != 2 {
+		t.Fatalf("drained %d tools, want 2 (empty-string cursor must NOT stop the drain)", len(tools))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(reqs) != 2 || reqs[0] != "<no-params>" || reqs[1] != "cursor=" {
+		t.Fatalf("reqs=%v, want [<no-params>, cursor=] (2nd page sends params.cursor even when empty)", reqs)
+	}
+}
+
+// TestPostToolsListLargeCursorCapped pins that the cumulative byte budget counts
+// CURSOR bytes too — a daemon returning empty tools but huge unique cursors would
+// otherwise evade a tool-bytes-only budget while growing heap unbounded (bot PR
+// #517 r2).
+func TestPostToolsListLargeCursorCapped(t *testing.T) {
+	orig := maxToolsListTotalBytes
+	maxToolsListTotalBytes = 500
+	t.Cleanup(func() { maxToolsListTotalBytes = orig })
+
+	sd := newStubDaemon(t, "bigcursor-sid")
+	page := 0
+	sd.onList = func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		page++
+		// empty tools, but a large UNIQUE cursor (~400+ bytes) each page.
+		bigCursor := strings.Repeat("z", 400) + string(rune('0'+page))
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[],"nextCursor":"` + bigCursor + `"}}`))
+	}
+	ref := canonicalDaemonRef{Server: "stub", Daemon: "default", Port: sd.port}
+	_, err := postToolsList(context.Background(), ref, "bigcursor-sid", "2025-11-25")
+	if err == nil {
+		t.Fatal("expected cumulative-byte-cap error from large cursors, got nil")
+	}
+	if !strings.Contains(err.Error(), "cumulative bytes") {
+		t.Fatalf("err=%v, want 'cumulative bytes'", err)
+	}
+}
