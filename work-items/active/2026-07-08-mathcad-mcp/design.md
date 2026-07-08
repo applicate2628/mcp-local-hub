@@ -136,6 +136,66 @@ Mathcad host FIRST (a P0.5 feasibility gate, before committing the full surface)
 (exact = Ω/z solid-angle formula, Wolfram-confirmed 2026-07-08) at **TOL 1e-9**, with `converged=true`.
 "If the MCP eats this, it eats everything we need." A non-converged or wrong result at this test = design not accepted.
 
+## 4b. ACCEPTANCE PANEL OUTCOME (fable + sonnet + codex, 2026-07-08) — ACCEPT-WITH-REVISIONS; host-smoke MANDATORY
+Unanimous: NO-GO for the full P0-P6 build now; GO only for a host feasibility smoke + these revisions first.
+Architecture (Go+go-ole native subcommand, comSession seam, probe gate, no schema change) = PASS/idiomatic.
+
+BLOCKING revisions (before any P0):
+- **[F, sonnet] Re-sequence §7 around the §4a COMPUTATION surface, NOT the superseded §4 worksheet-CRUD.** As
+  written P0-P6 built only open/recalc/list/set/save/export and never eval_expression / integrate_2d_region /
+  the calc.mcdx mechanism / sweep / find_root, and never gated the ∫∫1/R³ acceptance test into a phase = a
+  de-facto second deferral. Revised phasing below (§7-REVISED).
+- **[G, sonnet] Record the Go-vs-C# decision in work-items/decisions/** (done: 2026-07-08-mathcad-native-go-ole-com.md).
+- **[codex crux 4] MECHANISM: `SetStringValue` does NOT parse math — it sets a string value.** The real
+  expression-injection API is **`SetSExprValue(alias, sexpression)`** (Mathcad internal S-expression syntax),
+  verified by enumerating Ptc.MathcadPrime.Automation.dll. So generic-integrand-string injection needs
+  SetSExprValue (build the S-expr from the user's expression) OR pre-authored PARAMETRIC templates (fixed math,
+  numeric params only). The host smoke decides which; the design MUST hedge this fork (sonnet Finding B) like §2.5.
+- **[codex crux 2 + fable R1/R2] fail-loud CONVERGENCE must be MANUFACTURED**, not read from Mathcad's error
+  state alone (PTC docs: sharply-peaked/near-singular integrands "do not evaluate accurately" with NO error —
+  exactly our 1/R³ regime). out_converged = template-side cross-FORMULATION self-consistency (different domain
+  splits / singularity-removed vs reference — NOT two TOLs of the same Romberg) AND ErrorCode==0. Acceptance MUST
+  add a NEGATIVE case (z=0 true singularity, engineered pathology → converged=false / controlled error).
+- **[fable R4/R5, HIGH — DATA DESTRUCTION] `Dispatch("MathcadPrime.Application")` ATTACHES to the user's live
+  interactive Prime** (single-instance default; MathcadPy "selects worksheets already open"). So CloseAll(discard)
+  +Quit on exit DESTROYS the user's unsaved worksheets. FIX: per-handle Close of ONLY daemon-opened worksheets;
+  Quit/terminate ONLY when the instance was verifiably daemon-spawned AND no foreign worksheets open; explicit
+  shared/adopted-instance policy (refuse-start-if-Prime-running OR shared-mode with destructive ops DISABLED).
+
+SHOULD-fix before P1:
+- **[fable R3] Acceptance pass predicate = numeric tolerance-band** (|result-6265.5263429603| ≤ K·tol·|value|),
+  not a 14-digit literal at TOL 1e-9; error_estimate must be an honest a-posteriori estimate, not the requested tol.
+- **[fable R6] PID kill via persisted {pid,start_time} sidecar + start-time-proven gate** (reuse TerminatePIDWithIdentity;
+  "identity-gated" without start-time is PID-recycle-vulnerable).
+- **[sonnet A] Port band correction:** a built-in native server hand-assigns from **9121-9149** (configs/ports.yaml,
+  next free 9137) — NOT global_port_alloc.go's 9300-9399 marketplace band.
+- **[codex] Cancellation** uses DefaultCalculationTimeout + PauseCalculation/ResumeCalculation (available), not a hard kill.
+
+NON-blocking (planner absorbs): [fable R7] hash-verify/hardened-write the extracted template .mcdx (integrity-of-results);
+[sonnet C] template lifecycle (go:embed + extract-to-state-dir, versioned); [sonnet D] sweep deadline scales with
+param_table rows; [sonnet E] complex wire shape = {re:number, im:number}.
+
+## 7-REVISED. Phased plan (computation-first; the acceptance test IS a phase gate)
+- **P0.5 HOST FEASIBILITY SMOKE (go/no-go, BEFORE P0 build) — throwaway probe on the Mathcad host:**
+  (1) drive Mathcad via go-ole (Open/Synchronize/OutputGetRealValue/ErrorCode); (2) prove SetSExprValue injects a
+  live expression (simple: inject `x^2`, set x=3, read 9) — else fall to parametric templates; (3) the EXACT
+  triangle test: unit triangle, obs (1/3,1/3,1e-3) → 6265.5263429603 @ TOL 1e-9, converged=true (with the
+  singularity-removing transform in the worksheet if raw fails — the user's solid-angle route); (4) a NEGATIVE
+  convergence test (z=0) must fail loud; (5) complex output via Re/Im aliases. ACC: all 5 answered on the host.
+  IF the triangle test can't be met even with transforms → STOP, pivot the whole surface to "drive user reference
+  worksheets + sweep" (the open_worksheet(path,inputs)→outputs model), re-review.
+- **P0.** Skeleton (server.go/cmd.go, mathcad_status stub, manifest, root.go line, go-ole dep). ACC: build/vet;
+  tools/list; inert on non-Mathcad host.
+- **P1.** COM worker (STA + pump + deadline via DefaultCalculationTimeout) + data-safe lifecycle (per-handle close,
+  spawned-only Quit, shared-instance policy, {pid,start_time} sidecar). ACC (host): status real; no orphan;
+  user's open worksheets NEVER touched.
+- **P2.** The CORE via the smoke-proven mechanism: eval_expression + integrate_2d_region (triangle) with the
+  manufactured out_converged. ACC (host): the ∫∫1/R³ acceptance test (positive) + the negative convergence test.
+- **P3.** sweep (deadline scales with rows) + find_root + special-fns + complex {re,im}. ACC (host): 9-row sweep → CSV.
+- **P4.** (if needed) open_worksheet(path,inputs)→outputs for user reference .mcdx. **P5.** manifest polish (port 9137)
+  + CLAUDE.md + publication-safety + go-ole license. Old §7 P2-P5 worksheet-CRUD verbs demoted to internal COM
+  primitives, not separately MCP-exposed (sonnet Finding F option b).
+
 ## 5. Hub integration
 Built-in native server (in-tree, like godbolt) — NOT external, NOT a vendored/marketplace row. Fixes all 3
 deferral disqualifiers: no ${workspaceFolder} (kind:global subcommand, launch = `mcphub mathcad`); no absent
