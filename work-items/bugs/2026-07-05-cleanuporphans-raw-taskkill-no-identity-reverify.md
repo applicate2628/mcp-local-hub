@@ -1,5 +1,5 @@
 ---
-status: open
+status: fixed (PR #511 TerminatePIDWithIdentity + cmdline revalidate; see TRIAGE-2026-07-08.md)
 severity: medium
 filed: 2026-07-05
 context: adjacent-finding (surfaced during the A2 npx-orphan security-design pass, architect-verified against HEAD)
