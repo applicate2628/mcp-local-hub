@@ -582,7 +582,7 @@ host,"C:\Windows\explorer.exe",20260515090000.000000+000,C:\Windows\explorer.exe
 host,"C:\Users\u\AppData\Local\Programs\claude\claude.exe --foo",20260515100000.000000+000,C:\Users\u\AppData\Local\Programs\claude\claude.exe,4000,5000,300000000
 `
 	patterns := []string{"claude"}
-	swapOrphanParentAlive(t, func(int) bool { return false }) // deterministic: absent parent = dead = real orphan
+	swapOrphanParentState(t, deadParent) // deterministic: absent parent = dead = real orphan
 	out, _ := parseOrphans(strings.NewReader(csv), patterns)
 	for _, o := range out {
 		if o.PID == 5000 {
@@ -605,7 +605,7 @@ host,"C:\Users\u\AppData\Local\Programs\claude\claude.exe",20260515103000.000000
 host,"node.exe c:\path\to\server.js",20260515102000.000000+000,C:\Program Files\nodejs\node.exe,2000,3000,80000000
 `
 	patterns := []string{"server.js"}
-	swapOrphanParentAlive(t, func(int) bool { return false }) // deterministic: absent parent = dead = real orphan
+	swapOrphanParentState(t, deadParent) // deterministic: absent parent = dead = real orphan
 	out, _ := parseOrphans(strings.NewReader(csv), patterns)
 	for _, o := range out {
 		if o.PID == 3000 {
@@ -627,7 +627,7 @@ host,"C:\Windows\explorer.exe",20260515090000.000000+000,C:\Windows\explorer.exe
 host,"node.exe c:\path\to\server.js",20260515102000.000000+000,C:\Program Files\nodejs\node.exe,4000,3000,80000000
 `
 	patterns := []string{"server.js"}
-	swapOrphanParentAlive(t, func(int) bool { return false }) // deterministic: absent parent = dead = real orphan
+	swapOrphanParentState(t, deadParent) // deterministic: absent parent = dead = real orphan
 	out, _ := parseOrphans(strings.NewReader(csv), patterns)
 	var found bool
 	for _, o := range out {

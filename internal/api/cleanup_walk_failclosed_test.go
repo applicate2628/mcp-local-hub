@@ -4,18 +4,26 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/process"
 )
 
-// swapOrphanParentAlive injects a deterministic parent-liveness probe for the parseOrphans
-// ancestor walk (bug 2026-07-08 walk-fail-closed): tests control whether a PID absent from
-// the census fixture reads as alive (a dropped live-parent row → spare) or dead (a real
-// orphan → reap), instead of probing whatever real PID the fixture happens to name.
-func swapOrphanParentAlive(t *testing.T, fn func(int) bool) {
+// swapOrphanParentState injects a deterministic TRI-STATE parent-liveness probe for the
+// reaper ancestor walks (bug 2026-07-08 walk-fail-closed + codex PR #521): tests control
+// whether a PID absent from the census fixture reads as PIDStateDead (a real orphan → reap),
+// PIDStateAlive (a dropped live-parent row → spare), or PIDStateUnknown / probe error (cannot
+// prove → spare), instead of probing whatever real PID the fixture happens to name.
+func swapOrphanParentState(t *testing.T, fn func(int) (process.PIDState, error)) {
 	t.Helper()
-	prev := orphanParentAliveFn
-	orphanParentAliveFn = fn
-	t.Cleanup(func() { orphanParentAliveFn = prev })
+	prev := orphanParentStateFn
+	orphanParentStateFn = fn
+	t.Cleanup(func() { orphanParentStateFn = prev })
 }
+
+// deadParent / aliveParent / unknownParent are the three deterministic seam values.
+func deadParent(int) (process.PIDState, error)    { return process.PIDStateDead, nil }
+func aliveParent(int) (process.PIDState, error)   { return process.PIDStateAlive, nil }
+func unknownParent(int) (process.PIDState, error) { return process.PIDStateUnknown, nil }
 
 const walkCSVHeader = "Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize"
 
@@ -23,28 +31,58 @@ func walkRow(cmdline string, ppid, pid int) string {
 	return fmt.Sprintf(`host,"%s",20250101090000.000000+000,C:\x.exe,%d,%d,80000000`, cmdline, ppid, pid)
 }
 
-// TestParseOrphans_ByPIDMiss_LiveParentSpared is the Case A falsifying probe: a candidate
-// whose parent row is ABSENT from the census is spared ONLY when that parent is still alive
-// (a dropped/malformed snapshot row of a live protector) and reaped when the parent is
-// genuinely dead (a real orphan). A blunt "byPID-miss → spare" would inert the reaper; a
-// blunt "byPID-miss → reap" is the pre-fix fail-OPEN that could kill a live-rooted child.
-func TestParseOrphans_ByPIDMiss_LiveParentSpared(t *testing.T) {
-	// candidate pid=5000, ppid=4000 (4000 is NOT in the census → byPID-miss).
+// TestParseOrphans_ByPIDMiss_TriState is the Case A falsifying probe: a candidate whose
+// parent row is ABSENT is reaped ONLY when that parent is PROVABLY dead. Alive (a dropped
+// live-protector row) AND Unknown (an unprobeable live protector — OpenProcess ACCESS_DENIED)
+// both SPARE (fail closed). A boolean "alive?" probe would collapse Unknown into "dead" and
+// force-kill a live-rooted child on the unattended ticker (codex PR #521 P0).
+func TestParseOrphans_ByPIDMiss_TriState(t *testing.T) {
 	csv := walkCSVHeader + "\n" + walkRow("uvx -y @mui/mcp", 4000, 5000) + "\n"
 	patterns := []string{"@mui/mcp"}
 
-	// Parent 4000 still ALIVE (its census row was dropped) → cannot prove orphan → SPARED.
-	swapOrphanParentAlive(t, func(pid int) bool { return pid == 4000 })
-	got, _ := parseOrphans(strings.NewReader(csv), patterns)
-	if len(got) != 0 {
-		t.Errorf("a candidate whose ABSENT parent is still ALIVE must be spared (dropped-row fail-closed); got %d orphan(s)", len(got))
+	cases := []struct {
+		name      string
+		probe     func(int) (process.PIDState, error)
+		wantReap  bool
+	}{
+		{"dead parent → real orphan → reap", deadParent, true},
+		{"alive parent → dropped live row → spare", aliveParent, false},
+		{"unknown parent → unprobeable live protector → spare", unknownParent, false},
+		{"probe error → cannot prove → spare", func(int) (process.PIDState, error) {
+			return process.PIDStateUnknown, fmt.Errorf("open denied")
+		}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			swapOrphanParentState(t, tc.probe)
+			got, _ := parseOrphans(strings.NewReader(csv), patterns)
+			gotReap := len(got) == 1
+			if gotReap != tc.wantReap {
+				t.Errorf("reap=%v, want %v (got %d orphan(s))", gotReap, tc.wantReap, len(got))
+			}
+		})
+	}
+}
+
+// TestParseOrphans_SelfLoop_Spared (codex PR #521 P0): a candidate whose ancestor chain hits a
+// self-loop row (ppid == pid) — a MALFORMED row, not a real root — must be spared, because a
+// protected daemon/client could be above the malformed row. ppid==0 (a genuine root) still reaps.
+func TestParseOrphans_SelfLoop_Spared(t *testing.T) {
+	// candidate 5000 → 5001, where 5001 is a self-loop (ppid==pid==5001).
+	selfLoop := walkCSVHeader + "\n" +
+		walkRow("uvx -y @mui/mcp", 5001, 5000) + "\n" +
+		walkRow("malformed-self-loop", 5001, 5001) + "\n"
+	swapOrphanParentState(t, deadParent)
+	if got, _ := parseOrphans(strings.NewReader(selfLoop), []string{"@mui/mcp"}); len(got) != 0 {
+		t.Errorf("a candidate whose chain hits a self-loop row must be spared (unresolved ancestry); got %d", len(got))
 	}
 
-	// Parent 4000 genuinely DEAD → real orphan → REAPED.
-	swapOrphanParentAlive(t, func(int) bool { return false })
-	got, _ = parseOrphans(strings.NewReader(csv), patterns)
-	if len(got) != 1 {
-		t.Errorf("a candidate whose ABSENT parent is genuinely DEAD is a real orphan and must be detected; got %d", len(got))
+	// Contrast: a genuine root (ppid==0) still reaps.
+	genuineRoot := walkCSVHeader + "\n" +
+		walkRow("uvx -y @mui/mcp", 5001, 5000) + "\n" +
+		walkRow("real-root", 0, 5001) + "\n"
+	if got, _ := parseOrphans(strings.NewReader(genuineRoot), []string{"@mui/mcp"}); len(got) != 1 {
+		t.Errorf("a candidate resolving to a genuine root (ppid==0) with no protected ancestor is a real orphan; got %d", len(got))
 	}
 }
 
@@ -52,37 +90,14 @@ func TestParseOrphans_ByPIDMiss_LiveParentSpared(t *testing.T) {
 // abnormally deep chain of PRESENT, non-protected ancestors that never reaches a real root
 // within the 16-level cap is spared (fail closed) rather than falling through to "orphan".
 func TestParseOrphans_DepthCapExhaustion_Spared(t *testing.T) {
-	// Build a 20-deep chain: candidate 5000 → 5001 → ... → 5020, all present, none a
-	// protected launcher, and none with ppid==0 within the first 16 hops. The walk
-	// exhausts the depth cap unresolved → spareUncertain.
 	var b strings.Builder
 	b.WriteString(walkCSVHeader + "\n")
 	b.WriteString(walkRow("uvx -y @mui/mcp", 5001, 5000) + "\n") // candidate
 	for i := 1; i < 20; i++ {
 		b.WriteString(walkRow("some-intermediate-proc", 5000+i+1, 5000+i) + "\n")
 	}
-	// The chain never hits ppid==0 within the cap; every ancestor is present + generic.
-	// Parent-alive probe is irrelevant here (no byPID-miss within the cap) but pin it dead.
-	swapOrphanParentAlive(t, func(int) bool { return false })
-
-	got, _ := parseOrphans(strings.NewReader(b.String()), []string{"@mui/mcp"})
-	if len(got) != 0 {
-		t.Errorf("a candidate under a >16-deep unresolved live chain must be spared (depth-cap fail-closed); got %d orphan(s)", len(got))
-	}
-}
-
-// TestParseOrphans_ResolvedToRoot_StillReaped guards the POSITIVE path: a candidate whose
-// walk resolves to a genuine root (ppid==0) with no protected ancestor is a real orphan and
-// is still reaped — the fail-closed changes must not neuter legitimate reaping.
-func TestParseOrphans_ResolvedToRoot_StillReaped(t *testing.T) {
-	// candidate 5000 → 5001 (present, generic) → ppid 0 (genuine root).
-	csv := walkCSVHeader + "\n" +
-		walkRow("uvx -y @mui/mcp", 5001, 5000) + "\n" +
-		walkRow("some-root-proc", 0, 5001) + "\n"
-	swapOrphanParentAlive(t, func(int) bool { return false })
-
-	got, _ := parseOrphans(strings.NewReader(csv), []string{"@mui/mcp"})
-	if len(got) != 1 {
-		t.Errorf("a candidate resolving to a genuine root with no protected ancestor is a real orphan; got %d", len(got))
+	swapOrphanParentState(t, deadParent) // irrelevant (no byPID-miss within the cap) but deterministic
+	if got, _ := parseOrphans(strings.NewReader(b.String()), []string{"@mui/mcp"}); len(got) != 0 {
+		t.Errorf("a candidate under a >16-deep unresolved live chain must be spared (depth-cap fail-closed); got %d", len(got))
 	}
 }
