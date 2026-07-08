@@ -4587,11 +4587,11 @@ func TestPostToolsListRepeatedCursorRejected(t *testing.T) {
 // exceeds the cumulative budget.
 func TestPostToolsListCumulativeByteCapRejected(t *testing.T) {
 	orig := maxToolsListTotalBytes
-	maxToolsListTotalBytes = 200 // lower the cap so a couple of small pages exceed it
+	maxToolsListTotalBytes = 300 // page0 raw (~220 bytes) passes; cumulative page0+page1 exceeds
 	t.Cleanup(func() { maxToolsListTotalBytes = orig })
 
 	sd := newStubDaemon(t, "bytes-sid")
-	big := strings.Repeat("y", 150) // one ~150-byte tool per page; 2 pages > 200
+	big := strings.Repeat("y", 150) // one ~150-byte tool per page
 	page := 0
 	sd.onList = func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -4606,7 +4606,7 @@ func TestPostToolsListCumulativeByteCapRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected cumulative-byte-cap error, got nil")
 	}
-	if !strings.Contains(err.Error(), "cumulative bytes") {
+	if !strings.Contains(err.Error(), "cumulative response bytes") {
 		t.Fatalf("err=%v, want 'cumulative bytes'", err)
 	}
 }
@@ -4685,7 +4685,7 @@ func TestPostToolsListLargeCursorCapped(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected cumulative-byte-cap error from large cursors, got nil")
 	}
-	if !strings.Contains(err.Error(), "cumulative bytes") {
+	if !strings.Contains(err.Error(), "cumulative response bytes") {
 		t.Fatalf("err=%v, want 'cumulative bytes'", err)
 	}
 }

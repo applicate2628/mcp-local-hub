@@ -1725,6 +1725,16 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 		if err != nil {
 			return nil, err
 		}
+		// Count the FULL page payload against the cumulative budget BEFORE
+		// unmarshalling. doDaemonPost reads up to maxAggregatorResponseBytes per
+		// page regardless of how much is tools vs ignored fields, so len(raw) —
+		// not the extracted tool/cursor bytes — is the true per-daemon read+parse
+		// bound (bot PR #517 r3; restores the pre-pagination per-daemon 4 MiB cap,
+		// now summed across pages).
+		totalBytes += len(raw)
+		if totalBytes > maxToolsListTotalBytes {
+			return nil, fmt.Errorf("daemon tools/list exceeded %d cumulative response bytes across pages (runaway payload)", maxToolsListTotalBytes)
+		}
 		// `raw` is the JSON-RPC envelope; doDaemonPost peeled off any SSE
 		// framing (codex bot r12 P1 closures on PR #157).
 		//
@@ -1761,25 +1771,11 @@ func postToolsList(ctx context.Context, ref canonicalDaemonRef, daemonSID, proto
 		if env.Result.Tools == nil {
 			return nil, fmt.Errorf("daemon tools/list response missing `result.tools` field")
 		}
-		for _, t := range *env.Result.Tools {
-			totalBytes += len(t)
-		}
-		if totalBytes > maxToolsListTotalBytes {
-			return nil, fmt.Errorf("daemon tools/list exceeded %d cumulative bytes across pages (runaway payload)", maxToolsListTotalBytes)
-		}
 		tools = append(tools, *env.Result.Tools...)
 		nc := env.Result.NextCursor
 		if nc == nil {
 			// Absent nextCursor → the MCP spec says results are complete.
 			break
-		}
-		// Count the cursor bytes toward the cumulative budget too: a daemon
-		// returning tiny/empty tools but huge UNIQUE cursors would otherwise
-		// keep totalBytes low while growing seenCursors + the echoed request
-		// unbounded across pages (bot PR #517 r2).
-		totalBytes += len(*nc)
-		if totalBytes > maxToolsListTotalBytes {
-			return nil, fmt.Errorf("daemon tools/list exceeded %d cumulative bytes across pages (runaway payload)", maxToolsListTotalBytes)
 		}
 		if _, seen := seenCursors[*nc]; seen {
 			return nil, fmt.Errorf("daemon tools/list returned a repeated cursor (pagination loop)")
