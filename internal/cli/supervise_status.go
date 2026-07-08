@@ -79,10 +79,21 @@ func newStatusPortOwnersCoalescer(tracker *DaemonRuntimeTracker) *statusPortOwne
 	}
 }
 
-// Get returns the coalesced port-owner snapshot. Within statusPortOwnersTTL it
-// returns the cached (snapshot, err). A cold miss waits for the single shared
-// ctx-bounded probe; a warm but stale cache serves the stale result immediately
-// while one background probe refreshes it for later callers.
+// Get returns the coalesced port-owner snapshot. Within statusPortOwnersTTL
+// (and an unchanged fleet generation) it returns the cached (snapshot, err).
+// A warm cache that is only TTL-stale serves the stale result immediately
+// while ONE background probe refreshes it for later callers — freshness there
+// is a perf concern only, the fleet has not changed. A cold cache OR a fleet
+// GENERATION change (a daemon respawned/exited since the cached probe) JOINS
+// the single in-flight probe instead: a just-respawned daemon must never be
+// classified against the pre-change owner map (read-your-writes — Codex #514
+// r2; serving stale there reported a healthy fresh PID as Restarting/stale_pid
+// until the async refresh landed). The join is bounded: each probe is
+// ctx-limited to statusPortOwnersProbeTimeout (3s) < the 5s status-IPC budget,
+// only fleet-change-adjacent calls pay it, and at most two rounds are waited
+// (a respawn landing mid-probe triggers one fresh probe; after that the
+// freshest cache is served — the documented self-correcting degraded mode —
+// rather than risking unbounded waiting).
 func (c *statusPortOwnersCoalescer) Get() (map[int]int, error) {
 	now := c.nowFn()
 	gen := c.currentGeneration()
@@ -94,7 +105,9 @@ func (c *statusPortOwnersCoalescer) Get() (map[int]int, error) {
 		return snapshot, err
 	}
 
-	if !c.takenAt.IsZero() {
+	// Warm cache, unchanged fleet, TTL-stale only → serve stale now, refresh
+	// in the background.
+	if !c.takenAt.IsZero() && gen == c.genAtProbe {
 		if !c.inflight {
 			c.startProbeLocked(gen)
 		}
@@ -103,15 +116,20 @@ func (c *statusPortOwnersCoalescer) Get() (map[int]int, error) {
 		return snapshot, err
 	}
 
-	done := c.inflightDone
-	if !c.inflight {
-		done = c.startProbeLocked(gen)
+	// Cold cache or generation mismatch → join/start the single probe and
+	// return its result (bounded to two rounds; see doc comment).
+	for round := 0; ; round++ {
+		done := c.inflightDone
+		if !c.inflight {
+			done = c.startProbeLocked(c.currentGeneration())
+		}
+		c.mu.Unlock()
+		<-done
+		c.mu.Lock()
+		if round >= 1 || c.genAtProbe == c.currentGeneration() {
+			break
+		}
 	}
-	c.mu.Unlock()
-
-	<-done
-
-	c.mu.Lock()
 	snapshot, err := c.snapshot, c.err
 	c.mu.Unlock()
 	return snapshot, err
