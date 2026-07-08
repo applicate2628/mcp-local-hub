@@ -201,7 +201,11 @@ function CardOrphanMcpServers(): preact.JSX.Element {
   // captured at modal-open, not from live state.orphans. While the
   // modal is closed snapshot is null and the body collapses to an
   // empty list (the dialog is hidden anyway).
-  const confirmOrphans = orphansSnapshot ?? [];
+  //
+  // Only reap-ELIGIBLE rows are actually cleaned on Apply; the confirm modal lists
+  // and counts exactly those, so "Clean N" matches what happens (spared rows appear
+  // in the Preview table with their skip reason but are excluded here — bot PR #520 P2).
+  const confirmOrphans = (orphansSnapshot ?? []).filter(orphanIsEligible);
   const confirmCount = confirmOrphans.length;
   return (
     <div data-card="orphan-mcp-servers" class={CARD_CLASS}>
@@ -218,20 +222,20 @@ function CardOrphanMcpServers(): preact.JSX.Element {
         <button onClick={preview} disabled={state.kind === "loading"}>
           Preview
         </button>
-        {state.kind === "preview" && state.orphans && state.orphans.length > 0 && (
+        {state.kind === "preview" && state.orphans && state.orphans.filter(orphanIsEligible).length > 0 && (
           <button
             onClick={openConfirm}
             disabled={false}
             class="btn-danger"
             data-testid="orphan-mcp-clean-button"
           >
-            Clean ({state.orphans.length})
+            Clean ({state.orphans.filter(orphanIsEligible).length})
           </button>
         )}
       </div>
       <CardResult state={state} />
       {(state.kind === "preview" || state.kind === "applied") && state.orphans && (
-        <OrphansTable orphans={state.orphans} />
+        <OrphansTable orphans={state.orphans} applied={state.kind === "applied"} />
       )}
       <ConfirmModal
         open={confirmOpen}
@@ -272,7 +276,34 @@ function cmdlineDisplayOf(o: OrphanProcess): string {
   return "<unknown>";
 }
 
-function OrphansTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Element {
+// orphanIsEligible / orphanVerdictLabel mirror the Go api.ReapVerdictIsEligible /
+// api.ReapVerdictLabel (internal/api/cleanup.go). A default-sweep row carries a
+// reap_verdict; the Preview table renders the label and the Clean count counts only
+// eligible rows, so the operator sees which candidates are already SPARED (and why)
+// BEFORE clicking Clean instead of after Apply (bot PR #520 P2). An empty verdict
+// (aggressive-sweep row / older wire) counts as eligible — those paths clean every row.
+function orphanIsEligible(o: OrphanProcess): boolean {
+  return !o.reap_verdict || o.reap_verdict === "reap-eligible";
+}
+
+function orphanVerdictLabel(o: OrphanProcess): string {
+  switch (o.reap_verdict) {
+    case "reap-eligible":
+      return "will clean";
+    case "spared-config-referenced":
+      return "skip: still referenced by a client config";
+    case "spared-config-scan-degraded":
+      return "skip: a client config was unreadable this run";
+    case "spared-snapshot-degraded":
+      return "skip: process snapshot was truncated this run";
+    case "spared-below-kill-age-floor":
+      return "skip: below the kill-age floor";
+    default:
+      return "";
+  }
+}
+
+function OrphansTable({ orphans, applied }: { orphans: OrphanProcess[]; applied: boolean }): preact.JSX.Element {
   if (orphans.length === 0) {
     return <p class="maintenance-empty mt-3 text-sm text-app-muted">No orphan processes found.</p>;
   }
@@ -281,7 +312,12 @@ function OrphansTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Ele
   // (PID-reuse, exited-PID, snapshot start-time unknown), access
   // denials, and other partial failures. Render a Result column
   // whenever any row carries a non-empty kill_err.
-  const showResult = orphans.some((o) => !!o.kill_err);
+  //
+  // In PREVIEW (bot PR #520 P2) the column instead shows the config-absence-gate
+  // verdict per row (will clean / skip: <reason>) so the operator learns which
+  // candidates are spared BEFORE clicking Clean, not after Apply. kill_err is
+  // apply-only, so preview keys the column on reap_verdict.
+  const showResult = applied ? orphans.some((o) => !!o.kill_err) : orphans.some((o) => !!o.reap_verdict);
   return (
     <table class="maintenance-table mt-3 w-full border-collapse text-sm">
       <thead>
@@ -307,9 +343,15 @@ function OrphansTable({ orphans }: { orphans: OrphanProcess[] }): preact.JSX.Ele
                 hides the raw `cmdline` field (`json:"-"` server-side). */}
             <td class="maintenance-cmd py-1.5 pr-4 font-mono text-xs">{cmdlineDisplayOf(o)}</td>
             {showResult && (
-              <td class={`py-1.5 pr-4 ${o.kill_err ? "maintenance-error text-app-danger" : ""}`}>
-                {o.kill_err || "killed"}
-              </td>
+              applied ? (
+                <td class={`py-1.5 pr-4 ${o.kill_err ? "maintenance-error text-app-danger" : ""}`}>
+                  {o.kill_err || "killed"}
+                </td>
+              ) : (
+                <td class={`py-1.5 pr-4 ${!orphanIsEligible(o) ? "maintenance-error text-app-danger" : ""}`}>
+                  {orphanVerdictLabel(o)}
+                </td>
+              )
             )}
           </tr>
         ))}

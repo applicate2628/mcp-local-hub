@@ -171,6 +171,45 @@ describe("SectionMaintenance — kill_err visibility on apply (Cloud bot P2 on 7
     expect(killedCells.length).toBe(1);
   });
 
+  it("preview shows per-row reap_verdict and Clean counts only eligible rows (bot PR #520 P2)", async () => {
+    vi.spyOn(api, "cleanupOrphans").mockImplementation(async () => ({
+      orphans: [
+        { pid: 1234, parent_pid: 1, server: "fs", cmdline_display: "uvx",
+          age_sec: 700, ram_bytes: 1024 * 1024, reap_verdict: "reap-eligible" },
+        { pid: 5678, parent_pid: 1, server: "weather", cmdline_display: "uvx",
+          age_sec: 120, ram_bytes: 2 * 1024 * 1024, reap_verdict: "spared-below-kill-age-floor" },
+        { pid: 9999, parent_pid: 1, server: "memory", cmdline_display: "uvx",
+          age_sec: 800, ram_bytes: 1024 * 1024, reap_verdict: "spared-config-referenced" },
+      ],
+      killed: 0,
+      skipped: 0,
+    }));
+
+    const { container } = render(<SectionMaintenance />);
+    const card = container.querySelector('[data-card="orphan-mcp-servers"]')!;
+
+    fireEvent.click(cardActionButton(card));
+    await waitFor(() => expect(card.querySelector("table")).toBeTruthy());
+
+    // Preview now HAS a Result column because rows carry reap_verdict...
+    const headers = Array.from(card.querySelectorAll("th")).map((h) => h.textContent);
+    expect(headers).toContain("Result");
+
+    // ...and NO row renders a false "killed" during a preview (the PR #520 P1 bug).
+    const killedInPreview = Array.from(card.querySelectorAll("td")).filter((td) => td.textContent === "killed");
+    expect(killedInPreview.length).toBe(0);
+
+    // Eligible row shows "will clean"; each spared row shows its skip reason.
+    const cellTexts = Array.from(card.querySelectorAll("td")).map((td) => td.textContent ?? "");
+    expect(cellTexts).toContain("will clean");
+    expect(cellTexts.some((t) => t.startsWith("skip: below the kill-age floor"))).toBe(true);
+    expect(cellTexts.some((t) => t.startsWith("skip: still referenced"))).toBe(true);
+
+    // Clean button counts ONLY the 1 eligible row, not all 3 previewed.
+    const cleanBtn = card.querySelector('[data-testid="orphan-mcp-clean-button"]')!;
+    expect(cleanBtn.textContent).toMatch(/Clean \(1\)/);
+  });
+
   it("does NOT render Result column when no row has kill_err (e.g. all-clean apply)", async () => {
     vi.spyOn(api, "cleanupOrphans").mockImplementation(async () => ({
       orphans: [

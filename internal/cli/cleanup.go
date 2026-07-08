@@ -89,16 +89,27 @@ See also: stop, restart, status, language-server cleanup.`,
 				return nil
 			}
 			totalRAM := uint64(0)
+			eligible := 0
 			for _, o := range orphans {
 				totalRAM += o.RAMBytes
-				fmt.Fprintf(cmd.OutOrStdout(), "  PID %-6d  server=%-18s  RAM=%-6.0f MB  age=%-6ds  %s\n",
+				if api.ReapVerdictIsEligible(o.ReapVerdict) {
+					eligible++
+				}
+				// Show the per-row verdict so a dry-run reveals which candidates are
+				// already SPARED (config-referenced, too new, degraded scan) and WHY,
+				// instead of implying every listed row will be killed (bot PR #520 P2).
+				verdictCol := ""
+				if label := api.ReapVerdictLabel(o.ReapVerdict); label != "" {
+					verdictCol = "  [" + label + "]"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "  PID %-6d  server=%-18s  RAM=%-6.0f MB  age=%-6ds  %s%s\n",
 					o.PID, o.Server, float64(o.RAMBytes)/(1024*1024), o.AgeSec,
-					truncate(o.Cmdline, 80))
+					truncate(o.Cmdline, 80), verdictCol)
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "\n%d orphans · %.0f MB total\n",
-				len(orphans), float64(totalRAM)/(1024*1024))
+			fmt.Fprintf(cmd.OutOrStdout(), "\n%d orphans (%d will clean) · %.0f MB total\n",
+				len(orphans), eligible, float64(totalRAM)/(1024*1024))
 			if dryRun {
-				fmt.Fprintln(cmd.OutOrStdout(), "(dry-run — no processes killed. Re-run with --confirm to kill.)")
+				fmt.Fprintln(cmd.OutOrStdout(), "(dry-run — no processes killed. Re-run with --confirm to kill the 'will clean' rows.)")
 				return nil
 			}
 			killed, skipped := 0, 0

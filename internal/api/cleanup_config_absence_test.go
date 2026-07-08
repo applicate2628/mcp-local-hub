@@ -294,3 +294,34 @@ func TestManifestNominationPreservesRealSelfNamedPattern(t *testing.T) {
 		t.Errorf("broad launcher token must be dropped from nomination; got %v", got)
 	}
 }
+
+// TestReapVerdictLabelAndEligibility pins the CLI/GUI preview mapping (bot PR #520 P2):
+// a reap-eligible (or empty/aggressive) verdict is "will clean"/eligible; every spared
+// verdict maps to a distinct "skip: ..." label and is NOT eligible.
+func TestReapVerdictLabelAndEligibility(t *testing.T) {
+	cases := []struct {
+		verdict      string
+		wantEligible bool
+		labelPrefix  string // "" means the label must be empty
+	}{
+		{ReapVerdictReapEligible, true, "will clean"},
+		{"", true, ""}, // aggressive row / older wire → eligible, no label
+		{ReapVerdictSparedConfigReferenced, false, "skip:"},
+		{ReapVerdictSparedConfigScanDegraded, false, "skip:"},
+		{ReapVerdictSparedSnapshotDegraded, false, "skip:"},
+		{ReapVerdictSparedBelowKillAgeFloor, false, "skip:"},
+	}
+	for _, tc := range cases {
+		if got := ReapVerdictIsEligible(tc.verdict); got != tc.wantEligible {
+			t.Errorf("ReapVerdictIsEligible(%q) = %v, want %v", tc.verdict, got, tc.wantEligible)
+		}
+		label := ReapVerdictLabel(tc.verdict)
+		if tc.labelPrefix == "" {
+			if label != "" {
+				t.Errorf("ReapVerdictLabel(%q) = %q, want empty", tc.verdict, label)
+			}
+		} else if !strings.HasPrefix(label, tc.labelPrefix) {
+			t.Errorf("ReapVerdictLabel(%q) = %q, want prefix %q", tc.verdict, label, tc.labelPrefix)
+		}
+	}
+}

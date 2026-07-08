@@ -707,7 +707,14 @@ func scanClientConfigsFailClosedImpl() (patterns []string, degradedClients []str
 		seen[p] = true
 		patterns = append(patterns, p)
 	}
-	for _, c := range clients.AllClients() {
+	clientsMap, factoryFailed := clients.AllClientsWithErrors()
+	// A client whose factory could not even be constructed (UserHomeDir /
+	// config-path resolution failure) is DEGRADED, not absent: the scan cannot
+	// determine where its config lives, so it cannot prove a candidate's signature
+	// is absent from it. Fail closed (bot PR #520 P2). clients.AllClients() drops
+	// these silently, which would let the gate fail open.
+	degradedClients = append(degradedClients, factoryFailed...)
+	for _, c := range clientsMap {
 		if !c.Exists() {
 			// Exists()==false conflates "genuinely absent" with "stat errored":
 			// adapters implement Exists as os.Stat(path)==nil, so an unreadable
@@ -1065,6 +1072,38 @@ func classifyReapVerdict(o OrphanProcess, cfgPatterns, degradedClients []string,
 	default:
 		return ReapVerdictReapEligible, ""
 	}
+}
+
+// ReapVerdictLabel maps a ReapVerdict* value to a short, human, path-free PREVIEW
+// label for CLI / GUI display, so a dry-run surfaces per-row whether a candidate
+// will be cleaned or is already spared and WHY — instead of the operator learning
+// it only after Apply (bot PR #520 P2). An empty or unknown verdict (an older wire,
+// or an AggressiveCleanup row that never ran the config-absence gate) returns "" so
+// the caller keeps its default rendering. ReapVerdictIsEligible is the matching
+// predicate for "will this row actually be cleaned" preview counts.
+func ReapVerdictLabel(v string) string {
+	switch v {
+	case ReapVerdictReapEligible:
+		return "will clean"
+	case ReapVerdictSparedConfigReferenced:
+		return "skip: still referenced by a client config"
+	case ReapVerdictSparedConfigScanDegraded:
+		return "skip: a client config was unreadable this run"
+	case ReapVerdictSparedSnapshotDegraded:
+		return "skip: process snapshot was truncated this run"
+	case ReapVerdictSparedBelowKillAgeFloor:
+		return "skip: below the kill-age floor"
+	default:
+		return ""
+	}
+}
+
+// ReapVerdictIsEligible reports whether a row will actually be cleaned on Apply.
+// An empty verdict (older wire, or an AggressiveCleanup row that never ran the
+// config-absence gate) counts as eligible — those paths kill every listed row —
+// so a preview "N will clean" count matches what Apply does.
+func ReapVerdictIsEligible(v string) bool {
+	return v == "" || v == ReapVerdictReapEligible
 }
 
 // manifestNominationPatterns flattens the per-server manifest patterns into the flat

@@ -173,6 +173,16 @@ export type OrphanProcess = {
   ram_bytes: number;
   kill_err?: string;
   /**
+   * reap_verdict is the config-absence-gate verdict for a DEFAULT-sweep row
+   * (POST /api/cleanup/orphans): "reap-eligible" (will be cleaned on Apply),
+   * or a "spared-*" reason (config-referenced / below-kill-age-floor /
+   * snapshot-degraded / config-scan-degraded). Empty for an aggressive-sweep
+   * row (never runs the gate) or an older wire. The Preview table renders it
+   * so the operator sees which rows are SPARED and why BEFORE clicking Clean,
+   * and the Clean count excludes spared rows (bot PR #520 P2).
+   */
+  reap_verdict?: string;
+  /**
    * match_source explains why an AGGRESSIVE candidate was included: the
    * ancestor basename that anchored the scope (e.g. "codex") for a
    * --client run, or "root-pid <pid>" for a --root-pid run. Empty for
