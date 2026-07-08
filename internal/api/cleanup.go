@@ -1328,10 +1328,31 @@ func parseOrphans(r io.Reader, patterns []string) ([]OrphanProcess, error) {
 		// breaking the user's live agent session. The walk treats
 		// any ancestor at a recognized client basename as proof the
 		// stdio child is LIVE-managed, not an orphan.
+		// Ancestor walk with a 3-state verdict (bug 2026-07-08 walk-fail-closed): the
+		// candidate is a PROTECTED descendant (ourDescendant), a GENUINE orphan (walk
+		// resolved to a dead parent or a real root with no protected ancestor), or the
+		// classification is UNCERTAIN (spareUncertain) — in which case it fails CLOSED
+		// (spared), because on the unattended 5-min apply:true ticker a wrong "orphan"
+		// verdict force-kills a live process.
 		ourDescendant := false
-		for cur, depth := r.ppid, 0; depth < 16; depth++ {
+		spareUncertain := false
+		cur, depth := r.ppid, 0
+		for ; depth < 16; depth++ {
 			parent, ok := byPID[cur]
 			if !ok {
+				// The parent PID is absent from this census. That is the signature of a
+				// REAL orphan (dead parent) — but ALSO of a dropped / malformed snapshot
+				// row whose still-LIVE process (a mcphub daemon or a client) would
+				// otherwise protect this child. Probe the missing PID directly: if it is
+				// still alive, the census merely lost its row and we CANNOT prove this
+				// child is orphaned → spare (fail closed). If it is genuinely gone, this
+				// is a true orphan and the walk correctly ends. A bare "byPID-miss →
+				// spare" would inert the reaper (a dead-parent miss is the NORMAL
+				// real-orphan case), so the liveness probe is what distinguishes them.
+				// Case A. Injectable via orphanParentAliveFn for deterministic tests.
+				if orphanParentAliveFn(cur) {
+					spareUncertain = true
+				}
 				break
 			}
 			pcmd := parent.cmdline
@@ -1345,12 +1366,19 @@ func parseOrphans(r io.Reader, patterns []string) ([]OrphanProcess, error) {
 				break
 			}
 			if parent.ppid == 0 || parent.ppid == cur {
-				break // reached the root or a self-loop
+				break // reached a genuine root or a self-loop — ancestry resolved
 			}
 			cur = parent.ppid
 		}
-		if ourDescendant {
-			continue // NOT orphan — descendant of our daemon or a live client
+		// Depth cap exhausted WITHOUT resolving to a protected ancestor or a genuine root:
+		// an abnormally deep live chain (a real orphan resolves via a dead-parent miss or
+		// ppid==0 within a few levels; 16 present live ancestors is exactly a deep live
+		// tree we want to spare). Classification is unreliable → fail closed. Case B.
+		if depth == 16 && !ourDescendant {
+			spareUncertain = true
+		}
+		if ourDescendant || spareUncertain {
+			continue // NOT reaped: protected descendant, or ancestry unprovable (fail closed)
 		}
 		age := int64(0)
 		if !r.created.IsZero() {
@@ -1635,6 +1663,16 @@ func filterToExpectedIdentities(candidates []OrphanProcess, expect []ProcIdentit
 // unsupported), so this compiles cross-platform even though CleanupOrphans and
 // AggressiveCleanup only reach the kill path on Windows.
 var orphanTerminateFn = process.TerminatePIDWithIdentity
+
+// orphanParentAliveFn probes whether a PID that is ABSENT from the process census is
+// nonetheless still alive — the parseOrphans ancestor walk uses it to distinguish a real
+// orphan (dead parent → the missing PID is genuinely gone) from a dropped/malformed
+// census row (the parent is alive, our snapshot just lost it → the child must be spared,
+// fail closed). process.IsPidAlive opens the PID for SYNCHRONIZE and checks it has not
+// signaled, returning false for a dead/invalid PID on every platform. Injectable so the
+// parseOrphans fixture tests stay deterministic instead of probing whatever real PID a
+// fixture happens to name (bug 2026-07-08 walk-fail-closed Case A).
+var orphanParentAliveFn = process.IsPidAlive
 
 const cleanupIdentityStartTolerance = 500 * time.Millisecond
 

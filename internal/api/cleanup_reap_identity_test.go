@@ -90,6 +90,7 @@ func TestParseOrphans_CapturesIdentityProof(t *testing.T) {
 		`HOST,"C:\Windows\explorer.exe",` + created + `,C:\Windows\explorer.exe,1,4000,10000000` + "\n" +
 		`HOST,"node.exe c:\path\to\wolfram-server.js",` + created + `,` + exe + `,4000,5000,80000000` + "\n"
 
+	swapOrphanParentAlive(t, func(int) bool { return false }) // deterministic: absent parent = dead = real orphan
 	orphans, _ := parseOrphans(strings.NewReader(csv), []string{"wolfram-server"})
 	if len(orphans) != 1 {
 		t.Fatalf("expected exactly 1 orphan (PID 5000), got %d: %+v", len(orphans), orphans)
