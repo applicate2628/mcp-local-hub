@@ -90,6 +90,29 @@ func TestGeminiCLI_GetEntry_ReadsUrlField(t *testing.T) {
 	}
 }
 
+func TestGeminiCLI_GetEntry_MapsDisabledFlag(t *testing.T) {
+	g := newGeminiForTest(t, `{
+  "mcpServers": {
+    "serena": {
+      "url": "http://localhost:9123/mcp",
+      "type": "http",
+      "timeout": 10000,
+      "disabled": true
+    }
+  }
+}`)
+	e, err := g.GetEntry("serena")
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if e == nil {
+		t.Fatal("GetEntry returned nil")
+	}
+	if !e.Disabled {
+		t.Fatalf("Disabled = false, want true for disabled:true entry")
+	}
+}
+
 // TestGeminiCLI_RemoveEntry_Inherited confirms RemoveEntry (promoted from
 // jsonMCPClient) still works through the embedded struct.
 func TestGeminiCLI_RemoveEntry_Inherited(t *testing.T) {

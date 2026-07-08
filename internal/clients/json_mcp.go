@@ -152,7 +152,7 @@ func (j *jsonMCPClient) GetEntry(name string) (*MCPEntry, error) {
 		return nil, nil
 	}
 	url, _ := raw[j.urlField].(string)
-	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers")}, nil
+	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers"), Disabled: mcpEntryDisabled(raw)}, nil
 }
 
 // LatestBackupPath delegates to the shared helper.

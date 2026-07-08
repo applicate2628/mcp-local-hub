@@ -289,7 +289,7 @@ What setup does:
      (does NOT modify rc files automatically)
   4. Verifies the watchdog state directory is reachable (plan §16);
      fails with exit 8 if not.
-  5. Attempts to ensure every present MCP client has mcp-language-server-<lang>
+  5. Attempts to ensure every eligible present MCP client has mcp-language-server-<lang>
      entries pointing at the GUI LSP router URL
      http://localhost:<gui_server.port>/lsp/<lang>/mcp, migrating old
      per-project LSP proxy URLs after timestamped backups. Failures are
@@ -536,6 +536,14 @@ func runSetupLSPClientRouter(out io.Writer, rollback bool) error {
 	if rollback {
 		action = "rollback"
 	}
+	printLSPClientRouterReport(out, report, action)
+	return err
+}
+
+func printLSPClientRouterReport(out io.Writer, report *api.LSPClientRouterReport, action string) {
+	if report == nil {
+		return
+	}
 	for _, backup := range report.Backups {
 		fmt.Fprintf(out, "✓ %s backup before LSP router %s: %s\n", backup.Client, action, backup.Path)
 	}
@@ -548,11 +556,13 @@ func runSetupLSPClientRouter(out io.Writer, rollback bool) error {
 	for _, restored := range report.Restored {
 		fmt.Fprintf(out, "✓ restored %s entry %s\n", restored.Client, restored.EntryName)
 	}
+	for _, skipped := range report.Skipped {
+		fmt.Fprintf(out, "skipped foreign LSP-like entry %s for %s\n", skipped.EntryName, skipped.Client)
+	}
 	for _, failed := range report.Failed {
 		fmt.Fprintf(out, "✗ %s %s entry %s failed during %s: %s\n",
 			failed.Client, failed.Language, failed.EntryName, failed.Op, failed.Err)
 	}
-	return err
 }
 
 // ---------------------------------------------------------------------------

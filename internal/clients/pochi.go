@@ -182,7 +182,7 @@ func (p *pochiClient) GetEntry(name string) (*MCPEntry, error) {
 	if !ok {
 		return nil, nil
 	}
-	e := &MCPEntry{Name: name}
+	e := &MCPEntry{Name: name, Disabled: mcpEntryDisabled(raw)}
 	if cmd, _ := raw["command"].(string); cmd != "" {
 		e.RelayExePath = cmd
 	}

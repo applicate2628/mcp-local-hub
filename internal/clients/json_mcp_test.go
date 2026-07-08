@@ -49,3 +49,24 @@ func TestJSONMCP_RemoveEntry_Idempotent(t *testing.T) {
 		t.Errorf("remove of nonexistent should be nil, got %v", err)
 	}
 }
+
+func TestJSONMCP_GetEntry_MapsDisabledFlag(t *testing.T) {
+	j := newJSONClientForTest(t, `{
+  "mcpServers": {
+    "serena": {
+      "httpUrl": "http://localhost:9123/mcp",
+      "disabled": true
+    }
+  }
+}`)
+	e, err := j.GetEntry("serena")
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if e == nil {
+		t.Fatal("GetEntry returned nil")
+	}
+	if !e.Disabled {
+		t.Fatalf("Disabled = false, want true for disabled:true entry")
+	}
+}

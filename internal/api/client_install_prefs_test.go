@@ -154,6 +154,64 @@ func TestSetDefaultInstallClientNames_RejectsUnknownAndEmpty(t *testing.T) {
 	}
 }
 
+func TestSetLSPRouterDisabledClients_RoundTripRejectsUnknownAndClears(t *testing.T) {
+	a := NewAPI()
+	path := tempPrefsPath(t)
+	if err := a.SettingsSetIn(path, "appearance.theme", "dark"); err != nil {
+		t.Fatalf("seed setting: %v", err)
+	}
+
+	if err := a.SetLSPRouterDisabledClientsIn(path, []string{" codex-cli ", "antigravity", "codex-cli", ""}); err != nil {
+		t.Fatalf("set disabled clients: %v", err)
+	}
+	raw, err := readRawSettingsMap(path)
+	if err != nil {
+		t.Fatalf("read raw settings: %v", err)
+	}
+	if raw["appearance.theme"] != "dark" {
+		t.Fatalf("appearance.theme = %q, want preserved dark", raw["appearance.theme"])
+	}
+	if raw[lspRouterDisabledClientsKey] != "codex-cli,antigravity" {
+		t.Fatalf("%s = %q, want codex-cli,antigravity", lspRouterDisabledClientsKey, raw[lspRouterDisabledClientsKey])
+	}
+	got, err := a.LSPRouterDisabledClientSetIn(path)
+	if err != nil {
+		t.Fatalf("read disabled set: %v", err)
+	}
+	if !got["codex-cli"] || !got["antigravity"] || len(got) != 2 {
+		t.Fatalf("disabled set = %v, want codex-cli + antigravity only", got)
+	}
+
+	if err := a.SetLSPRouterDisabledClientsIn(path, []string{"not-a-client"}); err == nil {
+		t.Fatal("expected unknown client error, got nil")
+	}
+	afterReject, err := readRawSettingsMap(path)
+	if err != nil {
+		t.Fatalf("read after reject: %v", err)
+	}
+	if afterReject[lspRouterDisabledClientsKey] != "codex-cli,antigravity" {
+		t.Fatalf("disabled key changed after rejected write: %q", afterReject[lspRouterDisabledClientsKey])
+	}
+
+	if err := a.SetLSPRouterDisabledClientsIn(path, []string{" ", ""}); err != nil {
+		t.Fatalf("clear disabled clients: %v", err)
+	}
+	cleared, err := a.LSPRouterDisabledClientSetIn(path)
+	if err != nil {
+		t.Fatalf("read cleared set: %v", err)
+	}
+	if len(cleared) != 0 {
+		t.Fatalf("disabled set after clear = %v, want empty", cleared)
+	}
+	rawCleared, err := readRawSettingsMap(path)
+	if err != nil {
+		t.Fatalf("read raw after clear: %v", err)
+	}
+	if _, ok := rawCleared[lspRouterDisabledClientsKey]; ok {
+		t.Fatalf("%s still present after clear: %q", lspRouterDisabledClientsKey, rawCleared[lspRouterDisabledClientsKey])
+	}
+}
+
 func TestDefaultInstallClientNames_StaleUnknownNameDropped(t *testing.T) {
 	a := NewAPI()
 	path := tempPrefsPath(t)

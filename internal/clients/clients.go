@@ -91,20 +91,22 @@ type MCPEntry struct {
 	// MiMoCode/OpenCode's `enabled:false`). It exists so a read-membership
 	// consumer can keep SEEING
 	// the entry (GetEntry returns a non-nil entry so discovery/idempotency/rollback
-	// callers behave) while a GATING consumer that asks "is this an ACTIVE entry
-	// the client actually loads" can exclude it. The only gating consumer today is
-	// api.GatedOnClients (the `mcphub gui --reset-port` footgun guard): a DISABLED
-	// `mcphub-hub` aggregate must NOT count as gate-on, because the client never
-	// loads it, so resetting the hub port would orphan nothing — blocking the
-	// reset on a disabled aggregate is a false positive (bot PR #420 finding 5).
+	// callers behave) while GATING consumers that ask "is this an ACTIVE entry
+	// the client actually loads" can exclude it. api.GatedOnClients uses this for
+	// the `mcphub gui --reset-port` footgun guard: a DISABLED `mcphub-hub`
+	// aggregate must NOT count as gate-on, because the client never loads it, so
+	// resetting the hub port would orphan nothing — blocking the reset on a
+	// disabled aggregate is a false positive (bot PR #420 finding 5). The LSP
+	// router's opt-in evidence gate also uses this flag so disabled hub entries do
+	// not cause setup to add active router entries for an otherwise opt-in client.
 	// This mirrors the scan paths' shapeMimoCodeEntry/shapeOpenCodeEntry, which
 	// classify an enabled:false entry as Transport "absent" (absent for gating).
 	//
 	// CONTRACT: Disabled is ADDITIVE and defaults FALSE = "active / loaded" — the
 	// historical behavior of EVERY adapter. Only MiMoCode/OpenCode GetEntry sets
 	// it true (for an enabled:false projected entry); every other adapter leaves
-	// it zero, so their gating behavior is byte-unchanged. GatedOnClients is the
-	// ONLY consumer; every other GetEntry caller ignores it.
+	// it zero, so their gating behavior is byte-unchanged. Non-gating GetEntry
+	// callers ignore it.
 	Disabled bool
 }
 
@@ -1421,4 +1423,20 @@ func extractHeaders(raw map[string]any, field string) map[string]string {
 		return nil
 	}
 	return hdrs
+}
+
+// mcpEntryDisabled reports whether a parsed client entry is configured but
+// inactive. Most JSON-family clients use disabled:true; OpenCode/MiMoCode-style
+// clients use enabled:false. Missing flags preserve the historical active
+// default.
+func mcpEntryDisabled(raw map[string]any) bool {
+	if disabled, ok := raw["disabled"].(bool); ok && disabled {
+		return true
+	}
+	if enabled, present := raw["enabled"]; present {
+		if b, ok := enabled.(bool); ok && !b {
+			return true
+		}
+	}
+	return false
 }

@@ -36,10 +36,19 @@ import (
 	"mcp-local-hub/internal/clients"
 )
 
-// defaultInstallClientsKey is the gui-preferences.yaml key under which the
-// operator's chosen default-install client set is stored as a
-// comma-separated scalar string. Absent ⇒ compile-time default trio.
-const defaultInstallClientsKey = "clients.default_install"
+const (
+	// defaultInstallClientsKey is the gui-preferences.yaml key under which the
+	// operator's chosen default-install client set is stored as a
+	// comma-separated scalar string. Absent ⇒ compile-time default trio.
+	defaultInstallClientsKey = "clients.default_install"
+
+	// lspRouterDisabledClientsKey is a narrow LSP-router opt-out list, not an
+	// install target set. Absent/blank means it contributes no explicit opt-out
+	// to EnsureLSPRouterClientEntries' effective-enable rule; a listed client is
+	// skipped by future ensure runs, and RollbackLSPRouterClientEntriesForClient
+	// remains the explicit removal path for any existing router entries.
+	lspRouterDisabledClientsKey = "clients.lsp_router_disabled"
+)
 
 // DefaultInstallClientNamesOverride returns the persisted operator override
 // for the default-install client set, or nil when no override is configured.
@@ -99,6 +108,51 @@ func (a *API) DefaultInstallClientNamesEffectiveIn(path string) ([]string, error
 	return clients.DefaultInstallClientNames(), nil
 }
 
+// ClientInstallEnabledSet returns the effective operator-managed client set as
+// a lookup map. An absent override falls back to clients.DefaultInstallClientNames().
+func (a *API) ClientInstallEnabledSet() (map[string]bool, error) {
+	return a.ClientInstallEnabledSetIn(SettingsPath())
+}
+
+// ClientInstallEnabledSetIn is the tempdir-capable form.
+func (a *API) ClientInstallEnabledSetIn(path string) (map[string]bool, error) {
+	names, err := a.DefaultInstallClientNamesEffectiveIn(path)
+	if err != nil {
+		return nil, err
+	}
+	enabled := make(map[string]bool, len(names))
+	for _, name := range names {
+		enabled[name] = true
+	}
+	return enabled, nil
+}
+
+// LSPRouterDisabledClientSet returns the explicit per-client LSP-router
+// opt-out set. This is intentionally separate from clients.default_install:
+// the default-install preference controls only installs that omit an explicit
+// client target, while this list means "do not auto-maintain LSP router entries
+// for this present client." Absent/blank/unknown-only config returns an empty
+// set; the effective setup-write rule lives in EnsureLSPRouterClientEntries.
+func (a *API) LSPRouterDisabledClientSet() (map[string]bool, error) {
+	return a.LSPRouterDisabledClientSetIn(SettingsPath())
+}
+
+// LSPRouterDisabledClientSetIn is the tempdir-capable form.
+func (a *API) LSPRouterDisabledClientSetIn(path string) (map[string]bool, error) {
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	raw, err := readRawSettingsMap(path)
+	if err != nil {
+		return nil, err
+	}
+	names := sanitizeClientNames(splitClientCSV(raw[lspRouterDisabledClientsKey]))
+	disabled := make(map[string]bool, len(names))
+	for _, name := range names {
+		disabled[name] = true
+	}
+	return disabled, nil
+}
+
 // SetDefaultInstallClientNames persists the operator's chosen default-install
 // client set to gui-preferences.yaml. Every name must be a supported client
 // (validated against clients.SupportedClientNames()); an unknown name is a
@@ -116,8 +170,50 @@ func (a *API) SetDefaultInstallClientNames(names []string) error {
 // SettingsSetIn, so the override coexists with every other key across
 // goroutines and sibling processes.
 func (a *API) SetDefaultInstallClientNamesIn(path string, names []string) error {
+	cleaned, err := validateSupportedClientNames(names)
+	if err != nil {
+		return err
+	}
+	if len(cleaned) == 0 {
+		return fmt.Errorf("default-install client set must name at least one supported client")
+	}
+
+	return mutateRawSettingsMapLocked(path, func(raw map[string]string) error {
+		raw[defaultInstallClientsKey] = strings.Join(cleaned, ",")
+		return nil
+	})
+}
+
+// SetLSPRouterDisabledClients persists the explicit per-client LSP-router
+// opt-out set. Every non-blank name must be a supported client id; duplicates
+// are dropped, preserving first-seen order. An empty cleaned set clears the
+// key so future setup runs treat every present client as eligible again.
+func (a *API) SetLSPRouterDisabledClients(names []string) error {
+	return a.SetLSPRouterDisabledClientsIn(SettingsPath(), names)
+}
+
+// SetLSPRouterDisabledClientsIn is the tempdir-capable form. It uses the
+// shared gui-preferences.yaml read-modify-write helper so this key is
+// serialized with every other settings writer.
+func (a *API) SetLSPRouterDisabledClientsIn(path string, names []string) error {
+	cleaned, err := validateSupportedClientNames(names)
+	if err != nil {
+		return err
+	}
+	return mutateRawSettingsMapLocked(path, func(raw map[string]string) error {
+		if len(cleaned) == 0 {
+			delete(raw, lspRouterDisabledClientsKey)
+			return nil
+		}
+		raw[lspRouterDisabledClientsKey] = strings.Join(cleaned, ",")
+		return nil
+	})
+}
+
+func validateSupportedClientNames(names []string) ([]string, error) {
+	supportedNames := clients.SupportedClientNames()
 	supported := map[string]bool{}
-	for _, n := range clients.SupportedClientNames() {
+	for _, n := range supportedNames {
 		supported[n] = true
 	}
 	cleaned := make([]string, 0, len(names))
@@ -128,7 +224,7 @@ func (a *API) SetDefaultInstallClientNamesIn(path string, names []string) error 
 			continue
 		}
 		if !supported[trimmed] {
-			return fmt.Errorf("unknown client %q (expected %s)", trimmed, strings.Join(clients.SupportedClientNames(), " | "))
+			return nil, fmt.Errorf("unknown client %q (expected %s)", trimmed, strings.Join(supportedNames, " | "))
 		}
 		if seen[trimmed] {
 			continue
@@ -136,14 +232,7 @@ func (a *API) SetDefaultInstallClientNamesIn(path string, names []string) error 
 		seen[trimmed] = true
 		cleaned = append(cleaned, trimmed)
 	}
-	if len(cleaned) == 0 {
-		return fmt.Errorf("default-install client set must name at least one supported client")
-	}
-
-	return mutateRawSettingsMapLocked(path, func(raw map[string]string) error {
-		raw[defaultInstallClientsKey] = strings.Join(cleaned, ",")
-		return nil
-	})
+	return cleaned, nil
 }
 
 // splitClientCSV splits a comma-separated scalar into trimmed, non-empty
