@@ -603,16 +603,20 @@ func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChangesDuringP
 		timeout: time.Second,
 	}
 
-	// The cold Get's own probe bumps the generation mid-flight: the join loop
-	// detects the mismatch after round 0 and runs ONE bounded re-probe, so the
-	// cold caller already receives the post-change map (marker 2, 2 calls).
-	if snap, err := c.Get(); err != nil || snap[9123] != 2 {
-		t.Fatalf("first Get = (%+v, %v), want joined re-probe marker 2", snap, err)
+	// The cold Get's own probe bumps the generation mid-flight. The wait is
+	// capped at ONE probe (3s+3s would exceed the 5s IPC deadline — Codex #514
+	// r3), so the cold caller receives the freshest COMPLETED result (marker 1)
+	// and a background re-probe is kicked for the next caller.
+	if snap, err := c.Get(); err != nil || snap[9123] != 1 {
+		t.Fatalf("first Get = (%+v, %v), want capped single-wait marker 1", snap, err)
 	}
 	// Still within the TTL (now unchanged): the first probe's mid-flight
 	// generation bump invalidates the cache stamped with the pre-probe
-	// generation, and any subsequent Get returns the settled FRESH result
-	// (generation staleness never serves the pre-change map).
+	// generation; the background re-probe settles the cache to the FRESH map,
+	// and a subsequent Get returns it (generation staleness never leaves the
+	// pre-change map in place).
+	waitForCoalescerCalls(t, &calls, 2)
+	waitForCoalescerSnapshotValue(t, c, 9123, 2)
 	snap, err := c.Get()
 	if err != nil {
 		t.Fatalf("post-mid-probe-generation-bump Get: %v", err)
@@ -621,7 +625,7 @@ func TestStatusPortOwnersCoalescerRefreshesWithinTTLWhenGenerationChangesDuringP
 		t.Fatalf("post-mid-probe-generation-bump snapshot = %+v, want FRESH marker 2", snap)
 	}
 	if got := atomic.LoadInt32(&calls); got != 2 {
-		t.Fatalf("snapshotFn calls = %d, want 2 (mid-probe generation bump forced a joined re-probe within TTL)", got)
+		t.Fatalf("snapshotFn calls = %d, want 2 (one joined + one background re-probe)", got)
 	}
 }
 

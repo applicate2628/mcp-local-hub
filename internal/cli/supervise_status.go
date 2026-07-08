@@ -116,19 +116,24 @@ func (c *statusPortOwnersCoalescer) Get() (map[int]int, error) {
 		return snapshot, err
 	}
 
-	// Cold cache or generation mismatch → join/start the single probe and
-	// return its result (bounded to two rounds; see doc comment).
-	for round := 0; ; round++ {
-		done := c.inflightDone
-		if !c.inflight {
-			done = c.startProbeLocked(c.currentGeneration())
-		}
-		c.mu.Unlock()
-		<-done
-		c.mu.Lock()
-		if round >= 1 || c.genAtProbe == c.currentGeneration() {
-			break
-		}
+	// Cold cache or generation mismatch → join/start the single probe and wait
+	// for it ONCE. The total wait is thereby capped at one probe
+	// (statusPortOwnersProbeTimeout, 3s) < the 5s status-IPC deadline — waiting
+	// a second round after a mid-probe fleet change could stack 3s+3s > 5s and
+	// re-open the exact timeout this path eliminates (Codex #514 r3). If the
+	// generation moved again WHILE the joined probe ran (rare: a respawn racing
+	// an already-slow probe), the freshest COMPLETED result is returned as-is
+	// (≤ one probe stale, self-correcting) and a background probe is kicked for
+	// the next caller.
+	done := c.inflightDone
+	if !c.inflight {
+		done = c.startProbeLocked(c.currentGeneration())
+	}
+	c.mu.Unlock()
+	<-done
+	c.mu.Lock()
+	if c.genAtProbe != c.currentGeneration() && !c.inflight {
+		c.startProbeLocked(c.currentGeneration())
 	}
 	snapshot, err := c.snapshot, c.err
 	c.mu.Unlock()
