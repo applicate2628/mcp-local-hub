@@ -28,6 +28,8 @@
 package cli
 
 import (
+	"bufio"
+	"encoding/json"
 	"errors"
 	"net"
 	"os"
@@ -39,6 +41,8 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+
+	"github.com/gofrs/flock"
 )
 
 // readSupervisorEventsLog reads the JSONL events file at path; tests
@@ -176,6 +180,60 @@ func TestHandleIPCConnRefreshesIdleReadDeadline(t *testing.T) {
 		if remaining < 55*time.Second || remaining > ipcConnIdleTimeout+time.Second {
 			t.Fatalf("deadline[%d] remaining = %v, want near %v", i, remaining, ipcConnIdleTimeout)
 		}
+	}
+}
+
+func TestHandleIPCConnStatusDoesNotWaitForContendedAuditLog(t *testing.T) {
+	deps, _ := makeTestDeps(t)
+
+	lock := flock.New(filepath.Join(deps.stateDir, api.SupervisorEventLogFileLeaf) + ".lock")
+	if err := lock.Lock(); err != nil {
+		t.Fatalf("lock supervisor event log: %v", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	if err := api.WriteSupervisorIntent(filepath.Join(deps.stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	deps.runtimeTracker = NewDaemonRuntimeTracker()
+	var ready atomic.Bool
+	var loaded atomic.Bool
+	ready.Store(true)
+	loaded.Store(true)
+	deps.reconcileReady = &ready
+	deps.intentFilesLoaded = &loaded
+	var graceful gracefulCounter
+	deps.gracefulInProgress = &graceful
+
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	done := make(chan struct{})
+	go func() {
+		handleIPCConn(serverConn, deps)
+		close(done)
+	}()
+
+	if _, err := clientConn.Write([]byte(`{"version":1,"id":99,"cmd":"status"}` + "\n")); err != nil {
+		t.Fatalf("write status request: %v", err)
+	}
+	_ = clientConn.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	line, err := bufio.NewReader(clientConn).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read status response while audit log is contended: %v", err)
+	}
+	var resp api.IPCResponse
+	if err := json.Unmarshal([]byte(line), &resp); err != nil {
+		t.Fatalf("decode response %q: %v", line, err)
+	}
+	if !resp.OK || resp.Error != nil || resp.ID != 99 {
+		t.Fatalf("status response = %+v, want OK id=99", resp)
+	}
+
+	_ = clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleIPCConn did not exit after client close")
 	}
 }
 

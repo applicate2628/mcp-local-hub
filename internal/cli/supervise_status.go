@@ -36,9 +36,8 @@ var loopbackPortOwnersSnapshotFn = api.LoopbackPortOwnersSnapshot
 
 // statusPortOwnersTTL bounds how often the supervisor status handler takes a
 // fresh netstat snapshot. Concurrent AND rapid status IPC calls within the TTL
-// share ONE snapshot: the mutex held across the (ctx-bounded) netstat IS the
-// singleflight for this single-key cache -- concurrent misses serialize and the
-// later waiter finds a fresh value on lock acquire.
+// share ONE snapshot. Stale warm-cache callers kick at most one background
+// refresh and keep serving the cached result instead of stacking behind netstat.
 const statusPortOwnersTTL = 1 * time.Second
 
 // statusPortOwnersProbeTimeout caps a single netstat snapshot. On a host whose
@@ -54,15 +53,17 @@ const statusPortOwnersProbeTimeout = 3 * time.Second
 // caches BOTH the snapshot AND the error for the TTL so a persistently-failing
 // netstat is rate-limited to one probe/TTL instead of storming.
 type statusPortOwnersCoalescer struct {
-	mu         sync.Mutex
-	takenAt    time.Time
-	genAtProbe uint64
-	snapshot   map[int]int
-	err        error
-	snapshotFn func(context.Context) (map[int]int, error) // seam; default api.LoopbackPortOwnersSnapshotContext
-	genFn      func() uint64                              // seam; default DaemonRuntimeTracker.Generation
-	nowFn      func() time.Time                           // seam; default time.Now
-	timeout    time.Duration                              // default statusPortOwnersProbeTimeout
+	mu           sync.Mutex
+	takenAt      time.Time
+	genAtProbe   uint64
+	snapshot     map[int]int
+	err          error
+	inflight     bool
+	inflightDone chan struct{}
+	snapshotFn   func(context.Context) (map[int]int, error) // seam; default api.LoopbackPortOwnersSnapshotContext
+	genFn        func() uint64                              // seam; default DaemonRuntimeTracker.Generation
+	nowFn        func() time.Time                           // seam; default time.Now
+	timeout      time.Duration                              // default statusPortOwnersProbeTimeout
 }
 
 func newStatusPortOwnersCoalescer(tracker *DaemonRuntimeTracker) *statusPortOwnersCoalescer {
@@ -78,24 +79,92 @@ func newStatusPortOwnersCoalescer(tracker *DaemonRuntimeTracker) *statusPortOwne
 	}
 }
 
-// Get returns the coalesced port-owner snapshot. Within statusPortOwnersTTL it
-// returns the cached (snapshot, err); otherwise it takes ONE fresh ctx-bounded
-// snapshot under the lock and caches both. Holding mu across the netstat is the
-// singleflight.
+// Get returns the coalesced port-owner snapshot. Within statusPortOwnersTTL
+// (and an unchanged fleet generation) it returns the cached (snapshot, err).
+// A warm cache that is only TTL-stale serves the stale result immediately
+// while ONE background probe refreshes it for later callers — freshness there
+// is a perf concern only, the fleet has not changed. A cold cache OR a fleet
+// GENERATION change (a daemon respawned/exited since the cached probe) JOINS
+// the single in-flight probe instead: a just-respawned daemon must never be
+// classified against the pre-change owner map (read-your-writes — Codex #514
+// r2; serving stale there reported a healthy fresh PID as Restarting/stale_pid
+// until the async refresh landed). The join is bounded: each probe is
+// ctx-limited to statusPortOwnersProbeTimeout (3s) < the 5s status-IPC budget,
+// only fleet-change-adjacent calls pay it, and at most two rounds are waited
+// (a respawn landing mid-probe triggers one fresh probe; after that the
+// freshest cache is served — the documented self-correcting degraded mode —
+// rather than risking unbounded waiting).
 func (c *statusPortOwnersCoalescer) Get() (map[int]int, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	now := c.nowFn()
 	gen := c.currentGeneration()
+
+	c.mu.Lock()
 	if !c.takenAt.IsZero() && now.Sub(c.takenAt) < statusPortOwnersTTL && gen == c.genAtProbe {
-		return c.snapshot, c.err
+		snapshot, err := c.snapshot, c.err
+		c.mu.Unlock()
+		return snapshot, err
 	}
+
+	// Warm cache, unchanged fleet, TTL-stale only → serve stale now, refresh
+	// in the background.
+	if !c.takenAt.IsZero() && gen == c.genAtProbe {
+		if !c.inflight {
+			c.startProbeLocked(gen)
+		}
+		snapshot, err := c.snapshot, c.err
+		c.mu.Unlock()
+		return snapshot, err
+	}
+
+	// Cold cache or generation mismatch → join/start the single probe and wait
+	// for it ONCE. The total wait is thereby capped at one probe
+	// (statusPortOwnersProbeTimeout, 3s) < the 5s status-IPC deadline — waiting
+	// a second round after a mid-probe fleet change could stack 3s+3s > 5s and
+	// re-open the exact timeout this path eliminates (Codex #514 r3). If the
+	// generation moved again WHILE the joined probe ran (rare: a respawn racing
+	// an already-slow probe), the freshest COMPLETED result is returned as-is
+	// (≤ one probe stale, self-correcting) and a background probe is kicked for
+	// the next caller.
+	done := c.inflightDone
+	if !c.inflight {
+		done = c.startProbeLocked(c.currentGeneration())
+	}
+	c.mu.Unlock()
+	<-done
+	c.mu.Lock()
+	if c.genAtProbe != c.currentGeneration() && !c.inflight {
+		c.startProbeLocked(c.currentGeneration())
+	}
+	snapshot, err := c.snapshot, c.err
+	c.mu.Unlock()
+	return snapshot, err
+}
+
+func (c *statusPortOwnersCoalescer) startProbeLocked(gen uint64) chan struct{} {
+	done := make(chan struct{})
+	c.inflight = true
+	c.inflightDone = done
+	go c.runProbe(gen, done)
+	return done
+}
+
+func (c *statusPortOwnersCoalescer) runProbe(gen uint64, done chan struct{}) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
-	c.snapshot, c.err = c.snapshotFn(ctx)
-	c.takenAt = c.nowFn()
+	snapshot, err := c.snapshotFn(ctx)
+	takenAt := c.nowFn()
+
+	c.mu.Lock()
+	c.snapshot = snapshot
+	c.err = err
+	c.takenAt = takenAt
 	c.genAtProbe = gen
-	return c.snapshot, c.err
+	c.inflight = false
+	if c.inflightDone == done {
+		c.inflightDone = nil
+	}
+	c.mu.Unlock()
+	close(done)
 }
 
 func (c *statusPortOwnersCoalescer) currentGeneration() uint64 {
