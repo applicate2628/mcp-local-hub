@@ -1,10 +1,30 @@
 # status — adopt npx-stdio orphans into the hub (A2)
 
 Template: full-delivery (security-sensitive). Orchestrator: main conversation.
-State: PARTIALLY DELIVERED — adopt CLI/API + GUI surface SHIPPED + DEPLOYED;
-reaper (PR5) remains parked on the revised gate.
+State: PARTIALLY DELIVERED — adopt CLI/API + GUI surface + reaper (PR5) all
+SHIPPED + DEPLOYED; remaining = anti-drift GUI surface + phase-2 de-adopt (+ two
+tracked reaper-hardening bugs).
 
 ## Delivered (shipped to master + live-deployed)
+- **Auto-reaper hardening (A2 PR5, #520 → master c53d874a, deployed +
+  live-verified 2026-07-08):** the H5 config-absence reap-eligibility gate on the
+  shared `CleanupOrphans` (hardens the manual path AND the 5-min apply:true
+  auto-ticker at once) — config-referenced/degraded-scan/snapshot-degraded/
+  below-600s-age-floor SPARE, only config-absent aged residue reaps; snapshot
+  scanner-error fail-closed (default + aggressive paths); T3 bare-name demotion at
+  SOURCE (`patternsFromServerNominatable`, preserves real `mcp-language-server`);
+  Exists()/ConfigPath() stat-error → degraded; unconstructable client factory →
+  degraded (`AllClientsWithErrors`); config-reference case-fold + common-word
+  specificity denylist; per-row `ReapVerdict` audit surfaced in CLI + GUI preview
+  (no false "killed"; Clean counts only eligible); apply bound to the confirmed
+  `{pid, started_at}` IDENTITY set (architect verdict — the binding key equals the
+  key the kill primitive re-verifies, so a recycled PID cannot be killed
+  unacknowledged). Reviewed: architect design + security commission + a 3-lane
+  codex deep-security sweep + a cross-model adversarial-verify workflow + an
+  architect abstraction verdict; **5 bot rounds driven to FULL PASS** ("Didn't
+  find any major issues", reviewed commit == HEAD, zero inline). Deployed via the
+  cross-volume staged `install --upgrade`; fleet respawned healthy (serena×3 +
+  LSPs Running, 0 quarantined) + MCP routing live-verified.
 - **`mcphub adopt` CLI + `api.BuildAdoptPlan`/`ExecuteAdopt`** (earlier PR chain):
   extract → ManifestCreate → Install(merge), namespaced sanitized vault keys,
   9300-9399 port allocator, signature-matched multi-client repoint,
@@ -27,57 +47,21 @@ reaper (PR5) remains parked on the revised gate.
   identity-reverify (PEB-stdio-state optional fail-closed supplement).
 
 ## Remaining
-1. **PR5 — auto-reaper hardening — IN PROGRESS (config-absence gate + must-haves
-   implemented 2026-07-08; PR pending).** Design + security commissions run
-   (architect+fable+sonnet design; fable[$security-reviewer]+sonnet+codex review;
-   full synthesis in `pr5-design-synthesis.md` + session tasks). **Two factual
-   corrections to the H5 decision registered:** (a) the reaper is ALREADY
-   auto-running — `internal/cli/gui_cleanup_ticker.go` POSTs `{"apply":true}` to
-   `/api/cleanup/orphans` every 5 min (opt-out `MCPHUB_DISABLE_AUTO_CLEANUP`), so the
-   gate lands on the shared `CleanupOrphans` (hardens manual + ticker at once);
-   (b) T1 wording off — Antigravity/Cursor/Windsurf GLOBAL configs ARE scannable, so
-   config-absence covers them; the REAL residual (R1) is PROJECT-scoped configs +
-   unknown clients (unenumerable, silent gap). **Implemented (tested, all reviewers
-   confirm the gate is a STRICT SPARE-ADDER — kills a subset of the old set):**
-   config-absence gate (`scanClientConfigsFailClosed` + `candidateConfigReferenced` +
-   `applyReapEligibilityGate`; referenced→spare, exists-but-unparseable→spare-all
-   fail-closed, not-installed→skip); snapshot-truncation fail-closed (parseProcessRows
-   error → spare all, a dropped live-ancestor row can no longer mis-classify a live
-   child); T3 bare-name-fallback demotion (`manifestNominationPatterns` drops a
-   `[]string{serverName}` corrupt-manifest pattern so a bare word never nominates/kills
-   a bystander); 600s kill-age floor; `OrphanProcess.ReapVerdict` audit field;
-   AggressiveCleanup boundary preserved (still un-gated). **$security-reviewer (fable)
-   verdict = SHIP_WITH_FIXES; the two kill-hole must-haves (snapshot-fail-closed +
-   T3-demotion) are IN this PR.**
-
-   **PR5 round-2 (bot #520 + codex army + workflow — ALL fixed in this PR):**
-   - **T3 over-drop regression FIXED** (bot P2 #1 / codex B): `len(ps)==1 && ps[0]==name`
-     wrongly emptied the REAL `mcp-language-server` manifest. Moved the bare-name demotion
-     to its SOURCE — `patternsForServerNominatable` + `patternsFromManifestEx` (fallback
-     flag) return nil ONLY for a true synthesized fallback; a real self-named binary
-     survives. Scan process-count keeps the bare-name fallback (unchanged).
-   - **Reference-side short-token FIXED** (bot P2 #2): `argIsReferenceCandidate` (relaxed,
-     inclusive=true) keeps a short real token like `serena` on the config-REFERENCE side
-     (over-match only SPARES); nomination side stays strict.
-   - **Exists() stat-error → degraded FIXED** (bot P2 #3 / codex A P0#2): stat
-     `ConfigPath()` when `Exists()==false`; a non-IsNotExist error (ACCESS_DENIED) counts
-     as degraded, not absent.
-   - **Dry-run KillErr consent-surface P1 FIXED** (workflow sonnet+fable CONFIRMED):
-     stamping KillErr in dry-run made the GUI Preview render a reap-ELIGIBLE row (empty
-     kill_err) as a false "killed". `classifyReapVerdict` extracted; KillErr stamped ONLY
-     on apply; ReapVerdict is the dry-run-safe audit field.
-   - **Aggressive snapshot-scanner-error fail-closed FIXED** (codex A P2 / B MH1,
-     all-return-paths): `parseAggressiveCandidates` propagates the parseProcessRows error;
-     `AggressiveCleanup` refuses APPLY kills on a truncated census.
-
-   **Deferred to a coherent tracked bug** —
-   `work-items/bugs/2026-07-08-cleanup-ancestor-walk-fails-open-on-uncertainty.md`
-   (PRE-EXISTING walk fail-opens, NOT introduced by #520; one refactor, not two touches):
-   - Case A (codex A P0): byPID-miss can't tell dead-parent orphan from dropped-live-row →
-     needs a `process.IsPidAlive` parent-probe with an injectable seam (a blunt spare would
-     inert the reaper — byPID-miss is ALSO the normal real-orphan signature).
-   - Case B (codex A P1): depth-16 exhaustion falls through to orphan → spare-on-exhaustion.
-   - CLI aggressive `ExpectPIDs==nil` validated-set-binding gap (codex A P2 secondary).
+1. **PR5 — auto-reaper hardening — DELIVERED (#520 → master c53d874a, deployed +
+   live-verified 2026-07-08).** See the Delivered section above for the full scope +
+   review record. **Two reaper-hardening bugs tracked as follow-ups (NOT regressions
+   of #520 — pre-existing gaps #520 improved around):**
+   - `work-items/bugs/2026-07-08-cleanup-ancestor-walk-fails-open-on-uncertainty.md`
+     (**P0** kill-authority): the 16-deep ancestor walk fails OPEN on classification
+     uncertainty — byPID-miss can't tell a dead-parent orphan from a dropped-live-row
+     (needs a `process.IsPidAlive` parent-probe with an injectable seam — a blunt spare
+     would inert the reaper since byPID-miss is ALSO the normal real-orphan signature),
+     and depth-16 exhaustion falls through to orphan (spare-on-exhaustion). One coherent
+     3-state-verdict walk refactor; also folds the CLI aggressive `ExpectPIDs==nil` gap.
+   - `work-items/bugs/2026-07-08-aggressive-cleanup-token-omits-started-at.md` (low):
+     AggressiveCleanup's confirm token hashes {pid, basename, match_source} not
+     started_at + kill is PID-bound → shares the default reaper's (now-closed) PID-reuse
+     class; converge onto `filterToExpectedIdentities` server-side.
    - Still deferred per H5: per-candidate SupervisorEventLog audit, supervisor-state PID
      exclusion, ticker apply:false policy, knownClientLauncher 8→45, project-scoped-config
      enum (R1), PEB step-5.
