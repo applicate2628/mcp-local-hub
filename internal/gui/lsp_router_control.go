@@ -12,6 +12,7 @@ import (
 type lspRouterControlAPI interface {
 	DisableLSPRouterClient(string, api.LSPClientRouterOpts) (*api.LSPClientRouterReport, error)
 	EnableLSPRouterClient(string, api.LSPClientRouterOpts) (*api.LSPClientRouterReport, error)
+	LSPRouterClientStatuses(api.LSPClientRouterOpts) ([]api.LSPRouterClientStatus, error)
 }
 
 var lspRouterControlAPIFactory = func() lspRouterControlAPI { return api.NewAPI() }
@@ -26,9 +27,47 @@ type lspRouterControlResponse struct {
 	Report  *api.LSPClientRouterReport `json:"report"`
 }
 
+type lspRouterStatusResponse struct {
+	Clients []lspRouterClientStatusResponse `json:"clients"`
+}
+
+type lspRouterClientStatusResponse struct {
+	Client          string   `json:"client"`
+	ConfigPath      string   `json:"config_path"`
+	Disabled        bool     `json:"disabled"`
+	ExistingEntries []string `json:"existing_entries,omitempty"`
+	MissingEntries  []string `json:"missing_entries,omitempty"`
+}
+
 func registerLSPRouterControlRoutes(s *Server) {
+	s.mux.HandleFunc("/api/lsp-router/status", s.requireSameOrigin(s.lspRouterStatusHandler))
 	s.mux.HandleFunc("/api/lsp-router/disable", s.requireSameOrigin(s.lspRouterDisableHandler))
 	s.mux.HandleFunc("/api/lsp-router/enable", s.requireSameOrigin(s.lspRouterEnableHandler))
+}
+
+func (s *Server) lspRouterStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	a := lspRouterControlAPIFactory()
+	statuses, err := a.LSPRouterClientStatuses(api.LSPClientRouterOpts{GUIPort: s.Port()})
+	if err != nil {
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "LSP_ROUTER_STATUS_FAILED", "/api/lsp-router/status")
+		return
+	}
+	clients := make([]lspRouterClientStatusResponse, 0, len(statuses))
+	for _, status := range statuses {
+		clients = append(clients, lspRouterClientStatusResponse{
+			Client:          status.Client,
+			ConfigPath:      status.ConfigPath,
+			Disabled:        status.Disabled,
+			ExistingEntries: append([]string(nil), status.ExistingEntries...),
+			MissingEntries:  append([]string(nil), status.MissingEntries...),
+		})
+	}
+	writeJSON(w, http.StatusOK, lspRouterStatusResponse{Clients: clients})
 }
 
 func (s *Server) lspRouterDisableHandler(w http.ResponseWriter, r *http.Request) {

@@ -286,4 +286,92 @@ describe("collectLspRows", () => {
       );
     }
   });
+
+  // Codex PR #524 P2 (lsp-rows.ts:226): the backend's removable-name set
+  // (api.lspLegacyCandidateEntryNames) is NOT limited to registry
+  // client_entries values — for every workspace key it also generates
+  // `mcp-language-server-<lang>-<workspaceKey[:4]>` and
+  // `mcp-language-server-<lang>-<workspaceKey>`. An older/heuristic registry row
+  // carries no client_entries, so proving replaceability only from
+  // client_entries left those legacy cells marked unreplaceable and the GUI
+  // disabled a toggle /api/lsp-router/enable would have served.
+  it("proves replaceability for backend fallback-named legacy entries with no client_entries (P2)", () => {
+    const wsEntries: WorkspaceEntryDTO[] = [
+      {
+        workspace_key: "b133f336",
+        workspace_path: "D:/dev/project",
+        language: "python",
+        backend: "mcp-language-server",
+        port: 9200,
+        task_name: "\\mcp-local-hub-lsp-b133f336-python",
+        client_entries: {},
+      },
+    ];
+    const legacyURL = "http://127.0.0.1:9200/mcp";
+    const scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          // short (4-char) workspace-key fallback name
+          name: "mcp-language-server-python-b133",
+          manifest_exists: false,
+          can_migrate: false,
+          client_presence: { "codex-cli": { transport: "http", endpoint: legacyURL } },
+        },
+        {
+          // full workspace-key fallback name
+          name: "mcp-language-server-python-b133f336",
+          manifest_exists: false,
+          can_migrate: false,
+          client_presence: { cursor: { transport: "http", endpoint: legacyURL } },
+        },
+        {
+          // NEGATIVE: a suffix the backend never generates for this registry.
+          name: "mcp-language-server-python-zzzz",
+          manifest_exists: false,
+          can_migrate: false,
+          client_presence: { "gemini-cli": { transport: "http", endpoint: legacyURL } },
+        },
+      ],
+    };
+    const python = collectLspRows(scan, wsEntries, "").find((r) => r.language === "python")!;
+    expect(python.clientPresenceEntryName["codex-cli"]).toBe("mcp-language-server-python-b133");
+    expect(python.clientPresenceCanEnableFromLegacy["codex-cli"]).toBe(true);
+    expect(python.clientPresenceEntryName["cursor"]).toBe("mcp-language-server-python-b133f336");
+    expect(python.clientPresenceCanEnableFromLegacy["cursor"]).toBe(true);
+    expect(python.clientPresenceEntryName["gemini-cli"]).toBe("mcp-language-server-python-zzzz");
+    expect(python.clientPresenceCanEnableFromLegacy["gemini-cli"]).toBe(false);
+  });
+
+  // A backend candidate name is necessary but not sufficient: the legacy /mcp
+  // URL's port must also be a registered proxy port for the language, else the
+  // enable pass would hit a deterministic ownership error.
+  it("refuses a fallback-named legacy entry whose port is not in the registry", () => {
+    const wsEntries: WorkspaceEntryDTO[] = [
+      {
+        workspace_key: "b133f336",
+        workspace_path: "D:/dev/project",
+        language: "python",
+        backend: "mcp-language-server",
+        port: 9200,
+        task_name: "\\mcp-local-hub-lsp-b133f336-python",
+        client_entries: {},
+      },
+    ];
+    const scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-python-b133",
+          manifest_exists: false,
+          can_migrate: false,
+          client_presence: {
+            "codex-cli": { transport: "http", endpoint: "http://127.0.0.1:9999/mcp" },
+          },
+        },
+      ],
+    };
+    const python = collectLspRows(scan, wsEntries, "").find((r) => r.language === "python")!;
+    expect(python.clientPresenceCanEnableFromLegacy["codex-cli"]).toBe(false);
+  });
 });

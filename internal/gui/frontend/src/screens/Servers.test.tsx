@@ -87,6 +87,9 @@ function fetchRouter(routes: Record<string, (init?: RequestInit) => Response | P
         return routes[prefix](init);
       }
     }
+    if (url.startsWith("/api/lsp-router/status")) {
+      return jsonResponse(200, { clients: [] });
+    }
     throw new Error(`unexpected fetch: ${url}`);
   });
 }
@@ -604,6 +607,128 @@ describe("ServersScreen — LSP matrix rows", () => {
     expect(enableBodies[0]).toEqual({ client: "codex-cli" });
   });
 
+  it("lets a present client opt out when router entries are absent", async () => {
+    const scan: ScanResult = {
+      at: "2026-06-03T00:00:00Z",
+      entries: [],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+    const disableBodies: unknown[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () =>
+          jsonResponse(200, {
+            workspaces: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+              },
+            ],
+            entries: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+                language: "python",
+                backend: "mcp-language-server",
+                port: 9200,
+                task_name: "\\mcp-local-hub-lsp-default-python",
+                client_entries: {},
+              },
+            ],
+          }),
+        "/api/lsp-router/disable": (init?: RequestInit) => {
+          disableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, { client: "codex-cli", enabled: false, report: {} });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(false);
+
+    fireEvent.click(screen.getByTestId("lsp-opt-out-python-codex-cli"));
+
+    await waitFor(() => {
+      expect(disableBodies).toHaveLength(1);
+    });
+    expect(disableBodies[0]).toEqual({ client: "codex-cli" });
+  });
+
+  it("renders persisted LSP router opt-outs as off and re-enables from the checkbox", async () => {
+    const scan: ScanResult = {
+      at: "2026-06-03T00:00:00Z",
+      entries: [],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+    const enableBodies: unknown[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/lsp-router/status": () =>
+          jsonResponse(200, {
+            clients: [
+              {
+                client: "codex-cli",
+                config_path: "D:/dev/codex/config.toml",
+                disabled: true,
+                missing_entries: ["mcp-language-server-python"],
+              },
+            ],
+          }),
+        "/api/workspaces": () =>
+          jsonResponse(200, {
+            workspaces: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+              },
+            ],
+            entries: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+                language: "python",
+                backend: "mcp-language-server",
+                port: 9200,
+                task_name: "\\mcp-local-hub-lsp-default-python",
+                client_entries: {},
+              },
+            ],
+          }),
+        "/api/lsp-router/enable": (init?: RequestInit) => {
+          enableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, { client: "codex-cli", enabled: true, report: {} });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(false);
+    expect(screen.getByTestId("lsp-chip-opt-out-python-codex-cli").textContent).toBe("off");
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(enableBodies).toHaveLength(1);
+    });
+    expect(enableBodies[0]).toEqual({ client: "codex-cli" });
+  });
+
   it("enables an unregistered language-server row through the selected workspace", async () => {
     const scan: ScanResult = {
       at: "2026-06-03T00:00:00Z",
@@ -876,6 +1001,94 @@ describe("ServersScreen — LSP matrix rows", () => {
     });
 
     fireEvent.click(toggle);
+    await waitFor(() => expect(enableBodies).toHaveLength(1));
+    expect(enableBodies[0]).toEqual({ client: "codex-cli" });
+  });
+
+  // Codex PR #524 P2 (lsp-rows.ts:226): a legacy workspace row with NO
+  // client_entries for the client still has backend-removable candidate names —
+  // api.lspLegacyCandidateEntryNames generates `<router>-<workspaceKey[:4]>` and
+  // `<router>-<workspaceKey>` from the registry row itself. Those cells must stay
+  // ENABLED (enable would safely replace them); a suffix the backend never
+  // generates must stay DISABLED.
+  it("keeps fallback-named legacy LSP entries enableable and refuses unknown suffixes", async () => {
+    const legacyURL = "http://127.0.0.1:9200/mcp";
+    const scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-python-b133",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub",
+          client_presence: { "codex-cli": { transport: "http", endpoint: legacyURL } },
+        },
+        {
+          name: "mcp-language-server-python-b133f336",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub",
+          client_presence: { cursor: { transport: "http", endpoint: legacyURL } },
+        },
+        {
+          name: "mcp-language-server-python-zzzz",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub",
+          client_presence: { "gemini-cli": { transport: "http", endpoint: legacyURL } },
+        },
+      ],
+      client_config_presence: { "codex-cli": "ok", cursor: "ok", "gemini-cli": "ok" },
+    };
+    const enableBodies: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () =>
+          jsonResponse(200, {
+            workspaces: [{ workspace_key: "b133f336", workspace_path: "D:/dev/project" }],
+            entries: [
+              {
+                workspace_key: "b133f336",
+                workspace_path: "D:/dev/project",
+                language: "python",
+                backend: "mcp-language-server",
+                port: 9200,
+                task_name: "\\mcp-local-hub-lsp-b133f336-python",
+                // Older/heuristic registry shape: no per-client entry names.
+                client_entries: {},
+              },
+            ],
+          }),
+        "/api/lsp-router/enable": (init?: RequestInit) => {
+          enableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, { client: "codex-cli", enabled: true, report: {} });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const shortName = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    const fullName = screen.getByTestId("lsp-toggle-python-cursor") as HTMLInputElement;
+    const unknownSuffix = screen.getByTestId(
+      "lsp-toggle-python-gemini-cli",
+    ) as HTMLInputElement;
+
+    await waitFor(() => {
+      expect(shortName.checked).toBe(false);
+      expect(shortName.disabled).toBe(false);
+    });
+    expect(fullName.checked).toBe(false);
+    expect(fullName.disabled).toBe(false);
+    // Negative: name matches no backend candidate → not mutable from this cell.
+    expect(unknownSuffix.checked).toBe(false);
+    expect(unknownSuffix.disabled).toBe(true);
+
+    fireEvent.click(shortName);
     await waitFor(() => expect(enableBodies).toHaveLength(1));
     expect(enableBodies[0]).toEqual({ client: "codex-cli" });
   });

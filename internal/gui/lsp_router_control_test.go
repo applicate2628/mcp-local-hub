@@ -12,6 +12,7 @@ import (
 
 type fakeLSPRouterControlAPI struct {
 	disabled map[string]bool
+	statuses []api.LSPRouterClientStatus
 
 	setNames       []string
 	rollbackClient string
@@ -50,6 +51,12 @@ func (f *fakeLSPRouterControlAPI) EnableLSPRouterClient(clientName string, opts 
 	return &api.LSPClientRouterReport{
 		Applied: []api.LSPClientRouterChange{{Client: clientName, Language: "python", EntryName: "mcp-language-server-python"}},
 	}, nil
+}
+
+func (f *fakeLSPRouterControlAPI) LSPRouterClientStatuses(opts api.LSPClientRouterOpts) ([]api.LSPRouterClientStatus, error) {
+	f.ensureOpts = opts
+	out := append([]api.LSPRouterClientStatus(nil), f.statuses...)
+	return out, nil
 }
 
 func (f *fakeLSPRouterControlAPI) RollbackLSPRouterClientEntriesForClient(clientName string, opts api.LSPClientRouterOpts) (*api.LSPClientRouterReport, error) {
@@ -139,5 +146,45 @@ func TestLSPRouterEnableRouteClearsOptOutAndForcesEnsureForTargetClient(t *testi
 	}
 	if resp.Report == nil || len(resp.Report.Applied) != 1 {
 		t.Fatalf("response report = %+v, want one applied row", resp.Report)
+	}
+}
+
+func TestLSPRouterStatusRouteReportsPersistedClientOptOut(t *testing.T) {
+	fake := &fakeLSPRouterControlAPI{
+		statuses: []api.LSPRouterClientStatus{
+			{
+				Client:          "codex-cli",
+				ConfigPath:      "/tmp/codex/config.toml",
+				Disabled:        true,
+				ExistingEntries: nil,
+				MissingEntries:  []string{"mcp-language-server-python"},
+			},
+		},
+	}
+	s := withFakeLSPRouterControlAPI(t, fake)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/lsp-router/status", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if fake.ensureOpts.GUIPort != 0 {
+		t.Fatalf("status GUIPort = %d, want unstarted server port 0", fake.ensureOpts.GUIPort)
+	}
+	var resp lspRouterStatusResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v body=%q", err, rec.Body.String())
+	}
+	if len(resp.Clients) != 1 {
+		t.Fatalf("clients=%+v, want one status", resp.Clients)
+	}
+	got := resp.Clients[0]
+	if got.Client != "codex-cli" || !got.Disabled || got.ConfigPath != "/tmp/codex/config.toml" {
+		t.Fatalf("client status=%+v, want codex-cli disabled with config path", got)
+	}
+	if len(got.MissingEntries) != 1 || got.MissingEntries[0] != "mcp-language-server-python" {
+		t.Fatalf("missing entries=%+v", got.MissingEntries)
 	}
 }

@@ -3,6 +3,7 @@ import {
   fetchOrThrow,
   postInitClientConfig,
   InitClientConfigError,
+  listLspRouterClientStatuses,
   listWorkspaces,
   postLspRegister,
   resolveClientSymlink,
@@ -250,6 +251,7 @@ export function ServersScreen() {
   const [lspRouterBusy, setLspRouterBusy] = useState<Record<string, boolean>>({});
   const [lspRouterMsg, setLspRouterMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
   const [lspRouterClientOverrides, setLspRouterClientOverrides] = useState<Record<string, boolean>>({});
+  const [lspRouterClientDisabled, setLspRouterClientDisabled] = useState<Record<string, boolean>>({});
   // First-workspace registration (fresh-machine connect path): the
   // operator types a workspace ROOT path + picks a language, and the GUI
   // POSTs /api/lsp/register directly — no CLI `mcphub register` step. The
@@ -355,10 +357,11 @@ export function ServersScreen() {
       // LSP matrix surfaces the 9 placeholder rows. Catch isolation
       // is bounded to the workspaces fetch only; /api/scan and
       // /api/status errors continue to fail the whole load.
-      const [scan, status, workspacesResp] = await Promise.all([
+      const [scan, status, workspacesResp, routerStatuses] = await Promise.all([
         fetchOrThrow<ScanResult>("/api/scan", "object"),
         fetchOrThrow<DaemonStatus[]>("/api/status", "array"),
         listWorkspaces().catch(() => ({ workspaces: [], entries: [] })),
+        listLspRouterClientStatuses(),
       ]);
       if (!isLatest()) return;
       if (scan.entries != null && !Array.isArray(scan.entries)) {
@@ -371,6 +374,11 @@ export function ServersScreen() {
       setWorkspaceEntries(workspacesResp.entries);
       setClientConfigPresence(scan.client_config_presence ?? EMPTY_CLIENT_CONFIG_PRESENCE);
       setClientScanErrors(scan.client_scan_errors ?? EMPTY_CLIENT_SCAN_ERRORS);
+      const routerDisabled: Record<string, boolean> = {};
+      for (const status of routerStatuses) {
+        if (status.disabled) routerDisabled[status.client] = true;
+      }
+      setLspRouterClientDisabled(routerDisabled);
       // Clear any success banner once the authoritative refresh lands
       // (the matrix has already redrawn with the new "ok" state).
       // Error banners stay sticky so the operator sees the failure
@@ -1214,6 +1222,7 @@ export function ServersScreen() {
         routerBusy={lspRouterBusy}
         routerMsg={lspRouterMsg}
         routerClientOverrides={lspRouterClientOverrides}
+        routerClientDisabled={lspRouterClientDisabled}
         onRegister={registerLspRow}
         onToggleRouterClient={toggleLspRouterClient}
         hasWorkspaces={workspaces.length > 0}
@@ -1875,6 +1884,7 @@ function LspMatrix(props: {
   routerBusy: Record<string, boolean>;
   routerMsg: { text: string; kind: "ok" | "error" } | null;
   routerClientOverrides: Record<string, boolean>;
+  routerClientDisabled: Record<string, boolean>;
   onRegister: (row: LspRow) => void;
   onToggleRouterClient: (client: string, enabled: boolean) => void;
   // First-workspace register flow (fresh-machine connect path).
@@ -1896,6 +1906,7 @@ function LspMatrix(props: {
     routerBusy,
     routerMsg,
     routerClientOverrides,
+    routerClientDisabled,
     onRegister,
     onToggleRouterClient,
     hasWorkspaces,
@@ -1994,6 +2005,7 @@ function LspMatrix(props: {
                     legacy={row.legacyConflict[client]}
                     configState={clientConfigPresence[client]}
                     checkedOverride={routerClientOverrides[client]}
+                    clientRouterDisabled={routerClientDisabled[client] === true}
                     busy={routerBusy[client] === true}
                     onToggle={onToggleRouterClient}
                   />
@@ -2077,6 +2089,7 @@ function LspCellView(props: {
   // key (client absent / older mock) → treated as no usable config.
   configState: ClientConfigState | undefined;
   checkedOverride: boolean | undefined;
+  clientRouterDisabled: boolean;
   busy: boolean;
   onToggle: (client: string, enabled: boolean) => void;
 }) {
@@ -2089,6 +2102,7 @@ function LspCellView(props: {
     legacy,
     configState,
     checkedOverride,
+    clientRouterDisabled,
     busy,
     onToggle,
   } = props;
@@ -2123,6 +2137,7 @@ function LspCellView(props: {
   // Finding 2: a client with no usable config file cannot host router entries.
   const configUsable = clientConfigUsable(configState);
   const checked = checkedOverride ?? hasRouterEntry;
+  const clientOptedOut = checkedOverride === false || (checkedOverride === undefined && clientRouterDisabled);
   // Disabled when an Apply is in flight, the entry is inherited (read-only), or
   // there is nothing to act on — no existing router entry AND no usable config
   // to enable one into. A present (non-inherited) router entry stays interactive
@@ -2130,6 +2145,14 @@ function LspCellView(props: {
   // always-interactive via-hub cell.
   const disabled =
     busy || inherited || (!hasRouterEntry && (!configUsable || hasUnreplaceablePrimary));
+  const canPersistOptOut =
+    !checked &&
+    !clientOptedOut &&
+    !hasPrimary &&
+    !legacy &&
+    configUsable &&
+    !inherited &&
+    !busy;
   const dualBadge = hasPrimary && Boolean(legacy);
   let title: string;
   let ariaLabel: string;
@@ -2145,6 +2168,9 @@ function LspCellView(props: {
   } else if (checked) {
     title = `Uncheck to disable shared LSP router entries for ${client}.`;
     ariaLabel = `Disable shared LSP router entries for ${client}`;
+  } else if (clientOptedOut) {
+    title = `${client} is opted out of automatic shared LSP router entries. Check to enable them again.`;
+    ariaLabel = `Enable shared LSP router entries for ${client}`;
   } else {
     title = `Check to enable shared LSP router entries for ${client}.`;
     ariaLabel = `Enable shared LSP router entries for ${client}`;
@@ -2182,7 +2208,29 @@ function LspCellView(props: {
           legacy
         </span>
       )}
-      {!hasPrimary && !legacy && <span class="lsp-cell-empty">—</span>}
+      {clientOptedOut && (
+        <span
+          class="lsp-chip lsp-chip-off"
+          data-testid={`lsp-chip-opt-out-${language}-${client}`}
+        >
+          off
+        </span>
+      )}
+      {canPersistOptOut && (
+        <button
+          type="button"
+          class="lsp-router-opt-out"
+          data-testid={`lsp-opt-out-${language}-${client}`}
+          title={`Persist ${client}'s shared LSP router opt-out without adding entries.`}
+          aria-label={`Opt ${client} out of shared LSP router entries`}
+          onClick={() => onToggle(client, false)}
+        >
+          Off
+        </button>
+      )}
+      {!hasPrimary && !legacy && !clientOptedOut && !canPersistOptOut && (
+        <span class="lsp-cell-empty">—</span>
+      )}
     </td>
   );
 }

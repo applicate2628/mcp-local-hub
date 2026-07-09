@@ -112,7 +112,9 @@ export interface LspRow {
   // endpoint or relay_url whose port and source entry name are recognized by the
   // backend rollback/ensure owners via the workspace registry. Without this
   // proof, loopback /mcp cells stay unchecked and disabled instead of hitting
-  // deterministic ownership errors.
+  // deterministic ownership errors. The recognized-name set mirrors
+  // api.lspLegacyCandidateEntryNames, which includes the registry's generated
+  // fallback names, not just explicit client_entries values.
   clientPresenceCanEnableFromLegacy: Record<string, boolean>;
   legacyConflict: Record<string, ClientEntry>;
 }
@@ -198,32 +200,59 @@ export function collectLspRows(
         if (v) expectedNames.add(v);
       }
     }
+    // legacyPorts mirrors api.lspRegistryPortsByLanguage: every registered proxy
+    // port for THIS language, across every workspace. Both backend gates — the
+    // entryIsHubOwnedLSPClientEntry overwrite check on the reserved target name,
+    // and the entryPointsAtLegacyLSPPort check on each legacy candidate name —
+    // read that language-wide set, so narrowing to the ports of the single
+    // registry row that named the entry refuses cells the backend would replace.
     const legacyPorts = new Set<number>();
-    const legacyPortsByClientEntry = new Map<string, Set<number>>();
-    const legacyPortKey = (client: string, entryName: string) => `${client}\u0000${entryName}`;
+    // The legacy candidate names mirror api.lspLegacyCandidateEntryNames: for one
+    // (language, client) the backend treats as removable BOTH the registry's
+    // explicit client_entries value AND two generated fallbacks per workspace key
+    // — `<router>-<workspaceKey[:4]>` and `<router>-<workspaceKey>`. The generated
+    // names are client-independent (the Go loop never consults clientName for
+    // them), so they live in one shared set. An older/heuristic registry shape
+    // carries no client_entries at all; without the generated names this proof
+    // marks such legacy cells unreplaceable and the GUI disables a toggle that
+    // /api/lsp-router/enable would safely serve.
+    const generatedLegacyNames = new Set<string>();
+    const legacyNamesByClient = new Map<string, Set<string>>();
     for (const we of wsEntries) {
-      if (we.language !== language || we.port <= 0) continue;
-      legacyPorts.add(we.port);
+      if (we.language !== language) continue;
+      // Candidate-name generation has no port filter in the backend; only the
+      // port set (lspRegistryPortsByLanguage) drops port <= 0 rows.
+      if (we.port > 0) legacyPorts.add(we.port);
       for (const [client, entryName] of Object.entries(we.client_entries ?? {})) {
-        if (!entryName) continue;
-        const key = legacyPortKey(client, entryName);
-        const ports = legacyPortsByClientEntry.get(key) ?? new Set<number>();
-        ports.add(we.port);
-        legacyPortsByClientEntry.set(key, ports);
+        const name = (entryName ?? "").trim();
+        if (!name) continue;
+        const names = legacyNamesByClient.get(client) ?? new Set<string>();
+        names.add(name);
+        legacyNamesByClient.set(client, names);
+      }
+      const workspaceKey = we.workspace_key ?? "";
+      if (workspaceKey !== "") {
+        const short = workspaceKey.length > 4 ? workspaceKey.slice(0, 4) : workspaceKey;
+        generatedLegacyNames.add(`${reservedRouterName}-${short}`);
+        generatedLegacyNames.add(`${reservedRouterName}-${workspaceKey}`);
       }
     }
+    const isLegacyCandidateName = (client: string, entryName: string): boolean =>
+      generatedLegacyNames.has(entryName) ||
+      (legacyNamesByClient.get(client)?.has(entryName) ?? false);
     const canEnableFromLegacy = (
       client: string,
       entryName: string,
       presence: ClientPresence,
     ): boolean => {
-      if (entryName === reservedRouterName) {
-        return entryPointsAtLegacyLSPPort(presence, legacyPorts);
+      // The reserved router name is the backend's own ensure target: it is
+      // overwritten whenever entryIsHubOwnedLSPClientEntry holds, and a legacy
+      // registry port satisfies that. Any other name must first be a backend
+      // removal candidate before its port may prove replaceability.
+      if (entryName !== reservedRouterName && !isLegacyCandidateName(client, entryName)) {
+        return false;
       }
-      return entryPointsAtLegacyLSPPort(
-        presence,
-        legacyPortsByClientEntry.get(legacyPortKey(client, entryName)),
-      );
+      return entryPointsAtLegacyLSPPort(presence, legacyPorts);
     };
     // Cross-reference parsed names — covers placeholders + sanity.
     for (const e of entries) {
