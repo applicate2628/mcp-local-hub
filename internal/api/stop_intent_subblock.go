@@ -27,7 +27,8 @@
 //     daemon is no longer suppressed (E1 docstring intent_collapse.go: "the
 //     re-enable path writes a Desired=running tombstone … that the merge loop
 //     drops"). After E2 the write applies that drop directly to the sub-block
-//     rather than recording a running tombstone the merge later drops.
+//     rather than recording a running tombstone the merge later drops, and
+//     snapshots the departing stop into LegacyStopWatermarks[task].
 //
 // The sub-block therefore stays a clean ACTIVE-STOPS-ONLY map, byte-identical
 // to the merge owner's MergedStops output, so the two write paths (boot-merge
@@ -276,7 +277,9 @@ func (a *API) ClearStopIntent(taskName string, who string) error {
 //
 // before is the prior value for taskName (nil when absent); after is the new
 // value (nil when the mutation removed/left-absent the entry). changed reports
-// whether that entry actually changed and a write was committed.
+// whether that stop entry actually changed; the function may still commit a
+// watermark-only normalization write with changed=false, which must not emit a
+// stop audit entry.
 //
 // Lock-free write body: it commits via writeSupervisorIntentLockHeld (the same
 // helper the merge owner uses) because the flock is already held — re-entering
@@ -300,7 +303,7 @@ func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonInte
 	// minted supervisor-intent.json). readSupervisorIntentForMerge owns the
 	// missing-file semantics (install_parsed_manifest.go), shared with the
 	// merge owner.
-	intent, _, readErr := readSupervisorIntentForMerge(path)
+	intent, _, rawStopMaps, readErr := readSupervisorIntentForMergeWithRawStopMaps(path)
 	if readErr != nil {
 		return nil, nil, false, fmt.Errorf("stop-intent: read supervisor-intent.json: %w", readErr)
 	}
@@ -315,6 +318,10 @@ func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonInte
 	for k, v := range intent.Stops {
 		stops[k] = v
 	}
+	watermarks := map[string]DaemonIntent{}
+	for k, v := range intent.LegacyStopWatermarks {
+		watermarks[k] = v
+	}
 	if prior, ok := stops[taskName]; ok {
 		p := prior
 		before = &p
@@ -327,24 +334,39 @@ func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonInte
 		after = &n
 	}
 
+	switch {
+	case before != nil && after == nil:
+		watermarks[taskName] = *before
+	}
+
+	entryChanged := !stopEntriesEqual(before, after)
+	candidate := cloneSupervisorIntentFile(intent)
+	candidate.Stops = stops
+	if len(candidate.Stops) == 0 {
+		candidate.Stops = nil
+	}
+	candidate.LegacyStopWatermarks = watermarks
+	if len(candidate.LegacyStopWatermarks) == 0 {
+		candidate.LegacyStopWatermarks = nil
+	}
+	normalizeAbsentOnlyStopWatermarks(candidate)
+	persistenceChanged := !stopsMapsEqual(rawStopMaps.Stops, candidate.Stops) ||
+		!stopsMapsEqual(rawStopMaps.LegacyStopWatermarks, candidate.LegacyStopWatermarks)
+
 	// Idempotent no-op short-circuit: if the mutation produced no change to
-	// the sub-block entry, skip the write entirely (no flock-held rewrite, no
-	// audit churn). stopEntriesEqual handles both-present-and-equal and
-	// both-absent.
-	if stopEntriesEqual(before, after) {
+	// either the sub-block entry or its absent-only watermark, skip the write
+	// entirely (no flock-held rewrite, no audit churn). stopEntriesEqual handles
+	// both-present-and-equal and both-absent.
+	if !persistenceChanged {
 		return before, after, false, nil
 	}
 
-	intent.Stops = stops
-	// Drop an empty sub-block back to nil so the on-disk file omits the
-	// `stops` key entirely (omitempty), matching a never-stopped host.
-	if len(intent.Stops) == 0 {
-		intent.Stops = nil
-	}
+	intent.Stops = candidate.Stops
+	intent.LegacyStopWatermarks = candidate.LegacyStopWatermarks
 	if err := writeSupervisorIntentLockHeld(path, intent); err != nil {
 		return nil, nil, false, fmt.Errorf("stop-intent: write supervisor-intent.json: %w", err)
 	}
-	return before, after, true, nil
+	return before, after, entryChanged, nil
 }
 
 // stopEntriesEqual reports whether two optional DaemonIntent snapshots are

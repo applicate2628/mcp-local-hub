@@ -15,7 +15,8 @@ import (
 func TestUnregister_ReconcileFailureRestoresBareKeySupervisorStop(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
-	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := SetDaemonStateRootForTest(stateDir)
 	defer restoreState()
 
 	origReconcile := registerSupervisorReconcileFn
@@ -60,7 +61,7 @@ func TestUnregister_ReconcileFailureRestoresBareKeySupervisorStop(t *testing.T) 
 	if err != nil {
 		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
 	}
-	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+	writeRawSupervisorIntentFileForTest(t, intentPath, SupervisorIntentFile{
 		Version: 1,
 		Daemons: []SupervisorDaemon{
 			descriptor,
@@ -68,8 +69,13 @@ func TestUnregister_ReconcileFailureRestoresBareKeySupervisorStop(t *testing.T) 
 		Stops: map[string]DaemonIntent{
 			bareTask: operatorStop,
 		},
-	}); err != nil {
-		t.Fatalf("WriteSupervisorIntent: %v", err)
+	})
+	rawSeed := readRawSupervisorIntentFileForTest(t, stateDir)
+	if _, ok := rawSeed.Stops[bareTask]; !ok {
+		t.Fatalf("raw seed lost bare stop key %q before exercising unregister rollback path: %+v", bareTask, rawSeed.Stops)
+	}
+	if _, ok := rawSeed.Stops[descriptor.TaskName]; ok {
+		t.Fatalf("raw seed is canonicalized; test would be vacuous for bare-key regression: %+v", rawSeed.Stops)
 	}
 
 	_, err = mustNewAPI(t).unregisterWithManifest(nineLanguageManifest(), ws, []string{"go"}, &bytes.Buffer{})

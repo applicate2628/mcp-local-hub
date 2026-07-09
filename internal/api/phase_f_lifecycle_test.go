@@ -152,12 +152,8 @@ func TestRemoveServerFromSupervisorIntent_RemovesRowsTimerStops_PreservesSibling
 	if _, ok := got.LegacyStopWatermarks[`\mcp-local-hub-demo-beta`]; ok {
 		t.Error("blank-Server demo legacy-stop watermark survived uninstall")
 	}
-	gotOtherWatermark, ok := got.LegacyStopWatermarks[`\mcp-local-hub-other-d`]
-	if !ok {
-		t.Fatal("sibling legacy-stop watermark was wiped by the uninstall cleanup")
-	}
-	if gotOtherWatermark.Desired != otherStop.Desired || gotOtherWatermark.Reason != otherStop.Reason || !gotOtherWatermark.UpdatedAt.Equal(otherStop.UpdatedAt) {
-		t.Errorf("sibling legacy-stop watermark mutated: got %+v want %+v", gotOtherWatermark, otherStop)
+	if _, ok := got.LegacyStopWatermarks[`\mcp-local-hub-other-d`]; ok {
+		t.Fatalf("sibling stop retained redundant legacy-stop watermark: %+v", got.LegacyStopWatermarks)
 	}
 
 	// StrictMode is carried through untouched.

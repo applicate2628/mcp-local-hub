@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +80,9 @@ func TestWriteStopIntent_RunningDropsPriorStop(t *testing.T) {
 
 	task := `\mcp-local-hub-time-default`
 	now := time.Now().UTC()
+	stop := DaemonIntent{
+		Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now,
+	}
 	if err := NewAPI().WriteStopIntent(task, DaemonIntent{
 		Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now,
 	}, "tester"); err != nil {
@@ -103,6 +107,87 @@ func TestWriteStopIntent_RunningDropsPriorStop(t *testing.T) {
 	if len(sup.Stops) != 0 {
 		t.Fatalf("expected empty/nil sub-block, got %+v", sup.Stops)
 	}
+	assertDaemonIntentEqual(t, sup.LegacyStopWatermarks[task], stop)
+}
+
+func TestWriteStopIntent_ActiveStopPrunesLegacyStopWatermark(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	task := `\mcp-local-hub-paper-search-default`
+	oldStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC().Add(-time.Hour)}
+	newStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: time.Now().UTC()}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), &SupervisorIntentFile{
+		Version:              1,
+		LegacyStopWatermarks: map[string]DaemonIntent{task: oldStop},
+	}); err != nil {
+		t.Fatalf("seed supervisor intent watermark: %v", err)
+	}
+
+	if err := NewAPI().WriteStopIntent(task, newStop, "tester"); err != nil {
+		t.Fatalf("WriteStopIntent active: %v", err)
+	}
+	sup := readSupervisorIntentFromDisk(t, stateDir)
+	assertDaemonIntentEqual(t, sup.Stops[task], newStop)
+	if _, ok := sup.LegacyStopWatermarks[task]; ok {
+		t.Fatalf("active WriteStopIntent left redundant watermark behind: %+v", sup.LegacyStopWatermarks)
+	}
+}
+
+func TestWriteStopIntent_IdempotentActivePrunesWatermarkWithoutAudit(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	var captured []IntentAuditEntry
+	installTestAuditFn(t, &captured, nil)
+
+	task := `\mcp-local-hub-paper-search-default`
+	stop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
+	writeRawSupervisorIntentForCollapseTest(t, stateDir,
+		map[string]DaemonIntent{task: stop},
+		map[string]DaemonIntent{task: stop},
+	)
+
+	if err := NewAPI().WriteStopIntent(task, stop, "tester"); err != nil {
+		t.Fatalf("idempotent active WriteStopIntent: %v", err)
+	}
+	sup := readSupervisorIntentFromDisk(t, stateDir)
+	assertDaemonIntentEqual(t, sup.Stops[task], stop)
+	if _, ok := sup.LegacyStopWatermarks[task]; ok {
+		t.Fatalf("idempotent active write did not prune redundant watermark: %+v", sup.LegacyStopWatermarks)
+	}
+	if len(captured) != 0 {
+		t.Fatalf("watermark-only normalization emitted stop audit entries: %+v", captured)
+	}
+}
+
+func TestWriteStopIntent_UnrelatedWriteNormalizesRedundantLegacyStopWatermark(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	activeTask := `\mcp-local-hub-demo-active`
+	writeTask := `\mcp-local-hub-demo-written`
+	clearedTask := `\mcp-local-hub-demo-cleared`
+	activeStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now}
+	writeStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: now.Add(time.Minute)}
+	clearedStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-time.Minute)}
+	writeRawSupervisorIntentForCollapseTest(t, stateDir,
+		map[string]DaemonIntent{activeTask: activeStop},
+		map[string]DaemonIntent{activeTask: activeStop, clearedTask: clearedStop},
+	)
+
+	if err := NewAPI().WriteStopIntent(writeTask, writeStop, "tester"); err != nil {
+		t.Fatalf("unrelated WriteStopIntent: %v", err)
+	}
+
+	sup := readSupervisorIntentFromDisk(t, stateDir)
+	assertDaemonIntentEqual(t, sup.Stops[activeTask], activeStop)
+	assertDaemonIntentEqual(t, sup.Stops[writeTask], writeStop)
+	if _, ok := sup.LegacyStopWatermarks[activeTask]; ok {
+		t.Fatalf("unrelated stop write preserved redundant active-task watermark: %+v", sup.LegacyStopWatermarks)
+	}
+	assertDaemonIntentEqual(t, sup.LegacyStopWatermarks[clearedTask], clearedStop)
 }
 
 // An expired user-stop write DROPS rather than carries (matches the merge
@@ -129,6 +214,190 @@ func TestWriteStopIntent_ExpiredUserStopDropped(t *testing.T) {
 	}
 	if _, ok := got.Stops[task]; ok {
 		t.Fatalf("expired user-stop should NOT be stored as active stop, got %+v", got.Stops)
+	}
+}
+
+func TestClearStopIntent_SnapshotsDepartingStopWatermark(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	task := `\mcp-local-hub-clear-default`
+	stop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
+	if err := NewAPI().WriteStopIntent(task, stop, "tester"); err != nil {
+		t.Fatalf("seed stop: %v", err)
+	}
+
+	if err := NewAPI().ClearStopIntent(task, "tester"); err != nil {
+		t.Fatalf("ClearStopIntent: %v", err)
+	}
+	sup := readSupervisorIntentFromDisk(t, stateDir)
+	if _, ok := sup.Stops[task]; ok {
+		t.Fatalf("ClearStopIntent left stop behind: %+v", sup.Stops)
+	}
+	assertDaemonIntentEqual(t, sup.LegacyStopWatermarks[task], stop)
+}
+
+func TestClearStopIntentIfReason_WatermarkLifecycle(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	task := `\mcp-local-hub-idle-default`
+	siblingTask := `\mcp-local-hub-cleared-sibling`
+	now := time.Now().UTC()
+	operatorStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now}
+	siblingWatermark := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: now.Add(-time.Minute)}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), &SupervisorIntentFile{
+		Version:              1,
+		Stops:                map[string]DaemonIntent{task: operatorStop},
+		LegacyStopWatermarks: map[string]DaemonIntent{siblingTask: siblingWatermark},
+	}); err != nil {
+		t.Fatalf("seed supervisor intent: %v", err)
+	}
+
+	clearAllowed, err := NewAPI().ClearStopIntentIfReason(task, IntentReasonIdle, "wake")
+	if err != nil {
+		t.Fatalf("refused ClearStopIntentIfReason: %v", err)
+	}
+	if clearAllowed {
+		t.Fatal("ClearStopIntentIfReason returned clearAllowed=true for mismatched reason")
+	}
+	sup := readSupervisorIntentFromDisk(t, stateDir)
+	assertDaemonIntentEqual(t, sup.Stops[task], operatorStop)
+	if _, ok := sup.LegacyStopWatermarks[task]; ok {
+		t.Fatalf("refused clear created same-task watermark: %+v", sup.LegacyStopWatermarks)
+	}
+	assertDaemonIntentEqual(t, sup.LegacyStopWatermarks[siblingTask], siblingWatermark)
+
+	idleStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonIdle, UpdatedAt: now.Add(time.Minute)}
+	if err := NewAPI().WriteStopIntent(task, idleStop, "tester"); err != nil {
+		t.Fatalf("seed idle stop: %v", err)
+	}
+	clearAllowed, err = NewAPI().ClearStopIntentIfReason(task, IntentReasonIdle, "wake")
+	if err != nil {
+		t.Fatalf("matching ClearStopIntentIfReason: %v", err)
+	}
+	if !clearAllowed {
+		t.Fatal("ClearStopIntentIfReason returned clearAllowed=false for matching idle stop")
+	}
+	sup = readSupervisorIntentFromDisk(t, stateDir)
+	if _, ok := sup.Stops[task]; ok {
+		t.Fatalf("matching clear left stop behind: %+v", sup.Stops)
+	}
+	assertDaemonIntentEqual(t, sup.LegacyStopWatermarks[task], idleStop)
+	assertDaemonIntentEqual(t, sup.LegacyStopWatermarks[siblingTask], siblingWatermark)
+}
+
+func TestClearStopIntent_IdempotentAbsentPreservesWatermarkWithoutAudit(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	var captured []IntentAuditEntry
+	installTestAuditFn(t, &captured, nil)
+
+	task := `\mcp-local-hub-cleared-default`
+	watermark := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
+	if err := WriteSupervisorIntent(filepath.Join(stateDir, supervisorIntentFileLeaf), &SupervisorIntentFile{
+		Version:              1,
+		LegacyStopWatermarks: map[string]DaemonIntent{task: watermark},
+	}); err != nil {
+		t.Fatalf("seed absent watermark: %v", err)
+	}
+
+	if err := NewAPI().ClearStopIntent(task, "tester"); err != nil {
+		t.Fatalf("idempotent ClearStopIntent: %v", err)
+	}
+	sup := readSupervisorIntentFromDisk(t, stateDir)
+	if _, ok := sup.Stops[task]; ok {
+		t.Fatalf("idempotent clear created stop: %+v", sup.Stops)
+	}
+	assertDaemonIntentEqual(t, sup.LegacyStopWatermarks[task], watermark)
+	if len(captured) != 0 {
+		t.Fatalf("idempotent clear emitted audit entries: %+v", captured)
+	}
+}
+
+func TestClearStopIntent_BareKeyStopClearsWithoutResurrection(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	task := `\mcp-local-hub-bare-clear`
+	bareTask := strings.TrimPrefix(task, `\`)
+	stop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
+	writeRawSupervisorIntentForCollapseTest(t, stateDir, map[string]DaemonIntent{bareTask: stop}, nil)
+
+	if err := NewAPI().ClearStopIntent(task, "tester"); err != nil {
+		t.Fatalf("ClearStopIntent: %v", err)
+	}
+
+	sup := readSupervisorIntentFromDisk(t, stateDir)
+	if _, ok := sup.Stops[task]; ok {
+		t.Fatalf("bare-key stop resurrected as canonical active stop after clear: %+v", sup.Stops)
+	}
+	if _, ok := sup.Stops[bareTask]; ok {
+		t.Fatalf("bare-key stop survived clear: %+v", sup.Stops)
+	}
+	assertDaemonIntentEqual(t, sup.LegacyStopWatermarks[task], stop)
+}
+
+func TestWriteStopIntentIdleGuarded_BareKeyOperatorStopRefusesIdleOverwrite(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	task := `\mcp-local-hub-bare-idle`
+	bareTask := strings.TrimPrefix(task, `\`)
+	now := time.Now().UTC()
+	operatorStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now}
+	idleStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonIdle, UpdatedAt: now.Add(time.Minute)}
+	writeRawSupervisorIntentForCollapseTest(t, stateDir, map[string]DaemonIntent{bareTask: operatorStop}, nil)
+
+	wrote, err := NewAPI().WriteStopIntentIdleGuardedResult(task, idleStop, "idle-sweeper", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("WriteStopIntentIdleGuardedResult: %v", err)
+	}
+	if wrote {
+		t.Fatal("idle guarded write reported a write despite an active bare-key operator stop")
+	}
+
+	sup := readSupervisorIntentFromDisk(t, stateDir)
+	got, ok := sup.Stops[task]
+	if !ok {
+		t.Fatalf("operator stop missing after idle guarded write; stops=%+v", sup.Stops)
+	}
+	assertDaemonIntentEqual(t, got, operatorStop)
+}
+
+func TestWriteStopIntent_BareStopAndBareWatermarkCompactWithoutStopAudit(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	var captured []IntentAuditEntry
+	installTestAuditFn(t, &captured, nil)
+
+	task := `\mcp-local-hub-bare-watermark`
+	bareTask := strings.TrimPrefix(task, `\`)
+	stop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
+	writeRawSupervisorIntentForCollapseTest(t, stateDir,
+		map[string]DaemonIntent{bareTask: stop},
+		map[string]DaemonIntent{bareTask: stop},
+	)
+
+	if err := NewAPI().WriteStopIntent(task, stop, "tester"); err != nil {
+		t.Fatalf("WriteStopIntent: %v", err)
+	}
+	if len(captured) != 0 {
+		t.Fatalf("canonicalization-only/write-normalization-only persistence emitted stop audit entries: %+v", captured)
+	}
+
+	raw := readRawSupervisorIntentFileForTest(t, stateDir)
+	if len(raw.Stops) != 1 {
+		t.Fatalf("raw stops count = %d, want exactly one canonical entry: %+v", len(raw.Stops), raw.Stops)
+	}
+	assertDaemonIntentEqual(t, raw.Stops[task], stop)
+	if _, ok := raw.Stops[bareTask]; ok {
+		t.Fatalf("bare stop key survived compaction: %+v", raw.Stops)
+	}
+	if len(raw.LegacyStopWatermarks) != 0 {
+		t.Fatalf("redundant same-task watermark survived compaction: %+v", raw.LegacyStopWatermarks)
 	}
 }
 

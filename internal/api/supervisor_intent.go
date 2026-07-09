@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -44,8 +45,8 @@ type SupervisorIntentFile struct {
 	// makes this sub-block the sole stop source.
 	Stops map[string]DaemonIntent `json:"stops,omitempty"`
 
-	// LegacyStopWatermarks records the exact legacy daemon-intent.json active
-	// stop records already accounted for by the collapse. It is keyed like
+	// LegacyStopWatermarks records absent-only legacy daemon-intent.json active
+	// stop tombstones for tasks currently absent from Stops. It is keyed like
 	// Stops, by canonical leading-backslash task_name, but it is NOT a stop
 	// source and must not feed UnifiedStopsFile. It exists only so a later
 	// collapse can distinguish a first legacy migration from stale legacy replay
@@ -207,23 +208,42 @@ type MaintenanceTimer struct {
 //
 // See also: filterSupervisorIntentOneshotDaemons() for the criteria.
 func ReadSupervisorIntent(path string) (*SupervisorIntentFile, error) {
+	f, _, err := readSupervisorIntentWithRawStopMaps(path)
+	return f, err
+}
+
+type supervisorIntentRawStopMaps struct {
+	Stops                map[string]DaemonIntent
+	LegacyStopWatermarks map[string]DaemonIntent
+}
+
+func readSupervisorIntentWithRawStopMaps(path string) (*SupervisorIntentFile, supervisorIntentRawStopMaps, error) {
 	raw, err := readSupervisorIntentFileInodeAnchored(path)
 	if err != nil {
 		if isHubMcpStateMissingErr(err) {
-			return nil, fmt.Errorf("read %s: %w", path, os.ErrNotExist)
+			return nil, supervisorIntentRawStopMaps{}, fmt.Errorf("read %s: %w", path, os.ErrNotExist)
 		}
 		// Include the path in the error so callers (and Sentry-style
 		// log aggregators) can correlate failures to a specific
 		// installation's file location without having to prepend a
 		// prefix themselves. PR #212 r5 finding 5A.
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, supervisorIntentRawStopMaps{}, fmt.Errorf("read %s: %w", path, err)
 	}
+	return decodeSupervisorIntentFile(path, raw)
+}
+
+func decodeSupervisorIntentFile(path string, raw []byte) (*SupervisorIntentFile, supervisorIntentRawStopMaps, error) {
 	var f SupervisorIntentFile
 	if err := json.Unmarshal(raw, &f); err != nil {
-		return nil, fmt.Errorf("decode %s: %w", path, err)
+		return nil, supervisorIntentRawStopMaps{}, fmt.Errorf("decode %s: %w", path, err)
 	}
+	rawStops := supervisorIntentRawStopMaps{
+		Stops:                cloneDaemonIntentMap(f.Stops),
+		LegacyStopWatermarks: cloneDaemonIntentMap(f.LegacyStopWatermarks),
+	}
+	canonicalizeSupervisorIntentStopMaps(&f)
 	filterSupervisorIntentOneshotDaemons(&f)
-	return &f, nil
+	return &f, rawStops, nil
 }
 
 func readSupervisorIntentFileInodeAnchored(path string) ([]byte, error) {
@@ -277,9 +297,102 @@ func isLegacyOneshotDaemon(d SupervisorDaemon) bool {
 	return d.Args[0] == "watchdog" && d.Args[1] == "--once"
 }
 
-// WriteSupervisorIntent goes through WriteStateFileAtomic (Task 1.1).
+// WriteSupervisorIntent goes through the hardened state-file write pipeline.
 func WriteSupervisorIntent(path string, f *SupervisorIntentFile) error {
-	return WriteStateFileAtomic(path, f)
+	raw, err := marshalSupervisorIntent(f)
+	if err != nil {
+		return err
+	}
+	return WriteStateFileBytesAtomic(path, raw)
+}
+
+func marshalSupervisorIntent(f *SupervisorIntentFile) ([]byte, error) {
+	normalizeAbsentOnlyStopWatermarks(f)
+	raw, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal: %w", err)
+	}
+	return raw, nil
+}
+
+func normalizeAbsentOnlyStopWatermarks(f *SupervisorIntentFile) {
+	if f == nil {
+		return
+	}
+
+	canonicalizeSupervisorIntentStopMaps(f)
+	if len(f.LegacyStopWatermarks) == 0 {
+		f.LegacyStopWatermarks = nil
+		return
+	}
+
+	stopKeys := make(map[string]struct{}, len(f.Stops))
+	for taskName := range f.Stops {
+		stopKeys[taskName] = struct{}{}
+	}
+
+	watermarks := make(map[string]DaemonIntent, len(f.LegacyStopWatermarks))
+	for taskName, watermark := range f.LegacyStopWatermarks {
+		if _, stopped := stopKeys[taskName]; stopped {
+			continue
+		}
+		watermarks[taskName] = watermark
+	}
+	if len(watermarks) == 0 {
+		f.LegacyStopWatermarks = nil
+		return
+	}
+	f.LegacyStopWatermarks = watermarks
+}
+
+func canonicalizeSupervisorIntentStopMaps(f *SupervisorIntentFile) {
+	if f == nil {
+		return
+	}
+	f.Stops = normalizeDaemonIntentMapKeys(f.Stops)
+	f.LegacyStopWatermarks = normalizeDaemonIntentMapKeys(f.LegacyStopWatermarks)
+}
+
+func cloneDaemonIntentMap(in map[string]DaemonIntent) map[string]DaemonIntent {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]DaemonIntent, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// normalizeDaemonIntentMapKeys returns a map keyed by canonical task names. A
+// raw file can carry both bare and canonical spellings for the same task after a
+// supported binary rollback: the new binary writes a canonical stop, the older
+// binary writes a later bare stop, then the new binary reads both. In that
+// collision, keep the later UpdatedAt record so rollback interleavings never
+// drop the operator's current stop; on an exact UpdatedAt tie, keep the
+// canonical spelling current binaries write. The duplicate bare spelling is not
+// a separate stop authority for another task, so this never drops a unique task
+// stop.
+func normalizeDaemonIntentMapKeys(in map[string]DaemonIntent) map[string]DaemonIntent {
+	if len(in) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(in))
+	for taskName := range in {
+		keys = append(keys, taskName)
+	}
+	sort.Strings(keys)
+
+	out := make(map[string]DaemonIntent, len(in))
+	for _, taskName := range keys {
+		canonical := canonicalIntentTaskKey(taskName)
+		next := in[taskName]
+		current, exists := out[canonical]
+		if !exists || next.UpdatedAt.After(current.UpdatedAt) || (next.UpdatedAt.Equal(current.UpdatedAt) && taskName == canonical) {
+			out[canonical] = next
+		}
+	}
+	return out
 }
 
 // DefaultSupervisorIntentPath returns the absolute path of
@@ -459,9 +572,9 @@ const supervisorIntentLockSuffix = ".lock"
 // without the lock loses the cross-process write serialization
 // WriteStateFileAtomic otherwise provides.
 func writeSupervisorIntentLockHeld(path string, f *SupervisorIntentFile) error {
-	raw, err := json.MarshalIndent(f, "", "  ")
+	raw, err := marshalSupervisorIntent(f)
 	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("mkdir: %w", err)

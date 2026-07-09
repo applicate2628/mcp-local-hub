@@ -127,7 +127,7 @@ func TestLSPSupervisorIntentRemoveRollbackPreservesConcurrentDescriptors(t *test
 	}
 }
 
-func TestLSPSupervisorIntentRemoveRollbackRestoresStopWatermark(t *testing.T) {
+func TestLSPSupervisorIntentRemoveRollbackRestoresStopAndPreservesSiblingWatermark(t *testing.T) {
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
 	defer restoreState()
 
@@ -153,10 +153,10 @@ func TestLSPSupervisorIntentRemoveRollbackRestoresStopWatermark(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSupervisorIntent before seed: %v", err)
 	}
-	intent.Stops = map[string]DaemonIntent{taskA: stopA, taskB: stopB}
-	intent.LegacyStopWatermarks = map[string]DaemonIntent{taskA: stopA, taskB: stopB}
+	intent.Stops = map[string]DaemonIntent{taskA: stopA}
+	intent.LegacyStopWatermarks = map[string]DaemonIntent{taskB: stopB}
 	if err := WriteSupervisorIntent(intentPath, intent); err != nil {
-		t.Fatalf("seed stop watermarks: %v", err)
+		t.Fatalf("seed stop artifacts: %v", err)
 	}
 
 	restoreA, removed, err := NewAPI().removeLSPSupervisorIntent(entryA.WorkspaceKey, entryA.Language)
@@ -179,7 +179,6 @@ func TestLSPSupervisorIntentRemoveRollbackRestoresStopWatermark(t *testing.T) {
 	if _, ok := intent.LegacyStopWatermarks[taskA]; ok {
 		t.Fatalf("remove left A legacy-stop watermark behind: %+v", intent.LegacyStopWatermarks)
 	}
-	assertDaemonIntentEqual(t, intent.Stops[taskB], stopB)
 	assertDaemonIntentEqual(t, intent.LegacyStopWatermarks[taskB], stopB)
 
 	restoreA()
@@ -192,12 +191,13 @@ func TestLSPSupervisorIntentRemoveRollbackRestoresStopWatermark(t *testing.T) {
 		t.Fatalf("rollback did not restore A descriptor; rows=%+v", intent.Daemons)
 	}
 	assertDaemonIntentEqual(t, intent.Stops[taskA], stopA)
-	assertDaemonIntentEqual(t, intent.LegacyStopWatermarks[taskA], stopA)
-	assertDaemonIntentEqual(t, intent.Stops[taskB], stopB)
+	if _, ok := intent.LegacyStopWatermarks[taskA]; ok {
+		t.Fatalf("rollback restored redundant A watermark beside present stop: %+v", intent.LegacyStopWatermarks)
+	}
 	assertDaemonIntentEqual(t, intent.LegacyStopWatermarks[taskB], stopB)
 }
 
-func TestLSPSupervisorIntentUpsertRollbackRestoresPreExistingStopWatermark(t *testing.T) {
+func TestLSPSupervisorIntentUpsertRollbackRestoresPreExistingStop(t *testing.T) {
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
 	defer restoreState()
 
@@ -213,9 +213,8 @@ func TestLSPSupervisorIntentUpsertRollbackRestoresPreExistingStopWatermark(t *te
 		UpdatedAt: time.Unix(1700000000, 0).UTC(),
 	}
 	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
-		Version:              1,
-		Stops:                map[string]DaemonIntent{taskName: stop},
-		LegacyStopWatermarks: map[string]DaemonIntent{taskName: stop},
+		Version: 1,
+		Stops:   map[string]DaemonIntent{taskName: stop},
 	}); err != nil {
 		t.Fatalf("seed supervisor-intent: %v", err)
 	}
@@ -242,5 +241,103 @@ func TestLSPSupervisorIntentUpsertRollbackRestoresPreExistingStopWatermark(t *te
 		t.Fatalf("upsert rollback left descriptor behind: %+v", row)
 	}
 	assertDaemonIntentEqual(t, intent.Stops[taskName], stop)
-	assertDaemonIntentEqual(t, intent.LegacyStopWatermarks[taskName], stop)
+	if _, ok := intent.LegacyStopWatermarks[taskName]; ok {
+		t.Fatalf("upsert rollback restored redundant watermark beside present stop: %+v", intent.LegacyStopWatermarks)
+	}
+}
+
+func TestLSPSupervisorIntentUpsertRollbackRestoresWatermarkOnlyPriorArtifact(t *testing.T) {
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	entry := WorkspaceEntry{WorkspaceKey: "aaa11111", WorkspacePath: "D:/repo/a", Language: "python", Port: 9201}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	taskName := LSPIntentTaskNameForWorkspaceLanguage(entry.WorkspaceKey, entry.Language)
+	watermark := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Unix(1700000000, 0).UTC(),
+	}
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+		Version:              1,
+		LegacyStopWatermarks: map[string]DaemonIntent{taskName: watermark},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent watermark: %v", err)
+	}
+
+	restore, err := NewAPI().upsertLSPSupervisorIntent(entry, "mcphub.exe")
+	if err != nil {
+		t.Fatalf("upsert descriptor: %v", err)
+	}
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatalf("simulate descriptor and watermark removed before rollback: %v", err)
+	}
+
+	restore()
+
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after rollback: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(taskName); row != nil {
+		t.Fatalf("upsert rollback left descriptor behind: %+v", row)
+	}
+	if _, ok := intent.Stops[taskName]; ok {
+		t.Fatalf("watermark-only rollback restored a stop: %+v", intent.Stops)
+	}
+	assertDaemonIntentEqual(t, intent.LegacyStopWatermarks[taskName], watermark)
+}
+
+func TestLSPSupervisorIntentUpsertRollbackSkipsWatermarkRestoreWhenConcurrentStopExists(t *testing.T) {
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	entry := WorkspaceEntry{WorkspaceKey: "aaa11111", WorkspacePath: "D:/repo/a", Language: "python", Port: 9201}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	taskName := LSPIntentTaskNameForWorkspaceLanguage(entry.WorkspaceKey, entry.Language)
+	now := time.Now().UTC().Add(-time.Minute)
+	watermark := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: now,
+	}
+	freshStop := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserDisabled,
+		UpdatedAt: now.Add(time.Minute),
+	}
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+		Version:              1,
+		LegacyStopWatermarks: map[string]DaemonIntent{taskName: watermark},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent watermark: %v", err)
+	}
+
+	restore, err := NewAPI().upsertLSPSupervisorIntent(entry, "mcphub.exe")
+	if err != nil {
+		t.Fatalf("upsert descriptor: %v", err)
+	}
+	if err := NewAPI().WriteStopIntent(taskName, freshStop, "tester"); err != nil {
+		t.Fatalf("concurrent WriteStopIntent: %v", err)
+	}
+
+	restore()
+
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after rollback: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(taskName); row != nil {
+		t.Fatalf("upsert rollback left descriptor behind: %+v", row)
+	}
+	assertDaemonIntentEqual(t, intent.Stops[taskName], freshStop)
+	if _, ok := intent.LegacyStopWatermarks[taskName]; ok {
+		t.Fatalf("upsert rollback restored stale watermark beside concurrent stop: %+v", intent.LegacyStopWatermarks)
+	}
 }

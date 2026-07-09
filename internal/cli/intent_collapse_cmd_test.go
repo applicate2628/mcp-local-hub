@@ -67,10 +67,10 @@ func TestIntentCollapseCmd_CheckPrintsReport(t *testing.T) {
 	}
 }
 
-func TestIntentCollapseCmd_CheckExplainsWatermarkOnlyDelta(t *testing.T) {
+func TestIntentCollapseCmd_CheckExplainsBookkeepingCompactionDelta(t *testing.T) {
 	fakeRes := api.DaemonIntentCollapseResult{
 		Changed: true,
-		MergedLegacyStopWatermarks: map[string]api.DaemonIntent{
+		MergedStops: map[string]api.DaemonIntent{
 			`\mcp-local-hub-foo-default`: {Desired: api.IntentDesiredStopped, Reason: api.IntentReasonUserStop},
 		},
 	}
@@ -97,10 +97,10 @@ func TestIntentCollapseCmd_CheckExplainsWatermarkOnlyDelta(t *testing.T) {
 		t.Fatalf("output missing changed=true header; full:\n%s", out)
 	}
 	if strings.Contains(out, "no per-task changes — daemon-intent.json stops already reflected in supervisor-intent.json") {
-		t.Fatalf("watermark-only changed result printed bare no-delta line; full:\n%s", out)
+		t.Fatalf("bookkeeping changed result printed bare no-delta line; full:\n%s", out)
 	}
-	if !strings.Contains(out, "watermark self-heal: legacy stop already reflected; recording bookkeeping watermark (no daemon lifecycle change)") {
-		t.Fatalf("watermark-only changed result did not explain bookkeeping write; full:\n%s", out)
+	if !strings.Contains(out, "bookkeeping compaction: pruning redundant legacy-stop watermarks (no daemon lifecycle change)") {
+		t.Fatalf("bookkeeping changed result did not explain compaction write; full:\n%s", out)
 	}
 }
 

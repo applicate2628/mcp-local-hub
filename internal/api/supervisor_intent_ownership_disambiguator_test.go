@@ -515,8 +515,8 @@ func TestRemoveServerFromSupervisorIntent_ManifestUninstall_ReclaimsStaleRow(t *
 		if _, ok := got.Stops[siblingTask]; !ok {
 			t.Errorf("sibling stop %q was pruned by manifest uninstall: %+v", siblingTask, got.Stops)
 		}
-		if _, ok := got.LegacyStopWatermarks[siblingTask]; !ok {
-			t.Errorf("sibling legacy-stop watermark %q was pruned by manifest uninstall: %+v", siblingTask, got.LegacyStopWatermarks)
+		if _, ok := got.LegacyStopWatermarks[siblingTask]; ok {
+			t.Errorf("sibling stop %q retained redundant legacy-stop watermark: %+v", siblingTask, got.LegacyStopWatermarks)
 		}
 	}
 }

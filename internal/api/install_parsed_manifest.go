@@ -454,8 +454,9 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 		if werr := writeSupervisorIntentLockHeld(intentPath, desiredIntent); werr != nil {
 			return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, werr)
 		}
-		// Compensating undo: restore the prior file content verbatim, or
-		// remove the file entirely if it did not exist before this install.
+		// Compensating undo: restore the prior intent through the same
+		// supervisor-intent write boundary, or remove the file entirely if it did
+		// not exist before this install.
 		undo := func() {
 			if priorExisted {
 				if rerr := writeSupervisorIntentLockHeld(intentPath, priorIntent); rerr != nil {
@@ -2531,17 +2532,22 @@ func supervisorDaemonsFromPlan(m *config.ServerManifest, daemonFilter string) []
 // file is not an error: it returns an empty (non-nil) SupervisorIntentFile
 // and existed=false so callers can distinguish first-install from replace.
 func readSupervisorIntentForMerge(path string) (file *SupervisorIntentFile, existed bool, err error) {
+	file, existed, _, err = readSupervisorIntentForMergeWithRawStopMaps(path)
+	return file, existed, err
+}
+
+func readSupervisorIntentForMergeWithRawStopMaps(path string) (file *SupervisorIntentFile, existed bool, rawStops supervisorIntentRawStopMaps, err error) {
 	if _, serr := os.Stat(path); serr != nil {
 		if os.IsNotExist(serr) {
-			return &SupervisorIntentFile{Version: 1}, false, nil
+			return &SupervisorIntentFile{Version: 1}, false, supervisorIntentRawStopMaps{}, nil
 		}
-		return nil, false, fmt.Errorf("stat %s: %w", path, serr)
+		return nil, false, supervisorIntentRawStopMaps{}, fmt.Errorf("stat %s: %w", path, serr)
 	}
-	parsed, perr := ReadSupervisorIntent(path)
+	parsed, rawStops, perr := readSupervisorIntentWithRawStopMaps(path)
 	if perr != nil {
-		return nil, false, perr
+		return nil, false, supervisorIntentRawStopMaps{}, perr
 	}
-	return parsed, true, nil
+	return parsed, true, rawStops, nil
 }
 
 // preflightSupervisorIntentWrite dry-writes desired to a temp path in the
@@ -2551,7 +2557,7 @@ func readSupervisorIntentForMerge(path string) (file *SupervisorIntentFile, exis
 // happens, so a doomed install fails fast with a pristine end-state.
 func preflightSupervisorIntentWrite(stateDir string, desired *SupervisorIntentFile) error {
 	tmp := joinStateFilePath(stateDir, supervisorIntentFileLeaf+".preflight")
-	if err := WriteStateFileAtomic(tmp, desired); err != nil {
+	if err := WriteSupervisorIntent(tmp, desired); err != nil {
 		return err
 	}
 	// Best-effort cleanup of the probe file + its flock leaf. A leftover

@@ -112,10 +112,11 @@ type DaemonIntentCollapseResult struct {
 	// the merge would persist into supervisor-intent.json's `stops`
 	// sub-block). Always non-nil.
 	MergedStops map[string]DaemonIntent
-	// MergedLegacyStopWatermarks is the resulting per-task legacy-stop
-	// watermark map. It is not a stop source; it only records exact legacy
-	// records already accounted for by the collapse so later stale legacy replay
-	// can be distinguished from first migration. Always non-nil.
+	// MergedLegacyStopWatermarks is the resulting absent-only legacy-stop
+	// tombstone map. It is not a stop source; it only records exact legacy
+	// records that were previously accounted for and then deliberately cleared
+	// from Stops, so later stale legacy replay can be distinguished from first
+	// migration. Always non-nil.
 	MergedLegacyStopWatermarks map[string]DaemonIntent
 	// Changed reports whether the merge altered the supervisor-intent stops
 	// sub-block or legacy-stop watermarks versus their prior on-disk content.
@@ -171,17 +172,20 @@ func mergeDaemonIntentStops(
 		now = time.Now().UTC()
 	}
 
-	// Seed the merged set from the existing baseline (copy — never mutate
-	// the caller's map).
+	normalizedPrior := cloneSupervisorIntentFile(supervisorIntent)
+	normalizeAbsentOnlyStopWatermarks(normalizedPrior)
+
+	// Seed the merged set from the normalized existing baseline (copy — never
+	// mutate the caller's map).
 	merged := map[string]DaemonIntent{}
-	if supervisorIntent != nil && supervisorIntent.Stops != nil {
-		for k, v := range supervisorIntent.Stops {
+	if normalizedPrior != nil && normalizedPrior.Stops != nil {
+		for k, v := range normalizedPrior.Stops {
 			merged[k] = v
 		}
 	}
 	mergedWatermarks := map[string]DaemonIntent{}
-	if supervisorIntent != nil && supervisorIntent.LegacyStopWatermarks != nil {
-		for k, v := range supervisorIntent.LegacyStopWatermarks {
+	if normalizedPrior != nil && normalizedPrior.LegacyStopWatermarks != nil {
+		for k, v := range normalizedPrior.LegacyStopWatermarks {
 			mergedWatermarks[k] = v
 		}
 	}
@@ -201,18 +205,18 @@ func mergeDaemonIntentStops(
 						continue
 					}
 					merged[key] = di
-					mergedWatermarks[key] = di
+					delete(mergedWatermarks, key)
 					entries = append(entries, MergeStopsEntry{
 						TaskName: key, Action: MergeStopAdded, Reason: di.Reason,
 					})
 				} else if !daemonIntentRecordsEqual(prior, di) && di.UpdatedAt.After(prior.UpdatedAt) {
 					merged[key] = di
-					mergedWatermarks[key] = di
+					delete(mergedWatermarks, key)
 					entries = append(entries, MergeStopsEntry{
 						TaskName: key, Action: MergeStopUpdated, Reason: di.Reason,
 					})
 				} else {
-					mergedWatermarks[key] = di
+					delete(mergedWatermarks, key)
 				}
 				continue
 			}

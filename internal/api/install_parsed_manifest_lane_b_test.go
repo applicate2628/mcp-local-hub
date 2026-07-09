@@ -433,10 +433,10 @@ func TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows(t *testing.T) 
 	if _, ok := written.LegacyStopWatermarks[priorRows[0].TaskName]; ok {
 		t.Fatalf("dropped workspace watermark %q survived: %+v", priorRows[0].TaskName, written.LegacyStopWatermarks)
 	}
-	if _, ok := written.LegacyStopWatermarks[priorRows[1].TaskName]; !ok {
-		t.Fatalf("surviving workspace watermark %q was pruned: %+v", priorRows[1].TaskName, written.LegacyStopWatermarks)
+	if _, ok := written.LegacyStopWatermarks[priorRows[1].TaskName]; ok {
+		t.Fatalf("surviving workspace stop %q retained redundant watermark: %+v", priorRows[1].TaskName, written.LegacyStopWatermarks)
 	}
-	if _, ok := written.LegacyStopWatermarks[otherTask]; !ok {
-		t.Fatalf("sibling server watermark %q was pruned: %+v", otherTask, written.LegacyStopWatermarks)
+	if _, ok := written.LegacyStopWatermarks[otherTask]; ok {
+		t.Fatalf("sibling server stop %q retained redundant watermark: %+v", otherTask, written.LegacyStopWatermarks)
 	}
 }

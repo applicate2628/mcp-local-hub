@@ -289,9 +289,9 @@ func TestSelectSupervisorOwnedTargets_PopulatedAndUnfilteredUnchanged(t *testing
 }
 
 // ---------------------------------------------------------------------------
-// FIX 3 — upsertLSPSupervisorIntent captures a prior stop tombstone through both
-// the canonical AND bare key forms (supervisorStopForTask), so a bare-keyed stop
-// survives the rollback closure instead of being silently dropped.
+// FIX 3 — upsertLSPSupervisorIntent captures a prior stop tombstone after the
+// read boundary canonicalizes raw bare keys, so a bare-keyed stop survives the
+// rollback closure instead of being silently dropped.
 // ---------------------------------------------------------------------------
 
 // TestUpsertLSPSupervisorIntent_BareKeyStop_SurvivesRollback locks FIX 3. A
@@ -299,10 +299,10 @@ func TestSelectSupervisorOwnedTargets_PopulatedAndUnfilteredUnchanged(t *testing
 // the returned rollback closure runs against a post-spawn intent (descriptor
 // present, stop cleared) it restores the descriptor WITH the stop tombstone.
 //
-// Negative-control: pre-fix the raw desired.Stops[descriptor.TaskName] index
-// misses the bare key, so hadPriorStop=false and the rollback restores the
+// Negative-control: without read-boundary canonicalization, the canonical-only
+// lookup misses the bare key, so hadPriorStop=false and the rollback restores the
 // descriptor WITHOUT the stop — reviving a deliberately-stopped daemon. Asserting
-// the stop is present after rollback fails against the pre-fix code.
+// the stop is present after rollback fails without that canonicalization.
 func TestUpsertLSPSupervisorIntent_BareKeyStop_SurvivesRollback(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	t.Cleanup(SetDaemonStateRootForTest(stateDir))
@@ -324,13 +324,17 @@ func TestUpsertLSPSupervisorIntent_BareKeyStop_SurvivesRollback(t *testing.T) {
 	// Seed: the descriptor already exists (forces the replace path) AND a stop is
 	// keyed under the BARE form (legacy/external/migrated).
 	stop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
-	seed := &SupervisorIntentFile{
+	writeRawSupervisorIntentFileForTest(t, intentPath, SupervisorIntentFile{
 		Version: 1,
 		Daemons: []SupervisorDaemon{priorDescriptor},
 		Stops:   map[string]DaemonIntent{bareTask: stop},
+	})
+	rawSeed := readRawSupervisorIntentFileForTest(t, stateDir)
+	if _, ok := rawSeed.Stops[bareTask]; !ok {
+		t.Fatalf("raw seed lost bare stop key %q before exercising rollback path: %+v", bareTask, rawSeed.Stops)
 	}
-	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
-		t.Fatalf("seed WriteSupervisorIntent: %v", err)
+	if _, ok := rawSeed.Stops[canonicalTask]; ok {
+		t.Fatalf("raw seed is canonicalized; test would be vacuous for bare-key regression: %+v", rawSeed.Stops)
 	}
 
 	rollback, err := NewAPI().upsertLSPSupervisorIntent(entry, "mcphub")

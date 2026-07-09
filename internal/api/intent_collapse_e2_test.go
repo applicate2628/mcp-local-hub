@@ -93,9 +93,9 @@ func TestRunDaemonIntentCollapse_E2_DeletionIdempotent(t *testing.T) {
 }
 
 // Ordered: a daemon-intent.json with an active stop that the sub-block ALREADY
-// carries (E1 already merged it) is deleted on the next boot. If the legacy-stop
-// watermark is missing, the pass writes that self-healing watermark before the
-// delete. This is the crash-between-write-and-delete recovery path.
+// carries (E1 already merged it) is deleted on the next boot. The present
+// sub-block stop is the durable watermark; collapse must not write a redundant
+// legacy-stop watermark before the delete.
 func TestRunDaemonIntentCollapse_E2_DeletesWhenSubBlockAlreadyMerged(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	defer SetDaemonStateRootForTest(stateDir)()
@@ -119,8 +119,8 @@ func TestRunDaemonIntentCollapse_E2_DeletesWhenSubBlockAlreadyMerged(t *testing.
 	if err != nil {
 		t.Fatalf("RunDaemonIntentCollapse: %v", err)
 	}
-	if !res.Wrote {
-		t.Fatalf("expected write to self-heal missing legacy-stop watermark; res=%+v", res)
+	if res.Wrote {
+		t.Fatalf("expected no write when present sub-block stop already accounts for legacy stop; res=%+v", res)
 	}
 	if !res.DeletedLegacyFile {
 		t.Fatalf("expected delete even on no-delta path (crash-recovery); res=%+v", res)
@@ -128,7 +128,7 @@ func TestRunDaemonIntentCollapse_E2_DeletesWhenSubBlockAlreadyMerged(t *testing.
 	if _, statErr := os.Stat(filepath.Join(stateDir, intentFileLeaf)); !os.IsNotExist(statErr) {
 		t.Fatalf("daemon-intent.json should be deleted on no-delta path (err=%v)", statErr)
 	}
-	assertDaemonIntentEqual(t, readSupervisorLegacyStopWatermarksFromDisk(t, stateDir)[task], di)
+	assertNoLegacyStopWatermarkForTask(t, stateDir, task)
 }
 
 func TestRunDaemonIntentCollapse_E2_NewerActiveLegacyStopUpdatesSubBlockAndDeletes(t *testing.T) {
@@ -161,7 +161,7 @@ func TestRunDaemonIntentCollapse_E2_NewerActiveLegacyStopUpdatesSubBlockAndDelet
 	if got := readSupervisorStopsFromDisk(t, stateDir)[task]; got.Desired != newStop.Desired || got.Reason != newStop.Reason || !got.UpdatedAt.Equal(newStop.UpdatedAt) {
 		t.Fatalf("updated sub-block stop = %+v, want %+v", got, newStop)
 	}
-	assertDaemonIntentEqual(t, readSupervisorLegacyStopWatermarksFromDisk(t, stateDir)[task], newStop)
+	assertNoLegacyStopWatermarkForTask(t, stateDir, task)
 	if _, statErr := os.Stat(filepath.Join(stateDir, intentFileLeaf)); !os.IsNotExist(statErr) {
 		t.Fatalf("daemon-intent.json should be deleted after exact updated record is persisted (err=%v)", statErr)
 	}
