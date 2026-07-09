@@ -1,9 +1,12 @@
 ---
-status: closed (fixed by PR #514, merged 2026-07-08 03:42Z as c2171b44; deploy-proven: 0 degraded / 45min / ~9 cleanup ticks)
 severity: low
 filed: 2026-07-08
 context: post-deploy tail of the hub-flap fix (PR #510); predicted by fable acceptance INFO-1
 ---
+
+- **status:** fixed
+- **fixed-by:** PR #514 (`c2171b44`) - status coalescer single-flight plus serve-stale.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
 
 # Rare transient degraded blips: coalescer holds `mu` across the 3s probe → stacked status callers can exceed the 5s IPC timeout
 

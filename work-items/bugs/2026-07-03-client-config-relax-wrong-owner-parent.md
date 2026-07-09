@@ -1,10 +1,13 @@
 ---
-status: fixed
 severity: low
 filed: 2026-07-03
 fixed: 2026-07-08 (branch fix/backlog-bug-sweep, commit 9dabdb70 — clientConfigParentGateAllowsDefaultRelax mirrors the state-file wrong-owner hard-fail; refuses a foreign-owned parent in both client-write lanes; test TestClientConfigParentGateWrongOwnerHardFails)
 context: deep-audit finding (secure-write-dacl × correctness lens; DISPUTED — code divergence CONFIRMED, exploitability REFUTED 2/3)
 ---
+
+- **status:** fixed
+- **fixed-by:** PR #517 (`8dc8d064`) plus PR #518 (`63c93761`) - write/create lanes refuse wrong-owner parents.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
 
 # Client-config default-relax lane does not refuse a WRONG-OWNER parent, diverging from the state-file lane that does
 

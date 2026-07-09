@@ -1,10 +1,13 @@
 ---
-status: fixed
 severity: low
 fixed: 2026-07-03 — branch fix/lsp-notification-detach-202. handleLSPNotification now writes 202 immediately and forwards the notification best-effort in a DETACHED goroutine (cleanupContext-bounded, survives client disconnect); new forwardLSPNotificationDetached logs a hub-mcp.log warn on transport failure / non-2xx but never propagates. Mirrors serena forwardSerenaCancelledUpstream. Test TestLSPRouter_NotificationForwardIsDetached202 (reachable→202+delivered, unreachable→202-not-502; negative-controlled).
 filed: 2026-07-03
 context: deep-audit finding (multi-agent audit, lsp-router × error-propagation lens; partial verification — session-limit cut the skeptics)
 ---
+
+- **status:** fixed
+- **fixed-by:** PR #498 (`1a027dd5`) - LSP notifications return 202 and forward detached.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
 
 # LSP router notification forward returns a transport error status (502/504) or JSON-RPC error envelope to a JSON-RPC notification, violating the documented notifications→202 contract
 

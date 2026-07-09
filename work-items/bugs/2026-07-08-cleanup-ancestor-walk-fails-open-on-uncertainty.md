@@ -1,12 +1,14 @@
 ---
 id: 2026-07-08-cleanup-ancestor-walk-fails-open-on-uncertainty
-status: fixed
 severity: high
 area: internal/api/cleanup.go (parseOrphans + parseAggressiveCandidates ancestor walks)
 found-by: codex deep-security lane A + lane B (A2 PR5 adversarial re-verify)
 context: adjacent to 2026-07-05-adopt-npx-orphans (A2 PR5)
-fixed-by: PR #521 (master 509afa31), deployed + live-verified 2026-07-08
 ---
+
+- **status:** fixed
+- **fixed-by:** PR #521 (`509afa31`) - ancestor walks fail closed on alive/unknown/probe-error/self-loop/depth-cap.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
 
 ## Status — FIXED (PR #521 → master 509afa31, deployed + live-verified 2026-07-08)
 

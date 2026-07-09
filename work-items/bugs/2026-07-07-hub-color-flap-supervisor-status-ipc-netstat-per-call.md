@@ -1,9 +1,12 @@
 ---
-status: closed (fixed by PR #510, merged 2026-07-07 23:35Z as 1aeec052; hotfix-deployed 2026-07-07 23:10 local, final master redeployed 2026-07-08 04:31 local)
 severity: medium
 filed: 2026-07-07
 context: GUI hub health flap; root-caused by Opus against live logs + HEAD
 ---
+
+- **status:** fixed
+- **fixed-by:** PR #510 (`1aeec052`) plus PR #514 (`c2171b44`) - supervisor status coalescing and serve-stale refinement.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
 
 # Hub color flaps RED↔GREEN — supervisor status IPC does a fresh netstat per call (no coalescing) → restart-watcher timeout
 

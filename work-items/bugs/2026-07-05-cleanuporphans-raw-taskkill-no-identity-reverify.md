@@ -1,9 +1,12 @@
 ---
-status: fixed (PR #511 TerminatePIDWithIdentity + cmdline revalidate; see TRIAGE-2026-07-08.md)
 severity: medium
 filed: 2026-07-05
 context: adjacent-finding (surfaced during the A2 npx-orphan security-design pass, architect-verified against HEAD)
 ---
+
+- **status:** fixed
+- **fixed-by:** PR #511 (`93102d91`) - cleanup kills through `TerminatePIDWithIdentity`.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
 
 # CleanupOrphans reaps with raw `taskkill /PID <pid> /F` — no identity re-verify (PID-recycle friendly-fire window)
 

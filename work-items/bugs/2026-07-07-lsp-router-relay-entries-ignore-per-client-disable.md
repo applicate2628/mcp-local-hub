@@ -1,9 +1,11 @@
 ---
-status: open (fix in flight — branch fix/lsp-router-per-client-disable, codex-2)
 severity: high
 filed: 2026-07-07
 context: operator-hit (Antigravity), fable-root-caused during the global-proliferation diagnosis
 ---
+
+- **status:** open
+- **HEAD reconciliation (2026-07-09):** Backend/CLI fixed by PR #512 (`c3fc1801`), but the original GUI Servers-tab disable path remains a design gap at master `63b6a008`.
 
 # "Disabled" client still gets LSP-router relay entries — Antigravity spawns 18 `mcphub relay` despite being disabled in the Servers tab
 

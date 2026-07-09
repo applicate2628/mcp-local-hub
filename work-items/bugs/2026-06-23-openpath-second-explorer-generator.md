@@ -1,6 +1,8 @@
 ---
-status: triage
 ---
+
+- **status:** wontfix
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; triage decision is by-design one folder window per explicit operator click, not a code fix.
 
 # OpenPath is a second SeparateProcess=1 explorer-window generator (adjacent to the flood reaper)
 

@@ -1,9 +1,11 @@
 ---
-status: mostly-resolved
 severity: P1
 date: 2026-06-19
 slug: serena-client-revert-on-manifest-sync
 ---
+
+- **status:** duplicate
+- **HEAD reconciliation (2026-07-09):** Duplicate of `2026-06-19-serena-client-revert.md`; canonical defect is fixed by PR #400 (`43e7619a`) at master `63b6a008`.
 
 # Serena client entry reverts on manifest sync
 

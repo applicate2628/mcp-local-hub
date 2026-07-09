@@ -1,10 +1,13 @@
 ---
-status: fixed
 severity: medium
 filed: 2026-07-03
 fixed: 2026-07-08 (branch fix/backlog-bug-sweep, commit a112d059 — postToolsList drains all nextCursor pages server-side, bounded by maxToolsListPages; behaviour-preserving for non-paginating daemons; tests TestPostToolsListDrainsPaginatedDaemon + TestPostToolsListRunawayCursorCapped)
 context: deep-audit finding (multi-agent audit, hub-aggregator × wire lens, CONFIRMED by 1 verifier before session-limit cut the rest)
 ---
+
+- **status:** fixed
+- **fixed-by:** PR #517 (`8dc8d064`) - `postToolsList` drains paginated `nextCursor` pages.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
 
 # Hub tools/list fan-out ignores MCP pagination (result.nextCursor) — a paginating daemon's later tools are silently dropped and unroutable
 

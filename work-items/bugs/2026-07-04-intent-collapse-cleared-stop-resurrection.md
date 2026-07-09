@@ -1,9 +1,11 @@
 ---
-status: open
 severity: low
 filed: 2026-07-04
 context: deep-audit finding (multi-agent audit, install-migrate-intent × correctness lens, STRONG). Call-path verified 2026-07-04 — the suggested fix is WRONG (breaks initial migration); reclassified from quick-fix to design-decision.
 ---
+
+- **status:** open
+- **HEAD reconciliation (2026-07-09):** Verified still open against master `63b6a008`: `mergeDaemonIntentStops` still has the `!hadPrior` add path; E2 narrows but does not tombstone the mixed-old-binary case.
 
 # `mergeDaemonIntentStops` re-adds a deliberately-cleared stop from a lingering legacy `daemon-intent.json` (transitional-window only)
 

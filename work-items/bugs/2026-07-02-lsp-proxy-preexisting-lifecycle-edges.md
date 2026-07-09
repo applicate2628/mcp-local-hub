@@ -1,6 +1,8 @@
 # LSP lazy-proxy: two pre-existing lifecycle/refcount edges (backlog)
 
 - **status:** fixed
+- **fixed-by:** PR #492 (`52b492f1`) - lazy-proxy lifecycle/refcount edges closed.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
 - **severity:** low
 - **filed:** 2026-07-02
 - **fixed:** 2026-07-03 (branch `fix/lsp-preexisting-lifecycle-edges`, both edges)

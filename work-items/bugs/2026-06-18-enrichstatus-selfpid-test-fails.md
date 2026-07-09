@@ -5,7 +5,6 @@ found-by: backend-engineer
 found-in-phase: groups Phase 5b-1 (/api/groups CRUD endpoint) — full internal/api test sweep
 affected-surface: internal/api/status_enrich.go (selfPID skip, lines ~154/184/193/205) consumed by internal/api/status_enrich_test.go:110
 context: adjacent-finding
-status: fixed
 fixed: 2026-06-19
 resolution: >
   Root cause CAPTURED at runtime (t.Logf probe): the fixture
@@ -22,6 +21,10 @@ resolution: >
   port equals the GUI listener (a collision that still arises via
   registry/dynamic ports). All 13 EnrichStatus tests PASS.
 ---
+
+- **status:** fixed
+- **fixed-by:** PR #21 (`e01e9113`) - self-PID skip test repaired at HEAD.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
 
 ## Summary
 

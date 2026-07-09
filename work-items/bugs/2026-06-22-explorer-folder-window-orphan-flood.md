@@ -1,8 +1,11 @@
 ---
-status: resolving
 severity: high
 context: orphan-reaping (the hub's core mission — stale processes from agentic+MCP usage)
 ---
+
+- **status:** fixed
+- **fixed-by:** PR #423 (`260eaa47`) - bare `mcphub gui --force` is print-only; reveal is opt-in.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
 
 # Hub spawns unbounded zombie `explorer.exe` folder windows it never reaps
 

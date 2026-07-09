@@ -10,8 +10,11 @@ affected-surface: >
   %LOCALAPPDATA%\mcp-local-hub\workspaces.yaml file written by a
   pre-2026-06-18 binary on a broadened-DACL parent.
 context: adjacent-finding
-status: fixed-by-operator-command (repair-state-dacl)
 ---
+
+- **status:** fixed
+- **fixed-by:** PR #465 (`9c50960d`) - `mcphub repair-state-dacl`; write invariant test from `8be1721c`.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
 
 ## Symptom (the report that triggered this investigation)
 

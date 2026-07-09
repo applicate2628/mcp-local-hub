@@ -1,6 +1,8 @@
 # npx-stdio MCP servers orphan-accumulate because they bypass mcphub (hub-purpose failure)
 
-- **status:** closed — P0+P1 shipped as `mcphub adopt` (PR #513, merged 2026-07-08 01:21Z as d518a511); @mui/mcp leak swept (124 procs) + adopted into the hub (mui-mcp@9301, claude+codex repointed); reaper identity-hardening shipped separately (PR #511). Residual: reaper ScanClientConfigs auto-path (A2 PR5, pipe-peer gate) stays open in the design.
+- **status:** fixed
+- **fixed-by:** PR #513 (`d518a511`), PR #516 (`487482cf`), and PR #520 (`c53d874a`) - CLI/GUI adopt plus auto-reaper H5 gate.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; the old residual-open note below is superseded by PR #520/#521/#522 hardening.
 - **severity:** CRITICAL (raised from high 2026-07-07 by operator) — defeats mcphub's raison d'être (process-tail compression); ~360 node.exe accumulated on the dev host, 200+ were a single MCP server
 - **filed:** 2026-07-04
 - **context:** live-fleet / mcphub purpose / client-config routing

@@ -1,12 +1,14 @@
 ---
 id: 2026-07-08-aggressive-cleanup-token-omits-started-at
-status: fixed
 severity: low
 area: internal/api/cleanup.go (AggressiveConfirmToken) + internal/gui/cleanup_aggressive.go
 found-by: architect (A2 PR5 r5 consent-binding review)
 context: adjacent-finding
-fixed-by: PR #522 (master 669951e3), deployed + live-verified 2026-07-08
 ---
+
+- **status:** fixed
+- **fixed-by:** PR #522 (`669951e3`) - aggressive token and kill binding use `{PID, StartedAt}`.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
 
 ## Status — FIXED (PR #522 → master 669951e3, deployed + live-verified 2026-07-08; bot FULL PASS first round)
 

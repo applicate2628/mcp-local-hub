@@ -1,9 +1,9 @@
 # Work items index
 
-> Canonical open-bug truth: **`bugs/TRIAGE-2026-07-08.md`** (HEAD-verified by 3 parallel
-> agents). Individual bug-doc frontmatter LAGS reality — the roadmap was ~90% stale (most
-> bugs were fixed without a status flip). Trust the TRIAGE + the "Truly open" list below,
-> NOT a raw count of files in `bugs/` (32 files ≈ 4 open + ~26 done-not-flipped + 2 triage).
+> Canonical open-bug truth: **`bugs/TRIAGE-2026-07-09.md`** (HEAD-verified against master
+> `63b6a008`). Individual bug-doc frontmatter used to lag reality; the top-level bug registry
+> has now been normalized. Trust the TRIAGE + the "Truly open" list below, NOT a raw count of
+> files in `bugs/` (32 files = 2 open + 25 fixed + 1 duplicate + 1 wontfix + 3 triage records).
 
 ## Active (work-items/active/)
 
@@ -24,11 +24,10 @@
 | Bug | Status |
 |---|---|
 | [2026-07-04-intent-collapse-cleared-stop-resurrection](bugs/2026-07-04-intent-collapse-cleared-stop-resurrection.md) | open |
-| [2026-07-07-lsp-router-relay-entries-ignore-per-client-disable](bugs/2026-07-07-lsp-router-relay-entries-ignore-per-client-disable.md) | open (fix in flight) |
-| [2026-06-23-openpath-second-explorer-generator](bugs/2026-06-23-openpath-second-explorer-generator.md) | triage |
-| [2026-06-22-explorer-folder-window-orphan-flood](bugs/2026-06-22-explorer-folder-window-orphan-flood.md) | resolving (print-only default + --reveal shipped; verify + close) |
+| [2026-07-07-lsp-router-relay-entries-ignore-per-client-disable](bugs/2026-07-07-lsp-router-relay-entries-ignore-per-client-disable.md) | open |
 
-Two triage batch files (`bugs/TRIAGE-2026-05-28.md`, `bugs/TRIAGE-2026-07-08.md`) are
+Three triage batch files (`bugs/TRIAGE-2026-05-28.md`, `bugs/TRIAGE-2026-07-08.md`,
+`bugs/TRIAGE-2026-07-09.md`) are
 reconciliation records, not open tasks.
 
 ## Epics
