@@ -104,3 +104,29 @@ Overall verdict: REVISE. All nine findings survived adversarial refutation. Thre
 ## Gate Result
 
 All nine findings are recorded as confirmed. The revised design must be re-run through this adversarial security gate before implementation. Until that gate is clean, no implementation, local product-code commit, or publication is authorized.
+
+## Re-gate 2026-07-09 (round 2)
+
+The round-2 re-gate found that the revision at b5e6f6f344af5ee50873e84fb21d1bc4bcf088ce closed all nine findings above and the accepted A/B/C code-audit contracts. It also found the following two new confirmed findings. Overall verdict: REVISE; implementation remains blocked pending a clean re-run against design revision 3.
+
+### 10. P1 (attacker) — standalone `supervise` is byte-identical to a live in-use supervisor; parentDeathGate is vacuous for it
+
+| Field | Detail |
+|---|---|
+| Where | The pre-round-3 discriminator and positive branches admitted `supervise` at b5e6f6f344af5ee50873e84fb21d1bc4bcf088ce:work-items/active/2026-07-09-test-leftover-reaper/design.md:38 and :42-45, :115-154, :205-210, :217-255. The GUI spawns `supervise` from its resolved own executable at internal/cli/gui_supervisor_owner.go:128-150 and :888-900, detached at internal/cli/gui_supervisor_owner_windows.go:26-31 and with breakaway added at internal/cli/supervisor_spawn_breakaway_windows.go:12-49. A later GUI can adopt the existing process at internal/cli/gui_supervisor_owner.go:20-32 and :109-110 plus internal/cli/gui.go:674-698. orphanParentProvenDead accepts an error-free dead PID state at internal/api/cleanup.go:1702-1708. |
+| Problem | The v0.6 supervisor is designed to outlive and later be adopted by a GUI, so a live in-use supervisor can have the dead recorded PPID of its original GUI. A tagged `go run ... gui` from a go-build-cache image with a scratch MCPHUB_STATE_DIR_OVERRIDE can therefore produce a detached `supervise` process that passes the old go-build-cache image, argv, tag, environment, age, production-state, identity, and parentDeathGate predicates. The e2e marker cannot distinguish it: MCPHUB_E2E_SUPERVISOR=none returns before the GUI spawn block at internal/cli/gui.go:653-668, so a real spawned supervisor can never carry that marker through this path. Preview cannot distinguish the active adopted supervisor from a genuine leftover; confirmation could terminate it and its KILL_ON_JOB_CLOSE Job-Object fleet. |
+| Fix | Revision 3 removes `supervise` argv from every positive branch and makes supervise-not-tree-reachable the refusal for every standalone row. A supervisor is reaped only as the identity-bound live descendant of a confirmed go-build-cache test GUI in the same operation. It independently passes buildInfoTagGate, productionStateGuard, identity, and the other applicable non-topology gates; its liveness/provenance comes only from the confirmed live GUI ancestry. The fixed order is descendant-before-GUI because it preserves the observable ancestry and never manufactures the ambiguous orphan state; a refused or unconfirmed child prevents the GUI kill. An already-orphaned standalone supervisor remains outside automated scope and requires manual operator reaping with out-of-band identity verification. |
+| Verdict | CONFIRMED — P1 live-kill path. Revision 3 must remove standalone-supervise admission and re-gate. |
+
+### 11. P3 (consistency) — Positive Common Gate 1 names no owner
+
+| Field | Detail |
+|---|---|
+| Where | Positive Common Gate 1 named snapshot completeness without an owner or citation at b5e6f6f344af5ee50873e84fb21d1bc4bcf088ce:work-items/active/2026-07-09-test-leftover-reaper/design.md:119; the Components table at :72-90 omitted it. parseProcessRows owns row parsing and returns the snapshot error at internal/api/cleanup.go:1251-1275. parseOrphans and parseAggressiveCandidates propagate that `snapErr` at internal/api/cleanup.go:1284, :1420, :1469, and :1557, and AggressiveCleanup fails apply closed at :1623-1630. |
+| Problem | Gate 1 was the only positive common gate with no named single owner, leaving the direct row scan free to parse separately or drop the existing truncated-snapshot signal. That would violate Audit B's requirement to reuse runProcessSnapshot plus parseProcessRows and inherit the `snapErr` fail-close. |
+| Fix | Revision 3 names parseProcessRows and its existing `snapErr` return as the single owner of snapshot-completeness detection in Positive Common Gate 1 and the Components table. The direct row scan reuses runProcessSnapshot plus parseProcessRows; any `snapErr` makes apply refuse snapshot-degraded before termination. T16 and architectural claim 12 drive this exact return path. |
+| Verdict | CONFIRMED — P3 ownership and fail-close consistency defect. Revision 3 must name the owner and re-gate. |
+
+### Round-2 Gate Result
+
+The prior nine findings and A/B/C code contracts are closed, but the two new findings above keep the design at REVISE. No implementation is authorized until design revision 3 passes a clean adversarial security re-gate.
