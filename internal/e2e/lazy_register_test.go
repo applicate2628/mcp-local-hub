@@ -327,18 +327,13 @@ func TestE2E_LazyRegisterFullLifecycle(t *testing.T) {
 		t.Error("LastMaterializedAt should be stamped after materialization")
 	}
 
-	// --- Step 5: Status reflects the 5-state lifecycle --------------------
-	rows, err := a.Status()
-	if err != nil {
-		t.Fatalf("Status: %v", err)
+	// --- Step 5: Status fails loud without a supervisor -------------------
+	// Status must return ErrSupervisorDown when its IPC-backed daemon-state
+	// source is unavailable; lifecycle persistence was verified above.
+	_, err = a.Status()
+	if !errors.Is(err, api.ErrSupervisorDown) {
+		t.Fatalf("Status error = %v, want ErrSupervisorDown", err)
 	}
-	// The fake scheduler above has no List() method and the real
-	// scheduler.List() will return its own rows. Status is best-effort on
-	// non-Windows hosts; as long as enrichStatusWithRegistry runs, any row
-	// we inject manually should show lifecycle. Assert via a direct
-	// row-level exercise — Status's contract is already covered by its
-	// own tests.
-	_ = rows
 
 	// --- Step 6: Unregister ----------------------------------------------
 	if _, err := a.Unregister(ws, nil); err != nil {
