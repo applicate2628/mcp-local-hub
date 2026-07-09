@@ -453,7 +453,7 @@ describe("ServersScreen — LSP matrix rows", () => {
     cleanup();
   });
 
-  it("renders language-server rows as badge-only cells without ineffective checkboxes", async () => {
+  it("unchecking a routed language-server client posts the per-client LSP router disable endpoint", async () => {
     const scan: ScanResult = {
       at: "2026-06-03T00:00:00Z",
       entries: [
@@ -472,6 +472,7 @@ describe("ServersScreen — LSP matrix rows", () => {
       ],
       client_config_presence: { "codex-cli": "ok" },
     };
+    const disableBodies: unknown[] = [];
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
@@ -499,17 +500,108 @@ describe("ServersScreen — LSP matrix rows", () => {
               },
             ],
           }),
+        "/api/lsp-router/disable": (init?: RequestInit) => {
+          disableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, {
+            client: "codex-cli",
+            enabled: false,
+            report: {
+              removed: [
+                {
+                  client: "codex-cli",
+                  language: "python",
+                  entry_name: "mcp-language-server-python",
+                },
+              ],
+            },
+          });
+        },
       }) as unknown as typeof fetch,
     );
 
     render(<ServersScreen />);
 
-    const row = await screen.findByTestId("lsp-row-python");
-    expect(row.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
     expect(screen.getByTestId("lsp-chip-primary-python-codex-cli").textContent).toBe(
       "via-hub",
     );
     expect(screen.getByTestId("lsp-edit-env-python")).toBeTruthy();
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(disableBodies).toHaveLength(1);
+    });
+    expect(disableBodies[0]).toEqual({ client: "codex-cli" });
+  });
+
+  it("checking an absent language-server client posts the per-client LSP router enable endpoint", async () => {
+    const scan: ScanResult = {
+      at: "2026-06-03T00:00:00Z",
+      entries: [],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+    const enableBodies: unknown[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () =>
+          jsonResponse(200, {
+            workspaces: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+              },
+            ],
+            entries: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+                language: "python",
+                backend: "mcp-language-server",
+                port: 9200,
+                task_name: "\\mcp-local-hub-lsp-default-python",
+                client_entries: {},
+              },
+            ],
+          }),
+        "/api/lsp-router/enable": (init?: RequestInit) => {
+          enableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, {
+            client: "codex-cli",
+            enabled: true,
+            report: {
+              applied: [
+                {
+                  client: "codex-cli",
+                  language: "python",
+                  entry_name: "mcp-language-server-python",
+                },
+              ],
+            },
+          });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(enableBodies).toHaveLength(1);
+    });
+    expect(enableBodies[0]).toEqual({ client: "codex-cli" });
   });
 
   it("enables an unregistered language-server row through the selected workspace", async () => {
@@ -1108,6 +1200,94 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
     expect(scanCalls).toBe(scansAtEdit); // paused → zero new scans
     expect(box.checked).toBe(false); // edit preserved across the paused window
   });
+
+  it("pauses auto-refresh while an LSP router toggle POST is in flight", async () => {
+    let scanCalls = 0;
+    const disable = deferred<Response>();
+    const disableBodies: unknown[] = [];
+    const scan: ScanResult = {
+      at: "2026-06-03T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-python",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub",
+          client_presence: {
+            "codex-cli": {
+              transport: "http",
+              endpoint: "http://127.0.0.1:9200/lsp/python/mcp",
+            },
+          },
+        },
+      ],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return jsonResponse(200, scan);
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () =>
+          jsonResponse(200, {
+            workspaces: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+              },
+            ],
+            entries: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+                language: "python",
+                backend: "mcp-language-server",
+                port: 9200,
+                task_name: "\\mcp-local-hub-lsp-default-python",
+                client_entries: {
+                  "codex-cli": "mcp-language-server-python",
+                },
+              },
+            ],
+          }),
+        "/api/lsp-router/disable": (init?: RequestInit) => {
+          disableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return disable.promise;
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+
+    const scansAtToggle = scanCalls;
+    fireEvent.click(toggle);
+    await vi.waitFor(() => expect(disableBodies).toHaveLength(1));
+    await vi.waitFor(() => expect(toggle.checked).toBe(false));
+
+    await vi.advanceTimersByTimeAsync(POLL_MS * 2);
+    expect(scanCalls).toBe(scansAtToggle);
+    expect(toggle.checked).toBe(false);
+
+    await act(async () => {
+      disable.resolve(
+        jsonResponse(200, {
+          client: "codex-cli",
+          enabled: false,
+          report: {},
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  });
 });
 
 // Whole-row toggle: clicking the server-name row affordance flips EVERY
@@ -1152,7 +1332,7 @@ describe("ServersScreen — whole-row toggle", () => {
   const interactiveRowInputs = () =>
     Array.from(
       document.querySelectorAll<HTMLInputElement>(
-        'table.servers-matrix tbody tr input[type="checkbox"]:not(:disabled)',
+        'table.servers-matrix:not(.lsp-matrix) tbody tr input[type="checkbox"]:not(:disabled)',
       ),
     );
 

@@ -92,6 +92,117 @@ test.describe("servers — LSP matrix", () => {
     await expect(select.locator("option").nth(1)).toHaveText("default");
   });
 
+  test("per-client LSP toggle disables router entries through the GUI API", async ({ page, hub }) => {
+    const workspaces = {
+      workspaces: [{ workspace_key: "default", workspace_path: "/proj" }],
+      entries: [
+        buildWorkspace({
+          key: "default",
+          path: "/proj",
+          language: "python",
+          port: 9201,
+          clientEntries: { "codex-cli": "mcp-language-server-python" },
+        }),
+      ],
+    };
+    const disableBodies: unknown[] = [];
+    await routeStandardLspMocks(page, {
+      scan: {
+        at: "2026-05-20T00:00:00Z",
+        entries: [
+          {
+            name: "mcp-language-server-python",
+            manifest_exists: false,
+            can_migrate: false,
+            status: "via-hub",
+            client_presence: {
+              "codex-cli": {
+                transport: "http",
+                endpoint: "http://127.0.0.1:9125/lsp/python/mcp",
+              },
+            },
+          },
+        ],
+        client_config_presence: { "codex-cli": "ok" },
+      },
+      status: [],
+      workspaces,
+    });
+    await page.route("**/api/lsp-router/disable", async (r) => {
+      disableBodies.push(JSON.parse(r.request().postData() ?? "{}"));
+      await r.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          client: "codex-cli",
+          enabled: false,
+          report: {
+            removed: [
+              { client: "codex-cli", language: "python", entry_name: "mcp-language-server-python" },
+            ],
+          },
+        }),
+      });
+    });
+
+    await page.goto(`${hub.url}/#/servers`);
+    const toggle = page.locator('[data-testid="lsp-toggle-python-codex-cli"]');
+    await expect(toggle).toBeChecked();
+    await toggle.uncheck();
+
+    await expect.poll(() => disableBodies.length).toBe(1);
+    expect(disableBodies[0]).toEqual({ client: "codex-cli" });
+  });
+
+  test("per-client LSP toggle enables router entries through the GUI API", async ({ page, hub }) => {
+    const workspaces = {
+      workspaces: [{ workspace_key: "default", workspace_path: "/proj" }],
+      entries: [
+        buildWorkspace({
+          key: "default",
+          path: "/proj",
+          language: "python",
+          port: 9201,
+          clientEntries: {},
+        }),
+      ],
+    };
+    const enableBodies: unknown[] = [];
+    await routeStandardLspMocks(page, {
+      scan: {
+        at: "2026-05-20T00:00:00Z",
+        entries: [],
+        client_config_presence: { "codex-cli": "ok" },
+      },
+      status: [],
+      workspaces,
+    });
+    await page.route("**/api/lsp-router/enable", async (r) => {
+      enableBodies.push(JSON.parse(r.request().postData() ?? "{}"));
+      await r.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          client: "codex-cli",
+          enabled: true,
+          report: {
+            applied: [
+              { client: "codex-cli", language: "python", entry_name: "mcp-language-server-python" },
+            ],
+          },
+        }),
+      });
+    });
+
+    await page.goto(`${hub.url}/#/servers`);
+    const toggle = page.locator('[data-testid="lsp-toggle-python-codex-cli"]');
+    await expect(toggle).not.toBeChecked();
+    await toggle.check();
+
+    await expect.poll(() => enableBodies.length).toBe(1);
+    expect(enableBodies[0]).toEqual({ client: "codex-cli" });
+  });
+
   test("workspace selector empty-state placeholder when no registry", async ({ page, hub }) => {
     await routeStandardLspMocks(page);
     await page.goto(`${hub.url}/#/servers`);

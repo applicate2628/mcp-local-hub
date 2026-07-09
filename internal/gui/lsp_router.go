@@ -131,6 +131,7 @@ func (s *Server) lspRouterDepsProd() *lspRouterDeps {
 
 func registerLSPRouterRoutes(s *Server) {
 	s.mux.HandleFunc("/lsp/", s.requireSameOrigin(s.lspRouterHandler))
+	registerLSPRouterControlRoutes(s)
 }
 
 func (s *Server) lspRouterHandler(w http.ResponseWriter, r *http.Request) {

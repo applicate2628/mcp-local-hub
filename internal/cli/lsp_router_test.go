@@ -16,6 +16,10 @@ type fakeLSPRouterCLIAPI struct {
 	rollbackClients []string
 	ensureCalls     int
 	ensureOpts      []api.LSPClientRouterOpts
+	disableClients  []string
+	disableOpts     []api.LSPClientRouterOpts
+	enableClients   []string
+	enableOpts      []api.LSPClientRouterOpts
 
 	rollbackReport *api.LSPClientRouterReport
 	ensureReport   *api.LSPClientRouterReport
@@ -37,6 +41,29 @@ func (f *fakeLSPRouterCLIAPI) SetLSPRouterDisabledClients(names []string) error 
 		f.disabled[name] = true
 	}
 	return nil
+}
+
+func (f *fakeLSPRouterCLIAPI) DisableLSPRouterClient(clientName string, opts api.LSPClientRouterOpts) (*api.LSPClientRouterReport, error) {
+	f.disableClients = append(f.disableClients, clientName)
+	f.disableOpts = append(f.disableOpts, opts)
+	if f.disabled == nil {
+		f.disabled = map[string]bool{}
+	}
+	f.disabled[clientName] = true
+	if f.rollbackReport != nil {
+		return f.rollbackReport, nil
+	}
+	return &api.LSPClientRouterReport{}, nil
+}
+
+func (f *fakeLSPRouterCLIAPI) EnableLSPRouterClient(clientName string, opts api.LSPClientRouterOpts) (*api.LSPClientRouterReport, error) {
+	f.enableClients = append(f.enableClients, clientName)
+	f.enableOpts = append(f.enableOpts, opts)
+	delete(f.disabled, clientName)
+	if f.ensureReport != nil {
+		return f.ensureReport, nil
+	}
+	return &api.LSPClientRouterReport{}, nil
 }
 
 func (f *fakeLSPRouterCLIAPI) RollbackLSPRouterClientEntriesForClient(clientName string, _ api.LSPClientRouterOpts) (*api.LSPClientRouterReport, error) {
@@ -96,11 +123,11 @@ func TestLSPRouterDisablePersistsAndRollsBackClientImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("disable command: %v\n%s", err, out)
 	}
-	if len(fake.setCalls) != 1 || strings.Join(fake.setCalls[0], ",") != "claude-code,codex-cli" {
-		t.Fatalf("set calls = %+v, want [claude-code codex-cli]", fake.setCalls)
+	if len(fake.disableClients) != 1 || fake.disableClients[0] != "codex-cli" {
+		t.Fatalf("disable clients = %+v, want codex-cli", fake.disableClients)
 	}
-	if len(fake.rollbackClients) != 1 || fake.rollbackClients[0] != "codex-cli" {
-		t.Fatalf("rollback clients = %+v, want codex-cli", fake.rollbackClients)
+	if len(fake.disableOpts) != 1 || fake.disableOpts[0].GUIPort != 0 {
+		t.Fatalf("disable opts = %+v, want GUIPort 0 fallback", fake.disableOpts)
 	}
 	if !strings.Contains(out, "removed codex-cli entry mcp-language-server-go") {
 		t.Fatalf("output missing removed entry line:\n%s", out)
@@ -130,17 +157,14 @@ func TestLSPRouterEnablePersistsAndRunsEnsure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enable command: %v\n%s", err, out)
 	}
-	if len(fake.setCalls) != 1 || strings.Join(fake.setCalls[0], ",") != "claude-code" {
-		t.Fatalf("set calls = %+v, want [claude-code]", fake.setCalls)
+	if len(fake.enableClients) != 1 || fake.enableClients[0] != "codex-cli" {
+		t.Fatalf("enable clients = %+v, want codex-cli", fake.enableClients)
 	}
-	if fake.ensureCalls != 1 {
-		t.Fatalf("ensure calls = %d, want 1", fake.ensureCalls)
+	if len(fake.enableOpts) != 1 || fake.enableOpts[0].GUIPort != 0 {
+		t.Fatalf("enable opts = %+v, want GUIPort 0 fallback", fake.enableOpts)
 	}
-	if len(fake.ensureOpts) != 1 || fake.ensureOpts[0].ForceClientName != "codex-cli" {
-		t.Fatalf("ensure opts = %+v, want ForceClientName codex-cli", fake.ensureOpts)
-	}
-	if len(fake.ensureOpts[0].Clients) != 1 || fake.ensureOpts[0].Clients["codex-cli"] == nil {
-		t.Fatalf("ensure Clients scope = %+v, want only codex-cli", fake.ensureOpts[0].Clients)
+	if fake.ensureCalls != 0 {
+		t.Fatalf("ensure calls = %d, want routed through EnableLSPRouterClient owner", fake.ensureCalls)
 	}
 	if !strings.Contains(out, "codex-cli enabled for LSP router setup") {
 		t.Fatalf("output missing enable confirmation:\n%s", out)
@@ -167,11 +191,11 @@ func TestLSPRouterEnableForcesRequestedOptInClientEnsure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enable command: %v\n%s", err, out)
 	}
-	if len(fake.setCalls) != 1 || len(fake.setCalls[0]) != 0 {
-		t.Fatalf("set calls = %+v, want cleared disabled list", fake.setCalls)
+	if len(fake.enableClients) != 1 || fake.enableClients[0] != "antigravity" {
+		t.Fatalf("enable clients = %+v, want antigravity", fake.enableClients)
 	}
-	if len(fake.ensureOpts) != 1 || fake.ensureOpts[0].ForceClientName != "antigravity" {
-		t.Fatalf("ensure opts = %+v, want ForceClientName antigravity", fake.ensureOpts)
+	if len(fake.enableOpts) != 1 || fake.enableOpts[0].GUIPort != 0 {
+		t.Fatalf("enable opts = %+v, want GUIPort 0 fallback", fake.enableOpts)
 	}
 	if !strings.Contains(out, "antigravity enabled for LSP router setup") {
 		t.Fatalf("output missing enable confirmation:\n%s", out)

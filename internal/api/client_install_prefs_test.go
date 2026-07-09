@@ -3,6 +3,7 @@ package api
 import (
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -209,6 +210,45 @@ func TestSetLSPRouterDisabledClients_RoundTripRejectsUnknownAndClears(t *testing
 	}
 	if _, ok := rawCleared[lspRouterDisabledClientsKey]; ok {
 		t.Fatalf("%s still present after clear: %q", lspRouterDisabledClientsKey, rawCleared[lspRouterDisabledClientsKey])
+	}
+}
+
+func TestDisableLSPRouterClientConcurrentCallsPreserveBothOptOuts(t *testing.T) {
+	a := NewAPI()
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	opts := LSPClientRouterOpts{
+		GUIPort: 9125,
+		Clients: map[string]clients.Client{
+			"codex-cli":   nil,
+			"antigravity": nil,
+		},
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, name := range []string{"codex-cli", "antigravity"} {
+		name := name
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := a.DisableLSPRouterClient(name, opts)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("DisableLSPRouterClient: %v", err)
+		}
+	}
+	got, err := a.LSPRouterDisabledClientSet()
+	if err != nil {
+		t.Fatalf("read disabled set: %v", err)
+	}
+	if !got["codex-cli"] || !got["antigravity"] || len(got) != 2 {
+		t.Fatalf("disabled set = %v, want codex-cli + antigravity", got)
 	}
 }
 

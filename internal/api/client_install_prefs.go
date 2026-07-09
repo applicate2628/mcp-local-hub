@@ -210,6 +210,81 @@ func (a *API) SetLSPRouterDisabledClientsIn(path string, names []string) error {
 	})
 }
 
+// DisableLSPRouterClient atomically adds one client to the persisted
+// LSP-router opt-out set, then removes that client's current router entries.
+func (a *API) DisableLSPRouterClient(name string, opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
+	name, err := validateSupportedClientName(name)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.setLSPRouterClientDisabledIn(SettingsPath(), name, true); err != nil {
+		return nil, err
+	}
+	return a.RollbackLSPRouterClientEntriesForClient(name, opts)
+}
+
+// EnableLSPRouterClient atomically removes one client from the persisted
+// LSP-router opt-out set, then forces a narrowed ensure pass for that client.
+func (a *API) EnableLSPRouterClient(name string, opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
+	name, err := validateSupportedClientName(name)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.setLSPRouterClientDisabledIn(SettingsPath(), name, false); err != nil {
+		return nil, err
+	}
+	clientMap := opts.Clients
+	if clientMap == nil {
+		clientMap = clients.AllClients()
+	}
+	opts.ForceClientName = name
+	opts.Clients = map[string]clients.Client{name: clientMap[name]}
+	return a.EnsureLSPRouterClientEntries(opts)
+}
+
+func (a *API) setLSPRouterClientDisabledIn(path, name string, disabled bool) error {
+	return mutateRawSettingsMapLocked(path, func(raw map[string]string) error {
+		current := sanitizeClientNames(splitClientCSV(raw[lspRouterDisabledClientsKey]))
+		set := make(map[string]bool, len(current)+1)
+		for _, existing := range current {
+			set[existing] = true
+		}
+		if disabled {
+			set[name] = true
+		} else {
+			delete(set, name)
+		}
+		names := supportedClientNamesInSet(set)
+		if len(names) == 0 {
+			delete(raw, lspRouterDisabledClientsKey)
+			return nil
+		}
+		raw[lspRouterDisabledClientsKey] = strings.Join(names, ",")
+		return nil
+	})
+}
+
+func validateSupportedClientName(name string) (string, error) {
+	cleaned, err := validateSupportedClientNames([]string{name})
+	if err != nil {
+		return "", err
+	}
+	if len(cleaned) == 0 {
+		return "", fmt.Errorf("client name is required")
+	}
+	return cleaned[0], nil
+}
+
+func supportedClientNamesInSet(set map[string]bool) []string {
+	names := make([]string, 0, len(set))
+	for _, name := range clients.SupportedClientNames() {
+		if set[name] {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 func validateSupportedClientNames(names []string) ([]string, error) {
 	supportedNames := clients.SupportedClientNames()
 	supported := map[string]bool{}

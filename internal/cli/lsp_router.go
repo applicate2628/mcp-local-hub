@@ -12,9 +12,8 @@ import (
 
 type lspRouterCLIAPI interface {
 	LSPRouterDisabledClientSet() (map[string]bool, error)
-	SetLSPRouterDisabledClients([]string) error
-	RollbackLSPRouterClientEntriesForClient(string, api.LSPClientRouterOpts) (*api.LSPClientRouterReport, error)
-	EnsureLSPRouterClientEntries(api.LSPClientRouterOpts) (*api.LSPClientRouterReport, error)
+	DisableLSPRouterClient(string, api.LSPClientRouterOpts) (*api.LSPClientRouterReport, error)
+	EnableLSPRouterClient(string, api.LSPClientRouterOpts) (*api.LSPClientRouterReport, error)
 	LSPRouterClientStatuses(api.LSPClientRouterOpts) ([]api.LSPRouterClientStatus, error)
 }
 
@@ -84,16 +83,9 @@ func runLSPRouterDisable(cmd *cobra.Command, rawClient string) error {
 		return err
 	}
 	a := newLSPRouterCLIAPI()
-	disabled, err := a.LSPRouterDisabledClientSet()
-	if err != nil {
-		return err
-	}
-	if err := a.SetLSPRouterDisabledClients(lspRouterDisabledNames(disabled, clientName, "")); err != nil {
-		return err
-	}
-	report, err := a.RollbackLSPRouterClientEntriesForClient(clientName, api.LSPClientRouterOpts{})
+	report, err := a.DisableLSPRouterClient(clientName, api.LSPClientRouterOpts{})
 	if report == nil {
-		report = &api.LSPClientRouterReport{}
+		return err
 	}
 	printLSPClientRouterReport(cmd.OutOrStdout(), report, "disable")
 	if err != nil {
@@ -112,22 +104,11 @@ func runLSPRouterEnable(cmd *cobra.Command, rawClient string) error {
 		return err
 	}
 	a := newLSPRouterCLIAPI()
-	disabled, err := a.LSPRouterDisabledClientSet()
-	if err != nil {
-		return err
-	}
-	if err := a.SetLSPRouterDisabledClients(lspRouterDisabledNames(disabled, "", clientName)); err != nil {
+	report, err := a.EnableLSPRouterClient(clientName, api.LSPClientRouterOpts{})
+	if report == nil {
 		return err
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "✓ %s enabled for LSP router setup.\n", clientName)
-	allClients := clients.AllClients()
-	report, err := a.EnsureLSPRouterClientEntries(api.LSPClientRouterOpts{
-		ForceClientName: clientName,
-		Clients:         map[string]clients.Client{clientName: allClients[clientName]},
-	})
-	if report == nil {
-		report = &api.LSPClientRouterReport{}
-	}
 	printLSPClientRouterReport(cmd.OutOrStdout(), report, "wiring")
 	if err != nil {
 		return err
@@ -148,7 +129,12 @@ func runLSPRouterStatus(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	disabledNames := lspRouterDisabledNames(disabled, "", "")
+	disabledNames := make([]string, 0, len(disabled))
+	for _, name := range clients.SupportedClientNames() {
+		if disabled[name] {
+			disabledNames = append(disabledNames, name)
+		}
+	}
 	if len(disabledNames) == 0 {
 		fmt.Fprintln(cmd.OutOrStdout(), "Disabled clients: <none>")
 	} else {
@@ -184,21 +170,4 @@ func validateLSPRouterClientName(raw string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("unknown client %q (expected %s)", name, strings.Join(clients.SupportedClientNames(), " | "))
-}
-
-func lspRouterDisabledNames(disabled map[string]bool, add, remove string) []string {
-	names := make([]string, 0, len(disabled)+1)
-	for _, name := range clients.SupportedClientNames() {
-		on := disabled[name]
-		if name == add {
-			on = true
-		}
-		if name == remove {
-			on = false
-		}
-		if on {
-			names = append(names, name)
-		}
-	}
-	return names
 }

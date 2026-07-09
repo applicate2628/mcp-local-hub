@@ -2315,7 +2315,9 @@ section[data-section] button.btn-danger:not(:disabled):hover {
 .lsp-row-unregistered { color: var(--text-muted); font-size: 0.875rem; }
 .lsp-row-ambiguous { color: var(--warning-color); font-size: 0.85em; margin-left: 6px; }
 .lsp-row-ambiguous-hint { color: var(--warning-color); font-size: 0.9em; }
-.lsp-cell { vertical-align: middle; }
+.lsp-cell { vertical-align: middle; white-space: nowrap; }
+.lsp-router-toggle { display: inline-flex; align-items: center; margin-right: 0.25rem; vertical-align: middle; }
+.lsp-router-toggle input[type="checkbox"] { margin: 0; }
 .lsp-cell-empty { color: #aaa; }
 .lsp-chip {
   display: inline-block; padding: 0 0.4rem; margin: 0 0.1rem;
