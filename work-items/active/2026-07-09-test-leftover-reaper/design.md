@@ -1,274 +1,402 @@
-# Test-Leftover Reaper Lane Design Memo — Security-Gate And Code-Audit Revision 3
+# Test-Leftover Reaper — Preview/Diagnostics-Only v1 Design
 
-Date: 2026-07-09
-Status: design revised (round 3) after the round-2 re-gate found two new confirmed findings: standalone `supervise` admission and unnamed snapshot-completeness ownership. This is a destructive, operator-invoked lane; implementation is blocked pending a clean re-run of the adversarial security gate against this revision.
+Date: 2026-07-10
+Status: accepted for v1 implementation. Version 1 is preview/diagnostics only. Destructive apply is deferred to v2.
 
-This revision is the authoritative design for the test-leftover reaper work item. The first gate recorded nine confirmed findings in security-review.md, and the round-2 re-gate closed those findings plus the accepted code-audit contracts but found two new confirmed findings. This revision changes authorization, tree ordering, snapshot ownership, and test requirements; it does not authorize a product-code change in this documentation-only revision.
+This is the authoritative design for the test-leftover reaper work item. The accepted durable decision is `work-items/decisions/2026-07-10-test-leftover-reaper-preview-only-v1.md`. The three adversarial re-gates are recorded in `security-review.md`: the original gate found nine issues including three P1 live-kill paths, round 2 found one new P1, and round 3 found zero P1 but confirmed one P2 ordering flaw and one P3 ancestry flaw. The destructive predicate converged only by refusing standalone `supervise` processes, which are the main observed leftover population.
 
 ## Security Posture And Cited Facts
 
-The ordinary CleanupOrphans and AggressiveCleanup paths intentionally spare mcphub-family binaries. The own-binary boundary is defined at internal/api/cleanup.go:32-60 and enforced during default and aggressive candidate handling at internal/api/cleanup.go:1287-1298 and internal/api/cleanup.go:1473-1475. A separate, explicit lane is therefore required; it must never weaken either existing lane.
+The ordinary `CleanupOrphans` and `AggressiveCleanup` paths intentionally spare mcphub-family binaries. The own-binary boundary is defined at `internal/api/cleanup.go:32-60` and enforced during default and aggressive candidate handling at `internal/api/cleanup.go:1287-1298` and `internal/api/cleanup.go:1473-1475`. Version 1 must not weaken either path.
 
-The new lane may authorize a top-level candidate termination only after the target independently proves all of the following:
+The committed GUI integration test proves the go-build-cache leftover class: it invokes `go run` with `test_state_path_env`, the resulting mcphub grandchild can outlive `Cmd.Wait`, and killing the wrapper can leave it alive (`internal/cli/gui_integration_test.go:60-83` and `internal/cli/gui_integration_test.go:98-124`). A GUI spawns `supervise` from its resolved executable with inherited environment (`internal/cli/gui_supervisor_owner.go:128-150` and `internal/cli/gui_supervisor_owner.go:888-900`), deliberately detaches it (`internal/cli/gui_supervisor_owner_windows.go:10-31`), and may add breakaway-from-job behavior (`internal/cli/supervisor_spawn_breakaway_windows.go:12-49`). A restarted GUI may adopt an existing supervisor (`internal/cli/gui_supervisor_owner.go:20-32`, `internal/cli/gui_supervisor_owner.go:109-110`, and `internal/cli/gui.go:674-698`).
 
-1. the target image contains the test_state_path_env build tag;
-2. the target PEB environment proves a non-production MCPHUB_STATE_DIR_OVERRIDE;
-3. the target's recorded parent PID is provably dead;
-4. exactly one explicit branch admits its image and argv;
-5. the production-state, install-path, repo-path, age, identity, token, audit-intent, and tree rules pass.
+The 2026-07-09 field incident was an already-standalone `mcphub-reliability-*.exe supervise` process. A live, adopted supervisor can have the same dead recorded parent process identifier (PPID), image, argument shape, build tag, and redirected state as a true leftover. Version 1 therefore lists standalone `supervise` candidates but never classifies them as safe to kill. Each receives the operator note `manual-reap-only: verify identity out-of-band before killing`.
 
-No positive branch admits `supervise` argv as a top-level candidate. A `supervise` process can participate only as a live descendant of a confirmed test-GUI candidate in the same tree-reap operation. It independently passes buildinfo, environment, production-state, protected-path, age, command-line, and identity checks, but its liveness/provenance proof is the identity-bound ancestry relationship to that still-live GUI, not its own parent-death state.
+Version 1 is an evidence command, not an authorization command. It enumerates, classifies, and renders process metadata. It has no apply flag, confirm token, kill owner, tree-reap coordinator, or process-termination step.
 
-The environment proof alone is NOT test provenance. A stray shell or profile export can make the variable present, and an untagged binary can ignore it and resolve production state through internal/api/state_paths_prod.go:53-69. For a top-level candidate, the buildinfo tag plus the provably-dead parent carry authorization; for a tree-reachable `supervise` member, the buildinfo tag plus the live relationship to the confirmed test GUI carry authorization. The environment proof remains a necessary corroborating proof of each target's redirected state.
+## Decision And Scope
 
-The PEB reader has a byte-level trust boundary: every byte read through the target handle is untrusted until an architecture-specific, exact, size-bounded, metadata-coherent UTF-16 environment block has been validated. Only that state may become `OK with parsed map`; every API, layout, short-read, race, or parse deviation is `ERROR / AMBIGUOUS`, maps to a spare/refusal, and cannot contribute kill-authorizing token material.
+Version 1 ships one command:
 
-The test-only source variant is compiled only with test_state_path_env and consumes MCPHUB_STATE_DIR_OVERRIDE before the platform resolver at internal/api/state_paths_envfallback.go:1-16 and internal/api/state_paths_envfallback.go:53-75. The production variant instead resolves its read-only state root through daemonStateDirReadOnly at internal/api/state_paths_prod.go:53-69. The 2026-07-09 gate also observed the existing GUI fixture binary with go version -m and found the build setting -tags=test_state_path_env; implementation must prove that fact from each target image, not infer it from the fixture path or caller process.
+```text
+mcphub cleanup test-leftovers [--min-age-sec <seconds>] [--temp-root <path>]
+```
 
-The existing tri-state parent helper already has the required fail-closed semantics for top-level candidates: orphanParentProvenDead returns true only for an error-free PIDStateDead result, and treats alive, unknown, and probe errors as spare conditions (internal/api/cleanup.go:1687-1708). The existing identity-gated kill owner is reapOneOrphan, which revalidates command line and invokes orphanTerminateFn (internal/api/cleanup.go:1730-1736 and internal/api/cleanup.go:1749-1771). The new lane composes gates before that owner; it does not recreate a terminate sequence.
+The command is CLI-only and always runs in preview mode. `--min-age-sec` changes display classification only. `--temp-root` adds a strict-canonical classification scope for otherwise recognized reliability-family images; it does not authorize action. `--apply` and `--confirm-token` are not v1 options and must be rejected as unsupported input. No environment variable or hidden configuration may enable apply behavior.
 
-The committed GUI integration test proves the go-build-cache leftover class: it invokes go run with the test tag, the resulting mcphub grandchild can outlive Cmd.Wait, and the wrapper kill can leave it alive (internal/cli/gui_integration_test.go:60-83 and internal/cli/gui_integration_test.go:98-124). A GUI spawns `supervise` from its resolved own executable with inherited environment (internal/cli/gui_supervisor_owner.go:128-150 and :888-900), deliberately detaches it with DETACHED_PROCESS and CREATE_NEW_PROCESS_GROUP (internal/cli/gui_supervisor_owner_windows.go:10-31), and adds CREATE_BREAKAWAY_FROM_JOB when permitted (internal/cli/supervisor_spawn_breakaway_windows.go:12-49). A restarted GUI may adopt that existing supervisor over IPC instead of spawning it (internal/cli/gui_supervisor_owner.go:20-32 and :109-110; internal/cli/gui.go:674-698). Therefore a live in-use supervisor routinely can have a dead recorded PPID, making its own parent-death proof non-discriminating.
+The command stops after rendering the diagnostic result. If an operator chooses to remove a reported process, that action occurs outside this command and outside the v1 contract, after out-of-band verification of executable image path, argument vector, and `StartedAt`.
 
-The e2e marker cannot authorize a `supervise` process: a GUI with MCPHUB_E2E_SUPERVISOR=none returns before the spawn block (internal/cli/gui.go:653-668). A standalone supervisor that otherwise matches a test path, tag, environment, age, and dead-parent gate is byte-indistinguishable from a live adopted supervisor. It is always refused as `supervise-not-tree-reachable`. An already-orphaned standalone supervisor, including the 2026-07-09 field-incident shape, is deliberately outside the automated lane and requires manual operator reaping with out-of-band identity verification.
+Decision back-references:
 
-ASSUMPTION (UNVERIFIED): a 32-bit reader inspecting a native 64-bit target has no accepted Wow64-64 implementation or target-environment test. The apply lane must refuse that direction; preview may report diagnostics only. The prior amd64-reader-to-amd64 and amd64-reader-to-WOW64 results establish one-host feasibility only; neither bypasses the versioned layout and integration gates below.
-
-ASSUMPTION (UNVERIFIED): the f1-cli-verify prefix has no committed fixture or source match. It is not an admitted executable family. An explicit temp root scopes an already admitted reliability-family image; it does not broaden basename matching to an unverified prefix.
-
-## Test-Leftover Signature (Discriminator Table)
-
-| Discriminator | Cited evidence | Predicate role | Failure result |
-|---|---|---|---|
-| Snapshot completeness | parseProcessRows owns row parsing and returns its `snapErr` at internal/api/cleanup.go:1251-1275; parseOrphans and parseAggressiveCandidates propagate it at :1284, :1420, :1469, and :1557, and apply fails closed at :1623-1630. | The direct row scan must reuse runProcessSnapshot plus parseProcessRows. Any `snapErr` makes the whole snapshot non-authorizing. | snapshot-degraded |
-| Parent liveness | orphanParentProvenDead uses process.QueryPIDState at internal/api/cleanup.go:1687-1708. | Mandatory negative guard for every top-level candidate. A tree-reachable supervise member instead requires an identity-bound live ancestry proof to its confirmed test GUI. | parent-alive-or-unproven |
-| Target buildinfo tag | Test sources compile with test_state_path_env at internal/cli/daemon_reliability_test.go:67-82 and internal/gui/e2e/global-setup.ts:74-99. | Read the target on-disk image with debug/buildinfo.ReadFile(ExecutablePath); require an exact test_state_path_env token in its embedded -tags setting. | not-test-tagged |
-| PEB environment proof | The test variant consumes the override at internal/api/state_paths_envfallback.go:53-75; the process census has no environment field at internal/api/processes.go:184-235. | envProofGate may return a parsed map only after the PEB Environment Reader Contract validates an exact, architecture-specific, coherent UTF-16 block; a valid block with no matching key is the only key-absent result. It corroborates provenance but cannot authorize alone. | env-read-error, env-override-absent, or unsupported-arch |
-| Production state | daemonStateDirReadOnly is the single production-root source at internal/api/state_paths_prod.go:53-69; `rootContains` defines equal-or-true-descendant semantics at internal/api/lsp_trusted_roots.go:214-254. | productionStateGuard strictly canonicalizes both operands, then refuses when the override or any argv state path is equal to or below the production root. | production-state or path-canonicalization-error |
-| GUI e2e markers | hub.ts sets PID-port directory at internal/gui/e2e/fixtures/hub.ts:76-84 and both mandatory markers at :101-107; seeded-hub.ts sets them at :88-96. A GUI with the supervisor marker returns before spawn at internal/cli/gui.go:653-668. | Both MCPHUB_E2E_SCHEDULER=none and MCPHUB_E2E_SUPERVISOR=none must be present for every top-level gui-e2e GUI candidate. PID-port directory is corroborating evidence only; no e2e marker admits `supervise`. | e2e-markers-absent |
-| Reliability-temp image | Reliability tests make mcphub-reliability-* tagged binaries at internal/cli/daemon_reliability_test.go:49-82. | Strict-canonical OS-temp containment, branch-specific image family, and committed reliability daemon argv shape. | basename-not-in-branch, argv-not-in-branch, supervise-not-tree-reachable, or path-canonicalization-error |
-| GUI e2e image | Global setup writes internal/gui/e2e/bin/mcphub(.exe) at internal/gui/e2e/global-setup.ts:13-40 and builds it tagged at :74-99. | Strict-canonical fixture equality plus GUI argv and both mandatory e2e markers. No standalone `supervise` argv is admitted. | basename-not-in-branch, argv-not-in-branch, supervise-not-tree-reachable, e2e-markers-absent, or path-canonicalization-error |
-| Go-build-cache image | go run produces a temporary mcphub GUI that can outlive its wrapper at internal/cli/gui_integration_test.go:98-124. | Fourth positive branch: strict-canonical component-boundary containment below an admitted `go-build*` child of the OS temp root or the exact LocalAppData `go-build` root, with GUI argv only. | basename-not-in-branch, argv-not-in-branch, supervise-not-tree-reachable, or path-canonicalization-error |
-| Supervise topology | The GUI spawns detached `supervise` from its own image at internal/cli/gui_supervisor_owner.go:128-150 and may later adopt an existing instance at internal/cli/gui.go:674-698. | No positive branch admits standalone `supervise`. It is reaped only as an identity-bound live descendant of a confirmed test GUI, before that GUI, in the same operation. | supervise-not-tree-reachable |
-| Operator temp root | No committed source authorizes f1-cli-verify; the prior prefix probe is unverified. | A supplied strict-canonical root can scope only an otherwise reliability-family candidate, cannot intersect the production root by equality or containment, and is token-bound across preview and apply. | requires-explicit-temp-root, production-state, token-mismatch, or path-canonicalization-error |
-| Installed and repo paths | Install locations are defined at internal/api/install.go:39-64 and internal/cli/setup.go:99-115; own binaries are protected at internal/api/cleanup.go:32-60. | Strict-canonical equality/containment hard refusals before branch admission. | install-path, repo-path, or path-canonicalization-error |
-| Apply age | Existing cleanup floor is 600 seconds at internal/api/cleanup.go:141-145. | Apply uses max(requested --min-age-sec, 600); preview may display younger candidates only as refusals. | min-age-below-apply-floor |
-| Identity and command line | reapOneOrphan binds PID, executable path, started-at, and re-read command line at internal/api/cleanup.go:1749-1786. | Fresh apply identity proof and existing kill owner. | identity-unavailable, command-line-mismatch, or identity-filter-excludes-recycled-pid |
+- `work-items/decisions/2026-07-10-test-leftover-reaper-preview-only-v1.md` owns the preview-only v1 scope and v2 deferral.
+- `work-items/decisions/2026-07-09-test-leftover-reaper-peb-env-proof-preview-only.md` remains accepted for any future apply-capable Windows path; its Process Environment Block (PEB) contract is deferred with v2.
 
 ## Change-Surface Contract
 
 | Field | Contract |
 |---|---|
-| Intended change surface | Future implementation: a new explicit CleanupTestLeftovers API lane, one CLI subcommand, an apply-capable `windows && amd64` PEB environment reader, a strict-error Windows path canonicalizer, target-image buildinfo reading, and focused tests. This revision: only work-items/active/2026-07-09-test-leftover-reaper documentation. |
-| Approved extension seam(s) | internal/api owns candidate evaluation, `rootContains` path relations, TestLeftoverConfirmToken, productionStateGuard, installPathGuard, repoPathGuard, branch ordering, tree ordering, and the call to reapOneOrphan; internal/process owns the exact PEB byte reader and strict-error file/directory canonicalization; internal/cli owns parsing, typed option construction, output, and the local audit sink selection. |
-| Protected / must-not-touch surfaces | Existing CleanupOrphans, AggressiveCleanup, their token semantics, daemon recover behavior, scheduler/ticker behavior, GUI HTTP cleanup handlers, the current own-binary guard, and the best-effort contracts of CanonicalizeTrustedRoot and normalizeWindowsExecutablePath. This documentation revision must not edit internal/, cmd/, or product code. |
-| Declared blast radius | Additive, operator-invoked CLI/API behavior only. No unattended sweep, GUI endpoint, scheduler, default cleanup, or aggressive cleanup behavior changes. |
+| Intended change surface | Future v1 implementation: one `mcphub cleanup test-leftovers` preview command and one read-only candidate/evidence path that reuses `runProcessSnapshot` plus `parseProcessRows`. |
+|  | Add strict path canonicalization for classification display, on-disk buildinfo inspection where available, and focused preview tests. |
+|  | This documentation revision changes only this work item and its decision record. |
+| Approved extension seam(s) | `internal/api` owns candidate evidence and classification; `internal/process` owns a strict-error file/directory canonical form. |
+|  | `internal/cli` owns flag parsing and policy-aware rendering. The CLI passes typed options downward; lower layers do not reread ambient policy. |
+| Protected / must-not-touch surfaces | Existing `CleanupOrphans`, `AggressiveCleanup`, their token semantics, `reapOneOrphan`, `orphanTerminateFn`, daemon recovery, scheduler/ticker behavior, GUI cleanup handlers, and the current own-binary guard. |
+|  | The v1 lane must not call, wrap, or route into any termination owner. |
+| Declared blast radius | Additive, operator-invoked, read-only CLI/API behavior. No unattended sweep, GUI endpoint, scheduler, default cleanup, aggressive cleanup, state mutation, remote-memory requirement, or process termination. |
 
-## Operator Contract And Scope Binding
+## V1 Candidate Enumeration And Evidence Flow
 
-Preview syntax: mcphub cleanup test-leftovers [--min-age-sec <seconds>] [--temp-root <path>]
+1. `internal/api` calls `runProcessSnapshot` (`internal/api/processes.go:184-235`) and passes the returned census directly to `parseProcessRows` (`internal/api/cleanup.go:1251-1275`). It does not use `parseOrphans` because that path intentionally drops own mcphub basenames at `internal/api/cleanup.go:1287-1298`.
+2. The classifier considers rows resembling the known test-leftover families: reliability-temp, gui-e2e, go-build-cache, operator-temp-root, and `supervise` argv associated with those image families. The classifier is deliberately broader than a kill predicate because missing or adverse evidence must remain visible to the operator.
+3. Every path used for a branch or protected-path display verdict goes through the strict canonicalization contract. Canonicalization failure keeps the row in output, preserves only the path representation allowed by output policy, and labels the result `path-canonicalization-error`.
+4. The evidence collector derives age, parent-liveness verdict, normalized argv shape, and pattern class from the census. It may read the target image on disk with `debug/buildinfo.ReadFile` to report the exact `test_state_path_env` tag finding. A read or parse failure becomes diagnostic evidence; it never suppresses the row.
+5. Remote process memory is not required for v1. The accepted implementation scope reports `not-collected-v1` for the environment-override field. If an already-available, cheap, bounded, same-user, read-only evidence source is separately accepted during implementation, it may populate this diagnostic field only; failure remains `unavailable` and cannot change candidate inclusion or authorize action. Implementing the deferred PEB reader is not part of v1.
+6. The renderer emits one record per candidate and a top-level snapshot verdict. Rendering is the terminal step.
 
-Apply syntax: mcphub cleanup test-leftovers --confirm-token <token> [--min-age-sec <seconds>] [--temp-root <path>]
+The parser's `snapErr` remains the single snapshot-completeness owner. A complete snapshot yields `snapshot-complete`. If `parseProcessRows` returns complete rows plus `snapErr`, v1 may render those rows but must label the run `snapshot-degraded` and must not claim the list is exhaustive. If `runProcessSnapshot` itself returns no usable census, the command returns a visible diagnostic error and no completeness claim.
 
-The command remains CLI-only. The CLI parses all flags once into typed options and passes those resolved options to the API; lower layers must not reread ambient CLI or environment policy.
+## V1 Per-Candidate Evidence Contract
 
-For preview, --min-age-sec is diagnostic only: candidates younger than 600 seconds may be shown with min-age-below-apply-floor and cannot be applied. On apply, effectiveApplyMinAgeSec is max(requestedMinAgeSec, 600); the operator can raise but cannot lower the 600-second floor.
-
-If preview used --temp-root, preview and apply must strictly canonicalize it and apply must receive it again; the canonical value must equal the top-level tempRootHash in the confirm-token material. Omission, a different root, or a scope-changing canonical value is token-mismatch and makes zero termination calls. Canonicalization failure is path-canonicalization-error. If preview used no temp root, apply may not introduce one under the same token. A temp root equal to, below, or containing the production root is refused as production-state before branch admission; `imageUnderTempRoot` and `overrideOutsideProduction` remain independent, conjunctive gates.
-
-## Components, Ownership, And Stable Contracts
-
-| Component | Owns | Contract |
-|---|---|---|
-| parseProcessRows | Snapshot-completeness detection. | The direct lane calls runProcessSnapshot and passes its output to parseProcessRows at internal/api/cleanup.go:1251-1275. Its existing `snapErr` return is the single owner of truncated/degraded snapshot detection; preview may report rows, but apply refuses snapshot-degraded before any termination. |
-| Test-leftover predicate | Candidate verdict and exactly one branch classification. | Returns allow or refused(reason); a thrown or unavailable guard is guard-evaluation-error, never an implicit allow. |
-| parentDeathGate | Top-level candidate parent-liveness proof. | Calls orphanParentProvenDead against the top-level target's recorded PPID; it accepts only proven dead. It never authorizes a standalone `supervise` process. |
-| buildInfoTagGate | Test-tag provenance from the target image. | Calls debug/buildinfo.ReadFile(ExecutablePath) and accepts only the exact test_state_path_env tag; read, parse, or tag failures are not-test-tagged. |
-| PEB environment reader | Exact remote-byte acquisition and validated UTF-16 environment block. | Apply-capable only on `windows && amd64`; uses one target handle and the architecture-specific contract below. It returns parsed map, key absent, or error/ambiguous, never a partial map. |
-| envProofGate | Parsed target PEB environment and override proof. | Consumes only the PEB reader's validated result. Only a parsed map containing a non-production override can progress; valid key absence is env-override-absent, and every error/ambiguity is env-read-error with a distinct stage. |
-| Strict path canonicalizer | One strict-error Windows canonical form for files and directories. | internal/process owns the future strict variant: absolute, cleaned, fully reparse/symlink resolved, 8.3-expanded, UNC/device-spelling and trailing-separator normalized, and case-folded; any failure is path-canonicalization-error, with no unresolved fallback. |
-| Path relation owner | Equality and containment for all guards and branches. | internal/api reuses `rootContains` only after strict canonicalization. Containment is one call; equality is mutual containment. No raw, Clean-only, EqualFold-only, or bare-prefix decision is permitted. |
-| productionStateGuard | Production-state exclusion. | Resolves the production root once through daemonStateDirReadOnly, strictly canonicalizes it and each override/argv state path, and uses `rootContains(productionRoot, candidate)` once; equality and descendants refuse production-state. |
-| installPathGuard | Installed-image exclusion. | Strictly canonicalizes the census image, canonical install target, and install directory; mutual `rootContains` equality with the target or install-directory containment refuses install-path. |
-| repoPathGuard | Developer-repo exclusion. | Strictly canonicalizes the census image, repo root, and GUI fixture; repo containment refuses repo-path unless mutual `rootContains` proves exact fixture equality and the gui-e2e branch independently passes. |
-| Branch classifier | Top-level image/argv/marker family admission. | Returns exactly one of reliability-temp, gui-e2e, operator-temp-root, or go-build-cache; none accepts `supervise` argv. Every image equality/containment uses strict canonical inputs plus `rootContains`, otherwise a branch or path-canonicalization refusal. |
-| TestLeftoverConfirmToken | Preview/apply scope and candidate binding. | The only token owner, in internal/api; no CLI or GUI copy may derive a parallel token. |
-| Tree coordinator | GUI-to-supervise membership and descendant-before-GUI sequencing. | Binds a live `supervise` descendant to the confirmed test GUI's identity, evaluates the descendant's independent gates, reaps and confirms the descendant first, then revalidates and reaps the GUI. It never chases a standalone orphan after GUI termination. |
-| reapOneOrphan | Identity-gated termination. | The sole per-candidate kill owner; pre-kill gates compose before it and never duplicate its command-line or identity terminate sequence. |
-| Local audit writer | Intent and outcome event persistence. | Writes to the local owner-DACL'd supervisor-events.log; raw full paths stay local, while wire/JSON views contain hashes only. |
-
-### PEB Environment Reader Contract
-
-The reader contract is mandatory and fail-closed. Its public error/ambiguous refusal remains `env-read-error`, while local diagnostics and tests must carry one distinct `envReadFailureStage` from this closed set: `open-process`, `classify-architecture`, `query-basic-information`, `query-wow64-information`, `validate-layout`, `read-peb`, `read-process-parameters`, `read-environment-metadata`, `validate-environment-metadata`, `read-environment-block`, `reread-environment-metadata`, or `parse-environment`. Unsupported reader/target directions use `unsupported-arch`. No error/ambiguous result may be converted to key absence or a parsed map.
-
-1. **Build and target classification.** The apply-capable reader is compiled only for `windows && amd64`; all other reader builds are preview/refuse-only. The same opened target handle must be classified with `windows.IsWow64Process2`, available through the repository-pinned `golang.org/x/sys v0.46.0` at go.mod:16. A failed or unsupported classification is ERROR/AMBIGUOUS and spares. Microsoft documents the handle-based machine classification and its failure result in [IsWow64Process2, updated 2026-01-15](https://learn.microsoft.com/en-us/windows/win32/api/wow64apiset/nf-wow64apiset-iswow64process2).
-2. **One correctly authorized handle.** Open exactly one non-inheritable handle with `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ`; do not use the identity-only `PROCESS_QUERY_LIMITED_INFORMATION` mask. Close the handle on every return. Every OpenProcess, NtQueryInformationProcess, IsWow64Process2, or ReadProcessMemory failure, including access denied, protected-process denial, and target exit, is ERROR/AMBIGUOUS with its exact stage and operating-system error retained locally. Microsoft documents the non-inheritable flag and access check in [OpenProcess, updated 2022-11-01](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-openprocess), requires `PROCESS_VM_READ` in [ReadProcessMemory, updated 2022-05-14](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-readprocessmemory), and lists protected-process exclusions for both required rights in [Process Security and Access Rights, updated 2025-07-14](https://learn.microsoft.com/en-us/windows/win32/procthread/process-security-and-access-rights). The existing GUI reader uses the required read mask at internal/gui/probe_windows.go:131-138; its separate identity opens use a different mask and are not this contract.
-3. **Exact remote reads.** One `readExact(handle, remoteAddress, dst)` primitive owns every remote pointer, metadata, and block read. It succeeds only when ReadProcessMemory returns no API error and `bytesRead == len(dst)`; a nil API error with a short count is still ERROR/AMBIGUOUS. Remote-address arithmetic must reject zero bases and integer overflow before the call. ReadProcessMemory exposes the independent byte-count output documented in [ReadProcessMemory, updated 2022-05-14](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-readprocessmemory); the current GUI reader checks the final block count but not every pointer/metadata hop at internal/gui/probe_windows.go:166-207, so it is not reusable unchanged.
-4. **Native amd64 chase and coherence.** Call the pinned `windows.NtQueryInformationProcess` binding—not a new raw LazyProc wrapper—with `ProcessBasicInformation` into `windows.PROCESS_BASIC_INFORMATION`; require success, `ReturnLength == unsafe.Sizeof(pbi)`, a nonzero PEB address, and supported-layout assertions `sizeof(PBI)=0x30` and `offsetof(PebBaseAddress)=0x08`. Treat target pointers only as remote addresses. The reader contract version `x/sys-v0.46.0-amd64` pins PEB.ProcessParameters at `0x20`, RTL_USER_PROCESS_PARAMETERS.Environment at `0x80`, and EnvironmentSize at `0x3f0`; compile/run layout assertions and an amd64 helper integration test gate those offsets. Chase PEB to ProcessParameters to Environment pointer plus byte-sized EnvironmentSize through `readExact`. Reject zero pointers/sizes, odd sizes, address overflow, and sizes over the lane's conservative project-policy cap `maxRemoteEnvironmentBytes = 1 MiB`. After the exact block read and before parsing, reread Environment pointer and size and require exact equality; drift is ERROR/AMBIGUOUS. Microsoft documents ProcessBasicInformation, PebBaseAddress, ReturnLength, and the release-instability warning in [NtQueryInformationProcess, updated 2024-02-22](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntqueryinformationprocess); its public [RTL_USER_PROCESS_PARAMETERS, updated 2024-02-22](https://learn.microsoft.com/en-us/windows/win32/api/winternl/ns-winternl-rtl_user_process_parameters) contract omits Environment fields and warns the structure may change. The existing GUI reader explicitly hard-codes x64-only offsets at internal/gui/probe_windows.go:2-11 and :162-181; do not extend it by analogy to another architecture.
-5. **WOW64 i386 chase.** For a target classified as WOW64 i386, use the exact route `ProcessWow64Information -> PEB32 -> 32-bit ProcessParameters -> 32-bit Environment pointer and EnvironmentSize`. Call `windows.NtQueryInformationProcess` into the documented ULONG_PTR-sized result and require its ReturnLength to equal that result size, then use dedicated `uint32` remote wire fields and explicit zero-extension for every PEB32 address; never reuse reader-width `uintptr` or the amd64 structures. Microsoft documents information class 26, its ULONG_PTR result, and ReturnLength in [NtQueryInformationProcess, updated 2024-02-22](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntqueryinformationprocess). **ASSUMPTION (UNVERIFIED):** customary PEB32 offsets are ProcessParameters=`0x10`, Environment=`0x48`, and EnvironmentSize=`0x290`; Microsoft publishes no environment-field contract. This route cannot return a kill-authorizing parsed map until the implementation cites a versioned native-layout source, asserts those exact offsets, and passes a Windows i386 helper integration test that compares the exact override value, including a value containing `=`, with the helper's own `os.LookupEnv` result.
-6. **Environment parser.** Decode only the exact, bounded, even-sized block as UTF-16LE; reject odd bytes, incomplete code units, unpaired surrogates, an incomplete entry, or a missing double-NUL terminator. The first double-NUL must occur within the exact block and any remaining code units must be NUL padding. Split each ordinary entry at its first `=` only, require a nonempty name, preserve every later `=` in the value, and compare `MCPHUB_STATE_DIR_OVERRIDE` with `strings.EqualFold`; Windows environment names are case-insensitive. Only a fully validated block may return key absent. Do not log the complete environment map. Microsoft documents `Name=Value\0` entries followed by `\0\0` in [Environment Variables, updated 2025-07-14](https://learn.microsoft.com/en-us/windows/win32/procthread/environment-variables), and documents Windows' case-insensitive environment-variable names in [about_Environment_Variables](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_environment_variables?view=powershell-7.5).
-
-### Strict Path Canonicalization And Relation Contract
-
-`strictPathCanonicalizer` in internal/process is the single future canonicalization owner for every file or directory operand used by a destructive path gate. It must make the path absolute, clean it, fully resolve every reparse point/symlink, expand 8.3 aliases, normalize UNC/device spellings and trailing separators to one representation, and case-fold the result on Windows. Missing/broken components, permission errors, resolution loops, or any other incomplete canonicalization return path-canonicalization-error; there is no best-effort unresolved fallback.
-
-The strict owner is a new strict-error variant/refactor, not either existing helper unchanged. `api.CanonicalizeTrustedRoot` explicitly falls back after failed resolution at internal/api/lsp_trusted_roots.go:115-152, and `process.normalizeWindowsExecutablePath` keeps the cleaned unresolved path when EvalSymlinks fails at internal/process/pid_identity_windows.go:145-161. Once both operands are strict-canonical, internal/api reuses `rootContains` for every relation: `rootContains(root, candidate)` means equal-or-true-descendant, while equality is mutual containment. That helper is separator-aware, Windows case-insensitive, and prevents the `mcp-local-hub-evil` prefix collision at internal/api/lsp_trusted_roots.go:214-254.
-
-The consumers are fixed: productionStateGuard rejects the override or any argv state path equal to or below the production root; installPathGuard rejects census-image equality with the canonical install target and containment within the canonical install directory; repoPathGuard rejects repo containment except exact canonical GUI-fixture equality; and every reliability-temp, gui-e2e, operator-temp-root, and go-build-cache top-level image relation uses the same contract. The go-build-cache branch matches an entire directory component (`go-build*` immediately below the canonical OS temp root, or exact `go-build` below canonical LocalAppData) and then proves image containment under that directory; it never uses a bare full-path prefix. A tree-reachable `supervise` member must strict-canonicalize to the same image as its confirmed test GUI. The canonical census image feeds branch classification or tree binding, token hashing, and the later identity proof, and apply repeats strict canonicalization from the fresh census.
-
-The temp and production checks are conjunctive. `imageUnderTempRoot` can never replace `overrideOutsideProduction`; a temp root equal to, below, or containing the production root is itself production-state, and an override equal to or below production remains production-state regardless of where the image resides.
-
-## Fail-Closed Predicate
-
-Candidate enumeration calls runProcessSnapshot and scans its output through parseProcessRows because parseOrphans intentionally drops own mcphub basenames before candidate construction (internal/api/cleanup.go:1251-1275 and :1287-1298). The `snapErr` returned by parseProcessRows is the sole snapshot-completeness verdict and fails the whole apply closed. A top-level candidate becomes apply-eligible only if every common gate, exactly one positive branch, and every negative guard pass. A `supervise` row is never top-level apply-eligible; only the GUI Tree Rule can make it a member of an already-authorized GUI operation. There is no common basename shortcut.
-
-### Positive Common Gates
-
-1. parseProcessRows at internal/api/cleanup.go:1251-1275 returns no `snapErr`, so snapshot evidence is complete, and the row has PID, recorded PPID, ExecutablePath, CommandLine, and StartedAt. The direct scan must use runProcessSnapshot plus parseProcessRows and inherit the same propagated fail-close used by parseOrphans / parseAggressiveCandidates at internal/api/cleanup.go:1284, :1420, :1469, :1557, and :1623-1630. Any `snapErr` refuses snapshot-degraded for the whole apply; missing row proof refuses identity-unavailable, and path failure is path-canonicalization-error.
-2. The apply age is at least effectiveApplyMinAgeSec, which is never below 600 seconds. Preview reports, but does not admit, younger rows.
-3. On Windows, the `windows && amd64` PEB reader returns a parsed target environment only through the exact architecture, handle, readExact, layout, coherence, and UTF-16 checks in the PEB Environment Reader Contract. Every unsupported direction is unsupported-arch; every other error/ambiguity is env-read-error with its distinct stage.
-4. envProofGate finds MCPHUB_STATE_DIR_OVERRIDE with case-insensitive key comparison and strict-canonicalizes its value as a non-production test-state path. Key absence is env-override-absent; reader error or ambiguity is env-read-error; path failure is path-canonicalization-error.
-5. buildInfoTagGate reads the target's on-disk ExecutablePath with debug/buildinfo.ReadFile and finds test_state_path_env. A fixture path, caller build tag, or present environment variable cannot substitute for this result.
-6. For a top-level candidate, parentDeathGate calls orphanParentProvenDead on the recorded PPID. Alive, unknown, missing, or probe-error states all refuse as parent-alive-or-unproven. This gate never admits `supervise`; a tree member instead proves its still-live ancestry to the confirmed test GUI under the GUI Tree Rule.
-7. The single productionStateGuard has strict-canonicalized the production root, override, and any argv state path, and `rootContains(productionRoot, candidate)` is false for every candidate path. Equality and descendants both refuse production-state.
-8. The top-level candidate has a fresh identity suitable for reapOneOrphan and has passed the branch-specific rules below. A tree-reachable `supervise` member independently proves its own fresh identity under the GUI Tree Rule.
-
-### Positive Branch Gates
-
-The top-level classifier is exclusive and uses this order: gui-e2e, go-build-cache, reliability-temp, then operator-temp-root. Before branch selection, any row whose argv is `supervise` is refused `supervise-not-tree-reachable`; no positive branch can override that refusal. A candidate that matches no branch is refused; a candidate never receives a union of permissive branch rules.
-
-1. reliability-temp: `rootContains(canonicalOSTempRoot, canonicalImage)` is true, basename is mcphub-reliability-* with platform suffix, and argv is a committed reliability daemon shape. Source evidence: internal/cli/daemon_reliability_test.go:49-82 and :154-176. `supervise` is not an admitted shape.
-2. gui-e2e: mutual `rootContains` proves the canonical image is exactly the canonical internal/gui/e2e/bin/mcphub(.exe) fixture, argv is gui --no-browser --no-tray --port 0, and the validated target PEB map contains both MCPHUB_E2E_SCHEDULER=none and MCPHUB_E2E_SUPERVISOR=none. Neither marker is optional or conditional. A GUI with the supervisor marker returns before spawning at internal/cli/gui.go:653-668, so the markers authorize only the GUI and never a `supervise` process. Sources: internal/gui/e2e/fixtures/hub.ts:76-112 and internal/gui/e2e/fixtures/seeded-hub.ts:88-104.
-3. operator-temp-root: preview supplied --temp-root; it is strict-canonical and does not intersect the canonical production root in either containment direction; `rootContains(canonicalTempRoot, canonicalImage)` is true; the image still has the mcphub-reliability-* family and passes the same committed reliability daemon argv, common proofs, and negative guards. The root scopes the branch but never permits `supervise`, f1-cli-verify, an arbitrary mcphub basename, or a production override.
-4. go-build-cache: strict-canonical path components identify either a `go-build*` directory immediately below the canonical OS temp root or the exact `go-build` directory below canonical LocalAppData, and `rootContains(canonicalBuildCacheRoot, canonicalImage)` is true for mcphub.exe; argv is GUI only. It is admitted only after all common gates, especially buildInfoTagGate, envProofGate, parentDeathGate, and productionStateGuard, pass. This is the 2026-07-09 observed gui-integration GUI leftover class, not an illustrative branch, and no bare full-path prefix is accepted. Its `supervise` descendant can be reaped only under the GUI Tree Rule.
-
-### Mandatory Negative Guards
-
-1. installPathGuard strict-canonicalizes the census image, installed hub target, and install directory. Mutual `rootContains` equality with the target or install-directory containment refuses install-path. The install contract is at internal/api/install.go:39-64 and internal/cli/setup.go:99-115.
-2. repoPathGuard strict-canonicalizes the census image, repo root, and gui-e2e fixture. Repo containment refuses repo-path unless mutual `rootContains` proves exact fixture equality and the gui-e2e branch independently passes. This preserves the default own-binary safety intent.
-3. productionStateGuard is evaluated once and refuses any strict-canonical override/argv path equal to or below the production root as production-state. It is the same gate described in positive common gate 7, not a duplicate implementation.
-4. parentDeathGate refuses parent-alive-or-unproven whenever a top-level candidate's recorded parent is alive, unknown, missing, or cannot be queried. It is mandatory for every positive branch but is not a path for admitting `supervise`.
-5. buildInfoTagGate refuses not-test-tagged on absent, unreadable, unparsable, or non-matching build information.
-6. The operator-temp-root branch refuses production-state when the temp root equals, is below, or contains the production root. `imageUnderTempRoot` never substitutes for `overrideOutsideProduction`; a production override refuses independently even under an otherwise valid temp root.
-7. Any strict path failure refuses path-canonicalization-error; no guard or branch compares a raw, Clean-only, or unresolved fallback path.
-8. The lane refuses snapshot-degraded, identity-unavailable, command-line-mismatch, unsupported-arch, env-read-error, env-override-absent, min-age-below-apply-floor, supervise-not-tree-reachable, or guard-evaluation-error before reapOneOrphan.
-9. apply refuses token-mismatch and identity-filter-excludes-recycled-pid before the kill owner. A current-but-unexpected PID is not retroactively admitted.
-10. A failed durable intent write refuses audit-intent-unavailable before termination.
-
-## GUI Tree Rule
-
-No positive branch admits a standalone `supervise` process, even when its image, argv, build tag, environment, age, production-state guard, and dead recorded parent match every other predicate. Every such row is refused `supervise-not-tree-reachable` with zero termination calls. parentDeathGate is not `supervise` provenance because a live adopted supervisor can have the dead PPID of the GUI that originally spawned it (internal/cli/gui_supervisor_owner.go:20-32 and :109-110; internal/cli/gui.go:674-698).
-
-Preview may add a `supervise` process to an operation only by walking the complete parseProcessRows snapshot from an admitted GUI branch whose runtime contract can spawn a supervisor and proving that the still-live child is its direct or discovered descendant. The currently reachable tree-producing branch is go-build-cache. A gui-e2e GUI cannot supply this provenance because MCPHUB_E2E_SUPERVISOR=none returns before spawn; any alleged gui-e2e `supervise` row is refused `supervise-not-tree-reachable`. An admitted tree member is bound to the GUI's {PID, StartedAt}, its own {PID, StartedAt}, the ancestor chain, and a strict-canonical executable path equal to the GUI image. That live ancestry is its liveness/provenance proof. It does not run parentDeathGate, does not acquire a positive branch of its own, and does not use an e2e marker as a substitute.
-
-The design mandates descendant-before-GUI ordering. Before termination, the descendant independently must pass snapshot completeness, the apply-age floor, buildInfoTagGate, envProofGate, productionStateGuard, installPathGuard, repoPathGuard, strict path canonicalization, live command-line revalidation, fresh identity, token binding, and durable audit intent. The coordinator then calls reapOneOrphan for the descendant and confirms that exact identity is gone. Only after that confirmation does it freshly revalidate the GUI and call reapOneOrphan for the GUI. If the descendant fails any gate or termination is unconfirmed, the operation records the descendant's exact refusal/outcome and makes zero calls for the GUI.
-
-This order is mandatory because it keeps the ancestry proof observable until the descendant has gone and never manufactures the ambiguous standalone-orphan state. Reaping the GUI first and re-scanning is rejected: the surviving supervisor could be adopted by a restarted GUI, and its dead-parent, path, argv, tag, and environment bytes cannot distinguish live use from a leftover. The lane therefore never chases a `supervise` process after its GUI has terminated.
-
-An already-orphaned standalone `supervise` process whose GUI is gone—including the 2026-07-09 field-incident shape—is deliberately outside the automated lane. Preview reports refused(supervise-not-tree-reachable); removal requires manual operator reaping with out-of-band identity verification.
-
-Preview records each tree member's PID, confirmed GUI PID and StartedAt, inherited GUI branch, ancestor chain, independent-gate verdicts, and intended order `descendant-before-gui`. The local audit intent and outcome record the same tree relationship.
-
-## Confirm Token And Identity Binding
-
-TestLeftoverConfirmToken is an internal/api-only deterministic owner, analogous to the existing single-owner aggressive token contract at internal/api/cleanup.go:467-490 and internal/cli/cleanup_aggressive.go:197-200. It must not reuse AggressiveConfirmToken because its proof material is different.
-
-The token material contains predicateVersion, PEB reader-contract version, effectiveApplyMinAgeSec, and a top-level tempRootHash. The tempRootHash is the strict-canonical operator-root hash or an explicit no-root sentinel. Each sorted top-level candidate record contains PID, StartedAt, strict-canonical executable-path hash, strict-canonical override-path hash, normalized argv hash, branch, buildinfo-tag result, and parent-proof result. A GUI operation with a tree member additionally contains the descendant's PID, StartedAt, path/override/argv hashes, independent-gate results, ancestor chain, confirmed GUI PID and StartedAt, inherited GUI branch, and fixed `descendant-before-gui` order. A `supervise` member never receives a branch of its own. Raw paths never enter token display or wire output.
-
-Apply takes a fresh runProcessSnapshot/parseProcessRows snapshot, refuses snapshot-degraded on its `snapErr`, reconstructs the same typed scope, strict-canonicalizes the fresh census image and every comparison operand, recomputes the token, compares it before applying the expected identity allowlist, and uses filterToExpectedIdentities for the exact {PID, StartedAt} binding (internal/api/cleanup.go:1251-1275 and :1652-1671). It then re-reads live command line, the exact/coherent target PEB environment, target buildinfo, top-level parent state or tree ancestry, and top-level branch evidence before calling reapOneOrphan. The same canonical census image feeds classification or tree binding, token material, and the expected image supplied to the held-handle identity proof. A same-PID changed-StartedAt target is excluded as identity-filter-excludes-recycled-pid even if a token collision or stale display would otherwise look plausible.
-
-## Audit Events And Failure Transparency
-
-The audit sink is the local owner-DACL'd supervisor-events.log selected from the caller's hardened local state directory, not the target's environment-controlled state root. supervisor-events.log is the canonical local event leaf at internal/api/supervisor_events.go:64-68. The pre-kill event must use the durable Emit path rather than the lossy TryEmit path; TryEmit is explicitly unsuitable where an event is the only record of a mutation (internal/api/supervisor_events.go:253-289).
-
-Before every call to reapOneOrphan, the lane synchronously emits test-leftover-cleanup-intent. Its local-only body carries PID, StartedAt, full raw and strict-canonical ExecutablePath, top-level branch or tree-member role plus inherited GUI branch, raw argv, env-proof verdict plus proved strict-canonical override path, buildinfo-tag result, top-level parent proof or identity-bound GUI ancestry proof, token, predicateVersion, PEB reader-contract version, and tree ordering. A tree-member intent also carries the confirmed GUI PID and StartedAt. Failure to write that intent is audit-intent-unavailable and prevents termination; failure for the descendant also prevents the GUI call. This follows the pre-kill intent shape of daemon-port-squatter-reap-requested at internal/cli/supervise_squatter.go:395-419, rather than the old post-kill-only aggressive audit.
-
-After the loop, the lane emits test-leftover-cleanup-outcome with one result per candidate: reaped, refused(reason), or terminate-unconfirmed. It includes PID, full local raw/canonical path when available, branch, tree relation, and reason. An env-read-error also includes its exact envReadFailureStage and operating-system error locally; a path-canonicalization-error includes the failing operand role without converting the unresolved value into token or wire material. At minimum, install-path and production-state refusals must have per-candidate PID, reason, and full path; this design requires that detail for every refusal. The daemon-recover path already audits individual refusals at internal/cli/daemon_recover.go:192-217.
-
-Local owner-DACL'd audit entries retain full paths and argv for forensic proof. API JSON, CLI display intended for transport, and any wire-shaped event summaries use path and argv hashes only. If termination cannot be confirmed by fresh re-enumeration plus identity comparison, the outcome is terminate-unconfirmed, not a fabricated success or survivor state.
-
-## Refusal-Reason And Outcome Vocabulary
-
-`env-read-error` is the stable public refusal; `envReadFailureStage` is mandatory local diagnostic metadata, not a second refusal namespace. `path-canonicalization-error` is the stable refusal for any strict canonicalization failure. `supervise-not-tree-reachable` is the stable refusal for every `supervise` row that is not currently bound as a live descendant of a confirmed test GUI in the same operation. None may degrade to a weaker refusal or branch admission.
-
-| Class | Exact values |
+| Field | V1 output contract |
 |---|---|
-| Image / branch / topology | basename-not-in-branch, argv-not-in-branch, requires-explicit-temp-root, e2e-markers-absent, supervise-not-tree-reachable |
-| Provenance / environment | not-test-tagged, env-read-error, env-override-absent, unsupported-arch |
-| Safety guards | install-path, repo-path, production-state, path-canonicalization-error, parent-alive-or-unproven, min-age-below-apply-floor, snapshot-degraded, identity-unavailable, command-line-mismatch, guard-evaluation-error |
-| Apply binding | token-mismatch, identity-filter-excludes-recycled-pid, audit-intent-unavailable |
-| Outcome values | reaped, refused(<exact reason>), terminate-unconfirmed |
-| Preview tree state | descendant-before-gui; it is fixed ordering metadata, not a positive branch or authorization exception. |
+| PID | Census process identifier. Missing or invalid input is `identity-unavailable`; the row is not silently dropped if it can still be identified for display. |
+| StartedAt | RFC3339Nano creation time derived through the same `orphanStartedAt` representation used by existing cleanup identity binding (`internal/api/cleanup.go:1717-1725`). Missing data is shown as unavailable. |
+| Executable path | Full or redacted according to the established local-output policy. The raw census spelling and strict-canonicalization verdict remain distinguishable; machine-local paths are not copied into tracked docs, tokens, or portable artifacts. |
+| Argv shape | A normalized branch-relevant shape such as `gui`, `gui-e2e`, `reliability-daemon`, `supervise`, or `unrecognized`. Full argv is shown only where the local output policy permits it. |
+| Branch / pattern class | One of `reliability-temp`, `gui-e2e`, `go-build-cache`, `operator-temp-root`, `standalone-supervise`, `ambiguous-multi-match`, or `unclassified`. This is a display classification, never an allow verdict. |
+| Age | Computed age plus `younger-than-apply-floor` / `at-or-above-apply-floor` diagnostic relative to the deferred 600-second floor. No v1 filtering or action depends on it. |
+| Parent liveness | `parent-alive`, `parent-proven-dead`, or `parent-unproven` from the existing tri-state helper semantics at `internal/api/cleanup.go:1687-1708`. This is evidence, not provenance or authorization. |
+| Buildinfo tag | `test-tag-present`, `test-tag-absent`, `unreadable`, `unparsable`, or `not-collected` from the on-disk target image. |
+| Environment override | `not-collected-v1` by default; if a separately accepted read-only provider exists, `present` with policy-safe path evidence, `absent`, or `unavailable`. The complete environment is never logged. |
+| Hypothetical apply result | Always carries `apply-deferred-v1`. If collected evidence conclusively fails a deferred v2 gate, also carries exactly one stable `would-refuse` label using the vocabulary below; otherwise `would-refuse=not-evaluated-v1`. |
+| Operator note | Every `standalone-supervise` candidate carries `manual-reap-only: verify identity out-of-band before killing`. Other candidates may carry concise remediation tied to their evidence label. |
+
+## Test-Leftover Signature (Discriminator Table)
+
+| Discriminator | Cited evidence | V1 preview classification | Deferred v2 apply gate |
+|---|---|---|---|
+| Snapshot completeness | `runProcessSnapshot` is at `internal/api/processes.go:184-235`. | Render completeness; degraded rows remain diagnostics. | Fail apply closed as `snapshot-degraded`. |
+|  | `parseProcessRows` owns `snapErr` at `internal/api/cleanup.go:1251-1275`. | Do not claim a degraded snapshot is exhaustive. |  |
+|  | Existing callers propagate `snapErr` at `internal/api/cleanup.go:1284`, `internal/api/cleanup.go:1420`, `internal/api/cleanup.go:1469`, `internal/api/cleanup.go:1557`, and `internal/api/cleanup.go:1623-1630`. |  |  |
+| Parent liveness | `orphanParentProvenDead` is tri-state at `internal/api/cleanup.go:1687-1708`. | Display alive / proven-dead / unproven. | Mandatory negative guard for top-level candidates. |
+|  |  | Standalone `supervise` remains listed regardless. | Never sufficient provenance for `supervise`. |
+| Target buildinfo tag | Reliability tests use `test_state_path_env` at `internal/cli/daemon_reliability_test.go:67-82`. | Report the on-disk finding when cheap and available. | Exact tag is mandatory. |
+|  | GUI e2e setup uses the tag at `internal/gui/e2e/global-setup.ts:74-99`. |  | Failure is `not-test-tagged`. |
+| Environment override | The test variant consumes the override at `internal/api/state_paths_envfallback.go:53-75`. | `not-collected-v1` by default; optional evidence is non-authorizing. | The deferred PEB reader and `envProofGate` are mandatory. |
+|  | The census has no environment field at `internal/api/processes.go:184-235`. |  |  |
+| Production state | `daemonStateDirReadOnly` owns the production root at `internal/api/state_paths_prod.go:53-69`. | Display strict-canonical relation evidence or `path-canonicalization-error`. | Equality or descendants refuse `production-state`. |
+|  | `rootContains` owns equality/containment at `internal/api/lsp_trusted_roots.go:214-254`. | Do not hide the row. |  |
+| Reliability-temp image | Reliability tests build `mcphub-reliability-*` at `internal/cli/daemon_reliability_test.go:49-82`. | Display family and argv-shape match, including `supervise`. | Requires exact family, path, argv, and common gates. |
+|  |  |  | Standalone `supervise` is refused. |
+| GUI e2e image | Global setup writes the fixture at `internal/gui/e2e/global-setup.ts:13-40`. | Display fixture equality, GUI argv shape, and cheap marker evidence. | Requires exact fixture, GUI argv, and both markers. |
+|  | It tags the fixture at `internal/gui/e2e/global-setup.ts:74-99`. |  |  |
+|  |  |  | No marker admits `supervise`. |
+| Go-build-cache image | `go run` leaves a GUI grandchild in `internal/cli/gui_integration_test.go:98-124`. | Display strict component containment and GUI or `supervise` argv. | Requires exact branch gates. |
+|  |  |  | `supervise` requires a corrected v2 tree contract. |
+| Supervise topology | GUI spawn is at `internal/cli/gui_supervisor_owner.go:128-150`; adoption is at `internal/cli/gui.go:674-698`. | List `standalone-supervise` or `unverified-ppid-chain` only as a hint. | Standalone rows refuse `supervise-not-tree-reachable`. |
+|  |  | Never call it safe or tree-confirmed. | Tree authorization is blocked by round-3 P2/P3. |
+| Operator temp root | No committed source authorizes the considered `f1-cli-verify` prefix. | A strict-canonical root scopes display only. | Root must be token-bound and outside production. |
+|  |  | It cannot broaden the basename family. |  |
+| Installed and repo paths | Install locations are at `internal/api/install.go:39-64` and `internal/cli/setup.go:99-115`. | Display the strict-canonical relation or failure. | Refuse `install-path` / `repo-path` before admission. |
+|  | Own binaries are protected at `internal/api/cleanup.go:32-60`. |  |  |
+| Age | Existing cleanup floor is 600 seconds at `internal/api/cleanup.go:141-145`. | Display age relative to 600 seconds; do not filter or act. | Effective apply age can never be below 600 seconds. |
+| Identity | Existing identity binding uses PID, executable path, `StartedAt`, and live command line at `internal/api/cleanup.go:1749-1786`. | Display available fields and evidence gaps. | Fresh `{PID, StartedAt}` and command-line revalidation are mandatory. |
+
+## Fail-Closed Predicate: V1 Display Versus Deferred V2 Authorization
+
+Version 1 deliberately has no positive authorization predicate. No record may be named `allowed`, `apply-eligible`, `safe-to-kill`, or equivalent. The only v1 inclusion question is whether a census row resembles an admitted diagnostic pattern strongly enough to help an operator investigate it.
+
+The v1 display predicate is:
+
+1. reuse `runProcessSnapshot` plus `parseProcessRows`;
+2. retain every row matching a known image family, a known branch path, a supplied display-only temp root, or `supervise` argv associated with those families;
+3. evaluate each available evidence field independently;
+4. keep the candidate visible when an evidence read, strict canonicalization, parent probe, buildinfo read, or classification fails;
+5. render `apply-deferred-v1` plus a conclusive hypothetical `would-refuse` label when one is known; and
+6. stop after rendering.
+
+The deferred v2 predicate is separate: every common gate, exactly one positive branch, every negative guard, scope binding, identity proof, audit-intent requirement, and corrected tree rule must pass before a kill owner can be reached. Those contracts appear only under `Deferred: Destructive Apply (v2)`.
+
+## V1 Diagnostic And Refusal Vocabulary
+
+The refusal vocabulary is reused in v1 only as diagnostic labels describing what a hypothetical v2 apply would refuse. A v1 label has no authorizing complement: absence of a known refusal never means permission.
+
+| Class | Stable values | V1 meaning |
+|---|---|---|
+| V1 lifecycle | `apply-deferred-v1`, `not-evaluated-v1`, `manual-reap-only` | No apply exists; evidence may be incomplete; manual action is outside the command. |
+| Image / branch / topology | `basename-not-in-branch`, `argv-not-in-branch`, `requires-explicit-temp-root`, `e2e-markers-absent`, `supervise-not-tree-reachable` | `would-refuse` labels when current evidence conclusively establishes the condition. |
+| Provenance / environment | `not-test-tagged`, `env-read-error`, `env-override-absent`, `unsupported-arch` | `would-refuse` labels only when collected evidence supports them; `not-collected-v1` is evidence status, not an inferred refusal. |
+| Safety guards | `install-path`, `repo-path`, `production-state`, `path-canonicalization-error`, `parent-alive-or-unproven`, `min-age-below-apply-floor` | Diagnostic labels; the candidate remains visible. |
+|  | `snapshot-degraded`, `identity-unavailable`, `command-line-mismatch`, `guard-evaluation-error` |  |
+| Deferred apply binding | `token-mismatch`, `identity-filter-excludes-recycled-pid`, `audit-intent-unavailable` | Preserved for v2 and not evaluated by baseline v1. |
+| Deferred outcomes | `reaped`, `refused(<exact reason>)`, `terminate-unconfirmed` | Reserved for v2. V1 must never emit `reaped` or `terminate-unconfirmed`. |
+
+## V1 Components, Ownership, And Dependency Direction
+
+| Component | Single owner | V1 contract |
+|---|---|---|
+| Snapshot adapter | Existing `runProcessSnapshot` plus `parseProcessRows` | Produces typed rows and the sole completeness verdict. No parallel parser is introduced. |
+| Candidate evidence classifier | `internal/api` | Computes pattern class and independent diagnostic findings from typed rows and typed options. It returns data; it has no process handle, state mutation, or termination dependency. |
+| Strict path canonicalizer | `internal/process` | Returns one strict canonical form or an explicit error for files/directories. In v1 the result is used only for classification display and safe relation evidence. |
+| On-disk buildinfo reader | `internal/api` adapter around `debug/buildinfo.ReadFile` | Reads only the target image file and returns a typed finding. |
+| Environment evidence provider | Not required in baseline v1 | Baseline output is `not-collected-v1`. Any separately accepted provider is read-only, bounded, non-authorizing, and replaceable without classifier changes. |
+| CLI adapter and renderer | `internal/cli` | Parses flags once, calls the evidence API, applies redaction/full-path policy, renders records, and exits. |
+
+Dependencies point from the CLI adapter to the API evidence contract and from the API to read-only process/path utilities. No dependency points from the v1 evidence path into `reapOneOrphan`, `orphanTerminateFn`, the aggressive token owner, or a future apply coordinator.
+
+## V1 Failure Modes And Observability
+
+- Snapshot acquisition failure is visible and nonzero; no empty-success result claims that no leftovers exist.
+- A degraded parse is labeled `snapshot-degraded`; any complete rows remain visible without an exhaustive claim.
+- Per-candidate evidence failure is attached to that candidate and does not suppress it.
+- Strict canonicalization failure is reported without treating an unresolved path as outside a protected root.
+- Output applies the established redacted-or-full-per-policy path handling. The complete target environment is never read or logged by baseline v1.
+- The command emits no process-mutation intent or outcome event because it performs no mutation. Normal command diagnostics are sufficient; adding a destructive audit namespace in v1 would falsely imply an apply lifecycle.
+
+## Manual Operator Handoff (Outside V1)
+
+For a candidate the operator decides to remove, the safe procedure remains the one used in the 2026-07-09 incident:
+
+1. verify the live image path out of band;
+2. verify the live argv, including the exact `supervise` shape;
+3. verify `StartedAt` still matches the previewed identity; and
+4. use an operating-system process tool outside `mcphub cleanup test-leftovers`.
+
+The v1 command does not perform, script, or confirm step 4.
 
 ## Alternatives Considered
 
 | Alternative | Decision | Trade-off |
 |---|---|---|
-| Fold mcphub-family kills into CleanupOrphans or AggressiveCleanup. | Rejected. | Violates the current own-binary boundary and broadens unattended or existing destructive semantics. |
-| Use image path, argv, age, and environment presence as authorization. | Rejected. | A manually run, untagged, or live-debug hub can satisfy those signals; environment presence does not prove consumption. |
-| Admit standalone `supervise` through dead-parent, marker, or go-build-cache resemblance; or kill the GUI first and chase the new orphan. | Rejected. | A live adopted supervisor can have the same dead PPID, image, argv, tag, and environment, while MCPHUB_E2E_SUPERVISOR=none prevents a GUI from spawning any supervisor. Only a live descendant relationship to the confirmed test GUI is provenance, so the descendant must be reaped first. |
-| Compare raw or `filepath.Clean`-only paths, or reuse a best-effort canonicalizer. | Rejected. | Case, trailing-separator, junction, 8.3, or UNC aliases can turn production/install/repo containment into a false outside result; destructive gates require strict canonicalization plus `rootContains`. |
-| Keep the lane preview-only forever. | Rejected for this work item, retained as the fail-safe fallback. | Avoids destructive risk but cannot remove verified leftovers; any unavailable proof still degrades to preview/refusal. |
-| Separate explicit CLI lane with tag, top-level dead-parent, PEB environment, branch, token, audit, identity, and descendant-first GUI-tree proofs. | Chosen. | More implementation and test work, but preserves default cleanup behavior, refuses ambiguous standalone supervisors, and has one accountable kill owner. |
+| Ship the previously designed destructive apply as v1. | Deferred. | It safely handles only a fraction of observed leftovers, refuses the main standalone-`supervise` class, and still has confirmed P2/P3 blockers. |
+| Hide standalone `supervise` because it cannot be auto-authorized. | Rejected. | It would hide the actual field population and defeat the diagnostic value of v1. |
+| Fold mcphub-family handling into `CleanupOrphans` or `AggressiveCleanup`. | Rejected. | It would weaken the existing own-binary boundary and broaden destructive behavior. |
+| Ship a separate preview/diagnostics command and leave removal manual. | Chosen. | It provides actionable evidence for the real leftover class with no automated live-kill risk and preserves a future v2 contract. |
 
-## Architectural Claims
+## V1 Architectural Claims
 
-Decision back-reference: work-items/decisions/2026-07-09-test-leftover-reaper-peb-env-proof-preview-only.md remains the accepted durable decision for PEB environment evidence. The remaining directives are confined to this active work item and are intentionally specified here for its next security gate.
+1. `{ guarantee: mcphub cleanup test-leftovers v1 never terminates or mutates a process; single-owner: the preview-only CLI/API boundary defined by decision 2026-07-10-test-leftover-reaper-preview-only-v1; enforcement-probe: CLI tests reject --apply and --confirm-token, evidence-path tests inject a fail-on-call termination seam, and repository review finds no v1 call edge to reapOneOrphan or orphanTerminateFn. }`
+2. `{ guarantee: Existing CleanupOrphans and AggressiveCleanup behavior remains unchanged; single-owner: the separate test-leftover evidence API seam; enforcement-probe: the implementation diff leaves existing handlers and own-binary checks at internal/api/cleanup.go:1287-1298 and internal/api/cleanup.go:1473-1475 unchanged, and existing cleanup tests pass. }`
+3. `{ guarantee: Standalone supervise candidates are visible and never described as auto-authorized; single-owner: the candidate evidence classifier; enforcement-probe: a 2026-07-09-shaped mcphub-reliability-*.exe supervise fixture renders standalone-supervise, apply-deferred-v1, would-refuse=supervise-not-tree-reachable, and the exact manual-reap-only note. }`
+4. `{ guarantee: Snapshot completeness has one owner; single-owner: parseProcessRows and its snapErr return at internal/api/cleanup.go:1251-1275; enforcement-probe: a truncated census renders snapshot-degraded and never claims an exhaustive empty or complete result. }`
+5. `{ guarantee: Path aliases cannot silently change display classification; single-owner: strict path canonicalizer in internal/process plus rootContains in internal/api; enforcement-probe: case, trailing-separator, junction, 8.3, UNC, and prefix-collision fixtures either converge to the same class or render path-canonicalization-error. }`
+6. `{ guarantee: Missing diagnostic evidence keeps a candidate visible and never becomes implicit permission; single-owner: candidate evidence classifier; enforcement-probe: buildinfo read failure, parent-probe error, path error, and not-collected-v1 environment fixtures each remain in output with apply-deferred-v1. }`
+7. `{ guarantee: Baseline v1 neither requires nor implements cross-process memory reading; single-owner: the v1 evidence-provider registry; enforcement-probe: the accepted v1 implementation has no PEB reader dependency and emits not-collected-v1 for environment override. }`
+8. `{ guarantee: No unattended or GUI surface can reach the v1 lane; single-owner: the CLI composition root; enforcement-probe: route review finds only the explicit cleanup subcommand and no ticker, GUI handler, recovery, or background-watcher registration. }`
 
-1. { guarantee: Existing CleanupOrphans and AggressiveCleanup behavior remains unchanged; single-owner: the separate CleanupTestLeftovers API lane; enforcement-probe: no call path from existing cleanup handlers and existing own-binary checks remain at internal/api/cleanup.go:1287-1298 and :1473-1475. }
-2. { guarantee: A top-level candidate cannot be authorized by environment presence alone, and a supervise tree member cannot be authorized by dead-parent resemblance; single-owner: the test-leftover predicate; enforcement-probe: an untagged fixture-path binary with override is refused not-test-tagged, an otherwise valid top-level candidate with a live parent is refused parent-alive-or-unproven, and a standalone supervise with a dead parent is refused supervise-not-tree-reachable, all with zero orphanTerminateFn calls. }
-3. { guarantee: A gui-e2e GUI requires both exact e2e markers, and those markers never admit supervise; single-owner: the gui-e2e branch classifier; enforcement-probe: separate absent-scheduler and absent-supervisor GUI fixtures each refuse e2e-markers-absent, while a standalone supervise carrying both markers refuses supervise-not-tree-reachable, all with zero orphanTerminateFn calls. }
-4. { guarantee: The committed go-build-cache GUI leftover class is reachable without admitting an arbitrary temp mcphub image, path-prefix collision, or standalone supervise; single-owner: the go-build-cache branch classifier using strictPathCanonicalizer plus rootContains; enforcement-probe: a tagged, dead-parent, non-production GUI cache fixture is admitted while an otherwise matching standalone supervise refuses supervise-not-tree-reachable and generic/prefix fixtures refuse their exact branch reason. }
-5. { guarantee: A preview's temp-root scope cannot be widened, omitted, substituted, or intersected with production state during apply; single-owner: TestLeftoverConfirmToken plus productionStateGuard in internal/api; enforcement-probe: preview with a root followed by missing or different apply root is token-mismatch, and temp roots equal to or containing production refuse production-state, all with zero orphanTerminateFn calls. }
-6. { guarantee: Production-state exclusion has one relation implementation and termination has one kill owner; single-owner: strictPathCanonicalizer plus rootContains plus productionStateGuard, and reapOneOrphan respectively; enforcement-probe: case, junction, and trailing-separator aliases of production reject production-state, and the implementation review finds no raw/Clean-only path comparison or parallel terminate call outside reapOneOrphan/orphanTerminateFn. }
-7. { guarantee: Every irreversible termination has durable local intent evidence first; single-owner: the local audit writer; enforcement-probe: injected intent-write failure refuses audit-intent-unavailable with zero orphanTerminateFn calls, while successful applies record intent before the recorder seam. }
-8. { guarantee: No standalone supervise is automatically reaped; the only supervise kill is an independently gated live descendant reaped and confirmed before its confirmed test GUI in the same operation; single-owner: the tree coordinator; enforcement-probe: a matching standalone/adopted supervisor and an already-orphaned field-incident fixture refuse supervise-not-tree-reachable with zero calls, while the GUI-tree fixture calls reapOneOrphan for the descendant before the GUI and aborts the GUI call if the descendant refuses or is terminate-unconfirmed. }
-9. { guarantee: Refusal tests falsify their named guard rather than passing through overlap; single-owner: test-leftover predicate test support; enforcement-probe: each refusal fixture satisfies every other gate, asserts its exact reason, and asserts zero orphanTerminateFn calls; token drift and recycled-PID identity filtering are separate tests. }
-10. { guarantee: No remote byte sequence can become a kill-authorizing map unless the architecture-specific layout, every exact read, metadata coherence, and UTF-16 parser contract pass; single-owner: the PEB environment reader; enforcement-probe: amd64 and WOW64 helper value tests pass while short-read, API-error, invalid-layout, metadata-drift, malformed UTF-16, and missing-terminator fixtures each return env-read-error with their exact stage and zero orphanTerminateFn calls. }
-11. { guarantee: No unresolved or aliased path can be classified outside a protected root; single-owner: strictPathCanonicalizer in internal/process and rootContains in internal/api; enforcement-probe: production/install/repo alias fixtures refuse their exact guard reason, canonicalization faults refuse path-canonicalization-error, and prefix-collision fixtures do not count as descendants. }
-12. { guarantee: A truncated direct process-row scan cannot authorize any apply termination; single-owner: parseProcessRows and its existing snapErr return at internal/api/cleanup.go:1251-1275; enforcement-probe: runProcessSnapshot output truncated after one otherwise valid top-level row and after one GUI/descendant pair causes snapshot-degraded with zero orphanTerminateFn calls, matching the propagated fail-close at internal/api/cleanup.go:1420, :1557, and :1623-1630. }
-
-## Test Plan
-
-All refusal/spare tests use a fixture that satisfies every non-target gate, then alter only the guard under test. Each asserts its exact refusal reason and zero calls through orphanTerminateFn at internal/api/cleanup.go:1674-1685. Positive tests assert the intended top-level branch or tree-member role, exact audit/termination ordering, and calls only through reapOneOrphan.
+## V1 Test Plan
 
 | ID | Scenario | Required assertion |
 |---|---|---|
-| T1 | reliability-temp positive fixture with tag, non-production override, dead parent, correct argv, and age at least 600. | Admits reliability-temp and calls the terminate seam once through reapOneOrphan. |
-| T2 | gui-e2e GUI positive fixture with both markers, tag, override, dead parent, correct fixture path and argv. | Admits gui-e2e and records both marker proofs. |
-| T3 | Standalone `supervise` fixture that matches every non-topology common, path, age, tag, environment, dead-parent, identity, and image-family gate. | Refuses supervise-not-tree-reachable and makes zero terminate calls, proving no positive branch admits standalone supervise. |
-| T4 | Positive go-build-cache GUI fixtures from the OS-temp `go-build*` component and exact LocalAppData `go-build` root. | Each admits go-build-cache only when strict component-boundary containment, tag, override, dead parent, and GUI argv pass; `supervise` argv is not a branch shape. |
-| T5 | All-gates-pass candidate except its recorded parent is live. | Refuses parent-alive-or-unproven and makes zero terminate calls. |
-| T6 | gui-e2e GUI fixtures missing scheduler or supervisor marker one at a time. | Each refuses e2e-markers-absent and makes zero terminate calls; the marker pair is never tested as supervise admission. |
-| T7 | Untagged binary at the e2e fixture path with a present override. | Refuses not-test-tagged and makes zero terminate calls, proving environment presence is not consumption. |
-| T8 | Temp image with a strict-canonical production override or argv state path. | Refuses production-state and makes zero terminate calls through the one productionStateGuard. |
-| T9 | Installed-path and repo-path hub fixtures with all other proofs artificially satisfied. | Strict equality/containment respectively refuse install-path and repo-path, each with zero terminate calls. |
-| T10 | Valid key absence plus odd-sized, incomplete-entry, unpaired-surrogate, missing-double-NUL, trailing-garbage, and malformed PEB environment blocks. | Only the fully valid absent-key block refuses env-override-absent; every malformed block refuses env-read-error with `parse-environment` and makes zero terminate calls. |
-| T11 | Apply with requested min age below 600, and preview with a younger candidate. | Apply clamps to 600 and refuses min-age-below-apply-floor; preview may show but cannot admit the candidate. |
-| T12 | Preview with --temp-root, then apply without it and with a strict-canonical different root. | Each refuses token-mismatch and makes zero terminate calls. |
-| T13 | Preview/apply token candidate drift with changed candidate material. | Refuses token-mismatch and makes zero terminate calls. |
-| T14 | Same PID with a changed StartedAt after preview. | The expected identity filter yields identity-filter-excludes-recycled-pid and makes zero terminate calls; this is separate from T13. |
-| T15 | Injected throwing buildinfo, environment-policy, or parent guard. | Refuses guard-evaluation-error and makes zero terminate calls; strict path failures remain the separate path-canonicalization-error contract. |
-| T16 | Census/live command-line mismatch, missing identity proof, unsupported reader/target direction, and runProcessSnapshot output for which parseProcessRows returns `snapErr`. | Respectively refuse command-line-mismatch, identity-unavailable, unsupported-arch, or snapshot-degraded with zero terminate calls; the last case proves gate 1 inherits parseProcessRows fail-close. |
-| T17 | Intent event recorder and intent-write failure seam. | Successful intent precedes the terminate seam; write failure refuses audit-intent-unavailable and makes zero terminate calls. |
-| T18 | Confirmed go-build-cache test GUI with a live, independently gated `supervise` descendant in the complete snapshot. | Preview binds both identities and shows descendant-before-gui; apply writes child intent, reaps and confirms the descendant through reapOneOrphan, freshly revalidates the GUI, then writes GUI intent and reaps the GUI. The ordered terminate count is exactly two. |
-| T19 | Re-enumeration after a terminate seam reports a recycled PID or missing identity. | Emits terminate-unconfirmed rather than a false reaped result. |
-| T20 | CLI parsing and output. | Preview/apply preserve strict-canonical temp-root scope, apply clamps age, token mismatch returns nonzero, and local audit has per-candidate intent/outcome records with raw paths confined locally. |
-| T21 | `readExact` at every remote pointer, metadata, and block hop returns nil API error with `bytesRead < len(dst)`, then returns an API error. | Every variant is ERROR/AMBIGUOUS, refuses env-read-error with the exact read stage, never becomes key absence/map, and makes zero terminate calls. |
-| T22 | Native amd64 layout and coherence helper: assert PBI size/offsets and pinned PEB/RUPP offsets; read a value containing `=`; then mutate Environment pointer or size between the first and second metadata reads. | Stable exact value equals helper `os.LookupEnv`; metadata drift refuses env-read-error with `reread-environment-metadata` and zero terminate calls. |
-| T23 | amd64 reader against a Windows WOW64 i386 helper using the dedicated uint32 route, with present mixed-case override containing `=` and with the key absent. | The exact present value equals helper `os.LookupEnv`; valid absence is env-override-absent. The test cannot enable apply until a versioned PEB32 layout source and exact offset assertions are present. |
-| T24 | OpenProcess access denial/protected target, IsWow64Process2 failure, NtQueryInformationProcess failure, ReadProcessMemory failure, and target exit at each chase hop. | Each refuses env-read-error with the corresponding distinct envReadFailureStage and operating-system error, never env-override-absent, with zero terminate calls. |
-| T25 | Production-root aliases: case-only spelling, trailing separator, junction/reparse alias, and—where the test host can materialize them—8.3 and UNC aliases; test both equality and a descendant. | Every variant strict-canonicalizes to equal-or-descendant and refuses production-state with zero terminate calls. |
-| T26 | Operator temp roots equal to production, containing production, and below production; plus an image under an otherwise valid temp root whose override aliases production. | Root intersection and the independent override guard each refuse production-state, proving `imageUnderTempRoot` and `overrideOutsideProduction` are conjunctive; zero terminate calls. |
-| T27 | Installed-image junction alias, repo-image alias, exact gui-e2e fixture, and sibling prefix paths such as `mcp-local-hub-evil` or a full-path `go-build` prefix collision. | Aliases refuse install-path/repo-path; the exact fixture can proceed to its branch; sibling prefixes are outside and cannot satisfy containment. |
-| T28 | Strict canonicalization fails through missing/broken components, access denial, reparse loop, or unresolved 8.3/UNC/device spelling for each guard and branch operand. | Every failure refuses path-canonicalization-error with zero terminate calls; no best-effort path reaches rootContains or token material. |
-| T29 | Exclusive-branch refusal matrix: an otherwise valid reliability image lacks --temp-root for the operator branch, uses a non-admitted basename, or uses argv outside its selected branch. | Respectively refuses requires-explicit-temp-root, basename-not-in-branch, or argv-not-in-branch with zero terminate calls; no candidate receives a union of branch permissions. |
-| T30 | Already-orphaned standalone `supervise` whose recorded GUI parent is dead, matching the 2026-07-09 field-incident shape and every non-topology gate. | Refuses supervise-not-tree-reachable with zero terminate calls and performs no post-GUI or dead-parent chase; the outcome directs manual out-of-band identity verification. |
-| T31 | Confirmed GUI whose live supervise descendant fails one independent child gate or whose reap is terminate-unconfirmed. | Records the child's exact refusal/outcome and makes zero terminate calls for the GUI, proving descendant-before-GUI is fail-closed. |
+| V1-T1 | Complete synthetic census with reliability-temp, gui-e2e, go-build-cache, operator-root, and unrelated rows. | Every recognized candidate renders once with PID, `StartedAt`, path-policy result, argv shape, pattern class, age, and parent verdict. |
+|  |  | Evidence fields and `apply-deferred-v1` render; unrelated rows do not appear. |
+| V1-T2 | Standalone `mcphub-reliability-*.exe supervise` matching the 2026-07-09 incident shape. | It renders `standalone-supervise`, `would-refuse=supervise-not-tree-reachable`, and `manual-reap-only: verify identity out-of-band before killing`. |
+| V1-T3 | Candidate with missing StartedAt, buildinfo failure, parent-probe failure, or environment `not-collected-v1`. | The row remains visible with the exact evidence status; no missing field becomes an allow verdict. |
+| V1-T4 | `parseProcessRows` returns rows plus `snapErr`, and `runProcessSnapshot` returns a total acquisition error. | The first renders rows plus `snapshot-degraded` without an exhaustive claim; the second is visible and nonzero. |
+| V1-T5 | Production/install/repo aliases, broken reparse points, prefix collisions, and a supplied operator temp root. | Strict canonical results drive display only; failures render `path-canonicalization-error`. |
+|  |  | The temp root does not broaden basename families. |
+| V1-T6 | Tagged, untagged, unreadable, and unparsable on-disk images. | Buildinfo findings are exact and non-authorizing. |
+| V1-T7 | Redacted and full local-output policies. | Executable paths and argv obey policy; portable output contains no unintended machine-local path. |
+| V1-T8 | `--apply`, `--confirm-token`, hidden environment toggles, and direct evidence-API invocation. | Destructive flags are rejected, no hidden toggle exists, and a fail-on-call `orphanTerminateFn` seam remains untouched. |
+| V1-T9 | Existing default and aggressive cleanup suites. | Their behavior and own-binary protections remain unchanged. |
+| V1-T10 | Baseline environment evidence and any separately accepted optional read-only provider failure. | Baseline is `not-collected-v1`; optional failure is `unavailable`; both remain visible and never affect inclusion. |
 
-## Scope, Risk, And Gate
+## V1 Gate
 
-This remains an additive security-sensitive full-delivery item. Future implementation may use only the approved API, process, and CLI seams. It must not add the lane to a ticker, default cleanup, aggressive cleanup, or a GUI endpoint. No implementation begins until the adversarial security gate re-runs against this revision and reports no live-kill path.
+Gate decision: **PASS**. The preview/diagnostics-only v1 design is accepted for implementation. It provides evidence for the observed standalone-`supervise` population while keeping every destructive mechanism out of the v1 command.
 
-The principal false-positive risk is a real user-run or installed mcphub GUI or `supervise` process that resembles a test process in basename, argv, path, tag, dead-parent state, or environment. A real user-run standalone `supervise` is never killed because no positive branch admits it: every standalone row is refused(supervise-not-tree-reachable), even when every resemblance gate passes. A `supervise` process reaches reapOneOrphan only as the independently gated live descendant of a just-confirmed test GUI, is identity-bound to that GUI in the token, and is reaped and confirmed before the GUI. An already-orphaned supervisor is outside automated scope and requires manual out-of-band identity verification. Top-level candidates retain the combined authorization of target build tag, proven-dead parent, exact/coherent architecture-specific target environment, strict-canonical path relations, exclusive branch, production guard, fresh identity, scoped token, pre-kill audit, and reapOneOrphan. If any applicable proof is unavailable, the correct result is refused(<reason>) or preview diagnostics, never a kill.
+## Deferred: Destructive Apply (v2)
 
-Gate decision: REVISE. Round 3 incorporates all nine original findings, the accepted A/B/C code contracts, and both round-2 re-gate findings, but implementation remains blocked until the fable-headed adversarial pre-implementation security gate is re-run and clean against this full revision.
+Everything in this section is preserved as the specification for a possible future apply lane. It is not part of v1, must not be implemented behind v1 flags or hidden configuration, and cannot be wired to a kill owner until all three admission conditions are met:
+
+1. round-3 P2 is resolved with deterministic proof that the GUI's armed respawn loop cannot create a replacement `supervise` between descendant reap, confirm-gone, and GUI reap;
+2. round-3 P3 is resolved with PID-recycle-safe ancestry whose every edge is identity- and time-bound, not a bare PPID chain; and
+3. a demonstrated value case shows that the safely automatable subset justifies the coordination and maintenance cost despite excluding standalone `supervise`.
+
+Deferred apply syntax:
+
+```text
+mcphub cleanup test-leftovers --confirm-token <token> [--min-age-sec <seconds>] [--temp-root <path>]
+```
+
+The deferred CLI parses all flags once into typed options. Lower layers do not reread ambient policy. The effective apply age is `max(requestedMinAgeSec, 600)`. A preview temp root and its strict-canonical value must be bound into the confirm token; omission, substitution, or scope drift is `token-mismatch` with zero termination calls.
+
+### Deferred Components And Ownership
+
+| Component | Owns | Deferred contract |
+|---|---|---|
+| `parseProcessRows` | Snapshot-completeness detection. | Apply calls `runProcessSnapshot` plus `parseProcessRows`; any `snapErr` refuses `snapshot-degraded` before action. |
+| Destructive test-leftover predicate | Candidate authorization and exclusive branch. | Returns allow or `refused(reason)`; unavailable/throwing guards become `guard-evaluation-error`. |
+| `parentDeathGate` | Top-level parent-liveness proof. | Accepts only `orphanParentProvenDead`; it never authorizes standalone `supervise`. |
+| `buildInfoTagGate` | Test-tag provenance from the target image. | Requires exact `test_state_path_env` from `debug/buildinfo.ReadFile(ExecutablePath)`. |
+| PEB environment reader | Exact remote-byte acquisition and validated UTF-16 environment block. | Apply-capable only on `windows && amd64` under the reader contract below. |
+| `envProofGate` | Target environment and redirected-state proof. | Only a validated map with a non-production override may progress. Absence and ambiguity are distinct refusals. |
+| Strict path canonicalizer | One strict-error Windows form. | Every destructive path operand must be absolute, resolved, normalized, and case-folded; no unresolved fallback. |
+| Production/install/repo guards | Protected-path exclusion. | Use strict canonical forms plus `rootContains`; equality and containment are explicit. |
+| Branch classifier | Exclusive top-level admission. | Exactly one of reliability-temp, gui-e2e, operator-temp-root, or go-build-cache; no branch admits standalone `supervise`. |
+| `TestLeftoverConfirmToken` | Preview/apply scope and candidate binding. | Single owner in `internal/api`; no CLI or GUI copy derives a parallel token. |
+| Tree coordinator | GUI-to-supervise membership, respawn quiescence, PID-recycle-safe ancestry, and ordering. | **BLOCKED:** it must resolve round-3 P2/P3 before the preserved tree-reap contract can be enabled. |
+| `reapOneOrphan` | Identity-gated termination. | Sole per-candidate kill owner; no parallel terminate sequence. |
+| Local audit writer | Durable intent and outcome evidence. | Writes local owner-DACL'd events; intent must precede every irreversible action. |
+
+### PEB Environment Reader Contract
+
+The deferred reader contract is mandatory and fail-closed. Its public error/ambiguous refusal remains `env-read-error`, while local diagnostics and tests carry one distinct `envReadFailureStage` from: `open-process`, `classify-architecture`, `query-basic-information`, `query-wow64-information`, `validate-layout`, `read-peb`, `read-process-parameters`, `read-environment-metadata`, `validate-environment-metadata`, `read-environment-block`, `reread-environment-metadata`, or `parse-environment`. Unsupported reader/target directions use `unsupported-arch`. No error/ambiguous result may become key absence or a parsed map.
+
+1. **Build and target classification.** The apply-capable reader is compiled only for `windows && amd64`; all other builds are preview/refuse-only. The same target handle is classified with `windows.IsWow64Process2` from repository-pinned `golang.org/x/sys v0.46.0` (`go.mod:16`). A failed or unsupported classification is error/ambiguous and spares.
+2. **One correctly authorized handle.** Open exactly one non-inheritable handle with `PROCESS_QUERY_INFORMATION | PROCESS_VM_READ`, not `PROCESS_QUERY_LIMITED_INFORMATION`. Close it on every return. Every `OpenProcess`, `NtQueryInformationProcess`, `IsWow64Process2`, or `ReadProcessMemory` failure, including access denial and target exit, is error/ambiguous with its stage and operating-system error retained locally. The existing GUI reader's mask is at `internal/gui/probe_windows.go:131-138` but its identity opens are a different contract.
+3. **Exact remote reads.** One `readExact(handle, remoteAddress, dst)` owns every pointer, metadata, and block read. It succeeds only with no API error and `bytesRead == len(dst)`. Zero bases, integer overflow, and short reads are errors. The current GUI reader does not validate every hop (`internal/gui/probe_windows.go:166-207`), so it is not reused unchanged.
+4. **Native amd64 chase and coherence.** Use the pinned `windows.NtQueryInformationProcess` binding with `ProcessBasicInformation` and `windows.PROCESS_BASIC_INFORMATION`. Require success, exact `ReturnLength`, nonzero PEB, and layout assertions `sizeof(PBI)=0x30` / `offsetof(PebBaseAddress)=0x08`. Reader version `x/sys-v0.46.0-amd64` pins PEB.ProcessParameters at `0x20`, Environment at `0x80`, and EnvironmentSize at `0x3f0`. Chase through `readExact`; reject zero/odd/overflowing sizes and values over `maxRemoteEnvironmentBytes = 1 MiB`. Reread Environment pointer and size after the block read and require exact equality. The existing x64 offsets are visible at `internal/gui/probe_windows.go:2-11` and `internal/gui/probe_windows.go:162-181` but do not authorize another architecture by analogy.
+5. **WOW64 i386 chase.** Use `ProcessWow64Information -> PEB32 -> 32-bit ProcessParameters -> 32-bit Environment` with dedicated `uint32` wire fields and explicit zero-extension. **ASSUMPTION (UNVERIFIED):** customary offsets ProcessParameters=`0x10`, Environment=`0x48`, and EnvironmentSize=`0x290` lack a published Microsoft environment-field contract. This route cannot authorize a kill until a versioned native-layout source, exact offset assertions, and a Windows i386 helper test compare the exact override—including a value containing `=`—with the helper's `os.LookupEnv` result.
+6. **Environment parser.** Decode only an exact, bounded, even-sized UTF-16LE block. Reject odd bytes, incomplete code units, unpaired surrogates, incomplete entries, a missing double-NUL, or non-NUL trailing data. Split ordinary entries at the first `=`, require a nonempty name, preserve later `=` characters, and compare `MCPHUB_STATE_DIR_OVERRIDE` with `strings.EqualFold`. Only a fully validated block may return key absent. Never log the full environment map.
+
+### Deferred Strict Path Canonicalization And Relation Contract
+
+`strictPathCanonicalizer` in `internal/process` is the single future canonicalization owner for every destructive file or directory operand. It makes the path absolute, cleans it, fully resolves reparse points/symlinks, expands 8.3 aliases, normalizes UNC/device spellings and trailing separators, and case-folds on Windows. Missing/broken components, permissions, loops, or incomplete resolution return `path-canonicalization-error` with no best-effort fallback.
+
+The owner is a strict-error variant/refactor, not either existing helper unchanged. `api.CanonicalizeTrustedRoot` falls back after failed resolution at `internal/api/lsp_trusted_roots.go:115-152`, and `process.normalizeWindowsExecutablePath` keeps a cleaned unresolved path when `EvalSymlinks` fails at `internal/process/pid_identity_windows.go:145-161`. Once both operands are strict-canonical, `rootContains(root, candidate)` means equality-or-true-descendant and mutual containment means equality (`internal/api/lsp_trusted_roots.go:214-254`).
+
+`productionStateGuard` rejects override or argv state paths equal to or below production. `installPathGuard` rejects the install target and install-directory containment. `repoPathGuard` rejects repo containment except exact GUI-fixture equality. Branches use the same relations; go-build-cache matches a complete directory component, never a full-path prefix. The temp-root and production checks remain independent and conjunctive.
+
+### Deferred Fail-Closed Apply Predicate
+
+A top-level candidate becomes apply-eligible only when every common gate, exactly one positive branch, and every negative guard pass. A `supervise` row is never top-level apply-eligible. There is no common basename shortcut.
+
+#### Positive Common Gates
+
+1. `parseProcessRows` returns no `snapErr` and the row has PID, PPID, ExecutablePath, CommandLine, and `StartedAt`.
+2. Age is at least `effectiveApplyMinAgeSec`, never below 600 seconds.
+3. The PEB reader returns a parsed environment only through its exact architecture, handle, read, layout, coherence, and parser checks.
+4. `envProofGate` finds `MCPHUB_STATE_DIR_OVERRIDE` and strict-canonicalizes a non-production path.
+5. `buildInfoTagGate` reads the target image and finds `test_state_path_env`.
+6. A top-level candidate's recorded parent is proven dead; this never admits `supervise`.
+7. `productionStateGuard` proves every candidate state path is outside production.
+8. The candidate has a fresh identity suitable for `reapOneOrphan` and passes one branch.
+
+#### Positive Branch Gates
+
+The order is gui-e2e, go-build-cache, reliability-temp, then operator-temp-root. Before selection, `supervise` argv refuses `supervise-not-tree-reachable`.
+
+1. **reliability-temp:** strict-canonical OS-temp containment, `mcphub-reliability-*` basename, and committed reliability-daemon argv (`internal/cli/daemon_reliability_test.go:49-82` and `internal/cli/daemon_reliability_test.go:154-176`).
+2. **gui-e2e:** exact canonical fixture, `gui --no-browser --no-tray --port 0`, and both `MCPHUB_E2E_SCHEDULER=none` and `MCPHUB_E2E_SUPERVISOR=none` (`internal/gui/e2e/fixtures/hub.ts:76-112` and `internal/gui/e2e/fixtures/seeded-hub.ts:88-104`). Markers authorize only the GUI.
+3. **operator-temp-root:** supplied, strict-canonical, non-production-intersecting root; contained image remains a reliability-family binary with committed argv. It never permits arbitrary names, `f1-cli-verify`, or `supervise`.
+4. **go-build-cache:** a complete `go-build*` component immediately under OS temp or exact `go-build` under LocalAppData, contained `mcphub.exe` image, and GUI argv only.
+
+#### Mandatory Negative Guards
+
+1. Strict-canonical installed target/directory refuses `install-path`.
+2. Strict-canonical repo containment refuses `repo-path` except an independently valid exact gui-e2e fixture.
+3. Production equality/containment refuses `production-state`.
+4. Top-level parent alive, unknown, missing, or probe error refuses `parent-alive-or-unproven`.
+5. Missing/unreadable/unparsable/non-matching buildinfo refuses `not-test-tagged`.
+6. Production-intersecting temp roots or production overrides refuse `production-state`.
+7. Any strict path failure refuses `path-canonicalization-error`.
+8. Snapshot, identity, command-line, architecture, environment, age, topology, or guard failures refuse before `reapOneOrphan`.
+9. Token drift and changed `{PID, StartedAt}` refuse `token-mismatch` or `identity-filter-excludes-recycled-pid`.
+10. Failed durable intent writes refuse `audit-intent-unavailable`.
+
+### Deferred GUI Tree Rule And Round-3 Blockers
+
+No positive branch admits standalone `supervise`. A live adopted supervisor can have the dead PPID of its original GUI, so parent death is not provenance. An already-orphaned supervisor, including the field-incident shape, stays manual-reap-only.
+
+The deferred target contract binds a `supervise` descendant to a confirmed test GUI, independently applies all non-topology gates, reaps and confirms the descendant, then freshly revalidates and reaps the GUI. That descendant-before-GUI contract is preserved, but it is **not implementable until both blockers below are resolved**:
+
+- **P2 respawn ordering blocker.** A GUI-spawned owner arms `runRespawnLoop` at `internal/cli/gui_supervisor_owner.go:329-335`. Unexpected child exit waits from a one-second base and respawns (`internal/cli/gui_supervisor_owner.go:365-460`; constant at `internal/cli/gui_supervisor_owner.go:231`). Reaping the descendant while the GUI is live can therefore create a replacement before multi-second confirm-gone/re-enumeration finishes; killing the GUI afterward can strand the replacement as the same out-of-scope standalone orphan. V2 needs a single owner that quiesces or stops respawn before descendant action and proves the quiesced state holds through GUI exit. No timing assumption is acceptable.
+- **P3 ancestry blocker.** A census PPID is recyclable. A bare current-snapshot chain can connect a child to an unrelated process that later acquired an ancestor PID. V2 must bind every edge to `{PID, StartedAt}`, require temporally possible parent-before-child ordering, include every intermediate identity in token and fresh revalidation, and reject any missing, recycled, contradictory, or changed edge. If snapshot data cannot prove those invariants, a stronger operating-system provenance source is required.
+
+The tree coordinator remains blocked until deterministic tests engineer both race windows. There is no post-GUI orphan chase.
+
+### Deferred Confirm Token And Identity Binding
+
+`TestLeftoverConfirmToken` is an `internal/api`-only deterministic owner, analogous to `AggressiveConfirmToken` at `internal/api/cleanup.go:467-490` and `internal/cli/cleanup_aggressive.go:197-200`, but it is a distinct type because its proof material differs.
+
+Token material contains predicate version, PEB reader-contract version, effective age, strict-canonical temp-root hash or no-root sentinel, and sorted candidate records. Each top-level record binds PID, `StartedAt`, canonical image/override hashes, normalized argv hash, branch, buildinfo result, and parent proof. Any future GUI operation also binds every ancestry-edge `{PID, StartedAt}` identity, path/override/argv hashes, independent gates, confirmed GUI identity, branch, quiesced-respawn proof, and final ordering. Raw paths never enter token display or wire output.
+
+Apply takes a fresh `runProcessSnapshot` / `parseProcessRows` snapshot, reconstructs the typed scope, strictly canonicalizes every operand, recomputes the token, filters the exact expected `{PID, StartedAt}` set through `filterToExpectedIdentities` (`internal/api/cleanup.go:1652-1671`), and re-reads command line, environment, buildinfo, parent/tree evidence, and branch data. A same-PID changed-`StartedAt` target refuses `identity-filter-excludes-recycled-pid`.
+
+### Deferred Audit Events And Failure Transparency
+
+The audit sink is the local owner-DACL'd `supervisor-events.log` selected from the caller's hardened state directory, not the target-controlled override. The canonical leaf is at `internal/api/supervisor_events.go:64-68`. A pre-kill event uses durable `Emit`, never lossy `TryEmit` (`internal/api/supervisor_events.go:253-289`).
+
+Before every `reapOneOrphan` call, apply synchronously emits `test-leftover-cleanup-intent` with identity, local path/argv evidence, branch or tree role, environment/buildinfo proof, parent or corrected ancestry proof, token, contract versions, respawn-quiescence proof, and ordering. Failure is `audit-intent-unavailable` and prevents action. Outcomes are `reaped`, `refused(reason)`, or `terminate-unconfirmed`. Fresh re-enumeration plus identity comparison is mandatory; failure to confirm cannot become success.
+
+Local owner-DACL'd entries may retain full paths and argv. API JSON, CLI transport display, and wire-shaped summaries use hashes. Environment maps are never logged.
+
+### Deferred Refusal And Outcome Vocabulary
+
+`env-read-error` remains the public environment refusal with mandatory local `envReadFailureStage`. `path-canonicalization-error` covers strict path failure. `supervise-not-tree-reachable` covers every standalone `supervise` row. The preserved exact values are:
+
+| Class | Exact values |
+|---|---|
+| Image / branch / topology | `basename-not-in-branch`, `argv-not-in-branch`, `requires-explicit-temp-root`, `e2e-markers-absent`, `supervise-not-tree-reachable` |
+| Provenance / environment | `not-test-tagged`, `env-read-error`, `env-override-absent`, `unsupported-arch` |
+| Safety guards | `install-path`, `repo-path`, `production-state`, `path-canonicalization-error`, `parent-alive-or-unproven`, `min-age-below-apply-floor`, `snapshot-degraded`, `identity-unavailable`, `command-line-mismatch`, `guard-evaluation-error` |
+| Apply binding | `token-mismatch`, `identity-filter-excludes-recycled-pid`, `audit-intent-unavailable` |
+| Outcomes | `reaped`, `refused(<exact reason>)`, `terminate-unconfirmed` |
+
+### Deferred V2 Claims
+
+1. `{ guarantee: Environment presence alone can never authorize apply; single-owner: buildInfoTagGate plus envProofGate; enforcement-probe: untagged and malformed/absent environment fixtures refuse before orphanTerminateFn. }`
+2. `{ guarantee: Production/install/repo aliases cannot escape protected roots; single-owner: strictPathCanonicalizer plus rootContains and the three path guards; enforcement-probe: case, separator, junction, 8.3, UNC, device, and prefix-collision fixtures refuse exactly. }`
+3. `{ guarantee: Preview/apply scope and candidate identity cannot drift; single-owner: TestLeftoverConfirmToken plus filterToExpectedIdentities; enforcement-probe: changed temp root, candidate material, PID, or StartedAt refuses before action. }`
+4. `{ guarantee: Every irreversible action has durable local intent evidence first; single-owner: local audit writer; enforcement-probe: injected intent failure produces audit-intent-unavailable and zero orphanTerminateFn calls. }`
+5. `{ guarantee: Termination has one kill owner; single-owner: reapOneOrphan; enforcement-probe: call-graph review finds no parallel terminate path. }`
+6. `{ guarantee: A truncated process snapshot cannot authorize apply; single-owner: parseProcessRows snapErr; enforcement-probe: partial top-level and tree fixtures refuse snapshot-degraded with zero calls. }`
+7. `{ guarantee: No standalone supervise is automatically reaped; single-owner: exclusive branch classifier; enforcement-probe: matching adopted and field-incident standalone fixtures refuse supervise-not-tree-reachable. }`
+8. `{ guarantee: A GUI-tree operation cannot re-manufacture an orphan through respawn; single-owner: future tree coordinator and GUI respawn-quiescence contract; enforcement-probe: deterministic P2 race test proves no spawn from before descendant action through confirmed GUI exit. }`
+9. `{ guarantee: No recyclable PPID can establish ancestry; single-owner: future PID-recycle-safe ancestry proof; enforcement-probe: deterministic P3 fixtures recycle direct and intermediate ancestor PIDs and always refuse. }`
+10. `{ guarantee: No remote byte sequence becomes kill-authorizing without exact architecture, read, coherence, and UTF-16 validation; single-owner: PEB environment reader; enforcement-probe: amd64/WOW64 helpers pass while every short-read, layout, metadata-drift, parse, access, and exit fault refuses. }`
+
+### Deferred V2 Test Plan
+
+All refusal tests satisfy every non-target gate, alter only the guard under test, assert the exact reason, and assert zero `orphanTerminateFn` calls.
+
+| ID | Preserved scenario | Required assertion |
+|---|---|---|
+| V2-T1 | Positive reliability-temp top-level fixture. | Exclusive branch passes only with tag, override, dead parent, argv, paths, age, identity, token, and audit intent. |
+| V2-T2 | Positive gui-e2e GUI fixture. | Both exact markers and GUI argv are mandatory; markers never admit `supervise`. |
+| V2-T3 | Matching standalone/adopted `supervise`. | `supervise-not-tree-reachable` and zero calls. |
+| V2-T4 | Positive OS-temp and LocalAppData go-build-cache GUI fixtures. | Strict component containment and GUI argv only; no path-prefix or `supervise` admission. |
+| V2-T5 | Otherwise-valid candidate with live/unproven parent. | `parent-alive-or-unproven` and zero calls. |
+| V2-T6 | Missing each e2e marker independently. | `e2e-markers-absent` and zero calls. |
+| V2-T7 | Untagged target with a present override. | `not-test-tagged`, proving environment is not provenance. |
+| V2-T8 | Override or argv state path aliases production. | `production-state` and zero calls. |
+| V2-T9 | Installed/repo path aliases. | `install-path` / `repo-path` and zero calls. |
+| V2-T10 | Valid key absence and malformed UTF-16 environment blocks. | Only valid absence is `env-override-absent`; malformed blocks are staged `env-read-error`. |
+| V2-T11 | Requested age below 600 seconds. | Effective apply floor remains 600 and younger candidates refuse. |
+| V2-T12 | Preview temp root omitted/substituted on apply. | `token-mismatch` and zero calls. |
+| V2-T13 | Candidate material drifts between preview and apply. | `token-mismatch` and zero calls. |
+| V2-T14 | Same PID with changed `StartedAt`. | `identity-filter-excludes-recycled-pid` and zero calls. |
+| V2-T15 | Throwing buildinfo, environment, parent, or path guard. | Exact fail-closed reason and zero calls. |
+| V2-T16 | Command-line, identity, architecture, or snapshot-completeness failure. | Exact refusal and zero calls. |
+| V2-T17 | Durable intent write failure. | `audit-intent-unavailable` before the kill owner. |
+| V2-T18 | Intended GUI plus independently gated `supervise` descendant. | Remains blocked until V2-T32 and V2-T33 pass; then exact coordinated ordering and call count are asserted. |
+| V2-T19 | Re-enumeration sees recycled/missing identity. | `terminate-unconfirmed`, never fabricated success. |
+| V2-T20 | CLI apply parsing/output. | Strict scope, age, token, nonzero mismatch, and per-candidate local audit. |
+| V2-T21 | Short read or API error at every PEB hop. | Staged `env-read-error`; never key absence/map. |
+| V2-T22 | Native amd64 layout/coherence helper and metadata drift. | Exact helper value on stable data; drift refuses at reread stage. |
+| V2-T23 | amd64 reader against WOW64 i386 helper. | Exact present/absent results only after versioned layout source and offset gates. |
+| V2-T24 | Access denial, classification/query/read failure, or target exit. | Exact staged `env-read-error` and zero calls. |
+| V2-T25 | Production aliases across case, separator, junction, 8.3, UNC, and device forms. | Every equal/descendant alias refuses `production-state`. |
+| V2-T26 | Temp roots intersect production and independent production override. | Each conjunctive guard refuses `production-state`. |
+| V2-T27 | Installed/repo aliases, exact e2e fixture, and sibling-prefix paths. | Protected aliases refuse; exact fixture may proceed; prefix collision does not contain. |
+| V2-T28 | Broken/missing/denied/looping strict canonicalization operand. | `path-canonicalization-error` and zero calls. |
+| V2-T29 | Exclusive-branch refusal matrix. | `requires-explicit-temp-root`, `basename-not-in-branch`, or `argv-not-in-branch` without permission union. |
+| V2-T30 | Already-orphaned standalone field-incident `supervise`. | `supervise-not-tree-reachable`, zero calls, and manual handoff. |
+| V2-T31 | Intended GUI child fails an independent gate or confirmation. | Exact child refusal; zero GUI calls. |
+| V2-T32 | GUI-spawned child exit while the real respawn loop is armed with a deterministically enlarged confirm window. | No replacement can spawn from quiescence through confirmed GUI exit. |
+|  |  | Inability to prove quiescence refuses the whole operation. |
+| V2-T33 | Direct and multi-hop PPID recycling with newer replacement ancestors and changed intermediate identities. | Every impossible, missing, recycled, or changed edge refuses; token and fresh revalidation bind every `{PID, StartedAt}` in the chain. |
+
+### Deferred V2 Gate
+
+Gate decision: **BLOCKED**. Destructive apply is not admitted to v1 and remains deferred until round-3 P2/P3 are resolved and a value case is demonstrated for the safely automatable subset. The preserved contracts above are necessary but not sufficient authorization to implement or ship apply.
+
+## Terms and Abbreviations
+
+- **Apply:** the deferred process-termination mode; no apply mode exists in v1.
+- **PEB:** Process Environment Block, a Windows process structure relevant only to the deferred v2 environment-proof contract.
+- **PID / PPID:** process identifier / parent process identifier.
+- **P1 / P2 / P3:** security-review severity levels, from highest to lower priority in this work item.
+- **V1 / V2:** preview/diagnostics-only version 1 / deferred destructive version 2.

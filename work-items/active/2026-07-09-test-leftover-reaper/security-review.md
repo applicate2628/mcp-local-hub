@@ -130,3 +130,52 @@ The round-2 re-gate found that the revision at b5e6f6f344af5ee50873e84fb21d1bc4b
 ### Round-2 Gate Result
 
 The prior nine findings and A/B/C code contracts are closed, but the two new findings above keep the design at REVISE. No implementation is authorized until design revision 3 passes a clean adversarial security re-gate.
+
+## Re-gate 2026-07-10 (round 3)
+
+Round 3 reviewed design revision 3 at `388fe766`. The live-kill trajectory converged from nine original findings including three P1 findings, through one new P1 in round 2, to zero P1 in round 3: `9 (3×P1) → 1×P1 → 0×P1`. That destructive safety result was achieved only by refusing standalone `supervise`, which is the main observed leftover class from the 2026-07-09 incident. Round 3 also confirmed the following P2 and P3 findings.
+
+### 12. P2 (safety) — descendant-before-GUI order can re-manufacture the out-of-scope orphan through the GUI respawn loop
+
+| Field | Detail |
+|---|---|
+| Where | Revision 3 reaped and confirmed the `supervise` descendant before the GUI at `388fe766:work-items/active/2026-07-09-test-leftover-reaper/design.md:95` and `388fe766:work-items/active/2026-07-09-test-leftover-reaper/design.md:157-169`. |
+|  | Claim 8 and T18/T31 asserted that order at `388fe766:work-items/active/2026-07-09-test-leftover-reaper/design.md:224` and `388fe766:work-items/active/2026-07-09-test-leftover-reaper/design.md:253-266`. |
+|  | A GUI-spawned owner arms the loop at `internal/cli/gui_supervisor_owner.go:329-335`; its base delay is one second at `internal/cli/gui_supervisor_owner.go:231`. |
+|  | Unexpected exit reaches the respawn path at `internal/cli/gui_supervisor_owner.go:365-460`. Confirm-gone takes another snapshot through `internal/api/processes.go:201-235`. |
+| Problem | Reaping the child while its GUI lives is an unexpected exit. The armed manager can respawn after one second while the reaper takes the multi-second confirm-gone snapshot. |
+|  | The reaper confirms only the original `{PID, StartedAt}`, then reaps the GUI. The replacement can survive as a new standalone `supervise` that the design refuses to chase. |
+|  | The asserted order therefore re-manufactures the exact out-of-scope orphan class it claimed never to create. |
+| Why confirmed | Ordering alone did not control the concurrent lifecycle owner. Identity binding protects the original child from PID reuse but does not stop a different child identity. |
+|  | The one-second production backoff can beat a fresh WMIC/PowerShell census, so the race is reachable without violating a designed gate. |
+| Required fix | Version 1 contains no destructive apply. A future v2 needs a single-owner contract that quiesces or stops respawn before descendant action and holds through GUI exit. |
+|  | A deterministic race-window test must enlarge the confirm interval and prove no replacement can install. Timing assumptions and a post-GUI orphan chase are unacceptable. |
+| Verdict | CONFIRMED — P2 destructive ordering defect. It does not create a v1 preview risk; it blocks v2 apply. |
+
+### 13. P3 (safety) — snapshot ancestry trusts recyclable PPIDs without identity-binding every edge
+
+| Field | Detail |
+|---|---|
+| Where | Revision 3 used a direct/discovered descendant as provenance at `388fe766:work-items/active/2026-07-09-test-leftover-reaper/design.md:161-169`. |
+|  | It tokenized an unspecified “ancestor chain” at `388fe766:work-items/active/2026-07-09-test-leftover-reaper/design.md:173-177`. |
+|  | Census rows hold PID/PPID plus creation time at `internal/api/processes.go:53-62` and parse those fields at `internal/api/processes.go:162-180`. |
+|  | The design bound `{PID, StartedAt}` only for GUI and `supervise` endpoints, not every intermediate edge. |
+| Problem | PPIDs are recyclable. After a real parent exits, an unrelated process can acquire its PID and make a current-snapshot chain appear to connect `supervise` to an admitted GUI. |
+|  | Endpoint identity binding does not prove that each current parent identity existed before and parented its child. A false chain could replace `parentDeathGate` provenance. |
+| Why confirmed | The snapshot exposes creation time, but revision 3 required neither parent-before-child ordering nor token/fresh-revalidation binding for every intermediate `{PID, StartedAt}`. |
+|  | “Ancestor chain” was a list over recyclable identifiers, not a PID-recycle-safe provenance proof. |
+| Required fix | Version 1 may display only an `unverified-ppid-chain` hint and never use it as authorization. |
+|  | V2 must bind every edge, require possible temporal ordering, bind the full identity chain into the token, freshly revalidate it, and refuse missing/recycled/changed/contradictory edges. |
+|  | If the census cannot prove those invariants, v2 needs a stronger operating-system provenance source. |
+| Verdict | CONFIRMED — P3 ancestry-proof defect. It does not create a v1 preview risk; it blocks v2 apply. |
+
+### Round-3 Gate Result
+
+Round 3 found zero P1 live-kill paths in revision 3, so the destructive safety gates converged. The convergence covers only the automatically admitted subset: standalone `supervise` remains refused even though it is the principal real leftover population. Because the safe subset has limited demonstrated value and the remaining tree path has confirmed P2/P3 coordination and ancestry defects, the accepted decision is preview/diagnostics-only v1; destructive apply is deferred to v2. The authoritative v1/v2 separation is in `design.md` and `work-items/decisions/2026-07-10-test-leftover-reaper-preview-only-v1.md`.
+
+## Terms and Abbreviations
+
+- **GUI:** graphical user interface.
+- **PID / PPID:** process identifier / parent process identifier.
+- **P1 / P2 / P3:** security-review severity levels, from highest to lower priority in this work item.
+- **V1 / V2:** preview/diagnostics-only version 1 / deferred destructive version 2.
