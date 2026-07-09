@@ -10,6 +10,10 @@
 | Item | State | Remaining |
 |---|---|---|
 | [2026-07-05-adopt-npx-orphans](active/2026-07-05-adopt-npx-orphans/status.md) | PARTIALLY DELIVERED | adopt CLI/API + GUI + **reaper (all 3 kill-authority hardenings)** SHIPPED + DEPLOYED (#513/#520/#521/#522). Remaining = anti-drift "unmanaged detected" GUI signal (in flight) + phase-2 de-adopt + D P2a/P2b GUI. |
+| [2026-07-09-lsp-relay-per-client-disable-gui](active/2026-07-09-lsp-relay-per-client-disable-gui/status.md) | ACTIVE | PR #524 open at `41750ade`; Codex bot COMMENTED on current head. Remaining = fix current P2 review comments, re-review, then merge. |
+| [2026-07-09-intent-collapse-stop-resurrection](active/2026-07-09-intent-collapse-stop-resurrection/status.md) | ACTIVE | PR #525 open at `01689641`; absent-only rewrite is uncommitted in linked worktree. Remaining = finish P3 fix + invariant audit + force-push + re-review. |
+| [2026-07-09-test-leftover-reaper](active/2026-07-09-test-leftover-reaper/status.md) | DESIGN ACCEPTED | Implementation not started; queued after PR #524 and PR #525 land. |
+| [2026-07-09-deadopt-hub-to-native](active/2026-07-09-deadopt-hub-to-native/status.md) | DESIGN ACCEPTED | Implementation not started; queued after PR #524 and PR #525 land. |
 
 ## Reaper kill-authority hardening — COMPLETE (2026-07-08, all bot-PASS + deployed)
 
