@@ -351,17 +351,27 @@ export function ServersScreen() {
     latestScanRequestRef.current = requestId;
     const isLatest = () => latestScanRequestRef.current === requestId;
     try {
-      // /api/workspaces returns {workspaces, entries}. A registry
-      // load failure must NOT block the matrix render — the
-      // selector falls back to its empty-state placeholder and the
-      // LSP matrix surfaces the 9 placeholder rows. Catch isolation
-      // is bounded to the workspaces fetch only; /api/scan and
-      // /api/status errors continue to fail the whole load.
+      // Promise.all is fail-fast, so every member is REQUIRED unless it carries
+      // its own catch. Two members are OPTIONAL and must degrade in place:
+      //
+      //   - /api/workspaces returns {workspaces, entries}. A registry load
+      //     failure must NOT block the matrix render — the selector falls back
+      //     to its empty-state placeholder and the LSP matrix surfaces the 9
+      //     placeholder rows.
+      //   - /api/lsp-router/status only decorates the LSP rows with per-client
+      //     opt-out state. Its backend (LSPRouterClientStatuses) aborts on a
+      //     SINGLE client's GetEntry/config read failure, so one broken client
+      //     config would otherwise blank the whole Servers matrix — even though
+      //     /api/scan can still render that client as a config-error cell.
+      //
+      // /api/scan and /api/status stay REQUIRED: they supply the matrix rows
+      // and the Port/State columns, so there is nothing left to render without
+      // them, and their errors continue to fail the whole load.
       const [scan, status, workspacesResp, routerStatuses] = await Promise.all([
         fetchOrThrow<ScanResult>("/api/scan", "object"),
         fetchOrThrow<DaemonStatus[]>("/api/status", "array"),
         listWorkspaces().catch(() => ({ workspaces: [], entries: [] })),
-        listLspRouterClientStatuses(),
+        listLspRouterClientStatuses().catch(() => null),
       ]);
       if (!isLatest()) return;
       if (scan.entries != null && !Array.isArray(scan.entries)) {
@@ -374,11 +384,21 @@ export function ServersScreen() {
       setWorkspaceEntries(workspacesResp.entries);
       setClientConfigPresence(scan.client_config_presence ?? EMPTY_CLIENT_CONFIG_PRESENCE);
       setClientScanErrors(scan.client_scan_errors ?? EMPTY_CLIENT_SCAN_ERRORS);
-      const routerDisabled: Record<string, boolean> = {};
-      for (const status of routerStatuses) {
-        if (status.disabled) routerDisabled[status.client] = true;
+      // A failed status probe knows NOTHING about opt-outs, so it must not
+      // overwrite the map with {} — that would read as "no client is opted
+      // out" and silently flip a persisted opt-out cell back on. Keep the
+      // last-known map (empty on first load) instead. The optimistic
+      // per-client overrides sit ON TOP of that map, so they are cleared
+      // together with it or not at all: clearing them against a stale
+      // baseline would revert a toggle the backend already applied.
+      if (routerStatuses !== null) {
+        const routerDisabled: Record<string, boolean> = {};
+        for (const rs of routerStatuses) {
+          if (rs.disabled) routerDisabled[rs.client] = true;
+        }
+        setLspRouterClientDisabled(routerDisabled);
+        setLspRouterClientOverrides({});
       }
-      setLspRouterClientDisabled(routerDisabled);
       // Clear any success banner once the authoritative refresh lands
       // (the matrix has already redrawn with the new "ok" state).
       // Error banners stay sticky so the operator sees the failure
@@ -387,7 +407,6 @@ export function ServersScreen() {
       setInitMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
       setLspRegisterMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
       setLspRouterMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
-      setLspRouterClientOverrides({});
       const agg = aggregateStatus(status);
       const flat: Record<string, { state: string; port: number | null }> = {};
       for (const [name, a] of Object.entries(agg)) {

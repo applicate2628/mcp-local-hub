@@ -59,6 +59,26 @@ export function lspRouterEntryName(language: string): string {
   return `${LSP_MANIFEST_SERVER}-${language}`;
 }
 
+// lspFallbackEntryNames mirrors the GENERATED half of the backend's
+// api.lspLegacyCandidateEntryNames: besides the registry's explicit
+// client_entries value, the backend also treats
+// `<router>-<workspaceKey[:4]>` and `<router>-<workspaceKey>` as removable for
+// a (language, workspace). Those names are client-independent (the Go loop
+// never consults clientName), and an older/heuristic registry row carries no
+// client_entries at all, so they are the only handle on such an entry.
+//
+// Single owner on purpose: BOTH the replaceability proof
+// (clientPresenceCanEnableFromLegacy) and the scoped-view aggregation set
+// (expectedNames) derive from this, so a scoped view can never disagree with
+// the ALL-workspaces view about which scan entries belong to a row.
+function lspFallbackEntryNames(language: string, workspaceKey: string): string[] {
+  const key = workspaceKey ?? "";
+  if (key === "") return [];
+  const router = lspRouterEntryName(language);
+  const short = key.length > 4 ? key.slice(0, 4) : key;
+  return [`${router}-${short}`, `${router}-${key}`];
+}
+
 // LSP_KNOWN_CLIENTS mirrors the per-client-routing CLIENTS list used by
 // Servers.tsx — keeping a local constant lets the row helper produce
 // placeholder presence maps without importing from the screen module
@@ -199,6 +219,17 @@ export function collectLspRows(
       for (const v of Object.values(we.client_entries ?? {})) {
         if (v) expectedNames.add(v);
       }
+      // The registry's generated fallback names are part of the backend's
+      // removable set (see lspFallbackEntryNames), so they name scan entries
+      // this row owns. Without them, a SCOPED view (owner resolved +
+      // selectedWorkspaceKey !== "") filtered `mcp-language-server-<lang>-<key4>`
+      // out of the aggregation for an older registry row with empty
+      // client_entries — the legacy badge and toggle vanished outside
+      // ALL-workspaces mode even though the backend recognizes and can replace
+      // the entry. Scoped, so a sibling workspace's entries still cannot leak in.
+      for (const name of lspFallbackEntryNames(language, we.workspace_key ?? "")) {
+        expectedNames.add(name);
+      }
     }
     // legacyPorts mirrors api.lspRegistryPortsByLanguage: every registered proxy
     // port for THIS language, across every workspace. Both backend gates — the
@@ -209,13 +240,11 @@ export function collectLspRows(
     const legacyPorts = new Set<number>();
     // The legacy candidate names mirror api.lspLegacyCandidateEntryNames: for one
     // (language, client) the backend treats as removable BOTH the registry's
-    // explicit client_entries value AND two generated fallbacks per workspace key
-    // — `<router>-<workspaceKey[:4]>` and `<router>-<workspaceKey>`. The generated
-    // names are client-independent (the Go loop never consults clientName for
-    // them), so they live in one shared set. An older/heuristic registry shape
-    // carries no client_entries at all; without the generated names this proof
-    // marks such legacy cells unreplaceable and the GUI disables a toggle that
-    // /api/lsp-router/enable would safely serve.
+    // explicit client_entries value AND the generated fallbacks (see
+    // lspFallbackEntryNames). The generated names are client-independent, so they
+    // live in one shared set spanning EVERY workspace of the language — the
+    // backend's own candidate set is language-wide, and narrowing it to the
+    // selected workspace would refuse cells the backend would replace.
     const generatedLegacyNames = new Set<string>();
     const legacyNamesByClient = new Map<string, Set<string>>();
     for (const we of wsEntries) {
@@ -230,11 +259,8 @@ export function collectLspRows(
         names.add(name);
         legacyNamesByClient.set(client, names);
       }
-      const workspaceKey = we.workspace_key ?? "";
-      if (workspaceKey !== "") {
-        const short = workspaceKey.length > 4 ? workspaceKey.slice(0, 4) : workspaceKey;
-        generatedLegacyNames.add(`${reservedRouterName}-${short}`);
-        generatedLegacyNames.add(`${reservedRouterName}-${workspaceKey}`);
+      for (const name of lspFallbackEntryNames(language, we.workspace_key ?? "")) {
+        generatedLegacyNames.add(name);
       }
     }
     const isLegacyCandidateName = (client: string, entryName: string): boolean =>

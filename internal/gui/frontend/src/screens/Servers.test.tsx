@@ -2449,3 +2449,155 @@ describe("ServersScreen — isolated config parse/read failure (P2 scan isolatio
     expect(screen.queryByTestId("scan-error-memory-claude-code")).toBeNull();
   });
 });
+
+// Codex PR #524 round-2 P2 (Servers.tsx:364): GET /api/lsp-router/status only
+// decorates the LSP rows with per-client opt-out state. The backend's
+// LSPRouterClientStatuses aborts on a single client's GetEntry/config read
+// failure, so the fetch is OPTIONAL and must not take the whole matrix down —
+// the same isolation the /api/workspaces fetch already has. Two failure shapes:
+// a non-2xx status and a well-formed-JSON-but-wrong-shape 200 body.
+describe("ServersScreen — optional LSP router status fetch (P2 isolation)", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    window.location.hash = "#/servers";
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  function lspScan(): ScanResult {
+    return {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          name: "memory",
+          manifest_exists: true,
+          can_migrate: true,
+          client_presence: {},
+        },
+      ],
+      client_config_presence: { "codex-cli": "ok" } as ScanResult["client_config_presence"],
+    };
+  }
+
+  function workspacesResponse() {
+    return {
+      workspaces: [{ workspace_key: "default", workspace_path: "D:/dev/project" }],
+      entries: [
+        {
+          workspace_key: "default",
+          workspace_path: "D:/dev/project",
+          language: "python",
+          backend: "mcp-language-server",
+          port: 9200,
+          task_name: "\\mcp-local-hub-lsp-default-python",
+          client_entries: {},
+        },
+      ],
+    };
+  }
+
+  // Both failure shapes must degrade identically: the matrix and the LSP rows
+  // render, and every LSP cell falls back to the unknown/not-opted-out baseline
+  // (unchecked, no "off" chip) instead of the screen-wide "Failed to load".
+  async function expectMatrixSurvives() {
+    render(<ServersScreen />);
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    // Main matrix still rendered from /api/scan.
+    expect(screen.queryByText("memory")).toBeTruthy();
+    // No screen-wide error banner.
+    expect(screen.queryByText(/Failed to load/)).toBeNull();
+    // LSP cell degraded to the safe baseline: router entry absent → unchecked,
+    // opt-out state unknown → no persisted "off" chip.
+    expect(toggle.checked).toBe(false);
+    expect(screen.queryByTestId("lsp-chip-opt-out-python-codex-cli")).toBeNull();
+  }
+
+  it("renders the matrix when /api/lsp-router/status returns 500", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, lspScan()),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => jsonResponse(200, workspacesResponse()),
+        "/api/lsp-router/status": () =>
+          jsonResponse(500, { error: "codex-cli: read config: permission denied" }),
+      }) as unknown as typeof fetch,
+    );
+    await expectMatrixSurvives();
+  });
+
+  it("renders the matrix when /api/lsp-router/status returns a malformed body", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, lspScan()),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => jsonResponse(200, workspacesResponse()),
+        // 200 with a JSON string where the router-status object is expected.
+        "/api/lsp-router/status": () => jsonResponse(200, "not-an-object"),
+      }) as unknown as typeof fetch,
+    );
+    await expectMatrixSurvives();
+  });
+
+  // A failed status probe knows nothing; it must not assert "no client is
+  // opted out" and silently flip a persisted opt-out chip back on. The
+  // last-known map survives the failed refresh.
+  it("keeps the last-known opt-out map when a later status fetch fails", async () => {
+    let statusCalls = 0;
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          const s = lspScan();
+          // The refreshed scan carries a NEW server row. Waiting for it to
+          // paint is the deterministic signal that the second loadScan ran to
+          // completion — asserting straight after the fetch counter would race
+          // the state update and pass even on the pre-fix screen-blanking path.
+          if (scanCalls > 1) {
+            s.entries = [
+              ...(s.entries ?? []),
+              {
+                name: "filesystem",
+                manifest_exists: true,
+                can_migrate: true,
+                client_presence: {},
+              },
+            ];
+          }
+          return jsonResponse(200, s);
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => jsonResponse(200, workspacesResponse()),
+        "/api/lsp-router/status": () => {
+          statusCalls += 1;
+          if (statusCalls > 1) return jsonResponse(500, { error: "transient" });
+          return jsonResponse(200, {
+            clients: [
+              {
+                client: "codex-cli",
+                config_path: "D:/dev/codex/config.toml",
+                disabled: true,
+              },
+            ],
+          });
+        },
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("lsp-chip-opt-out-python-codex-cli")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("scan-rescan-btn"));
+    // Matrix repainted from the refreshed scan despite the failed status probe.
+    await screen.findByText("filesystem");
+    expect(statusCalls).toBeGreaterThan(1);
+    expect(screen.queryByText(/Failed to load/)).toBeNull();
+    // Opt-out chip retained: a failed probe knows nothing, so the last-known
+    // map beats asserting a false "not opted out".
+    expect(screen.getByTestId("lsp-chip-opt-out-python-codex-cli").textContent).toBe("off");
+  });
+});

@@ -374,4 +374,95 @@ describe("collectLspRows", () => {
     const python = collectLspRows(scan, wsEntries, "").find((r) => r.language === "python")!;
     expect(python.clientPresenceCanEnableFromLegacy["codex-cli"]).toBe(false);
   });
+
+  // Codex PR #524 round-2 P2 (lsp-rows.ts:197): the generated fallback names
+  // were folded into the REPLACEABILITY proof but never into `expectedNames`,
+  // which is what the scoped-view aggregation filters on. With a workspace
+  // selected (owner set), a fallback-named scan entry from an older registry row
+  // with empty client_entries therefore vanished from the row entirely — no
+  // presence, no legacy badge, no toggle — while ALL-workspaces mode showed it.
+  describe("scoped view agrees with ALL-workspaces view on fallback candidate names", () => {
+    const wsEntries: WorkspaceEntryDTO[] = [
+      {
+        workspace_key: "b133f336",
+        workspace_path: "D:/dev/project",
+        language: "python",
+        backend: "mcp-language-server",
+        port: 9200,
+        task_name: "\\mcp-local-hub-lsp-b133f336-python",
+        // Older/heuristic registry row: the backend derives the removable
+        // entry names from the workspace key, not from this map.
+        client_entries: {},
+      },
+    ];
+    const legacyURL = "http://127.0.0.1:9200/mcp";
+    const scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          // short (4-char) workspace-key fallback name
+          name: "mcp-language-server-python-b133",
+          manifest_exists: false,
+          can_migrate: false,
+          client_presence: { "codex-cli": { transport: "http", endpoint: legacyURL } },
+        },
+        {
+          // full workspace-key fallback name
+          name: "mcp-language-server-python-b133f336",
+          manifest_exists: false,
+          can_migrate: false,
+          client_presence: { cursor: { transport: "http", endpoint: legacyURL } },
+        },
+      ],
+    };
+
+    it("yields the same row, badge and toggle-enabled state in both views", () => {
+      const all = collectLspRows(scan, wsEntries, "").find((r) => r.language === "python")!;
+      const scoped = collectLspRows(scan, wsEntries, "b133f336").find(
+        (r) => r.language === "python",
+      )!;
+      expect(scoped.taskName).toBe(all.taskName);
+      expect(scoped.clientPresenceEntryName).toEqual(all.clientPresenceEntryName);
+      expect(scoped.clientPresence).toEqual(all.clientPresence);
+      expect(scoped.clientPresenceCanEnableFromLegacy).toEqual(
+        all.clientPresenceCanEnableFromLegacy,
+      );
+      // Both fallback shapes are recognized and replaceable.
+      expect(scoped.clientPresenceEntryName["codex-cli"]).toBe("mcp-language-server-python-b133");
+      expect(scoped.clientPresenceCanEnableFromLegacy["codex-cli"]).toBe(true);
+      expect(scoped.clientPresenceEntryName["cursor"]).toBe(
+        "mcp-language-server-python-b133f336",
+      );
+      expect(scoped.clientPresenceCanEnableFromLegacy["cursor"]).toBe(true);
+    });
+
+    // NEGATIVE: a suffix the backend never generates for this registry stays
+    // excluded from the scoped view (it belongs to no selected workspace) and
+    // stays unreplaceable in the ALL view (where unregistered LSP-shaped entries
+    // are deliberately surfaced so the operator can see them, but the toggle
+    // must not offer to overwrite them).
+    it("keeps an unknown-suffix name excluded when scoped and disabled in ALL mode", () => {
+      const withUnknown: ScanResult = {
+        at: "2026-07-09T00:00:00Z",
+        entries: [
+          {
+            name: "mcp-language-server-python-zzzz",
+            manifest_exists: false,
+            can_migrate: false,
+            client_presence: { "gemini-cli": { transport: "http", endpoint: legacyURL } },
+          },
+        ],
+      };
+      const scoped = collectLspRows(withUnknown, wsEntries, "b133f336").find(
+        (r) => r.language === "python",
+      )!;
+      expect(scoped.clientPresence["gemini-cli"]).toBeUndefined();
+      expect(scoped.clientPresenceEntryName["gemini-cli"]).toBeUndefined();
+      expect(scoped.clientPresenceCanEnableFromLegacy["gemini-cli"]).toBeUndefined();
+
+      const all = collectLspRows(withUnknown, wsEntries, "").find((r) => r.language === "python")!;
+      expect(all.clientPresenceEntryName["gemini-cli"]).toBe("mcp-language-server-python-zzzz");
+      expect(all.clientPresenceCanEnableFromLegacy["gemini-cli"]).toBe(false);
+    });
+  });
 });
