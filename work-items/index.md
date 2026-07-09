@@ -4,7 +4,8 @@
 > `63b6a008`, amended for #525 at master `7898c148`, then amended for #526 at master
 > `b5e6f6f3`). Individual bug-doc frontmatter used to lag reality; the top-level bug registry
 > has now been normalized. Trust the TRIAGE + the "Truly open" list below, NOT a raw count of
-> files in `bugs/` (33 files = 1 open + 27 fixed + 1 duplicate + 1 wontfix + 3 triage records).
+> files in `bugs/` (33 files = 0 open + 28 fixed + 1 duplicate + 1 wontfix + 3 triage records —
+> the last open bug was disposed open→fixed on 2026-07-10; see TRIAGE Amendment 3).
 
 ## Active (work-items/active/)
 
@@ -24,9 +25,11 @@
 
 ## Truly-open bugs (everything else in bugs/ is fixed/closed — status just not flipped)
 
-| Bug | Status |
-|---|---|
-| [2026-07-07-lsp-router-relay-entries-ignore-per-client-disable](bugs/2026-07-07-lsp-router-relay-entries-ignore-per-client-disable.md) | open |
+**None — truly-open = 0.** All 30 top-level `bugs/*.md` docs are fixed/closed at master
+`66b80ece`. The last open bug,
+[2026-07-07-lsp-router-relay-entries-ignore-per-client-disable](bugs/2026-07-07-lsp-router-relay-entries-ignore-per-client-disable.md),
+was disposed open→fixed by `$lead` on 2026-07-10 (backend #512 `c3fc1801` + GUI Servers-tab
+per-client disable #524 `22c91cab`; see `bugs/TRIAGE-2026-07-09.md` Amendment 3).
 
 Three triage batch files (`bugs/TRIAGE-2026-05-28.md`, `bugs/TRIAGE-2026-07-08.md`,
 `bugs/TRIAGE-2026-07-09.md`) are

@@ -4,7 +4,8 @@ filed: 2026-07-07
 context: operator-hit (Antigravity), fable-root-caused during the global-proliferation diagnosis
 ---
 
-- **status:** open
+- **status:** fixed
+- **fixed-by:** #512 (`c3fc1801`, backend/CLI) + #524 (`22c91cab`, GUI Servers-tab per-client disable); GUI gap closed at master `66b80ece`.
 - **HEAD reconciliation (2026-07-09):** Backend/CLI fixed by PR #512 (`c3fc1801`), but the original GUI Servers-tab disable path remains a design gap at master `63b6a008`.
 
 # "Disabled" client still gets LSP-router relay entries — Antigravity spawns 18 `mcphub relay` despite being disabled in the Servers tab
