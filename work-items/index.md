@@ -1,9 +1,10 @@
 # Work items index
 
-> Canonical open-bug truth: **`bugs/TRIAGE-2026-07-09.md`** (HEAD-verified against master
-> `63b6a008`). Individual bug-doc frontmatter used to lag reality; the top-level bug registry
-> has now been normalized. Trust the TRIAGE + the "Truly open" list below, NOT a raw count of
-> files in `bugs/` (32 files = 2 open + 25 fixed + 1 duplicate + 1 wontfix + 3 triage records).
+> Canonical open-bug truth: **`bugs/TRIAGE-2026-07-09.md`** (HEAD-reconciled against master
+> `63b6a008`, then amended for #525 at master `7898c148`). Individual bug-doc frontmatter
+> used to lag reality; the top-level bug registry has now been normalized. Trust the TRIAGE +
+> the "Truly open" list below, NOT a raw count of files in `bugs/` (32 files = 1 open +
+> 26 fixed + 1 duplicate + 1 wontfix + 3 triage records).
 
 ## Active (work-items/active/)
 
@@ -11,7 +12,6 @@
 |---|---|---|
 | [2026-07-05-adopt-npx-orphans](active/2026-07-05-adopt-npx-orphans/status.md) | PARTIALLY DELIVERED | adopt CLI/API + GUI + **reaper (all 3 kill-authority hardenings)** SHIPPED + DEPLOYED (#513/#520/#521/#522). Remaining = anti-drift "unmanaged detected" GUI signal (in flight) + phase-2 de-adopt + D P2a/P2b GUI. |
 | [2026-07-09-lsp-relay-per-client-disable-gui](active/2026-07-09-lsp-relay-per-client-disable-gui/status.md) | ACTIVE | PR #524 open at `41750ade`; Codex bot COMMENTED on current head. Remaining = fix current P2 review comments, re-review, then merge. |
-| [2026-07-09-intent-collapse-stop-resurrection](active/2026-07-09-intent-collapse-stop-resurrection/status.md) | ACTIVE | PR #525 open at `01689641`; absent-only rewrite is uncommitted in linked worktree. Remaining = finish P3 fix + invariant audit + force-push + re-review. |
 | [2026-07-09-test-leftover-reaper](active/2026-07-09-test-leftover-reaper/status.md) | DESIGN ACCEPTED | Implementation not started; queued after PR #524 and PR #525 land. |
 | [2026-07-09-deadopt-hub-to-native](active/2026-07-09-deadopt-hub-to-native/status.md) | DESIGN ACCEPTED | Implementation not started; queued after PR #524 and PR #525 land. |
 
@@ -27,7 +27,6 @@
 
 | Bug | Status |
 |---|---|
-| [2026-07-04-intent-collapse-cleared-stop-resurrection](bugs/2026-07-04-intent-collapse-cleared-stop-resurrection.md) | open |
 | [2026-07-07-lsp-router-relay-entries-ignore-per-client-disable](bugs/2026-07-07-lsp-router-relay-entries-ignore-per-client-disable.md) | open |
 
 Three triage batch files (`bugs/TRIAGE-2026-05-28.md`, `bugs/TRIAGE-2026-07-08.md`,
@@ -53,6 +52,7 @@ reconciliation records, not open tasks.
 
 | Item | Closed | Outcome |
 |---|---|---|
+| [2026-07-09-intent-collapse-stop-resurrection](archive/2026-07/2026-07-09-intent-collapse-stop-resurrection/closure.md) | 2026-07-09 | DELIVERED — absent-only legacy stop watermarks; #525 squash `5d8ab063`, deployed `7898c148`. |
 | [2026-07-05-unify-port-resolution-owner](archive/2026-07/2026-07-05-unify-port-resolution-owner/closure.md) | 2026-07-05 | DELIVERED — daemon port+identity single-owned; #505, deployed. |
 | [2026-06-15-dynamic-mcp-discovery](archive/2026-06/2026-06-15-dynamic-mcp-discovery/closure.md) | 2026-06-16 | DELIVERED — Discovery view + demigrate + marketplace mark-installed. |
 | [2026-06-15-workspace-daemon-prune](archive/2026-06/2026-06-15-workspace-daemon-prune/closure.md) | 2026-06-16 | DELIVERED — auto-prune Phase 1 + idle + GUI toggle. |

@@ -2,12 +2,23 @@
 severity: low
 filed: 2026-07-04
 context: deep-audit finding (multi-agent audit, install-migrate-intent × correctness lens, STRONG). Call-path verified 2026-07-04 — the suggested fix is WRONG (breaks initial migration); reclassified from quick-fix to design-decision.
+resolved-by: PR #525 (`5d8ab063`) - absent-only legacy_stop_watermarks plus canonical read/write boundaries.
 ---
 
-- **status:** open
-- **HEAD reconciliation (2026-07-09):** Verified still open against master `63b6a008`: `mergeDaemonIntentStops` still has the `!hadPrior` add path; E2 narrows but does not tombstone the mixed-old-binary case.
+- **status:** fixed
+- **fixed-by:** PR #525 (`5d8ab063`) - absent-only legacy_stop_watermarks stores only cleared tombstones and blocks stale replay without duplicating present stops.
+- **HEAD reconciliation (2026-07-09):** Verified fixed against master `7898c148`; #525 merged at `5d8ab063`, and the live installed binary reports `7898c148`.
 
 # `mergeDaemonIntentStops` re-adds a deliberately-cleared stop from a lingering legacy `daemon-intent.json` (transitional-window only)
+
+## Status - FIXED (PR #525 -> master `5d8ab063`, deployed `7898c148`)
+
+The shipped fix preserves initial migration while distinguishing cleared stops:
+`LegacyStopWatermarks` is absent-only, so a present `Stops` entry is the
+watermark and an absent watermark records a deliberate clear. Production reads
+canonicalize both maps, and the marshal boundary drops any watermark whose key is
+present in `Stops`. The legacy replay skip remains exact-match based, while lost
+or mismatching watermarks still fail toward respecting the stop.
 
 ## Finding
 
