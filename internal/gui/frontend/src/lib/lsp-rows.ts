@@ -201,8 +201,25 @@ export function collectLspRows(
     }
     const clientPresence: Record<string, ClientPresence> = {};
     const legacyConflict: Record<string, ClientEntry> = {};
-    for (const e of entries) {
-      if (!expectedNames.has(e.name)) continue;
+    // Deterministic, router-preferring aggregation order. The "first match
+    // wins" rule below is sensitive to iteration order, so raw scan.entries
+    // order must not decide which entry captures a client's presence cell.
+    // Prefer the reserved per-language router entry
+    // (mcp-language-server-<language>) first, then any remaining siblings by
+    // name — so a suffixed legacy entry (mcp-language-server-<language>-<hex>)
+    // always lands in legacyConflict, never displaces the router entry.
+    // Scope is minimal: this sorts ONLY the entries this row already
+    // aggregates over (narrowed to this language via expectedNames); it does
+    // not reorder collectServers or any unrelated matrix rows.
+    const reservedRouterName = `${LSP_MANIFEST_SERVER}-${language}`;
+    const aggregated = entries
+      .filter((e) => expectedNames.has(e.name))
+      .sort((a, b) => {
+        if (a.name === reservedRouterName && b.name !== reservedRouterName) return -1;
+        if (b.name === reservedRouterName && a.name !== reservedRouterName) return 1;
+        return a.name.localeCompare(b.name);
+      });
+    for (const e of aggregated) {
       for (const [client, pres] of Object.entries(e.client_presence ?? {})) {
         // First match wins; later entries that target the same client
         // are coexistence anomalies and surface as legacy_conflict.

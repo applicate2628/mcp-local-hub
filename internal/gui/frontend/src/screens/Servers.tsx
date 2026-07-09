@@ -14,7 +14,7 @@ import {
 import { ScanRefreshControls } from "../components/ScanRefreshControls";
 import { useAutoScan } from "../hooks/useAutoScan";
 import { useEventSource } from "../hooks/useEventSource";
-import { collectServers } from "../lib/routing";
+import { collectServers, isLspRouterURL, clientConfigUsable } from "../lib/routing";
 import {
   effectiveVisibleClients,
   loadColumnPrefs,
@@ -1194,6 +1194,7 @@ export function ServersScreen() {
       <LspMatrix
         rows={lspRows}
         clients={clientColumns}
+        clientConfigPresence={clientConfigPresence}
         openDrawerFor={openDrawerFor}
         onOpenDrawer={(row) => setOpenDrawerFor(row)}
         targetWorkspacePath={lspRegisterWorkspacePath}
@@ -1850,6 +1851,11 @@ function RegisterWorkspacePanel(props: {
 function LspMatrix(props: {
   rows: LspRow[];
   clients: readonly string[];
+  // Per-client config-file usability (ScanResult.client_config_presence),
+  // the SAME map the main matrix uses. Threaded so each LSP toggle can gate
+  // its disabled state on whether the client has a usable config, instead of
+  // rendering an enabled toggle for a missing/error config (finding 2).
+  clientConfigPresence: Record<string, ClientConfigState>;
   openDrawerFor: LspRow | null;
   onOpenDrawer: (row: LspRow) => void;
   targetWorkspacePath: string;
@@ -1870,6 +1876,7 @@ function LspMatrix(props: {
   const {
     rows,
     clients,
+    clientConfigPresence,
     openDrawerFor,
     onOpenDrawer,
     targetWorkspacePath,
@@ -1972,6 +1979,7 @@ function LspMatrix(props: {
                     client={client}
                     presence={row.clientPresence[client]}
                     legacy={row.legacyConflict[client]}
+                    configState={clientConfigPresence[client]}
                     checkedOverride={routerClientOverrides[client]}
                     busy={routerBusy[client] === true}
                     onToggle={onToggleRouterClient}
@@ -2025,42 +2033,92 @@ function LspMatrix(props: {
   );
 }
 
-// LspCellView renders one LSP row's per-client cell. Badge semantics:
+// LspCellView renders one LSP row's per-client cell. Badge semantics (chips,
+// unchanged) are driven by the entry's transport:
 //   - presence.transport === "http"  -> [via-hub]
 //   - presence.transport === "stdio" -> [direct]
 //   - legacy populated               -> [legacy] (stacks under [via-hub] or [direct])
 //   - none                           -> "-"
+//
+// The TOGGLE (checked / disabled / read-only) mirrors the main Servers matrix's
+// presence-derived logic instead of naive transport checks — the three Codex P2
+// fixes:
+//   1. checked ⟺ the entry is the SHARED-ROUTER shape (/lsp/<lang>/mcp), via the
+//      single-owner isLspRouterURL (mirrors api.entryIsOwnedLSPRouterForLanguage).
+//      A legacy per-workspace http://127.0.0.1:<port>/mcp entry renders UNCHECKED.
+//   2. disabled when the client has no usable config (clientConfigUsable — the
+//      same client_config_presence gate the main matrix uses); no usable config
+//      means there is nothing to enable into.
+//   3. an inherited router entry (presence.inherited) is checked-but-disabled and
+//      read-only, exactly like the main matrix's "via-hub-inherited" cell — the
+//      hub never wrote the inherited source layer and cannot roll it back.
 function LspCellView(props: {
   language: string;
   client: string;
   presence: ClientPresence | undefined;
   legacy: ClientEntry | undefined;
+  // Per-client config-file usability from ScanResult.client_config_presence —
+  // the SAME map the main matrix consumes. Undefined when the scan omitted the
+  // key (client absent / older mock) → treated as no usable config.
+  configState: ClientConfigState | undefined;
   checkedOverride: boolean | undefined;
   busy: boolean;
   onToggle: (client: string, enabled: boolean) => void;
 }) {
-  const { language, client, presence, legacy, checkedOverride, busy, onToggle } = props;
+  const { language, client, presence, legacy, configState, checkedOverride, busy, onToggle } = props;
   const t = presence?.transport;
   const hasPrimary = t === "http" || t === "relay" || t === "stdio";
-  const hasRouterEntry = t === "http" || t === "relay";
+  // Finding 1: an entry is a shared-router entry only when its URL (http) or
+  // relay_url (relay-stdio bridge) is the /lsp/<language>/mcp shape — mirror the
+  // backend owner, which checks both MCPEntry.URL and MCPEntry.RelayURL. A
+  // legacy per-workspace entry (path /mcp) and a direct-stdio entry (command,
+  // not a URL) both fail the shape test and render unchecked.
+  const hasRouterEntry =
+    isLspRouterURL(presence?.endpoint ?? "", language) ||
+    isLspRouterURL(presence?.relay_url ?? "", language);
+  // Finding 3: an inherited hub entry is read-only — the hub never wrote the
+  // inherited source (an ~/.claude.json import or a lower config.json layer) and
+  // cannot roll it back. Mirrors ClientPresence.inherited → via-hub-inherited.
+  const inherited = presence?.inherited === true;
+  // Finding 2: a client with no usable config file cannot host router entries.
+  const configUsable = clientConfigUsable(configState);
   const checked = checkedOverride ?? hasRouterEntry;
+  // Disabled when an Apply is in flight, the entry is inherited (read-only), or
+  // there is nothing to act on — no existing router entry AND no usable config
+  // to enable one into. A present (non-inherited) router entry stays interactive
+  // so the operator can always disable it, mirroring the main matrix's
+  // always-interactive via-hub cell.
+  const disabled = busy || inherited || (!hasRouterEntry && !configUsable);
   const dualBadge = hasPrimary && Boolean(legacy);
-  const title = checked
-    ? `Uncheck to disable shared LSP router entries for ${client}.`
-    : `Check to enable shared LSP router entries for ${client}.`;
+  let title: string;
+  let ariaLabel: string;
+  if (inherited) {
+    title = `Routed through the shared LSP router, but ${client} inherits this entry from a config layer mcphub never wrote (e.g. ~/.claude.json, or a lower config.json layer). mcphub cannot roll it back — edit that source config directly to remove it.`;
+    ariaLabel = `Shared LSP router entry for ${client} is inherited and read-only`;
+  } else if (!hasRouterEntry && !configUsable) {
+    title = `${client} has no usable MCP config on this host, so its shared LSP router entries can't be changed here.`;
+    ariaLabel = `Shared LSP router toggle for ${client} unavailable — no usable ${client} config`;
+  } else if (checked) {
+    title = `Uncheck to disable shared LSP router entries for ${client}.`;
+    ariaLabel = `Disable shared LSP router entries for ${client}`;
+  } else {
+    title = `Check to enable shared LSP router entries for ${client}.`;
+    ariaLabel = `Enable shared LSP router entries for ${client}`;
+  }
   return (
     <td
       class="lsp-cell"
       data-testid={`lsp-cell-${language}-${client}`}
       data-dual-badge={dualBadge ? "true" : undefined}
+      data-inherited={inherited ? "true" : undefined}
     >
       <label class="lsp-router-toggle" title={title}>
         <input
           type="checkbox"
           data-testid={`lsp-toggle-${language}-${client}`}
-          aria-label={`${checked ? "Disable" : "Enable"} shared LSP router entries for ${client}`}
+          aria-label={ariaLabel}
           checked={checked}
-          disabled={busy}
+          disabled={disabled}
           onChange={(event) => onToggle(client, (event.currentTarget as HTMLInputElement).checked)}
         />
       </label>

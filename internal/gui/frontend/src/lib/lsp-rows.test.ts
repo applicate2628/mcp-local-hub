@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { collectLspRows, LSP_LANGUAGES } from "./lsp-rows";
-import type { ScanResult } from "../types";
+import type { ScanEntry, ScanResult } from "../types";
 import type { WorkspaceEntryDTO } from "../api";
 
 describe("collectLspRows", () => {
@@ -242,5 +242,48 @@ describe("collectLspRows", () => {
     const html = rows.find((r) => r.language === "vscode-html")!;
     expect(css.clientPresence["codex-cli"]?.transport).toBe("stdio");
     expect(html.clientPresence["vscode"]?.transport).toBe("stdio");
+  });
+
+  // P3 finding 1: the reserved per-language router entry
+  // (mcp-language-server-<language>) must win the "first match" for the
+  // presence cell over any suffixed legacy sibling, REGARDLESS of the raw
+  // scan.entries order. Pre-fix the aggregation iterated scan.entries in
+  // wire order, so a suffixed legacy entry that happened to sort earlier in
+  // the scan captured clientPresence and demoted the router entry to
+  // legacyConflict — a coexistence-display flip driven purely by ordering.
+  it("prefers the reserved router entry over a suffixed legacy sibling in BOTH scan orders (P3 finding 1)", () => {
+    const routerEntry: ScanEntry = {
+      name: "mcp-language-server-rust",
+      manifest_exists: false,
+      can_migrate: false,
+      status: "via-hub",
+      client_presence: {
+        "codex-cli": { transport: "http", endpoint: "http://127.0.0.1:9000/lsp/rust/mcp" },
+      },
+    };
+    const legacyEntry: ScanEntry = {
+      name: "mcp-language-server-rust-b2cd",
+      manifest_exists: false,
+      can_migrate: false,
+      client_presence: {
+        "codex-cli": { transport: "http", endpoint: "http://127.0.0.1:9202/mcp" },
+      },
+    };
+    // Both wire orders must resolve identically: router → clientPresence,
+    // legacy → legacyConflict.
+    for (const entries of [
+      [routerEntry, legacyEntry],
+      [legacyEntry, routerEntry],
+    ]) {
+      const scan: ScanResult = { at: "2026-05-20T00:00:00Z", entries };
+      const rows = collectLspRows(scan, null, "");
+      const rust = rows.find((r) => r.language === "rust")!;
+      expect(rust.clientPresence["codex-cli"]?.endpoint).toBe(
+        "http://127.0.0.1:9000/lsp/rust/mcp",
+      );
+      expect(rust.legacyConflict["codex-cli"]?.endpoint).toBe(
+        "http://127.0.0.1:9202/mcp",
+      );
+    }
   });
 });

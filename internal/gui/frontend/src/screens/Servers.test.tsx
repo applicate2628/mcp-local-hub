@@ -465,7 +465,7 @@ describe("ServersScreen — LSP matrix rows", () => {
           client_presence: {
             "codex-cli": {
               transport: "http",
-              endpoint: "http://127.0.0.1:9200/lsp/python",
+              endpoint: "http://127.0.0.1:9200/lsp/python/mcp",
             },
           },
         },
@@ -757,6 +757,136 @@ describe("ServersScreen — LSP matrix rows", () => {
     await waitFor(() => {
       expect(workspacesCallCount).toBeGreaterThan(1);
     });
+  });
+
+  // Finding 1 (Codex P2): a legacy per-workspace HTTP entry
+  // (http://127.0.0.1:<port>/mcp) is NOT the shared /lsp/<lang>/mcp router, so
+  // its toggle must render UNCHECKED — pre-fix it rendered checked because the
+  // transport happened to be "http". Checking it then enables the shared router.
+  it("renders a legacy per-workspace HTTP LSP entry as unchecked (not the shared router)", async () => {
+    const scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-python",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub",
+          client_presence: {
+            "codex-cli": {
+              transport: "http",
+              // Legacy per-workspace daemon URL (path /mcp), NOT the shared
+              // /lsp/python/mcp router this toggle owns.
+              endpoint: "http://127.0.0.1:9200/mcp",
+            },
+          },
+        },
+      ],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+    const enableBodies: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => jsonResponse(200, { workspaces: [], entries: [] }),
+        "/api/lsp-router/enable": (init?: RequestInit) => {
+          enableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, { client: "codex-cli", enabled: true, report: {} });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    // Legacy /mcp entry → unchecked (finding 1) and still interactive (config ok).
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(false);
+
+    // Checking it enables the shared LSP router for the client.
+    fireEvent.click(toggle);
+    await waitFor(() => expect(enableBodies).toHaveLength(1));
+    expect(enableBodies[0]).toEqual({ client: "codex-cli" });
+  });
+
+  // Finding 2 (Codex P2): a client whose config is missing/error has no usable
+  // target, so its LSP toggle must be DISABLED — pre-fix only `busy` gated it.
+  // A sibling "ok" client stays enabled, proving the gate is the SAME
+  // client_config_presence usability the main matrix uses.
+  it("disables the LSP toggle for a client with an error config and enables it for an ok client", async () => {
+    const scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [],
+      client_config_presence: { "codex-cli": "error", "gemini-cli": "ok" },
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => jsonResponse(200, { workspaces: [], entries: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const errored = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    const usable = screen.getByTestId(
+      "lsp-toggle-python-gemini-cli",
+    ) as HTMLInputElement;
+    // No usable config → disabled; usable "ok" config → enabled.
+    expect(errored.disabled).toBe(true);
+    expect(usable.disabled).toBe(false);
+  });
+
+  // Finding 3 (Codex P2): an inherited shared-router entry (a config layer
+  // mcphub never wrote, e.g. ~/.claude.json) is hub-routed but READ-ONLY —
+  // checked yet disabled, mirroring the main matrix's via-hub-inherited cell.
+  // Pre-fix it was an enabled switch that would always fail closed.
+  it("renders an inherited LSP router cell as checked-but-disabled (read-only)", async () => {
+    const scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-python",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub-inherited",
+          client_presence: {
+            "codex-cli": {
+              transport: "http",
+              endpoint: "http://127.0.0.1:9200/lsp/python/mcp",
+              inherited: true,
+            },
+          },
+        },
+      ],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => jsonResponse(200, { workspaces: [], entries: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    // Inherited → checked (it IS hub-routed) but disabled (read-only).
+    expect(toggle.checked).toBe(true);
+    expect(toggle.disabled).toBe(true);
+    const cell = screen.getByTestId("lsp-cell-python-codex-cli");
+    expect(cell.getAttribute("data-inherited")).toBe("true");
+    const label = toggle.closest("label");
+    expect(label?.getAttribute("title") ?? "").toContain("inherits");
   });
 });
 
