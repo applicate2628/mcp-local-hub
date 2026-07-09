@@ -10,8 +10,8 @@
 
 | Item | State | Remaining |
 |---|---|---|
-| [2026-07-05-adopt-npx-orphans](active/2026-07-05-adopt-npx-orphans/status.md) | PARTIALLY DELIVERED | adopt CLI/API + GUI + **reaper (all 3 kill-authority hardenings)** SHIPPED + DEPLOYED (#513/#520/#521/#522). Remaining = anti-drift "unmanaged detected" GUI signal (in flight) + phase-2 de-adopt + D P2a/P2b GUI. |
-| [2026-07-09-test-leftover-reaper](active/2026-07-09-test-leftover-reaper/status.md) | DESIGN ACCEPTED | Implementation not started; queued after PR #524 and PR #525 land. |
+| [2026-07-05-adopt-npx-orphans](active/2026-07-05-adopt-npx-orphans/status.md) | PARTIALLY DELIVERED | adopt CLI/API + GUI + **reaper (all 3 kill-authority hardenings)** SHIPPED + DEPLOYED (#513/#520/#521/#522); anti-drift "unmanaged detected" GUI signal **LANDED** (#523, master `f7eaa1c8`). Remaining = phase-2 de-adopt (now the separate `2026-07-09-deadopt-hub-to-native` item, blocked) + D P2a/P2b GUI. |
+| [2026-07-09-test-leftover-reaper](active/2026-07-09-test-leftover-reaper/status.md) | DESIGN REVISED (r3) / BLOCKED on clean security re-gate | Destructive operator-invoked lane. Design passed CLOSURE re-gate (9 prior findings + PEB/reuse/path-canon audits all closed) but the re-gate found a fresh P1: a standalone `mcphub supervise` is byte-identical to a live adopted supervisor (dead parent by design), so `parentDeathGate` is vacuous for it. Revision r3 makes supervise **tree-reachable only** (never a standalone candidate). Implementation blocked until a security re-gate is clean. See `security-review.md`. |
 | [2026-07-09-deadopt-hub-to-native](active/2026-07-09-deadopt-hub-to-native/status.md) | REVISE / BLOCKED | Blocked on adopt-side durable pre-adopt provenance; implementation must not start until the design is revised and the prerequisite is delivered. |
 
 ## Reaper kill-authority hardening — COMPLETE (2026-07-08, all bot-PASS + deployed)
