@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, cleanup, fireEvent } from "@testing-library/preact";
 import { DashboardScreen, formatUptime, formatBytes } from "./Dashboard";
-import type { DaemonStatus } from "../types";
+import type { DaemonStatus, ScanEntry } from "../types";
 
 // happy-dom does not ship EventSource. Dashboard's bulk-action UI state
 // is SSE-driven (PR #38: unified pipeline — backend publishes
@@ -70,6 +70,13 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
+  });
+}
+
+function scanResponse(entries: ScanEntry[]): Response {
+  return jsonResponse(200, {
+    at: "2026-07-09T00:00:00Z",
+    entries,
   });
 }
 
@@ -842,6 +849,85 @@ describe("DashboardScreen — supervisor-down fail-loud (Workstream B §3.1)", (
     });
     // The error banner must be absent when the supervisor is up.
     expect(queryByTestId("dashboard-error")).toBeNull();
+  });
+});
+
+describe("DashboardScreen — unmanaged stdio anti-drift signal", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  it("renders a Discovery adopt banner when /api/scan contains unmanaged stdio entries", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/scan") {
+        return Promise.resolve(
+          scanResponse([
+            {
+              name: "local-stdio",
+              status: "unknown",
+              client_presence: { "claude-code": { transport: "stdio", endpoint: "npx" } },
+            },
+            {
+              name: "local-uvx",
+              status: "unknown",
+              client_presence: { "codex-cli": { transport: "stdio", endpoint: "uvx" } },
+            },
+            {
+              name: "context7",
+              status: "external",
+              client_presence: { "claude-code": { transport: "http", endpoint: "https://mcp.context7.com/mcp" } },
+            },
+          ]),
+        );
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { findByTestId } = render(<DashboardScreen />);
+    const banner = await findByTestId("dashboard-unmanaged-stdio");
+    expect(banner.textContent).toContain("⚠ 2 unmanaged MCP servers bypassing the hub");
+    const link = banner.querySelector("a") as HTMLAnchorElement | null;
+    expect(link?.textContent).toBe("Adopt");
+    expect(link?.getAttribute("href")).toBe("#/migration");
+  });
+
+  it("does not render the unmanaged stdio banner when /api/scan has no drift entries", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/scan") {
+        return Promise.resolve(
+          scanResponse([
+            {
+              name: "fetch",
+              status: "can-migrate",
+              client_presence: { "claude-code": { transport: "stdio", endpoint: "npx" } },
+            },
+            {
+              name: "odd-remote",
+              status: "unknown",
+              client_presence: { "claude-code": { transport: "http", endpoint: "https://example.test/mcp" } },
+            },
+          ]),
+        );
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { findAllByRole, queryByTestId } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4);
+    });
+    expect(queryByTestId("dashboard-unmanaged-stdio")).toBeNull();
   });
 });
 

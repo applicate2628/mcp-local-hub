@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { cleanupOrphans, fetchOrThrow, restartSupervisor } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
+import { unmanagedStdioCount as countUnmanagedStdio } from "../lib/unmanaged-stdio";
 import { stateShape } from "../lib/status";
 import { formatBytes, formatUptime } from "../lib/format";
 import { DaemonMetrics } from "../components/DaemonMetrics";
 import { ConnectionBadge } from "../components/ConnectionBadge";
 import { pushToast } from "../lib/toast-store";
-import type { DaemonStatus } from "../types";
+import type { DaemonStatus, ScanResult } from "../types";
 
 // formatUptime + formatBytes now live in lib/format (single owner shared
 // with the Servers row drawer). Re-exported here so the existing
@@ -56,6 +57,7 @@ export function DashboardScreen() {
   // event stream so any open Dashboard sees the same animation.
   const [bulkInflight, setBulkInflight] = useState<BulkAction | null>(null);
   const [bulkOutcome, setBulkOutcome] = useState<BulkOutcome | null>(null);
+  const [unmanagedStdioCount, setUnmanagedStdioCount] = useState(0);
   const bulkResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -101,6 +103,30 @@ export function DashboardScreen() {
       clearInterval(poll);
     };
   }, [reloadTrigger]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadScan() {
+      try {
+        const scan = await fetchOrThrow<ScanResult>("/api/scan", "object");
+        if (!cancelled) {
+          setUnmanagedStdioCount(countUnmanagedStdio(scan.entries));
+        }
+      } catch {
+        if (!cancelled) {
+          setUnmanagedStdioCount(0);
+        }
+      }
+    }
+    void loadScan();
+    const poll = setInterval(() => {
+      void loadScan();
+    }, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(poll);
+    };
+  }, []);
 
   // SSE delta handler. Same maintenance filter as bootstrap — otherwise a
   // weekly-refresh transition would re-inject a blank-name card after the
@@ -427,6 +453,16 @@ export function DashboardScreen() {
         context="normal"
         onReloadStatus={() => setReloadTrigger((n) => n + 1)}
       />
+      {unmanagedStdioCount > 0 && (
+        <p
+          class="dashboard-unmanaged-stdio"
+          data-testid="dashboard-unmanaged-stdio"
+          role="status"
+        >
+          ⚠ {unmanagedStdioCount} unmanaged MCP server{unmanagedStdioCount === 1 ? "" : "s"} bypassing the hub{" "}
+          <a href="#/migration">Adopt</a>
+        </p>
+      )}
       <div class="cards">
         {sorted.map((d) => (
           <Card

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -170,6 +171,143 @@ func TestStatusCLI_ForceMaterializeRequiresHealth(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--force-materialize") || !strings.Contains(err.Error(), "--health") {
 		t.Errorf("error must name both flags; got: %v", err)
+	}
+}
+
+func TestStatusCLI_WarnsForUnmanagedStdioScanEntries(t *testing.T) {
+	restoreStatus := api.SetTestStatusFn(func() ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{TaskName: "mcp-local-hub-memory-default", State: "Running", Port: 9123, NextRun: "N/A"},
+		}, nil
+	})
+	t.Cleanup(restoreStatus)
+	origScan := statusScanFn
+	statusScanFn = func(*api.API) (*api.ScanResult, error) {
+		return &api.ScanResult{Entries: []api.ScanEntry{
+			{
+				Name:   "zeta",
+				Status: "unknown",
+				ClientPresence: map[string]api.ClientEntry{
+					"codex-cli": {Transport: "stdio", Endpoint: "uvx"},
+				},
+			},
+			{
+				Name:   "alpha‮​\n\x1b]0;mcphub-poc-title\a",
+				Status: "unknown",
+				ClientPresence: map[string]api.ClientEntry{
+					"claude-code": {Transport: "stdio", Endpoint: "npx"},
+				},
+			},
+			{
+				Name:   "context7",
+				Status: "external",
+				ClientPresence: map[string]api.ClientEntry{
+					"claude-code": {Transport: "http", Endpoint: "https://mcp.context7.com/mcp"},
+				},
+			},
+		}}, nil
+	}
+	t.Cleanup(func() { statusScanFn = origScan })
+
+	var stdout, stderr bytes.Buffer
+	c := newStatusCmdReal()
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	if err := c.Execute(); err != nil {
+		t.Fatalf("status command: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "mcp-local-hub-memory-default") {
+		t.Fatalf("status table missing from stdout:\n%s", stdout.String())
+	}
+	errOut := stderr.String()
+	for _, want := range []string{
+		"2 unmanaged stdio MCP server(s) detected",
+		"alpha]0;mcphub-poc-title, zeta",
+		"mcphub adopt",
+		"GUI Discovery screen",
+	} {
+		if !strings.Contains(errOut, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, errOut)
+		}
+	}
+	if strings.ContainsAny(errOut, "\r\t\a\x1b") {
+		t.Fatalf("stderr warning emitted terminal controls: %q", errOut)
+	}
+	// Commission fable P3: bidi/format runes (U+202E override, U+200B ZWSP) must ALSO be
+	// stripped — IsControl (Cc only) misses them but they visually reorder/hide the line.
+	if strings.ContainsRune(errOut, '‮') || strings.ContainsRune(errOut, '​') {
+		t.Fatalf("stderr warning emitted bidi/format runes (visual spoof): %q", errOut)
+	}
+	if got, want := strings.Count(errOut, "\n"), 2; got != want {
+		t.Fatalf("stderr warning line count = %d, want %d; raw output: %q", got, want, errOut)
+	}
+}
+
+func TestStatusCLI_SuppressesUnmanagedStdioWarningWhenNoneDetected(t *testing.T) {
+	restoreStatus := api.SetTestStatusFn(func() ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{TaskName: "mcp-local-hub-memory-default", State: "Running", Port: 9123, NextRun: "N/A"},
+		}, nil
+	})
+	t.Cleanup(restoreStatus)
+	origScan := statusScanFn
+	statusScanFn = func(*api.API) (*api.ScanResult, error) {
+		return &api.ScanResult{Entries: []api.ScanEntry{
+			{
+				Name:   "fetch",
+				Status: "can-migrate",
+				ClientPresence: map[string]api.ClientEntry{
+					"claude-code": {Transport: "stdio", Endpoint: "npx"},
+				},
+			},
+			{
+				Name:   "odd-remote",
+				Status: "unknown",
+				ClientPresence: map[string]api.ClientEntry{
+					"claude-code": {Transport: "http", Endpoint: "https://example.test/mcp"},
+				},
+			},
+		}}, nil
+	}
+	t.Cleanup(func() { statusScanFn = origScan })
+
+	var stdout, stderr bytes.Buffer
+	c := newStatusCmdReal()
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	if err := c.Execute(); err != nil {
+		t.Fatalf("status command: %v", err)
+	}
+	if strings.Contains(stderr.String(), "unmanaged stdio") {
+		t.Fatalf("unexpected unmanaged warning:\n%s", stderr.String())
+	}
+}
+
+func TestStatusCLI_ScanErrorDoesNotFailStatus(t *testing.T) {
+	restoreStatus := api.SetTestStatusFn(func() ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{
+			{TaskName: "mcp-local-hub-memory-default", State: "Running", Port: 9123, NextRun: "N/A"},
+		}, nil
+	})
+	t.Cleanup(restoreStatus)
+	origScan := statusScanFn
+	statusScanFn = func(*api.API) (*api.ScanResult, error) {
+		return nil, errors.New("scan unavailable")
+	}
+	t.Cleanup(func() { statusScanFn = origScan })
+
+	var stdout, stderr bytes.Buffer
+	c := newStatusCmdReal()
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	if err := c.Execute(); err != nil {
+		t.Fatalf("status command should ignore scan errors, got: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "mcp-local-hub-memory-default") {
+		t.Fatalf("status table missing from stdout:\n%s", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "unmanaged stdio") {
+		t.Fatalf("scan error should not emit unmanaged warning:\n%s", stderr.String())
 	}
 }
 

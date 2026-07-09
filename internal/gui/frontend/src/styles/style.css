@@ -697,6 +697,21 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
    padding (--cell-padding-y / --gap-md), preserved here so the Dashboard
    header buttons render byte-identical to the pre-G5 look. */
 .dashboard-bulk-actions button.btn { padding: var(--cell-padding-y) var(--gap-md); }
+.dashboard-unmanaged-stdio {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: var(--gap-xs) 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--text);
+}
+.dashboard-unmanaged-stdio a {
+  font-weight: 700;
+}
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--gap-md); margin-top: var(--gap-md); }
 /* The card border is backed by a 1px box-shadow RING in addition to the CSS
    `border`. The `.cards` grid below uses `repeat(auto-fit, minmax(240px, 1fr))`,

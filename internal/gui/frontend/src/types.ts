@@ -260,6 +260,11 @@ export interface ClientPresence {
   endpoint?: string;
   relay_url?: string;
   raw?: unknown;
+  // Mirrors api.ClientEntry.Disabled (`json:"disabled,omitempty"`). True when
+  // the backend scan shaper observed disabled:true or enabled:false on the raw
+  // client entry. Survives GUI Raw stripping so display predicates can skip
+  // parked entries without re-reading client-specific raw config.
+  disabled?: boolean;
   // Mirrors api.ClientEntry.Inherited (`json:"inherited,omitempty"`). True for
   // a hub-loopback cell whose source is an inherited import (~/.claude.json) or
   // a config.json layer BELOW the write target — a layer the hub never wrote
