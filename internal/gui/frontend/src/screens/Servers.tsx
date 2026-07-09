@@ -3,6 +3,7 @@ import {
   fetchOrThrow,
   postInitClientConfig,
   InitClientConfigError,
+  listLspRouterClientStatuses,
   listWorkspaces,
   postLspRegister,
   resolveClientSymlink,
@@ -22,7 +23,13 @@ import {
   clearColumnPrefs,
   type ColumnPrefs,
 } from "../lib/matrix-columns";
-import { collectLspRows, type LspRow, LSP_MANIFEST_SERVER, LSP_LANGUAGES } from "../lib/lsp-rows";
+import {
+  collectLspRows,
+  lspCellState,
+  type LspRow,
+  LSP_MANIFEST_SERVER,
+  LSP_LANGUAGES,
+} from "../lib/lsp-rows";
 import { aggregateStatus, stateShape } from "../lib/status";
 import { pushToast } from "../lib/toast-store";
 import { WorkspaceSelector, ALL_WORKSPACES_KEY } from "../components/WorkspaceSelector";
@@ -128,6 +135,24 @@ function cellInteractive(routing: Routing, applying: boolean): boolean {
   return routing === "via-hub" || routing === "direct" || routing === "available";
 }
 
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function apiErrorMessage(body: unknown, fallback: string): string {
+  const obj = objectRecord(body);
+  return typeof obj?.error === "string" ? obj.error : fallback;
+}
+
+function lspRouterFailedCount(body: unknown): number {
+  const obj = objectRecord(body);
+  const report = objectRecord(obj?.report);
+  const failed = report?.Failed ?? report?.failed;
+  return Array.isArray(failed) ? failed.length : 0;
+}
+
 export function ServersScreen() {
   const [servers, setServers] = useState<ServerRow[] | null>(null);
   const [statusByServer, setStatusByServer] = useState<Record<string, { state: string; port: number | null }>>({});
@@ -218,6 +243,10 @@ export function ServersScreen() {
   const [openDrawerFor, setOpenDrawerFor] = useState<LspRow | null>(null);
   const [lspRegisterBusy, setLspRegisterBusy] = useState<Record<string, boolean>>({});
   const [lspRegisterMsg, setLspRegisterMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
+  const [lspRouterBusy, setLspRouterBusy] = useState<Record<string, boolean>>({});
+  const [lspRouterMsg, setLspRouterMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
+  const [lspRouterClientOverrides, setLspRouterClientOverrides] = useState<Record<string, boolean>>({});
+  const [lspRouterClientDisabled, setLspRouterClientDisabled] = useState<Record<string, boolean>>({});
   // First-workspace registration (fresh-machine connect path): the
   // operator types a workspace ROOT path + picks a language, and the GUI
   // POSTs /api/lsp/register directly — no CLI `mcphub register` step. The
@@ -317,16 +346,27 @@ export function ServersScreen() {
     latestScanRequestRef.current = requestId;
     const isLatest = () => latestScanRequestRef.current === requestId;
     try {
-      // /api/workspaces returns {workspaces, entries}. A registry
-      // load failure must NOT block the matrix render — the
-      // selector falls back to its empty-state placeholder and the
-      // LSP matrix surfaces the 9 placeholder rows. Catch isolation
-      // is bounded to the workspaces fetch only; /api/scan and
-      // /api/status errors continue to fail the whole load.
-      const [scan, status, workspacesResp] = await Promise.all([
+      // Promise.all is fail-fast, so every member is REQUIRED unless it carries
+      // its own catch. Two members are OPTIONAL and must degrade in place:
+      //
+      //   - /api/workspaces returns {workspaces, entries}. A registry load
+      //     failure must NOT block the matrix render — the selector falls back
+      //     to its empty-state placeholder and the LSP matrix surfaces the 9
+      //     placeholder rows.
+      //   - /api/lsp-router/status only decorates the LSP rows with per-client
+      //     opt-out state. Its backend (LSPRouterClientStatuses) aborts on a
+      //     SINGLE client's GetEntry/config read failure, so one broken client
+      //     config would otherwise blank the whole Servers matrix — even though
+      //     /api/scan can still render that client as a config-error cell.
+      //
+      // /api/scan and /api/status stay REQUIRED: they supply the matrix rows
+      // and the Port/State columns, so there is nothing left to render without
+      // them, and their errors continue to fail the whole load.
+      const [scan, status, workspacesResp, routerStatuses] = await Promise.all([
         fetchOrThrow<ScanResult>("/api/scan", "object"),
         fetchOrThrow<DaemonStatus[]>("/api/status", "array"),
         listWorkspaces().catch(() => ({ workspaces: [], entries: [] })),
+        listLspRouterClientStatuses().catch(() => null),
       ]);
       if (!isLatest()) return;
       if (scan.entries != null && !Array.isArray(scan.entries)) {
@@ -339,6 +379,21 @@ export function ServersScreen() {
       setWorkspaceEntries(workspacesResp.entries);
       setClientConfigPresence(scan.client_config_presence ?? EMPTY_CLIENT_CONFIG_PRESENCE);
       setClientScanErrors(scan.client_scan_errors ?? EMPTY_CLIENT_SCAN_ERRORS);
+      // A failed status probe knows NOTHING about opt-outs, so it must not
+      // overwrite the map with {} — that would read as "no client is opted
+      // out" and silently flip a persisted opt-out cell back on. Keep the
+      // last-known map (empty on first load) instead. The optimistic
+      // per-client overrides sit ON TOP of that map, so they are cleared
+      // together with it or not at all: clearing them against a stale
+      // baseline would revert a toggle the backend already applied.
+      if (routerStatuses !== null) {
+        const routerDisabled: Record<string, boolean> = {};
+        for (const rs of routerStatuses) {
+          if (rs.disabled) routerDisabled[rs.client] = true;
+        }
+        setLspRouterClientDisabled(routerDisabled);
+        setLspRouterClientOverrides({});
+      }
       // Clear any success banner once the authoritative refresh lands
       // (the matrix has already redrawn with the new "ok" state).
       // Error banners stay sticky so the operator sees the failure
@@ -346,6 +401,7 @@ export function ServersScreen() {
       // PARENT_MISSING / INIT_FAILED report.
       setInitMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
       setLspRegisterMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
+      setLspRouterMsg((msg) => (msg && msg.kind === "ok" ? null : msg));
       const agg = aggregateStatus(status);
       const flat: Record<string, { state: string; port: number | null }> = {};
       for (const [name, a] of Object.entries(agg)) {
@@ -378,11 +434,13 @@ export function ServersScreen() {
 
   // Auto-refresh: 10s poll while mounted, paused while the tab is hidden,
   // immediate refresh on becoming visible again — AND paused while there
-  // are unsaved matrix edits (`dirty.size > 0`). The dirty pause is the
-  // no-clobber guarantee: an auto tick never fires mid-edit. The pause
-  // releases automatically once Apply/discard empties the dirty map.
+  // are unsaved matrix edits (`dirty.size > 0`) or a per-client LSP router
+  // toggle is in flight. The pause is the no-clobber guarantee: an auto tick
+  // never fires while local optimistic state is waiting on an operator POST.
   const hasUnsavedEdits = dirty.size > 0;
-  const { rescan, agoSeconds } = useAutoScan(loadScan, hasUnsavedEdits);
+  const hasLspRouterToggleInFlight = Object.keys(lspRouterBusy).length > 0;
+  const autoScanPaused = hasUnsavedEdits || hasLspRouterToggleInFlight;
+  const { rescan, agoSeconds } = useAutoScan(loadScan, autoScanPaused);
 
   // reloadToken-driven refetch for Apply / Initialize / LSP register / SSE.
   // useAutoScan already issues the initial mount fetch, so this effect
@@ -439,6 +497,71 @@ export function ServersScreen() {
       // starts with a clean state via useState default anyway.
       if (mountedRef.current) {
         setInitBusy((prev) => {
+          const next = { ...prev };
+          delete next[client];
+          return next;
+        });
+      }
+    }
+  }
+
+  async function toggleLspRouterClient(client: string, enabled: boolean) {
+    if (lspRouterBusy[client]) return;
+    const endpoint = enabled ? "/api/lsp-router/enable" : "/api/lsp-router/disable";
+    const label = enabled ? "Enable" : "Disable";
+    setLspRouterBusy((prev) => ({ ...prev, [client]: true }));
+    setLspRouterMsg(null);
+    setLspRouterClientOverrides((prev) => ({ ...prev, [client]: enabled }));
+    try {
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client }),
+      });
+      let body: unknown = null;
+      try {
+        body = await resp.json();
+      } catch {
+        // Non-JSON responses are handled by status below.
+      }
+      if (resp.status === 200 || resp.status === 204) {
+        if (!mountedRef.current) return;
+        setLspRouterMsg({
+          kind: "ok",
+          text: `${enabled ? "Enabled" : "Disabled"} LSP router entries for ${client}. Refreshing…`,
+        });
+        pushToast(
+          "success",
+          `${enabled ? "Enabled" : "Disabled"} LSP router entries for ${client}.`,
+        );
+        setReloadToken((n) => n + 1);
+        return;
+      }
+      if (resp.status === 207) {
+        if (!mountedRef.current) return;
+        const failed = lspRouterFailedCount(body);
+        setLspRouterMsg({
+          kind: "error",
+          text: `${label} ${client} partially failed (${failed || "some"} LSP router row(s)); refresh and retry.`,
+        });
+        setReloadToken((n) => n + 1);
+        return;
+      }
+      throw new Error(`${endpoint}: ${apiErrorMessage(body, resp.statusText || `HTTP ${resp.status}`)}`);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setLspRouterClientOverrides((prev) => {
+        const next = { ...prev };
+        delete next[client];
+        return next;
+      });
+      setLspRouterMsg({
+        kind: "error",
+        text: `${label} ${client} failed: ${(err as Error).message}`,
+      });
+    } finally {
+      if (mountedRef.current) {
+        setLspRouterBusy((prev) => {
           const next = { ...prev };
           delete next[client];
           return next;
@@ -927,9 +1050,17 @@ export function ServersScreen() {
         <ScanRefreshControls
           agoSeconds={agoSeconds}
           onRescan={rescan}
-          paused={hasUnsavedEdits}
-          pauseReason="auto-refresh paused — unsaved changes"
-          disabledReason="Apply or discard your unsaved matrix changes before rescanning"
+          paused={autoScanPaused}
+          pauseReason={
+            hasUnsavedEdits
+              ? "auto-refresh paused — unsaved changes"
+              : "auto-refresh paused — LSP router update in progress"
+          }
+          disabledReason={
+            hasUnsavedEdits
+              ? "Apply or discard your unsaved matrix changes before rescanning"
+              : "Wait for the LSP router update to finish before rescanning"
+          }
         />
       </div>
       <WorkspaceSelector
@@ -1096,12 +1227,18 @@ export function ServersScreen() {
       <LspMatrix
         rows={lspRows}
         clients={clientColumns}
+        clientConfigPresence={clientConfigPresence}
         openDrawerFor={openDrawerFor}
         onOpenDrawer={(row) => setOpenDrawerFor(row)}
         targetWorkspacePath={lspRegisterWorkspacePath}
         registerBusy={lspRegisterBusy}
         registerMsg={lspRegisterMsg}
+        routerBusy={lspRouterBusy}
+        routerMsg={lspRouterMsg}
+        routerClientOverrides={lspRouterClientOverrides}
+        routerClientDisabled={lspRouterClientDisabled}
         onRegister={registerLspRow}
+        onToggleRouterClient={toggleLspRouterClient}
         hasWorkspaces={workspaces.length > 0}
         workspacePathInput={workspacePathInput}
         onWorkspacePathInput={setWorkspacePathInput}
@@ -1735,8 +1872,9 @@ function RegisterWorkspacePanel(props: {
 }
 
 // LspMatrix renders the 9-row LSP daemons table below the main matrix.
-// Workspace-scoped LSP rows do not use migrate/demigrate checkboxes,
-// but unregistered rows can be enabled from the row action when the
+// Workspace-scoped LSP rows do not use the main matrix migrate/demigrate
+// queue. Their per-client checkbox drives the shared LSP-router enable/disable
+// path, while unregistered rows can be registered from the row action when the
 // current workspace filter resolves to exactly one workspace.
 // Cells surface presence as badges: `[via-hub]`, `[direct]`, `[legacy]`,
 // or `—` for absent.
@@ -1747,12 +1885,22 @@ function RegisterWorkspacePanel(props: {
 function LspMatrix(props: {
   rows: LspRow[];
   clients: readonly string[];
+  // Per-client config-file usability (ScanResult.client_config_presence),
+  // the SAME map the main matrix uses. Threaded so each LSP toggle can gate
+  // its disabled state on whether the client has a usable config, instead of
+  // rendering an enabled toggle for a missing/error config (finding 2).
+  clientConfigPresence: Record<string, ClientConfigState>;
   openDrawerFor: LspRow | null;
   onOpenDrawer: (row: LspRow) => void;
   targetWorkspacePath: string;
   registerBusy: Record<string, boolean>;
   registerMsg: { text: string; kind: "ok" | "error" } | null;
+  routerBusy: Record<string, boolean>;
+  routerMsg: { text: string; kind: "ok" | "error" } | null;
+  routerClientOverrides: Record<string, boolean>;
+  routerClientDisabled: Record<string, boolean>;
   onRegister: (row: LspRow) => void;
+  onToggleRouterClient: (client: string, enabled: boolean) => void;
   // First-workspace register flow (fresh-machine connect path).
   hasWorkspaces: boolean;
   workspacePathInput: string;
@@ -1763,12 +1911,18 @@ function LspMatrix(props: {
   const {
     rows,
     clients,
+    clientConfigPresence,
     openDrawerFor,
     onOpenDrawer,
     targetWorkspacePath,
     registerBusy,
     registerMsg,
+    routerBusy,
+    routerMsg,
+    routerClientOverrides,
+    routerClientDisabled,
     onRegister,
+    onToggleRouterClient,
     hasWorkspaces,
     workspacePathInput,
     onWorkspacePathInput,
@@ -1795,6 +1949,15 @@ function LspMatrix(props: {
           style="margin:var(--gap-xs) 0"
         >
           {registerMsg.text}
+        </div>
+      )}
+      {routerMsg && (
+        <div
+          class={routerMsg.kind === "error" ? "error" : ""}
+          data-testid="lsp-router-msg"
+          style="margin:var(--gap-xs) 0"
+        >
+          {routerMsg.text}
         </div>
       )}
       <table class="servers-matrix lsp-matrix" data-testid="lsp-matrix">
@@ -1851,7 +2014,14 @@ function LspMatrix(props: {
                     language={row.language}
                     client={client}
                     presence={row.clientPresence[client]}
+                    entryName={row.clientPresenceEntryName[client]}
+                    canEnableFromLegacy={row.clientPresenceCanEnableFromLegacy[client] === true}
                     legacy={row.legacyConflict[client]}
+                    configState={clientConfigPresence[client]}
+                    checkedOverride={routerClientOverrides[client]}
+                    clientRouterDisabled={routerClientDisabled[client] === true}
+                    busy={routerBusy[client] === true}
+                    onToggle={onToggleRouterClient}
                   />
                 ))}
                 <td>
@@ -1902,27 +2072,108 @@ function LspMatrix(props: {
   );
 }
 
-// LspCellView renders one LSP row's per-client cell. Badge semantics:
+// LspCellView renders one LSP row's per-client cell. Badge semantics (chips,
+// unchanged) are driven by the entry's transport:
 //   - presence.transport === "http"  -> [via-hub]
 //   - presence.transport === "stdio" -> [direct]
 //   - legacy populated               -> [legacy] (stacks under [via-hub] or [direct])
 //   - none                           -> "-"
+//
+// The TOGGLE (checked / disabled / read-only) and the OPT-OUT affordance are
+// both derived by the single owner lspCellState (lib/lsp-rows.ts). This view
+// re-derives none of it: the checkbox describes the ROUTER ENTRY, while the
+// opt-out persists a CLIENT PREFERENCE and is therefore reachable for every
+// entry shape a usable client config can be in. See lspCellState's contract
+// comment for the full rationale and the disable-path side effects.
 function LspCellView(props: {
   language: string;
   client: string;
   presence: ClientPresence | undefined;
+  entryName: string | undefined;
+  canEnableFromLegacy: boolean;
   legacy: ClientEntry | undefined;
+  // Per-client config-file usability from ScanResult.client_config_presence —
+  // the SAME map the main matrix consumes. Undefined when the scan omitted the
+  // key (client absent / older mock) → treated as no usable config.
+  configState: ClientConfigState | undefined;
+  checkedOverride: boolean | undefined;
+  clientRouterDisabled: boolean;
+  busy: boolean;
+  onToggle: (client: string, enabled: boolean) => void;
 }) {
-  const { language, client, presence, legacy } = props;
-  const t = presence?.transport;
-  const hasPrimary = t === "http" || t === "relay" || t === "stdio";
+  const {
+    language,
+    client,
+    presence,
+    entryName,
+    canEnableFromLegacy,
+    legacy,
+    configState,
+    checkedOverride,
+    clientRouterDisabled,
+    busy,
+    onToggle,
+  } = props;
+  const {
+    transport: t,
+    hasPrimary,
+    hasRouterEntry,
+    hasUnreplaceablePrimary,
+    inherited,
+    configUsable,
+    checked,
+    checkboxDisabled: disabled,
+    optedOut: clientOptedOut,
+    showOptOutButton,
+  } = lspCellState({
+    language,
+    presence,
+    entryName,
+    canEnableFromLegacy,
+    configState,
+    checkedOverride,
+    clientRouterDisabled,
+    busy,
+  });
   const dualBadge = hasPrimary && Boolean(legacy);
+  let title: string;
+  let ariaLabel: string;
+  if (inherited) {
+    title = `Routed through the shared LSP router, but ${client} inherits this entry from a config layer mcphub never wrote (e.g. ~/.claude.json, or a lower config.json layer). mcphub cannot roll it back — edit that source config directly to remove it.`;
+    ariaLabel = `Shared LSP router entry for ${client} is inherited and read-only`;
+  } else if (!hasRouterEntry && hasUnreplaceablePrimary) {
+    title = `${client} already has a direct LSP entry here. mcphub cannot safely replace it from this checkbox; edit that client entry directly or remove it before enabling the shared router.`;
+    ariaLabel = `Shared LSP router toggle for ${client} unavailable — direct ${client} entry already exists`;
+  } else if (!hasRouterEntry && !configUsable) {
+    title = `${client} has no usable MCP config on this host, so its shared LSP router entries can't be changed here.`;
+    ariaLabel = `Shared LSP router toggle for ${client} unavailable — no usable ${client} config`;
+  } else if (checked) {
+    title = `Uncheck to disable shared LSP router entries for ${client}.`;
+    ariaLabel = `Disable shared LSP router entries for ${client}`;
+  } else if (clientOptedOut) {
+    title = `${client} is opted out of automatic shared LSP router entries. Check to enable them again.`;
+    ariaLabel = `Enable shared LSP router entries for ${client}`;
+  } else {
+    title = `Check to enable shared LSP router entries for ${client}.`;
+    ariaLabel = `Enable shared LSP router entries for ${client}`;
+  }
   return (
     <td
       class="lsp-cell"
       data-testid={`lsp-cell-${language}-${client}`}
       data-dual-badge={dualBadge ? "true" : undefined}
+      data-inherited={inherited ? "true" : undefined}
     >
+      <label class="lsp-router-toggle" title={title}>
+        <input
+          type="checkbox"
+          data-testid={`lsp-toggle-${language}-${client}`}
+          aria-label={ariaLabel}
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onToggle(client, (event.currentTarget as HTMLInputElement).checked)}
+        />
+      </label>
       {hasPrimary && (
         <span
           class={`lsp-chip lsp-chip-${t === "stdio" ? "direct" : "via-hub"}`}
@@ -1939,7 +2190,29 @@ function LspCellView(props: {
           legacy
         </span>
       )}
-      {!hasPrimary && !legacy && <span class="lsp-cell-empty">—</span>}
+      {clientOptedOut && (
+        <span
+          class="lsp-chip lsp-chip-off"
+          data-testid={`lsp-chip-opt-out-${language}-${client}`}
+        >
+          off
+        </span>
+      )}
+      {showOptOutButton && (
+        <button
+          type="button"
+          class="lsp-router-opt-out"
+          data-testid={`lsp-opt-out-${language}-${client}`}
+          title={`Persist ${client}'s shared LSP router opt-out. mcphub stops adding router entries for ${client} on setup, and removes the router entries it owns.`}
+          aria-label={`Opt ${client} out of shared LSP router entries`}
+          onClick={() => onToggle(client, false)}
+        >
+          Off
+        </button>
+      )}
+      {!hasPrimary && !legacy && !clientOptedOut && !showOptOutButton && (
+        <span class="lsp-cell-empty">—</span>
+      )}
     </td>
   );
 }

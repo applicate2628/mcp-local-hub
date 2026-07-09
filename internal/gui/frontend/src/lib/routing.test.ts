@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   isHubLoopback,
   isSerenaRouterURL,
+  isLspRouterURL,
+  isMcphubRelayCommand,
+  clientConfigUsable,
   loopbackEntryPort,
+  lspLegacyURLPort,
+  entryPointsAtLegacyLSPPort,
   loopbackPortMatchesDaemon,
   perClientRouting,
   collectServers,
@@ -51,6 +56,116 @@ describe("isSerenaRouterURL", () => {
   });
 });
 
+describe("isLspRouterURL", () => {
+  it("accepts loopback /lsp/<language>/mcp router URLs on any explicit port", () => {
+    expect(isLspRouterURL("http://127.0.0.1:9125/lsp/python/mcp", "python")).toBe(true);
+    expect(isLspRouterURL("http://localhost:9130/lsp/go/mcp", "go")).toBe(true);
+    // Hyphenated language segments (vscode-css/html) must match verbatim.
+    expect(isLspRouterURL("http://127.0.0.1:9125/lsp/vscode-css/mcp", "vscode-css")).toBe(true);
+    // IPv6 loopback: JS URL.hostname keeps the brackets ("[::1]"); the Go
+    // backend's url.Hostname() strips them ("::1"). Both parsers accept the
+    // same loopback host, so the shared-router URL must classify here too.
+    expect(isLspRouterURL("http://[::1]:9125/lsp/go/mcp", "go")).toBe(true);
+  });
+
+  it("rejects legacy per-workspace /mcp entries (finding 1)", () => {
+    // The naive transport==="http" check treated these as router entries;
+    // the shape test rejects them so the toggle renders unchecked.
+    expect(isLspRouterURL("http://127.0.0.1:9200/mcp", "python")).toBe(false);
+  });
+
+  it("rejects a router URL whose language segment does not match the row", () => {
+    expect(isLspRouterURL("http://127.0.0.1:9125/lsp/go/mcp", "python")).toBe(false);
+  });
+
+  it("rejects a partial /lsp/<language> path with no /mcp suffix", () => {
+    expect(isLspRouterURL("http://127.0.0.1:9125/lsp/python", "python")).toBe(false);
+  });
+
+  it("rejects non-loopback hosts and non-http schemes", () => {
+    expect(isLspRouterURL("https://example.com/lsp/python/mcp", "python")).toBe(false);
+    expect(isLspRouterURL("stdio:///mcp-language-server", "python")).toBe(false);
+    expect(isLspRouterURL("", "python")).toBe(false);
+  });
+
+  it("rejects a loopback https URL (backend requires scheme http)", () => {
+    // A loopback host alone is NOT sufficient — lspRouterURLLanguagePort
+    // requires parsed.Scheme == "http". A stray https router URL must not
+    // render as a checked cell.
+    expect(isLspRouterURL("https://127.0.0.1:9125/lsp/python/mcp", "python")).toBe(false);
+    expect(isLspRouterURL("https://localhost:9130/lsp/go/mcp", "go")).toBe(false);
+    expect(isLspRouterURL("https://[::1]:9125/lsp/go/mcp", "go")).toBe(false);
+  });
+
+  it("rejects a loopback URL with no explicit port (backend requires a port)", () => {
+    // lspRouterURLLanguagePort rejects a port-less URL (it would default to
+    // :80 and could never be a live router binding); the frontend must too.
+    expect(isLspRouterURL("http://127.0.0.1/lsp/python/mcp", "python")).toBe(false);
+    expect(isLspRouterURL("http://localhost/lsp/go/mcp", "go")).toBe(false);
+    expect(isLspRouterURL("http://[::1]/lsp/go/mcp", "go")).toBe(false);
+  });
+
+  it("matches a percent-encoded language path (%67o decodes to go), mirroring Go url.Parse (P3 finding 2)", () => {
+    // JS URL.pathname keeps percent-encoding verbatim (/lsp/%67o/mcp), but the
+    // Go backend's url.Parse decodes parsed.Path to /lsp/go/mcp and matches.
+    // The frontend must decode the pathname before comparing so a percent-
+    // encoded-but-equivalent router URL renders CHECKED, agreeing with Go.
+    expect(isLspRouterURL("http://127.0.0.1:9125/lsp/%67o/mcp", "go")).toBe(true);
+    // A decoded path that still does not match the row language stays false.
+    expect(isLspRouterURL("http://127.0.0.1:9125/lsp/%67o/mcp", "python")).toBe(false);
+  });
+
+  it("returns false for a malformed percent-encoding in the path (decodeURIComponent throws)", () => {
+    // A lone '%' is invalid percent-encoding; decodeURIComponent throws
+    // URIError, which the try/catch maps to a non-match rather than a crash.
+    expect(isLspRouterURL("http://127.0.0.1:9125/lsp/%/mcp", "go")).toBe(false);
+  });
+
+  it("pins the documented non-canonical IPv6 divergence as current TS behavior", () => {
+    // JS's URL parser CANONICALIZES [0:0:0:0:0:0:0:1] to [::1], so the TS
+    // classifier ACCEPTS the fully-expanded IPv6 loopback form. The Go
+    // backend's url.Hostname() does NOT compress ("0:0:0:0:0:0:0:1"), so it
+    // would reject the same URL — an accepted, out-of-scope divergence (see
+    // the comment in isLspRouterURL): the hub only ever writes canonical
+    // loopback URLs, and enable/ensure self-heals owned entries to canonical.
+    expect(isLspRouterURL("http://[0:0:0:0:0:0:0:1]:9125/lsp/go/mcp", "go")).toBe(true);
+  });
+});
+
+describe("clientConfigUsable", () => {
+  it("treats only an 'ok' config as usable", () => {
+    expect(clientConfigUsable("ok")).toBe(true);
+  });
+
+  it("treats every missing/error/absent state as not usable (finding 2)", () => {
+    expect(clientConfigUsable("missing")).toBe(false);
+    expect(clientConfigUsable("missing-init-possible")).toBe(false);
+    expect(clientConfigUsable("missing-init-creatable")).toBe(false);
+    expect(clientConfigUsable("missing-init-blocked-symlink")).toBe(false);
+    expect(clientConfigUsable("error")).toBe(false);
+    expect(clientConfigUsable("error-symlink")).toBe(false);
+    expect(clientConfigUsable(undefined)).toBe(false);
+  });
+});
+
+describe("isMcphubRelayCommand", () => {
+  it("accepts only the current mcphub relay basenames for LSP router ownership", () => {
+    expect(isMcphubRelayCommand("mcphub")).toBe(true);
+    expect(isMcphubRelayCommand("mcphub.exe")).toBe(true);
+    expect(isMcphubRelayCommand("C:\\Users\\u\\.local\\bin\\mcphub.exe")).toBe(true);
+  });
+
+  it("rejects legacy mcp and foreign relay executables", () => {
+    expect(isMcphubRelayCommand("mcp")).toBe(false);
+    expect(isMcphubRelayCommand("mcp.exe")).toBe(false);
+    expect(isMcphubRelayCommand("/usr/local/bin/mcp")).toBe(false);
+    expect(isMcphubRelayCommand("node")).toBe(false);
+    expect(isMcphubRelayCommand("C:\\tools\\relay.exe")).toBe(false);
+    expect(isMcphubRelayCommand("")).toBe(false);
+    expect(isMcphubRelayCommand(undefined)).toBe(false);
+  });
+});
+
 describe("loopbackEntryPort", () => {
   it("extracts the port from a loopback hub URL", () => {
     expect(loopbackEntryPort("http://127.0.0.1:9133/mcp")).toBe(9133);
@@ -66,6 +181,63 @@ describe("loopbackEntryPort", () => {
   it("returns null for an unparseable endpoint", () => {
     expect(loopbackEntryPort("stdio:///memory")).toBeNull();
     expect(loopbackEntryPort("")).toBeNull();
+  });
+});
+
+describe("lspLegacyURLPort", () => {
+  it("extracts the port only from loopback http /mcp legacy LSP URLs", () => {
+    expect(lspLegacyURLPort("http://127.0.0.1:9200/mcp")).toBe(9200);
+    expect(lspLegacyURLPort("http://localhost:9201/mcp")).toBe(9201);
+    expect(lspLegacyURLPort("http://[::1]:9202/mcp")).toBe(9202);
+  });
+
+  it("rejects router paths, non-http schemes, non-loopback hosts, and portless URLs", () => {
+    expect(lspLegacyURLPort("http://127.0.0.1:9200/lsp/python/mcp")).toBeNull();
+    expect(lspLegacyURLPort("https://127.0.0.1:9200/mcp")).toBeNull();
+    expect(lspLegacyURLPort("http://example.invalid:9200/mcp")).toBeNull();
+    expect(lspLegacyURLPort("http://127.0.0.1/mcp")).toBeNull();
+  });
+});
+
+describe("entryPointsAtLegacyLSPPort", () => {
+  it("matches backend replaceability through endpoint or relay_url without requiring relay ownership", () => {
+    const legacyPorts = new Set([9200]);
+    expect(
+      entryPointsAtLegacyLSPPort(
+        { endpoint: "http://127.0.0.1:9200/mcp" },
+        legacyPorts,
+      ),
+    ).toBe(true);
+    expect(
+      entryPointsAtLegacyLSPPort(
+        {
+          endpoint: "mcp-language-server",
+          relay_url: "http://127.0.0.1:9200/mcp",
+        },
+        legacyPorts,
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects router URLs, foreign ports, and missing registry evidence", () => {
+    expect(
+      entryPointsAtLegacyLSPPort(
+        { endpoint: "mcp.exe", relay_url: "http://127.0.0.1:9200/lsp/python/mcp" },
+        new Set([9200]),
+      ),
+    ).toBe(false);
+    expect(
+      entryPointsAtLegacyLSPPort(
+        { endpoint: "mcp-language-server", relay_url: "http://127.0.0.1:9300/mcp" },
+        new Set([9200]),
+      ),
+    ).toBe(false);
+    expect(
+      entryPointsAtLegacyLSPPort(
+        { endpoint: "mcp-language-server", relay_url: "http://127.0.0.1:9200/mcp" },
+        undefined,
+      ),
+    ).toBe(false);
   });
 });
 

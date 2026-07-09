@@ -21,7 +21,13 @@
 // servers/mcp-language-server/manifest.yaml. Keep both lists in sync
 // when the manifest declares a new language.
 
-import type { ClientPresence, ScanResult } from "../types";
+import {
+  clientConfigUsable,
+  entryPointsAtLegacyLSPPort,
+  isLspRouterURL,
+  isMcphubRelayCommand,
+} from "./routing";
+import type { ClientConfigState, ClientPresence, ScanResult } from "../types";
 import type { ClientEntry } from "../types";
 import type { WorkspaceEntryDTO } from "../api";
 
@@ -53,6 +59,30 @@ export type LspLanguage = (typeof LSP_LANGUAGES)[number];
 // a single path-router endpoint, so its matrix checkbox DOES work and it
 // is NOT excluded — the exclusion is by this specific name, not by kind.)
 export const LSP_MANIFEST_SERVER = "mcp-language-server";
+
+export function lspRouterEntryName(language: string): string {
+  return `${LSP_MANIFEST_SERVER}-${language}`;
+}
+
+// lspFallbackEntryNames mirrors the GENERATED half of the backend's
+// api.lspLegacyCandidateEntryNames: besides the registry's explicit
+// client_entries value, the backend also treats
+// `<router>-<workspaceKey[:4]>` and `<router>-<workspaceKey>` as removable for
+// a (language, workspace). Those names are client-independent (the Go loop
+// never consults clientName), and an older/heuristic registry row carries no
+// client_entries at all, so they are the only handle on such an entry.
+//
+// Single owner on purpose: BOTH the replaceability proof
+// (clientPresenceCanEnableFromLegacy) and the scoped-view aggregation set
+// (expectedNames) derive from this, so a scoped view can never disagree with
+// the ALL-workspaces view about which scan entries belong to a row.
+function lspFallbackEntryNames(language: string, workspaceKey: string): string[] {
+  const key = workspaceKey ?? "";
+  if (key === "") return [];
+  const router = lspRouterEntryName(language);
+  const short = key.length > 4 ? key.slice(0, 4) : key;
+  return [`${router}-${short}`, `${router}-${key}`];
+}
 
 // LSP_KNOWN_CLIENTS mirrors the per-client-routing CLIENTS list used by
 // Servers.tsx — keeping a local constant lets the row helper produce
@@ -99,6 +129,18 @@ export interface LspRow {
   // rows have empty objects so the per-client cell renders as
   // "not-installed" via the existing routing fallback.
   clientPresence: Record<string, ClientPresence>;
+  // Source scan-entry name for the first-win clientPresence cell. LSP router
+  // toggles need this because the backend per-client disable path mutates only
+  // the reserved mcp-language-server-<lang> entry, not suffixed siblings.
+  clientPresenceEntryName: Record<string, string>;
+  // True when the first-win clientPresence points at a legacy /mcp URL through
+  // endpoint or relay_url whose port and source entry name are recognized by the
+  // backend rollback/ensure owners via the workspace registry. Without this
+  // proof, loopback /mcp cells stay unchecked and disabled instead of hitting
+  // deterministic ownership errors. The recognized-name set mirrors
+  // api.lspLegacyCandidateEntryNames, which includes the registry's generated
+  // fallback names, not just explicit client_entries values.
+  clientPresenceCanEnableFromLegacy: Record<string, boolean>;
   legacyConflict: Record<string, ClientEntry>;
 }
 
@@ -176,12 +218,73 @@ export function collectLspRows(
     // workspace's client_entries may still name the old per-workspace suffixed
     // entry, so recognize the router name explicitly; rollback reconstructs
     // pre-router entries from client_entries, so the registry is not rewritten.
-    expectedNames.add(`${LSP_MANIFEST_SERVER}-${language}`);
+    const reservedRouterName = lspRouterEntryName(language);
+    expectedNames.add(reservedRouterName);
     for (const we of filteredWs) {
       for (const v of Object.values(we.client_entries ?? {})) {
         if (v) expectedNames.add(v);
       }
+      // The registry's generated fallback names are part of the backend's
+      // removable set (see lspFallbackEntryNames), so they name scan entries
+      // this row owns. Without them, a SCOPED view (owner resolved +
+      // selectedWorkspaceKey !== "") filtered `mcp-language-server-<lang>-<key4>`
+      // out of the aggregation for an older registry row with empty
+      // client_entries — the legacy badge and toggle vanished outside
+      // ALL-workspaces mode even though the backend recognizes and can replace
+      // the entry. Scoped, so a sibling workspace's entries still cannot leak in.
+      for (const name of lspFallbackEntryNames(language, we.workspace_key ?? "")) {
+        expectedNames.add(name);
+      }
     }
+    // legacyPorts mirrors api.lspRegistryPortsByLanguage: every registered proxy
+    // port for THIS language, across every workspace. Both backend gates — the
+    // entryIsHubOwnedLSPClientEntry overwrite check on the reserved target name,
+    // and the entryPointsAtLegacyLSPPort check on each legacy candidate name —
+    // read that language-wide set, so narrowing to the ports of the single
+    // registry row that named the entry refuses cells the backend would replace.
+    const legacyPorts = new Set<number>();
+    // The legacy candidate names mirror api.lspLegacyCandidateEntryNames: for one
+    // (language, client) the backend treats as removable BOTH the registry's
+    // explicit client_entries value AND the generated fallbacks (see
+    // lspFallbackEntryNames). The generated names are client-independent, so they
+    // live in one shared set spanning EVERY workspace of the language — the
+    // backend's own candidate set is language-wide, and narrowing it to the
+    // selected workspace would refuse cells the backend would replace.
+    const generatedLegacyNames = new Set<string>();
+    const legacyNamesByClient = new Map<string, Set<string>>();
+    for (const we of wsEntries) {
+      if (we.language !== language) continue;
+      // Candidate-name generation has no port filter in the backend; only the
+      // port set (lspRegistryPortsByLanguage) drops port <= 0 rows.
+      if (we.port > 0) legacyPorts.add(we.port);
+      for (const [client, entryName] of Object.entries(we.client_entries ?? {})) {
+        const name = (entryName ?? "").trim();
+        if (!name) continue;
+        const names = legacyNamesByClient.get(client) ?? new Set<string>();
+        names.add(name);
+        legacyNamesByClient.set(client, names);
+      }
+      for (const name of lspFallbackEntryNames(language, we.workspace_key ?? "")) {
+        generatedLegacyNames.add(name);
+      }
+    }
+    const isLegacyCandidateName = (client: string, entryName: string): boolean =>
+      generatedLegacyNames.has(entryName) ||
+      (legacyNamesByClient.get(client)?.has(entryName) ?? false);
+    const canEnableFromLegacy = (
+      client: string,
+      entryName: string,
+      presence: ClientPresence,
+    ): boolean => {
+      // The reserved router name is the backend's own ensure target: it is
+      // overwritten whenever entryIsHubOwnedLSPClientEntry holds, and a legacy
+      // registry port satisfies that. Any other name must first be a backend
+      // removal candidate before its port may prove replaceability.
+      if (entryName !== reservedRouterName && !isLegacyCandidateName(client, entryName)) {
+        return false;
+      }
+      return entryPointsAtLegacyLSPPort(presence, legacyPorts);
+    };
     // Cross-reference parsed names — covers placeholders + sanity.
     for (const e of entries) {
       const parsed = parseLspEntryName(e.name);
@@ -200,14 +303,34 @@ export function collectLspRows(
       }
     }
     const clientPresence: Record<string, ClientPresence> = {};
+    const clientPresenceEntryName: Record<string, string> = {};
+    const clientPresenceCanEnableFromLegacy: Record<string, boolean> = {};
     const legacyConflict: Record<string, ClientEntry> = {};
-    for (const e of entries) {
-      if (!expectedNames.has(e.name)) continue;
+    // Deterministic, router-preferring aggregation order. The "first match
+    // wins" rule below is sensitive to iteration order, so raw scan.entries
+    // order must not decide which entry captures a client's presence cell.
+    // Prefer the reserved per-language router entry
+    // (mcp-language-server-<language>) first, then any remaining siblings by
+    // name — so a suffixed legacy entry (mcp-language-server-<language>-<hex>)
+    // always lands in legacyConflict, never displaces the router entry.
+    // Scope is minimal: this sorts ONLY the entries this row already
+    // aggregates over (narrowed to this language via expectedNames); it does
+    // not reorder collectServers or any unrelated matrix rows.
+    const aggregated = entries
+      .filter((e) => expectedNames.has(e.name))
+      .sort((a, b) => {
+        if (a.name === reservedRouterName && b.name !== reservedRouterName) return -1;
+        if (b.name === reservedRouterName && a.name !== reservedRouterName) return 1;
+        return a.name.localeCompare(b.name);
+      });
+    for (const e of aggregated) {
       for (const [client, pres] of Object.entries(e.client_presence ?? {})) {
         // First match wins; later entries that target the same client
         // are coexistence anomalies and surface as legacy_conflict.
         if (!(client in clientPresence)) {
           clientPresence[client] = pres;
+          clientPresenceEntryName[client] = e.name;
+          clientPresenceCanEnableFromLegacy[client] = canEnableFromLegacy(client, e.name, pres);
         } else if (!(client in legacyConflict)) {
           legacyConflict[client] = pres;
         }
@@ -224,7 +347,179 @@ export function collectLspRows(
       workspaceKey: owner?.workspace_key ?? "",
       ambiguousOwners,
       clientPresence,
+      clientPresenceEntryName,
+      clientPresenceCanEnableFromLegacy,
       legacyConflict,
     };
   });
+}
+
+// LspCellStateInput is everything one LSP matrix cell knows about its
+// (language, client) pair. `presence`, `entryName`, and `canEnableFromLegacy`
+// come from the matching LspRow field; `configState` from
+// ScanResult.client_config_presence; `checkedOverride` / `clientRouterDisabled`
+// / `busy` from the screen's optimistic-toggle bookkeeping.
+export interface LspCellStateInput {
+  language: string;
+  presence: ClientPresence | undefined;
+  entryName: string | undefined;
+  canEnableFromLegacy: boolean;
+  configState: ClientConfigState | undefined;
+  checkedOverride: boolean | undefined;
+  clientRouterDisabled: boolean;
+  busy: boolean;
+}
+
+// LspOptOutAffordance names HOW the operator persists this client's
+// clients.lsp_router_disabled opt-out from this cell. Both "checkbox" and
+// "button" issue the SAME POST /api/lsp-router/disable; they differ only in
+// which control is visible, so a cell is never left without a path to the
+// preference while it is actionable at all.
+//
+//   "checkbox"    — a live, mutable router entry is checked here; unchecking it
+//                   disables the client (and removes its router entries). A
+//                   separate Off button would be a duplicate control.
+//   "button"      — the checkbox cannot express a disable (it is unchecked, or
+//                   checked-but-read-only), so the Off button carries the
+//                   preference write on its own.
+//   "already-off" — the opt-out is already persisted (or optimistically
+//                   pending); the cell renders the `off` chip instead.
+//   "unavailable" — an Apply is in flight, or the client has no usable MCP
+//                   config on this host, so there is nothing to opt out of.
+export type LspOptOutAffordance = "checkbox" | "button" | "already-off" | "unavailable";
+
+export interface LspCellState {
+  transport: string | undefined;
+  hasPrimary: boolean;
+  inherited: boolean;
+  configUsable: boolean;
+  // hasRouterEntry: a live (non-disabled) hub-owned shared-router entry sits at
+  // the RESERVED mcp-language-server-<language> name. The only shape that may
+  // render the checkbox checked.
+  hasRouterEntry: boolean;
+  // hasUnreplaceablePrimary: another entry occupies this cell and the backend
+  // would refuse to overwrite it, so the checkbox cannot enable the router.
+  hasUnreplaceablePrimary: boolean;
+  checked: boolean;
+  checkboxDisabled: boolean;
+  optedOut: boolean;
+  optOutAffordance: LspOptOutAffordance;
+  showOptOutButton: boolean;
+}
+
+// lspCellState is the SINGLE owner of an LSP cell's checkbox state, checkbox
+// enablement, and opt-out affordance. Servers.tsx renders straight off this
+// struct and re-derives none of it.
+//
+// The two decisions are deliberately orthogonal, because conflating them is
+// what produced three consecutive review findings on this one control
+// (PR #524 round 5: "let users opt out when router entries are absent";
+// round 7: "allow opting out when legacy LSP entries exist"):
+//
+//   1. The CHECKBOX describes a ROUTER ENTRY. It is checked only for a live
+//      hub-owned entry at the reserved name, and it is enabled only when it can
+//      actually mutate one (nothing in flight, not inherited, and either an
+//      entry to remove or a replaceable/empty slot to write into).
+//
+//   2. The OPT-OUT persists a CLIENT PREFERENCE (clients.lsp_router_disabled)
+//      in gui-preferences.yaml so future `mcphub setup` / ensure passes stop
+//      adding router entries for the client. Entry presence is IRRELEVANT to
+//      it: a legacy, suffixed, foreign, remote, or inherited entry neither
+//      grants nor withholds the ability to store a preference. Only a usable
+//      client config (there is a client to opt out), an idle cell, and a
+//      not-already-persisted opt-out gate it.
+//
+// Side effect when the opt-out is persisted while an entry is live: the disable
+// endpoint writes the preference FIRST, then runs its normal per-client
+// rollback (internal/api/client_install_prefs.go:237 →
+// rollbackLSPRouterClientEntriesForClientWithKeepN). That rollback reads ONLY
+// the reserved entry name, so it removes a hub-owned router entry, leaves a
+// suffixed / legacy sibling untouched, and is a clean idempotent no-op for an
+// inherited entry (which lives below the adapter's write target and stays
+// live). This is exactly the disable path the checkbox already invokes — the
+// Off button changes no semantics, it only makes that same path reachable from
+// a shape where the checkbox is inert.
+export function lspCellState(input: LspCellStateInput): LspCellState {
+  const {
+    language,
+    presence,
+    entryName,
+    canEnableFromLegacy,
+    configState,
+    checkedOverride,
+    clientRouterDisabled,
+    busy,
+  } = input;
+
+  const transport = presence?.transport;
+  const hasPrimary = transport === "http" || transport === "relay" || transport === "stdio";
+  const entryDisabled = presence?.disabled === true;
+  // A shared-router entry is active only when the entry is not disabled and its
+  // URL (http) or relay_url (relay-stdio bridge) is the /lsp/<language>/mcp
+  // shape. Relay entries also need the endpoint command to be mcphub-owned,
+  // matching the backend's entryIsOwnedLSPRouterForLanguage relay branch.
+  const httpRouterShape = isLspRouterURL(presence?.endpoint ?? "", language);
+  const relayRouterShape =
+    isLspRouterURL(presence?.relay_url ?? "", language) && isMcphubRelayCommand(presence?.endpoint);
+  const hasRouterShape = httpRouterShape || relayRouterShape;
+  const backendOwnedRouterShape = hasRouterShape && entryName === lspRouterEntryName(language);
+  const hasRouterEntry = !entryDisabled && backendOwnedRouterShape;
+  const hasUnreplaceablePrimary =
+    hasPrimary &&
+    !backendOwnedRouterShape &&
+    // Preserve only backend-recognized legacy hub-loopback LSP entries as
+    // enable candidates: the row helper proves the endpoint/relay_url /mcp
+    // URL's port and source entry name against the workspace registry.
+    // Orphaned/pruned loopback entries, suffixed router-shaped entries, direct
+    // stdio, foreign router relays, and non-loopback remote HTTP entries are
+    // not safe to mutate from this checkbox.
+    !canEnableFromLegacy;
+  // An inherited hub entry is read-only — the hub never wrote the inherited
+  // source (an ~/.claude.json import or a lower config.json layer) and cannot
+  // roll it back. Mirrors ClientPresence.inherited → via-hub-inherited.
+  const inherited = presence?.inherited === true;
+  const configUsable = clientConfigUsable(configState);
+
+  const checked = checkedOverride ?? hasRouterEntry;
+  const optedOut =
+    checkedOverride === false || (checkedOverride === undefined && clientRouterDisabled);
+  // Disabled when an Apply is in flight, the entry is inherited (read-only), or
+  // there is nothing to act on — no existing router entry AND no usable config
+  // to enable one into. A present (non-inherited) router entry stays interactive
+  // so the operator can always disable it, mirroring the main matrix's
+  // always-interactive via-hub cell.
+  const checkboxDisabled =
+    busy || inherited || (!hasRouterEntry && (!configUsable || hasUnreplaceablePrimary));
+
+  // Precedence matters. The live-checkbox test comes BEFORE the config-usable
+  // test: an interactive checked checkbox already POSTs /api/lsp-router/disable
+  // on uncheck, so reporting "unavailable" for it would be false even when the
+  // client's config file is unreadable. Only a cell whose checkbox cannot
+  // express a disable falls through to the config-usable gate.
+  let optOutAffordance: LspOptOutAffordance;
+  if (optedOut) {
+    optOutAffordance = "already-off";
+  } else if (busy) {
+    optOutAffordance = "unavailable";
+  } else if (checked && !checkboxDisabled) {
+    optOutAffordance = "checkbox";
+  } else if (configUsable) {
+    optOutAffordance = "button";
+  } else {
+    optOutAffordance = "unavailable";
+  }
+
+  return {
+    transport,
+    hasPrimary,
+    inherited,
+    configUsable,
+    hasRouterEntry,
+    hasUnreplaceablePrimary,
+    checked,
+    checkboxDisabled,
+    optedOut,
+    optOutAffordance,
+    showOptOutButton: optOutAffordance === "button",
+  };
 }

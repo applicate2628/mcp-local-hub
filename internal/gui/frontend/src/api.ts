@@ -398,6 +398,23 @@ export async function postInitClientConfig(client: string): Promise<InitClientCo
   );
 }
 
+export interface LspRouterClientStatus {
+  client: string;
+  config_path: string;
+  disabled: boolean;
+  existing_entries?: string[];
+  missing_entries?: string[];
+}
+
+interface LspRouterStatusResponse {
+  clients?: LspRouterClientStatus[];
+}
+
+export async function listLspRouterClientStatuses(): Promise<LspRouterClientStatus[]> {
+  const body = await fetchOrThrow<LspRouterStatusResponse>("/api/lsp-router/status", "object");
+  return Array.isArray(body.clients) ? body.clients : [];
+}
+
 // ───────────────────────────────────────────────────────────────────
 // A3 PR-2 — guided symlink-consent write. POST /api/resolve-symlink-and-write
 // drives the Servers matrix "Resolve symlink → write to real target"

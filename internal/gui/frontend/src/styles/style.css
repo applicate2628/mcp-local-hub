@@ -2330,7 +2330,10 @@ section[data-section] button.btn-danger:not(:disabled):hover {
 .lsp-row-unregistered { color: var(--text-muted); font-size: 0.875rem; }
 .lsp-row-ambiguous { color: var(--warning-color); font-size: 0.85em; margin-left: 6px; }
 .lsp-row-ambiguous-hint { color: var(--warning-color); font-size: 0.9em; }
-.lsp-cell { vertical-align: middle; }
+.lsp-cell { vertical-align: middle; white-space: nowrap; }
+.lsp-router-toggle { display: inline-flex; align-items: center; margin-right: 0.25rem; vertical-align: middle; }
+.lsp-router-toggle input[type="checkbox"] { margin: 0; }
+.lsp-router-opt-out { margin: 0 0.1rem; padding: 0 0.35rem; font-size: 0.75rem; line-height: 1.4; }
 .lsp-cell-empty { color: #aaa; }
 .lsp-chip {
   display: inline-block; padding: 0 0.4rem; margin: 0 0.1rem;
@@ -2340,6 +2343,7 @@ section[data-section] button.btn-danger:not(:disabled):hover {
 .lsp-chip-via-hub { background: #c8e6c9; color: #1b5e20; }
 .lsp-chip-direct  { background: #fff9c4; color: #795548; }
 .lsp-chip-legacy  { background: #ffcdd2; color: #b71c1c; }
+.lsp-chip-off     { background: #e0e0e0; color: #424242; }
 /* projects-mechanism-badge is the NEUTRAL provenance label chip in the
    Projects detail-lens section headers ("workspace"/"project-config"/"group").
    It mirrors the .lsp-chip border/padding but is deliberately NOT a routing

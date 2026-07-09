@@ -40,6 +40,96 @@ export function isSerenaRouterURL(endpoint: string): boolean {
   }
 }
 
+// isLspRouterURL mirrors api.lspRouterURLLanguagePort's FULL shape test
+// (internal/api/lsp_client_router.go:lspRouterURLLanguagePort): scheme http, a
+// loopback host (localhost / 127.0.0.1 / [::1]), an EXPLICIT valid TCP port,
+// AND path exactly /lsp/<language>/mcp. This is a TIGHTER gate than the
+// port-agnostic isSerenaRouterURL above: the backend SHAPE parser rejects a
+// non-http scheme and a URL with no explicit port (which would default to :80
+// and could never be a live router binding), so the frontend classifier must
+// reject them too — otherwise a loopback-https or port-less URL would be
+// misrendered as a checked router cell. (The backend's port-AGNOSTIC ownership
+// note — entryIsOwnedLSPRouterForLanguage's `reservedName` branch — is a
+// SEPARATE concern about which entry name is hub-owned, not about URL-shape
+// validity; the shape parser above always requires a port for a URL to count
+// as LSP-shaped at all.)
+//
+// isHubLoopback carries the host check, including the JS-specific IPv6 "[::1]"
+// URL.hostname bracket form (Go's url.Hostname() strips the brackets to "::1",
+// but both denote the same loopback host and both parsers accept it); the
+// scheme + explicit-port checks are layered on top because isHubLoopback is
+// deliberately scheme- and port-agnostic (it also backs the port-aware via-hub
+// gate). loopbackEntryPort returns null unless an explicit numeric port > 0 is
+// present, matching the backend's rejection of a port-less loopback URL. A
+// LEGACY per-workspace entry (path /mcp — the /lsp/<lang>/mcp router did not
+// own it) therefore does NOT match, so the LSP toggle renders such an entry
+// UNCHECKED instead of the naive transport==="http" → checked it did before.
+// The language segment is normally a plain identifier (go, rust, vscode-css,
+// ...), but hand-edited percent-encoded equivalents are decoded below to mirror
+// Go url.Parse's decoded Path field.
+export function isLspRouterURL(endpoint: string, language: string): boolean {
+  if (!isHubLoopback(endpoint)) return false;
+  // Explicit valid port required (mirrors lspRouterURLLanguagePort). A
+  // port-less loopback URL yields null here and is rejected.
+  if (loopbackEntryPort(endpoint) === null) return false;
+  try {
+    const u = new URL(endpoint);
+    // Scheme must be http (JS URL.protocol carries the trailing colon) — a
+    // loopback https URL is rejected, matching parsed.Scheme == "http".
+    if (u.protocol !== "http:") return false;
+    // Percent-decode the pathname before comparing. JS URL.pathname keeps
+    // %XX escapes verbatim (/lsp/%67o/mcp), but Go's url.Parse decodes
+    // parsed.Path (/lsp/go/mcp), so a percent-encoded-but-equivalent router
+    // URL must classify the same on both sides. A malformed escape (e.g. a
+    // lone '%') makes decodeURIComponent throw URIError → treat as non-match.
+    let decodedPath: string;
+    try {
+      decodedPath = decodeURIComponent(u.pathname);
+    } catch {
+      return false;
+    }
+    // ACCEPTED out-of-scope divergences from the Go backend at this compare:
+    //   (1) non-canonical IPv6 loopback (e.g. [0:0:0:0:0:0:0:1]) — JS's URL
+    //       parser compresses it to [::1] and accepts; Go's url.Hostname()
+    //       does not compress and would reject it; and
+    //   (2) an explicit :80 port — JS drops the default http port and this
+    //       frontend rejects it before this compare, while Go preserves the
+    //       explicit port text and accepts it.
+    // Neither can occur in practice: the hub only ever WRITES canonical
+    // loopback URLs with a port >= 1024, and enable/ensure self-heals owned
+    // entries back to canonical form, so a divergent URL is never a live
+    // owned router binding this classifier needs to agree with.
+    return decodedPath === `/lsp/${language}/mcp`;
+  } catch {
+    return false;
+  }
+}
+
+// clientConfigUsable is the SINGLE owner of the "is this client's config file
+// present and usable for writing entries" predicate. perClientRouting's
+// second-pass gate below CALLS it (not a parallel `state === "ok"` literal),
+// and the LSP router enable/disable toggle in Servers.tsx (LspCellView) calls
+// it too — so the main Servers matrix and the LSP toggle share one derivation
+// and can never drift. Only "ok" yields a usable config → an interactive
+// ("available") matrix cell / an enabled LSP toggle; every "missing*", "error",
+// and "error-symlink" state (and an absent key → undefined) means no usable
+// config, so a write-driving toggle must be disabled, matching how the matrix
+// disables not-installed / config-error cells.
+export function clientConfigUsable(state: ClientConfigState | undefined): boolean {
+  return state === "ok";
+}
+
+// isMcphubRelayCommand mirrors api.isCurrentMcphubRelayBinary for LSP-router
+// relay ownership: only the current mcphub/mcphub.exe basenames are removable
+// by the per-client disable path. Legacy mcp/mcp.exe can forward to a router
+// URL, but the backend refuses to mutate those relay entries.
+export function isMcphubRelayCommand(command: string | undefined): boolean {
+  if (!command) return false;
+  const normalized = command.replaceAll("\\", "/");
+  const base = normalized.split("/").pop()?.toLowerCase() ?? "";
+  return base === "mcphub" || base === "mcphub.exe";
+}
+
 // loopbackEntryPort parses the TCP port out of a hub-shaped loopback URL.
 // Returns the port number only when the endpoint isHubLoopback AND carries
 // an explicit numeric port; otherwise null (a loopback URL with no explicit
@@ -56,6 +146,38 @@ export function loopbackEntryPort(endpoint: string): number | null {
   } catch {
     return null;
   }
+}
+
+// lspLegacyURLPort mirrors api.lspLegacyURLPort: a backend-recognized legacy
+// LSP entry is an http loopback URL with an explicit valid port and path /mcp.
+// The caller still has to prove the port/name pair came from the workspace
+// registry before offering the LSP router enable toggle.
+export function lspLegacyURLPort(endpoint: string): number | null {
+  const port = loopbackEntryPort(endpoint);
+  if (port === null) return null;
+  try {
+    const u = new URL(endpoint);
+    return u.protocol === "http:" && u.pathname === "/mcp" ? port : null;
+  } catch {
+    return null;
+  }
+}
+
+// entryPointsAtLegacyLSPPort mirrors api.entryPointsAtLegacyLSPPort for
+// replaceability, not ownership: backend ensure/remove checks both URL and
+// RelayURL for a registry-backed legacy /mcp port and does not require a relay
+// command basename here. Relay command ownership remains in isMcphubRelayCommand
+// for shared-router /lsp/<lang>/mcp entries.
+export function entryPointsAtLegacyLSPPort(
+  entry: Pick<ClientPresence, "endpoint" | "relay_url"> | undefined,
+  ports: ReadonlySet<number> | undefined,
+): boolean {
+  if (!entry || !ports || ports.size === 0) return false;
+  for (const raw of [entry.endpoint, entry.relay_url]) {
+    const port = lspLegacyURLPort(raw ?? "");
+    if (port !== null && ports.has(port)) return true;
+  }
+  return false;
 }
 
 // loopbackPortMatchesDaemon reports whether a hub-shaped loopback endpoint
@@ -536,7 +658,8 @@ export function perClientRouting(
   }
   // Second pass: fill cells for known clients NOT in client_presence,
   // using client_config_presence as the source of truth. If the client
-  // config file exists ("ok") AND the server is migratable, the cell
+  // config is usable (clientConfigUsable — the SINGLE-owner presence gate,
+  // shared with the LSP router toggle) AND the server is migratable, the cell
   // is "available" — operator can migrate this server into that client.
   // Otherwise the cell is "not-installed".
   //
@@ -554,7 +677,7 @@ export function perClientRouting(
   for (const client of routingClassificationClients(clientConfigPresence)) {
     if (client in routing) continue;
     const state = clientConfigPresence[client];
-    if (state === "ok" && canMigrate && isScannable(client)) {
+    if (clientConfigUsable(state) && canMigrate && isScannable(client)) {
       // An UNSCANNABLE client with an "ok" config does NOT reach here — it
       // falls through to "not-installed" below (a disabled cell). Even when an
       // operator force-shows that column via the Clients popover pref, the cell

@@ -124,15 +124,55 @@ func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClient
 	if err != nil {
 		return report, err
 	}
-	clientMap := opts.Clients
-	if clientMap == nil {
-		clientMap = clients.AllClients()
-	}
 	keepN := opts.BackupKeepN
 	if keepN == 0 {
 		keepN = a.EffectiveBackupKeepN()
 	}
+	return a.ensureLSPRouterClientEntriesWithLoaded(opts, languages, port, regEntries, portsByLanguage, disabledClients, enabledClients, keepN)
+}
+
+func (a *API) ensureLSPRouterClientEntriesWithState(
+	opts LSPClientRouterOpts,
+	disabledClients map[string]bool,
+	enabledClients map[string]bool,
+	keepN int,
+) (*LSPClientRouterReport, error) {
+	report := &LSPClientRouterReport{}
+	languages, err := loadLSPRouterLanguages(opts.Languages)
+	if err != nil {
+		return report, err
+	}
+	port, err := resolvedLSPRouterGUIPort(opts.GUIPort)
+	if err != nil {
+		return report, err
+	}
+	regEntries, err := loadLSPRouterRegistryEntries()
+	if err != nil {
+		return report, err
+	}
+	portsByLanguage := lspRegistryPortsByLanguage(regEntries)
+	return a.ensureLSPRouterClientEntriesWithLoaded(opts, languages, port, regEntries, portsByLanguage, disabledClients, enabledClients, keepN)
+}
+
+func (a *API) ensureLSPRouterClientEntriesWithLoaded(
+	opts LSPClientRouterOpts,
+	languages []string,
+	port int,
+	regEntries []WorkspaceEntry,
+	portsByLanguage map[string]map[int]bool,
+	disabledClients map[string]bool,
+	enabledClients map[string]bool,
+	keepN int,
+) (*LSPClientRouterReport, error) {
+	report := &LSPClientRouterReport{}
 	forceClientName := strings.TrimSpace(opts.ForceClientName)
+	if keepN == 0 {
+		keepN = registryDefaultKeepN()
+	}
+	clientMap := opts.Clients
+	if clientMap == nil {
+		clientMap = clients.AllClients()
+	}
 
 	for _, clientName := range sortedLSPClientNames(clientMap) {
 		adapter := clientMap[clientName]
@@ -390,6 +430,20 @@ func (a *API) RollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClie
 // per-workspace entries and without touching sibling clients.
 func (a *API) RollbackLSPRouterClientEntriesForClient(clientName string, opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
 	report := &LSPClientRouterReport{}
+	keepN := opts.BackupKeepN
+	if keepN == 0 {
+		keepN = a.EffectiveBackupKeepN()
+	}
+	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	if err != nil {
+		return report, err
+	}
+	opts.GUIPort = port
+	return a.rollbackLSPRouterClientEntriesForClientWithKeepN(clientName, opts, keepN)
+}
+
+func (a *API) rollbackLSPRouterClientEntriesForClientWithKeepN(clientName string, opts LSPClientRouterOpts, keepN int) (*LSPClientRouterReport, error) {
+	report := &LSPClientRouterReport{}
 	clientName = strings.TrimSpace(clientName)
 	if clientName == "" {
 		return report, fmt.Errorf("client name is required")
@@ -398,11 +452,10 @@ func (a *API) RollbackLSPRouterClientEntriesForClient(clientName string, opts LS
 	if err != nil {
 		return report, err
 	}
-	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	port, err := resolvedLSPRouterGUIPort(opts.GUIPort)
 	if err != nil {
 		return report, err
 	}
-	opts.GUIPort = port
 	clientMap := opts.Clients
 	if clientMap == nil {
 		clientMap = clients.AllClients()
@@ -414,9 +467,8 @@ func (a *API) RollbackLSPRouterClientEntriesForClient(clientName string, opts LS
 	if adapter == nil || !adapter.Exists() {
 		return report, nil
 	}
-	keepN := opts.BackupKeepN
 	if keepN == 0 {
-		keepN = a.EffectiveBackupKeepN()
+		keepN = registryDefaultKeepN()
 	}
 
 	ops := make([]lspClientRouterOp, 0, len(languages))
@@ -524,6 +576,10 @@ func (a *API) lspRouterGUIPort(port int) (int, error) {
 		}
 		port = n
 	}
+	return resolvedLSPRouterGUIPort(port)
+}
+
+func resolvedLSPRouterGUIPort(port int) (int, error) {
 	if port <= 0 || port > 65535 {
 		return 0, fmt.Errorf("GUI port %d is outside 1..65535", port)
 	}
