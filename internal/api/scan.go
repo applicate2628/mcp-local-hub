@@ -1033,10 +1033,25 @@ func scanClaude(entries map[string]*ScanEntry, path string) error {
 
 func shapeClaudeEntry(raw map[string]any) ClientEntry {
 	if url, ok := raw["url"].(string); ok {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	cmd, _ := raw["command"].(string)
-	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	return scanClientEntry("stdio", cmd, raw)
+}
+
+func scanClientEntry(transport, endpoint string, raw map[string]any) ClientEntry {
+	return ClientEntry{
+		Transport: transport,
+		Endpoint:  endpoint,
+		Raw:       raw,
+		Disabled:  rawClientEntryDisabled(raw),
+	}
+}
+
+func scanRelayClientEntry(endpoint, relayURL string, raw map[string]any) ClientEntry {
+	entry := scanClientEntry("relay", endpoint, raw)
+	entry.RelayURL = relayURL
+	return entry
 }
 
 func scanCodex(entries map[string]*ScanEntry, path string) error {
@@ -1066,10 +1081,10 @@ func scanCodex(entries map[string]*ScanEntry, path string) error {
 
 func shapeCodexEntry(raw map[string]any) ClientEntry {
 	if url, ok := raw["url"].(string); ok {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	cmd, _ := raw["command"].(string)
-	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	return scanClientEntry("stdio", cmd, raw)
 }
 
 func scanCursor(entries map[string]*ScanEntry, path string) error {
@@ -1099,10 +1114,10 @@ func scanCursor(entries map[string]*ScanEntry, path string) error {
 
 func shapeCursorEntry(raw map[string]any) ClientEntry {
 	if url, ok := raw["url"].(string); ok {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	cmd, _ := raw["command"].(string)
-	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	return scanClientEntry("stdio", cmd, raw)
 }
 
 func scanVSCode(entries map[string]*ScanEntry, path string) error {
@@ -1135,10 +1150,10 @@ func scanVSCode(entries map[string]*ScanEntry, path string) error {
 
 func shapeVSCodeEntry(raw map[string]any) ClientEntry {
 	if url, ok := raw["url"].(string); ok {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	cmd, _ := raw["command"].(string)
-	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	return scanClientEntry("stdio", cmd, raw)
 }
 
 func scanGemini(entries map[string]*ScanEntry, path string) error {
@@ -1168,13 +1183,13 @@ func scanGemini(entries map[string]*ScanEntry, path string) error {
 
 func shapeGeminiEntry(raw map[string]any) ClientEntry {
 	if url, ok := raw["url"].(string); ok {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	if url, ok := raw["httpUrl"].(string); ok {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	cmd, _ := raw["command"].(string)
-	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	return scanClientEntry("stdio", cmd, raw)
 }
 
 func scanQwen(entries map[string]*ScanEntry, path string) error {
@@ -1204,13 +1219,13 @@ func scanQwen(entries map[string]*ScanEntry, path string) error {
 
 func shapeQwenEntry(raw map[string]any) ClientEntry {
 	if url, ok := raw["httpUrl"].(string); ok {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	if url, ok := raw["url"].(string); ok {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	cmd, _ := raw["command"].(string)
-	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	return scanClientEntry("stdio", cmd, raw)
 }
 
 func scanAntigravity(entries map[string]*ScanEntry, path string) error {
@@ -1240,7 +1255,7 @@ func scanAntigravity(entries map[string]*ScanEntry, path string) error {
 
 func shapeAntigravityEntry(raw map[string]any) ClientEntry {
 	if url, ok := raw["serverUrl"].(string); ok {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	// Detect our own relay shape: command is mcphub.exe (or legacy mcp.exe)
 	// with args[0]=="relay". Accepting both names because early installs
@@ -1248,12 +1263,12 @@ func shapeAntigravityEntry(raw map[string]any) ClientEntry {
 	if cmd, ok := raw["command"].(string); ok {
 		if args, ok := raw["args"].([]any); ok && len(args) > 0 {
 			if first, _ := args[0].(string); first == "relay" && isOurRelayBinary(cmd) {
-				return ClientEntry{Transport: "relay", Endpoint: cmd, RelayURL: relayURLFromArgs(args), Raw: raw}
+				return scanRelayClientEntry(cmd, relayURLFromArgs(args), raw)
 			}
 		}
-		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+		return scanClientEntry("stdio", cmd, raw)
 	}
-	return ClientEntry{Transport: "absent", Raw: raw}
+	return scanClientEntry("absent", "", raw)
 }
 
 func relayURLFromArgs(args []any) string {
@@ -1482,19 +1497,19 @@ func scanOpenCode(entries map[string]*ScanEntry, path string) error {
 func shapeOpenCodeEntry(raw map[string]any) ClientEntry {
 	if enabled, present := raw["enabled"]; present {
 		if b, ok := enabled.(bool); ok && !b {
-			return ClientEntry{Transport: "absent", Raw: raw}
+			return scanClientEntry("absent", "", raw)
 		}
 	}
 	if url, ok := raw["url"].(string); ok && url != "" {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	if cmd, tail := openCodeCommandArray(raw); cmd != "" {
-		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: openCodeRawWithNormalizedArgs(raw, tail)}
+		return scanClientEntry("stdio", cmd, openCodeRawWithNormalizedArgs(raw, tail))
 	}
 	if cmd, ok := raw["command"].(string); ok && cmd != "" {
-		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+		return scanClientEntry("stdio", cmd, raw)
 	}
-	return ClientEntry{Transport: "absent", Raw: raw}
+	return scanClientEntry("absent", "", raw)
 }
 
 func openCodeRawWithNormalizedArgs(raw map[string]any, cmdTail []string) map[string]any {
@@ -1622,24 +1637,24 @@ func scanMimoCode(entries map[string]*ScanEntry, path string) error {
 func shapeMimoCodeEntry(raw map[string]any) ClientEntry {
 	if enabled, present := raw["enabled"]; present {
 		if b, ok := enabled.(bool); ok && !b {
-			return ClientEntry{Transport: "absent", Raw: raw}
+			return scanClientEntry("absent", "", raw)
 		}
 	}
 	if url, ok := raw["url"].(string); ok && url != "" {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	// Local stdio: MiMoCode stores `command` as an ARRAY. Surface the executable
 	// (first element) as the endpoint; the normalized argv goes in Raw so the LSP
 	// args-reverse-lookup sees the `--lsp`/`mcp` tokens the command array carries.
 	if cmd, tail := mimoCodeCommandArray(raw); cmd != "" {
-		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: mimoCodeRawWithNormalizedArgs(raw, tail)}
+		return scanClientEntry("stdio", cmd, mimoCodeRawWithNormalizedArgs(raw, tail))
 	}
 	// Defensive: a string command (non-canonical but harmless) still classifies
 	// as stdio with that command as the endpoint.
 	if cmd, ok := raw["command"].(string); ok && cmd != "" {
-		return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+		return scanClientEntry("stdio", cmd, raw)
 	}
-	return ClientEntry{Transport: "absent", Raw: raw}
+	return scanClientEntry("absent", "", raw)
 }
 
 // mimoCodeRawWithNormalizedArgs returns a shallow copy of a MiMoCode local
@@ -1754,10 +1769,10 @@ func scanOpenClaw(entries map[string]*ScanEntry, path string) error {
 // recognises a loopback `url` as the hub binding (IsHubHTTPURL).
 func shapeURLOrCommandEntry(raw map[string]any) ClientEntry {
 	if url, ok := raw["url"].(string); ok {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	cmd, _ := raw["command"].(string)
-	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	return scanClientEntry("stdio", cmd, raw)
 }
 
 // shapeWindsurfEntry classifies a Windsurf entry. Windsurf names the
@@ -1766,13 +1781,13 @@ func shapeURLOrCommandEntry(raw map[string]any) ClientEntry {
 // classify() as the hub binding.
 func shapeWindsurfEntry(raw map[string]any) ClientEntry {
 	if url, ok := raw["serverUrl"].(string); ok {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	if url, ok := raw["url"].(string); ok {
-		return ClientEntry{Transport: "http", Endpoint: url, Raw: raw}
+		return scanClientEntry("http", url, raw)
 	}
 	cmd, _ := raw["command"].(string)
-	return ClientEntry{Transport: "stdio", Endpoint: cmd, Raw: raw}
+	return scanClientEntry("stdio", cmd, raw)
 }
 
 // scanShadowWarnDir resolves the disk-fallback dir the embed-first scan path

@@ -204,6 +204,9 @@ func warnUnmanagedStdioFromScan(cmd *cobra.Command, a *api.API) {
 	if len(names) == 0 {
 		return
 	}
+	for i := range names {
+		names[i] = stripTerminalControls(names[i])
+	}
 	fmt.Fprintf(
 		cmd.ErrOrStderr(),
 		"⚠ %d unmanaged stdio MCP server(s) detected (configured directly in a client, bypassing the hub): %s\n  Adopt them via 'mcphub adopt' or the GUI Discovery screen to route them through the hub and stop orphan-process accumulation.\n",
@@ -224,15 +227,20 @@ func statusDisplayName(r api.DaemonStatus) string {
 	return stripTerminalControls(r.TaskName)
 }
 
-// stripTerminalControls removes terminal control characters from text that is
-// about to be rendered in the human-readable status tables. DisplayName can
-// include a workspace basename, and POSIX basenames may legally contain bytes
-// such as newlines, ESC, OSC, or BEL; printing those bytes verbatim would allow
-// a malicious workspace name to spoof rows or trigger terminal side effects.
-// JSON output remains unchanged because it is emitted through json.Encoder.
+// stripTerminalControls removes terminal control AND bidi/format characters from
+// text about to be rendered in the human-readable status tables / warnings.
+// DisplayName and scan-derived server names can include a workspace basename or a
+// client-config key, and POSIX basenames / config keys may legally contain bytes
+// such as newlines, ESC, OSC, or BEL (CONTROL, category Cc) — printing those
+// verbatim would let a malicious name spoof rows or trigger terminal side effects.
+// It ALSO strips Unicode FORMAT / separator runes (Cf: bidi overrides U+202E/U+202D,
+// isolates U+2066-2069, zero-width ZWSP; Zl/Zp line/paragraph separators) which
+// IsControl (Cc only) misses but which visually reorder or hide the rest of a line
+// in bidi-rendering terminals (commission fable P3). JSON output is unchanged
+// (emitted through json.Encoder).
 func stripTerminalControls(s string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) {
 			return -1
 		}
 		return r

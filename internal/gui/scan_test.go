@@ -144,6 +144,7 @@ func TestSanitizeScanResult_StripsLegacyConflictRaw(t *testing.T) {
 			"codex-cli": {
 				Transport: "stdio",
 				Endpoint:  "mcp-language-server",
+				Disabled:  true,
 				Raw: map[string]any{
 					"command": "mcp-language-server",
 					"env":     map[string]any{"SECRET_TOKEN": "leak-me"},
@@ -165,6 +166,9 @@ func TestSanitizeScanResult_StripsLegacyConflictRaw(t *testing.T) {
 	// The non-Raw fields of the LegacyConflict entry survive (only Raw nil'd).
 	if out.Entries[0].LegacyConflict["codex-cli"].Transport != "stdio" {
 		t.Errorf("LegacyConflict entry transport corrupted: %#v", out.Entries[0].LegacyConflict["codex-cli"])
+	}
+	if !out.Entries[0].LegacyConflict["codex-cli"].Disabled {
+		t.Errorf("LegacyConflict entry disabled flag was stripped: %#v", out.Entries[0].LegacyConflict["codex-cli"])
 	}
 	// Input must NOT be mutated (sanitize deep-copies).
 	if in.Entries[0].LegacyConflict["codex-cli"].Raw == nil {

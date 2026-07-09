@@ -185,11 +185,10 @@ func TestScanMimoCode_ImportLSPHubURL_ClassifiedInherited(t *testing.T) {
 	}
 }
 
-// TestClientEntry_InheritedJSON_OmitEmpty is the wire-shape verification (per
-// AGENTS.md): the additive Inherited field is absent on the wire when false
-// (so every non-mimocode client's bytes are byte-identical) and present+true
-// when set.
-func TestClientEntry_InheritedJSON_OmitEmpty(t *testing.T) {
+// TestClientEntry_OptionalJSONFieldsOmitEmpty is the wire-shape verification
+// (per AGENTS.md): additive bool fields are absent on the wire when false
+// (so existing clients' bytes are byte-identical) and present+true when set.
+func TestClientEntry_OptionalJSONFieldsOmitEmpty(t *testing.T) {
 	falseBytes, err := json.Marshal(ClientEntry{Transport: "http", Endpoint: "http://x/mcp"})
 	if err != nil {
 		t.Fatal(err)
@@ -197,11 +196,21 @@ func TestClientEntry_InheritedJSON_OmitEmpty(t *testing.T) {
 	if got := string(falseBytes); strings.Contains(got, "inherited") {
 		t.Errorf("Inherited:false must be OMITTED from the wire (omitempty), got %s", got)
 	}
+	if got := string(falseBytes); strings.Contains(got, "disabled") {
+		t.Errorf("Disabled:false must be OMITTED from the wire (omitempty), got %s", got)
+	}
 	trueBytes, err := json.Marshal(ClientEntry{Transport: "http", Endpoint: "http://x/mcp", Inherited: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := string(trueBytes); !strings.Contains(got, `"inherited":true`) {
 		t.Errorf("Inherited:true must be PRESENT on the wire, got %s", got)
+	}
+	disabledBytes, err := json.Marshal(ClientEntry{Transport: "stdio", Endpoint: "npx", Disabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(disabledBytes); !strings.Contains(got, `"disabled":true`) {
+		t.Errorf("Disabled:true must be PRESENT on the wire, got %s", got)
 	}
 }

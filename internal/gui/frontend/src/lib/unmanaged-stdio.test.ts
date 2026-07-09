@@ -26,6 +26,24 @@ describe("unmanagedStdioCount", () => {
       want: 1,
     },
     {
+      name: "disabled unknown stdio is not unmanaged drift",
+      entry: {
+        name: "parked",
+        status: "unknown",
+        client_presence: { "codex-cli": { transport: "stdio", endpoint: "npx", disabled: true } },
+      },
+      want: 0,
+    },
+    {
+      name: "enabled unknown stdio remains unmanaged drift",
+      entry: {
+        name: "active",
+        status: "unknown",
+        client_presence: { "codex-cli": { transport: "stdio", endpoint: "npx", disabled: false } },
+      },
+      want: 1,
+    },
+    {
       name: "via hub is managed",
       entry: {
         name: "memory",

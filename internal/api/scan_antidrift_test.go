@@ -35,6 +35,48 @@ func TestUnmanagedStdioCount(t *testing.T) {
 			want: 1,
 		},
 		{
+			name: "disabled unknown stdio is not unmanaged drift",
+			entry: ScanEntry{
+				Name:   "parked-cursor",
+				Status: "unknown",
+				ClientPresence: map[string]ClientEntry{
+					"cursor": shapeCursorEntry(map[string]any{
+						"command":  "npx",
+						"disabled": true,
+					}),
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "enabled false unknown stdio is not unmanaged drift",
+			entry: ScanEntry{
+				Name:   "parked-codex",
+				Status: "unknown",
+				ClientPresence: map[string]ClientEntry{
+					"codex-cli": shapeCodexEntry(map[string]any{
+						"command": "npx",
+						"enabled": false,
+					}),
+				},
+			},
+			want: 0,
+		},
+		{
+			name: "enabled true unknown stdio remains unmanaged drift",
+			entry: ScanEntry{
+				Name:   "active-codex",
+				Status: "unknown",
+				ClientPresence: map[string]ClientEntry{
+					"codex-cli": shapeCodexEntry(map[string]any{
+						"command": "npx",
+						"enabled": true,
+					}),
+				},
+			},
+			want: 1,
+		},
+		{
 			name: "via hub is managed",
 			entry: ScanEntry{
 				Name:   "memory",

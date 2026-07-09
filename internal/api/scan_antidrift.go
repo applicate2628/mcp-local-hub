@@ -32,7 +32,7 @@ func isUnmanagedStdio(entry ScanEntry) bool {
 		return false
 	}
 	for _, presence := range entry.ClientPresence {
-		if presence.Transport == "stdio" {
+		if presence.Transport == "stdio" && !presence.Disabled {
 			return true
 		}
 	}

@@ -192,7 +192,7 @@ func TestStatusCLI_WarnsForUnmanagedStdioScanEntries(t *testing.T) {
 				},
 			},
 			{
-				Name:   "alpha",
+				Name:   "alpha‮​\n\x1b]0;mcphub-poc-title\a",
 				Status: "unknown",
 				ClientPresence: map[string]api.ClientEntry{
 					"claude-code": {Transport: "stdio", Endpoint: "npx"},
@@ -222,13 +222,24 @@ func TestStatusCLI_WarnsForUnmanagedStdioScanEntries(t *testing.T) {
 	errOut := stderr.String()
 	for _, want := range []string{
 		"2 unmanaged stdio MCP server(s) detected",
-		"alpha, zeta",
+		"alpha]0;mcphub-poc-title, zeta",
 		"mcphub adopt",
 		"GUI Discovery screen",
 	} {
 		if !strings.Contains(errOut, want) {
 			t.Fatalf("stderr missing %q:\n%s", want, errOut)
 		}
+	}
+	if strings.ContainsAny(errOut, "\r\t\a\x1b") {
+		t.Fatalf("stderr warning emitted terminal controls: %q", errOut)
+	}
+	// Commission fable P3: bidi/format runes (U+202E override, U+200B ZWSP) must ALSO be
+	// stripped — IsControl (Cc only) misses them but they visually reorder/hide the line.
+	if strings.ContainsRune(errOut, '‮') || strings.ContainsRune(errOut, '​') {
+		t.Fatalf("stderr warning emitted bidi/format runes (visual spoof): %q", errOut)
+	}
+	if got, want := strings.Count(errOut, "\n"), 2; got != want {
+		t.Fatalf("stderr warning line count = %d, want %d; raw output: %q", got, want, errOut)
 	}
 }
 
