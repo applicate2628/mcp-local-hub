@@ -1,9 +1,10 @@
 # status — adopt npx-stdio orphans into the hub (A2)
 
 Template: full-delivery (security-sensitive). Orchestrator: main conversation.
-State: PARTIALLY DELIVERED — adopt CLI/API + GUI surface + reaper (PR5) all
-SHIPPED + DEPLOYED; remaining = anti-drift GUI surface + phase-2 de-adopt (+ two
-tracked reaper-hardening bugs).
+State: PARTIALLY DELIVERED — adopt CLI/API + GUI surface + reaper (PR5) + anti-drift
+"unmanaged detected" GUI signal (#523) + both reaper-hardening bugs (#521/#522) all
+SHIPPED + DEPLOYED; remaining = phase-2 de-adopt (separate item
+`2026-07-09-deadopt-hub-to-native`, blocked) + D P2a/P2b GUI.
 
 ## Delivered (shipped to master + live-deployed)
 - **Auto-reaper hardening (A2 PR5, #520 → master c53d874a, deployed +
@@ -49,24 +50,27 @@ tracked reaper-hardening bugs).
 ## Remaining
 1. **PR5 — auto-reaper hardening — DELIVERED (#520 → master c53d874a, deployed +
    live-verified 2026-07-08).** See the Delivered section above for the full scope +
-   review record. **Two reaper-hardening bugs tracked as follow-ups (NOT regressions
-   of #520 — pre-existing gaps #520 improved around):**
-   - `work-items/bugs/2026-07-08-cleanup-ancestor-walk-fails-open-on-uncertainty.md`
+   review record. **Two reaper-hardening bugs — BOTH NOW FIXED + deployed (were tracked
+   as follow-ups; NOT regressions of #520 — pre-existing gaps #520 improved around):**
+   - **FIXED (#521, `509afa31`, deployed + live-verified 2026-07-08):**
+     `work-items/bugs/2026-07-08-cleanup-ancestor-walk-fails-open-on-uncertainty.md`
      (**P0** kill-authority): the 16-deep ancestor walk fails OPEN on classification
      uncertainty — byPID-miss can't tell a dead-parent orphan from a dropped-live-row
      (needs a `process.IsPidAlive` parent-probe with an injectable seam — a blunt spare
      would inert the reaper since byPID-miss is ALSO the normal real-orphan signature),
      and depth-16 exhaustion falls through to orphan (spare-on-exhaustion). One coherent
      3-state-verdict walk refactor; also folds the CLI aggressive `ExpectPIDs==nil` gap.
-   - `work-items/bugs/2026-07-08-aggressive-cleanup-token-omits-started-at.md` (low):
+   - **FIXED (#522, `669951e3`, deployed + live-verified 2026-07-08):**
+     `work-items/bugs/2026-07-08-aggressive-cleanup-token-omits-started-at.md` (low):
      AggressiveCleanup's confirm token hashes {pid, basename, match_source} not
      started_at + kill is PID-bound → shares the default reaper's (now-closed) PID-reuse
      class; converge onto `filterToExpectedIdentities` server-side.
    - Still deferred per H5: per-candidate SupervisorEventLog audit, supervisor-state PID
      exclusion, ticker apply:false policy, knownClientLauncher 8→45, project-scoped-config
      enum (R1), PEB step-5.
-2. **Anti-drift "unmanaged detected" surface** (GUI) — surface bypass servers
-   so the operator can adopt them; reduces reaper need.
+2. **Anti-drift "unmanaged detected" surface** (GUI) — **LANDED 2026-07-08 (PR #523,
+   master `f7eaa1c8`, deployed).** Surfaces bypass servers so the operator can adopt
+   them; reduces reaper need.
 3. **Phase-2 de-adopt / revert-to-native** (hub→native): interim = `mcphub
    uninstall --server X` + restore client backup.
 4. **fable Area-3 follow-up** (#516 review) — **DONE 2026-07-08 (PR #519, master

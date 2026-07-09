@@ -1,10 +1,10 @@
 # Work items index
 
 > Canonical open-bug truth: **`bugs/TRIAGE-2026-07-09.md`** (HEAD-reconciled against master
-> `63b6a008`, then amended for #525 at master `7898c148`). Individual bug-doc frontmatter
-> used to lag reality; the top-level bug registry has now been normalized. Trust the TRIAGE +
-> the "Truly open" list below, NOT a raw count of files in `bugs/` (32 files = 1 open +
-> 26 fixed + 1 duplicate + 1 wontfix + 3 triage records).
+> `63b6a008`, amended for #525 at master `7898c148`, then amended for #526 at master
+> `b5e6f6f3`). Individual bug-doc frontmatter used to lag reality; the top-level bug registry
+> has now been normalized. Trust the TRIAGE + the "Truly open" list below, NOT a raw count of
+> files in `bugs/` (33 files = 1 open + 27 fixed + 1 duplicate + 1 wontfix + 3 triage records).
 
 ## Active (work-items/active/)
 
