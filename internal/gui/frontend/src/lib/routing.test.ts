@@ -3,6 +3,7 @@ import {
   isHubLoopback,
   isSerenaRouterURL,
   isLspRouterURL,
+  isMcphubRelayCommand,
   clientConfigUsable,
   loopbackEntryPort,
   loopbackPortMatchesDaemon,
@@ -142,6 +143,24 @@ describe("clientConfigUsable", () => {
     expect(clientConfigUsable("error")).toBe(false);
     expect(clientConfigUsable("error-symlink")).toBe(false);
     expect(clientConfigUsable(undefined)).toBe(false);
+  });
+});
+
+describe("isMcphubRelayCommand", () => {
+  it("accepts current and legacy mcphub relay basenames", () => {
+    expect(isMcphubRelayCommand("mcphub")).toBe(true);
+    expect(isMcphubRelayCommand("mcphub.exe")).toBe(true);
+    expect(isMcphubRelayCommand("mcp")).toBe(true);
+    expect(isMcphubRelayCommand("mcp.exe")).toBe(true);
+    expect(isMcphubRelayCommand("C:\\Users\\u\\.local\\bin\\mcphub.exe")).toBe(true);
+    expect(isMcphubRelayCommand("/usr/local/bin/mcp")).toBe(true);
+  });
+
+  it("rejects foreign relay executables", () => {
+    expect(isMcphubRelayCommand("node")).toBe(false);
+    expect(isMcphubRelayCommand("C:\\tools\\relay.exe")).toBe(false);
+    expect(isMcphubRelayCommand("")).toBe(false);
+    expect(isMcphubRelayCommand(undefined)).toBe(false);
   });
 });
 

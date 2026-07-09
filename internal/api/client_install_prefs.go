@@ -71,11 +71,11 @@ func (a *API) DefaultInstallClientNamesOverrideIn(path string) ([]string, error)
 	if err != nil {
 		return nil, err
 	}
-	csv, ok := raw[defaultInstallClientsKey]
+	_, ok := raw[defaultInstallClientsKey]
 	if !ok {
 		return nil, nil
 	}
-	names := sanitizeClientNames(splitClientCSV(csv))
+	names := defaultInstallClientNamesOverrideFromRaw(raw)
 	if len(names) == 0 {
 		// Key present but no valid name survived (all blank/unknown) —
 		// treat as "no override" so the caller falls back to the
@@ -116,15 +116,13 @@ func (a *API) ClientInstallEnabledSet() (map[string]bool, error) {
 
 // ClientInstallEnabledSetIn is the tempdir-capable form.
 func (a *API) ClientInstallEnabledSetIn(path string) (map[string]bool, error) {
-	names, err := a.DefaultInstallClientNamesEffectiveIn(path)
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+	raw, err := readRawSettingsMap(path)
 	if err != nil {
 		return nil, err
 	}
-	enabled := make(map[string]bool, len(names))
-	for _, name := range names {
-		enabled[name] = true
-	}
-	return enabled, nil
+	return clientInstallEnabledSetFromRaw(raw), nil
 }
 
 // LSPRouterDisabledClientSet returns the explicit per-client LSP-router
@@ -145,12 +143,36 @@ func (a *API) LSPRouterDisabledClientSetIn(path string) (map[string]bool, error)
 	if err != nil {
 		return nil, err
 	}
+	return lspRouterDisabledClientSetFromRaw(raw), nil
+}
+
+func defaultInstallClientNamesOverrideFromRaw(raw map[string]string) []string {
+	csv, ok := raw[defaultInstallClientsKey]
+	if !ok {
+		return nil
+	}
+	return sanitizeClientNames(splitClientCSV(csv))
+}
+
+func clientInstallEnabledSetFromRaw(raw map[string]string) map[string]bool {
+	names := defaultInstallClientNamesOverrideFromRaw(raw)
+	if len(names) == 0 {
+		names = clients.DefaultInstallClientNames()
+	}
+	enabled := make(map[string]bool, len(names))
+	for _, name := range names {
+		enabled[name] = true
+	}
+	return enabled
+}
+
+func lspRouterDisabledClientSetFromRaw(raw map[string]string) map[string]bool {
 	names := sanitizeClientNames(splitClientCSV(raw[lspRouterDisabledClientsKey]))
 	disabled := make(map[string]bool, len(names))
 	for _, name := range names {
 		disabled[name] = true
 	}
-	return disabled, nil
+	return disabled
 }
 
 // SetDefaultInstallClientNames persists the operator's chosen default-install
@@ -217,10 +239,22 @@ func (a *API) DisableLSPRouterClient(name string, opts LSPClientRouterOpts) (*LS
 	if err != nil {
 		return nil, err
 	}
-	if err := a.setLSPRouterClientDisabledIn(SettingsPath(), name, true); err != nil {
+	keepN := opts.BackupKeepN
+	if keepN == 0 {
+		keepN = a.EffectiveBackupKeepN()
+	}
+	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	if err != nil {
 		return nil, err
 	}
-	return a.RollbackLSPRouterClientEntriesForClient(name, opts)
+	opts.GUIPort = port
+	var report *LSPClientRouterReport
+	err = a.setLSPRouterClientDisabledInThen(SettingsPath(), name, true, func(map[string]string) error {
+		var runErr error
+		report, runErr = a.rollbackLSPRouterClientEntriesForClientWithKeepN(name, opts, keepN)
+		return runErr
+	})
+	return report, err
 }
 
 // EnableLSPRouterClient atomically removes one client from the persisted
@@ -230,38 +264,66 @@ func (a *API) EnableLSPRouterClient(name string, opts LSPClientRouterOpts) (*LSP
 	if err != nil {
 		return nil, err
 	}
-	if err := a.setLSPRouterClientDisabledIn(SettingsPath(), name, false); err != nil {
-		return nil, err
-	}
 	clientMap := opts.Clients
 	if clientMap == nil {
 		clientMap = clients.AllClients()
 	}
 	opts.ForceClientName = name
 	opts.Clients = map[string]clients.Client{name: clientMap[name]}
-	return a.EnsureLSPRouterClientEntries(opts)
+	keepN := opts.BackupKeepN
+	if keepN == 0 {
+		keepN = a.EffectiveBackupKeepN()
+	}
+	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	if err != nil {
+		return nil, err
+	}
+	opts.GUIPort = port
+	var report *LSPClientRouterReport
+	err = a.setLSPRouterClientDisabledInThen(SettingsPath(), name, false, func(raw map[string]string) error {
+		var runErr error
+		report, runErr = a.ensureLSPRouterClientEntriesWithState(
+			opts,
+			lspRouterDisabledClientSetFromRaw(raw),
+			clientInstallEnabledSetFromRaw(raw),
+			keepN,
+		)
+		return runErr
+	})
+	return report, err
 }
 
 func (a *API) setLSPRouterClientDisabledIn(path, name string, disabled bool) error {
 	return mutateRawSettingsMapLocked(path, func(raw map[string]string) error {
-		current := sanitizeClientNames(splitClientCSV(raw[lspRouterDisabledClientsKey]))
-		set := make(map[string]bool, len(current)+1)
-		for _, existing := range current {
-			set[existing] = true
-		}
-		if disabled {
-			set[name] = true
-		} else {
-			delete(set, name)
-		}
-		names := supportedClientNamesInSet(set)
-		if len(names) == 0 {
-			delete(raw, lspRouterDisabledClientsKey)
-			return nil
-		}
-		raw[lspRouterDisabledClientsKey] = strings.Join(names, ",")
+		setLSPRouterClientDisabledRaw(raw, name, disabled)
 		return nil
 	})
+}
+
+func (a *API) setLSPRouterClientDisabledInThen(path, name string, disabled bool, after func(map[string]string) error) error {
+	return mutateRawSettingsMapLockedThen(path, func(raw map[string]string) error {
+		setLSPRouterClientDisabledRaw(raw, name, disabled)
+		return nil
+	}, after)
+}
+
+func setLSPRouterClientDisabledRaw(raw map[string]string, name string, disabled bool) {
+	current := sanitizeClientNames(splitClientCSV(raw[lspRouterDisabledClientsKey]))
+	set := make(map[string]bool, len(current)+1)
+	for _, existing := range current {
+		set[existing] = true
+	}
+	if disabled {
+		set[name] = true
+	} else {
+		delete(set, name)
+	}
+	names := supportedClientNamesInSet(set)
+	if len(names) == 0 {
+		delete(raw, lspRouterDisabledClientsKey)
+		return
+	}
+	raw[lspRouterDisabledClientsKey] = strings.Join(names, ",")
 }
 
 func validateSupportedClientName(name string) (string, error) {

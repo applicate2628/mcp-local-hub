@@ -119,6 +119,18 @@ export function clientConfigUsable(state: ClientConfigState | undefined): boolea
   return state === "ok";
 }
 
+// isMcphubRelayCommand mirrors clients.IsMcphubBinary for scan-surfaced relay
+// entries: only mcphub/mcphub.exe and the legacy mcp/mcp.exe basenames are
+// hub-owned relay executables. LSP router relay cells must check this before
+// treating a router-shaped relay_url as manageable; a foreign command can
+// forward to /lsp/<lang>/mcp but the backend refuses to mutate it.
+export function isMcphubRelayCommand(command: string | undefined): boolean {
+  if (!command) return false;
+  const normalized = command.replaceAll("\\", "/");
+  const base = normalized.split("/").pop()?.toLowerCase() ?? "";
+  return base === "mcphub" || base === "mcphub.exe" || base === "mcp" || base === "mcp.exe";
+}
+
 // loopbackEntryPort parses the TCP port out of a hub-shaped loopback URL.
 // Returns the port number only when the endpoint isHubLoopback AND carries
 // an explicit numeric port; otherwise null (a loopback URL with no explicit

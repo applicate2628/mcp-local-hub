@@ -128,6 +128,19 @@ func (a *API) SettingsSetIn(path, key, value string) error {
 // serialization. It combines the in-process settingsMu with the per-file flock
 // so API, GUI, CLI, and sibling-process writers share one RMW boundary.
 func mutateRawSettingsMapLocked(path string, mutate func(map[string]string) error) error {
+	return mutateRawSettingsMapLockedThen(path, mutate, nil)
+}
+
+// mutateRawSettingsMapLockedThen performs the same serialized settings
+// read-modify-write as mutateRawSettingsMapLocked, then runs after while the
+// same in-process mutex and per-file flock are still held. It is for operations
+// whose correctness spans the settings write plus an immediate side effect.
+// The after hook must not read or write settings, directly or transitively:
+// SettingsList/SettingsGet/SettingsSet and mutateRawSettingsMap* all need the
+// same non-reentrant settingsMu and may also need this settings-file flock.
+// Resolve every settings-derived value before calling this helper, or derive it
+// from the raw map passed to the hook.
+func mutateRawSettingsMapLockedThen(path string, mutate func(map[string]string) error, after func(map[string]string) error) error {
 	settingsMu.Lock()
 	defer settingsMu.Unlock()
 
@@ -166,6 +179,11 @@ func mutateRawSettingsMapLocked(path string, mutate func(map[string]string) erro
 	// owner-only DACL on the file handle before any bytes hit disk.
 	if err := WriteStateFileBytesLockHeld(path, data); err != nil {
 		return fmt.Errorf("write settings file: %w", err)
+	}
+	if after != nil {
+		if err := after(raw); err != nil {
+			return err
+		}
 	}
 	return nil
 }

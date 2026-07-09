@@ -812,6 +812,149 @@ describe("ServersScreen — LSP matrix rows", () => {
     expect(enableBodies[0]).toEqual({ client: "codex-cli" });
   });
 
+  it("renders disabled shared-router entries as unchecked and enableable", async () => {
+    const scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-python",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub",
+          client_presence: {
+            "codex-cli": {
+              transport: "http",
+              endpoint: "http://127.0.0.1:9200/lsp/python/mcp",
+              disabled: true,
+            },
+          },
+        },
+      ],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+    const enableBodies: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => jsonResponse(200, { workspaces: [], entries: [] }),
+        "/api/lsp-router/enable": (init?: RequestInit) => {
+          enableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, { client: "codex-cli", enabled: true, report: {} });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(false);
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(enableBodies).toHaveLength(1));
+    expect(enableBodies[0]).toEqual({ client: "codex-cli" });
+  });
+
+  it("disables LSP toggles for direct primary entries that the backend cannot replace", async () => {
+    const scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-python",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "unknown",
+          client_presence: {
+            "codex-cli": {
+              transport: "stdio",
+              endpoint: "pyright-langserver",
+            },
+            "gemini-cli": {
+              transport: "http",
+              endpoint: "https://example.invalid/lsp/python/mcp",
+            },
+          },
+        },
+      ],
+      client_config_presence: { "codex-cli": "ok", "gemini-cli": "ok" },
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => jsonResponse(200, { workspaces: [], entries: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const stdio = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    const remote = screen.getByTestId(
+      "lsp-toggle-python-gemini-cli",
+    ) as HTMLInputElement;
+    expect(stdio.checked).toBe(false);
+    expect(stdio.disabled).toBe(true);
+    expect(remote.checked).toBe(false);
+    expect(remote.disabled).toBe(true);
+    expect(stdio.closest("label")?.getAttribute("title") ?? "").toContain(
+      "direct LSP entry",
+    );
+  });
+
+  it("requires mcphub relay ownership before rendering an LSP router relay entry checked", async () => {
+    const scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-python",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub",
+          client_presence: {
+            antigravity: {
+              transport: "relay",
+              endpoint: "node",
+              relay_url: "http://127.0.0.1:9200/lsp/python/mcp",
+            },
+            zed: {
+              transport: "relay",
+              endpoint: "C:\\Users\\u\\.local\\bin\\mcphub.exe",
+              relay_url: "http://127.0.0.1:9200/lsp/python/mcp",
+            },
+          },
+        },
+      ],
+      client_config_presence: { antigravity: "ok", zed: "ok" },
+      client_capabilities: {
+        antigravity: { scannable: true, direct_installable: false, remote_http_capable: false },
+        zed: { scannable: true, direct_installable: false, remote_http_capable: false },
+      },
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => jsonResponse(200, { workspaces: [], entries: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const foreign = (await screen.findByTestId(
+      "lsp-toggle-python-antigravity",
+    )) as HTMLInputElement;
+    const owned = screen.getByTestId("lsp-toggle-python-zed") as HTMLInputElement;
+    expect(foreign.checked).toBe(false);
+    expect(foreign.disabled).toBe(true);
+    expect(owned.checked).toBe(true);
+    expect(owned.disabled).toBe(false);
+  });
+
   // Finding 2 (Codex P2): a client whose config is missing/error has no usable
   // target, so its LSP toggle must be DISABLED — pre-fix only `busy` gated it.
   // A sibling "ok" client stays enabled, proving the gate is the SAME

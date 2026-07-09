@@ -1,6 +1,9 @@
 package api
 
 import (
+	"context"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -249,6 +252,156 @@ func TestDisableLSPRouterClientConcurrentCallsPreserveBothOptOuts(t *testing.T) 
 	}
 	if !got["codex-cli"] || !got["antigravity"] || len(got) != 2 {
 		t.Fatalf("disabled set = %v, want codex-cli + antigravity", got)
+	}
+}
+
+const lspRouterToggleZeroPortChildEnv = "MCPHUB_TEST_LSP_ROUTER_TOGGLE_ZERO_PORT_CHILD"
+
+func TestLSPRouterClientToggleZeroGUIPortCompletes(t *testing.T) {
+	if mode := os.Getenv(lspRouterToggleZeroPortChildEnv); mode != "" {
+		runLSPRouterClientToggleZeroGUIPortChild(t, mode)
+		return
+	}
+
+	for _, mode := range []string{"disable", "enable"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLSPRouterClientToggleZeroGUIPortCompletes$")
+			cmd.Env = append(os.Environ(), lspRouterToggleZeroPortChildEnv+"="+mode)
+			out, err := cmd.CombinedOutput()
+			if ctx.Err() == context.DeadlineExceeded {
+				t.Fatalf("%s with zero GUIPort timed out; possible settings self-deadlock\n%s", mode, out)
+			}
+			if err != nil {
+				t.Fatalf("%s child failed: %v\n%s", mode, err, out)
+			}
+		})
+	}
+}
+
+func runLSPRouterClientToggleZeroGUIPortChild(t *testing.T, mode string) {
+	a := NewAPI()
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+
+	entryName := LSPRouterEntryName("go")
+	client := newLSPRouterFakeClient(t, "codex-cli", true)
+	opts := LSPClientRouterOpts{
+		Languages:   []string{"go"},
+		BackupKeepN: 1,
+		Clients:     map[string]clients.Client{"codex-cli": client},
+	}
+
+	switch mode {
+	case "disable":
+		client.entries[entryName] = clients.MCPEntry{
+			Name: entryName,
+			URL:  LSPRouterURL(9125, "go"),
+		}
+		if _, err := a.DisableLSPRouterClient("codex-cli", opts); err != nil {
+			t.Fatalf("DisableLSPRouterClient zero GUIPort: %v", err)
+		}
+		if got, err := client.GetEntry(entryName); err != nil {
+			t.Fatalf("GetEntry after disable: %v", err)
+		} else if got != nil {
+			t.Fatalf("router entry after disable = %+v, want removed", got)
+		}
+	case "enable":
+		if _, err := a.EnableLSPRouterClient("codex-cli", opts); err != nil {
+			t.Fatalf("EnableLSPRouterClient zero GUIPort: %v", err)
+		}
+		if got, err := client.GetEntry(entryName); err != nil {
+			t.Fatalf("GetEntry after enable: %v", err)
+		} else if got == nil || got.URL != LSPRouterURL(9125, "go") {
+			t.Fatalf("router entry after enable = %+v, want default-port router URL", got)
+		}
+	default:
+		t.Fatalf("unknown child mode %q", mode)
+	}
+}
+
+type blockingRemoveLSPClient struct {
+	*lspRouterFakeClient
+	removeStarted sync.Once
+	started       chan struct{}
+	unblock       chan struct{}
+}
+
+func (c *blockingRemoveLSPClient) RemoveEntry(name string) error {
+	c.removeStarted.Do(func() {
+		close(c.started)
+		<-c.unblock
+	})
+	return c.lspRouterFakeClient.RemoveEntry(name)
+}
+
+func TestLSPRouterClientToggleSerializesPreferenceAndConfigMutation(t *testing.T) {
+	a := NewAPI()
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+
+	base := newLSPRouterFakeClient(t, "codex-cli", true)
+	entryName := LSPRouterEntryName("go")
+	base.entries[entryName] = clients.MCPEntry{
+		Name: entryName,
+		URL:  LSPRouterURL(7777, "go"),
+	}
+	client := &blockingRemoveLSPClient{
+		lspRouterFakeClient: base,
+		started:             make(chan struct{}),
+		unblock:             make(chan struct{}),
+	}
+	opts := LSPClientRouterOpts{
+		GUIPort:     7777,
+		Languages:   []string{"go"},
+		BackupKeepN: 1,
+		Clients:     map[string]clients.Client{"codex-cli": client},
+	}
+
+	disableDone := make(chan error, 1)
+	go func() {
+		_, err := a.DisableLSPRouterClient("codex-cli", opts)
+		disableDone <- err
+	}()
+
+	select {
+	case <-client.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("disable did not reach blocked RemoveEntry")
+	}
+
+	enableDone := make(chan error, 1)
+	go func() {
+		_, err := a.EnableLSPRouterClient("codex-cli", opts)
+		enableDone <- err
+	}()
+
+	select {
+	case err := <-enableDone:
+		t.Fatalf("EnableLSPRouterClient completed before disable rollback released settings lock: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(client.unblock)
+	if err := <-disableDone; err != nil {
+		t.Fatalf("DisableLSPRouterClient: %v", err)
+	}
+	if err := <-enableDone; err != nil {
+		t.Fatalf("EnableLSPRouterClient: %v", err)
+	}
+
+	disabled, err := a.LSPRouterDisabledClientSet()
+	if err != nil {
+		t.Fatalf("read disabled set: %v", err)
+	}
+	if disabled["codex-cli"] {
+		t.Fatalf("codex-cli remains disabled after final enable: %v", disabled)
+	}
+	got, err := client.GetEntry(entryName)
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if got == nil || got.URL != LSPRouterURL(7777, "go") {
+		t.Fatalf("final router entry = %+v, want enabled router URL", got)
 	}
 }
 

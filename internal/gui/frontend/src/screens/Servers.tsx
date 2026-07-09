@@ -14,7 +14,13 @@ import {
 import { ScanRefreshControls } from "../components/ScanRefreshControls";
 import { useAutoScan } from "../hooks/useAutoScan";
 import { useEventSource } from "../hooks/useEventSource";
-import { collectServers, isLspRouterURL, clientConfigUsable } from "../lib/routing";
+import {
+  collectServers,
+  isHubLoopback,
+  isLspRouterURL,
+  isMcphubRelayCommand,
+  clientConfigUsable,
+} from "../lib/routing";
 import {
   effectiveVisibleClients,
   loadColumnPrefs,
@@ -2068,14 +2074,25 @@ function LspCellView(props: {
   const { language, client, presence, legacy, configState, checkedOverride, busy, onToggle } = props;
   const t = presence?.transport;
   const hasPrimary = t === "http" || t === "relay" || t === "stdio";
-  // Finding 1: an entry is a shared-router entry only when its URL (http) or
-  // relay_url (relay-stdio bridge) is the /lsp/<language>/mcp shape — mirror the
-  // backend owner, which checks both MCPEntry.URL and MCPEntry.RelayURL. A
-  // legacy per-workspace entry (path /mcp) and a direct-stdio entry (command,
-  // not a URL) both fail the shape test and render unchecked.
-  const hasRouterEntry =
-    isLspRouterURL(presence?.endpoint ?? "", language) ||
-    isLspRouterURL(presence?.relay_url ?? "", language);
+  const entryDisabled = presence?.disabled === true;
+  // A shared-router entry is active only when the entry is not disabled and its
+  // URL (http) or relay_url (relay-stdio bridge) is the /lsp/<language>/mcp
+  // shape. Relay entries also need the endpoint command to be mcphub-owned,
+  // matching the backend's entryIsOwnedLSPRouterForLanguage relay branch.
+  const httpRouterShape = isLspRouterURL(presence?.endpoint ?? "", language);
+  const relayRouterShape =
+    isLspRouterURL(presence?.relay_url ?? "", language) &&
+    isMcphubRelayCommand(presence?.endpoint);
+  const hasRouterShape = httpRouterShape || relayRouterShape;
+  const hasRouterEntry = !entryDisabled && hasRouterShape;
+  const hasUnreplaceablePrimary =
+    hasPrimary &&
+    !hasRouterShape &&
+    // Preserve legacy hub-loopback LSP entries as enable candidates: the
+    // backend can migrate hub-owned /mcp entries, while direct stdio, relay
+    // entries with foreign commands, and non-loopback remote HTTP entries are
+    // not safe to overwrite from this checkbox.
+    (t !== "http" || !isHubLoopback(presence?.endpoint ?? ""));
   // Finding 3: an inherited hub entry is read-only — the hub never wrote the
   // inherited source (an ~/.claude.json import or a lower config.json layer) and
   // cannot roll it back. Mirrors ClientPresence.inherited → via-hub-inherited.
@@ -2088,13 +2105,17 @@ function LspCellView(props: {
   // to enable one into. A present (non-inherited) router entry stays interactive
   // so the operator can always disable it, mirroring the main matrix's
   // always-interactive via-hub cell.
-  const disabled = busy || inherited || (!hasRouterEntry && !configUsable);
+  const disabled =
+    busy || inherited || (!hasRouterEntry && (!configUsable || hasUnreplaceablePrimary));
   const dualBadge = hasPrimary && Boolean(legacy);
   let title: string;
   let ariaLabel: string;
   if (inherited) {
     title = `Routed through the shared LSP router, but ${client} inherits this entry from a config layer mcphub never wrote (e.g. ~/.claude.json, or a lower config.json layer). mcphub cannot roll it back — edit that source config directly to remove it.`;
     ariaLabel = `Shared LSP router entry for ${client} is inherited and read-only`;
+  } else if (!hasRouterEntry && hasUnreplaceablePrimary) {
+    title = `${client} already has a direct LSP entry here. mcphub cannot safely replace it from this checkbox; edit that client entry directly or remove it before enabling the shared router.`;
+    ariaLabel = `Shared LSP router toggle for ${client} unavailable — direct ${client} entry already exists`;
   } else if (!hasRouterEntry && !configUsable) {
     title = `${client} has no usable MCP config on this host, so its shared LSP router entries can't be changed here.`;
     ariaLabel = `Shared LSP router toggle for ${client} unavailable — no usable ${client} config`;
