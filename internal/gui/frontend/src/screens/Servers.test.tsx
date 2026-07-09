@@ -2601,3 +2601,190 @@ describe("ServersScreen — optional LSP router status fetch (P2 isolation)", ()
     expect(screen.getByTestId("lsp-chip-opt-out-python-codex-cli").textContent).toBe("off");
   });
 });
+
+// The opt-out affordance must be reachable for EVERY entry-presence shape a
+// usable client config can be in. Three consecutive PR #524 bot rounds landed
+// on this one control because the render gated the preference write on entry
+// presence (round 5: no router entries; round 7: legacy LSP entries). These
+// tests pin the class fix at the render layer; lib/lsp-rows.test.ts pins the
+// full enumeration at the helper layer.
+describe("ServersScreen — LSP opt-out reachability across entry shapes", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    window.location.hash = "#/servers";
+  });
+  afterEach(() => {
+    cleanup();
+  });
+
+  const ROUTER_URL = "http://127.0.0.1:9125/lsp/python/mcp";
+  const LEGACY_URL = "http://127.0.0.1:9200/mcp";
+
+  function workspacesResponse() {
+    return {
+      workspaces: [{ workspace_key: "default", workspace_path: "D:/dev/project" }],
+      entries: [
+        {
+          workspace_key: "default",
+          workspace_path: "D:/dev/project",
+          language: "python",
+          backend: "mcp-language-server",
+          port: 9200,
+          task_name: "\mcp-local-hub-lsp-default-python",
+          client_entries: { "codex-cli": "mcp-language-server-python" },
+        },
+      ],
+    };
+  }
+
+  function scanWithPresence(
+    presence: Record<string, unknown> | null,
+    configState = "ok",
+  ): ScanResult {
+    return {
+      at: "2026-06-03T00:00:00Z",
+      entries: presence
+        ? [
+            {
+              name: "mcp-language-server-python",
+              manifest_exists: true,
+              can_migrate: true,
+              client_presence: { "codex-cli": presence },
+            },
+          ]
+        : [],
+      client_config_presence: {
+        "codex-cli": configState,
+      } as ScanResult["client_config_presence"],
+    };
+  }
+
+  function mountWith(scan: ScanResult) {
+    const disableBodies: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => jsonResponse(200, workspacesResponse()),
+        "/api/lsp-router/disable": (init?: RequestInit) => {
+          disableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, { client: "codex-cli", enabled: false, report: {} });
+        },
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    return disableBodies;
+  }
+
+  async function expectOptOutPersists(disableBodies: unknown[]) {
+    const button = await screen.findByTestId("lsp-opt-out-python-codex-cli");
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(disableBodies).toHaveLength(1);
+    });
+    expect(disableBodies[0]).toEqual({ client: "codex-cli" });
+  }
+
+  it("offers the Off button with no LSP entries at all", async () => {
+    const disableBodies = mountWith(scanWithPresence(null));
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(false);
+    await expectOptOutPersists(disableBodies);
+  });
+
+  // Round-7 finding: a registry-recognized legacy /mcp entry left hasPrimary
+  // true, which suppressed the Off button even though the checkbox is unchecked
+  // and can only ever ENABLE the router.
+  it("offers the Off button when a registry-recognized legacy HTTP entry exists", async () => {
+    const disableBodies = mountWith(
+      scanWithPresence({ transport: "http", endpoint: LEGACY_URL }),
+    );
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    // Legacy is not the router: unchecked, but replaceable so still enabled.
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(false);
+    expect(screen.getByTestId("lsp-chip-primary-python-codex-cli").textContent).toBe("via-hub");
+    await expectOptOutPersists(disableBodies);
+  });
+
+  it("offers the Off button when a registry-recognized legacy relay entry exists", async () => {
+    const disableBodies = mountWith(
+      scanWithPresence({
+        transport: "relay",
+        endpoint: "C:/tools/mcphub.exe",
+        relay_url: LEGACY_URL,
+      }),
+    );
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(false);
+    await expectOptOutPersists(disableBodies);
+  });
+
+  // Orphaned legacy entry: no registry evidence, so the checkbox is inert. The
+  // preference write must still be reachable.
+  it("offers the Off button when an unreplaceable direct entry blocks the checkbox", async () => {
+    const scan = scanWithPresence({ transport: "stdio", endpoint: "mcp-language-server" });
+    const disableBodies = mountWith(scan);
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(true);
+    await expectOptOutPersists(disableBodies);
+  });
+
+  // An inherited router entry is checked-but-read-only, so unchecking cannot
+  // carry the opt-out. Persisting the preference is still valid and the backend
+  // rollback is a clean no-op against the layer it never wrote.
+  it("offers the Off button when the router entry is inherited and read-only", async () => {
+    const disableBodies = mountWith(
+      scanWithPresence({ transport: "http", endpoint: ROUTER_URL, inherited: true }),
+    );
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(toggle.disabled).toBe(true);
+    await expectOptOutPersists(disableBodies);
+  });
+
+  // A live, mutable router entry already carries the disable on uncheck, so a
+  // second control would be a duplicate.
+  it("uses the checkbox, not a button, when a live router entry is present", async () => {
+    const disableBodies = mountWith(scanWithPresence({ transport: "http", endpoint: ROUTER_URL }));
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    expect(toggle.disabled).toBe(false);
+    expect(screen.queryByTestId("lsp-opt-out-python-codex-cli")).toBeNull();
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(disableBodies).toHaveLength(1);
+    });
+    expect(disableBodies[0]).toEqual({ client: "codex-cli" });
+  });
+
+  // No usable config means no client to opt out: the cell is fully inert and
+  // the preference control must NOT be offered.
+  it("withholds the Off button when the client config is unusable", async () => {
+    mountWith(scanWithPresence(null, "error"));
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(true);
+    expect(screen.queryByTestId("lsp-opt-out-python-codex-cli")).toBeNull();
+    expect(screen.queryByTestId("lsp-chip-opt-out-python-codex-cli")).toBeNull();
+  });
+});

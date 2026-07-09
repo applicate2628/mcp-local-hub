@@ -21,8 +21,13 @@
 // servers/mcp-language-server/manifest.yaml. Keep both lists in sync
 // when the manifest declares a new language.
 
-import { entryPointsAtLegacyLSPPort } from "./routing";
-import type { ClientPresence, ScanResult } from "../types";
+import {
+  clientConfigUsable,
+  entryPointsAtLegacyLSPPort,
+  isLspRouterURL,
+  isMcphubRelayCommand,
+} from "./routing";
+import type { ClientConfigState, ClientPresence, ScanResult } from "../types";
 import type { ClientEntry } from "../types";
 import type { WorkspaceEntryDTO } from "../api";
 
@@ -347,4 +352,174 @@ export function collectLspRows(
       legacyConflict,
     };
   });
+}
+
+// LspCellStateInput is everything one LSP matrix cell knows about its
+// (language, client) pair. `presence`, `entryName`, and `canEnableFromLegacy`
+// come from the matching LspRow field; `configState` from
+// ScanResult.client_config_presence; `checkedOverride` / `clientRouterDisabled`
+// / `busy` from the screen's optimistic-toggle bookkeeping.
+export interface LspCellStateInput {
+  language: string;
+  presence: ClientPresence | undefined;
+  entryName: string | undefined;
+  canEnableFromLegacy: boolean;
+  configState: ClientConfigState | undefined;
+  checkedOverride: boolean | undefined;
+  clientRouterDisabled: boolean;
+  busy: boolean;
+}
+
+// LspOptOutAffordance names HOW the operator persists this client's
+// clients.lsp_router_disabled opt-out from this cell. Both "checkbox" and
+// "button" issue the SAME POST /api/lsp-router/disable; they differ only in
+// which control is visible, so a cell is never left without a path to the
+// preference while it is actionable at all.
+//
+//   "checkbox"    — a live, mutable router entry is checked here; unchecking it
+//                   disables the client (and removes its router entries). A
+//                   separate Off button would be a duplicate control.
+//   "button"      — the checkbox cannot express a disable (it is unchecked, or
+//                   checked-but-read-only), so the Off button carries the
+//                   preference write on its own.
+//   "already-off" — the opt-out is already persisted (or optimistically
+//                   pending); the cell renders the `off` chip instead.
+//   "unavailable" — an Apply is in flight, or the client has no usable MCP
+//                   config on this host, so there is nothing to opt out of.
+export type LspOptOutAffordance = "checkbox" | "button" | "already-off" | "unavailable";
+
+export interface LspCellState {
+  transport: string | undefined;
+  hasPrimary: boolean;
+  inherited: boolean;
+  configUsable: boolean;
+  // hasRouterEntry: a live (non-disabled) hub-owned shared-router entry sits at
+  // the RESERVED mcp-language-server-<language> name. The only shape that may
+  // render the checkbox checked.
+  hasRouterEntry: boolean;
+  // hasUnreplaceablePrimary: another entry occupies this cell and the backend
+  // would refuse to overwrite it, so the checkbox cannot enable the router.
+  hasUnreplaceablePrimary: boolean;
+  checked: boolean;
+  checkboxDisabled: boolean;
+  optedOut: boolean;
+  optOutAffordance: LspOptOutAffordance;
+  showOptOutButton: boolean;
+}
+
+// lspCellState is the SINGLE owner of an LSP cell's checkbox state, checkbox
+// enablement, and opt-out affordance. Servers.tsx renders straight off this
+// struct and re-derives none of it.
+//
+// The two decisions are deliberately orthogonal, because conflating them is
+// what produced three consecutive review findings on this one control
+// (PR #524 round 5: "let users opt out when router entries are absent";
+// round 7: "allow opting out when legacy LSP entries exist"):
+//
+//   1. The CHECKBOX describes a ROUTER ENTRY. It is checked only for a live
+//      hub-owned entry at the reserved name, and it is enabled only when it can
+//      actually mutate one (nothing in flight, not inherited, and either an
+//      entry to remove or a replaceable/empty slot to write into).
+//
+//   2. The OPT-OUT persists a CLIENT PREFERENCE (clients.lsp_router_disabled)
+//      in gui-preferences.yaml so future `mcphub setup` / ensure passes stop
+//      adding router entries for the client. Entry presence is IRRELEVANT to
+//      it: a legacy, suffixed, foreign, remote, or inherited entry neither
+//      grants nor withholds the ability to store a preference. Only a usable
+//      client config (there is a client to opt out), an idle cell, and a
+//      not-already-persisted opt-out gate it.
+//
+// Side effect when the opt-out is persisted while an entry is live: the disable
+// endpoint writes the preference FIRST, then runs its normal per-client
+// rollback (internal/api/client_install_prefs.go:237 →
+// rollbackLSPRouterClientEntriesForClientWithKeepN). That rollback reads ONLY
+// the reserved entry name, so it removes a hub-owned router entry, leaves a
+// suffixed / legacy sibling untouched, and is a clean idempotent no-op for an
+// inherited entry (which lives below the adapter's write target and stays
+// live). This is exactly the disable path the checkbox already invokes — the
+// Off button changes no semantics, it only makes that same path reachable from
+// a shape where the checkbox is inert.
+export function lspCellState(input: LspCellStateInput): LspCellState {
+  const {
+    language,
+    presence,
+    entryName,
+    canEnableFromLegacy,
+    configState,
+    checkedOverride,
+    clientRouterDisabled,
+    busy,
+  } = input;
+
+  const transport = presence?.transport;
+  const hasPrimary = transport === "http" || transport === "relay" || transport === "stdio";
+  const entryDisabled = presence?.disabled === true;
+  // A shared-router entry is active only when the entry is not disabled and its
+  // URL (http) or relay_url (relay-stdio bridge) is the /lsp/<language>/mcp
+  // shape. Relay entries also need the endpoint command to be mcphub-owned,
+  // matching the backend's entryIsOwnedLSPRouterForLanguage relay branch.
+  const httpRouterShape = isLspRouterURL(presence?.endpoint ?? "", language);
+  const relayRouterShape =
+    isLspRouterURL(presence?.relay_url ?? "", language) && isMcphubRelayCommand(presence?.endpoint);
+  const hasRouterShape = httpRouterShape || relayRouterShape;
+  const backendOwnedRouterShape = hasRouterShape && entryName === lspRouterEntryName(language);
+  const hasRouterEntry = !entryDisabled && backendOwnedRouterShape;
+  const hasUnreplaceablePrimary =
+    hasPrimary &&
+    !backendOwnedRouterShape &&
+    // Preserve only backend-recognized legacy hub-loopback LSP entries as
+    // enable candidates: the row helper proves the endpoint/relay_url /mcp
+    // URL's port and source entry name against the workspace registry.
+    // Orphaned/pruned loopback entries, suffixed router-shaped entries, direct
+    // stdio, foreign router relays, and non-loopback remote HTTP entries are
+    // not safe to mutate from this checkbox.
+    !canEnableFromLegacy;
+  // An inherited hub entry is read-only — the hub never wrote the inherited
+  // source (an ~/.claude.json import or a lower config.json layer) and cannot
+  // roll it back. Mirrors ClientPresence.inherited → via-hub-inherited.
+  const inherited = presence?.inherited === true;
+  const configUsable = clientConfigUsable(configState);
+
+  const checked = checkedOverride ?? hasRouterEntry;
+  const optedOut =
+    checkedOverride === false || (checkedOverride === undefined && clientRouterDisabled);
+  // Disabled when an Apply is in flight, the entry is inherited (read-only), or
+  // there is nothing to act on — no existing router entry AND no usable config
+  // to enable one into. A present (non-inherited) router entry stays interactive
+  // so the operator can always disable it, mirroring the main matrix's
+  // always-interactive via-hub cell.
+  const checkboxDisabled =
+    busy || inherited || (!hasRouterEntry && (!configUsable || hasUnreplaceablePrimary));
+
+  // Precedence matters. The live-checkbox test comes BEFORE the config-usable
+  // test: an interactive checked checkbox already POSTs /api/lsp-router/disable
+  // on uncheck, so reporting "unavailable" for it would be false even when the
+  // client's config file is unreadable. Only a cell whose checkbox cannot
+  // express a disable falls through to the config-usable gate.
+  let optOutAffordance: LspOptOutAffordance;
+  if (optedOut) {
+    optOutAffordance = "already-off";
+  } else if (busy) {
+    optOutAffordance = "unavailable";
+  } else if (checked && !checkboxDisabled) {
+    optOutAffordance = "checkbox";
+  } else if (configUsable) {
+    optOutAffordance = "button";
+  } else {
+    optOutAffordance = "unavailable";
+  }
+
+  return {
+    transport,
+    hasPrimary,
+    inherited,
+    configUsable,
+    hasRouterEntry,
+    hasUnreplaceablePrimary,
+    checked,
+    checkboxDisabled,
+    optedOut,
+    optOutAffordance,
+    showOptOutButton: optOutAffordance === "button",
+  };
 }

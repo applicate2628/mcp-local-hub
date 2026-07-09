@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { collectLspRows, LSP_LANGUAGES } from "./lsp-rows";
-import type { ScanEntry, ScanResult } from "../types";
+import { collectLspRows, LSP_LANGUAGES, lspCellState } from "./lsp-rows";
+import type { LspCellStateInput, LspOptOutAffordance } from "./lsp-rows";
+import type { ClientConfigState, ClientPresence, ScanEntry, ScanResult } from "../types";
 import type { WorkspaceEntryDTO } from "../api";
 
 describe("collectLspRows", () => {
@@ -464,5 +465,227 @@ describe("collectLspRows", () => {
       expect(all.clientPresenceEntryName["gemini-cli"]).toBe("mcp-language-server-python-zzzz");
       expect(all.clientPresenceCanEnableFromLegacy["gemini-cli"]).toBe(false);
     });
+  });
+});
+
+// lspCellState is the single owner of the LSP cell's three rendered decisions:
+// checkbox checked, checkbox enabled, and which affordance (if any) persists
+// clients.lsp_router_disabled. The table below is the exhaustive
+// entry-presence enumeration; every row asserts all three so a future gate
+// change cannot silently strand a shape without an opt-out path.
+describe("lspCellState", () => {
+  const LANG = "go";
+  const RESERVED = "mcp-language-server-go";
+  const ROUTER_URL = "http://127.0.0.1:9125/lsp/go/mcp";
+  const LEGACY_URL = "http://127.0.0.1:9200/mcp";
+
+  const base = {
+    language: LANG,
+    presence: undefined as ClientPresence | undefined,
+    entryName: undefined as string | undefined,
+    canEnableFromLegacy: false,
+    configState: "ok" as ClientConfigState | undefined,
+    checkedOverride: undefined as boolean | undefined,
+    clientRouterDisabled: false,
+    busy: false,
+  };
+
+  interface Shape {
+    name: string;
+    input: LspCellStateInput;
+    checked: boolean;
+    checkboxDisabled: boolean;
+    optOutAffordance: LspOptOutAffordance;
+  }
+
+  const shapes: Shape[] = [
+    {
+      name: "no entries",
+      input: { ...base },
+      checked: false,
+      checkboxDisabled: false,
+      optOutAffordance: "button",
+    },
+    {
+      name: "router entry",
+      input: {
+        ...base,
+        presence: { transport: "http", endpoint: ROUTER_URL },
+        entryName: RESERVED,
+      },
+      checked: true,
+      checkboxDisabled: false,
+      optOutAffordance: "checkbox",
+    },
+    {
+      name: "router entry via mcphub relay",
+      input: {
+        ...base,
+        presence: { transport: "relay", endpoint: "C:/tools/mcphub.exe", relay_url: ROUTER_URL },
+        entryName: RESERVED,
+      },
+      checked: true,
+      checkboxDisabled: false,
+      optOutAffordance: "checkbox",
+    },
+    {
+      name: "legacy HTTP entry, registry-recognized",
+      input: {
+        ...base,
+        presence: { transport: "http", endpoint: LEGACY_URL },
+        entryName: RESERVED,
+        canEnableFromLegacy: true,
+      },
+      checked: false,
+      checkboxDisabled: false,
+      optOutAffordance: "button",
+    },
+    {
+      name: "legacy HTTP entry, orphaned (no registry evidence)",
+      input: {
+        ...base,
+        presence: { transport: "http", endpoint: LEGACY_URL },
+        entryName: RESERVED,
+        canEnableFromLegacy: false,
+      },
+      checked: false,
+      checkboxDisabled: true,
+      optOutAffordance: "button",
+    },
+    {
+      name: "legacy relay entry, registry-recognized",
+      input: {
+        ...base,
+        presence: { transport: "relay", endpoint: "C:/tools/mcphub.exe", relay_url: LEGACY_URL },
+        entryName: RESERVED,
+        canEnableFromLegacy: true,
+      },
+      checked: false,
+      checkboxDisabled: false,
+      optOutAffordance: "button",
+    },
+    {
+      name: "suffixed sibling with router URL",
+      input: {
+        ...base,
+        presence: { transport: "http", endpoint: ROUTER_URL },
+        entryName: "mcp-language-server-go-b133",
+      },
+      checked: false,
+      checkboxDisabled: true,
+      optOutAffordance: "button",
+    },
+    {
+      name: "inherited router entry",
+      input: {
+        ...base,
+        presence: { transport: "http", endpoint: ROUTER_URL, inherited: true },
+        entryName: RESERVED,
+      },
+      checked: true,
+      checkboxDisabled: true,
+      optOutAffordance: "button",
+    },
+    {
+      name: "presence.disabled router entry",
+      input: {
+        ...base,
+        presence: { transport: "http", endpoint: ROUTER_URL, disabled: true },
+        entryName: RESERVED,
+      },
+      checked: false,
+      checkboxDisabled: false,
+      optOutAffordance: "button",
+    },
+    {
+      name: "foreign relay to the router URL",
+      input: {
+        ...base,
+        presence: { transport: "relay", endpoint: "node", relay_url: ROUTER_URL },
+        entryName: RESERVED,
+      },
+      checked: false,
+      checkboxDisabled: true,
+      optOutAffordance: "button",
+    },
+    {
+      name: "non-loopback remote HTTP entry",
+      input: {
+        ...base,
+        presence: { transport: "http", endpoint: "https://lsp.example.com/lsp/go/mcp" },
+        entryName: RESERVED,
+      },
+      checked: false,
+      checkboxDisabled: true,
+      optOutAffordance: "button",
+    },
+    {
+      name: "unusable config",
+      input: { ...base, configState: "missing" },
+      checked: false,
+      checkboxDisabled: true,
+      optOutAffordance: "unavailable",
+    },
+    {
+      name: "unusable config with a live router entry",
+      input: {
+        ...base,
+        presence: { transport: "http", endpoint: ROUTER_URL },
+        entryName: RESERVED,
+        configState: "error",
+      },
+      checked: true,
+      checkboxDisabled: false,
+      optOutAffordance: "checkbox",
+    },
+    {
+      name: "already opted out",
+      input: { ...base, clientRouterDisabled: true },
+      checked: false,
+      checkboxDisabled: false,
+      optOutAffordance: "already-off",
+    },
+    {
+      name: "optimistic opt-out override",
+      input: { ...base, checkedOverride: false, clientRouterDisabled: false },
+      checked: false,
+      checkboxDisabled: false,
+      optOutAffordance: "already-off",
+    },
+    {
+      name: "apply in flight",
+      input: { ...base, busy: true },
+      checked: false,
+      checkboxDisabled: true,
+      optOutAffordance: "unavailable",
+    },
+  ];
+
+  for (const shape of shapes) {
+    it(`${shape.name}: checked=${shape.checked} disabled=${shape.checkboxDisabled} optOut=${shape.optOutAffordance}`, () => {
+      const state = lspCellState(shape.input);
+      expect(state.checked).toBe(shape.checked);
+      expect(state.checkboxDisabled).toBe(shape.checkboxDisabled);
+      expect(state.optOutAffordance).toBe(shape.optOutAffordance);
+      expect(state.showOptOutButton).toBe(shape.optOutAffordance === "button");
+    });
+  }
+
+  // The class invariant the round-5 and round-7 bot findings both violated:
+  // an entry-presence shape must never decide whether the opt-out preference
+  // is reachable. Only a usable config, a pending Apply, and an already-
+  // persisted opt-out may.
+  it("always exposes an opt-out path for a usable, idle, not-yet-opted-out client", () => {
+    for (const shape of shapes) {
+      const input = {
+        ...shape.input,
+        configState: "ok" as ClientConfigState,
+        busy: false,
+        checkedOverride: undefined,
+        clientRouterDisabled: false,
+      };
+      const state = lspCellState(input);
+      expect(["checkbox", "button"]).toContain(state.optOutAffordance);
+    }
   });
 });

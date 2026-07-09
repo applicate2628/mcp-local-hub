@@ -15,12 +15,7 @@ import {
 import { ScanRefreshControls } from "../components/ScanRefreshControls";
 import { useAutoScan } from "../hooks/useAutoScan";
 import { useEventSource } from "../hooks/useEventSource";
-import {
-  collectServers,
-  isLspRouterURL,
-  isMcphubRelayCommand,
-  clientConfigUsable,
-} from "../lib/routing";
+import { collectServers } from "../lib/routing";
 import {
   effectiveVisibleClients,
   loadColumnPrefs,
@@ -30,7 +25,7 @@ import {
 } from "../lib/matrix-columns";
 import {
   collectLspRows,
-  lspRouterEntryName,
+  lspCellState,
   type LspRow,
   LSP_MANIFEST_SERVER,
   LSP_LANGUAGES,
@@ -2084,18 +2079,12 @@ function LspMatrix(props: {
 //   - legacy populated               -> [legacy] (stacks under [via-hub] or [direct])
 //   - none                           -> "-"
 //
-// The TOGGLE (checked / disabled / read-only) mirrors the main Servers matrix's
-// presence-derived logic instead of naive transport checks — the three Codex P2
-// fixes:
-//   1. checked ⟺ the entry is the SHARED-ROUTER shape (/lsp/<lang>/mcp), via the
-//      single-owner isLspRouterURL (mirrors api.entryIsOwnedLSPRouterForLanguage).
-//      A legacy per-workspace http://127.0.0.1:<port>/mcp entry renders UNCHECKED.
-//   2. disabled when the client has no usable config (clientConfigUsable — the
-//      same client_config_presence gate the main matrix uses); no usable config
-//      means there is nothing to enable into.
-//   3. an inherited router entry (presence.inherited) is checked-but-disabled and
-//      read-only, exactly like the main matrix's "via-hub-inherited" cell — the
-//      hub never wrote the inherited source layer and cannot roll it back.
+// The TOGGLE (checked / disabled / read-only) and the OPT-OUT affordance are
+// both derived by the single owner lspCellState (lib/lsp-rows.ts). This view
+// re-derives none of it: the checkbox describes the ROUTER ENTRY, while the
+// opt-out persists a CLIENT PREFERENCE and is therefore reachable for every
+// entry shape a usable client config can be in. See lspCellState's contract
+// comment for the full rationale and the disable-path side effects.
 function LspCellView(props: {
   language: string;
   client: string;
@@ -2125,53 +2114,27 @@ function LspCellView(props: {
     busy,
     onToggle,
   } = props;
-  const t = presence?.transport;
-  const hasPrimary = t === "http" || t === "relay" || t === "stdio";
-  const entryDisabled = presence?.disabled === true;
-  // A shared-router entry is active only when the entry is not disabled and its
-  // URL (http) or relay_url (relay-stdio bridge) is the /lsp/<language>/mcp
-  // shape. Relay entries also need the endpoint command to be mcphub-owned,
-  // matching the backend's entryIsOwnedLSPRouterForLanguage relay branch.
-  const httpRouterShape = isLspRouterURL(presence?.endpoint ?? "", language);
-  const relayRouterShape =
-    isLspRouterURL(presence?.relay_url ?? "", language) &&
-    isMcphubRelayCommand(presence?.endpoint);
-  const hasRouterShape = httpRouterShape || relayRouterShape;
-  const backendOwnedRouterShape = hasRouterShape && entryName === lspRouterEntryName(language);
-  const hasRouterEntry = !entryDisabled && backendOwnedRouterShape;
-  const hasUnreplaceablePrimary =
-    hasPrimary &&
-    !backendOwnedRouterShape &&
-    // Preserve only backend-recognized legacy hub-loopback LSP entries as
-    // enable candidates: the row helper proves the endpoint/relay_url /mcp
-    // URL's port and source entry name against the workspace registry.
-    // Orphaned/pruned loopback entries, suffixed router-shaped entries, direct
-    // stdio, foreign router relays, and non-loopback remote HTTP entries are
-    // not safe to mutate from this checkbox.
-    !canEnableFromLegacy;
-  // Finding 3: an inherited hub entry is read-only — the hub never wrote the
-  // inherited source (an ~/.claude.json import or a lower config.json layer) and
-  // cannot roll it back. Mirrors ClientPresence.inherited → via-hub-inherited.
-  const inherited = presence?.inherited === true;
-  // Finding 2: a client with no usable config file cannot host router entries.
-  const configUsable = clientConfigUsable(configState);
-  const checked = checkedOverride ?? hasRouterEntry;
-  const clientOptedOut = checkedOverride === false || (checkedOverride === undefined && clientRouterDisabled);
-  // Disabled when an Apply is in flight, the entry is inherited (read-only), or
-  // there is nothing to act on — no existing router entry AND no usable config
-  // to enable one into. A present (non-inherited) router entry stays interactive
-  // so the operator can always disable it, mirroring the main matrix's
-  // always-interactive via-hub cell.
-  const disabled =
-    busy || inherited || (!hasRouterEntry && (!configUsable || hasUnreplaceablePrimary));
-  const canPersistOptOut =
-    !checked &&
-    !clientOptedOut &&
-    !hasPrimary &&
-    !legacy &&
-    configUsable &&
-    !inherited &&
-    !busy;
+  const {
+    transport: t,
+    hasPrimary,
+    hasRouterEntry,
+    hasUnreplaceablePrimary,
+    inherited,
+    configUsable,
+    checked,
+    checkboxDisabled: disabled,
+    optedOut: clientOptedOut,
+    showOptOutButton,
+  } = lspCellState({
+    language,
+    presence,
+    entryName,
+    canEnableFromLegacy,
+    configState,
+    checkedOverride,
+    clientRouterDisabled,
+    busy,
+  });
   const dualBadge = hasPrimary && Boolean(legacy);
   let title: string;
   let ariaLabel: string;
@@ -2235,19 +2198,19 @@ function LspCellView(props: {
           off
         </span>
       )}
-      {canPersistOptOut && (
+      {showOptOutButton && (
         <button
           type="button"
           class="lsp-router-opt-out"
           data-testid={`lsp-opt-out-${language}-${client}`}
-          title={`Persist ${client}'s shared LSP router opt-out without adding entries.`}
+          title={`Persist ${client}'s shared LSP router opt-out. mcphub stops adding router entries for ${client} on setup, and removes the router entries it owns.`}
           aria-label={`Opt ${client} out of shared LSP router entries`}
           onClick={() => onToggle(client, false)}
         >
           Off
         </button>
       )}
-      {!hasPrimary && !legacy && !clientOptedOut && !canPersistOptOut && (
+      {!hasPrimary && !legacy && !clientOptedOut && !showOptOutButton && (
         <span class="lsp-cell-empty">—</span>
       )}
     </td>
