@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/config"
 )
@@ -424,6 +425,7 @@ func TestRemoveServerFromSupervisorIntent_ManifestUninstall_ReclaimsStaleRow(t *
 	// current row AND its stale removed-daemon row.
 	seedInstalledServerManifests(t, "demo", "demo-alpha", "other")
 	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	now := time.Unix(1700000000, 0).UTC()
 
 	seed := &SupervisorIntentFile{
 		Version: 1,
@@ -432,6 +434,18 @@ func TestRemoveServerFromSupervisorIntent_ManifestUninstall_ReclaimsStaleRow(t *
 			{TaskName: `\mcp-local-hub-demo-oldname`, Command: "demo-stale-removed", Port: 33131},
 			{TaskName: `\mcp-local-hub-demo-alpha-beta`, Daemon: "beta", Command: "preserve-demo-alpha-beta", Port: 33122},
 			{TaskName: `\mcp-local-hub-other-d`, Server: "other", Daemon: "d", Command: "preserve-other", Port: 33133},
+		},
+		Stops: map[string]DaemonIntent{
+			`\mcp-local-hub-demo-alpha`:      {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			`\mcp-local-hub-demo-oldname`:    {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			`\mcp-local-hub-demo-alpha-beta`: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			`\mcp-local-hub-other-d`:         {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+		},
+		LegacyStopWatermarks: map[string]DaemonIntent{
+			`\mcp-local-hub-demo-alpha`:      {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			`\mcp-local-hub-demo-oldname`:    {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			`\mcp-local-hub-demo-alpha-beta`: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			`\mcp-local-hub-other-d`:         {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
 		},
 	}
 	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
@@ -488,5 +502,21 @@ func TestRemoveServerFromSupervisorIntent_ManifestUninstall_ReclaimsStaleRow(t *
 	}
 	if d, ok := survived[`\mcp-local-hub-other-d`]; !ok || d.Command != "preserve-other" {
 		t.Errorf("other/d sibling not preserved verbatim; survived=%+v", survived)
+	}
+	for _, removedTask := range []string{`\mcp-local-hub-demo-alpha`, `\mcp-local-hub-demo-oldname`} {
+		if _, ok := got.Stops[removedTask]; ok {
+			t.Errorf("stop for removed demo row %q survived manifest uninstall: %+v", removedTask, got.Stops)
+		}
+		if _, ok := got.LegacyStopWatermarks[removedTask]; ok {
+			t.Errorf("legacy-stop watermark for removed demo row %q survived manifest uninstall: %+v", removedTask, got.LegacyStopWatermarks)
+		}
+	}
+	for _, siblingTask := range []string{`\mcp-local-hub-demo-alpha-beta`, `\mcp-local-hub-other-d`} {
+		if _, ok := got.Stops[siblingTask]; !ok {
+			t.Errorf("sibling stop %q was pruned by manifest uninstall: %+v", siblingTask, got.Stops)
+		}
+		if _, ok := got.LegacyStopWatermarks[siblingTask]; ok {
+			t.Errorf("sibling stop %q retained redundant legacy-stop watermark: %+v", siblingTask, got.LegacyStopWatermarks)
+		}
 	}
 }

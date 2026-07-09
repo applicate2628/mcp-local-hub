@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
@@ -2318,6 +2320,11 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 			betaTask:  {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
 			otherTask: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
 		},
+		LegacyStopWatermarks: map[string]DaemonIntent{
+			alphaTask: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			betaTask:  {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			otherTask: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+		},
 	}
 	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
@@ -2412,6 +2419,81 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 	if _, ok := written.Stops[otherTask]; !ok {
 		t.Fatalf("sibling stop %s was not preserved: %+v", otherTask, written.Stops)
 	}
+	if _, ok := written.LegacyStopWatermarks[betaTask]; ok {
+		t.Fatalf("removed daemon %s retained a dangling legacy-stop watermark: %+v", betaTask, written.LegacyStopWatermarks)
+	}
+	if _, ok := written.LegacyStopWatermarks[otherTask]; ok {
+		t.Fatalf("sibling stop %s retained redundant legacy-stop watermark: %+v", otherTask, written.LegacyStopWatermarks)
+	}
+}
+
+func TestBuildMergedSupervisorIntentWrite_NormalizesRetainedRedundantLegacyStopWatermark(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	retainedTask := `\mcp-local-hub-demo-alpha`
+	clearedTask := `\mcp-local-hub-demo-cleared`
+	retainedStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now}
+	clearedStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: now.Add(-time.Minute)}
+	seed := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName: retainedTask,
+			Server:   "demo",
+			Daemon:   "alpha",
+			Command:  "stale-alpha",
+			Port:     9321,
+		}},
+		Stops: map[string]DaemonIntent{
+			retainedTask: retainedStop,
+		},
+		LegacyStopWatermarks: map[string]DaemonIntent{
+			retainedTask: retainedStop,
+			clearedTask:  clearedStop,
+		},
+	}
+	raw, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatalf("marshal raw supervisor intent seed: %v", err)
+	}
+	if err := os.WriteFile(intentPath, raw, 0o600); err != nil {
+		t.Fatalf("write raw supervisor intent seed: %v", err)
+	}
+
+	m := &config.ServerManifest{
+		Name:      "demo",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "go",
+		Daemons:   []config.DaemonSpec{{Name: "alpha", Port: 9321}},
+	}
+	lock := flock.New(intentPath + supervisorIntentLockSuffix)
+	if err := lock.Lock(); err != nil {
+		t.Fatalf("lock supervisor intent: %v", err)
+	}
+	defer func() { _ = lock.Unlock() }()
+
+	desired, prior, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	if err != nil {
+		t.Fatalf("buildMergedSupervisorIntent: %v", err)
+	}
+	scope := supervisorIntentOwnershipScopeForManifest(m, nil, "")
+	removed := removedSupervisorTargetsForFullInstallScope(prior, desired, m.Name, "", scope)
+	desired.Stops = pruneStopsForRemovedSupervisorTargets(desired.Stops, removed)
+	desired.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(desired.LegacyStopWatermarks, removed)
+	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
+		t.Fatalf("writeSupervisorIntentLockHeld: %v", err)
+	}
+
+	written, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	assertDaemonIntentEqual(t, written.Stops[retainedTask], retainedStop)
+	if _, ok := written.LegacyStopWatermarks[retainedTask]; ok {
+		t.Fatalf("retained stop kept redundant legacy-stop watermark: %+v", written.LegacyStopWatermarks)
+	}
+	assertDaemonIntentEqual(t, written.LegacyStopWatermarks[clearedTask], clearedStop)
 }
 
 // TestInstallPlanCore_GlobalFreshInstall_NoPerDaemonSchedulerTaskCreated is the

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSupervisorIntent_RoundTrip(t *testing.T) {
@@ -52,6 +53,232 @@ func TestSupervisorIntent_RoundTrip(t *testing.T) {
 	if got.Daemons[0].Port != 9128 {
 		t.Fatalf("port not preserved: %d", got.Daemons[0].Port)
 	}
+}
+
+func TestSupervisorIntent_LegacyStopWatermarkJSONIsAdditiveForSupportedOldReaders(t *testing.T) {
+	now := "2026-07-09T09:59:00Z"
+	raw := []byte(`{"version":1,"legacy_stop_watermarks":{"\\mcp-local-hub-paper-search-default":{"desired":"stopped","reason":"user-stop","updated_at":"` + now + `"}}}`)
+
+	var oldReaderShape struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &oldReaderShape); err != nil {
+		t.Fatalf("supported old reader shape rejected additive legacy_stop_watermarks field: %v", err)
+	}
+	if oldReaderShape.Version != 1 {
+		t.Fatalf("old reader shape version = %d, want 1", oldReaderShape.Version)
+	}
+	var current SupervisorIntentFile
+	if err := json.Unmarshal(raw, &current); err != nil {
+		t.Fatalf("current reader rejected legacy_stop_watermarks field: %v", err)
+	}
+	if _, ok := current.LegacyStopWatermarks[`\mcp-local-hub-paper-search-default`]; !ok {
+		t.Fatalf("current reader did not preserve legacy_stop_watermarks: %+v", current.LegacyStopWatermarks)
+	}
+
+	emptyRaw, err := json.Marshal(SupervisorIntentFile{Version: 1})
+	if err != nil {
+		t.Fatalf("marshal empty supervisor intent: %v", err)
+	}
+	if strings.Contains(string(emptyRaw), "legacy_stop_watermarks") {
+		t.Fatalf("empty watermark field should be omitted for back-compat, raw=%s", emptyRaw)
+	}
+}
+
+func TestWriteSupervisorIntent_NormalizesAbsentOnlyLegacyStopWatermarks(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-intent.json")
+
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	activeTask := `\mcp-local-hub-demo-active`
+	clearedTask := `\mcp-local-hub-demo-cleared`
+	activeStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now}
+	clearedStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: now.Add(-time.Minute)}
+
+	if err := WriteSupervisorIntent(path, &SupervisorIntentFile{
+		Version: 1,
+		Stops: map[string]DaemonIntent{
+			activeTask: activeStop,
+		},
+		LegacyStopWatermarks: map[string]DaemonIntent{
+			strings.TrimPrefix(activeTask, `\`):  activeStop,
+			strings.TrimPrefix(clearedTask, `\`): clearedStop,
+		},
+	}); err != nil {
+		t.Fatalf("WriteSupervisorIntent: %v", err)
+	}
+
+	got, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	assertDaemonIntentEqual(t, got.Stops[activeTask], activeStop)
+	if _, ok := got.LegacyStopWatermarks[activeTask]; ok {
+		t.Fatalf("redundant active-task watermark survived normalization: %+v", got.LegacyStopWatermarks)
+	}
+	if _, ok := got.LegacyStopWatermarks[strings.TrimPrefix(activeTask, `\`)]; ok {
+		t.Fatalf("bare active-task watermark survived normalization: %+v", got.LegacyStopWatermarks)
+	}
+	if _, ok := got.LegacyStopWatermarks[strings.TrimPrefix(clearedTask, `\`)]; ok {
+		t.Fatalf("cleared-task watermark kept bare key after normalization: %+v", got.LegacyStopWatermarks)
+	}
+	assertDaemonIntentEqual(t, got.LegacyStopWatermarks[clearedTask], clearedStop)
+}
+
+func TestReadSupervisorIntent_CanonicalizesBareStopKeysPrefersCanonicalEntry(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-intent.json")
+
+	task := `\mcp-local-hub-demo-canonical`
+	bareTask := strings.TrimPrefix(task, `\`)
+	bareStop := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
+	}
+	canonicalStop := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserDisabled,
+		UpdatedAt: time.Date(2026, 7, 9, 12, 1, 0, 0, time.UTC),
+	}
+	writeRawSupervisorIntentFileForTest(t, path, SupervisorIntentFile{
+		Version: 1,
+		Stops: map[string]DaemonIntent{
+			bareTask: bareStop,
+			task:     canonicalStop,
+		},
+	})
+
+	got, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if len(got.Stops) != 1 {
+		t.Fatalf("read stops count = %d, want one canonical entry after bare/canonical merge: %+v", len(got.Stops), got.Stops)
+	}
+	if _, ok := got.Stops[bareTask]; ok {
+		t.Fatalf("bare stop key survived read-boundary canonicalization: %+v", got.Stops)
+	}
+	assertDaemonIntentEqual(t, got.Stops[task], canonicalStop)
+}
+
+func TestReadSupervisorIntent_MergeStopCollisionKeepsBareNewerRecord(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-intent.json")
+
+	task := `\mcp-local-hub-demo-rollback-stop`
+	bareTask := strings.TrimPrefix(task, `\`)
+	canonicalStop := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserDisabled,
+		UpdatedAt: time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
+	}
+	bareStop := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Date(2026, 7, 9, 12, 1, 0, 0, time.UTC),
+	}
+	writeRawSupervisorIntentFileForTest(t, path, SupervisorIntentFile{
+		Version: 1,
+		Stops: map[string]DaemonIntent{
+			bareTask: bareStop,
+			task:     canonicalStop,
+		},
+	})
+
+	got, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if len(got.Stops) != 1 {
+		t.Fatalf("read stops count = %d, want one canonical entry after bare/canonical merge: %+v", len(got.Stops), got.Stops)
+	}
+	if _, ok := got.Stops[bareTask]; ok {
+		t.Fatalf("bare stop key survived read-boundary canonicalization: %+v", got.Stops)
+	}
+	assertDaemonIntentEqual(t, got.Stops[task], bareStop)
+}
+
+func TestReadSupervisorIntent_MergeWatermarkCollisionKeepsBareNewerRecord(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-intent.json")
+
+	task := `\mcp-local-hub-demo-rollback-watermark`
+	bareTask := strings.TrimPrefix(task, `\`)
+	canonicalWatermark := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserDisabled,
+		UpdatedAt: time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC),
+	}
+	bareWatermark := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Date(2026, 7, 9, 12, 1, 0, 0, time.UTC),
+	}
+	writeRawSupervisorIntentFileForTest(t, path, SupervisorIntentFile{
+		Version: 1,
+		LegacyStopWatermarks: map[string]DaemonIntent{
+			bareTask: bareWatermark,
+			task:     canonicalWatermark,
+		},
+	})
+
+	got, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if len(got.LegacyStopWatermarks) != 1 {
+		t.Fatalf("read watermarks count = %d, want one canonical entry after bare/canonical merge: %+v", len(got.LegacyStopWatermarks), got.LegacyStopWatermarks)
+	}
+	if _, ok := got.LegacyStopWatermarks[bareTask]; ok {
+		t.Fatalf("bare watermark key survived read-boundary canonicalization: %+v", got.LegacyStopWatermarks)
+	}
+	assertDaemonIntentEqual(t, got.LegacyStopWatermarks[task], bareWatermark)
+}
+
+func TestReadSupervisorIntent_MergeStopAndWatermarkCollisionTieKeepsCanonicalRecord(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-intent.json")
+
+	stopTask := `\mcp-local-hub-demo-tie-stop`
+	bareStopTask := strings.TrimPrefix(stopTask, `\`)
+	watermarkTask := `\mcp-local-hub-demo-tie-watermark`
+	bareWatermarkTask := strings.TrimPrefix(watermarkTask, `\`)
+	tiedUpdatedAt := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	bareStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: tiedUpdatedAt}
+	canonicalStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: tiedUpdatedAt}
+	bareWatermark := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: tiedUpdatedAt}
+	canonicalWatermark := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: tiedUpdatedAt}
+	writeRawSupervisorIntentFileForTest(t, path, SupervisorIntentFile{
+		Version: 1,
+		Stops: map[string]DaemonIntent{
+			bareStopTask: bareStop,
+			stopTask:     canonicalStop,
+		},
+		LegacyStopWatermarks: map[string]DaemonIntent{
+			bareWatermarkTask: bareWatermark,
+			watermarkTask:     canonicalWatermark,
+		},
+	})
+
+	got, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", err)
+	}
+	if len(got.Stops) != 1 {
+		t.Fatalf("read stops count = %d, want one canonical entry after bare/canonical merge: %+v", len(got.Stops), got.Stops)
+	}
+	if len(got.LegacyStopWatermarks) != 1 {
+		t.Fatalf("read watermarks count = %d, want one canonical entry after bare/canonical merge: %+v", len(got.LegacyStopWatermarks), got.LegacyStopWatermarks)
+	}
+	if _, ok := got.Stops[bareStopTask]; ok {
+		t.Fatalf("bare stop key survived tie canonicalization: %+v", got.Stops)
+	}
+	if _, ok := got.LegacyStopWatermarks[bareWatermarkTask]; ok {
+		t.Fatalf("bare watermark key survived tie canonicalization: %+v", got.LegacyStopWatermarks)
+	}
+	assertDaemonIntentEqual(t, got.Stops[stopTask], canonicalStop)
+	assertDaemonIntentEqual(t, got.LegacyStopWatermarks[watermarkTask], canonicalWatermark)
 }
 
 func TestSupervisorIntent_ReadRejectsSymlinkTarget(t *testing.T) {

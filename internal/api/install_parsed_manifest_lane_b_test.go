@@ -389,6 +389,11 @@ func TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows(t *testing.T) 
 			priorRows[1].TaskName: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
 			otherTask:             {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
 		},
+		LegacyStopWatermarks: map[string]DaemonIntent{
+			priorRows[0].TaskName: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			priorRows[1].TaskName: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			otherTask:             {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+		},
 	}
 	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
 	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
@@ -424,5 +429,14 @@ func TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows(t *testing.T) 
 	}
 	if _, ok := written.Stops[otherTask]; !ok {
 		t.Fatalf("sibling server stop %q was pruned: %+v", otherTask, written.Stops)
+	}
+	if _, ok := written.LegacyStopWatermarks[priorRows[0].TaskName]; ok {
+		t.Fatalf("dropped workspace watermark %q survived: %+v", priorRows[0].TaskName, written.LegacyStopWatermarks)
+	}
+	if _, ok := written.LegacyStopWatermarks[priorRows[1].TaskName]; ok {
+		t.Fatalf("surviving workspace stop %q retained redundant watermark: %+v", priorRows[1].TaskName, written.LegacyStopWatermarks)
+	}
+	if _, ok := written.LegacyStopWatermarks[otherTask]; ok {
+		t.Fatalf("sibling server stop %q retained redundant watermark: %+v", otherTask, written.LegacyStopWatermarks)
 	}
 }

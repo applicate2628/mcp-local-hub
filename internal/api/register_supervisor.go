@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -487,27 +486,22 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 	desired.Daemons = append(kept, descriptor)
 	desired.Version = 1
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	// Capture any prior stop tombstone for this task through both the canonical
-	// and bare key forms — a stop keyed under the bare (legacy/external/migrated)
-	// form would be missed by a raw canonical-only index, so the rollback closure
-	// below would restore the descriptor WITHOUT the tombstone and revive a
-	// deliberately-stopped daemon. Mirrors removeSupervisorIntentDescriptorForTask.
-	// Capture any prior stop tombstone for this task through both the canonical
-	// and bare key forms — a stop keyed under the bare (legacy/external/migrated)
-	// form would be missed by a raw canonical-only index, so the rollback closure
-	// below would restore the descriptor WITHOUT the tombstone and revive a
-	// deliberately-stopped daemon. Mirrors removeSupervisorIntentDescriptorForTask.
-	priorStop, hadPriorStop := supervisorStopForTask(desired.Stops, descriptor.TaskName)
+	// Capture any prior stop artifact for this task through both the canonical
+	// and bare key forms. A stop or absent-only watermark keyed under the bare
+	// legacy/external/migrated form would be missed by a raw canonical-only
+	// index, so the rollback closure below would restore the descriptor without
+	// the artifact and revive a deliberately-stopped daemon.
+	priorArtifacts := supervisorStopArtifactsForTask(desired, descriptor.TaskName)
 	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
 		return nil, fmt.Errorf("write supervisor-intent LSP row %s: %w", descriptor.TaskName, err)
 	}
 
 	return func() {
 		if replaced {
-			upsertSupervisorIntentDescriptorAndStop(intentPath, priorDescriptor, priorStop, hadPriorStop)
+			upsertSupervisorIntentDescriptorAndStop(intentPath, priorDescriptor, priorArtifacts)
 			return
 		}
-		removeSupervisorIntentDescriptorAndStop(intentPath, descriptor.TaskName, !existed, priorStop, hadPriorStop)
+		removeSupervisorIntentDescriptorAndStop(intentPath, descriptor.TaskName, !existed, priorArtifacts)
 	}, nil
 }
 
@@ -689,14 +683,16 @@ func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (func(), 
 	if !removed {
 		return func() {}, false, nil
 	}
-	priorStop, hadPriorStop := supervisorStopForTask(desired.Stops, taskName)
+	priorArtifacts := supervisorStopArtifactsForTask(desired, taskName)
 	desired.Daemons = kept
 	// Descriptor removal owns the matching stop tombstone too: this mirrors the
 	// install prune invariant that row removed => its stop entry goes with it.
 	// Keeping both changes in one intent write avoids a re-register window where
 	// reconcile observes the re-added descriptor but an old stop still suppresses
 	// readiness before recordRegisterIntentForTask can clear it.
-	desired.Stops = pruneStopsForRemovedSupervisorTargets(desired.Stops, []SupervisorDaemon{removedDescriptor})
+	removedDescriptors := []SupervisorDaemon{removedDescriptor}
+	desired.Stops = pruneStopsForRemovedSupervisorTargets(desired.Stops, removedDescriptors)
+	desired.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(desired.LegacyStopWatermarks, removedDescriptors)
 	desired.Version = 1
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
@@ -704,8 +700,33 @@ func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (func(), 
 	}
 
 	return func() {
-		upsertSupervisorIntentDescriptorAndStop(intentPath, removedDescriptor, priorStop, hadPriorStop)
+		upsertSupervisorIntentDescriptorAndStop(intentPath, removedDescriptor, priorArtifacts)
 	}, true, nil
+}
+
+type supervisorStopArtifacts struct {
+	stop         DaemonIntent
+	hasStop      bool
+	watermark    DaemonIntent
+	hasWatermark bool
+}
+
+func supervisorStopArtifactsForTask(intent *SupervisorIntentFile, taskName string) supervisorStopArtifacts {
+	if intent == nil {
+		return supervisorStopArtifacts{}
+	}
+	stop, hasStop := supervisorStopForTask(intent.Stops, taskName)
+	watermark, hasWatermark := supervisorStopForTask(intent.LegacyStopWatermarks, taskName)
+	return supervisorStopArtifacts{
+		stop:         stop,
+		hasStop:      hasStop,
+		watermark:    watermark,
+		hasWatermark: hasWatermark,
+	}
+}
+
+func (a supervisorStopArtifacts) hasAny() bool {
+	return a.hasStop || a.hasWatermark
 }
 
 func supervisorStopForTask(stops map[string]DaemonIntent, taskName string) (DaemonIntent, bool) {
@@ -716,15 +737,27 @@ func supervisorStopForTask(stops map[string]DaemonIntent, taskName string) (Daem
 	if stop, ok := stops[canonicalTaskName]; ok {
 		return stop, true
 	}
-	if bareTaskName := strings.TrimPrefix(canonicalTaskName, `\`); bareTaskName != canonicalTaskName {
-		if stop, ok := stops[bareTaskName]; ok {
-			return stop, true
-		}
-	}
 	return DaemonIntent{}, false
 }
 
-func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorDaemon, stop DaemonIntent, restoreStop bool) {
+func restoreSupervisorStopArtifacts(desired *SupervisorIntentFile, taskName string, artifacts supervisorStopArtifacts) {
+	key := canonicalIntentTaskKey(taskName)
+	if artifacts.hasStop {
+		if desired.Stops == nil {
+			desired.Stops = map[string]DaemonIntent{}
+		}
+		desired.Stops[key] = artifacts.stop
+		return
+	}
+	if artifacts.hasWatermark {
+		if desired.LegacyStopWatermarks == nil {
+			desired.LegacyStopWatermarks = map[string]DaemonIntent{}
+		}
+		desired.LegacyStopWatermarks[key] = artifacts.watermark
+	}
+}
+
+func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorDaemon, artifacts supervisorStopArtifacts) {
 	lock := flock.New(path + supervisorIntentLockSuffix)
 	if err := lock.Lock(); err != nil {
 		return
@@ -742,18 +775,13 @@ func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorD
 		}
 	}
 	desired.Daemons = append(kept, descriptor)
-	if restoreStop {
-		if desired.Stops == nil {
-			desired.Stops = map[string]DaemonIntent{}
-		}
-		desired.Stops[canonicalIntentTaskKey(descriptor.TaskName)] = stop
-	}
+	restoreSupervisorStopArtifacts(desired, descriptor.TaskName, artifacts)
 	desired.Version = 1
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	_ = writeSupervisorIntentLockHeld(path, desired)
 }
 
-func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIfEmpty bool, stop DaemonIntent, restoreStop bool) {
+func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIfEmpty bool, artifacts supervisorStopArtifacts) {
 	lock := flock.New(path + supervisorIntentLockSuffix)
 	if err := lock.Lock(); err != nil {
 		return
@@ -773,17 +801,14 @@ func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIf
 		}
 		kept = append(kept, daemon)
 	}
-	if !removed && !restoreStop {
+	if !removed && !artifacts.hasAny() {
 		return
 	}
 	desired.Daemons = kept
-	if restoreStop {
-		if desired.Stops == nil {
-			desired.Stops = map[string]DaemonIntent{}
-		}
-		desired.Stops[canonicalIntentTaskKey(taskName)] = stop
-	}
-	if removeFileIfEmpty && len(desired.Daemons) == 0 && len(desired.MaintenanceTimers) == 0 && !desired.StrictMode && len(desired.Stops) == 0 {
+	removedDescriptor := SupervisorDaemon{TaskName: taskName}
+	desired.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(desired.LegacyStopWatermarks, []SupervisorDaemon{removedDescriptor})
+	restoreSupervisorStopArtifacts(desired, taskName, artifacts)
+	if removeFileIfEmpty && len(desired.Daemons) == 0 && len(desired.MaintenanceTimers) == 0 && !desired.StrictMode && len(desired.Stops) == 0 && len(desired.LegacyStopWatermarks) == 0 {
 		_ = os.Remove(path)
 		return
 	}
@@ -822,6 +847,12 @@ func cloneSupervisorIntentFile(in *SupervisorIntentFile) *SupervisorIntentFile {
 		out.Stops = make(map[string]DaemonIntent, len(in.Stops))
 		for k, v := range in.Stops {
 			out.Stops[k] = v
+		}
+	}
+	if in.LegacyStopWatermarks != nil {
+		out.LegacyStopWatermarks = make(map[string]DaemonIntent, len(in.LegacyStopWatermarks))
+		for k, v := range in.LegacyStopWatermarks {
+			out.LegacyStopWatermarks[k] = v
 		}
 	}
 	return &out
