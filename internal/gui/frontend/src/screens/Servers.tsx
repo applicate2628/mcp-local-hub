@@ -16,7 +16,6 @@ import { useAutoScan } from "../hooks/useAutoScan";
 import { useEventSource } from "../hooks/useEventSource";
 import {
   collectServers,
-  isHubLoopback,
   isLspRouterURL,
   isMcphubRelayCommand,
   clientConfigUsable,
@@ -28,7 +27,13 @@ import {
   clearColumnPrefs,
   type ColumnPrefs,
 } from "../lib/matrix-columns";
-import { collectLspRows, type LspRow, LSP_MANIFEST_SERVER, LSP_LANGUAGES } from "../lib/lsp-rows";
+import {
+  collectLspRows,
+  lspRouterEntryName,
+  type LspRow,
+  LSP_MANIFEST_SERVER,
+  LSP_LANGUAGES,
+} from "../lib/lsp-rows";
 import { aggregateStatus, stateShape } from "../lib/status";
 import { pushToast } from "../lib/toast-store";
 import { WorkspaceSelector, ALL_WORKSPACES_KEY } from "../components/WorkspaceSelector";
@@ -1984,6 +1989,8 @@ function LspMatrix(props: {
                     language={row.language}
                     client={client}
                     presence={row.clientPresence[client]}
+                    entryName={row.clientPresenceEntryName[client]}
+                    canEnableFromLegacy={row.clientPresenceCanEnableFromLegacy[client] === true}
                     legacy={row.legacyConflict[client]}
                     configState={clientConfigPresence[client]}
                     checkedOverride={routerClientOverrides[client]}
@@ -2062,6 +2069,8 @@ function LspCellView(props: {
   language: string;
   client: string;
   presence: ClientPresence | undefined;
+  entryName: string | undefined;
+  canEnableFromLegacy: boolean;
   legacy: ClientEntry | undefined;
   // Per-client config-file usability from ScanResult.client_config_presence —
   // the SAME map the main matrix consumes. Undefined when the scan omitted the
@@ -2071,7 +2080,18 @@ function LspCellView(props: {
   busy: boolean;
   onToggle: (client: string, enabled: boolean) => void;
 }) {
-  const { language, client, presence, legacy, configState, checkedOverride, busy, onToggle } = props;
+  const {
+    language,
+    client,
+    presence,
+    entryName,
+    canEnableFromLegacy,
+    legacy,
+    configState,
+    checkedOverride,
+    busy,
+    onToggle,
+  } = props;
   const t = presence?.transport;
   const hasPrimary = t === "http" || t === "relay" || t === "stdio";
   const entryDisabled = presence?.disabled === true;
@@ -2084,15 +2104,18 @@ function LspCellView(props: {
     isLspRouterURL(presence?.relay_url ?? "", language) &&
     isMcphubRelayCommand(presence?.endpoint);
   const hasRouterShape = httpRouterShape || relayRouterShape;
-  const hasRouterEntry = !entryDisabled && hasRouterShape;
+  const backendOwnedRouterShape = hasRouterShape && entryName === lspRouterEntryName(language);
+  const hasRouterEntry = !entryDisabled && backendOwnedRouterShape;
   const hasUnreplaceablePrimary =
     hasPrimary &&
-    !hasRouterShape &&
-    // Preserve legacy hub-loopback LSP entries as enable candidates: the
-    // backend can migrate hub-owned /mcp entries, while direct stdio, relay
-    // entries with foreign commands, and non-loopback remote HTTP entries are
-    // not safe to overwrite from this checkbox.
-    (t !== "http" || !isHubLoopback(presence?.endpoint ?? ""));
+    !backendOwnedRouterShape &&
+    // Preserve only backend-recognized legacy hub-loopback LSP entries as
+    // enable candidates: the row helper proves the /mcp URL's port and source
+    // entry name against the workspace registry. Orphaned/pruned loopback
+    // entries, suffixed router-shaped entries, direct stdio, relay entries with
+    // foreign commands, and non-loopback remote HTTP entries are not safe to
+    // mutate from this checkbox.
+    (t !== "http" || !canEnableFromLegacy);
   // Finding 3: an inherited hub entry is read-only — the hub never wrote the
   // inherited source (an ~/.claude.json import or a lower config.json layer) and
   // cannot roll it back. Mirrors ClientPresence.inherited → via-hub-inherited.

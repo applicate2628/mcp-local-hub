@@ -119,16 +119,15 @@ export function clientConfigUsable(state: ClientConfigState | undefined): boolea
   return state === "ok";
 }
 
-// isMcphubRelayCommand mirrors clients.IsMcphubBinary for scan-surfaced relay
-// entries: only mcphub/mcphub.exe and the legacy mcp/mcp.exe basenames are
-// hub-owned relay executables. LSP router relay cells must check this before
-// treating a router-shaped relay_url as manageable; a foreign command can
-// forward to /lsp/<lang>/mcp but the backend refuses to mutate it.
+// isMcphubRelayCommand mirrors api.isCurrentMcphubRelayBinary for LSP-router
+// relay ownership: only the current mcphub/mcphub.exe basenames are removable
+// by the per-client disable path. Legacy mcp/mcp.exe can forward to a router
+// URL, but the backend refuses to mutate those relay entries.
 export function isMcphubRelayCommand(command: string | undefined): boolean {
   if (!command) return false;
   const normalized = command.replaceAll("\\", "/");
   const base = normalized.split("/").pop()?.toLowerCase() ?? "";
-  return base === "mcphub" || base === "mcphub.exe" || base === "mcp" || base === "mcp.exe";
+  return base === "mcphub" || base === "mcphub.exe";
 }
 
 // loopbackEntryPort parses the TCP port out of a hub-shaped loopback URL.
@@ -144,6 +143,21 @@ export function loopbackEntryPort(endpoint: string): number | null {
     if (u.port === "") return null;
     const p = Number(u.port);
     return Number.isInteger(p) && p > 0 ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+// lspLegacyURLPort mirrors api.lspLegacyURLPort: a backend-recognized legacy
+// LSP entry is an http loopback URL with an explicit valid port and path /mcp.
+// The caller still has to prove the port/name pair came from the workspace
+// registry before offering the LSP router enable toggle.
+export function lspLegacyURLPort(endpoint: string): number | null {
+  const port = loopbackEntryPort(endpoint);
+  if (port === null) return null;
+  try {
+    const u = new URL(endpoint);
+    return u.protocol === "http:" && u.pathname === "/mcp" ? port : null;
   } catch {
     return null;
   }

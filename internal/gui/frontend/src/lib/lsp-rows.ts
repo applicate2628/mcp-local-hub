@@ -21,6 +21,7 @@
 // servers/mcp-language-server/manifest.yaml. Keep both lists in sync
 // when the manifest declares a new language.
 
+import { lspLegacyURLPort } from "./routing";
 import type { ClientPresence, ScanResult } from "../types";
 import type { ClientEntry } from "../types";
 import type { WorkspaceEntryDTO } from "../api";
@@ -53,6 +54,10 @@ export type LspLanguage = (typeof LSP_LANGUAGES)[number];
 // a single path-router endpoint, so its matrix checkbox DOES work and it
 // is NOT excluded — the exclusion is by this specific name, not by kind.)
 export const LSP_MANIFEST_SERVER = "mcp-language-server";
+
+export function lspRouterEntryName(language: string): string {
+  return `${LSP_MANIFEST_SERVER}-${language}`;
+}
 
 // LSP_KNOWN_CLIENTS mirrors the per-client-routing CLIENTS list used by
 // Servers.tsx — keeping a local constant lets the row helper produce
@@ -99,6 +104,15 @@ export interface LspRow {
   // rows have empty objects so the per-client cell renders as
   // "not-installed" via the existing routing fallback.
   clientPresence: Record<string, ClientPresence>;
+  // Source scan-entry name for the first-win clientPresence cell. LSP router
+  // toggles need this because the backend per-client disable path mutates only
+  // the reserved mcp-language-server-<lang> entry, not suffixed siblings.
+  clientPresenceEntryName: Record<string, string>;
+  // True when the first-win clientPresence is a legacy /mcp URL whose port and
+  // source entry name are recognized by the backend rollback/ensure owners via
+  // the workspace registry. Without this proof, loopback /mcp cells stay
+  // unchecked and disabled instead of hitting deterministic ownership errors.
+  clientPresenceCanEnableFromLegacy: Record<string, boolean>;
   legacyConflict: Record<string, ClientEntry>;
 }
 
@@ -176,12 +190,39 @@ export function collectLspRows(
     // workspace's client_entries may still name the old per-workspace suffixed
     // entry, so recognize the router name explicitly; rollback reconstructs
     // pre-router entries from client_entries, so the registry is not rewritten.
-    expectedNames.add(`${LSP_MANIFEST_SERVER}-${language}`);
+    const reservedRouterName = lspRouterEntryName(language);
+    expectedNames.add(reservedRouterName);
     for (const we of filteredWs) {
       for (const v of Object.values(we.client_entries ?? {})) {
         if (v) expectedNames.add(v);
       }
     }
+    const legacyPorts = new Set<number>();
+    const legacyPortsByClientEntry = new Map<string, Set<number>>();
+    const legacyPortKey = (client: string, entryName: string) => `${client}\u0000${entryName}`;
+    for (const we of wsEntries) {
+      if (we.language !== language || we.port <= 0) continue;
+      legacyPorts.add(we.port);
+      for (const [client, entryName] of Object.entries(we.client_entries ?? {})) {
+        if (!entryName) continue;
+        const key = legacyPortKey(client, entryName);
+        const ports = legacyPortsByClientEntry.get(key) ?? new Set<number>();
+        ports.add(we.port);
+        legacyPortsByClientEntry.set(key, ports);
+      }
+    }
+    const canEnableFromLegacy = (
+      client: string,
+      entryName: string,
+      presence: ClientPresence,
+    ): boolean => {
+      const port = lspLegacyURLPort(presence.endpoint ?? "");
+      if (port === null) return false;
+      if (entryName === reservedRouterName) {
+        return legacyPorts.has(port);
+      }
+      return legacyPortsByClientEntry.get(legacyPortKey(client, entryName))?.has(port) === true;
+    };
     // Cross-reference parsed names — covers placeholders + sanity.
     for (const e of entries) {
       const parsed = parseLspEntryName(e.name);
@@ -200,6 +241,8 @@ export function collectLspRows(
       }
     }
     const clientPresence: Record<string, ClientPresence> = {};
+    const clientPresenceEntryName: Record<string, string> = {};
+    const clientPresenceCanEnableFromLegacy: Record<string, boolean> = {};
     const legacyConflict: Record<string, ClientEntry> = {};
     // Deterministic, router-preferring aggregation order. The "first match
     // wins" rule below is sensitive to iteration order, so raw scan.entries
@@ -211,7 +254,6 @@ export function collectLspRows(
     // Scope is minimal: this sorts ONLY the entries this row already
     // aggregates over (narrowed to this language via expectedNames); it does
     // not reorder collectServers or any unrelated matrix rows.
-    const reservedRouterName = `${LSP_MANIFEST_SERVER}-${language}`;
     const aggregated = entries
       .filter((e) => expectedNames.has(e.name))
       .sort((a, b) => {
@@ -225,6 +267,8 @@ export function collectLspRows(
         // are coexistence anomalies and surface as legacy_conflict.
         if (!(client in clientPresence)) {
           clientPresence[client] = pres;
+          clientPresenceEntryName[client] = e.name;
+          clientPresenceCanEnableFromLegacy[client] = canEnableFromLegacy(client, e.name, pres);
         } else if (!(client in legacyConflict)) {
           legacyConflict[client] = pres;
         }
@@ -241,6 +285,8 @@ export function collectLspRows(
       workspaceKey: owner?.workspace_key ?? "",
       ambiguousOwners,
       clientPresence,
+      clientPresenceEntryName,
+      clientPresenceCanEnableFromLegacy,
       legacyConflict,
     };
   });

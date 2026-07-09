@@ -6,6 +6,7 @@ import {
   isMcphubRelayCommand,
   clientConfigUsable,
   loopbackEntryPort,
+  lspLegacyURLPort,
   loopbackPortMatchesDaemon,
   perClientRouting,
   collectServers,
@@ -147,16 +148,16 @@ describe("clientConfigUsable", () => {
 });
 
 describe("isMcphubRelayCommand", () => {
-  it("accepts current and legacy mcphub relay basenames", () => {
+  it("accepts only the current mcphub relay basenames for LSP router ownership", () => {
     expect(isMcphubRelayCommand("mcphub")).toBe(true);
     expect(isMcphubRelayCommand("mcphub.exe")).toBe(true);
-    expect(isMcphubRelayCommand("mcp")).toBe(true);
-    expect(isMcphubRelayCommand("mcp.exe")).toBe(true);
     expect(isMcphubRelayCommand("C:\\Users\\u\\.local\\bin\\mcphub.exe")).toBe(true);
-    expect(isMcphubRelayCommand("/usr/local/bin/mcp")).toBe(true);
   });
 
-  it("rejects foreign relay executables", () => {
+  it("rejects legacy mcp and foreign relay executables", () => {
+    expect(isMcphubRelayCommand("mcp")).toBe(false);
+    expect(isMcphubRelayCommand("mcp.exe")).toBe(false);
+    expect(isMcphubRelayCommand("/usr/local/bin/mcp")).toBe(false);
     expect(isMcphubRelayCommand("node")).toBe(false);
     expect(isMcphubRelayCommand("C:\\tools\\relay.exe")).toBe(false);
     expect(isMcphubRelayCommand("")).toBe(false);
@@ -179,6 +180,21 @@ describe("loopbackEntryPort", () => {
   it("returns null for an unparseable endpoint", () => {
     expect(loopbackEntryPort("stdio:///memory")).toBeNull();
     expect(loopbackEntryPort("")).toBeNull();
+  });
+});
+
+describe("lspLegacyURLPort", () => {
+  it("extracts the port only from loopback http /mcp legacy LSP URLs", () => {
+    expect(lspLegacyURLPort("http://127.0.0.1:9200/mcp")).toBe(9200);
+    expect(lspLegacyURLPort("http://localhost:9201/mcp")).toBe(9201);
+    expect(lspLegacyURLPort("http://[::1]:9202/mcp")).toBe(9202);
+  });
+
+  it("rejects router paths, non-http schemes, non-loopback hosts, and portless URLs", () => {
+    expect(lspLegacyURLPort("http://127.0.0.1:9200/lsp/python/mcp")).toBeNull();
+    expect(lspLegacyURLPort("https://127.0.0.1:9200/mcp")).toBeNull();
+    expect(lspLegacyURLPort("http://example.invalid:9200/mcp")).toBeNull();
+    expect(lspLegacyURLPort("http://127.0.0.1/mcp")).toBeNull();
   });
 });
 

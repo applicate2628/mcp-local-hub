@@ -762,8 +762,9 @@ describe("ServersScreen — LSP matrix rows", () => {
   // Finding 1 (Codex P2): a legacy per-workspace HTTP entry
   // (http://127.0.0.1:<port>/mcp) is NOT the shared /lsp/<lang>/mcp router, so
   // its toggle must render UNCHECKED — pre-fix it rendered checked because the
-  // transport happened to be "http". Checking it then enables the shared router.
-  it("renders a legacy per-workspace HTTP LSP entry as unchecked (not the shared router)", async () => {
+  // transport happened to be "http". With no registry proof that the backend
+  // owns the legacy port, the cell must also be disabled.
+  it("renders an orphaned legacy per-workspace HTTP LSP entry as unchecked and disabled", async () => {
     const scan: ScanResult = {
       at: "2026-07-09T00:00:00Z",
       entries: [
@@ -802,11 +803,78 @@ describe("ServersScreen — LSP matrix rows", () => {
     const toggle = (await screen.findByTestId(
       "lsp-toggle-python-codex-cli",
     )) as HTMLInputElement;
-    // Legacy /mcp entry → unchecked (finding 1) and still interactive (config ok).
+    // Legacy /mcp entry with no matching workspace registry port is not
+    // backend-owned, so it is unchecked and not mutable from this cell.
     expect(toggle.checked).toBe(false);
-    expect(toggle.disabled).toBe(false);
+    expect(toggle.disabled).toBe(true);
 
-    // Checking it enables the shared LSP router for the client.
+    fireEvent.click(toggle);
+    expect(enableBodies).toHaveLength(0);
+  });
+
+  it("keeps a registry-owned legacy per-workspace HTTP LSP entry enableable", async () => {
+    const scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-python",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub",
+          client_presence: {
+            "codex-cli": {
+              transport: "http",
+              endpoint: "http://127.0.0.1:9200/mcp",
+            },
+          },
+        },
+      ],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+    const enableBodies: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () =>
+          jsonResponse(200, {
+            workspaces: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+              },
+            ],
+            entries: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+                language: "python",
+                backend: "mcp-language-server",
+                port: 9200,
+                task_name: "\\mcp-local-hub-lsp-default-python",
+                client_entries: {
+                  "codex-cli": "mcp-language-server-python",
+                },
+              },
+            ],
+          }),
+        "/api/lsp-router/enable": (init?: RequestInit) => {
+          enableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, { client: "codex-cli", enabled: true, report: {} });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-python-codex-cli",
+    )) as HTMLInputElement;
+    await waitFor(() => {
+      expect(toggle.checked).toBe(false);
+      expect(toggle.disabled).toBe(false);
+    });
+
     fireEvent.click(toggle);
     await waitFor(() => expect(enableBodies).toHaveLength(1));
     expect(enableBodies[0]).toEqual({ client: "codex-cli" });
@@ -906,7 +974,7 @@ describe("ServersScreen — LSP matrix rows", () => {
     );
   });
 
-  it("requires mcphub relay ownership before rendering an LSP router relay entry checked", async () => {
+  it("requires current mcphub relay ownership before rendering an LSP router relay entry checked", async () => {
     const scan: ScanResult = {
       at: "2026-07-09T00:00:00Z",
       entries: [
@@ -918,7 +986,7 @@ describe("ServersScreen — LSP matrix rows", () => {
           client_presence: {
             antigravity: {
               transport: "relay",
-              endpoint: "node",
+              endpoint: "mcp.exe",
               relay_url: "http://127.0.0.1:9200/lsp/python/mcp",
             },
             zed: {
@@ -953,6 +1021,50 @@ describe("ServersScreen — LSP matrix rows", () => {
     expect(foreign.disabled).toBe(true);
     expect(owned.checked).toBe(true);
     expect(owned.disabled).toBe(false);
+  });
+
+  it("does not render a suffixed router-shaped LSP entry as checked or mutable", async () => {
+    const scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-go-abcd",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub",
+          client_presence: {
+            "codex-cli": {
+              transport: "http",
+              endpoint: "http://127.0.0.1:9200/lsp/go/mcp",
+            },
+          },
+        },
+      ],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+    const disableBodies: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => jsonResponse(200, { workspaces: [], entries: [] }),
+        "/api/lsp-router/disable": (init?: RequestInit) => {
+          disableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, { client: "codex-cli", enabled: false, report: {} });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const toggle = (await screen.findByTestId(
+      "lsp-toggle-go-codex-cli",
+    )) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(true);
+
+    fireEvent.click(toggle);
+    expect(disableBodies).toHaveLength(0);
   });
 
   // Finding 2 (Codex P2): a client whose config is missing/error has no usable
