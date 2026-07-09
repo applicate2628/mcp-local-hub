@@ -207,6 +207,11 @@ type ClientEntry struct {
 	Endpoint  string         `json:"endpoint"`            // URL for http, command for stdio, etc.
 	RelayURL  string         `json:"relay_url,omitempty"` // resolved relay --url target, when present
 	Raw       map[string]any `json:"raw"`                 // the original JSON/TOML fragment
+	// Disabled mirrors the client entry's launch gate. It is set by the scan
+	// shaper from rawClientEntryDisabled (disabled:true OR enabled:false) and
+	// survives GUI Raw stripping so display-only predicates do not need to
+	// re-derive client-specific raw config rules.
+	Disabled bool `json:"disabled,omitempty"`
 	// Inherited marks a hub-loopback cell whose source is a layer the hub never
 	// wrote and CANNOT demigrate — for a multi-layer adapter (currently only
 	// MiMoCode) a name resolved from the ~/.claude.json mcpServers IMPORT or a
