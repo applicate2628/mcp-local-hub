@@ -54,6 +54,36 @@ func TestSupervisorIntent_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSupervisorIntent_LegacyStopWatermarkJSONIsAdditiveForSupportedOldReaders(t *testing.T) {
+	now := "2026-07-09T09:59:00Z"
+	raw := []byte(`{"version":1,"legacy_stop_watermarks":{"\\mcp-local-hub-paper-search-default":{"desired":"stopped","reason":"user-stop","updated_at":"` + now + `"}}}`)
+
+	var oldReaderShape struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &oldReaderShape); err != nil {
+		t.Fatalf("supported old reader shape rejected additive legacy_stop_watermarks field: %v", err)
+	}
+	if oldReaderShape.Version != 1 {
+		t.Fatalf("old reader shape version = %d, want 1", oldReaderShape.Version)
+	}
+	var current SupervisorIntentFile
+	if err := json.Unmarshal(raw, &current); err != nil {
+		t.Fatalf("current reader rejected legacy_stop_watermarks field: %v", err)
+	}
+	if _, ok := current.LegacyStopWatermarks[`\mcp-local-hub-paper-search-default`]; !ok {
+		t.Fatalf("current reader did not preserve legacy_stop_watermarks: %+v", current.LegacyStopWatermarks)
+	}
+
+	emptyRaw, err := json.Marshal(SupervisorIntentFile{Version: 1})
+	if err != nil {
+		t.Fatalf("marshal empty supervisor intent: %v", err)
+	}
+	if strings.Contains(string(emptyRaw), "legacy_stop_watermarks") {
+		t.Fatalf("empty watermark field should be omitted for back-compat, raw=%s", emptyRaw)
+	}
+}
+
 func TestSupervisorIntent_ReadRejectsSymlinkTarget(t *testing.T) {
 	dir := hardenedTempDir(t)
 	realPath := filepath.Join(dir, "real-supervisor-intent.json")

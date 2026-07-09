@@ -324,6 +324,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	}
 	removedSupervisorTargetsAfterInstall := removedSupervisorTargetsForServerMergeScope(priorIntent, desiredIntent, m.Name, ownershipScope)
 	desiredIntent.Stops = pruneStopsForRemovedSupervisorTargets(desiredIntent.Stops, removedSupervisorTargetsAfterInstall)
+	desiredIntent.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(desiredIntent.LegacyStopWatermarks, removedSupervisorTargetsAfterInstall)
 
 	// Required-workspace pre-commit guard (bot PR #253 r6 P2). A caller that
 	// auto-registers a SPECIFIC triggering workspace passes opts.RequireWorkspaceKey.
@@ -622,6 +623,7 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 			}
 			removedSupervisorTargetsAfterInstall = removedSupervisorTargetsForFullInstallScope(priorIntent, desiredIntent, m.Name, daemonFilter, ownershipScope)
 			desiredIntent.Stops = pruneStopsForRemovedSupervisorTargets(desiredIntent.Stops, removedSupervisorTargetsAfterInstall)
+			desiredIntent.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(desiredIntent.LegacyStopWatermarks, removedSupervisorTargetsAfterInstall)
 			intentWriteNeeded := len(plan.SupervisorIntent) > 0 ||
 				(daemonFilter == "" && supervisorIntentHasServerLifecycleArtifactsScope(priorIntent, m.Name, ownershipScope))
 			nudgeAfterInstall = len(plan.SupervisorIntent) > 0 ||
@@ -1172,6 +1174,10 @@ func pruneStopsForRemovedSupervisorTargets(stops map[string]DaemonIntent, remove
 	return kept
 }
 
+func pruneLegacyStopWatermarksForRemovedSupervisorTargets(watermarks map[string]DaemonIntent, removed []SupervisorDaemon) map[string]DaemonIntent {
+	return pruneStopsForRemovedSupervisorTargets(watermarks, removed)
+}
+
 func preliminarySupervisorTargetsForServerScope(intentPath, server string, scope *supervisorIntentOwnershipScope) ([]SupervisorDaemon, error) {
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
@@ -1552,7 +1558,8 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 		// #284 P2 — cross-phase E2×F regression). The post-success
 		// recordStopIntentAs / ClearStopIntent writers adjust ONLY the
 		// installed daemons' entries afterwards.
-		Stops: prior.Stops,
+		Stops:                prior.Stops,
+		LegacyStopWatermarks: prior.LegacyStopWatermarks,
 	}
 	return merged, prior, existed, nil
 }
@@ -1977,18 +1984,23 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 	if !stopsMapsEqual(prior.Stops, keptStops) {
 		changed = true
 	}
+	keptWatermarks := pruneLegacyStopWatermarksForRemovedSupervisorTargets(prior.LegacyStopWatermarks, removedDaemons)
+	if !stopsMapsEqual(prior.LegacyStopWatermarks, keptWatermarks) {
+		changed = true
+	}
 
 	if !changed {
 		return false, nil, nil, nil // this server owned nothing in the intent
 	}
 
 	merged := &SupervisorIntentFile{
-		Version:           1,
-		UpdatedAt:         time.Now().UTC().Format(time.RFC3339Nano),
-		Daemons:           keptDaemons,
-		MaintenanceTimers: keptTimers,
-		StrictMode:        prior.StrictMode,
-		Stops:             keptStops,
+		Version:              1,
+		UpdatedAt:            time.Now().UTC().Format(time.RFC3339Nano),
+		Daemons:              keptDaemons,
+		MaintenanceTimers:    keptTimers,
+		StrictMode:           prior.StrictMode,
+		Stops:                keptStops,
+		LegacyStopWatermarks: keptWatermarks,
 	}
 	if err := writeSupervisorIntentLockHeld(intentPath, merged); err != nil {
 		return false, nil, nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, err)

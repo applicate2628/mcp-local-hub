@@ -93,9 +93,9 @@ func TestRunDaemonIntentCollapse_E2_DeletionIdempotent(t *testing.T) {
 }
 
 // Ordered: a daemon-intent.json with an active stop that the sub-block ALREADY
-// carries (E1 already merged it) is deleted on the next boot even with NO
-// sub-block delta (Changed=false). This is the crash-between-write-and-delete
-// recovery path.
+// carries (E1 already merged it) is deleted on the next boot. If the legacy-stop
+// watermark is missing, the pass writes that self-healing watermark before the
+// delete. This is the crash-between-write-and-delete recovery path.
 func TestRunDaemonIntentCollapse_E2_DeletesWhenSubBlockAlreadyMerged(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	defer SetDaemonStateRootForTest(stateDir)()
@@ -119,8 +119,8 @@ func TestRunDaemonIntentCollapse_E2_DeletesWhenSubBlockAlreadyMerged(t *testing.
 	if err != nil {
 		t.Fatalf("RunDaemonIntentCollapse: %v", err)
 	}
-	if res.Wrote {
-		t.Fatalf("expected NO write (sub-block already merged); res=%+v", res)
+	if !res.Wrote {
+		t.Fatalf("expected write to self-heal missing legacy-stop watermark; res=%+v", res)
 	}
 	if !res.DeletedLegacyFile {
 		t.Fatalf("expected delete even on no-delta path (crash-recovery); res=%+v", res)
@@ -128,6 +128,7 @@ func TestRunDaemonIntentCollapse_E2_DeletesWhenSubBlockAlreadyMerged(t *testing.
 	if _, statErr := os.Stat(filepath.Join(stateDir, intentFileLeaf)); !os.IsNotExist(statErr) {
 		t.Fatalf("daemon-intent.json should be deleted on no-delta path (err=%v)", statErr)
 	}
+	assertDaemonIntentEqual(t, readSupervisorLegacyStopWatermarksFromDisk(t, stateDir)[task], di)
 }
 
 func TestRunDaemonIntentCollapse_E2_NewerActiveLegacyStopUpdatesSubBlockAndDeletes(t *testing.T) {
@@ -197,6 +198,32 @@ func TestDeleteLegacyDaemonIntentIfMerged_RefusesWhenActiveStopMissingFromSubBlo
 	}
 	if _, statErr := os.Stat(daemonPath); statErr != nil {
 		t.Fatalf("daemon-intent.json must be retained for retry (err=%v)", statErr)
+	}
+}
+
+func TestDeleteLegacyDaemonIntentIfMerged_AllowsMatchingLegacyStopWatermark(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	supPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	daemonPath := filepath.Join(stateDir, intentFileLeaf)
+	task := `\mcp-local-hub-paper-search-default`
+	stop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-time.Minute)}
+
+	writeRawSupervisorIntentForCollapseTest(t, stateDir, nil, map[string]DaemonIntent{task: stop})
+	daemonIntent := &DaemonIntentFile{Tasks: map[string]DaemonIntent{task: stop}}
+	seedDaemonIntent(t, task, stop)
+
+	deleted, err := deleteLegacyDaemonIntentIfMerged(stateDir, supPath, daemonPath, daemonIntent, now)
+	if err != nil {
+		t.Fatalf("deleteLegacyDaemonIntentIfMerged: %v", err)
+	}
+	if !deleted {
+		t.Fatalf("matching legacy-stop watermark should permit deleting the accounted stale legacy file")
+	}
+	if _, statErr := os.Stat(daemonPath); !os.IsNotExist(statErr) {
+		t.Fatalf("daemon-intent.json should be deleted when active stop is accounted by watermark (err=%v)", statErr)
 	}
 }
 

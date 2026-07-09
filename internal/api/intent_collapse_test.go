@@ -36,6 +36,51 @@ func readSupervisorStopsFromDisk(t *testing.T, stateDir string) map[string]Daemo
 	return got.Stops
 }
 
+func writeRawSupervisorIntentForCollapseTest(t *testing.T, stateDir string, stops, watermarks map[string]DaemonIntent) {
+	t.Helper()
+	payload := struct {
+		Version              int                     `json:"version"`
+		Stops                map[string]DaemonIntent `json:"stops,omitempty"`
+		LegacyStopWatermarks map[string]DaemonIntent `json:"legacy_stop_watermarks,omitempty"`
+	}{
+		Version:              1,
+		Stops:                stops,
+		LegacyStopWatermarks: watermarks,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal raw supervisor-intent fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, supervisorIntentFileLeaf), raw, 0o600); err != nil {
+		t.Fatalf("write raw supervisor-intent fixture: %v", err)
+	}
+}
+
+func readSupervisorLegacyStopWatermarksFromDisk(t *testing.T, stateDir string) map[string]DaemonIntent {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(stateDir, supervisorIntentFileLeaf))
+	if err != nil {
+		t.Fatalf("read raw supervisor-intent.json: %v", err)
+	}
+	var payload struct {
+		LegacyStopWatermarks map[string]DaemonIntent `json:"legacy_stop_watermarks"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal raw supervisor-intent.json: %v", err)
+	}
+	if payload.LegacyStopWatermarks == nil {
+		return map[string]DaemonIntent{}
+	}
+	return payload.LegacyStopWatermarks
+}
+
+func assertDaemonIntentEqual(t *testing.T, got, want DaemonIntent) {
+	t.Helper()
+	if got.Desired != want.Desired || got.Reason != want.Reason || !got.UpdatedAt.Equal(want.UpdatedAt) {
+		t.Fatalf("daemon intent = %+v, want %+v", got, want)
+	}
+}
+
 func TestReadDaemonIntentForMerge_LargeLegacyDaemonIntentAboveHubStateCap(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	now := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
@@ -263,6 +308,120 @@ func TestRunDaemonIntentCollapse_MintsSupervisorIntentForLegacyOnlyActiveStop(t 
 	if gotStop, ok := got.Stops[task]; !ok || gotStop.Desired != stop.Desired || gotStop.Reason != stop.Reason || !gotStop.UpdatedAt.Equal(stop.UpdatedAt) {
 		t.Fatalf("minted supervisor intent stops[%s] = %+v, ok=%v; want %+v", task, gotStop, ok, stop)
 	}
+}
+
+func TestRunDaemonIntentCollapse_LegacyStopWatermarkBlocksStaleReplayAfterClear(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	task := `\mcp-local-hub-paper-search-default`
+	oldStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-time.Minute)}
+
+	writeRawSupervisorIntentForCollapseTest(t, stateDir, nil, map[string]DaemonIntent{task: oldStop})
+	seedDaemonIntent(t, task, oldStop)
+
+	res, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
+	if err != nil {
+		t.Fatalf("RunDaemonIntentCollapse: %v", err)
+	}
+	if !res.DeletedLegacyFile {
+		t.Fatalf("matching legacy-stop watermark should permit deleting the stale legacy file; res=%+v", res)
+	}
+	if _, ok := readSupervisorStopsFromDisk(t, stateDir)[task]; ok {
+		t.Fatalf("stale legacy stop was resurrected after the stop had been cleared")
+	}
+	if !NewAPI().IntentStillRunning(task, now) {
+		t.Fatalf("watermark must not be a stop source; task should be permitted to run")
+	}
+	assertDaemonIntentEqual(t, readSupervisorLegacyStopWatermarksFromDisk(t, stateDir)[task], oldStop)
+}
+
+func TestRunDaemonIntentCollapse_LegacyStopWatermarkSelfHealsExistingSubBlockStop(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	task := `\mcp-local-hub-paper-search-default`
+	stop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-time.Minute)}
+
+	writeRawSupervisorIntentForCollapseTest(t, stateDir, map[string]DaemonIntent{task: stop}, nil)
+	seedDaemonIntent(t, task, stop)
+
+	res, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
+	if err != nil {
+		t.Fatalf("RunDaemonIntentCollapse: %v", err)
+	}
+	if !res.Wrote || !res.DeletedLegacyFile {
+		t.Fatalf("collapse should write the missing watermark and delete the accounted legacy file; res=%+v", res)
+	}
+	assertDaemonIntentEqual(t, readSupervisorStopsFromDisk(t, stateDir)[task], stop)
+	assertDaemonIntentEqual(t, readSupervisorLegacyStopWatermarksFromDisk(t, stateDir)[task], stop)
+}
+
+func TestRunDaemonIntentCollapse_LegacyStopWatermarkLossFailsTowardRespectingStop(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	task := `\mcp-local-hub-paper-search-default`
+	stop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-time.Minute)}
+
+	writeRawSupervisorIntentForCollapseTest(t, stateDir, nil, map[string]DaemonIntent{task: stop})
+	raw, err := os.ReadFile(filepath.Join(stateDir, supervisorIntentFileLeaf))
+	if err != nil {
+		t.Fatalf("read supervisor-intent before simulated old rewrite: %v", err)
+	}
+	var oldReaderShape struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &oldReaderShape); err != nil {
+		t.Fatalf("supported old reader shape should ignore watermark: %v", err)
+	}
+	oldRaw, err := json.Marshal(oldReaderShape)
+	if err != nil {
+		t.Fatalf("marshal simulated old writer shape: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, supervisorIntentFileLeaf), oldRaw, 0o600); err != nil {
+		t.Fatalf("write simulated old supervisor-intent without watermark: %v", err)
+	}
+	seedDaemonIntent(t, task, stop)
+
+	res, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
+	if err != nil {
+		t.Fatalf("RunDaemonIntentCollapse: %v", err)
+	}
+	if !res.Wrote || !res.DeletedLegacyFile {
+		t.Fatalf("missing/lost watermark should be treated as a real legacy stop and persisted; res=%+v", res)
+	}
+	assertDaemonIntentEqual(t, readSupervisorStopsFromDisk(t, stateDir)[task], stop)
+	assertDaemonIntentEqual(t, readSupervisorLegacyStopWatermarksFromDisk(t, stateDir)[task], stop)
+	if NewAPI().IntentStillRunning(task, now) {
+		t.Fatalf("watermark loss must fail toward respecting the legacy stop, not silently starting")
+	}
+}
+
+func TestRunDaemonIntentCollapse_LegitimateRestopAfterClearAddsDifferentLegacyRecord(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	task := `\mcp-local-hub-paper-search-default`
+	oldStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-2 * time.Hour)}
+	newStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: now.Add(-time.Minute)}
+
+	writeRawSupervisorIntentForCollapseTest(t, stateDir, nil, map[string]DaemonIntent{task: oldStop})
+	seedDaemonIntent(t, task, newStop)
+
+	res, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
+	if err != nil {
+		t.Fatalf("RunDaemonIntentCollapse: %v", err)
+	}
+	if !res.Wrote || !res.DeletedLegacyFile {
+		t.Fatalf("different legacy stop should be treated as a real re-stop and persisted; res=%+v", res)
+	}
+	assertDaemonIntentEqual(t, readSupervisorStopsFromDisk(t, stateDir)[task], newStop)
+	assertDaemonIntentEqual(t, readSupervisorLegacyStopWatermarksFromDisk(t, stateDir)[task], newStop)
 }
 
 // Phase 4-E2 (was E1 "DoesNotDelete"): daemon-intent.json is now DELETED after
@@ -958,8 +1117,8 @@ func TestRunDaemonIntentCollapse_DeletesLegacyIntentWhenFreshRereadAlreadyMerged
 	if !hookFired {
 		t.Fatalf("concurrent-writer hook never fired")
 	}
-	if res.Changed || res.Wrote {
-		t.Fatalf("fresh reread already had the merged stops, so collapse must not rewrite; res=%+v", res)
+	if !res.Changed || !res.Wrote {
+		t.Fatalf("fresh reread already had the merged stop, but collapse must write the missing watermark; res=%+v", res)
 	}
 	if !res.DeletedLegacyFile {
 		t.Fatalf("fresh no-op merge must still delete merged legacy daemon-intent.json; res=%+v", res)
@@ -970,6 +1129,7 @@ func TestRunDaemonIntentCollapse_DeletesLegacyIntentWhenFreshRereadAlreadyMerged
 	if got := readSupervisorStopsFromDisk(t, stateDir)[task]; got.Reason != IntentReasonUserStop || !got.UpdatedAt.Equal(now) {
 		t.Fatalf("merged stop missing or mutated after cleanup: %+v", got)
 	}
+	assertDaemonIntentEqual(t, readSupervisorLegacyStopWatermarksFromDisk(t, stateDir)[task], stop)
 }
 
 func TestRunDaemonIntentCollapse_DeletesLegacyIntentWhenSubBlockStopIsNewer(t *testing.T) {
@@ -996,8 +1156,8 @@ func TestRunDaemonIntentCollapse_DeletesLegacyIntentWhenSubBlockStopIsNewer(t *t
 	if err != nil {
 		t.Fatalf("RunDaemonIntentCollapse: %v", err)
 	}
-	if res.Changed || res.Wrote {
-		t.Fatalf("newer sub-block stop should win without a rewrite; res=%+v", res)
+	if !res.Changed || !res.Wrote {
+		t.Fatalf("newer sub-block stop should win and collapse should write the accounted legacy watermark; res=%+v", res)
 	}
 	if !res.DeletedLegacyFile {
 		t.Fatalf("older superseded daemon-intent.json should be deleted; res=%+v", res)
@@ -1008,6 +1168,7 @@ func TestRunDaemonIntentCollapse_DeletesLegacyIntentWhenSubBlockStopIsNewer(t *t
 	if got := readSupervisorStopsFromDisk(t, stateDir)[task]; !daemonIntentRecordsEqual(got, newerStop) {
 		t.Fatalf("newer sub-block stop = %+v, want %+v", got, newerStop)
 	}
+	assertDaemonIntentEqual(t, readSupervisorLegacyStopWatermarksFromDisk(t, stateDir)[task], legacyStop)
 }
 
 func TestDeleteLegacyDaemonIntentIfMerged_RefusesWhenLegacyStopIsNewerThanSubBlock(t *testing.T) {

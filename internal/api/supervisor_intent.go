@@ -43,6 +43,19 @@ type SupervisorIntentFile struct {
 	// readers learn. E2 later deletes daemon-intent.json + its writers and
 	// makes this sub-block the sole stop source.
 	Stops map[string]DaemonIntent `json:"stops,omitempty"`
+
+	// LegacyStopWatermarks records the exact legacy daemon-intent.json active
+	// stop records already accounted for by the collapse. It is keyed like
+	// Stops, by canonical leading-backslash task_name, but it is NOT a stop
+	// source and must not feed UnifiedStopsFile. It exists only so a later
+	// collapse can distinguish a first legacy migration from stale legacy replay
+	// after a new-binary re-enable cleared Stops[task].
+	//
+	// Compatibility: this is an additive, omitempty field. Supported rollback
+	// readers use plain json.Unmarshal and ignore it. The much older
+	// pre-runtime_spec reader that used DisallowUnknownFields is already outside
+	// the safe additive-field downgrade boundary documented by HasRuntimeSpecRow.
+	LegacyStopWatermarks map[string]DaemonIntent `json:"legacy_stop_watermarks,omitempty"`
 }
 
 // SupervisorDaemon is one daemon descriptor keyed by canonical

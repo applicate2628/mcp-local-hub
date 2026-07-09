@@ -112,9 +112,14 @@ type DaemonIntentCollapseResult struct {
 	// the merge would persist into supervisor-intent.json's `stops`
 	// sub-block). Always non-nil.
 	MergedStops map[string]DaemonIntent
+	// MergedLegacyStopWatermarks is the resulting per-task legacy-stop
+	// watermark map. It is not a stop source; it only records exact legacy
+	// records already accounted for by the collapse so later stale legacy replay
+	// can be distinguished from first migration. Always non-nil.
+	MergedLegacyStopWatermarks map[string]DaemonIntent
 	// Changed reports whether the merge altered the supervisor-intent stops
-	// sub-block versus its prior on-disk content. False → the write is a
-	// no-op (idempotent re-run, spec §5.1-E).
+	// sub-block or legacy-stop watermarks versus their prior on-disk content.
+	// False → the write is a no-op (idempotent re-run, spec §5.1-E).
 	Changed bool
 	// Wrote reports whether this pass actually wrote supervisor-intent.json.
 	// Always false in DryRun mode; true only when !DryRun AND Changed.
@@ -141,6 +146,10 @@ type DaemonIntentCollapseResult struct {
 //
 // Per-task decision table:
 //   - legacy ACTIVE + absent in sub-block → ADD the full legacy record.
+//     Exception: when LegacyStopWatermarks carries the exact same legacy record,
+//     SKIP the add because that record was already migrated and then cleared.
+//     A missing/lost or different watermark fails toward respecting the legacy
+//     stop (ADD), not silently starting a possibly stopped daemon.
 //   - legacy ACTIVE + sub-block record differs + legacy.UpdatedAt NEWER →
 //     UPDATE the sub-block record; the mixed-version legacy writer is the
 //     newer authority for this stop.
@@ -148,6 +157,11 @@ type DaemonIntentCollapseResult struct {
 //     record; an old/different legacy file must not downgrade the sole source.
 //   - legacy INACTIVE/running → NO-OP; never remove or downgrade an existing
 //     sub-block stop from a stale legacy tombstone.
+//
+// Considered alternative: deleting each per-task legacy entry immediately after
+// accounting for it would also prevent stale replay, but this keeps the existing
+// end-gated whole-file delete model so no legacy data is destructively rewritten
+// until deleteLegacyDaemonIntentIfMerged confirms every active entry is captured.
 func mergeDaemonIntentStops(
 	supervisorIntent *SupervisorIntentFile,
 	daemonIntentFile *DaemonIntentFile,
@@ -165,6 +179,12 @@ func mergeDaemonIntentStops(
 			merged[k] = v
 		}
 	}
+	mergedWatermarks := map[string]DaemonIntent{}
+	if supervisorIntent != nil && supervisorIntent.LegacyStopWatermarks != nil {
+		for k, v := range supervisorIntent.LegacyStopWatermarks {
+			mergedWatermarks[k] = v
+		}
+	}
 
 	var entries []MergeStopsEntry
 	if daemonIntentFile != nil {
@@ -177,15 +197,22 @@ func mergeDaemonIntentStops(
 			prior, hadPrior := merged[key]
 			if active {
 				if !hadPrior {
+					if watermark, accounted := mergedWatermarks[key]; accounted && daemonIntentRecordsEqual(watermark, di) {
+						continue
+					}
 					merged[key] = di
+					mergedWatermarks[key] = di
 					entries = append(entries, MergeStopsEntry{
 						TaskName: key, Action: MergeStopAdded, Reason: di.Reason,
 					})
 				} else if !daemonIntentRecordsEqual(prior, di) && di.UpdatedAt.After(prior.UpdatedAt) {
 					merged[key] = di
+					mergedWatermarks[key] = di
 					entries = append(entries, MergeStopsEntry{
 						TaskName: key, Action: MergeStopUpdated, Reason: di.Reason,
 					})
+				} else {
+					mergedWatermarks[key] = di
 				}
 				continue
 			}
@@ -202,12 +229,14 @@ func mergeDaemonIntentStops(
 
 	sort.Slice(entries, func(i, j int) bool { return entries[i].TaskName < entries[j].TaskName })
 
-	changed := !stopsMapsEqual(priorStops(supervisorIntent), merged)
+	changed := !stopsMapsEqual(priorStops(supervisorIntent), merged) ||
+		!stopsMapsEqual(priorLegacyStopWatermarks(supervisorIntent), mergedWatermarks)
 
 	return DaemonIntentCollapseResult{
-		Entries:     entries,
-		MergedStops: merged,
-		Changed:     changed,
+		Entries:                    entries,
+		MergedStops:                merged,
+		MergedLegacyStopWatermarks: mergedWatermarks,
+		Changed:                    changed,
 	}
 }
 
@@ -218,6 +247,13 @@ func priorStops(f *SupervisorIntentFile) map[string]DaemonIntent {
 		return map[string]DaemonIntent{}
 	}
 	return f.Stops
+}
+
+func priorLegacyStopWatermarks(f *SupervisorIntentFile) map[string]DaemonIntent {
+	if f == nil || f.LegacyStopWatermarks == nil {
+		return map[string]DaemonIntent{}
+	}
+	return f.LegacyStopWatermarks
 }
 
 // stopsMapsEqual reports whether two stops maps carry the same tasks with the
@@ -458,8 +494,9 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 	}
 	result.BackupDir = backupDir
 
-	// Persist the merged stops into the unified file. Apply ONLY the Stops
-	// sub-block onto the FRESHLY-read struct so every other field of the
+	// Persist the merged stops + legacy-stop watermarks into the unified file.
+	// Apply ONLY those collapse-owned sub-blocks onto the FRESHLY-read struct
+	// so every other field of the
 	// supervisor intent (Daemons, MaintenanceTimers, StrictMode, runtime_spec
 	// rows) — including any concurrent edit that landed since the top-of-pass
 	// read — survives the merge.
@@ -467,6 +504,7 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 		freshSupervisorIntent = &SupervisorIntentFile{Version: 1}
 	}
 	freshSupervisorIntent.Stops = result.MergedStops
+	freshSupervisorIntent.LegacyStopWatermarks = result.MergedLegacyStopWatermarks
 	if err := writeSupervisorIntentLockHeld(supervisorIntentPath, freshSupervisorIntent); err != nil {
 		return DaemonIntentCollapseResult{}, fmt.Errorf("intent-collapse: write supervisor-intent.json: %w", err)
 	}
@@ -548,13 +586,20 @@ func deleteLegacyDaemonIntentIfMerged(
 	if current != nil && current.Stops != nil {
 		subBlock = current.Stops
 	}
+	watermarks := map[string]DaemonIntent{}
+	if current != nil && current.LegacyStopWatermarks != nil {
+		watermarks = current.LegacyStopWatermarks
+	}
 
 	// Step 3: REFUSE the delete unless every ACTIVE stop in daemon-intent.json
 	// is present in the sub-block as either the identical record or a strictly
-	// newer record. The newer case means the merge already kept the sub-block
-	// authority instead of downgrading it to stale legacy data. An inactive
-	// (expired/running) task is intentionally NOT required (the merge drops
-	// those), so it is not a blocker. This is the "never lose a stop" gate.
+	// newer record, OR is exactly accounted for by a legacy-stop watermark. The
+	// newer case means the merge already kept the sub-block authority instead of
+	// downgrading it to stale legacy data. The watermark case means the legacy
+	// record was migrated before and then deliberately cleared from Stops by a
+	// new-binary re-enable, so deleting the stale legacy file cannot lose a stop.
+	// An inactive (expired/running) task is intentionally NOT required (the merge
+	// drops those), so it is not a blocker. This is the "never lose a stop" gate.
 	if daemonIntent != nil {
 		for taskName, di := range daemonIntent.Tasks {
 			active, _ := di.IsActiveStop(now)
@@ -563,11 +608,15 @@ func deleteLegacyDaemonIntentIfMerged(
 			}
 			key := canonicalIntentTaskKey(taskName)
 			got, ok := subBlock[key]
-			if !ok || !daemonIntentRecordMergedOrSuperseded(got, di) {
-				// An active stop is NOT durably in the sub-block yet — keep the
-				// file so the next boot re-merges it. Never delete here.
-				return false, nil
+			if ok && daemonIntentRecordMergedOrSuperseded(got, di) {
+				continue
 			}
+			if watermark, accounted := watermarks[key]; accounted && daemonIntentRecordsEqual(watermark, di) {
+				continue
+			}
+			// An active stop is NOT durably captured yet — keep the file so the
+			// next boot re-merges it. Never delete here.
+			return false, nil
 		}
 	}
 
