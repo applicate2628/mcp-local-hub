@@ -116,6 +116,10 @@ func printIntentCollapseReport(w io.Writer, stateDir string, res api.DaemonInten
 		return err
 	}
 	if len(res.Entries) == 0 {
+		if res.Changed {
+			_, err := fmt.Fprintln(w, "watermark self-heal: legacy stop already reflected; recording bookkeeping watermark (no daemon lifecycle change)")
+			return err
+		}
 		_, err := fmt.Fprintln(w, "no per-task changes — daemon-intent.json stops already reflected in supervisor-intent.json")
 		return err
 	}

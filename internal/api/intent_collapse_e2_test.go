@@ -161,6 +161,7 @@ func TestRunDaemonIntentCollapse_E2_NewerActiveLegacyStopUpdatesSubBlockAndDelet
 	if got := readSupervisorStopsFromDisk(t, stateDir)[task]; got.Desired != newStop.Desired || got.Reason != newStop.Reason || !got.UpdatedAt.Equal(newStop.UpdatedAt) {
 		t.Fatalf("updated sub-block stop = %+v, want %+v", got, newStop)
 	}
+	assertDaemonIntentEqual(t, readSupervisorLegacyStopWatermarksFromDisk(t, stateDir)[task], newStop)
 	if _, statErr := os.Stat(filepath.Join(stateDir, intentFileLeaf)); !os.IsNotExist(statErr) {
 		t.Fatalf("daemon-intent.json should be deleted after exact updated record is persisted (err=%v)", statErr)
 	}

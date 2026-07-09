@@ -2318,6 +2318,11 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 			betaTask:  {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
 			otherTask: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
 		},
+		LegacyStopWatermarks: map[string]DaemonIntent{
+			alphaTask: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			betaTask:  {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+			otherTask: {Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now},
+		},
 	}
 	if err := WriteSupervisorIntent(intentPath, seed); err != nil {
 		t.Fatalf("seed supervisor-intent.json: %v", err)
@@ -2411,6 +2416,12 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 	}
 	if _, ok := written.Stops[otherTask]; !ok {
 		t.Fatalf("sibling stop %s was not preserved: %+v", otherTask, written.Stops)
+	}
+	if _, ok := written.LegacyStopWatermarks[betaTask]; ok {
+		t.Fatalf("removed daemon %s retained a dangling legacy-stop watermark: %+v", betaTask, written.LegacyStopWatermarks)
+	}
+	if _, ok := written.LegacyStopWatermarks[otherTask]; !ok {
+		t.Fatalf("sibling legacy-stop watermark %s was not preserved: %+v", otherTask, written.LegacyStopWatermarks)
 	}
 }
 

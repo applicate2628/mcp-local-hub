@@ -2,6 +2,7 @@ package api
 
 import (
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api/apitest"
 )
@@ -124,4 +125,122 @@ func TestLSPSupervisorIntentRemoveRollbackPreservesConcurrentDescriptors(t *test
 			t.Fatalf("intent missing %s after remove rollback; rows=%+v", taskName, intent.Daemons)
 		}
 	}
+}
+
+func TestLSPSupervisorIntentRemoveRollbackRestoresStopWatermark(t *testing.T) {
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	entryA := WorkspaceEntry{WorkspaceKey: "aaa11111", WorkspacePath: "D:/repo/a", Language: "python", Port: 9201}
+	entryB := WorkspaceEntry{WorkspaceKey: "bbb22222", WorkspacePath: "D:/repo/b", Language: "go", Port: 9202}
+	if _, err := NewAPI().upsertLSPSupervisorIntent(entryA, "mcphub.exe"); err != nil {
+		t.Fatalf("upsert A: %v", err)
+	}
+	if _, err := NewAPI().upsertLSPSupervisorIntent(entryB, "mcphub.exe"); err != nil {
+		t.Fatalf("upsert B: %v", err)
+	}
+
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	taskA := LSPIntentTaskNameForWorkspaceLanguage(entryA.WorkspaceKey, entryA.Language)
+	taskB := LSPIntentTaskNameForWorkspaceLanguage(entryB.WorkspaceKey, entryB.Language)
+	now := time.Unix(1700000000, 0).UTC()
+	stopA := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now}
+	stopB := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: now.Add(time.Minute)}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent before seed: %v", err)
+	}
+	intent.Stops = map[string]DaemonIntent{taskA: stopA, taskB: stopB}
+	intent.LegacyStopWatermarks = map[string]DaemonIntent{taskA: stopA, taskB: stopB}
+	if err := WriteSupervisorIntent(intentPath, intent); err != nil {
+		t.Fatalf("seed stop watermarks: %v", err)
+	}
+
+	restoreA, removed, err := NewAPI().removeLSPSupervisorIntent(entryA.WorkspaceKey, entryA.Language)
+	if err != nil {
+		t.Fatalf("remove A: %v", err)
+	}
+	if !removed {
+		t.Fatal("remove A reported removed=false")
+	}
+	intent, err = ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after remove: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(taskA); row != nil {
+		t.Fatalf("remove left A descriptor behind: %+v", row)
+	}
+	if _, ok := intent.Stops[taskA]; ok {
+		t.Fatalf("remove left A stop behind: %+v", intent.Stops)
+	}
+	if _, ok := intent.LegacyStopWatermarks[taskA]; ok {
+		t.Fatalf("remove left A legacy-stop watermark behind: %+v", intent.LegacyStopWatermarks)
+	}
+	assertDaemonIntentEqual(t, intent.Stops[taskB], stopB)
+	assertDaemonIntentEqual(t, intent.LegacyStopWatermarks[taskB], stopB)
+
+	restoreA()
+
+	intent, err = ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after rollback: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(taskA); row == nil {
+		t.Fatalf("rollback did not restore A descriptor; rows=%+v", intent.Daemons)
+	}
+	assertDaemonIntentEqual(t, intent.Stops[taskA], stopA)
+	assertDaemonIntentEqual(t, intent.LegacyStopWatermarks[taskA], stopA)
+	assertDaemonIntentEqual(t, intent.Stops[taskB], stopB)
+	assertDaemonIntentEqual(t, intent.LegacyStopWatermarks[taskB], stopB)
+}
+
+func TestLSPSupervisorIntentUpsertRollbackRestoresPreExistingStopWatermark(t *testing.T) {
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	entry := WorkspaceEntry{WorkspaceKey: "aaa11111", WorkspacePath: "D:/repo/a", Language: "python", Port: 9201}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	taskName := LSPIntentTaskNameForWorkspaceLanguage(entry.WorkspaceKey, entry.Language)
+	stop := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserStop,
+		UpdatedAt: time.Unix(1700000000, 0).UTC(),
+	}
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{
+		Version:              1,
+		Stops:                map[string]DaemonIntent{taskName: stop},
+		LegacyStopWatermarks: map[string]DaemonIntent{taskName: stop},
+	}); err != nil {
+		t.Fatalf("seed supervisor-intent: %v", err)
+	}
+
+	restore, err := NewAPI().upsertLSPSupervisorIntent(entry, "mcphub.exe")
+	if err != nil {
+		t.Fatalf("upsert descriptor: %v", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after upsert: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(taskName); row == nil {
+		t.Fatalf("descriptor precondition not met after upsert; rows=%+v", intent.Daemons)
+	}
+
+	restore()
+
+	intent, err = ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("ReadSupervisorIntent after rollback: %v", err)
+	}
+	if row := intent.FindSupervisorDaemonByTaskName(taskName); row != nil {
+		t.Fatalf("upsert rollback left descriptor behind: %+v", row)
+	}
+	assertDaemonIntentEqual(t, intent.Stops[taskName], stop)
+	assertDaemonIntentEqual(t, intent.LegacyStopWatermarks[taskName], stop)
 }

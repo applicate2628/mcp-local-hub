@@ -68,6 +68,7 @@ func TestRemoveServerFromSupervisorIntent_RemovesRowsTimerStops_PreservesSibling
 	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
 
 	demoStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
+	demoBetaWatermark := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
 	otherStop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
 	enabledFalse := false
 	seed := &SupervisorIntentFile{
@@ -86,6 +87,11 @@ func TestRemoveServerFromSupervisorIntent_RemovesRowsTimerStops_PreservesSibling
 		},
 		Stops: map[string]DaemonIntent{
 			`\mcp-local-hub-demo-alpha`: demoStop,
+			`\mcp-local-hub-other-d`:    otherStop,
+		},
+		LegacyStopWatermarks: map[string]DaemonIntent{
+			`\mcp-local-hub-demo-alpha`: demoStop,
+			`\mcp-local-hub-demo-beta`:  demoBetaWatermark,
 			`\mcp-local-hub-other-d`:    otherStop,
 		},
 	}
@@ -139,6 +145,19 @@ func TestRemoveServerFromSupervisorIntent_RemovesRowsTimerStops_PreservesSibling
 	}
 	if gotOther.Desired != otherStop.Desired || gotOther.Reason != otherStop.Reason || !gotOther.UpdatedAt.Equal(otherStop.UpdatedAt) {
 		t.Errorf("sibling stop entry mutated: got %+v want %+v", gotOther, otherStop)
+	}
+	if _, ok := got.LegacyStopWatermarks[`\mcp-local-hub-demo-alpha`]; ok {
+		t.Error("demo legacy-stop watermark survived uninstall")
+	}
+	if _, ok := got.LegacyStopWatermarks[`\mcp-local-hub-demo-beta`]; ok {
+		t.Error("blank-Server demo legacy-stop watermark survived uninstall")
+	}
+	gotOtherWatermark, ok := got.LegacyStopWatermarks[`\mcp-local-hub-other-d`]
+	if !ok {
+		t.Fatal("sibling legacy-stop watermark was wiped by the uninstall cleanup")
+	}
+	if gotOtherWatermark.Desired != otherStop.Desired || gotOtherWatermark.Reason != otherStop.Reason || !gotOtherWatermark.UpdatedAt.Equal(otherStop.UpdatedAt) {
+		t.Errorf("sibling legacy-stop watermark mutated: got %+v want %+v", gotOtherWatermark, otherStop)
 	}
 
 	// StrictMode is carried through untouched.

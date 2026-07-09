@@ -337,6 +337,50 @@ func TestRunDaemonIntentCollapse_LegacyStopWatermarkBlocksStaleReplayAfterClear(
 	assertDaemonIntentEqual(t, readSupervisorLegacyStopWatermarksFromDisk(t, stateDir)[task], oldStop)
 }
 
+func TestRunDaemonIntentCollapse_LegacyStopWatermarkSurvivesRealReenableWriter(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	defer SetDaemonStateRootForTest(stateDir)()
+
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	task := `\mcp-local-hub-paper-search-default`
+	stop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(-time.Minute)}
+
+	seedDaemonIntent(t, task, stop)
+	first, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
+	if err != nil {
+		t.Fatalf("initial RunDaemonIntentCollapse: %v", err)
+	}
+	if !first.Wrote || !first.DeletedLegacyFile {
+		t.Fatalf("initial collapse should migrate the stop and delete the legacy file; res=%+v", first)
+	}
+
+	if err := NewAPI().WriteStopIntent(task, DaemonIntent{Desired: IntentDesiredRunning}, "test"); err != nil {
+		t.Fatalf("re-enable WriteStopIntent: %v", err)
+	}
+	if _, ok := readSupervisorStopsFromDisk(t, stateDir)[task]; ok {
+		t.Fatalf("re-enable WriteStopIntent did not clear stop %s", task)
+	}
+	assertDaemonIntentEqual(t, readSupervisorLegacyStopWatermarksFromDisk(t, stateDir)[task], stop)
+
+	seedDaemonIntent(t, task, stop)
+	second, err := RunDaemonIntentCollapse(stateDir, DaemonIntentCollapseOpts{Now: now})
+	if err != nil {
+		t.Fatalf("second RunDaemonIntentCollapse: %v", err)
+	}
+	if !second.DeletedLegacyFile {
+		t.Fatalf("matching legacy-stop watermark should permit deleting the stale legacy file; res=%+v", second)
+	}
+	if _, ok := readSupervisorStopsFromDisk(t, stateDir)[task]; ok {
+		t.Fatalf("stale legacy stop was resurrected after real re-enable writer cleared it")
+	}
+	if !NewAPI().IntentStillRunning(task, now) {
+		t.Fatalf("watermark must not be a stop source after real re-enable writer")
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, intentFileLeaf)); !os.IsNotExist(err) {
+		t.Fatalf("daemon-intent.json should be deleted after watermark-accounted stale replay (err=%v)", err)
+	}
+}
+
 func TestRunDaemonIntentCollapse_LegacyStopWatermarkSelfHealsExistingSubBlockStop(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	defer SetDaemonStateRootForTest(stateDir)()

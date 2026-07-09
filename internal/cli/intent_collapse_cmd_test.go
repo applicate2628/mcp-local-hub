@@ -67,6 +67,43 @@ func TestIntentCollapseCmd_CheckPrintsReport(t *testing.T) {
 	}
 }
 
+func TestIntentCollapseCmd_CheckExplainsWatermarkOnlyDelta(t *testing.T) {
+	fakeRes := api.DaemonIntentCollapseResult{
+		Changed: true,
+		MergedLegacyStopWatermarks: map[string]api.DaemonIntent{
+			`\mcp-local-hub-foo-default`: {Desired: api.IntentDesiredStopped, Reason: api.IntentReasonUserStop},
+		},
+	}
+	uninstallCheck := setIntentCollapseCheckFnForTest(func(stateDir string, now time.Time) (api.DaemonIntentCollapseResult, error) {
+		if stateDir != "/fake/state" {
+			t.Errorf("check called with stateDir=%q, want /fake/state", stateDir)
+		}
+		return fakeRes, nil
+	})
+	defer uninstallCheck()
+	uninstallDir := setIntentCollapseStateDirFnForTest(func() (string, error) { return "/fake/state", nil })
+	defer uninstallDir()
+
+	cmd := newIntentCollapseCmdReal()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{"--check"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute --check: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "merge changes: true") {
+		t.Fatalf("output missing changed=true header; full:\n%s", out)
+	}
+	if strings.Contains(out, "no per-task changes — daemon-intent.json stops already reflected in supervisor-intent.json") {
+		t.Fatalf("watermark-only changed result printed bare no-delta line; full:\n%s", out)
+	}
+	if !strings.Contains(out, "watermark self-heal: legacy stop already reflected; recording bookkeeping watermark (no daemon lifecycle change)") {
+		t.Fatalf("watermark-only changed result did not explain bookkeeping write; full:\n%s", out)
+	}
+}
+
 // TestIntentCollapseCmd_RequiresCheckFlag verifies the command refuses to run
 // without --check (the destructive merge is NOT exposed via the CLI in this
 // PR — only the read-only preview is).
