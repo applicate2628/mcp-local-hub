@@ -2,14 +2,14 @@
 
 Template: design review REVISE / blocked prerequisite. Orchestrator: `$lead`.
 State: REVISE / blocked on prerequisite - implementation not started.
-Depends-on: 2026-07-09-lsp-relay-per-client-disable-gui, 2026-07-09-intent-collapse-stop-resurrection, 2026-07-09-adopt-side-durable-pre-adopt-provenance
+Depends-on: 2026-07-09-adopt-side-durable-pre-adopt-provenance
 
 Dependency note: `2026-07-09-adopt-side-durable-pre-adopt-provenance` names
 the adopt-side provenance prerequisite established by `review.md`; no active
 work-item exists for it yet.
 
 ## Active agents / lanes
-- None. Parked behind the two in-flight PRs.
+- None. Blocked on the adopt-side provenance prerequisite, not on any in-flight PR.
 
 ## Completed agents / lanes
 - Design memo accepted and copied into this work-item as `design.md`.
