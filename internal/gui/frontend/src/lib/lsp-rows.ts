@@ -21,7 +21,7 @@
 // servers/mcp-language-server/manifest.yaml. Keep both lists in sync
 // when the manifest declares a new language.
 
-import { lspLegacyURLPort } from "./routing";
+import { entryPointsAtLegacyLSPPort } from "./routing";
 import type { ClientPresence, ScanResult } from "../types";
 import type { ClientEntry } from "../types";
 import type { WorkspaceEntryDTO } from "../api";
@@ -108,10 +108,11 @@ export interface LspRow {
   // toggles need this because the backend per-client disable path mutates only
   // the reserved mcp-language-server-<lang> entry, not suffixed siblings.
   clientPresenceEntryName: Record<string, string>;
-  // True when the first-win clientPresence is a legacy /mcp URL whose port and
-  // source entry name are recognized by the backend rollback/ensure owners via
-  // the workspace registry. Without this proof, loopback /mcp cells stay
-  // unchecked and disabled instead of hitting deterministic ownership errors.
+  // True when the first-win clientPresence points at a legacy /mcp URL through
+  // endpoint or relay_url whose port and source entry name are recognized by the
+  // backend rollback/ensure owners via the workspace registry. Without this
+  // proof, loopback /mcp cells stay unchecked and disabled instead of hitting
+  // deterministic ownership errors.
   clientPresenceCanEnableFromLegacy: Record<string, boolean>;
   legacyConflict: Record<string, ClientEntry>;
 }
@@ -216,12 +217,13 @@ export function collectLspRows(
       entryName: string,
       presence: ClientPresence,
     ): boolean => {
-      const port = lspLegacyURLPort(presence.endpoint ?? "");
-      if (port === null) return false;
       if (entryName === reservedRouterName) {
-        return legacyPorts.has(port);
+        return entryPointsAtLegacyLSPPort(presence, legacyPorts);
       }
-      return legacyPortsByClientEntry.get(legacyPortKey(client, entryName))?.has(port) === true;
+      return entryPointsAtLegacyLSPPort(
+        presence,
+        legacyPortsByClientEntry.get(legacyPortKey(client, entryName)),
+      );
     };
     // Cross-reference parsed names — covers placeholders + sanity.
     for (const e of entries) {

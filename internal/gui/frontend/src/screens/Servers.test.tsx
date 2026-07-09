@@ -880,6 +880,118 @@ describe("ServersScreen — LSP matrix rows", () => {
     expect(enableBodies[0]).toEqual({ client: "codex-cli" });
   });
 
+  it("keeps a registry-owned legacy relay LSP entry enableable while foreign router relays stay disabled", async () => {
+    let scan: ScanResult = {
+      at: "2026-07-09T00:00:00Z",
+      entries: [
+        {
+          name: "mcp-language-server-python",
+          manifest_exists: false,
+          can_migrate: false,
+          status: "via-hub",
+          client_presence: {
+            zed: {
+              transport: "relay",
+              endpoint: "mcp-language-server",
+              relay_url: "http://127.0.0.1:9200/mcp",
+            },
+            antigravity: {
+              transport: "relay",
+              endpoint: "mcp.exe",
+              relay_url: "http://127.0.0.1:9200/lsp/python/mcp",
+            },
+          },
+        },
+      ],
+      client_config_presence: { zed: "ok", antigravity: "ok" },
+      client_capabilities: {
+        zed: { scannable: true, direct_installable: false, remote_http_capable: false },
+        antigravity: { scannable: true, direct_installable: false, remote_http_capable: false },
+      },
+    };
+    const workspaceBody = {
+      workspaces: [
+        {
+          workspace_key: "default",
+          workspace_path: "D:/dev/project",
+        },
+      ],
+      entries: [
+        {
+          workspace_key: "default",
+          workspace_path: "D:/dev/project",
+          language: "python",
+          backend: "mcp-language-server",
+          port: 9200,
+          task_name: "\\mcp-local-hub-lsp-default-python",
+          client_entries: {
+            zed: "mcp-language-server-python",
+          },
+        },
+      ],
+    };
+    const enableBodies: unknown[] = [];
+    const disableBodies: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => jsonResponse(200, workspaceBody),
+        "/api/lsp-router/enable": (init?: RequestInit) => {
+          enableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          const currentEntry = scan.entries?.[0];
+          if (!currentEntry) throw new Error("missing LSP scan entry");
+          scan = {
+            ...scan,
+            entries: [
+              {
+                ...currentEntry,
+                client_presence: {
+                  ...currentEntry.client_presence,
+                  zed: {
+                    transport: "relay",
+                    endpoint: "C:\\Users\\u\\.local\\bin\\mcphub.exe",
+                    relay_url: "http://127.0.0.1:9200/lsp/python/mcp",
+                  },
+                },
+              },
+            ],
+          };
+          return jsonResponse(200, { client: "zed", enabled: true, report: {} });
+        },
+        "/api/lsp-router/disable": (init?: RequestInit) => {
+          disableBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, { client: "zed", enabled: false, report: {} });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+
+    const legacyRelay = (await screen.findByTestId(
+      "lsp-toggle-python-zed",
+    )) as HTMLInputElement;
+    const foreignRelay = screen.getByTestId(
+      "lsp-toggle-python-antigravity",
+    ) as HTMLInputElement;
+    expect(legacyRelay.checked).toBe(false);
+    expect(legacyRelay.disabled).toBe(false);
+    expect(foreignRelay.checked).toBe(false);
+    expect(foreignRelay.disabled).toBe(true);
+
+    fireEvent.click(legacyRelay);
+    await waitFor(() => expect(enableBodies).toHaveLength(1));
+    expect(enableBodies[0]).toEqual({ client: "zed" });
+
+    await waitFor(() => {
+      expect(legacyRelay.checked).toBe(true);
+      expect(legacyRelay.disabled).toBe(false);
+    });
+    fireEvent.click(legacyRelay);
+    await waitFor(() => expect(disableBodies).toHaveLength(1));
+    expect(disableBodies[0]).toEqual({ client: "zed" });
+  });
+
   it("renders disabled shared-router entries as unchecked and enableable", async () => {
     const scan: ScanResult = {
       at: "2026-07-09T00:00:00Z",

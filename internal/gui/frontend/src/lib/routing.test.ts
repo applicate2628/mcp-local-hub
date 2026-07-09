@@ -7,6 +7,7 @@ import {
   clientConfigUsable,
   loopbackEntryPort,
   lspLegacyURLPort,
+  entryPointsAtLegacyLSPPort,
   loopbackPortMatchesDaemon,
   perClientRouting,
   collectServers,
@@ -195,6 +196,48 @@ describe("lspLegacyURLPort", () => {
     expect(lspLegacyURLPort("https://127.0.0.1:9200/mcp")).toBeNull();
     expect(lspLegacyURLPort("http://example.invalid:9200/mcp")).toBeNull();
     expect(lspLegacyURLPort("http://127.0.0.1/mcp")).toBeNull();
+  });
+});
+
+describe("entryPointsAtLegacyLSPPort", () => {
+  it("matches backend replaceability through endpoint or relay_url without requiring relay ownership", () => {
+    const legacyPorts = new Set([9200]);
+    expect(
+      entryPointsAtLegacyLSPPort(
+        { endpoint: "http://127.0.0.1:9200/mcp" },
+        legacyPorts,
+      ),
+    ).toBe(true);
+    expect(
+      entryPointsAtLegacyLSPPort(
+        {
+          endpoint: "mcp-language-server",
+          relay_url: "http://127.0.0.1:9200/mcp",
+        },
+        legacyPorts,
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects router URLs, foreign ports, and missing registry evidence", () => {
+    expect(
+      entryPointsAtLegacyLSPPort(
+        { endpoint: "mcp.exe", relay_url: "http://127.0.0.1:9200/lsp/python/mcp" },
+        new Set([9200]),
+      ),
+    ).toBe(false);
+    expect(
+      entryPointsAtLegacyLSPPort(
+        { endpoint: "mcp-language-server", relay_url: "http://127.0.0.1:9300/mcp" },
+        new Set([9200]),
+      ),
+    ).toBe(false);
+    expect(
+      entryPointsAtLegacyLSPPort(
+        { endpoint: "mcp-language-server", relay_url: "http://127.0.0.1:9200/mcp" },
+        undefined,
+      ),
+    ).toBe(false);
   });
 });
 

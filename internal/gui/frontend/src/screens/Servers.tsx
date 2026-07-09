@@ -2110,12 +2110,12 @@ function LspCellView(props: {
     hasPrimary &&
     !backendOwnedRouterShape &&
     // Preserve only backend-recognized legacy hub-loopback LSP entries as
-    // enable candidates: the row helper proves the /mcp URL's port and source
-    // entry name against the workspace registry. Orphaned/pruned loopback
-    // entries, suffixed router-shaped entries, direct stdio, relay entries with
-    // foreign commands, and non-loopback remote HTTP entries are not safe to
-    // mutate from this checkbox.
-    (t !== "http" || !canEnableFromLegacy);
+    // enable candidates: the row helper proves the endpoint/relay_url /mcp
+    // URL's port and source entry name against the workspace registry.
+    // Orphaned/pruned loopback entries, suffixed router-shaped entries, direct
+    // stdio, foreign router relays, and non-loopback remote HTTP entries are
+    // not safe to mutate from this checkbox.
+    !canEnableFromLegacy;
   // Finding 3: an inherited hub entry is read-only — the hub never wrote the
   // inherited source (an ~/.claude.json import or a lower config.json layer) and
   // cannot roll it back. Mirrors ClientPresence.inherited → via-hub-inherited.

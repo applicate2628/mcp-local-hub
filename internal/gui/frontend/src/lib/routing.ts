@@ -163,6 +163,23 @@ export function lspLegacyURLPort(endpoint: string): number | null {
   }
 }
 
+// entryPointsAtLegacyLSPPort mirrors api.entryPointsAtLegacyLSPPort for
+// replaceability, not ownership: backend ensure/remove checks both URL and
+// RelayURL for a registry-backed legacy /mcp port and does not require a relay
+// command basename here. Relay command ownership remains in isMcphubRelayCommand
+// for shared-router /lsp/<lang>/mcp entries.
+export function entryPointsAtLegacyLSPPort(
+  entry: Pick<ClientPresence, "endpoint" | "relay_url"> | undefined,
+  ports: ReadonlySet<number> | undefined,
+): boolean {
+  if (!entry || !ports || ports.size === 0) return false;
+  for (const raw of [entry.endpoint, entry.relay_url]) {
+    const port = lspLegacyURLPort(raw ?? "");
+    if (port !== null && ports.has(port)) return true;
+  }
+  return false;
+}
+
 // loopbackPortMatchesDaemon reports whether a hub-shaped loopback endpoint
 // targets one of THIS server's manifest daemon ports. This is the
 // load-bearing PORT-aware gate that keeps the matrix cell in lockstep with
