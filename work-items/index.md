@@ -1,22 +1,57 @@
 # Work items index
 
-## Active
+> Canonical open-bug truth: **`bugs/TRIAGE-2026-07-08.md`** (HEAD-verified by 3 parallel
+> agents). Individual bug-doc frontmatter LAGS reality — the roadmap was ~90% stale (most
+> bugs were fixed without a status flip). Trust the TRIAGE + the "Truly open" list below,
+> NOT a raw count of files in `bugs/` (32 files ≈ 4 open + ~26 done-not-flipped + 2 triage).
 
-(none — all delivered items archived)
+## Active (work-items/active/)
+
+| Item | State | Remaining |
+|---|---|---|
+| [2026-07-05-adopt-npx-orphans](active/2026-07-05-adopt-npx-orphans/status.md) | PARTIALLY DELIVERED | adopt CLI/API + GUI + **reaper (all 3 kill-authority hardenings)** SHIPPED + DEPLOYED (#513/#520/#521/#522). Remaining = anti-drift "unmanaged detected" GUI signal (in flight) + phase-2 de-adopt + D P2a/P2b GUI. |
+
+## Reaper kill-authority hardening — COMPLETE (2026-07-08, all bot-PASS + deployed)
+
+| Fix | PR | master | Status |
+|---|---|---|---|
+| A2 PR5 auto-reaper (config-absence gate + snapshot fail-closed + T3 source-fix + reap_verdict presentation + identity-bind + specificity) | #520 | c53d874a | deployed + live-verified |
+| Walk-uncertainty P0 (3-state fail-closed walk: tri-state QueryPIDState + self-loop + depth-cap) | #521 | 509afa31 | deployed + live-verified |
+| Aggressive-token identity binding (token+started_at + {pid,started_at} kill-bind both surfaces) | #522 | 669951e3 | deployed + live-verified |
+
+## Truly-open bugs (everything else in bugs/ is fixed/closed — status just not flipped)
+
+| Bug | Status |
+|---|---|
+| [2026-07-04-intent-collapse-cleared-stop-resurrection](bugs/2026-07-04-intent-collapse-cleared-stop-resurrection.md) | open |
+| [2026-07-07-lsp-router-relay-entries-ignore-per-client-disable](bugs/2026-07-07-lsp-router-relay-entries-ignore-per-client-disable.md) | open (fix in flight) |
+| [2026-06-23-openpath-second-explorer-generator](bugs/2026-06-23-openpath-second-explorer-generator.md) | triage |
+| [2026-06-22-explorer-folder-window-orphan-flood](bugs/2026-06-22-explorer-folder-window-orphan-flood.md) | resolving (print-only default + --reveal shipped; verify + close) |
+
+Two triage batch files (`bugs/TRIAGE-2026-05-28.md`, `bugs/TRIAGE-2026-07-08.md`) are
+reconciliation records, not open tasks.
 
 ## Epics
 
 | Epic | Status | Closed | Outcome |
 |---|---|---|---|
-| [2026-06-23-desktop-app-mcp-catalog](epics/2026-06-23-desktop-app-mcp-catalog.md) | closed | 2026-06-29 | DONE — desktop/creative-app MCP catalog. All tiers resolved → 52 catalog rows (33 entries + 19 docs-only) across eng/CAD/music/data/BI/creative/science/PKM/office, theme-grouped, arch-aware install_probe. Clean one-click: Excel/codex/MATLAB/Ansys/KiCad/Onshape + the vendor-breadth sweep (Reaper/grafana/tableau/photoshop/zotero/metabase/jupyter/rmcp/obsidian/logseq/origin-pro). Ableton upgraded to the loopback-safe own-fork (#451, fixes 0.0.0.0). Immature/manual-clone Tier-3 = docs-only pointers (superseded the executed-clone blocker). Shipped npm v0.4.9. |
-| [2026-06-19-install-and-it-works-ux](epics/2026-06-19-install-and-it-works-ux.md) | closed | 2026-06-28 | DONE — clean-install + hub-launch + per-project UX. Areas 1/2/5/6 done (#377, #407/#408, #437, #428–#435); area 3 closeable (symlink PRs #409/#410 + hardening #414–#416, residual = accept-disclose posture mitigated by MCPHUB_REQUIRE_SINGLE_USER_HOME=1, decision promoted accepted); area 4 defect fixed (#400) with router-native rewrite DEFERRED; D2 cold re-enable shipped (#439). Deferred follow-ups: area-4 router-native, D1 claude-Local write-back, D2 stash-full-restore, embed-first-shadow bug. |
+| [2026-06-23-desktop-app-mcp-catalog](epics/2026-06-23-desktop-app-mcp-catalog.md) | closed | 2026-06-29 | DONE — desktop/creative-app MCP catalog, 52 rows, shipped npm v0.4.9. |
+| [2026-06-19-install-and-it-works-ux](epics/2026-06-19-install-and-it-works-ux.md) | closed | 2026-06-28 | DONE — clean-install + hub-launch + per-project UX (#377/#407/#408/#437/#428–#435/#439). |
 
-## Archived
+## Reference / parked (loose root files — NOT open tasks)
+
+- `2026-06-17-phase1-audit-findings.md` — Phase 1 audit source-of-truth (historical reference).
+- `2026-06-18-clean-install-ux-vision.md` — PARKED user vision (post-dev-debug future).
+- `2026-06-18-vendor-init-uninstalled-clients.md` — RESOLVED 2026-06-21 (secure-parent-create stack).
+- `roadmap-scan-2026-06-14.md` — gitignored local raw-inventory scan the `ROADMAP.md` audit
+  header cites; superseded by `ROADMAP.md` for all live tracking (not an open task).
+
+## Archived (work-items/archive/<YYYY-MM>/)
 
 | Item | Closed | Outcome |
 |---|---|---|
-| [2026-07-05-unify-port-resolution-owner](archive/2026-07/2026-07-05-unify-port-resolution-owner/closure.md) | 2026-07-05 | DELIVERED — daemon port + identity resolution single-owned in `internal/api/supervisor_port_owner.go`; F5 backfill + dead ResolveManifestDaemonPort deleted. Principle: scope picks the owner (PAIR→ResolveDescriptorMatchIdentity strict, SERVER→DescriptorServerName permissive); no consumer reads a raw d.Server/d.Daemon for a decision on a row that could carry a daemon argv. Merged #505 (e306cbd7), deployed + live-verified (22 MCP servers green). Landed after 7 bot rounds + 3 commissions + 2 architect reconsults (the F5-reader edge-mine). Residual: status-primary→secrets bucketing still field-trusting (fail-safe, deferred). |
-| [2026-06-15-dynamic-mcp-discovery](archive/2026-06/2026-06-15-dynamic-mcp-discovery/closure.md) | 2026-06-16 | DELIVERED — Discovery view (external classify + Managed flag), fetch-checkbox demigrate, Columns→Clients, marketplace mark-installed + card→tooltip, auto-scan poll+Rescan (dirty-safe). 1df59a4/269bd15/a2d13f3/2538151/3e03188, deployed+live-verified. P1 broader-client-discovery + fsnotify-instant → ROADMAP. |
-| [2026-06-15-workspace-daemon-prune](archive/2026-06/2026-06-15-workspace-daemon-prune/closure.md) | 2026-06-16 | DELIVERED — auto-prune Phase 1 (2d947ab) + Phase 3 idle (cefecae) + GUI toggle/backups (5649351, cbcdf28), shipped+deployed. Phase 2 manual GUI Remove → ROADMAP. |
-| [2026-06-15-settings-redesign](archive/2026-06/2026-06-15-settings-redesign/closure.md) | 2026-06-15 | DELIVERED — Settings card redesign + ⓘ tooltips + dark elevation + normalized buttons + UX-audit fixes (ef8d87e, 77c5b46), pushed+deployed+live-verified. Follow-on whole-GUI polish → ROADMAP. |
-| [2026-06-11-pr288-cumulative-review](archive/2026-06/2026-06-11-pr288-cumulative-review/closure.md) | 2026-06-14 | CLOSED — review-only; findings landed via #300/#301/#302/#303, merged + deployed (d1f8caf). |
+| [2026-07-05-unify-port-resolution-owner](archive/2026-07/2026-07-05-unify-port-resolution-owner/closure.md) | 2026-07-05 | DELIVERED — daemon port+identity single-owned; #505, deployed. |
+| [2026-06-15-dynamic-mcp-discovery](archive/2026-06/2026-06-15-dynamic-mcp-discovery/closure.md) | 2026-06-16 | DELIVERED — Discovery view + demigrate + marketplace mark-installed. |
+| [2026-06-15-workspace-daemon-prune](archive/2026-06/2026-06-15-workspace-daemon-prune/closure.md) | 2026-06-16 | DELIVERED — auto-prune Phase 1 + idle + GUI toggle. |
+| [2026-06-15-settings-redesign](archive/2026-06/2026-06-15-settings-redesign/closure.md) | 2026-06-15 | DELIVERED — Settings card redesign + tooltips + UX-audit fixes. |
+| [2026-06-11-pr288-cumulative-review](archive/2026-06/2026-06-11-pr288-cumulative-review/closure.md) | 2026-06-14 | CLOSED — review-only; findings landed via #300–#303. |
