@@ -669,41 +669,52 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 		case err != nil:
 			return nil, fmt.Errorf("adopt provenance capture: read client %q config: %w", name, err)
 		case entry != nil:
+			// Finding 1 (codex bot PR #528 r4): present-merged-lower is keyed on the
+			// ADAPTER's authoritative SourceBelowWriteTarget signal, NOT on a missing
+			// ConfigPath. SourceBelowWriteTarget==true means the entry resolves from a
+			// LOWER read/import layer the hub never writes; the write target may EXIST
+			// (holding other entries) yet not contain this entry. Record
+			// present-merged-lower with NO snapshot — de-adopt restores by removing the
+			// hub entry from the write target, which re-exposes the untouched lower-layer
+			// original — and do NOT read or snapshot the write-target bytes.
+			// (present-merged-lower <=> SourceBelowWriteTarget, exactly.)
+			if entry.SourceBelowWriteTarget {
+				out = append(out, AdoptClientProvenance{
+					Client:        name,
+					OriginalState: AdoptOriginalStatePresentMergedLower,
+					RestoreMode:   AdoptRestoreModeFunctionalEquivalent,
+				})
+				continue
+			}
 			cfgPath := adapter.ConfigPath()
 			if adoptCaptureBeforeSnapshotReadHook != nil {
 				adoptCaptureBeforeSnapshotReadHook(name) // test-only: simulate a concurrent config edit
 			}
 			configBytes, rErr := os.ReadFile(cfgPath)
 			if rErr != nil {
-				if errors.Is(rErr, fs.ErrNotExist) {
-					// MiMoCode merged-layer (design r2 finding 5): the entry resolves
-					// from a LOWER read layer but the hub WRITE TARGET (ConfigPath) does
-					// not exist yet. GetEntry non-nil PROVES the entry is resolvable, so
-					// this is NOT a vanished entry (the P2 data-loss case is GetEntry
-					// nil, handled by the present-at-Build branches above). Record
-					// present-merged-lower with NO snapshot; de-adopt restores by
-					// removing the hub entry from the write target, which re-exposes the
-					// untouched lower-layer original. (No write-target bytes to
-					// revalidate, so the finding-C guard below does not apply here.)
-					out = append(out, AdoptClientProvenance{
-						Client:        name,
-						OriginalState: AdoptOriginalStatePresentMergedLower,
-						RestoreMode:   AdoptRestoreModeFunctionalEquivalent,
-					})
-					continue
-				}
-				return nil, fmt.Errorf("adopt provenance capture: read client %q config file: %w", name, rErr)
+				// Finding 2 (r4): a SourceBelowWriteTarget==false entry lives IN the
+				// write target (ConfigPath). If that file is now gone, the config
+				// vanished in the GetEntry->ReadFile window — there are no durable bytes
+				// to preserve. FAIL CLOSED. This is deliberately NOT present-merged-lower:
+				// that state is keyed EXCLUSIVELY on SourceBelowWriteTarget above, so a
+				// ConfigPath ENOENT here (fs.ErrNotExist included) is a capture failure,
+				// never a merged-lower guess.
+				return nil, fmt.Errorf("adopt provenance capture: client %q config for entry %q disappeared during capture (%v); refusing to record present with no durable snapshot bytes (fail-closed)", name, plan.EntryName, rErr)
 			}
-			// Capture TOCTOU guard (codex bot PR #528 r3 finding C): the entry was
-			// present at the GetEntry above, but the config could have been edited
-			// (entry deleted/renamed) BEFORE this ReadFile, so configBytes may LACK the
-			// entry while we record `original_state: present` — a later de-adopt would
-			// then restore that DELETION instead of the pre-adopt entry. Re-verify the
-			// entry is STILL present in the live config after the snapshot read; if it
-			// is gone, the config changed during capture => FAIL CLOSED (do not pin a
-			// snapshot whose bytes are inconsistent with the recorded present state).
-			if recheck, reErr := adapter.GetEntry(plan.EntryName); reErr != nil || recheck == nil {
-				return nil, fmt.Errorf("adopt provenance capture: client %q config for entry %q changed during the snapshot read (entry no longer present); refusing to pin a snapshot inconsistent with the recorded present state", name, plan.EntryName)
+			// Finding 3 (r4): validate the EXACT snapshotted bytes physically contain the
+			// entry, parsed via the adapter's own reader (NO second disk read). The prior
+			// GetEntry re-verify left a double-TOCTOU open: the entry could be deleted
+			// before ReadFile (so configBytes LACKS it) then re-created before the
+			// re-verify (so GetEntry sees it again) — pinning a snapshot whose bytes a
+			// later de-adopt would restore as a DELETION. Checking the captured bytes
+			// themselves closes it.
+			checker, ok := adapter.(clients.EntryBytesChecker)
+			if !ok {
+				return nil, fmt.Errorf("adopt provenance capture: client %q does not support snapshot-byte validation; refusing to pin an unvalidated snapshot (fail-closed)", name)
+			}
+			present, pErr := checker.EntryPresentInBytes(configBytes, plan.EntryName)
+			if pErr != nil || !present {
+				return nil, fmt.Errorf("adopt provenance capture: client %q snapshot bytes do not contain entry %q (present=%t err=%v); config changed during the snapshot read — refusing to pin a snapshot inconsistent with the recorded present state (fail-closed)", name, plan.EntryName, present, pErr)
 			}
 			ref, sha, wErr := writeAdoptClientSnapshot(plan.ManifestName, name, configBytes)
 			if wErr != nil {

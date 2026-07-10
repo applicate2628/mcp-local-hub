@@ -350,9 +350,12 @@ func TestGcClassifierUnreadableClientKeeps(t *testing.T) {
 	}
 }
 
-// Finding C (r3) — a config edited to REMOVE the entry between GetEntry and the
-// snapshot ReadFile makes capture FAIL CLOSED: no snapshot inconsistent with the
-// recorded `present` state, no committed row.
+// Finding C (r3) / finding 3 (r4) — a config edited to REMOVE the entry between
+// GetEntry and the snapshot ReadFile makes capture FAIL CLOSED. As of r4 the guard
+// is adapter.EntryPresentInBytes over the EXACT snapshot bytes (not a fresh GetEntry
+// re-read), so a delete-then-recreate race cannot slip an entry-less snapshot past
+// it: the bytes that get validated are the same bytes that get pinned. No snapshot
+// inconsistent with the recorded `present` state, no committed row.
 func TestCaptureFailsClosedOnConfigEditDuringSnapshot(t *testing.T) {
 	entry := "captoctou"
 	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.captoctou]
@@ -387,5 +390,93 @@ args = ["version"]
 	d, _ := adoptSnapshotDir(entry)
 	if _, statErr := os.Stat(d); !os.IsNotExist(statErr) {
 		t.Errorf("capture-TOCTOU-failed adopt left a snapshot dir: %v", statErr)
+	}
+}
+
+// Finding 1 (r4) — present-merged-lower is keyed on SourceBelowWriteTarget, NOT on a
+// missing ConfigPath. A MiMoCode entry that resolves from the LOWER config.json layer
+// while the write target (mimocode.json = ConfigPath) EXISTS (holding an unrelated
+// entry) is still present-merged-lower with NO snapshot.
+func TestCaptureMimoCodeMergedLowerWithWriteTargetPresent(t *testing.T) {
+	entry := "mimomergedlive"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mimomergedlive]
+command = "go"
+args = ["version"]
+`)
+	t.Setenv("MIMOCODE_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
+	home := filepath.Dir(filepath.Dir(codexPath))
+	mimoDir := filepath.Join(home, ".config", "mimocode")
+	if err := os.MkdirAll(mimoDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// config.json (a LOWER read layer) carries the ADOPTED entry.
+	if err := os.WriteFile(filepath.Join(mimoDir, "config.json"), []byte(`{"mcp":{"mimomergedlive":{"type":"local","command":["go","version"]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// mimocode.json (the WRITE TARGET = ConfigPath) EXISTS but holds a DIFFERENT
+	// entry — the adopted entry is BELOW an existing write target. Old ConfigPath-ENOENT
+	// keying would have mis-routed this to `present` + snapshot; SourceBelowWriteTarget
+	// keying keeps it present-merged-lower.
+	if err := os.WriteFile(filepath.Join(mimoDir, "mimocode.json"), []byte(`{"mcp":{"someotherserver":{"type":"local","command":["true"]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan := &AdoptPlan{
+		EntryName: entry, SourceClient: "mimocode", ManifestName: entry,
+		AdoptClients: []string{"mimocode"},
+		ManifestYAML: "name: " + entry + "\n",
+	}
+	rec, err := NewAPI().captureAdoptProvenance(plan)
+	if err != nil {
+		t.Fatalf("capture must SUCCEED for a present-merged-lower client with an EXISTING write target: %v", err)
+	}
+	var mimo *AdoptClientProvenance
+	for i := range rec.Clients {
+		if rec.Clients[i].Client == "mimocode" {
+			mimo = &rec.Clients[i]
+		}
+	}
+	if mimo == nil {
+		t.Fatalf("mimocode client not recorded; clients=%+v", rec.Clients)
+	}
+	if mimo.OriginalState != AdoptOriginalStatePresentMergedLower {
+		t.Errorf("mimocode original_state = %q, want present-merged-lower (entry below an EXISTING write target)", mimo.OriginalState)
+	}
+	if mimo.SnapshotRef != "" || mimo.SnapshotSHA256 != "" {
+		t.Errorf("present-merged-lower must have NO snapshot: ref=%q sha=%q", mimo.SnapshotRef, mimo.SnapshotSHA256)
+	}
+}
+
+// Finding 2 (r4) — a SourceBelowWriteTarget==false entry (single-file client: the
+// entry lives IN the write target) whose ConfigPath vanishes between GetEntry and the
+// snapshot ReadFile must FAIL CLOSED, never be guessed present-merged-lower (which is
+// now reserved exclusively for SourceBelowWriteTarget==true).
+func TestCaptureFailsClosedWhenWriteTargetConfigVanishes(t *testing.T) {
+	entry := "capvanish"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.capvanish]
+command = "go"
+args = ["version"]
+`)
+	orig := adoptCaptureBeforeSnapshotReadHook
+	adoptCaptureBeforeSnapshotReadHook = func(client string) {
+		if client == "codex-cli" {
+			_ = os.Remove(codexPath) // whole config gone -> ConfigPath ENOENT
+			adoptCaptureBeforeSnapshotReadHook = nil
+		}
+	}
+	t.Cleanup(func() { adoptCaptureBeforeSnapshotReadHook = orig })
+
+	plan := &AdoptPlan{
+		EntryName: entry, SourceClient: "codex-cli", ManifestName: entry,
+		AdoptClients: []string{"codex-cli"},
+		ManifestYAML: "name: " + entry + "\n",
+	}
+	if _, err := NewAPI().captureAdoptProvenance(plan); err == nil {
+		t.Fatal("capture succeeded despite the write-target config vanishing; want fail-closed")
+	} else if !strings.Contains(err.Error(), "disappeared during capture") {
+		t.Errorf("error should name the vanished-write-target fail-closed: %v", err)
+	}
+	if rec, found, _ := ReadAdoptProvenance(entry); found {
+		t.Errorf("vanished-config capture left a committed row: %+v", rec)
 	}
 }
