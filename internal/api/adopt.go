@@ -53,6 +53,17 @@ type AdoptPlan struct {
 	DisabledSameName    []AdoptClientDisabled
 	SecretRoutedKeys    []string
 	ManifestYAML        string
+	// PresentAtBuild is the set of clients whose same-name entry was PRESENT and
+	// adoptable at BuildAdoptPlan time (= clientScan.Matching, which always
+	// includes the source client). captureAdoptProvenance fails CLOSED if any
+	// SELECTED client in this set reads absent/no-entry at capture: that is a
+	// Build->capture change (the entry was deleted / renamed / edited away), and
+	// since Install still writes the hub relay to the client, recording it `absent`
+	// with no snapshot would let de-adopt "restore to absence" and DELETE the
+	// operator's adopted entry unrecoverably (security F4). A client NOT in this
+	// set is a legitimate entryless-fanout target and may classify `absent`.
+	// Internal-only field; not part of any adopt CLI/API/GUI wire shape.
+	PresentAtBuild []string
 
 	secretValues map[string]string
 }
@@ -197,6 +208,7 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		DisabledSameName:    clientScan.Disabled,
 		SecretRoutedKeys:    routedKeys,
 		ManifestYAML:        manifestYAML,
+		PresentAtBuild:      append([]string(nil), clientScan.Matching...),
 		secretValues:        secretValues,
 	}, nil
 }

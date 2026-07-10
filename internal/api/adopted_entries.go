@@ -440,6 +440,17 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 //     never guess `absent` on a corrupted/unreadable config)
 func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, error) {
 	all := clients.AllClients()
+	// presentAtBuild = clients whose same-name entry was PRESENT and adoptable at
+	// BuildAdoptPlan time (always includes the source client). Such a client MUST
+	// NOT be recorded `absent` if it reads no-entry at capture — that is a
+	// Build->capture change, and since Install still writes the hub relay to it,
+	// a guessed `absent` would let de-adopt delete the adopted entry with no
+	// snapshot (security F4 — a vanished entry does not "parse cleanly and lack
+	// the entry"; it is a fail-closed capture failure).
+	presentAtBuild := make(map[string]bool, len(plan.PresentAtBuild))
+	for _, c := range plan.PresentAtBuild {
+		presentAtBuild[c] = true
+	}
 	out := make([]AdoptClientProvenance, 0, len(plan.AdoptClients))
 	for _, name := range plan.AdoptClients {
 		adapter, ok := all[name]
@@ -452,6 +463,12 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 		entry, err := adapter.GetEntry(plan.EntryName)
 		switch {
 		case err != nil && errors.Is(err, fs.ErrNotExist):
+			// A genuinely-missing config file. Fail closed if the client was present
+			// at Build (its config vanished in the Build->capture window); otherwise
+			// it is a legitimate configless fanout target with no entry to preserve.
+			if presentAtBuild[name] {
+				return nil, fmt.Errorf("adopt provenance capture: client %q had the %q entry at plan time but its config is missing at capture; refusing to record it absent (fail-closed — a guessed absent would let de-adopt delete the adopted entry)", name, plan.EntryName)
+			}
 			out = append(out, adoptClientProvenanceAbsent(name))
 		case err != nil:
 			return nil, fmt.Errorf("adopt provenance capture: read client %q config: %w", name, err)
@@ -473,6 +490,15 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 				SnapshotSHA256: sha,
 			})
 		default:
+			// entry == nil, err == nil: the config parsed cleanly but the same-name
+			// entry is gone. Fail closed if the client was present at Build (the
+			// entry was deleted/renamed/edited away in the Build->capture window —
+			// the TOCTOU that Install would still write the hub relay over, so a
+			// guessed `absent` is silent data loss on de-adopt, security F4).
+			// Otherwise it is a legitimate entryless-fanout target.
+			if presentAtBuild[name] {
+				return nil, fmt.Errorf("adopt provenance capture: client %q had the %q entry at plan time but it is gone at capture; refusing to record it absent (fail-closed — a guessed absent would let de-adopt delete the adopted entry)", name, plan.EntryName)
+			}
 			out = append(out, adoptClientProvenanceAbsent(name))
 		}
 	}

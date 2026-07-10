@@ -267,3 +267,118 @@ args = ["version"]
 		t.Errorf("adopt_manifest_hash = %q, want hash of on-disk manifest %q", rec.AdoptManifestHash, want)
 	}
 }
+
+// P2 — a client PRESENT at Build whose entry vanishes before capture fails the
+// adopt CLOSED (a Build->capture TOCTOU on the adopted entry): no vault key, no
+// manifest, no source-client write, no provenance row. Uses a NON-source
+// present-at-Build client (cursor) to prove the general-case fix, not just the
+// source special case.
+func TestCaptureFailsClosedWhenPresentClientVanishes(t *testing.T) {
+	entry := "mui-adopt-vanish"
+	codexPath, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-vanish]
+command = "go"
+args = ["version"]
+
+[mcp_servers.mui-adopt-vanish.env]
+API_KEY = "literal-secret-value"
+`)
+	if _, err := NewAPI().SecretsInit(); err != nil {
+		t.Fatalf("SecretsInit: %v", err)
+	}
+	home := filepath.Dir(filepath.Dir(codexPath))
+	cursorPath := filepath.Join(home, ".cursor", "mcp.json")
+	// cursor has the SAME-signature entry at Build (present + matching -> Matching).
+	writeJSONForAdoptTest(t, cursorPath, map[string]any{
+		"mcpServers": map[string]any{entry: map[string]any{
+			"command": "go", "args": []any{"version"},
+			"env": map[string]any{"API_KEY": "literal-secret-value"},
+		}},
+	})
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: port,
+		Clients:  []string{"codex-cli", "cursor"},
+		ScanOpts: ScanOpts{CodexConfigPath: codexPath, CursorConfigPath: cursorPath},
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	if !containsAdoptString(plan.PresentAtBuild, "cursor") || !containsAdoptString(plan.AdoptClients, "cursor") {
+		t.Fatalf("precondition: cursor must be present-at-Build AND selected; present=%#v selected=%#v", plan.PresentAtBuild, plan.AdoptClients)
+	}
+	codexBefore := mustReadFileForAdoptTest(t, codexPath)
+
+	// TOCTOU: cursor's entry vanishes between Build and capture (config parses
+	// cleanly, same-name entry gone).
+	writeJSONForAdoptTest(t, cursorPath, map[string]any{"mcpServers": map[string]any{}})
+
+	if err := NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{}); err == nil {
+		t.Fatal("ExecuteAdopt succeeded despite a present-at-Build client vanishing; want fail-closed error")
+	}
+	vault, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+	if err != nil {
+		t.Fatalf("OpenVault: %v", err)
+	}
+	if keys := vault.List(); len(keys) != 0 {
+		t.Errorf("vanish-capture adopt wrote vault keys %v, want none", keys)
+	}
+	if _, err := os.Stat(filepath.Join(manifestRoot, entry, "manifest.yaml")); !os.IsNotExist(err) {
+		t.Errorf("vanish-capture adopt created a manifest: stat err = %v", err)
+	}
+	if after := mustReadFileForAdoptTest(t, codexPath); !bytes.Equal(codexBefore, after) {
+		t.Errorf("vanish-capture adopt changed the source client config")
+	}
+	assertNoAdoptProvenanceResidue(t, entry)
+}
+
+// P2 control — a genuine entryless-fanout target (absent at Build, NOT in
+// PresentAtBuild) still classifies `absent` and the adopt SUCCEEDS. The fix must
+// not regress the fan-out path.
+func TestCaptureFanoutAbsentStillSucceeds(t *testing.T) {
+	entry := "mui-adopt-fanout-ok"
+	codexPath, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-fanout-ok]
+command = "go"
+args = ["version"]
+`)
+	home := filepath.Dir(filepath.Dir(codexPath))
+	cursorPath := filepath.Join(home, ".cursor", "mcp.json")
+	// Valid cursor config LACKING the entry -> entryless fanout (absent at Build).
+	writeJSONForAdoptTest(t, cursorPath, map[string]any{
+		"mcpServers": map[string]any{"someOther": map[string]any{"command": "x"}},
+	})
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: port,
+		Clients:  []string{"codex-cli", "cursor"},
+		ScanOpts: ScanOpts{CodexConfigPath: codexPath, CursorConfigPath: cursorPath},
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	if containsAdoptString(plan.PresentAtBuild, "cursor") {
+		t.Fatalf("precondition: cursor must NOT be present-at-Build: %#v", plan.PresentAtBuild)
+	}
+	if !containsAdoptString(plan.AdoptClients, "cursor") {
+		t.Fatalf("precondition: cursor must be a selected fanout target: %#v", plan.AdoptClients)
+	}
+	if err := NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{}); err != nil {
+		t.Fatalf("ExecuteAdopt on a legitimate entryless-fanout target must succeed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(manifestRoot, entry, "manifest.yaml")); err != nil {
+		t.Errorf("manifest missing after a successful fanout adopt: %v", err)
+	}
+	rec, found, err := ReadAdoptProvenance(entry)
+	if err != nil || !found {
+		t.Fatalf("ReadAdoptProvenance found=%v err=%v", found, err)
+	}
+	byClient := map[string]AdoptClientProvenance{}
+	for _, c := range rec.Clients {
+		byClient[c.Client] = c
+	}
+	if byClient["cursor"].OriginalState != AdoptOriginalStateAbsent {
+		t.Errorf("cursor should classify absent (fanout), got %q", byClient["cursor"].OriginalState)
+	}
+	if byClient["codex-cli"].OriginalState != AdoptOriginalStatePresent {
+		t.Errorf("codex-cli should classify present, got %q", byClient["codex-cli"].OriginalState)
+	}
+}
