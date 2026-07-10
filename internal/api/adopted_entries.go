@@ -360,8 +360,22 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 			return fmt.Errorf("adopt provenance capture: read store: %w", err)
 		}
 
-		// UPSERT step 1: drop any prior row for this manifest (in memory) and
-		// reap its stale snapshot dir on disk before re-pinning.
+		// A prior row for this manifest may be a pre-crash `adopting` ORPHAN (safe
+		// to reap) OR a COMMITTED adopt (adopted / de_adopting / closed). A
+		// committed row must NEVER be destroyed: dropping it strands the
+		// already-installed adopt with no provenance/snapshots — e.g. a GUI
+		// double-submit where two plans are built before the first commits (codex
+		// bot PR #528 finding 1). Fail the capture CLOSED on a committed prior row
+		// with ZERO side effects (scan BEFORE any mutation); the
+		// ManifestCreate-already-exists check is the coarser backstop, but refusing
+		// at capture is what preserves the committed row's provenance.
+		for _, r := range store.Records {
+			if r.ManifestName == plan.ManifestName && r.OperationState != AdoptOperationStateAdopting {
+				return fmt.Errorf("adopt provenance capture: manifest %q already has committed adopt provenance (state %q); refusing to overwrite it", plan.ManifestName, r.OperationState)
+			}
+		}
+		// UPSERT step 1: reap a prior `adopting` ORPHAN (at most one; guaranteed
+		// `adopting` by the scan above) + its stale snapshot dir before re-pinning.
 		var kept []AdoptProvenanceRecord
 		for _, r := range store.Records {
 			if r.ManifestName == plan.ManifestName {
@@ -555,11 +569,23 @@ func promoteAdoptProvenanceToAdopted(manifestName string) error {
 	return nil
 }
 
+// writeAdoptedEntriesFn is the abort-path store-write step, injected as a package
+// var ONLY so a test can prove abort's crash-safe ordering (snapshots removed
+// BEFORE the row write — codex bot PR #528 finding 3) by forcing the write to
+// fail after the snapshot removal. Production always uses writeAdoptedEntries.
+var writeAdoptedEntriesFn = writeAdoptedEntries
+
 // abortAdoptProvenance deletes the manifest's row and RemoveAll's its snapshot
 // dir during adopt failure cleanup. Idempotent + best-effort: a second call (or
 // a call for a manifest with no row) is a no-op success; an abort error is
 // RETURNED to the caller (which appends it to the operator message) and never
 // masks the caller's original adopt error.
+//
+// Crash-safe ordering (codex bot PR #528 finding 3): the secret-bearing snapshot
+// dir is removed FIRST, then the row is dropped. A crash between leaves a
+// row->missing-snapshot (harmless; GC/UPSERT reclaims the row), never a
+// snapshot->no-row (an unreclaimable secret leak the row-scanning GC could never
+// reach) — the same ordering gcOrphanedAdoptingProvenance uses.
 //
 // NOTE (Phase B): UNWIRED — called by unit tests only until Phase C.
 func abortAdoptProvenance(rec *AdoptProvenanceRecord) error {
@@ -580,11 +606,11 @@ func abortAdoptProvenance(rec *AdoptProvenanceRecord) error {
 			kept = append(kept, r)
 		}
 		store.Records = kept
-		if err := writeAdoptedEntries(store); err != nil {
-			return fmt.Errorf("adopt provenance abort: write store: %w", err)
-		}
 		if err := removeAdoptSnapshots(manifestName); err != nil {
 			return fmt.Errorf("adopt provenance abort: remove snapshots: %w", err)
+		}
+		if err := writeAdoptedEntriesFn(store); err != nil {
+			return fmt.Errorf("adopt provenance abort: write store: %w", err)
 		}
 		return nil
 	})
@@ -613,9 +639,14 @@ const adoptOrphanGCThreshold = 24 * time.Hour
 // other manifest.
 //
 // Bounded + safe: only `adopting` rows (never adopted/de_adopting/closed), only
-// older-than-threshold rows, all under withAdoptedEntriesLock so it cannot race a
-// concurrent capture/promote/abort. Returns the count reaped. Callers run it
-// best-effort — a GC error must not block a fresh adopt.
+// older-than-threshold rows, AND only rows whose manifest does NOT exist on disk.
+// An aged `adopting` row whose manifest EXISTS is a promote-flip-failure
+// recoverable row (a committed adopt left in `adopting` when the post-Install
+// flip write failed — design F1, security-verified), NOT an orphan, so it is
+// PRESERVED (codex bot PR #528 finding 2); a manifest-existence check error fails
+// SAFE (keep, never reap on uncertainty). All under withAdoptedEntriesLock so it
+// cannot race a concurrent capture/promote/abort. Returns the count reaped.
+// Callers run it best-effort — a GC error must not block a fresh adopt.
 //
 // Crash-safety / ordering: snapshot dirs are removed FIRST, then the row removal
 // is persisted in one write. A crash between leaves the rows `adopting` (aged), so
@@ -638,6 +669,16 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 		var reapedManifests []string
 		for _, r := range store.Records {
 			if r.OperationState == AdoptOperationStateAdopting && r.UpdatedAt.Before(cutoff) {
+				// A promote-flip failure after a successful Install leaves a COMMITTED
+				// adopt in `adopting` state (design F1) — its manifest EXISTS. Only a
+				// crash BEFORE ManifestCreate leaves an aged `adopting` row with NO
+				// manifest = a true orphan. Reap ONLY a true orphan; an existence-check
+				// error fails SAFE (keep). Mirrors BuildAdoptPlan's manifestExistsIn
+				// check (adopt.go:159).
+				if exists, exErr := manifestExistsIn(defaultManifestDir(), r.ManifestName); exErr != nil || exists {
+					kept = append(kept, r)
+					continue
+				}
 				reapedManifests = append(reapedManifests, r.ManifestName)
 				toEmit = append(toEmit, reapedOrphan{manifest: r.ManifestName, ageSec: time.Since(r.UpdatedAt).Seconds()})
 				continue
