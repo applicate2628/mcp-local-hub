@@ -824,3 +824,431 @@ named GC owner), observability, and test strategy are explicit; the three known
 limits are handled without promising byte-equivalence; no implementation code is
 included. Next stage: $planner breaks this into delivery phases (respecting the
 F7 scope boundary). SHOULD-TRACK items are in "Follow-ups & planning notes".
+
+---
+
+## Crash-consistency + concurrency model (bot r2 resolution)
+
+Role: $architect. Supersedes the round-1 ad-hoc guards at HEAD `45073703`
+("protect committed adopt-provenance rows from UPSERT + GC destruction (bot r1)").
+Anchors verified against the worktree at that HEAD (NOT the stale `ceb01c18`
+anchors above — the code has moved on; this addendum cites the real current
+lines). Docs-only; no code. Decision reference:
+`work-items/decisions/2026-07-10-adopt-provenance-crash-consistency-model.md`
+(`status: proposed` — the `$architecture-reviewer` gate promotes it).
+
+### Why the round-1 fixes kept revealing the next edge
+
+Every round-1 guard used `operation_state` + **manifest-existence** as a proxy for
+a row's true condition, and that proxy is ambiguous in three independent ways the
+bot's r2 review walked one at a time:
+
+- An `adopting` row can be **LIVE in-flight** OR a **crash-orphan** — state alone
+  cannot tell them apart (finding 1: the UPSERT reap at `adopted_entries.go:379-388`
+  drops a live row).
+- A dead-owner `adopting` row with **manifest-exists** can be a **committed-but-
+  unflipped** row (KEEP) OR a **pre-promote crash** (REAP) — manifest-existence is
+  TRUE for both (finding 2: the GC keep-guard at `adopted_entries.go:678` preserves
+  the crash-orphan forever).
+- Both abort and GC are **row-driven**, so a snapshot written before its row
+  (`captureAdoptClientsProvenance` at `:394`/`:495` runs before the row write at
+  `:425`) is invisible to every reaper (findings 3, 4).
+
+The fix is not a fourth guard. It is **three orthogonal signals**, each with ONE
+owner, that together classify any row's condition unambiguously.
+
+### The three signals (the coherent core)
+
+**Signal 1 — owner liveness: a per-manifest adopt LEASE (`flock`), held
+capture→promote/abort.** A dedicated lock file
+`<state-dir>/adopt-provenance/<manifest>.lease` (SIBLING to the `<manifest>/`
+snapshot dir, so `removeAdoptSnapshots`' `RemoveAll` of the dir never touches it).
+`ExecuteAdoptWithOpts` acquires it with a **non-blocking `TryLock`** at the very
+top of the adopt (before capture) and holds it — through `persistAdoptRoutedSecrets`,
+`ManifestCreate`, `Install`, and `promote` — releasing on every exit path (`defer`).
+The lease **is** the liveness authority; there is no pid math:
+
+- `TryLock` **fails** ⇒ a live same-manifest adopt already holds it ⇒ **FAIL CLOSED**
+  (finding 1: never reap, never proceed).
+- `TryLock` **succeeds** ⇒ **no live same-manifest adopt exists** (the OS auto-
+  releases a dead holder's `flock`), so ANY prior `adopting` row for this manifest
+  has a **provably dead owner** and is reap-eligible.
+- Every reaper (the capture UPSERT and the cross-manifest GC) `TryLock`s the
+  candidate's lease **before** reaping: can't acquire ⇒ live ⇒ **skip**. One
+  mechanism, two consumers ("one owner per cross-cutting invariant").
+
+*Why the lease over the alternatives (simplest-correct, RECOMMENDED).* `flock` is
+already THE liveness/mutex primitive in this exact file (`adopted-entries.lock`,
+`adopted_entries.go:170-186`) and in `state_file_helper.go:97-102`; the lease adds
+**zero new primitive**. The lock is the liveness — no `owner_pid`/`owner_start_time`
+token, no cross-process process-table probe, no pid-recycling edge, no cross-platform
+`CallerStartTime()` comparison. Cost: the lease is held across the (slow) `Install`.
+Acceptable — it is PER-MANIFEST (concurrent adopts of *different* manifests never
+contend), and concurrent adopts of the *same* manifest MUST be serialized/refused
+anyway. **Rejected alt A — fail-closed on ANY existing `adopting` row** (the "simplest"
+option): too blunt — a crash-orphan row then blocks all same-manifest retries until
+the 24 h GC runs, and `BuildAdoptPlan`'s manifest-exists refusal (`adopt.go:159`)
+plus operator manifest-removal still leaves the orphan row un-reapable on retry. It
+loses the round-1 UPSERT's reap-on-natural-retry, which the lease preserves.
+**Rejected alt B — `owner_pid` + `owner_start_time` liveness token** (reuses
+`CallerStartTime()`, `intent_audit_caller_*.go`): equivalent correctness, but needs
+a cross-process "is pid P alive with start-time T" probe wired into `internal/api`
+(the supervisor's `lookupProcessIdentity`-style probe lives in another layer), plus
+pid-recycling reasoning; a hung-but-alive adopt protects its row exactly as the
+lease would, so the token buys no advantage for more code.
+
+**Signal 2 — install committed: hub-binding-live via the existing single owner
+`liveEntryMatchesManifestBinding`** (`managed_entries.go:355-408`). For a
+dead-owner `adopting` row, this is the committed-vs-crash discriminator (finding 2):
+Install commits by rewriting each selected client's config to the hub URL, so
+"Install committed" ⟺ **at least one of the row's `adopt_clients` has a live entry
+that matches the manifest binding**. The computation is the existing per-client
+pattern at `demigrate.go:417-426` (`adapter.GetEntry(source_entry_name)` → `live`;
+`liveEntryMatchesManifestBinding(live, manifest, binding, m)`), composed over
+`adopt_clients` — the GC/capture becomes a THIRD consumer of that one owner (already
+reused by `demigrate.go:426` and `lsp_client_router.go:313`), no second
+shape-derivation path (consistent with arch F3). This **replaces** the round-1
+manifest-exists keep-guard (`:678`): manifest-exists is a precondition (no manifest
+⇒ not committed ⇒ REAP), but the KEEP decision is hub-binding-live, not
+manifest-existence. On any error building the signal → **KEEP** (fail-safe; never
+reap on uncertainty — same posture as the round-1 existence-check-error path).
+
+**Signal 3 — durable anchor: ROW-FIRST ordering + a snapshot-dir-driven GC
+backstop.** Capture writes a MINIMAL `adopting` row (manifest name, both hashes,
+`operation_state:"adopting"`, empty `clients`) **before** any snapshot, then writes
+the snapshots, then updates the row with the client provenance. This structurally
+eliminates the rowless-snapshot window (findings 3, 4): a snapshot dir is always
+subordinate to a row that a row-driven reaper can find. As a **class-level backstop**
+(the mandate is to stop the whack-a-mole, not close one instance), the GC ALSO scans
+`<state-dir>/adopt-provenance/*` and reaps any `<manifest>/` dir with **no matching
+store row** (under the same lease `TryLock`) — so a rowless secret dir from ANY
+future ordering bug or partial write is discoverable, not just the ones row-first
+prevents. RECOMMENDED: BOTH (row-first is load-bearing; the dir-scan is cheap
+insurance that closes the CLASS).
+
+### The single classifier (used by BOTH capture-reap and the GC)
+
+```
+// Precondition: caller HOLDS the manifest lease, so the row's owner is provably dead.
+classifyDeadAdoptingRow(row) -> COMMITTED_KEEP | CRASH_REAP:
+    exists, err := manifestExistsIn(defaultManifestDir(), row.manifest)   // manifest.go:433, scan.go:2237
+    if err != nil            -> COMMITTED_KEEP            // fail-safe: never reap on uncertainty
+    if !exists               -> CRASH_REAP               // crash before/at ManifestCreate
+    m := load manifest row.manifest
+    if err loading m         -> COMMITTED_KEEP            // fail-safe
+    for each c in row.adopt_clients:
+        live := AllClients()[c].GetEntry(row.source_entry_name)
+        if liveEntryMatchesManifestBinding(live, row.manifest, bindingFor(m,c), m):  // managed_entries.go:355
+            return COMMITTED_KEEP                          // Install committed a binding (finding 2 KEEP)
+    return CRASH_REAP                                      // manifest exists, no binding ever installed (finding 2 REAP)
+```
+
+Capture-reap consumes it: a prior `adopting` row → `COMMITTED_KEEP` ⇒ FAIL CLOSED
+(refuse to overwrite a committed adopt — this generalises the round-1
+non-`adopting`-row refusal at `:372-376`); `CRASH_REAP` ⇒ reap + proceed. The GC
+consumes it identically. **One classification, one committed-signal owner** — the
+capture path and the GC can never diverge again (that divergence WAS the bug class).
+
+### Revised lifecycle ordering (supersedes the round-1 pseudocode)
+
+```
+ExecuteAdoptWithOpts(plan, w, opts):                       // adopt.go:248
+  0a. gcOrphanedAdoptingProvenanceFn(...)   [non-fatal]    // adopt.go:260 — each candidate under ITS OWN lease TryLock
+  0b. lease := TryLock(<state-dir>/adopt-provenance/<manifest>.lease)
+        !ok -> FAIL CLOSED "concurrent adopt of <manifest> in progress" (finding 1)
+        defer lease.Unlock()                                // released on EVERY exit path
+  0c. rec := captureAdoptProvenance(plan)     // runs UNDER the held lease   // adopt.go:268
+        c1. [store-lock] read store:
+              prior non-`adopting` row  -> FAIL CLOSED (committed provenance; :372-376 generalised)
+              prior `adopting` row      -> classifyDeadAdoptingRow(row):
+                    COMMITTED_KEEP -> FAIL CLOSED (defends a bypass of BuildAdoptPlan's manifest gate)
+                    CRASH_REAP     -> removeAdoptSnapshots(m) + drop row   (owner PROVABLY dead — lease held)
+              write MINIMAL `adopting` row (manifest + BOTH hashes + empty clients)   <-- ANCHOR (row-first)
+              [/store-lock]
+        c2. for each present client: writeAdoptClientSnapshot(...)          // adopted_entries.go:495
+              write-target ENOENT but GetEntry non-nil -> present-merged-lower, NO snapshot (finding 5)
+              other snapshot/read error -> abort-under-lease + RETURN (surface the cleanup err, finding 4)
+        c3. [store-lock] update row with client provenance ; write store  [/store-lock]
+        on capture failure -> abortAdoptProvenance(rec) (best-effort; row anchors GC reclaim) + RETURN
+  1. persistAdoptRoutedSecrets(...)    on err -> abortAdoptProvenance(rec) + existing return   // adopt.go:273
+  2. ManifestCreate(...)               on err -> abortAdoptProvenance(rec) + existing cleanup   // adopt.go:279
+  3. Install(...)                      on err -> abortAdoptProvenance(rec) + existing cleanup   // adopt.go:292
+  4. promoteAdoptProvenanceToAdopted(rec.ManifestName)  [non-fatal]         // adopt.go:318
+  5. emitAdoptExecutedEvent(plan)                                           // adopt.go:321
+  (defer releases the lease)
+```
+
+Lock order (acyclic, deadlock-free): **`<manifest>.lease` (outermost, held
+capture→promote) → `adopted-entries.lock` (store, transient per write) →
+`<snapshot>.lock` (innermost, per file)**. This EXTENDS the order already documented
+at `adopted_entries.go:167-169`. The GC never holds the store lock while blocking on
+a lease: it (i) takes the store lock, enumerates candidate manifests, releases it;
+then (ii) per candidate, `TryLock`s the lease OUTSIDE the store lock, and only then
+re-takes the store lock to persist the reap. `TryLock` (non-blocking) makes even an
+inverted acquisition impossible to deadlock.
+
+### Per-finding resolution
+
+- **Finding 1 (live `adopting` reap, `adopted_entries.go:379-388`).** The lease
+  (Signal 1) makes the reap decision safe: capture holds the lease, so a prior
+  `adopting` row's owner is provably dead before it is ever reaped; a *live*
+  concurrent adopt holds the lease and forces the second one to FAIL CLOSED at
+  `0b`. The round-1 `:372-376` committed-row scan stays (generalised into the single
+  classifier's `COMMITTED_KEEP` branch), but it is no longer the sole defense — it
+  could not distinguish a live `adopting` row from an orphan; the lease can.
+
+- **Finding 2 (pre-promote crash not reapable, `:678`).** Replace the manifest-exists
+  keep-guard with Signal 2. A dead-owner `adopting` row is `COMMITTED_KEEP` iff a
+  hub binding is live (`liveEntryMatchesManifestBinding` over `adopt_clients`);
+  otherwise `CRASH_REAP`. The committed-but-unflipped row (Install committed, flip
+  crashed: manifest-exists **and** binding-live) is KEPT; the pre-promote crash
+  (manifest-exists **but no** binding-live) is now REAPED — closing the "leaked
+  secret snapshots forever" hole. The concrete committed signal is the **live hub
+  binding**, not manifest existence.
+
+- **Finding 3 (rowless snapshot on capture crash, `:495`).** Row-first ordering
+  (Signal 3) writes the minimal `adopting` row at `c1` before any snapshot at `c2`,
+  so no snapshot dir ever exists without a row. The snapshot-dir-driven GC backstop
+  makes any rowless dir (from a future bug) discoverable regardless. The window is
+  structurally closed.
+
+- **Finding 4 (swallowed partial-cleanup error, `:399`).** Two changes: (i) row-first
+  makes a failed cleanup **reclaimable** (the row anchors GC/dir-scan reaping) rather
+  than a permanent leak; (ii) the cleanup result is **surfaced** — `if err :=
+  removeAdoptSnapshots(...); err != nil` wraps into the returned capture error (and
+  emits `adopt-provenance-abort`), never `_ = removeAdoptSnapshots(...)`. Consistent
+  with the anchor model: cleanup is best-effort but never silent.
+
+- **Finding 5 (MiMoCode merged-layer snapshot source, `:491-493`).** See the rule
+  below. Capture snapshots the **write target** (`ConfigPath()`) — which is already
+  what it reads — but treats `fs.ErrNotExist` on that read as the first-class state
+  **`present-merged-lower`** (no snapshot), NOT a capture failure. Entry-presence is
+  proven by `GetEntry` (non-nil); write-target absence is a valid MiMoCode state, not
+  a vanished entry.
+
+- **Finding 6 (`PresentAtBuild` wire leak, `adopt.go:66`).** See the fix below.
+  `gui/adopt.go:34-36` anonymously embeds `*api.AdoptPlan` into `adoptPlanResponse`,
+  so the round-1-added exported `PresentAtBuild` serializes into `/api/adopt/plan`
+  (`gui/adopt.go:67-70`), regressing design claim 9 (byte-unchanged wire shape).
+
+### MiMoCode layer-source rule (finding 5, precise)
+
+Facts (verified `internal/clients/mimocode.go`): `ConfigPath()` returns the FIXED
+write target `mimocode.json` (`:678`, `mimoCodeWriteTargetInDir`), the ONLY file the
+hub WRITES/DELETES/BACKS-UP; `GetEntry` reads the MERGED view across all read layers
+(`readLayerFiles`, `:821-867`: `config.json < mimocode.json < .jsonc < MIMOCODE_CONFIG
+< ~/.mimocode < overlay < inline < ~/.claude.json import`), so it can succeed on a
+LOWER layer while the write target is absent. Install's `AddEntry` seeds + writes the
+hub entry to the write target; de-adopt's restore (`RestoreEntryFromBackupForRollback`,
+whose "snapshot lacks the entry ⇒ remove it from live config" semantics are the
+interface contract at `clients.go:220-235`) is **write-target-scoped**.
+
+Rule — for a client whose entry is present (`GetEntry` non-nil), branch on the
+write-target read (`os.ReadFile(ConfigPath())`):
+
+1. **Write target EXISTS** (read succeeds) → `original_state:"present"`, snapshot its
+   bytes, set `snapshot_ref` + whole-file `snapshot_sha256`. Unchanged. (Covers
+   single-file clients AND MiMoCode-where-the-entry-is-in-mimocode.json, and even
+   MiMoCode where mimocode.json holds *other* entries — restoring the write target's
+   pre-adopt bytes removes the hub entry and re-exposes any lower-layer original via
+   the merge.)
+2. **Write target ABSENT** (`fs.ErrNotExist`) **and** `GetEntry` non-nil → NEW state
+   `original_state:"present-merged-lower"`, **no snapshot** (`snapshot_ref:""`,
+   `restore_mode:"functional-equivalent"`). The entry lives in a lower layer the hub
+   never touches; de-adopt restores by **removing the hub entry from the write
+   target**, which re-exposes the untouched lower-layer original (its original
+   secret-literal spelling included, since the hub never wrote it). This is NOT the
+   P2 silent-data-loss: `GetEntry` non-nil PROVES the entry is still resolvable — a
+   genuinely-vanished entry returns `GetEntry` nil, which the existing
+   present-at-Build fail-closed branches (`:479-486`, `:506-517`) still reject.
+3. **Any other read error** (permission, parse) → capture failure (fail closed),
+   unchanged.
+
+**Rejected alt — snapshot the providing lower layer (`config.json`).** Requires a new
+"which layer defined the entry" resolver, and de-adopt would restore that layer's
+bytes to the WRITE TARGET (wrong file), corrupting the layer structure. It does not
+compose with the write-target-scoped restore. So: **tolerate the absent write target;
+do not snapshot the lower layer.** `present-merged-lower` is an additive enum value
+(no schema-version bump); de-adopt MUST handle it (Consumer-contract addition below).
+
+### Wire-shape fix (finding 6, precise)
+
+`PresentAtBuild` is accessed ONLY within package `api` (set at `adopt.go:211`; read at
+`adopted_entries.go:464-465`). **RECOMMENDED: unexport it to `presentAtBuild`** —
+strongest fix, because an unexported field is structurally un-serializable and can
+never leak through ANY embed, matching its own comment ("Internal-only field; not part
+of any adopt CLI/API/GUI wire shape", `adopt.go:65`). Precondition the implementer must
+verify: no black-box (`package api_test`) test references the exported name; if one
+does, fall back to **`json:"-"` on the field** (also fully closes the leak). It is the
+ONLY new leak: every other exported `AdoptPlan` field (`EntryName`, `ManifestName`,
+`ManifestYAML`, `AdoptClients`, `AlsoPresent`, `SignatureMismatches`,
+`DisabledSameName`, `SecretRoutedKeys`) pre-dates this work-item and is the intended
+plan preview; `secretValues` is already unexported. Add a regression guard: a test
+asserting the `/api/adopt/plan` JSON body has no `present_at_build`/`PresentAtBuild`
+key (closes the class, not just the instance).
+
+### Invariant table (crash matrix — every window classified)
+
+| # | Crash window | Durable residue | Signals (lease / hub-binding / manifest) | Verdict | Reaper / handler | Secret snapshot |
+|---|---|---|---|---|---|---|
+| C1 | lease held, before minimal row (`c1`) | none (lease auto-released) | dead / — / — | nothing to do | — | none exists |
+| C2 | after minimal row, before snapshots | `adopting` row, no dir | dead / no / no | `CRASH_REAP` | same-manifest capture (immediate) or cross-manifest GC | none exists |
+| C3 | mid snapshot write (`c2`) | `adopting` row + PARTIAL dir | dead / no / no | `CRASH_REAP` | capture/GC (row-driven) + dir-scan backstop | reclaimed |
+| C4 | after full row, before `ManifestCreate` | full row + dir, no manifest | dead / no / no | `CRASH_REAP` | capture/GC | reclaimed |
+| C5 | after `ManifestCreate`, Install NOT committed | row + dir + manifest, no live binding | dead / **no** / yes | `CRASH_REAP` | GC (row+dir); operator removes orphan manifest via `BuildAdoptPlan` guidance | reclaimed |
+| C6 | Install committed, before `promote` | row + dir + manifest + LIVE binding | dead / **yes** / yes | `COMMITTED_KEEP` | GC keeps (MAY re-drive promote); de-adopt tolerates `adopting`+live-shape | RETAINED (de-adopt needs it) |
+| C7 | after `promote` (`adopted`) | committed row + dir + manifest | n/a (not `adopting`) | untouched | de-adopt closes → deletes | retained until close |
+| CC | second same-manifest adopt in flight | first's LIVE row | **lease held by first** | FAIL CLOSED (second) | second refuses at `0b` | first's snapshot never reaped |
+
+Optional self-healing (RECOMMENDED, not required): at C6 the GC MAY call the
+idempotent `promoteAdoptProvenanceToAdopted` to converge the row to `adopted`;
+correctness does not depend on it (de-adopt already tolerates `adopting`+live-shape,
+design.md:236-238). Keeping the GC a pure reaper is the equally-valid minimal choice.
+
+### Interaction with the existing accepted design
+
+This addendum changes only the crash/concurrency mechanics; it does NOT touch the
+chosen approach, the store shape, the pinned-snapshot hardening, the secret-lifecycle
+posture, or the consumer restore contract. The 24 h `adoptOrphanGCThreshold` is
+RETAINED for cross-manifest row-bearing orphans (unchanged UX); the lease now makes an
+immediate reap SAFE, so the threshold is a secondary comfort guard, not a safety
+requirement (same-manifest retry already reaps immediately via capture). The GC's
+snapshot-dir backstop is NOT age-gated (a rowless dir has no `updated_at`), but is
+gated on the lease + "no store row" — safe.
+
+### Change-Surface Contract (r2 addendum — supersedes the round-1 crash guards)
+
+- **Intended change surface:**
+  - `internal/api/adopted_entries.go` — add the per-manifest lease helpers
+    (acquire/`TryLock`/release + `<manifest>.lease` path), the single
+    `classifyDeadAdoptingRow` (lease-precondition + hub-binding signal), row-first
+    capture ordering (minimal-row-then-snapshots-then-full-row), the
+    `present-merged-lower` classify branch, the surfaced cleanup error, and the GC
+    rewrite (hub-binding keep-signal + snapshot-dir backstop).
+  - `internal/api/adopt.go` `ExecuteAdoptWithOpts` (`:248-324`) — hoist the lease
+    acquire/`defer`-release to wrap the whole adopt (before `:268` capture, released
+    after `:318` promote / in each abort branch).
+  - `internal/api/adopt.go` `AdoptPlan.PresentAtBuild` (`:66`) — unexport (or
+    `json:"-"`).
+- **Approved extension seam(s):** S6 — the per-manifest `flock` lease (new lock leaf,
+  same `gofrs/flock` primitive as `adopted-entries.lock`). S7 —
+  `liveEntryMatchesManifestBinding` (`managed_entries.go:355`) reused read-only as
+  the committed signal (third consumer; not modified). S8 — the GC snapshot-dir scan
+  over `<state-dir>/adopt-provenance/*` (new read of an adopt-owned dir).
+- **Protected / must-not-touch surfaces:** unchanged from the base design —
+  `install.go` per-client block + rollback contract; `managed_entries.go`
+  `ManagedEntry`/schema/demigrate readers; `liveEntryMatchesManifestBinding`'s BODY
+  (reuse only); the client backup lane; `BuildAdoptPlan`'s side-effect-freedom;
+  `adopt_secret_route.go`. **Additionally protected:** the MiMoCode adapter
+  (`internal/clients/mimocode.go`) — capture consumes `ConfigPath()`/`GetEntry`
+  as-is; the layer semantics are NOT modified.
+- **Declared blast radius:** the adopt Execute path + `adopted_entries.go` internals +
+  one new lock leaf per manifest (`<manifest>.lease`) + one additive `AdoptOriginalState`
+  enum value (`present-merged-lower`) + the `PresentAtBuild` visibility fix. No schema
+  version bump (additive enum). No change to install/demigrate/migrate/manifest/secret
+  code, to the store file shape, or to any adopt CLI/API request shape; the ONLY wire
+  change is the REMOVAL of the accidental `PresentAtBuild` field from the plan response
+  (a regression repair toward claim 9, not a new field).
+
+### Claims (r2 addendum — `{ guarantee, single-owner, enforcement-probe }`)
+
+16. `{ guarantee: A live in-flight same-manifest adopt's `adopting` row is NEVER reaped
+    by a concurrent capture or the GC; single-owner: the per-manifest `<manifest>.lease`
+    flock held capture→promote (a reaper that cannot `TryLock` it skips); enforcement-probe:
+    T-r2-concurrent-lease (two overlapping same-manifest adopts; the second FAILs CLOSED,
+    the first's row + snapshot survive intact) }`
+17. `{ guarantee: A dead-owner `adopting` row is REAPED iff no hub binding is live, and
+    KEPT iff one is (committed-but-unflipped); single-owner: `classifyDeadAdoptingRow` over
+    `liveEntryMatchesManifestBinding`; enforcement-probe: T-r2-committed-vs-crash (two seeded
+    orphans — one with a live client binding, one without; GC keeps the first, reaps the
+    second) }`
+18. `{ guarantee: No crash window leaves a secret-bearing snapshot dir with no reclaiming
+    row; single-owner: row-first capture ordering + the snapshot-dir GC backstop;
+    enforcement-probe: T-r2-rowfirst-crash (inject a crash after the minimal row and mid
+    snapshot write; assert row + partial dir are both reaped) and T-r2-dirscan (plant a
+    rowless `adopt-provenance/<m>/` dir; assert the GC reaps it under lease) }`
+19. `{ guarantee: A partial-cleanup failure is surfaced, never swallowed, and is reclaimable;
+    single-owner: capture's cleanup path (wrap `removeAdoptSnapshots` err + emit
+    `adopt-provenance-abort`); enforcement-probe: T-r2-cleanup-surfaced (force
+    `removeAdoptSnapshots` to fail; assert the returned error names it AND a later GC still
+    reclaims the row) }`
+20. `{ guarantee: A MiMoCode adopt whose write target is absent but whose entry resolves from
+    a lower layer captures successfully as `present-merged-lower` (no snapshot), and a
+    genuinely-vanished present-at-Build entry still fails closed; single-owner: capture's
+    write-target-read branch keyed on `GetEntry`-non-nil + `fs.ErrNotExist`;
+    enforcement-probe: T-r2-mimocode-lower (entry only in `config.json`, write target absent →
+    `present-merged-lower`, adopt succeeds) and T-r2-vanished (present-at-Build entry gone,
+    `GetEntry` nil → capture fails closed, zero side effects) }`
+21. `{ guarantee: The `/api/adopt/plan` response carries no `present_at_build` field;
+    single-owner: `AdoptPlan.presentAtBuild` unexported (or `json:"-"`); enforcement-probe:
+    T-r2-wire-guard asserts the plan JSON has no such key }`
+22. `{ guarantee: Capture-reap and GC classify an `adopting` row through ONE function and ONE
+    committed-signal owner — they cannot diverge; single-owner: `classifyDeadAdoptingRow`;
+    enforcement-probe: `grep` shows both call sites route through it and no second
+    hub-binding/manifest-exists classifier exists in `adopted_entries.go` }`
+
+### Test strategy (r2 addendum)
+
+New falsification tests (in addition to T1-T12 above):
+
+- **T-r2-concurrent-lease** (claim 16, finding 1). Drive two same-manifest adopts so the
+  second enters capture while the first is between capture and promote (inject a pause via
+  the existing `promoteAdoptProvenanceFn`/an install seam). Assert: the second returns a
+  "concurrent adopt in progress" error, and the first's row + snapshot dir are byte-intact
+  (not reaped). Falsifies the round-1 live-row reap.
+- **T-r2-committed-vs-crash** (claim 17, finding 2). Seed two aged `adopting` orphans for
+  distinct manifests: (A) manifest exists + a client config carries the live hub binding;
+  (B) manifest exists + NO client binding. Run the GC. Assert A is KEPT, B is REAPED
+  (row + snapshot dir). Falsifies the manifest-exists keep-guard.
+- **T-r2-rowfirst-crash** (claim 18, findings 3/4). Inject a snapshot-write failure at the
+  first present client. Assert: the minimal row exists on disk at the failure point, and
+  after capture returns error the row + partial dir are removed (or a subsequent GC removes
+  them); no rowless dir survives.
+- **T-r2-dirscan** (claim 18). Plant a `adopt-provenance/<m>/x.snapshot` with no store row.
+  Run the GC. Assert the dir is reaped (under lease) and a live-lease dir is skipped.
+- **T-r2-cleanup-surfaced** (claim 19, finding 4). Force `removeAdoptSnapshots` to fail
+  during capture cleanup. Assert the returned error names the cleanup failure (not swallowed)
+  and the row remains GC-reclaimable.
+- **T-r2-mimocode-lower** + **T-r2-vanished** (claim 20, finding 5). (i) Entry only in
+  `config.json`, write target `mimocode.json` absent → adopt succeeds, client recorded
+  `present-merged-lower` with empty `snapshot_ref`. (ii) A present-at-Build entry removed
+  before capture (`GetEntry` nil) → capture fails closed, zero vault/manifest/client side
+  effects.
+- **T-r2-wire-guard** (claim 21, finding 6). Marshal an `adoptPlanResponse` (or hit
+  `/api/adopt/plan`); assert no `present_at_build`/`PresentAtBuild` key.
+
+### Bounded residuals (r2)
+
+- **Abandoned cross-manifest orphan lingers ≤ 24 h.** A hard-crash orphan for a manifest the
+  operator NEVER retries is reaped by the next adopt's GC (`adopt.go:260`) or a
+  supervisor-startup GC; until then its owner-only, secret-bearing snapshot dir survives.
+  UNCHANGED from the base design's documented residual (owner-only DACL; the lease now makes
+  an immediate reap safe, so this bound can be TIGHTENED later without a safety argument).
+  Same-manifest retries reap immediately via capture. **Recommend actually keeping this as
+  the only residual** — every other finding is fully closed, not deferred.
+- **`present-merged-lower` restore is a de-adopt obligation.** This item records the state;
+  de-adopt must implement "remove the hub entry from the write target" for it. Pinned in the
+  Consumer-contract addition below. Not a residual in THIS item (the state is captured
+  correctly); flagged so it is not lost across the item boundary.
+
+### Consumer-contract addition (de-adopt MUST honor — extends "Consumer-contract handoff")
+
+- **MUST — handle `original_state:"present-merged-lower"`.** Restore by REMOVING the hub
+  entry from the client's write target (`ConfigPath()`); do NOT expect a snapshot. The
+  untouched lower layer re-emerges via the adapter's merge. Treat it as a successful restore
+  (`restore_mode:"functional-equivalent"`), distinct from `absent` (which had no entry at
+  all) for honest reporting.
+
+### Gate decision — r2 addendum
+
+**PASS.** The six r2 findings are resolved by ONE model (three orthogonal signals + one
+classifier), not six guards: the per-manifest lease (Signal 1) closes finding 1 and makes
+every reap safe; the hub-binding committed signal (Signal 2) closes finding 2 by replacing
+manifest-existence; row-first ordering + the dir-scan backstop (Signal 3) close findings 3-4;
+the write-target-absent rule closes finding 5 without reopening P2 silent-data-loss; and the
+`PresentAtBuild` unexport closes finding 6 and repairs claim 9. Signals, seams, lock ordering,
+the crash matrix, the single classifier, tests, and the one bounded residual are explicit; no
+implementation code is included; the base design is intact. The cross-cutting decision is filed
+`status: proposed` for the `$architecture-reviewer` gate. Next stage: `$planner` folds the r2
+model into the delivery plan (it collapses the round-1 guards, so it is a revision of the
+existing capture/GC phases, not new phases).
