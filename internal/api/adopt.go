@@ -53,6 +53,21 @@ type AdoptPlan struct {
 	DisabledSameName    []AdoptClientDisabled
 	SecretRoutedKeys    []string
 	ManifestYAML        string
+	// presentAtBuild is the set of clients whose same-name entry was PRESENT and
+	// adoptable at BuildAdoptPlan time (= clientScan.Matching, which always
+	// includes the source client). captureAdoptProvenance fails CLOSED if any
+	// SELECTED client in this set reads absent/no-entry at capture: that is a
+	// Build->capture change (the entry was deleted / renamed / edited away), and
+	// since Install still writes the hub relay to the client, recording it `absent`
+	// with no snapshot would let de-adopt "restore to absence" and DELETE the
+	// operator's adopted entry unrecoverably (security F4). A client NOT in this
+	// set is a legitimate entryless-fanout target and may classify `absent`.
+	//
+	// UNEXPORTED (codex bot PR #528 finding 6): gui/adopt.go embeds *AdoptPlan into
+	// the /api/adopt/plan response, so an EXPORTED field would serialize onto the
+	// wire (regressing design claim 9 — byte-unchanged plan response). An unexported
+	// field is structurally un-serializable and can never leak through any embed.
+	presentAtBuild []string
 
 	secretValues map[string]string
 }
@@ -197,8 +212,34 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		DisabledSameName:    clientScan.Disabled,
 		SecretRoutedKeys:    routedKeys,
 		ManifestYAML:        manifestYAML,
+		presentAtBuild:      append([]string(nil), clientScan.Matching...),
 		secretValues:        secretValues,
 	}, nil
+}
+
+// promoteAdoptProvenanceFn is the post-Install provenance promote step, injected
+// as a package var ONLY so a test can exercise the non-fatal flip-failure path
+// (a promote-flip failure must NOT roll back a committed adopt — design claim 10,
+// AC C5). Production always uses promoteAdoptProvenanceToAdopted.
+var promoteAdoptProvenanceFn = promoteAdoptProvenanceToAdopted
+
+// gcOrphanedAdoptingProvenanceFn is the step-0a cross-manifest orphan GC, injected
+// as a package var ONLY so a test can exercise the non-fatal path (a GC failure
+// must NOT block a fresh adopt — AC D3). Production always uses
+// gcOrphanedAdoptingProvenance. Same seam idiom as promoteAdoptProvenanceFn (C5).
+var gcOrphanedAdoptingProvenanceFn = gcOrphanedAdoptingProvenance
+
+// abortProvenanceNote folds a best-effort abortAdoptProvenance result into an
+// operator-facing suffix appended to the adopt error, mirroring the existing
+// secret/manifest cleanup notes. It returns "" when abort succeeded (the common
+// case), so the existing error text and errors.Is chains stay byte-unchanged on
+// the happy cleanup path; a genuine abort failure is surfaced as a note without
+// masking the caller's original error.
+func abortProvenanceNote(err error) string {
+	if err == nil {
+		return ""
+	}
+	return "; additionally failed to clean up pre-adopt provenance: " + err.Error()
 }
 
 // ExecuteAdopt applies a plan built by BuildAdoptPlan.
@@ -215,17 +256,56 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	if w == nil {
 		w = io.Discard
 	}
+	// Step 0a — best-effort reap of stale CROSS-manifest `adopting` orphans (a
+	// prior adopt that hard-crashed between capture and promote/abort left an
+	// owner-only, secret-bearing snapshot with no reaper). NON-FATAL: a GC failure
+	// must never block a fresh adopt (design "Orphan lifecycle" (b)); the
+	// same-manifest UPSERT in captureAdoptProvenance is the complement.
+	_, _ = gcOrphanedAdoptingProvenanceFn(adoptOrphanGCThreshold)
+	// Step 0b — acquire the per-manifest adopt LEASE (design r2 Signal 1). Held
+	// (flock) across capture -> Install -> promote / abort so no concurrent
+	// same-manifest adopt or reaper can touch this adopt's `adopting` row (claim 16):
+	// a reaper that cannot TryLock the lease skips; a second same-manifest adopt
+	// FAILs CLOSED here. Released on EVERY exit path via defer. The lease is
+	// PER-MANIFEST — adopts of DIFFERENT manifests never contend.
+	lease, leased, leaseErr := tryAcquireAdoptManifestLease(plan.ManifestName)
+	if leaseErr != nil {
+		return fmt.Errorf("adopt: acquire per-manifest lease for %q: %w", plan.ManifestName, leaseErr)
+	}
+	if !leased {
+		return fmt.Errorf("adopt: a concurrent adopt of manifest %q is already in progress; retry after it completes", plan.ManifestName)
+	}
+	defer func() { _ = lease.Unlock() }()
+	// Durable pre-adopt provenance capture, BEFORE the first irreversible mutation
+	// (persistAdoptRoutedSecrets, below). A capture failure fails the adopt CLOSED
+	// with ZERO side effects — no vault key, no manifest, no client-config write —
+	// so a currently-successful adopt is never regressed (design "Fail-closed
+	// capture seam"; claims 1-2). Every failure branch after this point aborts the
+	// captured provenance so no secret-bearing snapshot orphan survives a failed
+	// adopt.
+	rec, err := a.captureAdoptProvenance(plan)
+	if err != nil {
+		emitAdoptProvenanceCaptureFailed(plan.ManifestName, "", "pre-adopt provenance capture failed")
+		return fmt.Errorf("adopt: capture pre-adopt provenance before any mutation: %w", err)
+	}
 	if err := persistAdoptRoutedSecrets(plan.secretValues); err != nil {
+		if note := abortProvenanceNote(abortAdoptProvenance(rec)); note != "" {
+			return fmt.Errorf("%w%s", err, note)
+		}
 		return err
 	}
 	if err := a.ManifestCreate(plan.ManifestName, plan.ManifestYAML); err != nil {
+		abortNote := abortProvenanceNote(abortAdoptProvenance(rec))
 		if len(plan.SecretRoutedKeys) == 0 {
-			return err
+			if abortNote == "" {
+				return err
+			}
+			return fmt.Errorf("%w%s", err, abortNote)
 		}
 		if cleanupErr := deleteAdoptRoutedSecrets(plan.SecretRoutedKeys); cleanupErr != nil {
-			return fmt.Errorf("adopt manifest create failed after writing routed vault keys; failed to remove routed vault keys %s: %v: %w", strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ","), cleanupErr, err)
+			return fmt.Errorf("adopt manifest create failed after writing routed vault keys; failed to remove routed vault keys %s: %v%s: %w", strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ","), cleanupErr, abortNote, err)
 		}
-		return fmt.Errorf("adopt manifest create failed after writing routed vault keys; removed routed vault keys %s so adopt can be re-run: %w", strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ","), err)
+		return fmt.Errorf("adopt manifest create failed after writing routed vault keys; removed routed vault keys %s so adopt can be re-run%s: %w", strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ","), abortNote, err)
 	}
 	if err := a.Install(InstallOpts{
 		Server:          plan.ManifestName,
@@ -234,18 +314,27 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 		SymlinkConsents: opts.SymlinkConsents,
 	}); err != nil {
 		vaultNote := ""
+		abortNote := abortProvenanceNote(abortAdoptProvenance(rec))
 		if cleanupErr := a.ManifestDelete(plan.ManifestName); cleanupErr != nil {
 			if len(plan.SecretRoutedKeys) > 0 {
 				vaultNote = "; routed vault keys were left intact because the manifest still exists: " + strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ",")
 			}
-			return fmt.Errorf("adopt install failed after creating manifest %q; failed to remove the adopt-created manifest (%v), so remove it before re-running adopt%s: %w", plan.ManifestName, cleanupErr, vaultNote, err)
+			return fmt.Errorf("adopt install failed after creating manifest %q; failed to remove the adopt-created manifest (%v), so remove it before re-running adopt%s%s: %w", plan.ManifestName, cleanupErr, vaultNote, abortNote, err)
 		}
 		if cleanupErr := deleteAdoptRoutedSecrets(plan.SecretRoutedKeys); cleanupErr != nil {
 			vaultNote = "; failed to remove routed vault keys " + strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ",") + ": " + cleanupErr.Error()
 		} else if len(plan.SecretRoutedKeys) > 0 {
 			vaultNote = "; removed routed vault keys: " + strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ",")
 		}
-		return fmt.Errorf("adopt install failed after creating manifest %q; removed the adopt-created manifest so adopt can be re-run%s: %w", plan.ManifestName, vaultNote, err)
+		return fmt.Errorf("adopt install failed after creating manifest %q; removed the adopt-created manifest so adopt can be re-run%s%s: %w", plan.ManifestName, vaultNote, abortNote, err)
+	}
+	// Install committed. Promote adopting -> adopted. A flip-write failure here is
+	// NON-FATAL: it leaves a recoverable `adopting` row (both manifest hashes were
+	// populated at capture, so de-adopt's hash-gate stays usable) and the adopt
+	// still returns success — a committed install is never rolled back for a
+	// provenance bookkeeping write (design claim 10).
+	if err := promoteAdoptProvenanceFn(rec.ManifestName); err != nil {
+		emitAdoptProvenanceCommitFailed(rec.ManifestName)
 	}
 	emitAdoptExecutedEvent(plan)
 	fmt.Fprintf(w, "Adopted %q from %s as manifest %q on port %d.\n", plan.EntryName, plan.SourceClient, plan.ManifestName, plan.Port)
@@ -479,13 +568,25 @@ func filterAdoptExcludedClients(selected []string, sourceClient string, mismatch
 	return out
 }
 
+// adoptDefaultDaemonName / adoptDefaultURLPath are the adopt-v1 client-binding
+// constants: every adopt-created manifest binds each client to the single
+// "default" daemon at url_path "/mcp" (see adoptClientBindings +
+// renderStdioBridgeManifestYAML's "default" daemon). Named once here so the
+// crash-consistency classifier (adopted_entries.go) can reconstruct the EXPECTED
+// hub binding from a row's IMMUTABLE port WITHOUT re-reading the mutable manifest
+// file (codex bot PR #528 r3 finding A) — single source of truth, no drift.
+const (
+	adoptDefaultDaemonName = "default"
+	adoptDefaultURLPath    = "/mcp"
+)
+
 func adoptClientBindings(clientNames []string) []map[string]any {
 	bindings := make([]map[string]any, 0, len(clientNames))
 	for _, client := range clientNames {
 		bindings = append(bindings, map[string]any{
 			"client":   client,
-			"daemon":   "default",
-			"url_path": "/mcp",
+			"daemon":   adoptDefaultDaemonName,
+			"url_path": adoptDefaultURLPath,
 		})
 	}
 	return bindings

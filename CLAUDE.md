@@ -1336,6 +1336,98 @@ for v0.4.6+. On a single-user solo-dev host with `MCPHUB_REQUIRE_SINGLE_USER_HOM
 the parent-dir DACL gate already prevents any co-resident principal
 from having parent-dir write rights, so the race is unreachable.
 
+## Adopt provenance (v0.7 — durable pre-adopt capture)
+
+`mcphub adopt` absorbs an unmanaged direct-stdio client entry into a
+hub-managed manifest (routes secrets, creates the manifest, rewrites each
+selected client's config to a hub URL). BEFORE the first irreversible
+mutation it captures a durable, adopt-scoped **provenance record + a pinned
+snapshot per client** so a future `de-adopt` can restore each client to its
+exact pre-adopt config — including the ORIGINAL secret-literal spelling that
+adopt's `secret:`-routing would otherwise lose. This is the ADOPT (producer)
+side ONLY; `de-adopt` (the consumer that reads this provenance and restores)
+is a SEPARATE work-item, NOT yet built. Full design +
+decision live under
+`work-items/active/2026-07-09-adopt-side-durable-pre-adopt-provenance/`.
+
+### State files (all under `<state-dir>`)
+
+- `adopted-entries.json` (+ flock `adopted-entries.lock`) — one record per
+  adopt-created manifest: `manifest_name`, `source_client`, `port`,
+  `adopt_clients`, both manifest hashes (`adopt_manifest_hash` +
+  `expected_manifest_hash`, populated AT CAPTURE), routed-secret-key NAMES,
+  `operation_state`, and per-client present/absent + snapshot pointer. Schema
+  version `1`, written through the same hardened owner-only state-file pipeline
+  as `managed-entries.json` — a SEPARATE store, NOT an extension of it.
+- `adopt-provenance/<manifest>/<client>.snapshot` — a byte copy of each
+  **present** client's WHOLE live config file, captured before adopt rewrites
+  it. Written owner-only via `WriteStateFileBytesAtomic` (handle-bound DACL —
+  it may hold literal secret `env` values, so it MUST NOT use the plain backup
+  copy). The record stores the snapshot's **whole-file sha256** (a fail-closed
+  restore gate de-adopt recomputes). The dir is **non-prunable**: no
+  `.bak-mcp-local-hub-` prefix, lives outside the client-config backup tree, so
+  no `BackupKeep`/prune pass can reach it.
+
+### Fail-closed capture lifecycle (in `ExecuteAdoptWithOpts`)
+
+- **Capture BEFORE the first irreversible mutation** (before any vault key /
+  manifest / client write). A capture failure aborts the adopt with ZERO side
+  effects — a currently-successful adopt is never regressed.
+- **Abort on each of the 3 failure branches** (secrets-persist / manifest-create
+  / install): the pending row + its snapshot dir are removed; the abort outcome
+  is appended to the operator error, never masking the original.
+- **Promote `adopting`→`adopted` after Install success** — NON-FATAL: a
+  promote-flip write failure leaves a recoverable `adopting` row (both manifest
+  hashes are already on it) and the adopt still returns success; a committed
+  install is never rolled back for a bookkeeping write.
+- **Fail-closed present-at-Build check (security):** a client that HAD the entry
+  at plan time but reads absent at capture (its config was deleted / renamed /
+  edited away in the plan→execute window) is a CAPTURE FAILURE, not a guessed
+  `absent` — otherwise Install would still write the hub relay and de-adopt
+  would later "restore to absence" and silently DELETE the adopted entry. A
+  genuine entryless-fanout target (absent at plan time) still classifies
+  `absent`.
+
+### Events (`supervisor-events.log`, source `adopt`)
+
+Six events — `adopt-provenance-captured`, `-committed`, `-capture-failed`,
+`-abort`, `-commit-failed`, `-orphan-reaped`. Bodies carry manifest/client
+NAMES, counts, snapshot PATHS, and key NAMES only — **never secret VALUES or
+config contents** (same redaction posture as `adopt-executed`).
+
+### Orphan lifecycle + the residual
+
+Two reapers keep the secret-bearing snapshot dirs bounded:
+
+- **Same-manifest UPSERT** (every capture): re-running the same adopt first
+  removes any prior orphan row + snapshot dir for that manifest
+  (`-orphan-reaped` with `trigger:"upsert"`).
+- **Cross-manifest bounded GC** `gcOrphanedAdoptingProvenance` (24h threshold),
+  run best-effort at the START (step 0a) of every adopt: reaps any `adopting`
+  row whose `updated_at` is older than 24h (never an `adopted` row, never a
+  fresh one) + its snapshot dir (`-orphan-reaped` with `trigger:"gc"`). It is
+  NOT wired into `mcphub supervise` startup (deferred; the per-adopt GC is
+  sufficient for v1).
+
+**Residual:** a hard crash between capture and Install/abort leaves an
+owner-only, secret-bearing snapshot under
+`<state-dir>/adopt-provenance/<manifest>/` until the next same-manifest
+re-adopt (UPSERT) or the 24h cross-manifest GC. It is bounded (owner-only DACL
+— a co-resident cannot read the content) and an operator may remove it manually
+by deleting that directory. On a broadened-parent host, set
+`MCPHUB_REQUIRE_SINGLE_USER_HOME=1` for the strict parent-dir gate (same posture
+as every other state file).
+
+### Scope boundary (de-adopt is a separate item)
+
+The `operation_state` machine is `adopting → adopted → de_adopting → closed`.
+This item owns `adopting`/`adopted` + the abort→delete transitions; the
+`de_adopting`/`closed` states are schema-DECLARED but IMPLEMENTED by the
+de-adopt work-item. The de-adopt-owned mutators
+(`MarkAdoptProvenanceDeAdopting` / `UpdateAdoptExpectedManifestHash` /
+`CloseAdoptProvenance`) are declared as COMMENTS ONLY in `adopted_entries.go`
+(anti-layering) — de-adopt authors their bodies.
+
 ## Stuck-instance recovery
 
 ### Quarantined daemon with a port squatter — `mcphub daemon recover <task>`
