@@ -1,10 +1,11 @@
 # Status — adopt-side durable pre-adopt provenance
 
-State: DESIGN REVISED — ready for planning. Arch review PASS + security review REVISE folded in (6 MUST-FIX); store-shape decision PROMOTED proposed→accepted by the arch-review gate (decision-file frontmatter reconciliation pending — reviewer/archivist owned)
+State: PLANNED — ready for implementation. Delivery plan (`plan.md`, PASS) breaks the design into 5 sequential phases (A storage → B capture/lifecycle → C fail-closed seam → D orphan GC → E docs) + 2 flagged-optional phases (F1 tuple-recording, F2 supervise-GC; both DEFER by default). Arch review PASS + security review REVISE folded in (6 MUST-FIX); store-shape decision PROMOTED proposed→accepted by the arch-review gate (decision-file frontmatter reconciliation pending — reviewer/archivist owned)
 Priority: medium
 Milestone: v0.7 Adoption
 Admitted: 2026-07-10 ($product-manager, see brief.md)
 Designed: 2026-07-10 ($architect, see design.md — PASS)
+Planned: 2026-07-10 ($planner, see plan.md — PASS; 5 phases A-E + F1/F2 flagged-optional)
 Reviewed: 2026-07-10 (architecture PASS; security REVISE, 0 P0/P1) → revised same day (design.md "Revision" section)
 Blocks: 2026-07-09-deadopt-hub-to-native (its `Depends-on:` target)
 Owner-to-be: internal/api/adopt.go + new internal/api/adopted_entries.go (see design.md)
@@ -44,11 +45,15 @@ BEFORE the config rewrite commits.
    Both converged on the orphan-lifecycle gap. Design REVISED same day folding in
    6 MUST-FIX (F1 hash-timing, F2/P2-2 upsert+GC, P2-1 fail-closed snapshot gate,
    F3 drop expected_hub_shape, F4 fail-closed classify, F5 whole-file-hash honesty).
-4. [NEXT] $planner breaks design.md into delivery phases, respecting the F7 scope
-   boundary (no stub bodies for de-adopt-owned mutators; `ReadAdoptProvenance` IS
-   in-scope). SHOULD-TRACK follow-ups (P3-1 minimal-entry snapshot, P3-2
-   shared-key scan, managed-entries tuple-recording scope choice) are in design.md
-   "Follow-ups & planning notes".
+4. [DONE 2026-07-10] $planner broke design.md into delivery phases (`plan.md`, PASS),
+   respecting the F7 scope boundary (no stub bodies for de-adopt-owned mutators;
+   `ReadAdoptProvenance` IS in-scope). Phases A (storage) → B (capture/lifecycle) →
+   C (fail-closed seam) → D (orphan GC) → E (docs), serialized. Two flagged-optional
+   phases (F1 managed-entries tuple-recording, F2 supervise-startup GC hook) DEFER by
+   default — orchestrator decision required before implementing.
+5. [NEXT] $backend-engineer implements Phase A in an isolated git worktree (TDD);
+   $security-reviewer gates Phases A + C (secret-bearing snapshot); $qa-engineer gates
+   each phase against its AC-ids. See plan.md "Recommended next-role sequence".
 
 ## Notes
 - Not on the critical path of the in-flight reaper v1 (PR #527); queued behind it.
