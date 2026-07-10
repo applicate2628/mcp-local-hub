@@ -237,6 +237,31 @@ VISIBLE = "not-secret"
 	}
 }
 
+// Claim 21 (codex bot PR #528 finding 6) — the /api/adopt/plan response must NOT
+// serialize the internal presentAtBuild set (a regression of the byte-unchanged
+// plan wire shape, design claim 9). The field is UNEXPORTED, so it can never leak
+// through adoptPlanResponse's *api.AdoptPlan embed.
+func TestAdoptPlanRouteNeverSerializesPresentAtBuild(t *testing.T) {
+	entry := "gui-adopt-wire"
+	setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-adopt-wire]
+command = "go"
+args = ["version"]
+`)
+	rec := postAdoptTest(t, "/api/adopt/plan", `{"entry":"gui-adopt-wire","client":"codex-cli","port":9325}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	raw := rec.Body.String()
+	for _, forbidden := range []string{"present_at_build", "presentAtBuild", "PresentAtBuild"} {
+		if strings.Contains(raw, forbidden) {
+			t.Fatalf("plan JSON leaked the internal present-at-build field %q:\n%s", forbidden, raw)
+		}
+	}
+	if !strings.Contains(raw, "gui-adopt-wire") {
+		t.Fatalf("plan JSON missing expected preview fields:\n%s", raw)
+	}
+}
+
 func TestAdoptRouteSymlinkConsentRequiredThenAllowed(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Log("attempting Windows symlink test; host may require Developer Mode or elevation")

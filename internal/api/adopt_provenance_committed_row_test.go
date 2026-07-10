@@ -86,9 +86,14 @@ func TestCaptureFailsClosedOnCommittedPriorRow(t *testing.T) {
 	}
 }
 
-// Finding 2 (P2) — GC reaps a TRUE orphan (aged `adopting`, manifest ABSENT) but
-// PRESERVES a promote-flip-failure recoverable row (aged `adopting`, manifest
-// EXISTS).
+// Finding 2 (r2 model) — GC reaps a TRUE orphan (aged `adopting`, manifest ABSENT)
+// but PRESERVES a row it cannot prove is a crash orphan. NOTE (design r2 supersede):
+// the round-1 "manifest EXISTS => keep" rule is REPLACED by the hub-binding-live
+// classifier (classifyDeadAdoptingRow). Here `existsM` carries an UNPARSEABLE
+// manifest, so the classifier fail-safes to KEEP (never reap on uncertainty) — the
+// genuine committed-KEEP-via-live-binding vs valid-no-binding-REAP distinction is
+// exercised by TestGcClassifierLiveBindingKeepsValidNoBindingReaps (r2). This test
+// pins the fail-safe-keep + absent-reap legs only.
 func TestGcOrphanedPreservesCommittedButAdoptingRow(t *testing.T) {
 	isolateStateDir(t)
 	mdir := defaultManifestDir()
@@ -130,12 +135,13 @@ func TestGcOrphanedPreservesCommittedButAdoptingRow(t *testing.T) {
 	if reaped != 1 {
 		t.Errorf("reaped = %d, want 1 (only the true orphan whose manifest is absent)", reaped)
 	}
-	// existsM: manifest EXISTS -> promote-failure recoverable row -> PRESERVED.
+	// existsM: manifest is UNPARSEABLE -> classifier fail-safes to KEEP (never reap
+	// on uncertainty) -> PRESERVED.
 	if _, found, _ := ReadAdoptProvenance(existsM); !found {
-		t.Errorf("aged `adopting` row whose manifest EXISTS was reaped (promote-failure recoverable row must survive)")
+		t.Errorf("aged `adopting` row with an unparseable manifest was reaped (classifier must fail-safe KEEP)")
 	}
 	if _, statErr := os.Stat(existsSnap); statErr != nil {
-		t.Errorf("promote-failure row's snapshot dir was removed: %v", statErr)
+		t.Errorf("fail-safe-kept row's snapshot dir was removed: %v", statErr)
 	}
 	// absentM: manifest ABSENT -> true orphan -> reaped.
 	if _, found, _ := ReadAdoptProvenance(absentM); found {

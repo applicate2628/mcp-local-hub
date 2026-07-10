@@ -35,6 +35,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,6 +47,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 
 	"github.com/gofrs/flock"
 )
@@ -62,6 +64,14 @@ const (
 	// and carry no backup prefix, so no BackupKeep pass can reach them.
 	adoptProvenanceSnapshotSubdir = "adopt-provenance"
 	adoptSnapshotFileSuffix       = ".snapshot"
+
+	// adoptManifestLeaseSuffix names the per-manifest adopt LEASE file
+	// (<state-dir>/adopt-provenance/<manifest>.lease), a SIBLING to the
+	// <manifest>/ snapshot dir so removeAdoptSnapshots' RemoveAll of the dir never
+	// touches it. The lease is the owner-liveness authority (design r2 Signal 1):
+	// held (flock) capture->promote by ExecuteAdoptWithOpts; a reaper TryLocks it
+	// before reaping (can't acquire => a live adopt owns it => skip/fail-closed).
+	adoptManifestLeaseSuffix = ".lease"
 )
 
 // adoptedEntriesSchemaVersion is the on-disk format version. Bumping requires a
@@ -95,6 +105,16 @@ type AdoptOriginalState string
 const (
 	AdoptOriginalStatePresent AdoptOriginalState = "present"
 	AdoptOriginalStateAbsent  AdoptOriginalState = "absent"
+
+	// AdoptOriginalStatePresentMergedLower marks a client whose entry IS present
+	// (GetEntry non-nil) but whose hub write target (ConfigPath) does not exist —
+	// the entry resolves from a LOWER read layer the hub never writes (e.g.
+	// MiMoCode config.json below an absent mimocode.json). NO snapshot is pinned:
+	// de-adopt restores by REMOVING the hub entry from the write target, which
+	// re-exposes the untouched lower-layer original. Additive enum value (no schema
+	// bump); de-adopt MUST handle it (codex bot PR #528 finding 5 / design r2
+	// "MiMoCode layer-source rule").
+	AdoptOriginalStatePresentMergedLower AdoptOriginalState = "present-merged-lower"
 )
 
 // AdoptRestoreMode is the honesty label for how faithfully de-adopt can restore
@@ -319,6 +339,145 @@ func ReadAdoptProvenance(manifestName string) (rec *AdoptProvenanceRecord, found
 }
 
 // ---------------------------------------------------------------------------
+// Crash-consistency + concurrency primitives (design r2 addendum): the
+// per-manifest LEASE (Signal 1), the snapshot-dir lister (Signal 3 backstop),
+// and the ONE classifier (Signal 2) used by BOTH capture-reap and the GC.
+// ---------------------------------------------------------------------------
+
+// adoptManifestLeasePath returns <state-dir>/adopt-provenance/<manifest>.lease —
+// a SIBLING to the <manifest>/ snapshot dir (so removeAdoptSnapshots' RemoveAll of
+// the dir never touches it). Ensures the owner-only provenance parent exists so
+// flock can create the lease file; the lease holds no secret content (a pure lock).
+func adoptManifestLeasePath(manifestName string) (string, error) {
+	if err := CheckManifestName(manifestName); err != nil {
+		return "", fmt.Errorf("adopt lease: invalid manifest name %q: %w", manifestName, err)
+	}
+	dir, err := DaemonStateDir()
+	if err != nil {
+		return "", err
+	}
+	provDir := filepath.Join(dir, adoptProvenanceSnapshotSubdir)
+	if err := os.MkdirAll(provDir, 0o700); err != nil {
+		return "", fmt.Errorf("adopt lease: mkdir %s: %w", provDir, err)
+	}
+	return filepath.Join(provDir, manifestName+adoptManifestLeaseSuffix), nil
+}
+
+// tryAcquireAdoptManifestLease non-blockingly TryLocks the per-manifest lease.
+// Returns (lk, true, nil) when acquired — caller MUST defer lk.Unlock(); (nil,
+// false, nil) when a LIVE same-manifest adopt already holds it; (nil, false, err)
+// on a path/lock error. The OS auto-releases a dead holder's flock, so a
+// successful acquire proves no live same-manifest adopt exists (design r2 Signal 1).
+func tryAcquireAdoptManifestLease(manifestName string) (*flock.Flock, bool, error) {
+	leasePath, err := adoptManifestLeasePath(manifestName)
+	if err != nil {
+		return nil, false, err
+	}
+	lk := flock.New(leasePath)
+	locked, lockErr := lk.TryLock()
+	if lockErr != nil {
+		return nil, false, fmt.Errorf("adopt lease TryLock %s: %w", leasePath, lockErr)
+	}
+	if !locked {
+		return nil, false, nil
+	}
+	return lk, true, nil
+}
+
+// listAdoptProvenanceSnapshotManifests returns the manifest names that have a
+// snapshot DIRECTORY under <state-dir>/adopt-provenance/ (the <manifest>/ dirs,
+// NOT the <manifest>.lease sibling files). Used by the GC's snapshot-dir backstop
+// (design r2 Signal 3) to find rowless dirs. A missing provenance parent returns an
+// empty list, no error (nothing pinned yet).
+func listAdoptProvenanceSnapshotManifests() ([]string, error) {
+	dir, err := DaemonStateDir()
+	if err != nil {
+		return nil, err
+	}
+	provDir := filepath.Join(dir, adoptProvenanceSnapshotSubdir)
+	ents, err := os.ReadDir(provDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("adopt provenance dir scan %s: %w", provDir, err)
+	}
+	var out []string
+	for _, e := range ents {
+		if e.IsDir() {
+			out = append(out, e.Name())
+		}
+	}
+	return out, nil
+}
+
+// adoptRowVerdict is the classifier result.
+type adoptRowVerdict int
+
+const (
+	adoptRowCommittedKeep adoptRowVerdict = iota // Install committed (a hub binding is live) — NEVER reap
+	adoptRowCrashReap                            // pre-commit crash — safe to reap
+)
+
+// classifyDeadAdoptingRow is the SINGLE committed-vs-crash classifier for an
+// `adopting` row whose owner is PROVABLY DEAD (precondition: the caller holds — or
+// has just TryLock'd — the row's manifest lease, design r2 Signal 1). BOTH the
+// capture-UPSERT reap and the cross-manifest GC route through it, so they can never
+// diverge (design r2 claim 22 — that divergence WAS the round-1 bug class).
+//
+// The committed signal is HUB-BINDING-LIVE (Signal 2), reusing the existing single
+// owner liveEntryMatchesManifestBinding (managed_entries.go:355, the demigrate.go:426
+// pattern) — NOT manifest-existence, which is TRUE for both a committed-but-unflipped
+// row AND a pre-promote crash. Any error building the signal => COMMITTED_KEEP
+// (fail-safe; never reap on uncertainty).
+func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
+	exists, err := manifestExistsIn(defaultManifestDir(), rec.ManifestName)
+	if err != nil {
+		return adoptRowCommittedKeep // fail-safe
+	}
+	if !exists {
+		return adoptRowCrashReap // crash before/at ManifestCreate — no manifest ever written
+	}
+	data, err := loadManifestYAMLEmbedFirst(rec.ManifestName)
+	if err != nil {
+		return adoptRowCommittedKeep // fail-safe
+	}
+	m, err := config.ParseManifest(bytes.NewReader(data))
+	if err != nil {
+		return adoptRowCommittedKeep // fail-safe
+	}
+	all := clients.AllClients()
+	for _, c := range rec.AdoptClients {
+		adapter, ok := all[c]
+		if !ok {
+			continue
+		}
+		binding, ok := adoptBindingForClient(m, c)
+		if !ok {
+			continue
+		}
+		live, gErr := adapter.GetEntry(rec.SourceEntryName)
+		if gErr != nil || live == nil {
+			continue
+		}
+		if matched, _ := liveEntryMatchesManifestBinding(live, rec.SourceEntryName, binding, m); matched {
+			return adoptRowCommittedKeep // Install committed a live hub binding
+		}
+	}
+	return adoptRowCrashReap // manifest exists, but no live binding was ever installed
+}
+
+// adoptBindingForClient returns the client's binding from the manifest.
+func adoptBindingForClient(m *config.ServerManifest, client string) (config.ClientBinding, bool) {
+	for _, b := range m.ClientBindings {
+		if b.Client == client {
+			return b, true
+		}
+	}
+	return config.ClientBinding{}, false
+}
+
+// ---------------------------------------------------------------------------
 // Adopt-side lifecycle — capture / promote / abort (THIS item; full bodies).
 // ---------------------------------------------------------------------------
 
@@ -339,75 +498,68 @@ func ReadAdoptProvenance(manifestName string) (rec *AdoptProvenanceRecord, found
 // F1) — the verbatim bytes ManifestCreateIn later writes — so a committed-but-
 // `adopting` row (Install succeeded, flip crashed) is never empty-hashed.
 //
-// Locking: the entire body runs under withAdoptedEntriesLock; the per-snapshot
-// flock is nested strictly inside (a consistent, deadlock-free lock order).
+// Locking + ordering (design r2 Signal 3, ROW-FIRST): capture writes a MINIMAL
+// `adopting` ANCHOR row (manifest + BOTH hashes + empty clients) under the store
+// lock BEFORE any secret-bearing snapshot; then pins the snapshots OUTSIDE the
+// store lock (each takes its own per-file flock); then finalizes the row with the
+// client provenance under the store lock again. A crash at any point leaves a row
+// a reaper can find (row->maybe-missing-snapshots is reclaimable), NEVER a snapshot
+// dir with no row. Lock order: <manifest>.lease (held by the caller) ->
+// adopted-entries.lock (per transaction) -> <snapshot>.lock (per file).
 //
-// NOTE (Phase B): this is UNWIRED — ExecuteAdoptWithOpts does not call it yet
-// (that is Phase C). It is exercised by unit tests only.
+// PRECONDITION: the caller (ExecuteAdoptWithOpts) holds the per-manifest lease, so
+// a prior `adopting` row for this manifest has a PROVABLY-DEAD owner and is
+// classified (not blindly reaped) by the SINGLE classifyDeadAdoptingRow.
 func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("adopt provenance capture: nil plan")
 	}
 
+	hash := ManifestHashContent([]byte(plan.ManifestYAML))
+	now := time.Now().UTC()
+
+	// c1 — prior-row handling + write the MINIMAL `adopting` ANCHOR row.
 	var (
-		rec          *AdoptProvenanceRecord
 		reapedPrior  bool
 		reapedAgeSec float64
 	)
-	lockErr := withAdoptedEntriesLock(func() error {
+	c1Err := withAdoptedEntriesLock(func() error {
 		store, err := readAdoptedEntries()
 		if err != nil {
 			return fmt.Errorf("adopt provenance capture: read store: %w", err)
 		}
-
-		// A prior row for this manifest may be a pre-crash `adopting` ORPHAN (safe
-		// to reap) OR a COMMITTED adopt (adopted / de_adopting / closed). A
-		// committed row must NEVER be destroyed: dropping it strands the
-		// already-installed adopt with no provenance/snapshots — e.g. a GUI
-		// double-submit where two plans are built before the first commits (codex
-		// bot PR #528 finding 1). Fail the capture CLOSED on a committed prior row
-		// with ZERO side effects (scan BEFORE any mutation); the
-		// ManifestCreate-already-exists check is the coarser backstop, but refusing
-		// at capture is what preserves the committed row's provenance.
+		// A prior row for this manifest is either a COMMITTED adopt (never destroy —
+		// FAIL CLOSED) or a dead-owner `adopting` orphan (the lease is held, so the
+		// owner is provably dead — classify via the SINGLE classifier, do not blindly
+		// reap: a committed-but-unflipped `adopting` row is COMMITTED_KEEP).
 		for _, r := range store.Records {
-			if r.ManifestName == plan.ManifestName && r.OperationState != AdoptOperationStateAdopting {
+			if r.ManifestName != plan.ManifestName {
+				continue
+			}
+			if r.OperationState != AdoptOperationStateAdopting {
 				return fmt.Errorf("adopt provenance capture: manifest %q already has committed adopt provenance (state %q); refusing to overwrite it", plan.ManifestName, r.OperationState)
 			}
+			if classifyDeadAdoptingRow(r) == adoptRowCommittedKeep {
+				return fmt.Errorf("adopt provenance capture: manifest %q already has a committed (install-live) adopt still in `adopting` state; refusing to overwrite it", plan.ManifestName)
+			}
+			reapedPrior = true
+			reapedAgeSec = time.Since(r.UpdatedAt).Seconds()
 		}
-		// UPSERT step 1: reap a prior `adopting` ORPHAN (at most one; guaranteed
-		// `adopting` by the scan above) + its stale snapshot dir before re-pinning.
+		// Drop the prior CRASH_REAP row (if any) + its stale snapshot dir, then write
+		// the minimal anchor.
 		var kept []AdoptProvenanceRecord
 		for _, r := range store.Records {
 			if r.ManifestName == plan.ManifestName {
-				reapedPrior = true
-				reapedAgeSec = time.Since(r.UpdatedAt).Seconds()
 				continue
 			}
 			kept = append(kept, r)
 		}
-		store.Records = kept
-		if err := removeAdoptSnapshots(plan.ManifestName); err != nil {
-			return fmt.Errorf("adopt provenance capture: reap stale snapshot dir: %w", err)
-		}
-
-		// UPSERT step 2: classify each selected client + pin present snapshots.
-		clientsProv, capErr := captureAdoptClientsProvenance(plan)
-		if capErr != nil {
-			// Fail closed: drop any partial snapshots pinned this call, and if we
-			// removed a prior row, persist that removal so no row points at the
-			// now-deleted snapshot dir.
-			_ = removeAdoptSnapshots(plan.ManifestName)
-			if reapedPrior {
-				if wErr := writeAdoptedEntries(store); wErr != nil {
-					return fmt.Errorf("%w; additionally failed to persist provenance cleanup: %v", capErr, wErr)
-				}
+		if reapedPrior {
+			if err := removeAdoptSnapshots(plan.ManifestName); err != nil {
+				return fmt.Errorf("adopt provenance capture: reap stale snapshot dir: %w", err)
 			}
-			return capErr
 		}
-
-		hash := ManifestHashContent([]byte(plan.ManifestYAML))
-		now := time.Now().UTC()
-		built := AdoptProvenanceRecord{
+		kept = append(kept, AdoptProvenanceRecord{
 			ManifestName:         plan.ManifestName,
 			SourceClient:         plan.SourceClient,
 			SourceEntryName:      plan.EntryName,
@@ -419,23 +571,58 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 			OperationState:       AdoptOperationStateAdopting,
 			CreatedAt:            now,
 			UpdatedAt:            now,
-			Clients:              clientsProv,
-		}
-		store.Records = append(store.Records, built)
-		if err := writeAdoptedEntries(store); err != nil {
-			_ = removeAdoptSnapshots(plan.ManifestName)
-			return fmt.Errorf("adopt provenance capture: write store: %w", err)
-		}
-		rec = &built
-		return nil
+			Clients:              nil, // ANCHOR: no snapshots pinned yet (row-first)
+		})
+		store.Records = kept
+		return writeAdoptedEntries(store)
 	})
-
+	if c1Err != nil {
+		return nil, c1Err
+	}
 	if reapedPrior {
 		emitAdoptProvenanceOrphanReaped(plan.ManifestName, reapedAgeSec, adoptOrphanReapTriggerUpsert)
 	}
-	if lockErr != nil {
-		return nil, lockErr
+
+	// c2 — pin snapshots for present clients (OUTSIDE the store lock). On failure,
+	// abort (remove snapshots + drop the anchor row) and SURFACE the cleanup error
+	// rather than swallow it (design r2 finding 4); the anchor row keeps the failure
+	// GC-reclaimable regardless.
+	clientsProv, capErr := captureAdoptClientsProvenance(plan)
+	if capErr != nil {
+		if abortErr := abortAdoptProvenance(&AdoptProvenanceRecord{ManifestName: plan.ManifestName}); abortErr != nil {
+			return nil, fmt.Errorf("%w; additionally the pre-adopt provenance cleanup failed (the `adopting` row remains, so a later GC still reclaims it): %v", capErr, abortErr)
+		}
+		return nil, capErr
 	}
+
+	// c3 — finalize the anchor row with the client provenance.
+	var rec *AdoptProvenanceRecord
+	c3Err := withAdoptedEntriesLock(func() error {
+		store, err := readAdoptedEntries()
+		if err != nil {
+			return fmt.Errorf("adopt provenance capture: read store (finalize): %w", err)
+		}
+		for i := range store.Records {
+			if store.Records[i].ManifestName == plan.ManifestName && store.Records[i].OperationState == AdoptOperationStateAdopting {
+				store.Records[i].Clients = clientsProv
+				store.Records[i].UpdatedAt = time.Now().UTC()
+				if wErr := writeAdoptedEntries(store); wErr != nil {
+					return fmt.Errorf("adopt provenance capture: finalize write store: %w", wErr)
+				}
+				cp := store.Records[i]
+				rec = &cp
+				return nil
+			}
+		}
+		return fmt.Errorf("adopt provenance capture: anchor row for manifest %q vanished before finalize", plan.ManifestName)
+	})
+	if c3Err != nil {
+		if abortErr := abortAdoptProvenance(&AdoptProvenanceRecord{ManifestName: plan.ManifestName}); abortErr != nil {
+			return nil, fmt.Errorf("%w; additionally the pre-adopt provenance cleanup failed (the `adopting` row remains, so a later GC still reclaims it): %v", c3Err, abortErr)
+		}
+		return nil, c3Err
+	}
+
 	emitAdoptProvenanceCaptured(rec)
 	return rec, nil
 }
@@ -461,8 +648,8 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 	// a guessed `absent` would let de-adopt delete the adopted entry with no
 	// snapshot (security F4 — a vanished entry does not "parse cleanly and lack
 	// the entry"; it is a fail-closed capture failure).
-	presentAtBuild := make(map[string]bool, len(plan.PresentAtBuild))
-	for _, c := range plan.PresentAtBuild {
+	presentAtBuild := make(map[string]bool, len(plan.presentAtBuild))
+	for _, c := range plan.presentAtBuild {
 		presentAtBuild[c] = true
 	}
 	out := make([]AdoptClientProvenance, 0, len(plan.AdoptClients))
@@ -490,6 +677,22 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 			cfgPath := adapter.ConfigPath()
 			configBytes, rErr := os.ReadFile(cfgPath)
 			if rErr != nil {
+				if errors.Is(rErr, fs.ErrNotExist) {
+					// MiMoCode merged-layer (design r2 finding 5): the entry resolves
+					// from a LOWER read layer but the hub WRITE TARGET (ConfigPath) does
+					// not exist yet. GetEntry non-nil PROVES the entry is resolvable, so
+					// this is NOT a vanished entry (the P2 data-loss case is GetEntry
+					// nil, handled by the present-at-Build branches above). Record
+					// present-merged-lower with NO snapshot; de-adopt restores by
+					// removing the hub entry from the write target, which re-exposes the
+					// untouched lower-layer original.
+					out = append(out, AdoptClientProvenance{
+						Client:        name,
+						OriginalState: AdoptOriginalStatePresentMergedLower,
+						RestoreMode:   AdoptRestoreModeFunctionalEquivalent,
+					})
+					continue
+				}
 				return nil, fmt.Errorf("adopt provenance capture: read client %q config file: %w", name, rErr)
 			}
 			ref, sha, wErr := writeAdoptClientSnapshot(plan.ManifestName, name, configBytes)
@@ -629,83 +832,131 @@ func abortAdoptProvenance(rec *AdoptProvenanceRecord) error {
 // genuinely-slow in-flight adopt is never reaped out from under itself.
 const adoptOrphanGCThreshold = 24 * time.Hour
 
-// gcOrphanedAdoptingProvenance reaps stale CROSS-manifest `adopting` orphans: a
-// row still `adopting` whose updated_at is older than olderThan (hard-crash
-// debris), plus its owner-only, secret-bearing snapshot dir. It is the
-// cross-manifest complement to the capture UPSERT (which reaps only a
-// SAME-manifest orphan on the operator's next same-manifest adopt): a hard crash
-// between captureAdoptProvenance and Install/abort otherwise leaves a snapshot
-// under <state-dir>/adopt-provenance/<manifest>/ with no automatic reaper for any
-// other manifest.
-//
-// Bounded + safe: only `adopting` rows (never adopted/de_adopting/closed), only
-// older-than-threshold rows, AND only rows whose manifest does NOT exist on disk.
-// An aged `adopting` row whose manifest EXISTS is a promote-flip-failure
-// recoverable row (a committed adopt left in `adopting` when the post-Install
-// flip write failed — design F1, security-verified), NOT an orphan, so it is
-// PRESERVED (codex bot PR #528 finding 2); a manifest-existence check error fails
-// SAFE (keep, never reap on uncertainty). All under withAdoptedEntriesLock so it
-// cannot race a concurrent capture/promote/abort. Returns the count reaped.
-// Callers run it best-effort — a GC error must not block a fresh adopt.
-//
-// Crash-safety / ordering: snapshot dirs are removed FIRST, then the row removal
-// is persisted in one write. A crash between leaves the rows `adopting` (aged), so
-// the next GC re-reaps them (removeAdoptSnapshots is idempotent on a missing dir)
-// — it never leaves an orphaned dir with no row (which no GC could reach). A
-// snapshot-removal error aborts before the store write, so nothing is half-reaped.
-func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err error) {
-	type reapedOrphan struct {
-		manifest string
-		ageSec   float64
-	}
-	var toEmit []reapedOrphan
-	lockErr := withAdoptedEntriesLock(func() error {
+// reapAdoptProvenanceRow removes a manifest's snapshot dir (FIRST) then drops its
+// row (crash-safe ordering, codex bot PR #528 finding 3). Caller MUST hold the
+// manifest lease so the reap cannot race a concurrent adopt. No event emit — the
+// GC caller emits orphan-reaped.
+func reapAdoptProvenanceRow(manifestName string) error {
+	return withAdoptedEntriesLock(func() error {
 		store, err := readAdoptedEntries()
 		if err != nil {
-			return fmt.Errorf("adopt provenance gc: read store: %w", err)
+			return fmt.Errorf("adopt provenance reap: read store: %w", err)
 		}
-		cutoff := time.Now().Add(-olderThan)
+		if err := removeAdoptSnapshots(manifestName); err != nil {
+			return fmt.Errorf("adopt provenance reap: remove snapshots: %w", err)
+		}
 		var kept []AdoptProvenanceRecord
-		var reapedManifests []string
 		for _, r := range store.Records {
-			if r.OperationState == AdoptOperationStateAdopting && r.UpdatedAt.Before(cutoff) {
-				// A promote-flip failure after a successful Install leaves a COMMITTED
-				// adopt in `adopting` state (design F1) — its manifest EXISTS. Only a
-				// crash BEFORE ManifestCreate leaves an aged `adopting` row with NO
-				// manifest = a true orphan. Reap ONLY a true orphan; an existence-check
-				// error fails SAFE (keep). Mirrors BuildAdoptPlan's manifestExistsIn
-				// check (adopt.go:159).
-				if exists, exErr := manifestExistsIn(defaultManifestDir(), r.ManifestName); exErr != nil || exists {
-					kept = append(kept, r)
-					continue
-				}
-				reapedManifests = append(reapedManifests, r.ManifestName)
-				toEmit = append(toEmit, reapedOrphan{manifest: r.ManifestName, ageSec: time.Since(r.UpdatedAt).Seconds()})
+			if r.ManifestName == manifestName {
 				continue
 			}
 			kept = append(kept, r)
 		}
-		if len(reapedManifests) == 0 {
-			return nil // nothing stale; no write, no snapshot removal
-		}
-		for _, m := range reapedManifests {
-			if rmErr := removeAdoptSnapshots(m); rmErr != nil {
-				return fmt.Errorf("adopt provenance gc: remove snapshots for %q: %w", m, rmErr)
-			}
-		}
 		store.Records = kept
 		if err := writeAdoptedEntries(store); err != nil {
-			return fmt.Errorf("adopt provenance gc: write store: %w", err)
+			return fmt.Errorf("adopt provenance reap: write store: %w", err)
 		}
 		return nil
 	})
-	if lockErr != nil {
+}
+
+// gcOrphanedAdoptingProvenance reaps stale CROSS-manifest orphans using the three
+// design-r2 signals — the per-manifest LEASE (Signal 1), the hub-binding-live
+// classifier (Signal 2), and the snapshot-dir backstop (Signal 3):
+//
+//   Phase 1 (store lock): snapshot the aged `adopting` candidates + the set of
+//     manifests that have ANY store row; release the store lock.
+//   Phase 2 (per candidate, OUTSIDE the store lock): TryLock its lease — a LIVE
+//     adopt holds it => skip (claim 16). With the lease held the owner is provably
+//     dead; classifyDeadAdoptingRow decides: COMMITTED_KEEP (a hub binding is live —
+//     a promote-flip-failure recoverable row, finding 2 KEEP) is preserved;
+//     CRASH_REAP (manifest absent, OR present with no live binding — finding 2 REAP)
+//     removes snapshots-then-row under the held lease.
+//   Phase 3 (backstop): reap ROWLESS snapshot dirs (a <manifest>/ dir with no store
+//     row — findings 3/4 residue or any future ordering bug), gated on the lease +
+//     no-store-row, NOT age-gated (a rowless dir has no updated_at).
+//
+// Lock order (acyclic): <manifest>.lease (TryLock, non-blocking) -> adopted-entries
+// .lock. The store lock is NEVER held while acquiring a lease. Returns the count
+// reaped; a GC error must not block a fresh adopt (callers run it best-effort).
+func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err error) {
+	type candidate struct {
+		rec    AdoptProvenanceRecord
+		ageSec float64
+	}
+	// Phase 1 — snapshot aged `adopting` candidates + the row-manifest set.
+	var candidates []candidate
+	rowManifests := map[string]bool{}
+	cutoff := time.Now().Add(-olderThan)
+	if lockErr := withAdoptedEntriesLock(func() error {
+		store, rErr := readAdoptedEntries()
+		if rErr != nil {
+			return fmt.Errorf("adopt provenance gc: read store: %w", rErr)
+		}
+		for _, r := range store.Records {
+			rowManifests[r.ManifestName] = true
+			if r.OperationState == AdoptOperationStateAdopting && r.UpdatedAt.Before(cutoff) {
+				candidates = append(candidates, candidate{rec: r, ageSec: time.Since(r.UpdatedAt).Seconds()})
+			}
+		}
+		return nil
+	}); lockErr != nil {
 		return 0, lockErr
 	}
-	for _, o := range toEmit {
-		emitAdoptProvenanceOrphanReaped(o.manifest, o.ageSec, adoptOrphanReapTriggerGC)
+
+	// Phase 2 — reap true cross-manifest row-bearing orphans under each own lease.
+	for _, c := range candidates {
+		lk, ok, lErr := tryAcquireAdoptManifestLease(c.rec.ManifestName)
+		if lErr != nil || !ok {
+			continue // lease unavailable (live adopt) or path error => skip (fail-safe)
+		}
+		if classifyDeadAdoptingRow(c.rec) == adoptRowCrashReap {
+			if rErr := reapAdoptProvenanceRow(c.rec.ManifestName); rErr == nil {
+				emitAdoptProvenanceOrphanReaped(c.rec.ManifestName, c.ageSec, adoptOrphanReapTriggerGC)
+				reaped++
+			}
+		}
+		_ = lk.Unlock()
 	}
-	return len(toEmit), nil
+
+	// Phase 3 — snapshot-dir backstop: reap ROWLESS <manifest>/ dirs under lease.
+	dirManifests, dErr := listAdoptProvenanceSnapshotManifests()
+	if dErr != nil {
+		return reaped, dErr
+	}
+	for _, m := range dirManifests {
+		if rowManifests[m] {
+			continue // has (or had) a store row — handled by Phase 2 or kept intentionally
+		}
+		lk, ok, lErr := tryAcquireAdoptManifestLease(m)
+		if lErr != nil || !ok {
+			continue // live adopt (may be mid-anchor) or path error => skip
+		}
+		// Confirm still rowless UNDER the lease before removing (authoritative).
+		hasRow := true
+		_ = withAdoptedEntriesLock(func() error {
+			store, rErr := readAdoptedEntries()
+			if rErr != nil {
+				return nil // fail-safe: leave hasRow=true, do not reap on read error
+			}
+			hasRow = false
+			for _, r := range store.Records {
+				if r.ManifestName == m {
+					hasRow = true
+					break
+				}
+			}
+			return nil
+		})
+		if !hasRow {
+			if rmErr := removeAdoptSnapshots(m); rmErr == nil {
+				emitAdoptProvenanceOrphanReaped(m, 0, adoptOrphanReapTriggerGC)
+				reaped++
+			}
+		}
+		_ = lk.Unlock()
+	}
+	return reaped, nil
 }
 
 // ---------------------------------------------------------------------------

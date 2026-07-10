@@ -53,7 +53,7 @@ type AdoptPlan struct {
 	DisabledSameName    []AdoptClientDisabled
 	SecretRoutedKeys    []string
 	ManifestYAML        string
-	// PresentAtBuild is the set of clients whose same-name entry was PRESENT and
+	// presentAtBuild is the set of clients whose same-name entry was PRESENT and
 	// adoptable at BuildAdoptPlan time (= clientScan.Matching, which always
 	// includes the source client). captureAdoptProvenance fails CLOSED if any
 	// SELECTED client in this set reads absent/no-entry at capture: that is a
@@ -62,8 +62,12 @@ type AdoptPlan struct {
 	// with no snapshot would let de-adopt "restore to absence" and DELETE the
 	// operator's adopted entry unrecoverably (security F4). A client NOT in this
 	// set is a legitimate entryless-fanout target and may classify `absent`.
-	// Internal-only field; not part of any adopt CLI/API/GUI wire shape.
-	PresentAtBuild []string
+	//
+	// UNEXPORTED (codex bot PR #528 finding 6): gui/adopt.go embeds *AdoptPlan into
+	// the /api/adopt/plan response, so an EXPORTED field would serialize onto the
+	// wire (regressing design claim 9 — byte-unchanged plan response). An unexported
+	// field is structurally un-serializable and can never leak through any embed.
+	presentAtBuild []string
 
 	secretValues map[string]string
 }
@@ -208,7 +212,7 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		DisabledSameName:    clientScan.Disabled,
 		SecretRoutedKeys:    routedKeys,
 		ManifestYAML:        manifestYAML,
-		PresentAtBuild:      append([]string(nil), clientScan.Matching...),
+		presentAtBuild:      append([]string(nil), clientScan.Matching...),
 		secretValues:        secretValues,
 	}, nil
 }
@@ -258,6 +262,20 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	// must never block a fresh adopt (design "Orphan lifecycle" (b)); the
 	// same-manifest UPSERT in captureAdoptProvenance is the complement.
 	_, _ = gcOrphanedAdoptingProvenanceFn(adoptOrphanGCThreshold)
+	// Step 0b — acquire the per-manifest adopt LEASE (design r2 Signal 1). Held
+	// (flock) across capture -> Install -> promote / abort so no concurrent
+	// same-manifest adopt or reaper can touch this adopt's `adopting` row (claim 16):
+	// a reaper that cannot TryLock the lease skips; a second same-manifest adopt
+	// FAILs CLOSED here. Released on EVERY exit path via defer. The lease is
+	// PER-MANIFEST — adopts of DIFFERENT manifests never contend.
+	lease, leased, leaseErr := tryAcquireAdoptManifestLease(plan.ManifestName)
+	if leaseErr != nil {
+		return fmt.Errorf("adopt: acquire per-manifest lease for %q: %w", plan.ManifestName, leaseErr)
+	}
+	if !leased {
+		return fmt.Errorf("adopt: a concurrent adopt of manifest %q is already in progress; retry after it completes", plan.ManifestName)
+	}
+	defer func() { _ = lease.Unlock() }()
 	// Durable pre-adopt provenance capture, BEFORE the first irreversible mutation
 	// (persistAdoptRoutedSecrets, below). A capture failure fails the adopt CLOSED
 	// with ZERO side effects — no vault key, no manifest, no client-config write —

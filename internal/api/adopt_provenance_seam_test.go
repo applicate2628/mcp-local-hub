@@ -303,8 +303,8 @@ API_KEY = "literal-secret-value"
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
 	}
-	if !containsAdoptString(plan.PresentAtBuild, "cursor") || !containsAdoptString(plan.AdoptClients, "cursor") {
-		t.Fatalf("precondition: cursor must be present-at-Build AND selected; present=%#v selected=%#v", plan.PresentAtBuild, plan.AdoptClients)
+	if !containsAdoptString(plan.presentAtBuild, "cursor") || !containsAdoptString(plan.AdoptClients, "cursor") {
+		t.Fatalf("precondition: cursor must be present-at-Build AND selected; present=%#v selected=%#v", plan.presentAtBuild, plan.AdoptClients)
 	}
 	codexBefore := mustReadFileForAdoptTest(t, codexPath)
 
@@ -355,8 +355,8 @@ args = ["version"]
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
 	}
-	if containsAdoptString(plan.PresentAtBuild, "cursor") {
-		t.Fatalf("precondition: cursor must NOT be present-at-Build: %#v", plan.PresentAtBuild)
+	if containsAdoptString(plan.presentAtBuild, "cursor") {
+		t.Fatalf("precondition: cursor must NOT be present-at-Build: %#v", plan.presentAtBuild)
 	}
 	if !containsAdoptString(plan.AdoptClients, "cursor") {
 		t.Fatalf("precondition: cursor must be a selected fanout target: %#v", plan.AdoptClients)
