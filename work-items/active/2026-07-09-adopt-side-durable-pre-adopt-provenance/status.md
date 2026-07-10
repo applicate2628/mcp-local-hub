@@ -1,14 +1,15 @@
 # Status — adopt-side durable pre-adopt provenance
 
-State: PLANNED — ready for implementation. Delivery plan (`plan.md`, PASS) breaks the design into 5 sequential phases (A storage → B capture/lifecycle → C fail-closed seam → D orphan GC → E docs) + 2 flagged-optional phases (F1 tuple-recording, F2 supervise-GC; both DEFER by default). Arch review PASS + security review REVISE folded in (6 MUST-FIX); store-shape decision PROMOTED proposed→accepted by the arch-review gate (decision-file frontmatter reconciliation pending — reviewer/archivist owned)
+State: IMPLEMENTATION COMPLETE — all 5 code+docs phases (A storage → B capture/lifecycle → C fail-closed seam → D orphan GC → E docs) delivered on branch `feat/adopt-provenance`. Both post-implementation review gates PASS (architecture PASS; security PASS after the P2 fail-closed-present-at-Build fix). Next = QA + PR + Codex bot loop + merge. The 2 flagged-optional phases (F1 tuple-recording, F2 supervise-GC) remain DEFERRED (lead decisions below).
 Priority: medium
 Milestone: v0.7 Adoption
 Admitted: 2026-07-10 ($product-manager, see brief.md)
 Designed: 2026-07-10 ($architect, see design.md — PASS)
 Planned: 2026-07-10 ($planner, see plan.md — PASS; 5 phases A-E + F1/F2 flagged-optional)
-Reviewed: 2026-07-10 (architecture PASS; security REVISE, 0 P0/P1) → revised same day (design.md "Revision" section)
+Reviewed: 2026-07-10 (design gate: architecture PASS; security REVISE, 0 P0/P1) → revised same day (design.md "Revision" section)
+Implemented: 2026-07-10 ($backend-engineer, branch `feat/adopt-provenance`) — A `69b24b89`, B (same commit), C `a6891320`, P2 fix `818985f2`, D `5adfd0c4`, E (this change). Post-impl review: architecture PASS on A+B+C; security REVISE→PASS (one P2, present-at-Build capture must fail closed, fixed in `818985f2`).
 Blocks: 2026-07-09-deadopt-hub-to-native (its `Depends-on:` target)
-Owner-to-be: internal/api/adopt.go + new internal/api/adopted_entries.go (see design.md)
+Owner: internal/api/adopt.go + new internal/api/adopted_entries.go + adopt_provenance_events.go (+ tests); CLAUDE.md "Adopt provenance (v0.7)" section (Phase E)
 
 ## What this is
 The de-adopt work-item (`2026-07-09-deadopt-hub-to-native`) is BLOCKED
@@ -51,9 +52,15 @@ BEFORE the config rewrite commits.
    C (fail-closed seam) → D (orphan GC) → E (docs), serialized. Two flagged-optional
    phases (F1 managed-entries tuple-recording, F2 supervise-startup GC hook) DEFER by
    default — orchestrator decision required before implementing.
-5. [NEXT] $backend-engineer implements Phase A in an isolated git worktree (TDD);
-   $security-reviewer gates Phases A + C (secret-bearing snapshot); $qa-engineer gates
-   each phase against its AC-ids. See plan.md "Recommended next-role sequence".
+5. [DONE 2026-07-10] $backend-engineer implemented Phases A-E in the isolated
+   worktree `feat/adopt-provenance` (TDD, one reviewable commit per phase).
+   $security-reviewer gated A+B+C (snapshot DACL + fail-closed ordering + the P2
+   present-at-Build fix); $architecture-reviewer gated the hot-path seam (protected
+   surfaces untouched). All AC-ids (A1-A8, B1-B8, C1-C7, D1-D4, E1-E3) covered by
+   named hermetic tests; build + vet (win + linux) + scoped `go test` green.
+6. [NEXT] $qa-engineer full gate against all AC-ids, then the repo PR workflow
+   (pre-push `go build && go vet && go test`; push; Codex bot PASS loop; deep-security
+   pass; merge). See CLAUDE.md "PR review + merge workflow (MANDATORY)".
 
 ## Notes
 - Not on the critical path of the in-flight reaper v1 (PR #527); queued behind it.
