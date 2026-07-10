@@ -201,6 +201,25 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	}, nil
 }
 
+// promoteAdoptProvenanceFn is the post-Install provenance promote step, injected
+// as a package var ONLY so a test can exercise the non-fatal flip-failure path
+// (a promote-flip failure must NOT roll back a committed adopt — design claim 10,
+// AC C5). Production always uses promoteAdoptProvenanceToAdopted.
+var promoteAdoptProvenanceFn = promoteAdoptProvenanceToAdopted
+
+// abortProvenanceNote folds a best-effort abortAdoptProvenance result into an
+// operator-facing suffix appended to the adopt error, mirroring the existing
+// secret/manifest cleanup notes. It returns "" when abort succeeded (the common
+// case), so the existing error text and errors.Is chains stay byte-unchanged on
+// the happy cleanup path; a genuine abort failure is surfaced as a note without
+// masking the caller's original error.
+func abortProvenanceNote(err error) string {
+	if err == nil {
+		return ""
+	}
+	return "; additionally failed to clean up pre-adopt provenance: " + err.Error()
+}
+
 // ExecuteAdopt applies a plan built by BuildAdoptPlan.
 func (a *API) ExecuteAdopt(plan *AdoptPlan, w io.Writer) error {
 	return a.ExecuteAdoptWithOpts(plan, w, ExecuteAdoptOpts{})
@@ -215,17 +234,36 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	if w == nil {
 		w = io.Discard
 	}
+	// Durable pre-adopt provenance capture, BEFORE the first irreversible mutation
+	// (persistAdoptRoutedSecrets, below). A capture failure fails the adopt CLOSED
+	// with ZERO side effects — no vault key, no manifest, no client-config write —
+	// so a currently-successful adopt is never regressed (design "Fail-closed
+	// capture seam"; claims 1-2). Every failure branch after this point aborts the
+	// captured provenance so no secret-bearing snapshot orphan survives a failed
+	// adopt.
+	rec, err := a.captureAdoptProvenance(plan)
+	if err != nil {
+		emitAdoptProvenanceCaptureFailed(plan.ManifestName, "", "pre-adopt provenance capture failed")
+		return fmt.Errorf("adopt: capture pre-adopt provenance before any mutation: %w", err)
+	}
 	if err := persistAdoptRoutedSecrets(plan.secretValues); err != nil {
+		if note := abortProvenanceNote(abortAdoptProvenance(rec)); note != "" {
+			return fmt.Errorf("%w%s", err, note)
+		}
 		return err
 	}
 	if err := a.ManifestCreate(plan.ManifestName, plan.ManifestYAML); err != nil {
+		abortNote := abortProvenanceNote(abortAdoptProvenance(rec))
 		if len(plan.SecretRoutedKeys) == 0 {
-			return err
+			if abortNote == "" {
+				return err
+			}
+			return fmt.Errorf("%w%s", err, abortNote)
 		}
 		if cleanupErr := deleteAdoptRoutedSecrets(plan.SecretRoutedKeys); cleanupErr != nil {
-			return fmt.Errorf("adopt manifest create failed after writing routed vault keys; failed to remove routed vault keys %s: %v: %w", strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ","), cleanupErr, err)
+			return fmt.Errorf("adopt manifest create failed after writing routed vault keys; failed to remove routed vault keys %s: %v%s: %w", strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ","), cleanupErr, abortNote, err)
 		}
-		return fmt.Errorf("adopt manifest create failed after writing routed vault keys; removed routed vault keys %s so adopt can be re-run: %w", strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ","), err)
+		return fmt.Errorf("adopt manifest create failed after writing routed vault keys; removed routed vault keys %s so adopt can be re-run%s: %w", strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ","), abortNote, err)
 	}
 	if err := a.Install(InstallOpts{
 		Server:          plan.ManifestName,
@@ -234,18 +272,27 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 		SymlinkConsents: opts.SymlinkConsents,
 	}); err != nil {
 		vaultNote := ""
+		abortNote := abortProvenanceNote(abortAdoptProvenance(rec))
 		if cleanupErr := a.ManifestDelete(plan.ManifestName); cleanupErr != nil {
 			if len(plan.SecretRoutedKeys) > 0 {
 				vaultNote = "; routed vault keys were left intact because the manifest still exists: " + strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ",")
 			}
-			return fmt.Errorf("adopt install failed after creating manifest %q; failed to remove the adopt-created manifest (%v), so remove it before re-running adopt%s: %w", plan.ManifestName, cleanupErr, vaultNote, err)
+			return fmt.Errorf("adopt install failed after creating manifest %q; failed to remove the adopt-created manifest (%v), so remove it before re-running adopt%s%s: %w", plan.ManifestName, cleanupErr, vaultNote, abortNote, err)
 		}
 		if cleanupErr := deleteAdoptRoutedSecrets(plan.SecretRoutedKeys); cleanupErr != nil {
 			vaultNote = "; failed to remove routed vault keys " + strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ",") + ": " + cleanupErr.Error()
 		} else if len(plan.SecretRoutedKeys) > 0 {
 			vaultNote = "; removed routed vault keys: " + strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ",")
 		}
-		return fmt.Errorf("adopt install failed after creating manifest %q; removed the adopt-created manifest so adopt can be re-run%s: %w", plan.ManifestName, vaultNote, err)
+		return fmt.Errorf("adopt install failed after creating manifest %q; removed the adopt-created manifest so adopt can be re-run%s%s: %w", plan.ManifestName, vaultNote, abortNote, err)
+	}
+	// Install committed. Promote adopting -> adopted. A flip-write failure here is
+	// NON-FATAL: it leaves a recoverable `adopting` row (both manifest hashes were
+	// populated at capture, so de-adopt's hash-gate stays usable) and the adopt
+	// still returns success — a committed install is never rolled back for a
+	// provenance bookkeeping write (design claim 10).
+	if err := promoteAdoptProvenanceFn(rec.ManifestName); err != nil {
+		emitAdoptProvenanceCommitFailed(rec.ManifestName)
 	}
 	emitAdoptExecutedEvent(plan)
 	fmt.Fprintf(w, "Adopted %q from %s as manifest %q on port %d.\n", plan.EntryName, plan.SourceClient, plan.ManifestName, plan.Port)
