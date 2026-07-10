@@ -137,6 +137,7 @@ See also: stop, restart, status, language-server cleanup.`,
 	c.Flags().BoolVar(&scanClients, "scan-clients", false,
 		"A6: extract additional cmdline patterns from every installed client's stdio entries (reverse-lookup orphan detection)")
 	c.AddCommand(newCleanupAggressiveCmdReal())
+	c.AddCommand(newCleanupTestLeftoversCmdReal())
 	return c
 }
 

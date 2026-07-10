@@ -33,6 +33,15 @@ type API struct {
 	state *State
 	bus   *EventBus
 
+	// Read-only dependency seams for the explicit test-leftover preview command.
+	// Production leaves them nil and PreviewTestLeftovers selects the canonical
+	// census/buildinfo/clock/parent owners. Focused tests inject synthetic census
+	// data so they never enumerate the host process fleet.
+	testLeftoverSnapshotFn      testLeftoverSnapshotFunc
+	testLeftoverNowFn           func() time.Time
+	testLeftoverBuildInfoReadFn testLeftoverBuildInfoReadFunc
+	testLeftoverParentStateFn   testLeftoverParentStateFunc
+
 	// G2 health snapshot cache + test seams. See internal/api/health.go for
 	// the cache lifecycle, TTL constants, and singleflight collapsing logic.
 	healthCache healthCache
