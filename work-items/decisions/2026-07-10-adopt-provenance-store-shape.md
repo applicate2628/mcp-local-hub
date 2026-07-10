@@ -1,6 +1,7 @@
 ---
-status: proposed
+status: accepted
 date: 2026-07-10
+accepted: 2026-07-10 ($architecture-reviewer gate; rationale rests on reasons 2 (split-owner/lifecycle hazard) + 3 (manufactured adopt↔demigrate coupling); reason 1 partially overstated, non-load-bearing)
 slug: adopt-provenance-store-shape
 deciders: $architect (design); $architecture-reviewer (promotes proposed → accepted)
 context: work-items/active/2026-07-09-adopt-side-durable-pre-adopt-provenance/design.md
