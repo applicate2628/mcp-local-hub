@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -19,11 +20,13 @@ const (
 	DefaultTestLeftoverMinAgeSec = int64(60)
 	testLeftoverApplyFloorSec    = int64(600)
 
-	TestLeftoverSnapshotComplete        = "snapshot-complete"
-	TestLeftoverSnapshotDegraded        = "snapshot-degraded"
-	TestLeftoverApplyDeferred           = "apply-deferred-v1"
-	TestLeftoverNotEvaluated            = "not-evaluated-v1"
-	TestLeftoverEnvironmentNotCollected = "not-collected-v1"
+	TestLeftoverSnapshotComplete            = "snapshot-complete"
+	TestLeftoverSnapshotDegraded            = "snapshot-degraded"
+	TestLeftoverSnapshotUnsupportedPlatform = "snapshot-unsupported-platform"
+	TestLeftoverApplyDeferred               = "apply-deferred-v1"
+	TestLeftoverNotEvaluated                = "not-evaluated-v1"
+	TestLeftoverAmbiguousFamily             = "ambiguous-family-classification"
+	TestLeftoverEnvironmentNotCollected     = "not-collected-v1"
 
 	testLeftoverManualOnlyNote = "manual-reap-only: verify identity out-of-band before killing"
 )
@@ -92,12 +95,37 @@ type testLeftoverPathScope struct {
 	protectedScopeUnverified bool
 }
 
+// testLeftoverGOOS names the platform the default snapshotter targets. It
+// defaults to runtime.GOOS in production; the non-Windows no-op guard below is
+// test-only overridable so the guarded path can be exercised on a Windows host
+// without a real cross-compile.
+var testLeftoverGOOS = runtime.GOOS
+
 // PreviewTestLeftovers enumerates and classifies test-leftover evidence. It is
 // deliberately data-only: the method owns no action option, process handle, or
 // mutation dependency, and returns after evidence collection.
 func (a *API) PreviewTestLeftovers(opts TestLeftoverPreviewOpts) (TestLeftoverPreview, error) {
 	if opts.MinAgeSec < 0 {
 		return TestLeftoverPreview{}, fmt.Errorf("test-leftover preview: min-age-sec must be non-negative")
+	}
+
+	// The default snapshotter (runProcessSnapshot: wmic then powershell) is
+	// Windows-only. Off Windows it fails with a tooling error, unlike the
+	// sibling commands CleanupOrphans (cleanup.go:978) and
+	// ListMatchingProcesses (cleanup.go:1585), which no-op cleanly. Mirror them:
+	// return an honest, distinctly-marked empty no-op preview instead of an
+	// error. Gate on the DEFAULT snapshotter only — when an injected census
+	// (a.testLeftoverSnapshotFn) is present the hermetic unit-test seam must
+	// still classify on any GOOS, so this must not short-circuit it.
+	if (a == nil || a.testLeftoverSnapshotFn == nil) && testLeftoverGOOS != "windows" {
+		return TestLeftoverPreview{
+			SnapshotVerdict:        TestLeftoverSnapshotUnsupportedPlatform,
+			Exhaustive:             true,
+			RequestedMinAgeSec:     opts.MinAgeSec,
+			TempRootVerdict:        "not-supplied",
+			ProtectedScopeVerdicts: map[string]string{},
+			Candidates:             make([]TestLeftoverCandidate, 0),
+		}, nil
 	}
 
 	snapshotFn := testLeftoverSnapshotFunc(runProcessSnapshot)
@@ -425,6 +453,15 @@ func testLeftoverWouldRefuse(candidate TestLeftoverCandidate, operatorRootErr, p
 	}
 	if candidate.PathVerdict == "path-canonicalization-error" || operatorRootErr {
 		return "path-canonicalization-error"
+	}
+	// A candidate whose path satisfied more than one preview family cannot be
+	// safely resolved to a single branch. This is a structural classification
+	// failure, so it must fail closed here — early, before the evidence-specific
+	// checks below — and never reach the not-evaluated-v1 fallthrough that would
+	// tell the operator no specific guard failed. A future v2 apply MUST refuse
+	// an ambiguous branch classification.
+	if candidate.PatternClass == "ambiguous-multi-match" {
+		return TestLeftoverAmbiguousFamily
 	}
 	for _, relation := range candidate.PathRelations {
 		switch relation {

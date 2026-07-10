@@ -539,6 +539,38 @@ func TestLeftoverPreviewExactGUIFixtureIsNotRefusedAsRepoPath(t *testing.T) {
 	}
 }
 
+func TestLeftoverPreviewAmbiguousFamilyFailsClosed(t *testing.T) {
+	// Every non-classification guard passes, so without an explicit ambiguous
+	// case this candidate would fall through to not-evaluated-v1 and falsely
+	// tell the operator no specific guard failed.
+	candidate := TestLeftoverCandidate{
+		IdentityVerdict:     "identity-available",
+		ArgvShape:           "gui",
+		PatternClass:        "ambiguous-multi-match",
+		PathVerdict:         "path-canonical",
+		PathRelations:       []string{},
+		BuildInfoTag:        "test-tag-present",
+		ParentLiveness:      "parent-proven-dead",
+		AgeVsApplyFloor:     "at-or-above-apply-floor",
+		EnvironmentOverride: "not-collected-v1",
+	}
+	if got := testLeftoverWouldRefuse(candidate, false, false); got != TestLeftoverAmbiguousFamily {
+		t.Fatalf("ambiguous candidate refusal = %q, want %q", got, TestLeftoverAmbiguousFamily)
+	}
+	if got := testLeftoverWouldRefuse(candidate, false, false); got == TestLeftoverNotEvaluated {
+		t.Fatalf("ambiguous candidate fell through to %q", TestLeftoverNotEvaluated)
+	}
+
+	// Same passing evidence with a single resolved family confirms every
+	// downstream guard clears, so the ambiguous refusal above is caused solely
+	// by the ambiguous PatternClass, not by any other failing check.
+	resolved := candidate
+	resolved.PatternClass = "gui-e2e"
+	if got := testLeftoverWouldRefuse(resolved, false, false); got != TestLeftoverNotEvaluated {
+		t.Fatalf("resolved-family control refusal = %q, want %q", got, TestLeftoverNotEvaluated)
+	}
+}
+
 func TestLeftoverPreviewPathClassificationIsStrictAndDisplayOnly(t *testing.T) {
 	root := t.TempDir()
 	operatorRoot := filepath.Join(root, "scope")
@@ -643,6 +675,63 @@ func TestLeftoverPreviewNeverCallsTerminateSeam(t *testing.T) {
 	}
 	if terminateCalls != 0 {
 		t.Fatalf("termination seam called %d times, want 0", terminateCalls)
+	}
+}
+
+func TestLeftoverPreviewNonWindowsDefaultSnapshotIsNoOp(t *testing.T) {
+	// Force the default-snapshotter branch onto a non-Windows platform. The
+	// unsupported-platform verdict is set ONLY on the guard path, so observing
+	// it proves the guard fired and runProcessSnapshot (wmic/powershell) was
+	// never consulted — on the real host that call would set snapshot-complete
+	// / snapshot-degraded or return an error instead.
+	prev := testLeftoverGOOS
+	testLeftoverGOOS = "linux"
+	t.Cleanup(func() { testLeftoverGOOS = prev })
+
+	a := NewAPI() // no injected testLeftoverSnapshotFn: the default snapshotter is in play
+	result, err := a.PreviewTestLeftovers(TestLeftoverPreviewOpts{MinAgeSec: 42, TempRoot: "/some/root"})
+	if err != nil {
+		t.Fatalf("non-windows default-snapshot preview returned error: %v", err)
+	}
+	if result.SnapshotVerdict != TestLeftoverSnapshotUnsupportedPlatform {
+		t.Fatalf("snapshot verdict = %q, want %q", result.SnapshotVerdict, TestLeftoverSnapshotUnsupportedPlatform)
+	}
+	if len(result.Candidates) != 0 {
+		t.Fatalf("no-op preview produced candidates: %+v", result.Candidates)
+	}
+	if !result.Exhaustive {
+		t.Fatalf("no-op preview should read as exhaustive; nothing remains to enumerate")
+	}
+	if result.RequestedMinAgeSec != 42 {
+		t.Fatalf("requested min age = %d, want 42 echoed through the no-op", result.RequestedMinAgeSec)
+	}
+}
+
+func TestLeftoverPreviewInjectedCensusClassifiesRegardlessOfGOOS(t *testing.T) {
+	// The non-Windows guard must gate on the DEFAULT snapshotter only. With an
+	// injected census present, the hermetic seam must still classify even when
+	// GOOS is non-Windows, or every injected-census unit test would silently
+	// no-op on Linux/macOS CI.
+	prev := testLeftoverGOOS
+	testLeftoverGOOS = "linux"
+	t.Cleanup(func() { testLeftoverGOOS = prev })
+
+	exe := writePreviewFixture(t, filepath.Join(t.TempDir(), "mcphub-reliability-seam.exe"))
+	a := previewAPIWithSnapshot(testLeftoverPreviewCSVHeader +
+		previewCSVRow(910, 1, exe, quotePreviewArg(exe)+" daemon x", validPreviewCreated))
+	a.testLeftoverBuildInfoReadFn = taggedPreviewBuildInfo
+	a.testLeftoverParentStateFn = deadParent
+
+	result, err := a.PreviewTestLeftovers(TestLeftoverPreviewOpts{MinAgeSec: 600})
+	if err != nil {
+		t.Fatalf("injected census on non-windows GOOS returned error: %v", err)
+	}
+	if result.SnapshotVerdict != TestLeftoverSnapshotComplete {
+		t.Fatalf("injected census verdict = %q, want %q (guard must not short-circuit the seam)",
+			result.SnapshotVerdict, TestLeftoverSnapshotComplete)
+	}
+	if len(result.Candidates) != 1 || result.Candidates[0].PID != 910 {
+		t.Fatalf("injected census did not classify under non-windows GOOS: %+v", result.Candidates)
 	}
 }
 
