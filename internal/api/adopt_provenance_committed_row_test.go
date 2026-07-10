@@ -86,66 +86,47 @@ func TestCaptureFailsClosedOnCommittedPriorRow(t *testing.T) {
 	}
 }
 
-// Finding 2 (r2 model) — GC reaps a TRUE orphan (aged `adopting`, manifest ABSENT)
-// but PRESERVES a row it cannot prove is a crash orphan. NOTE (design r2 supersede):
-// the round-1 "manifest EXISTS => keep" rule is REPLACED by the hub-binding-live
-// classifier (classifyDeadAdoptingRow). Here `existsM` carries an UNPARSEABLE
-// manifest, so the classifier fail-safes to KEEP (never reap on uncertainty) — the
-// genuine committed-KEEP-via-live-binding vs valid-no-binding-REAP distinction is
-// exercised by TestGcClassifierLiveBindingKeepsValidNoBindingReaps (r2). This test
-// pins the fail-safe-keep + absent-reap legs only.
-func TestGcOrphanedPreservesCommittedButAdoptingRow(t *testing.T) {
-	isolateStateDir(t)
-	mdir := defaultManifestDir()
-
-	existsM := "gcexists"
-	existsMDir := filepath.Join(mdir, existsM)
-	if err := os.MkdirAll(existsMDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(existsMDir) })
-	if err := os.WriteFile(filepath.Join(existsMDir, "manifest.yaml"), []byte("name: "+existsM+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	absentM := "gcabsent"
-	_ = os.RemoveAll(filepath.Join(mdir, absentM)) // ensure the true-orphan's manifest is absent
-
-	aged := time.Now().Add(-2 * time.Hour).UTC()
-	seed := &AdoptedEntries{Version: 1, Records: []AdoptProvenanceRecord{
-		{ManifestName: existsM, OperationState: AdoptOperationStateAdopting, UpdatedAt: aged,
-			Clients: []AdoptClientProvenance{{Client: "codex-cli", OriginalState: AdoptOriginalStatePresent, SnapshotRef: "adopt-provenance/gcexists/codex-cli.snapshot"}}},
-		{ManifestName: absentM, OperationState: AdoptOperationStateAdopting, UpdatedAt: aged},
-	}}
-	if err := writeAdoptedEntries(seed); err != nil {
-		t.Fatal(err)
-	}
-	existsSnap, _ := adoptSnapshotDir(existsM)
-	if err := os.MkdirAll(existsSnap, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(existsSnap, "codex-cli.snapshot"), []byte("SECRET"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+// Finding A (r3) — the classifier is MANIFEST-INDEPENDENT: it reconstructs the
+// expected hub binding from the ROW's IMMUTABLE captured port, so a committed row (a
+// live hub binding) is KEPT even after its manifest is DELETED or EDITED (port
+// changed). A row with NO live binding is REAPED regardless of manifest state. This
+// SUPERSEDES the round-1/r2 manifest-existence keep/reap rule (the classifier no
+// longer reads the manifest file). Rewritten from the former
+// TestGcOrphanedPreservesCommittedButAdoptingRow, whose manifest-existence premise
+// no longer applies.
+func TestGcClassifierIsManifestIndependent(t *testing.T) {
+	keepM, editM, reapM := "gcindepkeep", "gcindepedit", "gcindepreap"
+	keepPort, editPort, reapPort := 9411, 9412, 9413
+	// codex holds live hub bindings for keepM (port 9411) and editM (port 9412), and
+	// NO entry for reapM.
+	codexBody := fmt.Sprintf("[mcp_servers.%s]\nurl = \"http://127.0.0.1:%d/mcp\"\n\n[mcp_servers.%s]\nurl = \"http://127.0.0.1:%d/mcp\"\n",
+		keepM, keepPort, editM, editPort)
+	setupAdoptTestEnv(t, keepM, codexBody)
+	// keepM: manifest DELETED (never written) — the classifier must not need it.
+	seedAgedAdoptingRow(t, keepM, withAdoptRowPort(keepPort))
+	// editM: manifest EDITED to a DIFFERENT port; the row keeps the captured port, so
+	// the classifier still recognizes the live binding at the row's port.
+	writeAdoptManifestForClassifierTest(t, editM, 9999, "codex-cli")
+	seedAgedAdoptingRow(t, editM, withAdoptRowPort(editPort))
+	// reapM: manifest present, but NO live hub binding -> true pre-install orphan.
+	writeAdoptManifestForClassifierTest(t, reapM, reapPort, "codex-cli")
+	seedAgedAdoptingRow(t, reapM, withAdoptRowPort(reapPort))
 
 	reaped, err := gcOrphanedAdoptingProvenance(1 * time.Hour)
 	if err != nil {
 		t.Fatalf("gcOrphanedAdoptingProvenance: %v", err)
 	}
+	if _, found, _ := ReadAdoptProvenance(keepM); !found {
+		t.Errorf("keepM (live binding, manifest DELETED) was reaped; the classifier must not read the manifest")
+	}
+	if _, found, _ := ReadAdoptProvenance(editM); !found {
+		t.Errorf("editM (live binding at the ROW's port, manifest EDITED to a different port) was reaped; the classifier must use the row's immutable port")
+	}
+	if _, found, _ := ReadAdoptProvenance(reapM); found {
+		t.Errorf("reapM (no live binding) was NOT reaped")
+	}
 	if reaped != 1 {
-		t.Errorf("reaped = %d, want 1 (only the true orphan whose manifest is absent)", reaped)
-	}
-	// existsM: manifest is UNPARSEABLE -> classifier fail-safes to KEEP (never reap
-	// on uncertainty) -> PRESERVED.
-	if _, found, _ := ReadAdoptProvenance(existsM); !found {
-		t.Errorf("aged `adopting` row with an unparseable manifest was reaped (classifier must fail-safe KEEP)")
-	}
-	if _, statErr := os.Stat(existsSnap); statErr != nil {
-		t.Errorf("fail-safe-kept row's snapshot dir was removed: %v", statErr)
-	}
-	// absentM: manifest ABSENT -> true orphan -> reaped.
-	if _, found, _ := ReadAdoptProvenance(absentM); found {
-		t.Errorf("true orphan (manifest absent) was not reaped")
+		t.Errorf("reaped = %d, want 1 (only reapM)", reaped)
 	}
 }
 

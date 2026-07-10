@@ -35,7 +35,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -423,58 +422,49 @@ const (
 // `adopting` row whose owner is PROVABLY DEAD (precondition: the caller holds — or
 // has just TryLock'd — the row's manifest lease, design r2 Signal 1). BOTH the
 // capture-UPSERT reap and the cross-manifest GC route through it, so they can never
-// diverge (design r2 claim 22 — that divergence WAS the round-1 bug class).
+// diverge (design r2 claim 22).
 //
-// The committed signal is HUB-BINDING-LIVE (Signal 2), reusing the existing single
-// owner liveEntryMatchesManifestBinding (managed_entries.go:355, the demigrate.go:426
-// pattern) — NOT manifest-existence, which is TRUE for both a committed-but-unflipped
-// row AND a pre-promote crash. Any error building the signal => COMMITTED_KEEP
-// (fail-safe; never reap on uncertainty).
+// It classifies from the row's IMMUTABLE captured fields ONLY (codex bot PR #528 r3
+// findings A+B). The committed signal is "Install wrote a live hub entry": for each
+// adopt_client, reconstruct the EXPECTED hub binding from manifest_name + the row's
+// CAPTURED port + the adopt-v1 binding constants (daemon "default", url_path
+// "/mcp"), and ask the single recognition owner liveEntryMatchesManifestBinding
+// (managed_entries.go:355, the demigrate.go:426 pattern) whether the live entry
+// matches it. The manifest FILE is NEVER read — an operator deleting or editing it
+// (port change, binding removal) after a committed adopt must NOT let the committed
+// row's provenance be reaped (finding A).
+//
+// Uncertainty is ALWAYS KEEP (never reap on what we cannot disprove, finding B): a
+// client that cannot be constructed, or whose GetEntry ERRORS, => KEEP. Only when
+// EVERY adopt_client is cleanly readable AND NONE holds the expected hub entry is
+// the row a true pre-install crash orphan => REAP.
 func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
-	exists, err := manifestExistsIn(defaultManifestDir(), rec.ManifestName)
-	if err != nil {
-		return adoptRowCommittedKeep // fail-safe
-	}
-	if !exists {
-		return adoptRowCrashReap // crash before/at ManifestCreate — no manifest ever written
-	}
-	data, err := loadManifestYAMLEmbedFirst(rec.ManifestName)
-	if err != nil {
-		return adoptRowCommittedKeep // fail-safe
-	}
-	m, err := config.ParseManifest(bytes.NewReader(data))
-	if err != nil {
-		return adoptRowCommittedKeep // fail-safe
+	// Synthetic manifest carrying only the row's IMMUTABLE name + captured port; the
+	// recognition SHAPE stays single-owned in liveEntryMatchesManifestBinding — this
+	// merely supplies its daemon-port input from the row instead of the mutable file.
+	expected := &config.ServerManifest{
+		Name:    rec.ManifestName,
+		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
 	}
 	all := clients.AllClients()
 	for _, c := range rec.AdoptClients {
 		adapter, ok := all[c]
 		if !ok {
-			continue
-		}
-		binding, ok := adoptBindingForClient(m, c)
-		if !ok {
-			continue
+			return adoptRowCommittedKeep // cannot construct this client => cannot DISPROVE => KEEP
 		}
 		live, gErr := adapter.GetEntry(rec.SourceEntryName)
-		if gErr != nil || live == nil {
-			continue
+		if gErr != nil {
+			return adoptRowCommittedKeep // read error => cannot DISPROVE => KEEP (finding B)
 		}
-		if matched, _ := liveEntryMatchesManifestBinding(live, rec.SourceEntryName, binding, m); matched {
+		if live == nil {
+			continue // cleanly no entry here; check the other adopt_clients
+		}
+		binding := config.ClientBinding{Client: c, Daemon: adoptDefaultDaemonName, URLPath: adoptDefaultURLPath}
+		if matched, _ := liveEntryMatchesManifestBinding(live, rec.SourceEntryName, binding, expected); matched {
 			return adoptRowCommittedKeep // Install committed a live hub binding
 		}
 	}
-	return adoptRowCrashReap // manifest exists, but no live binding was ever installed
-}
-
-// adoptBindingForClient returns the client's binding from the manifest.
-func adoptBindingForClient(m *config.ServerManifest, client string) (config.ClientBinding, bool) {
-	for _, b := range m.ClientBindings {
-		if b.Client == client {
-			return b, true
-		}
-	}
-	return config.ClientBinding{}, false
+	return adoptRowCrashReap // every adopt_client readable, NONE holds the expected hub entry
 }
 
 // ---------------------------------------------------------------------------
@@ -627,6 +617,11 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 	return rec, nil
 }
 
+// adoptCaptureBeforeSnapshotReadHook is a test-only seam fired between the present
+// client's GetEntry and the snapshot os.ReadFile, so a test can simulate a
+// concurrent config edit and exercise the finding-C TOCTOU guard. nil in production.
+var adoptCaptureBeforeSnapshotReadHook func(client string)
+
 // captureAdoptClientsProvenance classifies each selected client's pre-adopt
 // state and pins a hardened whole-config snapshot for every `present` client.
 //
@@ -675,6 +670,9 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 			return nil, fmt.Errorf("adopt provenance capture: read client %q config: %w", name, err)
 		case entry != nil:
 			cfgPath := adapter.ConfigPath()
+			if adoptCaptureBeforeSnapshotReadHook != nil {
+				adoptCaptureBeforeSnapshotReadHook(name) // test-only: simulate a concurrent config edit
+			}
 			configBytes, rErr := os.ReadFile(cfgPath)
 			if rErr != nil {
 				if errors.Is(rErr, fs.ErrNotExist) {
@@ -685,7 +683,8 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 					// nil, handled by the present-at-Build branches above). Record
 					// present-merged-lower with NO snapshot; de-adopt restores by
 					// removing the hub entry from the write target, which re-exposes the
-					// untouched lower-layer original.
+					// untouched lower-layer original. (No write-target bytes to
+					// revalidate, so the finding-C guard below does not apply here.)
 					out = append(out, AdoptClientProvenance{
 						Client:        name,
 						OriginalState: AdoptOriginalStatePresentMergedLower,
@@ -694,6 +693,17 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 					continue
 				}
 				return nil, fmt.Errorf("adopt provenance capture: read client %q config file: %w", name, rErr)
+			}
+			// Capture TOCTOU guard (codex bot PR #528 r3 finding C): the entry was
+			// present at the GetEntry above, but the config could have been edited
+			// (entry deleted/renamed) BEFORE this ReadFile, so configBytes may LACK the
+			// entry while we record `original_state: present` — a later de-adopt would
+			// then restore that DELETION instead of the pre-adopt entry. Re-verify the
+			// entry is STILL present in the live config after the snapshot read; if it
+			// is gone, the config changed during capture => FAIL CLOSED (do not pin a
+			// snapshot whose bytes are inconsistent with the recorded present state).
+			if recheck, reErr := adapter.GetEntry(plan.EntryName); reErr != nil || recheck == nil {
+				return nil, fmt.Errorf("adopt provenance capture: client %q config for entry %q changed during the snapshot read (entry no longer present); refusing to pin a snapshot inconsistent with the recorded present state", name, plan.EntryName)
 			}
 			ref, sha, wErr := writeAdoptClientSnapshot(plan.ManifestName, name, configBytes)
 			if wErr != nil {

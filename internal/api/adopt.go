@@ -568,13 +568,25 @@ func filterAdoptExcludedClients(selected []string, sourceClient string, mismatch
 	return out
 }
 
+// adoptDefaultDaemonName / adoptDefaultURLPath are the adopt-v1 client-binding
+// constants: every adopt-created manifest binds each client to the single
+// "default" daemon at url_path "/mcp" (see adoptClientBindings +
+// renderStdioBridgeManifestYAML's "default" daemon). Named once here so the
+// crash-consistency classifier (adopted_entries.go) can reconstruct the EXPECTED
+// hub binding from a row's IMMUTABLE port WITHOUT re-reading the mutable manifest
+// file (codex bot PR #528 r3 finding A) — single source of truth, no drift.
+const (
+	adoptDefaultDaemonName = "default"
+	adoptDefaultURLPath    = "/mcp"
+)
+
 func adoptClientBindings(clientNames []string) []map[string]any {
 	bindings := make([]map[string]any, 0, len(clientNames))
 	for _, client := range clientNames {
 		bindings = append(bindings, map[string]any{
 			"client":   client,
-			"daemon":   "default",
-			"url_path": "/mcp",
+			"daemon":   adoptDefaultDaemonName,
+			"url_path": adoptDefaultURLPath,
 		})
 	}
 	return bindings

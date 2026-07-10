@@ -50,19 +50,22 @@ func seedAgedAdoptingRow(t *testing.T, manifest string, extra ...func(*AdoptProv
 	_ = os.WriteFile(filepath.Join(d, "codex-cli.snapshot"), []byte("SECRET"), 0o600)
 }
 
-// Claim 17 (finding 2) — the classifier KEEPS a committed-but-unflipped row (a live
-// hub binding exists) and REAPS a pre-promote crash (valid manifest, NO live binding).
-// This SUPERSEDES the round-1 "manifest EXISTS => keep" rule.
+func withAdoptRowPort(p int) func(*AdoptProvenanceRecord) {
+	return func(r *AdoptProvenanceRecord) { r.Port = p }
+}
+
+// Claim 17 (finding 2) — the classifier KEEPS a committed row (a live hub binding
+// exists, derived from the ROW's immutable port) and REAPS a pre-install orphan (NO
+// live binding). SUPERSEDES the round-1 "manifest EXISTS => keep" rule; no manifest
+// file is consulted (see TestGcClassifierIsManifestIndependent).
 func TestGcClassifierLiveBindingKeepsValidNoBindingReaps(t *testing.T) {
 	keepM, reapM := "gckeepbind", "gcreapnobind"
 	keepPort, reapPort := 9401, 9402
 	// codex config carries ONLY the keepM hub-URL entry => a LIVE binding for keepM.
 	codexBody := "[mcp_servers." + keepM + "]\nurl = \"http://127.0.0.1:" + strconv.Itoa(keepPort) + "/mcp\"\n"
 	setupAdoptTestEnv(t, keepM, codexBody)
-	writeAdoptManifestForClassifierTest(t, keepM, keepPort, "codex-cli")
-	writeAdoptManifestForClassifierTest(t, reapM, reapPort, "codex-cli")
-	seedAgedAdoptingRow(t, keepM)
-	seedAgedAdoptingRow(t, reapM)
+	seedAgedAdoptingRow(t, keepM, withAdoptRowPort(keepPort))
+	seedAgedAdoptingRow(t, reapM, withAdoptRowPort(reapPort))
 
 	reaped, err := gcOrphanedAdoptingProvenance(1 * time.Hour)
 	if err != nil {
@@ -238,9 +241,16 @@ args = ["version"]
 	if _, statErr := os.Stat(d); !os.IsNotExist(statErr) {
 		t.Errorf("snapshot dir survived (abort must remove snapshots before failing on the row write): %v", statErr)
 	}
-	// The anchor row is GC-reclaimable (manifest absent => CRASH_REAP) once the store
-	// write recovers.
+	// The anchor row is GC-reclaimable once the store write recovers AND the clients
+	// are cleanly readable with NO live hub binding (the manifest-independent
+	// classifier reaps only when every adopt_client is readable and none holds the
+	// hub entry). Repair the corrupt cursor to a clean empty config — a read error
+	// would fail-safe KEEP (finding B). codex still holds only the pre-adopt STDIO
+	// entry (no hub URL), so neither client has a live hub binding.
 	writeAdoptedEntriesFn = orig
+	if err := os.WriteFile(cursorPath, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	// Age the anchor so the GC's Phase-2 age gate considers it.
 	ageAdoptRow(t, entry)
 	if reaped, gErr := gcOrphanedAdoptingProvenance(1 * time.Hour); gErr != nil {
@@ -314,5 +324,68 @@ func ageAdoptRow(t *testing.T, manifest string) {
 	}
 	if err := writeAdoptedEntries(store); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Finding B (r3) — an `adopting` row whose adopt_client is UNREADABLE at classify
+// time is KEPT (a read error cannot DISPROVE a live binding), never reaped.
+func TestGcClassifierUnreadableClientKeeps(t *testing.T) {
+	entry := "gcunreadable"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, "[mcp_servers.gcunreadable]\ncommand = \"go\"\n")
+	// Corrupt codex so GetEntry ERRORS (not a clean no-entry) at classify time.
+	if err := os.WriteFile(codexPath, []byte("this is not valid toml {{{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	seedAgedAdoptingRow(t, entry, withAdoptRowPort(9421))
+
+	reaped, err := gcOrphanedAdoptingProvenance(1 * time.Hour)
+	if err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	if reaped != 0 {
+		t.Errorf("reaped = %d, want 0 (an unreadable adopt_client => fail-safe KEEP)", reaped)
+	}
+	if _, found, _ := ReadAdoptProvenance(entry); !found {
+		t.Errorf("row with an unreadable adopt_client was reaped (finding B: read error => KEEP)")
+	}
+}
+
+// Finding C (r3) — a config edited to REMOVE the entry between GetEntry and the
+// snapshot ReadFile makes capture FAIL CLOSED: no snapshot inconsistent with the
+// recorded `present` state, no committed row.
+func TestCaptureFailsClosedOnConfigEditDuringSnapshot(t *testing.T) {
+	entry := "captoctou"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.captoctou]
+command = "go"
+args = ["version"]
+`)
+	// Simulate a concurrent editor removing the entry AFTER GetEntry (present) but
+	// BEFORE the snapshot ReadFile.
+	orig := adoptCaptureBeforeSnapshotReadHook
+	adoptCaptureBeforeSnapshotReadHook = func(client string) {
+		if client == "codex-cli" {
+			_ = os.WriteFile(codexPath, []byte("[mcp_servers]\n"), 0o600) // entry removed
+			adoptCaptureBeforeSnapshotReadHook = nil                      // fire once
+		}
+	}
+	t.Cleanup(func() { adoptCaptureBeforeSnapshotReadHook = orig })
+
+	plan := &AdoptPlan{
+		EntryName: entry, SourceClient: "codex-cli", ManifestName: entry,
+		AdoptClients: []string{"codex-cli"},
+		ManifestYAML: "name: " + entry + "\n",
+	}
+	if _, err := NewAPI().captureAdoptProvenance(plan); err == nil {
+		t.Fatal("capture succeeded despite the entry being removed during the snapshot read; want fail-closed")
+	} else if !strings.Contains(err.Error(), "changed during") {
+		t.Errorf("error should name the config-changed-during-snapshot failure: %v", err)
+	}
+	// No committed row, no snapshot (the abort cleaned the anchor + partial dir).
+	if rec, found, _ := ReadAdoptProvenance(entry); found {
+		t.Errorf("capture-TOCTOU-failed adopt left a committed row: %+v", rec)
+	}
+	d, _ := adoptSnapshotDir(entry)
+	if _, statErr := os.Stat(d); !os.IsNotExist(statErr) {
+		t.Errorf("capture-TOCTOU-failed adopt left a snapshot dir: %v", statErr)
 	}
 }
