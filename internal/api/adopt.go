@@ -219,6 +219,12 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 // AC C5). Production always uses promoteAdoptProvenanceToAdopted.
 var promoteAdoptProvenanceFn = promoteAdoptProvenanceToAdopted
 
+// gcOrphanedAdoptingProvenanceFn is the step-0a cross-manifest orphan GC, injected
+// as a package var ONLY so a test can exercise the non-fatal path (a GC failure
+// must NOT block a fresh adopt — AC D3). Production always uses
+// gcOrphanedAdoptingProvenance. Same seam idiom as promoteAdoptProvenanceFn (C5).
+var gcOrphanedAdoptingProvenanceFn = gcOrphanedAdoptingProvenance
+
 // abortProvenanceNote folds a best-effort abortAdoptProvenance result into an
 // operator-facing suffix appended to the adopt error, mirroring the existing
 // secret/manifest cleanup notes. It returns "" when abort succeeded (the common
@@ -246,6 +252,12 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	if w == nil {
 		w = io.Discard
 	}
+	// Step 0a — best-effort reap of stale CROSS-manifest `adopting` orphans (a
+	// prior adopt that hard-crashed between capture and promote/abort left an
+	// owner-only, secret-bearing snapshot with no reaper). NON-FATAL: a GC failure
+	// must never block a fresh adopt (design "Orphan lifecycle" (b)); the
+	// same-manifest UPSERT in captureAdoptProvenance is the complement.
+	_, _ = gcOrphanedAdoptingProvenanceFn(adoptOrphanGCThreshold)
 	// Durable pre-adopt provenance capture, BEFORE the first irreversible mutation
 	// (persistAdoptRoutedSecrets, below). A capture failure fails the adopt CLOSED
 	// with ZERO side effects — no vault key, no manifest, no client-config write —

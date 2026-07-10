@@ -595,6 +595,78 @@ func abortAdoptProvenance(rec *AdoptProvenanceRecord) error {
 	return nil
 }
 
+// adoptOrphanGCThreshold is the age past which an `adopting` provenance row is
+// treated as a hard-crash orphan. A live in-flight adopt has a fresh updated_at
+// and holds the provenance lock across each mutation, so only a process that died
+// between capture and promote/abort leaves an aged `adopting` row. Default per
+// design.md "Orphan lifecycle + upsert" (24h) — conservative on purpose so a
+// genuinely-slow in-flight adopt is never reaped out from under itself.
+const adoptOrphanGCThreshold = 24 * time.Hour
+
+// gcOrphanedAdoptingProvenance reaps stale CROSS-manifest `adopting` orphans: a
+// row still `adopting` whose updated_at is older than olderThan (hard-crash
+// debris), plus its owner-only, secret-bearing snapshot dir. It is the
+// cross-manifest complement to the capture UPSERT (which reaps only a
+// SAME-manifest orphan on the operator's next same-manifest adopt): a hard crash
+// between captureAdoptProvenance and Install/abort otherwise leaves a snapshot
+// under <state-dir>/adopt-provenance/<manifest>/ with no automatic reaper for any
+// other manifest.
+//
+// Bounded + safe: only `adopting` rows (never adopted/de_adopting/closed), only
+// older-than-threshold rows, all under withAdoptedEntriesLock so it cannot race a
+// concurrent capture/promote/abort. Returns the count reaped. Callers run it
+// best-effort — a GC error must not block a fresh adopt.
+//
+// Crash-safety / ordering: snapshot dirs are removed FIRST, then the row removal
+// is persisted in one write. A crash between leaves the rows `adopting` (aged), so
+// the next GC re-reaps them (removeAdoptSnapshots is idempotent on a missing dir)
+// — it never leaves an orphaned dir with no row (which no GC could reach). A
+// snapshot-removal error aborts before the store write, so nothing is half-reaped.
+func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err error) {
+	type reapedOrphan struct {
+		manifest string
+		ageSec   float64
+	}
+	var toEmit []reapedOrphan
+	lockErr := withAdoptedEntriesLock(func() error {
+		store, err := readAdoptedEntries()
+		if err != nil {
+			return fmt.Errorf("adopt provenance gc: read store: %w", err)
+		}
+		cutoff := time.Now().Add(-olderThan)
+		var kept []AdoptProvenanceRecord
+		var reapedManifests []string
+		for _, r := range store.Records {
+			if r.OperationState == AdoptOperationStateAdopting && r.UpdatedAt.Before(cutoff) {
+				reapedManifests = append(reapedManifests, r.ManifestName)
+				toEmit = append(toEmit, reapedOrphan{manifest: r.ManifestName, ageSec: time.Since(r.UpdatedAt).Seconds()})
+				continue
+			}
+			kept = append(kept, r)
+		}
+		if len(reapedManifests) == 0 {
+			return nil // nothing stale; no write, no snapshot removal
+		}
+		for _, m := range reapedManifests {
+			if rmErr := removeAdoptSnapshots(m); rmErr != nil {
+				return fmt.Errorf("adopt provenance gc: remove snapshots for %q: %w", m, rmErr)
+			}
+		}
+		store.Records = kept
+		if err := writeAdoptedEntries(store); err != nil {
+			return fmt.Errorf("adopt provenance gc: write store: %w", err)
+		}
+		return nil
+	})
+	if lockErr != nil {
+		return 0, lockErr
+	}
+	for _, o := range toEmit {
+		emitAdoptProvenanceOrphanReaped(o.manifest, o.ageSec, adoptOrphanReapTriggerGC)
+	}
+	return len(toEmit), nil
+}
+
 // ---------------------------------------------------------------------------
 // De-adopt-owned MUTATORS — DECLARED (comments) for schema/contract shape ONLY.
 //

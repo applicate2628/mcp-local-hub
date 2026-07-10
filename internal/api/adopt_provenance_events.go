@@ -26,9 +26,13 @@ import (
 const adoptProvenanceEventSource = "adopt"
 
 // adoptOrphanReapTriggerUpsert marks an orphan-reaped event fired by the capture
-// UPSERT (a same-manifest re-run replacing a pre-crash orphan). The `gc` trigger
-// value is added by the Phase D bounded GC.
-const adoptOrphanReapTriggerUpsert = "upsert"
+// UPSERT (a same-manifest re-run replacing a pre-crash orphan);
+// adoptOrphanReapTriggerGC marks one fired by the bounded cross-manifest GC
+// (gcOrphanedAdoptingProvenance).
+const (
+	adoptOrphanReapTriggerUpsert = "upsert"
+	adoptOrphanReapTriggerGC     = "gc"
+)
 
 // emitAdoptProvenanceEvent is the single owner of the provenance event envelope
 // (severity + event + already-redacted body) on the `adopt` source.
