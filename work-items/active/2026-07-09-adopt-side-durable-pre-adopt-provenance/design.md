@@ -6,9 +6,42 @@ at `../2026-07-09-deadopt-hub-to-native/design.md:69-77` and
 code here. All `file:line` anchors verified on-disk at repo HEAD `ceb01c18`.
 
 Store-shape decision (required prerequisite): filed as
-`work-items/decisions/2026-07-10-adopt-provenance-store-shape.md` (status
-`proposed`; the `$architecture-reviewer` gate on this design promotes it). This
-design assumes that decision: **a new `<state-dir>/adopted-entries.json`**.
+`work-items/decisions/2026-07-10-adopt-provenance-store-shape.md`. The
+`$architecture-reviewer` gate on this design PROMOTED it `proposed → accepted`
+(no store-shape defect found). This design assumes that decision: **a new
+`<state-dir>/adopted-entries.json`**. (The decision file's `status:` frontmatter
+is the reviewer's/archivist's to finalize — it is not edited by this revision per
+the coordinator's instruction; see the report's flag on the lag.)
+
+## Revision (2026-07-10) — arch + security review fold-in
+
+Reviews: ARCHITECTURE **PASS** (store-shape promoted `proposed → accepted`);
+SECURITY **REVISE** (0 P0/P1; core posture verified correct). This revision folds
+in the 6 converged MUST-FIX items:
+
+- **F1 (hash timing):** BOTH manifest hashes are now populated in the `adopting`
+  row AT CAPTURE (pre-`adopt.go:218`) from `plan.ManifestYAML`; `promote` only
+  flips `operation_state`. A committed-but-`adopting` row can no longer carry an
+  empty `expected_manifest_hash` (which would make de-adopt's hash-gate SKIP —
+  `manifest.go:717` — and risk deleting an externally-edited manifest).
+- **F2 == P2-2 (orphan lifecycle):** `captureAdoptProvenance` is an UPSERT keyed
+  by `manifest_name` (removes a prior orphan row + snapshot dir first); a named
+  bounded GC owns hard-crash orphans. See "Orphan lifecycle + upsert".
+- **P2-1 (fail-closed hash gate):** `snapshot_sha256` is now a FAIL-CLOSED restore
+  gate de-adopt MUST honor (refuse restore on mismatch OR missing snapshot),
+  symmetric with the shape check. See "Consumer-contract handoff".
+- **F3 (single-owner):** `expected_hub_shape` is **DROPPED**. De-adopt reuses the
+  existing `liveEntryMatchesManifestBinding` owner (`managed_entries.go:355-408`)
+  after the hash-gate — no second shape-derivation path.
+- **F4 (fail-closed classify):** a `GetEntry`/config-read error at capture is a
+  CAPTURE FAILURE (abort, zero side effects), never a guessed `absent`.
+- **F5 (honesty):** `snapshot_sha256` granularity is documented as WHOLE-FILE
+  (trips on sibling-entry edits too).
+
+SHOULD-TRACK items (P3-1 minimal-entry snapshot follow-up, P3-2 shared-secret
+scan handoff, F6 decision reason-1 softening, F7 no-stub planning note) are
+recorded in "Follow-ups & planning notes". Code `file:line` anchors remain
+verified against code state at `ceb01c18` (unchanged by this docs revision).
 
 ## Change-Surface Contract
 
@@ -105,13 +138,16 @@ Why this shape:
   client config (a second read after `BuildAdoptPlan`'s extraction) — cheap
   (small JSON/TOML files, one-shot operator action), and it buys a
   whole-file faithful snapshot the `BackupKeep` path never returns to adopt.
-- **Alt-2 — store the extracted entry (not the whole file) as a serialized
-  blob inside the JSON record.** Rejected for v1: the restore helper operates on
-  a whole config-format file, so a blob would need a new per-adapter
+- **Alt-2 — minimal-entry snapshot (store only the adopted entry, not the whole
+  config file).** Rejected for v1: the restore helper operates on a whole
+  config-format file, so a minimal-entry snapshot would need a new per-adapter
   "single-entry config writer" + a new restore-from-blob path — more new code,
   more per-adapter surface, and it forfeits verbatim reuse of the proven restore
-  extraction. Revisit only if the whole-file snapshot's sibling-entry
-  over-collection (see Security) proves unacceptable.
+  extraction. It is NOT a "revisit if unacceptable" — it is a STANDING tracked
+  follow-up (security P3-1) to reduce durable-plaintext-secret over-collection;
+  the v1 whole-file mitigations (hardened owner-only DACL; delete on close AND
+  abort; documented residual) are MANDATORY in the meantime. See "Follow-ups &
+  planning notes".
 - **Alt-3 — extend `managed-entries.json` (store-shape decision option B).**
   Rejected in `work-items/decisions/2026-07-10-adopt-provenance-store-shape.md`
   (schema-version bump on a data-loss-critical demigrate marker; lifecycle
@@ -131,8 +167,11 @@ Root file, schema version `1`, one record per adopt-created manifest:
       "source_entry_name":      "context7",          // = manifest_name in adopt v1
       "port":                   9137,
       "adopt_clients":          ["claude-code", "codex-cli"],
-      "adopt_manifest_hash":    "<sha256 of manifest.yaml bytes at adopt time>",
-      "expected_manifest_hash": "<sha256; == adopt_manifest_hash at adopt; de-adopt updates on a subset binding edit>",
+      // BOTH hashes populated AT CAPTURE (pre-adopt.go:218) from plan.ManifestYAML
+      // (verbatim-written by ManifestCreateIn, manifest.go:489; hashed over raw
+      // bytes, manifest_hash.go:17). promote flips state only, never writes these.
+      "adopt_manifest_hash":    "<sha256 of plan.ManifestYAML bytes; immutable>",
+      "expected_manifest_hash": "<sha256; == adopt_manifest_hash at capture; de-adopt updates on a subset binding edit>",
       "routed_secret_keys":     ["CONTEXT7_CONTEXT7_API_KEY"],
       "operation_state":        "adopted",           // adopting|adopted|de_adopting|closed
       "created_at":             "2026-07-10T12:00:00Z",
@@ -143,22 +182,21 @@ Root file, schema version `1`, one record per adopt-created manifest:
           "original_state":    "present",            // present|absent
           "restore_mode":      "functional-equivalent", // functional-equivalent|byte-equivalent
           "snapshot_ref":      "adopt-provenance/context7/claude-code.snapshot", // state-dir-relative; present-only
-          "snapshot_sha256":   "<sha256 of the pinned snapshot bytes>",           // integrity; present-only
-          "expected_hub_shape": {                    // what the LIVE entry should be now (post-adopt)
-            "kind":     "http",                      // http|relay-server|relay-url
-            "url":      "http://127.0.0.1:9137/mcp",
-            "relay_url": "",
-            "daemon":   "default",
-            "url_path": "/mcp"
-          }
+          // WHOLE-FILE sha256 of the pinned snapshot bytes (NOT entry-scoped — it
+          // trips on unrelated sibling-entry edits too). De-adopt MUST recompute
+          // and FAIL CLOSED on mismatch OR missing snapshot before restoring
+          // (see "Consumer-contract handoff"). present-only.
+          "snapshot_sha256":   "<whole-file sha256 of the pinned snapshot bytes>"
+          // NOTE: expected_hub_shape is DROPPED (arch F3). De-adopt recomputes the
+          // expected hub shape via the existing liveEntryMatchesManifestBinding
+          // owner (managed_entries.go:355-408) AFTER the manifest hash-gate.
         },
         {
           "client":            "codex-cli",
           "original_state":    "absent",             // entryless-fanout client
           "restore_mode":      "n/a",
           "snapshot_ref":      "",
-          "snapshot_sha256":   "",
-          "expected_hub_shape": { "kind": "http", "url": "http://127.0.0.1:9137/mcp", "daemon": "default", "url_path": "/mcp" }
+          "snapshot_sha256":   ""
         }
       ]
     }
@@ -175,12 +213,12 @@ Root file, schema version `1`, one record per adopt-created manifest:
 | source client | `source_client` | |
 | selected clients | `adopt_clients` | = `plan.AdoptClients` (`adopt.go:194`). |
 | selected port | `port` | = `plan.Port`. |
-| adopt-generated manifest hash | `adopt_manifest_hash` | Immutable. `ManifestHashContent` (SHA-256 of manifest bytes, `manifest_hash.go:17`) of the freshly-created manifest. |
-| current expected hash (hash-gated edit/delete) | `expected_manifest_hash` | Starts == `adopt_manifest_hash`; de-adopt updates it after a subset binding edit so the next de-adopt hash-gate (review F1) matches. Both feed `ManifestEditInWithHash`'s `ErrManifestHashMismatch` gate (`manifest.go:708-721`) and close the "ManifestDelete has no hash gate" gap (`manifest.go:774-801`). |
-| per-client original state present/absent | `clients[].original_state` | `present` = a same-name pre-adopt entry existed; `absent` = entryless-fanout client (`adopt.go:183` `alsoPresent` / the fanout case pinned by `adopt_test.go:1510-1539`). |
+| adopt-generated manifest hash | `adopt_manifest_hash` | Immutable. `ManifestHashContent` (SHA-256 of raw bytes, `manifest_hash.go:17`) of `plan.ManifestYAML`. **Populated at CAPTURE (pre-`adopt.go:218`)**, not at promote — `plan.ManifestYAML` is the exact byte string `ManifestCreateIn` writes verbatim (`manifest.go:489`), so the capture-time hash equals the on-disk manifest hash. |
+| current expected hash (hash-gated edit/delete) | `expected_manifest_hash` | == `adopt_manifest_hash` at capture; **both hashes are on the `adopting` row from capture** (arch F1). De-adopt updates `expected_manifest_hash` after a subset binding edit so the next de-adopt hash-gate matches. Both feed `ManifestEditInWithHash`'s `ErrManifestHashMismatch` gate (`manifest.go:708-721`) and the last-binding-delete gate de-adopt adds (`manifest.go:774-801` has none today — review F1). Populating at capture (not promote) prevents a committed-but-`adopting` row from carrying an EMPTY hash that would make the gate SKIP (`manifest.go:717`). |
+| per-client original state present/absent | `clients[].original_state` | `present` = a same-name pre-adopt entry existed; `absent` = entryless-fanout client (`adopt.go:183` `alsoPresent` / the fanout case pinned by `adopt_test.go:1510-1539`). A `GetEntry`/read error classifies as NEITHER — it is a capture failure (arch F4; see "Fail-closed capture seam"). |
 | present → pinned backup ref or serialized adapter snapshot | `clients[].snapshot_ref` (+ `snapshot_sha256`) | Pinned whole-config-file snapshot; see "Pinned artifact". Non-prunable. |
-| per-client original config-shape hash | `clients[].snapshot_sha256` | SHA-256 of the pinned pre-adopt config bytes (the shape de-adopt restores FROM); tamper-detection on restore. |
-| expected hub-managed live shape | `clients[].expected_hub_shape` | The hub entry adopt installed; de-adopt's fail-closed pre-mutation check (`deadopt/design.md:103-104`, mirrors `demigrate.go:417-429` live-shape refusal). Derived from the manifest binding (`adopt.go:482-492`) + `install.go:2679-2687`. |
+| per-client original config-shape hash | `clients[].snapshot_sha256` | WHOLE-FILE SHA-256 of the pinned pre-adopt config bytes (granularity per arch F5 — trips on sibling-entry edits too). A FAIL-CLOSED restore gate, NOT decorative: de-adopt MUST recompute it and refuse restore on mismatch OR missing snapshot (security P2-1; see "Consumer-contract handoff"). |
+| expected hub-managed live shape | *(no stored field — dropped, arch F3)* | De-adopt recomputes the expected hub shape from the manifest binding via the existing single owner `liveEntryMatchesManifestBinding` (`managed_entries.go:355-408`, the `demigrate.go:417-429` refusal path de-adopt already reuses, `deadopt/design.md:104`) AFTER the manifest hash-gate. Storing a separately-derived descriptor would create a second, driftable shape owner; the hash-gate already implies shape identity (hash-match ⇒ shape equals stored manifest; hash-mismatch ⇒ hash-gate fails first). |
 | adopt-created routed secret keys | `routed_secret_keys` | = `plan.SecretRoutedKeys`; consumer deletes keys BEFORE forgetting provenance (review F2), enabled by keeping them in the record until `closed`. |
 | operation state adopting→adopted→de_adopting→closed | `operation_state` | See lifecycle below. |
 | restore artifact must be non-prunable / pinned | snapshot dir outside the backup-prune scope | See "Pinned artifact". |
@@ -197,10 +235,49 @@ scope to adopt-side capture.
 Recoverability: a crash between `Install` success and the `adopting → adopted`
 flip leaves `adopting` + a live hub shape. That is a benign, recoverable state
 (`deadopt/design.md:77`): de-adopt may treat `adopting` + matching live shape as
-committed, and the flip is idempotent on retry. A crash BEFORE `Install`
-(pending `adopting`, no live hub shape) is abortable cleanup — the adopt failed,
-so the row + snapshots are orphan debris a re-run or a bounded reconcile
-removes.
+committed, and the flip is idempotent on retry. Because BOTH manifest hashes are
+written at capture (F1), a committed-but-`adopting` row is fully hash-gate-usable
+by de-adopt — it never carries an empty `expected_manifest_hash`. A crash BEFORE
+`Install` (pending `adopting`, no live hub shape) is abortable cleanup — the
+adopt failed, so the row + snapshots are orphan debris. Who removes that debris
+is specified concretely below (no hand-wave "a bounded reconcile removes").
+
+### Orphan lifecycle + upsert (arch F2 / security P2-2)
+
+Two concrete owners, because a hard crash (SIGKILL / power-loss) between the
+capture-write and abort/promote leaves a secret-bearing owner-only snapshot dir
+with no in-process cleanup:
+
+- **(a) Same-manifest re-run — UPSERT.** `captureAdoptProvenance` is an UPSERT
+  keyed by `manifest_name`. On entry it FIRST removes any prior row for that
+  manifest AND `RemoveAll`s its snapshot dir, THEN writes the fresh `adopting`
+  row + snapshots. This cleans a pre-crash orphan on the operator's natural
+  retry (re-running the same adopt) and guarantees at most one row per manifest
+  — no duplicate/ambiguous rows. The copied `managed_entries.go:191-202`
+  template already does in-place update; here it is made explicit AND
+  snapshot-aware (delete the stale snapshot dir, not just the row). Required
+  test: T-capture-upsert (below). NOTE: adopt-v1 requires `manifest_name` ==
+  entry name and `ManifestCreate` rejects a pre-existing disk manifest
+  (`adopt.go:139-152`), so a same-manifest re-run only reaches capture when the
+  PRIOR attempt did not commit a manifest — i.e. exactly the orphan case the
+  upsert must clean.
+- **(b) Cross-manifest hard-crash orphan — bounded GC (named owner).** An
+  `adopting` row + snapshot dir for manifest X that will never be retried (the
+  operator moved on) is owned by a bounded GC: `gcOrphanedAdoptingProvenance`
+  sweeps `<state-dir>/adopt-provenance/<m>/` whose row is `operation_state ==
+  "adopting"` with `updated_at` older than a threshold (default 24h) AND no
+  in-flight adopt for that manifest, deleting the row + snapshot dir. It runs at
+  the START of every `ExecuteAdoptWithOpts` (the next adopt on the host reaps
+  stale orphans — cheap, no new scheduler) and SHOULD also be wired at `mcphub
+  supervise` startup (planner decision; a one-line call, not a new mechanism).
+  This is the written contract that closes the residual: **until GC runs, an
+  abandoned `adopting` adoption leaves an owner-only, secret-bearing snapshot
+  under `<state-dir>/adopt-provenance/<manifest>/`** — bounded (owner-only DACL,
+  co-resident cannot read content), and operator-removable by `RemoveAll` of
+  that dir. This boundary is symmetric with the consumer's
+  missing-manifest-plus-pending-provenance ⇒ abortable-cleanup contract
+  (`deadopt/design.md:152`): a `de_adopting`/`adopting` row whose manifest is
+  gone is debris, not a de-adopt candidate.
 
 ## Pinned artifact — non-prunable, hardened, secret-bearing
 
@@ -224,11 +301,20 @@ removes.
   handle-bound DACL and parent-gate posture. This is a deliberate deviation:
   reuse the RESTORE mechanic from the backup lane, but OWN the storage under the
   hardened state-file posture.
-- **Restore (consumed by de-adopt):**
-  `RestoreEntryFromBackupForRollbackWithConfigWriter(client, <abs snapshot
-  path>, entryName, writer)` (`clients.go:353-362`). The snapshot is a valid
-  whole config-format file, so the adapter parses it and extracts `entryName`
-  exactly as it would from a timestamped backup.
+- **Restore (consumed by de-adopt), fail-closed integrity gate first:** de-adopt
+  MUST recompute the WHOLE-FILE `sha256` of the snapshot bytes and compare it to
+  the stored `snapshot_sha256`, refusing the restore FAIL-CLOSED on **mismatch OR
+  missing snapshot**, BEFORE calling
+  `RestoreEntryFromBackupForRollbackWithConfigWriter(client, <abs snapshot path>,
+  entryName, writer)` (`clients.go:353-362`). This is not decorative
+  tamper-detection: on a default (non-strict) broadened-parent host a co-resident
+  with `FILE_DELETE_CHILD` can swap ONLY the snapshot file for an attacker config
+  carrying a malicious `command`/`url` — the same fail-closed posture the
+  manifest hash-gate and shape recheck already grant. Once the gate passes, the
+  snapshot is a valid whole config-format file, so the adapter parses it and
+  extracts `entryName` exactly as it would from a timestamped backup. (The gate
+  is a de-adopt implementation obligation; this design pins it as a contract in
+  "Consumer-contract handoff".)
 
 ## Fail-closed capture seam — exact placement
 
@@ -238,12 +324,16 @@ are `persistAdoptRoutedSecrets` (`:218`) → `ManifestCreate` (`:221`) → `Inst
 
 ```
 ExecuteAdoptWithOpts(plan, w, opts):
-  0. [NEW capture — BEFORE :218]
-     rec, err := a.captureAdoptProvenance(plan)   // read each selected client
-                                                  // config, classify present/absent,
-                                                  // pin hardened snapshots for present,
-                                                  // compute hashes + expected_hub_shape,
-                                                  // write record with state="adopting".
+  0a. [NEW GC — reap stale cross-manifest orphans] gcOrphanedAdoptingProvenance(24h)
+  0b. [NEW capture — BEFORE :218]  (UPSERT keyed by manifest_name)
+     rec, err := a.captureAdoptProvenance(plan)
+        // UPSERT: first RemoveAll any prior row + snapshot dir for plan.ManifestName,
+        // then for each selected client: read config, classify present/absent
+        //   (a GetEntry/read ERROR is a CAPTURE FAILURE — never guessed "absent", F4),
+        // pin hardened whole-file snapshots for present clients,
+        // compute snapshot_sha256 (whole-file, F5),
+        // compute BOTH manifest hashes = ManifestHashContent(plan.ManifestYAML) (F1),
+        // write record with operation_state="adopting".  (no expected_hub_shape, F3)
      if err != nil {
          // FAIL CLOSED. Nothing irreversible has run yet: no vault key, no
          // manifest, no client-config write. A currently-successful adopt is
@@ -257,10 +347,13 @@ ExecuteAdoptWithOpts(plan, w, opts):
   3. a.Install(...)                                   // existing :230
         on error → abortAdoptProvenance(rec)  +  existing manifest/secret cleanup (:237-248)
   4. [NEW promote — AFTER :230 success, BEFORE :250]
-     if err := promoteAdoptProvenanceToAdopted(rec.ManifestName, adoptManifestHash); err != nil {
-         // Install COMMITTED. Do NOT roll back a successful adopt for a flip-write
-         // failure. Emit a loud warn event; leave state="adopting" (recoverable).
-         // Adopt still returns success.
+     if err := promoteAdoptProvenanceToAdopted(rec.ManifestName); err != nil {
+         // promote flips operation_state adopting→adopted ONLY; it writes no hashes
+         // (both already on the row from capture, F1). It MAY re-verify the row's
+         // adopt_manifest_hash against the now-on-disk manifest as a consistency
+         // check. Install COMMITTED — do NOT roll back a successful adopt for a
+         // flip-write failure. Emit a loud warn; leave state="adopting"
+         // (recoverable, fully hash-gate-usable). Adopt still returns success.
          emitAdoptProvenanceCommitFailed(rec.ManifestName, err)
      }
   5. emitAdoptExecutedEvent(plan)                     // existing :250
@@ -286,8 +379,18 @@ Key placement rules:
 Capture reads client configs via `clients.AllClients()[clientName]`
 (`install.go:2630` uses the same map) → `client.ConfigPath()`
 (`clients.go:136-138`) → read bytes → classify: a `present` client has a
-same-name entry (`client.GetEntry(entryName) != nil`, `clients.go:208-209`); an
-`absent` client is a selected fanout target with no same-name entry.
+same-name entry (`client.GetEntry(entryName)` returns non-nil, `clients.go:208-209`);
+an `absent` client is a selected fanout target whose config parses cleanly and
+has NO same-name entry.
+
+**Fail-closed classification (arch F4).** `GetEntry` can return `(nil, err)` on a
+corrupted lower layer (the same multi-layer read hazard `install.go:2649-2660`
+already fails loud on). A `GetEntry` error — or any config-read/parse error — at
+capture is a CAPTURE FAILURE: abort with zero side effects (the pre-`:218`
+fail-closed return), NEVER a guessed `absent`. Guessing `absent` on an unreadable
+config would skip a needed snapshot and later restore the entry to absence —
+silent data loss. Only a config that parses cleanly AND lacks the entry is
+`absent`.
 
 ## Handling the three research-flagged known limits
 
@@ -324,21 +427,15 @@ type AdoptOperationState string // "adopting" | "adopted" | "de_adopting" | "clo
 type AdoptOriginalState  string // "present" | "absent"
 type AdoptRestoreMode    string // "functional-equivalent" | "byte-equivalent" | "n/a"
 
-type AdoptExpectedHubShape struct {
-    Kind     string `json:"kind"`               // "http" | "relay-server" | "relay-url"
-    URL      string `json:"url,omitempty"`
-    RelayURL string `json:"relay_url,omitempty"`
-    Daemon   string `json:"daemon,omitempty"`
-    URLPath  string `json:"url_path,omitempty"`
-}
+// (AdoptExpectedHubShape DROPPED per arch F3 — de-adopt recomputes the expected
+//  hub shape via the existing liveEntryMatchesManifestBinding owner.)
 
 type AdoptClientProvenance struct {
-    Client           string                `json:"client"`
-    OriginalState    AdoptOriginalState    `json:"original_state"`
-    RestoreMode      AdoptRestoreMode      `json:"restore_mode"`
-    SnapshotRef      string                `json:"snapshot_ref"`      // state-dir-relative; present-only
-    SnapshotSHA256   string                `json:"snapshot_sha256"`   // integrity; present-only
-    ExpectedHubShape AdoptExpectedHubShape `json:"expected_hub_shape"`
+    Client         string             `json:"client"`
+    OriginalState  AdoptOriginalState `json:"original_state"`
+    RestoreMode    AdoptRestoreMode   `json:"restore_mode"`
+    SnapshotRef    string             `json:"snapshot_ref"`    // state-dir-relative; present-only
+    SnapshotSHA256 string             `json:"snapshot_sha256"` // WHOLE-FILE hash; fail-closed restore gate; present-only
 }
 
 type AdoptProvenanceRecord struct {
@@ -368,20 +465,35 @@ func writeAdoptedEntries(m *AdoptedEntries) error           // writeHubMcpStateF
 
 // ---- snapshot storage (hardened, non-prunable) ----
 func adoptSnapshotDir(manifestName string) (string, error)                 // <state-dir>/adopt-provenance/<manifest>
-func writeAdoptClientSnapshot(manifestName, client string, configBytes []byte) (ref, sha256Hex string, err error) // WriteStateFileBytesAtomic
+func writeAdoptClientSnapshot(manifestName, client string, configBytes []byte) (ref, sha256Hex string, err error) // WriteStateFileBytesAtomic; whole-file sha256
 func removeAdoptSnapshots(manifestName string) error                       // RemoveAll the manifest snapshot dir
 
-// ---- adopt-side lifecycle (THIS item) ----
-func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, error) // -> writes state="adopting"
-func promoteAdoptProvenanceToAdopted(manifestName, adoptManifestHash string) error    // adopting -> adopted (idempotent)
+// ---- adopt-side lifecycle (THIS item — FULL bodies, not stubs) ----
+func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, error) // UPSERT by manifest_name; writes state="adopting" with BOTH hashes
+func promoteAdoptProvenanceToAdopted(manifestName string) error                       // flip adopting->adopted ONLY (no hash write); idempotent
 func abortAdoptProvenance(rec *AdoptProvenanceRecord) error                            // delete row + snapshots (idempotent)
+func gcOrphanedAdoptingProvenance(olderThan time.Duration) error                      // reap stale cross-manifest adopting orphans (F2/P2-2)
 
-// ---- read/mutation surface CONSUMED by de-adopt (declared here, IMPLEMENTED by the de-adopt item) ----
+// ---- read surface CONSUMED by de-adopt — IN SCOPE for THIS item (real body) ----
 func ReadAdoptProvenance(manifestName string) (*AdoptProvenanceRecord, bool, error)
-func MarkAdoptProvenanceDeAdopting(manifestName string) error                           // adopted -> de_adopting
-func UpdateAdoptExpectedManifestHash(manifestName, newHash string) error                // subset binding edit
-func CloseAdoptProvenance(manifestName string) error                                    // de_adopting -> closed + delete snapshots
+
+// ---- de-adopt-owned MUTATORS — declared for schema/contract shape ONLY.
+//      THIS item must NOT land empty/stub bodies for these (anti-layering, arch F7);
+//      the de-adopt item implements them against this schema. Listed here so the
+//      planner scopes them to de-adopt, not to this item.
+//   func MarkAdoptProvenanceDeAdopting(manifestName string) error        // adopted -> de_adopting
+//   func UpdateAdoptExpectedManifestHash(manifestName, newHash string)   // subset binding edit
+//   func CloseAdoptProvenance(manifestName string) error                 // de_adopting -> closed + delete snapshots
 ```
+
+**Scope boundary (arch F7).** This item implements the storage layer, the
+snapshot helpers, the adopt-side lifecycle (`captureAdoptProvenance`,
+`promoteAdoptProvenanceToAdopted`, `abortAdoptProvenance`,
+`gcOrphanedAdoptingProvenance`), and the read accessor `ReadAdoptProvenance`. The
+three de-adopt-owned mutators are DECLARED (commented above) so the schema
+supports them, but MUST NOT ship as empty/stub bodies in this item — the de-adopt
+work-item authors them. Landing stubs would be anti-layering (a half-owned state
+machine split across two items with no live second consumer).
 
 ## Dependency direction + stable contracts
 
@@ -415,25 +527,69 @@ func CloseAdoptProvenance(manifestName string) error                            
   lane's plain 0600 copy. On `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` the strict
   parent-gate applies to the snapshot exactly as to other state files — do NOT
   weaken it.
-- **Secret material lifecycle bound to the row.** `closed` / abort MUST
+- **Secret material lifecycle bound to the row.** BOTH `abort`
+  (`abortAdoptProvenance`) AND `closed` (`CloseAdoptProvenance`, de-adopt) MUST
   `RemoveAll` the snapshot dir so pre-adopt secret literals do not linger past
-  the operation. The record's `routed_secret_keys` are NAMES only; secret VALUES
-  live only in the vault and (transiently) in the owner-only snapshot.
+  the operation, and the capture UPSERT `RemoveAll`s a stale same-manifest
+  snapshot before re-pinning. Hard-crash orphans are reaped by
+  `gcOrphanedAdoptingProvenance` (bounded residual — see "Orphan lifecycle +
+  upsert"). The record's `routed_secret_keys` are NAMES only; secret VALUES live
+  only in the vault and (transiently) in the owner-only snapshot.
 - **Event bodies carry no secret values or config contents.** Provenance events
   log manifest names, client names, present/absent counts, snapshot PATHS, and
   key NAMES only — matching the existing `adopt-executed` body which logs
   `secret_routed_keys` names, never values (`adopt.go:537-551`). This is a
   redaction requirement, not an option.
-- **Residual (flagged for $security-reviewer):** the whole-file snapshot
-  over-collects — it copies sibling entries' secrets too, not just the adopted
-  entry's. Exposure is bounded (owner-only DACL; deleted on close; the material
-  already exists at the same trust level in the live config), but a v2 tightening
-  (minimal-entry snapshot via a per-adapter single-entry serializer, Alt-2) would
-  reduce it. Recorded as an adjacent finding.
+- **Snapshot integrity is a FAIL-CLOSED restore gate (security P2-1), not
+  decorative.** `snapshot_sha256` is a whole-file hash the CONSUMER (de-adopt)
+  MUST recompute and refuse restore on mismatch OR missing snapshot BEFORE
+  restoring — because on a default (non-strict) broadened-parent host a
+  co-resident with `FILE_DELETE_CHILD` can swap ONLY the snapshot file for an
+  attacker config (malicious `command`/`url`). Pinned as a contract in
+  "Consumer-contract handoff".
+- **Residual — whole-file over-collection (security P3-1, STANDING follow-up).**
+  The whole-file snapshot copies sibling entries' secrets too, not just the
+  adopted entry's. The three mitigations are MANDATORY, not best-effort:
+  (1) hardened owner-only DACL via `WriteStateFileBytesAtomic`; (2) delete on
+  close AND abort AND upsert-replace; (3) documented residual. The reduction to a
+  minimal-entry snapshot (Alt-2) is tracked as a real follow-up work-item (see
+  "Follow-ups & planning notes"), not a conditional "revisit".
 - **Co-resident parent-swap residual:** identical to every other state file — a
   `FILE_DELETE_CHILD` co-resident can delete/replace the directory entry but
   cannot read the owner-only content; `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` is the
   documented mitigation. No new posture introduced.
+
+## Consumer-contract handoff (statements de-adopt MUST/SHOULD honor)
+
+These are contract obligations THIS design imposes on the de-adopt consumer; they
+are pinned here so the boundary is written, not implicit. De-adopt implements
+them.
+
+- **MUST — fail-closed snapshot integrity gate (security P2-1).** Before
+  restoring, de-adopt MUST recompute the whole-file `sha256` of the pinned
+  snapshot and compare to the row's `snapshot_sha256`, refusing the restore
+  FAIL-CLOSED on **mismatch OR missing snapshot** — symmetric with the manifest
+  hash-gate and the shape recheck. (Enabled by the whole-file hash this item
+  writes.)
+- **MUST — recompute expected hub shape via the single owner (arch F3).** De-adopt
+  MUST derive the expected live hub shape from the manifest binding via
+  `liveEntryMatchesManifestBinding` (`managed_entries.go:355-408`) AFTER the
+  manifest hash-gate, NOT from a stored descriptor (none is stored).
+- **MUST — hash-gate the last-binding manifest delete (review F1).**
+  `ManifestDeleteIn` has no expected-hash gate today (`manifest.go:788-801`);
+  de-adopt MUST add one using `expected_manifest_hash`, matching
+  `ManifestEditInWithHash` (`manifest.go:717-720`). This design supplies both
+  hashes; the delete-path gate is de-adopt's code (review prerequisite 3,
+  `deadopt/review.md:88`).
+- **MUST — delete routed keys before closing provenance (review F2).** Keys stay
+  in the row until cleanup completes; de-adopt deletes `routed_secret_keys` from
+  the vault BEFORE `CloseAdoptProvenance`, or keeps a `cleanup_pending` row —
+  enabled by this schema retaining the keys through `de_adopting`.
+- **SHOULD — shared-routed-key scan before deletion (security P3-2).** Before
+  deleting a routed key, de-adopt SHOULD scan other live manifests for a
+  `secret:<KEY>` reference to the same key (a hand-authored manifest could share
+  it) and skip deletion if referenced, OR accept + document the risk of removing
+  a shared key. Flagged so de-adopt does not blind-delete.
 
 ## Observability
 
@@ -451,6 +607,9 @@ emit pattern per `adopt.go:527-553`; `source: "adopt"`):
   cleanup. Body: `manifest`, `reason`.
 - `adopt-provenance-commit-failed` (warn) — Install committed but the flip write
   failed; row left `adopting` (recoverable). Body: `manifest`.
+- `adopt-provenance-orphan-reaped` (warn) — the GC or the capture upsert removed a
+  stale `adopting` row + snapshot dir. Body: `manifest`, `age_seconds`, `trigger`
+  (`gc` | `upsert`). Makes the secret-bearing-orphan cleanup operator-visible.
 
 The existing GUI `operator-action` audit (`gui/adopt.go:106-116`, sanitized
 narration on failure `:112-116`) is unchanged — capture is backend-internal and
@@ -490,8 +649,30 @@ API/unit (new-behavior falsification):
 7. **T-snapshot-hardened.** Assert the pinned snapshot file has owner-only
    DACL/mode (reuse the state-file hardening assertions).
 8. **T-promote-recoverable.** Inject a flip-write failure after `Install` success.
-   Assert the row stays `adopting`, `ExecuteAdopt` still returns success, and a
-   subsequent read sees a recoverable `adopting` + live-hub-shape state.
+   Assert the row stays `adopting` and — crucially — its `adopt_manifest_hash` +
+   `expected_manifest_hash` are BOTH populated (F1), so de-adopt's hash-gate is
+   usable; `ExecuteAdopt` still returns success.
+9. **T-capture-upsert (arch F2).** Pre-seed an orphan `adopting` row + snapshot
+   dir for the manifest (simulating a pre-crash orphan), run `ExecuteAdopt`.
+   Assert exactly ONE row for the manifest afterward and the stale orphan
+   snapshot dir was replaced (not duplicated / not two rows).
+10. **T-capture-read-error-fail-closed (arch F4).** Make one selected client's
+    config unreadable/corrupt so `GetEntry` returns `(nil, err)`. Assert
+    `ExecuteAdopt` returns a capture error with ZERO side effects (no vault key,
+    no manifest, no client write) and the client is NEVER classified `absent`.
+11. **T-hash-at-capture (arch F1).** Assert the `adopting` row on disk carries
+    both manifest hashes BEFORE any promote, and that `adopt_manifest_hash` ==
+    `ManifestHashContent(plan.ManifestYAML)` == the hash of the manifest
+    `ManifestCreate` later writes.
+12. **T-gc-orphan (arch F2).** Seed an `adopting` row + snapshot dir with
+    `updated_at` older than the threshold and no in-flight adopt; run
+    `gcOrphanedAdoptingProvenance`; assert the row + snapshot dir are gone and a
+    fresh (`updated_at` recent) `adopting` orphan is PRESERVED.
+
+Consumer-side (de-adopt item, listed so they are not lost): a tamper-gate test —
+swap the pinned snapshot bytes after adopt, assert de-adopt refuses restore
+fail-closed on `snapshot_sha256` mismatch (security P2-1) — belongs to de-adopt
+but is enabled by the whole-file hash this item writes.
 
 (De-adopt's round-trip, hash-race, secret-retry, `/g/`, and lock-order tests
 `deadopt/review.md:105-113` belong to the de-adopt item; this item delivers the
@@ -540,6 +721,30 @@ are the two that MUST live here to prove the artifact is durable and pinned.)
     committed adopt — it downgrades to a recoverable `adopting`; single-owner:
     `promoteAdoptProvenanceToAdopted` (non-fatal on error); enforcement-probe:
     T-promote-recoverable }`
+11. `{ guarantee: BOTH manifest hashes are populated on the `adopting` row at
+    capture (pre-`:218`), so a committed-but-`adopting` row is never empty-hashed
+    and de-adopt's hash-gate never silently SKIPs (`manifest.go:717`) (arch F1);
+    single-owner: `captureAdoptProvenance` computing `ManifestHashContent(plan.ManifestYAML)`;
+    enforcement-probe: T-hash-at-capture }`
+12. `{ guarantee: At most one provenance row + snapshot dir exists per manifest —
+    a re-run upserts and reaps the prior orphan; a stale cross-manifest orphan is
+    GC'd (arch F2 / P2-2); single-owner: `captureAdoptProvenance` upsert +
+    `gcOrphanedAdoptingProvenance`; enforcement-probe: T-capture-upsert,
+    T-gc-orphan }`
+13. `{ guarantee: There is exactly ONE expected-hub-shape derivation owner —
+    `liveEntryMatchesManifestBinding` — no stored/second shape descriptor to drift
+    (arch F3); single-owner: `managed_entries.go:355-408` (reused by de-adopt);
+    enforcement-probe: `grep` shows no `expected_hub_shape` field in the schema
+    or any second shape-derivation path }`
+14. `{ guarantee: A `GetEntry`/config-read error at capture aborts fail-closed
+    (zero side effects) and never classifies a client `absent` (arch F4);
+    single-owner: `captureAdoptProvenance` classification; enforcement-probe:
+    T-capture-read-error-fail-closed }`
+15. `{ guarantee: `snapshot_sha256` is a whole-file hash sufficient for de-adopt's
+    fail-closed restore gate (refuse on mismatch OR missing) (security P2-1/F5);
+    single-owner: `writeAdoptClientSnapshot` (whole-file hash) + the de-adopt
+    restore gate (Consumer-contract handoff); enforcement-probe: the de-adopt
+    tamper-gate test (listed under Test strategy) }`
 
 ## Adjacent findings (filed, NOT in this item's scope)
 
@@ -567,14 +772,12 @@ are the two that MUST live here to prove the artifact is durable and pinned.)
    stays consistent — but flags it as OPTIONAL for de-adopt correctness. **Your
    call:** include the additive tuple-recording in this item's scope, or defer it.
    It does not block de-adopt either way.
-2. **Consumer's `expected_hub_shape` is partly derivable, so storing it is
-   belt-and-suspenders.** De-adopt could recompute the expected hub shape from
-   the manifest binding at plan time (as `liveEntryMatchesManifestBinding`
-   /`demigrate.go:417-429` already do) instead of reading a stored descriptor.
-   This design stores it to pin the shape against manifest edits between adopt and
-   de-adopt; if you prefer a leaner record, `expected_hub_shape` could be dropped
-   and recomputed — a minor schema simplification. Not a blocker; noted so the
-   redundancy is a conscious choice.
+2. **[RESOLVED in this revision — arch F3]** `expected_hub_shape` is DROPPED.
+   De-adopt recomputes the expected hub shape from the manifest binding via the
+   existing single owner `liveEntryMatchesManifestBinding` (`managed_entries.go:355-408`)
+   after the hash-gate, so there is no stored second shape-derivation path to
+   drift. (Was previously flagged as a conscious redundancy; the reviewer's
+   single-owner call settled it in favor of dropping.)
 3. **De-adopt's manifest hash-gate (review F1) needs BOTH hashes; confirm the
    `ManifestDelete` gap is de-adopt's to close.** `ManifestEditInWithHash` has an
    expected-hash gate (`manifest.go:717-720`) but `ManifestDeleteIn` does NOT
@@ -584,12 +787,40 @@ are the two that MUST live here to prove the artifact is durable and pinned.)
    prerequisite 3, `deadopt/review.md:88`), not adopt-side capture. Flagged so it
    is not lost between the two items.
 
+## Follow-ups & planning notes
+
+- **P3-1 (STANDING follow-up work-item, security).** Minimal-entry snapshot
+  (Alt-2) to end whole-config over-collection of sibling secrets. To admit as its
+  own work-item (not this item's scope); the v1 mandatory mitigations hold until
+  then.
+- **P3-2 (consumer handoff, security).** De-adopt SHOULD scan for other live
+  `secret:<KEY>` references before deleting a routed key — captured in
+  "Consumer-contract handoff"; carried to the de-adopt item.
+- **F6 (decision prose, optional).** The accepted store-shape decision's rationale
+  rests on reasons 2 (split-owner/lifecycle hazard) + 3 (manufactured
+  adopt↔demigrate coupling); reason 1 (forced schema bump) is partially
+  overstated — additive JSON fields can be back-compat without a version bump. The
+  conclusion stands on 2+3. Softening reason 1 in the decision file is OPTIONAL
+  and deferred (the decision is accepted; this design does not edit it).
+- **F7 (planner).** This item ships FULL bodies for the adopt-side lifecycle +
+  `ReadAdoptProvenance`; it MUST NOT land empty/stub bodies for the three
+  de-adopt-owned mutators (anti-layering). See "Scope boundary" under the API
+  sketch.
+- **`managed-entries.json` tuple-recording** (Findings-for-user #1) remains an
+  open scope choice for the orchestrator: additive `RecordManagedEntry` per
+  adopted client, or defer. Does not block de-adopt either way.
+
 ## Gate decision
 
-**PASS.** The design is traceable to accepted research facts and the pinned
-consumer contract; the store-shape decision is filed; alternatives, seams,
-dependency direction, blast radius, failure modes, security, observability, and
-test strategy are explicit; the three known limits are handled without promising
-byte-equivalence; no implementation code is included. Next stage: architecture +
-security review (which promotes the store-shape decision `proposed → accepted`),
-then plan.
+**PASS (revised 2026-07-10 — arch+security review fold-in).** All 6 MUST-FIX
+items (F1 hash-at-capture, F2/P2-2 upsert+GC orphan lifecycle, P2-1 fail-closed
+snapshot gate, F3 drop `expected_hub_shape`, F4 fail-closed classify, F5
+whole-file hash granularity) are reconciled across the schema, pseudocode,
+field-table, API sketch, claims, and tests — the pseudocode↔field-table hash
+timing is now consistent (both hashes at capture; promote flips state only). The
+store-shape decision is ACCEPTED. Alternatives, seams, dependency direction,
+blast radius, failure modes, security (incl. the orphan-secret residual with a
+named GC owner), observability, and test strategy are explicit; the three known
+limits are handled without promising byte-equivalence; no implementation code is
+included. Next stage: $planner breaks this into delivery phases (respecting the
+F7 scope boundary). SHOULD-TRACK items are in "Follow-ups & planning notes".
