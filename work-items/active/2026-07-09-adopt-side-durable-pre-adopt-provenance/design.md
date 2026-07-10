@@ -263,13 +263,20 @@ with no in-process cleanup:
   upsert must clean.
 - **(b) Cross-manifest hard-crash orphan — bounded GC (named owner).** An
   `adopting` row + snapshot dir for manifest X that will never be retried (the
-  operator moved on) is owned by a bounded GC: `gcOrphanedAdoptingProvenance`
-  sweeps `<state-dir>/adopt-provenance/<m>/` whose row is `operation_state ==
-  "adopting"` with `updated_at` older than a threshold (default 24h) AND no
-  in-flight adopt for that manifest, deleting the row + snapshot dir. It runs at
-  the START of every `ExecuteAdoptWithOpts` (the next adopt on the host reaps
-  stale orphans — cheap, no new scheduler) and SHOULD also be wired at `mcphub
-  supervise` startup (planner decision; a one-line call, not a new mechanism).
+  operator moved on) is owned by a bounded GC: `gcOrphanedAdoptingProvenance`.
+  The GC MUST distinguish true pre-install orphans from committed-but-unpromoted
+  adopts: it may delete an `adopting` row + snapshot dir only when ALL of these
+  are true: `updated_at` is older than a threshold (default 24h), there is no
+  in-flight adopt for that manifest, the manifest is absent from the manifest
+  store, and the live hub-managed client entries do NOT match the manifest
+  bindings that adopt would have installed. If the manifest exists and
+  `liveEntryMatchesManifestBinding` confirms the live hub shape, the row is a
+  committed-but-unpromoted adoption; GC MUST preserve it and SHOULD attempt the
+  idempotent `adopting → adopted` promote (or at minimum leave it for de-adopt).
+  It runs at the START of every `ExecuteAdoptWithOpts` (the next adopt on the
+  host reaps stale orphans — cheap, no new scheduler) and SHOULD also be wired at
+  `mcphub supervise` startup (planner decision; a one-line call, not a new
+  mechanism).
   This is the written contract that closes the residual: **until GC runs, an
   abandoned `adopting` adoption leaves an owner-only, secret-bearing snapshot
   under `<state-dir>/adopt-provenance/<manifest>/`** — bounded (owner-only DACL,
@@ -374,7 +381,8 @@ Key placement rules:
   original error.
 - **Promote is the LAST durable write and never rolls back a committed adopt.**
   A flip-write failure downgrades to a recoverable `adopting` state, not an
-  adopt failure.
+  adopt failure. Orphan GC MUST NOT reap this state when the manifest/live hub
+  shape proves the adopt committed; it preserves or idempotently promotes it.
 
 Capture reads client configs via `clients.AllClients()[clientName]`
 (`install.go:2630` uses the same map) → `client.ConfigPath()`
@@ -665,9 +673,16 @@ API/unit (new-behavior falsification):
     `ManifestHashContent(plan.ManifestYAML)` == the hash of the manifest
     `ManifestCreate` later writes.
 12. **T-gc-orphan (arch F2).** Seed an `adopting` row + snapshot dir with
-    `updated_at` older than the threshold and no in-flight adopt; run
-    `gcOrphanedAdoptingProvenance`; assert the row + snapshot dir are gone and a
-    fresh (`updated_at` recent) `adopting` orphan is PRESERVED.
+    `updated_at` older than the threshold, no in-flight adopt, no manifest, and
+    no matching live hub-managed entries; run `gcOrphanedAdoptingProvenance`;
+    assert the row + snapshot dir are gone and a fresh (`updated_at` recent)
+    `adopting` orphan is PRESERVED.
+13. **T-gc-preserves-committed-adopting.** Seed an old `adopting` row whose
+    manifest exists and whose live hub-managed client entries match the manifest
+    bindings (simulating a crash or write failure after `Install` success but
+    before promote). Assert `gcOrphanedAdoptingProvenance` does NOT delete the
+    row or snapshot dir, and either promotes it to `adopted` or leaves the fully
+    populated `adopting` row available for de-adopt.
 
 Consumer-side (de-adopt item, listed so they are not lost): a tamper-gate test —
 swap the pinned snapshot bytes after adopt, assert de-adopt refuses restore
