@@ -12,8 +12,7 @@
 | Item | State | Remaining |
 |---|---|---|
 | [2026-07-05-adopt-npx-orphans](active/2026-07-05-adopt-npx-orphans/status.md) | PARTIALLY DELIVERED | adopt CLI/API + GUI + **reaper (all 3 kill-authority hardenings)** SHIPPED + DEPLOYED (#513/#520/#521/#522); anti-drift "unmanaged detected" GUI signal **LANDED** (#523, master `f7eaa1c8`). Remaining = phase-2 de-adopt (now the separate `2026-07-09-deadopt-hub-to-native` item, blocked) + D P2a/P2b GUI. |
-| [2026-07-09-test-leftover-reaper](active/2026-07-09-test-leftover-reaper/status.md) | DESIGN REVISED (r3) / BLOCKED on clean security re-gate | Destructive operator-invoked lane. Design passed CLOSURE re-gate (9 prior findings + PEB/reuse/path-canon audits all closed) but the re-gate found a fresh P1: a standalone `mcphub supervise` is byte-identical to a live adopted supervisor (dead parent by design), so `parentDeathGate` is vacuous for it. Revision r3 makes supervise **tree-reachable only** (never a standalone candidate). Implementation blocked until a security re-gate is clean. See `security-review.md`. |
-| [2026-07-09-deadopt-hub-to-native](active/2026-07-09-deadopt-hub-to-native/status.md) | REVISE / BLOCKED | Blocked on adopt-side durable pre-adopt provenance; implementation must not start until the design is revised and the prerequisite is delivered. |
+| [2026-07-09-deadopt-hub-to-native](active/2026-07-09-deadopt-hub-to-native/status.md) | REVISE / BLOCKED | Blocked on adopt-side durable pre-adopt provenance (`active/2026-07-09-adopt-side-durable-pre-adopt-provenance/`, research done, untracked); implementation must not start until the design is revised and the prerequisite is delivered. |
 
 ## Reaper kill-authority hardening — COMPLETE (2026-07-08, all bot-PASS + deployed)
 
@@ -54,6 +53,7 @@ reconciliation records, not open tasks.
 
 | Item | Closed | Outcome |
 |---|---|---|
+| [2026-07-09-test-leftover-reaper](archive/2026-07/2026-07-09-test-leftover-reaper/closure.md) | 2026-07-10 | DELIVERED — v1 preview/diagnostics-only `mcphub cleanup test-leftovers`; #527 squash `436e4f58`, bot PASS (2 rounds). Non-destructive: enumerate + classify + hypothetical-refusal labels, no process termination. Destructive apply deferred to v2 (blocked on round-3 P2/P3 + value case); standalone-`supervise` stays manual-reap-only. |
 | [2026-07-09-lsp-relay-per-client-disable-gui](archive/2026-07/2026-07-09-lsp-relay-per-client-disable-gui/closure.md) | 2026-07-09 | DELIVERED — per-client LSP-router enable/disable in the Servers matrix; #524 squash `22c91cab`, deployed + live-verified. |
 | [2026-07-09-intent-collapse-stop-resurrection](archive/2026-07/2026-07-09-intent-collapse-stop-resurrection/closure.md) | 2026-07-09 | DELIVERED — absent-only legacy stop watermarks; #525 squash `5d8ab063`, deployed `7898c148`. |
 | [2026-07-05-unify-port-resolution-owner](archive/2026-07/2026-07-05-unify-port-resolution-owner/closure.md) | 2026-07-05 | DELIVERED — daemon port+identity single-owned; #505, deployed. |

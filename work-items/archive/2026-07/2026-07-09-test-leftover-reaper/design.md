@@ -1,7 +1,8 @@
 # Test-Leftover Reaper — Preview/Diagnostics-Only v1 Design
 
 Date: 2026-07-10
-Status: accepted for v1 implementation. Version 1 is preview/diagnostics only. Destructive apply is deferred to v2.
+Status: accepted and DELIVERED for v1. Version 1 is preview/diagnostics only. Destructive apply is deferred to v2.
+Delivered: v1 shipped in PR #527, merged to master as `436e4f58` (bot PASS, 2 rounds). The implementation is `internal/api/test_leftover_preview.go` (evidence/classification) with the `internal/api/test_leftover_preview_test.go` vocabulary tests; the enum/vocabulary tables below have been reconciled to that merged code const set.
 
 This is the authoritative design for the test-leftover reaper work item. The accepted durable decision is `work-items/decisions/2026-07-10-test-leftover-reaper-preview-only-v1.md`. The three adversarial re-gates are recorded in `security-review.md`: the original gate found nine issues including three P1 live-kill paths, round 2 found one new P1, and round 3 found zero P1 but confirmed one P2 ordering flaw and one P3 ancestry flaw. The destructive predicate converged only by refusing standalone `supervise` processes, which are the main observed leftover population.
 
@@ -54,23 +55,39 @@ Decision back-references:
 5. Remote process memory is not required for v1. The accepted implementation scope reports `not-collected-v1` for the environment-override field. If an already-available, cheap, bounded, same-user, read-only evidence source is separately accepted during implementation, it may populate this diagnostic field only; failure remains `unavailable` and cannot change candidate inclusion or authorize action. Implementing the deferred PEB reader is not part of v1.
 6. The renderer emits one record per candidate and a top-level snapshot verdict. Rendering is the terminal step.
 
-The parser's `snapErr` remains the single snapshot-completeness owner. A complete snapshot yields `snapshot-complete`. If `parseProcessRows` returns complete rows plus `snapErr`, v1 may render those rows but must label the run `snapshot-degraded` and must not claim the list is exhaustive. If `runProcessSnapshot` itself returns no usable census, the command returns a visible diagnostic error and no completeness claim.
+The parser's `snapErr` remains the single snapshot-completeness owner. The top-level `SnapshotVerdict` is exactly one of `snapshot-complete`, `snapshot-degraded`, or `snapshot-unsupported-platform`. A complete snapshot yields `snapshot-complete`. If `parseProcessRows` returns complete rows plus `snapErr`, v1 may render those rows but must label the run `snapshot-degraded` and must not claim the list is exhaustive. If `runProcessSnapshot` itself returns no usable census, the command returns a visible diagnostic error and no completeness claim. On a non-Windows host with no injected census, the default `wmic`/`powershell` snapshotter is unavailable; v1 returns an empty, non-error no-op preview labeled `snapshot-unsupported-platform` (mirroring `CleanupOrphans` and `ListMatchingProcesses`), never a false "no leftovers" claim.
 
 ## V1 Per-Candidate Evidence Contract
 
 | Field | V1 output contract |
 |---|---|
-| PID | Census process identifier. Missing or invalid input is `identity-unavailable`; the row is not silently dropped if it can still be identified for display. |
+| PID | Census process identifier, carried with an `IdentityVerdict` of `identity-available` or, when PID / `StartedAt` / executable path is missing or invalid, `identity-unavailable`; the row is not silently dropped if it can still be identified for display. |
 | StartedAt | RFC3339Nano creation time derived through the same `orphanStartedAt` representation used by existing cleanup identity binding (`internal/api/cleanup.go:1717-1725`). Missing data is shown as unavailable. |
 | Executable path | Full or redacted according to the established local-output policy. The raw census spelling and strict-canonicalization verdict remain distinguishable; machine-local paths are not copied into tracked docs, tokens, or portable artifacts. |
-| Argv shape | A normalized branch-relevant shape such as `gui`, `gui-e2e`, `reliability-daemon`, `supervise`, or `unrecognized`. Full argv is shown only where the local output policy permits it. |
-| Branch / pattern class | One of `reliability-temp`, `gui-e2e`, `go-build-cache`, `operator-temp-root`, `standalone-supervise`, `ambiguous-multi-match`, or `unclassified`. This is a display classification, never an allow verdict. |
-| Age | Computed age plus `younger-than-apply-floor` / `at-or-above-apply-floor` diagnostic relative to the deferred 600-second floor. No v1 filtering or action depends on it. |
+| Argv shape | A normalized branch-relevant shape: exactly one of `gui`, `gui-e2e`, `reliability-daemon`, `supervise`, or `unrecognized`. Full argv is shown only where the local output policy permits it. |
+| Branch / pattern class | One of `reliability-temp`, `gui-e2e`, `go-build-cache`, `operator-temp-root`, `standalone-supervise`, `live-supervise`, `ambiguous-multi-match`, or `unclassified`. A `supervise` argv with a live parent classifies `live-supervise`; with a dead or unproven parent it classifies `standalone-supervise`. This is a display classification, never an allow verdict. |
+| Age | Computed age plus two diagnostics: `younger-than-requested-min-age` / `at-or-above-requested-min-age` relative to `--min-age-sec`, and `younger-than-apply-floor` / `at-or-above-apply-floor` relative to the deferred 600-second floor. A zero creation time yields `age-unavailable` for both. No v1 filtering or action depends on any of them. |
 | Parent liveness | `parent-alive`, `parent-proven-dead`, or `parent-unproven` from the existing tri-state helper semantics at `internal/api/cleanup.go:1687-1708`. This is evidence, not provenance or authorization. |
 | Buildinfo tag | `test-tag-present`, `test-tag-absent`, `unreadable`, `unparsable`, or `not-collected` from the on-disk target image. |
 | Environment override | `not-collected-v1` by default; if a separately accepted read-only provider exists, `present` with policy-safe path evidence, `absent`, or `unavailable`. The complete environment is never logged. |
-| Hypothetical apply result | Always carries `apply-deferred-v1`. If collected evidence conclusively fails a deferred v2 gate, also carries exactly one stable `would-refuse` label using the vocabulary below; otherwise `would-refuse=not-evaluated-v1`. |
+| Hypothetical apply result | `ApplyLifecycle` always carries `apply-deferred-v1`. If collected evidence conclusively fails a deferred v2 gate, `would-refuse` carries exactly one stable label using the vocabulary below; otherwise `would-refuse=not-evaluated-v1`. When the snapshot is degraded, every candidate's `would-refuse` is set to `snapshot-degraded`. |
 | Operator note | Every `standalone-supervise` candidate carries `manual-reap-only: verify identity out-of-band before killing`. Other candidates may carry concise remediation tied to their evidence label. |
+
+## V1 Result Verdict Fields
+
+Beyond the per-candidate evidence above, the top-level `TestLeftoverPreview` result and each candidate carry structural verdict fields with fixed value sets:
+
+| Field | Scope | Stable values |
+|---|---|---|
+| `SnapshotVerdict` | Result | `snapshot-complete`, `snapshot-degraded`, `snapshot-unsupported-platform` |
+| `TempRootVerdict` | Result | `not-supplied` (no `--temp-root`), `path-canonical`, `path-canonicalization-error` |
+| `ProtectedScopeVerdicts` | Result | Per protected root (`production-state`, `install-path`, `repo-path`): `path-canonical` or `protected-scope-unverified` when that root could not be strict-canonicalized |
+| `IdentityVerdict` | Candidate | `identity-available`, `identity-unavailable` |
+| `PathVerdict` | Candidate | `path-canonical`, `path-canonicalization-error` |
+| `ExecutablePathPolicy` | Candidate | `basename-only` (the local-output policy applied to the rendered executable field) |
+| `PathRelations` | Candidate | Zero or more of `operator-temp-root`, `os-temp-root`, `production-state`, `repo-path`, `install-path` (strict-canonical containment hits) |
+
+When any `ProtectedScopeVerdicts` entry is `protected-scope-unverified`, an otherwise-clean candidate's `would-refuse` fails closed to `protected-scope-unverified` rather than the `not-evaluated-v1` fallthrough, because a protected root that cannot be canonicalized cannot prove the candidate is outside it.
 
 ## Test-Leftover Signature (Discriminator Table)
 
@@ -94,7 +111,7 @@ The parser's `snapErr` remains the single snapshot-completeness owner. A complet
 |  |  |  | No marker admits `supervise`. |
 | Go-build-cache image | `go run` leaves a GUI grandchild in `internal/cli/gui_integration_test.go:98-124`. | Display strict component containment and GUI or `supervise` argv. | Requires exact branch gates. |
 |  |  |  | `supervise` requires a corrected v2 tree contract. |
-| Supervise topology | GUI spawn is at `internal/cli/gui_supervisor_owner.go:128-150`; adoption is at `internal/cli/gui.go:674-698`. | List `standalone-supervise` or `unverified-ppid-chain` only as a hint. | Standalone rows refuse `supervise-not-tree-reachable`. |
+| Supervise topology | GUI spawn is at `internal/cli/gui_supervisor_owner.go:128-150`; adoption is at `internal/cli/gui.go:674-698`. | A `supervise` argv with a live parent lists `live-supervise`; with a dead or unproven parent it lists `standalone-supervise` plus the manual-reap-only note. Both are hints only. | Standalone rows refuse `supervise-not-tree-reachable`. |
 |  |  | Never call it safe or tree-confirmed. | Tree authorization is blocked by round-3 P2/P3. |
 | Operator temp root | No committed source authorizes the considered `f1-cli-verify` prefix. | A strict-canonical root scopes display only. | Root must be token-bound and outside production. |
 |  |  | It cannot broaden the basename family. |  |
@@ -122,15 +139,15 @@ The deferred v2 predicate is separate: every common gate, exactly one positive b
 
 The refusal vocabulary is reused in v1 only as diagnostic labels describing what a hypothetical v2 apply would refuse. A v1 label has no authorizing complement: absence of a known refusal never means permission.
 
+The rows split by whether baseline v1 code actually emits the label. The "emitted" rows are the exact `would-refuse` and lifecycle set produced by `testLeftoverWouldRefuse` plus the bulk degraded-snapshot assignment; the reserved row is the shared vocabulary a hypothetical v2 apply would emit but for which baseline v1 has no evidence path.
+
 | Class | Stable values | V1 meaning |
 |---|---|---|
-| V1 lifecycle | `apply-deferred-v1`, `not-evaluated-v1`, `manual-reap-only` | No apply exists; evidence may be incomplete; manual action is outside the command. |
-| Image / branch / topology | `basename-not-in-branch`, `argv-not-in-branch`, `requires-explicit-temp-root`, `e2e-markers-absent`, `supervise-not-tree-reachable` | `would-refuse` labels when current evidence conclusively establishes the condition. |
-| Provenance / environment | `not-test-tagged`, `env-read-error`, `env-override-absent`, `unsupported-arch` | `would-refuse` labels only when collected evidence supports them; `not-collected-v1` is evidence status, not an inferred refusal. |
-| Safety guards | `install-path`, `repo-path`, `production-state`, `path-canonicalization-error`, `parent-alive-or-unproven`, `min-age-below-apply-floor` | Diagnostic labels; the candidate remains visible. |
-|  | `snapshot-degraded`, `identity-unavailable`, `command-line-mismatch`, `guard-evaluation-error` |  |
-| Deferred apply binding | `token-mismatch`, `identity-filter-excludes-recycled-pid`, `audit-intent-unavailable` | Preserved for v2 and not evaluated by baseline v1. |
-| Deferred outcomes | `reaped`, `refused(<exact reason>)`, `terminate-unconfirmed` | Reserved for v2. V1 must never emit `reaped` or `terminate-unconfirmed`. |
+| V1 lifecycle (emitted) | `apply-deferred-v1`, `not-evaluated-v1`, `manual-reap-only` | No apply exists; `not-evaluated-v1` is the `would-refuse` fallthrough when no conclusive refusal is known; `manual-reap-only` is the standalone-`supervise` operator note. |
+| Topology / branch (emitted) | `supervise-not-tree-reachable`, `argv-not-in-branch`, `requires-explicit-temp-root`, `ambiguous-family-classification` | `would-refuse` labels v1 emits when current evidence conclusively establishes the condition. `ambiguous-family-classification` fails closed when one path matched more than one preview family. |
+| Provenance (emitted) | `not-test-tagged`, `guard-evaluation-error` | `would-refuse` labels from the on-disk buildinfo finding (`test-tag-absent` → `not-test-tagged`; `unreadable` / `unparsable` / `not-collected` → `guard-evaluation-error`). `not-collected-v1` is environment evidence status, not an inferred refusal. |
+| Safety guards (emitted) | `install-path`, `repo-path`, `production-state`, `path-canonicalization-error`, `parent-alive-or-unproven`, `min-age-below-apply-floor`, `protected-scope-unverified`, `snapshot-degraded`, `identity-unavailable` | Diagnostic `would-refuse` labels; the candidate remains visible. `snapshot-degraded` is bulk-assigned to every candidate on a degraded snapshot. |
+| Reserved for deferred v2 (NOT emitted by baseline v1) | `basename-not-in-branch`, `e2e-markers-absent`, `env-read-error`, `env-override-absent`, `unsupported-arch`, `command-line-mismatch`, `token-mismatch`, `identity-filter-excludes-recycled-pid`, `audit-intent-unavailable`, `reaped`, `refused(<exact reason>)`, `terminate-unconfirmed` | Part of the shared refusal/outcome vocabulary, but baseline v1 has no env-read, e2e-marker, command-line, token, audit, or termination evidence path, so it never emits them. See `Deferred Refusal And Outcome Vocabulary`. V1 must never emit `reaped` or `terminate-unconfirmed`. |
 
 ## V1 Components, Ownership, And Dependency Direction
 
@@ -329,11 +346,13 @@ Local owner-DACL'd entries may retain full paths and argv. API JSON, CLI transpo
 
 | Class | Exact values |
 |---|---|
-| Image / branch / topology | `basename-not-in-branch`, `argv-not-in-branch`, `requires-explicit-temp-root`, `e2e-markers-absent`, `supervise-not-tree-reachable` |
+| Image / branch / topology | `basename-not-in-branch`, `argv-not-in-branch`, `requires-explicit-temp-root`, `ambiguous-family-classification`, `e2e-markers-absent`, `supervise-not-tree-reachable` |
 | Provenance / environment | `not-test-tagged`, `env-read-error`, `env-override-absent`, `unsupported-arch` |
-| Safety guards | `install-path`, `repo-path`, `production-state`, `path-canonicalization-error`, `parent-alive-or-unproven`, `min-age-below-apply-floor`, `snapshot-degraded`, `identity-unavailable`, `command-line-mismatch`, `guard-evaluation-error` |
+| Safety guards | `install-path`, `repo-path`, `production-state`, `protected-scope-unverified`, `path-canonicalization-error`, `parent-alive-or-unproven`, `min-age-below-apply-floor`, `snapshot-degraded`, `identity-unavailable`, `command-line-mismatch`, `guard-evaluation-error` |
 | Apply binding | `token-mismatch`, `identity-filter-excludes-recycled-pid`, `audit-intent-unavailable` |
 | Outcomes | `reaped`, `refused(<exact reason>)`, `terminate-unconfirmed` |
+
+`ambiguous-family-classification` and `protected-scope-unverified` are emitted by v1 as diagnostics and are carried forward as mandatory v2 refusals: an ambiguous multi-family branch classification cannot resolve to one exclusive positive branch, and a protected root that cannot be strict-canonicalized cannot prove the candidate is outside it. Both fail closed.
 
 ### Deferred V2 Claims
 
