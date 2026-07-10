@@ -1,6 +1,6 @@
 # Adversarial architecture review - 2026-07-09
 
-Verdict: **REVISE**.
+Verdict: **REVISE** → **RESOLVED (2026-07-10)** — see "## Revision resolves" at the end.
 
 This review rejects the current de-adopt design for implementation. The design
 correctly says safe de-adopt requires durable adopt-side provenance, but current
@@ -8,6 +8,12 @@ adopt does not persist pre-adopt provenance. Therefore the design's round-trip
 invariant, "`adopt -> de-adopt` restores every selected client's MCP config to
 the pre-adopt entry state", is **not implementable as written**. De-adopt is
 blocked on an adopt-side provenance change before any implementation starts.
+
+> **UPDATE 2026-07-10:** the blocking prerequisite (adopt-side durable pre-adopt
+> provenance) SHIPPED in PR #528 (squash `16dba601`), and `design.md` was revised
+> to consume the AS-SHIPPED contract and close every finding below. This review's
+> REVISE is resolved; see "## Revision resolves (2026-07-10)". The verdict-of-record
+> for the current design is the revised `design.md` gate decision **PASS**.
 
 Source: adversarial architecture review memo supplied on 2026-07-09. The
 machine-local source path is intentionally not recorded here.
@@ -119,3 +125,27 @@ on prerequisite**. Implementation must not start until the design is revised,
 the adopt-side durable pre-adopt provenance prerequisite is admitted and
 delivered, and the revised design accounts for the defects and prerequisites
 above.
+
+## Revision resolves (2026-07-10)
+
+Prerequisite DELIVERED: adopt-side durable pre-adopt provenance shipped in PR #528
+(squash `16dba601`), archived at
+`work-items/archive/2026-07/2026-07-09-adopt-side-durable-pre-adopt-provenance/`.
+`design.md` was revised against the AS-SHIPPED store
+(`internal/api/adopted_entries.go`). Finding-by-finding resolution (each verified
+against merged code):
+
+| Finding / gap | Resolution in revised `design.md` |
+|---|---|
+| **F1** manifest-delete not hash-gated | New shared `ManifestDeleteInWithHash` gates the last-binding delete at the mutation point using the row's `ExpectedManifestHash` (both hashes populated at capture, so the gate never SKIPs on empty). Decision `work-items/decisions/2026-07-10-deadopt-manifest-delete-hash-gate.md` (`status: proposed`). "Manifest mutation" section + claim 3 + test T2. |
+| **F2** provenance forgotten before secret cleanup | Routed keys deleted via `deleteAdoptRoutedSecrets` BEFORE `CloseAdoptProvenance`; the row stays `de_adopting` (the shipped enum's recoverable "cleanup pending" state, keys retained) until every key is gone; idempotent retry (skip already-absent keys — `vault.Delete` errors on missing); P3-2 shared-key scan folded as a SHOULD. "Routed-secret cleanup" section + claim 4 + test T3. |
+| **F3** `/g/` semantics unresolved | Defined server-scoped `/g/` policy separate from `/clients/`: subset de-adopt leaves the group routing (manifest lives); last-binding delete surfaces an orphaned-group warning + event, no auto-edit of `groups.yaml`. "Gate-ON aggregate + `/g/` groups" section + claim 10 + test T4. |
+| **present-merged-lower** (new state the memo predated) | Restore by REMOVING the hub write-target entry (no snapshot); the lower layer re-emerges; reported functional-equivalent, distinct from `absent`. "Per-client restore" section + claim 2 + test 3. |
+| **P2-1** snapshot integrity | `SnapshotSHA256` recomputed via `ManifestHashContent(snapshotBytes)` and refused fail-closed on mismatch OR missing snapshot before the restore helper (present clients only). Claim 1 + tamper test. |
+| Backup retention gap | RESOLVED by the non-prunable pinned snapshot (adopt-owned dir, hardened writer); de-adopt restores from it, not a timestamped backup. Test T5. |
+| Lock order / cleanup journaling gap | Lock graph extends the shipped order `<manifest>.lease → adopted-entries.lock → <snapshot>.lock`; per-manifest lease guards de-adopt↔adopt; no IPC/kill/wait under state locks; `de_adopting` is the durable journal marker. Claim 8 + test T6. |
+| Durable schema decision gap | RESOLVED — two accepted decisions shipped (`2026-07-10-adopt-provenance-store-shape.md`, `2026-07-10-adopt-provenance-crash-consistency-model.md`); de-adopt consumes the schema, no new store-schema decision. |
+| **T1** persisted-only round-trip | De-adopt round-trips from DISK ALONE via `ReadAdoptProvenance` + the pinned snapshot, read via a fresh API instance. Claim 5 + test T1. |
+
+Verdict of record for the current design: the revised `design.md` gate decision
+**PASS**. Next stage: `$planner`.
