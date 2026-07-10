@@ -1,6 +1,7 @@
 ---
-status: proposed
+status: accepted
 date: 2026-07-10
+accepted: 2026-07-10 (validated empirically — security re-verify PASS + Codex bot PASS after the model converged the r2/r3/r4 crash/race/mutation edge clusters; shipped in PR #528)
 slug: adopt-provenance-crash-consistency-model
 deciders: $architect (design addendum); $architecture-reviewer (promotes proposed → accepted)
 context: work-items/active/2026-07-09-adopt-side-durable-pre-adopt-provenance/design.md ("## Crash-consistency + concurrency model (bot r2 resolution)")
