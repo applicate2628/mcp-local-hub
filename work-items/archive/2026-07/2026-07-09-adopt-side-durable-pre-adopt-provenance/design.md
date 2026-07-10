@@ -835,7 +835,20 @@ Anchors verified against the worktree at that HEAD (NOT the stale `ceb01c18`
 anchors above — the code has moved on; this addendum cites the real current
 lines). Docs-only; no code. Decision reference:
 `work-items/decisions/2026-07-10-adopt-provenance-crash-consistency-model.md`
-(`status: proposed` — the `$architecture-reviewer` gate promotes it).
+(`status: accepted` — promoted after the model shipped in PR #528).
+
+> **AS SHIPPED (#528).** This r2 addendum captures the model at its r2 stage. Two
+> mechanisms below were further refined by Codex-bot rounds r3 + r4 before merge, and
+> the r2 wording at the affected spots is corrected in place: (1) the single classifier
+> reads NO manifest file — it derives the expected hub binding from the row's IMMUTABLE
+> `manifest_name` + captured `port` (r3 findings A+B); (2) `present-merged-lower` is
+> keyed on the adapter field `clients.MCPEntry.SourceBelowWriteTarget`, NOT on a
+> `ConfigPath()` ENOENT (r4 finding 1), and a `present` client's snapshot bytes are
+> byte-validated via `clients.EntryBytesChecker.EntryPresentInBytes` (r4 finding 3). The
+> full delta is consolidated in the "## Reconciliation to merged code (as shipped #528)"
+> section at the end of this file. Authoritative anchors are the merged files
+> `internal/api/adopted_entries.go`, `internal/api/adopt.go`, and
+> `internal/clients/entry_bytes.go`.
 
 ### Why the round-1 fixes kept revealing the next edge
 
@@ -908,9 +921,12 @@ pattern at `demigrate.go:417-426` (`adapter.GetEntry(source_entry_name)` → `li
 `adopt_clients` — the GC/capture becomes a THIRD consumer of that one owner (already
 reused by `demigrate.go:426` and `lsp_client_router.go:313`), no second
 shape-derivation path (consistent with arch F3). This **replaces** the round-1
-manifest-exists keep-guard (`:678`): manifest-exists is a precondition (no manifest
-⇒ not committed ⇒ REAP), but the KEEP decision is hub-binding-live, not
-manifest-existence. On any error building the signal → **KEEP** (fail-safe; never
+manifest-exists keep-guard (`:678`): the KEEP decision is hub-binding-live, not
+manifest-existence. (AS SHIPPED #528, bot r3: the classifier reads NO manifest file
+at all — it derives the expected binding from the row's IMMUTABLE `manifest_name` +
+captured `port` + the adopt-v1 binding constants, so an operator editing/deleting the
+manifest after a committed adopt can never make the committed row reapable. See the
+Reconciliation section.) On any error building the signal → **KEEP** (fail-safe; never
 reap on uncertainty — same posture as the round-1 existence-check-error path).
 
 **Signal 3 — durable anchor: ROW-FIRST ordering + a snapshot-dir-driven GC
@@ -928,19 +944,29 @@ insurance that closes the CLASS).
 
 ### The single classifier (used by BOTH capture-reap and the GC)
 
+AS SHIPPED (#528, bot r3 findings A+B): the classifier reads NO manifest file. It
+derives the EXPECTED hub binding from the row's IMMUTABLE captured fields
+(`manifest_name` + captured `port` + the adopt-v1 binding constants daemon `"default"`,
+url_path `"/mcp"`) and asks the single recognition owner. An operator editing/deleting
+the manifest after a committed adopt must NOT make the committed row reapable (finding
+A); any client-construct/read uncertainty is KEEP (finding B). Verbatim at
+`adopted_entries.go:441-468`.
+
 ```
 // Precondition: caller HOLDS the manifest lease, so the row's owner is provably dead.
-classifyDeadAdoptingRow(row) -> COMMITTED_KEEP | CRASH_REAP:
-    exists, err := manifestExistsIn(defaultManifestDir(), row.manifest)   // manifest.go:433, scan.go:2237
-    if err != nil            -> COMMITTED_KEEP            // fail-safe: never reap on uncertainty
-    if !exists               -> CRASH_REAP               // crash before/at ManifestCreate
-    m := load manifest row.manifest
-    if err loading m         -> COMMITTED_KEEP            // fail-safe
+classifyDeadAdoptingRow(row) -> COMMITTED_KEEP | CRASH_REAP:            // adopted_entries.go:441
+    expected := &ServerManifest{Name: row.manifest_name,
+                                Daemons: [{Name: "default", Port: row.port}]}  // synthetic; row fields only, no file read
     for each c in row.adopt_clients:
-        live := AllClients()[c].GetEntry(row.source_entry_name)
-        if liveEntryMatchesManifestBinding(live, row.manifest, bindingFor(m,c), m):  // managed_entries.go:355
-            return COMMITTED_KEEP                          // Install committed a binding (finding 2 KEEP)
-    return CRASH_REAP                                      // manifest exists, no binding ever installed (finding 2 REAP)
+        adapter, ok := AllClients()[c]
+        if !ok                     -> COMMITTED_KEEP        // cannot construct client => cannot disprove => KEEP
+        live, gErr := adapter.GetEntry(row.source_entry_name)
+        if gErr != nil             -> COMMITTED_KEEP        // read error => cannot disprove => KEEP (finding B)
+        if live == nil             -> continue              // cleanly no entry here; check other clients
+        binding := ClientBinding{Client: c, Daemon: "default", URLPath: "/mcp"}
+        if liveEntryMatchesManifestBinding(live, row.source_entry_name, binding, expected):  // managed_entries.go:355
+            return COMMITTED_KEEP                           // Install committed a live hub binding (finding 2 KEEP)
+    return CRASH_REAP                                       // every client readable, NONE holds the expected hub entry (finding 2 REAP)
 ```
 
 Capture-reap consumes it: a prior `adopting` row → `COMMITTED_KEEP` ⇒ FAIL CLOSED
@@ -966,7 +992,9 @@ ExecuteAdoptWithOpts(plan, w, opts):                       // adopt.go:248
               write MINIMAL `adopting` row (manifest + BOTH hashes + empty clients)   <-- ANCHOR (row-first)
               [/store-lock]
         c2. for each present client: writeAdoptClientSnapshot(...)          // adopted_entries.go:495
-              write-target ENOENT but GetEntry non-nil -> present-merged-lower, NO snapshot (finding 5)
+              GetEntry non-nil + SourceBelowWriteTarget=true  -> present-merged-lower, NO snapshot (finding 5, r4)
+              GetEntry non-nil + SourceBelowWriteTarget=false -> snapshot + EntryPresentInBytes byte-validate (r4)
+                    (ConfigPath ENOENT here -> FAIL CLOSED, not merged-lower)
               other snapshot/read error -> abort-under-lease + RETURN (surface the cleanup err, finding 4)
         c3. [store-lock] update row with client provenance ; write store  [/store-lock]
         on capture failure -> abortAdoptProvenance(rec) (best-effort; row anchors GC reclaim) + RETURN
@@ -1001,10 +1029,11 @@ inverted acquisition impossible to deadlock.
   keep-guard with Signal 2. A dead-owner `adopting` row is `COMMITTED_KEEP` iff a
   hub binding is live (`liveEntryMatchesManifestBinding` over `adopt_clients`);
   otherwise `CRASH_REAP`. The committed-but-unflipped row (Install committed, flip
-  crashed: manifest-exists **and** binding-live) is KEPT; the pre-promote crash
-  (manifest-exists **but no** binding-live) is now REAPED — closing the "leaked
-  secret snapshots forever" hole. The concrete committed signal is the **live hub
-  binding**, not manifest existence.
+  crashed: a live binding exists) is KEPT; the pre-promote crash (NO live binding on
+  any `adopt_client`) is now REAPED — closing the "leaked secret snapshots forever"
+  hole. The concrete committed signal is the **live hub binding**, not manifest
+  existence — AS SHIPPED (#528, r3) the classifier never reads the manifest file at
+  all (see the Reconciliation section).
 
 - **Finding 3 (rowless snapshot on capture crash, `:495`).** Row-first ordering
   (Signal 3) writes the minimal `adopting` row at `c1` before any snapshot at `c2`,
@@ -1020,11 +1049,13 @@ inverted acquisition impossible to deadlock.
   with the anchor model: cleanup is best-effort but never silent.
 
 - **Finding 5 (MiMoCode merged-layer snapshot source, `:491-493`).** See the rule
-  below. Capture snapshots the **write target** (`ConfigPath()`) — which is already
-  what it reads — but treats `fs.ErrNotExist` on that read as the first-class state
-  **`present-merged-lower`** (no snapshot), NOT a capture failure. Entry-presence is
-  proven by `GetEntry` (non-nil); write-target absence is a valid MiMoCode state, not
-  a vanished entry.
+  below. A client whose entry resolves from a LOWER read/import layer the hub never
+  writes is the first-class state **`present-merged-lower`** (no snapshot), NOT a
+  capture failure. AS SHIPPED (#528, r4 finding 1) this is keyed on the adapter's
+  authoritative `clients.MCPEntry.SourceBelowWriteTarget` field, NOT on a
+  `ConfigPath()` `fs.ErrNotExist` (the r2 keying, superseded — see the Reconciliation
+  section). Entry-presence is proven by `GetEntry` (non-nil); a lower-layer source is a
+  valid MiMoCode state, not a vanished entry.
 
 - **Finding 6 (`PresentAtBuild` wire leak, `adopt.go:66`).** See the fix below.
   `gui/adopt.go:34-36` anonymously embeds `*api.AdoptPlan` into `adoptPlanResponse`,
@@ -1043,26 +1074,34 @@ hub entry to the write target; de-adopt's restore (`RestoreEntryFromBackupForRol
 whose "snapshot lacks the entry ⇒ remove it from live config" semantics are the
 interface contract at `clients.go:220-235`) is **write-target-scoped**.
 
-Rule — for a client whose entry is present (`GetEntry` non-nil), branch on the
-write-target read (`os.ReadFile(ConfigPath())`):
+Rule (AS SHIPPED #528, bot r4 finding 1) — for a client whose entry is present
+(`GetEntry` non-nil), branch on the adapter-authoritative
+`clients.MCPEntry.SourceBelowWriteTarget` field (NOT on an `os.ReadFile(ConfigPath())`
+result — that was the r2 keying, superseded by r4; see the Reconciliation section):
 
-1. **Write target EXISTS** (read succeeds) → `original_state:"present"`, snapshot its
-   bytes, set `snapshot_ref` + whole-file `snapshot_sha256`. Unchanged. (Covers
-   single-file clients AND MiMoCode-where-the-entry-is-in-mimocode.json, and even
-   MiMoCode where mimocode.json holds *other* entries — restoring the write target's
-   pre-adopt bytes removes the hub entry and re-exposes any lower-layer original via
-   the merge.)
-2. **Write target ABSENT** (`fs.ErrNotExist`) **and** `GetEntry` non-nil → NEW state
+1. **`SourceBelowWriteTarget == false`** → the entry lives IN the write target
+   (`ConfigPath()`), so `original_state:"present"`: read the write-target bytes,
+   VALIDATE the exact captured bytes physically contain the entry via the adapter's
+   `clients.EntryBytesChecker.EntryPresentInBytes` (r4 finding 3 — closes the
+   delete-then-recreate double-TOCTOU a second `GetEntry` re-verify would miss;
+   `entry_bytes.go`, `adopted_entries.go:704-718`), then pin the snapshot +
+   whole-file `snapshot_sha256`. (Covers single-file clients AND
+   MiMoCode-where-the-entry-is-in-mimocode.json.) A `ConfigPath()` ENOENT here means
+   the config vanished mid-capture (no durable bytes) → **FAIL CLOSED**, deliberately
+   NOT `present-merged-lower` (`adopted_entries.go:694-702`).
+2. **`SourceBelowWriteTarget == true`** → NEW state
    `original_state:"present-merged-lower"`, **no snapshot** (`snapshot_ref:""`,
-   `restore_mode:"functional-equivalent"`). The entry lives in a lower layer the hub
-   never touches; de-adopt restores by **removing the hub entry from the write
-   target**, which re-exposes the untouched lower-layer original (its original
-   secret-literal spelling included, since the hub never wrote it). This is NOT the
-   P2 silent-data-loss: `GetEntry` non-nil PROVES the entry is still resolvable — a
-   genuinely-vanished entry returns `GetEntry` nil, which the existing
-   present-at-Build fail-closed branches (`:479-486`, `:506-517`) still reject.
-3. **Any other read error** (permission, parse) → capture failure (fail closed),
-   unchanged.
+   `restore_mode:"functional-equivalent"`); the write-target bytes are NOT read. The
+   entry lives in a lower layer the hub never touches; de-adopt restores by
+   **removing the hub entry from the write target**, which re-exposes the untouched
+   lower-layer original (its original secret-literal spelling included, since the hub
+   never wrote it). This is NOT the P2 silent-data-loss: `GetEntry` non-nil PROVES the
+   entry is still resolvable — a genuinely-vanished present-at-Build entry returns
+   `GetEntry` nil, which the fail-closed branches (`adopted_entries.go:730-...`) still
+   reject. `present-merged-lower` ⇔ `SourceBelowWriteTarget`, exactly
+   (`adopted_entries.go:681`).
+3. **Any other read/parse error, or a byte-validation miss** → capture failure (fail
+   closed).
 
 **Rejected alt — snapshot the providing lower layer (`config.json`).** Requires a new
 "which layer defined the entry" resolver, and de-adopt would restore that layer's
@@ -1175,7 +1214,8 @@ gated on the lease + "no store row" — safe.
 20. `{ guarantee: A MiMoCode adopt whose write target is absent but whose entry resolves from
     a lower layer captures successfully as `present-merged-lower` (no snapshot), and a
     genuinely-vanished present-at-Build entry still fails closed; single-owner: capture's
-    write-target-read branch keyed on `GetEntry`-non-nil + `fs.ErrNotExist`;
+    classify branch keyed on `GetEntry`-non-nil + `clients.MCPEntry.SourceBelowWriteTarget`
+    (AS SHIPPED #528 r4, not `fs.ErrNotExist`);
     enforcement-probe: T-r2-mimocode-lower (entry only in `config.json`, write target absent →
     `present-merged-lower`, adopt succeeds) and T-r2-vanished (present-at-Build entry gone,
     `GetEntry` nil → capture fails closed, zero side effects) }`
@@ -1252,3 +1292,84 @@ implementation code is included; the base design is intact. The cross-cutting de
 `status: proposed` for the `$architecture-reviewer` gate. Next stage: `$planner` folds the r2
 model into the delivery plan (it collapses the round-1 guards, so it is a revision of the
 existing capture/GC phases, not new phases).
+
+---
+
+## Reconciliation to merged code (as shipped #528)
+
+DELIVERED: PR #528, squash `16dba601` on master (2026-07-10). After the r2 addendum
+above, the model was refined by two more Codex-bot rounds (r3, r4) and merged. This
+section is the authoritative as-shipped delta; where it and the r2 addendum differ, the
+merged code wins. Anchors verified against master `internal/api/adopted_entries.go`,
+`internal/api/adopt.go`, `internal/api/adopt_provenance_events.go`, and
+`internal/clients/entry_bytes.go`.
+
+### Delta 1 (bot r3, findings A+B) — the classifier reads NO manifest file
+
+`classifyDeadAdoptingRow` (`adopted_entries.go:441-468`) classifies a dead-owner
+`adopting` row from the row's IMMUTABLE captured fields ONLY. It builds a synthetic
+`config.ServerManifest{Name: rec.ManifestName, Daemons: [{Name: "default", Port:
+rec.Port}]}` and asks the single recognition owner
+`liveEntryMatchesManifestBinding(live, rec.SourceEntryName, binding, expected)`
+(`managed_entries.go:355`) per `adopt_client`. It does NOT call `manifestExistsIn`,
+does NOT load the manifest file, and does NOT derive the binding from the file
+(`bindingFor(m,c)` is gone). Rationale: an operator editing/deleting the manifest
+(port change, binding removal) after a committed adopt must not make the committed
+row's provenance reapable (finding A). Uncertainty is ALWAYS KEEP: a client that
+cannot be constructed, or whose `GetEntry` ERRORS, → `COMMITTED_KEEP` (finding B).
+Only when every `adopt_client` is cleanly readable AND none holds the expected hub
+entry is the row `CRASH_REAP`. (Supersedes the r2 classifier pseudocode's
+`manifestExistsIn` / `load manifest` / `bindingFor` steps.)
+
+### Delta 2 (bot r4, finding 1) — `present-merged-lower` is keyed on `SourceBelowWriteTarget`, not `ConfigPath()` ENOENT
+
+For a `present` client (`GetEntry` non-nil), capture branches on the adapter field
+`clients.MCPEntry.SourceBelowWriteTarget` (`clients.go:70-88`; `adopted_entries.go:681`):
+
+- `SourceBelowWriteTarget == true` → `original_state:"present-merged-lower"`, no
+  snapshot (the entry resolves from a lower read/import layer the hub never writes;
+  the write-target bytes are not read). `present-merged-lower` ⇔ `SourceBelowWriteTarget`,
+  exactly.
+- `SourceBelowWriteTarget == false` → `original_state:"present"` with a pinned
+  snapshot; a `ConfigPath()` ENOENT in this branch is now a FAIL-CLOSED capture
+  failure (config vanished mid-capture, no durable bytes), NOT `present-merged-lower`
+  (`adopted_entries.go:694-702`).
+
+(Supersedes the r2 MiMoCode rule's `os.ReadFile(ConfigPath())`-`fs.ErrNotExist`
+keying.) The enum value `AdoptOriginalStatePresentMergedLower` ships at
+`adopted_entries.go:116` (additive, no schema-version bump). The de-adopt
+consumer-contract for it is unchanged from the r2 addendum's "Consumer-contract
+addition".
+
+### Delta 3 (bot r4, finding 3) — snapshot bytes are byte-validated before pinning
+
+For a `present` (`SourceBelowWriteTarget == false`) client, capture validates that the
+EXACT snapshotted bytes physically contain the adopted entry via
+`clients.EntryBytesChecker.EntryPresentInBytes(configBytes, plan.EntryName)`
+(`entry_bytes.go`; called at `adopted_entries.go:704-718`) — a pure parse of the
+captured bytes, no second disk read. This closes a double-TOCTOU the r2 model left
+open (the entry deleted before `os.ReadFile` then re-created before a `GetEntry`
+re-verify, pinning a snapshot whose bytes a later de-adopt would restore as a
+DELETION). A miss (`present==false` or parse error) is a FAIL-CLOSED capture failure.
+New vocabulary: the `clients.EntryBytesChecker` interface, implemented by every
+adopt-supported adapter and forwarded through the `lockingClient` wrapper.
+
+### Confirmed unchanged as shipped (r2 mechanisms that survived intact)
+
+- Per-manifest `flock` LEASE `<state-dir>/adopt-provenance/<manifest>.lease`
+  (`adopted_entries.go:73,346-382`), `TryLock`-based, held capture→promote/abort; a
+  reaper `TryLock`s before reaping. Lock order `<manifest>.lease → adopted-entries.lock
+  → <snapshot>.lock`.
+- ROW-FIRST capture ordering (minimal anchor row before any snapshot) +
+  snapshot-dir-driven GC backstop; `classifyDeadAdoptingRow` is the single classifier
+  for BOTH capture-UPSERT reap and the GC (`adopted_entries.go:532`, `:934`).
+- Hub-binding-live committed signal via the reused `liveEntryMatchesManifestBinding`
+  owner; store shape (`adopted-entries.json`, schema v1) and the hardened owner-only
+  snapshot (`WriteStateFileBytesAtomic`) unchanged.
+
+### Known minor gap (tracked, non-blocking)
+
+`emitAdoptProvenanceCaptured` (`adopt_provenance_events.go:72-83`) counts only
+`present` and `absent` clients into `present_count` / `absent_count`; a
+`present-merged-lower` client appears in the `clients` name list but in neither count.
+Observability-only; tracked in `work-items/backlog/2026-07-10-adopt-provenance-lease-hygiene.md`.

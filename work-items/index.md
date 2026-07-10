@@ -12,8 +12,7 @@
 | Item | State | Remaining |
 |---|---|---|
 | [2026-07-05-adopt-npx-orphans](active/2026-07-05-adopt-npx-orphans/status.md) | PARTIALLY DELIVERED | adopt CLI/API + GUI + **reaper (all 3 kill-authority hardenings)** SHIPPED + DEPLOYED (#513/#520/#521/#522); anti-drift "unmanaged detected" GUI signal **LANDED** (#523, master `f7eaa1c8`). Remaining = phase-2 de-adopt (now the separate `2026-07-09-deadopt-hub-to-native` item, blocked) + D P2a/P2b GUI. |
-| [2026-07-09-deadopt-hub-to-native](active/2026-07-09-deadopt-hub-to-native/status.md) | REVISE / BLOCKED | `Depends-on:` [2026-07-09-adopt-side-durable-pre-adopt-provenance](active/2026-07-09-adopt-side-durable-pre-adopt-provenance/status.md) (below, now ADMITTED). Implementation must not start until the de-adopt design is revised and the provenance prerequisite is delivered. |
-| [2026-07-09-adopt-side-durable-pre-adopt-provenance](active/2026-07-09-adopt-side-durable-pre-adopt-provenance/status.md) | ADMITTED (Priority medium, v0.7 Adoption) | Prerequisite that unblocks de-adopt (above). Research PASS-complete; next stage = $architect designs the durable provenance schema + fail-closed capture seam (`internal/api/adopt.go` before `install.go:2689` overwrite). See `brief.md`. |
+| [2026-07-09-deadopt-hub-to-native](active/2026-07-09-deadopt-hub-to-native/status.md) | READY (was REVISE / BLOCKED) | `Depends-on:` [2026-07-09-adopt-side-durable-pre-adopt-provenance](archive/2026-07/2026-07-09-adopt-side-durable-pre-adopt-provenance/closure.md) — now DELIVERED (#528), so the prerequisite is met and this item is UNBLOCKED. Implementation may start once the de-adopt design is revised against the shipped provenance store. |
 
 ## Reaper kill-authority hardening — COMPLETE (2026-07-08, all bot-PASS + deployed)
 
@@ -54,6 +53,7 @@ reconciliation records, not open tasks.
 
 | Item | Closed | Outcome |
 |---|---|---|
+| [2026-07-09-adopt-side-durable-pre-adopt-provenance](archive/2026-07/2026-07-09-adopt-side-durable-pre-adopt-provenance/closure.md) | 2026-07-10 | DELIVERED — durable, non-destructive pre-adopt provenance store (`adopted-entries.json` + owner-only snapshot dir) capturing per-client pre-adopt state before the config rewrite; #528 squash `16dba601`, bot PASS (5 rounds, 16 real bugs) + security re-verify. Coherent crash-consistency model (per-manifest flock lease + single `classifyDeadAdoptingRow` + row-first anchor + snapshot-dir GC). Unblocks de-adopt. Both decisions `accepted`; follow-ups in `backlog/2026-07-10-adopt-provenance-lease-hygiene.md`. |
 | [2026-07-09-test-leftover-reaper](archive/2026-07/2026-07-09-test-leftover-reaper/closure.md) | 2026-07-10 | DELIVERED — v1 preview/diagnostics-only `mcphub cleanup test-leftovers`; #527 squash `436e4f58`, bot PASS (2 rounds). Non-destructive: enumerate + classify + hypothetical-refusal labels, no process termination. Destructive apply deferred to v2 (blocked on round-3 P2/P3 + value case); standalone-`supervise` stays manual-reap-only. |
 | [2026-07-09-lsp-relay-per-client-disable-gui](archive/2026-07/2026-07-09-lsp-relay-per-client-disable-gui/closure.md) | 2026-07-09 | DELIVERED — per-client LSP-router enable/disable in the Servers matrix; #524 squash `22c91cab`, deployed + live-verified. |
 | [2026-07-09-intent-collapse-stop-resurrection](archive/2026-07/2026-07-09-intent-collapse-stop-resurrection/closure.md) | 2026-07-09 | DELIVERED — absent-only legacy stop watermarks; #525 squash `5d8ab063`, deployed `7898c148`. |

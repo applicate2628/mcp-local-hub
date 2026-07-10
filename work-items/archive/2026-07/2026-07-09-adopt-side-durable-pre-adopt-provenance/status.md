@@ -1,6 +1,6 @@
 # Status — adopt-side durable pre-adopt provenance
 
-State: IMPLEMENTATION COMPLETE — all 5 code+docs phases (A storage → B capture/lifecycle → C fail-closed seam → D orphan GC → E docs) delivered on branch `feat/adopt-provenance`. Both post-implementation review gates PASS (architecture PASS; security PASS after the P2 fail-closed-present-at-Build fix). **Codex bot r2 review surfaced a crash/concurrency edge-cluster** on the round-1 (HEAD `45073703`) point-fixes — resolved by a coherent $architect model (2026-07-10): see design.md "## Crash-consistency + concurrency model (bot r2 resolution)" + decision `work-items/decisions/2026-07-10-adopt-provenance-crash-consistency-model.md` (`status: proposed`). That model is DESIGN-ONLY; $planner must fold it into the plan and $backend-engineer re-implement the r2 delta before the PR loop. Next = re-plan r2 delta → implement → QA + PR + bot loop + merge. The 2 flagged-optional phases (F1 tuple-recording, F2 supervise-GC) remain DEFERRED (lead decisions below).
+State: DELIVERED + CLOSED (2026-07-10). Shipped in PR #528, merged to master as squash commit `16dba601` ("feat(api): durable pre-adopt provenance (prereq for de-adopt)"), Codex Cloud bot PASS on round 5 (5 rounds total: r1 3 committed-row bugs; r2 6 crash/race edge-mine → the coherent crash-consistency model; r3 4 mutation-immune-classifier fixes; r4 3 [present-merged-lower keyed on `SourceBelowWriteTarget` + `EntryBytesChecker` snapshot-byte validation]; r5 PASS) plus a security re-verify PASS. The redundant Codex-autonomous PR #529 was closed as superseded. Both governing decisions are `status: accepted` (store-shape + crash-consistency-model). The de-adopt work-item (`2026-07-09-deadopt-hub-to-native`) is now UNBLOCKED. See `closure.md`; the coherent crash-consistency model is in design.md "## Crash-consistency + concurrency model (bot r2 resolution)" reconciled to the merged code in "## Reconciliation to merged code (as shipped #528)". The 2 flagged-optional phases (F1 tuple-recording, F2 supervise-GC) stayed DEFERRED (lead decisions below).
 Priority: medium
 Milestone: v0.7 Adoption
 Admitted: 2026-07-10 ($product-manager, see brief.md)
@@ -32,8 +32,10 @@ BEFORE the config rewrite commits.
   consumer-contract handoff, observability, test strategy, 15 numbered claims.
   See its "Revision (2026-07-10)" section for the review fold-in.
 - `work-items/decisions/2026-07-10-adopt-provenance-store-shape.md` — the store-shape
-  decision, PROMOTED proposed→accepted by the $architecture-reviewer gate
-  (decision-file frontmatter reconciliation pending — reviewer/archivist owned).
+  decision, `status: accepted` (promoted proposed→accepted by the $architecture-reviewer gate).
+- `work-items/decisions/2026-07-10-adopt-provenance-crash-consistency-model.md` — the
+  three-orthogonal-signals crash/concurrency model, `status: accepted` (validated
+  empirically — security re-verify PASS + Codex bot PASS; shipped in #528).
 
 ## Next action
 1. [DONE 2026-07-10] $product-manager: admitted for delivery — Priority medium,
@@ -58,9 +60,11 @@ BEFORE the config rewrite commits.
    present-at-Build fix); $architecture-reviewer gated the hot-path seam (protected
    surfaces untouched). All AC-ids (A1-A8, B1-B8, C1-C7, D1-D4, E1-E3) covered by
    named hermetic tests; build + vet (win + linux) + scoped `go test` green.
-6. [NEXT] $qa-engineer full gate against all AC-ids, then the repo PR workflow
-   (pre-push `go build && go vet && go test`; push; Codex bot PASS loop; deep-security
-   pass; merge). See CLAUDE.md "PR review + merge workflow (MANDATORY)".
+6. [DONE 2026-07-10] $qa-engineer full gate + the repo PR workflow: PR #528 driven
+   through 5 Codex-bot rounds to PASS (16 real bugs caught: r1 3 / r2 6 / r3 4 / r4 3)
+   + security re-verify PASS, merged to master squash `16dba601`. Redundant
+   Codex-autonomous PR #529 closed as superseded. Item closed + archived — see
+   `closure.md`.
 
 ## Notes
 - Not on the critical path of the in-flight reaper v1 (PR #527); queued behind it.
