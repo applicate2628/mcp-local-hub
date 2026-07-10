@@ -45,9 +45,23 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
     `removeAdoptSnapshots` helpers.
   - `internal/api/manifest.go` — ADD one shared helper `ManifestDeleteInWithHash`
     (an expected-hash gate at the delete mutation point, matching
-    `ManifestEditInWithHash:708-758`). Filed as decision
+    `ManifestEditInWithHash:708-758`; **FAIL-CLOSED when the expected hash is
+    empty/absent** — the inverse of the edit path's skip-on-empty, security P2-a;
+    **RETAINS** the path-escape guard `manifest.go:793-796`). Decision
     `work-items/decisions/2026-07-10-deadopt-manifest-delete-hash-gate.md`
-    (`status: proposed`) because it adds a capability to a shared manifest owner.
+    (**`status: accepted`** — arch-reviewer promoted it).
+  - `internal/clients/*` — ADD a bytes-input restore variant
+    `RestoreEntryFromBytesForRollbackWithConfigWriter(configBytes, name, writer)` on
+    the `Client` interface + `lockingClient` forward, factoring the tail of
+    `restoreEntryFromBackupWithWriter` (`claude_code.go:204-231`) so restore reads NO
+    file — de-adopt feeds the already-sha256-verified snapshot bytes (security P1,
+    single-read). Additive: the existing path-based helpers stay for install/serena
+    rollback; the security-critical de-adopt restore MUST use the bytes variant.
+  - `internal/api/install_hub_reconcile.go` — EXTEND `BuildHubReconcilePlan`'s
+    gate-ON path so a client dropping to ZERO bindings gets its `mcphub-hub`
+    aggregate removed (today only gate-OFF sweeps every client, `:164-180`; the
+    gate-ON per-client loop skips zero-binding clients, `:181-185`). Second
+    shared-owner change (arch F-B); folded into the decision above.
   - NEW `internal/gui/deadopt.go` — POST `/api/deadopt/plan` + `/api/deadopt`
     (Same-Origin, request/response style identical to `gui/adopt.go:46-123`).
   - NEW `internal/cli/deadopt.go` — `mcphub de-adopt <server>` (alias `deadopt`).
@@ -59,13 +73,21 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
   - D1 — the de-adopt-owned provenance mutators against the shipped schema (the store
     already declared them: `adopted_entries.go:983-996`). De-adopt lives in
     `internal/api`, so it uses the store's unexported read-modify-write helpers.
-  - D2 — the RESTORE extraction `clients.RestoreEntryFromBackupForRollbackWithConfigWriter`
-    (`clients.go:353-362`) pointed at the pinned snapshot (path swap, no new restore
-    code — the seam the provenance design already reserved as S5).
+  - D2 — RESTORE from ALREADY-VERIFIED BYTES via a NEW
+    `clients.RestoreEntryFromBytesForRollbackWithConfigWriter(configBytes, name, writer)`
+    (mirrors the capture side's byte-input `EntryBytesChecker`,
+    `adopted_entries.go:704-718`). De-adopt reads the snapshot ONCE, sha256-verifies
+    those bytes, and restores from the SAME in-memory bytes — the path-based
+    `RestoreEntryFromBackupForRollbackWithConfigWriter` (`clients.go:353-362`) does its
+    OWN second `os.ReadFile` (`claude_code.go:200`) and MUST NOT be used for the
+    security-critical de-adopt restore (a TOCTOU snapshot-swap between the two reads
+    would inject an attacker command/url — security P1). This supersedes the original
+    "path swap, no new restore code" framing (S5 reserved a path-based reuse).
   - D3 — the shape recognizer `liveEntryMatchesManifestBinding` (`managed_entries.go:355`)
     reused read-only (a fourth consumer; NOT modified).
   - D4 — the routed-secret deleter `deleteAdoptRoutedSecrets` (`adopt_secret_route.go:161`)
-    reused; de-adopt wraps it idempotency-safe (skip already-absent keys).
+    reused; de-adopt PRE-FILTERS to still-present keys before calling (arch F-D — the
+    deleter is all-or-nothing, not a thin idempotent wrapper).
   - D5 — the per-manifest adopt LEASE `tryAcquireAdoptManifestLease`
     (`adopted_entries.go:370`) reused for de-adopt↔adopt mutual exclusion.
   - D6 — the existing uninstall descriptor-cleanup core
@@ -86,13 +108,18 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
   - The client backup lane (`clients.go:1021-1051,1145-1191`) — de-adopt restores
     from the adopt-owned PINNED snapshot, NOT a timestamped backup.
 - **Declared blast radius:** de-adopt Execute/plan path + one new `internal/api` file
-  + one additive shared helper (`ManifestDeleteInWithHash`) + GUI/CLI routes + a
-  frontend affordance + additive events. The de-adopt mutators WRITE the shipped
-  store's `de_adopting`/`closed` states (which the store declared but never writes)
-  and DELETE snapshots on close. No change to adopt, install, migrate, demigrate,
-  managed-entries, the backup lane, or the provenance store's schema/capture code.
-  No new parallel state-sync mechanism: manifest `client_bindings` remain the source
-  of `/clients/<client>/mcp` membership.
+  + **THREE additive shared-owner changes**: (1) `ManifestDeleteInWithHash` on
+  `manifest.go`; (2) a bytes-input restore variant on the `clients` `Client` interface
+  + adapters (security P1); (3) the gate-ON zero-binding `mcphub-hub` prune in
+  `BuildHubReconcilePlan` (`install_hub_reconcile.go`, arch F-B). All three are
+  ADDITIVE — existing callers unchanged. Plus GUI/CLI routes, a frontend affordance,
+  and additive redaction-safe events. The de-adopt mutators WRITE the shipped store's
+  `de_adopting`/`closed` states (which the store declared but never writes) and DELETE
+  snapshots on close. No change to adopt, install, migrate, demigrate, managed-entries,
+  the backup lane, or the provenance store's schema/capture code. No new parallel
+  state-sync mechanism: manifest `client_bindings` remain the source of
+  `/clients/<client>/mcp` membership; the zero-binding prune EXTENDS the single
+  reconcile owner rather than adding a de-adopt-local `mcphub-hub` remove.
 
 ## Adopt-flow inventory (unchanged facts; verified)
 
@@ -172,7 +199,7 @@ Assumed-vs-shipped delta (what de-adopt must NOT get wrong):
 | Per-client `original_state` is `present` or `absent`. | THREE states: `present`, `absent`, **`present-merged-lower`** (`adopted_entries.go:104-117`). |
 | Store the pinned backup ref; may store `expected_hub_shape`. | `SnapshotRef` (state-dir-relative, forward-slashed, present-only) + a stored WHOLE-FILE `SnapshotSHA256`. **No `expected_hub_shape`** — recompute via `liveEntryMatchesManifestBinding`. |
 | Per-client config-shape hash. | `SnapshotSHA256` (whole-file). It is a FAIL-CLOSED restore gate, not decorative. |
-| Restore from a pinned backup; byte-equivalence maybe. | Restore from the pinned snapshot via `RestoreEntryFromBackupForRollbackWithConfigWriter`; `RestoreMode` is `functional-equivalent` for every present client (byte-equivalence UNVERIFIED per adapter). |
+| Restore from a pinned backup; byte-equivalence maybe. | Restore from the pinned snapshot via a SINGLE-READ bytes-input variant (`RestoreEntryFromBytesForRollbackWithConfigWriter`, de-adopt-added, security P1) fed the sha256-verified bytes — NOT the path-based helper's second read; `RestoreMode` is `functional-equivalent` for every present client (byte-equivalence UNVERIFIED per adapter). |
 | Operation states declared by the memo. | The enum + `ReadAdoptProvenance` + snapshot/lease/store helpers SHIP; the three de-adopt mutators are DECLARED as comments (`adopted_entries.go:993-995`) — de-adopt authors them. |
 | Hashes captured somewhere. | BOTH `AdoptManifestHash` + `ExpectedManifestHash` are populated AT CAPTURE (arch F1), so even a committed-but-`adopting` row is hash-gate-usable. |
 
@@ -205,15 +232,21 @@ The `original_state` selects the mechanic; only `present` triggers the snapshot
 sha256 gate (absent/merged-lower have no snapshot, so a "missing snapshot" check must
 NOT fire for them):
 
-1. **`present`** — recompute `ManifestHashContent(snapshotBytes)` and compare to the
-   row's `SnapshotSHA256`. Refuse the restore FAIL-CLOSED on **mismatch OR missing
-   snapshot file** (security P2-1) BEFORE calling
-   `RestoreEntryFromBackupForRollbackWithConfigWriter(client, <state-dir + FromSlash(SnapshotRef)>, SourceEntryName, writer)`
-   (`clients.go:353-362`). The helper reads the snapshot, extracts the named entry,
-   and writes it into live config (removing if the snapshot lacks it) — pointing it
-   at the pinned snapshot instead of a timestamped backup is a path swap (the seam the
-   provenance design reserved as S5). Restores original secret-literal spelling
-   (the snapshot was copied BEFORE Install rewrote the config).
+1. **`present`** — read the pinned snapshot bytes ONCE; recompute
+   `ManifestHashContent(snapshotBytes)` and compare to the row's `SnapshotSHA256`;
+   refuse FAIL-CLOSED on **mismatch OR missing snapshot file** (security P2-1); then
+   restore from the SAME in-memory bytes via the NEW
+   `RestoreEntryFromBytesForRollbackWithConfigWriter(client, snapshotBytes, SourceEntryName, writer)`.
+   **Single-read is load-bearing (security P1).** The path-based
+   `RestoreEntryFromBackupForRollbackWithConfigWriter` does its OWN second `os.ReadFile`
+   (`claude_code.go:200`), so verify-then-restore-BY-PATH leaves a TOCTOU window where a
+   broadened-parent co-resident swaps the snapshot file between the two reads and injects
+   an attacker `command`/`url`. De-adopt MUST verify and restore the SAME bytes and MUST
+   NOT call the path-based helper here — this mirrors the capture side's own byte-input
+   validation (`adopted_entries.go:704-718`). The bytes-input helper extracts the named
+   entry and writes it into live config (removing if the bytes lack it). Restores
+   original secret-literal spelling (the snapshot was copied BEFORE Install rewrote the
+   config).
 2. **`absent`** (entryless fanout, `RestoreMode:"n/a"`, empty `SnapshotRef`) — remove
    the hub entry from the client (`client.RemoveEntry(SourceEntryName)`): restore to
    absence. No snapshot, no sha256 gate.
@@ -226,6 +259,30 @@ NOT fire for them):
    restore. This is the shipped store's own Consumer-contract addition
    (`adopted_entries.go:108-116`; provenance design "Consumer-contract addition").
    No snapshot, no sha256 gate.
+
+**Remove-path integrity gate + threat model (security P2-b).** The `absent` and
+`present-merged-lower` branches call `RemoveEntry` driven by the row's `original_state`
+— an owner-only field with NO cryptographic binding to the record; the sha256 gate
+covers only `present`. On a broadened-parent host a co-resident with `FILE_DELETE_CHILD`
+can flip a `present` row to `absent` AND delete its snapshot, making de-adopt REMOVE the
+operator's entry instead of restoring it (data loss). `liveEntryMatchesManifestBinding`
+does NOT catch this (the live entry is the hub entry in both `present` and `absent`).
+Two-layer response:
+
+- **Adopted strengthening — exact-hub-entry match before any `RemoveEntry`.** Recompute
+  the EXACT deterministic hub entry adopt wrote (`clients.HubLoopbackURL(rec.Port,
+  "/clients/<client>/mcp" | the daemon url_path)` + the hub relay metadata `install.go`
+  wrote, `:2679-2692`) and require the LIVE entry to equal it byte-for-byte before
+  removing — not merely to match the hub SHAPE. If the live entry is anything else
+  (operator already restored native, or an attacker-crafted entry), REFUSE the remove.
+  This closes the sub-case where the live entry is not the hub entry.
+- **Documented residual + strict-mode mitigation.** The exact-match gate does NOT close
+  the `present→absent`+snapshot-delete field-swap (there the live entry IS the hub
+  entry). That residual is the same owner-only-DACL namespace-swap every state file
+  carries; `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` is the mitigation. De-adopt MUST emit a
+  one-line operator-visible warning under the relax lane (mirroring the adopt-side
+  `client-write-unhardened-fallback` warn — CLAUDE.md "Hardened client-config writes")
+  naming the residual + the env var. No silent downgrade.
 
 ### Manifest mutation — hash-gated (review F1)
 
@@ -246,11 +303,20 @@ NOT fire for them):
   mutation point"), atomic with the delete, not a de-adopt-local read-then-delete that
   a TOCTOU could slip through. Then remove supervisor-intent descriptors and routed
   keys. Because both hashes are populated at capture (arch F1), even a
-  committed-but-`adopting` row supplies a usable gate hash — the gate never silently
-  SKIPs on an empty hash (`manifest.go:717` skips when `expectedHash==""`).
+  committed-but-`adopting` row supplies a usable gate hash.
+
+**Fail-closed-on-empty polarity (security P2-a).** `ManifestDeleteInWithHash` INVERTS
+the edit path's polarity: where `ManifestEditInWithHash` SKIPs the check on an empty
+`expectedHash` (`manifest.go:717-721`), the DELETE variant treats an empty/absent
+expected hash as a FAIL-CLOSED **refusal to delete** (destructive-default polarity — the
+safe path is don't-delete). A tampered row or schema drift that blanks
+`ExpectedManifestHash` then cannot trigger an ungated delete of an externally-edited
+manifest — otherwise inheriting the edit path's skip would re-open the exact F1
+data-loss this closes. It also RETAINS `ManifestDeleteIn`'s path-escape guard
+(`manifest.go:793-796`, `Dir(target)==Clean(dir)`).
 
 `ManifestDeleteInWithHash` is a shared-owner addition (decision
-`2026-07-10-deadopt-manifest-delete-hash-gate.md`).
+`2026-07-10-deadopt-manifest-delete-hash-gate.md`, `status: accepted`).
 
 ### Routed-secret cleanup — before forgetting provenance (review F2)
 
@@ -259,18 +325,42 @@ The shipped store keeps `RoutedSecretKeys` in the row through `de_adopting`
 
 1. On last-binding de-adopt only (a subset de-adopt keeps the keys — other clients
    still route through the manifest), delete the row's `RoutedSecretKeys` from the
-   vault via `deleteAdoptRoutedSecrets` (`adopt_secret_route.go:161`) BEFORE
-   `CloseAdoptProvenance`. The row stays `de_adopting` (the recoverable "cleanup
-   pending" state — the shipped enum has no separate `cleanup_pending`, so
+   vault BEFORE `CloseAdoptProvenance`. The row stays `de_adopting` (the recoverable
+   "cleanup pending" state — the shipped enum has no separate `cleanup_pending`, so
    `de_adopting` IS it) until every key is deleted; only then flip to `closed`.
-2. **Idempotent retry:** `vault.Delete` errors on an already-absent key
-   (`vault.go:171-177`), so de-adopt's deletion loop MUST skip keys already gone
-   (treat not-found as success) — a retry after a partial delete then completes without
-   erroring on the previously-deleted keys. (T3.)
-3. **SHOULD — shared-key scan (provenance P3-2 handoff).** Before deleting a routed
-   key, scan other live manifests for a `secret:<KEY>` reference to the same key (a
-   hand-authored manifest could share it) and skip deletion if referenced, OR accept +
-   document the risk. Flagged so de-adopt does not blind-delete a shared key.
+2. **Filter-before-call, not a thin wrapper (arch F-D).** `deleteAdoptRoutedSecrets`
+   (`adopt_secret_route.go:161`) is ALL-OR-NOTHING: `deleteAdoptRoutedSecretsLocked`
+   errors on ANY `vault.Delete` failure, and `vault.Delete` itself errors on an
+   already-absent key (`vault.go:171-177`). So "idempotency-safe" cannot be a
+   try/ignore wrapper — de-adopt MUST PRE-FILTER the key set to still-present keys (a
+   `vault.Get`/`vault.List` presence pass under the same `vaultMutex` + `WithVaultLock`)
+   and pass only those to the deleter (or add a delete-if-present variant). A retry
+   after a partial delete then deletes only the remaining keys and never re-errors on
+   the ones already gone (T3).
+3. **P3-a — shared-key scan is an OPERATOR WARNING, not a silent SHOULD.** Before
+   deleting a routed key, scan other live manifests' env for a `secret:<KEY>` reference
+   to the same key (a hand-authored manifest could share it). If referenced, SKIP the
+   deletion and SURFACE it in the de-adopt plan + response as an operator-visible
+   warning (a shared-key break must be visible, not a mystery daemon failure later), OR
+   record a documented accepted residual — never a blind delete. De-adopt enumerates
+   manifests itself (no shared helper; see "Provenance-gap flag").
+4. **P3-b — abandoned-retry orphaned key (bounded, acceptable residual).** If de-adopt
+   crashes after `MarkAdoptProvenanceDeAdopting` but the operator never retries, the
+   routed keys linger (the `de_adopting` row still names them). Bounded and
+   operator-removable; a future `de_adopting`-GC could reclaim it (a sibling to the
+   adopt-side `adopting`-orphan GC). Acknowledged, not fixed here.
+
+### Observability + redaction (security P2-c)
+
+The pinned snapshot holds literal secret env values, so de-adopt's events, error
+messages, and logs carry ONLY: manifest names, client names, vault key NAMES, snapshot
+REFS (state-dir-relative paths), counts, and content hashes — NEVER snapshot bytes,
+restored entry bodies, `command`/`args`/`env` values, or secret values. This is the
+adopt-side path-free discipline (`adopt_provenance_events.go:49-110`; the `adopt-executed`
+body logs `secret_routed_keys` NAMES only, `adopt.go:537-551`), carried forward. A
+redaction test asserts no secret value appears in any emitted event body, error string,
+or operator-action narration (mirroring the sanitized-narration path
+`gui/adopt.go:112-116`).
 
 ### Operation-state machine + lock graph
 
@@ -283,53 +373,94 @@ De-adopt implements the three declared mutators (`adopted_entries.go:993-995`) d
 - `CloseAdoptProvenance(name)` — `de_adopting → closed` + `removeAdoptSnapshots(name)`
   (deletes the pinned snapshots + secret-bearing dir).
 
-Fail-closed ordering (each step fail-closed; a partial failure leaves a recoverable
-`de_adopting` row a retry resumes):
+Fail-closed ordering. The plan gates BRANCH on `OperationState` (a fresh `adopted` row
+vs a resuming `de_adopting` row); every execute step is skip-if-already-done so a partial
+failure leaves a recoverable `de_adopting` row a retry COMPLETES rather than refuses
+(arch F-A — the original single gate-set, written for a fresh row, would have BLOCKED
+resume):
 
 ```
 BuildDeAdoptPlan:
-  P1. ReadAdoptProvenance(manifest). No committed row (found=false, or state==adopting
-      with NO live hub binding) -> FAIL CLOSED. A committed-but-`adopting` row (state
-      ==adopting WITH a live binding, per classifyDeadAdoptingRow's COMMITTED_KEEP
-      semantics, adopted_entries.go:441-468) is a valid de-adopt candidate.
-  P2. Hash-gate readiness: recompute on-disk manifest hash; must equal ExpectedManifestHash
-      (else conflict/merge prompt — do not mutate).
-  P3. Per client, recompute the expected hub shape (liveEntryMatchesManifestBinding) and,
-      for `present`, verify the snapshot exists + sha256 matches. Any mismatch -> refuse
-      that client (fail closed before ANY mutation).
-ExecuteDeAdoptWithOpts:
+  P0. ReadAdoptProvenance(manifest) -> classify by OperationState:
+        found=false                         -> FAIL CLOSED (no provenance)
+        closed                              -> FAIL CLOSED (already de-adopted)
+        adopting WITH a live hub binding    -> ACCEPT as committed-but-unflipped
+              (classifyDeadAdoptingRow COMMITTED_KEEP, adopted_entries.go:441-468) -> treat as FRESH
+        adopting WITHOUT a live hub binding  -> FAIL CLOSED (pre-install crash orphan;
+              the adopt-side GC reclaims it, not de-adopt)
+        adopted                             -> FRESH de-adopt (full gates P1f-P3f)
+        de_adopting                         -> RESUME de-adopt (per-step done-ness P1r-P3r)
+  --- FRESH (adopted / committed-adopting) ---
+  P1f. Hash-gate: recompute the on-disk manifest hash; MUST equal ExpectedManifestHash
+       (else conflict/merge prompt — do not mutate).
+  P2f. Per client, recompute the expected hub shape (liveEntryMatchesManifestBinding);
+       the live entry MUST still be the hub entry. A shape MISMATCH here = operator
+       edited the config after adopt -> REFUSE that client (test 10).
+  P3f. For `present`, snapshot exists + sha256 matches (else fail closed).
+  --- RESUME (de_adopting) ---   [the shipped schema has NO per-client "restored" flag,
+                                   so done-ness is DERIVED, not read]
+  P1r. Per-CLIENT done-ness. A client is RESTORE-DONE when its live entry no longer
+       matches the expected hub binding AND matches its restore target (present: live
+       entry == the snapshot's entry; absent: entry gone; present-merged-lower: hub
+       write-target entry gone). A RESTORE-DONE client is SKIPPED, not refused. This is
+       the disambiguator P2f lacks: fresh + mismatch = operator-edit -> REFUSE; resume +
+       mismatch-TOWARD-the-restore-target = already-restored -> SKIP. Only a client that
+       is NEITHER still-the-hub-entry NOR matching-its-restore-target is a genuine
+       conflict -> refuse.
+  P2r. Per-STEP done-ness for manifest/secret/close. Manifest-delete is DONE when the
+       manifest file is already absent (a last-binding resume past E4) -> do NOT run the
+       P1f hash-gate against a missing manifest. A subset edit is DONE when the on-disk
+       hash already equals the post-edit ExpectedManifestHash.
+  P3r. Secret cleanup is DONE when none of RoutedSecretKeys is still present in the vault.
+ExecuteDeAdoptWithOpts (each step is skip-if-done: a fresh row runs all, a resume runs
+only the remainder):
   E1. Acquire the per-manifest LEASE (tryAcquireAdoptManifestLease, adopted_entries.go:370)
-      — mutual exclusion with a concurrent adopt/GC/second de-adopt of the same manifest;
-      TryLock fails -> "concurrent operation in progress", fail closed. defer Unlock.
-  E2. MarkAdoptProvenanceDeAdopting(manifest)  (durable journal: adopted -> de_adopting).
-  E3. Restore each target client (present/absent/present-merged-lower) BEFORE removing the
-      hub binding from durable topology (adds-before-removes: the existing hub-reconcile
-      safety rule, install_hub_reconcile.go:231-260,326-329; a short duplicate-routing
-      window beats an outage window).
-  E4. Manifest: subset -> ManifestEditInWithHash + UpdateAdoptExpectedManifestHash;
-      last binding -> ManifestDeleteInWithHash + remove supervisor-intent descriptors
-      (install_parsed_manifest.go:1914-2023).
-  E5. Gate-ON only: republish the resolver snapshot + hub-reconcile prune (see below);
-      republish failure -> success-with-restart-required, NOT a rollback (matches
-      gui/manifest.go:192-224).
-  E6. Last binding only: deleteAdoptRoutedSecrets(idempotent) BEFORE close.
+      — mutual exclusion with a concurrent adopt/GC/second de-adopt; TryLock fails ->
+      "concurrent operation in progress", fail closed. defer Unlock.
+  E2. MarkAdoptProvenanceDeAdopting(manifest)  (idempotent; adopted->de_adopting, no-op if already).
+  E3. Restore each NOT-yet-RESTORE-DONE target client (present/absent/present-merged-lower)
+      BEFORE removing the hub binding (adds-before-removes: install_hub_reconcile.go:231-260,
+      326-329; a short duplicate-routing window beats an outage window).
+  E4. Manifest (skip if P2r says done): subset -> ManifestEditInWithHash +
+      UpdateAdoptExpectedManifestHash; last binding -> ManifestDeleteInWithHash + remove
+      supervisor-intent descriptors (install_parsed_manifest.go:1914-2023).
+  E5. Gate-ON only: republish the resolver snapshot + hub-reconcile zero-binding prune
+      (idempotent); republish failure -> success-with-restart-required, NOT a rollback.
+  E6. Last binding only: delete the STILL-PRESENT RoutedSecretKeys (pre-filtered, F-D) BEFORE close.
   E7. CloseAdoptProvenance(manifest) (de_adopting -> closed + removeAdoptSnapshots) for a
-      full de-adopt; for a subset, update adopt_clients + clients[] + expected hash and
-      leave state `adopted`.
+      full de-adopt; for a subset, update adopt_clients + clients[] + expected hash, leave `adopted`.
   E8. Emit backend event + GUI operator-action row.
 ```
 
-**Lock graph** (extends the shipped order `<manifest>.lease → adopted-entries.lock →
-<snapshot>.lock`, `adopted_entries.go:186-188`): de-adopt holds the per-manifest lease
-(E1) across the operation; the store read-modify-write mutators take
-`adopted-entries.lock` transiently; client-config writes take their own per-file config
-lock (`config_lock.go:32-50`) one file at a time; supervisor-intent cleanup takes only
-the intent lock; gate-ON republish acquires `hub-mcp.lock` ITSELF
-(`hub_mcp_resolver.go:459-476` — callers must NOT already hold it). **No IPC, kill, or
-wait runs while any state lock is held** (review "Lock order and cleanup journaling"
-gap): supervisor nudge/kill happens in the descriptor-cleanup core outside the store
-lock. This resolves the review's lock-order gap; the journaled `de_adopting` marker
-resolves the cleanup-journaling gap.
+Test 14 (resume-after-restore) is now CONSISTENT with these gates: the already-restored
+client is RESTORE-DONE (P1r) so it is SKIPPED, not refused (the old P2f-only gate would
+have refused it as a shape-mismatch); the retry completes E4-E7.
+
+**Lock graph (arch F-C — full total order, not just the shipped triple).** De-adopt holds
+the per-manifest `<manifest>.lease` (E1) as the OUTERMOST lock across E1–E7; every other
+lock is an INNER, transient, NON-nested acquisition. Total order:
+
+```
+<manifest>.lease   (outermost, held E1-E7)
+  -> { config-lock (per client file, E3) | intent-lock (E4) |
+       adopted-entries.lock (each store mutator) | hub-mcp.lock (E5 republish) }
+```
+
+The inners are mutually EXCLUSIVE in time — never one held while acquiring another: each
+store mutator takes+releases `adopted-entries.lock` around a single read-modify-write;
+client restores take one per-file `config-lock` at a time (`config_lock.go:32-50`);
+supervisor-intent cleanup takes only the intent lock; gate-ON republish calls
+`PublishGroupsSnapshotLocked`, which ACQUIRES `hub-mcp.lock` ITSELF and requires callers
+NOT to hold it (`hub_mcp_resolver.go:459-476`) — so de-adopt MUST NOT hold
+`adopted-entries.lock` (or any other inner) when it enters E5. **No reverse edge exists:**
+nothing acquires the adopt `<manifest>.lease` while holding `hub-mcp.lock` (adopt nests
+the SAME direction, `adopted_entries.go:186-188`), and the lease is `TryLock`-based
+(non-blocking), so even an inverted acquisition cannot deadlock. **No IPC, kill, or wait
+runs while ANY lock is held** — supervisor nudge/kill happens in the descriptor-cleanup
+core outside every state lock. T6 asserts this RANKING (the total order + the
+no-reverse-edge property), not merely "no IPC/kill/wait under a state lock". This resolves
+the review's lock-order gap; the journaled `de_adopting` marker resolves the
+cleanup-journaling gap.
 
 ### Gate-ON aggregate + `/g/` groups (review F3)
 
@@ -339,11 +470,15 @@ resolves the cleanup-journaling gap.
   resolver so `/clients/<target>/mcp` drops the server (existing sessions revalidate
   tools/list against the live snapshot and drop removed bindings,
   `hub_mcp_aggregator.go:345-387`; tools/call may `-32601` a moved route). If the target
-  client has ZERO remaining bindings, prune its `mcphub-hub` aggregate entry — the
-  current `BuildHubReconcilePlan` only iterates clients with ≥1 binding
-  (`install_hub_reconcile.go:121-149`), so de-adopt needs the small reconcile-owner
-  extension to prune a stale aggregate for zero-binding selected clients (mirrors the
-  gate-OFF all-client sweep `:150-179`).
+  client has ZERO remaining bindings, its `mcphub-hub` aggregate entry must be pruned —
+  today `BuildHubReconcilePlan` sweeps every client for `mcphub-hub` removal ONLY on
+  gate-OFF (`install_hub_reconcile.go:164-180`); its gate-ON per-client loop `continue`s
+  a zero-binding client (`:181-185`), leaving a stale `mcphub-hub` URL. **This is a
+  SECOND shared-owner change (arch F-B):** EXTEND the single owner `BuildHubReconcilePlan`
+  to emit the zero-binding `mcphub-hub` removal under gate-ON — do NOT hand-roll a
+  de-adopt-local `mcphub-hub` remove (that would duplicate the reserved-entry-name
+  `hubReconcileAggregateEntryName` the reconcile owner holds). Folded into the decision
+  `2026-07-10-deadopt-manifest-delete-hash-gate.md` as the second shared-owner change.
 - **`/g/` groups (F3) — server-scoped, not client-scoped.** Group bindings come from
   `Group.Servers` (`hub_mcp_resolver.go:204-214`), so a group binds a SERVER, not a
   (client, server). Policy:
@@ -415,9 +550,14 @@ API/unit (falsification):
    pre-adopt state. FAIL if the test hands de-adopt an in-memory snapshot — proves de-adopt
    uses only `adopted-entries.json` + the pinned snapshot. (The provenance item's
    T-capture-persisted proves the artifact is durable; T1 proves de-adopt consumes it.)
-2. **Tamper gate.** Swap the pinned snapshot bytes after adopt; assert de-adopt refuses
-   the restore fail-closed on `SnapshotSHA256` mismatch (security P2-1). Also assert a
-   DELETED snapshot file → same fail-closed refusal.
+2. **Tamper gate + single-read (security P2-1 + P1).** Swap the pinned snapshot bytes
+   after adopt; assert de-adopt refuses the restore fail-closed on `SnapshotSHA256`
+   mismatch. Also assert a DELETED snapshot file → same fail-closed refusal. Single-read
+   sub-test: inject a snapshot-file swap in the window BETWEEN the sha256 verify and the
+   restore (a test seam that mutates the file after verification); assert the restored
+   entry is the VERIFIED bytes, never the swapped-in attacker bytes — proving de-adopt
+   restores from the in-memory verified bytes via the bytes-input helper, not a second
+   path read.
 3. **Present-merged-lower restore.** Adopt a MiMoCode-style client whose entry resolves
    from a lower layer (`SourceBelowWriteTarget=true` → `present-merged-lower`, no
    snapshot); de-adopt; assert de-adopt REMOVES the hub write-target entry and the lower
@@ -448,14 +588,27 @@ API/unit (falsification):
 12. **T5 — snapshot survives backup churn (`review.md:110-111`).** Set `backups.keep_n`
     low, adopt, churn client-config backups past retention, then de-adopt; assert restore
     still succeeds from the NON-PRUNABLE pinned snapshot.
-13. **T6 — lock order / no re-entrancy (`review.md:112-113`).** Assert de-adopt does not
-    call a helper that re-acquires a lock it already holds (esp. `hub-mcp.lock`), and no
-    IPC/kill/wait runs while a state lock is held; assert de-adopt↔adopt mutual exclusion
-    via the per-manifest lease.
-14. **Resume after restore before manifest.** Inject a failure after client restore; retry
-    completes manifest/provenance/supervisor cleanup without corrupting the restored entry.
+13. **T6 — lock order / no re-entrancy (`review.md:112-113`).** Assert the FULL total
+    order (`<manifest>.lease` outermost; `config-lock` / `intent-lock` /
+    `adopted-entries.lock` / `hub-mcp.lock` inner + mutually non-nested): de-adopt holds
+    NO inner lock when it enters E5 republish (which self-acquires `hub-mcp.lock`), and
+    no reverse edge exists (nothing takes the lease while holding `hub-mcp.lock`); no
+    IPC/kill/wait runs while any lock is held; de-adopt↔adopt mutual exclusion via the
+    per-manifest lease.
+14. **Resume after restore before manifest (reconciles with the F-A resume gates).**
+    Inject a failure after client restore; retry sees the restored client as RESTORE-DONE
+    (P1r → SKIP, not refuse) and completes manifest/provenance/supervisor cleanup without
+    corrupting the restored entry.
 15. **Quarantined daemon releases intent.** Descriptor present, runtime unhealthy;
     de-adopt still removes supervisor intent, no health precondition.
+16. **P2-c redaction.** Drive a de-adopt that emits events + an operator-action row +
+    (via an injected failure) an error; assert NO snapshot bytes, entry
+    `command`/`args`/`env` values, or secret values appear in any emitted body / error /
+    narration — only names, key NAMES, refs, counts, hashes.
+17. **P2-b remove-integrity.** (a) Flip a `present` row's live entry to a NON-hub entry
+    (operator-restored-native) then de-adopt an `absent`/`present-merged-lower` client;
+    assert the exact-hub-entry gate REFUSES the `RemoveEntry`. (b) Assert the relax lane
+    emits the operator-visible residual warning naming `MCPHUB_REQUIRE_SINGLE_USER_HOME=1`.
 
 GUI/CLI: route tests mirroring `gui/adopt_test.go` (plan previews without mutation;
 execute calls the API; conflicts map to actionable errors; operator-action emitted);
@@ -479,26 +632,42 @@ live-republish-unavailable returns restart-required.
 10. `{ guarantee: A `/g/` group is untouched on subset de-adopt and, on last-binding delete, produces an operator-visible orphaned-group warning without auto-editing groups.yaml; single-owner: the de-adopt gate reconcile step (server-scoped group policy); enforcement-probe: test 11 (T4) }`
 11. `{ guarantee: Restore is functional-equivalent (no byte-equivalence promise) and reports `RestoreMode` honestly per client; single-owner: the shipped `RestoreMode` field (functional-equivalent default, adopted_entries.go:125); enforcement-probe: plan/response asserts restore_mode, no byte-equivalence claim in UI copy }`
 12. `{ guarantee: De-adopt introduces no new aggregate-membership state — `client_bindings` stays the source of `/clients/<client>/mcp`; single-owner: the manifest resolver (hub_mcp_resolver.go:279-299); enforcement-probe: grep shows de-adopt mutates bindings + republishes, adds no parallel membership store }`
+13. `{ guarantee: The `present`-client restore verifies AND restores the SAME in-memory snapshot bytes (one read), so a between-reads snapshot swap cannot inject an attacker command/url (security P1); single-owner: the new `RestoreEntryFromBytesForRollbackWithConfigWriter` fed the sha256-verified bytes — NOT the path-based helper's second `os.ReadFile` (claude_code.go:200); enforcement-probe: test 2 single-read sub-test }`
+14. `{ guarantee: `ManifestDeleteInWithHash` REFUSES to delete on an empty/absent expected hash (fail-closed polarity, inverse of the edit path's skip) and RETAINS the path-escape guard (security P2-a); single-owner: `ManifestDeleteInWithHash` (manifest.go, per the accepted decision); enforcement-probe: a delete-with-empty-hash test asserts refusal + a traversal test asserts `Dir(target)==Clean(dir)` survives }`
+15. `{ guarantee: No `RemoveEntry` runs unless the live entry equals the EXACT deterministic adopt-written hub entry; the residual owner-only row-swap is documented + strict-mode-mitigated + relax-lane-warned (security P2-b); single-owner: the de-adopt remove-path exact-match gate; enforcement-probe: test 17 }`
+16. `{ guarantee: No secret value, snapshot byte, or entry body appears in any de-adopt event/error/log/narration — names, key NAMES, refs, counts, hashes only (security P2-c); single-owner: the de-adopt event/error redaction (mirrors adopt_provenance_events.go:49-110); enforcement-probe: test 16 }`
+17. `{ guarantee: A `de_adopting` resume COMPLETES (skips already-restore-done clients + already-done steps) instead of refusing them; the fresh-vs-resume disambiguation is DERIVED from OperationState + per-client/per-step done-ness (arch F-A); single-owner: BuildDeAdoptPlan's OperationState branch (P0 / P1f-P3f / P1r-P3r); enforcement-probe: test 14 (now consistent with the gates) }`
+18. `{ guarantee: De-adopt's lock acquisitions obey ONE acyclic total order (lease outermost; inners mutually non-nested; no inner held across E5's self-acquired hub-mcp.lock; no reverse edge) (arch F-C); single-owner: the lock graph; enforcement-probe: test 13 (T6) asserts the ranking }`
+19. `{ guarantee: Gate-ON zero-binding `mcphub-hub` pruning is emitted by the SINGLE reconcile owner `BuildHubReconcilePlan` (extended), not a de-adopt-local remove that duplicates the reserved-entry-name (arch F-B); single-owner: `BuildHubReconcilePlan` (install_hub_reconcile.go); enforcement-probe: grep shows no de-adopt-local `mcphub-hub` remove; the gate-ON T4 test asserts the aggregate is pruned }`
 
-Cross-cutting decision (registry): the shared-owner `ManifestDeleteInWithHash` gate is
-filed as `work-items/decisions/2026-07-10-deadopt-manifest-delete-hash-gate.md`
-(`status: proposed`). The de-adopt operation-state ordering + `/g/` policy are
+Cross-cutting decisions (registry): the shared-owner `ManifestDeleteInWithHash` gate
+(fail-closed-on-empty polarity + retained path-escape guard) AND the second shared-owner
+change (gate-ON zero-binding prune in `BuildHubReconcilePlan`, arch F-B) are filed in
+`work-items/decisions/2026-07-10-deadopt-manifest-delete-hash-gate.md`
+(**`status: accepted`** — arch-reviewer promoted). The bytes-input restore variant (P1),
+the de-adopt operation-state ordering + resume contract, and the `/g/` policy are
 single-work-item decisions and stay inline here.
 
 ## Provenance-gap flag (none blocking)
 
-No genuine provenance gap blocks de-adopt — everything the consumer needs is on master:
+No genuine provenance gap blocks de-adopt — the full PROVENANCE surface is on master:
 `ReadAdoptProvenance` (exported) + the store's same-package unexported helpers, the
 non-prunable pinned snapshot + `SnapshotSHA256`, `deleteAdoptRoutedSecrets`,
-`liveEntryMatchesManifestBinding`, `RestoreEntryFromBackupForRollbackWithConfigWriter`,
-`ManifestHashContent`, `tryAcquireAdoptManifestLease`, and the declared de-adopt
-mutators. Two de-adopt-OWNED nuances (not provenance defects, not reasons to touch the
-provenance code):
+`liveEntryMatchesManifestBinding`, the restore MECHANIC
+`RestoreEntryFromBackupForRollbackWithConfigWriter`, `ManifestHashContent`,
+`tryAcquireAdoptManifestLease`, and the declared de-adopt mutators. Three de-adopt-OWNED
+implementation shapes (NOT provenance defects, NOT reasons to touch the provenance code):
 
-- `vault.Delete` errors on an already-absent key (`vault.go:171-177`), so de-adopt's
-  secret-deletion loop must be idempotency-safe (skip absent keys) for T3 retry.
-- The P3-2 shared-routed-key scan has no shared helper; de-adopt enumerates manifests
-  itself (SHOULD, not MUST).
+- **Single-read restore is a de-adopt-authored `clients` addition (security P1).** The
+  path-based restore helper is on master, but using it verbatim double-reads the
+  snapshot (`claude_code.go:200`); de-adopt ADDS the bytes-input sibling
+  `RestoreEntryFromBytesForRollbackWithConfigWriter` (factoring the same extraction
+  tail). An additive clients-package change de-adopt owns, not a provenance dependency.
+- `deleteAdoptRoutedSecrets` is all-or-nothing and `vault.Delete` errors on an
+  already-absent key (`vault.go:171-177`), so de-adopt must PRE-FILTER to still-present
+  keys before calling (arch F-D) — an implementation shape, not a provenance defect.
+- The P3-a shared-routed-key scan has no shared helper; de-adopt enumerates manifests
+  itself and surfaces a shared-key hit as an operator warning (not a blind delete).
 
 De-adopt does NOT reopen the tracked provenance residuals (lease-file DACL, lease-file
 accumulation, `present-merged-lower` capture-event count) —
@@ -506,27 +675,48 @@ accumulation, `present-merged-lower` capture-event count) —
 
 ## Recommended delivery sequence (for the planner)
 
-1. Phase 2a: the three de-adopt provenance mutators + `ManifestDeleteInWithHash`
-   (shared helper, per decision) + unit tests (T1, tamper, T2).
-2. Phase 2b: `BuildDeAdoptPlan`/`ExecuteDeAdoptWithOpts` restore (present/absent/
-   present-merged-lower), manifest mutation, supervisor-intent teardown, secret cleanup
-   (F2/T3), lease-guarded resume (T6).
-3. Phase 2c: gate-ON republish + zero-binding aggregate prune + `/g/` orphan policy (T4)
-   with restart-required reporting.
+1. Phase 2a: the three de-adopt provenance mutators + the three additive shared-owner
+   changes — `ManifestDeleteInWithHash` (fail-closed-on-empty, path-guard retained), the
+   bytes-input restore variant `RestoreEntryFromBytesForRollbackWithConfigWriter` (P1),
+   and the `BuildHubReconcilePlan` gate-ON zero-binding prune (F-B) — + unit tests (T1,
+   tamper/single-read, T2, empty-hash refusal).
+2. Phase 2b: `BuildDeAdoptPlan`/`ExecuteDeAdoptWithOpts` — the OperationState-branched
+   plan gates + resume derivation (F-A), restore (present single-read/absent/
+   present-merged-lower) with the P2-b remove-integrity gate, manifest mutation,
+   supervisor-intent teardown, pre-filtered secret cleanup (F2/F-D/T3), redaction (P2-c),
+   lease-guarded resume + full lock order (T6/T14).
+3. Phase 2c: gate-ON republish + the zero-binding aggregate prune (via the extended
+   reconcile owner) + `/g/` orphan policy (T4) with restart-required reporting.
 4. Phase 2d: CLI + GUI + frontend affordance.
 5. Phase 2e: e2e round-trip (adopt from native → de-adopt → verify client config,
    manifest, supervisor intent, aggregate/`/g/` membership, scan classification).
 
 ## Gate decision
 
-**PASS.** The blocking prerequisite (adopt-side durable provenance) is DELIVERED (#528);
-this revision aligns de-adopt to the AS-SHIPPED contract and resolves the review
-findings: F1 (hash-gated last-binding delete via `ManifestDeleteInWithHash` using
-`ExpectedManifestHash`), F2 (delete routed keys before close, recoverable `de_adopting`,
-idempotent retry, shared-key scan handoff), the new `present-merged-lower` state
-(restore by removal), the P2-1 sha256 fail-closed gate, F3 (`/g/` server-scoped policy),
-and T1 (fresh-process/persisted-only round-trip) + T2–T6. Change-Surface Contract, claims,
-seams, dependency direction, blast radius, failure modes, lock graph, and test strategy
-are explicit; no implementation code is included; one cross-cutting decision is filed
-`status: proposed`. No provenance gap blocks de-adopt. Next stage: `$planner` breaks this
-into the delivery phases above.
+**PASS (revised 2026-07-10 — arch + security gate fold-in).** The blocking prerequisite
+(adopt-side durable provenance) is DELIVERED (#528); this design consumes the AS-SHIPPED
+contract and resolves the original review findings F1/F2/F3/present-merged-lower/P2-1/T1–T6.
+
+This revision additionally folds in the second-round arch + security REVISE (both
+design-level, none a redesign):
+
+- **Security:** P1 single-read restore (verify + restore the SAME bytes via a new
+  bytes-input helper; the path-based helper's second `os.ReadFile` is banned for the
+  security-critical restore); P2-a fail-closed-on-empty-hash polarity on
+  `ManifestDeleteInWithHash` (+ retained path-escape guard); P2-b remove-path exact-hub-
+  entry gate + documented owner-only row-swap residual + strict-mode/relax-lane warning;
+  P2-c redaction contract + test; P3-a shared-key scan elevated to an operator warning,
+  P3-b abandoned-retry orphan acknowledged as a bounded residual.
+- **Architecture:** F-A resume contract (plan gates branch on `OperationState`; per-step
+  and per-client done-ness derivation so a `de_adopting` resume completes rather than
+  refuses; reconciled with test 14); F-B the SECOND shared-owner change (gate-ON
+  zero-binding `mcphub-hub` prune EXTENDS `BuildHubReconcilePlan`, not a de-adopt-local
+  remove) — blast radius + scope note corrected; F-C the full lock total order + no-
+  reverse-edge, asserted by T6; F-D routed-secret pre-filter (the all-or-nothing deleter
+  needs a still-present-keys filter, not a thin wrapper).
+
+Change-Surface Contract, 19 claims, seams, dependency direction, blast radius (now THREE
+additive shared-owner changes), failure modes, the resume-aware ordering, the full lock
+graph, and test strategy are explicit; no implementation code is included; both
+cross-cutting shared-owner changes are in the now-`accepted` decision. No provenance gap
+blocks de-adopt. Next stage: `$planner` breaks this into the delivery phases above.

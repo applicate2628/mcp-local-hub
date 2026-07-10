@@ -137,7 +137,7 @@ against merged code):
 
 | Finding / gap | Resolution in revised `design.md` |
 |---|---|
-| **F1** manifest-delete not hash-gated | New shared `ManifestDeleteInWithHash` gates the last-binding delete at the mutation point using the row's `ExpectedManifestHash` (both hashes populated at capture, so the gate never SKIPs on empty). Decision `work-items/decisions/2026-07-10-deadopt-manifest-delete-hash-gate.md` (`status: proposed`). "Manifest mutation" section + claim 3 + test T2. |
+| **F1** manifest-delete not hash-gated | New shared `ManifestDeleteInWithHash` gates the last-binding delete at the mutation point using the row's `ExpectedManifestHash` (both hashes populated at capture). Decision `work-items/decisions/2026-07-10-deadopt-manifest-delete-hash-gate.md` (round 2: `status: accepted`, + fail-closed-on-empty polarity per SEC P2-a). "Manifest mutation" section + claim 3 + test T2. |
 | **F2** provenance forgotten before secret cleanup | Routed keys deleted via `deleteAdoptRoutedSecrets` BEFORE `CloseAdoptProvenance`; the row stays `de_adopting` (the shipped enum's recoverable "cleanup pending" state, keys retained) until every key is gone; idempotent retry (skip already-absent keys — `vault.Delete` errors on missing); P3-2 shared-key scan folded as a SHOULD. "Routed-secret cleanup" section + claim 4 + test T3. |
 | **F3** `/g/` semantics unresolved | Defined server-scoped `/g/` policy separate from `/clients/`: subset de-adopt leaves the group routing (manifest lives); last-binding delete surfaces an orphaned-group warning + event, no auto-edit of `groups.yaml`. "Gate-ON aggregate + `/g/` groups" section + claim 10 + test T4. |
 | **present-merged-lower** (new state the memo predated) | Restore by REMOVING the hub write-target entry (no snapshot); the lower layer re-emerges; reported functional-equivalent, distinct from `absent`. "Per-client restore" section + claim 2 + test 3. |
@@ -149,3 +149,25 @@ against merged code):
 
 Verdict of record for the current design: the revised `design.md` gate decision
 **PASS**. Next stage: `$planner`.
+
+## Second-round design gate (2026-07-10) — arch + security REVISE, folded in
+
+The revised `design.md` then went through both design gates. Both returned **REVISE**
+(design-level; none a redesign) and the `ManifestDeleteInWithHash` decision was PROMOTED
+to `accepted`. All items are folded into `design.md` + the decision:
+
+| Gate finding | Resolution in `design.md` |
+|---|---|
+| SEC **P1** — verify-then-restore-by-path double-read TOCTOU (snapshot swap injects attacker command/url) | Single-read: verify AND restore the SAME in-memory bytes via a NEW `clients.RestoreEntryFromBytesForRollbackWithConfigWriter`; the path-based helper's second `os.ReadFile` (`claude_code.go:200`) is BANNED for the security-critical restore. Change-Surface D2, "Per-client restore" §1, claim 13, test 2 single-read sub-test. |
+| SEC **P2-a** — delete gate must NOT inherit the edit path's skip-on-empty | `ManifestDeleteInWithHash` treats empty/absent expected hash as a FAIL-CLOSED refusal (destructive-default polarity). "Manifest mutation" §, decision Consequence (a), claim 14. |
+| SEC **P2-b** — restore-vs-remove trusts un-integrity-checked `original_state` | Exact-hub-entry match required before any `RemoveEntry`; documented owner-only row-swap residual + `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` + relax-lane operator warning. "Remove-path integrity gate + threat model" §, claim 15, test 17. |
+| SEC **P2-c** — secret/snapshot content in events/errors | Redaction contract (names/key-names/refs/counts/hashes only) + test. "Observability + redaction" §, claim 16, test 16. |
+| SEC **P3-a / P3-b** — shared-key deletion; abandoned-retry orphan | P3-a elevated to a plan-surfaced operator warning; P3-b acknowledged as a bounded residual. "Routed-secret cleanup" §3-4. |
+| ARCH **F-A** — resume contract contradicts the plan gates + test 14 | Plan gates BRANCH on `OperationState` (fresh `adopted` vs resuming `de_adopting`); per-client + per-step done-ness derivation so a resume SKIPS completed work; reconciled with test 14. "Operation-state machine" §, claim 17. |
+| ARCH **F-B** — a SECOND shared-owner change the scope note denied | Blast radius + scope corrected to THREE shared-owner changes; gate-ON zero-binding prune EXTENDS `BuildHubReconcilePlan` (not a de-adopt-local remove). "Gate-ON aggregate" §, decision Consequence (c), claim 19. |
+| ARCH **F-C** — complete the lock graph | Full total order `lease → {config-lock \| intent-lock \| adopted-entries.lock \| hub-mcp.lock}` + no-reverse-edge; T6 asserts the ranking. "Lock graph" §, claim 18. |
+| ARCH **F-D** — `deleteAdoptRoutedSecrets` all-or-nothing | Pre-filter to still-present keys before calling (not a thin wrapper). "Routed-secret cleanup" §2, provenance-gap flag. |
+| Decision | Flipped to `status: accepted`; folded Consequences (a) empty-hash polarity, (b) retained path-escape guard, (c) the F-B second shared-owner change. |
+
+Verdict of record after round 2: `design.md` gate decision **PASS (revised)**; the
+decision is `accepted`. Next stage: `$planner`.
