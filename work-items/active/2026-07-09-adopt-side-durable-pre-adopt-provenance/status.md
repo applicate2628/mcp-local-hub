@@ -59,3 +59,9 @@ BEFORE the config rewrite commits.
 - Not on the critical path of the in-flight reaper v1 (PR #527); queued behind it.
 - The de-adopt design + review already exist and pin the consumer contract, so the
   architect step is schema + capture-seam, not a from-scratch design.
+
+## Lead decisions on planner-flagged ambiguities (2026-07-10)
+- Ambiguity 1 (three abort sites): resolved by planner — Phase C asserts all 3 (`persistAdoptRoutedSecrets` err-path `:218-220` becomes the 3rd). No further action.
+- Ambiguity 2 (F1 managed-entries tuple-recording): **DEFERRED** — optional, not required for de-adopt correctness (arch-reviewer + planner concur). NOT in v1 scope.
+- Ambiguity 3 (F2 `mcphub supervise` startup GC hook): **DEFERRED to follow-up** — touches `runSupervise`, outside the admitted adopt-Execute blast radius; per-adopt GC (Phase D) already bounds the residual. Follow-up work-item if a fleet-wide sweep is later wanted.
+- Ambiguity 4 (capture atomicity + GC guard): implementer confirms; adopt-v1 disallows concurrent same-manifest (`adopt.go:148-152`), escalate-not-invent if a real window appears.
