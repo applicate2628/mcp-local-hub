@@ -76,19 +76,19 @@ de-adopt caller.
 - **(b) Retains the path-escape guard.** `ManifestDeleteInWithHash` MUST keep
   `ManifestDeleteIn`'s traversal defense (`manifest.go:793-796`, `Dir(target) ==
   Clean(dir)`); a gated variant that drops it is a security regression.
-- **(c) F-B — a SECOND shared-owner change is tracked here.** De-adopt's gate-ON
-  zero-binding aggregate prune EXTENDS the single reconcile owner `BuildHubReconcilePlan`
-  (`internal/api/install_hub_reconcile.go`) so a client dropping to zero bindings gets
-  its `mcphub-hub` aggregate removed under gate-ON (today only the gate-OFF sweep does
-  it, `:164-180`; the gate-ON per-client loop skips zero-binding clients, `:181-185`).
-  This is an EXTENSION of the single owner (it holds the reserved-entry-name
-  `hubReconcileAggregateEntryName`), NOT a de-adopt-local `mcphub-hub` remove that would
-  duplicate that knowledge. Recorded here rather than as a separate file because it is
-  the same de-adopt shared-owner-change class; a future split into its own decision is
-  fine if it grows.
-- Enforcement: de-adopt test T2 (build plan → edit manifest → execute last-binding
-  de-adopt → assert `ErrManifestHashMismatch`, no delete); an empty-hash-refusal test;
-  a traversal test for the escape guard; the gate-ON T4 test for the prune.
+- **(c) F-B (gate-ON reconcile prune) is DEFERRED out of de-adopt v1 (2026-07-11).** The
+  2026-07-11 multi-model rework scoped de-adopt v1 to gate-OFF-only (decision
+  `2026-07-11-deadopt-v1-all-clients-only-scope.md`), so v1 does NOT modify
+  `BuildHubReconcilePlan`. The gate-ON zero-binding `mcphub-hub` prune moves to the gate-ON
+  de-adopt follow-up (`work-items/backlog/2026-07-11-deadopt-subset-and-gate-on-followup.md`),
+  and the underlying pre-existing gate-ON stale-aggregate gap is filed independently as
+  `work-items/bugs/2026-07-11-hub-reconcile-gate-on-zero-binding-stale-aggregate.md`. When
+  that path is built, the prune must EXTEND the single reconcile owner
+  `BuildHubReconcilePlan` (it holds the reserved `hubReconcileAggregateEntryName`), NOT a
+  de-adopt-local `mcphub-hub` remove.
+- Enforcement: de-adopt test 5 (build plan → edit manifest → execute last-binding delete →
+  assert `ErrManifestHashMismatch`, no delete); an empty-hash-refusal test; a traversal test
+  for the escape guard.
 
 ## Scope note
 

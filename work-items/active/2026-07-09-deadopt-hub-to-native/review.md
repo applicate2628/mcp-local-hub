@@ -171,3 +171,36 @@ to `accepted`. All items are folded into `design.md` + the decision:
 
 Verdict of record after round 2: `design.md` gate decision **PASS (revised)**; the
 decision is `accepted`. Next stage: `$planner`.
+
+## Third-round design gate (2026-07-11) — multi-model review + v1 scope cut
+
+The round-2 design (`a1c2bcab`) was reviewed by 5 independent adversarial lanes (codex
+gpt-5.6-sol xhigh + 4 fable-5 angles). LEAD synthesis:
+`review-multimodel-2026-07-11.md`. Verdict: REVISE with a convergent simplification —
+`design.md` was REWORKED to **all-clients-only, gate-OFF-only v1** (subset + gate-ON +
+`--reconstruct-legacy` cut). Cross-verification changed two round-2 conclusions:
+**codex P0-1 (co-resident row+snapshot swap → command injection) was REFUTED** (the shipped
+anchored reader's unconditional wrong-owner refusal is the authenticity root — the prior
+P2-b threat framing was wrong and is corrected), and **P0-3 (manifest gate atomicity) was
+downgraded to a P3 residual**. 7 BLOCKING fixes folded into the reworked design:
+
+| Blocking | Resolution in reworked `design.md` |
+|---|---|
+| 1 — `closed` tombstone wedges re-adopt + strands snapshots | `CloseAdoptProvenance` DELETES the row snapshots-first (mirrors `reapAdoptProvenanceRow` `adopted_entries.go:860-882`); P0's `closed` branch → `found=false`. "Close = DELETE" §, claim 5, test 6. |
+| 2 — gate-ON false-refuses everything (per-server entries removed) | v1 REFUSES gate-ON ("gate OFF first"); gate-ON deferred. Adopt-side blindness filed as an adjacent bug. "Gate-ON refused" §, claim 9, test 11. |
+| 3 — byte-exact P2-b is a 2nd shape owner + false-refuses on binary upgrade | Equality = the shipped recognizer `liveEntryMatchesManifestBinding`; URL formula corrected to per-server `/mcp`. "Single equality owner" §, claim 2. |
+| 4 — plain `os.ReadFile` snapshot = OOM lever, discards owner signal | Read via `ReadStateFileInodeAnchored`; path recomputed from `(ManifestName, Client)`; `.snapshot` added to `isSecretBearingStateFilePath` + a snapshot read cap. "Snapshot read" §, claims 3+13, test 2. |
+| 5 — bytes-restore on `Client` compile-forces never-adoptable adapters | A CAS CAPABILITY interface (mirrors `EntryBytesChecker`), not a `Client` method. "Per-client restore" §, claim 10. |
+| 6 — reconcile prune mechanism/declaration | Deferred with gate-ON; pre-existing gate-ON stale-aggregate filed as an adjacent bug; folds into the follow-up. "Gate-ON refused" §, claim 11. |
+| 7 — client-config writes not mutation-point-atomic | CAS gate inside ONE `withConfigLock`: re-read live, require still-hub-entry, then write/remove. "Per-client restore" §, claim 4, test 3. |
+| Fold-ins | G3 eligibility surface; G4 per-client `{Restored,Failed}` report + CLI exit; G6 widened `{adopted,committed-adopting}→de_adopting`; P1-4 close predicate = deleted-OR-skipped; P3-E corrected threat model (owner anchor = authenticity root); P3-D manifest-delete residual; G7/G8 residuals. |
+
+Superseded round-2 items: the byte-exact P2-b exact-match gate is replaced by the recognizer
++ CAS gate (P0-1 refuted); F-B (reconcile prune) + the single-owner renderer are deferred with
+gate-ON; the path-based `RestoreEntryFromBytesForRollbackWithConfigWriter` from P1 is replaced
+by the CAS capability's `CASRestoreEntryFromBytes`.
+
+Verdict of record: reworked `design.md` gate decision **PASS (v1 all-clients-only)**; two
+governing decisions `accepted` (`2026-07-11-deadopt-v1-all-clients-only-scope`,
+`2026-07-10-deadopt-manifest-delete-hash-gate`); one follow-up stub + three adjacent bugs
+filed. Next stage: an independent FABLE audit, then `$planner`.

@@ -1,9 +1,10 @@
 # status - phase-2 de-adopt hub to native
 
 Template: design (full-delivery). Orchestrator: `$lead`.
-State: **DESIGN REVISED — unblocked; ready for planning.** The blocking prerequisite is
-DELIVERED and the design has been revised against the AS-SHIPPED provenance contract;
-the original REVISE/BLOCKED verdict is cleared. Implementation not started.
+State: **DESIGN REWORKED to v1 all-clients-only — awaiting an independent FABLE audit,
+then planning.** The blocking prerequisite is DELIVERED; the design was reworked to the
+multi-model synthesis (v1 = all-clients-only, gate-OFF-only atomic de-adopt). Implementation
+not started.
 Depends-on: 2026-07-09-adopt-side-durable-pre-adopt-provenance
 
 Dependency note: `2026-07-09-adopt-side-durable-pre-adopt-provenance` is DELIVERED +
@@ -13,7 +14,7 @@ durable provenance store (`<state-dir>/adopted-entries.json` + pinned snapshots)
 item consumes exists on master, so the `Depends-on:` edge is met.
 
 ## Active agents / lanes
-- None. Design revision complete; the next gate is `$planner`.
+- None. Design rework complete; the next gate is an independent FABLE audit, then `$planner`.
 
 ## Completed agents / lanes
 - Design memo accepted and copied into this work-item as `design.md`.
@@ -35,21 +36,38 @@ item consumes exists on master, so the `Depends-on:` edge is met.
   F-A (OperationState-branched resume contract, reconciled with test 14), F-B (the
   SECOND shared-owner change — gate-ON zero-binding prune extends `BuildHubReconcilePlan`;
   blast radius + scope corrected), F-C (full lock total order + no-reverse-edge, T6),
-  F-D (routed-secret pre-filter). Blast radius now names THREE additive shared-owner
-  changes; claims grew to 19.
+  F-D (routed-secret pre-filter). Blast radius named THREE additive shared-owner changes.
+- **Design REWORKED (2026-07-11, round 3 — multi-model synthesis + v1 scope cut).** 5
+  independent adversarial lanes (codex xhigh + 4 fable-5) reviewed the round-2 design;
+  LEAD synthesis (`review-multimodel-2026-07-11.md`) drove a REWORK to **v1 =
+  all-clients-only, gate-OFF-only atomic de-adopt** (subset + gate-ON + `--reconstruct-legacy`
+  CUT). 7 blocking fixes folded: close=DELETE-row-snapshots-first (no `closed` tombstone);
+  gate-ON refused; equality via the shipped recognizer (byte-exact cut, codex P0-1 REFUTED);
+  anchored snapshot read + recomputed path + `.snapshot` cap/secret-bearing; CAS on a
+  capability interface; client-config CAS mutation-point gate. Threat model corrected (owner
+  anchor = authenticity root). `review.md` carries the "## Third-round design gate" mapping.
+  design.md is a full rewrite; claims are 13; blast radius is 3 additive shared-owner changes
+  (`ManifestDeleteInWithHash`, the CAS capability interface, the `.snapshot` read-cap/secret
+  additions). `BuildHubReconcilePlan` is NOT touched in v1.
 
 ## Decisions
-- `2026-07-10-deadopt-manifest-delete-hash-gate` (**`status: accepted`** — arch-reviewer
-  promoted) — the shared `ManifestDeleteInWithHash` gate for the last-binding delete (F1,
-  fail-closed-on-empty polarity, retained path-escape guard) PLUS the F-B second
-  shared-owner change (gate-ON zero-binding `mcphub-hub` prune extends
-  `BuildHubReconcilePlan`).
+- `2026-07-11-deadopt-v1-all-clients-only-scope` (**`status: accepted`**) — v1 scope: atomic
+  all-clients-only, gate-OFF-only; subset + gate-ON + `--reconstruct-legacy` deferred.
+- `2026-07-10-deadopt-manifest-delete-hash-gate` (**`status: accepted`**) — `ManifestDeleteInWithHash`
+  (fail-closed-on-empty polarity, retained path guard). Its Consequence (c) F-B (reconcile
+  prune) is now DEFERRED with gate-ON.
+
+## Dependents / follow-ups
+- `work-items/backlog/2026-07-11-deadopt-subset-and-gate-on-followup.md` — subset + gate-ON de-adopt.
+- Adjacent bugs filed: `work-items/bugs/2026-07-11-classify-dead-adopting-row-gate-on-blind.md`
+  (adopt-side gate-ON blindness), `.../2026-07-11-hub-reconcile-gate-on-zero-binding-stale-aggregate.md`
+  (pre-existing reconcile gap), `.../2026-07-11-adopt-snapshot-read-cap-too-small.md`
+  (snapshot read-cap; fix lands with de-adopt).
 
 ## Next action
-`$planner` breaks the revised `design.md` into the delivery phases (2a–2e) it names,
-respecting the Change-Surface Contract (now THREE additive shared-owner changes:
-`ManifestDeleteInWithHash`, the bytes-input restore variant, the hub-reconcile
-zero-binding prune). No provenance gap blocks de-adopt; the de-adopt-owned nuances
-(routed-secret pre-filter F-D, P3-a shared-key scan) are in the design's "Provenance-gap
-flag" section. Do NOT reopen the tracked provenance residuals
-(`work-items/backlog/2026-07-10-adopt-provenance-lease-hygiene.md`).
+An independent FABLE audit of the reworked `design.md`, then `$planner` breaks it into
+delivery phases respecting the v1 Change-Surface Contract (THREE additive shared-owner
+changes). No provenance-CODE gap blocks de-adopt; the one under-specified read-cap detail is
+flagged in the design's "Provenance-gap flag" + filed as an adjacent bug. Do NOT reopen the
+tracked provenance residuals (`work-items/backlog/2026-07-10-adopt-provenance-lease-hygiene.md`)
+or patch the protected provenance surfaces.
