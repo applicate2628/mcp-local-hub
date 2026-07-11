@@ -25,6 +25,31 @@ revision:
   from `(ManifestName, Client)` (memo item 4).
 - **Also CUT:** `--reconstruct-legacy` and byte-exact P2-b (memo LEAD decision).
 
+### Round 2 (2026-07-11) — 3-fable audit fold-in (design-text only; no architecture change)
+
+Source of truth: `review-fable-audit-2026-07-11.md` (LEAD arbitration of 3 independent
+fable-5 audits of the round-1 rework `f0798f9d`). The structural rework PASSED; the audit
+found the restore primitive and the close/resume state machine under-specified at their
+hardest points. This round folds in B1-B6 + the P3 list — all design-text, the scope and
+security core unchanged:
+
+- **B1 — restore composes the SHIPPED per-adapter restore core, never lossy `GetEntry`.**
+  `CASRestoreEntryFromBytes` = the CAS gate + a bytes-parameterized refactor of the shipped
+  `restoreEntryFromBackup` body; `GetEntry`→`AddEntry` is BANNED (lossy for direct-stdio —
+  `MCPEntry` has no Command/Args), a parallel per-adapter re-implementation is BANNED, and
+  the resume done-test compares RAW on-disk subtrees, not lean-`MCPEntry` equality.
+- **B2 — close/resume state machine's two hard points** pinned: E6 gated on all-clients-
+  RESTORE-DONE-or-accepted + secrets-done, the permanent-CAS-conflict horn resolved with a
+  `--accept-conflict <client>` escape, and a crash-INSIDE-close resume branch added.
+- **B3 — G7/G8 (+ cap) residuals** now stated in the BODY (a new Residuals section), not
+  only claimed in the gate decision.
+- **B4/B5/B6** — E2 re-verifies committed-ness under the held lease; restore fail-closes
+  on entry-absent-in-verified-snapshot (never destroys); snapshot cap symmetry stated.
+- **P3 fold-ins** — CAS lock ownership pinned (forwarder holds the lock, concrete bodies
+  lock-free), restore guard polarity (guarded-refuse default), cap/secret-bearing SUFFIX
+  clause (not exact-basename), C6 landing-comment direction, unknown-field-drop honesty,
+  gate-ON F6 sentence, doc-anchor cleanup.
+
 Governing decisions: `work-items/decisions/2026-07-11-deadopt-v1-all-clients-only-scope.md`
 (`status: accepted`, cites the synthesis memo) and
 `work-items/decisions/2026-07-10-deadopt-manifest-delete-hash-gate.md` (`status: accepted`;
@@ -41,9 +66,18 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
     de-adopt owner, sibling to `adopt.go`), plus the de-adopt-owned provenance mutators
     the shipped store declared as comments (`adopted_entries.go:993-995`):
     `MarkAdoptProvenanceDeAdopting` (transition `{adopted, committed-adopting} →
-    de_adopting`, G6) and `CloseAdoptProvenance` (now **deletes** the row snapshots-first
-    — G1/item 1). `UpdateAdoptExpectedManifestHash` is DECLARED-but-UNUSED in v1 (subset
-    cut). Uses the store's own same-package unexported helpers (`withAdoptedEntriesLock`,
+    de_adopting`, G6; **B4** — for a `committed-adopting` row it RE-RUNS
+    `classifyDeadAdoptingRow == COMMITTED_KEEP` under the HELD lease before flipping and
+    refuses otherwise, so a plan-time admission stale by execute cannot flip a
+    now-uncommitted orphan the adopt GC still owns) and `CloseAdoptProvenance` (now
+    **deletes** the row snapshots-first — G1/item 1). **C6 landing direction:**
+    `UpdateAdoptExpectedManifestHash` is DECLARED-but-UNUSED in v1 (subset cut); the
+    implementation change MUST repoint its declaration comment (`adopted_entries.go:994`)
+    and the `ExpectedManifestHash` field doc (`:155-158`, which today reads "de-adopt
+    updates ExpectedManifestHash after a subset binding edit") at the subset FOLLOW-UP,
+    and update the mutator tombstone (`:983-996` — v1 authors 2 of the 3) so the live tree
+    asserts only the current state (stale-relation hygiene, arch law C6). Uses the store's
+    own same-package unexported helpers (`withAdoptedEntriesLock`,
     `readAdoptedEntries`, `writeAdoptedEntries`, `removeAdoptSnapshots`, `adoptSnapshotDir`,
     `tryAcquireAdoptManifestLease`, and the `reapAdoptProvenanceRow` snapshots-first
     ordering `adopted_entries.go:860-882`).
@@ -53,11 +87,26 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
     (`accepted`). This is the ONLY manifest mutation in v1 (always a last-binding delete).
   - `internal/clients/*` — ADD a **CAS capability interface** (mirrors the shipped
     `EntryBytesChecker` capability pattern, `entry_bytes.go:24`), NOT a `Client`-interface
-    method: `CASRestoreEntryFromBytes` + `CASGuardedRemoveEntry`, implemented by exactly
-    the adopt-reachable adapters, forwarded by `lockingClient`, fail-closed at the
-    de-adopt site if an adapter does not implement it (memo item 5 + 7). Each method does
-    re-read → predicate-check → write/remove INSIDE ONE `withConfigLock`
-    (`config_lock.go:51`).
+    method: `CASRestoreEntryFromBytes` + `CASGuardedRemoveEntry` + the read-only
+    `EntryRawSubtree` (resume done-test comparator), implemented by exactly the
+    adopt-reachable adapters, forwarded by `lockingClient`, fail-closed at the de-adopt
+    site if an adapter does not implement it (memo item 5 + 7). **B1 — the mutating CAS
+    methods COMPOSE the shipped per-adapter restore core, they do not re-implement it:**
+    each adapter's `restoreEntryFromBackup` body (`claude_code.go:191-232`, `codex_cli.go`,
+    `amazon_q.go`, `aider.go`, `continue.go`, `json_mcp.go`, `mimocode.go`, `vscode.go`,
+    `zed.go`, … — ~15 adapters, each with stdio-verbatim restore + remove-on-absent tests)
+    is refactored into a `restoreEntryFromBytes(configBytes, name, allowHubEntry, writer)`
+    core; the existing backup-path variant becomes a thin `os.ReadFile`+call-core wrapper
+    (every `RestoreEntryFromBackup*` caller stays byte-unchanged). `CASRestoreEntryFromBytes`
+    feeds the verified snapshot bytes into that SAME core (removing the `GetEntry`→`AddEntry`
+    lossiness install rollback already avoids, `install.go:2642-2647`). **Lock ownership
+    (P3):** `withConfigLock` is held by the `lockingClient` forwarder (type-assert-inside-
+    lock, mirroring `AddEntryWithConfigWriter` `config_lock.go:229-239` /
+    `RestoreEntryFromBackupForRollbackWithConfigWriter` `:259-269`); the concrete CAS bodies
+    run UNDER that held lock and are themselves LOCK-FREE (the per-path mutex is
+    non-reentrant `config_lock.go:24-30` → a concrete body calling `withConfigLock` would
+    self-deadlock). The read-only `EntryRawSubtree` forwards LOCK-FREE like
+    `EntryPresentInBytes` (`entry_bytes.go:109-114`).
   - `internal/api/state_read_caps.go` + `internal/api/state_read_inode_anchor.go` — two
     ADDITIVE lines: give the adopt-provenance `.snapshot` kind a client-config-sized read
     cap in `stateFileReadCapBytes` (`:28`; the default is only `maxStateFileBytes` = 1 MiB,
@@ -76,6 +125,8 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
     `adopted_entries.go:983-996`); de-adopt lives in `internal/api` and uses the store's
     unexported RMW helpers.
   - D2 — the CAS capability interface (item 5+7): the destructive-write atomicity seam.
+    Its restore body COMPOSES the shipped per-adapter restore core via a behavior-preserving
+    `restoreEntryFromBytes` extraction (B1) — no new restore logic, no second extraction owner.
   - D3 — the shipped recognizer `liveEntryMatchesManifestBinding` (`managed_entries.go:355`)
     reused read-only as the SINGLE "is the live entry our hub entry" equality owner (memo
     item 3). No second shape-derivation path.
@@ -103,11 +154,17 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
     shared-owner edit).
   - The client backup lane — de-adopt restores from the adopt-owned PINNED snapshot.
 - **Declared blast radius:** de-adopt Execute/plan path + one new `internal/api` file +
-  **THREE additive shared-owner changes**: (1) `ManifestDeleteInWithHash` on `manifest.go`;
-  (2) the CAS capability interface on the adopt-reachable `clients` adapters; (3) the two
+  **THREE shared-owner changes**: (1) `ManifestDeleteInWithHash` on `manifest.go` (additive);
+  (2) on the adopt-reachable `clients` adapters — an **additive CAS + read capability
+  interface AND a behavior-preserving extraction refactor of the per-adapter restore bodies**
+  (`restoreEntryFromBackup` → a `restoreEntryFromBytes` core + a thin file-reading wrapper;
+  every shipped `RestoreEntryFromBackup*` caller stays byte-unchanged — B1); (3) the two
   additive lines in `state_read_caps.go` + `state_read_inode_anchor.go` for the `.snapshot`
-  kind. All additive — existing callers unchanged. Plus GUI/CLI routes + eligibility
-  surface, a frontend affordance, and additive redaction-safe events. The de-adopt mutators
+  kind (a SUFFIX/dir-segment clause, not an exact basename — P3). Changes (1) and (3) are
+  purely additive; (2) is additive-plus-refactor with a preserved-behavior contract on the
+  existing callers. Plus GUI/CLI routes (incl. the `--accept-conflict <client>` escape) +
+  eligibility surface, a frontend affordance, and additive redaction-safe events. The
+  de-adopt mutators
   WRITE the `de_adopting` state (declared, never written by adopt) and DELETE the row +
   snapshots on close. **NOT changed in v1:** `BuildHubReconcilePlan` (gate-ON deferred),
   the single-owner entry renderer (recognizer suffices — see item 3), install, migrate,
@@ -208,6 +265,12 @@ gate-ON AGGREGATE path, NOT the per-server entry. P2f-shape-match and P2-b are c
 onto this ONE recognizer + the ONE `snapshot_sha256` byte-gate — no piled gate stack, no
 second shape owner (preserves claim 2).
 
+**`EntryRawSubtree` is NOT a second recognizer (claim 2 intact).** The resume done-test's
+raw-subtree comparator (B1) answers a DIFFERENT question — "is the live entry the SNAPSHOT's
+entry we already restored" — by deep-comparing verbatim on-disk subtrees, NOT "is the live
+entry the hub entry" (which stays single-owned in `liveEntryMatchesManifestBinding`). Two
+distinct predicates, two distinct owners; the hub-equality question keeps exactly one owner.
+
 ## Snapshot read — anchored, path-recomputed, secret-bearing (memo item 4)
 
 De-adopt reads a `present` client's pinned snapshot through
@@ -223,56 +286,119 @@ the owner signal).
   + `client + ".snapshot"` (same construction `writeAdoptClientSnapshot` used,
   `adopted_entries.go:272-289`), NOT from `SnapshotRef` as a raw path. `SnapshotRef` is
   cross-checked for a mismatch warning only.
-- **Two additive shared-owner lines (item 4 P3-A):** (i) `isSecretBearingStateFilePath`
-  (`state_read_inode_anchor.go:42-57`) does NOT currently match a `<client>.snapshot`
-  basename, so a read-broadened snapshot would relax rather than hard-fail — add a
-  `.snapshot`/`adopt-provenance` clause so the snapshot fails closed like the vault files;
-  (ii) `stateFileReadCapBytes` (`state_read_caps.go:28-42`) defaults `.snapshot` to
-  `maxStateFileBytes` (1 MiB) — too small for a real client config — add a snapshot cap kind
-  (client-config-sized, e.g. 16 MiB, bounded). See "Provenance-gap flag".
+- **Two additive shared-owner clauses (item 4 P3-A) — SUFFIX/dir-segment, NOT exact
+  basename (P3).** Both owners today branch on the EXACT `filepath.Base(path)`
+  (`state_read_caps.go:30` `switch base`; `state_read_inode_anchor.go:44` `switch base` +
+  substring `Contains`), and a `<client>.snapshot` basename is VARIABLE
+  (`claude-code.snapshot`, `cursor.snapshot`, …) matching none of the fixed cases — so the
+  additions MUST be suffix/dir-segment clauses, not new `case` labels:
+  (i) `isSecretBearingStateFilePath` (`state_read_inode_anchor.go:42-57`) gains a
+  `strings.HasSuffix(base, ".snapshot")` OR `adopt-provenance` path-segment clause, so a
+  read-broadened snapshot FAILS CLOSED like the vault files instead of relaxing;
+  (ii) `stateFileReadCapBytes` (`state_read_caps.go:28-42`) gains a matching
+  `.snapshot`-suffix clause returning a client-config-sized bounded cap
+  (`maxIntentFileBytes`/`maxVaultBlobFileBytes` = 16 MiB, already defined) — the default
+  `maxStateFileBytes` (1 MiB) is too small for a real `~/.claude.json`. See "Provenance-gap
+  flag".
+- **B6 — snapshot cap SYMMETRY invariant.** Adopt CAPTURE writes the snapshot via
+  `WriteStateFileBytesAtomic` with NO size limit (`adopted_entries.go:272-289`), so a config
+  that adopts fine today could exceed the de-adopt read cap and become PERMANENTLY
+  unrestorable (a Failed client — feeds the B2a horn). The invariant: **the restore cap MUST
+  be ≥ any snapshot adopt capture can pin.** v1 sets the de-adopt-owned restore cap generously
+  (16 MiB, covering every realistic client config); true symmetry additionally requires a
+  matching CAPTURE-time cap (== the restore cap) so adopt REFUSES to pin what de-adopt cannot
+  restore — that is adopt-side (a protected surface in v1), so it is directed to the filed
+  adjacent bug (widened to require capture==restore symmetry, not merely raising the read
+  cap). The residual (a pathological config > 16 MiB) is bounded + assigned — see "Residuals".
 - **After the anchored read**, recompute `ManifestHashContent(snapshotBytes)`
   (`manifest_hash.go:17`) and compare to `SnapshotSHA256`; refuse FAIL-CLOSED on mismatch
   OR missing snapshot (present clients only). The sha256 gate extends the owner-anchored
   trust to the exact bytes.
 
-## Per-client restore — via the CAS capability (memo items 5 + 7)
+## Per-client restore — via the CAS capability (memo items 5 + 7; B1 + B5)
 
 The destructive client-config write is the F1 mutation-point-atomicity principle applied to
 the CLIENT CONFIG. `withConfigLock` (`config_lock.go:51`) wraps EACH adapter method
 individually, so a plan-time recognizer check followed by a later `AddEntry`/`RemoveEntry`
 is NOT atomic — an operator hand-edit (or a `demigrate`) between plan and execute would let
 de-adopt restore a stale snapshot OVER the operator's fresh edit (silent data loss). Fix: a
-new **CAS capability interface** in `internal/clients` (mirroring `EntryBytesChecker`), whose
-methods do the whole re-read → check → mutate INSIDE ONE `withConfigLock`:
+new **CAS + read capability interface** in `internal/clients` (mirroring `EntryBytesChecker`),
+whose mutating methods do the whole re-read → check → mutate atomically:
 
 ```go
 // internal/clients — capability, NOT a Client method (item 5: never-adoptable adapters
 // must not be compile-forced to implement a restore they can never run).
 type CASEntryMutator interface {
-    // Under withConfigLock(ConfigPath): re-read the named live entry; if
-    // match(live) is false REFUSE (ErrCASConflict); else extract entryName from
-    // snapshotBytes (via the adapter's own reader) and write it (removing if the
-    // bytes lack it). One read, one write, one lock.
+    // The lockingClient FORWARDER holds withConfigLock(ConfigPath) across the whole
+    // call (P3: type-assert-inside-lock, mirroring AddEntryWithConfigWriter). The
+    // concrete body below runs UNDER that held lock and is itself LOCK-FREE — the
+    // per-path mutex is non-reentrant (config_lock.go:24-30), so a concrete body
+    // calling withConfigLock would self-deadlock.
+    //
+    // Under the held lock: re-read the named live entry.
+    //   - live == nil  -> CONFLICT-refuse (ErrCASConflict): restoring into an
+    //     operator-emptied slot resurrects an entry against intent (B1 nil-live).
+    //   - match(live) false -> REFUSE (ErrCASConflict).
+    //   - else run EntryPresentInBytes(snapshotBytes, entryName): if ABSENT it is an
+    //     impossible state for a `present` caller (capture GUARANTEED + sha-pinned the
+    //     entry) -> REFUSE fail-closed, NEVER silently remove (B5 — removal is
+    //     CASGuardedRemoveEntry's alone); if PRESENT, restore via the SHIPPED restore
+    //     core: restoreEntryFromBytes(snapshotBytes, entryName, allowHubEntry=false, ...)
+    //     — the guarded polarity (P3), refusing a hub-shaped snapshot entry. One read,
+    //     one write, one lock.
     CASRestoreEntryFromBytes(entryName string, match func(*MCPEntry) bool, snapshotBytes []byte) error
-    // Under withConfigLock: re-read the named live entry; if match(live) is false
-    // REFUSE; else remove it.
+    // Under the held lock: re-read the named live entry.
+    //   - live == nil  -> already-done idempotent SUCCESS (nothing to remove; B1 nil-live).
+    //   - match(live) false -> REFUSE (ErrCASConflict).
+    //   - else remove it.
     CASGuardedRemoveEntry(entryName string, match func(*MCPEntry) bool) error
+    // Read-only (LOCK-FREE forward like EntryPresentInBytes): the VERBATIM on-disk
+    // subtree for `name` in configBytes (the SAME extraction restoreEntryFromBytes
+    // uses). The resume done-test deep-compares this across live-config vs snapshot
+    // bytes — NOT lean MCPEntry equality (B1: two distinct stdio entries both project to
+    // MCPEntry{URL:""} and would falsely read equal).
+    EntryRawSubtree(configBytes []byte, name string) (subtree any, present bool, err error)
 }
 ```
+
+**B1 — the restore body COMPOSES the shipped per-adapter restore core; two owners are
+BANNED.** The concrete `CASRestoreEntryFromBytes` feeds the verified snapshot bytes into a
+bytes-parameterized refactor of each adapter's existing `restoreEntryFromBackup` core
+(`claude_code.go:191-232` extracts `backupServers[name]` and comment-preserving-sets it into
+the live config; ~15 adapters share this shape). Explicitly BANNED: (a) the
+`GetEntry`→`AddEntry` round-trip — LOSSY for the canonical direct-stdio adopt source
+(`MCPEntry` has no `Command`/`Args`, `clients.go:24-48`), which is exactly why install
+rollback restores from the backup FILE not `GetEntry`→`AddEntry` (`install.go:2642-2647`); a
+round-trip would restore an empty-URL husk, destroying the "original secret-literal spelling
+intact" guarantee the snapshot exists to deliver; (b) a parallel per-adapter extraction
+re-implementation (a second extraction owner). The extraction stays single-owned in the
+refactored core; the CAS method is a thin composition of {nil/match/present gate} + {that
+core}.
+
+**Restore guard polarity (P3): the guarded variant, not `ForRollback`.** The core is composed
+with `allowHubEntry=false` — the DEFAULT guarded polarity that REFUSES a hub-HTTP-shaped
+snapshot entry (`ErrBackupEntryAlreadyMigrated`, `claude_code.go:219-224`). A pinned snapshot
+whose entry is itself hub-shaped signals adopt absorbed an already-hub-managed entry;
+restoring it would re-apply hub data, so de-adopt reports that client Failed rather than using
+the verbatim `RestoreEntryFromBackupForRollback` polarity.
 
 `match` is injected by the api-layer de-adopt as a closure over the single recognizer —
 `func(live *clients.MCPEntry) bool { ok, _ := liveEntryMatchesManifestBinding(live, entryName, binding, m); return ok }`
 — so the recognizer stays single-owned in `internal/api` (dependency inversion: `clients`
-defines the callback signature; `api` injects the implementation; no upward import). Branch
-on `original_state`:
+defines the callback signature; `api` injects the implementation; no upward import). The
+concrete CAS method nil-guards `live` BEFORE calling `match` (the recognizer derefs `live.URL`
+at `managed_entries.go:378`; the shipped caller nil-guards at `adopted_entries.go:459-461`),
+applying the per-branch nil-live policy above. Branch on `original_state`:
 
 1. **`present`** — anchored-read the snapshot, sha256-gate it, then
    `CASRestoreEntryFromBytes(SourceEntryName, match, snapshotBytes)`. The verified bytes are
    the ONLY thing read and written (single read — closes the between-reads swap window). The
    native pre-adopt entry (original secret-literal spelling intact — the snapshot predates
-   Install's rewrite) is restored only if the live entry is STILL the hub entry.
+   Install's rewrite) is restored only if the live entry is STILL the hub entry AND the
+   snapshot physically contains the entry (B5).
 2. **`absent`** (entryless fanout, no snapshot) — `CASGuardedRemoveEntry(SourceEntryName, match)`:
-   remove the hub entry (restore to absence) only if it is still the hub entry.
+   remove the hub entry (restore to absence) only if it is still the hub entry (nil-live =
+   already-done success).
 3. **`present-merged-lower`** (no snapshot; entry resolves from a lower layer the hub never
    wrote, `adopted_entries.go:108-116`) — `CASGuardedRemoveEntry(SourceEntryName, match)`:
    remove the hub write-target entry only if it is still the hub entry; the untouched lower
@@ -283,6 +409,15 @@ Every path is CAS-gated on "live is still the hub entry", so no un-gated destruc
 exists (the `match` check is the integrity gate for `absent`/`present-merged-lower`, which
 have no sha256). A CAS conflict (`ErrCASConflict`) is a per-client FAILURE surfaced in the
 report (G4), never a silent overwrite.
+
+**Restore honesty (P3 — unknown per-entry fields).** The restore core writes the snapshot's
+entry subtree so the env VALUES (the original secret literals) are preserved — the guarantee
+the snapshot mechanism exists to deliver. Whether EVERY per-entry field the adapter's on-disk
+shape does not model survives is adapter-dependent (an adapter whose set-member re-serializes
+through a typed struct can drop an unmodeled sibling field); the round-trip is therefore
+honestly labeled `functional-equivalent`, NOT `byte-equivalent`, matching the shipped
+restore-mode label (`adopted_entries.go:119-128`). No design claim asserts whole-file or
+unmodeled-field byte-identity.
 
 ## Manifest delete — the single hash-gated DELETE (F1)
 
@@ -329,10 +464,19 @@ snapshot dir, snapshots-FIRST, mirroring the shipped `reapAdoptProvenanceRow` /
   row (`adopted_entries.go:529-531`) and adopt v1 pins `manifest == entry name` (no rename
   dodge), so a `closed` row would block ever re-adopting that server.
 - Snapshots-first ordering means a crash between snapshot-removal and row-drop leaves a
-  row→missing-snapshot (harmless; the row is still there), NEVER a snapshot→no-row secret
-  leak that no GC reaps (the adopt-side GC Phase-2 reaps only `adopting` rows; Phase-3 only
-  rowless dirs). Deleting the row keeps the shipped at-most-one-row-per-manifest invariant
-  true and collapses P0's `closed` branch to `found=false`.
+  row→missing-snapshot, NEVER a snapshot→no-row secret leak that no GC reaps (the adopt-side
+  GC Phase-2 reaps only `adopting` rows; Phase-3 only rowless dirs). Deleting the row keeps
+  the shipped at-most-one-row-per-manifest invariant true and collapses P0's `closed` branch
+  to `found=false`.
+- **B2b — crash INSIDE close is recoverable, not wedged.** Because E6 runs snapshots-first
+  and ONLY after E3 (all restored) + E4 (manifest deleted), a crash after `removeAdoptSnapshots`
+  and before the row-drop leaves `de_adopting` + manifest ABSENT + snapshot dir ABSENT + every
+  client already live≠hub. The resume done-test's crash-inside-close branch (P3:
+  snapshot-absent AND manifest-absent AND live≠hub → RESTORE-DONE) classifies all clients done,
+  so the retry finishes the row delete instead of routing to "snapshot missing → Failed" and
+  wedging. The pre-restore fail-closed rule (live STILL hub + snapshot missing → Failed) is
+  KEPT — only the manifest-absent+live≠hub combination signals a mid-close crash. Reachable
+  identically via manual snapshot-dir deletion.
 
 ## Operation-state machine + roll-forward resume + lock graph
 
@@ -356,20 +500,53 @@ BuildDeAdoptPlan(server):
       (RESUME: SKIP if the manifest file is already absent — delete step done).
   P3. Per client (FRESH): the live entry MUST still be the hub entry
       (liveEntryMatchesManifestBinding); for `present`, the snapshot exists + sha256 matches.
-      RESUME: derive RESTORE-DONE = live entry NO LONGER the hub entry AND matches the restore
-      target (present: parsed-entry == snapshot's entry via the adapter's reader; absent /
-      present-merged-lower: hub write-target entry gone) -> SKIP that client; a client that is
-      neither still-hub nor matching-target is a genuine conflict -> report Failed.
+      RESUME per client (done-ness DERIVED from live state — B1 pins the comparator to the
+      RAW on-disk subtree, never lean MCPEntry equality):
+        live STILL hub:
+          present w/ snapshot readable+sha-OK -> restore pending (E3 restores)
+          present w/ snapshot missing/unreadable -> Failed (pre-restore fail-closed)
+          absent / merged-lower                  -> remove pending (E3 removes)
+        live NO LONGER hub:
+          present: EntryRawSubtree(live) deep-equals EntryRawSubtree(snapshot) -> RESTORE-DONE
+          present: subtree MISMATCH (operator put a THIRD thing there) -> genuine conflict Failed
+          present: snapshot ABSENT + manifest ABSENT -> RESTORE-DONE   [B2b crash-inside-close]
+          present: snapshot ABSENT + manifest PRESENT -> Failed (anomalous; fail-closed)
+          absent / merged-lower: hub write-target entry gone -> RESTORE-DONE
+        (a client marked via --accept-conflict is treated as accepted-done, see below)
 ExecuteDeAdoptWithOpts(server, targets ≡ rec.AdoptClients):
   E1. lease := tryAcquireAdoptManifestLease(manifest); !ok -> "concurrent operation" REFUSE. defer Unlock.
-  E2. MarkAdoptProvenanceDeAdopting(manifest)   (idempotent; adopted/committed-adopting -> de_adopting).
-  E3. For each NOT-RESTORE-DONE target client: CAS restore/remove (present/absent/merged-lower)
+  E2. MarkAdoptProvenanceDeAdopting(manifest)  (idempotent; adopted/committed-adopting -> de_adopting;
+      B4: for a committed-adopting row, RE-VERIFY classifyDeadAdoptingRow==COMMITTED_KEEP under the
+      held lease before flipping; refuse otherwise — the adopt GC still owns an uncommitted orphan).
+  E3. For each NOT-(RESTORE-DONE|accepted) target client: CAS restore/remove (present/absent/merged-lower)
       BEFORE any topology removal.  (per-client {Restored, Failed} accrues — G4)
   E4. ManifestDeleteInWithHash (skip if manifest already absent) + remove supervisor-intent descriptors.
   E5. Delete still-present RoutedSecretKeys (pre-filtered; skip shared-as-warned).
-  E6. CloseAdoptProvenance(manifest)  ->  DELETE row + snapshots (snapshots-first).
+  E6. CloseAdoptProvenance(manifest) -> DELETE row + snapshots (snapshots-first),
+      ONLY when the close-gate holds (see below).
   E7. Emit redaction-safe event + GUI operator-action row + return the {Restored, Failed} report.
 ```
+
+**Close-gating + the permanent-conflict horn (B2a).** The E-list is roll-forward: E4/E5 MAY
+proceed while some target client is Failed — they touch the manifest, supervisor intent, and
+vault, NEVER the per-client snapshots, so a Failed client stays RETRYABLE (its snapshot
+survives). **E6 (the snapshot+row DELETE) runs ONLY when every target client is RESTORE-DONE
+OR accepted AND every routed secret is deleted-or-skipped-as-shared.** Un-gated E6 would
+destroy a still-needed snapshot (permanent data loss, retry impossible); a naively-gated E6
+would wedge the row `de_adopting` forever the moment ONE client hits a PERMANENT CAS conflict
+— the exact case the CAS gate exists for: an operator LEGITIMATELY edited that client's entry
+between plan and execute, so its live entry is neither the hub entry (can't restore) nor the
+snapshot's entry (already changed), an unsatisfiable predicate. Resolution: the operator
+escape `mcphub de-adopt <server> --accept-conflict <client>` marks that one client
+terminally-done-with-warning — defensible because a live entry that is no longer the hub entry
+means the operator ALREADY took that slot, so restoring the snapshot over it would be the very
+data loss we refuse. The accepted client satisfies the close-gate, E6 fires, and the row
+closes. The transient window where a still-hub Failed client (an unreadable-snapshot case,
+`present`) points at a now-deleted manifest after E4 is the accepted roll-forward
+partial-failure state surfaced in the {Restored, Failed} report; the operator fixes the
+snapshot-read cause and retries (E3 restores the native entry, which no longer needs the
+manifest). An abandoned `de_adopting` row (crash, operator never retries, never accepts) is
+the G7 residual — see "Residuals".
 
 **Lock graph (full total order, no reverse edge).** `<manifest>.lease` (E1, outermost, held
 E1→E6) → the inners, each transient and mutually NON-nested: `adopted-entries.lock` (each
@@ -394,20 +571,55 @@ distinct surface deferred to the follow-up. Two adjacent findings filed (NOT pat
 - **Adopt-side bug (memo F6):** the same gate-ON entry-removal blinds the SHIPPED
   `classifyDeadAdoptingRow` — a committed-but-unflipped `adopting` row on a gate-ON host has
   no live per-server entry, so it classifies `CRASH_REAP` and the adopt GC destroys the
-  snapshots de-adopt needs. Filed `work-items/bugs/2026-07-11-classify-dead-adopting-row-gate-on-blind.md`.
+  snapshots de-adopt needs. Concretely: until the filed bug lands, a committed-but-unflipped
+  `adopting` row >24h old on a gate-ON host can lose its snapshots to a subsequent adopt's GC
+  BEFORE the operator gates OFF to de-adopt. Bounded (only the promote-flip-crash window
+  produces such a row; a fully-committed `adopted` row is GC-immune) and outside de-adopt
+  scope, but the operator should gate-OFF-then-de-adopt promptly after such a crash. Filed
+  `work-items/bugs/2026-07-11-classify-dead-adopting-row-gate-on-blind.md`.
 - **Pre-existing reconcile bug:** `BuildHubReconcilePlan` gate-ON path leaves a stale
   `mcphub-hub` for a client that drops to zero bindings (it `continue`s zero-binding clients
   at `:181-185`; the gate-OFF sweep at `:164-180` removes it, gate-ON does not). Independent
   of de-adopt. Filed `work-items/bugs/2026-07-11-hub-reconcile-gate-on-zero-binding-stale-aggregate.md`;
   the de-adopt-side prune folds into the gate-ON follow-up.
 
+## Residuals (bounded — accepted or deferred; B3)
+
+Stated in the BODY (not only claimed in the gate decision). Each is bounded, operator-driven,
+and either accepted for v1 or explicitly deferred to a follow-up:
+
+- **G7 — abandoned `de_adopting` row (DEFERRED recover).** A crash mid-execute followed by an
+  operator who never retries (and never `--accept-conflict`s a permanently-conflicted client)
+  leaves a `de_adopting` row that (a) WEDGES re-adopt of that manifest — capture refuses ANY
+  non-`adopting` prior row (`adopted_entries.go:529-531`) — and (b) RETAINS the secret-bearing
+  snapshot dir, which no adopt-side GC reaps (Phase-2 reaps only `adopting`; the row is
+  `de_adopting`). This is structurally identical to the `closed`-tombstone wedge the rework
+  fixed, but on the abandoned-retry path the failure table only covers the RETRIED path. v1
+  does NOT add a `de_adopting`-GC or a `mcphub de-adopt --recover`; both are **DEFERRED to the
+  follow-up** (`work-items/backlog/2026-07-11-deadopt-subset-and-gate-on-followup.md`). Bounded
+  (owner-only snapshot DACL — a co-resident cannot read the content; operator can delete the
+  snapshot dir manually) and operator-driven.
+- **G8 — a concurrent hub-entry writer can clobber a just-restored native entry.** A plain
+  `mcphub install <server>` / GUI Apply / hub reconcile running concurrently takes only the
+  per-file config locks, NOT de-adopt's `<manifest>.lease` — so in the E3→E4 window it can
+  rewrite hub entries OVER the just-restored native entries (the CAS gate protects only
+  against writers BEFORE de-adopt's own write, not after it). Under a gate-ON reconcile this is
+  a `ClientUpdateRemove{EntryName: server}` against the just-restored entry
+  (`install_hub_reconcile.go:256-262`). Operator-driven and bounded (the operator is running
+  two conflicting topology commands at once); accepted as a one-line residual — de-adopt does
+  not extend the lease over the install/reconcile owners in v1.
+- **Snapshot > 16 MiB unrestorable (B6 residual).** Until the symmetric adopt-side capture cap
+  lands (filed adjacent bug, widened to require capture==restore), a config exceeding the
+  16 MiB restore cap adopts fine but de-adopts as a Failed client. Pathological (no realistic
+  client config approaches 16 MiB) and bounded; assigned to the adopt-side capture cap.
+
 ## Observability + redaction (P2-c — keep) + threat model (P3-E corrected)
 
 **Redaction (unchanged from the prior revision — keep).** De-adopt events/errors/logs carry
 ONLY manifest/client names, vault key NAMES, snapshot REFS (paths), counts, and hashes —
 NEVER snapshot bytes, restored entry bodies, `command`/`args`/`env` values, or secret
-values (mirrors `adopt_provenance_events.go:49-110`; `adopt.go:537-551` logs key NAMES). A
-redaction test asserts no secret value in any body/error/narration.
+values (mirrors `adopt_provenance_events.go:49-110`; `adopt.go:355` prints routed vault key
+NAMES only). A redaction test asserts no secret value in any body/error/narration.
 
 **Threat model (P3-E — corrected; codex P0-1 REFUTED).** The prior revision's "co-resident
 flips `present`→`absent`, deletes the snapshot, de-adopt removes the operator's entry" attack
@@ -443,7 +655,11 @@ sha256 gate extends that owner-anchored trust to the exact snapshot bytes. Conse
   client Failed, printing the report.
 - **CLI:** `mcphub de-adopt <server>` (alias `deadopt`); `--yes` executes, default dry-run
   prints the plan; no provenance → non-zero, no mutation; gate-ON → non-zero "gate OFF
-  first".
+  first". **`--accept-conflict <client>`** (repeatable) marks a permanently-CAS-conflicted
+  client (operator legitimately took the slot between plan and execute) as
+  terminally-done-with-warning so the close-gate is satisfiable and the row can close (B2a);
+  it never restores or removes that client's entry, only records the accepted conflict in the
+  report + event trail.
 
 ## Round-trip invariants + failure modes
 
@@ -457,13 +673,18 @@ manifest. Restore is functional-equivalent (byte-equivalence UNVERIFIED per adap
 |---|---|
 | Gate-ON host | REFUSE with "gate OFF first, then de-adopt" (item 2 b). |
 | Snapshot tampered / wrong-owner / oversize / missing (`present`) | Anchored read refuses (owner/reparse/cap) or sha256 mismatch → that client Failed, fail-closed before any write. |
-| Live client entry no longer the hub entry (operator edit / demigrate between plan+execute) | CAS `match` fails under the lock → REFUSE that client (Failed), never overwrite (items 5+7). |
+| Entry ABSENT in the verified snapshot (`present`) | Impossible-state (capture guaranteed + sha-pinned it) → `CASRestoreEntryFromBytes` REFUSES fail-closed; NEVER silently removes (B5 — removal is `CASGuardedRemoveEntry`'s alone). |
+| Snapshot > 16 MiB restore cap (`present`) | Anchored read refuses (cap) → that client Failed; bounded residual until the symmetric capture cap lands (B6, see Residuals). |
+| Live client entry no longer the hub entry (operator edit / demigrate between plan+execute) | CAS `match` fails under the lock → REFUSE that client (Failed), never overwrite (items 5+7). A PERMANENT conflict is cleared by operator revert+retry OR `--accept-conflict <client>` so the row can close (B2a); otherwise the row stays recoverable `de_adopting`. |
+| Live entry VANISHED between plan+execute (nil) | `CASGuardedRemoveEntry` nil-live = already-done success; `CASRestoreEntryFromBytes` nil-live = conflict-refuse fail-closed (never resurrect against intent) — B1 nil-live, no panic. |
 | Manifest externally edited | `ManifestDeleteInWithHash` refuses `ErrManifestHashMismatch`; empty/absent hash → fail-closed refusal. |
 | No provenance row | REFUSE (no `--reconstruct-legacy` in v1). |
-| Row `adopting` with no live binding | Pre-install crash orphan — adopt GC owns it; de-adopt refuses. |
+| Row `adopting` with no live binding | Pre-install crash orphan — adopt GC owns it; de-adopt refuses. E2 re-verifies COMMITTED_KEEP under the held lease before flipping a committed-adopting row (B4). |
 | Routed-secret delete fails / shared key | Pre-filter + shared-scan; row stays `de_adopting`; retry deletes remaining; close-done = deleted-or-skipped-as-shared (P1-4). |
-| Crash mid-execute | Recoverable `de_adopting` row; roll-forward resume skips RESTORE-DONE clients + done steps, completes, then DELETES the row. |
+| Crash mid-execute | Recoverable `de_adopting` row; roll-forward resume skips RESTORE-DONE (raw-subtree comparator, B1) + done steps, completes, DELETES the row. Crash INSIDE close (snapshot dir gone + manifest gone + live≠hub) resumes RESTORE-DONE, not wedged (B2b). |
+| Abandoned `de_adopting` row (crash, never retried/accepted) | Wedges re-adopt + retains secret-bearing snapshots no GC reaps; `de_adopting`-GC / `--recover` DEFERRED to the follow-up (G7 residual). |
 | Gate-ON republish | N/A in v1 (gate-ON refused). |
+| Concurrent install / Apply / reconcile (no lease) | Can clobber a just-restored native entry in the E3→E4 window (G8 residual); operator-driven + bounded. |
 | Quarantined daemon | Allowed; descriptor removal is independent of daemon health. |
 
 ## Test strategy
@@ -473,35 +694,64 @@ API/unit (falsification):
 1. **T1 — round-trip via PERSISTED provenance only.** Adopt a seeded stdio entry; de-adopt
    from a FRESH `API` instance (no in-memory snapshot); assert every client restored to
    pre-adopt. FAIL if handed an in-memory snapshot.
-2. **Snapshot integrity + single-read.** Swap snapshot bytes → sha256 mismatch → that
+2. **Snapshot integrity + single-read + B5.** Swap snapshot bytes → sha256 mismatch → that
    client Failed; delete the snapshot → fail-closed; plant a wrong-owner snapshot → anchored
-   read refuses; oversize snapshot → cap refusal. Single-read: mutate the file between the
-   sha256 verify and the restore → restored entry is the VERIFIED bytes (CAS reads once).
-3. **CAS operator-edit race (items 5+7).** Between plan and execute, hand-edit the live
-   entry to a non-hub entry → CAS `match` fails → REFUSE, no overwrite. Same for a
-   `demigrate` interleave.
-4. **present / absent / present-merged-lower.** Each original_state restores correctly;
-   merged-lower removes the write-target entry and the lower layer re-emerges; absent →
-   entry absent; none attempts a snapshot restore without a snapshot.
+   read refuses; oversize snapshot (> 16 MiB cap) → cap refusal. Single-read: mutate the file
+   between the sha256 verify and the restore → restored entry is the VERIFIED bytes (CAS reads
+   once). **B5:** a sha-VALID snapshot whose bytes LACK the entry (synthetically constructed
+   inconsistency) → `EntryPresentInBytes` false → `CASRestoreEntryFromBytes` REFUSES
+   fail-closed, and the live entry is NOT removed (removal stays `CASGuardedRemoveEntry`'s).
+3. **CAS operator-edit race (items 5+7) + nil-live (B1).** Between plan and execute, hand-edit
+   the live entry to a non-hub entry → CAS `match` fails → REFUSE, no overwrite. Same for a
+   `demigrate` interleave. **nil-live:** delete the live entry between plan and execute →
+   `CASGuardedRemoveEntry` = success (already gone), `CASRestoreEntryFromBytes` = conflict-refuse
+   (no panic, no resurrection).
+4. **present / absent / present-merged-lower + restore-core fidelity (B1).** Each
+   original_state restores correctly; merged-lower removes the write-target entry and the lower
+   layer re-emerges; absent → entry absent; none attempts a snapshot restore without a snapshot.
+   **B1 fidelity:** a `present` DIRECT-STDIO source (`command`/`args`/`env` with a literal
+   secret) restores via the composed restore core with its `command`/`args`/env-literal VALUES
+   intact (the functional-equivalent guarantee — not a whole-file byte claim); a
+   `GetEntry`→`AddEntry` husk restore (empty-URL, no command/args) would FAIL this test (the
+   falsification that pins the core-composition over the lossy round-trip). A hub-HTTP-shaped
+   snapshot entry → guarded-refuse (Failed), not verbatim re-applied (P3 polarity).
 5. **Manifest delete hash gate + empty-hash refusal.** Edit the manifest between plan and
    execute → `ManifestDeleteInWithHash` refuses; blank `ExpectedManifestHash` → fail-closed.
 6. **Close DELETES the row + re-adopt works (item 1).** After de-adopt, `ReadAdoptProvenance`
    → `found=false`, snapshot dir gone, AND a fresh adopt of the same manifest name SUCCEEDS
    (no `closed` tombstone wedge).
-7. **Roll-forward resume.** Inject a crash after some clients restored; retry SKIPS the
-   RESTORE-DONE clients (P3 done-ness), completes the rest + manifest/secret/close, no
-   double-write, row finally deleted.
+7. **Roll-forward resume + crash-inside-close (B2b) + raw-subtree done-test (B1).** Inject a
+   crash after some clients restored; retry SKIPS the RESTORE-DONE clients (P3 done-ness),
+   completes the rest + manifest/secret/close, no double-write, row finally deleted. **B2b
+   crash-inside-close:** inject a crash after `removeAdoptSnapshots` but before the row-drop
+   (manifest already gone, all clients restored) → retry classifies every client RESTORE-DONE
+   via the crash-inside-close branch and finishes the row delete (NOT wedged); the pre-restore
+   case (live STILL hub + snapshot missing) still Fails closed. **B1 raw-subtree:** a resume
+   where an operator replaced a restored stdio entry with a DIFFERENT stdio entry (both project
+   to `MCPEntry{URL:""}`) must read as a genuine conflict (raw-subtree mismatch), NOT falsely
+   RESTORE-DONE — a lean-MCPEntry comparator would pass this and is the falsification.
 8. **Routed-secret pre-filter + shared-key predicate (F-D / P1-4).** Partial delete → retry
    deletes only remaining; a shared key is SKIPPED-as-warned and the row still closes.
-9. **Lock order / no re-entrancy (T6).** Assert the total order (lease outermost; inners
+9. **Lock order / no re-entrancy.** Assert the total order (lease outermost; inners
    non-nested), no reverse edge, no IPC/kill/wait under a lock, de-adopt↔adopt mutual
-   exclusion via the lease.
+   exclusion via the lease. Assert the concrete CAS bodies are LOCK-FREE (the forwarder holds
+   the lock; a concrete body re-entering `withConfigLock` would self-deadlock).
 10. **Redaction (P2-c).** No secret value / snapshot byte / entry body in any event / error /
     narration.
 11. **Gate-ON refusal.** A gate-ON host → `BuildDeAdoptPlan` refuses with the "gate OFF
     first" message, zero mutation.
-12. **No-provenance / committed-adopting admission (G6).** No row → refuse; a
-    committed-but-`adopting` row (live binding) → admitted as FRESH.
+12. **No-provenance / committed-adopting admission (G6) + E2 re-verify (B4).** No row → refuse;
+    a committed-but-`adopting` row (live binding) → admitted as FRESH. **B4:** simulate the
+    row becoming UNCOMMITTED between plan-admission and E2 (its hub entries removed) → E2's
+    `MarkAdoptProvenanceDeAdopting` re-runs `classifyDeadAdoptingRow` under the held lease and
+    REFUSES the flip (adopt GC owns it), rather than converting a GC-reapable row into a
+    GC-immune `de_adopting` wedge.
+13. **Permanent-conflict `--accept-conflict` close (B2a).** A client with a permanent CAS
+    conflict (operator took the slot) → without `--accept-conflict` the row stays recoverable
+    `de_adopting` (close-gate unsatisfied, NOT wedged-by-silent-close); with
+    `--accept-conflict <client>` that client is accepted-done-with-warning, the close-gate
+    holds, E6 fires, the row is deleted, and re-adopt then succeeds. Assert the accepted client
+    is never restored/removed and the acceptance is in the report + event trail.
 
 GUI/CLI: eligibility-surface test (affordance only for provenance rows, disabled gate-ON);
 `{Restored, Failed}` report + CLI exit; Playwright round-trip (adopt → gate-OFF de-adopt →
@@ -512,16 +762,20 @@ scan native); route tests mirroring `gui/adopt_test.go`.
 1. `{ guarantee: v1 de-adopt is atomic over ALL AdoptClients of one manifest (targets ≡ rec.AdoptClients), so the resume scope is a fixed set needing no journaled target list; single-owner: BuildDeAdoptPlan reading rec.AdoptClients; enforcement-probe: test 7 (resume) + the absence of any subset code path }`
 2. `{ guarantee: "the live entry is our hub entry" has exactly ONE equality owner — the shipped liveEntryMatchesManifestBinding — no byte-exact recompute, no second shape owner; single-owner: managed_entries.go:355; enforcement-probe: grep shows no byte-exact entry reconstruction + no second recognizer in deadopt.go }`
 3. `{ guarantee: the snapshot is read through the anchored reader with the path recomputed from (ManifestName, Client), refusing wrong-owner/reparse/oversize before hashing; single-owner: ReadStateFileInodeAnchored (state_read_inode_anchor.go:22) + adoptSnapshotDir; enforcement-probe: test 2 (wrong-owner + oversize + tamper) }`
-4. `{ guarantee: every destructive client-config write is COMPARE-AND-SWAP inside one withConfigLock — refuse unless the live entry is still the hub entry; single-owner: the CAS capability methods (clients) + the injected recognizer predicate; enforcement-probe: test 3 (operator-edit race) }`
+4. `{ guarantee: every destructive client-config write is COMPARE-AND-SWAP under the lock held by the lockingClient forwarder (concrete bodies lock-free) — refuse unless the live entry is still the hub entry; nil-live is per-branch (remove=success, restore=conflict-refuse); a present-restore whose verified snapshot lacks the entry REFUSES fail-closed (removal is never silent); single-owner: the CAS capability methods (clients) + the injected recognizer predicate; enforcement-probe: test 3 (operator-edit race + nil-live) + test 2 (B5 absent-in-snapshot) }`
 5. `{ guarantee: CloseAdoptProvenance DELETES the row + snapshots (snapshots-first), leaving no `closed` tombstone, so re-adopt of the same manifest succeeds; single-owner: CloseAdoptProvenance mirroring reapAdoptProvenanceRow (adopted_entries.go:860-882); enforcement-probe: test 6 (re-adopt after de-adopt) }`
 6. `{ guarantee: the last-binding manifest delete is hash-gated at the mutation point, fail-closed on empty hash, path-escape guard retained; single-owner: ManifestDeleteInWithHash (accepted decision); enforcement-probe: test 5 }`
 7. `{ guarantee: routed keys are deleted before close; a shared key is skipped-as-warned and the close-done predicate is deleted-OR-skipped so the row never wedges; single-owner: the de-adopt cleanup ordering + pre-filtered deleteAdoptRoutedSecrets; enforcement-probe: test 8 }`
-8. `{ guarantee: a crash mid-execute leaves a recoverable de_adopting row that roll-forward resume COMPLETES (skips RESTORE-DONE clients + done steps), never a rollback that re-writes hub over native; single-owner: BuildDeAdoptPlan RESUME done-ness derivation; enforcement-probe: test 7 }`
+8. `{ guarantee: a crash mid-execute leaves a recoverable de_adopting row that roll-forward resume COMPLETES (skips RESTORE-DONE clients + done steps) — including a crash INSIDE close (snapshot dir + manifest gone + live≠hub → RESTORE-DONE, not wedged) — never a rollback that re-writes hub over native; the resume done-test compares RAW on-disk subtrees, not lean MCPEntry equality; single-owner: BuildDeAdoptPlan RESUME done-ness derivation + EntryRawSubtree comparator; enforcement-probe: test 7 (crash-inside-close + two-stdio-husk falsification) }`
 9. `{ guarantee: gate-ON de-adopt is refused with an actionable message and zero mutation in v1; single-owner: BuildDeAdoptPlan P0 gate check; enforcement-probe: test 11 }`
 10. `{ guarantee: the bytes-restore/guarded-remove live on a CAPABILITY interface implemented only by adopt-reachable adapters, not the Client interface; single-owner: the CASEntryMutator capability (mirrors EntryBytesChecker); enforcement-probe: grep shows no Client-interface restore method + a fail-closed type-assert at the de-adopt site }`
 11. `{ guarantee: v1 does NOT modify BuildHubReconcilePlan or add a single-owner entry renderer (both deferred with gate-ON); single-owner: the recognizer-only equality + gate-OFF-only scope; enforcement-probe: git diff shows no change to install_hub_reconcile.go and no new entry-renderer }`
 12. `{ guarantee: no secret value / snapshot byte / entry body appears in any de-adopt event/error/log; single-owner: the de-adopt redaction; enforcement-probe: test 10 }`
 13. `{ guarantee: the owner anchor (wrong-owner refusal in both modes) is the authenticity root — de-adopt adds no new authenticity mechanism; single-owner: readStateFileInodeAnchoredWithOptions ErrWrongOwner (hub_mcp_state_read_inode_windows.go:194 / posix:135); enforcement-probe: a wrong-owner snapshot/store read fails closed (test 2) }`
+14. `{ guarantee: the restore payload is produced by COMPOSING the shipped per-adapter restore core (a behavior-preserving restoreEntryFromBytes refactor), never a lossy GetEntry→AddEntry round-trip and never a parallel per-adapter extraction owner; single-owner: the refactored restoreEntryFromBytes core (one extraction owner across ~15 adapters); enforcement-probe: test 4 (direct-stdio command/args/env survive byte-faithfully — a husk restore fails) + grep shows no GetEntry→AddEntry restore path and no second extraction impl in the CAS bodies }`
+15. `{ guarantee: E6 (snapshot+row DELETE) runs ONLY when every target client is RESTORE-DONE-or-accepted AND every routed secret is deleted-or-skipped, so no still-needed snapshot is destroyed; a PERMANENT CAS conflict is closed via --accept-conflict (never a silent close, never an infinite wedge on the retried path); single-owner: the ExecuteDeAdopt close-gate; enforcement-probe: test 13 }`
+16. `{ guarantee: E2 re-verifies classifyDeadAdoptingRow==COMMITTED_KEEP under the held lease before flipping a committed-adopting row, so a plan-time admission stale by execute cannot convert a GC-reapable orphan into a GC-immune de_adopting wedge; single-owner: MarkAdoptProvenanceDeAdopting under the lease; enforcement-probe: test 12 (B4) }`
+17. `{ guarantee: the de-adopt restore read cap is a bounded client-config size (16 MiB) and the symmetry invariant (restore cap ≥ capture max) is stated + assigned — the residual > cap config is bounded and directed to the adopt-side capture cap; single-owner: the .snapshot suffix clause in stateFileReadCapBytes + the filed adopt-side capture-cap bug; enforcement-probe: test 2 (oversize cap refusal) + the Residuals section }`
 
 ## Provenance-gap flag
 
@@ -529,14 +783,19 @@ No provenance-CODE gap requires patching the shipped store. One under-specified 
 memo's item 4 implies but did not spell out (I did NOT patch provenance; this is a read-cap
 OWNER extension de-adopt authors):
 
-- **Snapshot read cap.** `stateFileReadCapBytes` (`state_read_caps.go:28-42`) defaults a
-  `<client>.snapshot` to `maxStateFileBytes` (1 MiB). A real client config (e.g. a large
-  `~/.claude.json`) can exceed 1 MiB, and adopt's capture side wrote it with NO size limit
-  (`WriteStateFileBytesAtomic`), so a legitimate large snapshot would FAIL the anchored read
-  back. De-adopt MUST add a snapshot cap kind (client-config-sized, bounded — e.g. 16 MiB
-  like intent/vault) alongside the `isSecretBearingStateFilePath` addition. Additive
-  shared-owner change, flagged so the planner scopes it and the FABLE audit sees it was
-  caught. (Adjacent finding filed.)
+- **Snapshot read cap + symmetry (B6).** `stateFileReadCapBytes` (`state_read_caps.go:28-42`)
+  defaults a `<client>.snapshot` to `maxStateFileBytes` (1 MiB). A real client config (e.g. a
+  large `~/.claude.json`) can exceed 1 MiB, and adopt's capture side wrote it with NO size
+  limit (`WriteStateFileBytesAtomic`), so a legitimate large snapshot would FAIL the anchored
+  read back. De-adopt MUST add a snapshot cap kind (client-config-sized, bounded — 16 MiB like
+  intent/vault) via a `.snapshot`-SUFFIX clause (NOT an exact-basename `case` — the basename is
+  variable), alongside the same-shape `isSecretBearingStateFilePath` `.snapshot`-suffix
+  addition. **Symmetry invariant:** the restore cap must be ≥ any snapshot capture can pin;
+  because capture is uncapped, true symmetry requires a matching CAPTURE-time cap (adopt-side,
+  a protected surface in v1) — the filed adjacent bug is directed to enforce
+  capture==restore, not merely raise the read cap. The residual > 16 MiB config is bounded +
+  assigned (Residuals). Additive shared-owner change, flagged so the planner scopes it and the
+  FABLE audit sees it was caught. (Adjacent finding filed.)
 
 Two de-adopt-OWNED implementation shapes (not provenance defects): the CAS capability
 interface (items 5+7) and the routed-secret pre-filter (F-D). De-adopt does NOT reopen the
@@ -552,25 +811,50 @@ tracked provenance residuals (`work-items/backlog/2026-07-10-adopt-provenance-le
    zero-binding client. `context: adjacent-finding`, `status: open`.
 3. `work-items/bugs/2026-07-11-adopt-snapshot-read-cap-too-small.md` — the snapshot read-cap
    gap above (a large legitimate client-config snapshot would fail the anchored read).
-   `context: adjacent-finding`, `status: open`.
+   `context: adjacent-finding`, `status: open`. **B6 directs widening it:** the fix must
+   enforce the capture==restore SYMMETRY (an adopt-side capture-time cap == the de-adopt
+   restore cap), not merely raise the read cap — the planner should update the bug's fix
+   direction accordingly.
 
 Follow-up work-item stub (subset + gate-ON de-adopt):
 `work-items/backlog/2026-07-11-deadopt-subset-and-gate-on-followup.md`.
 
 ## Gate decision
 
-**PASS (rework 2026-07-11 — multi-model synthesis fold-in).** v1 is scoped to
+**PASS (rework 2026-07-11 round 2 — 3-fable audit fold-in).** v1 is scoped to
 all-clients-only, gate-OFF-only atomic de-adopt (subset + gate-ON + `--reconstruct-legacy`
-cut, per the LEAD decision). All 7 BLOCKING must-fixes are resolved: (1) close DELETES the
-row snapshots-first; (2) gate-ON REFUSED with a message + adjacent bugs filed; (3) equality
-via the single shipped recognizer + URL formula corrected, no byte-exact; (4) anchored
-snapshot read + recomputed path + secret-bearing/cap additions; (5) CAS on a capability
-interface, not Client; (6) reconcile prune deferred with gate-ON + latent bug filed; (7)
-client-config CAS mutation-point gate. Fold-ins resolved: G3 eligibility surface, G4
-per-client report + CLI exit, G6 widened transition, P1-4 close predicate, P3-E corrected
-threat model (owner anchor is the authenticity root, codex P0-1 refuted), P3-D manifest-delete
-residual, G7/G8 residuals. PASS items kept unchanged (roll-forward resume, the
-`ManifestDeleteInWithHash` decision, lock/lease/redaction, routed-secret namespacing,
-demigrate-NOT-reused, composing shipped owners). One under-specified read-cap detail flagged;
-one adopt-side + one pre-existing bug filed as adjacent findings. Next stage: an independent
-FABLE audit, then `$planner`.
+cut, per the LEAD decision). All 7 round-1 BLOCKING must-fixes remain resolved: (1) close
+DELETES the row snapshots-first; (2) gate-ON REFUSED with a message + adjacent bugs filed;
+(3) equality via the single shipped recognizer + URL formula corrected, no byte-exact; (4)
+anchored snapshot read + recomputed path + secret-bearing/cap additions; (5) CAS on a
+capability interface, not Client; (6) reconcile prune deferred with gate-ON + latent bug
+filed; (7) client-config CAS mutation-point gate.
+
+Round-2 audit fixes folded in (all design-text; no architecture change): **B1** — the
+restore payload composes the SHIPPED per-adapter restore core (behavior-preserving
+`restoreEntryFromBytes` refactor), banning the lossy `GetEntry`→`AddEntry` round-trip and a
+second extraction owner; the resume done-test compares RAW subtrees (`EntryRawSubtree`), not
+lean `MCPEntry`; the nil-live per-branch contract is defined; blast-radius change (2) upgraded
+to "additive interface + behavior-preserving restore-body refactor." **B2a** — E6 gated on
+all-clients-RESTORE-DONE-or-accepted + secrets-done, the permanent-CAS-conflict horn resolved
+with `--accept-conflict <client>`. **B2b** — crash-inside-close resume branch added
+(snapshot+manifest gone + live≠hub → RESTORE-DONE), fail-closed missing-snapshot KEPT for the
+pre-restore case. **B3** — G7 (abandoned `de_adopting` row; recover DEFERRED) + G8 (concurrent
+no-lease writer) + the > cap residual now stated in the BODY (new "Residuals" section), so the
+gate decision no longer over-claims them. **B4** — E2 re-verifies committed-ness under the held
+lease. **B5** — restore fail-closes on entry-absent-in-verified-snapshot (removal stays
+`CASGuardedRemoveEntry`'s). **B6** — snapshot cap symmetry invariant stated + assigned. P3
+fold-ins: CAS lock ownership pinned (forwarder holds the lock, concrete bodies lock-free),
+guarded-refuse restore polarity, `.snapshot`-SUFFIX clauses (not exact basename), C6
+landing-comment direction (repoint `UpdateAdoptExpectedManifestHash` + `:155-158` + the mutator
+tombstone at the subset follow-up), unknown-field-drop honesty sentence, gate-ON F6 sentence,
+doc-anchor cleanup (`adopt.go:355`; dropped the "(T6)" test label).
+
+PASS items kept unchanged (roll-forward resume, the `ManifestDeleteInWithHash` decision,
+lock/lease/redaction, routed-secret namespacing, demigrate-NOT-reused, composing shipped
+owners, the all-clients-only cut). Consistent with the two accepted decisions
+(`2026-07-11-deadopt-v1-all-clients-only-scope`, `2026-07-10-deadopt-manifest-delete-hash-gate`)
+— `--accept-conflict` is a conflict-resolution escape WITHIN the atomic all-clients operation
+(targets ≡ `AdoptClients` unchanged), not a reintroduction of subset de-adopt. Next stage per
+the audit memo: a DELTA-CHECK of the amended sections (restore primitive, close/resume machine,
+gate decision, change-surface) — NOT a full re-audit — then `$planner`.
