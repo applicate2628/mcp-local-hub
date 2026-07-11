@@ -454,7 +454,6 @@ func TestServeIPCConn_SlowHelloDoesNotBlockNextAccept(t *testing.T) {
 	// client. Released in a t.Cleanup that (LIFO) runs before the
 	// events log is closed; conn1's released path emits no event.
 	blockCh := make(chan struct{})
-	t.Cleanup(func() { close(blockCh) })
 
 	served2 := make(chan struct{})
 	listener := &fakeAcceptor{
@@ -476,7 +475,11 @@ func TestServeIPCConn_SlowHelloDoesNotBlockNextAccept(t *testing.T) {
 		},
 	}
 
-	go acceptIPCConnections(listener, deps)
+	done := make(chan struct{})
+	go func() {
+		acceptIPCConnections(listener, deps)
+		close(done)
+	}()
 
 	select {
 	case <-served2:
@@ -485,6 +488,13 @@ func TestServeIPCConn_SlowHelloDoesNotBlockNextAccept(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("second connection was not served while the first connection's hello write was blocked")
 	}
+
+	// Release conn1's blocked hello, then wait for the accept loop to fully
+	// exit (including its ipc-accept-exit emit on the ErrClosed sentinel)
+	// before returning, so t.TempDir cleanup cannot race the background
+	// emitter still writing to the event log.
+	close(blockCh)
+	<-done
 }
 
 // TestServeIPCConn_HelloWriteFailureIsIsolated proves a hello-write
@@ -498,16 +508,21 @@ func TestServeIPCConn_HelloWriteFailureIsIsolated(t *testing.T) {
 	conn := &fakeConn{}
 	helloErr := errors.New("write hello: The pipe is being closed.")
 	listener := &fakeAcceptor{
-		queue: []fakeAcceptResult{
-			{conn: conn},
-			{err: net.ErrClosed},
-		},
 		helloFn: func(net.Conn) error { return helloErr },
 	}
-	runAcceptLoop(t, listener, deps, 2*time.Second)
+	// Call serveIPCConn directly (not through acceptIPCConnections) so the
+	// best-effort ipc-hello-write-error TryEmit has no competing emitter
+	// racing it for the event-log lock. Through the accept loop, the
+	// ErrClosed sentinel's ipc-accept-exit emit could win the lock first
+	// and TryEmit would drop the row (it skips on contention), flaking the
+	// assertion below. The accept loop's own ErrClosed exit is covered by
+	// TestAcceptLoop_ExitOnErrClosed.
+	serveIPCConn(conn, listener, deps)
 
+	if !conn.closed.Load() {
+		t.Error("hello-write failure must close the connection")
+	}
 	body := waitForSupervisorEvent(t, logPath, `"event":"ipc-hello-write-error"`, 2*time.Second)
-
 	if strings.Contains(body, `"event":"ipc-accept-transient-error"`) {
 		t.Errorf("hello-write failure must NOT emit ipc-accept-transient-error, got:\n%s", body)
 	}
@@ -516,13 +531,6 @@ func TestServeIPCConn_HelloWriteFailureIsIsolated(t *testing.T) {
 	}
 	if !strings.Contains(body, `"severity":"warn"`) {
 		t.Errorf("expected warn severity on ipc-hello-write-error, got:\n%s", body)
-	}
-	// The subsequent ErrClosed still exits the loop cleanly.
-	if !strings.Contains(body, `"event":"ipc-accept-exit"`) {
-		t.Errorf("expected ipc-accept-exit on ErrClosed, got:\n%s", body)
-	}
-	if !conn.closed.Load() {
-		t.Error("hello-write failure must close the connection")
 	}
 }
 
