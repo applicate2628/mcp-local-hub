@@ -126,9 +126,11 @@ func mustPipeReadWriteMask(t *testing.T, mask string) uint32 {
 	}
 }
 
-// TestSuperviseIPC_HandshakeSent verifies that Accept() sends the
-// IPCHello frame containing version=1, the supervisor PID, and a
-// non-empty StartedAt. Spec §"Wire format" + §"Handshake".
+// TestSuperviseIPC_HandshakeSent verifies that the supervisor sends
+// the IPCHello frame containing version=1, the supervisor PID, and a
+// non-empty StartedAt. Spec §"Wire format" + §"Handshake". The hello
+// frame is written by WriteHello after Accept (production drives this
+// from serveIPCConn); the server goroutine below mirrors that ordering.
 func TestSuperviseIPC_HandshakeSent(t *testing.T) {
 	pipePath := `\\.\pipe\mcphub-supervisor-test-handshake-` + sanitizeForPipe(t.Name())
 	listener, err := NewSupervisorIPCListener(pipePath)
@@ -138,13 +140,19 @@ func TestSuperviseIPC_HandshakeSent(t *testing.T) {
 	defer listener.Close()
 
 	// Spin up the server-side Accept in a goroutine so the test
-	// can dial concurrently. Accept() writes the hello frame, then
-	// the caller would normally drive the request/response loop;
-	// here we close immediately after the hello write.
+	// can dial concurrently. WriteHello writes the hello frame (moved
+	// off Accept into the per-connection serving goroutine), then the
+	// caller would normally drive the request/response loop; here we
+	// close immediately after the hello write.
 	acceptErrCh := make(chan error, 1)
 	go func() {
 		serverConn, err := listener.Accept()
 		if err != nil {
+			acceptErrCh <- err
+			return
+		}
+		if err := listener.WriteHello(serverConn); err != nil {
+			_ = serverConn.Close()
 			acceptErrCh <- err
 			return
 		}
@@ -221,6 +229,11 @@ func TestSupervisorLockOwnerHelloConsistency(t *testing.T) {
 	go func() {
 		serverConn, err := listener.Accept()
 		if err != nil {
+			acceptErrCh <- err
+			return
+		}
+		if err := listener.WriteHello(serverConn); err != nil {
+			_ = serverConn.Close()
 			acceptErrCh <- err
 			return
 		}

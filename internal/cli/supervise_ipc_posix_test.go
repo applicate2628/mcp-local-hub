@@ -43,10 +43,12 @@ func TestSuperviseIPC_POSIXListenerMode0600(t *testing.T) {
 	}
 }
 
-// TestSuperviseIPC_POSIXHelloHandshake verifies that Accept() sends
-// the IPCHello frame containing version=1, the supervisor PID, and a
-// non-empty StartedAt parseable as RFC3339Nano. Spec §"Wire format"
-// + §"Handshake".
+// TestSuperviseIPC_POSIXHelloHandshake verifies that the supervisor
+// sends the IPCHello frame containing version=1, the supervisor PID,
+// and a non-empty StartedAt parseable as RFC3339Nano. Spec §"Wire
+// format" + §"Handshake". The hello frame is written by WriteHello
+// after Accept (production drives this from serveIPCConn); the server
+// goroutine below mirrors that ordering.
 func TestSuperviseIPC_POSIXHelloHandshake(t *testing.T) {
 	dir := t.TempDir()
 	socketPath := filepath.Join(dir, "supervisor.sock")
@@ -57,13 +59,19 @@ func TestSuperviseIPC_POSIXHelloHandshake(t *testing.T) {
 	defer listener.Close()
 
 	// Spin up Accept in a goroutine so the test can dial concurrently.
-	// Accept() writes the hello frame; the caller would normally drive
-	// the request/response loop. Here we just hold the connection long
-	// enough for the client to read the hello, then close.
+	// WriteHello writes the hello frame (moved off Accept into the
+	// per-connection serving goroutine); the caller would normally then
+	// drive the request/response loop. Here we just hold the connection
+	// long enough for the client to read the hello, then close.
 	acceptErrCh := make(chan error, 1)
 	go func() {
 		serverConn, err := listener.Accept()
 		if err != nil {
+			acceptErrCh <- err
+			return
+		}
+		if err := listener.WriteHello(serverConn); err != nil {
+			_ = serverConn.Close()
 			acceptErrCh <- err
 			return
 		}
@@ -136,6 +144,11 @@ func TestSupervisorLockOwnerHelloConsistency(t *testing.T) {
 	go func() {
 		serverConn, err := listener.Accept()
 		if err != nil {
+			acceptErrCh <- err
+			return
+		}
+		if err := listener.WriteHello(serverConn); err != nil {
+			_ = serverConn.Close()
 			acceptErrCh <- err
 			return
 		}
