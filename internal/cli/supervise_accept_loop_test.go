@@ -601,3 +601,38 @@ func TestServeIPCConn_HelloIsFirstFrame(t *testing.T) {
 		t.Fatal("serveIPCConn did not exit after client close")
 	}
 }
+
+// TestWriteHello_BoundedByWriteDeadline proves the per-connection hello
+// write cannot park its goroutine indefinitely when the peer connects
+// but never drains the pipe. Without the write deadline, moving the
+// hello write off the accept loop (serveIPCConn) would let repeated
+// non-draining peers leak one goroutine + one open connection each.
+func TestWriteHello_BoundedByWriteDeadline(t *testing.T) {
+	orig := ipcHelloWriteTimeout
+	ipcHelloWriteTimeout = 50 * time.Millisecond
+	defer func() { ipcHelloWriteTimeout = orig }()
+
+	// net.Pipe is synchronous + unbuffered: a server-side Write blocks
+	// until the client end Reads. We never read from clientEnd, so the
+	// hello write blocks until the deadline trips.
+	serverEnd, clientEnd := net.Pipe()
+	defer serverEnd.Close()
+	defer clientEnd.Close()
+
+	l := &SupervisorIPCListener{pid: 1, startedAt: "2026-01-01T00:00:00Z"}
+	done := make(chan error, 1)
+	go func() { done <- l.WriteHello(serverEnd) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("WriteHello returned nil on a non-draining peer; expected a write-deadline timeout")
+		}
+		var ne net.Error
+		if !errors.As(err, &ne) || !ne.Timeout() {
+			t.Fatalf("WriteHello error = %v; want a net timeout error", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("WriteHello parked past the deadline — the write is not bounded")
+	}
+}

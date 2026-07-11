@@ -10,6 +10,18 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
+// ipcHelloWriteTimeout bounds the per-connection hello handshake write.
+// Since the hello write moved OFF the accept loop into serveIPCConn's
+// own goroutine, a same-user client that connects but stops draining
+// (or transport backpressure) would otherwise park that goroutine
+// indefinitely — before handleIPCConn installs any read deadline — and
+// the accept loop keeps spawning one goroutine per connection, so
+// repeated stalled handshakes would leak goroutines + open connections.
+// The hello is ~100 bytes into a 4 KiB buffer, so a healthy write
+// completes in microseconds; 10s only trips a genuinely stuck peer.
+// A var (not const) so tests can shorten it to exercise the timeout.
+var ipcHelloWriteTimeout = 10 * time.Second
+
 func supervisorIPCOwnerForHello(ownerOpt ...api.SupervisorLockOwner) api.SupervisorLockOwner {
 	if len(ownerOpt) > 0 && ownerOpt[0].PID > 0 && ownerOpt[0].StartedAt != "" {
 		return ownerOpt[0]
@@ -50,8 +62,19 @@ func (l *SupervisorIPCListener) WriteHello(conn net.Conn) error {
 		return fmt.Errorf("marshal hello: %w", err)
 	}
 	body = append(body, '\n')
+	// Bound the write so a stalled/non-draining peer cannot park this
+	// per-connection goroutine indefinitely (see ipcHelloWriteTimeout).
+	// Cleared on success so handleIPCConn's own deadlines govern the
+	// request loop; on error serveIPCConn closes the conn + emits
+	// ipc-hello-write-error, so a stuck handshake is reaped, not leaked.
+	if err := conn.SetWriteDeadline(time.Now().Add(ipcHelloWriteTimeout)); err != nil {
+		return fmt.Errorf("set hello write deadline: %w", err)
+	}
 	if _, err := conn.Write(body); err != nil {
 		return fmt.Errorf("write hello: %w", err)
+	}
+	if err := conn.SetWriteDeadline(time.Time{}); err != nil {
+		return fmt.Errorf("clear hello write deadline: %w", err)
 	}
 	return nil
 }
