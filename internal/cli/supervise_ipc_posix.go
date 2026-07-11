@@ -25,8 +25,9 @@
 // DACL; the v0.5.0 POSIX preview ships behind the 0600 + parent-dir
 // gate because Linux/macOS targets are beta-only per Q9.
 //
-// Handshake (Spec §"Wire format" / §"Handshake"): on every Accept()
-// the supervisor writes one JSON line:
+// Handshake (Spec §"Wire format" / §"Handshake"): per accepted
+// connection the supervisor writes one JSON line (via WriteHello, from
+// the per-connection serveIPCConn goroutine — no longer inside Accept):
 //
 //	{"hello":{"version":1,"pid":<pid>,"started_at":"<RFC3339Nano>"}}\n
 //
@@ -35,7 +36,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -102,39 +102,20 @@ func NewSupervisorIPCListener(socketPath string, ownerOpt ...api.SupervisorLockO
 	}, nil
 }
 
-// Accept blocks until a client connects, then sends the hello frame.
-// Caller is responsible for reading subsequent IPC frames and
-// closing the returned net.Conn.
+// Accept blocks until a client connects and returns the raw net.Conn.
+// The hello handshake frame is NO LONGER written here: it moved into
+// the per-connection serveIPCConn goroutine (via WriteHello) so a slow
+// or abandoned client can no longer block the supervisor's single
+// accept loop while the server writes the hello. The caller
+// (serveIPCConn) writes the hello frame, reads subsequent IPC frames,
+// and closes the returned net.Conn.
 //
 // Note on owner-uid checks: full SO_PEERCRED verification (Linux) or
 // LOCAL_PEERCRED (BSD/Darwin) is documented as a follow-up — for the
 // v0.5.0 POSIX preview the trust boundary is the 0600 mode + the
 // owner-only parent directory. Documented at the package doc above.
-//
-// On any error writing the hello, the connection is closed and the
-// error is returned so the supervisor's accept loop can log + retry.
 func (l *SupervisorIPCListener) Accept() (net.Conn, error) {
-	conn, err := l.listener.Accept()
-	if err != nil {
-		return nil, err
-	}
-	hello := api.IPCHello{
-		Version:   1,
-		PID:       l.pid,
-		StartedAt: l.startedAt,
-	}
-	frame := map[string]any{"hello": hello}
-	body, err := json.Marshal(frame)
-	if err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("marshal hello: %w", err)
-	}
-	body = append(body, '\n')
-	if _, err := conn.Write(body); err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("write hello: %w", err)
-	}
-	return conn, nil
+	return l.listener.Accept()
 }
 
 // Close shuts down the listener. The unix-socket inode is removed

@@ -63,11 +63,18 @@ func readSupervisorEventsLog(path string) (string, error) {
 // fakeAcceptor returns the queued (conn, err) sequence in order. If
 // the caller runs past the queue length, every subsequent Accept()
 // returns `net.ErrClosed` (mimicking listener.Close() taking effect).
+//
+// helloFn, when set, is the per-connection WriteHello behavior the
+// accept loop (via serveIPCConn) drives on each accepted connection.
+// A nil helloFn means "hello write always succeeds" (WriteHello
+// returns nil without touching the conn), which is what the existing
+// success-path tests want.
 type fakeAcceptor struct {
 	mu       sync.Mutex
 	queue    []fakeAcceptResult
 	idx      int
 	accepted atomic.Int32
+	helloFn  func(net.Conn) error
 }
 
 type fakeAcceptResult struct {
@@ -87,6 +94,37 @@ func (f *fakeAcceptor) Accept() (net.Conn, error) {
 		f.accepted.Add(1)
 	}
 	return r.conn, r.err
+}
+
+func (f *fakeAcceptor) WriteHello(conn net.Conn) error {
+	if f.helloFn != nil {
+		return f.helloFn(conn)
+	}
+	return nil
+}
+
+// waitForSupervisorEvent polls the JSONL events file until it contains
+// substr, or fails the test after timeout. Needed because the
+// per-connection serveIPCConn goroutine emits its event asynchronously
+// relative to the accept loop returning, so a single post-loop read can
+// race the emit.
+func waitForSupervisorEvent(t *testing.T, logPath, substr string, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last string
+	for {
+		b, err := os.ReadFile(logPath)
+		if err == nil {
+			last = string(b)
+			if strings.Contains(last, substr) {
+				return last
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("event %q not found in log within %s; got:\n%s", substr, timeout, last)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // fakeConn is the minimal net.Conn we hand back to acceptIPCConnections
@@ -394,5 +432,172 @@ func TestAcceptLoop_BudgetBreakerExitsOnFlood(t *testing.T) {
 	}
 	if !strings.Contains(body, `"severity":"error"`) {
 		t.Errorf("expected error severity on breaker fire:\n%s", body)
+	}
+}
+
+// TestServeIPCConn_SlowHelloDoesNotBlockNextAccept is the core
+// decoupling property of the 2026-07 accept-flap fix: the hello write
+// runs in the per-connection serveIPCConn goroutine, so a first
+// connection whose hello write blocks (a client that dialed then
+// vanished under host saturation) must NOT delay Accept() + service of
+// the SECOND connection. Pre-fix, the hello write lived inside Accept()
+// on the single accept loop, so the first slow hello stalled every
+// subsequent dial.
+func TestServeIPCConn_SlowHelloDoesNotBlockNextAccept(t *testing.T) {
+	deps, _ := makeTestDeps(t)
+
+	conn1 := &fakeConn{}
+	conn2 := &fakeConn{}
+
+	// conn1's hello write blocks until cleanup — it never returns
+	// while the test body runs, standing in for a wedged/abandoned
+	// client. Released in a t.Cleanup that (LIFO) runs before the
+	// events log is closed; conn1's released path emits no event.
+	blockCh := make(chan struct{})
+	t.Cleanup(func() { close(blockCh) })
+
+	served2 := make(chan struct{})
+	listener := &fakeAcceptor{
+		queue: []fakeAcceptResult{
+			{conn: conn1},
+			{conn: conn2},
+			{err: net.ErrClosed},
+		},
+		helloFn: func(c net.Conn) error {
+			switch c {
+			case conn1:
+				<-blockCh // hold the first connection's hello indefinitely
+				return nil
+			case conn2:
+				close(served2)
+				return nil
+			}
+			return nil
+		},
+	}
+
+	go acceptIPCConnections(listener, deps)
+
+	select {
+	case <-served2:
+		// conn2 was served while conn1's hello write is still blocked —
+		// the accept loop is decoupled from per-connection hello I/O.
+	case <-time.After(2 * time.Second):
+		t.Fatal("second connection was not served while the first connection's hello write was blocked")
+	}
+}
+
+// TestServeIPCConn_HelloWriteFailureIsIsolated proves a hello-write
+// failure is confined to its own connection: it closes ONLY that
+// connection, emits the DISTINCT ipc-hello-write-error event, and does
+// NOT enter the accept loop's transient-error branch or touch the
+// consecutive-error budget.
+func TestServeIPCConn_HelloWriteFailureIsIsolated(t *testing.T) {
+	deps, logPath := makeTestDeps(t)
+
+	conn := &fakeConn{}
+	helloErr := errors.New("write hello: The pipe is being closed.")
+	listener := &fakeAcceptor{
+		queue: []fakeAcceptResult{
+			{conn: conn},
+			{err: net.ErrClosed},
+		},
+		helloFn: func(net.Conn) error { return helloErr },
+	}
+	runAcceptLoop(t, listener, deps, 2*time.Second)
+
+	body := waitForSupervisorEvent(t, logPath, `"event":"ipc-hello-write-error"`, 2*time.Second)
+
+	if strings.Contains(body, `"event":"ipc-accept-transient-error"`) {
+		t.Errorf("hello-write failure must NOT emit ipc-accept-transient-error, got:\n%s", body)
+	}
+	if strings.Contains(body, `"consecutive_err"`) {
+		t.Errorf("hello-write failure must NOT touch the accept-error budget, got:\n%s", body)
+	}
+	if !strings.Contains(body, `"severity":"warn"`) {
+		t.Errorf("expected warn severity on ipc-hello-write-error, got:\n%s", body)
+	}
+	// The subsequent ErrClosed still exits the loop cleanly.
+	if !strings.Contains(body, `"event":"ipc-accept-exit"`) {
+		t.Errorf("expected ipc-accept-exit on ErrClosed, got:\n%s", body)
+	}
+	if !conn.closed.Load() {
+		t.Error("hello-write failure must close the connection")
+	}
+}
+
+// TestServeIPCConn_HelloIsFirstFrame preserves the wire contract: the
+// hello frame is still the FIRST server frame the client reads, before
+// any command response — only its timing moved off the accept loop into
+// serveIPCConn. Drives the real production WriteHello + handleIPCConn
+// over an in-memory net.Pipe.
+func TestServeIPCConn_HelloIsFirstFrame(t *testing.T) {
+	deps, _ := makeTestDeps(t)
+	if err := api.WriteSupervisorIntent(filepath.Join(deps.stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	deps.runtimeTracker = NewDaemonRuntimeTracker()
+	var ready atomic.Bool
+	var loaded atomic.Bool
+	ready.Store(true)
+	loaded.Store(true)
+	deps.reconcileReady = &ready
+	deps.intentFilesLoaded = &loaded
+	var graceful gracefulCounter
+	deps.gracefulInProgress = &graceful
+
+	// Fields-only listener: WriteHello reads pid/startedAt only; it
+	// never touches the (nil) bound listener, so no real pipe/socket is
+	// needed to exercise the production hello frame.
+	listener := &SupervisorIPCListener{pid: 4242, startedAt: "2026-07-11T00:00:00Z"}
+
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	done := make(chan struct{})
+	go func() {
+		serveIPCConn(serverConn, listener, deps)
+		close(done)
+	}()
+
+	reader := bufio.NewReader(clientConn)
+
+	// FIRST server frame MUST be the hello.
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	helloLine, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read hello frame: %v", err)
+	}
+	var helloFrame struct {
+		Hello api.IPCHello `json:"hello"`
+	}
+	if err := json.Unmarshal([]byte(helloLine), &helloFrame); err != nil {
+		t.Fatalf("decode hello frame %q: %v", helloLine, err)
+	}
+	if helloFrame.Hello.Version != 1 || helloFrame.Hello.PID != 4242 || helloFrame.Hello.StartedAt != "2026-07-11T00:00:00Z" {
+		t.Fatalf("hello frame = %+v, want version=1 pid=4242 startedAt=2026-07-11T00:00:00Z", helloFrame.Hello)
+	}
+
+	// THEN a command response, AFTER the hello.
+	if _, err := clientConn.Write([]byte(`{"version":1,"id":7,"cmd":"status"}` + "\n")); err != nil {
+		t.Fatalf("write status request: %v", err)
+	}
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	respLine, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read status response after hello: %v", err)
+	}
+	var resp api.IPCResponse
+	if err := json.Unmarshal([]byte(respLine), &resp); err != nil {
+		t.Fatalf("decode status response %q: %v", respLine, err)
+	}
+	if !resp.OK || resp.Error != nil || resp.ID != 7 {
+		t.Fatalf("status response = %+v, want OK id=7", resp)
+	}
+
+	_ = clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("serveIPCConn did not exit after client close")
 	}
 }

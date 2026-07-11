@@ -1511,17 +1511,27 @@ func defaultPipePath(stateDir string) string {
 // permanently. The supervisor process stayed alive, daemons stayed
 // alive, but IPC went silent and `mcphub status` started timing
 // out. Dashboard appeared "broken" with no actionable diagnostic.
+// The first fix continued the loop on non-ErrClosed errors with a
+// small backoff.
 //
-// The post-mortem error was specifically:
+// Follow-up (post-mortem of the 2026-07 accept-flap incident): the
+// hello handshake write ALSO used to run synchronously inside
+// Accept(), so a client that dialed then vanished before the server
+// finished the hello write ("write hello: The pipe is being closed.")
+// surfaced as an Accept() error and drove this loop into its 50ms
+// backoff — a single abandoned connection stalled every other client's
+// dial (297× over 24h; GUI "hub red" + intermittent `mcphub status`
+// i/o timeouts). The hello I/O now lives OFF this hot path in
+// serveIPCConn (via listener.WriteHello), so a hello-write failure
+// closes only its own connection and emits a DISTINCT
+// ipc-hello-write-error event; it never enters the accept-error branch
+// or the consecutive-error budget below.
 //
-//	ipc-accept-exit body: "write hello: The pipe is being closed."
-//
-// which comes from the Accept-time hello write in
-// supervise_ipc_windows.go:115 (POSIX equivalent at
-// supervise_ipc_posix.go:122). The fix: continue the loop on
-// non-ErrClosed errors with a small backoff to avoid hot-loop when
-// a persistent transport fault is in play; only ErrClosed signals
-// "listener was Close()'d via Stop()" and is the right time to exit.
+// So the accept loop's error branch now fires only on genuine listener
+// faults. Continue the loop on non-ErrClosed errors with a small
+// backoff to avoid hot-loop when a persistent transport fault is in
+// play; only ErrClosed signals "listener was Close()'d via Stop()" and
+// is the right time to exit.
 //
 // Defense-in-depth: if we somehow accumulate maxConsecutiveAcceptErrs
 // (100) transient errors back-to-back, treat the listener as
@@ -1536,8 +1546,14 @@ const (
 // the listener. Concrete production type is *SupervisorIPCListener;
 // tests inject a fake to exercise the error-handling branches without
 // binding a real pipe/socket.
+//
+// WriteHello writes the spec-required hello handshake frame to a
+// freshly-accepted connection. It is called from the per-connection
+// serveIPCConn goroutine, NOT from the accept loop, so a slow hello
+// write can never stall Accept() of the next client.
 type ipcAcceptor interface {
 	Accept() (net.Conn, error)
+	WriteHello(net.Conn) error
 }
 
 func acceptIPCConnections(
@@ -1564,11 +1580,12 @@ func acceptIPCConnections(
 				return
 			}
 			consecErrs++
-			// Per-connection transient (hello-write race, client
-			// disconnected mid-handshake, kernel pool pressure).
-			// Emit warn + continue so the loop survives. Pre-fix
-			// this was the regression that caused the 2026-05-19
-			// supervisor-IPC-silence Dashboard outage.
+			// Genuine listener fault (kernel pool pressure, transport
+			// error). The hello-write race no longer reaches here — it
+			// is handled per-connection in serveIPCConn. Emit warn +
+			// continue so the loop survives. Pre-fix this was the
+			// regression that caused the 2026-05-19 supervisor-IPC-
+			// silence Dashboard outage.
 			_ = deps.events.Emit(api.SupervisorEvent{
 				Severity: "warn",
 				Source:   "ipc",
@@ -1600,8 +1617,38 @@ func acceptIPCConnections(
 			continue
 		}
 		consecErrs = 0
-		go handleIPCConn(conn, deps)
+		go serveIPCConn(conn, listener, deps)
 	}
+}
+
+// serveIPCConn runs in its own per-connection goroutine. It writes the
+// hello handshake frame to a freshly-accepted connection, then hands it
+// to handleIPCConn. Doing the hello I/O here (rather than inside
+// Accept) keeps it OFF the single accept loop: a client that dials then
+// vanishes before the server finishes the hello write (common under
+// host saturation — "write hello: The pipe is being closed.") no longer
+// stalls Accept() of the NEXT client.
+//
+// A hello-write failure closes ONLY this connection and emits a
+// DISTINCT ipc-hello-write-error event; it does NOT touch the accept
+// loop's consecutive-error budget (that budget guards genuine listener
+// faults, not per-connection handshake races). The hello stays the
+// FIRST server frame the client reads — only its timing moved off the
+// accept loop.
+func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps) {
+	if err := listener.WriteHello(conn); err != nil {
+		_ = conn.Close()
+		_ = deps.events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "ipc",
+			Event:    "ipc-hello-write-error",
+			Body: map[string]any{
+				"err": err.Error(),
+			},
+		})
+		return
+	}
+	handleIPCConn(conn, deps)
 }
 
 // handleIPCConn is the per-connection request loop. Reads

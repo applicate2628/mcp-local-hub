@@ -24,8 +24,9 @@
 // consent. The protected `D:P` prefix blocks ACE inheritance from
 // the parent pipe namespace.
 //
-// Handshake (Spec §"Wire format" / §"Handshake"): on every Accept()
-// the supervisor writes one JSON line:
+// Handshake (Spec §"Wire format" / §"Handshake"): per accepted
+// connection the supervisor writes one JSON line (via WriteHello, from
+// the per-connection serveIPCConn goroutine — no longer inside Accept):
 //
 //	{"hello":{"version":1,"pid":<pid>,"started_at":"<RFC3339Nano>"}}\n
 //
@@ -34,7 +35,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"time"
@@ -58,8 +58,8 @@ type SupervisorIPCListener struct {
 
 // NewSupervisorIPCListener creates the named pipe at pipePath with
 // the shared SDDL allowlist (current-user + LocalSystem; BA dropped
-// per Q11 v12). Returns a listener whose Accept() sends the hello
-// frame on each new connection.
+// per Q11 v12). Accept() returns the raw connection; the hello frame
+// is written per-connection via WriteHello (see supervise_ipc_common.go).
 //
 // Buffer sizing: 4 KiB input + 4 KiB output is the spec-baseline
 // (IPC frames are short JSON lines well under 1 KiB; the cap exists
@@ -88,34 +88,15 @@ func NewSupervisorIPCListener(pipePath string, ownerOpt ...api.SupervisorLockOwn
 	}, nil
 }
 
-// Accept blocks until a client connects, then sends the hello frame.
-// Caller is responsible for reading subsequent IPC frames and
-// closing the returned net.Conn.
-//
-// On any error writing the hello, the connection is closed and the
-// error is returned so the supervisor's accept loop can log + retry.
+// Accept blocks until a client connects and returns the raw net.Conn.
+// The hello handshake frame is NO LONGER written here: it moved into
+// the per-connection serveIPCConn goroutine (via WriteHello) so a slow
+// or abandoned client can no longer block the supervisor's single
+// accept loop while the server writes the hello. The caller
+// (serveIPCConn) writes the hello frame, reads subsequent IPC frames,
+// and closes the returned net.Conn.
 func (l *SupervisorIPCListener) Accept() (net.Conn, error) {
-	conn, err := l.listener.Accept()
-	if err != nil {
-		return nil, err
-	}
-	hello := api.IPCHello{
-		Version:   1,
-		PID:       l.pid,
-		StartedAt: l.startedAt,
-	}
-	frame := map[string]any{"hello": hello}
-	body, err := json.Marshal(frame)
-	if err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("marshal hello: %w", err)
-	}
-	body = append(body, '\n')
-	if _, err := conn.Write(body); err != nil {
-		_ = conn.Close()
-		return nil, fmt.Errorf("write hello: %w", err)
-	}
-	return conn, nil
+	return l.listener.Accept()
 }
 
 // Close shuts down the listener. Outstanding accepted connections
