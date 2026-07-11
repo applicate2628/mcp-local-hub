@@ -509,32 +509,20 @@ func TestServeIPCConn_HelloWriteFailureIsIsolated(t *testing.T) {
 	conn := &fakeConn{}
 	helloErr := errors.New("write hello: The pipe is being closed.")
 	listener := &fakeAcceptor{
-		queue: []fakeAcceptResult{
-			{conn: conn},
-			{err: net.ErrClosed},
-		},
 		helloFn: func(net.Conn) error { return helloErr },
 	}
-	// Drive the REAL accept loop: the point of this test is that a
-	// hello-write failure is confined to serveIPCConn and must NOT feed
-	// back into the accept loop's transient-error branch / consecutive-
-	// error budget (the exact 2026-07 flap regression this PR fixes).
-	// Running through the loop is what makes the two negative assertions
-	// below FALSIFIABLE — a future refactor that routed hello errors into
-	// the accept budget would fail here. The ipc-hello-write-error row is
-	// deterministic because serveIPCConn records it via EmitWithTimeout
-	// (bounded-block, not the lossy TryEmit that would drop it under the
-	// ErrClosed sentinel's competing ipc-accept-exit emit).
-	runAcceptLoop(t, listener, deps, 2*time.Second)
+	// Call serveIPCConn directly (synchronous, no accept loop) so the
+	// best-effort ipc-hello-write-error TryEmit has no competing emitter
+	// and the event is deterministic here. That a hello failure does NOT
+	// feed the accept-error BUDGET is proven separately + falsifiably by
+	// TestServeIPCConn_HelloFailureDoesNotFeedAcceptBudget (which drives
+	// the real loop).
+	serveIPCConn(conn, listener, deps)
 
-	// Wait for the event FIRST: serveIPCConn runs in its own goroutine and
-	// closes the conn BEFORE emitting ipc-hello-write-error, so once the
-	// event is logged the close has already happened (checking conn.closed
-	// right after runAcceptLoop would race the still-starting goroutine).
-	body := waitForSupervisorEvent(t, logPath, `"event":"ipc-hello-write-error"`, 2*time.Second)
 	if !conn.closed.Load() {
 		t.Error("hello-write failure must close the connection")
 	}
+	body := waitForSupervisorEvent(t, logPath, `"event":"ipc-hello-write-error"`, 2*time.Second)
 	if strings.Contains(body, `"event":"ipc-accept-transient-error"`) {
 		t.Errorf("hello-write failure must NOT emit ipc-accept-transient-error, got:\n%s", body)
 	}
@@ -544,9 +532,61 @@ func TestServeIPCConn_HelloWriteFailureIsIsolated(t *testing.T) {
 	if !strings.Contains(body, `"severity":"warn"`) {
 		t.Errorf("expected warn severity on ipc-hello-write-error, got:\n%s", body)
 	}
-	// The subsequent ErrClosed still exits the loop cleanly.
-	if !strings.Contains(body, `"event":"ipc-accept-exit"`) {
-		t.Errorf("expected ipc-accept-exit on ErrClosed, got:\n%s", body)
+}
+
+// TestServeIPCConn_HelloFailureDoesNotFeedAcceptBudget is the FALSIFIABLE
+// guard for the PR's headline property: a hello-write failure driven through
+// the REAL accept loop must NOT enter the accept-error branch or touch the
+// consecutive-error budget (the 2026-07 flap regression). A future refactor
+// that routed hello errors back into the loop's budget would make
+// ipc-accept-transient-error / consecutive_err appear here. conn2's
+// successful hello proves the loop kept serving past conn1's failure.
+func TestServeIPCConn_HelloFailureDoesNotFeedAcceptBudget(t *testing.T) {
+	deps, logPath := makeTestDeps(t)
+
+	conn1 := &fakeConn{} // hello fails
+	conn2 := &fakeConn{} // hello succeeds
+	served2 := make(chan struct{})
+	listener := &fakeAcceptor{
+		queue: []fakeAcceptResult{
+			{conn: conn1},
+			{conn: conn2},
+			{err: net.ErrClosed},
+		},
+		helloFn: func(c net.Conn) error {
+			if c == conn1 {
+				return errors.New("write hello: The pipe is being closed.")
+			}
+			close(served2)
+			return nil
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		acceptIPCConnections(listener, deps)
+		close(done)
+	}()
+
+	select {
+	case <-served2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("conn2 was not served after conn1's hello failure")
+	}
+	<-done // join the accept loop (its ipc-accept-exit emit) before reading + cleanup
+
+	if got := listener.accepted.Load(); got != 2 {
+		t.Errorf("accepted = %d, want 2 — both conns accepted despite conn1's hello failure", got)
+	}
+	body, err := readSupervisorEventsLog(logPath)
+	if err != nil {
+		t.Fatalf("read events log: %v", err)
+	}
+	if strings.Contains(body, `"event":"ipc-accept-transient-error"`) {
+		t.Errorf("a hello-write failure must NOT feed the accept-error branch:\n%s", body)
+	}
+	if strings.Contains(body, `"consecutive_err"`) {
+		t.Errorf("a hello-write failure must NOT touch the accept-error budget:\n%s", body)
 	}
 }
 

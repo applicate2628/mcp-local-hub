@@ -1540,12 +1540,6 @@ func defaultPipePath(stateDir string) string {
 const (
 	maxConsecutiveAcceptErrs = 100
 	ipcConnIdleTimeout       = 60 * time.Second
-	// ipcHelloEmitTimeout bounds how long a per-connection serveIPCConn
-	// goroutine may park on the audit-flock while recording an
-	// ipc-hello-write-error, so a same-user hello-failure flood cannot
-	// accumulate unbounded parked goroutines — while still recording the
-	// event when the lock frees within the window (unlike a lossy TryEmit).
-	ipcHelloEmitTimeout = 250 * time.Millisecond
 )
 
 // ipcAcceptor is the narrow interface acceptIPCConnections needs from
@@ -1644,26 +1638,31 @@ func acceptIPCConnections(
 func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps) {
 	if err := listener.WriteHello(conn); err != nil {
 		_ = conn.Close()
-		// Bounded-block emit (EmitWithTimeout, not the plain blocking
-		// Emit and not the lossy TryEmit): the conn is already reaped,
-		// and the accept loop keeps spawning one goroutine per
-		// connection — so a plain blocking audit-flock write would park
-		// these per-connection goroutines indefinitely under a same-user
-		// hello-failure flood. EmitWithTimeout caps each park at
-		// ipcHelloEmitTimeout while STILL recording the event when the
-		// lock frees within that window — preserving the burst fidelity
-		// of the exact ipc-hello-write-error signal this fix exists to
-		// diagnose (TryEmit would silently drop the losers of a burst).
-		// Nil-guarded to match the ipc-command call site in handleIPCConn.
+		// Non-blocking emit (TryEmit): the conn is already reaped, and
+		// the accept loop keeps spawning one goroutine per connection —
+		// so under a same-user hello-failure flood the emit MUST NOT
+		// park these per-connection goroutines. TryEmit skips on
+		// contention (both the in-process mutex AND the cross-process
+		// flock are TryLock'd), so each goroutine returns immediately,
+		// truly bounding accumulation. EmitWithTimeout does NOT work
+		// here: SupervisorEventLog.emit takes the in-process mutex with a
+		// blocking Lock BEFORE its timeout applies (only the flock wait
+		// is bounded), so under combined contention the Nth writer still
+		// queues ~N×timeout on that mutex (codex review, PR #530). The
+		// cost of TryEmit is a best-effort drop of some ipc-hello-write-
+		// error rows under a burst — acceptable: bounding the goroutine
+		// park is the safety priority, and the burst is independently
+		// visible via the flap / status timeouts. Nil-guarded to match
+		// the ipc-command call site in handleIPCConn.
 		if deps.events != nil {
-			_ = deps.events.EmitWithTimeout(api.SupervisorEvent{
+			_ = deps.events.TryEmit(api.SupervisorEvent{
 				Severity: "warn",
 				Source:   "ipc",
 				Event:    "ipc-hello-write-error",
 				Body: map[string]any{
 					"err": err.Error(),
 				},
-			}, ipcHelloEmitTimeout)
+			})
 		}
 		return
 	}
