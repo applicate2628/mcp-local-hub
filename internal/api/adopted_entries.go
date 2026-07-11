@@ -857,11 +857,30 @@ const adoptOrphanGCThreshold = 24 * time.Hour
 // row (crash-safe ordering, codex bot PR #528 finding 3). Caller MUST hold the
 // manifest lease so the reap cannot race a concurrent adopt. No event emit — the
 // GC caller emits orphan-reaped.
-func reapAdoptProvenanceRow(manifestName string) error {
+//
+// Identity gate (bug 2026-07-11): the reap is a NO-OP unless the LIVE row still
+// matches the caller's expected identity — same ManifestName AND OperationState ==
+// expectedState AND UpdatedAt.Equal(expectedUpdatedAt). The held lease already
+// excludes a concurrent same-manifest adopt, but the caller selected the row from a
+// copy taken EARLIER (the GC's Phase-1 snapshot); this defense-in-depth re-check AT
+// THE MUTATION POINT ensures a name-only match can never destroy a row that was
+// REPLACED since selection (a fresh committed re-adopt + its secret snapshots).
+// Mismatch or absent => return nil without touching snapshots or the store.
+func reapAdoptProvenanceRow(manifestName string, expectedState AdoptOperationState, expectedUpdatedAt time.Time) error {
 	return withAdoptedEntriesLock(func() error {
 		store, err := readAdoptedEntries()
 		if err != nil {
 			return fmt.Errorf("adopt provenance reap: read store: %w", err)
+		}
+		matched := false
+		for _, r := range store.Records {
+			if r.ManifestName == manifestName && r.OperationState == expectedState && r.UpdatedAt.Equal(expectedUpdatedAt) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return nil // live row changed/vanished since selection => not ours => no-op
 		}
 		if err := removeAdoptSnapshots(manifestName); err != nil {
 			return fmt.Errorf("adopt provenance reap: remove snapshots: %w", err)
@@ -881,6 +900,13 @@ func reapAdoptProvenanceRow(manifestName string) error {
 	})
 }
 
+// adoptGCBeforePhase2Hook is a test-only seam fired ONCE inside
+// gcOrphanedAdoptingProvenance AFTER Phase 1 snapshots the candidates but BEFORE
+// Phase 2 re-reads + classifies them. It lets a test deterministically simulate a
+// concurrent same-manifest re-adopt committing inside the Phase-1->Phase-2 gap and
+// exercise Phase 2's under-lease re-read guard (bug 2026-07-11). nil in production.
+var adoptGCBeforePhase2Hook func()
+
 // gcOrphanedAdoptingProvenance reaps stale CROSS-manifest orphans using the three
 // design-r2 signals — the per-manifest LEASE (Signal 1), the hub-binding-live
 // classifier (Signal 2), and the snapshot-dir backstop (Signal 3):
@@ -889,10 +915,14 @@ func reapAdoptProvenanceRow(manifestName string) error {
 //     manifests that have ANY store row; release the store lock.
 //   Phase 2 (per candidate, OUTSIDE the store lock): TryLock its lease — a LIVE
 //     adopt holds it => skip (claim 16). With the lease held the owner is provably
-//     dead; classifyDeadAdoptingRow decides: COMMITTED_KEEP (a hub binding is live —
-//     a promote-flip-failure recoverable row, finding 2 KEEP) is preserved;
-//     CRASH_REAP (manifest absent, OR present with no live binding — finding 2 REAP)
-//     removes snapshots-then-row under the held lease.
+//     dead; then RE-READ the row under the store lock and require it is STILL the
+//     exact orphan Phase 1 selected (still `adopting`, UpdatedAt unchanged, still
+//     older than the cutoff) — a stale Phase-1 copy must never drive a reap after a
+//     concurrent re-adopt replaced the row (bug 2026-07-11). classifyDeadAdoptingRow
+//     decides on the LIVE bytes: COMMITTED_KEEP (a hub binding is live — a
+//     promote-flip-failure recoverable row, finding 2 KEEP) is preserved; CRASH_REAP
+//     (manifest absent, OR present with no live binding — finding 2 REAP) removes
+//     snapshots-then-row under the held lease, identity-gated at the mutation point.
 //   Phase 3 (backstop): reap ROWLESS snapshot dirs (a <manifest>/ dir with no store
 //     row — findings 3/4 residue or any future ordering bug), gated on the lease +
 //     no-store-row, NOT age-gated (a rowless dir has no updated_at).
@@ -925,15 +955,55 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 		return 0, lockErr
 	}
 
+	// Test-only seam: simulate a concurrent same-manifest re-adopt committing inside
+	// the Phase-1->Phase-2 gap. nil in production.
+	if adoptGCBeforePhase2Hook != nil {
+		adoptGCBeforePhase2Hook()
+	}
+
 	// Phase 2 — reap true cross-manifest row-bearing orphans under each own lease.
 	for _, c := range candidates {
 		lk, ok, lErr := tryAcquireAdoptManifestLease(c.rec.ManifestName)
 		if lErr != nil || !ok {
 			continue // lease unavailable (live adopt) or path error => skip (fail-safe)
 		}
-		if classifyDeadAdoptingRow(c.rec) == adoptRowCrashReap {
-			if rErr := reapAdoptProvenanceRow(c.rec.ManifestName); rErr == nil {
-				emitAdoptProvenanceOrphanReaped(c.rec.ManifestName, c.ageSec, adoptOrphanReapTriggerGC)
+		// RE-READ the row UNDER the held lease before classifying (bug 2026-07-11).
+		// c.rec is the STALE Phase-1 copy taken before the lease was held: a concurrent
+		// same-manifest re-adopt can UPSERT a FRESH committed row (new UpdatedAt /
+		// `adopted` state / a new port) into the Phase-1->Phase-2 gap. Classifying the
+		// stale copy would reconstruct the expected binding from the OLD port, miss the
+		// new live binding, and reap the freshly-committed row + its secret snapshots.
+		// Only reap when the LIVE row is STILL the exact dead-owner orphan Phase 1
+		// selected: still `adopting`, UpdatedAt unchanged, still older than the cutoff
+		// (mirrors Phase 3's under-lease re-confirm). Classify the LIVE bytes.
+		var (
+			live      AdoptProvenanceRecord
+			stillOurs bool
+		)
+		_ = withAdoptedEntriesLock(func() error {
+			store, rErr := readAdoptedEntries()
+			if rErr != nil {
+				return nil // fail-safe: leave stillOurs=false, do not reap on a read error
+			}
+			for _, r := range store.Records {
+				if r.ManifestName != c.rec.ManifestName {
+					continue
+				}
+				if r.OperationState == AdoptOperationStateAdopting && r.UpdatedAt.Equal(c.rec.UpdatedAt) && r.UpdatedAt.Before(cutoff) {
+					live = r
+					stillOurs = true
+				}
+				break
+			}
+			return nil
+		})
+		if !stillOurs {
+			_ = lk.Unlock()
+			continue // row changed/vanished since Phase-1 selection => not our orphan => skip
+		}
+		if classifyDeadAdoptingRow(live) == adoptRowCrashReap {
+			if rErr := reapAdoptProvenanceRow(live.ManifestName, AdoptOperationStateAdopting, live.UpdatedAt); rErr == nil {
+				emitAdoptProvenanceOrphanReaped(live.ManifestName, c.ageSec, adoptOrphanReapTriggerGC)
 				reaped++
 			}
 		}
