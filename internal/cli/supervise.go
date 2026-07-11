@@ -1540,6 +1540,12 @@ func defaultPipePath(stateDir string) string {
 const (
 	maxConsecutiveAcceptErrs = 100
 	ipcConnIdleTimeout       = 60 * time.Second
+	// ipcHelloEmitTimeout bounds how long a per-connection serveIPCConn
+	// goroutine may park on the audit-flock while recording an
+	// ipc-hello-write-error, so a same-user hello-failure flood cannot
+	// accumulate unbounded parked goroutines — while still recording the
+	// event when the lock frees within the window (unlike a lossy TryEmit).
+	ipcHelloEmitTimeout = 250 * time.Millisecond
 )
 
 // ipcAcceptor is the narrow interface acceptIPCConnections needs from
@@ -1638,23 +1644,26 @@ func acceptIPCConnections(
 func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps) {
 	if err := listener.WriteHello(conn); err != nil {
 		_ = conn.Close()
-		// Non-blocking emit (TryEmit, not Emit): the conn is already
-		// reaped, and the accept loop keeps spawning one goroutine per
-		// connection — so under a same-user hello-failure flood a
-		// blocking audit-flock write would park these per-connection
-		// goroutines behind a contended lock. TryEmit skips on
-		// contention (dropping a best-effort diagnostic breadcrumb),
-		// the same hot-path pattern as the ipc-command emit in
-		// handleIPCConn below. Nil-guarded to match that call site.
+		// Bounded-block emit (EmitWithTimeout, not the plain blocking
+		// Emit and not the lossy TryEmit): the conn is already reaped,
+		// and the accept loop keeps spawning one goroutine per
+		// connection — so a plain blocking audit-flock write would park
+		// these per-connection goroutines indefinitely under a same-user
+		// hello-failure flood. EmitWithTimeout caps each park at
+		// ipcHelloEmitTimeout while STILL recording the event when the
+		// lock frees within that window — preserving the burst fidelity
+		// of the exact ipc-hello-write-error signal this fix exists to
+		// diagnose (TryEmit would silently drop the losers of a burst).
+		// Nil-guarded to match the ipc-command call site in handleIPCConn.
 		if deps.events != nil {
-			_ = deps.events.TryEmit(api.SupervisorEvent{
+			_ = deps.events.EmitWithTimeout(api.SupervisorEvent{
 				Severity: "warn",
 				Source:   "ipc",
 				Event:    "ipc-hello-write-error",
 				Body: map[string]any{
 					"err": err.Error(),
 				},
-			})
+			}, ipcHelloEmitTimeout)
 		}
 		return
 	}

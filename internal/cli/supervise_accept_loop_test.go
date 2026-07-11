@@ -449,10 +449,11 @@ func TestServeIPCConn_SlowHelloDoesNotBlockNextAccept(t *testing.T) {
 	conn1 := &fakeConn{}
 	conn2 := &fakeConn{}
 
-	// conn1's hello write blocks until cleanup — it never returns
-	// while the test body runs, standing in for a wedged/abandoned
-	// client. Released in a t.Cleanup that (LIFO) runs before the
-	// events log is closed; conn1's released path emits no event.
+	// conn1's hello write blocks until we release blockCh below, standing
+	// in for a wedged/abandoned client while the test body runs. We release
+	// it inline after conn2 is served (not in a t.Cleanup) and then join the
+	// accept loop, so the released path finishes before the events log is
+	// torn down; conn1's released path emits no event.
 	blockCh := make(chan struct{})
 
 	served2 := make(chan struct{})
@@ -508,21 +509,32 @@ func TestServeIPCConn_HelloWriteFailureIsIsolated(t *testing.T) {
 	conn := &fakeConn{}
 	helloErr := errors.New("write hello: The pipe is being closed.")
 	listener := &fakeAcceptor{
+		queue: []fakeAcceptResult{
+			{conn: conn},
+			{err: net.ErrClosed},
+		},
 		helloFn: func(net.Conn) error { return helloErr },
 	}
-	// Call serveIPCConn directly (not through acceptIPCConnections) so the
-	// best-effort ipc-hello-write-error TryEmit has no competing emitter
-	// racing it for the event-log lock. Through the accept loop, the
-	// ErrClosed sentinel's ipc-accept-exit emit could win the lock first
-	// and TryEmit would drop the row (it skips on contention), flaking the
-	// assertion below. The accept loop's own ErrClosed exit is covered by
-	// TestAcceptLoop_ExitOnErrClosed.
-	serveIPCConn(conn, listener, deps)
+	// Drive the REAL accept loop: the point of this test is that a
+	// hello-write failure is confined to serveIPCConn and must NOT feed
+	// back into the accept loop's transient-error branch / consecutive-
+	// error budget (the exact 2026-07 flap regression this PR fixes).
+	// Running through the loop is what makes the two negative assertions
+	// below FALSIFIABLE — a future refactor that routed hello errors into
+	// the accept budget would fail here. The ipc-hello-write-error row is
+	// deterministic because serveIPCConn records it via EmitWithTimeout
+	// (bounded-block, not the lossy TryEmit that would drop it under the
+	// ErrClosed sentinel's competing ipc-accept-exit emit).
+	runAcceptLoop(t, listener, deps, 2*time.Second)
 
+	// Wait for the event FIRST: serveIPCConn runs in its own goroutine and
+	// closes the conn BEFORE emitting ipc-hello-write-error, so once the
+	// event is logged the close has already happened (checking conn.closed
+	// right after runAcceptLoop would race the still-starting goroutine).
+	body := waitForSupervisorEvent(t, logPath, `"event":"ipc-hello-write-error"`, 2*time.Second)
 	if !conn.closed.Load() {
 		t.Error("hello-write failure must close the connection")
 	}
-	body := waitForSupervisorEvent(t, logPath, `"event":"ipc-hello-write-error"`, 2*time.Second)
 	if strings.Contains(body, `"event":"ipc-accept-transient-error"`) {
 		t.Errorf("hello-write failure must NOT emit ipc-accept-transient-error, got:\n%s", body)
 	}
@@ -531,6 +543,10 @@ func TestServeIPCConn_HelloWriteFailureIsIsolated(t *testing.T) {
 	}
 	if !strings.Contains(body, `"severity":"warn"`) {
 		t.Errorf("expected warn severity on ipc-hello-write-error, got:\n%s", body)
+	}
+	// The subsequent ErrClosed still exits the loop cleanly.
+	if !strings.Contains(body, `"event":"ipc-accept-exit"`) {
+		t.Errorf("expected ipc-accept-exit on ErrClosed, got:\n%s", body)
 	}
 }
 
