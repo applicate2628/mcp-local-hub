@@ -71,8 +71,10 @@ security-core, or protected-surface change:
 
 - **NEW read-only capability method `ClassifyEntryUnderLock` on `CASEntryMutator`** (change (2),
   mirroring the shipped `EntryBytesChecker` capability pattern): its `lockingClient` forwarder HOLDS
-  `withConfigLock` across the live read + the raw-subtree deep-compare; the concrete body is
-  read-only + lock-free (same non-reentrant-mutex constraint as the CAS bodies, `config_lock.go:24-30`).
+  `withConfigLock` across the live read + the raw-subtree deep-compare (SUPERSEDED in round 5 — the
+  forwarder holds the read-selection `withConfigReadLock` and reads the WRITE-TARGET-PHYSICAL bytes,
+  see Round 5); the concrete body is read-only + lock-free (same non-reentrant-mutex constraint as
+  the CAS bodies, `config_lock.go:24-30`).
 - **The E3 `--accept-conflict` acceptance decision AND the resume/plan done-ness derivation BOTH call
   this ONE capability** — a single atomic classification owner. The round-3 resume derivation's
   PARALLEL UNLOCKED `os.ReadFile(adapter.ConfigPath())` live read is REMOVED (it was the very TOCTOU
@@ -80,6 +82,48 @@ security-core, or protected-surface change:
   stay api-layer and compose with the classifier's live verdict.
 - **New falsification test T15** — read-only assertion + a concurrent live-config state change vs the
   classifier + a still-hub client passed to `--accept-conflict` REFUSED with its snapshot INTACT.
+
+### Round 5 (2026-07-11) — write-target-physical collapse + adopt-GC dependency (design-text only; no architecture change)
+
+Source of truth: a mandatory fable-5 adversarial review of round-4 (`d9dbec56`). It confirmed the
+round-4 seam but found the seam's live-read WHICH-BYTES decision introduced a NEW P1 and left the
+adopt-GC dependency unfenced. This round changes ONLY which bytes `ClassifyEntryUnderLock` reads and
+adds the dependency edge — no scope, security-core, or protected-surface change:
+
+- **P1-B (the fix — a COLLAPSE, not another edge).** Round-4 pinned the classify live `*MCPEntry` +
+  raw-subtree derivations to "the same code `GetEntry` wraps." For the **mimocode** adapter `GetEntry`
+  (`mimocode.go:3868-3951`, via `readJSON`) is a MERGED multi-layer view (write target + lower
+  `config.json` + `~/.claude.json` import + higher overlay/env/MDM), NOT one file's bytes — so after
+  a successful `CASGuardedRemoveEntry` on a `present-merged-lower` client the lower entry re-emerges
+  in the merged view (live≠nil, match==false → `GenuineConflict`) when the TRUTH is `RestoreDone`
+  (a permanent CLOSE-READY block, or a coerced `--accept-conflict` whose snapshot-destruction warning
+  is meaningless), and the merged projection reads overlay/import files the held `withConfigLock(ConfigPath)`
+  does not cover (an atomicity void vs claim 18). **FIX:** pin BOTH derivations to the WRITE-TARGET
+  physical bytes read once under the lock — the adapter's single-file section parse, the SAME owner
+  `EntryPresentInBytes` documents (`entry_bytes.go:95-103`) — NEVER the multi-layer `GetEntry`. Stated
+  uniformly for every adapter: StillHub/RestoreDone/GenuineConflict are judged WRITE-TARGET-PHYSICAL,
+  correct-by-construction (adopt wrote the write target ⟹ merged-lower success ≡ write-target absence;
+  higher/lower layers are operator-owned, out of classify scope). This is the mimocode multi-layer
+  re-resolve class — collapsed to ONE predicate, NOT a mimocode special case.
+- **P1-A (adopt-GC dependency — unfenced).** De-adopt's per-manifest lease does NOT fence the adopt
+  GC's stale-candidate reap (the GC's decision inputs pre-date the lease). Added `Depends-on:` for the
+  two filed adopt-GC bugs to `status.md` + a new "Adopt-GC dependency" section, and corrected
+  design:564/:795 which asserted a reap-time `adopting`-only filter `reapAdoptProvenanceRow`
+  (`adopted_entries.go:860-882`) does NOT have (it is a Phase-1 SELECTION property; the reap primitive
+  drops by manifest NAME).
+- **P2** — a cleanly-absent config file (`os.IsNotExist`) maps to empty-config (live==nil, raw-absent),
+  never `ClassifyUnreadable` (which would wedge a `present` client permanently). `Unreadable` reserved
+  for genuine read/parse errors on a PRESENT file.
+- **P3-a** — the classify forwarder holds `withConfigReadLock` (the missing-dir short-circuit,
+  `config_lock.go:150-158`) so a plan-time classify of an absent config has NO FS side effect (no
+  `SecureCreateParentDir`, no `.lock` file), delegating to the SAME `withConfigLock` flock when the
+  config exists.
+- **P3-b** — G8 residual extended: the accepted-`GenuineConflict` verdict is a point-in-time proof at
+  E3, not re-checked at E6 (a between-E3-and-close reversion-to-hub is bounded/benign; a reversion
+  ALREADY landed AT E3-time IS caught → StillHub → reject).
+- **New falsification tests T16** (merged-lower write-target-physical → RestoreDone, not the merged
+  GenuineConflict) **+ T17** (cleanly-absent config → empty-config, not Unreadable); **claim 19**
+  added (write-target-physical single owner); claim 18 re-anchored on `withConfigReadLock`.
 
 ## Change-Surface Contract
 
@@ -114,9 +158,11 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
     `EntryBytesChecker` capability pattern, `entry_bytes.go:24`), NOT a `Client`-interface
     method: `CASRestoreEntryFromBytes` + `CASGuardedRemoveEntry` + the read-only
     `EntryRawSubtree` (the pure raw-subtree extractor) + the read-only `ClassifyEntryUnderLock`
-    (the P1-a atomic classification seam — its `lockingClient` forwarder HOLDS `withConfigLock`
-    across the live read + compare, UNLIKE the lock-free `EntryRawSubtree`/`EntryPresentInBytes`
-    forwards), implemented by exactly the
+    (the P1-a atomic classification seam — its `lockingClient` forwarder HOLDS the read-selection
+    `withConfigReadLock` across the WRITE-TARGET-PHYSICAL live read + compare, delegating to the
+    SAME `withConfigLock` flock the CAS mutators hold when the config exists and short-circuiting
+    the parent-dir/`.lock`-file creation when it is absent — P1-b/P3-a; UNLIKE the lock-free
+    `EntryRawSubtree`/`EntryPresentInBytes` forwards), implemented by exactly the
     adopt-reachable adapters, forwarded by `lockingClient`, fail-closed at the de-adopt
     site if an adapter does not implement it (memo item 5 + 7; P1-a). **B1 — the mutating CAS
     methods COMPOSE the shipped per-adapter restore core, they do not re-implement it:**
@@ -157,7 +203,9 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
     done-ness owner). Its restore body COMPOSES the shipped per-adapter restore core via a
     behavior-preserving `restoreEntryFromBytes` extraction (B1) — no new restore logic, no second
     extraction owner; `ClassifyEntryUnderLock` reuses the SAME `EntryRawSubtree` extractor + the
-    SAME injected recognizer, adding NO second equality owner.
+    SAME injected recognizer, adding NO second equality owner, and reads the WRITE-TARGET-PHYSICAL
+    bytes (the `EntryPresentInBytes` single-file section owner) — never the merged multi-layer
+    `GetEntry` (P1-b).
   - D3 — the shipped recognizer `liveEntryMatchesManifestBinding` (`managed_entries.go:355`)
     reused read-only as the SINGLE "is the live entry our hub entry" equality owner (memo
     item 3). No second shape-derivation path.
@@ -284,7 +332,11 @@ recognizer `liveEntryMatchesManifestBinding(live, entryName, binding, m)`
 
 - `m := &config.ServerManifest{Name: rec.ManifestName, Daemons: [{Name:"default", Port: rec.Port}]}`
 - `binding := config.ClientBinding{Client: c, Daemon:"default", URLPath:"/mcp"}`
-- `live := adapter.GetEntry(rec.SourceEntryName)`
+- `live := adapter.GetEntry(rec.SourceEntryName)` — this is how the SHIPPED `classifyDeadAdoptingRow`
+  builds its own live input; de-adopt REUSES the `m`/`binding` construction but NOT this `GetEntry`
+  read. De-adopt's `ClassifyEntryUnderLock` derives `live` from the WRITE-TARGET-PHYSICAL bytes (the
+  `EntryPresentInBytes` single-file section owner), never the merged multi-layer `GetEntry` (P1-b),
+  and passes THAT `*MCPEntry` into the injected recognizer.
 
 The recognizer does per-shape FIELD equality (NOT byte-exact): HTTP → exact URL across the
 3 loopback spellings `localhost`/`127.0.0.1`/`[::1]` (`:373-378`); Antigravity relay →
@@ -303,10 +355,12 @@ second shape owner (preserves claim 2).
 — by deep-comparing verbatim on-disk subtrees, NOT "is the live entry the hub entry" (which stays
 single-owned in `liveEntryMatchesManifestBinding`). Two distinct predicates, two distinct owners;
 the hub-equality question keeps exactly one owner. **That deep-compare now lives inside the ONE
-read-only `ClassifyEntryUnderLock` seam (P1-a)**, which under the held config lock reads the live
-entry, applies the injected hub recognizer (StillHub), and deep-compares the live raw subtree to
-the caller's verified snapshot subtree (RestoreDone vs GenuineConflict) — `EntryRawSubtree` is the
-single PURE extractor it and the api-layer snapshot read both call, never a parallel comparator.
+read-only `ClassifyEntryUnderLock` seam (P1-a)**, which under the held read-selection config lock
+reads the WRITE-TARGET-PHYSICAL live entry (the `EntryPresentInBytes` single-file section owner,
+`entry_bytes.go:95-103` — never the merged multi-layer `GetEntry`, P1-b), applies the injected hub
+recognizer (StillHub), and deep-compares the live raw subtree to the caller's verified snapshot
+subtree (RestoreDone vs GenuineConflict) — `EntryRawSubtree` is the single PURE extractor it and the
+api-layer snapshot read both call, never a parallel comparator.
 
 ## Snapshot read — anchored, path-recomputed, secret-bearing (memo item 4)
 
@@ -392,17 +446,45 @@ type CASEntryMutator interface {
 
     // ClassifyEntryUnderLock is the READ-ONLY classification seam (P1-a). UNLIKE
     // EntryRawSubtree (a pure bytes function, LOCK-FREE forward), its lockingClient
-    // FORWARDER HOLDS withConfigLock(ConfigPath) across the WHOLE call, because the
-    // body READS THE LIVE CONFIG FILE FROM DISK and must do so atomically w.r.t. any
-    // concurrent writer (the SAME operator-edit / demigrate race the CAS mutators close;
-    // merged lockingClient leaves the read-only GetEntry UNLOCKED — config_lock.go:160-173
-    // — so an unlocked GetEntry here would reopen the plan→execute TOCTOU). The concrete
-    // body runs UNDER that held lock and is itself LOCK-FREE (same non-reentrant-mutex
-    // constraint, config_lock.go:24-30) and NEVER MUTATES. It does ONE live read under the
-    // lock (via the adapter's OWN internal parse/projection — the same code GetEntry wraps,
-    // applied to the read bytes — NOT through the lockingClient, so no re-entry) and derives
-    // BOTH the live *MCPEntry for `match` AND the live raw subtree via the SAME EntryRawSubtree
-    // extraction for the deep compare.
+    // FORWARDER HOLDS withConfigReadLock(ConfigPath) across the WHOLE call — the
+    // READ-SELECTION variant of withConfigLock (config_lock.go:150-158). When the
+    // config's parent dir EXISTS it delegates to the SAME withConfigLock flock the CAS
+    // mutators hold, so the live read + compare are atomic w.r.t. any concurrent writer
+    // (the SAME operator-edit / demigrate race the CAS mutators close; merged lockingClient
+    // leaves the read-only GetEntry UNLOCKED — config_lock.go:160-173 — so an unlocked
+    // GetEntry here would reopen the plan→execute TOCTOU). When the parent dir is ABSENT
+    // it short-circuits to the in-process mutex only, creating NO parent dir and NO
+    // `<config>.lock` file — because the read-only advisory plan-time classify (one call
+    // per target client) must have NO plan-time filesystem side effect, and withConfigLock
+    // unconditionally SecureCreateParentDir + drops a `.lock` file (config_lock.go:117-132)
+    // (P3-a; mirrors the shipped backup-READ overrides, config_lock.go:285-316, which use
+    // withConfigReadLock for exactly this reason). The concrete body runs UNDER that held
+    // lock and is itself LOCK-FREE (same non-reentrant-mutex constraint, config_lock.go:24-30)
+    // and NEVER MUTATES.
+    //
+    // WRITE-TARGET-PHYSICAL (the P1-b collapse — ONE predicate, no per-adapter edge). The
+    // body does ONE live read of the adapter's WRITE-TARGET physical file bytes (ConfigPath)
+    // and derives BOTH the live *MCPEntry for `match` AND the live raw subtree from the SAME
+    // single-file section parse — the PHYSICAL-presence owner EntryPresentInBytes already
+    // documents (entry_bytes.go:95-103: mimocode presence is "PHYSICAL presence in the write
+    // target"; lower/import layers route to merged-lower BEFORE the byte check) — applied here
+    // to derive the entry + its raw subtree via the SAME EntryRawSubtree extraction. It is
+    // NEVER the multi-layer GetEntry: for mimocode GetEntry is a MERGED view over write target
+    // + lower config.json + ~/.claude.json import + higher overlay/env/MDM (mimocode.go:3868-3951,
+    // via readJSON) which (a) reads files the held ConfigPath lock does NOT cover — an atomicity
+    // void — and (b) after a SUCCESSFUL merged-lower CASGuardedRemoveEntry re-surfaces the
+    // lower-layer entry so live≠nil/match==false → a FALSE ClassifyGenuineConflict when the truth
+    // is ClassifyRestoreDone (a permanent CLOSE-READY wedge, or a coerced --accept-conflict whose
+    // snapshot-destruction warning is meaningless because merged-lower has no snapshot). For
+    // EVERY adapter StillHub/RestoreDone/GenuineConflict are judged WRITE-TARGET-PHYSICAL,
+    // CORRECT BY CONSTRUCTION: adopt wrote the write target, so merged-lower success ≡
+    // write-target absence, and the higher/lower layers are operator-owned and out of classify
+    // scope. For a single-file adapter the write-target parse EQUALS GetEntry, so the rule is a
+    // no-op change there and uniform everywhere.
+    //
+    // A cleanly-ABSENT config file (os.IsNotExist) is NOT unreadable — it maps to live==nil +
+    // raw-ABSENT (empty-config), exactly as every adapter's GetEntry treats IsNotExist; only a
+    // genuine read/parse error on a PRESENT file is ClassifyUnreadable (P2).
     //
     // `match` is the injected hub recognizer (dependency inversion — like the CAS mutators;
     // the equality owner stays liveEntryMatchesManifestBinding in api). It nil-guards `live`
@@ -412,20 +494,24 @@ type CASEntryMutator interface {
     // ABSENCE (absent / merged-lower; also passed nil when a `present` client's snapshot is
     // UNAVAILABLE on resume — see the resume derivation, which then consumes only the
     // StillHub / not-StillHub / Unreadable distinction). Returns:
-    //   - ClassifyStillHub       : live != nil AND match(live) — the hub entry adopt wrote is
-    //                              still there (restore/remove PENDING; and the P1-a REJECTION
-    //                              of --accept-conflict).
-    //   - ClassifyRestoreDone    : NOT still hub AND the post-op success state is already
-    //                              present — for a present snapshotSubtree, the live raw subtree
-    //                              DEEP-EQUALS snapshotSubtree; for nil snapshotSubtree, the
-    //                              entry is ABSENT.
-    //   - ClassifyGenuineConflict: NOT still hub AND neither the hub entry NOR the success
-    //                              state — a THIRD entry the operator put there (present: live
-    //                              subtree ≠ snapshotSubtree, or live==nil against a present
-    //                              snapshot; absent/merged-lower: a non-hub entry occupies the
-    //                              slot). accept-eligible.
-    //   - ClassifyUnreadable     : the live config could not be read/parsed under the lock —
-    //                              fail-closed (NEVER proves a conflict; NEVER accept-eligible).
+    //   - ClassifyStillHub       : the WRITE-TARGET-PHYSICAL live entry != nil AND match(live)
+    //                              — the hub entry adopt wrote is still in the write target
+    //                              (restore/remove PENDING; and the P1-a REJECTION of
+    //                              --accept-conflict).
+    //   - ClassifyRestoreDone    : NOT still hub AND the post-op success state already holds —
+    //                              for a present snapshotSubtree, the WRITE-TARGET-PHYSICAL live
+    //                              raw subtree DEEP-EQUALS snapshotSubtree; for nil snapshotSubtree
+    //                              (absent / merged-lower), the entry is ABSENT FROM THE WRITE
+    //                              TARGET (a merged-lower's re-emerged lower layer is out of scope).
+    //   - ClassifyGenuineConflict: NOT still hub AND neither the hub entry NOR the success state —
+    //                              a THIRD entry the operator put there (present: WRITE-TARGET-PHYSICAL
+    //                              live subtree ≠ snapshotSubtree, or write-target live==nil against a
+    //                              present snapshot; absent/merged-lower: a non-hub entry occupies the
+    //                              WRITE-TARGET slot). accept-eligible.
+    //   - ClassifyUnreadable     : a genuine read/parse ERROR on a PRESENT write-target config file
+    //                              under the lock — fail-closed (NEVER proves a conflict; NEVER
+    //                              accept-eligible). A cleanly-ABSENT file (os.IsNotExist) is NOT this
+    //                              — it is empty-config (live==nil, raw-absent), never Unreadable (P2).
     // Deep compare is reflect.DeepEqual over the verbatim subtrees (the SAME comparator the
     // round-3 resume done-test used, now single-owned here). NEVER MUTATES.
     ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error)
@@ -434,8 +520,9 @@ type CASEntryMutator interface {
     // read): the VERBATIM on-disk subtree for `name` in configBytes (the SAME extraction
     // restoreEntryFromBytes uses). The api layer calls it on the SNAPSHOT bytes to build the
     // snapshotSubtree argument (lock-free — the snapshot is immutable + owner-anchored, not
-    // subject to the live-config race); ClassifyEntryUnderLock calls it on the LIVE bytes UNDER
-    // the held lock. It is the SINGLE raw-subtree extraction owner, NOT a second recognizer —
+    // subject to the live-config race); ClassifyEntryUnderLock calls it on the WRITE-TARGET
+    // PHYSICAL live bytes (ConfigPath) UNDER the held lock — never the merged multi-layer GetEntry
+    // (P1-b). It is the SINGLE raw-subtree extraction owner, NOT a second recognizer —
     // deep-comparing raw subtrees answers "is the live entry the snapshot's entry", never "is it
     // the hub entry" (that stays single-owned in liveEntryMatchesManifestBinding). B1: two
     // distinct stdio entries both project to MCPEntry{URL:""} and would falsely read equal under
@@ -560,10 +647,18 @@ snapshot dir, snapshots-FIRST, mirroring the shipped `reapAdoptProvenanceRow` /
   row (`adopted_entries.go:529-531`) and adopt v1 pins `manifest == entry name` (no rename
   dodge), so a `closed` row would block ever re-adopting that server.
 - Snapshots-first ordering means a crash between snapshot-removal and row-drop leaves a
-  row→missing-snapshot, NEVER a snapshot→no-row secret leak that no GC reaps (the adopt-side
-  GC Phase-2 reaps only `adopting` rows; Phase-3 only rowless dirs). Deleting the row keeps
-  the shipped at-most-one-row-per-manifest invariant true and collapses P0's `closed` branch
-  to `found=false`.
+  row→missing-snapshot, NEVER a snapshot→no-row secret leak that no GC reaps. The adopt-side GC
+  never reaps a STEADY-STATE `de_adopting` row: Phase-1 SELECTS candidates by
+  `OperationState==adopting ∧ UpdatedAt<cutoff` (`adopted_entries.go:917-922`), so a `de_adopting`
+  row is never a Phase-2 candidate, and Phase-3 reaps only ROWLESS dirs (this row has a row). NOTE
+  — this is a Phase-1 SELECTION property, NOT a reap-time filter: `reapAdoptProvenanceRow`
+  (`adopted_entries.go:860-882`) drops EVERY row matching the manifest NAME with no
+  `(state, UpdatedAt)` check, and Phase-2 classifies the STALE Phase-1 candidate copy under a
+  later-acquired lease (`:929-941`), so a row that was `adopting` at Phase-1 and TRANSITIONS to
+  `de_adopting` under de-adopt's own lease can still be reaped by name. That transition window is
+  closed only by the two filed adopt-GC bug fixes de-adopt `Depends-on` (see "Adopt-GC
+  dependency"). Deleting the row keeps the shipped at-most-one-row-per-manifest invariant true and
+  collapses P0's `closed` branch to `found=false`.
 - **B2b — crash INSIDE close is recoverable, not wedged (soundness rests on the CLOSE-READY
   invariant — P1-b).** E4/E5/E6 run ONLY once CLOSE-READY held (every target client
   RESTORE-DONE-or-genuinely-accepted), and E6 runs snapshots-first AFTER E4. So a crash after
@@ -617,23 +712,30 @@ BuildDeAdoptPlan(server):
       RESUME per client done-ness is DERIVED via the ONE atomic classifier
       ClassifyEntryUnderLock(SourceEntryName, match, snapshotSubtree) — NOT a parallel unlocked
       read. There is exactly ONE live-config read-and-compare code path (this classifier, whose
-      lockingClient forwarder HOLDS withConfigLock across the live read + the RAW-subtree deep-
-      compare; B1 pins the comparator to the RAW on-disk subtree, never lean MCPEntry equality).
+      lockingClient forwarder HOLDS withConfigReadLock across the WRITE-TARGET-PHYSICAL live read +
+      the RAW-subtree deep-compare — never the merged multi-layer GetEntry, P1-b; B1 pins the
+      comparator to the RAW on-disk subtree, never lean MCPEntry equality).
       The api layer owns only the NON-config-lock dimensions and feeds them in: for `present` it
       anchored-reads the snapshot (ReadStateFileInodeAnchored) + sha-gates it + extracts
       snapshotSubtree via EntryRawSubtree(snapshotBytes) [pure, lock-free]; for absent/merged-lower
       snapshotSubtree is nil (success == absence). It then maps the classifier verdict, composing
       snapshot- and manifest-availability where the classifier cannot see them:
-        classifier StillHub:
+        (all verdicts judged WRITE-TARGET-PHYSICAL — the EntryPresentInBytes single-file section
+         owner, never the merged multi-layer GetEntry; P1-b)
+        classifier StillHub (write-target-physical live == hub entry):
           present w/ snapshot readable+sha-OK -> restore pending (E3 restores)
           present w/ snapshot missing/unreadable -> Failed (pre-restore fail-closed; NOT accept-eligible)
           absent / merged-lower                  -> remove pending (E3 removes)
-        classifier RestoreDone (present: live raw subtree deep-equals snapshotSubtree;
-          absent/merged-lower: entry absent)     -> RESTORE-DONE
-        classifier GenuineConflict (present: live subtree ≠ snapshot, or live==nil vs a present
-          snapshot; absent/merged-lower: a non-hub entry occupies the slot)
+        classifier RestoreDone (present: write-target-physical live raw subtree deep-equals
+          snapshotSubtree; absent/merged-lower: entry ABSENT FROM THE WRITE TARGET — a merged-lower's
+          re-emerged lower layer is out of scope, so this is RestoreDone NOT a conflict)
+                                                 -> RESTORE-DONE
+        classifier GenuineConflict (present: write-target-physical live subtree ≠ snapshot, or
+          write-target live==nil vs a present snapshot; absent/merged-lower: a non-hub entry occupies
+          the WRITE-TARGET slot)
                                                  -> genuine conflict Failed (accept-eligible)
-        classifier Unreadable (live config unreadable/unparseable under the lock)
+        classifier Unreadable (a genuine read/parse error on a PRESENT write-target file under the
+          lock — a cleanly-absent config is empty-config live==nil, NOT Unreadable; P2)
                                                  -> Failed (fail-closed)
         present with the snapshot UNAVAILABLE (no snapshotSubtree to supply — call the classifier
           with snapshotSubtree=nil and consume ONLY the StillHub / not-StillHub / Unreadable
@@ -745,11 +847,14 @@ never retries, never accepts) is the G7 residual — see "Residuals".
 
 **Lock graph (full total order, no reverse edge).** `<manifest>.lease` (E1, outermost, held
 E1→E6) → the inners, each transient and mutually NON-nested: `adopted-entries.lock` (each
-store mutator), the per-file `config-lock` inside each CAS method AND inside the read-only
-`ClassifyEntryUnderLock` seam (`config_lock.go:51`, one file at a time, held by the lockingClient
-forwarder — the concrete classify body is lock-free), the supervisor-intent lock (E4). The
-BuildDeAdoptPlan advisory classify call takes that per-file config-lock as a transient LEAF
-(released immediately; no lease held during plan), adding no reverse edge. Order extends the shipped
+store mutator), the per-file `config-lock` — `withConfigLock` (`config_lock.go:51`) inside each
+CAS method, and the read-selection `withConfigReadLock` (`:150-158`) inside the read-only
+`ClassifyEntryUnderLock` seam (which delegates to the SAME `config_lock.go:51` flock when the
+config exists and takes only the in-process mutex — creating no `.lock` file — when the config's
+parent dir is absent), one file at a time, held by the lockingClient forwarder (the concrete
+classify body is lock-free), the supervisor-intent lock (E4). The BuildDeAdoptPlan advisory classify
+call takes that per-file config-lock as a transient LEAF (released immediately; no lease held during
+plan; and NO `.lock` file created for an absent config — P3-a), adding no reverse edge. Order extends the shipped
 `<manifest>.lease → adopted-entries.lock → <snapshot>.lock` (`adopted_entries.go:186-188`).
 No IPC/kill/wait runs while any lock is held (supervisor nudge/kill is in the descriptor
 core, outside every state lock). v1 acquires NO `hub-mcp.lock` (gate-ON deferred), so the
@@ -781,6 +886,46 @@ distinct surface deferred to the follow-up. Two adjacent findings filed (NOT pat
   of de-adopt. Filed `work-items/bugs/2026-07-11-hub-reconcile-gate-on-zero-binding-stale-aggregate.md`;
   the de-adopt-side prune folds into the gate-ON follow-up.
 
+## Adopt-GC dependency (de-adopt `Depends-on` two filed GC bugs)
+
+De-adopt's per-manifest lease (D6) gives de-adopt↔adopt mutual exclusion for OVERLAPPING
+operations, but it does NOT fence the adopt GC's stale-candidate reap, because the GC's decision
+INPUTS pre-date the lease. `gcOrphanedAdoptingProvenance` Phase-1 snapshots the aged `adopting`
+candidates under the store lock and RELEASES it (`adopted_entries.go:908-926`); Phase-2 later
+`TryLock`s each candidate's lease and reaps the STALE Phase-1 copy via `reapAdoptProvenanceRow`
+(`adopted_entries.go:929-941`), which drops every row matching the manifest NAME with NO
+`(state, UpdatedAt)` filter (`:860-882`). Three data-destruction interleaves reach the provenance
+de-adopt reads:
+
+- **Pre-de-adopt destruction.** The direct filed-bug impact: a committed `adopted` row's provenance
+  (+ secret snapshots) is reaped from a stale candidate under a routine adopt's step-0a GC, so
+  de-adopt of M later reports "no provenance" and the original entry spelling incl. secret literals
+  is gone.
+- **de-adopt→re-adopt destroyed.** GC Phase-1 snapshots `R_old(M, adopting, >24h)`; de-adopt of M
+  completes (lease released); a re-adopt of M captures a fresh `R_new`; GC Phase-2 reaches M,
+  `TryLock` succeeds, classifies the STALE `R_old` → `adoptRowCrashReap` →
+  `reapAdoptProvenanceRow(M)` deletes `R_new` + its snapshots.
+- **crash-after-E3 `de_adopting` row reaped → permanent manifest/secret leak.** A committed-adopting
+  `R_old(M, adopting, >24h)` is admitted (G6); de-adopt flips it `de_adopting` under the lease, E3
+  removes the hub binding, then CRASHES before E6 (lease released on death). GC Phase-2 (within the
+  same invocation's Phase-1→Phase-2 gap — widenable by many candidates / slow config reads / AV
+  stalls) classifies the STALE `R_old` (binding now gone) → `adoptRowCrashReap` → reaps the
+  now-`de_adopting` row + its secret-bearing snapshots — orphaning the routed secrets and making the
+  row unresumable.
+
+**Dependency (declared `Depends-on:` in `status.md`; adopt-side, a protected surface in v1 — NOT
+patched here).** At minimum bug #1
+(`work-items/bugs/2026-07-11-gc-phase2-stale-candidate-reaps-committed-row.md`): Phase-2 RE-READS the
+row under the held lease and requires (row exists ∧ `state==adopting` ∧ `UpdatedAt==candidate.UpdatedAt`
+∧ still older than cutoff) before classify+reap, and `reapAdoptProvenanceRow` gains an expected
+`(state, UpdatedAt)` identity that no-ops on mismatch — closing all three interleaves (a transitioned
+`de_adopting` row's state/UpdatedAt no longer match the stale `adopting` candidate → no-op; the fresh
+`R_new`'s UpdatedAt differs from the reaped-`R_old`'s → no-op). Bug #2
+(`...-classifier-committed-signal-blind-to-entry-drift.md`) hardens the classifier's committed-KEEP
+side against live-entry drift, protecting the committed-but-unflipped `adopting` row de-adopt's claim-10
+recoverability contract depends on. De-adopt does not proceed to implementation until these land, or
+runs strictly behind them per the `Depends-on` edge.
+
 ## Residuals (bounded — accepted or deferred; B3)
 
 Stated in the BODY (not only claimed in the gate decision). Each is bounded, operator-driven,
@@ -792,7 +937,11 @@ and either accepted for v1 or explicitly deferred to a follow-up:
   permanently unreadable, so the P1-a snapshot-read-failure rejection applies), leaves a
   `de_adopting` row that (a) WEDGES re-adopt of that manifest — capture refuses ANY non-`adopting`
   prior row (`adopted_entries.go:529-531`) — and (b) RETAINS the secret-bearing snapshot dir,
-  which no adopt-side GC reaps (Phase-2 reaps only `adopting`; the row is `de_adopting`). This is
+  which no adopt-side GC reaps in steady state (Phase-1 SELECTS only `OperationState==adopting ∧
+  UpdatedAt<cutoff` candidates, so a `de_adopting` row is never a Phase-2 candidate, and Phase-3
+  reaps only rowless dirs — this row has a row; the reap primitive `reapAdoptProvenanceRow` has NO
+  state filter, but a steady abandoned `de_adopting` row is never SELECTED as a candidate, so it is
+  retained, not reaped — the transition-window reap is the separate "Adopt-GC dependency"). This is
   structurally identical to the `closed`-tombstone wedge the rework fixed, but on the
   abandoned-retry path the failure table only covers the RETRIED path. v1 does NOT add a
   `de_adopting`-GC or a `mcphub de-adopt --recover`; both are **DEFERRED to the follow-up**
@@ -805,9 +954,16 @@ and either accepted for v1 or explicitly deferred to a follow-up:
   rewrite hub entries OVER the just-restored native entries (the CAS gate protects only
   against writers BEFORE de-adopt's own write, not after it). Under a gate-ON reconcile this is
   a `ClientUpdateRemove{EntryName: server}` against the just-restored entry
-  (`install_hub_reconcile.go:256-262`). Operator-driven and bounded (the operator is running
-  two conflicting topology commands at once); accepted as a one-line residual — de-adopt does
-  not extend the lease over the install/reconcile owners in v1.
+  (`install_hub_reconcile.go:256-262`). **P3-b — the same window applies to an ACCEPTED-conflict
+  client:** its `ClassifyGenuineConflict` verdict is a point-in-time proof under the lock at E3 and
+  is NOT re-checked at E6, so a concurrent no-lease writer can rewrite the accepted slot back to
+  hub-shape between E3 and close (bounded and benign — the accepted client's snapshot is discarded
+  either way; the E3 classify simply proves the operator held a non-hub slot AT E3-time). A
+  reversion-to-hub that has ALREADY landed AT E3-time IS caught: the E3 `ClassifyEntryUnderLock`
+  re-read returns `ClassifyStillHub` → the `--accept-conflict` flag is REJECTED → that client Failed,
+  no snapshot destroyed. Operator-driven and bounded (the operator is running two conflicting topology
+  commands at once); accepted as a residual — de-adopt does not extend the lease over the
+  install/reconcile owners in v1.
 - **Snapshot > 16 MiB unrestorable (B6 residual).** Until the symmetric adopt-side capture cap
   lands (filed adjacent bug, widened to require capture==restore), a config exceeding the
   16 MiB restore cap adopts fine but de-adopts as a Failed client. Pathological (no realistic
@@ -999,6 +1155,26 @@ API/unit (falsification):
     resume done-ness derivation BOTH route through `ClassifyEntryUnderLock`, and there is NO other
     live-config read-and-compare path (no `os.ReadFile(adapter.ConfigPath())` + `EntryRawSubtree`
     comparison outside the seam).
+16. **T16 — write-target-physical classify (P1-b merged-lower falsification).** For a mimocode
+    `present-merged-lower` client whose original entry resolves from a LOWER layer (config.json /
+    `~/.claude.json` import) and whose write target holds the hub entry adopt wrote: after a
+    successful `CASGuardedRemoveEntry`, the write target is entry-ABSENT but the MERGED `GetEntry`
+    view re-surfaces the lower entry. `ClassifyEntryUnderLock` MUST read the WRITE-TARGET-PHYSICAL
+    bytes → classify `ClassifyRestoreDone` (write-target absent). A build that reads the merged
+    multi-layer `GetEntry` → live≠nil / match==false → `ClassifyGenuineConflict` (wedging CLOSE-READY,
+    or coercing a meaningless `--accept-conflict` whose snapshot-destruction warning is void because
+    merged-lower has no snapshot) is the falsification. Also assert the classify read touches ONLY the
+    write-target file (no overlay / import / `~/.claude.json` read) so it stays inside the held
+    ConfigPath lock's coverage (atomicity). A single-file adapter (write target == GetEntry) passes
+    unchanged — the rule is uniform.
+17. **T17 — cleanly-absent config is empty-config, not Unreadable (P2).** Delete a target client's
+    WHOLE config file (`os.IsNotExist`) between plan and execute → `ClassifyEntryUnderLock` returns
+    live==nil / raw-absent (empty-config), NOT `ClassifyUnreadable`: for a `present` client it maps to
+    `ClassifyGenuineConflict` (accept-eligible — the operator emptied the slot), a RECOVERABLE state,
+    NOT the permanent Failed + not-restorable + not-accept-eligible G7 wedge a wrong `Unreadable`
+    verdict would produce. `ClassifyUnreadable` is reserved for a genuine parse error on a PRESENT
+    file (corrupt the config to malformed JSON → `ClassifyUnreadable` → Failed fail-closed). A build
+    that maps `IsNotExist` to `Unreadable` is the falsification.
 
 GUI/CLI: eligibility-surface test (affordance only for provenance rows, disabled gate-ON);
 `{Restored, Failed, Accepted}` report + CLI exit; Playwright round-trip (adopt → gate-OFF
@@ -1023,7 +1199,8 @@ de-adopt → scan native); route tests mirroring `gui/adopt_test.go`.
 15. `{ guarantee: ONE CLOSE-READY predicate (every target client RESTORE-DONE-or-genuinely-accepted) gates the WHOLE close — E4 (manifest delete), E5 (secret delete), AND E6 (snapshot+row delete) all run only under it (E6 additionally requires every routed secret deleted-or-skipped) — so the manifest is never deleted while a client is unresolved (P1-b) and no still-needed snapshot is destroyed (P1-a); --accept-conflict is honored ONLY when the atomic ClassifyEntryUnderLock re-read (config lock held by the forwarder) returns GenuineConflict (StillHub OR unreadable-snapshot/Unreadable → refused → Failed), never a silent close, never a data-losing skip; single-owner: the single ExecuteDeAdopt CLOSE-READY gate (shared by E4/E5/E6 + the resume manifest-absence derivation); enforcement-probe: test 13 (accept validation) + test 14 (E4 close-gated) + test 15 (atomic classification) }`
 16. `{ guarantee: E2 re-verifies classifyDeadAdoptingRow==adoptRowCommittedKeep under the held lease before flipping a committed-adopting row, so a plan-time admission stale by execute cannot convert a GC-reapable orphan into a GC-immune de_adopting wedge; single-owner: MarkAdoptProvenanceDeAdopting under the lease; enforcement-probe: test 12 (B4) }`
 17. `{ guarantee: the de-adopt restore read cap is a bounded client-config size (16 MiB) and the symmetry invariant (restore cap ≥ capture max) is stated + assigned — the residual > cap config is bounded and directed to the adopt-side capture cap; single-owner: the .snapshot suffix clause in stateFileReadCapBytes + the filed adopt-side capture-cap bug; enforcement-probe: test 2 (oversize cap refusal) + the Residuals section }`
-18. `{ guarantee: accept-eligibility AND resume done-ness are decided by ONE read-only under-lock classification seam (ClassifyEntryUnderLock) whose lockingClient forwarder holds the SAME config lock the CAS mutators use, so the live read + raw-subtree compare are atomic vs a concurrent operator edit/demigrate — there is NO parallel unlocked live-config read-and-compare (the round-3 os.ReadFile(ConfigPath) resume read is removed) and NO mutating "probe" of a still-hub client; the hub-equality predicate stays the single injected recognizer and the raw-subtree extraction stays the single EntryRawSubtree owner (no second equality/extraction owner); the concrete classify body is read-only + lock-free (non-reentrant mutex, config_lock.go:24-30); single-owner: ClassifyEntryUnderLock on CASEntryMutator (forwarder-locked, read-only) + the injected liveEntryMatchesManifestBinding recognizer + the EntryRawSubtree extractor; enforcement-probe: test 15 (read-only + concurrent state change + still-hub-refused-snapshot-intact) + grep shows both the accept decision and the resume derivation call ClassifyEntryUnderLock and no os.ReadFile(ConfigPath)+compare outside the seam }`
+18. `{ guarantee: accept-eligibility AND resume done-ness are decided by ONE read-only under-lock classification seam (ClassifyEntryUnderLock) whose lockingClient forwarder holds withConfigReadLock — the read-selection variant delegating to the SAME withConfigLock flock the CAS mutators use when the config's parent dir exists (atomic vs a concurrent operator edit/demigrate), and short-circuiting to the in-process mutex when the dir is absent so a plan-time classify creates NO parent dir and NO .lock file (P3-a, config_lock.go:150-158 vs :117-132); there is NO parallel unlocked live-config read-and-compare (the round-3 os.ReadFile(ConfigPath) resume read is removed) and NO mutating "probe" of a still-hub client; the hub-equality predicate stays the single injected recognizer and the raw-subtree extraction stays the single EntryRawSubtree owner (no second equality/extraction owner); the concrete classify body is read-only + lock-free (non-reentrant mutex, config_lock.go:24-30); single-owner: ClassifyEntryUnderLock on CASEntryMutator (forwarder-locked via withConfigReadLock, read-only) + the injected liveEntryMatchesManifestBinding recognizer + the EntryRawSubtree extractor; enforcement-probe: test 15 (read-only + concurrent state change + still-hub-refused-snapshot-intact) + grep shows both the accept decision and the resume derivation call ClassifyEntryUnderLock and no os.ReadFile(ConfigPath)+compare outside the seam }`
+19. `{ guarantee: ClassifyEntryUnderLock derives BOTH the live *MCPEntry (fed to the hub recognizer) AND the live raw subtree from the WRITE-TARGET-PHYSICAL config bytes read once under the read-selection lock — the EntryPresentInBytes single-file section owner (entry_bytes.go:95-103) — NEVER the merged multi-layer GetEntry (for mimocode a merged view over write target + lower config.json + ~/.claude.json import + higher overlay, mimocode.go:3868-3951); so StillHub/RestoreDone/GenuineConflict are correct-by-construction for EVERY adapter (adopt wrote the write target ⟹ merged-lower success ≡ write-target absence, so a re-emerged lower layer reads RestoreDone not GenuineConflict) and the classify read stays inside the ConfigPath lock's coverage (no overlay/import read the lock cannot cover → claim-18 atomicity holds); a cleanly-absent config maps to empty-config (live==nil, raw-absent), never ClassifyUnreadable (P2); single-owner: the write-target-physical single-file section parse inside ClassifyEntryUnderLock (the EntryPresentInBytes / EntryRawSubtree owner); enforcement-probe: test 16 (merged-lower re-emerged lower layer after CASGuardedRemoveEntry → RestoreDone not GenuineConflict) + test 17 (cleanly-absent config → empty-config not Unreadable) + grep shows no GetEntry/merged-view read in the classify path }`
 
 ## Provenance-gap flag
 
@@ -1070,7 +1247,7 @@ Follow-up work-item stub (subset + gate-ON de-adopt):
 
 ## Gate decision
 
-**PASS (rework 2026-07-11 round 4 — Sol xhigh P1-a atomic-seam delta-check fold-in).** v1 is scoped to
+**PASS (rework 2026-07-11 round 5 — fable-5 write-target-physical collapse + adopt-GC dependency fold-in).** v1 is scoped to
 all-clients-only, gate-OFF-only atomic de-adopt (subset + gate-ON + `--reconstruct-legacy`
 cut, per the LEAD decision). All 7 round-1 BLOCKING must-fixes remain resolved: (1) close
 DELETES the row snapshots-first; (2) gate-ON REFUSED with a message + adjacent bugs filed;
@@ -1140,12 +1317,29 @@ added (read-only + concurrent state change + still-hub-refused-with-snapshot-int
 claim 15 re-anchored on the seam; blast-radius change (2) + D2 updated to list the read-only
 `ClassifyEntryUnderLock` seam alongside the two CAS mutators + `EntryRawSubtree`.
 
-PASS items kept unchanged (roll-forward resume, the `ManifestDeleteInWithHash` decision,
-lock/lease/redaction, routed-secret namespacing, demigrate-NOT-reused, composing shipped
-owners, the all-clients-only cut). Consistent with the two accepted decisions
+Round-5 fixes folded in (all design-text; no architecture / scope / protected-surface change —
+only WHICH BYTES the classify reads + the dependency edge): **P1-B** — the classify live `*MCPEntry`
++ raw-subtree derivations are pinned to the WRITE-TARGET-PHYSICAL single-file section bytes (the
+`EntryPresentInBytes` owner, `entry_bytes.go:95-103`), NEVER the merged multi-layer `GetEntry`
+(`mimocode.go:3868-3951`), collapsing the mimocode merged-lower misclassification + atomicity void to
+ONE correct-by-construction predicate for every adapter; **P1-A** — `Depends-on` the two filed
+adopt-GC bugs + a new "Adopt-GC dependency" section, and design:564/:795 corrected (they asserted a
+reap-time state filter `reapAdoptProvenanceRow` does not have); **P2** — cleanly-absent config →
+empty-config (live==nil), never `ClassifyUnreadable`; **P3-a** — the classify forwarder holds
+`withConfigReadLock` (missing-dir short-circuit) so plan-time classify has no FS side effect; **P3-b**
+— G8 extended (accepted-conflict verdict not re-checked at E6). Claims → 19 (claim 19 added, claim 18
+re-anchored on `withConfigReadLock`); tests T16 + T17 added.
+
+PASS items kept unchanged (the round-4 `ClassifyEntryUnderLock` seam + its lock discipline, the
+CLOSE-READY gate, B1 restore core, E4/E5/E6 gating, roll-forward resume, the `ManifestDeleteInWithHash`
+decision, lock/lease/redaction, routed-secret namespacing, demigrate-NOT-reused, composing shipped
+owners, the all-clients-only cut) — round 5 touched none of them except to change which bytes the
+classify reads. Consistent with the two accepted decisions
 (`2026-07-11-deadopt-v1-all-clients-only-scope`, `2026-07-10-deadopt-manifest-delete-hash-gate`)
 — `--accept-conflict` is a conflict-resolution escape WITHIN the atomic all-clients operation
 (targets ≡ `AdoptClients` unchanged), not a reintroduction of subset de-adopt. Next stage: the
-lead re-verifies + a final Sol+fable DELTA-recheck of the round-4 amended sections (the
-`ClassifyEntryUnderLock` seam + interface block, the resume/accept wiring, the change-surface, T15,
-claim 18) — NOT a full re-audit — then `$planner`.
+lead re-verifies + a Sol (codex) DELTA-recheck of the round-5 amended sections (the
+write-target-physical collapse in `ClassifyEntryUnderLock` + interface block, the resume/accept
+wiring, the `withConfigReadLock` P3-a forwarder, the "Adopt-GC dependency" section + the design:564/:795
+corrections, the P2 empty-config pin, claims 18-19, T16/T17) — NOT a full re-audit — then, once the
+two adopt-GC `Depends-on` edges are satisfied, `$planner`.
