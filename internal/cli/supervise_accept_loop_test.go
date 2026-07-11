@@ -636,3 +636,33 @@ func TestWriteHello_BoundedByWriteDeadline(t *testing.T) {
 		t.Fatal("WriteHello parked past the deadline — the write is not bounded")
 	}
 }
+
+// TestWriteHello_ClearsWriteDeadlineOnSuccess proves the hello write
+// deadline is CLEARED on success, so it cannot later sever a response
+// write on a connection older than ipcHelloWriteTimeout.
+func TestWriteHello_ClearsWriteDeadlineOnSuccess(t *testing.T) {
+	orig := ipcHelloWriteTimeout
+	ipcHelloWriteTimeout = 40 * time.Millisecond
+	defer func() { ipcHelloWriteTimeout = orig }()
+
+	serverEnd, clientEnd := net.Pipe()
+	defer serverEnd.Close()
+	defer clientEnd.Close()
+	go func() {
+		buf := make([]byte, 256)
+		for {
+			if _, err := clientEnd.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	l := &SupervisorIPCListener{pid: 1, startedAt: "2026-01-01T00:00:00Z"}
+	if err := l.WriteHello(serverEnd); err != nil {
+		t.Fatalf("WriteHello failed on a draining peer: %v", err)
+	}
+	time.Sleep(3 * ipcHelloWriteTimeout)
+	if _, err := serverEnd.Write([]byte("post-hello\n")); err != nil {
+		t.Fatalf("write after hello failed — deadline not cleared: %v", err)
+	}
+}

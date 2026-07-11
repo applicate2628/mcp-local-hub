@@ -1638,14 +1638,24 @@ func acceptIPCConnections(
 func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps) {
 	if err := listener.WriteHello(conn); err != nil {
 		_ = conn.Close()
-		_ = deps.events.Emit(api.SupervisorEvent{
-			Severity: "warn",
-			Source:   "ipc",
-			Event:    "ipc-hello-write-error",
-			Body: map[string]any{
-				"err": err.Error(),
-			},
-		})
+		// Non-blocking emit (TryEmit, not Emit): the conn is already
+		// reaped, and the accept loop keeps spawning one goroutine per
+		// connection — so under a same-user hello-failure flood a
+		// blocking audit-flock write would park these per-connection
+		// goroutines behind a contended lock. TryEmit skips on
+		// contention (dropping a best-effort diagnostic breadcrumb),
+		// the same hot-path pattern as the ipc-command emit in
+		// handleIPCConn below. Nil-guarded to match that call site.
+		if deps.events != nil {
+			_ = deps.events.TryEmit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "ipc",
+				Event:    "ipc-hello-write-error",
+				Body: map[string]any{
+					"err": err.Error(),
+				},
+			})
+		}
 		return
 	}
 	handleIPCConn(conn, deps)
