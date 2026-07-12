@@ -316,9 +316,10 @@ func TestAdoptGcMutationPointManifestGuardSkipsAndEmits(t *testing.T) {
 
 // Part 1 non-regression — the capture-UPSERT lane is NOT gated by the GC-lane
 // positive-unmutated check, and Signal 2b does not spuriously refuse an operator
-// re-adopt (the manifest is absent at capture time). A prior aged `adopting` orphan —
-// even one whose present-client config is byte-identical to its snapshot (which the GC
-// lane would KEEP) — is reaped-and-replaced by the classifier alone.
+// re-adopt (the manifest is absent at capture time). A prior aged `adopting` orphan
+// whose present-client config is byte-identical to its snapshot (a genuine pre-install
+// crash the GC lane would REAP via the positive-unmutated gate) is reaped-and-replaced
+// by the classifier alone here — the UPSERT path never invokes that GC-only gate.
 func TestAdoptUpsertReapsPriorOrphanNotGatedByUnmutatedCheck(t *testing.T) {
 	entry := "gcupsertnoreg"
 	codexBody := "[mcp_servers." + entry + "]\ncommand = \"go\"\nargs = [\"version\"]\n"
