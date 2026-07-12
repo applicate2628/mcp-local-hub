@@ -138,3 +138,16 @@ func emitAdoptProvenanceOrphanReaped(manifestName string, ageSeconds float64, tr
 		"trigger":     trigger,
 	})
 }
+
+// emitAdoptProvenanceReapSkippedManifestPresent records that the GC's mutation-point
+// guard (bug 2026-07-11 P1-2 Part 3) REFUSED to reap a CRASH_REAP-classified row
+// because a manifest for it exists on disk (a classifier regression, or a manifest
+// re-created inside the classify->reap window) — so a committed adopt's secret
+// snapshots were preserved rather than destroyed. Body: manifest, age_seconds
+// (NAMES/COUNTS only — never secret values or config contents).
+func emitAdoptProvenanceReapSkippedManifestPresent(manifestName string, ageSeconds float64) {
+	emitAdoptProvenanceEvent(SupervisorEventSeverityWarn, "adopt-provenance-reap-skipped-manifest-present", map[string]any{
+		"manifest":    manifestName,
+		"age_seconds": ageSeconds,
+	})
+}

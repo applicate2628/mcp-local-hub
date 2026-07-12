@@ -50,6 +50,15 @@ func isSecretBearingStateFilePath(path string) bool {
 		".age-key":
 		return true
 	}
+	// Adopt pre-adopt provenance snapshots (<state-dir>/adopt-provenance/<manifest>/
+	// <client>.snapshot) pin the client's WHOLE pre-adopt config, which may embed
+	// literal secret env values (adopted_entries.go writeAdoptClientSnapshot). Treat
+	// them as secret-bearing so a read-broadened snapshot hard-fails like secrets.age
+	// instead of warn-and-proceeding (bug 2026-07-11 P2-2) — the compensating control
+	// for the snapshots the classifier fix deliberately retains longer.
+	if strings.HasSuffix(base, adoptSnapshotFileSuffix) {
+		return true
+	}
 	return strings.Contains(base, "token") ||
 		strings.Contains(base, "secret") ||
 		strings.Contains(base, "credential") ||

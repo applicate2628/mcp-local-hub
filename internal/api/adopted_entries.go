@@ -418,6 +418,30 @@ const (
 	adoptRowCrashReap                            // pre-commit crash — safe to reap
 )
 
+// adoptCommittedManifestDir resolves the on-disk directory that holds an
+// adopt-created manifest — where adopt's ManifestCreate writes it (adopt.go:297 ->
+// ManifestCreate -> ManifestCreateIn(defaultManifestDir(), …)). It honors the
+// MCPHUB_MANIFEST_DIR_OVERRIDE test seam (manifestDirForTests) so a hermetic
+// classifier/GC test can control the manifest-exists KEEP signal; in production the
+// override is unset, so this is EXACTLY defaultManifestDir() — the same directory
+// BuildAdoptPlan (adopt.go:163) and ManifestCreate (manifest.go:418) use.
+func adoptCommittedManifestDir() string {
+	if dir := manifestDirForTests(); dir != "" {
+		return dir
+	}
+	return defaultManifestDir()
+}
+
+// adoptManifestExistsFn is the SINGLE owner of the "does this adopt-created manifest
+// still exist on disk?" committed-KEEP signal, consumed by BOTH
+// classifyDeadAdoptingRow (Signal 2b) and the GC's mutation-point guard so the two
+// can never diverge (single owner, arch C1). It is a package var only so a test can
+// force the fail-closed stat-error branch (=> KEEP). Production always stats
+// adoptCommittedManifestDir().
+var adoptManifestExistsFn = func(manifestName string) (bool, error) {
+	return manifestExistsIn(adoptCommittedManifestDir(), manifestName)
+}
+
 // classifyDeadAdoptingRow is the SINGLE committed-vs-crash classifier for an
 // `adopting` row whose owner is PROVABLY DEAD (precondition: the caller holds — or
 // has just TryLock'd — the row's manifest lease, design r2 Signal 1). BOTH the
@@ -430,14 +454,24 @@ const (
 // CAPTURED port + the adopt-v1 binding constants (daemon "default", url_path
 // "/mcp"), and ask the single recognition owner liveEntryMatchesManifestBinding
 // (managed_entries.go:355, the demigrate.go:426 pattern) whether the live entry
-// matches it. The manifest FILE is NEVER read — an operator deleting or editing it
-// (port change, binding removal) after a committed adopt must NOT let the committed
-// row's provenance be reaped (finding A).
+// matches it. The manifest FILE is not read for its CONTENTS — an operator deleting
+// or editing it (port change, binding removal) after a committed adopt must NOT let
+// the committed row's provenance be reaped (finding A).
+//
+// Signal 2b (bug 2026-07-11 P1-2): the live hub entry is NOT the only committed
+// signal. adopt's ManifestCreate (adopt.go:297) runs strictly BEFORE Install
+// (adopt.go:310), and NO routine drift op deletes the manifest (gate-ON reconcile /
+// port-edit+reinstall / uninstall / demigrate all leave it), so a committed adopt
+// ALWAYS still has its manifest on disk even after the live hub entry has drifted
+// away. The mere EXISTENCE of the manifest is therefore a drift-proof committed-KEEP
+// signal (its contents are still not consulted).
 //
 // Uncertainty is ALWAYS KEEP (never reap on what we cannot disprove, finding B): a
-// client that cannot be constructed, or whose GetEntry ERRORS, => KEEP. Only when
-// EVERY adopt_client is cleanly readable AND NONE holds the expected hub entry is
-// the row a true pre-install crash orphan => REAP.
+// client that cannot be constructed, or whose GetEntry ERRORS, => KEEP; and a
+// manifest that exists OR cannot be stat'd => KEEP (fail-closed — REAP demands
+// positive absence, destructive-default polarity). Only when EVERY adopt_client is
+// cleanly readable AND NONE holds the expected hub entry AND no manifest exists on
+// disk is the row a true pre-install crash orphan => REAP.
 func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
 	// Synthetic manifest carrying only the row's IMMUTABLE name + captured port; the
 	// recognition SHAPE stays single-owned in liveEntryMatchesManifestBinding — this
@@ -464,7 +498,16 @@ func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
 			return adoptRowCommittedKeep // Install committed a live hub binding
 		}
 	}
-	return adoptRowCrashReap // every adopt_client readable, NONE holds the expected hub entry
+	// Signal 2b — the drift-proof committed signal (see the doc comment): a manifest
+	// that still exists (or cannot be stat'd, fail-closed) is a committed adopt whose
+	// live hub entry merely drifted away, NEVER a pre-install crash. Inert in the
+	// capture-UPSERT lane, which classifies only with the manifest ABSENT
+	// (BuildAdoptPlan refuses a pre-existing manifest, capture runs before
+	// ManifestCreate), so it cannot spuriously refuse an operator re-adopt.
+	if exists, err := adoptManifestExistsFn(rec.ManifestName); err != nil || exists {
+		return adoptRowCommittedKeep
+	}
+	return adoptRowCrashReap // no live binding AND no manifest on disk => pre-install crash orphan
 }
 
 // ---------------------------------------------------------------------------
@@ -907,6 +950,67 @@ func reapAdoptProvenanceRow(manifestName string, expectedState AdoptOperationSta
 // exercise Phase 2's under-lease re-read guard (bug 2026-07-11). nil in production.
 var adoptGCBeforePhase2Hook func()
 
+// adoptGCBeforeReapHook is a test-only seam fired ONCE inside
+// gcOrphanedAdoptingProvenance Phase 2 AFTER a candidate classifies CRASH_REAP but
+// BEFORE the mutation-point manifest guard re-checks the manifest. It lets a test
+// deterministically simulate a manifest re-created inside the classify->reap window
+// and exercise the guard's refuse-and-emit path (bug 2026-07-11 P1-2 Part 3). nil in
+// production.
+var adoptGCBeforeReapHook func()
+
+// adoptRowProvablyUnmutatedFn is the GC-lane positive-crash-evidence gate (bug
+// 2026-07-11 P1-2 case-5 / Option B), a package var only so a test can prove the gate
+// is load-bearing (neutralize it => a case-5 row reaps => data loss). Production
+// always uses adoptRowProvablyUnmutated.
+var adoptRowProvablyUnmutatedFn = adoptRowProvablyUnmutated
+
+// adoptRowProvablyUnmutated reports POSITIVE crash-before-Install evidence for a
+// dead-owner `adopting` row the GC has already classified CRASH_REAP (so both the
+// live hub binding AND the manifest are absent). REAP destroys the row's secret
+// snapshots, so it demands positive proof that the adopt mutated NOTHING — never mere
+// absence of a committed signal (destructive-default polarity). This closes the
+// case-5 residual: a COMMITTED adopt whose manifest was later DELETED and whose hub
+// bindings drifted looks byte-for-byte like a pre-install crash to the classifier;
+// only the client-config bytes distinguish them.
+//
+// Proof: EVERY recorded client must be a `present`-at-capture client whose LIVE
+// config file is byte-frozen since capture — its whole-file sha256 still equals the
+// recorded SnapshotSHA256. The snapshot bytes were os.ReadFile(ConfigPath) at capture
+// (captureAdoptClientsProvenance -> writeAdoptClientSnapshot), so reading ConfigPath
+// here is byte-symmetric; had Install run it would have rewritten the config to the
+// hub relay and changed the sha. Anything we CANNOT sha-prove fails the proof and
+// KEEPS the row (fail-safe toward KEEP):
+//   - an `absent` or `present-merged-lower` client (no snapshot pinned),
+//   - a `present` client with an empty recorded SnapshotSHA256,
+//   - an adapter not constructible on this host,
+//   - a live-config read error, or
+//   - a differing live sha (the config changed since capture => Install ran / drift).
+//
+// A row with NO recorded clients (a capture-ANCHOR orphan: capture crashed before it
+// finalized the client provenance) is vacuously proven — capture runs entirely before
+// Install, so such a row is definitively pre-install and has no committed snapshots to
+// preserve.
+func adoptRowProvablyUnmutated(rec AdoptProvenanceRecord) bool {
+	all := clients.AllClients()
+	for _, c := range rec.Clients {
+		if c.OriginalState != AdoptOriginalStatePresent || c.SnapshotSHA256 == "" {
+			return false // no pinned snapshot to prove against => cannot positively prove
+		}
+		adapter, ok := all[c.Client]
+		if !ok {
+			return false // adapter not constructible on this host => cannot prove
+		}
+		liveBytes, err := os.ReadFile(adapter.ConfigPath())
+		if err != nil {
+			return false // live config unreadable => cannot prove (fail-safe KEEP)
+		}
+		if ManifestHashContent(liveBytes) != c.SnapshotSHA256 {
+			return false // config changed since capture => Install ran / drift => KEEP
+		}
+	}
+	return true // every present client byte-frozen since capture => pre-install crash
+}
+
 // gcOrphanedAdoptingProvenance reaps stale CROSS-manifest orphans using the three
 // design-r2 signals — the per-manifest LEASE (Signal 1), the hub-binding-live
 // classifier (Signal 2), and the snapshot-dir backstop (Signal 3):
@@ -919,10 +1023,15 @@ var adoptGCBeforePhase2Hook func()
 //     exact orphan Phase 1 selected (still `adopting`, UpdatedAt unchanged, still
 //     older than the cutoff) — a stale Phase-1 copy must never drive a reap after a
 //     concurrent re-adopt replaced the row (bug 2026-07-11). classifyDeadAdoptingRow
-//     decides on the LIVE bytes: COMMITTED_KEEP (a hub binding is live — a
-//     promote-flip-failure recoverable row, finding 2 KEEP) is preserved; CRASH_REAP
-//     (manifest absent, OR present with no live binding — finding 2 REAP) removes
-//     snapshots-then-row under the held lease, identity-gated at the mutation point.
+//     decides on the LIVE bytes: COMMITTED_KEEP (a live hub binding OR a manifest on
+//     disk, Signal 2b) is preserved. A CRASH_REAP verdict then passes TWO more
+//     destructive-safety gates before the reap (bug 2026-07-11 P1-2): a mutation-point
+//     manifest re-check (Part 3 — refuse + emit adopt-provenance-reap-skipped-manifest
+//     -present if a manifest exists now), and a POSITIVE crash-evidence gate (Part 2 —
+//     adoptRowProvablyUnmutatedFn: reap only when every present-at-capture client's
+//     live config is byte-frozen since capture; a mutated config means Install ran =>
+//     KEEP). Only a triply-cleared row removes snapshots-then-row under the held lease,
+//     identity-gated at the mutation point.
 //   Phase 3 (backstop): reap ROWLESS snapshot dirs (a <manifest>/ dir with no store
 //     row — findings 3/4 residue or any future ordering bug), gated on the lease +
 //     no-store-row, NOT age-gated (a rowless dir has no updated_at).
@@ -1001,11 +1110,38 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 			_ = lk.Unlock()
 			continue // row changed/vanished since Phase-1 selection => not our orphan => skip
 		}
-		if classifyDeadAdoptingRow(live) == adoptRowCrashReap {
-			if rErr := reapAdoptProvenanceRow(live.ManifestName, AdoptOperationStateAdopting, live.UpdatedAt); rErr == nil {
-				emitAdoptProvenanceOrphanReaped(live.ManifestName, c.ageSec, adoptOrphanReapTriggerGC)
-				reaped++
-			}
+		if classifyDeadAdoptingRow(live) != adoptRowCrashReap {
+			_ = lk.Unlock()
+			continue // COMMITTED_KEEP (live hub binding OR manifest on disk, Signal 2b)
+		}
+		// Test-only seam: simulate a manifest re-created inside the classify->reap
+		// window so the mutation-point guard below is exercised. nil in production.
+		if adoptGCBeforeReapHook != nil {
+			adoptGCBeforeReapHook()
+		}
+		// Part 3 — mutation-point manifest guard (defense-in-depth for Signal 2b).
+		// Re-check the manifest UNDER the held lease, immediately before the destructive
+		// reap. classifyDeadAdoptingRow already KEEPs a manifest-present row, so under
+		// normal flow this never fires; it catches a classifier regression or a manifest
+		// re-created between the classify and the reap, and records a DISTINCT audit event
+		// so an over-reap-that-was-averted is operator-visible (NAMES/COUNTS only).
+		if exists, mErr := adoptManifestExistsFn(live.ManifestName); mErr != nil || exists {
+			emitAdoptProvenanceReapSkippedManifestPresent(live.ManifestName, c.ageSec)
+			_ = lk.Unlock()
+			continue
+		}
+		// Part 2 — positive crash-before-Install evidence gate (case-5 closure). REAP
+		// only when every present-at-capture client's live config is byte-frozen since
+		// capture; anything unprovable fails safe toward KEEP. A committed adopt whose
+		// manifest was deleted + bindings drifted (looks like a pre-install crash to the
+		// classifier) is distinguished here by its MUTATED client-config bytes.
+		if !adoptRowProvablyUnmutatedFn(live) {
+			_ = lk.Unlock()
+			continue // cannot positively prove pre-install => preserve the row + snapshots
+		}
+		if rErr := reapAdoptProvenanceRow(live.ManifestName, AdoptOperationStateAdopting, live.UpdatedAt); rErr == nil {
+			emitAdoptProvenanceOrphanReaped(live.ManifestName, c.ageSec, adoptOrphanReapTriggerGC)
+			reaped++
 		}
 		_ = lk.Unlock()
 	}
