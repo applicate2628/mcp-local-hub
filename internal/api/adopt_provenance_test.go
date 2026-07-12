@@ -47,20 +47,27 @@ args = ["version"]
 	}
 }
 
-// B3 — capture UPSERT reaps a prior orphan row + stale snapshot dir; exactly one
-// row for the manifest remains.
+// B3 — capture UPSERT reaps a prior ANCHOR orphan (a row-first crash: the anchor row
+// was written and a snapshot dir pinned, but Clients was never finalized, so the row is
+// VACUOUSLY provably-unmutated and passes the shared positive-crash-evidence gate — see
+// TestAdoptCaptureReapsByteFrozenPriorCrashOrphan for the finalized-and-byte-frozen
+// variant) + its stale snapshot dir; exactly one row for the manifest remains.
 func TestCaptureAdoptProvenanceUpsertReapsOrphan(t *testing.T) {
 	entry := "mui-adopt-prov-upsert"
 	setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-prov-upsert]
 command = "go"
 args = ["version"]
 `)
-	// Pre-seed a stale orphan: an adopting row + a stale snapshot dir with a file.
+	// Pre-seed a stale ANCHOR orphan: an adopting row with NO finalized Clients (a
+	// row-first crash mid-capture) + a stale snapshot dir with a file. An empty Clients
+	// row is vacuously provably-unmutated, so the UPSERT reaps it (a present client with
+	// an empty SnapshotSHA256 would instead be fail-safe REFUSED by the shared gate —
+	// that state is production-impossible: real captures always pin a sha per present
+	// client).
 	stale := &AdoptedEntries{Version: 1, Records: []AdoptProvenanceRecord{{
 		ManifestName:   entry,
 		OperationState: AdoptOperationStateAdopting,
 		UpdatedAt:      time.Now().Add(-2 * time.Hour).UTC(),
-		Clients:        []AdoptClientProvenance{{Client: "old-client", OriginalState: AdoptOriginalStatePresent}},
 	}}}
 	if err := writeAdoptedEntries(stale); err != nil {
 		t.Fatalf("seed stale store: %v", err)

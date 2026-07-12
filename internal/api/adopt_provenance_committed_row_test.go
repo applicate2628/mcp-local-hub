@@ -86,44 +86,46 @@ func TestCaptureFailsClosedOnCommittedPriorRow(t *testing.T) {
 	}
 }
 
-// Finding A (r3) — the classifier is MANIFEST-INDEPENDENT: it reconstructs the
-// expected hub binding from the ROW's IMMUTABLE captured port, so a committed row (a
-// live hub binding) is KEPT even after its manifest is DELETED or EDITED (port
-// changed). A row with NO live binding is REAPED regardless of manifest state. This
-// SUPERSEDES the round-1/r2 manifest-existence keep/reap rule (the classifier no
-// longer reads the manifest file). Rewritten from the former
-// TestGcOrphanedPreservesCommittedButAdoptingRow, whose manifest-existence premise
-// no longer applies.
-func TestGcClassifierIsManifestIndependent(t *testing.T) {
-	keepM, editM, reapM := "gcindepkeep", "gcindepedit", "gcindepreap"
-	keepPort, editPort, reapPort := 9411, 9412, 9413
-	// codex holds live hub bindings for keepM (port 9411) and editM (port 9412), and
-	// NO entry for reapM.
-	codexBody := fmt.Sprintf("[mcp_servers.%s]\nurl = \"http://127.0.0.1:%d/mcp\"\n\n[mcp_servers.%s]\nurl = \"http://127.0.0.1:%d/mcp\"\n",
-		keepM, keepPort, editM, editPort)
-	setupAdoptTestEnv(t, keepM, codexBody)
-	// keepM: manifest DELETED (never written) — the classifier must not need it.
-	seedAgedAdoptingRow(t, keepM, withAdoptRowPort(keepPort))
-	// editM: manifest EDITED to a DIFFERENT port; the row keeps the captured port, so
-	// the classifier still recognizes the live binding at the row's port.
-	writeAdoptManifestForClassifierTest(t, editM, 9999, "codex-cli")
-	seedAgedAdoptingRow(t, editM, withAdoptRowPort(editPort))
-	// reapM: manifest present, but NO live hub binding -> true pre-install orphan.
-	writeAdoptManifestForClassifierTest(t, reapM, reapPort, "codex-cli")
-	seedAgedAdoptingRow(t, reapM, withAdoptRowPort(reapPort))
+// Dual committed signals (bug 2026-07-11 P1-2, supersedes the former r3
+// "manifest-independent" contract) — the classifier KEEPs on EITHER a live hub
+// binding OR a manifest on disk (Signal 2b), and REAPs only when BOTH are absent:
+//   - keepBindingM: manifest DELETED (never written), live hub binding at the ROW's
+//     immutable captured port -> KEEP via the binding signal (still recognized from
+//     the row's port, NOT the manifest file's edited contents).
+//   - keepManifestM: NO live binding, manifest PRESENT -> KEEP via Signal 2b. This is
+//     the fix: the former contract REAPED this "manifest present, no live binding"
+//     row and destroyed a committed adopt's provenance after routine binding drift.
+//   - reapM: NO live binding AND manifest ABSENT, no finalized client provenance
+//     (anchor orphan) -> REAP (a true pre-install crash).
+func TestGcClassifierManifestSignals(t *testing.T) {
+	keepBindingM, keepManifestM, reapM := "gcsigbind", "gcsigmanifest", "gcsigreap"
+	keepBindingPort, keepManifestPort, reapPort := 9411, 9412, 9413
+	// codex holds a live hub binding ONLY for keepBindingM (at its port); it has NO
+	// entry for keepManifestM or reapM (their bindings drifted / never installed).
+	codexBody := fmt.Sprintf("[mcp_servers.%s]\nurl = \"http://127.0.0.1:%d/mcp\"\n",
+		keepBindingM, keepBindingPort)
+	setupAdoptTestEnv(t, keepBindingM, codexBody)
+	// keepBindingM: manifest DELETED (never written) — kept purely by the live binding.
+	seedAgedAdoptingRow(t, keepBindingM, withAdoptRowPort(keepBindingPort))
+	// keepManifestM: NO live binding, manifest PRESENT (edited to an unrelated port —
+	// contents are irrelevant, only existence matters). Signal 2b keeps it.
+	writeAdoptManifestForClassifierTest(t, keepManifestM, 9999, "codex-cli")
+	seedAgedAdoptingRow(t, keepManifestM, withAdoptRowPort(keepManifestPort))
+	// reapM: NO live binding, manifest ABSENT, and no finalized client provenance.
+	seedAgedAdoptingRow(t, reapM, withAdoptRowPort(reapPort), func(r *AdoptProvenanceRecord) { r.Clients = nil })
 
 	reaped, err := gcOrphanedAdoptingProvenance(1 * time.Hour)
 	if err != nil {
 		t.Fatalf("gcOrphanedAdoptingProvenance: %v", err)
 	}
-	if _, found, _ := ReadAdoptProvenance(keepM); !found {
-		t.Errorf("keepM (live binding, manifest DELETED) was reaped; the classifier must not read the manifest")
+	if _, found, _ := ReadAdoptProvenance(keepBindingM); !found {
+		t.Errorf("keepBindingM (live binding at the ROW's port, manifest DELETED) was reaped; the binding signal must keep it")
 	}
-	if _, found, _ := ReadAdoptProvenance(editM); !found {
-		t.Errorf("editM (live binding at the ROW's port, manifest EDITED to a different port) was reaped; the classifier must use the row's immutable port")
+	if _, found, _ := ReadAdoptProvenance(keepManifestM); !found {
+		t.Errorf("keepManifestM (NO live binding, manifest PRESENT) was reaped; Signal 2b must keep a committed-then-drifted row (this is the P1-2 fix)")
 	}
 	if _, found, _ := ReadAdoptProvenance(reapM); found {
-		t.Errorf("reapM (no live binding) was NOT reaped")
+		t.Errorf("reapM (no live binding AND no manifest) was NOT reaped")
 	}
 	if reaped != 1 {
 		t.Errorf("reaped = %d, want 1 (only reapM)", reaped)

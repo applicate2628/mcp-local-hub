@@ -285,7 +285,15 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	// adopt.
 	rec, err := a.captureAdoptProvenance(plan)
 	if err != nil {
-		emitAdoptProvenanceCaptureFailed(plan.ManifestName, "", "pre-adopt provenance capture failed")
+		// Classify the data-preservation-gate refusal (a prior committed-looking adopt
+		// whose configs were mutated since capture) distinctly from an ordinary capture
+		// I/O failure so the audit trail is diagnosable. Reason stays a path-free class
+		// (NAMES/COUNTS only — no secret values, no filesystem paths).
+		reason := "pre-adopt provenance capture failed"
+		if errors.Is(err, errAdoptPriorConfigMutated) {
+			reason = "prior_adopt_config_mutated"
+		}
+		emitAdoptProvenanceCaptureFailed(plan.ManifestName, "", reason)
 		return fmt.Errorf("adopt: capture pre-adopt provenance before any mutation: %w", err)
 	}
 	if err := persistAdoptRoutedSecrets(plan.secretValues); err != nil {

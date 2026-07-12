@@ -11,7 +11,9 @@ import (
 )
 
 // writeAdoptManifestForClassifierTest writes a VALID adopt-shaped manifest to the
-// on-disk manifest dir so classifyDeadAdoptingRow can parse it and find a binding.
+// on-disk manifest dir. Its EXISTENCE is what classifyDeadAdoptingRow keys on
+// (Signal 2b, bug 2026-07-11 P1-2); the contents/port are irrelevant to the classifier
+// (they matter only to the manifest validator that renders it).
 func writeAdoptManifestForClassifierTest(t *testing.T, manifest string, port int, client string) {
 	t.Helper()
 	yaml := renderStdioBridgeManifestYAML(manifest, "go", []string{"version"}, nil, port, adoptClientBindings([]string{client}))
@@ -56,8 +58,10 @@ func withAdoptRowPort(p int) func(*AdoptProvenanceRecord) {
 
 // Claim 17 (finding 2) — the classifier KEEPS a committed row (a live hub binding
 // exists, derived from the ROW's immutable port) and REAPS a pre-install orphan (NO
-// live binding). SUPERSEDES the round-1 "manifest EXISTS => keep" rule; no manifest
-// file is consulted (see TestGcClassifierIsManifestIndependent).
+// live binding). Here BOTH rows have their manifest ABSENT, so the KEEP is driven
+// purely by the live binding and the REAP by its absence; the manifest-existence KEEP
+// signal (Signal 2b, bug 2026-07-11 P1-2) is exercised separately in
+// TestGcClassifierManifestSignals.
 func TestGcClassifierLiveBindingKeepsValidNoBindingReaps(t *testing.T) {
 	keepM, reapM := "gckeepbind", "gcreapnobind"
 	keepPort, reapPort := 9401, 9402

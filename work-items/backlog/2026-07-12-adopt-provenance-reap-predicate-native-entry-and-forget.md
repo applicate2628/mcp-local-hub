@@ -1,0 +1,70 @@
+# Backlog: sharpen the adopt-provenance reap predicate (native-entry, both lanes) + ship a `forget` escape
+
+Filed: 2026-07-12
+Priority: P3 (usability + precision; NOT data-loss — the shipped whole-file-sha gate is fail-safe)
+Source: fable adversarial lens on #532's capture-UPSERT Part-2 gate — the better predicate + the escape the minimal fix defers
+Depends-on / relates: #532 (adds `adoptRowProvablyUnmutatedFn` to the capture-UPSERT reap), decision `2026-07-10-adopt-provenance-crash-consistency-model.md`
+
+## Context
+
+#532 closes a P1 all-return-paths data-loss gap by adding the GC's Part-2 gate
+(`adoptRowProvablyUnmutatedFn`) to the capture-UPSERT reap. That predicate is a
+**whole-file sha** of each `present` client's live config vs its capture snapshot
+(`adopted_entries.go:993-1012`). The architect chose it deliberately for **lane symmetry**
+(one predicate, one owner across GC + capture) — the minimal, safe, mergeable fix.
+
+fable flagged two disclosed costs of the whole-file-sha predicate, both **over-block, not
+data-loss** (the refusal preserves the prior row + snapshots):
+
+1. **Config churn:** client apps (`claude.json`, VS Code settings) rewrite their own config
+   files constantly (key reorder, unrelated servers, formatting). A genuine pre-Install
+   crash orphan retried later sha-mismatches on unrelated churn → capture refuses, even
+   though the adopted entry itself is untouched and there is zero restore value at risk.
+2. **Absent / present-merged-lower clients:** `adoptRowProvablyUnmutated` returns false
+   unconditionally for any non-`present`/empty-sha client (:996). An entryless-fanout adopt
+   that crashed in the tiny capture→ManifestCreate window becomes **permanently** refused —
+   no config state can satisfy the predicate — with no in-product escape (de-adopt not built;
+   the GC shares the same predicate so the row is immortal).
+
+## Improvement A — entry-shaped predicate (churn-immune), applied to BOTH lanes
+
+Replace the whole-file-sha proof with a **per-snapshot-bearing-client entry-shape** check:
+reap is safe iff the live config STILL contains `SourceEntryName` as an adoptable **native
+stdio** entry. Install replaces the native entry with a hub relay, so *native-still-present
+⇒ Install never committed on that client* — independent of surrounding file churn.
+
+- **Owner already exists:** `clients.EntryPresentInBytes` (`internal/clients/entry_bytes.go`)
+  — byte-level, per-adapter, read-only, the exact capability. (Plus a native-vs-hub-shape
+  discriminator: a present entry that is a hub relay must still count as "Install committed."
+  Check whether `GetEntry`'s shape / `liveEntryMatchesManifestBinding` already distinguishes
+  native-stdio from hub-relay, or add a small `IsNativeStdioEntry`-style check.)
+- **Both lanes, not capture-only** — applying it only to capture re-introduces the exact
+  lane divergence #532 closes (the architect's hard constraint). So GC's Part-2
+  (`:1138`/`:993-1012`) moves to the same predicate. Requires re-verifying the case-3 /
+  case-5 analysis under the new predicate (native-present ⇒ reap; case-3 stays KEPT because
+  Signal 2b short-circuits before Part-2; case-5's mutated=hub-shaped client ⇒ native-absent
+  ⇒ KEEP — same verdict, churn-immune).
+- **No-snapshot clients (absent / present-merged-lower) must NOT block** — skip them (they
+  hold no restorable pre-adopt bytes), fixing over-block class 2.
+
+## Improvement B — `mcphub adopt-provenance forget <manifest>` (confirmed escape)
+
+The whole-file-sha gate (and even the sharper predicate, for a genuinely committed row)
+can leave an operator refused with no clean in-product recovery until de-adopt ships. Add a
+confirmed operator affordance to discard a stale/blocking provenance row + its snapshot dir
+under the per-manifest lease:
+
+- `mcphub adopt-provenance forget <manifest> [--yes]` — acquires the lease, prints what will
+  be removed (row + `adopt-provenance/<manifest>/` snapshot dir, NAMES only), requires
+  confirmation, removes both. Emits an `adopt-provenance-forgotten` audit event.
+- This is the clean escape the #532 refusal error message points at (currently it names the
+  manual `adopted-entries.json` row + dir removal — a hand-edit under flock).
+
+## Not doing now / why
+
+- The whole-file-sha gate SHIPS in #532 as the minimal P1 closure — it is fail-safe (refuse
+  preserves data) and symmetric. This backlog is the *precision + ergonomics* follow-up, not
+  a correctness blocker.
+- The real "reclaim a crashed adopt's manifest+vault+row" teardown is a SEPARATE item routed
+  to de-adopt (bug `2026-07-12-adopt-preinstall-crash-orphan-triple.md`); `forget` here is
+  the narrower "discard a blocking provenance row" escape.

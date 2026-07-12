@@ -10,6 +10,14 @@ import (
 
 // D1 — a STALE `adopting` row (aged updated_at) + its snapshot dir is reaped:
 // row gone, snapshot dir gone, reaped == 1.
+//
+// This is a capture-ANCHOR orphan: no live hub binding, no manifest on disk, and no
+// finalized per-client provenance (capture crashed before it wrote the client rows).
+// Under the P1-2 positive-evidence contract that is a definitive pre-install crash —
+// capture runs entirely before Install, so a Clients-less row has nothing Install
+// could have mutated and is vacuously provably-unmutated => REAP. (A row WITH a
+// finalized `present` client requires its live config to byte-match its snapshot
+// before it reaps — see TestGcCase* / TestGcClassifierManifestSignals.)
 func TestGcOrphanedReapsStaleAdoptingOrphan(t *testing.T) {
 	isolateStateDir(t)
 	manifest := "gcstale"
@@ -17,10 +25,6 @@ func TestGcOrphanedReapsStaleAdoptingOrphan(t *testing.T) {
 		ManifestName:   manifest,
 		OperationState: AdoptOperationStateAdopting,
 		UpdatedAt:      time.Now().Add(-2 * time.Hour).UTC(),
-		Clients: []AdoptClientProvenance{{
-			Client: "codex-cli", OriginalState: AdoptOriginalStatePresent,
-			SnapshotRef: "adopt-provenance/gcstale/codex-cli.snapshot",
-		}},
 	}}}
 	if err := writeAdoptedEntries(seed); err != nil {
 		t.Fatalf("seed store: %v", err)
