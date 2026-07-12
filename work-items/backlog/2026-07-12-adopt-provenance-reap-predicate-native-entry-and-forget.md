@@ -68,3 +68,33 @@ under the per-manifest lease:
 - The real "reclaim a crashed adopt's manifest+vault+row" teardown is a SEPARATE item routed
   to de-adopt (bug `2026-07-12-adopt-preinstall-crash-orphan-triple.md`); `forget` here is
   the narrower "discard a blocking provenance row" escape.
+
+## Update 2026-07-12 — the full refinement is DONE-but-superseded on a branch (Sol Option-2)
+
+After #532 merged the core all-return-paths P1 fix with the CONSERVATIVE whole-file-sha
+predicate, the churn-immune refinement turned into an information-theoretic edge-mine (the
+reap gate cannot satisfy both no-over-block AND no-under-protect — case-3 ≡ committed-then-
+reverted; abort-residue ≡ committed-with-deleted-snapshot; merged-lower-crash ≡
+merged-lower-committed are indistinguishable on disk). The architecture lane (Sol, gate PASS,
+2026-07-12) chose **merge-core + defer-refinement**: ship the conservative gate (uncertainty
+=> KEEP), move the refinement here.
+
+**The refinement work is COMPLETE (not just planned) on branch `wip/adopt-reap-predicate-refinement`**
+(tip commit `217a439c`), which the follow-up PR should build on:
+- write-target entry-equality predicate (`EntryRawFromBytes` per-adapter + `adoptWriteTargetEntry
+  Unchanged`, reads the write-target on both live+snapshot — NOT the merged view);
+- snapshot integrity (recorded-SHA verify) + hardened inode-anchored read + 16 MiB `.snapshot`
+  read-cap;
+- skip-absent + skip-merged-lower + abort-residue (os.ErrNotExist) reclaim;
+- both-lane mutation-point manifest re-checks;
+- GUI 409 for the `errAdoptPriorConfigMutated` refusal;
+- ~30 tests locking Terra/Sol/fable edges + the per-client committed-entry lock.
+
+**Blocking issue the follow-up MUST resolve before that predicate is safe:** the "reap more"
+skips UNDER-protect — a skipped client's row can still hold `RoutedSecretKeys` (a committed/
+failed adopt whose snapshot dir is gone), so reaping orphans the routed vault keys de-adopt
+must delete (Codex bot :1205/:1211 on `217a439c`). The clean resolution is the **`forget`
+operator escape** (conservative gate + explicit operator discard) rather than an
+information-theoretically ambiguous aggressive predicate. See also
+`work-items/bugs/2026-07-12-adopt-reap-native-revert-deletes-committed-provenance.md` and
+`work-items/bugs/2026-07-12-adopt-reap-present-merged-lower-permanent-keep.md`.
