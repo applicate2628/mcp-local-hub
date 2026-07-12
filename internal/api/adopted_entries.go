@@ -564,7 +564,14 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 		// A prior row for this manifest is either a COMMITTED adopt (never destroy —
 		// FAIL CLOSED) or a dead-owner `adopting` orphan (the lease is held, so the
 		// owner is provably dead — classify via the SINGLE classifier, do not blindly
-		// reap: a committed-but-unflipped `adopting` row is COMMITTED_KEEP).
+		// reap: a committed-but-unflipped `adopting` row is COMMITTED_KEEP). A row the
+		// classifier calls CRASH_REAP then passes the SAME positive-crash-evidence gate
+		// the GC reap uses (adoptRowProvablyUnmutatedFn — ONE predicate across both reap
+		// lanes, bug 2026-07-11 P1-2 case-5): a committed adopt whose manifest was deleted
+		// and whose hub bindings drifted looks byte-for-byte like a pre-install crash to
+		// the classifier, so only a row whose present-at-capture client configs are still
+		// byte-frozen is reaped; a mutated config (Install ran) is REFUSED, never
+		// overwritten (which would strand the de-adopt snapshots as rowless residue).
 		for _, r := range store.Records {
 			if r.ManifestName != plan.ManifestName {
 				continue
@@ -574,6 +581,13 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 			}
 			if classifyDeadAdoptingRow(r) == adoptRowCommittedKeep {
 				return fmt.Errorf("adopt provenance capture: manifest %q already has a committed (install-live) adopt still in `adopting` state; refusing to overwrite it", plan.ManifestName)
+			}
+			if !adoptRowProvablyUnmutatedFn(r) {
+				return fmt.Errorf("adopt provenance capture: manifest %[1]q has a prior adopt whose recorded client configs no longer match their pre-adopt snapshots "+
+					"(its manifest was deleted and its hub bindings drifted, so it looks like a crash orphan — but a mutated config means Install may have COMMITTED it); "+
+					"refusing to overwrite it, which would destroy the pre-adopt snapshots. "+
+					"WARNING: if ANY client entry for this server was rewritten to a hub URL, the prior adopt COMMITTED — do NOT delete adopt-provenance/%[1]s (it is the only copy of the original entries a future de-adopt (or manual) restore would need). "+
+					"Only after confirming the prior adopt never completed Install (no client was hub-rewritten) is it safe to remove its adopted-entries.json row + adopt-provenance/%[1]s dir and re-adopt: %[2]w", plan.ManifestName, errAdoptPriorConfigMutated)
 			}
 			reapedPrior = true
 			reapedAgeSec = time.Since(r.UpdatedAt).Seconds()
@@ -957,6 +971,14 @@ var adoptGCBeforePhase2Hook func()
 // and exercise the guard's refuse-and-emit path (bug 2026-07-11 P1-2 Part 3). nil in
 // production.
 var adoptGCBeforeReapHook func()
+
+// errAdoptPriorConfigMutated flags the ONE capture-UPSERT refusal where a prior
+// `adopting` row classifies CRASH_REAP but its recorded present-client configs are
+// MUTATED since capture (Install may have COMMITTED the prior adopt), so the capture
+// refuses to overwrite it rather than strand the de-adopt snapshots. It is wrapped into
+// that refusal error so ExecuteAdoptWithOpts can errors.Is-recognize it and classify the
+// audit event's reason distinctly from an ordinary capture I/O failure (path-free class).
+var errAdoptPriorConfigMutated = errors.New("prior adopt config mutated since capture; refusing to overwrite committed-looking provenance")
 
 // adoptRowProvablyUnmutatedFn is the GC-lane positive-crash-evidence gate (bug
 // 2026-07-11 P1-2 case-5 / Option B), a package var only so a test can prove the gate

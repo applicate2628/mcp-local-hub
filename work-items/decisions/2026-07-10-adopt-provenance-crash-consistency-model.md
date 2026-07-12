@@ -77,6 +77,36 @@ Two additional single-owner rules ride the same capture logic:
   secret snapshot lingers ≤ 24 h until the next adopt/supervisor-startup GC (unchanged
   from the base design; the lease now makes an earlier reap safe if tightened later).
 
+### Addendum 2026-07-12 (#532 — committed-drift KEEP + capture-lane symmetry; case-3 residual)
+
+- **Committed-but-manifest-present KEEP (Signal 2b, #532):** a dead-owner `adopting` row
+  whose live hub binding has DRIFTED away (gate-ON reconcile / port-edit+reinstall /
+  demigrate move-or-drop the binding but LEAVE the manifest) is KEPT via manifest-existence,
+  not reaped. The manifest is the "last artifact standing" of a committed adopt (written at
+  `ManifestCreate` before `Install`; every narrower Install footprint — client config,
+  managed-entries row, supervisor-intent descriptor, backup — is removed by some routine op
+  that leaves the manifest live), so manifest-exists is the correct fail-closed committed
+  anchor.
+- **case-3 residual (ACCEPTED — do NOT "fix" by removing the guards):** a crash AFTER
+  `ManifestCreate` but BEFORE `Install` leaves an `adopting` row whose manifest exists but
+  which never committed a binding. Signal 2b KEEPs it, so its owner-only secret snapshot
+  lingers. This is INDISTINGUISHABLE on disk from a fully-committed adopt whose config was
+  later reverted (both: manifest present, configs == snapshot, no live binding) — the
+  "did Install run" fact leaves no on-disk trace — so KEEP is the correct destructive-default
+  polarity (wrong-toward-REAP destroys a committed adopt's de-adopt linkage; wrong-toward-KEEP
+  is a bounded owner-only residual whose secrets also live in the vault). It SELF-HEALS: to
+  re-adopt M the operator must remove the stale manifest, after which the next capture-UPSERT
+  reclassifies the row (`CrashReap`) and reaps the snapshot. The full triple-orphan cleanup
+  (manifest + vault keys + row) is routed to de-adopt, not the GC (bug
+  `2026-07-12-adopt-preinstall-crash-orphan-triple.md`). Architect adjudication 2026-07-12.
+- **"One reap decision" (claim 22) restored across BOTH reap lanes:** #532 added the
+  positive-evidence Part-2 gate (`adoptRowProvablyUnmutatedFn`) to the GC reap; the SAME gate
+  is applied to the capture-UPSERT reap (a committed-but-manifest-deleted row that classifies
+  `CrashReap` is refused, not reaped) so both reap return-paths route through classify + Part-2
+  (all-return-paths discipline). Disclosed over-block (fail-safe refuse on config churn /
+  absent-fanout clients) + the sharper churn-immune predicate + a `forget` escape are tracked
+  in backlog `2026-07-12-adopt-provenance-reap-predicate-native-entry-and-forget.md`.
+
 ## Falsifiable claims
 
 See design addendum claims 16-22 (each `{ guarantee, single-owner, enforcement-probe }`);
