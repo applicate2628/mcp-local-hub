@@ -1215,8 +1215,8 @@
       "manual_install": "Scite is a REMOTE OAuth MCP server -- add it directly in your MCP client rather than installing via the hub. In Claude Code run: `claude mcp add --transport http --scope user scite https://api.scite.ai/mcp`, then run a tool (or `/mcp`) so the client opens a browser window to sign in and authorize (OAuth 2.0; the client auto-discovers the endpoints from /.well-known/oauth-authorization-server). Requires a Scite subscription (7-day trial available). Other MCP clients (Claude Desktop, Cursor, VS Code, ChatGPT) accept the same https://api.scite.ai/mcp streamable-HTTP URL.",
       "license": "proprietary",
       "categories": [
-        "science",
         "research",
+        "science",
         "citations"
       ]
     },
@@ -1229,8 +1229,8 @@
       "manual_install": "Consensus is a REMOTE OAuth MCP server -- add it directly in your MCP client rather than installing via the hub. In Claude Code run: `claude mcp add --transport http --scope user consensus https://mcp.consensus.app/mcp`, then run a tool (or `/mcp`) so the client opens a browser window to sign in and authorize on first use. In Codex, run `codex mcp login consensus` after adding it to complete OAuth. A no-account free tier may return limited results, but OAuth is the supported access path. Other MCP clients (Claude Desktop, Cursor, VS Code, ChatGPT) accept the same https://mcp.consensus.app/mcp streamable-HTTP URL.",
       "license": "proprietary",
       "categories": [
-        "science",
         "research",
+        "science",
         "remote"
       ]
     },
@@ -1240,11 +1240,11 @@
       "summary": "Search academic literature from an AI client via the Semantic Scholar API (and optionally arXiv) -- search papers, fetch paper/author details, citations, references, recommendations, and batch lookups. Community server silung/scholar-search-mcp (Python, MIT), published to PyPI as scholar-search-mcp and PINNED to v0.1.3. DOCS-ONLY pointer: this server exposes a WRITE-CAPABLE, DESTRUCTIVE tool `download_arxiv_source` that extracts an arXiv source bundle under a caller-supplied output_dir and DELETES/overwrites <output_dir>/<arxiv_id> first -- with no per-tool consent gate, a one-click READY install could let an agent pass output_dir=~ + arxiv_id=.ssh and wipe ~/.ssh even if the download 404s, so the hub does NOT one-click install it. Install it deliberately per the steps below and only ever pass a safe, dedicated output_dir (never a home/config directory such as ~ or ~/.ssh). Search itself is keyless (the Semantic Scholar API works at the shared public rate limit -- no secret). Requires Python + uv on PATH.",
       "homepage": "https://github.com/silung/scholar-search-mcp",
       "readme_url": "https://raw.githubusercontent.com/silung/scholar-search-mcp/master/README.md",
-      "manual_install": "Add it directly to your MCP client after reviewing the destructive-tool caveat. Pinned, project-isolated launch: `uv run --no-project --with scholar-search-mcp==0.1.3 python -m scholar_search_mcp` -- the --no-project flag avoids discovering an ambient Python project/workspace (a global daemon inherits the supervisor cwd; a stray pyproject.toml with an incompatible requires-python would otherwise break the server). Enable the backends with env SCHOLAR_SEARCH_ENABLE_SEMANTIC_SCHOLAR=true and SCHOLAR_SEARCH_ENABLE_ARXIV=true. DESTRUCTIVE-TOOL CAVEAT: this server exposes `download_arxiv_source`, which extracts an arXiv paper's LaTeX/source bundle under a caller-supplied output_dir and DELETES/overwrites <output_dir>/<arxiv_id> before fetching -- an agent that supplies a sensitive output_dir (e.g. ~ or ~/.ssh) could wipe files there even if the download fails. Only ever pass a safe, dedicated output_dir, or set env SCHOLAR_ARXIV_SOURCE_DIR to a scratch directory to fix the base. Requires Python + uv on PATH.",
+      "manual_install": "Add it directly to your MCP client after reviewing the destructive-tool caveat. Pinned, project-isolated launch: `uv run --no-project --with scholar-search-mcp==0.1.3 python -m scholar_search_mcp` -- the --no-project flag avoids discovering an ambient Python project/workspace (a global daemon inherits the supervisor cwd; a stray pyproject.toml with an incompatible requires-python would otherwise break the server). Enable the backends with env SCHOLAR_SEARCH_ENABLE_SEMANTIC_SCHOLAR=true and SCHOLAR_SEARCH_ENABLE_ARXIV=true. DESTRUCTIVE-TOOL CAVEAT: this server exposes `download_arxiv_source`, which extracts an arXiv paper's LaTeX/source bundle under a caller-supplied output_dir and DELETES/overwrites <output_dir>/<arxiv_id> before fetching -- an agent that supplies a sensitive output_dir (e.g. ~ or ~/.ssh) could wipe files there even if the download fails. Only ever pass a safe, dedicated output_dir, Setting env SCHOLAR_ARXIV_SOURCE_DIR only changes the DEFAULT base used when a call OMITS output_dir; it does NOT constrain an explicit output_dir an agent supplies, so it is not a safety gate. Requires Python + uv on PATH.",
       "license": "MIT",
       "categories": [
-        "science",
-        "research"
+        "research",
+        "science"
       ]
     }
   ]
