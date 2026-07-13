@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,15 +18,18 @@ import (
 // tryAcquireAdoptManifestLease with ZERO side effects.
 // ---------------------------------------------------------------------------
 
-// Test (5) — a full adopt of a ".lease"-suffixed manifest is refused fail-closed with
-// ZERO provenance-path side effects, while a concurrently-HELD "foo" lease file
-// survives. Includes the NON-VACUITY proof: the snapshot-dir path that
-// removeAdoptSnapshots("foo.lease") WOULD RemoveAll is byte-identical to manifest
-// "foo"'s lease-file path (the real collision the guard averts).
+// Test (5) — a ".lease"-suffixed manifest is refused fail-closed at adopt step 0b
+// (tryAcquireAdoptManifestLease, the exact fix point) with the reserved-suffix error,
+// while a concurrently-HELD "foo" lease file survives. Asserts the fix point DIRECTLY
+// rather than through ExecuteAdopt/BuildAdoptPlan, because adopt-v1 requires
+// --name == entry name, so a plan with ManifestName="foo.lease" is rejected at plan
+// build BEFORE the guard runs — making a full-adopt assertion VACUOUS (a regression in
+// the lease guard would still pass). Includes the NON-VACUITY collision proof: the
+// snapshot-dir path removeAdoptSnapshots("foo.lease") WOULD RemoveAll is byte-identical
+// to manifest "foo"'s lease-file path. Neuter the guard => the direct call returns
+// (lock,true,nil) => this test fails (confirmed via neuter→fail→restore).
 func TestAdoptLeaseSuffixManifestRefusedFailClosed(t *testing.T) {
-	entry := "foolease"
-	codexBody := "[mcp_servers." + entry + "]\ncommand = \"go\"\nargs = [\"version\"]\n"
-	_, _, stateRoot := setupAdoptTestEnv(t, entry, codexBody)
+	_, _, stateRoot := setupAdoptTestEnv(t, "unused", "[mcp_servers]\n")
 
 	// NON-VACUITY — PROVE the collision the guard averts. Pre-guard, adoptSnapshotDir
 	// builds <state>/adopt-provenance/<manifest>; for manifest "foo.lease" that is
@@ -56,26 +60,19 @@ func TestAdoptLeaseSuffixManifestRefusedFailClosed(t *testing.T) {
 		t.Fatalf("foo lease file must exist as a regular file: stat err=%v isDir=%v", sErr, st != nil && st.IsDir())
 	}
 
-	// The exact fix point: acquiring the lease for a ".lease"-suffixed manifest fails
-	// CLOSED (returns an error, not the ordinary already-held (nil,false,nil)).
-	if lk2, leased, lErr := tryAcquireAdoptManifestLease("foo.lease"); lErr == nil {
-		if lk2 != nil {
-			_ = lk2.Unlock()
-		}
-		t.Errorf("tryAcquireAdoptManifestLease(\"foo.lease\") must fail closed on the reserved suffix; got leased=%v err=nil", leased)
+	// THE FIX POINT (adopt step 0b): acquiring the lease for a ".lease"-suffixed manifest
+	// fails CLOSED with the reserved-suffix error — never the ordinary already-held
+	// (nil,false,nil). ExecuteAdoptWithOpts' step 0b does exactly this, so a full adopt of
+	// such a manifest is refused before any mutation.
+	lk2, leased, lErr := tryAcquireAdoptManifestLease("foo.lease")
+	if lk2 != nil {
+		_ = lk2.Unlock()
 	}
-
-	// Full adopt of a "foo.lease" manifest is refused at step 0b with zero side effects.
-	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
-	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: "foo.lease", Port: port})
-	if err != nil {
-		// A refusal at plan build is also fail-closed (nothing to execute); the
-		// zero-side-effect assertions below still hold.
-		t.Logf("BuildAdoptPlan refused foo.lease at plan build (also fail-closed): %v", err)
-	} else if execErr := NewAPI().ExecuteAdopt(plan, nil); execErr == nil {
-		t.Fatal("adopt of a \"foo.lease\" manifest must be refused")
-	} else if !strings.Contains(execErr.Error(), "lease") {
-		t.Errorf("adopt refusal should surface the lease-acquire failure: %v", execErr)
+	if lErr == nil {
+		t.Fatalf("tryAcquireAdoptManifestLease(\"foo.lease\") must fail closed on the reserved suffix; got leased=%v err=nil", leased)
+	}
+	if !strings.Contains(lErr.Error(), "reserved") || !strings.Contains(lErr.Error(), adoptManifestLeaseSuffix) {
+		t.Errorf("lease-acquire error must name the reserved %q suffix (proving it is the guard, not an unrelated failure); got %v", adoptManifestLeaseSuffix, lErr)
 	}
 
 	// Zero provenance-path side effects: no adopted-entries row for foo.lease, and the
@@ -84,10 +81,8 @@ func TestAdoptLeaseSuffixManifestRefusedFailClosed(t *testing.T) {
 		t.Errorf("a refused foo.lease adopt must leave NO adopted-entries row")
 	}
 	if st, sErr := os.Stat(fooLeasePath); sErr != nil || st.IsDir() {
-		t.Errorf("held foo lease file was disturbed by the refused foo.lease adopt: stat err=%v isDir=%v", sErr, st != nil && st.IsDir())
+		t.Errorf("held foo lease file was disturbed: stat err=%v isDir=%v", sErr, st != nil && st.IsDir())
 	}
-	// The event log lives under the state root; a refused adopt writes no provenance
-	// capture there, but that is asserted indirectly by the no-row check above.
 	_ = stateRoot
 }
 
@@ -169,8 +164,11 @@ func TestAdoptGcPhase2ReapFailureEmitsReapFailed(t *testing.T) {
 
 	logPath := filepath.Join(stateRoot, SupervisorEventLogFileLeaf)
 
-	// (a) Force the Phase-2 reap to fail.
+	// (a) Force the Phase-2 reap to fail. Register the restore IMMEDIATELY via t.Cleanup
+	// (F2) so a t.Fatal before the manual mid-test restore below cannot leak the induced
+	// seam into the rest of the package run.
 	orig := reapAdoptProvenanceRowFn
+	t.Cleanup(func() { reapAdoptProvenanceRowFn = orig })
 	reapAdoptProvenanceRowFn = func(string, AdoptOperationState, time.Time) error {
 		return fmt.Errorf("induced reap failure")
 	}
@@ -241,8 +239,10 @@ func TestAdoptGcPhase3RowlessReapFailureEmitsReapFailed(t *testing.T) {
 	}
 	logPath := filepath.Join(stateRoot, SupervisorEventLogFileLeaf)
 
-	// (a) Force the Phase-3 rowless removal to fail.
+	// (a) Force the Phase-3 rowless removal to fail. Register the restore IMMEDIATELY via
+	// t.Cleanup (F2) so a t.Fatal before the manual mid-test restore cannot leak the seam.
 	orig := gcRemoveRowlessSnapshotsFn
+	t.Cleanup(func() { gcRemoveRowlessSnapshotsFn = orig })
 	gcRemoveRowlessSnapshotsFn = func(string) error { return fmt.Errorf("induced rowless removal failure") }
 	reaped, err := gcOrphanedAdoptingProvenance(1 * time.Hour)
 	if err != nil {
@@ -305,13 +305,13 @@ func TestAdoptGcReapFailedEventRedactsSecret(t *testing.T) {
 	}
 
 	// Fail with the realistic removeAdoptSnapshots error shape: it names the manifest +
-	// the dir PATH, never the file CONTENT.
+	// the dir PATH, never the file CONTENT. Restore registered IMMEDIATELY (F2).
 	orig := gcRemoveRowlessSnapshotsFn
+	t.Cleanup(func() { gcRemoveRowlessSnapshotsFn = orig })
 	gcRemoveRowlessSnapshotsFn = func(name string) error {
 		dir, _ := adoptSnapshotDir(name)
 		return fmt.Errorf("remove adopt snapshots %s: unlinkat %s: device or resource busy", name, dir)
 	}
-	t.Cleanup(func() { gcRemoveRowlessSnapshotsFn = orig })
 
 	if _, err := gcOrphanedAdoptingProvenance(1 * time.Hour); err != nil {
 		t.Fatalf("gc: %v", err)
@@ -340,5 +340,103 @@ func TestAdoptGcReapFailedEventRedactsSecret(t *testing.T) {
 		t.Error("reason is empty; the redaction assertion would be vacuous")
 	} else if !strings.Contains(reason, m) {
 		t.Errorf("reason should carry the path/class detail (manifest %q); got %q", m, reason)
+	}
+}
+
+// reapFailedManifestsForPhase scans supervisor-events.log for every
+// adopt-provenance-reap-failed event with the given phase and returns the set of
+// manifest names it names.
+func reapFailedManifestsForPhase(t *testing.T, logPath, phase string) map[string]bool {
+	t.Helper()
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]bool{}
+		}
+		t.Fatalf("read %s: %v", logPath, err)
+	}
+	out := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("supervisor-events.log line invalid JSON: %v: %q", err, line)
+		}
+		if ev["event"] != "adopt-provenance-reap-failed" {
+			continue
+		}
+		body, _ := ev["body"].(map[string]any)
+		if body == nil || body["phase"] != phase {
+			continue
+		}
+		if name, ok := body["manifest"].(string); ok {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+// Test (F1) — a legacy ".lease"-suffixed provenance orphan (row-bearing OR rowless,
+// left by a pre-P3-1 build that allowed the name) can no longer be reaped because its
+// lease path now fails the reserved-suffix guard. The GC must REPORT it
+// (adopt-provenance-reap-failed{phase:"gc-lease-path-error"}) instead of silently
+// skipping, so an operator can remove adopt-provenance/<name> manually. Exercises BOTH
+// the Phase-2 (row-bearing) and Phase-3 (rowless-dir) lease-acquire-error branches.
+func TestAdoptGcLegacyLeaseNameOrphanEmitsLeasePathError(t *testing.T) {
+	stateRoot := isolateStateDir(t)
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+
+	// Phase-2 path: a row-bearing aged `adopting` orphan named "foo.lease" (writeAdopted-
+	// Entries does not validate the name, so a legacy on-disk row is reproducible).
+	rowM := "foo.lease"
+	seed := &AdoptedEntries{Version: 1, Records: []AdoptProvenanceRecord{{
+		ManifestName:    rowM,
+		SourceEntryName: rowM,
+		AdoptClients:    []string{"codex-cli"},
+		OperationState:  AdoptOperationStateAdopting,
+		UpdatedAt:       time.Now().Add(-2 * time.Hour).UTC(),
+	}}}
+	if err := writeAdoptedEntries(seed); err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase-3 path: a ROWLESS snapshot dir named "bar.lease" (constructed manually since
+	// adoptSnapshotDir now refuses the name — this reproduces a pre-P3-1 residue dir).
+	dirM := "bar.lease"
+	legacyDir := filepath.Join(stateDir, adoptProvenanceSnapshotSubdir, dirM)
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "codex-cli.snapshot"), []byte("SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reaped, err := gcOrphanedAdoptingProvenance(1 * time.Hour)
+	if err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	if reaped != 0 {
+		t.Errorf("reaped = %d, want 0 (legacy .lease orphans are unreachable, only reported)", reaped)
+	}
+
+	logPath := filepath.Join(stateRoot, SupervisorEventLogFileLeaf)
+	got := reapFailedManifestsForPhase(t, logPath, adoptReapFailPhaseLeasePathError)
+	for _, want := range []string{rowM, dirM} {
+		if !got[want] {
+			t.Errorf("no gc-lease-path-error reap-failed event for legacy orphan %q (previously a SILENT skip); got %v", want, got)
+		}
+	}
+
+	// The orphans SURVIVE (the guard prevents any removal); an operator removes them.
+	if _, statErr := os.Stat(legacyDir); statErr != nil {
+		t.Errorf("rowless legacy dir must survive (unreachable, only reported): %v", statErr)
+	}
+	if _, found, _ := ReadAdoptProvenance(rowM); !found {
+		t.Errorf("row-bearing legacy orphan must survive (unreachable, only reported)")
 	}
 }

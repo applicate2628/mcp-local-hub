@@ -41,6 +41,14 @@ const (
 const (
 	adoptReapFailPhaseRow        = "gc-row"
 	adoptReapFailPhaseRowlessDir = "gc-rowless-dir"
+	// adoptReapFailPhaseLeasePathError names a GC skip where the per-manifest lease
+	// path could NOT be resolved / acquired due to an ERROR (F1) — notably a legacy
+	// ".lease"-suffixed manifest that a pre-P3-1 build wrote to disk, whose lease path
+	// now fails the reserved-suffix guard. Such an orphan is permanently unreachable by
+	// the reaper, so the GC REPORTS it (instead of silently skipping) so an operator can
+	// remove adopt-provenance/<name> manually. Distinct from a lease HELD by a live
+	// adopt, which stays a legitimate silent skip.
+	adoptReapFailPhaseLeasePathError = "gc-lease-path-error"
 )
 
 // emitAdoptProvenanceEvent is the single owner of the provenance event envelope
