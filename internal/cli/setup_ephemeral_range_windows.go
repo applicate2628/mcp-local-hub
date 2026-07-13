@@ -5,7 +5,9 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,7 +53,11 @@ func (r ephemeralRange) contains(port int) bool {
 var queryEphemeralTCPRange = func() ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "netsh", "int", "ipv4", "show", "dynamicport", "tcp").CombinedOutput()
+	netsh, err := trustedNetshPath()
+	if err != nil {
+		return nil, err
+	}
+	out, err := exec.CommandContext(ctx, netsh, "int", "ipv4", "show", "dynamicport", "tcp").CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("netsh int ipv4 show dynamicport tcp: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -180,10 +186,53 @@ func (r tcpRange) overlaps(e ephemeralRange) bool {
 	return r.start <= e.end() && e.start <= r.end
 }
 
+// trustedNetshPath returns the absolute system netsh.exe path without consulting
+// PATH or the current directory. The --fix-ephemeral-range path may run from an
+// elevated shell, so resolving netsh by name would allow executable search-path
+// hijacking in that elevated context.
+func trustedNetshPath() (string, error) {
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = os.Getenv("windir")
+	}
+	if root == "" {
+		return "", fmt.Errorf("could not locate Windows system root for netsh.exe")
+	}
+
+	systemRoot, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return "", fmt.Errorf("resolve Windows system root %q: %w", root, err)
+	}
+	if !filepath.IsAbs(systemRoot) {
+		return "", fmt.Errorf("Windows system root %q is not absolute", root)
+	}
+	system32 := filepath.Join(systemRoot, "System32")
+	netsh := filepath.Join(system32, "netsh.exe")
+
+	rel, err := filepath.Rel(system32, netsh)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("resolved netsh.exe path %q is outside %q", netsh, system32)
+	}
+	info, err := os.Stat(netsh)
+	if err != nil {
+		return "", fmt.Errorf("stat trusted netsh.exe %q: %w", netsh, err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("trusted netsh.exe path %q is a directory", netsh)
+	}
+	return netsh, nil
+}
+
 // setEphemeralTCPRange is the netsh mutation seam (tests swap it). Requires an
 // elevated shell.
 var setEphemeralTCPRange = func(start, num int) ([]byte, error) {
-	out, err := exec.Command("netsh", "int", "ipv4", "set", "dynamicport", "tcp",
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	netsh, err := trustedNetshPath()
+	if err != nil {
+		return nil, err
+	}
+	out, err := exec.CommandContext(ctx, netsh, "int", "ipv4", "set", "dynamicport", "tcp",
 		"start="+strconv.Itoa(start), "num="+strconv.Itoa(num)).CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("netsh int ipv4 set dynamicport tcp start=%d num=%d: %w: %s", start, num, err, strings.TrimSpace(string(out)))
