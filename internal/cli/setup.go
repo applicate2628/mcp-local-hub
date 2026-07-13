@@ -272,6 +272,7 @@ func newSetupCmdReal() *cobra.Command {
 	var rollbackLSPRouter bool
 	var trustedRoots []string
 	var installServer string
+	var fixEphemeralRange bool
 	c := &cobra.Command{
 		Use:   "setup",
 		Short: "Install mcphub to ~/.local/bin, register PATH, install watchdog task",
@@ -394,6 +395,13 @@ See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 			if err := runSetupWatchdogForSetup(cmd.OutOrStdout(), allowElevated); err != nil {
 				return err
 			}
+			// L2 ephemeral-range detect + warn (Windows-only; POSIX no-op). Never
+			// mutates the host by default — it only warns when the OS TCP
+			// ephemeral (dynamic) range overlaps mcphub's daemon pools (the root
+			// cause the L1 runtime self-heal recovers from). --fix-ephemeral-range
+			// (admin) MOVES the range off the pool. Non-fatal: a probe/mutation
+			// failure warns and continues.
+			runSetupEphemeralRangeStep(cmd, fixEphemeralRange)
 			// Bless any operator-supplied LSP trusted roots. Runs AFTER the
 			// watchdog step because that step is where the per-user state dir
 			// is ensured + sanity-checked (it returns exit 8 if the state dir
@@ -420,6 +428,8 @@ See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 		"bless an ABSOLUTE workspace path as an LSP trusted root (repeatable); same store the GUI Settings → Trusted Roots panel writes. Idempotent.")
 	c.Flags().StringVar(&installServer, "server", "",
 		"after canonicalizing the binary + installing the maintenance task, install this one server headlessly (no prompts) via the same path as `mcphub install --server <name>`. Validated against the shipped manifest set; unknown names fail loud before any side effect.")
+	c.Flags().BoolVar(&fixEphemeralRange, "fix-ephemeral-range", false,
+		"Windows only: if the OS TCP ephemeral (dynamic) range overlaps mcphub's daemon pools, MOVE the range above the pools via `netsh int ipv4 set dynamicport tcp` (requires an elevated shell; prints before/after). Without this flag, setup only DETECTS + warns and never mutates the host. Never reverted on uninstall.")
 	return c
 }
 

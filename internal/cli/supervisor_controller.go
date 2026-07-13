@@ -283,6 +283,55 @@ type supervisorController struct {
 	// finishes. Combined with the worker's port re-probe staleness guard.
 	portGateInFlight sync.Map // canonical taskName -> struct{}
 
+	// --- Ephemeral-collision self-heal (L1) wiring ---------------------------
+	// reallocCh carries loop→worker port-REALLOCATION requests (a dynamic-pool
+	// proxy that exited exitBindRefused because a foreign process stole its
+	// port). Mirrors portGateCh: buffered, drained by a single off-loop worker
+	// (runReallocWorker) that runs the blocking AllocatePort + atomic registry/
+	// intent re-persist (reallocFn) OFF the loop and posts the outcome back via
+	// evReallocApplied. Wired only in the production runSupervise path
+	// (reconcileSpawnFn==nil); nil DISABLES the self-heal (spawn-as-today).
+	reallocCh chan reallocReq
+	// reallocInFlight dedupes reallocation requests per task (mirrors
+	// portGateInFlight): at most one reallocation is queued/processing per task
+	// at a time, so the armed fallback timer + a re-firing bind-refused exit
+	// cannot pile up duplicate reallocations.
+	reallocInFlight sync.Map // canonical taskName -> struct{}
+	// reallocFn performs the OFF-LOOP atomic port move for one descriptor:
+	// resolve the pool PER descriptor, then under the registry flock
+	// AllocatePort → write the registry row (new port) → write the
+	// supervisor-intent descriptor (Port + --port argv + serena
+	// RuntimeSpec.External/UpstreamPort) as ONE atomic temp+rename, and return
+	// the new port. It returns api.ErrPortPoolExhausted (wrapped) when the pool
+	// is full. Wired in runSupervise; nil in direct-construction tests (the
+	// worker then no-ops and the fallback timer re-drives the retry).
+	reallocFn func(d api.SupervisorDaemon) (newPort int, err error)
+	// reallocForeignHolderFn best-effort resolves (pid, basename) of the foreign
+	// process holding a stolen port, for the L3 event's REDACTED foreign_holder
+	// (PID + basename ONLY — never a command line/secrets). Runs on the off-loop
+	// worker (it may spawn a WMI/PowerShell identity probe). nil / pid<=0 → the
+	// event omits foreign_holder.
+	reallocForeignHolderFn func(port int) (pid int, basename string)
+	// ephemeralRangeContainsFn best-effort reports whether a port falls inside
+	// the OS TCP ephemeral (dynamic) range, for the L3 event's
+	// inside_ephemeral_range field. Production wires a CACHED netsh probe so it
+	// is cheap after warmup; nil → the field is omitted.
+	ephemeralRangeContainsFn func(port int) (inRange bool, known bool)
+	// reallocDwell tracks, per task, the stabilize-dwell clock used to reset the
+	// reallocation window + crash window ONLY after a reallocated daemon has
+	// dwelt continuously in StRunning past reallocationStabilizeDwell — the
+	// DWELL-GATE that stops a bind-refused daemon (which transits StRunning
+	// BEFORE it exits on the bind fail) from forever-resetting its own counter.
+	// Loop-owned (created on interception, advanced/cleared by the dwell tick on
+	// the loop goroutine).
+	reallocDwell sync.Map // canonical taskName -> *reallocDwellEntry
+	// bindAccessDeniedTerminalEmitted dedupes the terminal (give-up) L3 events
+	// (quarantined-realloc-cap-exhausted for proxies, quarantined-run-host-remedy
+	// for fixed globals) to ONE per episode. Cleared when the daemon stabilizes
+	// (dwell reset) or leaves quarantine (ClearCrashes site), so a later episode
+	// re-emits. Loop-owned.
+	bindAccessDeniedTerminalEmitted sync.Map // canonical taskName -> struct{}
+
 	// quarantineParole is the F2 in-memory parole ladder for threshold-quarantine
 	// daemons (map[canonicalTaskName]*quarantineParoleEntry). A daemon that hits
 	// the failure threshold used to stay quarantined "until supervisor restart" —
@@ -894,6 +943,22 @@ func (c *IntentCache) TaskNames() map[string]struct{} {
 		out[canonicalSupervisorTaskName(taskName)] = struct{}{}
 	}
 	return out
+}
+
+// CurrentIntent returns the supervisor-intent snapshot currently applied to the
+// cache (nil before the first Refresh, or when a Refresh applied a nil file). The
+// returned pointer is read-only — callers must not mutate it (the cache still
+// references it). Used by the reallocation stale-snapshot guard (FIX-4) to compare
+// the worker's carried snapshot's UpdatedAt against what is already applied.
+func (c *IntentCache) CurrentIntent() *api.SupervisorIntentFile {
+	if c == nil {
+		return nil
+	}
+	s, ok := c.snap.Load().(*intentSnapshot)
+	if !ok || s == nil {
+		return nil
+	}
+	return s.intent
 }
 
 // refreshSupervisorIntent is the OFF-LOOP detect-and-post-only entry point for a
@@ -2706,7 +2771,19 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 		// mutations (create / clear / Delete / field advance) + the EvManualRestart
 		// self-post against every other parole and SM mutation, closing the pre-fix
 		// off-loop TOCTOU. Carries no TaskName (a fleet-wide scan), like evReapScan.
-		c.runQuarantineParoleTick(time.Now().UTC())
+		now := time.Now().UTC()
+		c.runQuarantineParoleTick(now)
+		// L1 self-heal: the reallocation stabilize-dwell reset shares this tick's
+		// cadence + loop goroutine (both mutate loop-owned in-memory maps only).
+		c.runReallocDwellTick(now)
+		return
+	case evReallocApplied:
+		// L1 self-heal: apply the off-loop reallocation worker's outcome ON the
+		// loop (intent-cache refresh + respawn, or the pool-exhausted quarantine).
+		// Not an api.Transition row; intercepted here like the evReap* / parole
+		// events. The per-task in-flight marker is cleared by the worker's own defer
+		// (handleReallocReq); handleReallocApplied does NOT re-clear it here.
+		c.handleReallocApplied(ev)
 		return
 	}
 	// pr302 r8 single-key-space invariant: canonicalize ev.TaskName ONCE at the SM
@@ -2958,6 +3035,10 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// respawn route through the idle transition normally (Codex bot #268 P2,
 	// supervisor_controller.go:664).
 	if ev.Kind == api.EvChildExit && currentState == api.StRunning && supervisorEventIsCleanExit(ev) {
+		// FIX-5b: this StRunning→StIdle early-return also leaves continuous StRunning,
+		// so reset the stabilize-dwell clock here too (no-op unless a dwell entry
+		// exists). The main-transition reset below is skipped on this return path.
+		c.noteReallocDwellLeftRunning(ev.TaskName)
 		c.smStates.Store(ev.TaskName, api.StIdle)
 		if c.events != nil {
 			_ = c.events.Emit(api.SupervisorEvent{
@@ -2997,6 +3078,20 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	}
 
 	now := time.Now().UTC()
+
+	// Ephemeral-collision self-heal (L1): a bind-refused EvChildExit of a
+	// dynamic-pool proxy (its pool port was stolen by a foreign process) is moved
+	// to a fresh pool port off the loop instead of crash-looping to quarantine.
+	// Runs BEFORE the SM transition; returns true when it fully handled the event
+	// (reallocated → held in backoff, worker dispatched) so we skip the crash
+	// path. It returns false — falling through to the normal crash/backoff/
+	// quarantine SM below — for a non-bind-refused exit, a fixed-global daemon,
+	// and a dynamic proxy whose reallocation cap is exhausted (all after emitting
+	// their L3 event). The clean-exit guard above already returned for exit 0, so
+	// a bind-refused (non-zero) exit reaches here.
+	if c.maybeHandleBindRefusedExit(d, ev, currentState, now) {
+		return
+	}
 
 	// Resolve the intent's active-stop predicate via the REAL method
 	// form. There is no api.IsActiveStop(d, now) free function; the
@@ -3069,6 +3164,15 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// performing the side effect), NOT whether the in-memory transition
 	// took effect. The SM transition matched (matched=true), so smStates
 	// reflects the new state immediately; persistence is a separate axis.
+	if currentState == api.StRunning && newState != api.StRunning {
+		// FIX-5b: a daemon leaving continuous StRunning restarts its stabilize-dwell
+		// clock HERE, on the transition — not only when a later dwell tick samples a
+		// non-Running state. This closes the leave-and-reenter-between-ticks hole that
+		// would otherwise let a flapping daemon accrue non-continuous dwell and clear
+		// its reallocation/crash windows early. A no-op unless the task has a dwell
+		// entry (i.e. it previously bind-failed).
+		c.noteReallocDwellLeftRunning(ev.TaskName)
+	}
 	c.smStates.Store(ev.TaskName, newState)
 
 	// P2-2 (Codex PR-3): drop a stale F1 gateCleared bypass. The flag is a one-shot
@@ -3126,6 +3230,12 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	}
 	if strings.Contains(side, "reset failures") && c.tracker != nil {
 		c.tracker.ClearCrashes(ev.TaskName)
+		// L1 self-heal: leaving quarantine (manual recover / parole / intent
+		// re-enable) also resets the reallocation window and the terminal-event
+		// dedupe marker, so a recovered daemon starts its next ephemeral-collision
+		// episode with a fresh reallocation budget and can re-emit its L3 event.
+		c.tracker.ClearReallocations(ev.TaskName)
+		c.bindAccessDeniedTerminalEmitted.Delete(canonicalSupervisorTaskName(ev.TaskName))
 	}
 	// Sync tracker runtime state when SM transitions to StIdle from a
 	// non-idle state. Without this, persistDaemonRuntimeTracker below

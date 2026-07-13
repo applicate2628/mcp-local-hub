@@ -176,7 +176,12 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 				if errors.Is(err, http.ErrServerClosed) {
 					return nil
 				}
-				return fmt.Errorf("http server: %w", err)
+				// External ListenAndServe refused the bind because a foreign
+				// process holds this pool port (WSAEADDRINUSE/WSAEACCES) → exit
+				// exitBindRefused so the supervisor reallocates a fresh serena
+				// dynamic-pool port instead of crash-looping to quarantine. Any
+				// other http-server failure keeps the existing cobra exit-1.
+				return bindRefusedExit(fmt.Errorf("http server: %w", err))
 			case <-ctx.Done():
 				_ = h.Stop()
 				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
