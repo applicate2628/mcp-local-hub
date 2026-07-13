@@ -47,6 +47,38 @@ type supervisorController struct {
 	eventLoop   *api.EventLoop
 	tracker     *DaemonRuntimeTracker
 	smStates    sync.Map // taskName -> api.SMState
+	// respawnArmEpoch is a single controller-wide, monotonic, never-reset backoff-arm
+	// epoch. respawnArmGen maps each task -> the LATEST epoch it armed at, for the
+	// fire-time compare. armRespawnBackoffTimer takes the next epoch
+	// (respawnArmEpoch.Add(1)) at arm time, stores it under the task, and captures it
+	// in the timer closure; at fire time a timer whose captured epoch is no longer the
+	// current one for the task — or whose task entry is gone — was SUPERSEDED and drops
+	// its EvTimerDue. The pre-spawn port-gate route arms MULTIPLE coincident respawn
+	// timers (holdSpawnInBackoff, then the dynamic-pool realloc backstop, then a
+	// realloc-Failed re-arm) that all sit in StBackoffWaiting together — without this
+	// the fire-time SM-state re-check cannot distinguish them and every one drives a
+	// redundant EvTimerDue. The epoch guard collapses all stacked/coincident arms to
+	// the single most-recent one → exactly one effective EvTimerDue per episode (and
+	// closes the bind-refused path's latent double-timer).
+	//
+	// GLOBAL (not per-task) epoch is what makes remove → re-register ABA-safe: a
+	// per-task counter that clearRemovedTaskRuntime deletes would hand a re-registered
+	// task's first arm generation 1 AGAIN (deleted → Load-miss → 0 → +1 = 1), which a
+	// stale pre-removal timer captured at generation 1 would MATCH and fire against the
+	// NEW incarnation, shortening its backoff. A global epoch is ever-increasing and
+	// non-reusable, so a re-registered task's new arm always gets a FRESH high epoch and
+	// a stale timer's captured epoch can never collide with a different arm's — the
+	// compare is exact-identity, not a reused small integer.
+	//
+	// NORMAL exponential backoff is UNAFFECTED: each arm's timer fires and drives the
+	// next transition BEFORE the next arm happens, so every re-arm is the latest at its
+	// own fire time. Loop-owned single-writer for the Store (all arm sites run on the
+	// loop goroutine, mirroring incrReallocFailCount); respawnArmEpoch.Add is atomic;
+	// the timer goroutines only Load. respawnArmGen is keyed by
+	// canonicalSupervisorTaskName and cleared in clearRemovedTaskRuntime (now ABA-safe —
+	// the Delete cannot cause a false match because epochs are never reused).
+	respawnArmEpoch atomic.Uint64 // global monotonic arm epoch; never reset/reused
+	respawnArmGen   sync.Map      // canonical taskName -> uint64 (latest global epoch)
 	// queuedActions tracks per-task queued action ("" | "respawn" | "none")
 	// preserved across StExiting transitions per SM spec §"queued_action
 	// preservation across supervisor exit" (api/supervisor_state_machine.go:99).
@@ -282,6 +314,64 @@ type supervisorController struct {
 	// (Codex PR-3 round-2 P2). Set on a successful dispatch, cleared when the worker
 	// finishes. Combined with the worker's port re-probe staleness guard.
 	portGateInFlight sync.Map // canonical taskName -> struct{}
+
+	// --- Ephemeral-collision self-heal (L1) wiring ---------------------------
+	// reallocCh carries loop→worker port-REALLOCATION requests (a dynamic-pool
+	// proxy that exited exitBindRefused because a foreign process stole its
+	// port). Mirrors portGateCh: buffered, drained by a single off-loop worker
+	// (runReallocWorker) that runs the blocking AllocatePort + atomic registry/
+	// intent re-persist (reallocFn) OFF the loop and posts the outcome back via
+	// evReallocApplied. Wired only in the production runSupervise path
+	// (reconcileSpawnFn==nil); nil DISABLES the self-heal (spawn-as-today).
+	reallocCh chan reallocReq
+	// reallocInFlight dedupes reallocation requests per task (mirrors
+	// portGateInFlight): at most one reallocation is queued/processing per task
+	// at a time, so the armed fallback timer + a re-firing bind-refused exit
+	// cannot pile up duplicate reallocations.
+	reallocInFlight sync.Map // canonical taskName -> struct{}
+	// reallocFn performs the OFF-LOOP atomic port move for one descriptor:
+	// resolve the pool PER descriptor, then under the registry flock
+	// AllocatePort → write the registry row (new port) → write the
+	// supervisor-intent descriptor (Port + --port argv + serena
+	// RuntimeSpec.External/UpstreamPort) as ONE atomic temp+rename, and return
+	// the new port. It returns api.ErrPortPoolExhausted (wrapped) when the pool
+	// is full. Wired in runSupervise; nil in direct-construction tests (the
+	// worker then no-ops and the fallback timer re-drives the retry).
+	reallocFn func(d api.SupervisorDaemon) (newPort int, err error)
+	// reallocForeignHolderFn best-effort resolves (pid, basename) of the foreign
+	// process holding a stolen port, for the L3 event's REDACTED foreign_holder
+	// (PID + basename ONLY — never a command line/secrets). Runs on the off-loop
+	// worker (it may spawn a WMI/PowerShell identity probe). nil / pid<=0 → the
+	// event omits foreign_holder.
+	reallocForeignHolderFn func(port int) (pid int, basename string)
+	// ephemeralRangeContainsFn best-effort reports whether a port falls inside
+	// the OS TCP ephemeral (dynamic) range, for the L3 event's
+	// inside_ephemeral_range field. Production wires a CACHED netsh probe so it
+	// is cheap after warmup; nil → the field is omitted.
+	ephemeralRangeContainsFn func(port int) (inRange bool, known bool)
+	// reallocDwell tracks, per task, the stabilize-dwell clock used to reset the
+	// reallocation window + crash window ONLY after a reallocated daemon has
+	// dwelt continuously in StRunning past reallocationStabilizeDwell — the
+	// DWELL-GATE that stops a bind-refused daemon (which transits StRunning
+	// BEFORE it exits on the bind fail) from forever-resetting its own counter.
+	// Loop-owned (created on interception, advanced/cleared by the dwell tick on
+	// the loop goroutine).
+	reallocDwell sync.Map // canonical taskName -> *reallocDwellEntry
+	// bindAccessDeniedTerminalEmitted dedupes the terminal (give-up) L3 events
+	// (quarantined-realloc-cap-exhausted for proxies, quarantined-run-host-remedy
+	// for fixed globals) to ONE per episode. Cleared when the daemon stabilizes
+	// (dwell reset) or leaves quarantine (ClearCrashes site), so a later episode
+	// re-emits. Loop-owned.
+	bindAccessDeniedTerminalEmitted sync.Map // canonical taskName -> struct{}
+	// reallocFailCount counts CONSECUTIVE Failed reallocation outcomes per task (F2),
+	// so a PERSISTENTLY failing reallocation worker (denied registry/intent write,
+	// missing row, unwritable dir) escalates to a parole-eligible quarantine after
+	// reallocFailedEscalationBound consecutive failures instead of looping
+	// StBackoffWaiting forever. Reset on a COMPLETED reallocation, on the
+	// stabilize-dwell reset, and on quarantine-leave (same lifecycle as the
+	// reallocation cap). Loop-owned (mutated only in handleReallocApplied /
+	// runReallocDwellTick on the loop goroutine, so the load+store is race-free).
+	reallocFailCount sync.Map // canonical taskName -> int (consecutive Failed reallocation outcomes)
 
 	// quarantineParole is the F2 in-memory parole ladder for threshold-quarantine
 	// daemons (map[canonicalTaskName]*quarantineParoleEntry). A daemon that hits
@@ -894,6 +984,22 @@ func (c *IntentCache) TaskNames() map[string]struct{} {
 		out[canonicalSupervisorTaskName(taskName)] = struct{}{}
 	}
 	return out
+}
+
+// CurrentIntent returns the supervisor-intent snapshot currently applied to the
+// cache (nil before the first Refresh, or when a Refresh applied a nil file). The
+// returned pointer is read-only — callers must not mutate it (the cache still
+// references it). Used by the reallocation stale-snapshot guard (FIX-4) to compare
+// the worker's carried snapshot's UpdatedAt against what is already applied.
+func (c *IntentCache) CurrentIntent() *api.SupervisorIntentFile {
+	if c == nil {
+		return nil
+	}
+	s, ok := c.snap.Load().(*intentSnapshot)
+	if !ok || s == nil {
+		return nil
+	}
+	return s.intent
 }
 
 // refreshSupervisorIntent is the OFF-LOOP detect-and-post-only entry point for a
@@ -2325,6 +2431,15 @@ func (c *supervisorController) clearRemovedTaskRuntime(taskName string) {
 	// no-op (pendingReap.Load misses).
 	c.reapShadow.Delete(taskName)
 	c.disarmReapFollowup(taskName)
+	// Drop the backoff-arm generation entry: a re-registration under the same task
+	// name starts a fresh arm sequence. This Delete is ABA-SAFE because arm epochs are
+	// GLOBAL and never reused (respawnArmEpoch): a re-registered task's next arm takes
+	// a fresh HIGH epoch, so a stale pre-removal timer sees either a map MISS here (the
+	// fire-time guard drops on !ok) or the new incarnation's higher epoch (drop on
+	// mismatch) — never a false match against a reused low generation. Keyed
+	// canonically by armRespawnBackoffTimer, so — like the other reap-bookkeeping maps
+	// above — only the canonical delete is needed.
+	c.respawnArmGen.Delete(taskName)
 	// Drop any suppressed-backoff-timer marker (finding E): the reap is done, so
 	// there is no blip to replay the timer against. A confirmed removal that
 	// suppressed a backoff EvTimerDue during the window drove StBackoffWaiting ->
@@ -2706,7 +2821,27 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 		// mutations (create / clear / Delete / field advance) + the EvManualRestart
 		// self-post against every other parole and SM mutation, closing the pre-fix
 		// off-loop TOCTOU. Carries no TaskName (a fleet-wide scan), like evReapScan.
-		c.runQuarantineParoleTick(time.Now().UTC())
+		now := time.Now().UTC()
+		c.runQuarantineParoleTick(now)
+		// L1 self-heal: the reallocation stabilize-dwell reset shares this tick's
+		// cadence + loop goroutine (both mutate loop-owned in-memory maps only).
+		c.runReallocDwellTick(now)
+		return
+	case evReallocApplied:
+		// L1 self-heal: apply the off-loop reallocation worker's outcome ON the
+		// loop (intent-cache refresh + respawn, or the pool-exhausted quarantine).
+		// Not an api.Transition row; intercepted here like the evReap* / parole
+		// events. The per-task in-flight marker is cleared by the worker's own defer
+		// (handleReallocReq); handleReallocApplied does NOT re-clear it here.
+		c.handleReallocApplied(ev)
+		return
+	case evPreSpawnRealloc:
+		// F3 self-heal: the F1 port-gate worker classified the pre-spawn port holder
+		// as FOREIGN on a dynamic-pool proxy and posted this so the reallocation
+		// decision runs single-owned on the loop. Not an api.Transition row;
+		// intercepted here like evReallocApplied. Routes the "port stolen while the
+		// daemon was DOWN" collision shape into the same reallocation self-heal.
+		c.handlePreSpawnRealloc(ev)
 		return
 	}
 	// pr302 r8 single-key-space invariant: canonicalize ev.TaskName ONCE at the SM
@@ -2958,6 +3093,10 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// respawn route through the idle transition normally (Codex bot #268 P2,
 	// supervisor_controller.go:664).
 	if ev.Kind == api.EvChildExit && currentState == api.StRunning && supervisorEventIsCleanExit(ev) {
+		// FIX-5b: this StRunning→StIdle early-return also leaves continuous StRunning,
+		// so reset the stabilize-dwell clock here too (no-op unless a dwell entry
+		// exists). The main-transition reset below is skipped on this return path.
+		c.noteReallocDwellLeftRunning(ev.TaskName)
 		c.smStates.Store(ev.TaskName, api.StIdle)
 		if c.events != nil {
 			_ = c.events.Emit(api.SupervisorEvent{
@@ -2997,6 +3136,20 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	}
 
 	now := time.Now().UTC()
+
+	// Ephemeral-collision self-heal (L1): a bind-refused EvChildExit of a
+	// dynamic-pool proxy (its pool port was stolen by a foreign process) is moved
+	// to a fresh pool port off the loop instead of crash-looping to quarantine.
+	// Runs BEFORE the SM transition; returns true when it fully handled the event
+	// (reallocated → held in backoff, worker dispatched) so we skip the crash
+	// path. It returns false — falling through to the normal crash/backoff/
+	// quarantine SM below — for a non-bind-refused exit, a fixed-global daemon,
+	// and a dynamic proxy whose reallocation cap is exhausted (all after emitting
+	// their L3 event). The clean-exit guard above already returned for exit 0, so
+	// a bind-refused (non-zero) exit reaches here.
+	if c.maybeHandleBindRefusedExit(d, ev, currentState, now) {
+		return
+	}
 
 	// Resolve the intent's active-stop predicate via the REAL method
 	// form. There is no api.IsActiveStop(d, now) free function; the
@@ -3069,6 +3222,15 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// performing the side effect), NOT whether the in-memory transition
 	// took effect. The SM transition matched (matched=true), so smStates
 	// reflects the new state immediately; persistence is a separate axis.
+	if currentState == api.StRunning && newState != api.StRunning {
+		// FIX-5b: a daemon leaving continuous StRunning restarts its stabilize-dwell
+		// clock HERE, on the transition — not only when a later dwell tick samples a
+		// non-Running state. This closes the leave-and-reenter-between-ticks hole that
+		// would otherwise let a flapping daemon accrue non-continuous dwell and clear
+		// its reallocation/crash windows early. A no-op unless the task has a dwell
+		// entry (i.e. it previously bind-failed).
+		c.noteReallocDwellLeftRunning(ev.TaskName)
+	}
 	c.smStates.Store(ev.TaskName, newState)
 
 	// P2-2 (Codex PR-3): drop a stale F1 gateCleared bypass. The flag is a one-shot
@@ -3126,6 +3288,15 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	}
 	if strings.Contains(side, "reset failures") && c.tracker != nil {
 		c.tracker.ClearCrashes(ev.TaskName)
+		// L1 self-heal: leaving quarantine (manual recover / parole / intent
+		// re-enable) also resets the reallocation window and the terminal-event
+		// dedupe marker, so a recovered daemon starts its next ephemeral-collision
+		// episode with a fresh reallocation budget and can re-emit its L3 event.
+		c.tracker.ClearReallocations(ev.TaskName)
+		c.bindAccessDeniedTerminalEmitted.Delete(canonicalSupervisorTaskName(ev.TaskName))
+		// F2: leaving quarantine also resets the consecutive-Failed reallocation
+		// escalation counter, so a recovered daemon's next episode counts afresh.
+		c.reallocFailCount.Delete(canonicalSupervisorTaskName(ev.TaskName))
 	}
 	// Sync tracker runtime state when SM transitions to StIdle from a
 	// non-idle state. Without this, persistDaemonRuntimeTracker below
@@ -3704,6 +3875,22 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 	c.armRespawnBackoffTimer(*d, d.TaskName, backoff)
 }
 
+// nextRespawnArmGen takes the next GLOBAL monotonic arm epoch, records it as the
+// task's latest arm generation, and returns it. The epoch is controller-wide and
+// never reset/reused (respawnArmEpoch.Add), so a re-registered task's arm can never
+// collide with a stale pre-removal timer's captured epoch — see the respawnArmEpoch
+// field doc for the remove → re-register ABA that a per-task-reset counter had.
+// Loop-owned single-writer for the Store (every armRespawnBackoffTimer caller —
+// handleBackoffWaiting, holdSpawnInBackoff via preSpawnPortGateHold,
+// dispatchDynamicPoolRealloc, handleReallocApplied — runs on the loop goroutine);
+// respawnArmEpoch.Add is atomic; the timer goroutines only Load the value to compare
+// at fire time.
+func (c *supervisorController) nextRespawnArmGen(key string) uint64 {
+	gen := c.respawnArmEpoch.Add(1)
+	c.respawnArmGen.Store(key, gen)
+	return gen
+}
+
 // armRespawnBackoffTimer arms the cancel-respecting backoff timer that re-posts
 // EvTimerDue after `backoff`. Extracted from handleBackoffWaiting so the F1
 // pre-spawn port-owner gate (holdSpawnInBackoff) can re-arm the SAME timer
@@ -3727,6 +3914,14 @@ func (c *supervisorController) armRespawnBackoffTimer(descriptor api.SupervisorD
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Single-timer-owner: take the next global arm epoch, record it as this task's
+	// latest, and capture it in the closure. A later arm takes a higher epoch, so an
+	// older-epoch timer that fires after it drops its EvTimerDue at the fire-time guard
+	// below — collapsing coincident/stacked arms to exactly the most-recent one.
+	// Canonicalize so the key is stable whether the caller passed a raw or canonical
+	// taskName. All arm sites run on the loop goroutine, so the record is single-writer.
+	armKey := canonicalSupervisorTaskName(taskName)
+	armGen := c.nextRespawnArmGen(armKey)
 	go func() {
 		t := time.NewTimer(backoff)
 		defer t.Stop()
@@ -3756,6 +3951,38 @@ func (c *supervisorController) armRespawnBackoffTimer(descriptor api.SupervisorD
 				}
 				return
 			}
+		}
+		// Single-timer-owner guard (respawnArmGen): a newer arm for this task
+		// superseded this timer, OR the task's arm entry is gone (removed/cleaned up).
+		// Multiple coincident arms (the pre-spawn port-gate hold + the dynamic-pool
+		// realloc backstop + a realloc-Failed re-arm) each start their own goroutine
+		// and can all sit in StBackoffWaiting together, so the SM-state re-check above
+		// cannot tell them apart. Drop this EvTimerDue UNLESS the task's CURRENT arm
+		// epoch is EXACTLY the one this timer captured, so only the most-recent arm's
+		// timer drives the single EvTimerDue. DROP on a map MISS too (!ok): a missing
+		// entry means the task was removed/cleaned up (clearRemovedTaskRuntime Deletes
+		// it) or was never armed — either way this timer is stale and must NOT fall
+		// through as valid. Because epochs are GLOBAL and never reused, a stale timer
+		// from before a remove → re-register sees either a miss (drop) or the new
+		// incarnation's higher epoch (drop), never a false match — no ABA. A NORMAL
+		// backoff re-arm is unaffected: its timer fires and drives the transition
+		// BEFORE the next arm, so each re-arm is the latest at its own fire time.
+		v, ok := c.respawnArmGen.Load(armKey)
+		g, gok := v.(uint64)
+		if !ok || !gok || g != armGen {
+			if c.events != nil {
+				_ = c.events.Emit(api.SupervisorEvent{
+					Severity: "debug",
+					Source:   "lifecycle",
+					Event:    "daemon-respawn-timer-superseded",
+					TaskName: taskName,
+					Body: map[string]any{
+						"armed_generation":   armGen,
+						"current_generation": g,
+					},
+				})
+			}
+			return
 		}
 		if c.events != nil {
 			_ = c.events.Emit(api.SupervisorEvent{
@@ -4050,10 +4277,31 @@ func (c *supervisorController) handlePortGateReq(ctx context.Context, req portGa
 				Body:     map[string]any{autoRestartRequireRunningIntentBodyKey: true},
 			})
 		}
+	case squatterAutoForeign:
+		// F3: a FOREIGN holder at pre-spawn is the "port stolen while the daemon was
+		// DOWN" collision shape. For a DYNAMIC-POOL proxy (serena / workspace-LSP) route
+		// it to the SAME reallocation self-heal as a bind-refused exit — move OUR daemon
+		// to a fresh pool port — instead of parking on the stolen port forever (the L1
+		// bind-refused self-heal only fires from StRunning, so this shape never reached
+		// it). A FIXED-global daemon still PARKS: its port is baked into gate-OFF client
+		// URLs and must never move. The reallocation DECISION (cap peek + dispatch) is
+		// single-owned on the loop (handlePreSpawnRealloc → dispatchDynamicPoolRealloc);
+		// the reallocInFlight dedup there guards double-dispatch across the armed 30s
+		// re-probe cadence.
+		if isDynamicPoolProxyDescriptor(req.d) && c.eventLoop != nil {
+			_ = c.eventLoop.PostCtx(ctx, api.LoopEvent{
+				Kind:     evPreSpawnRealloc,
+				TaskName: task,
+			})
+		}
+		// Fixed-global: post NOTHING; the daemon is already held in backoff with an
+		// armed 30s timer that owns the re-probe cadence (today's foreign park).
 	default:
-		// squatterAutoForeign / squatterAutoReapFailed / squatterAutoRateLimited:
-		// post NOTHING. The daemon is already held in backoff and its armed 30s
-		// timer owns the re-probe cadence (today's foreign hold, no crash increment).
+		// squatterAutoReapFailed / squatterAutoRateLimited: post NOTHING. The daemon
+		// is already held in backoff and its armed 30s timer owns the re-probe cadence
+		// (today's foreign hold, no crash increment). Reap-failed is our own child we
+		// could not kill (not foreign), so it is NOT reallocated — the re-probe retries
+		// the identity-gated reap.
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -187,11 +188,28 @@ construct the backend lifecycle. Human invocation is not supported.`,
 			// If --port mismatches entry.Port, coming up anyway would bind a
 			// port clients and status-metadata don't expect, producing a
 			// silently-broken registration that still looks healthy in
-			// `mcphub workspaces`. Refuse to start — the operator must
-			// explicitly re-register to reconcile.
+			// `mcphub workspaces`.
+			//
+			// FIX-3 (P1-2 root): distinguish a STALE REGISTRY ROW from a genuine
+			// mis-registration. When supervisor-intent (the authority the supervisor
+			// spawns this proxy FROM) agrees with our --port and ONLY the registry row
+			// disagrees, the divergence is the ephemeral-collision self-heal's
+			// crash/double-fault residue (registry=newPort / intent=oldPort, or the
+			// inverse). Returning a plain exit-1 there BRICKS the LSP daemon forever —
+			// the self-heal keys on exit-3, so it never re-drives, and the crash loop
+			// marches to quarantine → parole → same exit-1 → re-quarantine. Classify it
+			// as bind-refused-equivalent (exit-3) so the supervisor reallocates a fresh
+			// pool port and rewrites BOTH stores consistently. A genuine mis-registration
+			// (our --port itself is stale relative to intent, or intent has no matching
+			// descriptor) keeps the original fail-closed exit-1 ("run mcphub register")
+			// so it is never swept into a self-heal loop.
 			if entry.Port != portFlag {
-				return fmt.Errorf("port mismatch: --port=%d but registry entry for (%s, %s) has port %d; run `mcphub register` to reconcile",
-					portFlag, activeWSKey, languageFlag, entry.Port)
+				var intent *api.SupervisorIntentFile
+				if ip, perr := api.ResolveSupervisorIntentPathForProxy(); perr == nil {
+					// nil on any read error → classify falls back to exit-1 (fail-closed).
+					intent, _ = api.ReadSupervisorIntent(ip)
+				}
+				return classifyLSPPortMismatch(intent, workspaceFlag, languageFlag, portFlag, entry.Port, activeWSKey)
 			}
 			// Re-assert Configured lifecycle on startup using the already-
 			// loaded Registry (no new flock acquisition — we hold it).
@@ -263,7 +281,12 @@ construct the backend lifecycle. Human invocation is not supported.`,
 			// release the lock — a subsequent unregister's kill-by-port will
 			// find the listening socket and terminate us.
 			if err := proxy.Bind(); err != nil {
-				return fmt.Errorf("bind proxy: %w", err)
+				// Bind refused because a foreign process holds this pool port
+				// (WSAEADDRINUSE/WSAEACCES) → exit exitBindRefused so the
+				// supervisor's ephemeral-collision self-heal reallocates a fresh
+				// pool port instead of crash-looping to quarantine. Any other
+				// bind failure keeps the existing cobra exit-1 (genuine crash).
+				return bindRefusedExit(fmt.Errorf("bind proxy: %w", err))
 			}
 			releaseUnlock()
 
@@ -357,4 +380,67 @@ func buildWorkspaceBackendLifecycle(spec config.LanguageSpec, canonicalWorkspace
 	default:
 		return nil
 	}
+}
+
+// classifyLSPPortMismatch (FIX-3) decides how a workspace-LSP proxy reacts when its
+// registry-row port disagrees with its own --port. It returns a SELF-HEALING exit-3
+// error (daemonBindRefusedExitError) when supervisor-intent — the authority the
+// supervisor spawns this proxy from — AGREES with our --port (so only the registry
+// row is stale, the ephemeral-collision self-heal's crash/double-fault residue), and
+// the original fail-closed exit-1 error otherwise (a genuine mis-registration, or any
+// case where intent could not confirm our --port). intent may be nil (read failed) →
+// exit-1. This is bounded to the dynamic-pool workspace-LSP proxy by construction:
+// only `daemon workspace-proxy` reaches this code, and lspIntentDescriptorPort matches
+// solely IsWorkspaceLSPProxyDescriptor rows, so a fixed-daemon mis-registration can
+// never be swept into the self-heal loop.
+func classifyLSPPortMismatch(intent *api.SupervisorIntentFile, workspacePath, language string, portFlag, registryPort int, activeWSKey string) error {
+	if p, ok := lspIntentDescriptorPort(intent, workspacePath, language); ok && p == portFlag {
+		return &daemonBindRefusedExitError{err: fmt.Errorf(
+			"registry row for (%s, %s) has stale port %d while supervisor-intent (the spawn authority) agrees with --port=%d; treating as bind-refused-equivalent (exit %d) so the supervisor reallocates a fresh pool port and reconciles both stores",
+			activeWSKey, language, registryPort, portFlag, exitBindRefused)}
+	}
+	return fmt.Errorf("port mismatch: --port=%d but registry entry for (%s, %s) has port %d; run `mcphub register` to reconcile",
+		portFlag, activeWSKey, language, registryPort)
+}
+
+// lspIntentDescriptorPort returns the --port of the supervisor-intent workspace-LSP
+// descriptor matching (workspacePath, language), or (0,false) when absent/unparseable.
+// The match is exact on the descriptor's --workspace / --language argv tokens: for a
+// supervisor-spawned proxy our own flags ARE that descriptor's argv verbatim, so an
+// exact string match uniquely finds our own row. A missing intent, a missing matching
+// row, or a non-integer --port all yield (0,false) → the caller keeps exit-1.
+func lspIntentDescriptorPort(intent *api.SupervisorIntentFile, workspacePath, language string) (int, bool) {
+	if intent == nil {
+		return 0, false
+	}
+	for i := range intent.Daemons {
+		d := intent.Daemons[i]
+		if !api.IsWorkspaceLSPProxyDescriptor(d) {
+			continue
+		}
+		if descriptorArgValue(d.Args, "--workspace") != workspacePath ||
+			descriptorArgValue(d.Args, "--language") != language {
+			continue
+		}
+		if raw := descriptorArgValue(d.Args, "--port"); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				return n, true
+			}
+		}
+		return 0, false
+	}
+	return 0, false
+}
+
+// descriptorArgValue returns the value token following the FIRST occurrence of flag
+// in a `daemon <kind> …` descriptor's args, or "" when absent. Scoped to i>=2 (past
+// the "daemon <kind>" prefix) to mirror api.descriptorArgPort's scan discipline, so a
+// stray leading token can never be mistaken for a flag.
+func descriptorArgValue(args []string, flag string) string {
+	for i := 2; i+1 < len(args); i++ {
+		if args[i] == flag {
+			return args[i+1]
+		}
+	}
+	return ""
 }

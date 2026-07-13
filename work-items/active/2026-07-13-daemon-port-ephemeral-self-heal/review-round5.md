@@ -1,0 +1,20 @@
+# D round-5 commission — Sol + Terra REVISE (F1 ok, F2 ok+2 P2, F3 BROKEN); fable pending
+
+Bot found 3 P2 on PR #535 HEAD a4b959ac (F1 setup-order, F2 Failed-escalation, F3 pre-spawn coverage gap). Round-5 fixed them; the commission on the round-5 delta:
+
+## F1 (setup ordering) — CORRECT (Sol + Terra)
+`runSetupEphemeralRangeStep` now runs before `runSetupWatchdogForSetup` can return the elevation error (setup.go:411-414); the full-command test proves the elevated mutation runs first + the watchdog refusal still propagates.
+
+## F2 (reallocFailCount bounded escalation) — logic CORRECT (Sol + Terra), 2 Terra P2 (both MATCH the existing pool-exhausted pattern → consistency, evaluate)
+- Counter: increment/reset serialized on the loop; reset on completed realloc / dwell reset / removal / escalation / quarantine-leave; bound=3 (fail 1-3 re-arm, fail 4 escalates); StBackoffWaiting guard before mutation; escalation → StQuarantined + parole + persist + terminal event. All CORRECT.
+- **Terra P2-a: on-loop blocking persist.** `escalateReallocFailing` calls `persistDaemonRuntimeTracker` from the loop (supervise_realloc.go:649) → a wedged FS stalls the loop. NOTE: the EXISTING pool-exhausted quarantine branch (handleReallocApplied) does the same on-loop persist — so this is consistent with the existing pattern, not a NEW regression. Evaluate whether to move ALL quarantine persist off-loop (broader) or accept the existing pattern.
+- **Terra P2-b: raw allocator error redaction.** `errStr` verbatim in `allocator_error` + lifecycle `detail` (may contain local paths). NOTE: the existing pool-exhausted branch does `"allocator_error": err.Error()` too. Events are owner-only DACL (a local path is not a secret leak to a non-owner). Evaluate consistency vs the "PID+basename only" redaction posture.
+
+## F3 (pre-spawn reallocation routing) — BROKEN (Sol P1 + Terra 2×P2)
+Routing itself CORRECT (Sol+Terra): only dynamic descriptors post evPreSpawnRealloc; fixed-global + reap-failed/rate-limited still park; verified-own reap unchanged; cap centralized in dispatchDynamicPoolRealloc; cap-exhausted falls through to the existing park; the new PostCtx is on the port-gate worker (not the loop).
+- **Sol P1 — timer amplification.** `handlePreSpawnRealloc` (supervise_realloc.go:265-285) calls void `tryDispatchRealloc` then UNCONDITIONALLY arms a timer — EVEN when reallocInFlight rejected the dispatch. A quick reallocOutcomeFailed arms ANOTHER timer (:681-682). Stacked timers → batched retries → the new failure counter drives quarantine much FASTER than the intended cadence. FIX: one retry-timer owner — cancel/consume the pre-spawn timer when routing to reallocation, OR make dispatch admission observable + arm a backstop only when no equivalent timer is already active.
+- **Terra P2 — stale foreign classification.** The worker posts only TaskName; handlePreSpawnRealloc does not revalidate the observed owner/proof/port. A foreign holder that exits between worker-classification and loop-handling → an unnecessary reallocation, consuming cap/dwell → eventually a permanent old-port park. FIX: revalidate the owner at handle time, OR accept the bounded waste (document).
+- **Terra P2 — operator-stop override during pre-spawn realloc.** The handler accepts StBackoffWaiting as sufficient; a stop may leave that state until EvTimerDue; meanwhile it dispatches a realloc worker that persists a new port despite the stop intent (timer prevents spawn but not the allocator/intent mutation). FIX: re-check the stop intent before dispatching the pre-spawn reallocation.
+
+## Disposition (pending fable, the F3 arbiter)
+F1 done, F2 logic done (2 P2 to evaluate for consistency). F3's architectural extension has real integration subtleties in the delicate pre-spawn gate — chiefly Sol's P1 timer amplification (MUST fix: single timer owner). Round-6 fixes F3 (single timer owner + stop-recheck + classification-revalidate-or-accept) + evaluates F2's 2 P2 (off-loop persist + redaction, weighing consistency with the existing pool-exhausted pattern). Wait for fable's F3 verdict + best-fix direction before dispatching round-6.

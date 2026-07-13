@@ -336,6 +336,39 @@ func TestPortGateWorker_ForeignPostsNothing(t *testing.T) {
 	assertNoEvent(t, captured)
 }
 
+// TestPortGateWorker_ForeignDynamicPoolRoutesToRealloc (F3): a FOREIGN holder at
+// pre-spawn on a DYNAMIC-POOL proxy (serena / workspace-LSP) routes to the
+// reallocation self-heal via an evPreSpawnRealloc post, instead of parking on the
+// stolen port forever. It is NEVER killed (foreign) and does NOT set gateCleared.
+//
+// NON-VACUITY: this test is the DYNAMIC-POOL twin of
+// TestPortGateWorker_ForeignPostsNothing (which uses a FIXED-global descriptor and
+// asserts assertNoEvent). Same foreign classification, opposite routing — the
+// contrast IS the F3 fix. Remove the isDynamicPoolProxyDescriptor gate in
+// handlePortGateReq and the fixed-global twin starts posting (its assertNoEvent
+// fails); remove the whole F3 post and THIS test's assertEvent fails.
+func TestPortGateWorker_ForeignDynamicPoolRoutesToRealloc(t *testing.T) {
+	d := serenaProxyDescriptor() // dynamic-pool proxy
+	const owner = 44000
+	setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
+		return squatterIdentityFor(owner, d), nil
+	}, func(int, string) bool { return false }) // exe gate → foreign
+	var reapCount atomic.Int32
+	setSquatterTerminateForTest(t, func(process.PIDIdentityProof) error { reapCount.Add(1); return nil })
+
+	ctrl, captured := newWorkerController(t)
+	ctrl.handlePortGateReq(ctrl.ctx, portGateReq{d: d, ownerPID: owner})
+
+	if reapCount.Load() != 0 {
+		t.Fatalf("reap called %d times, want 0 (foreign owner must NEVER be killed)", reapCount.Load())
+	}
+	if _, ok := ctrl.gateCleared.Load(canonicalSupervisorTaskName(d.TaskName)); ok {
+		t.Fatal("foreign path must NOT set gateCleared (no spawn over a foreign holder)")
+	}
+	// F3: a FOREIGN holder on a DYNAMIC-POOL proxy routes to the reallocation self-heal.
+	assertEvent(t, captured, evPreSpawnRealloc, d.TaskName)
+}
+
 // TestPortGateWorker_StaleOwnerChangedDropped proves the round-2 P2 staleness
 // guard: when the intended port is owned by a DIFFERENT PID than the one dispatched
 // (a prior request already reaped the squatter and the daemon respawned, so the

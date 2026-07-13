@@ -63,16 +63,25 @@ type DaemonRuntimeEntry struct {
 }
 
 type DaemonRuntimeTracker struct {
-	mu                  sync.RWMutex
-	entries             map[string]DaemonRuntimeEntry
-	failures            map[string][]time.Time // per-task crash timestamps (sliding window, not persisted)
+	mu       sync.RWMutex
+	entries  map[string]DaemonRuntimeEntry
+	failures map[string][]time.Time // per-task crash timestamps (sliding window, not persisted)
+	// reallocations is the per-task sliding window of ephemeral-collision port
+	// REALLOCATIONS (the L1 self-heal). It is SEPARATE from `failures` on
+	// purpose: a within-cap bind-refused reallocation must NOT fuel the crash /
+	// quarantine march (mirrors the F1 port-gate "no crash increment"
+	// precedent), so it is counted here, not in `failures`. In-memory only,
+	// resets on cold restart — pre-restart reallocations are not relevant to
+	// runtime respawn decisions, exactly like `failures`.
+	reallocations       map[string][]time.Time
 	ownershipGeneration atomic.Uint64
 }
 
 func NewDaemonRuntimeTracker() *DaemonRuntimeTracker {
 	return &DaemonRuntimeTracker{
-		entries:  map[string]DaemonRuntimeEntry{},
-		failures: map[string][]time.Time{},
+		entries:       map[string]DaemonRuntimeEntry{},
+		failures:      map[string][]time.Time{},
+		reallocations: map[string][]time.Time{},
 	}
 }
 
@@ -164,6 +173,77 @@ func (t *DaemonRuntimeTracker) ClearCrashes(taskName string) {
 	defer t.mu.Unlock()
 	if t.failures != nil {
 		delete(t.failures, taskName)
+	}
+}
+
+// RecordReallocationAndCountInWindow appends `now` to the per-task
+// reallocations slice, prunes entries older than (now - window), and returns the
+// count within the window (INCLUDING the just-recorded entry). The exact
+// crash-window shape (RecordCrashAndCountInWindow) applied to the SEPARATE
+// ephemeral-collision reallocation counter — so a within-cap reallocation is
+// bounded per-window without ever touching the crash `failures` window that
+// drives quarantine.
+func (t *DaemonRuntimeTracker) RecordReallocationAndCountInWindow(taskName string, now time.Time, window time.Duration) int {
+	if t == nil {
+		return 0
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.reallocations == nil {
+		t.reallocations = map[string][]time.Time{}
+	}
+	cutoff := now.Add(-window)
+	prev := t.reallocations[taskName]
+	kept := make([]time.Time, 0, len(prev)+1)
+	for _, ts := range prev {
+		if ts.After(cutoff) {
+			kept = append(kept, ts)
+		}
+	}
+	kept = append(kept, now)
+	t.reallocations[taskName] = kept
+	return len(kept)
+}
+
+// ReallocationCountInWindow returns the current reallocations-in-window count
+// WITHOUT recording a new reallocation (the peek used to decide whether the cap
+// is already exhausted before spending a reallocation). Mirrors
+// CrashCountInWindow.
+func (t *DaemonRuntimeTracker) ReallocationCountInWindow(taskName string, now time.Time, window time.Duration) int {
+	if t == nil {
+		return 0
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if t.reallocations == nil {
+		return 0
+	}
+	cutoff := now.Add(-window)
+	n := 0
+	for _, ts := range t.reallocations[taskName] {
+		if ts.After(cutoff) {
+			n++
+		}
+	}
+	return n
+}
+
+// ClearReallocations drops the per-task reallocations slice. Called (alongside
+// ClearCrashes) when a reallocated daemon dwells stably in StRunning past the
+// stabilize dwell — a genuinely-recovered daemon starts its next
+// ephemeral-collision episode with a fresh reallocation budget. Mirrors
+// ClearCrashes.
+func (t *DaemonRuntimeTracker) ClearReallocations(taskName string) {
+	if t == nil {
+		return
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.reallocations != nil {
+		delete(t.reallocations, taskName)
 	}
 }
 
@@ -443,6 +523,9 @@ func (t *DaemonRuntimeTracker) Remove(taskName string) {
 	delete(t.entries, taskName)
 	if t.failures != nil {
 		delete(t.failures, taskName)
+	}
+	if t.reallocations != nil {
+		delete(t.reallocations, taskName)
 	}
 }
 

@@ -1058,6 +1058,37 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		ctrl.squatterLimiter = newSquatterReapLimiter()
 		ctrl.portGateCh = make(chan portGateReq, portGateChCapacity)
 		go ctrl.runPortGateWorker(loopCtx)
+		// L1 ephemeral-collision self-heal wiring. Same split-loop/worker
+		// discipline as the F1 port-gate above: the blocking AllocatePort +
+		// atomic registry/intent re-persist runs on ONE off-loop worker; the loop
+		// only classifies + holds + dispatches. Wired only here (production);
+		// direct-construction tests leave reallocCh/reallocFn nil, which disables
+		// the self-heal (spawn-as-today).
+		reallocRegistryPath := filepath.Join(stateDir, "workspaces.yaml")
+		reallocIntentPath := filepath.Join(stateDir, "supervisor-intent.json")
+		ctrl.reallocFn = func(d api.SupervisorDaemon) (int, error) {
+			return api.ReallocateDynamicPoolPort(reallocRegistryPath, reallocIntentPath, d)
+		}
+		// Best-effort REDACTED foreign-holder resolver for the L3 event: the PID
+		// that holds the stolen port + its image basename ONLY. Runs on the
+		// off-loop worker (it may spawn a WMI/PowerShell identity probe), never on
+		// the loop. Build-tagged (reallocForeignHolder) — the Windows-only
+		// identity probe would break the POSIX build if wired inline here. Any
+		// probe miss → (0, "") → the event omits foreign_holder.
+		ctrl.reallocForeignHolderFn = reallocForeignHolder
+		// inside_ephemeral_range for the L3 event: cached OS-dynamic-range probe
+		// (Windows netsh; no-op elsewhere). Cheap after warmup, so it is safe to
+		// call from either the worker or the loop.
+		ctrl.ephemeralRangeContainsFn = ephemeralRangePortContains
+		// FIX-2 (NEW-2): pre-warm the OS-dynamic-range probe OFF the loop at startup.
+		// The range is static per boot and cached behind a sync.Once; firing that
+		// Once here (bounded by the 3s netsh deadline; a POSIX no-op) means every
+		// later on-loop ephemeralRangeContainsFn call — including the FIRST L3
+		// terminal emit in a fixed-global storm — hits the warm cache instead of
+		// spawning netsh on the event loop goroutine.
+		go func() { _, _ = ephemeralRangePortContains(0) }()
+		ctrl.reallocCh = make(chan reallocReq, reallocChCapacity)
+		go ctrl.runReallocWorker(loopCtx)
 		// P2a: the port-squatter reap capability (single owner, beside the
 		// spawn/terminate closures above) wraps TerminatePIDWithIdentity. The
 		// monitor owns the rate-limit state; the sweep classifies + reaps a

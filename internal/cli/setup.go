@@ -272,6 +272,7 @@ func newSetupCmdReal() *cobra.Command {
 	var rollbackLSPRouter bool
 	var trustedRoots []string
 	var installServer string
+	var fixEphemeralRange bool
 	c := &cobra.Command{
 		Use:   "setup",
 		Short: "Install mcphub to ~/.local/bin, register PATH, install watchdog task",
@@ -391,6 +392,23 @@ See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 			if err := runSetupLSPClientRouter(cmd.OutOrStdout(), false); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: LSP router wiring failed (continuing to watchdog): %v\n", err)
 			}
+			// L2 ephemeral-range detect + warn (Windows-only; POSIX no-op). Never
+			// mutates the host by default — it only warns when the OS TCP
+			// ephemeral (dynamic) range overlaps mcphub's daemon pools (the root
+			// cause the L1 runtime self-heal recovers from). --fix-ephemeral-range
+			// (admin) MOVES the range off the pool. Non-fatal: a probe/mutation
+			// failure warns and continues.
+			//
+			// Runs BEFORE the watchdog step (F1, round-5 bot). runSetupWatchdogForSetup
+			// REFUSES an elevated setup (plan §42) and returns early, but
+			// --fix-ephemeral-range needs exactly that elevated ADMIN shell (its netsh
+			// `int ipv4 set dynamicport tcp` mutation requires admin). Ordered AFTER the
+			// watchdog gate, the advertised host remedy was unreachable in the one
+			// context it requires. The step is independent of the watchdog step — it
+			// only probes/mutates the OS dynamic range via netsh + resolves the pools
+			// from config/manifest, needing NEITHER the state dir the watchdog ensures
+			// NOR the liveness task — so moving it earlier is side-effect-free.
+			runSetupEphemeralRangeStep(cmd, fixEphemeralRange)
 			if err := runSetupWatchdogForSetup(cmd.OutOrStdout(), allowElevated); err != nil {
 				return err
 			}
@@ -420,6 +438,8 @@ See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 		"bless an ABSOLUTE workspace path as an LSP trusted root (repeatable); same store the GUI Settings → Trusted Roots panel writes. Idempotent.")
 	c.Flags().StringVar(&installServer, "server", "",
 		"after canonicalizing the binary + installing the maintenance task, install this one server headlessly (no prompts) via the same path as `mcphub install --server <name>`. Validated against the shipped manifest set; unknown names fail loud before any side effect.")
+	c.Flags().BoolVar(&fixEphemeralRange, "fix-ephemeral-range", false,
+		"Windows only: if the OS TCP ephemeral (dynamic) range overlaps mcphub's daemon pools, MOVE the range above the pools via `netsh int ipv4 set dynamicport tcp` (requires an elevated shell; prints before/after). Without this flag, setup only DETECTS + warns and never mutates the host. Never reverted on uninstall.")
 	return c
 }
 

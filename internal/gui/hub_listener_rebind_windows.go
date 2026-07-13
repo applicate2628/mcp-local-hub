@@ -2,12 +2,13 @@
 
 package gui
 
-import (
-	"errors"
+import "mcp-local-hub/internal/api"
 
-	"golang.org/x/sys/windows"
-)
-
+// isHubListenerSamePortRebindPendingErr delegates to the single-owner predicate
+// (api.IsPortBindRefusedErr). The WSAEADDRINUSE/WSAEACCES check was RELOCATED to
+// internal/api so the daemon-proxy bind path shares one owner with the hub
+// listener (arch C1). This thin wrapper is retained so the hub-listener call
+// sites keep their intent-named local helper.
 func isHubListenerSamePortRebindPendingErr(err error) bool {
-	return errors.Is(err, windows.WSAEADDRINUSE) || errors.Is(err, windows.WSAEACCES)
+	return api.IsPortBindRefusedErr(err)
 }
