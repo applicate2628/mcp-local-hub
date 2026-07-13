@@ -799,3 +799,69 @@ func (a *API) ManifestDeleteIn(dir, name string) error {
 	}
 	return os.RemoveAll(target)
 }
+
+// ErrManifestHashRequired is returned by ManifestDeleteInWithHash when the
+// caller supplies an empty/absent expectedHash. It is the DESTRUCTIVE
+// counterpart to ManifestEditInWithHash's skip-on-empty behaviour: the edit
+// path treats an empty expectedHash as "skip the check" (a safe polarity for
+// a non-destructive edit), but the delete path fails closed — a blank or
+// tampered expected hash must never delete a manifest. See the POLARITY note
+// on ManifestDeleteInWithHash (decision 2026-07-10 deadopt-manifest-delete-
+// hash-gate, Consequence (a): destructive-default polarity — safe path is
+// don't-delete).
+var ErrManifestHashRequired = errors.New("manifest delete refused: a non-empty expected hash is required (fail-closed destructive gate)")
+
+// ManifestDeleteInWithHash is the hash-gated, fail-closed sibling of
+// ManifestDeleteIn used at de-adopt's last-binding manifest delete
+// (internal/api/deadopt.go E4 — no caller yet, additive). It re-reads the
+// on-disk manifest.yaml, computes ManifestHashContent(current) — the same
+// hasher ManifestEditInWithHash gates on — and deletes the manifest directory
+// ONLY when that hash equals expectedHash. The re-read and the delete are one
+// call, so the manifest cannot change between the check and the delete (atomic
+// at the mutation point, closing the F1 TOCTOU).
+//
+// POLARITY (CRITICAL — destructive-default discipline): this INVERTS
+// ManifestEditInWithHash's `if expectedHash != "" { ...check... }` skip. That
+// skip is the SAFE polarity for a non-destructive edit, but the WRONG polarity
+// for a destructive delete: here an empty/absent expectedHash is a HARD
+// REFUSAL (ErrManifestHashRequired), NEVER a skip. Inheriting the edit path's
+// skip would re-open the exact F1 data-loss — a blanked/tampered
+// ExpectedManifestHash producing an ungated delete of an externally-edited
+// manifest. The empty-hash refusal fires FIRST, before any on-disk read, so a
+// blank hash can never reach the delete regardless of on-disk state.
+//
+// Absent manifest: an absent on-disk manifest.yaml is an idempotent no-op
+// (returns nil), NOT the "does not exist" error ManifestDeleteIn returns. This
+// deliberate divergence supports de-adopt's roll-forward resume — a crash after
+// the delete, retried with the same (non-empty) provenance hash, finds the
+// manifest already gone and completes rather than failing. Because there is no
+// manifest.yaml to hash, no ungated delete can occur, so the no-op is
+// fail-closed-safe. ManifestDeleteIn itself is unchanged.
+func (a *API) ManifestDeleteInWithHash(dir, name, expectedHash string) error {
+	if err := checkManifestName(name); err != nil {
+		return err
+	}
+	// Fail-closed empty-hash gate — see the POLARITY note above. MUST precede
+	// the file read so a blank hash can never reach the delete.
+	if expectedHash == "" {
+		return ErrManifestHashRequired
+	}
+	// Path-escape guard carried over verbatim from ManifestDeleteIn (defense in
+	// depth; checkManifestName already rejects separators).
+	target := filepath.Join(dir, name)
+	cleanDir := filepath.Clean(dir)
+	if parent := filepath.Dir(target); parent != cleanDir {
+		return fmt.Errorf("manifest delete: resolved path %q escapes manifest dir %q", target, cleanDir)
+	}
+	current, err := os.ReadFile(filepath.Join(target, "manifest.yaml"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // absent → idempotent no-op (resume-safe; see doc)
+		}
+		return fmt.Errorf("manifest delete: read %q for hash gate: %w", name, err)
+	}
+	if got := ManifestHashContent(current); got != expectedHash {
+		return ErrManifestHashMismatch
+	}
+	return os.RemoveAll(target)
+}

@@ -105,12 +105,15 @@ adds the dependency edge — no scope, security-core, or protected-surface chang
   correct-by-construction (adopt wrote the write target ⟹ merged-lower success ≡ write-target absence;
   higher/lower layers are operator-owned, out of classify scope). This is the mimocode multi-layer
   re-resolve class — collapsed to ONE predicate, NOT a mimocode special case.
-- **P1-A (adopt-GC dependency — unfenced).** De-adopt's per-manifest lease does NOT fence the adopt
-  GC's stale-candidate reap (the GC's decision inputs pre-date the lease). Added `Depends-on:` for the
-  two filed adopt-GC bugs to `status.md` + a new "Adopt-GC dependency" section, and corrected
-  design:564/:795 which asserted a reap-time `adopting`-only filter `reapAdoptProvenanceRow`
-  (`adopted_entries.go:860-882`) does NOT have (it is a Phase-1 SELECTION property; the reap primitive
-  drops by manifest NAME).
+- **P1-A (adopt-GC dependency — unfenced AT ROUND 5; SINCE CLOSED by #531/#532).** De-adopt's
+  per-manifest lease does NOT by itself fence the adopt GC's stale-candidate reap (the GC's decision
+  inputs pre-date the lease). Added `Depends-on:` for the two filed adopt-GC bugs to `status.md` + a
+  new "Adopt-GC dependency" section, and corrected design:564/:795 which asserted a reap-time
+  `adopting`-only filter `reapAdoptProvenanceRow` (`adopted_entries.go:946-978`) did NOT have AT
+  ROUND-5 AUTHORING TIME (it was a Phase-1 SELECTION property; the reap primitive then dropped by
+  manifest NAME). SUPERSEDED at HEAD: #531 has since ADDED that `(state, UpdatedAt)` identity gate to
+  `reapAdoptProvenanceRow` and #532 hardened the classifier, so both `Depends-on` edges are now MET —
+  see "Adopt-GC dependency".
 - **P2** — a cleanly-absent config file (`os.IsNotExist`) maps to empty-config (live==nil, raw-absent),
   never `ClassifyUnreadable` (which would wedge a `present` client permanently). `Unreadable` reserved
   for genuine read/parse errors on a PRESENT file.
@@ -133,7 +136,7 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
 - **Intended change surface:**
   - NEW `internal/api/deadopt.go` — `BuildDeAdoptPlan` + `ExecuteDeAdoptWithOpts` (the
     de-adopt owner, sibling to `adopt.go`), plus the de-adopt-owned provenance mutators
-    the shipped store declared as comments (`adopted_entries.go:993-995`):
+    the shipped store declared as comments (`adopted_entries.go:1294-1296`):
     `MarkAdoptProvenanceDeAdopting` (transition `{adopted, committed-adopting} →
     de_adopting`, G6; **B4** — for a `committed-adopting` row it RE-RUNS
     `classifyDeadAdoptingRow == adoptRowCommittedKeep` under the HELD lease before flipping and
@@ -141,15 +144,15 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
     now-uncommitted orphan the adopt GC still owns) and `CloseAdoptProvenance` (now
     **deletes** the row snapshots-first — G1/item 1). **C6 landing direction:**
     `UpdateAdoptExpectedManifestHash` is DECLARED-but-UNUSED in v1 (subset cut); the
-    implementation change MUST repoint its declaration comment (`adopted_entries.go:994`)
-    and the `ExpectedManifestHash` field doc (`:155-158`, which today reads "de-adopt
+    implementation change MUST repoint its declaration comment (`adopted_entries.go:1295`)
+    and the `ExpectedManifestHash` field doc (`:156-161`, which today reads "de-adopt
     updates ExpectedManifestHash after a subset binding edit") at the subset FOLLOW-UP,
-    and update the mutator tombstone (`:983-996` — v1 authors 2 of the 3) so the live tree
+    and update the mutator tombstone (`:1284-1297` — v1 authors 2 of the 3) so the live tree
     asserts only the current state (stale-relation hygiene, arch law C6). Uses the store's
     own same-package unexported helpers (`withAdoptedEntriesLock`,
     `readAdoptedEntries`, `writeAdoptedEntries`, `removeAdoptSnapshots`, `adoptSnapshotDir`,
     `tryAcquireAdoptManifestLease`, and the `reapAdoptProvenanceRow` snapshots-first
-    ordering `adopted_entries.go:860-882`).
+    ordering `adopted_entries.go:946-978`).
   - `internal/api/manifest.go` — ADD shared `ManifestDeleteInWithHash` (delete-mutation-
     point hash gate; FAIL-CLOSED on empty/absent hash; RETAINS the path-escape guard
     `manifest.go:793-796`). Decision `2026-07-10-deadopt-manifest-delete-hash-gate.md`
@@ -185,7 +188,10 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
     ADDITIVE lines: give the adopt-provenance `.snapshot` kind a client-config-sized read
     cap in `stateFileReadCapBytes` (`:28`; the default is only `maxStateFileBytes` = 1 MiB,
     too small for a real `~/.claude.json` snapshot — see "Provenance-gap flag") and mark it
-    secret-bearing in `isSecretBearingStateFilePath` (`:42`, memo item 4 P3-A).
+    secret-bearing in `isSecretBearingStateFilePath` (`:42`, memo item 4 P3-A). **HEAD update
+    (#532):** the secret-bearing `.snapshot`-suffix clause has ALREADY landed
+    (`state_read_inode_anchor.go:59-61`); only the `stateFileReadCapBytes` read-cap clause
+    remains for de-adopt to add.
   - NEW `internal/gui/deadopt.go` — POST `/api/deadopt/plan` + `/api/deadopt`, plus a
     de-adopt eligibility read-surface (G3, below); Same-Origin, response style like
     `gui/adopt.go:46-123`.
@@ -196,7 +202,7 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
     eligibility surface (no shape heuristic, G3).
 - **Approved extension seam(s):**
   - D1 — the two de-adopt provenance mutators against the shipped schema (declared at
-    `adopted_entries.go:983-996`); de-adopt lives in `internal/api` and uses the store's
+    `adopted_entries.go:1284-1297`); de-adopt lives in `internal/api` and uses the store's
     unexported RMW helpers.
   - D2 — the CAS + read capability interface (item 5+7; P1-a): the destructive-write atomicity
     seam PLUS the read-only `ClassifyEntryUnderLock` classification seam (the accept/resume
@@ -213,7 +219,7 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
     for the snapshot read (item 4).
   - D5 — the routed-secret deleter `deleteAdoptRoutedSecrets` (`adopt_secret_route.go:161`),
     pre-filtered to still-present keys (F-D).
-  - D6 — the per-manifest adopt LEASE `tryAcquireAdoptManifestLease` (`adopted_entries.go:370`)
+  - D6 — the per-manifest adopt LEASE `tryAcquireAdoptManifestLease` (`adopted_entries.go:390`)
     for de-adopt↔adopt/GC mutual exclusion.
   - D7 — the existing uninstall descriptor-cleanup core (`install_parsed_manifest.go:1914-2023`)
     for the last-binding supervisor-intent teardown.
@@ -241,7 +247,9 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
   (`restoreEntryFromBackup` → a `restoreEntryFromBytes` core + a thin file-reading wrapper;
   every shipped `RestoreEntryFromBackup*` caller stays byte-unchanged — B1); (3) the two
   additive lines in `state_read_caps.go` + `state_read_inode_anchor.go` for the `.snapshot`
-  kind (a SUFFIX/dir-segment clause, not an exact basename — P3). Changes (1) and (3) are
+  kind (a SUFFIX/dir-segment clause, not an exact basename — P3; the
+  `state_read_inode_anchor.go` secret-bearing half ALREADY landed via #532, so only the
+  `state_read_caps.go` read-cap line remains for de-adopt). Changes (1) and (3) are
   purely additive; (2) is additive-plus-refactor with a preserved-behavior contract on the
   existing callers. Plus GUI/CLI routes (incl. the `--accept-conflict <client>` escape) +
   eligibility surface, a frontend affordance, and additive redaction-safe events. The
@@ -296,7 +304,7 @@ Store: `internal/api/adopted_entries.go`. Read via exported
 (`:323`); mutate via the same-package unexported helpers. As-shipped record fields:
 
 ```go
-// adopted_entries.go:149-166
+// adopted_entries.go:150-167
 type AdoptProvenanceRecord struct {
     ManifestName, SourceClient, SourceEntryName string
     Port                 int                     // recompute the expected hub binding
@@ -308,7 +316,7 @@ type AdoptProvenanceRecord struct {
     CreatedAt, UpdatedAt time.Time
     Clients              []AdoptClientProvenance
 }
-// adopted_entries.go:132-144
+// adopted_entries.go:133-145
 type AdoptClientProvenance struct {
     Client         string
     OriginalState  AdoptOriginalState  // present | absent | present-merged-lower
@@ -327,8 +335,8 @@ DELETES the row rather than persisting `closed` (item 1).
 De-adopt's one notion of "the live entry is the hub entry adopt wrote" is the SHIPPED
 recognizer `liveEntryMatchesManifestBinding(live, entryName, binding, m)`
 (`managed_entries.go:355-408`), the same owner `demigrate.go:426` and
-`classifyDeadAdoptingRow` (`adopted_entries.go:463`) use. Inputs, exactly as
-`classifyDeadAdoptingRow` builds them (`:445-448`):
+`classifyDeadAdoptingRow` (`adopted_entries.go:517`) use. Inputs, exactly as
+`classifyDeadAdoptingRow` builds them (`:499-516`):
 
 - `m := &config.ServerManifest{Name: rec.ManifestName, Daemons: [{Name:"default", Port: rec.Port}]}`
 - `binding := config.ClientBinding{Client: c, Daemon:"default", URLPath:"/mcp"}`
@@ -375,7 +383,7 @@ the owner signal).
 - **Path is recomputed, not trusted.** De-adopt derives the snapshot path from the
   IMMUTABLE `(rec.ManifestName, client)` via the store's own `adoptSnapshotDir(rec.ManifestName)`
   + `client + ".snapshot"` (same construction `writeAdoptClientSnapshot` used,
-  `adopted_entries.go:272-289`), NOT from `SnapshotRef` as a raw path. `SnapshotRef` is
+  `adopted_entries.go:285-303`), NOT from `SnapshotRef` as a raw path. `SnapshotRef` is
   cross-checked for a mismatch warning only.
 - **Two additive shared-owner clauses (item 4 P3-A) — SUFFIX/dir-segment, NOT exact
   basename (P3).** Both owners today branch on the EXACT `filepath.Base(path)`
@@ -392,7 +400,7 @@ the owner signal).
   `maxStateFileBytes` (1 MiB) is too small for a real `~/.claude.json`. See "Provenance-gap
   flag".
 - **B6 — snapshot cap SYMMETRY invariant.** Adopt CAPTURE writes the snapshot via
-  `WriteStateFileBytesAtomic` with NO size limit (`adopted_entries.go:272-289`), so a config
+  `WriteStateFileBytesAtomic` with NO size limit (`adopted_entries.go:285-303`), so a config
   that adopts fine today could exceed the de-adopt read cap and become PERMANENTLY
   unrestorable (a Failed client — feeds the B2a horn). The invariant: **the restore cap MUST
   be ≥ any snapshot adopt capture can pin.** v1 sets the de-adopt-owned restore cap generously
@@ -568,7 +576,7 @@ the verbatim `RestoreEntryFromBackupForRollback` polarity.
 — so the recognizer stays single-owned in `internal/api` (dependency inversion: `clients`
 defines the callback signature; `api` injects the implementation; no upward import). The
 concrete CAS method nil-guards `live` BEFORE calling `match` (the recognizer derefs `live.URL`
-at `managed_entries.go:378`; the shipped caller nil-guards at `adopted_entries.go:459-461`),
+at `managed_entries.go:378`; the shipped caller nil-guards at `adopted_entries.go:513-514`),
 applying the per-branch nil-live policy above. Branch on `original_state`:
 
 1. **`present`** — anchored-read the snapshot, sha256-gate it, then
@@ -581,7 +589,7 @@ applying the per-branch nil-live policy above. Branch on `original_state`:
    remove the hub entry (restore to absence) only if it is still the hub entry (nil-live =
    already-done success).
 3. **`present-merged-lower`** (no snapshot; entry resolves from a lower layer the hub never
-   wrote, `adopted_entries.go:108-116`) — `CASGuardedRemoveEntry(SourceEntryName, match)`:
+   wrote, `adopted_entries.go:109-117`) — `CASGuardedRemoveEntry(SourceEntryName, match)`:
    remove the hub write-target entry only if it is still the hub entry; the untouched lower
    layer re-emerges via the adapter's merge. Reported functional-equivalent, distinct from
    `absent`.
@@ -597,7 +605,7 @@ the snapshot mechanism exists to deliver. Whether EVERY per-entry field the adap
 shape does not model survives is adapter-dependent (an adapter whose set-member re-serializes
 through a typed struct can drop an unmodeled sibling field); the round-trip is therefore
 honestly labeled `functional-equivalent`, NOT `byte-equivalent`, matching the shipped
-restore-mode label (`adopted_entries.go:119-128`). No design claim asserts whole-file or
+restore-mode label (`adopted_entries.go:120-128`). No design claim asserts whole-file or
 unmodeled-field byte-identity.
 
 ## Manifest delete — the single hash-gated DELETE (F1)
@@ -641,23 +649,24 @@ until close:
 
 `CloseAdoptProvenance` does NOT flip to a `closed` tombstone. It DELETES the row and the
 snapshot dir, snapshots-FIRST, mirroring the shipped `reapAdoptProvenanceRow` /
-`abortAdoptProvenance` ordering (`adopted_entries.go:815-882`). Rationale:
+`abortAdoptProvenance` ordering (`adopted_entries.go:892-978`). Rationale:
 
 - A `closed` tombstone permanently WEDGES re-adopt: capture refuses ANY non-`adopting` prior
-  row (`adopted_entries.go:529-531`) and adopt v1 pins `manifest == entry name` (no rename
+  row (`adopted_entries.go:599-601`) and adopt v1 pins `manifest == entry name` (no rename
   dodge), so a `closed` row would block ever re-adopting that server.
 - Snapshots-first ordering means a crash between snapshot-removal and row-drop leaves a
   row→missing-snapshot, NEVER a snapshot→no-row secret leak that no GC reaps. The adopt-side GC
   never reaps a STEADY-STATE `de_adopting` row: Phase-1 SELECTS candidates by
-  `OperationState==adopting ∧ UpdatedAt<cutoff` (`adopted_entries.go:917-922`), so a `de_adopting`
+  `OperationState==adopting ∧ UpdatedAt<cutoff` (`adopted_entries.go:1112-1117`), so a `de_adopting`
   row is never a Phase-2 candidate, and Phase-3 reaps only ROWLESS dirs (this row has a row). NOTE
-  — this is a Phase-1 SELECTION property, NOT a reap-time filter: `reapAdoptProvenanceRow`
-  (`adopted_entries.go:860-882`) drops EVERY row matching the manifest NAME with no
-  `(state, UpdatedAt)` check, and Phase-2 classifies the STALE Phase-1 candidate copy under a
-  later-acquired lease (`:929-941`), so a row that was `adopting` at Phase-1 and TRANSITIONS to
-  `de_adopting` under de-adopt's own lease can still be reaped by name. That transition window is
-  closed only by the two filed adopt-GC bug fixes de-adopt `Depends-on` (see "Adopt-GC
-  dependency"). Deleting the row keeps the shipped at-most-one-row-per-manifest invariant true and
+  — steady-state safety rests on that Phase-1 SELECTION property AND, since #531, a reap-time identity
+  gate: `reapAdoptProvenanceRow` (`adopted_entries.go:946-978`) now NO-OPS unless the live row still
+  matches the caller's expected `(ManifestName, state, UpdatedAt)` (matched at `:954`), and Phase-2
+  RE-READS the row under the later-acquired lease before classify+reap (`:1144-1177`). So a row that
+  was `adopting` at Phase-1 and TRANSITIONS to `de_adopting` under de-adopt's own lease no longer
+  matches the stale `adopting` candidate → the reap NO-OPS; the transition-window reap is CLOSED (both
+  filed adopt-GC bugs de-adopt `Depends-on` are FIXED at HEAD — see "Adopt-GC dependency"). Deleting
+  the row keeps the shipped at-most-one-row-per-manifest invariant true and
   collapses P0's `closed` branch to `found=false`.
 - **B2b — crash INSIDE close is recoverable, not wedged (soundness rests on the CLOSE-READY
   invariant — P1-b).** E4/E5/E6 run ONLY once CLOSE-READY held (every target client
@@ -886,16 +895,18 @@ distinct surface deferred to the follow-up. Two adjacent findings filed (NOT pat
   of de-adopt. Filed `work-items/bugs/2026-07-11-hub-reconcile-gate-on-zero-binding-stale-aggregate.md`;
   the de-adopt-side prune folds into the gate-ON follow-up.
 
-## Adopt-GC dependency (de-adopt `Depends-on` two filed GC bugs)
+## Adopt-GC dependency (de-adopt `Depends-on` two filed GC bugs — SATISFIED at HEAD)
 
 De-adopt's per-manifest lease (D6) gives de-adopt↔adopt mutual exclusion for OVERLAPPING
-operations, but it does NOT fence the adopt GC's stale-candidate reap, because the GC's decision
-INPUTS pre-date the lease. `gcOrphanedAdoptingProvenance` Phase-1 snapshots the aged `adopting`
-candidates under the store lock and RELEASES it (`adopted_entries.go:908-926`); Phase-2 later
-`TryLock`s each candidate's lease and reaps the STALE Phase-1 copy via `reapAdoptProvenanceRow`
-(`adopted_entries.go:929-941`), which drops every row matching the manifest NAME with NO
-`(state, UpdatedAt)` filter (`:860-882`). Three data-destruction interleaves reach the provenance
-de-adopt reads:
+operations, but it does NOT by itself fence the adopt GC's stale-candidate reap, because the GC's
+decision INPUTS pre-date the lease. `gcOrphanedAdoptingProvenance` Phase-1 snapshots the aged
+`adopting` candidates under the store lock and RELEASES it (`adopted_entries.go:1103-1121`); Phase-2
+later `TryLock`s each candidate's lease and (since #531) RE-READS the live row under that lease
+before classify+reap (`adopted_entries.go:1144-1177`), and `reapAdoptProvenanceRow`
+(`adopted_entries.go:946-978`) NO-OPS unless the live row still matches the caller's expected
+`(ManifestName, state, UpdatedAt)` (`:954`). Before #531/#532 landed the reap dropped every row
+matching the manifest NAME with NO `(state, UpdatedAt)` filter, so three data-destruction interleaves
+could reach the provenance de-adopt reads — all now CLOSED (see the Dependency note):
 
 - **Pre-de-adopt destruction.** The direct filed-bug impact: a committed `adopted` row's provenance
   (+ secret snapshots) is reaped from a stale candidate under a routine adopt's step-0a GC, so
@@ -914,17 +925,19 @@ de-adopt reads:
   row unresumable.
 
 **Dependency (declared `Depends-on:` in `status.md`; adopt-side, a protected surface in v1 — NOT
-patched here).** At minimum bug #1
-(`work-items/bugs/2026-07-11-gc-phase2-stale-candidate-reaps-committed-row.md`): Phase-2 RE-READS the
-row under the held lease and requires (row exists ∧ `state==adopting` ∧ `UpdatedAt==candidate.UpdatedAt`
-∧ still older than cutoff) before classify+reap, and `reapAdoptProvenanceRow` gains an expected
-`(state, UpdatedAt)` identity that no-ops on mismatch — closing all three interleaves (a transitioned
-`de_adopting` row's state/UpdatedAt no longer match the stale `adopting` candidate → no-op; the fresh
-`R_new`'s UpdatedAt differs from the reaped-`R_old`'s → no-op). Bug #2
-(`...-classifier-committed-signal-blind-to-entry-drift.md`) hardens the classifier's committed-KEEP
-side against live-entry drift, protecting the committed-but-unflipped `adopting` row de-adopt's claim-10
-recoverability contract depends on. De-adopt does not proceed to implementation until these land, or
-runs strictly behind them per the `Depends-on` edge.
+patched by de-adopt; both edges FIXED at HEAD).** Bug #1
+(`work-items/bugs/2026-07-11-gc-phase2-stale-candidate-reaps-committed-row.md`) — FIXED by #531
+(master `c7e2534b`): Phase-2 RE-READS the row under the held lease and requires (row exists ∧
+`state==adopting` ∧ `UpdatedAt==candidate.UpdatedAt` ∧ still older than cutoff) before classify+reap
+(`adopted_entries.go:1144-1177`), and `reapAdoptProvenanceRow` now takes an expected `(state, UpdatedAt)`
+identity that no-ops on mismatch (`:946-978`, matched at `:954`) — closing all three interleaves (a
+transitioned `de_adopting` row's state/UpdatedAt no longer match the stale `adopting` candidate → no-op;
+the fresh `R_new`'s UpdatedAt differs from the reaped-`R_old`'s → no-op). Bug #2
+(`...-classifier-committed-signal-blind-to-entry-drift.md`) — FIXED by #532: hardens the classifier's
+committed-KEEP side against live-entry drift (Signal 2b, `adopted_entries.go:521-530`), protecting the
+committed-but-unflipped `adopting` row de-adopt's claim-10 recoverability contract depends on. Both
+`Depends-on` edges are therefore MET; the `Depends-on:` declaration is retained in `status.md` as a
+traceability record. De-adopt is no longer blocked behind these edges on this axis.
 
 ## Residuals (bounded — accepted or deferred; B3)
 
@@ -936,12 +949,13 @@ and either accepted for v1 or explicitly deferred to a follow-up:
   OR a client that is neither restorable (live≠hub) NOR accept-eligible (its snapshot is
   permanently unreadable, so the P1-a snapshot-read-failure rejection applies), leaves a
   `de_adopting` row that (a) WEDGES re-adopt of that manifest — capture refuses ANY non-`adopting`
-  prior row (`adopted_entries.go:529-531`) — and (b) RETAINS the secret-bearing snapshot dir,
+  prior row (`adopted_entries.go:599-601`) — and (b) RETAINS the secret-bearing snapshot dir,
   which no adopt-side GC reaps in steady state (Phase-1 SELECTS only `OperationState==adopting ∧
   UpdatedAt<cutoff` candidates, so a `de_adopting` row is never a Phase-2 candidate, and Phase-3
-  reaps only rowless dirs — this row has a row; the reap primitive `reapAdoptProvenanceRow` has NO
-  state filter, but a steady abandoned `de_adopting` row is never SELECTED as a candidate, so it is
-  retained, not reaped — the transition-window reap is the separate "Adopt-GC dependency"). This is
+  reaps only rowless dirs — this row has a row; `reapAdoptProvenanceRow` (since #531) NO-OPS on any
+  row whose `(state, UpdatedAt)` does not match the caller's expected identity, and a steady abandoned
+  `de_adopting` row is never SELECTED as a candidate anyway, so it is retained, not reaped — the
+  transition-window reap is CLOSED (the separate "Adopt-GC dependency", now satisfied)). This is
   structurally identical to the `closed`-tombstone wedge the rework fixed, but on the
   abandoned-retry path the failure table only covers the RETRIED path. v1 does NOT add a
   `de_adopting`-GC or a `mcphub de-adopt --recover`; both are **DEFERRED to the follow-up**
@@ -1031,7 +1045,7 @@ Invariant: `adopt → de-adopt` restores EVERY `AdoptClient` to its pre-adopt st
 snapshot for `present`; absence for `absent`; re-exposed lower layer for
 `present-merged-lower`) and releases every hub-owned artifact adopt created for that
 manifest. Restore is functional-equivalent (byte-equivalence UNVERIFIED per adapter,
-`adopted_entries.go:120-127`). The SOLE exception is a client the operator explicitly
+`adopted_entries.go:120-128`). The SOLE exception is a client the operator explicitly
 `--accept-conflict`s after genuinely taking that slot between plan and execute: that client is
 LEFT at its operator-chosen state (never overwritten) and its pinned snapshot is discarded at
 close — a deliberate, warned, operator-driven opt-out of restoration, not a silent divergence.
@@ -1186,7 +1200,7 @@ de-adopt → scan native); route tests mirroring `gui/adopt_test.go`.
 2. `{ guarantee: "the live entry is our hub entry" has exactly ONE equality owner — the shipped liveEntryMatchesManifestBinding — no byte-exact recompute, no second shape owner; single-owner: managed_entries.go:355; enforcement-probe: grep shows no byte-exact entry reconstruction + no second recognizer in deadopt.go }`
 3. `{ guarantee: the snapshot is read through the anchored reader with the path recomputed from (ManifestName, Client), refusing wrong-owner/reparse/oversize before hashing; single-owner: ReadStateFileInodeAnchored (state_read_inode_anchor.go:22) + adoptSnapshotDir; enforcement-probe: test 2 (wrong-owner + oversize + tamper) }`
 4. `{ guarantee: every destructive client-config write is COMPARE-AND-SWAP under the lock held by the lockingClient forwarder (concrete bodies lock-free) — refuse unless the live entry is still the hub entry; nil-live is per-branch (remove=success, restore=conflict-refuse); a present-restore whose verified snapshot lacks the entry REFUSES fail-closed (removal is never silent); single-owner: the CAS capability methods (clients) + the injected recognizer predicate; enforcement-probe: test 3 (operator-edit race + nil-live) + test 2 (B5 absent-in-snapshot) }`
-5. `{ guarantee: CloseAdoptProvenance DELETES the row + snapshots (snapshots-first), leaving no `closed` tombstone, so re-adopt of the same manifest succeeds; single-owner: CloseAdoptProvenance mirroring reapAdoptProvenanceRow (adopted_entries.go:860-882); enforcement-probe: test 6 (re-adopt after de-adopt) }`
+5. `{ guarantee: CloseAdoptProvenance DELETES the row + snapshots (snapshots-first), leaving no `closed` tombstone, so re-adopt of the same manifest succeeds; single-owner: CloseAdoptProvenance mirroring reapAdoptProvenanceRow (adopted_entries.go:946-978); enforcement-probe: test 6 (re-adopt after de-adopt) }`
 6. `{ guarantee: the last-binding manifest delete is hash-gated at the mutation point, fail-closed on empty hash, path-escape guard retained; single-owner: ManifestDeleteInWithHash (accepted decision); enforcement-probe: test 5 }`
 7. `{ guarantee: routed keys are deleted before close; a shared key is skipped-as-warned and the close-done predicate is deleted-OR-skipped so the row never wedges; single-owner: the de-adopt cleanup ordering + pre-filtered deleteAdoptRoutedSecrets; enforcement-probe: test 8 }`
 8. `{ guarantee: a crash mid-execute leaves a recoverable de_adopting row that roll-forward resume COMPLETES (skips RESTORE-DONE clients + done steps) — including a crash INSIDE close (snapshot dir + manifest gone + live≠hub → RESTORE-DONE, not wedged), sound BECAUSE E4 deletes the manifest ONLY under CLOSE-READY so manifest-absence implies all-clients-resolved (P1-b) — never a rollback that re-writes hub over native; the resume done-test compares RAW on-disk subtrees, not lean MCPEntry equality; single-owner: BuildDeAdoptPlan RESUME done-ness derivation (routed through the atomic ClassifyEntryUnderLock seam, gated on the CLOSE-READY manifest-absence invariant) + the EntryRawSubtree comparator; enforcement-probe: test 7 (crash-inside-close + two-stdio-husk falsification) + test 14 (manifest-absence never masks an unresolved conflict) }`
@@ -1214,8 +1228,9 @@ OWNER extension de-adopt authors):
   limit (`WriteStateFileBytesAtomic`), so a legitimate large snapshot would FAIL the anchored
   read back. De-adopt MUST add a snapshot cap kind (client-config-sized, bounded — 16 MiB like
   intent/vault) via a `.snapshot`-SUFFIX clause (NOT an exact-basename `case` — the basename is
-  variable), alongside the same-shape `isSecretBearingStateFilePath` `.snapshot`-suffix
-  addition. **Symmetry invariant:** the restore cap must be ≥ any snapshot capture can pin;
+  variable). The same-shape `isSecretBearingStateFilePath` `.snapshot`-suffix clause has ALREADY
+  landed at HEAD (`state_read_inode_anchor.go:59-61`, #532); only this `stateFileReadCapBytes`
+  read-cap clause remains for de-adopt. **Symmetry invariant:** the restore cap must be ≥ any snapshot capture can pin;
   because capture is uncapped, true symmetry requires a matching CAPTURE-time cap (adopt-side,
   a protected surface in v1) — the filed adjacent bug is directed to enforce
   capture==restore, not merely raise the read cap. The residual > 16 MiB config is bounded +
@@ -1272,7 +1287,7 @@ lease. **B5** — restore fail-closes on entry-absent-in-verified-snapshot (remo
 `CASGuardedRemoveEntry`'s). **B6** — snapshot cap symmetry invariant stated + assigned. P3
 fold-ins: CAS lock ownership pinned (forwarder holds the lock, concrete bodies lock-free),
 guarded-refuse restore polarity, `.snapshot`-SUFFIX clauses (not exact basename), C6
-landing-comment direction (repoint `UpdateAdoptExpectedManifestHash` + `:155-158` + the mutator
+landing-comment direction (repoint `UpdateAdoptExpectedManifestHash` + `:156-161` + the mutator
 tombstone at the subset follow-up), unknown-field-drop honesty sentence, gate-ON F6 sentence,
 doc-anchor cleanup (`adopt.go:355`; dropped the "(T6)" test label).
 
@@ -1305,9 +1320,10 @@ conflict but declared NO callable seam that could classify {still-hub, restore-d
 genuine-conflict, unreadable} READ-ONLY under the held config lock (the two CAS methods mutate;
 `EntryRawSubtree` is a lock-free pure bytes function; merged `lockingClient` leaves `GetEntry`
 UNLOCKED, `config_lock.go:160-173`). Fix: a NEW read-only `ClassifyEntryUnderLock` method on the
-`CASEntryMutator` capability whose `lockingClient` forwarder HOLDS `withConfigLock` across the live
-read + the raw-subtree deep-compare (concrete body read-only + lock-free, same non-reentrant-mutex
-constraint as the CAS bodies). BOTH the E3 `--accept-conflict` acceptance decision AND the
+`CASEntryMutator` capability whose `lockingClient` forwarder HOLDS `withConfigLock` (SUPERSEDED in
+round 5 — the forwarder holds the read-selection `withConfigReadLock`; see the round-5 paragraph
+below) across the live read + the raw-subtree deep-compare (concrete body read-only + lock-free, same
+non-reentrant-mutex constraint as the CAS bodies). BOTH the E3 `--accept-conflict` acceptance decision AND the
 resume/plan done-ness derivation now route through this ONE seam (single atomic classification
 owner); the round-3 resume derivation's parallel UNLOCKED `os.ReadFile(adapter.ConfigPath())` live
 read — the very TOCTOU the seam closes — is REMOVED, with snapshot/manifest-availability composed
@@ -1324,7 +1340,8 @@ only WHICH BYTES the classify reads + the dependency edge): **P1-B** — the cla
 (`mimocode.go:3868-3951`), collapsing the mimocode merged-lower misclassification + atomicity void to
 ONE correct-by-construction predicate for every adapter; **P1-A** — `Depends-on` the two filed
 adopt-GC bugs + a new "Adopt-GC dependency" section, and design:564/:795 corrected (they asserted a
-reap-time state filter `reapAdoptProvenanceRow` does not have); **P2** — cleanly-absent config →
+reap-time state filter `reapAdoptProvenanceRow` did not have AT ROUND-5 TIME — SINCE ADDED by #531,
+so both `Depends-on` edges are now MET; see "Adopt-GC dependency"); **P2** — cleanly-absent config →
 empty-config (live==nil), never `ClassifyUnreadable`; **P3-a** — the classify forwarder holds
 `withConfigReadLock` (missing-dir short-circuit) so plan-time classify has no FS side effect; **P3-b**
 — G8 extended (accepted-conflict verdict not re-checked at E6). Claims → 19 (claim 19 added, claim 18

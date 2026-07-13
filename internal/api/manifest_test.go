@@ -212,6 +212,106 @@ func TestManifestDeleteRemovesDir(t *testing.T) {
 	}
 }
 
+// writeManifestForHashDelete creates a manifest on disk and returns the
+// content hash ManifestDeleteInWithHash will recompute for it — i.e. the
+// ground-truth hash of the on-disk manifest.yaml bytes.
+func writeManifestForHashDelete(t *testing.T, a *API, dir, name, yaml string) string {
+	t.Helper()
+	if err := a.ManifestCreateIn(dir, name, yaml); err != nil {
+		t.Fatalf("create %q: %v", name, err)
+	}
+	onDisk, err := os.ReadFile(filepath.Join(dir, name, "manifest.yaml"))
+	if err != nil {
+		t.Fatalf("read on-disk manifest %q: %v", name, err)
+	}
+	return ManifestHashContent(onDisk)
+}
+
+// TestManifestDeleteInWithHash is de-adopt plan test T5: the hash-gated,
+// fail-closed last-binding manifest delete. It exercises the matching-hash
+// delete, the stale-hash refusal (F1 TOCTOU), the fail-closed empty-hash
+// refusal (destructive-default polarity — the INVERSE of the edit path's
+// skip-on-empty), the path-escape guard, and the absent-manifest idempotent
+// no-op (roll-forward resume).
+func TestManifestDeleteInWithHash(t *testing.T) {
+	const yaml = "name: doomed\nkind: global\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9230\n"
+
+	t.Run("deletes on matching hash", func(t *testing.T) {
+		dir := t.TempDir()
+		a := &API{}
+		hash := writeManifestForHashDelete(t, a, dir, "doomed", yaml)
+		if err := a.ManifestDeleteInWithHash(dir, "doomed", hash); err != nil {
+			t.Fatalf("delete with matching hash: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "doomed")); !os.IsNotExist(err) {
+			t.Error("manifest dir not removed on matching hash")
+		}
+	})
+
+	t.Run("refuses stale hash after external edit, manifest survives", func(t *testing.T) {
+		dir := t.TempDir()
+		a := &API{}
+		// Plan-time hash, then an operator edits the manifest in the
+		// plan->execute window (the exact F1 data-loss window).
+		staleHash := writeManifestForHashDelete(t, a, dir, "doomed", yaml)
+		path := filepath.Join(dir, "doomed", "manifest.yaml")
+		edited := "name: doomed\nkind: workspace-scoped\ntransport: stdio-bridge\ncommand: npx\ndaemons:\n  - name: default\n    port: 9230\n"
+		if err := os.WriteFile(path, []byte(edited), 0600); err != nil {
+			t.Fatalf("external edit: %v", err)
+		}
+		err := a.ManifestDeleteInWithHash(dir, "doomed", staleHash)
+		if !errors.Is(err, ErrManifestHashMismatch) {
+			t.Fatalf("err = %v, want ErrManifestHashMismatch", err)
+		}
+		if _, statErr := os.Stat(path); statErr != nil {
+			t.Errorf("manifest deleted despite stale hash: %v", statErr)
+		}
+	})
+
+	t.Run("fail-closed: blank hash on present manifest refuses, survives", func(t *testing.T) {
+		dir := t.TempDir()
+		a := &API{}
+		writeManifestForHashDelete(t, a, dir, "doomed", yaml)
+		path := filepath.Join(dir, "doomed", "manifest.yaml")
+		err := a.ManifestDeleteInWithHash(dir, "doomed", "")
+		if !errors.Is(err, ErrManifestHashRequired) {
+			t.Fatalf("err = %v, want ErrManifestHashRequired", err)
+		}
+		if _, statErr := os.Stat(path); statErr != nil {
+			t.Errorf("manifest deleted on blank hash (fail-closed violated): %v", statErr)
+		}
+	})
+
+	t.Run("path traversal names refuse, no collateral deletion", func(t *testing.T) {
+		dir := t.TempDir()
+		a := &API{}
+		// A sibling dir a traversal name might target — must survive.
+		sentinel := filepath.Join(dir, "keepme")
+		if err := os.MkdirAll(sentinel, 0755); err != nil {
+			t.Fatalf("mkdir sentinel: %v", err)
+		}
+		for _, bad := range []string{"..", "../keepme", "../../etc", "name/with/slash", `\abs\path`} {
+			if err := a.ManifestDeleteInWithHash(dir, bad, strings.Repeat("a", 64)); err == nil {
+				t.Errorf("ManifestDeleteInWithHash(_, %q, _): expected rejection, got nil", bad)
+			}
+		}
+		if _, err := os.Stat(sentinel); err != nil {
+			t.Errorf("sentinel dir removed by a traversal name: %v", err)
+		}
+	})
+
+	t.Run("absent manifest with valid non-empty hash is idempotent no-op", func(t *testing.T) {
+		dir := t.TempDir()
+		a := &API{}
+		// Never created — models de-adopt roll-forward resume after a prior
+		// run already deleted the manifest. Retried with the (non-empty)
+		// provenance hash it must complete, not fail.
+		if err := a.ManifestDeleteInWithHash(dir, "gone", strings.Repeat("a", 64)); err != nil {
+			t.Fatalf("absent manifest with non-empty hash should be a no-op, got: %v", err)
+		}
+	})
+}
+
 func TestManifestGetIn_ReturnsContentHash(t *testing.T) {
 	dir := t.TempDir()
 	a := &API{}
