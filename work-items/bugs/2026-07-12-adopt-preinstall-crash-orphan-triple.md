@@ -65,6 +65,22 @@ the per-manifest lease and the hash gate, positively confirms the adopt never co
 (no live binding, configs unmutated) and then removes manifest + vault keys + row +
 snapshot as ONE operator-confirmed teardown. Design owner: de-adopt work-item.
 
+## Second route to the same routed-key residual (2026-07-12, adopt-abort-preserve round-3)
+
+The adopt-abort-preserve fix (`work-items/active/2026-07-12-adopt-abort-preserve-provenance/`)
+adds a SECOND path that reaches the same lingering-routed-key state. When Install's
+client-config rollback is INCOMPLETE, adopt now PRESERVES the whole partially-committed
+state (`adopting` row + snapshots + manifest + routed vault keys) instead of aborting.
+After the operator reverses the still-committed client back to its pre-adopt snapshot and
+removes the manifest, the adopt-provenance GC's crash-reap gate fires
+(`classifyDeadAdoptingRow` → CrashReap on the absent manifest AND `adoptRowProvablyUnmutated`
+now true) and reaps the **row + snapshot dir ONLY** — the routed vault keys `<M>_<ENV>`
+LINGER, exactly as in the case-3 crash above. (Design round-3 deliberately REVERTED an
+in-GC routed-key deletion because a background GC autonomously dropping secret material a
+live adopt could still reference is unsafe — Sol P1 cross-manifest key deletion; Terra P2
+crash-safety.) Owner is unchanged: de-adopt's hash-gated `--reclaim-crashed` removes the
+lingering routed keys as part of the operator-confirmed teardown. Keep Status: open.
+
 ## Do NOT
 
 - Do NOT "fix" this by removing Signal 2b / Part-3 from the GC classifier — that reopens a

@@ -1164,6 +1164,15 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 		if rErr := reapAdoptProvenanceRow(live.ManifestName, AdoptOperationStateAdopting, live.UpdatedAt); rErr == nil {
 			emitAdoptProvenanceOrphanReaped(live.ManifestName, c.ageSec, adoptOrphanReapTriggerGC)
 			reaped++
+			// The GC reaps the row + snapshot dir ONLY. It does NOT delete the row's
+			// routed vault keys: a background GC must never autonomously drop secret
+			// material a live adopt could still reference (bug
+			// 2026-07-12-adopt-preinstall-crash-orphan-triple — a normalization
+			// collision or corrupted-provenance row could share a key with a LIVE
+			// committed adopt, so cross-manifest key deletion here is unsafe). Routed-key
+			// cleanup is owned by de-adopt (hash-gated, operator-driven --reclaim-crashed).
+			// Bounded residual: a reversed-preserve reap leaves the routed keys in the
+			// owner-only vault until de-adopt (or the operator) removes them.
 		}
 		_ = lk.Unlock()
 	}

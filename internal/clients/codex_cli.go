@@ -205,13 +205,67 @@ func (c *codexCLI) restoreEntryFromBackupWithWriter(backupPath, name string, all
 		backupMap = map[string]any{}
 	}
 	backupServers, _ := backupMap["mcp_servers"].(map[string]any)
-	liveMap, err := c.readTOML()
-	if err != nil {
-		return err
-	}
-	liveServers, _ := liveMap["mcp_servers"].(map[string]any)
-	if liveServers == nil {
-		liveServers = map[string]any{}
+
+	// The live map is read exactly ONCE per path and never falls back to a stale
+	// snapshot (design round-7, Sol+Terra P1). Rollback (allowHubEntry=true) reads
+	// AFTER the whole-file recovery helper so the surgical write reflects current
+	// on-disk state; demigrate (false) keeps its single early read.
+	var liveMap map[string]any
+	var liveServers map[string]any
+	if allowHubEntry {
+		// Whole-file-gone recovery FIRST (design round-5): SecureWrite path #1 may have
+		// REMOVED the write-target file (target entry + siblings). Recover the whole
+		// backup before the entry-scoped skip, which would else false-skip the
+		// both-absent case or surgically recreate only the target entry (losing siblings).
+		if handled, werr := wholeFileRestoreIfWriteTargetGone(c.path, backupData); handled {
+			return werr
+		}
+		// The helper fell through (handled=false) — either the common file-present
+		// path #2, or a create/no-replace CONFLICT (an external process recreated
+		// c.path, possibly with a NEW sibling S', in the stat→create window; the
+		// no-replace create sees EEXIST and did NOT publish the backup bytes). Read
+		// the live map ONCE here, AFTER the helper, and treat it as AUTHORITATIVE:
+		// the surgical write below (unlike the JSONC bodies' setMember/deleteMember,
+		// which re-read at mutate time) serializes THIS whole map, so it must reflect
+		// current on-disk state and preserve S' rather than clobber it. For the
+		// non-race path #2 the read equals the pre-helper state (no-op-equivalent).
+		// A read FAILURE (transient / partial TOML written by the racing recreate)
+		// must ABORT with that error — it flows to the Install rollback closure
+		// (InstallClientRollbackIncompleteError) so adopt PRESERVES the provenance;
+		// it must NEVER fall back to a stale/earlier map and silently clobber S'
+		// while reporting success (design round-7, Sol+Terra P1). Still under the
+		// single withConfigLock hold, so this stays TOCTOU-free.
+		freshMap, rerr := c.readTOML()
+		if rerr != nil {
+			return rerr
+		}
+		liveMap = freshMap
+		liveServers, _ = liveMap["mcp_servers"].(map[string]any)
+		if liveServers == nil {
+			liveServers = map[string]any{}
+		}
+		// Rollback-only atomic entry-scoped skip-if-unchanged (design round-4): the
+		// live read above + the write below run under the SAME withConfigLock hold, so
+		// this compare-then-restore is TOCTOU-free. If the write-target already holds
+		// the backup's entry value (the client was never mutated, or a sibling edit
+		// left THIS entry untouched) return nil WITHOUT writing — no redundant/damaging
+		// restore.
+		le, lp := liveServers[name]
+		be, bp := backupServers[name]
+		if entryRestoreIsNoop(le, lp, be, bp) {
+			return nil
+		}
+	} else {
+		// Demigrate path: single early read, unchanged. It keeps its
+		// ErrBackupEntryAlreadyMigrated guard (below) exactly as before.
+		liveMap, err = c.readTOML()
+		if err != nil {
+			return err
+		}
+		liveServers, _ = liveMap["mcp_servers"].(map[string]any)
+		if liveServers == nil {
+			liveServers = map[string]any{}
+		}
 	}
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {

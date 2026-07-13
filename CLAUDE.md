@@ -1390,10 +1390,24 @@ decision live under
 
 ### Events (`supervisor-events.log`, source `adopt`)
 
-Six events — `adopt-provenance-captured`, `-committed`, `-capture-failed`,
-`-abort`, `-commit-failed`, `-orphan-reaped`. Bodies carry manifest/client
-NAMES, counts, snapshot PATHS, and key NAMES only — **never secret VALUES or
-config contents** (same redaction posture as `adopt-executed`).
+Seven events — `adopt-provenance-captured`, `-committed`, `-capture-failed`,
+`-abort`, `-commit-failed`, `-orphan-reaped`, `-preserved`. Bodies carry
+manifest/client NAMES, counts, snapshot PATHS, and key NAMES only — **never
+secret VALUES or config contents** (same redaction posture as `adopt-executed`).
+`-preserved` (bug 2026-07-12) fires when an adopt Install FAILED and its own
+client-config rollback could NOT confirm the pre-adopt state of ≥1 client (the
+client may have been rewritten to the hub relay and not reversed, OR a restore
+write failed on an otherwise-untouched config): instead of aborting (which would
+delete the pre-adopt snapshot needed to reverse a still-committed client), adopt
+PRESERVES the whole partially-committed state (row `adopting` + snapshots +
+manifest + routed vault keys) so the post-#532 GC reclaim gates reclaim it once
+the operator reverses the partial commit. Body carries the NAMES + count of
+clients whose pre-adopt restoration could not be confirmed only. When that
+reclaim eventually fires, the GC reaps the row +
+snapshot dir ONLY — it does NOT delete the routed vault keys (a background GC must
+never autonomously drop secret material a live adopt could still reference; Sol P1
+/ Terra P2); routed-key cleanup is owned by de-adopt's hash-gated
+`--reclaim-crashed`.
 
 ### Orphan lifecycle + the residual
 
@@ -1416,7 +1430,12 @@ re-adopt (UPSERT) or the 24h cross-manifest GC. It is bounded (owner-only DACL
 — a co-resident cannot read the content) and an operator may remove it manually
 by deleting that directory. On a broadened-parent host, set
 `MCPHUB_REQUIRE_SINGLE_USER_HOME=1` for the strict parent-dir gate (same posture
-as every other state file).
+as every other state file). Second route to the same class: a `-preserved` state
+the operator later reverses, then the GC reclaims, leaves the row's routed vault
+keys `<M>_<ENV>` lingering in the owner-only vault (the GC reaps row+snapshot
+only) until de-adopt's `--reclaim-crashed` (or the operator) removes them — same
+bounded, owner-only residual (bug
+`2026-07-12-adopt-preinstall-crash-orphan-triple`).
 
 ### Scope boundary (de-adopt is a separate item)
 

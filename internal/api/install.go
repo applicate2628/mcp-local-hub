@@ -2477,6 +2477,36 @@ func executeInstallTo(w io.Writer, m *config.ServerManifest, p *Plan, keepN int,
 	return executeInstallToWithSymlinkConsents(w, m, p, keepN, startTasks, intermediate, skipPrune, skipTasks, nil)
 }
 
+// InstallClientRollbackIncompleteError is returned (via failAfterRollback) when a
+// mid-install failure triggered the compensating rollback but ≥1 client-config
+// restore callback FAILED — the client's pre-adopt restoration could not be
+// confirmed. The client may have been mutated (Install rewrote it to the hub relay)
+// and the restore-from-backup did not succeed, OR the restore write itself failed on
+// an otherwise-untouched config. Rollback callbacks are best-effort and cannot return
+// errors, so this typed sentinel is the only in-band signal that the client-side
+// state is NOT provably reversed.
+//
+// ExecuteAdoptWithOpts inspects it via errors.As and PRESERVES the pre-adopt
+// provenance (row + snapshots + manifest + routed vault keys) instead of deleting
+// it, so the still-committed client stays recoverable (bug 2026-07-12). Present
+// iff ≥1 client-restore callback errored; otherwise Install's error is
+// byte-identical to today (no sentinel).
+//
+// Clients carries NAMES ONLY — no paths, no config bytes, no secret values.
+type InstallClientRollbackIncompleteError struct {
+	Clients []string
+	cause   error
+}
+
+func (e *InstallClientRollbackIncompleteError) Error() string {
+	return fmt.Sprintf("install client-config rollback incomplete (clients: %s): %v",
+		strings.Join(e.Clients, ", "), e.cause)
+}
+
+// Unwrap returns the underlying install failure so errors.Is/As chains (the %w the
+// caller wrapped) keep working through this sentinel.
+func (e *InstallClientRollbackIncompleteError) Unwrap() error { return e.cause }
+
 func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool, skipTasks bool, symlinkConsents []ResolvedSymlinkConsent) error {
 	// v0.6 Phase F: when skipTasks is set (GLOBAL manifest install routed to the
 	// supervisor model) NEITHER Pass A scheduler-task creation NOR Pass B start
@@ -2531,9 +2561,35 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// written, or vice-versa).
 	var rollback []func()
 	var installBackupPaths []string
+	// rollbackClientRestoreFailures accumulates the NAMES of clients whose
+	// client-config restore callback FAILED during runRollback — the client's pre-adopt
+	// state could not be confirmed (it may have been rewritten to the hub relay and not
+	// reversed, OR the restore write itself failed on an otherwise-untouched config).
+	// Only the client-restore closure below appends to it — scheduler-task /
+	// supervisor-intent undo failures do NOT, and a client whose entry-scoped
+	// restore is a no-op (provably unmutated) never appends either (the folded
+	// skip-if-unchanged returns nil WITHOUT writing) — so the sentinel is scoped to
+	// client-config restores that actually ran and failed.
+	var rollbackClientRestoreFailures []string
 	runRollback := func() {
 		for i := len(rollback) - 1; i >= 0; i-- {
 			rollback[i]()
+		}
+	}
+	// failAfterRollback runs the compensating rollback stack, then returns the
+	// caller's error. When ≥1 client-config restore FAILED during rollback it wraps
+	// the cause in a typed *InstallClientRollbackIncompleteError naming those clients
+	// so ExecuteAdoptWithOpts can PRESERVE the pre-adopt provenance instead of
+	// deleting it (bug 2026-07-12). With zero restore failures the returned error is
+	// byte-identical to today's happy-failure path (bare cause, no sentinel).
+	failAfterRollback := func(cause error) error {
+		runRollback()
+		if len(rollbackClientRestoreFailures) == 0 {
+			return cause
+		}
+		return &InstallClientRollbackIncompleteError{
+			Clients: append([]string(nil), rollbackClientRestoreFailures...),
+			cause:   cause,
 		}
 	}
 
@@ -2577,8 +2633,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		}
 		_ = sch.Delete(spec.Name)
 		if err := sch.Create(spec); err != nil {
-			runRollback()
-			return fmt.Errorf("create task %s: %w", spec.Name, err)
+			return failAfterRollback(fmt.Errorf("create task %s: %w", spec.Name, err))
 		}
 		taskName := spec.Name
 		savedXML := priorXML // capture for closure
@@ -2632,8 +2687,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	for _, u := range p.ClientUpdates {
 		client := allClients[u.Client]
 		if client == nil {
-			runRollback()
-			return fmt.Errorf("unknown client %q in binding", u.Client)
+			return failAfterRollback(fmt.Errorf("unknown client %q in binding", u.Client))
 		}
 		if !client.Exists() {
 			fmt.Fprintf(w, "\u26a0 Client %s not installed on this machine \u2014 skipping\n", u.Client)
@@ -2655,8 +2709,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		// fail loud and run the rollback-so-far instead of proceeding from an
 		// untrusted read.
 		if _, err := client.GetEntry(m.Name); err != nil {
-			runRollback()
-			return fmt.Errorf("snapshot prior entry for %s in %s: %w", m.Name, u.Client, err)
+			return failAfterRollback(fmt.Errorf("snapshot prior entry for %s in %s: %w", m.Name, u.Client, err))
 		}
 
 		// keepN is the user's `backups.keep_n` setting (default 5). During
@@ -2669,8 +2722,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		}
 		bak, err := client.BackupKeep(backupKeepN)
 		if err != nil {
-			runRollback()
-			return fmt.Errorf("backup %s: %w", u.Client, err)
+			return failAfterRollback(fmt.Errorf("backup %s: %w", u.Client, err))
 		}
 		if keepN > 0 {
 			installBackupPaths = append(installBackupPaths, bak)
@@ -2686,14 +2738,32 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 			RelayURL:     u.RelayURL,
 		}
 		configWriter := symlinkConsentWriters[u.Client]
-		if err := clients.AddEntryWithConfigWriter(client, entry, configWriter); err != nil {
-			runRollback()
-			return fmt.Errorf("add entry to %s: %w", u.Client, err)
-		}
-		// Compensating op: restore this entry's exact prior state from the
-		// timestamped backup that was taken immediately before AddEntry. The
-		// adapter-level restore is still surgical: it restores/removes only
-		// entryName, leaving other live entries untouched.
+		// Compensating op registered BEFORE the AddEntry mutation (bug 2026-07-12):
+		// restore this entry's exact prior state from the timestamped backup taken
+		// immediately above. AddEntry -> SecureWriteClientConfig has post-rename error
+		// paths (#1 definitive verify-failure removes the just-published file; #2
+		// transient reopen-failure leaves the published file = the hub relay) that
+		// return an error with the live config ALREADY mutated. Registering the restore
+		// FIRST means such a mutated-then-error AddEntry is still restored during
+		// rollback \u2014 before, the closure was appended only after AddEntry success, so a
+		// mutated-then-error AddEntry left the client config committed with NO
+		// compensator, and adopt aborted (deleting the pre-adopt snapshot that reverses
+		// it) = the P1 data-loss. A restore that cannot prove the pre-adopt state (its
+		// OWN write errors) appends clientName to rollbackClientRestoreFailures, feeding
+		// the sentinel so adopt PRESERVES its provenance instead of aborting. The
+		// adapter-level restore is surgical: it restores/removes only entryName, leaving
+		// other live entries untouched.
+		//
+		// The closure has two outcomes (design round-4 — the atomic entry-scoped
+		// skip-if-unchanged is now FOLDED INTO the restore body under its single
+		// withConfigLock hold, so no separate unlocked pre-check lives here). (1)
+		// RECONCILED — the restore returns nil: either it reverted a mutated entry, or
+		// the write-target already held the pre-adopt entry value (unmutated client, or
+		// a sibling edit left THIS entry untouched) so the body skipped the write. Both
+		// mean the client is reconciled to its pre-adopt state with no damage and no
+		// sentinel append. (2) RESTORE-FAIL→SENTINEL — a restore that RAN and errored
+		// feeds clientName to rollbackClientRestoreFailures + the sentinel so adopt
+		// preserves.
 		clientRef := client
 		entryName := m.Name
 		clientName := u.Client
@@ -2701,11 +2771,15 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		rollbackWriter := configWriter
 		rollback = append(rollback, func() {
 			if err := clients.RestoreEntryFromBackupForRollbackWithConfigWriter(clientRef, backupPath, entryName, rollbackWriter); err != nil {
+				rollbackClientRestoreFailures = append(rollbackClientRestoreFailures, clientName)
 				fmt.Fprintf(w, "  rollback: restore %s entry in %s from backup failed: %v\n", entryName, clientName, err)
 				return
 			}
-			fmt.Fprintf(w, "  rollback: restored %s entry state in %s from backup\n", entryName, clientName)
+			fmt.Fprintf(w, "  rollback: reconciled %s entry in %s to pre-adopt backup\n", entryName, clientName)
 		})
+		if err := clients.AddEntryWithConfigWriter(client, entry, configWriter); err != nil {
+			return failAfterRollback(fmt.Errorf("add entry to %s: %w", u.Client, err))
+		}
 		fmt.Fprintf(w, "\u2713 %s \u2192 %s\n", u.Client, displayURLOf(u))
 	}
 	// Intermediate step (InstallParsedManifest only): write supervisor
@@ -2715,8 +2789,7 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	if intermediate != nil {
 		undo, err := intermediate()
 		if err != nil {
-			runRollback()
-			return err
+			return failAfterRollback(err)
 		}
 		if undo != nil {
 			rollback = append(rollback, undo)

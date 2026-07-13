@@ -1188,20 +1188,44 @@ type ioDiscardForAdoptTest struct{}
 
 func (ioDiscardForAdoptTest) Write(p []byte) (int, error) { return len(p), nil }
 
+// failClientConfigWritesForAdoptTest fails ONLY the FIRST live-config write to
+// failPath — the AddEntry write — and lets every subsequent write to it (the
+// rollback restore-from-backup write) pass through. This models a transient
+// AddEntry failure whose compensating restore SUCCEEDS, so Install's rollback
+// completes cleanly and returns a PLAIN error → adopt takes the ABORT path these
+// callers assert (manifest removed / no provenance residue).
+//
+// Failing EVERY write to failPath would, post-fix (restore closure registered
+// before AddEntry — bug 2026-07-12), make the client's restore ALSO fail, feeding
+// the InstallClientRollbackIncompleteError sentinel → adopt PRESERVES. That
+// persistent-write-fault → preserve path is exercised deliberately by the
+// per-path seam in adopt_abort_preserve_provenance_test.go; here we want the abort
+// path, which requires the restore to succeed.
 func failClientConfigWritesForAdoptTest(t *testing.T, failPath string) {
 	t.Helper()
 	cleanFailPath := filepath.Clean(failPath)
-	orig := clients.WriteConfigFile
-	clients.WriteConfigFile = func(path string, contents []byte) error {
-		if filepath.Clean(path) == cleanFailPath {
-			return fmt.Errorf("induced client config write failure for %s", filepath.Base(path))
-		}
+	realWrite := func(path string, contents []byte) error {
 		if dir := filepath.Dir(path); dir != "" {
 			if err := os.MkdirAll(dir, 0o700); err != nil {
 				return err
 			}
 		}
 		return os.WriteFile(path, contents, 0o600)
+	}
+	var mu sync.Mutex
+	firstWriteFailed := false
+	orig := clients.WriteConfigFile
+	clients.WriteConfigFile = func(path string, contents []byte) error {
+		if filepath.Clean(path) == cleanFailPath {
+			mu.Lock()
+			isFirst := !firstWriteFailed
+			firstWriteFailed = true
+			mu.Unlock()
+			if isFirst {
+				return fmt.Errorf("induced client config write failure for %s", filepath.Base(path))
+			}
+		}
+		return realWrite(path, contents)
 	}
 	t.Cleanup(func() { clients.WriteConfigFile = orig })
 }

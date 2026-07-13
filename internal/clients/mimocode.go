@@ -4052,6 +4052,34 @@ func (o *mimoCodeClient) restoreEntryFromBackupWithWriter(backupPath, name strin
 		return fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	backupServers, _ := backupMap[mimoCodeMCPKey].(map[string]any)
+	// Rollback-only atomic entry-scoped skip-if-unchanged (design round-4): compare
+	// against the TOP WRITE-TARGET layer (o.path) — NOT the merged readJSON() view,
+	// which folds lower operator layers the hub never writes and would misjudge
+	// presence/value. readRawConfig returns empty on ENOENT so a removed top file
+	// reads livePresent=false. A read/parse error FALLS THROUGH to the existing
+	// restore (no new failure mode). Gated on allowHubEntry so demigrate keeps its
+	// ErrBackupEntryAlreadyMigrated guard. The read + the setMember/deleteMember
+	// write below run under the SAME withConfigLock hold ⇒ no TOCTOU.
+	if allowHubEntry {
+		// Whole-file-gone recovery FIRST (design round-5): SecureWrite path #1 may have
+		// REMOVED the TOP write-target file o.path (target entry + siblings). Recover the
+		// whole backup (a snapshot of o.path — see BackupKeep) to o.path before the
+		// entry-scoped skip, which would else false-skip the both-absent case or
+		// surgically recreate only the target entry (losing siblings).
+		if handled, werr := wholeFileRestoreIfWriteTargetGone(o.path, backupData); handled {
+			return werr
+		}
+		if rawLive, rerr := readRawConfig(o.path); rerr == nil {
+			if liveMap, perr := parseJSONCBytes(rawLive); perr == nil {
+				liveServers, _ := liveMap[mimoCodeMCPKey].(map[string]any)
+				le, lp := liveServers[name]
+				be, bp := backupServers[name]
+				if entryRestoreIsNoop(le, lp, be, bp) {
+					return nil
+				}
+			}
+		}
+	}
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			// Defensive guard (demigrate flow only — the rollback caller
