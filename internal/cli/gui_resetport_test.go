@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/gui"
 )
 
@@ -26,6 +27,12 @@ func resetPortHermeticHome(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	// APPDATA (Roaming) must be redirected too: defaultVSCodeConfigPath reads
+	// %APPDATA%\Code\User\mcp.json, so without this the gate-ON scan would read
+	// the developer's REAL, live vscode config (a gate-ON mcphub-hub entry ⇒
+	// spurious `force exit 8` on this host). Redirect it under the temp home so
+	// the scan sees an empty sandbox client set.
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	return home
 }
@@ -51,7 +58,7 @@ func TestGuiResetPortClearsPortKeepsInstanceID(t *testing.T) {
 	// check before --reset-port mutates endpoint state. Route the
 	// single-instance lock through the test-only pidport dir so the
 	// test doesn't lock the user's real %LOCALAPPDATA% pidport.
-	pidportDir := t.TempDir()
+	pidportDir := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", pidportDir)
 
 	// Seed endpoint state so reset has something to clear.
@@ -119,7 +126,7 @@ func TestGuiResetPortNonTTYRequiresYes(t *testing.T) {
 	restore := api.SetDaemonStateRootForTest(root)
 	t.Cleanup(restore)
 
-	pidportDir := t.TempDir()
+	pidportDir := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", pidportDir)
 
 	c := newGuiCmdRealForTest()
@@ -162,7 +169,7 @@ func TestGuiResetPortRefusedWhenHubRunning(t *testing.T) {
 	// the developer's real client configs.
 	resetPortHermeticHome(t)
 
-	pidportDir := t.TempDir()
+	pidportDir := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", pidportDir)
 	pidportPath := filepath.Join(pidportDir, "gui.pidport")
 
@@ -223,7 +230,7 @@ func TestGuiResetPortRefusedWhenClientGatedOn(t *testing.T) {
 
 	home := resetPortHermeticHome(t)
 
-	pidportDir := t.TempDir()
+	pidportDir := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", pidportDir)
 
 	// Seed claude-code gate-ON: a mcphub-hub aggregate entry, exactly
