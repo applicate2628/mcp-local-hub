@@ -24,15 +24,19 @@ var docsOnlyCatalogIDs = []string{
 	// wave-2b additions.
 	"mathematica", "word", "powerpoint", "blender", "freecad",
 	"fusion360", "rhino", "davinci", "audacity", "anki",
-	// research/academic-search additions: both are REMOTE OAuth MCP endpoints that
-	// "Need authentication" per client, so neither can be a one-click clean entries[]
-	// row — they are docs-only OAuth pointers (like the other docs_only rows). Both are
-	// proprietary products (no OSS license — see wantLicense below).
-	//   - scite    — api.scite.ai/mcp (Smart Citations; subscription-gated OAuth).
+	// research/academic-search additions — all three are docs-only pointers, NOT
+	// installable entries[] rows (see wantLicense below):
+	//   - scite    — api.scite.ai/mcp (Smart Citations; subscription-gated OAuth,
+	//     proprietary). REMOTE OAuth, so it can't be a URL-only one-click row.
 	//   - consensus — mcp.consensus.app/mcp (RECLASSIFIED from an entries[] http row by
-	//     Codex bot PR #536 F2: per-client OAuth means a URL-only one-click install would
-	//     leave an unauthenticated, non-working server).
-	"scite", "consensus",
+	//     Codex bot PR #536 F2, round 2: per-client OAuth means a URL-only one-click install
+	//     would leave an unauthenticated, non-working server). Proprietary.
+	//   - scholar-search — silung/scholar-search-mcp (MIT). RECLASSIFIED from an entries[]
+	//     stdio row (Codex bot PR #536 round 3, P1): its download_arxiv_source tool DELETES a
+	//     caller-supplied <output_dir>/<arxiv_id> with no per-tool consent gate, so a READY
+	//     one-click install is unsafe — it is a docs-only pointer whose manual_install carries
+	//     the destructive-tool caveat + the project-isolated `uv run --no-project` command.
+	"scite", "consensus", "scholar-search",
 }
 
 // TestDocsOnlyPointerText_EmitsPointerNotManifest pins the S4 pointer text: a
@@ -302,7 +306,9 @@ func TestV2DocsOnlyRows_PresentInPointerArray(t *testing.T) {
 		"anki": "MIT",
 		// research additions: scite + consensus are proprietary commercial products
 		// (remote OAuth MCP, subscription/account-gated) — no OSS license, so "proprietary".
-		"scite": "proprietary", "consensus": "proprietary",
+		// scholar-search is the community silung/scholar-search-mcp package (MIT), a
+		// docs-only pointer only because of its destructive download_arxiv_source tool.
+		"scite": "proprietary", "consensus": "proprietary", "scholar-search": "MIT",
 	}
 	if len(cat.DocsOnly) != len(docsOnlyCatalogIDs) {
 		t.Fatalf("docs_only count = %d, want %d", len(cat.DocsOnly), len(docsOnlyCatalogIDs))

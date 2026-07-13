@@ -112,23 +112,17 @@ var tierSecretGatedVendoredCatalogIDs = []string{"tableau", "metabase"}
 //     in the summary, but a clean-cache launch is verified.
 var tierVendorWave2bCatalogIDs = []string{"obsidian", "logseq", "origin-pro"}
 
-// tierResearchCatalogIDs is the research/academic-search entries[] row appended AFTER
-// the wave-2b batch. It is a READY one-click row (no install_probe, no vendored_source,
-// no required_secrets), so it extends ONLY the entries[] count sum below — it is NOT
-// part of the disabled-until-probe tier1/wave-2a install_probe ordering loops:
-//   - scholar-search — community silung/scholar-search-mcp (Python, MIT), PyPI
-//     scholar-search-mcp PINNED to ==0.1.3, run via `uv run --with scholar-search-mcp==0.1.3`.
-//     A local-stdio CLIENT to the Semantic Scholar API, which works keyless at the shared
-//     public rate limit, so it is a clean ready SEARCH row like the git/fetch v1 entries.
-//     No secret. (It also exposes a write-capable download_arxiv_source tool — the summary
-//     carries the caveat; that does not change its catalog SHAPE, so there is no probe/gate.)
-//
-// consensus was initially added here as a transport:http entries[] row but was
-// RECLASSIFIED to a docs_only[] OAuth pointer (Codex bot PR #536 F2): its supported
-// access is per-client OAuth, so a one-click URL-only install would leave an
-// unauthenticated non-working server. It now lives in docsOnlyCatalogIDs
-// (marketplace_docs_only_test.go), not here.
-var tierResearchCatalogIDs = []string{"scholar-search"}
+// NOTE: the three research/academic-search servers (scholar-search, consensus, scite)
+// are ALL docs_only[] POINTER rows, NOT entries[] rows — so there is deliberately NO
+// research tier slice here, and the entries[] count sum below is unchanged from the
+// wave-2b total. They were each reclassified to docs_only across Codex bot PR #536
+// review rounds:
+//   - consensus + scite — REMOTE OAuth MCP endpoints (per-client OAuth), so a URL-only
+//     one-click install would leave an unauthenticated, non-working server (F2, round 2).
+//   - scholar-search — its download_arxiv_source tool DELETES a caller-supplied
+//     <output_dir>/<arxiv_id> before fetching with no per-tool consent gate, so a READY
+//     one-click install is unsafe; a summary warning is not a gate (P1 escalation,
+//     round 3). All three now live in docsOnlyCatalogIDs (marketplace_docs_only_test.go).
 
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
@@ -169,10 +163,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	// The docs-only POINTER rows live in the SEPARATE top-level docs_only[] array
 	// (S4, bot #446 P1), NOT entries[], so the entries[] count is v1 + Tier-1 +
 	// music-local only. docs_only count is asserted separately below.
-	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs) + len(tierSecretGatedVendoredCatalogIDs) + len(tierVendorWave2bCatalogIDs) + len(tierResearchCatalogIDs)
+	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs) + len(tierSecretGatedVendoredCatalogIDs) + len(tierVendorWave2bCatalogIDs)
 	if len(cat.Entries) != wantCount {
-		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local + %d secret-gated-vendored + %d wave-2b + %d research; docs-only rows are in docs_only[], not entries[])",
-			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs), len(tierSecretGatedVendoredCatalogIDs), len(tierVendorWave2bCatalogIDs), len(tierResearchCatalogIDs))
+		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local + %d secret-gated-vendored + %d wave-2b; docs-only rows are in docs_only[], not entries[])",
+			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs), len(tierSecretGatedVendoredCatalogIDs), len(tierVendorWave2bCatalogIDs))
 	}
 	if len(cat.DocsOnly) != len(docsOnlyCatalogIDs) {
 		t.Fatalf("v2 catalog docs_only count = %d, want %d", len(cat.DocsOnly), len(docsOnlyCatalogIDs))
