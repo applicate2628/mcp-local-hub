@@ -112,6 +112,20 @@ var tierSecretGatedVendoredCatalogIDs = []string{"tableau", "metabase"}
 //     in the summary, but a clean-cache launch is verified.
 var tierVendorWave2bCatalogIDs = []string{"obsidian", "logseq", "origin-pro"}
 
+// tierResearchCatalogIDs are the research/academic-search rows appended AFTER the
+// wave-2b batch. Both are READY one-click rows (no install_probe, no vendored_source,
+// no required_secrets), so they extend ONLY the entries[] count sum below — they are
+// NOT part of the disabled-until-probe tier1/wave-2a install_probe ordering loops:
+//   - scholar-search — community silung/scholar-search-mcp (Python, MIT), PyPI
+//     scholar-search-mcp, run via `uv run --with scholar-search-mcp`. A local-stdio
+//     CLIENT to the Semantic Scholar API, which works keyless at the shared public
+//     rate limit, so it is a clean ready row like the git/fetch v1 entries. No secret.
+//   - consensus — REMOTE HTTP row (transport:http, like context7) pointing at the
+//     provider-hosted endpoint https://mcp.consensus.app/mcp. READY, no auth for the
+//     free tier. As a transport:http row it carries NO command/args and NO
+//     required_secrets (a remote endpoint's credentials live in its OAuth/headers).
+var tierResearchCatalogIDs = []string{"scholar-search", "consensus"}
+
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
 func v2CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v2", "catalog.json") }
@@ -151,10 +165,10 @@ func TestParseV2Catalog_ParsesAsSchema2WithTier1Rows(t *testing.T) {
 	// The docs-only POINTER rows live in the SEPARATE top-level docs_only[] array
 	// (S4, bot #446 P1), NOT entries[], so the entries[] count is v1 + Tier-1 +
 	// music-local only. docs_only count is asserted separately below.
-	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs) + len(tierSecretGatedVendoredCatalogIDs) + len(tierVendorWave2bCatalogIDs)
+	wantCount := len(v1cat.Entries) + len(tier1CatalogIDs) + len(tierMusicLocalCatalogIDs) + len(tierSecretGatedVendoredCatalogIDs) + len(tierVendorWave2bCatalogIDs) + len(tierResearchCatalogIDs)
 	if len(cat.Entries) != wantCount {
-		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local + %d secret-gated-vendored + %d wave-2b; docs-only rows are in docs_only[], not entries[])",
-			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs), len(tierSecretGatedVendoredCatalogIDs), len(tierVendorWave2bCatalogIDs))
+		t.Fatalf("v2 catalog entry count = %d, want %d (v1 %d + %d Tier-1 + %d music-local + %d secret-gated-vendored + %d wave-2b + %d research; docs-only rows are in docs_only[], not entries[])",
+			len(cat.Entries), wantCount, len(v1cat.Entries), len(tier1CatalogIDs), len(tierMusicLocalCatalogIDs), len(tierSecretGatedVendoredCatalogIDs), len(tierVendorWave2bCatalogIDs), len(tierResearchCatalogIDs))
 	}
 	if len(cat.DocsOnly) != len(docsOnlyCatalogIDs) {
 		t.Fatalf("v2 catalog docs_only count = %d, want %d", len(cat.DocsOnly), len(docsOnlyCatalogIDs))

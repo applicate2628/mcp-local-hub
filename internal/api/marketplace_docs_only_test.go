@@ -24,6 +24,11 @@ var docsOnlyCatalogIDs = []string{
 	// wave-2b additions.
 	"mathematica", "word", "powerpoint", "blender", "freecad",
 	"fusion360", "rhino", "davinci", "audacity", "anki",
+	// research/academic-search addition: scite is a REMOTE OAuth MCP
+	// (api.scite.ai/mcp) — it "Needs authentication", so it cannot be a one-click
+	// clean entries[] row and is a docs-only pointer (like the other docs_only rows).
+	// It is a proprietary product (no OSS license — see wantLicense below).
+	"scite",
 }
 
 // TestDocsOnlyPointerText_EmitsPointerNotManifest pins the S4 pointer text: a
@@ -291,6 +296,9 @@ func TestV2DocsOnlyRows_PresentInPointerArray(t *testing.T) {
 		"blender": "MIT", "freecad": "MIT", "fusion360": "MIT",
 		"rhino": "MIT", "davinci": "MIT", "audacity": "Apache-2.0",
 		"anki": "MIT",
+		// research addition: scite is a proprietary commercial product (remote OAuth
+		// MCP, subscription-gated) — there is no OSS license, so "proprietary".
+		"scite": "proprietary",
 	}
 	if len(cat.DocsOnly) != len(docsOnlyCatalogIDs) {
 		t.Fatalf("docs_only count = %d, want %d", len(cat.DocsOnly), len(docsOnlyCatalogIDs))
