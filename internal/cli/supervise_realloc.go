@@ -41,6 +41,19 @@ const (
 	// portGateChCapacity). A full channel drops the dispatch; the daemon is
 	// already held in backoff with an armed fallback timer that re-drives.
 	reallocChCapacity = 64
+	// reallocFailedEscalationBound bounds CONSECUTIVE Failed reallocation outcomes
+	// (F2) before the daemon escalates from the transient old-port re-arm to
+	// quarantine. A genuinely transient registry/intent write error (flock
+	// contention, a momentary unwritable dir) clears within a couple retries (each
+	// ~squatterForeignHoldDelay apart), so under this bound the Failed outcome keeps
+	// re-arming the old-port retry as before. A PERSISTENT allocator error (denied
+	// write, missing registry row, unwritable state dir) would otherwise loop
+	// StBackoffWaiting FOREVER — never crash-counting, never quarantining, never
+	// emitting a terminal reason. After this many consecutive Failed outcomes the
+	// daemon quarantines (parole-eligible, like pool-exhausted) with the
+	// quarantined-realloc-failing terminal L3 event naming the allocator error. Small
+	// like reallocationCap (reliability-engineer: bound the invisible retry).
+	reallocFailedEscalationBound = 3
 )
 
 // evReallocApplied is the controller-internal loop event the off-loop
@@ -50,6 +63,18 @@ const (
 // routes it to handleReallocApplied, where the intent-cache refresh + respawn (or
 // the pool-exhausted quarantine) run serialized on the single loop goroutine.
 const evReallocApplied api.SMEvent = "realloc-applied"
+
+// evPreSpawnRealloc is the controller-internal loop event the F1 port-gate WORKER
+// posts (from handlePortGateReq) when it classified the pre-spawn port holder as a
+// FOREIGN process on a DYNAMIC-POOL proxy (F3). Like evReallocApplied it is an
+// api.SMEvent VALUE that is NOT a row in api.Transition — handleLoopEvent intercepts
+// it at the top and routes it to handlePreSpawnRealloc, where the reallocation
+// decision (cap peek + dispatch, single-owned via dispatchDynamicPoolRealloc) runs
+// serialized on the loop goroutine. This unifies the "port stolen while the daemon
+// was DOWN" collision shape (detected at pre-spawn, never reaching StRunning) with
+// the bind-refused-exit self-heal under one owner, instead of parking on the stolen
+// port forever.
+const evPreSpawnRealloc api.SMEvent = "pre-spawn-realloc"
 
 // Reallocation result body keys (carried on evReallocApplied).
 const (
@@ -110,6 +135,12 @@ const (
 	bindAccessDeniedActionCapExhausted  = "quarantined-realloc-cap-exhausted"
 	bindAccessDeniedActionPoolExhausted = "quarantined-pool-exhausted"
 	bindAccessDeniedActionRunHostRemedy = "quarantined-run-host-remedy"
+	// bindAccessDeniedActionReallocFailing is the F2 terminal action: the
+	// reallocation worker FAILED persistently (denied write / missing row /
+	// unwritable dir) past reallocFailedEscalationBound consecutive attempts, so the
+	// daemon is quarantined (parole-eligible) instead of looping StBackoffWaiting
+	// forever. The body carries the allocator error.
+	bindAccessDeniedActionReallocFailing = "quarantined-realloc-failing"
 )
 
 // bindAccessDeniedRemedy is the actionable operator remedy carried in every L3
@@ -141,6 +172,17 @@ func bindRefusedPoolLabel(d api.SupervisorDaemon) string {
 	default:
 		return "global-fixed"
 	}
+}
+
+// isDynamicPoolProxyDescriptor reports whether d is a dynamic-pool proxy (serena or
+// workspace-LSP) whose port MAY be reallocated to a fresh pool port on an
+// ephemeral-collision — as opposed to a fixed-global daemon whose port is baked into
+// gate-OFF client URLs and must NEVER move. A single argv-based predicate shared by
+// the bind-refused-exit self-heal (bindRefusedPoolLabel) and the F3 pre-spawn
+// foreign-holder self-heal (the port-gate worker + handlePreSpawnRealloc), so both
+// collision shapes agree on "is this reallocatable" through one owner.
+func isDynamicPoolProxyDescriptor(d api.SupervisorDaemon) bool {
+	return api.IsSerenaProxyDescriptor(d) || api.IsWorkspaceLSPProxyDescriptor(d)
 }
 
 // maybeHandleBindRefusedExit is the LOOP-side entry point of the L1 self-heal,
@@ -179,35 +221,58 @@ func (c *supervisorController) maybeHandleBindRefusedExit(d *api.SupervisorDaemo
 		return false
 	}
 
-	// Dynamic-pool proxy: reallocation candidate. PEEK the reallocation window
-	// (does NOT record — FIX-6 records a cap slot only on a COMPLETED reallocation,
-	// in handleReallocApplied) to decide the cap and the 1-based attempt number.
-	reallocInWindow := 0
-	if c.tracker != nil {
-		reallocInWindow = c.tracker.ReallocationCountInWindow(ev.TaskName, now, c.failureWindow)
+	// Dynamic-pool proxy: reallocation candidate. The reallocation DECISION (peek the
+	// window, hold crash-free, dispatch the off-loop worker, arm the backstop) is
+	// single-owned by dispatchDynamicPoolRealloc, shared with the F3 pre-spawn
+	// foreign-holder self-heal so both collision shapes agree on the cap + dispatch.
+	if c.dispatchDynamicPoolRealloc(d, ev.TaskName, now) {
+		return true
 	}
-	if reallocInWindow >= reallocationCap {
-		// Cap exhausted: STOP reallocating. Emit the cap-exhausted L3 event ONCE
-		// and fall through to normal crash counting so the daemon marches to the
-		// existing 10-in-30-min quarantine on its last-reallocated port.
-		c.emitBindAccessDeniedTerminalOnce(d, bindAccessDeniedActionCapExhausted)
+	// Cap exhausted: STOP reallocating. Emit the cap-exhausted L3 event ONCE and fall
+	// through to normal crash counting so the daemon marches to the existing
+	// 10-in-30-min quarantine on its last-reallocated port.
+	c.emitBindAccessDeniedTerminalOnce(d, bindAccessDeniedActionCapExhausted)
+	return false
+}
+
+// dispatchDynamicPoolRealloc is the SINGLE owner of the dynamic-pool reallocation
+// decision, shared by the bind-refused-exit self-heal (maybeHandleBindRefusedExit)
+// and the F3 pre-spawn foreign-holder self-heal (handlePreSpawnRealloc). It PEEKS the
+// reallocation window (does NOT record — FIX-6 records a cap slot only on a COMPLETED
+// reallocation, in handleReallocApplied):
+//   - over the cap → returns false WITHOUT any state change or terminal event. The
+//     CALLER owns the cap-exhausted response, which differs by collision shape: the
+//     bind-refused caller emits the cap-exhausted terminal + falls through to the
+//     crash SM (marches to quarantine); the pre-spawn caller stays parked on the old
+//     port (the pre-spawn hold's armed 30s timer owns the re-probe). Emitting a
+//     "quarantined-*" terminal HERE would lie for the pre-spawn caller, so it stays
+//     out of this owner.
+//   - under the cap → starts the stabilize-dwell clock, HOLDS the daemon in backoff
+//     (no crash increment), dispatches the worker, ALWAYS arms a long backstop
+//     fallback timer (P2-1), and returns true (a reallocation is now in flight).
+//
+// FIX-6: it records NO cap slot here — a wedged worker's repeated backstop retries
+// (deduped by the in-flight marker), a dropped dispatch, and a transient Failed
+// outcome would each otherwise burn a slot WITHOUT any replacement allocation,
+// marching a merely-stuck daemon to a false quarantine. The slot is recorded ONLY
+// when the worker posts a COMPLETED (Reallocated) outcome. The L3-event attempt
+// number is PREDICTED as peek+1: the same-task in-flight dedup plus loop
+// serialization admit exactly one completed record per peek, so the recorded count
+// lands at this value. Called only on the loop.
+func (c *supervisorController) dispatchDynamicPoolRealloc(d *api.SupervisorDaemon, taskName string, now time.Time) bool {
+	if c == nil || d == nil {
 		return false
 	}
-
-	// Within cap: reallocate OFF the loop. FIX-6: do NOT record a cap slot here. A
-	// wedged worker's repeated backstop retries (deduped by the in-flight marker), a
-	// dropped dispatch, and a transient Failed outcome would each otherwise burn a
-	// slot WITHOUT any replacement allocation, marching a merely-stuck daemon to a
-	// false quarantine. The slot is recorded ONLY when the worker posts a COMPLETED
-	// (Reallocated) outcome (handleReallocApplied), so the cap counts genuine
-	// completed port moves. The L3-event attempt number is PREDICTED as peek+1: the
-	// same-task in-flight dedup plus loop serialization admit exactly one completed
-	// record per peek, so the recorded count lands at this value. Start the
-	// stabilize-dwell clock, HOLD the daemon in backoff (no crash increment),
-	// dispatch the worker, and ALWAYS arm a long backstop fallback timer (P2-1).
+	reallocInWindow := 0
+	if c.tracker != nil {
+		reallocInWindow = c.tracker.ReallocationCountInWindow(taskName, now, c.failureWindow)
+	}
+	if reallocInWindow >= reallocationCap {
+		return false
+	}
 	attempt := reallocInWindow + 1
-	c.startReallocDwell(ev.TaskName)
-	c.holdInBackoffNoTimer(ev.TaskName)
+	c.startReallocDwell(taskName)
+	c.holdInBackoffNoTimer(taskName)
 	c.tryDispatchRealloc(reallocReq{d: *d, attempt: attempt})
 	// ALWAYS arm the backstop, even on a delivered dispatch (P2-1). The worker's
 	// registry Lock() + MutateSupervisorIntentIfChanged flock are BLOCKING with no
@@ -219,10 +284,57 @@ func (c *supervisorController) maybeHandleBindRefusedExit(d *api.SupervisorDaemo
 	// off StBackoffWaiting) long before this 30s backstop fires, so
 	// armRespawnBackoffTimer's stale-state re-check drops the backstop as a harmless
 	// no-op. On a wedge the backstop re-drives the retry on the OLD port (which
-	// self-heals again, or falls through to the crash path once the cap is spent) so
-	// the daemon is NEVER stranded.
-	c.armRespawnBackoffTimer(*d, ev.TaskName, squatterForeignHoldDelay)
+	// self-heals again, or falls through to the crash/park path once the cap is spent)
+	// so the daemon is NEVER stranded.
+	c.armRespawnBackoffTimer(*d, taskName, squatterForeignHoldDelay)
 	return true
+}
+
+// handlePreSpawnRealloc applies the F3 pre-spawn foreign-holder self-heal ON the loop
+// (intercepted at the top of handleLoopEvent for evPreSpawnRealloc). The F1 port-gate
+// WORKER classified the pre-spawn port holder as FOREIGN on a dynamic-pool proxy and
+// posted this event so the reallocation decision runs single-owned on the loop. This
+// is the "port stolen while the daemon was DOWN" collision shape — detected at
+// pre-spawn, never reaching StRunning — so the bind-refused-exit self-heal alone never
+// covered it; without this it would ride the old-port foreign-hold re-probe forever.
+// It reallocates the daemon to a fresh pool port (like a bind-refused exit) instead of
+// parking on the stolen port. A no-op when the daemon is no longer held in the
+// pre-spawn backoff (an operator stop raced), when the descriptor is gone, or (defense
+// in depth) when the descriptor is no longer a dynamic-pool proxy. Cap exhaustion
+// leaves the daemon parked on the old port (the pre-spawn hold's armed 30s timer owns
+// the re-probe cadence + the foreign-squatter events), exactly the existing pre-spawn
+// foreign-park behavior.
+func (c *supervisorController) handlePreSpawnRealloc(ev api.LoopEvent) {
+	if c == nil {
+		return
+	}
+	task := canonicalSupervisorTaskName(ev.TaskName)
+	// Only reallocate a daemon still HELD in the pre-spawn backoff. An operator stop
+	// (or any transition off StBackoffWaiting) landing between the worker's classify
+	// and this event already moved it; do not resurrect it. A raced stop that keeps
+	// the daemon in StBackoffWaiting is additionally caught downstream: the respawn is
+	// armed via armRespawnBackoffTimer → EvTimerDue, whose SM transition re-checks the
+	// stop intent (StBackoffWaiting+EvTimerDue drops to StIdle on a stopped daemon).
+	if !c.smStateIs(task, api.StBackoffWaiting) {
+		return
+	}
+	d, ok := c.lookupDescriptorWithShadow(task)
+	if !ok || d == nil {
+		return
+	}
+	// Defense-in-depth: NEVER reallocate a fixed-global daemon (its port is baked into
+	// gate-OFF client URLs). The worker only posts this event for dynamic-pool proxies,
+	// but re-verify the argv predicate on the loop in case the descriptor was
+	// re-registered as fixed-global in the worker→loop window.
+	if !isDynamicPoolProxyDescriptor(*d) {
+		return
+	}
+	// Reuse the SINGLE reallocation decision owner. Under the cap it holds + dispatches
+	// the realloc worker + arms the backstop; over the cap it returns false and the
+	// daemon STAYS parked on the old port (the pre-spawn hold already parked it in
+	// StBackoffWaiting with an armed 30s timer), which is the existing pre-spawn
+	// foreign-park — no quarantine, no misleading terminal event.
+	c.dispatchDynamicPoolRealloc(d, task, time.Now().UTC())
 }
 
 // holdInBackoffNoTimer parks a task in StBackoffWaiting + tracker backoff (crash-
@@ -406,6 +518,11 @@ func (c *supervisorController) handleReallocApplied(ev api.LoopEvent) {
 		if c.tracker != nil {
 			c.tracker.RecordReallocationAndCountInWindow(task, time.Now().UTC(), c.failureWindow)
 		}
+		// F2: a COMPLETED reallocation cleared whatever allocator error was
+		// accumulating, so reset the consecutive-Failed escalation counter (same
+		// lifecycle as the reallocation cap — reset on success / stabilize-dwell /
+		// quarantine-leave).
+		c.reallocFailCount.Delete(task)
 
 		// Move the descriptor cache onto the reallocated port so the respawn below
 		// resolves argv=newPort. INVARIANT: the port MUST always land on newPort (the
@@ -532,15 +649,94 @@ func (c *supervisorController) handleReallocApplied(ev api.LoopEvent) {
 			})
 		}
 	default: // reallocOutcomeFailed
-		// A transient reallocation failure (e.g. registry/intent write error).
-		// Do NOT crash-count it — re-arm the fallback hold so the daemon retries
-		// the OLD port, which will re-drive the self-heal (or fall through to the
-		// crash path once the underlying failure clears).
-		if c.smStateIs(task, api.StBackoffWaiting) {
-			if d, ok := c.lookupDescriptorWithShadow(task); ok && d != nil {
-				c.armRespawnBackoffTimer(*d, task, squatterForeignHoldDelay)
-			}
+		// GUARD (P2-3, mirrors the reallocated + pool-exhausted branches): only act
+		// while the daemon is STILL held in the reallocation backoff. An operator stop
+		// landing in the reallocation window already drove it to StIdle; touching it
+		// here would resurrect a just-stopped daemon.
+		if !c.smStateIs(task, api.StBackoffWaiting) {
+			return
 		}
+		d, ok := c.lookupDescriptorWithShadow(task)
+		if !ok || d == nil {
+			return
+		}
+		// F2: BOUNDED escalation. A genuinely transient reallocation failure
+		// (registry/intent flock contention, a momentary unwritable dir) clears within
+		// a couple retries, so under the bound keep re-arming the OLD-port fallback
+		// hold (the pre-fix behavior): the retry re-drives the self-heal, and a
+		// recovered daemon's completed reallocation / stabilize-dwell resets the
+		// counter. A PERSISTENT allocator error (consistently denied registry/intent
+		// write, a missing registry row, an unwritable state dir) would otherwise loop
+		// StBackoffWaiting FOREVER — never crash-counting, never quarantining, never
+		// emitting a terminal reason. Count CONSECUTIVE Failed outcomes; once they
+		// exceed the bound, STOP treating it as transient and ESCALATE to a
+		// parole-eligible quarantine with a distinct terminal L3 reason naming the
+		// allocator error, so a broken allocator is bounded + operator-visible instead
+		// of an invisible infinite retry.
+		if c.incrReallocFailCount(task) > reallocFailedEscalationBound {
+			c.escalateReallocFailing(task, d, ev)
+			return
+		}
+		c.armRespawnBackoffTimer(*d, task, squatterForeignHoldDelay)
+	}
+}
+
+// incrReallocFailCount increments and returns the per-task consecutive Failed
+// reallocation-outcome counter (F2). Loop-owned single-writer (handleReallocApplied
+// runs only on the loop goroutine), so the load+store is race-free.
+func (c *supervisorController) incrReallocFailCount(taskName string) int {
+	task := canonicalSupervisorTaskName(taskName)
+	n := 0
+	if v, ok := c.reallocFailCount.Load(task); ok {
+		if iv, ok := v.(int); ok {
+			n = iv
+		}
+	}
+	n++
+	c.reallocFailCount.Store(task, n)
+	return n
+}
+
+// escalateReallocFailing quarantines a daemon whose reallocation worker has FAILED
+// persistently past reallocFailedEscalationBound consecutive attempts (F2). It
+// mirrors the pool-exhausted terminal branch: transition to StQuarantined
+// (parole-eligible on the F2 ladder, so the daemon auto-recovers after a cooldown if
+// the allocator error clears), mark the tracker + persist, emit the distinct
+// quarantined-realloc-failing terminal L3 event naming the allocator error, and the
+// daemon-quarantined lifecycle event. The caller has already confirmed the
+// StBackoffWaiting operator-stop guard and resolved the descriptor. Reset the counter
+// so a later parole re-entry counts afresh. foreignHolderPort=0 keeps the (blocking)
+// identity probe off the loop. Called only on the loop.
+func (c *supervisorController) escalateReallocFailing(task string, d *api.SupervisorDaemon, ev api.LoopEvent) {
+	c.reallocFailCount.Delete(task)
+	c.smStates.Store(task, api.StQuarantined)
+	c.recordQuarantineParoleEligible(task, time.Now().UTC())
+	if c.tracker != nil {
+		c.tracker.MarkQuarantined(task)
+		if c.statePath != "" {
+			_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, task)
+		}
+	}
+	errStr, _ := ev.Body[reallocResultErrBodyKey].(string)
+	oldPort, _ := ev.Body[reallocResultOldPortBodyKey].(int)
+	attempt, _ := ev.Body[reallocResultAttemptBodyKey].(int)
+	c.emitBindAccessDenied(*d, bindAccessDeniedActionReallocFailing, oldPort, map[string]any{
+		"reallocation_attempt": attempt,
+		"cap":                  reallocationCap,
+		"allocator_error":      errStr,
+		"consecutive_failures": reallocFailedEscalationBound + 1,
+	}, 0)
+	if c.events != nil {
+		_ = c.events.Emit(api.SupervisorEvent{
+			Severity: api.SupervisorEventSeverityError,
+			Source:   api.SupervisorEventSourceLifecycle,
+			Event:    "daemon-quarantined",
+			TaskName: task,
+			Body: map[string]any{
+				"reason": "reallocation worker failed persistently during ephemeral-collision self-heal; the allocator/registry/intent write kept failing so the daemon could not be moved to a fresh port",
+				"detail": errStr,
+			},
+		})
 	}
 }
 
@@ -674,6 +870,7 @@ func (c *supervisorController) runReallocDwellTick(now time.Time) {
 			// Task no longer tracked (removed from intent). Drop the entry.
 			c.reallocDwell.Delete(k)
 			c.bindAccessDeniedTerminalEmitted.Delete(k)
+			c.reallocFailCount.Delete(k)
 			return true
 		}
 		if state != api.StRunning {
@@ -695,6 +892,7 @@ func (c *supervisorController) runReallocDwellTick(now time.Time) {
 				c.tracker.ClearCrashes(task)
 			}
 			c.bindAccessDeniedTerminalEmitted.Delete(k)
+			c.reallocFailCount.Delete(k)
 			c.reallocDwell.Delete(k)
 			if c.events != nil {
 				_ = c.events.Emit(api.SupervisorEvent{

@@ -700,6 +700,179 @@ func TestRealloc_Exit3AtNonRunning_FallsThrough(t *testing.T) {
 	}
 }
 
+// driveFailedReallocOutcome feeds a Failed reallocation outcome through
+// handleReallocApplied with the daemon held in StBackoffWaiting (the reallocation
+// backoff), the state a real Failed outcome lands in.
+func driveFailedReallocOutcome(ctrl *supervisorController, d api.SupervisorDaemon, errMsg string) {
+	task := canonicalSupervisorTaskName(d.TaskName)
+	ctrl.smStates.Store(task, api.StBackoffWaiting)
+	ctrl.handleReallocApplied(api.LoopEvent{
+		Kind:     evReallocApplied,
+		TaskName: d.TaskName,
+		Body: map[string]any{
+			reallocResultOutcomeBodyKey: reallocOutcomeFailed,
+			reallocResultOldPortBodyKey: 9401,
+			reallocResultAttemptBodyKey: 1,
+			reallocResultErrBodyKey:     errMsg,
+		},
+	})
+}
+
+// TestRealloc_FailedOutcome_BoundedEscalationToQuarantine (F2): a PERSISTENT
+// reallocation failure escalates to a parole-eligible quarantine after
+// reallocFailedEscalationBound consecutive Failed outcomes, instead of looping
+// StBackoffWaiting forever. Under the bound each Failed outcome re-arms the transient
+// hold (no crash-count, no quarantine); the (bound+1)-th escalates + emits the
+// distinct terminal L3 reason naming the allocator error.
+//
+// NON-VACUITY: with an unbounded Failed branch (remove the incrReallocFailCount >
+// bound escalation) the daemon NEVER quarantines and quarantined-realloc-failing is
+// never emitted, so both post-escalation assertions fail.
+func TestRealloc_FailedOutcome_BoundedEscalationToQuarantine(t *testing.T) {
+	d := lspWorkspaceProxyDescriptor()
+	ctrl, eventsPath := reallocSyncController(t, d)
+	task := canonicalSupervisorTaskName(d.TaskName)
+	const allocErr = "persistent registry write denied"
+
+	// Under the bound: each Failed outcome re-arms the transient hold — NOT quarantine,
+	// NOT crash-count.
+	for i := 0; i < reallocFailedEscalationBound; i++ {
+		driveFailedReallocOutcome(ctrl, d, allocErr)
+		if st, _ := ctrl.getSMStateCanonical(task); st != api.StBackoffWaiting {
+			t.Fatalf("Failed #%d: state = %v, want StBackoffWaiting (under bound = transient hold)", i+1, st)
+		}
+		if got := crashCount(ctrl, task); got != 0 {
+			t.Fatalf("Failed #%d: crash count = %d, want 0 (a transient realloc failure must NOT crash-count)", i+1, got)
+		}
+	}
+	assertEventNotInLog(t, eventsPath, "quarantined-realloc-failing")
+
+	// The (bound+1)-th consecutive Failed outcome ESCALATES to a parole-eligible
+	// quarantine with the distinct terminal L3 reason naming the allocator error.
+	driveFailedReallocOutcome(ctrl, d, allocErr)
+	if st, _ := ctrl.getSMStateCanonical(task); st != api.StQuarantined {
+		t.Fatalf("after %d consecutive Failed outcomes: state = %v, want StQuarantined (bounded escalation)", reallocFailedEscalationBound+1, st)
+	}
+	// Straight to quarantine (parole-eligible), NOT a crash march.
+	if got := crashCount(ctrl, task); got != 0 {
+		t.Fatalf("escalation crash count = %d, want 0 (a persistent-realloc-failure quarantine is parole-eligible, not a crash march)", got)
+	}
+	assertEventInLog(t, eventsPath, "quarantined-realloc-failing")
+	assertEventInLog(t, eventsPath, allocErr)
+}
+
+// TestRealloc_FailedOutcome_SuccessResetsEscalationCounter (F2): a COMPLETED
+// reallocation between failures resets the consecutive-Failed counter, so the
+// escalation counts CONSECUTIVE failures (not lifetime ones).
+//
+// NON-VACUITY: without the reset-on-success (reallocFailCount.Delete in the
+// Reallocated branch), the second run of `bound` failures pushes the cumulative
+// count past the bound and the FIRST post-reset failure escalates → the loop assert
+// fires with StQuarantined.
+func TestRealloc_FailedOutcome_SuccessResetsEscalationCounter(t *testing.T) {
+	d := lspWorkspaceProxyDescriptor()
+	ctrl, eventsPath := reallocSyncController(t, d)
+	task := canonicalSupervisorTaskName(d.TaskName)
+
+	// Accrue exactly `bound` consecutive failures (bound is not yet EXCEEDED → no
+	// escalation).
+	for i := 0; i < reallocFailedEscalationBound; i++ {
+		driveFailedReallocOutcome(ctrl, d, "transient write error")
+	}
+	if st, _ := ctrl.getSMStateCanonical(task); st != api.StBackoffWaiting {
+		t.Fatalf("state = %v after %d failures, want StBackoffWaiting (bound not yet exceeded)", st, reallocFailedEscalationBound)
+	}
+
+	// A COMPLETED reallocation resets the consecutive-Failed counter.
+	driveReallocCompletion(ctrl, d, 9460)
+
+	// After the reset, another full run of `bound` failures must NOT escalate (the
+	// failures are no longer consecutive across the successful reallocation).
+	for i := 0; i < reallocFailedEscalationBound; i++ {
+		driveFailedReallocOutcome(ctrl, d, "transient write error")
+		if st, _ := ctrl.getSMStateCanonical(task); st != api.StBackoffWaiting {
+			t.Fatalf("post-reset Failed #%d: state = %v, want StBackoffWaiting (a successful reallocation reset the escalation counter)", i+1, st)
+		}
+	}
+	assertEventNotInLog(t, eventsPath, "quarantined-realloc-failing")
+}
+
+// TestPreSpawnRealloc_DynamicPoolReallocatesNotParks (F3): a pre-spawn FOREIGN holder
+// on a dynamic-pool proxy (routed here by the port-gate worker via evPreSpawnRealloc)
+// reallocates OUR daemon to a fresh pool port instead of parking on the stolen port.
+//
+// NON-VACUITY: if handlePreSpawnRealloc did not dispatch a reallocation (the pre-fix
+// behavior — the pre-spawn gate only parked), reallocCh stays empty and the select's
+// default fails.
+func TestPreSpawnRealloc_DynamicPoolReallocatesNotParks(t *testing.T) {
+	d := serenaProxyDescriptor() // dynamic-pool proxy
+	ctrl, _ := reallocSyncController(t, d)
+	ctrl.reallocCh = make(chan reallocReq, reallocChCapacity) // wire so the dispatch lands
+	task := canonicalSupervisorTaskName(d.TaskName)
+	// The pre-spawn port gate has already parked the daemon in StBackoffWaiting because
+	// a foreign process holds its port.
+	ctrl.smStates.Store(task, api.StBackoffWaiting)
+
+	ctrl.handlePreSpawnRealloc(api.LoopEvent{Kind: evPreSpawnRealloc, TaskName: d.TaskName})
+
+	select {
+	case req := <-ctrl.reallocCh:
+		if canonicalSupervisorTaskName(req.d.TaskName) != task {
+			t.Fatalf("dispatched reallocation for %q, want %q", req.d.TaskName, task)
+		}
+	default:
+		t.Fatal("no reallocation dispatched — a pre-spawn FOREIGN holder on a dynamic-pool proxy must reallocate, not park on the old port")
+	}
+	if st, _ := ctrl.getSMStateCanonical(task); st != api.StBackoffWaiting {
+		t.Fatalf("state = %v, want StBackoffWaiting (held pending the reallocation)", st)
+	}
+	if got := crashCount(ctrl, task); got != 0 {
+		t.Fatalf("crash count = %d, want 0 (a pre-spawn reallocation must not crash-count)", got)
+	}
+}
+
+// TestPreSpawnRealloc_FixedGlobalNeverReallocated (F3): a fixed-global daemon is NEVER
+// reallocated even if an evPreSpawnRealloc reaches its handler (its port is baked into
+// gate-OFF client URLs). handlePreSpawnRealloc's defense-in-depth dynamic-pool
+// re-check parks it.
+//
+// NON-VACUITY: remove the isDynamicPoolProxyDescriptor guard in handlePreSpawnRealloc
+// and a fixed-global gets reallocated → reallocCh len 1.
+func TestPreSpawnRealloc_FixedGlobalNeverReallocated(t *testing.T) {
+	d := globalDaemonDescriptor() // fixed-global — port baked into client URLs
+	ctrl, _ := reallocSyncController(t, d)
+	ctrl.reallocCh = make(chan reallocReq, reallocChCapacity)
+	task := canonicalSupervisorTaskName(d.TaskName)
+	ctrl.smStates.Store(task, api.StBackoffWaiting)
+
+	ctrl.handlePreSpawnRealloc(api.LoopEvent{Kind: evPreSpawnRealloc, TaskName: d.TaskName})
+
+	if got := len(ctrl.reallocCh); got != 0 {
+		t.Fatalf("dispatched %d reallocations for a FIXED-global daemon, want 0 (its port is baked into gate-OFF client URLs — never reallocate)", got)
+	}
+}
+
+// TestPreSpawnRealloc_OperatorStopNotResurrected (F3): an operator stop that drove the
+// daemon out of StBackoffWaiting between the worker's classify and this event must not
+// be resurrected into a reallocation.
+func TestPreSpawnRealloc_OperatorStopNotResurrected(t *testing.T) {
+	d := serenaProxyDescriptor()
+	ctrl, _ := reallocSyncController(t, d)
+	ctrl.reallocCh = make(chan reallocReq, reallocChCapacity)
+	task := canonicalSupervisorTaskName(d.TaskName)
+	// An operator stop already drove the daemon to StIdle.
+	ctrl.smStates.Store(task, api.StIdle)
+
+	ctrl.handlePreSpawnRealloc(api.LoopEvent{Kind: evPreSpawnRealloc, TaskName: d.TaskName})
+
+	if got := len(ctrl.reallocCh); got != 0 {
+		t.Fatalf("dispatched %d reallocations for a stopped daemon, want 0 (StBackoffWaiting guard must not resurrect a raced stop)", got)
+	}
+	if st, _ := ctrl.getSMStateCanonical(task); st != api.StIdle {
+		t.Fatalf("state = %v, want StIdle (the raced operator stop must be preserved)", st)
+	}
+}
+
 // assertEventInLog / assertEventNotInLog read the supervisor-events.log and
 // assert a substring is present / absent (with a short poll for the async paths).
 func assertEventInLog(t *testing.T, path, substr string) {

@@ -4,12 +4,15 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
 )
 
@@ -186,6 +189,77 @@ func TestRunSetupEphemeralRangeStep_FixRequiresElevation(t *testing.T) {
 	_, stderr := runStepCapture(t, true)
 	if !strings.Contains(stderr, "requires an ELEVATED shell") {
 		t.Errorf("expected an elevation-required message; stderr:\n%s", stderr)
+	}
+}
+
+// TestSetupCommand_EphemeralRangeStepRunsBeforeWatchdogElevationGate is the F1
+// (round-5 bot) ordering regression. `mcphub setup --fix-ephemeral-range` needs an
+// elevated ADMIN shell (its netsh mutation requires admin), but the watchdog step
+// REFUSES an elevated setup (plan §42) and returns early. Ordered AFTER the watchdog
+// gate, the advertised host remedy never ran in the one context it requires. This
+// test drives the full `setup` command in an elevated shell with an overlapping
+// dynamic range and asserts the ephemeral-range fix runs BEFORE the watchdog gate's
+// refusal (which still surfaces as the command error).
+//
+// NON-VACUITY: revert the F1 reorder (put runSetupEphemeralRangeStep back AFTER
+// runSetupWatchdogForSetup) and the watchdog refusal returns before the ephemeral
+// step — order becomes just [watchdog] and the "ephemeral first" assertion fails.
+func TestSetupCommand_EphemeralRangeStepRunsBeforeWatchdogElevationGate(t *testing.T) {
+	resetEphemeralRangeCache(t)
+	setEphemeralProbeForTest(t, netshDynamicPortWidened, nil) // overlap → the fix fires when elevated
+
+	// Elevated shell: the watchdog gate refuses an elevated setup (the real §42
+	// behavior) — but --fix-ephemeral-range needs exactly this elevated admin shell.
+	prevElev := setupIsElevatedFn
+	setupIsElevatedFn = func() (bool, error) { return true, nil }
+	t.Cleanup(func() { setupIsElevatedFn = prevElev })
+
+	var order []string
+	prevSet := setEphemeralTCPRange
+	setEphemeralTCPRange = func(start, num int) ([]byte, error) {
+		order = append(order, "ephemeral")
+		return []byte("Ok."), nil
+	}
+	t.Cleanup(func() { setEphemeralTCPRange = prevSet })
+
+	origBootstrap := setupBootstrapFn
+	origRouter := setupLSPClientRouterFn
+	origWatchdog := setupWatchdogFn
+	t.Cleanup(func() {
+		setupBootstrapFn = origBootstrap
+		setupLSPClientRouterFn = origRouter
+		setupWatchdogFn = origWatchdog
+	})
+	setupBootstrapFn = func(io.Writer) error { return nil }
+	setupLSPClientRouterFn = func(bool) (*api.LSPClientRouterReport, error) {
+		return &api.LSPClientRouterReport{}, nil
+	}
+	// The watchdog step REFUSES an elevated setup (plan §42) — model that refusal.
+	setupWatchdogFn = func(io.Writer, bool) error {
+		order = append(order, "watchdog")
+		return errors.New("mcphub setup must run un-elevated (plan §42); use --allow-elevated to override")
+	}
+
+	cmd := newSetupCmdReal()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"--fix-ephemeral-range"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected the watchdog elevation refusal to surface as a command error")
+	}
+
+	// The ephemeral-range fix MUST have run FIRST — before the watchdog gate refused.
+	if len(order) < 1 || order[0] != "ephemeral" {
+		t.Fatalf("step order = %v, want the ephemeral-range fix to run FIRST (before the watchdog elevation gate)", order)
+	}
+	// And the watchdog gate still ran + refused (the reorder did not swallow it).
+	if len(order) != 2 || order[1] != "watchdog" {
+		t.Fatalf("step order = %v, want [ephemeral watchdog]", order)
+	}
+	// The elevated netsh mutation actually printed its before/after (the fix executed).
+	if !strings.Contains(stdout.String(), "AFTER") {
+		t.Fatalf("ephemeral-range fix did not print its before/after; stdout:\n%s", stdout.String())
 	}
 }
 

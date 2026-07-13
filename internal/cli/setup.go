@@ -392,16 +392,26 @@ See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
 			if err := runSetupLSPClientRouter(cmd.OutOrStdout(), false); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: LSP router wiring failed (continuing to watchdog): %v\n", err)
 			}
-			if err := runSetupWatchdogForSetup(cmd.OutOrStdout(), allowElevated); err != nil {
-				return err
-			}
 			// L2 ephemeral-range detect + warn (Windows-only; POSIX no-op). Never
 			// mutates the host by default — it only warns when the OS TCP
 			// ephemeral (dynamic) range overlaps mcphub's daemon pools (the root
 			// cause the L1 runtime self-heal recovers from). --fix-ephemeral-range
 			// (admin) MOVES the range off the pool. Non-fatal: a probe/mutation
 			// failure warns and continues.
+			//
+			// Runs BEFORE the watchdog step (F1, round-5 bot). runSetupWatchdogForSetup
+			// REFUSES an elevated setup (plan §42) and returns early, but
+			// --fix-ephemeral-range needs exactly that elevated ADMIN shell (its netsh
+			// `int ipv4 set dynamicport tcp` mutation requires admin). Ordered AFTER the
+			// watchdog gate, the advertised host remedy was unreachable in the one
+			// context it requires. The step is independent of the watchdog step — it
+			// only probes/mutates the OS dynamic range via netsh + resolves the pools
+			// from config/manifest, needing NEITHER the state dir the watchdog ensures
+			// NOR the liveness task — so moving it earlier is side-effect-free.
 			runSetupEphemeralRangeStep(cmd, fixEphemeralRange)
+			if err := runSetupWatchdogForSetup(cmd.OutOrStdout(), allowElevated); err != nil {
+				return err
+			}
 			// Bless any operator-supplied LSP trusted roots. Runs AFTER the
 			// watchdog step because that step is where the per-user state dir
 			// is ensured + sanity-checked (it returns exit 8 if the state dir
