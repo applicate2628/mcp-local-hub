@@ -1,6 +1,17 @@
 # Bug: adopt GC Phase 2 reaps from a STALE Phase-1 row copy → can destroy a committed `adopted` row + secret snapshots
 
-Status: open
+Status: fixed
+Fixed: 2026-07-13 — PR #531 (`767b6736`). Phase 2 now re-reads the row under
+`withAdoptedEntriesLock` after acquiring the lease and reaps ONLY when the LIVE row is
+still the exact orphan Phase 1 selected (still `adopting`, `UpdatedAt.Equal(candidate)`,
+still older than cutoff); `reapAdoptProvenanceRow(manifestName, expectedState,
+expectedUpdatedAt)` gained the `(state, UpdatedAt)` identity gate (`adopted_entries.go:926-940`).
+Read error → fail-safe skip, never reap. Sibling all-return-paths gap closed by `e545c06e`
+(capture-UPSERT Part-2 unmutated gate). Verified at HEAD `63ed26a5`: the identity gate +
+Phase-2 under-lease re-read are present, named test
+`TestGcPhase2SkipsStaleCandidateAfterConcurrentReadopt` present. Unblocks de-adopt's dependency
+on this GC (the second de-adopt `Depends-on`, `classifier-committed-signal-blind-to-entry-drift`,
+remains OPEN).
 Filed: 2026-07-11
 Severity: P1 (silent, unrecoverable data destruction of provenance)
 Source: fable-5 hidden-bug hunt on delivered adopt-provenance code (#528)
