@@ -24,11 +24,15 @@ var docsOnlyCatalogIDs = []string{
 	// wave-2b additions.
 	"mathematica", "word", "powerpoint", "blender", "freecad",
 	"fusion360", "rhino", "davinci", "audacity", "anki",
-	// research/academic-search addition: scite is a REMOTE OAuth MCP
-	// (api.scite.ai/mcp) — it "Needs authentication", so it cannot be a one-click
-	// clean entries[] row and is a docs-only pointer (like the other docs_only rows).
-	// It is a proprietary product (no OSS license — see wantLicense below).
-	"scite",
+	// research/academic-search additions: both are REMOTE OAuth MCP endpoints that
+	// "Need authentication" per client, so neither can be a one-click clean entries[]
+	// row — they are docs-only OAuth pointers (like the other docs_only rows). Both are
+	// proprietary products (no OSS license — see wantLicense below).
+	//   - scite    — api.scite.ai/mcp (Smart Citations; subscription-gated OAuth).
+	//   - consensus — mcp.consensus.app/mcp (RECLASSIFIED from an entries[] http row by
+	//     Codex bot PR #536 F2: per-client OAuth means a URL-only one-click install would
+	//     leave an unauthenticated, non-working server).
+	"scite", "consensus",
 }
 
 // TestDocsOnlyPointerText_EmitsPointerNotManifest pins the S4 pointer text: a
@@ -296,9 +300,9 @@ func TestV2DocsOnlyRows_PresentInPointerArray(t *testing.T) {
 		"blender": "MIT", "freecad": "MIT", "fusion360": "MIT",
 		"rhino": "MIT", "davinci": "MIT", "audacity": "Apache-2.0",
 		"anki": "MIT",
-		// research addition: scite is a proprietary commercial product (remote OAuth
-		// MCP, subscription-gated) — there is no OSS license, so "proprietary".
-		"scite": "proprietary",
+		// research additions: scite + consensus are proprietary commercial products
+		// (remote OAuth MCP, subscription/account-gated) — no OSS license, so "proprietary".
+		"scite": "proprietary", "consensus": "proprietary",
 	}
 	if len(cat.DocsOnly) != len(docsOnlyCatalogIDs) {
 		t.Fatalf("docs_only count = %d, want %d", len(cat.DocsOnly), len(docsOnlyCatalogIDs))

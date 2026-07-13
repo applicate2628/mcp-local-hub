@@ -112,19 +112,23 @@ var tierSecretGatedVendoredCatalogIDs = []string{"tableau", "metabase"}
 //     in the summary, but a clean-cache launch is verified.
 var tierVendorWave2bCatalogIDs = []string{"obsidian", "logseq", "origin-pro"}
 
-// tierResearchCatalogIDs are the research/academic-search rows appended AFTER the
-// wave-2b batch. Both are READY one-click rows (no install_probe, no vendored_source,
-// no required_secrets), so they extend ONLY the entries[] count sum below — they are
-// NOT part of the disabled-until-probe tier1/wave-2a install_probe ordering loops:
+// tierResearchCatalogIDs is the research/academic-search entries[] row appended AFTER
+// the wave-2b batch. It is a READY one-click row (no install_probe, no vendored_source,
+// no required_secrets), so it extends ONLY the entries[] count sum below — it is NOT
+// part of the disabled-until-probe tier1/wave-2a install_probe ordering loops:
 //   - scholar-search — community silung/scholar-search-mcp (Python, MIT), PyPI
-//     scholar-search-mcp, run via `uv run --with scholar-search-mcp`. A local-stdio
-//     CLIENT to the Semantic Scholar API, which works keyless at the shared public
-//     rate limit, so it is a clean ready row like the git/fetch v1 entries. No secret.
-//   - consensus — REMOTE HTTP row (transport:http, like context7) pointing at the
-//     provider-hosted endpoint https://mcp.consensus.app/mcp. READY, no auth for the
-//     free tier. As a transport:http row it carries NO command/args and NO
-//     required_secrets (a remote endpoint's credentials live in its OAuth/headers).
-var tierResearchCatalogIDs = []string{"scholar-search", "consensus"}
+//     scholar-search-mcp PINNED to ==0.1.3, run via `uv run --with scholar-search-mcp==0.1.3`.
+//     A local-stdio CLIENT to the Semantic Scholar API, which works keyless at the shared
+//     public rate limit, so it is a clean ready SEARCH row like the git/fetch v1 entries.
+//     No secret. (It also exposes a write-capable download_arxiv_source tool — the summary
+//     carries the caveat; that does not change its catalog SHAPE, so there is no probe/gate.)
+//
+// consensus was initially added here as a transport:http entries[] row but was
+// RECLASSIFIED to a docs_only[] OAuth pointer (Codex bot PR #536 F2): its supported
+// access is per-client OAuth, so a one-click URL-only install would leave an
+// unauthenticated non-working server. It now lives in docsOnlyCatalogIDs
+// (marketplace_docs_only_test.go), not here.
+var tierResearchCatalogIDs = []string{"scholar-search"}
 
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
