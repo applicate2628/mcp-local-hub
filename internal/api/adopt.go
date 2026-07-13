@@ -321,6 +321,31 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 		Writer:          w,
 		SymlinkConsents: opts.SymlinkConsents,
 	}); err != nil {
+		// PRESERVE branch (bug 2026-07-12): Install's own client-config rollback could
+		// not CONFIRM the pre-adopt state of ≥1 client (it may have been rewritten to
+		// the hub relay and not reversed, OR a restore write failed on an
+		// otherwise-untouched config). Aborting here would delete the pre-adopt
+		// provenance snapshot needed to reverse a still-committed client — a data-loss
+		// window. Keep the WHOLE
+		// partially-committed state (row `adopting` + snapshots + manifest + routed
+		// vault keys) so the post-#532 GC reclaim gates (classifyDeadAdoptingRow
+		// Signal 2b + adoptRowProvablyUnmutated) reclaim it once the operator
+		// reverses the partial commit; do NOT abort, delete the manifest, or drop the
+		// keys. Do NOT promote to `adopted` — `adopting`+manifest-present is exactly
+		// the Signal-2b committed-keep state.
+		var rbErr *InstallClientRollbackIncompleteError
+		if errors.As(err, &rbErr) {
+			emitAdoptProvenancePreserved(plan.ManifestName, rbErr.Clients) // NAMES/COUNTS only
+			return fmt.Errorf(
+				"adopt install failed and its client-config rollback could not be fully reversed "+
+					"(clients whose pre-adopt restoration could not be confirmed: %s); the pre-adopt provenance snapshot, "+
+					"manifest %q, and routed vault keys were PRESERVED so the state stays recoverable — "+
+					"restore those clients from the timestamped .bak-mcp-local-hub-* backup printed above, "+
+					"then remove manifest %q, or reverse it with de-adopt once available: %w",
+				strings.Join(sortedAdoptStrings(rbErr.Clients), ","), plan.ManifestName, plan.ManifestName, err)
+		}
+		// ABORT — rollback provably complete OR nothing client-side mutated. Existing
+		// cleanup UNCHANGED below.
 		vaultNote := ""
 		abortNote := abortProvenanceNote(abortAdoptProvenance(rec))
 		if cleanupErr := a.ManifestDelete(plan.ManifestName); cleanupErr != nil {

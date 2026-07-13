@@ -119,6 +119,21 @@ func emitAdoptProvenanceAbort(manifestName, reason string) {
 	})
 }
 
+// emitAdoptProvenancePreserved records that an adopt Install FAILED with an
+// INCOMPLETE client-config rollback (≥1 client whose pre-adopt restoration could
+// not be confirmed), so the whole partially-committed state (row `adopting` +
+// snapshots + manifest + routed vault keys) was PRESERVED rather than aborted —
+// keeping it recoverable (bug 2026-07-12). Body: manifest, clients (NAMES of the
+// clients whose pre-adopt restoration could not be confirmed), client_count.
+// NAMES/COUNTS only — never secret values or config contents.
+func emitAdoptProvenancePreserved(manifestName string, clientNames []string) {
+	emitAdoptProvenanceEvent(SupervisorEventSeverityWarn, "adopt-provenance-preserved", map[string]any{
+		"manifest":     manifestName,
+		"clients":      append([]string(nil), clientNames...),
+		"client_count": len(clientNames),
+	})
+}
+
 // emitAdoptProvenanceCommitFailed records that Install committed but the flip
 // write failed; the row is left `adopting` (recoverable). Body: manifest. Called
 // by the Phase C seam.

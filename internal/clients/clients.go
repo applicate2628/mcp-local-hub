@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -359,6 +360,91 @@ func RestoreEntryFromBackupForRollbackWithConfigWriter(client Client, backupPath
 		return fmt.Errorf("client %s does not support scoped config writer rollback", client.Name())
 	}
 	return scoped.RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name, writer)
+}
+
+// entryRestoreIsNoop is the single owner of the presence-aware, entry-scoped
+// skip-if-unchanged predicate the rollback-restore bodies fold in: it reports
+// whether restoring the backup's copy of a named entry over the live config
+// would be a no-op — the live write-target already holds exactly the backup's
+// entry value, or both agree the entry is absent.
+//
+// Compare is by PARSED VALUE deep-equal of the target entry ONLY, so (a) a
+// formatting/comment/sibling-entry difference elsewhere in the file never forces
+// a restore (closes the round-3 sibling-edit false-restore), and (b) a mutated
+// entry (AddEntry rewrote stdio→url) never deep-equals its stdio backup, so a
+// mutated client is never skipped. Presence-aware so an absent-vs-present entry
+// (a #1-removed / delete case) is correctly a non-noop that must restore.
+func entryRestoreIsNoop(liveEntry any, livePresent bool, backupEntry any, backupPresent bool) bool {
+	if livePresent != backupPresent {
+		return false
+	}
+	if !livePresent {
+		return true
+	}
+	return reflect.DeepEqual(liveEntry, backupEntry)
+}
+
+// wholeFileRestoreIfWriteTargetGone is the rollback-only whole-file recovery for
+// SecureWriteClientConfig post-rename path #1: a definitive owner/mode/DACL verify
+// failure REMOVES the just-published config file, taking the restore target entry
+// AND every sibling entry with it. The surgical entry-scoped restore body cannot
+// recover the siblings once the file is gone (it base-reads the now-missing live
+// config, so a set/delete of the one target entry writes back a file with only that
+// entry), and the entry-scoped skip would FALSE-skip the both-absent case — so this
+// runs FIRST, ahead of entryRestoreIsNoop, inside each restore body's allowHubEntry
+// (rollback) gate.
+//
+// When the write-target FILE at path is absent (os.IsNotExist) while backupData
+// holds bytes, it publishes the WHOLE backup file — recovering the target entry and
+// all siblings — through the ATOMIC create-if-absent seam CreateConfigFileIfMissing
+// (design round-6). That production seam is a no-replace create (Windows:
+// NtCreateFile FILE_CREATE + rename-no-replace + owner-only DACL at create; POSIX:
+// O_CREAT|O_EXCL|O_NOFOLLOW 0600), so publication is race-free with any external
+// process (non-lock-honoring client app / editor / sync) that might recreate the
+// file: the no-replace create is the AUTHORITATIVE publish. If the file reappears in
+// the stat→create window the create returns EEXIST, the backup bytes are NEVER
+// written, and this returns (false, nil) so the body falls through to the surgical
+// restore (which re-reads the now-live file and preserves the external sibling).
+//
+// The os.Stat below is therefore NOT a TOCTOU: it is a non-authoritative fast-path
+// gate answering only "are we in the file-gone branch?". The create — not the stat —
+// decides whether the whole backup is published, and it does so atomically. This
+// closes Sol round-5 P1 (the round-5 stat-then-writeConfigFile publish could clobber
+// a concurrently-recreated sibling with stale backup bytes and report false success).
+//
+// Branch map:
+//
+//   - len(backupData)==0 -> (false, nil): nothing to recover from (an empty backup
+//     would only truncate the file).
+//   - os.Stat(path) ok -> (false, nil): file present (the common path #2 mutated /
+//     unmutated cases) -> let the surgical body / entry-scoped skip run unchanged.
+//     NO create is attempted on any file-present path.
+//   - os.Stat(path) non-ENOENT error -> (false, nil): fail-safe — never manufacture
+//     a whole-file write off an ambiguous stat error.
+//   - os.Stat==ENOENT, create returns err -> (true, err): a no-replace-create refusal
+//     (symlink/reparse) or hard I/O failure. The error propagates so the caller's
+//     rollback sentinel PRESERVES provenance rather than reporting a false success.
+//   - os.Stat==ENOENT, created==true -> (true, nil): the whole backup file was
+//     published race-free; recovery complete.
+//   - os.Stat==ENOENT, created==false (EEXIST) -> (false, nil): an external process
+//     recreated the file between the stat and the no-replace create. The backup bytes
+//     were NOT published; fall through to the surgical restore, which re-reads the
+//     live file and preserves whatever the external process wrote.
+func wholeFileRestoreIfWriteTargetGone(path string, backupData []byte) (handled bool, err error) {
+	if len(backupData) == 0 {
+		return false, nil
+	}
+	if _, statErr := os.Stat(path); statErr == nil || !os.IsNotExist(statErr) {
+		return false, nil
+	}
+	created, cerr := CreateConfigFileIfMissing(path, backupData)
+	if cerr != nil {
+		return true, cerr
+	}
+	if created {
+		return true, nil
+	}
+	return false, nil
 }
 
 // StdioEntry is the format-agnostic shape of one stdio MCP server

@@ -1,6 +1,6 @@
 # Bug: adopt abort deletes pre-adopt provenance even when Install's client-config rollback FAILED
 
-Status: open
+Status: closed (fixed on branch fix/adopt-abort-preserve-provenance-on-rollback-failure)
 Filed: 2026-07-12
 Severity: P1 (Sol / final-decisions lane) — data-loss class, but with an Install-backup backstop (fable: "pre-existing residual"). Fix-owner to reconcile.
 Source: Sol (codex gpt-5.6-sol xhigh) wider destructive-path review during #532 commission

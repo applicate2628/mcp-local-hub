@@ -322,6 +322,29 @@ func (o *openCodeClient) restoreEntryFromBackupWithWriter(backupPath, name strin
 		return fmt.Errorf("parse backup %s: %w", backupPath, err)
 	}
 	backupServers, _ := backupMap[openCodeMCPKey].(map[string]any)
+	// Rollback-only atomic entry-scoped skip-if-unchanged (design round-4): read
+	// the SINGLE write-target layer under the held withConfigLock and, if it
+	// already holds the backup's entry value (unmutated client, or a sibling edit
+	// left THIS entry untouched), return nil WITHOUT writing. A read/parse error
+	// FALLS THROUGH to the existing restore (no new failure mode). Gated on
+	// allowHubEntry so demigrate keeps its ErrBackupEntryAlreadyMigrated guard.
+	if allowHubEntry {
+		// Whole-file-gone recovery FIRST (design round-5): SecureWrite path #1 may have
+		// REMOVED the write-target file (target entry + siblings). Recover the whole
+		// backup before the entry-scoped skip, which would else false-skip the
+		// both-absent case or surgically recreate only the target entry (losing siblings).
+		if handled, werr := wholeFileRestoreIfWriteTargetGone(o.path, backupData); handled {
+			return werr
+		}
+		if liveMap, rerr := o.readJSON(); rerr == nil {
+			liveServers, _ := liveMap[openCodeMCPKey].(map[string]any)
+			le, lp := liveServers[name]
+			be, bp := backupServers[name]
+			if entryRestoreIsNoop(le, lp, be, bp) {
+				return nil
+			}
+		}
+	}
 	if backupServers != nil {
 		if backupEntry, present := backupServers[name]; present {
 			// Defensive guard (demigrate flow only — the rollback caller
