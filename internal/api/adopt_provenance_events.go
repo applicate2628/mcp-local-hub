@@ -34,6 +34,23 @@ const (
 	adoptOrphanReapTriggerGC     = "gc"
 )
 
+// adoptReapFailPhaseRow and adoptReapFailPhaseRowlessDir name the two GC reap
+// stages that emitAdoptProvenanceReapFailed distinguishes (P3-3): the Phase-2
+// row-reap and the Phase-3 rowless-dir snapshot removal. Single-owned here so the
+// wire points and the tests share one string.
+const (
+	adoptReapFailPhaseRow        = "gc-row"
+	adoptReapFailPhaseRowlessDir = "gc-rowless-dir"
+	// adoptReapFailPhaseLeasePathError names a GC skip where the per-manifest lease
+	// path could NOT be resolved / acquired due to an ERROR (F1) — notably a legacy
+	// ".lease"-suffixed manifest that a pre-P3-1 build wrote to disk, whose lease path
+	// now fails the reserved-suffix guard. Such an orphan is permanently unreachable by
+	// the reaper, so the GC REPORTS it (instead of silently skipping) so an operator can
+	// remove adopt-provenance/<name> manually. Distinct from a lease HELD by a live
+	// adopt, which stays a legitimate silent skip.
+	adoptReapFailPhaseLeasePathError = "gc-lease-path-error"
+)
+
 // emitAdoptProvenanceEvent is the single owner of the provenance event envelope
 // (severity + event + already-redacted body) on the `adopt` source.
 func emitAdoptProvenanceEvent(severity, event string, body map[string]any) {
@@ -151,6 +168,23 @@ func emitAdoptProvenanceOrphanReaped(manifestName string, ageSeconds float64, tr
 		"manifest":    manifestName,
 		"age_seconds": ageSeconds,
 		"trigger":     trigger,
+	})
+}
+
+// emitAdoptProvenanceReapFailed records that the GC could NOT complete a reap —
+// either the Phase-2 row-reap (reapAdoptProvenanceRow) or the Phase-3 rowless-dir
+// snapshot removal (removeAdoptSnapshots) returned an error — so a stale,
+// secret-bearing `adopting` orphan (or rowless snapshot dir) remains on disk with no
+// operator signal until the next GC pass (previously a SILENT `else` branch, P3-3).
+// Body: manifest, phase ("gc-row" | "gc-rowless-dir"), reason (the returned error's
+// path/class string). NAMES/PATHS/COUNTS only — reapAdoptProvenanceRow /
+// removeAdoptSnapshots errors are path/class only and NEVER carry a secret value or
+// config content, matching the module's redaction contract.
+func emitAdoptProvenanceReapFailed(manifestName, phase, reason string) {
+	emitAdoptProvenanceEvent(SupervisorEventSeverityWarn, "adopt-provenance-reap-failed", map[string]any{
+		"manifest": manifestName,
+		"phase":    phase,
+		"reason":   reason,
 	})
 }
 

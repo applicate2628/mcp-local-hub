@@ -42,6 +42,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -254,6 +255,18 @@ func adoptSnapshotDir(manifestName string) (string, error) {
 	if err := CheckManifestName(manifestName); err != nil {
 		return "", fmt.Errorf("adopt snapshot dir: invalid manifest name %q: %w", manifestName, err)
 	}
+	// Reserve the ".lease" suffix adopt-provenance-locally (P3-1). CheckManifestName
+	// ACCEPTS a dotted name like "foo.lease", but <state>/adopt-provenance/foo.lease
+	// is BOTH manifest "foo.lease"'s snapshot DIR and manifest "foo"'s lease FILE
+	// (adoptManifestLeasePath). Without this guard, removeAdoptSnapshots("foo.lease")
+	// RemoveAll's that path and unlinks a concurrently-HELD "foo" lease → split-lease
+	// → the dead-owner precondition of the reap classifier is defeated → a live
+	// committed "foo" row can be reaped (P1 data loss). Both path owners carry the
+	// SAME guard (arch C1) so they can never diverge; the refusal fail-closes at
+	// tryAcquireAdoptManifestLease (adopt step 0b) with ZERO side effects.
+	if strings.HasSuffix(manifestName, adoptManifestLeaseSuffix) {
+		return "", fmt.Errorf("adopt provenance: manifest name %q ends in the reserved %q suffix", manifestName, adoptManifestLeaseSuffix)
+	}
 	dir, err := DaemonStateDir()
 	if err != nil {
 		return "", err
@@ -350,6 +363,13 @@ func ReadAdoptProvenance(manifestName string) (rec *AdoptProvenanceRecord, found
 func adoptManifestLeasePath(manifestName string) (string, error) {
 	if err := CheckManifestName(manifestName); err != nil {
 		return "", fmt.Errorf("adopt lease: invalid manifest name %q: %w", manifestName, err)
+	}
+	// SAME reserved-suffix guard as adoptSnapshotDir (arch C1 — the two path owners
+	// MUST fail identically, or a ".lease"-suffixed manifest could still resolve a
+	// lease path here while its snapshot dir is refused, re-opening the collision).
+	// Placed BEFORE the MkdirAll below so a rejected name causes NO side effect.
+	if strings.HasSuffix(manifestName, adoptManifestLeaseSuffix) {
+		return "", fmt.Errorf("adopt provenance: manifest name %q ends in the reserved %q suffix", manifestName, adoptManifestLeaseSuffix)
 	}
 	dir, err := DaemonStateDir()
 	if err != nil {
@@ -986,6 +1006,16 @@ var errAdoptPriorConfigMutated = errors.New("prior adopt config mutated since ca
 // always uses adoptRowProvablyUnmutated.
 var adoptRowProvablyUnmutatedFn = adoptRowProvablyUnmutated
 
+// reapAdoptProvenanceRowFn is the GC Phase-2 row-reap step, a package var ONLY so a
+// test can force the reap to fail and exercise the reap-failed audit path (P3-3).
+// Production always uses reapAdoptProvenanceRow.
+var reapAdoptProvenanceRowFn = reapAdoptProvenanceRow
+
+// gcRemoveRowlessSnapshotsFn is the GC Phase-3 rowless-dir snapshot-removal step, a
+// package var ONLY so a test can force the removal to fail and exercise the
+// reap-failed audit path (P3-3). Production always uses removeAdoptSnapshots.
+var gcRemoveRowlessSnapshotsFn = removeAdoptSnapshots
+
 // adoptRowProvablyUnmutated reports POSITIVE crash-before-Install evidence for a
 // dead-owner `adopting` row the GC has already classified CRASH_REAP (so both the
 // live hub binding AND the manifest are absent). REAP destroys the row's secret
@@ -1039,9 +1069,12 @@ func adoptRowProvablyUnmutated(rec AdoptProvenanceRecord) bool {
 //
 //   Phase 1 (store lock): snapshot the aged `adopting` candidates + the set of
 //     manifests that have ANY store row; release the store lock.
-//   Phase 2 (per candidate, OUTSIDE the store lock): TryLock its lease — a LIVE
-//     adopt holds it => skip (claim 16). With the lease held the owner is provably
-//     dead; then RE-READ the row under the store lock and require it is STILL the
+//   Phase 2 (per candidate, OUTSIDE the store lock): TryLock its lease — a lease-PATH
+//     resolver ERROR (a legacy ".lease"-suffixed manifest now refused by the P3-1
+//     guard) is REPORTED as adopt-provenance-reap-failed{phase:gc-lease-path-error}
+//     then skipped (F1 — an unreachable orphan must not be silent); a lease HELD by a
+//     LIVE adopt is a legitimate silent skip (claim 16). With the lease held the owner
+//     is provably dead; then RE-READ the row under the store lock and require it is STILL the
 //     exact orphan Phase 1 selected (still `adopting`, UpdatedAt unchanged, still
 //     older than the cutoff) — a stale Phase-1 copy must never drive a reap after a
 //     concurrent re-adopt replaced the row (bug 2026-07-11). classifyDeadAdoptingRow
@@ -1056,7 +1089,8 @@ func adoptRowProvablyUnmutated(rec AdoptProvenanceRecord) bool {
 //     identity-gated at the mutation point.
 //   Phase 3 (backstop): reap ROWLESS snapshot dirs (a <manifest>/ dir with no store
 //     row — findings 3/4 residue or any future ordering bug), gated on the lease +
-//     no-store-row, NOT age-gated (a rowless dir has no updated_at).
+//     no-store-row, NOT age-gated (a rowless dir has no updated_at). Same F1 lease-path
+//     -error report as Phase 2 for a rowless legacy ".lease"-named dir.
 //
 // Lock order (acyclic): <manifest>.lease (TryLock, non-blocking) -> adopted-entries
 // .lock. The store lock is NEVER held while acquiring a lease. Returns the count
@@ -1095,8 +1129,17 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 	// Phase 2 — reap true cross-manifest row-bearing orphans under each own lease.
 	for _, c := range candidates {
 		lk, ok, lErr := tryAcquireAdoptManifestLease(c.rec.ManifestName)
-		if lErr != nil || !ok {
-			continue // lease unavailable (live adopt) or path error => skip (fail-safe)
+		if lErr != nil {
+			// A lease-PATH resolver error (notably a legacy ".lease"-suffixed manifest a
+			// pre-P3-1 build allowed on disk — its lease path now fails the reserved-suffix
+			// guard) makes this orphan permanently unreachable by the reaper. Do NOT silently
+			// skip it (F1): REPORT it so an operator can remove adopt-provenance/<name>
+			// manually. Best-effort emit; still skip the reap (nothing was mutated).
+			emitAdoptProvenanceReapFailed(c.rec.ManifestName, adoptReapFailPhaseLeasePathError, lErr.Error())
+			continue
+		}
+		if !ok {
+			continue // lease HELD by a live adopt => legitimate silent skip (claim 16)
 		}
 		// RE-READ the row UNDER the held lease before classifying (bug 2026-07-11).
 		// c.rec is the STALE Phase-1 copy taken before the lease was held: a concurrent
@@ -1161,7 +1204,7 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 			_ = lk.Unlock()
 			continue // cannot positively prove pre-install => preserve the row + snapshots
 		}
-		if rErr := reapAdoptProvenanceRow(live.ManifestName, AdoptOperationStateAdopting, live.UpdatedAt); rErr == nil {
+		if rErr := reapAdoptProvenanceRowFn(live.ManifestName, AdoptOperationStateAdopting, live.UpdatedAt); rErr == nil {
 			emitAdoptProvenanceOrphanReaped(live.ManifestName, c.ageSec, adoptOrphanReapTriggerGC)
 			reaped++
 			// The GC reaps the row + snapshot dir ONLY. It does NOT delete the row's
@@ -1173,6 +1216,14 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 			// cleanup is owned by de-adopt (hash-gated, operator-driven --reclaim-crashed).
 			// Bounded residual: a reversed-preserve reap leaves the routed keys in the
 			// owner-only vault until de-adopt (or the operator) removes them.
+		} else {
+			// Reap failed (store write / snapshot removal error): the secret-bearing
+			// `adopting` orphan remains on disk. Surface it (P3-3) so an operator sees
+			// the stuck orphan instead of it being silently retried next pass. The reason
+			// is the returned error's path/class string (reapAdoptProvenanceRow errors are
+			// path/class only, never a secret value). Best-effort — an audit miss must
+			// never fail the best-effort GC.
+			emitAdoptProvenanceReapFailed(live.ManifestName, adoptReapFailPhaseRow, rErr.Error())
 		}
 		_ = lk.Unlock()
 	}
@@ -1187,8 +1238,15 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 			continue // has (or had) a store row — handled by Phase 2 or kept intentionally
 		}
 		lk, ok, lErr := tryAcquireAdoptManifestLease(m)
-		if lErr != nil || !ok {
-			continue // live adopt (may be mid-anchor) or path error => skip
+		if lErr != nil {
+			// Same F1 legacy ".lease" case as Phase 2: a rowless snapshot dir whose name
+			// fails the lease-path suffix guard is unreachable by the reaper — REPORT it
+			// instead of silently skipping. Best-effort emit; still skip the removal.
+			emitAdoptProvenanceReapFailed(m, adoptReapFailPhaseLeasePathError, lErr.Error())
+			continue
+		}
+		if !ok {
+			continue // live adopt (may be mid-anchor) => legitimate silent skip
 		}
 		// Confirm still rowless UNDER the lease before removing (authoritative).
 		hasRow := true
@@ -1207,9 +1265,15 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 			return nil
 		})
 		if !hasRow {
-			if rmErr := removeAdoptSnapshots(m); rmErr == nil {
+			if rmErr := gcRemoveRowlessSnapshotsFn(m); rmErr == nil {
 				emitAdoptProvenanceOrphanReaped(m, 0, adoptOrphanReapTriggerGC)
 				reaped++
+			} else {
+				// Rowless-dir snapshot removal failed: the secret-bearing rowless dir
+				// remains. Surface it (P3-3) instead of silently leaving it for the next
+				// pass. Reason is the error's path/class string (removeAdoptSnapshots
+				// errors are path/class only, never a secret value). Best-effort.
+				emitAdoptProvenanceReapFailed(m, adoptReapFailPhaseRowlessDir, rmErr.Error())
 			}
 		}
 		_ = lk.Unlock()
