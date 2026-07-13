@@ -1,6 +1,29 @@
 # Bug: adopt classifier's committed-signal is blind to entry drift → committed-but-unflipped `adopting` row destroyed by routine ops
 
-Status: open
+Status: fixed
+Fixed: 2026-07-13 — the P1 committed-signal-blind class was closed at HEAD by PR #532
+(`e545c06e`, "capture-UPSERT reap gains the Part-2 unmutated gate"), architect-adjudicated
+(Sol PASS) + security-re-verified + Codex-bot PASS (decision
+`2026-07-10-adopt-provenance-crash-consistency-model.md` addendum 2026-07-12). Verified at
+HEAD `92552562` by a security-engineer ground-truth pass (2026-07-13):
+- **Signal 2b (manifest-exists → KEEP):** `classifyDeadAdoptingRow` now returns
+  `adoptRowCommittedKeep` when the adopt-created manifest still exists or cannot be stat'd
+  (`adopted_entries.go:507-509`, single owner `adoptManifestExistsFn` :435-441; fail-closed).
+- **Positive-crash-evidence gate before REAP, BOTH lanes:** `adoptRowProvablyUnmutated`
+  (:1015-1034) wired into the GC crash-reap lane and the capture-UPSERT lane (:585) — REAP
+  only if every present-at-capture client's live config still whole-file-sha-matches its
+  snapshot; any unprovable client → KEEP.
+- Drift table: all three scenarios the root-cause names (gate-ON `mcphub-hub` aggregate,
+  manifest port-edit+reinstall, `mcphub uninstall`) now classify to KEEP — each protected by
+  TWO independent gates (Signal 2b + the sha gate). Verified `mcphub uninstall` has NO
+  ManifestDelete, so Signal 2b fires. Named regression tests present
+  (`adopt_classifier_committed_signal_test.go`, 9 tests).
+This SATISFIES de-adopt's second `Depends-on` edge (design claim 10 committed-KEEP
+recoverability). The residual over-reap (case-3 revert-to-exact-bytes + manifest-delete) and
+the merged-lower over-block are ACCEPTED/deferred residuals (decision addendum), NOT this P1,
+and do not arise under the named drift scenarios. Split out below: **P3-1** (`.lease`
+namespace collision → latent split-lease P1) and **P3-3** (silent GC reap-failure) remain
+OPEN and are tracked as an adopt-provenance hardening follow-up.
 Filed: 2026-07-11
 Severity: P1 (silent, unrecoverable destruction of a "recoverable" provenance row)
 Source: fable-5 hidden-bug hunt on delivered adopt-provenance code (#528)
