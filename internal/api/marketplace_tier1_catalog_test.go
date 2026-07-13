@@ -112,6 +112,18 @@ var tierSecretGatedVendoredCatalogIDs = []string{"tableau", "metabase"}
 //     in the summary, but a clean-cache launch is verified.
 var tierVendorWave2bCatalogIDs = []string{"obsidian", "logseq", "origin-pro"}
 
+// NOTE: the three research/academic-search servers (scholar-search, consensus, scite)
+// are ALL docs_only[] POINTER rows, NOT entries[] rows — so there is deliberately NO
+// research tier slice here, and the entries[] count sum below is unchanged from the
+// wave-2b total. They were each reclassified to docs_only across Codex bot PR #536
+// review rounds:
+//   - consensus + scite — REMOTE OAuth MCP endpoints (per-client OAuth), so a URL-only
+//     one-click install would leave an unauthenticated, non-working server (F2, round 2).
+//   - scholar-search — its download_arxiv_source tool DELETES a caller-supplied
+//     <output_dir>/<arxiv_id> before fetching with no per-tool consent gate, so a READY
+//     one-click install is unsafe; a summary warning is not a gate (P1 escalation,
+//     round 3). All three now live in docsOnlyCatalogIDs (marketplace_docs_only_test.go).
+
 // v1CatalogPath / v2CatalogPath: internal/api/ test cwd → repo root is two levels up.
 func v1CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v1", "catalog.json") }
 func v2CatalogPath() string { return filepath.Join("..", "..", "marketplace", "v2", "catalog.json") }

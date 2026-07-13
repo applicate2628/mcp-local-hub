@@ -1205,6 +1205,47 @@
         "daw",
         "audio"
       ]
+    },
+    {
+      "id": "scite",
+      "name": "Scite MCP server (docs-only)",
+      "summary": "Connect an AI client to Scite's scientific-literature database from scite.ai -- full-text search across research papers plus Scite's Smart Citations (which show whether other studies support, contradict, or merely mention a claim). DOCS-ONLY pointer: this is a REMOTE MCP endpoint (https://api.scite.ai/mcp) that requires OAuth sign-in, so it cannot be a one-click clean entries[] row -- the hub never installs it; add it directly in your MCP client and complete the browser OAuth flow. Requires a Scite subscription (7-day trial available). Scite is a proprietary commercial product.",
+      "homepage": "https://scite.ai",
+      "readme_url": "https://scite.ai/mcp",
+      "manual_install": "Scite is a REMOTE OAuth MCP server -- add it directly in your MCP client rather than installing via the hub. In Claude Code run: `claude mcp add --transport http --scope user scite https://api.scite.ai/mcp`, then run a tool (or `/mcp`) so the client opens a browser window to sign in and authorize (OAuth 2.0; the client auto-discovers the endpoints from /.well-known/oauth-authorization-server). Requires a Scite subscription (7-day trial available). Other MCP clients (Claude Desktop, Cursor, VS Code, ChatGPT) accept the same https://api.scite.ai/mcp streamable-HTTP URL.",
+      "license": "proprietary",
+      "categories": [
+        "research",
+        "science",
+        "citations"
+      ]
+    },
+    {
+      "id": "consensus",
+      "name": "Consensus MCP server (docs-only)",
+      "summary": "Search over 200M+ peer-reviewed scientific papers from an AI client via Consensus -- an AI research search engine spanning sources such as Semantic Scholar, PubMed, and arXiv. DOCS-ONLY pointer: this is a REMOTE MCP endpoint (https://mcp.consensus.app/mcp) whose supported access is OAuth per client (Claude Code opens the browser OAuth on first tool use; Codex requires `codex mcp login consensus`), so a one-click URL-only install would leave an unauthenticated, non-working server -- the hub never installs it; add it directly in your MCP client and complete the OAuth flow. A no-account free tier may return limited results, but OAuth is the supported access path. Consensus is a proprietary commercial product.",
+      "homepage": "https://consensus.app",
+      "readme_url": "https://docs.consensus.app/docs/mcp",
+      "manual_install": "Consensus is a REMOTE OAuth MCP server -- add it directly in your MCP client rather than installing via the hub. In Claude Code run: `claude mcp add --transport http --scope user consensus https://mcp.consensus.app/mcp`, then run a tool (or `/mcp`) so the client opens a browser window to sign in and authorize on first use. In Codex, run `codex mcp login consensus` after adding it to complete OAuth. A no-account free tier may return limited results, but OAuth is the supported access path. Other MCP clients (Claude Desktop, Cursor, VS Code, ChatGPT) accept the same https://mcp.consensus.app/mcp streamable-HTTP URL.",
+      "license": "proprietary",
+      "categories": [
+        "research",
+        "science",
+        "remote"
+      ]
+    },
+    {
+      "id": "scholar-search",
+      "name": "Scholar Search MCP server (docs-only)",
+      "summary": "Search academic literature from an AI client via the Semantic Scholar API (and optionally arXiv) -- search papers, fetch paper/author details, citations, references, recommendations, and batch lookups. Community server silung/scholar-search-mcp (Python, MIT), published to PyPI as scholar-search-mcp and PINNED to v0.1.3. DOCS-ONLY pointer: this server exposes a WRITE-CAPABLE, DESTRUCTIVE tool `download_arxiv_source` that extracts an arXiv source bundle under a caller-supplied output_dir and DELETES/overwrites <output_dir>/<arxiv_id> first -- with no per-tool consent gate, a one-click READY install could let an agent pass output_dir=~ + arxiv_id=.ssh and wipe ~/.ssh even if the download 404s, so the hub does NOT one-click install it. Install it deliberately per the steps below and only ever pass a safe, dedicated output_dir (never a home/config directory such as ~ or ~/.ssh). Search itself is keyless (the Semantic Scholar API works at the shared public rate limit -- no secret). Requires Python + uv on PATH.",
+      "homepage": "https://github.com/silung/scholar-search-mcp",
+      "readme_url": "https://raw.githubusercontent.com/silung/scholar-search-mcp/master/README.md",
+      "manual_install": "Add it directly to your MCP client after reviewing the destructive-tool caveat. Pinned, project-isolated launch: `uv run --no-project --with scholar-search-mcp==0.1.3 python -m scholar_search_mcp` -- the --no-project flag avoids discovering an ambient Python project/workspace (a global daemon inherits the supervisor cwd; a stray pyproject.toml with an incompatible requires-python would otherwise break the server). Enable the backends with env SCHOLAR_SEARCH_ENABLE_SEMANTIC_SCHOLAR=true and SCHOLAR_SEARCH_ENABLE_ARXIV=true. DESTRUCTIVE-TOOL CAVEAT: this server exposes `download_arxiv_source`, which extracts an arXiv paper's LaTeX/source bundle under a caller-supplied output_dir and DELETES/overwrites <output_dir>/<arxiv_id> before fetching -- an agent that supplies a sensitive output_dir (e.g. ~ or ~/.ssh) could wipe files there even if the download fails. Only ever pass a safe, dedicated output_dir, Setting env SCHOLAR_ARXIV_SOURCE_DIR only changes the DEFAULT base used when a call OMITS output_dir; it does NOT constrain an explicit output_dir an agent supplies, so it is not a safety gate. Requires Python + uv on PATH.",
+      "license": "MIT",
+      "categories": [
+        "research",
+        "science"
+      ]
     }
   ]
 }
