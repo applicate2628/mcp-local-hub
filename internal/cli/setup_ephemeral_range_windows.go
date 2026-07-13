@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/windows"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
@@ -191,28 +192,21 @@ func (r tcpRange) overlaps(e ephemeralRange) bool {
 // elevated shell, so resolving netsh by name would allow executable search-path
 // hijacking in that elevated context.
 func trustedNetshPath() (string, error) {
-	root := os.Getenv("SystemRoot")
-	if root == "" {
-		root = os.Getenv("windir")
-	}
-	if root == "" {
-		return "", fmt.Errorf("could not locate Windows system root for netsh.exe")
-	}
-
-	systemRoot, err := filepath.Abs(filepath.Clean(root))
+	// Resolve System32 via the kernel-authoritative GetSystemDirectoryW syscall,
+	// NOT the SystemRoot/windir ENVIRONMENT. --fix-ephemeral-range may run from an
+	// elevated shell whose inherited environment is attacker-influenced; a
+	// SystemRoot pointing at e.g. C:\Users\Public\fake (with fake\System32\netsh.exe)
+	// would pass an absolute+stat check yet execute a hijacked binary as admin. The
+	// syscall returns the real Windows system directory and cannot be redirected via
+	// the environment or PATH.
+	system32, err := windows.GetSystemDirectory()
 	if err != nil {
-		return "", fmt.Errorf("resolve Windows system root %q: %w", root, err)
+		return "", fmt.Errorf("resolve Windows system directory for netsh.exe: %w", err)
 	}
-	if !filepath.IsAbs(systemRoot) {
-		return "", fmt.Errorf("Windows system root %q is not absolute", root)
+	if !filepath.IsAbs(system32) {
+		return "", fmt.Errorf("Windows system directory %q is not absolute", system32)
 	}
-	system32 := filepath.Join(systemRoot, "System32")
 	netsh := filepath.Join(system32, "netsh.exe")
-
-	rel, err := filepath.Rel(system32, netsh)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("resolved netsh.exe path %q is outside %q", netsh, system32)
-	}
 	info, err := os.Stat(netsh)
 	if err != nil {
 		return "", fmt.Errorf("stat trusted netsh.exe %q: %w", netsh, err)
