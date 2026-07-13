@@ -21,6 +21,7 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
 
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/gui"
 )
 
@@ -29,7 +30,7 @@ import (
 // ---------------------------------------------------------------
 
 func TestForce_HealthyIncumbent_BareFlagActivates(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	srv := healthyIncumbentServer(t, os.Getpid())
 	defer srv.Close()
@@ -62,7 +63,7 @@ func TestForce_HealthyIncumbent_BareFlagActivates(t *testing.T) {
 // ---------------------------------------------------------------
 
 func TestForce_HealthyIncumbent_KillFlagPrintsNoticeAndActivates(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	srv := healthyIncumbentServer(t, os.Getpid())
 	defer srv.Close()
@@ -109,7 +110,7 @@ func TestForce_HealthyIncumbent_KillFlagPrintsNoticeAndActivates(t *testing.T) {
 // and registers flock cleanup on t.
 func setupStuckForceFixture(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	const probablyClosedPort = 1
 	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d %d\n", os.Getpid(), probablyClosedPort)), 0o600); err != nil {
@@ -201,7 +202,7 @@ func TestForce_KillHappyPath_SeamMocked(t *testing.T) {
 	defer gui.RestoreIdentityGate(prevGate)
 	gui.SetIdentityGate(func(v gui.Verdict) (refused bool, reason string) { return false, "" })
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	// Spawn a child sleep process so we have a real PID we can kill.
 	var sleepCmd *exec.Cmd
@@ -306,7 +307,7 @@ func TestForce_KillRewritesPidportWithCurrentPID(t *testing.T) {
 	// one the P2 #2 bug hid in.
 	freePort := pickFreePort(t)
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	// Spawn a sleep helper so Probe sees a live PID. The kill path
@@ -434,7 +435,7 @@ func pickFreePort(t *testing.T) int {
 // ---------------------------------------------------------------
 
 func TestForce_KillRefusesNonMcphubImage(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	// os.Getppid is the shell (or test runner parent) — image does NOT
 	// match mcphub.exe/mcphub.
@@ -465,7 +466,7 @@ func TestForce_KillRefusesNonMcphubImage(t *testing.T) {
 // ---------------------------------------------------------------
 
 func TestForce_KillNonInteractiveWithoutYesExits6(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d 1\n", os.Getpid())), 0o600); err != nil {
 		t.Fatal(err)
@@ -553,7 +554,7 @@ func TestForce_FlagValidation_YesRequiresKill(t *testing.T) {
 // unrecoverable" per memo §Exit codes), not exit 2 (which is
 // reserved for bare --force diagnostic).
 func TestForce_KillMalformedPidport_NoPromptExits4(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte("garbage not a pidport"), 0o600); err != nil {
 		t.Fatal(err)
@@ -587,7 +588,7 @@ func TestForce_KillMalformedPidport_NoPromptExits4(t *testing.T) {
 // where the otherwise-healthy GUI would be terminated for bad
 // metadata alone.
 func TestForce_KillOutOfRangePort_ClassifiesMalformed(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	// Use os.Getpid() so PID is alive (we want to assert the port
 	// validation kicks in BEFORE the kill path; without the iter-8
@@ -634,7 +635,7 @@ func TestForce_KillDeadPID_NoPromptExits3(t *testing.T) {
 	}
 	deadPid := deadCmd.Process.Pid
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte(fmt.Sprintf("%d 1\n", deadPid)), 0o600); err != nil {
 		t.Fatal(err)
@@ -675,7 +676,7 @@ func TestForce_KillRaceLost(t *testing.T) {
 	prevHook := gui.PostKillHookForTest()
 	defer gui.RestorePostKillHook(prevHook)
 
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	// Spawn a sleep child so Probe sees a live PID.
@@ -740,7 +741,7 @@ func TestForce_KillRaceLost(t *testing.T) {
 // ---------------------------------------------------------------
 
 func TestForce_MalformedPidport(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	if err := os.WriteFile(pidport, []byte("garbage not a pidport"), 0o600); err != nil {
 		t.Fatal(err)
@@ -790,7 +791,7 @@ func TestForce_MalformedPidport(t *testing.T) {
 // ok:true → Healthy → cli's iter-2 switch arm fires →
 // "incumbent recovered to healthy" + exit 0.
 func TestForce_KillRecoveryHealthyBetweenProbes(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	// Counting ping handler: first request fails, subsequent succeed.
@@ -884,7 +885,7 @@ func TestForce_RealSubprocessE2E(t *testing.T) {
 	// Use the existing ensureMcphubBinary pattern from
 	// daemon_reliability_test.go.
 	bin := ensureMcphubBinary(t)
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 	// Phase A: spawn a first mcphub gui that holds the lock.
 	first := exec.Command(bin, "gui", "--port", "0", "--no-browser", "--no-tray")
@@ -972,7 +973,7 @@ func TestForce_RealSubprocessE2E(t *testing.T) {
 // identity on every runner (linux/windows/macOS), so the test runs
 // uniformly without needing a real `mcphub daemon` subprocess.
 func TestForce_KillNonGUIMcphubSubcommand_RefusedBeforePrompt(t *testing.T) {
-	dir := t.TempDir()
+	dir := apitest.HardenedTempDir(t)
 	pidport := filepath.Join(dir, "gui.pidport")
 
 	// pidport must record a live PID so probeOnce reaches
