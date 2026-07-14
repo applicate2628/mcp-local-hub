@@ -195,10 +195,31 @@ func (c *codexCLI) restoreEntryFromBackupWithWriter(backupPath, name string, all
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
+	// Re-attach the backup file path to any error the path-free core returns, so
+	// the file-backed demigrate/rollback caller keeps a "which backup failed"
+	// diagnostic (the core stays path-free for Phase 3's in-memory snapshot
+	// bytes). %w preserves ErrBackupEntryAlreadyMigrated for errors.Is callers.
+	if err := c.restoreEntryFromBytes(backupData, name, allowHubEntry, writer); err != nil {
+		return fmt.Errorf("restore backup %s: %w", backupPath, err)
+	}
+	return nil
+}
+
+// restoreEntryFromBytes is the post-ReadFile restore core: given the
+// already-read backup bytes it parses them, reads the live config once, and
+// surgically restores (or strips) the named entry.
+// restoreEntryFromBackupWithWriter is the thin file-reading wrapper over this
+// core. The parse error omits the source path because this core also serves
+// callers that pass in-memory bytes with no backing file.
+func (c *codexCLI) restoreEntryFromBytes(backupData []byte, name string, allowHubEntry bool, writer WriteConfigFileFunc) error {
+	// err is declared here because the os.ReadFile that previously declared it
+	// now lives in the wrapper; the demigrate branch below assigns it via
+	// `liveMap, err = c.readTOML()`.
+	var err error
 	var backupMap map[string]any
 	if len(backupData) > 0 {
 		if err := toml.Unmarshal(backupData, &backupMap); err != nil {
-			return fmt.Errorf("parse backup %s: %w", backupPath, err)
+			return fmt.Errorf("parse backup: %w", err)
 		}
 	}
 	if backupMap == nil {
