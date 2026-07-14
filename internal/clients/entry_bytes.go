@@ -42,30 +42,51 @@ var (
 // <section>[name] is a JSON object — the same parse + lookup the JSON-family
 // adapters' GetEntry uses. Pure/read-only (no disk access).
 func jsoncEntryPresentInBytes(configBytes []byte, section, name string) (bool, error) {
+	_, present, err := jsoncEntryRawSubtree(configBytes, section, name)
+	return present, err
+}
+
+// jsoncEntryRawSubtree is the single JSONC section extractor used by both the
+// physical-presence check and Phase-4 classification. It returns the parsed
+// on-disk entry value without projecting it onto the intentionally lean
+// MCPEntry shape.
+func jsoncEntryRawSubtree(configBytes []byte, section, name string) (any, bool, error) {
 	m, err := parseJSONCBytes(configBytes)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	servers, _ := m[section].(map[string]any)
 	if servers == nil {
-		return false, nil
+		return nil, false, nil
 	}
-	_, ok := servers[name].(map[string]any)
-	return ok, nil
+	subtree, ok := servers[name].(map[string]any)
+	if !ok {
+		return nil, false, nil
+	}
+	return subtree, true, nil
 }
 
 // tomlEntryPresentInBytes is the TOML analogue (codex-cli's readTOML parse).
 func tomlEntryPresentInBytes(configBytes []byte, section, name string) (bool, error) {
+	_, present, err := tomlEntryRawSubtree(configBytes, section, name)
+	return present, err
+}
+
+// tomlEntryRawSubtree is the TOML analogue of jsoncEntryRawSubtree.
+func tomlEntryRawSubtree(configBytes []byte, section, name string) (any, bool, error) {
 	var m map[string]any
 	if err := toml.Unmarshal(configBytes, &m); err != nil {
-		return false, fmt.Errorf("parse toml config bytes: %w", err)
+		return nil, false, fmt.Errorf("parse toml config bytes: %w", err)
 	}
 	servers, _ := m[section].(map[string]any)
 	if servers == nil {
-		return false, nil
+		return nil, false, nil
 	}
-	_, ok := servers[name].(map[string]any)
-	return ok, nil
+	subtree, ok := servers[name].(map[string]any)
+	if !ok {
+		return nil, false, nil
+	}
+	return subtree, true, nil
 }
 
 // ---- adapter implementations (methods may live in any file of package clients) ----

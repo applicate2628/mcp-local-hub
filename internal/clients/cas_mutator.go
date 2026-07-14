@@ -3,6 +3,7 @@ package clients
 import (
 	"errors"
 	"fmt"
+	"reflect"
 )
 
 // ErrCASConflict is the sentinel a CAS entry mutator returns when the live
@@ -12,6 +13,22 @@ import (
 // never a silent overwrite. Wrapped with %w at every refusal site so
 // errors.Is(err, ErrCASConflict) holds.
 var ErrCASConflict = errors.New("clients: CAS conflict — live client entry no longer matches the expected hub entry")
+
+// EntryClassification is ClassifyEntryUnderLock's exhaustive read-only verdict.
+type EntryClassification int
+
+const classifyInvalid EntryClassification = -1
+
+const (
+	ClassifyStillHub EntryClassification = iota
+	ClassifyRestoreDone
+	ClassifyGenuineConflict
+	ClassifyUnreadable
+)
+
+// ClassifyVerdict is the public verdict spelling used by Phase-4 callers.
+// EntryClassification remains the design-specified method signature.
+type ClassifyVerdict = EntryClassification
 
 // CASEntryMutator is the read-check-mutate capability the de-adopt flow uses to
 // restore or remove a client's hub entry ATOMICALLY under the config lock. It is
@@ -80,6 +97,16 @@ type CASEntryMutator interface {
 	// write-target entry so a lower/merged layer re-emerges (present-merged-lower).
 	// nil match fails closed (ErrCASConflict), never panics.
 	CASGuardedRemoveEntry(entryName string, match func(*MCPEntry) bool) error
+
+	// ClassifyEntryUnderLock reads and classifies the write-target-physical
+	// entry. The lockingClient forwarder holds withConfigReadLock across this
+	// whole call; concrete implementations are read-only and lock-free.
+	ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error)
+
+	// EntryRawSubtree extracts the parsed, verbatim per-entry subtree from
+	// configBytes. It is pure and lock-free and shares the same section extractor
+	// as EntryPresentInBytes.
+	EntryRawSubtree(configBytes []byte, name string) (subtree any, present bool, err error)
 }
 
 // Compile-time proof that every adopt-reachable adapter carries the CAS method
@@ -275,6 +302,121 @@ func casGuardedRemove(
 	return removeEntry(entryName)
 }
 
+// classifyEntryFromPhysicalBytes is the single live-classification owner. It
+// reads ConfigPath exactly once, extracts the live raw subtree through the same
+// owner EntryPresentInBytes uses, projects the recognizer input from that parsed
+// subtree, and never consults a merged GetEntry view.
+func classifyEntryFromPhysicalBytes(
+	configPath string,
+	name string,
+	match func(*MCPEntry) bool,
+	snapshotSubtree any,
+	extract func([]byte, string) (any, bool, error),
+	project func(string, map[string]any) *MCPEntry,
+) (EntryClassification, error) {
+	configBytes, err := readRawConfig(configPath)
+	if err != nil {
+		return ClassifyUnreadable, fmt.Errorf("classify entry %q: read write target %s: %w", name, configPath, err)
+	}
+
+	liveSubtree, present, err := extract(configBytes, name)
+	if err != nil {
+		return ClassifyUnreadable, fmt.Errorf("classify entry %q: parse write target %s: %w", name, configPath, err)
+	}
+	if !present {
+		if snapshotSubtree == nil {
+			return ClassifyRestoreDone, nil
+		}
+		return ClassifyGenuineConflict, nil
+	}
+
+	raw, ok := liveSubtree.(map[string]any)
+	if !ok {
+		return classifyInvalid, fmt.Errorf("classify entry %q: write-target subtree has type %T, want object", name, liveSubtree)
+	}
+	live := project(name, raw)
+	if match == nil {
+		return classifyInvalid, fmt.Errorf("classify entry %q: nil recognizer", name)
+	}
+	matched, err := classifyInvokeMatch(name, match, live)
+	if err != nil {
+		return classifyInvalid, err
+	}
+	if matched {
+		return ClassifyStillHub, nil
+	}
+	if snapshotSubtree != nil && reflect.DeepEqual(liveSubtree, snapshotSubtree) {
+		return ClassifyRestoreDone, nil
+	}
+	return ClassifyGenuineConflict, nil
+}
+
+// classifyInvokeMatch keeps a faulty injected recognizer from escaping the
+// read-lock critical section as a panic. A callback failure returns the private
+// invalid verdict plus an error; ClassifyUnreadable stays reserved for genuine
+// physical read/parse failures.
+func classifyInvokeMatch(name string, match func(*MCPEntry) bool, live *MCPEntry) (matched bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			matched = false
+			err = fmt.Errorf("classify entry %q: recognizer panicked: %v", name, r)
+		}
+	}()
+	return match(live), nil
+}
+
+func classifyURLRawEntry(name string, raw map[string]any, urlField, headersField string) *MCPEntry {
+	url, _ := raw[urlField].(string)
+	return &MCPEntry{
+		Name:     name,
+		URL:      url,
+		Headers:  extractHeaders(raw, headersField),
+		Disabled: mcpEntryDisabled(raw),
+	}
+}
+
+func classifyOpenCodeRawEntry(name string, raw map[string]any) *MCPEntry {
+	url, _ := raw["url"].(string)
+	disabled := openCodeEntryDisabled(raw)
+	if url == "" {
+		return &MCPEntry{Name: name, Raw: raw, Disabled: disabled}
+	}
+	if disabled {
+		return &MCPEntry{Name: name, URL: url, Raw: raw, Disabled: true}
+	}
+	if openCodeRemoteHasExtraFields(raw) {
+		return &MCPEntry{Name: name, URL: url, Raw: raw}
+	}
+	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers")}
+}
+
+func classifyAntigravityRawEntry(name string, raw map[string]any) *MCPEntry {
+	e := &MCPEntry{Name: name, Disabled: mcpEntryDisabled(raw)}
+	if cmd, _ := raw["command"].(string); cmd != "" {
+		e.RelayExePath = cmd
+	}
+	if args, ok := raw["args"].([]any); ok {
+		for i, value := range args {
+			flag, _ := value.(string)
+			switch flag {
+			case "--server":
+				if i+1 < len(args) {
+					e.RelayServer, _ = args[i+1].(string)
+				}
+			case "--daemon":
+				if i+1 < len(args) {
+					e.RelayDaemon, _ = args[i+1].(string)
+				}
+			case "--url":
+				if i+1 < len(args) {
+					e.RelayURL, _ = args[i+1].(string)
+				}
+			}
+		}
+	}
+	return e
+}
+
 // ---- per-adapter CAS methods (methods may live in any file of package clients;
 // co-located here so the adopt-reachable set is auditable in one place) ----
 //
@@ -282,6 +424,14 @@ func casGuardedRemove(
 // the live read dispatches to the concrete GetEntry override and the restore
 // composes the concrete (or promoted-base) restoreEntryFromBytes.
 
+func (c *claudeCode) EntryRawSubtree(configBytes []byte, name string) (any, bool, error) {
+	return jsoncEntryRawSubtree(configBytes, claudeCodeMCPServersKey, name)
+}
+func (c *claudeCode) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
+	return classifyEntryFromPhysicalBytes(c.path, name, match, snapshotSubtree, c.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
+		return classifyURLRawEntry(name, raw, "url", "headers")
+	})
+}
 func (c *claudeCode) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil)
 }
@@ -289,6 +439,14 @@ func (c *claudeCode) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bo
 	return casGuardedRemove(name, match, c.GetEntry, c.RemoveEntry, nil)
 }
 
+func (c *codexCLI) EntryRawSubtree(configBytes []byte, name string) (any, bool, error) {
+	return tomlEntryRawSubtree(configBytes, "mcp_servers", name)
+}
+func (c *codexCLI) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
+	return classifyEntryFromPhysicalBytes(c.path, name, match, snapshotSubtree, c.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
+		return classifyURLRawEntry(name, raw, "url", "http_headers")
+	})
+}
 func (c *codexCLI) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil)
 }
@@ -296,6 +454,14 @@ func (c *codexCLI) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool
 	return casGuardedRemove(name, match, c.GetEntry, c.RemoveEntry, nil)
 }
 
+func (v *vscodeClient) EntryRawSubtree(configBytes []byte, name string) (any, bool, error) {
+	return jsoncEntryRawSubtree(configBytes, vscodeServersKey, name)
+}
+func (v *vscodeClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
+	return classifyEntryFromPhysicalBytes(v.path, name, match, snapshotSubtree, v.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
+		return classifyURLRawEntry(name, raw, "url", "headers")
+	})
+}
 func (v *vscodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return casRestoreFromBytes(name, match, snapshotBytes, v.GetEntry, v.EntryPresentInBytes, v.restoreEntryFromBytes, nil)
 }
@@ -303,6 +469,12 @@ func (v *vscodeClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) 
 	return casGuardedRemove(name, match, v.GetEntry, v.RemoveEntry, nil)
 }
 
+func (o *openCodeClient) EntryRawSubtree(configBytes []byte, name string) (any, bool, error) {
+	return jsoncEntryRawSubtree(configBytes, openCodeMCPKey, name)
+}
+func (o *openCodeClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
+	return classifyEntryFromPhysicalBytes(o.path, name, match, snapshotSubtree, o.EntryRawSubtree, classifyOpenCodeRawEntry)
+}
 func (o *openCodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return casRestoreFromBytes(name, match, snapshotBytes, o.GetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, nil)
 }
@@ -320,6 +492,14 @@ func (o *openCodeClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry
 // a hub-shaped HIGHER layer could pass the recognizer while the mutation lands on a
 // different operator write-target value (fable-5 Phase-3 P2). Comparing the write
 // target's OWN value + refusing on a winning higher layer restores the invariant.
+func (o *mimoCodeClient) EntryRawSubtree(configBytes []byte, name string) (any, bool, error) {
+	return jsoncEntryRawSubtree(configBytes, mimoCodeMCPKey, name)
+}
+func (o *mimoCodeClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
+	return classifyEntryFromPhysicalBytes(o.path, name, match, snapshotSubtree, o.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
+		return mimoCodeProjectEntry(name, raw, raw, false)
+	})
+}
 func (o *mimoCodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return casRestoreFromBytes(name, match, snapshotBytes, o.casWriteTargetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, o.casHigherLayerDefined)
 }
@@ -386,6 +566,14 @@ func (o *mimoCodeClient) casHigherLayerRetainsServer(name string) (bool, error) 
 // virtual dispatch, so a CAS method on the base would bind the base GetEntry and
 // silently mis-read relay/httpUrl entries — another reason CAS is per-concrete).
 
+func (c *cursorClient) EntryRawSubtree(configBytes []byte, name string) (any, bool, error) {
+	return jsoncEntryRawSubtree(configBytes, c.sectionKey(), name)
+}
+func (c *cursorClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
+	return classifyEntryFromPhysicalBytes(c.path, name, match, snapshotSubtree, c.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
+		return classifyURLRawEntry(name, raw, c.urlField, "headers")
+	})
+}
 func (c *cursorClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil)
 }
@@ -393,6 +581,14 @@ func (c *cursorClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) 
 	return casGuardedRemove(name, match, c.GetEntry, c.RemoveEntry, nil)
 }
 
+func (g *geminiCLI) EntryRawSubtree(configBytes []byte, name string) (any, bool, error) {
+	return jsoncEntryRawSubtree(configBytes, g.sectionKey(), name)
+}
+func (g *geminiCLI) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
+	return classifyEntryFromPhysicalBytes(g.path, name, match, snapshotSubtree, g.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
+		return classifyURLRawEntry(name, raw, "url", "headers")
+	})
+}
 func (g *geminiCLI) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return casRestoreFromBytes(name, match, snapshotBytes, g.GetEntry, g.EntryPresentInBytes, g.restoreEntryFromBytes, nil)
 }
@@ -400,6 +596,14 @@ func (g *geminiCLI) CASGuardedRemoveEntry(name string, match func(*MCPEntry) boo
 	return casGuardedRemove(name, match, g.GetEntry, g.RemoveEntry, nil)
 }
 
+func (q *qwenCLI) EntryRawSubtree(configBytes []byte, name string) (any, bool, error) {
+	return jsoncEntryRawSubtree(configBytes, q.sectionKey(), name)
+}
+func (q *qwenCLI) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
+	return classifyEntryFromPhysicalBytes(q.path, name, match, snapshotSubtree, q.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
+		return classifyURLRawEntry(name, raw, "httpUrl", "headers")
+	})
+}
 func (q *qwenCLI) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return casRestoreFromBytes(name, match, snapshotBytes, q.GetEntry, q.EntryPresentInBytes, q.restoreEntryFromBytes, nil)
 }
@@ -407,6 +611,12 @@ func (q *qwenCLI) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool)
 	return casGuardedRemove(name, match, q.GetEntry, q.RemoveEntry, nil)
 }
 
+func (a *antigravityClient) EntryRawSubtree(configBytes []byte, name string) (any, bool, error) {
+	return jsoncEntryRawSubtree(configBytes, a.sectionKey(), name)
+}
+func (a *antigravityClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
+	return classifyEntryFromPhysicalBytes(a.path, name, match, snapshotSubtree, a.EntryRawSubtree, classifyAntigravityRawEntry)
+}
 func (a *antigravityClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return casRestoreFromBytes(name, match, snapshotBytes, a.GetEntry, a.EntryPresentInBytes, a.restoreEntryFromBytes, nil)
 }
@@ -414,13 +624,32 @@ func (a *antigravityClient) CASGuardedRemoveEntry(name string, match func(*MCPEn
 	return casGuardedRemove(name, match, a.GetEntry, a.RemoveEntry, nil)
 }
 
-// ---- lockingClient forwarders: HOLD withConfigLock across the whole CAS call ----
+// ---- lockingClient forwarders ----
 //
-// The forwarder owns the lock; the concrete body (dispatched via l.Client) runs
-// under it and is lock-free. A wrapped client whose CONCRETE does not implement
-// the capability (e.g. a windsurf-wrapped lockingClient reached by accident)
-// fails closed with an explicit error — but the de-adopt site should never reach
-// this because AsCASEntryMutator gates on the concrete first.
+// CAS forwarders hold withConfigLock. ClassifyEntryUnderLock holds the
+// read-selection withConfigReadLock. EntryRawSubtree is a pure lock-free bytes
+// forward, matching EntryPresentInBytes.
+
+func (l *lockingClient) EntryRawSubtree(configBytes []byte, name string) (any, bool, error) {
+	m, ok := l.Client.(CASEntryMutator)
+	if !ok {
+		return nil, false, fmt.Errorf("client %s does not support raw entry extraction", l.Client.Name())
+	}
+	return m.EntryRawSubtree(configBytes, name)
+}
+
+func (l *lockingClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (verdict EntryClassification, err error) {
+	err = withConfigReadLock(l.Client.ConfigPath(), func() error {
+		m, ok := l.Client.(CASEntryMutator)
+		if !ok {
+			return fmt.Errorf("client %s does not support entry classification", l.Client.Name())
+		}
+		var classifyErr error
+		verdict, classifyErr = m.ClassifyEntryUnderLock(name, match, snapshotSubtree)
+		return classifyErr
+	})
+	return verdict, err
+}
 
 func (l *lockingClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return withConfigLock(l.Client.ConfigPath(), func() error {
