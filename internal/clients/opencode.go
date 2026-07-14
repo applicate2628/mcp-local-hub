@@ -317,7 +317,14 @@ func (o *openCodeClient) restoreEntryFromBackupWithWriter(backupPath, name strin
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
-	return o.restoreEntryFromBytes(backupData, name, allowHubEntry, writer)
+	// Re-attach the backup file path to any error the path-free core returns, so
+	// the file-backed demigrate/rollback caller keeps a "which backup failed"
+	// diagnostic (the core stays path-free for Phase 3's in-memory snapshot
+	// bytes). %w preserves ErrBackupEntryAlreadyMigrated for errors.Is callers.
+	if err := o.restoreEntryFromBytes(backupData, name, allowHubEntry, writer); err != nil {
+		return fmt.Errorf("restore backup %s: %w", backupPath, err)
+	}
+	return nil
 }
 
 // restoreEntryFromBytes is the post-ReadFile restore core: given the
