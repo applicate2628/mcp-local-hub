@@ -164,8 +164,7 @@ func (v *vscodeClient) GetEntry(name string) (*MCPEntry, error) {
 	if !ok {
 		return nil, nil
 	}
-	url, _ := raw["url"].(string)
-	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers"), Disabled: mcpEntryDisabled(raw)}, nil
+	return classifyURLRawEntry(name, raw, "url", "headers"), nil
 }
 
 func (v *vscodeClient) LatestBackupPath() (string, bool, error) {

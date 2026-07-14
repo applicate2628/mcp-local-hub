@@ -120,32 +120,5 @@ func (a *antigravityClient) GetEntry(name string) (*MCPEntry, error) {
 		return nil, nil
 	}
 	// Reconstruct relay args if present, for debugging convenience.
-	e := &MCPEntry{Name: name, Disabled: mcpEntryDisabled(raw)}
-	if cmd, _ := raw["command"].(string); cmd != "" {
-		e.RelayExePath = cmd
-	}
-	if argsAny, ok := raw["args"].([]any); ok {
-		// Pull RelayServer/RelayDaemon (legacy form) or RelayURL
-		// (dynamic-pool router form) back out by position — our writer
-		// produces either [relay, --server, <s>, --daemon, <d>] or
-		// [relay, --url, <url>].
-		for i, v := range argsAny {
-			s, _ := v.(string)
-			switch s {
-			case "--server":
-				if i+1 < len(argsAny) {
-					e.RelayServer, _ = argsAny[i+1].(string)
-				}
-			case "--daemon":
-				if i+1 < len(argsAny) {
-					e.RelayDaemon, _ = argsAny[i+1].(string)
-				}
-			case "--url":
-				if i+1 < len(argsAny) {
-					e.RelayURL, _ = argsAny[i+1].(string)
-				}
-			}
-		}
-	}
-	return e, nil
+	return classifyAntigravityRawEntry(name, raw), nil
 }

@@ -148,8 +148,7 @@ func (c *codexCLI) GetEntry(name string) (*MCPEntry, error) {
 	if !ok {
 		return nil, nil
 	}
-	url, _ := raw["url"].(string)
-	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "http_headers"), Disabled: mcpEntryDisabled(raw)}, nil
+	return classifyURLRawEntry(name, raw, "url", "http_headers"), nil
 }
 
 // LatestBackupPath delegates to the shared helper.

@@ -324,7 +324,11 @@ func classifyEntryFromPhysicalBytes(
 		return ClassifyUnreadable, fmt.Errorf("classify entry %q: parse write target %s: %w", name, configPath, err)
 	}
 	if !present {
-		if snapshotSubtree == nil {
+		// A missing live entry is RestoreDone only when the original snapshot
+		// was entryless. A non-nil snapshot means the operator deleted the entry
+		// post-adopt; CAS restore deliberately refuses to resurrect it, so the
+		// classification is GenuineConflict.
+		if isNilSnapshotSubtree(snapshotSubtree) {
 			return ClassifyRestoreDone, nil
 		}
 		return ClassifyGenuineConflict, nil
@@ -349,6 +353,19 @@ func classifyEntryFromPhysicalBytes(
 		return ClassifyRestoreDone, nil
 	}
 	return ClassifyGenuineConflict, nil
+}
+
+func isNilSnapshotSubtree(snapshotSubtree any) bool {
+	if snapshotSubtree == nil {
+		return true
+	}
+	value := reflect.ValueOf(snapshotSubtree)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 // classifyInvokeMatch keeps a faulty injected recognizer from escaping the
@@ -382,6 +399,10 @@ func classifyOpenCodeRawEntry(name string, raw map[string]any) *MCPEntry {
 		return &MCPEntry{Name: name, Raw: raw, Disabled: disabled}
 	}
 	if disabled {
+		// Keep URL populated alongside Raw: read-side ownership checks
+		// (uninstall) compare entry.URL with the manifest URL, so dropping it
+		// would leave a hub-managed remote entry behind. Raw still drives
+		// lossless rollback.
 		return &MCPEntry{Name: name, URL: url, Raw: raw, Disabled: true}
 	}
 	if openCodeRemoteHasExtraFields(raw) {
@@ -396,6 +417,10 @@ func classifyAntigravityRawEntry(name string, raw map[string]any) *MCPEntry {
 		e.RelayExePath = cmd
 	}
 	if args, ok := raw["args"].([]any); ok {
+		// Pull RelayServer/RelayDaemon (legacy form) or RelayURL
+		// (dynamic-pool router form) back out by position — our writer
+		// produces either [relay, --server, <s>, --daemon, <d>] or
+		// [relay, --url, <url>].
 		for i, value := range args {
 			flag, _ := value.(string)
 			switch flag {
@@ -639,6 +664,12 @@ func (l *lockingClient) EntryRawSubtree(configBytes []byte, name string) (any, b
 }
 
 func (l *lockingClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (verdict EntryClassification, err error) {
+	// When the config parent is absent, withConfigReadLock deliberately holds
+	// only the in-process mutex: creating a flock would violate classification's
+	// no-side-effect-on-absence contract. A concurrent cross-process first-time
+	// config creation is therefore a benign point-in-time TOCTOU; this verdict is
+	// only point-in-time proof, and the CAS act re-verifies under its own flock so
+	// a stale verdict fails safe.
 	err = withConfigReadLock(l.Client.ConfigPath(), func() error {
 		m, ok := l.Client.(CASEntryMutator)
 		if !ok {

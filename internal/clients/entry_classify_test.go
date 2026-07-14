@@ -119,6 +119,11 @@ func TestClassifyEntryUnderLockAbsentConfigIsNotUnreadableAndHasNoFSSideEffects(
 	if err != nil || verdict != ClassifyRestoreDone {
 		t.Fatalf("absent-origin classify = (%v, %v), want (%v, nil)", verdict, err, ClassifyRestoreDone)
 	}
+	var typedNilSnapshot map[string]any
+	verdict, err = mut.ClassifyEntryUnderLock("serena", casURLMatch, typedNilSnapshot)
+	if err != nil || verdict != ClassifyRestoreDone {
+		t.Fatalf("absent-origin typed-nil snapshot classify = (%v, %v), want (%v, nil)", verdict, err, ClassifyRestoreDone)
+	}
 	snapshotSubtree, present, err := mut.EntryRawSubtree([]byte(`{"mcpServers":{"serena":{"command":"native-mcp-cmd"}}}`), "serena")
 	if err != nil || !present {
 		t.Fatalf("extract present snapshot: present=%v err=%v", present, err)

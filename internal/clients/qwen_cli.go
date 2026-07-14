@@ -98,6 +98,5 @@ func (q *qwenCLI) GetEntry(name string) (*MCPEntry, error) {
 	if !ok {
 		return nil, nil
 	}
-	url, _ := raw["httpUrl"].(string)
-	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(raw, "headers"), Disabled: mcpEntryDisabled(raw)}, nil
+	return classifyURLRawEntry(name, raw, "httpUrl", "headers"), nil
 }
