@@ -30,6 +30,12 @@ var (
 
 	// vcpkg search row: name  [version]  description (columns are space-padded).
 	vcpkgSearchRe = regexp.MustCompile(`^(\S+)(?:\s+(\S+))?\s{2,}(.*)$`)
+
+	// vcpkgPortNameRe validates that the first column of a search row is a real
+	// port name (optionally with a [feature] suffix). It rejects status/error
+	// lines like "error:  failed to fetch" whose first token ("error:") would
+	// otherwise be fabricated into a package result.
+	vcpkgPortNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*(?:\[[^\]]*\])?$`)
 )
 
 // parseCTest extracts per-test outcomes from ctest console output. The returned
@@ -137,6 +143,11 @@ func parseVcpkgSearch(raw string) []searchPackage {
 		if m == nil {
 			continue
 		}
+		// Skip rows whose first column is not a real port name (e.g. an
+		// "error: ..." status line) so garbage output never fabricates a package.
+		if !vcpkgPortNameRe.MatchString(m[1]) {
+			continue
+		}
 		out = append(out, searchPackage{
 			Name:        m[1],
 			Version:     m[2],
@@ -171,7 +182,10 @@ func readCacheSummary(sourceDir, preset string) map[string]string {
 	if err != nil {
 		return nil
 	}
-	expanded := expandPresetMacros(binaryDir, sourceDir, preset)
+	expanded, err := expandPresetMacros(binaryDir, sourceDir, preset)
+	if err != nil {
+		return nil
+	}
 	if strings.Contains(expanded, "${") || strings.Contains(expanded, "$env{") || strings.Contains(expanded, "$penv{") {
 		return nil
 	}

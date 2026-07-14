@@ -81,6 +81,14 @@ func TestParseDiagnostics(t *testing.T) {
 			}},
 		},
 		{
+			name: "msvc linker LINK label is file-less",
+			raw:  `LINK : fatal error LNK1104: cannot open file 'foo.lib'`,
+			want: []Diagnostic{{
+				Severity: "error", Code: "LNK1104",
+				Message: "cannot open file 'foo.lib'",
+			}},
+		},
+		{
 			name: "gnu ld undefined reference best effort",
 			raw:  `/usr/bin/ld: main.o: undefined reference to ` + "`bar()'",
 			want: []Diagnostic{{

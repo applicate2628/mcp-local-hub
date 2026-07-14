@@ -216,6 +216,22 @@ func sortedKeys(m map[string]string) []string {
 	return keys
 }
 
+// validateTargets rejects empty and flag-shaped build targets. A value like
+// "--clean-first" or "--" must never reach cmake as a positional target, or
+// cmake would reinterpret it as a flag (argument injection). No shell is used,
+// so this is the only guard against a flag-shaped target.
+func validateTargets(targets []string) error {
+	for _, t := range targets {
+		if strings.TrimSpace(t) == "" {
+			return mcp.NewParamError("targets must not contain empty entries")
+		}
+		if strings.HasPrefix(t, "-") {
+			return mcp.NewParamError("invalid target %q: must not begin with '-' (it would be parsed as a flag, not a target)", t)
+		}
+	}
+	return nil
+}
+
 // validateDefineKey rejects a -D cache key that would corrupt the argv (no
 // shell is used, but an '=' or space in the key would still misparse).
 func validateDefineKey(k string) error {
@@ -341,6 +357,11 @@ func (b *builder) cmakeBuild() mcp.Tool {
 			if a.Preset == "" {
 				return nil, mcp.NewParamError("preset is required")
 			}
+			// Validate targets before any environment resolution so a flag-shaped
+			// target is rejected as a param error regardless of host state.
+			if err := validateTargets(a.Targets); err != nil {
+				return nil, err
+			}
 			dir, err := b.workingDir(a.WorkingDir)
 			if err != nil {
 				return nil, err
@@ -351,11 +372,6 @@ func (b *builder) cmakeBuild() mcp.Tool {
 			}
 			argv := []string{"--build", "--preset", a.Preset}
 			if len(a.Targets) > 0 {
-				for _, t := range a.Targets {
-					if strings.TrimSpace(t) == "" {
-						return nil, mcp.NewParamError("targets must not contain empty entries")
-					}
-				}
 				argv = append(argv, "--target")
 				argv = append(argv, a.Targets...)
 			}
@@ -727,6 +743,11 @@ func (b *builder) vcpkgSearch() mcp.Tool {
 			}
 			if strings.TrimSpace(a.Query) == "" {
 				return nil, mcp.NewParamError("query is required")
+			}
+			// Reject a flag-shaped query so it cannot be reinterpreted by vcpkg as
+			// a flag (consistent with the cmake_build target guard).
+			if strings.HasPrefix(strings.TrimSpace(a.Query), "-") {
+				return nil, mcp.NewParamError("invalid query %q: must not begin with '-'", a.Query)
 			}
 			dir, err := b.workingDir(a.WorkingDir)
 			if err != nil {

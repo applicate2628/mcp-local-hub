@@ -96,3 +96,29 @@ func TestParseVcpkgSearch(t *testing.T) {
 		t.Errorf("row[2] = %+v", pkgs[2])
 	}
 }
+
+// TestParseVcpkgSearchGarbageSafe proves that error/status output never
+// fabricates a package result. "error:  failed to fetch" has the 2-space column
+// gap the row regex keys on, but its first token ("error:") is not a valid port
+// name, so it must be skipped rather than surfaced as a package named "error:".
+func TestParseVcpkgSearchGarbageSafe(t *testing.T) {
+	garbage := "error:  failed to fetch baseline\n" +
+		"warning:  something  happened\n" +
+		"note:  unrelated  text\n" +
+		"could not connect to the registry\n"
+	pkgs := parseVcpkgSearch(garbage)
+	if pkgs == nil {
+		t.Fatal("want non-nil empty slice")
+	}
+	if len(pkgs) != 0 {
+		t.Errorf("garbage output fabricated %d package(s): %+v", len(pkgs), pkgs)
+	}
+
+	// A real row mixed in with garbage is still parsed; the garbage is dropped.
+	mixed := "error:  failed to fetch\n" +
+		"fmt                  10.1.1#1         {Formatting library for C++}\n"
+	pkgs = parseVcpkgSearch(mixed)
+	if len(pkgs) != 1 || pkgs[0].Name != "fmt" {
+		t.Errorf("mixed input: want exactly the fmt row, got %+v", pkgs)
+	}
+}

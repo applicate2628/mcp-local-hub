@@ -169,15 +169,43 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 // dispatch parses one message and routes it. Long-running tools/call requests
 // are handed to a goroutine; everything else is answered inline.
 func (s *Server) dispatch(ctx context.Context, msg []byte) {
-	var env requestEnvelope
-	if err := json.Unmarshal(msg, &env); err != nil {
-		// We could not parse the frame, so we have no id to address; reply with
-		// a null-id parse error per JSON-RPC §5.1.
+	// Distinguish MALFORMED JSON (-32700 parse error) from well-formed JSON that
+	// is not a valid JSON-RPC request object (-32600 invalid request).
+	var probe json.RawMessage
+	if err := json.Unmarshal(msg, &probe); err != nil {
 		s.replyError(json.RawMessage("null"), codeParseError, "parse error: "+err.Error(), nil)
 		return
 	}
+	trimmed := bytes.TrimSpace(probe)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		// Valid JSON but not a request object (array/batch, scalar): no id to
+		// address, reply with a null-id invalid-request error.
+		s.replyError(json.RawMessage("null"), codeInvalidRequest, "invalid request: expected a JSON-RPC 2.0 request object", nil)
+		return
+	}
+	var env requestEnvelope
+	if err := json.Unmarshal(trimmed, &env); err != nil {
+		s.replyError(json.RawMessage("null"), codeInvalidRequest, "invalid request: "+err.Error(), nil)
+		return
+	}
 
-	isNotification := !hasID(env.ID)
+	// id classification: ABSENT => notification; PRESENT-and-null or a
+	// non-string/number type => an INVALID request (must be answered, id echoed
+	// as null); PRESENT string/number => a valid request id.
+	present, valid := idState(env.ID)
+	isNotification := !present
+	if present && !valid {
+		s.replyError(json.RawMessage("null"), codeInvalidRequest, "invalid request: id must be a string or number", nil)
+		return
+	}
+
+	// jsonrpc must be exactly "2.0". A malformed notification cannot be answered.
+	if env.JSONRPC != "2.0" {
+		if !isNotification {
+			s.replyError(env.ID, codeInvalidRequest, `invalid request: "jsonrpc" must be "2.0"`, nil)
+		}
+		return
+	}
 
 	if env.Method == "" {
 		if !isNotification {
@@ -193,8 +221,17 @@ func (s *Server) dispatch(ctx context.Context, msg []byte) {
 		}
 		s.handleInitialize(env.ID, env.Params)
 	case "notifications/initialized":
-		// Lifecycle no-op.
+		if !isNotification {
+			// Carries an id => it is a request, not the lifecycle notification;
+			// method-not-found is the correct answer for the request form.
+			s.replyError(env.ID, codeMethodNotFound, "method not found: "+env.Method, nil)
+		}
+		// Notification form: lifecycle no-op.
 	case "notifications/cancelled":
+		if !isNotification {
+			s.replyError(env.ID, codeMethodNotFound, "method not found: "+env.Method, nil)
+			return
+		}
 		s.handleCancelled(env.Params)
 	case "ping":
 		if !isNotification {
@@ -282,7 +319,9 @@ func (s *Server) handleToolsCall(ctx context.Context, id, params json.RawMessage
 	}
 	tool, ok := s.tools[p.Name]
 	if !ok {
-		s.replyError(id, codeMethodNotFound, "unknown tool: "+p.Name, nil)
+		// The METHOD (tools/call) exists; the tool NAME is a bad argument, so
+		// this is invalid params (-32602), not method-not-found (-32601).
+		s.replyError(id, codeInvalidParams, "unknown tool: "+p.Name, nil)
 		return
 	}
 
@@ -291,6 +330,14 @@ func (s *Server) handleToolsCall(ctx context.Context, id, params json.RawMessage
 
 	go func() {
 		defer s.releaseInflight(key, cancel)
+		// A panic in a tool handler (or its argument parser) must never take down
+		// the whole daemon; recover and surface it as an isError tool result so
+		// this one call fails while the server keeps serving.
+		defer func() {
+			if r := recover(); r != nil {
+				s.reply(id, toolResult(errorPayload(fmt.Sprintf("tool %q panicked: %v", p.Name, r)), true))
+			}
+		}()
 		result, err := tool.Call(callCtx, p.Arguments)
 		switch {
 		case err == nil:
@@ -382,10 +429,24 @@ func errorPayload(msg string) map[string]any {
 
 // --- id helpers --------------------------------------------------------------
 
-// hasID reports whether the raw id denotes a request (present and non-null).
-func hasID(raw json.RawMessage) bool {
+// idState classifies a raw JSON-RPC id field: present reports whether an id was
+// supplied at all (an ABSENT id denotes a notification); valid reports whether a
+// present id is an acceptable type (string or number). A present-but-null id, or
+// one of bool/object/array type, is present-but-invalid — the caller answers it
+// as an invalid request with a null id rather than treating it as a notification.
+func idState(raw json.RawMessage) (present, valid bool) {
 	t := bytes.TrimSpace(raw)
-	return len(t) > 0 && !bytes.Equal(t, []byte("null"))
+	if len(t) == 0 {
+		return false, false // absent => notification
+	}
+	switch t[0] {
+	case '"':
+		return true, true // string id
+	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		return true, true // number id
+	default:
+		return true, false // null, true, false, {, [ => present but invalid
+	}
 }
 
 // normalizeID returns a non-nil RawMessage so a response always carries an id

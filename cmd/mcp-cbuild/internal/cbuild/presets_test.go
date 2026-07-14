@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // writeFile is a test helper that writes content to dir/name.
@@ -147,5 +148,118 @@ func TestResolveBuildDirWithinSourceGuard(t *testing.T) {
 	// Unresolved macro: refused.
 	if _, err := resolveBuildDirWithinSource("${unknownMacro}/build", src, "dev"); err == nil {
 		t.Error("expected refusal for a binaryDir with unresolved macros")
+	}
+}
+
+// TestMergeConfigureSharedParentPrecedence pins the inherits-precedence fix: a
+// grandparent shared across two inheritance branches must contribute at each
+// branch's correct precedence. Here `dev` inherits [viaA, viaB]; both inherit
+// `common` (binaryDir=common-build); viaB overrides it to b-build. Because viaA
+// (which keeps common's value) is EARLIER in dev's inherits list, it wins, so
+// dev.binaryDir must resolve to common-build. The earlier shared-visited-set
+// design let the lower-precedence viaB value win.
+func TestMergeConfigureSharedParentPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "CMakePresets.json", `{
+      "version": 3,
+      "configurePresets": [
+        { "name": "common", "hidden": true, "generator": "Ninja",
+          "binaryDir": "${sourceDir}/common-build" },
+        { "name": "viaA", "hidden": true, "inherits": ["common"] },
+        { "name": "viaB", "hidden": true, "inherits": ["common"],
+          "binaryDir": "${sourceDir}/b-build" },
+        { "name": "dev", "inherits": ["viaA", "viaB"] }
+      ]
+    }`)
+
+	p, err := LoadPresets(dir)
+	if err != nil {
+		t.Fatalf("LoadPresets: %v", err)
+	}
+	bd, err := p.ResolvedBinaryDir("dev")
+	if err != nil {
+		t.Fatalf("ResolvedBinaryDir: %v", err)
+	}
+	if bd != "${sourceDir}/common-build" {
+		t.Errorf("dev binaryDir = %q, want ${sourceDir}/common-build (viaA outranks viaB)", bd)
+	}
+}
+
+// TestResolveBuildDirUnsetEnvMacroFailClosed proves an unset $env{} macro is a
+// fail-closed error, never collapsed to an empty string the purge guard trusts.
+func TestResolveBuildDirUnsetEnvMacroFailClosed(t *testing.T) {
+	src := t.TempDir()
+
+	// Unset env var → refused.
+	if _, err := resolveBuildDirWithinSource("$env{MCP_CBUILD_DEFINITELY_UNSET}/build", src, "dev"); err == nil {
+		t.Error("expected refusal for a binaryDir referencing an unset $env{} macro")
+	}
+	if _, err := resolveBuildDirWithinSource("$penv{MCP_CBUILD_DEFINITELY_UNSET}/build", src, "dev"); err == nil {
+		t.Error("expected refusal for a binaryDir referencing an unset $penv{} macro")
+	}
+
+	// Set env var pointing inside the tree → resolves.
+	t.Setenv("MCP_CBUILD_TESTDIR", "build-from-env")
+	got, err := resolveBuildDirWithinSource("$env{MCP_CBUILD_TESTDIR}", src, "dev")
+	if err != nil {
+		t.Fatalf("set env macro rejected: %v", err)
+	}
+	if got != filepath.Join(filepath.Clean(src), "build-from-env") {
+		t.Errorf("resolved = %q, want %q", got, filepath.Join(src, "build-from-env"))
+	}
+}
+
+// TestExpandEnvMacroSelfReferenceTerminates proves a self-referential env value
+// cannot make expandEnvMacro loop forever (the scan cursor advances past each
+// substitution).
+func TestExpandEnvMacroSelfReferenceTerminates(t *testing.T) {
+	t.Setenv("MCP_CBUILD_SELF", "$env{MCP_CBUILD_SELF}/x")
+
+	done := make(chan string, 1)
+	go func() {
+		out, _ := expandEnvMacro("$env{MCP_CBUILD_SELF}", "$env{")
+		done <- out
+	}()
+	select {
+	case out := <-done:
+		// The substituted value is treated as a literal (not re-expanded).
+		if out != "$env{MCP_CBUILD_SELF}/x" {
+			t.Errorf("expandEnvMacro = %q, want the literal single substitution", out)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("expandEnvMacro did not terminate on a self-referential value")
+	}
+}
+
+// TestNamedPresetInheritance proves build/test preset `inherits` is resolved so
+// an inherited configurePreset is surfaced (previously omitted).
+func TestNamedPresetInheritance(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "CMakePresets.json", `{
+      "version": 6,
+      "configurePresets": [ { "name": "dev", "binaryDir": "${sourceDir}/build" } ],
+      "buildPresets": [
+        { "name": "base-build", "hidden": true, "configurePreset": "dev" },
+        { "name": "child-build", "inherits": ["base-build"] }
+      ],
+      "testPresets": [
+        { "name": "base-test", "hidden": true, "configurePreset": "dev" },
+        { "name": "child-test", "inherits": ["base-test"] }
+      ]
+    }`)
+
+	p, err := LoadPresets(dir)
+	if err != nil {
+		t.Fatalf("LoadPresets: %v", err)
+	}
+	res := p.Result()
+
+	child := findPreset(t, res.BuildPresets, "child-build")
+	if child.ConfigurePreset != "dev" {
+		t.Errorf("child-build configurePreset = %q, want dev (inherited from base-build)", child.ConfigurePreset)
+	}
+	ctest := findPreset(t, res.TestPresets, "child-test")
+	if ctest.ConfigurePreset != "dev" {
+		t.Errorf("child-test configurePreset = %q, want dev (inherited from base-test)", ctest.ConfigurePreset)
 	}
 }

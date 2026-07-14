@@ -1,7 +1,6 @@
 package cbuild
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,9 +17,22 @@ import (
 // parseDiagnostics dropped is silently lost, without returning unbounded spew.
 const maxRawTail = 8 * 1024
 
+// maxCapturedOutput is the hard ceiling on how much child stdout+stderr is
+// retained in memory. A verbose or runaway build can emit gigabytes; we keep
+// only the last maxCapturedOutput bytes (a ring buffer) so a single build can
+// never OOM the server. parseDiagnostics and raw_tail both run off this bounded
+// sink; only the leading (oldest) output is dropped when the cap is exceeded.
+const maxCapturedOutput = 1 << 20 // 1 MiB
+
 // hardCapTimeout is the absolute ceiling on any single exec, regardless of the
 // per-call timeout requested by the client.
 const hardCapTimeout = 60 * time.Minute
+
+// waitDelay bounds how long Wait may block AFTER a timeout/cancel kill before it
+// is forced to return. A killed build's grandchild (ninja/cl.exe/link.exe) can
+// keep the output pipe open; without this the call would wedge past its
+// deadline. See runCommand.
+const waitDelay = 8 * time.Second
 
 // execResult is the outcome of a single external-command run.
 type execResult struct {
@@ -34,29 +46,54 @@ type execResult struct {
 	WallMs   int64
 }
 
-// syncBuffer is an io.Writer safe for concurrent writes from the stdout and
-// stderr pump goroutines, preserving interleaving order well enough for
-// diagnostic parsing.
-type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
+// boundedBuffer is an io.Writer safe for concurrent writes from the stdout and
+// stderr pump goroutines. It retains only the last `max` bytes: once the total
+// written exceeds the cap, the oldest bytes are discarded so memory stays
+// bounded regardless of how much the child emits. Interleaving order is
+// preserved well enough for diagnostic parsing.
+type boundedBuffer struct {
+	mu        sync.Mutex
+	buf       []byte
+	max       int
+	truncated bool // set once any leading output was dropped
 }
 
-func (s *syncBuffer) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.buf.Write(p)
+func newBoundedBuffer(max int) *boundedBuffer {
+	return &boundedBuffer{max: max}
 }
 
-func (s *syncBuffer) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.buf.String()
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := len(p)
+	b.buf = append(b.buf, p...)
+	if len(b.buf) > b.max {
+		over := len(b.buf) - b.max
+		// Retain only the last b.max bytes; copy into a fresh slice so the old
+		// head is released to the GC rather than pinned by a re-slice.
+		trimmed := make([]byte, b.max)
+		copy(trimmed, b.buf[over:])
+		b.buf = trimmed
+		b.truncated = true
+	}
+	return n, nil
+}
+
+func (b *boundedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.buf)
 }
 
 // runCommand executes bin with args in dir, bounded by timeout (clamped to the
-// hard cap) and cancellable via ctx. stdout and stderr are captured together.
-// There is NO shell: args are passed verbatim to exec.
+// hard cap) and cancellable via ctx. stdout and stderr are captured together
+// into a bounded ring buffer. There is NO shell: args are passed verbatim to
+// exec.
+//
+// On timeout or cancellation the WHOLE process tree is killed (not just the
+// direct child) via the per-OS process-group seam, and cmd.WaitDelay guarantees
+// Wait returns even if an orphaned grandchild still holds the output pipe — so
+// the call can never wedge past its deadline.
 func runCommand(ctx context.Context, timeout time.Duration, dir, bin string, args []string) execResult {
 	if timeout <= 0 || timeout > hardCapTimeout {
 		timeout = hardCapTimeout
@@ -64,14 +101,40 @@ func runCommand(ctx context.Context, timeout time.Duration, dir, bin string, arg
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	var out syncBuffer
+	out := newBoundedBuffer(maxCapturedOutput)
 	cmd := exec.CommandContext(runCtx, bin, args...)
 	cmd.Dir = dir
-	cmd.Stdout = &out
-	cmd.Stderr = &out
+	cmd.Stdout = out
+	cmd.Stderr = out
+	// If the process (or a grandchild holding the pipe) does not exit promptly
+	// after the kill, WaitDelay forces Wait to return so runCommand cannot block
+	// past the deadline.
+	cmd.WaitDelay = waitDelay
+
+	pg := newProcGroup()
+	pg.configure(cmd)
+	defer pg.close()
+	// Replace os/exec's default single-process cancel with a whole-tree kill so
+	// ninja/msbuild/cl.exe/link.exe grandchildren are reaped, not orphaned.
+	cmd.Cancel = func() error {
+		pg.kill(cmd)
+		return nil
+	}
 
 	start := time.Now()
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return execResult{
+			Combined: out.String(),
+			WallMs:   time.Since(start).Milliseconds(),
+			startErr: err,
+			ExitCode: -1,
+		}
+	}
+	// Assign the freshly-started child to the process group / Job Object so every
+	// descendant it spawns is reaped with it.
+	pg.start(cmd)
+
+	err := cmd.Wait()
 	wall := time.Since(start).Milliseconds()
 
 	res := execResult{Combined: out.String(), WallMs: wall}
@@ -179,13 +242,19 @@ func fileExists(p string) bool {
 // resolveBuildDirWithinSource resolves a preset's binaryDir to a concrete
 // absolute path and enforces that it is STRICTLY inside sourceDir. It is the
 // single owner of the cmake_clean --purge_build_dir path-escape guard: it
-// refuses an unresolved-macro path, a path equal to or outside sourceDir, and
-// a filesystem root. Only a path that passes may be handed to RemoveAll.
+// refuses an unresolved-macro path, a path equal to or outside sourceDir, and a
+// filesystem root. It applies the containment check TWICE — once lexically and
+// once on the symlink-resolved REAL paths — so an intermediate junction /
+// symlink whose lexical spelling stays inside the tree but whose real target
+// escapes it is refused. Only a path that passes both may be handed to RemoveAll.
 func resolveBuildDirWithinSource(binaryDir, sourceDir, presetName string) (string, error) {
 	if binaryDir == "" {
 		return "", errors.New("preset declares no binaryDir")
 	}
-	expanded := expandPresetMacros(binaryDir, sourceDir, presetName)
+	expanded, err := expandPresetMacros(binaryDir, sourceDir, presetName)
+	if err != nil {
+		return "", err
+	}
 	if strings.Contains(expanded, "${") || strings.Contains(expanded, "$env{") || strings.Contains(expanded, "$penv{") {
 		return "", fmt.Errorf("binaryDir contains unresolved macros after expansion: %q — refusing to purge", expanded)
 	}
@@ -202,17 +271,72 @@ func resolveBuildDirWithinSource(binaryDir, sourceDir, presetName string) (strin
 	}
 	buildAbs = filepath.Clean(buildAbs)
 
-	rel, err := filepath.Rel(srcAbs, buildAbs)
+	// 1) Lexical containment (cheap, catches `..`, absolute-outside, cross-drive).
+	if err := containmentCheck(srcAbs, buildAbs, "binaryDir"); err != nil {
+		return "", err
+	}
+
+	// 2) Symlink-resolved containment. Resolve BOTH sides against real
+	// filesystem paths, then containment-check the real paths. Fail closed on
+	// any resolution error — never RemoveAll a path we could not fully resolve.
+	srcReal, err := filepath.EvalSymlinks(srcAbs)
 	if err != nil {
-		return "", fmt.Errorf("binaryDir not resolvable relative to sourceDir: %w", err)
+		return "", fmt.Errorf("resolve source directory %q: %w — refusing to purge", srcAbs, err)
 	}
-	// Reject escapes (`..`), the source dir itself (`.`), and anything not
-	// contained. On Windows, Rel across drives yields an absolute path.
-	if rel == "." {
-		return "", errors.New("binaryDir resolves to the source directory itself — refusing to purge")
+	buildReal, err := evalExistingPrefix(buildAbs)
+	if err != nil {
+		return "", fmt.Errorf("resolve build directory %q: %w — refusing to purge", buildAbs, err)
 	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("binaryDir %q is outside the source directory %q — refusing to purge", buildAbs, srcAbs)
+	if err := containmentCheck(srcReal, buildReal, "binaryDir (symlink-resolved)"); err != nil {
+		return "", err
 	}
 	return buildAbs, nil
+}
+
+// containmentCheck rejects a target that is not strictly inside base: the base
+// itself (`.`), an escape (`..`), or an unrelated tree (absolute Rel = a
+// different Windows drive). label names the value for the error message.
+func containmentCheck(base, target, label string) error {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return fmt.Errorf("%s not resolvable relative to source directory: %w", label, err)
+	}
+	if rel == "." {
+		return fmt.Errorf("%s resolves to the source directory itself — refusing to purge", label)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("%s %q is outside the source directory %q — refusing to purge", label, target, base)
+	}
+	return nil
+}
+
+// evalExistingPrefix resolves symlinks in the longest EXISTING prefix of path
+// and re-appends the not-yet-existing remainder, so a build directory that has
+// not been created yet still has its real (symlink-resolved) location computed
+// for the containment check. It fails closed on any stat error other than
+// "does not exist".
+func evalExistingPrefix(path string) (string, error) {
+	path = filepath.Clean(path)
+	cur := path
+	var tail []string
+	for {
+		if _, err := os.Lstat(cur); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("stat %q: %w", cur, err)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			// Reached the volume root without an existing component; resolve the
+			// root and re-append everything below it.
+			break
+		}
+		tail = append([]string{filepath.Base(cur)}, tail...)
+		cur = parent
+	}
+	realCur, err := filepath.EvalSymlinks(cur)
+	if err != nil {
+		return "", fmt.Errorf("resolve %q: %w", cur, err)
+	}
+	return filepath.Join(append([]string{realCur}, tail...)...), nil
 }

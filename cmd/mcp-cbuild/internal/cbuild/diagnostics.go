@@ -94,8 +94,14 @@ func parseLine(line string) (Diagnostic, bool) {
 		return d, true
 	}
 	if m := msvcLinkRe.FindStringSubmatch(line); m != nil {
+		file := strings.TrimSpace(m[1])
+		// `LINK : fatal error LNK1104: ...` uses "LINK" as the tool label, not a
+		// source path; treat it as file-less so it does not misdirect a repair.
+		if strings.EqualFold(file, "LINK") {
+			file = ""
+		}
 		d := Diagnostic{
-			File:     strings.TrimSpace(m[1]),
+			File:     file,
 			Severity: normalizeSeverity(m[2]),
 			Code:     m[3],
 			Message:  strings.TrimSpace(m[4]),

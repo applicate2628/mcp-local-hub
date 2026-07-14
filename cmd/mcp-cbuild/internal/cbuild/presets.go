@@ -203,26 +203,79 @@ func (p *Presets) Result() PresetsResult {
 		}
 		res.ConfigurePresets = append(res.ConfigurePresets, info)
 	}
-	for _, bp := range p.build {
-		res.BuildPresets = append(res.BuildPresets, namedInfo(bp))
-	}
-	for _, tp := range p.test {
-		res.TestPresets = append(res.TestPresets, namedInfo(tp))
-	}
-	for _, wp := range p.workflow {
-		res.WorkflowPresets = append(res.WorkflowPresets, namedInfo(wp))
-	}
+	res.BuildPresets = resolveNamed(p.build)
+	res.TestPresets = resolveNamed(p.test)
+	res.WorkflowPresets = resolveNamed(p.workflow)
 	return res
 }
 
-func namedInfo(n rawNamedPreset) PresetInfo {
-	return PresetInfo{
-		Name:            n.Name,
-		DisplayName:     n.DisplayName,
-		Description:     n.Description,
-		Inherits:        []string(n.Inherits),
-		Hidden:          n.Hidden,
-		ConfigurePreset: n.ConfigurePreset,
+// resolveNamed surfaces each build/test/workflow preset with its inherited
+// fields resolved (currently configurePreset), preserving declaration order and
+// de-duplicating by name (first declaration wins, matching configure presets).
+func resolveNamed(list []rawNamedPreset) []PresetInfo {
+	byName := make(map[string]rawNamedPreset, len(list))
+	for _, n := range list {
+		if n.Name == "" {
+			continue
+		}
+		if _, exists := byName[n.Name]; !exists {
+			byName[n.Name] = n
+		}
+	}
+	out := []PresetInfo{}
+	emitted := map[string]bool{}
+	for _, n := range list {
+		if n.Name == "" || emitted[n.Name] {
+			continue
+		}
+		emitted[n.Name] = true
+		merged := mergeNamed(byName, n.Name, nil)
+		out = append(out, PresetInfo{
+			Name:        n.Name,
+			DisplayName: n.DisplayName,
+			Description: n.Description,
+			Inherits:    []string(n.Inherits),
+			Hidden:      n.Hidden,
+			// configurePreset is the one inheritable field surfaced here: a
+			// build/test preset that omits it inherits it from its chain.
+			ConfigurePreset: merged.ConfigurePreset,
+		})
+	}
+	return out
+}
+
+// mergeNamed resolves a named preset against its inherits chain. Precedence
+// matches CMake and mergeConfigure: the preset's own value wins over inherited
+// ones, and earlier entries in `inherits` win over later ones. chain carries the
+// current resolution path (per-branch) for cycle detection only, so a preset
+// shared across sibling branches contributes at each branch's correct precedence.
+func mergeNamed(byName map[string]rawNamedPreset, name string, chain []string) rawNamedPreset {
+	cur, ok := byName[name]
+	if !ok {
+		return rawNamedPreset{}
+	}
+	for _, n := range chain {
+		if n == name {
+			return rawNamedPreset{} // cycle on this path
+		}
+	}
+	childChain := append(append([]string{}, chain...), name)
+
+	merged := rawNamedPreset{}
+	for i := len(cur.Inherits) - 1; i >= 0; i-- {
+		parent := mergeNamed(byName, cur.Inherits[i], childChain)
+		overlayNamed(&merged, parent)
+	}
+	overlayNamed(&merged, cur)
+	return merged
+}
+
+// overlayNamed copies the inheritable configurePreset field from src over dst
+// when set. Name/DisplayName/Description/Hidden/Inherits are a preset's own
+// identity and are never inherited.
+func overlayNamed(dst *rawNamedPreset, src rawNamedPreset) {
+	if src.ConfigurePreset != "" {
+		dst.ConfigurePreset = src.ConfigurePreset
 	}
 }
 
@@ -230,21 +283,33 @@ func namedInfo(n rawNamedPreset) PresetInfo {
 // A preset's own fields win over inherited ones; earlier entries in `inherits`
 // win over later ones (CMake precedence). cacheVariables are merged key-wise.
 func (p *Presets) mergedConfigure(name string) rawConfigurePreset {
-	return p.mergeConfigure(name, map[string]bool{})
+	return p.mergeConfigure(name, nil)
 }
 
-func (p *Presets) mergeConfigure(name string, seen map[string]bool) rawConfigurePreset {
+// mergeConfigure resolves a configure preset against its inherits chain. chain
+// is the set of preset names on the CURRENT resolution path, used only for
+// cycle detection; each parent is resolved with its own chain copy. A shared
+// visited-set (the earlier design) wrongly skipped a parent the first time it
+// was reached on any branch, which let a lower-precedence sibling branch's
+// binaryDir win — a correctness AND safety bug, since the purge guard resolves
+// against the winning binaryDir.
+func (p *Presets) mergeConfigure(name string, chain []string) rawConfigurePreset {
 	cp, ok := p.configure[name]
-	if !ok || seen[name] {
+	if !ok {
 		return rawConfigurePreset{}
 	}
-	seen[name] = true
+	for _, n := range chain {
+		if n == name {
+			return rawConfigurePreset{} // cycle on this path
+		}
+	}
+	childChain := append(append([]string{}, chain...), name)
 
 	// Start from the resolved parents (first parent has highest precedence
 	// among parents), then overlay this preset's own fields.
 	merged := rawConfigurePreset{CacheVariables: map[string]json.RawMessage{}}
 	for i := len(cp.Inherits) - 1; i >= 0; i-- {
-		parent := p.mergeConfigure(cp.Inherits[i], seen)
+		parent := p.mergeConfigure(cp.Inherits[i], childChain)
 		overlay(&merged, parent)
 	}
 	overlay(&merged, cp)
@@ -323,9 +388,11 @@ func cacheString(vars map[string]json.RawMessage, key string) string {
 
 // expandPresetMacros expands the subset of CMake preset macros needed to
 // resolve a binaryDir to a concrete path for the cmake_clean safety guard.
-// sourceDir is the project (working) directory. Unresolved macros are left
-// intact so the caller can refuse a path it could not fully resolve.
-func expandPresetMacros(s, sourceDir, presetName string) string {
+// sourceDir is the project (working) directory. Non-env unresolved macros are
+// left intact so the caller can refuse a path it could not fully resolve; an
+// UNSET $env{}/$penv{} macro is a fail-closed error (never silently collapsed to
+// an empty string, which would let the purge guard trust a wrong directory).
+func expandPresetMacros(s, sourceDir, presetName string) (string, error) {
 	sourceDir = filepath.Clean(sourceDir)
 	repl := map[string]string{
 		"${sourceDir}":       sourceDir,
@@ -338,24 +405,45 @@ func expandPresetMacros(s, sourceDir, presetName string) string {
 		s = strings.ReplaceAll(s, k, v)
 	}
 	// $env{VAR} / $penv{VAR}
-	s = expandEnvMacro(s, "$env{")
-	s = expandEnvMacro(s, "$penv{")
-	return s
+	s, err := expandEnvMacro(s, "$env{")
+	if err != nil {
+		return "", err
+	}
+	s, err = expandEnvMacro(s, "$penv{")
+	if err != nil {
+		return "", err
+	}
+	return s, nil
 }
 
-func expandEnvMacro(s, prefix string) string {
+// expandEnvMacro substitutes every prefix{NAME} occurrence with the value of the
+// NAME environment variable. An UNSET variable is a fail-closed error. The scan
+// cursor advances past each substituted value so a self-referential value (one
+// that itself contains the prefix) cannot trigger an infinite rescan.
+func expandEnvMacro(s, prefix string) (string, error) {
+	searchFrom := 0
 	for {
-		idx := strings.Index(s, prefix)
-		if idx < 0 {
-			return s
+		rel := strings.Index(s[searchFrom:], prefix)
+		if rel < 0 {
+			return s, nil
 		}
+		idx := searchFrom + rel
 		end := strings.Index(s[idx:], "}")
 		if end < 0 {
-			return s
+			// Malformed (no closing brace): leave the literal in place so the
+			// caller's unresolved-macro check refuses the path.
+			return s, nil
 		}
 		end += idx
 		name := s[idx+len(prefix) : end]
-		s = s[:idx] + os.Getenv(name) + s[end+1:]
+		val, ok := os.LookupEnv(name)
+		if !ok {
+			return "", fmt.Errorf("preset env macro %s%s} is unset — refusing to resolve binaryDir to an empty path", prefix, name)
+		}
+		s = s[:idx] + val + s[end+1:]
+		// Resume AFTER the substituted value: a value that happens to contain
+		// the prefix is treated as a literal, not re-expanded.
+		searchFrom = idx + len(val)
 	}
 }
 
