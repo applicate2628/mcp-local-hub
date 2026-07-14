@@ -184,6 +184,24 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
     non-reentrant `config_lock.go:24-30` → a concrete body calling `withConfigLock` would
     self-deadlock). The read-only `EntryRawSubtree` forwards LOCK-FREE like
     `EntryPresentInBytes` (`entry_bytes.go:109-114`).
+  - **ENFORCEMENT (Phase-3 constraint — fable-5 Phase-2 audit, 2026-07-14): the
+    "implemented by exactly the adopt-reachable adapters" property CANNOT be enforced by
+    interface-satisfaction / method-set alone.** `windsurfClient` (`windsurf.go:156/163`,
+    NOT adopt-reachable — it overrides `RestoreEntryFromBackup*` with a `serverUrl`-aware
+    body) EMBEDS `jsonMCPClient`, and Phase 2 added the base `restoreEntryFromBytes` to
+    `jsonMCPClient`; embedding PROMOTES that base method (and would promote any Phase-3
+    CAS/classify method added to the base) onto windsurf's method set. So a plain
+    `client.(CASEntryMutator)` type-assert at the de-adopt site would SUCCEED for windsurf
+    (and every other `jsonMCPClient` embedder) via promotion, with base `url`-field /
+    `mcpServers` semantics that CONTRADICT windsurf's own restore — the same latent gap
+    `EntryBytesChecker` has (windsurf satisfies it via promotion too, but is kept out by the
+    explicit compile-proof set at `entry_bytes.go:31-39`). **Phase-3 MUST gate the
+    CAS/classify capability by an EXPLICIT ALLOWLIST / MARKER (mirror the `EntryBytesChecker`
+    compile-proof set), NOT the bare type-assert.** Options: add the CAS methods to each
+    adopt-reachable adapter as DISTINCT (non-promoted) methods rather than on the shared
+    `jsonMCPClient` base, OR keep an explicit adopt-reachable allowlist the de-adopt site
+    consults BEFORE the type-assert. Zero callers today (Phase 2 added only the unexported
+    restore core), so this is a Phase-3 design constraint, not a current defect.
   - `internal/api/state_read_caps.go` + `internal/api/state_read_inode_anchor.go` — two
     ADDITIVE lines: give the adopt-provenance `.snapshot` kind a client-config-sized read
     cap in `stateFileReadCapBytes` (`:28`; the default is only `maxStateFileBytes` = 1 MiB,
