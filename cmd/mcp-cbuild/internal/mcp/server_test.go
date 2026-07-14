@@ -104,10 +104,10 @@ type stubTool struct {
 	fn   func(ctx context.Context, args json.RawMessage) (any, error)
 }
 
-func (s stubTool) Name() string                    { return s.name }
-func (s stubTool) Title() string                   { return "" }
-func (s stubTool) Description() string             { return "stub" }
-func (s stubTool) InputSchema() map[string]any     { return map[string]any{"type": "object"} }
+func (s stubTool) Name() string                { return s.name }
+func (s stubTool) Title() string               { return "" }
+func (s stubTool) Description() string         { return "stub" }
+func (s stubTool) InputSchema() map[string]any { return map[string]any{"type": "object"} }
 func (s stubTool) Call(ctx context.Context, a json.RawMessage) (any, error) {
 	return s.fn(ctx, a)
 }
@@ -284,4 +284,46 @@ func TestServeDrainsInFlightOnEOF(t *testing.T) {
 	if !cleanedUp.Load() {
 		t.Error("Serve returned before the in-flight tool ran its cancellation cleanup — EOF drain missing")
 	}
+}
+
+// TestServeCancellationUnblocksReadAndDrains proves signal-driven context
+// cancellation returns even while stdin remains open, and still waits for the
+// in-flight tool's cancellation cleanup before returning.
+func TestServeCancellationUnblocksReadAndDrains(t *testing.T) {
+	started := make(chan struct{})
+	var cleanedUp atomic.Bool
+	tool := stubTool{name: "slow", fn: func(ctx context.Context, _ json.RawMessage) (any, error) {
+		close(started)
+		<-ctx.Done()
+		time.Sleep(50 * time.Millisecond)
+		cleanedUp.Store(true)
+		return nil, ctx.Err()
+	}}
+
+	srv := NewServer("test", "0", []Tool{tool})
+	in, inW := io.Pipe()
+	out := &syncBuffer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(ctx, in, out) }()
+
+	if _, err := io.WriteString(inW, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"slow"}}`+"\n"); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	<-started
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Serve returned an error after cancellation: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		_ = inW.Close()
+		t.Fatal("Serve did not return after context cancellation while stdin remained open")
+	}
+	if !cleanedUp.Load() {
+		t.Error("Serve returned before the in-flight tool ran its cancellation cleanup")
+	}
+	_ = inW.Close()
 }

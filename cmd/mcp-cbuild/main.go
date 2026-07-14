@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	"mcp-local-hub/cmd/mcp-cbuild/internal/cbuild"
 	"mcp-local-hub/cmd/mcp-cbuild/internal/mcp"
@@ -27,6 +28,10 @@ import (
 
 // version is the server version advertised in the MCP initialize handshake.
 const version = "0.1.0"
+
+func shutdownSignals() []os.Signal {
+	return []os.Signal{os.Interrupt, syscall.SIGTERM}
+}
 
 func main() {
 	workDir := flag.String("w", "", "default working directory for tool calls that omit working_dir (absolute; defaults to the process working directory)")
@@ -48,9 +53,9 @@ func main() {
 
 	srv := mcp.NewServer("mcp-cbuild", version, cbuild.Tools(defaultDir))
 
-	// Ctrl+C / SIGINT triggers a clean shutdown; stdin EOF (the hub closing the
-	// pipe) also ends Serve.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// SIGINT/Ctrl+C and SIGTERM trigger the same clean shutdown; stdin EOF (the
+	// hub closing the pipe) also ends Serve.
+	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 
 	if err := srv.Serve(ctx, os.Stdin, os.Stdout); err != nil {

@@ -141,6 +141,53 @@ func TestLoadPresetsMissing(t *testing.T) {
 	}
 }
 
+// TestListPresetsExcludesHiddenBases proves inheritance-only presets still
+// contribute their fields without being surfaced as runnable --preset choices.
+func TestListPresetsExcludesHiddenBases(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "CMakePresets.json", `{
+      "version": 6,
+      "configurePresets": [
+        { "name": "base", "hidden": true, "generator": "Ninja",
+          "binaryDir": "${sourceDir}/build/${presetName}" },
+        { "name": "dev", "inherits": ["base"] }
+      ],
+      "buildPresets": [
+        { "name": "base-build", "hidden": true, "configurePreset": "dev" },
+        { "name": "dev-build", "inherits": ["base-build"] }
+      ],
+      "testPresets": [
+        { "name": "base-test", "hidden": true, "configurePreset": "dev" },
+        { "name": "dev-test", "inherits": ["base-test"] }
+      ]
+    }`)
+
+	p, err := LoadPresets(dir)
+	if err != nil {
+		t.Fatalf("LoadPresets: %v", err)
+	}
+	res := p.Result()
+
+	if len(res.ConfigurePresets) != 1 || res.ConfigurePresets[0].Name != "dev" {
+		t.Fatalf("configure presets = %v, want only runnable child dev", res.ConfigurePresets)
+	}
+	if len(res.BuildPresets) != 1 || res.BuildPresets[0].Name != "dev-build" {
+		t.Fatalf("build presets = %v, want only runnable child dev-build", res.BuildPresets)
+	}
+	if len(res.TestPresets) != 1 || res.TestPresets[0].Name != "dev-test" {
+		t.Fatalf("test presets = %v, want only runnable child dev-test", res.TestPresets)
+	}
+	if got := res.ConfigurePresets[0].ResolvedGenerator; got != "Ninja" {
+		t.Errorf("dev.ResolvedGenerator = %q, want inherited Ninja", got)
+	}
+	if got := res.BuildPresets[0].ConfigurePreset; got != "dev" {
+		t.Errorf("dev-build.ConfigurePreset = %q, want inherited dev", got)
+	}
+	if got := res.TestPresets[0].ConfigurePreset; got != "dev" {
+		t.Errorf("dev-test.ConfigurePreset = %q, want inherited dev", got)
+	}
+}
+
 func TestResolveBuildDirWithinSourceGuard(t *testing.T) {
 	src := t.TempDir()
 

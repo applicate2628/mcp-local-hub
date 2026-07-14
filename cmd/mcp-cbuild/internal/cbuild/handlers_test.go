@@ -225,3 +225,47 @@ func TestPresetArgvWiring(t *testing.T) {
 		t.Errorf("cmake_clean non-purge wrongly used a --preset flag; raw_tail:\n%s", tail)
 	}
 }
+
+// TestGeneratorBinaryDirResolvesForCleanAndCacheSummary proves consumers that
+// resolve binaryDir locally use the configure preset's merged generator macro,
+// matching the directory CMake configured.
+func TestGeneratorBinaryDirResolvesForCleanAndCacheSummary(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "CMakePresets.json", `{
+      "version": 6,
+      "configurePresets": [
+        { "name": "dev", "generator": "Ninja",
+          "binaryDir": "${sourceDir}/build/${generator}" }
+      ]
+    }`)
+	buildDir := filepath.Join(dir, "build", "Ninja")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatalf("mkdir build dir: %v", err)
+	}
+	writeFile(t, buildDir, "CMakeCache.txt", "CMAKE_GENERATOR:INTERNAL=Ninja\n")
+
+	t.Run("cache summary", func(t *testing.T) {
+		summary := readCacheSummary(dir, "dev")
+		if got := summary["CMAKE_GENERATOR"]; got != "Ninja" {
+			t.Errorf("CMAKE_GENERATOR = %q, want Ninja; summary = %v", got, summary)
+		}
+	})
+
+	t.Run("clean purge", func(t *testing.T) {
+		result, err := callWithArgs(t, toolNamed(t, "cmake_clean"), map[string]any{
+			"preset":          "dev",
+			"working_dir":     dir,
+			"purge_build_dir": true,
+		})
+		if err != nil {
+			t.Fatalf("cmake_clean: %v", err)
+		}
+		cleaned, ok := result.(cleanResult)
+		if !ok || !cleaned.Success || !cleaned.Purged {
+			t.Fatalf("cmake_clean result = %#v, want successful purge", result)
+		}
+		if _, err := os.Stat(buildDir); !os.IsNotExist(err) {
+			t.Errorf("build directory still exists after purge: stat error = %v", err)
+		}
+	})
+}

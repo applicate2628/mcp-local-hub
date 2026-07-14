@@ -248,7 +248,15 @@ func fileExists(p string) bool {
 // symlink whose lexical spelling stays inside the tree but whose real target
 // escapes it is refused. Only a path that passes both may be handed to RemoveAll.
 func resolveBuildDirWithinSource(binaryDir, sourceDir, presetName string) (string, error) {
-	buildAbs, srcAbs, err := expandBinaryDirToAbs(binaryDir, sourceDir, presetName)
+	return resolveBuildDirWithinSourceContext(binaryDir, presetMacroContext{
+		sourceDir:  sourceDir,
+		presetName: presetName,
+		fileDir:    sourceDir,
+	})
+}
+
+func resolveBuildDirWithinSourceContext(binaryDir string, macroCtx presetMacroContext) (string, error) {
+	buildAbs, srcAbs, err := expandBinaryDirToAbsContext(binaryDir, macroCtx)
 	if err != nil {
 		return "", err
 	}
@@ -293,17 +301,25 @@ func resolveBuildDirWithinSource(binaryDir, sourceDir, presetName string) (strin
 // `cmake --build <dir> --target clean` caller accepts any concrete build dir CMake
 // itself configured, including a legitimate out-of-source tree.
 func expandBinaryDirToAbs(binaryDir, sourceDir, presetName string) (build, src string, err error) {
+	return expandBinaryDirToAbsContext(binaryDir, presetMacroContext{
+		sourceDir:  sourceDir,
+		presetName: presetName,
+		fileDir:    sourceDir,
+	})
+}
+
+func expandBinaryDirToAbsContext(binaryDir string, macroCtx presetMacroContext) (build, src string, err error) {
 	if binaryDir == "" {
 		return "", "", errors.New("preset declares no binaryDir")
 	}
-	expanded, err := expandPresetMacros(binaryDir, sourceDir, presetName)
+	expanded, err := expandPresetMacros(binaryDir, macroCtx)
 	if err != nil {
 		return "", "", err
 	}
 	if containsUnexpandedMacro(expanded) {
 		return "", "", fmt.Errorf("binaryDir contains an unresolved or unknown-namespace macro after expansion: %q — refusing to resolve", expanded)
 	}
-	src, err = filepath.Abs(sourceDir)
+	src, err = filepath.Abs(macroCtx.sourceDir)
 	if err != nil {
 		return "", "", fmt.Errorf("resolve sourceDir: %w", err)
 	}

@@ -576,7 +576,7 @@ func (b *builder) cmakeClean() mcp.Tool {
 			if err != nil {
 				return nil, err
 			}
-			binaryDir, err := p.ResolvedBinaryDir(a.Preset)
+			binaryDir, macroCtx, err := p.resolvedBinaryDir(a.Preset)
 			if err != nil {
 				return nil, err
 			}
@@ -585,7 +585,7 @@ func (b *builder) cmakeClean() mcp.Tool {
 				// The path-escape guard is the single owner of purge safety: it
 				// refuses unresolved/unknown-namespace macros, the source dir
 				// itself, and anything outside the source tree before RemoveAll.
-				safe, err := resolveBuildDirWithinSource(binaryDir, dir, a.Preset)
+				safe, err := resolveBuildDirWithinSourceContext(binaryDir, macroCtx)
 				if err != nil {
 					return nil, err
 				}
@@ -602,7 +602,7 @@ func (b *builder) cmakeClean() mcp.Tool {
 			// whenever the build preset is named differently (e.g. configure
 			// "dev" vs build "dev-build"). This also cleans a legitimate
 			// out-of-source build tree, which the configure preset already names.
-			buildDir, _, err := expandBinaryDirToAbs(binaryDir, dir, a.Preset)
+			buildDir, _, err := expandBinaryDirToAbsContext(binaryDir, macroCtx)
 			if err != nil {
 				return nil, err
 			}

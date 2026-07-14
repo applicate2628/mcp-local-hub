@@ -2,6 +2,7 @@ package cbuild
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -74,6 +75,7 @@ type rawConfigurePreset struct {
 	// condition object). It is inheritable, so it is merged through the inherits
 	// chain and evaluated per host to drop presets disabled on this machine.
 	Condition json.RawMessage `json:"condition"`
+	fileDir   string
 }
 
 type rawNamedPreset struct {
@@ -163,7 +165,10 @@ func (p *Presets) loadFile(path string, visited map[string]bool) error {
 	// is fail-closed on an unset $env{}/$penv{}) BEFORE resolving the path, else
 	// the raw macro string would be opened literally and the load would fail.
 	for _, inc := range f.Include {
-		expandedInc, err := expandPresetMacros(inc, p.sourceDir, "")
+		expandedInc, err := expandPresetMacros(inc, presetMacroContext{
+			sourceDir: p.sourceDir,
+			fileDir:   filepath.Dir(abs),
+		})
 		if err != nil {
 			return fmt.Errorf("expand include %q in %s: %w", inc, path, err)
 		}
@@ -180,6 +185,7 @@ func (p *Presets) loadFile(path string, visited map[string]bool) error {
 		if cp.Name == "" {
 			continue
 		}
+		cp.fileDir = filepath.Dir(abs)
 		if _, exists := p.configure[cp.Name]; !exists {
 			p.configureOrder = append(p.configureOrder, cp.Name)
 		}
@@ -206,6 +212,9 @@ func (p *Presets) Result() PresetsResult {
 	cache := map[string]rawConfigurePreset{}
 	for _, name := range p.configureOrder {
 		cp := p.configure[name]
+		if cp.Hidden {
+			continue
+		}
 		merged := p.mergeConfigure(name, nil, cache)
 		// Drop a preset disabled on this host by its (inherits-merged) condition,
 		// matching `cmake --list-presets`, which omits condition-disabled presets.
@@ -260,6 +269,9 @@ func resolveNamed(list []rawNamedPreset, sourceDir string) []PresetInfo {
 			continue
 		}
 		emitted[n.Name] = true
+		if n.Hidden {
+			continue
+		}
 		merged := mergeNamed(byName, n.Name, nil, resolved)
 		// Drop a build/test preset disabled on this host by its merged condition
 		// (workflow presets have no condition, so merged.Condition is empty →
@@ -430,14 +442,28 @@ func overlay(dst *rawConfigurePreset, src rawConfigurePreset) {
 // configure preset, before macro expansion. Errors when the preset is unknown
 // or declares no binaryDir.
 func (p *Presets) ResolvedBinaryDir(name string) (string, error) {
+	binaryDir, _, err := p.resolvedBinaryDir(name)
+	return binaryDir, err
+}
+
+// resolvedBinaryDir returns the merged binaryDir together with every standard
+// preset value needed to expand it exactly where local consumers (clean and
+// cache-summary reads) need the concrete path.
+func (p *Presets) resolvedBinaryDir(name string) (string, presetMacroContext, error) {
 	if _, ok := p.configure[name]; !ok {
-		return "", fmt.Errorf("configure preset %q not found", name)
+		return "", presetMacroContext{}, fmt.Errorf("configure preset %q not found", name)
 	}
 	merged := p.mergedConfigure(name)
 	if merged.BinaryDir == "" {
-		return "", fmt.Errorf("configure preset %q has no binaryDir", name)
+		return "", presetMacroContext{}, fmt.Errorf("configure preset %q has no binaryDir", name)
 	}
-	return merged.BinaryDir, nil
+	definition := p.configure[name]
+	return merged.BinaryDir, presetMacroContext{
+		sourceDir:  p.sourceDir,
+		presetName: name,
+		generator:  merged.Generator,
+		fileDir:    definition.fileDir,
+	}, nil
 }
 
 func resolvedToolchain(cp rawConfigurePreset) string {
@@ -476,24 +502,39 @@ func cacheString(vars map[string]json.RawMessage, key string) string {
 	return ""
 }
 
-// expandPresetMacros expands the subset of CMake preset macros needed to
-// resolve a binaryDir to a concrete path for the cmake_clean safety guard.
-// sourceDir is the project (working) directory. Non-env unresolved macros are
-// left intact so the caller can refuse a path it could not fully resolve; an
-// UNSET $env{}/$penv{} macro is a fail-closed error (never silently collapsed to
-// an empty string, which would let the purge guard trust a wrong directory).
-func expandPresetMacros(s, sourceDir, presetName string) (string, error) {
-	sourceDir = filepath.Clean(sourceDir)
-	repl := map[string]string{
-		"${sourceDir}":       sourceDir,
-		"${sourceParentDir}": filepath.Dir(sourceDir),
-		"${sourceDirName}":   filepath.Base(sourceDir),
-		"${presetName}":      presetName,
-		"${dollar}":          "$",
+// presetMacroContext is the resolved configure-preset context used by CMake's
+// standard macro expansion in binaryDir.
+type presetMacroContext struct {
+	sourceDir  string
+	presetName string
+	generator  string
+	fileDir    string
+}
+
+// expandPresetMacros expands the standard CMake preset macros that can be
+// resolved locally. Unknown/vendor namespaces remain intact so path consumers
+// can reject them before filesystem cleaning. An unset $env{}/$penv{} or a
+// context-dependent macro with no value is a fail-closed error.
+func expandPresetMacros(s string, ctx presetMacroContext) (string, error) {
+	sourceDir := filepath.Clean(ctx.sourceDir)
+	if strings.Contains(s, "${generator}") && ctx.generator == "" {
+		return "", errors.New("preset macro ${generator} cannot be resolved because the configure preset has no generator")
 	}
-	for k, v := range repl {
-		s = strings.ReplaceAll(s, k, v)
+	if strings.Contains(s, "${fileDir}") && ctx.fileDir == "" {
+		return "", errors.New("preset macro ${fileDir} cannot be resolved because the presets-file directory is unknown")
 	}
+	repl := strings.NewReplacer(
+		"${sourceDir}", sourceDir,
+		"${sourceParentDir}", filepath.Dir(sourceDir),
+		"${sourceDirName}", filepath.Base(sourceDir),
+		"${presetName}", ctx.presetName,
+		"${generator}", ctx.generator,
+		"${hostSystemName}", cmakeHostSystemName(),
+		"${fileDir}", filepath.Clean(ctx.fileDir),
+		"${dollar}", "$",
+		"${pathListSep}", string(os.PathListSeparator),
+	)
+	s = repl.Replace(s)
 	// $env{VAR} / $penv{VAR}
 	s, err := expandEnvMacro(s, "$env{")
 	if err != nil {

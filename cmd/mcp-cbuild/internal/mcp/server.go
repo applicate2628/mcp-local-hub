@@ -165,20 +165,46 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	defer s.drainInflight(cancelAll)
 
 	reader := bufio.NewReaderSize(in, 1<<20)
-	for {
-		line, err := reader.ReadBytes('\n')
-		if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
-			// Copy the line: ReadBytes reuses its buffer on the next call, and
-			// tools/call dispatch retains params on a goroutine.
-			msg := make([]byte, len(trimmed))
-			copy(msg, trimmed)
-			s.dispatch(ctx, msg)
+	type readResult struct {
+		line []byte
+		err  error
+	}
+	reads := make(chan readResult)
+	go func() {
+		defer close(reads)
+		for {
+			line, err := reader.ReadBytes('\n')
+			select {
+			case reads <- readResult{line: line, err: err}:
+			case <-ctx.Done():
+				return
+			}
+			if err != nil {
+				return
+			}
 		}
-		if err != nil {
-			if errors.Is(err, io.EOF) {
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case result, ok := <-reads:
+			if !ok {
 				return nil
 			}
-			return fmt.Errorf("read stdin: %w", err)
+			if trimmed := bytes.TrimSpace(result.line); len(trimmed) > 0 {
+				// Copy the line: tools/call dispatch retains params on a goroutine.
+				msg := make([]byte, len(trimmed))
+				copy(msg, trimmed)
+				s.dispatch(ctx, msg)
+			}
+			if result.err != nil {
+				if errors.Is(result.err, io.EOF) {
+					return nil
+				}
+				return fmt.Errorf("read stdin: %w", result.err)
+			}
 		}
 	}
 }

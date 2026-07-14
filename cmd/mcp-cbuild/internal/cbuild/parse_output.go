@@ -178,22 +178,13 @@ func readCacheSummary(sourceDir, preset string) map[string]string {
 	if err != nil {
 		return nil
 	}
-	binaryDir, err := p.ResolvedBinaryDir(preset)
+	binaryDir, macroCtx, err := p.resolvedBinaryDir(preset)
 	if err != nil {
 		return nil
 	}
-	expanded, err := expandPresetMacros(binaryDir, sourceDir, preset)
+	expanded, _, err := expandBinaryDirToAbsContext(binaryDir, macroCtx)
 	if err != nil {
 		return nil
-	}
-	// Same unresolved/unknown-namespace-macro gate as the purge guard (single
-	// owner: containsUnexpandedMacro). A leftover macro means we cannot trust the
-	// path; return no summary rather than read an arbitrary CMakeCache.txt.
-	if containsUnexpandedMacro(expanded) {
-		return nil
-	}
-	if !filepath.IsAbs(expanded) {
-		expanded = filepath.Join(sourceDir, expanded)
 	}
 	data, err := os.ReadFile(filepath.Join(expanded, "CMakeCache.txt"))
 	if err != nil {
