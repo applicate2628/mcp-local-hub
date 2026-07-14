@@ -29,7 +29,7 @@ func stateFileReadCapBytes(path string) int64 {
 	base := strings.ToLower(filepath.Base(path))
 	// Adopt pre-adopt provenance snapshots pin whole client configs, which can
 	// exceed the ordinary state-file ceiling.
-	if strings.HasSuffix(filepath.Base(path), ".snapshot") {
+	if strings.HasSuffix(base, ".snapshot") {
 		return maxIntentFileBytes
 	}
 	switch base {
