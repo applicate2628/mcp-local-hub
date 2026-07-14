@@ -22,8 +22,12 @@ This SATISFIES de-adopt's second `Depends-on` edge (design claim 10 committed-KE
 recoverability). The residual over-reap (case-3 revert-to-exact-bytes + manifest-delete) and
 the merged-lower over-block are ACCEPTED/deferred residuals (decision addendum), NOT this P1,
 and do not arise under the named drift scenarios. Split out below: **P3-1** (`.lease`
-namespace collision → latent split-lease P1) and **P3-3** (silent GC reap-failure) remain
-OPEN and are tracked as an adopt-provenance hardening follow-up.
+namespace collision → latent split-lease P1) and **P3-3** (silent GC reap-failure) were
+subsequently CLOSED by #537 (master `c7e2534b`, "reserve .lease manifest suffix + GC
+reap-failure events") — verified at HEAD: P3-1 = the `.lease` suffix is reserved/refused in
+`adopted_entries.go` (`adoptManifestLeaseSuffix` :74, reservation :258, CheckManifestName
+parity :368); P3-3 = a `adopt-provenance-reap-failed{phase:…}` audit event now fires on a GC
+reap/removeSnapshots failure (:1010/:1016/:1074). Neither remains open.
 Filed: 2026-07-11
 Severity: P1 (silent, unrecoverable destruction of a "recoverable" provenance row)
 Source: fable-5 hidden-bug hunt on delivered adopt-provenance code (#528)

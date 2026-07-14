@@ -1,10 +1,12 @@
-# status - phase-2 de-adopt hub to native
+# status - de-adopt v1 (hub to native, all-clients-only, gate-OFF-only, atomic)
 
-Template: design (full-delivery). Orchestrator: `$lead`.
-State: **DESIGN REWORKED to v1 all-clients-only — awaiting an independent FABLE audit,
-then planning.** The blocking prerequisite is DELIVERED; the design was reworked to the
-multi-model synthesis (v1 = all-clients-only, gate-OFF-only atomic de-adopt). Implementation
-not started.
+Template: design → delivery (full-delivery). Orchestrator: `$lead`.
+State: **IN PROGRESS — Phase 0 + Phase 1 DONE; Phase 1 in Codex-bot review (PR #539).**
+Design round-5 is ACCEPTED (arch delta-recheck PASS 2026-07-13); `$planner` broke it into a
+12-phase delivery plan (`plan.md`, 2026-07-14). Phase 0 (docs precondition) and Phase 1
+(`ManifestDeleteInWithHash`) are delivered on branch `feat/deadopt-phase1-manifest-delete-hash`;
+Phase 1 is under bot review as PR #539 with the P3 atomicity-contract doc-fix committed at
+`23971e87` (awaiting Sol review + bot re-trigger). Phases 2-11 pending. master HEAD = `c7e2534b`.
 Depends-on: 2026-07-09-adopt-side-durable-pre-adopt-provenance, bug:2026-07-11-gc-phase2-stale-candidate-reaps-committed-row, bug:2026-07-11-classifier-committed-signal-blind-to-entry-drift
 
 Dependency note: `2026-07-09-adopt-side-durable-pre-adopt-provenance` is DELIVERED +
@@ -21,16 +23,47 @@ later-acquired lease, so de-adopt's per-manifest lease did NOT fence it (the GC'
 pre-date the lease); three interleaves could destroy de-adopt's provenance (pre-de-adopt destruction;
 de-adopt→re-adopt destroyed; crash-after-E3 `de_adopting` row reaped → permanent manifest/secret leak).
 BOTH `Depends-on` adopt-GC bugs are now FIXED at HEAD (both work-items `Status: fixed`):
-`2026-07-11-gc-phase2-stale-candidate-reaps-committed-row` (FIXED by #531 — Phase-2 re-reads the row
-under the held lease at `internal/api/adopted_entries.go:1144-1177` and `reapAdoptProvenanceRow`
+`2026-07-11-gc-phase2-stale-candidate-reaps-committed-row` (FIXED by #531 `767b6736` — Phase-2 re-reads
+the row under the held lease at `internal/api/adopted_entries.go:1144-1177` and `reapAdoptProvenanceRow`
 (`:946-978`) no-ops unless `(ManifestName, state, UpdatedAt)` still match, matched at `:954` — closes all
-three interleaves) and `2026-07-11-classifier-committed-signal-blind-to-entry-drift` (FIXED by #532 —
-committed-KEEP hardened against live-entry drift at Signal 2b `:521-530`, protects the claim-10
-recoverability contract). See design.md "Adopt-GC dependency". The `Depends-on:` edges are MET; the
-declaration above is retained as a traceability record.
+three interleaves) and `2026-07-11-classifier-committed-signal-blind-to-entry-drift` (FIXED by #532
+`e545c06e` — committed-KEEP hardened against live-entry drift at Signal 2b `:521-530`, protects the
+claim-10 recoverability contract). See design.md "Adopt-GC dependency". The `Depends-on:` edges are MET;
+the declaration above is retained as a traceability record.
+
+## Phase status (plan.md = 12 phases, Phase 0-11)
+
+| Phase | Scope | Gate | Status |
+|---|---|---|---|
+| 0 | Precondition + C6 stale-text/citation refresh (docs) | $knowledge-archivist + $arch confirm | **DONE** (design.md re-pointed to HEAD; committed with Phase 1 at `98d16cd0`) |
+| 1 | `ManifestDeleteInWithHash` (#1) fail-closed hash gate | $security MANDATORY + $qa | **DONE — in bot review (PR #539);** P3 atomicity-contract doc-fix at `23971e87`; awaiting Sol review + bot re-trigger, then merge |
+| 2 | `restoreEntryFromBackup`→`restoreEntryFromBytes` extraction (#2 pt1, PURE refactor) | $arch + $qa (full regression) + $security light | **REDO — started then abandoned mid-refactor at a session limit; partial branch DELETED. To be REDONE fresh off master AFTER Phase 1 merges.** |
+| 3 | CAS mutators `CASRestoreEntryFromBytes` + `CASGuardedRemoveEntry` (#2 pt2) | **FULL COMMISSION** ($security MANDATORY + $arch + $qa) | PENDING (dep: 2) |
+| 4 | `ClassifyEntryUnderLock` (read-only) + `EntryRawSubtree` (#2 pt3) | **FULL COMMISSION** (subtlest seam, P1-a/P1-b) | PENDING (dep: 3) |
+| 5 | `state_read_caps.go` `.snapshot` read-cap (#3) | $security ($qa) | PENDING (secret-bearing half already at HEAD, #532) |
+| 6 | Provenance mutators (D1) — author `MarkAdoptProvenanceDeAdopting` + `CloseAdoptProvenance` bodies | **FULL COMMISSION** (protected provenance store) | PENDING |
+| 7 | `BuildDeAdoptPlan` (read-only planner), NEW deadopt.go | $arch + $security + $qa | PENDING (dep: 4,5,6) |
+| 8 | `ExecuteDeAdoptWithOpts` — ATOMIC all-clients (DO NOT SPLIT, integration) | **FULL COMMISSION + integration owner + Codex-bot PASS + deep-security** | PENDING (dep: 1,3,4,5,6,7) |
+| 9 | CLI `mcphub de-adopt` (alias deadopt) | $qa + $arch light + $security light | PENDING (dep: 7,8) |
+| 10 | GUI backend routes + eligibility (G3) | $security + $qa | PENDING (dep: 7,8) |
+| 11 | Frontend affordance + Playwright | $ux-reviewer + $frontend self-check + $qa | PENDING (dep: 10) |
+
+Mandatory-gate map (from plan.md): full commission on **3, 4, 6, 8**; security-reviewer MANDATORY on
+1,3,4,5,6,7,8,10; Phase 8 additionally requires Codex-bot PASS + deep-security.
+
+Change-Surface Contract (v1 — exactly **3 additive shared-owner changes**, delta-review-confirmed):
+1. `ManifestDeleteInWithHash` (manifest.go) — Phase 1.
+2. CAS+read capability on adopt-reachable clients adapters (`CASRestoreEntryFromBytes` +
+   `CASGuardedRemoveEntry` + `EntryRawSubtree` + read-only `ClassifyEntryUnderLock` +
+   `restoreEntryFromBackup`→`restoreEntryFromBytes` extraction) — Phases 2-4.
+3. `.snapshot` read-cap line in `state_read_caps.go` — Phase 5 (secret-bearing half already at HEAD).
+Plus D1 provenance mutator **BODIES** in `adopted_entries.go` (Phase 6, design-authorized, tightly
+bounded). Everything else is NEW files. **`BuildHubReconcilePlan` / `install_hub_reconcile.go` is NOT
+touched in v1** (gate-ON deferred; claim-11 negative check).
 
 ## Active agents / lanes
-- None. Design rework complete; the next gate is an independent FABLE audit, then `$planner`.
+- None running. Phase 1 is in bot review (PR #539); the immediate gate is Sol review of the
+  round-5 amended sections + Codex-bot PASS, then merge Phase 1.
 
 ## Completed agents / lanes
 - Design memo accepted and copied into this work-item as `design.md`.
@@ -87,10 +120,19 @@ declaration above is retained as a traceability record.
   no FS side effect. **P3-b:** one-sentence G8 extension (accepted-conflict verdict not re-checked at
   E6). Claims → 19; tests T16 (merged-lower write-target-physical) + T17 (empty-config ≠ Unreadable)
   added. No architecture / scope / protected-surface change — only WHICH BYTES classify reads.
+- **Arch delta-recheck PASS (2026-07-13).** The round-5 amended sections cleared architecture review;
+  design.md round-5 is ACCEPTED as the planning source of truth.
+- **Planned (2026-07-14).** `$planner` broke the accepted design into the 12-phase delivery plan
+  (`plan.md`) respecting the v1 Change-Surface Contract; plan snapshot saved at
+  `.plans/2026-07/plan(main)-2026-07-14_deadopt-v1-12-phase.md`.
+- **Phase 0 DONE (2026-07-14).** design.md C6 doc-freshness refresh (see below); committed with Phase 1.
+- **Phase 1 DELIVERED to bot review (2026-07-14).** `ManifestDeleteInWithHash` (fail-closed hash gate)
+  on branch `feat/deadopt-phase1-manifest-delete-hash` (`98d16cd0`); P3 atomicity-contract doc-fix for
+  Codex-bot #539 at `23971e87`. Awaiting Sol review + bot re-trigger, then merge.
 
 ## Decisions
 - `2026-07-11-deadopt-v1-all-clients-only-scope` (**`status: accepted`**) — v1 scope: atomic
-  all-clients-only, gate-OFF-only; subset + gate-ON + `--reconstruct-legacy` deferred.
+  all-clients-only, gate-OFF-only; subset + gate-ON + `--reconstruct-legacy` DEFERRED.
 - `2026-07-10-deadopt-manifest-delete-hash-gate` (**`status: accepted`**) — `ManifestDeleteInWithHash`
   (fail-closed-on-empty polarity, retained path guard). Its Consequence (c) F-B (reconcile
   prune) is now DEFERRED with gate-ON.
@@ -100,27 +142,28 @@ declaration above is retained as a traceability record.
 - Adjacent bugs filed: `work-items/bugs/2026-07-11-classify-dead-adopting-row-gate-on-blind.md`
   (adopt-side gate-ON blindness), `.../2026-07-11-hub-reconcile-gate-on-zero-binding-stale-aggregate.md`
   (pre-existing reconcile gap), `.../2026-07-11-adopt-snapshot-read-cap-too-small.md`
-  (snapshot read-cap; fix lands with de-adopt).
+  (snapshot read-cap; fix lands with de-adopt Phase 5).
 
 ## Next action
-**Phase 0 DONE (2026-07-14): design.md C6 doc-freshness refresh.** The "Adopt-GC dependency" section,
-every present-tense "no filter" assertion, and every `internal/api/adopted_entries.go` line citation in
-`design.md` were re-pointed to HEAD (master `c7e2534b`) and now assert the RESOLVED state (both
-`Depends-on` adopt-GC edges FIXED by #531/#532; `reapAdoptProvenanceRow` HAS the `(state, UpdatedAt)`
-identity gate at `:946-978`/`:954`; the transition-window reap is CLOSED). Docs-only — no design
-decision, claim count (still 19), scope, or architecture changed. The round-4 `withConfigLock`→
-`withConfigReadLock` supersession marker and the shared-owner-#3 scope note (the `.snapshot`
-secret-bearing half already landed via #532; only the `state_read_caps.go` read-cap line remains) were
-also folded in.
+**Merge Phase 1 (PR #539):** land the round-5-amended Sol delta-recheck + Codex-bot PASS on the
+`ManifestDeleteInWithHash` change, then merge to master.
 
-**Phase 1 IN PROGRESS on branch `feat/deadopt-phase1-manifest-delete-hash`** (the `ManifestDeleteInWithHash`
-delete-mutation-point hash gate, per the Change-Surface Contract). The two adopt-GC `Depends-on` edges
-are now SATISFIED at HEAD, so that blocker is CLEARED. The remaining v1 delivery gates ($lead-owned)
-are unchanged: a codex (Sol) DELTA-recheck of the round-5 amended sections (the write-target-physical
-collapse in `ClassifyEntryUnderLock` + the resume/accept wiring, the `withConfigReadLock` P3-a forwarder,
-the "Adopt-GC dependency" section, the P2 empty-config pin, claims 19 + T16/T17) — NOT a full re-audit —
-then `$planner` breaks it into delivery phases respecting the v1 Change-Surface Contract (THREE additive
-shared-owner changes). No provenance-CODE gap blocks de-adopt; the one under-specified read-cap detail
-is flagged in the design's "Provenance-gap flag" + filed as an adjacent bug. Do NOT reopen the tracked
-provenance residuals (`work-items/backlog/2026-07-10-adopt-provenance-lease-hygiene.md`) or patch the
-protected provenance surfaces.
+**Then Phase 2 (REDO fresh off master).** Phase 2 (`restoreEntryFromBackup`→`restoreEntryFromBytes`
+PURE extraction) was started once, then abandoned mid-refactor at a session limit; that partial branch
+was DELETED. It must be REDONE fresh off master AFTER Phase 1 merges (a pure refactor with the existing
+restore/demigrate/rollback suites as its regression gate). The capability track (Phases 2→3→4) plus
+Phase 5 (state-read cap) and Phase 6 (provenance mutators D1) can then proceed; full-commission phases
+(3, 4, 6, 8) each get the multi-model commission (Sol+Terra+fable) + security-reviewer before the bot,
+and Phase 8 is D-scale (Codex-bot + deep-security).
+
+Do NOT reopen the tracked provenance residuals (`work-items/backlog/2026-07-10-adopt-provenance-lease-hygiene.md`)
+or patch the protected provenance surfaces. `BuildHubReconcilePlan` stays untouched in v1 (gate-ON deferred).
+
+**Phase 0 record (2026-07-14):** the design.md "Adopt-GC dependency" section, every present-tense
+"no filter" assertion, and every `internal/api/adopted_entries.go` line citation in `design.md` were
+re-pointed to HEAD (master `c7e2534b`) and now assert the RESOLVED state (both `Depends-on` adopt-GC
+edges FIXED by #531/#532; `reapAdoptProvenanceRow` HAS the `(state, UpdatedAt)` identity gate at
+`:946-978`/`:954`; the transition-window reap is CLOSED). Docs-only — no design decision, claim count
+(still 19), scope, or architecture changed. The round-4 `withConfigLock`→`withConfigReadLock`
+supersession marker and the shared-owner-#3 scope note (the `.snapshot` secret-bearing half already
+landed via #532; only the `state_read_caps.go` read-cap line remains) were also folded in.
