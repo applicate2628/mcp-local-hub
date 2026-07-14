@@ -1289,19 +1289,13 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 // ---------------------------------------------------------------------------
 
 // MarkAdoptProvenanceDeAdopting transitions adopted (or a re-verified,
-// committed adopting row) to de_adopting. The manifest lease excludes a live
-// same-manifest adopt/de-adopt operation; the entries lock protects the row
-// read-classify-write transaction.
+// committed adopting row) to de_adopting.
+//
+// PRECONDITION: the caller (the de-adopt executor, ExecuteDeAdoptWithOpts) holds
+// the per-manifest lease across the E1..E6 flow; this mutator does NOT re-acquire
+// it (a second same-process flock handle would fail-closed on Windows). The
+// entries lock still protects the row read-classify-write transaction.
 func MarkAdoptProvenanceDeAdopting(manifestName string) error {
-	lk, acquired, err := tryAcquireAdoptManifestLease(manifestName)
-	if err != nil {
-		return fmt.Errorf("adopt provenance mark de-adopting: acquire manifest lease: %w", err)
-	}
-	if !acquired {
-		return fmt.Errorf("adopt provenance mark de-adopting: manifest %q lease is held by another operation", manifestName)
-	}
-	defer func() { _ = lk.Unlock() }()
-
 	return withAdoptedEntriesLock(func() error {
 		store, err := readAdoptedEntries()
 		if err != nil {
@@ -1337,19 +1331,15 @@ func MarkAdoptProvenanceDeAdopting(manifestName string) error {
 	})
 }
 
-// CloseAdoptProvenance removes a de_adopting row and its snapshots. It retains
-// the manifest lease while delegating deletion to reapAdoptProvenanceRow, the
-// store's single identity-gated snapshots-first deletion path.
+// CloseAdoptProvenance removes a de_adopting row and its snapshots.
+//
+// PRECONDITION: the caller (the de-adopt executor, ExecuteDeAdoptWithOpts) holds
+// the per-manifest lease across the E1..E6 flow; this mutator does NOT re-acquire
+// it (a second same-process flock handle would fail-closed on Windows). The
+// caller retains the lease while CloseAdoptProvenance delegates deletion to
+// reapAdoptProvenanceRow, the store's single identity-gated snapshots-first
+// deletion path.
 func CloseAdoptProvenance(manifestName string) error {
-	lk, acquired, err := tryAcquireAdoptManifestLease(manifestName)
-	if err != nil {
-		return fmt.Errorf("adopt provenance close: acquire manifest lease: %w", err)
-	}
-	if !acquired {
-		return fmt.Errorf("adopt provenance close: manifest %q lease is held by another operation", manifestName)
-	}
-	defer func() { _ = lk.Unlock() }()
-
 	var (
 		found     bool
 		updatedAt time.Time
