@@ -1,12 +1,28 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// syncBuffer is a concurrency-safe io.Writer so a test can drive Serve without
+// the synchronous-blocking semantics of io.Pipe on the server's response writes.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
 
 // --- test harness ------------------------------------------------------------
 
@@ -227,5 +243,45 @@ func TestToolPanicRecovered(t *testing.T) {
 	r = h.recv()
 	if r.Error != nil || string(r.ID) != "2" {
 		t.Errorf("server did not survive the panic: id=%s err=%+v", r.ID, r.Error)
+	}
+}
+
+// TestServeDrainsInFlightOnEOF proves that when stdin closes (EOF) while a
+// tools/call is still running, Serve cancels the call AND waits for its
+// cancellation cleanup (the domain layer's deferred process-tree kill) to run
+// BEFORE returning. Without the drain, Serve returns immediately on EOF, main
+// exits, and the in-flight build's cleanup never runs — orphaning its process
+// tree during normal shutdown.
+func TestServeDrainsInFlightOnEOF(t *testing.T) {
+	started := make(chan struct{})
+	var cleanedUp atomic.Bool
+	tool := stubTool{name: "slow", fn: func(ctx context.Context, _ json.RawMessage) (any, error) {
+		close(started)
+		<-ctx.Done() // block until the server cancels us during EOF shutdown
+		// Simulate the deferred tree-kill running only AFTER cancellation is seen.
+		time.Sleep(50 * time.Millisecond)
+		cleanedUp.Store(true)
+		return nil, ctx.Err()
+	}}
+
+	srv := NewServer("test", "0", []Tool{tool})
+	in, inW := io.Pipe()
+	out := &syncBuffer{}
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(context.Background(), in, out) }()
+
+	if _, err := io.WriteString(inW, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"slow"}}`+"\n"); err != nil {
+		t.Fatalf("write request: %v", err)
+	}
+	<-started       // the tool is now in flight
+	_ = inW.Close() // stdin EOF
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not return within 5s after EOF")
+	}
+	if !cleanedUp.Load() {
+		t.Error("Serve returned before the in-flight tool ran its cancellation cleanup — EOF drain missing")
 	}
 }

@@ -232,6 +232,18 @@ func validateTargets(targets []string) error {
 	return nil
 }
 
+// presetFlag renders the --preset argument in the =<name> equals form. A preset
+// name may legitimately begin with '-' (e.g. "--help"; `cmake --list-presets`
+// can list such a name), and passing it as two separate argv elements
+// ("--preset", "--help") lets cmake/ctest reinterpret the value as an option —
+// `cmake --preset --help` prints help and exits 0 instead of configuring. The
+// equals form binds the value to the flag regardless of its leading dashes and is
+// accepted by cmake configure/build/workflow and ctest alike, so it is the single
+// owner of preset-flag construction across every preset-taking command.
+func presetFlag(name string) string {
+	return "--preset=" + name
+}
+
 // validateDefineKey rejects a -D cache key that would corrupt the argv (no
 // shell is used, but an '=' or space in the key would still misparse).
 func validateDefineKey(k string) error {
@@ -302,7 +314,7 @@ func (b *builder) cmakeConfigure() mcp.Tool {
 			if err != nil {
 				return nil, err
 			}
-			argv := []string{"--preset", a.Preset}
+			argv := []string{presetFlag(a.Preset)}
 			if a.Fresh {
 				argv = append(argv, "--fresh")
 			}
@@ -370,7 +382,7 @@ func (b *builder) cmakeBuild() mcp.Tool {
 			if err != nil {
 				return nil, err
 			}
-			argv := []string{"--build", "--preset", a.Preset}
+			argv := []string{"--build", presetFlag(a.Preset)}
 			if len(a.Targets) > 0 {
 				argv = append(argv, "--target")
 				argv = append(argv, a.Targets...)
@@ -440,7 +452,7 @@ func (b *builder) cmakeTest() mcp.Tool {
 			if junitPath != "" && !filepath.IsAbs(junitPath) {
 				junitPath = filepath.Join(dir, junitPath)
 			}
-			argv := []string{"--preset", a.Preset}
+			argv := []string{presetFlag(a.Preset)}
 			if a.Regex != "" {
 				argv = append(argv, "-R", a.Regex)
 			}
@@ -514,7 +526,7 @@ func (b *builder) cmakeWorkflow() mcp.Tool {
 			if err != nil {
 				return nil, err
 			}
-			argv := []string{"--workflow", "--preset", a.Preset}
+			argv := []string{"--workflow", presetFlag(a.Preset)}
 			timeout := timeoutOrDefault(a.TimeoutSec, defaultWorkflowTimeout)
 			res, err := b.runTool(ctx, timeout, dir, cmakeBin, argv)
 			if err != nil {
@@ -543,7 +555,7 @@ func (b *builder) cmakeClean() mcp.Tool {
 	return &funcTool{
 		name:        "cmake_clean",
 		title:       "CMake clean",
-		description: "Clean a build tree. By default runs `cmake --build --preset <preset> --target clean`. With purge_build_dir it removes the whole resolved build directory, refusing any path not strictly inside the project directory (never RemoveAll on an arbitrary path).",
+		description: "Clean a build tree. `preset` is a CONFIGURE preset; it resolves the build directory. By default runs `cmake --build <resolved build dir> --target clean` (so a build preset named differently from the configure preset is never required). With purge_build_dir it removes the whole resolved build directory, refusing any path not strictly inside the project directory (never RemoveAll on an arbitrary path).",
 		schema:      schema,
 		handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var a cleanArgs
@@ -558,18 +570,21 @@ func (b *builder) cmakeClean() mcp.Tool {
 				return nil, err
 			}
 
+			// Both clean modes key off the CONFIGURE preset, which resolves the
+			// build DIRECTORY. `preset` is never a build preset here.
+			p, err := LoadPresets(dir)
+			if err != nil {
+				return nil, err
+			}
+			binaryDir, err := p.ResolvedBinaryDir(a.Preset)
+			if err != nil {
+				return nil, err
+			}
+
 			if a.PurgeBuildDir {
-				p, err := LoadPresets(dir)
-				if err != nil {
-					return nil, err
-				}
-				binaryDir, err := p.ResolvedBinaryDir(a.Preset)
-				if err != nil {
-					return nil, err
-				}
 				// The path-escape guard is the single owner of purge safety: it
-				// refuses unresolved macros, the source dir itself, and anything
-				// outside the source tree.
+				// refuses unresolved/unknown-namespace macros, the source dir
+				// itself, and anything outside the source tree before RemoveAll.
 				safe, err := resolveBuildDirWithinSource(binaryDir, dir, a.Preset)
 				if err != nil {
 					return nil, err
@@ -580,11 +595,22 @@ func (b *builder) cmakeClean() mcp.Tool {
 				return cleanResult{Success: true, Purged: true, RemovedDir: safe}, nil
 			}
 
+			// Non-purge: run `cmake --build <build-dir> --target clean`. Building
+			// by the resolved build DIRECTORY (not `--build --preset <name>`)
+			// avoids the build-vs-configure preset mismatch: a configure preset
+			// name sent to `cmake --build --preset` fails "No such build preset"
+			// whenever the build preset is named differently (e.g. configure
+			// "dev" vs build "dev-build"). This also cleans a legitimate
+			// out-of-source build tree, which the configure preset already names.
+			buildDir, _, err := expandBinaryDirToAbs(binaryDir, dir, a.Preset)
+			if err != nil {
+				return nil, err
+			}
 			cmakeBin, err := resolveCMake()
 			if err != nil {
 				return nil, err
 			}
-			argv := []string{"--build", "--preset", a.Preset, "--target", "clean"}
+			argv := []string{"--build", buildDir, "--target", "clean"}
 			timeout := timeoutOrDefault(a.TimeoutSec, defaultCleanTimeout)
 			res, err := b.runTool(ctx, timeout, dir, cmakeBin, argv)
 			if err != nil {

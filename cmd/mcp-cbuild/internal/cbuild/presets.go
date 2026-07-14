@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -68,15 +70,20 @@ type rawConfigurePreset struct {
 	BinaryDir      string                     `json:"binaryDir"`
 	ToolchainFile  string                     `json:"toolchainFile"`
 	CacheVariables map[string]json.RawMessage `json:"cacheVariables"`
+	// Condition is the raw preset `condition` (a bool shorthand, null, or a
+	// condition object). It is inheritable, so it is merged through the inherits
+	// chain and evaluated per host to drop presets disabled on this machine.
+	Condition json.RawMessage `json:"condition"`
 }
 
 type rawNamedPreset struct {
-	Name            string        `json:"name"`
-	DisplayName     string        `json:"displayName"`
-	Description     string        `json:"description"`
-	Inherits        inheritsField `json:"inherits"`
-	Hidden          bool          `json:"hidden"`
-	ConfigurePreset string        `json:"configurePreset"`
+	Name            string          `json:"name"`
+	DisplayName     string          `json:"displayName"`
+	Description     string          `json:"description"`
+	Inherits        inheritsField   `json:"inherits"`
+	Hidden          bool            `json:"hidden"`
+	ConfigurePreset string          `json:"configurePreset"`
+	Condition       json.RawMessage `json:"condition"`
 }
 
 type rawPresetsFile struct {
@@ -93,6 +100,7 @@ type rawPresetsFile struct {
 type Presets struct {
 	Version        int
 	Files          []string
+	sourceDir      string // project dir (holds the top-level presets file); for macro expansion
 	configure      map[string]rawConfigurePreset
 	configureOrder []string
 	build          []rawNamedPreset
@@ -103,7 +111,7 @@ type Presets struct {
 // LoadPresets reads CMakePresets.json and CMakeUserPresets.json from dir,
 // resolving `include` recursively. At least one of the two files must exist.
 func LoadPresets(dir string) (*Presets, error) {
-	p := &Presets{configure: map[string]rawConfigurePreset{}}
+	p := &Presets{sourceDir: dir, configure: map[string]rawConfigurePreset{}}
 	visited := map[string]bool{}
 	found := false
 	for _, base := range []string{"CMakePresets.json", "CMakeUserPresets.json"} {
@@ -149,11 +157,19 @@ func (p *Presets) loadFile(path string, visited map[string]bool) error {
 
 	// Includes are resolved relative to THIS file's directory, and are merged
 	// BEFORE this file's own presets so a local preset can inherit from an
-	// included base.
+	// included base. For preset files version 7+, an include entry may itself
+	// carry macros (e.g. "$penv{PRESET_DIR}/base.json" or
+	// "${sourceDir}/cmake/base.json"); expand them via the shared helper (which
+	// is fail-closed on an unset $env{}/$penv{}) BEFORE resolving the path, else
+	// the raw macro string would be opened literally and the load would fail.
 	for _, inc := range f.Include {
-		incPath := inc
+		expandedInc, err := expandPresetMacros(inc, p.sourceDir, "")
+		if err != nil {
+			return fmt.Errorf("expand include %q in %s: %w", inc, path, err)
+		}
+		incPath := expandedInc
 		if !filepath.IsAbs(incPath) {
-			incPath = filepath.Join(filepath.Dir(path), inc)
+			incPath = filepath.Join(filepath.Dir(path), incPath)
 		}
 		if err := p.loadFile(incPath, visited); err != nil {
 			return err
@@ -191,6 +207,12 @@ func (p *Presets) Result() PresetsResult {
 	for _, name := range p.configureOrder {
 		cp := p.configure[name]
 		merged := p.mergeConfigure(name, nil, cache)
+		// Drop a preset disabled on this host by its (inherits-merged) condition,
+		// matching `cmake --list-presets`, which omits condition-disabled presets.
+		// A preset we cannot positively evaluate to false is kept (see evalCondition).
+		if !evalCondition(merged.Condition, p.sourceDir, name) {
+			continue
+		}
 		info := PresetInfo{
 			Name:              cp.Name,
 			DisplayName:       cp.DisplayName,
@@ -207,16 +229,18 @@ func (p *Presets) Result() PresetsResult {
 		}
 		res.ConfigurePresets = append(res.ConfigurePresets, info)
 	}
-	res.BuildPresets = resolveNamed(p.build)
-	res.TestPresets = resolveNamed(p.test)
-	res.WorkflowPresets = resolveNamed(p.workflow)
+	res.BuildPresets = resolveNamed(p.build, p.sourceDir)
+	res.TestPresets = resolveNamed(p.test, p.sourceDir)
+	// Workflow presets carry no `condition` field in CMake, so none are filtered;
+	// resolveNamed still evaluates the (always-empty → enabled) condition uniformly.
+	res.WorkflowPresets = resolveNamed(p.workflow, p.sourceDir)
 	return res
 }
 
 // resolveNamed surfaces each build/test/workflow preset with its inherited
 // fields resolved (currently configurePreset), preserving declaration order and
 // de-duplicating by name (first declaration wins, matching configure presets).
-func resolveNamed(list []rawNamedPreset) []PresetInfo {
+func resolveNamed(list []rawNamedPreset, sourceDir string) []PresetInfo {
 	byName := make(map[string]rawNamedPreset, len(list))
 	for _, n := range list {
 		if n.Name == "" {
@@ -237,6 +261,12 @@ func resolveNamed(list []rawNamedPreset) []PresetInfo {
 		}
 		emitted[n.Name] = true
 		merged := mergeNamed(byName, n.Name, nil, resolved)
+		// Drop a build/test preset disabled on this host by its merged condition
+		// (workflow presets have no condition, so merged.Condition is empty →
+		// enabled). Matches `cmake --list-presets`.
+		if !evalCondition(merged.Condition, sourceDir, n.Name) {
+			continue
+		}
 		out = append(out, PresetInfo{
 			Name:        n.Name,
 			DisplayName: n.DisplayName,
@@ -259,9 +289,10 @@ func resolveNamed(list []rawNamedPreset) []PresetInfo {
 //
 // resolved memoizes each node's merged value BY NAME (path-independent, same
 // rationale as mergeConfigure) so diamond-inheritance named presets resolve in
-// O(V+E) rather than O(2^depth). A merged value's only set field is the scalar
-// ConfigurePreset (Inherits is never populated on a merge), so the cached value
-// carries no shared mutable reference and is safe to return directly.
+// O(V+E) rather than O(2^depth). A merged value's set fields are the scalar
+// ConfigurePreset and the read-only Condition byte slice (Inherits is never
+// populated on a merge); neither is mutated in place after caching, so the cached
+// value carries no shared MUTABLE reference and is safe to return directly.
 func mergeNamed(byName map[string]rawNamedPreset, name string, chain []string, resolved map[string]rawNamedPreset) rawNamedPreset {
 	cur, ok := byName[name]
 	if !ok {
@@ -293,6 +324,9 @@ func mergeNamed(byName map[string]rawNamedPreset, name string, chain []string, r
 func overlayNamed(dst *rawNamedPreset, src rawNamedPreset) {
 	if src.ConfigurePreset != "" {
 		dst.ConfigurePreset = src.ConfigurePreset
+	}
+	if len(src.Condition) > 0 && !isJSONNull(src.Condition) {
+		dst.Condition = src.Condition
 	}
 }
 
@@ -380,6 +414,9 @@ func overlay(dst *rawConfigurePreset, src rawConfigurePreset) {
 	}
 	if src.ToolchainFile != "" {
 		dst.ToolchainFile = src.ToolchainFile
+	}
+	if len(src.Condition) > 0 && !isJSONNull(src.Condition) {
+		dst.Condition = src.Condition
 	}
 	if dst.CacheVariables == nil {
 		dst.CacheVariables = map[string]json.RawMessage{}
@@ -502,4 +539,250 @@ func expandEnvMacro(s, prefix string) (string, error) {
 
 func trimSpaceBytes(b []byte) []byte {
 	return []byte(strings.TrimSpace(string(b)))
+}
+
+// isJSONNull reports whether b is the JSON literal null (or empty).
+func isJSONNull(b json.RawMessage) bool {
+	s := string(trimSpaceBytes(b))
+	return s == "" || s == "null"
+}
+
+// --- preset condition evaluation --------------------------------------------
+
+// cmakeCondition is a decoded preset `condition` object. Only the fields
+// relevant to the active `type` are populated by any given condition.
+type cmakeCondition struct {
+	Type       string            `json:"type"`
+	Value      *bool             `json:"value"`      // const
+	Lhs        string            `json:"lhs"`        // equals / notEquals
+	Rhs        string            `json:"rhs"`        // equals / notEquals
+	String     string            `json:"string"`     // inList / notInList / matches / notMatches
+	List       []string          `json:"list"`       // inList / notInList
+	Regex      string            `json:"regex"`      // matches / notMatches
+	Condition  json.RawMessage   `json:"condition"`  // not
+	Conditions []json.RawMessage `json:"conditions"` // anyOf / allOf
+}
+
+// evalCondition reports whether a preset carrying condition raw is ENABLED on the
+// current host. It is FAIL-OPEN: an absent/null condition, a boolean shorthand, an
+// unknown/future condition type, an unresolvable macro (unset env, unknown
+// namespace), or a regex that will not compile all resolve to ENABLED.
+// cmake_list_presets must never HIDE a preset it merely failed to understand —
+// over-listing a preset the agent can still attempt is safer than silently
+// dropping a usable one. Only a condition we POSITIVELY evaluate to false disables
+// (and thus excludes) a preset, matching `cmake --list-presets`.
+func evalCondition(raw json.RawMessage, sourceDir, presetName string) bool {
+	enabled, _ := evalConditionResolved(raw, sourceDir, presetName)
+	return enabled
+}
+
+// evalConditionResolved returns (enabled, resolved). resolved reports whether the
+// condition was positively evaluated; resolved==false means "could not determine"
+// and the caller treats it as enabled. The three-valued logic lets anyOf/allOf
+// combine unknown sub-conditions correctly (unknown OR true == true; unknown AND
+// false == false).
+func evalConditionResolved(raw json.RawMessage, sourceDir, presetName string) (enabled, resolved bool) {
+	raw = trimSpaceBytes(raw)
+	if len(raw) == 0 || string(raw) == "null" {
+		return true, true // no condition → enabled
+	}
+	// Boolean shorthand: `"condition": true|false`.
+	switch string(raw) {
+	case "true":
+		return true, true
+	case "false":
+		return false, true
+	}
+	if raw[0] != '{' {
+		return true, false // unexpected shape → treat as enabled
+	}
+	var c cmakeCondition
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return true, false
+	}
+	switch c.Type {
+	case "const":
+		if c.Value == nil {
+			return true, false
+		}
+		return *c.Value, true
+	case "equals", "notEquals":
+		lhs, ok1 := expandConditionString(c.Lhs, sourceDir, presetName)
+		rhs, ok2 := expandConditionString(c.Rhs, sourceDir, presetName)
+		if !ok1 || !ok2 {
+			return true, false
+		}
+		eq := lhs == rhs
+		if c.Type == "notEquals" {
+			eq = !eq
+		}
+		return eq, true
+	case "inList", "notInList":
+		str, ok := expandConditionString(c.String, sourceDir, presetName)
+		if !ok {
+			return true, false
+		}
+		found := false
+		for _, item := range c.List {
+			it, okItem := expandConditionString(item, sourceDir, presetName)
+			if !okItem {
+				return true, false
+			}
+			if it == str {
+				found = true
+				break
+			}
+		}
+		if c.Type == "notInList" {
+			found = !found
+		}
+		return found, true
+	case "matches", "notMatches":
+		str, ok1 := expandConditionString(c.String, sourceDir, presetName)
+		rx, ok2 := expandConditionString(c.Regex, sourceDir, presetName)
+		if !ok1 || !ok2 {
+			return true, false
+		}
+		// CMake uses ECMAScript regex; Go's RE2 differs on exotic constructs. A
+		// pattern RE2 cannot compile is treated as unresolvable → enabled.
+		re, err := regexp.Compile(rx)
+		if err != nil {
+			return true, false
+		}
+		m := re.MatchString(str)
+		if c.Type == "notMatches" {
+			m = !m
+		}
+		return m, true
+	case "anyOf":
+		anyTrue, anyUnknown := false, false
+		for _, sub := range c.Conditions {
+			en, res := evalConditionResolved(sub, sourceDir, presetName)
+			if !res {
+				anyUnknown = true
+				continue
+			}
+			if en {
+				anyTrue = true
+			}
+		}
+		if anyTrue {
+			return true, true // OR short-circuits on any true, even with unknowns
+		}
+		if anyUnknown {
+			return true, false // no true, some unknown → cannot resolve → enabled
+		}
+		return false, true // all sub-conditions positively false
+	case "allOf":
+		anyFalse, anyUnknown := false, false
+		for _, sub := range c.Conditions {
+			en, res := evalConditionResolved(sub, sourceDir, presetName)
+			if !res {
+				anyUnknown = true
+				continue
+			}
+			if !en {
+				anyFalse = true
+			}
+		}
+		if anyFalse {
+			return false, true // AND short-circuits on any false, even with unknowns
+		}
+		if anyUnknown {
+			return true, false // no false, some unknown → cannot resolve → enabled
+		}
+		return true, true // all sub-conditions positively true
+	case "not":
+		en, res := evalConditionResolved(c.Condition, sourceDir, presetName)
+		if !res {
+			return true, false
+		}
+		return !en, true
+	default:
+		return true, false // unknown/future type → enabled (fail-open)
+	}
+}
+
+// expandConditionString expands the macros CMake allows inside a condition's
+// string operands. It returns ok=false when it meets a macro it cannot resolve
+// (an unset $env{}/$penv{}, or any remaining ${...} / $<namespace>{...} token);
+// the caller then treats the whole condition as unresolvable → enabled. Unlike
+// expandPresetMacros (which hard-errors on an unset env so the purge guard fails
+// closed), a condition must NOT abort listing on an unset env — it just becomes
+// unresolvable.
+func expandConditionString(s, sourceDir, presetName string) (string, bool) {
+	sourceDir = filepath.Clean(sourceDir)
+	repl := map[string]string{
+		"${sourceDir}":       sourceDir,
+		"${sourceParentDir}": filepath.Dir(sourceDir),
+		"${sourceDirName}":   filepath.Base(sourceDir),
+		"${presetName}":      presetName,
+		"${hostSystemName}":  cmakeHostSystemName(),
+		"${dollar}":          "$",
+	}
+	for k, v := range repl {
+		s = strings.ReplaceAll(s, k, v)
+	}
+	var ok bool
+	if s, ok = expandConditionEnv(s, "$env{"); !ok {
+		return s, false
+	}
+	if s, ok = expandConditionEnv(s, "$penv{"); !ok {
+		return s, false
+	}
+	// Any remaining macro token (unknown ${...} or $<namespace>{...}, or a
+	// malformed $env{ with no closing brace) → unresolvable.
+	if containsUnexpandedMacro(s) {
+		return s, false
+	}
+	return s, true
+}
+
+// expandConditionEnv substitutes every prefix{NAME} with the NAME env value,
+// returning ok=false on the first UNSET variable (the caller treats the condition
+// as unresolvable rather than aborting the whole listing). The scan cursor
+// advances past each substituted value so a self-referential value cannot loop.
+func expandConditionEnv(s, prefix string) (string, bool) {
+	searchFrom := 0
+	for {
+		rel := strings.Index(s[searchFrom:], prefix)
+		if rel < 0 {
+			return s, true
+		}
+		idx := searchFrom + rel
+		end := strings.Index(s[idx:], "}")
+		if end < 0 {
+			// Malformed (no closing brace): leave literal; containsUnexpandedMacro
+			// in the caller then flags it as unresolvable.
+			return s, true
+		}
+		end += idx
+		name := s[idx+len(prefix) : end]
+		val, found := os.LookupEnv(name)
+		if !found {
+			return s, false
+		}
+		s = s[:idx] + val + s[end+1:]
+		searchFrom = idx + len(val)
+	}
+}
+
+// cmakeHostSystemName maps the Go runtime to CMake's ${hostSystemName}
+// (CMAKE_HOST_SYSTEM_NAME): Windows / Linux / Darwin for the common hosts. For a
+// less-common GOOS the CMake uname-style name is approximated by capitalizing the
+// GOOS; a mismatch there only over-lists a preset (the fail-open direction).
+func cmakeHostSystemName() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "Windows"
+	case "linux":
+		return "Linux"
+	case "darwin":
+		return "Darwin"
+	default:
+		if runtime.GOOS == "" {
+			return ""
+		}
+		return strings.ToUpper(runtime.GOOS[:1]) + runtime.GOOS[1:]
+	}
 }

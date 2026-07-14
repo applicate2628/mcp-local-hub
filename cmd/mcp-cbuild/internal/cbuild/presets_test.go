@@ -1,9 +1,11 @@
 package cbuild
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -333,5 +335,204 @@ func TestNamedPresetInheritance(t *testing.T) {
 	ctest := findPreset(t, res.TestPresets, "child-test")
 	if ctest.ConfigurePreset != "dev" {
 		t.Errorf("child-test configurePreset = %q, want dev (inherited from base-test)", ctest.ConfigurePreset)
+	}
+}
+
+// TestResolveBuildDirRejectsVendorMacro proves the purge guard fails closed on a
+// vendor / unknown-namespace macro. Without the catch-all, filepath.Clean would
+// collapse e.g. "$vendor{x}/../build" and RemoveAll could delete an in-tree
+// source directory — even though CMake itself rejects such a preset.
+func TestResolveBuildDirRejectsVendorMacro(t *testing.T) {
+	src := t.TempDir()
+	for _, bad := range []string{
+		"$vendor{x}/../build",
+		"$vendor{microsoft.com/CMake}/out",
+		"$unknownns{y}/build",
+		"${sourceDir}/$vendor{x}",
+	} {
+		if _, err := resolveBuildDirWithinSource(bad, src, "dev"); err == nil {
+			t.Errorf("binaryDir %q: expected refusal for an unexpanded/unknown-namespace macro", bad)
+		}
+	}
+}
+
+// TestCleanResolvesBuildDirFromConfigurePreset pins the build-vs-configure fix:
+// cmake_clean's non-purge path resolves the build DIRECTORY from the configure
+// preset's binaryDir. It must never pass the configure preset NAME to
+// `cmake --build --preset`, which fails "No such build preset" whenever the build
+// preset is named differently (here configure "dev" vs build "dev-build").
+func TestCleanResolvesBuildDirFromConfigurePreset(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "CMakePresets.json", `{
+      "version": 3,
+      "configurePresets": [
+        { "name": "dev", "generator": "Ninja", "binaryDir": "${sourceDir}/out/dev" }
+      ],
+      "buildPresets": [ { "name": "dev-build", "configurePreset": "dev" } ]
+    }`)
+	p, err := LoadPresets(dir)
+	if err != nil {
+		t.Fatalf("LoadPresets: %v", err)
+	}
+	binaryDir, err := p.ResolvedBinaryDir("dev")
+	if err != nil {
+		t.Fatalf("ResolvedBinaryDir: %v", err)
+	}
+	buildAbs, _, err := expandBinaryDirToAbs(binaryDir, dir, "dev")
+	if err != nil {
+		t.Fatalf("expandBinaryDirToAbs: %v", err)
+	}
+	want := filepath.Clean(filepath.Join(dir, "out", "dev"))
+	if buildAbs != want {
+		t.Errorf("resolved build dir = %q, want %q", buildAbs, want)
+	}
+
+	// There is NO build preset named "dev"; the old --build --preset dev path
+	// would have failed. Confirm the configure preset is not itself a build preset.
+	res := p.Result()
+	for _, bp := range res.BuildPresets {
+		if bp.Name == "dev" {
+			t.Fatal("unexpected build preset named dev")
+		}
+	}
+}
+
+// TestEvalConditionForms exercises every documented condition form plus the
+// fail-open cases (unknown type, unresolvable macro).
+func TestEvalConditionForms(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "proj")
+	host := cmakeHostSystemName()
+	cases := []struct {
+		raw  string
+		want bool
+	}{
+		{`null`, true},
+		{`true`, true},
+		{`false`, false},
+		{`{"type":"const","value":true}`, true},
+		{`{"type":"const","value":false}`, false},
+		{fmt.Sprintf(`{"type":"equals","lhs":"${hostSystemName}","rhs":%q}`, host), true},
+		{`{"type":"equals","lhs":"${hostSystemName}","rhs":"NoSuchOS"}`, false},
+		{fmt.Sprintf(`{"type":"notEquals","lhs":"${hostSystemName}","rhs":%q}`, host), false},
+		{fmt.Sprintf(`{"type":"inList","string":"${hostSystemName}","list":[%q,"Zzz"]}`, host), true},
+		{`{"type":"inList","string":"${hostSystemName}","list":["Zzz"]}`, false},
+		{`{"type":"notInList","string":"${hostSystemName}","list":["Zzz"]}`, true},
+		{fmt.Sprintf(`{"type":"matches","string":"${hostSystemName}","regex":"^%s$"}`, regexp.QuoteMeta(host)), true},
+		{`{"type":"matches","string":"abc","regex":"^z"}`, false},
+		{`{"type":"notMatches","string":"abc","regex":"^z"}`, true},
+		{`{"type":"not","condition":{"type":"const","value":false}}`, true},
+		{fmt.Sprintf(`{"type":"allOf","conditions":[{"type":"const","value":true},{"type":"equals","lhs":"${hostSystemName}","rhs":%q}]}`, host), true},
+		{`{"type":"allOf","conditions":[{"type":"const","value":true},{"type":"const","value":false}]}`, false},
+		{fmt.Sprintf(`{"type":"anyOf","conditions":[{"type":"const","value":false},{"type":"equals","lhs":"${hostSystemName}","rhs":%q}]}`, host), true},
+		{`{"type":"anyOf","conditions":[{"type":"const","value":false},{"type":"const","value":false}]}`, false},
+		{`{"type":"unknownFutureType"}`, true},                                   // fail-open on unknown type
+		{`{"type":"equals","lhs":"$env{MCP_CBUILD_UNSET_XYZ}","rhs":"x"}`, true}, // unresolvable env → enabled
+		{`{"type":"matches","string":"x","regex":"("}`, true},                    // uncompilable regex → enabled
+	}
+	for _, c := range cases {
+		if got := evalCondition(json.RawMessage(c.raw), src, "p"); got != c.want {
+			t.Errorf("evalCondition(%s) = %v, want %v", c.raw, got, c.want)
+		}
+	}
+}
+
+// TestListPresetsFiltersHostDisabled proves cmake_list_presets excludes a preset
+// disabled on the current host by its condition, while keeping host-matching and
+// unconditional presets — matching `cmake --list-presets`.
+func TestListPresetsFiltersHostDisabled(t *testing.T) {
+	dir := t.TempDir()
+	host := cmakeHostSystemName()
+	writeFile(t, dir, "CMakePresets.json", fmt.Sprintf(`{
+      "version": 3,
+      "configurePresets": [
+        { "name": "match-host", "generator": "Ninja", "binaryDir": "${sourceDir}/b1",
+          "condition": {"type":"equals","lhs":"${hostSystemName}","rhs":%q} },
+        { "name": "other-host", "generator": "Ninja", "binaryDir": "${sourceDir}/b2",
+          "condition": {"type":"equals","lhs":"${hostSystemName}","rhs":"NoSuchOS"} },
+        { "name": "always", "generator": "Ninja", "binaryDir": "${sourceDir}/b3" }
+      ],
+      "buildPresets": [
+        { "name": "b-match", "configurePreset": "match-host",
+          "condition": {"type":"equals","lhs":"${hostSystemName}","rhs":%q} },
+        { "name": "b-other", "configurePreset": "other-host",
+          "condition": {"type":"equals","lhs":"${hostSystemName}","rhs":"NoSuchOS"} }
+      ]
+    }`, host, host))
+	p, err := LoadPresets(dir)
+	if err != nil {
+		t.Fatalf("LoadPresets: %v", err)
+	}
+	res := p.Result()
+
+	cfg := map[string]bool{}
+	for _, cp := range res.ConfigurePresets {
+		cfg[cp.Name] = true
+	}
+	if !cfg["match-host"] {
+		t.Errorf("host-matching configure preset was excluded; got %v", cfg)
+	}
+	if !cfg["always"] {
+		t.Errorf("unconditional configure preset was excluded; got %v", cfg)
+	}
+	if cfg["other-host"] {
+		t.Errorf("host-DISABLED configure preset was listed; got %v", cfg)
+	}
+
+	bld := map[string]bool{}
+	for _, bp := range res.BuildPresets {
+		bld[bp.Name] = true
+	}
+	if !bld["b-match"] {
+		t.Errorf("host-matching build preset was excluded; got %v", bld)
+	}
+	if bld["b-other"] {
+		t.Errorf("host-DISABLED build preset was listed; got %v", bld)
+	}
+}
+
+// TestLoadPresetsPenvInclude proves an include entry carrying a $penv{} macro
+// (version 7+) is expanded before the include path is resolved, so the included
+// base file is actually loaded and its fields inherited.
+func TestLoadPresetsPenvInclude(t *testing.T) {
+	root := t.TempDir()
+	incDir := filepath.Join(root, "presets")
+	if err := os.Mkdir(incDir, 0o755); err != nil {
+		t.Fatalf("mkdir incDir: %v", err)
+	}
+	writeFile(t, incDir, "base.json", `{
+      "version": 7,
+      "configurePresets": [
+        { "name": "base", "hidden": true, "generator": "Ninja", "binaryDir": "${sourceDir}/build" }
+      ]
+    }`)
+	t.Setenv("MCP_CBUILD_PRESET_DIR", incDir)
+	writeFile(t, root, "CMakePresets.json", `{
+      "version": 7,
+      "include": ["$penv{MCP_CBUILD_PRESET_DIR}/base.json"],
+      "configurePresets": [ { "name": "dev", "inherits": ["base"] } ]
+    }`)
+
+	p, err := LoadPresets(root)
+	if err != nil {
+		t.Fatalf("LoadPresets: %v", err)
+	}
+	res := p.Result()
+	dev := findPreset(t, res.ConfigurePresets, "dev")
+	if dev.ResolvedGenerator != "Ninja" {
+		t.Errorf("dev.ResolvedGenerator = %q, want Ninja (inherited from $penv-included base)", dev.ResolvedGenerator)
+	}
+}
+
+// TestLoadPresetsIncludeUnsetPenvFailsClosed proves an include referencing an
+// unset $penv{} is a fail-closed error, not a silently-collapsed empty path.
+func TestLoadPresetsIncludeUnsetPenvFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakePresets.json", `{
+      "version": 7,
+      "include": ["$penv{MCP_CBUILD_DEFINITELY_UNSET_INC}/base.json"],
+      "configurePresets": [ { "name": "dev" } ]
+    }`)
+	if _, err := LoadPresets(root); err == nil {
+		t.Error("expected LoadPresets to fail closed on an unset $penv{} in an include path")
 	}
 }

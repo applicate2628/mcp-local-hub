@@ -248,28 +248,10 @@ func fileExists(p string) bool {
 // symlink whose lexical spelling stays inside the tree but whose real target
 // escapes it is refused. Only a path that passes both may be handed to RemoveAll.
 func resolveBuildDirWithinSource(binaryDir, sourceDir, presetName string) (string, error) {
-	if binaryDir == "" {
-		return "", errors.New("preset declares no binaryDir")
-	}
-	expanded, err := expandPresetMacros(binaryDir, sourceDir, presetName)
+	buildAbs, srcAbs, err := expandBinaryDirToAbs(binaryDir, sourceDir, presetName)
 	if err != nil {
 		return "", err
 	}
-	if strings.Contains(expanded, "${") || strings.Contains(expanded, "$env{") || strings.Contains(expanded, "$penv{") {
-		return "", fmt.Errorf("binaryDir contains unresolved macros after expansion: %q — refusing to purge", expanded)
-	}
-
-	srcAbs, err := filepath.Abs(sourceDir)
-	if err != nil {
-		return "", fmt.Errorf("resolve sourceDir: %w", err)
-	}
-	srcAbs = filepath.Clean(srcAbs)
-
-	buildAbs := expanded
-	if !filepath.IsAbs(buildAbs) {
-		buildAbs = filepath.Join(srcAbs, buildAbs)
-	}
-	buildAbs = filepath.Clean(buildAbs)
 
 	// 1) Lexical containment (cheap, catches `..`, absolute-outside, cross-drive).
 	if err := containmentCheck(srcAbs, buildAbs, "binaryDir"); err != nil {
@@ -297,6 +279,76 @@ func resolveBuildDirWithinSource(binaryDir, sourceDir, presetName string) (strin
 	// to a symlink between the check and the delete redirect the RemoveAll to an
 	// out-of-tree target (TOCTOU).
 	return buildReal, nil
+}
+
+// expandBinaryDirToAbs expands a preset's binaryDir macros and resolves it to an
+// absolute, lexically-cleaned path (build) plus the absolute source directory
+// (src). It fails closed on any macro left unexpanded after substitution — a bare
+// ${...}, $env{...}, $penv{...}, $vendor{...}, or ANY $<namespace>{...} form.
+// CMake itself rejects an unknown macro namespace, and a leftover macro is
+// dangerous here: filepath.Clean would collapse e.g. "$vendor{x}/../src" into a
+// real in-tree "src" path, which the purge caller would then RemoveAll. It does
+// NOT enforce containment; the purge caller (resolveBuildDirWithinSource) layers
+// the containment + symlink checks on top, while the non-destructive
+// `cmake --build <dir> --target clean` caller accepts any concrete build dir CMake
+// itself configured, including a legitimate out-of-source tree.
+func expandBinaryDirToAbs(binaryDir, sourceDir, presetName string) (build, src string, err error) {
+	if binaryDir == "" {
+		return "", "", errors.New("preset declares no binaryDir")
+	}
+	expanded, err := expandPresetMacros(binaryDir, sourceDir, presetName)
+	if err != nil {
+		return "", "", err
+	}
+	if containsUnexpandedMacro(expanded) {
+		return "", "", fmt.Errorf("binaryDir contains an unresolved or unknown-namespace macro after expansion: %q — refusing to resolve", expanded)
+	}
+	src, err = filepath.Abs(sourceDir)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve sourceDir: %w", err)
+	}
+	src = filepath.Clean(src)
+
+	build = expanded
+	if !filepath.IsAbs(build) {
+		build = filepath.Join(src, build)
+	}
+	build = filepath.Clean(build)
+	return build, src, nil
+}
+
+// containsUnexpandedMacro reports whether s still contains a CMake preset macro
+// token of the form ${...}, $env{...}, $penv{...}, $vendor{...}, or any other
+// $<namespace>{...} — that is, a '$', optional identifier characters, then '{'.
+// The $env/$penv fail-closed expansion in expandPresetMacros resolves the known
+// namespaces; this catch-all additionally refuses the vendor namespace and any
+// future/unknown namespace CMake would reject, so an unexpanded macro can never
+// reach filepath.Clean (which would silently collapse it into a real path).
+func containsUnexpandedMacro(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '$' {
+			continue
+		}
+		j := i + 1
+		for j < len(s) && isMacroNamespaceByte(s[j]) {
+			j++
+		}
+		if j < len(s) && s[j] == '{' {
+			return true
+		}
+	}
+	return false
+}
+
+// isMacroNamespaceByte reports whether b may appear in a CMake macro namespace
+// (the identifier between '$' and '{', e.g. the "env"/"penv"/"vendor" in
+// $env{}/$penv{}/$vendor{}). The empty namespace (${...}) is still matched by
+// containsUnexpandedMacro because '$' is then immediately followed by '{'.
+func isMacroNamespaceByte(b byte) bool {
+	return b == '_' ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9')
 }
 
 // containmentCheck rejects a target that is not strictly inside base: the base

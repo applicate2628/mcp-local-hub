@@ -186,7 +186,10 @@ func readCacheSummary(sourceDir, preset string) map[string]string {
 	if err != nil {
 		return nil
 	}
-	if strings.Contains(expanded, "${") || strings.Contains(expanded, "$env{") || strings.Contains(expanded, "$penv{") {
+	// Same unresolved/unknown-namespace-macro gate as the purge guard (single
+	// owner: containsUnexpandedMacro). A leftover macro means we cannot trust the
+	// path; return no summary rather than read an arbitrary CMakeCache.txt.
+	if containsUnexpandedMacro(expanded) {
 		return nil
 	}
 	if !filepath.IsAbs(expanded) {

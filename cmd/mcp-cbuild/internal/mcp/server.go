@@ -20,6 +20,7 @@ import (
 	"io"
 	"log"
 	"sync"
+	"time"
 )
 
 // JSON-RPC 2.0 error codes used by this server (a subset of the spec plus the
@@ -44,6 +45,14 @@ var supportedProtocolVersions = map[string]bool{
 // defaultProtocolVersion is advertised in initialize when the client does not
 // offer a version this server recognizes.
 const defaultProtocolVersion = "2025-06-18"
+
+// shutdownGrace bounds how long Serve waits, after stdin EOF, for in-flight
+// tools/call goroutines to observe cancellation and run their deferred cleanup
+// (the domain layer's process-tree kill) before returning. It must exceed the
+// exec layer's post-kill WaitDelay (8s) so a cancelled build's tree-kill fully
+// completes; a tool that still refuses to finish past this bound is abandoned so
+// shutdown can never wedge.
+const shutdownGrace = 10 * time.Second
 
 // Tool is a single MCP tool exposed by the server. Implementations live in the
 // domain package (cbuild); the mcp package knows nothing about CMake or vcpkg.
@@ -90,6 +99,10 @@ type Server struct {
 
 	mu       sync.Mutex
 	inflight map[string]context.CancelFunc
+
+	// wg tracks live tools/call goroutines so Serve can drain them (cancel + wait
+	// for their deferred process-tree kill) on stdin EOF before returning.
+	wg sync.WaitGroup
 }
 
 // NewServer builds a server advertising the given name/version and exposing
@@ -145,7 +158,11 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	s.enc = enc
 
 	ctx, cancelAll := context.WithCancel(ctx)
-	defer cancelAll()
+	// On ANY return from Serve (EOF, read error) cancel every in-flight tools/call
+	// AND wait (bounded) for its goroutine to run its deferred process-tree kill.
+	// Returning on EOF without this drain lets main exit and orphan a still-running
+	// cmake/ninja tree during normal stdio shutdown.
+	defer s.drainInflight(cancelAll)
 
 	reader := bufio.NewReaderSize(in, 1<<20)
 	for {
@@ -163,6 +180,27 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 			}
 			return fmt.Errorf("read stdin: %w", err)
 		}
+	}
+}
+
+// drainInflight cancels every in-flight tools/call and waits (bounded by
+// shutdownGrace) for their goroutines to finish. Each cancelled tool observes ctx
+// cancellation, tree-kills its child process group, and runs its deferred
+// cleanup; draining here guarantees that cleanup completes BEFORE Serve returns
+// (and thus before main exits), so a cmake/ninja tree is never orphaned during a
+// normal stdin-EOF shutdown. A tool that will not finish within the grace is
+// abandoned so shutdown cannot wedge.
+func (s *Server) drainInflight(cancelAll context.CancelFunc) {
+	cancelAll()
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(shutdownGrace):
+		log.Printf("mcp: shutdown grace (%s) elapsed with tool call(s) still in flight; abandoning them", shutdownGrace)
 	}
 }
 
@@ -328,7 +366,9 @@ func (s *Server) handleToolsCall(ctx context.Context, id, params json.RawMessage
 	callCtx, cancel := context.WithCancel(ctx)
 	key := s.registerInflight(id, cancel)
 
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		defer s.releaseInflight(key, cancel)
 		// A panic in a tool handler (or its argument parser) must never take down
 		// the whole daemon; recover and surface it as an isError tool result so
