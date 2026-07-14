@@ -74,12 +74,25 @@ func (p *procGroup) start(cmd *exec.Cmd) {
 		// server is killed. Surface it so the loss of tree-kill protection is
 		// observable (mirrors mcphub's own job-protection signal).
 		log.Printf("warning: job assignment failed (OpenProcess pid=%d: %v); build grandchildren may orphan if this server is killed", cmd.Process.Pid, err)
+		p.disableJobLocked()
 		return
 	}
 	defer windows.CloseHandle(procH)
 	if err := windows.AssignProcessToJobObject(p.job, procH); err != nil {
 		// Same non-fatal orphan risk as the OpenProcess failure above.
 		log.Printf("warning: job assignment failed (AssignProcessToJobObject pid=%d: %v); build grandchildren may orphan if this server is killed", cmd.Process.Pid, err)
+		p.disableJobLocked()
+	}
+}
+
+// disableJobLocked releases an empty/unusable job after assignment failure so
+// kill takes the direct-process fallback instead of terminating an empty job.
+// p.mu must be held by the caller.
+func (p *procGroup) disableJobLocked() {
+	h := p.job
+	p.job = 0
+	if h != 0 {
+		_ = windows.CloseHandle(h)
 	}
 }
 

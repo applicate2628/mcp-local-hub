@@ -3,6 +3,7 @@ package cbuild
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -582,6 +583,17 @@ func (b *builder) cmakeClean() mcp.Tool {
 			}
 
 			if a.PurgeBuildDir {
+				buildAbs, _, err := expandBinaryDirToAbsContext(binaryDir, macroCtx)
+				if err != nil {
+					return nil, err
+				}
+				if info, statErr := os.Lstat(buildAbs); statErr == nil {
+					if !info.IsDir() {
+						return nil, fmt.Errorf("purge build dir %q: target is not a directory — refusing to purge", buildAbs)
+					}
+				} else if !errors.Is(statErr, os.ErrNotExist) {
+					return nil, fmt.Errorf("inspect purge build dir %q: %w", buildAbs, statErr)
+				}
 				// The path-escape guard is the single owner of purge safety: it
 				// refuses unresolved/unknown-namespace macros, the source dir
 				// itself, and anything outside the source tree before RemoveAll.

@@ -71,6 +71,7 @@ type rawConfigurePreset struct {
 	BinaryDir      string                     `json:"binaryDir"`
 	ToolchainFile  string                     `json:"toolchainFile"`
 	CacheVariables map[string]json.RawMessage `json:"cacheVariables"`
+	Environment    map[string]*string         `json:"environment"`
 	// Condition is the raw preset `condition` (a bool shorthand, null, or a
 	// condition object). It is inheritable, so it is merged through the inherits
 	// chain and evaluated per host to drop presets disabled on this machine.
@@ -97,6 +98,17 @@ type rawPresetsFile struct {
 	WorkflowPresets  []rawNamedPreset     `json:"workflowPresets"`
 }
 
+type duplicatePresetError struct {
+	Kind          string
+	Name          string
+	FirstFile     string
+	DuplicateFile string
+}
+
+func (e *duplicatePresetError) Error() string {
+	return fmt.Sprintf("duplicate %s preset %q in %s (already declared in %s)", e.Kind, e.Name, e.DuplicateFile, e.FirstFile)
+}
+
 // Presets is a loaded, merged CMakePresets.json (+ CMakeUserPresets.json +
 // their includes). It is read-only.
 type Presets struct {
@@ -105,15 +117,24 @@ type Presets struct {
 	sourceDir      string // project dir (holds the top-level presets file); for macro expansion
 	configure      map[string]rawConfigurePreset
 	configureOrder []string
+	configureFiles map[string]string
 	build          []rawNamedPreset
+	buildFiles     map[string]string
 	test           []rawNamedPreset
+	testFiles      map[string]string
 	workflow       []rawNamedPreset
 }
 
 // LoadPresets reads CMakePresets.json and CMakeUserPresets.json from dir,
 // resolving `include` recursively. At least one of the two files must exist.
 func LoadPresets(dir string) (*Presets, error) {
-	p := &Presets{sourceDir: dir, configure: map[string]rawConfigurePreset{}}
+	p := &Presets{
+		sourceDir:      dir,
+		configure:      map[string]rawConfigurePreset{},
+		configureFiles: map[string]string{},
+		buildFiles:     map[string]string{},
+		testFiles:      map[string]string{},
+	}
 	visited := map[string]bool{}
 	found := false
 	for _, base := range []string{"CMakePresets.json", "CMakeUserPresets.json"} {
@@ -186,10 +207,30 @@ func (p *Presets) loadFile(path string, visited map[string]bool) error {
 			continue
 		}
 		cp.fileDir = filepath.Dir(abs)
-		if _, exists := p.configure[cp.Name]; !exists {
-			p.configureOrder = append(p.configureOrder, cp.Name)
+		if firstFile, exists := p.configureFiles[cp.Name]; exists {
+			return &duplicatePresetError{Kind: "configure", Name: cp.Name, FirstFile: firstFile, DuplicateFile: abs}
 		}
+		p.configureFiles[cp.Name] = abs
+		p.configureOrder = append(p.configureOrder, cp.Name)
 		p.configure[cp.Name] = cp
+	}
+	for _, bp := range f.BuildPresets {
+		if bp.Name == "" {
+			continue
+		}
+		if firstFile, exists := p.buildFiles[bp.Name]; exists {
+			return &duplicatePresetError{Kind: "build", Name: bp.Name, FirstFile: firstFile, DuplicateFile: abs}
+		}
+		p.buildFiles[bp.Name] = abs
+	}
+	for _, tp := range f.TestPresets {
+		if tp.Name == "" {
+			continue
+		}
+		if firstFile, exists := p.testFiles[tp.Name]; exists {
+			return &duplicatePresetError{Kind: "test", Name: tp.Name, FirstFile: firstFile, DuplicateFile: abs}
+		}
+		p.testFiles[tp.Name] = abs
 	}
 	p.build = append(p.build, f.BuildPresets...)
 	p.test = append(p.test, f.TestPresets...)
@@ -385,7 +426,10 @@ func (p *Presets) mergeConfigure(name string, chain []string, resolved map[strin
 
 	// Start from the resolved parents (first parent has highest precedence
 	// among parents), then overlay this preset's own fields.
-	merged := rawConfigurePreset{CacheVariables: map[string]json.RawMessage{}}
+	merged := rawConfigurePreset{
+		CacheVariables: map[string]json.RawMessage{},
+		Environment:    map[string]*string{},
+	}
 	for i := len(cp.Inherits) - 1; i >= 0; i-- {
 		parent := p.mergeConfigure(cp.Inherits[i], childChain, resolved)
 		overlay(&merged, parent)
@@ -412,6 +456,13 @@ func copyConfigure(src rawConfigurePreset) rawConfigurePreset {
 		}
 		dst.CacheVariables = m
 	}
+	if src.Environment != nil {
+		m := make(map[string]*string, len(src.Environment))
+		for k, v := range src.Environment {
+			m[k] = v
+		}
+		dst.Environment = m
+	}
 	return dst
 }
 
@@ -436,6 +487,12 @@ func overlay(dst *rawConfigurePreset, src rawConfigurePreset) {
 	for k, v := range src.CacheVariables {
 		dst.CacheVariables[k] = v
 	}
+	if dst.Environment == nil {
+		dst.Environment = map[string]*string{}
+	}
+	for k, v := range src.Environment {
+		dst.Environment[k] = v
+	}
 }
 
 // ResolvedBinaryDir returns the merged (inherits-resolved) binaryDir for a
@@ -459,10 +516,11 @@ func (p *Presets) resolvedBinaryDir(name string) (string, presetMacroContext, er
 	}
 	definition := p.configure[name]
 	return merged.BinaryDir, presetMacroContext{
-		sourceDir:  p.sourceDir,
-		presetName: name,
-		generator:  merged.Generator,
-		fileDir:    definition.fileDir,
+		sourceDir:   p.sourceDir,
+		presetName:  name,
+		generator:   merged.Generator,
+		fileDir:     definition.fileDir,
+		environment: merged.Environment,
 	}, nil
 }
 
@@ -505,17 +563,31 @@ func cacheString(vars map[string]json.RawMessage, key string) string {
 // presetMacroContext is the resolved configure-preset context used by CMake's
 // standard macro expansion in binaryDir.
 type presetMacroContext struct {
-	sourceDir  string
-	presetName string
-	generator  string
-	fileDir    string
+	sourceDir   string
+	presetName  string
+	generator   string
+	fileDir     string
+	environment map[string]*string
 }
+
+const escapedDollarMarker = "\x00mcp-cbuild-escaped-dollar\x00"
 
 // expandPresetMacros expands the standard CMake preset macros that can be
 // resolved locally. Unknown/vendor namespaces remain intact so path consumers
 // can reject them before filesystem cleaning. An unset $env{}/$penv{} or a
 // context-dependent macro with no value is a fail-closed error.
 func expandPresetMacros(s string, ctx presetMacroContext) (string, error) {
+	expanded, err := expandPresetMacrosProtected(s, ctx)
+	if err != nil {
+		return "", err
+	}
+	return restoreEscapedDollars(expanded), nil
+}
+
+// expandPresetMacrosProtected retains ${dollar} as a private marker while
+// expanding environment macros. Path consumers can therefore reject genuinely
+// unresolved macros before restoring the escaped literal dollar.
+func expandPresetMacrosProtected(s string, ctx presetMacroContext) (string, error) {
 	sourceDir := filepath.Clean(ctx.sourceDir)
 	if strings.Contains(s, "${generator}") && ctx.generator == "" {
 		return "", errors.New("preset macro ${generator} cannot be resolved because the configure preset has no generator")
@@ -523,6 +595,9 @@ func expandPresetMacros(s string, ctx presetMacroContext) (string, error) {
 	if strings.Contains(s, "${fileDir}") && ctx.fileDir == "" {
 		return "", errors.New("preset macro ${fileDir} cannot be resolved because the presets-file directory is unknown")
 	}
+	// Protect escaped dollars before looking for $env{} / $penv{} so a literal
+	// `${dollar}env{VAR}` segment is never expanded as an environment macro.
+	s = strings.ReplaceAll(s, "${dollar}", escapedDollarMarker)
 	repl := strings.NewReplacer(
 		"${sourceDir}", sourceDir,
 		"${sourceParentDir}", filepath.Dir(sourceDir),
@@ -531,20 +606,28 @@ func expandPresetMacros(s string, ctx presetMacroContext) (string, error) {
 		"${generator}", ctx.generator,
 		"${hostSystemName}", cmakeHostSystemName(),
 		"${fileDir}", filepath.Clean(ctx.fileDir),
-		"${dollar}", "$",
 		"${pathListSep}", string(os.PathListSeparator),
 	)
 	s = repl.Replace(s)
 	// $env{VAR} / $penv{VAR}
-	s, err := expandEnvMacro(s, "$env{")
+	s, err := expandEnvMacroWithLookup(s, "$env{", func(name string) (string, bool) {
+		if value, ok := ctx.environment[name]; ok && value != nil {
+			return *value, true
+		}
+		return os.LookupEnv(name)
+	})
 	if err != nil {
 		return "", err
 	}
-	s, err = expandEnvMacro(s, "$penv{")
+	s, err = expandEnvMacroWithLookup(s, "$penv{", os.LookupEnv)
 	if err != nil {
 		return "", err
 	}
 	return s, nil
+}
+
+func restoreEscapedDollars(s string) string {
+	return strings.ReplaceAll(s, escapedDollarMarker, "$")
 }
 
 // expandEnvMacro substitutes every prefix{NAME} occurrence with the value of the
@@ -552,6 +635,10 @@ func expandPresetMacros(s string, ctx presetMacroContext) (string, error) {
 // cursor advances past each substituted value so a self-referential value (one
 // that itself contains the prefix) cannot trigger an infinite rescan.
 func expandEnvMacro(s, prefix string) (string, error) {
+	return expandEnvMacroWithLookup(s, prefix, os.LookupEnv)
+}
+
+func expandEnvMacroWithLookup(s, prefix string, lookup func(string) (string, bool)) (string, error) {
 	searchFrom := 0
 	for {
 		rel := strings.Index(s[searchFrom:], prefix)
@@ -567,7 +654,7 @@ func expandEnvMacro(s, prefix string) (string, error) {
 		}
 		end += idx
 		name := s[idx+len(prefix) : end]
-		val, ok := os.LookupEnv(name)
+		val, ok := lookup(name)
 		if !ok {
 			return "", fmt.Errorf("preset env macro %s%s} is unset — refusing to resolve binaryDir to an empty path", prefix, name)
 		}

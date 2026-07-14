@@ -269,3 +269,81 @@ func TestGeneratorBinaryDirResolvesForCleanAndCacheSummary(t *testing.T) {
 		}
 	})
 }
+
+func TestPresetEnvironmentBinaryDirResolvesForCleanAndCacheSummary(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("MCP_CBUILD_PRESET_BDIR", "os-build")
+	writeFile(t, dir, "CMakePresets.json", `{
+      "version": 6,
+      "configurePresets": [
+        { "name": "base", "hidden": true,
+          "environment": {"MCP_CBUILD_PRESET_BDIR":"preset-build"} },
+        { "name": "dev", "inherits": ["base"], "generator": "Ninja",
+          "binaryDir": "${sourceDir}/$env{MCP_CBUILD_PRESET_BDIR}" }
+      ]
+    }`)
+	buildDir := filepath.Join(dir, "preset-build")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatalf("mkdir build dir: %v", err)
+	}
+	writeFile(t, buildDir, "CMakeCache.txt", "CMAKE_GENERATOR:INTERNAL=Ninja\n")
+
+	t.Run("cache summary", func(t *testing.T) {
+		summary := readCacheSummary(dir, "dev")
+		if got := summary["CMAKE_GENERATOR"]; got != "Ninja" {
+			t.Errorf("CMAKE_GENERATOR = %q, want Ninja; summary = %v", got, summary)
+		}
+	})
+
+	t.Run("clean purge", func(t *testing.T) {
+		result, err := callWithArgs(t, toolNamed(t, "cmake_clean"), map[string]any{
+			"preset":          "dev",
+			"working_dir":     dir,
+			"purge_build_dir": true,
+		})
+		if err != nil {
+			t.Fatalf("cmake_clean: %v", err)
+		}
+		cleaned, ok := result.(cleanResult)
+		if !ok || !cleaned.Success || !cleaned.Purged {
+			t.Fatalf("cmake_clean result = %#v, want successful purge", result)
+		}
+		if _, err := os.Stat(buildDir); !os.IsNotExist(err) {
+			t.Errorf("preset-environment build directory still exists after purge: stat error = %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "os-build")); !os.IsNotExist(err) {
+			t.Errorf("OS-environment build directory was touched: stat error = %v", err)
+		}
+	})
+}
+
+func TestCmakeCleanPurgeRefusesNonDirectoryTarget(t *testing.T) {
+	dir := t.TempDir()
+	const contents = "project(contents)\n"
+	writeFile(t, dir, "CMakeLists.txt", contents)
+	writeFile(t, dir, "CMakePresets.json", `{
+      "version": 3,
+      "configurePresets": [
+        { "name": "malicious", "binaryDir": "${sourceDir}/CMakeLists.txt" }
+      ]
+    }`)
+
+	_, err := callWithArgs(t, toolNamed(t, "cmake_clean"), map[string]any{
+		"preset":          "malicious",
+		"working_dir":     dir,
+		"purge_build_dir": true,
+	})
+	if err == nil {
+		t.Fatal("cmake_clean purged a non-directory binaryDir")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "not a directory") {
+		t.Errorf("cmake_clean error = %q, want non-directory refusal", err)
+	}
+	got, readErr := os.ReadFile(filepath.Join(dir, "CMakeLists.txt"))
+	if readErr != nil {
+		t.Fatalf("non-directory purge target was removed: %v", readErr)
+	}
+	if string(got) != contents {
+		t.Errorf("non-directory purge target contents = %q, want %q", got, contents)
+	}
+}

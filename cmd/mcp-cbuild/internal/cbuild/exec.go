@@ -312,13 +312,14 @@ func expandBinaryDirToAbsContext(binaryDir string, macroCtx presetMacroContext) 
 	if binaryDir == "" {
 		return "", "", errors.New("preset declares no binaryDir")
 	}
-	expanded, err := expandPresetMacros(binaryDir, macroCtx)
+	expanded, err := expandPresetMacrosProtected(binaryDir, macroCtx)
 	if err != nil {
 		return "", "", err
 	}
 	if containsUnexpandedMacro(expanded) {
 		return "", "", fmt.Errorf("binaryDir contains an unresolved or unknown-namespace macro after expansion: %q — refusing to resolve", expanded)
 	}
+	expanded = restoreEscapedDollars(expanded)
 	src, err = filepath.Abs(macroCtx.sourceDir)
 	if err != nil {
 		return "", "", fmt.Errorf("resolve sourceDir: %w", err)

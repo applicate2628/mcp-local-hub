@@ -583,3 +583,55 @@ func TestLoadPresetsIncludeUnsetPenvFailsClosed(t *testing.T) {
 		t.Error("expected LoadPresets to fail closed on an unset $penv{} in an include path")
 	}
 }
+
+func TestLoadPresetsRejectsDuplicateNamesAcrossIncludes(t *testing.T) {
+	for _, tc := range []struct {
+		kind string
+		key  string
+	}{
+		{kind: "configure", key: "configurePresets"},
+		{kind: "build", key: "buildPresets"},
+		{kind: "test", key: "testPresets"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "common.json", fmt.Sprintf(`{
+              "version": 4,
+              %q: [{"name":"duplicate"}]
+            }`, tc.key))
+			writeFile(t, dir, "CMakePresets.json", fmt.Sprintf(`{
+              "version": 4,
+              "include": ["common.json"],
+              %q: [{"name":"duplicate"}]
+            }`, tc.key))
+
+			_, err := LoadPresets(dir)
+			if err == nil {
+				t.Fatalf("LoadPresets accepted duplicate %s preset", tc.kind)
+			}
+			want := fmt.Sprintf("duplicate %s preset", tc.kind)
+			if !strings.Contains(strings.ToLower(err.Error()), want) || !strings.Contains(err.Error(), `"duplicate"`) {
+				t.Errorf("LoadPresets error = %q, want %q and preset name", err, want)
+			}
+		})
+	}
+}
+
+func TestDollarEscapedEnvMacrosStayLiteral(t *testing.T) {
+	src := t.TempDir()
+	t.Setenv("MCP_CBUILD_ESCAPED", "expanded")
+
+	for _, namespace := range []string{"env", "penv"} {
+		t.Run(namespace, func(t *testing.T) {
+			binaryDir := "${sourceDir}/${dollar}" + namespace + "{MCP_CBUILD_ESCAPED}"
+			got, _, err := expandBinaryDirToAbs(binaryDir, src, "dev")
+			if err != nil {
+				t.Fatalf("expandBinaryDirToAbs(%q): %v", binaryDir, err)
+			}
+			want := filepath.Join(src, "$"+namespace+"{MCP_CBUILD_ESCAPED}")
+			if got != want {
+				t.Errorf("expanded path = %q, want literal escaped macro path %q", got, want)
+			}
+		})
+	}
+}
