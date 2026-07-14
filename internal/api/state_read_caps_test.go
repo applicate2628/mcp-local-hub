@@ -38,6 +38,11 @@ func TestStateFileReadCapResolverByKind(t *testing.T) {
 			want: 16 << 20,
 		},
 		{
+			name: "adopt provenance snapshot",
+			path: filepath.Join(stateDir, "adopt-provenance", "mymanifest", "claude-code.snapshot"),
+			want: maxIntentFileBytes,
+		},
+		{
 			name: "age identity",
 			path: filepath.Join(stateDir, ".age-key"),
 			want: 64 << 10,
