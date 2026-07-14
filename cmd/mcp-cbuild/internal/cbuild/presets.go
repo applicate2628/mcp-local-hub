@@ -184,9 +184,13 @@ func (p *Presets) Result() PresetsResult {
 	res.TestPresets = []PresetInfo{}
 	res.WorkflowPresets = []PresetInfo{}
 
+	// One resolution cache shared across every configure preset: a merged value
+	// is path-independent, so resolving the whole set against a single cache keeps
+	// the pass O(V+E) instead of re-walking shared subtrees once per preset.
+	cache := map[string]rawConfigurePreset{}
 	for _, name := range p.configureOrder {
 		cp := p.configure[name]
-		merged := p.mergedConfigure(name)
+		merged := p.mergeConfigure(name, nil, cache)
 		info := PresetInfo{
 			Name:              cp.Name,
 			DisplayName:       cp.DisplayName,
@@ -224,12 +228,15 @@ func resolveNamed(list []rawNamedPreset) []PresetInfo {
 	}
 	out := []PresetInfo{}
 	emitted := map[string]bool{}
+	// Shared resolution cache (see mergeNamed): keeps the whole list O(V+E)
+	// instead of O(2^depth) on diamond-inheritance named presets.
+	resolved := map[string]rawNamedPreset{}
 	for _, n := range list {
 		if n.Name == "" || emitted[n.Name] {
 			continue
 		}
 		emitted[n.Name] = true
-		merged := mergeNamed(byName, n.Name, nil)
+		merged := mergeNamed(byName, n.Name, nil, resolved)
 		out = append(out, PresetInfo{
 			Name:        n.Name,
 			DisplayName: n.DisplayName,
@@ -249,7 +256,13 @@ func resolveNamed(list []rawNamedPreset) []PresetInfo {
 // ones, and earlier entries in `inherits` win over later ones. chain carries the
 // current resolution path (per-branch) for cycle detection only, so a preset
 // shared across sibling branches contributes at each branch's correct precedence.
-func mergeNamed(byName map[string]rawNamedPreset, name string, chain []string) rawNamedPreset {
+//
+// resolved memoizes each node's merged value BY NAME (path-independent, same
+// rationale as mergeConfigure) so diamond-inheritance named presets resolve in
+// O(V+E) rather than O(2^depth). A merged value's only set field is the scalar
+// ConfigurePreset (Inherits is never populated on a merge), so the cached value
+// carries no shared mutable reference and is safe to return directly.
+func mergeNamed(byName map[string]rawNamedPreset, name string, chain []string, resolved map[string]rawNamedPreset) rawNamedPreset {
 	cur, ok := byName[name]
 	if !ok {
 		return rawNamedPreset{}
@@ -259,14 +272,18 @@ func mergeNamed(byName map[string]rawNamedPreset, name string, chain []string) r
 			return rawNamedPreset{} // cycle on this path
 		}
 	}
+	if cached, ok := resolved[name]; ok {
+		return cached // off-path node; value-type fields only
+	}
 	childChain := append(append([]string{}, chain...), name)
 
 	merged := rawNamedPreset{}
 	for i := len(cur.Inherits) - 1; i >= 0; i-- {
-		parent := mergeNamed(byName, cur.Inherits[i], childChain)
+		parent := mergeNamed(byName, cur.Inherits[i], childChain, resolved)
 		overlayNamed(&merged, parent)
 	}
 	overlayNamed(&merged, cur)
+	resolved[name] = merged
 	return merged
 }
 
@@ -283,7 +300,7 @@ func overlayNamed(dst *rawNamedPreset, src rawNamedPreset) {
 // A preset's own fields win over inherited ones; earlier entries in `inherits`
 // win over later ones (CMake precedence). cacheVariables are merged key-wise.
 func (p *Presets) mergedConfigure(name string) rawConfigurePreset {
-	return p.mergeConfigure(name, nil)
+	return p.mergeConfigure(name, nil, map[string]rawConfigurePreset{})
 }
 
 // mergeConfigure resolves a configure preset against its inherits chain. chain
@@ -293,7 +310,17 @@ func (p *Presets) mergedConfigure(name string) rawConfigurePreset {
 // was reached on any branch, which let a lower-precedence sibling branch's
 // binaryDir win — a correctness AND safety bug, since the purge guard resolves
 // against the winning binaryDir.
-func (p *Presets) mergeConfigure(name string, chain []string) rawConfigurePreset {
+//
+// resolved memoizes each node's fully-merged value BY NAME. A merged value is
+// path-independent (own-fields-win / earlier-inherit-wins holds regardless of
+// which caller reached the node), so a node NOT currently on the resolution path
+// may reuse its cached result. This keeps resolution O(V+E) for
+// diamond-inheritance DAGs instead of O(2^depth): the per-path chain alone (with
+// no memoization) re-resolves a node's whole subtree once per inheritance path,
+// which a crafted CMakePresets.json turns into an uninterruptible CPU DoS. The
+// chain still owns cycle detection; the cache only short-circuits off-path nodes,
+// so a cyclic path is always broken and never served a stale cache entry.
+func (p *Presets) mergeConfigure(name string, chain []string, resolved map[string]rawConfigurePreset) rawConfigurePreset {
 	cp, ok := p.configure[name]
 	if !ok {
 		return rawConfigurePreset{}
@@ -303,17 +330,43 @@ func (p *Presets) mergeConfigure(name string, chain []string) rawConfigurePreset
 			return rawConfigurePreset{} // cycle on this path
 		}
 	}
+	// Cache hit for an off-path node: return a copy so a caller that overlays
+	// onto the result cannot mutate the shared cache entry.
+	if cached, ok := resolved[name]; ok {
+		return copyConfigure(cached)
+	}
 	childChain := append(append([]string{}, chain...), name)
 
 	// Start from the resolved parents (first parent has highest precedence
 	// among parents), then overlay this preset's own fields.
 	merged := rawConfigurePreset{CacheVariables: map[string]json.RawMessage{}}
 	for i := len(cp.Inherits) - 1; i >= 0; i-- {
-		parent := p.mergeConfigure(cp.Inherits[i], childChain)
+		parent := p.mergeConfigure(cp.Inherits[i], childChain, resolved)
 		overlay(&merged, parent)
 	}
 	overlay(&merged, cp)
+	// The stored entry is only ever read (overlaid as a parent, or read scalar-
+	// wise by callers); every later reuse goes through copyConfigure, so the
+	// cache map is never mutated after insertion.
+	resolved[name] = merged
 	return merged
+}
+
+// copyConfigure returns a clone of a cached resolved preset that is safe to
+// overlay onto a caller's merge: scalar fields copy by value and CacheVariables
+// gets a fresh map. The json.RawMessage values are never mutated in place (only
+// re-pointed by overlay / read by cacheString), so sharing the byte slices is
+// safe; only the map itself must be private per copy.
+func copyConfigure(src rawConfigurePreset) rawConfigurePreset {
+	dst := src
+	if src.CacheVariables != nil {
+		m := make(map[string]json.RawMessage, len(src.CacheVariables))
+		for k, v := range src.CacheVariables {
+			m[k] = v
+		}
+		dst.CacheVariables = m
+	}
+	return dst
 }
 
 // overlay copies non-empty scalar fields from src over dst and merges

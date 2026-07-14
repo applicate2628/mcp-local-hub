@@ -225,7 +225,7 @@ func validateTargets(targets []string) error {
 		if strings.TrimSpace(t) == "" {
 			return mcp.NewParamError("targets must not contain empty entries")
 		}
-		if strings.HasPrefix(t, "-") {
+		if strings.HasPrefix(strings.TrimSpace(t), "-") {
 			return mcp.NewParamError("invalid target %q: must not begin with '-' (it would be parsed as a flag, not a target)", t)
 		}
 	}

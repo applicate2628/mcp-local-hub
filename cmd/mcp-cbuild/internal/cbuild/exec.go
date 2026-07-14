@@ -290,7 +290,13 @@ func resolveBuildDirWithinSource(binaryDir, sourceDir, presetName string) (strin
 	if err := containmentCheck(srcReal, buildReal, "binaryDir (symlink-resolved)"); err != nil {
 		return "", err
 	}
-	return buildAbs, nil
+	// Hand the caller the CANONICAL, symlink-resolved target (buildReal =
+	// real existing-prefix + remaining lexical suffix), not the lexical buildAbs
+	// that was only containment-checked. RemoveAll must operate on the same path
+	// we validated: returning buildAbs would let an intermediate component swapped
+	// to a symlink between the check and the delete redirect the RemoveAll to an
+	// out-of-tree target (TOCTOU).
+	return buildReal, nil
 }
 
 // containmentCheck rejects a target that is not strictly inside base: the base

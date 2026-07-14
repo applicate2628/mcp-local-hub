@@ -3,6 +3,7 @@
 package cbuild
 
 import (
+	"log"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -68,10 +69,18 @@ func (p *procGroup) start(cmd *exec.Cmd) {
 	}
 	procH, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE, false, uint32(cmd.Process.Pid))
 	if err != nil {
+		// Non-fatal: the command still runs, but without job assignment its
+		// grandchildren (cmake -> ninja/msbuild -> cl.exe) may orphan if the
+		// server is killed. Surface it so the loss of tree-kill protection is
+		// observable (mirrors mcphub's own job-protection signal).
+		log.Printf("warning: job assignment failed (OpenProcess pid=%d: %v); build grandchildren may orphan if this server is killed", cmd.Process.Pid, err)
 		return
 	}
 	defer windows.CloseHandle(procH)
-	_ = windows.AssignProcessToJobObject(p.job, procH)
+	if err := windows.AssignProcessToJobObject(p.job, procH); err != nil {
+		// Same non-fatal orphan risk as the OpenProcess failure above.
+		log.Printf("warning: job assignment failed (AssignProcessToJobObject pid=%d: %v); build grandchildren may orphan if this server is killed", cmd.Process.Pid, err)
+	}
 }
 
 // kill terminates every process in the job (whole tree). Falls back to a

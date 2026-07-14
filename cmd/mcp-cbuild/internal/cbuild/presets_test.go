@@ -1,8 +1,10 @@
 package cbuild
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -13,6 +15,18 @@ func writeFile(t *testing.T, dir, name, content string) {
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
+}
+
+// realDir resolves symlinks in dir so tests can compare against the canonical
+// (symlink-free) path resolveBuildDirWithinSource returns for RemoveAll (on
+// e.g. macOS, t.TempDir() sits under the /var -> /private/var symlink).
+func realDir(t *testing.T, dir string) string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(filepath.Clean(dir))
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", dir, err)
+	}
+	return real
 }
 
 // findPreset returns the PresetInfo with the given name, or fails.
@@ -133,8 +147,8 @@ func TestResolveBuildDirWithinSourceGuard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inside-source binaryDir rejected: %v", err)
 	}
-	if got != filepath.Join(filepath.Clean(src), "build") {
-		t.Errorf("resolved = %q, want %q", got, filepath.Join(src, "build"))
+	if got != filepath.Join(realDir(t, src), "build") {
+		t.Errorf("resolved = %q, want %q", got, filepath.Join(realDir(t, src), "build"))
 	}
 
 	// Escaping the source tree: refused.
@@ -185,6 +199,64 @@ func TestMergeConfigureSharedParentPrecedence(t *testing.T) {
 	}
 }
 
+// TestMergeConfigureNestedDiamondNotExponential proves preset inherit resolution
+// is memoized (O(V+E)), not O(2^depth). Every level's two nodes (a{i}, b{i})
+// inherit BOTH of the next level's two nodes, so the graph is a legal ACYCLIC DAG
+// with 2^levels distinct root->leaf paths. Without per-name memoization each
+// shared subtree is re-resolved once per path and cmake_list_presets hangs for
+// minutes-to-hours on a crafted (cloned-repo) presets file — an uninterruptible
+// CPU DoS, since resolution is wrapped by no timeout and merge* has no ctx check.
+// cycle detection never fires (acyclic), so only memoization bounds it. The
+// single-diamond TestMergeConfigureSharedParentPrecedence is microseconds even
+// unfixed and masks this blowup.
+func TestMergeConfigureNestedDiamondNotExponential(t *testing.T) {
+	const levels = 30 // 2^30 ≈ 1.07e9 merge calls without memoization → minutes+
+
+	// root inherits [a0,b0]; a{i}/b{i} inherit [a{i+1},b{i+1}] for i in [0,levels);
+	// the leaves a{levels}/b{levels} inherit nothing. The all-"a" branch is the
+	// highest-precedence ancestor at every level (root's first parent is a0, a0's
+	// first parent is a1, ...), so root must resolve to a{levels}'s values.
+	var sb strings.Builder
+	sb.WriteString(`{"version":3,"configurePresets":[`)
+	sb.WriteString(`{"name":"root","inherits":["a0","b0"]}`)
+	for i := 0; i < levels; i++ {
+		fmt.Fprintf(&sb, `,{"name":"a%d","hidden":true,"inherits":["a%d","b%d"]}`, i, i+1, i+1)
+		fmt.Fprintf(&sb, `,{"name":"b%d","hidden":true,"inherits":["a%d","b%d"]}`, i, i+1, i+1)
+	}
+	fmt.Fprintf(&sb, `,{"name":"a%d","hidden":true,"generator":"Ninja","binaryDir":"${sourceDir}/leaf-build"}`, levels)
+	fmt.Fprintf(&sb, `,{"name":"b%d","hidden":true,"generator":"Unix Makefiles","binaryDir":"${sourceDir}/b-leaf"}`, levels)
+	sb.WriteString(`]}`)
+
+	dir := t.TempDir()
+	writeFile(t, dir, "CMakePresets.json", sb.String())
+
+	p, err := LoadPresets(dir)
+	if err != nil {
+		t.Fatalf("LoadPresets: %v", err)
+	}
+
+	// Result() resolves EVERY preset (the read-only cmake_list_presets path). Run
+	// it off-goroutine: a memoized pass finishes in well under a second; an
+	// exponential one cannot complete in 2s (it needs ~1e9 merge calls).
+	done := make(chan PresetsResult, 1)
+	go func() { done <- p.Result() }()
+	select {
+	case res := <-done:
+		// Correctness under memoization: the cache must return path-independent
+		// results WITHOUT corrupting precedence — the all-"a" branch wins, so root
+		// resolves to a{levels}'s values, not b{levels}'s.
+		root := findPreset(t, res.ConfigurePresets, "root")
+		if root.ResolvedGenerator != "Ninja" {
+			t.Errorf("root.ResolvedGenerator = %q, want Ninja (all-a branch wins)", root.ResolvedGenerator)
+		}
+		if root.BinaryDir != "${sourceDir}/leaf-build" {
+			t.Errorf("root.BinaryDir = %q, want ${sourceDir}/leaf-build", root.BinaryDir)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cmake_list_presets did not finish in 2s on a nested-diamond preset graph — inherit resolution is still exponential (memoization missing)")
+	}
+}
+
 // TestResolveBuildDirUnsetEnvMacroFailClosed proves an unset $env{} macro is a
 // fail-closed error, never collapsed to an empty string the purge guard trusts.
 func TestResolveBuildDirUnsetEnvMacroFailClosed(t *testing.T) {
@@ -204,8 +276,8 @@ func TestResolveBuildDirUnsetEnvMacroFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("set env macro rejected: %v", err)
 	}
-	if got != filepath.Join(filepath.Clean(src), "build-from-env") {
-		t.Errorf("resolved = %q, want %q", got, filepath.Join(src, "build-from-env"))
+	if got != filepath.Join(realDir(t, src), "build-from-env") {
+		t.Errorf("resolved = %q, want %q", got, filepath.Join(realDir(t, src), "build-from-env"))
 	}
 }
 
