@@ -13,21 +13,21 @@ closed (2026-07-10, PR #528 squash `16dba601`), archived at
 durable provenance store (`<state-dir>/adopted-entries.json` + pinned snapshots) this
 item consumes exists on master, so the `Depends-on:` edge is met.
 
-Adopt-GC dependency (round 5, P1-A): de-adopt reads the provenance rows + secret-bearing
-snapshots the adopt GC can DESTROY from a STALE Phase-1 candidate. `reapAdoptProvenanceRow`
-(`internal/api/adopted_entries.go:860-882`) drops every row matching the manifest NAME with
-no `(state, UpdatedAt)` reap-time filter, and Phase-2 (`:929-941`) classifies the stale
-Phase-1 copy under a later-acquired lease — so de-adopt's per-manifest lease does NOT fence it
-(the GC's decision inputs pre-date the lease). Three interleaves destroy de-adopt's provenance
-(pre-de-adopt destruction; de-adopt→re-adopt destroyed; crash-after-E3 `de_adopting` row reaped
-→ permanent manifest/secret leak). De-adopt therefore `Depends-on` two OPEN adopt-side bugs
-(both `work-items/bugs/`, `status: open`, adopt-side = a protected surface in v1, NOT patched by
-de-adopt): `2026-07-11-gc-phase2-stale-candidate-reaps-committed-row` (Phase-2 re-read under the
-lease + `reapAdoptProvenanceRow` gains an expected `(state, UpdatedAt)` identity, no-op on
-mismatch — closes all three) and `2026-07-11-classifier-committed-signal-blind-to-entry-drift`
-(committed-KEEP hardened against live-entry drift — protects the claim-10 recoverability
-contract). See design.md "Adopt-GC dependency". These edges must be satisfied (fixes landed, or
-de-adopt sequenced strictly behind them) before de-adopt implementation.
+Adopt-GC dependency (round 5, P1-A) — SATISFIED at HEAD (master `c7e2534b`): de-adopt reads the
+provenance rows + secret-bearing snapshots the adopt GC could DESTROY from a STALE Phase-1 candidate.
+Before #531/#532, `reapAdoptProvenanceRow` dropped every row matching the manifest NAME with no
+`(state, UpdatedAt)` reap-time filter and Phase-2 classified the stale Phase-1 copy under a
+later-acquired lease, so de-adopt's per-manifest lease did NOT fence it (the GC's decision inputs
+pre-date the lease); three interleaves could destroy de-adopt's provenance (pre-de-adopt destruction;
+de-adopt→re-adopt destroyed; crash-after-E3 `de_adopting` row reaped → permanent manifest/secret leak).
+BOTH `Depends-on` adopt-GC bugs are now FIXED at HEAD (both work-items `Status: fixed`):
+`2026-07-11-gc-phase2-stale-candidate-reaps-committed-row` (FIXED by #531 — Phase-2 re-reads the row
+under the held lease at `internal/api/adopted_entries.go:1144-1177` and `reapAdoptProvenanceRow`
+(`:946-978`) no-ops unless `(ManifestName, state, UpdatedAt)` still match, matched at `:954` — closes all
+three interleaves) and `2026-07-11-classifier-committed-signal-blind-to-entry-drift` (FIXED by #532 —
+committed-KEEP hardened against live-entry drift at Signal 2b `:521-530`, protects the claim-10
+recoverability contract). See design.md "Adopt-GC dependency". The `Depends-on:` edges are MET; the
+declaration above is retained as a traceability record.
 
 ## Active agents / lanes
 - None. Design rework complete; the next gate is an independent FABLE audit, then `$planner`.
@@ -80,7 +80,8 @@ de-adopt sequenced strictly behind them) before de-adopt implementation.
   EVERY adapter — correct-by-construction (adopt wrote the write target; merged-lower success ≡
   write-target absence). **P1-A:** added `Depends-on` for the two filed adopt-GC bugs + the "Adopt-GC
   dependency" section; corrected design:564/:795 (they asserted a reap-time state filter
-  `reapAdoptProvenanceRow` does not have). **P2:** a cleanly-absent config → empty-config (live==nil),
+  `reapAdoptProvenanceRow` did not have AT ROUND-5 TIME — SINCE ADDED by #531, both edges now MET).
+  **P2:** a cleanly-absent config → empty-config (live==nil),
   never `ClassifyUnreadable`. **P3-a:** the classify forwarder holds `withConfigReadLock`
   (missing-dir short-circuit, `config_lock.go:150-158`) so plan-time classify of an absent config has
   no FS side effect. **P3-b:** one-sentence G8 extension (accepted-conflict verdict not re-checked at
@@ -102,14 +103,24 @@ de-adopt sequenced strictly behind them) before de-adopt implementation.
   (snapshot read-cap; fix lands with de-adopt).
 
 ## Next action
-Lead re-verify + a codex (Sol) DELTA-recheck of the round-5 amended sections (the
-write-target-physical collapse in `ClassifyEntryUnderLock` + the resume/accept wiring, the
-`withConfigReadLock` P3-a forwarder, the "Adopt-GC dependency" section + the design:564/:795
-corrections, the P2 empty-config pin, claims 19 + T16/T17) — NOT a full re-audit — then `$planner`
-breaks it into delivery phases respecting the v1 Change-Surface Contract (THREE additive
-shared-owner changes). **The two adopt-GC `Depends-on` edges must be satisfied first** (fixes
-landed or de-adopt sequenced strictly behind them). No provenance-CODE gap blocks de-adopt; the
-one under-specified read-cap detail is flagged in the design's "Provenance-gap flag" + filed as an
-adjacent bug. Do NOT reopen the tracked provenance residuals
-(`work-items/backlog/2026-07-10-adopt-provenance-lease-hygiene.md`) or patch the protected
-provenance surfaces.
+**Phase 0 DONE (2026-07-14): design.md C6 doc-freshness refresh.** The "Adopt-GC dependency" section,
+every present-tense "no filter" assertion, and every `internal/api/adopted_entries.go` line citation in
+`design.md` were re-pointed to HEAD (master `c7e2534b`) and now assert the RESOLVED state (both
+`Depends-on` adopt-GC edges FIXED by #531/#532; `reapAdoptProvenanceRow` HAS the `(state, UpdatedAt)`
+identity gate at `:946-978`/`:954`; the transition-window reap is CLOSED). Docs-only — no design
+decision, claim count (still 19), scope, or architecture changed. The round-4 `withConfigLock`→
+`withConfigReadLock` supersession marker and the shared-owner-#3 scope note (the `.snapshot`
+secret-bearing half already landed via #532; only the `state_read_caps.go` read-cap line remains) were
+also folded in.
+
+**Phase 1 IN PROGRESS on branch `feat/deadopt-phase1-manifest-delete-hash`** (the `ManifestDeleteInWithHash`
+delete-mutation-point hash gate, per the Change-Surface Contract). The two adopt-GC `Depends-on` edges
+are now SATISFIED at HEAD, so that blocker is CLEARED. The remaining v1 delivery gates ($lead-owned)
+are unchanged: a codex (Sol) DELTA-recheck of the round-5 amended sections (the write-target-physical
+collapse in `ClassifyEntryUnderLock` + the resume/accept wiring, the `withConfigReadLock` P3-a forwarder,
+the "Adopt-GC dependency" section, the P2 empty-config pin, claims 19 + T16/T17) — NOT a full re-audit —
+then `$planner` breaks it into delivery phases respecting the v1 Change-Surface Contract (THREE additive
+shared-owner changes). No provenance-CODE gap blocks de-adopt; the one under-specified read-cap detail
+is flagged in the design's "Provenance-gap flag" + filed as an adjacent bug. Do NOT reopen the tracked
+provenance residuals (`work-items/backlog/2026-07-10-adopt-provenance-lease-hygiene.md`) or patch the
+protected provenance surfaces.
