@@ -206,9 +206,19 @@ func (v *vscodeClient) restoreEntryFromBackupWithWriter(backupPath, name string,
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
 	}
+	return v.restoreEntryFromBytes(backupData, name, allowHubEntry, writer)
+}
+
+// restoreEntryFromBytes is the post-ReadFile restore core: given the
+// already-read backup bytes it parses them, reads the live config, and
+// surgically restores (or strips) the named entry.
+// restoreEntryFromBackupWithWriter is the thin file-reading wrapper over this
+// core. The parse error omits the source path because this core also serves
+// callers that pass in-memory bytes with no backing file.
+func (v *vscodeClient) restoreEntryFromBytes(backupData []byte, name string, allowHubEntry bool, writer WriteConfigFileFunc) error {
 	backupMap, err := parseJSONCBytes(backupData)
 	if err != nil {
-		return fmt.Errorf("parse backup %s: %w", backupPath, err)
+		return fmt.Errorf("parse backup: %w", err)
 	}
 	backupServers, _ := backupMap[vscodeServersKey].(map[string]any)
 	// Rollback-only atomic entry-scoped skip-if-unchanged (design round-4): read
