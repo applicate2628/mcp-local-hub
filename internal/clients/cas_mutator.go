@@ -313,7 +313,8 @@ func (o *openCodeClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry
 // mimocode is the ONE multi-layer adapter, so its CAS methods DIVERGE from the
 // generic bindings above: they inject a WRITE-TARGET compare-object getter
 // (casWriteTargetEntry) instead of GetEntry, plus a higher-layer pre-refuse hook
-// (casHigherLayerDefined). GetEntry returns the MERGED multi-layer view while the
+// (operation-specific because remove exempts disable-only shadows). GetEntry returns
+// the MERGED multi-layer view while the
 // mutators (restoreEntryFromBytes / RemoveEntry) touch ONLY the write target, so
 // the generic "compare == mutate" invariant is BROKEN for mimocode with GetEntry:
 // a hub-shaped HIGHER layer could pass the recognizer while the mutation lands on a
@@ -323,7 +324,7 @@ func (o *mimoCodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEn
 	return casRestoreFromBytes(name, match, snapshotBytes, o.casWriteTargetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, o.casHigherLayerDefined)
 }
 func (o *mimoCodeClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
-	return casGuardedRemove(name, match, o.casWriteTargetEntry, o.RemoveEntry, o.casHigherLayerDefined)
+	return casGuardedRemove(name, match, o.casWriteTargetEntry, o.RemoveEntry, o.casHigherLayerRetainsServer)
 }
 
 // casWriteTargetEntry is mimocode's CAS compare-object getter: the WRITE TARGET's
@@ -352,18 +353,29 @@ func (o *mimoCodeClient) casWriteTargetEntry(name string) (*MCPEntry, error) {
 	return mimoCodeProjectEntry(name, ownRaw, ownRaw, false), nil
 }
 
-// casHigherLayerDefined is mimocode's CAS higher-layer pre-refuse hook. The generic
-// gate runs it BEFORE any mutation: it reports whether a merge layer ABOVE the write
-// target defines <name> and would WIN the merge. When it does, even a write-target
-// compare that passed cannot make the mutation take effect (restore) or clear the
-// server (remove) — mimocode's own RemoveEntry B4 guard, moved pre-write for the CAS
-// destructive path so the write target is never edited-then-refused (fable-5 P2).
+// casHigherLayerDefined is mimocode's CAS restore pre-refuse hook. It reports whether
+// a merge layer above the write target defines <name> and would win the merge.
 func (o *mimoCodeClient) casHigherLayerDefined(name string) (bool, error) {
 	src, err := o.mimoCodeHigherLayerDefining(name)
 	if err != nil {
 		return false, err
 	}
 	return src.Kind != "", nil
+}
+
+// casHigherLayerRetainsServer is mimocode's CAS remove pre-refuse hook. It mirrors
+// RemoveEntry's B4 retention guard: a disable-only shadow retains no active server
+// once the write-target value is removed, while every value-providing shadow does.
+func (o *mimoCodeClient) casHigherLayerRetainsServer(name string) (bool, error) {
+	shadow, err := o.mimoCodeHigherLayerDefining(name)
+	if err != nil || shadow.Kind == "" {
+		return false, err
+	}
+	disableOnly, err := o.mimoCodeShadowIsDisableOnlyOverride(shadow, name)
+	if err != nil {
+		return false, err
+	}
+	return !disableOnly, nil
 }
 
 // The jsonMCPClient embedders (cursor / gemini-cli / qwen-cli / antigravity) each

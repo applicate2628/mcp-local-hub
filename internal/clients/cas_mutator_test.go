@@ -222,6 +222,36 @@ func TestMimoCodeCASCheckActDivergenceRefusesAndPreservesWriteTarget(t *testing.
 	}
 }
 
+func TestMimoCodeCASRemoveAllowsDisableOnlyHigherLayer(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	writeTarget := filepath.Join(dir, "mimocode.json")
+	if err := os.WriteFile(
+		writeTarget,
+		[]byte(`{"mcp":{"serena":{"type":"remote","url":"`+casHubURL+`","enabled":true}}}`),
+		0600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "mimocode.jsonc"),
+		[]byte(`{"mcp":{"serena":{"enabled":false}}}`),
+		0600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	c := &mimoCodeClient{path: writeTarget, claudeHome: ""}
+
+	if err := c.CASGuardedRemoveEntry("serena", casURLMatch); err != nil {
+		t.Fatalf("disable-only shadow must not block CAS remove: %v", err)
+	}
+	if _, present, err := mimoCodeFileEntryValue(writeTarget, "serena"); err != nil {
+		t.Fatal(err)
+	} else if present {
+		t.Fatal("CAS remove left the write-target serena entry present")
+	}
+}
+
 func TestCASRecognizerPanicFailsClosedWithoutMutation(t *testing.T) {
 	hubCfg := []byte(`{"mcpServers":{"serena":{"url":"` + casHubURL + `"}}}`)
 	nativeSnapshot := []byte(`{"mcpServers":{"serena":{"command":"native-mcp-cmd"}}}`)
