@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -144,6 +145,111 @@ func TestCASRemoveGateBranches(t *testing.T) {
 		}
 		if e, _ := c.GetEntry("serena"); e == nil {
 			t.Errorf("nil-recognizer remove must not mutate")
+		}
+	})
+}
+
+func TestMimoCodeCASCheckActDivergenceRefusesAndPreservesWriteTarget(t *testing.T) {
+	isolateMimoCodeEnv(t)
+	dir := t.TempDir()
+	writeTarget := filepath.Join(dir, "mimocode.json")
+	writeTargetBefore := []byte(`{"mcp":{"serena":{"type":"local","command":"operator-native"}}}`)
+	if err := os.WriteFile(writeTarget, writeTargetBefore, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(dir, "mimocode.jsonc"),
+		[]byte(`{"mcp":{"serena":{"type":"remote","url":"`+casHubURL+`","enabled":true}}}`),
+		0600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	c := &mimoCodeClient{path: writeTarget, claudeHome: ""}
+
+	// Prove the divergence precondition: the merged view is hub-shaped even
+	// though the physical write target is the operator-native entry above.
+	if merged, err := c.GetEntry("serena"); err != nil {
+		t.Fatalf("read merged serena: %v", err)
+	} else if !casURLMatch(merged) {
+		t.Fatalf("merged serena must be the higher-layer hub entry, got %+v", merged)
+	}
+
+	snapshot := []byte(`{"mcp":{"serena":{"type":"local","command":"snapshot-native"}}}`)
+	if err := c.CASRestoreEntryFromBytes("serena", casURLMatch, snapshot); !errors.Is(err, ErrCASConflict) {
+		t.Fatalf("restore divergence: err=%v, want ErrCASConflict", err)
+	}
+	if got, err := os.ReadFile(writeTarget); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(got, writeTargetBefore) {
+		t.Fatalf("restore divergence mutated write target:\n got: %s\nwant: %s", got, writeTargetBefore)
+	}
+
+	if err := c.CASGuardedRemoveEntry("serena", casURLMatch); !errors.Is(err, ErrCASConflict) {
+		t.Fatalf("remove divergence: err=%v, want ErrCASConflict", err)
+	}
+	if got, err := os.ReadFile(writeTarget); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(got, writeTargetBefore) {
+		t.Fatalf("remove divergence mutated write target:\n got: %s\nwant: %s", got, writeTargetBefore)
+	}
+	if _, present, err := mimoCodeFileEntryValue(writeTarget, "serena"); err != nil {
+		t.Fatal(err)
+	} else if !present {
+		t.Fatal("remove divergence deleted the write-target serena entry")
+	}
+
+	// Exercise the higher-layer hook itself: even when the physical write target
+	// matches the recognizer, the winning jsonc layer must pre-refuse both writes.
+	hubWriteTarget := []byte(`{"mcp":{"serena":{"type":"remote","url":"` + casHubURL + `","enabled":true}}}`)
+	if err := os.WriteFile(writeTarget, hubWriteTarget, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.CASRestoreEntryFromBytes("serena", casURLMatch, snapshot); !errors.Is(err, ErrCASConflict) {
+		t.Fatalf("shadowed restore: err=%v, want ErrCASConflict", err)
+	}
+	if got, err := os.ReadFile(writeTarget); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(got, hubWriteTarget) {
+		t.Fatalf("shadowed restore mutated write target:\n got: %s\nwant: %s", got, hubWriteTarget)
+	}
+	if err := c.CASGuardedRemoveEntry("serena", casURLMatch); !errors.Is(err, ErrCASConflict) {
+		t.Fatalf("shadowed remove: err=%v, want ErrCASConflict", err)
+	}
+	if got, err := os.ReadFile(writeTarget); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(got, hubWriteTarget) {
+		t.Fatalf("shadowed remove mutated write target:\n got: %s\nwant: %s", got, hubWriteTarget)
+	}
+}
+
+func TestCASRecognizerPanicFailsClosedWithoutMutation(t *testing.T) {
+	hubCfg := []byte(`{"mcpServers":{"serena":{"url":"` + casHubURL + `"}}}`)
+	nativeSnapshot := []byte(`{"mcpServers":{"serena":{"command":"native-mcp-cmd"}}}`)
+	panicMatch := func(*MCPEntry) bool { panic("recognizer boom") }
+
+	t.Run("restore", func(t *testing.T) {
+		path := casWriteCfg(t, "settings.json", string(hubCfg))
+		c := &claudeCode{path: path}
+		if err := c.CASRestoreEntryFromBytes("serena", panicMatch, nativeSnapshot); !errors.Is(err, ErrCASConflict) {
+			t.Fatalf("panicking restore recognizer: err=%v, want ErrCASConflict", err)
+		}
+		if got, err := os.ReadFile(path); err != nil {
+			t.Fatal(err)
+		} else if !bytes.Equal(got, hubCfg) {
+			t.Fatalf("panicking restore recognizer mutated config:\n got: %s\nwant: %s", got, hubCfg)
+		}
+	})
+
+	t.Run("remove", func(t *testing.T) {
+		path := casWriteCfg(t, "settings.json", string(hubCfg))
+		c := &claudeCode{path: path}
+		if err := c.CASGuardedRemoveEntry("serena", panicMatch); !errors.Is(err, ErrCASConflict) {
+			t.Fatalf("panicking remove recognizer: err=%v, want ErrCASConflict", err)
+		}
+		if got, err := os.ReadFile(path); err != nil {
+			t.Fatal(err)
+		} else if !bytes.Equal(got, hubCfg) {
+			t.Fatalf("panicking remove recognizer mutated config:\n got: %s\nwant: %s", got, hubCfg)
 		}
 	})
 }

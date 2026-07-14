@@ -134,12 +134,42 @@ func AsCASEntryMutator(c Client) (CASEntryMutator, bool) {
 	return m, ok
 }
 
+// casInvokeMatch is the SINGLE owner of recognizer invocation for every CAS gate
+// (the 8 single-file adapters AND mimocode reach the recognizer only through here).
+// The injected match runs inside the destructive critical section under the held
+// config lock; a panicking recognizer must fail the gate CLOSED — a wrapped
+// ErrCASConflict returned as a VALUE — never a propagated panic that unwinds past
+// the lock with a half-checked entry (P3, fable-5 Phase-3 audit). Returns the
+// verdict, plus a non-nil error ONLY when the recognizer panicked.
+func casInvokeMatch(entryName string, match func(*MCPEntry) bool, live *MCPEntry) (matched bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			matched = false
+			err = fmt.Errorf("%w: recognizer panicked for entry %q: %v (fail-closed)", ErrCASConflict, entryName, r)
+		}
+	}()
+	return match(live), nil
+}
+
 // casRestoreFromBytes is the SINGLE owner of the CAS restore gate. All I/O flows
 // through the injected adapter functions so the live read resolves the adapter's
-// OWN GetEntry (relay / serverUrl / httpUrl overrides included — the same GetEntry
-// the shipped classifyDeadAdoptingRow recognizer path uses) and the restore
-// COMPOSES the adapter's OWN restoreEntryFromBytes core (design B1: no second
-// extraction owner). Runs under the caller-held config lock; never locks itself.
+// OWN compare object (relay / serverUrl / httpUrl overrides included) and the
+// restore COMPOSES the adapter's OWN restoreEntryFromBytes core (design B1: no
+// second extraction owner). Runs under the caller-held config lock; never locks
+// itself.
+//
+// getEntry is the CAS COMPARE-OBJECT getter, which MUST resolve the SAME physical
+// value the restore will MUTATE. For the 8 single-file adapters that is their plain
+// GetEntry (write-target == merge). mimocode passes a WRITE-TARGET getter instead,
+// because its GetEntry returns the MERGED multi-layer view while restoreEntryFromBytes
+// touches only the write target — comparing the merged view would let a hub-shaped
+// higher layer pass the recognizer while the mutation lands on a different write-target
+// value (fable-5 Phase-3 P2).
+//
+// higherLayerDefined is an OPTIONAL pre-mutation refuse hook: nil for the 8
+// single-file adapters (no layering); mimocode injects a check that a HIGHER merge
+// layer would win over the write target, so a restore that cannot take effect is
+// refused BEFORE any write.
 func casRestoreFromBytes(
 	entryName string,
 	match func(*MCPEntry) bool,
@@ -147,6 +177,7 @@ func casRestoreFromBytes(
 	getEntry func(string) (*MCPEntry, error),
 	entryPresentInBytes func([]byte, string) (bool, error),
 	restoreFromBytes func([]byte, string, bool, WriteConfigFileFunc) error,
+	higherLayerDefined func(string) (bool, error),
 ) error {
 	if match == nil {
 		return fmt.Errorf("%w: nil recognizer for entry %q (fail-closed)", ErrCASConflict, entryName)
@@ -158,8 +189,26 @@ func casRestoreFromBytes(
 	if live == nil {
 		return fmt.Errorf("%w: live entry %q is absent — refusing to resurrect an operator-removed entry", ErrCASConflict, entryName)
 	}
-	if !match(live) {
+	matched, err := casInvokeMatch(entryName, match, live)
+	if err != nil {
+		return err
+	}
+	if !matched {
 		return fmt.Errorf("%w: live entry %q is no longer the hub entry — refusing to overwrite it", ErrCASConflict, entryName)
+	}
+	// Higher-layer pre-refuse (mimocode injects a non-nil hook; the 8 single-file
+	// adapters pass nil — write-target == merge for them). Runs BEFORE the mutation:
+	// even a write-target compare that PASSED cannot make the restore take effect
+	// when a HIGHER merge layer wins over the write target, so refuse rather than
+	// write a value a shadowing layer would mask (fable-5 Phase-3 P2).
+	if higherLayerDefined != nil {
+		shadowed, err := higherLayerDefined(entryName)
+		if err != nil {
+			return err
+		}
+		if shadowed {
+			return fmt.Errorf("%w: entry %q is defined by a higher merge layer that wins over the write target — restoring the write-target value would not take effect", ErrCASConflict, entryName)
+		}
 	}
 	present, err := entryPresentInBytes(snapshotBytes, entryName)
 	if err != nil {
@@ -174,16 +223,23 @@ func casRestoreFromBytes(
 	// Compose the shipped restore core with the guarded (allowHubEntry=false)
 	// polarity, and no scoped writer (default hardened write — single entry, one
 	// client, one lock).
+	//
+	// NOTE for the FUTURE Phase-5/de-adopt classifier: this core surfaces its OWN
+	// refusals as ErrBackupEntryAlreadyMigrated (a hub-shaped snapshot entry), NOT
+	// ErrCASConflict. That is fail-closed and correct; a downstream refusal classifier
+	// must NOT assume every CAS refusal is ErrCASConflict.
 	return restoreFromBytes(snapshotBytes, entryName, false, nil)
 }
 
 // casGuardedRemove is the SINGLE owner of the CAS remove gate. Same lock/injection
-// posture as casRestoreFromBytes.
+// posture as casRestoreFromBytes; getEntry + higherLayerDefined carry the same
+// mimocode compare-object / pre-refuse contract documented there.
 func casGuardedRemove(
 	entryName string,
 	match func(*MCPEntry) bool,
 	getEntry func(string) (*MCPEntry, error),
 	removeEntry func(string) error,
+	higherLayerDefined func(string) (bool, error),
 ) error {
 	if match == nil {
 		return fmt.Errorf("%w: nil recognizer for entry %q (fail-closed)", ErrCASConflict, entryName)
@@ -195,8 +251,26 @@ func casGuardedRemove(
 	if live == nil {
 		return nil // nothing to remove — already-done idempotent success
 	}
-	if !match(live) {
+	matched, err := casInvokeMatch(entryName, match, live)
+	if err != nil {
+		return err
+	}
+	if !matched {
 		return fmt.Errorf("%w: live entry %q is no longer the hub entry — refusing to remove it", ErrCASConflict, entryName)
+	}
+	// Higher-layer pre-refuse (mimocode injects a non-nil hook; single-file adapters
+	// pass nil). Runs BEFORE the delete: mimocode's own RemoveEntry deletes the
+	// write-target key THEN fails loud when a higher layer retains the server (B4
+	// write-then-fail) — for the CAS destructive path the retention must refuse
+	// BEFORE the write so the write target is left byte-unchanged (fable-5 Phase-3 P2).
+	if higherLayerDefined != nil {
+		shadowed, err := higherLayerDefined(entryName)
+		if err != nil {
+			return err
+		}
+		if shadowed {
+			return fmt.Errorf("%w: entry %q is defined by a higher merge layer that wins over the write target — removing the write-target entry would not clear it", ErrCASConflict, entryName)
+		}
 	}
 	return removeEntry(entryName)
 }
@@ -209,38 +283,87 @@ func casGuardedRemove(
 // composes the concrete (or promoted-base) restoreEntryFromBytes.
 
 func (c *claudeCode) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes)
+	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil)
 }
 func (c *claudeCode) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
-	return casGuardedRemove(name, match, c.GetEntry, c.RemoveEntry)
+	return casGuardedRemove(name, match, c.GetEntry, c.RemoveEntry, nil)
 }
 
 func (c *codexCLI) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes)
+	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil)
 }
 func (c *codexCLI) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
-	return casGuardedRemove(name, match, c.GetEntry, c.RemoveEntry)
+	return casGuardedRemove(name, match, c.GetEntry, c.RemoveEntry, nil)
 }
 
 func (v *vscodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, v.GetEntry, v.EntryPresentInBytes, v.restoreEntryFromBytes)
+	return casRestoreFromBytes(name, match, snapshotBytes, v.GetEntry, v.EntryPresentInBytes, v.restoreEntryFromBytes, nil)
 }
 func (v *vscodeClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
-	return casGuardedRemove(name, match, v.GetEntry, v.RemoveEntry)
+	return casGuardedRemove(name, match, v.GetEntry, v.RemoveEntry, nil)
 }
 
 func (o *openCodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, o.GetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes)
+	return casRestoreFromBytes(name, match, snapshotBytes, o.GetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, nil)
 }
 func (o *openCodeClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
-	return casGuardedRemove(name, match, o.GetEntry, o.RemoveEntry)
+	return casGuardedRemove(name, match, o.GetEntry, o.RemoveEntry, nil)
 }
 
+// mimocode is the ONE multi-layer adapter, so its CAS methods DIVERGE from the
+// generic bindings above: they inject a WRITE-TARGET compare-object getter
+// (casWriteTargetEntry) instead of GetEntry, plus a higher-layer pre-refuse hook
+// (casHigherLayerDefined). GetEntry returns the MERGED multi-layer view while the
+// mutators (restoreEntryFromBytes / RemoveEntry) touch ONLY the write target, so
+// the generic "compare == mutate" invariant is BROKEN for mimocode with GetEntry:
+// a hub-shaped HIGHER layer could pass the recognizer while the mutation lands on a
+// different operator write-target value (fable-5 Phase-3 P2). Comparing the write
+// target's OWN value + refusing on a winning higher layer restores the invariant.
 func (o *mimoCodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, o.GetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes)
+	return casRestoreFromBytes(name, match, snapshotBytes, o.casWriteTargetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, o.casHigherLayerDefined)
 }
 func (o *mimoCodeClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
-	return casGuardedRemove(name, match, o.GetEntry, o.RemoveEntry)
+	return casGuardedRemove(name, match, o.casWriteTargetEntry, o.RemoveEntry, o.casHigherLayerDefined)
+}
+
+// casWriteTargetEntry is mimocode's CAS compare-object getter: the WRITE TARGET's
+// OWN physical mcp.<name> value (mimocode.json via mimoCodeFileEntryValue),
+// projected to an *MCPEntry by the SAME owner GetEntry uses (mimoCodeProjectEntry)
+// so the injected recognizer runs against a byte-identically-shaped entry — NOT the
+// merged multi-layer view GetEntry returns. This makes the CAS compare object equal
+// the object restoreEntryFromBytes / RemoveEntry will mutate (fable-5 Phase-3 P2).
+//
+// A write target with NO own value returns (nil, nil): the generic gate then applies
+// its usual nil-live semantics — restore refuses no-resurrection, remove is
+// idempotent success — only the SOURCE of the nil verdict changed (the write target,
+// not the merged view).
+func (o *mimoCodeClient) casWriteTargetEntry(name string) (*MCPEntry, error) {
+	ownRaw, ownOK, err := mimoCodeFileEntryValue(o.path, name)
+	if err != nil {
+		return nil, err
+	}
+	if !ownOK {
+		return nil, nil
+	}
+	// The physical write-target value is BOTH the merged-source (Disabled scalar)
+	// and the shape-source (url/Raw/Headers): the compare is deliberately the write
+	// target in ISOLATION. SourceBelowWriteTarget=false — this IS the write target's
+	// own value.
+	return mimoCodeProjectEntry(name, ownRaw, ownRaw, false), nil
+}
+
+// casHigherLayerDefined is mimocode's CAS higher-layer pre-refuse hook. The generic
+// gate runs it BEFORE any mutation: it reports whether a merge layer ABOVE the write
+// target defines <name> and would WIN the merge. When it does, even a write-target
+// compare that passed cannot make the mutation take effect (restore) or clear the
+// server (remove) — mimocode's own RemoveEntry B4 guard, moved pre-write for the CAS
+// destructive path so the write target is never edited-then-refused (fable-5 P2).
+func (o *mimoCodeClient) casHigherLayerDefined(name string) (bool, error) {
+	src, err := o.mimoCodeHigherLayerDefining(name)
+	if err != nil {
+		return false, err
+	}
+	return src.Kind != "", nil
 }
 
 // The jsonMCPClient embedders (cursor / gemini-cli / qwen-cli / antigravity) each
@@ -252,31 +375,31 @@ func (o *mimoCodeClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry
 // silently mis-read relay/httpUrl entries — another reason CAS is per-concrete).
 
 func (c *cursorClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes)
+	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil)
 }
 func (c *cursorClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
-	return casGuardedRemove(name, match, c.GetEntry, c.RemoveEntry)
+	return casGuardedRemove(name, match, c.GetEntry, c.RemoveEntry, nil)
 }
 
 func (g *geminiCLI) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, g.GetEntry, g.EntryPresentInBytes, g.restoreEntryFromBytes)
+	return casRestoreFromBytes(name, match, snapshotBytes, g.GetEntry, g.EntryPresentInBytes, g.restoreEntryFromBytes, nil)
 }
 func (g *geminiCLI) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
-	return casGuardedRemove(name, match, g.GetEntry, g.RemoveEntry)
+	return casGuardedRemove(name, match, g.GetEntry, g.RemoveEntry, nil)
 }
 
 func (q *qwenCLI) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, q.GetEntry, q.EntryPresentInBytes, q.restoreEntryFromBytes)
+	return casRestoreFromBytes(name, match, snapshotBytes, q.GetEntry, q.EntryPresentInBytes, q.restoreEntryFromBytes, nil)
 }
 func (q *qwenCLI) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
-	return casGuardedRemove(name, match, q.GetEntry, q.RemoveEntry)
+	return casGuardedRemove(name, match, q.GetEntry, q.RemoveEntry, nil)
 }
 
 func (a *antigravityClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, a.GetEntry, a.EntryPresentInBytes, a.restoreEntryFromBytes)
+	return casRestoreFromBytes(name, match, snapshotBytes, a.GetEntry, a.EntryPresentInBytes, a.restoreEntryFromBytes, nil)
 }
 func (a *antigravityClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
-	return casGuardedRemove(name, match, a.GetEntry, a.RemoveEntry)
+	return casGuardedRemove(name, match, a.GetEntry, a.RemoveEntry, nil)
 }
 
 // ---- lockingClient forwarders: HOLD withConfigLock across the whole CAS call ----

@@ -3948,36 +3948,11 @@ func (o *mimoCodeClient) GetEntry(name string) (*MCPEntry, error) {
 	// A disabling higher overlay (enabled:false) over an enabled write target merges
 	// `raw` to enabled:false → Disabled:true, also correct. Mirrors the scan path
 	// (shapeMimoCodeEntry classifies enabled:false as Transport "absent").
-	disabled := mimoCodeEntryDisabled(raw)
-	url, _ := effRaw["url"].(string)
-	if url == "" {
-		// URL-less local entry (or a url-less remote) — not representable as a
-		// URL MCPEntry. Carry the verbatim value in Raw so rollback restores it
-		// exactly rather than deleting it or corrupting it to {type:remote,url:""}.
-		return &MCPEntry{Name: name, Raw: effRaw, SourceBelowWriteTarget: below, Disabled: disabled}, nil
-	}
-	// A DISABLED URL entry (enabled:false) is also not faithfully representable
-	// as a {URL,Headers} MCPEntry: AddEntry's normal install path hardcodes
-	// enabled:true, so a GetEntry→AddEntry(*prior) rollback would silently
-	// RE-ENABLE a server the operator had disabled (bot PR #420 finding 5).
-	// Carry the verbatim entry in Raw so the rollback writes it back byte-shaped
-	// (Raw wins in AddEntry), preserving enabled:false.
-	if disabled {
-		return &MCPEntry{Name: name, Raw: effRaw, SourceBelowWriteTarget: below, Disabled: true}, nil
-	}
-	// A user-authored remote entry carrying EXTRA fields beyond the hub-written
-	// shape (type/url/enabled/headers) — e.g. oauth, timeout (accepted by
-	// MiMoCode's MCP schema) — is ALSO not faithfully representable by the lean
-	// {URL,Headers} MCPEntry: a GetEntry→AddEntry(*prior) rollback would re-emit
-	// only the bare remote shape and DROP those fields (bot PR #420 finding 3).
-	// Carry the verbatim entry in Raw so the rollback restores it byte-shaped. A
-	// clean hub-shaped remote entry (key set ⊆ {type,url,enabled,headers}) stays
-	// on the lean {URL,Headers} path (Raw nil) so the normal hub-install/restore
-	// polarity and every existing URL round-trip are unchanged.
-	if mimoCodeRemoteHasExtraFields(effRaw) {
-		return &MCPEntry{Name: name, Raw: effRaw, SourceBelowWriteTarget: below, Disabled: disabled}, nil
-	}
-	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(effRaw, "headers"), SourceBelowWriteTarget: below, Disabled: disabled}, nil
+	// Projection is single-owned in mimoCodeProjectEntry (shared with the CAS
+	// write-target compare, casWriteTargetEntry). Disabled comes from the MERGED
+	// `raw` (per the comment above); the url/Raw/Headers SHAPE comes from `effRaw`
+	// (no-copy-up). Behaviour-identical to the prior inline tail.
+	return mimoCodeProjectEntry(name, raw, effRaw, below), nil
 }
 
 // mimoCodeEntryDisabled reports whether a parsed mcp entry map carries an
@@ -4005,6 +3980,47 @@ func mimoCodeRemoteHasExtraFields(raw map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// mimoCodeProjectEntry is the SINGLE owner of the mimocode value-map → *MCPEntry
+// projection GetEntry returns. mergedRaw supplies the merged-effective Disabled
+// scalar (feeds api.GatedOnClients); effRaw supplies the url/Raw/Headers SHAPE
+// decision (the rollback-Raw no-copy-up value). Factored out of GetEntry so the
+// CAS write-target compare (casWriteTargetEntry) builds a byte-identically-shaped
+// entry — the injected recognizer must run against an entry constructed the SAME
+// way GetEntry constructs one (fable-5 Phase-3 P2). Behaviour-identical to the
+// prior inline GetEntry tail.
+func mimoCodeProjectEntry(name string, mergedRaw, effRaw map[string]any, below bool) *MCPEntry {
+	disabled := mimoCodeEntryDisabled(mergedRaw)
+	url, _ := effRaw["url"].(string)
+	if url == "" {
+		// URL-less local entry (or a url-less remote) — not representable as a
+		// URL MCPEntry. Carry the verbatim value in Raw so rollback restores it
+		// exactly rather than deleting it or corrupting it to {type:remote,url:""}.
+		return &MCPEntry{Name: name, Raw: effRaw, SourceBelowWriteTarget: below, Disabled: disabled}
+	}
+	// A DISABLED URL entry (enabled:false) is also not faithfully representable
+	// as a {URL,Headers} MCPEntry: AddEntry's normal install path hardcodes
+	// enabled:true, so a GetEntry→AddEntry(*prior) rollback would silently
+	// RE-ENABLE a server the operator had disabled (bot PR #420 finding 5).
+	// Carry the verbatim entry in Raw so the rollback writes it back byte-shaped
+	// (Raw wins in AddEntry), preserving enabled:false.
+	if disabled {
+		return &MCPEntry{Name: name, Raw: effRaw, SourceBelowWriteTarget: below, Disabled: true}
+	}
+	// A user-authored remote entry carrying EXTRA fields beyond the hub-written
+	// shape (type/url/enabled/headers) — e.g. oauth, timeout (accepted by
+	// MiMoCode's MCP schema) — is ALSO not faithfully representable by the lean
+	// {URL,Headers} MCPEntry: a GetEntry→AddEntry(*prior) rollback would re-emit
+	// only the bare remote shape and DROP those fields (bot PR #420 finding 3).
+	// Carry the verbatim entry in Raw so the rollback restores it byte-shaped. A
+	// clean hub-shaped remote entry (key set ⊆ {type,url,enabled,headers}) stays
+	// on the lean {URL,Headers} path (Raw nil) so the normal hub-install/restore
+	// polarity and every existing URL round-trip are unchanged.
+	if mimoCodeRemoteHasExtraFields(effRaw) {
+		return &MCPEntry{Name: name, Raw: effRaw, SourceBelowWriteTarget: below, Disabled: disabled}
+	}
+	return &MCPEntry{Name: name, URL: url, Headers: extractHeaders(effRaw, "headers"), SourceBelowWriteTarget: below, Disabled: disabled}
 }
 
 func (o *mimoCodeClient) LatestBackupPath() (string, bool, error) {
