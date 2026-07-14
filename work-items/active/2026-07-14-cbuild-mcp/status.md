@@ -34,3 +34,23 @@ Dispatch backend-engineer to implement Phase 1 on `feat/cbuild-mcp`.
 ## Notes
 Runs in PARALLEL with E de-adopt (Phase 2 #540 in bot review). Disjoint files (`cmd/mcp-cbuild/`
 vs `internal/api`+`internal/clients`).
+
+## DEFERRED 2026-07-15 + design correction (user)
+
+**Guiding principle (user, 2026-07-15): "an MCP for cmake USES cmake for everything —
+reimplement NOTHING."** The v1 `presets.go` hand-rolled CMakePresets.json interpretation
+(hidden/conditions/includes/inherits/macros/duplicates/validation) was the WRONG approach
+end-to-end — it triggered 6 Codex-bot rounds chasing cmake-presets(7) spec compliance
+(a losing reimplementation race). Correct redesign when resumed:
+- `cmake_list_presets` → shell out to `cmake --list-presets=<kind>` (cmake validates
+  hidden/conditions/includes/inherits/duplicates — it is the authority; a rejected file =
+  cmake nonzero = our structured error).
+- **binaryDir → read from `CMakeCache.txt` (`CMAKE_BINARY_DIR`, cmake-computed at configure)**,
+  NOT a hand-rolled macro resolver. Purge removes the cmake-configured dir; refuse if unconfigured.
+- configure/build/test/workflow/clean already delegate via `cmake --preset` — keep.
+- Delete ALL the reimplemented condition/macro/inherit/include/duplicate/hidden logic.
+- Keep only the SAFETY guards that are NOT cmake's job (symlink-escape / non-dir / path
+  containment on the purge target).
+
+Status: PR #541 PARKED at d521aad3 (8 open bot findings that the delegation redesign obviates).
+The cbuild binary + v1 tools work; the preset-listing accuracy is the only open item.
