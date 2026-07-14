@@ -816,9 +816,28 @@ var ErrManifestHashRequired = errors.New("manifest delete refused: a non-empty e
 // (internal/api/deadopt.go E4 — no caller yet, additive). It re-reads the
 // on-disk manifest.yaml, computes ManifestHashContent(current) — the same
 // hasher ManifestEditInWithHash gates on — and deletes the manifest directory
-// ONLY when that hash equals expectedHash. The re-read and the delete are one
-// call, so the manifest cannot change between the check and the delete (atomic
-// at the mutation point, closing the F1 TOCTOU).
+// ONLY when that hash equals expectedHash.
+//
+// ATOMICITY SCOPE (what the hash gate does and does NOT close): the gate closes
+// the F1 provenance-drift TOCTOU — a stale, blanked, or tampered
+// ExpectedManifestHash carried on the de-adopt provenance row can no longer
+// drive an ungated delete of a manifest whose on-disk bytes have since changed;
+// a mismatch is refused (ErrManifestHashMismatch). It does NOT make the
+// filesystem operation atomic: the on-disk read (os.ReadFile) and the delete
+// (os.RemoveAll) are two separate syscalls, so a window exists between them in
+// which an external actor with write access to the manifest dir could swap its
+// bytes after the hash check and before the delete, and those swapped bytes
+// would be removed. The window's duration is NOT bounded — a thread preemption
+// between the two syscalls widens the unlocked interval arbitrarily; the point
+// is only that such a window exists. That residual is inherent, and it
+// uses the SAME read -> hash-check -> mutate-without-lock gating pattern the
+// accepted ManifestEditInWithHash relies on (it likewise re-reads, compares
+// ManifestHashContent, then mutates the manifest under no lock — via a
+// tmp-file + atomic rename rather than RemoveAll; the gating shape is the same,
+// only the mutation primitive differs). A concurrent external mutation of a
+// manifest dir mid-call is out of scope for every hash-gated file op in this
+// package. Callers MUST NOT rely on a stronger "cannot change between check and
+// delete" guarantee than this.
 //
 // POLARITY (CRITICAL — destructive-default discipline): this INVERTS
 // ManifestEditInWithHash's `if expectedHash != "" { ...check... }` skip. That
