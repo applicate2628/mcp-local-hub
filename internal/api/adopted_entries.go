@@ -24,11 +24,10 @@
 //
 // Scope boundary (arch F7 / plan AC A8). THIS work-item owns the storage layer,
 // the snapshot helpers, the adopt-side lifecycle (capture / promote / abort),
-// and the read accessor ReadAdoptProvenance. The de-adopt-owned mutators
-// (MarkAdoptProvenanceDeAdopting / UpdateAdoptExpectedManifestHash /
-// CloseAdoptProvenance) and the de_adopting/closed states are DECLARED here (as
-// comments + schema enum values) so the shared schema supports them, but MUST
-// NOT ship as Go bodies in this item — the de-adopt work-item authors them.
+// and the read accessor ReadAdoptProvenance. The de-adopt work-item IMPLEMENTS
+// MarkAdoptProvenanceDeAdopting and CloseAdoptProvenance here;
+// UpdateAdoptExpectedManifestHash remains DECLARED as a comment for the subset
+// follow-up. The shared schema declares the de_adopting/closed enum values.
 //
 // Design: work-items/active/2026-07-09-adopt-side-durable-pre-adopt-provenance/design.md.
 
@@ -1282,16 +1281,104 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 }
 
 // ---------------------------------------------------------------------------
-// De-adopt-owned MUTATORS — DECLARED (comments) for schema/contract shape ONLY.
+// De-adopt-owned MUTATORS. Phase 6 implements the whole-manifest Mark + Close
+// operations here against the protected store. The subset hash update remains
+// declared-only for its follow-up:
 //
-// THIS work-item MUST NOT land Go bodies (empty or otherwise) for these three
-// (anti-layering, arch F7 / plan AC A8). The de-adopt work-item
-// (2026-07-09-deadopt-hub-to-native) authors them against this schema; they
-// drive the adopted -> de_adopting -> closed transitions this item does NOT own.
-// Listed here so the schema (the de_adopting/closed AdoptOperationState values)
-// supports them without a second store owner.
-//
-//	func MarkAdoptProvenanceDeAdopting(manifestName string) error         // adopted -> de_adopting
 //	func UpdateAdoptExpectedManifestHash(manifestName, newHash string) error // subset binding edit
-//	func CloseAdoptProvenance(manifestName string) error                  // de_adopting -> closed + delete snapshots
 // ---------------------------------------------------------------------------
+
+// MarkAdoptProvenanceDeAdopting transitions adopted (or a re-verified,
+// committed adopting row) to de_adopting. The manifest lease excludes a live
+// same-manifest adopt/de-adopt operation; the entries lock protects the row
+// read-classify-write transaction.
+func MarkAdoptProvenanceDeAdopting(manifestName string) error {
+	lk, acquired, err := tryAcquireAdoptManifestLease(manifestName)
+	if err != nil {
+		return fmt.Errorf("adopt provenance mark de-adopting: acquire manifest lease: %w", err)
+	}
+	if !acquired {
+		return fmt.Errorf("adopt provenance mark de-adopting: manifest %q lease is held by another operation", manifestName)
+	}
+	defer func() { _ = lk.Unlock() }()
+
+	return withAdoptedEntriesLock(func() error {
+		store, err := readAdoptedEntries()
+		if err != nil {
+			return fmt.Errorf("adopt provenance mark de-adopting: read store: %w", err)
+		}
+		for i := range store.Records {
+			rec := &store.Records[i]
+			if rec.ManifestName != manifestName {
+				continue
+			}
+			switch rec.OperationState {
+			case AdoptOperationStateDeAdopting:
+				return nil
+			case AdoptOperationStateAdopted:
+				// Ready to transition below.
+			case AdoptOperationStateAdopting:
+				if classifyDeadAdoptingRow(*rec) != adoptRowCommittedKeep {
+					return fmt.Errorf("adopt provenance mark de-adopting: manifest %q adopting row is not committed; refusing to take it from adopt orphan GC", manifestName)
+				}
+			case AdoptOperationStateClosed:
+				return fmt.Errorf("adopt provenance mark de-adopting: manifest %q provenance is already closed", manifestName)
+			default:
+				return fmt.Errorf("adopt provenance mark de-adopting: manifest %q has unsupported state %q", manifestName, rec.OperationState)
+			}
+			rec.OperationState = AdoptOperationStateDeAdopting
+			rec.UpdatedAt = time.Now().UTC()
+			if err := writeAdoptedEntries(store); err != nil {
+				return fmt.Errorf("adopt provenance mark de-adopting: write store: %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("adopt provenance mark de-adopting: manifest %q has no provenance row", manifestName)
+	})
+}
+
+// CloseAdoptProvenance removes a de_adopting row and its snapshots. It retains
+// the manifest lease while delegating deletion to reapAdoptProvenanceRow, the
+// store's single identity-gated snapshots-first deletion path.
+func CloseAdoptProvenance(manifestName string) error {
+	lk, acquired, err := tryAcquireAdoptManifestLease(manifestName)
+	if err != nil {
+		return fmt.Errorf("adopt provenance close: acquire manifest lease: %w", err)
+	}
+	if !acquired {
+		return fmt.Errorf("adopt provenance close: manifest %q lease is held by another operation", manifestName)
+	}
+	defer func() { _ = lk.Unlock() }()
+
+	var (
+		found     bool
+		updatedAt time.Time
+	)
+	if err := withAdoptedEntriesLock(func() error {
+		store, err := readAdoptedEntries()
+		if err != nil {
+			return fmt.Errorf("adopt provenance close: read store: %w", err)
+		}
+		for _, rec := range store.Records {
+			if rec.ManifestName != manifestName {
+				continue
+			}
+			if rec.OperationState != AdoptOperationStateDeAdopting {
+				return fmt.Errorf("adopt provenance close: manifest %q has state %q, want %q", manifestName, rec.OperationState, AdoptOperationStateDeAdopting)
+			}
+			found = true
+			updatedAt = rec.UpdatedAt
+			return nil
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	if err := reapAdoptProvenanceRow(manifestName, AdoptOperationStateDeAdopting, updatedAt); err != nil {
+		return fmt.Errorf("adopt provenance close: %w", err)
+	}
+	return nil
+}
