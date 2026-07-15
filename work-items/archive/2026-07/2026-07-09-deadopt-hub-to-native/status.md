@@ -1,15 +1,11 @@
 # status - de-adopt v1 (hub to native, all-clients-only, gate-OFF-only, atomic)
 
 Template: design → delivery (full-delivery). Orchestrator: `$lead`.
-State: **IN PROGRESS — Phases 0-8 DONE + MERGED to master; Phase 9 (CLI mcphub de-adopt) next. Core feature (planner + atomic executor) complete.**
-Design round-5 is ACCEPTED (arch delta-recheck PASS 2026-07-13); `$planner` broke it into a
-12-phase delivery plan (`plan.md`, 2026-07-14). Phases 0-6 are all delivered + squash-merged:
-Phase 0+1 (`ManifestDeleteInWithHash`, #539/82e07b46), Phase 2 (restore-extraction, #540),
-Phase 3 (CAS mutators, #542), Phase 4 (`ClassifyEntryUnderLock`+`EntryRawSubtree`, #544),
-Phase 5 (`.snapshot` read-cap, #543), Phase 6 (provenance mutators Mark/Close, #545 — with the
-codex-bot P2 fix `27a622ac`: Mark/Close assume caller-held lease, not internal re-acquire).
-Phase 7 (`BuildDeAdoptPlan` read-only planner, NEW `deadopt.go`) is now UNBLOCKED (deps 4,5,6
-all in master) and in impl. Phases 8-11 pending. master HEAD = `a2a109b0`.
+State: **COMPLETE — all 12 phases (0-11) DELIVERED + MERGED to master (HEAD `837fe95c`, Phase 11 #550). De-adopt v1 shipped end-to-end: manifest-delete-hash gate, restore-core extraction, CAS mutators, ClassifyEntryUnderLock/EntryRawSubtree seam, snapshot read-cap, provenance Mark/Close, BuildDeAdoptPlan planner, ExecuteDeAdoptWithOpts ATOMIC executor, CLI, GUI routes+eligibility, frontend affordance+Playwright+/api/deadopt/recoverable.** See `closure.md`.
+Design round-5 was ACCEPTED (arch delta-recheck PASS 2026-07-13); `$planner` broke it into a
+12-phase delivery plan (`plan.md`, 2026-07-14), each phase its own PR → gate → Codex-bot → merge.
+All twelve squash-merged: #539 (0+1), #540 (2), #542 (3), #544 (4), #543 (5), #545 (6), #546 (7),
+#547 (8), #548 (9), #549 (10), #550 (11). master HEAD = `837fe95c`.
 Depends-on: 2026-07-09-adopt-side-durable-pre-adopt-provenance, bug:2026-07-11-gc-phase2-stale-candidate-reaps-committed-row, bug:2026-07-11-classifier-committed-signal-blind-to-entry-drift
 
 Dependency note: `2026-07-09-adopt-side-durable-pre-adopt-provenance` is DELIVERED +
@@ -47,9 +43,9 @@ the declaration above is retained as a traceability record.
 | 6 | Provenance mutators (D1) — author `MarkAdoptProvenanceDeAdopting` + `CloseAdoptProvenance` bodies | **FULL COMMISSION** (protected provenance store) | **DONE + MERGED** (#545, `a2a109b0`; codex-bot P2 lease-fix `27a622ac`) |
 | 7 | `BuildDeAdoptPlan` (read-only planner), NEW deadopt.go | $arch + $security + $qa | **DONE + MERGED** (#546, `1d9c37c2`; Sol+fable + 5 codex-bot rounds: B2b AlreadyAbsent, adopting→classifyDeadAdoptingRow, FRESH RestoreDone→done, fail-closed ProbeHubGate incl. mimocode-layered GetEntry-authority) |
 | 8 | `ExecuteDeAdoptWithOpts` — ATOMIC all-clients (DO NOT SPLIT, integration) | **FULL COMMISSION + integration owner + Codex-bot PASS + deep-security** | **DONE + MERGED** (#547, `0e5614df`; Sol+Terra+fable commission (3) + 6 codex-bot rounds (12) + fable final-gate (1 fail-open the bot missed) = 16 TOCTOU/fail-closed/resume/liveness/data-safety fixes) |
-| 9 | CLI `mcphub de-adopt` (alias deadopt) | $qa + $arch light + $security light | PENDING (dep: 7,8) |
-| 10 | GUI backend routes + eligibility (G3) | $security + $qa | PENDING (dep: 7,8) |
-| 11 | Frontend affordance + Playwright | $ux-reviewer + $frontend self-check + $qa | PENDING (dep: 10) |
+| 9 | CLI `mcphub de-adopt` (alias deadopt) | $qa + $arch light + $security light | **DONE + MERGED** (#548, `5d362a76`; dry-run/`--yes`/`--accept-conflict`, exit-code + hash-gate bot fixes) |
+| 10 | GUI backend routes + eligibility (G3) | $security + $qa | **DONE + MERGED** (#549, `7bb45df6`; Sol + fable security-gate PASS) |
+| 11 | Frontend affordance + Playwright | $ux-reviewer + $frontend self-check + $qa | **DONE + MERGED** (#550, `837fe95c`; Sol UX + 5 bot rounds: visible-error, render-reason, non-blocking eligibility, irreversible accept-warning, recovery-row visibility, migrate fail-closed, suppress-unmanaged, `/api/deadopt/recoverable`) |
 
 Mandatory-gate map (from plan.md): full commission on **3, 4, 6, 8**; security-reviewer MANDATORY on
 1,3,4,5,6,7,8,10; Phase 8 additionally requires Codex-bot PASS + deep-security.
