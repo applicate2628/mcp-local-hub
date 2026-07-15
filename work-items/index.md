@@ -43,10 +43,11 @@ reconciliation records, not open tasks.
 ## Reference / parked (loose root files — NOT open tasks)
 
 - `2026-06-17-phase1-audit-findings.md` — Phase 1 arch+security audit. **HEAD-reconciled 2026-07-15
-  (the inline fixed-markers were stale):** 5/6 findings resolved-or-exempt (P1 state-fanout, config-path
+  (the inline fixed-markers were stale):** 6/6 findings resolved-or-exempt (P1 state-fanout, config-path
   double-encode, dual state-enum, hand-rolled atomic writers, path-validate raw-error — all FIXED with
-  backing tests; backups path-echo EXEMPT-by-design). **1 residual:** finding 4's 4 GUI state-dir-error
-  POSIX path-leak sites → tracked `backlog/2026-07-15-gui-state-dir-error-path-leak-residual.md`. See the
+  backing tests; backups path-echo EXEMPT-by-design). Finding 4's residual (4 GUI state-dir-error POSIX
+  path-leak sites) **FIXED 2026-07-15** — the 4 sites now route through `writeAPIErrorRedacted` + a
+  `state_dir_error_redaction_test.go` structural guard; the backlog tracker is removed on delivery. See the
   doc's HEAD-RECONCILIATION header for per-finding evidence.
 - `2026-06-18-clean-install-ux-vision.md` — PARKED user vision (post-dev-debug future).
 - `2026-06-18-vendor-init-uninstalled-clients.md` — RESOLVED 2026-06-21 (secure-parent-create stack).

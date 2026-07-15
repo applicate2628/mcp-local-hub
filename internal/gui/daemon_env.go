@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -160,7 +161,10 @@ func (s *Server) daemonEnvHandler(w http.ResponseWriter, r *http.Request) {
 
 	overlayPath, err := resolveOverlayPath()
 	if err != nil {
-		writeAPIError(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED")
+		// resolveOverlayPath wraps api.DaemonStateDir(); on POSIX its
+		// errStateParentInsecure embeds the absolute state-dir path, so log
+		// server-side + return a stable opaque message (phase-1 finding 4).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED", "/api/daemon/env set resolve overlay path")
 		return
 	}
 	if err := daemon_env_overlay.WriteOverlay(overlayPath, func(ov *daemon_env_overlay.Overlay) error {
@@ -220,7 +224,10 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	overlayPath, err := resolveOverlayPath()
 	if err != nil {
-		writeAPIError(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED")
+		// resolveOverlayPath wraps api.DaemonStateDir(); on POSIX its
+		// errStateParentInsecure embeds the absolute state-dir path, so log
+		// server-side + return a stable opaque message (phase-1 finding 4).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED", "/api/daemon/env list resolve overlay path")
 		return
 	}
 	ov, err := daemon_env_overlay.Load(overlayPath)
@@ -352,7 +359,10 @@ func (s *Server) discoveryRefreshHandler(w http.ResponseWriter, r *http.Request)
 	}
 	overlayPath, err := resolveOverlayPath()
 	if err != nil {
-		writeAPIError(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED")
+		// resolveOverlayPath wraps api.DaemonStateDir(); on POSIX its
+		// errStateParentInsecure embeds the absolute state-dir path, so log
+		// server-side + return a stable opaque message (phase-1 finding 4).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED", "/api/discovery/refresh resolve overlay path")
 		return
 	}
 
@@ -424,10 +434,14 @@ func (s *Server) daemonRespawnHandler(w http.ResponseWriter, r *http.Request) {
 		//     meaning the supervisor is unreachable right now — a retryable
 		//     condition — so it maps to 503.
 		if errors.Is(dialErr, api.ErrRespawnSetupFailure) {
-			writeAPIError(w, dialErr, http.StatusInternalServerError, "RESPAWN_SETUP_FAILED")
+			// ErrRespawnSetupFailure wraps DaemonStateDir (abs state-dir path via
+			// errStateParentInsecure on POSIX) or a `supervisor.lock.owner.json`
+			// read against an absolute lockPath — redact both (phase-1 finding 4).
+			writeAPIErrorRedacted(w, dialErr, http.StatusInternalServerError, "RESPAWN_SETUP_FAILED", "/api/daemon/respawn setup")
 			return
 		}
-		writeAPIError(w, dialErr, http.StatusServiceUnavailable, "IPC_FAILED")
+		// A transport dial error embeds the absolute unix-socket path on POSIX; redact.
+		writeAPIErrorRedacted(w, dialErr, http.StatusServiceUnavailable, "IPC_FAILED", "/api/daemon/respawn dial supervisor")
 		return
 	}
 	if result.Success {
@@ -459,6 +473,20 @@ func (s *Server) daemonRespawnHandler(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 	case "RESPAWN_FAILED":
 		status = http.StatusInternalServerError
+	}
+	// SUPERVISOR_UNAVAILABLE is the one supervisor-classified code whose Message is
+	// built locally from an absolute path — "supervisor.lock.owner.json not found at
+	// <lockPath>" or "dial <unix-socket address> failed" (supervisor_ipc_respawn_
+	// client.go:130-149) — so it leaks the state-dir/socket path on POSIX. Log the raw
+	// message server-side and return a curated, PATH-FREE but ACTIONABLE message: the
+	// frontend surfaces this text verbatim to the operator, so a bare "internal error"
+	// would strip the restart/retry guidance (phase-1 finding 4). Every other code
+	// carries a curated, path-free operator message (UNKNOWN_TASK, QUARANTINED,
+	// RESPAWN_NOT_READY, ...) the GUI surfaces, so keep those raw.
+	if result.Code == "SUPERVISOR_UNAVAILABLE" {
+		log.Printf("/api/daemon/respawn supervisor unavailable: %s", result.Message)
+		writeAPIError(w, fmt.Errorf("the mcp-local-hub supervisor is not running — restart the hub and retry"), status, result.Code)
+		return
 	}
 	writeAPIError(w, fmt.Errorf("%s", result.Message), status, result.Code)
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -168,6 +169,43 @@ func TestStatusEndpoint_ExposesSupervisorDownDegradedMarker(t *testing.T) {
 	}
 	if !strings.Contains(body.Error, "restart the hub") {
 		t.Errorf("error = %q, want it to name the operator action (restart the hub)", body.Error)
+	}
+}
+
+// TestStatusEndpoint_RedactsSetupFailurePath is the phase-1 finding-4 companion to
+// the ErrSupervisorDown allowlist above: a NON-ErrSupervisorDown status error (here a
+// DialSupervisorIPCStatus setup failure that wraps the absolute state-dir path via
+// ErrStatusSetupFailure) MUST be redacted — the response body carries the opaque
+// "internal error", never the absolute path, while keeping the STATUS_FAILED code.
+func TestStatusEndpoint_RedactsSetupFailurePath(t *testing.T) {
+	const leakyPath = `/home/alice/.local/state/mcp-local-hub`
+	leaky := fmt.Errorf("supervisor IPC status: resolve state dir: %s: owner UID 1000 != current UID 1001: %w",
+		leakyPath, api.ErrStatusSetupFailure)
+	fakeH := &fakeHealth{returnDaemonErr: leaky}
+	s := NewServer(Config{})
+	s.health = fakeH
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body=%s; want 500", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if body.Code != "STATUS_FAILED" {
+		t.Errorf("code = %q, want STATUS_FAILED", body.Code)
+	}
+	if body.Error != "internal error" {
+		t.Errorf("error = %q, want redacted \"internal error\"", body.Error)
+	}
+	if strings.Contains(rec.Body.String(), leakyPath) {
+		t.Errorf("response body leaks the absolute state-dir path %q: %s", leakyPath, rec.Body.String())
 	}
 }
 
