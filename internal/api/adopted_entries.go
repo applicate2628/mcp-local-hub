@@ -1113,6 +1113,29 @@ func adoptRowProvablyUnmutated(rec AdoptProvenanceRecord) bool {
 
 		switch c.OriginalState {
 		case AdoptOriginalStatePresent:
+			// ClassifyRestoreDone is reflect.DeepEqual(liveSubtree, snapshotSubtree)
+			// over PARSED subtrees (cas_mutator.go:352), not byte equality — which is
+			// exactly the right gate, because de-adopt would perform NO restore from a
+			// snapshot in this state, so deleting it risks zero restore value:
+			//   - De-adopt's OWN disposition consumes the SAME ClassifyEntryUnderLock
+			//     verdict: ClassifyRestoreDone maps to DeAdoptClientRestoreDone
+			//     ("client already in its de-adopted target state", deadopt.go:980-981)
+			//     and the executor SKIPS the client's mutation entirely
+			//     (deadopt.go:504-508). Same predicate on both sides, not two DeepEquals.
+			//   - Backstop: de-adopt's E3 restore is CASRestoreEntryFromBytes with
+			//     allowHubEntry=false (cas_mutator.go:258); casRestoreFromBytes requires
+			//     the LIVE entry to still hub-recognizer-match before it touches the
+			//     snapshot, so a native (RestoreDone) live entry fails the match =>
+			//     ErrCASConflict, no write (cas_mutator.go:216-225). The snapshot is
+			//     provably never consumed under RestoreDone.
+			// So the byte-level formatting the parsed compare ignores (quote style,
+			// comments, whitespace) is never a de-adopt restore product; its loss on
+			// reap is immaterial, and the secret-literal VALUE round-trips through the
+			// shared extractor anyway. The ONE byte-exact writer,
+			// wholeFileRestoreIfWriteTargetGone, is gated on allowHubEntry=true so it is
+			// unreachable from de-adopt (adopt-rollback lane only), and it fires only
+			// when the live file is ABSENT — which a present client classifies
+			// GenuineConflict (present=false + non-nil snapshot), never RestoreDone.
 			if verdict != clients.ClassifyRestoreDone {
 				return false // StillHub, conflict, unreadable, or unknown => KEEP
 			}
