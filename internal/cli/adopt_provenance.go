@@ -1,0 +1,91 @@
+package cli
+
+import (
+	"fmt"
+	"io"
+	"strings"
+
+	"mcp-local-hub/internal/api"
+
+	"github.com/spf13/cobra"
+)
+
+type forgetProvenanceCLIAPI interface {
+	BuildForgetAdoptProvenancePlan(string) (*api.ForgetAdoptProvenancePlan, error)
+	ForgetAdoptProvenance(string, api.ForgetAdoptProvenanceOpts) (*api.ForgetAdoptProvenancePlan, error)
+}
+
+var newForgetProvenanceCLIAPI = func() forgetProvenanceCLIAPI { return api.NewAPI() }
+
+func newAdoptProvenanceCmdReal() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "adopt-provenance",
+		Short: "Inspect and manage adopt-provenance records",
+		Long: "Adopt-provenance records are the durable pre-adopt snapshots `mcphub adopt` " +
+			"captures so `mcphub de-adopt` can restore a client to its exact pre-adopt config. " +
+			"These subcommands manage stale or blocking records.",
+	}
+	cmd.AddCommand(newAdoptProvenanceForgetCmd())
+	return cmd
+}
+
+func newAdoptProvenanceForgetCmd() *cobra.Command {
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "forget <manifest>",
+		Short: "Discard a stale/blocking adopt-provenance row + its snapshot dir",
+		Long: "Removes the durable provenance row and pinned snapshot dir for <manifest> under " +
+			"the per-manifest lease. Use this to clear a provenance record the reap predicate " +
+			"conservatively keeps (for example a crashed adopt) when you do not need to de-adopt it.\n\n" +
+			"This is DESTRUCTIVE and discards provenance bookkeeping only: it does NOT restore any " +
+			"client config and does NOT remove routed vault keys (those are de-adopt's job).",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			manifest := args[0]
+			a := newForgetProvenanceCLIAPI()
+			plan, err := a.BuildForgetAdoptProvenancePlan(manifest)
+			if err != nil {
+				return err
+			}
+			printForgetPlan(cmd.OutOrStdout(), plan)
+			if !yes {
+				fmt.Fprintf(cmd.OutOrStdout(),
+					"\nDry run — nothing removed. Re-run with --yes to forget:\n  mcphub adopt-provenance forget %s --yes\n",
+					manifest)
+				return nil
+			}
+			done, err := a.ForgetAdoptProvenance(manifest, api.ForgetAdoptProvenanceOpts{Yes: true})
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "\nForgotten: removed the provenance record for %q", done.ManifestName)
+			if done.HasSnapshotDir {
+				fmt.Fprint(cmd.OutOrStdout(), " + its snapshot dir")
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), ".")
+			return nil
+		},
+	}
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "skip the confirmation dry-run and remove immediately")
+	return cmd
+}
+
+func printForgetPlan(w io.Writer, plan *api.ForgetAdoptProvenancePlan) {
+	fmt.Fprintf(w, "adopt-provenance forget %s\n", plan.ManifestName)
+	if plan.HasRow {
+		fmt.Fprintf(w, "  row:      present (state=%s)\n", plan.RowState)
+		if len(plan.Clients) > 0 {
+			fmt.Fprintf(w, "  clients:  %s\n", strings.Join(plan.Clients, ", "))
+		}
+	} else {
+		fmt.Fprintln(w, "  row:      none")
+	}
+	if plan.HasSnapshotDir {
+		fmt.Fprintf(w, "  snapshot: %s\n", plan.SnapshotDir)
+	} else {
+		fmt.Fprintln(w, "  snapshot: none")
+	}
+	for _, warn := range plan.Warnings {
+		fmt.Fprintf(w, "  WARNING:  %s\n", warn)
+	}
+}
