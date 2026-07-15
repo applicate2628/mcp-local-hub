@@ -1,14 +1,19 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/secrets"
 )
 
 // DeAdoptRoutingVerdict selects the fresh or roll-forward-resume execution path.
@@ -87,6 +92,30 @@ type DeAdoptPlan struct {
 	snapshotBytes map[string][]byte
 }
 
+// ExecuteDeAdoptOpts carries request-scoped destructive-operation consent.
+// AcceptConflictClients is validated again at E3 under each client's config
+// lock; naming a client here never by itself makes that client terminal.
+type ExecuteDeAdoptOpts struct {
+	AcceptConflictClients []string
+}
+
+// DeAdoptClientFailure is a redaction-safe per-client failure. Reason is always
+// a fixed class/message assembled by this file; raw adapter, path, snapshot, or
+// config errors are never copied into the report.
+type DeAdoptClientFailure struct {
+	Client string `json:"client"`
+	Reason string `json:"reason"`
+}
+
+// DeAdoptReport carries the all-clients E3 outcomes. Restored includes clients
+// already proven RESTORE-DONE during a roll-forward retry. Accepted contains
+// only conflicts re-proven at the E3 mutation point.
+type DeAdoptReport struct {
+	Restored []string               `json:"restored"`
+	Failed   []DeAdoptClientFailure `json:"failed"`
+	Accepted []string               `json:"accepted"`
+}
+
 type deAdoptSnapshotState int
 
 const (
@@ -127,15 +156,7 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 	plan.Eligibility.AdoptOwned = found
 	plan.Eligibility.Eligible = found && len(probe.GatedOn) == 0 && len(probe.Unreadable) == 0
 
-	if len(probe.GatedOn) != 0 || len(probe.Unreadable) != 0 {
-		var blockers []string
-		if len(probe.GatedOn) != 0 {
-			blockers = append(blockers, fmt.Sprintf("gate is ON for %d client(s) (%s); gate OFF first, then de-adopt", len(probe.GatedOn), strings.Join(probe.GatedOn, ", ")))
-		}
-		if len(probe.Unreadable) != 0 {
-			blockers = append(blockers, fmt.Sprintf("cannot prove gate-OFF: %d client config(s) unreadable (%s); de-adopt refuses until every client's hub-gate state is readable", len(probe.Unreadable), strings.Join(probe.Unreadable, ", ")))
-		}
-		reason := strings.Join(blockers, "; ")
+	if reason := deAdoptHubGateRefusalReason(probe); reason != "" {
 		plan.RefusalReason = reason
 		plan.Eligibility.BlockedReason = reason
 		return plan, nil
@@ -230,6 +251,524 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 	}
 
 	return plan, nil
+}
+
+// ExecuteDeAdopt applies the atomic all-clients de-adopt operation using no
+// conflict-acceptance overrides.
+func (a *API) ExecuteDeAdopt(server string, w io.Writer) (*DeAdoptReport, error) {
+	return a.ExecuteDeAdoptWithOpts(server, w, ExecuteDeAdoptOpts{})
+}
+
+// ExecuteDeAdoptWithOpts executes the E1..E7 roll-forward sequence from the
+// accepted de-adopt design. The per-manifest lease is outermost and remains held
+// through E6. Every inner lock is acquired by an existing owner for one bounded
+// operation and released before the next inner lock is taken.
+func (a *API) ExecuteDeAdoptWithOpts(server string, w io.Writer, opts ExecuteDeAdoptOpts) (*DeAdoptReport, error) {
+	if w == nil {
+		w = io.Discard
+	}
+
+	// The read-only planner is the single owner of gate-OFF, provenance routing,
+	// manifest readiness, and plan-time client classification.
+	plan, err := a.BuildDeAdoptPlan(server)
+	if err != nil {
+		return nil, fmt.Errorf("de-adopt plan for manifest %q could not be built", strings.TrimSpace(server))
+	}
+	return a.executeDeAdoptPlanWithOpts(plan, w, opts)
+}
+
+// executeDeAdoptPlanWithOpts owns the lease-held E1..E7 executor body. Keeping
+// the immutable advisory plan explicit also lets tests deterministically prove
+// that E3 revalidates every client after a plan-to-lease state change.
+func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts ExecuteDeAdoptOpts) (*DeAdoptReport, error) {
+	if w == nil {
+		w = io.Discard
+	}
+	if plan.Routing == DeAdoptRoutingRefuse {
+		return nil, fmt.Errorf("de-adopt refused: %s", plan.RefusalReason)
+	}
+	if plan.provenance == nil {
+		return nil, fmt.Errorf("de-adopt refused: manifest %q has no executable provenance", plan.ManifestName)
+	}
+
+	plannedRec := plan.provenance
+
+	// E1 — acquire the outermost per-manifest lease. No IPC, process kill, or
+	// wait is invoked anywhere before the deferred unlock.
+	lease, leased, leaseErr := tryAcquireAdoptManifestLease(plan.ManifestName)
+	if leaseErr != nil {
+		return nil, fmt.Errorf("de-adopt: acquire per-manifest lease for %q failed", plan.ManifestName)
+	}
+	if !leased {
+		return nil, fmt.Errorf("de-adopt: concurrent operation for manifest %q; retry after it completes", plan.ManifestName)
+	}
+	callerWriter := w
+	var narration bytes.Buffer
+	pendingEvents := make([]func(), 0, 2)
+	// Register the potentially blocking flush before Unlock. Defers run in LIFO
+	// order, so the lease is always released before caller I/O or event-log I/O.
+	defer func() {
+		if narration.Len() != 0 {
+			_, _ = callerWriter.Write(narration.Bytes())
+		}
+		for _, emit := range pendingEvents {
+			emit()
+		}
+	}()
+	defer func() { _ = lease.Unlock() }()
+	w = &narration
+
+	// The plan's provenance row predates E1 and is advisory. Re-read it while
+	// holding the lease so a completed de-adopt followed by a same-name re-adopt
+	// cannot make this executor act on the replaced row's stale recovery data.
+	fresh, found, err := ReadAdoptProvenance(plan.ManifestName)
+	if err != nil {
+		return nil, fmt.Errorf("de-adopt: re-read provenance under lease failed")
+	}
+	if !found {
+		return nil, fmt.Errorf("de-adopt: provenance row for %q vanished under the lease; re-run", plan.ManifestName)
+	}
+	if !deAdoptProvenanceIdentityMatches(plannedRec, fresh) {
+		return nil, fmt.Errorf("de-adopt: provenance changed under the lease; re-run de-adopt")
+	}
+	rec := fresh
+	var effectiveRouting DeAdoptRoutingVerdict
+	switch rec.OperationState {
+	case AdoptOperationStateDeAdopting:
+		effectiveRouting = DeAdoptRoutingResume
+	case AdoptOperationStateAdopted, AdoptOperationStateAdopting:
+		effectiveRouting = DeAdoptRoutingFresh
+	default:
+		return nil, fmt.Errorf("de-adopt: provenance changed under the lease; re-run de-adopt")
+	}
+
+	// The planner's P0 result predates E1. Re-probe under the lease so no E2/E3
+	// mutation can begin unless this execution owns a fresh proof of gate-OFF.
+	if reason := deAdoptHubGateRefusalReason(ProbeHubGate()); reason != "" {
+		return nil, fmt.Errorf("de-adopt refused: %s", reason)
+	}
+
+	// Recompute the destructive manifest gate from the authoritative row. A
+	// fresh operation must still have the exact adopted manifest; only a resume
+	// may proceed when it is already absent. E4 rechecks at the mutation point.
+	readiness := a.buildDeAdoptManifestReadiness(rec, effectiveRouting)
+	if !readiness.HashReady && !(effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent) {
+		return nil, fmt.Errorf("de-adopt: manifest %q is not delete-ready (%s); resolve it before de-adopting", plan.ManifestName, readiness.Reason)
+	}
+
+	acceptSet, err := deAdoptAcceptConflictSet(opts.AcceptConflictClients, rec.AdoptClients)
+	if err != nil {
+		return nil, err
+	}
+
+	// E2 — idempotently enter de_adopting. Mark performs the B4 committed-row
+	// re-verification while this caller retains the lease.
+	if err := MarkAdoptProvenanceDeAdopting(plan.ManifestName); err != nil {
+		return nil, fmt.Errorf("de-adopt: mark provenance for manifest %q de-adopting failed", plan.ManifestName)
+	}
+
+	report := &DeAdoptReport{}
+	resolvedClients := 0
+	allClients := clients.AllClients()
+
+	// E3 — restore/remove every target before any topology mutation.
+	for _, clientName := range rec.AdoptClients {
+		clientRec, ok := deAdoptClientRecord(rec, clientName)
+		if !ok {
+			deAdoptFailClient(report, clientName, "client provenance is missing or duplicated", w)
+			continue
+		}
+		adapter, ok := allClients[clientName]
+		if !ok {
+			deAdoptFailClient(report, clientName, "client adapter is unavailable", w)
+			continue
+		}
+		mutator, ok := clients.AsCASEntryMutator(adapter)
+		if !ok {
+			deAdoptFailClient(report, clientName, "client does not support atomic de-adopt mutation", w)
+			continue
+		}
+
+		match := deAdoptLiveBindingMatcher(rec, clientName)
+		snapshotState, snapshot, snapshotSubtree, snapshotReason := readDeAdoptSnapshot(rec, clientRec, mutator)
+		verdict, classifyErr := mutator.ClassifyEntryUnderLock(
+			rec.SourceEntryName,
+			match,
+			snapshotSubtree,
+		)
+		if classifyErr != nil {
+			verdict = clients.ClassifyUnreadable
+		}
+		disposition, acceptEligible, dispositionReason := mapDeAdoptClientDisposition(
+			effectiveRouting,
+			clientRec.OriginalState,
+			snapshotState,
+			readiness.AlreadyAbsent,
+			verdict,
+		)
+
+		if acceptSet[clientName] {
+			if disposition == DeAdoptClientRestoreDone {
+				report.Restored = append(report.Restored, clientName)
+				resolvedClients++
+				fmt.Fprintf(w, "De-adopt client %q is already restored; --accept-conflict was not needed.\n", clientName)
+				continue
+			}
+
+			switch {
+			case verdict == clients.ClassifyGenuineConflict && acceptEligible:
+				report.Accepted = append(report.Accepted, clientName)
+				resolvedClients++
+				manifestName, acceptedClient := plan.ManifestName, clientName
+				pendingEvents = append(pendingEvents, func() {
+					emitDeAdoptClientAccepted(manifestName, acceptedClient)
+				})
+				fmt.Fprintf(w, "WARNING: --accept-conflict %q honored: %s\n", clientName, deAdoptAcceptConflictWarning)
+			case verdict == clients.ClassifyStillHub:
+				deAdoptFailClient(report, clientName, fmt.Sprintf("--accept-conflict passed but %q is still the hub entry; omit the flag to restore it", clientName), w)
+			case verdict == clients.ClassifyUnreadable:
+				deAdoptFailClient(report, clientName, "--accept-conflict rejected: live client config could not be read or parsed", w)
+			case clientRec.OriginalState == AdoptOriginalStatePresent && snapshotState != deAdoptSnapshotAvailable:
+				reason := "--accept-conflict passed but the pinned snapshot could not be verified; repair it and retry"
+				if snapshotReason != "" {
+					reason = "--accept-conflict rejected: " + snapshotReason
+				}
+				deAdoptFailClient(report, clientName, reason, w)
+			default:
+				deAdoptFailClient(report, clientName, "--accept-conflict rejected: "+dispositionReason, w)
+			}
+			continue
+		}
+
+		var mutationErr error
+		switch disposition {
+		case DeAdoptClientRestoreDone:
+			report.Restored = append(report.Restored, clientName)
+			resolvedClients++
+			fmt.Fprintf(w, "De-adopt client %q is already restored; skipping.\n", clientName)
+			continue
+		case DeAdoptClientRestorePending:
+			mutationErr = mutator.CASRestoreEntryFromBytes(rec.SourceEntryName, match, snapshot)
+		case DeAdoptClientRemovePending:
+			mutationErr = mutator.CASGuardedRemoveEntry(rec.SourceEntryName, match)
+		case DeAdoptClientFailed:
+			deAdoptFailClient(report, clientName, dispositionReason, w)
+			continue
+		default:
+			deAdoptFailClient(report, clientName, "client classification returned an unsupported disposition", w)
+			continue
+		}
+
+		if mutationErr != nil {
+			if errors.Is(mutationErr, clients.ErrCASConflict) {
+				deAdoptFailClient(report, clientName, "live client entry changed; atomic de-adopt mutation refused", w)
+			} else {
+				deAdoptFailClient(report, clientName, "client config mutation failed", w)
+			}
+			continue
+		}
+		report.Restored = append(report.Restored, clientName)
+		resolvedClients++
+		fmt.Fprintf(w, "De-adopt restored client %q.\n", clientName)
+	}
+
+	// CLOSE-READY is the one terminal-state predicate shared by E4, E5, and E6.
+	// Returning here is the only unresolved-client branch; the complete topology,
+	// routed-secret set, provenance row, and every snapshot remain intact.
+	closeReady := resolvedClients == len(rec.AdoptClients)
+	if !closeReady {
+		pendingEvents = append(pendingEvents, func() {
+			emitDeAdoptCloseReadyBlocked(plan.ManifestName, rec.ExpectedManifestHash, report)
+		})
+		fmt.Fprintf(w, "De-adopt for manifest %q is not close-ready: %d client(s) failed; topology and recovery state were preserved.\n", plan.ManifestName, len(report.Failed))
+		return report, nil
+	}
+
+	// E4 — CLOSE-READY only. Build the exact adopt-created one-daemon ownership
+	// scope before deleting the manifest. captureLivePIDs=false keeps the existing
+	// cleanup core free of IPC, process probes, kills, and waits under the lease.
+	expectedManifest := &config.ServerManifest{
+		Name:    rec.ManifestName,
+		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
+	}
+	intentScope := supervisorIntentOwnershipScopeForManifest(expectedManifest, nil, "")
+	if deAdoptBeforeManifestDeleteHook != nil {
+		deAdoptBeforeManifestDeleteHook()
+	}
+	if err := a.ManifestDeleteInWithHash(adoptCommittedManifestDir(), rec.ManifestName, rec.ExpectedManifestHash); err != nil {
+		pendingEvents = append(pendingEvents, func() {
+			emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "manifest-delete", report)
+		})
+		switch {
+		case errors.Is(err, ErrManifestHashRequired):
+			return report, fmt.Errorf("de-adopt: manifest %q delete refused because its expected hash is missing", plan.ManifestName)
+		case errors.Is(err, ErrManifestHashMismatch):
+			return report, fmt.Errorf("de-adopt: manifest %q delete refused because its content hash changed", plan.ManifestName)
+		default:
+			return report, fmt.Errorf("de-adopt: hash-gated manifest delete for %q failed", plan.ManifestName)
+		}
+	}
+	if _, _, _, err := a.removeServerFromSupervisorIntentCore(context.Background(), rec.ManifestName, intentScope, false); err != nil {
+		pendingEvents = append(pendingEvents, func() {
+			emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "supervisor-intent", report)
+		})
+		return report, fmt.Errorf("de-adopt: supervisor-intent cleanup for manifest %q failed", plan.ManifestName)
+	}
+
+	// E5 — CLOSE-READY only. The prefilter and delete each take the vault lock
+	// through their existing owner and release it before the next inner operation.
+	toDelete, sharedSkipped, unreadableManifests, prefilterErr := a.prepareDeAdoptRoutedSecretCleanup(rec.ManifestName, rec.RoutedSecretKeys)
+	if prefilterErr != nil {
+		pendingEvents = append(pendingEvents, func() {
+			emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "routed-secret-prefilter", report)
+		})
+		return report, fmt.Errorf("de-adopt: routed-secret prefilter for manifest %q failed", plan.ManifestName)
+	}
+	if err := deleteAdoptRoutedSecrets(toDelete); err != nil {
+		pendingEvents = append(pendingEvents, func() {
+			emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "routed-secret-delete", report)
+		})
+		return report, fmt.Errorf("de-adopt: routed-secret cleanup for manifest %q failed for %d key(s)", plan.ManifestName, len(toDelete))
+	}
+	if len(unreadableManifests) != 0 {
+		for _, unreadableManifest := range unreadableManifests {
+			fmt.Fprintf(w, "WARNING: routed secret cleanup preserved %d key(s): manifest %q could not be read to check references.\n", len(sharedSkipped), unreadableManifest)
+		}
+	} else {
+		for _, key := range sharedSkipped {
+			fmt.Fprintf(w, "WARNING: routed secret key %q is referenced by another live manifest and was preserved.\n", key)
+		}
+	}
+
+	// E6 — CLOSE-READY and every routed key deleted, already absent, or
+	// deliberately skipped-as-shared. Close deletes snapshots first, then the row.
+	if err := CloseAdoptProvenance(rec.ManifestName); err != nil {
+		pendingEvents = append(pendingEvents, func() {
+			emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "provenance-close", report)
+		})
+		return report, fmt.Errorf("de-adopt: provenance close for manifest %q failed", plan.ManifestName)
+	}
+
+	// E7 — best-effort redaction-safe audit plus the G4 report.
+	pendingEvents = append(pendingEvents, func() {
+		emitDeAdoptExecuted(plan.ManifestName, rec.ExpectedManifestHash, report, sharedSkipped)
+	})
+	fmt.Fprintf(w, "De-adopted manifest %q: restored=%d accepted=%d failed=%d.\n", plan.ManifestName, len(report.Restored), len(report.Accepted), len(report.Failed))
+	return report, nil
+}
+
+func deAdoptAcceptConflictSet(requested, targets []string) (map[string]bool, error) {
+	targetSet := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		targetSet[target] = true
+	}
+	accepted := make(map[string]bool, len(requested))
+	for _, raw := range requested {
+		clientName := strings.TrimSpace(raw)
+		if clientName == "" {
+			return nil, fmt.Errorf("de-adopt: --accept-conflict requires a client name")
+		}
+		if !targetSet[clientName] {
+			return nil, fmt.Errorf("de-adopt: --accept-conflict client %q is not an adopt target", clientName)
+		}
+		accepted[clientName] = true
+	}
+	return accepted, nil
+}
+
+func deAdoptProvenanceIdentityMatches(planned, fresh *AdoptProvenanceRecord) bool {
+	if planned == nil || fresh == nil ||
+		!deAdoptOperationStateMatches(planned.OperationState, fresh.OperationState) ||
+		!planned.CreatedAt.Equal(fresh.CreatedAt) ||
+		planned.ExpectedManifestHash != fresh.ExpectedManifestHash ||
+		planned.SourceEntryName != fresh.SourceEntryName ||
+		planned.Port != fresh.Port {
+		return false
+	}
+	plannedClients := make(map[string]struct{}, len(planned.AdoptClients))
+	for _, clientName := range planned.AdoptClients {
+		plannedClients[clientName] = struct{}{}
+	}
+	freshClients := make(map[string]struct{}, len(fresh.AdoptClients))
+	for _, clientName := range fresh.AdoptClients {
+		freshClients[clientName] = struct{}{}
+	}
+	if len(plannedClients) != len(freshClients) {
+		return false
+	}
+	for clientName := range plannedClients {
+		if _, found := freshClients[clientName]; !found {
+			return false
+		}
+	}
+	return true
+}
+
+func deAdoptHubGateRefusalReason(probe HubGateProbe) string {
+	if len(probe.GatedOn) == 0 && len(probe.Unreadable) == 0 {
+		return ""
+	}
+	var blockers []string
+	if len(probe.GatedOn) != 0 {
+		blockers = append(blockers, fmt.Sprintf("gate is ON for %d client(s) (%s); gate OFF first, then de-adopt", len(probe.GatedOn), strings.Join(probe.GatedOn, ", ")))
+	}
+	if len(probe.Unreadable) != 0 {
+		blockers = append(blockers, fmt.Sprintf("cannot prove gate-OFF: %d client config(s) unreadable (%s); de-adopt refuses until every client's hub-gate state is readable", len(probe.Unreadable), strings.Join(probe.Unreadable, ", ")))
+	}
+	return strings.Join(blockers, "; ")
+}
+
+func deAdoptOperationStateMatches(planned, fresh AdoptOperationState) bool {
+	if planned == fresh {
+		return fresh == AdoptOperationStateAdopted ||
+			fresh == AdoptOperationStateAdopting ||
+			fresh == AdoptOperationStateDeAdopting
+	}
+	return fresh == AdoptOperationStateDeAdopting &&
+		(planned == AdoptOperationStateAdopted || planned == AdoptOperationStateAdopting)
+}
+
+func deAdoptFailClient(report *DeAdoptReport, clientName, reason string, w io.Writer) {
+	report.Failed = append(report.Failed, DeAdoptClientFailure{Client: clientName, Reason: reason})
+	fmt.Fprintf(w, "De-adopt client %q failed: %s.\n", clientName, reason)
+}
+
+// prepareDeAdoptRoutedSecretCleanup returns only still-present, non-shared keys
+// for deleteAdoptRoutedSecrets. A missing vault means every routed key is
+// already absent and cleanup is complete. For a readable vault, a key already
+// absent is complete; a present key referenced by another live on-disk manifest
+// is deliberately skipped and also complete for E6. An unreadable manifest
+// conservatively makes every present candidate possibly shared.
+func (a *API) prepareDeAdoptRoutedSecretCleanup(manifestName string, routedKeys []string) (toDelete, sharedSkipped, unreadableManifests []string, err error) {
+	keys := dedupeSortedDeAdoptStrings(routedKeys)
+	if len(keys) == 0 {
+		return nil, nil, nil, nil
+	}
+
+	present := make(map[string]bool)
+	vaultAbsent := false
+	vaultMutex.Lock()
+	err = secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
+		vault, openErr := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+		if openErr != nil {
+			if adoptRoutedSecretVaultAbsent() {
+				vaultAbsent = true
+				return nil
+			}
+			return fmt.Errorf("routed-secret vault is unavailable")
+		}
+		for _, key := range vault.List() {
+			present[key] = true
+		}
+		return nil
+	})
+	vaultMutex.Unlock()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if vaultAbsent {
+		return nil, nil, nil, nil
+	}
+
+	shared, unreadableManifests, err := a.deAdoptSharedRoutedSecretKeys(manifestName, keys)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for _, key := range keys {
+		if !present[key] {
+			continue
+		}
+		if shared[key] {
+			sharedSkipped = append(sharedSkipped, key)
+			continue
+		}
+		toDelete = append(toDelete, key)
+	}
+	return toDelete, sharedSkipped, unreadableManifests, nil
+}
+
+// deAdoptBeforeManifestDeleteHook makes the readiness-to-E4 recreate window
+// deterministic in package tests. Production leaves it nil.
+var deAdoptBeforeManifestDeleteHook func()
+
+func (a *API) deAdoptSharedRoutedSecretKeys(manifestName string, routedKeys []string) (map[string]bool, []string, error) {
+	candidates := make(map[string]bool, len(routedKeys))
+	for _, key := range routedKeys {
+		candidates[key] = true
+	}
+	shared := make(map[string]bool)
+	names, err := listManifestNamesEmbedFirstStrict()
+	if err != nil {
+		return nil, nil, fmt.Errorf("list live manifests for routed-secret scan failed")
+	}
+	var unreadableManifests []string
+	for _, name := range names {
+		if name == manifestName {
+			continue
+		}
+		raw, readErr := loadManifestYAMLEmbedFirst(name)
+		if readErr != nil {
+			unreadableManifests = append(unreadableManifests, name)
+			continue
+		}
+		live, parseErr := config.ParseManifest(bytes.NewReader(raw))
+		if parseErr != nil {
+			unreadableManifests = append(unreadableManifests, name)
+			continue
+		}
+		for key := range deAdoptManifestVaultReferenceKeys(live) {
+			if candidates[key] {
+				shared[key] = true
+			}
+		}
+	}
+	if len(unreadableManifests) != 0 {
+		for key := range candidates {
+			shared[key] = true
+		}
+	}
+	return shared, unreadableManifests, nil
+}
+
+// deAdoptManifestVaultReferenceKeys returns every vault key a live manifest can
+// resolve: exact secret: references in Env plus canonical ${secret:KEY}
+// placeholders in the remote-http URL and every header value.
+func deAdoptManifestVaultReferenceKeys(live *config.ServerManifest) map[string]bool {
+	references := make(map[string]bool)
+	for _, value := range live.Env {
+		value = strings.TrimSpace(value)
+		if strings.HasPrefix(value, "secret:") {
+			if key := strings.TrimPrefix(value, "secret:"); key != "" {
+				references[key] = true
+			}
+		}
+	}
+	addPlaceholders := func(value string) {
+		for _, match := range secrets.SecretPlaceholderRE.FindAllStringSubmatch(value, -1) {
+			if len(match) > 1 {
+				references[match[1]] = true
+			}
+		}
+	}
+	addPlaceholders(live.URL)
+	for _, value := range live.Headers {
+		addPlaceholders(value)
+	}
+	return references
+}
+
+func dedupeSortedDeAdoptStrings(values []string) []string {
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (a *API) buildDeAdoptManifestReadiness(rec *AdoptProvenanceRecord, routing DeAdoptRoutingVerdict) DeAdoptManifestReadiness {

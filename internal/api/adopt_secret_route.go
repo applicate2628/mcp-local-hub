@@ -1,7 +1,10 @@
 package api
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -158,6 +161,9 @@ func deleteAdoptRoutedSecretsLocked(keys []string) error {
 	}
 	vault, err := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 	if err != nil {
+		if adoptRoutedSecretVaultAbsent() {
+			return nil
+		}
 		return fmt.Errorf("adopt secret routing cleanup: open vault: %w", err)
 	}
 	for _, key := range keys {
@@ -166,4 +172,13 @@ func deleteAdoptRoutedSecretsLocked(keys []string) error {
 		}
 	}
 	return nil
+}
+
+// adoptRoutedSecretVaultAbsent distinguishes a missing vault blob from other
+// OpenVault failures. OpenVault can also report fs.ErrNotExist for a missing
+// identity, so callers must verify the vault path itself before treating routed
+// secret cleanup as complete.
+func adoptRoutedSecretVaultAbsent() bool {
+	_, err := os.Stat(secrets.DefaultVaultPath())
+	return errors.Is(err, fs.ErrNotExist)
 }
