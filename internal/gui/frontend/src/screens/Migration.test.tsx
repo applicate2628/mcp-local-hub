@@ -8,6 +8,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, cleanup, fireEvent, screen, act, within } from "@testing-library/preact";
 import { DiscoveryScreen } from "./Migration";
+import { ToastContainer } from "../components/Toast";
+import { clearAllToasts } from "../lib/toast-store";
 import type { DeAdoptPlan, DeAdoptRouting, ScanResult } from "../types";
 
 // happy-dom doesn't ship EventSource. DiscoveryScreen subscribes to
@@ -215,6 +217,7 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     cleanup();
     vi.restoreAllMocks();
     vi.useFakeTimers();
+    clearAllToasts();
     HTMLDialogElement.prototype.showModal = function () {
       this.open = true;
       this.setAttribute("open", "");
@@ -227,6 +230,7 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     window.location.hash = "#/migration";
   });
   afterEach(() => {
+    clearAllToasts();
     vi.useRealTimers();
     cleanup();
   });
@@ -497,7 +501,8 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock as unknown as typeof fetch);
 
     render(<DiscoveryScreen />);
-    const row = (await screen.findByText("resume-server")).closest("li");
+    await screen.findByText("De-adopt recovery");
+    const row = screen.getByText("resume-server").closest("li");
     expect(row).not.toBeNull();
     expect(
       await within(row as HTMLElement).findByRole("button", { name: "De-adopt to native" }),
@@ -510,14 +515,119 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     ).toBe(true);
   });
 
+  it("surfaces a manifest-only adopt-owned row in de-adopt recovery", async () => {
+    const manifestOnlyScan: ScanResult = {
+      at: "2026-07-15T00:00:00Z",
+      entries: [
+        {
+          name: "manifest-only",
+          status: "not-installed",
+          managed: false,
+          manifest_exists: true,
+          can_migrate: false,
+          client_presence: {},
+        },
+      ],
+      client_config_presence: {},
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, manifestOnlyScan),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+        "/api/deadopt/eligible": () =>
+          jsonResponse(200, {
+            eligible: true,
+            adopt_owned: true,
+            gate_on: false,
+            gate_on_clients: [],
+            blocked_reason: "",
+          }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    expect(await screen.findByText("De-adopt recovery")).toBeTruthy();
+    const row = screen.getByText("manifest-only").closest("li");
+    expect(row).not.toBeNull();
+    expect(
+      within(row as HTMLElement).getByRole("button", { name: "De-adopt to native" }),
+    ).toBeTruthy();
+  });
+
+  it("excludes adopt-owned can-migrate rows from selection and the migrate request", async () => {
+    const migrateRequests: unknown[] = [];
+    const mixedScan: ScanResult = {
+      at: "2026-07-15T00:00:00Z",
+      entries: [
+        {
+          name: "resume-server",
+          status: "can-migrate",
+          manifest_exists: true,
+          can_migrate: true,
+          client_presence: {},
+        },
+        {
+          name: "normal-server",
+          status: "can-migrate",
+          manifest_exists: true,
+          can_migrate: true,
+          client_presence: {},
+        },
+      ],
+      client_config_presence: {},
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/scan") return jsonResponse(200, mixedScan);
+        if (url === "/api/dismissed") return jsonResponse(200, { unknown: [] });
+        if (url.startsWith("/api/deadopt/eligible")) {
+          const adoptOwned = url.includes("server=resume-server");
+          return jsonResponse(200, {
+            eligible: adoptOwned,
+            adopt_owned: adoptOwned,
+            gate_on: false,
+            gate_on_clients: [],
+            blocked_reason: "",
+          });
+        }
+        if (url === "/api/migrate") {
+          migrateRequests.push(JSON.parse(String(init?.body ?? "{}")));
+          return new Response(null, { status: 204 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }) as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    expect(await screen.findByText("De-adopt recovery")).toBeTruthy();
+    const recoveryRow = screen.getByText("resume-server").closest("li");
+    expect(recoveryRow).not.toBeNull();
+    expect(within(recoveryRow as HTMLElement).queryByRole("checkbox")).toBeNull();
+
+    const migrate = screen.getByRole("button", { name: "Migrate selected (1)" });
+    fireEvent.click(migrate);
+    await vi.waitFor(() => expect(migrateRequests).toHaveLength(1));
+    expect(migrateRequests).toEqual([{ servers: ["normal-server"] }]);
+  });
+
   it("renders scan rows without waiting for a hanging eligibility read", async () => {
-    const eligibility = deferred<Response>();
+    let eligibilitySignal: AbortSignal | undefined;
+    let eligibilityAborted = false;
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
         "/api/scan": () => jsonResponse(200, scan("slow-eligibility")),
         "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
-        "/api/deadopt/eligible": () => eligibility.promise,
+        "/api/deadopt/eligible": (init) => {
+          eligibilitySignal = init?.signal ?? undefined;
+          return new Promise<Response>((_resolve, reject) => {
+            eligibilitySignal?.addEventListener("abort", () => {
+              eligibilityAborted = true;
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          });
+        },
       }) as unknown as typeof fetch,
     );
 
@@ -534,6 +644,31 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     expect(
       within(row as HTMLElement).getByText("Couldn't check de-adopt eligibility."),
     ).toBeTruthy();
+    expect(eligibilitySignal).toBeDefined();
+    expect(eligibilitySignal?.aborted).toBe(true);
+    expect(eligibilityAborted).toBe(true);
+  });
+
+  it("does not probe invalid manifest names or show an eligibility warning", async () => {
+    let eligibilityCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan("Invalid Name")),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+        "/api/deadopt/eligible": () => {
+          eligibilityCalls += 1;
+          return jsonResponse(400, { error: "invalid manifest name" });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    const row = (await screen.findByText("Invalid Name")).closest("li");
+    expect(row).not.toBeNull();
+    expect(eligibilityCalls).toBe(0);
+    expect(
+      within(row as HTMLElement).queryByText("Couldn't check de-adopt eligibility."),
+    ).toBeNull();
   });
 
   it("shows a disabled de-adopt affordance and backend gate-OFF reason while gate is ON", async () => {
@@ -711,7 +846,12 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
       }) as unknown as typeof fetch,
     );
 
-    render(<DiscoveryScreen />);
+    render(
+      <>
+        <DiscoveryScreen />
+        <ToastContainer />
+      </>,
+    );
     const button = await screen.findByRole("button", { name: "De-adopt to native" });
     expect((button as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(button);
@@ -738,6 +878,12 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     expect(within(modal).getByText("Failed")).toBeTruthy();
     expect(within(modal).getByText("cursor — write failed")).toBeTruthy();
     expect(within(modal).getByText("vscode — permission denied")).toBeTruthy();
+    const toast = await screen.findByTestId("toast");
+    expect(toast.getAttribute("data-toast-variant")).toBe("danger");
+    expect(within(toast).getByTestId("toast-message").textContent).toBe(
+      "De-adopt incomplete: adopted-server — 2 client(s) failed.",
+    );
+    expect(within(toast).getByTestId("toast-message").textContent).not.toContain("De-adopted");
   });
 
   it("surfaces a failed de-adopt execute and refreshes Discovery", async () => {

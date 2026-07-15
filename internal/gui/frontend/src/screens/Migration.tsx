@@ -31,14 +31,19 @@ interface DismissedResponse {
 }
 
 const DE_ADOPT_ELIGIBILITY_TIMEOUT_MS = 5_000;
+const MANIFEST_NAME_REGEX = /^[a-z0-9][a-z0-9._-]*$/;
 
 function getDeAdoptEligibleWithTimeout(server: string): Promise<DeAdoptEligible> {
   return new Promise((resolve, reject) => {
+    const controller = new AbortController();
     const timeout = window.setTimeout(
-      () => reject(new Error("de-adopt eligibility check timed out")),
+      () => {
+        controller.abort();
+        reject(new Error("de-adopt eligibility check timed out"));
+      },
       DE_ADOPT_ELIGIBILITY_TIMEOUT_MS,
     );
-    void getDeAdoptEligible(server).then(
+    void getDeAdoptEligible(server, controller.signal).then(
       (eligibility) => {
         window.clearTimeout(timeout);
         resolve(eligibility);
@@ -163,12 +168,21 @@ export function DiscoveryScreen() {
       // bindings are already gone and therefore no longer scan as via-hub.
       // Each request publishes independently; a slow or failed row remains
       // fail-closed and cannot delay the scan or any sibling row.
-      const scannedNames = [...new Set((s.entries ?? []).map((entry) => entry.name))];
+      const scannedNames = [...new Set((s.entries ?? []).map((entry) => entry.name))]
+        .filter((name) => MANIFEST_NAME_REGEX.test(name));
       for (const name of scannedNames) {
         void getDeAdoptEligibleWithTimeout(name).then(
           (eligibility) => {
             if (!isLatest()) return;
             setDeAdoptEligibility((current) => ({ ...current, [name]: eligibility }));
+            if (eligibility.adopt_owned) {
+              setSelected((current) => {
+                if (!current.has(name)) return current;
+                const next = new Set(current);
+                next.delete(name);
+                return next;
+              });
+            }
           },
           (err: unknown) => {
             if (!isLatest()) return;
@@ -263,14 +277,17 @@ export function DiscoveryScreen() {
   }
 
   async function runMigrateSelected() {
-    if (selected.size === 0) return;
+    const migrationSelection = [...selected].filter(
+      (name) => deAdoptEligibility[name]?.adopt_owned !== true,
+    );
+    if (migrationSelection.length === 0) return;
     setMigrateBusy(true);
     setActionError(null);
     try {
       const resp = await fetch("/api/migrate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ servers: [...selected] }),
+        body: JSON.stringify({ servers: migrationSelection }),
       });
       // B1 #7 symmetry: same 200/207/4xx-5xx triad as /api/demigrate.
       if (resp.status === 200 || resp.status === 204) {
@@ -413,10 +430,17 @@ export function DiscoveryScreen() {
       setDeAdoptReport({ server: deAdoptPlan.ManifestName, report });
       setDeAdoptPlan(null);
       setDeAdoptAcceptedConflicts(new Set());
-      pushToast(
-        report.failed.length === 0 ? "success" : "danger",
-        `De-adopted ${deAdoptPlan.ManifestName}: ${report.restored.length} restored, ${report.accepted.length} accepted, ${report.failed.length} failed.`,
-      );
+      if (report.failed.length > 0) {
+        pushToast(
+          "danger",
+          `De-adopt incomplete: ${deAdoptPlan.ManifestName} — ${report.failed.length} client(s) failed.`,
+        );
+      } else {
+        pushToast(
+          "success",
+          `De-adopted ${deAdoptPlan.ManifestName}: ${report.restored.length} restored, ${report.accepted.length} accepted.`,
+        );
+      }
     } catch (err) {
       setDeAdoptModalError((err as Error).message);
     } finally {
@@ -437,6 +461,32 @@ export function DiscoveryScreen() {
   const groups: MigrationGroups = scan
     ? groupMigrationEntries(scan, dismissedUnknown)
     : { viaHub: [], viaHubInherited: [], canMigrate: [], unknown: [], external: [], perSession: [], dismissed: [] };
+  const migrationEntries = groups.canMigrate.filter(
+    (entry) => deAdoptEligibility[entry.name]?.adopt_owned !== true,
+  );
+  const displayedNames = new Set(
+    [
+      ...groups.viaHub,
+      ...groups.viaHubInherited,
+      ...migrationEntries,
+      ...groups.unknown,
+      ...groups.external,
+      ...groups.perSession,
+      ...groups.dismissed,
+    ].map((entry) => entry.name),
+  );
+  const recoveryNames = new Set<string>();
+  const recoveryEntries = (scan?.entries ?? []).filter((entry) => {
+    if (
+      deAdoptEligibility[entry.name]?.adopt_owned !== true ||
+      displayedNames.has(entry.name) ||
+      recoveryNames.has(entry.name)
+    ) {
+      return false;
+    }
+    recoveryNames.add(entry.name);
+    return true;
+  });
 
   if (error) {
     return (
@@ -458,11 +508,12 @@ export function DiscoveryScreen() {
   const totalRows =
     groups.viaHub.length +
     groups.viaHubInherited.length +
-    groups.canMigrate.length +
+    migrationEntries.length +
     groups.unknown.length +
     groups.external.length +
     groups.perSession.length +
-    groups.dismissed.length;
+    groups.dismissed.length +
+    recoveryEntries.length;
   const deAdoptRowProps: DeAdoptRowProps = {
     deAdoptEligibility,
     deAdoptEligibilityErrors,
@@ -496,8 +547,9 @@ export function DiscoveryScreen() {
             onDemigrate={runDemigrate}
           />
           <ManagedInheritedGroup entries={groups.viaHubInherited} {...deAdoptRowProps} />
+          <DeAdoptRecoveryGroup entries={recoveryEntries} {...deAdoptRowProps} />
           <ReadyToMigrateGroup
-            entries={groups.canMigrate}
+            entries={migrationEntries}
             {...deAdoptRowProps}
             selected={selected}
             onToggle={toggleSelected}
@@ -601,6 +653,25 @@ function DeAdoptAffordance(props: DeAdoptRowProps & { serverName: string }) {
         </span>
       )}
     </>
+  );
+}
+
+function DeAdoptRecoveryGroup(props: DeAdoptRowProps & { entries: ScanEntry[] }) {
+  if (props.entries.length === 0) return null;
+  return (
+    <section class="group group-de-adopt-recovery" data-group="de-adopt-recovery">
+      <h2>De-adopt recovery</h2>
+      <p>Resume an incomplete de-adopt operation.</p>
+      <ul class="group-rows">
+        {props.entries.map((entry) => (
+          <li key={entry.name} data-server={entry.name}>
+            <span class="server-name">{entry.name}</span>
+            <span class="badge">Recovery</span>
+            <DeAdoptAffordance {...props} serverName={entry.name} />
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

@@ -133,10 +133,14 @@ export async function postAdopt(req: AdoptRequest): Promise<AdoptResult> {
   return postJSONObject<AdoptResult>("/api/adopt", req);
 }
 
-export async function getDeAdoptEligible(server: string): Promise<DeAdoptEligible> {
+export async function getDeAdoptEligible(
+  server: string,
+  signal?: AbortSignal,
+): Promise<DeAdoptEligible> {
   const eligibility = await fetchOrThrow<DeAdoptEligible>(
     `/api/deadopt/eligible?server=${encodeURIComponent(server)}`,
     "object",
+    { signal },
   );
   return {
     ...eligibility,
