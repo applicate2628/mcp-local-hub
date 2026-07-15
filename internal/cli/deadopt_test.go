@@ -195,6 +195,7 @@ func TestDeAdoptCmdDryRunFailedClientReturnsError(t *testing.T) {
 	failed := &fakeDeAdoptCLIAPI{plan: &api.DeAdoptPlan{
 		ManifestName: "blocked-client",
 		Routing:      api.DeAdoptRoutingFresh,
+		Manifest:     api.DeAdoptManifestReadiness{HashReady: true},
 		Clients: []api.DeAdoptClientPlan{{
 			Client:      "codex-cli",
 			Disposition: api.DeAdoptClientFailed,
@@ -215,6 +216,7 @@ func TestDeAdoptCmdDryRunFailedClientReturnsError(t *testing.T) {
 	restorable := &fakeDeAdoptCLIAPI{plan: &api.DeAdoptPlan{
 		ManifestName: "restorable-client",
 		Routing:      api.DeAdoptRoutingFresh,
+		Manifest:     api.DeAdoptManifestReadiness{HashReady: true},
 		Clients: []api.DeAdoptClientPlan{{
 			Client:      "codex-cli",
 			Disposition: api.DeAdoptClientRestorePending,
@@ -230,18 +232,43 @@ func TestDeAdoptCmdDryRunFailedClientReturnsError(t *testing.T) {
 	}
 }
 
+func TestDeAdoptCmdDryRunManifestNotReadyReturnsErrorAndOmitsYesHint(t *testing.T) {
+	notReady := &fakeDeAdoptCLIAPI{plan: &api.DeAdoptPlan{
+		ManifestName: "edited-manifest",
+		Routing:      api.DeAdoptRoutingFresh,
+		Manifest: api.DeAdoptManifestReadiness{
+			Reason: "manifest hash does not match adopt provenance",
+		},
+	}}
+	out, err := runDeAdoptCommandWithFake(t, notReady, "de-adopt", "edited-manifest")
+	if err == nil {
+		t.Fatalf("dry-run with manifest not ready succeeded:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "manifest is not delete-ready (manifest hash does not match adopt provenance)") {
+		t.Fatalf("dry-run error = %v", err)
+	}
+	if strings.Contains(out, "--yes") {
+		t.Fatalf("manifest-not-ready output suggested --yes:\n%s", out)
+	}
+	if notReady.executeServer != "" {
+		t.Fatalf("dry-run executed de-adopt for %q", notReady.executeServer)
+	}
+}
+
 func TestPrintDeAdoptPlanYesFooterDependsOnRouting(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
-		routing     api.DeAdoptRoutingVerdict
+		plan        *api.DeAdoptPlan
 		wantYesHint bool
 	}{
-		{name: "refuse", routing: api.DeAdoptRoutingRefuse, wantYesHint: false},
-		{name: "fresh", routing: api.DeAdoptRoutingFresh, wantYesHint: true},
+		{name: "refuse", plan: &api.DeAdoptPlan{ManifestName: "server", Routing: api.DeAdoptRoutingRefuse, Manifest: api.DeAdoptManifestReadiness{HashReady: true}}, wantYesHint: false},
+		{name: "manifest-not-ready", plan: &api.DeAdoptPlan{ManifestName: "server", Routing: api.DeAdoptRoutingFresh}, wantYesHint: false},
+		{name: "failed-client", plan: &api.DeAdoptPlan{ManifestName: "server", Routing: api.DeAdoptRoutingFresh, Manifest: api.DeAdoptManifestReadiness{HashReady: true}, Clients: []api.DeAdoptClientPlan{{Disposition: api.DeAdoptClientFailed}}}, wantYesHint: false},
+		{name: "fresh", plan: &api.DeAdoptPlan{ManifestName: "server", Routing: api.DeAdoptRoutingFresh, Manifest: api.DeAdoptManifestReadiness{HashReady: true}}, wantYesHint: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
-			api.PrintDeAdoptPlan(&out, &api.DeAdoptPlan{ManifestName: "server", Routing: tc.routing})
+			api.PrintDeAdoptPlan(&out, tc.plan)
 			if got := strings.Contains(out.String(), "--yes"); got != tc.wantYesHint {
 				t.Fatalf("--yes hint present = %t, want %t:\n%s", got, tc.wantYesHint, out.String())
 			}

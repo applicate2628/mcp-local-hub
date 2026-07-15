@@ -40,6 +40,10 @@ func newDeAdoptCmdReal() *cobra.Command {
 			}
 			if !yes {
 				api.PrintDeAdoptPlan(cmd.OutOrStdout(), plan)
+				blockers := make([]string, 0)
+				if !plan.Manifest.HashReady {
+					blockers = append(blockers, fmt.Sprintf("manifest is not delete-ready (%s)", plan.Manifest.Reason))
+				}
 				failures := make([]string, 0)
 				for _, client := range plan.Clients {
 					if client.Disposition == api.DeAdoptClientFailed {
@@ -47,7 +51,10 @@ func newDeAdoptCmdReal() *cobra.Command {
 					}
 				}
 				if len(failures) != 0 {
-					return fmt.Errorf("de-adopt plan is not executable: %d client(s) would fail; %s", len(failures), strings.Join(failures, "; "))
+					blockers = append(blockers, fmt.Sprintf("%d client(s) would fail; %s", len(failures), strings.Join(failures, "; ")))
+				}
+				if len(blockers) != 0 {
+					return fmt.Errorf("de-adopt plan is not executable: %s", strings.Join(blockers, "; "))
 				}
 				return nil
 			}

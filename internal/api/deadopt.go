@@ -295,9 +295,21 @@ func PrintDeAdoptPlan(w io.Writer, plan *DeAdoptPlan) {
 	if plan.RefusalReason != "" {
 		fmt.Fprintf(w, "  refusal: %s\n", plan.RefusalReason)
 	}
-	if plan.Routing != DeAdoptRoutingRefuse {
+	if deAdoptPlanCleanlyExecutable(plan) {
 		fmt.Fprintln(w, "No changes made. Re-run with --yes to apply.")
 	}
+}
+
+func deAdoptPlanCleanlyExecutable(plan *DeAdoptPlan) bool {
+	if plan == nil || plan.Routing == DeAdoptRoutingRefuse || !plan.Manifest.HashReady {
+		return false
+	}
+	for _, client := range plan.Clients {
+		if client.Disposition == DeAdoptClientFailed {
+			return false
+		}
+	}
+	return true
 }
 
 // ExecuteDeAdopt applies the atomic all-clients de-adopt operation using no
