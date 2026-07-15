@@ -232,6 +232,14 @@ func TestDaemonRespawnNoSupervisorReturns503(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "SUPERVISOR_UNAVAILABLE") {
 		t.Fatalf("body = %s, want SUPERVISOR_UNAVAILABLE error code", rec.Body.String())
 	}
+	// phase-1 finding 4: the SUPERVISOR_UNAVAILABLE Message is built from the absolute
+	// supervisor.lock.owner.json path; the response must be redacted, never leak it.
+	if strings.Contains(rec.Body.String(), stateDir) {
+		t.Errorf("body leaks the absolute state-dir path %q: %s", stateDir, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "internal error") {
+		t.Errorf("body = %s, want redacted \"internal error\" message", rec.Body.String())
+	}
 }
 
 func TestDaemonEnvGETPrefersDescriptorIdentityOverTaskNameParsing(t *testing.T) {

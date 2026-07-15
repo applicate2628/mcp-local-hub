@@ -473,6 +473,17 @@ func (s *Server) daemonRespawnHandler(w http.ResponseWriter, r *http.Request) {
 	case "RESPAWN_FAILED":
 		status = http.StatusInternalServerError
 	}
+	// SUPERVISOR_UNAVAILABLE is the one supervisor-classified code whose Message is
+	// built locally from an absolute path — "supervisor.lock.owner.json not found at
+	// <lockPath>" or "dial <unix-socket address> failed" (supervisor_ipc_respawn_
+	// client.go:130-149) — so it leaks the state-dir/socket path on POSIX. Redact it
+	// (phase-1 finding 4); the frontend keys on the code, which the redacted body
+	// keeps. Every other code carries a curated, path-free operator message
+	// (UNKNOWN_TASK, QUARANTINED, RESPAWN_NOT_READY, ...) the GUI surfaces, so keep raw.
+	if result.Code == "SUPERVISOR_UNAVAILABLE" {
+		writeAPIErrorRedacted(w, fmt.Errorf("%s", result.Message), status, result.Code, "/api/daemon/respawn supervisor unavailable")
+		return
+	}
 	writeAPIError(w, fmt.Errorf("%s", result.Message), status, result.Code)
 }
 
