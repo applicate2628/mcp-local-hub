@@ -619,7 +619,7 @@ func TestExecuteDeAdoptT8RoutedSecretPrefilterSharedSkipAndClose(t *testing.T) {
 	if err := os.MkdirAll(sharedManifestDir, 0o700); err != nil {
 		t.Fatalf("mkdir shared manifest: %v", err)
 	}
-	sharedManifest := "name: shared-secret-owner\nenv:\n  TOKEN: secret:" + sharedKey + "\n"
+	sharedManifest := "name: shared-secret-owner\nkind: global\ntransport: stdio-bridge\ncommand: test-command\nenv:\n  TOKEN: secret:" + sharedKey + "\ndaemons:\n  - name: default\n    port: 31991\n"
 	if err := os.WriteFile(filepath.Join(sharedManifestDir, "manifest.yaml"), []byte(sharedManifest), 0o600); err != nil {
 		t.Fatalf("write shared manifest: %v", err)
 	}
@@ -642,6 +642,76 @@ func TestExecuteDeAdoptT8RoutedSecretPrefilterSharedSkipAndClose(t *testing.T) {
 	}
 }
 
+func TestExecuteDeAdoptPreservesRoutedSecretReferencedThroughExpandedEnv(t *testing.T) {
+	name := "deadopt-execute-expanded-env-secret"
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state:           AdoptOperationStateAdopted,
+		originalState:   AdoptOriginalStateAbsent,
+		liveConfig:      deAdoptHubConfig(name),
+		manifestPresent: true,
+	})
+	const sharedKey = "DEADOPT_EXPANDED_ENV_SHARED_KEY"
+	rec.RoutedSecretKeys = []string{sharedKey}
+	writeDeAdoptExecutorRecord(t, rec)
+	seedDeAdoptSupervisorIntent(t, stateRoot, rec)
+	seedDeAdoptVault(t, map[string]string{sharedKey: "expanded-env-secret-value"})
+	t.Setenv("DEADOPT_SHARED_SECRET_REF", "secret:"+sharedKey)
+
+	sharedManifestDir := filepath.Join(manifestRoot, "expanded-env-secret-owner")
+	t.Cleanup(func() { _ = os.RemoveAll(sharedManifestDir) })
+	if err := os.MkdirAll(sharedManifestDir, 0o700); err != nil {
+		t.Fatalf("mkdir shared manifest: %v", err)
+	}
+	sharedManifest := "name: expanded-env-secret-owner\nkind: global\ntransport: stdio-bridge\ncommand: test-command\nenv:\n  TOKEN: \"${DEADOPT_SHARED_SECRET_REF}\"\ndaemons:\n  - name: default\n    port: 31992\n"
+	if err := os.WriteFile(filepath.Join(sharedManifestDir, "manifest.yaml"), []byte(sharedManifest), 0o600); err != nil {
+		t.Fatalf("write shared manifest: %v", err)
+	}
+
+	var out bytes.Buffer
+	report, err := NewAPI().ExecuteDeAdopt(name, &out)
+	if err != nil {
+		t.Fatalf("ExecuteDeAdopt expanded-env secret: %v\n%s", err, out.String())
+	}
+	if len(report.Failed) != 0 || !strings.Contains(out.String(), sharedKey) || strings.Contains(out.String(), "could not be read") {
+		t.Fatalf("expanded-env secret cleanup report/output = %+v / %s", report, out.String())
+	}
+	if got := deAdoptVaultKeys(t); !reflect.DeepEqual(got, []string{sharedKey}) {
+		t.Fatalf("vault keys = %#v, want expanded env shared key preserved", got)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptPreservesRoutedSecretReferencedByEmbeddedManifest(t *testing.T) {
+	name := "deadopt-execute-embedded-secret"
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state:           AdoptOperationStateAdopted,
+		originalState:   AdoptOriginalStateAbsent,
+		liveConfig:      deAdoptHubConfig(name),
+		manifestPresent: true,
+	})
+	const sharedKey = "wolfram_app_id"
+	rec.RoutedSecretKeys = []string{sharedKey}
+	writeDeAdoptExecutorRecord(t, rec)
+	seedDeAdoptSupervisorIntent(t, stateRoot, rec)
+	seedDeAdoptVault(t, map[string]string{sharedKey: "embedded-manifest-secret-value"})
+	// Exercise the production manifest source: the wolfram manifest exists only
+	// in the binary's embedded catalog for this test and references sharedKey.
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", "")
+
+	var out bytes.Buffer
+	report, err := NewAPI().ExecuteDeAdopt(name, &out)
+	if err != nil {
+		t.Fatalf("ExecuteDeAdopt embedded-manifest secret: %v\n%s", err, out.String())
+	}
+	if len(report.Failed) != 0 || !strings.Contains(out.String(), sharedKey) || strings.Contains(out.String(), "could not be read") {
+		t.Fatalf("embedded-manifest secret cleanup report/output = %+v / %s", report, out.String())
+	}
+	if got := deAdoptVaultKeys(t); !reflect.DeepEqual(got, []string{sharedKey}) {
+		t.Fatalf("vault keys = %#v, want embedded-manifest shared key preserved", got)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
 func TestExecuteDeAdoptPreservesRoutedSecretReferencedByRemoteHeader(t *testing.T) {
 	name := "deadopt-execute-header-secret"
 	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
@@ -660,7 +730,7 @@ func TestExecuteDeAdoptPreservesRoutedSecretReferencedByRemoteHeader(t *testing.
 	if err := os.MkdirAll(sharedManifestDir, 0o700); err != nil {
 		t.Fatalf("mkdir shared manifest: %v", err)
 	}
-	sharedManifest := "name: remote-header-secret-owner\ntransport: remote-http\nurl: https://example.com/mcp\nheaders:\n  Authorization: \"Bearer ${secret:" + sharedKey + "}\"\n"
+	sharedManifest := "name: remote-header-secret-owner\nkind: global\ntransport: remote-http\nurl: https://example.com/mcp\nheaders:\n  Authorization: \"Bearer ${secret:" + sharedKey + "}\"\n"
 	if err := os.WriteFile(filepath.Join(sharedManifestDir, "manifest.yaml"), []byte(sharedManifest), 0o600); err != nil {
 		t.Fatalf("write shared manifest: %v", err)
 	}

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,8 +14,6 @@ import (
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/secrets"
-
-	"gopkg.in/yaml.v3"
 )
 
 // DeAdoptRoutingVerdict selects the fresh or roll-forward-resume execution path.
@@ -700,34 +697,26 @@ func (a *API) deAdoptSharedRoutedSecretKeys(manifestName string, routedKeys []st
 		candidates[key] = true
 	}
 	shared := make(map[string]bool)
-	dir := adoptCommittedManifestDir()
-	entries, err := os.ReadDir(dir)
+	names, err := listManifestNamesEmbedFirst()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return shared, nil, nil
-		}
 		return nil, nil, fmt.Errorf("list live manifests for routed-secret scan failed")
 	}
 	var unreadableManifests []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
+	for _, name := range names {
 		if name == manifestName {
 			continue
 		}
-		raw, readErr := a.ManifestGetIn(dir, name)
+		raw, readErr := loadManifestYAMLEmbedFirst(name)
 		if readErr != nil {
 			unreadableManifests = append(unreadableManifests, name)
 			continue
 		}
-		var live config.ServerManifest
-		if parseErr := yaml.Unmarshal([]byte(raw), &live); parseErr != nil {
+		live, parseErr := config.ParseManifest(bytes.NewReader(raw))
+		if parseErr != nil {
 			unreadableManifests = append(unreadableManifests, name)
 			continue
 		}
-		for key := range deAdoptManifestVaultReferenceKeys(&live) {
+		for key := range deAdoptManifestVaultReferenceKeys(live) {
 			if candidates[key] {
 				shared[key] = true
 			}
