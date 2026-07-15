@@ -712,6 +712,47 @@ func TestExecuteDeAdoptPreservesRoutedSecretReferencedByEmbeddedManifest(t *test
 	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
 }
 
+func TestExecuteDeAdoptManifestDirReadFailurePreservesRoutedSecret(t *testing.T) {
+	name := "deadopt-execute-manifest-list-failure"
+	_, _, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state:           AdoptOperationStateAdopted,
+		originalState:   AdoptOriginalStateAbsent,
+		liveConfig:      deAdoptHubConfig(name),
+		manifestPresent: true,
+	})
+	const routedKey = "DEADOPT_MANIFEST_LIST_FAILURE_KEY"
+	rec.RoutedSecretKeys = []string{routedKey}
+	writeDeAdoptExecutorRecord(t, rec)
+	seedDeAdoptSupervisorIntent(t, stateRoot, rec)
+	seedDeAdoptVault(t, map[string]string{routedKey: "preserve-on-list-failure"})
+
+	// Exercise the production embed+disk branch, not the test-only manifest-dir
+	// override branch that already propagates non-ENOENT ReadDir failures.
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", "")
+	originalReadDir := deAdoptManifestReadDir
+	deAdoptManifestReadDir = func(path string) ([]os.DirEntry, error) {
+		return nil, &os.PathError{Op: "readdir", Path: path, Err: os.ErrPermission}
+	}
+	t.Cleanup(func() { deAdoptManifestReadDir = originalReadDir })
+
+	report, err := NewAPI().ExecuteDeAdopt(name, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "routed-secret prefilter") {
+		t.Fatalf("ExecuteDeAdopt manifest-list failure = report=%+v err=%v", report, err)
+	}
+	if got := deAdoptVaultKeys(t); !reflect.DeepEqual(got, []string{routedKey}) {
+		t.Fatalf("manifest-list failure deleted routed secret: %#v", got)
+	}
+	persisted, found, readErr := ReadAdoptProvenance(name)
+	if readErr != nil || !found || persisted.OperationState != AdoptOperationStateDeAdopting {
+		t.Fatalf("manifest-list failure lost recovery row: found=%v rec=%+v err=%v", found, persisted, readErr)
+	}
+	logBytes := mustReadFileForAdoptTest(t, filepath.Join(stateRoot, SupervisorEventLogFileLeaf))
+	if !bytes.Contains(logBytes, []byte(`"event":"deadopt-close-failed"`)) ||
+		!bytes.Contains(logBytes, []byte(`"phase":"routed-secret-prefilter"`)) {
+		t.Fatalf("routed-secret-prefilter close-failed event missing:\n%s", logBytes)
+	}
+}
+
 func TestExecuteDeAdoptPreservesRoutedSecretReferencedByRemoteHeader(t *testing.T) {
 	name := "deadopt-execute-header-secret"
 	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{

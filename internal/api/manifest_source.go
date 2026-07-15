@@ -11,6 +11,11 @@ import (
 	"mcp-local-hub/servers"
 )
 
+// deAdoptManifestReadDir is the filesystem seam for the de-adopt-only strict
+// manifest enumeration. Production uses os.ReadDir; executor tests replace it
+// to reproduce a non-ENOENT directory-listing failure deterministically.
+var deAdoptManifestReadDir = os.ReadDir
+
 // manifestDirForTests is a test-only override consulted by
 // ScanManifestEnv and the embed-aware helpers when set via
 // MCPHUB_MANIFEST_DIR_OVERRIDE. When the override is non-empty the
@@ -235,6 +240,40 @@ func listManifestNamesEmbedFirst() ([]string, error) {
 			seen[e.Name()] = true
 		}
 	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// listManifestNamesEmbedFirstStrict is the fail-closed manifest enumerator for
+// de-adopt's routed-secret scan. Unlike the install-facing forgiving lister, a
+// non-ENOENT disk listing failure is fatal because an incomplete manifest set
+// could make a shared routed secret appear unique. Every directory name is
+// included without a manifest.yaml stat gate so a later load failure reaches
+// de-adopt's existing conservative preserve-all-candidates branch.
+func listManifestNamesEmbedFirstStrict() ([]string, error) {
+	dir := manifestDirForTests()
+	seen := map[string]bool{}
+	if dir == "" {
+		for _, name := range embeddedManifestNames() {
+			seen[name] = true
+		}
+		dir = defaultManifestDir()
+	}
+
+	entries, err := deAdoptManifestReadDir(dir)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			seen[entry.Name()] = true
+		}
+	}
+
 	out := make([]string, 0, len(seen))
 	for name := range seen {
 		out = append(out, name)

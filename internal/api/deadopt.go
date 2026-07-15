@@ -697,7 +697,7 @@ func (a *API) deAdoptSharedRoutedSecretKeys(manifestName string, routedKeys []st
 		candidates[key] = true
 	}
 	shared := make(map[string]bool)
-	names, err := listManifestNamesEmbedFirst()
+	names, err := listManifestNamesEmbedFirstStrict()
 	if err != nil {
 		return nil, nil, fmt.Errorf("list live manifests for routed-secret scan failed")
 	}
