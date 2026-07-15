@@ -8,15 +8,24 @@ import (
 	"time"
 )
 
-func seedForgetRow(t *testing.T, manifest string, state AdoptOperationState, withSnapshot bool) {
+// forceAdoptManifestAbsent makes adoptRowProvablyUnmutated's manifest signal deterministic
+// (no manifest on disk) so the warning logic depends only on the row shape, and restores it.
+func forceAdoptManifestExists(t *testing.T, exists bool) {
+	t.Helper()
+	prior := adoptManifestExistsFn
+	adoptManifestExistsFn = func(string) (bool, error) { return exists, nil }
+	t.Cleanup(func() { adoptManifestExistsFn = prior })
+}
+
+// seedForgetRow seeds a BARE provenance row (no clients) — a clients-less `adopting` row is
+// vacuously provably-unmutated, so with no manifest present it is the safe crash orphan that
+// forget must NOT warn about.
+func seedForgetRow(t *testing.T, manifest string, state AdoptOperationState, at time.Time, withSnapshot bool) {
 	t.Helper()
 	seed := &AdoptedEntries{Version: 1, Records: []AdoptProvenanceRecord{{
 		ManifestName:   manifest,
 		OperationState: state,
-		UpdatedAt:      time.Now().UTC(),
-		Clients: []AdoptClientProvenance{
-			{Client: "codex-cli", OriginalState: AdoptOriginalStatePresent},
-		},
+		UpdatedAt:      at,
 	}}}
 	if err := writeAdoptedEntries(seed); err != nil {
 		t.Fatalf("seed store: %v", err)
@@ -24,6 +33,23 @@ func seedForgetRow(t *testing.T, manifest string, state AdoptOperationState, wit
 	if withSnapshot {
 		seedForgetSnapshotDir(t, manifest)
 	}
+}
+
+func seedForgetRowWithClient(t *testing.T, manifest string, state AdoptOperationState, keys []string) {
+	t.Helper()
+	seed := &AdoptedEntries{Version: 1, Records: []AdoptProvenanceRecord{{
+		ManifestName:     manifest,
+		OperationState:   state,
+		UpdatedAt:        time.Now().UTC(),
+		RoutedSecretKeys: keys,
+		Clients: []AdoptClientProvenance{
+			{Client: "codex-cli", OriginalState: AdoptOriginalStatePresent},
+		},
+	}}}
+	if err := writeAdoptedEntries(seed); err != nil {
+		t.Fatalf("seed store: %v", err)
+	}
+	seedForgetSnapshotDir(t, manifest)
 }
 
 func seedForgetSnapshotDir(t *testing.T, manifest string) {
@@ -40,10 +66,12 @@ func seedForgetSnapshotDir(t *testing.T, manifest string) {
 	}
 }
 
-func TestForgetAdoptProvenance_AdoptingRowAndSnapshotBothRemoved(t *testing.T) {
+// F1: the safe crash orphan (clients-less `adopting`, no manifest) forgets WITHOUT a warning.
+func TestForgetAdoptProvenance_SafeCrashOrphanNoWarning(t *testing.T) {
 	isolateStateDir(t)
-	m := "forgetadopting"
-	seedForgetRow(t, m, AdoptOperationStateAdopting, true)
+	forceAdoptManifestExists(t, false)
+	m := "forgetorphan"
+	seedForgetRow(t, m, AdoptOperationStateAdopting, time.Now().UTC(), true)
 
 	a := NewAPI()
 	plan, err := a.ForgetAdoptProvenance(m, ForgetAdoptProvenanceOpts{Yes: true})
@@ -54,11 +82,9 @@ func TestForgetAdoptProvenance_AdoptingRowAndSnapshotBothRemoved(t *testing.T) {
 		t.Errorf("plan = %+v, want HasRow && HasSnapshotDir", plan)
 	}
 	if len(plan.Warnings) != 0 {
-		t.Errorf("an `adopting` (crash-orphan) row must carry no warning, got %v", plan.Warnings)
+		t.Errorf("a provably-safe crash orphan must carry no warning, got %v", plan.Warnings)
 	}
-	if _, found, err := ReadAdoptProvenance(m); err != nil {
-		t.Fatalf("ReadAdoptProvenance: %v", err)
-	} else if found {
+	if _, found, _ := ReadAdoptProvenance(m); found {
 		t.Errorf("row survived forget")
 	}
 	dir, _ := adoptSnapshotDir(m)
@@ -67,21 +93,53 @@ func TestForgetAdoptProvenance_AdoptingRowAndSnapshotBothRemoved(t *testing.T) {
 	}
 }
 
-func TestForgetAdoptProvenance_AdoptedRowWarnsAndBuildIsDryRun(t *testing.T) {
+// F1: a COMMITTED-but-`adopting` row (manifest still present) forgets WITH a warning.
+func TestForgetAdoptProvenance_CommittedAdoptingWarns(t *testing.T) {
 	isolateStateDir(t)
-	m := "forgetadopted"
-	seedForgetRow(t, m, AdoptOperationStateAdopted, true)
+	forceAdoptManifestExists(t, true) // manifest present => the adopt may have committed
+	m := "forgetcommitted"
+	seedForgetRow(t, m, AdoptOperationStateAdopting, time.Now().UTC(), true)
 
 	a := NewAPI()
 	plan, err := a.BuildForgetAdoptProvenancePlan(m)
 	if err != nil {
 		t.Fatalf("BuildForgetAdoptProvenancePlan: %v", err)
 	}
-	if len(plan.Warnings) == 0 {
-		t.Errorf("an `adopted` (committed) row must carry a de-adopt-capability-loss warning")
+	if !containsSubstr(plan.Warnings, "may have (partly) committed") {
+		t.Errorf("a committed-but-adopting row (manifest present) must warn; got %v", plan.Warnings)
+	}
+}
+
+// F1: a `de_adopting` row (mid-restore) forgets WITH a warning.
+func TestForgetAdoptProvenance_DeAdoptingWarns(t *testing.T) {
+	isolateStateDir(t)
+	forceAdoptManifestExists(t, false)
+	m := "forgetdeadopting"
+	seedForgetRow(t, m, AdoptOperationStateDeAdopting, time.Now().UTC(), true)
+
+	a := NewAPI()
+	plan, err := a.BuildForgetAdoptProvenancePlan(m)
+	if err != nil {
+		t.Fatalf("BuildForgetAdoptProvenancePlan: %v", err)
+	}
+	if !containsSubstr(plan.Warnings, "roll-forward recovery") {
+		t.Errorf("a de_adopting row must warn about abandoned roll-forward recovery; got %v", plan.Warnings)
+	}
+}
+
+func TestForgetAdoptProvenance_AdoptedRowWarnsAndBuildIsDryRun(t *testing.T) {
+	isolateStateDir(t)
+	forceAdoptManifestExists(t, false)
+	m := "forgetadopted"
+	seedForgetRow(t, m, AdoptOperationStateAdopted, time.Now().UTC(), true)
+
+	a := NewAPI()
+	plan, err := a.BuildForgetAdoptProvenancePlan(m)
+	if err != nil {
+		t.Fatalf("BuildForgetAdoptProvenancePlan: %v", err)
 	}
 	if !containsSubstr(plan.Warnings, "de-adopt") {
-		t.Errorf("warning should name de-adopt; got %v", plan.Warnings)
+		t.Errorf("an `adopted` row must warn and name de-adopt; got %v", plan.Warnings)
 	}
 	// BuildPlan must NOT remove anything (dry-run).
 	if _, found, _ := ReadAdoptProvenance(m); !found {
@@ -91,13 +149,59 @@ func TestForgetAdoptProvenance_AdoptedRowWarnsAndBuildIsDryRun(t *testing.T) {
 	if _, err := os.Stat(dir); err != nil {
 		t.Errorf("BuildForgetAdoptProvenancePlan removed the snapshot dir; it must be a dry read: %v", err)
 	}
-
 	// Now actually forget it.
 	if _, err := a.ForgetAdoptProvenance(m, ForgetAdoptProvenanceOpts{Yes: true}); err != nil {
 		t.Fatalf("ForgetAdoptProvenance: %v", err)
 	}
 	if _, found, _ := ReadAdoptProvenance(m); found {
 		t.Errorf("adopted row survived forget")
+	}
+}
+
+// F3: routed vault key NAMES are surfaced in the plan (forget does not delete them).
+func TestForgetAdoptProvenance_SurfacesRoutedKeyNames(t *testing.T) {
+	isolateStateDir(t)
+	forceAdoptManifestExists(t, false)
+	m := "forgetkeys"
+	seedForgetRowWithClient(t, m, AdoptOperationStateAdopted, []string{"FORGETKEYS_API_KEY", "FORGETKEYS_TOKEN"})
+
+	a := NewAPI()
+	plan, err := a.BuildForgetAdoptProvenancePlan(m)
+	if err != nil {
+		t.Fatalf("BuildForgetAdoptProvenancePlan: %v", err)
+	}
+	if len(plan.RoutedSecretKeys) != 2 {
+		t.Errorf("plan.RoutedSecretKeys = %v, want the 2 seeded key names", plan.RoutedSecretKeys)
+	}
+}
+
+// F2: the identity gate refuses to destroy a row that changed since it was reviewed.
+func TestForgetAdoptProvenance_IdentityGateRejectsChangedRow(t *testing.T) {
+	isolateStateDir(t)
+	forceAdoptManifestExists(t, false)
+	m := "forgetchanged"
+	t1 := time.Now().Add(-time.Hour).UTC()
+	seedForgetRow(t, m, AdoptOperationStateAdopting, t1, true)
+
+	a := NewAPI()
+	plan, err := a.BuildForgetAdoptProvenancePlan(m)
+	if err != nil {
+		t.Fatalf("BuildForgetAdoptProvenancePlan: %v", err)
+	}
+
+	// Simulate a same-manifest commit in the gap: rewrite the row with a new state + updated_at.
+	seedForgetRow(t, m, AdoptOperationStateAdopted, time.Now().UTC(), true)
+
+	if _, err := a.ForgetAdoptProvenance(m, ForgetAdoptProvenanceOpts{
+		Yes:               true,
+		ExpectedUpdatedAt: plan.UpdatedAt,
+		ExpectedRowState:  plan.RowState,
+	}); err == nil {
+		t.Errorf("identity gate must reject a row that changed since it was reviewed")
+	}
+	// The changed row must survive (not destroyed).
+	if _, found, _ := ReadAdoptProvenance(m); !found {
+		t.Errorf("identity gate must not destroy the changed row")
 	}
 }
 
@@ -125,8 +229,9 @@ func TestForgetAdoptProvenance_RowlessSnapshotDir(t *testing.T) {
 
 func TestForgetAdoptProvenance_RowOnlyNoSnapshot(t *testing.T) {
 	isolateStateDir(t)
+	forceAdoptManifestExists(t, false)
 	m := "forgetrowonly"
-	seedForgetRow(t, m, AdoptOperationStateAdopting, false) // row, NO snapshot dir
+	seedForgetRow(t, m, AdoptOperationStateAdopting, time.Now().UTC(), false) // row, NO snapshot dir
 
 	a := NewAPI()
 	plan, err := a.ForgetAdoptProvenance(m, ForgetAdoptProvenanceOpts{Yes: true})
