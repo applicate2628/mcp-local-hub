@@ -14,8 +14,10 @@ revision:
   is CUT** (deferred to a follow-up). Targets ≡ the record's `AdoptClients`, always — so
   the resume scope is unambiguous and only 2 of the 3 declared mutators are used
   (`UpdateAdoptExpectedManifestHash` and the `ManifestEditInWithHash` edit lane are gone).
-- **v1 requires gate-OFF.** Gate-ON de-adopt is REFUSED with a "gate OFF first" message
-  and deferred to the follow-up (memo item 2, option b).
+- **v1 requires PROVEN gate-OFF.** P0 fails closed: proven gate-ON is REFUSED with a
+  "gate OFF first" message, while any unreadable applicable client config is REFUSED with
+  a distinct "cannot prove gate-OFF" message. Gate-ON de-adopt remains deferred to the
+  follow-up (memo item 2, option b).
 - **Close DELETES the row (snapshots-first)** — no `closed` tombstone (memo item 1).
 - **The equality gate is the SHIPPED recognizer `liveEntryMatchesManifestBinding`** — no
   byte-exact recompute, no second shape owner (memo item 3).
@@ -287,10 +289,11 @@ De-adopt OWNS this seam decision; the planner and implementers CONSUME it (may
 > renderer de-adopt never calls would be dead weight and a second shape owner). Both move to
 > the gate-ON follow-up. This is a deliberate rescoping flagged in the report, not an omission.
 
-## v1 scope decision — all-clients-only, gate-OFF-only (memo LEAD decision)
+## v1 scope decision — all-clients-only, proven-gate-OFF-only (memo LEAD decision)
 
 **What v1 IS:** atomic de-adopt of ONE adopt-owned manifest across ALL its
-`AdoptClients` at once, under gate-OFF. On success the manifest, its supervisor intent,
+`AdoptClients` at once, after gate-OFF is proven across every applicable client (an unreadable
+config prevents that proof). On success the manifest, its supervisor intent,
 its routed secrets, its provenance row, and its snapshots are gone, and every adopted
 client is restored to its pre-adopt state (native entry / absence / re-exposed lower
 layer). It is the exact inverse of one adopt.
@@ -308,6 +311,8 @@ layer). It is the exact inverse of one adopt.
   (`install_hub_reconcile.go:233-263`), so the gate-OFF recognizer path does not apply and
   a separate expected-state model + the reconcile zero-binding prune are required. v1
   REFUSES gate-ON with "gate OFF first, then de-adopt" and defers the full gate-ON path.
+  P0 also REFUSES when any applicable client config is unreadable, because unreadable is
+  UNKNOWN rather than gate-OFF and the prerequisite cannot be proven.
 - **`--reconstruct-legacy`** (no-provenance rows). Fail-closed on no provenance is the
   complete v1 answer.
 
@@ -723,19 +728,28 @@ crash leaves a recoverable `de_adopting` row a retry COMPLETES:
 
 ```
 BuildDeAdoptPlan(server):
-  P0. gate := detect gate-ON via the reserved mcphub-hub entry (hub_gate_detect.go).
-      gate-ON -> REFUSE ("gate OFF first, then de-adopt"; item 2 option b).
+  P0. probe := ProbeHubGate via the reserved mcphub-hub entry (hub_gate_detect.go).
   P1. rec, found := ReadAdoptProvenance(manifest):
+        The row is read after the probe so Eligibility.AdoptOwned stays truthful on refusal.
+        Before state-specific routing:
+        probe.GatedOn non-empty    -> REFUSE ("gate OFF first, then de-adopt"; item 2 option b)
+        probe.Unreadable non-empty -> REFUSE ("cannot prove gate-OFF"; name unreadable clients)
         found=false                          -> REFUSE (not adopt-owned, or already de-adopted;
                                                 no `closed` tombstone exists — item 1)
         state == adopted                     -> FRESH   (full plan gates)
-        state == adopting WITH a live binding -> FRESH   (committed-but-unflipped; G6 admits it)
-        state == adopting WITHOUT a live binding -> REFUSE (pre-install crash orphan; adopt GC owns it)
+        state == adopting AND classifyDeadAdoptingRow(rec) == adoptRowCommittedKeep
+                                               -> FRESH   (matches Mark's admission; a manifest-present
+                                                           committed row whose hub entry merely drifted
+                                                           is admitted by Signal 2b)
+        state == adopting AND classifier != adoptRowCommittedKeep
+                                               -> REFUSE  (true pre-install crash orphan; adopt GC owns it)
         state == de_adopting                 -> RESUME  (per-step / per-client done-ness)
   P2. Manifest hash-gate readiness: on-disk manifest hash == ExpectedManifestHash
       (RESUME: SKIP if the manifest file is already absent — delete step done).
-  P3. Per client (FRESH): the live entry MUST still be the hub entry
-      (liveEntryMatchesManifestBinding); for `present`, the snapshot exists + sha256 matches.
+  P3. Per client (FRESH): a StillHub entry remains mutation-pending; a RestoreDone entry is a
+      fortuitous no-op already in the de-adopted target state, not a conflict. Only
+      GenuineConflict / Unreadable / snapshot-unverifiable clients fail FRESH; for `present`, the
+      snapshot exists + sha256 matches before its verdict can prove completion.
       RESUME per client done-ness is DERIVED via the ONE atomic classifier
       ClassifyEntryUnderLock(SourceEntryName, match, snapshotSubtree) — NOT a parallel unlocked
       read. There is exactly ONE live-config read-and-compare code path (this classifier, whose
@@ -756,7 +770,9 @@ BuildDeAdoptPlan(server):
         classifier RestoreDone (present: write-target-physical live raw subtree deep-equals
           snapshotSubtree; absent/merged-lower: entry ABSENT FROM THE WRITE TARGET — a merged-lower's
           re-emerged lower layer is out of scope, so this is RestoreDone NOT a conflict)
-                                                 -> RESTORE-DONE
+                                                 -> RESTORE-DONE (including FRESH: already at the
+                                                    de-adopted target, no mutation, idempotent and
+                                                    consistent with RESUME)
         classifier GenuineConflict (present: write-target-physical live subtree ≠ snapshot, or
           write-target live==nil vs a present snapshot; absent/merged-lower: a non-hub entry occupies
           the WRITE-TARGET slot)
@@ -888,10 +904,13 @@ core, outside every state lock). v1 acquires NO `hub-mcp.lock` (gate-ON deferred
 prior revision's E5 republish-under-hub-lock ordering hazard is gone. No reverse edge: adopt
 nests the same direction and the lease is `TryLock`-based.
 
-## Gate-ON refused in v1 (memo item 2, option b) + adjacent bugs
+## Gate must be proven OFF in v1 (memo item 2, option b) + adjacent bugs
 
-v1 REFUSES gate-ON de-adopt with a "gate OFF first, then de-adopt" message (detected via the
-reserved `mcphub-hub` entry, `hub_gate_detect.go`). Rationale: under gate-ON the reconcile
+v1 P0 uses `ProbeHubGate` (`hub_gate_detect.go`) and fails closed. It REFUSES proven gate-ON
+de-adopt with a "gate OFF first, then de-adopt" message, and separately REFUSES any applicable
+client whose config cannot be read or parsed with a "cannot prove gate-OFF" message naming only
+the client. `GatedOnClients` remains the reset-port best-effort view and still skips unreadable
+clients; de-adopt consumes both probe sets. Rationale: under gate-ON the reconcile
 has removed every per-server entry (`install_hub_reconcile.go:233-263`), so
 `GetEntry(SourceEntryName)==nil` and the gate-OFF recognizer path would false-refuse
 everything; the correct gate-ON model (expected state = "no per-server entry + `mcphub-hub`
@@ -1033,8 +1052,9 @@ sha256 gate extends that owner-anchored trust to the exact snapshot bytes. Conse
   de-adopt-eligibility from hub URL shape. Backend provides `GET /api/deadopt/eligible` →
   `{ manifests: [<provenance manifest names from ReadAdoptProvenance>], gate_on: bool }`
   (or an equivalent `adopt_owned` + `deadopt_blocked_reason` field on the scan response). A
-  row is eligible iff it is in the provenance set AND `gate_on == false`; gate-ON disables
-  the affordance with "gate OFF first".
+  row is eligible iff it is in the provenance set, `gate_on == false`, AND no applicable
+  client config is unreadable; gate-ON disables the affordance with "gate OFF first", while
+  unreadable gate state disables it with the distinct "cannot prove gate-OFF" reason.
 - **G4 — per-client partial-failure report + CLI exit semantics.** `ExecuteDeAdoptWithOpts`
   returns a `{Restored []string, Failed []{Client, Reason}, Accepted []string}` report (precedent
   `DemigrateReport{Restored, Failed}`, `demigrate.go:31-34`; `Accepted` lists the
@@ -1045,7 +1065,8 @@ sha256 gate extends that owner-anchored trust to the exact snapshot bytes. Conse
   the report.
 - **CLI:** `mcphub de-adopt <server>` (alias `deadopt`); `--yes` executes, default dry-run
   prints the plan; no provenance → non-zero, no mutation; gate-ON → non-zero "gate OFF
-  first". **`--accept-conflict <client>`** (repeatable) requests that a genuinely-CAS-conflicted
+  first"; unreadable gate state → non-zero "cannot prove gate-OFF" naming the client.
+  **`--accept-conflict <client>`** (repeatable) requests that a genuinely-CAS-conflicted
   client (operator legitimately took the slot between plan and execute) be treated as
   terminally-done-with-warning so CLOSE-READY is satisfiable and the row can close (B2a). It is
   HONORED only after the E3 `ClassifyEntryUnderLock` re-read (config lock held by the forwarder)
@@ -1071,6 +1092,7 @@ close — a deliberate, warned, operator-driven opt-out of restoration, not a si
 | Failure mode | Behavior |
 |---|---|
 | Gate-ON host | REFUSE with "gate OFF first, then de-adopt" (item 2 b). |
+| Applicable client config unreadable during P0 | REFUSE with "cannot prove gate-OFF" and client names only; never assume gate-OFF or route FRESH/RESUME. |
 | Snapshot tampered / wrong-owner / oversize / missing (`present`) | Anchored read refuses (owner/reparse/cap) or sha256 mismatch → that client Failed, fail-closed before any write. |
 | Entry ABSENT in the verified snapshot (`present`) | Impossible-state (capture guaranteed + sha-pinned it) → `CASRestoreEntryFromBytes` REFUSES fail-closed; NEVER silently removes (B5 — removal is `CASGuardedRemoveEntry`'s alone). |
 | Snapshot > 16 MiB restore cap (`present`) | Anchored read refuses (cap) → that client Failed; bounded residual until the symmetric capture cap lands (B6, see Residuals). |
@@ -1078,7 +1100,7 @@ close — a deliberate, warned, operator-driven opt-out of restoration, not a si
 | Live entry VANISHED between plan+execute (nil) | `CASGuardedRemoveEntry` nil-live = already-done success; `CASRestoreEntryFromBytes` nil-live = conflict-refuse fail-closed (never resurrect against intent) — B1 nil-live, no panic. |
 | Manifest externally edited | `ManifestDeleteInWithHash` refuses `ErrManifestHashMismatch`; empty/absent hash → fail-closed refusal. |
 | No provenance row | REFUSE (no `--reconstruct-legacy` in v1). |
-| Row `adopting` with no live binding | Pre-install crash orphan — adopt GC owns it; de-adopt refuses. E2 re-verifies adoptRowCommittedKeep under the held lease before flipping a committed-adopting row (B4). |
+| Row `adopting` classified `adoptRowCommittedKeep` | De-adopt admits it as FRESH, including Signal 2b: manifest present while the live hub binding has drifted away. Any other `adopting` row is a true pre-install crash orphan, so adopt GC owns it and de-adopt refuses. E2 re-verifies `adoptRowCommittedKeep` under the held lease before flipping a committed-adopting row (B4). |
 | Routed-secret delete fails / shared key | Pre-filter + shared-scan; row stays `de_adopting`; retry deletes remaining; close-done = deleted-or-skipped-as-shared (P1-4). |
 | Crash mid-execute | Recoverable `de_adopting` row; roll-forward resume skips RESTORE-DONE (raw-subtree comparator, B1) + done steps, completes, DELETES the row. Crash INSIDE close (snapshot dir gone + manifest gone + live≠hub) resumes RESTORE-DONE, not wedged (B2b). |
 | Abandoned `de_adopting` row (crash, never retried/accepted) | Wedges re-adopt + retains secret-bearing snapshots no GC reaps; `de_adopting`-GC / `--recover` DEFERRED to the follow-up (G7 residual). |
@@ -1137,11 +1159,14 @@ API/unit (falsification):
    the lock; a concrete body re-entering `withConfigLock` would self-deadlock).
 10. **Redaction (P2-c).** No secret value / snapshot byte / entry body in any event / error /
     narration.
-11. **Gate-ON refusal.** A gate-ON host → `BuildDeAdoptPlan` refuses with the "gate OFF
-    first" message, zero mutation.
+11. **Fail-closed gate refusal.** A proven gate-ON host → `BuildDeAdoptPlan` refuses with
+    the "gate OFF first" message; an unreadable applicable client config → refuses with
+    "cannot prove gate-OFF" naming the client. Both have zero mutation and neither routes
+    FRESH/RESUME; `GatedOnClients` still skips unreadable for reset-port.
 12. **No-provenance / committed-adopting admission (G6) + E2 re-verify (B4).** No row → refuse;
-    a committed-but-`adopting` row (live binding) → admitted as FRESH. **B4:** simulate the
-    row becoming UNCOMMITTED between plan-admission and E2 (its hub entries removed) → E2's
+    a committed-but-`adopting` row classified `adoptRowCommittedKeep` → admitted as FRESH,
+    including manifest-present Signal 2b when its live hub binding has drifted away. **B4:** simulate
+    the row becoming UNCOMMITTED between plan-admission and E2 (its hub entries and manifest removed) → E2's
     `MarkAdoptProvenanceDeAdopting` re-runs `classifyDeadAdoptingRow` under the held lease and
     REFUSES the flip (adopt GC owns it), rather than converting a GC-reapable row into a
     GC-immune `de_adopting` wedge.
@@ -1222,7 +1247,7 @@ de-adopt → scan native); route tests mirroring `gui/adopt_test.go`.
 6. `{ guarantee: the last-binding manifest delete is hash-gated at the mutation point, fail-closed on empty hash, path-escape guard retained; single-owner: ManifestDeleteInWithHash (accepted decision); enforcement-probe: test 5 }`
 7. `{ guarantee: routed keys are deleted before close; a shared key is skipped-as-warned and the close-done predicate is deleted-OR-skipped so the row never wedges; single-owner: the de-adopt cleanup ordering + pre-filtered deleteAdoptRoutedSecrets; enforcement-probe: test 8 }`
 8. `{ guarantee: a crash mid-execute leaves a recoverable de_adopting row that roll-forward resume COMPLETES (skips RESTORE-DONE clients + done steps) — including a crash INSIDE close (snapshot dir + manifest gone + live≠hub → RESTORE-DONE, not wedged), sound BECAUSE E4 deletes the manifest ONLY under CLOSE-READY so manifest-absence implies all-clients-resolved (P1-b) — never a rollback that re-writes hub over native; the resume done-test compares RAW on-disk subtrees, not lean MCPEntry equality; single-owner: BuildDeAdoptPlan RESUME done-ness derivation (routed through the atomic ClassifyEntryUnderLock seam, gated on the CLOSE-READY manifest-absence invariant) + the EntryRawSubtree comparator; enforcement-probe: test 7 (crash-inside-close + two-stdio-husk falsification) + test 14 (manifest-absence never masks an unresolved conflict) }`
-9. `{ guarantee: gate-ON de-adopt is refused with an actionable message and zero mutation in v1; single-owner: BuildDeAdoptPlan P0 gate check; enforcement-probe: test 11 }`
+9. `{ guarantee: de-adopt proceeds only when gate-OFF is proven: proven gate-ON and unreadable applicable client configs are both refused with distinct actionable, client-name-only messages and zero mutation, while GatedOnClients preserves reset-port's skip-on-unreadable behavior; single-owner: ProbeHubGate classification + BuildDeAdoptPlan P0 policy; enforcement-probe: test 11 }`
 10. `{ guarantee: the bytes-restore/guarded-remove live on a CAPABILITY interface implemented only by adopt-reachable adapters, not the Client interface; single-owner: the CASEntryMutator capability (mirrors EntryBytesChecker); enforcement-probe: grep shows no Client-interface restore method + a fail-closed type-assert at the de-adopt site }`
 11. `{ guarantee: v1 does NOT modify BuildHubReconcilePlan or add a single-owner entry renderer (both deferred with gate-ON); single-owner: the recognizer-only equality + gate-OFF-only scope; enforcement-probe: git diff shows no change to install_hub_reconcile.go and no new entry-renderer }`
 12. `{ guarantee: no secret value / snapshot byte / entry body appears in any de-adopt event/error/log; single-owner: the de-adopt redaction; enforcement-probe: test 10 }`
@@ -1281,9 +1306,10 @@ Follow-up work-item stub (subset + gate-ON de-adopt):
 ## Gate decision
 
 **PASS (rework 2026-07-11 round 5 — fable-5 write-target-physical collapse + adopt-GC dependency fold-in).** v1 is scoped to
-all-clients-only, gate-OFF-only atomic de-adopt (subset + gate-ON + `--reconstruct-legacy`
+all-clients-only, proven-gate-OFF-only atomic de-adopt (subset + gate-ON + `--reconstruct-legacy`
 cut, per the LEAD decision). All 7 round-1 BLOCKING must-fixes remain resolved: (1) close
-DELETES the row snapshots-first; (2) gate-ON REFUSED with a message + adjacent bugs filed;
+DELETES the row snapshots-first; (2) P0 REFUSES both proven gate-ON and unreadable client
+gate state with distinct messages + adjacent bugs filed;
 (3) equality via the single shipped recognizer + URL formula corrected, no byte-exact; (4)
 anchored snapshot read + recomputed path + secret-bearing/cap additions; (5) CAS on a
 capability interface, not Client; (6) reconcile prune deferred with gate-ON + latent bug
