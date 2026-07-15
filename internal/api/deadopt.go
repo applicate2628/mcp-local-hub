@@ -353,7 +353,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 
 	// Recompute the destructive manifest gate from the authoritative row. A
 	// fresh operation must still have the exact adopted manifest; only a resume
-	// may treat an already-absent manifest as a completed E4.
+	// may proceed when it is already absent. E4 rechecks at the mutation point.
 	readiness := a.buildDeAdoptManifestReadiness(rec, effectiveRouting)
 	if !readiness.HashReady && !(effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent) {
 		return nil, fmt.Errorf("de-adopt: manifest %q is not delete-ready (%s); resolve it before de-adopting", plan.ManifestName, readiness.Reason)
@@ -495,19 +495,20 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
 	}
 	intentScope := supervisorIntentOwnershipScopeForManifest(expectedManifest, nil, "")
-	if !(effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent) {
-		if err := a.ManifestDeleteInWithHash(adoptCommittedManifestDir(), rec.ManifestName, rec.ExpectedManifestHash); err != nil {
-			pendingEvents = append(pendingEvents, func() {
-				emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "manifest-delete", report)
-			})
-			switch {
-			case errors.Is(err, ErrManifestHashRequired):
-				return report, fmt.Errorf("de-adopt: manifest %q delete refused because its expected hash is missing", plan.ManifestName)
-			case errors.Is(err, ErrManifestHashMismatch):
-				return report, fmt.Errorf("de-adopt: manifest %q delete refused because its content hash changed", plan.ManifestName)
-			default:
-				return report, fmt.Errorf("de-adopt: hash-gated manifest delete for %q failed", plan.ManifestName)
-			}
+	if deAdoptBeforeManifestDeleteHook != nil {
+		deAdoptBeforeManifestDeleteHook()
+	}
+	if err := a.ManifestDeleteInWithHash(adoptCommittedManifestDir(), rec.ManifestName, rec.ExpectedManifestHash); err != nil {
+		pendingEvents = append(pendingEvents, func() {
+			emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "manifest-delete", report)
+		})
+		switch {
+		case errors.Is(err, ErrManifestHashRequired):
+			return report, fmt.Errorf("de-adopt: manifest %q delete refused because its expected hash is missing", plan.ManifestName)
+		case errors.Is(err, ErrManifestHashMismatch):
+			return report, fmt.Errorf("de-adopt: manifest %q delete refused because its content hash changed", plan.ManifestName)
+		default:
+			return report, fmt.Errorf("de-adopt: hash-gated manifest delete for %q failed", plan.ManifestName)
 		}
 	}
 	if _, _, _, err := a.removeServerFromSupervisorIntentCore(context.Background(), rec.ManifestName, intentScope, false); err != nil {
@@ -636,48 +637,62 @@ func deAdoptFailClient(report *DeAdoptReport, clientName, reason string, w io.Wr
 }
 
 // prepareDeAdoptRoutedSecretCleanup returns only still-present, non-shared keys
-// for deleteAdoptRoutedSecrets. A key already absent is complete; a present key
-// referenced by another live on-disk manifest is deliberately skipped and also
-// complete for E6. An unreadable manifest conservatively makes every candidate
-// possibly shared; directory-enumeration failures stop before the vault is read.
+// for deleteAdoptRoutedSecrets. A missing vault means every routed key is
+// already absent and cleanup is complete. For a readable vault, a key already
+// absent is complete; a present key referenced by another live on-disk manifest
+// is deliberately skipped and also complete for E6. An unreadable manifest
+// conservatively makes every present candidate possibly shared.
 func (a *API) prepareDeAdoptRoutedSecretCleanup(manifestName string, routedKeys []string) (toDelete, sharedSkipped, unreadableManifests []string, err error) {
 	keys := dedupeSortedDeAdoptStrings(routedKeys)
 	if len(keys) == 0 {
 		return nil, nil, nil, nil
 	}
+
+	present := make(map[string]bool)
+	vaultAbsent := false
+	vaultMutex.Lock()
+	err = secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
+		vault, openErr := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
+		if openErr != nil {
+			if adoptRoutedSecretVaultAbsent() {
+				vaultAbsent = true
+				return nil
+			}
+			return fmt.Errorf("routed-secret vault is unavailable")
+		}
+		for _, key := range vault.List() {
+			present[key] = true
+		}
+		return nil
+	})
+	vaultMutex.Unlock()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if vaultAbsent {
+		return nil, nil, nil, nil
+	}
+
 	shared, unreadableManifests, err := a.deAdoptSharedRoutedSecretKeys(manifestName, keys)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	vaultMutex.Lock()
-	defer vaultMutex.Unlock()
-	err = secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
-		vault, openErr := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
-		if openErr != nil {
-			return fmt.Errorf("routed-secret vault is unavailable")
+	for _, key := range keys {
+		if !present[key] {
+			continue
 		}
-		present := make(map[string]bool)
-		for _, key := range vault.List() {
-			present[key] = true
+		if shared[key] {
+			sharedSkipped = append(sharedSkipped, key)
+			continue
 		}
-		for _, key := range keys {
-			if !present[key] {
-				continue
-			}
-			if shared[key] {
-				sharedSkipped = append(sharedSkipped, key)
-				continue
-			}
-			toDelete = append(toDelete, key)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, nil, nil, err
+		toDelete = append(toDelete, key)
 	}
 	return toDelete, sharedSkipped, unreadableManifests, nil
 }
+
+// deAdoptBeforeManifestDeleteHook makes the readiness-to-E4 recreate window
+// deterministic in package tests. Production leaves it nil.
+var deAdoptBeforeManifestDeleteHook func()
 
 func (a *API) deAdoptSharedRoutedSecretKeys(manifestName string, routedKeys []string) (map[string]bool, []string, error) {
 	candidates := make(map[string]bool, len(routedKeys))

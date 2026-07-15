@@ -33,7 +33,7 @@ func emitDeAdoptEvent(severity, event string, body map[string]any) {
 		return
 	}
 	defer func() { _ = logger.Close() }()
-	_ = logger.Emit(SupervisorEvent{
+	_ = logger.TryEmit(SupervisorEvent{
 		SchemaVersion: SupervisorEventSchemaVersion,
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
 		Severity:      severity,

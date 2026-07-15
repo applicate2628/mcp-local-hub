@@ -295,8 +295,8 @@ func TestExecuteDeAdoptCallerWriterFlushesAfterLeaseUnlock(t *testing.T) {
 	}
 }
 
-func TestExecuteDeAdoptEventsFlushAfterLeaseUnlock(t *testing.T) {
-	name := "deadopt-execute-events-after-unlock"
+func TestExecuteDeAdoptEventsDoNotBlockCompletedCall(t *testing.T) {
+	name := "deadopt-execute-events-nonblocking"
 	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
 	_, _, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
 		state:           AdoptOperationStateAdopted,
@@ -325,38 +325,20 @@ func TestExecuteDeAdoptEventsFlushAfterLeaseUnlock(t *testing.T) {
 		done <- result{report: report, err: err}
 	}()
 
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		_, found, err := ReadAdoptProvenance(name)
-		if err != nil {
-			_ = eventLock.Unlock()
-			t.Fatalf("read provenance while event emit blocks: %v", err)
+	select {
+	case got := <-done:
+		if got.err != nil || got.report == nil {
+			t.Fatalf("ExecuteDeAdopt under event-log contention = report=%+v err=%v", got.report, got.err)
 		}
-		if !found {
-			break
-		}
-		if time.Now().After(deadline) {
-			_ = eventLock.Unlock()
-			t.Fatal("timed out waiting for E6 provenance close")
-		}
-		time.Sleep(5 * time.Millisecond)
+	case <-time.After(5 * time.Second):
+		t.Fatal("ExecuteDeAdopt blocked on best-effort de-adopt event emission")
 	}
-
 	lease, leased, leaseErr := tryAcquireAdoptManifestLease(name)
 	if leased {
 		_ = lease.Unlock()
 	}
-	_ = eventLock.Unlock()
-	select {
-	case got := <-done:
-		if got.err != nil || got.report == nil {
-			t.Fatalf("ExecuteDeAdopt after event-lock release = report=%+v err=%v", got.report, got.err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("ExecuteDeAdopt remained blocked after event-log lock was released")
-	}
 	if leaseErr != nil || !leased {
-		t.Fatalf("manifest lease remained held while event emit blocked: leased=%v err=%v", leased, leaseErr)
+		t.Fatalf("manifest lease remained held after completed de-adopt: leased=%v err=%v", leased, leaseErr)
 	}
 }
 
@@ -882,6 +864,112 @@ func TestExecuteDeAdoptPartialRoutedSecretDeleteRetry(t *testing.T) {
 		t.Fatalf("partial routed-secret retry report/vault = %+v / %#v", report, deAdoptVaultKeys(t))
 	}
 	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptResumeWithAbsentVaultCompletesRoutedSecretCleanup(t *testing.T) {
+	name := "deadopt-execute-absent-vault-resume"
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state:           AdoptOperationStateDeAdopting,
+		originalState:   AdoptOriginalStateAbsent,
+		liveConfig:      "",
+		manifestPresent: false,
+	})
+	rec.RoutedSecretKeys = []string{"DEADOPT_ABSENT_VAULT_KEY"}
+	writeDeAdoptExecutorRecord(t, rec)
+	seedDeAdoptVault(t, map[string]string{"UNRELATED_KEY": "unrelated-value"})
+	if err := os.Remove(secrets.DefaultVaultPath()); err != nil {
+		t.Fatalf("remove vault before resume: %v", err)
+	}
+
+	report, err := NewAPI().ExecuteDeAdopt(name, nil)
+	if err != nil {
+		t.Fatalf("ExecuteDeAdopt absent-vault resume: %v", err)
+	}
+	if len(report.Failed) != 0 {
+		t.Fatalf("absent-vault resume report = %+v", report)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptResumeWithUnreadableVaultBlocksClose(t *testing.T) {
+	name := "deadopt-execute-unreadable-vault-resume"
+	_, manifestRoot, _, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state:           AdoptOperationStateDeAdopting,
+		originalState:   AdoptOriginalStateAbsent,
+		liveConfig:      "",
+		manifestPresent: false,
+	})
+	rec.RoutedSecretKeys = []string{"DEADOPT_UNREADABLE_VAULT_KEY"}
+	writeDeAdoptExecutorRecord(t, rec)
+	seedDeAdoptVault(t, map[string]string{"DEADOPT_UNREADABLE_VAULT_KEY": "secret-value"})
+	if err := os.WriteFile(secrets.DefaultVaultPath(), []byte("not-an-age-vault"), 0o600); err != nil {
+		t.Fatalf("corrupt existing vault: %v", err)
+	}
+
+	report, err := NewAPI().ExecuteDeAdopt(name, nil)
+	if err == nil || !strings.Contains(err.Error(), "routed-secret prefilter") {
+		t.Fatalf("ExecuteDeAdopt unreadable-vault resume = report=%+v err=%v", report, err)
+	}
+	if _, statErr := os.Stat(secrets.DefaultVaultPath()); statErr != nil {
+		t.Fatalf("existing unreadable vault was removed: %v", statErr)
+	}
+	persisted, found, readErr := ReadAdoptProvenance(name)
+	if readErr != nil || !found || persisted.OperationState != AdoptOperationStateDeAdopting {
+		t.Fatalf("unreadable-vault refusal lost recovery row: found=%v rec=%+v err=%v", found, persisted, readErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(manifestRoot, name, "manifest.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("resume manifest unexpectedly present after refusal: %v", statErr)
+	}
+}
+
+func TestExecuteDeAdoptResumeRechecksRecreatedManifestAtE4(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		recreated   []byte
+		wantSuccess bool
+	}{
+		{name: "matching adopt content is deleted", recreated: []byte("name: deadopt-recreate-matching\n"), wantSuccess: true},
+		{name: "different content is refused", recreated: []byte("name: foreign-replacement\n"), wantSuccess: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "deadopt-recreate-matching"
+			adoptContent := []byte("name: " + name + "\n")
+			_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+				state:           AdoptOperationStateDeAdopting,
+				originalState:   AdoptOriginalStateAbsent,
+				liveConfig:      "",
+				manifestPresent: false,
+				manifestBytes:   adoptContent,
+			})
+			seedDeAdoptSupervisorIntent(t, stateRoot, rec)
+			manifestPath := filepath.Join(manifestRoot, name, "manifest.yaml")
+			deAdoptBeforeManifestDeleteHook = func() {
+				if err := os.MkdirAll(filepath.Dir(manifestPath), 0o700); err != nil {
+					t.Fatalf("recreate manifest dir before E4: %v", err)
+				}
+				if err := os.WriteFile(manifestPath, tc.recreated, 0o600); err != nil {
+					t.Fatalf("recreate manifest before E4: %v", err)
+				}
+			}
+			t.Cleanup(func() { deAdoptBeforeManifestDeleteHook = nil })
+
+			report, err := NewAPI().ExecuteDeAdopt(name, nil)
+			if tc.wantSuccess {
+				if err != nil || len(report.Failed) != 0 {
+					t.Fatalf("ExecuteDeAdopt matching recreation = report=%+v err=%v", report, err)
+				}
+				assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "content hash changed") {
+				t.Fatalf("ExecuteDeAdopt foreign recreation = report=%+v err=%v", report, err)
+			}
+			if got := mustReadFileForAdoptTest(t, manifestPath); !bytes.Equal(got, tc.recreated) {
+				t.Fatalf("foreign manifest changed\ngot: %q\nwant: %q", got, tc.recreated)
+			}
+			assertDeAdoptRecoveryStateIntact(t, manifestRoot, stateRoot, rec, "", "")
+		})
+	}
 }
 
 func TestExecuteDeAdoptSnapshotDeletedManifestPresentRetryBlocksClose(t *testing.T) {
