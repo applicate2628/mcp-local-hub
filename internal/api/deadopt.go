@@ -159,15 +159,7 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 	plan.Eligibility.AdoptOwned = found
 	plan.Eligibility.Eligible = found && len(probe.GatedOn) == 0 && len(probe.Unreadable) == 0
 
-	if len(probe.GatedOn) != 0 || len(probe.Unreadable) != 0 {
-		var blockers []string
-		if len(probe.GatedOn) != 0 {
-			blockers = append(blockers, fmt.Sprintf("gate is ON for %d client(s) (%s); gate OFF first, then de-adopt", len(probe.GatedOn), strings.Join(probe.GatedOn, ", ")))
-		}
-		if len(probe.Unreadable) != 0 {
-			blockers = append(blockers, fmt.Sprintf("cannot prove gate-OFF: %d client config(s) unreadable (%s); de-adopt refuses until every client's hub-gate state is readable", len(probe.Unreadable), strings.Join(probe.Unreadable, ", ")))
-		}
-		reason := strings.Join(blockers, "; ")
+	if reason := deAdoptHubGateRefusalReason(probe); reason != "" {
 		plan.RefusalReason = reason
 		plan.Eligibility.BlockedReason = reason
 		return plan, nil
@@ -343,12 +335,27 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		return nil, fmt.Errorf("de-adopt: provenance changed under the lease; re-run de-adopt")
 	}
 	rec := fresh
+	var effectiveRouting DeAdoptRoutingVerdict
+	switch rec.OperationState {
+	case AdoptOperationStateDeAdopting:
+		effectiveRouting = DeAdoptRoutingResume
+	case AdoptOperationStateAdopted, AdoptOperationStateAdopting:
+		effectiveRouting = DeAdoptRoutingFresh
+	default:
+		return nil, fmt.Errorf("de-adopt: provenance changed under the lease; re-run de-adopt")
+	}
+
+	// The planner's P0 result predates E1. Re-probe under the lease so no E2/E3
+	// mutation can begin unless this execution owns a fresh proof of gate-OFF.
+	if reason := deAdoptHubGateRefusalReason(ProbeHubGate()); reason != "" {
+		return nil, fmt.Errorf("de-adopt refused: %s", reason)
+	}
 
 	// Recompute the destructive manifest gate from the authoritative row. A
 	// fresh operation must still have the exact adopted manifest; only a resume
 	// may treat an already-absent manifest as a completed E4.
-	readiness := a.buildDeAdoptManifestReadiness(rec, plan.Routing)
-	if !readiness.HashReady && !(plan.Routing == DeAdoptRoutingResume && readiness.AlreadyAbsent) {
+	readiness := a.buildDeAdoptManifestReadiness(rec, effectiveRouting)
+	if !readiness.HashReady && !(effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent) {
 		return nil, fmt.Errorf("de-adopt: manifest %q is not delete-ready (%s); resolve it before de-adopting", plan.ManifestName, readiness.Reason)
 	}
 
@@ -396,7 +403,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 			verdict = clients.ClassifyUnreadable
 		}
 		disposition, acceptEligible, dispositionReason := mapDeAdoptClientDisposition(
-			plan.Routing,
+			effectiveRouting,
 			clientRec.OriginalState,
 			snapshotState,
 			readiness.AlreadyAbsent,
@@ -488,7 +495,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
 	}
 	intentScope := supervisorIntentOwnershipScopeForManifest(expectedManifest, nil, "")
-	if !readiness.AlreadyAbsent {
+	if !(effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent) {
 		if err := a.ManifestDeleteInWithHash(adoptCommittedManifestDir(), rec.ManifestName, rec.ExpectedManifestHash); err != nil {
 			pendingEvents = append(pendingEvents, func() {
 				emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "manifest-delete", report)
@@ -574,6 +581,7 @@ func deAdoptAcceptConflictSet(requested, targets []string) (map[string]bool, err
 func deAdoptProvenanceIdentityMatches(planned, fresh *AdoptProvenanceRecord) bool {
 	if planned == nil || fresh == nil ||
 		!deAdoptOperationStateMatches(planned.OperationState, fresh.OperationState) ||
+		!planned.CreatedAt.Equal(fresh.CreatedAt) ||
 		planned.ExpectedManifestHash != fresh.ExpectedManifestHash ||
 		planned.SourceEntryName != fresh.SourceEntryName ||
 		planned.Port != fresh.Port {
@@ -596,6 +604,20 @@ func deAdoptProvenanceIdentityMatches(planned, fresh *AdoptProvenanceRecord) boo
 		}
 	}
 	return true
+}
+
+func deAdoptHubGateRefusalReason(probe HubGateProbe) string {
+	if len(probe.GatedOn) == 0 && len(probe.Unreadable) == 0 {
+		return ""
+	}
+	var blockers []string
+	if len(probe.GatedOn) != 0 {
+		blockers = append(blockers, fmt.Sprintf("gate is ON for %d client(s) (%s); gate OFF first, then de-adopt", len(probe.GatedOn), strings.Join(probe.GatedOn, ", ")))
+	}
+	if len(probe.Unreadable) != 0 {
+		blockers = append(blockers, fmt.Sprintf("cannot prove gate-OFF: %d client config(s) unreadable (%s); de-adopt refuses until every client's hub-gate state is readable", len(probe.Unreadable), strings.Join(probe.Unreadable, ", ")))
+	}
+	return strings.Join(blockers, "; ")
 }
 
 func deAdoptOperationStateMatches(planned, fresh AdoptOperationState) bool {

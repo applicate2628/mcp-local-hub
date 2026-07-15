@@ -163,7 +163,7 @@ func TestExecuteDeAdoptReclassifiesStaleRestoreDonePlanAtE3(t *testing.T) {
 		assertDeAdoptRecoveryStateIntact(t, manifestRoot, stateRoot, rec, snapshotPath, "")
 	})
 
-	t.Run("ClassifyUnreadable fails and preserves recovery state", func(t *testing.T) {
+	t.Run("unreadable gate refuses before E2", func(t *testing.T) {
 		name := "deadopt-execute-plan-drift-unreadable"
 		snapshot := []byte(deAdoptNativeConfig(name, "pre-adopt-native"))
 		codexPath, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
@@ -182,19 +182,29 @@ func TestExecuteDeAdoptReclassifiesStaleRestoreDonePlanAtE3(t *testing.T) {
 		if err := os.WriteFile(codexPath, []byte("[mcp_servers.\n"), 0o600); err != nil {
 			t.Fatalf("simulate plan-to-E3 unreadable drift: %v", err)
 		}
+		before := mustReadFileForAdoptTest(t, codexPath)
 		snapshotPath := deAdoptSnapshotPathForTest(t, rec)
 
 		report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{})
-		if err != nil {
-			t.Fatalf("execute stale unreadable plan: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "cannot prove gate-OFF") || !strings.Contains(err.Error(), "codex-cli") || report != nil {
+			t.Fatalf("execute stale unreadable plan = report=%+v err=%v", report, err)
 		}
-		if len(report.Failed) != 1 || !strings.Contains(report.Failed[0].Reason, "could not be read or parsed") || len(report.Restored) != 0 {
-			t.Fatalf("unreadable drift report = %+v", report)
+		if got := mustReadFileForAdoptTest(t, codexPath); !bytes.Equal(got, before) {
+			t.Fatalf("unreadable-gate refusal mutated client config\nbefore:\n%s\nafter:\n%s", before, got)
 		}
-		assertDeAdoptRecoveryStateIntact(t, manifestRoot, stateRoot, rec, snapshotPath, "")
+		persisted, found, readErr := ReadAdoptProvenance(name)
+		if readErr != nil || !found || persisted.OperationState != AdoptOperationStateAdopted {
+			t.Fatalf("unreadable-gate refusal changed provenance: found=%v rec=%+v err=%v", found, persisted, readErr)
+		}
+		if _, statErr := os.Stat(snapshotPath); statErr != nil {
+			t.Fatalf("unreadable-gate refusal removed snapshot: %v", statErr)
+		}
+		if _, statErr := os.Stat(filepath.Join(manifestRoot, name, "manifest.yaml")); statErr != nil {
+			t.Fatalf("unreadable-gate refusal removed manifest: %v", statErr)
+		}
 	})
 
-	t.Run("accept conflict rejects ClassifyUnreadable at mutation point", func(t *testing.T) {
+	t.Run("accept conflict cannot bypass unreadable gate", func(t *testing.T) {
 		name := "deadopt-execute-accept-drift-unreadable"
 		snapshot := []byte(deAdoptNativeConfig(name, "pre-adopt-native"))
 		codexPath, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
@@ -213,16 +223,26 @@ func TestExecuteDeAdoptReclassifiesStaleRestoreDonePlanAtE3(t *testing.T) {
 		if err := os.WriteFile(codexPath, []byte("[mcp_servers.\n"), 0o600); err != nil {
 			t.Fatalf("simulate plan-to-E3 unreadable drift: %v", err)
 		}
+		before := mustReadFileForAdoptTest(t, codexPath)
 		snapshotPath := deAdoptSnapshotPathForTest(t, rec)
 
 		report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{AcceptConflictClients: []string{"codex-cli"}})
-		if err != nil {
-			t.Fatalf("execute stale unreadable acceptance plan: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "cannot prove gate-OFF") || !strings.Contains(err.Error(), "codex-cli") || report != nil {
+			t.Fatalf("execute stale unreadable acceptance plan = report=%+v err=%v", report, err)
 		}
-		if len(report.Failed) != 1 || !strings.Contains(report.Failed[0].Reason, "--accept-conflict rejected") || len(report.Accepted) != 0 {
-			t.Fatalf("unreadable acceptance drift report = %+v", report)
+		if got := mustReadFileForAdoptTest(t, codexPath); !bytes.Equal(got, before) {
+			t.Fatalf("unreadable-gate acceptance refusal mutated client config\nbefore:\n%s\nafter:\n%s", before, got)
 		}
-		assertDeAdoptRecoveryStateIntact(t, manifestRoot, stateRoot, rec, snapshotPath, "")
+		persisted, found, readErr := ReadAdoptProvenance(name)
+		if readErr != nil || !found || persisted.OperationState != AdoptOperationStateAdopted {
+			t.Fatalf("unreadable-gate acceptance refusal changed provenance: found=%v rec=%+v err=%v", found, persisted, readErr)
+		}
+		if _, statErr := os.Stat(snapshotPath); statErr != nil {
+			t.Fatalf("unreadable-gate acceptance refusal removed snapshot: %v", statErr)
+		}
+		if _, statErr := os.Stat(filepath.Join(manifestRoot, name, "manifest.yaml")); statErr != nil {
+			t.Fatalf("unreadable-gate acceptance refusal removed manifest: %v", statErr)
+		}
 	})
 }
 
@@ -393,6 +413,81 @@ func TestExecuteDeAdoptE1ConcurrentOperationRefusesBeforeMark(t *testing.T) {
 	}
 }
 
+func TestExecuteDeAdoptReprobesHubGateUnderLease(t *testing.T) {
+	name := "deadopt-execute-gate-flip"
+	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
+	codexPath, manifestRoot, _, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state:           AdoptOperationStateAdopted,
+		originalState:   AdoptOriginalStatePresent,
+		liveConfig:      deAdoptHubConfig(name),
+		snapshotBytes:   snapshot,
+		writeSnapshot:   true,
+		manifestPresent: true,
+	})
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil || plan.Routing != DeAdoptRoutingFresh {
+		t.Fatalf("BuildDeAdoptPlan = %+v err=%v", plan, err)
+	}
+
+	gateOn := []byte("[mcp_servers.mcphub-hub]\nurl = \"http://127.0.0.1:1/mcp\"\n")
+	if err := os.WriteFile(codexPath, gateOn, 0o600); err != nil {
+		t.Fatalf("flip hub gate ON after planning: %v", err)
+	}
+	before := mustReadFileForAdoptTest(t, codexPath)
+
+	report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{})
+	if err == nil || !strings.Contains(err.Error(), "gate OFF first") || !strings.Contains(err.Error(), "codex-cli") || report != nil {
+		t.Fatalf("execute gate-flipped plan = report=%+v err=%v", report, err)
+	}
+	if got := mustReadFileForAdoptTest(t, codexPath); !bytes.Equal(got, before) {
+		t.Fatalf("gate-flip refusal mutated client config\nbefore:\n%s\nafter:\n%s", before, got)
+	}
+	persisted, found, readErr := ReadAdoptProvenance(name)
+	if readErr != nil || !found || persisted.OperationState != AdoptOperationStateAdopted {
+		t.Fatalf("gate-flip refusal changed provenance: found=%v rec=%+v err=%v", found, persisted, readErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(manifestRoot, rec.ManifestName, "manifest.yaml")); statErr != nil {
+		t.Fatalf("gate-flip refusal removed manifest: %v", statErr)
+	}
+}
+
+func TestExecuteDeAdoptDerivesResumeRoutingFromLeasedRow(t *testing.T) {
+	name := "deadopt-execute-fresh-plan-resume-row"
+	snapshot := []byte(deAdoptNativeConfig(name, "already-restored"))
+	codexPath, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state:           AdoptOperationStateAdopted,
+		originalState:   AdoptOriginalStatePresent,
+		liveConfig:      string(snapshot),
+		snapshotBytes:   snapshot,
+		writeSnapshot:   true,
+		manifestPresent: true,
+	})
+	seedDeAdoptSupervisorIntent(t, stateRoot, rec)
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil || plan.Routing != DeAdoptRoutingFresh {
+		t.Fatalf("BuildDeAdoptPlan = %+v err=%v", plan, err)
+	}
+
+	rec.OperationState = AdoptOperationStateDeAdopting
+	writeDeAdoptExecutorRecord(t, rec)
+	if err := os.Remove(filepath.Join(manifestRoot, name, "manifest.yaml")); err != nil {
+		t.Fatalf("simulate completed manifest delete: %v", err)
+	}
+	before := mustReadFileForAdoptTest(t, codexPath)
+
+	report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{})
+	if err != nil {
+		t.Fatalf("execute FRESH plan against leased resume row: %v", err)
+	}
+	if !reflect.DeepEqual(report.Restored, []string{"codex-cli"}) || len(report.Failed) != 0 {
+		t.Fatalf("resume-derived report = %+v", report)
+	}
+	if got := mustReadFileForAdoptTest(t, codexPath); !bytes.Equal(got, before) {
+		t.Fatalf("already-restored resume client was rewritten\nbefore:\n%s\nafter:\n%s", before, got)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
 func TestExecuteDeAdoptRereadsProvenanceUnderLease(t *testing.T) {
 	name := "deadopt-execute-row-replaced"
 	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
@@ -427,6 +522,49 @@ func TestExecuteDeAdoptRereadsProvenanceUnderLease(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(manifestRoot, name, "manifest.yaml")); statErr != nil {
 		t.Fatalf("replaced-row refusal removed manifest: %v", statErr)
+	}
+}
+
+func TestExecuteDeAdoptRejectsReplacementAdoptionByCreatedAt(t *testing.T) {
+	name := "deadopt-execute-replacement-created-at"
+	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
+	codexPath, manifestRoot, _, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state:           AdoptOperationStateAdopted,
+		originalState:   AdoptOriginalStatePresent,
+		liveConfig:      deAdoptHubConfig(name),
+		snapshotBytes:   snapshot,
+		writeSnapshot:   true,
+		manifestPresent: true,
+	})
+	rec.CreatedAt = time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+	rec.UpdatedAt = rec.CreatedAt
+	writeDeAdoptExecutorRecord(t, rec)
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil || plan.Routing != DeAdoptRoutingFresh {
+		t.Fatalf("BuildDeAdoptPlan = %+v err=%v", plan, err)
+	}
+	before := mustReadFileForAdoptTest(t, codexPath)
+
+	// Model a completed de-adopt followed by an otherwise-identical re-adopt:
+	// capture assigns the replacement row a new immutable creation identity.
+	replacement := rec
+	replacement.CreatedAt = rec.CreatedAt.Add(time.Second)
+	replacement.UpdatedAt = replacement.CreatedAt
+	writeDeAdoptExecutorRecord(t, replacement)
+
+	report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{})
+	if err == nil || !strings.Contains(err.Error(), "provenance changed under the lease") || report != nil {
+		t.Fatalf("execute replacement-adoption plan = report=%+v err=%v", report, err)
+	}
+	if got := mustReadFileForAdoptTest(t, codexPath); !bytes.Equal(got, before) {
+		t.Fatalf("replacement-adoption refusal mutated client config\nbefore:\n%s\nafter:\n%s", before, got)
+	}
+	persisted, found, readErr := ReadAdoptProvenance(name)
+	if readErr != nil || !found || persisted.OperationState != AdoptOperationStateAdopted || !persisted.CreatedAt.Equal(replacement.CreatedAt) {
+		t.Fatalf("replacement adoption changed: found=%v rec=%+v err=%v", found, persisted, readErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(manifestRoot, name, "manifest.yaml")); statErr != nil {
+		t.Fatalf("replacement-adoption refusal removed manifest: %v", statErr)
 	}
 }
 
