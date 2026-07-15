@@ -27,7 +27,6 @@ package api
 import (
 	"errors"
 	"io/fs"
-	"os"
 	"sort"
 
 	"mcp-local-hub/internal/clients"
@@ -36,17 +35,19 @@ import (
 // HubGateProbe reports the hub-gate state across supported clients.
 // GatedOn contains clients proven gate-ON by a live, enabled mcphub-hub
 // aggregate. Unreadable contains supported, non-relay clients whose gate state
-// could not be determined because their config could not be statted, read, or
-// parsed. Fail-closed callers must treat Unreadable as blocking because gate-OFF
-// has not been proven for those clients.
+// could not be determined because their config could not be read or parsed.
+// GetEntry is the layer-aware authority; an absent write target alone does not
+// make a layered client gate-OFF. Fail-closed callers must treat Unreadable as
+// blocking because gate-OFF has not been proven for those clients.
 type HubGateProbe struct {
 	GatedOn    []string
 	Unreadable []string
 }
 
 // ProbeHubGate classifies the hub-gate state of every applicable client.
-// Absent or disabled aggregates are gate-OFF; read errors are surfaced as
-// unreadable so callers can choose the appropriate failure policy.
+// GetEntry is the sole layer-aware authority: absent or disabled aggregates are
+// gate-OFF, while read or parse errors are surfaced as unreadable so callers can
+// choose the appropriate failure policy.
 func ProbeHubGate() HubGateProbe {
 	var probe HubGateProbe
 	all := clients.AllClients()
@@ -58,19 +59,15 @@ func ProbeHubGate() HubGateProbe {
 			// The hub aggregate is never written to a relay-stdio client.
 			continue
 		}
-		_, statErr := os.Stat(c.ConfigPath())
-		switch {
-		case statErr == nil:
-			// The config exists; classify its aggregate below.
-		case errors.Is(statErr, fs.ErrNotExist):
-			// A genuinely absent config cannot contain a live aggregate.
-			continue
-		default:
-			probe.Unreadable = append(probe.Unreadable, name)
-			continue
-		}
 		entry, err := c.GetEntry(hubReconcileAggregateEntryName)
 		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				// A genuinely absent config surfaced as a NotExist error (adapters
+				// that do not normalize it internally) is gate-OFF, not unknown.
+				continue
+			}
+			// Permission / ACL / parse / any other read error means the gate
+			// state is unknown.
 			probe.Unreadable = append(probe.Unreadable, name)
 			continue
 		}
@@ -91,14 +88,13 @@ func ProbeHubGate() HubGateProbe {
 }
 
 // GatedOnClients returns the sorted list of supported client ids whose
-// on-disk config currently carries the reserved `mcphub-hub` aggregate
-// entry — i.e. the clients that are gate-ON and whose URLs are baked to
-// the current hub port.
+// effective, layer-aware config currently carries the reserved `mcphub-hub`
+// aggregate entry — i.e. the clients that are gate-ON and whose URLs are baked
+// to the current hub port.
 //
 // A client is reported gate-ON iff:
 //   - its adapter constructs on this host (clients.AllClients drops
 //     unconstructable adapters), AND
-//   - its config path stats successfully, AND
 //   - GetEntry("mcphub-hub") returns a non-nil entry with no error, AND
 //   - that entry is NOT disabled (entry.Disabled == false).
 //
@@ -111,10 +107,11 @@ func ProbeHubGate() HubGateProbe {
 // skips it while read-membership callers still see the entry. This mirrors the
 // scan path (shapeMimoCodeEntry classifies enabled:false as Transport "absent").
 //
-// Stat/read errors per client (corrupt config, DACL violation) are omitted from
+// Read/parse errors per client (corrupt config, DACL violation) are omitted from
 // this returned slice: ProbeHubGate retains them separately in Unreadable, while
-// this reset-port advisory wrapper intentionally keeps its historical
-// "not detectably gate-ON" behavior.
+// this reset-port advisory wrapper intentionally keeps its historical "not
+// detectably gate-ON" behavior. A missing write target is not such an error:
+// GetEntry remains authoritative for layered clients such as MiMoCode.
 //
 // Relay-stdio clients (Antigravity, Zed, ...) are skipped: the gate-ON
 // reconciler never writes a `mcphub-hub` aggregate to them (they require

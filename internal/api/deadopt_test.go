@@ -401,8 +401,8 @@ func TestBuildDeAdoptPlanT2PartialGateAndStateRouting(t *testing.T) {
 		}
 	})
 
-	t.Run("un-stattable hub gate fails closed before state routing", func(t *testing.T) {
-		name := "deadoptt2unstattablegate"
+	t.Run("layered hub gate uses GetEntry despite absent write target", func(t *testing.T) {
+		name := "deadoptt2layeredgate"
 		codexPath, _, _, _ := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
 			state:           AdoptOperationStateAdopted,
 			originalState:   AdoptOriginalStateAbsent,
@@ -412,30 +412,17 @@ func TestBuildDeAdoptPlanT2PartialGateAndStateRouting(t *testing.T) {
 
 		root := filepath.Dir(filepath.Dir(filepath.Dir(codexPath)))
 		t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg-config"))
+		t.Setenv("MIMOCODE_HOME", "")
+		t.Setenv("MIMOCODE_CONFIG", "")
+		t.Setenv("MIMOCODE_CONFIG_DIR", "")
+		t.Setenv("MIMOCODE_CONFIG_CONTENT", `{"mcp":{"mcphub-hub":{"type":"remote","url":"http://127.0.0.1:1/mcp","enabled":true}}}`)
 
-		candidateHomes := []string{
-			filepath.Join(root, "*"),
-			filepath.Join(root, strings.Repeat("x", 300)),
+		mimocodePath, err := clients.ConfigPathForName("mimocode")
+		if err != nil {
+			t.Fatalf("resolve mimocode config path: %v", err)
 		}
-		loopHome := filepath.Join(root, "home-loop")
-		if err := os.Symlink(loopHome, loopHome); err == nil {
-			candidateHomes = append(candidateHomes, loopHome)
-		}
-		var unStattablePath string
-		for _, candidateHome := range candidateHomes {
-			t.Setenv("HOME", candidateHome)
-			t.Setenv("USERPROFILE", candidateHome)
-			candidatePath, err := clients.ConfigPathForName("codex-cli")
-			if err != nil {
-				t.Fatalf("resolve codex config path: %v", err)
-			}
-			if _, statErr := os.Stat(candidatePath); statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
-				unStattablePath = candidatePath
-				break
-			}
-		}
-		if unStattablePath == "" {
-			t.Fatal("no fixture config path produced a non-NotExist stat error")
+		if _, statErr := os.Stat(mimocodePath); !errors.Is(statErr, fs.ErrNotExist) {
+			t.Fatalf("os.Stat(%q) error = %v, want absent MiMoCode write target", mimocodePath, statErr)
 		}
 		absentPath, err := clients.ConfigPathForName("opencode")
 		if err != nil {
@@ -444,16 +431,24 @@ func TestBuildDeAdoptPlanT2PartialGateAndStateRouting(t *testing.T) {
 		if _, absentErr := os.Stat(absentPath); !errors.Is(absentErr, fs.ErrNotExist) {
 			t.Fatalf("os.Stat(%q) error = %v, want NotExist", absentPath, absentErr)
 		}
+		opencode := clients.AllClients()["opencode"]
+		if opencode == nil {
+			t.Fatal("opencode client did not construct")
+		}
+		absentEntry, err := opencode.GetEntry(hubReconcileAggregateEntryName)
+		if err != nil || absentEntry != nil {
+			t.Fatalf("opencode GetEntry(%q) = (%+v, %v), want (nil, nil) for genuine absence", hubReconcileAggregateEntryName, absentEntry, err)
+		}
 
 		probe := ProbeHubGate()
-		if slices.Contains(probe.GatedOn, "codex-cli") ||
-			!slices.Contains(probe.Unreadable, "codex-cli") ||
+		if !slices.Contains(probe.GatedOn, "mimocode") ||
+			slices.Contains(probe.Unreadable, "mimocode") ||
 			slices.Contains(probe.GatedOn, "opencode") ||
 			slices.Contains(probe.Unreadable, "opencode") {
-			t.Fatalf("ProbeHubGate() = %+v, want un-stattable codex-cli unreadable and absent opencode in neither set", probe)
+			t.Fatalf("ProbeHubGate() = %+v, want layered mimocode gate-ON and genuinely absent opencode in neither set", probe)
 		}
-		if gated := GatedOnClients(); slices.Contains(gated, "codex-cli") {
-			t.Fatalf("GatedOnClients() = %v, want reset-port probe to keep excluding un-stattable codex-cli", gated)
+		if gated := GatedOnClients(); !slices.Contains(gated, "mimocode") {
+			t.Fatalf("GatedOnClients() = %v, want reset-port probe to include layered mimocode", gated)
 		}
 
 		plan, err := NewAPI().BuildDeAdoptPlan(name)
@@ -461,10 +456,9 @@ func TestBuildDeAdoptPlanT2PartialGateAndStateRouting(t *testing.T) {
 			t.Fatalf("BuildDeAdoptPlan: %v", err)
 		}
 		if plan.Routing != DeAdoptRoutingRefuse || plan.Eligibility.Eligible ||
-			!plan.Eligibility.AdoptOwned || plan.Eligibility.GateOn ||
-			!strings.Contains(plan.RefusalReason, "unreadable") ||
-			!strings.Contains(plan.RefusalReason, "codex-cli") {
-			t.Fatalf("un-stattable-gate plan = %+v, want fail-closed REFUSE naming codex-cli", plan)
+			!plan.Eligibility.AdoptOwned || !plan.Eligibility.GateOn ||
+			!strings.Contains(plan.RefusalReason, "gate OFF first") {
+			t.Fatalf("layered-gate plan = %+v, want gate-ON REFUSE", plan)
 		}
 	})
 
