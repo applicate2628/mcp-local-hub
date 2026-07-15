@@ -1,10 +1,21 @@
 # `BuildHubReconcilePlan` leaves a stale `mcphub-hub` for a zero-binding client under gate-ON
 
-- **status:** open
+- **status:** FIXED 2026-07-16 (adoption-lifecycle qualification slice)
 - **severity:** medium (stale aggregate URL; connection-refused surface after last-server removal)
 - **filed:** 2026-07-11
 - **context:** adjacent-finding (surfaced by the de-adopt multi-model design review)
 - **owner:** unassigned (pre-existing; NOT de-adopt v1 scope)
+
+> **FIXED 2026-07-16.** `BuildHubReconcilePlan`'s up-front stale-aggregate sweep now runs under
+> gate-ON too, emitting `Remove mcphub-hub` for every supported non-relay client with ZERO
+> remaining bindings (the per-binding loop re-adds the aggregate only for clients WITH bindings).
+> So `mcphub install --reconcile-hub-mode` prunes the stale aggregate a client keeps after its
+> last binding is removed. Declared behavioral. Regression guard:
+> `TestBuildHubReconcilePlanGateOnPrunesZeroBindingAggregate`
+> (`internal/api/install_hub_reconcile_test.go`) — a manifest binding only claude-code, asserting
+> every OTHER supported client gets Remove mcphub-hub while claude-code keeps AddReplace. The
+> gate-OFF all-client sweep + the openhands per-binding skip are unaffected (verified by the
+> existing reconcile suite).
 
 ## Symptom
 

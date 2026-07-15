@@ -249,6 +249,70 @@ func TestBuildHubReconcilePlanGateOffRemovesAggregateForAllSupportedClients(t *t
 	}
 }
 
+// TestBuildHubReconcilePlanGateOnPrunesZeroBindingAggregate is the fix for bug
+// 2026-07-11-hub-reconcile-gate-on-zero-binding-stale-aggregate: under gate-ON, a supported
+// client that has dropped to ZERO bindings must get a `Remove mcphub-hub` op so its stale
+// aggregate is pruned. Before the fix the gate-ON path only iterated clients WITH bindings, so
+// a zero-binding client kept a `mcphub-hub` aggregate pointing at a hub route that aggregates
+// nothing for it. The binding client must still get AddReplace (not Remove).
+func TestBuildHubReconcilePlanGateOnPrunesZeroBindingAggregate(t *testing.T) {
+	manifests := []config.ServerManifest{{
+		Name:      "alpha",
+		Kind:      config.KindGlobal,
+		Transport: config.TransportNativeHTTP,
+		Command:   "uvx",
+		Daemons:   []config.DaemonSpec{{Name: "default", Port: 9100}},
+		ClientBindings: []config.ClientBinding{
+			{Client: "claude-code", Daemon: "default", URLPath: "/mcp"},
+		},
+	}}
+	endpoint := HubEndpoint{Port: 9180, InstanceID: "inst-1"}
+	// Gate-ON fails fast on a missing token for a binding client; give every supported client a
+	// token (harmless for the zero-binding clients, which only receive a Remove op).
+	tokens := HubTokenTable{Tokens: map[string]string{}}
+	for _, c := range clients.SupportedClientNames() {
+		tokens.Tokens[c] = "0000000000000000000000000000000000000000000000000000000000000000"
+	}
+
+	plan, err := BuildHubReconcilePlan(manifests, endpoint, tokens, HubReconcileOpts{GateOn: true})
+	if err != nil {
+		t.Fatalf("BuildHubReconcilePlan: %v", err)
+	}
+
+	gotRemove := map[string]bool{}
+	gotAdd := map[string]bool{}
+	for _, op := range plan {
+		if op.EntryName == "mcphub-hub" {
+			switch op.Action {
+			case ClientUpdateRemove:
+				gotRemove[op.Client] = true
+			case ClientUpdateAddReplace:
+				gotAdd[op.Client] = true
+			}
+		}
+	}
+
+	// claude-code (with a binding) keeps its aggregate: AddReplace, NOT Remove.
+	if !gotAdd["claude-code"] {
+		t.Errorf("gate-ON: binding client claude-code must get AddReplace mcphub-hub")
+	}
+	if gotRemove["claude-code"] {
+		t.Errorf("gate-ON: binding client claude-code must NOT get Remove mcphub-hub (it keeps the aggregate)")
+	}
+	// Every OTHER supported non-relay client (zero bindings) must get its stale aggregate pruned.
+	for _, c := range clients.SupportedClientNames() {
+		if c == "claude-code" || clients.IsRelayStdio(c) {
+			continue
+		}
+		if !gotRemove[c] {
+			t.Errorf("gate-ON: zero-binding supported client %q must get Remove mcphub-hub (stale aggregate would persist)", c)
+		}
+		if gotAdd[c] {
+			t.Errorf("gate-ON: zero-binding client %q must NOT get AddReplace mcphub-hub", c)
+		}
+	}
+}
+
 // TestBuildHubReconcilePlanGateOnFailsFastOnMissingToken pins the
 // codex bot phase5 r7 P1 closure on PR #160: gate-ON reconcile MUST
 // reject the plan upfront when any participating client lacks a
