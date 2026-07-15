@@ -149,7 +149,7 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 	case AdoptOperationStateAdopted:
 		plan.Routing = DeAdoptRoutingFresh
 	case AdoptOperationStateAdopting:
-		if !deAdoptHasLiveBinding(rec, allClients) {
+		if classifyDeadAdoptingRow(*rec) != adoptRowCommittedKeep {
 			plan.RefusalReason = fmt.Sprintf("manifest %q has an adopting row without a live hub binding; adopt orphan GC owns it", server)
 			return plan, nil
 		}
@@ -255,24 +255,6 @@ func (a *API) buildDeAdoptManifestReadiness(rec *AdoptProvenanceRecord, routing 
 	}
 	readiness.HashReady = true
 	return readiness
-}
-
-func deAdoptHasLiveBinding(rec *AdoptProvenanceRecord, allClients map[string]clients.Client) bool {
-	for _, clientName := range rec.AdoptClients {
-		adapter, ok := allClients[clientName]
-		if !ok {
-			continue
-		}
-		mutator, ok := clients.AsCASEntryMutator(adapter)
-		if !ok {
-			continue
-		}
-		verdict, err := mutator.ClassifyEntryUnderLock(rec.SourceEntryName, deAdoptLiveBindingMatcher(rec, clientName), nil)
-		if err == nil && verdict == clients.ClassifyStillHub {
-			return true
-		}
-	}
-	return false
 }
 
 func deAdoptLiveBindingMatcher(rec *AdoptProvenanceRecord, clientName string) func(*clients.MCPEntry) bool {
@@ -390,6 +372,8 @@ func mapDeAdoptClientDisposition(
 			return DeAdoptClientRemovePending, false, "live hub entry is ready to remove"
 		case clients.ClassifyGenuineConflict:
 			return DeAdoptClientFailed, true, "live entry is a genuine conflict; conflict acceptance is available"
+		case clients.ClassifyRestoreDone:
+			return DeAdoptClientRestoreDone, false, "client is already in its de-adopted target state"
 		default:
 			return DeAdoptClientFailed, false, "fresh de-adopt requires the live entry to remain the hub binding"
 		}

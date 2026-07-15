@@ -139,7 +139,7 @@ func TestDeAdoptT11DispositionCompositionTable(t *testing.T) {
 		{"resume missing snapshot absent manifest conflict verdict", DeAdoptRoutingResume, AdoptOriginalStatePresent, deAdoptSnapshotMissing, true, clients.ClassifyGenuineConflict, DeAdoptClientRestoreDone, false},
 		{"resume missing snapshot absent manifest unreadable live", DeAdoptRoutingResume, AdoptOriginalStatePresent, deAdoptSnapshotMissing, true, clients.ClassifyUnreadable, DeAdoptClientFailed, false},
 		{"fresh present still-hub", DeAdoptRoutingFresh, AdoptOriginalStatePresent, deAdoptSnapshotAvailable, false, clients.ClassifyStillHub, DeAdoptClientRestorePending, false},
-		{"fresh restore-done is not admitted", DeAdoptRoutingFresh, AdoptOriginalStatePresent, deAdoptSnapshotAvailable, false, clients.ClassifyRestoreDone, DeAdoptClientFailed, false},
+		{"fresh present restore-done", DeAdoptRoutingFresh, AdoptOriginalStatePresent, deAdoptSnapshotAvailable, false, clients.ClassifyRestoreDone, DeAdoptClientRestoreDone, false},
 		{"fresh genuine conflict is accept-eligible", DeAdoptRoutingFresh, AdoptOriginalStatePresent, deAdoptSnapshotAvailable, false, clients.ClassifyGenuineConflict, DeAdoptClientFailed, true},
 		{"fresh present available unreadable live", DeAdoptRoutingFresh, AdoptOriginalStatePresent, deAdoptSnapshotAvailable, false, clients.ClassifyUnreadable, DeAdoptClientFailed, false},
 		{"fresh present missing still-hub", DeAdoptRoutingFresh, AdoptOriginalStatePresent, deAdoptSnapshotMissing, false, clients.ClassifyStillHub, DeAdoptClientFailed, false},
@@ -151,11 +151,11 @@ func TestDeAdoptT11DispositionCompositionTable(t *testing.T) {
 		{"fresh present unreadable genuine conflict", DeAdoptRoutingFresh, AdoptOriginalStatePresent, deAdoptSnapshotUnreadable, false, clients.ClassifyGenuineConflict, DeAdoptClientFailed, false},
 		{"fresh present unreadable live", DeAdoptRoutingFresh, AdoptOriginalStatePresent, deAdoptSnapshotUnreadable, false, clients.ClassifyUnreadable, DeAdoptClientFailed, false},
 		{"fresh absent still-hub", DeAdoptRoutingFresh, AdoptOriginalStateAbsent, deAdoptSnapshotNotApplicable, false, clients.ClassifyStillHub, DeAdoptClientRemovePending, false},
-		{"fresh absent restore-done", DeAdoptRoutingFresh, AdoptOriginalStateAbsent, deAdoptSnapshotNotApplicable, false, clients.ClassifyRestoreDone, DeAdoptClientFailed, false},
+		{"fresh absent restore-done", DeAdoptRoutingFresh, AdoptOriginalStateAbsent, deAdoptSnapshotNotApplicable, false, clients.ClassifyRestoreDone, DeAdoptClientRestoreDone, false},
 		{"fresh absent genuine conflict", DeAdoptRoutingFresh, AdoptOriginalStateAbsent, deAdoptSnapshotNotApplicable, false, clients.ClassifyGenuineConflict, DeAdoptClientFailed, true},
 		{"fresh absent unreadable live", DeAdoptRoutingFresh, AdoptOriginalStateAbsent, deAdoptSnapshotNotApplicable, false, clients.ClassifyUnreadable, DeAdoptClientFailed, false},
 		{"fresh merged-lower still-hub", DeAdoptRoutingFresh, AdoptOriginalStatePresentMergedLower, deAdoptSnapshotNotApplicable, false, clients.ClassifyStillHub, DeAdoptClientRemovePending, false},
-		{"fresh merged-lower restore-done", DeAdoptRoutingFresh, AdoptOriginalStatePresentMergedLower, deAdoptSnapshotNotApplicable, false, clients.ClassifyRestoreDone, DeAdoptClientFailed, false},
+		{"fresh merged-lower restore-done", DeAdoptRoutingFresh, AdoptOriginalStatePresentMergedLower, deAdoptSnapshotNotApplicable, false, clients.ClassifyRestoreDone, DeAdoptClientRestoreDone, false},
 		{"fresh merged-lower genuine conflict", DeAdoptRoutingFresh, AdoptOriginalStatePresentMergedLower, deAdoptSnapshotNotApplicable, false, clients.ClassifyGenuineConflict, DeAdoptClientFailed, true},
 		{"fresh merged-lower unreadable live", DeAdoptRoutingFresh, AdoptOriginalStatePresentMergedLower, deAdoptSnapshotNotApplicable, false, clients.ClassifyUnreadable, DeAdoptClientFailed, false},
 	}
@@ -376,17 +376,19 @@ func TestBuildDeAdoptPlanT2PartialGateAndStateRouting(t *testing.T) {
 	})
 
 	tests := []struct {
-		name       string
-		state      AdoptOperationState
-		live       func(string) string
-		wantRoute  DeAdoptRoutingVerdict
-		wantReason string
+		name            string
+		state           AdoptOperationState
+		live            func(string) string
+		manifestPresent bool
+		wantRoute       DeAdoptRoutingVerdict
+		wantReason      string
 	}{
-		{"adopted routes fresh", AdoptOperationStateAdopted, deAdoptHubConfig, DeAdoptRoutingFresh, ""},
-		{"committed adopting routes fresh", AdoptOperationStateAdopting, deAdoptHubConfig, DeAdoptRoutingFresh, ""},
-		{"uncommitted adopting refuses", AdoptOperationStateAdopting, func(string) string { return "model = \"gpt-5\"\n" }, DeAdoptRoutingRefuse, "orphan GC owns it"},
-		{"closed refuses", AdoptOperationStateClosed, func(string) string { return "model = \"gpt-5\"\n" }, DeAdoptRoutingRefuse, "already de-adopted"},
-		{"unknown state refuses", AdoptOperationState("unknown"), deAdoptHubConfig, DeAdoptRoutingRefuse, "unsupported"},
+		{"adopted routes fresh", AdoptOperationStateAdopted, deAdoptHubConfig, true, DeAdoptRoutingFresh, ""},
+		{"committed adopting live hub routes fresh", AdoptOperationStateAdopting, deAdoptHubConfig, true, DeAdoptRoutingFresh, ""},
+		{"committed adopting manifest-present drift routes fresh", AdoptOperationStateAdopting, func(string) string { return "model = \"gpt-5\"\n" }, true, DeAdoptRoutingFresh, ""},
+		{"pre-install crash orphan adopting refuses", AdoptOperationStateAdopting, func(string) string { return "model = \"gpt-5\"\n" }, false, DeAdoptRoutingRefuse, "orphan GC owns it"},
+		{"closed refuses", AdoptOperationStateClosed, func(string) string { return "model = \"gpt-5\"\n" }, true, DeAdoptRoutingRefuse, "already de-adopted"},
+		{"unknown state refuses", AdoptOperationState("unknown"), deAdoptHubConfig, true, DeAdoptRoutingRefuse, "unsupported"},
 	}
 	for i, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -395,7 +397,7 @@ func TestBuildDeAdoptPlanT2PartialGateAndStateRouting(t *testing.T) {
 				state:           tc.state,
 				originalState:   AdoptOriginalStateAbsent,
 				liveConfig:      tc.live(name),
-				manifestPresent: true,
+				manifestPresent: tc.manifestPresent,
 			})
 			plan, err := NewAPI().BuildDeAdoptPlan(name)
 			if err != nil {

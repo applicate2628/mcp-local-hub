@@ -729,13 +729,19 @@ BuildDeAdoptPlan(server):
         found=false                          -> REFUSE (not adopt-owned, or already de-adopted;
                                                 no `closed` tombstone exists — item 1)
         state == adopted                     -> FRESH   (full plan gates)
-        state == adopting WITH a live binding -> FRESH   (committed-but-unflipped; G6 admits it)
-        state == adopting WITHOUT a live binding -> REFUSE (pre-install crash orphan; adopt GC owns it)
+        state == adopting AND classifyDeadAdoptingRow(rec) == adoptRowCommittedKeep
+                                               -> FRESH   (matches Mark's admission; a manifest-present
+                                                           committed row whose hub entry merely drifted
+                                                           is admitted by Signal 2b)
+        state == adopting AND classifier != adoptRowCommittedKeep
+                                               -> REFUSE  (true pre-install crash orphan; adopt GC owns it)
         state == de_adopting                 -> RESUME  (per-step / per-client done-ness)
   P2. Manifest hash-gate readiness: on-disk manifest hash == ExpectedManifestHash
       (RESUME: SKIP if the manifest file is already absent — delete step done).
-  P3. Per client (FRESH): the live entry MUST still be the hub entry
-      (liveEntryMatchesManifestBinding); for `present`, the snapshot exists + sha256 matches.
+  P3. Per client (FRESH): a StillHub entry remains mutation-pending; a RestoreDone entry is a
+      fortuitous no-op already in the de-adopted target state, not a conflict. Only
+      GenuineConflict / Unreadable / snapshot-unverifiable clients fail FRESH; for `present`, the
+      snapshot exists + sha256 matches before its verdict can prove completion.
       RESUME per client done-ness is DERIVED via the ONE atomic classifier
       ClassifyEntryUnderLock(SourceEntryName, match, snapshotSubtree) — NOT a parallel unlocked
       read. There is exactly ONE live-config read-and-compare code path (this classifier, whose
@@ -756,7 +762,9 @@ BuildDeAdoptPlan(server):
         classifier RestoreDone (present: write-target-physical live raw subtree deep-equals
           snapshotSubtree; absent/merged-lower: entry ABSENT FROM THE WRITE TARGET — a merged-lower's
           re-emerged lower layer is out of scope, so this is RestoreDone NOT a conflict)
-                                                 -> RESTORE-DONE
+                                                 -> RESTORE-DONE (including FRESH: already at the
+                                                    de-adopted target, no mutation, idempotent and
+                                                    consistent with RESUME)
         classifier GenuineConflict (present: write-target-physical live subtree ≠ snapshot, or
           write-target live==nil vs a present snapshot; absent/merged-lower: a non-hub entry occupies
           the WRITE-TARGET slot)
@@ -1078,7 +1086,7 @@ close — a deliberate, warned, operator-driven opt-out of restoration, not a si
 | Live entry VANISHED between plan+execute (nil) | `CASGuardedRemoveEntry` nil-live = already-done success; `CASRestoreEntryFromBytes` nil-live = conflict-refuse fail-closed (never resurrect against intent) — B1 nil-live, no panic. |
 | Manifest externally edited | `ManifestDeleteInWithHash` refuses `ErrManifestHashMismatch`; empty/absent hash → fail-closed refusal. |
 | No provenance row | REFUSE (no `--reconstruct-legacy` in v1). |
-| Row `adopting` with no live binding | Pre-install crash orphan — adopt GC owns it; de-adopt refuses. E2 re-verifies adoptRowCommittedKeep under the held lease before flipping a committed-adopting row (B4). |
+| Row `adopting` classified `adoptRowCommittedKeep` | De-adopt admits it as FRESH, including Signal 2b: manifest present while the live hub binding has drifted away. Any other `adopting` row is a true pre-install crash orphan, so adopt GC owns it and de-adopt refuses. E2 re-verifies `adoptRowCommittedKeep` under the held lease before flipping a committed-adopting row (B4). |
 | Routed-secret delete fails / shared key | Pre-filter + shared-scan; row stays `de_adopting`; retry deletes remaining; close-done = deleted-or-skipped-as-shared (P1-4). |
 | Crash mid-execute | Recoverable `de_adopting` row; roll-forward resume skips RESTORE-DONE (raw-subtree comparator, B1) + done steps, completes, DELETES the row. Crash INSIDE close (snapshot dir gone + manifest gone + live≠hub) resumes RESTORE-DONE, not wedged (B2b). |
 | Abandoned `de_adopting` row (crash, never retried/accepted) | Wedges re-adopt + retains secret-bearing snapshots no GC reaps; `de_adopting`-GC / `--recover` DEFERRED to the follow-up (G7 residual). |
@@ -1140,8 +1148,9 @@ API/unit (falsification):
 11. **Gate-ON refusal.** A gate-ON host → `BuildDeAdoptPlan` refuses with the "gate OFF
     first" message, zero mutation.
 12. **No-provenance / committed-adopting admission (G6) + E2 re-verify (B4).** No row → refuse;
-    a committed-but-`adopting` row (live binding) → admitted as FRESH. **B4:** simulate the
-    row becoming UNCOMMITTED between plan-admission and E2 (its hub entries removed) → E2's
+    a committed-but-`adopting` row classified `adoptRowCommittedKeep` → admitted as FRESH,
+    including manifest-present Signal 2b when its live hub binding has drifted away. **B4:** simulate
+    the row becoming UNCOMMITTED between plan-admission and E2 (its hub entries and manifest removed) → E2's
     `MarkAdoptProvenanceDeAdopting` re-runs `classifyDeadAdoptingRow` under the held lease and
     REFUSES the flip (adopt GC owns it), rather than converting a GC-reapable row into a
     GC-immune `de_adopting` wedge.
