@@ -26,6 +26,7 @@ func NewRootCmd() *cobra.Command {
 	}
 	root.AddCommand(newInstallCmd())
 	root.AddCommand(newAdoptCmd())
+	root.AddCommand(newDeAdoptCmd())
 	root.AddCommand(newUpgradeCmd())
 	root.AddCommand(newSetupCmd())
 	root.AddCommand(newUninstallCmd())
@@ -83,6 +84,7 @@ func newInstallCmd() *cobra.Command {
 	return newInstallCmdReal()
 }
 func newAdoptCmd() *cobra.Command     { return newAdoptCmdReal() }
+func newDeAdoptCmd() *cobra.Command   { return newDeAdoptCmdReal() }
 func newUpgradeCmd() *cobra.Command   { return newUpgradeCmdReal() }
 func newSetupCmd() *cobra.Command     { return newSetupCmdReal() }
 func newUninstallCmd() *cobra.Command { return newUninstallCmdReal() }

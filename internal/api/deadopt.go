@@ -253,6 +253,51 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 	return plan, nil
 }
 
+// PrintDeAdoptPlan writes a redacted dry-run summary for CLI callers. It
+// deliberately omits manifest hashes, config bodies, snapshot bytes, and secret
+// values; only names, state labels, counts, and planner-authored reasons appear.
+func PrintDeAdoptPlan(w io.Writer, plan *DeAdoptPlan) {
+	if w == nil || plan == nil {
+		return
+	}
+	fmt.Fprintf(w, "De-adopt plan for manifest %q (dry-run):\n", plan.ManifestName)
+	fmt.Fprintf(w, "  routing: %s\n", plan.Routing)
+	if plan.SourceEntryName != "" {
+		fmt.Fprintf(w, "  source entry: %s\n", plan.SourceEntryName)
+	}
+	fmt.Fprintf(w, "  target clients: %d", len(plan.AdoptClients))
+	if len(plan.AdoptClients) != 0 {
+		fmt.Fprintf(w, " (%s)", strings.Join(plan.AdoptClients, ","))
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  eligibility: adopt-owned=%t gate-on=%t eligible=%t\n",
+		plan.Eligibility.AdoptOwned, plan.Eligibility.GateOn, plan.Eligibility.Eligible)
+	if len(plan.Eligibility.GateOnClients) != 0 {
+		fmt.Fprintf(w, "  gate-on clients: %d (%s)\n",
+			len(plan.Eligibility.GateOnClients), strings.Join(plan.Eligibility.GateOnClients, ","))
+	}
+	if plan.Eligibility.BlockedReason != "" {
+		fmt.Fprintf(w, "  eligibility reason: %s\n", plan.Eligibility.BlockedReason)
+	}
+	fmt.Fprintf(w, "  manifest readiness: present=%t already-absent=%t hash-ready=%t\n",
+		plan.Manifest.Present, plan.Manifest.AlreadyAbsent, plan.Manifest.HashReady)
+	if plan.Manifest.Reason != "" {
+		fmt.Fprintf(w, "  manifest reason: %s\n", plan.Manifest.Reason)
+	}
+	for _, client := range plan.Clients {
+		fmt.Fprintf(w, "  client %s: original=%s disposition=%s accept-eligible=%t",
+			client.Client, client.OriginalState, client.Disposition, client.AcceptEligible)
+		if client.Reason != "" {
+			fmt.Fprintf(w, " reason=%s", client.Reason)
+		}
+		fmt.Fprintln(w)
+	}
+	if plan.RefusalReason != "" {
+		fmt.Fprintf(w, "  refusal: %s\n", plan.RefusalReason)
+	}
+	fmt.Fprintln(w, "No changes made. Re-run with --yes to apply.")
+}
+
 // ExecuteDeAdopt applies the atomic all-clients de-adopt operation using no
 // conflict-acceptance overrides.
 func (a *API) ExecuteDeAdopt(server string, w io.Writer) (*DeAdoptReport, error) {
