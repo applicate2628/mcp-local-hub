@@ -2,6 +2,31 @@
 
 > Persisted from workflow wbi47xgg2 (R: RAM-disk, would be lost on reboot). Source of truth for Phase 2 audit-fixes.
 
+> **## HEAD-RECONCILIATION 2026-07-15 (sonnet HEAD-verify — the inline fixed-markers below were STALE).**
+> All 7 findings re-verified against live master by reading the cited code (not the markers). Result:
+> - **Finding P1 (state-fanout, 4 mappers)** — FIXED (`4133dd1`, marked below).
+> - **Finding 1 (config path double-encode + COPILOT_HOME)** — FIXED: descriptor drops its `configPath`
+>   closure, resolver builds the adapter + calls its own `ConfigPath()`; `ConfigPathForName` at
+>   `clients.go:984`; reconcile test `clients_test.go:399`; COPILOT_HOME sole-owned `copilot_cli.go:57-76`.
+> - **Finding 2 (/api/status vs /api/health dual state-enum)** — FIXED: one canonical `DaemonDisplayState`
+>   enum `daemon_state.go` (both normalizers now 1-line delegates: `health.go:1184`,
+>   `supervisor_ipc_status_client.go:335`) + consistency guard `daemon_state_consistency_test.go`.
+> - **Finding 3 (hand-rolled atomic writers bypass `WriteStateFileAtomic`)** — FIXED: all 4 migrated
+>   (`workspace_registry.go:186`, `settings.go:180`, `dismiss.go:133`, `client_install_prefs.go`); the one
+>   `daemon_intent.go:985` exception is documented retired/test-only (zero prod callers).
+> - **Finding 4 (no central error-redaction; raw path leaks)** — **PARTIAL / RESIDUAL.** The
+>   `writeAPIErrorRedacted` helper exists + the cited supervisor-intent/overlay/manifest leaks are fixed,
+>   but 4 sites still return raw `api.DaemonStateDir()` errors (absolute path via `errStateParentInsecure`)
+>   on POSIX: `daemon_env.go:163,223,355` + `supervisor_restart.go:84`. Tracked:
+>   `backlog/2026-07-15-gui-state-dir-error-path-leak-residual.md`.
+> - **Finding 5 (/api/path/validate echoes raw os.Stat error+path)** — FIXED: opaque token
+>   `path_validate.go:118-126`.
+> - **Finding 6 (backups restore surfaces absolute paths)** — NO-FIX-NEEDED (the finding's own verdict was
+>   "EXEMPT these path echoes"; code matches — `backups_actions.go:226-272` returns paths by design).
+>
+> **Net: 5/6 resolved-or-exempt; 1 residual (finding 4, tracked). The inline `[P2]`/`[P3]` markers below
+> are the ORIGINAL 2026-06-17 state — trust this header, not them.**
+
 
 ## g9-architecture
 

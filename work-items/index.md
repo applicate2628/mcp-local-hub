@@ -42,7 +42,12 @@ reconciliation records, not open tasks.
 
 ## Reference / parked (loose root files — NOT open tasks)
 
-- `2026-06-17-phase1-audit-findings.md` — Phase 1 audit source-of-truth (historical reference).
+- `2026-06-17-phase1-audit-findings.md` — Phase 1 arch+security audit. **HEAD-reconciled 2026-07-15
+  (the inline fixed-markers were stale):** 5/6 findings resolved-or-exempt (P1 state-fanout, config-path
+  double-encode, dual state-enum, hand-rolled atomic writers, path-validate raw-error — all FIXED with
+  backing tests; backups path-echo EXEMPT-by-design). **1 residual:** finding 4's 4 GUI state-dir-error
+  POSIX path-leak sites → tracked `backlog/2026-07-15-gui-state-dir-error-path-leak-residual.md`. See the
+  doc's HEAD-RECONCILIATION header for per-finding evidence.
 - `2026-06-18-clean-install-ux-vision.md` — PARKED user vision (post-dev-debug future).
 - `2026-06-18-vendor-init-uninstalled-clients.md` — RESOLVED 2026-06-21 (secure-parent-create stack).
 - `roadmap-scan-2026-06-14.md` — gitignored local raw-inventory scan the `ROADMAP.md` audit
