@@ -1,12 +1,15 @@
 # status - de-adopt v1 (hub to native, all-clients-only, gate-OFF-only, atomic)
 
 Template: design → delivery (full-delivery). Orchestrator: `$lead`.
-State: **IN PROGRESS — Phase 0 + Phase 1 DONE; Phase 1 in Codex-bot review (PR #539).**
+State: **IN PROGRESS — Phases 0-6 DONE + MERGED to master; Phase 7 (BuildDeAdoptPlan) in impl.**
 Design round-5 is ACCEPTED (arch delta-recheck PASS 2026-07-13); `$planner` broke it into a
-12-phase delivery plan (`plan.md`, 2026-07-14). Phase 0 (docs precondition) and Phase 1
-(`ManifestDeleteInWithHash`) are delivered on branch `feat/deadopt-phase1-manifest-delete-hash`;
-Phase 1 is under bot review as PR #539 with the P3 atomicity-contract doc-fix committed at
-`23971e87` (awaiting Sol review + bot re-trigger). Phases 2-11 pending. master HEAD = `c7e2534b`.
+12-phase delivery plan (`plan.md`, 2026-07-14). Phases 0-6 are all delivered + squash-merged:
+Phase 0+1 (`ManifestDeleteInWithHash`, #539/82e07b46), Phase 2 (restore-extraction, #540),
+Phase 3 (CAS mutators, #542), Phase 4 (`ClassifyEntryUnderLock`+`EntryRawSubtree`, #544),
+Phase 5 (`.snapshot` read-cap, #543), Phase 6 (provenance mutators Mark/Close, #545 — with the
+codex-bot P2 fix `27a622ac`: Mark/Close assume caller-held lease, not internal re-acquire).
+Phase 7 (`BuildDeAdoptPlan` read-only planner, NEW `deadopt.go`) is now UNBLOCKED (deps 4,5,6
+all in master) and in impl. Phases 8-11 pending. master HEAD = `a2a109b0`.
 Depends-on: 2026-07-09-adopt-side-durable-pre-adopt-provenance, bug:2026-07-11-gc-phase2-stale-candidate-reaps-committed-row, bug:2026-07-11-classifier-committed-signal-blind-to-entry-drift
 
 Dependency note: `2026-07-09-adopt-side-durable-pre-adopt-provenance` is DELIVERED +
@@ -35,14 +38,14 @@ the declaration above is retained as a traceability record.
 
 | Phase | Scope | Gate | Status |
 |---|---|---|---|
-| 0 | Precondition + C6 stale-text/citation refresh (docs) | $knowledge-archivist + $arch confirm | **DONE** (design.md re-pointed to HEAD; committed with Phase 1 at `98d16cd0`) |
-| 1 | `ManifestDeleteInWithHash` (#1) fail-closed hash gate | $security MANDATORY + $qa | **DONE — in bot review (PR #539);** P3 atomicity-contract doc-fix at `23971e87`; awaiting Sol review + bot re-trigger, then merge |
-| 2 | `restoreEntryFromBackup`→`restoreEntryFromBytes` extraction (#2 pt1, PURE refactor) | $arch + $qa (full regression) + $security light | **REDO — started then abandoned mid-refactor at a session limit; partial branch DELETED. To be REDONE fresh off master AFTER Phase 1 merges.** |
-| 3 | CAS mutators `CASRestoreEntryFromBytes` + `CASGuardedRemoveEntry` (#2 pt2) | **FULL COMMISSION** ($security MANDATORY + $arch + $qa) | PENDING (dep: 2) |
-| 4 | `ClassifyEntryUnderLock` (read-only) + `EntryRawSubtree` (#2 pt3) | **FULL COMMISSION** (subtlest seam, P1-a/P1-b) | PENDING (dep: 3) |
-| 5 | `state_read_caps.go` `.snapshot` read-cap (#3) | $security ($qa) | PENDING (secret-bearing half already at HEAD, #532) |
-| 6 | Provenance mutators (D1) — author `MarkAdoptProvenanceDeAdopting` + `CloseAdoptProvenance` bodies | **FULL COMMISSION** (protected provenance store) | PENDING |
-| 7 | `BuildDeAdoptPlan` (read-only planner), NEW deadopt.go | $arch + $security + $qa | PENDING (dep: 4,5,6) |
+| 0 | Precondition + C6 stale-text/citation refresh (docs) | $knowledge-archivist + $arch confirm | **DONE + MERGED** (design.md re-pointed to HEAD; committed with Phase 1) |
+| 1 | `ManifestDeleteInWithHash` (#1) fail-closed hash gate | $security MANDATORY + $qa | **DONE + MERGED** (#539, `82e07b46`) |
+| 2 | `restoreEntryFromBackup`→`restoreEntryFromBytes` extraction (#2 pt1, PURE refactor) | $arch + $qa (full regression) + $security light | **DONE + MERGED** (#540) |
+| 3 | CAS mutators `CASRestoreEntryFromBytes` + `CASGuardedRemoveEntry` (#2 pt2) | **FULL COMMISSION** ($security MANDATORY + $arch + $qa) | **DONE + MERGED** (#542, `f4623355`) |
+| 4 | `ClassifyEntryUnderLock` (read-only) + `EntryRawSubtree` (#2 pt3) | **FULL COMMISSION** (subtlest seam, P1-a/P1-b) | **DONE + MERGED** (#544, `43675926`) |
+| 5 | `state_read_caps.go` `.snapshot` read-cap (#3) | $security ($qa) | **DONE + MERGED** (#543, `9c03b3ff`) |
+| 6 | Provenance mutators (D1) — author `MarkAdoptProvenanceDeAdopting` + `CloseAdoptProvenance` bodies | **FULL COMMISSION** (protected provenance store) | **DONE + MERGED** (#545, `a2a109b0`; codex-bot P2 lease-fix `27a622ac`) |
+| 7 | `BuildDeAdoptPlan` (read-only planner), NEW deadopt.go | $arch + $security + $qa | **IN IMPL** (dep 4,5,6 all merged; codex sol-xhigh) |
 | 8 | `ExecuteDeAdoptWithOpts` — ATOMIC all-clients (DO NOT SPLIT, integration) | **FULL COMMISSION + integration owner + Codex-bot PASS + deep-security** | PENDING (dep: 1,3,4,5,6,7) |
 | 9 | CLI `mcphub de-adopt` (alias deadopt) | $qa + $arch light + $security light | PENDING (dep: 7,8) |
 | 10 | GUI backend routes + eligibility (G3) | $security + $qa | PENDING (dep: 7,8) |
