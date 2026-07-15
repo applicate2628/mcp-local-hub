@@ -41,6 +41,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -347,6 +348,28 @@ func ReadAdoptProvenance(manifestName string) (rec *AdoptProvenanceRecord, found
 		}
 	}
 	return nil, false, nil
+}
+
+// ListDeAdoptRecoverableManifestNames returns the redaction-safe manifest names
+// whose durable provenance row is waiting for de-adopt roll-forward recovery.
+// Snapshot references, routed secret keys, and all other provenance fields stay
+// inside the API layer and are never exposed to callers.
+func ListDeAdoptRecoverableManifestNames() ([]string, error) {
+	adoptedEntriesMu.Lock()
+	defer adoptedEntriesMu.Unlock()
+
+	store, err := readAdoptedEntries()
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0)
+	for _, rec := range store.Records {
+		if rec.OperationState == AdoptOperationStateDeAdopting {
+			names = append(names, rec.ManifestName)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // ---------------------------------------------------------------------------

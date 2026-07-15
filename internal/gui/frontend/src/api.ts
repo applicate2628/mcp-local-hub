@@ -148,6 +148,10 @@ export async function getDeAdoptEligible(
   };
 }
 
+export async function getDeAdoptRecoverable(): Promise<string[]> {
+  return fetchOrThrow<string[]>("/api/deadopt/recoverable", "array");
+}
+
 export async function postDeAdoptPlan(server: string): Promise<DeAdoptPlan> {
   const plan = await postJSONObject<DeAdoptPlan>("/api/deadopt/plan", { server });
   return {

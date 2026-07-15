@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import {
   fetchOrThrow,
   getDeAdoptEligible,
+  getDeAdoptRecoverable,
   postAdopt,
   postAdoptPlan,
   postDeAdopt,
@@ -86,6 +87,7 @@ export function DiscoveryScreen() {
   const [adoptModalError, setAdoptModalError] = useState<string | null>(null);
   const [deAdoptEligibility, setDeAdoptEligibility] = useState<Record<string, DeAdoptEligible>>({});
   const [deAdoptEligibilityErrors, setDeAdoptEligibilityErrors] = useState<Record<string, string>>({});
+  const [recoverableDeAdoptNames, setRecoverableDeAdoptNames] = useState<string[]>([]);
   const [deAdoptPlan, setDeAdoptPlan] = useState<DeAdoptPlan | null>(null);
   const [deAdoptReport, setDeAdoptReport] = useState<{
     server: string;
@@ -122,7 +124,7 @@ export function DiscoveryScreen() {
       // (which would also block Demigrate / Migrate selected for
       // unaffected groups). (PR #4 Codex R2.)
       const dismissedFallback: DismissedResponse = { unknown: [] };
-      const [s, d] = await Promise.all([
+      const [s, d, recoverableNames] = await Promise.all([
         fetchOrThrow<ScanResult>("/api/scan", "object"),
         fetchOrThrow<DismissedResponse>("/api/dismissed", "object").catch(
           (err: unknown) => {
@@ -133,10 +135,20 @@ export function DiscoveryScreen() {
             return dismissedFallback;
           },
         ),
+        getDeAdoptRecoverable().catch((err: unknown) => {
+          console.warn(
+            "Discovery: /api/deadopt/recoverable failed, rendering scan-visible recovery rows only:",
+            err,
+          );
+          return [];
+        }),
       ]);
       if (!isLatest()) return;
       setScan(s);
       setDismissedUnknown(new Set(d.unknown ?? []));
+      const validRecoverableNames = [...new Set(recoverableNames)]
+        .filter((name) => MANIFEST_NAME_REGEX.test(name));
+      setRecoverableDeAdoptNames(validRecoverableNames);
       // Publish the authoritative scan before auxiliary eligibility reads.
       // Reset to fail-closed so a refreshed row never inherits a stale
       // affordance while its current eligibility is still unknown.
@@ -168,7 +180,10 @@ export function DiscoveryScreen() {
       // bindings are already gone and therefore no longer scan as via-hub.
       // Each request publishes independently; a slow or failed row remains
       // fail-closed and cannot delay the scan or any sibling row.
-      const scannedNames = [...new Set((s.entries ?? []).map((entry) => entry.name))]
+      const scannedNames = [...new Set([
+        ...(s.entries ?? []).map((entry) => entry.name),
+        ...validRecoverableNames,
+      ])]
         .filter((name) => MANIFEST_NAME_REGEX.test(name));
       for (const name of scannedNames) {
         void getDeAdoptEligibleWithTimeout(name).then(
@@ -278,7 +293,7 @@ export function DiscoveryScreen() {
 
   async function runMigrateSelected() {
     const migrationSelection = [...selected].filter(
-      (name) => deAdoptEligibility[name]?.adopt_owned !== true,
+      (name) => deAdoptEligibility[name]?.adopt_owned === false,
     );
     if (migrationSelection.length === 0) return;
     setMigrateBusy(true);
@@ -462,7 +477,7 @@ export function DiscoveryScreen() {
     ? groupMigrationEntries(scan, dismissedUnknown)
     : { viaHub: [], viaHubInherited: [], canMigrate: [], unknown: [], external: [], perSession: [], dismissed: [] };
   const migrationEntries = groups.canMigrate.filter(
-    (entry) => deAdoptEligibility[entry.name]?.adopt_owned !== true,
+    (entry) => deAdoptEligibility[entry.name]?.adopt_owned === false,
   );
   const displayedNames = new Set(
     [
@@ -476,7 +491,7 @@ export function DiscoveryScreen() {
     ].map((entry) => entry.name),
   );
   const recoveryNames = new Set<string>();
-  const recoveryEntries = (scan?.entries ?? []).filter((entry) => {
+  const recoveryEntries: Array<Pick<ScanEntry, "name">> = (scan?.entries ?? []).filter((entry) => {
     if (
       deAdoptEligibility[entry.name]?.adopt_owned !== true ||
       displayedNames.has(entry.name) ||
@@ -487,6 +502,16 @@ export function DiscoveryScreen() {
     recoveryNames.add(entry.name);
     return true;
   });
+  for (const name of recoverableDeAdoptNames) {
+    if (
+      deAdoptEligibility[name]?.adopt_owned === true &&
+      !displayedNames.has(name) &&
+      !recoveryNames.has(name)
+    ) {
+      recoveryNames.add(name);
+      recoveryEntries.push({ name });
+    }
+  }
 
   if (error) {
     return (
@@ -656,7 +681,7 @@ function DeAdoptAffordance(props: DeAdoptRowProps & { serverName: string }) {
   );
 }
 
-function DeAdoptRecoveryGroup(props: DeAdoptRowProps & { entries: ScanEntry[] }) {
+function DeAdoptRecoveryGroup(props: DeAdoptRowProps & { entries: Array<Pick<ScanEntry, "name">> }) {
   if (props.entries.length === 0) return null;
   return (
     <section class="group group-de-adopt-recovery" data-group="de-adopt-recovery">
@@ -855,11 +880,12 @@ function UnmanagedExternalGroup(props: DeAdoptRowProps & {
         <ul class="group-rows group-rows-unknown" data-subgroup="unknown">
           {props.unknownEntries.map((e) => {
             const adoptClient = firstAdoptClientFor(e, props.clientCapabilities);
+            const adoptOwned = props.deAdoptEligibility[e.name]?.adopt_owned === true;
             return (
               <li key={e.name} data-server={e.name}>
                 <span class="server-name">{e.name}</span>
                 <span class="badge badge-unknown">Unknown stdio</span>
-                {adoptClient && (
+                {!adoptOwned && adoptClient && (
                   <button
                     type="button"
                     class="adopt btn btn-primary"
@@ -870,28 +896,32 @@ function UnmanagedExternalGroup(props: DeAdoptRowProps & {
                     {props.actionBusy === adoptActionKey(e.name) ? "Planning..." : "Adopt into hub"}
                   </button>
                 )}
-                <button
-                  type="button"
-                  class="create-manifest btn"
-                  data-action="create-manifest"
-                  onClick={() => {
-                    const client = firstClientFor(e);
-                    const url = client
-                      ? `#/add-server?server=${encodeURIComponent(e.name)}&from-client=${encodeURIComponent(client)}`
-                      : `#/add-server?server=${encodeURIComponent(e.name)}`;
-                    window.location.hash = url;
-                  }}
-                >
-                  Create manifest
-                </button>
-                <button
-                  type="button"
-                  class="dismiss btn btn-danger"
-                  data-action="dismiss"
-                  onClick={() => props.onDismiss(e)}
-                >
-                  Dismiss
-                </button>
+                {!adoptOwned && (
+                  <>
+                    <button
+                      type="button"
+                      class="create-manifest btn"
+                      data-action="create-manifest"
+                      onClick={() => {
+                        const client = firstClientFor(e);
+                        const url = client
+                          ? `#/add-server?server=${encodeURIComponent(e.name)}&from-client=${encodeURIComponent(client)}`
+                          : `#/add-server?server=${encodeURIComponent(e.name)}`;
+                        window.location.hash = url;
+                      }}
+                    >
+                      Create manifest
+                    </button>
+                    <button
+                      type="button"
+                      class="dismiss btn btn-danger"
+                      data-action="dismiss"
+                      onClick={() => props.onDismiss(e)}
+                    >
+                      Dismiss
+                    </button>
+                  </>
+                )}
                 <DeAdoptAffordance {...props} serverName={e.name} />
               </li>
             );

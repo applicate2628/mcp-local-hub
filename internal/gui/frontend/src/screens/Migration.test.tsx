@@ -36,6 +36,9 @@ function jsonResponse(status: number, body: unknown): Response {
 function fetchRouter(routes: Record<string, (init?: RequestInit) => Response | Promise<Response>>) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
+    if (url === "/api/deadopt/recoverable") {
+      return routes[url]?.(init) ?? jsonResponse(200, []);
+    }
     for (const prefix of Object.keys(routes)) {
       if (url.startsWith(prefix)) return routes[prefix](init);
     }
@@ -515,6 +518,85 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     ).toBe(true);
   });
 
+  it("suppresses unmanaged actions for an adopt-owned unknown recovery row", async () => {
+    const unknownRecovery: ScanResult = {
+      at: "2026-07-15T00:00:00Z",
+      entries: [
+        {
+          name: "unknown-recovery",
+          status: "unknown",
+          manifest_exists: false,
+          can_migrate: false,
+          client_presence: { "codex-cli": { transport: "stdio" } },
+        },
+      ],
+      client_config_presence: {},
+      client_capabilities: {
+        "codex-cli": {
+          scannable: true,
+          direct_installable: true,
+          remote_http_capable: true,
+          adopt_supported: true,
+        },
+      },
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, unknownRecovery),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+        "/api/deadopt/eligible": () =>
+          jsonResponse(200, {
+            eligible: true,
+            adopt_owned: true,
+            gate_on: false,
+            gate_on_clients: [],
+            blocked_reason: "",
+          }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    const row = (await screen.findByText("unknown-recovery")).closest("li");
+    expect(row).not.toBeNull();
+    expect(
+      await within(row as HTMLElement).findByRole("button", { name: "De-adopt to native" }),
+    ).toBeTruthy();
+    expect(within(row as HTMLElement).queryByRole("button", { name: "Adopt into hub" })).toBeNull();
+    expect(within(row as HTMLElement).queryByRole("button", { name: "Create manifest" })).toBeNull();
+    expect(within(row as HTMLElement).queryByRole("button", { name: "Dismiss" })).toBeNull();
+  });
+
+  it("renders a provenance-only recovery name that is absent from scan", async () => {
+    const emptyScan: ScanResult = {
+      at: "2026-07-15T00:00:00Z",
+      entries: [],
+      client_config_presence: {},
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, emptyScan),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+        "/api/deadopt/recoverable": () => jsonResponse(200, ["provenance-only"]),
+        "/api/deadopt/eligible": () =>
+          jsonResponse(200, {
+            eligible: true,
+            adopt_owned: true,
+            gate_on: false,
+            gate_on_clients: [],
+            blocked_reason: "",
+          }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    expect(await screen.findByText("De-adopt recovery")).toBeTruthy();
+    const row = screen.getByText("provenance-only").closest("li");
+    expect(row).not.toBeNull();
+    expect(
+      within(row as HTMLElement).getByRole("button", { name: "De-adopt to native" }),
+    ).toBeTruthy();
+  });
+
   it("surfaces a manifest-only adopt-owned row in de-adopt recovery", async () => {
     const manifestOnlyScan: ScanResult = {
       at: "2026-07-15T00:00:00Z",
@@ -611,13 +693,80 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     expect(migrateRequests).toEqual([{ servers: ["normal-server"] }]);
   });
 
+  it("keeps unresolved can-migrate rows out of selection and migrate POST until proven unowned", async () => {
+    const migrateRequests: unknown[] = [];
+    const pendingEligibility = deferred<Response>();
+    const mixedScan: ScanResult = {
+      at: "2026-07-15T00:00:00Z",
+      entries: [
+        {
+          name: "pending-server",
+          status: "can-migrate",
+          manifest_exists: true,
+          can_migrate: true,
+          client_presence: {},
+        },
+        {
+          name: "resolved-server",
+          status: "can-migrate",
+          manifest_exists: true,
+          can_migrate: true,
+          client_presence: {},
+        },
+      ],
+      client_config_presence: {},
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === "/api/scan") return jsonResponse(200, mixedScan);
+        if (url === "/api/dismissed") return jsonResponse(200, { unknown: [] });
+        if (url === "/api/deadopt/recoverable") return jsonResponse(200, []);
+        if (url.includes("server=pending-server")) return pendingEligibility.promise;
+        if (url.includes("server=resolved-server")) {
+          return jsonResponse(200, {
+            eligible: false,
+            adopt_owned: false,
+            gate_on: false,
+            gate_on_clients: [],
+            blocked_reason: "",
+          });
+        }
+        if (url === "/api/migrate") {
+          migrateRequests.push(JSON.parse(String(init?.body ?? "{}")));
+          return new Response(null, { status: 204 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }) as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    const migrate = await screen.findByRole("button", { name: "Migrate selected (1)" });
+    expect(screen.queryByText("pending-server")).toBeNull();
+    fireEvent.click(migrate);
+    await vi.waitFor(() => expect(migrateRequests).toHaveLength(1));
+    expect(migrateRequests).toEqual([{ servers: ["resolved-server"] }]);
+
+    pendingEligibility.resolve(
+      jsonResponse(200, {
+        eligible: false,
+        adopt_owned: false,
+        gate_on: false,
+        gate_on_clients: [],
+        blocked_reason: "",
+      }),
+    );
+    expect(await screen.findByRole("button", { name: "Migrate selected (2)" })).toBeTruthy();
+    expect(screen.getByText("pending-server")).toBeTruthy();
+  });
+
   it("renders scan rows without waiting for a hanging eligibility read", async () => {
     let eligibilitySignal: AbortSignal | undefined;
     let eligibilityAborted = false;
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/scan": () => jsonResponse(200, scan("slow-eligibility")),
+        "/api/scan": () => jsonResponse(200, managedDiscoveryScan("slow-eligibility")),
         "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
         "/api/deadopt/eligible": (init) => {
           eligibilitySignal = init?.signal ?? undefined;
@@ -651,9 +800,22 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
 
   it("does not probe invalid manifest names or show an eligibility warning", async () => {
     let eligibilityCalls = 0;
+    const invalidNameScan: ScanResult = {
+      at: "2026-07-15T00:00:00Z",
+      entries: [
+        {
+          name: "Invalid Name",
+          status: "unknown",
+          manifest_exists: false,
+          can_migrate: false,
+          client_presence: {},
+        },
+      ],
+      client_config_presence: {},
+    };
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/scan": () => jsonResponse(200, scan("Invalid Name")),
+        "/api/scan": () => jsonResponse(200, invalidNameScan),
         "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
         "/api/deadopt/eligible": () => {
           eligibilityCalls += 1;

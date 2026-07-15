@@ -130,6 +130,29 @@ func TestAdoptedEntriesMissingFileEmpty(t *testing.T) {
 	}
 }
 
+func TestListDeAdoptRecoverableManifestNamesFiltersAndSorts(t *testing.T) {
+	isolateStateDir(t)
+	if err := writeAdoptedEntries(&AdoptedEntries{
+		Version: adoptedEntriesSchemaVersion,
+		Records: []AdoptProvenanceRecord{
+			{ManifestName: "zeta", OperationState: AdoptOperationStateDeAdopting},
+			{ManifestName: "closed", OperationState: AdoptOperationStateClosed},
+			{ManifestName: "adopted", OperationState: AdoptOperationStateAdopted},
+			{ManifestName: "alpha", OperationState: AdoptOperationStateDeAdopting},
+		},
+	}); err != nil {
+		t.Fatalf("seed adopted entries: %v", err)
+	}
+
+	names, err := ListDeAdoptRecoverableManifestNames()
+	if err != nil {
+		t.Fatalf("list recoverable names: %v", err)
+	}
+	if want := []string{"alpha", "zeta"}; !reflect.DeepEqual(names, want) {
+		t.Fatalf("names=%#v, want %#v", names, want)
+	}
+}
+
 // A5 — snapshot is written to the non-prunable adopt-provenance location, is
 // hardened owner-only, and its returned sha256 matches the on-disk bytes.
 func TestWriteAdoptClientSnapshotHardenedAndHashed(t *testing.T) {

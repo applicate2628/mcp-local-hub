@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 const guiDeAdoptTestPort = 9330 // inert URL data only; these tests never bind a TCP port
@@ -98,6 +100,7 @@ func TestDeAdoptRoutesRequireSameOrigin(t *testing.T) {
 		{http.MethodPost, "/api/deadopt/plan", fmt.Sprintf(`{"server":%q}`, name)},
 		{http.MethodPost, "/api/deadopt", fmt.Sprintf(`{"server":%q}`, name)},
 		{http.MethodGet, "/api/deadopt/eligible?server=" + url.QueryEscape(name), ""},
+		{http.MethodGet, "/api/deadopt/recoverable", ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.path, func(t *testing.T) {
@@ -113,6 +116,27 @@ func TestDeAdoptRoutesRequireSameOrigin(t *testing.T) {
 				t.Fatalf("code=%#v, want CROSS_ORIGIN", body["code"])
 			}
 		})
+	}
+}
+
+func TestDeAdoptRecoverableRouteListsOnlyDeAdoptingNames(t *testing.T) {
+	name := "gui-deadopt-recoverable"
+	native := fmt.Sprintf("[mcp_servers.%s]\ncommand = \"go\"\nargs = [\"version\"]\n", name)
+	setupGUIDeAdoptAdopted(t, name, native)
+	if err := api.MarkAdoptProvenanceDeAdopting(name); err != nil {
+		t.Fatalf("mark de-adopting: %v", err)
+	}
+
+	rec := requestGUIDeAdopt(t, http.MethodGet, "/api/deadopt/recoverable", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var names []string
+	if err := json.Unmarshal(rec.Body.Bytes(), &names); err != nil {
+		t.Fatalf("decode names: %v; body=%s", err, rec.Body.String())
+	}
+	if len(names) != 1 || names[0] != name {
+		t.Fatalf("names=%#v, want [%q]", names, name)
 	}
 }
 
