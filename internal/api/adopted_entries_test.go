@@ -227,9 +227,10 @@ func TestReadAdoptProvenancePresentAbsentError(t *testing.T) {
 	}
 }
 
-// A8 — F7: the three de-adopt-owned mutators must be comment-only (NO Go
-// function definition). Authoritative parse-time check via go/ast.
-func TestF7DeAdoptMutatorsAreCommentOnly(t *testing.T) {
+// A8 — F7: Phase 6 implements the two whole-manifest de-adopt mutators while
+// the subset-only hash updater remains comment-only. Authoritative parse-time
+// check via go/ast.
+func TestF7DeAdoptMutatorImplementationBoundary(t *testing.T) {
 	const fname = "adopted_entries.go"
 	src, err := os.ReadFile(fname)
 	if err != nil {
@@ -240,24 +241,32 @@ func TestF7DeAdoptMutatorsAreCommentOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse %s: %v", fname, err)
 	}
-	forbidden := map[string]bool{
-		"MarkAdoptProvenanceDeAdopting":   true,
-		"UpdateAdoptExpectedManifestHash": true,
-		"CloseAdoptProvenance":            true,
+	wantBodies := map[string]bool{
+		"MarkAdoptProvenanceDeAdopting": false,
+		"CloseAdoptProvenance":          false,
 	}
 	for _, decl := range f.Decls {
 		fd, ok := decl.(*ast.FuncDecl)
 		if !ok {
 			continue
 		}
-		if forbidden[fd.Name.Name] {
-			t.Errorf("F7 violation: %s defines func %q with a Go body; the de-adopt-owned mutators must be comment-only", fname, fd.Name.Name)
+		if _, ok := wantBodies[fd.Name.Name]; ok {
+			wantBodies[fd.Name.Name] = true
+		}
+		if fd.Name.Name == "UpdateAdoptExpectedManifestHash" {
+			t.Errorf("F7 violation: %s defines subset-only func %q with a Go body; it must remain comment-only", fname, fd.Name.Name)
 		}
 	}
-	// The three names MUST still appear (as comments) so the contract is declared.
-	for name := range forbidden {
+	for name, found := range wantBodies {
+		if !found {
+			t.Errorf("Phase 6 mutator %q has no Go body in %s", name, fname)
+		}
+	}
+	// The subset updater MUST still appear as a comment so the follow-up contract
+	// remains declared.
+	for _, name := range []string{"UpdateAdoptExpectedManifestHash"} {
 		if !bytes.Contains(src, []byte(name)) {
-			t.Errorf("de-adopt mutator %q must be declared as a comment in %s", name, fname)
+			t.Errorf("subset follow-up mutator %q must be declared as a comment in %s", name, fname)
 		}
 	}
 }
