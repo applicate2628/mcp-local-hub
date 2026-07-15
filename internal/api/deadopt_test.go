@@ -3,7 +3,9 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -396,6 +398,73 @@ func TestBuildDeAdoptPlanT2PartialGateAndStateRouting(t *testing.T) {
 			!strings.Contains(plan.RefusalReason, "unreadable") ||
 			!strings.Contains(plan.RefusalReason, "codex-cli") {
 			t.Fatalf("unreadable-gate plan = %+v, want fail-closed REFUSE naming codex-cli", plan)
+		}
+	})
+
+	t.Run("un-stattable hub gate fails closed before state routing", func(t *testing.T) {
+		name := "deadoptt2unstattablegate"
+		codexPath, _, _, _ := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+			state:           AdoptOperationStateAdopted,
+			originalState:   AdoptOriginalStateAbsent,
+			liveConfig:      deAdoptHubConfig(name),
+			manifestPresent: true,
+		})
+
+		root := filepath.Dir(filepath.Dir(filepath.Dir(codexPath)))
+		t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "xdg-config"))
+
+		candidateHomes := []string{
+			filepath.Join(root, "*"),
+			filepath.Join(root, strings.Repeat("x", 300)),
+		}
+		loopHome := filepath.Join(root, "home-loop")
+		if err := os.Symlink(loopHome, loopHome); err == nil {
+			candidateHomes = append(candidateHomes, loopHome)
+		}
+		var unStattablePath string
+		for _, candidateHome := range candidateHomes {
+			t.Setenv("HOME", candidateHome)
+			t.Setenv("USERPROFILE", candidateHome)
+			candidatePath, err := clients.ConfigPathForName("codex-cli")
+			if err != nil {
+				t.Fatalf("resolve codex config path: %v", err)
+			}
+			if _, statErr := os.Stat(candidatePath); statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
+				unStattablePath = candidatePath
+				break
+			}
+		}
+		if unStattablePath == "" {
+			t.Fatal("no fixture config path produced a non-NotExist stat error")
+		}
+		absentPath, err := clients.ConfigPathForName("opencode")
+		if err != nil {
+			t.Fatalf("resolve opencode config path: %v", err)
+		}
+		if _, absentErr := os.Stat(absentPath); !errors.Is(absentErr, fs.ErrNotExist) {
+			t.Fatalf("os.Stat(%q) error = %v, want NotExist", absentPath, absentErr)
+		}
+
+		probe := ProbeHubGate()
+		if slices.Contains(probe.GatedOn, "codex-cli") ||
+			!slices.Contains(probe.Unreadable, "codex-cli") ||
+			slices.Contains(probe.GatedOn, "opencode") ||
+			slices.Contains(probe.Unreadable, "opencode") {
+			t.Fatalf("ProbeHubGate() = %+v, want un-stattable codex-cli unreadable and absent opencode in neither set", probe)
+		}
+		if gated := GatedOnClients(); slices.Contains(gated, "codex-cli") {
+			t.Fatalf("GatedOnClients() = %v, want reset-port probe to keep excluding un-stattable codex-cli", gated)
+		}
+
+		plan, err := NewAPI().BuildDeAdoptPlan(name)
+		if err != nil {
+			t.Fatalf("BuildDeAdoptPlan: %v", err)
+		}
+		if plan.Routing != DeAdoptRoutingRefuse || plan.Eligibility.Eligible ||
+			!plan.Eligibility.AdoptOwned || plan.Eligibility.GateOn ||
+			!strings.Contains(plan.RefusalReason, "unreadable") ||
+			!strings.Contains(plan.RefusalReason, "codex-cli") {
+			t.Fatalf("un-stattable-gate plan = %+v, want fail-closed REFUSE naming codex-cli", plan)
 		}
 	})
 

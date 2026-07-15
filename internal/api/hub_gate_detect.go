@@ -25,6 +25,9 @@
 package api
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"sort"
 
 	"mcp-local-hub/internal/clients"
@@ -32,10 +35,10 @@ import (
 
 // HubGateProbe reports the hub-gate state across supported clients.
 // GatedOn contains clients proven gate-ON by a live, enabled mcphub-hub
-// aggregate. Unreadable contains supported, existing, non-relay clients whose
-// gate state could not be determined because GetEntry could not read or parse
-// their config. Fail-closed callers must treat Unreadable as blocking because
-// gate-OFF has not been proven for those clients.
+// aggregate. Unreadable contains supported, non-relay clients whose gate state
+// could not be determined because their config could not be statted, read, or
+// parsed. Fail-closed callers must treat Unreadable as blocking because gate-OFF
+// has not been proven for those clients.
 type HubGateProbe struct {
 	GatedOn    []string
 	Unreadable []string
@@ -55,7 +58,15 @@ func ProbeHubGate() HubGateProbe {
 			// The hub aggregate is never written to a relay-stdio client.
 			continue
 		}
-		if !c.Exists() {
+		_, statErr := os.Stat(c.ConfigPath())
+		switch {
+		case statErr == nil:
+			// The config exists; classify its aggregate below.
+		case errors.Is(statErr, fs.ErrNotExist):
+			// A genuinely absent config cannot contain a live aggregate.
+			continue
+		default:
+			probe.Unreadable = append(probe.Unreadable, name)
 			continue
 		}
 		entry, err := c.GetEntry(hubReconcileAggregateEntryName)
@@ -87,7 +98,7 @@ func ProbeHubGate() HubGateProbe {
 // A client is reported gate-ON iff:
 //   - its adapter constructs on this host (clients.AllClients drops
 //     unconstructable adapters), AND
-//   - its config file exists (Exists()), AND
+//   - its config path stats successfully, AND
 //   - GetEntry("mcphub-hub") returns a non-nil entry with no error, AND
 //   - that entry is NOT disabled (entry.Disabled == false).
 //
@@ -100,12 +111,10 @@ func ProbeHubGate() HubGateProbe {
 // skips it while read-membership callers still see the entry. This mirrors the
 // scan path (shapeMimoCodeEntry classifies enabled:false as Transport "absent").
 //
-// Read errors per client (corrupt config, DACL violation) are
-// SKIPPED, not fatal: this is a best-effort advisory probe whose only
-// consumer is a refuse-guard. A client whose config cannot be parsed is
-// treated as "not detectably gate-ON" rather than aborting the whole
-// probe — the operator still gets the guard for every client we COULD
-// read, and a corrupt config surfaces its own error on the next install.
+// Stat/read errors per client (corrupt config, DACL violation) are omitted from
+// this returned slice: ProbeHubGate retains them separately in Unreadable, while
+// this reset-port advisory wrapper intentionally keeps its historical
+// "not detectably gate-ON" behavior.
 //
 // Relay-stdio clients (Antigravity, Zed, ...) are skipped: the gate-ON
 // reconciler never writes a `mcphub-hub` aggregate to them (they require
