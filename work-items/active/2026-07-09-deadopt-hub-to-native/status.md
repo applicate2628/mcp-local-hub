@@ -1,7 +1,7 @@
 # status - de-adopt v1 (hub to native, all-clients-only, gate-OFF-only, atomic)
 
 Template: design → delivery (full-delivery). Orchestrator: `$lead`.
-State: **IN PROGRESS — Phases 0-7 DONE + MERGED to master; Phase 8 (ExecuteDeAdoptWithOpts ATOMIC) in impl.**
+State: **IN PROGRESS — Phases 0-8 DONE + MERGED to master; Phase 9 (CLI mcphub de-adopt) next. Core feature (planner + atomic executor) complete.**
 Design round-5 is ACCEPTED (arch delta-recheck PASS 2026-07-13); `$planner` broke it into a
 12-phase delivery plan (`plan.md`, 2026-07-14). Phases 0-6 are all delivered + squash-merged:
 Phase 0+1 (`ManifestDeleteInWithHash`, #539/82e07b46), Phase 2 (restore-extraction, #540),
@@ -46,7 +46,7 @@ the declaration above is retained as a traceability record.
 | 5 | `state_read_caps.go` `.snapshot` read-cap (#3) | $security ($qa) | **DONE + MERGED** (#543, `9c03b3ff`) |
 | 6 | Provenance mutators (D1) — author `MarkAdoptProvenanceDeAdopting` + `CloseAdoptProvenance` bodies | **FULL COMMISSION** (protected provenance store) | **DONE + MERGED** (#545, `a2a109b0`; codex-bot P2 lease-fix `27a622ac`) |
 | 7 | `BuildDeAdoptPlan` (read-only planner), NEW deadopt.go | $arch + $security + $qa | **DONE + MERGED** (#546, `1d9c37c2`; Sol+fable + 5 codex-bot rounds: B2b AlreadyAbsent, adopting→classifyDeadAdoptingRow, FRESH RestoreDone→done, fail-closed ProbeHubGate incl. mimocode-layered GetEntry-authority) |
-| 8 | `ExecuteDeAdoptWithOpts` — ATOMIC all-clients (DO NOT SPLIT, integration) | **FULL COMMISSION + integration owner + Codex-bot PASS + deep-security** | PENDING (dep: 1,3,4,5,6,7) |
+| 8 | `ExecuteDeAdoptWithOpts` — ATOMIC all-clients (DO NOT SPLIT, integration) | **FULL COMMISSION + integration owner + Codex-bot PASS + deep-security** | **DONE + MERGED** (#547, `0e5614df`; Sol+Terra+fable commission (3) + 6 codex-bot rounds (12) + fable final-gate (1 fail-open the bot missed) = 16 TOCTOU/fail-closed/resume/liveness/data-safety fixes) |
 | 9 | CLI `mcphub de-adopt` (alias deadopt) | $qa + $arch light + $security light | PENDING (dep: 7,8) |
 | 10 | GUI backend routes + eligibility (G3) | $security + $qa | PENDING (dep: 7,8) |
 | 11 | Frontend affordance + Playwright | $ux-reviewer + $frontend self-check + $qa | PENDING (dep: 10) |
