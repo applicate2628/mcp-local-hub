@@ -25,6 +25,7 @@ func registerDeAdoptRoutes(s *Server) {
 	s.mux.HandleFunc("/api/deadopt/plan", s.requireSameOrigin(s.deAdoptPlanHandler))
 	s.mux.HandleFunc("/api/deadopt", s.requireSameOrigin(s.deAdoptHandler))
 	s.mux.HandleFunc("/api/deadopt/eligible", s.requireSameOrigin(s.deAdoptEligibleHandler))
+	s.mux.HandleFunc("/api/deadopt/recoverable", s.requireSameOrigin(s.deAdoptRecoverableHandler))
 }
 
 func (s *Server) deAdoptPlanHandler(w http.ResponseWriter, r *http.Request) {
@@ -99,4 +100,18 @@ func (s *Server) deAdoptEligibleHandler(w http.ResponseWriter, r *http.Request) 
 		GateOnClients: eligibility.GateOnClients,
 		BlockedReason: eligibility.BlockedReason,
 	})
+}
+
+func (s *Server) deAdoptRecoverableHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	names, err := api.ListDeAdoptRecoverableManifestNames()
+	if err != nil {
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "DEADOPT_RECOVERABLE_FAILED", "/api/deadopt/recoverable")
+		return
+	}
+	writeJSON(w, http.StatusOK, names)
 }
