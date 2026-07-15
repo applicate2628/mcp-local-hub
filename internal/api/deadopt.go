@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -301,11 +302,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		return nil, fmt.Errorf("de-adopt refused: manifest %q has no executable provenance", plan.ManifestName)
 	}
 
-	rec := plan.provenance
-	acceptSet, err := deAdoptAcceptConflictSet(opts.AcceptConflictClients, rec.AdoptClients)
-	if err != nil {
-		return nil, err
-	}
+	plannedRec := plan.provenance
 
 	// E1 — acquire the outermost per-manifest lease. No IPC, process kill, or
 	// wait is invoked anywhere before the deferred unlock.
@@ -331,6 +328,34 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	}()
 	defer func() { _ = lease.Unlock() }()
 	w = &narration
+
+	// The plan's provenance row predates E1 and is advisory. Re-read it while
+	// holding the lease so a completed de-adopt followed by a same-name re-adopt
+	// cannot make this executor act on the replaced row's stale recovery data.
+	fresh, found, err := ReadAdoptProvenance(plan.ManifestName)
+	if err != nil {
+		return nil, fmt.Errorf("de-adopt: re-read provenance under lease failed")
+	}
+	if !found {
+		return nil, fmt.Errorf("de-adopt: provenance row for %q vanished under the lease; re-run", plan.ManifestName)
+	}
+	if !deAdoptProvenanceIdentityMatches(plannedRec, fresh) {
+		return nil, fmt.Errorf("de-adopt: provenance changed under the lease; re-run de-adopt")
+	}
+	rec := fresh
+
+	// Recompute the destructive manifest gate from the authoritative row. A
+	// fresh operation must still have the exact adopted manifest; only a resume
+	// may treat an already-absent manifest as a completed E4.
+	readiness := a.buildDeAdoptManifestReadiness(rec, plan.Routing)
+	if !readiness.HashReady && !(plan.Routing == DeAdoptRoutingResume && readiness.AlreadyAbsent) {
+		return nil, fmt.Errorf("de-adopt: manifest %q is not delete-ready (%s); resolve it before de-adopting", plan.ManifestName, readiness.Reason)
+	}
+
+	acceptSet, err := deAdoptAcceptConflictSet(opts.AcceptConflictClients, rec.AdoptClients)
+	if err != nil {
+		return nil, err
+	}
 
 	// E2 — idempotently enter de_adopting. Mark performs the B4 committed-row
 	// re-verification while this caller retains the lease.
@@ -360,56 +385,8 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 			continue
 		}
 
-		snapshotState, snapshot, snapshotSubtree, snapshotReason := readDeAdoptSnapshot(rec, clientRec, mutator)
-		if acceptSet[clientName] {
-			if clientRec.OriginalState == AdoptOriginalStatePresent && snapshotState != deAdoptSnapshotAvailable {
-				reason := "--accept-conflict passed but the pinned snapshot could not be verified; repair it and retry"
-				if snapshotReason != "" {
-					reason = "--accept-conflict rejected: " + snapshotReason
-				}
-				deAdoptFailClient(report, clientName, reason, w)
-				continue
-			}
-			if clientRec.OriginalState != AdoptOriginalStatePresent &&
-				clientRec.OriginalState != AdoptOriginalStateAbsent &&
-				clientRec.OriginalState != AdoptOriginalStatePresentMergedLower {
-				deAdoptFailClient(report, clientName, "--accept-conflict rejected: unsupported original client state", w)
-				continue
-			}
-
-			verdict, classifyErr := mutator.ClassifyEntryUnderLock(
-				rec.SourceEntryName,
-				deAdoptLiveBindingMatcher(rec, clientName),
-				snapshotSubtree,
-			)
-			if classifyErr != nil {
-				verdict = clients.ClassifyUnreadable
-			}
-			switch verdict {
-			case clients.ClassifyGenuineConflict:
-				report.Accepted = append(report.Accepted, clientName)
-				resolvedClients++
-				manifestName, acceptedClient := plan.ManifestName, clientName
-				pendingEvents = append(pendingEvents, func() {
-					emitDeAdoptClientAccepted(manifestName, acceptedClient)
-				})
-				fmt.Fprintf(w, "WARNING: --accept-conflict %q honored: %s\n", clientName, deAdoptAcceptConflictWarning)
-			case clients.ClassifyRestoreDone:
-				// A harmless no-op when the client became restored after planning.
-				report.Restored = append(report.Restored, clientName)
-				resolvedClients++
-				fmt.Fprintf(w, "De-adopt client %q is already restored; --accept-conflict was not needed.\n", clientName)
-			case clients.ClassifyStillHub:
-				deAdoptFailClient(report, clientName, fmt.Sprintf("--accept-conflict passed but %q is still the hub entry; omit the flag to restore it", clientName), w)
-			case clients.ClassifyUnreadable:
-				deAdoptFailClient(report, clientName, "--accept-conflict rejected: live client config could not be read or parsed", w)
-			default:
-				deAdoptFailClient(report, clientName, "--accept-conflict rejected: unsupported client classification", w)
-			}
-			continue
-		}
-
 		match := deAdoptLiveBindingMatcher(rec, clientName)
+		snapshotState, snapshot, snapshotSubtree, snapshotReason := readDeAdoptSnapshot(rec, clientRec, mutator)
 		verdict, classifyErr := mutator.ClassifyEntryUnderLock(
 			rec.SourceEntryName,
 			match,
@@ -418,13 +395,46 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		if classifyErr != nil {
 			verdict = clients.ClassifyUnreadable
 		}
-		disposition, _, reason := mapDeAdoptClientDisposition(
+		disposition, acceptEligible, dispositionReason := mapDeAdoptClientDisposition(
 			plan.Routing,
 			clientRec.OriginalState,
 			snapshotState,
-			plan.Manifest.AlreadyAbsent,
+			readiness.AlreadyAbsent,
 			verdict,
 		)
+
+		if acceptSet[clientName] {
+			if disposition == DeAdoptClientRestoreDone {
+				report.Restored = append(report.Restored, clientName)
+				resolvedClients++
+				fmt.Fprintf(w, "De-adopt client %q is already restored; --accept-conflict was not needed.\n", clientName)
+				continue
+			}
+
+			switch {
+			case verdict == clients.ClassifyGenuineConflict && acceptEligible:
+				report.Accepted = append(report.Accepted, clientName)
+				resolvedClients++
+				manifestName, acceptedClient := plan.ManifestName, clientName
+				pendingEvents = append(pendingEvents, func() {
+					emitDeAdoptClientAccepted(manifestName, acceptedClient)
+				})
+				fmt.Fprintf(w, "WARNING: --accept-conflict %q honored: %s\n", clientName, deAdoptAcceptConflictWarning)
+			case verdict == clients.ClassifyStillHub:
+				deAdoptFailClient(report, clientName, fmt.Sprintf("--accept-conflict passed but %q is still the hub entry; omit the flag to restore it", clientName), w)
+			case verdict == clients.ClassifyUnreadable:
+				deAdoptFailClient(report, clientName, "--accept-conflict rejected: live client config could not be read or parsed", w)
+			case clientRec.OriginalState == AdoptOriginalStatePresent && snapshotState != deAdoptSnapshotAvailable:
+				reason := "--accept-conflict passed but the pinned snapshot could not be verified; repair it and retry"
+				if snapshotReason != "" {
+					reason = "--accept-conflict rejected: " + snapshotReason
+				}
+				deAdoptFailClient(report, clientName, reason, w)
+			default:
+				deAdoptFailClient(report, clientName, "--accept-conflict rejected: "+dispositionReason, w)
+			}
+			continue
+		}
 
 		var mutationErr error
 		switch disposition {
@@ -438,7 +448,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		case DeAdoptClientRemovePending:
 			mutationErr = mutator.CASGuardedRemoveEntry(rec.SourceEntryName, match)
 		case DeAdoptClientFailed:
-			deAdoptFailClient(report, clientName, reason, w)
+			deAdoptFailClient(report, clientName, dispositionReason, w)
 			continue
 		default:
 			deAdoptFailClient(report, clientName, "client classification returned an unsupported disposition", w)
@@ -478,7 +488,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
 	}
 	intentScope := supervisorIntentOwnershipScopeForManifest(expectedManifest, nil, "")
-	if !plan.Manifest.AlreadyAbsent {
+	if !readiness.AlreadyAbsent {
 		if err := a.ManifestDeleteInWithHash(adoptCommittedManifestDir(), rec.ManifestName, rec.ExpectedManifestHash); err != nil {
 			pendingEvents = append(pendingEvents, func() {
 				emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "manifest-delete", report)
@@ -502,7 +512,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 
 	// E5 — CLOSE-READY only. The prefilter and delete each take the vault lock
 	// through their existing owner and release it before the next inner operation.
-	toDelete, sharedSkipped, prefilterErr := a.prepareDeAdoptRoutedSecretCleanup(rec.ManifestName, rec.RoutedSecretKeys)
+	toDelete, sharedSkipped, unreadableManifests, prefilterErr := a.prepareDeAdoptRoutedSecretCleanup(rec.ManifestName, rec.RoutedSecretKeys)
 	if prefilterErr != nil {
 		pendingEvents = append(pendingEvents, func() {
 			emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "routed-secret-prefilter", report)
@@ -515,8 +525,14 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		})
 		return report, fmt.Errorf("de-adopt: routed-secret cleanup for manifest %q failed for %d key(s)", plan.ManifestName, len(toDelete))
 	}
-	for _, key := range sharedSkipped {
-		fmt.Fprintf(w, "WARNING: routed secret key %q is referenced by another live manifest and was preserved.\n", key)
+	if len(unreadableManifests) != 0 {
+		for _, unreadableManifest := range unreadableManifests {
+			fmt.Fprintf(w, "WARNING: routed secret cleanup preserved %d key(s): manifest %q could not be read to check references.\n", len(sharedSkipped), unreadableManifest)
+		}
+	} else {
+		for _, key := range sharedSkipped {
+			fmt.Fprintf(w, "WARNING: routed secret key %q is referenced by another live manifest and was preserved.\n", key)
+		}
 	}
 
 	// E6 — CLOSE-READY and every routed key deleted, already absent, or
@@ -555,6 +571,43 @@ func deAdoptAcceptConflictSet(requested, targets []string) (map[string]bool, err
 	return accepted, nil
 }
 
+func deAdoptProvenanceIdentityMatches(planned, fresh *AdoptProvenanceRecord) bool {
+	if planned == nil || fresh == nil ||
+		!deAdoptOperationStateMatches(planned.OperationState, fresh.OperationState) ||
+		planned.ExpectedManifestHash != fresh.ExpectedManifestHash ||
+		planned.SourceEntryName != fresh.SourceEntryName ||
+		planned.Port != fresh.Port {
+		return false
+	}
+	plannedClients := make(map[string]struct{}, len(planned.AdoptClients))
+	for _, clientName := range planned.AdoptClients {
+		plannedClients[clientName] = struct{}{}
+	}
+	freshClients := make(map[string]struct{}, len(fresh.AdoptClients))
+	for _, clientName := range fresh.AdoptClients {
+		freshClients[clientName] = struct{}{}
+	}
+	if len(plannedClients) != len(freshClients) {
+		return false
+	}
+	for clientName := range plannedClients {
+		if _, found := freshClients[clientName]; !found {
+			return false
+		}
+	}
+	return true
+}
+
+func deAdoptOperationStateMatches(planned, fresh AdoptOperationState) bool {
+	if planned == fresh {
+		return fresh == AdoptOperationStateAdopted ||
+			fresh == AdoptOperationStateAdopting ||
+			fresh == AdoptOperationStateDeAdopting
+	}
+	return fresh == AdoptOperationStateDeAdopting &&
+		(planned == AdoptOperationStateAdopted || planned == AdoptOperationStateAdopting)
+}
+
 func deAdoptFailClient(report *DeAdoptReport, clientName, reason string, w io.Writer) {
 	report.Failed = append(report.Failed, DeAdoptClientFailure{Client: clientName, Reason: reason})
 	fmt.Fprintf(w, "De-adopt client %q failed: %s.\n", clientName, reason)
@@ -563,15 +616,16 @@ func deAdoptFailClient(report *DeAdoptReport, clientName, reason string, w io.Wr
 // prepareDeAdoptRoutedSecretCleanup returns only still-present, non-shared keys
 // for deleteAdoptRoutedSecrets. A key already absent is complete; a present key
 // referenced by another live on-disk manifest is deliberately skipped and also
-// complete for E6. Manifest scan failures fail closed before the vault is read.
-func (a *API) prepareDeAdoptRoutedSecretCleanup(manifestName string, routedKeys []string) (toDelete, sharedSkipped []string, err error) {
+// complete for E6. An unreadable manifest conservatively makes every candidate
+// possibly shared; directory-enumeration failures stop before the vault is read.
+func (a *API) prepareDeAdoptRoutedSecretCleanup(manifestName string, routedKeys []string) (toDelete, sharedSkipped, unreadableManifests []string, err error) {
 	keys := dedupeSortedDeAdoptStrings(routedKeys)
 	if len(keys) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
-	shared, err := a.deAdoptSharedRoutedSecretKeys(manifestName, keys)
+	shared, unreadableManifests, err := a.deAdoptSharedRoutedSecretKeys(manifestName, keys)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	vaultMutex.Lock()
@@ -598,33 +652,43 @@ func (a *API) prepareDeAdoptRoutedSecretCleanup(manifestName string, routedKeys 
 		return nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return toDelete, sharedSkipped, nil
+	return toDelete, sharedSkipped, unreadableManifests, nil
 }
 
-func (a *API) deAdoptSharedRoutedSecretKeys(manifestName string, routedKeys []string) (map[string]bool, error) {
+func (a *API) deAdoptSharedRoutedSecretKeys(manifestName string, routedKeys []string) (map[string]bool, []string, error) {
 	candidates := make(map[string]bool, len(routedKeys))
 	for _, key := range routedKeys {
 		candidates[key] = true
 	}
 	shared := make(map[string]bool)
 	dir := adoptCommittedManifestDir()
-	names, err := a.ManifestListIn(dir)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("list live manifests for routed-secret scan failed")
+		if os.IsNotExist(err) {
+			return shared, nil, nil
+		}
+		return nil, nil, fmt.Errorf("list live manifests for routed-secret scan failed")
 	}
-	for _, name := range names {
+	var unreadableManifests []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
 		if name == manifestName {
 			continue
 		}
 		raw, readErr := a.ManifestGetIn(dir, name)
 		if readErr != nil {
-			return nil, fmt.Errorf("read live manifest %q for routed-secret scan failed", name)
+			unreadableManifests = append(unreadableManifests, name)
+			continue
 		}
 		var live config.ServerManifest
 		if parseErr := yaml.Unmarshal([]byte(raw), &live); parseErr != nil {
-			return nil, fmt.Errorf("parse live manifest %q for routed-secret scan failed", name)
+			unreadableManifests = append(unreadableManifests, name)
+			continue
 		}
 		for key := range deAdoptManifestVaultReferenceKeys(&live) {
 			if candidates[key] {
@@ -632,7 +696,12 @@ func (a *API) deAdoptSharedRoutedSecretKeys(manifestName string, routedKeys []st
 			}
 		}
 	}
-	return shared, nil
+	if len(unreadableManifests) != 0 {
+		for key := range candidates {
+			shared[key] = true
+		}
+	}
+	return shared, unreadableManifests, nil
 }
 
 // deAdoptManifestVaultReferenceKeys returns every vault key a live manifest can

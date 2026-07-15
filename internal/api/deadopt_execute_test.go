@@ -393,6 +393,88 @@ func TestExecuteDeAdoptE1ConcurrentOperationRefusesBeforeMark(t *testing.T) {
 	}
 }
 
+func TestExecuteDeAdoptRereadsProvenanceUnderLease(t *testing.T) {
+	name := "deadopt-execute-row-replaced"
+	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
+	codexPath, manifestRoot, _, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state:           AdoptOperationStateAdopted,
+		originalState:   AdoptOriginalStatePresent,
+		liveConfig:      deAdoptHubConfig(name),
+		snapshotBytes:   snapshot,
+		writeSnapshot:   true,
+		manifestPresent: true,
+	})
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil || plan.Routing != DeAdoptRoutingFresh {
+		t.Fatalf("BuildDeAdoptPlan = %+v err=%v", plan, err)
+	}
+	before := mustReadFileForAdoptTest(t, codexPath)
+
+	newer := rec
+	newer.Port++
+	writeDeAdoptExecutorRecord(t, newer)
+
+	report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{})
+	if err == nil || !strings.Contains(err.Error(), "provenance changed under the lease") || report != nil {
+		t.Fatalf("execute replaced-row plan = report=%+v err=%v", report, err)
+	}
+	if got := mustReadFileForAdoptTest(t, codexPath); !bytes.Equal(got, before) {
+		t.Fatalf("replaced-row refusal mutated client config\nbefore:\n%s\nafter:\n%s", before, got)
+	}
+	persisted, found, readErr := ReadAdoptProvenance(name)
+	if readErr != nil || !found || persisted.OperationState != AdoptOperationStateAdopted || persisted.Port != newer.Port {
+		t.Fatalf("replaced row changed: found=%v rec=%+v err=%v", found, persisted, readErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(manifestRoot, name, "manifest.yaml")); statErr != nil {
+		t.Fatalf("replaced-row refusal removed manifest: %v", statErr)
+	}
+}
+
+func TestExecuteDeAdoptManifestReadinessRefusesBeforeE2E3(t *testing.T) {
+	tests := []struct {
+		name                 string
+		manifestPresent      bool
+		expectedHashOverride string
+		wantReason           string
+	}{
+		{name: "fresh manifest absent", manifestPresent: false, wantReason: "manifest is absent"},
+		{name: "manifest hash mismatch", manifestPresent: true, expectedHashOverride: strings.Repeat("a", 64), wantReason: "manifest hash does not match adopt provenance"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "deadopt-readiness-" + strings.ReplaceAll(tc.name, " ", "-")
+			snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
+			codexPath, _, _, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+				state:                AdoptOperationStateAdopted,
+				originalState:        AdoptOriginalStatePresent,
+				liveConfig:           deAdoptHubConfig(name),
+				snapshotBytes:        snapshot,
+				writeSnapshot:        true,
+				manifestPresent:      tc.manifestPresent,
+				expectedHashOverride: tc.expectedHashOverride,
+			})
+			before := mustReadFileForAdoptTest(t, codexPath)
+			snapshotPath := deAdoptSnapshotPathForTest(t, rec)
+
+			report, err := NewAPI().ExecuteDeAdopt(name, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), "is not delete-ready") || !strings.Contains(err.Error(), tc.wantReason) || report != nil {
+				t.Fatalf("ExecuteDeAdopt readiness refusal = report=%+v err=%v", report, err)
+			}
+			if got := mustReadFileForAdoptTest(t, codexPath); !bytes.Equal(got, before) {
+				t.Fatalf("readiness refusal mutated client config\nbefore:\n%s\nafter:\n%s", before, got)
+			}
+			persisted, found, readErr := ReadAdoptProvenance(name)
+			if readErr != nil || !found || persisted.OperationState != AdoptOperationStateAdopted {
+				t.Fatalf("readiness refusal changed row: found=%v rec=%+v err=%v", found, persisted, readErr)
+			}
+			if _, statErr := os.Stat(snapshotPath); statErr != nil {
+				t.Fatalf("readiness refusal removed snapshot: %v", statErr)
+			}
+		})
+	}
+}
+
 func TestExecuteDeAdoptT8RoutedSecretPrefilterSharedSkipAndClose(t *testing.T) {
 	name := "deadopt-execute-secrets"
 	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
@@ -477,6 +559,44 @@ func TestExecuteDeAdoptPreservesRoutedSecretReferencedByRemoteHeader(t *testing.
 	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
 }
 
+func TestExecuteDeAdoptPreservesRoutedSecretWhenAnotherManifestIsUnreadable(t *testing.T) {
+	name := "deadopt-execute-unreadable-secret-owner"
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state:           AdoptOperationStateAdopted,
+		originalState:   AdoptOriginalStateAbsent,
+		liveConfig:      deAdoptHubConfig(name),
+		manifestPresent: true,
+	})
+	const routedKey = "DEADOPT_POSSIBLY_SHARED_KEY"
+	rec.RoutedSecretKeys = []string{routedKey}
+	writeDeAdoptExecutorRecord(t, rec)
+	seedDeAdoptSupervisorIntent(t, stateRoot, rec)
+	seedDeAdoptVault(t, map[string]string{routedKey: "possibly-shared-secret-value"})
+
+	const unreadableManifest = "unreadable-secret-owner"
+	unreadableDir := filepath.Join(manifestRoot, unreadableManifest)
+	t.Cleanup(func() { _ = os.RemoveAll(unreadableDir) })
+	if err := os.MkdirAll(unreadableDir, 0o700); err != nil {
+		t.Fatalf("mkdir unreadable manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(unreadableDir, "manifest.yaml"), []byte("name: [\n"), 0o600); err != nil {
+		t.Fatalf("write unreadable manifest: %v", err)
+	}
+
+	var out bytes.Buffer
+	report, err := NewAPI().ExecuteDeAdopt(name, &out)
+	if err != nil {
+		t.Fatalf("ExecuteDeAdopt unreadable-manifest secret scan: %v\n%s", err, out.String())
+	}
+	if len(report.Failed) != 0 || !strings.Contains(out.String(), "preserved 1 key(s)") || !strings.Contains(out.String(), unreadableManifest) {
+		t.Fatalf("unreadable-manifest cleanup report/output = %+v / %s", report, out.String())
+	}
+	if got := deAdoptVaultKeys(t); !reflect.DeepEqual(got, []string{routedKey}) {
+		t.Fatalf("vault keys = %#v, want routed key preserved after unreadable manifest", got)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
 func TestDeAdoptManifestVaultReferenceKeysCoversEnvURLAndHeaders(t *testing.T) {
 	got := deAdoptManifestVaultReferenceKeys(&config.ServerManifest{
 		Env: map[string]string{
@@ -515,9 +635,6 @@ func TestExecuteDeAdoptT9T10T14FailureBlocksWholeCloseAndRedacts(t *testing.T) {
 	const routedKey = "DEADOPT_BLOCKED_KEY"
 	const routedValue = "ROUTED_SECRET_MUST_NOT_LEAK"
 	rec.RoutedSecretKeys = []string{routedKey}
-	// A provenance field is untrusted at the event boundary. It must not be
-	// emitted as a hash unless it is actually a 64-hex SHA-256.
-	rec.ExpectedManifestHash = snapshotSecret
 	writeDeAdoptExecutorRecord(t, rec)
 	seedDeAdoptSupervisorIntent(t, stateRoot, rec)
 	seedDeAdoptVault(t, map[string]string{routedKey: routedValue})
@@ -572,6 +689,33 @@ func TestExecuteDeAdoptCrashInsideCloseResumeWithoutManifestOrSnapshot(t *testin
 	}
 	if !reflect.DeepEqual(report.Restored, []string{"codex-cli"}) || len(report.Failed) != 0 {
 		t.Fatalf("crash-inside-close report = %+v", report)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptAcceptConflictCrashInsideCloseIsRestoreDone(t *testing.T) {
+	name := "deadopt-accept-crash-inside-close"
+	snapshot := []byte(deAdoptNativeConfig(name, "already-restored"))
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state:           AdoptOperationStateDeAdopting,
+		originalState:   AdoptOriginalStatePresent,
+		liveConfig:      string(snapshot),
+		snapshotBytes:   snapshot,
+		writeSnapshot:   false,
+		manifestPresent: false,
+	})
+	seedDeAdoptSupervisorIntent(t, stateRoot, rec)
+
+	var out bytes.Buffer
+	report, err := NewAPI().ExecuteDeAdoptWithOpts(name, &out, ExecuteDeAdoptOpts{AcceptConflictClients: []string{"codex-cli"}})
+	if err != nil {
+		t.Fatalf("ExecuteDeAdoptWithOpts crash-inside-close: %v\n%s", err, out.String())
+	}
+	if !reflect.DeepEqual(report.Restored, []string{"codex-cli"}) || len(report.Failed) != 0 || len(report.Accepted) != 0 {
+		t.Fatalf("accept crash-inside-close report = %+v", report)
+	}
+	if !strings.Contains(out.String(), "already restored; --accept-conflict was not needed") {
+		t.Fatalf("accept crash-inside-close did not narrate harmless no-op: %s", out.String())
 	}
 	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
 }
