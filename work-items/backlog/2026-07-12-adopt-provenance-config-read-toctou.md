@@ -1,8 +1,23 @@
 # Backlog: adopt-provenance unmutated-proof reads client configs without a per-config lock (TOCTOU)
 
+> **PER-CLIENT TOCTOU RESOLVED 2026-07-15 by #551** (the entry-shape predicate rewrite,
+> master `0336572f`). `adoptRowProvablyUnmutated` no longer does raw `os.ReadFile` — it now
+> classifies each client through `mutator.ClassifyEntryUnderLock`, whose `lockingClient`
+> forwarder holds the per-file config READ lock (`withConfigReadLock`) across the write-target
+> read + compare. So the MAIN race in "The race" below (a writer changing client A's config
+> between the guard's read and the reap) is closed per client, on BOTH lanes (the predicate is
+> the single shared owner). Terra concurrency review (#551 commission) confirmed the fix +
+> assessed the RESIDUAL as acceptable: the lock is acquired/released PER CLIENT, so the
+> cross-client-simultaneity issue (A classified + unlocked, A mutated, B classified — items 17-18
+> below) remains, but the per-manifest lease already excludes the realistic same-manifest
+> committer, leaving only different-manifest/external writers between per-client classifies —
+> low realistic risk (a wrong reap still needs an adversarial writer that momentarily restores
+> exact pre-adopt bytes). This backlog now tracks ONLY that accepted cross-client residual;
+> close it or promote it only if a real single-consistent-read-across-all-clients need appears.
+
 Filed: 2026-07-12
-Priority: P2 (Sol + Terra both rated P1; downgraded here because it is PRE-EXISTING, shared with the GC lane, and fail-safe-leaning — a lost race most often yields a sha-mismatch => KEEP/refuse, not a wrong reap)
-Source: Sol + Terra concurrency lanes, #532 commission
+Priority: P3 (was P2; per-client TOCTOU fixed by #551, only the Terra-accepted cross-client residual remains)
+Source: Sol + Terra concurrency lanes, #532 commission (+ #551 resolution)
 Context: PRE-EXISTING (shared property of `adoptRowProvablyUnmutated`, which the GC lane already used before #532; #532 extends the SAME predicate to capture). Filed separately per user decision 2026-07-12.
 
 ## The race
