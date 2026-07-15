@@ -233,12 +233,16 @@ func TestDaemonRespawnNoSupervisorReturns503(t *testing.T) {
 		t.Fatalf("body = %s, want SUPERVISOR_UNAVAILABLE error code", rec.Body.String())
 	}
 	// phase-1 finding 4: the SUPERVISOR_UNAVAILABLE Message is built from the absolute
-	// supervisor.lock.owner.json path; the response must be redacted, never leak it.
+	// supervisor.lock.owner.json path; the response must NOT leak it, while still
+	// giving the operator an actionable restart hint (not a bare "internal error").
 	if strings.Contains(rec.Body.String(), stateDir) {
 		t.Errorf("body leaks the absolute state-dir path %q: %s", stateDir, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "internal error") {
-		t.Errorf("body = %s, want redacted \"internal error\" message", rec.Body.String())
+	if strings.Contains(rec.Body.String(), "supervisor.lock") {
+		t.Errorf("body leaks the supervisor.lock path: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "restart") {
+		t.Errorf("body = %s, want an actionable restart hint", rec.Body.String())
 	}
 }
 

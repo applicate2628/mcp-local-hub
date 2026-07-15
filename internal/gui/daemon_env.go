@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -476,12 +477,15 @@ func (s *Server) daemonRespawnHandler(w http.ResponseWriter, r *http.Request) {
 	// SUPERVISOR_UNAVAILABLE is the one supervisor-classified code whose Message is
 	// built locally from an absolute path — "supervisor.lock.owner.json not found at
 	// <lockPath>" or "dial <unix-socket address> failed" (supervisor_ipc_respawn_
-	// client.go:130-149) — so it leaks the state-dir/socket path on POSIX. Redact it
-	// (phase-1 finding 4); the frontend keys on the code, which the redacted body
-	// keeps. Every other code carries a curated, path-free operator message
-	// (UNKNOWN_TASK, QUARANTINED, RESPAWN_NOT_READY, ...) the GUI surfaces, so keep raw.
+	// client.go:130-149) — so it leaks the state-dir/socket path on POSIX. Log the raw
+	// message server-side and return a curated, PATH-FREE but ACTIONABLE message: the
+	// frontend surfaces this text verbatim to the operator, so a bare "internal error"
+	// would strip the restart/retry guidance (phase-1 finding 4). Every other code
+	// carries a curated, path-free operator message (UNKNOWN_TASK, QUARANTINED,
+	// RESPAWN_NOT_READY, ...) the GUI surfaces, so keep those raw.
 	if result.Code == "SUPERVISOR_UNAVAILABLE" {
-		writeAPIErrorRedacted(w, fmt.Errorf("%s", result.Message), status, result.Code, "/api/daemon/respawn supervisor unavailable")
+		log.Printf("/api/daemon/respawn supervisor unavailable: %s", result.Message)
+		writeAPIError(w, fmt.Errorf("the mcp-local-hub supervisor is not running — restart the hub and retry"), status, result.Code)
 		return
 	}
 	writeAPIError(w, fmt.Errorf("%s", result.Message), status, result.Code)
