@@ -186,6 +186,67 @@ func TestDeAdoptCmdRefusalPrintsPlanAndReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "de-adopt refused") {
 		t.Fatalf("refusal error = %v, want de-adopt refused", err)
 	}
+	if strings.Contains(out, "--yes") {
+		t.Fatalf("refusal output suggested --yes:\n%s", out)
+	}
+}
+
+func TestDeAdoptCmdDryRunFailedClientReturnsError(t *testing.T) {
+	failed := &fakeDeAdoptCLIAPI{plan: &api.DeAdoptPlan{
+		ManifestName: "blocked-client",
+		Routing:      api.DeAdoptRoutingFresh,
+		Clients: []api.DeAdoptClientPlan{{
+			Client:      "codex-cli",
+			Disposition: api.DeAdoptClientFailed,
+			Reason:      "snapshot is missing",
+		}},
+	}}
+	out, err := runDeAdoptCommandWithFake(t, failed, "de-adopt", "blocked-client")
+	if err == nil {
+		t.Fatalf("dry-run with failed client succeeded:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "1 client(s) would fail; codex-cli (snapshot is missing)") {
+		t.Fatalf("dry-run error = %v", err)
+	}
+	if failed.executeServer != "" {
+		t.Fatalf("dry-run executed de-adopt for %q", failed.executeServer)
+	}
+
+	restorable := &fakeDeAdoptCLIAPI{plan: &api.DeAdoptPlan{
+		ManifestName: "restorable-client",
+		Routing:      api.DeAdoptRoutingFresh,
+		Clients: []api.DeAdoptClientPlan{{
+			Client:      "codex-cli",
+			Disposition: api.DeAdoptClientRestorePending,
+			Reason:      "live hub entry is ready to restore",
+		}},
+	}}
+	out, err = runDeAdoptCommandWithFake(t, restorable, "de-adopt", "restorable-client")
+	if err != nil {
+		t.Fatalf("dry-run with restorable client: %v\n%s", err, out)
+	}
+	if restorable.executeServer != "" {
+		t.Fatalf("dry-run executed de-adopt for %q", restorable.executeServer)
+	}
+}
+
+func TestPrintDeAdoptPlanYesFooterDependsOnRouting(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		routing     api.DeAdoptRoutingVerdict
+		wantYesHint bool
+	}{
+		{name: "refuse", routing: api.DeAdoptRoutingRefuse, wantYesHint: false},
+		{name: "fresh", routing: api.DeAdoptRoutingFresh, wantYesHint: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			api.PrintDeAdoptPlan(&out, &api.DeAdoptPlan{ManifestName: "server", Routing: tc.routing})
+			if got := strings.Contains(out.String(), "--yes"); got != tc.wantYesHint {
+				t.Fatalf("--yes hint present = %t, want %t:\n%s", got, tc.wantYesHint, out.String())
+			}
+		})
+	}
 }
 
 func TestDeAdoptCmdAliasExecutesAndPassesRepeatableAcceptConflict(t *testing.T) {

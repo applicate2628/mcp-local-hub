@@ -40,6 +40,15 @@ func newDeAdoptCmdReal() *cobra.Command {
 			}
 			if !yes {
 				api.PrintDeAdoptPlan(cmd.OutOrStdout(), plan)
+				failures := make([]string, 0)
+				for _, client := range plan.Clients {
+					if client.Disposition == api.DeAdoptClientFailed {
+						failures = append(failures, fmt.Sprintf("%s (%s)", client.Client, client.Reason))
+					}
+				}
+				if len(failures) != 0 {
+					return fmt.Errorf("de-adopt plan is not executable: %d client(s) would fail; %s", len(failures), strings.Join(failures, "; "))
+				}
 				return nil
 			}
 

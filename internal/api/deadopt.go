@@ -295,7 +295,9 @@ func PrintDeAdoptPlan(w io.Writer, plan *DeAdoptPlan) {
 	if plan.RefusalReason != "" {
 		fmt.Fprintf(w, "  refusal: %s\n", plan.RefusalReason)
 	}
-	fmt.Fprintln(w, "No changes made. Re-run with --yes to apply.")
+	if plan.Routing != DeAdoptRoutingRefuse {
+		fmt.Fprintln(w, "No changes made. Re-run with --yes to apply.")
+	}
 }
 
 // ExecuteDeAdopt applies the atomic all-clients de-adopt operation using no
