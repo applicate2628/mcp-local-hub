@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -185,7 +186,6 @@ func TestBuildDeAdoptPlanT11UsesAtomicClassifierAndRecomputedSnapshotPath(t *tes
 		{"still-hub present restores", AdoptOriginalStatePresent, deAdoptHubConfig, true, "", true, DeAdoptClientRestorePending, false, true},
 		{"restore-done present", AdoptOriginalStatePresent, func(n string) string { return deAdoptNativeConfig(n, "go") }, true, "", true, DeAdoptClientRestoreDone, false, true},
 		{"genuine-conflict present", AdoptOriginalStatePresent, func(n string) string { return deAdoptNativeConfig(n, "operator-command") }, true, "", true, DeAdoptClientFailed, true, true},
-		{"unreadable live config", AdoptOriginalStatePresent, func(string) string { return "not = [valid" }, true, "", true, DeAdoptClientFailed, false, true},
 		{"snapshot missing manifest present", AdoptOriginalStatePresent, func(n string) string { return deAdoptNativeConfig(n, "operator-command") }, false, "", true, DeAdoptClientFailed, false, true},
 		{"snapshot missing after manifest delete", AdoptOriginalStatePresent, func(n string) string { return deAdoptNativeConfig(n, "operator-command") }, false, "", false, DeAdoptClientRestoreDone, false, false},
 		{"still-hub snapshot missing after manifest delete", AdoptOriginalStatePresent, deAdoptHubConfig, false, "", false, DeAdoptClientFailed, false, false},
@@ -311,7 +311,7 @@ func TestBuildDeAdoptPlanResumeMissingSnapshotUnreadableManifestFailsClosed(t *t
 	}
 }
 
-func TestBuildDeAdoptPlanUnreadableLiveReasonWinsOverMissingSnapshot(t *testing.T) {
+func TestBuildDeAdoptPlanUnreadableGatePrecedesSnapshotClassification(t *testing.T) {
 	name := "deadoptunreadablereason"
 	_, _, _, _ = setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
 		state:           AdoptOperationStateDeAdopting,
@@ -326,9 +326,11 @@ func TestBuildDeAdoptPlanUnreadableLiveReasonWinsOverMissingSnapshot(t *testing.
 	if err != nil {
 		t.Fatalf("BuildDeAdoptPlan: %v", err)
 	}
-	if len(plan.Clients) != 1 || plan.Clients[0].Disposition != DeAdoptClientFailed ||
-		plan.Clients[0].Reason != "live client config could not be read or parsed" {
-		t.Fatalf("unreadable-live client plan = %#v, want FAILED with live-read reason", plan.Clients)
+	if plan.Routing != DeAdoptRoutingRefuse || plan.Eligibility.Eligible ||
+		!plan.Eligibility.AdoptOwned || plan.Eligibility.GateOn || len(plan.Clients) != 0 ||
+		!strings.Contains(plan.RefusalReason, "cannot prove gate-OFF") ||
+		!strings.Contains(plan.RefusalReason, "codex-cli") {
+		t.Fatalf("unreadable-gate plan = %+v, want P0 REFUSE before snapshot classification", plan)
 	}
 }
 
@@ -359,6 +361,41 @@ func TestBuildDeAdoptPlanT2PartialGateAndStateRouting(t *testing.T) {
 		after, err := os.ReadFile(codexPath)
 		if err != nil || !bytes.Equal(before, after) {
 			t.Fatalf("gate-on plan mutated config: err=%v before=%q after=%q", err, before, after)
+		}
+	})
+
+	t.Run("unreadable hub gate fails closed before state routing", func(t *testing.T) {
+		name := "deadoptt2unreadablegate"
+		body := "[mcp_servers.mcphub-hub]\nurl = \"http://127.0.0.1:1/mcp\"\ninvalid = [\n"
+		codexPath, _, _, _ := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+			state:           AdoptOperationStateAdopted,
+			originalState:   AdoptOriginalStateAbsent,
+			liveConfig:      body,
+			manifestPresent: true,
+		})
+		claudePath := filepath.Join(filepath.Dir(filepath.Dir(codexPath)), ".claude.json")
+		if err := os.WriteFile(claudePath, []byte(`{"mcpServers":{"ordinary":{"url":"http://127.0.0.1:2/mcp","type":"http"}}}`), 0o600); err != nil {
+			t.Fatalf("seed cleanly gate-absent claude-code config: %v", err)
+		}
+
+		if gated := GatedOnClients(); slices.Contains(gated, "codex-cli") {
+			t.Fatalf("GatedOnClients() = %v, want reset-port probe to keep skipping unreadable codex-cli", gated)
+		}
+		probe := ProbeHubGate()
+		if len(probe.GatedOn) != 0 || !slices.Contains(probe.Unreadable, "codex-cli") ||
+			slices.Contains(probe.Unreadable, "claude-code") {
+			t.Fatalf("ProbeHubGate() = %+v, want codex-cli unreadable and cleanly gate-absent claude-code in neither set", probe)
+		}
+
+		plan, err := NewAPI().BuildDeAdoptPlan(name)
+		if err != nil {
+			t.Fatalf("BuildDeAdoptPlan: %v", err)
+		}
+		if plan.Routing != DeAdoptRoutingRefuse || plan.Eligibility.Eligible ||
+			!plan.Eligibility.AdoptOwned || plan.Eligibility.GateOn ||
+			!strings.Contains(plan.RefusalReason, "unreadable") ||
+			!strings.Contains(plan.RefusalReason, "codex-cli") {
+			t.Fatalf("unreadable-gate plan = %+v, want fail-closed REFUSE naming codex-cli", plan)
 		}
 	})
 

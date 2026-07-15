@@ -30,6 +30,55 @@ import (
 	"mcp-local-hub/internal/clients"
 )
 
+// HubGateProbe reports the hub-gate state across supported clients.
+// GatedOn contains clients proven gate-ON by a live, enabled mcphub-hub
+// aggregate. Unreadable contains supported, existing, non-relay clients whose
+// gate state could not be determined because GetEntry could not read or parse
+// their config. Fail-closed callers must treat Unreadable as blocking because
+// gate-OFF has not been proven for those clients.
+type HubGateProbe struct {
+	GatedOn    []string
+	Unreadable []string
+}
+
+// ProbeHubGate classifies the hub-gate state of every applicable client.
+// Absent or disabled aggregates are gate-OFF; read errors are surfaced as
+// unreadable so callers can choose the appropriate failure policy.
+func ProbeHubGate() HubGateProbe {
+	var probe HubGateProbe
+	all := clients.AllClients()
+	for name, c := range all {
+		if c == nil {
+			continue
+		}
+		if c.IsRelayStdio() {
+			// The hub aggregate is never written to a relay-stdio client.
+			continue
+		}
+		if !c.Exists() {
+			continue
+		}
+		entry, err := c.GetEntry(hubReconcileAggregateEntryName)
+		if err != nil {
+			probe.Unreadable = append(probe.Unreadable, name)
+			continue
+		}
+		if entry == nil {
+			continue
+		}
+		if entry.Disabled {
+			// A disabled aggregate (enabled:false) is one the client never loads,
+			// so it orphans no live URL on a hub port reset — not gate-ON (bot PR
+			// #420 finding 5).
+			continue
+		}
+		probe.GatedOn = append(probe.GatedOn, name)
+	}
+	sort.Strings(probe.GatedOn)
+	sort.Strings(probe.Unreadable)
+	return probe
+}
+
 // GatedOnClients returns the sorted list of supported client ids whose
 // on-disk config currently carries the reserved `mcphub-hub` aggregate
 // entry — i.e. the clients that are gate-ON and whose URLs are baked to
@@ -64,34 +113,7 @@ import (
 // install_hub_reconcile.go applyOpsForClient), so they can never be
 // gate-ON via the hub aggregate.
 func GatedOnClients() []string {
-	var gated []string
-	all := clients.AllClients()
-	for name, c := range all {
-		if c == nil {
-			continue
-		}
-		if c.IsRelayStdio() {
-			// The hub aggregate is never written to a relay-stdio client.
-			continue
-		}
-		if !c.Exists() {
-			continue
-		}
-		entry, err := c.GetEntry(hubReconcileAggregateEntryName)
-		if err != nil || entry == nil {
-			// Skip on read error (best-effort) or absent entry.
-			continue
-		}
-		if entry.Disabled {
-			// A disabled aggregate (enabled:false) is one the client never loads,
-			// so it orphans no live URL on a hub port reset — not gate-ON (bot PR
-			// #420 finding 5).
-			continue
-		}
-		gated = append(gated, name)
-	}
-	sort.Strings(gated)
-	return gated
+	return ProbeHubGate().GatedOn
 }
 
 // AnyClientGatedOn reports whether at least one supported client is

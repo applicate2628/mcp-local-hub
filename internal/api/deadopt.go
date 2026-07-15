@@ -107,13 +107,13 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 		return nil, err
 	}
 
-	gated := GatedOnClients()
+	probe := ProbeHubGate()
 	plan := &DeAdoptPlan{
 		ManifestName: server,
 		Routing:      DeAdoptRoutingRefuse,
 		Eligibility: DeAdoptEligibility{
-			GateOn:        len(gated) != 0,
-			GateOnClients: append([]string(nil), gated...),
+			GateOn:        len(probe.GatedOn) != 0,
+			GateOnClients: append([]string(nil), probe.GatedOn...),
 		},
 		snapshotBytes: make(map[string][]byte),
 	}
@@ -125,10 +125,17 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 		return nil, fmt.Errorf("de-adopt plan: read provenance for %q: %w", server, err)
 	}
 	plan.Eligibility.AdoptOwned = found
-	plan.Eligibility.Eligible = found && len(gated) == 0
+	plan.Eligibility.Eligible = found && len(probe.GatedOn) == 0 && len(probe.Unreadable) == 0
 
-	if len(gated) != 0 {
-		reason := fmt.Sprintf("gate is ON for %d client(s) (%s); gate OFF first, then de-adopt", len(gated), strings.Join(gated, ", "))
+	if len(probe.GatedOn) != 0 || len(probe.Unreadable) != 0 {
+		var blockers []string
+		if len(probe.GatedOn) != 0 {
+			blockers = append(blockers, fmt.Sprintf("gate is ON for %d client(s) (%s); gate OFF first, then de-adopt", len(probe.GatedOn), strings.Join(probe.GatedOn, ", ")))
+		}
+		if len(probe.Unreadable) != 0 {
+			blockers = append(blockers, fmt.Sprintf("cannot prove gate-OFF: %d client config(s) unreadable (%s); de-adopt refuses until every client's hub-gate state is readable", len(probe.Unreadable), strings.Join(probe.Unreadable, ", ")))
+		}
+		reason := strings.Join(blockers, "; ")
 		plan.RefusalReason = reason
 		plan.Eligibility.BlockedReason = reason
 		return plan, nil
