@@ -81,7 +81,10 @@ func (s *Server) supervisorRestartHandler(w http.ResponseWriter, r *http.Request
 
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
-		writeAPIError(w, fmt.Errorf("resolve state dir: %w", err), http.StatusInternalServerError, "STATE_DIR_FAILED")
+		// api.DaemonStateDir's errStateParentInsecure embeds the absolute
+		// state-dir path on POSIX; log server-side + return a stable opaque
+		// message (phase-1 finding 4).
+		writeAPIErrorRedacted(w, fmt.Errorf("resolve state dir: %w", err), http.StatusInternalServerError, "STATE_DIR_FAILED", "/api/supervisor/restart resolve state dir")
 		return
 	}
 

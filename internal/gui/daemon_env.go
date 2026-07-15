@@ -160,7 +160,10 @@ func (s *Server) daemonEnvHandler(w http.ResponseWriter, r *http.Request) {
 
 	overlayPath, err := resolveOverlayPath()
 	if err != nil {
-		writeAPIError(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED")
+		// resolveOverlayPath wraps api.DaemonStateDir(); on POSIX its
+		// errStateParentInsecure embeds the absolute state-dir path, so log
+		// server-side + return a stable opaque message (phase-1 finding 4).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED", "/api/daemon/env set resolve overlay path")
 		return
 	}
 	if err := daemon_env_overlay.WriteOverlay(overlayPath, func(ov *daemon_env_overlay.Overlay) error {
@@ -220,7 +223,10 @@ func (s *Server) daemonEnvListHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	overlayPath, err := resolveOverlayPath()
 	if err != nil {
-		writeAPIError(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED")
+		// resolveOverlayPath wraps api.DaemonStateDir(); on POSIX its
+		// errStateParentInsecure embeds the absolute state-dir path, so log
+		// server-side + return a stable opaque message (phase-1 finding 4).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED", "/api/daemon/env list resolve overlay path")
 		return
 	}
 	ov, err := daemon_env_overlay.Load(overlayPath)
@@ -352,7 +358,10 @@ func (s *Server) discoveryRefreshHandler(w http.ResponseWriter, r *http.Request)
 	}
 	overlayPath, err := resolveOverlayPath()
 	if err != nil {
-		writeAPIError(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED")
+		// resolveOverlayPath wraps api.DaemonStateDir(); on POSIX its
+		// errStateParentInsecure embeds the absolute state-dir path, so log
+		// server-side + return a stable opaque message (phase-1 finding 4).
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "STATE_DIR_FAILED", "/api/discovery/refresh resolve overlay path")
 		return
 	}
 

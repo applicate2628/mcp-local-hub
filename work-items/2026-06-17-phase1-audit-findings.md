@@ -14,18 +14,20 @@
 > - **Finding 3 (hand-rolled atomic writers bypass `WriteStateFileAtomic`)** — FIXED: all 4 migrated
 >   (`workspace_registry.go:186`, `settings.go:180`, `dismiss.go:133`, `client_install_prefs.go`); the one
 >   `daemon_intent.go:985` exception is documented retired/test-only (zero prod callers).
-> - **Finding 4 (no central error-redaction; raw path leaks)** — **PARTIAL / RESIDUAL.** The
->   `writeAPIErrorRedacted` helper exists + the cited supervisor-intent/overlay/manifest leaks are fixed,
->   but 4 sites still return raw `api.DaemonStateDir()` errors (absolute path via `errStateParentInsecure`)
->   on POSIX: `daemon_env.go:163,223,355` + `supervisor_restart.go:84`. Tracked:
->   `backlog/2026-07-15-gui-state-dir-error-path-leak-residual.md`.
+> - **Finding 4 (no central error-redaction; raw path leaks)** — **FIXED (2026-07-15).** The
+>   `writeAPIErrorRedacted` helper + the cited supervisor-intent/overlay/manifest leaks were fixed earlier;
+>   the residual 4 `api.DaemonStateDir()` sites (`daemon_env.go` set/list/discovery-refresh +
+>   `supervisor_restart.go`) now route through `writeAPIErrorRedacted` too, closing the POSIX
+>   `errStateParentInsecure` absolute-path leak. Structural guard
+>   `state_dir_error_redaction_test.go` asserts every `STATE_DIR_FAILED` emission stays redacted. The
+>   `backlog/2026-07-15-gui-state-dir-error-path-leak-residual.md` tracker is closed/removed on delivery.
 > - **Finding 5 (/api/path/validate echoes raw os.Stat error+path)** — FIXED: opaque token
 >   `path_validate.go:118-126`.
 > - **Finding 6 (backups restore surfaces absolute paths)** — NO-FIX-NEEDED (the finding's own verdict was
 >   "EXEMPT these path echoes"; code matches — `backups_actions.go:226-272` returns paths by design).
 >
-> **Net: 5/6 resolved-or-exempt; 1 residual (finding 4, tracked). The inline `[P2]`/`[P3]` markers below
-> are the ORIGINAL 2026-06-17 state — trust this header, not them.**
+> **Net: 6/6 resolved-or-exempt (finding 4's residual closed 2026-07-15). The inline `[P2]`/`[P3]` markers
+> below are the ORIGINAL 2026-06-17 state — trust this header, not them.**
 
 
 ## g9-architecture
