@@ -1,10 +1,35 @@
 # Adopt-side `classifyDeadAdoptingRow` is blind under gate-ON — can reap a committed adopt's snapshots
 
-- **status:** open
-- **severity:** high (data loss: destroys pre-adopt snapshots de-adopt needs)
+- **status:** DATA-LOSS CLOSED by #551 (residual = classifier imprecision, non-data-loss)
+- **severity:** high -> low (the data-loss path is closed; the classifier is still imprecise)
 - **filed:** 2026-07-11
 - **context:** adjacent-finding (surfaced by the de-adopt multi-model design review; memo F6)
 - **owner:** unassigned (adopt-side; NOT de-adopt v1 scope)
+
+> **DATA-LOSS CLOSED 2026-07-16 by #551 (verified).** The reap that this bug feared is gated
+> TWICE: `classifyDeadAdoptingRow` (Signal 2) → `adoptRowProvablyUnmutatedFn` (the #551
+> write-target entry-shape predicate). This bug is about the FIRST gate misfiring; the SECOND
+> gate (#551) now catches it. `adoptRowProvablyUnmutated` classifies the live physical
+> `SourceEntryName` entry: under gate-ON that per-server entry is ABSENT (replaced by the
+> `mcphub-hub` aggregate), and for a PRESENT client (the only client kind that pins a secret
+> snapshot) an absent live entry with a non-nil snapshot is `GenuineConflict`, NOT
+> `ClassifyRestoreDone` → the predicate returns false → KEEP. So even when the classifier
+> misclassifies a gate-ON committed row `CRASH_REAP` (manifest also deleted, so Signal-2b can't
+> save it), the snapshots are NOT destroyed. `absent`/`present-merged-lower` clients pin no
+> snapshot, so a reap there loses nothing. Regression guard:
+> `TestAdoptGcGateOnCommittedManifestAbsentKeeps` (`internal/api/adopt_gate_on_reap_test.go`)
+> reproduces the exact worst case (gate-ON aggregate + manifest absent + present client) and
+> asserts the row + snapshots survive while confirming the classifier still emits `CRASH_REAP`.
+>
+> **Residual (LOW, non-data-loss):** `classifyDeadAdoptingRow` is still gate-ON-BLIND — it
+> reports `CRASH_REAP` for a committed gate-ON row when it should report `adoptRowCommittedKeep`.
+> No data is lost (the predicate keeps the row), but the classifier is imprecise. The
+> gate-ON-aware committed recognizer (aggregate present + manifest binding live in the resolver)
+> is the SAME building block the gate-ON de-adopt lane needs, so the classifier-correctness fix
+> is folded into the de-adopt-v2 gate-ON follow-up
+> (`work-items/backlog/2026-07-11-deadopt-subset-and-gate-on-followup.md`) rather than done as a
+> standalone now. This bug is DOWNGRADED to that follow-up's precondition; the data-loss
+> emergency is over.
 
 ## Symptom
 

@@ -161,22 +161,31 @@ func BuildHubReconcilePlan(
 	// entry is idempotent (no-op), so this is safe to fan out across
 	// every supported client.
 	var plan []ClientUpdatePlan
-	if !opts.GateOn {
-		for _, client := range clients.SupportedClientNames() {
-			if clients.IsRelayStdio(client) {
-				continue
-			}
-			path, err := clients.ConfigPathForName(client)
-			if err != nil {
-				continue
-			}
-			plan = append(plan, ClientUpdatePlan{
-				Client:    client,
-				Path:      path,
-				Action:    ClientUpdateRemove,
-				EntryName: hubReconcileAggregateEntryName,
-			})
+	// Up-front stale-aggregate sweep. Gate-OFF removes `mcphub-hub` from EVERY supported
+	// client (nothing re-adds it below). Gate-ON removes it from every supported client that
+	// has ZERO remaining bindings: the per-binding loop below re-adds the aggregate ONLY for
+	// clients WITH bindings, so a client that dropped to zero bindings under gate-ON would
+	// otherwise keep a stale `mcphub-hub` aggregate pointing at a hub route that aggregates
+	// nothing for it (bug 2026-07-11-hub-reconcile-gate-on-zero-binding-stale-aggregate). This
+	// makes `mcphub install --reconcile-hub-mode` prune those stale aggregates — a behavioral
+	// improvement declared here. Remove-on-missing is an idempotent no-op, so the fan-out is safe.
+	for _, client := range clients.SupportedClientNames() {
+		if clients.IsRelayStdio(client) {
+			continue
 		}
+		if opts.GateOn && len(perClient[client]) != 0 {
+			continue // gate-ON: this client keeps its aggregate (re-added by the per-binding loop)
+		}
+		path, err := clients.ConfigPathForName(client)
+		if err != nil {
+			continue
+		}
+		plan = append(plan, ClientUpdatePlan{
+			Client:    client,
+			Path:      path,
+			Action:    ClientUpdateRemove,
+			EntryName: hubReconcileAggregateEntryName,
+		})
 	}
 	for _, client := range clientNames {
 		refs := perClient[client]
