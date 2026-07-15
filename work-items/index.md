@@ -11,7 +11,7 @@
 
 | Item | State | Remaining |
 |---|---|---|
-| [2026-07-05-adopt-npx-orphans](active/2026-07-05-adopt-npx-orphans/status.md) | PARTIALLY DELIVERED | adopt CLI/API + GUI + **reaper (all 3 kill-authority hardenings)** SHIPPED + DEPLOYED (#513/#520/#521/#522); anti-drift "unmanaged detected" GUI signal **LANDED** (#523, master `f7eaa1c8`). Remaining = phase-2 de-adopt (now the separate `2026-07-09-deadopt-hub-to-native` item, blocked) + D P2a/P2b GUI. |
+| [2026-07-05-adopt-npx-orphans](active/2026-07-05-adopt-npx-orphans/status.md) | PARTIALLY DELIVERED | adopt CLI/API + GUI + **reaper (all 3 kill-authority hardenings)** SHIPPED + DEPLOYED (#513/#520/#521/#522); anti-drift "unmanaged detected" GUI signal **LANDED** (#523, master `f7eaa1c8`). Phase-2 de-adopt (the separate `2026-07-09-deadopt-hub-to-native` item) is now **DELIVERED + CLOSED** (2026-07-15, #539-#550). Remaining = D P2a/P2b GUI. |
 
 ## Reaper kill-authority hardening — COMPLETE (2026-07-08, all bot-PASS + deployed)
 

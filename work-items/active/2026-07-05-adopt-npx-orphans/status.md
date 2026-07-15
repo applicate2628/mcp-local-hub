@@ -3,8 +3,10 @@
 Template: full-delivery (security-sensitive). Orchestrator: main conversation.
 State: PARTIALLY DELIVERED — adopt CLI/API + GUI surface + reaper (PR5) + anti-drift
 "unmanaged detected" GUI signal (#523) + both reaper-hardening bugs (#521/#522) all
-SHIPPED + DEPLOYED; remaining = phase-2 de-adopt (separate item
-`2026-07-09-deadopt-hub-to-native`, blocked) + D P2a/P2b GUI.
+SHIPPED + DEPLOYED. Phase-2 de-adopt (the separate item
+`2026-07-09-deadopt-hub-to-native`) is now **DELIVERED + CLOSED** (2026-07-15, all 12
+phases #539-#550, master `837fe95c`, archived at
+`archive/2026-07/2026-07-09-deadopt-hub-to-native/`). Remaining here = D P2a/P2b GUI.
 
 ## Delivered (shipped to master + live-deployed)
 - **Auto-reaper hardening (A2 PR5, #520 → master c53d874a, deployed +
@@ -71,8 +73,11 @@ SHIPPED + DEPLOYED; remaining = phase-2 de-adopt (separate item
 2. **Anti-drift "unmanaged detected" surface** (GUI) — **LANDED 2026-07-08 (PR #523,
    master `f7eaa1c8`, deployed).** Surfaces bypass servers so the operator can adopt
    them; reduces reaper need.
-3. **Phase-2 de-adopt / revert-to-native** (hub→native): interim = `mcphub
-   uninstall --server X` + restore client backup.
+3. **Phase-2 de-adopt / revert-to-native** (hub→native): **DELIVERED** —
+   `mcphub de-adopt <server>` (CLI + GUI affordance) atomically restores every
+   adopt-owned client entry to its pre-adopt config + removes the hub manifest
+   (item `2026-07-09-deadopt-hub-to-native`, closed 2026-07-15, #539-#550). The
+   old interim (`mcphub uninstall --server X` + manual backup restore) is superseded.
 4. **fable Area-3 follow-up** (#516 review) — **DONE 2026-07-08 (PR #519, master
    f52d3ccb, deployed).** An explicitly-requested client whose config extraction
    errors now FAILS LOUD at plan-build time (path-free error) instead of silently
