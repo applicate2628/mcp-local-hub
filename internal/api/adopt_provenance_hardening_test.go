@@ -136,10 +136,13 @@ func TestAdoptGcPhase2ReapFailureEmitsReapFailed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sha := ManifestHashContent(liveBytes)
+	ref, sha, err := writeAdoptClientSnapshot(entry, "codex-cli", liveBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Aged CRASH_REAP orphan: manifest absent + byte-frozen config => passes the
-	// classifier AND both destructive-safety gates, so the reap is actually attempted.
+	// Aged CRASH_REAP orphan: manifest absent + pinned native entry still present =>
+	// passes the classifier AND both destructive-safety gates, so reap is attempted.
 	seed := &AdoptedEntries{Version: 1, Records: []AdoptProvenanceRecord{{
 		ManifestName:    entry,
 		SourceEntryName: entry,
@@ -148,20 +151,12 @@ func TestAdoptGcPhase2ReapFailureEmitsReapFailed(t *testing.T) {
 		UpdatedAt:       time.Now().Add(-2 * time.Hour).UTC(),
 		Clients: []AdoptClientProvenance{{
 			Client: "codex-cli", OriginalState: AdoptOriginalStatePresent,
-			SnapshotRef: "adopt-provenance/" + entry + "/codex-cli.snapshot", SnapshotSHA256: sha,
+			SnapshotRef: ref, SnapshotSHA256: sha,
 		}},
 	}}}
 	if err := writeAdoptedEntries(seed); err != nil {
 		t.Fatal(err)
 	}
-	d, _ := adoptSnapshotDir(entry)
-	if err := os.MkdirAll(d, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(d, "codex-cli.snapshot"), liveBytes, 0o600); err != nil {
-		t.Fatal(err)
-	}
-
 	logPath := filepath.Join(stateRoot, SupervisorEventLogFileLeaf)
 
 	// (a) Force the Phase-2 reap to fail. Register the restore IMMEDIATELY via t.Cleanup

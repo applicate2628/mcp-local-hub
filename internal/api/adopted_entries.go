@@ -610,10 +610,10 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 		// classifier calls CRASH_REAP then passes the SAME positive-crash-evidence gate
 		// the GC reap uses (adoptRowProvablyUnmutatedFn — ONE predicate across both reap
 		// lanes, bug 2026-07-11 P1-2 case-5): a committed adopt whose manifest was deleted
-		// and whose hub bindings drifted looks byte-for-byte like a pre-install crash to
-		// the classifier, so only a row whose present-at-capture client configs are still
-		// byte-frozen is reaped; a mutated config (Install ran) is REFUSED, never
-		// overwritten (which would strand the de-adopt snapshots as rowless residue).
+		// and whose hub bindings drifted looks like a pre-install crash to the classifier,
+		// so only a row whose write-target entry shapes prove Install committed nowhere is
+		// reaped. Any unprovable client is REFUSED, never overwritten (which would strand
+		// the de-adopt snapshots as rowless residue).
 		for _, r := range store.Records {
 			if r.ManifestName != plan.ManifestName {
 				continue
@@ -625,8 +625,8 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 				return fmt.Errorf("adopt provenance capture: manifest %q already has a committed (install-live) adopt still in `adopting` state; refusing to overwrite it", plan.ManifestName)
 			}
 			if !adoptRowProvablyUnmutatedFn(r) {
-				return fmt.Errorf("adopt provenance capture: manifest %[1]q has a prior adopt whose recorded client configs no longer match their pre-adopt snapshots "+
-					"(its manifest was deleted and its hub bindings drifted, so it looks like a crash orphan — but a mutated config means Install may have COMMITTED it); "+
+				return fmt.Errorf("adopt provenance capture: manifest %[1]q has a prior adopt whose client entry shapes do not prove a pre-Install crash "+
+					"(its manifest was deleted and its hub bindings drifted, so it looks like a crash orphan — but a write-target hub relay or any unreadable/unverifiable entry means Install may have COMMITTED it); "+
 					"refusing to overwrite it, which would destroy the pre-adopt snapshots. "+
 					"WARNING: if ANY client entry for this server was rewritten to a hub URL, the prior adopt COMMITTED — do NOT delete adopt-provenance/%[1]s (it is the only copy of the original entries a future de-adopt (or manual) restore would need). "+
 					"Only after confirming the prior adopt never completed Install (no client was hub-rewritten) is it safe to remove its adopted-entries.json row + adopt-provenance/%[1]s dir and re-adopt: %[2]w", plan.ManifestName, errAdoptPriorConfigMutated)
@@ -1015,12 +1015,12 @@ var adoptGCBeforePhase2Hook func()
 var adoptGCBeforeReapHook func()
 
 // errAdoptPriorConfigMutated flags the ONE capture-UPSERT refusal where a prior
-// `adopting` row classifies CRASH_REAP but its recorded present-client configs are
-// MUTATED since capture (Install may have COMMITTED the prior adopt), so the capture
-// refuses to overwrite it rather than strand the de-adopt snapshots. It is wrapped into
-// that refusal error so ExecuteAdoptWithOpts can errors.Is-recognize it and classify the
-// audit event's reason distinctly from an ordinary capture I/O failure (path-free class).
-var errAdoptPriorConfigMutated = errors.New("prior adopt config mutated since capture; refusing to overwrite committed-looking provenance")
+// `adopting` row classifies CRASH_REAP but its per-client entry proof cannot establish
+// that Install committed nowhere. The capture refuses to overwrite it rather than
+// strand the de-adopt snapshots. It is wrapped into that refusal error so
+// ExecuteAdoptWithOpts can errors.Is-recognize it and classify the audit event's reason
+// distinctly from an ordinary capture I/O failure (path-free class).
+var errAdoptPriorConfigMutated = errors.New("prior adopt entry state does not prove a pre-Install crash; refusing to overwrite committed-looking provenance")
 
 // adoptRowProvablyUnmutatedFn is the GC-lane positive-crash-evidence gate (bug
 // 2026-07-11 P1-2 case-5 / Option B), a package var only so a test can prove the gate
@@ -1039,50 +1039,113 @@ var reapAdoptProvenanceRowFn = reapAdoptProvenanceRow
 var gcRemoveRowlessSnapshotsFn = removeAdoptSnapshots
 
 // adoptRowProvablyUnmutated reports POSITIVE crash-before-Install evidence for a
-// dead-owner `adopting` row the GC has already classified CRASH_REAP (so both the
-// live hub binding AND the manifest are absent). REAP destroys the row's secret
-// snapshots, so it demands positive proof that the adopt mutated NOTHING — never mere
-// absence of a committed signal (destructive-default polarity). This closes the
-// case-5 residual: a COMMITTED adopt whose manifest was later DELETED and whose hub
-// bindings drifted looks byte-for-byte like a pre-install crash to the classifier;
-// only the client-config bytes distinguish them.
+// dead-owner `adopting` row the caller has already classified CRASH_REAP. REAP
+// destroys the row's secret snapshots, so uncertainty always KEEPS the row
+// (destructive-default polarity); absence of a committed signal alone is never proof.
 //
-// Proof: EVERY recorded client must be a `present`-at-capture client whose LIVE
-// config file is byte-frozen since capture — its whole-file sha256 still equals the
-// recorded SnapshotSHA256. The snapshot bytes were os.ReadFile(ConfigPath) at capture
-// (captureAdoptClientsProvenance -> writeAdoptClientSnapshot), so reading ConfigPath
-// here is byte-symmetric; had Install run it would have rewritten the config to the
-// hub relay and changed the sha. Anything we CANNOT sha-prove fails the proof and
-// KEEPS the row (fail-safe toward KEEP):
-//   - an `absent` or `present-merged-lower` client (no snapshot pinned),
-//   - a `present` client with an empty recorded SnapshotSHA256,
-//   - an adapter not constructible on this host,
-//   - a live-config read error, or
-//   - a differing live sha (the config changed since capture => Install ran / drift).
+// SAFETY RESTS ON VALUE-AT-RISK, NOT MONOTONICITY. An earlier draft claimed no
+// `adopting` path removes an installed write-target hub relay, so hub-relay presence
+// was a monotonic Install-commit signal (ClassifyStillHub => Install committed => keep).
+// That premise is FALSE: demigrate / uninstall / hub-mode reconcile revert a committed
+// client's entry to native WITHOUT consulting provenance, so ClassifyStillHub can go
+// absent on a row Install DID commit. The predicate is safe anyway because a reap never
+// puts a secret/config value at risk. Every recorded client is classified through
+// CASEntryMutator while its config read lock is held, against the physical write target
+// rather than any merged view, and the per-state gate is:
+//   - `present`: inode-anchored read + sha-gate the pinned snapshot, extract its raw
+//     entry subtree, and require ClassifyRestoreDone — the live write-target entry
+//     reflect.DeepEqual-equals the pinned native snapshot. The snapshot is therefore
+//     deleted ONLY when its exact content already survives, identical, in the live
+//     config: zero restore value at risk. A committed-then-reverted row reaps only when
+//     the reverted native equals the pinned native (the original spelling is already
+//     live) — the deleted snapshot was redundant. Unrelated whole-config churn is
+//     intentionally irrelevant.
+//   - `absent` / `present-merged-lower`: no native snapshot is pinned by construction,
+//     so classify against a nil snapshot and require a readable non-hub verdict
+//     (ClassifyRestoreDone or ClassifyGenuineConflict). A reap here deletes only the row
+//     + empty snapshot dir — no secret at risk.
 //
-// A row with NO recorded clients (a capture-ANCHOR orphan: capture crashed before it
-// finalized the client provenance) is vacuously proven — capture runs entirely before
-// Install, so such a row is definitively pre-install and has no committed snapshots to
-// preserve.
+// The reap NEVER deletes the row's routed vault keys (owned by de-adopt's hash-gated
+// --reclaim-crashed), so the worst case of a wrongly-reaped committed-but-reverted row
+// is a BOOKKEEPING residual (orphan row + lingering owner-only vault keys), never a lost
+// secret/config spelling. See work-items/bugs/
+// 2026-07-12-adopt-reap-native-revert-deletes-committed-provenance.md.
+//
+// An unavailable/non-CAS adapter, unverifiable snapshot, unreadable classification,
+// unknown original state, ClassifyStillHub, or any unexpected verdict fails safe to
+// KEEP. A row with NO recorded clients remains vacuously reap-safe: capture writes the
+// anchor before Install and has no committed snapshots to preserve.
 func adoptRowProvablyUnmutated(rec AdoptProvenanceRecord) bool {
 	all := clients.AllClients()
 	for _, c := range rec.Clients {
-		if c.OriginalState != AdoptOriginalStatePresent || c.SnapshotSHA256 == "" {
-			return false // no pinned snapshot to prove against => cannot positively prove
-		}
 		adapter, ok := all[c.Client]
 		if !ok {
 			return false // adapter not constructible on this host => cannot prove
 		}
-		liveBytes, err := os.ReadFile(adapter.ConfigPath())
-		if err != nil {
-			return false // live config unreadable => cannot prove (fail-safe KEEP)
+		mutator, ok := clients.AsCASEntryMutator(adapter)
+		if !ok {
+			return false // no locked write-target classifier => cannot prove
 		}
-		if ManifestHashContent(liveBytes) != c.SnapshotSHA256 {
-			return false // config changed since capture => Install ran / drift => KEEP
+
+		var snapshotSubtree any
+		switch c.OriginalState {
+		case AdoptOriginalStatePresent:
+			state, _, subtree, _ := readDeAdoptSnapshot(&rec, c, mutator)
+			if state != deAdoptSnapshotAvailable {
+				return false // pinned native snapshot missing/unreadable/mismatched => KEEP
+			}
+			snapshotSubtree = subtree
+		case AdoptOriginalStateAbsent, AdoptOriginalStatePresentMergedLower:
+			// These states intentionally have no snapshot. Their proof is solely that
+			// Install did not place the expected hub relay in the physical write target.
+		default:
+			return false // unknown persisted state => cannot prove
+		}
+
+		verdict, err := mutator.ClassifyEntryUnderLock(
+			rec.SourceEntryName,
+			deAdoptLiveBindingMatcher(&rec, c.Client),
+			snapshotSubtree,
+		)
+		if err != nil {
+			return false // read/parse/recognizer failure => cannot prove
+		}
+
+		switch c.OriginalState {
+		case AdoptOriginalStatePresent:
+			// ClassifyRestoreDone is reflect.DeepEqual(liveSubtree, snapshotSubtree)
+			// over PARSED subtrees (cas_mutator.go:352), not byte equality — which is
+			// exactly the right gate, because de-adopt would perform NO restore from a
+			// snapshot in this state, so deleting it risks zero restore value:
+			//   - De-adopt's OWN disposition consumes the SAME ClassifyEntryUnderLock
+			//     verdict: ClassifyRestoreDone maps to DeAdoptClientRestoreDone
+			//     ("client already in its de-adopted target state", deadopt.go:980-981)
+			//     and the executor SKIPS the client's mutation entirely
+			//     (deadopt.go:504-508). Same predicate on both sides, not two DeepEquals.
+			//   - Backstop: de-adopt's E3 restore is CASRestoreEntryFromBytes with
+			//     allowHubEntry=false (cas_mutator.go:258); casRestoreFromBytes requires
+			//     the LIVE entry to still hub-recognizer-match before it touches the
+			//     snapshot, so a native (RestoreDone) live entry fails the match =>
+			//     ErrCASConflict, no write (cas_mutator.go:216-225). The snapshot is
+			//     provably never consumed under RestoreDone.
+			// So the byte-level formatting the parsed compare ignores (quote style,
+			// comments, whitespace) is never a de-adopt restore product; its loss on
+			// reap is immaterial, and the secret-literal VALUE round-trips through the
+			// shared extractor anyway. The ONE byte-exact writer,
+			// wholeFileRestoreIfWriteTargetGone, is gated on allowHubEntry=true so it is
+			// unreachable from de-adopt (adopt-rollback lane only), and it fires only
+			// when the live file is ABSENT — which a present client classifies
+			// GenuineConflict (present=false + non-nil snapshot), never RestoreDone.
+			if verdict != clients.ClassifyRestoreDone {
+				return false // StillHub, conflict, unreadable, or unknown => KEEP
+			}
+		case AdoptOriginalStateAbsent, AdoptOriginalStatePresentMergedLower:
+			if verdict != clients.ClassifyRestoreDone && verdict != clients.ClassifyGenuineConflict {
+				return false // StillHub, unreadable, or unknown => KEEP
+			}
 		}
 	}
-	return true // every present client byte-frozen since capture => pre-install crash
+	return true // Install committed on no recorded client
 }
 
 // gcOrphanedAdoptingProvenance reaps stale CROSS-manifest orphans using the three
@@ -1105,8 +1168,8 @@ func adoptRowProvablyUnmutated(rec AdoptProvenanceRecord) bool {
 //     destructive-safety gates before the reap (bug 2026-07-11 P1-2): a mutation-point
 //     manifest re-check (Part 3 — refuse + emit adopt-provenance-reap-skipped-manifest
 //     -present if a manifest exists now), and a POSITIVE crash-evidence gate (Part 2 —
-//     adoptRowProvablyUnmutatedFn: reap only when every present-at-capture client's
-//     live config is byte-frozen since capture; a mutated config means Install ran =>
+//     adoptRowProvablyUnmutatedFn: reap only when every client's locked physical
+//     write-target entry shape proves Install committed nowhere; any uncertainty =>
 //     KEEP). Only a triply-cleared row removes snapshots-then-row under the held lease,
 //     identity-gated at the mutation point.
 //   Phase 3 (backstop): reap ROWLESS snapshot dirs (a <manifest>/ dir with no store
@@ -1218,10 +1281,10 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 			continue
 		}
 		// Part 2 — positive crash-before-Install evidence gate (case-5 closure). REAP
-		// only when every present-at-capture client's live config is byte-frozen since
-		// capture; anything unprovable fails safe toward KEEP. A committed adopt whose
-		// manifest was deleted + bindings drifted (looks like a pre-install crash to the
-		// classifier) is distinguished here by its MUTATED client-config bytes.
+		// only when every client's locked physical write-target entry shape proves
+		// Install committed nowhere; anything unprovable fails safe toward KEEP. This
+		// distinguishes a committed adopt after manifest/binding drift without treating
+		// unrelated whole-config churn as evidence of Install.
 		if !adoptRowProvablyUnmutatedFn(live) {
 			_ = lk.Unlock()
 			continue // cannot positively prove pre-install => preserve the row + snapshots

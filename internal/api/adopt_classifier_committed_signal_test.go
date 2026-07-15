@@ -82,23 +82,26 @@ func TestAdoptGcCommittedDriftManifestPresentKeeps(t *testing.T) {
 	}
 }
 
-// Part 2 (positive control) — a TRUE pre-install crash orphan still reaps: manifest
-// ABSENT, no live binding, and the present client's live config is byte-frozen since
-// capture (its whole-file sha256 == the recorded SnapshotSHA256) => Install never ran
-// => reaped 1, row + snapshot gone.
-func TestAdoptGcCrashOrphanUnmutatedReaps(t *testing.T) {
+// Part 2 (positive control) — a TRUE pre-install crash orphan still reaps despite
+// unrelated whole-config churn: manifest ABSENT, no live binding, and the present
+// client's adopted entry still matches the pinned native snapshot entry. The old
+// whole-file-sha proof kept this row merely because a sibling entry was added.
+func TestAdoptGcCrashOrphanEntryFrozenReapsDespiteUnrelatedChurn(t *testing.T) {
 	entry := "gcunmutated"
-	// Pre-adopt config: a plain stdio entry (NOT a hub binding). Install never ran, so
-	// the live config is still exactly this.
-	codexBody := "[mcp_servers." + entry + "]\ncommand = \"go\"\nargs = [\"version\"]\n"
-	codexPath, _, _ := setupAdoptTestEnv(t, entry, codexBody)
-	liveBytes, err := os.ReadFile(codexPath)
+	snapshotBytes := []byte("[mcp_servers." + entry + "]\ncommand = \"go\"\nargs = [\"version\"]\n")
+	// The adopted entry is unchanged, but an unrelated sibling server was added and
+	// placed before it. The whole file differs while the entry subtree is identical.
+	liveBytes := []byte("[mcp_servers.unrelated]\ncommand = \"other\"\n\n" + string(snapshotBytes))
+	setupAdoptTestEnv(t, entry, string(liveBytes))
+	if ManifestHashContent(liveBytes) == ManifestHashContent(snapshotBytes) {
+		t.Fatal("precondition: unrelated churn must change the whole-config hash")
+	}
+	ref, sha, err := writeAdoptClientSnapshot(entry, "codex-cli", snapshotBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sha := ManifestHashContent(liveBytes)
 
-	seed := &AdoptedEntries{Version: 1, Records: []AdoptProvenanceRecord{{
+	rec := AdoptProvenanceRecord{
 		ManifestName:    entry,
 		SourceEntryName: entry,
 		AdoptClients:    []string{"codex-cli"},
@@ -106,18 +109,16 @@ func TestAdoptGcCrashOrphanUnmutatedReaps(t *testing.T) {
 		UpdatedAt:       time.Now().Add(-2 * time.Hour).UTC(),
 		Clients: []AdoptClientProvenance{{
 			Client: "codex-cli", OriginalState: AdoptOriginalStatePresent,
-			SnapshotRef: "adopt-provenance/" + entry + "/codex-cli.snapshot", SnapshotSHA256: sha,
+			SnapshotRef: ref, SnapshotSHA256: sha,
 		}},
-	}}}
+	}
+	seed := &AdoptedEntries{Version: 1, Records: []AdoptProvenanceRecord{rec}}
 	if err := writeAdoptedEntries(seed); err != nil {
 		t.Fatal(err)
 	}
 	d, _ := adoptSnapshotDir(entry)
-	if err := os.MkdirAll(d, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(d, "codex-cli.snapshot"), liveBytes, 0o600); err != nil {
-		t.Fatal(err)
+	if !adoptRowProvablyUnmutated(rec) {
+		t.Fatal("precondition: entry-shape predicate must accept the frozen adopted entry")
 	}
 
 	reaped, err := gcOrphanedAdoptingProvenance(1 * time.Hour)
@@ -125,7 +126,7 @@ func TestAdoptGcCrashOrphanUnmutatedReaps(t *testing.T) {
 		t.Fatalf("gc: %v", err)
 	}
 	if reaped != 1 {
-		t.Errorf("reaped = %d, want 1 (manifest absent + config byte-frozen since capture => pre-install crash)", reaped)
+		t.Errorf("reaped = %d, want 1 (manifest absent + adopted entry frozen despite unrelated churn => pre-install crash)", reaped)
 	}
 	if _, found, _ := ReadAdoptProvenance(entry); found {
 		t.Errorf("pre-install-crash orphan was NOT reaped")
@@ -133,6 +134,161 @@ func TestAdoptGcCrashOrphanUnmutatedReaps(t *testing.T) {
 	if _, statErr := os.Stat(d); !os.IsNotExist(statErr) {
 		t.Errorf("snapshot dir survived the reap: %v", statErr)
 	}
+}
+
+func TestAdoptRowProvablyUnmutatedNoSnapshotStatesUseWriteTarget(t *testing.T) {
+	t.Run("absent without write-target hub relay is reap-safe", func(t *testing.T) {
+		entry := "reapabsent"
+		setupAdoptTestEnv(t, entry, "[mcp_servers]\n")
+		rec := AdoptProvenanceRecord{
+			ManifestName: entry, SourceEntryName: entry, Port: 9461,
+			Clients: []AdoptClientProvenance{{Client: "codex-cli", OriginalState: AdoptOriginalStateAbsent}},
+		}
+		if !adoptRowProvablyUnmutated(rec) {
+			t.Fatal("absent client with no write-target hub relay must be reap-safe")
+		}
+	})
+
+	t.Run("present-merged-lower without write-target hub relay is reap-safe", func(t *testing.T) {
+		entry := "reapmerged"
+		codexPath, _, _ := setupAdoptTestEnv(t, entry, "[mcp_servers]\n")
+		t.Setenv("MIMOCODE_HOME", "")
+		t.Setenv("XDG_CONFIG_HOME", "")
+		mimoDir := filepath.Join(filepath.Dir(filepath.Dir(codexPath)), ".config", "mimocode")
+		if err := os.MkdirAll(mimoDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(mimoDir, "config.json"), []byte(`{"mcp":{"reapmerged":{"type":"local","command":["go","version"]}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		rec := AdoptProvenanceRecord{
+			ManifestName: entry, SourceEntryName: entry, Port: 9462,
+			Clients: []AdoptClientProvenance{{Client: "mimocode", OriginalState: AdoptOriginalStatePresentMergedLower}},
+		}
+		if !adoptRowProvablyUnmutated(rec) {
+			t.Fatal("present-merged-lower client with no write-target hub relay must be reap-safe")
+		}
+	})
+
+	t.Run("present-merged-lower with committed write-target hub relay keeps", func(t *testing.T) {
+		entry := "keepmerged"
+		codexPath, _, _ := setupAdoptTestEnv(t, entry, "[mcp_servers]\n")
+		t.Setenv("MIMOCODE_HOME", "")
+		t.Setenv("XDG_CONFIG_HOME", "")
+		mimoDir := filepath.Join(filepath.Dir(filepath.Dir(codexPath)), ".config", "mimocode")
+		if err := os.MkdirAll(mimoDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(mimoDir, "config.json"), []byte(`{"mcp":{"keepmerged":{"type":"local","command":["go","version"]}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(mimoDir, "mimocode.json"), []byte(`{"mcp":{"keepmerged":{"type":"remote","url":"http://127.0.0.1:9463/mcp","enabled":true}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		rec := AdoptProvenanceRecord{
+			ManifestName: entry, SourceEntryName: entry, Port: 9463,
+			Clients: []AdoptClientProvenance{{Client: "mimocode", OriginalState: AdoptOriginalStatePresentMergedLower}},
+		}
+		if adoptRowProvablyUnmutated(rec) {
+			t.Fatal("present-merged-lower client with a write-target hub relay must KEEP")
+		}
+	})
+}
+
+func TestAdoptRowProvablyUnmutatedPresentHubRelayKeeps(t *testing.T) {
+	entry := "keeppresenthub"
+	port := 9464
+	liveBody := "[mcp_servers." + entry + "]\nurl = \"http://127.0.0.1:9464/mcp\"\n"
+	setupAdoptTestEnv(t, entry, liveBody)
+	snapshotBytes := []byte("[mcp_servers." + entry + "]\ncommand = \"go\"\nargs = [\"version\"]\n")
+	ref, sha, err := writeAdoptClientSnapshot(entry, "codex-cli", snapshotBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := AdoptProvenanceRecord{
+		ManifestName: entry, SourceEntryName: entry, Port: port,
+		Clients: []AdoptClientProvenance{{
+			Client: "codex-cli", OriginalState: AdoptOriginalStatePresent,
+			SnapshotRef: ref, SnapshotSHA256: sha,
+		}},
+	}
+	if adoptRowProvablyUnmutated(rec) {
+		t.Fatal("present client whose write target is the expected hub relay must KEEP")
+	}
+}
+
+func TestAdoptRowProvablyUnmutatedFailSafeKeeps(t *testing.T) {
+	t.Run("snapshot missing", func(t *testing.T) {
+		entry := "keepsnapmissing"
+		snapshotBytes := []byte("[mcp_servers." + entry + "]\ncommand = \"go\"\n")
+		setupAdoptTestEnv(t, entry, string(snapshotBytes))
+		rec := AdoptProvenanceRecord{
+			ManifestName: entry, SourceEntryName: entry, Port: 9465,
+			Clients: []AdoptClientProvenance{{
+				Client: "codex-cli", OriginalState: AdoptOriginalStatePresent,
+				SnapshotSHA256: ManifestHashContent(snapshotBytes),
+			}},
+		}
+		if adoptRowProvablyUnmutated(rec) {
+			t.Fatal("missing pinned snapshot must KEEP")
+		}
+	})
+
+	t.Run("snapshot sha mismatch", func(t *testing.T) {
+		entry := "keepsnapmismatch"
+		snapshotBytes := []byte("[mcp_servers." + entry + "]\ncommand = \"go\"\n")
+		setupAdoptTestEnv(t, entry, string(snapshotBytes))
+		ref, _, err := writeAdoptClientSnapshot(entry, "codex-cli", snapshotBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := AdoptProvenanceRecord{
+			ManifestName: entry, SourceEntryName: entry, Port: 9466,
+			Clients: []AdoptClientProvenance{{
+				Client: "codex-cli", OriginalState: AdoptOriginalStatePresent,
+				SnapshotRef: ref, SnapshotSHA256: "deadbeef",
+			}},
+		}
+		if adoptRowProvablyUnmutated(rec) {
+			t.Fatal("snapshot sha mismatch must KEEP")
+		}
+	})
+
+	t.Run("adapter unavailable", func(t *testing.T) {
+		entry := "keepnoadapter"
+		setupAdoptTestEnv(t, entry, "[mcp_servers]\n")
+		rec := AdoptProvenanceRecord{
+			ManifestName: entry, SourceEntryName: entry, Port: 9467,
+			Clients: []AdoptClientProvenance{{Client: "not-a-client", OriginalState: AdoptOriginalStateAbsent}},
+		}
+		if adoptRowProvablyUnmutated(rec) {
+			t.Fatal("unresolvable adapter must KEEP")
+		}
+	})
+
+	t.Run("adapter lacks classification capability", func(t *testing.T) {
+		entry := "keepnocas"
+		setupAdoptTestEnv(t, entry, "[mcp_servers]\n")
+		rec := AdoptProvenanceRecord{
+			ManifestName: entry, SourceEntryName: entry, Port: 9468,
+			Clients: []AdoptClientProvenance{{Client: "windsurf", OriginalState: AdoptOriginalStateAbsent}},
+		}
+		if adoptRowProvablyUnmutated(rec) {
+			t.Fatal("adapter without CASEntryMutator must KEEP")
+		}
+	})
+
+	t.Run("classification unreadable", func(t *testing.T) {
+		entry := "keepunreadable"
+		setupAdoptTestEnv(t, entry, "this is not valid toml {{{")
+		rec := AdoptProvenanceRecord{
+			ManifestName: entry, SourceEntryName: entry, Port: 9469,
+			Clients: []AdoptClientProvenance{{Client: "codex-cli", OriginalState: AdoptOriginalStateAbsent}},
+		}
+		if adoptRowProvablyUnmutated(rec) {
+			t.Fatal("ClassifyUnreadable must KEEP")
+		}
+	})
 }
 
 // Part 2 (case-5 closure, Option B) — a COMMITTED adopt whose manifest was later
@@ -151,12 +307,20 @@ func TestAdoptGcCase5MutatedConfigKeeps(t *testing.T) {
 
 	// The recorded snapshot sha is of the PRE-adopt bytes, which DIFFER from the live
 	// (Install-mutated) config => this row is a committed adopt, not a pre-install crash.
-	preAdoptSha := ManifestHashContent([]byte("[mcp_servers." + entry + "]\ncommand = \"go\"\nargs = [\"version\"]\n"))
+	preAdopt := []byte("[mcp_servers." + entry + "]\ncommand = \"python\"\nargs = [\"-V\"]\n")
+	preAdoptSha := ManifestHashContent(preAdopt)
 	if live, _ := os.ReadFile(codexPath); ManifestHashContent(live) == preAdoptSha {
 		t.Fatal("precondition: live config must DIFFER from the recorded snapshot sha")
 	}
 
 	seedCase5 := func() {
+		ref, sha, err := writeAdoptClientSnapshot(entry, "codex-cli", preAdopt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sha != preAdoptSha {
+			t.Fatalf("snapshot sha = %s, want %s", sha, preAdoptSha)
+		}
 		seed := &AdoptedEntries{Version: 1, Records: []AdoptProvenanceRecord{{
 			ManifestName:    entry,
 			SourceEntryName: entry,
@@ -165,15 +329,12 @@ func TestAdoptGcCase5MutatedConfigKeeps(t *testing.T) {
 			UpdatedAt:       time.Now().Add(-2 * time.Hour).UTC(),
 			Clients: []AdoptClientProvenance{{
 				Client: "codex-cli", OriginalState: AdoptOriginalStatePresent,
-				SnapshotRef: "adopt-provenance/" + entry + "/codex-cli.snapshot", SnapshotSHA256: preAdoptSha,
+				SnapshotRef: ref, SnapshotSHA256: preAdoptSha,
 			}},
 		}}}
 		if err := writeAdoptedEntries(seed); err != nil {
 			t.Fatal(err)
 		}
-		d, _ := adoptSnapshotDir(entry)
-		_ = os.MkdirAll(d, 0o700)
-		_ = os.WriteFile(filepath.Join(d, "codex-cli.snapshot"), []byte("PRE-ADOPT-SECRET"), 0o600)
 	}
 
 	// (a) The real gate KEEPS the case-5 row.
@@ -339,13 +500,20 @@ func TestAdoptCaptureRefusesMutatedPriorCrashRow(t *testing.T) {
 	// bytes the snapshot FILE holds (production capture hashes the bytes it writes,
 	// adopted_entries.go:282), so the fixture is production-possible. Those bytes DIFFER
 	// from the live config => Install mutated it => adoptRowProvablyUnmutated == false.
-	preAdopt := []byte("PRE-ADOPT-SECRET-CONFIG")
+	preAdopt := []byte("[mcp_servers." + entry + "]\ncommand = \"python\"\nargs = [\"-V\"]\n")
 	mutatedSha := ManifestHashContent(preAdopt)
 	if mutatedSha == ManifestHashContent([]byte(codexBody)) {
 		t.Fatal("precondition: recorded snapshot sha must DIFFER from the live config sha")
 	}
 	priorUpdatedAt := time.Now().Add(-2 * time.Hour).UTC()
 	seedPrior := func() {
+		ref, sha, err := writeAdoptClientSnapshot(entry, "codex-cli", preAdopt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sha != mutatedSha {
+			t.Fatalf("snapshot sha = %s, want %s", sha, mutatedSha)
+		}
 		seed := &AdoptedEntries{Version: 1, Records: []AdoptProvenanceRecord{{
 			ManifestName:    entry,
 			SourceEntryName: entry,
@@ -354,15 +522,12 @@ func TestAdoptCaptureRefusesMutatedPriorCrashRow(t *testing.T) {
 			UpdatedAt:       priorUpdatedAt,
 			Clients: []AdoptClientProvenance{{
 				Client: "codex-cli", OriginalState: AdoptOriginalStatePresent,
-				SnapshotRef: "adopt-provenance/" + entry + "/codex-cli.snapshot", SnapshotSHA256: mutatedSha,
+				SnapshotRef: ref, SnapshotSHA256: mutatedSha,
 			}},
 		}}}
 		if err := writeAdoptedEntries(seed); err != nil {
 			t.Fatal(err)
 		}
-		d, _ := adoptSnapshotDir(entry)
-		_ = os.MkdirAll(d, 0o700)
-		_ = os.WriteFile(filepath.Join(d, "codex-cli.snapshot"), preAdopt, 0o600)
 	}
 	seedPrior()
 
@@ -420,9 +585,9 @@ func TestAdoptCaptureRefusesMutatedPriorCrashRow(t *testing.T) {
 }
 
 // Capture-UPSERT still-reaps — a prior aged `adopting` orphan that classifies
-// CRASH_REAP (manifest absent + no live hub binding) whose present-client config is
-// byte-frozen since capture (its whole-file sha256 == the recorded SnapshotSHA256, a
-// GENUINE pre-install crash) PASSES the shared positive-crash-evidence gate
+// CRASH_REAP (manifest absent + no live hub binding) whose present-client entry still
+// equals the sha-verified pinned native snapshot entry (a GENUINE pre-install crash)
+// PASSES the shared positive-crash-evidence gate
 // (adoptRowProvablyUnmutatedFn, bug 2026-07-11 P1-2 case-5 Part 2) and is
 // reaped-and-replaced by the UPSERT. Signal 2b does not spuriously refuse the re-adopt
 // either (the manifest is absent at capture time). No-regression counterpart to
@@ -434,7 +599,10 @@ func TestAdoptCaptureReapsByteFrozenPriorCrashOrphan(t *testing.T) {
 	codexBody := "[mcp_servers." + entry + "]\ncommand = \"go\"\nargs = [\"version\"]\n"
 	codexPath, _, _ := setupAdoptTestEnv(t, entry, codexBody)
 	liveBytes, _ := os.ReadFile(codexPath)
-	sha := ManifestHashContent(liveBytes)
+	ref, sha, err := writeAdoptClientSnapshot(entry, "codex-cli", liveBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	prior := &AdoptedEntries{Version: 1, Records: []AdoptProvenanceRecord{{
 		ManifestName:    entry,
@@ -444,19 +612,17 @@ func TestAdoptCaptureReapsByteFrozenPriorCrashOrphan(t *testing.T) {
 		UpdatedAt:       time.Now().Add(-2 * time.Hour).UTC(),
 		Clients: []AdoptClientProvenance{{
 			Client: "codex-cli", OriginalState: AdoptOriginalStatePresent,
-			SnapshotRef: "adopt-provenance/" + entry + "/codex-cli.snapshot", SnapshotSHA256: sha,
+			SnapshotRef: ref, SnapshotSHA256: sha,
 		}},
 	}}}
 	if err := writeAdoptedEntries(prior); err != nil {
 		t.Fatal(err)
 	}
 	d, _ := adoptSnapshotDir(entry)
-	_ = os.MkdirAll(d, 0o700)
 	// Byte-frozen: the snapshot FILE holds the exact live bytes it was captured from, so it
 	// hashes to the recorded sha (production capture hashes the bytes it writes,
 	// adopted_entries.go:282). live config == snapshot => the gate proves the prior is an
 	// unmutated pre-install crash orphan and the UPSERT reaps+replaces it.
-	_ = os.WriteFile(filepath.Join(d, "codex-cli.snapshot"), liveBytes, 0o600)
 	// Since the fresh capture re-pins the SAME live bytes, snapshot content alone cannot
 	// prove the reap-and-replace happened. Seed an EXTRA stale marker in the manifest's
 	// snapshot dir: the reap (removeAdoptSnapshots) removes the whole <manifest>/ dir, so a
