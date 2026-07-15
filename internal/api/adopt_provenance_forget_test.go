@@ -1,12 +1,15 @@
 package api
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+var errStubManifestStat = errors.New("stub: manifest stat failed")
 
 // forceAdoptManifestAbsent makes adoptRowProvablyUnmutated's manifest signal deterministic
 // (no manifest on disk) so the warning logic depends only on the row shape, and restores it.
@@ -194,6 +197,8 @@ func TestForgetAdoptProvenance_IdentityGateRejectsChangedRow(t *testing.T) {
 
 	if _, err := a.ForgetAdoptProvenance(m, ForgetAdoptProvenanceOpts{
 		Yes:               true,
+		ConfirmIdentity:   true,
+		ExpectedHasRow:    plan.HasRow,
 		ExpectedUpdatedAt: plan.UpdatedAt,
 		ExpectedRowState:  plan.RowState,
 	}); err == nil {
@@ -202,6 +207,73 @@ func TestForgetAdoptProvenance_IdentityGateRejectsChangedRow(t *testing.T) {
 	// The changed row must survive (not destroyed).
 	if _, found, _ := ReadAdoptProvenance(m); !found {
 		t.Errorf("identity gate must not destroy the changed row")
+	}
+}
+
+// P2 (bot r2): a forget reviewed as rowless must refuse if a row appeared in the gap.
+func TestForgetAdoptProvenance_IdentityGateRejectsRowAppearedWhereRowless(t *testing.T) {
+	isolateStateDir(t)
+	forceAdoptManifestExists(t, false)
+	m := "forgetrowappeared"
+	seedForgetSnapshotDir(t, m) // rowless: only a snapshot dir
+
+	a := NewAPI()
+	plan, err := a.BuildForgetAdoptProvenancePlan(m)
+	if err != nil {
+		t.Fatalf("BuildForgetAdoptProvenancePlan: %v", err)
+	}
+	if plan.HasRow {
+		t.Fatalf("precondition: plan must be rowless")
+	}
+	// A same-manifest adopt commits in the gap: a row appears.
+	seedForgetRow(t, m, AdoptOperationStateAdopted, time.Now().UTC(), true)
+
+	if _, err := a.ForgetAdoptProvenance(m, ForgetAdoptProvenanceOpts{
+		Yes:             true,
+		ConfirmIdentity: true,
+		ExpectedHasRow:  plan.HasRow, // false
+	}); err == nil {
+		t.Errorf("identity gate must reject a row that appeared where 'row: none' was reviewed")
+	}
+	if _, found, _ := ReadAdoptProvenance(m); !found {
+		t.Errorf("identity gate must not destroy the newly-appeared row")
+	}
+}
+
+// P3 (bot r2): an unrecognized persisted state warns (not treated as the safe orphan).
+func TestForgetRowWarnings_UnknownStateWarns(t *testing.T) {
+	isolateStateDir(t)
+	forceAdoptManifestExists(t, false)
+	m := "forgetunknown"
+	seedForgetRow(t, m, AdoptOperationState("some-future-state"), time.Now().UTC(), true)
+
+	a := NewAPI()
+	plan, err := a.BuildForgetAdoptProvenancePlan(m)
+	if err != nil {
+		t.Fatalf("BuildForgetAdoptProvenancePlan: %v", err)
+	}
+	if !containsSubstr(plan.Warnings, "unrecognized state") {
+		t.Errorf("an unknown row state must warn; got %v", plan.Warnings)
+	}
+}
+
+// P2 (bot r2): an unverifiable manifest-existence check warns (fail-closed).
+func TestForgetRowWarnings_ManifestErrorWarns(t *testing.T) {
+	isolateStateDir(t)
+	prior := adoptManifestExistsFn
+	adoptManifestExistsFn = func(string) (bool, error) { return false, errStubManifestStat }
+	t.Cleanup(func() { adoptManifestExistsFn = prior })
+
+	m := "forgetmaniferr"
+	seedForgetRow(t, m, AdoptOperationStateAdopting, time.Now().UTC(), true)
+
+	a := NewAPI()
+	plan, err := a.BuildForgetAdoptProvenancePlan(m)
+	if err != nil {
+		t.Fatalf("BuildForgetAdoptProvenancePlan: %v", err)
+	}
+	if !containsSubstr(plan.Warnings, "may have (partly) committed") {
+		t.Errorf("an unverifiable manifest existence must warn (fail-closed); got %v", plan.Warnings)
 	}
 }
 

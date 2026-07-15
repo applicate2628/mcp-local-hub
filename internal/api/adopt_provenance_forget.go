@@ -12,15 +12,16 @@ type ForgetAdoptProvenanceOpts struct {
 	// gate the confirmation prompt. Kept here so the API contract mirrors de-adopt.
 	Yes bool
 
-	// ExpectedUpdatedAt + ExpectedRowState, when ExpectedUpdatedAt is non-zero, gate the
-	// removal on the fresh under-lease row still matching what the operator reviewed (the
-	// CLI passes the dry-run plan's identity). A mismatch — a same-manifest adopt / de-adopt
-	// committed in the gap between the dry-run's lease acquisition and this one — errors
-	// instead of destroying a row the operator never saw (the same identity idiom
-	// reapAdoptProvenanceRow uses). Zero value skips the check (a direct API caller that did
-	// not display a plan).
-	ExpectedUpdatedAt time.Time
+	// ConfirmIdentity, when true, gates the removal on the fresh under-lease row matching
+	// the reviewed identity (ExpectedHasRow / ExpectedRowState / ExpectedUpdatedAt). The
+	// CLI sets it so the destructive act cannot hit a row — OR a row that appeared where the
+	// operator reviewed "row: none" — that was never displayed (a same-manifest adopt /
+	// de-adopt / forget that committed in the gap between the dry-run's lease acquisition and
+	// this one). A direct API caller that displayed no plan leaves it false to skip the gate.
+	ConfirmIdentity   bool
+	ExpectedHasRow    bool
 	ExpectedRowState  AdoptOperationState
+	ExpectedUpdatedAt time.Time
 }
 
 // ForgetAdoptProvenancePlan describes what `mcphub adopt-provenance forget <manifest>`
@@ -34,7 +35,7 @@ type ForgetAdoptProvenancePlan struct {
 	UpdatedAt        time.Time // the row's identity, threaded into the --yes act (F2 gate)
 	Clients          []string  // client NAMES from the row (empty if !HasRow)
 	RoutedSecretKeys []string  // vault key NAMES the forgotten row referenced (F3) — forget does
-	// NOT delete them; surfaced so the operator can clean the vault manually (or via de-adopt).
+	// NOT delete them; surfaced so the operator can clean the vault manually (via mcphub secrets).
 	HasSnapshotDir bool
 	SnapshotDir    string // absolute path to <state-dir>/adopt-provenance/<manifest>/ (display)
 	Warnings       []string
@@ -62,7 +63,7 @@ func (a *API) BuildForgetAdoptProvenancePlan(manifestName string) (*ForgetAdoptP
 // UNDER the per-manifest lease, then emits an `adopt-provenance-forgotten` event. It
 // returns the plan it acted on. This is a DESTRUCTIVE operator escape: it discards
 // provenance bookkeeping only — it does NOT restore any client config and does NOT
-// touch routed vault keys (those are de-adopt's `--reclaim-crashed`).
+// touch routed vault keys (the operator cleans those manually once the row is gone).
 func (a *API) ForgetAdoptProvenance(manifestName string, opts ForgetAdoptProvenanceOpts) (*ForgetAdoptProvenancePlan, error) {
 	lk, acquired, err := tryAcquireAdoptManifestLease(manifestName)
 	if err != nil {
@@ -71,21 +72,31 @@ func (a *API) ForgetAdoptProvenance(manifestName string, opts ForgetAdoptProvena
 	if !acquired {
 		return nil, errForgetLeaseBusy(manifestName)
 	}
-	defer func() { _ = lk.Unlock() }()
+	// Release explicitly BEFORE the event-log I/O below, so a contended/wedged
+	// supervisor-events.log flock cannot pin the per-manifest lease after the row/snapshots
+	// are already gone (which would make every subsequent adopt/de-adopt/forget for this
+	// manifest report the lease busy). The deferred unlock is the safety net for early
+	// returns; leaseReleased makes it idempotent (mirrors de-adopt's defer-emit-after-unlock).
+	leaseReleased := false
+	releaseLease := func() {
+		if !leaseReleased {
+			_ = lk.Unlock()
+			leaseReleased = true
+		}
+	}
+	defer releaseLease()
 
 	plan, rec, err := buildForgetPlanUnderLease(manifestName)
 	if err != nil {
 		return nil, err
 	}
 
-	// F2 identity gate: if the caller reviewed a plan (CLI dry-run), refuse to destroy a
-	// row that changed since — a same-manifest adopt/de-adopt that committed in the gap
-	// between the two lease acquisitions would otherwise be destroyed unseen.
-	if !opts.ExpectedUpdatedAt.IsZero() {
-		if rec == nil || rec.OperationState != opts.ExpectedRowState || !rec.UpdatedAt.Equal(opts.ExpectedUpdatedAt) {
-			return nil, fmt.Errorf("adopt-provenance forget %q: the provenance row changed since it was "+
-				"reviewed (reviewed state=%s, now %s) — re-run to review the current state",
-				manifestName, opts.ExpectedRowState, forgetCurrentStateLabel(rec))
+	// F2 identity gate: refuse to destroy anything but the exact row (or exact absence of a
+	// row) the operator reviewed. Covers both the row-changed case AND the row-appeared-where-
+	// none-was-reviewed case (a same-manifest adopt in the gap between the two lease acquisitions).
+	if opts.ConfirmIdentity {
+		if err := forgetIdentityMismatch(manifestName, rec, opts); err != nil {
+			return nil, err
 		}
 	}
 
@@ -106,8 +117,33 @@ func (a *API) ForgetAdoptProvenance(manifestName string, opts ForgetAdoptProvena
 		}
 	}
 
+	releaseLease() // lease is no longer needed; do NOT hold it across the event-log I/O
 	emitAdoptProvenanceForgotten(manifestName, string(plan.RowState), len(plan.Clients), plan.HasSnapshotDir)
 	return plan, nil
+}
+
+// forgetIdentityMismatch returns a non-nil error when the fresh under-lease row does not
+// match the identity the operator reviewed (F2 + the rowless-appeared case).
+func forgetIdentityMismatch(manifestName string, rec *AdoptProvenanceRecord, opts ForgetAdoptProvenanceOpts) error {
+	if opts.ExpectedHasRow {
+		if rec == nil {
+			return fmt.Errorf("adopt-provenance forget %q: the reviewed row is gone (removed or renamed since "+
+				"you reviewed it) — re-run to review the current state", manifestName)
+		}
+		if rec.OperationState != opts.ExpectedRowState || !rec.UpdatedAt.Equal(opts.ExpectedUpdatedAt) {
+			return fmt.Errorf("adopt-provenance forget %q: the provenance row changed since it was reviewed "+
+				"(reviewed state=%s, now %s) — re-run to review the current state",
+				manifestName, opts.ExpectedRowState, forgetCurrentStateLabel(rec))
+		}
+		return nil
+	}
+	// The operator reviewed "row: none" (rowless snapshot dir). A row that appeared since must
+	// not be silently reaped by a rowless-reviewed forget.
+	if rec != nil {
+		return fmt.Errorf("adopt-provenance forget %q: a provenance row (state=%s) was created since you "+
+			"reviewed 'row: none' — re-run to review it before forgetting", manifestName, rec.OperationState)
+	}
+	return nil
 }
 
 // buildForgetPlanUnderLease assumes the per-manifest lease is already held. It returns
@@ -173,17 +209,28 @@ func forgetRowWarnings(manifestName string, rec *AdoptProvenanceRecord) []string
 		// An `adopting` row is USUALLY a pre-Install crash orphan (safe to forget), but it is
 		// ALSO the state a committed-but-unflipped adopt and a preserved partial-commit
 		// rollback (adopt.go InstallClientRollbackIncompleteError) sit in. If the manifest
-		// still exists OR the row is not provably un-mutated, the adopt may have (partly)
-		// committed and the snapshot dir may be the only non-prunable pre-adopt copy while a
-		// client is still pointed at the hub relay — the exact reap the GC refuses as P1 data
-		// loss. Warn (no refusal); stay silent only for the provably-safe crash orphan.
-		manifestExists, _ := adoptManifestExistsFn(manifestName)
-		if manifestExists || !adoptRowProvablyUnmutated(*rec) {
+		// still exists, its existence CANNOT be verified, OR the row is not provably
+		// un-mutated, the adopt may have (partly) committed and the snapshot dir may be the
+		// only non-prunable pre-adopt copy while a client is still pointed at the hub relay —
+		// the exact reap the GC refuses as P1 data loss. Warn (no refusal); stay silent ONLY
+		// for the provably-safe crash orphan (manifest verified absent AND provably unmutated).
+		manifestExists, mErr := adoptManifestExistsFn(manifestName)
+		if mErr != nil || manifestExists || !adoptRowProvablyUnmutated(*rec) {
 			warns = append(warns, fmt.Sprintf(
-				"row is 'adopting' but the adopt may have (partly) committed (manifest present or "+
-					"not provably un-mutated): the snapshot dir may be the only non-prunable pre-adopt "+
-					"copy while a client is still on the hub relay — prefer 'mcphub de-adopt %s'", manifestName))
+				"row is 'adopting' but the adopt may have (partly) committed (manifest present, its "+
+					"existence unverifiable, or the row not provably un-mutated): the snapshot dir may be "+
+					"the only non-prunable pre-adopt copy while a client is still on the hub relay — prefer "+
+					"'mcphub de-adopt %s'", manifestName))
 		}
+	case AdoptOperationStateClosed:
+		// A `closed` row is post-de-adopt cleanup: de-adopt completed and consumed the
+		// snapshots. Forgetting it is safe bookkeeping — no warning.
+	default:
+		// A corrupted store or a future state written without a schema bump: recoverability
+		// semantics are unknown, so do NOT treat it as the safe crash orphan.
+		warns = append(warns, fmt.Sprintf(
+			"row has an unrecognized state %q: its recoverability is not understood — forgetting it "+
+				"may discard data a restore would need; prefer inspecting it before --yes", rec.OperationState))
 	}
 	return warns
 }

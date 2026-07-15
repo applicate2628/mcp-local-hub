@@ -56,11 +56,14 @@ func newAdoptProvenanceForgetCmd() *cobra.Command {
 			}
 			done, err := a.ForgetAdoptProvenance(manifest, api.ForgetAdoptProvenanceOpts{
 				Yes: true,
-				// Gate the removal on the row the operator just reviewed (F2): if it changed
+				// Gate the removal on exactly the row (or exact absence of a row) the operator
+				// just reviewed: if it changed — or a row appeared where 'row: none' was shown —
 				// between this dry-run read and the act, the API errors instead of destroying
-				// a row that was never displayed.
-				ExpectedUpdatedAt: plan.UpdatedAt,
+				// something never displayed.
+				ConfirmIdentity:   true,
+				ExpectedHasRow:    plan.HasRow,
 				ExpectedRowState:  plan.RowState,
+				ExpectedUpdatedAt: plan.UpdatedAt,
 			})
 			if err != nil {
 				return err
@@ -94,8 +97,8 @@ func printForgetPlan(w io.Writer, plan *api.ForgetAdoptProvenancePlan) {
 	}
 	if len(plan.RoutedSecretKeys) > 0 {
 		// forget does NOT delete these — surface the names so the operator can clean the
-		// vault manually (or via de-adopt's --reclaim-crashed) once the row is gone.
-		fmt.Fprintf(w, "  vault:    %s (NOT removed by forget — clean manually or via de-adopt --reclaim-crashed)\n",
+		// vault manually (via `mcphub secrets`) once the row is gone.
+		fmt.Fprintf(w, "  vault:    %s (NOT removed by forget — clean manually via `mcphub secrets`)\n",
 			strings.Join(plan.RoutedSecretKeys, ", "))
 	}
 	for _, warn := range plan.Warnings {
