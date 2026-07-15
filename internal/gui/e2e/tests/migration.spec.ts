@@ -52,6 +52,74 @@ test.describe("Discovery screen", () => {
     await expect(page.locator("h1")).toHaveText("Discovery");
   });
 
+  test("de-adopt affordance follows backend ownership and gate eligibility", async ({
+    page,
+    hub,
+  }) => {
+    await page.route("**/api/scan", async (route) => {
+      await route.fulfill({
+        json: {
+          at: "2026-07-15T00:00:00Z",
+          entries: ["not-owned", "gate-on", "eligible"].map((name) => ({
+            name,
+            status: "via-hub",
+            managed: true,
+            manifest_exists: true,
+            can_migrate: false,
+            client_presence: {},
+          })),
+          client_config_presence: {},
+        },
+      });
+    });
+    await page.route("**/api/dismissed", async (route) => {
+      await route.fulfill({ json: { unknown: [] } });
+    });
+    await page.route("**/api/deadopt/eligible**", async (route) => {
+      const server = new URL(route.request().url()).searchParams.get("server");
+      const eligibility =
+        server === "eligible"
+          ? {
+              eligible: true,
+              adopt_owned: true,
+              gate_on: false,
+              gate_on_clients: [],
+              blocked_reason: "",
+            }
+          : server === "gate-on"
+            ? {
+                eligible: false,
+                adopt_owned: true,
+                gate_on: true,
+                gate_on_clients: ["codex-cli"],
+                blocked_reason:
+                  "gate is ON for 1 client(s) (codex-cli); gate OFF first, then de-adopt",
+              }
+            : {
+                eligible: false,
+                adopt_owned: false,
+                gate_on: false,
+                gate_on_clients: [],
+                blocked_reason: `manifest ${server} is not adopt-owned`,
+              };
+      await route.fulfill({ json: eligibility });
+    });
+
+    await page.goto(`${hub.url}/#/migration`);
+
+    const notOwned = page.locator('li[data-server="not-owned"]');
+    await expect(notOwned).toBeVisible();
+    await expect(notOwned.getByRole("button", { name: "De-adopt to native" })).toHaveCount(0);
+
+    const gateOn = page.locator('li[data-server="gate-on"]');
+    const gateOnButton = gateOn.getByRole("button", { name: "De-adopt to native" });
+    await expect(gateOnButton).toBeDisabled();
+    await expect(gateOn).toContainText("gate OFF first");
+
+    const eligible = page.locator('li[data-server="eligible"]');
+    await expect(eligible.getByRole("button", { name: "De-adopt to native" })).toBeEnabled();
+  });
+
   test("POST /api/dismiss → GET /api/dismissed → on-disk JSON all agree", async ({
     page,
     hub,

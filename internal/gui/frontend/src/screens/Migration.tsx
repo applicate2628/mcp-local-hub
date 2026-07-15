@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import {
   fetchOrThrow,
+  getDeAdoptEligible,
   postAdopt,
   postAdoptPlan,
+  postDeAdopt,
+  postDeAdoptPlan,
   postDismiss,
   type APIError,
   type AdoptPlan,
+  type DeAdoptEligible,
+  type DeAdoptPlan,
+  type DeAdoptReport,
 } from "../api";
 import { InfoTip } from "../components/InfoTip";
 import { ScanRefreshControls } from "../components/ScanRefreshControls";
@@ -44,7 +50,7 @@ export function DiscoveryScreen() {
   const [dismissedUnknown, setDismissedUnknown] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [actionBusy, setActionBusy] = useState<string | null>(null); // server name being demigrated
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [scanReloadToken, setScanReloadToken] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [migrateBusy, setMigrateBusy] = useState<boolean>(false);
@@ -52,6 +58,15 @@ export function DiscoveryScreen() {
   const [adoptConsent, setAdoptConsent] = useState(false);
   const [adoptConfirmBusy, setAdoptConfirmBusy] = useState(false);
   const [adoptModalError, setAdoptModalError] = useState<string | null>(null);
+  const [deAdoptEligibility, setDeAdoptEligibility] = useState<Record<string, DeAdoptEligible>>({});
+  const [deAdoptPlan, setDeAdoptPlan] = useState<DeAdoptPlan | null>(null);
+  const [deAdoptReport, setDeAdoptReport] = useState<{
+    server: string;
+    report: DeAdoptReport;
+  } | null>(null);
+  const [deAdoptAcceptedConflicts, setDeAdoptAcceptedConflicts] = useState<Set<string>>(new Set());
+  const [deAdoptConfirmBusy, setDeAdoptConfirmBusy] = useState(false);
+  const [deAdoptModalError, setDeAdoptModalError] = useState<string | null>(null);
   // Monotonic guard for scan refreshes. Auto-refresh, manual Rescan,
   // reload-token effects, and SSE can overlap; only the newest request may
   // publish state so a slow older response cannot replace fresher results.
@@ -92,9 +107,26 @@ export function DiscoveryScreen() {
           },
         ),
       ]);
+      // G3: ask the backend eligibility owner for every discovered server.
+      // Rendering never derives de-adopt ownership from scan status, endpoint
+      // shape, or a loopback URL heuristic. A failed eligibility read is
+      // fail-closed for that row: no affordance is published.
+      const eligibilityPairs = await Promise.all(
+        [...new Set((s.entries ?? []).map((entry) => entry.name))].map(async (name) => {
+          try {
+            return [name, await getDeAdoptEligible(name)] as const;
+          } catch (err) {
+            console.warn(`Discovery: de-adopt eligibility failed for ${name}:`, err);
+            return null;
+          }
+        }),
+      );
       if (!isLatest()) return;
       setScan(s);
       setDismissedUnknown(new Set(d.unknown ?? []));
+      setDeAdoptEligibility(
+        Object.fromEntries(eligibilityPairs.filter((pair) => pair !== null)),
+      );
       setError(null);
       const canMigrateNames = (s.entries ?? [])
         .filter((e) => e.status === "can-migrate")
@@ -320,6 +352,55 @@ export function DiscoveryScreen() {
     }
   }
 
+  async function runDeAdoptPlan(server: string) {
+    setActionBusy(deAdoptActionKey(server));
+    setActionError(null);
+    setDeAdoptModalError(null);
+    setDeAdoptReport(null);
+    try {
+      const plan = await postDeAdoptPlan(server);
+      setDeAdoptPlan(plan);
+      setDeAdoptAcceptedConflicts(new Set());
+    } catch (err) {
+      setActionError(`De-adopt ${server}: ${(err as Error).message}`);
+    } finally {
+      setActionBusy(null);
+    }
+  }
+
+  async function confirmDeAdopt() {
+    if (!deAdoptPlan) return;
+    setDeAdoptConfirmBusy(true);
+    setDeAdoptModalError(null);
+    try {
+      const report = await postDeAdopt(
+        deAdoptPlan.ManifestName,
+        [...deAdoptAcceptedConflicts],
+      );
+      setDeAdoptReport({ server: deAdoptPlan.ManifestName, report });
+      setDeAdoptPlan(null);
+      setDeAdoptAcceptedConflicts(new Set());
+      pushToast(
+        report.failed.length === 0 ? "success" : "danger",
+        `De-adopted ${deAdoptPlan.ManifestName}: ${report.restored.length} restored, ${report.accepted.length} accepted, ${report.failed.length} failed.`,
+      );
+      setScanReloadToken((n) => n + 1);
+    } catch (err) {
+      setDeAdoptModalError((err as Error).message);
+    } finally {
+      setDeAdoptConfirmBusy(false);
+    }
+  }
+
+  function toggleDeAdoptConflict(client: string, next: boolean) {
+    setDeAdoptAcceptedConflicts((prev) => {
+      const accepted = new Set(prev);
+      if (next) accepted.add(client);
+      else accepted.delete(client);
+      return accepted;
+    });
+  }
+
   const groups: MigrationGroups = scan
     ? groupMigrationEntries(scan, dismissedUnknown)
     : { viaHub: [], viaHubInherited: [], canMigrate: [], unknown: [], external: [], perSession: [], dismissed: [] };
@@ -372,8 +453,10 @@ export function DiscoveryScreen() {
         <div class="card">
           <ManagedByHubGroup
             entries={groups.viaHub}
+            deAdoptEligibility={deAdoptEligibility}
             actionBusy={actionBusy}
             onDemigrate={runDemigrate}
+            onDeAdopt={runDeAdoptPlan}
           />
           <ManagedInheritedGroup entries={groups.viaHubInherited} />
           <ReadyToMigrateGroup
@@ -411,14 +494,32 @@ export function DiscoveryScreen() {
         }}
         onConfirm={confirmAdopt}
       />
+      <DeAdoptConfirmModal
+        plan={deAdoptPlan}
+        report={deAdoptReport}
+        acceptedConflicts={deAdoptAcceptedConflicts}
+        busy={deAdoptConfirmBusy}
+        error={deAdoptModalError}
+        onAcceptConflict={toggleDeAdoptConflict}
+        onCancel={() => {
+          if (deAdoptConfirmBusy) return;
+          setDeAdoptPlan(null);
+          setDeAdoptReport(null);
+          setDeAdoptAcceptedConflicts(new Set());
+          setDeAdoptModalError(null);
+        }}
+        onConfirm={confirmDeAdopt}
+      />
     </section>
   );
 }
 
 function ManagedByHubGroup(props: {
   entries: ScanEntry[];
+  deAdoptEligibility: Record<string, DeAdoptEligible>;
   actionBusy: string | null;
   onDemigrate: (server: string) => void;
+  onDeAdopt: (server: string) => void;
 }) {
   if (props.entries.length === 0) {
     return (
@@ -432,7 +533,11 @@ function ManagedByHubGroup(props: {
     <section class="group group-via-hub" data-group="via-hub">
       <h2>Managed by hub</h2>
       <ul class="group-rows">
-        {props.entries.map((e) => (
+        {props.entries.map((e) => {
+          const eligibility = props.deAdoptEligibility[e.name];
+          const showDeAdopt = eligibility?.adopt_owned === true;
+          const gateHint = eligibility?.blocked_reason;
+          return (
           <li key={e.name} data-server={e.name}>
             <span class="server-name">{e.name}</span>
             {/* Badge driven by the backend Managed flag (Status==="via-hub").
@@ -461,8 +566,34 @@ function ManagedByHubGroup(props: {
             >
               {props.actionBusy === e.name ? "Demigrating…" : "Demigrate"}
             </button>
+            {showDeAdopt && (
+              <span class="de-adopt-action">
+                <button
+                  type="button"
+                  class="de-adopt btn"
+                  data-action="de-adopt"
+                  disabled={props.actionBusy != null || eligibility?.eligible !== true}
+                  aria-describedby={gateHint ? `de-adopt-hint-${e.name}` : undefined}
+                  onClick={() => props.onDeAdopt(e.name)}
+                >
+                  {props.actionBusy === deAdoptActionKey(e.name)
+                    ? "Planning..."
+                    : "De-adopt to native"}
+                </button>
+                {gateHint && eligibility?.eligible !== true && (
+                  <span
+                    id={`de-adopt-hint-${e.name}`}
+                    class="de-adopt-hint"
+                    data-testid={`de-adopt-hint-${e.name}`}
+                  >
+                    {gateHint}
+                  </span>
+                )}
+              </span>
+            )}
           </li>
-        ))}
+          );
+        })}
       </ul>
     </section>
   );
@@ -751,6 +882,149 @@ function firstAdoptClientFor(
 
 function adoptActionKey(name: string): string {
   return `adopt:${name}`;
+}
+
+function deAdoptActionKey(name: string): string {
+  return `de-adopt:${name}`;
+}
+
+function DeAdoptConfirmModal(props: {
+  plan: DeAdoptPlan | null;
+  report: { server: string; report: DeAdoptReport } | null;
+  acceptedConflicts: Set<string>;
+  busy: boolean;
+  error: string | null;
+  onAcceptConflict: (client: string, next: boolean) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const open = props.plan !== null || props.report !== null;
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open && !dialog.open) {
+      dialog.showModal();
+    } else if (!open && dialog.open) {
+      dialog.close();
+    }
+  }, [open]);
+  if (!open) return null;
+
+  const plan = props.plan;
+  const report = props.report;
+  const confirmDisabled =
+    props.busy ||
+    plan?.Routing === "REFUSE" ||
+    plan?.Manifest.HashReady !== true;
+  return (
+    <dialog
+      ref={dialogRef}
+      data-testid="deadopt-confirm-modal"
+      onCancel={(ev) => {
+        ev.preventDefault();
+        props.onCancel();
+      }}
+    >
+      {plan ? (
+        <>
+          <h2>De-adopt to native</h2>
+          <div class="adopt-plan-summary de-adopt-plan-summary">
+            <p>Server: {plan.ManifestName}</p>
+            <p>Routing verdict: {plan.Routing}</p>
+            <p>
+              Manifest: {plan.Manifest.HashReady ? "ready" : plan.Manifest.Reason || "not ready"}
+            </p>
+            {plan.RefusalReason && <p class="error">{plan.RefusalReason}</p>}
+            <section>
+              <h3>Client dispositions</h3>
+              <ul>
+                {plan.Clients.map((client) => (
+                  <li key={client.Client}>
+                    <strong>{client.Client}</strong>: {client.Disposition}
+                    {client.Reason && ` — ${client.Reason}`}
+                    {client.AcceptEligible && (
+                      <label class="de-adopt-conflict-consent">
+                        <input
+                          type="checkbox"
+                          checked={props.acceptedConflicts.has(client.Client)}
+                          onChange={(ev) =>
+                            props.onAcceptConflict(
+                              client.Client,
+                              (ev.currentTarget as HTMLInputElement).checked,
+                            )
+                          }
+                        />
+                        <span>Accept the current native conflict for {client.Client}</span>
+                      </label>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </div>
+          {props.error && <p class="error">{props.error}</p>}
+          <menu>
+            <button type="button" onClick={props.onCancel} disabled={props.busy}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="primary"
+              data-action="confirm-de-adopt"
+              disabled={confirmDisabled}
+              onClick={props.onConfirm}
+            >
+              {props.busy ? "De-adopting..." : "De-adopt to native"}
+            </button>
+          </menu>
+        </>
+      ) : report ? (
+        <>
+          <h2>De-adopt report</h2>
+          <div class="adopt-plan-summary de-adopt-report">
+            <p>Server: {report.server}</p>
+            <ReportNames title="Restored" names={report.report.restored} />
+            <ReportNames title="Accepted" names={report.report.accepted} />
+            <section>
+              <h3>Failed</h3>
+              {report.report.failed.length === 0 ? (
+                <p>None</p>
+              ) : (
+                <ul>
+                  {report.report.failed.map((failure) => (
+                    <li key={failure.client}>{failure.client}</li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
+          <menu>
+            <button type="button" class="primary" onClick={props.onCancel}>
+              Close
+            </button>
+          </menu>
+        </>
+      ) : null}
+    </dialog>
+  );
+}
+
+function ReportNames(props: { title: string; names: string[] }) {
+  return (
+    <section>
+      <h3>{props.title}</h3>
+      {props.names.length === 0 ? (
+        <p>None</p>
+      ) : (
+        <ul>
+          {props.names.map((name) => (
+            <li key={name}>{name}</li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
 }
 
 function AdoptConfirmModal(props: {

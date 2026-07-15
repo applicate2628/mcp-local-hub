@@ -882,15 +882,26 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
 }
 .screen.migration .group-rows li:last-child { border-bottom: none; }
 .screen.migration .server-name { flex: 1 1 auto; font-family: var(--font-mono); }
-/* The "Managed by hub" status text sits with the name side; only the two action
-   controls (Edit manifest + Demigrate) hug the right edge, with a tight gutter
-   between the pair. The status badge stays left of the actions, separated from
-   them by a small margin so the row reads: name … status | [Edit] [Demigrate]. */
+/* The "Managed by hub" status text sits with the name side; row actions hug the
+   right edge with a tight gutter. De-adopt stays in this same action cluster so
+   it mirrors the inverse Adopt affordance on the Discovery screen. */
 .screen.migration .badge-managed { margin-right: 0.375rem; }
 /* Edit manifest renders as a button-styled link (matches the Demigrate button):
    strip the underline + link color so the two peer actions look identical. */
 .screen.migration .group-rows a.edit-manifest.btn { text-decoration: none; color: var(--text); }
 .screen.migration .group-rows a.edit-manifest.btn:hover { color: var(--text); }
+.screen.migration .de-adopt-action {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+}
+.screen.migration .de-adopt-hint {
+  max-width: 16rem;
+  color: var(--text-muted, #656d76);
+  font-size: 0.75rem;
+  line-height: 1.2;
+}
 .screen.migration .action-error { color: var(--danger, #cf222e); }
 .screen.migration button[disabled] { opacity: 0.5; cursor: not-allowed; }
 /* (Migration buttons now carry the unified `.btn` design-system classes —
@@ -1424,6 +1435,20 @@ dialog label.adopt-symlink-consent {
 }
 
 dialog label.adopt-symlink-consent input[type="checkbox"] {
+  display: inline-block;
+  width: auto;
+  margin-top: 0.1rem;
+  padding: 0;
+}
+
+dialog label.de-adopt-conflict-consent {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  line-height: 1.35;
+}
+
+dialog label.de-adopt-conflict-consent input[type="checkbox"] {
   display: inline-block;
   width: auto;
   margin-top: 0.1rem;

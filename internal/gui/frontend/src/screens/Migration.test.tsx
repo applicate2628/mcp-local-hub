@@ -127,6 +127,23 @@ function unsupportedAdoptDiscoveryScan(): ScanResult {
   };
 }
 
+function managedDiscoveryScan(name = "adopted-server"): ScanResult {
+  return {
+    at: "2026-07-15T00:00:00Z",
+    entries: [
+      {
+        name,
+        status: "via-hub",
+        managed: true,
+        manifest_exists: true,
+        can_migrate: false,
+        client_presence: {},
+      },
+    ],
+    client_config_presence: {},
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => {
@@ -361,6 +378,152 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
       ],
     });
     await vi.waitFor(() => expect(scanCalls).toBeGreaterThan(beforeConfirmScanCalls));
+  });
+
+  it("hides de-adopt when backend eligibility says the server is not adopt-owned", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, managedDiscoveryScan()),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+        "/api/deadopt/eligible": () =>
+          jsonResponse(200, {
+            eligible: false,
+            adopt_owned: false,
+            gate_on: false,
+            gate_on_clients: [],
+            blocked_reason: 'manifest "adopted-server" is not adopt-owned',
+          }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    const row = (await screen.findByText("adopted-server")).closest("li");
+    expect(row).not.toBeNull();
+    expect(
+      within(row as HTMLElement).queryByRole("button", { name: "De-adopt to native" }),
+    ).toBeNull();
+  });
+
+  it("shows a disabled de-adopt affordance and backend gate-OFF reason while gate is ON", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, managedDiscoveryScan()),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+        "/api/deadopt/eligible": () =>
+          jsonResponse(200, {
+            eligible: false,
+            adopt_owned: true,
+            gate_on: true,
+            gate_on_clients: ["codex-cli"],
+            blocked_reason: "gate is ON for 1 client(s) (codex-cli); gate OFF first, then de-adopt",
+          }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    const row = (await screen.findByText("adopted-server")).closest("li");
+    expect(row).not.toBeNull();
+    const button = within(row as HTMLElement).getByRole("button", {
+      name: "De-adopt to native",
+    }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(within(row as HTMLElement).getByText(/gate OFF first/)).toBeTruthy();
+  });
+
+  it("plans and executes eligible de-adopt through the backend endpoints", async () => {
+    const planRequests: unknown[] = [];
+    const executeRequests: unknown[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/deadopt/eligible": () =>
+          jsonResponse(200, {
+            eligible: true,
+            adopt_owned: true,
+            gate_on: false,
+            gate_on_clients: [],
+            blocked_reason: "",
+          }),
+        "/api/deadopt/plan": (init) => {
+          planRequests.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, {
+            ManifestName: "adopted-server",
+            SourceEntryName: "legacy-server",
+            AdoptClients: ["codex-cli", "claude-code"],
+            Routing: "FRESH",
+            RefusalReason: "",
+            Manifest: {
+              Present: true,
+              AlreadyAbsent: false,
+              HashReady: true,
+              ExpectedHash: "expected",
+              ActualHash: "actual",
+              Reason: "",
+            },
+            Eligibility: {
+              AdoptOwned: true,
+              GateOn: false,
+              Eligible: true,
+              GateOnClients: [],
+              BlockedReason: "",
+            },
+            Clients: [
+              {
+                Client: "codex-cli",
+                OriginalState: "present",
+                Disposition: "restore-pending",
+                AcceptEligible: false,
+                Reason: "",
+              },
+              {
+                Client: "claude-code",
+                OriginalState: "conflict",
+                Disposition: "remove-pending",
+                AcceptEligible: true,
+                Reason: "native conflict",
+              },
+            ],
+          });
+        },
+        "/api/deadopt": (init) => {
+          executeRequests.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, {
+            restored: ["codex-cli"],
+            accepted: ["claude-code"],
+            failed: [{ client: "cursor", reason: "write failed" }],
+          });
+        },
+        "/api/scan": () => jsonResponse(200, managedDiscoveryScan()),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    const button = await screen.findByRole("button", { name: "De-adopt to native" });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(button);
+
+    const modal = await screen.findByTestId("deadopt-confirm-modal");
+    await vi.waitFor(() => expect((modal as HTMLDialogElement).open).toBe(true));
+    expect(planRequests).toEqual([{ server: "adopted-server" }]);
+    expect(modal.textContent).toContain("codex-cli: restore-pending");
+    fireEvent.click(within(modal).getByLabelText(/Accept the current native conflict/));
+    fireEvent.click(within(modal).getByRole("button", { name: "De-adopt to native" }));
+
+    await vi.waitFor(() => expect(executeRequests).toHaveLength(1));
+    expect(executeRequests).toEqual([
+      {
+        server: "adopted-server",
+        accept_conflict_clients: ["claude-code"],
+      },
+    ]);
+    await vi.waitFor(() => expect(within(modal).getByText("De-adopt report")).toBeTruthy());
+    expect(within(modal).getByText("Restored")).toBeTruthy();
+    expect(within(modal).getByText("codex-cli")).toBeTruthy();
+    expect(within(modal).getByText("Accepted")).toBeTruthy();
+    expect(within(modal).getByText("claude-code")).toBeTruthy();
+    expect(within(modal).getByText("Failed")).toBeTruthy();
+    expect(within(modal).getByText("cursor")).toBeTruthy();
+    expect(within(modal).queryByText(/write failed/)).toBeNull();
   });
 
   it("skips the poll tick while the tab is hidden", async () => {

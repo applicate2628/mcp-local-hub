@@ -1,4 +1,10 @@
-import type { ScanResult } from "./types";
+import type {
+  DeAdoptEligible,
+  DeAdoptPlan,
+  DeAdoptReport,
+  ScanResult,
+} from "./types";
+export type { DeAdoptEligible, DeAdoptPlan, DeAdoptReport } from "./types";
 import type { CleanupOrphansResponse } from "./lib/settings-api";
 
 // fetchOrThrow is the shared API wrapper mirroring the legacy fetchOrThrow
@@ -125,6 +131,45 @@ export async function postAdoptPlan(req: AdoptRequest): Promise<AdoptPlan> {
 
 export async function postAdopt(req: AdoptRequest): Promise<AdoptResult> {
   return postJSONObject<AdoptResult>("/api/adopt", req);
+}
+
+export async function getDeAdoptEligible(server: string): Promise<DeAdoptEligible> {
+  const eligibility = await fetchOrThrow<DeAdoptEligible>(
+    `/api/deadopt/eligible?server=${encodeURIComponent(server)}`,
+    "object",
+  );
+  return {
+    ...eligibility,
+    gate_on_clients: eligibility.gate_on_clients ?? [],
+  };
+}
+
+export async function postDeAdoptPlan(server: string): Promise<DeAdoptPlan> {
+  const plan = await postJSONObject<DeAdoptPlan>("/api/deadopt/plan", { server });
+  return {
+    ...plan,
+    AdoptClients: plan.AdoptClients ?? [],
+    Clients: plan.Clients ?? [],
+    Eligibility: {
+      ...plan.Eligibility,
+      GateOnClients: plan.Eligibility?.GateOnClients ?? [],
+    },
+  };
+}
+
+export async function postDeAdopt(
+  server: string,
+  acceptConflictClients: string[] = [],
+): Promise<DeAdoptReport> {
+  const report = await postJSONObject<DeAdoptReport>("/api/deadopt", {
+    server,
+    accept_conflict_clients: acceptConflictClients,
+  });
+  return {
+    restored: report.restored ?? [],
+    accepted: report.accepted ?? [],
+    failed: report.failed ?? [],
+  };
 }
 
 async function postJSONObject<T>(path: string, body: unknown): Promise<T> {

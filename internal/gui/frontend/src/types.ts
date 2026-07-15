@@ -146,6 +146,72 @@ export interface ScanResult {
   project_scope?: ProjectScopeInfo;
 }
 
+// Phase 11 de-adopt wire types. DeAdoptPlan mirrors the untagged exported
+// fields in api.DeAdoptPlan (PascalCase on the JSON wire); DeAdoptEligible and
+// DeAdoptReport mirror the explicitly tagged GUI response structs.
+export type DeAdoptRouting = "FRESH" | "RESUME" | "REFUSE";
+
+export type DeAdoptClientDisposition =
+  | "restore-pending"
+  | "remove-pending"
+  | "restore-done"
+  | "failed";
+
+export interface DeAdoptClientPlan {
+  Client: string;
+  OriginalState: string;
+  Disposition: DeAdoptClientDisposition;
+  AcceptEligible: boolean;
+  Reason: string;
+}
+
+export interface DeAdoptManifest {
+  Present: boolean;
+  AlreadyAbsent: boolean;
+  HashReady: boolean;
+  ExpectedHash: string;
+  ActualHash: string;
+  Reason: string;
+}
+
+export interface DeAdoptPlanEligibility {
+  AdoptOwned: boolean;
+  GateOn: boolean;
+  Eligible: boolean;
+  GateOnClients: string[];
+  BlockedReason: string;
+}
+
+export interface DeAdoptPlan {
+  ManifestName: string;
+  SourceEntryName: string;
+  AdoptClients: string[];
+  Routing: DeAdoptRouting;
+  RefusalReason: string;
+  Manifest: DeAdoptManifest;
+  Eligibility: DeAdoptPlanEligibility;
+  Clients: DeAdoptClientPlan[];
+}
+
+export interface DeAdoptClientFailure {
+  client: string;
+  reason: string;
+}
+
+export interface DeAdoptReport {
+  restored: string[];
+  accepted: string[];
+  failed: DeAdoptClientFailure[];
+}
+
+export interface DeAdoptEligible {
+  eligible: boolean;
+  adopt_owned: boolean;
+  gate_on: boolean;
+  gate_on_clients: string[];
+  blocked_reason: string;
+}
+
 // ClientCapability mirrors api.ClientCapability — the per-client capability
 // flags surfaced on the scan result and the /api/client-capabilities endpoint.
 export interface ClientCapability {
