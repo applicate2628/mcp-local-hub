@@ -3,7 +3,10 @@ package gui
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+
+	"mcp-local-hub/internal/api"
 )
 
 // registerStatusRoutes wires GET /api/status. Phase 6 of G2 re-sourced
@@ -27,7 +30,19 @@ func registerStatusRoutes(s *Server) {
 		}
 		rows, err := s.health.DaemonStatusSnapshot(r.Context())
 		if err != nil {
-			writeAPIError(w, err, http.StatusInternalServerError, "STATUS_FAILED")
+			// Fail-closed redaction (phase-1 finding 4). ErrSupervisorDown is the ONE
+			// curated, path-free, operator-actionable message ("supervisor unreachable
+			// — restart the hub") the GUI surfaces verbatim, so it is allowlisted. Every
+			// OTHER status error is redacted: DialSupervisorIPCStatus's setup failures
+			// wrap the absolute state-dir path (errStateParentInsecure) and the absolute
+			// supervisor.lock.owner.json path on POSIX, and a cached/unknown error could
+			// embed a path too. /api/status is dashboard-polled, so this is the most
+			// reachable of the state-path leaks.
+			if errors.Is(err, api.ErrSupervisorDown) {
+				writeAPIError(w, err, http.StatusInternalServerError, "STATUS_FAILED")
+				return
+			}
+			writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "STATUS_FAILED", "/api/status daemon snapshot")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

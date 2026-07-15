@@ -433,10 +433,14 @@ func (s *Server) daemonRespawnHandler(w http.ResponseWriter, r *http.Request) {
 		//     meaning the supervisor is unreachable right now — a retryable
 		//     condition — so it maps to 503.
 		if errors.Is(dialErr, api.ErrRespawnSetupFailure) {
-			writeAPIError(w, dialErr, http.StatusInternalServerError, "RESPAWN_SETUP_FAILED")
+			// ErrRespawnSetupFailure wraps DaemonStateDir (abs state-dir path via
+			// errStateParentInsecure on POSIX) or a `supervisor.lock.owner.json`
+			// read against an absolute lockPath — redact both (phase-1 finding 4).
+			writeAPIErrorRedacted(w, dialErr, http.StatusInternalServerError, "RESPAWN_SETUP_FAILED", "/api/daemon/respawn setup")
 			return
 		}
-		writeAPIError(w, dialErr, http.StatusServiceUnavailable, "IPC_FAILED")
+		// A transport dial error embeds the absolute unix-socket path on POSIX; redact.
+		writeAPIErrorRedacted(w, dialErr, http.StatusServiceUnavailable, "IPC_FAILED", "/api/daemon/respawn dial supervisor")
 		return
 	}
 	if result.Success {
