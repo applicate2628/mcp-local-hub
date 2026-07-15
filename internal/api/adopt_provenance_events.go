@@ -171,6 +171,20 @@ func emitAdoptProvenanceOrphanReaped(manifestName string, ageSeconds float64, tr
 	})
 }
 
+// emitAdoptProvenanceForgotten records that an operator ran `mcphub adopt-provenance
+// forget <manifest>`, deliberately discarding a provenance row and/or its snapshot dir
+// under the per-manifest lease. Info severity (a deliberate operator action, like
+// captured/committed — not a fault). Body: manifest, row_state, client_count,
+// had_snapshot_dir — NAMES / COUNTS only, never a secret value or config content.
+func emitAdoptProvenanceForgotten(manifestName, rowState string, clientCount int, hadSnapshotDir bool) {
+	emitAdoptProvenanceEvent(SupervisorEventSeverityInfo, "adopt-provenance-forgotten", map[string]any{
+		"manifest":         manifestName,
+		"row_state":        rowState,
+		"client_count":     clientCount,
+		"had_snapshot_dir": hadSnapshotDir,
+	})
+}
+
 // emitAdoptProvenanceReapFailed records that the GC could NOT complete a reap —
 // either the Phase-2 row-reap (reapAdoptProvenanceRow) or the Phase-3 rowless-dir
 // snapshot removal (removeAdoptSnapshots) returned an error — so a stale,

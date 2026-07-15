@@ -1,5 +1,22 @@
 # Backlog: sharpen the adopt-provenance reap predicate (native-entry, both lanes) + ship a `forget` escape
 
+> **DELIVERED 2026-07-15.**
+> - **Improvement A (entry-shape reap predicate, both lanes)** — shipped in **#551**
+>   (`adoptRowProvablyUnmutated` rewritten to a write-target-physical entry-shape proof via
+>   `ClassifyEntryUnderLock`, churn-immune, skip-absent + skip-merged-lower). Bot PASS +
+>   fable adversarial security review (REFUTATION-HOLDS: the semantic-DeepEqual gate is
+>   data-safe because de-adopt's own disposition consumes the same verdict). Merged master
+>   `0336572f`.
+> - **Improvement B (`mcphub adopt-provenance forget <manifest>`)** — shipped in the PR that
+>   carries this doc edit: parent `adopt-provenance` cobra group + `forget` subcommand,
+>   lease-held plan/execute, dry-run without `--yes`, `adopted`-row de-adopt-capability-loss
+>   warning, `adopt-provenance-forgotten` event, reuses `reapAdoptProvenanceRow` /
+>   `removeAdoptSnapshots`. Removes the row + snapshot dir only — NOT routed vault keys
+>   (de-adopt's `--reclaim-crashed` owns those).
+>
+> Both improvements delivered; this backlog item is CLOSED. The historical analysis below is
+> retained for reference.
+
 Filed: 2026-07-12
 Priority: P3 (usability + precision; NOT data-loss — the shipped whole-file-sha gate is fail-safe)
 Source: fable adversarial lens on #532's capture-UPSERT Part-2 gate — the better predicate + the escape the minimal fix defers
