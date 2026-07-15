@@ -8,7 +8,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, cleanup, fireEvent, screen, act, within } from "@testing-library/preact";
 import { DiscoveryScreen } from "./Migration";
-import type { ScanResult } from "../types";
+import type { DeAdoptPlan, DeAdoptRouting, ScanResult } from "../types";
 
 // happy-dom doesn't ship EventSource. DiscoveryScreen subscribes to
 // /api/events for daemon-state / clients-rescan; minimal stub.
@@ -141,6 +141,35 @@ function managedDiscoveryScan(name = "adopted-server"): ScanResult {
       },
     ],
     client_config_presence: {},
+  };
+}
+
+function basicDeAdoptPlan(
+  routing: DeAdoptRouting = "FRESH",
+  refusalReason = "",
+): DeAdoptPlan {
+  return {
+    ManifestName: "adopted-server",
+    SourceEntryName: "legacy-server",
+    AdoptClients: [],
+    Routing: routing,
+    RefusalReason: refusalReason,
+    Manifest: {
+      Present: true,
+      AlreadyAbsent: false,
+      HashReady: true,
+      ExpectedHash: "expected",
+      ActualHash: "actual",
+      Reason: "",
+    },
+    Eligibility: {
+      AdoptOwned: true,
+      GateOn: false,
+      Eligible: routing !== "REFUSE",
+      GateOnClients: [],
+      BlockedReason: refusalReason,
+    },
+    Clients: [],
   };
 }
 
@@ -404,6 +433,46 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     ).toBeNull();
   });
 
+  it("keeps de-adopt fail-closed and shows a visible warning when eligibility cannot be read", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, managedDiscoveryScan()),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+        "/api/deadopt/eligible": () =>
+          jsonResponse(503, { error: "eligibility service unavailable" }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    const row = (await screen.findByText("adopted-server")).closest("li");
+    expect(row).not.toBeNull();
+    expect(
+      within(row as HTMLElement).queryByRole("button", { name: "De-adopt to native" }),
+    ).toBeNull();
+    expect(
+      within(row as HTMLElement).getByText("Couldn't check de-adopt eligibility."),
+    ).toBeTruthy();
+  });
+
+  it("requests de-adopt eligibility only for managed rows", async () => {
+    const fetchMock = fetchRouter({
+      "/api/scan": () => jsonResponse(200, unmanagedDiscoveryScan()),
+      "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<DiscoveryScreen />);
+    await screen.findByText("local-stdio");
+    await screen.findByText("context7");
+
+    expect(
+      fetchMock.mock.calls.some(([input]) =>
+        String(input).startsWith("/api/deadopt/eligible"),
+      ),
+    ).toBe(false);
+  });
+
   it("shows a disabled de-adopt affordance and backend gate-OFF reason while gate is ON", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
@@ -430,7 +499,45 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     expect(within(row as HTMLElement).getByText(/gate OFF first/)).toBeTruthy();
   });
 
-  it("plans and executes eligible de-adopt through the backend endpoints", async () => {
+  it("shows a REFUSE reason, disables confirmation, and never executes de-adopt", async () => {
+    let executeCalls = 0;
+    const refusalReason = "de-adopt refused because the hub gate is ON";
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/deadopt/eligible": () =>
+          jsonResponse(200, {
+            eligible: true,
+            adopt_owned: true,
+            gate_on: false,
+            gate_on_clients: [],
+            blocked_reason: "",
+          }),
+        "/api/deadopt/plan": () =>
+          jsonResponse(200, basicDeAdoptPlan("REFUSE", refusalReason)),
+        "/api/deadopt": () => {
+          executeCalls += 1;
+          return jsonResponse(200, { restored: [], accepted: [], failed: [] });
+        },
+        "/api/scan": () => jsonResponse(200, managedDiscoveryScan()),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "De-adopt to native" }));
+
+    const modal = await screen.findByTestId("deadopt-confirm-modal");
+    await vi.waitFor(() => expect((modal as HTMLDialogElement).open).toBe(true));
+    expect(within(modal).getByText(refusalReason)).toBeTruthy();
+    const confirm = within(modal).getByRole("button", {
+      name: "De-adopt to native",
+    }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(confirm);
+    expect(executeCalls).toBe(0);
+  });
+
+  it("plans and executes eligible de-adopt and renders partial failure reasons", async () => {
     const planRequests: unknown[] = [];
     const executeRequests: unknown[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(
@@ -489,7 +596,10 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
           return jsonResponse(200, {
             restored: ["codex-cli"],
             accepted: ["claude-code"],
-            failed: [{ client: "cursor", reason: "write failed" }],
+            failed: [
+              { client: "cursor", reason: "write failed" },
+              { client: "vscode", reason: "permission denied" },
+            ],
           });
         },
         "/api/scan": () => jsonResponse(200, managedDiscoveryScan()),
@@ -522,8 +632,48 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     expect(within(modal).getByText("Accepted")).toBeTruthy();
     expect(within(modal).getByText("claude-code")).toBeTruthy();
     expect(within(modal).getByText("Failed")).toBeTruthy();
-    expect(within(modal).getByText("cursor")).toBeTruthy();
-    expect(within(modal).queryByText(/write failed/)).toBeNull();
+    expect(within(modal).getByText("cursor — write failed")).toBeTruthy();
+    expect(within(modal).getByText("vscode — permission denied")).toBeTruthy();
+  });
+
+  it("surfaces a failed de-adopt execute and refreshes Discovery", async () => {
+    let scanCalls = 0;
+    let executeCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/deadopt/eligible": () =>
+          jsonResponse(200, {
+            eligible: true,
+            adopt_owned: true,
+            gate_on: false,
+            gate_on_clients: [],
+            blocked_reason: "",
+          }),
+        "/api/deadopt/plan": () => jsonResponse(200, basicDeAdoptPlan()),
+        "/api/deadopt": () => {
+          executeCalls += 1;
+          return jsonResponse(500, { error: "executor failed after a partial restore" });
+        },
+        "/api/scan": () => {
+          scanCalls += 1;
+          return jsonResponse(200, managedDiscoveryScan());
+        },
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "De-adopt to native" }));
+    const modal = await screen.findByTestId("deadopt-confirm-modal");
+    await vi.waitFor(() => expect((modal as HTMLDialogElement).open).toBe(true));
+    const scansBeforeExecute = scanCalls;
+    fireEvent.click(within(modal).getByRole("button", { name: "De-adopt to native" }));
+
+    await vi.waitFor(() => expect(executeCalls).toBe(1));
+    await vi.waitFor(() =>
+      expect(within(modal).getByText(/executor failed after a partial restore/)).toBeTruthy(),
+    );
+    await vi.waitFor(() => expect(scanCalls).toBeGreaterThan(scansBeforeExecute));
   });
 
   it("skips the poll tick while the tab is hidden", async () => {

@@ -59,6 +59,7 @@ export function DiscoveryScreen() {
   const [adoptConfirmBusy, setAdoptConfirmBusy] = useState(false);
   const [adoptModalError, setAdoptModalError] = useState<string | null>(null);
   const [deAdoptEligibility, setDeAdoptEligibility] = useState<Record<string, DeAdoptEligible>>({});
+  const [deAdoptEligibilityErrors, setDeAdoptEligibilityErrors] = useState<Record<string, string>>({});
   const [deAdoptPlan, setDeAdoptPlan] = useState<DeAdoptPlan | null>(null);
   const [deAdoptReport, setDeAdoptReport] = useState<{
     server: string;
@@ -107,26 +108,48 @@ export function DiscoveryScreen() {
           },
         ),
       ]);
-      // G3: ask the backend eligibility owner for every discovered server.
+      // G3: ask the backend eligibility owner only for rows that can render
+      // the de-adopt affordance. The via-hub predicate is the same one used by
+      // groupMigrationEntries for ManagedByHubGroup; eligibility itself still
+      // comes exclusively from the backend response.
       // Rendering never derives de-adopt ownership from scan status, endpoint
       // shape, or a loopback URL heuristic. A failed eligibility read is
       // fail-closed for that row: no affordance is published.
-      const eligibilityPairs = await Promise.all(
-        [...new Set((s.entries ?? []).map((entry) => entry.name))].map(async (name) => {
+      const managedNames = [
+        ...new Set(
+          (s.entries ?? [])
+            .filter((entry) => entry.status === "via-hub")
+            .map((entry) => entry.name),
+        ),
+      ];
+      const eligibilityResults = await Promise.all(
+        managedNames.map(async (name) => {
           try {
-            return [name, await getDeAdoptEligible(name)] as const;
+            return { name, eligibility: await getDeAdoptEligible(name), error: null };
           } catch (err) {
             console.warn(`Discovery: de-adopt eligibility failed for ${name}:`, err);
-            return null;
+            return {
+              name,
+              eligibility: null,
+              error: "Couldn't check de-adopt eligibility.",
+            };
           }
         }),
       );
       if (!isLatest()) return;
+      const eligibilityByName: Record<string, DeAdoptEligible> = {};
+      const eligibilityErrorsByName: Record<string, string> = {};
+      for (const result of eligibilityResults) {
+        if (result.eligibility !== null) {
+          eligibilityByName[result.name] = result.eligibility;
+        } else if (result.error !== null) {
+          eligibilityErrorsByName[result.name] = result.error;
+        }
+      }
       setScan(s);
       setDismissedUnknown(new Set(d.unknown ?? []));
-      setDeAdoptEligibility(
-        Object.fromEntries(eligibilityPairs.filter((pair) => pair !== null)),
-      );
+      setDeAdoptEligibility(eligibilityByName);
+      setDeAdoptEligibilityErrors(eligibilityErrorsByName);
       setError(null);
       const canMigrateNames = (s.entries ?? [])
         .filter((e) => e.status === "can-migrate")
@@ -384,11 +407,11 @@ export function DiscoveryScreen() {
         report.failed.length === 0 ? "success" : "danger",
         `De-adopted ${deAdoptPlan.ManifestName}: ${report.restored.length} restored, ${report.accepted.length} accepted, ${report.failed.length} failed.`,
       );
-      setScanReloadToken((n) => n + 1);
     } catch (err) {
       setDeAdoptModalError((err as Error).message);
     } finally {
       setDeAdoptConfirmBusy(false);
+      setScanReloadToken((n) => n + 1);
     }
   }
 
@@ -454,6 +477,7 @@ export function DiscoveryScreen() {
           <ManagedByHubGroup
             entries={groups.viaHub}
             deAdoptEligibility={deAdoptEligibility}
+            deAdoptEligibilityErrors={deAdoptEligibilityErrors}
             actionBusy={actionBusy}
             onDemigrate={runDemigrate}
             onDeAdopt={runDeAdoptPlan}
@@ -517,6 +541,7 @@ export function DiscoveryScreen() {
 function ManagedByHubGroup(props: {
   entries: ScanEntry[];
   deAdoptEligibility: Record<string, DeAdoptEligible>;
+  deAdoptEligibilityErrors: Record<string, string>;
   actionBusy: string | null;
   onDemigrate: (server: string) => void;
   onDeAdopt: (server: string) => void;
@@ -535,6 +560,7 @@ function ManagedByHubGroup(props: {
       <ul class="group-rows">
         {props.entries.map((e) => {
           const eligibility = props.deAdoptEligibility[e.name];
+          const eligibilityError = props.deAdoptEligibilityErrors[e.name];
           const showDeAdopt = eligibility?.adopt_owned === true;
           const gateHint = eligibility?.blocked_reason;
           return (
@@ -589,6 +615,15 @@ function ManagedByHubGroup(props: {
                     {gateHint}
                   </span>
                 )}
+              </span>
+            )}
+            {eligibilityError && (
+              <span
+                class="de-adopt-hint error"
+                role="status"
+                data-testid={`de-adopt-eligibility-error-${e.name}`}
+              >
+                {eligibilityError}
               </span>
             )}
           </li>
@@ -993,7 +1028,9 @@ function DeAdoptConfirmModal(props: {
               ) : (
                 <ul>
                   {report.report.failed.map((failure) => (
-                    <li key={failure.client}>{failure.client}</li>
+                    <li key={failure.client}>
+                      {failure.client} — {failure.reason}
+                    </li>
                   ))}
                 </ul>
               )}
