@@ -37,6 +37,15 @@ function fetchRouter(routes: Record<string, (init?: RequestInit) => Response | P
     for (const prefix of Object.keys(routes)) {
       if (url.startsWith(prefix)) return routes[prefix](init);
     }
+    if (url.startsWith("/api/deadopt/eligible")) {
+      return jsonResponse(200, {
+        eligible: false,
+        adopt_owned: false,
+        gate_on: false,
+        gate_on_clients: [],
+        blocked_reason: "",
+      });
+    }
     throw new Error(`unexpected fetch: ${url}`);
   });
 }
@@ -137,6 +146,23 @@ function managedDiscoveryScan(name = "adopted-server"): ScanResult {
         managed: true,
         manifest_exists: true,
         can_migrate: false,
+        client_presence: {},
+      },
+    ],
+    client_config_presence: {},
+  };
+}
+
+function recoverableDeAdoptingScan(): ScanResult {
+  return {
+    at: "2026-07-15T00:00:00Z",
+    entries: [
+      {
+        name: "resume-server",
+        status: "can-migrate",
+        managed: false,
+        manifest_exists: true,
+        can_migrate: true,
         client_presence: {},
       },
     ],
@@ -451,26 +477,63 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
       within(row as HTMLElement).queryByRole("button", { name: "De-adopt to native" }),
     ).toBeNull();
     expect(
-      within(row as HTMLElement).getByText("Couldn't check de-adopt eligibility."),
+      await within(row as HTMLElement).findByText("Couldn't check de-adopt eligibility."),
     ).toBeTruthy();
   });
 
-  it("requests de-adopt eligibility only for managed rows", async () => {
+  it("fetches eligibility and renders de-adopt for a recoverable non-via-hub row", async () => {
     const fetchMock = fetchRouter({
-      "/api/scan": () => jsonResponse(200, unmanagedDiscoveryScan()),
+      "/api/scan": () => jsonResponse(200, recoverableDeAdoptingScan()),
       "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      "/api/deadopt/eligible": () =>
+        jsonResponse(200, {
+          eligible: true,
+          adopt_owned: true,
+          gate_on: false,
+          gate_on_clients: [],
+          blocked_reason: "",
+        }),
     });
     vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock as unknown as typeof fetch);
 
     render(<DiscoveryScreen />);
-    await screen.findByText("local-stdio");
-    await screen.findByText("context7");
+    const row = (await screen.findByText("resume-server")).closest("li");
+    expect(row).not.toBeNull();
+    expect(
+      await within(row as HTMLElement).findByRole("button", { name: "De-adopt to native" }),
+    ).toBeTruthy();
 
     expect(
       fetchMock.mock.calls.some(([input]) =>
-        String(input).startsWith("/api/deadopt/eligible"),
+        String(input).includes("/api/deadopt/eligible?server=resume-server"),
       ),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it("renders scan rows without waiting for a hanging eligibility read", async () => {
+    const eligibility = deferred<Response>();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan("slow-eligibility")),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+        "/api/deadopt/eligible": () => eligibility.promise,
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    const row = (await screen.findByText("slow-eligibility")).closest("li");
+    expect(row).not.toBeNull();
+    expect(
+      within(row as HTMLElement).queryByText("Couldn't check de-adopt eligibility."),
+    ).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(
+      within(row as HTMLElement).getByText("Couldn't check de-adopt eligibility."),
+    ).toBeTruthy();
   });
 
   it("shows a disabled de-adopt affordance and backend gate-OFF reason while gate is ON", async () => {
@@ -492,7 +555,7 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     render(<DiscoveryScreen />);
     const row = (await screen.findByText("adopted-server")).closest("li");
     expect(row).not.toBeNull();
-    const button = within(row as HTMLElement).getByRole("button", {
+    const button = await within(row as HTMLElement).findByRole("button", {
       name: "De-adopt to native",
     }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
@@ -535,6 +598,47 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     expect(confirm.disabled).toBe(true);
     fireEvent.click(confirm);
     expect(executeCalls).toBe(0);
+  });
+
+  it("shows irreversible snapshot-destruction consent for accept-conflict", async () => {
+    const plan = basicDeAdoptPlan();
+    plan.Clients = [
+      {
+        Client: "claude-code",
+        OriginalState: "present",
+        Disposition: "failed",
+        AcceptEligible: true,
+        Reason: "current native entry conflicts with the pinned pre-adopt snapshot",
+      },
+    ];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, managedDiscoveryScan()),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+        "/api/deadopt/eligible": () =>
+          jsonResponse(200, {
+            eligible: true,
+            adopt_owned: true,
+            gate_on: false,
+            gate_on_clients: [],
+            blocked_reason: "",
+          }),
+        "/api/deadopt/plan": () => jsonResponse(200, plan),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "De-adopt to native" }));
+
+    const modal = await screen.findByTestId("deadopt-confirm-modal");
+    expect(
+      within(modal).getByLabelText(/I understand this is irreversible/),
+    ).toBeTruthy();
+    expect(
+      within(modal).getByText(
+        "IRREVERSIBLE: the accepted client's pinned snapshot is DESTROYED at close and its pre-adopt original config + secret-literal spellings are discarded without ever being restored.",
+      ),
+    ).toBeTruthy();
   });
 
   it("plans and executes eligible de-adopt and renders partial failure reasons", async () => {
@@ -616,7 +720,7 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     await vi.waitFor(() => expect((modal as HTMLDialogElement).open).toBe(true));
     expect(planRequests).toEqual([{ server: "adopted-server" }]);
     expect(modal.textContent).toContain("codex-cli: restore-pending");
-    fireEvent.click(within(modal).getByLabelText(/Accept the current native conflict/));
+    fireEvent.click(within(modal).getByLabelText(/accept the current native conflict/i));
     fireEvent.click(within(modal).getByRole("button", { name: "De-adopt to native" }));
 
     await vi.waitFor(() => expect(executeRequests).toHaveLength(1));

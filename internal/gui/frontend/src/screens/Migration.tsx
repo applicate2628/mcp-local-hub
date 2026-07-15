@@ -30,6 +30,27 @@ interface DismissedResponse {
   unknown: string[];
 }
 
+const DE_ADOPT_ELIGIBILITY_TIMEOUT_MS = 5_000;
+
+function getDeAdoptEligibleWithTimeout(server: string): Promise<DeAdoptEligible> {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(
+      () => reject(new Error("de-adopt eligibility check timed out")),
+      DE_ADOPT_ELIGIBILITY_TIMEOUT_MS,
+    );
+    void getDeAdoptEligible(server).then(
+      (eligibility) => {
+        window.clearTimeout(timeout);
+        resolve(eligibility);
+      },
+      (err: unknown) => {
+        window.clearTimeout(timeout);
+        reject(err);
+      },
+    );
+  });
+}
+
 // DiscoveryScreen (formerly MigrationScreen) is the comprehensive
 // "see ALL MCP servers" view: a scan-driven grouping of every MCP
 // server entry across all managed clients, with hub-managed servers
@@ -108,48 +129,14 @@ export function DiscoveryScreen() {
           },
         ),
       ]);
-      // G3: ask the backend eligibility owner only for rows that can render
-      // the de-adopt affordance. The via-hub predicate is the same one used by
-      // groupMigrationEntries for ManagedByHubGroup; eligibility itself still
-      // comes exclusively from the backend response.
-      // Rendering never derives de-adopt ownership from scan status, endpoint
-      // shape, or a loopback URL heuristic. A failed eligibility read is
-      // fail-closed for that row: no affordance is published.
-      const managedNames = [
-        ...new Set(
-          (s.entries ?? [])
-            .filter((entry) => entry.status === "via-hub")
-            .map((entry) => entry.name),
-        ),
-      ];
-      const eligibilityResults = await Promise.all(
-        managedNames.map(async (name) => {
-          try {
-            return { name, eligibility: await getDeAdoptEligible(name), error: null };
-          } catch (err) {
-            console.warn(`Discovery: de-adopt eligibility failed for ${name}:`, err);
-            return {
-              name,
-              eligibility: null,
-              error: "Couldn't check de-adopt eligibility.",
-            };
-          }
-        }),
-      );
       if (!isLatest()) return;
-      const eligibilityByName: Record<string, DeAdoptEligible> = {};
-      const eligibilityErrorsByName: Record<string, string> = {};
-      for (const result of eligibilityResults) {
-        if (result.eligibility !== null) {
-          eligibilityByName[result.name] = result.eligibility;
-        } else if (result.error !== null) {
-          eligibilityErrorsByName[result.name] = result.error;
-        }
-      }
       setScan(s);
       setDismissedUnknown(new Set(d.unknown ?? []));
-      setDeAdoptEligibility(eligibilityByName);
-      setDeAdoptEligibilityErrors(eligibilityErrorsByName);
+      // Publish the authoritative scan before auxiliary eligibility reads.
+      // Reset to fail-closed so a refreshed row never inherits a stale
+      // affordance while its current eligibility is still unknown.
+      setDeAdoptEligibility({});
+      setDeAdoptEligibilityErrors({});
       setError(null);
       const canMigrateNames = (s.entries ?? [])
         .filter((e) => e.status === "can-migrate")
@@ -170,6 +157,29 @@ export function DiscoveryScreen() {
         });
         return next;
       });
+
+      // G3: ask the backend eligibility owner for every scanned server. This
+      // deliberately includes roll-forward de_adopting rows whose live hub
+      // bindings are already gone and therefore no longer scan as via-hub.
+      // Each request publishes independently; a slow or failed row remains
+      // fail-closed and cannot delay the scan or any sibling row.
+      const scannedNames = [...new Set((s.entries ?? []).map((entry) => entry.name))];
+      for (const name of scannedNames) {
+        void getDeAdoptEligibleWithTimeout(name).then(
+          (eligibility) => {
+            if (!isLatest()) return;
+            setDeAdoptEligibility((current) => ({ ...current, [name]: eligibility }));
+          },
+          (err: unknown) => {
+            if (!isLatest()) return;
+            console.warn(`Discovery: de-adopt eligibility failed for ${name}:`, err);
+            setDeAdoptEligibilityErrors((current) => ({
+              ...current,
+              [name]: "Couldn't check de-adopt eligibility.",
+            }));
+          },
+        );
+      }
     } catch (err) {
       if (isLatest()) setError((err as Error).message);
     }
@@ -453,6 +463,12 @@ export function DiscoveryScreen() {
     groups.external.length +
     groups.perSession.length +
     groups.dismissed.length;
+  const deAdoptRowProps: DeAdoptRowProps = {
+    deAdoptEligibility,
+    deAdoptEligibilityErrors,
+    actionBusy,
+    onDeAdopt: runDeAdoptPlan,
+  };
 
   return (
     <section class="screen migration discovery">
@@ -476,15 +492,13 @@ export function DiscoveryScreen() {
         <div class="card">
           <ManagedByHubGroup
             entries={groups.viaHub}
-            deAdoptEligibility={deAdoptEligibility}
-            deAdoptEligibilityErrors={deAdoptEligibilityErrors}
-            actionBusy={actionBusy}
+            {...deAdoptRowProps}
             onDemigrate={runDemigrate}
-            onDeAdopt={runDeAdoptPlan}
           />
-          <ManagedInheritedGroup entries={groups.viaHubInherited} />
+          <ManagedInheritedGroup entries={groups.viaHubInherited} {...deAdoptRowProps} />
           <ReadyToMigrateGroup
             entries={groups.canMigrate}
+            {...deAdoptRowProps}
             selected={selected}
             onToggle={toggleSelected}
             onMigrateSelected={runMigrateSelected}
@@ -494,13 +508,14 @@ export function DiscoveryScreen() {
             unknownEntries={groups.unknown}
             externalEntries={groups.external}
             clientCapabilities={scan.client_capabilities ?? {}}
-            actionBusy={actionBusy}
+            {...deAdoptRowProps}
             onAdopt={runAdoptPlan}
             onDismiss={runDismiss}
           />
-          <PerSessionGroup entries={groups.perSession} />
+          <PerSessionGroup entries={groups.perSession} {...deAdoptRowProps} />
           <DismissedGroup
             entries={groups.dismissed}
+            {...deAdoptRowProps}
           />
         </div>
       )}
@@ -538,13 +553,60 @@ export function DiscoveryScreen() {
   );
 }
 
-function ManagedByHubGroup(props: {
-  entries: ScanEntry[];
+interface DeAdoptRowProps {
   deAdoptEligibility: Record<string, DeAdoptEligible>;
   deAdoptEligibilityErrors: Record<string, string>;
   actionBusy: string | null;
-  onDemigrate: (server: string) => void;
   onDeAdopt: (server: string) => void;
+}
+
+function DeAdoptAffordance(props: DeAdoptRowProps & { serverName: string }) {
+  const eligibility = props.deAdoptEligibility[props.serverName];
+  const eligibilityError = props.deAdoptEligibilityErrors[props.serverName];
+  const gateHint = eligibility?.blocked_reason;
+  return (
+    <>
+      {eligibility?.adopt_owned === true && (
+        <span class="de-adopt-action">
+          <button
+            type="button"
+            class="de-adopt btn"
+            data-action="de-adopt"
+            disabled={props.actionBusy != null || eligibility.eligible !== true}
+            aria-describedby={gateHint ? `de-adopt-hint-${props.serverName}` : undefined}
+            onClick={() => props.onDeAdopt(props.serverName)}
+          >
+            {props.actionBusy === deAdoptActionKey(props.serverName)
+              ? "Planning..."
+              : "De-adopt to native"}
+          </button>
+          {gateHint && eligibility.eligible !== true && (
+            <span
+              id={`de-adopt-hint-${props.serverName}`}
+              class="de-adopt-hint"
+              data-testid={`de-adopt-hint-${props.serverName}`}
+            >
+              {gateHint}
+            </span>
+          )}
+        </span>
+      )}
+      {eligibilityError && (
+        <span
+          class="de-adopt-hint error"
+          role="status"
+          data-testid={`de-adopt-eligibility-error-${props.serverName}`}
+        >
+          {eligibilityError}
+        </span>
+      )}
+    </>
+  );
+}
+
+function ManagedByHubGroup(props: DeAdoptRowProps & {
+  entries: ScanEntry[];
+  onDemigrate: (server: string) => void;
 }) {
   if (props.entries.length === 0) {
     return (
@@ -558,12 +620,7 @@ function ManagedByHubGroup(props: {
     <section class="group group-via-hub" data-group="via-hub">
       <h2>Managed by hub</h2>
       <ul class="group-rows">
-        {props.entries.map((e) => {
-          const eligibility = props.deAdoptEligibility[e.name];
-          const eligibilityError = props.deAdoptEligibilityErrors[e.name];
-          const showDeAdopt = eligibility?.adopt_owned === true;
-          const gateHint = eligibility?.blocked_reason;
-          return (
+        {props.entries.map((e) => (
           <li key={e.name} data-server={e.name}>
             <span class="server-name">{e.name}</span>
             {/* Badge driven by the backend Managed flag (Status==="via-hub").
@@ -592,43 +649,9 @@ function ManagedByHubGroup(props: {
             >
               {props.actionBusy === e.name ? "Demigrating…" : "Demigrate"}
             </button>
-            {showDeAdopt && (
-              <span class="de-adopt-action">
-                <button
-                  type="button"
-                  class="de-adopt btn"
-                  data-action="de-adopt"
-                  disabled={props.actionBusy != null || eligibility?.eligible !== true}
-                  aria-describedby={gateHint ? `de-adopt-hint-${e.name}` : undefined}
-                  onClick={() => props.onDeAdopt(e.name)}
-                >
-                  {props.actionBusy === deAdoptActionKey(e.name)
-                    ? "Planning..."
-                    : "De-adopt to native"}
-                </button>
-                {gateHint && eligibility?.eligible !== true && (
-                  <span
-                    id={`de-adopt-hint-${e.name}`}
-                    class="de-adopt-hint"
-                    data-testid={`de-adopt-hint-${e.name}`}
-                  >
-                    {gateHint}
-                  </span>
-                )}
-              </span>
-            )}
-            {eligibilityError && (
-              <span
-                class="de-adopt-hint error"
-                role="status"
-                data-testid={`de-adopt-eligibility-error-${e.name}`}
-              >
-                {eligibilityError}
-              </span>
-            )}
+            <DeAdoptAffordance {...props} serverName={e.name} />
           </li>
-          );
-        })}
+        ))}
       </ul>
     </section>
   );
@@ -644,7 +667,7 @@ function ManagedByHubGroup(props: {
 // (never dropped) so the "see all MCP servers" Discovery view shows these
 // import-inherited rows instead of hiding them. Rendered only when non-empty
 // (the common host has none — an empty section would be noise).
-function ManagedInheritedGroup(props: { entries: ScanEntry[] }) {
+function ManagedInheritedGroup(props: DeAdoptRowProps & { entries: ScanEntry[] }) {
   if (props.entries.length === 0) {
     return null;
   }
@@ -667,6 +690,7 @@ function ManagedInheritedGroup(props: { entries: ScanEntry[] }) {
             >
               Inherited (read-only)
             </span>
+            <DeAdoptAffordance {...props} serverName={e.name} />
           </li>
         ))}
       </ul>
@@ -674,7 +698,7 @@ function ManagedInheritedGroup(props: { entries: ScanEntry[] }) {
   );
 }
 
-function ReadyToMigrateGroup(props: {
+function ReadyToMigrateGroup(props: DeAdoptRowProps & {
   entries: ScanEntry[];
   selected: Set<string>;
   onToggle: (name: string, next: boolean) => void;
@@ -707,6 +731,7 @@ function ReadyToMigrateGroup(props: {
               />
               <span class="server-name">{e.name}</span>
             </label>
+            <DeAdoptAffordance {...props} serverName={e.name} />
           </li>
         ))}
       </ul>
@@ -729,7 +754,7 @@ function ReadyToMigrateGroup(props: {
 //   - external: real external remote MCP servers (non-hub http). These
 //     are read-only (no Create-manifest — they're remote, not stdio) but
 //     CAN be Dismissed to park a noisy remote.
-function UnmanagedExternalGroup(props: {
+function UnmanagedExternalGroup(props: DeAdoptRowProps & {
   unknownEntries: ScanEntry[];
   externalEntries: ScanEntry[];
   clientCapabilities: Record<string, ClientCapability>;
@@ -796,6 +821,7 @@ function UnmanagedExternalGroup(props: {
                 >
                   Dismiss
                 </button>
+                <DeAdoptAffordance {...props} serverName={e.name} />
               </li>
             );
           })}
@@ -820,6 +846,7 @@ function UnmanagedExternalGroup(props: {
               >
                 Dismiss
               </button>
+              <DeAdoptAffordance {...props} serverName={e.name} />
             </li>
           ))}
         </ul>
@@ -828,7 +855,7 @@ function UnmanagedExternalGroup(props: {
   );
 }
 
-function PerSessionGroup(props: { entries: ScanEntry[] }) {
+function PerSessionGroup(props: DeAdoptRowProps & { entries: ScanEntry[] }) {
   if (props.entries.length === 0) {
     return (
       <section class="group group-per-session" data-group="per-session">
@@ -850,6 +877,7 @@ function PerSessionGroup(props: { entries: ScanEntry[] }) {
         {props.entries.map((e) => (
           <li key={e.name} data-server={e.name}>
             <span class="server-name">{e.name}</span>
+            <DeAdoptAffordance {...props} serverName={e.name} />
           </li>
         ))}
       </ul>
@@ -862,7 +890,7 @@ function PerSessionGroup(props: { entries: ScanEntry[] }) {
 // entirely (prior behavior): the operator can expand to see what was
 // parked. Re-instating a dismissed entry is a future affordance; for now
 // expansion is read-only visibility.
-function DismissedGroup(props: { entries: ScanEntry[] }) {
+function DismissedGroup(props: DeAdoptRowProps & { entries: ScanEntry[] }) {
   if (props.entries.length === 0) {
     // Render nothing when there are no dismissed entries — an empty
     // <details> would be noise.
@@ -882,6 +910,7 @@ function DismissedGroup(props: { entries: ScanEntry[] }) {
             <span class="badge badge-dismissed">
               {e.status === "external" ? "External remote" : "Unknown stdio"}
             </span>
+            <DeAdoptAffordance {...props} serverName={e.name} />
           </li>
         ))}
       </ul>
@@ -990,7 +1019,15 @@ function DeAdoptConfirmModal(props: {
                             )
                           }
                         />
-                        <span>Accept the current native conflict for {client.Client}</span>
+                        <span>
+                          I understand this is irreversible and accept the current native conflict
+                          for {client.Client}.
+                        </span>
+                        <span class="de-adopt-conflict-warning">
+                          IRREVERSIBLE: the accepted client's pinned snapshot is DESTROYED at close and its
+                          pre-adopt original config + secret-literal spellings are discarded without
+                          ever being restored.
+                        </span>
                       </label>
                     )}
                   </li>
