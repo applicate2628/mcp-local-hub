@@ -123,9 +123,23 @@ func TryActivateIncumbent(pidportPath string, totalTimeout time.Duration) error 
 		if err != nil {
 			return fmt.Errorf("activate-window: %w", err)
 		}
-		reason := ReasonNoBrowserWindow
-		if resp2.Header.Get(activationNoTargetReasonHeader) == string(ReasonHeadless) {
+		// Reason classification, including version skew. An incumbent that
+		// predates this header only ever returned 503/no-target from ONE
+		// branch — the headless-session check — so a MISSING header
+		// unambiguously means headless, and defaulting it to
+		// no-browser-window would strip the SSH-tunnel guidance a remote
+		// operator needs (the local-URL wording points them at their own
+		// machine). An UNKNOWN (present but unrecognized) value comes from a
+		// NEWER incumbent whose reasons we do not model yet: fall back to the
+		// generic no-window wording rather than inventing a headless story.
+		reason := ReasonHeadless
+		switch v := resp2.Header.Get(activationNoTargetReasonHeader); v {
+		case "":
+			reason = ReasonHeadless // legacy incumbent: headless was the only 503 source
+		case string(ReasonHeadless):
 			reason = ReasonHeadless
+		default:
+			reason = ReasonNoBrowserWindow
 		}
 		resp2.Body.Close()
 		switch resp2.StatusCode {
