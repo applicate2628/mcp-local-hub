@@ -7,6 +7,8 @@ import (
 	"net/http"
 )
 
+const activationNoTargetReasonHeader = "X-Mcphub-Activation-No-Target-Reason"
+
 func registerPingRoutes(s *Server) {
 	s.mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -21,6 +23,8 @@ func registerPingRoutes(s *Server) {
 			"version": s.cfg.Version,
 		})
 	})
+	// Authorization: public by design to native loopback clients; browser
+	// callers must pass the production allowed-Host and same-origin checks.
 	s.mux.HandleFunc("/api/activate-window", s.requireSameOrigin(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.Header().Set("Allow", "POST")
@@ -39,11 +43,12 @@ func registerPingRoutes(s *Server) {
 		case err == nil:
 			w.WriteHeader(http.StatusNoContent)
 		case errors.Is(err, ErrActivationNoTarget):
-			// Headless session: incumbent reachable but cannot focus
-			// or relaunch a window. 503 + diagnostic body so the
-			// second-instance handshake can surface a useful message
+			// Incumbent reachable but cannot focus or relaunch a
+			// window. 503 + reason header + diagnostic body let the
+			// second-instance handshake surface a useful message
 			// instead of "activated existing mcphub gui" — which would
 			// be a lie in this case. Codex bot review on PR #26 P2.
+			w.Header().Set(activationNoTargetReasonHeader, string(activationNoTargetReason(err)))
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)

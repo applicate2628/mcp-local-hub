@@ -95,6 +95,8 @@ jobs:
         # -count=1 disables the test result cache so we always re-run
         # against the current source. CI minutes are the cost; signal
         # is worth it.
+        env:
+          MCPHUB_GUI_SPAWN_TESTS: "1"
         run: go test -count=1 -timeout 5m ./...
 
       - name: Test (env-fallback build tag)
@@ -106,6 +108,8 @@ jobs:
         # tests depend on the tag (internal/api state-path tests +
         # internal/cli subprocess-isolation tests) — matches the local
         # pre-push command in CLAUDE.md Step 1.
+        env:
+          MCPHUB_GUI_SPAWN_TESTS: "1"
         run: go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/
 
       - name: Production binary symbol assertion
@@ -190,6 +194,8 @@ jobs:
         with:
           go-version: stable
       - name: Linux-tagged go test
+        env:
+          MCPHUB_GUI_SPAWN_TESTS: "1"
         run: go test -count=1 -timeout 5m -tags=linux_integration ./internal/cli/ ./internal/process/
       - name: systemd-user smoke (skipped if not present)
         run: |

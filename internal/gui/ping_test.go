@@ -53,18 +53,23 @@ func TestActivateWindow_MarksSignalReceived(t *testing.T) {
 // instead of falsely claiming activation succeeded.
 func TestActivateWindow_HeadlessReturns503(t *testing.T) {
 	s := NewServer(Config{})
-	s.OnActivateWindow(func() error { return ErrActivationNoTarget })
+	s.OnActivateWindow(func() error {
+		return &ActivationNoTargetError{Reason: ReasonHeadless}
+	})
 	req := httptest.NewRequest(http.MethodPost, "/api/activate-window", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", rec.Code)
 	}
+	if got := rec.Header().Get(activationNoTargetReasonHeader); got != string(ReasonHeadless) {
+		t.Errorf("reason header = %q, want %q", got, ReasonHeadless)
+	}
 }
 
 // TestActivateWindow_OtherErrorReturns500 confirms unexpected callback
 // errors map to 500 (not 503 — that's reserved for the documented
-// "headless" sentinel).
+// typed no-activation-target outcome).
 func TestActivateWindow_OtherErrorReturns500(t *testing.T) {
 	s := NewServer(Config{})
 	s.OnActivateWindow(func() error { return errPingTestSentinel })

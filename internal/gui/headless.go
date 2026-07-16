@@ -3,19 +3,52 @@ package gui
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"runtime"
 )
 
 // ErrActivationNoTarget is returned by an OnActivateWindow callback when
 // the request to bring the dashboard to front is impossible in this
-// session — currently only the headless-Linux case (no $DISPLAY /
-// $WAYLAND_DISPLAY, no browser to launch). The /api/activate-window
-// handler maps this to 503 Service Unavailable so the client of
-// TryActivateIncumbent can distinguish "incumbent reached and
-// activated" from "incumbent reached but cannot activate". Codex bot
-// review on PR #26 P2.
-var ErrActivationNoTarget = errors.New("no activation target (headless session — no display server, no browser to launch)")
+// session because there is no dashboard window to focus and launching
+// one is unavailable or disabled. The /api/activate-window handler maps
+// this to 503 Service Unavailable so the client of TryActivateIncumbent
+// can distinguish "incumbent reached and activated" from "incumbent
+// reached but cannot activate". Codex bot review on PR #26 P2.
+var ErrActivationNoTarget = errors.New("no activation target (no dashboard window to focus)")
+
+// ActivationNoTargetReason identifies why an incumbent cannot activate a
+// dashboard window. It crosses the /api/activate-window 503 response so CLI
+// callers can give the operator reason-specific recovery guidance.
+type ActivationNoTargetReason string
+
+const (
+	ReasonHeadless        ActivationNoTargetReason = "headless"
+	ReasonNoBrowserWindow ActivationNoTargetReason = "no-browser-window"
+)
+
+// ActivationNoTargetError carries the reason an OnActivateWindow callback
+// could not focus or launch a dashboard. Its Is method preserves sentinel
+// matching through errors.Is(err, ErrActivationNoTarget).
+type ActivationNoTargetError struct {
+	Reason ActivationNoTargetReason
+}
+
+func (e *ActivationNoTargetError) Error() string {
+	return fmt.Sprintf("%s: %s", ErrActivationNoTarget.Error(), activationNoTargetReason(e))
+}
+
+func (e *ActivationNoTargetError) Is(target error) bool {
+	return target == ErrActivationNoTarget
+}
+
+func activationNoTargetReason(err error) ActivationNoTargetReason {
+	var noTarget *ActivationNoTargetError
+	if errors.As(err, &noTarget) && noTarget.Reason == ReasonHeadless {
+		return ReasonHeadless
+	}
+	return ReasonNoBrowserWindow
+}
 
 // HeadlessSession reports whether the current process is running in a
 // session without an attached display server. Used by the GUI command

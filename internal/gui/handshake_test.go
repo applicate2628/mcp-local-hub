@@ -19,9 +19,9 @@ import (
 // the F4 headless path: incumbent reachable on /api/ping, but its
 // OnActivateWindow callback returned ErrActivationNoTarget, so the
 // handler responds 503. TryActivateIncumbent must wrap that into the
-// typed sentinel so cli/gui.go can print SSH-tunnel guidance instead
-// of falsely claiming "activated existing mcphub gui". Sonnet review
-// on PR #26 I2 (handshake_test.go missing 503 coverage).
+// typed error with a reason so cli/gui.go can choose SSH-tunnel or local
+// browser guidance instead of falsely claiming activation. Sonnet review on
+// PR #26 I2 (handshake_test.go missing 503 coverage).
 func TestHandshake_503ActivateReturnsErrIncumbentNoActivationTarget(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
@@ -29,6 +29,7 @@ func TestHandshake_503ActivateReturnsErrIncumbentNoActivationTarget(t *testing.T
 		_, _ = w.Write([]byte(`{"ok":true,"pid":111,"version":"t"}`))
 	})
 	mux.HandleFunc("/api/activate-window", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(activationNoTargetReasonHeader, string(ReasonHeadless))
 		http.Error(w, "headless session", http.StatusServiceUnavailable)
 	})
 	ts := httptest.NewServer(mux)
@@ -47,6 +48,78 @@ func TestHandshake_503ActivateReturnsErrIncumbentNoActivationTarget(t *testing.T
 	}
 	if !errors.Is(err, ErrIncumbentNoActivationTarget) {
 		t.Errorf("expected ErrIncumbentNoActivationTarget, got: %v", err)
+	}
+	var noTarget *IncumbentNoActivationTargetError
+	if !errors.As(err, &noTarget) {
+		t.Fatalf("error type = %T, want *IncumbentNoActivationTargetError", err)
+	}
+	if noTarget.Port != port || noTarget.Reason != ReasonHeadless {
+		t.Errorf("typed error = %+v, want port=%d reason=%q", noTarget, port, ReasonHeadless)
+	}
+}
+
+// A pre-header incumbent returned 503/no-target from exactly ONE branch — its
+// headless-session check — so a MISSING reason header means headless, and the
+// operator must still get the SSH-tunnel guidance. (Defaulting it the other way
+// would point a remote operator at 127.0.0.1 on their OWN machine.)
+func TestHandshake_503WithoutReasonMeansHeadless(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"pid":111,"version":"t"}`))
+	})
+	mux.HandleFunc("/api/activate-window", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "older incumbent without reason", http.StatusServiceUnavailable)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	port := parseTestServerPort(t, ts.URL)
+	dir := apitest.HardenedTempDir(t)
+	pidport := filepath.Join(dir, "gui.pidport")
+	if err := os.WriteFile(pidport, []byte(formatPidport(111, port)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := TryActivateIncumbent(pidport, 2*time.Second)
+	var noTarget *IncumbentNoActivationTargetError
+	if !errors.As(err, &noTarget) {
+		t.Fatalf("error = %v, want *IncumbentNoActivationTargetError", err)
+	}
+	if noTarget.Reason != ReasonHeadless {
+		t.Errorf("reason = %q, want %q for a legacy header-less 503", noTarget.Reason, ReasonHeadless)
+	}
+}
+
+// A NEWER incumbent may report a reason this build does not model yet. Fall back
+// to the generic no-window wording rather than inventing a headless story.
+func TestHandshake_503UnknownReasonFallsBackToNoBrowserWindow(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"pid":111,"version":"t"}`))
+	})
+	mux.HandleFunc("/api/activate-window", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(activationNoTargetReasonHeader, "some-future-reason")
+		http.Error(w, "newer incumbent, unmodelled reason", http.StatusServiceUnavailable)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	port := parseTestServerPort(t, ts.URL)
+	dir := apitest.HardenedTempDir(t)
+	pidport := filepath.Join(dir, "gui.pidport")
+	if err := os.WriteFile(pidport, []byte(formatPidport(111, port)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := TryActivateIncumbent(pidport, 2*time.Second)
+	var noTarget *IncumbentNoActivationTargetError
+	if !errors.As(err, &noTarget) {
+		t.Fatalf("error = %v, want *IncumbentNoActivationTargetError", err)
+	}
+	if noTarget.Reason != ReasonNoBrowserWindow {
+		t.Errorf("reason = %q, want %q for an unknown reason", noTarget.Reason, ReasonNoBrowserWindow)
 	}
 }
 

@@ -17,6 +17,13 @@ func (s *Server) httpHandler() http.Handler {
 	return s.requireAllowedHost(s.mux)
 }
 
+// ServeHTTP routes requests through the same host and origin checks used by
+// Start. Besides satisfying http.Handler for embedding, this permits hermetic
+// in-process integration tests without binding a listener.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.httpHandler().ServeHTTP(w, r)
+}
+
 func (s *Server) requireAllowedHost(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.allowedHost(r.Host) {

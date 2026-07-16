@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +15,50 @@ import (
 
 	"mcp-local-hub/internal/gui"
 )
+
+// TestActivateWindowNoBrowserHandlerWiring exercises the production Server
+// handler and CLI activation callback entirely in-process. It deliberately
+// has no MCPHUB_GUI_SPAWN_TESTS gate: no command, browser, or GUI process is
+// started.
+func TestActivateWindowNoBrowserHandlerWiring(t *testing.T) {
+	const port = 19123
+	var log bytes.Buffer
+	focusCalls := 0
+	launchCalls := 0
+
+	s := gui.NewServer(gui.Config{Port: port, PID: 4242})
+	wireDashboardActivation(
+		s,
+		true,
+		&log,
+		func(string) error {
+			focusCalls++
+			return gui.ErrFocusNoWindow
+		},
+		func(string) error {
+			launchCalls++
+			return nil
+		},
+		func() bool { return false },
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:19123/api/activate-window", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if got := rec.Header().Get("X-Mcphub-Activation-No-Target-Reason"); got != string(gui.ReasonNoBrowserWindow) {
+		t.Errorf("reason header = %q, want %q", got, gui.ReasonNoBrowserWindow)
+	}
+	if focusCalls != 1 {
+		t.Errorf("focus calls = %d, want 1", focusCalls)
+	}
+	if launchCalls != 0 {
+		t.Errorf("browser launch calls = %d, want 0", launchCalls)
+	}
+}
 
 // repoRoot locates the module root by walking up from the test's CWD
 // until it finds go.mod. Needed because `go run ./cmd/mcphub` resolves
@@ -39,6 +86,7 @@ func repoRoot(t *testing.T) string {
 // and asserts the second exits 0 without binding a new port (the first
 // keeps running).
 func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
+	requireGuiSpawnTests(t)
 	if testing.Short() {
 		t.Skip("subprocess test")
 	}
@@ -50,12 +98,12 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	// $WAYLAND_DISPLAY — the standard ubuntu-latest CI shape) the
 	// incumbent's OnActivateWindow callback returns ErrActivationNoTarget,
 	// the handler maps to 503, and the second instance prints the
-	// SSH-tunnel guidance instead of "activated existing mcphub gui".
+	// no-window guidance instead of "activated existing mcphub gui".
 	// The "activated" assertion below would spuriously fail on that
 	// path, even though the headless contract is working as designed.
 	// Sonnet review on PR #26 P1 (gui_integration_test.go:107).
 	if runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
-		t.Skip("headless Linux: second instance prints SSH-tunnel guidance, not 'activated' (PR #26 F4 contract)")
+		t.Skip("headless Linux: second instance prints no-window guidance, not 'activated' (PR #26 F4 contract)")
 	}
 	// Use a standalone temp dir we control manually: go-exec's child
 	// process (the built mcphub.exe) can outlive Cmd.Wait on Windows
@@ -181,13 +229,13 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	// (--no-browser refuses LaunchBrowser fallback in the callback)
 	// makes the activate-window handler return 503 → handshake
 	// returns ErrIncumbentNoActivationTarget → second instance prints
-	// the headless-style guidance instead of "activated". Either
+	// the no-window guidance instead of "activated". Either
 	// output proves the handshake reached the incumbent.
 	out2 := string(out)
 	ok := strings.Contains(out2, "activated") ||
-		strings.Contains(out2, "already running headless")
+		strings.Contains(out2, "no dashboard window to focus")
 	if !ok {
-		t.Errorf("second instance output should confirm handshake (activated OR headless guidance); got: %s", out2)
+		t.Errorf("second instance output should confirm handshake (activated OR no-window guidance); got: %s", out2)
 	}
 
 	// ISOLATION PROOF (PR #300 r1 P1 + r2 P2): assert the child's

@@ -338,25 +338,16 @@ activates the first window and exits 0.`,
 					exitCode := runForceDiagnostic(ctx, cmd, pidportPath, reveal)
 					return forceExit(exitCode)
 				}
-				if err := gui.TryActivateIncumbent(pidportPath, 2*time.Second); err != nil {
-					var ina *gui.IncumbentNoActivationTargetError
-					if errors.As(err, &ina) {
-						// Incumbent reachable but headless — print
-						// SSH-tunnel guidance using the port the
-						// handshake already verified via /api/ping.
-						// We do NOT re-read the pidport: that races a
-						// successor's pre-bind port=0 write and turns
-						// usable guidance into a spurious error.
-						// Codex CLI xhigh review on PR #26 P3.
-						fmt.Fprintf(cmd.OutOrStdout(),
-							"mcphub gui is already running headless on port %d. SSH-tunnel and visit http://127.0.0.1:%d/\n",
-							ina.Port, ina.Port)
-						return nil
-					}
+				activationErr := gui.TryActivateIncumbent(pidportPath, 2*time.Second)
+				noTarget, activationErr := handleIncumbentActivationResult(cmd.OutOrStdout(), activationErr)
+				if activationErr != nil {
 					return fmt.Errorf(
 						"another mcphub gui is running but unreachable (%v); "+
 							"rerun with --force for diagnostic, or --force --kill to recover",
-						err)
+						activationErr)
+				}
+				if noTarget {
+					return nil
 				}
 				fmt.Fprintln(cmd.OutOrStdout(), "activated existing mcphub gui")
 				return nil
@@ -378,6 +369,123 @@ activates the first window and exits 0.`,
 	_ = c.Flags().MarkHidden("yes")
 	_ = c.Flags().MarkHidden("reveal")
 	return c
+}
+
+// handleIncumbentActivationResult is the single owner for the typed
+// reachable-but-no-target outcome. It reports reason-specific guidance and
+// marks that outcome handled; all other errors remain errors for the caller.
+func handleIncumbentActivationResult(stdout io.Writer, err error) (noTarget bool, otherErr error) {
+	if err == nil {
+		return false, nil
+	}
+	var ina *gui.IncumbentNoActivationTargetError
+	if !errors.As(err, &ina) {
+		return false, err
+	}
+	if ina.Reason == gui.ReasonHeadless {
+		fmt.Fprintf(stdout,
+			"mcphub gui is already running headless on port %d. SSH-tunnel and visit http://127.0.0.1:%d/\n",
+			ina.Port, ina.Port)
+		return true, nil
+	}
+	fmt.Fprintf(stdout,
+		"mcphub gui is already running but has no dashboard window to focus. Open http://127.0.0.1:%d/ in a browser.\n",
+		ina.Port)
+	return true, nil
+}
+
+func wireDashboardActivation(
+	s *gui.Server,
+	noBrowser bool,
+	stderr io.Writer,
+	focusWindow func(string) error,
+	launchBrowser func(string) error,
+	headlessSession func() bool,
+) {
+	s.OnActivateWindow(func() error {
+		return activateDashboardWindow(
+			noBrowser,
+			s.Port(),
+			stderr,
+			focusWindow,
+			launchBrowser,
+			headlessSession,
+		)
+	})
+}
+
+func activateDashboardWindow(
+	noBrowser bool,
+	port int,
+	stderr io.Writer,
+	focusWindow func(string) error,
+	launchBrowser func(string) error,
+	headlessSession func() bool,
+) error {
+	err := focusWindow("Local Dashboard")
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gui.ErrFocusNoWindow) {
+		// Win32 transient failure — log + best-effort 204 so the
+		// second invocation prints "activated" (incumbent IS
+		// reachable, just focus jitter happened).
+		fmt.Fprintf(stderr,
+			"activate-window: focus failed (no fallback for non-no-window error): %v\n", err)
+		return nil
+	}
+	if headlessSession() {
+		fmt.Fprintln(stderr,
+			"activate-window: focus failed and headless session — no browser to open")
+		return &gui.ActivationNoTargetError{Reason: gui.ReasonHeadless}
+	}
+	if noBrowser {
+		fmt.Fprintln(stderr,
+			"activate-window: focus failed and --no-browser is set — not launching a browser")
+		return &gui.ActivationNoTargetError{Reason: gui.ReasonNoBrowserWindow}
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+	if launchErr := launchBrowser(url); launchErr != nil {
+		fmt.Fprintf(stderr,
+			"activate-window: focus failed (%v); browser launch also failed: %v\n",
+			err, launchErr)
+	}
+	return nil
+}
+
+func activateDashboardFromTray(
+	pidportPath string,
+	port int,
+	stderr io.Writer,
+	tryActivate func(string, time.Duration) error,
+	launchBrowser func(string) error,
+) {
+	err := tryActivate(pidportPath, 500*time.Millisecond)
+	if err == nil {
+		return
+	}
+	var noTarget *gui.IncumbentNoActivationTargetError
+	if !errors.As(err, &noTarget) {
+		fmt.Fprintf(stderr, "tray: activate-window failed: %v\n", err)
+		return
+	}
+	// Build the URL from the port the handshake ALREADY VERIFIED via /api/ping,
+	// not from `port`: that is the REQUESTED port, which is 0 under the default
+	// `--port 0` (the server bound an ephemeral one), so a tray click would open
+	// http://127.0.0.1:0/. The typed error carries the verified port precisely so
+	// callers need not re-read the pidport, which races a successor's pre-bind
+	// port=0 write. Fall back to the requested port only if the error somehow
+	// carries none (an explicit `--port N` run).
+	activePort := noTarget.Port
+	if activePort == 0 {
+		activePort = port
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/", activePort)
+	fmt.Fprintf(stderr,
+		"tray: incumbent has no dashboard window to focus; opening %s\n", url)
+	if err := launchBrowser(url); err != nil {
+		fmt.Fprintf(stderr, "tray: browser launch failed: %v\n", err)
+	}
 }
 
 // startGuiServer runs Phase B: server start, status poller, optional
@@ -518,55 +626,14 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 		fmt.Fprintf(cmd.OutOrStderr(),
 			"serena-router: registry path resolution failed; /serena/mcp will return 503 until next restart: %v\n", regErr)
 	}
-	s.OnActivateWindow(func() error {
-		// Phase 3B-II C2: focus the existing Chrome app-mode dashboard
-		// via Win32 SetForegroundWindow. Title-substring "Local
-		// Dashboard" disambiguates from other "mcp-local-hub" windows
-		// (Cursor IDE, terminals, file explorer).
-		err := gui.FocusBrowserWindow("Local Dashboard")
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, gui.ErrFocusNoWindow) {
-			// Win32 transient failure — log + best-effort 204 so the
-			// second invocation prints "activated" (incumbent IS
-			// reachable, just focus jitter happened).
-			fmt.Fprintf(cmd.OutOrStderr(),
-				"activate-window: focus failed (no fallback for non-no-window error): %v\n", err)
-			return nil
-		}
-		// Pre-2026-05-20 there was a `if noBrowser { return
-		// ErrActivationNoTarget }` guard here, originally added to
-		// stop an orphan `mcphub gui --no-browser` from spawning an
-		// uninvited Chrome window when a local actor POSTed
-		// /api/activate-window. But that conflated two intents: the
-		// `--no-browser` startup flag suppresses the AUTO-launch at
-		// GUI boot (line ~470 below), while /api/activate-window is
-		// only reachable via the CSRF + same-origin gate — i.e. only
-		// from a browser tab on the mcphub origin OR from a
-		// process the operator already trusts (the tray child it
-		// spawned). Honoring tray clicks even under `--no-browser`
-		// matches the user's expectation: clicking "Open dashboard"
-		// in the tray IS the explicit consent the original guard
-		// was protecting against. The CSRF middleware remains the
-		// authoritative defense against unauthorized callers.
-		// Headless Linux: no display server, browser launch would
-		// xdg-open-fail noisily. Surface ErrActivationNoTarget so
-		// the second instance prints SSH-tunnel guidance (PR #26 F4).
-		if gui.HeadlessSession() {
-			fmt.Fprintln(cmd.OutOrStderr(),
-				"activate-window: focus failed and headless session — no browser to open")
-			return gui.ErrActivationNoTarget
-		}
-		url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
-		if launchErr := gui.LaunchBrowser(url); launchErr != nil {
-			fmt.Fprintf(cmd.OutOrStderr(),
-				"activate-window: focus failed (%v); browser launch also failed: %v\n",
-				err, launchErr)
-			return nil
-		}
-		return nil
-	})
+	wireDashboardActivation(
+		s,
+		noBrowser,
+		cmd.OutOrStderr(),
+		gui.FocusBrowserWindow,
+		gui.LaunchBrowser,
+		gui.HeadlessSession,
+	)
 
 	ready := make(chan struct{})
 	errCh := make(chan error, 1)
@@ -782,7 +849,13 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 
 			if err := tray.Run(ctx, tray.Config{
 				ActivateWindow: func() {
-					_ = gui.TryActivateIncumbent(pidportPath, 500*time.Millisecond)
+					activateDashboardFromTray(
+						pidportPath,
+						port,
+						cmd.OutOrStderr(),
+						gui.TryActivateIncumbent,
+						gui.LaunchBrowser,
+					)
 				},
 				StateCh:          trayStateCh,
 				StateReadRelaxCh: stateRelaxCh,
@@ -1023,11 +1096,17 @@ func runForceDiagnostic(ctx context.Context, cmd *cobra.Command, pidportPath str
 	if v.Class == gui.VerdictHealthy {
 		// Healthy → fall through to TryActivateIncumbent (legacy
 		// handshake). Returning 0 signals the caller to handshake.
-		if err := gui.TryActivateIncumbent(pidportPath, 2*time.Second); err != nil {
+		noTarget, err := handleIncumbentActivationResult(
+			cmd.OutOrStdout(),
+			gui.TryActivateIncumbent(pidportPath, 2*time.Second),
+		)
+		if err != nil {
 			fmt.Fprintf(cmd.OutOrStderr(), "incumbent reported healthy but activate-window failed: %v\n", err)
 			return 1
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), "activated existing mcphub gui")
+		if !noTarget {
+			fmt.Fprintln(cmd.OutOrStdout(), "activated existing mcphub gui")
+		}
 		return 0
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), formatDiagnostic(v, pidportPath))
@@ -1059,7 +1138,11 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 	// Gate 1: Healthy early-exit (Codex r5 #7b): never kill a healthy gui.
 	if v.Class == gui.VerdictHealthy {
 		fmt.Fprintf(cmd.OutOrStdout(), "incumbent is healthy (PID %d); activating instead of killing\n", v.PID)
-		if err := gui.TryActivateIncumbent(pidportPath, 2*time.Second); err != nil {
+		_, err := handleIncumbentActivationResult(
+			cmd.OutOrStdout(),
+			gui.TryActivateIncumbent(pidportPath, 2*time.Second),
+		)
+		if err != nil {
 			fmt.Fprintf(cmd.OutOrStderr(), "activate-window failed: %v\n", err)
 			return nil, 1
 		}
@@ -1227,7 +1310,11 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 		// the stderr-diagnose preamble below so the success path
 		// stays on stdout.
 		fmt.Fprintf(cmd.OutOrStdout(), "incumbent recovered to healthy (PID %d); activating instead of killing\n", killVerdict.PID)
-		if err := gui.TryActivateIncumbent(pidportPath, 2*time.Second); err != nil {
+		_, err := handleIncumbentActivationResult(
+			cmd.OutOrStdout(),
+			gui.TryActivateIncumbent(pidportPath, 2*time.Second),
+		)
+		if err != nil {
 			fmt.Fprintf(cmd.OutOrStderr(), "activate-window failed: %v\n", err)
 			return nil, 1
 		}

@@ -9,29 +9,39 @@ import (
 )
 
 // ErrIncumbentNoActivationTarget signals that the incumbent GUI process
-// was reachable but reported it cannot bring a window to front (currently
-// the headless-Linux case — see ErrActivationNoTarget). Callers of
-// TryActivateIncumbent (cli/gui.go) use errors.Is to distinguish this
-// non-fatal "incumbent alive but headless" outcome from "incumbent
-// unreachable" and print useful guidance to the operator. Codex bot
-// review on PR #26 P2.
-var ErrIncumbentNoActivationTarget = errors.New("incumbent reachable but cannot activate window (headless session)")
+// was reachable but reported it cannot bring a dashboard window to front.
+// Callers of TryActivateIncumbent (cli/gui.go) use errors.Is to distinguish
+// this non-fatal "incumbent alive but no activation target" outcome from
+// "incumbent unreachable" and print useful guidance to the operator.
+// Codex bot review on PR #26 P2.
+var ErrIncumbentNoActivationTarget = errors.New("incumbent reachable but has no dashboard window to focus")
 
 // IncumbentNoActivationTargetError is the typed error returned when the
 // 503 path fires. It carries the port `TryActivateIncumbent` already
-// verified via /api/ping, so callers can use it directly for SSH-tunnel
-// guidance instead of re-reading the pidport (which races a successor's
-// pre-bind port=0 write). Implements Is so
+// verified via /api/ping plus the incumbent's refusal reason, so callers can
+// choose correct guidance without re-reading the pidport (which races a
+// successor's pre-bind port=0 write). Implements Is so
 // `errors.Is(err, ErrIncumbentNoActivationTarget)` keeps working.
 // Codex CLI xhigh review on PR #26 P3.
 type IncumbentNoActivationTargetError struct {
 	// Port is the port the incumbent was successfully ping'd on before
 	// the activate-window POST returned 503.
 	Port int
+	// Reason distinguishes a genuinely headless incumbent from a local
+	// --no-browser instance with no window. Classification (see the
+	// switch in TryActivateIncumbent, which is authoritative): an OMITTED
+	// wire header means ReasonHeadless, because an incumbent predating the
+	// header returned 503/no-target from exactly ONE branch — its
+	// headless-session check. A PRESENT but unrecognized value means
+	// ReasonNoBrowserWindow (a newer incumbent whose reasons this build
+	// does not model — prefer the generic no-window wording over inventing
+	// a headless story). Pinned by TestHandshake_503WithoutReasonMeansHeadless
+	// and TestHandshake_503UnknownReasonFallsBackToNoBrowserWindow.
+	Reason ActivationNoTargetReason
 }
 
 func (e *IncumbentNoActivationTargetError) Error() string {
-	return fmt.Sprintf("activate-window on port %d: %s", e.Port, ErrIncumbentNoActivationTarget.Error())
+	return fmt.Sprintf("activate-window on port %d: %s: %s", e.Port, ErrIncumbentNoActivationTarget.Error(), e.Reason)
 }
 
 func (e *IncumbentNoActivationTargetError) Is(target error) bool {
@@ -42,9 +52,9 @@ func (e *IncumbentNoActivationTargetError) Is(target error) bool {
 // AcquireSingleInstance returned ErrSingleInstanceBusy. It reads the
 // pidport file to locate the running instance, probes /api/ping with a
 // short total deadline, and if that succeeds posts /api/activate-window.
-// Returns nil if the incumbent was reached and signaled; any non-nil
-// error means the second instance should either escalate (--force) or
-// abort with a human-readable message.
+// Returns nil if the incumbent was reached and signaled, a typed
+// IncumbentNoActivationTargetError if it was reached but could not activate,
+// or another error when the second instance should escalate or abort.
 func TryActivateIncumbent(pidportPath string, totalTimeout time.Duration) error {
 	deadline := time.Now().Add(totalTimeout)
 	client := &http.Client{Timeout: 500 * time.Millisecond}
@@ -120,20 +130,38 @@ func TryActivateIncumbent(pidportPath string, totalTimeout time.Duration) error 
 		if err != nil {
 			return fmt.Errorf("activate-window: %w", err)
 		}
+		// Reason classification, including version skew. An incumbent that
+		// predates this header only ever returned 503/no-target from ONE
+		// branch — the headless-session check — so a MISSING header
+		// unambiguously means headless, and defaulting it to
+		// no-browser-window would strip the SSH-tunnel guidance a remote
+		// operator needs (the local-URL wording points them at their own
+		// machine). An UNKNOWN (present but unrecognized) value comes from a
+		// NEWER incumbent whose reasons we do not model yet: fall back to the
+		// generic no-window wording rather than inventing a headless story.
+		reason := ReasonHeadless
+		switch v := resp2.Header.Get(activationNoTargetReasonHeader); v {
+		case "":
+			reason = ReasonHeadless // legacy incumbent: headless was the only 503 source
+		case string(ReasonHeadless):
+			reason = ReasonHeadless
+		default:
+			reason = ReasonNoBrowserWindow
+		}
 		resp2.Body.Close()
 		switch resp2.StatusCode {
 		case http.StatusNoContent:
 			return nil
 		case http.StatusServiceUnavailable:
 			// Incumbent reachable but cannot focus / launch a window
-			// (headless). Return a typed error carrying the verified
-			// port so the cli caller can print SSH-tunnel guidance
+			// (no activation target). Return a typed error carrying the
+			// verified port so the cli caller can print no-window guidance
 			// without re-reading the pidport (which races a
 			// successor's pre-bind port=0 write). errors.Is against
 			// ErrIncumbentNoActivationTarget keeps working via the
 			// Is method on the typed error. Codex CLI xhigh review
 			// on PR #26 P3.
-			return &IncumbentNoActivationTargetError{Port: port}
+			return &IncumbentNoActivationTargetError{Port: port, Reason: reason}
 		default:
 			return fmt.Errorf("activate-window status %d", resp2.StatusCode)
 		}
