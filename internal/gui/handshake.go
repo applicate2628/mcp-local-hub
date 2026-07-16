@@ -28,8 +28,15 @@ type IncumbentNoActivationTargetError struct {
 	// the activate-window POST returned 503.
 	Port int
 	// Reason distinguishes a genuinely headless incumbent from a local
-	// --no-browser instance with no window. Older incumbents omit the
-	// wire header, which defaults to ReasonNoBrowserWindow.
+	// --no-browser instance with no window. Classification (see the
+	// switch in TryActivateIncumbent, which is authoritative): an OMITTED
+	// wire header means ReasonHeadless, because an incumbent predating the
+	// header returned 503/no-target from exactly ONE branch — its
+	// headless-session check. A PRESENT but unrecognized value means
+	// ReasonNoBrowserWindow (a newer incumbent whose reasons this build
+	// does not model — prefer the generic no-window wording over inventing
+	// a headless story). Pinned by TestHandshake_503WithoutReasonMeansHeadless
+	// and TestHandshake_503UnknownReasonFallsBackToNoBrowserWindow.
 	Reason ActivationNoTargetReason
 }
 
