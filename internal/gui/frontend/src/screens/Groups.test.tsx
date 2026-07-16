@@ -10,8 +10,43 @@
 //   - the restart_required banner;
 //   - delete via the ConfirmModal.
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, cleanup, fireEvent, screen } from "@testing-library/preact";
+import { render, waitFor, cleanup, fireEvent, screen, act } from "@testing-library/preact";
 import { GroupsScreen } from "./Groups";
+
+type StubListener = (ev: MessageEvent) => void;
+const stubInstances = new Set<StubEventSource>();
+class StubEventSource {
+  url: string;
+  listeners = new Map<string, Set<StubListener>>();
+  onopen: ((ev: Event) => void) | null = null;
+  onerror: ((ev: Event) => void) | null = null;
+  constructor(url: string) {
+    this.url = url;
+    stubInstances.add(this);
+  }
+  addEventListener(name: string, handler: StubListener): void {
+    let bucket = this.listeners.get(name);
+    if (!bucket) {
+      bucket = new Set();
+      this.listeners.set(name, bucket);
+    }
+    bucket.add(handler);
+  }
+  removeEventListener(name: string, handler: StubListener): void {
+    this.listeners.get(name)?.delete(handler);
+  }
+  close(): void {
+    stubInstances.delete(this);
+  }
+}
+(globalThis as unknown as { EventSource: typeof StubEventSource }).EventSource = StubEventSource;
+
+function dispatchSse(eventName: string, data: unknown): void {
+  const ev = new MessageEvent(eventName, { data: JSON.stringify(data) });
+  for (const inst of stubInstances) {
+    inst.listeners.get(eventName)?.forEach((handler) => handler(ev));
+  }
+}
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -48,6 +83,7 @@ function listBody(groups: unknown[], available: string[] = AVAILABLE) {
 describe("GroupsScreen", () => {
   beforeEach(() => {
     cleanup();
+    stubInstances.clear();
     vi.restoreAllMocks();
     window.location.hash = "#/groups";
   });
@@ -91,6 +127,44 @@ describe("GroupsScreen", () => {
     });
     expect(screen.getByTestId("groups-row-servers-frontend").textContent).toContain("serena, time");
     expect(screen.getByTestId("groups-row-infra").textContent).toContain("infra");
+  });
+
+  it("refetches on hub-health SSE and hides a now-unavailable group URL", async () => {
+    let getCount = 0;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": () => {
+          getCount += 1;
+          const connection = getCount === 1
+            ? {
+                available: true,
+                url: "http://127.0.0.1:9201/g/frontend/mcp",
+                token: "group-token",
+                instance_id: "instance-1",
+              }
+            : { available: false, hint: "The aggregated hub is down." };
+          return jsonResponse(
+            200,
+            listBody([{ name: "frontend", servers: ["serena"], connection }]),
+          );
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    expect((await screen.findByTestId("groups-conn-url-frontend")).textContent).toContain(
+      "/g/frontend/mcp",
+    );
+    expect(getCount).toBe(1);
+
+    act(() => {
+      dispatchSse("hub-health", { state: "down", degraded: true });
+    });
+
+    await waitFor(() => expect(getCount).toBe(2));
+    expect(screen.queryByTestId("groups-conn-url-frontend")).toBeNull();
+    expect(await screen.findByTestId("groups-connection-hint-frontend")).toBeTruthy();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
   it("renders an error banner with Retry when GET /api/groups fails", async () => {

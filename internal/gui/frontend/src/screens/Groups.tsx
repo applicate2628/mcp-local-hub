@@ -23,7 +23,7 @@
 // The pure draft/dirty/validation logic lives in lib/groups-draft.ts (unit-
 // tested there); this file is the rendering + network glue.
 
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
 import {
   getGroups,
   saveGroup,
@@ -34,6 +34,7 @@ import {
 } from "../api";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { LoadingState } from "../components/LoadingState";
+import { useEventSource } from "../hooks/useEventSource";
 import {
   type GroupDraft,
   type GroupErrorField,
@@ -89,7 +90,7 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  async function load(): Promise<void> {
+  const load = useCallback(async (): Promise<void> => {
     setState({ kind: "loading" });
     try {
       const r = await getGroups();
@@ -97,11 +98,16 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
     } catch (e) {
       setState({ kind: "error", error: asError(e) });
     }
-  }
+  }, []);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
+
+  const onHubHealth = useCallback((_ev: MessageEvent) => {
+    void load();
+  }, [load]);
+  useEventSource("/api/events", { "hub-health": onHubHealth });
 
   // The persisted row for the group currently being edited (null for a new
   // group). Drives isDirty and the editor's initial hydration.

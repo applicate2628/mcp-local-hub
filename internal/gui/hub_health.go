@@ -80,6 +80,30 @@ func (h *hubHealthTracker) set(state HubHealthState, action string) {
 	}
 }
 
+// markHealthy sets healthy UNLESS the state is sticky needs-reconcile (which
+// only a real reconcile signal — not yet implemented — or a process restart
+// clears).
+func (h *hubHealthTracker) markHealthy() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.state == HubHealthNeedsReconcile {
+		return
+	}
+	changed := h.state != HubHealthHealthy || h.action != ""
+	h.state = HubHealthHealthy
+	h.action = ""
+	if changed && h.pub != nil {
+		h.pub(Event{Type: "hub-health", Body: map[string]any{
+			"state":           string(HubHealthHealthy),
+			"operator_action": "",
+			"degraded":        hubHealthDegraded(HubHealthHealthy),
+		}})
+	}
+}
+
 // snapshot returns the current state + action (for the GET initial-load route).
 func (h *hubHealthTracker) snapshot() (HubHealthState, string) {
 	if h == nil {
@@ -90,8 +114,9 @@ func (h *hubHealthTracker) snapshot() (HubHealthState, string) {
 	return h.state, h.action
 }
 
-// onHubListenerRecovered is the watcher recovery hook → healthy.
-func (s *Server) onHubListenerRecovered() { s.hubHealth.set(HubHealthHealthy, "") }
+// onHubListenerRecovered is the watcher recovery hook → healthy unless a
+// reconcile is still required.
+func (s *Server) onHubListenerRecovered() { s.hubHealth.markHealthy() }
 
 // hubHealthDTO is the GET /api/hub/health body (initial load; SSE `hub-health`
 // events push subsequent transitions).
@@ -127,7 +152,7 @@ func (s *Server) hubHealthEmitWrapper(base func(level, event string, fields map[
 	return func(level, event string, fields map[string]any) error {
 		switch event {
 		case "hub-listener-restarted":
-			s.hubHealth.set(HubHealthHealthy, "")
+			s.hubHealth.markHealthy()
 		case "hub-listener-restart-failed":
 			s.hubHealth.set(HubHealthRecovering, "")
 		case "hub-listener-restart-exhausted":

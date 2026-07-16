@@ -1253,6 +1253,46 @@ describe("DashboardScreen — hub-health banner (Phase-0 item 1)", () => {
     expect(banner.getAttribute("data-hub-state")).toBe("recovering");
   });
 
+  it("applies an earlier successful mount GET when a later open GET fails", async () => {
+    let resolveMountHealth!: (response: Response) => void;
+    const mountHealth = new Promise<Response>((resolve) => {
+      resolveMountHealth = resolve;
+    });
+    let healthCalls = 0;
+    let resolveOpenHealthRequested!: () => void;
+    const openHealthRequested = new Promise<void>((resolve) => {
+      resolveOpenHealthRequested = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/hub/health") {
+        healthCalls += 1;
+        if (healthCalls === 1) return mountHealth;
+        if (healthCalls === 2) {
+          resolveOpenHealthRequested();
+          return Promise.reject(new Error("open resync failed"));
+        }
+        return Promise.reject(new Error("unexpected extra hub-health fetch"));
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const { findAllByRole, findByTestId } = render(<DashboardScreen />);
+    await findAllByRole("button");
+    await waitFor(() => expect(healthCalls).toBe(1));
+
+    act(() => {
+      activeStubEventSource().triggerOpen();
+    });
+    await openHealthRequested;
+    expect(healthCalls).toBe(2);
+
+    resolveMountHealth(jsonResponse(200, { state: "down", degraded: true }));
+    const banner = await findByTestId("dashboard-hub-health");
+    expect(banner.getAttribute("data-hub-state")).toBe("down");
+  });
+
   it("shows restart guidance for a down hub-health SSE event", async () => {
     mockDashboardFetch();
     const { findAllByRole, findByTestId } = render(<DashboardScreen />);

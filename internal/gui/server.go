@@ -1050,9 +1050,15 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 			// already structured-logged via LogHubMcpEvent inside
 			// startHubMcpListener.
 			log.Printf("hub-mcp listener startup failed (gate-OFF for this process): %v", hubErr)
+			if hubEnabled {
+				s.hubHealth.set(HubHealthDown, "")
+			}
 			return
 		}
 		if hubComp == nil {
+			if hubEnabled {
+				s.hubHealth.set(HubHealthDown, "")
+			}
 			return
 		}
 		// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):

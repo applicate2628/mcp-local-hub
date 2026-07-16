@@ -79,9 +79,9 @@ export function DashboardScreen() {
   // live by the `hub-health` SSE event so a hung/dead/needs-reconcile hub is
   // visible instead of every daemon card silently painting green.
   const [hubHealth, setHubHealth] = useState<HubHealth | null>(null);
-  const hubHealthSseSeenRef = useRef(false);
   const hubHealthSseSeqRef = useRef(0);
   const hubHealthFetchSeqRef = useRef(0);
+  const hubHealthAppliedSeqRef = useRef(0);
   const bulkResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -273,7 +273,6 @@ export function DashboardScreen() {
 
   const onHubHealth = useCallback((ev: MessageEvent) => {
     const body = JSON.parse(ev.data) as HubHealth;
-    hubHealthSseSeenRef.current = true;
     hubHealthSseSeqRef.current += 1;
     setHubHealth(body);
   }, []);
@@ -296,17 +295,17 @@ export function DashboardScreen() {
   // failed probe just leaves the badge hidden.
   useEffect(() => {
     let cancelled = false;
-    const fetchSeq = ++hubHealthFetchSeqRef.current;
-    const sseSeq = hubHealthSseSeqRef.current;
+    const mySeq = ++hubHealthFetchSeqRef.current;
+    const sseSeqAtIssue = hubHealthSseSeqRef.current;
     getHubHealth()
       .then((h) => {
         if (
           !cancelled &&
-          !hubHealthSseSeenRef.current &&
-          fetchSeq === hubHealthFetchSeqRef.current &&
-          sseSeq === hubHealthSseSeqRef.current
+          mySeq > hubHealthAppliedSeqRef.current &&
+          sseSeqAtIssue === hubHealthSseSeqRef.current
         ) {
           setHubHealth(h);
+          hubHealthAppliedSeqRef.current = mySeq;
         }
       })
       .catch(() => {});
@@ -321,16 +320,17 @@ export function DashboardScreen() {
   useEffect(() => {
     if (connectionState !== "open") return;
     let cancelled = false;
-    const fetchSeq = ++hubHealthFetchSeqRef.current;
-    const sseSeq = hubHealthSseSeqRef.current;
+    const mySeq = ++hubHealthFetchSeqRef.current;
+    const sseSeqAtIssue = hubHealthSseSeqRef.current;
     getHubHealth()
       .then((h) => {
         if (
           !cancelled &&
-          fetchSeq === hubHealthFetchSeqRef.current &&
-          sseSeq === hubHealthSseSeqRef.current
+          mySeq > hubHealthAppliedSeqRef.current &&
+          sseSeqAtIssue === hubHealthSseSeqRef.current
         ) {
           setHubHealth(h);
+          hubHealthAppliedSeqRef.current = mySeq;
         }
       })
       .catch(() => {});

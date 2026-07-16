@@ -51,6 +51,68 @@ func TestHubHealthTrackerPublishesOnChangeAndDedups(t *testing.T) {
 	}
 }
 
+func TestHubHealthTrackerMarkHealthyPreservesNeedsReconcile(t *testing.T) {
+	cases := []struct {
+		name       string
+		seed       HubHealthState
+		seedAction string
+		want       HubHealthState
+		wantAction string
+	}{
+		{
+			name:       "needs reconcile stays sticky",
+			seed:       HubHealthNeedsReconcile,
+			seedAction: hubReconcileOperatorAction,
+			want:       HubHealthNeedsReconcile,
+			wantAction: hubReconcileOperatorAction,
+		},
+		{name: "recovering becomes healthy", seed: HubHealthRecovering, want: HubHealthHealthy},
+		{name: "down becomes healthy", seed: HubHealthDown, want: HubHealthHealthy},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHubHealthTracker(nil)
+			h.set(tc.seed, tc.seedAction)
+			h.markHealthy()
+			if got, action := h.snapshot(); got != tc.want || action != tc.wantAction {
+				t.Fatalf("markHealthy from %q = state %q action %q, want %q action %q", tc.seed, got, action, tc.want, tc.wantAction)
+			}
+		})
+	}
+}
+
+func TestHubHealthRestartedEventPreservesNeedsReconcile(t *testing.T) {
+	cases := []struct {
+		name       string
+		seed       HubHealthState
+		seedAction string
+		want       HubHealthState
+		wantAction string
+	}{
+		{
+			name:       "needs reconcile stays sticky",
+			seed:       HubHealthNeedsReconcile,
+			seedAction: hubReconcileOperatorAction,
+			want:       HubHealthNeedsReconcile,
+			wantAction: hubReconcileOperatorAction,
+		},
+		{name: "recovering becomes healthy", seed: HubHealthRecovering, want: HubHealthHealthy},
+		{name: "down becomes healthy", seed: HubHealthDown, want: HubHealthHealthy},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewServer(Config{})
+			s.hubHealth.set(tc.seed, tc.seedAction)
+			if err := s.hubHealthEmitWrapper(nil)("info", "hub-listener-restarted", nil); err != nil {
+				t.Fatalf("hubHealthEmitWrapper: %v", err)
+			}
+			if got, action := s.hubHealth.snapshot(); got != tc.want || action != tc.wantAction {
+				t.Fatalf("restarted from %q = state %q action %q, want %q action %q", tc.seed, got, action, tc.want, tc.wantAction)
+			}
+		})
+	}
+}
+
 // The emitFn wrapper maps the restart-driver event names to hub-health states and
 // still delegates to the underlying log emit.
 func TestHubHealthEmitWrapperMapsRestartEvents(t *testing.T) {
