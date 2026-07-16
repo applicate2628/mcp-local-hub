@@ -38,17 +38,9 @@ reconciliation records, not open tasks.
 | [2026-06-23-desktop-app-mcp-catalog](epics/2026-06-23-desktop-app-mcp-catalog.md) | closed | 2026-06-29 | DONE — desktop/creative-app MCP catalog, 52 rows, shipped npm v0.4.9. |
 | [2026-06-19-install-and-it-works-ux](epics/2026-06-19-install-and-it-works-ux.md) | closed | 2026-06-28 | DONE — clean-install + hub-launch + per-project UX (#377/#407/#408/#437/#428–#435/#439). |
 
-## Reference / parked (loose root files — NOT open tasks)
+## Reference / parked (NOT open tasks)
 
-- `2026-06-17-phase1-audit-findings.md` — Phase 1 arch+security audit. **HEAD-reconciled 2026-07-15
-  (the inline fixed-markers were stale):** 6/6 findings resolved-or-exempt (P1 state-fanout, config-path
-  double-encode, dual state-enum, hand-rolled atomic writers, path-validate raw-error — all FIXED with
-  backing tests; backups path-echo EXEMPT-by-design). Finding 4's residual (4 GUI state-dir-error POSIX
-  path-leak sites) **FIXED 2026-07-15** — the 4 sites now route through `writeAPIErrorRedacted` + a
-  `state_dir_error_redaction_test.go` structural guard; the backlog tracker is removed on delivery. See the
-  doc's HEAD-RECONCILIATION header for per-finding evidence.
-- `2026-06-18-clean-install-ux-vision.md` — PARKED user vision (post-dev-debug future).
-- `2026-06-18-vendor-init-uninstalled-clients.md` — RESOLVED 2026-06-21 (secure-parent-create stack).
+- [2026-06-18-clean-install-ux-vision](active/2026-07-16-productization-gui-solidify/2026-06-18-clean-install-ux-vision.md) — source material for the active productization initiative.
 - `roadmap-scan-2026-06-14.md` — gitignored local raw-inventory scan the `ROADMAP.md` audit
   header cites; superseded by `ROADMAP.md` for all live tracking (not an open task).
 
@@ -56,6 +48,11 @@ reconciliation records, not open tasks.
 
 | Item | Closed | Outcome |
 |---|---|---|
+| [2026-06-17-phase1-audit-findings](archive/2026-07/2026-06-17-phase1-audit-findings.md) | 2026-07-15 | Phase 1 arch+security audit. **HEAD-reconciled 2026-07-15 (the inline fixed-markers were stale):** 6/6 findings resolved-or-exempt (P1 state-fanout, config-path |
+| | | double-encode, dual state-enum, hand-rolled atomic writers, path-validate raw-error — all FIXED with backing tests; backups path-echo EXEMPT-by-design). Finding 4's residual (4 GUI state-dir-error POSIX path-leak sites) |
+| | | **FIXED 2026-07-15** — the 4 sites now route through `writeAPIErrorRedacted` + a `state_dir_error_redaction_test.go` structural guard; the backlog tracker is removed on delivery. See the doc's |
+| | | HEAD-RECONCILIATION header for per-finding evidence. |
+| [2026-06-18-vendor-init-uninstalled-clients](archive/2026-07/2026-06-18-vendor-init-uninstalled-clients.md) | 2026-06-21 | RESOLVED — secure-parent-create stack. |
 | [2026-07-05-adopt-npx-orphans](archive/2026-07/2026-07-05-adopt-npx-orphans/closure.md) | 2026-07-16 | DELIVERED — absorb unmanaged direct-stdio MCP entries into the hub: `mcphub adopt` (CLI/API + GUI "Adopt into hub" surface, #513/#516), auto-reaper hardening (#520 + kill-authority bugs #521/#522), anti-drift "unmanaged detected" GUI signal (#523), and Phase-2 `mcphub de-adopt` (the separate `2026-07-09-deadopt-hub-to-native` item, #539-#550). All shipped + deployed. Post-delivery consilium qualification (2026-07-16, #554) closed the two open gate-ON bugs + added the adopt→de-adopt lifecycle round-trip test. The status-header "D P2a/P2b GUI" residual is a cross-ref to the per-project-GUI approval-surface initiative (decision `2026-06-24-per-project-gui-design.md` + backlog `2026-06-25-p2b-approval-surface-claude-json-only.md`), not this item. |
 | [2026-07-09-deadopt-hub-to-native](archive/2026-07/2026-07-09-deadopt-hub-to-native/closure.md) | 2026-07-15 | DELIVERED — `mcphub de-adopt` reverses `mcphub adopt`: restores every adopt-owned client entry to its exact pre-adopt config (original secret-literal spellings from pinned snapshots) + removes the hub manifest, atomically + roll-forward-recoverable. All 12 phases merged (#539/#540/#542/#544/#543/#545/#546/#547/#548/#549/#550, master `837fe95c`). Spine: per-manifest lease E1→E6 + CLOSE-READY single terminal gate + roll-forward resume + under-lease re-read/re-classify authority + `--accept-conflict` mutation-point proof. Gates: FULL-COMMISSION (Sol+Terra+fable) on 3/4/6/8; Phase 8 executor took 16 fixes (commission + 6 bot rounds + fable final-gate catching a fail-open the bot missed). v1 = all-clients-only, gate-OFF-only, atomic; subset/gate-ON/`--reconstruct-legacy` DEFERRED (backlog `2026-07-11-deadopt-subset-and-gate-on-followup.md`). |
 | [2026-07-13-daemon-port-ephemeral-self-heal](archive/2026-07/2026-07-13-daemon-port-ephemeral-self-heal/closure.md) | 2026-07-13 | DELIVERED — supervisor self-heals a dynamic-pool proxy (serena/LSP) whose loopback pool port is stolen by a foreign process (WSL2/Hyper-V-widened OS ephemeral range over the pools) — hub no longer "partial". L1 off-loop atomic realloc + respawn (covers bind-fail-after-spawn AND port-held-at-pre-spawn), L2 setup detect + `--fix-ephemeral-range`, L3 redacted events. #535 squash `b351a5cc`, 7-round commission (Sol+Terra+fable arbiter) + bot PASS, deployed + fleet-verified. P3 follow-ups in `backlog/2026-07-13-daemon-port-self-heal-followups.md`. |

@@ -10,7 +10,7 @@ Template: full-delivery (design-first). Orchestrator: main conversation ($lead).
 
 Productization = turn mcphub from a dev tool into a product a non-developer installs in one
 click (exe→auto-GUI+tray+onboarding, hide CLI, obvious workspace registration, clean-VM
-first-run). Roadmap vision: `work-items/2026-06-18-clean-install-ux-vision.md`. The user's gate
+first-run). Roadmap vision: `work-items/active/2026-07-16-productization-gui-solidify/2026-06-18-clean-install-ux-vision.md`. The user's gate
 was "not until the dev variant is solid" — now unlocked, BUT the user says the GUI/hub is still
 rough. So Phase 0 is NOT install-polish; it is **make the rough GUI/hub solid** (the prerequisite
 the polish sits on).

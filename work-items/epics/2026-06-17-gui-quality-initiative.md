@@ -14,7 +14,7 @@ control works, the design is unified, resilience gaps (error-boundary, SSE, a11y
 responsive) are closed, the architecture/security audit findings are fixed, and the
 whole surface is functionally tested. This is the prerequisite the user named for
 the FUTURE clean-install / end-user productization track
-(`work-items/2026-06-18-clean-install-ux-vision.md` — a SEPARATE future epic, NOT a
+(`work-items/active/2026-07-16-productization-gui-solidify/2026-06-18-clean-install-ux-vision.md` — a SEPARATE future epic, NOT a
 child here).
 
 ## Children
@@ -65,6 +65,6 @@ one-shot scroll landed short below async-grown sections → ResizeObserver re-sc
 
 Residual (optional follow-ups, non-blocking): formal coverage-% measurement; 2 autocomplete
 a11y hints on password inputs (Secrets/Add-server); the broader clean-install/end-user
-productization track (`work-items/2026-06-18-clean-install-ux-vision.md`) is a SEPARATE
+productization track (`work-items/active/2026-07-16-productization-gui-solidify/2026-06-18-clean-install-ux-vision.md`) is a SEPARATE
 future epic the user explicitly deferred. Deploy discipline: see
 feedback_deploy_kill_gui_process_directly memory (full-reset + verify-served + zero-quarantine).
