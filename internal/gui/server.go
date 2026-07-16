@@ -1113,7 +1113,9 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 			// else: shutdown path already swapped — it owns teardown.
 			return
 		}
-		s.hubHealth.markHealthy()
+		if hubComp.alive.Load() {
+			s.hubHealth.markHealthy()
+		}
 	}()
 	s.hubRestartDriverAlive.Store(true)
 	go runHubListenerRestartDriver(hubInitCtx, s, hubListenerRestartDriverOptions{})

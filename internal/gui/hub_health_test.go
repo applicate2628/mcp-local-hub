@@ -225,17 +225,25 @@ func TestHubHealthGetReturnsCurrentState(t *testing.T) {
 
 func TestServerHubHealthTracksInitialStartup(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		enabled     bool
-		startErr    error
-		pendingWant HubHealthState
-		finalWant   HubHealthState
+		name          string
+		enabled       bool
+		startErr      error
+		deadOnArrival bool
+		pendingWant   HubHealthState
+		finalWant     HubHealthState
 	}{
 		{
 			name:        "gate on success",
 			enabled:     true,
 			pendingWant: HubHealthRecovering,
 			finalWant:   HubHealthHealthy,
+		},
+		{
+			name:          "gate on dead-on-arrival component",
+			enabled:       true,
+			deadOnArrival: true,
+			pendingWant:   HubHealthRecovering,
+			finalWant:     HubHealthDown,
 		},
 		{
 			name:        "gate off stays inert",
@@ -272,7 +280,12 @@ func TestServerHubHealthTracksInitialStartup(t *testing.T) {
 				if !enabled {
 					return nil, nil
 				}
-				return liveRestartTestComp(9201), nil
+				comp := liveRestartTestComp(9201)
+				if tc.deadOnArrival {
+					comp.alive.Store(false)
+					s.hubHealth.set(HubHealthDown, "")
+				}
+				return comp, nil
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())

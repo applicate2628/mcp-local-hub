@@ -120,17 +120,20 @@ func TestHubListenerFatalServeExitSetsHealthDownUnlessSuperseded(t *testing.T) {
 		name              string
 		exitingLive       bool
 		nothingRegistered bool
+		driverAlive       bool
 		want              HubHealthState
 		wantAction        string
 	}{
-		{name: "live component", exitingLive: true, want: HubHealthDown},
-		{name: "stale component", exitingLive: false, want: HubHealthNeedsReconcile, wantAction: hubReconcileOperatorAction},
-		{name: "pre-registration component", nothingRegistered: true, want: HubHealthDown},
+		{name: "live component with live driver", exitingLive: true, driverAlive: true, want: HubHealthRecovering},
+		{name: "live component with dead driver", exitingLive: true, want: HubHealthDown},
+		{name: "stale component", exitingLive: false, driverAlive: true, want: HubHealthNeedsReconcile, wantAction: hubReconcileOperatorAction},
+		{name: "pre-registration component with dead driver", nothingRegistered: true, want: HubHealthDown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
 			s := NewServer(Config{})
 			s.hubHealth.markReconcilePending()
+			s.hubRestartDriverAlive.Store(tc.driverAlive)
 
 			srv := newHubMcpHTTPServer(http.NewServeMux())
 			exiting := &HubListenerComponents{srv: srv}

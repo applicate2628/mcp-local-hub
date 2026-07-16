@@ -803,7 +803,11 @@ func serveHubMcpListener(s *Server, comp *HubListenerComponents, srv *http.Serve
 		if s != nil {
 			registered := s.hubMcpComp.Load()
 			if registered == nil || registered == comp {
-				s.hubHealth.set(HubHealthDown, "")
+				if s.hubRestartDriverAlive.Load() {
+					s.hubHealth.set(HubHealthRecovering, "")
+				} else {
+					s.hubHealth.set(HubHealthDown, "")
+				}
 			}
 		}
 		_ = api.LogHubMcpEvent("error", "hub-listener-down", map[string]any{
