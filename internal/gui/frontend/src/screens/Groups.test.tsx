@@ -38,6 +38,9 @@ class StubEventSource {
   close(): void {
     stubInstances.delete(this);
   }
+  triggerOpen(): void {
+    this.onopen?.(new Event("open"));
+  }
 }
 (globalThis as unknown as { EventSource: typeof StubEventSource }).EventSource = StubEventSource;
 
@@ -46,6 +49,12 @@ function dispatchSse(eventName: string, data: unknown): void {
   for (const inst of stubInstances) {
     inst.listeners.get(eventName)?.forEach((handler) => handler(ev));
   }
+}
+
+function activeStubEventSource(): StubEventSource {
+  const [source] = stubInstances;
+  if (!source) throw new Error("no active StubEventSource");
+  return source;
 }
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -58,7 +67,9 @@ function jsonResponse(status: number, body: unknown): Response {
 // fetchRouter dispatches each fetch call to the matching response based on
 // the request URL prefix (same helper shape as Catalog.test.tsx). The
 // per-route fn receives the RequestInit so a test can capture POST bodies.
-function fetchRouter(routes: Record<string, (init?: RequestInit, url?: string) => Response>) {
+function fetchRouter(
+  routes: Record<string, (init?: RequestInit, url?: string) => Response | Promise<Response>>,
+) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     // Longest-prefix match so "/api/groups?name=x" can route distinctly if
@@ -162,9 +173,150 @@ describe("GroupsScreen", () => {
     });
 
     await waitFor(() => expect(getCount).toBe(2));
-    expect(screen.queryByTestId("groups-conn-url-frontend")).toBeNull();
     expect(await screen.findByTestId("groups-connection-hint-frontend")).toBeTruthy();
+    expect(screen.queryByTestId("groups-conn-url-frontend")).toBeNull();
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps rendered groups during a failed hub-health background refresh", async () => {
+    let rejectRefresh!: (reason?: unknown) => void;
+    const refreshResponse = new Promise<Response>((_resolve, reject) => {
+      rejectRefresh = reject;
+    });
+    let getCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": () => {
+          getCount += 1;
+          return getCount === 1
+            ? jsonResponse(200, listBody([{ name: "frontend", servers: ["serena"] }]))
+            : refreshResponse;
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    expect(await screen.findByTestId("groups-row-frontend")).toBeTruthy();
+
+    act(() => {
+      dispatchSse("hub-health", { state: "recovering", degraded: true });
+    });
+    await waitFor(() => expect(getCount).toBe(2));
+    const stayedVisibleWhileRefreshing = screen.queryByTestId("groups-row-frontend");
+    const showedLoadingWhileRefreshing = screen.queryByTestId("groups-loading");
+
+    await act(async () => {
+      rejectRefresh(new Error("transient refresh failure"));
+    });
+
+    expect(stayedVisibleWhileRefreshing).toBeTruthy();
+    expect(showedLoadingWhileRefreshing).toBeNull();
+    expect(screen.queryByTestId("groups-row-frontend")).toBeTruthy();
+    expect(screen.queryByTestId("groups-load-error")).toBeNull();
+  });
+
+  it("applies an earlier foreground success after a newer background load fails", async () => {
+    let resolveForeground!: (response: Response) => void;
+    const foregroundResponse = new Promise<Response>((resolve) => {
+      resolveForeground = resolve;
+    });
+    let rejectBackground!: (reason?: unknown) => void;
+    const backgroundResponse = new Promise<Response>((_resolve, reject) => {
+      rejectBackground = reject;
+    });
+    let getCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": () => {
+          getCount += 1;
+          return getCount === 1 ? foregroundResponse : backgroundResponse;
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    await waitFor(() => {
+      expect(getCount).toBe(1);
+      expect(stubInstances.size).toBe(1);
+    });
+
+    act(() => {
+      dispatchSse("hub-health", { state: "recovering", degraded: true });
+    });
+    await waitFor(() => expect(getCount).toBe(2));
+
+    await act(async () => {
+      rejectBackground(new Error("transient refresh failure"));
+    });
+    await act(async () => {
+      resolveForeground(jsonResponse(200, listBody([{ name: "foreground", servers: ["serena"] }])));
+    });
+
+    expect(await screen.findByTestId("groups-row-foreground")).toBeTruthy();
+    expect(screen.queryByTestId("groups-loading")).toBeNull();
+    expect(screen.queryByTestId("groups-load-error")).toBeNull();
+  });
+
+  it("refetches groups when EventSource opens after the initial load", async () => {
+    let getCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": () => {
+          getCount += 1;
+          return jsonResponse(200, listBody([]));
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    await waitFor(() => {
+      expect(getCount).toBe(1);
+      expect(stubInstances.size).toBe(1);
+    });
+
+    act(() => {
+      activeStubEventSource().triggerOpen();
+    });
+
+    await waitFor(() => expect(getCount).toBe(2));
+  });
+
+  it("keeps the newer hub-health load when the initial load resolves last", async () => {
+    let resolveInitial!: (response: Response) => void;
+    const initialResponse = new Promise<Response>((resolve) => {
+      resolveInitial = resolve;
+    });
+    let getCount = 0;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": () => {
+          getCount += 1;
+          return getCount === 1
+            ? initialResponse
+            : jsonResponse(200, listBody([{ name: "fresh", servers: ["serena"] }]));
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(stubInstances.size).toBe(1);
+    });
+
+    act(() => {
+      dispatchSse("hub-health", { state: "up", degraded: false });
+    });
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+    expect(await screen.findByTestId("groups-row-fresh")).toBeTruthy();
+
+    await act(async () => {
+      resolveInitial(jsonResponse(200, listBody([{ name: "stale", servers: ["memory"] }])));
+    });
+
+    expect(screen.queryByTestId("groups-row-fresh")).toBeTruthy();
+    expect(screen.queryByTestId("groups-row-stale")).toBeNull();
   });
 
   it("renders an error banner with Retry when GET /api/groups fails", async () => {

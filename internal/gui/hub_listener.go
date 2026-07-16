@@ -41,6 +41,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -161,6 +162,7 @@ func normalizeHubListenerRestartDriverOptions(s *Server, opts hubListenerRestart
 		opts.startFn = func(ctx context.Context) (*HubListenerComponents, error) {
 			return startHubMcpListenerWithOptions(ctx, true, s.api, startHubMcpListenerOptions{
 				preservePortOnReloadHandlerFailure: true,
+				server:                             s,
 				onUnresponsive:                     s.signalHubListenerRestart,
 				onRecovered:                        s.onHubListenerRecovered,
 			})
@@ -350,6 +352,20 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 			}
 			return hubListenerRestartStopDriver
 		}
+		if !newComp.alive.Load() {
+			if s.hubMcpComp.CompareAndSwap(newComp, nil) {
+				opts.shutdownFn(context.Background(), newComp)
+			}
+			_ = opts.emitFn("warn", "hub-listener-restart-failed", map[string]any{
+				"port":    newComp.port,
+				"attempt": attempt,
+				"err":     "new hub listener component is dead on arrival",
+			})
+			if s.hubRestartConsecutive < hubListenerRestartMaxConsecutiveRestarts {
+				retryDelay = hubListenerRestartBackoff(attempt)
+			}
+			continue
+		}
 		restartPort = newComp.port
 		currentInstanceID, currentInstanceIDErr := loadHubListenerRestartInstanceID()
 		instanceIDPreserved := previousInstanceIDErr == nil && currentInstanceIDErr == nil && previousInstanceID != "" && previousInstanceID == currentInstanceID
@@ -500,6 +516,7 @@ func startHubMcpListener(ctx context.Context, enabled bool, a *api.API) (*HubLis
 type startHubMcpListenerOptions struct {
 	preservePortOnReloadHandlerFailure bool
 	reloadHandlerFn                    func(context.Context) (*api.InternalReloadHandler, error)
+	server                             *Server
 	onUnresponsive                     func()
 	onRecovered                        func()
 	healthProbeInterval                time.Duration
@@ -736,8 +753,8 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 	// Fire-and-forget on the listener ctx: unwinds solely on ctx
 	// cancellation (hub stop / shutdown), same as the watcher above.
 	healthWatcher := api.NewHubListenerHealthWatcher(port, opts.healthProbeInterval)
-	healthWatcher.SetOnUnresponsive(opts.onUnresponsive)
-	healthWatcher.SetOnRecovered(opts.onRecovered)
+	healthWatcher.SetOnUnresponsive(hubListenerComponentCallback(opts.server, comp, opts.onUnresponsive))
+	healthWatcher.SetOnRecovered(hubListenerComponentCallback(opts.server, comp, opts.onRecovered))
 	go healthWatcher.Run(listenerCtx)
 
 	go func() {
@@ -756,12 +773,7 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 		// Anything else (accept loop fatal, unexpected close, etc.)
 		// is structured-logged via LogHubMcpEvent so it appears in
 		// the same hub-mcp.log stream as bind / lifecycle events.
-		if serveErr := srv.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			_ = api.LogHubMcpEvent("error", "hub-listener-down", map[string]any{
-				"port": port,
-				"err":  serveErr.Error(),
-			})
-		}
+		serveHubMcpListener(opts.server, comp, srv, ln, port)
 	}()
 
 	_ = api.LogHubMcpEvent("info", "hub-listener-up", map[string]any{
@@ -769,6 +781,33 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 	})
 
 	return comp, nil
+}
+
+func serveHubMcpListener(s *Server, comp *HubListenerComponents, srv *http.Server, ln net.Listener, port int) {
+	if serveErr := srv.Serve(ln); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		comp.alive.Store(false)
+		if s != nil {
+			registered := s.hubMcpComp.Load()
+			if registered == nil || registered == comp {
+				s.hubHealth.set(HubHealthDown, "")
+			}
+		}
+		_ = api.LogHubMcpEvent("error", "hub-listener-down", map[string]any{
+			"port": port,
+			"err":  serveErr.Error(),
+		})
+	}
+}
+
+func hubListenerComponentCallback(s *Server, comp *HubListenerComponents, callback func()) func() {
+	if callback == nil || s == nil {
+		return callback
+	}
+	return func() {
+		if s.hubMcpComp.Load() == comp {
+			callback()
+		}
+	}
 }
 
 func newHubMcpHTTPServer(handler http.Handler) *http.Server {

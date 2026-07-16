@@ -82,6 +82,7 @@ export function DashboardScreen() {
   const hubHealthSseSeqRef = useRef(0);
   const hubHealthFetchSeqRef = useRef(0);
   const hubHealthAppliedSeqRef = useRef(0);
+  const hubHealthMountedRef = useRef(false);
   const bulkResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -277,6 +278,28 @@ export function DashboardScreen() {
     setHubHealth(body);
   }, []);
 
+  const resyncHubHealth = useCallback((): (() => void) => {
+    let cancelled = false;
+    const mySeq = ++hubHealthFetchSeqRef.current;
+    const sseSeqAtIssue = hubHealthSseSeqRef.current;
+    getHubHealth()
+      .then((h) => {
+        if (
+          !cancelled &&
+          hubHealthMountedRef.current &&
+          mySeq > hubHealthAppliedSeqRef.current &&
+          sseSeqAtIssue === hubHealthSseSeqRef.current
+        ) {
+          setHubHealth(h);
+          hubHealthAppliedSeqRef.current = mySeq;
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // connectionState surfaces the live SSE transport status so the
   // Dashboard header can show a "live / reconnecting…" cue. When the
   // supervisor/GUI drops, native EventSource retries silently; without
@@ -291,53 +314,37 @@ export function DashboardScreen() {
     "hub-health": onHubHealth,
   });
 
-  // Initial hub-aggregate health (SSE only pushes transitions). Non-fatal: a
-  // failed probe just leaves the badge hidden.
+  // Initial hub-aggregate health plus connected-stream backstops. SSE only
+  // pushes transitions and can drop without reconnecting, so resync on mount,
+  // foreground visibility, and a low-frequency interval. Non-fatal: a failed
+  // probe leaves the last health state in place.
   useEffect(() => {
-    let cancelled = false;
-    const mySeq = ++hubHealthFetchSeqRef.current;
-    const sseSeqAtIssue = hubHealthSseSeqRef.current;
-    getHubHealth()
-      .then((h) => {
-        if (
-          !cancelled &&
-          mySeq > hubHealthAppliedSeqRef.current &&
-          sseSeqAtIssue === hubHealthSseSeqRef.current
-        ) {
-          setHubHealth(h);
-          hubHealthAppliedSeqRef.current = mySeq;
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
+    hubHealthMountedRef.current = true;
+    const cancelInitial = resyncHubHealth();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void resyncHubHealth();
+      }
     };
-  }, []);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const poll = setInterval(() => {
+      void resyncHubHealth();
+    }, 60_000);
+    return () => {
+      hubHealthMountedRef.current = false;
+      cancelInitial();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearInterval(poll);
+    };
+  }, [resyncHubHealth]);
 
   // The hub-health stream is transition-only and lossy. Re-hydrate whenever
   // EventSource opens (including after reconnect), while rejecting a response
   // if a newer fetch or SSE transition landed after this request was issued.
   useEffect(() => {
     if (connectionState !== "open") return;
-    let cancelled = false;
-    const mySeq = ++hubHealthFetchSeqRef.current;
-    const sseSeqAtIssue = hubHealthSseSeqRef.current;
-    getHubHealth()
-      .then((h) => {
-        if (
-          !cancelled &&
-          mySeq > hubHealthAppliedSeqRef.current &&
-          sseSeqAtIssue === hubHealthSseSeqRef.current
-        ) {
-          setHubHealth(h);
-          hubHealthAppliedSeqRef.current = mySeq;
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [connectionState]);
+    return resyncHubHealth();
+  }, [connectionState, resyncHubHealth]);
 
   // Codex bot PR #38 P1 (round 3): safety-net for dropped SSE events.
   // The Broadcaster is lossy (internal/gui/events.go::Publish drops on

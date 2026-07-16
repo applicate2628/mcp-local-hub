@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"errors"
+	"net/http"
 	"reflect"
 	"sync"
 	"testing"
@@ -96,10 +97,10 @@ func TestHubListenerRestartDriverRestartsAndPublishesNewBundle(t *testing.T) {
 			shutdownFn: func(_ context.Context, comp *HubListenerComponents) {
 				shutdowns = append(shutdowns, comp)
 			},
-			emitFn: func(level, event string, fields map[string]any) error {
+			emitFn: s.hubHealthEmitWrapper(func(level, event string, fields map[string]any) error {
 				events <- hubRestartTestEvent{level: level, event: event, fields: fields}
 				return nil
-			},
+			}),
 			sleepFn: func(_ context.Context, d time.Duration) bool {
 				sleeps = append(sleeps, d)
 				return true
@@ -139,6 +140,57 @@ func TestHubListenerRestartDriverRestartsAndPublishesNewBundle(t *testing.T) {
 	}
 	if len(sleeps) != 0 {
 		t.Fatalf("backoff sleeps before first recovery = %d, want 0", len(sleeps))
+	}
+	if got, action := s.hubHealth.snapshot(); got != HubHealthHealthy || action != "" {
+		t.Fatalf("health after live restart = state %q action %q, want healthy", got, action)
+	}
+}
+
+func TestHubListenerRestartDriverRejectsDeadOnArrivalComponent(t *testing.T) {
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
+	s := NewServer(Config{Port: 0})
+	oldComp := liveRestartTestComp(3439)
+	deadComp := liveRestartTestComp(3439)
+	s.hubMcpComp.Store(oldComp)
+
+	var shutdowns []*HubListenerComponents
+	var events []hubRestartTestEvent
+	outcome := restartHubListenerWithOutcome(context.Background(), s, hubListenerRestartDriverOptions{
+		startFn: func(context.Context) (*HubListenerComponents, error) {
+			serveHubMcpListener(s, deadComp, newHubMcpHTTPServer(http.NewServeMux()), fatalAcceptListener{}, 3439)
+			return deadComp, nil
+		},
+		shutdownFn: func(_ context.Context, comp *HubListenerComponents) {
+			shutdowns = append(shutdowns, comp)
+		},
+		emitFn: s.hubHealthEmitWrapper(func(level, event string, fields map[string]any) error {
+			events = append(events, hubRestartTestEvent{level: level, event: event, fields: fields})
+			return nil
+		}),
+		sleepFn: func(context.Context, time.Duration) bool { return false },
+		nowFn:   func() time.Time { return time.Unix(100, 0) },
+	})
+
+	if outcome != hubListenerRestartStopDriver {
+		t.Fatalf("restart outcome = %v, want stop after deterministic backoff cancellation", outcome)
+	}
+	if deadComp.alive.Load() {
+		t.Fatal("dead-on-arrival component remained alive after fatal Serve exit")
+	}
+	if got := s.hubMcpComp.Load(); got != nil {
+		t.Fatalf("registered component = %#v, want dead component rolled back", got)
+	}
+	if !reflect.DeepEqual(shutdowns, []*HubListenerComponents{oldComp, deadComp}) {
+		t.Fatalf("shutdowns = %#v, want old then dead component", shutdowns)
+	}
+	if len(events) != 1 || events[0].event != "hub-listener-restart-failed" {
+		t.Fatalf("restart events = %#v, want one restart-failed and no success event", events)
+	}
+	if got := events[0].fields["err"]; got != "new hub listener component is dead on arrival" {
+		t.Fatalf("restart-failed err = %v, want dead-on-arrival diagnosis", got)
+	}
+	if got, action := s.hubHealth.snapshot(); got != HubHealthRecovering || action != "" {
+		t.Fatalf("health after dead-on-arrival restart = state %q action %q, want recovering", got, action)
 	}
 }
 

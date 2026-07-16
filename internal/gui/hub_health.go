@@ -53,7 +53,10 @@ type hubHealthTracker struct {
 	mu     sync.Mutex
 	state  HubHealthState
 	action string // operator-action hint for needs-reconcile (empty otherwise)
-	pub    func(Event)
+	// reconcilePending is process-scoped because there is no reconcile-ack
+	// signal yet. Only a process restart clears it.
+	reconcilePending bool
+	pub              func(Event)
 }
 
 func newHubHealthTracker(pub func(Event)) *hubHealthTracker {
@@ -80,26 +83,53 @@ func (h *hubHealthTracker) set(state HubHealthState, action string) {
 	}
 }
 
-// markHealthy sets healthy UNLESS the state is sticky needs-reconcile (which
-// only a real reconcile signal — not yet implemented — or a process restart
-// clears).
+// markReconcilePending records stale client configuration independently from
+// the listener's current availability. Outage states remain operator-visible;
+// the reconcile state is restored when the listener becomes healthy again.
+func (h *hubHealthTracker) markReconcilePending() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.reconcilePending = true
+	if h.state == HubHealthDown {
+		return
+	}
+	changed := h.state != HubHealthNeedsReconcile || h.action != hubReconcileOperatorAction
+	h.state = HubHealthNeedsReconcile
+	h.action = hubReconcileOperatorAction
+	if changed && h.pub != nil {
+		h.pub(Event{Type: "hub-health", Body: map[string]any{
+			"state":           string(HubHealthNeedsReconcile),
+			"operator_action": hubReconcileOperatorAction,
+			"degraded":        hubHealthDegraded(HubHealthNeedsReconcile),
+		}})
+	}
+}
+
+// markHealthy restores needs-reconcile while client reconciliation is pending;
+// otherwise it reports the listener healthy.
 func (h *hubHealthTracker) markHealthy() {
 	if h == nil {
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.state == HubHealthNeedsReconcile {
-		return
+	state := HubHealthHealthy
+	action := ""
+	if h.reconcilePending {
+		state = HubHealthNeedsReconcile
+		action = hubReconcileOperatorAction
 	}
-	changed := h.state != HubHealthHealthy || h.action != ""
-	h.state = HubHealthHealthy
-	h.action = ""
+	changed := h.state != state || h.action != action
+	h.state = state
+	h.action = action
 	if changed && h.pub != nil {
 		h.pub(Event{Type: "hub-health", Body: map[string]any{
-			"state":           string(HubHealthHealthy),
-			"operator_action": "",
-			"degraded":        hubHealthDegraded(HubHealthHealthy),
+			"state":           string(state),
+			"operator_action": action,
+			"degraded":        hubHealthDegraded(state),
 		}})
 	}
 }
@@ -162,7 +192,7 @@ func (s *Server) hubHealthEmitWrapper(base func(level, event string, fields map[
 				s.hubHealth.set(HubHealthDown, "")
 			}
 		case "hub-listener-restart-instance-id-changed":
-			s.hubHealth.set(HubHealthNeedsReconcile, hubReconcileOperatorAction)
+			s.hubHealth.markReconcilePending()
 		case "hub-listener-restart-abandoned":
 			s.hubHealth.set(HubHealthDown, "")
 		}

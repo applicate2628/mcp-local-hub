@@ -1038,6 +1038,7 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	go func() {
 		defer close(hubInitDone)
 		hubComp, hubErr := startHubMcpListenerWithOptions(hubInitCtx, hubEnabled, s.api, startHubMcpListenerOptions{
+			server:         s,
 			onUnresponsive: s.signalHubListenerRestart,
 			onRecovered:    s.onHubListenerRecovered,
 		})

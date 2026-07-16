@@ -43,73 +43,75 @@ func TestHubHealthTrackerPublishesOnChangeAndDedups(t *testing.T) {
 		t.Fatalf("duplicate set published an event: %+v", ev)
 	case <-time.After(200 * time.Millisecond):
 	}
-	// Transition with an operator action → publishes + carries the action.
-	s.hubHealth.set(HubHealthNeedsReconcile, hubReconcileOperatorAction)
+	// Return to healthy, then record pending reconciliation. The latter
+	// transition publishes + carries the operator action.
+	s.hubHealth.markHealthy()
+	if ev := recvHubHealth(t, ch); ev.Body["state"] != "healthy" {
+		t.Fatalf("state=%v, want healthy", ev.Body["state"])
+	}
+	s.hubHealth.markReconcilePending()
 	ev := recvHubHealth(t, ch)
 	if ev.Body["state"] != "needs-reconcile" || ev.Body["operator_action"] != hubReconcileOperatorAction {
 		t.Fatalf("ev.Body=%+v, want needs-reconcile + reconcile action", ev.Body)
 	}
 }
 
-func TestHubHealthTrackerMarkHealthyPreservesNeedsReconcile(t *testing.T) {
-	cases := []struct {
-		name       string
-		seed       HubHealthState
-		seedAction string
-		want       HubHealthState
-		wantAction string
-	}{
-		{
-			name:       "needs reconcile stays sticky",
-			seed:       HubHealthNeedsReconcile,
-			seedAction: hubReconcileOperatorAction,
-			want:       HubHealthNeedsReconcile,
-			wantAction: hubReconcileOperatorAction,
-		},
-		{name: "recovering becomes healthy", seed: HubHealthRecovering, want: HubHealthHealthy},
-		{name: "down becomes healthy", seed: HubHealthDown, want: HubHealthHealthy},
+func TestHubHealthRestartedEventPreservesNeedsReconcile(t *testing.T) {
+	t.Run("pending reconcile survives an outage", func(t *testing.T) {
+		s := NewServer(Config{})
+		wrap := s.hubHealthEmitWrapper(nil)
+		s.hubHealth.markReconcilePending()
+		_ = wrap("error", "hub-listener-restart-failed", nil)
+		if got, action := s.hubHealth.snapshot(); got != HubHealthRecovering || action != "" {
+			t.Fatalf("restart-failed = state %q action %q, want recovering", got, action)
+		}
+		_ = wrap("info", "hub-listener-restarted", nil)
+		if got, action := s.hubHealth.snapshot(); got != HubHealthNeedsReconcile || action != hubReconcileOperatorAction {
+			t.Fatalf("restarted = state %q action %q, want needs-reconcile + action", got, action)
+		}
+	})
+
+	t.Run("plain recovering without pending reconcile becomes healthy", func(t *testing.T) {
+		s := NewServer(Config{})
+		s.hubHealth.set(HubHealthRecovering, "")
+		_ = s.hubHealthEmitWrapper(nil)("info", "hub-listener-restarted", nil)
+		if got, action := s.hubHealth.snapshot(); got != HubHealthHealthy || action != "" {
+			t.Fatalf("restarted = state %q action %q, want healthy", got, action)
+		}
+	})
+}
+
+func TestHubHealthInstanceIDChangeFromRecoveringPublishesNeedsReconcile(t *testing.T) {
+	s := NewServer(Config{})
+	s.hubHealth.set(HubHealthRecovering, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := s.Broadcaster().Subscribe(ctx)
+
+	_ = s.hubHealthEmitWrapper(nil)("error", "hub-listener-restart-instance-id-changed", nil)
+	if got, action := s.hubHealth.snapshot(); got != HubHealthNeedsReconcile || action != hubReconcileOperatorAction {
+		t.Fatalf("instance-id-changed = state %q action %q, want needs-reconcile + action", got, action)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newHubHealthTracker(nil)
-			h.set(tc.seed, tc.seedAction)
-			h.markHealthy()
-			if got, action := h.snapshot(); got != tc.want || action != tc.wantAction {
-				t.Fatalf("markHealthy from %q = state %q action %q, want %q action %q", tc.seed, got, action, tc.want, tc.wantAction)
-			}
-		})
+	ev := recvHubHealth(t, ch)
+	if ev.Body["state"] != "needs-reconcile" || ev.Body["operator_action"] != hubReconcileOperatorAction {
+		t.Fatalf("ev.Body=%+v, want published needs-reconcile + reconcile action", ev.Body)
 	}
 }
 
-func TestHubHealthRestartedEventPreservesNeedsReconcile(t *testing.T) {
-	cases := []struct {
-		name       string
-		seed       HubHealthState
-		seedAction string
-		want       HubHealthState
-		wantAction string
-	}{
-		{
-			name:       "needs reconcile stays sticky",
-			seed:       HubHealthNeedsReconcile,
-			seedAction: hubReconcileOperatorAction,
-			want:       HubHealthNeedsReconcile,
-			wantAction: hubReconcileOperatorAction,
-		},
-		{name: "recovering becomes healthy", seed: HubHealthRecovering, want: HubHealthHealthy},
-		{name: "down becomes healthy", seed: HubHealthDown, want: HubHealthHealthy},
+func TestHubHealthInstanceIDChangeWhileDownDefersReconcileUntilRecovery(t *testing.T) {
+	s := NewServer(Config{})
+	wrap := s.hubHealthEmitWrapper(nil)
+	s.hubHealth.set(HubHealthDown, "")
+
+	_ = wrap("error", "hub-listener-restart-instance-id-changed", nil)
+	if got, action := s.hubHealth.snapshot(); got != HubHealthDown || action != "" {
+		t.Fatalf("instance-id-changed while down = state %q action %q, want down with no action", got, action)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			s := NewServer(Config{})
-			s.hubHealth.set(tc.seed, tc.seedAction)
-			if err := s.hubHealthEmitWrapper(nil)("info", "hub-listener-restarted", nil); err != nil {
-				t.Fatalf("hubHealthEmitWrapper: %v", err)
-			}
-			if got, action := s.hubHealth.snapshot(); got != tc.want || action != tc.wantAction {
-				t.Fatalf("restarted from %q = state %q action %q, want %q action %q", tc.seed, got, action, tc.want, tc.wantAction)
-			}
-		})
+
+	_ = wrap("info", "hub-listener-restarted", nil)
+	if got, action := s.hubHealth.snapshot(); got != HubHealthNeedsReconcile || action != hubReconcileOperatorAction {
+		t.Fatalf("restarted = state %q action %q, want needs-reconcile + action", got, action)
 	}
 }
 
@@ -149,7 +151,11 @@ func TestHubHealthEmitWrapperMapsRestartEvents(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := NewServer(Config{})
-			s.hubHealth.set(HubHealthDown, "seed") // seed a distinct state so the map is a change
+			if tc.event == "hub-listener-restart-instance-id-changed" {
+				s.hubHealth.set(HubHealthRecovering, "")
+			} else {
+				s.hubHealth.set(HubHealthDown, "seed") // seed a distinct state so the map is a change
+			}
 			delegated := false
 			wrap := s.hubHealthEmitWrapper(func(level, event string, fields map[string]any) error {
 				delegated = true
@@ -186,7 +192,7 @@ func TestHubHealthServing(t *testing.T) {
 // GET /api/hub/health returns the current state + degraded flag for initial load.
 func TestHubHealthGetReturnsCurrentState(t *testing.T) {
 	s := NewServer(Config{})
-	s.hubHealth.set(HubHealthNeedsReconcile, hubReconcileOperatorAction)
+	s.hubHealth.markReconcilePending()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/hub/health", nil)
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -203,8 +209,8 @@ func TestHubHealthGetReturnsCurrentState(t *testing.T) {
 		t.Fatalf("dto=%+v, want needs-reconcile + degraded + reconcile action", dto)
 	}
 
-	// Healthy state → not degraded.
-	s.hubHealth.set(HubHealthHealthy, "")
+	// A fresh process starts healthy and not degraded.
+	s = NewServer(Config{})
 	rec2 := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec2, req)
 	var dto2 hubHealthDTO

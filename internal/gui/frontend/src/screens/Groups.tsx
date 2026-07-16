@@ -23,7 +23,7 @@
 // The pure draft/dirty/validation logic lives in lib/groups-draft.ts (unit-
 // tested there); this file is the rendering + network glue.
 
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
   getGroups,
   saveGroup,
@@ -75,6 +75,8 @@ export interface GroupsScreenProps {
 
 export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.Element {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const loadSeqRef = useRef(0);
+  const loadAppliedSeqRef = useRef(0);
   const [target, setTarget] = useState<EditorTarget>({ mode: "none" });
   const [draft, setDraft] = useState<GroupDraft>(emptyDraft([]));
   const [busy, setBusy] = useState(false);
@@ -90,13 +92,22 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const load = useCallback(async (): Promise<void> => {
-    setState({ kind: "loading" });
+  const load = useCallback(async (opts?: { background?: boolean }): Promise<void> => {
+    const mySeq = ++loadSeqRef.current;
+    const background = opts?.background === true;
+    if (!background) {
+      setState({ kind: "loading" });
+    }
     try {
       const r = await getGroups();
-      setState({ kind: "ok", groups: r.groups, available: r.available_servers });
+      if (mySeq > loadAppliedSeqRef.current) {
+        setState({ kind: "ok", groups: r.groups, available: r.available_servers });
+        loadAppliedSeqRef.current = mySeq;
+      }
     } catch (e) {
-      setState({ kind: "error", error: asError(e) });
+      if (mySeq > loadAppliedSeqRef.current && !background) {
+        setState({ kind: "error", error: asError(e) });
+      }
     }
   }, []);
 
@@ -105,9 +116,15 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
   }, [load]);
 
   const onHubHealth = useCallback((_ev: MessageEvent) => {
-    void load();
+    void load({ background: true });
   }, [load]);
-  useEventSource("/api/events", { "hub-health": onHubHealth });
+  const connectionState = useEventSource("/api/events", { "hub-health": onHubHealth });
+
+  useEffect(() => {
+    if (connectionState === "open") {
+      void load({ background: true });
+    }
+  }, [connectionState, load]);
 
   // The persisted row for the group currently being edited (null for a new
   // group). Drives isDirty and the editor's initial hydration.

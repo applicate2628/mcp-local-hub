@@ -1205,6 +1205,38 @@ describe("DashboardScreen — hub-health banner (Phase-0 item 1)", () => {
     await waitFor(() => expect(banner.getAttribute("data-hub-state")).toBe("down"));
   });
 
+  it("re-hydrates hub health when the document becomes visible", async () => {
+    const healthResponses = [
+      { state: "healthy", degraded: false },
+      { state: "down", degraded: true },
+    ];
+    let healthCalls = 0;
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/hub/health") {
+        healthCalls += 1;
+        const body = healthResponses.shift();
+        if (!body) return Promise.reject(new Error("unexpected extra hub-health fetch"));
+        return Promise.resolve(jsonResponse(200, body));
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const { findAllByRole, findByTestId } = render(<DashboardScreen />);
+    await findAllByRole("button");
+    await waitFor(() => expect(healthCalls).toBe(1));
+
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => expect(healthCalls).toBe(2));
+    const banner = await findByTestId("dashboard-hub-health");
+    expect(banner.getAttribute("data-hub-state")).toBe("down");
+  });
+
   it("keeps a newer hub-health SSE state when the mount GET resolves stale", async () => {
     let resolveMountHealth!: (response: Response) => void;
     const mountHealth = new Promise<Response>((resolve) => {
