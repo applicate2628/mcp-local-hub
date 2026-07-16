@@ -19,9 +19,9 @@ import (
 // the F4 headless path: incumbent reachable on /api/ping, but its
 // OnActivateWindow callback returned ErrActivationNoTarget, so the
 // handler responds 503. TryActivateIncumbent must wrap that into the
-// typed sentinel so cli/gui.go can print SSH-tunnel guidance instead
-// of falsely claiming "activated existing mcphub gui". Sonnet review
-// on PR #26 I2 (handshake_test.go missing 503 coverage).
+// typed error with a reason so cli/gui.go can choose SSH-tunnel or local
+// browser guidance instead of falsely claiming activation. Sonnet review on
+// PR #26 I2 (handshake_test.go missing 503 coverage).
 func TestHandshake_503ActivateReturnsErrIncumbentNoActivationTarget(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
@@ -29,6 +29,7 @@ func TestHandshake_503ActivateReturnsErrIncumbentNoActivationTarget(t *testing.T
 		_, _ = w.Write([]byte(`{"ok":true,"pid":111,"version":"t"}`))
 	})
 	mux.HandleFunc("/api/activate-window", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(activationNoTargetReasonHeader, string(ReasonHeadless))
 		http.Error(w, "headless session", http.StatusServiceUnavailable)
 	})
 	ts := httptest.NewServer(mux)
@@ -47,6 +48,42 @@ func TestHandshake_503ActivateReturnsErrIncumbentNoActivationTarget(t *testing.T
 	}
 	if !errors.Is(err, ErrIncumbentNoActivationTarget) {
 		t.Errorf("expected ErrIncumbentNoActivationTarget, got: %v", err)
+	}
+	var noTarget *IncumbentNoActivationTargetError
+	if !errors.As(err, &noTarget) {
+		t.Fatalf("error type = %T, want *IncumbentNoActivationTargetError", err)
+	}
+	if noTarget.Port != port || noTarget.Reason != ReasonHeadless {
+		t.Errorf("typed error = %+v, want port=%d reason=%q", noTarget, port, ReasonHeadless)
+	}
+}
+
+func TestHandshake_503WithoutReasonDefaultsNoBrowserWindow(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"pid":111,"version":"t"}`))
+	})
+	mux.HandleFunc("/api/activate-window", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "older incumbent without reason", http.StatusServiceUnavailable)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	port := parseTestServerPort(t, ts.URL)
+	dir := apitest.HardenedTempDir(t)
+	pidport := filepath.Join(dir, "gui.pidport")
+	if err := os.WriteFile(pidport, []byte(formatPidport(111, port)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := TryActivateIncumbent(pidport, 2*time.Second)
+	var noTarget *IncumbentNoActivationTargetError
+	if !errors.As(err, &noTarget) {
+		t.Fatalf("error = %v, want *IncumbentNoActivationTargetError", err)
+	}
+	if noTarget.Reason != ReasonNoBrowserWindow {
+		t.Errorf("reason = %q, want version-skew default %q", noTarget.Reason, ReasonNoBrowserWindow)
 	}
 }
 

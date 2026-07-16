@@ -13,78 +13,189 @@ import (
 	"mcp-local-hub/internal/gui"
 )
 
-func TestActivateDashboardFromTray_NoTargetLaunchesBrowserOnce(t *testing.T) {
+func TestActivateDashboardFromTrayDecisionMatrix(t *testing.T) {
 	const (
 		pidportPath = "test-gui.pidport"
 		port        = 19123
 	)
-
-	var log bytes.Buffer
-	activateCalls := 0
-	launchCalls := 0
-	launchedURL := ""
-	activateDashboardFromTray(
-		pidportPath,
-		port,
-		&log,
-		func(gotPath string, gotTimeout time.Duration) error {
-			activateCalls++
-			if gotPath != pidportPath {
-				t.Errorf("pidport path = %q, want %q", gotPath, pidportPath)
-			}
-			if gotTimeout != 500*time.Millisecond {
-				t.Errorf("activation timeout = %v, want 500ms", gotTimeout)
-			}
-			return gui.ErrIncumbentNoActivationTarget
+	unexpected := errors.New("tray transport failed")
+	tests := []struct {
+		name          string
+		activationErr error
+		wantLaunches  int
+		wantLog       string
+	}{
+		{
+			name: "no target",
+			activationErr: &gui.IncumbentNoActivationTargetError{
+				Port: port, Reason: gui.ReasonNoBrowserWindow,
+			},
+			wantLaunches: 1,
+			wantLog:      "no dashboard window to focus",
 		},
-		func(url string) error {
-			launchCalls++
-			launchedURL = url
-			return nil
-		},
-	)
+		{name: "nil", wantLaunches: 0},
+		{name: "unexpected error", activationErr: unexpected, wantLaunches: 0, wantLog: "tray: activate-window failed: tray transport failed"},
+	}
 
-	if activateCalls != 1 {
-		t.Fatalf("activation calls = %d, want 1", activateCalls)
-	}
-	if launchCalls != 1 {
-		t.Fatalf("browser launch calls = %d, want 1", launchCalls)
-	}
-	if want := "http://127.0.0.1:19123/"; launchedURL != want {
-		t.Errorf("launched URL = %q, want %q", launchedURL, want)
-	}
-	if !strings.Contains(log.String(), "no dashboard window to focus") {
-		t.Errorf("fallback log should explain why the browser opened; got %q", log.String())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var log bytes.Buffer
+			activateCalls := 0
+			launchCalls := 0
+			launchedURL := ""
+			activateDashboardFromTray(
+				pidportPath,
+				port,
+				&log,
+				func(gotPath string, gotTimeout time.Duration) error {
+					activateCalls++
+					if gotPath != pidportPath {
+						t.Errorf("pidport path = %q, want %q", gotPath, pidportPath)
+					}
+					if gotTimeout != 500*time.Millisecond {
+						t.Errorf("activation timeout = %v, want 500ms", gotTimeout)
+					}
+					return tt.activationErr
+				},
+				func(url string) error {
+					launchCalls++
+					launchedURL = url
+					return nil
+				},
+			)
+
+			if activateCalls != 1 {
+				t.Fatalf("activation calls = %d, want 1", activateCalls)
+			}
+			if launchCalls != tt.wantLaunches {
+				t.Fatalf("browser launch calls = %d, want %d", launchCalls, tt.wantLaunches)
+			}
+			if tt.wantLaunches == 1 {
+				if want := "http://127.0.0.1:19123/"; launchedURL != want {
+					t.Errorf("launched URL = %q, want %q", launchedURL, want)
+				}
+			}
+			if tt.wantLog != "" && !strings.Contains(log.String(), tt.wantLog) {
+				t.Errorf("log = %q, want substring %q", log.String(), tt.wantLog)
+			}
+		})
 	}
 }
 
-func TestActivateDashboardWindow_NoBrowserNoWindowDoesNotLaunchBrowser(t *testing.T) {
-	var log bytes.Buffer
-	focusCalls := 0
-	launchCalls := 0
-	err := activateDashboardWindow(
-		true,
-		19123,
-		&log,
-		func(title string) error {
-			focusCalls++
-			return gui.ErrFocusNoWindow
-		},
-		func(url string) error {
-			launchCalls++
-			return nil
-		},
-		func() bool { return false },
-	)
+func TestActivateDashboardWindowDecisionMatrix(t *testing.T) {
+	unexpected := errors.New("focus failed")
+	tests := []struct {
+		name         string
+		focusErr     error
+		headless     bool
+		noBrowser    bool
+		wantReason   gui.ActivationNoTargetReason
+		wantLaunches int
+	}{
+		{name: "focus success", headless: true, noBrowser: true},
+		{name: "non-no-window focus error", focusErr: unexpected, headless: true, noBrowser: true},
+		{name: "headless", focusErr: gui.ErrFocusNoWindow, headless: true, wantReason: gui.ReasonHeadless},
+		{name: "no browser and no window", focusErr: gui.ErrFocusNoWindow, noBrowser: true, wantReason: gui.ReasonNoBrowserWindow},
+		{name: "browser fallback", focusErr: gui.ErrFocusNoWindow, wantLaunches: 1},
+	}
 
-	if !errors.Is(err, gui.ErrActivationNoTarget) {
-		t.Fatalf("error = %v, want ErrActivationNoTarget", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var log bytes.Buffer
+			focusCalls := 0
+			launchCalls := 0
+			launchedURL := ""
+			err := activateDashboardWindow(
+				tt.noBrowser,
+				19123,
+				&log,
+				func(title string) error {
+					focusCalls++
+					if title != "Local Dashboard" {
+						t.Errorf("focus title = %q, want Local Dashboard", title)
+					}
+					return tt.focusErr
+				},
+				func(url string) error {
+					launchCalls++
+					launchedURL = url
+					return nil
+				},
+				func() bool { return tt.headless },
+			)
+
+			if tt.wantReason == "" {
+				if err != nil {
+					t.Fatalf("error = %v, want nil", err)
+				}
+			} else {
+				if !errors.Is(err, gui.ErrActivationNoTarget) {
+					t.Fatalf("error = %v, want ErrActivationNoTarget", err)
+				}
+				var noTarget *gui.ActivationNoTargetError
+				if !errors.As(err, &noTarget) {
+					t.Fatalf("error type = %T, want *gui.ActivationNoTargetError", err)
+				}
+				if noTarget.Reason != tt.wantReason {
+					t.Errorf("reason = %q, want %q", noTarget.Reason, tt.wantReason)
+				}
+			}
+			if focusCalls != 1 {
+				t.Errorf("focus calls = %d, want 1", focusCalls)
+			}
+			if launchCalls != tt.wantLaunches {
+				t.Errorf("browser launch calls = %d, want %d", launchCalls, tt.wantLaunches)
+			}
+			if tt.wantLaunches == 1 && launchedURL != "http://127.0.0.1:19123/" {
+				t.Errorf("launched URL = %q, want http://127.0.0.1:19123/", launchedURL)
+			}
+		})
 	}
-	if focusCalls != 1 {
-		t.Errorf("focus calls = %d, want 1", focusCalls)
+}
+
+func TestHandleIncumbentActivationResultGuidance(t *testing.T) {
+	unexpected := errors.New("activate failed")
+	tests := []struct {
+		name        string
+		err         error
+		wantHandled bool
+		wantErr     error
+		wantOutput  string
+	}{
+		{name: "nil"},
+		{
+			name: "headless",
+			err: &gui.IncumbentNoActivationTargetError{
+				Port: 19123, Reason: gui.ReasonHeadless,
+			},
+			wantHandled: true,
+			wantOutput:  "SSH-tunnel and visit http://127.0.0.1:19123/",
+		},
+		{
+			name: "no browser window",
+			err: &gui.IncumbentNoActivationTargetError{
+				Port: 19123, Reason: gui.ReasonNoBrowserWindow,
+			},
+			wantHandled: true,
+			wantOutput:  "no dashboard window to focus. Open http://127.0.0.1:19123/",
+		},
+		{name: "unexpected", err: unexpected, wantErr: unexpected},
 	}
-	if launchCalls != 0 {
-		t.Errorf("browser launch calls = %d, want 0", launchCalls)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			handled, err := handleIncumbentActivationResult(&out, tt.err)
+			if handled != tt.wantHandled {
+				t.Errorf("handled = %v, want %v", handled, tt.wantHandled)
+			}
+			if !errors.Is(err, tt.wantErr) {
+				t.Errorf("error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantOutput != "" && !strings.Contains(out.String(), tt.wantOutput) {
+				t.Errorf("output = %q, want substring %q", out.String(), tt.wantOutput)
+			}
+		})
 	}
 }
 

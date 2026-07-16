@@ -194,6 +194,8 @@ jobs:
         with:
           go-version: stable
       - name: Linux-tagged go test
+        env:
+          MCPHUB_GUI_SPAWN_TESTS: "1"
         run: go test -count=1 -timeout 5m -tags=linux_integration ./internal/cli/ ./internal/process/
       - name: systemd-user smoke (skipped if not present)
         run: |

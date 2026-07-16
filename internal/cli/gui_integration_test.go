@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +15,50 @@ import (
 
 	"mcp-local-hub/internal/gui"
 )
+
+// TestActivateWindowNoBrowserHandlerWiring exercises the production Server
+// handler and CLI activation callback entirely in-process. It deliberately
+// has no MCPHUB_GUI_SPAWN_TESTS gate: no command, browser, or GUI process is
+// started.
+func TestActivateWindowNoBrowserHandlerWiring(t *testing.T) {
+	const port = 19123
+	var log bytes.Buffer
+	focusCalls := 0
+	launchCalls := 0
+
+	s := gui.NewServer(gui.Config{Port: port, PID: 4242})
+	wireDashboardActivation(
+		s,
+		true,
+		&log,
+		func(string) error {
+			focusCalls++
+			return gui.ErrFocusNoWindow
+		},
+		func(string) error {
+			launchCalls++
+			return nil
+		},
+		func() bool { return false },
+	)
+
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:19123/api/activate-window", nil)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if got := rec.Header().Get("X-Mcphub-Activation-No-Target-Reason"); got != string(gui.ReasonNoBrowserWindow) {
+		t.Errorf("reason header = %q, want %q", got, gui.ReasonNoBrowserWindow)
+	}
+	if focusCalls != 1 {
+		t.Errorf("focus calls = %d, want 1", focusCalls)
+	}
+	if launchCalls != 0 {
+		t.Errorf("browser launch calls = %d, want 0", launchCalls)
+	}
+}
 
 // repoRoot locates the module root by walking up from the test's CWD
 // until it finds go.mod. Needed because `go run ./cmd/mcphub` resolves

@@ -18,19 +18,23 @@ var ErrIncumbentNoActivationTarget = errors.New("incumbent reachable but has no 
 
 // IncumbentNoActivationTargetError is the typed error returned when the
 // 503 path fires. It carries the port `TryActivateIncumbent` already
-// verified via /api/ping, so callers can use it directly for no-window
-// guidance instead of re-reading the pidport (which races a successor's
-// pre-bind port=0 write). Implements Is so
+// verified via /api/ping plus the incumbent's refusal reason, so callers can
+// choose correct guidance without re-reading the pidport (which races a
+// successor's pre-bind port=0 write). Implements Is so
 // `errors.Is(err, ErrIncumbentNoActivationTarget)` keeps working.
 // Codex CLI xhigh review on PR #26 P3.
 type IncumbentNoActivationTargetError struct {
 	// Port is the port the incumbent was successfully ping'd on before
 	// the activate-window POST returned 503.
 	Port int
+	// Reason distinguishes a genuinely headless incumbent from a local
+	// --no-browser instance with no window. Older incumbents omit the
+	// wire header, which defaults to ReasonNoBrowserWindow.
+	Reason ActivationNoTargetReason
 }
 
 func (e *IncumbentNoActivationTargetError) Error() string {
-	return fmt.Sprintf("activate-window on port %d: %s", e.Port, ErrIncumbentNoActivationTarget.Error())
+	return fmt.Sprintf("activate-window on port %d: %s: %s", e.Port, ErrIncumbentNoActivationTarget.Error(), e.Reason)
 }
 
 func (e *IncumbentNoActivationTargetError) Is(target error) bool {
@@ -41,9 +45,9 @@ func (e *IncumbentNoActivationTargetError) Is(target error) bool {
 // AcquireSingleInstance returned ErrSingleInstanceBusy. It reads the
 // pidport file to locate the running instance, probes /api/ping with a
 // short total deadline, and if that succeeds posts /api/activate-window.
-// Returns nil if the incumbent was reached and signaled; any non-nil
-// error means the second instance should either escalate (--force) or
-// abort with a human-readable message.
+// Returns nil if the incumbent was reached and signaled, a typed
+// IncumbentNoActivationTargetError if it was reached but could not activate,
+// or another error when the second instance should escalate or abort.
 func TryActivateIncumbent(pidportPath string, totalTimeout time.Duration) error {
 	deadline := time.Now().Add(totalTimeout)
 	client := &http.Client{Timeout: 500 * time.Millisecond}
@@ -119,6 +123,10 @@ func TryActivateIncumbent(pidportPath string, totalTimeout time.Duration) error 
 		if err != nil {
 			return fmt.Errorf("activate-window: %w", err)
 		}
+		reason := ReasonNoBrowserWindow
+		if resp2.Header.Get(activationNoTargetReasonHeader) == string(ReasonHeadless) {
+			reason = ReasonHeadless
+		}
 		resp2.Body.Close()
 		switch resp2.StatusCode {
 		case http.StatusNoContent:
@@ -132,7 +140,7 @@ func TryActivateIncumbent(pidportPath string, totalTimeout time.Duration) error 
 			// ErrIncumbentNoActivationTarget keeps working via the
 			// Is method on the typed error. Codex CLI xhigh review
 			// on PR #26 P3.
-			return &IncumbentNoActivationTargetError{Port: port}
+			return &IncumbentNoActivationTargetError{Port: port, Reason: reason}
 		default:
 			return fmt.Errorf("activate-window status %d", resp2.StatusCode)
 		}
