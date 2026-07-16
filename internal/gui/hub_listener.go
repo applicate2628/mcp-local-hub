@@ -130,6 +130,9 @@ func (s *Server) signalHubListenerRestart() {
 	if s == nil || s.hubRestartCh == nil {
 		return
 	}
+	// The watcher declared the aggregate listener unresponsive and an auto-restart
+	// is now requested — surface "recovering" so the Dashboard stops painting green.
+	s.hubHealth.set(HubHealthRecovering, "")
 	select {
 	case s.hubRestartCh <- struct{}{}:
 	default:
@@ -159,6 +162,7 @@ func normalizeHubListenerRestartDriverOptions(s *Server, opts hubListenerRestart
 			return startHubMcpListenerWithOptions(ctx, true, s.api, startHubMcpListenerOptions{
 				preservePortOnReloadHandlerFailure: true,
 				onUnresponsive:                     s.signalHubListenerRestart,
+				onRecovered:                        s.onHubListenerRecovered,
 			})
 		}
 	}
@@ -166,7 +170,10 @@ func normalizeHubListenerRestartDriverOptions(s *Server, opts hubListenerRestart
 		opts.shutdownFn = ShutdownHubListener
 	}
 	if opts.emitFn == nil {
-		opts.emitFn = api.LogHubMcpEvent
+		// Wrap the log emit so hub-health-relevant restart events also drive the
+		// tracker state (recovering / needs-reconcile / healthy / down) that the
+		// Dashboard + Groups render; the underlying hub-mcp.log audit is unchanged.
+		opts.emitFn = s.hubHealthEmitWrapper(api.LogHubMcpEvent)
 	}
 	if opts.sleepFn == nil {
 		opts.sleepFn = hubListenerRestartSleep
@@ -494,6 +501,7 @@ type startHubMcpListenerOptions struct {
 	preservePortOnReloadHandlerFailure bool
 	reloadHandlerFn                    func(context.Context) (*api.InternalReloadHandler, error)
 	onUnresponsive                     func()
+	onRecovered                        func()
 	healthProbeInterval                time.Duration
 }
 
@@ -729,6 +737,7 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 	// cancellation (hub stop / shutdown), same as the watcher above.
 	healthWatcher := api.NewHubListenerHealthWatcher(port, opts.healthProbeInterval)
 	healthWatcher.SetOnUnresponsive(opts.onUnresponsive)
+	healthWatcher.SetOnRecovered(opts.onRecovered)
 	go healthWatcher.Run(listenerCtx)
 
 	go func() {

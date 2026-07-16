@@ -552,6 +552,7 @@ type Server struct {
 	logs                     logsProvider
 	extractor                extractor
 	events                   *Broadcaster
+	hubHealth                *hubHealthTracker
 	secrets                  secretsAPI
 	settings                 settingsAPI
 	backups                  backupsAPI
@@ -816,6 +817,11 @@ func NewServer(cfg Config) *Server {
 	s.logs = realLogs{}
 	s.extractor = realExtractor{}
 	s.events = NewBroadcaster()
+	s.hubHealth = newHubHealthTracker(func(e Event) {
+		if s.events != nil {
+			s.events.Publish(e)
+		}
+	})
 	s.secrets = realSecretsAPI{}
 	s.settings = realSettingsAPI{}
 	s.backups = realBackupsAPI{}
@@ -851,6 +857,7 @@ func NewServer(cfg Config) *Server {
 	registerBackupsRoutes(s)
 	registerBackupsActionsRoutes(s) // Wave 2: per-timestamp backup restore + delete
 	registerVersionRoutes(s)
+	registerHubHealthRoutes(s)
 	registerDaemonsRoutes(s)
 	registerExportBundleRoutes(s)
 	registerCleanupRoutes(s)

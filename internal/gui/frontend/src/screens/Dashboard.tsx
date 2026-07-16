@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { cleanupOrphans, fetchOrThrow, restartSupervisor } from "../api";
+import { cleanupOrphans, fetchOrThrow, getHubHealth, restartSupervisor } from "../api";
+import type { HubHealth } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { unmanagedStdioCount as countUnmanagedStdio } from "../lib/unmanaged-stdio";
 import { stateShape } from "../lib/status";
@@ -20,6 +21,22 @@ export { formatBytes, formatUptime };
 // on server alone and render one card instead of two.
 function keyFor(r: { server: string; daemon?: string }): string {
   return `${r.server}/${r.daemon ?? "default"}`;
+}
+
+// hubHealthMessage renders plain-language guidance for a degraded gate-ON hub
+// aggregate (Phase-0 item 1) — a user must understand that ALL aggregated MCP
+// traffic is affected, not just one daemon card.
+function hubHealthMessage(h: HubHealth): string {
+  switch (h.state) {
+    case "recovering":
+      return "The aggregated hub is not responding — MCP clients cannot reach any server; auto-recovery is in progress.";
+    case "needs-reconcile":
+      return `The aggregated hub restarted on a new address — installed MCP clients cannot reach any server until their config is refreshed${h.operator_action ? ` (${h.operator_action})` : ""}.`;
+    case "down":
+      return "The aggregated hub is down and did not self-heal — MCP clients cannot reach any server. Restart the hub.";
+    default:
+      return "The aggregated hub is degraded — MCP clients may be unable to reach servers.";
+  }
 }
 
 // BulkAction is the action verb used in /api/{restart,stop}-all and in
@@ -58,6 +75,10 @@ export function DashboardScreen() {
   const [bulkInflight, setBulkInflight] = useState<BulkAction | null>(null);
   const [bulkOutcome, setBulkOutcome] = useState<BulkOutcome | null>(null);
   const [unmanagedStdioCount, setUnmanagedStdioCount] = useState(0);
+  // Phase-0 item 1: honest hub-aggregate health. Fetched on mount, then updated
+  // live by the `hub-health` SSE event so a hung/dead/needs-reconcile hub is
+  // visible instead of every daemon card silently painting green.
+  const [hubHealth, setHubHealth] = useState<HubHealth | null>(null);
   const bulkResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -247,6 +268,11 @@ export function DashboardScreen() {
     pushToast("success", `Daemon ${who} recovered`);
   }, []);
 
+  const onHubHealth = useCallback((ev: MessageEvent) => {
+    const body = JSON.parse(ev.data) as HubHealth;
+    setHubHealth(body);
+  }, []);
+
   // connectionState surfaces the live SSE transport status so the
   // Dashboard header can show a "live / reconnecting…" cue. When the
   // supervisor/GUI drops, native EventSource retries silently; without
@@ -258,7 +284,22 @@ export function DashboardScreen() {
     "poller-error": onPollerError,
     "daemon-failed": onDaemonFailed,
     "daemon-recovered": onDaemonRecovered,
+    "hub-health": onHubHealth,
   });
+
+  // Initial hub-aggregate health (SSE only pushes transitions). Non-fatal: a
+  // failed probe just leaves the badge hidden.
+  useEffect(() => {
+    let cancelled = false;
+    getHubHealth()
+      .then((h) => {
+        if (!cancelled) setHubHealth(h);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Codex bot PR #38 P1 (round 3): safety-net for dropped SSE events.
   // The Broadcaster is lossy (internal/gui/events.go::Publish drops on
@@ -453,6 +494,16 @@ export function DashboardScreen() {
         context="normal"
         onReloadStatus={() => setReloadTrigger((n) => n + 1)}
       />
+      {hubHealth?.degraded && (
+        <p
+          class={`dashboard-hub-health dashboard-hub-health-${hubHealth.state}`}
+          data-testid="dashboard-hub-health"
+          data-hub-state={hubHealth.state}
+          role="alert"
+        >
+          ⚠ {hubHealthMessage(hubHealth)}
+        </p>
+      )}
       {unmanagedStdioCount > 0 && (
         <p
           class="dashboard-unmanaged-stdio"

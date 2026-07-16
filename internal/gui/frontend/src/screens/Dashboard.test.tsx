@@ -1093,3 +1093,40 @@ describe("DashboardScreen — Flowbite card layout + View-logs link", () => {
     expect(card.className).toContain("shadow-sm");
   });
 });
+
+describe("DashboardScreen — hub-health banner (Phase-0 item 1)", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  it("shows a degraded hub banner on a needs-reconcile hub-health SSE event, then hides it when healthy", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([runningRow]));
+    const { findAllByRole, queryByTestId, findByTestId } = render(<DashboardScreen />);
+    await findAllByRole("button");
+
+    // Healthy/unknown → no banner (the whole point: green cards never hide a dead hub silently,
+    // but a healthy hub shows nothing).
+    expect(queryByTestId("dashboard-hub-health")).toBeNull();
+
+    // A needs-reconcile hub silently kills all aggregated traffic — the banner must say so.
+    dispatchSse("hub-health", {
+      state: "needs-reconcile",
+      degraded: true,
+      operator_action: "mcphub install --reconcile-hub-mode",
+    });
+    const banner = await findByTestId("dashboard-hub-health");
+    expect(banner.getAttribute("data-hub-state")).toBe("needs-reconcile");
+    expect(banner.textContent).toContain("cannot reach any server");
+    expect(banner.textContent).toContain("reconcile");
+
+    // Recovered → banner gone.
+    dispatchSse("hub-health", { state: "healthy", degraded: false });
+    await waitFor(() => expect(queryByTestId("dashboard-hub-health")).toBeNull());
+  });
+});
