@@ -51,12 +51,12 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	// $WAYLAND_DISPLAY — the standard ubuntu-latest CI shape) the
 	// incumbent's OnActivateWindow callback returns ErrActivationNoTarget,
 	// the handler maps to 503, and the second instance prints the
-	// SSH-tunnel guidance instead of "activated existing mcphub gui".
+	// no-window guidance instead of "activated existing mcphub gui".
 	// The "activated" assertion below would spuriously fail on that
 	// path, even though the headless contract is working as designed.
 	// Sonnet review on PR #26 P1 (gui_integration_test.go:107).
 	if runtime.GOOS == "linux" && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
-		t.Skip("headless Linux: second instance prints SSH-tunnel guidance, not 'activated' (PR #26 F4 contract)")
+		t.Skip("headless Linux: second instance prints no-window guidance, not 'activated' (PR #26 F4 contract)")
 	}
 	// Use a standalone temp dir we control manually: go-exec's child
 	// process (the built mcphub.exe) can outlive Cmd.Wait on Windows
@@ -182,13 +182,13 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 	// (--no-browser refuses LaunchBrowser fallback in the callback)
 	// makes the activate-window handler return 503 → handshake
 	// returns ErrIncumbentNoActivationTarget → second instance prints
-	// the headless-style guidance instead of "activated". Either
+	// the no-window guidance instead of "activated". Either
 	// output proves the handshake reached the incumbent.
 	out2 := string(out)
 	ok := strings.Contains(out2, "activated") ||
-		strings.Contains(out2, "already running headless")
+		strings.Contains(out2, "no dashboard window to focus")
 	if !ok {
-		t.Errorf("second instance output should confirm handshake (activated OR headless guidance); got: %s", out2)
+		t.Errorf("second instance output should confirm handshake (activated OR no-window guidance); got: %s", out2)
 	}
 
 	// ISOLATION PROOF (PR #300 r1 P1 + r2 P2): assert the child's

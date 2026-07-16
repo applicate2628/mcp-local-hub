@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,81 @@ import (
 	"mcp-local-hub/internal/api/serena_routing"
 	"mcp-local-hub/internal/gui"
 )
+
+func TestActivateDashboardFromTray_NoTargetLaunchesBrowserOnce(t *testing.T) {
+	const (
+		pidportPath = "test-gui.pidport"
+		port        = 19123
+	)
+
+	var log bytes.Buffer
+	activateCalls := 0
+	launchCalls := 0
+	launchedURL := ""
+	activateDashboardFromTray(
+		pidportPath,
+		port,
+		&log,
+		func(gotPath string, gotTimeout time.Duration) error {
+			activateCalls++
+			if gotPath != pidportPath {
+				t.Errorf("pidport path = %q, want %q", gotPath, pidportPath)
+			}
+			if gotTimeout != 500*time.Millisecond {
+				t.Errorf("activation timeout = %v, want 500ms", gotTimeout)
+			}
+			return gui.ErrIncumbentNoActivationTarget
+		},
+		func(url string) error {
+			launchCalls++
+			launchedURL = url
+			return nil
+		},
+	)
+
+	if activateCalls != 1 {
+		t.Fatalf("activation calls = %d, want 1", activateCalls)
+	}
+	if launchCalls != 1 {
+		t.Fatalf("browser launch calls = %d, want 1", launchCalls)
+	}
+	if want := "http://127.0.0.1:19123/"; launchedURL != want {
+		t.Errorf("launched URL = %q, want %q", launchedURL, want)
+	}
+	if !strings.Contains(log.String(), "no dashboard window to focus") {
+		t.Errorf("fallback log should explain why the browser opened; got %q", log.String())
+	}
+}
+
+func TestActivateDashboardWindow_NoBrowserNoWindowDoesNotLaunchBrowser(t *testing.T) {
+	var log bytes.Buffer
+	focusCalls := 0
+	launchCalls := 0
+	err := activateDashboardWindow(
+		true,
+		19123,
+		&log,
+		func(title string) error {
+			focusCalls++
+			return gui.ErrFocusNoWindow
+		},
+		func(url string) error {
+			launchCalls++
+			return nil
+		},
+		func() bool { return false },
+	)
+
+	if !errors.Is(err, gui.ErrActivationNoTarget) {
+		t.Fatalf("error = %v, want ErrActivationNoTarget", err)
+	}
+	if focusCalls != 1 {
+		t.Errorf("focus calls = %d, want 1", focusCalls)
+	}
+	if launchCalls != 0 {
+		t.Errorf("browser launch calls = %d, want 0", launchCalls)
+	}
+}
 
 func TestGuiCmd_HelpIncludesFlags(t *testing.T) {
 	cmd := newGuiCmdReal()

@@ -341,16 +341,16 @@ activates the first window and exits 0.`,
 				if err := gui.TryActivateIncumbent(pidportPath, 2*time.Second); err != nil {
 					var ina *gui.IncumbentNoActivationTargetError
 					if errors.As(err, &ina) {
-						// Incumbent reachable but headless — print
-						// SSH-tunnel guidance using the port the
+						// Incumbent reachable but has no dashboard window
+						// to focus. Print the URL using the port the
 						// handshake already verified via /api/ping.
 						// We do NOT re-read the pidport: that races a
 						// successor's pre-bind port=0 write and turns
 						// usable guidance into a spurious error.
 						// Codex CLI xhigh review on PR #26 P3.
 						fmt.Fprintf(cmd.OutOrStdout(),
-							"mcphub gui is already running headless on port %d. SSH-tunnel and visit http://127.0.0.1:%d/\n",
-							ina.Port, ina.Port)
+							"mcphub gui is already running but has no dashboard window to focus. Open http://127.0.0.1:%d/ in a browser.\n",
+							ina.Port)
 						return nil
 					}
 					return fmt.Errorf(
@@ -378,6 +378,64 @@ activates the first window and exits 0.`,
 	_ = c.Flags().MarkHidden("yes")
 	_ = c.Flags().MarkHidden("reveal")
 	return c
+}
+
+func activateDashboardWindow(
+	noBrowser bool,
+	port int,
+	stderr io.Writer,
+	focusWindow func(string) error,
+	launchBrowser func(string) error,
+	headlessSession func() bool,
+) error {
+	err := focusWindow("Local Dashboard")
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, gui.ErrFocusNoWindow) {
+		// Win32 transient failure — log + best-effort 204 so the
+		// second invocation prints "activated" (incumbent IS
+		// reachable, just focus jitter happened).
+		fmt.Fprintf(stderr,
+			"activate-window: focus failed (no fallback for non-no-window error): %v\n", err)
+		return nil
+	}
+	if headlessSession() {
+		fmt.Fprintln(stderr,
+			"activate-window: focus failed and headless session — no browser to open")
+		return gui.ErrActivationNoTarget
+	}
+	if noBrowser {
+		fmt.Fprintln(stderr,
+			"activate-window: focus failed and --no-browser is set — not launching a browser")
+		return gui.ErrActivationNoTarget
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+	if launchErr := launchBrowser(url); launchErr != nil {
+		fmt.Fprintf(stderr,
+			"activate-window: focus failed (%v); browser launch also failed: %v\n",
+			err, launchErr)
+	}
+	return nil
+}
+
+func activateDashboardFromTray(
+	pidportPath string,
+	port int,
+	stderr io.Writer,
+	tryActivate func(string, time.Duration) error,
+	launchBrowser func(string) error,
+) {
+	err := tryActivate(pidportPath, 500*time.Millisecond)
+	if !errors.Is(err, gui.ErrIncumbentNoActivationTarget) {
+		return
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+	fmt.Fprintf(stderr,
+		"tray: incumbent has no dashboard window to focus; opening %s\n", url)
+	if err := launchBrowser(url); err != nil {
+		fmt.Fprintf(stderr, "tray: browser launch failed: %v\n", err)
+	}
 }
 
 // startGuiServer runs Phase B: server start, status poller, optional
@@ -519,68 +577,14 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 			"serena-router: registry path resolution failed; /serena/mcp will return 503 until next restart: %v\n", regErr)
 	}
 	s.OnActivateWindow(func() error {
-		// Phase 3B-II C2: focus the existing Chrome app-mode dashboard
-		// via Win32 SetForegroundWindow. Title-substring "Local
-		// Dashboard" disambiguates from other "mcp-local-hub" windows
-		// (Cursor IDE, terminals, file explorer).
-		err := gui.FocusBrowserWindow("Local Dashboard")
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, gui.ErrFocusNoWindow) {
-			// Win32 transient failure — log + best-effort 204 so the
-			// second invocation prints "activated" (incumbent IS
-			// reachable, just focus jitter happened).
-			fmt.Fprintf(cmd.OutOrStderr(),
-				"activate-window: focus failed (no fallback for non-no-window error): %v\n", err)
-			return nil
-		}
-		// Pre-2026-05-20 there was a `if noBrowser { return
-		// ErrActivationNoTarget }` guard here, originally added to
-		// stop an orphan `mcphub gui --no-browser` from spawning an
-		// uninvited Chrome window when a local actor POSTed
-		// /api/activate-window. But that conflated two intents: the
-		// `--no-browser` startup flag suppresses the AUTO-launch at
-		// GUI boot (line ~470 below), while /api/activate-window is
-		// only reachable via the CSRF + same-origin gate — i.e. only
-		// from a browser tab on the mcphub origin OR from a
-		// process the operator already trusts (the tray child it
-		// spawned). Honoring tray clicks even under `--no-browser`
-		// matches the user's expectation: clicking "Open dashboard"
-		// in the tray IS the explicit consent the original guard
-		// was protecting against. The CSRF middleware remains the
-		// authoritative defense against unauthorized callers.
-		// Headless Linux: no display server, browser launch would
-		// xdg-open-fail noisily. Surface ErrActivationNoTarget so
-		// the second instance prints SSH-tunnel guidance (PR #26 F4).
-		if gui.HeadlessSession() {
-			fmt.Fprintln(cmd.OutOrStderr(),
-				"activate-window: focus failed and headless session — no browser to open")
-			return gui.ErrActivationNoTarget
-		}
-		// `--no-browser` + no window to focus: there is nothing to
-		// ACTIVATE, so the fallback below would not be "honoring a tray
-		// click" — it would spawn an UNINVITED browser the operator
-		// explicitly opted out of. The tray-consent reasoning above only
-		// holds while a window EXISTS (focus succeeds and returns early);
-		// once focus reports ErrFocusNoWindow under --no-browser, refuse
-		// like the headless branch. Without this, every second `mcphub
-		// gui` invocation (notably the cli test suite, which spawns real
-		// `mcphub gui --no-browser` children) makes the incumbent
-		// headless GUI pop a dashboard window onto the operator's desktop.
-		if noBrowser {
-			fmt.Fprintln(cmd.OutOrStderr(),
-				"activate-window: focus failed and --no-browser is set — not launching a browser")
-			return gui.ErrActivationNoTarget
-		}
-		url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
-		if launchErr := gui.LaunchBrowser(url); launchErr != nil {
-			fmt.Fprintf(cmd.OutOrStderr(),
-				"activate-window: focus failed (%v); browser launch also failed: %v\n",
-				err, launchErr)
-			return nil
-		}
-		return nil
+		return activateDashboardWindow(
+			noBrowser,
+			s.Port(),
+			cmd.OutOrStderr(),
+			gui.FocusBrowserWindow,
+			gui.LaunchBrowser,
+			gui.HeadlessSession,
+		)
 	})
 
 	ready := make(chan struct{})
@@ -797,7 +801,13 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 
 			if err := tray.Run(ctx, tray.Config{
 				ActivateWindow: func() {
-					_ = gui.TryActivateIncumbent(pidportPath, 500*time.Millisecond)
+					activateDashboardFromTray(
+						pidportPath,
+						port,
+						cmd.OutOrStderr(),
+						gui.TryActivateIncumbent,
+						gui.LaunchBrowser,
+					)
 				},
 				StateCh:          trayStateCh,
 				StateReadRelaxCh: stateRelaxCh,

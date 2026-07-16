@@ -9,17 +9,16 @@ import (
 )
 
 // ErrIncumbentNoActivationTarget signals that the incumbent GUI process
-// was reachable but reported it cannot bring a window to front (currently
-// the headless-Linux case — see ErrActivationNoTarget). Callers of
-// TryActivateIncumbent (cli/gui.go) use errors.Is to distinguish this
-// non-fatal "incumbent alive but headless" outcome from "incumbent
-// unreachable" and print useful guidance to the operator. Codex bot
-// review on PR #26 P2.
-var ErrIncumbentNoActivationTarget = errors.New("incumbent reachable but cannot activate window (headless session)")
+// was reachable but reported it cannot bring a dashboard window to front.
+// Callers of TryActivateIncumbent (cli/gui.go) use errors.Is to distinguish
+// this non-fatal "incumbent alive but no activation target" outcome from
+// "incumbent unreachable" and print useful guidance to the operator.
+// Codex bot review on PR #26 P2.
+var ErrIncumbentNoActivationTarget = errors.New("incumbent reachable but has no dashboard window to focus")
 
 // IncumbentNoActivationTargetError is the typed error returned when the
 // 503 path fires. It carries the port `TryActivateIncumbent` already
-// verified via /api/ping, so callers can use it directly for SSH-tunnel
+// verified via /api/ping, so callers can use it directly for no-window
 // guidance instead of re-reading the pidport (which races a successor's
 // pre-bind port=0 write). Implements Is so
 // `errors.Is(err, ErrIncumbentNoActivationTarget)` keeps working.
@@ -126,8 +125,8 @@ func TryActivateIncumbent(pidportPath string, totalTimeout time.Duration) error 
 			return nil
 		case http.StatusServiceUnavailable:
 			// Incumbent reachable but cannot focus / launch a window
-			// (headless). Return a typed error carrying the verified
-			// port so the cli caller can print SSH-tunnel guidance
+			// (no activation target). Return a typed error carrying the
+			// verified port so the cli caller can print no-window guidance
 			// without re-reading the pidport (which races a
 			// successor's pre-bind port=0 write). errors.Is against
 			// ErrIncumbentNoActivationTarget keeps working via the
