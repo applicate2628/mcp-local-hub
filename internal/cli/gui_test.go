@@ -21,20 +21,38 @@ func TestActivateDashboardFromTrayDecisionMatrix(t *testing.T) {
 	unexpected := errors.New("tray transport failed")
 	tests := []struct {
 		name          string
+		requestedPort int // what startGuiServer passes in (the --port FLAG value)
 		activationErr error
 		wantLaunches  int
+		wantURL       string
 		wantLog       string
 	}{
 		{
-			name: "no target",
+			name:          "no target",
+			requestedPort: port,
 			activationErr: &gui.IncumbentNoActivationTargetError{
 				Port: port, Reason: gui.ReasonNoBrowserWindow,
 			},
 			wantLaunches: 1,
+			wantURL:      "http://127.0.0.1:19123/",
 			wantLog:      "no dashboard window to focus",
 		},
-		{name: "nil", wantLaunches: 0},
-		{name: "unexpected error", activationErr: unexpected, wantLaunches: 0, wantLog: "tray: activate-window failed: tray transport failed"},
+		{
+			// The default `--port 0` (an ephemeral bind) is the production
+			// posture: the REQUESTED port stays 0 while the server binds a real
+			// one. The URL must come from the handshake-verified port on the
+			// typed error, or the tray opens http://127.0.0.1:0/.
+			name:          "no target under default --port 0 uses the bound port",
+			requestedPort: 0,
+			activationErr: &gui.IncumbentNoActivationTargetError{
+				Port: port, Reason: gui.ReasonNoBrowserWindow,
+			},
+			wantLaunches: 1,
+			wantURL:      "http://127.0.0.1:19123/",
+			wantLog:      "no dashboard window to focus",
+		},
+		{name: "nil", requestedPort: port, wantLaunches: 0},
+		{name: "unexpected error", requestedPort: port, activationErr: unexpected, wantLaunches: 0, wantLog: "tray: activate-window failed: tray transport failed"},
 	}
 
 	for _, tt := range tests {
@@ -45,7 +63,7 @@ func TestActivateDashboardFromTrayDecisionMatrix(t *testing.T) {
 			launchedURL := ""
 			activateDashboardFromTray(
 				pidportPath,
-				port,
+				tt.requestedPort,
 				&log,
 				func(gotPath string, gotTimeout time.Duration) error {
 					activateCalls++
@@ -70,10 +88,8 @@ func TestActivateDashboardFromTrayDecisionMatrix(t *testing.T) {
 			if launchCalls != tt.wantLaunches {
 				t.Fatalf("browser launch calls = %d, want %d", launchCalls, tt.wantLaunches)
 			}
-			if tt.wantLaunches == 1 {
-				if want := "http://127.0.0.1:19123/"; launchedURL != want {
-					t.Errorf("launched URL = %q, want %q", launchedURL, want)
-				}
+			if tt.wantLaunches == 1 && launchedURL != tt.wantURL {
+				t.Errorf("launched URL = %q, want %q", launchedURL, tt.wantURL)
 			}
 			if tt.wantLog != "" && !strings.Contains(log.String(), tt.wantLog) {
 				t.Errorf("log = %q, want substring %q", log.String(), tt.wantLog)

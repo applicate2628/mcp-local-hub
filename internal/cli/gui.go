@@ -464,11 +464,23 @@ func activateDashboardFromTray(
 	if err == nil {
 		return
 	}
-	if !errors.Is(err, gui.ErrIncumbentNoActivationTarget) {
+	var noTarget *gui.IncumbentNoActivationTargetError
+	if !errors.As(err, &noTarget) {
 		fmt.Fprintf(stderr, "tray: activate-window failed: %v\n", err)
 		return
 	}
-	url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+	// Build the URL from the port the handshake ALREADY VERIFIED via /api/ping,
+	// not from `port`: that is the REQUESTED port, which is 0 under the default
+	// `--port 0` (the server bound an ephemeral one), so a tray click would open
+	// http://127.0.0.1:0/. The typed error carries the verified port precisely so
+	// callers need not re-read the pidport, which races a successor's pre-bind
+	// port=0 write. Fall back to the requested port only if the error somehow
+	// carries none (an explicit `--port N` run).
+	activePort := noTarget.Port
+	if activePort == 0 {
+		activePort = port
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/", activePort)
 	fmt.Fprintf(stderr,
 		"tray: incumbent has no dashboard window to focus; opening %s\n", url)
 	if err := launchBrowser(url); err != nil {

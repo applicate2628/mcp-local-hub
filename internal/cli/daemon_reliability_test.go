@@ -151,8 +151,12 @@ func TestReliability_VersionCommandExitsZero(t *testing.T) {
 // translation, cobra's SilenceErrors/SilenceUsage in the real launch
 // path, or the OS-level exit-code propagation Task Scheduler
 // observes. This subprocess version closes that gap.
+// NOT gated behind MCPHUB_GUI_SPAWN_TESTS: this spawns the real binary but the
+// run deliberately fails at manifest load, BEFORE any daemon child is launched,
+// so it opens no window and cannot cause the desktop spam that gate exists to
+// prevent. Gating it would drop the only routine coverage of main.go's exit-code
+// translation and the launch-failure log write.
 func TestReliability_DaemonCmdUnknownServerExitsNonZeroQuickly(t *testing.T) {
-	requireGuiSpawnTests(t)
 	bin := ensureMcphubBinary(t)
 	tmpHome := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
