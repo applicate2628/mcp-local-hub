@@ -138,6 +138,31 @@ Expected file set: new `internal/daemonrecovery/` operation plus tests; thin edi
 4. `{ guarantee: Every Dashboard status color derives from one status.ts bucket classifier; single-owner: daemonStateVisual; enforcement-probe: status.ts table test and Dashboard source test remove the local Running-vs-other color ternary. }`
 5. `{ guarantee: Dashboard does not offer the known-refused normal Restart action for a quarantined daemon; single-owner: Card recovery eligibility helper; enforcement-probe: Quarantined-card test finds Recover and no Restart. }`
 
-## Open question
+## Open question — RESOLVED 2026-07-16 ($lead)
 
-Should Productization define and emit a separate canonical `LostChild` status, or is the current `Quarantined` state the only intended GUI entry point for the lost-child recovery class? This design is safe with the latter and deliberately will not infer the former from diagnostics.
+> Should Productization define and emit a separate canonical `LostChild` status, or is the current
+> `Quarantined` state the only intended GUI entry point for the lost-child recovery class?
+
+**Decision: NO separate `LostChild` wire state in this item. `Quarantined` is the GUI entry point.**
+
+Rationale:
+
+1. **The condition is proven at execution time, not at classification time.** The recovery operation
+   establishes port ownership + verified identity at the destructive boundary; that proof cannot be
+   hoisted into a status field the poller writes seconds earlier. A pre-classified `LostChild` would be
+   a *prediction*, and the operation would still have to re-prove it.
+2. **The only available inference sources are lies.** `orphan_pid` is a Windows post-create diagnostic,
+   not evidence of a port squatter; PID/state do not prove ownership either. Inferring `LostChild` from
+   them is exactly the dishonest-status class this Phase-0 exists to eliminate — the same mistake as
+   painting a dead hub green.
+3. **A new wire enum is a cross-cutting change with no user-facing gain here.** It would ripple through
+   the Go status type, the TS union, every consumer switch, and the embedded bundle, for a value the
+   operator does not act on differently: a quarantined daemon is what they see and what they want
+   recovered, whatever the underlying cause.
+4. **Nothing is foreclosed.** `isRecoveryEligibleState` admits `Quarantined` today and is written so a
+   future canonical backend state can be added by EXACT value. It must never widen by inference from
+   `orphan_pid`, PID, or an unknown/unmodelled state — the same "present-but-unknown ⇒ generic, never
+   invent a story" rule the hub-health reason classifier landed on in item 1.
+
+If a later item makes the supervisor emit a canonical lost-child state (i.e. the backend itself proves
+it), admitting it is a one-line widening of the helper plus its table test.
