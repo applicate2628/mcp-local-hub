@@ -39,6 +39,7 @@ func repoRoot(t *testing.T) string {
 // and asserts the second exits 0 without binding a new port (the first
 // keeps running).
 func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
+	requireGuiSpawnTests(t)
 	if testing.Short() {
 		t.Skip("subprocess test")
 	}

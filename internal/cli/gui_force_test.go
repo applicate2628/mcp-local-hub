@@ -882,6 +882,7 @@ func TestForce_KillRecoveryHealthyBetweenProbes(t *testing.T) {
 // ---------------------------------------------------------------
 
 func TestForce_RealSubprocessE2E(t *testing.T) {
+	requireGuiSpawnTests(t)
 	// Use the existing ensureMcphubBinary pattern from
 	// daemon_reliability_test.go.
 	bin := ensureMcphubBinary(t)

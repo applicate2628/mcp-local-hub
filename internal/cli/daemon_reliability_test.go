@@ -152,6 +152,7 @@ func TestReliability_VersionCommandExitsZero(t *testing.T) {
 // path, or the OS-level exit-code propagation Task Scheduler
 // observes. This subprocess version closes that gap.
 func TestReliability_DaemonCmdUnknownServerExitsNonZeroQuickly(t *testing.T) {
+	requireGuiSpawnTests(t)
 	bin := ensureMcphubBinary(t)
 	tmpHome := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

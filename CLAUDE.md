@@ -21,6 +21,9 @@ go build ./... && go vet ./... && go test -count=1 -timeout 5m ./...
 go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/
 ```
 
+CLI tests that launch real `mcphub` GUI, supervisor, or daemon processes are
+skipped by default. CI must set `MCPHUB_GUI_SPAWN_TESTS=1` to enable them.
+
 Both must be clean. If a subagent reported "all green" — do NOT trust;
 re-run these commands yourself before reporting status to the user.
 
