@@ -612,10 +612,16 @@ type Server struct {
 	// goroutine; they discriminate flapping from a fresh outage and cap
 	// rolling restart attempts.
 	hubRestartCh             chan struct{}
+	hubRestartDriverAlive    atomic.Bool
 	hubRestartConsecutive    int
 	hubRestartLastSuccess    time.Time
 	hubRestartWindowStart    time.Time
 	hubRestartWindowAttempts int
+
+	// Hub startup test seams. Production leaves both nil and uses the settings
+	// registry plus startHubMcpListenerWithOptions directly.
+	hubEndpointGateFn     func(*api.API) bool
+	startHubMcpListenerFn func(context.Context, bool, *api.API, startHubMcpListenerOptions) (*HubListenerComponents, error)
 
 	// Phase C.2 (v0.5.x serena routing) -- holds the resolver +
 	// session-router bundle wired by SetSerenaRouterDeps. Atomic so a
@@ -1032,12 +1038,22 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	// listener into s.hubMcpComp after Start has already returned —
 	// the explicit cancel + defer below covers both shutdown paths.
 	hubEnabled := readHubEndpointGateFromSettings(s.api)
+	if s.hubEndpointGateFn != nil {
+		hubEnabled = s.hubEndpointGateFn(s.api)
+	}
+	if hubEnabled {
+		s.hubHealth.set(HubHealthRecovering, "")
+	}
+	hubStartFn := startHubMcpListenerWithOptions
+	if s.startHubMcpListenerFn != nil {
+		hubStartFn = s.startHubMcpListenerFn
+	}
 	hubInitCtx, hubInitCancel := context.WithCancel(ctx)
 	defer hubInitCancel()
 	hubInitDone := make(chan struct{})
 	go func() {
 		defer close(hubInitDone)
-		hubComp, hubErr := startHubMcpListenerWithOptions(hubInitCtx, hubEnabled, s.api, startHubMcpListenerOptions{
+		hubComp, hubErr := hubStartFn(hubInitCtx, hubEnabled, s.api, startHubMcpListenerOptions{
 			server:         s,
 			onUnresponsive: s.signalHubListenerRestart,
 			onRecovered:    s.onHubListenerRecovered,
@@ -1085,6 +1101,9 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		// take-the-bundle-or-take-nothing.
 		if !s.hubMcpComp.CompareAndSwap(nil, hubComp) {
 			ShutdownHubListener(context.Background(), hubComp)
+			if hubEnabled {
+				s.hubHealth.set(HubHealthDown, "")
+			}
 			return
 		}
 		if hubInitCtx.Err() != nil {
@@ -1092,8 +1111,11 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 				ShutdownHubListener(context.Background(), hubComp)
 			}
 			// else: shutdown path already swapped — it owns teardown.
+			return
 		}
+		s.hubHealth.markHealthy()
 	}()
+	s.hubRestartDriverAlive.Store(true)
 	go runHubListenerRestartDriver(hubInitCtx, s, hubListenerRestartDriverOptions{})
 
 	select {

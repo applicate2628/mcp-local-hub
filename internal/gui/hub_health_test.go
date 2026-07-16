@@ -3,10 +3,13 @@ package gui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 func recvHubHealth(t *testing.T, ch <-chan Event) Event {
@@ -217,5 +220,100 @@ func TestHubHealthGetReturnsCurrentState(t *testing.T) {
 	_ = json.NewDecoder(rec2.Body).Decode(&dto2)
 	if dto2.State != "healthy" || dto2.Degraded {
 		t.Fatalf("dto2=%+v, want healthy + not degraded", dto2)
+	}
+}
+
+func TestServerHubHealthTracksInitialStartup(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		enabled     bool
+		startErr    error
+		pendingWant HubHealthState
+		finalWant   HubHealthState
+	}{
+		{
+			name:        "gate on success",
+			enabled:     true,
+			pendingWant: HubHealthRecovering,
+			finalWant:   HubHealthHealthy,
+		},
+		{
+			name:        "gate off stays inert",
+			enabled:     false,
+			pendingWant: HubHealthHealthy,
+			finalWant:   HubHealthHealthy,
+		},
+		{
+			name:        "gate on failure",
+			enabled:     true,
+			startErr:    errors.New("injected hub startup failure"),
+			pendingWant: HubHealthRecovering,
+			finalWant:   HubHealthDown,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewServer(Config{Port: 0})
+			s.hubEndpointGateFn = func(*api.API) bool { return tc.enabled }
+			started := make(chan struct{})
+			release := make(chan struct{})
+			s.startHubMcpListenerFn = func(ctx context.Context, enabled bool, _ *api.API, _ startHubMcpListenerOptions) (*HubListenerComponents, error) {
+				if enabled != tc.enabled {
+					t.Errorf("startup enabled = %v, want %v", enabled, tc.enabled)
+				}
+				close(started)
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
+				if tc.startErr != nil {
+					return nil, tc.startErr
+				}
+				if !enabled {
+					return nil, nil
+				}
+				return liveRestartTestComp(9201), nil
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			ready := make(chan struct{})
+			startDone := make(chan error, 1)
+			go func() { startDone <- s.Start(ctx, ready) }()
+			defer func() {
+				cancel()
+				select {
+				case <-startDone:
+				case <-time.After(2 * time.Second):
+					t.Error("Server.Start did not stop after cancellation")
+				}
+			}()
+
+			select {
+			case <-ready:
+			case <-time.After(2 * time.Second):
+				t.Fatal("Server.Start did not signal GUI readiness")
+			}
+			select {
+			case <-started:
+			case <-time.After(2 * time.Second):
+				t.Fatal("hub startup seam was not entered")
+			}
+			if got, action := s.hubHealth.snapshot(); got != tc.pendingWant || action != "" {
+				t.Fatalf("pending health = state %q action %q, want %q", got, action, tc.pendingWant)
+			}
+
+			close(release)
+			deadline := time.Now().Add(2 * time.Second)
+			for {
+				got, action := s.hubHealth.snapshot()
+				if got == tc.finalWant && action == "" {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("final health = state %q action %q, want %q", got, action, tc.finalWant)
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		})
 	}
 }

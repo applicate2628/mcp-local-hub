@@ -1016,6 +1016,13 @@ func TestHubListenerRestartDriverNilBatonStopsWithoutDoubleShutdown(t *testing.T
 	if shutdowns != 0 {
 		t.Fatalf("shutdown calls with nil baton = %d, want 0", shutdowns)
 	}
+	if s.hubRestartDriverAlive.Load() {
+		t.Fatal("restart driver remained live after a non-shutdown stop")
+	}
+	s.signalHubListenerRestart()
+	if got, action := s.hubHealth.snapshot(); got != HubHealthDown || action != "" {
+		t.Fatalf("health after signaling stopped driver = state %q action %q, want down", got, action)
+	}
 }
 
 func TestHubListenerRestartStartPreservesPortOnReloadHandlerFailure(t *testing.T) {
@@ -1264,5 +1271,49 @@ func TestHubListenerRestartSignalIsNonBlockingAndCoalesced(t *testing.T) {
 	case <-s.hubRestartCh:
 		t.Fatal("restart signal channel accepted duplicate pending signal; want coalesced buffered-1")
 	default:
+	}
+}
+
+func TestHubListenerRestartSignalPublishesHealthByDriverLiveness(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		alive bool
+		want  HubHealthState
+	}{
+		{name: "driver alive", alive: true, want: HubHealthRecovering},
+		{name: "driver stopped", alive: false, want: HubHealthDown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewServer(Config{Port: 0})
+			s.hubRestartDriverAlive.Store(tc.alive)
+
+			s.signalHubListenerRestart()
+
+			if got, action := s.hubHealth.snapshot(); got != tc.want || action != "" {
+				t.Fatalf("health = state %q action %q, want %q", got, action, tc.want)
+			}
+		})
+	}
+}
+
+func TestHubListenerRestartDriverCleanCancellationPreservesShutdownHealthSemantics(t *testing.T) {
+	s := NewServer(Config{Port: 0})
+	s.hubRestartDriverAlive.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runHubListenerRestartDriver(ctx, s, hubListenerRestartDriverOptions{})
+	}()
+
+	cancel()
+	waitRestartDriverDone(t, done)
+	if !s.hubRestartDriverAlive.Load() {
+		t.Fatal("clean shutdown cleared driver liveness and would turn a late watcher signal into false down")
+	}
+
+	s.signalHubListenerRestart()
+	if got, action := s.hubHealth.snapshot(); got != HubHealthRecovering || action != "" {
+		t.Fatalf("health after clean-shutdown late signal = state %q action %q, want recovering", got, action)
 	}
 }

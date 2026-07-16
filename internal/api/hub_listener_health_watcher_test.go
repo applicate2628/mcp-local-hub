@@ -176,6 +176,8 @@ func TestHealthWatcherRecoveryEvent(t *testing.T) {
 	w, events, setDial := newTestHealthWatcher(3439)
 	ctx := context.Background()
 	fail := errors.New("connection refused")
+	recoveredCallbacks := 0
+	w.onRecovered = func() { recoveredCallbacks++ }
 
 	// Drive into the unresponsive state.
 	(*setDial)(fail)
@@ -196,6 +198,9 @@ func TestHealthWatcherRecoveryEvent(t *testing.T) {
 	if rec.level != "info" || rec.event != "hub-listener-probe-recovered" {
 		t.Errorf("recovery event = %s/%s, want info/hub-listener-probe-recovered", rec.level, rec.event)
 	}
+	if recoveredCallbacks != 1 {
+		t.Fatalf("recovery callbacks = %d, want exactly 1", recoveredCallbacks)
+	}
 
 	// A fresh outage warns again (state was reset on recovery).
 	(*setDial)(fail)
@@ -204,6 +209,9 @@ func TestHealthWatcherRecoveryEvent(t *testing.T) {
 	}
 	if len(*events) != 3 {
 		t.Errorf("second outage did not re-warn: got %d events, want 3", len(*events))
+	}
+	if recoveredCallbacks != 1 {
+		t.Errorf("recovery callbacks after second outage = %d, want exactly 1", recoveredCallbacks)
 	}
 }
 

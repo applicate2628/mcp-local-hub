@@ -587,8 +587,14 @@ func TestGroups_GetConnectionAvailabilityTracksHubHealth(t *testing.T) {
 				t.Fatalf("connection.available=%v want %v: %+v", conn.Available, tc.available, conn)
 			}
 			if tc.available {
-				if conn.URL == "" {
-					t.Fatalf("connection.url is empty while %q is serving: %+v", tc.state, conn)
+				if conn.URL != "http://127.0.0.1:9201/g/frontend/mcp" {
+					t.Fatalf("connection.url=%q while %q is serving, want the new bound URL", conn.URL, tc.state)
+				}
+				if conn.InstanceID != "inst-abc" {
+					t.Fatalf("connection.instance_id=%q while %q is serving, want inst-abc", conn.InstanceID, tc.state)
+				}
+				if conn.Token != "tok-frontend" {
+					t.Fatalf("connection.token=%q while %q is serving, want tok-frontend", conn.Token, tc.state)
 				}
 				return
 			}

@@ -1143,7 +1143,8 @@ describe("DashboardScreen — hub-health banner (Phase-0 item 1)", () => {
 
     const banner = await findByTestId("dashboard-hub-health");
     expect(banner.getAttribute("data-hub-state")).toBe("needs-reconcile");
-    expect(banner.textContent).toContain("reconcile");
+    expect(banner.textContent).toContain("mcphub install --reconcile-hub-mode");
+    expect(banner.textContent).toContain("notice clears when the hub GUI restarts");
   });
 
   it("re-hydrates hub health on every SSE open, including reconnect", async () => {
@@ -1235,6 +1236,29 @@ describe("DashboardScreen — hub-health banner (Phase-0 item 1)", () => {
     await waitFor(() => expect(healthCalls).toBe(2));
     const banner = await findByTestId("dashboard-hub-health");
     expect(banner.getAttribute("data-hub-state")).toBe("down");
+  });
+
+  it("re-hydrates hub health on the 60-second interval", async () => {
+    let healthCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/hub/health") {
+        healthCalls += 1;
+        return Promise.resolve(jsonResponse(200, { state: "healthy", degraded: false }));
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const { findAllByRole } = render(<DashboardScreen />);
+    await findAllByRole("button");
+    await waitFor(() => expect(healthCalls).toBe(1));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    await waitFor(() => expect(healthCalls).toBe(2));
   });
 
   it("keeps a newer hub-health SSE state when the mount GET resolves stale", async () => {
@@ -1344,10 +1368,12 @@ describe("DashboardScreen — hub-health banner (Phase-0 item 1)", () => {
     dispatchSse("hub-health", {
       state: "needs-reconcile",
       degraded: true,
-      operator_action: "mcphub install --reconcile-hub-mode",
+      operator_action: "mcphub repair --from-health-event",
     });
     const banner = await findByTestId("dashboard-hub-health");
-    expect(banner.textContent).toContain("reconcile");
+    expect(banner.textContent).toContain("mcphub repair --from-health-event");
+    expect(banner.textContent).not.toContain("mcphub install --reconcile-hub-mode");
+    expect(banner.textContent).toContain("notice clears when the hub GUI restarts");
     expect(banner.textContent).not.toContain("cannot reach any server");
   });
 

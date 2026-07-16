@@ -131,9 +131,14 @@ func (s *Server) signalHubListenerRestart() {
 	if s == nil || s.hubRestartCh == nil {
 		return
 	}
-	// The watcher declared the aggregate listener unresponsive and an auto-restart
-	// is now requested — surface "recovering" so the Dashboard stops painting green.
-	s.hubHealth.set(HubHealthRecovering, "")
+	// Only promise recovery while the once-started restart driver can consume the
+	// signal. A non-shutdown driver exit is permanent, so a later watcher signal
+	// must report down instead of an absorbing "recovering" state.
+	if s.hubRestartDriverAlive.Load() {
+		s.hubHealth.set(HubHealthRecovering, "")
+	} else {
+		s.hubHealth.set(HubHealthDown, "")
+	}
 	select {
 	case s.hubRestartCh <- struct{}{}:
 	default:
@@ -144,6 +149,15 @@ func runHubListenerRestartDriver(ctx context.Context, s *Server, opts hubListene
 	if s == nil || s.hubRestartCh == nil {
 		return
 	}
+	s.hubRestartDriverAlive.Store(true)
+	defer func() {
+		// Shutdown cancels the watcher and no later signal can legitimately fire.
+		// Preserve the flag on that path so a racing teardown callback cannot
+		// publish a false down; every permanent non-shutdown exit clears it.
+		if ctx.Err() == nil {
+			s.hubRestartDriverAlive.Store(false)
+		}
+	}()
 	opts = normalizeHubListenerRestartDriverOptions(s, opts)
 	for {
 		select {

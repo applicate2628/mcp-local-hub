@@ -31,6 +31,7 @@ import {
   GroupsApiError,
   type GroupDTO,
   type GroupConnectionDTO,
+  type HubHealth,
 } from "../api";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { LoadingState } from "../components/LoadingState";
@@ -51,6 +52,9 @@ type LoadState =
   | { kind: "loading" }
   | { kind: "ok"; groups: GroupDTO[]; available: string[] }
   | { kind: "error"; error: string };
+
+const HUB_NOT_HEALTHY_HINT =
+  "The aggregated hub is not healthy right now (see the Dashboard hub badge) — this group's endpoint is temporarily unreachable.";
 
 // EditorTarget is what the editor is currently authoring:
 //   - "none": list view, no editor open.
@@ -75,6 +79,7 @@ export interface GroupsScreenProps {
 
 export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.Element {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [hubHealth, setHubHealth] = useState<HubHealth | null>(null);
   const loadSeqRef = useRef(0);
   const loadAppliedSeqRef = useRef(0);
   const [target, setTarget] = useState<EditorTarget>({ mode: "none" });
@@ -113,9 +118,23 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
 
   useEffect(() => {
     void load();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void load({ background: true });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const poll = setInterval(() => {
+      void load({ background: true });
+    }, 60_000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearInterval(poll);
+    };
   }, [load]);
 
-  const onHubHealth = useCallback((_ev: MessageEvent) => {
+  const onHubHealth = useCallback((ev: MessageEvent) => {
+    setHubHealth(JSON.parse(ev.data) as HubHealth);
     void load({ background: true });
   }, [load]);
   const connectionState = useEventSource("/api/events", { "hub-health": onHubHealth });
@@ -425,7 +444,7 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
                   ? "No servers"
                   : `Servers: ${g.servers.join(", ")}`}
               </p>
-              <ConnectionDetails group={g.name} connection={g.connection} />
+              <ConnectionDetails group={g.name} connection={g.connection} hubHealth={hubHealth} />
             </li>
           ))}
         </ul>
@@ -684,14 +703,17 @@ function CopyRow({
 function ConnectionDetails({
   group,
   connection,
+  hubHealth,
 }: {
   group: string;
   connection?: GroupConnectionDTO;
+  hubHealth: HubHealth | null;
 }): preact.JSX.Element | null {
   if (!connection) return null;
+  const hubUnavailable = hubHealth?.state === "recovering" || hubHealth?.state === "down";
   return (
     <div class="mt-2 border-t border-app-border/40 pt-2" data-testid={`groups-connection-${group}`}>
-      {connection.available ? (
+      {connection.available && !hubUnavailable ? (
         <>
           <p class="m-0 mb-1 text-xs font-medium text-app-text">
             Point a client at this group:
@@ -718,7 +740,9 @@ function ConnectionDetails({
           data-testid={`groups-connection-hint-${group}`}
           role="status"
         >
-          {connection.hint ?? "The aggregated hub is not running."}
+          {hubUnavailable
+            ? HUB_NOT_HEALTHY_HINT
+            : connection.hint ?? "The aggregated hub is not running."}
         </p>
       )}
       <p class="m-0 mt-2 text-xs text-app-muted">

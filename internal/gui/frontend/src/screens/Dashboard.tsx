@@ -30,8 +30,10 @@ function hubHealthMessage(h: HubHealth): string {
   switch (h.state) {
     case "recovering":
       return "The aggregated hub is not responding — MCP clients cannot reach any server; auto-recovery is in progress.";
-    case "needs-reconcile":
-      return "The aggregated hub restarted on a new address — installed MCP clients get errors until their config is refreshed. Run `mcphub install --reconcile-hub-mode`, then re-copy any Group URLs from the Groups screen.";
+    case "needs-reconcile": {
+      const action = h.operator_action?.trim() || "mcphub install --reconcile-hub-mode";
+      return `The aggregated hub restarted on a new address — installed MCP clients get errors until their config is refreshed. Run \`${action}\`, then re-copy any Group URLs from the Groups screen. This notice clears when the hub GUI restarts.`;
+    }
     case "down":
       return "The aggregated hub is down and did not self-heal — MCP clients cannot reach any server. Restart the hub (close the tray/window and relaunch, or `mcphub gui --force --kill --yes` then relaunch).";
     default:

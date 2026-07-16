@@ -140,42 +140,88 @@ describe("GroupsScreen", () => {
     expect(screen.getByTestId("groups-row-infra").textContent).toContain("infra");
   });
 
-  it("refetches on hub-health SSE and hides a now-unavailable group URL", async () => {
+  it.each(["down", "recovering"] as const)(
+    "hides a group URL immediately on a %s hub-health SSE even when refetch hangs",
+    async (hubState) => {
+      let getCount = 0;
+      const stalledRefresh = new Promise<Response>(() => {});
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        fetchRouter({
+          "/api/groups": () => {
+            getCount += 1;
+            if (getCount === 1) {
+              return jsonResponse(
+                200,
+                listBody([{
+                  name: "frontend",
+                  servers: ["serena"],
+                  connection: {
+                    available: true,
+                    url: "http://127.0.0.1:9201/g/frontend/mcp",
+                    token: "group-token",
+                    instance_id: "instance-1",
+                  },
+                }]),
+              );
+            }
+            return stalledRefresh;
+          },
+        }) as unknown as typeof fetch,
+      );
+
+      render(<GroupsScreen />);
+      expect((await screen.findByTestId("groups-conn-url-frontend")).textContent).toContain(
+        "/g/frontend/mcp",
+      );
+      expect(getCount).toBe(1);
+
+      act(() => {
+        dispatchSse("hub-health", { state: hubState, degraded: true });
+      });
+
+      expect(screen.queryByTestId("groups-conn-url-frontend")).toBeNull();
+      expect(screen.getByTestId("groups-connection-hint-frontend").textContent).toContain(
+        "not healthy right now",
+      );
+      await waitFor(() => expect(getCount).toBe(2));
+    },
+  );
+
+  it("keeps the newly refetched group URL visible after a needs-reconcile SSE", async () => {
     let getCount = 0;
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+    vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
         "/api/groups": () => {
           getCount += 1;
-          const connection = getCount === 1
-            ? {
-                available: true,
-                url: "http://127.0.0.1:9201/g/frontend/mcp",
-                token: "group-token",
-                instance_id: "instance-1",
-              }
-            : { available: false, hint: "The aggregated hub is down." };
+          const port = getCount === 1 ? 9201 : 9302;
           return jsonResponse(
             200,
-            listBody([{ name: "frontend", servers: ["serena"], connection }]),
+            listBody([{
+              name: "frontend",
+              servers: ["serena"],
+              connection: {
+                available: true,
+                url: `http://127.0.0.1:${port}/g/frontend/mcp`,
+                token: `group-token-${port}`,
+                instance_id: `instance-${port}`,
+              },
+            }]),
           );
         },
       }) as unknown as typeof fetch,
     );
 
     render(<GroupsScreen />);
-    expect((await screen.findByTestId("groups-conn-url-frontend")).textContent).toContain(
-      "/g/frontend/mcp",
-    );
-    expect(getCount).toBe(1);
+    expect((await screen.findByTestId("groups-conn-url-frontend")).textContent).toContain(":9201/");
 
     act(() => {
-      dispatchSse("hub-health", { state: "down", degraded: true });
+      dispatchSse("hub-health", { state: "needs-reconcile", degraded: true });
     });
 
-    await waitFor(() => expect(getCount).toBe(2));
-    expect(await screen.findByTestId("groups-connection-hint-frontend")).toBeTruthy();
-    expect(screen.queryByTestId("groups-conn-url-frontend")).toBeNull();
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    await waitFor(() => {
+      expect(getCount).toBe(2);
+      expect(screen.getByTestId("groups-conn-url-frontend").textContent).toContain(":9302/");
+    });
   });
 
   it("keeps rendered groups during a failed hub-health background refresh", async () => {
@@ -281,6 +327,28 @@ describe("GroupsScreen", () => {
     await waitFor(() => expect(getCount).toBe(2));
   });
 
+  it("refetches groups when the document becomes visible", async () => {
+    let getCount = 0;
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/groups": () => {
+          getCount += 1;
+          return jsonResponse(200, listBody([]));
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<GroupsScreen />);
+    await waitFor(() => expect(getCount).toBe(1));
+
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => expect(getCount).toBe(2));
+  });
+
   it("keeps the newer hub-health load when the initial load resolves last", async () => {
     let resolveInitial!: (response: Response) => void;
     const initialResponse = new Promise<Response>((resolve) => {
@@ -305,7 +373,7 @@ describe("GroupsScreen", () => {
     });
 
     act(() => {
-      dispatchSse("hub-health", { state: "up", degraded: false });
+      dispatchSse("hub-health", { state: "healthy", degraded: false });
     });
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
