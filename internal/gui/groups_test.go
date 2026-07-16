@@ -546,6 +546,59 @@ func TestGroups_GetConnectionDetailsWhenHubLive(t *testing.T) {
 	}
 }
 
+// A bound, authenticated hub continues to advertise its group URL while it
+// needs reconciliation (it is serving on its new port), but not while it is
+// recovering or down.
+func TestGroups_GetConnectionAvailabilityTracksHubHealth(t *testing.T) {
+	g := &fakeGroupsAPI{
+		available:   []string{"memory"},
+		cfg:         api.GroupsConfig{Version: 1, Groups: []api.Group{{Name: "frontend", Servers: []string{"memory"}}}},
+		instanceID:  "inst-abc",
+		groupTokens: map[string]string{"frontend": "tok-frontend"},
+	}
+	s := groupsTestServer(t, g)
+	comp := &HubListenerComponents{port: 9201}
+	comp.alive.Store(true)
+	s.hubMcpComp.Store(comp)
+
+	cases := []struct {
+		name      string
+		state     HubHealthState
+		available bool
+	}{
+		{name: "healthy", state: HubHealthHealthy, available: true},
+		{name: "needs-reconcile", state: HubHealthNeedsReconcile, available: true},
+		{name: "recovering", state: HubHealthRecovering, available: false},
+		{name: "down", state: HubHealthDown, available: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s.hubHealth.set(tc.state, "")
+			rec := doJSON(t, s, http.MethodGet, "/api/groups", nil)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+			}
+			resp := decodeListResp(t, rec)
+			conn := resp.Groups[0].Connection
+			if conn == nil {
+				t.Fatal("connection must be present on the GET list path")
+			}
+			if conn.Available != tc.available {
+				t.Fatalf("connection.available=%v want %v: %+v", conn.Available, tc.available, conn)
+			}
+			if tc.available {
+				if conn.URL == "" {
+					t.Fatalf("connection.url is empty while %q is serving: %+v", tc.state, conn)
+				}
+				return
+			}
+			if !strings.Contains(conn.Hint, "not healthy") {
+				t.Fatalf("connection.hint=%q, want not-healthy guidance", conn.Hint)
+			}
+		})
+	}
+}
+
 // TestGroups_GetConnectionPlaceholderWhenHubOff pins B4: when the hub is
 // gate-OFF / not bound, the connection is NOT available and carries a hint
 // instead of a dead URL + a real token.

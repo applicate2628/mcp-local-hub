@@ -55,17 +55,37 @@ func TestHubHealthTrackerPublishesOnChangeAndDedups(t *testing.T) {
 // still delegates to the underlying log emit.
 func TestHubHealthEmitWrapperMapsRestartEvents(t *testing.T) {
 	cases := []struct {
-		event string
-		want  HubHealthState
+		name       string
+		event      string
+		fields     map[string]any
+		want       HubHealthState
+		wantAction string
 	}{
-		{"hub-listener-restart-failed", HubHealthRecovering},
-		{"hub-listener-restart-exhausted", HubHealthNeedsReconcile},
-		{"hub-listener-restart-instance-id-changed", HubHealthNeedsReconcile},
-		{"hub-listener-restart-abandoned", HubHealthDown},
-		{"hub-listener-restarted", HubHealthHealthy},
+		{name: "restart failed", event: "hub-listener-restart-failed", want: HubHealthRecovering},
+		{name: "restart exhausted", event: "hub-listener-restart-exhausted", want: HubHealthDown},
+		{
+			name:   "restart exhausted with retry scheduled",
+			event:  "hub-listener-restart-exhausted",
+			fields: map[string]any{"no_signal_retry_scheduled": true},
+			want:   HubHealthRecovering,
+		},
+		{
+			name:   "restart exhausted with wrong typed retry field",
+			event:  "hub-listener-restart-exhausted",
+			fields: map[string]any{"no_signal_retry_scheduled": "true"},
+			want:   HubHealthDown,
+		},
+		{
+			name:       "instance id changed",
+			event:      "hub-listener-restart-instance-id-changed",
+			want:       HubHealthNeedsReconcile,
+			wantAction: hubReconcileOperatorAction,
+		},
+		{name: "restart abandoned", event: "hub-listener-restart-abandoned", want: HubHealthDown},
+		{name: "restarted", event: "hub-listener-restarted", want: HubHealthHealthy},
 	}
 	for _, tc := range cases {
-		t.Run(tc.event, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			s := NewServer(Config{})
 			s.hubHealth.set(HubHealthDown, "seed") // seed a distinct state so the map is a change
 			delegated := false
@@ -73,14 +93,31 @@ func TestHubHealthEmitWrapperMapsRestartEvents(t *testing.T) {
 				delegated = true
 				return nil
 			})
-			_ = wrap("warn", tc.event, nil)
-			if got, _ := s.hubHealth.snapshot(); got != tc.want {
-				t.Errorf("event %q → state %q, want %q", tc.event, got, tc.want)
+			_ = wrap("warn", tc.event, tc.fields)
+			if got, action := s.hubHealth.snapshot(); got != tc.want || action != tc.wantAction {
+				t.Errorf("event %q → state %q action %q, want %q action %q", tc.event, got, action, tc.want, tc.wantAction)
 			}
 			if !delegated {
 				t.Errorf("wrapper did not delegate to the base emit for %q", tc.event)
 			}
 		})
+	}
+}
+
+func TestHubHealthServing(t *testing.T) {
+	cases := []struct {
+		state HubHealthState
+		want  bool
+	}{
+		{HubHealthHealthy, true},
+		{HubHealthNeedsReconcile, true},
+		{HubHealthRecovering, false},
+		{HubHealthDown, false},
+	}
+	for _, tc := range cases {
+		if got := hubHealthServing(tc.state); got != tc.want {
+			t.Errorf("hubHealthServing(%q)=%v, want %v", tc.state, got, tc.want)
+		}
 	}
 }
 

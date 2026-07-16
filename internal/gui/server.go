@@ -1039,6 +1039,7 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		defer close(hubInitDone)
 		hubComp, hubErr := startHubMcpListenerWithOptions(hubInitCtx, hubEnabled, s.api, startHubMcpListenerOptions{
 			onUnresponsive: s.signalHubListenerRestart,
+			onRecovered:    s.onHubListenerRecovered,
 		})
 		if hubErr != nil {
 			// codex bot phase4 r1 P2 closure on PR #158: surface

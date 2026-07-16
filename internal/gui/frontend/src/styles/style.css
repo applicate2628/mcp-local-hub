@@ -709,9 +709,8 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
   background: rgba(245, 158, 11, 0.12);
   color: var(--text);
 }
-/* Phase-0 item 1: honest hub-aggregate health banner. Amber while auto-recovering,
-   red when the hub needs the operator (needs-reconcile / down) — a dead aggregate
-   means ALL clients are cut off, so it must read louder than the unmanaged notice. */
+/* Phase-0 item 1: honest hub-aggregate health banner. Amber while auto-recovering
+   or serving with stale client configs; red when the aggregate is down. */
 .dashboard-hub-health {
   display: block;
   margin: var(--gap-xs) 0;
@@ -722,7 +721,11 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
   color: var(--text);
   font-weight: 500;
 }
-.dashboard-hub-health-needs-reconcile,
+.dashboard-hub-health-recovering,
+.dashboard-hub-health-needs-reconcile {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.12);
+}
 .dashboard-hub-health-down {
   border-color: rgba(239, 68, 68, 0.5);
   background: rgba(239, 68, 68, 0.12);

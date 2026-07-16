@@ -31,9 +31,9 @@ function hubHealthMessage(h: HubHealth): string {
     case "recovering":
       return "The aggregated hub is not responding — MCP clients cannot reach any server; auto-recovery is in progress.";
     case "needs-reconcile":
-      return `The aggregated hub restarted on a new address — installed MCP clients cannot reach any server until their config is refreshed${h.operator_action ? ` (${h.operator_action})` : ""}.`;
+      return "The aggregated hub restarted on a new address — installed MCP clients get errors until their config is refreshed. Run `mcphub install --reconcile-hub-mode`, then re-copy any Group URLs from the Groups screen.";
     case "down":
-      return "The aggregated hub is down and did not self-heal — MCP clients cannot reach any server. Restart the hub.";
+      return "The aggregated hub is down and did not self-heal — MCP clients cannot reach any server. Restart the hub (close the tray/window and relaunch, or `mcphub gui --force --kill --yes` then relaunch).";
     default:
       return "The aggregated hub is degraded — MCP clients may be unable to reach servers.";
   }
@@ -79,6 +79,9 @@ export function DashboardScreen() {
   // live by the `hub-health` SSE event so a hung/dead/needs-reconcile hub is
   // visible instead of every daemon card silently painting green.
   const [hubHealth, setHubHealth] = useState<HubHealth | null>(null);
+  const hubHealthSseSeenRef = useRef(false);
+  const hubHealthSseSeqRef = useRef(0);
+  const hubHealthFetchSeqRef = useRef(0);
   const bulkResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -270,6 +273,8 @@ export function DashboardScreen() {
 
   const onHubHealth = useCallback((ev: MessageEvent) => {
     const body = JSON.parse(ev.data) as HubHealth;
+    hubHealthSseSeenRef.current = true;
+    hubHealthSseSeqRef.current += 1;
     setHubHealth(body);
   }, []);
 
@@ -291,15 +296,48 @@ export function DashboardScreen() {
   // failed probe just leaves the badge hidden.
   useEffect(() => {
     let cancelled = false;
+    const fetchSeq = ++hubHealthFetchSeqRef.current;
+    const sseSeq = hubHealthSseSeqRef.current;
     getHubHealth()
       .then((h) => {
-        if (!cancelled) setHubHealth(h);
+        if (
+          !cancelled &&
+          !hubHealthSseSeenRef.current &&
+          fetchSeq === hubHealthFetchSeqRef.current &&
+          sseSeq === hubHealthSseSeqRef.current
+        ) {
+          setHubHealth(h);
+        }
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // The hub-health stream is transition-only and lossy. Re-hydrate whenever
+  // EventSource opens (including after reconnect), while rejecting a response
+  // if a newer fetch or SSE transition landed after this request was issued.
+  useEffect(() => {
+    if (connectionState !== "open") return;
+    let cancelled = false;
+    const fetchSeq = ++hubHealthFetchSeqRef.current;
+    const sseSeq = hubHealthSseSeqRef.current;
+    getHubHealth()
+      .then((h) => {
+        if (
+          !cancelled &&
+          fetchSeq === hubHealthFetchSeqRef.current &&
+          sseSeq === hubHealthSseSeqRef.current
+        ) {
+          setHubHealth(h);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionState]);
 
   // Codex bot PR #38 P1 (round 3): safety-net for dropped SSE events.
   // The Broadcaster is lossy (internal/gui/events.go::Publish drops on

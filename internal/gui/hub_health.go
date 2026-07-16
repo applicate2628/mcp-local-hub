@@ -21,24 +21,28 @@ const (
 	// HubHealthRecovering — the watcher declared the listener unresponsive and an
 	// auto-restart is in flight (or a restart attempt failed and is retrying).
 	HubHealthRecovering HubHealthState = "recovering"
-	// HubHealthNeedsReconcile — auto-restart is exhausted, OR a restart rebound on
-	// a NEW instance_id, so gated client configs point at a dead port/instance and
-	// need `mcphub install --reconcile-hub-mode`. Operator action required.
+	// HubHealthNeedsReconcile — the listener restarted successfully on a NEW
+	// instance_id, so the hub is serving but gated client configs need
+	// `mcphub install --reconcile-hub-mode`. Operator action required.
 	HubHealthNeedsReconcile HubHealthState = "needs-reconcile"
-	// HubHealthDown — auto-recovery was abandoned; the aggregate is not serving and
-	// will not self-heal.
+	// HubHealthDown — auto-recovery gave up; the aggregate is not serving and will
+	// not self-heal.
 	HubHealthDown HubHealthState = "down"
 )
 
 // hubReconcileOperatorAction is the command that repoints gated client configs
-// at the live hub port/instance (mirrors the operator_action the restart driver
-// already writes into its log fields).
+// at the live hub port/instance after an instance-id change (mirrors the
+// operator_action the restart driver already writes into its log fields).
 const hubReconcileOperatorAction = "mcphub install --reconcile-hub-mode"
 
-// hubHealthDegraded reports whether the state means the aggregate cannot serve
-// clients right now (so Groups must NOT advertise a live URL).
+// hubHealthDegraded reports whether the Dashboard should show a health banner.
 func hubHealthDegraded(state HubHealthState) bool {
 	return state == HubHealthRecovering || state == HubHealthNeedsReconcile || state == HubHealthDown
+}
+
+// hubHealthServing reports whether the aggregate is currently serving clients.
+func hubHealthServing(state HubHealthState) bool {
+	return state == HubHealthHealthy || state == HubHealthNeedsReconcile
 }
 
 // hubHealthTracker is the single owner of the GUI's hub-aggregate health surface.
@@ -48,7 +52,7 @@ func hubHealthDegraded(state HubHealthState) bool {
 type hubHealthTracker struct {
 	mu     sync.Mutex
 	state  HubHealthState
-	action string // operator-action hint for needs-reconcile/down (empty otherwise)
+	action string // operator-action hint for needs-reconcile (empty otherwise)
 	pub    func(Event)
 }
 
@@ -63,13 +67,12 @@ func (h *hubHealthTracker) set(state HubHealthState, action string) {
 		return
 	}
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	changed := h.state != state || h.action != action
 	h.state = state
 	h.action = action
-	pub := h.pub
-	h.mu.Unlock()
-	if changed && pub != nil {
-		pub(Event{Type: "hub-health", Body: map[string]any{
+	if changed && h.pub != nil {
+		h.pub(Event{Type: "hub-health", Body: map[string]any{
 			"state":           string(state),
 			"operator_action": action,
 			"degraded":        hubHealthDegraded(state),
@@ -127,10 +130,16 @@ func (s *Server) hubHealthEmitWrapper(base func(level, event string, fields map[
 			s.hubHealth.set(HubHealthHealthy, "")
 		case "hub-listener-restart-failed":
 			s.hubHealth.set(HubHealthRecovering, "")
-		case "hub-listener-restart-exhausted", "hub-listener-restart-instance-id-changed":
+		case "hub-listener-restart-exhausted":
+			if retryScheduled, ok := fields["no_signal_retry_scheduled"].(bool); ok && retryScheduled {
+				s.hubHealth.set(HubHealthRecovering, "")
+			} else {
+				s.hubHealth.set(HubHealthDown, "")
+			}
+		case "hub-listener-restart-instance-id-changed":
 			s.hubHealth.set(HubHealthNeedsReconcile, hubReconcileOperatorAction)
 		case "hub-listener-restart-abandoned":
-			s.hubHealth.set(HubHealthDown, hubReconcileOperatorAction)
+			s.hubHealth.set(HubHealthDown, "")
 		}
 		if base == nil {
 			return nil

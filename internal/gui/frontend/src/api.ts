@@ -45,7 +45,8 @@ export async function fetchOrThrow<T>(
 }
 
 // HubHealth is the honest state of the gate-ON hub-aggregate listener
-// (Phase-0 item 1). `degraded` means the aggregate cannot serve clients now.
+// (Phase-0 item 1). `degraded` means the Dashboard should show a health banner;
+// `needs-reconcile` is degraded but still serving on its new address.
 export interface HubHealth {
   state: "healthy" | "recovering" | "needs-reconcile" | "down";
   operator_action?: string;
