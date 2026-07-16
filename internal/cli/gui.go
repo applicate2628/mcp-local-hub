@@ -558,6 +558,21 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 				"activate-window: focus failed and headless session — no browser to open")
 			return gui.ErrActivationNoTarget
 		}
+		// `--no-browser` + no window to focus: there is nothing to
+		// ACTIVATE, so the fallback below would not be "honoring a tray
+		// click" — it would spawn an UNINVITED browser the operator
+		// explicitly opted out of. The tray-consent reasoning above only
+		// holds while a window EXISTS (focus succeeds and returns early);
+		// once focus reports ErrFocusNoWindow under --no-browser, refuse
+		// like the headless branch. Without this, every second `mcphub
+		// gui` invocation (notably the cli test suite, which spawns real
+		// `mcphub gui --no-browser` children) makes the incumbent
+		// headless GUI pop a dashboard window onto the operator's desktop.
+		if noBrowser {
+			fmt.Fprintln(cmd.OutOrStderr(),
+				"activate-window: focus failed and --no-browser is set — not launching a browser")
+			return gui.ErrActivationNoTarget
+		}
 		url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
 		if launchErr := gui.LaunchBrowser(url); launchErr != nil {
 			fmt.Fprintf(cmd.OutOrStderr(),
