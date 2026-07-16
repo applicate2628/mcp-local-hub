@@ -290,6 +290,16 @@ func (s *Server) groupConnection(name string, port int, hubLive bool, instanceID
 			Hint:      "The hub is running but this group's auth row is not ready yet — restart the hub (or re-save the group) to ensure it.",
 		}
 	}
+	// Even when the hub is bound + primed, the aggregate listener can be wedged or
+	// restarting (Phase-0 item 1): do NOT hand out a URL for a listener that is not
+	// serving. A needs-reconcile listener is serving on its new address, so Groups
+	// must keep advertising the new URL for the operator to re-copy.
+	if state, _ := s.hubHealth.snapshot(); !hubHealthServing(state) {
+		return &groupConnectionDTO{
+			Available: false,
+			Hint:      "The aggregated hub is not healthy right now (see the Dashboard hub badge) — this group's endpoint is temporarily unreachable.",
+		}
+	}
 	return &groupConnectionDTO{
 		Available:  true,
 		URL:        clients.HubLoopbackURL(port, api.HubGroupPrefix+name+api.HubPathSuffix),

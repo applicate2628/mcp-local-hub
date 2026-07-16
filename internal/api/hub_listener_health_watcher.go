@@ -87,6 +87,11 @@ type HubListenerHealthWatcher struct {
 	// restart driver attaches here; this watcher never performs restart work.
 	onUnresponsive func()
 
+	// onRecovered is an optional detect-only callback fired on the transition
+	// back to reachable (the same transition as the probe-recovered info event).
+	// The GUI attaches here to flip the hub-health surface back to healthy.
+	onRecovered func()
+
 	// consecutiveFailures counts failed dials in a row. Mutated only on
 	// the Run/probeOnce goroutine, so it needs no lock.
 	consecutiveFailures int
@@ -119,6 +124,13 @@ func NewHubListenerHealthWatcher(port int, interval time.Duration) *HubListenerH
 // callback mutation with the probe goroutine.
 func (w *HubListenerHealthWatcher) SetOnUnresponsive(fn func()) {
 	w.onUnresponsive = fn
+}
+
+// SetOnRecovered installs a detect-only recovery-transition callback. Same
+// contract as SetOnUnresponsive: call before Run; no synchronization with the
+// probe goroutine.
+func (w *HubListenerHealthWatcher) SetOnRecovered(fn func()) {
+	w.onRecovered = fn
 }
 
 // defaultHubHealthDial is the production TCP-dial. Returns nil iff the
@@ -192,6 +204,9 @@ func (w *HubListenerHealthWatcher) probeOnce(ctx context.Context) {
 	// recovery info event on the transition back.
 	if w.unresponsive {
 		w.unresponsive = false
+		if w.onRecovered != nil {
+			w.onRecovered()
+		}
 		_ = w.emit("info", "hub-listener-probe-recovered", map[string]any{
 			"port": w.port,
 		})

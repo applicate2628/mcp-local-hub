@@ -44,6 +44,19 @@ export async function fetchOrThrow<T>(
   return data as T;
 }
 
+// HubHealth is the honest state of the gate-ON hub-aggregate listener
+// (Phase-0 item 1). `degraded` means the Dashboard should show a health banner;
+// `needs-reconcile` is degraded but still serving on its new address.
+export interface HubHealth {
+  state: "healthy" | "recovering" | "needs-reconcile" | "down";
+  operator_action?: string;
+  degraded: boolean;
+}
+
+export async function getHubHealth(): Promise<HubHealth> {
+  return fetchOrThrow<HubHealth>("/api/hub/health", "object");
+}
+
 export interface APIError extends Error {
   code?: string;
   status: number;

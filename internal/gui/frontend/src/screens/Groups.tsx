@@ -23,7 +23,7 @@
 // The pure draft/dirty/validation logic lives in lib/groups-draft.ts (unit-
 // tested there); this file is the rendering + network glue.
 
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
   getGroups,
   saveGroup,
@@ -31,9 +31,11 @@ import {
   GroupsApiError,
   type GroupDTO,
   type GroupConnectionDTO,
+  type HubHealth,
 } from "../api";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { LoadingState } from "../components/LoadingState";
+import { useEventSource } from "../hooks/useEventSource";
 import {
   type GroupDraft,
   type GroupErrorField,
@@ -50,6 +52,9 @@ type LoadState =
   | { kind: "loading" }
   | { kind: "ok"; groups: GroupDTO[]; available: string[] }
   | { kind: "error"; error: string };
+
+const HUB_NOT_HEALTHY_HINT =
+  "The aggregated hub is not healthy right now (see the Dashboard hub badge) — this group's endpoint is temporarily unreachable.";
 
 // EditorTarget is what the editor is currently authoring:
 //   - "none": list view, no editor open.
@@ -74,6 +79,9 @@ export interface GroupsScreenProps {
 
 export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.Element {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [hubHealth, setHubHealth] = useState<HubHealth | null>(null);
+  const loadSeqRef = useRef(0);
+  const loadAppliedSeqRef = useRef(0);
   const [target, setTarget] = useState<EditorTarget>({ mode: "none" });
   const [draft, setDraft] = useState<GroupDraft>(emptyDraft([]));
   const [busy, setBusy] = useState(false);
@@ -89,19 +97,53 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  async function load(): Promise<void> {
-    setState({ kind: "loading" });
+  const load = useCallback(async (opts?: { background?: boolean }): Promise<void> => {
+    const mySeq = ++loadSeqRef.current;
+    const background = opts?.background === true;
+    if (!background) {
+      setState({ kind: "loading" });
+    }
     try {
       const r = await getGroups();
-      setState({ kind: "ok", groups: r.groups, available: r.available_servers });
+      if (mySeq > loadAppliedSeqRef.current) {
+        setState({ kind: "ok", groups: r.groups, available: r.available_servers });
+        loadAppliedSeqRef.current = mySeq;
+      }
     } catch (e) {
-      setState({ kind: "error", error: asError(e) });
+      if (mySeq > loadAppliedSeqRef.current && !background) {
+        setState({ kind: "error", error: asError(e) });
+      }
     }
-  }
+  }, []);
 
   useEffect(() => {
     void load();
-  }, []);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void load({ background: true });
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const poll = setInterval(() => {
+      void load({ background: true });
+    }, 60_000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      clearInterval(poll);
+    };
+  }, [load]);
+
+  const onHubHealth = useCallback((ev: MessageEvent) => {
+    setHubHealth(JSON.parse(ev.data) as HubHealth);
+    void load({ background: true });
+  }, [load]);
+  const connectionState = useEventSource("/api/events", { "hub-health": onHubHealth });
+
+  useEffect(() => {
+    if (connectionState === "open") {
+      void load({ background: true });
+    }
+  }, [connectionState, load]);
 
   // The persisted row for the group currently being edited (null for a new
   // group). Drives isDirty and the editor's initial hydration.
@@ -402,7 +444,7 @@ export function GroupsScreen({ onDirtyChange }: GroupsScreenProps): preact.JSX.E
                   ? "No servers"
                   : `Servers: ${g.servers.join(", ")}`}
               </p>
-              <ConnectionDetails group={g.name} connection={g.connection} />
+              <ConnectionDetails group={g.name} connection={g.connection} hubHealth={hubHealth} />
             </li>
           ))}
         </ul>
@@ -661,14 +703,17 @@ function CopyRow({
 function ConnectionDetails({
   group,
   connection,
+  hubHealth,
 }: {
   group: string;
   connection?: GroupConnectionDTO;
+  hubHealth: HubHealth | null;
 }): preact.JSX.Element | null {
   if (!connection) return null;
+  const hubUnavailable = hubHealth?.state === "recovering" || hubHealth?.state === "down";
   return (
     <div class="mt-2 border-t border-app-border/40 pt-2" data-testid={`groups-connection-${group}`}>
-      {connection.available ? (
+      {connection.available && !hubUnavailable ? (
         <>
           <p class="m-0 mb-1 text-xs font-medium text-app-text">
             Point a client at this group:
@@ -695,7 +740,9 @@ function ConnectionDetails({
           data-testid={`groups-connection-hint-${group}`}
           role="status"
         >
-          {connection.hint ?? "The aggregated hub is not running."}
+          {hubUnavailable
+            ? HUB_NOT_HEALTHY_HINT
+            : connection.hint ?? "The aggregated hub is not running."}
         </p>
       )}
       <p class="m-0 mt-2 text-xs text-app-muted">

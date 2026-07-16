@@ -16,6 +16,7 @@ package gui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -28,6 +29,12 @@ import (
 
 	"mcp-local-hub/internal/api"
 )
+
+type fatalAcceptListener struct{}
+
+func (fatalAcceptListener) Accept() (net.Conn, error) { return nil, errors.New("fatal accept failure") }
+func (fatalAcceptListener) Close() error              { return nil }
+func (fatalAcceptListener) Addr() net.Addr            { return &net.TCPAddr{} }
 
 // setupGateOverrides routes LOCALAPPDATA/XDG_DATA_HOME at a per-test
 // temp dir so api.SettingsPath() returns a path under it. Returns
@@ -106,6 +113,71 @@ func TestHubListenerComponents_AliveTransitionsOnExit(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Errorf("Alive() stuck true 2s after Serve exited; the defer must clear it on any exit path")
+}
+
+func TestHubListenerFatalServeExitSetsHealthDownUnlessSuperseded(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		exitingLive       bool
+		nothingRegistered bool
+		driverAlive       bool
+		want              HubHealthState
+		wantAction        string
+	}{
+		{name: "live component with live driver", exitingLive: true, driverAlive: true, want: HubHealthRecovering},
+		{name: "live component with dead driver", exitingLive: true, want: HubHealthDown},
+		{name: "stale component", exitingLive: false, driverAlive: true, want: HubHealthNeedsReconcile, wantAction: hubReconcileOperatorAction},
+		{name: "pre-registration component with dead driver", nothingRegistered: true, want: HubHealthDown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
+			s := NewServer(Config{})
+			s.hubHealth.markReconcilePending()
+			s.hubRestartDriverAlive.Store(tc.driverAlive)
+
+			srv := newHubMcpHTTPServer(http.NewServeMux())
+			exiting := &HubListenerComponents{srv: srv}
+			if !tc.nothingRegistered {
+				current := exiting
+				if !tc.exitingLive {
+					current = &HubListenerComponents{srv: newHubMcpHTTPServer(http.NewServeMux())}
+				}
+				s.hubMcpComp.Store(current)
+			}
+
+			serveHubMcpListener(s, exiting, srv, fatalAcceptListener{}, 0)
+			if got, action := s.hubHealth.snapshot(); got != tc.want || action != tc.wantAction {
+				t.Fatalf("fatal Serve exit = state %q action %q, want %q action %q", got, action, tc.want, tc.wantAction)
+			}
+
+			if tc.exitingLive {
+				// The fatal availability state must not erase the process-scoped reconcile
+				// requirement; a later recovery restores the operator guidance.
+				s.hubHealth.markHealthy()
+				if got, action := s.hubHealth.snapshot(); got != HubHealthNeedsReconcile || action != hubReconcileOperatorAction {
+					t.Fatalf("recovery after fatal exit = state %q action %q, want needs-reconcile + action", got, action)
+				}
+			}
+		})
+	}
+}
+
+func TestHubListenerRecoveryCallbackRequiresCurrentComponent(t *testing.T) {
+	s := NewServer(Config{})
+	oldComp := liveRestartTestComp(3439)
+	currentComp := liveRestartTestComp(3439)
+	s.hubMcpComp.Store(currentComp)
+	s.hubHealth.set(HubHealthRecovering, "")
+
+	hubListenerComponentCallback(s, oldComp, s.onHubListenerRecovered)()
+	if got, action := s.hubHealth.snapshot(); got != HubHealthRecovering || action != "" {
+		t.Fatalf("stale component recovery = state %q action %q, want recovering", got, action)
+	}
+
+	hubListenerComponentCallback(s, currentComp, s.onHubListenerRecovered)()
+	if got, action := s.hubHealth.snapshot(); got != HubHealthHealthy || action != "" {
+		t.Fatalf("current component recovery = state %q action %q, want healthy", got, action)
+	}
 }
 
 func TestHubMcpHTTPServerHasSlowClientTimeouts(t *testing.T) {

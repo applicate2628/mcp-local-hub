@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, cleanup, fireEvent } from "@testing-library/preact";
+import { render, waitFor, cleanup, fireEvent, act } from "@testing-library/preact";
 import { DashboardScreen, formatUptime, formatBytes } from "./Dashboard";
 import type { DaemonStatus, ScanEntry } from "../types";
 
@@ -9,10 +9,13 @@ import type { DaemonStatus, ScanEntry } from "../types";
 // listeners so tests can dispatch synthetic events that drive the same
 // state transitions a real backend would.
 type StubListener = (ev: MessageEvent) => void;
+type StubLifecycleListener = ((ev: Event) => void) | null;
 const stubInstances = new Set<StubEventSource>();
 class StubEventSource {
   url: string;
   listeners = new Map<string, Set<StubListener>>();
+  onopen: StubLifecycleListener = null;
+  onerror: StubLifecycleListener = null;
   constructor(url: string) {
     this.url = url;
     stubInstances.add(this);
@@ -31,6 +34,12 @@ class StubEventSource {
   close(): void {
     stubInstances.delete(this);
   }
+  triggerOpen(): void {
+    this.onopen?.(new Event("open"));
+  }
+  triggerError(): void {
+    this.onerror?.(new Event("error"));
+  }
 }
 (globalThis as unknown as { EventSource: typeof StubEventSource }).EventSource = StubEventSource;
 
@@ -42,6 +51,12 @@ function dispatchSse(eventName: string, data: unknown) {
   for (const inst of stubInstances) {
     inst.listeners.get(eventName)?.forEach((h) => h(ev));
   }
+}
+
+function activeStubEventSource(): StubEventSource {
+  const [source] = stubInstances;
+  if (!source) throw new Error("no active StubEventSource");
+  return source;
 }
 
 const runningRow: DaemonStatus = {
@@ -1091,5 +1106,299 @@ describe("DashboardScreen — Flowbite card layout + View-logs link", () => {
     expect(card.className).toContain("card");
     expect(card.className).toContain("rounded-lg");
     expect(card.className).toContain("shadow-sm");
+  });
+});
+
+describe("DashboardScreen — hub-health banner (Phase-0 item 1)", () => {
+  function mockDashboardFetch(hubHealth: Record<string, unknown> = {
+    state: "healthy",
+    degraded: false,
+  }) {
+    return vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/hub/health") return Promise.resolve(jsonResponse(200, hubHealth));
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+  }
+
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  it("hydrates a needs-reconcile banner from the initial GET without SSE", async () => {
+    mockDashboardFetch({
+      state: "needs-reconcile",
+      degraded: true,
+      operator_action: "mcphub install --reconcile-hub-mode",
+    });
+    const { findByTestId } = render(<DashboardScreen />);
+
+    const banner = await findByTestId("dashboard-hub-health");
+    expect(banner.getAttribute("data-hub-state")).toBe("needs-reconcile");
+    expect(banner.textContent).toContain("mcphub install --reconcile-hub-mode");
+    expect(banner.textContent).toContain("notice clears when the hub GUI restarts");
+  });
+
+  it("re-hydrates hub health on every SSE open, including reconnect", async () => {
+    const healthResponses = [
+      { state: "healthy", degraded: false },
+      {
+        state: "needs-reconcile",
+        degraded: true,
+        operator_action: "mcphub install --reconcile-hub-mode",
+      },
+      { state: "down", degraded: true },
+    ];
+    let healthCalls = 0;
+    let resolveFirstOpenFetch!: () => void;
+    const firstOpenFetch = new Promise<void>((resolve) => {
+      resolveFirstOpenFetch = resolve;
+    });
+    let resolveReconnectOpenFetch!: () => void;
+    const reconnectOpenFetch = new Promise<void>((resolve) => {
+      resolveReconnectOpenFetch = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/hub/health") {
+        healthCalls += 1;
+        if (healthCalls === 2) resolveFirstOpenFetch();
+        if (healthCalls === 3) resolveReconnectOpenFetch();
+        const body = healthResponses.shift();
+        if (!body) return Promise.reject(new Error("unexpected extra hub-health fetch"));
+        return Promise.resolve(jsonResponse(200, body));
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const { findAllByRole, findByTestId } = render(<DashboardScreen />);
+    await findAllByRole("button");
+    expect(healthCalls).toBe(1);
+
+    const stream = activeStubEventSource();
+    act(() => {
+      stream.triggerOpen();
+    });
+    await firstOpenFetch;
+    expect(healthCalls).toBe(2);
+    let banner = await findByTestId("dashboard-hub-health");
+    expect(banner.getAttribute("data-hub-state")).toBe("needs-reconcile");
+
+    act(() => {
+      stream.triggerError();
+    });
+    expect((await findByTestId("connection-badge")).textContent).toContain("reconnecting");
+    act(() => {
+      stream.triggerOpen();
+    });
+    await reconnectOpenFetch;
+    expect(healthCalls).toBe(3);
+    banner = await findByTestId("dashboard-hub-health");
+    await waitFor(() => expect(banner.getAttribute("data-hub-state")).toBe("down"));
+  });
+
+  it("re-hydrates hub health when the document becomes visible", async () => {
+    const healthResponses = [
+      { state: "healthy", degraded: false },
+      { state: "down", degraded: true },
+    ];
+    let healthCalls = 0;
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/hub/health") {
+        healthCalls += 1;
+        const body = healthResponses.shift();
+        if (!body) return Promise.reject(new Error("unexpected extra hub-health fetch"));
+        return Promise.resolve(jsonResponse(200, body));
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const { findAllByRole, findByTestId } = render(<DashboardScreen />);
+    await findAllByRole("button");
+    await waitFor(() => expect(healthCalls).toBe(1));
+
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await waitFor(() => expect(healthCalls).toBe(2));
+    const banner = await findByTestId("dashboard-hub-health");
+    expect(banner.getAttribute("data-hub-state")).toBe("down");
+  });
+
+  it("re-hydrates hub health on the 60-second interval", async () => {
+    let healthCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/hub/health") {
+        healthCalls += 1;
+        return Promise.resolve(jsonResponse(200, { state: "healthy", degraded: false }));
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const { findAllByRole } = render(<DashboardScreen />);
+    await findAllByRole("button");
+    await waitFor(() => expect(healthCalls).toBe(1));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    await waitFor(() => expect(healthCalls).toBe(2));
+  });
+
+  it("keeps a newer hub-health SSE state when the mount GET resolves stale", async () => {
+    let resolveMountHealth!: (response: Response) => void;
+    const mountHealth = new Promise<Response>((resolve) => {
+      resolveMountHealth = resolve;
+    });
+    let healthCalls = 0;
+    let resolveMountHealthRequested!: () => void;
+    const mountHealthRequested = new Promise<void>((resolve) => {
+      resolveMountHealthRequested = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/hub/health") {
+        healthCalls += 1;
+        resolveMountHealthRequested();
+        return mountHealth;
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const { findAllByRole, findByTestId } = render(<DashboardScreen />);
+    await findAllByRole("button");
+    await mountHealthRequested;
+    expect(healthCalls).toBe(1);
+
+    dispatchSse("hub-health", { state: "recovering", degraded: true });
+    let banner = await findByTestId("dashboard-hub-health");
+    expect(banner.getAttribute("data-hub-state")).toBe("recovering");
+
+    const staleResponse = jsonResponse(200, { state: "healthy", degraded: false });
+    let resolveStaleJSONRead!: () => void;
+    const staleJSONRead = new Promise<void>((resolve) => {
+      resolveStaleJSONRead = resolve;
+    });
+    vi.spyOn(staleResponse, "json").mockImplementation(async () => {
+      resolveStaleJSONRead();
+      return { state: "healthy", degraded: false };
+    });
+    resolveMountHealth(staleResponse);
+    await staleJSONRead;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    banner = await findByTestId("dashboard-hub-health");
+    expect(banner.getAttribute("data-hub-state")).toBe("recovering");
+  });
+
+  it("applies an earlier successful mount GET when a later open GET fails", async () => {
+    let resolveMountHealth!: (response: Response) => void;
+    const mountHealth = new Promise<Response>((resolve) => {
+      resolveMountHealth = resolve;
+    });
+    let healthCalls = 0;
+    let resolveOpenHealthRequested!: () => void;
+    const openHealthRequested = new Promise<void>((resolve) => {
+      resolveOpenHealthRequested = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") return Promise.resolve(statusResponse([runningRow]));
+      if (url === "/api/hub/health") {
+        healthCalls += 1;
+        if (healthCalls === 1) return mountHealth;
+        if (healthCalls === 2) {
+          resolveOpenHealthRequested();
+          return Promise.reject(new Error("open resync failed"));
+        }
+        return Promise.reject(new Error("unexpected extra hub-health fetch"));
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const { findAllByRole, findByTestId } = render(<DashboardScreen />);
+    await findAllByRole("button");
+    await waitFor(() => expect(healthCalls).toBe(1));
+
+    act(() => {
+      activeStubEventSource().triggerOpen();
+    });
+    await openHealthRequested;
+    expect(healthCalls).toBe(2);
+
+    resolveMountHealth(jsonResponse(200, { state: "down", degraded: true }));
+    const banner = await findByTestId("dashboard-hub-health");
+    expect(banner.getAttribute("data-hub-state")).toBe("down");
+  });
+
+  it("shows restart guidance for a down hub-health SSE event", async () => {
+    mockDashboardFetch();
+    const { findAllByRole, findByTestId } = render(<DashboardScreen />);
+    await findAllByRole("button");
+
+    dispatchSse("hub-health", { state: "down", degraded: true });
+    const banner = await findByTestId("dashboard-hub-health");
+    expect(banner.getAttribute("data-hub-state")).toBe("down");
+    expect(banner.textContent).toContain("Restart the hub");
+  });
+
+  it("describes needs-reconcile as serving with stale client config", async () => {
+    mockDashboardFetch();
+    const { findAllByRole, findByTestId } = render(<DashboardScreen />);
+    await findAllByRole("button");
+
+    dispatchSse("hub-health", {
+      state: "needs-reconcile",
+      degraded: true,
+      operator_action: "mcphub repair --from-health-event",
+    });
+    const banner = await findByTestId("dashboard-hub-health");
+    expect(banner.textContent).toContain("mcphub repair --from-health-event");
+    expect(banner.textContent).not.toContain("mcphub install --reconcile-hub-mode");
+    expect(banner.textContent).toContain("notice clears when the hub GUI restarts");
+    expect(banner.textContent).not.toContain("cannot reach any server");
+  });
+
+  it("shows a degraded hub banner on a needs-reconcile hub-health SSE event, then hides it when healthy", async () => {
+    mockDashboardFetch();
+    const { findAllByRole, queryByTestId, findByTestId } = render(<DashboardScreen />);
+    await findAllByRole("button");
+
+    // Healthy/unknown → no banner (the whole point: green cards never hide a dead hub silently,
+    // but a healthy hub shows nothing).
+    expect(queryByTestId("dashboard-hub-health")).toBeNull();
+
+    // A needs-reconcile hub is serving on a new address, but stale clients need guidance.
+    dispatchSse("hub-health", {
+      state: "needs-reconcile",
+      degraded: true,
+      operator_action: "mcphub install --reconcile-hub-mode",
+    });
+    const banner = await findByTestId("dashboard-hub-health");
+    expect(banner.getAttribute("data-hub-state")).toBe("needs-reconcile");
+    expect(banner.textContent).not.toContain("cannot reach any server");
+    expect(banner.textContent).toContain("reconcile");
+
+    // Recovered → banner gone.
+    dispatchSse("hub-health", { state: "healthy", degraded: false });
+    await waitFor(() => expect(queryByTestId("dashboard-hub-health")).toBeNull());
   });
 });
