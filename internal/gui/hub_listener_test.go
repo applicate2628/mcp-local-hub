@@ -360,8 +360,8 @@ func TestServerStartContinuesWithGateOff(t *testing.T) {
 // TestServerStartContinuesAfterHubBindFailure — even if the hub
 // listener bind fails (gate ON but state-dir unwriteable on
 // Windows), Server.Start MUST still bring up gui-server. The hub
-// path stays gate-OFF for this process lifetime; operator runs the
-// rotation chain to recover.
+// path enters the existing bounded restart driver while gui-server
+// remains available.
 //
 // Skipped on POSIX where the t.TempDir() state-dir is writeable
 // and the bind succeeds — this test specifically targets the
