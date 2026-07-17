@@ -1,18 +1,23 @@
-# Item 3 DESIGN v2.2 — GUI self-restart and port change
+# Item 3 DESIGN v3.1 (design-B) — GUI self-restart and port change
 
-Design package by `$architect`, tightened by the bounded v2.2 consistency pass after the confirm-gate accepted
-the architecture and its compare-and-swap (CAS), rollback, and reservation mechanics. Branch baseline:
-`master @ 9f39c2a2`. Accepted factual source: `item3-restart-recon.md`, supplemented by the accepted confirm-gate
-trace and the live-parent hub-listener wedge documented in
-`work-items/backlog/closed/2026-06-16-hub-listener-hang-no-recovery.md:11-24`. V2.2 changes only the
-post-`child-lock-owned` wait owner: activation now follows a parent signal, proved parent death, or a bounded
-no-signal timeout. The phase graph, rollback split, and reservation semantics are unchanged.
+Design package by `$architect`. This revision implements the accepted decision
+`work-items/decisions/2026-07-17-item3-unitB-recovery-simplify.md`: keep the restartable listener,
+authenticated confirm-then-release standby, parent pre-release rollback, and reservation/Held mapping; delete
+the fully automatic post-release recovery graph. V3.1 also incorporates the accepted two-lane design-gate
+findings: extend the one existing hub restart owner to cover an initial bind failure from a nil component, close
+the parent's own hub listener at flock release, make failed rollback free the flock and exit, distinguish
+free-flock from live-holder recovery, and replace the unsafe ensure-alive relaunch with one degrade-only
+predicate. The accepted factual source remains `item3-restart-recon.md`; the live design baseline is
+`master @ b18ed154`, plus the accepted decision at `47a45076` and the cited current-tree checks in §1.
 
-Cross-cutting port decision: `work-items/decisions/2026-07-17-gui-server-port-authority-model.md`
-(`status: proposed`, revised with this package). Listener lifecycle, reservation, and recovery decisions
-are local to item 3 and remain in this package.
+The simplification is structural. A durable record cannot serialize OS process termination, socket bind, or
+file-lock side effects. V3.1 therefore uses the record only where it can make a truthful decision: reserving the
+healthy release-to-acquire gap and recording a proved-free interruption. Once the parent releases the GUI
+flock, it never arbitrates, terminates, reclaims, or advances the child. The child activates immediately after
+acquiring the flock. Ambiguous crash-during-handoff outcomes fail loudly to one of two exact operator commands,
+selected only by the flock discriminator.
 
-No implementation code is specified below. Go-like text is limited to signatures and protocol pseudocode.
+No implementation code is specified below. Code-like text is limited to signatures and protocol pseudocode.
 
 ---
 
@@ -22,142 +27,473 @@ No implementation code is specified below. Go-like text is limited to signatures
 not redefine it.**
 
 - **Intended change surface:**
-  - `internal/gui/server.go` — REQUIRED. Split the currently coupled `Server.Start` lifetime into a
-    restartable GUI-listener owner, full-runtime activation, hub-listener release, and final process
-    shutdown. Today one GUI-listener close returns from `Start` and drains hub, events, and process state
-    (`server.go:980-1009,1126-1205`), so a CLI-only handoff cannot be correct.
-  - New `internal/gui/gui_listener_lifecycle.go` — `GUIListenerOwner`, request-mode gate, standby/full/grace
-    handler swap, listener close, and rebind-from-owned-listener operations.
+  - `internal/gui/server.go` — REQUIRED. Split the currently coupled `Server.Start` lifetime so the GUI HTTP
+    listener can close/rebind without ending the hub, event bus, or process runtime. The current `Server` still
+    owns the GUI and hub lifecycles together (`server.go:509-625,980-1205`). Route a gate-on initial hub-start
+    error at `server.go:1064-1076` into the existing hub restart driver instead of terminal `HubHealthDown`, and
+    close the parent's own hub listener through that existing owner immediately before flock release.
+  - `internal/gui/hub_listener.go` — BOUNDED ADDITIVE AMENDMENT. At the existing
+    `restartHubListenerWithOutcome` nil-component guard (`hub_listener.go:265-269`), admit only a typed
+    `initial-bind-failed` request from `Server.Start`; skip old-component swap/shutdown and enter the existing
+    start/backoff loop. The same driver, rolling window, consecutive-attempt cap, same-port backoff, exhaustion,
+    abandonment, events, and `hubHealthTracker` remain unchanged. Every other nil-component entry still
+    stop-drives.
+  - New `internal/gui/gui_listener_lifecycle.go` — `GUIListenerOwner`, standby/full/grace request modes,
+    listener close, and owned rebind.
   - `internal/gui/gui_self_restart.go` plus new `internal/gui/gui_restart_protocol.go` — parent coordinator,
-    child standby protocol, retained spawned-process handle, authenticated readiness, deadlines, progress
-    events, and read-only recovery surface.
-  - New `internal/gui/gui_restart_record.go` — the single writer-owner API for the generation-checked
-    handoff record and bounded lock reservation. Parent and child request transitions only through this API.
-  - `internal/gui/single_instance.go` — REQUIRED. The single-instance lease and reservation-aware acquire
-    are the lock-transfer seam. The current lock is CLI-local state (`single_instance.go:25-31`); v2.2 moves
-    its lifecycle ownership into the injected GUI-owner lifecycle.
-  - `internal/gui/ping.go` — additive standby readiness proof on `/api/ping`; the existing public fields
-    remain unchanged.
-  - `internal/cli/gui.go` — inject the acquired lease into the GUI-owner lifecycle; construct child standby
-    before full runtime; gate hub, supervisor, tray, browser, pollers, and mutable background work behind
-    child activation; apply parser-aware restart argv reconstruction; retain the current manual-launch
-    precedence. The current caller owns `defer lock.Release()` and one monolithic `Server.Start`
-    (`gui.go:499-505,638-640`).
-  - New `internal/api/hub_port_dependencies.go` — the one typed dependency probe covering
-    `{gated, grouped, unknown/error}`.
-  - `internal/cli/gui.go` and `internal/gui/server.go` — the two fail-closed consumers of that typed probe:
-    `--reset-port` and initial hub-listener rollback policy respectively. The initial-start policy is set at
-    the `Server.Start` composition call (`server.go:1043-1063`), not by changing the reset branch in
-    `hub_listener.go:657-663`.
-  - `internal/cli/supervise_ensure_alive.go` — additive tri-state GUI-owner probe and interrupted-handoff
-    recovery decision. Existing supervisor recovery semantics remain separate.
+    child standby, retained child process handle, authenticated readiness, bounded pre-release rollback, coarse
+    progress, and the post-release no-op boundary.
+  - New `internal/gui/gui_restart_record.go` — one small marker owner for
+    `{in-progress,reserved,committed,interrupted}`, reservation identity, freshness, and an owned-free-probe
+    interruption compare-and-swap. It does not implement a general recovery graph or relaunch state.
+  - `internal/gui/single_instance.go` — reservation-aware flock acquisition and typed
+    `Held | Free(owned_probe_lease) | Unknown` probing.
+  - `internal/gui/ping.go` — additive challenged standby readiness fields; existing public ping fields remain
+    unchanged.
+  - `internal/cli/gui.go` — inject the existing GUI lease, build standby before full activation, gate mutable
+    child work until flock acquisition, reconstruct restart argv through the parser-aware owner, and keep normal
+    manual launch precedence.
+  - New `internal/api/hub_port_dependencies.go`, `internal/cli/gui.go`, and `internal/gui/server.go` — Unit A's
+    independent typed dependency probe and its two fail-closed consumers. Unit A remains unchanged and ships
+    first.
+  - `internal/cli/supervise_ensure_alive.go` — additive tri-state GUI-owner probe, the single degrade-only
+    predicate, and distinct free-flock/live-holder operator discriminators. It never spawns a GUI. Existing
+    supervisor recovery remains separate.
   - `internal/gui/frontend/src/api.ts`,
-    `internal/gui/frontend/src/components/settings/SectionGuiServer.tsx`, and one restart-event consumer —
-    preserve `restarting`, consume v2.2 progress, best-effort port-change navigation, and manual recovery.
-  - `internal/gui/events.go` only if a registered event identifier is required; the existing
-    `Broadcaster.Publish` and `/api/events` streaming contract are otherwise reused unchanged
-    (`events.go:350-397,567-607`).
-  - Focused unit, contract, and browser tests adjacent to every changed owner.
+    `internal/gui/frontend/src/components/settings/SectionGuiServer.tsx`, and one restart-progress consumer —
+    preserve the 202/2xx spawn contract, show coarse progress, attempt best-effort navigation, and show the
+    exact discriminator-selected manual recovery guidance.
+  - `internal/gui/events.go` only if the coarse progress event needs a registered identifier; reuse the existing
+    broadcaster and `/api/events` stream.
+  - Focused tests adjacent to these owners. No 43-edge record matrix, post-release-kill matrix, or watchdog
+    timing matrix remains.
 - **Approved extension seams:**
-  - `GUIListenerOwner` is the only seam allowed to bind, close, swap, or rebind the GUI HTTP listener.
-  - `HandoffRecordStore` is the only seam allowed to create or advance `gui-restart.json` or evaluate its
+  - `GUIListenerOwner` is the only component allowed to bind, close, swap, or rebind the GUI HTTP listener.
+  - `HandoffMarkerStore` is the only component allowed to create/replace the coarse marker or evaluate its
     reservation.
-  - `SingleInstanceLease` is the only seam allowed to release/reacquire the GUI flock during handoff.
-  - `SpawnedGUIChild` retains the exact OS process handle and is the only termination/wait seam.
+  - `SingleInstanceLease` is the only component allowed to release, acquire, or transfer the GUI flock.
+  - `SpawnedGUIChild` retains the exact OS process handle and is the only termination/wait seam, and only before
+    the parent releases the flock.
   - `resolveGuiPort` plus its typed persisted-value helper is the only port-validity and precedence seam.
-  - `ProbeHubPortDependencies` is the only reset-safety predicate.
-  - The existing SSE broadcaster is the browser progress channel; no second event bus is introduced.
+  - `ProbeHubPortDependencies` is the only Unit A reset-safety predicate.
+  - The existing `runHubListenerRestartDriver` plus `hubHealthTracker` is the only hub recovery owner. The
+    initial-bind request is a new entry cause, not a second owner, protocol phase, or child-sequencing gate.
+  - The existing SSE broadcaster is the only browser progress channel.
 - **Protected / must-not-touch surfaces:**
-  - `internal/gui/hub_listener.go` bind transaction, `api.BindHubMcpListener`, endpoint/token/instance-id
-    formats, hub-session semantics, and hub-health state machine. Existing start/shutdown functions are
-    orchestrated through the new lifecycle; their owned logic is not duplicated.
-  - `internal/api/hub_mcp_groups.go` parsing and persistence semantics. `LoadGroups` remains the source probe;
-    its errors remain errors (`hub_mcp_groups.go:328-356`).
-  - Daemon/supervisor protocols, manifest, secrets, adopt/de-adopt, client reconcile, scheduler task format,
-    and force-kill identity gates.
-  - `internal/autostart/windows.go`; it is evidence only and already launches `gui` without `--port`
-    (`windows.go:63-68`).
-  - Existing `/api/ping` fields `{ok,pid,version}` and existing non-restart callers. V2.2 adds proof fields
-    only for an authenticated standby challenge.
+  - `internal/gui/hub_listener.go` outside the exact initial-bind/nil-component driver amendment above;
+    `api.BindHubMcpListener`; endpoint/token/instance-id formats; hub-session semantics; and the hub-health state
+    machine. Initial failure now enters that state machine's existing bounded recovery path; no retry policy,
+    bind transaction, or second hub recovery owner changes.
+  - `internal/api/hub_mcp_groups.go` parsing and persistence semantics. `LoadGroups` remains the group probe;
+    its errors remain errors.
+  - Daemon/supervisor protocols, manifest, secrets, client reconcile, scheduler task format, and force-kill
+    identity gates.
+  - `internal/autostart/windows.go`; it remains evidence only and launches `gui` without `--port`.
+  - Existing `/api/ping` fields `{ok,pid,version}` and existing non-restart callers.
+  - All post-release recovery machinery is prohibited: no `ClaimRecovery`, claimant record, activation signal,
+    child self-advance, parent reclaim, post-release child termination, or fallback recovery listener.
 - **Declared blast radius:**
-  - Full GUI-process lifecycle on self-restart: GUI listener, single-instance lease, hub-listener transfer,
-    tray/browser/poller activation barrier, restart progress API, and interrupted-handoff recovery.
-  - Hub-port reset safety only at the two named callers.
+  - Unit B changes GUI-listener lifetime, single-instance handoff, restart response/progress, desired-port argv,
+    the narrowly gated ensure-alive degrade branch, parent-owned hub teardown ordering at flock release, and the
+    existing hub restart driver's nil-component entry for one initial-bind cause.
+  - Unit A changes only the two named hub-port reset decisions.
   - No daemon lifecycle, hub routing, token, manifest, group schema, scheduler task, or client-reconcile change.
-  - This is a large internal seam because the current `Server.Start` conflates listener and process lifetime.
-    It is developed in internal stages but ships only in the atomic v2.2 rollout group in §10.
+  - The listener seam is the only cross-cutting internal extraction. The recovery simplification reduces the
+    protocol surface from 13 phases and 43 legal edges to four coarse marker phases and one degrade predicate;
+    ensure-alive has no GUI spawn path.
 - **Shared mutable-state ownership and committed events:**
-  - Listener mode and request admission: exactly one writer-owner, `GUIListenerOwner`; downstream settled
-    event, `gui-restart-progress{phase:"parent-quiesced"}`.
-  - Handoff record and reservation: exactly one writer-owner, `HandoffRecordStore`; downstream committed
-    events are its monotonic terminal transitions `committed`, `aborted`, `recovery-failed`,
-    `shutdown-intent`, or `expired`.
-  - Single-instance ownership: exactly one writer-owner, `SingleInstanceLease`; downstream settled event,
-    record phase `child-lock-owned`.
-  - Browser-visible restart state: exactly one writer-owner, the parent `RestartCoordinator`; downstream
-    event, `gui-restart-progress`, emitted on the old-port broadcaster.
+  - Listener mode and request admission: exactly one writer-owner, `GUIListenerOwner`; downstream settled event,
+    `gui-restart-progress{phase:"listener-settled"}`.
+  - Coarse marker and reservation: exactly one writer-owner, `HandoffMarkerStore`; downstream committed event,
+    durable marker `committed` or `interrupted`.
+  - Single-instance ownership: exactly one writer-owner, `SingleInstanceLease`; downstream observable event,
+    `gui-restart-lock-acquired` emitted by the child immediately before activation.
+  - Browser-visible pre-release progress: exactly one writer-owner, parent `RestartCoordinator`; downstream
+    event, `gui-restart-progress`. After flock release the parent publishes no child verdict.
+  - Hub listener recovery: exactly one writer-owner, the existing `runHubListenerRestartDriver` over
+    `Server.hubMcpComp`; downstream observable events remain the registered `hub-listener-restart-*` events and
+    `hubHealthTracker` state changes.
 
-## 1. Re-verified constraints that drive v2.2
+## 1. Re-verified constraints that drive v3.1
 
-1. The GUI listener is not independently restartable today. `Server.Start` binds and serves it, starts the
-   hub lifecycle, and drains hub/events when the GUI server returns (`server.go:980-1009,1043-1124,
-   1126-1205`). `startGuiServer` merely owns the flock and invokes that monolith (`gui.go:499-505,638-640`).
-2. The current restart returns success after spawn and schedules `os.Exit`, while the process handle is
-   immediately handed to a background `Wait` and only a bare PID is returned
-   (`gui_self_restart.go:98-145,156-201`).
-3. The current child must acquire the flock before binding (`gui.go:285-305`). V1's “confirm child ping,
-   then release flock” therefore deadlocked.
-4. Current `/api/ping` proves only a caller-provided JSON PID (`ping.go:12-25`); the existing handshake
-   checks that PID against pidport (`handshake.go:83-125`) but has no per-handoff proof.
-5. `GatedOnClients` deliberately omits unreadable clients, although `ProbeHubGate` retains them
-   (`hub_gate_detect.go:35-51,110-123`). `LoadGroups` distinguishes missing from every other read/parse error
-   (`hub_mcp_groups.go:328-356`). A reset predicate that discards either error class fails open.
-6. The current frontend contract requires `restarting` (`api.ts:920-948`) and branches on it
-   (`SectionGuiServer.tsx:65-89`). A backend-only `202 {handoff_id}` is a regression.
-7. `runEnsureAlive` currently returns early when the supervisor is live (`supervise_ensure_alive.go:346-360`),
-   and its GUI-owner helper maps pidport path/read uncertainty to “not alive”
-   (`supervise_ensure_alive.go:176-218,266-277`). V2.2 recovery must be independent, tri-state, and record-gated.
-8. Only long `port` is registered (`gui.go:358`). Autostart supplies `gui` with no `--port`
-   (`autostart/windows.go:63-68`).
+1. The GUI listener is not independently restartable today. `Server.Start` binds and serves it, starts the hub
+   lifecycle, and drains hub/events when the GUI listener returns (`server.go:980-1205`). The current CLI
+   composition owns the flock outside that monolith.
+2. The current self-restart reports spawn success, schedules `os.Exit`, and reduces the spawned child to a PID
+   while a background goroutine waits (`gui_self_restart.go:98-201`). V3.1 retains the exact OS process handle
+   until the only safe termination boundary ends.
+3. The child must acquire the GUI flock before it can become the full owner. V1's “confirm full child, then
+   release flock” therefore circularly waited. V3.1 confirms a bounded standby listener before release.
+4. Current `/api/ping` proves only a caller-provided PID. A retained process handle plus a one-use nonce is
+   required to confirm and, before release only, terminate the exact spawned child.
+5. A record compare-and-swap cannot serialize OS kills, binds, and flocks. The accepted decision records three
+   relocations of the same no-owner freeze and a fourth named race. V3.1 does not attempt to repair that mismatch
+   with another record edge.
+6. The current initial hub-start path does **not** recover a never-bound listener: a gate-on error becomes
+   terminal `HubHealthDown` (`server.go:1064-1076`), and the existing restart driver stop-drives when
+   `hubMcpComp` is nil (`hub_listener.go:265-269`). The bind transaction uses an exclusive listener
+   (`internal/api/hub_mcp_bind.go:149-160`, `internal/api/hub_mcp_listener_windows.go:75-93`), so a child start
+   can contend with a parent's live socket. V3.1 routes only that initial failure into the existing driver and
+   closes the parent's own hub listener at flock release; neither amendment sequences child GUI activation.
+7. A raw `reserved` marker is necessary because the healthy parent-release to designated-child-acquire gap can
+   expose a momentarily free OS flock. Treating that moment as dead would launch a third GUI.
+8. `runEnsureAlive` currently conflates some path/read failures with “not alive” and returns early while the
+   supervisor is live. The Unit B branch must be independent, tri-state, record-gated, and fail closed.
+9. The frontend depends on `restarting`; spawn failure is deliberately a 2xx body. Accepted work remains HTTP
+   202 and spawn failure remains 200/2xx so the friendly UI branch is reachable.
+10. Only long `port` is registered. Autostart launches `gui` without an explicit port.
+11. A live GUI process can still wedge while holding the single-instance flock. That is the pre-existing
+    single-instance baseline, not the deleted no-owner relocation class: a proved live holder requires the
+    existing identity-gated `mcphub gui --force --kill`, while only a proved-free flock can advertise plain
+    `mcphub gui`.
 
 ## 2. Chosen architecture
 
-### Parent-supervised, confirm-then-release handoff with a restartable GUI-listener owner
+### Parent-supervised confirm-then-release, with no parent recovery after release
 
-The running GUI remains the coordinator and rollback agent. The replacement child starts as a minimal
-**STANDBY** process: it may bind and serve the GUI listener and answer an authenticated readiness probe, but it
-does not load mutable GUI state, bind the hub, start tray/browser/pollers, expose mutators, or write ordinary
-runtime state. The parent confirms this exact child, quiesces its own full handler, installs a bounded
-reservation, releases the flock, and waits until the designated child owns it. Only then does the parent
-release the hub listener and authorize child activation.
+The running GUI coordinates only the portion it can prove safely. It spawns a minimal **STANDBY** child through
+a retained OS process handle and transfers a 256-bit nonce through an owner-only inherited handle/file, never
+through argv or environment. The child binds the target GUI port in standby, serves only authenticated readiness,
+and performs no mutable-runtime side effect. The parent confirms the exact child, quiesces or closes its own GUI
+listener as required, publishes `reserved` while still holding the flock, closes its own hub listener through
+the existing bounded hub owner, and releases the flock immediately afterward. This is own-resource ordering:
+the child receives no hub signal and waits only for normal flock acquisition.
 
-For a port change, the parent retains the old GUI listener in **GRACE** mode after giving up full-service
-authority. GRACE serves only the existing SSE stream and `GET /api/gui/restart/redirect`; every other request
-returns `503 GUI_RESTART_IN_PROGRESS`. This supplies best-effort navigation without permitting a second tab to
-mutate settings, secrets, groups, or daemon state after the child begins loading state.
+That release is the architectural boundary. After it, the parent never writes a child phase, waits for child
+activation, claims recovery, terminates the child, reacquires the flock, or decides a winner. It may finish a
+fixed old-port grace interval and ordinary process cleanup, but those actions are not protocol gates and never
+condition child progress.
 
-For a same-port restart, the parent must close only its GUI listener before the child can bind. The new
-`GUIListenerOwner` makes that granular close and later rebind possible without returning from the full Server
-lifecycle or implicitly draining the hub/events/process.
+The designated child acquires the reserved flock, writes pidport, and **activates immediately**. It does not
+wait for hub release or a parent signal. Full GUI activation and the existing hub lifecycle remain separate:
+the GUI becomes reachable, while an initial hub bind failure is enqueued into the one existing restart driver,
+which retries from nil with its unchanged backoff/window/exhaustion policy after the old socket is closed.
+
+### Deliberate recovery floor
+
+There is no automatic GUI relaunch. After a nonterminal phase deadline, ensure-alive only classifies the flock:
+an actually acquired free probe lease permits one compare-and-swap to `interrupted`, after which plain
+`mcphub gui` is truthful; a proved held flock permits no marker write and surfaces the identity-gated
+`mcphub gui --force --kill` baseline. `Unknown` remains fail-closed and is not mislabeled as either case. The
+two exact messages and discriminators are defined in §4, §9, and §12.
 
 ### Single feature gate
 
-`gui.RestartV2Enabled()` is the single internal capability owner. It is resolved once at the CLI composition
-root and injected into `Server`; `supervise --ensure-alive` calls the same owner. It is not a user setting and
-adds no persisted configuration.
+`gui.RestartV3Enabled()` is the one internal capability owner, resolved at the CLI composition root and consumed
+by the endpoint and ensure-alive branch. Disabled means fully inert: endpoint 503, no child, no marker, no
+reservation, no recovery branch, and frontend manual guidance. The unsafe v1 spawn-and-exit path is not a
+fallback.
 
-Disabled means fully inert: the v2.2 endpoint returns `503 GUI_RESTART_UNAVAILABLE`, the frontend gives manual
-restart guidance, no child is spawned, no handoff record/reservation is created, and ensure-alive ignores v2.2
-records. The unsafe v1 spawn-and-exit path is not used as fallback.
+## 3. Port authority and parser-aware child argv
 
-## 3. Component contracts and dependency direction
+The desired/actual model remains:
+
+| Layer | Authority | Owner |
+| --- | --- | --- |
+| Persisted `gui_server.port` | Desired operator intent when valid | Settings registry |
+| Bound listener port | Actual runtime fact | `GUIListenerOwner` |
+| `gui.pidport` | Derived rendezvous cache | Current flock holder |
+
+Manual launch remains `explicit --port -> valid persisted -> 0`. Self-restart changes only inherited argv: a
+**valid** persisted value wins and every recognized pre-terminator `--port` occurrence is removed. Unset or
+invalid persisted state is “no valid intent”: inherited explicit `--port`, including `0`, is preserved. Invalid
+persisted state emits a visible warning; with no explicit flag it degrades to ephemeral `0` rather than
+pretending the invalid value was honored.
+
+One typed helper under `resolveGuiPort` owns the sole `[1024,65535]` predicate and returns
+`Unset | Valid(port) | Invalid(raw,reason)`. The argv builder consumes that classification; it does not retype
+the range.
+
+`RebuildSelfRestartArgv` uses the GUI `pflag.FlagSet` metadata to identify effective token spans, respects `--`,
+and recognizes only the registered long name `port`. It is not a raw string replacement.
+
+| Parent argv shape | Valid persisted intent | Unset/invalid persisted intent |
+| --- | --- | --- |
+| `--port N` | Remove flag and value | Preserve both tokens |
+| `--port=N` | Remove token | Preserve token |
+| `--port 0` | Remove flag and value | Preserve explicit `0` |
+| Repeated `--port` forms | Remove every recognized occurrence | Preserve all; parser last-wins remains |
+| `-port` | Reject unregistered shorthand before spawn | Same rejection |
+| Tokens after `--` | Preserve as positional | Preserve as positional |
+| No `--port` | No argv change | No change; invalid persisted warns and resolves to `0` |
+
+Decision details remain in `work-items/decisions/2026-07-17-gui-server-port-authority-model.md`.
+
+## 4. Confirm-then-release handoff
+
+### Port-change path (`N != P`)
+
+```text
+parent holds flock + full GUI(P) + hub
+  -> marker in-progress; spawn retained child handle with owner-only nonce
+child binds N; serves STANDBY authenticated ping; parent confirms exact child
+  -> parent enters GRACE(P); new mutators 503; admitted mutators drain
+parent writes reserved while still holding flock
+  -> bounded/non-blocking target-port progress flush
+  -> close PARENT'S OWN hub listener through the existing hub owner (bounded 5 s, force-close on expiry)
+  -> RELEASE flock immediately; the child waits on no hub signal
+  -> protocol duty ends; no parent child-phase write, wait, claim, kill, or reclaim
+child acquires matching reservation; writes pidport
+  -> ACTIVATE IMMEDIATELY: full GUI(N) becomes reachable
+  -> existing hub owner attempts desired bind independently
+  -> initial failure enters that same owner's retry-from-nil path; healthy/recovering/down is honest
+  -> child writes committed
+parent finishes fixed GRACE(P), releases only its remaining GUI/process-local resources,
+  and exits through the self-restart path without stopping the adopted supervisor fleet
+  and without observing child outcome
+```
+
+The old-port grace bridge is delivery help, not recovery authority. It may serve SSE and the fixed redirect
+route for `G`, but it neither waits for `committed` nor changes the marker after release.
+
+### Same-port path (`N == P`)
+
+```text
+parent holds flock + full GUI(P) + hub
+  -> marker in-progress; spawn retained child with owner-only nonce
+child prepares minimal standby and supplies authenticated poised proof
+parent closes new mutable admissions; admitted mutators drain
+parent closes ONLY GUI listener P; flock, hub, events, and process remain owned
+child binds P in STANDBY; parent confirms exact child before the bind deadline
+parent writes reserved while still holding flock
+  -> close PARENT'S OWN hub listener through the existing bounded hub owner
+  -> RELEASE flock immediately; protocol duty ends; no child hub signal exists
+child acquires matching reservation; writes pidport; ACTIVATE IMMEDIATELY
+  -> full GUI(P), then independent existing hub lifecycle with retry-from-nil on initial failure; write committed
+parent releases only its remaining GUI/process-local resources and exits through the
+self-restart path without stopping the adopted supervisor fleet; browser reconnects
+```
+
+### Parent pre-release rollback — the only automatic rollback
+
+The rollback gate is the concrete fact `parentLeaseReleased == false`, never an inferred marker phase. On child
+bind/auth failure, confirmation timeout, quiesce failure, or marker-write failure:
+
+1. Retain the already-owned `SingleInstanceLease`; never reacquire it.
+2. Terminate only the exact authenticated child through the retained OS process handle. A child that never
+   authenticated remains flockless and closes its own bounded standby on timeout.
+3. For same-port, call `GUIListenerOwner.BindForRecovery(P)` while reaping the exact child; for port-change,
+   swap the still-owned grace listener back to full.
+4. Restore full admission within the rollback budget. Once restoration and exact exit are proved, clear the
+   non-reserved marker and report restart failure while the original GUI remains healthy.
+5. If safe restoration cannot be proved, write `interrupted` with the §12 reason, surface the exact operator
+   instruction, and enter the terminal rollback-failure branch below. No second automatic mechanism is entered.
+
+**Normative rollback-failure terminal branch:** after the durable `interrupted` write, the parent spends only
+the remaining rollback budget on exact-child cleanup and bounded shutdown of its own hub listener, then releases
+the retained `SingleInstanceLease` and exits unconditionally. An authenticated child may be terminated through
+the retained handle; an unauthenticated child remains flockless and is left only to its already-bounded standby
+timeout. Cleanup failure is logged but cannot retain the flock or keep the crippled parent alive. If the
+`interrupted` write itself fails, emit `gui-restart-interrupted-marker-write-failed` and still perform the same
+bounded cleanup, release, and exit. This branch fails loud and leaves the flock free, so plain `mcphub gui` is a
+genuine recovery rather than a bounce to the crippled parent.
+
+### Post-release rule
+
+After the release call returns, the parent:
+
+- does not call `Terminate`, `Wait` as a protocol gate, `ClaimRecovery`, lease reacquire, or
+  `BindForRecovery`;
+- does not publish `hub-released`, signal activation, advance a suffix, or decide between commit and abort;
+- does not condition ordinary cleanup or the fixed grace deadline on child state;
+- has already closed its own hub listener at the release boundary and may only close its retained process handle
+  without terminating the child, finish bounded GUI grace, release its remaining resources, and exit;
+- must not run the normal GUI-return `manager.Stop` path that tears down the adopted supervisor/daemon fleet;
+  successful handoff uses the existing self-restart-specific process-exit boundary after its owned cleanup.
+
+The child has no activation-wait state. Its successful flock acquisition directly calls the single activation
+barrier. This removes the parent-death, live-parent-wedge, claimant-death, claim-expiry, and in-flight-terminate
+arbitration surfaces instead of guarding them.
+
+### Minimal deadlines
+
+All values belong to one injected `RestartDeadlines` policy; tests use a fake clock.
+
+| Deadline | Production value | Expiry action |
+| --- | ---: | --- |
+| Authenticated poised proof / flockless standby | 10 s | Parent stays full; unauthenticated child closes and exits |
+| Port-change bind/ping confirmation | 2 s | Parent stays full; terminate exact authenticated child; clear marker |
+| Same-port bind/ping after P closes | 2 s from close | Retain flock; run pre-release rebind rollback |
+| Mutable-request quiesce | 5 s | Restore full admission; terminate exact authenticated child |
+| Reservation protection window | 10 s from durable `Reserve` | Covers the 5 s parent hub-shutdown cap plus 5 s post-release acquisition; before expiry raw `reserved` maps Held, after expiry the predicate only classifies Free/Held and never spawns |
+| Parent hub-listener teardown at release | Existing 5 s shutdown cap | Force-close on expiry, then release flock; never wait for child hub state |
+| Pre-release exact-child reap plus P rebind | 5 s | Write/log `interrupted`, finish bounded cleanup, release flock, and exit |
+| Old-port grace `G` | 5 s after release | Close old GUI listener and exit regardless of child outcome; hub is already closed |
+| Marker freshness | 3 min from generation start | Never auto-relaunch; classify expired nonterminal Free/Held for exact guidance |
+
+There is no 10-second parent decision cutoff, 30-second child signal wait, 65-second admission arithmetic,
+post-release reacquire deadline, absolute-expiry transition, or recovery-surface lifetime.
+
+### Held-flock nonterminal work is bounded
+
+There are only three held-flock nonterminal sections in v3.1:
+
+1. **Parent preparation before `reserved`:** authenticated proof, target bind confirmation, mutator quiesce,
+   and same-port rebind rollback use the 10 s, 2 s, 5 s, and 5 s deadlines above. Record writes are single
+   durable owner operations. Browser navigation, old-port grace, child activation, and hub-health convergence
+   are not awaited here.
+2. **Parent `reserved`-to-release boundary:** the progress publication is bounded/non-blocking, the parent's own
+   hub teardown uses the existing 5 s cap and force-close fallback, and flock release follows immediately. No
+   parent signal, child status, hub bind result, or grace completion gates release.
+3. **Ensure-alive owned-Free probe:** no `reserved -> in-progress` spawn executor exists. The probe lease permits
+   only one generation/sequence-checked `interrupted` write and is then released on success, error,
+   cancellation, or timeout; it is never transferred to a child.
+
+The remaining way a nonterminal handoff can stay `Held` past its deadline is that the GUI process itself or an
+OS/filesystem call inside it has wedged while retaining the flock. That is the irreducible pre-existing
+single-instance-holder baseline. No claimant, parent signal, child self-advance, competing writer, or
+post-release termination is added to mask it.
+
+### What the operator sees in a degraded case
+
+The supervisor/ensure-alive log, the next CLI invocation, and any surviving grace UI select exactly one message
+from the flock discriminator:
+
+- **Free flock:** after ensure-alive actually acquires the probe lease and writes `interrupted`, or after
+  rollback failure releases and exits, show exactly:
+
+  > GUI restart interrupted; run `mcphub gui`.
+
+  The command acquires the now-free normal flock, starts a new generation, and restores the full GUI.
+- **Live-wedged holder:** when a nonterminal phase is past its applicable deadline and the probe returns
+  `Held`, show exactly:
+
+  > GUI restart interrupted: a GUI process still holds the single-instance lock; run `mcphub gui --force --kill`.
+
+  This is the existing identity-gated single-instance recovery: it verifies and terminates the live holder,
+  then performs the normal launch path. Plain `mcphub gui` is deliberately not advertised because it would only
+  report/bounce to that holder.
+
+`Unknown` is neither message: it emits `gui-restart-owner-unknown`, mutates no marker, and remains fail-closed
+until the lock/path/DACL uncertainty is resolved. Neither degraded case requires record surgery, a fallback
+port, or an automatic takeover.
+
+## 5. Coarse marker and reservation/Held rule
+
+### One small record owner
+
+`HandoffMarkerStore` owns `<state-dir>/gui-restart.json` and its private record lock. It exposes intent-specific
+operations, not a generic legal-edge engine:
+
+```text
+Begin(generation, route, old_port, new_port, freshness_deadline) -> in-progress
+Reserve(generation, expected_sequence, reservation_deadline, designated_child_hash) -> reserved
+Commit(generation, owner_lease, bound_port) -> committed
+Interrupt(generation, reason_code, operator_action) -> interrupted
+InterruptFromOwnedFreeProbe(generation, expected_sequence, owned_probe_lease,
+                            reason_code, operator_action) -> interrupted
+ClearAfterProvedPreReleaseRollback(generation, owner_lease) -> absent
+```
+
+`Reserve` and `InterruptFromOwnedFreeProbe` require generation+sequence comparison because they guard the
+release gap without overwriting a changed generation. `Begin` is parent-only while it holds the flock. `Commit`
+is child-only while it holds the flock. `Interrupt` is written by the current pre-release parent;
+`InterruptFromOwnedFreeProbe` is written only by ensure-alive while it holds the acquired free probe lease. A
+non-owner observing `Held` cannot write the marker. This ownership removes the need for a general transition
+graph and gives ensure-alive no spawn/lease-transfer operation.
+
+Record v3.1 fields are deliberately small:
+
+| Field | Purpose |
+| --- | --- |
+| `version`, `generation`, `sequence` | Schema, generation identity, and compare-and-swap interruption |
+| `phase` | One of the four coarse decisions below |
+| `route`, `old_port`, `new_port` | Same-port/port-change operation and operator diagnostics |
+| `old_pid`, `child_pid` | Diagnostics only; never confirmation or kill authority |
+| `designated_child_hash` | Reservation match without persisting the nonce |
+| `created_at`, `updated_at`, `fresh_until` | Injected-clock validity; no expiry phase |
+| `reservation_expires_at` | Parent hub-shutdown cap plus healthy post-release acquisition protection window |
+| `reason_code`, `operator_action` | §12 discriminator and exact manual guidance |
+
+There are no claim IDs, claim deadlines, fallback ports, activation-signal fields, hub-release fields, or
+phase-suffix cursors.
+
+### Minimal phase set
+
+| Phase | The one distinct decision it gates |
+| --- | --- |
+| `in-progress` | The parent is preparing a handoff; automatic relaunch is forbidden |
+| `reserved` | Parent has committed to flock release; the designated child is protected during the window, after which only Free/Held degradation is permitted |
+| `committed` | A replacement owns the flock and full GUI is reachable; suppress all recovery |
+| `interrupted` | The current owner failed pre-release or ensure-alive proved the flock free; stop automation and require plain `mcphub gui` |
+
+Any proposed fifth phase must gate a decision not expressible by the owner lease, process handle, listener
+ownership, reservation deadline, or §12 reason. `poised`, `parent-quiesced`, `parent-listener-released`,
+`child-lock-owned`, `hub-released`, `activating`, `aborted`, `recovery-failed`, `shutdown-intent`, and `expired`
+do not meet that test and are removed.
+
+The only normal marker shapes are:
+
+```text
+absent -> in-progress -> reserved -> committed
+                 |          |
+                 +----------+-> interrupted   // only on proved failure/ambiguity
+reserved -------------------> interrupted      // ensure-alive owns Free; no spawn/relaunch
+```
+
+Successful pre-release rollback clears `in-progress` after restoring the original full GUI; it does not mint
+an `aborted` phase. An explicit operator launch after `interrupted` starts a new generation rather than
+advancing the interrupted generation.
+
+### Reservation-aware acquisition
+
+Every entrant that tentatively acquires the flock reads the marker while still holding that tentative lease:
+
+1. A fresh unexpired `reserved` marker rejects every ordinary/third entrant and returns
+   `ErrHandoffReserved` after releasing the tentative lease.
+2. The designated child may retain the lease only when its owner-only nonce hashes to the reservation. It then
+   writes pidport and activates immediately; it does not need a record phase advance first.
+3. Ensure-alive maps raw `reserved` to `Held` throughout the reservation window even if the OS flock is
+   momentarily free.
+4. After the reservation window, ensure-alive may retain a proved-free probe lease only as part of the exact §9
+   predicate. It may compare-and-swap `reserved -> interrupted`, release the lease, and emit the free-flock
+   message; it never spawns or transfers the lease.
+5. Unknown path, marker, DACL, or flock state releases any tentative lease and returns `Unknown`; it never means
+   dead.
+
+If a designated child is alive but stalled in standby when ensure-alive owns the free lease and changes its
+matching `reserved` marker to `interrupted`, the child cannot acquire during the write. After release it finds no
+matching reservation, releases any tentative lease, closes standby, and exits. Thus the degrade action fences a
+late surviving child without adding a takeover or closure protocol.
+
+An explicit operator launch is not ensure-alive recovery. After the healthy reservation window it may acquire
+the normal flock; when it encounters a stale/`interrupted` marker it starts a new generation and reports the
+prior reason. It never kills a holder based on the marker.
+
+### Crash analysis — reservation/Held only
+
+| Crash point | Durable/OS observation | Required verdict |
+| --- | --- | --- |
+| Parent dies before `reserved` | `in-progress`; flock becomes Free | Ambiguous pre-release state: write `interrupted`, show manual command, no auto relaunch |
+| Parent writes `reserved`, dies before release | `reserved`; flock Held until OS cleanup | Suppress inside the window; after the deadline, a still-Held live process gets the force-kill message, while OS cleanup to Free permits `interrupted` + plain launch |
+| Parent releases; child has not acquired | `reserved`; flock briefly Free inside reservation window | Map to Held; reject third entrant and suppress ensure-alive |
+| Child acquires and remains alive | `reserved` or `committed`; flock Held | Suppress while within deadline or committed; stale nonterminal Held emits the force-kill message |
+| Child acquires then dies before `committed` | `reserved`; flock becomes Free | After reservation expiry, §9 writes `interrupted`, releases the probe, and advertises plain launch; no relaunch |
+| Marker reserve write fails | parent still holds flock | Pre-release rollback; never expose an unreserved free gap |
+
+This is the complete crash analysis for the record. There is no whole-protocol crash matrix because the marker
+does not claim to order OS process, bind, hub, or termination side effects.
+
+### Why the relocation class is unreachable by construction
+
+| V2.2 relocation surface | V3 construction that removes it |
+| --- | --- |
+| Recovery-claimant death | No `ClaimRecovery`, claim credential, claimant lease, or claimant timeout exists |
+| Live-parent post-lock wedge | The child waits on no parent signal and activates immediately after flock acquisition |
+| Parent-death suffix repair | The child has no phase suffix to self-advance; flock acquisition directly enters the one activation path |
+| Parent/child CAS winner race | The parent makes no marker decision after release; there are no competing post-release writers |
+| Claim-expiry versus in-flight `Terminate` | No post-release termination API or claim expiry exists; the retained handle is detached at release |
+| Hub-release sequencing race | Parent hub close is own-resource ordering immediately before release; the child waits only on flock acquisition, and any residual initial bind failure enters the existing retry-from-nil owner |
+
+These are unreachable because the required actor, wait, edge, or operation is absent—not because another
+timeout or guard attempts to win the same race.
+
+## 6. Component contracts and dependency direction
 
 The stable dependency direction is CLI composition → GUI lifecycle contracts → existing hub/API primitives.
 No reusable GUI component imports CLI-private code.
 
 ### `GUIListenerOwner`
-
-Signature-level contract:
 
 ```text
 BindStandby(port, readiness) -> BoundListener
@@ -169,486 +505,82 @@ BindForRecovery(port, deadline) -> BoundListener
 Shutdown(deadline) -> result
 ```
 
-- Owns the `net.Listener`, `http.Server`, and one atomic per-request handler-mode gate.
-- A mode swap rejects new non-allowed requests immediately; `EnterGrace` then waits, within a declared
-  quiesce deadline, for already-admitted mutable requests to drain before reporting `ModeSettled`.
-- Existing SSE connections survive a full→grace swap. A listener close is independent of hub/event/runtime
-  shutdown.
-- `BindForRecovery` returns the already-bound exclusive listener to the owner. The proof that the port is free
-  and the rebind are one operation, avoiding a probe-close-rebind race.
+- Owns the `net.Listener`, `http.Server`, and one per-request handler-mode gate.
+- Mode swap rejects new non-allowed requests immediately and then drains already-admitted mutators within the
+  quiesce deadline.
+- Existing SSE may survive full→grace. Listener close is independent of hub/event/runtime shutdown.
+- `BindForRecovery` returns an already-bound exclusive listener; it is callable only while the parent still
+  owns the GUI flock.
 
 ### `GUIOwnerLifecycle`
 
-- Owns `GUIListenerOwner`, injected `SingleInstanceLease`, hub components, activation barrier, and orderly
-  cleanup.
+- Owns `GUIListenerOwner`, injected `SingleInstanceLease`, existing hub components, and orderly cleanup.
 - Normal launch starts full immediately.
-- Handoff child starts standby and blocks every full-runtime side effect behind `Activate`.
-- Parent `ReleaseHub` drains the existing hub through the existing owner; child `Activate` starts the desired
-  hub state only after it owns the GUI lease. `ReleaseHub` is governed by the §4 post-confirmation deadline:
-  the existing five-second graceful shutdown must fall through to its owned forced `http.Server.Close` action
-  (`hub_listener.go:840-881`), never leave the coordinator blocked on drain completion.
-- CLI tray, browser, pollers, supervisor adoption/spawn, session sweepers, and mutable background work wait on
-  `Activated()`. This prevents the child's automatic hub bind from colliding with the parent and preserves
-  same-port hub-toggle restart behavior.
+- Handoff child starts standby and gates hub, tray, browser, pollers, supervisor adoption/spawn, and mutable
+  background work behind **flock acquisition**, not a parent activation signal.
+- After acquiring the flock, the child opens full GUI service immediately and starts the desired hub lifecycle
+  through its existing owner. An initial hub bind failure is recovering health owned by the existing restart
+  driver, not failed GUI activation or a reason to wait on the parent.
+- During healthy handoff the parent closes its own hub component with the existing bounded shutdown operation
+  immediately before `SingleInstanceLease.Release`; after release the old parent has no hub component left to
+  close during grace.
+
+### Existing hub restart owner — bounded v3.1 amendment
+
+```text
+RequestHubRestart(cause: unresponsive | initial-bind-failed)
+```
+
+- `runHubListenerRestartDriver` and `hubHealthTracker` remain the single recovery/state owner.
+- `Server.Start` changes only the gate-on initial-error branch: replace the stale “gate-OFF for this process”
+  terminal log with a retry-scheduled diagnostic, retain `HubHealthRecovering`, and enqueue
+  `initial-bind-failed` on the existing buffered channel. The once-started driver consumes that request; the
+  branch no longer terminates the never-bound case as `HubHealthDown` before the retry policy runs.
+- For `initial-bind-failed` with `hubMcpComp == nil`, `restartHubListenerWithOutcome` skips old-listener swap and
+  shutdown, then enters its existing start loop. A nil component for every other cause still stop-drives.
+- Base/max backoff, rolling-window attempt cap, consecutive restart cap, same-port wait, exhaustion/abandon
+  outcomes, event identifiers, and health transitions are unchanged. Exhaustion may still end in honest
+  `HubHealthDown`; the amendment only makes the existing recovery owner run first.
+- This owner receives no child readiness signal and exposes no handoff phase. Parent hub close at flock release
+  is a caller-owned resource-lifetime action, not a restart-driver decision.
 
 ### `SpawnedGUIChild`
 
 ```text
-PID() -> int                 // diagnostic only
-Wait(deadline) -> ExitResult // exactly once, on the retained OS process handle
-Terminate(auth, deadline) -> result
-DetachAfterCommit() -> result
+PID() -> int                  // diagnostic only
+WaitBeforeRelease(deadline) -> ExitResult
+TerminateBeforeRelease(auth, deadline) -> result
+DetachAtRelease() -> result
 Close() -> result
 ```
 
-- The coordinator, not a background reaper, owns the retained spawn handle until commit/abort.
-- No termination is addressed by a bare integer PID.
-- `Terminate` is enabled after the child has supplied the valid one-time authenticated `poised` proof. This
-  proof arrives before either route lets the parent quiesce or close anything, so same-port pre-release
-  rollback is authorized to terminate the exact retained child. If no proof ever arrives, the child is still
-  flockless: its ten-second pre-ownership standby expiry closes that listener and exits while the parent keeps
-  serving. That exit rule never applies after `child-lock-owned`; the normative post-ownership conduct is below.
-- Abort is recorded only after `Wait` proves the exact child exited. On commit, `DetachAfterCommit` releases
-  the parent's local handle without waiting for the long-lived child.
-
-### Authenticated readiness
-
-- Parent generates a 256-bit handoff nonce and transfers it through a one-shot inherited OS pipe/handle whose
-  endpoints are owned only by the parent and exact child; the nonce is never placed in argv, an environment
-  variable, logs, or durable raw state. An owner-only temporary file is the only permitted platform fallback.
-- Child reads once from the inherited channel and closes it before starting standby.
-- The child readiness file contains `{handoff_id,generation,sequence,phase,pid,port,proof}` where `proof` is a
-  message authentication code over the preceding fields.
-- Parent accepts the first valid proof once and binds that authenticated session to the retained process
-  handle. A challenge-bearing standby `GET /api/ping` must return matching `pid`, `handoff_id`, `generation`,
-  and proof. The existing public ping fields remain byte-compatible for ordinary callers.
-- The child explicitly serves standby ping **before** asking for the flock. This is a sanctioned, bounded,
-  parent-supervised flockless listener, not full GUI ownership.
-
-## 4. Confirm-then-release state machine
-
-### Port-change path (`N != P`)
-
-```text
-parent holds flock + full GUI(P) + hub
-  -> begin generation; spawn retained child handle
-child binds N; serves STANDBY ping; parent confirms the nonce-bound retained child
-  -> record poised
-  -> parent EnterGrace(P); new mutators 503; admitted mutators drain
-  -> record parent-quiesced
-parent advances parent-quiesced -> reserved while still holding flock
-  -> RELEASE flock
-child acquires flock with matching claim; consumes reservation; writes pidport
-  -> record/signal child-lock-owned; start child activation wait + parent post-confirmation deadlines
-parent releases hub listener within the bounded post-confirmation duty
-  -> record hub-released; signals activate
-child loads mutable state, applies desired hub state, opens full handler,
-  -> record activating; then starts tray/browser/pollers/supervisor work
-  -> record committed; signal child-active
-parent publishes committed(new_port=N) on old-port SSE
-  -> keep GRACE(P) for G; close old listener; detach child handle; exit parent
-```
-
-The child answering ping no longer waits on a flock that the parent is withholding. Full child service still
-waits for exclusive ownership.
-
-### Same-port path (`N == P`)
-
-```text
-parent holds flock + full GUI(P) + hub
-  -> begin generation; spawn retained child
-child prepares minimal standby and supplies authenticated poised proof
-  -> record poised
-parent rejects new mutators and drains admitted mutators
-  -> record parent-quiesced
-parent closes ONLY GUI listener P; hub/events/process and flock remain owned
-  -> record parent-listener-released; start the 2 s same-port bind-and-confirm deadline
-child binds P; serves STANDBY ping; parent confirms the nonce-bound retained child
-parent advances parent-listener-released -> reserved while still holding flock
-  -> RELEASE flock
-child acquires reserved flock; writes pidport; signals child-lock-owned
-  -> start child activation wait + parent post-confirmation deadlines
-parent releases hub within the bounded post-confirmation duty
-  -> record hub-released; signals activate
-child advances activating; loads state, starts desired hub state and full runtime; commits
-parent detaches child handle and exits
-browser EventSource reconnects to the same origin
-```
-
-The zero-listener interval is bounded by child bind/confirmation and the pre-flock-release rollback below.
-The parent remains the rollback agent and retains the flock, hub, events, full handler state, and listener
-ownership seam until the child is both confirmed and allowed to acquire the flock.
-
-### Same-port pre-flock-release rollback
-
-This path is keyed by `parentLeaseReleased == false`; it is not the post-release reclaim path. After
-`parent-listener-released`, either an authenticated child bind failure or expiry of the **2 s deadline measured
-from the successful close of P** triggers this ordered rollback. The same steps apply if `reserved` was CASed
-but the parent detects failure before the actual lease-release call completes:
-
-1. Keep the already-owned `SingleInstanceLease`; never call reacquire.
-2. Cancel the handoff session and call `SpawnedGUIChild.Terminate` through the retained handle. The earlier
-   authenticated `poised` proof authorizes this exact-child termination even if bound confirmation never came.
-3. Concurrently retry `GUIListenerOwner.BindForRecovery(P)` and reap the exact child. A free P is rebound
-   immediately; if the child briefly owns P, its standby listener prevents a zero-listener state until exact
-   exit releases P, after which the same owner rebinds it.
-4. Within the 5 s pre-release rollback budget, restore the full handler. Publish `aborted` only after exact
-   `Wait` also proves child exit; if `Wait` outlives the rebind budget, keep serving full on P and continue the
-   exact-handle wait without a PID kill. If P cannot be restored, enter the bounded read-only
-   `recovery-failed` surface from §5; never wait indefinitely with P closed.
-
-Only `parentLeaseReleased == true` permits the post-flock-release recovery in §5. At that point the child was
-already authenticated and serving standby before it became `child-lock-owned`, so reacquisition is recovery of
-a served child, not a race to repair an unconfirmed bind.
-
-### Child activation-wait and parent post-confirmation arbiter
-
-Let `t_lock` be the instant the child successfully CASes `reserved -> child-lock-owned` and atomically retains
-the flock. Two monotonic-clock deadlines start at `t_lock`; neither adds a phase or legal edge.
-
-The parent owns the earlier **ten-second post-confirmation decision window**. Its first five seconds are the
-graceful `ReleaseHub` budget. If that sub-deadline expires, the hub owner cancels the drain and force-closes the
-owned hub HTTP server; this forced close is independent of the blocked drain completion. During the remaining
-five seconds the parent must land exactly one existing CAS decision: either
-`child-lock-owned -> hub-released` followed by the activation signal, or `ClaimRecovery` followed by the §5
-post-release rollback. At `t_lock + 10s` the parent may no longer initiate a post-confirmation phase write or
-recovery claim; a late wake-up only re-reads and follows the winner.
-
-The child waits at most **30 seconds** for the activation signal while also monitoring the inherited parent
-process handle. A signal runs normal activation from the current live phase. Proved parent death triggers the
-same fallback immediately. If no signal has arrived at `t_lock + 30s` and the parent handle is still alive, the
-child emits `gui-restart-parent-wedged-self-activate` and runs that same fallback. The fallback re-reads the
-record and, within five seconds, advances whichever suffix remains of
-`child-lock-owned -> hub-released -> activating -> committed`; it never duplicates a phase already landed by
-the parent. On the live-parent timeout branch, `hub-released` records expiry of the parent's exclusive release
-authority, not proof that the old hub socket is already free.
-
-**Normative child exit/hold conduct:** before authenticated `poised`, the flockless child exits on its
-ten-second pre-ownership standby expiry; after `poised` but before `child-lock-owned`, it exits only on an
-authenticated parent abort/termination or its own reported bind failure. After `child-lock-owned`, the child
-never treats standby or absolute record expiry as an exit instruction and never voluntarily exits while
-retaining the flock. It activates on signal, self-advances on proved parent death, or self-advances on the
-30-second no-signal deadline. If a live parent recovery claim wins first, the child holds the flock and obeys
-the existing exact-child rollback/termination protocol. These are the complete post-ownership outcomes.
-
-The parent cutoff is strictly earlier than the child fallback. A parent phase CAS or recovery-claim CAS that
-lands by `t_lock + 10s` increments the sequence and determines the path; the child's later CAS must observe that
-phase/claim. If neither parent decision lands by the cutoff, the parent has forfeited new writes and the child
-is the sole fallback owner at `t_lock + 30s`. Any CAS boundary race is serialized by the unchanged
-generation+sequence+legal-edge guard: one write wins, the loser re-reads, and an unexpired recovery claim blocks
-child advance. The child already owns the only flock, so no outcome creates two full GUI owners.
-
-The normal path, parent-death path, and live-parent no-signal path share the same
-`GUIOwnerLifecycle.Activate` implementation and existing CAS edges in §5. A hub bind failure against a still-
-live wedged parent leaves the committed full GUI reachable with existing degraded hub-health reporting; it does
-not strand a standby owner. The old parent is quiesced/grace-only and lacks the flock, so it cannot resume as a
-second full owner. While the child remains alive its flock makes §9 suppress relaunch; if it dies, the
-qualifying record plus a successful recovery claim allows one relaunch.
-
-### Declared deadlines
-
-All values are fields of one injected `RestartDeadlines` policy; tests use a fake clock.
-
-| Deadline | Production value | Expiry action |
-| --- | ---: | --- |
-| Authenticated pre-close `poised` proof / flockless child standby expiry | 10 s | Retain parent full service; no release; unauthenticated child closes standby and exits |
-| Port-change bind/ping confirmation | 2 s | Parent remains full; no release; terminate authenticated child and abort |
-| Same-port bind/ping confirmation after P closes | 2 s from successful close | Run §4 pre-flock-release rollback; retain lease, rebind P, never reacquire |
-| Mutable-request quiesce | 5 s | Return parent to full mode; abort |
-| Handoff reservation | 5 s | Non-designated entrants remain rejected; stale reservation becomes recoverable |
-| Same-port pre-release terminate/rebind total | 5 s | Restore P full or enter bounded read-only `recovery-failed`; no unbounded closed-P wait |
-| Child lock-owned confirmation | 5 s | Enter post-flock-release rollback; never assume ownership transferred |
-| Parent post-confirmation hub handoff | 10 s total from `child-lock-owned` | At 5 s force-close the owned hub server |
-|  | First 5 s: graceful drain; last 5 s: CAS decision | By 10 s land `hub-released` + activate signal or the existing recovery claim; after 10 s parent is read-only for this decision |
-| Exact child exit wait after post-release termination | 5 s | Do not write `aborted` or kill by PID; CAS `recovery-failed` and expose bounded recovery status |
-| Post-release lock reacquire + owned-listener bind | 5 s | Terminal `recovery-failed`; start read-only recovery surface |
-| Child activation-signal wait | 30 s from `child-lock-owned` | If no signal, emit the death or live-wedge discriminator |
-|  | Admission also reserves 5 s conduct + 30 s expiry headroom | Self-advance the remaining activation suffix within 5 s |
-| Child parent-death reaction | Immediate trigger; 5 s conduct budget | Run the same self-advance without waiting for the 30 s no-signal deadline |
-| Old-port grace `G` after commit event flush | 5 s | Close old listener and exit parent |
-| Absolute handoff-record expiry | 3 min | Recovery probe marks/observes expired; never relaunches from it |
-| Ephemeral recovery-surface lifetime | 2 min | Close read-only surface; leave durable terminal guidance |
-
-Deadline arithmetic is normative. With `E = expires_at`, admission to `child-lock-owned` requires
-`t_lock + 65s < E`: 30 s activation wait + 5 s self-advance + 30 s recovery headroom. Therefore the no-signal
-trigger satisfies `t_lock + 30s < E - 35s < E - 30s`, and even the complete five-second self-advance satisfies
-`t_lock + 35s < E - 30s`. The absolute-expiry probe cannot land first. Parent arbitration also finishes first:
-its decision cutoff is `t_lock + 10s < t_lock + 30s`, leaving a strict 20-second separation before child
-fallback.
-
-## 5. Reservation, crash-consistent record, and rollback
-
-### One record owner and CAS protocol
-
-`HandoffRecordStore` owns `<state-dir>/gui-restart.json` and its private record lock. Every transition is an
-atomic compare-and-swap (CAS) under that lock:
-
-```text
-Advance(handoff_id, generation, expected_sequence, allowed_from, next_phase, patch)
-  -> {new_sequence | stale_generation | illegal_transition | io_error}
-```
-
-The store rejects a lower generation, a stale sequence, an illegal live edge after absolute expiry, or a
-terminal regression; `Expire` is the sole write whose time guard requires absolute expiry. Parent and child may
-request advances, but neither writes the file directly.
-
-Record v2.2 fields:
-
-| Field | Purpose |
-| --- | --- |
-| `version`, `generation`, `sequence` | Schema and monotonic CAS identity |
-| `handoff_id`, `state_dir_fingerprint` | Match this restart to this owner domain |
-| `phase`, `route` | Current state and same-port/port-change path |
-| `old_pid`, `old_port`, `child_pid`, `new_port` | Diagnostics; never sufficient for kill/confirmation |
-| `nonce_hash` | Reservation claim check without persisting the nonce |
-| `created_at`, `updated_at`, `expires_at` | Injected-clock freshness; `expires_at` is immutable per generation |
-| `reservation_expires_at` | Bounded designated-child acquisition window |
-| `recovery_claim_id`, `recovery_claim_expires_at` | CAS-owned single recovery claimant; absent until `ClaimRecovery` succeeds |
-| `reason_code`, `fallback_port` | Typed terminal diagnosis and recovery surface |
-
-### Complete monotonic phase graph
-
-The complete durable `phase` enum is:
-
-```text
-accepted, poised, parent-quiesced, parent-listener-released,
-reserved, child-lock-owned, hub-released, activating,
-committed, aborted, recovery-failed, shutdown-intent, expired
-```
-
-`committed`, `aborted`, `recovery-failed`, `shutdown-intent`, and `expired` are absorbing for recovery: none can
-be relaunched or advanced back into a live handoff. The sole terminal refinement is
-`committed -> shutdown-intent`, which records later intentional shutdown without making the generation
-resurrectable. `recovery-claim` is deliberately **not** another phase value: it is an in-place,
-sequence-advancing CAS transition over one qualifying phase, preserving `phase` and storing the claimant fields.
-
-Every mutation checks the same identity triple and graph guard:
-
-```text
-Advance(handoff_id, generation, expected_sequence, allowed_from, next_phase, patch)
-ClaimRecovery(handoff_id, generation, expected_sequence, allowed_from,
-              claim_id, claim_deadline)
-Expire(handoff_id, generation, expected_sequence, allowed_from, now)
-```
-
-A write is legal only when `handoff_id` and `generation` equal the current record, `expected_sequence` equals
-the current sequence, and the requested edge is in the following set with its route/owner predicate true. A
-successful write increments `sequence` exactly once. Stale generation, stale sequence, wrong route, wrong
-claim, or an edge absent from this table returns `illegal_transition` without modifying the record.
-
-Repeated guards below are normative: `PRE_ABORT` = no child was created or exact child exit is proved and
-parent full service is restored; `POST_ABORT` = matching recovery claim, exact child exit, owned lease, and full
-service restored; `POST_FAIL` = matching claim plus an exhausted recovery deadline; `INTENT` = current
-authorized owner records intentional shutdown before releasing its last capability; `EXPIRE` = absolute expiry
-reached, generation+sequence match, no live claim, and no terminal landed first.
-
-| Legal edge or CAS transition | Additional legality guard |
-| --- | --- |
-| `accepted -> poised` | Exact retained child supplies the authenticated `poised` proof |
-| `poised -> parent-quiesced` | Parent still owns the flock; mutable admissions are closed and admitted mutators drained |
-| `parent-quiesced -> parent-listener-released` | Same-port route only; parent still owns flock, hub, events, and listener owner |
-| `parent-quiesced -> reserved` | Port-change route only; child N is authenticated and serving standby |
-| `parent-listener-released -> reserved` | Same-port route only; child P bind and authenticated ping confirmed before the 2 s deadline |
-| `reserved -> child-lock-owned` | Designated child presents the matching nonce, or recovery child presents the installed claim |
-|  | Caller proves `now + 65s < expires_at` and atomically retains the tentatively acquired flock |
-| `child-lock-owned -> hub-released` | Parent signals release by its 10 s cutoff, or the lock-owning child fallback observes proved parent death or the 30 s activation-wait expiry |
-|  | Child fallback requires no unexpired recovery claim |
-| `hub-released -> activating` | Current child owns the flock and invokes the single activation barrier |
-| `activating -> committed` | Full GUI handler is reachable; desired hub activation has resolved healthy or explicitly degraded |
-| `accepted -> aborted` | `PRE_ABORT` |
-| `poised -> aborted` | `PRE_ABORT` |
-| `parent-quiesced -> aborted` | `PRE_ABORT` |
-| `parent-listener-released -> aborted` | `PRE_ABORT` |
-| `reserved -> aborted` | `PRE_ABORT` when parent still holds the lease; otherwise `POST_ABORT` |
-| `child-lock-owned -> aborted` | `POST_ABORT` |
-| `hub-released -> aborted` | `POST_ABORT` |
-| `activating -> aborted` | `POST_ABORT` |
-| `parent-listener-released -> recovery-failed` | Pre-release owner retained the flock but failed the bounded P rebind/recovery-surface contract |
-| `reserved -> recovery-failed` | Retained-lease pre-release recovery failure, or `POST_FAIL` after release |
-| `child-lock-owned -> recovery-failed` | `POST_FAIL` |
-| `hub-released -> recovery-failed` | `POST_FAIL` |
-| `activating -> recovery-failed` | `POST_FAIL` |
-| `accepted -> shutdown-intent` | `INTENT` |
-| `poised -> shutdown-intent` | `INTENT` |
-| `parent-quiesced -> shutdown-intent` | `INTENT` |
-| `parent-listener-released -> shutdown-intent` | `INTENT` |
-| `reserved -> shutdown-intent` | `INTENT` |
-| `child-lock-owned -> shutdown-intent` | `INTENT` |
-| `hub-released -> shutdown-intent` | `INTENT` |
-| `activating -> shutdown-intent` | `INTENT` |
-| `committed -> shutdown-intent` | `INTENT`; no other edge leaves `committed` |
-| `ClaimRecovery` on `reserved` | Record is fresh, reservation deadline elapsed, no unexpired claim exists, claim deadline preserves 30 s expiry headroom, and CAS preserves `phase=reserved` while incrementing sequence |
-| `ClaimRecovery` on `child-lock-owned` | Live authenticated parent rollback requested by the 10 s §4 cutoff, or ensure-alive already holding Free probe lease |
-|  | Fresh record, no live claim, 30 s headroom; preserve phase and increment sequence |
-| `ClaimRecovery` on `hub-released` | Same guard as the `child-lock-owned` claim transition |
-| `ClaimRecovery` on `activating` | Same guard as the `child-lock-owned` claim transition |
-| `accepted -> expired` | `EXPIRE` |
-| `poised -> expired` | `EXPIRE` |
-| `parent-quiesced -> expired` | `EXPIRE` |
-| `parent-listener-released -> expired` | `EXPIRE` |
-| `reserved -> expired` | `EXPIRE` |
-| `child-lock-owned -> expired` | `EXPIRE` |
-| `hub-released -> expired` | `EXPIRE` |
-| `activating -> expired` | `EXPIRE` |
-
-The recovery-qualifying phase set is exactly `reserved` **with a matching installed recovery claim**,
-`child-lock-owned`, `hub-released`, and `activating`; the latter three still require `ClaimRecovery` before
-automatic relaunch. The suppress set is exactly `accepted`, `poised`, `parent-quiesced`,
-`parent-listener-released`, raw `reserved` without a matching claim, and all absorbing phases
-`committed|aborted|recovery-failed|shutdown-intent|expired`.
-
-A prior child `activating -> committed` CAS changes both sequence and phase, so any parent CAS whose
-`allowed_from` excludes `committed` fails by construction. In particular, parent `aborted` after a prior child
-`committed` is illegal regardless of timing; exact-child exit is necessary for abort but cannot override the
-generation/sequence/legal-edge checks.
-
-### Per-edge crash probes
-
-Each row states the durable record left when parent or child crashes after X but before the named CAS to X+1.
-“Relaunch” always additionally means a successful matching recovery claim and a provably free reservation-
-aware flock; otherwise the verdict is suppress.
-
-| Edge crossed next | Record left at X | Recovery verdict and reason |
-| --- | --- | --- |
-| `accepted -> poised` | `accepted` | **Suppress**: no authenticated child and ownership release is not proved |
-| `poised -> parent-quiesced` | `poised` | **Suppress**: parent is still the lease/full-service rollback owner |
-| `parent-quiesced -> parent-listener-released` | `parent-quiesced` | **Suppress**: same-port parent still owns P and the flock |
-| `parent-quiesced -> reserved` | `parent-quiesced` | **Suppress**: port-change parent still owns the flock and grace/full rollback path |
-| `parent-listener-released -> reserved` | `parent-listener-released` | **Suppress**: parent still owns the flock; §4 pre-release rollback must rebind P without reacquire |
-| `reserved -> child-lock-owned` | raw `reserved` | **Suppress initially**: this healthy release-to-acquire gap maps to `Held/ErrHandoffReserved` |
-|  |  | After reservation expiry only `reserved` with a successful claim may relaunch |
-| `child-lock-owned -> hub-released` | `child-lock-owned` | **Suppress while Held**: the live child owns both parent-death and live-parent no-signal fallback |
-|  |  | **Relaunch** only if the child also died, the flock is Free, and claim CAS succeeds |
-| `hub-released -> activating` | `hub-released` | **Suppress while Held**; **relaunch** only on Free plus successful claim because takeover is already authorized and activation owns the healthy/degraded hub result |
-| `activating -> committed` | `activating` | **Suppress while Held**; **relaunch** only on Free plus successful claim because activation was interrupted |
-| Parent crashes during the 10 s post-confirmation decision window before its CAS | `child-lock-owned` | **Suppress while Held**: the child handle monitor triggers the common fallback immediately |
-|  |  | The child commits within 5 s |
-| Parent lands `hub-released`, then crashes before the activate signal | `hub-released` | **Suppress while Held**: the child re-reads, skips the already-landed edge, and advances `activating -> committed` |
-| Child crashes during the parent decision or 30 s activation-wait window | `child-lock-owned` or `hub-released` | Flock becomes Free; only the existing owned-lease + matching-claim path may **relaunch** |
-| `accepted -> aborted` | `accepted` | **Suppress**: no ownership release is proved |
-| `poised -> aborted` | `poised` | **Suppress**: parent still owns pre-release cleanup |
-| `parent-quiesced -> aborted` | `parent-quiesced` | **Suppress**: parent still owns pre-release cleanup |
-| `parent-listener-released -> aborted` | `parent-listener-released` | **Suppress**: parent retains the lease and §4 rollback owns P |
-| `reserved -> aborted` | raw or claimed `reserved` | Raw suppresses; claimed may **relaunch only** with Free because abort did not land |
-| `child-lock-owned -> aborted` | `child-lock-owned` | Held suppresses for the child activation-wait arbiter; Free plus claim may **relaunch** |
-| `hub-released -> aborted` | `hub-released` | Held suppresses; Free plus claim may **relaunch** |
-| `activating -> aborted` | `activating` | Held suppresses; Free plus claim may **relaunch** |
-| `parent-listener-released -> recovery-failed` | `parent-listener-released` | **Suppress** automatic relaunch: parent still owns the flock and must finish the bounded recovery surface |
-| `reserved -> recovery-failed` | raw or claimed `reserved` | Raw suppresses; claimed may **relaunch only** with Free because failure did not land |
-| `child-lock-owned -> recovery-failed` | `child-lock-owned` | Held suppresses; Free plus claim may **relaunch** |
-| `hub-released -> recovery-failed` | `hub-released` | Held suppresses; Free plus claim may **relaunch** |
-| `activating -> recovery-failed` | `activating` | Held suppresses; Free plus claim may **relaunch** |
-| `accepted -> shutdown-intent` | `accepted` | **Suppress**: intentional shutdown did not land, but release is still unproved |
-| `poised -> shutdown-intent` | `poised` | **Suppress**: intentional shutdown did not land, but parent still owns cleanup |
-| `parent-quiesced -> shutdown-intent` | `parent-quiesced` | **Suppress**: intentional shutdown did not land, but parent still owns cleanup |
-| `parent-listener-released -> shutdown-intent` | `parent-listener-released` | **Suppress**: parent retains the lease and P rollback duty |
-| `reserved -> shutdown-intent` | raw or claimed `reserved` | Raw suppresses; claimed may **relaunch only** with Free because shutdown did not land |
-| `child-lock-owned -> shutdown-intent` | `child-lock-owned` | Held suppresses; Free plus claim may **relaunch** because shutdown did not land |
-| `hub-released -> shutdown-intent` | `hub-released` | Held suppresses; Free plus claim may **relaunch** because shutdown did not land |
-| `activating -> shutdown-intent` | `activating` | Held suppresses; Free plus claim may **relaunch** because shutdown did not land |
-| `committed -> shutdown-intent` | `committed` | **Suppress**: committed is already non-resurrectable |
-| `ClaimRecovery` on `reserved` | `reserved` without claim if CAS did not land | Raw `reserved` suppresses |
-|  | `reserved` with incremented sequence and claim if it did | After claim, only that claimant may acquire the reservation-aware lease and relaunch |
-| `ClaimRecovery` on `child-lock-owned` | `child-lock-owned`, without or with incremented-sequence claim | Ensure-alive claim requires its owned Free lease; live parent claim freezes child commit for rollback |
-| `ClaimRecovery` on `hub-released` | `hub-released`, without or with incremented-sequence claim | Same claimant exclusivity; Held suppresses and Free claimant may relaunch |
-| `ClaimRecovery` on `activating` | `activating`, without or with incremented-sequence claim | Same claimant exclusivity; Held suppresses and Free claimant may relaunch |
-| `accepted -> expired` | `accepted` | **Suppress** before or after expiry; no ownership release is proved |
-| `poised -> expired` | `poised` | **Suppress** before or after expiry; parent ownership was not released |
-| `parent-quiesced -> expired` | `parent-quiesced` | **Suppress** before or after expiry; parent ownership was not released |
-| `parent-listener-released -> expired` | `parent-listener-released` | **Suppress** before or after expiry; retained-lease rollback owns P |
-| `reserved -> expired` | raw or claimed `reserved` | Before expiry use reserved claim rule; after `Expire` lands, **suppress** as absorbing |
-| `child-lock-owned -> expired` | `child-lock-owned` | Before expiry use Held/Free claim rule; after `Expire` lands, **suppress** |
-| `hub-released -> expired` | `hub-released` | Before expiry use Held/Free claim rule; after `Expire` lands, **suppress** |
-| `activating -> expired` | `activating` | Before expiry use Held/Free claim rule; after `Expire` lands, **suppress** |
-
-### Bounded flock reservation every entrant honors
-
-The reservation is the `reserved` record phase, written while the parent still holds the flock. Every
-`AcquireSingleInstanceAt` entrant follows one owner rule after it tentatively acquires the flock:
-
-1. Read the handoff record through `HandoffRecordStore` while holding the flock.
-2. If a fresh reservation exists and the entrant has neither the matching designated-child
-   `{handoff_id,generation,nonce}` nor the installed recovery claim, release immediately and return typed
-   `ErrHandoffReserved`.
-3. If the designated nonce or recovery claim matches, CAS `reserved -> child-lock-owned`, consume the
-   reservation, retain the flock, and write pidport.
-4. If record/path/read validation is unknown, release and fail closed.
-5. A fresh raw `reserved` record without a matching recovery claim returns `ErrHandoffReserved` even when the
-   OS flock is momentarily free. After `reservation_expires_at`, only a successful `ClaimRecovery` may install
-   credentials that let the claimant retain the flock. After absolute `expires_at`, `Expire` makes the record
-   terminal for automatic recovery; an explicit later user launch is not a v2.2 recovery relaunch.
-
-A third `mcphub gui` from double-click, autostart, or a user command therefore cannot wedge the designated
-handoff. It receives restart-in-progress guidance rather than entering the normal busy/force path.
-
-An older/foreign binary may ignore the new reservation. If it wins anyway, the coordinator never kills it.
-It waits for the authenticated child, retries lease reclaim within the deadline, and distinguishes a healthy
-foreign GUI from an unknown holder. Persistent foreign ownership ends in `recovery-failed` with the read-only
-recovery surface.
-
-### Two rollback paths and durable recovery failure
-
-The coordinator selects rollback only from the authoritative lease state, never from an inferred phase name:
-
-| Lease state | Applicable failure window | Required rollback |
-| --- | --- | --- |
-| `parentLeaseReleased == false` | Any failure through bind/auth confirmation or the tiny reserved-before-release interval | Retain the already-owned flock and **never reacquire** |
-|  | Includes the same-port 2 s deadline | Same-port runs §4 terminate/reap plus `BindForRecovery(P)` |
-|  |  | Port-change swaps its still-owned Grace(P) listener back to full |
-| `parentLeaseReleased == true` | Failure after the child was authenticated/serving and the flock was released | Install the matching recovery claim and terminate through the retained handle |
-|  |  | Prove exact child exit, reacquire through the reservation-aware lease, and restore the old/full listener |
-
-Post-release rollback is ordered: `ClaimRecovery`; exact-handle `Terminate`; exact `Wait`; lease reacquire;
-exclusive `BindForRecovery(old_port)` or adoption of the still-owned port-change grace listener; full-handler
-and desired-hub restore; then `aborted`. A prior `committed` makes the abort edge illegal. If exact exit,
-reacquire, or bind cannot complete within the declared deadlines, the matching claim owner CASes
-`recovery-failed` rather than waiting indefinitely.
-
-If the old listener still exists on the port-change route, it remains the read-only recovery endpoint.
-Otherwise the owner starts a read-only ephemeral recovery listener/agent containing only restart status and
-manual recovery guidance, records its port, logs it, and best-effort opens it in the existing browser. The
-agent owns no flock, hub, tray, or mutator and expires after 2 minutes. Failure to bind even that surface has
-its own durable event and does not turn into a false success.
-
-## 6. Port authority and parser-aware child argv
-
-The desired/actual model remains:
-
-| Layer | Authority | Owner |
-| --- | --- | --- |
-| Persisted `gui_server.port` | Desired operator intent when valid | Settings registry |
-| Bound listener port | Actual runtime fact | `GUIListenerOwner` |
-| `gui.pidport` | Derived rendezvous cache | Current flock holder |
-
-Manual launch remains `explicit --port -> valid persisted -> 0`. Self-restart changes only inherited argv:
-a **valid** persisted value wins and every recognized pre-terminator `--port` occurrence is removed. Unset or
-invalid persisted state is “no valid intent”: inherited explicit `--port`, including `0`, is preserved.
-Invalid persisted state emits a visible warning; with no explicit flag it degrades to ephemeral `0` rather
-than silently pretending the invalid value was honored.
-
-One typed helper under `resolveGuiPort` owns the sole `[1024,65535]` predicate and returns
-`Unset | Valid(port) | Invalid(raw,reason)`. The argv builder consumes that classification; it does not parse
-or retype the range.
-
-`RebuildSelfRestartArgv` uses the actual GUI `pflag.FlagSet` metadata to identify effective token spans,
-respects `--`, and recognizes only the registered long name `port`. It is not a raw string replacement.
-
-| Parent argv shape | Valid persisted intent | Unset/invalid persisted intent |
-| --- | --- | --- |
-| `--port N` | Remove the flag/value pair | Preserve both tokens |
-| `--port=N` | Remove the token | Preserve the token |
-| `--port 0` | Remove the flag/value pair | Preserve explicit `0` |
-| Repeated `--port` forms | Remove every recognized occurrence; persisted wins | Preserve all; normal parser last-wins behavior remains |
-| `-port` | Reject as an unregistered shorthand before spawn; never normalize | Same rejection |
-| Tokens after `--` | Preserve; they are positional, not effective flags | Preserve |
-| No `--port` | No argv change | No argv change; invalid persisted warns and resolves to `0` |
-
-Decision details and enforcement matrix live in
-`work-items/decisions/2026-07-17-gui-server-port-authority-model.md`.
-
-## 7. Fail-closed hub-port dependency guard
-
-One typed probe replaces boolean/list-only decisions:
+- The coordinator retains the exact OS process handle until release or proved pre-release rollback.
+- No termination is addressed by a bare PID.
+- Termination is legal only after valid nonce proof and only while the parent still owns the flock.
+- At flock release, the parent irrevocably detaches/close-releases its local handle without waiting for child
+  completion. No post-release termination API exists.
+- Before flock acquisition, the child monitors the inherited parent process handle and its standby deadline. A
+  parent death without a matching `reserved` marker, or deadline expiry, closes standby and exits; the child
+  never improvises ownership from `in-progress`.
+
+### `AuthenticatedReadinessSession`
+
+- Parent generates a 256-bit nonce and transfers it through a one-shot owner-only inherited OS handle/file.
+  The nonce is never placed in argv, environment, logs, or durable raw state.
+- Child consumes and closes the channel before serving standby.
+- Readiness binds `{handoff_id,generation,sequence,pid,port}` to a message authentication code.
+- Parent accepts one valid proof and binds it to the retained process handle. Challenged standby ping must match
+  PID, generation, target port, and proof; ordinary ping remains byte-compatible.
+- Port-change child binds standby before proof. Same-port child supplies a pre-bind poised proof, then supplies
+  bound proof after the parent closes P. Neither route performs full-runtime side effects before the flock.
+- The child requests the flock only against its matching fresh `reserved` marker. Parent-handle death before
+  reservation is an exit signal, not permission to acquire.
+- A changed/nonmatching phase, including ensure-alive's `interrupted`, makes a late standby child release any
+  tentative lease, close standby, and exit; it never turns that mismatch into ownership.
+
+## 7. Fail-closed hub-port dependency guard (Unit A)
+
+Unit A is unchanged, independent, and ships first. One typed probe replaces boolean/list-only decisions:
 
 ```text
 ProbeHubPortDependencies() -> {
@@ -661,461 +593,423 @@ ProbeHubPortDependencies() -> {
 
 - `dependent` when at least one enabled aggregate client or group exists.
 - `clear` only when every applicable client is proved gate-OFF and `groups.yaml` is missing or valid-empty.
-- `unknown` on any client config read/parse/DACL error, any groups read/parse/DACL/validation error, or probe
-  path failure.
+- `unknown` on any client config read/parse/DACL error, group read/parse/DACL/validation error, or probe path
+  failure.
 
 Both destructive reset callers fail closed:
 
-- `mcphub gui --reset-port` refuses with exit 8 on `dependent` and on `unknown`, naming proved dependencies
-  and separately listing unreadable sources.
+- `mcphub gui --reset-port` refuses with exit 8 on `dependent` and `unknown`, naming proved dependencies and
+  separately listing unreadable sources.
 - Initial hub startup in `internal/gui/server.go` sets
   `preservePortOnReloadHandlerFailure=true` unless the typed result is exactly `clear`. The reset mechanism in
-  `hub_listener.go:657-663` remains unchanged; the composition caller supplies the safe policy.
+  `hub_listener.go` remains unchanged; the composition caller supplies the safe policy.
 
-This preserves every live `/clients/<client>/mcp` and `/g/<group>/mcp` URL or blocks when safety cannot be
-proved. No automatic group URL reconcile is introduced because there is no authoritative inventory of where
-operators pasted those URLs.
+This preserves live client/group URLs or blocks when safety cannot be proved. No automatic rewrite of
+hand-pasted group URLs is introduced.
 
 ## 8. External API, grace handler, and frontend behavior
 
-### Restart response
+### Restart response — unchanged expand-contract
 
-Accepted restart returns HTTP 202 while preserving current fields:
+Accepted restart returns HTTP 202 while retaining current fields:
 
 ```text
-{handoff_id, generation, phase:"accepted", spawned:true,
- spawned_pid, restarting:true}
+{handoff_id, generation, phase:"in-progress", spawned:true,
+ spawned_pid, restarting:true, old_port, target_port?}
 ```
 
 Spawn failure returns **HTTP 200 (2xx) with a non-restarting body**
-`{spawned:false,spawned_pid:0,restarting:false,spawn_error}`. It must not return non-2xx: today's GUI route
-deliberately reports spawn failure as 200-with-body, mirroring `/api/supervisor/restart`
-(`gui_self_restart.go:115-120`), while the current client throws on any non-2xx before it can enter the friendly
-`Restart incomplete` body branch (`api.ts:937-948`). `202` means accepted, not completed; only a terminal
-progress event/record means completed or aborted. Keeping `restarting` prevents the current frontend contract
-regression (`api.ts:920-948`, `SectionGuiServer.tsx:70-79`).
+`{spawned:false,spawned_pid:0,restarting:false,spawn_error}`. It must not return non-2xx: the current client
+throws on non-2xx before it can render the friendly `Restart incomplete` body. `202` means accepted, not
+completed. Keeping `restarting` preserves existing frontend behavior.
 
-### Progress event
+### Coarse progress event
 
-`gui-restart-progress` body contains `{handoff_id,generation,phase,old_port,new_port?,same_port,reason_code?}`.
-The parent is the only writer to the old-port broadcaster. The child communicates with the parent through the
-authenticated readiness channel, not by publishing directly to the parent's bus.
+`gui-restart-progress` contains
+`{handoff_id,generation,phase,old_port,new_port?,same_port,reason_code?,operator_action?}`. Before flock release,
+the parent is the only writer to the old-port broadcaster. It may emit `in-progress`, `listener-settled`,
+`reserved`, or `interrupted`. It never emits a post-release child `committed` verdict. The child may publish
+`committed` only on its own new/full broadcaster after full GUI reachability.
 
 ### Grace-mode allowlist
 
-On the port-change route, after authenticated `poised`, the parent swaps to grace and quiesces. The grace
-handler permits only:
+On a port-change route, after authenticated standby confirmation the parent enters grace. Grace permits only:
 
 - existing/new `GET /api/events` SSE streams;
 - `GET /api/gui/restart/redirect?handoff_id=...`.
 
-All other paths and methods return `503` with stable code `GUI_RESTART_IN_PROGRESS`. The redirect route returns
-202 while transfer is incomplete, 200 with a loopback-only URL after commit, and 409 with typed manual recovery
-on abort/recovery failure. It never accepts a host or URL from the child; the parent formats
-`http://127.0.0.1:<confirmed-port>/` from the authenticated bound port.
+All other paths/methods return 503 `GUI_RESTART_IN_PROGRESS`. Before release the redirect returns 202. Once the
+parent has published/flushed `reserved`, closed its own hub listener, and released the flock, it may return 200
+with the confirmed loopback target URL for the remainder of fixed `G`; this reports the handoff target, not
+child commit. It never accepts a host or URL from the child.
 
 ### Navigation guarantee
 
-Port-change navigation is explicitly **best-effort**, not guaranteed delivery. After the child commits, the
-parent publishes and flushes the `committed` event, keeps the old listener alive for `G=5s`, and keeps the
-redirect route available for that same interval. The frontend navigates only on matching
-`committed{handoff_id,generation}`. If SSE is missed, it polls the redirect route while the old origin remains
-available. If both are missed, the UI has already shown the confirmed new port and manual URL before handoff;
-the terminal record and logs retain it.
+Port-change navigation remains explicitly **best-effort**. The frontend records the confirmed target URL before
+handoff, navigates on matching `reserved`, and may poll the grace redirect during `G`. Because design-B deletes
+post-release child acknowledgement, neither SSE nor redirect claims that the child committed. If navigation
+lands early, normal browser retry/manual refresh applies. If it misses, the UI already displayed the target URL
+and the recovery command selected by the trusted `operator_action` enum.
 
-Same-port restart does not navigate. Native EventSource reconnects to the same origin
-(`useEventSource.ts:31-65`).
+Same-port restart does not navigate. Native EventSource/browser reconnect targets the same origin.
 
-## 9. Interrupted-handoff recovery without false resurrection
+If a durable free-flock `interrupted` is observed, the frontend stops retrying and shows exactly
+**“GUI restart interrupted; run `mcphub gui`.”** A live-wedged-holder discriminator, when observable through a
+surviving surface, shows exactly **“GUI restart interrupted: a GUI process still holds the single-instance lock;
+run `mcphub gui --force --kill`.”** The frontend maps registered reason/action values to these literals; it never
+renders an arbitrary persisted command.
 
-The v2.2 GUI recovery branch uses the record owner plus a reservation-aware lease probe:
+## 9. Interrupted-handoff recovery: one degrade predicate, never relaunch
+
+### Tri-state owner probe
 
 ```text
-ProbeGUIOwnerLease(record, optional_matching_claim)
-  -> Held | Free(owned_probe_lease) | Unknown(error)
-ProbeInterruptedHandoff(now) -> ValidNonTerminal(record) |
-                                AbsentOrTerminal | Expired | Unknown(error)
+ProbeGUIOwnerLease(record)
+  -> Held(reason) | Free(owned_probe_lease) | Unknown(error)
 ```
 
-`Free` is proved by actually acquiring the flock and returning that still-owned probe lease; the caller either
-passes it into the one relaunch or explicitly releases it on CAS/error/cancellation. There is no probe-release-
-reacquire race. Path resolution, lock I/O, pidport read, malformed state, or permission failures are `Unknown`,
-never “dead.” This corrects the current boolean helper's fail-open mapping
-(`supervise_ensure_alive.go:176-218,266-277`).
+`Free` means the caller actually acquired and still owns the flock. The caller releases that lease on every
+success, error, cancellation, and timeout path; ensure-alive never transfers it. There is no
+probe-release-reacquire gap. A raw `reserved` marker inside `reservation_expires_at` maps to
+`Held(ErrHandoffReserved)` even when the OS flock is momentarily free. Path, marker, DACL, or lock uncertainty
+is `Unknown`, never dead and never a holder proof.
 
-The lease probe is reservation-aware: a fresh raw `reserved` record without a matching recovery claim maps to
-`Held` with typed cause `ErrHandoffReserved` even during the healthy instant after parent release and before
-child acquisition. It may return `Free` for `reserved` only after `reservation_expires_at` and only when the
-caller presents the exact claim installed by a successful generation+sequence+legal-edge `ClaimRecovery` CAS.
-For `child-lock-owned|hub-released|activating`, the order reverses: first acquire and retain the free probe lease,
-then CAS the claim while holding it. Therefore ensure-alive never increments the record sequence underneath a
-healthy lock-owning child.
-
-The exact recovery-qualifying list is:
-
-- `reserved` **with a matching installed recovery claim** after the reservation deadline;
-- `child-lock-owned`;
-- `hub-released`;
-- `activating`.
-
-The exact suppress list is `accepted`, `poised`, `parent-quiesced`, `parent-listener-released`, raw `reserved`
-without a matching claim, and every absorbing phase: `committed`, `aborted`, `recovery-failed`,
-`shutdown-intent`, and `expired`. This list is normative planner input; no implementation may infer a broader
-set from prose such as “ownership was released.”
-
-The additive GUI-relaunch rule is a phase-specific ordered AND gate:
+### The exact ensure-alive predicate
 
 ```text
 feature gate enabled
-AND record == fresh + schema-valid + state-dir-matching + recovery-qualifying phase
-AND (
-  phase == reserved:
-    reservation deadline elapsed
-    -> generation+sequence+legal-edge ClaimRecovery CAS succeeds
-    -> reservation-aware owner lease with that matching claim == Free(owned lease)
-  OR phase in {child-lock-owned, hub-released, activating}:
-    owner lease == Free(owned lease)
-    -> ClaimRecovery CAS succeeds while that lease remains held
-)
-=> re-fire the GUI owner task once with the owned lease
+AND record is schema-valid and state-dir-matching
+AND record.phase IN {in-progress, reserved}
+AND now >= phase_deadline(record)
+    where in-progress -> fresh_until
+      and reserved    -> reservation_expires_at
+AND reservation-aware probe returns one of:
+
+  Free(owned_probe_lease)
+    AND InterruptFromOwnedFreeProbe(generation, sequence, owned_probe_lease,
+                                    reason_code, "mcphub gui")
+        atomically changes the exact nonterminal record -> interrupted
+    => emit the free-flock message; release the lease; GUI spawn count = 0
+
+  Held(reason)
+    => mutate no marker; emit gui-restart-live-holder-wedged with
+       operator_action "mcphub gui --force --kill"; GUI spawn count = 0
+
+  Unknown(error)
+    => mutate no marker; emit gui-restart-owner-unknown; GUI spawn count = 0
 ```
 
-Every other combination is no action with a typed event. In particular:
+Every conjunct is mandatory. Inside the healthy reservation window, raw `reserved` remains Held/suppressed and
+does not reach the deadline branch. After the window, `reserved + Free` can only become `interrupted`; it never
+becomes `in-progress` and never launches a process. `InterruptFromOwnedFreeProbe` is the idempotency point:
+concurrent ticks cannot hold the same flock and a generation/sequence mismatch loses the compare-and-swap.
 
-- `Held`: a healthy handoff gap, raw reservation, or owner exists; do not relaunch.
-- `Unknown`: fail closed and retry next tick.
-- every phase in the explicit suppress list, or an absent, malformed, mismatched, or unknown record: do not
-  relaunch.
-- autostart intent by itself never triggers this GUI-recovery branch.
+This predicate makes no claim that both processes are dead. A parent may still be completing grace and a
+designated child may still be alive or stalled in standby. It is nevertheless safe because ensure-alive never
+spawns: while it owns the flock it changes the exact reservation to `interrupted`, and after release any late
+standby child finds no matching `reserved`, releases, and exits. Therefore it cannot relaunch into or create a
+second owner beside a surviving child.
 
-When `child-lock-owned` is Held, ensure-alive intentionally takes no action: the §4 child activation-wait
-arbiter is the single owner. It self-activates within 5 s of proved parent death, or by 35 s after
-`child-lock-owned` when a live parent supplies no activation signal. If the child also dies, the flock becomes
-Free; then and only then may one claimant recover from `child-lock-owned|hub-released|activating`.
+### Predicate crash analysis — and no broader matrix
 
-The existing supervisor-down recovery remains its own path. The new GUI branch is evaluated independently of
-the current early supervisor-live no-op (`supervise_ensure_alive.go:346-360`) but does not redefine supervisor
-ownership or standalone-supervisor recovery.
+| Predicate point | Observation on next ensure-alive tick | Verdict |
+| --- | --- | --- |
+| Before the phase deadline | `reserved` inside its window, or active `in-progress` | Suppress; do not mutate or message |
+| Deadline passed; probe is Held | Current process still owns the flock | Emit the force-kill message; do not mutate or spawn |
+| Deadline passed; probe is Unknown | Ownership cannot be proved | Emit unknown discriminator; do not mutate, command, or spawn |
+| Free lease acquired; before compare-and-swap | Flock is Held by this ensure-alive tick | Competing ticks suppress; cancellation releases lease |
+| Compare-and-swap loses | Marker/generation/sequence changed | Release lease; follow the current coarse phase; no spawn |
+| `interrupted` write wins | Exact nonterminal record is terminal; flock remains held only by this tick | Emit plain-launch message, release lease; late standby child rejects the marker |
+| Ensure-alive dies while owning the probe | OS releases flock; record is old nonterminal or `interrupted` | Next tick repeats classification or leaves terminal state; no hidden process exists |
+
+No other phase is eligible:
+
+- `committed` suppresses handoff recovery even if a later intentional shutdown frees the flock; normal
+  launch/autostart policy remains separate.
+- `interrupted` is the manual floor and never auto-advances.
+- absent, unknown-schema, or state-dir-mismatched data cannot authorize a marker write or command choice.
+- `Held` before the applicable deadline is healthy/protected; `Held` after it is the live-wedged-holder
+  discriminator, not permission for ensure-alive to kill.
+
+### Two degrade outcomes
+
+| Proved observation | Durable action | Exact message and recovery |
+| --- | --- | --- |
+| Nonterminal deadline passed + `Free(owned_probe_lease)` | Compare-and-swap the exact record to `interrupted`; release probe | **“GUI restart interrupted; run `mcphub gui`.”** |
+|  |  | Plain launch acquires the proved/released free flock and starts a new generation. |
+| Nonterminal deadline passed + `Held` | No marker mutation; emit `gui-restart-live-holder-wedged` | **“GUI restart interrupted: a GUI process still holds the single-instance lock; run `mcphub gui --force --kill`.”** |
+|  |  | The existing identity gate verifies/kills the holder, then normal launch recovers. |
+
+If a free-probe marker write fails, the owner emits `gui-restart-interrupted-marker-write-failed`, releases the
+proved-free lease, shows the same plain-launch instruction, and does not claim a durable `interrupted` state.
+Plain launch is still truthful because the discriminator was the owned free flock, not the marker write.
+
+The GUI handoff classification branch is evaluated independently of the supervisor-live early return but does
+not redefine supervisor recovery or autostart policy. Autostart intent alone never triggers it. There is no
+ensure-alive kill, bind, spawn, retry, claim, fallback listener, or takeover path.
 
 ## 10. Shippable units and rollback groups
 
-Internal development stages are not independent releases. There are exactly two shippable units:
-
 | Unit | Included scope | Reversibility / rollback group |
 | --- | --- | --- |
-| **A — independent fail-closed guard** | Typed hub-port dependency probe; CLI reset refusal; initial-start preserve policy | Independently shippable and reversible; roll back its caller + probe together |
-|  | Unreadable/group error tests | It does not activate restart or port precedence |
-| **B — atomic restart v2.2** | Restartable listener/full-runtime seam; retained child handle; owner-only nonce readiness | One feature-gated rollout and one rollback group |
-|  | Unchanged reservation/CAS graph; two rollback paths; child activation-wait arbiter | Ship disabled until every member is present, then enable once |
-|  | Bounded parent hub handoff; standby/hub transfer; parser-aware port precedence | Rollback disables the single gate for backend and recovery together |
-|  | 202+SSE+redirect frontend; tri-state recovery; all protocol tests | The passive frontend receives 503 and presents manual guidance |
+| **A — independent fail-closed guard** | Typed hub-port dependency probe and two fail-closed callers | Ships first; independently reversible |
+|  | Unreadable-client and group-error tests | Does not activate restart or port precedence |
+| **B — atomic restart v3.1** | Listener seam, retained pre-release child handle, owner-only nonce standby | One feature-gated rollout and rollback group |
+|  | Four-phase marker, reservation/Held, one degrade predicate, two exact manual commands | No post-release recovery or ensure-alive spawn component exists |
+|  | Existing hub-driver initial-bind entry plus parent hub close at flock release | Same hub owner and retry/exhaustion policy |
+|  | Parser-aware port precedence, 202/2xx API, coarse progress/navigation | Rollback disables endpoint and recovery together |
 
-Unit B internal build order may be lifecycle seam → protocol/record → UI/recovery → activation, but no
-intermediate order is a supported runtime. Specifically:
-
-- Port precedence activation and port-change navigation are coupled.
-- The accepted 202 response, spawn-failure 200/2xx body, and frontend consumer are coupled; `restarting`
-  remains present throughout.
-- Recovery never activates before the record protocol.
-- Protocol backend cannot be rolled back while its UI or recovery consumer remains enabled.
-- A disabled/rolled-back v2.2 leaves versioned records inert; old binaries ignore them, and the v2.2 recovery
-  gate ignores them while disabled.
+Unit B may be built internally as listener seam → standby/auth → marker/reservation → UI/recovery → gate, but no
+intermediate state is a supported release. A disabled v3.1 leaves its marker inert and the UI presents
+discriminator-selected manual guidance.
 
 ## 11. Contract and persisted-state migration
 
-- **HTTP expand-contract:** add v2.2 response fields while retaining existing `spawned`, `spawned_pid`,
-  `spawn_error`, and `restarting`; accepted work is 202, while spawn failure remains 200/2xx-with-body. Add one
-  SSE event and one GET redirect route. Existing ping fields stay; authenticated readiness fields appear only
-  on the challenged standby path.
-- **Compatibility window:** one full Unit-B release keeps all legacy response fields. Frontend and backend
-  activate together, so no supported mixed v2.2 state exists; older tabs still receive fields they understand.
-- **Persisted state:** introduce versioned `gui-restart.json` for restart v2.2. It is operational state, not
-  user config. The complete phase enum, recovery-claim fields, and legal-edge set in §5 are one schema unit.
-  Missing means no handoff. Unknown version, invalid schema, mismatch, or expiry fails closed.
-- **Rollback of migrated state:** disabling Unit B makes the file inert. Re-enabling may consume only a fresh
-  valid v2.2 generation; otherwise the store writes/observes an expired terminal and starts a new generation.
-  No settings, hub endpoint, groups, tokens, or client config migration occurs.
+- **HTTP expand-contract:** retain `spawned`, `spawned_pid`, `spawn_error`, and `restarting`; accepted work is
+  202, spawn failure remains 200/2xx-with-body. Add coarse fields, one SSE event, and one GET redirect route.
+  Existing ping fields remain unchanged for ordinary callers.
+- **Compatibility window:** one full Unit B release retains every legacy response field. Backend and frontend
+  activate together; older tabs continue to receive fields they understand.
+- **Persisted operational state:** introduce versioned v3.1 `gui-restart.json` with only the §5 fields and four
+  phases. Missing means no handoff. Unknown version/schema/path fails closed and surfaces
+  `gui-restart-owner-unknown`; it is never migrated into a recovery-qualifying phase or command choice.
+- **Expand/contract:** code first reads absent/v3.1 and treats any prototype v2.x/v3.0 record as unknown/manual.
+  After one release with no v2.x/v3.0 reader or writer, documentation and fixtures may delete those shapes. There is no live
+  production v2.2 phase graph to migrate because v2.2 was a design target, not a shipped protocol.
+- **Rollback:** disabling Unit B makes v3.1 markers inert. Plain `mcphub gui` may replace a stale/interrupted
+  marker only after acquiring a free flock; a proved live holder still requires the pre-existing
+  `mcphub gui --force --kill` identity gate. No settings, hub endpoint, groups, token, or client-config migration
+  occurs.
 
 ## 12. Failure modes and observable discriminators
 
 | Failure | Required behavior | Observable discriminator |
 | --- | --- | --- |
-| Spawn fails | Parent remains full; no release; return 200/2xx non-restarting body | HTTP body `spawned:false,restarting:false`; `gui-restart-spawn-failed` |
-| Child never supplies `poised` proof | Parent remains full; no kill, no release; child standby expiry | `gui-restart-readiness-timeout` |
-| Nonce/ping proof mismatch | Reject confirmation; retain parent; never kill by PID | `gui-restart-proof-mismatch` |
-| Target new port busy | Child reports bind failure; parent remains full | `gui-restart-child-bind-failed`, reason `address-in-use` |
-| Same-port bind/auth fails or exceeds 2 s after P closes | Retain the flock; terminate authenticated poised child | `gui-restart-pre-release-rollback` |
-|  | Rebind P without reacquire within pre-release budget | Reason `bind-failed` or `confirm-timeout` |
-| Mutable requests do not drain | Reopen parent full admission; abort after child exit | `gui-restart-quiesce-timeout` |
-| Third new-binary entrant | Release tentative flock; typed busy guidance | `ErrHandoffReserved`; `gui-restart-reservation-rejected` |
-| Ensure-alive sees fresh raw `reserved` while flock is free | Map lease to Held and suppress | `ErrHandoffReserved`; `gui-restart-recovery-suppressed` |
-|  | Recovery claim is required after reservation expiry | Reason `reservation-unclaimed` |
-| Foreign/old entrant wins | Never kill it; retry exact child/lease recovery | `gui-restart-foreign-owner-detected` |
-| Child fails after flock release | Claim recovery, terminate authenticated handle, prove exit, reacquire, then restore listener | phase plus `recovery_claim_id`; `gui-restart-post-release-rollback` |
-| Exact child will not exit post-release | Do not write `aborted`; CAS `recovery-failed` after 5 s and expose bounded recovery status | `gui-restart-child-exit-timeout` |
-| Old port cannot be rebound within the applicable pre/post-release budget | Terminal failure; start read-only recovery surface | `recovery-failed`; `gui-restart-fallback-listener-up` |
-|  |  | or `gui-restart-fallback-listener-failed` |
-| Parent graceful hub drain exceeds 5 s after `child-lock-owned` | Force-close the owned hub server | `gui-restart-parent-hub-force-closed` |
-|  | Land normal handoff or the existing rollback claim by the 10 s parent cutoff | Followed by the winning phase/rollback event |
-| Parent dies after `child-lock-owned` before activate | Held child self-advances within 5 s through `hub-released -> activating -> committed` | `gui-restart-parent-death-self-activate` then `gui-restart-child-active` |
-| Parent remains alive but supplies no activation signal for 30 s after `child-lock-owned` | Held child self-advances the remaining CAS suffix within 5 s | `gui-restart-parent-wedged-self-activate` |
-|  |  | Fields `parent_handle:"alive"` and `elapsed_ms:30000` |
-|  | A conflicting old-hub bind is an honest degraded result, never a standby freeze | Same event with `record_remaining_ms`, then `gui-restart-child-active` |
-| Hub activation fails | Child full GUI remains reachable; hub health reports existing degraded state | existing `hub-listener-*` events plus `gui-restart-child-active` |
-| Record CAS conflict | Re-read; never overwrite newer/terminal state | `gui-restart-record-cas-conflict` |
-| Record read/path/DACL error | No release/relaunch; fail closed | `gui-restart-record-unknown` |
-| Recovery sees lock free but terminal/expired record | No relaunch | `gui-restart-recovery-suppressed`, typed reason |
-| Parent or child crashes between phase edges | Apply the exact §5 crash-probe row; no inferred edge | `gui-restart-recovery-claimed` or phase-specific typed suppression |
-| SSE/redirect missed | No false success claim; manual confirmed-port guidance | frontend timeout message plus terminal record/log |
+| Spawn fails | Parent remains full; no marker reservation/release; 2xx non-restarting body | `gui-restart-spawn-failed` |
+| Poised/bound proof absent or mismatched | Parent retains flock; exact authenticated child only may be terminated | `gui-restart-proof-timeout` or `gui-restart-proof-mismatch` |
+| Target N busy | Parent remains full | `gui-restart-child-bind-failed`, reason `address-in-use` |
+| Same-port bind/auth fails after P closes | Retain flock; exact-child reap; owned P rebind | `gui-restart-pre-release-rollback`, reason `bind-failed` or `confirm-timeout` |
+| Parent P-rebind/restoration fails | Durably interrupt when possible; bounded child/hub cleanup; release flock; exit | `gui-restart-pre-release-rollback-failed`; `operator_action:"mcphub gui"` |
+| Mutable requests do not drain | Restore parent full; no release | `gui-restart-quiesce-timeout` |
+| Reservation write fails | Parent retains flock and rolls back | `gui-restart-reservation-write-failed` |
+| Third entrant or ensure-alive enters healthy gap | Release tentative lease; map raw reservation to Held | `ErrHandoffReserved`; `gui-restart-reservation-held` |
+| Expired nonterminal + proved Free flock | Compare-and-swap to `interrupted`; release lease; never spawn | `gui-restart-interrupted-free-flock`; `operator_action:"mcphub gui"` |
+| Expired nonterminal + proved Held flock | Mutate no marker; require identity-gated baseline recovery | `gui-restart-live-holder-wedged`; `operator_action:"mcphub gui --force --kill"` |
+| Marker/path/flock state unknown | Fail closed; do not select either recovery message | `gui-restart-owner-unknown` |
+| Proved-Free `interrupted` write fails | Release lease and show plain command without claiming durability | `gui-restart-interrupted-marker-write-failed`; `operator_action:"mcphub gui"` |
+| Child hub bind initially contends/fails | Full GUI stays reachable; enqueue `initial-bind-failed` into the existing driver from nil | Existing `hub-listener-restart-failed`, `-exhausted`, `-abandoned`, success, and hub-health events |
+| Parent hub teardown reaches deadline | Force-close owned hub component, then release flock; do not wait for child | Existing `hub-shutdown-incomplete` plus handoff reason metadata |
+| SSE/redirect missed | No false committed claim; retain target URL and manual command | Frontend navigation timeout/manual guidance |
 
-All events carry `handoff_id`, `generation`, phase, and only non-sensitive process/port metadata. The nonce,
-argv, environment, and secrets are never logged.
+Every new event carries `handoff_id`, generation, coarse phase, reason code, and non-sensitive port/process
+metadata. Nonce, argv, environment, and secrets are never logged.
 
 ## 13. Security and resource lifetime
 
-- Listeners remain loopback-only; the existing Host/origin protections remain on full handlers.
-- Standby exposes only challenged ping; grace exposes only SSE and redirect status. Neither mode exposes
-  mutators, secrets, group tokens, force-kill, or arbitrary proxying.
-- The handoff nonce is cryptographically random, transferred only through the owner-only inherited
-  pipe/handle (owner-only file fallback), absent from argv/environment/logs/durable raw state, and consumed once.
-- PID is diagnostic only. Confirmation requires retained process handle + nonce proof; termination uses the
-  retained handle only after authentication.
-- The designated-child reservation compares a nonce hash; recovery claims compare their CAS-installed claim
-  identifier under the same record lock. Unknown record state fails closed.
-- Every listener, process handle, record lock, single-instance lease, SSE subscription, timer, hub component,
-  and recovery agent has explicit success/failure/cancel/timeout cleanup in its owning component.
-- The fallback recovery agent is read-only, time-bounded, and owns no single-instance or hub capability.
+- Listeners remain loopback-only; existing Host/origin protections remain on full handlers.
+- Standby exposes only challenged ping. Grace exposes only SSE and restart redirect. Neither exposes mutators,
+  secrets, tokens, force-kill, or arbitrary proxying.
+- The nonce is cryptographically random, owner-only, one-use, absent from argv/environment/logs/durable raw
+  state, and represented in the marker only by a one-way hash.
+- PID is diagnostic only. Confirmation requires retained handle plus nonce proof; termination uses that exact
+  handle and exists only before flock release.
+- Reservation uncertainty fails closed. The marker never authorizes a kill, bind takeover, or holder eviction.
+- Every listener, process handle, marker lock, flock lease, SSE subscription, timer, and hub component has
+  explicit success/failure/cancel/timeout cleanup in its owner.
+- The old parent atomically takes and closes its own hub component through the existing hub owner before flock
+  release; the child never closes or signals a parent resource.
+- Ensure-alive's `Free` result is an owned resource. It is used only to guard one exact `interrupted`
+  compare-and-swap and is released on every path; it is never transferred to a process.
+- `mcphub gui --force --kill` retains the existing holder-identity proof. Neither the marker nor a bare PID
+  authorizes termination.
 - Redirect URLs are constructed from authenticated numeric loopback ports, never untrusted host input.
 
 ## 14. Automated test strategy and required seams
 
 ### Required seams
 
-| Seam | What the deterministic harness controls |
+| Seam | Deterministic harness control |
 | --- | --- |
-| Old-listener close/rebind | Exact close, retained handler mode, owned bound-listener transfer |
-| Flock release/reacquire | Reservation order, third entrant, foreign winner, reclaim deadline |
-| Spawned child handle | Authenticate, terminate, exact `Wait`, detach, handle cleanup |
-| Bind probe | Port busy/free, exclusive listener ownership, persistent rebind failure |
-| Clock/deadlines | Every timeout, parent 5 s force-close / 10 s decision cutoff, child 30 s activation wait / 5 s self-advance, strict 65 s admission guard, record expiry, grace `G`, retry cadence |
-| Readiness channel | Poised, route-specific bind confirmation, lock-owned/active, nonce proof, sequence corruption |
-| Record store | Complete legal-edge matrix, recovery claim/expiry CAS, generation regression, committed-to-aborted rejection, DACL/read error |
-| Handler-mode gate | In-flight mutator drain, new-request 503, SSE continuity |
-| Hub transfer | Parent graceful drain, forced close, and activation signal only after child-lock-owned; child live-wedge degraded bind; gate ON/OFF toggle outcomes |
-| SSE/redirect | Event flush, five-second grace, poll fallback, abort/failure payloads |
-| Recovery relaunch | Owner tri-state, record tri-state, CAS claim, autostart invocation count |
+| GUI listener owner | Exact standby/full/grace mode, listener close, exclusive rebind |
+| Flock lease | Release/acquire, raw-reservation Held mapping, owned probe interruption and release |
+| Spawned child handle | Nonce proof, pre-release exact terminate/wait, detach-at-release |
+| Clock | Proof, bind, quiesce, reservation, rollback, grace, freshness deadlines |
+| Marker store | Four phases, reserve/interrupt CAS, interrupted reason/action, write/read failure |
+| Handler gate | In-flight mutator drain, new-request 503, grace allowlist |
+| Hub owner | Parent close before flock release; initial-bind request from nil; unchanged retry/exhaustion policy |
+| SSE/redirect | Pre-release event flush, fixed grace, best-effort navigation |
+| Ensure-alive | Held/Free-owned/Unknown, zero GUI spawns, exact free/held command discriminator |
 
-### Runnable contract tests
+### Required runnable contract tests — 20 total, down from v2.2's 35
 
-- `TestRestartV2_PortChange_StandbyBoundBeforeReservedRelease`
-- `TestRestartV2_SamePort_ClosesOnlyGUIListenerAndKeepsHubEventsAlive`
-- `TestRestartV2_SamePort_PreReleaseConfirmDeadlineIsTwoSeconds`
-- `TestRestartV2_SamePort_PreReleaseRollbackRetainsLeaseAndRebindsWithoutReacquire`
-- `TestRestartV2_PostReleaseRollbackReacquiresOnlyAfterLeaseRelease`
-- `TestRestartV2_ChildStandbyHasNoHubTrayMutatorsOrBackgroundWrites`
-- `TestRestartV2_ChildParentDeathAfterLockOwnedSelfActivatesWithinFiveSeconds`
-- `TestRestartV2_ParentPostConfirmationForcesHubCloseAtFiveSecondsAndDecidesByTen`
-- `TestRestartV2_ChildActivationWaitLiveWedgedParentSelfActivatesAtThirtySeconds`
-- `TestRestartV2_ActivationWaitAdmissionRequiresStrictSixtyFiveSeconds`
-- `TestRestartV2_ParentDecisionAndChildFallbackCASHaveExactlyOneWinner`
-- `TestRestartV2_ParentCrashesAfterHubReleasedBeforeSignalChildResumes`
-- `TestRestartV2_ReservationRejectsThirdEntrantAndDesignatedChildWins`
-- `TestRestartV2_RawReservedFreeFlockMapsHeldUntilRecoveryClaim`
-- `TestEnsureAliveGUIRecovery_HeldChildCannotBeClaimedOrSequenceStarved`
-- `TestRestartV2_ForeignWinnerNeverKilled`
-- `TestRestartV2_NonceAndRetainedHandleDefeatPIDReuse`
-- `TestRestartV2_NonceUsesInheritedOwnerOnlyChannelNotEnvironment`
-- `TestRestartV2_AbortWaitsForExactChildExitBeforeRecordTerminal`
-- `TestRestartV2_RebindUsesOwnedExclusiveListener`
-- `TestRestartV2_RebindFailureStartsReadOnlyFallbackAndEndsRecoveryFailed`
-- `TestRestartV2_RecordCASCannotRegressCommittedToAborted`
-- `TestRestartV2_RecordCompleteLegalEdgeAndCrashVerdictMatrix`
-- `TestRestartV2_RecordRecoveryClaimAndExpiryRequireGenerationSequenceAndLegalEdge`
-- `TestRestartV2_IntentionalShutdownCannotRelaunch`
-- `TestRestartV2_GraceAllowsOnlySSEAndRedirectForFiveSeconds`
-- `TestRestartV2_HubToggleSamePortTransfersAfterLockOwnership`
-- `TestRestartV2_API202RetainsRestartingField`
-- `TestRestartV2_SpawnFailureReturns2xxNonRestartingBody`
-- `TestRestartV2_PortArgvMatrix` covering every §6 row plus invalid persisted warning.
-- `TestHubPortDependencies_FailsClosedOnUnreadableClient`
-- `TestHubPortDependencies_FailsClosedOnGroupsLoadError`
-- `TestEnsureAliveGUIRecovery_RequiresFreeLockClaimAndExplicitQualifyingPhase`
-- `TestEnsureAliveGUIRecovery_UnknownOrAutostartIntentAloneNeverRelaunches`
-- Browser test: `gui-restart-port-change.spec.ts` proves committed SSE navigation and redirect-poll fallback
-  against the deterministic two-process harness.
+1. `TestRestartV3_SamePort_ClosesOnlyGUIListenerAndKeepsHubEventsAlive`
+2. `TestRestartV3_PortChange_ParentClosesHubBeforeFlockReleaseThenChildActivatesImmediately`
+3. `TestRestartV3_SamePort_PreReleaseRollbackRetainsLeaseAndRebindsWithoutReacquire`
+4. `TestRestartV3_PreReleaseRollbackFailureInterruptsReleasesLeaseAndExits`
+5. `TestRestartV3_NonceRetainedHandleDefeatsPIDReuseAndNeverUsesEnvironment`
+6. `TestRestartV3_ReservationRejectsThirdEntrantAndDesignatedChildWins`
+7. `TestRestartV3_RawReservedFreeFlockMapsHeldDuringWindow`
+8. `TestEnsureAliveGUIRecovery_ExpiredReservedFreeInterruptsAndNeverSpawns`
+9. `TestEnsureAliveGUIRecovery_FreeVsHeldSelectsExactOperatorCommand`
+10. `TestRestartV3_ParentPerformsNoProtocolWriteWaitTerminateOrReclaimAfterRelease`
+11. `TestRestartV3_ChildActivatesImmediatelyAndInitialHubBindRetriesFromNilThroughExistingDriver`
+12. `TestRestartV3_API202RetainsRestartingField`
+13. `TestRestartV3_SpawnFailureReturns2xxNonRestartingBody`
+14. `TestRestartV3_PortArgvMatrix`
+15. `TestRestartV3_GraceNavigationIsBestEffortAndNeverClaimsCommit`
+16. `TestRestartV3_FeatureGateInertMatrix`
+17. `TestRestartV3_FreeFlockInterruptedPlainLaunchRecoversEndToEnd`
+18. `TestRestartV3_LiveHeldInterruptedForceKillRecoversEndToEnd`
+19. `TestHubPortDependencies_FailsClosedOnUnreadableClient`
+20. `TestHubPortDependencies_FailsClosedOnGroupsLoadError`
 
-The only manual smoke retained is killing a real live GUI process during each handoff checkpoint on Windows
-to validate OS handle/flock behavior and operator recovery. All protocol ordering, failure, navigation, and
-record semantics are automated.
+The protocol suite deliberately has no 43-edge/crash-verdict matrix, recovery-claim expiry race, 10s/30s
+arbiter race, child suffix self-advance test, post-release terminate/reacquire test, or fallback recovery-listener
+test. Windows process smokes cover both discriminator outcomes: a dead/free parent-child handoff restored by
+plain `mcphub gui`, and a live wedged holder restored only through the existing identity-gated
+`mcphub gui --force --kill`. Neither smoke permits an ensure-alive GUI spawn.
 
 ## 15. Diff-invisible invariants
 
 | Invariant | Named regression guard and expected result |
 | --- | --- |
-| Same-port restart with hub toggle still works | `TestRestartV2_HubToggleSamePortTransfersAfterLockOwnership`: no child hub bind before parent release; final hub state equals persisted intent |
-| Closing only the GUI listener does not end Server/hub/events | `TestRestartV2_SamePort_ClosesOnlyGUIListenerAndKeepsHubEventsAlive`: hub probe and existing SSE stay live until explicit transfer |
-| Same-port pre-release rollback never reacquires an already-owned lease | `TestRestartV2_SamePort_PreReleaseRollbackRetainsLeaseAndRebindsWithoutReacquire` |
-|  | Reacquire counter remains zero and P returns to full within the budget |
-| A healthy release-to-child-acquire gap never triggers a second GUI | `TestRestartV2_RawReservedFreeFlockMapsHeldUntilRecoveryClaim` |
-|  | Raw `reserved` plus provably free OS flock returns Held/`ErrHandoffReserved`; relaunch count remains zero |
-| Parent death after child lock ownership cannot strand standby | `TestRestartV2_ChildParentDeathAfterLockOwnedSelfActivatesWithinFiveSeconds` |
-|  | Inherited parent handle signals death; child commits within 5 s with expiry headroom intact |
-| A live wedged parent after child lock ownership cannot strand standby | `TestRestartV2_ChildActivationWaitLiveWedgedParentSelfActivatesAtThirtySeconds` |
-|  | No signal with an unsignaled live parent handle triggers at 30 s and commits by 35 s |
-| Parent completion/abort and child fallback cannot both or neither win | `TestRestartV2_ParentDecisionAndChildFallbackCASHaveExactlyOneWinner` |
-|  | Every parent CAS/claim versus child-timeout schedule produces one winning sequence path |
-|  | Parent cutoff is 10 s and child trigger is 30 s |
-| Absolute expiry cannot preempt the lock-owning child's fallback | `TestRestartV2_ActivationWaitAdmissionRequiresStrictSixtyFiveSeconds` |
-|  | `reserved -> child-lock-owned` rejects equality or less |
-|  | When admitted, commit lands with more than 30 s remaining |
-| No mutable request reaches the old parent after `parent-quiesced` | `TestRestartV2_GraceRejectsAllMutators`: every non-allowlisted route returns 503; in-flight mutator drains before child activation |
-| Child standby has no externally mutable side effects | `TestRestartV2_ChildStandbyHasNoHubTrayMutatorsOrBackgroundWrites`: all injected counters remain zero until activation |
-| Supervisor fleet survives self-restart | `TestRestartV2_ParentSuccessDoesNotRunSupervisorStop`: adopted/spawned supervisor handle is not stopped by parent handoff exit |
-| Existing second-instance activation remains unchanged outside reservation | Existing `TryActivateIncumbent` and force-path suites pass; new reservation test applies only during fresh `reserved` phase |
-| EventSource same-origin reconnect remains native | Existing `useEventSource` test plus same-port browser contract reaches `open` without manual recreation |
-| Hub endpoint port is never cleared when dependencies are unknown | Two fail-closed dependency tests assert `ResetHubPortContext` is not invoked |
-| No false resurrection after intentional close | `TestRestartV2_IntentionalShutdownCannotRelaunch` records terminal shutdown, frees lock, runs ensure-alive, and observes zero relaunches |
+| Listener close does not end hub/events/process | `TestRestartV3_SamePort_ClosesOnlyGUIListenerAndKeepsHubEventsAlive`: hub and SSE remain through same-port proof, until the explicit flock-release boundary |
+| Parent hub socket is not held through old-port grace | `TestRestartV3_PortChange_ParentClosesHubBeforeFlockReleaseThenChildActivatesImmediately`: parent hub close completes/force-closes before release; old GUI grace may continue afterward |
+| Pre-release rollback never reacquires an owned lease | `TestRestartV3_SamePort_PreReleaseRollbackRetainsLeaseAndRebindsWithoutReacquire`: reacquire count is zero; P is full again |
+| Failed rollback cannot leave a crippled flock holder | `TestRestartV3_PreReleaseRollbackFailureInterruptsReleasesLeaseAndExits`: cleanup deadline expires, but release count is one and process exit is requested |
+| Healthy release-to-acquire gap never launches a third GUI | `TestRestartV3_RawReservedFreeFlockMapsHeldDuringWindow`: raw reserved plus free OS flock returns Held; GUI spawn count is zero |
+| Child standby has no mutable side effects | Port-change test: hub/tray/browser/poller/mutator counters remain zero until flock acquisition |
+| Child never waits for parent after flock acquisition | Immediate-activation test: full handler opens without hub-release or activation signal |
+|  | Initial hub bind conflict enqueues the existing driver from nil; unchanged retry events lead to healthy or honest exhausted/down |
+| Parent cannot recreate post-release arbitration | `TestRestartV3_ParentPerformsNoProtocolWriteWaitTerminateOrReclaimAfterRelease`: all forbidden seam counters remain zero after release |
+| Ensure-alive never creates an owner | `TestEnsureAliveGUIRecovery_ExpiredReservedFreeInterruptsAndNeverSpawns`: concurrent/later ticks produce one terminal compare-and-swap and zero GUI spawns/transfers |
+| Supervisor fleet survives self-restart | Existing manager-stop regression guard: parent handoff exit does not stop adopted supervisor/daemons |
+| Old parent never admits mutators after grace | Grace test: every non-allowlisted route returns 503 and admitted mutators drain before release |
+| Hub endpoint port is never cleared when dependencies are unknown | Both Unit A tests assert reset owner is never invoked |
+| Spawn failure remains friendly 2xx | `TestRestartV3_SpawnFailureReturns2xxNonRestartingBody`: frontend reaches incomplete banner, parent stays full |
+| Free-flock guidance cannot bounce to an owner | `TestRestartV3_FreeFlockInterruptedPlainLaunchRecoversEndToEnd`: message appears only after owned Free; plain command restores full GUI |
+| Live-holder guidance cannot falsely advertise plain launch | `TestRestartV3_LiveHeldInterruptedForceKillRecoversEndToEnd`: Held emits only the force-kill command; identity-gated recovery restores full GUI |
 
 ## 16. Alternatives and rejection drivers
 
+The superseded v2.2 fully automatic recovery graph is not an available alternative: accepted decision
+`2026-07-17-item3-unitB-recovery-simplify` rejects it because a record CAS cannot serialize OS kills, binds, or
+flocks, and its no-owner freeze relocated across repeated revisions. The three remaining alternatives are:
+
 ### A. Keep `Server.Start` monolithic and close the listener indirectly — rejected
 
-The current return path drains hub and events and ends the process lifecycle (`server.go:1126-1205`). It cannot
-hold/release/rebind only the GUI listener or retain an old-port grace handler. Decisive driver: panel finding A
-and re-verified lifecycle coupling.
+The current return path drains hub/events and ends process lifecycle. It cannot close/rebind only the GUI
+listener or retain old-port grace. Decisive driver: re-verified lifecycle coupling. The `GUIListenerOwner` seam
+remains required and `internal/gui/server.go` remains in the change surface.
 
 ### B. Dual-bind same port with `SO_REUSEPORT` — rejected
 
-The current exclusive listener and single-instance design intentionally forbid two full owners. This would
-change cross-platform socket/security semantics and still would not solve hub, mutator, or lock transfer.
-Decisive driver: accepted recon known limit 1.
+The exclusive listener and single-instance design intentionally forbid two full owners. Reuse-port would change
+cross-platform socket/security semantics and still would not solve hub, mutator, or flock transfer.
 
-### C. Relaunch whenever the GUI flock is absent — rejected
+### C. Add a surviving-child fence and automatic ensure-alive takeover — rejected
 
-Absence occurs during healthy handoff and after intentional shutdown; current path/read errors can also look
-dead. Decisive driver: panel finding D plus `supervise_ensure_alive.go:176-218,266-277`. The v2.2 AND gate
-requires an explicit qualifying phase, a matching recovery claim, and a provably free reservation-aware lock.
+A correct takeover would need a provable child closure/fence protocol before spawning, because expired
+`reserved + Free` does not prove the parent or standby child dead. That protocol would reintroduce another
+long-lived actor/edge solely to retain automation. V3.1 instead uses the owned free lease to terminally interrupt
+the exact record and fence a late child through the existing reservation check; it never spawns. Relaunching on
+mere flock absence is even less safe because the flock is briefly absent during healthy handoff and may be
+absent after intentional shutdown, while path/read errors can look dead.
 
 ## 17. Claims
 
-Each claim is a falsifiable `{guarantee, single-owner, enforcement-probe}` contract for the next architecture
-review.
+Each claim is a falsifiable `{guarantee, single-owner, enforcement-probe}` contract for design-gate re-review.
 
-1. `{ guarantee: the GUI listener can close, remain closed, or rebind without returning the full Server
-   lifecycle or draining hub/events; single-owner: GUIListenerOwner; enforcement-probe:
-   TestRestartV2_SamePort_ClosesOnlyGUIListenerAndKeepsHubEventsAlive fails unless hub and SSE remain live
-   across listener close and the owner restores an exclusively rebound P }`.
-2. `{ guarantee: authenticated child standby serves before the parent releases the flock, eliminating the v1
-   circular wait while keeping full service exclusive; single-owner: RestartCoordinator; enforcement-probe:
-   TestRestartV2_PortChange_StandbyBoundBeforeReservedRelease asserts the exact ordered trace
-   bind -> serve-ping -> poised -> parent-quiesced -> reserved -> release }`.
-3. `{ guarantee: port-change navigation is best-effort with a measured five-second old-port delivery window
-   and a manual recovery path, not an unprovable delivery promise; single-owner: parent GraceBridge;
-   enforcement-probe: TestRestartV2_GraceAllowsOnlySSEAndRedirectForFiveSeconds plus
-   gui-restart-port-change.spec.ts fail if the old listener closes before event flush plus G or if both SSE
-   and redirect fallback cannot navigate }`.
-4. `{ guarantee: valid persisted intent wins only for self-restart, while unset or invalid persisted intent
-   preserves every explicit inherited port form including 0 and emits an invalid-value warning;
-   single-owner: resolveGuiPort typed helper; enforcement-probe: TestRestartV2_PortArgvMatrix table-tests
-   --port N, --port=N, --port 0, repeats, -port rejection, post-- tokens, no flag, unset, valid, and invalid }`
+1. `{ guarantee: the GUI listener can close and rebind without returning the full Server lifecycle or draining
+   hub/events; single-owner: GUIListenerOwner; enforcement-probe:
+   TestRestartV3_SamePort_ClosesOnlyGUIListenerAndKeepsHubEventsAlive }`.
+2. `{ guarantee: authenticated standby is reachable before flock release, eliminating the v1 circular wait,
+   and PID reuse cannot authorize the wrong child; single-owner: AuthenticatedReadinessSession;
+   enforcement-probe:
+   TestRestartV3_PortChange_ParentClosesHubBeforeFlockReleaseThenChildActivatesImmediately and
+   TestRestartV3_NonceRetainedHandleDefeatsPIDReuseAndNeverUsesEnvironment }`.
+3. `{ guarantee: raw reserved maps to Held throughout the healthy gap so neither a third entrant nor
+   ensure-alive can preempt the designated child; single-owner: SingleInstanceLease reservation-aware acquire;
+   enforcement-probe: TestRestartV3_ReservationRejectsThirdEntrantAndDesignatedChildWins and
+   TestRestartV3_RawReservedFreeFlockMapsHeldDuringWindow }`
+   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+4. `{ guarantee: a successful automatic parent rollback retains the owned lease and rebinds P without
+   reacquire, while a failed restoration durably interrupts when possible, performs bounded cleanup, releases
+   the lease, and exits; single-owner: RestartCoordinator pre-release rollback;
+   enforcement-probe: TestRestartV3_SamePort_PreReleaseRollbackRetainsLeaseAndRebindsWithoutReacquire and
+   TestRestartV3_PreReleaseRollbackFailureInterruptsReleasesLeaseAndExits }`
+   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+5. `{ guarantee: the parent closes its own hub listener before flock release, then performs no child-phase
+   write, wait gate, termination, claim, reclaim, activation signal, or delayed hub teardown, so
+   claimant-death/wedge/self-advance races have no actor or edge;
+   single-owner: RestartCoordinator post-release no-op boundary; enforcement-probe:
+   TestRestartV3_PortChange_ParentClosesHubBeforeFlockReleaseThenChildActivatesImmediately and
+   TestRestartV3_ParentPerformsNoProtocolWriteWaitTerminateOrReclaimAfterRelease }`
+   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+6. `{ guarantee: child flock acquisition immediately activates full GUI without a parent signal, parent-status
+   wait, or hub-health gate; single-owner: GUIOwnerLifecycle activation barrier; enforcement-probe:
+   TestRestartV3_PortChange_ParentClosesHubBeforeFlockReleaseThenChildActivatesImmediately }`
+   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+7. `{ guarantee: a never-bound initial hub failure enters the one existing restart driver from nil with
+   unchanged backoff, rolling-window, exhaustion, abandonment, event, and health semantics; single-owner:
+   runHubListenerRestartDriver; enforcement-probe:
+   TestRestartV3_ChildActivatesImmediatelyAndInitialHubBindRetriesFromNilThroughExistingDriver }`
+   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+8. `{ guarantee: ensure-alive never spawns, kills, binds, retries, or transfers its probe lease; after the
+   phase deadline an exact nonterminal + Free record can only become interrupted, and a late surviving standby
+   child rejects that changed marker;
+   single-owner: GUI ensure-alive predicate; enforcement-probe:
+   TestEnsureAliveGUIRecovery_ExpiredReservedFreeInterruptsAndNeverSpawns }`
+   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+9. `{ guarantee: only an owned Free probe advertises plain mcphub gui, while an expired nonterminal Held probe
+   advertises only the existing identity-gated mcphub gui --force --kill; Unknown advertises neither;
+   single-owner: ensure-alive flock discriminator/manual recovery boundary;
+   enforcement-probe: TestEnsureAliveGUIRecovery_FreeVsHeldSelectsExactOperatorCommand,
+   TestRestartV3_FreeFlockInterruptedPlainLaunchRecoversEndToEnd, and
+   TestRestartV3_LiveHeldInterruptedForceKillRecoversEndToEnd }`
+   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+10. `{ guarantee: valid persisted port intent wins only for self-restart while unset/invalid intent preserves
+   explicit inherited port forms including 0; single-owner: resolveGuiPort typed helper;
+   enforcement-probe: TestRestartV3_PortArgvMatrix }`
    (decision `2026-07-17-gui-server-port-authority-model`).
-5. `{ guarantee: no destructive hub-port reset occurs unless clients and groups are both proved dependency-
-   free; single-owner: ProbeHubPortDependencies; enforcement-probe:
-   TestHubPortDependencies_FailsClosedOnUnreadableClient and
-   TestHubPortDependencies_FailsClosedOnGroupsLoadError inject read, parse, and DACL errors and assert both
-   reset callers never invoke ResetHubPortContext }`.
-6. `{ guarantee: during a fresh reservation only the designated child can retain the GUI flock, and raw
-   reserved without a recovery claim maps to Held even when the OS flock is free;
-   single-owner: SingleInstanceLease reservation-aware acquire; enforcement-probe:
-   TestRestartV2_ReservationRejectsThirdEntrantAndDesignatedChildWins races designated child, autostart tick,
-   and double-click entrant and asserts one matching winner, while
-   TestRestartV2_RawReservedFreeFlockMapsHeldUntilRecoveryClaim asserts zero recovery launch }`.
-7. `{ guarantee: PID reuse or a foreign listener cannot cause confirmation or termination of the wrong
-   process; single-owner: SpawnedGUIChild plus authenticated readiness session; enforcement-probe:
-   TestRestartV2_NonceAndRetainedHandleDefeatPIDReuse supplies a matching integer PID with wrong handle/proof
-   and asserts no confirm/terminate, then supplies the retained handle plus valid proof and observes the exact
-   handle only }`.
-8. `{ guarantee: every phase, legal edge, recovery-claim mutation, expiry mutation, and per-edge crash verdict
-   is closed under generation+sequence CAS, and a committed child can never be overwritten by parent abort;
-   single-owner: HandoffRecordStore; enforcement-probe:
-   TestRestartV2_RecordCompleteLegalEdgeAndCrashVerdictMatrix and
-   TestRestartV2_RecordRecoveryClaimAndExpiryRequireGenerationSequenceAndLegalEdge exhaust the graph, while
-   TestRestartV2_RecordCASCannotRegressCommittedToAborted races the terminal writes }`.
-9. `{ guarantee: ensure-alive relaunches only reserved-with-claim, child-lock-owned, hub-released, or
-   activating after the phase-specific claim/owned-lease order succeeds; it cannot claim or sequence-starve a
-   Held child; accepted through
-   parent-listener-released, raw reserved, and every terminal suppress; single-owner: GUI interrupted-handoff recovery
-   decision in supervise_ensure_alive; enforcement-probe:
-   TestEnsureAliveGUIRecovery_RequiresFreeLockClaimAndExplicitQualifyingPhase exhaustively table-tests the
-   owner x record state matrix, TestEnsureAliveGUIRecovery_HeldChildCannotBeClaimedOrSequenceStarved preserves
-   the healthy child sequence, and TestEnsureAliveGUIRecovery_UnknownOrAutostartIntentAloneNeverRelaunches
-   asserts zero relaunches for path/read errors, healthy handoff, terminal shutdown, expiry, and bare
-   autostart intent }`.
-10. `{ guarantee: rollback is selected only by actual lease release: pre-release retains the owned lease and
-    rebinds P without reacquire, while post-release claims recovery, proves exact child exit, and reacquires;
-    either path restores full service or ends durably in recovery-failed with a bounded read-only surface;
-    single-owner:
-    RestartCoordinator rollback state machine; enforcement-probe:
-    TestRestartV2_SamePort_PreReleaseConfirmDeadlineIsTwoSeconds,
-    TestRestartV2_SamePort_PreReleaseRollbackRetainsLeaseAndRebindsWithoutReacquire,
-    TestRestartV2_PostReleaseRollbackReacquiresOnlyAfterLeaseRelease,
-    TestRestartV2_AbortWaitsForExactChildExitBeforeRecordTerminal,
-    TestRestartV2_RebindUsesOwnedExclusiveListener, and
-    TestRestartV2_RebindFailureStartsReadOnlyFallbackAndEndsRecoveryFailed cover both lease branches and
-    terminal outcomes }`.
-11. `{ guarantee: the child binds no hub listener, starts no tray/browser/poller, and exposes no mutator until
-    it owns the reserved flock and activation is authorized by parent signal, proved parent death, or the
-    bounded no-signal fallback after the parent decision cutoff;
-    single-owner: GUIOwnerLifecycle activation
-    barrier; enforcement-probe: TestRestartV2_ChildStandbyHasNoHubTrayMutatorsOrBackgroundWrites and
-    TestRestartV2_HubToggleSamePortTransfersAfterLockOwnership assert zero pre-activation side effects and
-    correct final hub state }`.
-12. `{ guarantee: restart v2.2 backend, port precedence, navigation, and recovery cannot be partially active;
-    single-owner: gui.RestartV2Enabled capability; enforcement-probe: TestRestartV2_FeatureGateInertMatrix
-    runs every reachable endpoint, child mode, frontend response path, record path, and ensure-alive path with
-    the gate disabled and observes no v2.2 side effect }`.
-13. `{ guarantee: after child-lock-owned, neither confirmed parent death nor a live parent that supplies no
-    activation signal can leave a lock-holding standby child waiting indefinitely; the child triggers
-    immediately on death or at 30 s without signal, commits within the following 5 s, and retains more than
-    30 s before absolute expiry; single-owner: child activation-wait arbiter; enforcement-probe:
-    TestRestartV2_ChildParentDeathAfterLockOwnedSelfActivatesWithinFiveSeconds,
-    TestRestartV2_ChildActivationWaitLiveWedgedParentSelfActivatesAtThirtySeconds, and
-    TestRestartV2_ActivationWaitAdmissionRequiresStrictSixtyFiveSeconds cover both triggers and reject an
-    admission guard that is not strict }`.
-14. `{ guarantee: spawn failure remains a 2xx non-restarting body so stale tabs reach friendly incomplete
-    handling instead of throwing on status; single-owner: restart HTTP response contract; enforcement-probe:
-    TestRestartV2_SpawnFailureReturns2xxNonRestartingBody asserts status, body, no release, and no exit }`.
-15. `{ guarantee: the handoff nonce is never transferred through argv or environment and is readable only by
-    the exact parent/child pair; single-owner: authenticated readiness transport; enforcement-probe:
-    TestRestartV2_NonceUsesInheritedOwnerOnlyChannelNotEnvironment inspects child argv/environment and owner
-    permissions, then proves the inherited one-shot channel is consumed and closed }`.
-16. `{ guarantee: after child-lock-owned, the parent lands completion or the existing rollback claim by its
-    10 s cutoff, otherwise the child owns fallback at 30 s; exactly one CAS path wins and no schedule permits
-    both owners or no owner; single-owner: HandoffRecordStore generation+sequence+claim arbiter;
-    enforcement-probe: TestRestartV2_ParentPostConfirmationForcesHubCloseAtFiveSecondsAndDecidesByTen and
-    TestRestartV2_ParentDecisionAndChildFallbackCASHaveExactlyOneWinner exhaust the parent-edge,
-    parent-claim, no-parent-write, stale-sequence, and signal-loss schedules }`.
+11. `{ guarantee: no destructive hub-port reset occurs unless clients and groups are proved dependency-free;
+    single-owner: ProbeHubPortDependencies; enforcement-probe:
+    TestHubPortDependencies_FailsClosedOnUnreadableClient and
+    TestHubPortDependencies_FailsClosedOnGroupsLoadError }`
+    (decision `2026-07-17-gui-server-port-authority-model`).
+12. `{ guarantee: accepted restart remains HTTP 202 with restarting=true and spawn failure remains 2xx with a
+    friendly non-restarting body; single-owner: restart HTTP response contract;
+    enforcement-probe: TestRestartV3_API202RetainsRestartingField and
+    TestRestartV3_SpawnFailureReturns2xxNonRestartingBody }`.
+13. `{ guarantee: Unit B endpoint, marker, child mode, frontend path, and ensure-alive branch cannot be partially
+    active; single-owner: gui.RestartV3Enabled; enforcement-probe: TestRestartV3_FeatureGateInertMatrix }`.
+
+The claims surface is 13, with the recovery core expressed as reservation/Held, bounded pre-release rollback,
+parent hub-close plus post-release no-op, immediate child activation, the one existing hub retry owner, and a
+degrade-only free/held manual floor.
 
 ## 18. Non-goals and adjacent findings
 
 - No zero-downtime same-port handover.
 - No automatic rewrite of hand-pasted group URLs.
-- No permanent rendezvous port and no long-lived GUI health watcher.
+- No permanent rendezvous port or long-lived GUI health watcher.
 - No change to supervisor ownership, daemon restart policy, or hub bind transaction.
-- No use of bare PID termination for this protocol.
-- The admitted live-parent post-lock wedge is closed by the bounded v2.2 patch; no additional adjacent finding
-  is folded into this revision.
+- No bare-PID termination.
+- No post-release parent/child arbiter, recovery claimant, self-advance, activation signal, hub-release phase,
+  post-release kill/reacquire, fallback listener, ensure-alive GUI spawn, or automatic takeover/relaunch.
+- No adjacent finding is folded into this revision.
+- **Planner note:** update stale `CLAUDE.md` B1 “Hub listener hang” text in the Unit B docs pass; `runHubListenerRestartDriver` plus `hubHealthTracker` already implements bounded restart and exhaustion/abandon states.
 
 ## Terms and Abbreviations
 
-- **CAS:** Compare-and-swap; a write accepted only when generation, sequence, and prior phase match.
-- **Flock:** The existing file lock that grants one full GUI owner per user.
-- **GRACE:** Old-port, read-only parent mode serving only SSE and restart redirect status.
+- **CAS:** Compare-and-swap; in v3.1 used only to reserve the handoff and interrupt an exact nonterminal record
+  by generation and sequence.
+- **Flock:** The existing file lock granting one full GUI owner per user.
+- **GRACE:** Old-port, read-only parent mode serving only SSE and restart redirect status for a fixed deadline.
 - **GUI:** Graphical User Interface.
-- **Handoff nonce:** One-use random value proving that readiness came from the spawned child.
-- **Recovery claim:** Sequence-advancing CAS credential that grants one recovery actor permission to test and
-  retain the reservation-aware flock; it does not change the durable phase.
+- **Handoff nonce:** One-use random value proving readiness came from the exact spawned child.
+- **Held:** Tri-state probe result meaning an owner or protected reservation exists; not proof of which process.
 - **SSE:** Server-Sent Events, the browser progress stream at `/api/events`.
-- **STANDBY:** Child mode that may serve authenticated readiness but has no full-runtime side effects.
+- **STANDBY:** Child mode serving authenticated readiness with no mutable-runtime side effects.
 
-## Gate decision: PASS — v2.2 ready for final confirm
+## Gate decision: PASS — design-B v3.1 ready for final confirm
