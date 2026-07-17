@@ -45,9 +45,18 @@ Discovery done (84 findings → 5 themes → 6 ranked items; see `roadmap.md`).
   never follows it with `restarted`), and an ABSORBING false `recovering` after the driver
   permanently exits on `restart-abandoned` while its watcher keeps running. Deferred debt:
   `work-items/backlog/2026-07-16-hub-health-deferred-debt.md`.
-- **Item 2 — GUI recovery for quarantined/lost-child daemons — DESIGNED, not started.**
-  `item2-recover-design.md` (a4f83885). Open question for the orchestrator: should `LostChild`
-  be a distinct status-wire state or stay covered by `Quarantined`?
+- **Item 2 — GUI recovery for quarantined/lost-child daemons — DELIVERED 2026-07-17.** PR #557,
+  squash `64b16e35`, deployed (fleet 36, GUI autostarted). A shared `internal/daemonrecovery`
+  authority (CLI + GUI + sweep classify through one owner), `POST /api/daemon/recover`, a
+  first-class Recover affordance, and truthful colors from the one `status.ts` bucket classifier.
+  Resolved open question: **no distinct `LostChild` wire state** — `isRecoveryEligibleState` admits
+  `Quarantined` by exact value; the operation proves the lost-child condition at execution time.
+  Reviewed over 11 panel rounds (codex adversarial + opus deep + sonnet mechanical sweep + fable
+  arbiter) + a Codex-bot round; ~70 defects fixed. The recurring class was **kill-without-restart**,
+  which surfaced FOUR times through four different mechanisms (early return → starved budget → dead
+  supervisor → blocking audit flock) plus the bot's fifth angle (fail-closed state-read on only one
+  of three respawn paths) — each found only because the next reviewer assumed the prior fix had
+  created it. Deferred debt: `backlog/2026-07-16-daemon-recovery-followups.md` (now 8 items).
 - **Items 3-6** — not started (`roadmap.md`).
 
 ## Side-effects found while executing Phase 0 (all filed, none blocking)
@@ -65,5 +74,9 @@ Discovery done (84 findings → 5 themes → 6 ranked items; see `roadmap.md`).
 
 ## Now
 
-Item 2 (GUI daemon recovery) — resolve the `LostChild` wire-state question, then implement from
-`item2-recover-design.md`.
+Items 1 + 2 DELIVERED + deployed. **Item 3 next** — GUI self-restart / port-change without bricking
+gated client URLs (`roadmap.md`). Also standing: a `2026-07-17` policy-ownership audit
+(`backlog/2026-07-17-ticker-intervals-hardcoded-split-policy-ownership.md`, 4×P2 + 4×P3, the
+form-driven-registry rule) surfaced from an operator question during item 2; not a Phase-0 item but
+overlaps items 3-6 (truthful surfaces, config ownership) — the product-manager should decide whether
+it folds into Phase 0 or becomes its own initiative.

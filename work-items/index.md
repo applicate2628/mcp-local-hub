@@ -41,8 +41,11 @@ reconciliation records, not open tasks.
 ## Reference / parked (NOT open tasks)
 
 - [2026-06-18-clean-install-ux-vision](active/2026-07-16-productization-gui-solidify/2026-06-18-clean-install-ux-vision.md) — source material for the active productization initiative.
-- `roadmap-scan-2026-06-14.md` — gitignored local raw-inventory scan the `ROADMAP.md` audit
-  header cites; superseded by `ROADMAP.md` for all live tracking (not an open task).
+- `.scratch/roadmap-scans/roadmap-scan-2026-06-14.md` — the local-only raw-inventory scan the
+  `ROADMAP.md` audit header cites. Moved out of this tree 2026-07-16: it is gitignored working
+  material, and `/.scratch/` is where local-only raw artifacts belong — a `.gitignore` rule hiding a
+  file inside `work-items/` was papering over the wrong location. Superseded by `ROADMAP.md` for all
+  live tracking; regenerate if absent.
 
 ## Archived (work-items/archive/<YYYY-MM>/)
 
