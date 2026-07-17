@@ -40,3 +40,14 @@ BUT: the self-restart path does NOT share the `--reset-port` exit-8 gate-ON guar
 
 ## Why low priority
 Same-port re-bind is the norm; the worst-case no-GUI failure is already recovered by `\mcp-local-hub-liveness` (~1 min). This is a rare correctness edge, not a routine failure. The 2 other analyst-flagged residual risks (timing-window dependence; no real-process handoff test) are accepted: the liveness task nets the no-GUI worst case, and the handler's seam-mocked test covers the logic (a real-process integration test is infeasible in the Playwright suite since it kills the test's own GUI).
+
+> **CORRECTION 2026-07-17 (item-3 recon, verified in code):** the claim "the worst-case no-GUI failure
+> is already recovered by `\mcp-local-hub-liveness` (~1 min)" is **FALSE**. `runEnsureAlive`
+> (`internal/cli/supervise_ensure_alive.go:346-360`) returns a no-op when the supervisor is running, and
+> a GUI self-restart ADOPTS the live supervisor (`os.Exit` in `gui_self_restart.go:39-44` skips
+> `manager.Stop`, so the supervisor survives the handoff). The autostart-GUI relaunch fires only in the
+> `running=false AND no live GUI owner` branch (`:393-409`) — i.e. only when the supervisor is ALSO dead.
+> So a self-restart that bricks the GUI (child failed to acquire, parent exited, supervisor still alive)
+> is NOT auto-recovered; it needs manual relaunch. This edge is therefore higher-risk than this doc
+> assessed, and is folded into **Phase-0 item 3**'s design (see
+> `active/2026-07-16-productization-gui-solidify/item3-restart-recon.md`).
