@@ -519,7 +519,12 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 			return api.NewAPI().WriteSerenaIdleStopResult(taskName, now)
 		},
 	)
-	s := gui.NewServer(gui.Config{Port: port, Version: versionString()})
+	restartV3Enabled := gui.RestartV3Enabled()
+	s := gui.NewServer(gui.Config{
+		Port:             port,
+		Version:          versionString(),
+		RestartV3Enabled: restartV3Enabled,
+	})
 
 	// Phase C.2 wiring (v0.5.x plan §C.2): construct the serena routing
 	// dependencies and hand them to the GUI server. The /serena/mcp

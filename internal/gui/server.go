@@ -29,6 +29,8 @@ type Config struct {
 	// verify the pidport file's PID matches the live process. Zero
 	// means "use os.Getpid()" (the normal production path).
 	PID int
+	// RestartV3Enabled is the composition-root-resolved GUI restart gate.
+	RestartV3Enabled bool
 }
 
 // scanner is the narrow interface that the /api/scan handler needs.
