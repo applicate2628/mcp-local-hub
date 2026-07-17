@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -1461,7 +1462,63 @@ func readBootstrappedLanguages(t *testing.T, root string) []string {
 	return out
 }
 
-func TestWorkspaceBootstrap_DetectsLanguagesFromExtensions(t *testing.T) {
+// serenaLanguageEnumForTest is the external wire contract accepted by Serena's
+// Language enum. It is intentionally duplicated at this process boundary so
+// every mcphub-to-Serena mapping value is drift-gated by a test.
+var serenaLanguageEnumForTest = func() map[string]struct{} {
+	values := strings.Fields(`
+		csharp python rust java kotlin typescript go ruby dart cpp cpp_ccls php r perl clojure
+		elixir elm terraform swift bash crystal zig lua luau nix erlang ocaml al fsharp rego
+		scala julia fortran haskell haxe lean4 groovy vue powershell pascal matlab msl
+		typescript_vts python_jedi python_ty csharp_omnisharp ruby_solargraph php_phpactor
+		markdown yaml toml hlsl systemverilog solidity ansible
+	`)
+	out := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		out[value] = struct{}{}
+	}
+	return out
+}()
+
+func TestMCPhubToSerenaLanguageMap_ValuesAreValid(t *testing.T) {
+	for mcphubLanguage, serenaLanguage := range mcphubToSerenaLanguage {
+		if _, ok := serenaLanguageEnumForTest[serenaLanguage]; !ok {
+			t.Errorf("mapping %q -> %q targets a value outside Serena's Language enum", mcphubLanguage, serenaLanguage)
+		}
+	}
+	for mcphubLanguage, want := range map[string]string{
+		"clangd":     "cpp",
+		"javascript": "typescript",
+	} {
+		if got := mcphubToSerenaLanguage[mcphubLanguage]; got != want {
+			t.Errorf("mapping %q = %q, want %q", mcphubLanguage, got, want)
+		}
+	}
+	for _, unsupported := range []string{"vscode-css", "vscode-html"} {
+		if got, ok := mcphubToSerenaLanguage[unsupported]; ok {
+			t.Errorf("unsupported mcphub language %q unexpectedly maps to %q", unsupported, got)
+		}
+	}
+}
+
+func TestProjectSerenaLanguages_OmitsUnknownWithDiagnostic(t *testing.T) {
+	var debug bytes.Buffer
+	got := projectSerenaLanguages(
+		[]string{"future-language", "go", "javascript", "typescript", "vscode-css"},
+		&debug,
+	)
+	want := []string{"go", "typescript"}
+	if !equalStrings(got, want) {
+		t.Errorf("projected languages = %v, want %v", got, want)
+	}
+	for _, omitted := range []string{"future-language", "vscode-css"} {
+		if !strings.Contains(debug.String(), omitted) {
+			t.Errorf("debug output should name omitted language %q; output: %s", omitted, debug.String())
+		}
+	}
+}
+
+func TestWorkspaceBootstrap_ProjectsOnlySerenaLanguages(t *testing.T) {
 	tmp := t.TempDir()
 	// Seed a multi-language repo.
 	touch(t, filepath.Join(tmp, "main.cpp"))
@@ -1478,18 +1535,42 @@ func TestWorkspaceBootstrap_DetectsLanguagesFromExtensions(t *testing.T) {
 	touch(t, filepath.Join(tmp, "index.html"))
 	touch(t, filepath.Join(tmp, "sim.f90"))
 
-	if _, err := runWorkspaceCmd(t, "bootstrap", tmp); err != nil {
+	out, err := runWorkspaceCmd(t, "bootstrap", tmp)
+	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
 	got := readBootstrappedLanguages(t, tmp)
 	want := []string{
-		"cpp", "fortran", "go", "javascript", "markdown",
-		"python", "rust", "typescript", "vscode-css", "vscode-html",
+		"cpp", "fortran", "go", "markdown", "python", "rust", "typescript",
 	}
 	sort.Strings(want)
 	if !equalStrings(got, want) {
 		t.Errorf("languages = %v, want %v", got, want)
+	}
+	for _, language := range got {
+		if _, ok := serenaLanguageEnumForTest[language]; !ok {
+			t.Errorf("bootstrap wrote Serena-invalid language %q", language)
+		}
+	}
+	for _, invalid := range []string{"javascript", "vscode-css", "vscode-html"} {
+		if slices.Contains(got, invalid) {
+			t.Errorf("bootstrap leaked mcphub-only language %q into Serena config", invalid)
+		}
+	}
+	count := 0
+	for _, language := range got {
+		if language == "typescript" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("typescript count = %d, want 1 after javascript mapping and deduplication", count)
+	}
+	for _, dropped := range []string{"vscode-css", "vscode-html"} {
+		if !strings.Contains(out, dropped) {
+			t.Errorf("bootstrap output should diagnose omitted language %q; output: %s", dropped, out)
+		}
 	}
 }
 

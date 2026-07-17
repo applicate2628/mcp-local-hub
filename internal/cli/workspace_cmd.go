@@ -748,16 +748,16 @@ func newWorkspaceBootstrapCmd() *cobra.Command {
 list for node_modules/target/dist/.git) and write a .serena/project.yml
 with a detected languages list, read_only=false, and excluded_dirs.
 
-Detection map (matches language names accepted by upstream serena):
+Detection map (mcphub LSP identifiers projected to Serena on write):
   .cpp .hpp .cc .cxx .h     -> cpp
   .go                       -> go
   .ts .tsx                  -> typescript
-  .js .jsx                  -> javascript
+  .js .jsx                  -> javascript -> typescript
   .py                       -> python
   .rs                       -> rust
   .md                       -> markdown
-  .css                      -> vscode-css
-  .html .htm                -> vscode-html
+  .css                      -> vscode-css (omitted: no Serena equivalent)
+  .html .htm                -> vscode-html (omitted: no Serena equivalent)
   .f90 .f95 .f03 .f         -> fortran
 
 --force overwrites an existing .serena/project.yml. Without --force, the
@@ -784,11 +784,12 @@ func runWorkspaceBootstrap(cmd *cobra.Command, rawPath string, force bool) error
 		}
 	}
 
-	languages, err := surveyLanguages(canonical, 5)
+	mcphubLanguages, err := surveyLanguages(canonical, 5)
 	if err != nil {
 		return fmt.Errorf("survey languages: %w", err)
 	}
-	sort.Strings(languages)
+	sort.Strings(mcphubLanguages)
+	languages := projectSerenaLanguages(mcphubLanguages, cmd.ErrOrStderr())
 
 	// Write .serena/project.yml. Use a stable schema matching upstream
 	// serena's expectations (languages, read_only, excluded_dirs).
@@ -826,8 +827,10 @@ var alwaysSkipDirs = map[string]bool{
 	".git":         true,
 }
 
-// extensionToLanguage maps file extensions (lower-case, with leading dot)
-// to the language identifier accepted by upstream serena.
+// extensionToLanguage maps file extensions (lower-case, with leading dot) to
+// mcphub's own LSP/backend language identifiers. These identifiers are not a
+// Serena contract and must pass through projectSerenaLanguages before they are
+// written to .serena/project.yml.
 var extensionToLanguage = map[string]string{
 	".cpp": "cpp", ".hpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".h": "cpp",
 	".go": "go",
@@ -839,6 +842,49 @@ var extensionToLanguage = map[string]string{
 	".css":  "vscode-css",
 	".html": "vscode-html", ".htm": "vscode-html",
 	".f90": "fortran", ".f95": "fortran", ".f03": "fortran", ".f": "fortran",
+}
+
+// mcphubToSerenaLanguage is the single owner of the cross-tool language
+// taxonomy boundary. Values must be members of Serena's Language enum. An
+// absent key means Serena has no safe equivalent and is omitted fail-closed.
+//
+// clangd is not emitted by the extension survey today (C/C++ maps directly to
+// cpp), but it is a shipped mcphub LSP language and belongs in this complete
+// boundary mapping alongside javascript.
+var mcphubToSerenaLanguage = map[string]string{
+	"clangd":     "cpp",
+	"cpp":        "cpp",
+	"fortran":    "fortran",
+	"go":         "go",
+	"javascript": "typescript",
+	"markdown":   "markdown",
+	"python":     "python",
+	"rust":       "rust",
+	"typescript": "typescript",
+}
+
+// projectSerenaLanguages maps mcphub language identifiers onto Serena's enum,
+// de-duplicates converging mappings (notably javascript + typescript), and
+// omits unknown identifiers so a future mcphub backend cannot crash Serena.
+func projectSerenaLanguages(mcphubLanguages []string, debug io.Writer) []string {
+	seen := make(map[string]struct{}, len(mcphubLanguages))
+	projected := make([]string, 0, len(mcphubLanguages))
+	for _, mcphubLanguage := range mcphubLanguages {
+		serenaLanguage, ok := mcphubToSerenaLanguage[mcphubLanguage]
+		if !ok {
+			if debug != nil {
+				fmt.Fprintf(debug, "mcphub: debug: Serena bootstrap omitted unsupported mcphub language %q\n", mcphubLanguage)
+			}
+			continue
+		}
+		if _, duplicate := seen[serenaLanguage]; duplicate {
+			continue
+		}
+		seen[serenaLanguage] = struct{}{}
+		projected = append(projected, serenaLanguage)
+	}
+	sort.Strings(projected)
+	return projected
 }
 
 // surveyLanguages walks <root> bounded at maxDepth, gitignore-aware,
