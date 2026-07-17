@@ -260,6 +260,12 @@ func TestExecuteUnboundPortSkipsTerminateAndForcesRespawn(t *testing.T) {
 	d := recoveryDescriptor()
 	calls := &recoveryCallLog{}
 	deps := recoveryDependencies(t, calls, d)
+	readState := deps.ReadState
+	stateReads := 0
+	deps.ReadState = func(path string) (*api.SupervisorStateFile, error) {
+		stateReads++
+		return readState(path)
+	}
 
 	result, err := ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps)
 	if err != nil {
@@ -270,6 +276,82 @@ func TestExecuteUnboundPortSkipsTerminateAndForcesRespawn(t *testing.T) {
 	}
 	if len(calls.terminate) != 0 || len(calls.respawn) != 1 || !calls.respawn[0].force {
 		t.Fatalf("side effects: terminate=%d respawn=%+v", len(calls.terminate), calls.respawn)
+	}
+	if stateReads != 1 {
+		t.Fatalf("state reads=%d want=1 before the unbound force-respawn", stateReads)
+	}
+}
+
+func TestExecuteUnboundPortStateReadFailureFailsClosedBeforeTerminateOrRespawn(t *testing.T) {
+	d := recoveryDescriptor()
+	calls := &recoveryCallLog{}
+	deps := recoveryDependencies(t, calls, d)
+	deps.ReadState = func(string) (*api.SupervisorStateFile, error) {
+		return nil, errors.New("state unreadable")
+	}
+
+	_, err := ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps)
+	requireFailureKind(t, err, FailureStateRead)
+	if calls.probe != 0 || len(calls.terminate) != 0 || len(calls.respawn) != 0 {
+		t.Fatalf("state-read failure side effects: probes=%d terminate=%d respawn=%d", calls.probe, len(calls.terminate), len(calls.respawn))
+	}
+}
+
+func TestExecuteUnboundPortMissingTargetStateRowFailsClosedBeforeTerminateOrRespawn(t *testing.T) {
+	d := recoveryDescriptor()
+	calls := &recoveryCallLog{}
+	deps := recoveryDependencies(t, calls, d)
+	deps.ReadState = func(string) (*api.SupervisorStateFile, error) {
+		return &api.SupervisorStateFile{Daemons: map[string]api.SupervisorDaemonState{
+			`\mcp-local-hub-other-default`: {CurrentPID: 1234},
+		}}, nil
+	}
+
+	_, err := ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps)
+	requireFailureKind(t, err, FailureStateRead)
+	if calls.probe != 0 || len(calls.terminate) != 0 || len(calls.respawn) != 0 {
+		t.Fatalf("missing-target-row side effects: probes=%d terminate=%d respawn=%d", calls.probe, len(calls.terminate), len(calls.respawn))
+	}
+}
+
+func TestExecuteUnresolvablePortStateReadFailureFailsClosedBeforeRespawn(t *testing.T) {
+	d := recoveryDescriptor()
+	d.Port = 0
+	d.Server = ""
+	d.Daemon = ""
+	d.Args = nil
+	if port, ok := api.EffectiveDaemonPort(d); ok || port != 0 {
+		t.Fatalf("test descriptor port = (%d,%v), want unresolvable", port, ok)
+	}
+	calls := &recoveryCallLog{}
+	deps := recoveryDependencies(t, calls, d)
+	deps.ReadState = func(string) (*api.SupervisorStateFile, error) {
+		return nil, errors.New("state unreadable")
+	}
+
+	_, err := ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps)
+	requireFailureKind(t, err, FailureStateRead)
+	if calls.probe != 0 || len(calls.terminate) != 0 || len(calls.respawn) != 0 {
+		t.Fatalf("unresolvable-port state-read failure side effects: probes=%d terminate=%d respawn=%d", calls.probe, len(calls.terminate), len(calls.respawn))
+	}
+}
+
+func TestExecutePortProbeErrorStateReadFailureFailsClosedBeforeRespawn(t *testing.T) {
+	d := recoveryDescriptor()
+	calls := &recoveryCallLog{}
+	deps := recoveryDependencies(t, calls, d)
+	deps.ReadState = func(string) (*api.SupervisorStateFile, error) {
+		return nil, errors.New("state unreadable")
+	}
+	deps.PortOwner = func(context.Context, int) (int, bool, error) {
+		calls.probe++
+		return 0, false, errors.New("port probe unavailable")
+	}
+
+	_, err := ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps)
+	requireFailureKind(t, err, FailureStateRead)
+	if calls.probe != 0 || len(calls.terminate) != 0 || len(calls.respawn) != 0 {
+		t.Fatalf("probe-error state-read failure side effects: probes=%d terminate=%d respawn=%d", calls.probe, len(calls.terminate), len(calls.respawn))
 	}
 }
 

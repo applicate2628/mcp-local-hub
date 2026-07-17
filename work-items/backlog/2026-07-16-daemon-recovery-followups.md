@@ -88,3 +88,21 @@ probe is self-capped at 5 seconds, so at least 25 seconds of the 30-second post-
 always more than the 20-second respawn reserve. No default-configured operator can reach this failure
 surface today; retain that reachability fact when maintaining its exit code, wire code, union entry,
 and UI copy.
+
+## 8. Missing-row fail-closed refuses recovery of a never-reconciled daemon
+
+After the bot-review fix (PR #557), the up-front `trackedEntries` read at `recovery.go:303` fails closed
+on a MISSING target row, not only on a read error. Correct polarity (absence of the row is not evidence
+of absence of the child — round 4's rule). But a daemon that is present in `supervisor-intent.json` yet
+has no row in `supervisor-state.json` yet — freshly added and pre-first-reconcile, or a state file
+written by an older supervisor — is now UNRECOVERABLE through this surface even with a free port. It
+returns `FailureStateRead` / `RECOVER_STATE_READ_FAILED`.
+
+The guard must NOT be relaxed (the fail-closed direction is the safety property). The right shape is an
+operator-message hint: when the intent has the descriptor but state has no row, say "the supervisor has
+not reconciled this daemon yet; run `mcphub supervise` / wait for the next reconcile" rather than the
+generic state-read failure. Arbiter (fable) flagged this as the one production watch-item on the fix.
+
+**Verify first:** does this actually reproduce, or does every intent daemon always get a state row at
+register time? If the row is always present by construction, this is moot — check before building the
+hint. ASSUMPTION (UNVERIFIED — arbiter's inference from the code, not a reproduced field case).

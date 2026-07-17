@@ -300,6 +300,10 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 	if descriptor == nil {
 		return Result{}, &OperationError{Kind: FailureUnknownTask, TaskName: normalized, KnownTasks: known}
 	}
+	tracked, stateErr := trackedEntries(deps, stateDir, normalized)
+	if stateErr != nil {
+		return Result{}, &OperationError{Kind: FailureStateRead, TaskName: normalized, Cause: stateErr}
+	}
 
 	check := PortOwnerUnbound
 	reaped := false
@@ -321,10 +325,6 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 			})
 			return Result{}, &OperationError{Kind: FailureRefusedPortOwner, TaskName: normalized, Candidate: &candidate}
 		default:
-			tracked, stateErr := trackedEntries(deps, stateDir, normalized)
-			if stateErr != nil {
-				return Result{}, &OperationError{Kind: FailureStateRead, TaskName: normalized, Cause: stateErr}
-			}
 			if entry, ok := tracked[normalized]; ok && ownerPID == entry.CurrentPID {
 				check = PortOwnerTrackedChild
 				notify(options, Notification{Kind: NotificationTrackedChild, TaskName: normalized, Port: port, PID: ownerPID})
