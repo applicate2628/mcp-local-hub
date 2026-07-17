@@ -73,3 +73,12 @@ Pre-existing and independent of daemon recovery. The file is untouched by the it
 (`git status` clean for it); last modified by `9828bf7e` (#241, per-task Job Object orphan
 cleanup). Deliberately NOT fixed inside the item-2 PR — an unrelated test-only defect does
 not belong in a destructive-path change.
+
+## Companion observation 2026-07-17 (same load-induced class)
+A second intermittent failure of the same class was observed during heavy parallel codex load
+(design-B + consilium lanes running): `TestVerifyProxyReadyForServerNames_AcceptsJSONFiniteAndHeldOpenSSE`
+(`internal/api/register_test.go`) failed once in an aggregate `./internal/api/ ./internal/cli/ ./internal/gui/`
+run, then passed 3/3 in isolation and passed a subsequent full aggregate. Held-open SSE + temp-port under
+CPU/port pressure. Same trigger (machine saturated by concurrent lanes), same non-reproducing signature.
+Not blocking; same "wall-clock/load-dependent test" class as the jobobject finding above. If the
+deterministic-window fix lands for jobobject, audit this SSE-readiness test for the same anti-pattern.

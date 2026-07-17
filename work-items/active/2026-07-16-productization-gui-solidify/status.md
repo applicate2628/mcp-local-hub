@@ -104,15 +104,29 @@ self-restart handoff).
   rollback unit (marker store, reservation flock, child/parent coordinator, frontend, ensure-alive,
   gate flip). Two non-blocking architect confirms flagged: OPEN-1 (gate mechanism const+env vs
   gui-preferences key) for Phase D; OPEN-2 (ungate C) — accepted by $lead.
-- **Unit B — IMPL IN FLIGHT.** Foundations bundle A+B+C dispatched to codex Sol (behaviour-
-  preserving, feature-gate OFF, shippable-alone) as one PR to cut bot+deploy overhead; the gated
-  group D–J is the next separate large effort.
+- **Unit B foundations A+B+C — DELIVERED + DEPLOYED 2026-07-17.** PR #560, squash `a7d05fd3`, deployed
+  (build.sh from master → C:-staged `install --upgrade` → supervisor restart, fleet 36; GUI restarted
+  manually PID 165212, `/api/status` → 200; installed binary `mcphub version` = `a7d05fd3`). codex Sol
+  implemented all three (typed `resolveGuiPort`+argv · `GUIListenerOwner` seam · hub initial-bind→driver).
+  my-verify green (build/vet + tagged api/cli/gui, re-run after every fix). Commission: fable PASS
+  (line-by-line Phase B behaviour-preservation + Phase C item-1 class structurally excluded), Terra PASS
+  (4 audits), Sol REVISE→fixed (`Shutdown(done==nil)` unserved-listener leak → explicit close + rebind
+  regression; `net/http` Shutdown doesn't close an unserved listener). 3 fable P3 polish also fixed (async
+  invalid-port log per bot #423 · initial-bind telemetry port seed · clearCurrent hoist); fable #3
+  declined-with-reason (would break the close(ready)-before-Serve invariant). Sol-confirm hung (not
+  capacity) → proceeded on the strength of exact-spec-fix + passing regression + green suite + the bot
+  gate (bot PASS on `ab0810fc`: "no major issues", 0 inline, 0 unresolved threads). Full record:
+  `item3-unitB-foundations-review.md`.
+- **Unit B gated group D–J** — the next separate large effort (feature-gated handoff protocol,
+  default-OFF, flipped ON in J). Not started; A+B+C are its prerequisite seam.
 
 ## Now
 
-Items 1 + 2 + Unit A DELIVERED + deployed; Unit B design closed + confirmed + planned. **Now: Unit B
-foundations A+B+C** implementing (codex Sol) → my-verify → PR → bot → deploy, then the gated group
-D–J. Also standing: a `2026-07-17` policy-ownership audit
+Items 1 + 2 + Unit A + **Unit B foundations A+B+C** DELIVERED + deployed. **Now: Unit B gated group
+D–J** — the large feature-gated (`gui.RestartV3Enabled()`, default OFF) handoff protocol (marker store,
+reservation flock, child/parent coordinator, frontend, ensure-alive degrade-only, gate flip). Plan +
+fable-amended ACs ready in `item3-unitB-plan.md`; A+B+C are its landed prerequisite seam. Also standing:
+a `2026-07-17` policy-ownership audit
 (`backlog/2026-07-17-ticker-intervals-hardcoded-split-policy-ownership.md`, 4×P2 + 4×P3, the
 form-driven-registry rule) surfaced from an operator question during item 2; not a Phase-0 item but
 overlaps items 3-6 (truthful surfaces, config ownership) — the product-manager should decide whether
