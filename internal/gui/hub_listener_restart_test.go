@@ -4,13 +4,38 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
+
+func setupInitialHubPortDependencyTest(t *testing.T) string {
+	t.Helper()
+	root := apitest.HardenedTempDir(t)
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	for _, key := range []string{
+		"COPILOT_HOME", "KIMI_CODE_HOME",
+		"MIMOCODE_HOME", "MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_CONFIG_CONTENT",
+	} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP", "1")
+	t.Setenv("MIMOCODE_TEST_MANAGED_CONFIG_DIR", filepath.Join(home, "ProgramData", "opencode"))
+	return home
+}
 
 type hubRestartTestEvent struct {
 	level  string
@@ -1092,6 +1117,72 @@ func TestHubListenerRestartStartPreservesPortOnReloadHandlerFailure(t *testing.T
 	}
 	if afterRetry.Port != persistedPort {
 		t.Fatalf("persisted port after retry = %d, want preserved %d", afterRetry.Port, persistedPort)
+	}
+}
+
+func TestHubListenerReloadFailurePreservesPortForGroupCommittedAfterClearSnapshot(t *testing.T) {
+	seedManifestDir(t)
+	resetResolverSnapshot(t)
+	t.Cleanup(func() { api.PublishResolverSnapshot(nil) })
+	setupInitialHubPortDependencyTest(t)
+
+	if deps := api.ProbeHubPortDependencies(); deps.State != api.DependencyStateClear {
+		t.Fatalf("startup dependency snapshot = %+v, want clear", deps)
+	}
+
+	a := api.NewAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	failedComp, err := startHubMcpListenerWithOptions(ctx, true, a, startHubMcpListenerOptions{
+		reloadHandlerFn: func(context.Context) (*api.InternalReloadHandler, error) {
+			if err := api.ReadModifyWriteGroups(func(cfg *api.GroupsConfig) ([]string, error) {
+				cfg.Groups = append(cfg.Groups, api.Group{Name: "committed-after-startup", Servers: []string{"fs"}})
+				return nil, nil
+			}); err != nil {
+				t.Fatalf("commit group after clear startup snapshot: %v", err)
+			}
+			return nil, errors.New("reload handler build failed")
+		},
+	})
+	if err == nil {
+		ShutdownHubListener(context.Background(), failedComp)
+		t.Fatal("startHubMcpListenerWithOptions succeeded despite reload handler failure")
+	}
+
+	ep, loadErr := api.LoadHubEndpoint()
+	if loadErr != nil {
+		t.Fatalf("LoadHubEndpoint after reload failure: %v", loadErr)
+	}
+	if ep.Port == 0 {
+		t.Fatal("persisted port was reset after a group committed; want fresh dependency probe to preserve it")
+	}
+}
+
+func TestHubListenerReloadFailureResetsPortWhenDependenciesRemainClear(t *testing.T) {
+	seedManifestDir(t)
+	resetResolverSnapshot(t)
+	t.Cleanup(func() { api.PublishResolverSnapshot(nil) })
+	setupInitialHubPortDependencyTest(t)
+
+	a := api.NewAPI()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	failedComp, err := startHubMcpListenerWithOptions(ctx, true, a, startHubMcpListenerOptions{
+		reloadHandlerFn: func(context.Context) (*api.InternalReloadHandler, error) {
+			return nil, errors.New("reload handler build failed")
+		},
+	})
+	if err == nil {
+		ShutdownHubListener(context.Background(), failedComp)
+		t.Fatal("startHubMcpListenerWithOptions succeeded despite reload handler failure")
+	}
+
+	ep, loadErr := api.LoadHubEndpoint()
+	if loadErr != nil {
+		t.Fatalf("LoadHubEndpoint after reload failure: %v", loadErr)
+	}
+	if ep.Port != 0 {
+		t.Fatalf("persisted port after clear-host reload failure = %d, want 0", ep.Port)
 	}
 }
 

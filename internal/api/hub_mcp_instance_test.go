@@ -166,6 +166,7 @@ func TestRotateHubInstanceIDRewritesFile(t *testing.T) {
 // command per the credential burn-down workflow in the spec).
 func TestResetHubPortClearsPortKeepsInstanceID(t *testing.T) {
 	hubMcpStateTestHelper(t)
+	hermeticHome(t)
 
 	ep1, err := EnsureHubEndpoint(9120, 1234)
 	if err != nil {
