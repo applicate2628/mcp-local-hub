@@ -2,9 +2,13 @@ package gui
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -21,13 +25,119 @@ import (
 // /api/activate-window before giving up.
 var ErrSingleInstanceBusy = errors.New("another mcphub gui is already running")
 
+// ErrHandoffReserved reports that a fresh restart-v3 reservation protects the
+// single-instance lease for its designated child. An ordinary entrant, a
+// third entrant with the wrong nonce, or a late designated child with no
+// matching reservation must release any tentative lease before returning it.
+var ErrHandoffReserved = errors.New("GUI handoff lease is reserved for the designated child")
+
+// ErrGUIOwnerLeaseUnknown classifies path, marker, DACL, clock, or flock
+// uncertainty. It is deliberately distinct from ErrSingleInstanceBusy: an
+// unknown observation is never proof that the GUI owner is dead or that a
+// takeover is safe.
+var ErrGUIOwnerLeaseUnknown = errors.New("GUI owner lease state is unknown")
+
+// HandoffMarkerReader is the read-only Phase-E view of HandoffMarkerStore.
+// Reservation-aware acquisition and probing may inspect the marker, but this
+// seam grants them no marker mutation authority.
+type HandoffMarkerReader interface {
+	Read() (*HandoffMarkerRecord, error)
+}
+
+// SingleInstanceLease is the ownership seam for the GUI flock. A returned
+// lease is an owned resource and Release must run on every success, error,
+// cancellation, and timeout path.
+type SingleInstanceLease interface {
+	Release()
+}
+
+// SingleInstanceAcquireOptions enables the restart-v3 reservation check for a
+// single acquisition. Existing callers pass no options and retain the legacy
+// single-shot behavior without reading the marker.
+type SingleInstanceAcquireOptions struct {
+	RestartV3Enabled     bool
+	MarkerStore          HandoffMarkerReader
+	DesignatedChildNonce []byte
+	Deadlines            RestartDeadlines
+}
+
+// GUIOwnerLeaseState is the tri-state owner-lease probe result.
+type GUIOwnerLeaseState uint8
+
+const (
+	// GUIOwnerLeaseStateUnknown is the fail-closed zero value.
+	GUIOwnerLeaseStateUnknown GUIOwnerLeaseState = iota
+	GUIOwnerLeaseStateHeld
+	GUIOwnerLeaseStateFree
+)
+
+// GUIOwnerLeaseProbeRequest carries the previously-read record plus the
+// read-only store needed to revalidate it after tentatively acquiring a free
+// flock. That re-read closes the marker-change window without introducing a
+// probe-release-reacquire gap.
+type GUIOwnerLeaseProbeRequest struct {
+	PidportPath string
+	Record      *HandoffMarkerRecord
+	MarkerStore HandoffMarkerReader
+	Deadlines   RestartDeadlines
+}
+
+// GUIOwnerLeaseProbeResult represents Held(reason),
+// Free(owned_probe_lease), or Unknown(error). Lease is populated only for Free
+// and remains held until the caller releases it.
+type GUIOwnerLeaseProbeResult struct {
+	State  GUIOwnerLeaseState
+	Reason error
+	Lease  SingleInstanceLease
+	Record *HandoffMarkerRecord
+}
+
+// GUIOwnerLeaseUnknownError preserves the concrete uncertainty while exposing
+// the stable ErrGUIOwnerLeaseUnknown classifier.
+type GUIOwnerLeaseUnknownError struct {
+	Operation string
+	Cause     error
+}
+
+func (e *GUIOwnerLeaseUnknownError) Error() string {
+	if e == nil {
+		return ErrGUIOwnerLeaseUnknown.Error()
+	}
+	return fmt.Sprintf("%s: %v: %v", ErrGUIOwnerLeaseUnknown, e.Operation, e.Cause)
+}
+
+func (e *GUIOwnerLeaseUnknownError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+func (e *GUIOwnerLeaseUnknownError) Is(target error) bool {
+	if e == nil {
+		return target == ErrGUIOwnerLeaseUnknown
+	}
+	return target == ErrGUIOwnerLeaseUnknown || errors.Is(e.Cause, target)
+}
+
+type singleInstanceFlock interface {
+	TryLock() (bool, error)
+	Unlock() error
+	Close() error
+}
+
+const (
+	singleInstanceUnlockAttempts   = 3
+	singleInstanceUnlockRetryDelay = time.Millisecond
+)
+
 // SingleInstanceLock represents the acquired single-instance ownership.
 // Release must be called on shutdown (or by an errdefer immediately after
 // acquisition) to free the flock. The pidport file is intentionally NOT
 // removed on Release — see Release() for the rationale.
 type SingleInstanceLock struct {
 	pidport string
-	fl      *flock.Flock
+	fl      singleInstanceFlock
 }
 
 // AcquireSingleInstance tries to become the sole mcphub gui process for
@@ -49,6 +159,22 @@ func AcquireSingleInstance(port int) (*SingleInstanceLock, error) {
 
 // acquireSingleInstanceAt is the injectable form used by tests.
 func acquireSingleInstanceAt(pidportPath string, port int) (*SingleInstanceLock, error) {
+	lease, err := tryAcquireSingleInstanceLockAt(pidportPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := api.WriteStateFileBytesLockHeld(pidportPath, []byte(formatPidport(os.Getpid(), port))); err != nil {
+		lease.Release()
+		return nil, fmt.Errorf("write pidport: %w", err)
+	}
+	return lease, nil
+}
+
+// tryAcquireSingleInstanceLockAt performs one non-blocking flock attempt. The
+// underlying TryLock is deliberately retained instead of Lock: both legacy
+// acquisition and restart-v3 probing remain bounded and never wait forever on
+// another process.
+func tryAcquireSingleInstanceLockAt(pidportPath string) (*SingleInstanceLock, error) {
 	fl := flock.New(pidportPath + ".lock")
 	ok, err := fl.TryLock()
 	if err != nil {
@@ -56,10 +182,6 @@ func acquireSingleInstanceAt(pidportPath string, port int) (*SingleInstanceLock,
 	}
 	if !ok {
 		return nil, ErrSingleInstanceBusy
-	}
-	if err := api.WriteStateFileBytesLockHeld(pidportPath, []byte(formatPidport(os.Getpid(), port))); err != nil {
-		_ = fl.Unlock()
-		return nil, fmt.Errorf("write pidport: %w", err)
 	}
 	return &SingleInstanceLock{pidport: pidportPath, fl: fl}, nil
 }
@@ -82,11 +204,44 @@ func acquireSingleInstanceAt(pidportPath string, port int) (*SingleInstanceLock,
 //   - Next acquirer overwrites the file before any second-instance
 //     handshake can read it.
 func (l *SingleInstanceLock) Release() {
+	_ = l.release()
+}
+
+func (l *SingleInstanceLock) release() error {
 	if l == nil || l.fl == nil {
-		return
+		return nil
 	}
-	_ = l.fl.Unlock()
+
+	fl := l.fl
+	var firstErr error
+	for attempt := 0; attempt < singleInstanceUnlockAttempts; attempt++ {
+		if err := fl.Unlock(); err == nil {
+			l.fl = nil
+			return firstErr
+		} else if firstErr == nil {
+			firstErr = err
+		}
+		if attempt+1 < singleInstanceUnlockAttempts {
+			time.Sleep(singleInstanceUnlockRetryDelay)
+		}
+	}
+
+	// The bounded retry above recovers a TRANSIENT Unlock failure. A PERSISTENT
+	// failure is an accepted residual: gofrs/flock exposes no file-handle
+	// accessor and its Close() delegates to Unlock() (flock.go:99), so on a real
+	// persistent UnlockFileEx/flock syscall error Close() fails identically and
+	// the descriptor is NOT closed — the OS lock stays held until process exit.
+	// This is bounded and pre-existing (the legacy Release path has always had
+	// it, so Phase E adds no new reachability): UnlockFileEx failing on a lock
+	// this process legitimately holds is near-impossible, and every tentative-
+	// lease caller (entrant, one-shot ensure-alive tick) is short-lived so
+	// process exit frees the lock. We still clear l.fl unconditionally so a
+	// discarded lease never double-frees and the caller classifies Unknown.
+	// Definitive release (raw-handle lock or a gofrs/flock patch) is tracked:
+	// work-items/backlog/2026-07-18-flock-persistent-unlock-residual.md.
+	_ = fl.Close()
 	l.fl = nil
+	return firstErr
 }
 
 // ReadPidport reads "<PID> <PORT>\n" format. Returns (0,0,err) on parse
@@ -116,10 +271,254 @@ func formatPidport(pid, port int) string {
 	return fmt.Sprintf("%d %d\n", pid, port)
 }
 
-// AcquireSingleInstanceAt is the exported form of acquireSingleInstanceAt
-// so callers outside the gui package (cli) can share the same path.
-func AcquireSingleInstanceAt(pidportPath string, port int) (*SingleInstanceLock, error) {
-	return acquireSingleInstanceAt(pidportPath, port)
+// AcquireSingleInstanceAt is the exported form of acquireSingleInstanceAt so
+// callers outside the gui package (cli) can share the same path.
+//
+// With no options, or with RestartV3Enabled false, this calls the legacy
+// single-shot implementation directly and never reads the handoff marker.
+// Phase F will pass one enabled option for a restart child; current CLI and
+// force-kill callers intentionally remain unwired in Phase E.
+func AcquireSingleInstanceAt(pidportPath string, port int, options ...SingleInstanceAcquireOptions) (*SingleInstanceLock, error) {
+	if len(options) == 0 || !options[0].RestartV3Enabled {
+		return acquireSingleInstanceAt(pidportPath, port)
+	}
+	if len(options) != 1 {
+		return nil, newGUIOwnerLeaseUnknown("acquire options", fmt.Errorf("got %d option sets, want exactly one", len(options)))
+	}
+	return acquireReservationAwareSingleInstanceAt(pidportPath, port, options[0])
+}
+
+func acquireReservationAwareSingleInstanceAt(pidportPath string, port int, options SingleInstanceAcquireOptions) (*SingleInstanceLock, error) {
+	if err := validateGUIOwnerLeasePath(pidportPath); err != nil {
+		return nil, newGUIOwnerLeaseUnknown("validate pidport path", err)
+	}
+
+	lease, err := tryAcquireSingleInstanceLockAt(pidportPath)
+	if err != nil {
+		if errors.Is(err, ErrSingleInstanceBusy) {
+			return nil, err
+		}
+		return nil, newGUIOwnerLeaseUnknown("acquire tentative lease", err)
+	}
+
+	record, err := readValidatedHandoffMarker(options.MarkerStore)
+	if err != nil {
+		return nil, releaseTentativeLeaseUnknown(lease, "read handoff marker", err)
+	}
+	now, err := restartDeadlineNow(options.Deadlines)
+	if err != nil {
+		return nil, releaseTentativeLeaseUnknown(lease, "read restart clock", err)
+	}
+
+	reservationOpen := reservationWindowOpen(record, now)
+	if len(options.DesignatedChildNonce) > 0 {
+		if !reservationOpen || !designatedChildMatches(record, options.DesignatedChildNonce) {
+			return nil, releaseTentativeLeaseWithReason(lease, ErrHandoffReserved)
+		}
+	} else if reservationOpen {
+		return nil, releaseTentativeLeaseWithReason(lease, ErrHandoffReserved)
+	}
+
+	if err := api.WriteStateFileBytesLockHeld(pidportPath, []byte(formatPidport(os.Getpid(), port))); err != nil {
+		if releaseErr := lease.release(); releaseErr != nil {
+			return nil, newGUIOwnerLeaseUnknown("release tentative lease after pidport write failure", errors.Join(err, releaseErr))
+		}
+		return nil, fmt.Errorf("write pidport: %w", err)
+	}
+	return lease, nil
+}
+
+// ProbeGUIOwnerLease returns a tri-state owner verdict. A Free result owns the
+// flock and does not write pidport metadata; the caller must retain that exact
+// lease through its guarded operation and release it on every exit path.
+func ProbeGUIOwnerLease(ctx context.Context, request GUIOwnerLeaseProbeRequest) GUIOwnerLeaseProbeResult {
+	if ctx == nil {
+		return unknownGUIOwnerLease(nil, "probe context", errors.New("context is nil"))
+	}
+	if err := validateGUIOwnerLeasePath(request.PidportPath); err != nil {
+		return unknownGUIOwnerLease(request.Record, "validate pidport path", err)
+	}
+	if request.Record != nil {
+		if err := validateHandoffMarker(request.Record); err != nil {
+			return unknownGUIOwnerLease(nil, "validate observed handoff marker", err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return unknownGUIOwnerLease(request.Record, "probe cancelled before marker read", err)
+	}
+	observed, err := readValidatedHandoffMarker(request.MarkerStore)
+	if err != nil {
+		return unknownGUIOwnerLease(request.Record, "read handoff marker", err)
+	}
+	if request.Record != nil && !sameHandoffMarkerObservation(request.Record, observed) {
+		return unknownGUIOwnerLease(observed, "validate observed handoff marker", errors.New("handoff marker changed before owner probe"))
+	}
+	now, err := restartDeadlineNow(request.Deadlines)
+	if err != nil {
+		return unknownGUIOwnerLease(observed, "read restart clock", err)
+	}
+	// A raw reservation is authoritative throughout its protection window.
+	// Returning Held before touching a momentarily-free OS flock prevents a
+	// third entrant or ensure-alive from entering the healthy release gap.
+	if reservationWindowOpen(observed, now) {
+		return heldGUIOwnerLease(observed, ErrHandoffReserved)
+	}
+
+	lease, err := tryAcquireSingleInstanceLockAt(request.PidportPath)
+	if err != nil {
+		if errors.Is(err, ErrSingleInstanceBusy) {
+			return heldGUIOwnerLease(observed, ErrSingleInstanceBusy)
+		}
+		return unknownGUIOwnerLease(observed, "probe flock", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return unknownAfterTentativeLease(lease, observed, "probe cancelled after acquire", err)
+	}
+
+	current, err := readValidatedHandoffMarker(request.MarkerStore)
+	if err != nil {
+		return unknownAfterTentativeLease(lease, observed, "revalidate handoff marker", err)
+	}
+	if !sameHandoffMarkerObservation(observed, current) {
+		return unknownAfterTentativeLease(lease, current, "revalidate handoff marker", errors.New("handoff marker changed during owner probe"))
+	}
+	now, err = restartDeadlineNow(request.Deadlines)
+	if err != nil {
+		return unknownAfterTentativeLease(lease, current, "re-read restart clock", err)
+	}
+	if reservationWindowOpen(current, now) {
+		if releaseErr := lease.release(); releaseErr != nil {
+			return unknownGUIOwnerLease(current, "release tentative lease for reservation", releaseErr)
+		}
+		return heldGUIOwnerLease(current, ErrHandoffReserved)
+	}
+	if err := ctx.Err(); err != nil {
+		return unknownAfterTentativeLease(lease, current, "probe cancelled after marker read", err)
+	}
+
+	return GUIOwnerLeaseProbeResult{
+		State:  GUIOwnerLeaseStateFree,
+		Lease:  lease,
+		Record: current,
+	}
+}
+
+func readValidatedHandoffMarker(reader HandoffMarkerReader) (*HandoffMarkerRecord, error) {
+	if reader == nil {
+		return nil, errors.New("handoff marker reader is nil")
+	}
+	record, err := reader.Read()
+	if err != nil {
+		return nil, err
+	}
+	if record != nil {
+		if err := validateHandoffMarker(record); err != nil {
+			return nil, err
+		}
+	}
+	return record, nil
+}
+
+func restartDeadlineNow(deadlines RestartDeadlines) (time.Time, error) {
+	if deadlines.Now == nil {
+		return time.Time{}, errors.New("restart clock is nil")
+	}
+	return deadlines.Now().UTC(), nil
+}
+
+func validateGUIOwnerLeasePath(pidportPath string) error {
+	if strings.TrimSpace(pidportPath) == "" {
+		return errors.New("pidport path is empty")
+	}
+	if !filepath.IsAbs(pidportPath) {
+		return fmt.Errorf("pidport path is not absolute: %q", pidportPath)
+	}
+	return nil
+}
+
+func reservationWindowOpen(record *HandoffMarkerRecord, now time.Time) bool {
+	return record != nil &&
+		record.Phase == HandoffPhaseReserved &&
+		!record.ReservationExpiresAt.IsZero() &&
+		now.Before(record.ReservationExpiresAt)
+}
+
+func designatedChildMatches(record *HandoffMarkerRecord, nonce []byte) bool {
+	if record == nil || len(nonce) == 0 || !isCanonicalDesignatedChildHash(record.DesignatedChildHash) {
+		return false
+	}
+	got := []byte(hashDesignatedChildNonce(nonce))
+	want := []byte(record.DesignatedChildHash)
+	return len(got) == len(want) && subtle.ConstantTimeCompare(got, want) == 1
+}
+
+func isCanonicalDesignatedChildHash(value string) bool {
+	const prefix = "sha256:"
+	if len(value) != len(prefix)+(sha256.Size*2) || !strings.HasPrefix(value, prefix) {
+		return false
+	}
+	for i := len(prefix); i < len(value); i++ {
+		if (value[i] < '0' || value[i] > '9') && (value[i] < 'a' || value[i] > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func hashDesignatedChildNonce(nonce []byte) string {
+	sum := sha256.Sum256(nonce)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func sameHandoffMarkerObservation(observed, current *HandoffMarkerRecord) bool {
+	if observed == nil || current == nil {
+		return observed == nil && current == nil
+	}
+	return *observed == *current
+}
+
+func heldGUIOwnerLease(record *HandoffMarkerRecord, reason error) GUIOwnerLeaseProbeResult {
+	return GUIOwnerLeaseProbeResult{
+		State:  GUIOwnerLeaseStateHeld,
+		Reason: reason,
+		Record: record,
+	}
+}
+
+func unknownGUIOwnerLease(record *HandoffMarkerRecord, operation string, cause error) GUIOwnerLeaseProbeResult {
+	return GUIOwnerLeaseProbeResult{
+		State:  GUIOwnerLeaseStateUnknown,
+		Reason: newGUIOwnerLeaseUnknown(operation, cause),
+		Record: record,
+	}
+}
+
+func unknownAfterTentativeLease(lease *SingleInstanceLock, record *HandoffMarkerRecord, operation string, cause error) GUIOwnerLeaseProbeResult {
+	if releaseErr := lease.release(); releaseErr != nil {
+		cause = errors.Join(cause, fmt.Errorf("release tentative lease: %w", releaseErr))
+	}
+	return unknownGUIOwnerLease(record, operation, cause)
+}
+
+func releaseTentativeLeaseUnknown(lease *SingleInstanceLock, operation string, cause error) error {
+	if releaseErr := lease.release(); releaseErr != nil {
+		cause = errors.Join(cause, fmt.Errorf("release tentative lease: %w", releaseErr))
+	}
+	return newGUIOwnerLeaseUnknown(operation, cause)
+}
+
+func releaseTentativeLeaseWithReason(lease *SingleInstanceLock, reason error) error {
+	if releaseErr := lease.release(); releaseErr != nil {
+		return newGUIOwnerLeaseUnknown("release rejected tentative lease", errors.Join(reason, releaseErr))
+	}
+	return reason
+}
+
+func newGUIOwnerLeaseUnknown(operation string, cause error) error {
+	if cause == nil {
+		cause = errors.New("unspecified uncertainty")
+	}
+	return &GUIOwnerLeaseUnknownError{Operation: operation, Cause: cause}
 }
 
 // RewritePidportPort overwrites the pidport file with the current PID and
