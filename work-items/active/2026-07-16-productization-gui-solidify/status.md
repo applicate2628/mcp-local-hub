@@ -46,7 +46,12 @@ Discovery done (84 findings → 5 themes → 6 ranked items; see `roadmap.md`).
   permanently exits on `restart-abandoned` while its watcher keeps running. Deferred debt:
   `work-items/backlog/2026-07-16-hub-health-deferred-debt.md`.
 - **Item 2 — GUI recovery for quarantined/lost-child daemons — DELIVERED 2026-07-17.** PR #557,
-  squash `64b16e35`, deployed (fleet 36, GUI autostarted). A shared `internal/daemonrecovery`
+  squash `64b16e35`, deployed: binary swapped (`mcphub version` → `64b16e35`), supervisor + 36
+  daemons restarted, GUI restarted MANUALLY (`install --upgrade` restarts the supervisor, not the
+  GUI — per "GUI owns supervisor lifecycle" the GUI is started on logon/by hand). Live-verified
+  against the real GUI on :9125 — `/` serves the HTML shell, `/api/status` returns the Running
+  fleet, `POST /api/daemon/recover` is registered and rejects an unauthorized request (400). A
+  shared `internal/daemonrecovery`
   authority (CLI + GUI + sweep classify through one owner), `POST /api/daemon/recover`, a
   first-class Recover affordance, and truthful colors from the one `status.ts` bucket classifier.
   Resolved open question: **no distinct `LostChild` wire state** — `isRecoveryEligibleState` admits
