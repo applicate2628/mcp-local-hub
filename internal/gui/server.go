@@ -1077,9 +1077,15 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 			// without tailing hub-mcp.log. The error is also
 			// already structured-logged via LogHubMcpEvent inside
 			// startHubMcpListener.
-			log.Printf("hub-mcp listener startup failed; retry scheduled through existing restart driver: %v", hubErr)
+			// A bind failure on the persisted port can mean a pre-binding
+			// process harvested the existing hub credentials. Do not retry
+			// initial startup automatically: EnsureHubTokens preserves those
+			// credentials, so a later successful bind could accept leaked
+			// tokens. Recovery requires the operator's credential-rotation
+			// workflow before starting a new listener.
+			log.Printf("hub-mcp listener startup failed; hub remains down pending credential rotation or manual recovery: %v", hubErr)
 			if hubEnabled {
-				s.signalInitialHubBindFailure()
+				s.hubHealth.set(HubHealthDown, "")
 			}
 			return
 		}

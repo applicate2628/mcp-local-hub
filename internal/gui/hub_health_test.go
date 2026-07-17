@@ -231,12 +231,14 @@ func TestServerHubHealthTracksInitialStartup(t *testing.T) {
 		deadOnArrival bool
 		pendingWant   HubHealthState
 		finalWant     HubHealthState
+		attemptsWant  int
 	}{
 		{
-			name:        "gate on success",
-			enabled:     true,
-			pendingWant: HubHealthRecovering,
-			finalWant:   HubHealthHealthy,
+			name:         "gate on success",
+			enabled:      true,
+			pendingWant:  HubHealthRecovering,
+			finalWant:    HubHealthHealthy,
+			attemptsWant: 1,
 		},
 		{
 			name:          "gate on dead-on-arrival component",
@@ -244,19 +246,22 @@ func TestServerHubHealthTracksInitialStartup(t *testing.T) {
 			deadOnArrival: true,
 			pendingWant:   HubHealthRecovering,
 			finalWant:     HubHealthDown,
+			attemptsWant:  1,
 		},
 		{
-			name:        "gate off stays inert",
-			enabled:     false,
-			pendingWant: HubHealthHealthy,
-			finalWant:   HubHealthHealthy,
+			name:         "gate off stays inert",
+			enabled:      false,
+			pendingWant:  HubHealthHealthy,
+			finalWant:    HubHealthHealthy,
+			attemptsWant: 1,
 		},
 		{
-			name:        "gate on first failure recovers through driver",
-			enabled:     true,
-			startErr:    errors.New("injected hub startup failure"),
-			pendingWant: HubHealthRecovering,
-			finalWant:   HubHealthHealthy,
+			name:         "gate on first failure remains down",
+			enabled:      true,
+			startErr:     errors.New("injected hub startup failure"),
+			pendingWant:  HubHealthRecovering,
+			finalWant:    HubHealthDown,
+			attemptsWant: 1,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -330,6 +335,9 @@ func TestServerHubHealthTracksInitialStartup(t *testing.T) {
 					t.Fatalf("final health = state %q action %q, want %q", got, action, tc.finalWant)
 				}
 				time.Sleep(5 * time.Millisecond)
+			}
+			if attempts != tc.attemptsWant {
+				t.Fatalf("hub startup attempts = %d, want %d", attempts, tc.attemptsWant)
 			}
 		})
 	}
