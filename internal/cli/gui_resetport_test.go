@@ -34,6 +34,14 @@ func resetPortHermeticHome(t *testing.T) string {
 	// the scan sees an empty sandbox client set.
 	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	for _, key := range []string{
+		"COPILOT_HOME", "KIMI_CODE_HOME",
+		"MIMOCODE_HOME", "MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_CONFIG_CONTENT",
+	} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP", "1")
+	t.Setenv("MIMOCODE_TEST_MANAGED_CONFIG_DIR", filepath.Join(home, "ProgramData", "opencode"))
 	return home
 }
 
@@ -280,5 +288,128 @@ func TestGuiResetPortRefusedWhenClientGatedOn(t *testing.T) {
 	}
 	if reloaded.Port != originalEp.Port {
 		t.Errorf("endpoint.Port mutated despite gate-ON refusal: %d -> %d", originalEp.Port, reloaded.Port)
+	}
+}
+
+func setupResetPortDependencyTest(t *testing.T) string {
+	t.Helper()
+	root := apitest.HardenedTempDir(t)
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	if _, err := api.EnsureHubEndpoint(9120, 12345); err != nil {
+		t.Fatalf("seed hub endpoint: %v", err)
+	}
+	return resetPortHermeticHome(t)
+}
+
+func seedResetPortGroup(t *testing.T, name string) {
+	t.Helper()
+	if err := api.WriteGroups(api.GroupsConfig{
+		Version: 1,
+		Groups:  []api.Group{{Name: name, Servers: []string{"memory"}}},
+	}); err != nil {
+		t.Fatalf("seed groups.yaml: %v", err)
+	}
+}
+
+func seedMalformedResetPortGroups(t *testing.T) {
+	t.Helper()
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("resolve daemon state dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "groups.yaml"), []byte("version: 2\n"), 0o600); err != nil {
+		t.Fatalf("seed malformed groups.yaml: %v", err)
+	}
+}
+
+func executeResetPortDependencyTest(t *testing.T) (error, string) {
+	t.Helper()
+	pidportDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", pidportDir)
+
+	c := newGuiCmdRealForTest()
+	var stderr bytes.Buffer
+	c.SetErr(&stderr)
+	c.SetArgs([]string{"--reset-port", "--yes"})
+	return c.ExecuteContext(context.Background()), stderr.String()
+}
+
+func requireResetPortExit8(t *testing.T, err error, stderr string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected --reset-port refusal; stderr:\n%s", stderr)
+	}
+	var fe *forceExitError
+	if !errors.As(err, &fe) || fe.ExitCode() != 8 {
+		t.Fatalf("want forceExitError code 8, got %T %v\nstderr:\n%s", err, err, stderr)
+	}
+	if !strings.Contains(stderr, "--reset-port refused:") {
+		t.Fatalf("stderr missing reset-port refusal header:\n%s", stderr)
+	}
+}
+
+func TestGuiResetPortRefusedWhenGroupDependsOnHubPort(t *testing.T) {
+	setupResetPortDependencyTest(t)
+	seedResetPortGroup(t, "frontend")
+
+	err, stderr := executeResetPortDependencyTest(t)
+	requireResetPortExit8(t, err, stderr)
+	if !strings.Contains(stderr, "frontend") || !strings.Contains(stderr, "/g/<group>/mcp") {
+		t.Errorf("stderr should name the group and its pinned URL:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "no reconcile path rewrites group URLs") {
+		t.Errorf("stderr should explain the group URL non-goal:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "cannot be proven") {
+		t.Errorf("dependent-only refusal must not include unreadable-source text:\n%s", stderr)
+	}
+}
+
+func TestGuiResetPortRefusedWhenClientConfigUnreadable(t *testing.T) {
+	home := setupResetPortDependencyTest(t)
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte("{"), 0o600); err != nil {
+		t.Fatalf("seed malformed claude-code config: %v", err)
+	}
+
+	err, stderr := executeResetPortDependencyTest(t)
+	requireResetPortExit8(t, err, stderr)
+	if !strings.Contains(stderr, "client claude-code (config unreadable (parse/DACL))") {
+		t.Errorf("stderr should name the unreadable client source:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "cannot be proven") {
+		t.Errorf("stderr should explain the unknown safety state:\n%s", stderr)
+	}
+}
+
+func TestGuiResetPortRefusedWhenGroupsFileUnreadable(t *testing.T) {
+	setupResetPortDependencyTest(t)
+	seedMalformedResetPortGroups(t)
+
+	err, stderr := executeResetPortDependencyTest(t)
+	requireResetPortExit8(t, err, stderr)
+	if !strings.Contains(stderr, "groups groups.yaml (") {
+		t.Errorf("stderr should name the unreadable groups source:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "cannot be proven") {
+		t.Errorf("stderr should explain the unknown safety state:\n%s", stderr)
+	}
+}
+
+func TestGuiResetPortRefusalNamesDependenciesAndUnreadableSources(t *testing.T) {
+	home := setupResetPortDependencyTest(t)
+	body := `{"mcpServers":{"mcphub-hub":{"url":"http://127.0.0.1:3439/clients/claude-code/mcp","type":"http"}}}`
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("seed gate-ON claude-code config: %v", err)
+	}
+	seedMalformedResetPortGroups(t)
+
+	err, stderr := executeResetPortDependencyTest(t)
+	requireResetPortExit8(t, err, stderr)
+	if !strings.Contains(stderr, "claude-code") {
+		t.Errorf("stderr should name the proved client dependency:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "groups groups.yaml (") || !strings.Contains(stderr, "cannot be proven") {
+		t.Errorf("stderr should separately name the unreadable groups source:\n%s", stderr)
 	}
 }

@@ -1044,8 +1044,10 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	if s.hubEndpointGateFn != nil {
 		hubEnabled = s.hubEndpointGateFn(s.api)
 	}
+	preservePortOnReloadHandlerFailure := false
 	if hubEnabled {
 		s.hubHealth.set(HubHealthRecovering, "")
+		preservePortOnReloadHandlerFailure = api.ProbeHubPortDependencies().State != api.DependencyStateClear
 	}
 	hubStartFn := startHubMcpListenerWithOptions
 	if s.startHubMcpListenerFn != nil {
@@ -1057,9 +1059,10 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	go func() {
 		defer close(hubInitDone)
 		hubComp, hubErr := hubStartFn(hubInitCtx, hubEnabled, s.api, startHubMcpListenerOptions{
-			server:         s,
-			onUnresponsive: s.signalHubListenerRestart,
-			onRecovered:    s.onHubListenerRecovered,
+			server:                             s,
+			onUnresponsive:                     s.signalHubListenerRestart,
+			onRecovered:                        s.onHubListenerRecovered,
+			preservePortOnReloadHandlerFailure: preservePortOnReloadHandlerFailure,
 		})
 		if hubErr != nil {
 			// codex bot phase4 r1 P2 closure on PR #158: surface

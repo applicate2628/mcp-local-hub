@@ -224,28 +224,40 @@ activates the first window and exits 0.`,
 					return fmt.Errorf("acquire single-instance lock: %w", lockErr)
 				}
 				defer lock.Release()
-				// B2 footgun guard
-				// (work-items/backlog/2026-06-16-hub-port-drift-on-reset-port.md):
-				// the hub port is baked into every gate-ON client URL
-				// (`http://127.0.0.1:<hubport>/clients/<client>/mcp`).
-				// Clearing the persisted port to 0 makes the NEXT hub bind
-				// grab a fresh OS-assigned ephemeral port, orphaning every
-				// gated client URL at once (connection refused for ALL
-				// aggregated servers — and the symptom misdirects diagnosis
-				// toward the daemons, not the config). Refuse the reset
-				// while any client is gate-ON; the operator must gate-OFF
-				// FIRST (which removes the on-disk mcphub-hub entries this
-				// guard keys on) and THEN retry --reset-port. This is the
-				// bounded safe fix vs a stable-port pin. The single-instance
-				// lock above already proved the GUI is not running, so this
-				// read sees the at-rest config.
-				if gated := api.GatedOnClients(); len(gated) > 0 {
-					fmt.Fprintf(cmd.ErrOrStderr(),
-						"--reset-port refused: %d client(s) are gate-ON (hub-aggregate mode) and their URLs are pinned to the current hub port: %s.\n"+
-							"Resetting the port would orphan every gated client URL (the next hub bind grabs a NEW ephemeral port → connection refused for ALL aggregated servers).\n"+
-							"Gate OFF first, THEN retry --reset-port. Headless: `mcphub settings set gui_server.hub_endpoint_enabled false` then `mcphub install --reconcile-hub-mode` (removes the on-disk mcphub-hub entries) — or in the GUI: Settings → uncheck \"Expose a single aggregated hub URL\" + restart.\n"+
-							"(If the GUI itself is stuck, `mcphub gui --force --kill` is the separate recovery and is NOT blocked by this guard.)\n",
-						len(gated), strings.Join(gated, ", "))
+				// The hub port is baked into gate-ON client and group URLs. Refuse
+				// unless every source is proved clear: an unreadable client or
+				// groups.yaml may contain a live URL that would be orphaned by a
+				// reset. The single-instance lock above already proved the GUI is
+				// not running, so this read sees the at-rest config.
+				deps := api.ProbeHubPortDependencies()
+				if deps.State != api.DependencyStateClear {
+					var message strings.Builder
+					message.WriteString("--reset-port refused:\n")
+					if len(deps.GatedClients) > 0 || len(deps.Groups) > 0 {
+						message.WriteString("Proved dependencies pinned to the current hub port:\n")
+						if len(deps.GatedClients) > 0 {
+							fmt.Fprintf(&message,
+								"- %d client(s) are gate-ON (hub-aggregate mode) and their /clients/<client>/mcp URLs are pinned: %s.\n"+
+									"  Resetting the port would orphan every gated client URL (the next hub bind grabs a NEW ephemeral port → connection refused for ALL aggregated servers).\n",
+								len(deps.GatedClients), strings.Join(deps.GatedClients, ", "))
+						}
+						if len(deps.Groups) > 0 {
+							fmt.Fprintf(&message,
+								"- %d group(s) have /g/<group>/mcp URLs pinned: %s.\n"+
+									"  Resetting the port would orphan those URLs; no reconcile path rewrites group URLs, so re-copy them from the Groups screen after a port change.\n",
+								len(deps.Groups), strings.Join(deps.Groups, ", "))
+						}
+					}
+					if len(deps.Errors) > 0 {
+						message.WriteString("Unreadable sources; reset safety cannot be proven:\n")
+						for _, source := range deps.Errors {
+							fmt.Fprintf(&message, "- %s %s (%s)\n", source.Kind, source.Name, source.Err)
+						}
+						message.WriteString("Fix the unreadable file (repair its DACL or parse error), then retry.\n")
+					}
+					message.WriteString("Gate OFF first, THEN retry --reset-port. Headless: `mcphub settings set gui_server.hub_endpoint_enabled false` then `mcphub install --reconcile-hub-mode` (removes the on-disk mcphub-hub entries) — or in the GUI: Settings → uncheck \"Expose a single aggregated hub URL\" + restart.\n")
+					message.WriteString("(If the GUI itself is stuck, `mcphub gui --force --kill` is the separate recovery and is NOT blocked by this guard.)\n")
+					fmt.Fprint(cmd.ErrOrStderr(), message.String())
 					return &forceExitError{code: 8}
 				}
 				if err := api.ResetHubPort(); err != nil {

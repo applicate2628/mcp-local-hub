@@ -6,10 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 func recvHubHealth(t *testing.T, ch <-chan Event) Event {
@@ -328,5 +331,106 @@ func TestServerHubHealthTracksInitialStartup(t *testing.T) {
 				time.Sleep(5 * time.Millisecond)
 			}
 		})
+	}
+}
+
+func setupInitialHubPortDependencyTest(t *testing.T) string {
+	t.Helper()
+	root := apitest.HardenedTempDir(t)
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	for _, key := range []string{
+		"COPILOT_HOME", "KIMI_CODE_HOME",
+		"MIMOCODE_HOME", "MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_CONFIG_CONTENT",
+	} {
+		t.Setenv(key, "")
+	}
+	t.Setenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP", "1")
+	t.Setenv("MIMOCODE_TEST_MANAGED_CONFIG_DIR", filepath.Join(home, "ProgramData", "opencode"))
+	return home
+}
+
+func captureInitialHubPortPreservePolicy(t *testing.T) bool {
+	t.Helper()
+	s := NewServer(Config{Port: 0})
+	s.hubEndpointGateFn = func(*api.API) bool { return true }
+	policy := make(chan bool, 1)
+	s.startHubMcpListenerFn = func(_ context.Context, enabled bool, _ *api.API, opts startHubMcpListenerOptions) (*HubListenerComponents, error) {
+		if !enabled {
+			t.Error("hub startup unexpectedly disabled")
+		}
+		policy <- opts.preservePortOnReloadHandlerFailure
+		return nil, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan struct{})
+	startDone := make(chan error, 1)
+	go func() { startDone <- s.Start(ctx, ready) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-startDone:
+			if err != nil {
+				t.Errorf("Server.Start returned %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Error("Server.Start did not stop after cancellation")
+		}
+	})
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Server.Start did not signal GUI readiness")
+	}
+	select {
+	case preserve := <-policy:
+		return preserve
+	case <-time.After(2 * time.Second):
+		t.Fatal("hub startup seam did not capture preserve policy")
+		return false
+	}
+}
+
+func TestServerInitialHubStartupPreservesPortForDependentHost(t *testing.T) {
+	home := setupInitialHubPortDependencyTest(t)
+	body := `{"mcpServers":{"mcphub-hub":{"url":"http://127.0.0.1:3439/clients/claude-code/mcp","type":"http"}}}`
+	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(body), 0o600); err != nil {
+		t.Fatalf("seed gate-ON claude-code config: %v", err)
+	}
+
+	if preserve := captureInitialHubPortPreservePolicy(t); !preserve {
+		t.Fatal("preservePortOnReloadHandlerFailure = false, want true for a dependent host")
+	}
+}
+
+func TestServerInitialHubStartupClearsPortForClearHost(t *testing.T) {
+	setupInitialHubPortDependencyTest(t)
+
+	if preserve := captureInitialHubPortPreservePolicy(t); preserve {
+		t.Fatal("preservePortOnReloadHandlerFailure = true, want false for a clear host")
+	}
+}
+
+func TestServerInitialHubStartupPreservesPortForUnknownHost(t *testing.T) {
+	setupInitialHubPortDependencyTest(t)
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("resolve daemon state dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "groups.yaml"), []byte("version: 2\n"), 0o600); err != nil {
+		t.Fatalf("seed malformed groups.yaml: %v", err)
+	}
+
+	if preserve := captureInitialHubPortPreservePolicy(t); !preserve {
+		t.Fatal("preservePortOnReloadHandlerFailure = false, want true for an unknown host")
 	}
 }
