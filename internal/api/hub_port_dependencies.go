@@ -36,8 +36,8 @@ type HubPortDependencies struct {
 }
 
 // ProbeHubPortDependencies reports every known consumer of the persisted hub
-// port. It keeps ProbeHubGate's unreadable client set and LoadGroups' read or
-// parse error so destructive callers can fail closed.
+// port. It keeps ProbeHubGate's unreadable and adapter-construction failure
+// sets plus LoadGroups' read or parse error so destructive callers fail closed.
 func ProbeHubPortDependencies() HubPortDependencies {
 	gate := ProbeHubGate()
 	deps := HubPortDependencies{GatedClients: gate.GatedOn}
@@ -46,6 +46,13 @@ func ProbeHubPortDependencies() HubPortDependencies {
 			Kind: "client",
 			Name: name,
 			Err:  "config unreadable (parse/DACL)",
+		})
+	}
+	for _, name := range gate.AdapterConstructionFailed {
+		deps.Errors = append(deps.Errors, HubPortDependencySource{
+			Kind: "client",
+			Name: name,
+			Err:  "adapter construction failed",
 		})
 	}
 

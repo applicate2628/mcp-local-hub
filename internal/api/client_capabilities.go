@@ -108,13 +108,9 @@ func ClientCapabilities() map[string]ClientCapability {
 	for _, name := range AdoptSupportedClients() {
 		adoptSupported[name] = true
 	}
-	// relayStdio is built once via clients.RelayStdioClientNames (a single
-	// clients.AllClients() pass) instead of calling clients.IsRelayStdio per
-	// client name below — IsRelayStdio rebuilds the full adapter set (every
-	// factory, including UserHomeDir calls) on each call, so doing that once
-	// per SupportedClientNames() entry made this O(N²) in the client count.
-	// The result set is identical: each adapter's own IsRelayStdio()
-	// declaration remains the single source of truth.
+	// relayStdio is built once from construction-independent client-registry
+	// metadata. A config-path factory failure therefore cannot misclassify a
+	// known relay client as direct-installable.
 	relayStdio := clients.RelayStdioClientNames()
 	out := make(map[string]ClientCapability, len(clients.SupportedClientNames()))
 	for _, name := range clients.SupportedClientNames() {
@@ -122,9 +118,8 @@ func ClientCapabilities() map[string]ClientCapability {
 			Scannable: scannable[name],
 			// directInstallable = AddEntry accepts a URL-only entry = NOT
 			// relay-stdio. Derived from the single relayStdio set built
-			// above (same per-adapter IsRelayStdio() declaration as
-			// clients.IsRelayStdio), so a future URL-native adapter is
-			// offered with no edit here.
+			// above (same registry metadata as clients.IsRelayStdio), so a
+			// future URL-native adapter is offered with no edit here.
 			DirectInstallable: !relayStdio[name],
 			RemoteHTTPCapable: isRemoteHTTPCapableClient(name),
 			AdoptSupported:    adoptSupported[name],

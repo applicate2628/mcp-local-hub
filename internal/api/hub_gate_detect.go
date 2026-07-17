@@ -36,21 +36,24 @@ import (
 // GatedOn contains clients proven gate-ON by a live, enabled mcphub-hub
 // aggregate. Unreadable contains supported, non-relay clients whose gate state
 // could not be determined because their config could not be read or parsed.
+// AdapterConstructionFailed contains supported, non-relay clients whose
+// adapters could not be built, so their gate state cannot be inspected.
 // GetEntry is the layer-aware authority; an absent write target alone does not
-// make a layered client gate-OFF. Fail-closed callers must treat Unreadable as
-// blocking because gate-OFF has not been proven for those clients.
+// make a layered client gate-OFF. Fail-closed callers must treat both failure
+// sets as blocking because gate-OFF has not been proven for those clients.
 type HubGateProbe struct {
-	GatedOn    []string
-	Unreadable []string
+	GatedOn                   []string
+	Unreadable                []string
+	AdapterConstructionFailed []string
 }
 
 // ProbeHubGate classifies the hub-gate state of every applicable client.
 // GetEntry is the sole layer-aware authority: absent or disabled aggregates are
-// gate-OFF, while read or parse errors are surfaced as unreadable so callers can
-// choose the appropriate failure policy.
+// gate-OFF, while construction, read, or parse errors are surfaced so callers
+// can choose the appropriate failure policy.
 func ProbeHubGate() HubGateProbe {
 	var probe HubGateProbe
-	all := clients.AllClients()
+	all, failed := clients.AllClientsWithErrors()
 	for name, c := range all {
 		if c == nil {
 			continue
@@ -82,8 +85,15 @@ func ProbeHubGate() HubGateProbe {
 		}
 		probe.GatedOn = append(probe.GatedOn, name)
 	}
+	relayStdio := clients.RelayStdioClientNames()
+	for _, name := range failed {
+		if !relayStdio[name] {
+			probe.AdapterConstructionFailed = append(probe.AdapterConstructionFailed, name)
+		}
+	}
 	sort.Strings(probe.GatedOn)
 	sort.Strings(probe.Unreadable)
+	sort.Strings(probe.AdapterConstructionFailed)
 	return probe
 }
 

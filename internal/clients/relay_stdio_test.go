@@ -7,9 +7,10 @@ import "testing"
 // manifest-lookup form RelayServer/RelayDaemon) and rejects a URL-only
 // entry. antigravity, zed, and aider today (aider's MCP client is stdio-only:
 // its .aider.conf.yml mcp-server entries take a command, not a URL, so mcphub
-// writes a `mcphub relay` stdio command). A new relay adapter must be added
-// here AND declare IsRelayStdio()=true on its concrete struct; the
-// SupportedClientNames()-driven loop below fails until both are done.
+// writes a `mcphub relay` stdio command). A new relay adapter must be added to
+// this expected set, marked relayStdio in clientRegistry, AND declare
+// IsRelayStdio()=true on its concrete struct; the SupportedClientNames-driven
+// loop below fails until all three agree.
 var relayStdioClientNames = map[string]bool{
 	"antigravity": true,
 	"zed":         true,
@@ -23,14 +24,14 @@ var relayStdioClientNames = map[string]bool{
 }
 
 // TestIsRelayStdioClassifiesEverySupportedClient asserts the relay-stdio
-// predicate is true for exactly {antigravity, zed} and false for every other
+// predicate is true for exactly the expected set above and false for every other
 // SupportedClientNames() entry — checked through BOTH the per-adapter
 // Client.IsRelayStdio method (constructed adapter) and the name-only
-// clients.IsRelayStdio helper, so the two stay in lock-step. Driving the
+// registry-backed clients.IsRelayStdio helper, so the two stay in lock-step.
 // table off SupportedClientNames() means a future adapter is automatically
 // covered: it lands in the loop, and unless it is added to
-// relayStdioClientNames AND declares the matching method truth, this test
-// fails.
+// relayStdioClientNames, marked in the registry, AND declares the matching
+// method truth, this test fails.
 func TestIsRelayStdioClassifiesEverySupportedClient(t *testing.T) {
 	all := AllClients()
 	for _, name := range SupportedClientNames() {

@@ -836,6 +836,10 @@ type clientDescriptor struct {
 	// user does not request a narrower/wider target. Heavy/experimental
 	// clients leave this false so a fresh install stays minimal.
 	defaultInstall bool
+	// relayStdio is registry metadata because it must remain knowable even when
+	// factory construction fails before an adapter value exists. The concrete
+	// adapter method is parity-checked for every constructable client.
+	relayStdio bool
 	// factory constructs the adapter. May return an error (e.g. UserHomeDir
 	// failure); AllClients() silently skips a factory that errors. The
 	// constructed adapter's ConfigPath() is the SINGLE owner of this client's
@@ -866,9 +870,9 @@ func clientRegistry() []clientDescriptor {
 		{name: "vscode", factory: NewVSCode},
 		{name: "gemini-cli", factory: NewGeminiCLI},
 		{name: "qwen-cli", factory: NewQwenCLI},
-		{name: "antigravity", factory: NewAntigravity},
+		{name: "antigravity", relayStdio: true, factory: NewAntigravity},
 		// Wave 2: 8 additional opt-in clients.
-		{name: "zed", factory: NewZed},
+		{name: "zed", relayStdio: true, factory: NewZed},
 		{name: "kiro", factory: NewKiro},
 		{name: "windsurf", factory: NewWindsurf},
 		{name: "cline", factory: NewCline},
@@ -888,7 +892,7 @@ func clientRegistry() []clientDescriptor {
 		{name: "copilot-cli", factory: NewCopilotCLI},
 		{name: "amazon-q", factory: NewAmazonQ},
 		{name: "openhands", factory: NewOpenHands},
-		{name: "aider", factory: NewAider},
+		{name: "aider", relayStdio: true, factory: NewAider},
 		// skills-CLI vendor reconciliation TIER-1 (2026-06-17): 19 more opt-in
 		// clients with a verified file-based mcpServers config.
 		{name: "bob", factory: NewBob},
@@ -904,7 +908,7 @@ func clientRegistry() []clientDescriptor {
 		{name: "kimi-code-cli", factory: NewKimiCodeCLI},
 		{name: "kode", factory: NewKode},
 		{name: "ona", factory: NewOna},
-		{name: "pi", factory: NewPi},
+		{name: "pi", relayStdio: true, factory: NewPi},
 		{name: "qoder", factory: NewQoder},
 		{name: "qoder-cn", factory: NewQoderCN},
 		{name: "roo", factory: NewRoo},
@@ -924,9 +928,9 @@ func clientRegistry() []clientDescriptor {
 		// pochi + zencoder are relay-stdio (stdio-only documented hand-edit form).
 		{name: "neovate", factory: NewNeovate},
 		{name: "crush", factory: NewCrush},
-		{name: "pochi", factory: NewPochi},
+		{name: "pochi", relayStdio: true, factory: NewPochi},
 		{name: "amp", factory: NewAmp},
-		{name: "zencoder", factory: NewZencoder},
+		{name: "zencoder", relayStdio: true, factory: NewZencoder},
 	}
 }
 
@@ -1042,42 +1046,26 @@ func AllClientsWithErrors() (constructed map[string]Client, failedNames []string
 // This is the name-only entry point for call sites (e.g. the hub-reconcile
 // planner) that hold a client id string rather than a constructed adapter.
 //
-// It resolves name → adapter via AllClients() and returns that adapter's
-// IsRelayStdio() method, so the answer always derives from the adapter's own
-// declaration and a future relay adapter needs no edit here. Returns false
-// for an unknown name, or for a name whose adapter cannot be constructed on
-// the current host (e.g. UserHomeDir failure) — both are non-relay by the
-// same fail-safe rule AllClients() uses to drop unconstructable adapters.
-//
-// Builds the full adapter set via AllClients() on every call. A caller that
-// needs the answer for many names in one pass (e.g. ClientCapabilities
-// iterating every supported client) should build the set once with
-// AllClients() and query each adapter's IsRelayStdio() directly instead of
-// calling this per name — see RelayStdioClientNames for that batch form.
+// The registry metadata is construction-independent so fail-closed callers
+// can classify a registered client even when its factory cannot resolve a
+// config path. Returns false for an unknown name.
 func IsRelayStdio(name string) bool {
-	c, ok := AllClients()[name]
-	if !ok {
-		return false
+	for _, d := range clientRegistry() {
+		if d.name == name {
+			return d.relayStdio
+		}
 	}
-	return c.IsRelayStdio()
+	return false
 }
 
 // RelayStdioClientNames returns the set of client ids whose adapter is a
-// relay-stdio adapter (IsRelayStdio() == true), built from exactly one
-// AllClients() pass. This is the batch form of IsRelayStdio for callers
-// that need the answer for every supported client name in one pass (e.g.
-// ClientCapabilities) — calling IsRelayStdio per name would rebuild the
-// full adapter set (including its UserHomeDir factory calls) once per
-// name, which is wasted work for an answer that does not change within a
-// single pass. The returned set still derives from each adapter's own
-// IsRelayStdio() declaration (same single owner as IsRelayStdio), so a
-// future relay adapter needs no edit here.
+// relay-stdio adapter. It derives from construction-independent registry
+// metadata, so factory failures cannot erase a known relay classification.
 func RelayStdioClientNames() map[string]bool {
-	all := AllClients()
-	out := make(map[string]bool, len(all))
-	for name, c := range all {
-		if c.IsRelayStdio() {
-			out[name] = true
+	out := make(map[string]bool)
+	for _, d := range clientRegistry() {
+		if d.relayStdio {
+			out[d.name] = true
 		}
 	}
 	return out

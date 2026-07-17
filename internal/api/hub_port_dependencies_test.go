@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"mcp-local-hub/internal/clients"
 )
 
 func setupHubPortDependenciesTest(t *testing.T) string {
@@ -138,5 +140,52 @@ func TestProbeHubPortDependenciesUnknownPrecedesDependent(t *testing.T) {
 	}
 	if !hasHubPortDependencyError(deps, "groups", "groups.yaml") {
 		t.Fatalf("Errors = %+v, want unreadable groups.yaml source", deps.Errors)
+	}
+}
+
+func TestProbeHubPortDependenciesUnknownWhenSupportedClientFactoryFails(t *testing.T) {
+	setupHubPortDependenciesTest(t)
+	for _, key := range []string{"HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"} {
+		t.Setenv(key, "")
+	}
+
+	_, failed := clients.AllClientsWithErrors()
+	if !slices.Contains(failed, "claude-code") {
+		t.Fatalf("test setup: failed factories = %v, want registered supported client claude-code", failed)
+	}
+
+	deps := ProbeHubPortDependencies()
+	if deps.State != DependencyStateUnknown {
+		t.Fatalf("State = %v, want unknown when a supported client adapter cannot be constructed", deps.State)
+	}
+	if !slices.ContainsFunc(deps.Errors, func(source HubPortDependencySource) bool {
+		return source.Kind == "client" && source.Name == "claude-code" && source.Err == "adapter construction failed"
+	}) {
+		t.Fatalf("Errors = %+v, want claude-code adapter-construction error", deps.Errors)
+	}
+}
+
+func TestProbeHubPortDependenciesIgnoresRelayStdioFactoryFailures(t *testing.T) {
+	setupHubPortDependenciesTest(t)
+	for _, key := range []string{"HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"} {
+		t.Setenv(key, "")
+	}
+
+	_, failed := clients.AllClientsWithErrors()
+	relayStdio := clients.RelayStdioClientNames()
+	for _, name := range []string{"aider", "antigravity", "pi", "pochi", "zed", "zencoder"} {
+		if !slices.Contains(failed, name) {
+			t.Fatalf("test setup: failed factories = %v, want relay-stdio client %s", failed, name)
+		}
+		if !relayStdio[name] {
+			t.Fatalf("test setup: %s is not classified as a known relay-stdio client", name)
+		}
+	}
+
+	deps := ProbeHubPortDependencies()
+	for _, source := range deps.Errors {
+		if relayStdio[source.Name] {
+			t.Errorf("Errors includes relay-stdio factory failure %+v; relay clients have no hub aggregate URL to orphan", source)
+		}
 	}
 }

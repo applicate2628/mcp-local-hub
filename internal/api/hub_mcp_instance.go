@@ -36,10 +36,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
 )
+
+// ErrHubPortResetBlocked means the reset was intentionally skipped because a
+// fresh dependency probe could not prove that clearing the port is safe.
+var ErrHubPortResetBlocked = errors.New("hub port reset blocked by dependencies")
 
 // HubEndpoint is the on-disk shape of hub-mcp.endpoint.json. Persistent
 // across restarts; rotated only by explicit RotateHubInstanceID. Port
@@ -218,8 +223,9 @@ func ResetHubPort() error {
 // ephemeralPort=0 to the OS, get a fresh allocation, then call
 // EnsureHubEndpoint with the new port to record it.
 //
-// Holds hub-mcp.lock for the read-modify-write so a concurrent
-// EnsureHubEndpoint cannot overwrite the cleared Port mid-flight.
+// Holds hub-mcp.lock across the fresh dependency probe and read-modify-write so
+// a concurrent group commit cannot land between the safety decision and the
+// port mutation, and EnsureHubEndpoint cannot overwrite the cleared Port.
 //
 // codex bot phase4 r12 P1 closure on PR #158: the lock acquisition is
 // bounded by ctx so the rollback path inside startHubMcpListener does
@@ -241,6 +247,10 @@ func ResetHubPortContext(ctx context.Context) error {
 		// the underlying error so the CLI can surface "hub has not
 		// run yet" if appropriate.
 		return err
+	}
+	deps := ProbeHubPortDependencies()
+	if deps.State != DependencyStateClear {
+		return fmt.Errorf("%w: state=%d", ErrHubPortResetBlocked, deps.State)
 	}
 	// Port-only mutation (codex bot r2 P2 closure): do NOT rewrite
 	// StartedAt or PID. ResetHubPort runs from the `mcphub gui

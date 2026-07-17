@@ -654,11 +654,18 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 		// fresh OS port and orphan those gated URLs. The restart
 		// driver emits hub-listener-restart-failed and retries against
 		// the same persisted port instead.
+		//
+		// Initial startup does not carry a pre-start dependency snapshot into
+		// this later failure boundary. ResetHubPortContext re-probes while its
+		// hub-mcp.lock is held and returns ErrHubPortResetBlocked when a client,
+		// group, or unreadable source now depends on the persisted port.
 		if !opts.preservePortOnReloadHandlerFailure {
 			if rerr := api.ResetHubPortContext(ctx); rerr != nil {
-				_ = api.LogHubMcpEvent("error", "hub-endpoint-rollback-failed", map[string]any{
-					"err": rerr.Error(),
-				})
+				if !errors.Is(rerr, api.ErrHubPortResetBlocked) {
+					_ = api.LogHubMcpEvent("error", "hub-endpoint-rollback-failed", map[string]any{
+						"err": rerr.Error(),
+					})
+				}
 			}
 		}
 		return nil, fmt.Errorf("hub-mcp: %w", reloadErr)
