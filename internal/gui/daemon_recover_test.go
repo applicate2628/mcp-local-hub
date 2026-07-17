@@ -1,0 +1,364 @@
+package gui
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/daemonrecovery"
+	"mcp-local-hub/internal/process"
+)
+
+type fakeDaemonRecoverer struct {
+	result    daemonrecovery.Result
+	err       error
+	calls     int
+	taskName  string
+	confirmed bool
+}
+
+func (f *fakeDaemonRecoverer) Recover(_ context.Context, taskName string, confirmed bool) (daemonrecovery.Result, error) {
+	f.calls++
+	f.taskName = taskName
+	f.confirmed = confirmed
+	return f.result, f.err
+}
+
+func performDaemonRecoverRequest(t *testing.T, s *Server, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/daemon/recover", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	return rec
+}
+
+func decodeDaemonRecoverBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v; raw=%s", err, rec.Body.String())
+	}
+	return body
+}
+
+func TestDaemonRecoverRouteRequiresSameOriginPOST(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	fake := &fakeDaemonRecoverer{}
+	s.daemonRecover = fake
+
+	req := httptest.NewRequest(http.MethodPost, "/api/daemon/recover", strings.NewReader(`{"task_name":"x","confirm":true}`))
+	req.Header.Set("Origin", "https://attacker.example")
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || fake.calls != 0 {
+		t.Fatalf("cross-origin status=%d calls=%d body=%s", rec.Code, fake.calls, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/daemon/recover", nil)
+	rec = httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed || fake.calls != 0 {
+		t.Fatalf("GET status=%d calls=%d body=%s", rec.Code, fake.calls, rec.Body.String())
+	}
+}
+
+func TestDaemonRecoverRouteRequiresExplicitConfirmationBeforeInvocation(t *testing.T) {
+	for _, body := range []string{
+		`{"task_name":"mcp-local-hub-memory-default"}`,
+		`{"task_name":"mcp-local-hub-memory-default","confirm":false}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			s := NewServer(Config{Port: 9125})
+			fake := &fakeDaemonRecoverer{}
+			s.daemonRecover = fake
+
+			rec := performDaemonRecoverRequest(t, s, body)
+			if rec.Code != http.StatusPreconditionFailed {
+				t.Fatalf("status=%d want=412 body=%s", rec.Code, rec.Body.String())
+			}
+			if fake.calls != 0 {
+				t.Fatalf("recover invoked %d times without confirmation", fake.calls)
+			}
+			if code := decodeDaemonRecoverBody(t, rec)["code"]; code != "RECOVER_CONFIRMATION_REQUIRED" {
+				t.Fatalf("code=%v", code)
+			}
+		})
+	}
+}
+
+func TestDaemonRecoverRouteMapsStableOutcomesAndRedactsDetails(t *testing.T) {
+	foreignPath := `C:\Users\owner\foreign.exe`
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "unknown task",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureUnknownTask, TaskName: `\missing`},
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "RECOVER_UNKNOWN_TASK",
+		},
+		{
+			name: "foreign owner",
+			err: &daemonrecovery.OperationError{
+				Kind:     daemonrecovery.FailureRefusedPortOwner,
+				TaskName: `\mcp-local-hub-memory-default`,
+				Candidate: &daemonrecovery.ReapCandidate{
+					PID:      44000,
+					Verdict:  daemonrecovery.VerdictForeign,
+					Identity: process.ProcessIdentity{ExecutablePath: foreignPath, CommandLine: foreignPath + " --attacker"},
+				},
+			},
+			wantStatus: http.StatusConflict,
+			wantCode:   "RECOVER_REFUSED_PORT_OWNER",
+		},
+		{
+			name:       "respawn failed",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureRespawnFailed, Respawn: api.RespawnResult{Code: "RESPAWN_FAILED", Message: foreignPath}},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "RECOVER_RESPAWN_FAILED",
+		},
+		{
+			name:       "supervisor unavailable",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureSupervisorUnavailable, Cause: errors.New("dial " + foreignPath)},
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "RECOVER_SUPERVISOR_UNAVAILABLE",
+		},
+		{
+			name:       "state read failed",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead, Cause: errors.New("read " + foreignPath)},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "RECOVER_STATE_READ_FAILED",
+		},
+		{
+			name:       "respawn setup failure",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead, Cause: api.ErrRespawnSetupFailure},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "RECOVER_STATE_READ_FAILED",
+		},
+		{
+			name:       "request canceled before kill",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureRequestCanceled, Cause: context.Canceled},
+			wantStatus: http.StatusRequestTimeout,
+			wantCode:   "RECOVER_REQUEST_CANCELED",
+		},
+		{
+			name:       "kill-boundary owner recheck timed out",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureBoundaryProbeTimeout, Cause: context.DeadlineExceeded},
+			wantStatus: http.StatusGatewayTimeout,
+			wantCode:   "RECOVER_BOUNDARY_PROBE_TIMEOUT",
+		},
+		{
+			name:       "detached respawn budget insufficient",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureRespawnBudgetInsufficient, Cause: daemonrecovery.ErrInsufficientRespawnBudget},
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "RECOVER_RESPAWN_BUDGET_INSUFFICIENT",
+		},
+		{
+			name:       "unclassified failure",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureKind("future_failure"), Cause: errors.New("unclassified " + foreignPath)},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "RECOVER_UNCLASSIFIED_FAILURE",
+		},
+		{
+			name:       "raw non-operation error",
+			err:        errors.New("unknown raw failure " + foreignPath),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "RECOVER_UNCLASSIFIED_FAILURE",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewServer(Config{Port: 9125})
+			fake := &fakeDaemonRecoverer{err: tc.err}
+			s.daemonRecover = fake
+
+			rec := performDaemonRecoverRequest(t, s, `{"task_name":"mcp-local-hub-memory-default","confirm":true}`)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status=%d want=%d body=%s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			body := decodeDaemonRecoverBody(t, rec)
+			if body["code"] != tc.wantCode || body["error"] != "internal error" {
+				t.Fatalf("body=%v", body)
+			}
+			if committed, ok := body["termination_committed"]; !ok || committed != false {
+				t.Fatalf("body=%v want termination_committed=false for a zero-result pre-kill failure", body)
+			}
+			if _, ok := body["reaped"]; ok {
+				t.Fatalf("body=%v unexpectedly exposes the narrower reaped field", body)
+			}
+			if strings.Contains(rec.Body.String(), foreignPath) || strings.Contains(rec.Body.String(), "44000") {
+				t.Fatalf("response leaked process details: %s", rec.Body.String())
+			}
+			if fake.calls != 1 || !fake.confirmed || fake.taskName != `\mcp-local-hub-memory-default` {
+				t.Fatalf("fake calls=%d confirmed=%v task=%q", fake.calls, fake.confirmed, fake.taskName)
+			}
+		})
+	}
+}
+
+func TestDaemonRecoverRouteSuccessReturnsOnlySafeAcceptedFields(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	fake := &fakeDaemonRecoverer{result: daemonrecovery.Result{
+		TaskName:        `\mcp-local-hub-memory-default`,
+		Reaped:          true,
+		PortOwnerCheck:  daemonrecovery.PortOwnerReaped,
+		PortWaitOutcome: daemonrecovery.PortWaitStillBound,
+	}}
+	s.daemonRecover = fake
+
+	rec := performDaemonRecoverRequest(t, s, `{"task_name":"mcp-local-hub-memory-default","confirm":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	want := map[string]any{
+		"task_name":         `\mcp-local-hub-memory-default`,
+		"state":             "respawn_accepted",
+		"reaped":            true,
+		"port_owner_check":  "reaped",
+		"port_wait_outcome": "still_bound",
+	}
+	if got := decodeDaemonRecoverBody(t, rec); !mapsEqual(got, want) {
+		t.Fatalf("body=%v want=%v", got, want)
+	}
+	if fake.calls != 1 || !fake.confirmed {
+		t.Fatalf("calls=%d confirmed=%v", fake.calls, fake.confirmed)
+	}
+}
+
+func TestDaemonRecoverRouteRespawnFailureReportsCommittedTerminationWithoutProcessDetail(t *testing.T) {
+	leakyPath := `C:\Users\owner\mcphub.exe`
+	tests := []struct {
+		name       string
+		result     daemonrecovery.Result
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name: "confirmed reap then supervisor unavailable",
+			result: daemonrecovery.Result{
+				Reaped:         true,
+				PortOwnerCheck: daemonrecovery.PortOwnerReaped,
+			},
+			err: &daemonrecovery.OperationError{
+				Kind:  daemonrecovery.FailureSupervisorUnavailable,
+				Cause: errors.New("dial failed after reap of " + leakyPath),
+			},
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "RECOVER_SUPERVISOR_UNAVAILABLE",
+		},
+		{
+			name: "termination unconfirmed then respawn rejected",
+			result: daemonrecovery.Result{
+				Reaped:         false,
+				PortOwnerCheck: daemonrecovery.PortOwnerTerminationUnconfirmed,
+			},
+			err: &daemonrecovery.OperationError{
+				Kind:    daemonrecovery.FailureRespawnFailed,
+				Respawn: api.RespawnResult{Code: "RESPAWN_FAILED", Message: leakyPath},
+			},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "RECOVER_RESPAWN_FAILED",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewServer(Config{Port: 9125})
+			s.daemonRecover = &fakeDaemonRecoverer{result: tc.result, err: tc.err}
+
+			rec := performDaemonRecoverRequest(t, s, `{"task_name":"mcp-local-hub-memory-default","confirm":true}`)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status=%d want=%d body=%s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			body := decodeDaemonRecoverBody(t, rec)
+			if body["code"] != tc.wantCode || body["error"] != "internal error" || body["termination_committed"] != true {
+				t.Fatalf("body=%v want redacted error with termination_committed=true", body)
+			}
+			if _, ok := body["reaped"]; ok {
+				t.Fatalf("body=%v unexpectedly exposes the narrower reaped field", body)
+			}
+			if strings.Contains(rec.Body.String(), leakyPath) || strings.Contains(rec.Body.String(), "dial failed") {
+				t.Fatalf("response leaked process detail: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestDaemonRecoverHTTPFailureMapsStableKinds(t *testing.T) {
+	tests := []struct {
+		name       string
+		kind       daemonrecovery.FailureKind
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "local state or owner-sidecar failure",
+			kind:       daemonrecovery.FailureStateRead,
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "RECOVER_STATE_READ_FAILED",
+		},
+		{
+			name:       "supervisor transport unavailable",
+			kind:       daemonrecovery.FailureSupervisorUnavailable,
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "RECOVER_SUPERVISOR_UNAVAILABLE",
+		},
+		{
+			name:       "respawn setup failure remains a redacted internal error",
+			kind:       daemonrecovery.FailureStateRead,
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "RECOVER_STATE_READ_FAILED",
+		},
+		{
+			name:       "request canceled before kill",
+			kind:       daemonrecovery.FailureRequestCanceled,
+			wantStatus: http.StatusRequestTimeout,
+			wantCode:   "RECOVER_REQUEST_CANCELED",
+		},
+		{
+			name:       "boundary probe timeout",
+			kind:       daemonrecovery.FailureBoundaryProbeTimeout,
+			wantStatus: http.StatusGatewayTimeout,
+			wantCode:   "RECOVER_BOUNDARY_PROBE_TIMEOUT",
+		},
+		{
+			name:       "detached respawn budget insufficient",
+			kind:       daemonrecovery.FailureRespawnBudgetInsufficient,
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "RECOVER_RESPAWN_BUDGET_INSUFFICIENT",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			status, code := daemonRecoverHTTPFailure(&daemonrecovery.OperationError{Kind: tc.kind})
+			if status != tc.wantStatus || code != tc.wantCode {
+				t.Fatalf("mapping=(%d,%q) want=(%d,%q)", status, code, tc.wantStatus, tc.wantCode)
+			}
+		})
+	}
+}
+
+func mapsEqual(a, b map[string]any) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for key, value := range b {
+		if a[key] != value {
+			return false
+		}
+	}
+	return true
+}

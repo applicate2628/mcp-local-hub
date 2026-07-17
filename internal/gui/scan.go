@@ -115,11 +115,24 @@ func writeAPIError(w http.ResponseWriter, err error, status int, code string) {
 // reaching the wire. Use this instead of writeAPIError at any 500-class
 // site that forwards a backend error which may carry a filesystem path.
 func writeAPIErrorRedacted(w http.ResponseWriter, err error, status int, code string, logCtx string) {
+	writeAPIErrorRedactedFields(w, err, status, code, logCtx, nil)
+}
+
+// writeAPIErrorRedactedFields preserves the fixed opaque error envelope while
+// allowing explicitly typed, non-sensitive boolean facts to survive an error.
+// A bool-only map prevents callers from accidentally forwarding paths, process
+// identities, command lines, or other backend error detail.
+func writeAPIErrorRedactedFields(w http.ResponseWriter, err error, status int, code string, logCtx string, fields map[string]bool) {
 	log.Printf("%s: %v", logCtx, err)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"error": "internal error",
-		"code":  code,
-	})
+	body := make(map[string]any, len(fields)+2)
+	for key, value := range fields {
+		body[key] = value
+	}
+	// Fixed redacted fields win even if a future caller accidentally reuses a
+	// reserved key in its bool map.
+	body["error"] = "internal error"
+	body["code"] = code
+	_ = json.NewEncoder(w).Encode(body)
 }

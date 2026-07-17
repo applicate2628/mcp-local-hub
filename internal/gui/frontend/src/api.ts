@@ -730,6 +730,51 @@ export async function respawnDaemon(
   );
 }
 
+export const DAEMON_RECOVER_ERROR_CODES = [
+  "INVALID_ARGS",
+  "RECOVER_CONFIRMATION_REQUIRED",
+  "RECOVER_UNKNOWN_TASK",
+  "RECOVER_REFUSED_PORT_OWNER",
+  "RECOVER_RESPAWN_FAILED",
+  "RECOVER_SUPERVISOR_UNAVAILABLE",
+  "RECOVER_REQUEST_CANCELED",
+  "RECOVER_BOUNDARY_PROBE_TIMEOUT",
+  "RECOVER_RESPAWN_BUDGET_INSUFFICIENT",
+  "RECOVER_STATE_READ_FAILED",
+  "RECOVER_UNCLASSIFIED_FAILURE",
+] as const;
+
+export type DaemonRecoverErrorCode = (typeof DAEMON_RECOVER_ERROR_CODES)[number];
+
+export interface DaemonRecoverResponse {
+  task_name: string;
+  state: "respawn_accepted";
+  reaped: boolean;
+  port_owner_check:
+    | "reaped"
+    | "already_exited"
+    | "termination_unconfirmed"
+    | "unbound"
+    | "tracked_child"
+    | "port_unresolvable"
+    | "probe_unavailable";
+  port_wait_outcome:
+    | "not_required"
+    | "released"
+    | "still_bound"
+    | "probe_unavailable";
+}
+
+// postDaemonRecover carries the explicit confirmation required by the route.
+// A successful response means the force-respawn was accepted; it does not
+// assert that the daemon has reached Running.
+export async function postDaemonRecover(taskName: string): Promise<DaemonRecoverResponse> {
+  return postJSONObject<DaemonRecoverResponse>("/api/daemon/recover", {
+    task_name: taskName,
+    confirm: true,
+  });
+}
+
 // WorkspacePair mirrors the deduplicated (key, path) entries from the
 // /api/workspaces top-level `workspaces` array. The selector renders
 // these directly; the matrix uses them to scope LSP rows.

@@ -1,12 +1,12 @@
 package cli
 
 import (
+	"context"
 	"errors"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/daemonrecovery"
 	"mcp-local-hub/internal/process"
 )
 
@@ -15,39 +15,19 @@ import (
 // daemon's intended port — the supervisor may reap that owner IFF a strict
 // identity gate proves it is a disowned mcphub daemon child FOR THIS TASK.
 // Otherwise it must NOT kill: a genuinely foreign process yields an honest
-// observe-only warn, and an unverifiable owner fails CLOSED (no kill). This is
-// the single owner of that classification, shared by the sweep and the
-// `mcphub daemon recover` verb (P2b).
+// observe-only warn, and an unverifiable owner fails CLOSED (no kill). The
+// authorization classifier lives in internal/daemonrecovery and is shared
+// by this automatic sweep adapter and the operator recovery operation.
 //
 // Security contract: work-items/decisions/2026-07-02-da-supervisor-reap-verified-own-port-squatter.md.
 
-type squatterVerdict int
+type squatterVerdict = daemonrecovery.Verdict
 
 const (
-	// squatterOwnTask: every identity gate passed — the owner IS this task's
-	// disowned mcphub child (our binary at the configured path, our argv naming
-	// THIS task). Only this verdict authorizes a reap.
-	squatterOwnTask squatterVerdict = iota
-	// squatterForeign: the owner exists and was identity-read, but it is NOT a
-	// child of this task (a tracked sibling, a different binary, or argv that
-	// does not name this task). Observe-only, NEVER killed.
-	squatterForeign
-	// squatterUnverified: the owner's identity could not be established
-	// (OpenProcess/lookup failure, PID gone, or non-Windows where no
-	// start-time-proof handle exists). Fail closed — observe-only, no kill.
-	squatterUnverified
+	squatterOwnTask    = daemonrecovery.VerdictOwnTask
+	squatterForeign    = daemonrecovery.VerdictForeign
+	squatterUnverified = daemonrecovery.VerdictUnverified
 )
-
-func (v squatterVerdict) String() string {
-	switch v {
-	case squatterOwnTask:
-		return "own_task"
-	case squatterForeign:
-		return "foreign"
-	default:
-		return "unverified"
-	}
-}
 
 // squatterLookupIdentityFn resolves a PID into a full ProcessIdentity
 // (image path + verbatim command line + creation time). It is nil on
@@ -56,7 +36,7 @@ func (v squatterVerdict) String() string {
 // (MUST-FIX #6: Windows-only reap). The Windows build sets it in
 // supervise_squatter_windows.go's init. Tests swap it to drive gates without
 // shelling PowerShell; nil-ing it exercises the non-Windows observe-only path.
-var squatterLookupIdentityFn func(pid int) (process.ProcessIdentity, error)
+var squatterLookupIdentityFn func(context.Context, int) (process.ProcessIdentity, error)
 
 // squatterExeMatchesFn is the handle-truth executable gate (gate 3):
 // QueryFullProcessImageName on a live handle, which argv spoofing cannot beat.
@@ -64,20 +44,13 @@ var squatterLookupIdentityFn func(pid int) (process.ProcessIdentity, error)
 var squatterExeMatchesFn = process.PIDExecutableMatches
 
 // squatterTerminatePIDFn is the identity-re-verifying kill primitive used by
-// BOTH the sweep reap closure and the `daemon recover` verb (MUST-FIX #2: kill
-// EXCLUSIVELY via TerminatePIDWithIdentity — held-handle re-verify of
+// the automatic sweep reap paths (MUST-FIX #2: kill EXCLUSIVELY via
+// TerminatePIDWithIdentity — held-handle re-verify of
 // exe+basename+start-time, ACCESS_DENIED fails closed, no raw TerminateProcess).
-// Injectable for tests so no real process is killed.
+// Operator recovery instead owns one held generation through
+// recoverHoldProcessFn. This automatic-path seam remains injectable for tests
+// so no real process is killed.
 var squatterTerminatePIDFn = process.TerminatePIDWithIdentity
-
-// squatterEventFieldCap bounds each attacker-influenceable observed string
-// (command_line, executable_path) BEFORE it enters a supervisor event body
-// (MUST-FIX #1 / H1). supervisor_events.go truncates the ENTIRE Body to a
-// sentinel at 16 KB — NOT per-field — so an unbounded hostile CommandLine or
-// exe-path would evict the forensic scalars (squatter_pid / verdict /
-// executable_path / started_at) from the audit. Field-level pre-bounding keeps
-// the whole body well under the 16 KB cap so the identity survives.
-const squatterEventFieldCap = 2048
 
 // Audit `source` discriminators (MUST-FIX #8): every verdict/kill is tagged
 // with the trigger that produced it so an operator can tell the automatic
@@ -86,15 +59,16 @@ const squatterEventFieldCap = 2048
 // recover verb apart in supervisor-events.log. "sweep"/"recover" are the
 // pre-existing literals; these name the two NEW automatic triggers.
 const (
-	squatterSourcePreSpawn        = "prespawn"        // F1: pre-spawn port-owner gate on the controller loop
+	squatterSourcePreSpawn        = "prespawn"         // F1: pre-spawn port-owner gate on the controller loop
 	squatterSourceQuarantineSweep = "quarantine-sweep" // F3: quarantine self-heal second pass on the liveness sweep
 )
 
 // classifyPortSquatter decides whether ownerPID (the live foreign owner of
 // d.Port, per a port_owner_mismatch verdict) may be reaped as a disowned child
 // of THIS task. It is pure — no rate limiting, no kill, no event emission — so
-// both the sweep (rate-limited, killing) and `daemon recover` (operator-driven)
-// can reuse it. On squatterOwnTask (and on a post-lookup Foreign) it returns
+// automatic sweep adapters can reuse it. Operator recovery calls the shared
+// daemonrecovery classifier directly while holding the target generation. On
+// squatterOwnTask (and on a post-lookup Foreign) it returns
 // the fresh ProcessIdentity so the caller builds the kill proof and the audit
 // body from THIS pass's read (MUST-FIX #3). It fails closed to
 // squatterUnverified on any ambiguity.
@@ -116,61 +90,20 @@ const (
 //     supervise, status, daemon recover) shares mcphub.exe, so the exe gate
 //     cannot separate tasks. A prefix/substring bug here is P0 friendly-fire.
 func classifyPortSquatter(d api.SupervisorDaemon, ownerPID, selfPID int, tracked map[string]DaemonRuntimeEntry) (squatterVerdict, process.ProcessIdentity) {
-	canon := canonicalSupervisorTaskName(d.TaskName)
-
-	// Gate 1 (defensive — MUST-FIX #7): a reapable squatter is a live foreign
-	// PID distinct from the supervisor itself and from this task's own tracked
-	// child. port_owner_self is handled by its own reason before the mismatch
-	// arm; asserting it here too keeps the classifier honest if reused elsewhere.
-	if ownerPID <= 0 || (selfPID != 0 && ownerPID == selfPID) {
-		return squatterUnverified, process.ProcessIdentity{}
-	}
-	if entry, ok := tracked[canon]; ok && ownerPID == entry.CurrentPID {
-		// The owner IS this task's current child — not a squatter at all.
-		return squatterUnverified, process.ProcessIdentity{}
-	}
-
-	// Gate 2 (MUST-FIX #5): refuse to kill another tracked daemon. Iterate BOTH
-	// CurrentPID and OrphanPID of every OTHER task.
+	sharedTracked := make(map[string]daemonrecovery.RuntimeEntry, len(tracked))
 	for task, entry := range tracked {
-		if canonicalSupervisorTaskName(task) == canon {
-			continue
+		sharedTracked[task] = daemonrecovery.RuntimeEntry{CurrentPID: entry.CurrentPID, OrphanPID: entry.OrphanPID}
+	}
+	var lookupIdentity func(int) (process.ProcessIdentity, error)
+	if squatterLookupIdentityFn != nil {
+		lookupIdentity = func(pid int) (process.ProcessIdentity, error) {
+			return squatterLookupIdentityFn(context.Background(), pid)
 		}
-		if ownerPID == entry.CurrentPID || (entry.OrphanPID != 0 && ownerPID == entry.OrphanPID) {
-			return squatterForeign, process.ProcessIdentity{}
-		}
 	}
-
-	// Platform gate (MUST-FIX #6): no start-time-proof identity lookup on
-	// non-Windows → fail closed to observe-only.
-	if squatterLookupIdentityFn == nil {
-		return squatterUnverified, process.ProcessIdentity{}
-	}
-
-	// Gate 4 FIRST (SHOULD #8): a fresh identity read. Any error — OpenProcess
-	// access-denied, CIM failure, PID gone — is Unverified (fail closed). This
-	// is also the SOLE source of the kill proof (MUST-FIX #3).
-	id, err := squatterLookupIdentityFn(ownerPID)
-	if err != nil {
-		return squatterUnverified, process.ProcessIdentity{}
-	}
-
-	// Gate 3 (handle truth): the owner's image must BE this daemon's configured
-	// binary. The lookup above proved the process exists, so a miss here is a
-	// genuine different-binary owner → Foreign (distinguished from Unverified).
-	expectedExe := daemonExpectedIdentityExe(d.Command)
-	if expectedExe == "" || !squatterExeMatchesFn(ownerPID, expectedExe) {
-		return squatterForeign, id
-	}
-
-	// Gate 5 (argv, SOLE task-discriminator, MUST-FIX #4 + F2): the owner's
-	// command line must anchor THIS descriptor's subcommand in command position
-	// AND carry every discriminating flag/value pair for the task, each matched
-	// exact-token. An unknown descriptor shape → Foreign (fail-closed).
-	if !commandLineMatchesTaskArgv(tokenizeWindowsCommandLine(id.CommandLine), d) {
-		return squatterForeign, id
-	}
-	return squatterOwnTask, id
+	return daemonrecovery.ClassifyPortOwner(d, ownerPID, selfPID, sharedTracked, daemonrecovery.ClassifierDependencies{
+		LookupIdentity:    lookupIdentity,
+		ExecutableMatches: squatterExeMatchesFn,
+	})
 }
 
 // squatterKillProof builds the identity proof for the reap from a fresh
@@ -179,22 +112,15 @@ func classifyPortSquatter(d api.SupervisorDaemon, ownerPID, selfPID int, tracked
 // identity (MUST-FIX #3). A zero-value id yields an empty ExecutablePath and a
 // zero PID, so TerminatePIDWithIdentity fails closed.
 func squatterKillProof(id process.ProcessIdentity) process.PIDIdentityProof {
-	return process.PIDIdentityProof{
-		PID:            id.PID,
-		ExecutablePath: id.ExecutablePath,
-		StartedAt:      squatterStartedAt(id),
-	}
+	return daemonrecovery.KillProof(id)
 }
 
 // squatterStartedAt renders the second-precision CreationDateUnix as the
 // RFC3339Nano proof timestamp. Second precision is within
-// pidIdentityStartTolerance (2s), so TerminatePIDWithIdentity's start-time
+// pidIdentityStartTolerance (1s), so TerminatePIDWithIdentity's start-time
 // re-verify on the held handle matches deterministically.
 func squatterStartedAt(id process.ProcessIdentity) string {
-	if id.CreationDateUnix <= 0 {
-		return ""
-	}
-	return time.Unix(id.CreationDateUnix, 0).UTC().Format(time.RFC3339Nano)
+	return daemonrecovery.StartedAt(id)
 }
 
 // commandLineMatchesTaskArgv is gate 5 — the SOLE task-discriminator (MUST-FIX
@@ -211,84 +137,14 @@ func squatterStartedAt(id process.ProcessIdentity) string {
 //
 // An unknown descriptor shape yields false (→ Foreign, fail-closed).
 func commandLineMatchesTaskArgv(tokens []string, d api.SupervisorDaemon) bool {
-	if isSerenaProxyDescriptor(d) {
-		tn := canonicalSupervisorTaskName(d.TaskName)
-		return tn != "" &&
-			hasSubcommandAnchor(tokens, "daemon", "serena-proxy") &&
-			commandLineHasAdjacentTokenPair(tokens, "--task-name", tn)
-	}
-	if isLSPWorkspaceProxyDescriptor(d) {
-		ws := lspWorkspaceProxyArgValue(d, "--workspace")
-		lang := lspWorkspaceProxyArgValue(d, "--language")
-		return ws != "" && lang != "" &&
-			hasSubcommandAnchor(tokens, "daemon", "workspace-proxy") &&
-			commandLineHasAdjacentTokenPair(tokens, "--workspace", ws) &&
-			commandLineHasAdjacentTokenPair(tokens, "--language", lang)
-	}
-	if isGlobalDaemonDescriptor(d) {
-		// Resolve identity through the owner (args-recovery when the struct fields
-		// are blank), so a blank-field legacy row (Server=="" but args carry
-		// --server/--daemon) classifies its own squatter correctly WITHOUT F5's
-		// identity-heal. A field/argv mismatch → owner ok=false → gate fails →
-		// Foreign (fail-closed), the correct conservative outcome for a corrupt
-		// descriptor.
-		server, daemon, ok := api.DescriptorServerDaemon(d)
-		return ok && server != "" && daemon != "" &&
-			hasGlobalDaemonAnchor(tokens) &&
-			commandLineHasAdjacentTokenPair(tokens, "--server", server) &&
-			commandLineHasAdjacentTokenPair(tokens, "--daemon", daemon)
-	}
-	return false
-}
-
-// isGlobalDaemonDescriptor reports whether a descriptor is a global/legacy
-// server daemon (`daemon --server … --daemon …`). It EXCLUDES the proxy shapes
-// and anything that is not a bare `daemon` subcommand, so sibling subcommands
-// (gui / supervise / status / restart / relay / daemon recover) never resolve a
-// discriminator (MUST-FIX #4 — those must classify Foreign). Re-exports the
-// owner-package api.DescriptorHasGlobalDaemonArgv so "is a global daemon argv" is
-// single-owned and the squatter classifier can never drift from the match-select
-// consumers that gate their task-name fallback on the same shape (bot PR #505 r6).
-func isGlobalDaemonDescriptor(d api.SupervisorDaemon) bool {
-	return api.DescriptorHasGlobalDaemonArgv(d)
-}
-
-// hasSubcommandAnchor reports whether the observed argv begins (after argv[0],
-// the exe) with the exact subcommand token sequence sub. tokens[0] is the exe;
-// the subcommand starts at tokens[1].
-func hasSubcommandAnchor(tokens []string, sub ...string) bool {
-	if len(tokens) < 1+len(sub) {
-		return false
-	}
-	for i, s := range sub {
-		if tokens[1+i] != s {
-			return false
-		}
-	}
-	return true
-}
-
-// hasGlobalDaemonAnchor requires the observed argv to be `<exe> daemon --…`:
-// tokens[1] == "daemon" AND the token after it is a flag (not a proxy
-// subcommand). A global daemon is spawned as `mcphub daemon --server X --daemon
-// Y`; a sibling `mcphub relay --server X --daemon Y` has tokens[1]=="relay" and
-// a `mcphub daemon serena-proxy …` has a non-flag token after "daemon" — both
-// rejected (F2: sibling-subcommand rejection is required by D-A even though
-// those siblings do not bind the daemon port today).
-func hasGlobalDaemonAnchor(tokens []string) bool {
-	return len(tokens) >= 3 && tokens[1] == "daemon" && strings.HasPrefix(tokens[2], "-")
+	return daemonrecovery.CommandLineMatchesTaskArgv(tokens, d)
 }
 
 // commandLineHasAdjacentTokenPair reports whether tokens contains flag
 // immediately followed by value, each an EXACT whole-token match (MUST-FIX #4:
 // no substring/prefix matching — `serena-b1` must not match `serena-b133f336`).
 func commandLineHasAdjacentTokenPair(tokens []string, flag, value string) bool {
-	for i := 0; i+1 < len(tokens); i++ {
-		if tokens[i] == flag && tokens[i+1] == value {
-			return true
-		}
-	}
-	return false
+	return daemonrecovery.CommandLineHasAdjacentTokenPair(tokens, flag, value)
 }
 
 // tokenizeWindowsCommandLine splits a Windows command line into argv tokens.
@@ -311,80 +167,16 @@ func commandLineHasAdjacentTokenPair(tokens []string, flag, value string) bool {
 // span emits one literal `"` (the double-double-quote rule); backslashes not
 // before a quote are literal; unquoted whitespace delimits.
 func tokenizeWindowsCommandLine(s string) []string {
-	var tokens []string
-	for len(s) > 0 {
-		if s[0] == ' ' || s[0] == '\t' {
-			s = s[1:]
-			continue
-		}
-		var arg []byte
-		arg, s = readNextWindowsArg(s)
-		tokens = append(tokens, string(arg))
-	}
-	return tokens
-}
-
-// readNextWindowsArg splits the leading argument off cmd and returns it plus the
-// remainder. Byte-oriented (multi-byte UTF-8 literal bytes fall through the
-// default case unchanged, reconstructing valid UTF-8). Mirrors os.readNextArg.
-func readNextWindowsArg(cmd string) (arg []byte, rest string) {
-	var b []byte
-	var inquote bool
-	var nslash int
-	for ; len(cmd) > 0; cmd = cmd[1:] {
-		c := cmd[0]
-		switch c {
-		case ' ', '\t':
-			if !inquote {
-				return appendWindowsBackslashes(b, nslash), cmd[1:]
-			}
-		case '"':
-			b = appendWindowsBackslashes(b, nslash/2)
-			if nslash%2 == 0 {
-				// Double-double-quote rule: a `""` inside a quoted span is one
-				// literal quote (matches shell32 CommandLineToArgvW empirically —
-				// see the differential test).
-				if inquote && len(cmd) > 1 && cmd[1] == '"' {
-					b = append(b, c)
-					cmd = cmd[1:]
-				}
-				inquote = !inquote
-			} else {
-				b = append(b, c)
-			}
-			nslash = 0
-			continue
-		case '\\':
-			nslash++
-			continue
-		}
-		b = appendWindowsBackslashes(b, nslash)
-		nslash = 0
-		b = append(b, c)
-	}
-	return appendWindowsBackslashes(b, nslash), ""
-}
-
-func appendWindowsBackslashes(b []byte, n int) []byte {
-	for ; n > 0; n-- {
-		b = append(b, '\\')
-	}
-	return b
+	return daemonrecovery.TokenizeWindowsCommandLine(s)
 }
 
 // boundSquatterField caps an attacker-influenceable observed string to
-// squatterEventFieldCap bytes, truncating on a UTF-8 rune boundary so the
+// daemonrecovery.BoundEventField's shared 2048-byte limit, truncating on a
+// UTF-8 rune boundary so the
 // emitted body stays valid and — critically — well under the 16 KB whole-body
 // cap that would otherwise evict the forensic scalars (MUST-FIX #1 / H1).
 func boundSquatterField(s string) string {
-	if len(s) <= squatterEventFieldCap {
-		return s
-	}
-	cut := squatterEventFieldCap
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "…[truncated]"
+	return daemonrecovery.BoundEventField(s)
 }
 
 // squatterReapFunc is the identity-gated kill capability. The production
@@ -615,7 +407,14 @@ func handleSquatterMismatchOnSweep(
 		globalCount := reap.limiter.recordReap(task, now)
 		proof := squatterKillProof(id)
 		err := reap.reapFn(d, proof)
-		if err != nil && !errors.Is(err, process.ErrProcessAlreadyExited) {
+		if errors.Is(err, process.ErrProcessAlreadyExited) {
+			emitSquatterEvent(events, "daemon-port-squatter-already-exited", "sweep", verdict, d, ownerPID, id, map[string]any{
+				"reap_count_window": globalCount,
+				"note":              "verified-own port squatter had already exited; no reap was performed; restarting this task to rebind its port",
+			})
+			return squatterSweepReapedFallThrough
+		}
+		if err != nil {
 			emitSquatterEvent(events, "daemon-port-squatter-reap-failed", "sweep", verdict, d, ownerPID, id, map[string]any{
 				"err":               err.Error(),
 				"reap_count_window": globalCount,
@@ -625,8 +424,7 @@ func handleSquatterMismatchOnSweep(
 		}
 		emitSquatterEvent(events, "daemon-port-squatter-reaped", "sweep", verdict, d, ownerPID, id, map[string]any{
 			"reap_count_window": globalCount,
-			"already_exited":    errors.Is(err, process.ErrProcessAlreadyExited),
-			"note":              "verified-own port squatter reaped; restarting this task to rebind its port",
+			"note":              "verified-own port squatter exit confirmed; restarting this task to rebind its port",
 		})
 		return squatterSweepReapedFallThrough
 	}
@@ -641,49 +439,7 @@ func handleSquatterMismatchOnSweep(
 // ("sweep" vs "recover"); actor names the OS user so an operator-driven kill is
 // attributable (F1 / D-A Security-argument clause 6).
 func emitSquatterEvent(events *api.SupervisorEventLog, event, source string, verdict squatterVerdict, d api.SupervisorDaemon, ownerPID int, id process.ProcessIdentity, extra map[string]any) {
-	if events == nil {
-		return
-	}
-	body := map[string]any{
-		"squatter_pid": ownerPID,
-		"verdict":      verdict.String(),
-		"port":         d.Port,
-		"source":       source,
-		"actor":        api.CurrentOSUser(),
-	}
-	if id.ExecutablePath != "" {
-		body["executable_path"] = boundSquatterField(id.ExecutablePath)
-	}
-	if id.CommandLine != "" {
-		body["command_line"] = boundSquatterField(id.CommandLine)
-	}
-	if started := squatterStartedAt(id); started != "" {
-		body["started_at"] = started
-	}
-	for k, v := range extra {
-		body[k] = v
-	}
-	_ = events.Emit(api.SupervisorEvent{
-		Severity: "warn",
-		Source:   squatterEnvelopeSource(source),
-		Event:    event,
-		TaskName: canonicalSupervisorTaskName(d.TaskName),
-		Body:     body,
-	})
-}
-
-// squatterEnvelopeSource maps the body `source` discriminator to an accurate
-// event-envelope Source (OBS-2). The liveness sweep (P2a "sweep" + F3
-// "quarantine-sweep") genuinely runs on the liveness goroutine → "liveness"; the
-// F1 "prespawn" trigger runs on the controller's restart-policy port-gate worker,
-// NOT the liveness sweep, so tagging its envelope "liveness" was inaccurate →
-// "restart-policy". The body `source` keeps the fine-grained discriminator
-// (prespawn / sweep / quarantine-sweep / recover) unchanged.
-func squatterEnvelopeSource(source string) string {
-	if source == squatterSourcePreSpawn {
-		return "restart-policy"
-	}
-	return "liveness"
+	daemonrecovery.EmitAuditEvent(events, event, source, verdict, d, ownerPID, id, extra)
 }
 
 // squatterAutoOutcome is the result of the shared automatic-trigger port-owner
@@ -702,8 +458,9 @@ const (
 	// (lookup failure / non-Windows / owner is this task's own tracked child) —
 	// fail closed, no kill.
 	squatterAutoUnverified
-	// squatterAutoReaped: a verified-own disowned child was reaped (or was
-	// already gone). The caller may proceed to (re)spawn into the freed port.
+	// squatterAutoReaped: a verified-own disowned child was confirmed reaped or
+	// was already gone. The audit event distinguishes those outcomes; the caller
+	// may proceed to (re)spawn into the freed port in either case.
 	squatterAutoReaped
 	// squatterAutoReapFailed: the owner was verified-own but the identity-gated
 	// kill failed — the port is still held; the caller must NOT spawn over it.
@@ -719,9 +476,9 @@ const (
 // triggers (F1 pre-spawn gate, F3 quarantine self-heal). The caller has already
 // resolved the effective port and probed a live foreign owner (ownerPID > 0);
 // this decides whether that owner is a reapable disowned child of THIS task and,
-// if so, kills it EXCLUSIVELY via squatterTerminatePIDFn (MUST-FIX #2 — the same
-// held-handle-re-verifying primitive `daemon recover` uses; no raw
-// TerminateProcess, no ACCESS_DENIED retry). Every verdict/kill is audited with
+// if so, kills it EXCLUSIVELY via squatterTerminatePIDFn (MUST-FIX #2 — the
+// automatic adapter over the same held-generation process primitive used by
+// operator recovery; no raw TerminateProcess, no ACCESS_DENIED retry). Every verdict/kill is audited with
 // the caller's `source` (MUST-FIX #8) and H1-bounded identity fields.
 //
 // It deliberately mirrors handleSquatterMismatchOnSweep's rate-limit + classify
@@ -779,7 +536,14 @@ func reapSquatterForAutomaticTrigger(
 		globalCount := limiter.recordReap(task, now)
 		proof := squatterKillProof(id)
 		err := squatterTerminatePIDFn(proof)
-		if err != nil && !errors.Is(err, process.ErrProcessAlreadyExited) {
+		if errors.Is(err, process.ErrProcessAlreadyExited) {
+			emitSquatterEvent(events, "daemon-port-squatter-already-exited", source, verdict, d, ownerPID, id, map[string]any{
+				"reap_count_window": globalCount,
+				"note":              "verified-own port squatter had already exited; no reap was performed",
+			})
+			return squatterAutoReaped
+		}
+		if err != nil {
 			emitSquatterEvent(events, "daemon-port-squatter-reap-failed", source, verdict, d, ownerPID, id, map[string]any{
 				"err":               err.Error(),
 				"reap_count_window": globalCount,
@@ -789,8 +553,7 @@ func reapSquatterForAutomaticTrigger(
 		}
 		emitSquatterEvent(events, "daemon-port-squatter-reaped", source, verdict, d, ownerPID, id, map[string]any{
 			"reap_count_window": globalCount,
-			"already_exited":    errors.Is(err, process.ErrProcessAlreadyExited),
-			"note":              "verified-own port squatter reaped",
+			"note":              "verified-own port squatter exit confirmed",
 		})
 		return squatterAutoReaped
 	}

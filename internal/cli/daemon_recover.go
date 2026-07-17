@@ -6,29 +6,31 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
-	"mcp-local-hub/internal/api/daemon_env_overlay"
+	"mcp-local-hub/internal/daemonrecovery"
 	"mcp-local-hub/internal/process"
 )
 
 // Test seams over the production surfaces `daemon recover` composes: the state
-// dir, the intent/state readers, the port-owner probe, and the force-respawn
-// IPC. Tests swap these to drive the flow without a live supervisor or real
-// kills. squatterTerminatePIDFn (shared with the sweep) is the kill primitive.
+// dir, the intent/state readers, the port-owner and supervisor probes, and the
+// force-respawn IPC. Tests swap these to drive the flow without a live
+// supervisor or real kills. recoverHoldProcessFn supplies the held-generation
+// kill primitive; recovery does not use the automatic sweep's
+// squatterTerminatePIDFn seam.
 var (
-	recoverStateDirFn   = api.DaemonStateDir
-	recoverReadIntentFn = api.ReadSupervisorIntent
-	recoverReadStateFn  = api.ReadSupervisorState
-	recoverPortOwnerFn  = api.LoopbackPortOwnerPID
-	recoverSelfPIDFn    = os.Getpid
-	recoverRespawnFn    = func(ctx context.Context, task string, force bool) (api.RespawnResult, error) {
+	recoverStateDirFn        = api.DaemonStateDir
+	recoverReadIntentFn      = api.ReadSupervisorIntent
+	recoverReadStateFn       = api.ReadSupervisorState
+	recoverPortOwnerFn       = api.LoopbackPortOwnerPIDContext
+	recoverSelfPIDFn         = os.Getpid
+	recoverHoldProcessFn     = process.HoldPIDForTermination
+	recoverProbeSupervisorFn = daemonrecovery.ProductionDependencies().ProbeSupervisor
+	recoverRespawnFn         = func(ctx context.Context, task string, force bool) (api.RespawnResult, error) {
 		return api.DialSupervisorIPCRespawn(ctx, task, force, 15000)
 	}
 	// recoverPortFreePollInterval / recoverPortFreeTimeout bound the post-kill
@@ -41,16 +43,25 @@ var (
 // daemon-recover exit codes (command-scoped; propagated via forceExit →
 // cmd/mcphub/main.go's ExitCode() branch):
 //
-//	2 — unknown task (not in supervisor-intent.json) OR intent unreadable
-//	3 — refused: the port owner is a foreign / unverifiable process (no kill),
-//	    OR the operator declined the confirmation prompt
-//	4 — force respawn returned a non-success supervisor code
-//	5 — supervisor unreachable (no IPC owner / dial failed)
+//	2 — invalid/unknown task, or recovery-state read failure: state-directory
+//	    resolution; unreadable/nil supervisor-intent.json or supervisor-state.json;
+//	    or a missing target state row (the respawn-setup special case exits 5)
+//	3 — FailureConfirmationRequired or refused: the operator declined/missed
+//	    confirmation, the port owner is foreign / unverifiable (no kill), OR the
+//	    final owner recheck timed out before any kill
+//	4 — force respawn returned a non-success supervisor code, OR recovery reached
+//	    an unclassified failure kind
+//	5 — pre-kill supervisor probe or respawn call unavailable (no IPC owner / dial
+//	    or local setup failed),
+//	    or the request was canceled before completion
+//	6 — refused before termination because the configured recovery budget could
+//	    not preserve the mandatory detached respawn reservation
 const (
-	daemonRecoverExitUnknownTask  = 2
-	daemonRecoverExitRefused      = 3
-	daemonRecoverExitRespawnError = 4
-	daemonRecoverExitUnreachable  = 5
+	daemonRecoverExitUnknownTask        = 2
+	daemonRecoverExitRefused            = 3
+	daemonRecoverExitRespawnError       = 4
+	daemonRecoverExitUnreachable        = 5
+	daemonRecoverExitBudgetInsufficient = 6
 )
 
 // newDaemonRecoverCmd builds `mcphub daemon recover <task> [--yes]`: reap a
@@ -89,204 +100,38 @@ handle. On other platforms a bound foreign owner is refused (no kill).`,
 
 func runDaemonRecover(cmd *cobra.Command, taskArg string, yes bool) error {
 	out := cmd.OutOrStdout()
-	errOut := cmd.ErrOrStderr()
-
-	stateDir, err := recoverStateDirFn()
-	if err != nil {
-		fmt.Fprintf(errOut, "error: resolve state dir: %v\n", err)
-		return forceExit(daemonRecoverExitUnknownTask)
-	}
-
-	norm := daemon_env_overlay.NormalizeOverlayKey(taskArg)
-	intent, err := recoverReadIntentFn(filepath.Join(stateDir, "supervisor-intent.json"))
-	if err != nil || intent == nil {
-		fmt.Fprintf(errOut, "error: read supervisor-intent.json: %v\n", err)
-		return forceExit(daemonRecoverExitUnknownTask)
-	}
-	var desc *api.SupervisorDaemon
-	for i := range intent.Daemons {
-		if daemon_env_overlay.NormalizeOverlayKey(intent.Daemons[i].TaskName) == norm {
-			desc = &intent.Daemons[i]
-			break
-		}
-	}
-	if desc == nil {
-		fmt.Fprintf(errOut, "error: task %q not found in supervisor-intent.json\n", taskArg)
-		if known := knownRecoverTaskNames(intent); len(known) > 0 {
-			fmt.Fprintf(errOut, "known tasks:\n")
-			for _, k := range known {
-				fmt.Fprintf(errOut, "  %s\n", k)
-			}
-		}
-		return forceExit(daemonRecoverExitUnknownTask)
-	}
-
-	// Port disposition: identity-gate and reap a verified-own squatter before
-	// the respawn. Skip when the port is unbound, unprobeable, or owned by this
-	// task's own live child.
-	if reapErr := recoverReapPortSquatter(cmd, *desc, norm, stateDir, yes); reapErr != nil {
-		return reapErr
-	}
-
-	// Force respawn through the supervisor (never a direct spawn — ownership
-	// stays with the controller). force=true bypasses the quarantine refusal and
-	// resets the failure window.
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	res, respErr := recoverRespawnFn(ctx, norm, true)
-	if respErr != nil {
-		fmt.Fprintf(errOut, "error: force respawn: %v\n", respErr)
-		return forceExit(daemonRecoverExitUnreachable)
-	}
-	if res.Code == "SUPERVISOR_UNAVAILABLE" {
-		fmt.Fprintf(errOut, "error: supervisor not reachable: %s\n", res.Message)
-		fmt.Fprintf(errOut, "hint: start it with `mcphub supervise` (or ensure the autostart task is enabled), then retry.\n")
-		return forceExit(daemonRecoverExitUnreachable)
-	}
-	if !res.Success {
-		fmt.Fprintf(errOut, "error: force respawn refused [%s]: %s\n", res.Code, res.Message)
-		return forceExit(daemonRecoverExitRespawnError)
-	}
-	fmt.Fprintf(out, "recovered %s: forced respawn accepted by the supervisor.\n", norm)
-	return nil
-}
+	deps := daemonrecovery.ProductionDependencies()
+	deps.StateDir = recoverStateDirFn
+	deps.ReadIntent = recoverReadIntentFn
+	deps.ReadState = recoverReadStateFn
+	deps.PortOwner = recoverPortOwnerFn
+	deps.SelfPID = recoverSelfPIDFn
+	deps.LookupIdentity = squatterLookupIdentityFn
+	deps.ExecutableMatches = squatterExeMatchesFn
+	deps.HoldProcess = recoverHoldProcessFn
+	deps.ProbeSupervisor = recoverProbeSupervisorFn
+	deps.Respawn = recoverRespawnFn
+	deps.PortPollInterval = recoverPortFreePollInterval
+	deps.PortWaitTimeout = recoverPortFreeTimeout
 
-// recoverReapPortSquatter classifies the current owner of the daemon's port and
-// reaps ONLY a verified-own squatter. Returns nil to continue to the respawn
-// (nothing to reap, or reap succeeded), or a forceExit error to abort (foreign/
-// unverifiable owner refused, or operator declined). Never kills on ambiguity.
-func recoverReapPortSquatter(cmd *cobra.Command, desc api.SupervisorDaemon, norm, stateDir string, yes bool) error {
-	out := cmd.OutOrStdout()
-	errOut := cmd.ErrOrStderr()
-
-	// Resolve the effective port through the owner: a legacy Port=0 descriptor
-	// whose manifest declares a port is now reaped like any other, not skipped.
-	// (This replaces the old desc.Port<=0 skip + the 3-way F5-modelling hint —
-	// once recover resolves the port itself, a "restart supervise to backfill"
-	// hint is obsolete, and F5 is being deleted.) A genuine resolve-miss
-	// (manifest missing/renamed, or a non-manifest-daemon / portless row) has no
-	// port to fight over — warn and return to the force respawn.
-	if port, ok := api.EffectiveDaemonPort(desc); ok && port > 0 {
-		desc.Port = port
-	} else {
-		fmt.Fprintf(errOut, "warning: descriptor for %s has no resolvable port (its server manifest is missing/renamed, or it is not a manifest-backed daemon); the port-squatter check was SKIPPED (a lost-child squatter, if present, was NOT reaped). Verify the server is still installed (`mcphub install`), or remove this stale supervisor-intent row.\n", norm)
-		return nil // no port to fight over
-	}
-	ownerPID, ok, err := recoverPortOwnerFn(desc.Port)
+	result, err := daemonrecovery.ExecuteWithDependencies(ctx, taskArg, daemonrecovery.Options{
+		Confirmed: yes,
+		ConfirmReap: func(daemonrecovery.ReapCandidate) bool {
+			return confirmRecoverReap(cmd)
+		},
+		Notify: func(notification daemonrecovery.Notification) {
+			printRecoverNotification(cmd, notification)
+		},
+	}, deps)
 	if err != nil {
-		fmt.Fprintf(out, "note: could not determine the owner of port %d (%v); proceeding to force respawn without a reap.\n", desc.Port, err)
-		return nil
+		return printRecoverError(cmd, taskArg, err)
 	}
-	if !ok || ownerPID <= 0 {
-		return nil // port unbound — nothing squatting it
-	}
-
-	tracked := recoverTrackedEntries(stateDir)
-	if entry, ok := tracked[canonicalSupervisorTaskName(norm)]; ok && ownerPID == entry.CurrentPID {
-		fmt.Fprintf(out, "note: port %d is owned by this task's own tracked child (pid %d); skipping reap.\n", desc.Port, ownerPID)
-		return nil
-	}
-
-	verdict, id := classifyPortSquatter(desc, ownerPID, recoverSelfPIDFn(), tracked)
-	// id.ExecutablePath / id.CommandLine come from a FOREIGN (or unverified) process
-	// whose command line the attacker fully controls (Windows CreateProcessW accepts
-	// arbitrary strings). Strip terminal-control bytes before printing to the
-	// operator's TTY: ESC/OSC/CSI/BEL in a crafted command line could otherwise
-	// overwrite or hide the "refused / NOT a verified child" warning, forge a benign
-	// command line, or inject an OSC-8 phishing hyperlink — subverting the very
-	// trust decision this output exists to inform. stripTerminalControls is applied
-	// at the TERMINAL sink only (not inside boundSquatterField), so the audit event
-	// body keeps the raw bytes (json.Marshal escapes them faithfully for forensics).
-	switch verdict {
-	case squatterForeign, squatterUnverified:
-		fmt.Fprintf(errOut, "refused: port %d is held by pid %d, which is NOT a verified disowned child of %s (%s).\n", desc.Port, ownerPID, norm, verdict)
-		if id.ExecutablePath != "" {
-			fmt.Fprintf(errOut, "  executable: %s\n", boundSquatterField(stripTerminalControls(id.ExecutablePath)))
-		}
-		if id.CommandLine != "" {
-			fmt.Fprintf(errOut, "  command line: %s\n", boundSquatterField(stripTerminalControls(id.CommandLine)))
-		}
-		fmt.Fprintf(errOut, "  This tool will not kill a foreign or unverifiable process. Investigate and stop it yourself, then retry.\n")
-		// Audit the REFUSAL too (D-A clause 6): even a not-killed foreign/
-		// unverifiable owner is an operator-attributable decision.
-		recoverEmitSquatterAudit(stateDir, "daemon-port-squatter-"+verdict.String(), verdict, desc, ownerPID, id, map[string]any{
-			"note": "operator recover refused: port owner is not a verified disowned child of this task; NOT killed",
-		})
-		return forceExit(daemonRecoverExitRefused)
-	case squatterOwnTask:
-		fmt.Fprintf(out, "port %d is squatted by a verified-own disowned child of %s:\n", desc.Port, norm)
-		fmt.Fprintf(out, "  pid:        %d\n", ownerPID)
-		fmt.Fprintf(out, "  executable: %s\n", boundSquatterField(stripTerminalControls(id.ExecutablePath)))
-		fmt.Fprintf(out, "  command line: %s\n", boundSquatterField(stripTerminalControls(id.CommandLine)))
-		if started := squatterStartedAt(id); started != "" {
-			fmt.Fprintf(out, "  started_at: %s\n", started)
-		}
-		if !yes && !confirmRecoverReap(cmd) {
-			fmt.Fprintf(out, "aborted: no process was killed and no respawn was forced.\n")
-			return forceExit(daemonRecoverExitRefused)
-		}
-		proof := squatterKillProof(id)
-		if killErr := squatterTerminatePIDFn(proof); killErr != nil && !errors.Is(killErr, process.ErrProcessAlreadyExited) {
-			fmt.Fprintf(errOut, "error: reap pid %d failed: %v\n", ownerPID, killErr)
-			recoverEmitSquatterAudit(stateDir, "daemon-port-squatter-reap-failed", verdict, desc, ownerPID, id, map[string]any{
-				"err":  killErr.Error(),
-				"note": "operator recover: identity-gated reap failed",
-			})
-			return forceExit(daemonRecoverExitRefused)
-		}
-		fmt.Fprintf(out, "reaped pid %d.\n", ownerPID)
-		// Audit the KILL (D-A clause 6) with the operator as actor.
-		recoverEmitSquatterAudit(stateDir, "daemon-port-squatter-reaped", verdict, desc, ownerPID, id, map[string]any{
-			"note": "operator recover: verified-own port squatter reaped, forcing a respawn",
-		})
-		waitRecoverPortFree(cmd, desc.Port)
-		return nil
-	}
+	fmt.Fprintf(out, "recovered %s: forced respawn accepted by the supervisor.\n", result.TaskName)
 	return nil
-}
-
-// recoverEmitSquatterAudit writes a supervisor-events.log entry for an
-// operator-driven recover outcome, reusing emitSquatterEvent's H1 field-bounding
-// and setting source="recover" + actor=OS user (D-A Security-argument clause 6:
-// every verdict/kill audited). Best-effort — an audit failure (unwritable log)
-// must NEVER fail the command (mirrors emitStrictModeChangedEvent).
-func recoverEmitSquatterAudit(stateDir, event string, verdict squatterVerdict, d api.SupervisorDaemon, ownerPID int, id process.ProcessIdentity, extra map[string]any) {
-	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
-	if err != nil {
-		return
-	}
-	defer func() { _ = logger.Close() }()
-	emitSquatterEvent(logger, event, "recover", verdict, d, ownerPID, id, extra)
-}
-
-// recoverTrackedEntries reads supervisor-state.json into the minimal
-// per-task PID map classifyPortSquatter needs for its own-child + tracked-
-// sibling gates. A missing/unreadable state file yields an empty map (the
-// classifier still applies its exe + argv gates).
-func recoverTrackedEntries(stateDir string) map[string]DaemonRuntimeEntry {
-	out := map[string]DaemonRuntimeEntry{}
-	st, err := recoverReadStateFn(filepath.Join(stateDir, "supervisor-state.json"))
-	if err != nil || st == nil {
-		return out
-	}
-	for task, ds := range st.Daemons {
-		out[canonicalSupervisorTaskName(task)] = DaemonRuntimeEntry{
-			CurrentPID: ds.CurrentPID,
-			OrphanPID:  ds.OrphanPID,
-		}
-	}
-	return out
-}
-
-func knownRecoverTaskNames(intent *api.SupervisorIntentFile) []string {
-	names := make([]string, 0, len(intent.Daemons))
-	for _, d := range intent.Daemons {
-		names = append(names, canonicalSupervisorTaskName(d.TaskName))
-	}
-	sort.Strings(names)
-	return names
 }
 
 // confirmRecoverReap prompts for an interactive y/N confirmation. A non-tty /
@@ -306,17 +151,114 @@ func confirmRecoverReap(cmd *cobra.Command) bool {
 	}
 }
 
-// waitRecoverPortFree polls until the reaped squatter's port is unbound
-// (bounded), so the subsequent force respawn does not race a still-closing
-// socket. Best-effort — a still-bound port is reported but not fatal.
-func waitRecoverPortFree(cmd *cobra.Command, port int) {
-	deadline := time.Now().Add(recoverPortFreeTimeout)
-	for time.Now().Before(deadline) {
-		_, ok, err := recoverPortOwnerFn(port)
-		if err == nil && !ok {
-			return
+func printRecoverNotification(cmd *cobra.Command, notification daemonrecovery.Notification) {
+	out := cmd.OutOrStdout()
+	errOut := cmd.ErrOrStderr()
+	switch notification.Kind {
+	case daemonrecovery.NotificationPortUnresolvable:
+		fmt.Fprintf(errOut, "warning: descriptor for %s has no resolvable port (its server manifest is missing/renamed, or it is not a manifest-backed daemon); the port-squatter check was SKIPPED (a lost-child squatter, if present, was NOT reaped). Verify the server is still installed (`mcphub install`), or remove this stale supervisor-intent row.\n", notification.TaskName)
+	case daemonrecovery.NotificationProbeUnavailable:
+		fmt.Fprintf(out, "note: could not determine the owner of port %d (%v); proceeding to force respawn without a reap.\n", notification.Port, notification.Cause)
+	case daemonrecovery.NotificationTrackedChild:
+		fmt.Fprintf(out, "note: port %d is owned by this task's own tracked child (pid %d); skipping reap.\n", notification.Port, notification.PID)
+	case daemonrecovery.NotificationReapCandidate:
+		if notification.Candidate != nil {
+			printRecoverCandidate(out, *notification.Candidate)
 		}
-		time.Sleep(recoverPortFreePollInterval)
+	case daemonrecovery.NotificationReaped:
+		fmt.Fprintf(out, "reaped pid %d.\n", notification.PID)
+	case daemonrecovery.NotificationTerminationUnconfirmed:
+		fmt.Fprintf(errOut, "warning: termination was committed for pid %d, but exit was not confirmed (%v); the mandatory force-respawn request was still dispatched.\n", notification.PID, notification.Cause)
+	case daemonrecovery.NotificationAlreadyExited:
+		fmt.Fprintf(out, "pid %d had already exited before the reap; proceeding to force respawn.\n", notification.PID)
+	case daemonrecovery.NotificationPortWaitTimeout:
+		if notification.Duration <= 0 {
+			fmt.Fprintf(errOut, "note: port %d release wait was skipped to preserve the mandatory respawn reservation; the post-termination port state was not observed, and the respawn is being forced anyway.\n", notification.Port)
+		} else {
+			fmt.Fprintf(errOut, "note: port %d still appears bound after %s; forcing the respawn anyway.\n", notification.Port, notification.Duration)
+		}
 	}
-	fmt.Fprintf(cmd.ErrOrStderr(), "note: port %d still appears bound after %s; forcing the respawn anyway.\n", port, recoverPortFreeTimeout)
+}
+
+func printRecoverCandidate(out interface{ Write([]byte) (int, error) }, candidate daemonrecovery.ReapCandidate) {
+	identity := candidate.Identity
+	fmt.Fprintf(out, "port %d is squatted by a verified-own disowned child of %s:\n", candidate.Port, candidate.TaskName)
+	fmt.Fprintf(out, "  pid:        %d\n", candidate.PID)
+	fmt.Fprintf(out, "  executable: %s\n", boundSquatterField(stripTerminalControls(identity.ExecutablePath)))
+	fmt.Fprintf(out, "  command line: %s\n", boundSquatterField(stripTerminalControls(identity.CommandLine)))
+	if started := squatterStartedAt(identity); started != "" {
+		fmt.Fprintf(out, "  started_at: %s\n", started)
+	}
+}
+
+func printRecoverError(cmd *cobra.Command, taskArg string, err error) error {
+	errOut := cmd.ErrOrStderr()
+	var operationErr *daemonrecovery.OperationError
+	if !errors.As(err, &operationErr) {
+		fmt.Fprintf(errOut, "error: daemon recovery: %v\n", err)
+		return forceExit(daemonRecoverExitRespawnError)
+	}
+	if operationErr.Kind == daemonrecovery.FailureStateRead && errors.Is(operationErr.Cause, api.ErrRespawnSetupFailure) {
+		fmt.Fprintf(errOut, "error: force respawn call could not be prepared: %v\n", operationErr)
+		return forceExit(daemonRecoverExitUnreachable)
+	}
+	switch operationErr.Kind {
+	case daemonrecovery.FailureInvalidArgs, daemonrecovery.FailureStateRead, daemonrecovery.FailureUnknownTask:
+		if operationErr.Kind == daemonrecovery.FailureUnknownTask {
+			fmt.Fprintf(errOut, "error: task %q not found in supervisor-intent.json\n", taskArg)
+			if len(operationErr.KnownTasks) > 0 {
+				fmt.Fprintln(errOut, "known tasks:")
+				for _, taskName := range operationErr.KnownTasks {
+					fmt.Fprintf(errOut, "  %s\n", taskName)
+				}
+			}
+		} else {
+			fmt.Fprintf(errOut, "error: recover state: %v\n", operationErr)
+		}
+		return forceExit(daemonRecoverExitUnknownTask)
+	case daemonrecovery.FailureConfirmationRequired, daemonrecovery.FailureRefusedPortOwner:
+		candidate := operationErr.Candidate
+		if candidate != nil && errors.Is(operationErr.Cause, daemonrecovery.ErrSupervisorTrackedChild) {
+			fmt.Fprintf(errOut, "refused: pid %d is now a supervisor-tracked child of %s; no process was killed and no respawn was forced.\n", candidate.PID, candidate.TaskName)
+		} else if candidate != nil && candidate.Verdict != daemonrecovery.VerdictOwnTask {
+			identity := candidate.Identity
+			fmt.Fprintf(errOut, "refused: port %d is held by pid %d, which is NOT a verified disowned child of %s (%s).\n", candidate.Port, candidate.PID, candidate.TaskName, candidate.Verdict)
+			if identity.ExecutablePath != "" {
+				fmt.Fprintf(errOut, "  executable: %s\n", boundSquatterField(stripTerminalControls(identity.ExecutablePath)))
+			}
+			if identity.CommandLine != "" {
+				fmt.Fprintf(errOut, "  command line: %s\n", boundSquatterField(stripTerminalControls(identity.CommandLine)))
+			}
+			fmt.Fprintln(errOut, "  This tool will not kill a foreign or unverifiable process. Investigate and stop it yourself, then retry.")
+		} else if operationErr.Cause != nil && candidate != nil {
+			fmt.Fprintf(errOut, "error: reap pid %d failed: %v\n", candidate.PID, operationErr.Cause)
+		} else {
+			fmt.Fprintln(cmd.OutOrStdout(), "aborted: no process was killed and no respawn was forced.")
+		}
+		return forceExit(daemonRecoverExitRefused)
+	case daemonrecovery.FailureSupervisorUnavailable:
+		message := operationErr.Error()
+		if operationErr.Respawn.Message != "" {
+			message = operationErr.Respawn.Message
+		}
+		fmt.Fprintf(errOut, "error: supervisor not reachable: %s\n", message)
+		fmt.Fprintln(errOut, "hint: start it with `mcphub supervise` (or ensure the autostart task is enabled), then retry.")
+		return forceExit(daemonRecoverExitUnreachable)
+	case daemonrecovery.FailureRequestCanceled:
+		fmt.Fprintln(errOut, "error: recovery was canceled before any process termination was committed.")
+		return forceExit(daemonRecoverExitUnreachable)
+	case daemonrecovery.FailureBoundaryProbeTimeout:
+		fmt.Fprintln(errOut, "refused: recovery timed out while rechecking the port owner; no process was killed and no respawn was forced.")
+		return forceExit(daemonRecoverExitRefused)
+	case daemonrecovery.FailureRespawnBudgetInsufficient:
+		fmt.Fprintln(errOut, "refused: recovery could not reserve the mandatory post-termination respawn time; no process was killed and no respawn was forced.")
+		fmt.Fprintln(errOut, "hint: retry when the local system is less busy.")
+		return forceExit(daemonRecoverExitBudgetInsufficient)
+	case daemonrecovery.FailureRespawnFailed:
+		fmt.Fprintf(errOut, "error: force respawn refused [%s]: %s\n", operationErr.Respawn.Code, operationErr.Respawn.Message)
+		return forceExit(daemonRecoverExitRespawnError)
+	default:
+		fmt.Fprintln(errOut, "error: daemon recovery failed: unclassified failure.")
+		return forceExit(daemonRecoverExitRespawnError)
+	}
 }

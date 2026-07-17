@@ -34,9 +34,28 @@ const (
 type PIDIdentityProof struct {
 	PID            int
 	ExecutablePath string
-	StartedAt      string
+	// CommandLine carries the argv evidence used by callers that must prove a
+	// specific process role. The generic identity primitive cannot query argv
+	// from an OS handle, so callers remain responsible for validating it while
+	// the matching process generation is held.
+	CommandLine string
+	StartedAt   string
 	// StartTolerance optionally tightens or widens the start-time proof for a
 	// specific destructive call. Zero keeps the package default used by existing
 	// supervisor call sites.
 	StartTolerance time.Duration
+}
+
+// HeldPIDGeneration is an open operating-system reference to one PID
+// generation. Holding it across classification and termination prevents a PID
+// reused by a later process from inheriting the destructive authority.
+//
+// Terminate reports committed=true once the OS accepted the termination, even
+// if the subsequent bounded wait fails. Callers that must finish a recovery
+// after the point of no return can distinguish that state from a refused kill.
+type HeldPIDGeneration interface {
+	PID() int
+	VerifyIdentity(PIDIdentityProof) error
+	Terminate() (committed bool, err error)
+	Close() error
 }

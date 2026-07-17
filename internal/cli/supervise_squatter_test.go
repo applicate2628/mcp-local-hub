@@ -95,7 +95,13 @@ func joinCmdLine(parts []string) string {
 func setSquatterLookupForTest(t *testing.T, lookup func(int) (process.ProcessIdentity, error), exeMatch func(int, string) bool) {
 	t.Helper()
 	pl, pe := squatterLookupIdentityFn, squatterExeMatchesFn
-	squatterLookupIdentityFn = lookup
+	if lookup == nil {
+		squatterLookupIdentityFn = nil
+	} else {
+		squatterLookupIdentityFn = func(_ context.Context, pid int) (process.ProcessIdentity, error) {
+			return lookup(pid)
+		}
+	}
 	if exeMatch != nil {
 		squatterExeMatchesFn = exeMatch
 	}
@@ -547,6 +553,59 @@ func TestSweepMismatch_OwnSquatterReapedThenRestart(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Kind != api.EvManualRestart {
 		t.Fatalf("events = %+v, want exactly one EvManualRestart (reap then restart)", events)
+	}
+}
+
+func TestRound6SweepAlreadyExitedEmitsDistinctEventWithoutReapedClaim(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(stateDir, "supervisor-events.log")
+	log, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			_ = log.Close()
+		}
+	}()
+
+	d := globalDaemonDescriptor()
+	const owner = 44000
+	setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
+		return squatterIdentityFor(owner, d), nil
+	}, alwaysExeMatch)
+	reapCalls := 0
+	reap := &squatterSweepReaper{
+		reapFn: func(api.SupervisorDaemon, process.PIDIdentityProof) error {
+			reapCalls++
+			return process.ErrProcessAlreadyExited
+		},
+		limiter: newSquatterReapLimiter(),
+	}
+	tracked := map[string]DaemonRuntimeEntry{
+		canonicalSupervisorTaskName(d.TaskName): {CurrentPID: 22036},
+	}
+	if got := handleSquatterMismatchOnSweep(d, owner, 1, tracked, log, reap, time.Now().UTC()); got != squatterSweepReapedFallThrough {
+		t.Fatalf("outcome=%v want squatterSweepReapedFallThrough so recovery may continue", got)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatalf("close event log: %v", err)
+	}
+	closed = true
+	data, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read event log: %v", err)
+	}
+	text := string(data)
+	if got := strings.Count(text, `"event":"daemon-port-squatter-reaped"`); got != 0 {
+		t.Fatalf("reaped event count=%d want=0; log=%s", got, text)
+	}
+	if got := strings.Count(text, `"event":"daemon-port-squatter-already-exited"`); got != 1 {
+		t.Fatalf("already-exited event count=%d want=1; log=%s", got, text)
+	}
+	if reapCalls != 1 {
+		t.Fatalf("reapFn calls=%d want=1", reapCalls)
 	}
 }
 

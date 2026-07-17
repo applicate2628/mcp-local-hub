@@ -26,8 +26,11 @@ const squatterIdentityLookupDeadline = 12 * time.Second
 // squatterLookupIdentityFn stays nil and classifyPortSquatter fails closed to
 // squatterUnverified (MUST-FIX #6: Windows-only reap authority in v1).
 func init() {
-	squatterLookupIdentityFn = func(pid int) (process.ProcessIdentity, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), squatterIdentityLookupDeadline)
+	squatterLookupIdentityFn = func(ctx context.Context, pid int) (process.ProcessIdentity, error) {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(ctx, squatterIdentityLookupDeadline)
 		defer cancel()
 		return process.LookupProcessIdentityContext(ctx, pid)
 	}

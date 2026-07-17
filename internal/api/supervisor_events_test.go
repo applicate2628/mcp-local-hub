@@ -301,8 +301,8 @@ func TestSupervisorEventLog_TryEmitSkipsContendedLock(t *testing.T) {
 
 // TestSupervisorEventLog_EmitWithTimeoutSkipsWedgedLock pins the bounded
 // contention behavior EmitWithTimeout adds for the strict-mode audit: with the
-// flock held for the whole call, it must (1) best-effort skip (return nil, not
-// error), (2) NOT write, and (3) return within a bound of its budget rather
+// flock held for the whole call, it must (1) report the bounded skip through
+// ErrSupervisorEventEmitTimeout, (2) NOT write, and (3) return within a bound of its budget rather
 // than blocking indefinitely. The held lock makes the timeout window
 // deterministic (every TryLock fails until the deadline).
 func TestSupervisorEventLog_EmitWithTimeoutSkipsWedgedLock(t *testing.T) {
@@ -322,12 +322,13 @@ func TestSupervisorEventLog_EmitWithTimeoutSkipsWedgedLock(t *testing.T) {
 
 	const timeout = 150 * time.Millisecond
 	start := time.Now()
-	if err := logger.EmitWithTimeout(SupervisorEvent{
+	err = logger.EmitWithTimeout(SupervisorEvent{
 		Severity: "info",
 		Source:   "autostart",
 		Event:    "emit-timeout-wedged",
-	}, timeout); err != nil {
-		t.Fatalf("EmitWithTimeout under a wedged lock must best-effort skip (nil), got: %v", err)
+	}, timeout)
+	if !errors.Is(err, ErrSupervisorEventEmitTimeout) {
+		t.Fatalf("EmitWithTimeout under a wedged lock error = %v, want ErrSupervisorEventEmitTimeout", err)
 	}
 	elapsed := time.Since(start)
 	// Waited ~the budget (proving it is the bounded-retry path, not an instant

@@ -628,3 +628,81 @@ describe("validatePath", () => {
     await expect(validatePath("/tmp/foo\nbar")).rejects.toThrow(/path contains control characters/);
   });
 });
+
+import {
+  DAEMON_RECOVER_ERROR_CODES,
+  postDaemonRecover,
+  type DaemonRecoverResponse,
+} from "./api";
+
+describe("postDaemonRecover", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("posts the explicit-confirmation recovery contract", async () => {
+    const terminationUnconfirmed: DaemonRecoverResponse["port_owner_check"] =
+      "termination_unconfirmed";
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        task_name: "demo/default",
+        state: "respawn_accepted",
+        reaped: false,
+        port_owner_check: terminationUnconfirmed,
+        port_wait_outcome: "still_bound",
+      }),
+    }) as unknown as Response);
+
+    await expect(postDaemonRecover("demo/default")).resolves.toMatchObject({
+      state: "respawn_accepted",
+      reaped: false,
+      port_owner_check: "termination_unconfirmed",
+    });
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/daemon/recover", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task_name: "demo/default", confirm: true }),
+    });
+  });
+
+  it("preserves the stable backend reason code for safe UI copy", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      statusText: "Conflict",
+      json: async () => ({
+        error: "redacted operation failed",
+        code: "RECOVER_REFUSED_PORT_OWNER",
+      }),
+    }) as unknown as Response);
+
+    let err: APIError | undefined;
+    try {
+      await postDaemonRecover("demo/default");
+    } catch (cause) {
+      err = cause as APIError;
+    }
+    if (!err) throw new Error("expected recovery request to fail");
+    expect(err.code).toBe("RECOVER_REFUSED_PORT_OWNER");
+    expect(err.status).toBe(409);
+  });
+
+  it("pins the complete stable backend error-code contract", () => {
+    expect(DAEMON_RECOVER_ERROR_CODES).toEqual([
+      "INVALID_ARGS",
+      "RECOVER_CONFIRMATION_REQUIRED",
+      "RECOVER_UNKNOWN_TASK",
+      "RECOVER_REFUSED_PORT_OWNER",
+      "RECOVER_RESPAWN_FAILED",
+      "RECOVER_SUPERVISOR_UNAVAILABLE",
+      "RECOVER_REQUEST_CANCELED",
+      "RECOVER_BOUNDARY_PROBE_TIMEOUT",
+      "RECOVER_RESPAWN_BUDGET_INSUFFICIENT",
+      "RECOVER_STATE_READ_FAILED",
+      "RECOVER_UNCLASSIFIED_FAILURE",
+    ]);
+  });
+});

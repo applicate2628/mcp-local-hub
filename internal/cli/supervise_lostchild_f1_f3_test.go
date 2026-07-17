@@ -676,7 +676,10 @@ func runF3Sweep(t *testing.T, d api.SupervisorDaemon, tracker *DaemonRuntimeTrac
 	reap := &squatterSweepReaper{
 		// F3 must reap via squatterTerminatePIDFn directly, never the sweep's
 		// reapFn closure (which is the P2a-mismatch path). Fail loud if it does.
-		reapFn:  func(api.SupervisorDaemon, process.PIDIdentityProof) error { t.Fatal("F3 must not use reap.reapFn"); return nil },
+		reapFn: func(api.SupervisorDaemon, process.PIDIdentityProof) error {
+			t.Fatal("F3 must not use reap.reapFn")
+			return nil
+		},
 		limiter: newSquatterReapLimiter(),
 	}
 	return runSweepOnce(t, d, tracker, events, reap)
@@ -794,7 +797,6 @@ func TestSquatterAutoTrigger_OversizedCommandLinePreservesIdentity(t *testing.T)
 		t.Fatalf("open event log: %v", err)
 	}
 	defer log.Close()
-
 	d := globalDaemonDescriptor()
 	const owner = 44000
 	// A VALID own-task argv (so the classify verdict is own_task) with a 100 KB
@@ -829,6 +831,55 @@ func TestSquatterAutoTrigger_OversizedCommandLinePreservesIdentity(t *testing.T)
 	}
 	if len(line) > 12*1024 {
 		t.Fatalf("event line %d bytes — expected well under the 16 KB cap after field bounding", len(line))
+	}
+}
+
+func TestRound6AutomaticAlreadyExitedEmitsDistinctEventWithoutReapedClaim(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(stateDir, "supervisor-events.log")
+	log, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			_ = log.Close()
+		}
+	}()
+
+	d := globalDaemonDescriptor()
+	const owner = 44000
+	setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
+		return squatterIdentityFor(owner, d), nil
+	}, alwaysExeMatch)
+	terminateCalls := 0
+	setSquatterTerminateForTest(t, func(process.PIDIdentityProof) error {
+		terminateCalls++
+		return process.ErrProcessAlreadyExited
+	})
+	setSelfPIDForTest(t, 1)
+
+	if got := reapSquatterForAutomaticTrigger(d, owner, 1, nil, newSquatterReapLimiter(), log, squatterSourcePreSpawn, time.Now().UTC()); got != squatterAutoReaped {
+		t.Fatalf("outcome=%v want squatterAutoReaped so the caller may continue recovery", got)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatalf("close event log: %v", err)
+	}
+	closed = true
+	data, err := os.ReadFile(eventsPath)
+	if err != nil {
+		t.Fatalf("read event log: %v", err)
+	}
+	text := string(data)
+	if got := strings.Count(text, `"event":"daemon-port-squatter-reaped"`); got != 0 {
+		t.Fatalf("reaped event count=%d want=0; log=%s", got, text)
+	}
+	if got := strings.Count(text, `"event":"daemon-port-squatter-already-exited"`); got != 1 {
+		t.Fatalf("already-exited event count=%d want=1; log=%s", got, text)
+	}
+	if terminateCalls != 1 {
+		t.Fatalf("squatterTerminatePIDFn calls=%d want=1", terminateCalls)
 	}
 }
 
@@ -893,7 +944,10 @@ func TestF1_GateClearedClearedOnSettle(t *testing.T) {
 func runF3SweepStopped(t *testing.T, d api.SupervisorDaemon, tracker *DaemonRuntimeTracker, stopped bool) []api.LoopEvent {
 	t.Helper()
 	reap := &squatterSweepReaper{
-		reapFn:    func(api.SupervisorDaemon, process.PIDIdentityProof) error { t.Fatal("F3 must not use reap.reapFn"); return nil },
+		reapFn: func(api.SupervisorDaemon, process.PIDIdentityProof) error {
+			t.Fatal("F3 must not use reap.reapFn")
+			return nil
+		},
 		limiter:   newSquatterReapLimiter(),
 		stoppedFn: func(string) bool { return stopped },
 	}
