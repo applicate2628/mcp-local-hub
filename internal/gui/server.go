@@ -504,13 +504,13 @@ type realLSPRegistrar struct{}
 // their own; callers outside the package construct this one.
 type RealStatusProvider = realStatusProvider
 
-// Server is the GUI HTTP server. It owns a net/http.Server bound to
-// 127.0.0.1, a ready-to-register mux, and a best-effort shutdown path.
+// Server is the GUI HTTP server. It owns the long-lived application state and
+// delegates its restartable loopback HTTP lifecycle to GUIListenerOwner.
 type Server struct {
-	cfg  Config
-	mux  *http.ServeMux
-	srv  *http.Server
-	port atomic.Int32 // set after Listen, read by Port()
+	cfg         Config
+	mux         *http.ServeMux
+	guiListener *GUIListenerOwner
+	port        atomic.Int32 // set after Listen, read by Port()
 	// api is the long-lived shared *api.API handle. Phase G2 places the
 	// HealthSnapshot TTL+singleflight cache on this struct, so the
 	// healthBackend adapter MUST reuse this instance — per-request
@@ -612,7 +612,7 @@ type Server struct {
 	// restart counters and last-success timestamp are owned by that driver
 	// goroutine; they discriminate flapping from a fresh outage and cap
 	// rolling restart attempts.
-	hubRestartCh             chan struct{}
+	hubRestartCh             chan hubListenerRestartCause
 	hubRestartDriverAlive    atomic.Bool
 	hubRestartConsecutive    int
 	hubRestartLastSuccess    time.Time
@@ -783,7 +783,8 @@ func NewServer(cfg Config) *Server {
 	s := &Server{
 		cfg:                      cfg,
 		mux:                      http.NewServeMux(),
-		hubRestartCh:             make(chan struct{}, 1),
+		guiListener:              NewGUIListenerOwner(10 * time.Second),
+		hubRestartCh:             make(chan hubListenerRestartCause, 1),
 		serenaBackendLossTrigger: make(chan struct{}, 1),
 		guiProcessStart:          time.Now(),
 		pruneEnoentTicks:         map[string]pruneEnoentEntry{},
@@ -894,6 +895,14 @@ func NewServer(cfg Config) *Server {
 // production callers (poller goroutine in Task 12+) use it the same way.
 func (s *Server) Broadcaster() *Broadcaster { return s.events }
 
+// GUIListenerOwner exposes the restartable GUI listener lifecycle. It is the
+// sole binder/closer/rebinder; hub and event ownership remains on Server.
+func (s *Server) GUIListenerOwner() *GUIListenerOwner { return s.guiListener }
+
+// Activated closes when the full GUI handler is serving. CLI-owned poller,
+// tray, and browser work waits on this gate.
+func (s *Server) Activated() <-chan struct{} { return s.guiListener.Activated() }
+
 // StatusProvider returns the statusProvider the production SSE
 // StatusPoller must poll. It is backed by the server's long-lived
 // healthBackend so the poller shares the daemons-section TTL cache with
@@ -975,18 +984,14 @@ func (s *Server) HubMcpBoundPort() (int, bool) {
 // `ready` is signaled, this method ALSO binds the hub-mcp listener
 // when `gui_server.hub_endpoint_enabled=true` (separate socket at the
 // persisted hub-mcp port). Bind failure is non-fatal to the gui-server
-// — the operator still gets the GUI; the hub side stays gate-OFF until
-// the operator runs the documented rotation chain.
+// — the operator still gets the GUI while the existing bounded hub
+// restart driver retries the initial bind from a nil component.
 func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", s.cfg.Port))
+	ln, err := s.guiListener.bind(ctx, s.cfg.Port)
 	if err != nil {
-		return fmt.Errorf("bind 127.0.0.1:%d: %w", s.cfg.Port, err)
+		return err
 	}
 	s.port.Store(int32(ln.Addr().(*net.TCPAddr).Port))
-	s.srv = &http.Server{
-		Handler:           s.httpHandler(),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
 
 	// Phase 4 (G4) — hub listener wiring. The gate is read from
 	// gui-preferences.yaml directly (Phase 5 adds the registry entry +
@@ -1005,8 +1010,11 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	// + start srv.Serve FIRST; run hub startup AFTER. Shutdown still
 	// handles a nil s.hubMcpComp cleanly.
 	close(ready)
-	errCh := make(chan error, 1)
-	go func() { errCh <- s.srv.Serve(ln) }()
+	if err := s.guiListener.ServeFull(ln, s.httpHandler()); err != nil {
+		_ = ln.Close()
+		return err
+	}
+	errCh := s.guiListener.Errors()
 
 	// Reveal-window flood advisory (bug
 	// 2026-06-22-explorer-folder-window-orphan-flood): warn once if the
@@ -1069,9 +1077,9 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 			// without tailing hub-mcp.log. The error is also
 			// already structured-logged via LogHubMcpEvent inside
 			// startHubMcpListener.
-			log.Printf("hub-mcp listener startup failed (gate-OFF for this process): %v", hubErr)
+			log.Printf("hub-mcp listener startup failed; retry scheduled through existing restart driver: %v", hubErr)
 			if hubEnabled {
-				s.hubHealth.set(HubHealthDown, "")
+				s.signalInitialHubBindFailure()
 			}
 			return
 		}
@@ -1139,7 +1147,7 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 		}
 		// codex bot phase4 r3 P2 closure on PR #158: each shutdown
 		// phase gets its OWN 5s budget. The earlier code shared one
-		// shutdownCtx between ShutdownHubListener and s.srv.Shutdown;
+		// shutdownCtx between ShutdownHubListener and GUIListenerOwner.Shutdown;
 		// if a slow hub drain consumed most of the budget, the gui-
 		// server Shutdown would return "context deadline exceeded"
 		// even on a healthy gui server, turning a normal cancellation
@@ -1161,13 +1169,12 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 
 		guiCtx, guiCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer guiCancel()
-		if err := s.srv.Shutdown(guiCtx); err != nil {
+		if err := s.guiListener.Shutdown(guiCtx); err != nil {
 			// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #3):
 			// graceful gui-server shutdown failed (typically context
 			// deadline exceeded). Force-close active connections so
 			// request goroutines unwind before we return — without
 			// this, hung requests survive Start's return.
-			_ = s.srv.Close()
 			s.events.Close()
 			return fmt.Errorf("graceful shutdown: %w", err)
 		}

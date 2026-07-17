@@ -117,6 +117,25 @@ type hubListenerRestartDriverOptions struct {
 	emitFn     func(level, event string, fields map[string]any) error
 	sleepFn    func(context.Context, time.Duration) bool
 	nowFn      func() time.Time
+	cause      hubListenerRestartCause
+}
+
+type hubListenerRestartCause uint8
+
+const (
+	hubListenerRestartCauseUnresponsive hubListenerRestartCause = iota
+	hubListenerRestartCauseInitialBindFailed
+)
+
+func (c hubListenerRestartCause) String() string {
+	switch c {
+	case hubListenerRestartCauseUnresponsive:
+		return "unresponsive"
+	case hubListenerRestartCauseInitialBindFailed:
+		return "initial-bind-failed"
+	default:
+		return fmt.Sprintf("unknown-%d", c)
+	}
 }
 
 type hubListenerRestartOutcome int
@@ -139,8 +158,24 @@ func (s *Server) signalHubListenerRestart() {
 	} else {
 		s.hubHealth.set(HubHealthDown, "")
 	}
+	s.enqueueHubListenerRestart(hubListenerRestartCauseUnresponsive)
+}
+
+// signalInitialHubBindFailure is the only nil-component admission into the
+// existing restart driver. Server.Start guarantees the driver will consume the
+// buffered request, so this path remains Recovering even if the goroutine has
+// not yet published its liveness flag.
+func (s *Server) signalInitialHubBindFailure() {
+	if s == nil || s.hubRestartCh == nil {
+		return
+	}
+	s.hubHealth.set(HubHealthRecovering, "")
+	s.enqueueHubListenerRestart(hubListenerRestartCauseInitialBindFailed)
+}
+
+func (s *Server) enqueueHubListenerRestart(cause hubListenerRestartCause) {
 	select {
-	case s.hubRestartCh <- struct{}{}:
+	case s.hubRestartCh <- cause:
 	default:
 	}
 }
@@ -163,8 +198,10 @@ func runHubListenerRestartDriver(ctx context.Context, s *Server, opts hubListene
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.hubRestartCh:
-			if restartHubListenerWithOutcome(ctx, s, opts) == hubListenerRestartStopDriver {
+		case cause := <-s.hubRestartCh:
+			requestOpts := opts
+			requestOpts.cause = cause
+			if restartHubListenerWithOutcome(ctx, s, requestOpts) == hubListenerRestartStopDriver {
 				return
 			}
 		}
@@ -173,8 +210,12 @@ func runHubListenerRestartDriver(ctx context.Context, s *Server, opts hubListene
 
 func normalizeHubListenerRestartDriverOptions(s *Server, opts hubListenerRestartDriverOptions) hubListenerRestartDriverOptions {
 	if opts.startFn == nil {
+		hubStartFn := startHubMcpListenerWithOptions
+		if s.startHubMcpListenerFn != nil {
+			hubStartFn = s.startHubMcpListenerFn
+		}
 		opts.startFn = func(ctx context.Context) (*HubListenerComponents, error) {
-			return startHubMcpListenerWithOptions(ctx, true, s.api, startHubMcpListenerOptions{
+			return hubStartFn(ctx, true, s.api, startHubMcpListenerOptions{
 				preservePortOnReloadHandlerFailure: true,
 				server:                             s,
 				onUnresponsive:                     s.signalHubListenerRestart,
@@ -265,25 +306,44 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 		if !oldTaken {
 			preview := s.hubMcpComp.Load()
 			if preview == nil {
-				return hubListenerRestartStopDriver
-			}
-			if restartPort == 0 {
-				restartPort = preview.port
-			}
-			if !hubListenerRestartCanAttempt(s, opts.nowFn()) {
-				hubListenerRestartEmitAbandoned(opts, s, restartPort)
-				return hubListenerRestartStopDriver
-			}
-			old := s.hubMcpComp.Swap(nil)
-			if old == nil {
-				return hubListenerRestartStopDriver
-			}
-			oldTaken = true
-			restartPort = old.port
-			previousInstanceID, previousInstanceIDErr = loadHubListenerRestartInstanceID()
-			opts.shutdownFn(ctx, old)
-			if ctx.Err() != nil {
-				return hubListenerRestartStopDriver
+				if opts.cause != hubListenerRestartCauseInitialBindFailed {
+					return hubListenerRestartStopDriver
+				}
+				// Seed the telemetry port from the persisted endpoint so the
+				// initial-bind restart events (-failed/-exhausted/-abandoned)
+				// carry the real port instead of 0 — there is no old component
+				// to read it from, but this is the exact outage class that
+				// correlates with gated client URLs, so the port anchor matters.
+				if restartPort == 0 {
+					if ep, epErr := api.LoadHubEndpoint(); epErr == nil {
+						restartPort = ep.Port
+					}
+				}
+				if !hubListenerRestartCanAttempt(s, opts.nowFn()) {
+					hubListenerRestartEmitAbandoned(opts, s, restartPort)
+					return hubListenerRestartStopDriver
+				}
+				oldTaken = true
+				previousInstanceID, previousInstanceIDErr = loadHubListenerRestartInstanceID()
+			} else {
+				if restartPort == 0 {
+					restartPort = preview.port
+				}
+				if !hubListenerRestartCanAttempt(s, opts.nowFn()) {
+					hubListenerRestartEmitAbandoned(opts, s, restartPort)
+					return hubListenerRestartStopDriver
+				}
+				old := s.hubMcpComp.Swap(nil)
+				if old == nil {
+					return hubListenerRestartStopDriver
+				}
+				oldTaken = true
+				restartPort = old.port
+				previousInstanceID, previousInstanceIDErr = loadHubListenerRestartInstanceID()
+				opts.shutdownFn(ctx, old)
+				if ctx.Err() != nil {
+					return hubListenerRestartStopDriver
+				}
 			}
 		} else if !hubListenerRestartCanAttempt(s, opts.nowFn()) {
 			hubListenerRestartEmitAbandoned(opts, s, restartPort)

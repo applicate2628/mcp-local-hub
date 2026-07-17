@@ -77,10 +77,42 @@ Discovery done (84 findings → 5 themes → 6 ranked items; see `roadmap.md`).
 - `backlog/2026-07-16-activate-window-protocol-followups.md` — the activate-window endpoint
   conflates caller intents because the wire carries none (per-request window consent).
 
+## Item 3 progress (GUI self-restart / port-change without bricking gated URLs)
+
+Split into **Unit A** (fail-closed hub-port dependency guard) + **Unit B** (parent-supervised
+self-restart handoff).
+
+- **Unit A — DELIVERED 2026-07-17.** PR #559, squash `b18ed154`, deployed (fleet 38).
+  `ProbeHubPortDependencies` in `internal/api`; `--reset-port` refuses (exit 8) unless deps Clear;
+  initial hub-startup preserves the port when gated. Bot found + fixed two my-chain missed
+  (`AllClients()` drops failed-factory clients → `AllClientsWithErrors()`; a startup-snapshot
+  TOCTOU into async reset). PASS `c5b6ff83`.
+- **Unit B — DESIGN CLOSED + CONFIRMED 2026-07-17.** `item3-restart-design.md` converged v1→v3.1
+  across ~8 rounds; a 3-voice consilium (Sol+opus+fable, unanimous B) named the decisive root cause
+  — **a record CAS cannot serialize OS kills/binds/flocks**, so the fully-automatic recovery graph
+  structurally kept re-minting a no-owner freeze (relocated 3× + a named 4th). design-B collapses
+  the 13-phase/43-transition CAS graph to a 4-phase marker `{in-progress, reserved, committed,
+  interrupted}` + DEGRADE-to-operator-visible for the rare crash-mid-handoff; `ensure-alive` is
+  degrade-ONLY (never spawns), which eliminated the whole double-owner class. Decision:
+  `decisions/2026-07-17-item3-unitB-recovery-simplify.md` (accepted). Final fable confirm PASS with
+  one non-blocking P3 (a failed `committed`-marker write → a healthy child draws a repeated false
+  `--force --kill` advisory) folded into the plan.
+- **Unit B — PLAN READY 2026-07-17.** `item3-unitB-plan.md` (planner PASS). 10 phases A–J:
+  A (typed `resolveGuiPort` + parser-aware argv, inert), B (`GUIListenerOwner` seam — largest,
+  prerequisite), C (hub initial-bind-failure → existing restart driver, ungated robustness);
+  D–J one atomic feature-gated (`gui.RestartV3Enabled()`, default OFF, flipped ON in J) rollout+
+  rollback unit (marker store, reservation flock, child/parent coordinator, frontend, ensure-alive,
+  gate flip). Two non-blocking architect confirms flagged: OPEN-1 (gate mechanism const+env vs
+  gui-preferences key) for Phase D; OPEN-2 (ungate C) — accepted by $lead.
+- **Unit B — IMPL IN FLIGHT.** Foundations bundle A+B+C dispatched to codex Sol (behaviour-
+  preserving, feature-gate OFF, shippable-alone) as one PR to cut bot+deploy overhead; the gated
+  group D–J is the next separate large effort.
+
 ## Now
 
-Items 1 + 2 DELIVERED + deployed. **Item 3 next** — GUI self-restart / port-change without bricking
-gated client URLs (`roadmap.md`). Also standing: a `2026-07-17` policy-ownership audit
+Items 1 + 2 + Unit A DELIVERED + deployed; Unit B design closed + confirmed + planned. **Now: Unit B
+foundations A+B+C** implementing (codex Sol) → my-verify → PR → bot → deploy, then the gated group
+D–J. Also standing: a `2026-07-17` policy-ownership audit
 (`backlog/2026-07-17-ticker-intervals-hardcoded-split-policy-ownership.md`, 4×P2 + 4×P3, the
 form-driven-registry rule) surfaced from an operator question during item 2; not a Phase-0 item but
 overlaps items 3-6 (truthful surfaces, config ownership) — the product-manager should decide whether

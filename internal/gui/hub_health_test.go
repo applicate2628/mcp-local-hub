@@ -252,11 +252,11 @@ func TestServerHubHealthTracksInitialStartup(t *testing.T) {
 			finalWant:   HubHealthHealthy,
 		},
 		{
-			name:        "gate on failure",
+			name:        "gate on first failure recovers through driver",
 			enabled:     true,
 			startErr:    errors.New("injected hub startup failure"),
 			pendingWant: HubHealthRecovering,
-			finalWant:   HubHealthDown,
+			finalWant:   HubHealthHealthy,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -264,17 +264,21 @@ func TestServerHubHealthTracksInitialStartup(t *testing.T) {
 			s.hubEndpointGateFn = func(*api.API) bool { return tc.enabled }
 			started := make(chan struct{})
 			release := make(chan struct{})
+			attempts := 0
 			s.startHubMcpListenerFn = func(ctx context.Context, enabled bool, _ *api.API, _ startHubMcpListenerOptions) (*HubListenerComponents, error) {
+				attempts++
 				if enabled != tc.enabled {
 					t.Errorf("startup enabled = %v, want %v", enabled, tc.enabled)
 				}
-				close(started)
-				select {
-				case <-release:
-				case <-ctx.Done():
-					return nil, ctx.Err()
+				if attempts == 1 {
+					close(started)
+					select {
+					case <-release:
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
 				}
-				if tc.startErr != nil {
+				if tc.startErr != nil && attempts == 1 {
 					return nil, tc.startErr
 				}
 				if !enabled {

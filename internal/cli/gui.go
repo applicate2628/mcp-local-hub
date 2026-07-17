@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -25,34 +24,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
-
-// resolveGuiPort decides which port mcphub gui will bind. Bug-bash A5
-// (#18/#19/#20) closure: pre-fix, the --port flag defaulted to 0
-// (auto-pick) and the persisted `gui_server.port` setting was never
-// consulted at startup. Users who set 9125 in Settings + restarted
-// were still bound to an OS-assigned ephemeral port; Settings showed
-// 9125 as "configured" with "Restart required to take effect" but
-// restart didn't help.
-//
-// Resolution order:
-//  1. --port flag explicitly passed (any value, including 0 for
-//     explicit ephemeral): operator override wins.
-//  2. `gui_server.port` setting parses to an int in [1024, 65535]:
-//     use that.
-//  3. Fallback to 0 (auto-pick).
-//
-// Pure function so it can be unit-tested without spinning a server.
-// Tests cover all three branches + invalid setting values + boundary
-// ports.
-func resolveGuiPort(flagChanged bool, flagValue int, settingValue string) int {
-	if flagChanged {
-		return flagValue
-	}
-	if n, err := strconv.Atoi(strings.TrimSpace(settingValue)); err == nil && n >= 1024 && n <= 65535 {
-		return n
-	}
-	return 0
-}
 
 // selfRestartHandoffEnv mirrors gui.SelfRestartHandoffEnv. The GUI
 // self-restart handler (internal/gui/gui_self_restart.go) sets this env
@@ -289,9 +260,16 @@ activates the first window and exits 0.`,
 			// (default 0). Operators who changed Settings + restarted were
 			// still bound to an OS-assigned ephemeral port; the
 			// "Restart required to take effect" warning was misleading.
-			if !cmd.Flags().Changed("port") {
-				settingVal, _ := api.NewAPI().SettingsGet("gui_server.port")
-				port = resolveGuiPort(false, port, settingVal)
+			flagChanged := cmd.Flags().Changed("port")
+			settingVal, _ := api.NewAPI().SettingsGet("gui_server.port")
+			portIntent := classifyPersistedGUIPort(settingVal)
+			port = resolveGuiPort(flagChanged, port, settingVal)
+			if portIntent.Kind == guiPortIntentInvalid {
+				fallback := guiPortFallbackEphemeral
+				if flagChanged {
+					fallback = guiPortFallbackExplicitFlag
+				}
+				emitInvalidGUIPortWarning(cmd.OutOrStderr(), portIntent, fallback)
 			}
 
 			// Phase A: acquire the single-instance lock BEFORE binding any
@@ -686,9 +664,6 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	pollerErrCh := make(chan error, 1)
 	poller.SetSnapshotChannel(snapshotCh)
 	poller.SetErrorChannel(pollerErrCh)
-	go aggregateTrayState(ctx, snapshotCh, pollerErrCh, trayStateCh)
-	go poller.Run(ctx)
-
 	select {
 	case <-ready:
 		// Now we know the actual bound port. Unconditionally rewrite
@@ -716,6 +691,15 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+	select {
+	case <-s.Activated():
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	go aggregateTrayState(ctx, snapshotCh, pollerErrCh, trayStateCh)
+	go poller.Run(ctx)
 
 	// "GUI owns supervisor lifecycle" — the GUI process is the operator-
 	// visible mcphub. When GUI is running (tray icon present), the
