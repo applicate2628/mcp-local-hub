@@ -1,5 +1,78 @@
 import type { DaemonStatus, ServerAggregate } from "../types";
 
+type DaemonStateBucket =
+  | "running"
+  | "partial"
+  | "recovering"
+  | "quarantined"
+  | "failed"
+  | "idle";
+
+function daemonStateBucket(state: string): DaemonStateBucket {
+  switch (state) {
+    case "Running":
+      return "running";
+    case "Partial":
+      return "partial";
+    case "Starting":
+    case "Restarting":
+    case "Backoff":
+    case "Spawning":
+      return "recovering";
+    case "Quarantined":
+      return "quarantined";
+    case "Failed":
+      return "failed";
+    default:
+      return "idle";
+  }
+}
+
+export interface DaemonStateVisual {
+  cardClass: string;
+  badgeClass: string;
+}
+
+// daemonStateVisual is the single owner of Dashboard card and badge colors.
+// Unknown states fail neutral: the browser must not invent health or failure.
+export function daemonStateVisual(state: string): DaemonStateVisual {
+  switch (daemonStateBucket(state)) {
+    case "running":
+      return {
+        cardClass: "card ok",
+        badgeClass: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
+      };
+    case "partial":
+    case "recovering":
+      return {
+        cardClass: "card warning",
+        badgeClass: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
+      };
+    case "quarantined":
+      return {
+        cardClass: "card warning",
+        badgeClass: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300",
+      };
+    case "failed":
+      return {
+        cardClass: "card down",
+        badgeClass: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
+      };
+    case "idle":
+      return {
+        cardClass: "card idle",
+        badgeClass: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300",
+      };
+  }
+}
+
+// Recovery eligibility is deliberately narrower than the visual failure
+// bucket. The shared recovery operation proves the lost-child condition at
+// execution time; the browser only admits the exact modeled wire state.
+export function isRecoveryEligibleState(state: string): boolean {
+  return state === "Quarantined";
+}
+
 // stateShape returns the shape glyph that augments color for daemon-state
 // rendering. Spec §5.7 line 289 requires status cells to include a shape
 // indicator so red/green color is not the sole carrier of meaning — users
@@ -30,27 +103,17 @@ import type { DaemonStatus, ServerAggregate } from "../types";
 // state word, so the shape only has to convey the coarse health group at a
 // glance; the label remains the authoritative source for screen readers.
 export function stateShape(state: string): string {
-  switch (state) {
-    case "Running":
+  switch (daemonStateBucket(state)) {
+    case "running":
       return "●";
-    case "Partial":
+    case "partial":
       return "◐";
-    case "Starting":
-    case "Restarting":
-    case "Backoff":
-    case "Spawning":
+    case "recovering":
       return "◓";
-    case "Failed":
-    case "Quarantined":
+    case "failed":
+    case "quarantined":
       return "✕";
-    case "Ready":
-    case "Scheduled":
-    case "Stopped":
-      return "○";
-    default:
-      // Unrecognized / blank vocabulary (e.g. "Disabled", "Queued", "")
-      // reads as the benign open circle — it is not a known failure, so it
-      // must not borrow the error cross.
+    case "idle":
       return "○";
   }
 }

@@ -1402,3 +1402,134 @@ describe("DashboardScreen — hub-health banner (Phase-0 item 1)", () => {
     await waitFor(() => expect(queryByTestId("dashboard-hub-health")).toBeNull());
   });
 });
+
+describe("DashboardScreen — quarantined daemon recovery", () => {
+  const quarantinedRow: DaemonStatus = {
+    server: "memory",
+    daemon: "default",
+    port: 9123,
+    state: "Quarantined",
+    task_name: "mcp-local-hub-memory-default",
+    display_name: "Memory daemon",
+  };
+
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  function mockRecoveryFetch(recoverResponse: Response = jsonResponse(200, {
+    task_name: quarantinedRow.task_name,
+    state: "respawn_accepted",
+    reaped: false,
+    port_owner_check: "unbound",
+    port_wait_outcome: "not_required",
+  })) {
+    let statusCalls = 0;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: Request | string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") {
+          statusCalls += 1;
+          return Promise.resolve(statusResponse([quarantinedRow]));
+        }
+        if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+        if (url === "/api/hub/health") {
+          return Promise.resolve(jsonResponse(200, { state: "healthy", degraded: false }));
+        }
+        if (url === "/api/daemon/recover") return Promise.resolve(recoverResponse.clone());
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      },
+    );
+    return { fetchSpy, statusCalls: () => statusCalls };
+  }
+
+  it("shows the quarantine reason and Recover instead of the refused Restart; Cancel sends nothing", async () => {
+    const { fetchSpy } = mockRecoveryFetch();
+    const view = render(<DashboardScreen />);
+    const recover = await view.findByRole("button", { name: "Recover" });
+
+    expect(view.queryByRole("button", { name: "Restart" })).toBeNull();
+    expect(view.getByRole("status").textContent).toContain(
+      "Automatic restart is paused because this daemon is quarantined after repeated failures.",
+    );
+
+    fireEvent.click(recover);
+    await waitFor(() => {
+      expect((view.getByTestId("daemon-recover-modal") as HTMLDialogElement).open).toBe(true);
+    });
+    expect(view.getByText("Recover Memory daemon?")).toBeTruthy();
+    expect(view.getByText(/It will never stop a foreign or unverifiable process/)).toBeTruthy();
+    expect(view.getByText(/Verified lost-child termination is Windows-only in v1/)).toBeTruthy();
+    fireEvent.click(view.getByTestId("daemon-recover-modal-cancel"));
+
+    const recoverCalls = fetchSpy.mock.calls.filter((call) => call[0].toString() === "/api/daemon/recover");
+    expect(recoverCalls).toHaveLength(0);
+  });
+
+  it("confirms the exact task identity, keeps Quarantined pending, and refreshes status immediately", async () => {
+    const { fetchSpy, statusCalls } = mockRecoveryFetch();
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    await view.findByText("Recovery accepted; waiting for supervisor status");
+    await waitFor(() => expect(statusCalls()).toBeGreaterThanOrEqual(2));
+    expect(view.getByTestId("dashboard-card").className).toContain("card warning");
+    expect(view.getByTestId("dashboard-card").textContent).toContain("Quarantined");
+    expect(fetchSpy).toHaveBeenCalledWith("/api/daemon/recover", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        task_name: "mcp-local-hub-memory-default",
+        confirm: true,
+      }),
+    });
+  });
+
+  it.each([
+    [409, "RECOVER_REFUSED_PORT_OWNER", "Recovery was refused: the port owner could not be verified as this daemon's child. No process was stopped."],
+    [500, "RECOVER_RESPAWN_FAILED", "The supervisor did not accept recovery. View logs and retry after resolving the failure."],
+    [503, "RECOVER_SUPERVISOR_UNAVAILABLE", "The supervisor is unavailable. Restart the hub, then retry recovery."],
+    [408, "RECOVER_REQUEST_CANCELED", "Recovery was canceled before any process was stopped. Retry if recovery is still needed."],
+    [504, "RECOVER_BOUNDARY_PROBE_TIMEOUT", "Recovery verified the process identity but timed out while rechecking the port owner. No process was stopped."],
+    [503, "RECOVER_RESPAWN_BUDGET_INSUFFICIENT", "Recovery could not reserve enough time for a safe restart. No process was stopped; retry when the local system is less busy."],
+    [500, "RECOVER_UNCLASSIFIED_FAILURE", "Recovery failed for an unclassified reason. No specific cause can be asserted; check the supervisor logs before retrying."],
+  ])("maps HTTP %i code %s to persistent safe inline copy without claiming an undisclosed termination", async (status, code, message) => {
+    const raw = "C:\\attacker\\owned.exe --secret-token";
+    mockRecoveryFetch(jsonResponse(status, { error: raw, code }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const alert = await view.findByRole("alert");
+    expect(alert.textContent).toBe(message);
+    expect(alert.textContent).not.toContain("A process was already stopped during this recovery attempt.");
+    expect(view.container.textContent).not.toContain(raw);
+    expect(view.getByRole("button", { name: "Recover" })).toBeTruthy();
+  });
+
+  it.each([
+    [500, "RECOVER_RESPAWN_FAILED", "The supervisor did not accept recovery. View logs and retry after resolving the failure."],
+    [503, "RECOVER_SUPERVISOR_UNAVAILABLE", "The supervisor is unavailable. Restart the hub, then retry recovery."],
+  ])("discloses a committed termination for HTTP %i code %s", async (status, code, message) => {
+    const raw = "C:\\attacker\\owned.exe --secret-token";
+    mockRecoveryFetch(jsonResponse(status, {
+      error: raw,
+      code,
+      termination_committed: true,
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const alert = await view.findByRole("alert");
+    expect(alert.textContent).toBe(`${message} A process was already stopped during this recovery attempt.`);
+    expect(view.container.textContent).not.toContain(raw);
+  });
+});

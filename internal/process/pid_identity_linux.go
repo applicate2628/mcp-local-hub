@@ -16,6 +16,10 @@ import (
 
 const linuxDeletedSuffix = " (deleted)"
 
+func HoldPIDForTermination(pid int) (HeldPIDGeneration, error) {
+	return nil, fmt.Errorf("%w: held PID generation unavailable for PID %d on this platform", ErrProcessIdentityUnsupported, pid)
+}
+
 // PIDExecutableMatches compares /proc/<pid>/exe against expectedPath.
 func PIDExecutableMatches(pid int, expectedPath string) bool {
 	return verifyPIDExecutablePath(pid, expectedPath) == nil

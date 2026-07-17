@@ -7,10 +7,10 @@ import "context"
 // Linux maps /proc/net/tcp socket inodes back to /proc/<pid>/fd owners; other
 // platforms fail closed until an OS-level owner proof is implemented.
 //
-// It is now a context.Background() delegate of LoopbackPortOwnerPIDContext so
-// every existing caller (serena reconcile, status enrichment, `daemon recover`)
-// stays byte-identical — a background context never cancels, so the Windows
-// exec.CommandContext behaves exactly like the prior exec.Command.
+// It is a context.Background() delegate of LoopbackPortOwnerPIDContext for
+// legacy point-in-time callers such as Serena reconcile and status enrichment.
+// Context-governed flows, including daemon recovery, call the Context variant
+// directly so cancellation and phase deadlines reach the Windows netstat probe.
 func LoopbackPortOwnerPID(port int) (int, bool, error) {
 	return LoopbackPortOwnerPIDContext(context.Background(), port)
 }

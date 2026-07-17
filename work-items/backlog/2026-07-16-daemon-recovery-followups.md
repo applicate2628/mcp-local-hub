@@ -3,8 +3,8 @@
 Filed: 2026-07-16
 Source: the Sol (architecture/adversarial) + Terra (narrow audit) + fable (arbiter) panel on
 Productization Phase-0 item 2 (`feat/gui-daemon-recovery`). The arbiter PASSED the design and the
-concurrency story; 9 defects were fixed in the item itself. These four were explicitly scoped OUT with
-the arbiter's agreement — none is a correctness hole.
+concurrency story; 9 defects were fixed in the item itself. The first four were explicitly scoped OUT
+with the arbiter's agreement — none is a correctness hole.
 
 ## 1. A third copy of the task-name canonicalization predicate
 
@@ -24,12 +24,14 @@ the other two delegating; one shared constant for the lookup deadline.
 
 Nothing serializes two concurrent recoveries of the same task (two browser tabs, or CLI + GUI).
 
-**Arbiter's ruling: acceptable.** Traced in code: the port probe runs BEFORE the `supervisor-state.json`
-read, so a just-respawned child is caught by the tracked-child exclusion (the supervisor persists
-CurrentPID at spawn, before bind); the held generation pins the PID across
-classify→confirm→boundary-recheck→kill; a concurrent sweep kill of the same dead PID is idempotent. The
-worst outcome of a race is **one supervisor-owned extra restart of a fresh child — never an unverified
-kill**.
+**Arbiter's ruling: acceptable.** The identity gate constrains the only possible victim to a process
+running our binary with our exact argv naming the recovered task. The bound is therefore never a
+stranger, and no loss beyond what hard-restarting the target daemon itself entails: in-flight requests
+and writes of that daemon can be severed. The held generation pins that process across
+classify→confirm→boundary-recheck→kill, while
+the destructive-boundary `supervisor-state.json` re-read reduces the stale tracked-child verdict from
+the operator-confirmation interval to the controller event loop's measured approximately 1.5-second
+persistence lag. It does not assume that `CurrentPID` is persisted before the child binds.
 
 **Right shape (follow-up):** a per-task lease around Execute, same pattern as the adopt/de-adopt
 per-manifest flock.
@@ -46,3 +48,43 @@ authorized a reap.
 
 The Recover affordance renders with the existing card vocabulary; the dedicated classes carry no rules
 yet. Cosmetic; no behavior impact.
+
+## 5. Automatic recovery cannot audit committed-but-unconfirmed termination distinctly
+
+The automatic recovery paths at `internal/cli/supervise_squatter.go:417` and
+`internal/cli/supervise_squatter.go:546` fold a termination that committed but whose exit wait was
+unconfirmed into `daemon-port-squatter-reap-failed` ("the port is still held"). The cause is that
+`process.TerminatePIDWithIdentity` discards the shared held-generation primitive's `committed` flag at
+`internal/process/pid_identity_windows.go:167` before returning to those callers.
+
+The current direction is fail-safe: it never claims an unconfirmed reap, and the supervisor loop
+self-heals on the next tick. The right shape is to surface committed-ness from the shared primitive and
+emit the distinct unconfirmed event on the automatic paths too.
+
+**Why deferred:** changing the shared primitive's signature affects three other call sites, verified via
+the language server rather than assumed — `internal/api/cleanup.go:1684` (`orphanTerminateFn`),
+`internal/cli/supervise.go:195` (`productionTerminatePIDWithIdentityFn`), and
+`internal/cli/supervise_squatter.go:70` (`squatterTerminatePIDFn`, which is the automatic sweep path this
+follow-up exists to fix). It needs its own reviewed change rather than widening GUI recovery round 8.
+
+## 6. A future wrapper-based Windows port probe must set `Cmd.WaitDelay`
+
+`waitForPortFree` is bounded today only because the Windows port probe uses
+`exec.CommandContext(ctx, "netstat", "-ano")` directly
+(`internal/api/serena_port_owner_windows.go`) and that command spawns no grandchild inheriting its
+stdout pipe. No `Cmd.WaitDelay` is set anywhere on this path. If the probe is ever replaced by a
+wrapper that forks, `cmd.Output()` can stop returning after cancellation while the inherited pipe
+remains open; the post-commit window would silently stop being bounded and create the next
+kill-without-restart gap at exactly that point.
+
+**Right shape:** set `Cmd.WaitDelay` on the probe command whenever this path is changed or wrapped.
+
+## 7. The production-default respawn-reservation refusal surface is unreachable
+
+`FailureRespawnBudgetInsufficient` (CLI exit 6, HTTP 503
+`RECOVER_RESPAWN_BUDGET_INSUFFICIENT`, TypeScript union member, and Dashboard message) is correct
+defence-in-depth for a custom `Dependencies` caller. At production defaults, however, the supervisor
+probe is self-capped at 5 seconds, so at least 25 seconds of the 30-second post-kill budget remains —
+always more than the 20-second respawn reserve. No default-configured operator can reach this failure
+surface today; retain that reachability fact when maintaining its exit code, wire code, union entry,
+and UI copy.

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { cleanupOrphans, fetchOrThrow, getHubHealth, restartSupervisor } from "../api";
-import type { HubHealth } from "../api";
+import { cleanupOrphans, fetchOrThrow, getHubHealth, postDaemonRecover, restartSupervisor } from "../api";
+import type { APIError, HubHealth } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { unmanagedStdioCount as countUnmanagedStdio } from "../lib/unmanaged-stdio";
-import { stateShape } from "../lib/status";
+import { daemonStateVisual, isRecoveryEligibleState, stateShape } from "../lib/status";
 import { formatBytes, formatUptime } from "../lib/format";
 import { DaemonMetrics } from "../components/DaemonMetrics";
 import { ConnectionBadge } from "../components/ConnectionBadge";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { pushToast } from "../lib/toast-store";
 import type { DaemonStatus, ScanResult } from "../types";
 
@@ -567,6 +568,10 @@ export function DashboardScreen() {
             key={keyFor(d)}
             daemon={d}
             onRestart={() => restart(d.server, d.daemon)}
+            onRecover={async () => {
+              await postDaemonRecover(d.task_name!);
+              setReloadTrigger((n) => n + 1);
+            }}
             onStop={() => stop(d.server, d.daemon)}
             bulkInflight={bulkInflight}
             bulkOutcome={bulkOutcome}
@@ -672,6 +677,7 @@ function useActionButton(
 function Card(props: {
   daemon: DaemonStatus;
   onRestart: () => Promise<void>;
+  onRecover: () => Promise<void>;
   onStop: () => Promise<void>;
   // Bulk action signals from the parent — when a Run all / Stop all
   // is in flight, every Card's matching button reflects it. By
@@ -683,6 +689,18 @@ function Card(props: {
   const { daemon: d, onRestart, onStop, bulkInflight, bulkOutcome } = props;
   const restartBtn = useActionButton(onRestart);
   const stopBtn = useActionButton(onStop);
+  const [recoverOpen, setRecoverOpen] = useState(false);
+  const [recoverBusy, setRecoverBusy] = useState(false);
+  const [recoverFeedback, setRecoverFeedback] = useState<
+    { kind: "pending" | "error"; message: string } | null
+  >(null);
+  const previousDaemonState = useRef(d.state);
+  useEffect(() => {
+    if (previousDaemonState.current !== d.state) {
+      setRecoverFeedback(null);
+      previousDaemonState.current = d.state;
+    }
+  }, [d.state]);
 
   // Flowbite Card shell classes (the documented `p-6 bg-white border
   // border-gray-200 rounded-lg shadow-sm dark:bg-gray-800 dark:border-gray-700`
@@ -692,13 +710,9 @@ function Card(props: {
   // and `.cards .card` selectors stay intact.
   const flowbiteCard =
     "p-6 bg-white border border-gray-200 rounded-lg shadow-sm dark:bg-gray-800 dark:border-gray-700";
-  const cls = `${d.state === "Running" ? "card ok" : "card down"} ${flowbiteCard}`;
-  // Flowbite Badge color for the State chip (green when Running, red
-  // otherwise) — the documented pill-badge palette.
-  const stateBadgeClass =
-    d.state === "Running"
-      ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
-      : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300";
+  const stateVisual = daemonStateVisual(d.state);
+  const cls = `${stateVisual.cardClass} ${flowbiteCard}`;
+  const stateBadgeClass = stateVisual.badgeClass;
   // Prefer the backend-computed human-readable name ("serena · <project>",
   // "<lang> @ <workspace>") when present; it replaces the hash-suffixed
   // task name for workspace-scoped daemons. Global daemons carry no
@@ -709,6 +723,26 @@ function Card(props: {
     : d.daemon && d.daemon !== "default"
       ? `${d.server} (${d.daemon})`
       : d.server;
+  const recoveryEligible = isRecoveryEligibleState(d.state);
+  const canRecover = recoveryEligible && (d.task_name?.trim().length ?? 0) > 0;
+
+  async function confirmRecovery() {
+    if (recoverBusy || !canRecover) return;
+    setRecoverBusy(true);
+    setRecoverFeedback(null);
+    try {
+      await props.onRecover();
+      setRecoverFeedback({
+        kind: "pending",
+        message: "Recovery accepted; waiting for supervisor status",
+      });
+    } catch (error) {
+      setRecoverFeedback({ kind: "error", message: daemonRecoveryMessage(error) });
+    } finally {
+      setRecoverBusy(false);
+      setRecoverOpen(false);
+    }
+  }
 
   // Live process metrics (Port / PID / Uptime / RAM + the orphan-PID and
   // job-protection diagnostics) are rendered by DaemonMetrics, the single
@@ -788,6 +822,19 @@ function Card(props: {
           on header/state/actions chrome. Reads only fields already present
           on DaemonStatus (no new backend surface). */}
       <DaemonMetrics daemon={d} />
+      {recoveryEligible && (
+        <p class="daemon-recovery-reason" role="status">
+          Automatic restart is paused because this daemon is quarantined after repeated failures. Recover checks for a lost child on its port, may stop only a verified hub child, then requests a forced respawn.
+        </p>
+      )}
+      {recoverFeedback && (
+        <p
+          class={`daemon-recovery-feedback daemon-recovery-feedback-${recoverFeedback.kind}`}
+          role={recoverFeedback.kind === "error" ? "alert" : "status"}
+        >
+          {recoverFeedback.message}
+        </p>
+      )}
       {/* View-logs link — an <a> (link role), NOT a <button>, so the
           long-standing per-card button-count invariant (2 bulk + 2 per
           card) the Dashboard tests assert is preserved. Navigates to the
@@ -806,9 +853,22 @@ function Card(props: {
         </a>
       </div>
       <div class="card-actions">
-        <button class="btn btn-secondary" onClick={restartBtn.click} disabled={restartDisabled} aria-busy={anyWorking}>
-          {restartLabel}
-        </button>
+        {recoveryEligible ? (
+          canRecover ? (
+            <button
+              class="btn btn-secondary"
+              onClick={() => setRecoverOpen(true)}
+              disabled={recoverBusy || anyBulk}
+              aria-busy={recoverBusy}
+            >
+              Recover
+            </button>
+          ) : null
+        ) : (
+          <button class="btn btn-secondary" onClick={restartBtn.click} disabled={restartDisabled} aria-busy={anyWorking}>
+            {restartLabel}
+          </button>
+        )}
         <button
           onClick={stopBtn.click}
           disabled={stopDisabled}
@@ -818,8 +878,71 @@ function Card(props: {
           {stopLabel}
         </button>
       </div>
+      {canRecover && (
+        <ConfirmModal
+          open={recoverOpen}
+          title={`Recover ${title}?`}
+          body={
+            <p>
+              Recovery checks the daemon's configured port. If it is occupied, mcphub will stop the process only after it proves that it is this daemon's own lost child. It will never stop a foreign or unverifiable process. Then it asks the supervisor to force a respawn. Verified lost-child termination is Windows-only in v1; on other platforms recovery refuses a bound owner without stopping it.
+            </p>
+          }
+          confirmLabel="Recover daemon"
+          danger
+          onConfirm={confirmRecovery}
+          onCancel={() => setRecoverOpen(false)}
+          testId="daemon-recover-modal"
+        />
+      )}
     </div>
   );
+}
+
+function daemonRecoveryMessage(error: unknown): string {
+  const apiError = error as APIError | undefined;
+  const body = apiError?.body;
+  const terminationCommitted =
+    typeof body === "object" &&
+    body !== null &&
+    "termination_committed" in body &&
+    (body as { termination_committed?: unknown }).termination_committed === true;
+
+  let message: string;
+  switch (apiError?.code) {
+    case "RECOVER_REFUSED_PORT_OWNER":
+      message = "Recovery was refused: the port owner could not be verified as this daemon's child. No process was stopped.";
+      break;
+    case "RECOVER_RESPAWN_FAILED":
+      message = "The supervisor did not accept recovery. View logs and retry after resolving the failure.";
+      break;
+    case "RECOVER_SUPERVISOR_UNAVAILABLE":
+      message = "The supervisor is unavailable. Restart the hub, then retry recovery.";
+      break;
+    case "RECOVER_REQUEST_CANCELED":
+      message = "Recovery was canceled before any process was stopped. Retry if recovery is still needed.";
+      break;
+    case "RECOVER_BOUNDARY_PROBE_TIMEOUT":
+      message = "Recovery verified the process identity but timed out while rechecking the port owner. No process was stopped.";
+      break;
+    case "RECOVER_RESPAWN_BUDGET_INSUFFICIENT":
+      message = "Recovery could not reserve enough time for a safe restart. No process was stopped; retry when the local system is less busy.";
+      break;
+    case "RECOVER_UNKNOWN_TASK":
+      message = "This daemon is no longer known to the supervisor. Refresh status and try again.";
+      break;
+    case "RECOVER_STATE_READ_FAILED":
+      message = "Recovery could not read the current daemon state. Check the supervisor logs and try again.";
+      break;
+    case "RECOVER_UNCLASSIFIED_FAILURE":
+      message = "Recovery failed for an unclassified reason. No specific cause can be asserted; check the supervisor logs before retrying.";
+      break;
+    default:
+      message = "Recovery failed. Check the supervisor logs and try again.";
+  }
+
+  return terminationCommitted
+    ? `${message} A process was already stopped during this recovery attempt.`
+    : message;
 }
 
 // RecoveryActions surfaces the two ops affordances the Dashboard

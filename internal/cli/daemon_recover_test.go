@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/daemonrecovery"
 	"mcp-local-hub/internal/process"
 )
 
@@ -40,6 +41,33 @@ type respawnCall struct {
 	force bool
 }
 
+type recoverTestHeldGeneration struct {
+	pid   int
+	env   *recoverTestEnv
+	proof process.PIDIdentityProof
+}
+
+func (h *recoverTestHeldGeneration) PID() int { return h.pid }
+
+func (h *recoverTestHeldGeneration) VerifyIdentity(proof process.PIDIdentityProof) error {
+	h.proof = proof
+	if proof.PID != h.pid {
+		return process.ErrProcessIdentityMismatch
+	}
+	return nil
+}
+
+func (h *recoverTestHeldGeneration) Terminate() (bool, error) {
+	h.env.order = append(h.env.order, "kill")
+	h.env.killCalls = append(h.env.killCalls, h.proof)
+	if h.env.killErr != nil {
+		return false, h.env.killErr
+	}
+	return true, nil
+}
+
+func (*recoverTestHeldGeneration) Close() error { return nil }
+
 func newRecoverTestEnv(t *testing.T, env *recoverTestEnv) {
 	t.Helper()
 	prevStateDir := recoverStateDirFn
@@ -48,7 +76,8 @@ func newRecoverTestEnv(t *testing.T, env *recoverTestEnv) {
 	prevPortOwner := recoverPortOwnerFn
 	prevRespawn := recoverRespawnFn
 	prevSelf := recoverSelfPIDFn
-	prevKill := squatterTerminatePIDFn
+	prevHold := recoverHoldProcessFn
+	prevProbeSupervisor := recoverProbeSupervisorFn
 	prevPollInterval := recoverPortFreePollInterval
 	prevTimeout := recoverPortFreeTimeout
 
@@ -56,10 +85,17 @@ func newRecoverTestEnv(t *testing.T, env *recoverTestEnv) {
 	if env.stateDirOverride != "" {
 		env.stateDir = env.stateDirOverride
 	}
+	if env.state == nil && env.intent != nil {
+		daemons := make(map[string]api.SupervisorDaemonState, len(env.intent.Daemons))
+		for _, descriptor := range env.intent.Daemons {
+			daemons[canonicalSupervisorTaskName(descriptor.TaskName)] = api.SupervisorDaemonState{}
+		}
+		env.state = &api.SupervisorStateFile{Daemons: daemons}
+	}
 	recoverStateDirFn = func() (string, error) { return env.stateDir, nil }
 	recoverReadIntentFn = func(string) (*api.SupervisorIntentFile, error) { return env.intent, nil }
 	recoverReadStateFn = func(string) (*api.SupervisorStateFile, error) { return env.state, nil }
-	recoverPortOwnerFn = func(port int) (int, bool, error) {
+	recoverPortOwnerFn = func(_ context.Context, port int) (int, bool, error) {
 		if env.portOwner != nil {
 			return env.portOwner(port)
 		}
@@ -71,11 +107,10 @@ func newRecoverTestEnv(t *testing.T, env *recoverTestEnv) {
 		return env.respawnRes, env.respawnErr
 	}
 	recoverSelfPIDFn = func() int { return 1 }
-	squatterTerminatePIDFn = func(proof process.PIDIdentityProof) error {
-		env.order = append(env.order, "kill")
-		env.killCalls = append(env.killCalls, proof)
-		return env.killErr
+	recoverHoldProcessFn = func(pid int) (process.HeldPIDGeneration, error) {
+		return &recoverTestHeldGeneration{pid: pid, env: env}, nil
 	}
+	recoverProbeSupervisorFn = func(context.Context) error { return nil }
 	recoverPortFreePollInterval = time.Millisecond
 	recoverPortFreeTimeout = 10 * time.Millisecond
 
@@ -86,7 +121,8 @@ func newRecoverTestEnv(t *testing.T, env *recoverTestEnv) {
 		recoverPortOwnerFn = prevPortOwner
 		recoverRespawnFn = prevRespawn
 		recoverSelfPIDFn = prevSelf
-		squatterTerminatePIDFn = prevKill
+		recoverHoldProcessFn = prevHold
+		recoverProbeSupervisorFn = prevProbeSupervisor
 		recoverPortFreePollInterval = prevPollInterval
 		recoverPortFreeTimeout = prevTimeout
 	})
@@ -114,6 +150,120 @@ func exitCodeOf(t *testing.T, err error) int {
 		t.Fatalf("error %v is not a forceExit", err)
 	}
 	return fe.ExitCode()
+}
+
+func TestDaemonRecoverHermeticExitContract(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "invalid arguments", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureInvalidArgs}, want: daemonRecoverExitUnknownTask},
+		{name: "state read", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead}, want: daemonRecoverExitUnknownTask},
+		{name: "unknown task", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureUnknownTask}, want: daemonRecoverExitUnknownTask},
+		{name: "confirmation required", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureConfirmationRequired}, want: daemonRecoverExitRefused},
+		{name: "refused owner", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureRefusedPortOwner}, want: daemonRecoverExitRefused},
+		{name: "boundary probe timeout", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureBoundaryProbeTimeout, Cause: context.DeadlineExceeded}, want: daemonRecoverExitRefused},
+		{name: "respawn rejected", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureRespawnFailed}, want: daemonRecoverExitRespawnError},
+		{name: "supervisor unavailable", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureSupervisorUnavailable}, want: daemonRecoverExitUnreachable},
+		{name: "request canceled", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureRequestCanceled, Cause: context.Canceled}, want: daemonRecoverExitUnreachable},
+		{name: "respawn budget insufficient", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureRespawnBudgetInsufficient, Cause: daemonrecovery.ErrInsufficientRespawnBudget}, want: daemonRecoverExitBudgetInsufficient},
+		{name: "respawn setup failure", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead, Cause: api.ErrRespawnSetupFailure}, want: daemonRecoverExitUnreachable},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, _, _ := recoverCmd("")
+			if got := exitCodeOf(t, printRecoverError(cmd, `\mcp-local-hub-memory-default`, tc.err)); got != tc.want {
+				t.Fatalf("exit = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDaemonRecoverBudgetRefusalHasHonestOperatorMessage(t *testing.T) {
+	cmd, _, errOut := recoverCmd("")
+	err := printRecoverError(cmd, `\mcp-local-hub-memory-default`, &daemonrecovery.OperationError{
+		Kind:  daemonrecovery.FailureRespawnBudgetInsufficient,
+		Cause: daemonrecovery.ErrInsufficientRespawnBudget,
+	})
+	if got := exitCodeOf(t, err); got != daemonRecoverExitBudgetInsufficient {
+		t.Fatalf("exit=%d want=%d", got, daemonRecoverExitBudgetInsufficient)
+	}
+	message := errOut.String()
+	if !strings.Contains(message, "could not reserve the mandatory post-termination respawn time") || strings.Contains(message, "recover state") {
+		t.Fatalf("budget refusal message is not honest: %q", message)
+	}
+}
+
+func TestDaemonRecoverUnclassifiedFailureHasHonestOperatorMessage(t *testing.T) {
+	cmd, _, errOut := recoverCmd("")
+	err := printRecoverError(cmd, `\mcp-local-hub-memory-default`, &daemonrecovery.OperationError{
+		Kind: daemonrecovery.FailureKind("future_failure"),
+	})
+	if got := exitCodeOf(t, err); got != daemonRecoverExitRespawnError {
+		t.Fatalf("exit=%d want=%d", got, daemonRecoverExitRespawnError)
+	}
+	message := errOut.String()
+	if !strings.Contains(message, "unclassified failure") || strings.Contains(message, "[]:") {
+		t.Fatalf("unclassified failure message is not honest: %q", message)
+	}
+}
+
+func TestDaemonRecoverZeroBudgetPortWaitMessageSaysSkippedNotStillBound(t *testing.T) {
+	cmd, _, errOut := recoverCmd("")
+	printRecoverNotification(cmd, daemonrecovery.Notification{
+		Kind:     daemonrecovery.NotificationPortWaitTimeout,
+		Port:     9123,
+		Duration: 0,
+		Cause:    errors.New("port release wait skipped to preserve the mandatory respawn reservation"),
+	})
+	message := errOut.String()
+	if !strings.Contains(message, "release wait was skipped") || !strings.Contains(message, "port state was not observed") {
+		t.Fatalf("zero-budget port-wait message is not skip-specific: %q", message)
+	}
+	if strings.Contains(message, "still appears bound") || strings.Contains(message, "after 0s") {
+		t.Fatalf("zero-budget port-wait message claims an observation that was not made: %q", message)
+	}
+}
+
+func TestDaemonRecoverRespawnFailurePreservesSupervisorMessage(t *testing.T) {
+	cmd, _, errOut := recoverCmd("")
+	err := printRecoverError(cmd, `\mcp-local-hub-memory-default`, &daemonrecovery.OperationError{
+		Kind: daemonrecovery.FailureRespawnFailed,
+		Respawn: api.RespawnResult{
+			Code:    "RESPAWN_REJECTED",
+			Message: "restart policy refused the request",
+		},
+	})
+	if got := exitCodeOf(t, err); got != daemonRecoverExitRespawnError {
+		t.Fatalf("exit=%d want=%d", got, daemonRecoverExitRespawnError)
+	}
+	if message := errOut.String(); !strings.Contains(message, "[RESPAWN_REJECTED]: restart policy refused the request") {
+		t.Fatalf("respawn failure message lost supervisor detail: %q", message)
+	}
+}
+
+func TestDaemonRecoverRound4HermeticExitContract(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "state directory failure", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead, Cause: errors.New("resolve state directory")}, want: daemonRecoverExitUnknownTask},
+		{name: "intent file failure", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead, Cause: errors.New("read supervisor-intent.json")}, want: daemonRecoverExitUnknownTask},
+		{name: "state file failure", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead, Cause: errors.New("read supervisor-state.json")}, want: daemonRecoverExitUnknownTask},
+		{name: "missing target row", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead, Cause: errors.New("missing target state row")}, want: daemonRecoverExitUnknownTask},
+		{name: "respawn setup special case", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead, Cause: api.ErrRespawnSetupFailure}, want: daemonRecoverExitUnreachable},
+		{name: "final owner recheck timeout", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureBoundaryProbeTimeout, Cause: context.DeadlineExceeded}, want: daemonRecoverExitRefused},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, _, _ := recoverCmd("")
+			if got := exitCodeOf(t, printRecoverError(cmd, `\mcp-local-hub-memory-default`, tc.err)); got != tc.want {
+				t.Fatalf("exit=%d want=%d", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestDaemonRecover_UnknownTask(t *testing.T) {
@@ -193,8 +343,8 @@ func TestDaemonRecover_Port0ResolvesEffectivePortOrWarns(t *testing.T) {
 		},
 		{
 			name: "unresolvable non-daemon timer row warns",
-			desc: api.SupervisorDaemon{TaskName: `\mcp-local-hub-workspace-weekly-refresh`,
-				Args: []string{"workspace-weekly-refresh"}, Port: 0},
+			desc: api.SupervisorDaemon{TaskName: `\mcp-local-hub-future-timer-row`,
+				Args: []string{"future-timer-row"}, Port: 0},
 			wantWarn: true,
 		},
 	}
@@ -236,7 +386,7 @@ func TestDaemonRecover_OwnSquatterReapThenRespawn(t *testing.T) {
 		}},
 		portOwner: func(int) (int, bool, error) {
 			portCalls++
-			if portCalls == 1 {
+			if portCalls <= 2 {
 				return owner, true, nil // first probe: squatter owns the port
 			}
 			return 0, false, nil // after the kill: port free
@@ -302,10 +452,13 @@ func TestDaemonRecover_ForeignSquatterRefusesExit3(t *testing.T) {
 		portOwner: func(int) (int, bool, error) { return owner, true, nil },
 	}
 	newRecoverTestEnv(t, env)
-	// Exe gate says foreign.
+	// The held generation owns executable proof, so mismatched task argv is the
+	// authoritative foreign-process discriminator for this adapter test.
 	setSquatterLookupForTest(t, func(int) (process.ProcessIdentity, error) {
-		return squatterIdentityFor(owner, d), nil
-	}, func(int, string) bool { return false })
+		identity := squatterIdentityFor(owner, d)
+		identity.CommandLine = `"C:\mcphub.exe" daemon --server time --daemon default`
+		return identity, nil
+	}, alwaysExeMatch)
 
 	cmd, _, errBuf := recoverCmd("")
 	err := runDaemonRecover(cmd, d.TaskName, true)
@@ -394,7 +547,7 @@ func TestDaemonRecover_AuditEmitFailureDoesNotFailCommand(t *testing.T) {
 		stateDirOverride: filepath.Join(t.TempDir(), "does", "not", "exist"), // OpenSupervisorEventLog will fail
 		portOwner: func(int) (int, bool, error) {
 			portCalls++
-			if portCalls == 1 {
+			if portCalls <= 2 {
 				return owner, true, nil
 			}
 			return 0, false, nil

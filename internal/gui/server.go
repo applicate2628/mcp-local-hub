@@ -548,6 +548,7 @@ type Server struct {
 	uninstaller              uninstaller
 	installBulk              installBulkAPI
 	restart                  restarter
+	daemonRecover            daemonRecoverer
 	stop                     stopper
 	logs                     logsProvider
 	extractor                extractor
@@ -819,6 +820,7 @@ func NewServer(cfg Config) *Server {
 	s.uninstaller = realUninstaller{}
 	s.installBulk = realInstallBulkAPI{}
 	s.restart = realRestarter{}
+	s.daemonRecover = realDaemonRecoverer{}
 	s.stop = realStopper{}
 	s.logs = realLogs{}
 	s.extractor = realExtractor{}
@@ -871,6 +873,7 @@ func NewServer(cfg Config) *Server {
 	registerInitClientConfigRoutes(s)
 	registerResolveSymlinkWriteRoutes(s) // A3 PR-2: guided symlink-consent write
 	registerDaemonEnvRoutes(s)
+	registerDaemonRecoverRoutes(s)
 	registerWorkspacesRoutes(s)
 	registerLSPRegisterRoutes(s)
 	registerLSPTrustedRootsRoutes(s)

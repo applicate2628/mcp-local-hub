@@ -1472,16 +1472,23 @@ checks who owns the port, and:
 
 1. If a **verified-own** squatter holds it (our binary at the configured
    path, our argv naming THIS task exactly, start-time-proven via a held
-   handle), reaps it with `TerminatePIDWithIdentity` (confirm prompt
-   unless `--yes`). A **foreign or unverifiable** owner is REFUSED —
+   handle), retains that same process generation through the final owner
+   recheck and termination (confirm prompt unless `--yes`). A **foreign or unverifiable** owner is REFUSED —
    never killed (fail-closed). Windows only in v1; on other platforms a
    bound foreign owner is refused (no kill).
 2. Forces a respawn through the supervisor (`force=true`), which resets
    the quarantine window.
 
-Every verdict/kill is audited to `supervisor-events.log`
-(`daemon-port-squatter-reaped` / `-foreign` / `-unverified` /
-`-reap-failed`, with `source:"recover"` + `actor`).
+Every verdict/kill is audited to `supervisor-events.log` with `source:"recover"`
++ `actor`: `daemon-port-squatter-reaped`, `daemon-port-squatter-foreign`,
+`daemon-port-squatter-unverified`, `daemon-port-squatter-reap-failed`,
+`daemon-port-squatter-confirmation-declined`,
+`daemon-port-squatter-already-exited`,
+`daemon-port-squatter-tracked-child`,
+`daemon-recovery-supervisor-unavailable`,
+`daemon-recovery-budget-insufficient`,
+`daemon-port-squatter-termination-unconfirmed`, and
+`daemon-recovery-canceled`. Already-exited is a distinct no-reap outcome.
 
 ```bash
 mcphub daemon recover \mcp-local-hub-serena-b133f336        # prompts before killing
@@ -1492,11 +1499,18 @@ Exit codes:
 
 ```text
 0 — recovered (reaped if needed, force respawn accepted)
-2 — unknown task (not in supervisor-intent.json) OR intent unreadable
-3 — refused: the port owner is foreign / unverifiable (no kill), or the
-    operator declined the confirmation prompt
-4 — force respawn returned a non-success supervisor code
-5 — supervisor unreachable (start `mcphub supervise` / enable autostart)
+2 — invalid/unknown task, or recovery-state read failure: state-directory
+    resolution; unreadable/nil supervisor-intent.json or supervisor-state.json;
+    or a missing target state row (the respawn-setup special case exits 5)
+3 — FailureConfirmationRequired or refused: confirmation was missing/declined,
+    the port owner is foreign / unverifiable (no kill), or the final owner
+    recheck timed out before any kill
+4 — force respawn returned a non-success supervisor code, or recovery reached
+    an unclassified failure kind whose cause cannot be asserted
+5 — supervisor/respawn call unavailable, or the request was canceled before
+    completion (start `mcphub supervise` / enable autostart when unreachable)
+6 — refused before termination because recovery could not preserve the mandatory
+    detached respawn reservation; retry when the local system is less busy
 ```
 
 `POST /api/daemon/respawn {force:true}` remains the GUI/programmatic

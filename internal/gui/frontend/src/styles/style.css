@@ -752,7 +752,9 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
 .card-title { font-weight: 600; margin-bottom: var(--gap-sm); display: flex; align-items: center; gap: var(--gap-xs); }
 .card-kv { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
 .card.ok .state { color: var(--success); }
+.card.warning .state { color: var(--warning, #bf8700); }
 .card.down .state { color: var(--danger); }
+.card.idle .state { color: var(--text-muted); }
 
 /* Spec §5.7 line 289: status cells include a shape indicator (●/○) so
    color is not the sole carrier of meaning. The glyph inherits color

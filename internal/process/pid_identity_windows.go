@@ -20,6 +20,106 @@ type processHandleIdentity struct {
 	CreationTime   time.Time
 }
 
+type heldPIDGeneration struct {
+	pid    int
+	handle windows.Handle
+	ops    heldPIDGenerationOps
+}
+
+type heldPIDGenerationOps struct {
+	verifyIdentity func(PIDIdentityProof, windows.Handle) error
+	terminate      func(windows.Handle, uint32) error
+	wait           func(windows.Handle, uint32) (uint32, error)
+	close          func(windows.Handle) error
+}
+
+var productionHeldPIDGenerationOps = heldPIDGenerationOps{
+	verifyIdentity: verifyHandleIdentity,
+	terminate:      windows.TerminateProcess,
+	wait:           windows.WaitForSingleObject,
+	close:          windows.CloseHandle,
+}
+
+// HoldPIDForTermination opens one process generation with the complete access
+// needed to verify and terminate it. The caller owns the returned handle and
+// must close it on every path.
+func HoldPIDForTermination(pid int) (HeldPIDGeneration, error) {
+	return holdPIDForTermination(pid, windows.OpenProcess, productionHeldPIDGenerationOps)
+}
+
+func holdPIDForTermination(
+	pid int,
+	openProcess func(uint32, bool, uint32) (windows.Handle, error),
+	ops heldPIDGenerationOps,
+) (HeldPIDGeneration, error) {
+	if pid <= 0 {
+		return nil, fmt.Errorf("process: invalid PID %d", pid)
+	}
+	access := uint32(windows.PROCESS_TERMINATE | windows.SYNCHRONIZE | windows.PROCESS_QUERY_LIMITED_INFORMATION)
+	h, err := openProcess(access, false, uint32(pid))
+	if err != nil {
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+			return nil, fmt.Errorf("process: PID %d already exited before generation hold: %w", pid, ErrProcessAlreadyExited)
+		}
+		return nil, fmt.Errorf("process: open PID %d for generation hold: %w", pid, err)
+	}
+	return &heldPIDGeneration{pid: pid, handle: h, ops: ops}, nil
+}
+
+func (h *heldPIDGeneration) PID() int {
+	if h == nil {
+		return 0
+	}
+	return h.pid
+}
+
+func (h *heldPIDGeneration) VerifyIdentity(proof PIDIdentityProof) error {
+	if h == nil || h.handle == 0 {
+		return fmt.Errorf("process: held PID generation is closed")
+	}
+	if proof.PID != h.pid {
+		return fmt.Errorf("%w: proof PID %d does not match held PID %d", ErrProcessIdentityMismatch, proof.PID, h.pid)
+	}
+	return h.ops.verifyIdentity(proof, h.handle)
+}
+
+func (h *heldPIDGeneration) Terminate() (bool, error) {
+	if h == nil || h.handle == 0 {
+		return false, fmt.Errorf("process: held PID generation is closed")
+	}
+	if err := h.ops.terminate(h.handle, 1); err != nil {
+		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			if ev, waitErr := h.ops.wait(h.handle, 0); waitErr == nil && ev == windows.WAIT_OBJECT_0 {
+				return false, fmt.Errorf("process: PID %d already exited before terminate: %w", h.pid, ErrProcessAlreadyExited)
+			}
+		}
+		return false, fmt.Errorf("process: terminate PID %d: %w", h.pid, err)
+	}
+	ev, waitErr := h.ops.wait(h.handle, terminateWaitMilliseconds)
+	if waitErr != nil {
+		return true, fmt.Errorf("process: wait for PID %d after terminate: %w", h.pid, waitErr)
+	}
+	if ev == uint32(windows.WAIT_TIMEOUT) {
+		return true, fmt.Errorf("process: timeout waiting for PID %d to exit after terminate", h.pid)
+	}
+	if ev != windows.WAIT_OBJECT_0 {
+		return true, fmt.Errorf("process: wait for PID %d after terminate returned unexpected code %d", h.pid, ev)
+	}
+	return true, nil
+}
+
+func (h *heldPIDGeneration) Close() error {
+	if h == nil || h.handle == 0 {
+		return nil
+	}
+	err := h.ops.close(h.handle)
+	h.handle = 0
+	if err != nil {
+		return fmt.Errorf("process: close held PID %d generation: %w", h.pid, err)
+	}
+	return nil
+}
+
 func PIDExecutableMatches(pid int, expectedPath string) bool {
 	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, uint32(pid))
 	if err != nil {
@@ -49,40 +149,23 @@ func VerifyPIDIdentity(proof PIDIdentityProof) error {
 }
 
 func TerminatePIDWithIdentity(proof PIDIdentityProof) error {
-	if proof.PID <= 0 {
-		return fmt.Errorf("process: invalid PID %d", proof.PID)
-	}
-	access := uint32(windows.PROCESS_TERMINATE | windows.SYNCHRONIZE | windows.PROCESS_QUERY_LIMITED_INFORMATION)
-	h, err := windows.OpenProcess(access, false, uint32(proof.PID))
+	return terminatePIDWithIdentity(proof, HoldPIDForTermination)
+}
+
+func terminatePIDWithIdentity(
+	proof PIDIdentityProof,
+	hold func(int) (HeldPIDGeneration, error),
+) error {
+	held, err := hold(proof.PID)
 	if err != nil {
-		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
-			return fmt.Errorf("process: PID %d already exited before terminate open: %w", proof.PID, ErrProcessAlreadyExited)
-		}
-		return fmt.Errorf("process: open PID %d for terminate: %w", proof.PID, err)
-	}
-	defer windows.CloseHandle(h)
-	if err := verifyHandleIdentity(proof, h); err != nil {
 		return err
 	}
-	if err := windows.TerminateProcess(h, 1); err != nil {
-		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-			if ev, waitErr := windows.WaitForSingleObject(h, 0); waitErr == nil && ev == windows.WAIT_OBJECT_0 {
-				return fmt.Errorf("process: PID %d already exited before terminate: %w", proof.PID, ErrProcessAlreadyExited)
-			}
-		}
-		return fmt.Errorf("process: terminate PID %d: %w", proof.PID, err)
+	defer func() { _ = held.Close() }()
+	if err := held.VerifyIdentity(proof); err != nil {
+		return err
 	}
-	ev, waitErr := windows.WaitForSingleObject(h, terminateWaitMilliseconds)
-	if waitErr != nil {
-		return fmt.Errorf("process: wait for PID %d after terminate: %w", proof.PID, waitErr)
-	}
-	if ev == uint32(windows.WAIT_TIMEOUT) {
-		return fmt.Errorf("process: timeout waiting for PID %d to exit after terminate", proof.PID)
-	}
-	if ev != windows.WAIT_OBJECT_0 {
-		return fmt.Errorf("process: wait for PID %d after terminate returned unexpected code %d", proof.PID, ev)
-	}
-	return nil
+	_, err = held.Terminate()
+	return err
 }
 
 func verifyHandleIdentity(proof PIDIdentityProof, h windows.Handle) error {

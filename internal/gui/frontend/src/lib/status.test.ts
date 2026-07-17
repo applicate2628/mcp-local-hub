@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { aggregateStatus, stateShape } from "./status";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import {
+  aggregateStatus,
+  daemonStateVisual,
+  isRecoveryEligibleState,
+  stateShape,
+} from "./status";
 import type { DaemonStatus } from "../types";
 
 function row(overrides: Partial<DaemonStatus>): DaemonStatus {
@@ -122,5 +129,51 @@ describe("stateShape", () => {
       stateShape("Starting"),
     ]);
     expect(glyphs.size).toBe(5);
+  });
+});
+
+describe("daemonStateVisual", () => {
+  const green = "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
+  const amber = "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300";
+  const orange = "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300";
+  const red = "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300";
+  const gray = "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300";
+
+  it.each([
+    ["Running", "card ok", green],
+    ["Partial", "card warning", amber],
+    ["Starting", "card warning", amber],
+    ["Restarting", "card warning", amber],
+    ["Backoff", "card warning", amber],
+    ["Spawning", "card warning", amber],
+    ["Quarantined", "card warning", orange],
+    ["Failed", "card down", red],
+    ["Ready", "card idle", gray],
+    ["Scheduled", "card idle", gray],
+    ["Stopped", "card idle", gray],
+    ["Idle", "card idle", gray],
+    ["", "card idle", gray],
+    ["FutureState", "card idle", gray],
+  ])("maps %s through the canonical visual bucket", (state, cardClass, badgeClass) => {
+    expect(daemonStateVisual(state)).toEqual({ cardClass, badgeClass });
+  });
+
+  it("is the only Dashboard owner of card and badge status colors", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "src/screens/Dashboard.tsx"),
+      "utf8",
+    );
+    expect(source).toContain("daemonStateVisual(d.state)");
+    expect(source).not.toContain('d.state === "Running" ? "card ok"');
+    expect(source).not.toMatch(/d\.state\s*===\s*["']Running["']\s*\?\s*["']bg-green/);
+  });
+});
+
+describe("isRecoveryEligibleState", () => {
+  it("admits Quarantined by exact value only", () => {
+    expect(isRecoveryEligibleState("Quarantined")).toBe(true);
+    for (const state of ["LostChild", "quarantined", "Failed", "", "FutureState"]) {
+      expect(isRecoveryEligibleState(state)).toBe(false);
+    }
   });
 });

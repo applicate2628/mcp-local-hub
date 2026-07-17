@@ -174,6 +174,11 @@ var ErrSupervisorEventMissingSource = errors.New("supervisor event log: missing 
 // (intent_audit.go:118 §51).
 var ErrSupervisorEventIdentityOversize = errors.New("supervisor event log: identity field (event/source/task_name) exceeds 1024-byte cap")
 
+// ErrSupervisorEventEmitTimeout reports that EmitWithTimeout could not acquire
+// the event-log flock inside its bounded wait. Callers that need a durable
+// fallback can distinguish this best-effort skip from a successful append.
+var ErrSupervisorEventEmitTimeout = errors.New("supervisor event log: bounded emit timed out")
+
 // ---------------------------------------------------------------------------
 // SupervisorEventLog — constructor + Emit.
 // ---------------------------------------------------------------------------
@@ -256,8 +261,8 @@ func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
 
 // EmitWithTimeout serializes the entry and appends it, waiting up to timeout
 // for the cross-process flock via TryLockContext. On timeout (or a defensive
-// not-locked) it treats the contention as a best-effort skip and returns nil,
-// like TryEmit — it does NOT block indefinitely.
+// not-locked) it returns ErrSupervisorEventEmitTimeout so callers can arrange a
+// durable fallback; it does NOT block indefinitely.
 //
 // Use this for an audit row that is the ONLY record of a state mutation AND is
 // emitted while the caller still holds another lock (e.g. the strict-mode CLI
@@ -330,10 +335,11 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 		locked, lockErr = l.lock.TryLockContext(ctx, eventLogEmitRetryDelay)
 		if !locked {
 			// Timed out under contention (DeadlineExceeded) or a defensive
-			// (false, nil): best-effort skip, same as TryEmit. Only a genuine
+			// (false, nil): report the bounded skip so a mutation-audit caller
+			// can fall back after leaving its critical path. Only a genuine
 			// non-timeout lock error falls through to be reported below.
 			if lockErr == nil || errors.Is(lockErr, context.DeadlineExceeded) {
-				return nil
+				return ErrSupervisorEventEmitTimeout
 			}
 		}
 	}
