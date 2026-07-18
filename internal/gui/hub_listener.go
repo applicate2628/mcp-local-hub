@@ -70,6 +70,9 @@ type HubListenerComponents struct {
 	handler *api.HubMcpHandler
 	reload  *api.InternalReloadHandler
 	port    int
+	// reconcilePending is copied from the endpoint returned by the serialized
+	// bind transaction and hydrates the Server-owned health tracker.
+	reconcilePending bool
 
 	// listenerCancel stops per-listener background watchers. It is
 	// derived from the long-lived hub init context so shutdown/restart can
@@ -555,6 +558,17 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 			continue
 		}
 		restartPort = newComp.port
+		// Hydrate the durable reconcile marker from the accepted component the
+		// SAME way the initial-bind accept path does. BindHubMcpListener loaded
+		// newComp.reconcilePending under hub-mcp.lock, so a sibling
+		// `regenerate-instance-id` that set the marker while this GUI was live
+		// (no in-process latch) is caught here — even when this restart's
+		// instance-id reads both land AFTER the rotation (instanceIDPreserved,
+		// so the instance-id-changed emit never fires). Idempotent with that
+		// emit's markReconcilePending; markHealthy below re-reads the latch.
+		if newComp.reconcilePending {
+			s.hubHealth.markReconcilePending()
+		}
 		currentInstanceID, currentInstanceIDErr := loadHubListenerRestartInstanceID()
 		instanceIDPreserved := previousInstanceIDErr == nil && currentInstanceIDErr == nil && previousInstanceID != "" && previousInstanceID == currentInstanceID
 		instanceIDChanged := previousInstanceIDErr == nil && currentInstanceIDErr == nil && previousInstanceID != "" && currentInstanceID != "" && previousInstanceID != currentInstanceID
@@ -913,12 +927,13 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 	// for the persisted-vs-runtime hub-endpoint badge).
 	listenerCtx, listenerCancel := context.WithCancel(ctx)
 	comp := &HubListenerComponents{
-		srv:            srv,
-		store:          store,
-		handler:        handler,
-		reload:         reload,
-		port:           port,
-		listenerCancel: listenerCancel,
+		srv:              srv,
+		store:            store,
+		handler:          handler,
+		reload:           reload,
+		port:             port,
+		reconcilePending: ep.ReconcilePending,
+		listenerCancel:   listenerCancel,
 	}
 	comp.alive.Store(true)
 
@@ -951,6 +966,41 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 	healthWatcher.SetOnUnresponsive(hubListenerComponentCallback(opts.server, comp, opts.onUnresponsive))
 	healthWatcher.SetOnRecovered(hubListenerComponentCallback(opts.server, comp, opts.onRecovered))
 	go healthWatcher.Run(listenerCtx)
+
+	// Keep the process-local reconcile latch aligned with a successful CLI
+	// reconcile. This watcher is detect-only: read failures are ignored for the
+	// current tick, and listener cancellation is its sole lifetime boundary.
+	if server := opts.server; server != nil {
+		interval := opts.healthProbeInterval
+		if interval <= 0 {
+			interval = api.DefaultHubHealthProbeInterval
+		}
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-listenerCtx.Done():
+					return
+				case <-ticker.C:
+					ep, err := api.LoadHubEndpoint()
+					if err != nil {
+						continue
+					}
+					// Bidirectional re-sync with the durable marker: re-latch when
+					// a sibling rotation set it while this GUI was live (fable F1
+					// backstop) AND self-heal a marker a stale-read tick wrongly
+					// cleared (fable F2 TOCTOU). markReconcilePending is idempotent;
+					// clearReconcilePendingIfResolved only downgrades NeedsReconcile.
+					if ep.ReconcilePending {
+						server.hubHealth.markReconcilePending()
+					} else {
+						server.hubHealth.clearReconcilePendingIfResolved(false)
+					}
+				}
+			}
+		}()
+	}
 
 	go func() {
 		// Mark the listener dead on any exit path (clean shutdown via

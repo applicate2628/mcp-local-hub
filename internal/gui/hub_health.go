@@ -54,8 +54,9 @@ type hubHealthTracker struct {
 	state  HubHealthState
 	action string // operator-action hint for needs-reconcile (empty otherwise)
 	// reconcilePending is the process-local mirror/latch. Server.Start hydrates
-	// it from HubEndpoint.ReconcilePending; the install reconciler clears the
-	// durable record, and a later process starts without re-latching it.
+	// it from the endpoint returned by the serialized bind transaction, and the
+	// listener watcher observes when the install reconciler clears the durable
+	// record.
 	reconcilePending bool
 	pub              func(Event)
 }
@@ -131,6 +132,33 @@ func (h *hubHealthTracker) markHealthy() {
 			"state":           string(state),
 			"operator_action": action,
 			"degraded":        hubHealthDegraded(state),
+		}})
+	}
+}
+
+// clearReconcilePendingIfResolved observes the durable marker after a
+// successful CLI reconcile. It clears only a latched process-local marker and
+// only transitions NeedsReconcile; availability states remain authoritative.
+func (h *hubHealthTracker) clearReconcilePendingIfResolved(pendingOnDisk bool) {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.reconcilePending || pendingOnDisk {
+		return
+	}
+	h.reconcilePending = false
+	if h.state != HubHealthNeedsReconcile {
+		return
+	}
+	h.state = HubHealthHealthy
+	h.action = ""
+	if h.pub != nil {
+		h.pub(Event{Type: "hub-health", Body: map[string]any{
+			"state":           string(HubHealthHealthy),
+			"operator_action": "",
+			"degraded":        hubHealthDegraded(HubHealthHealthy),
 		}})
 	}
 }

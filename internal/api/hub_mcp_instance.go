@@ -358,11 +358,3 @@ func generateHexToken() (string, error) {
 func isMissingEndpointErr(err error) bool {
 	return isHubMcpStateMissingErr(err)
 }
-
-// IsMissingHubEndpointErr is the exported form of isMissingEndpointErr for
-// out-of-package callers (the GUI reconcile-marker hydration) that must
-// distinguish "endpoint never written yet" (first-run — do nothing) from a
-// genuine read/parse/DACL failure (which must NOT be silently swallowed).
-func IsMissingHubEndpointErr(err error) bool {
-	return isMissingEndpointErr(err)
-}
