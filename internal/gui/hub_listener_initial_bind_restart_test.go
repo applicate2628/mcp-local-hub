@@ -249,6 +249,58 @@ func TestHubListenerRestartDriverInitialBindForeignOwnerRotatesOnceAndNeedsRecon
 	}
 }
 
+func TestHubListenerRestartDriverRotationPersistsThenCancelStillNeedsReconcile(t *testing.T) {
+	setupInitialHubPortDependencyTest(t)
+	before, err := api.EnsureHubEndpoint(3439, 111)
+	if err != nil {
+		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
+	}
+
+	s := NewServer(Config{Port: 0})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runHubListenerRestartDriver(ctx, s, hubListenerRestartDriverOptions{
+			startFn: func(startCtx context.Context) (*HubListenerComponents, error) {
+				return nil, startCtx.Err()
+			},
+			shutdownFn: func(context.Context, *HubListenerComponents) {},
+			emitFn:     func(string, string, map[string]any) error { return nil },
+			sleepFn:    func(context.Context, time.Duration) bool { return true },
+			nowFn:      func() time.Time { return time.Unix(100, 0) },
+			initialBindPortNeedsRotationFn: func(context.Context, int) bool {
+				return true
+			},
+			rotateHubInstanceIDFn: func(rotateCtx context.Context) (api.HubEndpoint, error) {
+				rotated, rotateErr := api.RotateHubInstanceIDContext(rotateCtx)
+				if rotateErr == nil {
+					cancel()
+				}
+				return rotated, rotateErr
+			},
+		})
+	}()
+
+	s.signalInitialHubBindFailure()
+	waitRestartDriverDone(t, done)
+
+	after, err := api.LoadHubEndpoint()
+	if err != nil {
+		t.Fatalf("LoadHubEndpoint after canceled restart: %v", err)
+	}
+	if after.InstanceID == before.InstanceID {
+		t.Fatalf("InstanceID = %q, want persisted rotation from %q", after.InstanceID, before.InstanceID)
+	}
+	if got := s.hubMcpComp.Load(); got != nil {
+		t.Fatalf("published component after cancellation = %#v, want nil", got)
+	}
+	if got, action := s.hubHealth.snapshot(); got != HubHealthNeedsReconcile || action != hubReconcileOperatorAction {
+		t.Fatalf("health after persisted rotation + cancel = state %q action %q, want needs-reconcile + action", got, action)
+	}
+}
+
 func TestHubListenerRestartDriverInitialBindOwnMcphubGUIOwnerDoesNotRotateOrReconcile(t *testing.T) {
 	setupInitialHubPortDependencyTest(t)
 	before, err := api.EnsureHubEndpoint(3439, 111)

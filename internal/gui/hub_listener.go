@@ -273,6 +273,14 @@ func hubInitialBindPortNeedsInstanceIDRotationWithDeps(ctx context.Context, port
 	probeCtx, cancel := context.WithTimeout(ctx, hubInitialBindPortOwnerProbeTimeout)
 	defer cancel()
 
+	// Accepted bounded multi-tenant residual (PR #562 P1-1/P1-2): this probe
+	// runs after the bind failure, so a different-user holder can drop the port
+	// before inspection, and basename + GUI argv identity is forgeable by a
+	// different-user copied/renamed binary. Both are moot for the primary
+	// single-user host because a same-user actor already owns the credential
+	// files; MCPHUB_REQUIRE_SINGLE_USER_HOME plus the owner-only DACL bounds the
+	// fable-accepted residual. Reliable rebind-time detection is impossible
+	// (TOCTOU + forgeable identity), so keep the own-mcphub-GUI no-rotation gate.
 	if deps.portOwner == nil {
 		return true
 	}
@@ -396,6 +404,7 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 						})
 						return hubListenerRestartOutageExhausted
 					}
+					s.hubHealth.markReconcilePending()
 				}
 			} else {
 				if restartPort == 0 {

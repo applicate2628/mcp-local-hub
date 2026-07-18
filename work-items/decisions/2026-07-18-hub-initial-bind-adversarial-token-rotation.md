@@ -72,7 +72,34 @@ alert is the human-in-the-loop the design relies on and must not have been silen
 into the auto-retry driver.
 
 ## Consequence
-Implement Option B on a branch off master (Phase C is live/ungated), its own PR → bot re-review (Option B
-is demonstrably STRONGER than the bot's own fix against the raised threat, so it should satisfy the
-re-review) → merge → deploy. Then CLOSE PR #561 as non-canon with a comment pointing at this decision +
-the Option B PR. Sequenced AFTER the gated Phase F/I commit to avoid a working-tree/branch conflict.
+Implement Option B on a branch off master (Phase C is live/ungated), its own PR → bot re-review → merge →
+deploy. Then CLOSE PR #561 as non-canon with a comment pointing at this decision + the Option B PR.
+Sequenced AFTER the gated Phase F/I commit to avoid a working-tree/branch conflict.
+
+## Amendment 1 (2026-07-18) — bot review of PR #562: what the adversarial-gate can and cannot close
+PR #562 went to the Codex bot over two fix rounds. Round 1 raised two REAL P1s (both fixed): the owner
+classifier used the DAEMON-descriptor gate (`daemonrecovery.ClassifyPortOwner`), which misclassifies an
+own mcphub-GUI hub-port holder as FOREIGN and rotates on every benign same-port recovery → switched to a
+GUI-process identity gate (`processID`+`matchBasename`+`cmdlineIsGui`, the `--force --kill` gate); and
+`RotateHubInstanceID` was a blocking non-cancellable lock → added `RotateHubInstanceIDContext`.
+
+Round 2 raised three more, and they are DECISIVE about the limits of the whole approach:
+- **P1-3 (fixed):** rotation-then-cancel (driver cancelled after the InstanceID persisted but before a
+  successful retry) left NO reconcile signal → clients 401 without `needs-reconcile`. Fixed by making the
+  reconcile state durable at rotation-persist time (the operator is ALWAYS told to reconcile once the
+  InstanceID rotates, regardless of cancellation timing).
+- **P1-1 + P1-2 (ACCEPTED as bounded residual — operator decision 2026-07-18):** reliable adversarial
+  detection at rebind time is IMPOSSIBLE — the owner probe is asynchronous to the bind failure (a foreign
+  holder can DROP the port before the probe and evade rotation, P1-1), and process identity is FORGEABLE
+  (a different-user attacker runs a copied binary named `mcphub` with `gui` argv, P1-2). BOTH require a
+  DIFFERENT-USER (multi-tenant) attacker; on the single-user solo-dev host (this product's primary target)
+  a same-user actor already owns the credential files, so the attack is moot. This is the SAME bounded
+  multi-tenant residual this decision already accepted, governed by `MCPHUB_REQUIRE_SINGLE_USER_HOME` + the
+  owner-only DACL. Documented inline at the classifier; NOT fixed (cannot be, robustly).
+
+**Operator decision (2026-07-18):** fix P1-3; accept + document P1-1/P1-2 as the bounded multi-tenant
+residual; the gate stays for the single-user common case (own-GUI → no rotation, no needs-reconcile churn).
+Because the bot may keep flagging P1-1/P1-2 (they are genuinely un-closable), the operator explicitly
+authorized MERGING #562 on this documented-residual justification — this specific PR only — rather than
+requiring a clean bot PASS. Option B still strictly improves security over both Phase-C-as-was (no
+rotation) and the bot's fail-closed revert (which reuses the same preserved credentials on manual relaunch).
