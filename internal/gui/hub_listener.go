@@ -70,6 +70,9 @@ type HubListenerComponents struct {
 	handler *api.HubMcpHandler
 	reload  *api.InternalReloadHandler
 	port    int
+	// reconcilePending is copied from the endpoint returned by the serialized
+	// bind transaction and hydrates the Server-owned health tracker.
+	reconcilePending bool
 
 	// listenerCancel stops per-listener background watchers. It is
 	// derived from the long-lived hub init context so shutdown/restart can
@@ -109,6 +112,7 @@ const (
 	hubListenerRestartRollingWindow          = 30 * time.Minute
 	hubListenerRestartMaxAttemptsPerWindow   = 20
 	hubListenerRestartStableWindow           = api.DefaultHubHealthProbeInterval*time.Duration(api.DefaultHubHealthUnresponsiveThreshold) + api.DefaultHubHealthProbeInterval
+	hubInitialBindPortOwnerProbeTimeout      = 3 * time.Second
 )
 
 type hubListenerRestartDriverOptions struct {
@@ -118,12 +122,24 @@ type hubListenerRestartDriverOptions struct {
 	sleepFn    func(context.Context, time.Duration) bool
 	nowFn      func() time.Time
 	cause      hubListenerRestartCause
+	// initialBindPort is populated only for a confirmed persisted-port socket
+	// bind refusal. Pre-bind startup failures leave it zero and never probe.
+	initialBindPort int
+
+	initialBindPortNeedsRotationFn func(context.Context, int) bool
+	rotateHubInstanceIDFn          func(context.Context) (api.HubEndpoint, error)
+}
+
+type hubInitialBindPortOwnerDependencies struct {
+	portOwner       func(context.Context, int) (pid int, ok bool, err error)
+	processIdentity func(int) (ProcessIdentity, error)
 }
 
 type hubListenerRestartCause uint8
 
 const (
 	hubListenerRestartCauseUnresponsive hubListenerRestartCause = iota
+	hubListenerRestartCauseInitialStartupFailed
 	hubListenerRestartCauseInitialBindFailed
 )
 
@@ -131,11 +147,18 @@ func (c hubListenerRestartCause) String() string {
 	switch c {
 	case hubListenerRestartCauseUnresponsive:
 		return "unresponsive"
+	case hubListenerRestartCauseInitialStartupFailed:
+		return "initial-startup-failed"
 	case hubListenerRestartCauseInitialBindFailed:
 		return "initial-bind-failed"
 	default:
 		return fmt.Sprintf("unknown-%d", c)
 	}
+}
+
+type hubListenerRestartRequest struct {
+	cause           hubListenerRestartCause
+	initialBindPort int
 }
 
 type hubListenerRestartOutcome int
@@ -158,24 +181,42 @@ func (s *Server) signalHubListenerRestart() {
 	} else {
 		s.hubHealth.set(HubHealthDown, "")
 	}
-	s.enqueueHubListenerRestart(hubListenerRestartCauseUnresponsive)
+	s.enqueueHubListenerRestart(hubListenerRestartRequest{cause: hubListenerRestartCauseUnresponsive})
 }
 
-// signalInitialHubBindFailure is the only nil-component admission into the
-// existing restart driver. Server.Start guarantees the driver will consume the
-// buffered request, so this path remains Recovering even if the goroutine has
-// not yet published its liveness flag.
-func (s *Server) signalInitialHubBindFailure() {
+// signalInitialHubStartupFailure classifies the startup error at its producer.
+// Only a confirmed persisted-port socket refusal gets the adversarial bind
+// cause; every other setup/startup error keeps the existing nil-component retry
+// path without port-owner inspection or InstanceID rotation.
+func (s *Server) signalInitialHubStartupFailure(err error) {
+	if port, ok := api.HubMcpListenerBindFailurePort(err); ok {
+		s.signalInitialHubBindFailure(port)
+		return
+	}
 	if s == nil || s.hubRestartCh == nil {
 		return
 	}
 	s.hubHealth.set(HubHealthRecovering, "")
-	s.enqueueHubListenerRestart(hubListenerRestartCauseInitialBindFailed)
+	s.enqueueHubListenerRestart(hubListenerRestartRequest{cause: hubListenerRestartCauseInitialStartupFailed})
 }
 
-func (s *Server) enqueueHubListenerRestart(cause hubListenerRestartCause) {
+// signalInitialHubBindFailure is the confirmed-bind nil-component admission
+// into the restart driver. The exact failed persisted port travels with the
+// request so the later owner probe cannot drift to an unrelated endpoint value.
+func (s *Server) signalInitialHubBindFailure(port int) {
+	if s == nil || s.hubRestartCh == nil {
+		return
+	}
+	s.hubHealth.set(HubHealthRecovering, "")
+	s.enqueueHubListenerRestart(hubListenerRestartRequest{
+		cause:           hubListenerRestartCauseInitialBindFailed,
+		initialBindPort: port,
+	})
+}
+
+func (s *Server) enqueueHubListenerRestart(request hubListenerRestartRequest) {
 	select {
-	case s.hubRestartCh <- cause:
+	case s.hubRestartCh <- request:
 	default:
 	}
 }
@@ -198,9 +239,10 @@ func runHubListenerRestartDriver(ctx context.Context, s *Server, opts hubListene
 		select {
 		case <-ctx.Done():
 			return
-		case cause := <-s.hubRestartCh:
+		case request := <-s.hubRestartCh:
 			requestOpts := opts
-			requestOpts.cause = cause
+			requestOpts.cause = request.cause
+			requestOpts.initialBindPort = request.initialBindPort
 			if restartHubListenerWithOutcome(ctx, s, requestOpts) == hubListenerRestartStopDriver {
 				return
 			}
@@ -238,7 +280,60 @@ func normalizeHubListenerRestartDriverOptions(s *Server, opts hubListenerRestart
 	if opts.nowFn == nil {
 		opts.nowFn = time.Now
 	}
+	if opts.initialBindPortNeedsRotationFn == nil {
+		opts.initialBindPortNeedsRotationFn = hubInitialBindPortNeedsInstanceIDRotation
+	}
+	if opts.rotateHubInstanceIDFn == nil {
+		opts.rotateHubInstanceIDFn = api.RotateHubInstanceIDContext
+	}
 	return opts
+}
+
+func hubInitialBindPortNeedsInstanceIDRotation(ctx context.Context, port int) bool {
+	return hubInitialBindPortNeedsInstanceIDRotationWithDeps(ctx, port, hubInitialBindPortOwnerDependencies{
+		portOwner:       api.LoopbackPortOwnerPIDContext,
+		processIdentity: processID,
+	})
+}
+
+func hubInitialBindPortNeedsInstanceIDRotationWithDeps(ctx context.Context, port int, deps hubInitialBindPortOwnerDependencies) bool {
+	if port <= 0 {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, hubInitialBindPortOwnerProbeTimeout)
+	defer cancel()
+
+	// Accepted bounded multi-tenant residual (PR #562 P1-1/P1-2): this probe
+	// runs after the bind failure, so a different-user holder can drop the port
+	// before inspection, and basename + GUI argv identity is forgeable by a
+	// different-user copied/renamed binary. Both are moot for the primary
+	// single-user host because a same-user actor already owns the credential
+	// files; MCPHUB_REQUIRE_SINGLE_USER_HOME plus the owner-only DACL bounds the
+	// fable-accepted residual. Reliable rebind-time detection is impossible
+	// (TOCTOU + forgeable identity), so keep the own-mcphub-GUI no-rotation gate.
+	if deps.portOwner == nil {
+		return true
+	}
+	ownerPID, bound, err := deps.portOwner(probeCtx, port)
+	if err != nil {
+		return true
+	}
+	if !bound {
+		return false
+	}
+	if ownerPID <= 0 || probeCtx.Err() != nil || deps.processIdentity == nil {
+		return true
+	}
+
+	identity, err := deps.processIdentity(ownerPID)
+	defer identity.Close()
+	if err != nil || !identity.Alive || identity.Denied {
+		return true
+	}
+	return !matchBasename(identity.ImagePath) || !cmdlineIsGui(identity.Cmdline)
 }
 
 func restartHubListener(ctx context.Context, s *Server, opts hubListenerRestartDriverOptions) bool {
@@ -306,8 +401,11 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 		if !oldTaken {
 			preview := s.hubMcpComp.Load()
 			if preview == nil {
-				if opts.cause != hubListenerRestartCauseInitialBindFailed {
+				if opts.cause != hubListenerRestartCauseInitialBindFailed && opts.cause != hubListenerRestartCauseInitialStartupFailed {
 					return hubListenerRestartStopDriver
+				}
+				if opts.cause == hubListenerRestartCauseInitialBindFailed {
+					restartPort = opts.initialBindPort
 				}
 				// Seed the telemetry port from the persisted endpoint so the
 				// initial-bind restart events (-failed/-exhausted/-abandoned)
@@ -325,6 +423,25 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 				}
 				oldTaken = true
 				previousInstanceID, previousInstanceIDErr = loadHubListenerRestartInstanceID()
+				if opts.cause == hubListenerRestartCauseInitialBindFailed && restartPort > 0 && opts.initialBindPortNeedsRotationFn(ctx, restartPort) {
+					if ctx.Err() != nil {
+						return hubListenerRestartStopDriver
+					}
+					if _, rotateErr := opts.rotateHubInstanceIDFn(ctx); rotateErr != nil {
+						if ctx.Err() != nil {
+							return hubListenerRestartStopDriver
+						}
+						_ = opts.emitFn("error", "hub-listener-restart-exhausted", map[string]any{
+							"attempts":                    s.hubRestartConsecutive,
+							"max_consecutive_restarts":    hubListenerRestartMaxConsecutiveRestarts,
+							"port":                        restartPort,
+							"instance_id_rotation_failed": true,
+							"err":                         rotateErr.Error(),
+						})
+						return hubListenerRestartOutageExhausted
+					}
+					s.hubHealth.markReconcilePending()
+				}
 			} else {
 				if restartPort == 0 {
 					restartPort = preview.port
@@ -441,6 +558,17 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 			continue
 		}
 		restartPort = newComp.port
+		// Hydrate the durable reconcile marker from the accepted component the
+		// SAME way the initial-bind accept path does. BindHubMcpListener loaded
+		// newComp.reconcilePending under hub-mcp.lock, so a sibling
+		// `regenerate-instance-id` that set the marker while this GUI was live
+		// (no in-process latch) is caught here — even when this restart's
+		// instance-id reads both land AFTER the rotation (instanceIDPreserved,
+		// so the instance-id-changed emit never fires). Idempotent with that
+		// emit's markReconcilePending; markHealthy below re-reads the latch.
+		if newComp.reconcilePending {
+			s.hubHealth.markReconcilePending()
+		}
 		currentInstanceID, currentInstanceIDErr := loadHubListenerRestartInstanceID()
 		instanceIDPreserved := previousInstanceIDErr == nil && currentInstanceIDErr == nil && previousInstanceID != "" && previousInstanceID == currentInstanceID
 		instanceIDChanged := previousInstanceIDErr == nil && currentInstanceIDErr == nil && previousInstanceID != "" && currentInstanceID != "" && previousInstanceID != currentInstanceID
@@ -799,12 +927,13 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 	// for the persisted-vs-runtime hub-endpoint badge).
 	listenerCtx, listenerCancel := context.WithCancel(ctx)
 	comp := &HubListenerComponents{
-		srv:            srv,
-		store:          store,
-		handler:        handler,
-		reload:         reload,
-		port:           port,
-		listenerCancel: listenerCancel,
+		srv:              srv,
+		store:            store,
+		handler:          handler,
+		reload:           reload,
+		port:             port,
+		reconcilePending: ep.ReconcilePending,
+		listenerCancel:   listenerCancel,
 	}
 	comp.alive.Store(true)
 
@@ -837,6 +966,41 @@ func startHubMcpListenerWithOptions(ctx context.Context, enabled bool, a *api.AP
 	healthWatcher.SetOnUnresponsive(hubListenerComponentCallback(opts.server, comp, opts.onUnresponsive))
 	healthWatcher.SetOnRecovered(hubListenerComponentCallback(opts.server, comp, opts.onRecovered))
 	go healthWatcher.Run(listenerCtx)
+
+	// Keep the process-local reconcile latch aligned with a successful CLI
+	// reconcile. This watcher is detect-only: read failures are ignored for the
+	// current tick, and listener cancellation is its sole lifetime boundary.
+	if server := opts.server; server != nil {
+		interval := opts.healthProbeInterval
+		if interval <= 0 {
+			interval = api.DefaultHubHealthProbeInterval
+		}
+		go func() {
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-listenerCtx.Done():
+					return
+				case <-ticker.C:
+					ep, err := api.LoadHubEndpoint()
+					if err != nil {
+						continue
+					}
+					// Bidirectional re-sync with the durable marker: re-latch when
+					// a sibling rotation set it while this GUI was live (fable F1
+					// backstop) AND self-heal a marker a stale-read tick wrongly
+					// cleared (fable F2 TOCTOU). markReconcilePending is idempotent;
+					// clearReconcilePendingIfResolved only downgrades NeedsReconcile.
+					if ep.ReconcilePending {
+						server.hubHealth.markReconcilePending()
+					} else {
+						server.hubHealth.clearReconcilePendingIfResolved(false)
+					}
+				}
+			}
+		}()
+	}
 
 	go func() {
 		// Mark the listener dead on any exit path (clean shutdown via

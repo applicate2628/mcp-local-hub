@@ -12,6 +12,116 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
+func TestServerHubHealthRestoresDurableReconcilePendingOnFreshStartup(t *testing.T) {
+	setupInitialHubPortDependencyTest(t)
+	ep, err := api.EnsureHubEndpoint(3439, 111)
+	if err != nil {
+		t.Fatalf("EnsureHubEndpoint: %v", err)
+	}
+	rotated, err := api.RotateHubInstanceID()
+	if err != nil {
+		t.Fatalf("RotateHubInstanceID: %v", err)
+	}
+	if rotated.InstanceID == ep.InstanceID {
+		t.Fatalf("InstanceID did not rotate: %q", ep.InstanceID)
+	}
+
+	startFromEndpoint := func(context.Context, bool, *api.API, startHubMcpListenerOptions) (*HubListenerComponents, error) {
+		current, err := api.LoadHubEndpoint()
+		if err != nil {
+			return nil, err
+		}
+		comp := liveRestartTestComp(current.Port)
+		comp.reconcilePending = current.ReconcilePending
+		return comp, nil
+	}
+
+	s := NewServer(Config{Port: 0})
+	s.hubEndpointGateFn = func(*api.API) bool { return true }
+	s.startHubMcpListenerFn = startFromEndpoint
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan struct{})
+	startDone := make(chan error, 1)
+	go func() { startDone <- s.Start(ctx, ready) }()
+	stopped := false
+	stop := func() {
+		if stopped {
+			return
+		}
+		cancel()
+		select {
+		case <-startDone:
+		case <-time.After(2 * time.Second):
+			t.Error("Server.Start did not stop after cancellation")
+		}
+		stopped = true
+	}
+	defer stop()
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Server.Start did not signal GUI readiness")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		state, action := s.hubHealth.snapshot()
+		if state == HubHealthNeedsReconcile && action == hubReconcileOperatorAction {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("fresh-start health = state %q action %q, want needs-reconcile + action", state, action)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	stop() // simulate shutdown after the persisted rotation, before reconciliation
+
+	lk, err := api.AcquireHubMcpLock()
+	if err != nil {
+		t.Fatalf("AcquireHubMcpLock: %v", err)
+	}
+	if err := api.ClearHubReconcilePendingLocked(); err != nil {
+		_ = lk.Unlock()
+		t.Fatalf("ClearHubReconcilePendingLocked: %v", err)
+	}
+	if err := lk.Unlock(); err != nil {
+		t.Fatalf("unlock hub-mcp.lock: %v", err)
+	}
+
+	next := NewServer(Config{Port: 0})
+	next.hubEndpointGateFn = func(*api.API) bool { return true }
+	next.startHubMcpListenerFn = startFromEndpoint
+	nextCtx, nextCancel := context.WithCancel(context.Background())
+	nextReady := make(chan struct{})
+	nextDone := make(chan error, 1)
+	go func() { nextDone <- next.Start(nextCtx, nextReady) }()
+	defer func() {
+		nextCancel()
+		select {
+		case <-nextDone:
+		case <-time.After(2 * time.Second):
+			t.Error("subsequent Server.Start did not stop after cancellation")
+		}
+	}()
+	select {
+	case <-nextReady:
+	case <-time.After(2 * time.Second):
+		t.Fatal("subsequent Server.Start did not signal GUI readiness")
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		state, action := next.hubHealth.snapshot()
+		if state == HubHealthHealthy && action == "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("post-clear startup health = state %q action %q, want healthy without reconcile", state, action)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func recvHubHealth(t *testing.T, ch <-chan Event) Event {
 	t.Helper()
 	for {
@@ -57,6 +167,63 @@ func TestHubHealthTrackerPublishesOnChangeAndDedups(t *testing.T) {
 	if ev.Body["state"] != "needs-reconcile" || ev.Body["operator_action"] != hubReconcileOperatorAction {
 		t.Fatalf("ev.Body=%+v, want needs-reconcile + reconcile action", ev.Body)
 	}
+}
+
+func TestHubHealthTrackerClearReconcilePendingIfResolved(t *testing.T) {
+	t.Run("disk clear downgrades needs-reconcile and publishes", func(t *testing.T) {
+		var events []Event
+		h := newHubHealthTracker(func(ev Event) { events = append(events, ev) })
+		h.markReconcilePending()
+		events = nil
+
+		h.clearReconcilePendingIfResolved(false)
+
+		if got, action := h.snapshot(); got != HubHealthHealthy || action != "" {
+			t.Fatalf("health = state %q action %q, want healthy without action", got, action)
+		}
+		if len(events) != 1 || events[0].Body["state"] != string(HubHealthHealthy) {
+			t.Fatalf("events = %+v, want one healthy hub-health event", events)
+		}
+	})
+
+	t.Run("pending disk marker is a no-op", func(t *testing.T) {
+		var events []Event
+		h := newHubHealthTracker(func(ev Event) { events = append(events, ev) })
+		h.markReconcilePending()
+		events = nil
+
+		h.clearReconcilePendingIfResolved(true)
+
+		if got, action := h.snapshot(); got != HubHealthNeedsReconcile || action != hubReconcileOperatorAction {
+			t.Fatalf("health = state %q action %q, want needs-reconcile + action", got, action)
+		}
+		if len(events) != 0 {
+			t.Fatalf("events = %+v, want no publish", events)
+		}
+	})
+
+	t.Run("disk clear does not override down", func(t *testing.T) {
+		var events []Event
+		h := newHubHealthTracker(func(ev Event) { events = append(events, ev) })
+		h.markReconcilePending()
+		h.set(HubHealthDown, "")
+		events = nil
+
+		h.clearReconcilePendingIfResolved(false)
+
+		if got, action := h.snapshot(); got != HubHealthDown || action != "" {
+			t.Fatalf("health = state %q action %q, want down without action", got, action)
+		}
+		if len(events) != 0 {
+			t.Fatalf("events = %+v, want no publish", events)
+		}
+		h.mu.Lock()
+		pending := h.reconcilePending
+		h.mu.Unlock()
+		if pending {
+			t.Fatal("reconcilePending = true after disk clear, want false")
+		}
+	})
 }
 
 func TestHubHealthRestartedEventPreservesNeedsReconcile(t *testing.T) {

@@ -149,6 +149,17 @@ func TestRotateHubInstanceIDRewritesFile(t *testing.T) {
 	if len(ep2.InstanceID) != 64 {
 		t.Errorf("rotated instance_id len = %d, want 64", len(ep2.InstanceID))
 	}
+	raw, err := readHubMcpStateFile(hubMcpEndpointFileLeaf)
+	if err != nil {
+		t.Fatalf("read rotated endpoint: %v", err)
+	}
+	var onDisk map[string]any
+	if err := json.Unmarshal(raw, &onDisk); err != nil {
+		t.Fatalf("unmarshal rotated endpoint: %v", err)
+	}
+	if pending, ok := onDisk["reconcile_pending"].(bool); !ok || !pending {
+		t.Fatalf("rotated endpoint reconcile_pending = %#v, want true", onDisk["reconcile_pending"])
+	}
 
 	ep3, err := EnsureHubEndpoint(0, 1234)
 	if err != nil {
@@ -156,6 +167,9 @@ func TestRotateHubInstanceIDRewritesFile(t *testing.T) {
 	}
 	if ep3.InstanceID != ep2.InstanceID {
 		t.Errorf("post-rotate Ensure read = %q, want %q", ep3.InstanceID, ep2.InstanceID)
+	}
+	if !ep3.ReconcilePending {
+		t.Fatal("post-rotate Ensure cleared reconcile_pending; want durable marker preserved")
 	}
 }
 

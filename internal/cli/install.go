@@ -578,6 +578,12 @@ func runReconcileHubMode(cmd *cobra.Command, dryRun bool) error {
 		return fmt.Errorf("%d client reconcile failure(s) — see stderr; rerun to converge",
 			len(report.Failed))
 	}
+	// The whole apply runs under hub-mcp.lock. Clear the endpoint-owned durable
+	// marker only after every non-skipped client operation succeeded, while the
+	// same lock still prevents a newer InstanceID rotation from racing this ack.
+	if err := api.ClearHubReconcilePendingLocked(); err != nil {
+		return fmt.Errorf("client configs reconciled, but durable reconcile state could not be cleared: %w", err)
+	}
 	return nil
 }
 

@@ -171,6 +171,56 @@ func TestHubListenerRestartDriverRestartsAndPublishesNewBundle(t *testing.T) {
 	}
 }
 
+// A restart that accepts a component whose bind loaded reconcile_pending=true
+// (a sibling regenerate-instance-id set the durable marker while this GUI was
+// live) must surface needs-reconcile even though the instance-id is PRESERVED
+// across the restart (so the instance-id-changed emit never fires). fable F1.
+func TestHubListenerRestartDriverHydratesReconcilePendingFromAcceptedComponent(t *testing.T) {
+	stateDir := t.TempDir()
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	if _, err := api.EnsureHubEndpoint(3439, 111); err != nil {
+		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
+	}
+
+	s := NewServer(Config{Port: 0})
+	oldComp := liveRestartTestComp(3439)
+	newComp := liveRestartTestComp(3439)
+	newComp.reconcilePending = true // bind loaded a set durable marker under hub-mcp.lock
+	s.hubMcpComp.Store(oldComp)
+
+	events := make(chan hubRestartTestEvent, 8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runHubListenerRestartDriver(ctx, s, hubListenerRestartDriverOptions{
+			startFn:    func(context.Context) (*HubListenerComponents, error) { return newComp, nil },
+			shutdownFn: func(_ context.Context, comp *HubListenerComponents) {},
+			emitFn: s.hubHealthEmitWrapper(func(level, event string, fields map[string]any) error {
+				events <- hubRestartTestEvent{level: level, event: event, fields: fields}
+				return nil
+			}),
+			sleepFn: func(_ context.Context, d time.Duration) bool { return true },
+			nowFn:   func() time.Time { return time.Unix(100, 0) },
+		})
+	}()
+
+	s.signalHubListenerRestart()
+	ev := waitRestartTestEvent(t, events, "hub-listener-restarted")
+	cancel()
+	waitRestartDriverDone(t, done)
+
+	if ev.fields["instance_id_preserved"] != true {
+		t.Fatalf("instance_id_preserved = %v, want true (no rotation on disk)", ev.fields["instance_id_preserved"])
+	}
+	if got, action := s.hubHealth.snapshot(); got != HubHealthNeedsReconcile || action != hubReconcileOperatorAction {
+		t.Fatalf("health after restart with pending marker = state %q action %q, want needs-reconcile", got, action)
+	}
+}
+
 func TestHubListenerRestartDriverRejectsDeadOnArrivalComponent(t *testing.T) {
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
 	s := NewServer(Config{Port: 0})

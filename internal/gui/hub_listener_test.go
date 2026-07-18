@@ -151,7 +151,7 @@ func TestHubListenerFatalServeExitSetsHealthDownUnlessSuperseded(t *testing.T) {
 			}
 
 			if tc.exitingLive {
-				// The fatal availability state must not erase the process-scoped reconcile
+				// The fatal availability state must not erase the latched reconcile
 				// requirement; a later recovery restores the operator guidance.
 				s.hubHealth.markHealthy()
 				if got, action := s.hubHealth.snapshot(); got != HubHealthNeedsReconcile || action != hubReconcileOperatorAction {

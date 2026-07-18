@@ -619,7 +619,7 @@ type Server struct {
 	// restart counters and last-success timestamp are owned by that driver
 	// goroutine; they discriminate flapping from a fresh outage and cap
 	// rolling restart attempts.
-	hubRestartCh             chan hubListenerRestartCause
+	hubRestartCh             chan hubListenerRestartRequest
 	hubRestartDriverAlive    atomic.Bool
 	hubRestartConsecutive    int
 	hubRestartLastSuccess    time.Time
@@ -791,7 +791,7 @@ func NewServer(cfg Config) *Server {
 		cfg:                      cfg,
 		mux:                      http.NewServeMux(),
 		guiListener:              NewGUIListenerOwner(GUIReadHeaderTimeout),
-		hubRestartCh:             make(chan hubListenerRestartCause, 1),
+		hubRestartCh:             make(chan hubListenerRestartRequest, 1),
 		serenaBackendLossTrigger: make(chan struct{}, 1),
 		guiProcessStart:          time.Now(),
 		pruneEnoentTicks:         map[string]pruneEnoentEntry{},
@@ -1110,7 +1110,7 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 			// startHubMcpListener.
 			log.Printf("hub-mcp listener startup failed; retry scheduled through existing restart driver: %v", hubErr)
 			if hubEnabled {
-				s.signalInitialHubBindFailure()
+				s.signalInitialHubStartupFailure(hubErr)
 			}
 			return
 		}
@@ -1154,6 +1154,12 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 			}
 			// else: shutdown path already swapped — it owns teardown.
 			return
+		}
+		// BindHubMcpListener loaded and persisted this endpoint while holding
+		// hub-mcp.lock. Hydrate only from that accepted component so startup has
+		// no unlocked pre-bind read and cannot latch stale marker state.
+		if hubComp.reconcilePending {
+			s.hubHealth.markReconcilePending()
 		}
 		if hubComp.alive.Load() {
 			s.hubHealth.markHealthy()
