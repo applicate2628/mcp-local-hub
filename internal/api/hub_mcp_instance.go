@@ -180,7 +180,29 @@ func RotateHubInstanceID() (HubEndpoint, error) {
 		return HubEndpoint{}, err
 	}
 	defer func() { _ = lk.Unlock() }()
+	return rotateHubInstanceIDLocked(context.Background())
+}
 
+// RotateHubInstanceIDContext is the context-aware rotation path for long-lived
+// GUI work. It uses the cancellable hub-mcp.lock acquisition and rechecks ctx
+// immediately before the endpoint write, so shutdown cannot resume a rotation
+// that was waiting behind another process's lock.
+func RotateHubInstanceIDContext(ctx context.Context) (HubEndpoint, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	lk, err := acquireHubMcpLockContext(ctx)
+	if err != nil {
+		return HubEndpoint{}, err
+	}
+	defer func() { _ = lk.Unlock() }()
+	return rotateHubInstanceIDLocked(ctx)
+}
+
+func rotateHubInstanceIDLocked(ctx context.Context) (HubEndpoint, error) {
+	if err := ctx.Err(); err != nil {
+		return HubEndpoint{}, fmt.Errorf("rotate hub InstanceID: %w", err)
+	}
 	ep, err := loadHubEndpointLocked()
 	if err != nil && !isMissingEndpointErr(err) {
 		return HubEndpoint{}, err
@@ -203,6 +225,9 @@ func RotateHubInstanceID() (HubEndpoint, error) {
 	payload, perr := json.Marshal(ep)
 	if perr != nil {
 		return HubEndpoint{}, fmt.Errorf("marshal rotated hub-mcp endpoint: %w", perr)
+	}
+	if err := ctx.Err(); err != nil {
+		return HubEndpoint{}, fmt.Errorf("rotate hub InstanceID: %w", err)
 	}
 	if werr := writeHubMcpStateFile(hubMcpEndpointFileLeaf, payload); werr != nil {
 		return HubEndpoint{}, werr

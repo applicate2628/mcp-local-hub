@@ -53,8 +53,6 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
-	"mcp-local-hub/internal/daemonrecovery"
-	"mcp-local-hub/internal/process"
 )
 
 const (
@@ -123,7 +121,12 @@ type hubListenerRestartDriverOptions struct {
 	cause      hubListenerRestartCause
 
 	initialBindPortNeedsRotationFn func(context.Context, int) bool
-	rotateHubInstanceIDFn          func() (api.HubEndpoint, error)
+	rotateHubInstanceIDFn          func(context.Context) (api.HubEndpoint, error)
+}
+
+type hubInitialBindPortOwnerDependencies struct {
+	portOwner       func(context.Context, int) (pid int, ok bool, err error)
+	processIdentity func(int) (ProcessIdentity, error)
 }
 
 type hubListenerRestartCause uint8
@@ -248,16 +251,19 @@ func normalizeHubListenerRestartDriverOptions(s *Server, opts hubListenerRestart
 		opts.initialBindPortNeedsRotationFn = hubInitialBindPortNeedsInstanceIDRotation
 	}
 	if opts.rotateHubInstanceIDFn == nil {
-		opts.rotateHubInstanceIDFn = api.RotateHubInstanceID
+		opts.rotateHubInstanceIDFn = api.RotateHubInstanceIDContext
 	}
 	return opts
 }
 
 func hubInitialBindPortNeedsInstanceIDRotation(ctx context.Context, port int) bool {
-	return hubInitialBindPortNeedsInstanceIDRotationWithDeps(ctx, port, daemonrecovery.ProductionDependencies())
+	return hubInitialBindPortNeedsInstanceIDRotationWithDeps(ctx, port, hubInitialBindPortOwnerDependencies{
+		portOwner:       api.LoopbackPortOwnerPIDContext,
+		processIdentity: processID,
+	})
 }
 
-func hubInitialBindPortNeedsInstanceIDRotationWithDeps(ctx context.Context, port int, deps daemonrecovery.Dependencies) bool {
+func hubInitialBindPortNeedsInstanceIDRotationWithDeps(ctx context.Context, port int, deps hubInitialBindPortOwnerDependencies) bool {
 	if port <= 0 {
 		return false
 	}
@@ -267,56 +273,26 @@ func hubInitialBindPortNeedsInstanceIDRotationWithDeps(ctx context.Context, port
 	probeCtx, cancel := context.WithTimeout(ctx, hubInitialBindPortOwnerProbeTimeout)
 	defer cancel()
 
-	if deps.PortOwner == nil {
+	if deps.portOwner == nil {
 		return true
 	}
-	ownerPID, bound, err := deps.PortOwner(probeCtx, port)
+	ownerPID, bound, err := deps.portOwner(probeCtx, port)
 	if err != nil {
 		return true
 	}
 	if !bound {
 		return false
 	}
-	if ownerPID <= 0 || deps.StateDir == nil || deps.ReadIntent == nil || deps.SelfPID == nil {
+	if ownerPID <= 0 || probeCtx.Err() != nil || deps.processIdentity == nil {
 		return true
 	}
 
-	stateDir, err := deps.StateDir()
-	if err != nil {
+	identity, err := deps.processIdentity(ownerPID)
+	defer identity.Close()
+	if err != nil || !identity.Alive || identity.Denied {
 		return true
 	}
-	intent, err := deps.ReadIntent(filepath.Join(stateDir, "supervisor-intent.json"))
-	if err != nil || intent == nil {
-		return true
-	}
-
-	var lookupIdentity func(int) (process.ProcessIdentity, error)
-	if deps.LookupIdentity != nil {
-		lookupIdentity = func(pid int) (process.ProcessIdentity, error) {
-			return deps.LookupIdentity(probeCtx, pid)
-		}
-	}
-	for _, descriptor := range intent.Daemons {
-		effectivePort, ok := api.EffectiveDaemonPort(descriptor)
-		if !ok || effectivePort != port {
-			continue
-		}
-		descriptor.Port = effectivePort
-		verdict, _ := daemonrecovery.ClassifyPortOwner(
-			descriptor,
-			ownerPID,
-			deps.SelfPID(),
-			nil,
-			daemonrecovery.ClassifierDependencies{
-				LookupIdentity:    lookupIdentity,
-				ExecutableMatches: deps.ExecutableMatches,
-			},
-		)
-		if verdict == daemonrecovery.VerdictOwnTask {
-			return false
-		}
-	}
-	return true
+	return !matchBasename(identity.ImagePath) || !cmdlineIsGui(identity.Cmdline)
 }
 
 func restartHubListener(ctx context.Context, s *Server, opts hubListenerRestartDriverOptions) bool {
@@ -407,7 +383,10 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 					if ctx.Err() != nil {
 						return hubListenerRestartStopDriver
 					}
-					if _, rotateErr := opts.rotateHubInstanceIDFn(); rotateErr != nil {
+					if _, rotateErr := opts.rotateHubInstanceIDFn(ctx); rotateErr != nil {
+						if ctx.Err() != nil {
+							return hubListenerRestartStopDriver
+						}
 						_ = opts.emitFn("error", "hub-listener-restart-exhausted", map[string]any{
 							"attempts":                    s.hubRestartConsecutive,
 							"max_consecutive_restarts":    hubListenerRestartMaxConsecutiveRestarts,

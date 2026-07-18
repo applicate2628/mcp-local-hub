@@ -3,12 +3,14 @@ package gui
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"mcp-local-hub/internal/api"
-	"mcp-local-hub/internal/daemonrecovery"
-	"mcp-local-hub/internal/process"
 )
 
 func TestHubInitialBindFailureEnqueuesTypedRestartAndKeepsRecovering(t *testing.T) {
@@ -72,32 +74,28 @@ func TestHubListenerRestartDriverInitialBindFailureRetriesFromNil(t *testing.T) 
 	}
 }
 
-func TestHubInitialBindPortOwnerRotationGateReusesDaemonRecoveryClassifier(t *testing.T) {
+func TestHubInitialBindPortOwnerRotationGateUsesGUIProcessIdentity(t *testing.T) {
 	const (
 		restartPort = 3439
 		ownerPID    = 4242
 	)
-	descriptor := api.SupervisorDaemon{
-		TaskName: `\mcp-local-hub-memory-default`,
-		Server:   "memory",
-		Daemon:   "default",
-		Command:  `C:\Program Files\mcphub\mcphub.exe`,
-		Args:     []string{"daemon", "--server", "memory", "--daemon", "default"},
-		Port:     restartPort,
+	mcphubPath := "/opt/mcphub"
+	foreignPath := "/opt/not-mcphub"
+	if runtime.GOOS == "windows" {
+		mcphubPath = `C:\Program Files\mcphub\mcphub.exe`
+		foreignPath = `C:\Program Files\not-mcphub.exe`
 	}
-	ownIdentity := process.ProcessIdentity{
-		PID:            ownerPID,
-		Basename:       "mcphub.exe",
-		CommandLine:    `"C:\Program Files\mcphub\mcphub.exe" daemon --server memory --daemon default`,
-		ExecutablePath: descriptor.Command,
+	ownGUIIdentity := ProcessIdentity{
+		Alive:     true,
+		ImagePath: mcphubPath,
+		Cmdline:   []string{mcphubPath, "gui"},
 	}
 
 	tests := []struct {
-		name              string
-		portOwner         func(context.Context, int) (int, bool, error)
-		lookupIdentity    func(context.Context, int) (process.ProcessIdentity, error)
-		executableMatches bool
-		wantRotate        bool
+		name            string
+		portOwner       func(context.Context, int) (int, bool, error)
+		processIdentity func(int) (ProcessIdentity, error)
+		wantRotate      bool
 	}{
 		{
 			name: "no holder",
@@ -107,37 +105,62 @@ func TestHubInitialBindPortOwnerRotationGateReusesDaemonRecoveryClassifier(t *te
 			wantRotate: false,
 		},
 		{
-			name: "verified own stale daemon",
+			name: "mcphub gui subcommand holder",
 			portOwner: func(context.Context, int) (int, bool, error) {
 				return ownerPID, true, nil
 			},
-			lookupIdentity: func(context.Context, int) (process.ProcessIdentity, error) {
-				return ownIdentity, nil
+			processIdentity: func(int) (ProcessIdentity, error) {
+				return ownGUIIdentity, nil
 			},
-			executableMatches: true,
-			wantRotate:        false,
+			wantRotate: false,
 		},
 		{
-			name: "foreign holder",
+			name: "mcphub no-arg default-gui holder",
 			portOwner: func(context.Context, int) (int, bool, error) {
 				return ownerPID, true, nil
 			},
-			lookupIdentity: func(context.Context, int) (process.ProcessIdentity, error) {
-				return ownIdentity, nil
+			processIdentity: func(int) (ProcessIdentity, error) {
+				identity := ownGUIIdentity
+				identity.Cmdline = []string{mcphubPath}
+				return identity, nil
 			},
-			executableMatches: false,
-			wantRotate:        true,
+			wantRotate: false,
+		},
+		{
+			name: "mcphub daemon holder",
+			portOwner: func(context.Context, int) (int, bool, error) {
+				return ownerPID, true, nil
+			},
+			processIdentity: func(int) (ProcessIdentity, error) {
+				identity := ownGUIIdentity
+				identity.Cmdline = []string{mcphubPath, "daemon"}
+				return identity, nil
+			},
+			wantRotate: true,
+		},
+		{
+			name: "non-mcphub holder",
+			portOwner: func(context.Context, int) (int, bool, error) {
+				return ownerPID, true, nil
+			},
+			processIdentity: func(int) (ProcessIdentity, error) {
+				return ProcessIdentity{
+					Alive:     true,
+					ImagePath: foreignPath,
+					Cmdline:   []string{foreignPath, "gui"},
+				}, nil
+			},
+			wantRotate: true,
 		},
 		{
 			name: "unverifiable identity",
 			portOwner: func(context.Context, int) (int, bool, error) {
 				return ownerPID, true, nil
 			},
-			lookupIdentity: func(context.Context, int) (process.ProcessIdentity, error) {
-				return process.ProcessIdentity{}, errors.New("identity unavailable")
+			processIdentity: func(int) (ProcessIdentity, error) {
+				return ProcessIdentity{}, errors.New("identity unavailable")
 			},
-			executableMatches: true,
-			wantRotate:        true,
+			wantRotate: true,
 		},
 		{
 			name: "unverifiable owner probe",
@@ -150,17 +173,9 @@ func TestHubInitialBindPortOwnerRotationGateReusesDaemonRecoveryClassifier(t *te
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			deps := daemonrecovery.Dependencies{
-				StateDir: func() (string, error) { return t.TempDir(), nil },
-				ReadIntent: func(string) (*api.SupervisorIntentFile, error) {
-					return &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}, nil
-				},
-				PortOwner:      tt.portOwner,
-				SelfPID:        func() int { return 1 },
-				LookupIdentity: tt.lookupIdentity,
-				ExecutableMatches: func(int, string) bool {
-					return tt.executableMatches
-				},
+			deps := hubInitialBindPortOwnerDependencies{
+				portOwner:       tt.portOwner,
+				processIdentity: tt.processIdentity,
 			}
 
 			if got := hubInitialBindPortNeedsInstanceIDRotationWithDeps(context.Background(), restartPort, deps); got != tt.wantRotate {
@@ -201,9 +216,9 @@ func TestHubListenerRestartDriverInitialBindForeignOwnerRotatesOnceAndNeedsRecon
 				probes++
 				return true
 			},
-			rotateHubInstanceIDFn: func() (api.HubEndpoint, error) {
+			rotateHubInstanceIDFn: func(rotateCtx context.Context) (api.HubEndpoint, error) {
 				rotations++
-				return api.RotateHubInstanceID()
+				return api.RotateHubInstanceIDContext(rotateCtx)
 			},
 		})
 	}()
@@ -234,7 +249,7 @@ func TestHubListenerRestartDriverInitialBindForeignOwnerRotatesOnceAndNeedsRecon
 	}
 }
 
-func TestHubListenerRestartDriverInitialBindOwnOrAbsentOwnerDoesNotRotateOrReconcile(t *testing.T) {
+func TestHubListenerRestartDriverInitialBindOwnMcphubGUIOwnerDoesNotRotateOrReconcile(t *testing.T) {
 	setupInitialHubPortDependencyTest(t)
 	before, err := api.EnsureHubEndpoint(3439, 111)
 	if err != nil {
@@ -245,6 +260,22 @@ func TestHubListenerRestartDriverInitialBindOwnOrAbsentOwnerDoesNotRotateOrRecon
 	newComp := liveRestartTestComp(before.Port)
 	events := make(chan hubRestartTestEvent, 8)
 	var probes, rotations int
+	mcphubPath := "/opt/mcphub"
+	if runtime.GOOS == "windows" {
+		mcphubPath = `C:\Program Files\mcphub\mcphub.exe`
+	}
+	ownerDeps := hubInitialBindPortOwnerDependencies{
+		portOwner: func(context.Context, int) (int, bool, error) {
+			return 4242, true, nil
+		},
+		processIdentity: func(int) (ProcessIdentity, error) {
+			return ProcessIdentity{
+				Alive:     true,
+				ImagePath: mcphubPath,
+				Cmdline:   []string{mcphubPath, "gui"},
+			}, nil
+		},
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -261,11 +292,11 @@ func TestHubListenerRestartDriverInitialBindOwnOrAbsentOwnerDoesNotRotateOrRecon
 			}),
 			sleepFn: func(context.Context, time.Duration) bool { return true },
 			nowFn:   func() time.Time { return time.Unix(100, 0) },
-			initialBindPortNeedsRotationFn: func(context.Context, int) bool {
+			initialBindPortNeedsRotationFn: func(probeCtx context.Context, port int) bool {
 				probes++
-				return false
+				return hubInitialBindPortNeedsInstanceIDRotationWithDeps(probeCtx, port, ownerDeps)
 			},
-			rotateHubInstanceIDFn: func() (api.HubEndpoint, error) {
+			rotateHubInstanceIDFn: func(context.Context) (api.HubEndpoint, error) {
 				rotations++
 				return api.HubEndpoint{}, errors.New("unexpected rotation")
 			},
@@ -295,6 +326,95 @@ func TestHubListenerRestartDriverInitialBindOwnOrAbsentOwnerDoesNotRotateOrRecon
 	}
 	if got, action := s.hubHealth.snapshot(); got != HubHealthHealthy || action != "" {
 		t.Fatalf("health after benign retry = state %q action %q, want healthy without reconcile", got, action)
+	}
+}
+
+func TestHubListenerRestartDriverCancelledContextAbortsBeforeInstanceIDRotation(t *testing.T) {
+	setupInitialHubPortDependencyTest(t)
+	before, err := api.EnsureHubEndpoint(3439, 111)
+	if err != nil {
+		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
+	}
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("DaemonStateDir: %v", err)
+	}
+	holder := flock.New(filepath.Join(stateDir, "hub-mcp.lock"))
+	locked, err := holder.TryLock()
+	if err != nil {
+		t.Fatalf("hold hub-mcp.lock: %v", err)
+	}
+	if !locked {
+		t.Fatal("hold hub-mcp.lock: unavailable")
+	}
+	holderLocked := true
+	t.Cleanup(func() {
+		if holderLocked {
+			_ = holder.Unlock()
+		}
+	})
+
+	s := NewServer(Config{Port: 0})
+	rotateEntered := make(chan struct{})
+	startCalled := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runHubListenerRestartDriver(ctx, s, hubListenerRestartDriverOptions{
+			startFn: func(context.Context) (*HubListenerComponents, error) {
+				startCalled <- struct{}{}
+				return liveRestartTestComp(before.Port), nil
+			},
+			shutdownFn: func(context.Context, *HubListenerComponents) {},
+			emitFn:     func(string, string, map[string]any) error { return nil },
+			sleepFn:    func(context.Context, time.Duration) bool { return true },
+			nowFn:      func() time.Time { return time.Unix(100, 0) },
+			initialBindPortNeedsRotationFn: func(context.Context, int) bool {
+				return true
+			},
+			rotateHubInstanceIDFn: func(rotateCtx context.Context) (api.HubEndpoint, error) {
+				close(rotateEntered)
+				return api.RotateHubInstanceIDContext(rotateCtx)
+			},
+		})
+	}()
+
+	s.signalInitialHubBindFailure()
+	select {
+	case <-rotateEntered:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("restart driver did not enter InstanceID rotation")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		_ = holder.Unlock()
+		holderLocked = false
+		<-done
+		t.Fatal("restart driver did not stop while hub-mcp.lock remained held")
+	}
+	if err := holder.Unlock(); err != nil {
+		t.Fatalf("release hub-mcp.lock: %v", err)
+	}
+	holderLocked = false
+
+	select {
+	case <-startCalled:
+		t.Fatal("hub listener start ran after rotation was canceled")
+	default:
+	}
+	after, err := api.LoadHubEndpoint()
+	if err != nil {
+		t.Fatalf("LoadHubEndpoint after canceled restart: %v", err)
+	}
+	if after.InstanceID != before.InstanceID {
+		t.Fatalf("InstanceID rotated after shutdown: %q -> %q", before.InstanceID, after.InstanceID)
+	}
+	if got, action := s.hubHealth.snapshot(); got == HubHealthNeedsReconcile || action != "" {
+		t.Fatalf("health after canceled restart = state %q action %q, want no reconcile", got, action)
 	}
 }
 
