@@ -145,3 +145,35 @@ Round 3 (on `d9cabcb4`, the first P1-3 attempt) proved the round-2 fix INCOMPLET
 Net for the round-4 push: durable-reconcile (P1) + confirmed-bind (P2) + Terra-A load-error fail-safe, all
 $lead-verified green; F1-F3 filed as follow-ups; F4 doc corrected. The accepted P1-1/P1-2 residual is
 unchanged and still governs the merge authorization above.
+
+## Amendment 3 (2026-07-18) — bot round 5 (on cdea806a) is a FALSE POSITIVE; merge on the standing authorization
+
+Round 4's fixes (post-bind authoritative hydration + bidirectional re-sync ticker) went to the bot, plus a
+fable commission that folded in two more real fixes (F1 restart-accept hydration, F2 ticker TOCTOU — both
+in cdea806a). Bot round 5 then raised ONE P1 (install.go:584, "keep the reconcile marker when clients are
+skipped"): it claims a reconcile-SKIPPED client (antigravity) "still has the old instance ID and will
+receive 401s," so clearing the durable marker when `report.Skipped` is non-empty hides a real stale client.
+
+**This is a FALSE POSITIVE — the bot's premise is empirically wrong, confirmed THREE independent ways:**
+- `report.Skipped` is populated ONLY for `clients.IsRelayStdio` adapters (install_hub_reconcile.go:362-363).
+- A relay-stdio client's config is a STDIO SPAWN entry (`command: mcphub, args: [relay, --server/--daemon
+  or --url ...]`), NOT an HTTP `mcphub-hub` aggregate entry. `mcphub relay` (`resolveRelayURL`,
+  internal/cli/relay.go) forwards to a PER-DAEMON URL (`http://localhost:<daemonport>/mcp`) via
+  `HTTPToStdioRelay` — it never dials the hub aggregate and sends NO `X-Mcphub-Instance-Id` (relay.go has
+  zero instance-id references; a grep of `X-Mcphub-Instance-Id` across internal/clients is empty).
+- Therefore a Skipped client NEVER holds or sends the hub InstanceID, so a hub InstanceID rotation cannot
+  401 it, so clearing the marker with only relay-stdio clients skipped un-signals nothing stale.
+- The bot conflates "skipped from the hub reconcile" (it can't be CONVERTED to the hub aggregate because the
+  hub planner doesn't supply `Relay{Server,Daemon,ExePath}`) with "holds a stale hub InstanceID." The exact
+  opposite is true: it is skipped BECAUSE it is not on the hub, and precisely because it is not on the hub
+  it holds no InstanceID.
+
+Confirmed by: (1) $lead trace (relay.go + install_hub_reconcile.go + the empty clients grep); (2) fable's
+independent R3-commission finding (same conclusion, "relay-stdio spawn per-daemon ports, carry no
+X-Mcphub-Instance-Id"); (3) an independent codex Sol verification (VERDICT: CLAIM-FALSE — "Skipped
+relay-stdio clients never persist or send the hub InstanceID").
+
+**Decision:** bot R5-P1 requires no code change. Per the standing operator authorization (Amendment 2:
+"MERGING #562 on this documented-residual justification — this specific PR only — rather than requiring a
+clean bot PASS"), and this finding being a verified false positive rather than even a residual, MERGE #562
+and deploy. The refutation is posted to the bot comment for the PR record.
