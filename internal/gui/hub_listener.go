@@ -53,6 +53,8 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/daemonrecovery"
+	"mcp-local-hub/internal/process"
 )
 
 const (
@@ -109,6 +111,7 @@ const (
 	hubListenerRestartRollingWindow          = 30 * time.Minute
 	hubListenerRestartMaxAttemptsPerWindow   = 20
 	hubListenerRestartStableWindow           = api.DefaultHubHealthProbeInterval*time.Duration(api.DefaultHubHealthUnresponsiveThreshold) + api.DefaultHubHealthProbeInterval
+	hubInitialBindPortOwnerProbeTimeout      = 3 * time.Second
 )
 
 type hubListenerRestartDriverOptions struct {
@@ -118,6 +121,9 @@ type hubListenerRestartDriverOptions struct {
 	sleepFn    func(context.Context, time.Duration) bool
 	nowFn      func() time.Time
 	cause      hubListenerRestartCause
+
+	initialBindPortNeedsRotationFn func(context.Context, int) bool
+	rotateHubInstanceIDFn          func() (api.HubEndpoint, error)
 }
 
 type hubListenerRestartCause uint8
@@ -238,7 +244,79 @@ func normalizeHubListenerRestartDriverOptions(s *Server, opts hubListenerRestart
 	if opts.nowFn == nil {
 		opts.nowFn = time.Now
 	}
+	if opts.initialBindPortNeedsRotationFn == nil {
+		opts.initialBindPortNeedsRotationFn = hubInitialBindPortNeedsInstanceIDRotation
+	}
+	if opts.rotateHubInstanceIDFn == nil {
+		opts.rotateHubInstanceIDFn = api.RotateHubInstanceID
+	}
 	return opts
+}
+
+func hubInitialBindPortNeedsInstanceIDRotation(ctx context.Context, port int) bool {
+	return hubInitialBindPortNeedsInstanceIDRotationWithDeps(ctx, port, daemonrecovery.ProductionDependencies())
+}
+
+func hubInitialBindPortNeedsInstanceIDRotationWithDeps(ctx context.Context, port int, deps daemonrecovery.Dependencies) bool {
+	if port <= 0 {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, hubInitialBindPortOwnerProbeTimeout)
+	defer cancel()
+
+	if deps.PortOwner == nil {
+		return true
+	}
+	ownerPID, bound, err := deps.PortOwner(probeCtx, port)
+	if err != nil {
+		return true
+	}
+	if !bound {
+		return false
+	}
+	if ownerPID <= 0 || deps.StateDir == nil || deps.ReadIntent == nil || deps.SelfPID == nil {
+		return true
+	}
+
+	stateDir, err := deps.StateDir()
+	if err != nil {
+		return true
+	}
+	intent, err := deps.ReadIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	if err != nil || intent == nil {
+		return true
+	}
+
+	var lookupIdentity func(int) (process.ProcessIdentity, error)
+	if deps.LookupIdentity != nil {
+		lookupIdentity = func(pid int) (process.ProcessIdentity, error) {
+			return deps.LookupIdentity(probeCtx, pid)
+		}
+	}
+	for _, descriptor := range intent.Daemons {
+		effectivePort, ok := api.EffectiveDaemonPort(descriptor)
+		if !ok || effectivePort != port {
+			continue
+		}
+		descriptor.Port = effectivePort
+		verdict, _ := daemonrecovery.ClassifyPortOwner(
+			descriptor,
+			ownerPID,
+			deps.SelfPID(),
+			nil,
+			daemonrecovery.ClassifierDependencies{
+				LookupIdentity:    lookupIdentity,
+				ExecutableMatches: deps.ExecutableMatches,
+			},
+		)
+		if verdict == daemonrecovery.VerdictOwnTask {
+			return false
+		}
+	}
+	return true
 }
 
 func restartHubListener(ctx context.Context, s *Server, opts hubListenerRestartDriverOptions) bool {
@@ -325,6 +403,21 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 				}
 				oldTaken = true
 				previousInstanceID, previousInstanceIDErr = loadHubListenerRestartInstanceID()
+				if opts.initialBindPortNeedsRotationFn(ctx, restartPort) {
+					if ctx.Err() != nil {
+						return hubListenerRestartStopDriver
+					}
+					if _, rotateErr := opts.rotateHubInstanceIDFn(); rotateErr != nil {
+						_ = opts.emitFn("error", "hub-listener-restart-exhausted", map[string]any{
+							"attempts":                    s.hubRestartConsecutive,
+							"max_consecutive_restarts":    hubListenerRestartMaxConsecutiveRestarts,
+							"port":                        restartPort,
+							"instance_id_rotation_failed": true,
+							"err":                         rotateErr.Error(),
+						})
+						return hubListenerRestartOutageExhausted
+					}
+				}
 			} else {
 				if restartPort == 0 {
 					restartPort = preview.port

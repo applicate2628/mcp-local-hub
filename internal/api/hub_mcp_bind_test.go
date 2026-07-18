@@ -51,6 +51,34 @@ func TestBindHubMcpListenerSucceedsOnFirstStart(t *testing.T) {
 	}
 }
 
+func TestBindHubMcpListenerForeignHeldPortEmitsCredentialRotationWarning(t *testing.T) {
+	hubMcpStateTestHelper(t)
+
+	holder, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen as foreign port holder: %v", err)
+	}
+	defer holder.Close()
+	port := holder.Addr().(*net.TCPAddr).Port
+	if _, err := EnsureHubEndpoint(port, 111); err != nil {
+		t.Fatalf("EnsureHubEndpoint: %v", err)
+	}
+
+	if _, err := BindHubMcpListener(context.Background(), []string{"claude-code"}, nil); err == nil {
+		t.Fatal("BindHubMcpListener succeeded while the persisted port was held")
+	}
+	events, err := RecentHubMcpEvents(16)
+	if err != nil {
+		t.Fatalf("RecentHubMcpEvents: %v", err)
+	}
+	for _, event := range events {
+		if event["event"] == "credential-rotation-required" && event["level"] == "warn" {
+			return
+		}
+	}
+	t.Fatalf("credential-rotation-required warning absent from events: %#v", events)
+}
+
 // TestBindHubMcpListenerConcurrentFirstStartSerializesOnLock pins
 // codex deep-sec P1 closure on PR #158. Two concurrent
 // BindHubMcpListener calls (simulating two GUI processes racing to
