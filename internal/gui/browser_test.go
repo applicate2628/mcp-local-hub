@@ -7,6 +7,10 @@ import (
 )
 
 func TestLaunchBrowser_PrefersChromeOverEdgeOverDefault(t *testing.T) {
+	// This test exercises the spawn-preference LOGIC via the fake spawner, so it
+	// must opt OUT of the global MCPHUB_SUPPRESS_BROWSER_LAUNCH kill-switch the
+	// gui TestMain sets (that guard early-returns before any spawnProcess call).
+	t.Setenv(SuppressBrowserLaunchEnv, "")
 	log := []string{}
 	restore := withSpawnerOverride(func(cmd string, args ...string) error {
 		log = append(log, cmd)
