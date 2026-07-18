@@ -533,8 +533,7 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 			}
 			continue
 		}
-		if !s.hubMcpComp.CompareAndSwap(nil, newComp) {
-			opts.shutdownFn(context.Background(), newComp)
+		if !s.publishHubMcpComponent(newComp, opts.shutdownFn) {
 			return hubListenerRestartStopDriver
 		}
 		if ctx.Err() != nil {

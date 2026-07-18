@@ -9,6 +9,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -86,6 +88,109 @@ func TestRestartV3ChildStandbyBindUsesDedicatedBindDeadline(t *testing.T) {
 	}
 }
 
+func TestRestartV3_SamePortStandbyBindWaitsForParentClose(t *testing.T) {
+	attempts := 0
+	want := phaseGCLIListener{}
+	bindRefusal := restartV3BindRefusedTestError()
+	listener, err := bindRestartV3ChildStandby(context.Background(), time.Second, func(context.Context) (net.Listener, error) {
+		attempts++
+		if attempts < 3 {
+			return nil, &net.OpError{Op: "listen", Net: "tcp", Err: bindRefusal}
+		}
+		return want, nil
+	})
+	if err != nil {
+		t.Fatalf("bindRestartV3ChildStandby: %v", err)
+	}
+	if listener != want || attempts != 3 {
+		t.Fatalf("listener=%v attempts=%d, want retained listener after 3 attempts", listener, attempts)
+	}
+}
+
+type phaseGCLIListener struct{}
+
+func (phaseGCLIListener) Accept() (net.Conn, error) { return nil, net.ErrClosed }
+func (phaseGCLIListener) Close() error              { return nil }
+func (phaseGCLIListener) Addr() net.Addr            { return phaseGCLIAddr{} }
+
+type phaseGCLIAddr struct{}
+
+func (phaseGCLIAddr) Network() string { return "tcp" }
+func (phaseGCLIAddr) String() string  { return "127.0.0.1:9125" }
+
+type phaseGCLIChild struct{}
+
+func (phaseGCLIChild) PID() int                                     { return 4260 }
+func (phaseGCLIChild) TerminateBeforeRelease(context.Context) error { return nil }
+func (phaseGCLIChild) DetachAtRelease() error                       { return nil }
+
+type phaseGCLILease struct{ releases int }
+
+func (l *phaseGCLILease) Release() { l.releases++ }
+
+type phaseGSupervisorStopper struct{ stops int }
+
+func (s *phaseGSupervisorStopper) Stop(context.Context, int) error {
+	s.stops++
+	return nil
+}
+
+func TestRestartV3_SuccessfulHandoffExitSkipsManagerStop(t *testing.T) {
+	var exitRequested atomic.Bool
+	exits := 0
+	exit := selfRestartProcessExitBoundary(&exitRequested, func() { exits++ })
+	exit()
+	manager := &phaseGSupervisorStopper{}
+	if err := stopSupervisorManagerUnlessSelfRestart(context.Background(), manager, &exitRequested); err != nil {
+		t.Fatalf("stopSupervisorManagerUnlessSelfRestart: %v", err)
+	}
+	if exits != 1 || !exitRequested.Load() || manager.stops != 0 {
+		t.Fatalf("exits=%d requested=%t manager stops=%d, want 1/true/0", exits, exitRequested.Load(), manager.stops)
+	}
+}
+
+func TestRestartV3_ParentCompositionUsesParserAwareArgvAndRetainedLease(t *testing.T) {
+	lease := &phaseGCLILease{}
+	var spawnedArgv []string
+	var spawnedHandoff gui.SelfRestartHandoff
+	runtime := restartV3ParentRuntime{
+		SettingsGet: func(string) (string, error) { return "19125", nil },
+		Spawn: func(argv []string, handoff gui.SelfRestartHandoff) (gui.RestartParentChild, error) {
+			spawnedArgv = append([]string(nil), argv...)
+			spawnedHandoff = handoff
+			return phaseGCLIChild{}, nil
+		},
+		Confirm: func(context.Context, int, []byte, gui.AuthenticatedReadinessIdentity) error { return nil },
+		Exit:    func() {},
+	}
+	deps, err := buildRestartV3ParentDependencies(
+		context.Background(), newGuiCmdReal(), lease,
+		filepath.Join(apitest.HardenedTempDir(t), gui.PidportFileLeaf),
+		func() int { return 9125 },
+		[]string{"gui", "--port", "9125", "--no-tray"}, runtime,
+	)
+	if err != nil {
+		t.Fatalf("buildRestartV3ParentDependencies: %v", err)
+	}
+	if deps.Lease != lease {
+		t.Fatal("coordinator did not retain the CLI-owned lease reference")
+	}
+	targetPort, err := deps.TargetPort(9125)
+	if err != nil || targetPort != 19125 {
+		t.Fatalf("TargetPort = %d, %v; want 19125", targetPort, err)
+	}
+	handoff := gui.SelfRestartHandoff{Version: 1, HandoffID: "h", Generation: "g", Sequence: 1, OldPort: 9125, TargetPort: 19125, ParentPID: os.Getpid(), NoncePath: filepath.Join(t.TempDir(), "nonce")}
+	if _, err := deps.Spawn(handoff); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if want := []string{"gui", "--no-tray"}; !reflect.DeepEqual(spawnedArgv, want) {
+		t.Fatalf("spawn argv = %q, want parser-rebuilt %q", spawnedArgv, want)
+	}
+	if spawnedHandoff != handoff {
+		t.Fatalf("spawn handoff = %+v, want %+v", spawnedHandoff, handoff)
+	}
+}
+
 func TestRestartV3_ChildStartupUsesStandbyContinuationAndCommits(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR", stateDir)
@@ -100,13 +205,15 @@ func TestRestartV3_ChildStartupUsesStandbyContinuationAndCommits(t *testing.T) {
 	deadlines := gui.DefaultRestartDeadlines()
 	deadlines.Now = time.Now
 	nonce := bytes.Repeat([]byte{0x39}, 32)
-	noncePath := filepath.Join(stateDir, "gui-restart-nonce")
+	generation := "generation-cli-f"
+	generationHash := sha256.Sum256([]byte(generation))
+	noncePath := filepath.Join(stateDir, fmt.Sprintf("%s-%x", api.GUIRestartNonceFileLeaf, generationHash[:]))
 	if err := api.WriteStateFileBytesAtomic(noncePath, nonce); err != nil {
 		t.Fatalf("write nonce file: %v", err)
 	}
 	store := gui.NewHandoffMarkerStore(stateDir, deadlines)
 	started, err := store.Begin(gui.HandoffBegin{
-		Generation: "generation-cli-f", Route: gui.HandoffRoutePortChange,
+		Generation: generation, Route: gui.HandoffRoutePortChange,
 		OldPort: 9125, NewPort: targetPort, OldPID: os.Getppid(),
 	})
 	if err != nil {

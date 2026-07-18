@@ -2,40 +2,46 @@
 
 Admission source: direct human decision recorded in `status.md` and Phase-0 item 3 in `roadmap.md`.
 
-Primary task: Item 3, Unit B, Phase F — implement only the restart child half from the accepted
-`item3-restart-design.md` and `item3-unitB-plan.md`.
+Primary task: Item 3, Unit B, Phase G — implement only the parent restart coordinator, pre-release rollback,
+parent hub-close ordering, and gated 202/2xx endpoint from the accepted `item3-restart-design.md` and
+`item3-unitB-plan.md` (including the 2026-07-18 cli-layer change-surface amendment).
 
-Scope: additive challenged standby readiness; one-shot owner-only nonce-file consumption; the gated
-restart-child standby/acquire/activate/Commit flow; and the authorized minimal `Server` continuation
-that reuses the existing post-listener-bind lifecycle. Directly enforcing tests are in scope.
+Scope: `RestartCoordinator` in `internal/gui/gui_restart_protocol.go`; the gated endpoint in
+`internal/gui/gui_self_restart.go`; the owner-side hub-close immediately before the parent's flock release in
+`internal/gui/server.go`; cli-layer parent composition in `internal/cli/gui.go`; and adjacent `_test.go` files.
+The coordinator must use the existing marker, listener-owner, lease, child-retained-handle, authenticated
+readiness, hub-owner, parser-aware argv, and self-restart exit seams. Directly enforcing AC-G1 through AC-G8
+tests are in scope.
 
-Out of scope: the Phase-G parent coordinator, frontend work, ensure-alive changes, gate flip, deployment,
-commit, push, and any change to the gate-off normal launch or legacy bounded-acquire handoff path.
+Out of scope: Phase H frontend changes, Phase J gate flip or v1 deletion, deployment, commit, push, real GUI
+spawn, Graphify, the `claude` CLI, `MCPHUB_GUI_SPAWN_TESTS`, and changes outside the approved Phase G surface.
+The gate-OFF endpoint remains the retained v1 implementation.
 
-Acceptance: AC-F1 through AC-F5 in `item3-unitB-plan.md`, normal `/api/ping` byte compatibility,
-normal `Server.Start` behavior preservation, and the repository build/vet/tagged-test commands named by
-the human handoff.
+Acceptance: AC-G1 through AC-G8 in `item3-unitB-plan.md`; the concrete pre-release rollback gate is
+`parentLeaseReleased == false`; proved rollback retains the lease and rebinds without reacquire; failed rollback
+releases exactly once and requests the composition-root exit; post-release behavior performs no protocol writes,
+waits, termination, claim/reclaim, recovery bind, or activation signaling; successful handoff skips
+`manager.Stop`; spawn failure remains 2xx. Required verification is `go build ./...`, `go vet ./...`, clean
+`gofmt -l` on touched files, and `go test -tags=test_state_path_env -count=1 -timeout 15m ./internal/gui/
+./internal/cli/`, followed by an `mcphub.exe` process sweep.
 
-Current stage: Phase F correction implementation is complete and locally verified after the human selected
-Option B pathname transport and accepted the same-user rename residual. The strict consume now authorizes
-only the canonical state-directory nonce leaf, hard-fails broadened access, unlinks before use, verifies
-post-unlink identity state where the platform exposes it, and zeroizes failed buffers. Commit publication is
-serialized with runtime stop/cancellation and exhausts to terminal `interrupted`; the child bind deadline and
-normal 10-second header timeout are separately owned. No commit is authorized. Integration owner: main
+Current stage: implementation. The branch is `feat/gui-restart-unitb-gated` at `beadf474`; this is the requested
+`58340fd5` baseline plus one documentation-only commit that authorizes `internal/cli/gui.go` and its adjacent
+tests for Phase G. Phases D, E, F, and I are landed default-OFF and not deployed. Integration owner: the main
 conversation holding `$lead`; implementation owner: explicitly assigned `$backend-engineer`; next verification
-owners: `$qa-engineer` and `$security-reviewer`.
+owner: `$qa-engineer`.
 
-Critical risks and owners: strict one-shot nonce consumption and challenged-readiness authorization
-(`$backend-engineer`, independently checked by `$security-reviewer`); child/marker liveness settlement and
-parent-death resource lifetime (`$backend-engineer`, independently checked by `$qa-engineer`); continuation
-seam, gate-off compatibility, and owner-layer blast radius (`$backend-engineer`, mechanically reconciled by
-`$lead`).
+Critical risks and owners: lease/hub/child handle ordering and post-release no-op fencing (`$backend-engineer`,
+independently checked by `$qa-engineer`); pre-release rollback proof and marker cleanup (`$backend-engineer`,
+independently checked by `$qa-engineer`); endpoint wire compatibility and gate-OFF v1 preservation
+(`$backend-engineer`, mechanically reconciled by `$lead`).
 
-Next action: repeat the independent QA and security gates over the corrected uncommitted Phase-F diff. Keep
-Phase I and the gate flip out of scope; do not commit until the orchestrator admits the next gate.
+Next action: execute the Phase G backend implementation with test-first red/green cycles, build after each
+production file, then run the independent QA gate and the exact required verification commands. Do not commit.
 
 ## Terms and Abbreviations
 
-- DACL: Discretionary Access Control List.
 - FLOCK: The operating-system-backed GUI single-instance file lock.
+- GRACE(P): Old-port handler mode that serves only the approved restart allowlist while rejecting new work.
 - MAC: Message Authentication Code.
+- P: The parent GUI's currently owned port.

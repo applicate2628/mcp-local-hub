@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -403,6 +405,139 @@ func cloneEnsureAliveGUIRecoveryRecord(record *gui.HandoffMarkerRecord) *gui.Han
 	}
 	copy := *record
 	return &copy
+}
+
+type phaseGEnsureAliveLease struct{ releases int }
+
+func (l *phaseGEnsureAliveLease) Release() { l.releases++ }
+
+type phaseGEnsureAliveChild struct {
+	terminates int
+	detaches   int
+}
+
+func (c *phaseGEnsureAliveChild) PID() int { return 4270 }
+func (c *phaseGEnsureAliveChild) TerminateBeforeRelease(context.Context) error {
+	c.terminates++
+	return nil
+}
+func (c *phaseGEnsureAliveChild) DetachAtRelease() error {
+	c.detaches++
+	return nil
+}
+
+type phaseGEnsureAliveListener struct{ full bool }
+
+func (*phaseGEnsureAliveListener) EnterGrace(context.Context, http.Handler) error { return nil }
+func (*phaseGEnsureAliveListener) CloseListener(context.Context) error            { return nil }
+func (l *phaseGEnsureAliveListener) BindForRecovery(context.Context, int) (net.Listener, error) {
+	return phaseGEnsureAliveNetListener{}, nil
+}
+func (l *phaseGEnsureAliveListener) ServeFull(net.Listener, http.Handler) error {
+	l.full = true
+	return nil
+}
+func (l *phaseGEnsureAliveListener) RestoreFull(http.Handler) error {
+	l.full = true
+	return nil
+}
+
+type phaseGEnsureAliveNetListener struct{}
+
+func (phaseGEnsureAliveNetListener) Accept() (net.Conn, error) { return nil, net.ErrClosed }
+func (phaseGEnsureAliveNetListener) Close() error              { return nil }
+func (phaseGEnsureAliveNetListener) Addr() net.Addr            { return phaseGEnsureAliveAddr{} }
+
+type phaseGEnsureAliveAddr struct{}
+
+func (phaseGEnsureAliveAddr) Network() string { return "tcp" }
+func (phaseGEnsureAliveAddr) String() string  { return "127.0.0.1:9125" }
+
+type phaseGEnsureAliveStoreCounter struct {
+	*gui.HandoffMarkerStore
+	interrupts int
+}
+
+func (s *phaseGEnsureAliveStoreCounter) InterruptFromOwnedFreeProbe(generation string, sequence uint64, reason, action string) (*gui.HandoffMarkerRecord, error) {
+	s.interrupts++
+	return s.HandoffMarkerStore.InterruptFromOwnedFreeProbe(generation, sequence, reason, action)
+}
+
+func TestRestartV3_ProvedRollbackClearsMarkerAndEnsureAliveTickDoesNothing(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	now := time.Date(2026, 7, 18, 18, 0, 0, 0, time.UTC)
+	deadlines := gui.DefaultRestartDeadlines()
+	deadlines.Now = func() time.Time { return now }
+	store := gui.NewHandoffMarkerStore(stateDir, deadlines)
+	lease := &phaseGEnsureAliveLease{}
+	child := &phaseGEnsureAliveChild{}
+	listener := &phaseGEnsureAliveListener{}
+	ids := []string{"handoff-g8", "generation-g8"}
+	coordinator, err := gui.NewRestartCoordinator(gui.RestartCoordinatorDependencies{
+		Context: context.Background(), StateDir: stateDir,
+		OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 9125, nil }, ParentPID: 1111,
+		Lease: lease, Listener: listener, FullHandler: http.NotFoundHandler(), MarkerStore: store, Deadlines: deadlines,
+		NewID:    func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+		NewNonce: func() ([]byte, error) { return bytes.Repeat([]byte{0x78}, 32), nil },
+		Spawn:    func(gui.SelfRestartHandoff) (gui.RestartParentChild, error) { return child, nil },
+		Confirm: func(context.Context, int, []byte, gui.AuthenticatedReadinessIdentity) error {
+			return errors.New("standby confirmation timeout")
+		},
+		CloseHub: func(context.Context) {},
+		Exit:     func() {},
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+	started, err := coordinator.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	started.AcknowledgeResponseFlushed()
+	result := <-started.Done
+	if result.Err == nil || result.ParentLeaseReleased || lease.releases != 0 || !listener.full {
+		t.Fatalf("rollback result=%+v releases=%d full=%t, want proved healthy retained parent", result, lease.releases, listener.full)
+	}
+	if child.terminates != 1 || child.detaches != 0 {
+		t.Fatalf("unauthenticated child terminate=%d detach=%d, want 1/0", child.terminates, child.detaches)
+	}
+	marker, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read after rollback: %v", err)
+	}
+	if marker != nil {
+		t.Fatalf("proved rollback retained stale marker: %+v", marker)
+	}
+
+	counter := &phaseGEnsureAliveStoreCounter{HandoffMarkerStore: store}
+	probeCalls := 0
+	eventPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
+	eventsBefore, beforeErr := os.ReadFile(eventPath)
+	if beforeErr != nil && !os.IsNotExist(beforeErr) {
+		t.Fatalf("read event baseline: %v", beforeErr)
+	}
+	restore := setEnsureAliveGUIRecoveryDependenciesForTest(ensureAliveGUIRecoveryDependencies{
+		restartV3Enabled: func() bool { return true },
+		restartDeadlines: func() gui.RestartDeadlines { return deadlines },
+		markerStore:      func(string, gui.RestartDeadlines) ensureAliveGUIRecoveryStore { return counter },
+		probeOwnerLease: func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+			probeCalls++
+			return gui.GUIOwnerLeaseProbeResult{State: gui.GUIOwnerLeaseStateHeld}
+		},
+	})
+	t.Cleanup(restore)
+	var out bytes.Buffer
+	runEnsureAliveGUIRecovery(stateDir, &out)
+	if out.Len() != 0 || probeCalls != 0 || counter.interrupts != 0 {
+		t.Fatalf("ensure-alive tick output=%q probes=%d mutations=%d, want zero emit/probe/mutation", out.String(), probeCalls, counter.interrupts)
+	}
+	eventsAfter, afterErr := os.ReadFile(eventPath)
+	if afterErr != nil && !os.IsNotExist(afterErr) {
+		t.Fatalf("read events after ensure-alive tick: %v", afterErr)
+	}
+	if !bytes.Equal(eventsAfter, eventsBefore) || bytes.Contains(eventsAfter, []byte("gui-restart-live-holder-wedged")) {
+		t.Fatalf("ensure-alive event log changed or contains false held-owner degrade: before=%q after=%q", eventsBefore, eventsAfter)
+	}
 }
 
 type ensureAliveGUIRecoveryLeaseFake struct {

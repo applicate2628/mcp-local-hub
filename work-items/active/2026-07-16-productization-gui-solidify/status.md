@@ -209,3 +209,26 @@ environment clearing, and cross-platform fixtures. Fresh evidence: `gofmt -l` on
 nothing; `go build ./...` and `go vet ./...` exited 0; the exact tagged API/CLI/GUI suite passed in 212.1 s
 (`api` 79.197 s, `cli` 208.010 s, `gui` 191.228 s). Phase F is corrected and ready for independent QA and
 security re-gates. Phase I remained untouched by this lane; no commit is authorized or created.
+
+## Phase-G implementation run (2026-07-18)
+
+The human directly admitted Phase G and amended its production change surface to include `internal/cli/gui.go`
+plus adjacent tests. Current `HEAD` `beadf474` is the requested `58340fd5` baseline plus only that accepted
+documentation amendment; no production drift was introduced. The canonical `brief.md` now names Phase G,
+AC-G1 through AC-G8, the exact verification gate, and the no-commit/no-real-spawn constraints.
+
+| Agent | Role | Model/effort | Status | Launched |
+|---|---|---|---|---|
+| Phase-G recovery-state audit | knowledge-archivist | internal runtime model, low effort — bounded task-memory and Git reconciliation | completed: REVISE; Phase-G plan current, stale brief corrected by Lead, unrelated parked-item drift isolated | current session |
+| Phase-G parent coordinator | backend-engineer | internal runtime model, high effort — ordering-sensitive multi-file lifecycle protocol with red/green tests | completed: REVISE after independent gates | current session |
+| Phase-G affected-surface facts | analyst | internal runtime model, high effort — diff-wide concurrency, rollback, endpoint, and resource-lifetime trace | completed: REVISE; five concrete ordering/resource defects, concurrency and atomic ordering clean | current session |
+| Phase-G acceptance matrix | qa-engineer | internal runtime model, high effort — AC-G1..G8 claim verification and must-not-break regressions | completed: REVISE; one-shot standby confirmation fails the startup-latency contract | current session |
+| Phase-G ordering/seam review | architecture-reviewer | internal runtime model, high effort — adversarial lease/hub/child lifetime and dependency-boundary review | completed: REVISE; hub producers can republish after restart close and pre-accept cleanup is split | current session |
+| Phase-G correction seam | architect | internal runtime model, high effort — synthesize five confirmed ownership/race findings into one no-layering correction contract | completed: PASS; accepted correction design recorded | current session |
+| Phase-G seven-defect correction | backend-engineer | internal runtime model, high effort — TDD correction of producer shutdown, confirmation retry, listener rollback, response flush, nonce generations, duplicate requests, and post-Begin cleanup | completed: PASS; seven regressions plus exact tagged full gate green | current session |
+| Phase-G deep correctness gate | Lead | internal runtime model, high effort — reconcile diff, HEAD, consumers, and independent specialist evidence | completed: REVISE; seven defects recorded in `item3-unitB-phaseG-deep-review.md` | current session |
+
+Resume point: the backend correction for all seven deep-review findings is complete. The exact tagged GUI/CLI
+gate, build, vet, formatting check, all `TestRestartV3_*` tests, and the workspace executable sweep passed on
+2026-07-18. Next gate is independent `$qa-engineer` and `$architecture-reviewer` review of the corrected
+working tree. The gate-OFF branch remains v1 and no commit is authorized or created.

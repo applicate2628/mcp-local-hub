@@ -35,6 +35,15 @@ type guiListenerServeGeneration struct {
 	serving  bool
 }
 
+type guiListenerPhysicalCloseWaitError struct {
+	err error
+}
+
+func (e *guiListenerPhysicalCloseWaitError) Error() string { return e.err.Error() }
+func (e *guiListenerPhysicalCloseWaitError) Unwrap() error { return e.err }
+
+func (*guiListenerPhysicalCloseWaitError) ListenerPhysicallyClosed() bool { return true }
+
 // GUIListenerOwner is the sole owner of the GUI net.Listener, http.Server,
 // handler-mode gate, and close/rebind lifecycle. Closing its listener never
 // closes the Server's hub component, event broadcaster, or process context.
@@ -230,14 +239,17 @@ func (o *GUIListenerOwner) CloseListener(ctx context.Context) error {
 	if closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
 		return closeErr
 	}
+	// The socket is physically closed now. Drop the owned generation before
+	// waiting for Serve so a bounded wait timeout cannot make rollback mistake
+	// this dead listener for a live one or block BindForRecovery on stale state.
+	o.clearCurrent(listener)
 	if done != nil {
 		select {
 		case <-done:
 		case <-ctx.Done():
-			return ctx.Err()
+			return &guiListenerPhysicalCloseWaitError{err: ctx.Err()}
 		}
 	}
-	o.clearCurrent(listener)
 	return nil
 }
 

@@ -3,6 +3,7 @@ package gui
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,6 +15,44 @@ import (
 
 	"mcp-local-hub/internal/api"
 )
+
+type phaseGCloseWaitListener struct {
+	closed atomic.Bool
+}
+
+func (*phaseGCloseWaitListener) Accept() (net.Conn, error) { return nil, net.ErrClosed }
+
+func (l *phaseGCloseWaitListener) Close() error {
+	l.closed.Store(true)
+	return nil
+}
+
+func (*phaseGCloseWaitListener) Addr() net.Addr { return phaseGNetAddr{} }
+
+func TestRestartV3_CloseListenerReportsPhysicalCloseWhenServeWaitTimesOut(t *testing.T) {
+	owner := NewGUIListenerOwner(time.Second)
+	listener := &phaseGCloseWaitListener{}
+	owner.current = &guiListenerServeGeneration{
+		listener: listener,
+		serving:  true,
+		done:     make(chan struct{}),
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	err := owner.CloseListener(closeCtx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CloseListener error = %v, want context deadline", err)
+	}
+	if !restartListenerPhysicallyClosed(err) || !listener.closed.Load() {
+		t.Fatalf("physical close state = %v listener.closed=%v, want both true", restartListenerPhysicallyClosed(err), listener.closed.Load())
+	}
+	owner.mu.Lock()
+	current := owner.current
+	owner.mu.Unlock()
+	if current != nil {
+		t.Fatalf("owner retained physically closed generation: %+v", current)
+	}
+}
 
 func TestRestartV3_ChildActivatesImmediatelyAndInitialHubBindRetriesFromNilThroughExistingDriver(t *testing.T) {
 	s := NewServer(Config{Port: 0, PID: 4242, Version: "phase-f"})

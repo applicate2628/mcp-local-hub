@@ -2,13 +2,20 @@ package gui
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -17,13 +24,685 @@ import (
 const (
 	selfRestartHandoffVersion       = 1
 	restartChildStandbyCloseTimeout = 2 * time.Second
+	restartStandbyConfirmRetry      = 50 * time.Millisecond
 )
 
 var (
 	ErrRestartChildStandbyExpired = errors.New("restart child standby deadline expired")
 	ErrRestartChildMarkerMismatch = errors.New("restart child marker no longer matches its reservation")
 	ErrRestartChildParentExited   = errors.New("restart child parent process exited during standby")
+	ErrRestartAlreadyInProgress   = errors.New("GUI restart is already in progress")
 )
+
+// RestartParentChild is the parent's retained authority over exactly one
+// spawned replacement process. Termination includes its bounded reap and is
+// legal only before the parent releases the GUI lease. DetachAtRelease closes
+// the retained local handle without terminating or waiting for the child.
+type RestartParentChild interface {
+	PID() int
+	TerminateBeforeRelease(context.Context) error
+	DetachAtRelease() error
+}
+
+type RestartCoordinatorMarkerStore interface {
+	Begin(HandoffBegin) (*HandoffMarkerRecord, error)
+	Reserve(string, uint64, time.Time, string, int) (*HandoffMarkerRecord, error)
+	Interrupt(string, string, string) (*HandoffMarkerRecord, error)
+	ClearAfterProvedPreReleaseRollback(string) error
+}
+
+type RestartCoordinatorListener interface {
+	EnterGrace(context.Context, http.Handler) error
+	CloseListener(context.Context) error
+	BindForRecovery(context.Context, int) (net.Listener, error)
+	ServeFull(net.Listener, http.Handler) error
+	RestoreFull(http.Handler) error
+}
+
+// RestartCoordinatorDependencies are the parent protocol's injected resource
+// owners. CLI composition supplies argv/process and process-exit operations;
+// Server supplies its listener, handler, event bus, and owned hub close.
+type RestartCoordinatorDependencies struct {
+	Context     context.Context
+	StateDir    string
+	OldPort     func() int
+	TargetPort  func(int) (int, error)
+	ParentPID   int
+	Lease       SingleInstanceLease
+	Listener    RestartCoordinatorListener
+	FullHandler http.Handler
+	MarkerStore RestartCoordinatorMarkerStore
+	Deadlines   RestartDeadlines
+	NewID       func() (string, error)
+	NewNonce    func() ([]byte, error)
+	WriteNonce  func(string, []byte) error
+	RemoveNonce func(string) error
+	Spawn       func(SelfRestartHandoff) (RestartParentChild, error)
+	Confirm     func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error
+	Events      RestartChildEventPublisher
+	CloseHub    func(context.Context)
+	WaitGrace   func(context.Context, time.Duration) error
+	Exit        func()
+}
+
+type RestartCoordinatorStart struct {
+	HandoffID       string
+	Generation      string
+	Phase           HandoffPhase
+	SpawnedPID      int
+	OldPort         int
+	TargetPort      int
+	Done            <-chan RestartCoordinatorResult
+	responseFlushed func()
+}
+
+// AcknowledgeResponseFlushed opens the coordinator's irreversible continuation
+// only after the accepting HTTP handler has encoded its 202 body and attempted
+// Flush when the ResponseWriter supports it. Copies share one sync.Once-backed
+// acknowledgement closure.
+func (s RestartCoordinatorStart) AcknowledgeResponseFlushed() {
+	if s.responseFlushed != nil {
+		s.responseFlushed()
+	}
+}
+
+type RestartCoordinatorResult struct {
+	Err                 error
+	ParentLeaseReleased bool
+}
+
+// RestartCoordinator owns the parent half of one restart-v3 generation.
+// Start persists in-progress and spawns before returning the accepted response;
+// the background continuation crosses one irreversible lease-release boundary.
+type RestartCoordinator struct {
+	deps           RestartCoordinatorDependencies
+	mu             sync.Mutex
+	run            bool
+	active         RestartCoordinatorStart
+	runReady       chan struct{}
+	runReadyClosed bool
+}
+
+func NewRestartCoordinator(deps RestartCoordinatorDependencies) (*RestartCoordinator, error) {
+	if err := validateRestartCoordinatorDependencies(deps); err != nil {
+		return nil, err
+	}
+	if deps.NewID == nil {
+		deps.NewID = newRestartCoordinatorID
+	}
+	if deps.NewNonce == nil {
+		deps.NewNonce = newRestartCoordinatorNonce
+	}
+	if deps.WriteNonce == nil {
+		deps.WriteNonce = api.WriteStateFileBytesAtomic
+	}
+	if deps.RemoveNonce == nil {
+		deps.RemoveNonce = os.Remove
+	}
+	if deps.WaitGrace == nil {
+		deps.WaitGrace = waitRestartCoordinatorDuration
+	}
+	return &RestartCoordinator{deps: deps}, nil
+}
+
+func (c *RestartCoordinator) Start() (RestartCoordinatorStart, error) {
+	c.mu.Lock()
+	if c.run {
+		active := c.active
+		ready := c.runReady
+		c.mu.Unlock()
+		if active.HandoffID == "" && ready != nil {
+			select {
+			case <-ready:
+			case <-c.deps.Context.Done():
+				return RestartCoordinatorStart{}, c.deps.Context.Err()
+			}
+			c.mu.Lock()
+			if !c.run {
+				c.mu.Unlock()
+				return c.Start()
+			}
+			active = c.active
+			c.mu.Unlock()
+		}
+		return active, ErrRestartAlreadyInProgress
+	}
+	c.run = true
+	c.runReady = make(chan struct{})
+	c.runReadyClosed = false
+	c.mu.Unlock()
+
+	oldPort := c.deps.OldPort()
+	targetPort, err := c.deps.TargetPort(oldPort)
+	if err != nil {
+		c.resetBeforeSpawn()
+		return RestartCoordinatorStart{}, err
+	}
+	route := HandoffRoutePortChange
+	if targetPort == oldPort {
+		route = HandoffRouteSamePort
+	}
+	handoffID, err := c.deps.NewID()
+	if err != nil {
+		c.resetBeforeSpawn()
+		return RestartCoordinatorStart{}, fmt.Errorf("create restart handoff id: %w", err)
+	}
+	generation, err := c.deps.NewID()
+	if err != nil {
+		c.resetBeforeSpawn()
+		return RestartCoordinatorStart{}, fmt.Errorf("create restart generation: %w", err)
+	}
+	if err := sweepRestartNonceResidue(c.deps.StateDir); err != nil {
+		c.resetBeforeSpawn()
+		return RestartCoordinatorStart{}, err
+	}
+	record, err := c.deps.MarkerStore.Begin(HandoffBegin{
+		Generation: generation,
+		Route:      route,
+		OldPort:    oldPort,
+		NewPort:    targetPort,
+		OldPID:     c.deps.ParentPID,
+	})
+	if err != nil {
+		c.resetBeforeSpawn()
+		return RestartCoordinatorStart{}, err
+	}
+	nonce, err := c.deps.NewNonce()
+	if err != nil {
+		return RestartCoordinatorStart{}, c.failAfterBegin(generation, "", nil, fmt.Errorf("create restart nonce: %w", err))
+	}
+	if len(nonce) != authenticatedReadinessNonceBytes {
+		zeroBytes(nonce)
+		return RestartCoordinatorStart{}, c.failAfterBegin(generation, "", nil, fmt.Errorf("restart nonce length = %d, want %d", len(nonce), authenticatedReadinessNonceBytes))
+	}
+	noncePath := restartNoncePath(c.deps.StateDir, generation)
+	if err := c.deps.WriteNonce(noncePath, nonce); err != nil {
+		zeroBytes(nonce)
+		return RestartCoordinatorStart{}, c.failAfterBegin(generation, noncePath, nil, fmt.Errorf("write restart nonce: %w", err))
+	}
+	handoff := SelfRestartHandoff{
+		Version:    selfRestartHandoffVersion,
+		HandoffID:  handoffID,
+		Generation: generation,
+		Sequence:   record.Sequence,
+		OldPort:    oldPort,
+		TargetPort: targetPort,
+		ParentPID:  c.deps.ParentPID,
+		NoncePath:  noncePath,
+	}
+	child, err := c.deps.Spawn(handoff)
+	if err != nil {
+		zeroBytes(nonce)
+		return RestartCoordinatorStart{}, c.failAfterBegin(generation, noncePath, child, err)
+	}
+	if child == nil || child.PID() <= 0 {
+		zeroBytes(nonce)
+		return RestartCoordinatorStart{}, c.failAfterBegin(generation, noncePath, child, errors.New("restart spawn returned no retained child"))
+	}
+
+	done := make(chan RestartCoordinatorResult, 1)
+	responseFlushed := make(chan struct{})
+	var acknowledgeResponse sync.Once
+	start := RestartCoordinatorStart{
+		HandoffID: handoffID, Generation: generation, Phase: HandoffPhaseInProgress,
+		SpawnedPID: child.PID(), OldPort: oldPort, TargetPort: targetPort, Done: done,
+		responseFlushed: func() { acknowledgeResponse.Do(func() { close(responseFlushed) }) },
+	}
+	c.mu.Lock()
+	c.active = start
+	c.signalRunReadyLocked()
+	c.mu.Unlock()
+	c.publishProgress(start, HandoffPhaseInProgress, "")
+	go c.continueHandoff(start, record, noncePath, nonce, child, responseFlushed, done)
+	return start, nil
+}
+
+func (c *RestartCoordinator) resetBeforeSpawn() {
+	c.mu.Lock()
+	c.signalRunReadyLocked()
+	c.run = false
+	c.active = RestartCoordinatorStart{}
+	c.runReady = nil
+	c.mu.Unlock()
+}
+
+func (c *RestartCoordinator) signalRunReady() {
+	c.mu.Lock()
+	c.signalRunReadyLocked()
+	c.mu.Unlock()
+}
+
+func (c *RestartCoordinator) signalRunReadyLocked() {
+	if c.runReady != nil && !c.runReadyClosed {
+		close(c.runReady)
+		c.runReadyClosed = true
+	}
+}
+
+func (c *RestartCoordinator) failAfterBegin(generation, noncePath string, child RestartParentChild, cause error) error {
+	var handleErr error
+	if child != nil {
+		handleErr = child.DetachAtRelease()
+	}
+	nonceErr := c.removeNonce(noncePath)
+	markerErr := c.deps.MarkerStore.ClearAfterProvedPreReleaseRollback(generation)
+	if markerErr == nil {
+		c.resetBeforeSpawn()
+		return errors.Join(
+			cause,
+			wrapRestartCleanupError("close retained child handle", handleErr),
+			wrapRestartCleanupError("remove restart nonce", nonceErr),
+		)
+	}
+
+	_, terminalErr := c.deps.MarkerStore.Interrupt(
+		generation,
+		"gui-restart-pre-accept-cleanup-failed",
+		"mcphub gui",
+	)
+	c.signalRunReady()
+	return errors.Join(
+		cause,
+		wrapRestartCleanupError("close retained child handle", handleErr),
+		wrapRestartCleanupError("remove restart nonce", nonceErr),
+		wrapRestartCleanupError("remove in-progress restart marker", markerErr),
+		wrapRestartCleanupError("write interrupted restart marker", terminalErr),
+	)
+}
+
+func wrapRestartCleanupError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", operation, err)
+}
+
+func (c *RestartCoordinator) continueHandoff(start RestartCoordinatorStart, record *HandoffMarkerRecord, noncePath string, nonce []byte, child RestartParentChild, responseFlushed <-chan struct{}, done chan<- RestartCoordinatorResult) {
+	parentLeaseReleased := false
+	listenerClosed := false
+	grace := newRestartGraceHandler(start.HandoffID, start.TargetPort, c.deps.FullHandler)
+	finish := func(result RestartCoordinatorResult) {
+		done <- result
+		close(done)
+	}
+
+	confirm := func() error {
+		confirmCtx, cancel := context.WithTimeout(c.deps.Context, c.deps.Deadlines.Bind)
+		defer cancel()
+		identity := AuthenticatedReadinessIdentity{
+			HandoffID: start.HandoffID, Generation: start.Generation, Sequence: record.Sequence,
+			PID: child.PID(), Port: start.TargetPort,
+		}
+		for {
+			err := c.deps.Confirm(confirmCtx, start.TargetPort, nonce, identity)
+			if err == nil {
+				return nil
+			}
+			if !isTransientRestartStandbyConfirmError(err) {
+				return err
+			}
+			if waitErr := waitRestartCoordinatorDuration(confirmCtx, restartStandbyConfirmRetry); waitErr != nil {
+				return errors.Join(err, waitErr)
+			}
+		}
+	}
+
+	var prepareErr error
+	if start.TargetPort == start.OldPort {
+		quiesceCtx, cancel := context.WithTimeout(c.deps.Context, c.deps.Deadlines.Quiesce)
+		prepareErr = c.deps.Listener.EnterGrace(quiesceCtx, grace)
+		cancel()
+		if prepareErr == nil {
+			closeCtx, cancelClose := context.WithTimeout(c.deps.Context, c.deps.Deadlines.Bind)
+			prepareErr = c.deps.Listener.CloseListener(closeCtx)
+			cancelClose()
+			listenerClosed = restartListenerPhysicallyClosed(prepareErr)
+		}
+		if prepareErr == nil {
+			prepareErr = confirm()
+		}
+	} else {
+		prepareErr = confirm()
+		if prepareErr == nil {
+			quiesceCtx, cancel := context.WithTimeout(c.deps.Context, c.deps.Deadlines.Quiesce)
+			prepareErr = c.deps.Listener.EnterGrace(quiesceCtx, grace)
+			cancel()
+		}
+	}
+	if prepareErr != nil {
+		zeroBytes(nonce)
+		finish(c.rollbackBeforeRelease(start, noncePath, child, listenerClosed, parentLeaseReleased, prepareErr))
+		return
+	}
+	if err := c.removeNonce(noncePath); err != nil {
+		zeroBytes(nonce)
+		finish(c.rollbackBeforeRelease(start, noncePath, child, listenerClosed, parentLeaseReleased, fmt.Errorf("remove confirmed restart nonce: %w", err)))
+		return
+	}
+
+	now := c.deps.Deadlines.Now().UTC()
+	reserved, err := c.deps.MarkerStore.Reserve(
+		start.Generation,
+		record.Sequence,
+		now.Add(c.deps.Deadlines.Reservation),
+		hashDesignatedChildNonce(nonce),
+		child.PID(),
+	)
+	if err != nil {
+		zeroBytes(nonce)
+		finish(c.rollbackBeforeRelease(start, noncePath, child, listenerClosed, parentLeaseReleased, err))
+		return
+	}
+	c.publishProgress(start, HandoffPhaseReserved, "")
+	select {
+	case <-responseFlushed:
+	case <-c.deps.Context.Done():
+		zeroBytes(nonce)
+		finish(c.rollbackBeforeRelease(start, noncePath, child, listenerClosed, parentLeaseReleased, c.deps.Context.Err()))
+		return
+	}
+
+	// The parent's own hub close and lease release are one ordered boundary.
+	// No protocol decision is made after Release returns.
+	hubCtx, cancelHub := context.WithTimeout(c.deps.Context, 5*time.Second)
+	c.deps.CloseHub(hubCtx)
+	cancelHub()
+	c.deps.Lease.Release()
+	parentLeaseReleased = true
+	grace.released.Store(true)
+	zeroBytes(nonce)
+	_ = child.DetachAtRelease()
+
+	if start.TargetPort != start.OldPort {
+		_ = c.deps.WaitGrace(c.deps.Context, c.deps.Deadlines.Grace)
+		closeCtx, cancelClose := context.WithTimeout(context.Background(), c.deps.Deadlines.Grace)
+		_ = c.deps.Listener.CloseListener(closeCtx)
+		cancelClose()
+	}
+	c.deps.Exit()
+	finish(RestartCoordinatorResult{ParentLeaseReleased: parentLeaseReleased, Err: reservedResultError(reserved)})
+}
+
+func reservedResultError(record *HandoffMarkerRecord) error {
+	if record == nil || record.Phase != HandoffPhaseReserved {
+		return errors.New("restart reservation returned an invalid record")
+	}
+	return nil
+}
+
+func (c *RestartCoordinator) rollbackBeforeRelease(start RestartCoordinatorStart, noncePath string, child RestartParentChild, listenerClosed, parentLeaseReleased bool, cause error) RestartCoordinatorResult {
+	if parentLeaseReleased {
+		return RestartCoordinatorResult{Err: cause, ParentLeaseReleased: true}
+	}
+	rollbackCtx, cancelRollback := context.WithTimeout(c.deps.Context, c.deps.Deadlines.Rollback)
+	defer cancelRollback()
+	var cleanupErr error
+	if child != nil {
+		cleanupErr = child.TerminateBeforeRelease(rollbackCtx)
+	}
+	cleanupErr = errors.Join(cleanupErr, c.removeNonce(noncePath))
+	var restoreErr error
+	if start.TargetPort == start.OldPort && listenerClosed {
+		var rebound net.Listener
+		rebound, restoreErr = c.deps.Listener.BindForRecovery(rollbackCtx, start.OldPort)
+		if restoreErr == nil {
+			restoreErr = c.deps.Listener.ServeFull(rebound, c.deps.FullHandler)
+		}
+	} else {
+		restoreErr = c.deps.Listener.RestoreFull(c.deps.FullHandler)
+	}
+	if cleanupErr == nil && restoreErr == nil {
+		if err := c.deps.MarkerStore.ClearAfterProvedPreReleaseRollback(start.Generation); err == nil {
+			c.resetBeforeSpawn()
+			c.publishProgress(start, HandoffPhaseInterrupted, "gui-restart-pre-release-rollback")
+			return RestartCoordinatorResult{Err: cause}
+		} else {
+			restoreErr = err
+		}
+	}
+
+	terminalErr := c.interruptRollbackFailure(start, errors.Join(cause, cleanupErr, restoreErr))
+	_ = child.DetachAtRelease()
+	hubCtx, cancelHub := context.WithTimeout(context.Background(), 5*time.Second)
+	c.deps.CloseHub(hubCtx)
+	cancelHub()
+	c.deps.Lease.Release()
+	parentLeaseReleased = true
+	c.deps.Exit()
+	return RestartCoordinatorResult{Err: terminalErr, ParentLeaseReleased: parentLeaseReleased}
+}
+
+func (c *RestartCoordinator) interruptRollbackFailure(start RestartCoordinatorStart, cause error) error {
+	_, err := c.deps.MarkerStore.Interrupt(start.Generation, "gui-restart-pre-release-rollback-failed", "mcphub gui")
+	eventType := "gui-restart-pre-release-rollback-failed"
+	if err != nil {
+		eventType = "gui-restart-interrupted-marker-write-failed"
+	}
+	c.publishProgress(start, HandoffPhaseInterrupted, eventType)
+	return errors.Join(cause, err)
+}
+
+func (c *RestartCoordinator) publishProgress(start RestartCoordinatorStart, phase HandoffPhase, reasonCode string) {
+	c.mu.Lock()
+	if c.run && c.active.Generation == start.Generation {
+		c.active.Phase = phase
+	}
+	c.mu.Unlock()
+	if c.deps.Events == nil {
+		return
+	}
+	body := map[string]any{
+		"handoff_id": start.HandoffID, "generation": start.Generation, "phase": phase,
+		"old_port": start.OldPort, "same_port": start.OldPort == start.TargetPort,
+	}
+	if start.TargetPort != start.OldPort {
+		body["new_port"] = start.TargetPort
+	}
+	if reasonCode != "" {
+		body["reason_code"] = reasonCode
+	}
+	c.deps.Events.Publish(Event{Type: "gui-restart-progress", Body: body})
+}
+
+type restartGraceHandler struct {
+	handoffID string
+	targetURL string
+	full      http.Handler
+	released  atomic.Bool
+}
+
+func newRestartGraceHandler(handoffID string, targetPort int, full http.Handler) *restartGraceHandler {
+	return &restartGraceHandler{
+		handoffID: handoffID,
+		targetURL: fmt.Sprintf("http://127.0.0.1:%d/", targetPort),
+		full:      full,
+	}
+}
+
+func (h *restartGraceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && r.URL.Path == "/api/events" {
+		h.full.ServeHTTP(w, r)
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/api/gui/restart/redirect" && r.URL.Query().Get("handoff_id") == h.handoffID {
+		w.Header().Set("Content-Type", "application/json")
+		if !h.released.Load() {
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{"released": false})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"released": true, "target_url": h.targetURL})
+		return
+	}
+	http.Error(w, "GUI_RESTART_IN_PROGRESS", http.StatusServiceUnavailable)
+}
+
+func (o *GUIListenerOwner) RestoreFull(fullHandler http.Handler) error {
+	if o == nil {
+		return errors.New("restore full GUI listener: nil owner")
+	}
+	o.mu.Lock()
+	generation := o.current
+	o.mu.Unlock()
+	if generation == nil || generation.listener == nil {
+		return errors.New("restore full GUI listener: no owned listener")
+	}
+	return o.ServeFull(generation.listener, fullHandler)
+}
+
+func validateRestartCoordinatorDependencies(deps RestartCoordinatorDependencies) error {
+	if deps.Context == nil || deps.OldPort == nil || deps.TargetPort == nil || deps.ParentPID <= 0 {
+		return errors.New("restart coordinator context, ports, and parent PID are required")
+	}
+	if strings.TrimSpace(deps.StateDir) == "" || deps.Lease == nil || deps.Listener == nil || deps.FullHandler == nil || deps.MarkerStore == nil {
+		return errors.New("restart coordinator resource ownership is incomplete")
+	}
+	if deps.Spawn == nil || deps.Confirm == nil || deps.CloseHub == nil || deps.Exit == nil || deps.Deadlines.Now == nil {
+		return errors.New("restart coordinator operation seams are incomplete")
+	}
+	for name, value := range map[string]time.Duration{
+		"bind": deps.Deadlines.Bind, "quiesce": deps.Deadlines.Quiesce, "reservation": deps.Deadlines.Reservation,
+		"rollback": deps.Deadlines.Rollback, "grace": deps.Deadlines.Grace,
+	} {
+		if value <= 0 {
+			return fmt.Errorf("restart coordinator %s deadline must be positive", name)
+		}
+	}
+	return nil
+}
+
+func newRestartCoordinatorID() (string, error) {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(value), nil
+}
+
+func newRestartCoordinatorNonce() ([]byte, error) {
+	nonce := make([]byte, authenticatedReadinessNonceBytes)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	return nonce, nil
+}
+
+func waitRestartCoordinatorDuration(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *RestartCoordinator) removeNonce(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if err := c.deps.RemoveNonce(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove restart nonce %q: %w", path, err)
+	}
+	return nil
+}
+
+func sweepRestartNonceResidue(stateDir string) error {
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		return fmt.Errorf("read restart nonce state directory %q: %w", stateDir, err)
+	}
+	prefix := api.GUIRestartNonceFileLeaf + "-"
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+		path := filepath.Join(stateDir, entry.Name())
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove stale restart nonce residue %q: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func restartListenerPhysicallyClosed(err error) bool {
+	if err == nil {
+		return true
+	}
+	var state interface {
+		ListenerPhysicallyClosed() bool
+	}
+	return errors.As(err, &state) && state.ListenerPhysicallyClosed()
+}
+
+// isTransientRestartStandbyConfirmError admits retry only for loopback network
+// readiness failures. HTTP status, response decoding, identity, and message-
+// authentication failures are hard protocol failures and never satisfy
+// net.Error, so they fail immediately. The caller's Bind context is the single
+// total timeout for all attempts and waits.
+func isTransientRestartStandbyConfirmError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var networkErr net.Error
+	return errors.As(err, &networkErr)
+}
+
+// ConfirmAuthenticatedStandby performs one exact, non-redirecting loopback
+// challenge against the retained child's standby listener. The caller owns
+// the retry/deadline policy through ctx; this probe never follows a child-
+// supplied host or URL.
+func ConfirmAuthenticatedStandby(ctx context.Context, port int, nonce []byte, expected AuthenticatedReadinessIdentity) error {
+	if ctx == nil {
+		return errors.New("confirm restart standby: nil context")
+	}
+	if err := validateAuthenticatedReadinessIdentity(expected); err != nil {
+		return fmt.Errorf("confirm restart standby identity: %w", err)
+	}
+	if expected.Port != port {
+		return fmt.Errorf("confirm restart standby port %d does not match identity port %d", port, expected.Port)
+	}
+	if len(nonce) != authenticatedReadinessNonceBytes {
+		return fmt.Errorf("confirm restart standby nonce length = %d, want %d", len(nonce), authenticatedReadinessNonceBytes)
+	}
+	challenge, err := newRestartCoordinatorID()
+	if err != nil {
+		return fmt.Errorf("create restart readiness challenge: %w", err)
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/api/ping?challenge=%s", port, challenge)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("create restart readiness request: %w", err)
+	}
+	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return fmt.Errorf("probe restart standby: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		return fmt.Errorf("probe restart standby status = %d, want 200", response.StatusCode)
+	}
+	var proof AuthenticatedReadinessProof
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 8192))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&proof); err != nil {
+		return fmt.Errorf("decode restart standby proof: %w", err)
+	}
+	if !VerifyAuthenticatedReadiness(nonce, challenge, proof, expected) {
+		return errors.New("restart standby authentication failed")
+	}
+	return nil
+}
 
 // SelfRestartHandoff is the non-secret child descriptor carried by
 // SelfRestartHandoffEnv. NoncePath names a one-shot owner-only file; the nonce
@@ -51,6 +730,12 @@ func EncodeSelfRestartHandoff(handoff SelfRestartHandoff) (string, error) {
 		return "", fmt.Errorf("encode restart child handoff: %w", err)
 	}
 	return string(raw), nil
+}
+
+// DecodeSelfRestartHandoff validates the structured child descriptor before
+// CLI composition uses its authoritative target port.
+func DecodeSelfRestartHandoff(raw string) (SelfRestartHandoff, error) {
+	return decodeSelfRestartHandoff(raw)
 }
 
 func decodeSelfRestartHandoff(raw string) (SelfRestartHandoff, error) {
@@ -114,7 +799,7 @@ func NewSpawnedGUIChildFromEnvironment(raw string, pid int, stateDir string) (*S
 	if pid <= 0 {
 		return nil, errors.New("restart child PID must be positive")
 	}
-	noncePath, err := canonicalRestartNoncePath(stateDir, handoff.NoncePath)
+	noncePath, err := canonicalRestartNoncePath(stateDir, handoff.Generation, handoff.NoncePath)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +830,16 @@ func NewSpawnedGUIChildFromEnvironment(raw string, pid int, stateDir string) (*S
 	return &SpawnedGUIChild{Handoff: handoff, PID: pid, Readiness: readiness, parentDeath: parentDeath}, nil
 }
 
-func canonicalRestartNoncePath(stateDir, supplied string) (string, error) {
+func restartNonceFileLeaf(generation string) string {
+	sum := sha256.Sum256([]byte(generation))
+	return api.GUIRestartNonceFileLeaf + "-" + hex.EncodeToString(sum[:])
+}
+
+func restartNoncePath(stateDir, generation string) string {
+	return filepath.Join(stateDir, restartNonceFileLeaf(generation))
+}
+
+func canonicalRestartNoncePath(stateDir, generation, supplied string) (string, error) {
 	if strings.TrimSpace(stateDir) == "" {
 		return "", errors.New("restart child canonical state directory is required")
 	}
@@ -157,11 +851,12 @@ func canonicalRestartNoncePath(stateDir, supplied string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve restart child nonce path: %w", err)
 	}
+	wantLeaf := restartNonceFileLeaf(generation)
 	rel, err := filepath.Rel(stateAbs, nonceAbs)
-	if err != nil || rel != api.GUIRestartNonceFileLeaf {
-		return "", fmt.Errorf("restart child nonce path %q is not the canonical state directory leaf %q", supplied, filepath.Join(stateAbs, api.GUIRestartNonceFileLeaf))
+	if err != nil || rel != wantLeaf {
+		return "", fmt.Errorf("restart child nonce path %q is not the canonical state directory generation leaf %q", supplied, filepath.Join(stateAbs, wantLeaf))
 	}
-	return filepath.Join(stateAbs, api.GUIRestartNonceFileLeaf), nil
+	return filepath.Join(stateAbs, wantLeaf), nil
 }
 
 func zeroBytes(value []byte) {

@@ -507,6 +507,101 @@ type lspRegistrar interface {
 
 type realLSPRegistrar struct{}
 
+type restartCoordinatorStarter interface {
+	Start() (RestartCoordinatorStart, error)
+}
+
+const hubProducerJoinTimeout = 2 * time.Second
+
+// hubProducerShutdownBarrier is the one Server-owned lifetime boundary for
+// every goroutine that can publish hubMcpComp. Shutdown closes admission before
+// cancellation, waits up to the bounded producer-join budget, takes the current
+// component, and permanently rejects late publication. A producer that outlives
+// the wait must self-shut down when its publication is rejected.
+type hubProducerShutdownBarrier struct {
+	mu           sync.Mutex
+	started      bool
+	stopping     bool
+	closed       bool
+	cancel       context.CancelFunc
+	producers    sync.WaitGroup
+	shutdownOnce sync.Once
+}
+
+func (b *hubProducerShutdownBarrier) begin(parent context.Context) (context.Context, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.started || b.stopping || b.closed {
+		ctx, cancel := context.WithCancel(parent)
+		cancel()
+		return ctx, false
+	}
+	b.started = true
+	ctx, cancel := context.WithCancel(parent)
+	b.cancel = cancel
+	return ctx, true
+}
+
+func (b *hubProducerShutdownBarrier) launch(producer func()) bool {
+	b.mu.Lock()
+	if b.stopping || b.closed {
+		b.mu.Unlock()
+		return false
+	}
+	b.producers.Add(1)
+	b.mu.Unlock()
+	go func() {
+		defer b.producers.Done()
+		producer()
+	}()
+	return true
+}
+
+func (b *hubProducerShutdownBarrier) publish(slot *atomic.Pointer[HubListenerComponents], comp *HubListenerComponents, shutdown func(context.Context, *HubListenerComponents)) bool {
+	if comp == nil {
+		return false
+	}
+	b.mu.Lock()
+	accepted := !b.stopping && !b.closed && slot.CompareAndSwap(nil, comp)
+	b.mu.Unlock()
+	if !accepted {
+		shutdown(context.Background(), comp)
+	}
+	return accepted
+}
+
+func (b *hubProducerShutdownBarrier) shutdown(ctx context.Context, slot *atomic.Pointer[HubListenerComponents]) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	b.shutdownOnce.Do(func() {
+		b.mu.Lock()
+		b.stopping = true
+		cancel := b.cancel
+		b.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+
+		producersDone := make(chan struct{})
+		go func() {
+			b.producers.Wait()
+			close(producersDone)
+		}()
+		joinCtx, cancelJoin := context.WithTimeout(ctx, hubProducerJoinTimeout)
+		select {
+		case <-producersDone:
+		case <-joinCtx.Done():
+		}
+		cancelJoin()
+
+		ShutdownHubListener(ctx, slot.Swap(nil))
+		b.mu.Lock()
+		b.closed = true
+		b.mu.Unlock()
+	})
+}
+
 // RealStatusProvider is the production-default statusProvider. Tests inject
 // their own; callers outside the package construct this one.
 type RealStatusProvider = realStatusProvider
@@ -517,7 +612,10 @@ type Server struct {
 	cfg         Config
 	mux         *http.ServeMux
 	guiListener *GUIListenerOwner
-	port        atomic.Int32 // set after Listen, read by Port()
+	// restartCoordinator is composed by the CLI only for a gate-ON parent.
+	// The child runtime and the default-OFF v1 path leave it nil.
+	restartCoordinator restartCoordinatorStarter
+	port               atomic.Int32 // set after Listen, read by Port()
 	// api is the long-lived shared *api.API handle. Phase G2 places the
 	// HealthSnapshot TTL+singleflight cache on this struct, so the
 	// healthBackend adapter MUST reuse this instance — per-request
@@ -625,6 +723,7 @@ type Server struct {
 	hubRestartLastSuccess    time.Time
 	hubRestartWindowStart    time.Time
 	hubRestartWindowAttempts int
+	hubProducerShutdown      hubProducerShutdownBarrier
 
 	// Hub startup test seams. Production leaves both nil and uses the settings
 	// registry plus startHubMcpListenerWithOptions directly.
@@ -906,6 +1005,31 @@ func (s *Server) Broadcaster() *Broadcaster { return s.events }
 // sole binder/closer/rebinder; hub and event ownership remains on Server.
 func (s *Server) GUIListenerOwner() *GUIListenerOwner { return s.guiListener }
 
+// ConfigureRestartCoordinator completes the GUI-owned half of the parent
+// restart protocol. In particular, it fixes the irreversible boundary to this
+// Server's own hub listener: RestartCoordinator calls this owner-side close
+// immediately before releasing the CLI-owned single-instance lease.
+func (s *Server) ConfigureRestartCoordinator(deps RestartCoordinatorDependencies) error {
+	deps.Listener = s.guiListener
+	deps.FullHandler = s.httpHandler()
+	deps.Events = s.events
+	deps.CloseHub = s.closeOwnHubListenerForRestart
+	coordinator, err := NewRestartCoordinator(deps)
+	if err != nil {
+		return err
+	}
+	s.restartCoordinator = coordinator
+	return nil
+}
+
+func (s *Server) closeOwnHubListenerForRestart(ctx context.Context) {
+	s.hubProducerShutdown.shutdown(ctx, &s.hubMcpComp)
+}
+
+func (s *Server) publishHubMcpComponent(comp *HubListenerComponents, shutdown func(context.Context, *HubListenerComponents)) bool {
+	return s.hubProducerShutdown.publish(&s.hubMcpComp, comp, shutdown)
+}
+
 // Activated closes when the full GUI handler is serving. CLI-owned poller,
 // tray, and browser work waits on this gate.
 func (s *Server) Activated() <-chan struct{} { return s.guiListener.Activated() }
@@ -1059,26 +1183,12 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 	// fail-soft on read error; idempotent via its own sync.Once.
 	go detectSeparateProcessOnce(s)
 
-	// codex bot phase4 r9 P1 closure on PR #158: run hub startup in
-	// a goroutine so ctx.Done() during the bind transaction (e.g. a
-	// sibling `mcphub hub-mcp regenerate-token` is holding
-	// hub-mcp.lock under blocking flock acquisition) can still tear
-	// down the gui-server promptly. We wait up to 2s for the init
-	// to settle at shutdown time so a successful bind doesn't leak
-	// its listener; beyond that the process-exit flock release
-	// unblocks the stuck acquireHubMcpLock anyway.
-	//
-	// codex bot phase4 r10 P1 closure on PR #158: hubInitCtx is a
-	// derived cancel context, NOT the parent ctx, so the shutdown
-	// path can issue an explicit hubInitCancel() to unwind a stuck
-	// goroutine BEFORE the 2s wait elapses. startHubMcpListener now
-	// honors ctx — its lock acquisition uses
-	// acquireHubMcpLockContext, so hubInitCancel() unblocks the
-	// flock acquisition within ~10 ms. Even the errCh-shutdown path
-	// (gui-server listener died unexpectedly) needs to cancel the
-	// goroutine so the goroutine does NOT later store a live
-	// listener into s.hubMcpComp after Start has already returned —
-	// the explicit cancel + defer below covers both shutdown paths.
+	// Hub initialization and the restart driver are admitted through one
+	// Server-owned producer barrier. Closing the hub shuts admission, cancels
+	// their shared context, and waits a bounded interval for both producers before
+	// taking the current component. startHubMcpListener honors that context through
+	// acquireHubMcpLockContext, so a blocked hub-mcp.lock acquisition unwinds
+	// promptly rather than publishing after parent shutdown.
 	hubEnabled := readHubEndpointGateFromSettings(s.api)
 	if s.hubEndpointGateFn != nil {
 		hubEnabled = s.hubEndpointGateFn(s.api)
@@ -1090,98 +1200,89 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 	if s.startHubMcpListenerFn != nil {
 		hubStartFn = s.startHubMcpListenerFn
 	}
-	hubInitCtx, hubInitCancel := context.WithCancel(ctx)
-	defer hubInitCancel()
-	hubInitDone := make(chan struct{})
-	go func() {
-		defer close(hubInitDone)
-		hubComp, hubErr := hubStartFn(hubInitCtx, hubEnabled, s.api, startHubMcpListenerOptions{
-			server:         s,
-			onUnresponsive: s.signalHubListenerRestart,
-			onRecovered:    s.onHubListenerRecovered,
+	hubInitCtx, producersAdmitted := s.hubProducerShutdown.begin(ctx)
+	if producersAdmitted {
+		s.hubProducerShutdown.launch(func() {
+			hubComp, hubErr := hubStartFn(hubInitCtx, hubEnabled, s.api, startHubMcpListenerOptions{
+				server:         s,
+				onUnresponsive: s.signalHubListenerRestart,
+				onRecovered:    s.onHubListenerRecovered,
+			})
+			if hubErr != nil {
+				// codex bot phase4 r1 P2 closure on PR #158: surface
+				// non-bind hub failures (token gen/persist, endpoint
+				// load/write, manifest pre-gate refusal) on the gui-
+				// server log so operators get an actionable signal
+				// without tailing hub-mcp.log. The error is also
+				// already structured-logged via LogHubMcpEvent inside
+				// startHubMcpListener.
+				log.Printf("hub-mcp listener startup failed; retry scheduled through existing restart driver: %v", hubErr)
+				if hubEnabled {
+					s.signalInitialHubStartupFailure(hubErr)
+				}
+				return
+			}
+			if hubComp == nil {
+				if hubEnabled {
+					s.hubHealth.set(HubHealthDown, "")
+				}
+				return
+			}
+			// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
+			// CAS-based ownership transfer between hub-init goroutine
+			// and shutdown path. Pre-r24 code did:
+			//   if hubInitCtx.Err() != nil { tear down } else { Store }
+			// which is NOT one atomic transition: the goroutine could be
+			// descheduled between the Err() check and the Store, letting
+			// the shutdown path Load() == nil, return, THEN the goroutine
+			// publishes a live listener after Start has already returned.
+			//
+			// New protocol:
+			//   1. Goroutine attempts CAS(nil -> hubComp). If it fails,
+			//      something else already owns the slot (impossible in
+			//      practice, but defensive) — tear down our bundle.
+			//   2. Re-check ctx after the publish. If canceled NOW,
+			//      attempt CAS(hubComp -> nil) to take ownership back. If
+			//      THAT CAS succeeds, we still own the bundle and tear it
+			//      down. If it fails, the shutdown path already
+			//      atomically Swap'd to nil and will tear down itself.
+			//
+			// The shutdown path uses Swap(nil) (below) — single atomic
+			// take-the-bundle-or-take-nothing.
+			if !s.publishHubMcpComponent(hubComp, ShutdownHubListener) {
+				if hubEnabled {
+					s.hubHealth.set(HubHealthDown, "")
+				}
+				return
+			}
+			if hubInitCtx.Err() != nil {
+				if s.hubMcpComp.CompareAndSwap(hubComp, nil) {
+					ShutdownHubListener(context.Background(), hubComp)
+				}
+				// else: shutdown path already swapped — it owns teardown.
+				return
+			}
+			// BindHubMcpListener loaded and persisted this endpoint while holding
+			// hub-mcp.lock. Hydrate only from that accepted component so startup has
+			// no unlocked pre-bind read and cannot latch stale marker state.
+			if hubComp.reconcilePending {
+				s.hubHealth.markReconcilePending()
+			}
+			if hubComp.alive.Load() {
+				s.hubHealth.markHealthy()
+			}
 		})
-		if hubErr != nil {
-			// codex bot phase4 r1 P2 closure on PR #158: surface
-			// non-bind hub failures (token gen/persist, endpoint
-			// load/write, manifest pre-gate refusal) on the gui-
-			// server log so operators get an actionable signal
-			// without tailing hub-mcp.log. The error is also
-			// already structured-logged via LogHubMcpEvent inside
-			// startHubMcpListener.
-			log.Printf("hub-mcp listener startup failed; retry scheduled through existing restart driver: %v", hubErr)
-			if hubEnabled {
-				s.signalInitialHubStartupFailure(hubErr)
-			}
-			return
-		}
-		if hubComp == nil {
-			if hubEnabled {
-				s.hubHealth.set(HubHealthDown, "")
-			}
-			return
-		}
-		// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
-		// CAS-based ownership transfer between hub-init goroutine
-		// and shutdown path. Pre-r24 code did:
-		//   if hubInitCtx.Err() != nil { tear down } else { Store }
-		// which is NOT one atomic transition: the goroutine could be
-		// descheduled between the Err() check and the Store, letting
-		// the shutdown path Load() == nil, return, THEN the goroutine
-		// publishes a live listener after Start has already returned.
-		//
-		// New protocol:
-		//   1. Goroutine attempts CAS(nil -> hubComp). If it fails,
-		//      something else already owns the slot (impossible in
-		//      practice, but defensive) — tear down our bundle.
-		//   2. Re-check ctx after the publish. If canceled NOW,
-		//      attempt CAS(hubComp -> nil) to take ownership back. If
-		//      THAT CAS succeeds, we still own the bundle and tear it
-		//      down. If it fails, the shutdown path already
-		//      atomically Swap'd to nil and will tear down itself.
-		//
-		// The shutdown path uses Swap(nil) (below) — single atomic
-		// take-the-bundle-or-take-nothing.
-		if !s.hubMcpComp.CompareAndSwap(nil, hubComp) {
-			ShutdownHubListener(context.Background(), hubComp)
-			if hubEnabled {
-				s.hubHealth.set(HubHealthDown, "")
-			}
-			return
-		}
-		if hubInitCtx.Err() != nil {
-			if s.hubMcpComp.CompareAndSwap(hubComp, nil) {
-				ShutdownHubListener(context.Background(), hubComp)
-			}
-			// else: shutdown path already swapped — it owns teardown.
-			return
-		}
-		// BindHubMcpListener loaded and persisted this endpoint while holding
-		// hub-mcp.lock. Hydrate only from that accepted component so startup has
-		// no unlocked pre-bind read and cannot latch stale marker state.
-		if hubComp.reconcilePending {
-			s.hubHealth.markReconcilePending()
-		}
-		if hubComp.alive.Load() {
-			s.hubHealth.markHealthy()
-		}
-	}()
-	s.hubRestartDriverAlive.Store(true)
-	go runHubListenerRestartDriver(hubInitCtx, s, hubListenerRestartDriverOptions{})
+		s.hubRestartDriverAlive.Store(true)
+		s.hubProducerShutdown.launch(func() {
+			runHubListenerRestartDriver(hubInitCtx, s, hubListenerRestartDriverOptions{})
+		})
+	}
 
 	select {
 	case <-ctx.Done():
-		// codex bot phase4 r10 P1 closure on PR #158: cancel hub init
-		// BEFORE the 2s wait so a flock-stuck goroutine unwinds via
-		// context.Canceled within ~10 ms (the
-		// acquireHubMcpLockContext retry cadence). The wait then
-		// serves only to give a goroutine in late-stage bind enough
-		// time to publish its listener for the subsequent
-		// ShutdownHubListener call.
-		hubInitCancel()
-		select {
-		case <-hubInitDone:
-		case <-time.After(2 * time.Second):
-		}
+		// Cancel producers and wait only up to the bounded join budget before
+		// taking the current component. Publication admission is already closed,
+		// so a producer that finishes late must shut down its own rejected component.
 		// codex bot phase4 r3 P2 closure on PR #158: each shutdown
 		// phase gets its OWN 5s budget. The earlier code shared one
 		// shutdownCtx between ShutdownHubListener and GUIListenerOwner.Shutdown;
@@ -1193,15 +1294,8 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 		// internal-reload writes complete via the still-flockable
 		// state-dir.
 		//
-		// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
-		// atomic.Swap takes ownership of the bundle (or nil). If the
-		// goroutine raced past us and stored a bundle, we get it
-		// here and tear it down. If we get nil, the goroutine either
-		// hasn't stored yet (its later CAS will tear down its own
-		// bundle when it sees ctx canceled) or it never produced
-		// a bundle (errored out). No double-shutdown.
 		hubCtx, hubCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		ShutdownHubListener(hubCtx, s.hubMcpComp.Swap(nil))
+		s.closeOwnHubListenerForRestart(hubCtx)
 		hubCancel()
 
 		guiCtx, guiCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1223,24 +1317,10 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 		s.events.Close()
 		return nil
 	case err := <-errCh:
-		// gui-server listener died; wait briefly for hub init to
-		// settle so we capture its components, then drain.
-		//
-		// codex bot phase4 r10 P1 closure on PR #158: cancel hub init
-		// here too. The defer hubInitCancel above guarantees
-		// eventual cancellation, but an explicit call ensures the
-		// goroutine unwinds DURING the 2s wait window (not after),
-		// avoiding the race where the goroutine stores a live
-		// listener into s.hubMcpComp after Start has returned.
-		hubInitCancel()
-		select {
-		case <-hubInitDone:
-		case <-time.After(2 * time.Second):
-		}
-		// codex deep-sec phase4 r24 P1 closure on PR #158 (lane #1):
-		// same atomic Swap ownership transfer as the ctx.Done branch.
+		// A failed GUI listener uses the same cancel/join/take hub boundary as
+		// normal cancellation, so neither producer can republish after return.
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		ShutdownHubListener(drainCtx, s.hubMcpComp.Swap(nil))
+		s.closeOwnHubListenerForRestart(drainCtx)
 		drainCancel()
 		s.events.Close()
 		if errors.Is(err, http.ErrServerClosed) {

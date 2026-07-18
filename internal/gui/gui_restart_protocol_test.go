@@ -4,16 +4,1161 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
 )
+
+type phaseGOrder struct {
+	mu    sync.Mutex
+	steps []string
+}
+
+func phaseGNow(now *time.Time) func() time.Time {
+	return func() time.Time { return *now }
+}
+
+func phaseGDeadlines(now *time.Time) RestartDeadlines {
+	return RestartDeadlines{
+		Now: phaseGNow(now), RecordLock: time.Second, Freshness: 3 * time.Minute,
+		Reservation: 10 * time.Second, Proof: 10 * time.Second, Bind: 2 * time.Second,
+		Quiesce: 5 * time.Second, Rollback: 5 * time.Second, Grace: 5 * time.Second,
+	}
+}
+
+func (o *phaseGOrder) add(step string) {
+	o.mu.Lock()
+	o.steps = append(o.steps, step)
+	o.mu.Unlock()
+}
+
+func (o *phaseGOrder) snapshot() []string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]string(nil), o.steps...)
+}
+
+type phaseGLease struct {
+	order      *phaseGOrder
+	releaseCnt int
+	reacquires int
+	onRelease  func()
+}
+
+func (l *phaseGLease) Release() {
+	l.releaseCnt++
+	l.order.add("flock-release")
+	if l.onRelease != nil {
+		l.onRelease()
+	}
+}
+
+type phaseGChildHandle struct {
+	order        *phaseGOrder
+	pid          int
+	terminated   int
+	detached     int
+	terminateErr error
+	onTerminate  func()
+}
+
+func (c *phaseGChildHandle) PID() int { return c.pid }
+
+func (c *phaseGChildHandle) TerminateBeforeRelease(context.Context) error {
+	c.terminated++
+	c.order.add("child-terminate")
+	if c.onTerminate != nil {
+		c.onTerminate()
+	}
+	return c.terminateErr
+}
+
+func (c *phaseGChildHandle) DetachAtRelease() error {
+	c.detached++
+	c.order.add("child-detach")
+	return nil
+}
+
+type phaseGListener struct {
+	order           *phaseGOrder
+	enterGraceErr   error
+	closeErr        error
+	bindErr         error
+	restoreErr      error
+	rebound         net.Listener
+	servedFull      int
+	restoredFull    int
+	bindForRecovery func(context.Context, int) (net.Listener, error)
+}
+
+func (l *phaseGListener) EnterGrace(context.Context, http.Handler) error {
+	l.order.add("enter-grace")
+	return l.enterGraceErr
+}
+
+func (l *phaseGListener) CloseListener(context.Context) error {
+	l.order.add("close-gui-listener")
+	return l.closeErr
+}
+
+func (l *phaseGListener) BindForRecovery(ctx context.Context, port int) (net.Listener, error) {
+	l.order.add("bind-for-recovery")
+	if l.bindForRecovery != nil {
+		return l.bindForRecovery(ctx, port)
+	}
+	if l.bindErr != nil {
+		return nil, l.bindErr
+	}
+	return l.rebound, nil
+}
+
+func (l *phaseGListener) ServeFull(net.Listener, http.Handler) error {
+	l.servedFull++
+	l.order.add("serve-full")
+	return nil
+}
+
+func (l *phaseGListener) RestoreFull(http.Handler) error {
+	l.restoredFull++
+	l.order.add("restore-full")
+	return l.restoreErr
+}
+
+type phaseGMarkerStore struct {
+	record       *HandoffMarkerRecord
+	reserveErr   error
+	interruptErr error
+	clearErr     error
+	clears       int
+	interrupts   int
+	onReserve    func()
+}
+
+func (s *phaseGMarkerStore) Begin(begin HandoffBegin) (*HandoffMarkerRecord, error) {
+	s.record = &HandoffMarkerRecord{
+		Generation: begin.Generation,
+		Phase:      HandoffPhaseInProgress,
+		Route:      begin.Route,
+		OldPort:    begin.OldPort,
+		NewPort:    begin.NewPort,
+		OldPID:     begin.OldPID,
+		Sequence:   1,
+	}
+	copy := *s.record
+	if s.onReserve != nil {
+		s.onReserve()
+	}
+	return &copy, nil
+}
+
+type phaseGPhysicalCloseWaitError struct {
+	err error
+}
+
+func (e phaseGPhysicalCloseWaitError) Error() string                { return e.err.Error() }
+func (e phaseGPhysicalCloseWaitError) Unwrap() error                { return e.err }
+func (phaseGPhysicalCloseWaitError) ListenerPhysicallyClosed() bool { return true }
+
+func (s *phaseGMarkerStore) Reserve(generation string, expectedSequence uint64, _ time.Time, _ string, childPID int) (*HandoffMarkerRecord, error) {
+	if s.reserveErr != nil {
+		return nil, s.reserveErr
+	}
+	if s.record == nil || s.record.Generation != generation || s.record.Sequence != expectedSequence {
+		return nil, ErrHandoffMarkerStateMismatch
+	}
+	s.record.Phase = HandoffPhaseReserved
+	s.record.ChildPID = childPID
+	s.record.Sequence++
+	copy := *s.record
+	return &copy, nil
+}
+
+func (s *phaseGMarkerStore) Interrupt(generation, reasonCode, operatorAction string) (*HandoffMarkerRecord, error) {
+	s.interrupts++
+	if s.interruptErr != nil {
+		return nil, s.interruptErr
+	}
+	if s.record == nil || s.record.Generation != generation {
+		return nil, ErrHandoffMarkerStateMismatch
+	}
+	s.record.Phase = HandoffPhaseInterrupted
+	s.record.ReasonCode = reasonCode
+	s.record.OperatorAction = operatorAction
+	s.record.Sequence++
+	copy := *s.record
+	return &copy, nil
+}
+
+func (s *phaseGMarkerStore) ClearAfterProvedPreReleaseRollback(generation string) error {
+	if s.clearErr != nil {
+		return s.clearErr
+	}
+	if s.record == nil || s.record.Generation != generation || s.record.Phase != HandoffPhaseInProgress {
+		return ErrHandoffMarkerStateMismatch
+	}
+	s.clears++
+	s.record = nil
+	return nil
+}
+
+type phaseGNetListener struct{}
+
+func (phaseGNetListener) Accept() (net.Conn, error) { return nil, net.ErrClosed }
+func (phaseGNetListener) Close() error              { return nil }
+func (phaseGNetListener) Addr() net.Addr            { return phaseGNetAddr{} }
+
+type phaseGNetAddr struct{}
+
+func (phaseGNetAddr) Network() string { return "tcp" }
+func (phaseGNetAddr) String() string  { return "127.0.0.1:9125" }
+
+func TestRestartV3_HubLifecycleBarrierJoinsPublishersBeforeRelease(t *testing.T) {
+	t.Run("initializer", func(t *testing.T) {
+		s := NewServer(Config{Port: 9125})
+		s.hubEndpointGateFn = func(*api.API) bool { return true }
+		producerStarted := make(chan struct{})
+		allowProducer := make(chan struct{})
+		producerStopped := make(chan struct{})
+		var stopOnce sync.Once
+		comp := &HubListenerComponents{listenerCancel: func() { stopOnce.Do(func() { close(producerStopped) }) }}
+		comp.alive.Store(true)
+		s.startHubMcpListenerFn = func(context.Context, bool, *api.API, startHubMcpListenerOptions) (*HubListenerComponents, error) {
+			close(producerStarted)
+			<-allowProducer // Deliberately ignore cancellation to engineer the join window.
+			return comp, nil
+		}
+
+		serverCtx, stopServer := context.WithCancel(context.Background())
+		serverDone := make(chan error, 1)
+		go func() { serverDone <- s.runActivatedGUIListener(serverCtx, make(chan error)) }()
+		select {
+		case <-producerStarted:
+		case <-time.After(time.Second):
+			t.Fatal("hub initializer did not start")
+		}
+
+		closeDone := make(chan struct{})
+		go func() {
+			s.closeOwnHubListenerForRestart(context.Background())
+			close(closeDone)
+		}()
+		returnedBeforeProducerSettled := false
+		select {
+		case <-closeDone:
+			returnedBeforeProducerSettled = true
+		case <-time.After(100 * time.Millisecond):
+		}
+		close(allowProducer)
+		select {
+		case <-closeDone:
+		case <-time.After(time.Second):
+			t.Fatal("restart hub close did not join the initializer")
+		}
+
+		deadline := time.After(time.Second)
+		for s.hubMcpComp.Load() == nil {
+			select {
+			case <-producerStopped:
+				goto initializerSettled
+			case <-deadline:
+				goto initializerSettled
+			default:
+				time.Sleep(time.Millisecond)
+			}
+		}
+	initializerSettled:
+		lateComp := s.hubMcpComp.Load()
+		stopServer()
+		select {
+		case err := <-serverDone:
+			if err != nil {
+				t.Fatalf("runActivatedGUIListener shutdown: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("runActivatedGUIListener did not stop")
+		}
+		if returnedBeforeProducerSettled {
+			t.Fatal("restart hub close returned before the initializer settled")
+		}
+		if lateComp != nil {
+			t.Fatalf("initializer published live component %p after restart hub close", lateComp)
+		}
+		select {
+		case <-producerStopped:
+		default:
+			t.Fatal("initializer component was not shut down by the lifecycle owner")
+		}
+	})
+
+	t.Run("restart-driver", func(t *testing.T) {
+		s := NewServer(Config{Port: 9125})
+		s.hubEndpointGateFn = func(*api.API) bool { return true }
+		restartStarted := make(chan struct{})
+		allowRestart := make(chan struct{})
+		replacementStopped := make(chan struct{})
+		var replacementStopOnce sync.Once
+		old := &HubListenerComponents{port: 19125}
+		old.alive.Store(true)
+		replacement := &HubListenerComponents{
+			port: 19125,
+			listenerCancel: func() {
+				replacementStopOnce.Do(func() { close(replacementStopped) })
+			},
+		}
+		replacement.alive.Store(true)
+		var startMu sync.Mutex
+		startCalls := 0
+		s.startHubMcpListenerFn = func(context.Context, bool, *api.API, startHubMcpListenerOptions) (*HubListenerComponents, error) {
+			startMu.Lock()
+			startCalls++
+			call := startCalls
+			startMu.Unlock()
+			if call == 1 {
+				return old, nil
+			}
+			close(restartStarted)
+			<-allowRestart // Deliberately ignore cancellation to engineer the join window.
+			return replacement, nil
+		}
+
+		serverCtx, stopServer := context.WithCancel(context.Background())
+		serverDone := make(chan error, 1)
+		go func() { serverDone <- s.runActivatedGUIListener(serverCtx, make(chan error)) }()
+		deadline := time.Now().Add(time.Second)
+		for s.hubMcpComp.Load() != old && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		if s.hubMcpComp.Load() != old {
+			stopServer()
+			t.Fatal("initial hub component was not published")
+		}
+		s.enqueueHubListenerRestart(hubListenerRestartRequest{cause: hubListenerRestartCauseUnresponsive})
+		select {
+		case <-restartStarted:
+		case <-time.After(time.Second):
+			stopServer()
+			t.Fatal("hub restart driver did not enter replacement start")
+		}
+
+		closeDone := make(chan struct{})
+		go func() {
+			s.closeOwnHubListenerForRestart(context.Background())
+			close(closeDone)
+		}()
+		returnedBeforeProducerSettled := false
+		select {
+		case <-closeDone:
+			returnedBeforeProducerSettled = true
+		case <-time.After(100 * time.Millisecond):
+		}
+		close(allowRestart)
+		select {
+		case <-closeDone:
+		case <-time.After(time.Second):
+			t.Fatal("restart hub close did not join the restart driver")
+		}
+
+		deadline = time.Now().Add(time.Second)
+		for s.hubMcpComp.Load() == nil && time.Now().Before(deadline) {
+			select {
+			case <-replacementStopped:
+				goto restartDriverSettled
+			default:
+				time.Sleep(time.Millisecond)
+			}
+		}
+	restartDriverSettled:
+		lateComp := s.hubMcpComp.Load()
+		stopServer()
+		select {
+		case err := <-serverDone:
+			if err != nil {
+				t.Fatalf("runActivatedGUIListener shutdown: %v", err)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("runActivatedGUIListener did not stop")
+		}
+		if returnedBeforeProducerSettled {
+			t.Fatal("restart hub close returned before the restart driver settled")
+		}
+		if lateComp != nil {
+			t.Fatalf("restart driver published live component %p after restart hub close", lateComp)
+		}
+		select {
+		case <-replacementStopped:
+		default:
+			t.Fatal("replacement component was not shut down by the lifecycle owner")
+		}
+	})
+}
+
+func TestRestartV3_HubProducerShutdownBoundedWhenProducerDoesNotReturn(t *testing.T) {
+	barrier := &hubProducerShutdownBarrier{}
+	producerCtx, began := barrier.begin(context.Background())
+	if !began {
+		t.Fatal("hub producer barrier did not begin")
+	}
+	producerStarted := make(chan struct{})
+	allowProducerReturn := make(chan struct{})
+	if !barrier.launch(func() {
+		close(producerStarted)
+		<-allowProducerReturn
+		_ = producerCtx.Err()
+	}) {
+		t.Fatal("hub producer was not admitted")
+	}
+	<-producerStarted
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	shutdownDone := make(chan struct{})
+	var slot atomic.Pointer[HubListenerComponents]
+	go func() {
+		barrier.shutdown(shutdownCtx, &slot)
+		close(shutdownDone)
+	}()
+
+	returnedWithinBound := false
+	select {
+	case <-shutdownDone:
+		returnedWithinBound = true
+	case <-time.After(250 * time.Millisecond):
+	}
+	close(allowProducerReturn)
+	if !returnedWithinBound {
+		<-shutdownDone
+		t.Fatal("hub producer shutdown ignored its bound while a producer was wedged")
+	}
+}
+
+func TestRestartV3_ConfirmRetriesConnectionRefusedUntilChildBinds(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	order := &phaseGOrder{}
+	lease := &phaseGLease{order: order}
+	child := &phaseGChildHandle{order: order, pid: 4241}
+	marker := &phaseGMarkerStore{}
+	listener := &phaseGListener{order: order}
+	ids := []string{"handoff-confirm-retry", "generation-confirm-retry"}
+	attempts := 0
+	deadlines := phaseGDeadlines(&now)
+	deadlines.Bind = 500 * time.Millisecond
+	coordinator, err := NewRestartCoordinator(RestartCoordinatorDependencies{
+		Context: context.Background(), StateDir: apitest.HardenedTempDir(t),
+		OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 19125, nil }, ParentPID: 1111,
+		Lease: lease, Listener: listener, FullHandler: http.NotFoundHandler(), MarkerStore: marker,
+		Deadlines: deadlines,
+		NewID:     func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+		NewNonce:  func() ([]byte, error) { return bytes.Repeat([]byte{0x70}, 32), nil },
+		Spawn:     func(SelfRestartHandoff) (RestartParentChild, error) { return child, nil },
+		Confirm: func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error {
+			attempts++
+			if attempts <= 3 {
+				return fmt.Errorf("probe restart standby: %w", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")})
+			}
+			return nil
+		},
+		CloseHub:  func(context.Context) {},
+		WaitGrace: func(context.Context, time.Duration) error { return nil },
+		Exit:      func() {},
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+
+	started, err := coordinator.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	started.AcknowledgeResponseFlushed()
+	result := <-started.Done
+	if result.Err != nil || !result.ParentLeaseReleased {
+		t.Fatalf("result = %+v, want confirmed handoff without rollback", result)
+	}
+	if attempts != 4 {
+		t.Fatalf("confirm attempts = %d, want 4 after three transient connection refusals", attempts)
+	}
+	if lease.releaseCnt != 1 || child.terminated != 0 || child.detached != 1 {
+		t.Fatalf("release=%d terminate=%d detach=%d, want 1/0/1", lease.releaseCnt, child.terminated, child.detached)
+	}
+}
+
+func TestRestartV3_SamePort_EnterGraceFailureRestoresLiveListenerWithoutRebind(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	order := &phaseGOrder{}
+	lease := &phaseGLease{order: order}
+	child := &phaseGChildHandle{order: order, pid: 4240}
+	listener := &phaseGListener{order: order, enterGraceErr: errors.New("grace admission failed")}
+	marker := &phaseGMarkerStore{}
+	ids := []string{"handoff-live-listener-rollback", "generation-live-listener-rollback"}
+	confirmCalls := 0
+	exits := 0
+	coordinator, err := NewRestartCoordinator(RestartCoordinatorDependencies{
+		Context: context.Background(), StateDir: apitest.HardenedTempDir(t),
+		OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 9125, nil }, ParentPID: 1111,
+		Lease: lease, Listener: listener, FullHandler: http.NotFoundHandler(), MarkerStore: marker,
+		Deadlines: phaseGDeadlines(&now),
+		NewID:     func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+		NewNonce:  func() ([]byte, error) { return bytes.Repeat([]byte{0x6f}, 32), nil },
+		Spawn:     func(SelfRestartHandoff) (RestartParentChild, error) { order.add("spawn"); return child, nil },
+		Confirm: func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error {
+			confirmCalls++
+			return nil
+		},
+		CloseHub: func(context.Context) {},
+		Exit:     func() { exits++ },
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+
+	started, err := coordinator.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	started.AcknowledgeResponseFlushed()
+	result := <-started.Done
+	if result.Err == nil || result.ParentLeaseReleased {
+		t.Fatalf("result = %+v, want proved pre-release rollback with retained lease", result)
+	}
+	if listener.restoredFull != 1 || listener.servedFull != 0 {
+		t.Fatalf("restore-full=%d serve-full=%d, want 1/0 for retained listener", listener.restoredFull, listener.servedFull)
+	}
+	if got := order.snapshot(); strings.Contains(","+strings.Join(got, ",")+",", ",bind-for-recovery,") {
+		t.Fatalf("rollback order = %v, BindForRecovery must not run while original listener is live", got)
+	}
+	if lease.releaseCnt != 0 || lease.reacquires != 0 || exits != 0 || confirmCalls != 0 {
+		t.Fatalf("release=%d reacquire=%d exits=%d confirm=%d, want all zero", lease.releaseCnt, lease.reacquires, exits, confirmCalls)
+	}
+	if marker.record != nil || marker.clears != 1 || child.terminated != 1 || child.detached != 0 {
+		t.Fatalf("marker=%+v clears=%d terminate=%d detach=%d, want nil/1/1/0", marker.record, marker.clears, child.terminated, child.detached)
+	}
+}
+
+func TestRestartV3_SamePort_CloseTimeoutAfterPhysicalCloseRebindsForRollback(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	order := &phaseGOrder{}
+	lease := &phaseGLease{order: order}
+	child := &phaseGChildHandle{order: order, pid: 4246}
+	listener := &phaseGListener{
+		order:    order,
+		closeErr: phaseGPhysicalCloseWaitError{err: context.DeadlineExceeded},
+		rebound:  phaseGNetListener{},
+	}
+	marker := &phaseGMarkerStore{}
+	ids := []string{"handoff-close-timeout", "generation-close-timeout"}
+	exits := 0
+	coordinator, err := NewRestartCoordinator(RestartCoordinatorDependencies{
+		Context: context.Background(), StateDir: apitest.HardenedTempDir(t),
+		OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 9125, nil }, ParentPID: 1111,
+		Lease: lease, Listener: listener, FullHandler: http.NotFoundHandler(), MarkerStore: marker,
+		Deadlines: phaseGDeadlines(&now),
+		NewID:     func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+		NewNonce:  func() ([]byte, error) { return bytes.Repeat([]byte{0x71}, 32), nil },
+		Spawn:     func(SelfRestartHandoff) (RestartParentChild, error) { return child, nil },
+		Confirm: func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error {
+			return errors.New("confirm must not run after close timeout")
+		},
+		CloseHub: func(context.Context) {},
+		Exit:     func() { exits++ },
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+
+	started, err := coordinator.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	result := <-started.Done
+	if result.Err == nil || result.ParentLeaseReleased {
+		t.Fatalf("result = %+v, want proved rollback after physical close timeout", result)
+	}
+	if listener.servedFull != 1 || listener.restoredFull != 0 {
+		t.Fatalf("serve-full=%d restore-full=%d, want recovery rebind 1/0", listener.servedFull, listener.restoredFull)
+	}
+	if child.terminated != 1 || lease.releaseCnt != 0 || exits != 0 || marker.record != nil || marker.clears != 1 {
+		t.Fatalf("terminate=%d release=%d exits=%d marker=%+v clears=%d", child.terminated, lease.releaseCnt, exits, marker.record, marker.clears)
+	}
+}
+
+func TestRestartV3_NoncePathIsGenerationBoundAndStaleGenerationCannotConsumeNext(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	stateDir := apitest.HardenedTempDir(t)
+	order := &phaseGOrder{}
+	ids := []string{"handoff-a", "generation-a", "handoff-b", "generation-b"}
+	marker := &phaseGMarkerStore{}
+	var handoffs []SelfRestartHandoff
+	coordinator, err := NewRestartCoordinator(RestartCoordinatorDependencies{
+		Context: context.Background(), StateDir: stateDir,
+		OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 19125, nil }, ParentPID: os.Getpid(),
+		Lease: &phaseGLease{order: order}, Listener: &phaseGListener{order: order}, FullHandler: http.NotFoundHandler(), MarkerStore: marker,
+		Deadlines: phaseGDeadlines(&now),
+		NewID:     func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+		NewNonce:  func() ([]byte, error) { return bytes.Repeat([]byte{byte(len(handoffs) + 1)}, 32), nil },
+		Spawn: func(handoff SelfRestartHandoff) (RestartParentChild, error) {
+			handoffs = append(handoffs, handoff)
+			return nil, errors.New("synthetic spawn failure")
+		},
+		Confirm:  func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error { return nil },
+		CloseHub: func(context.Context) {},
+		Exit:     func() {},
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+	for generation := 0; generation < 2; generation++ {
+		if _, err := coordinator.Start(); err == nil || !strings.Contains(err.Error(), "synthetic spawn failure") {
+			t.Fatalf("generation %d Start error = %v, want synthetic spawn failure", generation, err)
+		}
+	}
+	if len(handoffs) != 2 {
+		t.Fatalf("captured handoffs = %d, want 2", len(handoffs))
+	}
+	if handoffs[0].NoncePath == handoffs[1].NoncePath {
+		t.Errorf("generation A and B nonce paths are both %q; want distinct generation-bound leaves", handoffs[0].NoncePath)
+	}
+
+	staleNonce := bytes.Repeat([]byte{0xa1}, authenticatedReadinessNonceBytes)
+	if err := api.WriteStateFileBytesAtomic(handoffs[0].NoncePath, staleNonce); err != nil {
+		t.Fatalf("write stale generation-A nonce: %v", err)
+	}
+	staleForB := handoffs[1]
+	staleForB.NoncePath = handoffs[0].NoncePath
+	raw, err := EncodeSelfRestartHandoff(staleForB)
+	if err != nil {
+		t.Fatalf("EncodeSelfRestartHandoff: %v", err)
+	}
+	child, consumeErr := NewSpawnedGUIChildFromEnvironment(raw, os.Getpid(), stateDir)
+	if child != nil {
+		child.Close()
+	}
+	if consumeErr == nil {
+		t.Error("generation B consumed generation A's stale nonce leaf; want canonical generation mismatch")
+	}
+	got, readErr := os.ReadFile(handoffs[0].NoncePath)
+	if readErr != nil || !bytes.Equal(got, staleNonce) {
+		t.Fatalf("stale generation-A nonce was consumed or altered: bytes=%x err=%v", got, readErr)
+	}
+}
+
+func TestRestartV3_BeginSweepsStaleGenerationNonceAndLock(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	stateDir := apitest.HardenedTempDir(t)
+	staleNoncePath := restartNoncePath(stateDir, "stale-generation")
+	if err := api.WriteStateFileBytesAtomic(staleNoncePath, bytes.Repeat([]byte{0xa5}, authenticatedReadinessNonceBytes)); err != nil {
+		t.Fatalf("write stale nonce generation: %v", err)
+	}
+	staleLockPath := staleNoncePath + ".lock"
+	if _, err := os.Stat(staleNoncePath); err != nil {
+		t.Fatalf("stale nonce precondition: %v", err)
+	}
+	if _, err := os.Stat(staleLockPath); err != nil {
+		t.Fatalf("stale lock precondition: %v", err)
+	}
+
+	order := &phaseGOrder{}
+	ids := []string{"handoff-sweep", "generation-sweep"}
+	coordinator, err := NewRestartCoordinator(RestartCoordinatorDependencies{
+		Context: context.Background(), StateDir: stateDir,
+		OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 19125, nil }, ParentPID: 1111,
+		Lease: &phaseGLease{order: order}, Listener: &phaseGListener{order: order}, FullHandler: http.NotFoundHandler(), MarkerStore: &phaseGMarkerStore{},
+		Deadlines: phaseGDeadlines(&now),
+		NewID:     func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+		NewNonce:  func() ([]byte, error) { return bytes.Repeat([]byte{0xa6}, authenticatedReadinessNonceBytes), nil },
+		Spawn: func(SelfRestartHandoff) (RestartParentChild, error) {
+			return nil, errors.New("synthetic spawn failure after sweep")
+		},
+		Confirm:  func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error { return nil },
+		CloseHub: func(context.Context) {},
+		Exit:     func() {},
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+	if _, err := coordinator.Start(); err == nil || !strings.Contains(err.Error(), "synthetic spawn failure after sweep") {
+		t.Fatalf("Start error = %v, want post-sweep synthetic spawn failure", err)
+	}
+	for _, path := range []string{staleNoncePath, staleLockPath} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stale generation residue %q survived Begin: %v", path, err)
+		}
+	}
+}
+
+func TestRestartV3_PostBeginCleanupFailureTerminalizesMarkerBeforeRunReset(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	order := &phaseGOrder{}
+	marker := &phaseGMarkerStore{clearErr: errors.New("synthetic marker removal failure")}
+	ids := []string{"handoff-cleanup", "generation-cleanup"}
+	coordinator, err := NewRestartCoordinator(RestartCoordinatorDependencies{
+		Context: context.Background(), StateDir: apitest.HardenedTempDir(t),
+		OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 19125, nil }, ParentPID: 1111,
+		Lease: &phaseGLease{order: order}, Listener: &phaseGListener{order: order}, FullHandler: http.NotFoundHandler(), MarkerStore: marker,
+		Deadlines: phaseGDeadlines(&now),
+		NewID:     func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+		NewNonce:  func() ([]byte, error) { return nil, errors.New("synthetic nonce creation failure") },
+		Spawn:     func(SelfRestartHandoff) (RestartParentChild, error) { return nil, errors.New("spawn must not run") },
+		Confirm:   func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error { return nil },
+		CloseHub:  func(context.Context) {},
+		Exit:      func() {},
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+
+	if _, err := coordinator.Start(); err == nil || !strings.Contains(err.Error(), "synthetic marker removal failure") {
+		t.Fatalf("Start error = %v, want surfaced marker cleanup failure", err)
+	}
+	if marker.record == nil || marker.record.Generation != "generation-cleanup" || marker.record.Phase != HandoffPhaseInterrupted || marker.record.Phase.nonterminal() {
+		t.Fatalf("marker after cleanup failure = %+v, want terminal interrupted generation", marker.record)
+	}
+	if marker.interrupts != 1 || marker.record.ReasonCode != "gui-restart-pre-accept-cleanup-failed" {
+		t.Fatalf("interrupts=%d marker=%+v, want one pre-accept cleanup terminalization", marker.interrupts, marker.record)
+	}
+	if _, err := coordinator.Start(); !errors.Is(err, ErrRestartAlreadyInProgress) {
+		t.Fatalf("second Start error = %v, want in-memory guard retained after unproved residue cleanup", err)
+	}
+}
+
+func TestRestartV3_PostBeginMarkerClearWithNonceCleanupFailureDoesNotWedgeRun(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	order := &phaseGOrder{}
+	marker := &phaseGMarkerStore{}
+	ids := []string{"handoff-cleanup-a", "generation-cleanup-a", "handoff-cleanup-b", "generation-cleanup-b"}
+	removeErr := errors.New("synthetic nonce removal failure")
+	coordinator, err := NewRestartCoordinator(RestartCoordinatorDependencies{
+		Context: context.Background(), StateDir: apitest.HardenedTempDir(t),
+		OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 19125, nil }, ParentPID: 1111,
+		Lease: &phaseGLease{order: order}, Listener: &phaseGListener{order: order}, FullHandler: http.NotFoundHandler(), MarkerStore: marker,
+		Deadlines:   phaseGDeadlines(&now),
+		NewID:       func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+		NewNonce:    func() ([]byte, error) { return bytes.Repeat([]byte{0x74}, authenticatedReadinessNonceBytes), nil },
+		RemoveNonce: func(string) error { return removeErr },
+		Spawn: func(SelfRestartHandoff) (RestartParentChild, error) {
+			return nil, errors.New("synthetic spawn failure")
+		},
+		Confirm:  func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error { return nil },
+		CloseHub: func(context.Context) {},
+		Exit:     func() {},
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+	if _, err := coordinator.Start(); err == nil || !errors.Is(err, removeErr) {
+		t.Fatalf("first Start error = %v, want nonce cleanup failure", err)
+	}
+	if marker.record != nil || marker.interrupts != 0 {
+		t.Fatalf("marker after proved clear = %+v interrupts=%d, want no retained marker", marker.record, marker.interrupts)
+	}
+	if _, err := coordinator.Start(); errors.Is(err, ErrRestartAlreadyInProgress) {
+		t.Fatalf("second Start remained permanently wedged: %v", err)
+	}
+}
+
+func TestRestartV3_PortChange_ParentClosesHubBeforeFlockReleaseThenChildActivatesImmediately(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	stateDir := apitest.HardenedTempDir(t)
+	order := &phaseGOrder{}
+	child := &phaseGChildHandle{order: order, pid: 4242}
+	lease := &phaseGLease{order: order}
+	lease.onRelease = func() { order.add("child-activates") }
+	ids := []string{"handoff-g1", "generation-g1"}
+	coordinator, err := NewRestartCoordinator(RestartCoordinatorDependencies{
+		Context:     context.Background(),
+		StateDir:    stateDir,
+		OldPort:     func() int { return 9125 },
+		TargetPort:  func(int) (int, error) { return 19125, nil },
+		ParentPID:   1111,
+		Lease:       lease,
+		Listener:    &phaseGListener{order: order},
+		FullHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+		MarkerStore: NewHandoffMarkerStore(stateDir, RestartDeadlines{
+			Now: phaseGNow(&now), RecordLock: time.Second, Freshness: 3 * time.Minute,
+			Reservation: 10 * time.Second, Proof: 10 * time.Second, Bind: 2 * time.Second,
+			Quiesce: 5 * time.Second, Rollback: 5 * time.Second, Grace: 5 * time.Second,
+		}),
+		Deadlines: RestartDeadlines{
+			Now: phaseGNow(&now), RecordLock: time.Second, Freshness: 3 * time.Minute,
+			Reservation: 10 * time.Second, Proof: 10 * time.Second, Bind: 2 * time.Second,
+			Quiesce: 5 * time.Second, Rollback: 5 * time.Second, Grace: 5 * time.Second,
+		},
+		NewID: func() (string, error) {
+			id := ids[0]
+			ids = ids[1:]
+			return id, nil
+		},
+		NewNonce: func() ([]byte, error) { return bytes.Repeat([]byte{0x71}, 32), nil },
+		Spawn: func(handoff SelfRestartHandoff) (RestartParentChild, error) {
+			order.add("spawn")
+			if handoff.TargetPort != 19125 || handoff.OldPort != 9125 {
+				t.Fatalf("spawn handoff ports = %d->%d, want 9125->19125", handoff.OldPort, handoff.TargetPort)
+			}
+			return child, nil
+		},
+		Confirm: func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error {
+			order.add("confirm-authenticated-standby")
+			return nil
+		},
+		Events: &phaseFEvents{},
+		CloseHub: func(context.Context) {
+			order.add("hub-close")
+		},
+		WaitGrace: func(context.Context, time.Duration) error {
+			order.add("grace-finished")
+			return nil
+		},
+		Exit: func() { order.add("process-exit") },
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+
+	started, err := coordinator.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	started.AcknowledgeResponseFlushed()
+	result := <-started.Done
+	if result.Err != nil || !result.ParentLeaseReleased {
+		t.Fatalf("coordinator result = %+v, want successful released handoff", result)
+	}
+	got := order.snapshot()
+	want := []string{
+		"spawn", "confirm-authenticated-standby", "enter-grace", "hub-close",
+		"flock-release", "child-activates", "child-detach", "grace-finished",
+		"close-gui-listener", "process-exit",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("handoff order = %v, want %v", got, want)
+	}
+	if lease.releaseCnt != 1 || child.detached != 1 || child.terminated != 0 {
+		t.Fatalf("release=%d detach=%d terminate=%d, want 1/1/0", lease.releaseCnt, child.detached, child.terminated)
+	}
+}
+
+func TestRestartV3_SamePort_PreReleaseRollbackRetainsLeaseAndRebindsWithoutReacquire(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	order := &phaseGOrder{}
+	lease := &phaseGLease{order: order}
+	child := &phaseGChildHandle{order: order, pid: 4243}
+	listener := &phaseGListener{order: order, rebound: phaseGNetListener{}}
+	marker := &phaseGMarkerStore{reserveErr: errors.New("reservation failed")}
+	exits := 0
+	ids := []string{"handoff-g2", "generation-g2"}
+	coordinator, err := NewRestartCoordinator(RestartCoordinatorDependencies{
+		Context: context.Background(), StateDir: apitest.HardenedTempDir(t),
+		OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 9125, nil }, ParentPID: 1111,
+		Lease: lease, Listener: listener, FullHandler: http.NotFoundHandler(), MarkerStore: marker,
+		Deadlines: phaseGDeadlines(&now),
+		NewID:     func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+		NewNonce:  func() ([]byte, error) { return bytes.Repeat([]byte{0x72}, 32), nil },
+		Spawn:     func(SelfRestartHandoff) (RestartParentChild, error) { order.add("spawn"); return child, nil },
+		Confirm: func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error {
+			order.add("confirm-authenticated-standby")
+			return nil
+		},
+		CloseHub: func(context.Context) { order.add("hub-close") },
+		Exit:     func() { exits++ },
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+	started, err := coordinator.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	started.AcknowledgeResponseFlushed()
+	result := <-started.Done
+	if result.Err == nil || result.ParentLeaseReleased {
+		t.Fatalf("result = %+v, want pre-release rollback error with retained lease", result)
+	}
+	if lease.releaseCnt != 0 || lease.reacquires != 0 {
+		t.Fatalf("release=%d reacquire=%d, want 0/0", lease.releaseCnt, lease.reacquires)
+	}
+	if child.terminated != 1 || listener.servedFull != 1 || marker.clears != 1 || marker.record != nil {
+		t.Fatalf("terminate=%d served-full=%d clears=%d marker=%+v", child.terminated, listener.servedFull, marker.clears, marker.record)
+	}
+	if exits != 0 {
+		t.Fatalf("process exits = %d, want 0 after proved rollback", exits)
+	}
+	want := []string{"spawn", "enter-grace", "close-gui-listener", "confirm-authenticated-standby", "child-terminate", "bind-for-recovery", "serve-full"}
+	if got := order.snapshot(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("rollback order = %v, want %v", got, want)
+	}
+}
+
+func TestRestartV3_SamePort_TerminalConfirmFailureTerminatesUnauthenticatedChildBeforeRecoveryBind(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	order := &phaseGOrder{}
+	lease := &phaseGLease{order: order}
+	childAlive := true
+	child := &phaseGChildHandle{order: order, pid: 4247}
+	listener := &phaseGListener{order: order}
+	child.onTerminate = func() { childAlive = false }
+	listener.bindForRecovery = func(context.Context, int) (net.Listener, error) {
+		if childAlive {
+			return nil, errors.New("standby child still owns old port")
+		}
+		return phaseGNetListener{}, nil
+	}
+	marker := &phaseGMarkerStore{}
+	ids := []string{"handoff-terminal-confirm", "generation-terminal-confirm"}
+	exits := 0
+	coordinator, err := NewRestartCoordinator(RestartCoordinatorDependencies{
+		Context: context.Background(), StateDir: apitest.HardenedTempDir(t),
+		OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 9125, nil }, ParentPID: 1111,
+		Lease: lease, Listener: listener, FullHandler: http.NotFoundHandler(), MarkerStore: marker,
+		Deadlines: phaseGDeadlines(&now),
+		NewID:     func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+		NewNonce:  func() ([]byte, error) { return bytes.Repeat([]byte{0x75}, authenticatedReadinessNonceBytes), nil },
+		Spawn:     func(SelfRestartHandoff) (RestartParentChild, error) { return child, nil },
+		Confirm: func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error {
+			return errors.New("terminal proof wire mismatch")
+		},
+		CloseHub: func(context.Context) {},
+		Exit:     func() { exits++ },
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+	started, err := coordinator.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	result := <-started.Done
+	if result.Err == nil || result.ParentLeaseReleased {
+		t.Fatalf("result = %+v, want proved pre-release rollback", result)
+	}
+	if child.terminated != 1 || childAlive || listener.servedFull != 1 || listener.restoredFull != 0 {
+		t.Fatalf("terminate=%d childAlive=%v serve-full=%d restore-full=%d", child.terminated, childAlive, listener.servedFull, listener.restoredFull)
+	}
+	if lease.releaseCnt != 0 || exits != 0 || marker.record != nil || marker.clears != 1 {
+		t.Fatalf("release=%d exits=%d marker=%+v clears=%d", lease.releaseCnt, exits, marker.record, marker.clears)
+	}
+}
+
+func TestRestartV3_PreReleaseRollbackFailureInterruptsReleasesLeaseAndExits(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		interruptErr  error
+		wantReason    string
+		wantInterrupt int
+	}{
+		{name: "interrupted marker written", wantReason: "gui-restart-pre-release-rollback-failed", wantInterrupt: 1},
+		{name: "interrupted marker write fails", interruptErr: errors.New("marker write failed"), wantReason: "gui-restart-interrupted-marker-write-failed", wantInterrupt: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+			order := &phaseGOrder{}
+			lease := &phaseGLease{order: order}
+			child := &phaseGChildHandle{order: order, pid: 4244}
+			listener := &phaseGListener{order: order, restoreErr: errors.New("full handler restoration failed")}
+			marker := &phaseGMarkerStore{reserveErr: errors.New("reservation failed"), interruptErr: tc.interruptErr}
+			events := &phaseFEvents{}
+			exits := 0
+			ids := []string{"handoff-g3", "generation-g3"}
+			coordinator, err := NewRestartCoordinator(RestartCoordinatorDependencies{
+				Context: context.Background(), StateDir: apitest.HardenedTempDir(t),
+				OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 19125, nil }, ParentPID: 1111,
+				Lease: lease, Listener: listener, FullHandler: http.NotFoundHandler(), MarkerStore: marker,
+				Deadlines: phaseGDeadlines(&now),
+				NewID:     func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+				NewNonce:  func() ([]byte, error) { return bytes.Repeat([]byte{0x73}, 32), nil },
+				Spawn:     func(SelfRestartHandoff) (RestartParentChild, error) { order.add("spawn"); return child, nil },
+				Confirm:   func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error { return nil },
+				Events:    events,
+				CloseHub:  func(context.Context) { order.add("hub-close") },
+				Exit:      func() { exits++ },
+			})
+			if err != nil {
+				t.Fatalf("NewRestartCoordinator: %v", err)
+			}
+			started, err := coordinator.Start()
+			if err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			started.AcknowledgeResponseFlushed()
+			result := <-started.Done
+			if result.Err == nil || !result.ParentLeaseReleased {
+				t.Fatalf("result = %+v, want terminal rollback failure", result)
+			}
+			if lease.releaseCnt != 1 || child.terminated != 1 || child.detached != 1 || exits != 1 {
+				t.Fatalf("release=%d terminate=%d detach=%d exits=%d, want 1/1/1/1", lease.releaseCnt, child.terminated, child.detached, exits)
+			}
+			if marker.interrupts != tc.wantInterrupt {
+				t.Fatalf("interrupt writes = %d, want %d", marker.interrupts, tc.wantInterrupt)
+			}
+			if tc.interruptErr == nil && (marker.record == nil || marker.record.Phase != HandoffPhaseInterrupted) {
+				t.Fatalf("marker = %+v, want interrupted", marker.record)
+			}
+			foundReason := false
+			for _, event := range events.snapshot() {
+				if event.Body["reason_code"] == tc.wantReason {
+					foundReason = true
+				}
+			}
+			if !foundReason {
+				t.Fatalf("events = %+v, want reason %q", events.snapshot(), tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestRestartV3_ParentPerformsNoProtocolWriteWaitTerminateOrReclaimAfterRelease(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	order := &phaseGOrder{}
+	released := false
+	lease := &phaseGLease{order: order, onRelease: func() { released = true }}
+	child := &phaseGChildHandle{order: order, pid: 4245}
+	listener := &phaseGListener{order: order}
+	marker := &phaseGMarkerStore{}
+	postReleaseMarkerWrites := 0
+	guardedMarker := &phaseGPostReleaseMarkerStore{
+		inner:             marker,
+		released:          func() bool { return released },
+		postReleaseWrites: &postReleaseMarkerWrites,
+	}
+	postReleaseWaits := 0
+	postReleaseBinds := 0
+	ids := []string{"handoff-g4", "generation-g4"}
+	coordinator, err := NewRestartCoordinator(RestartCoordinatorDependencies{
+		Context: context.Background(), StateDir: apitest.HardenedTempDir(t),
+		OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 19125, nil }, ParentPID: 1111,
+		Lease: lease, Listener: &phaseGPostReleaseListener{
+			phaseGListener:   listener,
+			released:         func() bool { return released },
+			postReleaseBinds: &postReleaseBinds,
+		}, FullHandler: http.NotFoundHandler(), MarkerStore: guardedMarker,
+		Deadlines: phaseGDeadlines(&now),
+		NewID:     func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+		NewNonce:  func() ([]byte, error) { return bytes.Repeat([]byte{0x74}, 32), nil },
+		Spawn:     func(SelfRestartHandoff) (RestartParentChild, error) { return child, nil },
+		Confirm: func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error {
+			if released {
+				postReleaseWaits++
+			}
+			return nil
+		},
+		CloseHub:  func(context.Context) {},
+		WaitGrace: func(context.Context, time.Duration) error { return nil },
+		Exit:      func() {},
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+	started, err := coordinator.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	started.AcknowledgeResponseFlushed()
+	result := <-started.Done
+	if result.Err != nil || !result.ParentLeaseReleased {
+		t.Fatalf("result = %+v, want successful handoff", result)
+	}
+	if postReleaseMarkerWrites != 0 || postReleaseWaits != 0 || postReleaseBinds != 0 || child.terminated != 0 || lease.reacquires != 0 {
+		t.Fatalf("post-release marker=%d wait=%d bind=%d terminate=%d reacquire=%d, want all zero",
+			postReleaseMarkerWrites, postReleaseWaits, postReleaseBinds, child.terminated, lease.reacquires)
+	}
+	if lease.releaseCnt != 1 || child.detached != 1 {
+		t.Fatalf("release=%d detach=%d, want exactly 1/1", lease.releaseCnt, child.detached)
+	}
+}
+
+type phaseGPostReleaseMarkerStore struct {
+	inner             RestartCoordinatorMarkerStore
+	released          func() bool
+	postReleaseWrites *int
+}
+
+func (s *phaseGPostReleaseMarkerStore) count() {
+	if s.released() {
+		*s.postReleaseWrites++
+	}
+}
+
+func (s *phaseGPostReleaseMarkerStore) Begin(begin HandoffBegin) (*HandoffMarkerRecord, error) {
+	s.count()
+	return s.inner.Begin(begin)
+}
+
+func (s *phaseGPostReleaseMarkerStore) Reserve(generation string, sequence uint64, expires time.Time, hash string, pid int) (*HandoffMarkerRecord, error) {
+	s.count()
+	return s.inner.Reserve(generation, sequence, expires, hash, pid)
+}
+
+func (s *phaseGPostReleaseMarkerStore) Interrupt(generation, reason, action string) (*HandoffMarkerRecord, error) {
+	s.count()
+	return s.inner.Interrupt(generation, reason, action)
+}
+
+func (s *phaseGPostReleaseMarkerStore) ClearAfterProvedPreReleaseRollback(generation string) error {
+	s.count()
+	return s.inner.ClearAfterProvedPreReleaseRollback(generation)
+}
+
+type phaseGPostReleaseListener struct {
+	*phaseGListener
+	released         func() bool
+	postReleaseBinds *int
+}
+
+func (l *phaseGPostReleaseListener) BindForRecovery(ctx context.Context, port int) (net.Listener, error) {
+	if l.released() {
+		*l.postReleaseBinds++
+	}
+	return l.phaseGListener.BindForRecovery(ctx, port)
+}
+
+func TestRestartV3_GraceAllowlistRedirectAndMutatorRejection(t *testing.T) {
+	eventsCalls := 0
+	handler := newRestartGraceHandler("handoff-g6", 19125, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		eventsCalls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	eventsReq := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	eventsRes := httptest.NewRecorder()
+	handler.ServeHTTP(eventsRes, eventsReq)
+	if eventsRes.Code != http.StatusNoContent || eventsCalls != 1 {
+		t.Fatalf("events status=%d calls=%d, want 204/1", eventsRes.Code, eventsCalls)
+	}
+
+	preRelease := httptest.NewRecorder()
+	handler.ServeHTTP(preRelease, httptest.NewRequest(http.MethodGet, "/api/gui/restart/redirect?handoff_id=handoff-g6&target_url=https://attacker.invalid/", nil))
+	if preRelease.Code != http.StatusAccepted || !strings.Contains(preRelease.Body.String(), `"released":false`) {
+		t.Fatalf("pre-release redirect = %d %s, want 202 released:false", preRelease.Code, preRelease.Body.String())
+	}
+
+	handler.released.Store(true)
+	postRelease := httptest.NewRecorder()
+	handler.ServeHTTP(postRelease, httptest.NewRequest(http.MethodGet, "/api/gui/restart/redirect?handoff_id=handoff-g6&target_url=https://attacker.invalid/", nil))
+	if postRelease.Code != http.StatusOK || !strings.Contains(postRelease.Body.String(), `"target_url":"http://127.0.0.1:19125/"`) || strings.Contains(postRelease.Body.String(), "attacker.invalid") {
+		t.Fatalf("post-release redirect = %d %s, want trusted loopback target only", postRelease.Code, postRelease.Body.String())
+	}
+
+	for _, request := range []*http.Request{
+		httptest.NewRequest(http.MethodPost, "/api/events", strings.NewReader("{}")),
+		httptest.NewRequest(http.MethodGet, "/api/health", nil),
+		httptest.NewRequest(http.MethodGet, "/api/gui/restart/redirect?handoff_id=wrong", nil),
+	} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "GUI_RESTART_IN_PROGRESS") {
+			t.Fatalf("%s %s = %d %q, want 503 GUI_RESTART_IN_PROGRESS", request.Method, request.URL, response.Code, response.Body.String())
+		}
+	}
+}
 
 type phaseFLease struct {
 	mu       sync.Mutex
@@ -197,7 +1342,7 @@ func phaseFChild(stateDir string) *SpawnedGUIChild {
 			OldPort:    9125,
 			TargetPort: 19125,
 			ParentPID:  1111,
-			NoncePath:  filepath.Join(stateDir, "gui-restart-nonce"),
+			NoncePath:  restartNoncePath(stateDir, "generation-f"),
 		},
 		PID:         4242,
 		parentDeath: newPhaseFParentDeathWatcher(),
@@ -254,7 +1399,7 @@ func phaseFDependencies(now *time.Time, marker *phaseFMarkerStore, lease *phaseF
 
 func TestRestartV3_NonceRetainedHandleDefeatsPIDReuseAndNeverUsesEnvironment(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
-	noncePath := filepath.Join(stateDir, "gui-restart-nonce")
+	noncePath := restartNoncePath(stateDir, "generation-f")
 	nonce := bytes.Repeat([]byte{0x7c}, 32)
 	if err := api.WriteStateFileBytesAtomic(noncePath, nonce); err != nil {
 		t.Fatalf("write hardened nonce file: %v", err)
@@ -309,7 +1454,7 @@ func TestRestartV3_NonceRetainedHandleDefeatsPIDReuseAndNeverUsesEnvironment(t *
 
 func TestRestartV3_MalformedNonceIsUnlinkedOnConsumeFailure(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
-	noncePath := filepath.Join(stateDir, "gui-restart-nonce")
+	noncePath := restartNoncePath(stateDir, "generation-f")
 	if err := api.WriteStateFileBytesAtomic(noncePath, []byte("short")); err != nil {
 		t.Fatalf("write malformed nonce file: %v", err)
 	}
@@ -332,7 +1477,7 @@ func TestRestartV3_MalformedNonceIsUnlinkedOnConsumeFailure(t *testing.T) {
 func TestRestartV3_RejectsNonceOutsideCanonicalStateDirBeforeConsume(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	foreignDir := apitest.HardenedTempDir(t)
-	foreignNoncePath := filepath.Join(foreignDir, "gui-restart-nonce")
+	foreignNoncePath := restartNoncePath(foreignDir, "generation-f")
 	if err := api.WriteStateFileBytesAtomic(foreignNoncePath, bytes.Repeat([]byte{0x65}, 32)); err != nil {
 		t.Fatalf("write foreign nonce file: %v", err)
 	}
@@ -358,7 +1503,7 @@ func TestRestartV3_SpawnedChildAcquirePassesDesignatedNonce(t *testing.T) {
 	deadlines.Now = func() time.Time { return now }
 	stateDir := apitest.HardenedTempDir(t)
 	nonce := bytes.Repeat([]byte{0x4d}, 32)
-	noncePath := filepath.Join(stateDir, "gui-restart-nonce")
+	noncePath := restartNoncePath(stateDir, "generation-f")
 	if err := api.WriteStateFileBytesAtomic(noncePath, nonce); err != nil {
 		t.Fatalf("write hardened nonce file: %v", err)
 	}

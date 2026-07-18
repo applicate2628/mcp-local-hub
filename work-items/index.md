@@ -11,7 +11,7 @@
 
 | Item | Status |
 |---|---|
-| [2026-07-16-productization-gui-solidify](active/2026-07-16-productization-gui-solidify/status.md) | Item 3 Unit B gated group: Phases D/E/F/I committed (default-OFF, not deployed); commission-fixed + Sol-confirmed; Phase G (parent coordinator) next; PR #561 canonical fix (Option B) queued off-master |
+| [2026-07-16-productization-gui-solidify](active/2026-07-16-productization-gui-solidify/status.md) | Item 3 Unit B gated group: Phases D/E/F/I committed (default-OFF, not deployed); Option B/#562 integrated; Phase G parent coordinator implementation in progress at documentation-amended `beadf474` |
 
 ## Reaper kill-authority hardening — COMPLETE (2026-07-08, all bot-PASS + deployed)
 

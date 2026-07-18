@@ -9,8 +9,8 @@ import (
 	"mcp-local-hub/internal/secrets"
 )
 
-// GUIRestartNonceFileLeaf is the single state-file leaf authorized for the
-// restart-child readiness credential.
+// GUIRestartNonceFileLeaf is the prefix of generation-bound state-file leaves
+// authorized for restart-child readiness credentials.
 const GUIRestartNonceFileLeaf = "gui-restart-nonce"
 
 func init() {
@@ -82,6 +82,9 @@ func isSecretBearingStateFilePath(path string) bool {
 		GUIRestartNonceFileLeaf,
 		"secrets.age",
 		".age-key":
+		return true
+	}
+	if strings.HasPrefix(base, GUIRestartNonceFileLeaf+"-") {
 		return true
 	}
 	// Adopt pre-adopt provenance snapshots (<state-dir>/adopt-provenance/<manifest>/
