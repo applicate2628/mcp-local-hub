@@ -22,7 +22,13 @@
 // `--reset-port` (ResetHubPort) clears Port WITHOUT touching
 // instance_id. The recovery workflow for a pre-bind credential-leak
 // is `--reset-port` + `regenerate-token` + `regenerate-instance-id`
-// + `mcphub install <client>` per the spec's burn-down sequence.
+// + `mcphub install --reconcile-hub-mode` per the spec's burn-down
+// sequence. The closing `--reconcile-hub-mode` step is load-bearing:
+// it rewrites every gated client's endpoint to the new InstanceID AND
+// clears the durable `reconcile_pending` marker a rotation sets (see
+// ClearHubReconcilePendingLocked); ending on a per-client
+// `mcphub install <client>` instead would leave `reconcile_pending`
+// true forever and the needs-reconcile badge stuck on.
 //
 // State-mutating paths serialize on hub-mcp.lock via acquireHubMcpLock.
 //
@@ -57,10 +63,11 @@ var ErrHubPortResetBlocked = errors.New("hub port reset blocked by dependencies"
 // the long-lived identity; StartedAt is operational metadata for
 // `mcphub hub-mcp status`.
 type HubEndpoint struct {
-	Port       int    `json:"port"`
-	InstanceID string `json:"instance_id"`
-	PID        int    `json:"pid"`
-	StartedAt  string `json:"started_at"` // RFC3339Nano UTC
+	Port             int    `json:"port"`
+	InstanceID       string `json:"instance_id"`
+	PID              int    `json:"pid"`
+	StartedAt        string `json:"started_at"` // RFC3339Nano UTC
+	ReconcilePending bool   `json:"reconcile_pending,omitempty"`
 }
 
 // EnsureHubEndpoint loads or generates hub-mcp.endpoint.json under
@@ -213,6 +220,10 @@ func rotateHubInstanceIDLocked(ctx context.Context) (HubEndpoint, error) {
 	}
 	ep.InstanceID = fresh
 	ep.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	// InstanceID and the durable reconcile requirement share one endpoint-record
+	// write, so a shutdown immediately after persistence cannot lose the operator
+	// signal while leaving clients on the old identity.
+	ep.ReconcilePending = true
 	// PID refresh on rotate (codex bot r2 P2 closure): rotation is
 	// typically invoked from the `mcphub hub-mcp regenerate-instance-id`
 	// CLI process, which has a DIFFERENT PID from the running hub
@@ -233,6 +244,36 @@ func rotateHubInstanceIDLocked(ctx context.Context) (HubEndpoint, error) {
 		return HubEndpoint{}, werr
 	}
 	return ep, nil
+}
+
+// ClearHubReconcilePendingLocked clears the durable client-reconcile marker in
+// hub-mcp.endpoint.json. The caller MUST already hold hub-mcp.lock; the install
+// reconciler keeps that lock from its endpoint/token snapshot through client
+// config application and this final acknowledgement, preventing a concurrent
+// rotation from being cleared by an older reconcile transaction.
+//
+// A missing endpoint is a no-op: gate-OFF reconcile is valid on a first-run
+// system where no hub endpoint has ever been created.
+func ClearHubReconcilePendingLocked() error {
+	ep, err := loadHubEndpointLocked()
+	if err != nil {
+		if isMissingEndpointErr(err) {
+			return nil
+		}
+		return fmt.Errorf("clear hub reconcile pending: %w", err)
+	}
+	if !ep.ReconcilePending {
+		return nil
+	}
+	ep.ReconcilePending = false
+	payload, err := json.Marshal(ep)
+	if err != nil {
+		return fmt.Errorf("marshal hub endpoint after reconcile: %w", err)
+	}
+	if err := writeHubMcpStateFile(hubMcpEndpointFileLeaf, payload); err != nil {
+		return fmt.Errorf("clear hub reconcile pending: %w", err)
+	}
+	return nil
 }
 
 // ResetHubPort is the blocking wrapper for short CLI flows. Threads
@@ -316,4 +357,12 @@ func generateHexToken() (string, error) {
 // in one place — see hub_mcp_state_{posix,windows}.go.
 func isMissingEndpointErr(err error) bool {
 	return isHubMcpStateMissingErr(err)
+}
+
+// IsMissingHubEndpointErr is the exported form of isMissingEndpointErr for
+// out-of-package callers (the GUI reconcile-marker hydration) that must
+// distinguish "endpoint never written yet" (first-run — do nothing) from a
+// genuine read/parse/DACL failure (which must NOT be silently swallowed).
+func IsMissingHubEndpointErr(err error) bool {
+	return isMissingEndpointErr(err)
 }

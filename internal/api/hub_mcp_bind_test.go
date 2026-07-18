@@ -14,6 +14,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -64,8 +65,13 @@ func TestBindHubMcpListenerForeignHeldPortEmitsCredentialRotationWarning(t *test
 		t.Fatalf("EnsureHubEndpoint: %v", err)
 	}
 
-	if _, err := BindHubMcpListener(context.Background(), []string{"claude-code"}, nil); err == nil {
+	_, bindErr := BindHubMcpListener(context.Background(), []string{"claude-code"}, nil)
+	if bindErr == nil {
 		t.Fatal("BindHubMcpListener succeeded while the persisted port was held")
+	}
+	startupErr := fmt.Errorf("hub-mcp: %w", bindErr) // startHubMcpListener wrapping shape
+	if gotPort, ok := HubMcpListenerBindFailurePort(startupErr); !ok || gotPort != port {
+		t.Fatalf("bind failure classification = port %d ok %v, want persisted port %d", gotPort, ok, port)
 	}
 	events, err := RecentHubMcpEvents(16)
 	if err != nil {
@@ -187,6 +193,9 @@ func TestBindHubMcpListenerValidateManifestFailureClosesNothing(t *testing.T) {
 	// Wrapped via fmt.Errorf("bind refused: %w", verr).
 	if !containsString(err.Error(), wantErr) {
 		t.Errorf("error chain missing marker %q: %v", wantErr, err)
+	}
+	if gotPort, ok := HubMcpListenerBindFailurePort(err); ok {
+		t.Fatalf("manifest validation error classified as socket bind failure on port %d: %v", gotPort, err)
 	}
 }
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -15,6 +16,45 @@ import (
 
 	"github.com/spf13/cobra"
 )
+
+func TestReconcileHubModeSuccessfulApplyClearsDurableReconcilePending(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+
+	if _, err := api.EnsureHubEndpoint(3439, 111); err != nil {
+		t.Fatalf("EnsureHubEndpoint: %v", err)
+	}
+	if _, err := api.RotateHubInstanceID(); err != nil {
+		t.Fatalf("RotateHubInstanceID: %v", err)
+	}
+	endpointPath := filepath.Join(stateDir, "hub-mcp.endpoint.json")
+
+	restoreScheduler := api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
+		return &setupFakeScheduler{listResult: nil}, nil
+	})
+	t.Cleanup(restoreScheduler)
+
+	var stdout, stderr bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	if err := runReconcileHubMode(cmd, false); err != nil {
+		t.Fatalf("runReconcileHubMode apply: %v; stderr=%s", err, stderr.String())
+	}
+
+	raw, err := os.ReadFile(endpointPath)
+	if err != nil {
+		t.Fatalf("read endpoint after reconcile: %v", err)
+	}
+	var onDisk map[string]any
+	if err := json.Unmarshal(raw, &onDisk); err != nil {
+		t.Fatalf("unmarshal endpoint after reconcile: %v", err)
+	}
+	if pending, _ := onDisk["reconcile_pending"].(bool); pending {
+		t.Fatalf("reconcile_pending remained true after successful reconcile: %s", raw)
+	}
+}
 
 // TestManifestHasScheduledDaemon_FlagsInstalledManifests pins the
 // codex bot phase5 r16 P1 closure on PR #160: reconcile manifest

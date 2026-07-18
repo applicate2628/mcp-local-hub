@@ -612,7 +612,7 @@ type Server struct {
 	// restart counters and last-success timestamp are owned by that driver
 	// goroutine; they discriminate flapping from a fresh outage and cap
 	// rolling restart attempts.
-	hubRestartCh             chan hubListenerRestartCause
+	hubRestartCh             chan hubListenerRestartRequest
 	hubRestartDriverAlive    atomic.Bool
 	hubRestartConsecutive    int
 	hubRestartLastSuccess    time.Time
@@ -623,6 +623,12 @@ type Server struct {
 	// registry plus startHubMcpListenerWithOptions directly.
 	hubEndpointGateFn     func(*api.API) bool
 	startHubMcpListenerFn func(context.Context, bool, *api.API, startHubMcpListenerOptions) (*HubListenerComponents, error)
+	// loadHubEndpointFn injects the reconcile-marker hydration read at hub
+	// startup (defaults to api.LoadHubEndpoint). A test seam so the
+	// load-error fail-safe path is exercisable with a synthetically-degraded
+	// read (Terra P1: a non-missing load error must not silently drop the
+	// durable needs-reconcile signal).
+	loadHubEndpointFn func() (api.HubEndpoint, error)
 
 	// Phase C.2 (v0.5.x serena routing) -- holds the resolver +
 	// session-router bundle wired by SetSerenaRouterDeps. Atomic so a
@@ -784,7 +790,7 @@ func NewServer(cfg Config) *Server {
 		cfg:                      cfg,
 		mux:                      http.NewServeMux(),
 		guiListener:              NewGUIListenerOwner(10 * time.Second),
-		hubRestartCh:             make(chan hubListenerRestartCause, 1),
+		hubRestartCh:             make(chan hubListenerRestartRequest, 1),
 		serenaBackendLossTrigger: make(chan struct{}, 1),
 		guiProcessStart:          time.Now(),
 		pruneEnoentTicks:         map[string]pruneEnoentEntry{},
@@ -975,6 +981,39 @@ func (s *Server) HubMcpBoundPort() (int, bool) {
 	return comp.port, true
 }
 
+// hydrateReconcilePendingMarker restores the durable needs-reconcile signal at
+// hub startup. Three outcomes from the endpoint read:
+//   - read OK, marker set → surface needs-reconcile (the rotation-persisted case).
+//   - read OK, marker clear → nothing to do.
+//   - first-run (endpoint never written) → nothing to do.
+//   - any OTHER read failure (corrupt/parse/DACL/transient) → surface
+//     needs-reconcile anyway. A load error cannot PROVE the marker is clear, so
+//     it fails safe toward telling the operator: a spurious reconcile prompt is
+//     benign (mcphub install --reconcile-hub-mode is idempotent) whereas
+//     silently dropping a real post-rotation signal leaves gated clients 401ing
+//     with no guidance (Terra P1 — non-missing load error must not suppress the
+//     signal). Called after set(HubHealthRecovering), so a surfaced marker
+//     transitions Recovering→NeedsReconcile exactly like the marker-set path.
+func (s *Server) hydrateReconcilePendingMarker() {
+	load := s.loadHubEndpointFn
+	if load == nil {
+		load = api.LoadHubEndpoint
+	}
+	endpoint, err := load()
+	switch {
+	case err == nil:
+		if endpoint.ReconcilePending {
+			s.hubHealth.markReconcilePending()
+		}
+	case api.IsMissingHubEndpointErr(err):
+		// First-run: no endpoint has ever been written, so no rotation can be
+		// pending. EnsureHubEndpoint (in the bind path) will create a fresh one.
+	default:
+		log.Printf("hub endpoint reconcile-marker hydration read failed; surfacing needs-reconcile fail-safe: %v", err)
+		s.hubHealth.markReconcilePending()
+	}
+}
+
 // Start binds 127.0.0.1:<cfg.Port>, signals `ready` once the listener
 // is accepting, then blocks in ListenAndServe. Returns when ctx is
 // canceled (graceful shutdown, 5s deadline) or the listener errors.
@@ -1054,6 +1093,10 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	}
 	if hubEnabled {
 		s.hubHealth.set(HubHealthRecovering, "")
+		// A rotation can persist the new InstanceID and then be interrupted before
+		// this process binds. Restore the endpoint-owned durable marker before hub
+		// startup so every later process continues to surface the reconcile action.
+		s.hydrateReconcilePendingMarker()
 	}
 	hubStartFn := startHubMcpListenerWithOptions
 	if s.startHubMcpListenerFn != nil {
@@ -1079,7 +1122,7 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 			// startHubMcpListener.
 			log.Printf("hub-mcp listener startup failed; retry scheduled through existing restart driver: %v", hubErr)
 			if hubEnabled {
-				s.signalInitialHubBindFailure()
+				s.signalInitialHubStartupFailure(hubErr)
 			}
 			return
 		}

@@ -6,11 +6,174 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
 )
+
+// TestServerHubHealthReconcileHydrationLoadErrorFailsSafe proves the Terra P1
+// fix directly against hydrateReconcilePendingMarker (Server.Start calls it
+// after set(HubHealthRecovering)). A non-missing endpoint read failure must
+// surface needs-reconcile (fail safe — it cannot prove the durable marker is
+// clear); a genuine first-run absence and a clear marker must NOT; a set marker
+// must. Exercising the method directly keeps the test free of Server.Start
+// background goroutines (which would leak events into the shared GUI event log).
+func TestServerHubHealthReconcileHydrationLoadErrorFailsSafe(t *testing.T) {
+	// mirror Server.Start's pre-hydration state, then hydrate.
+	hydrate := func(loadFn func() (api.HubEndpoint, error)) (HubHealthState, string) {
+		s := NewServer(Config{Port: 0})
+		s.loadHubEndpointFn = loadFn
+		s.hubHealth.set(HubHealthRecovering, "")
+		s.hydrateReconcilePendingMarker()
+		return s.hubHealth.snapshot()
+	}
+
+	cases := []struct {
+		name       string
+		load       func() (api.HubEndpoint, error)
+		wantState  HubHealthState
+		wantAction string
+	}{
+		{
+			name:       "non-missing load error surfaces needs-reconcile",
+			load:       func() (api.HubEndpoint, error) { return api.HubEndpoint{}, errors.New("synthetic read failure") },
+			wantState:  HubHealthNeedsReconcile,
+			wantAction: hubReconcileOperatorAction,
+		},
+		{
+			name:       "first-run absence stays recovering (no false signal)",
+			load:       func() (api.HubEndpoint, error) { return api.HubEndpoint{}, os.ErrNotExist },
+			wantState:  HubHealthRecovering,
+			wantAction: "",
+		},
+		{
+			name:       "clear marker stays recovering",
+			load:       func() (api.HubEndpoint, error) { return api.HubEndpoint{ReconcilePending: false}, nil },
+			wantState:  HubHealthRecovering,
+			wantAction: "",
+		},
+		{
+			name:       "set marker surfaces needs-reconcile",
+			load:       func() (api.HubEndpoint, error) { return api.HubEndpoint{ReconcilePending: true}, nil },
+			wantState:  HubHealthNeedsReconcile,
+			wantAction: hubReconcileOperatorAction,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			state, action := hydrate(c.load)
+			if state != c.wantState || action != c.wantAction {
+				t.Fatalf("health = state %q action %q, want state %q action %q", state, action, c.wantState, c.wantAction)
+			}
+		})
+	}
+}
+
+func TestServerHubHealthRestoresDurableReconcilePendingOnFreshStartup(t *testing.T) {
+	setupInitialHubPortDependencyTest(t)
+	ep, err := api.EnsureHubEndpoint(3439, 111)
+	if err != nil {
+		t.Fatalf("EnsureHubEndpoint: %v", err)
+	}
+	rotated, err := api.RotateHubInstanceID()
+	if err != nil {
+		t.Fatalf("RotateHubInstanceID: %v", err)
+	}
+	if rotated.InstanceID == ep.InstanceID {
+		t.Fatalf("InstanceID did not rotate: %q", ep.InstanceID)
+	}
+
+	s := NewServer(Config{Port: 0})
+	s.hubEndpointGateFn = func(*api.API) bool { return true }
+	s.startHubMcpListenerFn = func(context.Context, bool, *api.API, startHubMcpListenerOptions) (*HubListenerComponents, error) {
+		return liveRestartTestComp(ep.Port), nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan struct{})
+	startDone := make(chan error, 1)
+	go func() { startDone <- s.Start(ctx, ready) }()
+	stopped := false
+	stop := func() {
+		if stopped {
+			return
+		}
+		cancel()
+		select {
+		case <-startDone:
+		case <-time.After(2 * time.Second):
+			t.Error("Server.Start did not stop after cancellation")
+		}
+		stopped = true
+	}
+	defer stop()
+
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Server.Start did not signal GUI readiness")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		state, action := s.hubHealth.snapshot()
+		if state == HubHealthNeedsReconcile && action == hubReconcileOperatorAction {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("fresh-start health = state %q action %q, want needs-reconcile + action", state, action)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	stop() // simulate shutdown after the persisted rotation, before reconciliation
+
+	lk, err := api.AcquireHubMcpLock()
+	if err != nil {
+		t.Fatalf("AcquireHubMcpLock: %v", err)
+	}
+	if err := api.ClearHubReconcilePendingLocked(); err != nil {
+		_ = lk.Unlock()
+		t.Fatalf("ClearHubReconcilePendingLocked: %v", err)
+	}
+	if err := lk.Unlock(); err != nil {
+		t.Fatalf("unlock hub-mcp.lock: %v", err)
+	}
+
+	next := NewServer(Config{Port: 0})
+	next.hubEndpointGateFn = func(*api.API) bool { return true }
+	next.startHubMcpListenerFn = func(context.Context, bool, *api.API, startHubMcpListenerOptions) (*HubListenerComponents, error) {
+		return liveRestartTestComp(ep.Port), nil
+	}
+	nextCtx, nextCancel := context.WithCancel(context.Background())
+	nextReady := make(chan struct{})
+	nextDone := make(chan error, 1)
+	go func() { nextDone <- next.Start(nextCtx, nextReady) }()
+	defer func() {
+		nextCancel()
+		select {
+		case <-nextDone:
+		case <-time.After(2 * time.Second):
+			t.Error("subsequent Server.Start did not stop after cancellation")
+		}
+	}()
+	select {
+	case <-nextReady:
+	case <-time.After(2 * time.Second):
+		t.Fatal("subsequent Server.Start did not signal GUI readiness")
+	}
+	deadline = time.Now().Add(2 * time.Second)
+	for {
+		state, action := next.hubHealth.snapshot()
+		if state == HubHealthHealthy && action == "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("post-clear startup health = state %q action %q, want healthy without reconcile", state, action)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
 
 func recvHubHealth(t *testing.T, ch <-chan Event) Event {
 	t.Helper()

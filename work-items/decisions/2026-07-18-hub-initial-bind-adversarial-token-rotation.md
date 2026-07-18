@@ -84,10 +84,11 @@ GUI-process identity gate (`processID`+`matchBasename`+`cmdlineIsGui`, the `--fo
 `RotateHubInstanceID` was a blocking non-cancellable lock → added `RotateHubInstanceIDContext`.
 
 Round 2 raised three more, and they are DECISIVE about the limits of the whole approach:
-- **P1-3 (fixed):** rotation-then-cancel (driver cancelled after the InstanceID persisted but before a
-  successful retry) left NO reconcile signal → clients 401 without `needs-reconcile`. Fixed by making the
-  reconcile state durable at rotation-persist time (the operator is ALWAYS told to reconcile once the
-  InstanceID rotates, regardless of cancellation timing).
+- **P1-3 (fixed in round 3):** rotation-then-cancel (driver cancelled after the InstanceID persisted but
+  before a successful retry) left clients on the old ID. The round-2 in-memory health latch covered only
+  the current process; round 3 makes `reconcile_pending` part of the atomically-written endpoint record,
+  restores `needs-reconcile` on every later startup, and clears it only after successful
+  `mcphub install --reconcile-hub-mode` application.
 - **P1-1 + P1-2 (ACCEPTED as bounded residual — operator decision 2026-07-18):** reliable adversarial
   detection at rebind time is IMPOSSIBLE — the owner probe is asynchronous to the bind failure (a foreign
   holder can DROP the port before the probe and evade rotation, P1-1), and process identity is FORGEABLE
@@ -103,3 +104,44 @@ Because the bot may keep flagging P1-1/P1-2 (they are genuinely un-closable), th
 authorized MERGING #562 on this documented-residual justification — this specific PR only — rather than
 requiring a clean bot PASS. Option B still strictly improves security over both Phase-C-as-was (no
 rotation) and the bot's fail-closed revert (which reuses the same preserved credentials on manual relaunch).
+
+## Amendment 2 (2026-07-18) — bot round 3 + full commission on the P1-3-completion fix
+
+Round 3 (on `d9cabcb4`, the first P1-3 attempt) proved the round-2 fix INCOMPLETE and added a scoping bug:
+- **P1 (durability, FIXED):** the round-2 `markReconcilePending()` was process-scoped in-memory; a
+  shutdown after the InstanceID rotation persisted but before a successful rebind lost the signal, so the
+  next process bound the new (durable) InstanceID with no needs-reconcile surface. Fixed by a DURABLE
+  `HubEndpoint.ReconcilePending` field set in the SAME endpoint write as the new InstanceID
+  (`rotateHubInstanceIDLocked`), hydrated at `Server.Start`, and cleared by `ClearHubReconcilePendingLocked`
+  from `runReconcileHubMode` under a continuously-held `hub-mcp.lock` (the same lock rotation takes → no
+  interleaving rotation can lose a just-set marker).
+- **P2 (scoping, FIXED):** `Server.Start` emitted `initial-bind-failed` for EVERY hub startup error. Now a
+  new `hubMcpListenerBindError` wraps ONLY a confirmed WSAEADDRINUSE(10048)/WSAEACCES(10013) refusal on the
+  positive persisted port; non-bind startup errors take a new `initial-startup-failed` retry cause with NO
+  port probe and NO rotation.
+
+**Full commission before the round-4 bot push (fable mandatory member):**
+- **fable (Claude fable-5) — PASS.** No in-diff blocker. Verified CLEAN: the channel-type reshape, the
+  wrap-chain `errors.As` reachability, durable-marker preservation across all endpoint writers, idempotency,
+  and — decisively — the **Skipped-clients-clear** question: `report.Skipped` is populated ONLY for
+  `clients.IsRelayStdio` adapters (antigravity/aider), which never receive a `mcphub-hub` aggregate entry
+  and carry no `X-Mcphub-Instance-Id`, so clearing the marker with skips present un-signals nothing stale.
+  Raised 4 P2/P3 follow-ups (all pre-existing / out-of-#561-scope), filed as
+  `backlog/2026-07-18-hub-restart-path-adversarial-rotation-followups.md`; the one substantive item is F1
+  (P2) — the mid-run RESTART path has the SAME foreign-holder capture window with NO rotation (the
+  initial-bind fix's mirror gap).
+- **Terra (codex gpt-5.6-terra) — REVISE, 2×P1.** Terra-A (a non-missing endpoint load error at startup
+  hydration silently skipped the durable signal) was a REAL distinct gap and is FIXED: hydration now fails
+  safe — a non-missing read error surfaces needs-reconcile (a spurious idempotent prompt beats a dropped
+  security signal), while first-run absence still skips; covered by
+  `TestServerHubHealthReconcileHydrationLoadErrorFailsSafe`. Terra-B (clear-despite-Skipped) was
+  EMPIRICALLY DISPROVEN by $lead (Skipped = relay-stdio only, no hub identity) — same conclusion fable
+  reached independently; recorded as a false positive.
+- **Sol (codex gpt-5.6-sol) — output misfired** (emitted a stray marker instead of its verdict after
+  123k tokens of reasoning; read-only review, no diff to recover). Not re-run: fable's deep PASS + Terra's
+  live finding + $lead's own trace of the P1-race closure and the Windows-classifier coverage already
+  cover the substantive surface. F4 (a stale burn-down doc line) was fixed in-PR.
+
+Net for the round-4 push: durable-reconcile (P1) + confirmed-bind (P2) + Terra-A load-error fail-safe, all
+$lead-verified green; F1-F3 filed as follow-ups; F4 doc corrected. The accepted P1-1/P1-2 residual is
+unchanged and still governs the merge authorization above.

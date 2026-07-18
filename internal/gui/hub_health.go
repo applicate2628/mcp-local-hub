@@ -53,8 +53,9 @@ type hubHealthTracker struct {
 	mu     sync.Mutex
 	state  HubHealthState
 	action string // operator-action hint for needs-reconcile (empty otherwise)
-	// reconcilePending is process-scoped because there is no reconcile-ack
-	// signal yet. Only a process restart clears it.
+	// reconcilePending is the process-local mirror/latch. Server.Start hydrates
+	// it from HubEndpoint.ReconcilePending; the install reconciler clears the
+	// durable record, and a later process starts without re-latching it.
 	reconcilePending bool
 	pub              func(Event)
 }

@@ -119,6 +119,9 @@ type hubListenerRestartDriverOptions struct {
 	sleepFn    func(context.Context, time.Duration) bool
 	nowFn      func() time.Time
 	cause      hubListenerRestartCause
+	// initialBindPort is populated only for a confirmed persisted-port socket
+	// bind refusal. Pre-bind startup failures leave it zero and never probe.
+	initialBindPort int
 
 	initialBindPortNeedsRotationFn func(context.Context, int) bool
 	rotateHubInstanceIDFn          func(context.Context) (api.HubEndpoint, error)
@@ -133,6 +136,7 @@ type hubListenerRestartCause uint8
 
 const (
 	hubListenerRestartCauseUnresponsive hubListenerRestartCause = iota
+	hubListenerRestartCauseInitialStartupFailed
 	hubListenerRestartCauseInitialBindFailed
 )
 
@@ -140,11 +144,18 @@ func (c hubListenerRestartCause) String() string {
 	switch c {
 	case hubListenerRestartCauseUnresponsive:
 		return "unresponsive"
+	case hubListenerRestartCauseInitialStartupFailed:
+		return "initial-startup-failed"
 	case hubListenerRestartCauseInitialBindFailed:
 		return "initial-bind-failed"
 	default:
 		return fmt.Sprintf("unknown-%d", c)
 	}
+}
+
+type hubListenerRestartRequest struct {
+	cause           hubListenerRestartCause
+	initialBindPort int
 }
 
 type hubListenerRestartOutcome int
@@ -167,24 +178,42 @@ func (s *Server) signalHubListenerRestart() {
 	} else {
 		s.hubHealth.set(HubHealthDown, "")
 	}
-	s.enqueueHubListenerRestart(hubListenerRestartCauseUnresponsive)
+	s.enqueueHubListenerRestart(hubListenerRestartRequest{cause: hubListenerRestartCauseUnresponsive})
 }
 
-// signalInitialHubBindFailure is the only nil-component admission into the
-// existing restart driver. Server.Start guarantees the driver will consume the
-// buffered request, so this path remains Recovering even if the goroutine has
-// not yet published its liveness flag.
-func (s *Server) signalInitialHubBindFailure() {
+// signalInitialHubStartupFailure classifies the startup error at its producer.
+// Only a confirmed persisted-port socket refusal gets the adversarial bind
+// cause; every other setup/startup error keeps the existing nil-component retry
+// path without port-owner inspection or InstanceID rotation.
+func (s *Server) signalInitialHubStartupFailure(err error) {
+	if port, ok := api.HubMcpListenerBindFailurePort(err); ok {
+		s.signalInitialHubBindFailure(port)
+		return
+	}
 	if s == nil || s.hubRestartCh == nil {
 		return
 	}
 	s.hubHealth.set(HubHealthRecovering, "")
-	s.enqueueHubListenerRestart(hubListenerRestartCauseInitialBindFailed)
+	s.enqueueHubListenerRestart(hubListenerRestartRequest{cause: hubListenerRestartCauseInitialStartupFailed})
 }
 
-func (s *Server) enqueueHubListenerRestart(cause hubListenerRestartCause) {
+// signalInitialHubBindFailure is the confirmed-bind nil-component admission
+// into the restart driver. The exact failed persisted port travels with the
+// request so the later owner probe cannot drift to an unrelated endpoint value.
+func (s *Server) signalInitialHubBindFailure(port int) {
+	if s == nil || s.hubRestartCh == nil {
+		return
+	}
+	s.hubHealth.set(HubHealthRecovering, "")
+	s.enqueueHubListenerRestart(hubListenerRestartRequest{
+		cause:           hubListenerRestartCauseInitialBindFailed,
+		initialBindPort: port,
+	})
+}
+
+func (s *Server) enqueueHubListenerRestart(request hubListenerRestartRequest) {
 	select {
-	case s.hubRestartCh <- cause:
+	case s.hubRestartCh <- request:
 	default:
 	}
 }
@@ -207,9 +236,10 @@ func runHubListenerRestartDriver(ctx context.Context, s *Server, opts hubListene
 		select {
 		case <-ctx.Done():
 			return
-		case cause := <-s.hubRestartCh:
+		case request := <-s.hubRestartCh:
 			requestOpts := opts
-			requestOpts.cause = cause
+			requestOpts.cause = request.cause
+			requestOpts.initialBindPort = request.initialBindPort
 			if restartHubListenerWithOutcome(ctx, s, requestOpts) == hubListenerRestartStopDriver {
 				return
 			}
@@ -368,8 +398,11 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 		if !oldTaken {
 			preview := s.hubMcpComp.Load()
 			if preview == nil {
-				if opts.cause != hubListenerRestartCauseInitialBindFailed {
+				if opts.cause != hubListenerRestartCauseInitialBindFailed && opts.cause != hubListenerRestartCauseInitialStartupFailed {
 					return hubListenerRestartStopDriver
+				}
+				if opts.cause == hubListenerRestartCauseInitialBindFailed {
+					restartPort = opts.initialBindPort
 				}
 				// Seed the telemetry port from the persisted endpoint so the
 				// initial-bind restart events (-failed/-exhausted/-abandoned)
@@ -387,7 +420,7 @@ func restartHubListenerWithOutcome(ctx context.Context, s *Server, opts hubListe
 				}
 				oldTaken = true
 				previousInstanceID, previousInstanceIDErr = loadHubListenerRestartInstanceID()
-				if opts.initialBindPortNeedsRotationFn(ctx, restartPort) {
+				if opts.cause == hubListenerRestartCauseInitialBindFailed && restartPort > 0 && opts.initialBindPortNeedsRotationFn(ctx, restartPort) {
 					if ctx.Err() != nil {
 						return hubListenerRestartStopDriver
 					}

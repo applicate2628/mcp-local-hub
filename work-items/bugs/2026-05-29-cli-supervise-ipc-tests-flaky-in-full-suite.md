@@ -5,9 +5,46 @@ found-by: backend-engineer
 found-in-phase: D.3b-2 (migrate serena legacy-to-dynamic-pool)
 affected-surface: internal/cli/supervise_test.go
 context: adjacent-finding
-status: closed
+status: open
 related-pr: PR #264 (914d0cf)
 ---
+
+## Reopened 2026-07-18 — DISTINCT residual mechanism (TempDir cleanup handle-race)
+
+PR #264 fixed the PIPE-CONTENTION mechanism (per-test pipe isolation → the
+`sidecar never appeared` poll-timeout no longer fires). A DIFFERENT residual
+surfaces on the SAME supervise-IPC test group under full-suite load: the test
+FAILS at Go's `t.TempDir` auto-cleanup, not at an IPC assertion:
+
+```
+testing.go:1464: TempDir RemoveAll cleanup: unlinkat
+  R:\Temp\Test..._IPC_...\001\hardened-parent: The directory is not empty.
+```
+
+Observed 2026-07-18 across two full `go test -tags=test_state_path_env
+./internal/cli/` runs; a DIFFERENT subset of the six IPC tests failed each run
+(run 1: `TestSupervise_IPC_VersionPinning`; run 2:
+`TestSuperviseCommand_StatusIPC_UnknownCommand` + `TestSupervise_IPC_QuiesceTimersTwoFrames`).
+All pass in isolation. Non-deterministic, load-dependent.
+
+**Root cause (test-harness, NOT production):** each IPC test spawns a real
+`mcphub.exe supervise` child under the test's `t.TempDir()`. On Windows a
+directory with a live open handle cannot be removed, so when the test returns
+and Go runs `RemoveAll` on the TempDir, a supervisor child (or its Job Object /
+an open state-file handle under `hardened-parent`) that has not FULLY exited yet
+keeps the dir busy → cleanup `unlinkat ... directory not empty`. The IPC logic
+itself is correct (isolation passes); this is spawn/exit/handle-release timing.
+
+**Fix direction:** before each IPC test returns, deterministically terminate its
+spawned supervisor AND wait for handle release (poll until the child PID is gone
+and the state-file handles are closed) before `t.TempDir` cleanup runs — e.g. an
+explicit `t.Cleanup` that kills the child and retries the dir removal with a
+bounded backoff, or route the spawn through a helper that guarantees reap-before-return.
+
+Unrelated to the hub-reconcile / adopt / de-adopt work; found as a side-effect
+while gating PR #562 (hub adversarial-rotation). Severity stays LOW (test-harness
+only, no production impact) but it now reds full-cli runs more often than the
+intermittent #264-era flake did, so it is worth a harness fix.
 
 ## Status
 

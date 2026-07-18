@@ -15,18 +15,81 @@ import (
 
 func TestHubInitialBindFailureEnqueuesTypedRestartAndKeepsRecovering(t *testing.T) {
 	s := NewServer(Config{Port: 0})
-	s.signalInitialHubBindFailure()
+	s.signalInitialHubBindFailure(3439)
 
 	select {
-	case cause := <-s.hubRestartCh:
-		if cause != hubListenerRestartCauseInitialBindFailed {
-			t.Fatalf("restart cause = %v, want initial-bind-failed", cause)
+	case request := <-s.hubRestartCh:
+		if request.cause != hubListenerRestartCauseInitialBindFailed {
+			t.Fatalf("restart cause = %v, want initial-bind-failed", request.cause)
+		}
+		if request.initialBindPort != 3439 {
+			t.Fatalf("initial bind port = %d, want 3439", request.initialBindPort)
 		}
 	default:
 		t.Fatal("initial hub bind failure did not enqueue the restart driver")
 	}
 	if got, action := s.hubHealth.snapshot(); got != HubHealthRecovering || action != "" {
 		t.Fatalf("health after initial bind failure = state %q action %q, want recovering", got, action)
+	}
+}
+
+func TestHubInitialNonBindStartupFailureEnqueuesNonBindRestart(t *testing.T) {
+	s := NewServer(Config{Port: 0})
+	s.signalInitialHubStartupFailure(errors.New("manifest setup failed before socket bind"))
+
+	select {
+	case request := <-s.hubRestartCh:
+		if request.cause != hubListenerRestartCauseInitialStartupFailed {
+			t.Fatalf("restart cause = %v, want initial-startup-failed", request.cause)
+		}
+		if request.initialBindPort != 0 {
+			t.Fatalf("initial bind port = %d, want 0 for non-bind startup failure", request.initialBindPort)
+		}
+	default:
+		t.Fatal("initial non-bind startup failure did not enqueue the restart driver")
+	}
+}
+
+func TestHubListenerRestartDriverInitialNonBindFailureRetriesWithoutProbeOrRotation(t *testing.T) {
+	setupInitialHubPortDependencyTest(t)
+	ep, err := api.EnsureHubEndpoint(3439, 111)
+	if err != nil {
+		t.Fatalf("EnsureHubEndpoint: %v", err)
+	}
+	s := NewServer(Config{Port: 0})
+	newComp := liveRestartTestComp(ep.Port)
+	var probes, rotations int
+
+	outcome := restartHubListenerWithOutcome(context.Background(), s, hubListenerRestartDriverOptions{
+		cause: hubListenerRestartCauseInitialStartupFailed,
+		startFn: func(context.Context) (*HubListenerComponents, error) {
+			return newComp, nil
+		},
+		shutdownFn: func(context.Context, *HubListenerComponents) {},
+		emitFn:     func(string, string, map[string]any) error { return nil },
+		sleepFn:    func(context.Context, time.Duration) bool { return true },
+		nowFn:      func() time.Time { return time.Unix(100, 0) },
+		initialBindPortNeedsRotationFn: func(context.Context, int) bool {
+			probes++
+			return true
+		},
+		rotateHubInstanceIDFn: func(context.Context) (api.HubEndpoint, error) {
+			rotations++
+			return api.HubEndpoint{}, errors.New("unexpected rotation")
+		},
+	})
+
+	if outcome != hubListenerRestartSucceeded {
+		t.Fatalf("restart outcome = %v, want succeeded", outcome)
+	}
+	if probes != 0 {
+		t.Fatalf("port-owner probes = %d, want 0 for pre-bind startup failure", probes)
+	}
+	if rotations != 0 {
+		t.Fatalf("InstanceID rotations = %d, want 0 for pre-bind startup failure", rotations)
+	}
+	if got := s.hubMcpComp.Load(); got != newComp {
+		t.Fatalf("published component = %#v, want %#v", got, newComp)
 	}
 }
 
@@ -55,7 +118,7 @@ func TestHubListenerRestartDriverInitialBindFailureRetriesFromNil(t *testing.T) 
 		})
 	}()
 
-	s.signalInitialHubBindFailure()
+	s.signalInitialHubBindFailure(3439)
 	waitRestartTestEvent(t, events, "hub-listener-restarted")
 	cancel()
 	waitRestartDriverDone(t, done)
@@ -223,7 +286,7 @@ func TestHubListenerRestartDriverInitialBindForeignOwnerRotatesOnceAndNeedsRecon
 		})
 	}()
 
-	s.signalInitialHubBindFailure()
+	s.signalInitialHubBindFailure(3439)
 	ev := waitRestartTestEvent(t, events, "hub-listener-restart-instance-id-changed")
 	cancel()
 	waitRestartDriverDone(t, done)
@@ -283,7 +346,7 @@ func TestHubListenerRestartDriverRotationPersistsThenCancelStillNeedsReconcile(t
 		})
 	}()
 
-	s.signalInitialHubBindFailure()
+	s.signalInitialHubBindFailure(3439)
 	waitRestartDriverDone(t, done)
 
 	after, err := api.LoadHubEndpoint()
@@ -355,7 +418,7 @@ func TestHubListenerRestartDriverInitialBindOwnMcphubGUIOwnerDoesNotRotateOrReco
 		})
 	}()
 
-	s.signalInitialHubBindFailure()
+	s.signalInitialHubBindFailure(3439)
 	ev := waitRestartTestEvent(t, events, "hub-listener-restarted")
 	cancel()
 	waitRestartDriverDone(t, done)
@@ -432,7 +495,7 @@ func TestHubListenerRestartDriverCancelledContextAbortsBeforeInstanceIDRotation(
 		})
 	}()
 
-	s.signalInitialHubBindFailure()
+	s.signalInitialHubBindFailure(3439)
 	select {
 	case <-rotateEntered:
 	case <-time.After(2 * time.Second):
@@ -493,7 +556,7 @@ func TestHubListenerRestartDriverInitialBindFailureExhaustionEndsDown(t *testing
 		})
 	}()
 
-	s.signalInitialHubBindFailure()
+	s.signalInitialHubBindFailure(3439)
 	waitRestartTestEvent(t, events, "hub-listener-restart-abandoned")
 	waitRestartDriverDone(t, done)
 
