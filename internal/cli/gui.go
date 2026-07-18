@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -45,6 +47,155 @@ var (
 	selfRestartHandoffAcquireDeadline = 10 * time.Second
 	selfRestartHandoffAcquireBackoff  = 100 * time.Millisecond
 )
+
+func isRestartV3ChildLaunch(restartV3Enabled bool, handoff string) bool {
+	return restartV3Enabled && handoff != "" && handoff != "1"
+}
+
+func consumeSelfRestartHandoff(handoff string) string {
+	_ = os.Unsetenv(selfRestartHandoffEnv)
+	return handoff
+}
+
+type restartV3ChildRuntimeStarter func(
+	context.Context,
+	*gui.Server,
+	*gui.GUIListenerOwner,
+	net.Listener,
+	gui.SingleInstanceLease,
+) error
+
+type restartV3ChildStartupConfig struct {
+	Handoff      string
+	PID          int
+	PidportPath  string
+	Port         int
+	Version      string
+	Deadlines    gui.RestartDeadlines
+	StartRuntime restartV3ChildRuntimeStarter
+}
+
+type releaseOnceLease struct {
+	lease gui.SingleInstanceLease
+	once  sync.Once
+}
+
+func (l *releaseOnceLease) Release() {
+	if l == nil {
+		return
+	}
+	l.once.Do(func() {
+		if l.lease != nil {
+			l.lease.Release()
+		}
+	})
+}
+
+// runRestartV3ChildStartup composes the gated child half. Before the flock it
+// only consumes the one-shot nonce file and binds the challenged standby
+// listener. The injected runtime owns every mutable GUI side effect and is not
+// invoked until SpawnedGUIChild has acquired and revalidated the reservation.
+func runRestartV3ChildStartup(ctx context.Context, cfg restartV3ChildStartupConfig) error {
+	if ctx == nil {
+		return errors.New("restart child context is nil")
+	}
+	if cfg.PidportPath == "" || cfg.Port <= 0 || cfg.StartRuntime == nil {
+		return errors.New("restart child startup configuration is incomplete")
+	}
+
+	stateDir := filepath.Dir(cfg.PidportPath)
+	child, err := gui.NewSpawnedGUIChildFromEnvironment(cfg.Handoff, cfg.PID, stateDir)
+	if err != nil {
+		return err
+	}
+	defer child.Close()
+	if child.Handoff.TargetPort != cfg.Port {
+		return fmt.Errorf("restart child target port %d does not match resolved GUI port %d", child.Handoff.TargetPort, cfg.Port)
+	}
+
+	server := gui.NewServer(gui.Config{
+		Port:             cfg.Port,
+		Version:          cfg.Version,
+		PID:              cfg.PID,
+		RestartV3Enabled: true,
+	})
+	defer server.Broadcaster().Close()
+	owner := gui.NewGUIListenerOwner(gui.GUIReadHeaderTimeout)
+	bound, err := bindRestartV3ChildStandby(ctx, cfg.Deadlines.Bind, func(bindCtx context.Context) (net.Listener, error) {
+		return owner.BindStandby(bindCtx, cfg.Port, child.Readiness.Handler())
+	})
+	if err != nil {
+		return err
+	}
+
+	store := gui.NewHandoffMarkerStore(stateDir, cfg.Deadlines)
+	deps := gui.DefaultRestartChildDependencies(cfg.Deadlines)
+	deps.MarkerStore = store
+	deps.Standby = owner
+	deps.Events = server.Broadcaster()
+	runtime := gui.NewRestartChildRuntimeSettlement()
+	deps.Runtime = runtime
+	deps.Acquire = func(context.Context) (gui.SingleInstanceLease, error) {
+		lease, err := child.AcquireSingleInstanceAt(cfg.PidportPath, cfg.Port, store, cfg.Deadlines)
+		if err != nil {
+			return nil, err
+		}
+		return &releaseOnceLease{lease: lease}, nil
+	}
+
+	deps.Activate = func(activateCtx context.Context, lease gui.SingleInstanceLease) error {
+		go func() {
+			runtime.Stop(cfg.StartRuntime(activateCtx, server, owner, bound, lease))
+		}()
+		go func() {
+			select {
+			case <-activateCtx.Done():
+				runtime.Stop(activateCtx.Err())
+			case <-runtime.Done():
+			}
+		}()
+		select {
+		case <-owner.Activated():
+			return nil
+		case <-runtime.Done():
+			runtimeErr := runtime.Err()
+			if runtimeErr == nil {
+				runtimeErr = errors.New("restart child runtime stopped before listener activation")
+			}
+			return runtimeErr
+		case <-activateCtx.Done():
+			return activateCtx.Err()
+		}
+	}
+
+	result, err := child.Run(ctx, deps)
+	if err != nil {
+		return err
+	}
+	if !result.Activated {
+		return errors.New("restart child completed without an activated runtime")
+	}
+
+	<-runtime.Done()
+	runtimeErr := runtime.Err()
+	if errors.Is(runtimeErr, context.Canceled) && errors.Is(ctx.Err(), context.Canceled) {
+		return nil
+	}
+	return runtimeErr
+}
+
+func bindRestartV3ChildStandby(
+	ctx context.Context,
+	bindBudget time.Duration,
+	bind func(context.Context) (net.Listener, error),
+) (net.Listener, error) {
+	if bindBudget <= 0 || bind == nil {
+		return nil, errors.New("restart child standby bind budget and binder are required")
+	}
+	bindCtx, cancel := context.WithTimeout(ctx, bindBudget)
+	defer cancel()
+	return bind(bindCtx)
+}
 
 // acquireSingleInstanceWithHandoff acquires the GUI single-instance lock.
 // On the normal path it is a single AcquireSingleInstanceAt (identical to
@@ -182,7 +333,7 @@ activates the first window and exits 0.`,
 					return fmt.Errorf("resolve pidport path: %w", ppErr)
 				}
 				if d := os.Getenv("MCPHUB_GUI_TEST_PIDPORT_DIR"); d != "" {
-					pidportPath = filepath.Join(d, "gui.pidport")
+					pidportPath = filepath.Join(d, gui.PidportFileLeaf)
 				}
 				lock, lockErr := gui.AcquireSingleInstanceAt(pidportPath, 0)
 				if lockErr != nil {
@@ -250,7 +401,7 @@ activates the first window and exits 0.`,
 				return err
 			}
 			if d := os.Getenv("MCPHUB_GUI_TEST_PIDPORT_DIR"); d != "" {
-				pidportPath = filepath.Join(d, "gui.pidport")
+				pidportPath = filepath.Join(d, gui.PidportFileLeaf)
 			}
 
 			// Bug-bash A5 (#18/#19/#20): resolve the effective port using
@@ -270,6 +421,15 @@ activates the first window and exits 0.`,
 					fallback = guiPortFallbackExplicitFlag
 				}
 				emitInvalidGUIPortWarning(cmd.OutOrStderr(), portIntent, fallback)
+			}
+
+			handoff := os.Getenv(selfRestartHandoffEnv)
+			if isRestartV3ChildLaunch(gui.RestartV3Enabled(), handoff) {
+				handoff = consumeSelfRestartHandoff(handoff)
+				return startRestartV3GUIChild(
+					cmd, ctx, stop, handoff, pidportPath, port,
+					noBrowser, noTray, strictMode,
+				)
 			}
 
 			// Phase A: acquire the single-instance lock BEFORE binding any
@@ -488,6 +648,62 @@ func activateDashboardFromTray(
 // repo's existing control-flow style. See plan task 4 §"alternative".
 func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.CancelFunc,
 	lock *gui.SingleInstanceLock, port int, noBrowser, noTray, strictMode bool, pidportPath string) error {
+	return startGuiServerWithStartup(
+		cmd, ctx, stop, lock, port, noBrowser, noTray, strictMode, pidportPath, nil,
+	)
+}
+
+type guiServerStartup struct {
+	server        *gui.Server
+	listenerOwner *gui.GUIListenerOwner
+	bound         net.Listener
+}
+
+func startRestartV3GUIChild(
+	cmd *cobra.Command,
+	ctx context.Context,
+	stop context.CancelFunc,
+	handoff string,
+	pidportPath string,
+	port int,
+	noBrowser bool,
+	noTray bool,
+	strictMode bool,
+) error {
+	deadlines := gui.DefaultRestartDeadlines()
+	return runRestartV3ChildStartup(ctx, restartV3ChildStartupConfig{
+		Handoff:     handoff,
+		PID:         os.Getpid(),
+		PidportPath: pidportPath,
+		Port:        port,
+		Version:     versionString(),
+		Deadlines:   deadlines,
+		StartRuntime: func(
+			runtimeCtx context.Context,
+			server *gui.Server,
+			owner *gui.GUIListenerOwner,
+			bound net.Listener,
+			lease gui.SingleInstanceLease,
+		) error {
+			return startGuiServerWithStartup(
+				cmd,
+				runtimeCtx,
+				stop,
+				lease,
+				port,
+				noBrowser,
+				noTray,
+				strictMode,
+				pidportPath,
+				&guiServerStartup{server: server, listenerOwner: owner, bound: bound},
+			)
+		},
+	})
+}
+
+func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop context.CancelFunc,
+	lock gui.SingleInstanceLease, port int, noBrowser, noTray, strictMode bool, pidportPath string,
+	startup *guiServerStartup) error {
 	defer lock.Release()
 
 	// Phase B: start the HTTP server. Server.Start binds 127.0.0.1
@@ -519,12 +735,17 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 			return api.NewAPI().WriteSerenaIdleStopResult(taskName, now)
 		},
 	)
-	restartV3Enabled := gui.RestartV3Enabled()
-	s := gui.NewServer(gui.Config{
-		Port:             port,
-		Version:          versionString(),
-		RestartV3Enabled: restartV3Enabled,
-	})
+	var s *gui.Server
+	if startup == nil {
+		restartV3Enabled := gui.RestartV3Enabled()
+		s = gui.NewServer(gui.Config{
+			Port:             port,
+			Version:          versionString(),
+			RestartV3Enabled: restartV3Enabled,
+		})
+	} else {
+		s = startup.server
+	}
 
 	// Phase C.2 wiring (v0.5.x plan §C.2): construct the serena routing
 	// dependencies and hand them to the GUI server. The /serena/mcp
@@ -632,7 +853,13 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 
 	ready := make(chan struct{})
 	errCh := make(chan error, 1)
-	go func() { errCh <- s.Start(ctx, ready) }()
+	if startup == nil {
+		go func() { errCh <- s.Start(ctx, ready) }()
+	} else {
+		go func() {
+			errCh <- s.ContinueWithGUIListener(ctx, ready, startup.listenerOwner, startup.bound)
+		}()
+	}
 
 	// Poll daemon status every 5s and push daemon-state events onto /api/events.
 	//

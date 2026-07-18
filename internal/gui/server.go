@@ -17,6 +17,11 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
+// GUIReadHeaderTimeout is the single HTTP header-read policy shared by normal
+// Server.Start and restart-child listener owners. Bind deadlines govern only
+// listener acquisition and must not alter the lifetime HTTP policy.
+const GUIReadHeaderTimeout = 10 * time.Second
+
 // Config drives Server construction. Zero values are sensible defaults.
 type Config struct {
 	// Port to bind on 127.0.0.1. Zero lets the OS pick one from the
@@ -785,7 +790,7 @@ func NewServer(cfg Config) *Server {
 	s := &Server{
 		cfg:                      cfg,
 		mux:                      http.NewServeMux(),
-		guiListener:              NewGUIListenerOwner(10 * time.Second),
+		guiListener:              NewGUIListenerOwner(GUIReadHeaderTimeout),
 		hubRestartCh:             make(chan hubListenerRestartCause, 1),
 		serenaBackendLossTrigger: make(chan struct{}, 1),
 		guiProcessStart:          time.Now(),
@@ -993,6 +998,24 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	if err != nil {
 		return err
 	}
+	return s.continueWithGUIListener(ctx, ready, s.guiListener, ln)
+}
+
+// ContinueWithGUIListener activates a listener already bound and serving in
+// standby, then enters the exact post-bind lifecycle used by Start. The caller
+// transfers owner and bound to Server for the remainder of the process.
+func (s *Server) ContinueWithGUIListener(ctx context.Context, ready chan<- struct{}, owner *GUIListenerOwner, bound net.Listener) error {
+	if owner == nil {
+		return errors.New("continue GUI server: nil listener owner")
+	}
+	if bound == nil {
+		return errors.New("continue GUI server: nil bound listener")
+	}
+	s.guiListener = owner
+	return s.continueWithGUIListener(ctx, ready, owner, bound)
+}
+
+func (s *Server) continueWithGUIListener(ctx context.Context, ready chan<- struct{}, owner *GUIListenerOwner, ln net.Listener) error {
 	s.port.Store(int32(ln.Addr().(*net.TCPAddr).Port))
 
 	// Phase 4 (G4) — hub listener wiring. The gate is read from
@@ -1012,11 +1035,17 @@ func (s *Server) Start(ctx context.Context, ready chan<- struct{}) error {
 	// + start srv.Serve FIRST; run hub startup AFTER. Shutdown still
 	// handles a nil s.hubMcpComp cleanly.
 	close(ready)
-	if err := s.guiListener.ServeFull(ln, s.httpHandler()); err != nil {
+	if err := owner.ServeFull(ln, s.httpHandler()); err != nil {
 		_ = ln.Close()
 		return err
 	}
-	errCh := s.guiListener.Errors()
+	return s.runActivatedGUIListener(ctx, owner.Errors())
+}
+
+// runActivatedGUIListener is the shared hub-init, restart-driver, event, and
+// shutdown continuation. Both normal Start and restart-child standby activation
+// enter this single implementation after ServeFull.
+func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error) error {
 
 	// Reveal-window flood advisory (bug
 	// 2026-06-22-explorer-folder-window-orphan-flood): warn once if the

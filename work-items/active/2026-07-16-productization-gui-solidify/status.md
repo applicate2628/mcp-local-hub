@@ -117,17 +117,74 @@ self-restart handoff).
   capacity) → proceeded on the strength of exact-spec-fix + passing regression + green suite + the bot
   gate (bot PASS on `ab0810fc`: "no major issues", 0 inline, 0 unresolved threads). Full record:
   `item3-unitB-foundations-review.md`.
-- **Unit B gated group D–J** — the next separate large effort (feature-gated handoff protocol,
-  default-OFF, flipped ON in J). Not started; A+B+C are its prerequisite seam.
+- **Unit B Phase D — COMMITTED, NOT DEPLOYED.** Default-OFF `RestartV3Enabled`,
+  `HandoffMarkerStore`, and the shared `RestartDeadlines` policy landed in `ebc12e78`; commission PASS
+  is recorded in `item3-unitB-phaseD-review.md`.
+- **Unit B Phase E — COMMITTED, NOT DEPLOYED.** Reservation-aware single-instance acquisition,
+  `DesignatedChildNonce`, and tri-state `ProbeGUIOwnerLease` landed in `c2ee96eb`; commission PASS is
+  recorded in `item3-unitB-phaseE-review.md`.
+- **Unit B Phase F + Phase I — COMMITTED, NOT DEPLOYED 2026-07-18.** Phase F (restart CHILD half:
+  one-shot hardened nonce consume, MAC-bound challenged standby readiness, Phase-E designated-child
+  reservation acquire, activation through the AUTHORIZED shared post-bind `Server` continuation seam
+  extracted from `Server.Start`, exact parent-death watch, bounded Commit) and Phase I (ensure-alive
+  DEGRADE-ONLY predicate — never spawns/kills/binds; both-dead reconciled to auto-recovery messaging).
+  Deep commission (fable + Sol per phase) returned REVISE with ~6 P1s across the two; ALL fixed:
+  F — strict owner-only nonce consume (hard-fail broadened DACL) + unlink-on-every-path, Commit unified
+  with runtime liveness (exhaustion → terminal `interrupted`, never a lingering `reserved`, so a live
+  flock-holding child is never misclassified wedged), Windows-hardcoded test → `t.TempDir()` (Linux
+  cross-builds), single 10s `GUIReadHeaderTimeout` owner (not the 2s bind budget), exact parent-death
+  seam; I — both-dead message reconciliation ($lead-decided: do NOT suppress the supervisor-liveness
+  relaunch, emit `gui-restart-interrupted-owner-recovering` instead of a contradictory `mcphub gui`),
+  one total classifier deadline (supervisor-liveness never starved by a wedged marker) + Free-lease
+  released only after the CAS returns (no post-release CAS commit), real-flock two-tick race test, shared
+  `PidportFileLeaf` single owner. codex hit its usage limit mid-F-fix (resumed on refresh). fable hit its
+  Fable-5 limit at the final confirm → Sol confirm ALL-CLOSED (fable re-joins at the Phase-J gate).
+  my-verify green (build/vet + tagged api/cli/gui + `-race` on the new tests). Review records:
+  `item3-unitB-phaseF-review.md` + this status entry for Phase I.
 
 ## Now
 
-Items 1 + 2 + Unit A + **Unit B foundations A+B+C** DELIVERED + deployed. **Now: Unit B gated group
-D–J** — the large feature-gated (`gui.RestartV3Enabled()`, default OFF) handoff protocol (marker store,
-reservation flock, child/parent coordinator, frontend, ensure-alive degrade-only, gate flip). Plan +
-fable-amended ACs ready in `item3-unitB-plan.md`; A+B+C are its landed prerequisite seam. Also standing:
+Items 1 + 2 + Unit A + **Unit B foundations A+B+C** delivered + deployed. Unit B gated group progress:
+**Phases D, E, F, I all COMMITTED to `feat/gui-restart-unitb-gated`, default-OFF, NOT deployed** (the
+atomic group ships at Phase J: gate flip → one PR → bot → deploy). **Now: Phase G** — the parent
+coordinator (spawn/confirm/reserve/parent-hub-close/release + pre-release rollback + the 202/2xx endpoint),
+the largest remaining phase; then H (frontend + progress + degrade messages) and J (gate flip + v1 delete
++ PR + bot + deploy). Parallel queued: **PR #561** — the Codex-bot's fail-closed revert of Phase C is
+non-canon (fable security review: threat overstated, revert closes nothing); the canonical fix is Option B
+(adversarial-gated `RotateHubInstanceID`), to be implemented off master and then #561 closed
+(`decisions/2026-07-18-hub-initial-bind-adversarial-token-rotation.md`). Also standing:
 a `2026-07-17` policy-ownership audit
 (`backlog/2026-07-17-ticker-intervals-hardcoded-split-policy-ownership.md`, 4×P2 + 4×P3, the
 form-driven-registry rule) surfaced from an operator question during item 2; not a Phase-0 item but
 overlaps items 3-6 (truthful surfaces, config ownership) — the product-manager should decide whether
 it folds into Phase 0 or becomes its own initiative.
+
+## Active review agents (2026-07-18)
+
+| Role | Scope | Model/effort | State |
+|---|---|---|---|
+| knowledge-archivist | Read-only recovery-state audit for `work-items/active/`; Phase-F artifacts remain untouched | internal agent, low effort — bounded artifact-presence/index consistency check | completed: Phase-F item review-ready; unrelated recovery drift reported |
+| analyst | Phase-F diff, unchanged dependents, normal-start equivalence, child/nonce/exit/commit flow | internal agent, high effort — cross-file behavioral and security-contract trace | completed: REVISE, four contract risks |
+| qa-engineer | AC-F1..F5, focused/full package checks, cross-platform and failure-path falsification | internal agent, high effort — executable regression gate over security/lifecycle paths | completed: REVISE, Windows green; Linux and two deterministic defect probes fail |
+| architecture-reviewer | Listener-continuation ownership, child lifecycle, failure-state consistency, extension seams | internal agent, high effort — claim-verify against accepted Phase-F facts | completed: REVISE, four ownership/contract defects |
+| security-reviewer | Nonce secrecy/lifetime, challenged readiness, parent identity/death, gate and exit fencing | internal agent, high effort — adversarial implementation review | completed: REVISE, owner-only read and nonce-lifetime defects |
+
+## Phase-F correction run (2026-07-18)
+
+| Agent | Role | Model/effort | Status | Launched |
+|---|---|---|---|---|
+| recovery-state completeness audit | knowledge-archivist | internal agent, low effort — bounded read-only artifact/index audit before implementation delegation | completed: PASS; Phase F ready, unrelated parked-item drift isolated | current session |
+| six-finding Phase-F correction | backend-engineer | internal agent, high effort — security-sensitive cross-platform process/marker lifecycle correction with red-green tests | completed: PASS; six focused RED→GREEN fixes and required tagged suite green | current session |
+| Phase-F acceptance matrix | qa-engineer | internal agent, high effort — claim-verify of lifecycle, portability, compatibility, and exact required commands | completed: REVISE; child bind deadline is not applied | current session |
+| nonce/process security re-gate | security-reviewer | internal agent, high effort — adversarial review of strict consume, identity lifetime, cleanup, and marker classification | completed: REVISE; POSIX consume race, Commit liveness race, and nonce-path authorization gap | current session |
+| security correction constraints | security-engineer | internal agent, high effort — define implementable exact invariants for consume identity, marker liveness, and nonce object authorization | completed: BLOCKED:dependency; exact opened-entry unlink is impossible against malicious same-UID rename through pathname transport | current session |
+
+Resume point: the human selected Option B pathname transport and accepted malicious same-user rename as a
+non-threat because that actor already owns and can read the nonce. The resumed `$backend-engineer` lane
+completed the strict exact-length consume, canonical pre-consume path authorization, post-unlink fail-closed
+checks, dedicated standby bind/close budgets, single 10-second header-timeout owner, exact Windows parent
+death handle plus injected seam, runtime-serialized Commit settlement, stale-generation fail-fast behavior,
+environment clearing, and cross-platform fixtures. Fresh evidence: `gofmt -l` on the Phase-F files emitted
+nothing; `go build ./...` and `go vet ./...` exited 0; the exact tagged API/CLI/GUI suite passed in 212.1 s
+(`api` 79.197 s, `cli` 208.010 s, `gui` 191.228 s). Phase F is corrected and ready for independent QA and
+security re-gates. Phase I remained untouched by this lane; no commit is authorized or created.

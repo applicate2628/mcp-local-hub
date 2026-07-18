@@ -9,7 +9,9 @@
 
 ## Active (work-items/active/)
 
-_None._ (adopt-npx-orphans closed 2026-07-16 — see Archived.)
+| Item | Status |
+|---|---|
+| [2026-07-16-productization-gui-solidify](active/2026-07-16-productization-gui-solidify/status.md) | Item 3 Unit B gated group: Phases D/E/F/I committed (default-OFF, not deployed); commission-fixed + Sol-confirmed; Phase G (parent coordinator) next; PR #561 canonical fix (Option B) queued off-master |
 
 ## Reaper kill-authority hardening — COMPLETE (2026-07-08, all bot-PASS + deployed)
 
