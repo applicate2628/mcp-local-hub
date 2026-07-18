@@ -61,10 +61,19 @@ func newPlatformBackend() (Backend, error) {
 // from the supervise-only shim to the gui-owns-supervisor shim with
 // no extra step.
 func superviseArgs(opts Options) []string {
+	// --no-browser: the autostart/logon/liveness-recovery GUI is a headless
+	// server + tray indicator, NOT an interactive `mcphub gui`. Without it,
+	// EVERY relaunch (user logon OR a `supervise --ensure-alive` recovery after
+	// the fleet is killed) auto-opened a browser window — spamming the operator
+	// with tabs on every fleet churn. The tray icon signals "running"; the
+	// operator opens the dashboard from the tray. (Bug 2026-07-18: repeated
+	// test-sweeps of mcphub.exe triggered repeated autostart relaunches, each
+	// popping a browser.) See memory feedback_gui_always_tray (tray on, browser
+	// off) + gui.go's --no-browser flag.
 	if opts.StrictMode {
-		return []string{"gui", "--strict-mode"}
+		return []string{"gui", "--no-browser", "--strict-mode"}
 	}
-	return []string{"gui"}
+	return []string{"gui", "--no-browser"}
 }
 
 // Enable installs (or replaces) the autostart Task Scheduler entry.

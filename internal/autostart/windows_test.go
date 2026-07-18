@@ -113,8 +113,8 @@ func TestWindowsBackend_EnableCreatesTask(t *testing.T) {
 	// As of 2026-05-18, the autostart entry launches `mcphub gui`
 	// instead of `mcphub supervise` — GUI process owns supervisor
 	// lifecycle (see internal/cli/gui_supervisor_owner.go).
-	if len(spec.Args) != 1 || spec.Args[0] != "gui" {
-		t.Errorf("Create.Args = %v, want [gui]", spec.Args)
+	if len(spec.Args) != 2 || spec.Args[0] != "gui" || spec.Args[1] != "--no-browser" {
+		t.Errorf("Create.Args = %v, want [gui --no-browser]", spec.Args)
 	}
 }
 
@@ -135,7 +135,7 @@ func TestWindowsBackend_EnableStrictModeAddsFlag(t *testing.T) {
 	got := f.createCalls[0].Args
 	// As of 2026-05-18, autostart launches `mcphub gui --strict-mode`
 	// (GUI owns supervisor lifecycle; --strict-mode threads through).
-	want := []string{"gui", "--strict-mode"}
+	want := []string{"gui", "--no-browser", "--strict-mode"}
 	if len(got) != len(want) {
 		t.Fatalf("Create.Args = %v, want %v", got, want)
 	}
