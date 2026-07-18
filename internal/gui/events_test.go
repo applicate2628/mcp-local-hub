@@ -99,6 +99,45 @@ func TestBroadcaster_Publish_PersistsToGUIEventLog(t *testing.T) {
 	}
 }
 
+func TestClassifyEvent_RestartV3ProgressAndDiscriminators(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		eventType, wantSeverity string
+	}{
+		{"gui-restart-progress", api.GUIEventSeverityInfo},
+		{"gui-restart-lock-acquired", api.GUIEventSeverityInfo},
+		{"gui-restart-reservation-held", api.GUIEventSeverityInfo},
+		{"gui-restart-spawn-failed", api.GUIEventSeverityWarn},
+		{"gui-restart-proof-timeout", api.GUIEventSeverityWarn},
+		{"gui-restart-proof-mismatch", api.GUIEventSeverityWarn},
+		{"gui-restart-child-bind-failed", api.GUIEventSeverityWarn},
+		{"gui-restart-pre-release-rollback", api.GUIEventSeverityWarn},
+		{"gui-restart-quiesce-timeout", api.GUIEventSeverityWarn},
+		{"gui-restart-reservation-write-failed", api.GUIEventSeverityWarn},
+		{"gui-restart-interrupted-free-flock", api.GUIEventSeverityWarn},
+		{"gui-restart-live-holder-wedged", api.GUIEventSeverityWarn},
+		{"gui-restart-owner-unknown", api.GUIEventSeverityWarn},
+		{"gui-restart-interrupted-owner-recovering", api.GUIEventSeverityWarn},
+		{"gui-restart-pre-release-rollback-failed", api.GUIEventSeverityError},
+		{"gui-restart-interrupted-marker-write-failed", api.GUIEventSeverityError},
+		{"gui-restart-commit-write-failed", api.GUIEventSeverityError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.eventType, func(t *testing.T) {
+			source, severity := classifyEvent(tc.eventType)
+			if source != "gui" || severity != tc.wantSeverity {
+				t.Fatalf("classifyEvent(%q) = %q/%q, want gui/%q", tc.eventType, source, severity, tc.wantSeverity)
+			}
+		})
+	}
+
+	source, severity := classifyEvent("future-gui-event")
+	if source != "gui" || severity != api.GUIEventSeverityInfo {
+		t.Fatalf("unknown fallback = %q/%q, want gui/info", source, severity)
+	}
+}
+
 // TestBroadcaster_DisableGUIEventLog_SkipsPersist guards the opt-out
 // path used by tests and ephemeral surfaces.
 func TestBroadcaster_DisableGUIEventLog_SkipsPersist(t *testing.T) {

@@ -514,6 +514,32 @@ func classifyEvent(eventType string) (source string, severity string) {
 		return "poller", api.GUIEventSeverityError
 	case "bulk-action":
 		return "servers", api.GUIEventSeverityInfo
+	case "gui-restart-progress", "gui-restart-lock-acquired", "gui-restart-reservation-held":
+		// Coarse restart lifecycle updates are expected control-flow. Keep
+		// them at info while registering the source explicitly so future
+		// fallback changes cannot silently reclassify the restart stream.
+		// classifyEvent receives only the type: parent terminal rollback
+		// failures are gui-restart-progress bodies with phase=interrupted and
+		// a failure reason_code, not standalone event types. gui-events.log
+		// readers seeking those parent failures must therefore filter the body
+		// reason_code instead of relying on this type-level severity.
+		return "gui", api.GUIEventSeverityInfo
+	case "gui-restart-spawn-failed",
+		"gui-restart-proof-timeout",
+		"gui-restart-proof-mismatch",
+		"gui-restart-child-bind-failed",
+		"gui-restart-pre-release-rollback",
+		"gui-restart-quiesce-timeout",
+		"gui-restart-reservation-write-failed",
+		"gui-restart-interrupted-free-flock",
+		"gui-restart-live-holder-wedged",
+		"gui-restart-owner-unknown",
+		"gui-restart-interrupted-owner-recovering":
+		return "gui", api.GUIEventSeverityWarn
+	case "gui-restart-pre-release-rollback-failed",
+		"gui-restart-interrupted-marker-write-failed",
+		"gui-restart-commit-write-failed":
+		return "gui", api.GUIEventSeverityError
 	case "operator-action":
 		// Operator-initiated, security-relevant GUI mutations (supervisor
 		// restart, migrate, demigrate, install, secret mutation, backup

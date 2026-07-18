@@ -1003,13 +1003,18 @@ func TestRestartV3_PreReleaseRollbackFailureInterruptsReleasesLeaseAndExits(t *t
 				t.Fatalf("marker = %+v, want interrupted", marker.record)
 			}
 			foundReason := false
+			var terminalEvent Event
 			for _, event := range events.snapshot() {
 				if event.Body["reason_code"] == tc.wantReason {
 					foundReason = true
+					terminalEvent = event
 				}
 			}
 			if !foundReason {
 				t.Fatalf("events = %+v, want reason %q", events.snapshot(), tc.wantReason)
+			}
+			if terminalEvent.Type != "gui-restart-progress" || terminalEvent.Body["phase"] != HandoffPhaseInterrupted {
+				t.Fatalf("terminal event = %#v, want gui-restart-progress/interrupted with body reason_code", terminalEvent)
 			}
 		})
 	}
@@ -1157,6 +1162,46 @@ func TestRestartV3_GraceAllowlistRedirectAndMutatorRejection(t *testing.T) {
 		if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "GUI_RESTART_IN_PROGRESS") {
 			t.Fatalf("%s %s = %d %q, want 503 GUI_RESTART_IN_PROGRESS", request.Method, request.URL, response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestRestartV3_GraceNavigationIsBestEffortAndNeverClaimsCommit(t *testing.T) {
+	events := &phaseFEvents{}
+	coordinator := &RestartCoordinator{deps: RestartCoordinatorDependencies{Events: events}}
+	start := RestartCoordinatorStart{
+		HandoffID:  "handoff-navigation",
+		Generation: "generation-navigation",
+		OldPort:    19125,
+		TargetPort: 19126,
+	}
+	coordinator.publishProgress(start, HandoffPhaseReserved, "")
+
+	published := events.snapshot()
+	if len(published) != 1 {
+		t.Fatalf("published events = %d, want one reserved navigation event", len(published))
+	}
+	event := published[0]
+	if event.Type != "gui-restart-progress" || event.Body["phase"] != HandoffPhaseReserved {
+		t.Fatalf("navigation event = %#v, want gui-restart-progress/reserved", event)
+	}
+	if event.Body["old_port"] != 19125 || event.Body["new_port"] != 19126 || event.Body["same_port"] != false {
+		t.Fatalf("navigation ports = %#v, want old=19125 new=19126 same_port=false", event.Body)
+	}
+	for _, forbidden := range []string{"committed", "child_committed", "activation_committed"} {
+		if _, ok := event.Body[forbidden]; ok {
+			t.Fatalf("best-effort navigation event asserts %q: %#v", forbidden, event.Body)
+		}
+	}
+
+	handler := newRestartGraceHandler(start.HandoffID, start.TargetPort, http.NotFoundHandler())
+	handler.released.Store(true)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/gui/restart/redirect?handoff_id="+start.HandoffID, nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"target_url":"http://127.0.0.1:19126/"`) {
+		t.Fatalf("released redirect = %d %s, want trusted best-effort target", response.Code, response.Body.String())
+	}
+	if strings.Contains(strings.ToLower(response.Body.String()), "committed") {
+		t.Fatalf("best-effort redirect claims child commit: %s", response.Body.String())
 	}
 }
 
