@@ -29,8 +29,11 @@ var errMacOSProbeUnsupported = errors.New("--force --kill identity probe not sup
 var errWindowsArchUnsupported = errors.New("--force --kill identity probe is amd64-only on Windows; this build (other arch) cannot enumerate cmdline/start-time")
 
 // ProcessIdentity is the cross-platform result of inspecting an OS
-// process. Used by single_instance.go's Probe + KillRecordedHolder
-// to run the three-part identity gate before any destructive action.
+// process. Used by single_instance.go's Probe + KillRecordedHolder and
+// hub_listener.go's initial-bind owner classifier. The former runs the full
+// destructive-action identity gate; the latter reuses only the mcphub GUI
+// image + argv identity arms to distinguish a benign GUI holder from a
+// foreign or unverifiable hub-port holder.
 //
 // Codex r5 #1 + r6 #5 + r7 #6: image basename + (argv[1]=="gui" OR
 // len(argv)==1) + start-time vs pidport mtime. All three checks live
@@ -103,8 +106,8 @@ func pingIncumbent(ctx context.Context, port int, timeout time.Duration) (int, e
 }
 
 // processID is the platform-specific process inspector; defined in
-// probe_windows.go, probe_linux.go, and probe_darwin.go. Called by
-// single_instance.go only — keep callers narrow.
+// probe_windows.go, probe_linux.go, and probe_darwin.go. Called only by the
+// single-instance identity gate and the hub initial-bind owner classifier.
 //
 // processIDOverride (test seam in test_seams.go), when non-nil,
 // replaces the platform implementation. Production code path is

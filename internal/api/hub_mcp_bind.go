@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"syscall"
 )
 
 // HubMcpBindResult bundles the listener and the post-write endpoint
@@ -38,6 +39,29 @@ import (
 type HubMcpBindResult struct {
 	Listener net.Listener
 	Endpoint HubEndpoint
+}
+
+// hubMcpListenerBindError marks only a confirmed socket bind refusal on the
+// positive persisted hub port. Setup/configuration failures that happen before
+// NewListenerWithSOExclusiveContext are deliberately never wrapped in this
+// type, so callers cannot mistake them for port contention.
+type hubMcpListenerBindError struct {
+	port int
+	err  error
+}
+
+func (e *hubMcpListenerBindError) Error() string { return e.err.Error() }
+func (e *hubMcpListenerBindError) Unwrap() error { return e.err }
+
+// HubMcpListenerBindFailurePort returns the persisted hub port only when err
+// proves that the listener bind itself was refused because the port was held.
+// Wrapped pre-bind and post-bind startup errors return ok=false.
+func HubMcpListenerBindFailurePort(err error) (port int, ok bool) {
+	var bindErr *hubMcpListenerBindError
+	if !errors.As(err, &bindErr) || bindErr == nil || bindErr.port <= 0 {
+		return 0, false
+	}
+	return bindErr.port, true
 }
 
 // BindHubMcpListener executes spec §"Bind ordering" steps 3-7 under
@@ -179,7 +203,11 @@ func BindHubMcpListener(ctx context.Context, clients []string, validateManifests
 				"reason": "pre-bind window — credentials may have leaked to pre-binding process",
 			})
 		}
-		return nil, fmt.Errorf("bind %s: %w", bindAddr, lnErr)
+		wrapped := fmt.Errorf("bind %s: %w", bindAddr, lnErr)
+		if ep.Port > 0 && (IsPortBindRefusedErr(lnErr) || errors.Is(lnErr, syscall.EADDRINUSE)) {
+			return nil, &hubMcpListenerBindError{port: ep.Port, err: wrapped}
+		}
+		return nil, wrapped
 	}
 
 	// codex bot phase4 r13 P1 closure on PR #158: if ctx was canceled

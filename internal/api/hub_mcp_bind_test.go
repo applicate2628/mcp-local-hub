@@ -14,6 +14,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -49,6 +50,39 @@ func TestBindHubMcpListenerSucceedsOnFirstStart(t *testing.T) {
 	if res.Endpoint.InstanceID == "" {
 		t.Errorf("endpoint.InstanceID empty after first-start bind")
 	}
+}
+
+func TestBindHubMcpListenerForeignHeldPortEmitsCredentialRotationWarning(t *testing.T) {
+	hubMcpStateTestHelper(t)
+
+	holder, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen as foreign port holder: %v", err)
+	}
+	defer holder.Close()
+	port := holder.Addr().(*net.TCPAddr).Port
+	if _, err := EnsureHubEndpoint(port, 111); err != nil {
+		t.Fatalf("EnsureHubEndpoint: %v", err)
+	}
+
+	_, bindErr := BindHubMcpListener(context.Background(), []string{"claude-code"}, nil)
+	if bindErr == nil {
+		t.Fatal("BindHubMcpListener succeeded while the persisted port was held")
+	}
+	startupErr := fmt.Errorf("hub-mcp: %w", bindErr) // startHubMcpListener wrapping shape
+	if gotPort, ok := HubMcpListenerBindFailurePort(startupErr); !ok || gotPort != port {
+		t.Fatalf("bind failure classification = port %d ok %v, want persisted port %d", gotPort, ok, port)
+	}
+	events, err := RecentHubMcpEvents(16)
+	if err != nil {
+		t.Fatalf("RecentHubMcpEvents: %v", err)
+	}
+	for _, event := range events {
+		if event["event"] == "credential-rotation-required" && event["level"] == "warn" {
+			return
+		}
+	}
+	t.Fatalf("credential-rotation-required warning absent from events: %#v", events)
 }
 
 // TestBindHubMcpListenerConcurrentFirstStartSerializesOnLock pins
@@ -159,6 +193,9 @@ func TestBindHubMcpListenerValidateManifestFailureClosesNothing(t *testing.T) {
 	// Wrapped via fmt.Errorf("bind refused: %w", verr).
 	if !containsString(err.Error(), wantErr) {
 		t.Errorf("error chain missing marker %q: %v", wantErr, err)
+	}
+	if gotPort, ok := HubMcpListenerBindFailurePort(err); ok {
+		t.Fatalf("manifest validation error classified as socket bind failure on port %d: %v", gotPort, err)
 	}
 }
 
