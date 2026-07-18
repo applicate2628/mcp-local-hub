@@ -117,8 +117,23 @@ self-restart handoff).
   capacity) → proceeded on the strength of exact-spec-fix + passing regression + green suite + the bot
   gate (bot PASS on `ab0810fc`: "no major issues", 0 inline, 0 unresolved threads). Full record:
   `item3-unitB-foundations-review.md`.
+- **Option B (adversarial hub-InstanceID rotation) — DELIVERED + DEPLOYED 2026-07-18.** PR #562, squash
+  `61890221`, deployed (build.sh from master → C:-staged `install --upgrade` → supervisor cold-restart,
+  fleet 38; GUI restarted PID 130532; `/api/version` commit `61890221`, `/api/status` 200,
+  `/api/hub/health` healthy). This was the canonical response to the Codex-bot PR #561 (closed non-canon):
+  keep Phase C auto-recovery but rotate the hub InstanceID once on a FOREIGN/unverifiable port-holder at
+  initial bind, with a durable + race-safe needs-reconcile signal. Six bot rounds (R3 durable-marker +
+  confirmed-bind, R4 hydration/bind serialization race + stale-live-latch, R5 skipped-clients FALSE-POSITIVE
+  3-way-refuted) + a fable commission (F1 restart-accept hydrate + F2 ticker TOCTOU). Accepted multi-tenant
+  residual P1-1/P1-2 (async owner probe + forgeable identity), governed by `MCPHUB_REQUIRE_SINGLE_USER_HOME`
+  + owner-only DACL. Decision: `decisions/2026-07-18-hub-initial-bind-adversarial-token-rotation.md`
+  (Amendments 1-3). Follow-ups: `backlog/2026-07-18-hub-restart-path-adversarial-rotation-followups.md`
+  (F1 restart-path capture = the one substantive), `bugs/2026-07-18-process-snapshot-scanner-token-too-long.md`,
+  `bugs/2026-05-29-cli-supervise-ipc-tests-flaky-in-full-suite.md` (reopened — distinct TempDir-cleanup residual).
 - **Unit B gated group D–J** — the next separate large effort (feature-gated handoff protocol,
-  default-OFF, flipped ON in J). Not started; A+B+C are its prerequisite seam.
+  default-OFF, flipped ON in J). D/E/F/I committed to `feat/gui-restart-unitb-gated` (`0654c8e7`, default-OFF,
+  not deployed); **Phase G next** (parent coordinator). NOTE: that branch predates #562 — it must be rebased
+  onto master `61890221` (both touch hub_listener/server/hub_health) before Phase G continues.
 
 ## Now
 
