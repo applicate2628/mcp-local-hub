@@ -84,3 +84,19 @@ reviewable path and one failure mode the relocating defect has no surface to hid
 `item3-restart-design.md` is superseded by a v3 (design-B) that rewrites Unit B's recovery per the
 KEEP/CUT/DEGRADE above. The v2.2 CAS graph is retained in history for the reasoning trail but is NOT the
 implementation target. Unit A (guard) is unaffected and ships first.
+
+## C6 supersession note (2026-07-18)
+
+Design v3.1 is the current contract where this accepted synthesis differs from
+its earlier sketch. KEEP #5's "relaunch once" is superseded: ensure-alive is
+degrade-only and never spawns a GUI. After the phase deadline it may classify
+the exact nonterminal marker and publish either the plain `mcphub gui` guidance
+for an owned Free flock or the identity-gated `mcphub gui --force --kill`
+guidance for a Held flock; Unknown selects neither.
+
+The three-phase marker `{in-progress, committed, interrupted}` is likewise
+superseded by the v3.1 four-phase marker
+`{in-progress, reserved, committed, interrupted}`. `reserved` is the
+load-bearing healthy release-to-acquire gap and maps to Held for third entrants.
+The live design and implementation must not be read as authorizing the earlier
+ensure-alive relaunch path.

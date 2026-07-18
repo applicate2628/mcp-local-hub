@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -262,6 +265,153 @@ func TestRestartV3_ChildStartupUsesStandbyContinuationAndCommits(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runRestartV3ChildStartup: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("restart child startup did not stop after cancellation")
+	}
+}
+
+func TestRestartV3_ActivatedChildAcceptsSecondRestart(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR", stateDir)
+	t.Setenv("MCPHUB_GUI_RESTART_V3", "1")
+
+	firstProbe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve child target port: %v", err)
+	}
+	secondProbe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		_ = firstProbe.Close()
+		t.Fatalf("reserve second restart target port: %v", err)
+	}
+	childPort := firstProbe.Addr().(*net.TCPAddr).Port
+	secondTargetPort := secondProbe.Addr().(*net.TCPAddr).Port
+	_ = firstProbe.Close()
+	_ = secondProbe.Close()
+
+	now := time.Now().UTC()
+	deadlines := gui.DefaultRestartDeadlines()
+	deadlines.Now = time.Now
+	nonce := bytes.Repeat([]byte{0x4a}, 32)
+	generation := "generation-cli-child-second-restart"
+	generationHash := sha256.Sum256([]byte(generation))
+	noncePath := filepath.Join(stateDir, fmt.Sprintf("%s-%x", api.GUIRestartNonceFileLeaf, generationHash[:]))
+	if err := api.WriteStateFileBytesAtomic(noncePath, nonce); err != nil {
+		t.Fatalf("write nonce file: %v", err)
+	}
+	store := gui.NewHandoffMarkerStore(stateDir, deadlines)
+	started, err := store.Begin(gui.HandoffBegin{
+		Generation: generation, Route: gui.HandoffRoutePortChange,
+		OldPort: 9125, NewPort: childPort, OldPID: os.Getppid(),
+	})
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	nonceHash := sha256.Sum256(nonce)
+	if _, err := store.Reserve(started.Generation, started.Sequence, now.Add(deadlines.Reservation), "sha256:"+fmt.Sprintf("%x", nonceHash[:]), os.Getpid()); err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	raw, err := gui.EncodeSelfRestartHandoff(gui.SelfRestartHandoff{
+		Version: 1, HandoffID: "handoff-cli-child-second-restart", Generation: started.Generation,
+		Sequence: started.Sequence, OldPort: 9125, TargetPort: childPort,
+		ParentPID: os.Getppid(), NoncePath: noncePath,
+	})
+	if err != nil {
+		t.Fatalf("EncodeSelfRestartHandoff: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	childServer := make(chan *gui.Server, 1)
+	confirmStarted := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- runRestartV3ChildStartup(ctx, restartV3ChildStartupConfig{
+			Handoff: raw, PID: os.Getpid(), PidportPath: filepath.Join(stateDir, "gui.pidport"),
+			Port: childPort, Version: "phase-j-child-second-restart-test", Deadlines: deadlines,
+			StartRuntime: func(runtimeCtx context.Context, server *gui.Server, owner *gui.GUIListenerOwner, bound net.Listener, lease gui.SingleInstanceLease) error {
+				if owner != server.GUIListenerOwner() {
+					return errors.New("activated child listener owner differs from server restart owner")
+				}
+				ownedLease, ok := lease.(*releaseOnceLease)
+				if !ok {
+					ownedLease = &releaseOnceLease{lease: lease}
+				}
+				defer ownedLease.Release()
+				composed, err := composeGuiServerRestartV3(
+					runtimeCtx,
+					newGuiCmdReal(),
+					ownedLease,
+					childPort,
+					filepath.Join(stateDir, "gui.pidport"),
+					&guiServerStartup{server: server, listenerOwner: owner, bound: bound},
+					[]string{"gui"},
+					restartV3ParentRuntime{
+						SettingsGet: func(string) (string, error) { return strconv.Itoa(secondTargetPort), nil },
+						Spawn:       func([]string, gui.SelfRestartHandoff) (gui.RestartParentChild, error) { return phaseGCLIChild{}, nil },
+						Confirm: func(confirmCtx context.Context, _ int, _ []byte, _ gui.AuthenticatedReadinessIdentity) error {
+							select {
+							case confirmStarted <- struct{}{}:
+							default:
+							}
+							<-confirmCtx.Done()
+							return confirmCtx.Err()
+						},
+						Exit: func() {},
+					},
+				)
+				if err != nil {
+					return err
+				}
+				childServer <- composed
+				ready := make(chan struct{})
+				return composed.ContinueWithGUIListener(runtimeCtx, ready, owner, bound)
+			},
+		})
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		record, readErr := store.Read()
+		if readErr != nil {
+			t.Fatalf("Read committed marker: %v", readErr)
+		}
+		if record != nil && record.Phase == gui.HandoffPhaseCommitted {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("child did not commit before deadline; record=%+v", record)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	var server *gui.Server
+	select {
+	case server = <-childServer:
+	case err := <-done:
+		t.Fatalf("child runtime stopped before second restart request: %v", err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("activated child server was not published")
+	}
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/api/gui/restart", childPort), nil)
+	req.Header.Set("Origin", fmt.Sprintf("http://127.0.0.1:%d", childPort))
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, req)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("second restart status = %d body=%s, want 202 without nil-coordinator spawn_error", response.Code, response.Body.String())
+	}
+	select {
+	case <-confirmStarted:
+	case <-time.After(time.Second):
+		t.Fatal("second restart coordinator did not begin standby confirmation")
+	}
+
 	cancel()
 	select {
 	case err := <-done:

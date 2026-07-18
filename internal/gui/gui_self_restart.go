@@ -25,16 +25,12 @@
 //   dying parent, and EXITS without ever starting a server — leaving NO
 //   GUI running once the parent exits. There is no second attempt.
 //
-//   The safe handoff therefore needs BOTH halves:
-//     1. (this file) the parent spawns a detached child carrying the
-//        MCPHUB_GUI_SELF_RESTART_HANDOFF=1 env signal, then exits via
-//        os.Exit so the OS releases the flock (the same OS-release
-//        mechanism `mcphub gui --force --kill` already relies on).
-//     2. (internal/cli/gui.go) the child, seeing the handoff env, runs a
-//        BOUNDED retry loop around AcquireSingleInstanceAt so it tolerates
-//        the brief window in which the parent has not yet exited. Without
-//        this the single-shot TryLock would BUSY-out and strand the
-//        handoff with no GUI.
+//   The v3 coordinator owns the safe handoff: it writes the authenticated
+//   marker, starts a retained replacement child carrying a structured
+//   MCPHUB_GUI_SELF_RESTART_HANDOFF value, and releases or terminates that
+//   exact child according to the four-phase protocol. The child performs a
+//   bounded acquire against the recorded handoff instead of relying on the
+//   unsafe v1 spawn-and-exit race.
 //
 //   os.Exit (rather than triggering the cobra stop() context) is
 //   deliberate: the GUI's normal return path runs a deferred
@@ -43,10 +39,8 @@
 //   the still-live supervisor. os.Exit skips that defer, so the
 //   supervisor survives and the flock is released by process death.
 //
-// Best-effort + seam-driven: the spawn and the process-exit are behind
-// package-level function seams (selfRestartSpawnFn / selfRestartExitFn)
-// so the handler test never spawns a real process nor exits the test
-// binary.
+// The v3 spawn and process-exit boundaries remain seam-driven so tests never
+// spawn a real process or exit the test binary.
 
 package gui
 
@@ -61,7 +55,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -72,18 +65,11 @@ import (
 // single-shot acquire" (the default for every other launch path).
 const SelfRestartHandoffEnv = "MCPHUB_GUI_SELF_RESTART_HANDOFF"
 
-// selfRestartExitDelay is the grace window between writing the 200
-// response and exiting the process, so the HTTP response is flushed to
-// the browser before the listener dies. Kept short — the child's
-// bounded acquire retry absorbs the remaining handoff window.
-const selfRestartExitDelay = 250 * time.Millisecond
-
 // guiSelfRestartResponse reports the spawn outcome. `spawned` false with
 // a non-empty `spawn_error` means the child was NOT launched and the
 // parent will NOT exit (so the operator is never left with no GUI).
 type guiSelfRestartResponse struct {
-	// HandoffID and Generation identify a gate-ON v3 handoff. They are
-	// omitted from the retained v1 response.
+	// HandoffID and Generation identify a gate-ON v3 handoff.
 	HandoffID  string       `json:"handoff_id,omitempty"`
 	Generation string       `json:"generation,omitempty"`
 	Phase      HandoffPhase `json:"phase,omitempty"`
@@ -112,52 +98,16 @@ func (s *Server) guiSelfRestartHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if s.cfg.RestartV3Enabled {
-		s.guiRestartV3Handler(w)
+	if !s.cfg.RestartV3Enabled {
+		writeAPIError(
+			w,
+			errors.New("automatic GUI restart is disabled; restart the GUI manually"),
+			http.StatusServiceUnavailable,
+			"GUI_RESTART_UNAVAILABLE",
+		)
 		return
 	}
-
-	resp := guiSelfRestartResponse{}
-
-	pid, err := selfRestartSpawnFn()
-	if err != nil {
-		// Spawn failed — do NOT exit; the operator keeps the running GUI
-		// and sees the error, rather than being stranded with no GUI.
-		resp.SpawnError = err.Error()
-		_ = api.LogHubMcpEvent("error", "gui-self-restart-spawn-failed", map[string]any{
-			"error": err.Error(),
-		})
-		w.Header().Set("Content-Type", "application/json")
-		// 200 with spawned:false — the frontend inspects the body
-		// (mirrors the /api/supervisor/restart always-200 contract so a
-		// partial outcome is never lost behind a bare HTTP status).
-		_ = json.NewEncoder(w).Encode(resp)
-		return
-	}
-
-	resp.Spawned = true
-	resp.SpawnedPID = pid
-	resp.Restarting = true
-
-	_ = api.LogHubMcpEvent("info", "gui-self-restart-via-gui", map[string]any{
-		"spawned_pid": pid,
-	})
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
-
-	// Flush the response, then exit so the OS releases the
-	// single-instance flock for the freshly-spawned child to acquire.
-	// os.Exit (NOT the cobra stop() context) is intentional: it skips the
-	// deferred supervisor manager.Stop() so the daemon fleet survives the
-	// GUI re-exec — the child adopts the live supervisor.
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
-	}
-	go func() {
-		time.Sleep(selfRestartExitDelay)
-		selfRestartExitFn()
-	}()
+	s.guiRestartV3Handler(w)
 }
 
 func (s *Server) guiRestartV3Handler(w http.ResponseWriter) {
@@ -214,13 +164,11 @@ func (s *Server) guiRestartV3Handler(w http.ResponseWriter) {
 	}
 }
 
-// selfRestartSpawnFn / selfRestartExitFn are the production-default
-// seams. Tests swap them so the handler never spawns a real process nor
-// terminates the test binary.
-var (
-	selfRestartSpawnFn = spawnSelfRestartGUI
-	selfRestartExitFn  = func() { os.Exit(0) }
-)
+// selfRestartExitFn is the v3 process-exit seam. Tests replace it so the
+// coordinator can exercise the release boundary without terminating the test
+// binary. The v3 spawn seam is restartV3ParentRuntime.Spawn, whose production
+// implementation is SpawnRestartV3GUI.
+var selfRestartExitFn = func() { os.Exit(0) }
 
 // RequestSelfRestartExit crosses the self-restart-specific process boundary.
 // The production seam is os.Exit, intentionally bypassing normal-return
@@ -343,52 +291,4 @@ func replaceEnvironmentValue(environment []string, key, value string) []string {
 		replaced = append(replaced, entry)
 	}
 	return append(replaced, key+"="+value)
-}
-
-// spawnSelfRestartGUI launches a detached replacement `mcphub gui`
-// process that re-runs the CURRENT invocation's arguments (os.Args[1:],
-// so the same --port / --no-tray / --strict-mode flags are preserved),
-// with the handoff env var added so the child uses the bounded
-// lock-acquire retry. Returns the child PID on success.
-//
-// It reuses the same detach machinery as spawnDetachedSupervisor
-// (configureDetached + startDetachedSupervisorTolerant) so the child
-// gains the same DETACHED|NEW_GROUP|BREAKAWAY orphan-escape and the
-// corp-host ERROR_ACCESS_DENIED flag-stripping fallback.
-func spawnSelfRestartGUI() (int, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return 0, fmt.Errorf("os.Executable: %w", err)
-	}
-	if resolved, lerr := filepath.EvalSymlinks(exe); lerr == nil {
-		exe = resolved
-	}
-
-	// Re-run the current process's own argv tail so the replacement GUI
-	// binds the same port / flags. os.Args[0] is the binary path (we use
-	// the symlink-resolved `exe` instead); os.Args[1:] is the cobra
-	// command + flags ("gui", "--port", "9125", ...).
-	childArgs := append([]string{}, os.Args[1:]...)
-
-	// Carry the parent env forward (LOCALAPPDATA relax-lane vars, E2E
-	// seams, etc.) and append the handoff signal so the child retries the
-	// lock acquire instead of single-shot TryLock-ing.
-	childEnv := append(os.Environ(), SelfRestartHandoffEnv+"=1")
-
-	build := func() *exec.Cmd {
-		c := exec.Command(exe, childArgs...)
-		c.Env = childEnv
-		c.Stdin = nil
-		c.Stdout = nil
-		c.Stderr = nil
-		configureDetached(c) // platform-specific (_windows.go / _other.go)
-		return c
-	}
-	cmd, err := startDetachedSupervisorTolerant(build)
-	if err != nil {
-		return 0, fmt.Errorf("start replacement gui: %w", err)
-	}
-	// Reap the OS-side handle so the child outlives this process cleanly.
-	go func() { _ = cmd.Wait() }()
-	return cmd.Process.Pid, nil
 }

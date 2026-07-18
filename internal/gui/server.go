@@ -612,8 +612,8 @@ type Server struct {
 	cfg         Config
 	mux         *http.ServeMux
 	guiListener *GUIListenerOwner
-	// restartCoordinator is composed by the CLI only for a gate-ON parent.
-	// The child runtime and the default-OFF v1 path leave it nil.
+	// restartCoordinator is composed by the CLI for every gate-ON server,
+	// including an activated RestartV3 child. Gate-OFF servers leave it nil.
 	restartCoordinator restartCoordinatorStarter
 	port               atomic.Int32 // set after Listen, read by Port()
 	// api is the long-lived shared *api.API handle. Phase G2 places the

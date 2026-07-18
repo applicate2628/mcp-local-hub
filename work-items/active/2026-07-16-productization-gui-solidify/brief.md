@@ -1,47 +1,51 @@
 # Productization GUI solidify — current delivery brief
 
-Admission source: direct human decision recorded in `status.md` and Phase-0 item 3 in `roadmap.md`.
+Admission source: direct human Phase J decision on 2026-07-18, grounded in Phase-0 item 3 in `roadmap.md`
+and the accepted `item3-unitB-plan.md`.
 
-Primary task: Item 3, Unit B, Phase G — implement only the parent restart coordinator, pre-release rollback,
-parent hub-close ordering, and gated 202/2xx endpoint from the accepted `item3-restart-design.md` and
-`item3-unitB-plan.md` (including the 2026-07-18 cli-layer change-surface amendment).
+Primary task: Item 3, Unit B, Phase J — complete the final atomic release group by enabling RestartV3 by
+default, making the disabled gate fully inert, deleting only the retained v1 unsafe spawn-and-exit body,
+adding AC-J1, and closing the approved documentation drift.
 
-Scope: `RestartCoordinator` in `internal/gui/gui_restart_protocol.go`; the gated endpoint in
-`internal/gui/gui_self_restart.go`; the owner-side hub-close immediately before the parent's flock release in
-`internal/gui/server.go`; cli-layer parent composition in `internal/cli/gui.go`; and adjacent `_test.go` files.
-The coordinator must use the existing marker, listener-owner, lease, child-retained-handle, authenticated
-readiness, hub-owner, parser-aware argv, and self-restart exit seams. Directly enforcing AC-G1 through AC-G8
-tests are in scope.
+Scope: `internal/gui/gui_restart_gate.go`; the gate-off endpoint branch and retained v1 body in
+`internal/gui/gui_self_restart.go`; one adjacent inert-matrix test; `docs/phase-3b-ii-verification.md`;
+`CLAUDE.md`; and the required C6 supersession note in
+`work-items/decisions/2026-07-17-item3-unitB-recovery-simplify.md`.
 
-Out of scope: Phase H frontend changes, Phase J gate flip or v1 deletion, deployment, commit, push, real GUI
-spawn, Graphify, the `claude` CLI, `MCPHUB_GUI_SPAWN_TESTS`, and changes outside the approved Phase G surface.
-The gate-OFF endpoint remains the retained v1 implementation.
+Approved seams: preserve the v3 coordinator's spawn and exit seams and the composition-root discipline that
+successful restart exits without calling `manager.Stop`. Preserve all Phase D-I/G/H behavior and contracts.
 
-Acceptance: AC-G1 through AC-G8 in `item3-unitB-plan.md`; the concrete pre-release rollback gate is
-`parentLeaseReleased == false`; proved rollback retains the lease and rebinds without reacquire; failed rollback
-releases exactly once and requests the composition-root exit; post-release behavior performs no protocol writes,
-waits, termination, claim/reclaim, recovery bind, or activation signaling; successful handoff skips
-`manager.Stop`; spawn failure remains 2xx. Required verification is `go build ./...`, `go vet ./...`, clean
-`gofmt -l` on touched files, and `go test -tags=test_state_path_env -count=1 -timeout 15m ./internal/gui/
-./internal/cli/`, followed by an `mcphub.exe` process sweep.
+Out of scope: deployment, commit, push, real GUI spawn, Graphify, the `claude` CLI,
+`MCPHUB_GUI_SPAWN_TESTS`, any `mcphub.exe` sweep/kill, frontend implementation changes, and changes outside
+the Phase J surface.
 
-Current stage: implementation. The branch is `feat/gui-restart-unitb-gated` at `beadf474`; this is the requested
-`58340fd5` baseline plus one documentation-only commit that authorizes `internal/cli/gui.go` and its adjacent
-tests for Phase G. Phases D, E, F, and I are landed default-OFF and not deployed. Integration owner: the main
-conversation holding `$lead`; implementation owner: explicitly assigned `$backend-engineer`; next verification
-owner: `$qa-engineer`.
+Acceptance: AC-J1 through AC-J4 in `item3-unitB-plan.md`, as narrowed by the direct human constraints. Gate
+OFF must return 503, write no marker, spawn no child, skip the ensure-alive predicate, and retain frontend
+manual guidance. Gate ON must activate the RestartV3 contract suite. The two degrade-to-recovery end-to-end
+tests must pass if seam-drivable. Documentation must add the two CLI-primary discriminator rows, the real
+self-restart-and-reconnect smoke, the unreapable wedged-holder runbook row, the current bounded listener
+restart/exhaustion behavior, and the v3.1 C6 supersession note.
 
-Critical risks and owners: lease/hub/child handle ordering and post-release no-op fencing (`$backend-engineer`,
-independently checked by `$qa-engineer`); pre-release rollback proof and marker cleanup (`$backend-engineer`,
-independently checked by `$qa-engineer`); endpoint wire compatibility and gate-OFF v1 preservation
-(`$backend-engineer`, mechanically reconciled by `$lead`).
+Required verification: `go build ./...`; `go vet ./...`; `go test -count=1 -timeout 5m ./...`; and
+`go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/`. Run frontend
+build/test/typecheck and `go generate ./internal/gui/...` only if a frontend or bundle input is touched.
 
-Next action: execute the Phase G backend implementation with test-first red/green cycles, build after each
-production file, then run the independent QA gate and the exact required verification commands. Do not commit.
+Current stage: implementation. Branch `feat/gui-restart-unitb-gated` at starting HEAD `3b42b1e7` contains
+Phases D, E, F, I, G, and H plus the browser-test follow-up; all remain gated and undeployed before Phase J.
+Integration owner: the main conversation holding `$lead`; implementation owner: explicitly assigned
+`$backend-engineer`; verification owner: the same session under the exact user-required local gate because
+subagent dispatch was not authorized.
+
+Critical risks and owners: gate-off inertness and endpoint wire behavior (`$backend-engineer`); spawn/exit
+seam preservation and post-release `manager.Stop` discipline (`$backend-engineer`); documentation C6
+coherence (`$knowledge-archivist`); fresh full-gate evidence (`$lead`).
+
+Next action: write AC-J1 first, prove the expected red state, make the smallest production edits, prove green,
+finish the documentation pass, then run the exact full gate. Do not commit.
 
 ## Terms and Abbreviations
 
+- CLI: Command-Line Interface.
 - FLOCK: The operating-system-backed GUI single-instance file lock.
-- GRACE(P): Old-port handler mode that serves only the approved restart allowlist while rejecting new work.
-- MAC: Message Authentication Code.
-- P: The parent GUI's currently owned port.
+- GUI: Graphical User Interface.
+- SSE: Server-Sent Events.

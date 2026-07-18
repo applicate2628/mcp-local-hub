@@ -270,8 +270,11 @@ describe("SectionGuiServer", () => {
     ));
   });
 
-  it("keeps restartGui throw-on-non-2xx behavior", async () => {
-    stubRestartResponse(503, { code: "GUI_RESTART_UNAVAILABLE", error: "restart unavailable" });
+  it("shows manual guidance for a gate-off 503", async () => {
+    stubRestartResponse(503, {
+      code: "GUI_RESTART_UNAVAILABLE",
+      error: "automatic GUI restart is disabled; restart the GUI manually",
+    });
     const { getByTestId } = render(
       <SectionGuiServer snapshot={snap(envWithPort("9200", 9125))} onDirtyChange={() => {}} />,
     );
@@ -279,7 +282,7 @@ describe("SectionGuiServer", () => {
     fireEvent.click(getByTestId("gui-server-restart-now"));
 
     await waitFor(() => expect(getByTestId("gui-server-restart-msg").textContent).toBe(
-      "/api/gui/restart [GUI_RESTART_UNAVAILABLE]: restart unavailable",
+      "/api/gui/restart [GUI_RESTART_UNAVAILABLE]: automatic GUI restart is disabled; restart the GUI manually",
     ));
   });
 

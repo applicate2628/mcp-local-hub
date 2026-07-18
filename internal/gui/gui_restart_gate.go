@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	restartV3DefaultEnabled = false
+	restartV3DefaultEnabled = true
 	restartV3Env            = "MCPHUB_GUI_RESTART_V3"
 )
 

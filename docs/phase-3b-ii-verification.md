@@ -188,6 +188,39 @@ SKIP with a one-line note. Needs a real Windows desktop.
   `WatchdogTaskName` / `InstallWatchdogTask` / `RecoverStoppedDaemons` /
   `BuildWatchdogXML` / `AppendWatchdogLog` finds matches only in docs.
 
+### D2.7 — RestartV3 handoff, discriminator, and reconnect
+
+The interrupted-handoff discriminator is **command-line interface (CLI)
+primary**. In these crash cases the browser is dead, so the authoritative
+delivery is the `mcphub supervise --ensure-alive` output plus
+`supervisor-events.log`, not a browser server-sent event (SSE). The frontend
+mapping is defensive only.
+
+These rows assume the post-Phase-J binary, whose compiled RestartV3 default is
+ON. For a pre-flip smoke, setting `MCPHUB_GUI_RESTART_V3=1` only in the
+operator shell is insufficient: the `\mcp-local-hub-liveness` task has a
+different process environment, resolves the gate OFF, skips marker
+classification, writes no marker, and spawns no GUI. Record that outcome as
+`ENV-SKEW`, or arrange the override in the task action/environment itself.
+A shipped rollback must set `MCPHUB_GUI_RESTART_V3=0` at the USER/MACHINE
+environment level (`setx` or the scheduled-task environment), because a shell
+export does not roll back the autostart GUI or `\mcp-local-hub-liveness` tick.
+
+| Scenario | Procedure | Expected discriminator and recovery | Result |
+|---|---|---|---|
+| Real self-restart and reconnect | Start `mcphub gui`; record the GUI, supervisor, and daemon process identifiers plus the dashboard URL. | Baseline is healthy before restart. | |
+|  | In GUI Server settings, select a free target port and invoke Restart GUI. | The request is accepted; the page shows restart progress and reconnects or navigates to the target loopback URL. | |
+|  | Verify `/api/ping` on the target URL and make one real aggregated MCP round-trip. | The GUI process identifier changes; supervisor and daemon identifiers do not. The marker reaches `committed`. | |
+| Free flock after interrupted handoff | With a debugger or scoped fault injection, interrupt the exact parent and standby after the parent releases the GUI flock but before the standby acquires it. | A nonterminal marker remains. Only the two handoff processes are stopped; do not sweep every `mcphub.exe`. | |
+|  | Wait past the recorded phase deadline, then run `\mcp-local-hub-liveness` once and inspect `supervisor-events.log`. | Event `gui-restart-interrupted-free-flock`; `operator_action` is exactly `mcphub gui`. No GUI is spawned by ensure-alive. | |
+|  | Run `mcphub gui`. | A full GUI starts and the dashboard reconnects. | |
+| Live holder after interrupted handoff | Pause the exact GUI owner after a nonterminal marker exists; keep that process alive and holding the flock past the phase deadline. | The dashboard may be dead; use CLI/log evidence, not SSE. | |
+|  | Run `\mcp-local-hub-liveness` once and inspect `supervisor-events.log`. | Event `gui-restart-live-holder-wedged`; `operator_action` is exactly `mcphub gui --force --kill`. The marker is not mutated and ensure-alive spawns nothing. | |
+|  | Run the identity-gated `mcphub gui --force --kill` flow for that exact holder. | The proved GUI holder is reaped and a full GUI starts. Plain `mcphub gui` is never advertised for this state. | |
+| Wedged ensure-alive classifier owns the probe flock | If `--force --kill` cannot identify/reap the holder while `\mcp-local-hub-liveness` is still Running, inspect that one task instance before acting on the stale pidport record. | This can be the one-shot ensure-alive worker holding its owned Free probe during a wedged marker operation; it is not the recorded GUI process. | |
+|  | Do not retry a kill against the recorded GUI process and do not kill all `mcphub.exe` processes. Wait for the liveness task to exit, or end only that exact scheduled-task instance. | Process exit releases the worker's operating-system flock. Preserve the marker and `supervisor-events.log` for diagnosis. | |
+|  | Run plain `mcphub gui` after the task is no longer Running. | The GUI acquires the now-free flock; escalate with the preserved evidence if it remains blocked. | |
+
 ### D2.8 — Marketplace draft-import (G5, v3 per codex r5)
 
 Runs in PowerShell 7+ on Windows. Linux/macOS equivalents shown in

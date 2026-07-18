@@ -402,6 +402,14 @@ func runEnsureAliveGUIRecovery(stateDir string, out io.Writer) {
 		fmt.Fprintln(out, ensureAliveGUIUnknownMessage)
 		return
 	}
+	// An absent state directory cannot contain a handoff marker. Return before
+	// HandoffMarkerStore.Read acquires its record lock, because that lock owner
+	// creates the directory for writers and would otherwise turn the unchanged
+	// supervisor-liveness probe's fail-closed "unprobeable" input into a false
+	// "not running" result later in this tick.
+	if _, statErr := os.Stat(canonicalStateDir); errors.Is(statErr, os.ErrNotExist) {
+		return
+	}
 	if deps.restartDeadlines == nil || deps.markerStore == nil || deps.probeOwnerLease == nil {
 		emitEnsureAliveGUIRecoveryUnknown(canonicalStateDir, out, nil, "phase-i-dependency-missing", errors.New("ensure-alive GUI recovery dependency is nil"))
 		return

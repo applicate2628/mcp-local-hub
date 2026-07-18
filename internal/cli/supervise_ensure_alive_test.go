@@ -1200,7 +1200,7 @@ func TestEnsureAliveGUIRecovery_FreeProbeContractFailureReleasesBeforeDiagnostic
 	}
 }
 
-func TestEnsureAliveGUIRecovery_GateOffSkipsBranchAndPreservesSupervisorLivePath(t *testing.T) {
+func TestRestartV3_FeatureGateInertMatrix(t *testing.T) {
 	stateDir := ensureAliveTestStateDir(t)
 	holdEnsureAliveSupervisorLock(t, stateDir)
 	restore := setEnsureAliveGUIRecoveryDependenciesForTest(ensureAliveGUIRecoveryDependencies{

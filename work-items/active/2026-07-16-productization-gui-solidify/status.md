@@ -232,3 +232,29 @@ Resume point: the backend correction for all seven deep-review findings is compl
 gate, build, vet, formatting check, all `TestRestartV3_*` tests, and the workspace executable sweep passed on
 2026-07-18. Next gate is independent `$qa-engineer` and `$architecture-reviewer` review of the corrected
 working tree. The gate-OFF branch remains v1 and no commit is authorized or created.
+
+## Phase-J implementation run (2026-07-18)
+
+The human directly admitted Phase J and supplied the authoritative final atomic-group plan. Starting HEAD
+`3b42b1e7` contains Phases D, E, F, I, G, and H plus the browser-test follow-up. Phase J is behavioral and
+release-cutting, but remains local-only: no commit, push, deployment, real GUI spawn, process sweep/kill,
+Graphify, `claude` CLI, `MCPHUB_GUI_SPAWN_TESTS`, or untagged API/CLI test invocation is authorized.
+
+| Agent | Role | Model/effort | Status | Launched |
+|---|---|---|---|---|
+| Phase-J recovery-state audit | knowledge-archivist | internal runtime model, low effort — bounded work-item and branch reconciliation | completed: PASS for the Phase-J item; unrelated parked cbuild index/brief/roadmap drift left untouched | current session |
+| Phase-J gate flip and closure | backend-engineer | internal runtime model, high effort — ordering-sensitive final gate, inert-matrix test, seam deletion, and canonical docs | completed: PASS; gate ON by default, rollback OFF fully inert, v1 endpoint body removed, docs reconciled, full local gate green | current session |
+
+Resume point: Phase J is implemented and verified in the uncommitted working tree. The compiled RestartV3
+default is ON; explicit gate OFF returns the honest 503/manual guidance and reaches neither coordinator,
+marker, exit, nor ensure-alive classifier; explicit gate ON reaches the v3 coordinator. The unsafe v1 endpoint
+spawn-and-exit body and helper are gone, while `restartV3ParentRuntime.Spawn`, `SpawnRestartV3GUI`,
+`selfRestartExitFn`, and `RequestSelfRestartExit` preserve the v3 spawn/exit and manager-stop-bypass seams.
+The first full suite exposed a gate-flip regression where the Phase-I marker read created a missing state
+directory and weakened the existing supervisor probe-error guard; the classifier now returns before marker
+locking when the state directory is absent, and its named regression plus the fresh full suite pass. Final
+evidence: build/vet pass; `go test -count=1 -timeout 5m ./...` passes; tagged API/CLI passes; frontend build,
+1,122 tests, and typecheck pass. The exact AC-J2 end-to-end test names are not present on this branch; existing
+seam-driven discriminator tests pass and the two real recovery cases remain the D2.7 manual smoke. Next gate:
+human review, manual Windows smoke, and separate commit authorization. No commit, push, deployment, process
+sweep/kill, or real GUI spawn occurred; the frontend build produced no bundle asset diff.
