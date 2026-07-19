@@ -17,15 +17,20 @@ test.describe("dashboard", () => {
     page,
     hub,
   }) => {
-    // Dashboard.tsx debounces the RED fail-loud banner via a `degradedSince`
-    // timestamp: on a failure it shows a calm reconnecting cue and turns the
-    // banner RED only once the failure PERSISTS past RESTART_GRACE_MS (~20s),
-    // so a normal restart/handoff window doesn't flash RED but a genuine
-    // prolonged outage still does (fail-loud preserved). Here the supervisor is
-    // genuinely down: one successful /api/status (sets hasEverLoaded=true), then
-    // the live ~5s `poller-error` SSE sets `degradedSince` → the banner turns
-    // RED after ~5s + 20s. See the matching note in dashboard-fail-loud.spec.ts.
-    // The wire-level 500 STATUS_FAILED contract is asserted there.
+    // Dashboard.tsx gates the RED fail-loud banner on a fresh-observation
+    // timestamp compare (Fix B round-2): on a failure it shows a calm
+    // reconnecting cue and turns the banner RED only when a RESOLVED failing
+    // /api/status observation lands AT/after the ~20s grace bound
+    // (RESTART_GRACE_MS) — never on elapsed time alone. So a normal
+    // restart/handoff window self-heals before the bound (no RED flash) but a
+    // genuine prolonged outage still turns RED (fail-loud preserved). Here the
+    // supervisor is genuinely down: one successful /api/status (sets
+    // hasEverLoaded=true), then the live ~5s `poller-error` SSE marks
+    // `degradedSince`/`lastFailAt`; at the ~20s bound the grace recheck 500s
+    // (≤5s backend latency, not aborted) → a fresh past-bound failing
+    // observation → RED after ~20s + ≤5s. See the matching note in
+    // dashboard-fail-loud.spec.ts. The wire-level 500 STATUS_FAILED contract is
+    // asserted there.
     // First /api/status succeeds (sets hasEverLoaded=true, cards render), then
     // the supervisor stays down → PERSISTENT 500 STATUS_FAILED on every later
     // poll. A route that returned 200 forever would let the Dashboard's own 30s
@@ -54,7 +59,9 @@ test.describe("dashboard", () => {
     // The degraded banner names the operator action (the message comes from
     // api.ErrSupervisorDown, surfaced through the poller-error SSE event).
     const banner = page.locator('[data-testid="dashboard-error"]');
-    // >= 30s HTTP-poll-set + 20s RESTART_GRACE_MS worst case for a persistent outage.
+    // ~20s grace bound + a fresh past-bound failing observation (grace recheck
+    // ≤5s backend latency / ≤8s abort ceiling, or the next ~5s poller-error SSE
+    // / 30s poll) + margin — comfortably inside 60s for a persistent outage.
     await expect(banner).toBeVisible({ timeout: 60_000 });
     await expect(banner).toContainText("supervisor unreachable — restart the hub");
 
