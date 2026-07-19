@@ -302,6 +302,93 @@ func TestCleanupOrphansHandler_UnknownServer_400(t *testing.T) {
 	}
 }
 
+// TestCleanupOrphansHandler_ScanClients_ThreadsToOpts pins Rank-2 (bug
+// 2026-07-19): a body carrying scan_clients:true threads
+// CleanupOpts.ScanClientConfigs=true through to the backend so the sweep
+// nominates config-absent dead-parent orphans of client-direct MCP
+// servers. apply:true keeps DryRun=false (the automatic ticker's shape).
+func TestCleanupOrphansHandler_ScanClients_ThreadsToOpts(t *testing.T) {
+	gotOpts := api.CleanupOpts{}
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		CleanupOrphansFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			gotOpts = opts
+			return []api.OrphanProcess{}, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": true, "scan_clients": true}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if !gotOpts.ScanClientConfigs {
+		t.Errorf("CleanupOpts.ScanClientConfigs = false, want true (scan_clients:true must thread through)")
+	}
+	if gotOpts.DryRun {
+		t.Errorf("CleanupOpts.DryRun = true, want false (apply:true → kill mode)")
+	}
+}
+
+// TestCleanupOrphansHandler_NoScanClients_DefaultsFalse is INV1: the manual
+// Dashboard "Clean orphans" button sends no scan_clients field, so its
+// zero value keeps ScanClientConfigs=false — the pre-existing manifest-only
+// nomination behavior is UNCHANGED by Rank-2. This guards against an
+// accidental unconditional flip that would alter the manual button's UX.
+func TestCleanupOrphansHandler_NoScanClients_DefaultsFalse(t *testing.T) {
+	gotOpts := api.CleanupOpts{}
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		CleanupOrphansFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			gotOpts = opts
+			return []api.OrphanProcess{}, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": true}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200; body=%s", rr.Code, rr.Body.String())
+	}
+	if gotOpts.ScanClientConfigs {
+		t.Errorf("CleanupOpts.ScanClientConfigs = true, want false (manual button omits scan_clients → zero value)")
+	}
+}
+
+// TestCleanupOrphansHandler_ScanClientsWithServer_400 pins the defensive
+// pre-validate: scan_clients + server is a backend conflict (client stdio
+// entries carry no server-name key → errOrphanOptsServerScanClientsConflict).
+// The handler returns a clean 400 at the boundary BEFORE any backend call —
+// the conflict wins even over the "unknown server" path, and the kill seam
+// must NOT run.
+func TestCleanupOrphansHandler_ScanClientsWithServer_400(t *testing.T) {
+	s := newCleanupTestServer(t, fakeCleanupAPI{
+		CleanupOrphansFn: func(opts api.CleanupOpts) ([]api.OrphanProcess, error) {
+			t.Fatal("CleanupOrphans must not be called for scan_clients+server conflict")
+			return nil, nil
+		},
+	})
+
+	body := strings.NewReader(`{"apply": true, "scan_clients": true, "server": "x"}`)
+	req := httptest.NewRequest("POST", "/api/cleanup/orphans", body)
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
 // TestCleanupOrphansHandler_RequiresSameOrigin verifies the same-origin
 // gate (CSRF defense) rejects requests from foreign origins. The shared
 // requireSameOrigin wrapper handles this; this test just confirms it is

@@ -56,6 +56,31 @@ func TestApplyReapEligibilityGate_ReferencedCandidateNeverReachesKill(t *testing
 	}
 }
 
+// TestApplyReapEligibilityGate_AgedConfigReferencedSparedOverAgeFloor pins that the
+// config-reference spare WINS over the 600s kill-age floor: an AGED candidate (far past the
+// floor) whose signature is still referenced by an installed client config is SPARED
+// (ReapVerdictSparedConfigReferenced), NOT reaped. This is the load-bearing safety invariant
+// behind wiring ScanClientConfigs into the AUTOMATIC path (Rank-2, bug 2026-07-19): the
+// auto-reaper never kills a currently-configured client-direct MCP server no matter how old
+// its process is — reference precedence, not the age floor, is what spares it.
+func TestApplyReapEligibilityGate_AgedConfigReferencedSparedOverAgeFloor(t *testing.T) {
+	swapScanClientConfigsFailClosed(t, func() ([]string, []string) { return []string{"@mui/mcp"}, nil })
+	var calls []process.PIDIdentityProof
+	swapOrphanTerminator(t, func(p process.PIDIdentityProof) error { calls = append(calls, p); return nil })
+
+	// AgeSec far above the 600s floor — absent the reference spare this row WOULD be
+	// reap-eligible and killed on apply.
+	filtered := []OrphanProcess{{PID: 1234, AgeSec: 99999, Cmdline: `node npx -y @mui/mcp`, ExecutablePath: `C:\node.exe`, StartedAt: "2026-01-01T00:00:00Z"}}
+	applyReapEligibilityGate(filtered, false /*apply*/, false)
+
+	if filtered[0].ReapVerdict != ReapVerdictSparedConfigReferenced {
+		t.Errorf("aged config-referenced verdict = %q, want %q (reference must win over the age floor)", filtered[0].ReapVerdict, ReapVerdictSparedConfigReferenced)
+	}
+	if len(calls) != 0 {
+		t.Errorf("an aged but config-referenced candidate must NEVER reach the kill primitive; got %d terminate call(s)", len(calls))
+	}
+}
+
 // TestApplyReapEligibilityGate_ConfigAbsentIsReapEligibleAndKills: a candidate whose
 // signature is absent from every parseable client config is reap-eligible and IS killed
 // on apply (proves the gate does not neuter the positive path).

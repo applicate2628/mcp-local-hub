@@ -73,8 +73,11 @@ type autoCleanupTickerResponse struct {
 
 // runAutoCleanupTicker fires a tick every autoCleanupInterval until
 // ctx is cancelled. Each tick POSTs to the GUI's own
-// /api/cleanup/orphans with {"apply": true}, then emits an
-// observability event. The ticker does NOT fire an immediate startup
+// /api/cleanup/orphans with {"apply": true, "scan_clients": true}
+// (scan_clients opts the automatic sweep into the client-config scan
+// so config-absent dead-parent orphans of client-direct MCP servers
+// are reaped too — Rank-2), then emits an observability event. The
+// ticker does NOT fire an immediate startup
 // tick — the first tick fires after the interval elapses, so a fresh
 // GUI launch doesn't compete with agent-side daemon spawns during the
 // first 5 min.
@@ -123,7 +126,14 @@ func fireAutoCleanupTick(ctx context.Context, port int) {
 	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	body := `{"apply":true}`
+	// scan_clients:true opts the automatic sweep INTO the client-config
+	// scan (A6) so a config-ABSENT dead-parent orphan of a client-direct
+	// MCP server is reaped, not just manifest-nominated orphans (Rank-2,
+	// bug 2026-07-19). The shipped config-absence gate + identity-verified
+	// kill + 600s age floor still apply, so a currently-configured server
+	// is nominated then spared. The ticker never sets server, so the
+	// handler's scan_clients+server 400 pre-validate never trips.
+	body := `{"apply":true,"scan_clients":true}`
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
 		fmt.Sprintf("http://127.0.0.1:%d/api/cleanup/orphans", port),
 		strings.NewReader(body))

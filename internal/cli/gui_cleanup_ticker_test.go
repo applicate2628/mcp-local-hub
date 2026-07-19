@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -96,6 +97,51 @@ func TestAutoCleanupOptedOut_RecognizedValues(t *testing.T) {
 				t.Fatalf("autoCleanupOptedOut(%q) = %v, want %v", c.val, got, c.want)
 			}
 		})
+	}
+}
+
+// TestFireAutoCleanupTick_PostsScanClientsBody pins Rank-2 (bug
+// 2026-07-19): the automatic ticker opts INTO the client-config scan so
+// config-ABSENT dead-parent orphans of client-direct MCP servers are
+// reaped by the 5-min sweep. The POST body must decode to
+// {apply:true, scan_clients:true, server:""}. `server` MUST stay empty —
+// the handler rejects scan_clients+server with 400, so a ticker that ever
+// set server would self-disable its own tick.
+//
+// The captured body is delivered over a buffered channel so the assertion
+// has a happens-before edge with the handler goroutine (clean under -race).
+func TestFireAutoCleanupTick_PostsScanClientsBody(t *testing.T) {
+	type capturedBody struct {
+		Apply       bool   `json:"apply"`
+		ScanClients bool   `json:"scan_clients"`
+		Server      string `json:"server"`
+	}
+	bodyCh := make(chan capturedBody, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b capturedBody
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"killed":0,"skipped":0}`))
+		bodyCh <- b
+	}))
+	t.Cleanup(srv.Close)
+
+	port := mustParsePort(t, srv.URL)
+	fireAutoCleanupTick(context.Background(), port)
+
+	select {
+	case got := <-bodyCh:
+		if !got.Apply {
+			t.Errorf("apply = false, want true")
+		}
+		if !got.ScanClients {
+			t.Errorf("scan_clients = false, want true (auto-ticker must opt into the client-config scan — Rank-2)")
+		}
+		if got.Server != "" {
+			t.Errorf("server = %q, want empty (ticker must never set server, else the scan_clients+server 400 pre-validate would trip)", got.Server)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler never received the auto-cleanup POST")
 	}
 }
 

@@ -118,6 +118,58 @@ url = "http://localhost:9129/mcp"
 	}
 }
 
+// TestNominationSubsetOfSpare_ConfiguredServerNeverOverKilled pins the architect's
+// nomination⊆spare symmetry (decision 2026-07-19-auto-reaper-reaps-only-config-absent-orphans):
+// for a PRESENT, parseable client config, every signature the STRICT nomination scanner
+// (patternsFromClientStdio, which can KILL) emits is ALSO emitted by the INCLUSIVE fail-closed
+// reference scanner (scanClientConfigsFailClosedImpl, which only SPARES). Both walk the same
+// clients via the same appendPatternsFromEntries; the only arg-filter difference is
+// strict (argIsDiscriminatingPattern, ≥8+separator) ⊆ relaxed (argIsReferenceCandidate, ≥3),
+// and the command-basename branch is identical — so nomination ⊆ spare by construction.
+//
+// Consequence (the safety invariant behind auto-wiring ScanClientConfigs, Rank-2): a process
+// nominated *because* a client still configures it is guaranteed config-referenced, hence
+// SPARED — the automatic reaper can never over-kill a currently-configured client-direct MCP
+// server. It reaps ONLY config-ABSENT orphans.
+func TestNominationSubsetOfSpare_ConfiguredServerNeverOverKilled(t *testing.T) {
+	home := withHermeticHomeForCleanup(t)
+	// A present, parseable client config with a discriminating stdio server:
+	//   - command "mcp-language-server" → emitted by BOTH scanners (basename branch)
+	//   - arg "my-project-root/src" (≥8 chars, has a separator) → passes strict AND relaxed
+	//   - arg "clangd" (6 chars) → relaxed-only (spare set); irrelevant to the ⊆ claim
+	writeCleanupFile(t, filepath.Join(home, ".codex", "config.toml"), `
+[mcp_servers.lsp]
+command = "mcp-language-server"
+args = ["--lsp", "clangd", "--workspace", "my-project-root/src"]
+`)
+
+	nominated := patternsFromClientStdio() // strict — a pattern here can KILL
+	if len(nominated) == 0 {
+		t.Fatalf("fixture must yield at least one nomination pattern; got %v", nominated)
+	}
+	spare, degraded := scanClientConfigsFailClosedImpl() // inclusive — a pattern here only SPARES
+	if len(degraded) != 0 {
+		t.Fatalf("a present, parseable config must not be degraded; got %v", degraded)
+	}
+	spareSet := map[string]bool{}
+	for _, p := range spare {
+		spareSet[p] = true
+	}
+	// SYMMETRY: every strict nomination pattern is also an inclusive spare pattern.
+	for _, n := range nominated {
+		if !spareSet[n] {
+			t.Errorf("nomination pattern %q is NOT in the fail-closed spare set %v — a configured server could be over-killed", n, spare)
+		}
+	}
+
+	// END-TO-END: a live process bearing a nominated signature is config-referenced by the
+	// same config's inclusive pattern set, so the H5 gate SPARES it (never reaped).
+	proc := OrphanProcess{Cmdline: `C:\node.exe mcp-language-server --lsp clangd --workspace my-project-root/src`}
+	if !candidateConfigReferenced(proc, spare) {
+		t.Errorf("a process bearing a configured server's signature must be config-referenced (→ spared); spare patterns=%v", spare)
+	}
+}
+
 // TestCleanupOrphans_RefusesServerWithScanClients covers codex bot
 // r3 P1: --scan-clients + --server is an out-of-scope kill risk
 // because client stdio entries have no server-name key. The two

@@ -42,6 +42,24 @@ type cleanupRequest struct {
 	Apply     bool   `json:"apply"`
 	MinAgeSec int64  `json:"min_age_sec"`
 	Server    string `json:"server"`
+	// ScanClients (A6) opts the sweep INTO scanning every installed MCP
+	// client's stdio config for additional kill-nomination patterns, so a
+	// config-ABSENT dead-parent orphan of a client-direct MCP server (a
+	// migrated-out / deleted / uninstalled entry whose child process lives
+	// on, re-parented to explorer.exe/svchost) is reaped. Threads to
+	// api.CleanupOpts.ScanClientConfigs, whose shipped config-absence gate +
+	// identity-verified kill + 600s age floor still apply unchanged — a
+	// currently-configured server is nominated then SPARED
+	// (ReapVerdictSparedConfigReferenced) by the nomination⊆spare symmetry,
+	// so this only widens nomination into the config-absent set.
+	//
+	// The automatic 5-min ticker sets this true (gui_cleanup_ticker.go); the
+	// manual Dashboard "Clean orphans" button omits it, so its zero value
+	// (false) keeps the pre-existing manifest-only nomination behavior.
+	// Mutually exclusive with Server (see the handler pre-validate): client
+	// stdio entries carry no server-name key, so the backend rejects the
+	// combination with errOrphanOptsServerScanClientsConflict.
+	ScanClients bool `json:"scan_clients"`
 	// Expect, on an apply, binds the kill to the exact {pid, started_at} identities
 	// the operator confirmed in the GUI modal, so a candidate whose reap verdict
 	// drifted to eligible while the dialog was open — or a PID recycled onto a
@@ -114,6 +132,19 @@ func (s *Server) cleanupOrphansHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "min_age_sec must be >= 0", http.StatusBadRequest)
 		return
 	}
+	// Defensive pre-validate: scan_clients + server is a backend conflict —
+	// client stdio entries carry no server-name key, so mixing the two would
+	// expand the kill-pattern set with cmdlines unrelated to the requested
+	// server. The backend CleanupOrphans returns
+	// errOrphanOptsServerScanClientsConflict for this combination; catch it
+	// at the boundary so the caller gets a clean 400 instead of a generic
+	// 500. Checked BEFORE the manifest-name lookup so the conflict wins over
+	// an "unknown server" error. The auto-ticker never sets server, so this
+	// never trips for it.
+	if req.ScanClients && req.Server != "" {
+		http.Error(w, "scan_clients is incompatible with server (pick one mode)", http.StatusBadRequest)
+		return
+	}
 	if req.Server != "" {
 		names, err := api.NewAPI().ManifestList()
 		if err != nil {
@@ -141,11 +172,12 @@ func (s *Server) cleanupOrphansHandler(w http.ResponseWriter, r *http.Request) {
 		expect = req.Expect
 	}
 	orphans, err := s.cleanup.CleanupOrphans(api.CleanupOpts{
-		ManifestDir: "",
-		Server:      req.Server,
-		DryRun:      !req.Apply,
-		MinAgeSec:   req.MinAgeSec,
-		Expect:      expect,
+		ManifestDir:       "",
+		Server:            req.Server,
+		DryRun:            !req.Apply,
+		MinAgeSec:         req.MinAgeSec,
+		ScanClientConfigs: req.ScanClients,
+		Expect:            expect,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
