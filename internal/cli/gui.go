@@ -878,6 +878,16 @@ func startRestartV3GUIChild(
 	})
 }
 
+// shouldAutoLaunchBrowser reports whether this GUI launch should open a
+// browser: only the INITIAL launch (startup == nil) with the browser not
+// suppressed. A restart child (startup != nil) inherits a live operator tab
+// that the Phase-H frontend redirects to the new origin, so it must never open
+// a second window — otherwise every self-restart floods a fresh browser app
+// window (bot #563 deep-sec F3, same family as the autostart browser-flood fix).
+func shouldAutoLaunchBrowser(startup *guiServerStartup, noBrowser bool) bool {
+	return startup == nil && !noBrowser
+}
+
 func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop context.CancelFunc,
 	lock gui.SingleInstanceLease, port int, noBrowser, noTray, strictMode bool, pidportPath string,
 	startup *guiServerStartup) error {
@@ -1198,7 +1208,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 		}
 	}()
 
-	if !noBrowser {
+	if shouldAutoLaunchBrowser(startup, noBrowser) {
 		url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
 		if err := gui.LaunchBrowser(url); err != nil {
 			fmt.Fprintf(cmd.OutOrStderr(), "warning: could not auto-launch browser: %v\n", err)

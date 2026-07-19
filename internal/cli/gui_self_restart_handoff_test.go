@@ -124,6 +124,33 @@ func TestRestartV3ChildStandbyRetriesOnPlatformBindRefused(t *testing.T) {
 	}
 }
 
+// TestShouldAutoLaunchBrowser pins bot #563 deep-sec F3: only the INITIAL GUI
+// launch (startup == nil, browser not suppressed) opens a browser. A restart
+// child (startup != nil) must NEVER open a second window — it inherits a live
+// operator tab the frontend redirects — otherwise every self-restart floods a
+// fresh browser app window (same family as the autostart browser-flood fix).
+func TestShouldAutoLaunchBrowser(t *testing.T) {
+	cases := []struct {
+		name      string
+		startup   *guiServerStartup
+		noBrowser bool
+		want      bool
+	}{
+		{name: "initial launch, browser enabled", startup: nil, noBrowser: false, want: true},
+		{name: "initial launch, --no-browser", startup: nil, noBrowser: true, want: false},
+		{name: "restart child, browser enabled", startup: &guiServerStartup{}, noBrowser: false, want: false},
+		{name: "restart child, --no-browser", startup: &guiServerStartup{}, noBrowser: true, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldAutoLaunchBrowser(tc.startup, tc.noBrowser); got != tc.want {
+				t.Fatalf("shouldAutoLaunchBrowser(startup==nil:%v, noBrowser:%v) = %v, want %v",
+					tc.startup == nil, tc.noBrowser, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRestartV3_SamePortStandbyBindWaitsForParentClose(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR", stateDir)

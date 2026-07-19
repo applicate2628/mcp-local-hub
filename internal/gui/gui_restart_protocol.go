@@ -300,6 +300,12 @@ func (c *RestartCoordinator) failAfterBegin(generation, noncePath string, child 
 		"gui-restart-pre-accept-cleanup-failed",
 		"mcphub gui",
 	)
+	// Deliberately DO NOT reset the in-memory guard here: the marker cleanup
+	// was unproved (the Clear failed), so the residue state is uncertain. The
+	// guard is retained as a fail-safe so no further restart is attempted on
+	// uncertain state until a GUI relaunch resets everything — codified by
+	// TestRestartV3_PostBeginCleanupFailureTerminalizesMarkerBeforeRunReset.
+	// (Contrast the proved-clean arm above, which resets.)
 	c.signalRunReady()
 	return errors.Join(
 		cause,

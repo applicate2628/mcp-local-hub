@@ -36,3 +36,65 @@ honest async protocol; this is operational tuning only. Fix option: give the chi
   StartRuntime, not through production `startGuiServerWithStartup` — a coverage boundary (a regression that
   re-branched the gui.go:906 compose call would be caught only by code review). An integration test through
   `startRestartV3GUIChild` would close it.
+
+## Deep-security commission (2026-07-19) — $architect adjudication: GATE-ON RELEASE ACCEPTABLE, all 10 findings BACKLOG, zero blockers
+
+Three independent reviewers (Sol=auth/trust, Terra=concurrency, fable=error/regression) + `$architect`
+release-posture adjudication. Verified fail-safe substrate: exclusive strictly-hand-off-ordered GUI flock
+(no split-brain in ANY traced path) + `os.Exit` fleet-preservation (a failed GUI restart never reaps the
+separate-process supervisor/daemons) + expiry-gated activation. Every worst case lands at "no GUI serves
+until manual relaunch; daemons/supervisor unaffected." F3 (duplicate browser on every self-restart) was the
+only inline fix this round (`shouldAutoLaunchBrowser` gates on `startup==nil`, +unit test). F4/T2b resolved
+as CORRECT-AS-IS (retain-guard is the right fail-safe; `Interrupt` shares the failing lock/write path, so a
+reset would retry against uncertain durable state — worse than "feature inert until relaunch").
+
+Top-2 hardening for the next iteration:
+
+- **S1 (nonce transfer) — security hardening.** The authenticated-readiness nonce is a named owner-only file
+  in StateDir (`gui_restart_protocol.go:218-219,813`; `ping.go:178-196`). A same-UID process watching StateDir
+  can copy it in the write→consume window and forge readiness to win the reservation-aware flock →
+  same-principal GUI-listener impersonation/DoS. SAME CLASS as the already-accepted same-UID co-resident
+  residual (a same-UID actor can already inject a daemon descriptor = arbitrary code), strictly weaker, and
+  operator-triggered not attacker-pumpable — so not a gate. Fix: transfer the nonce via a child-exclusive
+  inherited pipe/OS handle (not a named file), or verify peer process identity against the retained child handle.
+- **T1a / F2 (deadline timing) — tuning.** `DefaultRestartDeadlines` sets `Proof == Reservation == 10s`
+  (`gui_restart_record.go:53-54`) and the child Proof budget starts at `Run` entry
+  (`gui_restart_protocol.go:1014-1015`), so a child can expire while the parent has closed its listener but is
+  still flushing/closing the hub → both-miss-port → no GUI (fail-safe). Fix: derive the child budget from the
+  parent's physical-close commitment and enforce strict `Bind < Quiesce < Proof < Reservation` (also raised as
+  Phase-G P3-2 and the same-port P3 above — consolidate all three).
+
+Remaining findings (all BACKLOG, bounded + fail-safe):
+
+- **T1b — post-acquire parent-death race.** After a successful `Acquire`, a parent death in the µs-window
+  before `stopWatchingParent` makes the child release its just-acquired lease and exit
+  (`gui_restart_protocol.go:1042-1055`). Worst case = flock-free, no GUI, SINGLE owner throughout (child
+  releases before exit → no split-brain). Recoverable via ensure-alive Free-interrupt + `mcphub gui`.
+- **T2a — Begin marker replace without expected-state CAS** (`gui_restart_record.go:196-234`). Unreachable in
+  production (in-memory `run` guard serializes one coordinator/process + single-instance model = one live GUI);
+  the loser would fail `ErrHandoffMarkerCASMismatch` and roll back cleanly. Optional CAS for defense-in-depth.
+- **T2b — retain `run=true` on marker-clear failure** (`gui_restart_protocol.go:282-317`). CORRECT fail-safe
+  (see above). Optional refinement: reset the guard ONLY when the subsequent `Interrupt` returned
+  `terminalErr == nil` (marker proved terminal), preserving the retain path when the terminal write is unproved.
+- **T2c — Commit checks no expiry/sequence** (`gui_restart_record.go:259-268`). Activation is ALREADY
+  expiry-gated at acquire (`matchesReservedMarker` requires `now.Before(ReservationExpiresAt)`,
+  `gui_restart_protocol.go:1086,1207-1218`); only post-activation bookkeeping can cross expiry while the child
+  is the sole flock holder → no split-brain/stuck-port. Adding a Commit-side expiry+sequence check is cleanliness.
+- **T3a — unbounded wait for `responseFlushed` after Reserve** (`gui_restart_protocol.go:403-409`). Only blocks
+  if the API handler panics between WriteHeader and the ack (`gui_self_restart.go:159-164` closes it immediately
+  otherwise). Worst case (same-port) = listener closed + parent wedged holding flock + child expired →
+  recovery is `mcphub gui --force --kill` (ensure-alive prints the exact command). The one worst-case that
+  needs `--force --kill` rather than a plain relaunch. Fix: bound the flush ack by the reservation budget and
+  roll back before release.
+- **T3b — CloseHub has no acknowledgement before Release** (`gui_restart_protocol.go:413-416`). Impact bounded
+  to the hub-aggregate listener, which owns its own restart/health driver (CLAUDE.md B1); GUI flock authority
+  + daemons unaffected. Fix: require confirmed hub shutdown before lease release.
+- **T5 — failAfterBegin detaches (not terminates) a partial child** (`gui_restart_protocol.go:284-286` vs the
+  `rollbackBeforeRelease` `TerminateBeforeRelease` at `:447`). Unreachable in production (`SpawnRestartV3GUI`
+  returns `nil,err` on every error path, `gui_self_restart.go:257,261,279`); a hypothetical orphan self-limits
+  within Proof (can't steal the parent-held flock). Tighten to Terminate for symmetry.
+- **F1 — false `--force --kill` advisory on a healthy holder.** A stale nonterminal marker + a healthy but
+  unrelated flock holder makes ensure-alive emit the per-tick "wedged, run `mcphub gui --force --kill`" warn
+  against a HEALTHY GUI (`supervise_ensure_alive.go:511-520,615-624`) — precisely the crash-then-manual-restart
+  sequence. Nuisance only (nothing auto-kills; obeying loses no data; log churn bounded by rotation). Fix:
+  compare the holder's generation/PID to the marker and interrupt an orphan instead of advising force-kill.
