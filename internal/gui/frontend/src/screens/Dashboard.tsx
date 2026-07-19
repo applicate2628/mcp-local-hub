@@ -179,6 +179,17 @@ export function DashboardScreen() {
   // committed timestamps, never this flag), so the recheck can safely be
   // fire-and-forget. Reset by the streak-reset effect when the streak clears.
   const recheckIssuedRef = useRef(false);
+  // loadStatus issue-freshness guard. loadSeqRef is a monotonic per-call issue
+  // counter (++ at call time); appliedSeqRef is the highest issue seq that has
+  // committed a state apply. Two /api/status calls can be in flight at once — the
+  // bound recheck vs the 30s poll, or a reloadTrigger reload vs a prior in-flight
+  // poll — and resolve OUT OF ISSUE ORDER. Without this, a stale-by-issue success
+  // can clear degradedSince/lastFailAt that a fresher-issued failure already
+  // committed → RED falsely cleared/delayed. Every apply (success AND catch)
+  // drops if a later-issued call already applied (last-issued-wins), mirroring the
+  // resyncHubHealth fetch-seq idiom. Refs, not state: they ORDER applies, never render.
+  const loadSeqRef = useRef(0);
+  const appliedSeqRef = useRef(0);
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -192,6 +203,9 @@ export function DashboardScreen() {
   // RED decision NEVER depends on its return value — it depends only on the two
   // committed timestamps it writes (`degradedSince`, `lastFailAt`).
   const loadStatus = useCallback(async (): Promise<boolean> => {
+    // Capture this call's issue order FIRST (before the fetch), so an
+    // out-of-order resolution can be dropped by the apply-gates below.
+    const seq = ++loadSeqRef.current;
     // Bound the fetch with a client abort (see REQUEST_TIMEOUT_MS). Uses
     // AbortController + setTimeout deliberately (NOT AbortSignal.timeout) so the
     // deadline is drivable under Vitest fake timers. The signal threads through
@@ -204,6 +218,9 @@ export function DashboardScreen() {
         signal: controller.signal,
       });
       if (!mountedRef.current) return false;
+      // Drop a stale-by-issue apply: a later-issued call already committed.
+      if (seq < appliedSeqRef.current) return true;
+      appliedSeqRef.current = seq;
       const next: Record<string, DaemonStatus> = {};
       // Scheduler-maintenance rows (weekly-refresh tasks) have no
       // meaningful "Restart" action. Rendering them would produce a
@@ -223,6 +240,9 @@ export function DashboardScreen() {
       return true;
     } catch (err) {
       if (!mountedRef.current) return false;
+      // Drop a stale-by-issue apply: a later-issued call already committed.
+      if (seq < appliedSeqRef.current) return false;
+      appliedSeqRef.current = seq;
       const e = err as Error;
       // An abort means the supervisor accepted the connection but never
       // answered within the deadline — a distinct, actionable failure from a

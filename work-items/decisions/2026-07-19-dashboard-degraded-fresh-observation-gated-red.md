@@ -81,3 +81,19 @@ fires; fails on round-1). Defect 3 (P3 amber flash) disclosed + deferred (amber-
 
 ## $lead decision: CLOSE the request-freshness race (do NOT ship with the residual)
 Cross-family (Sol) flagged HIGH; it is fail-loud-affecting (delays RED during a genuine outage) on a fix whose PURPOSE is fail-loud timing; a sequence/generation guard closes BOTH Sol's Area-4 (recheck/poll overlap) AND arch's F1 (the MORE-COMMON reloadTrigger race — every RecoveryActions reload). Routed to $architect for the guard design (monotonic issue-sequence, last-applied-wins — captured per loadStatus call, checked before every setState apply) + a regression test for the A/B out-of-order-resolution ordering. NOT hand-rolled inline (6th-concurrency-defect risk on a 5-round fix). The timestamp-gate impl itself is Fable-PASS and committed as the baseline the guard extends.
+
+## Correction (round 3): request-freshness seq-guard (closes Sol Area-4 + arch F1)
+$architect GATE PASS. Monotonic issue-freshness guard inside loadStatus, mirroring the file's own shipped
+resyncHubHealth fetch-seq idiom (hubHealthFetchSeqRef/hubHealthAppliedSeqRef):
+- 2 refs `loadSeqRef`/`appliedSeqRef` (after recheckIssuedRef); `const seq = ++loadSeqRef.current` first stmt
+  of loadStatus; success + catch apply-gates `if (seq < appliedSeqRef.current) return; appliedSeqRef.current = seq`
+  (after the existing mountedRef check, before the first setState). Symmetric last-issued-wins (~7 lines).
+- Closes: a stale-by-issue apply (an earlier-issued SUCCESS recheck resolving AFTER a fresher-issued FAILING poll
+  set RED) no longer clears degradedSince/lastFailAt → RED preserved (Sol Area-4). Same guard closes the more-common
+  reloadTrigger-vs-poll race (arch F1).
+- Symmetric (not asymmetric) chosen: provably can never manufacture a false RED (only DROPS applies, never fabricates
+  lastFailAt → smaller-or-equal → less RED); the failure-failure lastFailAt-staleness is fail-safe + masked by the
+  ungated ~5s onPollerError SSE lane. Refs not state → no render, loadStatus stays useCallback([]).
+- Age-0 invariant preserved (gate before both co-writes; both-or-neither). All 5 defects stay closed.
+- Regression test `out-of-order resolution: a stale-issued success does not clear a fresher-issued failure's RED` —
+  MUTATION-PROVEN (green with guard, FAILS on the 30dadafa baseline: stale A clears RED). Full Vitest 1130 pass.

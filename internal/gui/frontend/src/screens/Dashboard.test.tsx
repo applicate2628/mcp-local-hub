@@ -1191,6 +1191,84 @@ describe("DashboardScreen — fresh-observation-gated RED (Fix B round-2)", () =
     expect(banner.textContent).toContain("supervisor not responding (timed out)");
   });
 
+  // Round-3 request-freshness guard (Sol Area-4 / arch F1): two /api/status calls
+  // are in flight and resolve OUT OF ISSUE ORDER. A later-issued FAILING poll (B)
+  // sets RED; an earlier-issued SUCCESS recheck (A, from a momentary up-blip) then
+  // resolves STALE. Without the loadSeqRef/appliedSeqRef guard, A's success clears
+  // degradedSince/lastFailAt → RED is falsely dropped/delayed. The guard drops A
+  // (seq < appliedSeqRef, a later-issued call already applied) → RED PRESERVED.
+  // FAILS on the HEAD baseline (no guard): the stale success clears the banner.
+  it("out-of-order resolution: a stale-issued success does not clear a fresher-issued failure's RED", async () => {
+    let statusCall = 0;
+    let resolveA!: (r: Response) => void; // earlier-issued bound recheck (up-blip → success)
+    let resolveB!: (r: Response) => void; // later-issued 30s poll (failure)
+    const deferredA = new Promise<Response>((res) => {
+      resolveA = res;
+    });
+    const deferredB = new Promise<Response>((res) => {
+      resolveB = res;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        statusCall += 1;
+        if (statusCall === 1) return Promise.resolve(statusResponse([runningRow])); // mount
+        if (statusCall === 2) return deferredA; // bound recheck (issued EARLIER), deferred
+        if (statusCall === 3) return deferredB; // 30s poll (issued LATER), deferred
+        return Promise.resolve(supervisorDown500());
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      if (url === "/api/hub/health") {
+        return Promise.resolve(jsonResponse(200, { state: "healthy", degraded: false }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { findAllByRole, findByTestId, queryByTestId } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      expect((await findAllByRole("button")).length).toBe(4);
+    });
+
+    // Start the streak via SSE (no fetch), then cross the bound → the ONE recheck
+    // (call 2 = A, issued EARLIER) fires and stays in flight (deferred).
+    act(() => {
+      dispatchSse("poller-error", { err: "supervisor unreachable — restart the hub" });
+    });
+    await findByTestId("dashboard-reconnecting");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_001);
+    });
+    expect(statusCall).toBe(2); // A (bound recheck) issued, in flight
+
+    // Advance to the next 30s poll → call 3 = B (issued LATER) fires, in flight.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(statusCall).toBe(3); // B (poll) issued — both A and B now in flight
+    expect(queryByTestId("dashboard-error")).toBeNull(); // no RED yet (both pending)
+
+    // Resolve B FIRST (later-issued, fresh failing observation, past bound) → RED.
+    // advanceTimersByTimeAsync fully flushes B's async fetch→setState→re-render
+    // chain (2 Promise.resolve ticks are too few to walk fetchOrThrow's awaits).
+    await act(async () => {
+      resolveB(supervisorDown500());
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    const banner2 = await findByTestId("dashboard-error");
+    expect(banner2.textContent).toContain("supervisor unreachable — restart the hub");
+
+    // Resolve A LAST (earlier-issued, STALE success). With the guard it is dropped
+    // (seq 2 < appliedSeqRef 3) → does NOT clear the streak → RED PRESERVED. Without
+    // the guard (HEAD baseline) A's success would run setDegradedSince(null)/
+    // setLastFailAt(null) → RED falsely cleared → this assertion FAILS (teeth).
+    await act(async () => {
+      resolveA(statusResponse([runningRow]));
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(queryByTestId("dashboard-error")).not.toBeNull(); // RED preserved (stale A dropped)
+    expect(queryByTestId("dashboard-reconnecting")).toBeNull();
+  });
+
   // Anti-D1 sampling-density guard: a persistent outage over a ~51s window issues
   // EXACTLY 3 /api/status calls — mount + the 30s poll + the ONE bound recheck.
   // A fast-poll-while-degraded (the reverted D1 fix) would issue ~10 here and let
