@@ -27,24 +27,42 @@ test.describe("dashboard — supervisor-down fail-loud (Workstream B §3.1)", ()
     page,
     hub,
   }) => {
-    // Dashboard.tsx gained a STARTUP GRACE (STARTUP_GRACE_POLLS = 2): while
-    // it has NEVER loaded real data and only a couple of failures have
-    // happened, it shows a calm "Loading status… the supervisor is
-    // starting" rather than flashing the scary fail-loud banner during the
-    // normal supervisor-IPC bind window. The HTTP /api/status poll is 30s,
-    // so reaching the post-grace banner via repeated HTTP failures alone
-    // would take ~90s (well past the test timeout). To exercise the degraded
-    // BANNER deterministically and fast, drive the grace-bypass the real GUI
-    // uses: one successful /api/status (sets hasEverLoaded=true) followed by
-    // the live `poller-error` SSE event the backend StatusPoller emits every
-    // 5s because the supervisor is genuinely down (MCPHUB_E2E_SUPERVISOR=none).
-    // With hasEverLoaded=true the grace gate is bypassed and the SSE-driven
-    // `error` renders the banner (Dashboard.tsx onPollerError + the
-    // hasEverLoaded fail-loud branch). The wire-level 500 STATUS_FAILED
-    // contract itself is asserted by the sibling test below.
-    await page.route("**/api/status", (r) =>
-      r.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
-    );
+    // Dashboard.tsx debounces the RED fail-loud banner via a `degradedSince`
+    // timestamp: a failure shows a calm reconnecting cue and turns the banner
+    // RED only once the failure PERSISTS past RESTART_GRACE_MS (~20s). To
+    // exercise the RED banner deterministically here, one successful
+    // /api/status (sets hasEverLoaded=true) is followed by the live
+    // `poller-error` SSE the backend emits every ~5s poll cycle:
+    // The supervisor is genuinely down (MCPHUB_E2E_SUPERVISOR=none), so the
+    // backend emits a `poller-error` SSE within one ~5s poll cycle, which sets
+    // the Dashboard's `degradedSince`. A GENUINE prolonged outage stays down,
+    // so after the RESTART_GRACE_MS (~20s) debounce window it turns the banner
+    // RED (fail-loud preserved). A transient restart/handoff window instead
+    // stays on the calm `dashboard-reconnecting` cue and self-heals before the
+    // bound. The wait below therefore covers ~5s poll + 20s grace + margin.
+    // The wire-level 500 STATUS_FAILED contract itself is asserted by the
+    // sibling test below.
+    // First /api/status succeeds (sets hasEverLoaded=true), then the supervisor
+    // stays down → PERSISTENT 500 STATUS_FAILED. A route that returned 200
+    // forever would let the 30s poll clear `degradedSince` and make the RED
+    // banner OSCILLATE; the persistent 500 keeps the streak monotonic so the
+    // banner is stable once the grace elapses (failing HTTP poll backstops SSE).
+    let statusCalls = 0;
+    await page.route("**/api/status", (r) => {
+      statusCalls += 1;
+      if (statusCalls === 1) {
+        r.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      } else {
+        r.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({
+            code: "STATUS_FAILED",
+            error: "supervisor unreachable — restart the hub",
+          }),
+        });
+      }
+    });
     await page.goto(`${hub.url}/#/dashboard`);
 
     // Heading still renders (the error branch keeps the shell intact).
@@ -53,7 +71,8 @@ test.describe("dashboard — supervisor-down fail-loud (Workstream B §3.1)", ()
     // Explicit degraded banner naming the operator action — surfaced via the
     // backend `poller-error` SSE within one 5s poll cycle.
     const banner = page.locator('[data-testid="dashboard-error"]');
-    await expect(banner).toBeVisible({ timeout: 15_000 });
+    // >= 30s HTTP-poll-set + 20s RESTART_GRACE_MS worst case for a persistent outage.
+    await expect(banner).toBeVisible({ timeout: 60_000 });
     await expect(banner).toContainText("supervisor unreachable — restart the hub");
 
     // NO daemon cards — the operator must NOT see Running daemons painted

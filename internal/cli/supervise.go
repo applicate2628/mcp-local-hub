@@ -1711,8 +1711,12 @@ func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps) {
 // layer (unknown cmd, unsupported version) are surfaced via the
 // IPCResponse.Error envelope, not via connection close.
 //
-// Audit: each request gets one `ipc-command` audit row capturing the
-// cmd + id. The response body is NOT logged (may contain operator-
+// Audit: each MUTATING/unknown request gets one `ipc-command` audit row
+// capturing the cmd + id; read-only commands (api.IPCCommandIsReadOnly —
+// today just `status`) SKIP the row so read-only poll floods don't evict
+// real lifecycle events from the audit channel (bug 2026-07-16). The row
+// is emitted BEFORE dispatch, so a mutating command is audited even if its
+// handler errors. The response body is NOT logged (may contain operator-
 // visible state that doesn't belong in the long-lived audit channel);
 // just the verb + correlation id is.
 func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
@@ -1743,7 +1747,7 @@ func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
 			})
 			continue
 		}
-		if deps.events != nil {
+		if deps.events != nil && !api.IPCCommandIsReadOnly(req.Cmd) {
 			_ = deps.events.TryEmit(api.SupervisorEvent{
 				Severity: "info",
 				Source:   "ipc",

@@ -275,6 +275,120 @@ func TestHandleIPCConnStatusDoesNotWaitForContendedAuditLog(t *testing.T) {
 	}
 }
 
+// TestHandleIPCConnAuditSkipsReadOnlyStatusKeepsMutating is the
+// regression guard for bug 2026-07-16 (P1): read-only `status` polls
+// flooded the audit trail with `ipc-command` rows, evicting real
+// lifecycle events. The guard at supervise.go:1750
+// (`!api.IPCCommandIsReadOnly(req.Cmd)`) skips the row for read-only
+// commands and KEEPS it for every mutating/unknown verb. This test
+// reads the emitted rows from a REAL SupervisorEventLog under
+// t.TempDir() (via makeTestDeps) and drives handleIPCConn over an
+// in-memory net.Pipe — it never touches the live supervisor-intent or
+// real fleet.
+func TestHandleIPCConnAuditSkipsReadOnlyStatusKeepsMutating(t *testing.T) {
+	deps, logPath := makeTestDeps(t)
+
+	if err := api.WriteSupervisorIntent(filepath.Join(deps.stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	deps.runtimeTracker = NewDaemonRuntimeTracker()
+	var ready atomic.Bool
+	var loaded atomic.Bool
+	ready.Store(true)
+	loaded.Store(true)
+	deps.reconcileReady = &ready
+	deps.intentFilesLoaded = &loaded
+	var graceful gracefulCounter
+	deps.gracefulInProgress = &graceful
+
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	done := make(chan struct{})
+	go func() {
+		handleIPCConn(serverConn, deps)
+		close(done)
+	}()
+	reader := bufio.NewReader(clientConn)
+
+	// (1) read-only status → OK response, and ZERO ipc-command audit rows.
+	if _, err := clientConn.Write([]byte(`{"version":1,"id":1,"cmd":"status"}` + "\n")); err != nil {
+		t.Fatalf("write status request: %v", err)
+	}
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	statusLine, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read status response: %v", err)
+	}
+	var statusResp api.IPCResponse
+	if err := json.Unmarshal([]byte(statusLine), &statusResp); err != nil {
+		t.Fatalf("decode status response %q: %v", statusLine, err)
+	}
+	if !statusResp.OK || statusResp.Error != nil || statusResp.ID != 1 {
+		t.Fatalf("status response = %+v, want OK id=1", statusResp)
+	}
+	// Read directly, tolerating a missing file: because read-only status
+	// emits nothing, the event log may not have been created at all —
+	// which is itself proof of ZERO ipc-command rows.
+	time.Sleep(20 * time.Millisecond)
+	afterStatusBytes, err := os.ReadFile(logPath)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read events log after status: %v", err)
+	}
+	afterStatus := string(afterStatusBytes)
+	if n := strings.Count(afterStatus, `"event":"ipc-command"`); n != 0 {
+		t.Fatalf("read-only status must emit ZERO ipc-command rows, got %d in:\n%s", n, afterStatus)
+	}
+
+	// (2) mutating/unknown restart → exactly one ipc-command row (cmd=restart).
+	// The row is emitted BEFORE dispatch, so it exists even though restart
+	// itself returns UNKNOWN_COMMAND.
+	if _, err := clientConn.Write([]byte(`{"version":1,"id":2,"cmd":"restart"}` + "\n")); err != nil {
+		t.Fatalf("write restart request: %v", err)
+	}
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatalf("read restart response: %v", err)
+	}
+	afterRestart := waitForSupervisorEvent(t, logPath, `"event":"ipc-command"`, 2*time.Second)
+	if n := strings.Count(afterRestart, `"event":"ipc-command"`); n != 1 {
+		t.Fatalf("mutating restart must emit exactly one ipc-command row, got %d in:\n%s", n, afterRestart)
+	}
+	if !strings.Contains(afterRestart, `"cmd":"restart"`) {
+		t.Fatalf("ipc-command row must carry body.cmd==restart, got:\n%s", afterRestart)
+	}
+	if strings.Contains(afterRestart, `"cmd":"status"`) {
+		t.Fatalf("no ipc-command row may carry body.cmd==status, got:\n%s", afterRestart)
+	}
+
+	_ = clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleIPCConn did not exit after client close")
+	}
+
+	// (3) taxonomy table: pin api.IPCCommandIsReadOnly against the dispatch
+	// switch. Only the pre-reconcileReady-gate pure query (`status`) is
+	// read-only; every mutating (post-gate), deferred, or unknown verb is
+	// NOT — the fail-safe allowlist default. Adding a pre-gate query to the
+	// allowlist MUST update this table (the C1 drift guard).
+	taxonomy := map[string]bool{
+		"status":         true,
+		"quiesce-timers": false,
+		"exit":           false,
+		"respawn":        false,
+		"reconcile":      false,
+		"restart":        false,
+		"reload":         false,
+		"somefuture":     false,
+	}
+	for cmd, want := range taxonomy {
+		if got := api.IPCCommandIsReadOnly(cmd); got != want {
+			t.Errorf("IPCCommandIsReadOnly(%q) = %v, want %v", cmd, got, want)
+		}
+	}
+}
+
 // makeTestDeps returns an ipcDispatchDeps wired with a real
 // SupervisorEventLog under t.TempDir() so emitted events can be
 // inspected by reading the log file directly.
