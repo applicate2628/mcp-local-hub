@@ -389,6 +389,73 @@ func TestHandleIPCConnAuditSkipsReadOnlyStatusKeepsMutating(t *testing.T) {
 	}
 }
 
+// TestHandleIPCConnAuditsRejectedStatusEnvelope is the bot PR #566 P2 guard: a
+// frame like {"version":2,"cmd":"status"} parses OK and IS read-only by cmd, but
+// api.ValidateRequestEnvelope rejects the unsupported version at dispatch. That
+// is incompatible-protocol activity, NOT a benign poll, so the read-only
+// audit-skip MUST NOT apply — the request stays in the audit trail (one
+// ipc-command row, cmd=status), exactly like a rejected mutating command. The
+// skip is gated on IPCCommandIsReadOnly(cmd) && ValidateRequestEnvelope==nil.
+func TestHandleIPCConnAuditsRejectedStatusEnvelope(t *testing.T) {
+	deps, logPath := makeTestDeps(t)
+
+	if err := api.WriteSupervisorIntent(filepath.Join(deps.stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+	deps.runtimeTracker = NewDaemonRuntimeTracker()
+	var ready atomic.Bool
+	var loaded atomic.Bool
+	ready.Store(true)
+	loaded.Store(true)
+	deps.reconcileReady = &ready
+	deps.intentFilesLoaded = &loaded
+	var graceful gracefulCounter
+	deps.gracefulInProgress = &graceful
+
+	serverConn, clientConn := net.Pipe()
+	defer clientConn.Close()
+	done := make(chan struct{})
+	go func() {
+		handleIPCConn(serverConn, deps)
+		close(done)
+	}()
+	reader := bufio.NewReader(clientConn)
+
+	// Unsupported-version status: valid JSON, cmd=status, but version 2 is
+	// rejected by ValidateRequestEnvelope in dispatch.
+	if _, err := clientConn.Write([]byte(`{"version":2,"id":7,"cmd":"status"}` + "\n")); err != nil {
+		t.Fatalf("write version-2 status request: %v", err)
+	}
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	respLine, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatalf("read version-2 status response: %v", err)
+	}
+	var resp api.IPCResponse
+	if err := json.Unmarshal([]byte(respLine), &resp); err != nil {
+		t.Fatalf("decode response %q: %v", respLine, err)
+	}
+	if resp.OK || resp.Error == nil {
+		t.Fatalf("version-2 status must be rejected (not OK, has Error), got %+v", resp)
+	}
+
+	// The rejected envelope IS audited — exactly one ipc-command row, cmd=status.
+	after := waitForSupervisorEvent(t, logPath, `"event":"ipc-command"`, 2*time.Second)
+	if n := strings.Count(after, `"event":"ipc-command"`); n != 1 {
+		t.Fatalf("rejected version-2 status must emit exactly one ipc-command row, got %d in:\n%s", n, after)
+	}
+	if !strings.Contains(after, `"cmd":"status"`) {
+		t.Fatalf("audit row must carry body.cmd==status, got:\n%s", after)
+	}
+
+	_ = clientConn.Close()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handleIPCConn did not exit after client close")
+	}
+}
+
 // makeTestDeps returns an ipcDispatchDeps wired with a real
 // SupervisorEventLog under t.TempDir() so emitted events can be
 // inspected by reading the log file directly.
