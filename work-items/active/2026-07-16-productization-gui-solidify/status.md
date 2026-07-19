@@ -258,3 +258,53 @@ evidence: build/vet pass; `go test -count=1 -timeout 5m ./...` passes; tagged AP
 seam-driven discriminator tests pass and the two real recovery cases remain the D2.7 manual smoke. Next gate:
 human review, manual Windows smoke, and separate commit authorization. No commit, push, deployment, process
 sweep/kill, or real GUI spawn occurred; the frontend build produced no bundle asset diff.
+
+## PR #563 Codex-bot round-1 correction run (2026-07-18)
+
+The human directly admitted all three review corrections and supplied the authoritative constraints. Starting
+HEAD `37b39ebc` is clean and RestartV3 is ON. The correction is behavioral and spans two implementation
+owners but stays within the existing frontend progress-consumer, CLI composition, and deadline-policy seams.
+
+| Agent | Role | Model/effort | Status | Launched |
+|---|---|---|---|---|
+| Round-1 recovery-state audit | knowledge-archivist | internal runtime model, low effort — bounded artifact/index consistency audit | completed: PASS; current PR #563 chain complete, unrelated parked cbuild drift isolated | current session |
+| P1 readiness-gated navigation (first dispatch) | frontend-engineer | internal runtime model, high effort — asynchronous cross-origin activation probe with deterministic red/green tests | INTERRUPTED(no-artifact); no product edit landed | current session |
+| P1 readiness-gated navigation (narrow retry) | frontend-engineer | internal runtime model, high effort — same bounded red/green artifact with reduced context | completed: PASS; RED 2 expected failures, GREEN 19/19, lead rerun 19/19 + typecheck + TypeScript diagnostics clean | current session |
+| P2 bind and explicit-port corrections | backend-engineer | internal runtime model, high effort — timing-sensitive child budget plus explicit-vs-persisted port contract | completed: PASS; RED reproduced both defects, tagged GREEN slow-bind/port-80/deadline guards pass, Lead rerun + gofmt + Go diagnostics clean | current session |
+| Round-1 acceptance gate | qa-engineer | internal runtime model, high effort — three finding regressions plus exact frontend/build/vet/tagged-suite evidence | completed: PASS; focused participant checks and final exact tagged suite green, two test-harness defects corrected and reverified | current session |
+
+Resume point: all three PR #563 round-1 findings are corrected and QA PASS. Port-change navigation waits for
+activated new-origin favicon readiness and stays on the old page on exhaustion; same-port child bind uses the
+7-second `Quiesce + Bind` budget and commits after a real 3.2-second listener hold; explicit actual port 80
+reaches spawn while persisted implicit-port policy remains unchanged. The generated bundle, frontend
+build/1,123 tests/typecheck, Go build/vet/format/diff, 100-repeat named-pipe harness, and final exact tagged
+GUI/CLI suite all pass. No commit, push, deployment, real GUI spawn, or live-fleet process kill occurred.
+Next gate: human review and the next PR #563 review round; real-browser favicon semantics remain the explicit
+manual-smoke residual.
+
+## DELIVERED — item-3 Unit B merged + deployed (2026-07-19)
+
+Supersedes the stale round-1 resume point above (which described the codex round-1 fix
+"explicit actual port 80 reaches spawn"). That was REVISED during the review:
+
+- **P2 privileged-port — Option A (uniform range, single owner).** fable's deep-review found the codex
+  inline fix left `gui_restart_protocol.go:770` + `ping.go:117` still enforcing `[1024,65535]` — a
+  single-owner violation whose Spawn-stub test proved nothing end-to-end. Resolved via the bot's Option A:
+  `validateExplicitGUIPortFlag` front-door refusal of an explicit privileged `--port` (0=auto allowed) +
+  the restart `targetPort` reverted to the single owner `validPersistedGUIPort`. So privileged `--port 80`
+  is now REFUSED at startup, NOT "reaches spawn".
+- **Bot round-1**: 3 findings fixed (7ed32f68). Bot round-2 on 4424d4a3: "Didn't find any major issues" PASS
+  (0 inline, 0 open threads).
+- **Deep-security commission** (Sol auth/trust + Terra concurrency + fable error/regression + $architect
+  release-posture): PASS — gate-ON release acceptable, F3 (duplicate browser on restart) inline-fixed,
+  F4/T2b kept as-is (retain-guard is the correct fail-safe, test :699), 10 findings backlogged in
+  `work-items/backlog/2026-07-18-restart-v3-phaseJ-residuals.md` (top-2 hardening: S1 nonce-via-inherited-handle,
+  T1a Bind<Quiesce<Proof<Reservation timing).
+- **Merged** #563 → master `a078587c` (squash, 2026-07-19T11:52:59Z). **Deployed** via build.sh (a078587c)
+  + `install --upgrade` (C: staging to dodge the D:→C: cross-volume MoveFileEx block) + GUI relaunch.
+  Live binary a078587c on supervisor+daemons+GUI; dashboard consistently green; MCP 37 connected; RestartV3
+  gate ON (flagship self-restart flow live).
+
+Resume point: item-3 Unit B DELIVERED + DEPLOYED. Next: Phase-0 items 4-6 (fail-soft errors+redaction;
+truthful install/migrate/snapshot; confirm/undo guardrails). Separate follow-up bug filed:
+supervisor-IPC status-poll congestion (dashboard-red recurrence).

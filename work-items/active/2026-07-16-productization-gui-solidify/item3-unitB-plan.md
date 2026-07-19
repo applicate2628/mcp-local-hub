@@ -332,3 +332,43 @@ A read-only architecture-review pass over this plan (before code) verified every
 Each phase is small enough to implement and review independently; file scope, allowed change surface, nearby smoke coverage, tests, checks, and AC-IDs are explicit per phase; parallelism (A/B/C independent; I after D+E) is used only where write boundaries are fixed; the atomic-release rule protects the working button; the plan contains no implementation code. Two non-blocking architect confirmations (OPEN-1, OPEN-2) are flagged, neither gating the start.
 
 **Recommended next role sequence:** `$backend-engineer` implements Phase A → B → C (each independently reviewable, ungated) with `$qa-engineer` gating each against its ACs; then the atomic group D → E → (F ∥ I) → G → H → J behind `gui.RestartV3Enabled()`, with `$qa-engineer` verifying the contract suite and `$architecture-reviewer` gating the `GUIListenerOwner` seam (B) and the coordinator (G) before the Phase-J flip. Route the Phase-J docs pass through `$knowledge-archivist`. Confirm OPEN-1/OPEN-2 with `$architect` before Phase D.
+
+---
+
+## 10. PR #563 Codex-bot round-1 correction plan (2026-07-18)
+
+Direct human admission: fix all three supplied findings without commit, deployment, real GUI spawn,
+`MCPHUB_GUI_SPAWN_TESTS`, process sweep/kill, Graphify, or the `claude` CLI.
+
+### C1 — port-change navigation waits for the activated full GUI
+
+- Red: extend `SectionGuiServer.test.tsx` so a `reserved` new-port event does not assign while the readiness
+  probe is pending or exhausts, and assigns exactly once only after readiness succeeds; keep same-port and
+  committed no-navigation guards.
+- Green: make `api.ts` start a bounded asynchronous readiness poll. The production probe loads the full-GUI
+  `/favicon.ico` image on the target origin with cache-busting; standby serves only `/api/ping`, so it cannot
+  satisfy the probe. Preserve best-effort failure swallowing and never render or infer a committed phase.
+- Check: focused SectionGuiServer test, then frontend build/test/typecheck and `go generate ./internal/gui/...`.
+
+### C2 — same-port standby bind spans parent quiesce
+
+- Red: extend `TestRestartV3_SamePortStandbyBindWaitsForParentClose` with the default deadlines and a binder
+  that remains address-in-use for 3-4 seconds; assert the child returns the bound listener rather than timing
+  out. Extend `TestRestartDeadlines_DefaultPolicy` with the ordering guard for the composed same-port window.
+- Green: select `Quiesce + Bind` for a same-port child's standby bind retry and retain `Bind` for port-change.
+  Keep `Bind=2s`, `Quiesce=5s`, and the injected policy owner unchanged.
+- Check: focused CLI and GUI deadline tests, then the exact tagged CLI/GUI suite.
+
+### C3 — privileged explicit actual port remains restartable
+
+- Red: add a parent-composition regression using actual port 80 and unset persisted intent; resolve the target
+  and invoke the spawn seam, asserting the child is spawned and no `spawned:false` pre-spawn failure occurs.
+- Green: validate the actual bound port against TCP `[1,65535]`; retain persisted GUI-setting validation at
+  `[1024,65535]` and the existing explicit-flag precedence in `resolveGuiPort`.
+- Check: focused parent-composition and port-policy tests, then the exact tagged CLI/GUI suite.
+
+### Correction gate
+
+Run, in order: frontend build/test/typecheck; bundle generation; gofmt check on touched Go; `go build ./...`;
+`go vet ./...`; `go test -tags=test_state_path_env -count=1 -timeout 15m ./internal/gui/ ./internal/cli/`.
+No commit is authorized.

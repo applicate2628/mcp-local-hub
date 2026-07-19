@@ -11,7 +11,7 @@
 
 | Item | Status |
 |---|---|
-| [2026-07-16-productization-gui-solidify](active/2026-07-16-productization-gui-solidify/status.md) | Item 3 Unit B gated group: Phases D/E/F/I committed (default-OFF, not deployed); Option B/#562 integrated; Phase G parent coordinator implementation in progress at documentation-amended `beadf474` |
+| [2026-07-16-productization-gui-solidify](active/2026-07-16-productization-gui-solidify/status.md) | Item 3 Unit B RestartV3 gate ON; PR #563 round-1 three-finding correction QA PASS on `feat/gui-restart-unitb-gated` at `37b39ebc`; changes remain uncommitted and undeployed; next gate is human/PR review |
 
 ## Reaper kill-authority hardening — COMPLETE (2026-07-08, all bot-PASS + deployed)
 

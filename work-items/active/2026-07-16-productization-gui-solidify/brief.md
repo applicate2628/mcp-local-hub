@@ -1,51 +1,59 @@
 # Productization GUI solidify — current delivery brief
 
-Admission source: direct human Phase J decision on 2026-07-18, grounded in Phase-0 item 3 in `roadmap.md`
-and the accepted `item3-unitB-plan.md`.
+Admission source: direct human PR #563 Codex-bot round-1 correction decision on 2026-07-18, grounded in
+Phase-0 item 3 in `roadmap.md`, the accepted `item3-unitB-plan.md`, and the three supplied review findings.
 
-Primary task: Item 3, Unit B, Phase J — complete the final atomic release group by enabling RestartV3 by
-default, making the disabled gate fully inert, deleting only the retained v1 unsafe spawn-and-exit body,
-adding AC-J1, and closing the approved documentation drift.
+Primary task: fix all three PR #563 round-1 findings against the RestartV3 gate-ON implementation, add one
+red/green regression per finding, regenerate the embedded frontend bundle, and run the exact human-required
+frontend and Go gates.
 
-Scope: `internal/gui/gui_restart_gate.go`; the gate-off endpoint branch and retained v1 body in
-`internal/gui/gui_self_restart.go`; one adjacent inert-matrix test; `docs/phase-3b-ii-verification.md`;
-`CLAUDE.md`; and the required C6 supersession note in
-`work-items/decisions/2026-07-17-item3-unitB-recovery-simplify.md`.
+Scope: `internal/gui/frontend/src/api.ts`,
+`internal/gui/frontend/src/components/settings/SectionGuiServer.tsx` and its adjacent test;
+`internal/cli/gui.go`, `internal/cli/gui_port.go`, and adjacent CLI restart tests;
+`internal/gui/gui_restart_record.go` and its adjacent deadline-policy test; generated
+`internal/gui/assets/*` only through `go generate ./internal/gui/...`.
 
-Approved seams: preserve the v3 coordinator's spawn and exit seams and the composition-root discipline that
-successful restart exits without calling `manager.Stop`. Preserve all Phase D-I/G/H behavior and contracts.
+Approved seams: the existing RestartV3 progress consumer and best-effort navigation interface; the
+CLI-composed child standby bind budget; the single `RestartDeadlines` policy owner; the distinction between
+explicit runtime TCP-port validity and persisted GUI-setting validity. No endpoint wire shape changes.
 
 Out of scope: deployment, commit, push, real GUI spawn, Graphify, the `claude` CLI,
-`MCPHUB_GUI_SPAWN_TESTS`, any `mcphub.exe` sweep/kill, frontend implementation changes, and changes outside
-the Phase J surface.
+`MCPHUB_GUI_SPAWN_TESTS`, any `mcphub.exe` sweep/kill, startup rejection of privileged explicit ports,
+RestartV3 protocol redesign, or changes outside the named correction surface.
 
-Acceptance: AC-J1 through AC-J4 in `item3-unitB-plan.md`, as narrowed by the direct human constraints. Gate
-OFF must return 503, write no marker, spawn no child, skip the ensure-alive predicate, and retain frontend
-manual guidance. Gate ON must activate the RestartV3 contract suite. The two degrade-to-recovery end-to-end
-tests must pass if seam-drivable. Documentation must add the two CLI-primary discriminator rows, the real
-self-restart-and-reconnect smoke, the unreapable wedged-holder runbook row, the current bounded listener
-restart/exhaustion behavior, and the v3.1 C6 supersession note.
+Acceptance:
 
-Required verification: `go build ./...`; `go vet ./...`; `go test -count=1 -timeout 5m ./...`; and
-`go test -tags=test_state_path_env -count=1 -timeout 5m ./internal/api/ ./internal/cli/`. Run frontend
-build/test/typecheck and `go generate ./internal/gui/...` only if a frontend or bundle input is touched.
+- Port-change `reserved`/`new_port` waits for the new origin's full-GUI readiness probe before navigation;
+  same-port never navigates; probe exhaustion leaves the old page in place and preserves guidance.
+- Same-port child bind retry spans at least parent quiesce plus the post-close bind budget, so a 3-4 second
+  drain no longer expires the child; the injected timeout ordering remains within the reservation policy.
+- A restart callback whose actual bound port is any valid TCP port `[1,65535]`, including port 80, reaches
+  spawn; persisted GUI settings keep their existing `[1024,65535]` policy.
+- Existing 202/2xx progress/degrade behavior, no-commit constraints, manager-stop bypass, marker protocol,
+  same-port native reconnect, and gate-ON behavior remain unchanged.
 
-Current stage: implementation. Branch `feat/gui-restart-unitb-gated` at starting HEAD `3b42b1e7` contains
-Phases D, E, F, I, G, and H plus the browser-test follow-up; all remain gated and undeployed before Phase J.
-Integration owner: the main conversation holding `$lead`; implementation owner: explicitly assigned
-`$backend-engineer`; verification owner: the same session under the exact user-required local gate because
-subagent dispatch was not authorized.
+Required verification: `cd internal/gui/frontend && npm run build && npm run test && npm run typecheck`;
+`go generate ./internal/gui/...`; `go build ./...`; `go vet ./...`; gofmt clean on touched Go files; and
+`go test -tags=test_state_path_env -count=1 -timeout 15m ./internal/gui/ ./internal/cli/`.
 
-Critical risks and owners: gate-off inertness and endpoint wire behavior (`$backend-engineer`); spawn/exit
-seam preservation and post-release `manager.Stop` discipline (`$backend-engineer`); documentation C6
-coherence (`$knowledge-archivist`); fresh full-gate evidence (`$lead`).
+Current stage: corrective implementation. Branch `feat/gui-restart-unitb-gated` at starting HEAD `37b39ebc`
+is clean and has RestartV3 ON. Integration owner: the main conversation holding `$lead`; implementation
+owners: `$frontend-engineer` for P1 and `$backend-engineer` for both P2 findings; verification owner:
+`$qa-engineer`, with final exact-command reconciliation by `$lead`.
 
-Next action: write AC-J1 first, prove the expected red state, make the smallest production edits, prove green,
-finish the documentation pass, then run the exact full gate. Do not commit.
+Critical risks and owners: cross-origin/full-GUI readiness discrimination and bounded polling
+(`$frontend-engineer`); deadline ordering and same-port retry lifetime (`$backend-engineer`); explicit-vs-
+persisted port contract isolation (`$backend-engineer`); regression and exact-command evidence
+(`$qa-engineer` / `$lead`).
+
+Next action: run the three focused regressions red, implement each minimal owner-level correction, prove each
+green, regenerate the bundle, run frontend checks, then the exact tagged Go/build/vet/format gates. Do not
+commit.
 
 ## Terms and Abbreviations
 
 - CLI: Command-Line Interface.
 - FLOCK: The operating-system-backed GUI single-instance file lock.
 - GUI: Graphical User Interface.
-- SSE: Server-Sent Events.
+- P1/P2: Review finding priorities, with P1 higher than P2.
+- TCP: Transmission Control Protocol.
