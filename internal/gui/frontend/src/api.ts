@@ -912,8 +912,8 @@ export async function restartSupervisor(): Promise<SupervisorRestartResult> {
 // GuiRestartResult mirrors gui.guiSelfRestartResponse: the outcome of
 // the GUI self-restart handoff. `restarting: true` means the replacement
 // `mcphub gui` child was spawned and the current process is about to exit
-// to hand off the single-instance lock — the browser tab will lose its
-// connection momentarily, then the child's listener (same port) answers.
+// to hand off the single-instance lock. Same-port restarts reconnect natively;
+// port changes are observed separately through gui-restart-progress.
 // `spawned: false` + `spawn_error` means the child did NOT launch and the
 // current GUI keeps running, so the operator sees the error rather than
 // losing the GUI.
@@ -922,6 +922,250 @@ export interface GuiRestartResult {
   spawned_pid: number;
   spawn_error?: string;
   restarting: boolean;
+  handoff_id?: string;
+  generation?: string;
+  phase?: "in-progress";
+  old_port?: number;
+  target_port?: number;
+}
+
+export type GuiRestartProgressPhase = "in-progress" | "reserved" | "committed" | "interrupted";
+
+export type GuiRestartDegradeReasonCode =
+  | "gui-restart-interrupted-free-flock"
+  | "gui-restart-interrupted-marker-write-failed"
+  | "gui-restart-live-holder-wedged";
+
+export type GuiRestartOperatorAction = "mcphub gui" | "mcphub gui --force --kill";
+
+export interface GuiRestartProgress {
+  handoff_id?: string;
+  generation?: string;
+  phase: GuiRestartProgressPhase;
+  old_port?: number;
+  new_port?: number;
+  target_port?: number;
+  same_port?: boolean;
+  reason_code?: GuiRestartDegradeReasonCode;
+  operator_action?: GuiRestartOperatorAction;
+}
+
+export interface GuiRestartNavigation {
+  currentPort: number;
+  assign: (target: string) => void;
+  waitUntilReady?: (target: string, signal?: AbortSignal) => Promise<boolean>;
+  signal?: AbortSignal;
+}
+
+const guiRestartReadinessAttempts = 20;
+const guiRestartReadinessAttemptTimeoutMs = 500;
+const guiRestartReadinessRetryDelayMs = 250;
+
+function loadGuiRestartReadinessImage(src: string, signal?: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal?.aborted || typeof Image === "undefined") {
+      resolve(false);
+      return;
+    }
+
+    const image = new Image();
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (ready: boolean): void => {
+      if (settled) return;
+      settled = true;
+      if (timeout !== undefined) clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+      image.onload = null;
+      image.onerror = null;
+      if (!ready) {
+        try {
+          image.src = "data:,";
+        } catch {
+          // The probe is already settled; a browser-specific cancellation
+          // failure must not escape the best-effort readiness path.
+        }
+      }
+      resolve(ready);
+    };
+    const onAbort = (): void => finish(false);
+
+    image.onload = () => finish(true);
+    image.onerror = () => finish(false);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    timeout = setTimeout(() => finish(false), guiRestartReadinessAttemptTimeoutMs);
+    try {
+      image.src = src;
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+function waitForGuiRestartRetry(signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, guiRestartReadinessRetryDelayMs);
+    const onAbort = (): void => {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(false);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function waitUntilGuiRestartReady(target: string, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const favicon = new URL("/favicon.ico", target);
+    const pollID = Date.now();
+    for (let attempt = 0; attempt < guiRestartReadinessAttempts; attempt += 1) {
+      if (signal?.aborted) return false;
+      favicon.searchParams.set("gui-restart-ready", `${pollID}-${attempt}`);
+      if (await loadGuiRestartReadinessImage(favicon.href, signal)) return true;
+      if (
+        attempt + 1 < guiRestartReadinessAttempts &&
+        !(await waitForGuiRestartRetry(signal))
+      ) {
+        return false;
+      }
+    }
+  } catch {
+    // Readiness is best-effort; malformed targets and browser image failures
+    // leave the still-live old-port page in place.
+  }
+  return false;
+}
+
+export const GUI_RESTART_INTERRUPTED_MESSAGE = "GUI restart interrupted; run `mcphub gui`.";
+export const GUI_RESTART_LIVE_HOLDER_MESSAGE =
+  "GUI restart interrupted: a GUI process still holds the single-instance lock; run `mcphub gui --force --kill`.";
+
+const guiRestartProgressPhases = new Set<GuiRestartProgressPhase>([
+  "in-progress",
+  "reserved",
+  "committed",
+  "interrupted",
+]);
+const guiRestartDegradeReasonCodes = new Set<GuiRestartDegradeReasonCode>([
+  "gui-restart-interrupted-free-flock",
+  "gui-restart-interrupted-marker-write-failed",
+  "gui-restart-live-holder-wedged",
+]);
+const guiRestartOperatorActions = new Set<GuiRestartOperatorAction>([
+  "mcphub gui",
+  "mcphub gui --force --kill",
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validPort(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535
+    ? value
+    : undefined;
+}
+
+function parseGuiRestartProgressEvent(event: MessageEvent): GuiRestartProgress | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(String(event.data));
+  } catch {
+    return null;
+  }
+  if (!isRecord(value) || typeof value.phase !== "string" || !guiRestartProgressPhases.has(value.phase as GuiRestartProgressPhase)) {
+    return null;
+  }
+
+  const progress: GuiRestartProgress = { phase: value.phase as GuiRestartProgressPhase };
+  if (typeof value.handoff_id === "string") progress.handoff_id = value.handoff_id;
+  if (typeof value.generation === "string") progress.generation = value.generation;
+  const oldPort = validPort(value.old_port);
+  const newPort = validPort(value.new_port);
+  const targetPort = validPort(value.target_port);
+  if (oldPort !== undefined) progress.old_port = oldPort;
+  if (newPort !== undefined) progress.new_port = newPort;
+  if (targetPort !== undefined) progress.target_port = targetPort;
+  if (typeof value.same_port === "boolean") progress.same_port = value.same_port;
+  if (typeof value.reason_code === "string" && guiRestartDegradeReasonCodes.has(value.reason_code as GuiRestartDegradeReasonCode)) {
+    progress.reason_code = value.reason_code as GuiRestartDegradeReasonCode;
+  }
+  if (typeof value.operator_action === "string" && guiRestartOperatorActions.has(value.operator_action as GuiRestartOperatorAction)) {
+    progress.operator_action = value.operator_action as GuiRestartOperatorAction;
+  }
+  return progress;
+}
+
+function currentGuiPort(): number {
+  const explicit = Number(window.location.port);
+  if (Number.isInteger(explicit) && explicit >= 1 && explicit <= 65535) return explicit;
+  return window.location.protocol === "https:" ? 443 : 80;
+}
+
+// consumeGuiRestartProgressEvent is the single browser-side owner of restart
+// progress parsing and port-change navigation. Navigation is deliberately
+// best-effort: a matching reserved/new_port event on the still-alive old-port
+// stream starts a bounded favicon poll. Standby serves no favicon, so navigation
+// waits for the activated full GUI without inferring that the child committed.
+export function consumeGuiRestartProgressEvent(
+  event: MessageEvent,
+  navigation: GuiRestartNavigation = {
+    currentPort: currentGuiPort(),
+    assign: (target) => window.location.assign(target),
+    waitUntilReady: waitUntilGuiRestartReady,
+  },
+): GuiRestartProgress | null {
+  const progress = parseGuiRestartProgressEvent(event);
+  if (progress === null || progress.phase !== "reserved") return progress;
+
+  const targetPort = progress.new_port ?? progress.target_port;
+  if (
+    progress.old_port === undefined ||
+    targetPort === undefined ||
+    progress.same_port === true ||
+    progress.old_port !== navigation.currentPort ||
+    targetPort === progress.old_port
+  ) {
+    return progress;
+  }
+
+  const target = `http://127.0.0.1:${targetPort}/`;
+  const waitUntilReady = navigation.waitUntilReady ?? waitUntilGuiRestartReady;
+  void (async () => {
+    try {
+      if (!(await waitUntilReady(target, navigation.signal)) || navigation.signal?.aborted) return;
+      navigation.assign(target);
+    } catch {
+      // The old-port grace stream and readiness probe are opportunistic. Keep
+      // the progress UI alive when probing exhausts or navigation is blocked.
+    }
+  })();
+  return progress;
+}
+
+// guiRestartDegradeMessage returns only literals selected by registered
+// reason/action enum pairs. Persisted or otherwise arbitrary command text is
+// never rendered into the GUI.
+export function guiRestartDegradeMessage(progress: GuiRestartProgress): string | null {
+  if (
+    (progress.reason_code === "gui-restart-interrupted-free-flock" ||
+      progress.reason_code === "gui-restart-interrupted-marker-write-failed") &&
+    progress.operator_action === "mcphub gui"
+  ) {
+    return GUI_RESTART_INTERRUPTED_MESSAGE;
+  }
+  if (
+    progress.reason_code === "gui-restart-live-holder-wedged" &&
+    progress.operator_action === "mcphub gui --force --kill"
+  ) {
+    return GUI_RESTART_LIVE_HOLDER_MESSAGE;
+  }
+  return null;
 }
 
 // restartGui posts to /api/gui/restart. On success the backend spawns a

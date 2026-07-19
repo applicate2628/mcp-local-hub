@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -293,5 +294,37 @@ func TestGuiCmd_SecondInstanceActivates(t *testing.T) {
 		t.Fatalf("isolation proof failed: child mcphub api.DaemonStateDir() did not create its redirected override dir %q within 15s\n"+
 			"This means the subprocess resolved the REAL per-user state dir instead of the temp override — "+
 			"the live-fleet hazard is NOT closed.\nsecond-instance output:\n%s", stateLeaf, out2)
+	}
+}
+
+// TestGuiCmd_RejectsExplicitPrivilegedPort drives the ACTUAL `mcphub gui` RunE
+// with an explicit privileged --port and asserts it exits non-zero with the
+// [1024,65535] range refusal — the end-to-end wiring of validateExplicitGUIPortFlag
+// (bot #563). The validator returns before any listener bind, single-instance
+// lock acquire, or GUI/tray launch, so this refusal never starts a real GUI
+// process; it is grouped with the subprocess-gated tests only because it execs
+// `go run`.
+func TestGuiCmd_RejectsExplicitPrivilegedPort(t *testing.T) {
+	requireGuiSpawnTests(t)
+	if testing.Short() {
+		t.Skip("subprocess test")
+	}
+	exe, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	childState := t.TempDir()
+	cmd := exec.CommandContext(ctx, exe, goRunArgsWithTestTag("./cmd/mcphub", "gui", "--port", "80", "--no-browser", "--no-tray")...)
+	cmd.Dir = repoRoot(t)
+	cmd.Env = append(os.Environ(), childStateEnv(childState)...)
+	cmd.WaitDelay = 2 * time.Second
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("gui --port 80 exited 0, want non-zero range refusal; output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "[1024,65535]") {
+		t.Fatalf("gui --port 80 output missing the range refusal; got:\n%s", out)
 	}
 }

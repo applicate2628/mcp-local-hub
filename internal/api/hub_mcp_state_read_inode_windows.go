@@ -81,14 +81,14 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 }
 
 func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true, false)
 }
 
 func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false, false)
 }
 
-func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks bool) ([]byte, error) {
+func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool) ([]byte, error) {
 	parentDir := filepath.Dir(path)
 	basename := filepath.Base(path)
 
@@ -147,10 +147,14 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	// FILE_READ_DATA so we can issue ReadFile on the same handle
 	// after the verify steps below. SYNCHRONIZE is added by
 	// ntOpenRelative internally.
+	desiredAccess := uint32(windows.FILE_READ_DATA | windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES)
+	if consume {
+		desiredAccess |= windows.DELETE
+	}
 	fileHandle, err := ntOpenRelative(
 		parentHandle,
 		basename,
-		windows.FILE_READ_DATA|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES,
+		desiredAccess,
 	)
 	if err != nil {
 		if windowsAnchoredReadErrIsNotExist(err) {
@@ -211,12 +215,26 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			})
 		}
 	}
+	if consume {
+		// FILE_DISPOSITION_INFORMATION marks this exact opened kernel file
+		// object for deletion when the retained handle closes. A directory-entry
+		// replacement after open cannot redirect deletion to a different file.
+		if err := setFileDeleteOnClose(fileHandle); err != nil {
+			return nil, fmt.Errorf("unlink consumed state secret %s: %w", path, err)
+		}
+		if fi.NumberOfLinks != 1 {
+			return nil, fmt.Errorf("consume state secret %s: opened file has %d links, want exactly one", path, fi.NumberOfLinks)
+		}
+	}
 
 	// Read the content via the verified handle. windows.ReadFile
 	// fills a single buffer; loop until EOF or the size cap fires.
 	// Pre-allocate based on the file size we already have from
 	// GetFileInformationByHandle to avoid reslicing.
 	fileSize := int64(fi.FileSizeHigh)<<32 | int64(fi.FileSizeLow)
+	if consume && fileSize != maxBytes {
+		return nil, fmt.Errorf("consume state secret %s: size = %d, want %d bytes", path, fileSize, maxBytes)
+	}
 	if fileSize > maxBytes {
 		return nil, fmt.Errorf("hub-mcp state read %s: file size %d exceeds cap %d (OOM-protection)", path, fileSize, maxBytes)
 	}
@@ -224,7 +242,14 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 		return nil, fmt.Errorf("hub-mcp state read %s: invalid file size %d", path, fileSize)
 	}
 	buf := make([]byte, 0, fileSize)
+	readSucceeded := false
+	defer func() {
+		if !readSucceeded {
+			zeroStateSecretBytes(buf)
+		}
+	}()
 	chunk := make([]byte, 4096)
+	defer zeroStateSecretBytes(chunk)
 	for {
 		var read uint32
 		err := windows.ReadFile(fileHandle, chunk, &read, nil)
@@ -249,6 +274,7 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	if buf == nil {
 		buf = []byte{}
 	}
+	readSucceeded = true
 	return buf, nil
 }
 

@@ -122,3 +122,40 @@ func TestInvalidPersistedGUIPortWarningNamesFallbackWithoutClaimingApplication(t
 		}
 	}
 }
+
+// TestValidateExplicitGUIPortFlag pins the front-door refusal for bot #563:
+// an explicit privileged/out-of-range --port is rejected (so a GUI never
+// launches on a port the persisted-config + restart-handoff protocol cannot
+// carry), while 0 (auto-pick) and every valid [1024,65535] port pass. A port
+// value that was NOT explicitly set on the flag is never the flag's concern.
+func TestValidateExplicitGUIPortFlag(t *testing.T) {
+	tests := []struct {
+		name        string
+		flagChanged bool
+		port        int
+		wantErr     bool
+	}{
+		{name: "explicit privileged 80", flagChanged: true, port: 80, wantErr: true},
+		{name: "explicit privileged 22", flagChanged: true, port: 22, wantErr: true},
+		{name: "explicit boundary 1023", flagChanged: true, port: 1023, wantErr: true},
+		{name: "explicit negative", flagChanged: true, port: -1, wantErr: true},
+		{name: "explicit above range", flagChanged: true, port: 65536, wantErr: true},
+		{name: "explicit auto-pick zero", flagChanged: true, port: 0, wantErr: false},
+		{name: "explicit boundary 1024", flagChanged: true, port: 1024, wantErr: false},
+		{name: "explicit default 9125", flagChanged: true, port: 9125, wantErr: false},
+		{name: "explicit boundary 65535", flagChanged: true, port: 65535, wantErr: false},
+		{name: "not explicit privileged ignored", flagChanged: false, port: 80, wantErr: false},
+		{name: "not explicit zero ignored", flagChanged: false, port: 0, wantErr: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateExplicitGUIPortFlag(tc.flagChanged, tc.port)
+			if tc.wantErr && err == nil {
+				t.Fatalf("validateExplicitGUIPortFlag(%v, %d) = nil, want error", tc.flagChanged, tc.port)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("validateExplicitGUIPortFlag(%v, %d) = %v, want nil", tc.flagChanged, tc.port, err)
+			}
+		})
+	}
+}

@@ -3,16 +3,134 @@ package gui
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
 )
+
+type phaseGCloseWaitListener struct {
+	closed atomic.Bool
+}
+
+func (*phaseGCloseWaitListener) Accept() (net.Conn, error) { return nil, net.ErrClosed }
+
+func (l *phaseGCloseWaitListener) Close() error {
+	l.closed.Store(true)
+	return nil
+}
+
+func (*phaseGCloseWaitListener) Addr() net.Addr { return phaseGNetAddr{} }
+
+func TestRestartV3_CloseListenerReportsPhysicalCloseWhenServeWaitTimesOut(t *testing.T) {
+	owner := NewGUIListenerOwner(time.Second)
+	listener := &phaseGCloseWaitListener{}
+	owner.current = &guiListenerServeGeneration{
+		listener: listener,
+		serving:  true,
+		done:     make(chan struct{}),
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	err := owner.CloseListener(closeCtx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CloseListener error = %v, want context deadline", err)
+	}
+	if !restartListenerPhysicallyClosed(err) || !listener.closed.Load() {
+		t.Fatalf("physical close state = %v listener.closed=%v, want both true", restartListenerPhysicallyClosed(err), listener.closed.Load())
+	}
+	owner.mu.Lock()
+	current := owner.current
+	owner.mu.Unlock()
+	if current != nil {
+		t.Fatalf("owner retained physically closed generation: %+v", current)
+	}
+}
+
+func TestRestartV3_ChildActivatesImmediatelyAndInitialHubBindRetriesFromNilThroughExistingDriver(t *testing.T) {
+	s := NewServer(Config{Port: 0, PID: 4242, Version: "phase-f"})
+	s.events.DisableGUIEventLog = true
+	s.hubEndpointGateFn = func(*api.API) bool { return true }
+	recoveredHub := liveRestartTestComp(3439)
+	driverAttempt := make(chan struct{})
+	releaseDriver := make(chan struct{})
+	var starts atomic.Int32
+	s.startHubMcpListenerFn = func(ctx context.Context, _ bool, _ *api.API, _ startHubMcpListenerOptions) (*HubListenerComponents, error) {
+		switch starts.Add(1) {
+		case 1:
+			return nil, fmt.Errorf("initial child hub bind blocked by outgoing parent")
+		case 2:
+			close(driverAttempt)
+			select {
+			case <-releaseDriver:
+				return recoveredHub, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		default:
+			return nil, fmt.Errorf("unexpected extra hub start")
+		}
+	}
+
+	owner := NewGUIListenerOwner(10 * time.Second)
+	bindCtx, bindCancel := context.WithTimeout(context.Background(), time.Second)
+	bound, err := owner.BindStandby(bindCtx, 0, http.NotFoundHandler())
+	bindCancel()
+	if err != nil {
+		t.Fatalf("BindStandby: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	ready := make(chan struct{})
+	go func() { done <- s.ContinueWithGUIListener(ctx, ready, owner, bound) }()
+	select {
+	case <-owner.Activated():
+	case <-time.After(time.Second):
+		t.Fatal("child did not activate full handler immediately after the continuation started")
+	}
+	select {
+	case <-driverAttempt:
+	case <-time.After(2 * time.Second):
+		t.Fatal("initial child hub bind failure did not enter the existing retry-from-nil driver")
+	}
+
+	client := &http.Client{Timeout: time.Second}
+	response, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/ping", s.Port()))
+	if err != nil {
+		t.Fatalf("full ping while hub retry is blocked: %v", err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("full ping status while hub retry is blocked = %d, want 200", response.StatusCode)
+	}
+
+	close(releaseDriver)
+	deadline := time.Now().Add(2 * time.Second)
+	for s.hubMcpComp.Load() != recoveredHub && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := s.hubMcpComp.Load(); got != recoveredHub {
+		t.Fatalf("hub component after retry = %#v, want %#v", got, recoveredHub)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("ContinueWithGUIListener shutdown: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ContinueWithGUIListener did not stop after cancellation")
+	}
+}
 
 func TestRestartV3_SamePort_ClosesOnlyGUIListenerAndKeepsHubEventsAlive(t *testing.T) {
 	s := NewServer(Config{Port: 0})

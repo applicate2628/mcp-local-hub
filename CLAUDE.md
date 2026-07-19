@@ -1752,41 +1752,40 @@ The `--reset-port` exit-8 gate keys on the `mcphub-hub` client entry, so
 it does NOT fire for a host that ONLY uses `/g/` group routes — reset
 those at will, but re-copy the group URLs afterward.
 
-## Hub listener hang — observability (B1, partial)
+## Hub listener hang — bounded restart and honest exhaustion (B1)
 
-The gate-ON hub aggregate listener is a fire-and-forget goroutine inside
-the GUI process. A serve-loop death (fatal accept error) already logs
-`hub-listener-down` to `hub-mcp.log` and flips the live badge. A HANG
-(wedged accept loop, stuck handler, deadlock) with the GUI still alive
-was previously SILENT — `\mcp-local-hub-liveness` probes the supervisor
-lock, not the hub listener's responsiveness, so a live GUI with a hung
-listener passes the liveness probe and all aggregated MCP dies with no
-automatic recovery.
+The gate-ON hub aggregate listener runs inside the GUI process. A
+serve-loop death logs `hub-listener-down` to `hub-mcp.log`; a separate
+health watcher periodically TCP-dials the bound hub port and emits
+`hub-listener-unresponsive` after a bounded run of failed probes. The
+`\mcp-local-hub-liveness` task still probes the supervisor lock, not
+this listener.
 
-**What ships now (observability only).** A self-watchdog goroutine in
-the GUI periodically TCP-dials the bound hub port. When the socket is
-unreachable for a bounded number of consecutive probes, it emits a
-structured `severity: warn, event: hub-listener-unresponsive` entry to
-`hub-mcp.log` (and `hub-listener-probe-recovered` info on recovery), so
-the previously-silent failure is observable in the same log stream as
-bind/lifecycle events. It does NOT auto-restart the listener.
+**What ships now (detection plus bounded recovery).** The watcher remains
+detect-only, but its transition callback signals the Server-owned
+`runHubListenerRestartDriver`. That single owner shuts down the current
+hub component and rebuilds it on the persisted endpoint through the
+existing listener lifecycle. Restarts use bounded backoff, a five-attempt
+consecutive cap, a 20-attempt rolling cap per 30 minutes, and a bounded
+same-port rebind wait. Events `hub-listener-restart-failed`,
+`hub-listener-restarted`, `hub-listener-restart-exhausted`, and
+`hub-listener-restart-abandoned` record the outcome. `hubHealthTracker`
+publishes the matching recovering, healthy, needs-reconcile, or down
+state to the dashboard and Groups surfaces.
 
-**Deferred (full recovery).** Auto-restart of a hung listener
-(ShutdownHubListener + startHubMcpListener) and handler-deadlock
-detection (a full authed round-trip rather than a TCP dial) need
-careful Server-lifecycle integration and are out of scope here to avoid
-destabilizing the running hub. Until then, the runbook recovery for "ALL
-aggregated MCP dies at once under gate-ON" is: **restart the GUI**
-(close the tray/window and relaunch, or `mcphub gui --force --kill --yes`
-then relaunch). Tracked in
-`work-items/backlog/2026-06-16-hub-listener-hang-no-recovery.md`.
+**Honest recovery floor.** Exhaustion or rolling-window abandonment is
+not hidden: health becomes down and manual hub-listener intervention is
+required. Restart the GUI (close the tray/window and relaunch, or use the
+identity-gated `mcphub gui --force --kill --yes` flow and relaunch).
+The watcher is intentionally TCP-dial based, so a handler-only deadlock
+that still accepts TCP connections remains outside its detection
+contract and uses the same manual recovery.
 
 **Groups `/g/` routes ride the same listener (C7).** A hung or dead hub
 listener takes the `/g/<group>/mcp` group routes down alongside the
-`/clients/` routes — they share the one aggregate listener. The
-`hub-listener-unresponsive` warn + the "restart the GUI" recovery above
-apply identically to groups; there is no separate group-listener health
-signal.
+`/clients/` routes. They share the recovery driver, event stream, health
+state, retry limits, and manual exhaustion runbook; there is no separate
+group-listener owner.
 
 ## LSP router — cold-start contract (P2c; requests await, notifications 202)
 

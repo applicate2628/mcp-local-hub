@@ -15,9 +15,15 @@
 import { useState } from "preact/hooks";
 import { SectionFooter } from "./SectionAppearance";
 import { useSectionSaveFlow } from "./useSectionSaveFlow";
+import { useEventSource } from "../../hooks/useEventSource";
 import { InfoTip } from "../InfoTip";
 import { SettingsCard } from "./SettingsCard";
-import { restartGui } from "../../api";
+import {
+  consumeGuiRestartProgressEvent,
+  guiRestartDegradeMessage,
+  restartGui,
+} from "../../api";
+import type { GuiRestartProgress } from "../../api";
 import type { SettingsSnapshot, ConfigSettingDTO, SettingDTO } from "../../lib/settings-types";
 
 export type SectionGuiServerProps = {
@@ -50,18 +56,37 @@ export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerPr
   // GUI self-restart affordance for the port / hub-endpoint restart-required
   // badges. POST /api/gui/restart spawns a replacement `mcphub gui` process
   // (re-running the same args, so the new port / flags take effect) and then
-  // exits the current one to hand off the single-instance lock. The
-  // replacement listener binds the SAME port, so the browser tab reconnects
-  // on its own after a brief drop — there is no need to close and reopen the
-  // app by hand. The supervisor + daemon fleet survive the handoff (the child
-  // adopts the live supervisor), so this is a GUI-listener restart, not a
-  // daemon restart.
+  // exits the current one to hand off the single-instance lock. Same-port
+  // restarts reconnect natively; a reserved port-change progress event makes
+  // one best-effort navigation attempt to the new loopback origin. The
+  // supervisor + daemon fleet survive the handoff (the child adopts the live
+  // supervisor), so this is a GUI-listener restart, not a daemon restart.
   //
   // The post-200 connection drop is EXPECTED: the backend may send the 200 as
   // its last byte before the listener dies, so a fetch network error AFTER a
   // successful parse is treated as a normal handoff rather than a failure.
   const [restartBusy, setRestartBusy] = useState(false);
   const [restartMsg, setRestartMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  function onRestartProgress(event: MessageEvent): void {
+    const progress = consumeGuiRestartProgressEvent(event);
+    if (progress === null) return;
+
+    const degrade = guiRestartDegradeMessage(progress);
+    if (degrade !== null) {
+      setRestartMsg({ kind: "error", text: degrade });
+      return;
+    }
+
+    const coarse = coarseRestartProgressMessage(progress);
+    if (coarse !== null) setRestartMsg(coarse);
+  }
+
+  const restartEventsURL = snapshot.status === "ok" && typeof EventSource !== "undefined" ? "/api/events" : null;
+  useEventSource(restartEventsURL, {
+    "gui-restart-progress": onRestartProgress,
+  });
+
   async function doRestart() {
     if (restartBusy) return;
     setRestartBusy(true);
@@ -71,7 +96,9 @@ export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerPr
       if (res.restarting) {
         setRestartMsg({
           kind: "ok",
-          text: "Restarting the GUI… the replacement window reconnects on the same port in a moment. If this tab does not refresh on its own, reload it.",
+          text: res.old_port !== res.target_port
+            ? `Restarting the GUI… the replacement GUI is targeting port ${res.target_port}. This tab will make a best-effort attempt to follow; if it does not, open the GUI on the new port.`
+            : "Restarting the GUI… the replacement window reconnects on the same port in a moment. If this tab does not refresh on its own, reload it.",
         });
       } else {
         const detail = res.spawn_error || "the replacement GUI process did not start";
@@ -197,16 +224,18 @@ export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerPr
         })}
       </div>
 
-      {showPortBadge || showHubBadge ? (
+      {showPortBadge || showHubBadge || restartMsg ? (
         <div class="mt-3 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => void doRestart()}
-            disabled={restartBusy}
-            data-testid="gui-server-restart-now"
-          >
-            {restartBusy ? "Restarting…" : "Restart GUI now"}
-          </button>
+          {showPortBadge || showHubBadge ? (
+            <button
+              type="button"
+              onClick={() => void doRestart()}
+              disabled={restartBusy}
+              data-testid="gui-server-restart-now"
+            >
+              {restartBusy ? "Restarting…" : "Restart GUI now"}
+            </button>
+          ) : null}
           {restartMsg ? (
             <span
               class={`save-banner ${restartMsg.kind}`}
@@ -222,4 +251,26 @@ export function SectionGuiServer({ snapshot, onDirtyChange }: SectionGuiServerPr
       <SectionFooter flow={flow} />
     </SettingsCard>
   );
+}
+
+function coarseRestartProgressMessage(
+  progress: GuiRestartProgress,
+): { kind: "ok" | "error"; text: string } | null {
+  switch (progress.phase) {
+    case "in-progress":
+      return { kind: "ok", text: "Restarting the GUI… starting the replacement process." };
+    case "reserved": {
+      const targetPort = progress.new_port ?? progress.target_port;
+      if (progress.same_port !== true && targetPort !== undefined && targetPort !== progress.old_port) {
+        return { kind: "ok", text: `Restart handoff ready… opening the GUI on port ${targetPort}.` };
+      }
+      return { kind: "ok", text: "Restart handoff ready… reconnecting on the same port." };
+    }
+    case "interrupted":
+      return { kind: "error", text: "GUI restart interrupted." };
+    case "committed":
+      // A child-side persisted phase is diagnostic only. The old stream and
+      // best-effort redirect never turn it into a browser-visible success claim.
+      return null;
+  }
 }

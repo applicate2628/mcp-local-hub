@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -25,34 +28,309 @@ import (
 	"golang.org/x/term"
 )
 
-// selfRestartHandoffEnv mirrors gui.SelfRestartHandoffEnv. The GUI
-// self-restart handler (internal/gui/gui_self_restart.go) sets this env
-// var on the replacement `mcphub gui` child it spawns; this CLI startup
-// path reads it to switch the single-instance acquire from a single-shot
-// TryLock to a bounded retry poll. Duplicated as a local const (rather
-// than importing the value) only to keep the literal in one obvious
-// place per package; the gui package owns the canonical name and a unit
-// test pins the two equal.
+// selfRestartHandoffEnv mirrors gui.SelfRestartHandoffEnv. RestartV3 carries a
+// structured handoff descriptor in this variable and dispatches the replacement
+// directly into the reservation-aware standby child path. The literal "1" is
+// retained only as a cross-version upgrade bridge: an already-running v1 binary
+// can spawn a rename-aside-deployed v3 binary, whose normal startup path still
+// recognizes the old signal. The gui package owns the canonical name and a unit
+// test pins the two package constants equal.
 const selfRestartHandoffEnv = "MCPHUB_GUI_SELF_RESTART_HANDOFF"
 
 // selfRestartHandoffAcquireDeadline / selfRestartHandoffAcquireBackoff
-// bound the handoff acquire poll. The window only needs to cover the
-// outgoing parent's flush-response + selfRestartExitDelay (~250ms) + OS
-// flock release; 10s is generously padded for a loaded host. After the
-// deadline the child falls through to the normal busy/handshake path so
-// a genuinely-stuck incumbent (not a handoff) is still diagnosed.
+// bound only the legacy literal-"1" upgrade-bridge acquire poll. RestartV3's
+// structured child uses its reservation protocol instead. After this bridge
+// deadline the child falls through to the normal busy/handshake path so a
+// genuinely stuck incumbent is still diagnosed.
 var (
 	selfRestartHandoffAcquireDeadline = 10 * time.Second
 	selfRestartHandoffAcquireBackoff  = 100 * time.Millisecond
 )
 
-// acquireSingleInstanceWithHandoff acquires the GUI single-instance lock.
-// On the normal path it is a single AcquireSingleInstanceAt (identical to
-// the prior direct call). When MCPHUB_GUI_SELF_RESTART_HANDOFF=1 is set
-// (the replacement GUI spawned by POST /api/gui/restart), it polls the
-// acquire for a bounded window so the brief overlap where the outgoing
-// parent still holds the flock does not BUSY-out the handoff — the child
-// catches the lock the instant the parent's exit releases it.
+func isRestartV3ChildLaunch(restartV3Enabled bool, handoff string) bool {
+	return restartV3Enabled && handoff != "" && handoff != "1"
+}
+
+func consumeSelfRestartHandoff(handoff string) string {
+	_ = os.Unsetenv(selfRestartHandoffEnv)
+	return handoff
+}
+
+type restartV3ChildRuntimeStarter func(
+	context.Context,
+	*gui.Server,
+	*gui.GUIListenerOwner,
+	net.Listener,
+	gui.SingleInstanceLease,
+) error
+
+type restartV3ChildStartupConfig struct {
+	Handoff      string
+	PID          int
+	PidportPath  string
+	Port         int
+	Version      string
+	Deadlines    gui.RestartDeadlines
+	StartRuntime restartV3ChildRuntimeStarter
+}
+
+type releaseOnceLease struct {
+	lease gui.SingleInstanceLease
+	once  sync.Once
+}
+
+func (l *releaseOnceLease) Release() {
+	if l == nil {
+		return
+	}
+	l.once.Do(func() {
+		if l.lease != nil {
+			l.lease.Release()
+		}
+	})
+}
+
+type restartV3ParentRuntime struct {
+	SettingsGet func(string) (string, error)
+	Spawn       func([]string, gui.SelfRestartHandoff) (gui.RestartParentChild, error)
+	Confirm     func(context.Context, int, []byte, gui.AuthenticatedReadinessIdentity) error
+	Exit        func()
+}
+
+func defaultRestartV3ParentRuntime(exitRequested *atomic.Bool) restartV3ParentRuntime {
+	return restartV3ParentRuntime{
+		SettingsGet: func(key string) (string, error) { return api.NewAPI().SettingsGet(key) },
+		Spawn:       gui.SpawnRestartV3GUI,
+		Confirm:     gui.ConfirmAuthenticatedStandby,
+		Exit:        selfRestartProcessExitBoundary(exitRequested, gui.RequestSelfRestartExit),
+	}
+}
+
+func selfRestartProcessExitBoundary(requested *atomic.Bool, exit func()) func() {
+	return func() {
+		if requested != nil {
+			requested.Store(true)
+		}
+		if exit != nil {
+			exit()
+		}
+	}
+}
+
+type guiSupervisorManagerStopper interface {
+	Stop(context.Context, int) error
+}
+
+func stopSupervisorManagerUnlessSelfRestart(ctx context.Context, manager guiSupervisorManagerStopper, exitRequested *atomic.Bool) error {
+	if manager == nil || (exitRequested != nil && exitRequested.Load()) {
+		return nil
+	}
+	return manager.Stop(ctx, 5000)
+}
+
+// buildRestartV3ParentDependencies composes CLI-owned facts without moving
+// argv parsing or lease ownership into the gui package. TargetPort captures
+// one typed persisted-port classification; Spawn consumes that same value so
+// a settings race cannot produce argv/marker disagreement.
+func buildRestartV3ParentDependencies(
+	ctx context.Context,
+	cmd *cobra.Command,
+	lease gui.SingleInstanceLease,
+	pidportPath string,
+	oldPort func() int,
+	argv []string,
+	runtime restartV3ParentRuntime,
+) (gui.RestartCoordinatorDependencies, error) {
+	if ctx == nil || cmd == nil || lease == nil || strings.TrimSpace(pidportPath) == "" || oldPort == nil {
+		return gui.RestartCoordinatorDependencies{}, errors.New("restart v3 parent composition is incomplete")
+	}
+	if runtime.SettingsGet == nil || runtime.Spawn == nil || runtime.Confirm == nil || runtime.Exit == nil {
+		return gui.RestartCoordinatorDependencies{}, errors.New("restart v3 parent runtime seams are incomplete")
+	}
+	var intentMu sync.Mutex
+	var intent guiPortIntent
+	intentResolved := false
+	argvCopy := append([]string(nil), argv...)
+	targetPort := func(actualPort int) (int, error) {
+		if !validPersistedGUIPort(actualPort) {
+			return 0, fmt.Errorf("restart v3 actual GUI port %d is outside the supported loopback range [1024,65535]", actualPort)
+		}
+		raw, err := runtime.SettingsGet("gui_server.port")
+		if err != nil {
+			return 0, fmt.Errorf("read desired GUI port for restart: %w", err)
+		}
+		resolved := classifyPersistedGUIPort(raw)
+		if resolved.Kind == guiPortIntentInvalid {
+			fallback := guiPortFallbackEphemeral
+			if cmd.Flags().Changed("port") {
+				fallback = guiPortFallbackExplicitFlag
+			}
+			emitInvalidGUIPortWarning(cmd.OutOrStderr(), resolved, fallback)
+		}
+		intentMu.Lock()
+		intent = resolved
+		intentResolved = true
+		intentMu.Unlock()
+		if resolved.Kind == guiPortIntentValid {
+			return resolved.Port, nil
+		}
+		// The structured handoff pins the already-proved actual port for
+		// unset/invalid intent; the child consumes that target directly.
+		return actualPort, nil
+	}
+	spawn := func(handoff gui.SelfRestartHandoff) (gui.RestartParentChild, error) {
+		intentMu.Lock()
+		resolved, ok := intent, intentResolved
+		intentMu.Unlock()
+		if !ok {
+			return nil, errors.New("restart v3 target port was not resolved before spawn")
+		}
+		rebuilt, err := RebuildSelfRestartArgv(argvCopy, cmd.Flags(), resolved)
+		if err != nil {
+			return nil, err
+		}
+		return runtime.Spawn(rebuilt, handoff)
+	}
+	deadlines := gui.DefaultRestartDeadlines()
+	return gui.RestartCoordinatorDependencies{
+		Context: ctx, StateDir: filepath.Dir(pidportPath), OldPort: oldPort, TargetPort: targetPort,
+		ParentPID: os.Getpid(), Lease: lease, MarkerStore: gui.NewHandoffMarkerStore(filepath.Dir(pidportPath), deadlines),
+		Deadlines: deadlines, Spawn: spawn, Confirm: runtime.Confirm, Exit: runtime.Exit,
+	}, nil
+}
+
+// runRestartV3ChildStartup composes the gated child half. Before the flock it
+// only consumes the one-shot nonce file and binds the challenged standby
+// listener. The injected runtime owns every mutable GUI side effect and is not
+// invoked until SpawnedGUIChild has acquired and revalidated the reservation.
+func runRestartV3ChildStartup(ctx context.Context, cfg restartV3ChildStartupConfig) error {
+	if ctx == nil {
+		return errors.New("restart child context is nil")
+	}
+	if cfg.PidportPath == "" || cfg.Port <= 0 || cfg.StartRuntime == nil {
+		return errors.New("restart child startup configuration is incomplete")
+	}
+
+	stateDir := filepath.Dir(cfg.PidportPath)
+	child, err := gui.NewSpawnedGUIChildFromEnvironment(cfg.Handoff, cfg.PID, stateDir)
+	if err != nil {
+		return err
+	}
+	defer child.Close()
+	if child.Handoff.TargetPort != cfg.Port {
+		return fmt.Errorf("restart child target port %d does not match resolved GUI port %d", child.Handoff.TargetPort, cfg.Port)
+	}
+
+	server := gui.NewServer(gui.Config{
+		Port:             cfg.Port,
+		Version:          cfg.Version,
+		PID:              cfg.PID,
+		RestartV3Enabled: true,
+	})
+	defer server.Broadcaster().Close()
+	owner := server.GUIListenerOwner()
+	bindBudget := cfg.Deadlines.Bind
+	if child.Handoff.OldPort == child.Handoff.TargetPort {
+		bindBudget += cfg.Deadlines.Quiesce
+	}
+	bound, err := bindRestartV3ChildStandby(ctx, bindBudget, func(bindCtx context.Context) (net.Listener, error) {
+		return owner.BindStandby(bindCtx, cfg.Port, child.Readiness.Handler())
+	})
+	if err != nil {
+		return err
+	}
+
+	store := gui.NewHandoffMarkerStore(stateDir, cfg.Deadlines)
+	deps := gui.DefaultRestartChildDependencies(cfg.Deadlines)
+	deps.MarkerStore = store
+	deps.Standby = owner
+	deps.Events = server.Broadcaster()
+	runtime := gui.NewRestartChildRuntimeSettlement()
+	deps.Runtime = runtime
+	deps.Acquire = func(context.Context) (gui.SingleInstanceLease, error) {
+		lease, err := child.AcquireSingleInstanceAt(cfg.PidportPath, cfg.Port, store, cfg.Deadlines)
+		if err != nil {
+			return nil, err
+		}
+		return &releaseOnceLease{lease: lease}, nil
+	}
+
+	deps.Activate = func(activateCtx context.Context, lease gui.SingleInstanceLease) error {
+		go func() {
+			runtime.Stop(cfg.StartRuntime(activateCtx, server, owner, bound, lease))
+		}()
+		go func() {
+			select {
+			case <-activateCtx.Done():
+				runtime.Stop(activateCtx.Err())
+			case <-runtime.Done():
+			}
+		}()
+		select {
+		case <-owner.Activated():
+			return nil
+		case <-runtime.Done():
+			runtimeErr := runtime.Err()
+			if runtimeErr == nil {
+				runtimeErr = errors.New("restart child runtime stopped before listener activation")
+			}
+			return runtimeErr
+		case <-activateCtx.Done():
+			return activateCtx.Err()
+		}
+	}
+
+	result, err := child.Run(ctx, deps)
+	if err != nil {
+		return err
+	}
+	if !result.Activated {
+		return errors.New("restart child completed without an activated runtime")
+	}
+
+	<-runtime.Done()
+	runtimeErr := runtime.Err()
+	if errors.Is(runtimeErr, context.Canceled) && errors.Is(ctx.Err(), context.Canceled) {
+		return nil
+	}
+	return runtimeErr
+}
+
+func bindRestartV3ChildStandby(
+	ctx context.Context,
+	bindBudget time.Duration,
+	bind func(context.Context) (net.Listener, error),
+) (net.Listener, error) {
+	if bindBudget <= 0 || bind == nil {
+		return nil, errors.New("restart child standby bind budget and binder are required")
+	}
+	bindCtx, cancel := context.WithTimeout(ctx, bindBudget)
+	defer cancel()
+	var lastErr error
+	for {
+		listener, err := bind(bindCtx)
+		if err == nil {
+			return listener, nil
+		}
+		lastErr = err
+		if !api.IsPortBindRefusedErr(err) && !errors.Is(err, syscall.EADDRINUSE) {
+			return nil, err
+		}
+		timer := time.NewTimer(25 * time.Millisecond)
+		select {
+		case <-bindCtx.Done():
+			timer.Stop()
+			return nil, errors.Join(lastErr, bindCtx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+// acquireSingleInstanceWithHandoff owns the normal GUI single-instance acquire.
+// The current RestartV3 structured child does not enter this helper; it uses the
+// reservation-aware standby path in runRestartV3ChildStartup. A handoff value of
+// exactly "1" enables a bounded retry only for the cross-version upgrade bridge
+// where an already-running v1 parent launches a rename-aside-deployed v3 binary.
 //
 // Only ErrSingleInstanceBusy is retried; any other acquire error (write
 // failure, etc.) returns immediately. On deadline expiry the last busy
@@ -182,7 +460,7 @@ activates the first window and exits 0.`,
 					return fmt.Errorf("resolve pidport path: %w", ppErr)
 				}
 				if d := os.Getenv("MCPHUB_GUI_TEST_PIDPORT_DIR"); d != "" {
-					pidportPath = filepath.Join(d, "gui.pidport")
+					pidportPath = filepath.Join(d, gui.PidportFileLeaf)
 				}
 				lock, lockErr := gui.AcquireSingleInstanceAt(pidportPath, 0)
 				if lockErr != nil {
@@ -250,7 +528,7 @@ activates the first window and exits 0.`,
 				return err
 			}
 			if d := os.Getenv("MCPHUB_GUI_TEST_PIDPORT_DIR"); d != "" {
-				pidportPath = filepath.Join(d, "gui.pidport")
+				pidportPath = filepath.Join(d, gui.PidportFileLeaf)
 			}
 
 			// Bug-bash A5 (#18/#19/#20): resolve the effective port using
@@ -264,12 +542,35 @@ activates the first window and exits 0.`,
 			settingVal, _ := api.NewAPI().SettingsGet("gui_server.port")
 			portIntent := classifyPersistedGUIPort(settingVal)
 			port = resolveGuiPort(flagChanged, port, settingVal)
+			// Reject an explicit privileged --port at the front door BEFORE the
+			// persisted-fallback warning: the persisted-config and restart-handoff
+			// protocol only carry [1024,65535], so a GUI launched on a privileged
+			// port could start but never restart (bot #563). Hard-fail the explicit
+			// flag rather than silently binding a port the restart action cannot
+			// handle. Ordered before the warning so a refused explicit flag never
+			// emits a misleading "fallback=explicit-flag" line for the same value.
+			if err := validateExplicitGUIPortFlag(flagChanged, port); err != nil {
+				return err
+			}
 			if portIntent.Kind == guiPortIntentInvalid {
 				fallback := guiPortFallbackEphemeral
 				if flagChanged {
 					fallback = guiPortFallbackExplicitFlag
 				}
 				emitInvalidGUIPortWarning(cmd.OutOrStderr(), portIntent, fallback)
+			}
+
+			handoff := os.Getenv(selfRestartHandoffEnv)
+			if isRestartV3ChildLaunch(gui.RestartV3Enabled(), handoff) {
+				handoff = consumeSelfRestartHandoff(handoff)
+				descriptor, decodeErr := gui.DecodeSelfRestartHandoff(handoff)
+				if decodeErr != nil {
+					return decodeErr
+				}
+				return startRestartV3GUIChild(
+					cmd, ctx, stop, handoff, pidportPath, descriptor.TargetPort,
+					noBrowser, noTray, strictMode,
+				)
 			}
 
 			// Phase A: acquire the single-instance lock BEFORE binding any
@@ -282,15 +583,11 @@ activates the first window and exits 0.`,
 			// with the resolved port so second-instance handshake probes
 			// reach the right place.
 			//
-			// Self-restart handoff (MCPHUB_GUI_SELF_RESTART_HANDOFF=1): when
-			// this process is the replacement GUI spawned by POST
-			// /api/gui/restart, the outgoing parent still briefly holds the
-			// flock while it flushes its 200 response and exits. The normal
-			// single-shot AcquireSingleInstanceAt would BUSY-out on that
-			// window and route to the activate-then-exit handshake, leaving
-			// NO GUI once the parent dies. acquireSingleInstanceWithHandoff
-			// instead polls the acquire for a bounded window so the child
-			// catches the lock the instant the parent's exit releases it.
+			// RestartV3 structured handoffs were dispatched above into the
+			// reservation-aware standby child path and never reach this normal
+			// acquire. acquireSingleInstanceWithHandoff recognizes only the
+			// literal "1" compatibility signal so a v1 parent from before a
+			// rename-aside upgrade can still hand off to this v3 binary.
 			lock, err := acquireSingleInstanceWithHandoff(ctx, pidportPath, port)
 			if err != nil {
 				if !errors.Is(err, gui.ErrSingleInstanceBusy) {
@@ -345,7 +642,7 @@ activates the first window and exits 0.`,
 			return startGuiServer(cmd, ctx, stop, lock, port, noBrowser, noTray, strictMode, pidportPath)
 		},
 	}
-	c.Flags().IntVar(&port, "port", 0, "TCP port on 127.0.0.1 (0 = auto-pick from ephemeral)")
+	c.Flags().IntVar(&port, "port", 0, "TCP port on 127.0.0.1 in [1024,65535] (0 = auto-pick from ephemeral)")
 	c.Flags().BoolVar(&noBrowser, "no-browser", false, "do not auto-launch a browser window")
 	c.Flags().BoolVar(&noTray, "no-tray", false, "do not show the system-tray icon")
 	c.Flags().BoolVar(&force, "force", false, "stuck-instance recovery: print the diagnostic (PRINT-ONLY; add --reveal to also open the lock folder in the file manager). Add --kill to terminate the recorded PID after a three-part identity gate.")
@@ -488,7 +785,117 @@ func activateDashboardFromTray(
 // repo's existing control-flow style. See plan task 4 §"alternative".
 func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.CancelFunc,
 	lock *gui.SingleInstanceLock, port int, noBrowser, noTray, strictMode bool, pidportPath string) error {
-	defer lock.Release()
+	return startGuiServerWithStartup(
+		cmd, ctx, stop, lock, port, noBrowser, noTray, strictMode, pidportPath, nil,
+	)
+}
+
+type guiServerStartup struct {
+	server        *gui.Server
+	listenerOwner *gui.GUIListenerOwner
+	bound         net.Listener
+}
+
+func composeGuiServerRestartV3(
+	ctx context.Context,
+	cmd *cobra.Command,
+	ownedLease *releaseOnceLease,
+	port int,
+	pidportPath string,
+	startup *guiServerStartup,
+	argv []string,
+	runtime restartV3ParentRuntime,
+) (*gui.Server, error) {
+	restartV3Enabled := gui.RestartV3Enabled()
+	var s *gui.Server
+	if startup == nil {
+		s = gui.NewServer(gui.Config{
+			Port:             port,
+			Version:          versionString(),
+			RestartV3Enabled: restartV3Enabled,
+		})
+	} else {
+		s = startup.server
+		if s == nil {
+			return nil, errors.New("restart child startup server is nil")
+		}
+	}
+	if !restartV3Enabled {
+		return s, nil
+	}
+
+	deps, err := buildRestartV3ParentDependencies(
+		ctx, cmd, ownedLease, pidportPath, s.Port, argv, runtime,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("compose restart v3 parent: %w", err)
+	}
+	if err := s.ConfigureRestartCoordinator(deps); err != nil {
+		return nil, fmt.Errorf("configure restart v3 parent: %w", err)
+	}
+	return s, nil
+}
+
+func startRestartV3GUIChild(
+	cmd *cobra.Command,
+	ctx context.Context,
+	stop context.CancelFunc,
+	handoff string,
+	pidportPath string,
+	port int,
+	noBrowser bool,
+	noTray bool,
+	strictMode bool,
+) error {
+	deadlines := gui.DefaultRestartDeadlines()
+	return runRestartV3ChildStartup(ctx, restartV3ChildStartupConfig{
+		Handoff:     handoff,
+		PID:         os.Getpid(),
+		PidportPath: pidportPath,
+		Port:        port,
+		Version:     versionString(),
+		Deadlines:   deadlines,
+		StartRuntime: func(
+			runtimeCtx context.Context,
+			server *gui.Server,
+			owner *gui.GUIListenerOwner,
+			bound net.Listener,
+			lease gui.SingleInstanceLease,
+		) error {
+			return startGuiServerWithStartup(
+				cmd,
+				runtimeCtx,
+				stop,
+				lease,
+				port,
+				noBrowser,
+				noTray,
+				strictMode,
+				pidportPath,
+				&guiServerStartup{server: server, listenerOwner: owner, bound: bound},
+			)
+		},
+	})
+}
+
+// shouldAutoLaunchBrowser reports whether this GUI launch should open a
+// browser: only the INITIAL launch (startup == nil) with the browser not
+// suppressed. A restart child (startup != nil) inherits a live operator tab
+// that the Phase-H frontend redirects to the new origin, so it must never open
+// a second window — otherwise every self-restart floods a fresh browser app
+// window (bot #563 deep-sec F3, same family as the autostart browser-flood fix).
+func shouldAutoLaunchBrowser(startup *guiServerStartup, noBrowser bool) bool {
+	return startup == nil && !noBrowser
+}
+
+func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop context.CancelFunc,
+	lock gui.SingleInstanceLease, port int, noBrowser, noTray, strictMode bool, pidportPath string,
+	startup *guiServerStartup) error {
+	ownedLease, ok := lock.(*releaseOnceLease)
+	if !ok {
+		ownedLease = &releaseOnceLease{lease: lock}
+	}
+	defer ownedLease.Release()
 
 	// Phase B: start the HTTP server. Server.Start binds 127.0.0.1
 	// on the configured port (0 = OS-assigned) and signals ready
@@ -519,7 +926,20 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 			return api.NewAPI().WriteSerenaIdleStopResult(taskName, now)
 		},
 	)
-	s := gui.NewServer(gui.Config{Port: port, Version: versionString()})
+	var selfRestartExitRequested atomic.Bool
+	s, err := composeGuiServerRestartV3(
+		ctx,
+		cmd,
+		ownedLease,
+		port,
+		pidportPath,
+		startup,
+		os.Args[1:],
+		defaultRestartV3ParentRuntime(&selfRestartExitRequested),
+	)
+	if err != nil {
+		return err
+	}
 
 	// Phase C.2 wiring (v0.5.x plan §C.2): construct the serena routing
 	// dependencies and hand them to the GUI server. The /serena/mcp
@@ -627,7 +1047,13 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 
 	ready := make(chan struct{})
 	errCh := make(chan error, 1)
-	go func() { errCh <- s.Start(ctx, ready) }()
+	if startup == nil {
+		go func() { errCh <- s.Start(ctx, ready) }()
+	} else {
+		go func() {
+			errCh <- s.ContinueWithGUIListener(ctx, ready, startup.listenerOwner, startup.bound)
+		}()
+	}
 
 	// Poll daemon status every 5s and push daemon-state events onto /api/events.
 	//
@@ -777,12 +1203,12 @@ func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.Cancel
 		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := manager.Stop(shutdownCtx, 5000); err != nil {
+		if err := stopSupervisorManagerUnlessSelfRestart(shutdownCtx, manager, &selfRestartExitRequested); err != nil {
 			fmt.Fprintf(cmd.OutOrStderr(), "supervisor shutdown: %v\n", err)
 		}
 	}()
 
-	if !noBrowser {
+	if shouldAutoLaunchBrowser(startup, noBrowser) {
 		url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
 		if err := gui.LaunchBrowser(url); err != nil {
 			fmt.Fprintf(cmd.OutOrStderr(), "warning: could not auto-launch browser: %v\n", err)

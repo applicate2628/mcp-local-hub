@@ -1,12 +1,17 @@
 package api
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"mcp-local-hub/internal/secrets"
 )
+
+// GUIRestartNonceFileLeaf is the prefix of generation-bound state-file leaves
+// authorized for restart-child readiness credentials.
+const GUIRestartNonceFileLeaf = "gui-restart-nonce"
 
 func init() {
 	secrets.SetVaultFileReader(ReadStateFileInodeAnchored)
@@ -21,6 +26,34 @@ func init() {
 // each caller can keep its existing missing-file semantics.
 func ReadStateFileInodeAnchored(path string) ([]byte, error) {
 	return readStateFileInodeAnchored(path)
+}
+
+// ConsumeStateSecretFileInodeAnchored opens an owner-only secret state file,
+// unlinks the verified entry while retaining the opened file identity, and
+// returns its bytes. The caller owns the returned buffer and must zero it when
+// finished. Verification and unlink are performed by the platform-specific
+// inode-anchored reader so no post-read path re-walk can leave the credential
+// at its original entry.
+func ConsumeStateSecretFileInodeAnchored(path string, expectedBytes int64) ([]byte, error) {
+	if expectedBytes <= 0 {
+		return nil, fmt.Errorf("consume state secret %s: expected size must be positive", path)
+	}
+	value, err := readStateFileInodeAnchoredWithOptions(
+		path,
+		func() bool { return true },
+		expectedBytes,
+		false,
+		true,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(value)) != expectedBytes {
+		actual := len(value)
+		zeroStateSecretBytes(value)
+		return nil, fmt.Errorf("consume state secret %s: size = %d, want %d bytes", path, actual, expectedBytes)
+	}
+	return value, nil
 }
 
 // ReadStateFileInodeAnchoredEnvStrictOnly is the bootstrap variant for recovery
@@ -46,8 +79,12 @@ func isSecretBearingStateFilePath(path string) bool {
 		hubMcpEndpointFileLeaf,
 		hubMcpControlTokenFileLeaf,
 		"hub-mcp-control.tok",
+		GUIRestartNonceFileLeaf,
 		"secrets.age",
 		".age-key":
+		return true
+	}
+	if strings.HasPrefix(base, GUIRestartNonceFileLeaf+"-") {
 		return true
 	}
 	// Adopt pre-adopt provenance snapshots (<state-dir>/adopt-provenance/<manifest>/
@@ -63,6 +100,12 @@ func isSecretBearingStateFilePath(path string) bool {
 		strings.Contains(base, "secret") ||
 		strings.Contains(base, "credential") ||
 		strings.Contains(base, "vault")
+}
+
+func zeroStateSecretBytes(value []byte) {
+	for i := range value {
+		value[i] = 0
+	}
 }
 
 func operatorRequiresSingleUserHomeEnvOnly() bool {

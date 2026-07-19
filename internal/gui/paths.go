@@ -7,6 +7,11 @@ import (
 	"runtime"
 )
 
+// PidportFileLeaf is the single-instance pid/port metadata leaf. Callers that
+// already own a canonical state directory use it without resolving or creating
+// the ambient per-user AppData directory.
+const PidportFileLeaf = "gui.pidport"
+
 // appDataDirPath resolves the per-user mcp-local-hub directory path WITHOUT
 // creating it. AppDataDir adds the MkdirAll; read-only probes that must have no
 // filesystem side effect (e.g. a dry-run install checking for a live GUI) use
@@ -60,7 +65,7 @@ func PidportPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "gui.pidport"), nil
+	return filepath.Join(dir, PidportFileLeaf), nil
 }
 
 // PidportPathNoCreate returns the pidport path WITHOUT creating the per-user
@@ -73,5 +78,5 @@ func PidportPathNoCreate() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "gui.pidport"), nil
+	return filepath.Join(dir, PidportFileLeaf), nil
 }

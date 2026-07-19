@@ -408,6 +408,21 @@ Record v3.1 fields are deliberately small:
 There are no claim IDs, claim deadlines, fallback ports, activation-signal fields, hub-release fields, or
 phase-suffix cursors.
 
+**"State-dir-matching" (§9 line ~681, §12 "state-dir-mismatched") means LOCATION-binding, not an embedded
+origin field.** There is deliberately no `state_dir`/origin field in the v3.1 schema: the store binds to
+one absolute `<state-dir>/gui-restart.json` and never searches or falls back to another root, so the
+record any operation consults IS, by construction, the one at the caller's own resolved state dir; and
+provenance/wrong-owner planting is owned uniformly by the hardened owner-only DACL pipeline (the same
+posture as `supervisor-intent.json`), NOT by a per-marker field. An embedded origin field was rejected —
+it would be forgeable by anyone who can plant the file (so it does not defend the plant threat), would
+add Windows path-normalization fail-closed hazards, and would violate the closed field list above. The
+residual (a valid marker byte-copied/backup-restored/planted at the exact path) is benign: the marker
+carries no kill/spawn authority (`old_pid`/`child_pid` are diagnostics only), ensure-alive's relaunch/
+degrade predicate is AND-gated on the REAL OS flock (a planted JSON cannot free it; spawn count stays 0),
+and `operator_action` is enum-mapped to fixed literals, never an arbitrary persisted command — worst case
+is a ≤`reservation` reject or a benign "run `mcphub gui`" message. (Recorded from the 2026-07-17
+fable/Sol split + opus tie-break; `RESOLUTION: PATH-OWNED-CORRECT`.)
+
 ### Minimal phase set
 
 | Phase | The one distinct decision it gates |

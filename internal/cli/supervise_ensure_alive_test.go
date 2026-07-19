@@ -2,14 +2,22 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/gui"
 )
 
 // ensureAliveTestStateDir creates a per-test temp state dir and routes EVERY
@@ -310,6 +318,910 @@ func TestEnsureAlive_RelaunchFailure_StillExitsZero(t *testing.T) {
 	// Durable observability (PR #283 review P3-d): a chronically-failing
 	// relaunch must be visible despite Task Scheduler discarding stdout.
 	assertSupervisorEvent(t, stateDir, "liveness-relaunch-failed")
+}
+
+type ensureAliveGUIRecoveryMarkerFake struct {
+	mu                    sync.Mutex
+	record                *gui.HandoffMarkerRecord
+	readErr               error
+	readEntered           chan struct{}
+	readContinue          chan struct{}
+	interruptErr          error
+	interruptCalls        int
+	interruptEntered      chan struct{}
+	interruptContinue     chan struct{}
+	interruptBeforeCommit func()
+}
+
+func (s *ensureAliveGUIRecoveryMarkerFake) Read() (*gui.HandoffMarkerRecord, error) {
+	s.mu.Lock()
+	record := cloneEnsureAliveGUIRecoveryRecord(s.record)
+	readErr := s.readErr
+	entered := s.readEntered
+	continueCh := s.readContinue
+	s.mu.Unlock()
+
+	if entered != nil {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+	}
+	if continueCh != nil {
+		<-continueCh
+	}
+	return record, readErr
+}
+
+func (s *ensureAliveGUIRecoveryMarkerFake) InterruptFromOwnedFreeProbe(generation string, expectedSequence uint64, reasonCode, operatorAction string) (*gui.HandoffMarkerRecord, error) {
+	s.mu.Lock()
+	s.interruptCalls++
+	entered := s.interruptEntered
+	continueCh := s.interruptContinue
+	s.mu.Unlock()
+
+	if entered != nil {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+	}
+	if continueCh != nil {
+		<-continueCh
+	}
+
+	s.mu.Lock()
+	beforeCommit := s.interruptBeforeCommit
+	s.mu.Unlock()
+	if beforeCommit != nil {
+		beforeCommit()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.interruptErr != nil {
+		return nil, s.interruptErr
+	}
+	if s.record == nil || s.record.Generation != generation || s.record.Sequence != expectedSequence {
+		return nil, gui.ErrHandoffMarkerCASMismatch
+	}
+	s.record = cloneEnsureAliveGUIRecoveryRecord(s.record)
+	s.record.Sequence++
+	s.record.Phase = gui.HandoffPhaseInterrupted
+	s.record.ReasonCode = reasonCode
+	s.record.OperatorAction = operatorAction
+	return cloneEnsureAliveGUIRecoveryRecord(s.record), nil
+}
+
+func (s *ensureAliveGUIRecoveryMarkerFake) snapshot() (*gui.HandoffMarkerRecord, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneEnsureAliveGUIRecoveryRecord(s.record), s.interruptCalls
+}
+
+func cloneEnsureAliveGUIRecoveryRecord(record *gui.HandoffMarkerRecord) *gui.HandoffMarkerRecord {
+	if record == nil {
+		return nil
+	}
+	copy := *record
+	return &copy
+}
+
+type phaseGEnsureAliveLease struct{ releases int }
+
+func (l *phaseGEnsureAliveLease) Release() { l.releases++ }
+
+type phaseGEnsureAliveChild struct {
+	terminates int
+	detaches   int
+}
+
+func (c *phaseGEnsureAliveChild) PID() int { return 4270 }
+func (c *phaseGEnsureAliveChild) TerminateBeforeRelease(context.Context) error {
+	c.terminates++
+	return nil
+}
+func (c *phaseGEnsureAliveChild) DetachAtRelease() error {
+	c.detaches++
+	return nil
+}
+
+type phaseGEnsureAliveListener struct{ full bool }
+
+func (*phaseGEnsureAliveListener) EnterGrace(context.Context, http.Handler) error { return nil }
+func (*phaseGEnsureAliveListener) CloseListener(context.Context) error            { return nil }
+func (l *phaseGEnsureAliveListener) BindForRecovery(context.Context, int) (net.Listener, error) {
+	return phaseGEnsureAliveNetListener{}, nil
+}
+func (l *phaseGEnsureAliveListener) ServeFull(net.Listener, http.Handler) error {
+	l.full = true
+	return nil
+}
+func (l *phaseGEnsureAliveListener) RestoreFull(http.Handler) error {
+	l.full = true
+	return nil
+}
+
+type phaseGEnsureAliveNetListener struct{}
+
+func (phaseGEnsureAliveNetListener) Accept() (net.Conn, error) { return nil, net.ErrClosed }
+func (phaseGEnsureAliveNetListener) Close() error              { return nil }
+func (phaseGEnsureAliveNetListener) Addr() net.Addr            { return phaseGEnsureAliveAddr{} }
+
+type phaseGEnsureAliveAddr struct{}
+
+func (phaseGEnsureAliveAddr) Network() string { return "tcp" }
+func (phaseGEnsureAliveAddr) String() string  { return "127.0.0.1:9125" }
+
+type phaseGEnsureAliveStoreCounter struct {
+	*gui.HandoffMarkerStore
+	interrupts int
+}
+
+func (s *phaseGEnsureAliveStoreCounter) InterruptFromOwnedFreeProbe(generation string, sequence uint64, reason, action string) (*gui.HandoffMarkerRecord, error) {
+	s.interrupts++
+	return s.HandoffMarkerStore.InterruptFromOwnedFreeProbe(generation, sequence, reason, action)
+}
+
+func TestRestartV3_ProvedRollbackClearsMarkerAndEnsureAliveTickDoesNothing(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	now := time.Date(2026, 7, 18, 18, 0, 0, 0, time.UTC)
+	deadlines := gui.DefaultRestartDeadlines()
+	deadlines.Now = func() time.Time { return now }
+	store := gui.NewHandoffMarkerStore(stateDir, deadlines)
+	lease := &phaseGEnsureAliveLease{}
+	child := &phaseGEnsureAliveChild{}
+	listener := &phaseGEnsureAliveListener{}
+	ids := []string{"handoff-g8", "generation-g8"}
+	coordinator, err := gui.NewRestartCoordinator(gui.RestartCoordinatorDependencies{
+		Context: context.Background(), StateDir: stateDir,
+		OldPort: func() int { return 9125 }, TargetPort: func(int) (int, error) { return 9125, nil }, ParentPID: 1111,
+		Lease: lease, Listener: listener, FullHandler: http.NotFoundHandler(), MarkerStore: store, Deadlines: deadlines,
+		NewID:    func() (string, error) { id := ids[0]; ids = ids[1:]; return id, nil },
+		NewNonce: func() ([]byte, error) { return bytes.Repeat([]byte{0x78}, 32), nil },
+		Spawn:    func(gui.SelfRestartHandoff) (gui.RestartParentChild, error) { return child, nil },
+		Confirm: func(context.Context, int, []byte, gui.AuthenticatedReadinessIdentity) error {
+			return errors.New("standby confirmation timeout")
+		},
+		CloseHub: func(context.Context) {},
+		Exit:     func() {},
+	})
+	if err != nil {
+		t.Fatalf("NewRestartCoordinator: %v", err)
+	}
+	started, err := coordinator.Start()
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	started.AcknowledgeResponseFlushed()
+	result := <-started.Done
+	if result.Err == nil || result.ParentLeaseReleased || lease.releases != 0 || !listener.full {
+		t.Fatalf("rollback result=%+v releases=%d full=%t, want proved healthy retained parent", result, lease.releases, listener.full)
+	}
+	if child.terminates != 1 || child.detaches != 0 {
+		t.Fatalf("unauthenticated child terminate=%d detach=%d, want 1/0", child.terminates, child.detaches)
+	}
+	marker, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read after rollback: %v", err)
+	}
+	if marker != nil {
+		t.Fatalf("proved rollback retained stale marker: %+v", marker)
+	}
+
+	counter := &phaseGEnsureAliveStoreCounter{HandoffMarkerStore: store}
+	probeCalls := 0
+	eventPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
+	eventsBefore, beforeErr := os.ReadFile(eventPath)
+	if beforeErr != nil && !os.IsNotExist(beforeErr) {
+		t.Fatalf("read event baseline: %v", beforeErr)
+	}
+	restore := setEnsureAliveGUIRecoveryDependenciesForTest(ensureAliveGUIRecoveryDependencies{
+		restartV3Enabled: func() bool { return true },
+		restartDeadlines: func() gui.RestartDeadlines { return deadlines },
+		markerStore:      func(string, gui.RestartDeadlines) ensureAliveGUIRecoveryStore { return counter },
+		probeOwnerLease: func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+			probeCalls++
+			return gui.GUIOwnerLeaseProbeResult{State: gui.GUIOwnerLeaseStateHeld}
+		},
+	})
+	t.Cleanup(restore)
+	var out bytes.Buffer
+	runEnsureAliveGUIRecovery(stateDir, &out)
+	if out.Len() != 0 || probeCalls != 0 || counter.interrupts != 0 {
+		t.Fatalf("ensure-alive tick output=%q probes=%d mutations=%d, want zero emit/probe/mutation", out.String(), probeCalls, counter.interrupts)
+	}
+	eventsAfter, afterErr := os.ReadFile(eventPath)
+	if afterErr != nil && !os.IsNotExist(afterErr) {
+		t.Fatalf("read events after ensure-alive tick: %v", afterErr)
+	}
+	if !bytes.Equal(eventsAfter, eventsBefore) || bytes.Contains(eventsAfter, []byte("gui-restart-live-holder-wedged")) {
+		t.Fatalf("ensure-alive event log changed or contains false held-owner degrade: before=%q after=%q", eventsBefore, eventsAfter)
+	}
+}
+
+type ensureAliveGUIRecoveryLeaseFake struct {
+	once     sync.Once
+	releases atomic.Int32
+	released chan struct{}
+}
+
+type ensureAliveGUIRecoveryReleaseCheckingWriter struct {
+	bytes.Buffer
+	lease              *ensureAliveGUIRecoveryLeaseFake
+	wroteBeforeRelease bool
+}
+
+func (w *ensureAliveGUIRecoveryReleaseCheckingWriter) Write(p []byte) (int, error) {
+	if w.lease.releases.Load() == 0 {
+		w.wroteBeforeRelease = true
+	}
+	return w.Buffer.Write(p)
+}
+
+func (l *ensureAliveGUIRecoveryLeaseFake) Release() {
+	l.once.Do(func() {
+		l.releases.Add(1)
+		if l.released != nil {
+			close(l.released)
+		}
+	})
+}
+
+func expiredEnsureAliveGUIRecoveryRecord(now time.Time, phase gui.HandoffPhase) *gui.HandoffMarkerRecord {
+	deadline := now.Add(-time.Second)
+	record := &gui.HandoffMarkerRecord{
+		Version:        "3.1",
+		Generation:     "ensure-alive-generation",
+		Sequence:       2,
+		Phase:          phase,
+		Route:          gui.HandoffRouteSamePort,
+		OldPort:        9125,
+		NewPort:        9125,
+		OldPID:         101,
+		ChildPID:       202,
+		CreatedAt:      now.Add(-time.Minute),
+		UpdatedAt:      now.Add(-30 * time.Second),
+		FreshUntil:     deadline,
+		ReasonCode:     "",
+		OperatorAction: "",
+	}
+	if phase == gui.HandoffPhaseReserved {
+		record.DesignatedChildHash = "sha256:" + strings.Repeat("0", 64)
+		record.ReservationExpiresAt = deadline
+	}
+	return record
+}
+
+func ensureAliveGUIRecoveryTestDeadlines(now time.Time) gui.RestartDeadlines {
+	deadlines := gui.DefaultRestartDeadlines()
+	deadlines.Now = func() time.Time { return now }
+	deadlines.RecordLock = 100 * time.Millisecond
+	return deadlines
+}
+
+func installEnsureAliveGUIRecoveryTestDependencies(
+	t *testing.T,
+	deadlines gui.RestartDeadlines,
+	store ensureAliveGUIRecoveryStore,
+	probe func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult,
+) {
+	t.Helper()
+	restore := setEnsureAliveGUIRecoveryDependenciesForTest(ensureAliveGUIRecoveryDependencies{
+		restartV3Enabled: func() bool { return true },
+		restartDeadlines: func() gui.RestartDeadlines { return deadlines },
+		markerStore: func(string, gui.RestartDeadlines) ensureAliveGUIRecoveryStore {
+			return store
+		},
+		probeOwnerLease: probe,
+	})
+	t.Cleanup(restore)
+}
+
+func holdEnsureAliveSupervisorLock(t *testing.T, stateDir string) {
+	t.Helper()
+	lock, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	t.Cleanup(lock.Release)
+}
+
+func TestEnsureAliveGUIRecovery_ConcurrentTicksUseProductionFlockExclusion(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	stateDir := ensureAliveTestStateDir(t)
+	holdEnsureAliveSupervisorLock(t, stateDir)
+	deadlines := ensureAliveGUIRecoveryTestDeadlines(now)
+	deadlines.RecordLock = time.Second
+
+	store := &ensureAliveGUIRecoveryMarkerFake{
+		record:            expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseReserved),
+		interruptEntered:  make(chan struct{}, 1),
+		interruptContinue: make(chan struct{}),
+	}
+	var probeCalls atomic.Int32
+	var freeResults atomic.Int32
+	var heldResults atomic.Int32
+	probe := func(ctx context.Context, request gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+		probeCalls.Add(1)
+		result := gui.ProbeGUIOwnerLease(ctx, request)
+		switch result.State {
+		case gui.GUIOwnerLeaseStateFree:
+			freeResults.Add(1)
+		case gui.GUIOwnerLeaseStateHeld:
+			heldResults.Add(1)
+		}
+		return result
+	}
+	installEnsureAliveGUIRecoveryTestDependencies(t, deadlines, store, probe)
+
+	var guiAutostartCalls atomic.Int32
+	restoreAutostart := setLivenessRelaunchFnForTest(func() error {
+		guiAutostartCalls.Add(1)
+		return nil
+	})
+	t.Cleanup(restoreAutostart)
+	var standaloneCalls atomic.Int32
+	restoreStandalone := setStandaloneRelaunchFnForTest(func() error {
+		standaloneCalls.Add(1)
+		return nil
+	})
+	t.Cleanup(restoreStandalone)
+
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		_ = runEnsureAlive(stateDir, &bytes.Buffer{})
+	}()
+	select {
+	case <-store.interruptEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first ensure-alive tick did not reach the owned-free interrupt CAS")
+	}
+
+	secondDone := make(chan struct{})
+	go func() {
+		defer close(secondDone)
+		_ = runEnsureAlive(stateDir, &bytes.Buffer{})
+	}()
+	select {
+	case <-secondDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("concurrent ensure-alive tick did not complete while the first held the probe lease")
+	}
+	close(store.interruptContinue)
+	select {
+	case <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first ensure-alive tick did not complete after the CAS was released")
+	}
+
+	gotRecord, interruptCalls := store.snapshot()
+	if interruptCalls != 1 {
+		t.Fatalf("InterruptFromOwnedFreeProbe calls = %d, want exactly 1", interruptCalls)
+	}
+	if gotRecord.Phase != gui.HandoffPhaseInterrupted || gotRecord.Sequence != 3 {
+		t.Fatalf("terminal marker = phase %q sequence %d, want interrupted/3", gotRecord.Phase, gotRecord.Sequence)
+	}
+	if probeCalls.Load() != 2 || freeResults.Load() != 1 || heldResults.Load() != 1 {
+		t.Fatalf("production owner-probe results: calls=%d free=%d held=%d, want 2/1/1", probeCalls.Load(), freeResults.Load(), heldResults.Load())
+	}
+	if guiAutostartCalls.Load() != 0 || standaloneCalls.Load() != 0 {
+		t.Fatalf("ensure-alive GUI recovery spawned via relaunch seams: autostart=%d standalone=%d, want 0/0", guiAutostartCalls.Load(), standaloneCalls.Load())
+	}
+}
+
+func TestEnsureAliveGUIRecovery_FreeMessageReconcilesSupervisorLiveness(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 30, 0, 0, time.UTC)
+	tests := []struct {
+		name             string
+		supervisorAlive  bool
+		wantMessage      string
+		wantEvent        string
+		wantRelaunches   int32
+		wantManualAction bool
+	}{
+		{
+			name:             "supervisor alive keeps manual recovery guidance",
+			supervisorAlive:  true,
+			wantMessage:      ensureAliveGUIFreeMessage,
+			wantEvent:        "gui-restart-interrupted-free-flock",
+			wantManualAction: true,
+		},
+		{
+			name:           "both dead reports automatic owner recovery",
+			wantMessage:    "GUI restart interrupted; the supervisor owner is being recovered automatically.",
+			wantEvent:      "gui-restart-interrupted-owner-recovering",
+			wantRelaunches: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := ensureAliveTestStateDir(t)
+			if tc.supervisorAlive {
+				holdEnsureAliveSupervisorLock(t, stateDir)
+			} else {
+				noLiveGUIOwner(t)
+			}
+			store := &ensureAliveGUIRecoveryMarkerFake{
+				record: expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseReserved),
+			}
+			lease := &ensureAliveGUIRecoveryLeaseFake{}
+			installEnsureAliveGUIRecoveryTestDependencies(t, ensureAliveGUIRecoveryTestDeadlines(now), store, func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+				return gui.GUIOwnerLeaseProbeResult{
+					State:  gui.GUIOwnerLeaseStateFree,
+					Lease:  lease,
+					Record: cloneEnsureAliveGUIRecoveryRecord(store.record),
+				}
+			})
+
+			var relaunches atomic.Int32
+			restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+				relaunches.Add(1)
+				return nil
+			})
+			t.Cleanup(restoreRelaunch)
+			var standaloneRelaunches atomic.Int32
+			restoreStandalone := setStandaloneRelaunchFnForTest(func() error {
+				standaloneRelaunches.Add(1)
+				return nil
+			})
+			t.Cleanup(restoreStandalone)
+
+			out := &bytes.Buffer{}
+			if err := runEnsureAlive(stateDir, out); err != nil {
+				t.Fatalf("runEnsureAlive: %v", err)
+			}
+			if !strings.Contains(out.String(), tc.wantMessage) {
+				t.Fatalf("output %q missing reconciled message %q", out.String(), tc.wantMessage)
+			}
+			if got := relaunches.Load(); got != tc.wantRelaunches {
+				t.Fatalf("owner relaunch calls = %d, want %d", got, tc.wantRelaunches)
+			}
+			if got := standaloneRelaunches.Load(); got != 0 {
+				t.Fatalf("standalone relaunch calls = %d, want 0", got)
+			}
+			if gotManual := strings.Contains(out.String(), "run `mcphub gui`"); gotManual != tc.wantManualAction {
+				t.Fatalf("manual mcphub-gui guidance present = %t, want %t; output=%q", gotManual, tc.wantManualAction, out.String())
+			}
+			interrupted, interruptCalls := store.snapshot()
+			if interruptCalls != 1 || interrupted == nil || interrupted.Phase != gui.HandoffPhaseInterrupted {
+				t.Fatalf("interrupt result = record=%+v calls=%d, want one terminal interrupted write", interrupted, interruptCalls)
+			}
+			if gotManual := interrupted.OperatorAction == "mcphub gui"; gotManual != tc.wantManualAction {
+				t.Fatalf("durable operator action = %q, manual=%t want %t", interrupted.OperatorAction, gotManual, tc.wantManualAction)
+			}
+			assertSupervisorEvent(t, stateDir, tc.wantEvent)
+			logRaw, err := os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+			if err != nil {
+				t.Fatalf("read supervisor event log: %v", err)
+			}
+			if strings.Contains(string(logRaw), `"handoff_id"`) {
+				t.Fatalf("Phase-I event aliased generation into distinct Phase-F handoff_id: %s", logRaw)
+			}
+		})
+	}
+}
+
+func TestEnsureAliveGUIRecovery_FreeVsHeldSelectsExactOperatorCommand(t *testing.T) {
+	now := time.Date(2026, 7, 18, 13, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name               string
+		probeState         gui.GUIOwnerLeaseState
+		probeReason        error
+		interruptErr       error
+		wantMessage        string
+		wantCommand        string
+		forbidCommand      string
+		wantEvent          string
+		wantInterruptCalls int
+		wantInterrupted    bool
+	}{
+		{
+			name:               "free",
+			probeState:         gui.GUIOwnerLeaseStateFree,
+			wantMessage:        ensureAliveGUIFreeMessage,
+			wantCommand:        "mcphub gui",
+			forbidCommand:      "mcphub gui --force --kill",
+			wantEvent:          "gui-restart-interrupted-free-flock",
+			wantInterruptCalls: 1,
+			wantInterrupted:    true,
+		},
+		{
+			name:               "held",
+			probeState:         gui.GUIOwnerLeaseStateHeld,
+			probeReason:        gui.ErrSingleInstanceBusy,
+			wantMessage:        ensureAliveGUIHeldMessage,
+			wantCommand:        "mcphub gui --force --kill",
+			wantEvent:          "gui-restart-live-holder-wedged",
+			wantInterruptCalls: 0,
+		},
+		{
+			name:               "unknown",
+			probeState:         gui.GUIOwnerLeaseStateUnknown,
+			probeReason:        errors.New("synthetic owner uncertainty"),
+			wantMessage:        ensureAliveGUIUnknownMessage,
+			forbidCommand:      "mcphub gui",
+			wantEvent:          "gui-restart-owner-unknown",
+			wantInterruptCalls: 0,
+		},
+		{
+			name:               "free marker write failure",
+			probeState:         gui.GUIOwnerLeaseStateFree,
+			interruptErr:       errors.New("synthetic interrupted marker write failure"),
+			wantMessage:        ensureAliveGUIMarkerWriteFailedMessage,
+			wantCommand:        "mcphub gui",
+			forbidCommand:      "mcphub gui --force --kill",
+			wantEvent:          "gui-restart-interrupted-marker-write-failed",
+			wantInterruptCalls: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := ensureAliveTestStateDir(t)
+			holdEnsureAliveSupervisorLock(t, stateDir)
+			store := &ensureAliveGUIRecoveryMarkerFake{
+				record:       expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseReserved),
+				interruptErr: tc.interruptErr,
+			}
+			lease := &ensureAliveGUIRecoveryLeaseFake{}
+			probe := func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+				result := gui.GUIOwnerLeaseProbeResult{
+					State:  tc.probeState,
+					Reason: tc.probeReason,
+					Record: cloneEnsureAliveGUIRecoveryRecord(store.record),
+				}
+				if tc.probeState == gui.GUIOwnerLeaseStateFree {
+					result.Lease = lease
+				}
+				return result
+			}
+			installEnsureAliveGUIRecoveryTestDependencies(t, ensureAliveGUIRecoveryTestDeadlines(now), store, probe)
+
+			out := &bytes.Buffer{}
+			if err := runEnsureAlive(stateDir, out); err != nil {
+				t.Fatalf("runEnsureAlive: %v", err)
+			}
+			if !strings.Contains(out.String(), tc.wantMessage) {
+				t.Fatalf("output %q missing exact message %q", out.String(), tc.wantMessage)
+			}
+			if tc.wantCommand != "" && !strings.Contains(out.String(), tc.wantCommand) {
+				t.Fatalf("output %q missing operator command %q", out.String(), tc.wantCommand)
+			}
+			if tc.forbidCommand != "" && strings.Contains(out.String(), tc.forbidCommand) {
+				t.Fatalf("output %q selected forbidden operator command %q", out.String(), tc.forbidCommand)
+			}
+			assertSupervisorEvent(t, stateDir, tc.wantEvent)
+
+			gotRecord, interruptCalls := store.snapshot()
+			if interruptCalls != tc.wantInterruptCalls {
+				t.Fatalf("InterruptFromOwnedFreeProbe calls = %d, want %d", interruptCalls, tc.wantInterruptCalls)
+			}
+			if got := gotRecord.Phase == gui.HandoffPhaseInterrupted; got != tc.wantInterrupted {
+				t.Fatalf("marker interrupted = %t, want %t (record=%+v)", got, tc.wantInterrupted, gotRecord)
+			}
+			if tc.probeState == gui.GUIOwnerLeaseStateFree && lease.releases.Load() != 1 {
+				t.Fatalf("owned Free probe lease releases = %d, want 1", lease.releases.Load())
+			}
+		})
+	}
+}
+
+func TestEnsureAliveGUIRecovery_IneligibleOrUnreadableMarkersNeverProbeMutateOrChooseCommand(t *testing.T) {
+	now := time.Date(2026, 7, 18, 13, 30, 0, 0, time.UTC)
+	tests := []struct {
+		name        string
+		record      *gui.HandoffMarkerRecord
+		readErr     error
+		wantUnknown bool
+	}{
+		{name: "absent"},
+		{name: "committed", record: expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseCommitted)},
+		{name: "interrupted", record: expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseInterrupted)},
+		{
+			name: "fresh in-progress",
+			record: func() *gui.HandoffMarkerRecord {
+				record := expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseInProgress)
+				record.FreshUntil = now.Add(time.Minute)
+				return record
+			}(),
+		},
+		{name: "unknown schema", readErr: errors.New("unknown marker version"), wantUnknown: true},
+		{name: "state-dir mismatch", readErr: errors.New("marker state directory mismatch"), wantUnknown: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := ensureAliveTestStateDir(t)
+			store := &ensureAliveGUIRecoveryMarkerFake{record: tc.record, readErr: tc.readErr}
+			var probeCalls atomic.Int32
+			installEnsureAliveGUIRecoveryTestDependencies(t, ensureAliveGUIRecoveryTestDeadlines(now), store, func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+				probeCalls.Add(1)
+				return gui.GUIOwnerLeaseProbeResult{State: gui.GUIOwnerLeaseStateFree, Lease: &ensureAliveGUIRecoveryLeaseFake{}}
+			})
+			out := &bytes.Buffer{}
+
+			runEnsureAliveGUIRecovery(stateDir, out)
+
+			if probeCalls.Load() != 0 {
+				t.Fatalf("owner probe calls = %d, want 0", probeCalls.Load())
+			}
+			_, interruptCalls := store.snapshot()
+			if interruptCalls != 0 {
+				t.Fatalf("marker interrupt calls = %d, want 0", interruptCalls)
+			}
+			if strings.Contains(out.String(), "mcphub gui") {
+				t.Fatalf("ineligible/unreadable marker selected an operator command: %q", out.String())
+			}
+			if gotUnknown := strings.Contains(out.String(), ensureAliveGUIUnknownMessage); gotUnknown != tc.wantUnknown {
+				t.Fatalf("unknown diagnostic present = %t, want %t; output=%q", gotUnknown, tc.wantUnknown, out.String())
+			}
+			if tc.wantUnknown {
+				assertSupervisorEvent(t, stateDir, "gui-restart-owner-unknown")
+			}
+		})
+	}
+}
+
+func TestEnsureAliveGUIRecovery_ReservationWindowSuppressesAndSupervisorLiveStillNoOps(t *testing.T) {
+	now := time.Date(2026, 7, 18, 14, 0, 0, 0, time.UTC)
+	stateDir := ensureAliveTestStateDir(t)
+	holdEnsureAliveSupervisorLock(t, stateDir)
+	record := expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseReserved)
+	record.ReservationExpiresAt = now.Add(time.Minute)
+	store := &ensureAliveGUIRecoveryMarkerFake{record: record}
+	var probeCalls atomic.Int32
+	installEnsureAliveGUIRecoveryTestDependencies(t, ensureAliveGUIRecoveryTestDeadlines(now), store, func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+		probeCalls.Add(1)
+		return gui.GUIOwnerLeaseProbeResult{State: gui.GUIOwnerLeaseStateHeld, Reason: gui.ErrHandoffReserved}
+	})
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v", err)
+	}
+	if probeCalls.Load() != 0 {
+		t.Fatalf("reservation-aware probe calls inside healthy reservation window = %d, want 0", probeCalls.Load())
+	}
+	if !strings.Contains(out.String(), "supervisor running") || strings.Contains(out.String(), "GUI restart") {
+		t.Fatalf("supervisor-live output changed or reservation was not suppressed: %q", out.String())
+	}
+	_, interruptCalls := store.snapshot()
+	if interruptCalls != 0 {
+		t.Fatalf("marker interrupts inside healthy reservation window = %d, want 0", interruptCalls)
+	}
+}
+
+func TestEnsureAliveGUIRecovery_LateStandbyRejectsInterruptedMarker(t *testing.T) {
+	clockNow := time.Date(2026, 7, 18, 15, 0, 0, 0, time.UTC)
+	stateDir := ensureAliveTestStateDir(t)
+	holdEnsureAliveSupervisorLock(t, stateDir)
+	deadlines := ensureAliveGUIRecoveryTestDeadlines(clockNow)
+	deadlines.Now = func() time.Time { return clockNow }
+	store := gui.NewHandoffMarkerStore(stateDir, deadlines)
+	nonce := []byte("late-standby-child")
+	hash := sha256.Sum256(nonce)
+	begin, err := store.Begin(gui.HandoffBegin{
+		Generation: "late-standby-generation",
+		Route:      gui.HandoffRouteSamePort,
+		OldPort:    9125,
+		NewPort:    9125,
+		OldPID:     101,
+	})
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if _, err := store.Reserve(begin.Generation, begin.Sequence, clockNow.Add(time.Second), "sha256:"+hex.EncodeToString(hash[:]), 202); err != nil {
+		t.Fatalf("Reserve handoff: %v", err)
+	}
+	clockNow = clockNow.Add(2 * time.Second)
+	installEnsureAliveGUIRecoveryTestDependencies(t, deadlines, store, gui.ProbeGUIOwnerLease)
+
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("runEnsureAlive: %v", err)
+	}
+	interrupted, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read interrupted marker: %v", err)
+	}
+	if interrupted == nil || interrupted.Phase != gui.HandoffPhaseInterrupted {
+		t.Fatalf("ensure-alive marker = %+v, want interrupted", interrupted)
+	}
+
+	lease, err := gui.AcquireSingleInstanceAt(filepath.Join(stateDir, gui.PidportFileLeaf), 9125, gui.SingleInstanceAcquireOptions{
+		RestartV3Enabled:     true,
+		MarkerStore:          store,
+		DesignatedChildNonce: nonce,
+		Deadlines:            deadlines,
+	})
+	if lease != nil {
+		lease.Release()
+		t.Fatal("late standby child acquired the GUI flock after ensure-alive wrote interrupted")
+	}
+	if !errors.Is(err, gui.ErrHandoffReserved) {
+		t.Fatalf("late standby child error = %v, want ErrHandoffReserved", err)
+	}
+}
+
+func TestEnsureAliveGUIRecovery_TotalBudgetCannotStarveSupervisorLiveness(t *testing.T) {
+	now := time.Date(2026, 7, 18, 16, 0, 0, 0, time.UTC)
+	stateDir := ensureAliveTestStateDir(t)
+	noLiveGUIOwner(t)
+	deadlines := ensureAliveGUIRecoveryTestDeadlines(now)
+	deadlines.RecordLock = 40 * time.Millisecond
+	readContinue := make(chan struct{})
+	unblockRead := sync.OnceFunc(func() { close(readContinue) })
+	defer unblockRead()
+	store := &ensureAliveGUIRecoveryMarkerFake{
+		readEntered:  make(chan struct{}, 1),
+		readContinue: readContinue,
+	}
+	installEnsureAliveGUIRecoveryTestDependencies(t, deadlines, store, func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+		t.Fatal("marker-read timeout reached owner probe")
+		return gui.GUIOwnerLeaseProbeResult{}
+	})
+	var relaunches atomic.Int32
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+		relaunches.Add(1)
+		return nil
+	})
+	t.Cleanup(restoreRelaunch)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = runEnsureAlive(stateDir, &bytes.Buffer{})
+	}()
+	select {
+	case <-store.readEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ensure-alive did not reach the synthetic wedged marker read")
+	}
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		unblockRead()
+		<-done
+		t.Fatal("wedged marker read starved the supervisor-liveness recovery past the total classifier budget")
+	}
+	if got := relaunches.Load(); got != 1 {
+		t.Fatalf("owner relaunch calls after classifier deadline = %d, want 1", got)
+	}
+}
+
+func TestEnsureAliveGUIRecovery_ClassifierTimeoutRetainsLeaseUntilCASCompletes(t *testing.T) {
+	now := time.Date(2026, 7, 18, 16, 15, 0, 0, time.UTC)
+	stateDir := ensureAliveTestStateDir(t)
+	noLiveGUIOwner(t)
+	deadlines := ensureAliveGUIRecoveryTestDeadlines(now)
+	deadlines.RecordLock = 40 * time.Millisecond
+	lease := &ensureAliveGUIRecoveryLeaseFake{released: make(chan struct{})}
+	interruptContinue := make(chan struct{})
+	unblockInterrupt := sync.OnceFunc(func() { close(interruptContinue) })
+	defer unblockInterrupt()
+	var committedAfterRelease atomic.Bool
+	store := &ensureAliveGUIRecoveryMarkerFake{
+		record:            expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseReserved),
+		interruptEntered:  make(chan struct{}, 1),
+		interruptContinue: interruptContinue,
+		interruptBeforeCommit: func() {
+			if lease.releases.Load() != 0 {
+				committedAfterRelease.Store(true)
+			}
+		},
+	}
+	installEnsureAliveGUIRecoveryTestDependencies(t, deadlines, store, func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+		return gui.GUIOwnerLeaseProbeResult{
+			State:  gui.GUIOwnerLeaseStateFree,
+			Lease:  lease,
+			Record: cloneEnsureAliveGUIRecoveryRecord(store.record),
+		}
+	})
+	var relaunches atomic.Int32
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+		relaunches.Add(1)
+		return nil
+	})
+	t.Cleanup(restoreRelaunch)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = runEnsureAlive(stateDir, &bytes.Buffer{})
+	}()
+	select {
+	case <-store.interruptEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ensure-alive did not reach the deterministically blocked marker CAS")
+	}
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		unblockInterrupt()
+		<-done
+		t.Fatal("blocked marker CAS starved the supervisor-liveness recovery past the total classifier budget")
+	}
+	if got := relaunches.Load(); got != 1 {
+		t.Fatalf("owner relaunch calls after classifier deadline = %d, want 1", got)
+	}
+	if got := lease.releases.Load(); got != 0 {
+		t.Fatalf("owned probe lease released while CAS was still executing = %d, want 0", got)
+	}
+
+	unblockInterrupt()
+	select {
+	case <-lease.released:
+	case <-time.After(2 * time.Second):
+		t.Fatal("owned probe lease was not released after the CAS completed")
+	}
+	if committedAfterRelease.Load() {
+		t.Fatal("marker CAS committed after its owned GUI probe lease was released")
+	}
+	interrupted, interruptCalls := store.snapshot()
+	if interruptCalls != 1 || interrupted == nil || interrupted.Phase != gui.HandoffPhaseInterrupted {
+		t.Fatalf("interrupt result = record=%+v calls=%d, want one terminal interrupted write", interrupted, interruptCalls)
+	}
+}
+
+func TestEnsureAliveGUIRecovery_FreeProbeContractFailureReleasesBeforeDiagnostics(t *testing.T) {
+	now := time.Date(2026, 7, 18, 16, 30, 0, 0, time.UTC)
+	stateDir := ensureAliveTestStateDir(t)
+	store := &ensureAliveGUIRecoveryMarkerFake{
+		record: expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseReserved),
+	}
+	lease := &ensureAliveGUIRecoveryLeaseFake{}
+	mismatched := cloneEnsureAliveGUIRecoveryRecord(store.record)
+	mismatched.Sequence++
+	installEnsureAliveGUIRecoveryTestDependencies(t, ensureAliveGUIRecoveryTestDeadlines(now), store, func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+		return gui.GUIOwnerLeaseProbeResult{
+			State:  gui.GUIOwnerLeaseStateFree,
+			Lease:  lease,
+			Record: mismatched,
+		}
+	})
+	out := &ensureAliveGUIRecoveryReleaseCheckingWriter{lease: lease}
+
+	runEnsureAliveGUIRecovery(stateDir, out)
+
+	if lease.releases.Load() != 1 {
+		t.Fatalf("mismatched Free probe lease releases = %d, want 1", lease.releases.Load())
+	}
+	if out.wroteBeforeRelease {
+		t.Fatalf("mismatched Free probe emitted diagnostics before releasing its owned lease: %q", out.String())
+	}
+	if !strings.Contains(out.String(), ensureAliveGUIUnknownMessage) {
+		t.Fatalf("mismatched Free probe output = %q, want unknown diagnostic", out.String())
+	}
+	_, interruptCalls := store.snapshot()
+	if interruptCalls != 0 {
+		t.Fatalf("mismatched Free probe marker interrupts = %d, want 0", interruptCalls)
+	}
+}
+
+func TestRestartV3_FeatureGateInertMatrix(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	holdEnsureAliveSupervisorLock(t, stateDir)
+	restore := setEnsureAliveGUIRecoveryDependenciesForTest(ensureAliveGUIRecoveryDependencies{
+		restartV3Enabled: func() bool { return false },
+		restartDeadlines: func() gui.RestartDeadlines { panic("gate-off resolved restart deadlines") },
+		markerStore: func(string, gui.RestartDeadlines) ensureAliveGUIRecoveryStore {
+			panic("gate-off constructed a handoff marker store")
+		},
+		probeOwnerLease: func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+			panic("gate-off probed the GUI owner lease")
+		},
+	})
+	t.Cleanup(restore)
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v", err)
+	}
+	if !strings.Contains(out.String(), "ensure-alive: supervisor running") || strings.Contains(out.String(), "GUI restart") {
+		t.Fatalf("gate-off supervisor-live path output changed: %q", out.String())
+	}
 }
 
 // assertSupervisorEvent fails the test unless supervisor-events.log under

@@ -32,14 +32,14 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 }
 
 func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true, false)
 }
 
 func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false, false)
 }
 
-func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks bool) ([]byte, error) {
+func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool) ([]byte, error) {
 	parentPath := filepath.Dir(path)
 	basename := filepath.Base(path)
 
@@ -154,6 +154,34 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			})
 		}
 	}
+	if consume {
+		// The strict parent and file gates above make the basename owner-only.
+		// A different-user actor therefore cannot rename or replace the entry. A
+		// same-user rename between revalidation and unlink remains possible with
+		// pathname transport, but that actor is the owner and can already read the
+		// nonce; it is an accepted non-threat. The retained fd and post-unlink
+		// nlink/size checks fail closed if such a race leaves the opened inode live.
+		var entry unix.Stat_t
+		if err := unix.Fstatat(pfd, basename, &entry, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return nil, fmt.Errorf("revalidate consumed state secret %s: %w", path, err)
+		}
+		if entry.Dev != st.Dev || entry.Ino != st.Ino {
+			return nil, fmt.Errorf("consume state secret %s: directory entry changed after open", path)
+		}
+		if err := unix.Unlinkat(pfd, basename, 0); err != nil {
+			return nil, fmt.Errorf("unlink consumed state secret %s: %w", path, err)
+		}
+		var consumed unix.Stat_t
+		if err := unix.Fstat(fd, &consumed); err != nil {
+			return nil, fmt.Errorf("verify unlinked state secret %s: %w", path, err)
+		}
+		if consumed.Nlink != 0 {
+			return nil, fmt.Errorf("consume state secret %s: opened inode still has %d links after unlink", path, consumed.Nlink)
+		}
+		if consumed.Size != st.Size || consumed.Size != maxBytes {
+			return nil, fmt.Errorf("consume state secret %s: size changed or is truncated (opened=%d post-unlink=%d want=%d)", path, st.Size, consumed.Size, maxBytes)
+		}
+	}
 
 	// Read via the verified fd. unix.Read in a loop until EOF or
 	// the cap fires. Pre-allocate based on Stat_t.Size.
@@ -164,7 +192,14 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 		return nil, fmt.Errorf("hub-mcp state read %s: invalid file size %d", path, st.Size)
 	}
 	buf := make([]byte, 0, st.Size)
+	readSucceeded := false
+	defer func() {
+		if !readSucceeded {
+			zeroStateSecretBytes(buf)
+		}
+	}()
 	chunk := make([]byte, 4096)
+	defer zeroStateSecretBytes(chunk)
 	for {
 		n, err := unix.Read(fd, chunk)
 		if err != nil {
@@ -181,6 +216,7 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	if buf == nil {
 		buf = []byte{}
 	}
+	readSucceeded = true
 	return buf, nil
 }
 

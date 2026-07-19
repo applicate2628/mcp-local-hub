@@ -341,6 +341,11 @@ func TestMain(m *testing.M) {
 		"LOCALAPPDATA":              tmp,
 		"XDG_DATA_HOME":             tmp,
 		"XDG_STATE_HOME":            tmp,
+		// Global browser kill-switch for the whole cli test binary AND any real
+		// `mcphub gui` child a test spawns (inherited env) — no test flashes a
+		// browser window even when it spawns a GUI without an explicit
+		// --no-browser. Matches gui.SuppressBrowserLaunchEnv (browser.go).
+		"MCPHUB_SUPPRESS_BROWSER_LAUNCH": "1",
 	})
 
 	code := m.Run()
