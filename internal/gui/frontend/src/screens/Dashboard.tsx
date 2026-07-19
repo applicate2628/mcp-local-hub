@@ -187,7 +187,10 @@ export function DashboardScreen() {
   // can clear degradedSince/lastFailAt that a fresher-issued failure already
   // committed → RED falsely cleared/delayed. Every apply (success AND catch)
   // drops if a later-issued call already applied (last-issued-wins), mirroring the
-  // resyncHubHealth fetch-seq idiom. Refs, not state: they ORDER applies, never render.
+  // resyncHubHealth fetch-seq idiom — but deliberately NOT its SSE-seq clause: a
+  // fresh HTTP success is authoritative over a stale SSE failing signal here, so
+  // this guard is scoped to HTTP-vs-HTTP ordering only. Refs, not state: they
+  // ORDER applies, never render.
   const loadSeqRef = useRef(0);
   const appliedSeqRef = useRef(0);
   useEffect(() => {
