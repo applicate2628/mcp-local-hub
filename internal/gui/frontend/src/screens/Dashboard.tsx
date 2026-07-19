@@ -308,9 +308,11 @@ export function DashboardScreen() {
     const body = JSON.parse(ev.data) as { err?: string };
     setError(body.err ?? "supervisor unreachable");
     // Source-agnostic degraded marker: the SSE path never bumps the HTTP poll
-    // count, so `degradedSince` is the single owner both sources feed. Keep
-    // the first failure's timestamp (prev ?? now) across a streak.
-    setDegradedSince((prev) => prev ?? Date.now());
+    // count, so `degradedSince` is the single owner both sources feed. Keep the
+    // first failure's MONOTONIC `performance.now()` timestamp across the streak
+    // — the SAME clock the HTTP catch records and the grace timer/compare read,
+    // so a wall-clock step can't skew the debounce (bot #564 P1).
+    setDegradedSince((prev) => prev ?? performance.now());
   }, []);
 
   // SSE handler for daemon-failed (backend rising-edge failure event,
