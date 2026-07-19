@@ -806,13 +806,13 @@ describe("DashboardScreen — supervisor-down fail-loud (Workstream B §3.1)", (
 
     const { findByTestId, queryByText } = render(<DashboardScreen />);
 
-    // Startup grace: the FIRST 500 renders the calm Loading state, not the
-    // banner — the supervisor may simply be coming up. Advance past the
-    // grace (the 30s poll re-fires each tick; flush the pending status
-    // promise between advances) so failCount exceeds STARTUP_GRACE_POLLS
-    // and the PERSISTENT-down fail-loud banner takes over. The §3.1
-    // assertion below is unchanged — a persistent down MUST still surface
-    // the degraded banner; we just exercise it past the grace.
+    // Restart-grace debounce: the FIRST 500 renders the calm Loading state,
+    // not the banner — the supervisor may simply be coming up. Advance past
+    // the grace window (the 30s poll re-fires each tick; the grace-deadline
+    // timer flips persistentlyDegraded once RESTART_GRACE_MS elapses) so the
+    // PERSISTENT-down fail-loud banner takes over. The §3.1 assertion below
+    // is unchanged — a persistent down MUST still surface the degraded
+    // banner; we just exercise it past the grace.
     await vi.advanceTimersByTimeAsync(30_000);
     await vi.advanceTimersByTimeAsync(30_000);
     await vi.advanceTimersByTimeAsync(30_000);
@@ -864,6 +864,63 @@ describe("DashboardScreen — supervisor-down fail-loud (Workstream B §3.1)", (
     });
     // The error banner must be absent when the supervisor is up.
     expect(queryByTestId("dashboard-error")).toBeNull();
+  });
+
+  // Fix B (bug 2026-07-19): a transient supervisor restart/handoff window
+  // (deploy, RestartV3 self-restart) makes /api/status fail for a few
+  // seconds AFTER the dashboard has already loaded. That must NOT flash the
+  // RED banner — it debounces to a calm reconnecting cue within
+  // RESTART_GRACE_MS, and only turns RED once the streak passes the bound
+  // (fail-loud on a genuine prolonged outage preserved).
+  it("debounces the RED banner across a restart window: calm reconnecting cue within grace, RED past the bound", async () => {
+    let statusFails = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        if (statusFails) {
+          return Promise.resolve(
+            jsonResponse(500, {
+              error: "supervisor unreachable — restart the hub",
+              code: "STATUS_FAILED",
+            }),
+          );
+        }
+        return Promise.resolve(statusResponse([runningRow]));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { findAllByRole, findByTestId, queryByTestId, queryByText } = render(
+      <DashboardScreen />,
+    );
+
+    // One successful /api/status → hasEverLoaded=true, cards render, no error.
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4); // 2 bulk + 2 per-card
+    });
+    expect(queryByTestId("dashboard-error")).toBeNull();
+
+    // Supervisor enters a restart/handoff window: /api/status now 500s.
+    statusFails = true;
+
+    // Advance to the next 30s poll — the first failure marks degradedSince,
+    // but we are still WITHIN the grace window (elapsed 0 < RESTART_GRACE_MS).
+    // A calm reconnecting cue renders, NOT the RED banner.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(queryByTestId("dashboard-error")).toBeNull();
+    const reconnecting = await findByTestId("dashboard-reconnecting");
+    expect(reconnecting.textContent).toContain("Reconnecting");
+
+    // Advance PAST RESTART_GRACE_MS (20s) from the first failure → the
+    // grace-deadline timer fires, persistentlyDegraded flips, and the RED
+    // fail-loud banner takes over (prolonged outage → RED preserved).
+    await vi.advanceTimersByTimeAsync(20_001);
+    const banner = await findByTestId("dashboard-error");
+    expect(banner.textContent).toContain("supervisor unreachable — restart the hub");
+    // The reconnecting cue is gone; the RecoveryActions affordance is present.
+    expect(queryByTestId("dashboard-reconnecting")).toBeNull();
+    expect(queryByText("Restart supervisor")).not.toBeNull();
   });
 });
 
