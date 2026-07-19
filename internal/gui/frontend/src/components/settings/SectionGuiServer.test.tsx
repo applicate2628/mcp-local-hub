@@ -40,7 +40,11 @@ class StubEventSource {
 
 function consumeRestartProgress(
   body: Record<string, unknown>,
-  navigation?: { currentPort: number; assign: (target: string) => void },
+  navigation: {
+    currentPort: number;
+    assign: (target: string) => void;
+    waitUntilReady?: (target: string, signal?: AbortSignal) => Promise<boolean>;
+  },
 ): unknown {
   return guiApi.consumeGuiRestartProgressEvent(
     new MessageEvent("gui-restart-progress", { data: JSON.stringify(body) }),
@@ -286,18 +290,29 @@ describe("SectionGuiServer", () => {
     ));
   });
 
-  it("best-effort navigates only on reserved new_port from the matching old-port stream", () => {
-    const assign = vi.fn(() => { throw new Error("navigation unavailable"); });
+  it("waits for activated new-port readiness before best-effort navigation", async () => {
+    let resolveReadiness!: (ready: boolean) => void;
+    const readiness = new Promise<boolean>((resolve) => {
+      resolveReadiness = resolve;
+    });
+    const waitUntilReady = vi.fn(() => readiness);
+    const assign = vi.fn();
 
-    expect(() => consumeRestartProgress({
+    consumeRestartProgress({
       handoff_id: "handoff-navigation",
       generation: "generation-navigation",
       phase: "reserved",
       old_port: 9125,
       new_port: 9200,
       same_port: false,
-    }, { currentPort: 9125, assign })).not.toThrow();
-    expect(assign).toHaveBeenCalledOnce();
+    }, { currentPort: 9125, assign, waitUntilReady });
+
+    expect(waitUntilReady).toHaveBeenCalledOnce();
+    expect(waitUntilReady).toHaveBeenCalledWith("http://127.0.0.1:9200/", undefined);
+    expect(assign).not.toHaveBeenCalled();
+
+    resolveReadiness(true);
+    await waitFor(() => expect(assign).toHaveBeenCalledOnce());
     expect(assign).toHaveBeenCalledWith("http://127.0.0.1:9200/");
 
     consumeRestartProgress({
@@ -307,19 +322,25 @@ describe("SectionGuiServer", () => {
       old_port: 9300,
       new_port: 9400,
       same_port: false,
-    }, { currentPort: 9125, assign });
+    }, { currentPort: 9125, assign, waitUntilReady });
     expect(assign).toHaveBeenCalledOnce();
+  });
+
+  it("leaves the old-port page in place when new-port readiness exhausts", async () => {
+    const waitUntilReady = vi.fn(async () => false);
+    const assign = vi.fn();
 
     consumeRestartProgress({
-      handoff_id: "handoff-target-port",
-      generation: "generation-target-port",
+      handoff_id: "handoff-never-ready",
+      generation: "generation-never-ready",
       phase: "reserved",
       old_port: 9125,
-      target_port: 9300,
+      new_port: 9200,
       same_port: false,
-    }, { currentPort: 9125, assign });
-    expect(assign).toHaveBeenCalledTimes(2);
-    expect(assign).toHaveBeenLastCalledWith("http://127.0.0.1:9300/");
+    }, { currentPort: 9125, assign, waitUntilReady });
+
+    await waitFor(() => expect(waitUntilReady).toHaveBeenCalledOnce());
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it("does not navigate for same-port or committed progress", () => {

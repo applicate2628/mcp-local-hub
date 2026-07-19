@@ -953,6 +953,92 @@ export interface GuiRestartProgress {
 export interface GuiRestartNavigation {
   currentPort: number;
   assign: (target: string) => void;
+  waitUntilReady?: (target: string, signal?: AbortSignal) => Promise<boolean>;
+  signal?: AbortSignal;
+}
+
+const guiRestartReadinessAttempts = 20;
+const guiRestartReadinessAttemptTimeoutMs = 500;
+const guiRestartReadinessRetryDelayMs = 250;
+
+function loadGuiRestartReadinessImage(src: string, signal?: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal?.aborted || typeof Image === "undefined") {
+      resolve(false);
+      return;
+    }
+
+    const image = new Image();
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (ready: boolean): void => {
+      if (settled) return;
+      settled = true;
+      if (timeout !== undefined) clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+      image.onload = null;
+      image.onerror = null;
+      if (!ready) {
+        try {
+          image.src = "data:,";
+        } catch {
+          // The probe is already settled; a browser-specific cancellation
+          // failure must not escape the best-effort readiness path.
+        }
+      }
+      resolve(ready);
+    };
+    const onAbort = (): void => finish(false);
+
+    image.onload = () => finish(true);
+    image.onerror = () => finish(false);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    timeout = setTimeout(() => finish(false), guiRestartReadinessAttemptTimeoutMs);
+    try {
+      image.src = src;
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+function waitForGuiRestartRetry(signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, guiRestartReadinessRetryDelayMs);
+    const onAbort = (): void => {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(false);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function waitUntilGuiRestartReady(target: string, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const favicon = new URL("/favicon.ico", target);
+    const pollID = Date.now();
+    for (let attempt = 0; attempt < guiRestartReadinessAttempts; attempt += 1) {
+      if (signal?.aborted) return false;
+      favicon.searchParams.set("gui-restart-ready", `${pollID}-${attempt}`);
+      if (await loadGuiRestartReadinessImage(favicon.href, signal)) return true;
+      if (
+        attempt + 1 < guiRestartReadinessAttempts &&
+        !(await waitForGuiRestartRetry(signal))
+      ) {
+        return false;
+      }
+    }
+  } catch {
+    // Readiness is best-effort; malformed targets and browser image failures
+    // leave the still-live old-port page in place.
+  }
+  return false;
 }
 
 export const GUI_RESTART_INTERRUPTED_MESSAGE = "GUI restart interrupted; run `mcphub gui`.";
@@ -1024,13 +1110,14 @@ function currentGuiPort(): number {
 // consumeGuiRestartProgressEvent is the single browser-side owner of restart
 // progress parsing and port-change navigation. Navigation is deliberately
 // best-effort: a matching reserved/new_port event on the still-alive old-port
-// stream is enough to try the trusted loopback origin, but neither a successful
-// assign call nor the companion redirect says the child committed.
+// stream starts a bounded favicon poll. Standby serves no favicon, so navigation
+// waits for the activated full GUI without inferring that the child committed.
 export function consumeGuiRestartProgressEvent(
   event: MessageEvent,
   navigation: GuiRestartNavigation = {
     currentPort: currentGuiPort(),
     assign: (target) => window.location.assign(target),
+    waitUntilReady: waitUntilGuiRestartReady,
   },
 ): GuiRestartProgress | null {
   const progress = parseGuiRestartProgressEvent(event);
@@ -1047,12 +1134,17 @@ export function consumeGuiRestartProgressEvent(
     return progress;
   }
 
-  try {
-    navigation.assign(`http://127.0.0.1:${targetPort}/`);
-  } catch {
-    // The old-port grace stream and redirect are both opportunistic. Keep the
-    // progress UI alive when a browser blocks or races the navigation attempt.
-  }
+  const target = `http://127.0.0.1:${targetPort}/`;
+  const waitUntilReady = navigation.waitUntilReady ?? waitUntilGuiRestartReady;
+  void (async () => {
+    try {
+      if (!(await waitUntilReady(target, navigation.signal)) || navigation.signal?.aborted) return;
+      navigation.assign(target);
+    } catch {
+      // The old-port grace stream and readiness probe are opportunistic. Keep
+      // the progress UI alive when probing exhausts or navigation is blocked.
+    }
+  })();
   return progress;
 }
 

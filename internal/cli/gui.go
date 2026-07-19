@@ -153,7 +153,7 @@ func buildRestartV3ParentDependencies(
 	argvCopy := append([]string(nil), argv...)
 	targetPort := func(actualPort int) (int, error) {
 		if !validPersistedGUIPort(actualPort) {
-			return 0, fmt.Errorf("restart v3 actual GUI port %d is not a fixed loopback port", actualPort)
+			return 0, fmt.Errorf("restart v3 actual GUI port %d is outside the supported loopback range [1024,65535]", actualPort)
 		}
 		raw, err := runtime.SettingsGet("gui_server.port")
 		if err != nil {
@@ -229,7 +229,11 @@ func runRestartV3ChildStartup(ctx context.Context, cfg restartV3ChildStartupConf
 	})
 	defer server.Broadcaster().Close()
 	owner := server.GUIListenerOwner()
-	bound, err := bindRestartV3ChildStandby(ctx, cfg.Deadlines.Bind, func(bindCtx context.Context) (net.Listener, error) {
+	bindBudget := cfg.Deadlines.Bind
+	if child.Handoff.OldPort == child.Handoff.TargetPort {
+		bindBudget += cfg.Deadlines.Quiesce
+	}
+	bound, err := bindRestartV3ChildStandby(ctx, bindBudget, func(bindCtx context.Context) (net.Listener, error) {
 		return owner.BindStandby(bindCtx, cfg.Port, child.Readiness.Handler())
 	})
 	if err != nil {
@@ -538,6 +542,16 @@ activates the first window and exits 0.`,
 			settingVal, _ := api.NewAPI().SettingsGet("gui_server.port")
 			portIntent := classifyPersistedGUIPort(settingVal)
 			port = resolveGuiPort(flagChanged, port, settingVal)
+			// Reject an explicit privileged --port at the front door BEFORE the
+			// persisted-fallback warning: the persisted-config and restart-handoff
+			// protocol only carry [1024,65535], so a GUI launched on a privileged
+			// port could start but never restart (bot #563). Hard-fail the explicit
+			// flag rather than silently binding a port the restart action cannot
+			// handle. Ordered before the warning so a refused explicit flag never
+			// emits a misleading "fallback=explicit-flag" line for the same value.
+			if err := validateExplicitGUIPortFlag(flagChanged, port); err != nil {
+				return err
+			}
 			if portIntent.Kind == guiPortIntentInvalid {
 				fallback := guiPortFallbackEphemeral
 				if flagChanged {
@@ -628,7 +642,7 @@ activates the first window and exits 0.`,
 			return startGuiServer(cmd, ctx, stop, lock, port, noBrowser, noTray, strictMode, pidportPath)
 		},
 	}
-	c.Flags().IntVar(&port, "port", 0, "TCP port on 127.0.0.1 (0 = auto-pick from ephemeral)")
+	c.Flags().IntVar(&port, "port", 0, "TCP port on 127.0.0.1 in [1024,65535] (0 = auto-pick from ephemeral)")
 	c.Flags().BoolVar(&noBrowser, "no-browser", false, "do not auto-launch a browser window")
 	c.Flags().BoolVar(&noTray, "no-tray", false, "do not show the system-tray icon")
 	c.Flags().BoolVar(&force, "force", false, "stuck-instance recovery: print the diagnostic (PRINT-ONLY; add --reveal to also open the lock folder in the file manager). Add --kill to terminate the recorded PID after a three-part identity gate.")

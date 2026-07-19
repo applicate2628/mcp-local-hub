@@ -46,6 +46,26 @@ func validPersistedGUIPort(port int) bool {
 	return port >= 1024 && port <= 65535
 }
 
+// validateExplicitGUIPortFlag rejects an explicit `--port` outside the
+// supported [1024,65535] range (0 = auto-pick an ephemeral port is allowed).
+// It is the front-door counterpart of validPersistedGUIPort: the persisted
+// config already forbids privileged ports (<1024), and the restart-handoff
+// protocol (validateSelfRestartHandoff, the readiness identity gate) only
+// carries [1024,65535], so a GUI launched on a privileged port via the flag
+// could start but never restart. Enforcing the same range on the flag keeps a
+// running GUI on a port every downstream owner can carry — closing the bot
+// #563 privileged-port restart inconsistency at the single point of entry
+// rather than lifting the floor across the whole handoff protocol.
+func validateExplicitGUIPortFlag(flagChanged bool, port int) error {
+	if !flagChanged || port == 0 {
+		return nil
+	}
+	if !validPersistedGUIPort(port) {
+		return fmt.Errorf("gui --port %d is outside the supported range [1024,65535] (0 = auto-pick an ephemeral port)", port)
+	}
+	return nil
+}
+
 func classifyPersistedGUIPort(raw string) guiPortIntent {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {

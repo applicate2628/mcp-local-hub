@@ -48,6 +48,13 @@ func TestRestartDeadlines_DefaultPolicy(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DefaultRestartDeadlines() durations = %#v, want %#v", got, want)
 	}
+	samePortBindBudget := d.Quiesce + d.Bind
+	if samePortBindBudget <= d.Quiesce {
+		t.Fatalf("same-port standby bind budget = %v, want greater than quiesce %v", samePortBindBudget, d.Quiesce)
+	}
+	if samePortBindBudget >= d.Proof || samePortBindBudget >= d.Reservation {
+		t.Fatalf("same-port standby bind budget = %v, want below proof %v and reservation %v", samePortBindBudget, d.Proof, d.Reservation)
+	}
 }
 
 func TestHandoffMarkerStore_ReserveAndOwnedFreeInterruptCAS(t *testing.T) {

@@ -91,22 +91,142 @@ func TestRestartV3ChildStandbyBindUsesDedicatedBindDeadline(t *testing.T) {
 	}
 }
 
-func TestRestartV3_SamePortStandbyBindWaitsForParentClose(t *testing.T) {
-	attempts := 0
-	want := phaseGCLIListener{}
-	bindRefusal := restartV3BindRefusedTestError()
-	listener, err := bindRestartV3ChildStandby(context.Background(), time.Second, func(context.Context) (net.Listener, error) {
-		attempts++
-		if attempts < 3 {
-			return nil, &net.OpError{Op: "listen", Net: "tcp", Err: bindRefusal}
+// TestRestartV3ChildStandbyRetriesOnPlatformBindRefused asserts the standby
+// bind retry predicate recognizes the REAL platform bind-refused errno and
+// retries instead of giving up. This guards the Windows trap: WSAEADDRINUSE
+// (10048) does NOT satisfy errors.Is(err, syscall.EADDRINUSE), so only
+// api.IsPortBindRefusedErr classifies it — a naive errno check would surface
+// the parent's not-yet-released same-port listener as a fatal bind failure and
+// abort the handoff. restartV3BindRefusedTestError() supplies the true
+// per-platform errno (windows.WSAEADDRINUSE / syscall.EADDRINUSE).
+func TestRestartV3ChildStandbyRetriesOnPlatformBindRefused(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve standby listener: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	calls := 0
+	got, err := bindRestartV3ChildStandby(context.Background(), time.Second, func(context.Context) (net.Listener, error) {
+		calls++
+		if calls == 1 {
+			return nil, restartV3BindRefusedTestError()
 		}
-		return want, nil
+		return ln, nil
 	})
 	if err != nil {
-		t.Fatalf("bindRestartV3ChildStandby: %v", err)
+		t.Fatalf("bindRestartV3ChildStandby on platform bind-refused = %v, want retry then success", err)
 	}
-	if listener != want || attempts != 3 {
-		t.Fatalf("listener=%v attempts=%d, want retained listener after 3 attempts", listener, attempts)
+	if got != ln {
+		t.Fatalf("bind returned %v, want the second-attempt listener", got)
+	}
+	if calls != 2 {
+		t.Fatalf("bind attempts = %d, want 2 (retry after platform bind-refused errno)", calls)
+	}
+}
+
+func TestRestartV3_SamePortStandbyBindWaitsForParentClose(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR", stateDir)
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("hold same-port listener: %v", err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
+	port := held.Addr().(*net.TCPAddr).Port
+
+	deadlines := gui.DefaultRestartDeadlines()
+	deadlines.Now = time.Now
+	nonce := bytes.Repeat([]byte{0x5b}, 32)
+	generation := "generation-cli-same-port-slow-bind"
+	generationHash := sha256.Sum256([]byte(generation))
+	noncePath := filepath.Join(stateDir, fmt.Sprintf("%s-%x", api.GUIRestartNonceFileLeaf, generationHash[:]))
+	if err := api.WriteStateFileBytesAtomic(noncePath, nonce); err != nil {
+		t.Fatalf("write nonce file: %v", err)
+	}
+	store := gui.NewHandoffMarkerStore(stateDir, deadlines)
+	started, err := store.Begin(gui.HandoffBegin{
+		Generation: generation, Route: gui.HandoffRouteSamePort,
+		OldPort: port, NewPort: port, OldPID: os.Getppid(),
+	})
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	nonceHash := sha256.Sum256(nonce)
+	if _, err := store.Reserve(started.Generation, started.Sequence, time.Now().Add(deadlines.Reservation), "sha256:"+fmt.Sprintf("%x", nonceHash[:]), os.Getpid()); err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	raw, err := gui.EncodeSelfRestartHandoff(gui.SelfRestartHandoff{
+		Version: 1, HandoffID: "handoff-cli-same-port-slow-bind", Generation: started.Generation,
+		Sequence: started.Sequence, OldPort: port, TargetPort: port,
+		ParentPID: os.Getppid(), NoncePath: noncePath,
+	})
+	if err != nil {
+		t.Fatalf("EncodeSelfRestartHandoff: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	boundListener := make(chan net.Listener, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- runRestartV3ChildStartup(ctx, restartV3ChildStartupConfig{
+			Handoff: raw, PID: os.Getpid(), PidportPath: filepath.Join(stateDir, gui.PidportFileLeaf),
+			Port: port, Version: "same-port-slow-bind-test", Deadlines: deadlines,
+			StartRuntime: func(ctx context.Context, server *gui.Server, owner *gui.GUIListenerOwner, bound net.Listener, lease gui.SingleInstanceLease) error {
+				boundListener <- bound
+				ready := make(chan struct{})
+				defer lease.Release()
+				return server.ContinueWithGUIListener(ctx, ready, owner, bound)
+			},
+		})
+	}()
+
+	// Hold address-in-use beyond the old 2s Bind deadline but within the
+	// same-port Quiesce+Bind window selected from the default policy.
+	releaseTimer := time.NewTimer(3200 * time.Millisecond)
+	select {
+	case err := <-done:
+		releaseTimer.Stop()
+		t.Fatalf("restart child exited before parent-close window elapsed: %v", err)
+	case <-releaseTimer.C:
+	}
+	if err := held.Close(); err != nil {
+		t.Fatalf("release same-port listener: %v", err)
+	}
+
+	select {
+	case listener := <-boundListener:
+		if listener == nil || listener.Addr().(*net.TCPAddr).Port != port {
+			t.Fatalf("bound listener = %v, want live listener on port %d", listener, port)
+		}
+	case err := <-done:
+		t.Fatalf("restart child failed after parent listener close: %v", err)
+	case <-time.After(4 * time.Second):
+		t.Fatal("restart child did not bind after parent listener close")
+	}
+	commitDeadline := time.Now().Add(3 * time.Second)
+	for {
+		record, readErr := store.Read()
+		if readErr != nil {
+			t.Fatalf("Read committed marker: %v", readErr)
+		}
+		if record != nil && record.Phase == gui.HandoffPhaseCommitted {
+			break
+		}
+		if time.Now().After(commitDeadline) {
+			t.Fatalf("same-port child did not commit after binding; record=%+v", record)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runRestartV3ChildStartup: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("restart child startup did not stop after cancellation")
 	}
 }
 
@@ -191,6 +311,53 @@ func TestRestartV3_ParentCompositionUsesParserAwareArgvAndRetainedLease(t *testi
 	}
 	if spawnedHandoff != handoff {
 		t.Fatalf("spawn handoff = %+v, want %+v", spawnedHandoff, handoff)
+	}
+}
+
+// TestRestartV3_ParentCompositionPrivilegedActualPortRefused asserts the
+// coordinator-level defense for bot #563: the restart TargetPort resolver
+// refuses any actual port outside [1024,65535] (validPersistedGUIPort), so the
+// handoff never forms for a privileged port and Spawn is unreachable. Privileged
+// ports are refused at the front door too (validateExplicitGUIPortFlag, unit-
+// tested in gui_port_test.go); this is the belt-and-suspenders refusal at the
+// restart seam. It replaces an earlier test that stubbed Spawn and asserted
+// `--port 80` "reached spawn" — that stub bypassed validateSelfRestartHandoff
+// (the real [1024,65535] handoff gate), so it proved nothing about production.
+func TestRestartV3_ParentCompositionPrivilegedActualPortRefused(t *testing.T) {
+	cmd := newGuiCmdReal()
+	lease := &phaseGCLILease{}
+	runtime := restartV3ParentRuntime{
+		SettingsGet: func(string) (string, error) { return "", nil },
+		Spawn: func([]string, gui.SelfRestartHandoff) (gui.RestartParentChild, error) {
+			t.Fatal("Spawn must be unreachable for a refused privileged actual port")
+			return phaseGCLIChild{}, nil
+		},
+		Confirm: func(context.Context, int, []byte, gui.AuthenticatedReadinessIdentity) error { return nil },
+		Exit:    func() {},
+	}
+	deps, err := buildRestartV3ParentDependencies(
+		context.Background(), cmd, lease,
+		filepath.Join(apitest.HardenedTempDir(t), gui.PidportFileLeaf),
+		func() int { return 9125 },
+		[]string{"gui", "--no-tray"}, runtime,
+	)
+	if err != nil {
+		t.Fatalf("buildRestartV3ParentDependencies: %v", err)
+	}
+	// Privileged (<1024) and out-of-range actual ports are refused; the handoff
+	// never forms, so Spawn (asserted fatal above) is never reached.
+	for _, refused := range []int{0, 22, 80, 443, 1023, 65536} {
+		if _, err := deps.TargetPort(refused); err == nil {
+			t.Errorf("TargetPort(%d) succeeded, want refusal for a port outside [1024,65535]", refused)
+		}
+	}
+	// A valid loopback port resolves to itself (same-port restart) when no
+	// distinct persisted port is configured.
+	for _, ok := range []int{1024, 9125, 65535} {
+		got, err := deps.TargetPort(ok)
+		if err != nil || got != ok {
+			t.Fatalf("TargetPort(%d) = %d, %v; want %d, nil", ok, got, err, ok)
+		}
 	}
 }
 
