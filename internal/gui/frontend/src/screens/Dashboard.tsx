@@ -5,6 +5,7 @@ import { useEventSource } from "../hooks/useEventSource";
 import { unmanagedStdioCount as countUnmanagedStdio } from "../lib/unmanaged-stdio";
 import { daemonStateVisual, isRecoveryEligibleState, stateShape } from "../lib/status";
 import { formatBytes, formatUptime } from "../lib/format";
+import { deriveSpawnHoldBanners } from "../lib/spawnHold";
 import { DaemonMetrics } from "../components/DaemonMetrics";
 import { ConnectionBadge } from "../components/ConnectionBadge";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -764,6 +765,17 @@ export function DashboardScreen() {
 
   const sorted = Object.values(state).sort((a, b) => keyFor(a).localeCompare(keyFor(b)));
 
+  // Pre-spawn existence gate (P1.1). One banner per distinct cause, above the
+  // cards. Every server is started from ONE mcphub.exe, so when that file goes
+  // missing all of them fail identically — the real incident held 12 daemons at
+  // once, and twelve identical red cards is worse for an operator than one
+  // sentence naming the cause and the remedy. Grouping keeps that say-it-once
+  // property while ALSO guaranteeing the remedy is visible without hover when
+  // only one server is held (the card carries the remedy in a `title` tooltip
+  // the operator has no reason to open). Derived from data already on the wire;
+  // no extra backend surface.
+  const spawnHoldBanners = deriveSpawnHoldBanners(sorted);
+
   return (
     <div>
       <header class="dashboard-header">
@@ -783,6 +795,18 @@ export function DashboardScreen() {
         context="normal"
         onReloadStatus={() => setReloadTrigger((n) => n + 1)}
       />
+      {spawnHoldBanners.map((hold) => (
+        <p
+          key={JSON.stringify([hold.reason, hold.path])}
+          class="dashboard-fleet-hold"
+          data-testid="dashboard-fleet-hold"
+          data-hold-reason={hold.reason}
+          data-hold-count={String(hold.count)}
+          role="alert"
+        >
+          ⚠ {hold.headline}
+        </p>
+      ))}
       {hubHealth?.degraded && (
         <p
           class={`dashboard-hub-health dashboard-hub-health-${hubHealth.state}`}

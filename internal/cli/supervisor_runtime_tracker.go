@@ -60,6 +60,19 @@ type DaemonRuntimeEntry struct {
 	// #242 sequencing review (2026-05-28). *bool with omitempty
 	// preserves the absent-field-means-unknown semantic.
 	JobProtection *bool `json:",omitempty"`
+
+	// SpawnHoldReason / SpawnHoldPath record that the pre-spawn existence gate
+	// (P1.1) is holding this daemon because a path it needs is absent — a
+	// stable id ("missing-binary" / "missing-workspace") plus the exact path.
+	//
+	// Deliberately NOT cleared by clearJobProtectionLocked or the state-
+	// transition marks (MarkBackoff in particular): the gate marks the hold
+	// BEFORE calling holdSpawnInBackoff so one MarkBackoff + persist pass
+	// writes both the backoff state and the reason. The gate is the SOLE owner
+	// and clears them itself (ClearSpawnHold) on the first pass where nothing
+	// is absent.
+	SpawnHoldReason string `json:",omitempty"`
+	SpawnHoldPath   string `json:",omitempty"`
 }
 
 type DaemonRuntimeTracker struct {
@@ -306,6 +319,43 @@ func (t *DaemonRuntimeTracker) MarkJobProtection(taskName string, protected *boo
 	entry := t.entries[taskName]
 	entry.JobProtection = protected
 	t.entries[taskName] = entry
+}
+
+// MarkSpawnHold records that the pre-spawn existence gate is holding this task
+// because reasonID's path is absent. Called BEFORE holdSpawnInBackoff so that
+// call's MarkBackoff + persist writes the backoff state and the hold reason in
+// one pass (MarkBackoff deliberately does not clear these fields).
+func (t *DaemonRuntimeTracker) MarkSpawnHold(taskName, reasonID, path string) {
+	if t == nil {
+		return
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry := t.entries[taskName]
+	entry.SpawnHoldReason = reasonID
+	entry.SpawnHoldPath = path
+	t.entries[taskName] = entry
+}
+
+// ClearSpawnHold drops any recorded pre-spawn hold for the task and reports
+// whether anything changed, so the caller can skip a state-file write on the
+// healthy path (the gate runs on EVERY create-process transition).
+func (t *DaemonRuntimeTracker) ClearSpawnHold(taskName string) bool {
+	if t == nil {
+		return false
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry := t.entries[taskName]
+	if entry.SpawnHoldReason == "" && entry.SpawnHoldPath == "" {
+		return false
+	}
+	entry.SpawnHoldReason = ""
+	entry.SpawnHoldPath = ""
+	t.entries[taskName] = entry
+	return true
 }
 
 // MarkSpawned records a fresh child PID for the task and bumps the tracker's
@@ -581,6 +631,11 @@ func (t *DaemonRuntimeTracker) HydrateFromState(file *api.SupervisorStateFile) {
 			RestartCount:  0,
 			OrphanPID:     daemonState.OrphanPID,
 			JobProtection: daemonState.JobProtection,
+			// Hydrated for DISPLAY continuity across a supervisor restart only
+			// — decision-inert, and corrected by the first gate pass for this
+			// daemon (which re-probes the filesystem and clears or re-marks).
+			SpawnHoldReason: daemonState.SpawnHoldReason,
+			SpawnHoldPath:   daemonState.SpawnHoldPath,
 		}
 	}
 }
@@ -615,6 +670,12 @@ func (t *DaemonRuntimeTracker) PersistTo(path string) error {
 				PIDGeneration: entry.PIDGeneration,
 				OrphanPID:     entry.OrphanPID,
 				JobProtection: entry.JobProtection,
+				// Pre-spawn existence-gate hold (P1.1). Persisted so `mcphub
+				// status --json` and the GUI keep naming the absent path across
+				// a supervisor restart instead of showing an unexplained
+				// stopped daemon. Decision-inert by contract.
+				SpawnHoldReason: entry.SpawnHoldReason,
+				SpawnHoldPath:   entry.SpawnHoldPath,
 			}
 			if !entry.StartedAt.IsZero() {
 				daemonState.StartedAt = entry.StartedAt.UTC().Format(time.RFC3339Nano)

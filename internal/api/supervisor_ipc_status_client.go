@@ -187,6 +187,17 @@ type supervisorIPCStatusDaemon struct {
 	// and the GUI Dashboard. Closes consultant strategic concern #1
 	// on PR #241 (silent-degradation gap when fallback fires).
 	JobProtection *bool `json:"job_protection,omitempty"`
+	// SpawnHoldReason / SpawnHoldPath mirror SupervisorDaemonState's pre-spawn
+	// existence-gate hold across the IPC boundary. REQUIRED, not optional:
+	// without these fields json.Unmarshal would silently drop the
+	// spawn_hold_reason / spawn_hold_path the producer emits before they reached
+	// the DaemonStatus consumer — the same trap the OrphanPID / StalePID /
+	// RAMBytes comments above record. That silent drop would break exactly the
+	// surface this feature exists for (the GUI telling a non-technical operator
+	// the mcphub binary is missing), and it would fail silently rather than
+	// loudly. Empty on the happy path.
+	SpawnHoldReason string `json:"spawn_hold_reason,omitempty"`
+	SpawnHoldPath   string `json:"spawn_hold_path,omitempty"`
 }
 
 func validateSupervisorIPCHello(conn net.Conn, expected SupervisorLockOwner) error {
@@ -281,7 +292,12 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 			OrphanPID:     d.OrphanPID,
 			StalePID:      d.StalePID,
 			JobProtection: d.JobProtection,
-			Workspace:     d.Workspace,
+			// Pre-spawn existence-gate hold (P1.1) — carried through so the GUI
+			// Dashboard and `mcphub status --json` can name the absent path and
+			// the remedy instead of showing an unexplained non-running daemon.
+			SpawnHoldReason: d.SpawnHoldReason,
+			SpawnHoldPath:   d.SpawnHoldPath,
+			Workspace:       d.Workspace,
 			// UptimeSec is derived HERE from the supervisor's started_at
 			// (the wire carries started_at, not a precomputed uptime_sec).
 			// The v0.6 idle sweeper (internal/gui/serena_idle_sweeper.go)

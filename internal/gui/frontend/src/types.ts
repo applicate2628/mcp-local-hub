@@ -35,6 +35,27 @@ export interface DaemonStatus {
   // a daemon running without orphan-protection can accumulate
   // orphans on supervisor crash with no steady-state warning.
   job_protection?: boolean | null;
+  // Pre-spawn existence gate (P1.1). Set when the supervisor is HOLDING this
+  // daemon because a path it needs is absent on disk:
+  //   spawn_hold_reason — stable id: "missing-binary" | "missing-workspace"
+  //   spawn_hold_path   — the exact absent path
+  // Both empty/absent on the happy path.
+  //
+  // The wire carries the stable ID, not prose, because a badge, a tooltip and
+  // a CLI line are three renderings of ONE fact — each surface owns its own
+  // wording (see spawnHoldCopy in DaemonMetrics.tsx) while the id stays the
+  // single stable identifier. An UNKNOWN id must degrade gracefully rather
+  // than render blank: consumers fall back to a generic "required file is
+  // missing" phrasing.
+  //
+  // This is a HOLD, not a quarantine: no crash budget was consumed and the
+  // daemon starts by itself once the path exists again, so the copy must say
+  // "it will start automatically" and never tell the operator to run a
+  // recovery command. The SSE delta always sends BOTH keys (never omits them)
+  // so the shallow delta merge actively CLEARS a stale warning after the
+  // operator reinstalls.
+  spawn_hold_reason?: string;
+  spawn_hold_path?: string;
   // Process uptime in seconds, derived server-side from the supervisor's
   // started_at (api.supervisorIPCUptimeSec). Mirrors DaemonStatus.UptimeSec
   // (`json:"uptime_sec,omitempty"`). 0/absent for a just-spawned or
