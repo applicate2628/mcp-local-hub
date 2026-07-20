@@ -16,6 +16,20 @@ type IPCRequest struct {
 	Args    map[string]any `json:"args,omitempty"`
 }
 
+// IPCCommandIsReadOnly is the single owner of "read-only supervisor IPC command".
+// Fail-safe allowlist: true ONLY for enumerated pure-query commands (answered in the
+// pre-reconcileReady-gate dispatch switch); every other command — including unknown/
+// future verbs — is NOT read-only and keeps its audit row. See
+// work-items/decisions/2026-07-19-ipc-audit-readonly-allowlist.md.
+func IPCCommandIsReadOnly(cmd string) bool {
+	switch cmd {
+	case "status":
+		return true
+	default:
+		return false
+	}
+}
+
 // ValidateRequestEnvelope returns nil iff req.Version is 0 (treated as
 // v1 default) or 1. Any other version returns an error so the IPC
 // dispatcher can refuse the frame with a structured error response

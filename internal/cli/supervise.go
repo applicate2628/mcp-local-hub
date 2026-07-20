@@ -1711,10 +1711,18 @@ func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps) {
 // layer (unknown cmd, unsupported version) are surfaced via the
 // IPCResponse.Error envelope, not via connection close.
 //
-// Audit: each request gets one `ipc-command` audit row capturing the
-// cmd + id. The response body is NOT logged (may contain operator-
-// visible state that doesn't belong in the long-lived audit channel);
-// just the verb + correlation id is.
+// Audit: each MUTATING/unknown request gets one `ipc-command` audit row
+// capturing the cmd + id; only a VALID read-only command (api.IPCCommandIsReadOnly
+// — today just `status` — AND a passing api.ValidateRequestEnvelope) SKIPS the row
+// so read-only poll floods don't evict real lifecycle events from the audit
+// channel (bug 2026-07-16). A REJECTED envelope (e.g. an unsupported protocol
+// version carrying cmd=status) is NOT a benign poll — it is incompatible-protocol
+// activity, so it stays audited (bot PR #566 P2); the validity is re-checked by
+// dispatchIPCRequest below (ValidateRequestEnvelope is pure, so the double call
+// is a cheap single-owner reuse of the version rule). The row is emitted BEFORE
+// dispatch, so a mutating/rejected command is audited even if its handler errors.
+// The response body is NOT logged (may contain operator-visible state that
+// doesn't belong in the long-lived audit channel); just the verb + correlation id.
 func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
 	defer func() { _ = conn.Close() }()
 	reader := bufio.NewReader(conn)
@@ -1743,7 +1751,7 @@ func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
 			})
 			continue
 		}
-		if deps.events != nil {
+		if deps.events != nil && !(api.IPCCommandIsReadOnly(req.Cmd) && api.ValidateRequestEnvelope(req) == nil) {
 			_ = deps.events.TryEmit(api.SupervisorEvent{
 				Severity: "info",
 				Source:   "ipc",
