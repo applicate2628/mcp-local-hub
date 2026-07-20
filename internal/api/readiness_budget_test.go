@@ -97,13 +97,38 @@ func TestFixedPortStatus_UnverifiedOwnershipIsNotAssertedAsForeign(t *testing.T)
 	t.Cleanup(func() { portAvailable = origPortAvailable })
 	portAvailable = func(int) bool { return false } // port in use
 
-	ok, reason := fixedPortStatus(65000, "srv", "dmn", false)
+	ok, reason := fixedPortStatus(readinessBudget{}, 65000, "srv", "dmn", false)
 	if ok {
 		t.Fatal("a port in use and not owned by us must not report ok")
 	}
 	if !strings.Contains(reason, "could not be verified") {
 		t.Errorf("reason must admit ownership may be unverified rather than "+
 			"asserting a foreign owner it did not establish; got %q", reason)
+	}
+}
+
+// TestFixedPortStatus_SpentBudgetReportsUnknownNotConflict pins FIX-5's
+// operator-visible distinction: a port left unprobed because the time budget
+// was spent must read as UNKNOWN, not as a detected conflict. The two carry
+// different runbooks — "WMI is slow, retry" vs "reclaim a squatted port".
+func TestFixedPortStatus_SpentBudgetReportsUnknownNotConflict(t *testing.T) {
+	origPortAvailable, origClock := portAvailable, readinessClock
+	t.Cleanup(func() { portAvailable, readinessClock = origPortAvailable, origClock })
+	portAvailable = func(int) bool { return false } // port in use
+
+	base := time.Now()
+	readinessClock = func() time.Time { return base }
+	spent := readinessBudget{deadline: base.Add(-time.Second)} // already past
+
+	ok, reason := fixedPortStatus(spent, 65001, "srv", "dmn", false)
+	if ok {
+		t.Fatal("an unprobed in-use port must not report ok")
+	}
+	if !strings.Contains(reason, "UNKNOWN") {
+		t.Errorf("a budget-skipped ownership probe must read as UNKNOWN, got %q", reason)
+	}
+	if strings.Contains(reason, "not this server's daemon") {
+		t.Errorf("must not assert a foreign owner it never probed for; got %q", reason)
 	}
 }
 

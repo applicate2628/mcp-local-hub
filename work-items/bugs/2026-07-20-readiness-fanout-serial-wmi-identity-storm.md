@@ -78,6 +78,38 @@ performance redesign touching `processIdentityByPID`'s contract and its
 install/preflight callers. Filed rather than absorbed, per the adjacent-findings
 protocol.
 
+## Measurement reconciliation (the "~31s per wmic call" record)
+
+`internal/api/main_test.go:82-88` records "~31s per wmic call on Win11 24H2".
+This host IS 24H2 (build 26100). Measured here, deliberately including samples
+taken WHILE the readiness fan-out was hammering WMI:
+
+| query | idle | under fan-out load |
+|---|---|---|
+| `wmic process where ProcessId=<live>` (single-PID, filtered) | 2.3-4.6 s | 1.6-10.3 s |
+| `wmic process get ...` (FULL table, 1018 processes) | 2.9-8.2 s | — |
+| `powershell Get-CimInstance` (single PID) | 10.5 s | — |
+| `powershell Get-CimInstance` (full table) | 7.8 s | — |
+
+The obvious hypothesis — that 31s was a full-table enumeration and the newer
+numbers were a cheap filtered query — was tested and **does not hold**:
+full-table is 2.9-8.2s here, not the slow one. The worst single probe observed
+under load was **10.3s**.
+
+So 31s could not be reproduced, and also could not be falsified — it is most
+likely a different host or WMI-repository state (a rebuilding or corrupted WMI
+repository is exactly this pathology). The probe caps were therefore sized to
+ACCOMMODATE it (`probeCommandTimeout` 45s, `probeChainBudget` 60s) rather than
+to match today's numbers, because the harm is asymmetric: a cap set too high
+costs bounded latency, while a cap set too low manufactures false timeouts and a
+report that is mostly UNKNOWN. Full argument in `process_probe_exec.go`.
+
+**Follow-up this bug also covers:** interrupting an already-in-flight probe
+would require threading a context through the `lookupProcess` seam, which has
+**97 test fakes**. Until then the readiness report can overshoot its 20s budget
+by at most one probe chain (~80s worst case), which is stated in the
+`allServerReadinessBudget` comment rather than implied away.
+
 ## Related fix
 
 The unbounded-probe defect on the same path is fixed separately:

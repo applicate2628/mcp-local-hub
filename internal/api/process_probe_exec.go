@@ -28,33 +28,50 @@ var ErrProbeTimeout = errors.New("process probe timed out")
 // caller, so the hang was operator-facing, not merely a test problem.
 //
 // The numbers below are measured, not guessed. On the reference Windows 11
-// host under real load (38 live mcphub daemons):
+// host (build 26100 = 24H2, 1018 live processes, 38 mcphub daemons):
 //
-//	netstat -ano ................................  110 ms
-//	schtasks /Query /TN <task> /V /FO LIST ......  177 ms
-//	wmic process where ProcessId=<live pid> .....  4.1 s – 6.7 s
-//	powershell Get-CimInstance (single PID) ..... 10.5 s
+//	netstat -ano ...................................   110 ms
+//	schtasks /Query /TN <task> /V /FO LIST .........   177 ms
+//	wmic single-PID filtered, idle .................  2.3 s –  4.6 s
+//	wmic single-PID filtered, under readiness load .  1.6 s – 10.3 s
+//	wmic FULL-TABLE (runProcessSnapshot) ...........  2.9 s –  8.2 s
+//	powershell Get-CimInstance (single PID) ........          10.5 s
+//	powershell Get-CimInstance (full table) ........           7.8 s
 //
-// The WMI-backed queries dominate, and the PowerShell fallback is SLOWER than
-// the wmic path it backs up. So:
+// RECONCILIATION with internal/api/main_test.go:82-88, which records "~31s per
+// wmic call on Win11 24H2". This host IS 24H2, and nothing measured here comes
+// close to 31s — the worst single probe observed, deliberately sampled WHILE the
+// readiness fan-out was hammering WMI, was 10.3s. The gap is NOT explained by
+// filtered-vs-full-table (both were measured above; full-table is not the slow
+// one). So the 31s record is either from a different host/WMI-repository state
+// or from an aggregate of several calls, and it could NOT be reproduced here.
 //
-//   - probeCommandTimeout (15s) bounds ONE child. It sits above the slowest
-//     measured healthy probe (10.5s) with headroom, so a loaded-but-working
-//     host is never falsely cut; its job is to kill a wedged child in bounded
-//     time, not to control latency.
-//   - probeChainBudget (20s) bounds a whole wmic→PowerShell FALLBACK CHAIN.
-//     The fallback exists because Windows 11 24H2+ removes wmic.exe (which
-//     fails fast), NOT because wmic is slow — so a slow wmic must not buy a
-//     second full-price PowerShell attempt. One shared deadline across both
-//     attempts keeps the chain's worst case at 20s instead of 2×15s = 30s.
-//     20s covers the measured worst-case healthy chain (6.7s + 10.5s = 17.2s).
+// Because it could not be REPRODUCED but also could not be FALSIFIED, the caps
+// below are sized to accommodate it rather than to match today's measurement.
+// That choice follows from the asymmetry of harm:
 //
-// Latency of a whole multi-probe operation is bounded by its own caller's
-// budget (see allServerReadinessBudget in readiness.go); these constants only
-// guarantee that no SINGLE probe can block forever.
+//   - A cap set too HIGH costs bounded extra latency before the deadline fires.
+//     The whole-report budget (readinessBudget in readiness.go) is what actually
+//     controls user-visible latency, so this costs little.
+//   - A cap set too LOW manufactures FALSE timeouts on a healthy-but-slow host.
+//     Post-FIX-1 a timeout degrades to an honest UNKNOWN — safe, but a report
+//     that is mostly UNKNOWN is useless, and mass-UNKNOWN would be self-inflicted.
+//
+// A wedged probe is caught either way; only the honesty of a healthy host's
+// report depends on getting this right. Hence:
+//
+//   - probeCommandTimeout (45s) bounds ONE child: above the repo's recorded 31s
+//     worst case with ~1.45x headroom, and ~4.3x the worst probe measured here.
+//     Its ONLY job is to kill a wedged child in bounded time. It is deliberately
+//     NOT a latency control.
+//   - probeChainBudget (60s) bounds a whole wmic→PowerShell FALLBACK CHAIN. The
+//     fallback exists because Windows 11 24H2+ removes wmic.exe (which fails
+//     FAST), NOT because wmic is slow — so a slow wmic must not buy a second
+//     full-price PowerShell attempt. One shared deadline keeps the chain's worst
+//     case at 60s rather than 2x45s = 90s.
 const (
-	probeCommandTimeout = 15 * time.Second
-	probeChainBudget    = 20 * time.Second
+	probeCommandTimeout = 45 * time.Second
+	probeChainBudget    = 60 * time.Second
 
 	// probeWaitDelay bounds the window between "context expired, child killed"
 	// and "Wait returns". Without it, Cmd.Wait still blocks on the stdout-copy

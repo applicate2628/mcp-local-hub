@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/user"
 	"path/filepath"
 	"strings"
@@ -505,16 +506,28 @@ func TestPreflight_ExternalPortDoesNotMatchSupervisorIntentInternalPort(t *testi
 	}
 }
 
+// fakeProcessNameAndParent models a probe surface that ANSWERS: an absent row
+// is a definitive "no such process" (errProcessNotFound), NOT a timeout. Use
+// fakeProcessNameAndParentTimingOut for the did-not-answer case — the two drive
+// opposite ownership decisions.
 func fakeProcessNameAndParent(rows map[int]struct {
 	image  string
 	parent int
-}) func(int) (string, int, bool) {
-	return func(pid int) (string, int, bool) {
+}) func(int) (string, int, error) {
+	return func(pid int) (string, int, error) {
 		row, ok := rows[pid]
 		if !ok {
-			return "", 0, false
+			return "", 0, errProcessNotFound
 		}
-		return row.image, row.parent, true
+		return row.image, row.parent, nil
+	}
+}
+
+// fakeProcessNameAndParentTimingOut models the WMI-congested host: the probe
+// ran and was cut by its deadline, so ownership is UNKNOWN.
+func fakeProcessNameAndParentTimingOut() func(int) (string, int, error) {
+	return func(pid int) (string, int, error) {
+		return "", 0, fmt.Errorf("identity probe for pid %d: %w", pid, ErrProbeTimeout)
 	}
 }
 

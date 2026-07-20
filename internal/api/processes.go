@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -514,7 +515,7 @@ func init() {
 		parentImage, _, _ = procNameAndParent(parentPID)
 		return image, parentImage, true
 	}
-	processNameAndParentByPID = procNameAndParent
+	processNameAndParentByPID = procNameAndParentErr
 
 	// Batch variant: one netstat + one wmic for N ports.
 	lookupProcessBatch = func(ports []int) map[int]struct {
@@ -696,8 +697,19 @@ func parseWmicDate(s string) time.Time {
 // missing, both queries failing, parse error, PID not found). The
 // caller (portHeldByOurDaemon) treats this as fail-closed.
 func procNameAndParent(pid int) (image string, parentPID int, ok bool) {
+	image, parentPID, err := procNameAndParentErr(pid)
+	return image, parentPID, err == nil
+}
+
+// procNameAndParentErr is the real implementation, reporting WHY it failed.
+//
+// The distinction is load-bearing, not cosmetic: a caller that treats "the WMI
+// probe did not answer in time" the same as "the process is genuinely gone" will
+// take an ownership downgrade it has not earned. procNameAndParent keeps the
+// boolean shape for callers that already fail closed on any negative.
+func procNameAndParentErr(pid int) (image string, parentPID int, err error) {
 	if pid <= 0 {
-		return "", 0, false
+		return "", 0, errProcessNotFound
 	}
 	// ONE deadline for the whole wmic→PowerShell chain. This was the frame the
 	// readiness hang was captured in: a bare cmd.Output() here is an infinite
@@ -706,23 +718,34 @@ func procNameAndParent(pid int) (image string, parentPID int, ok bool) {
 	ctx, cancel := newProbeChainContext()
 	defer cancel()
 
+	timedOut := false
+
 	// Try wmic first.
-	if out, err := runWmicNameParent(ctx, pid); err == nil {
+	if out, werr := runWmicNameParent(ctx, pid); werr == nil {
 		if name, pp, parsed := parseNameParent(out); parsed {
-			return name, pp, true
+			return name, pp, nil
 		}
+	} else if errors.Is(werr, ErrProbeTimeout) {
+		timedOut = true
 	}
 	// PowerShell fallback (Get-CimInstance). Emits a single CSV-shaped
 	// line: `Node,Name,ParentProcessId` (matching wmic's column order
 	// after the leading Node column). Shares ctx with the wmic attempt above:
 	// the fallback covers "wmic.exe removed on 24H2+" (which fails FAST), not
 	// "wmic is slow", so it must not restart the clock.
-	if out, err := runPSNameParent(ctx, pid); err == nil {
+	if out, perr := runPSNameParent(ctx, pid); perr == nil {
 		if name, pp, parsed := parseNameParent(out); parsed {
-			return name, pp, true
+			return name, pp, nil
 		}
+	} else if errors.Is(perr, ErrProbeTimeout) {
+		timedOut = true
 	}
-	return "", 0, false
+	if timedOut {
+		// At least one arm was cut by its deadline, so we did NOT establish that
+		// the process is absent — we only established that we do not know.
+		return "", 0, fmt.Errorf("identity probe for pid %d: %w", pid, ErrProbeTimeout)
+	}
+	return "", 0, errProcessNotFound
 }
 
 // runWmicNameParent runs `wmic process where ProcessId=N get Name,ParentProcessId /format:csv`
