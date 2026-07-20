@@ -62,5 +62,17 @@ func (s savedStderrBinding) restore() error {
 // The dup is atomic — fd 2 is never momentarily closed — so there is no
 // window in which a panic could be lost.
 func redirectProcessStderr(f *os.File) error {
-	return dupOntoStderr(int(f.Fd()))
+	fd := int(f.Fd())
+	// If the sink already landed ON fd 2 (possible when the parent handed us
+	// a process with fd 2 closed, so open(2) hands the lowest free descriptor
+	// straight back), it is already bound and no dup is needed. Guarding is
+	// not cosmetic: Linux dup3 returns EINVAL when oldfd == newfd (unlike
+	// dup2, which succeeds as a no-op), and the subsequent f.Close() on the
+	// error path would then close fd 2 itself — destroying stderr entirely
+	// instead of redirecting it. Cheaper to hold than to reason about
+	// reachability.
+	if fd == 2 {
+		return nil
+	}
+	return dupOntoStderr(fd)
 }

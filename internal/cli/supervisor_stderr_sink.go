@@ -62,6 +62,34 @@ type supervisorStderrSink struct {
 	saved savedStderrBinding
 }
 
+// supervisorStderrSinkHint renders the sink's absolute path for an operator
+// -facing diagnostic, degrading to the bare leaf name when the state dir
+// cannot be resolved (a diagnostic must never itself fail).
+//
+// It exists because the GUI's supervisor owner captures the spawned child's
+// stderr into a bounded buffer to surface startup crashes (PR #212 r5), and
+// the child rebinds its own stderr to the sink once it passes the singleton
+// lock. Post-lock crash text therefore never reaches that buffer, so an
+// empty tail is NOT evidence of silence — the diagnostic has to say where
+// the text actually went.
+//
+// TEEING WAS RECONSIDERED FOR THIS CASE AND STILL REJECTED, for a reason
+// that survives the different context: the GUI's buffer is filled across a
+// pipe by the parent, so the child's traceback would have to be written,
+// flushed through the pipe, and read by the parent before the runtime
+// terminates the child. That is the same unscheduled-pump race that ruled
+// teeing out for the panic path — and it fails in exactly the case that
+// matters most (a panic). A pointer to a file that is guaranteed to hold
+// the text is strictly more reliable than a tee that is guaranteed only
+// most of the time.
+func supervisorStderrSinkHint() string {
+	stateDir, err := stateDirFunc()
+	if err != nil || stateDir == "" {
+		return api.SupervisorStderrSinkFileLeaf
+	}
+	return filepath.Join(stateDir, api.SupervisorStderrSinkFileLeaf)
+}
+
 // openSupervisorStderrSink points this process's stderr at
 // <stateDir>/supervisor-stderr.log unless stderr is an interactive console.
 //
@@ -166,6 +194,82 @@ func (s *supervisorStderrSink) release() {
 		s.file = nil
 	}
 	s.redirected = false
+}
+
+// releaseOnExit is the deferred owner of the sink's exit behavior for
+// runSupervise. It MUST be deferred directly by runSupervise so its
+// recover() sees a main-goroutine panic.
+//
+// THE BUG THIS FIXES (adversarial review, 2026-07-20). A plain
+// `defer sink.release()` looks correct and is not: Go runs the panicking
+// goroutine's deferred functions BEFORE the runtime prints the traceback.
+// So on a MAIN-goroutine panic the release fired first, restored the
+// original stderr — which under detached autostart is bound to nothing —
+// and the traceback then went to the void. The sink was blind to panics on
+// the one goroutine that runs the whole of startup, the final select loop,
+// and every signal / IPC-exit handler.
+//
+// Independently reproduced on windows-amd64 before fixing:
+//
+//	main-defer       panic-in-sink=NO   panic-in-original-stderr=YES
+//	main-nodefer     panic-in-sink=YES  panic-in-original-stderr=NO
+//	goroutine-defer  panic-in-sink=YES  panic-in-original-stderr=NO
+//
+// The existing subprocess test panicked on a BACKGROUND goroutine (the
+// third row), which is exactly why it could not see the hole.
+//
+// THE CONTRACT, in three parts:
+//
+//  1. When unwinding, do NOT restore and do NOT close. Leaving the sink
+//     bound is the whole point — the runtime prints into it moments later.
+//     Losing the handle here is not a leak worth fixing: the process is
+//     about to be terminated by the runtime.
+//  2. NEVER swallow. The recovered value is re-raised, so the panic value,
+//     the traceback, exit status 2, and the recovery layer's respawn all
+//     behave exactly as before this sink existed. Same contract as
+//     guardSupervisorGoroutine.
+//  3. On a non-panic ERROR return, write the error into the sink BEFORE
+//     releasing. cobra prints the returned error only after runSupervise
+//     returns, by which point the restore has already redirected it to the
+//     detached void — so without this the sink would show a session banner
+//     with no marker at all, indistinguishable from a hard death.
+func (s *supervisorStderrSink) releaseOnExit(errp *error) {
+	if r := recover(); r != nil {
+		s.noteMainGoroutinePanic(r)
+		// Re-raise with the sink still bound so the runtime's traceback
+		// lands in it. Deliberately no release: see part 1 above.
+		panic(r)
+	}
+	if errp != nil && *errp != nil {
+		s.noteErrorExit(*errp)
+	}
+	s.release()
+}
+
+// noteMainGoroutinePanic marks the sink immediately before the Go runtime
+// prints the traceback, so an operator reading the file can tell a
+// main-goroutine panic from a background-goroutine one (the latter also
+// carries a `supervisor-goroutine-panic` event row; this one cannot,
+// because the event log's own defer chain is already unwinding).
+func (s *supervisorStderrSink) noteMainGoroutinePanic(r any) {
+	if s == nil || s.file == nil {
+		return
+	}
+	fmt.Fprintf(s.file, "=== mcphub supervisor stderr sink | pid=%d | MAIN-GOROUTINE PANIC=%v | at=%s | runtime traceback follows ===\n",
+		os.Getpid(), r, time.Now().UTC().Format(time.RFC3339Nano))
+}
+
+// noteErrorExit records a non-panic error return. Without it an early
+// startup failure (event-log open, supervise-startup-failed, overlay/IPC
+// wiring) leaves the sink holding a bare session banner — visually
+// identical to a hard death, which would send an operator hunting a crash
+// that never happened.
+func (s *supervisorStderrSink) noteErrorExit(err error) {
+	if s == nil || s.file == nil || err == nil {
+		return
+	}
+	fmt.Fprintf(s.file, "=== mcphub supervisor stderr sink | pid=%d | error-exit=%v | at=%s ===\n",
+		os.Getpid(), err, time.Now().UTC().Format(time.RFC3339Nano))
 }
 
 // noteGracefulExit writes a closing banner so an operator reading the sink

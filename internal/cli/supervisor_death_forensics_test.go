@@ -118,13 +118,23 @@ func TestGuardSupervisorGoroutine_NilEventLogStillReRaises(t *testing.T) {
 func panicFromNestedFrame() { panic("forensics-probe-panic") }
 
 // TestSuperviseLongLivedGoroutinesAreGuarded is a STRUCTURAL regression
-// guard over the supervisor composition root.
+// guard over the supervisor composition root. As of this change supervise.go
+// contains 15 `go` statements and all 15 are guarded.
 //
 // The defect being prevented is not a single missing guard — it is a future
 // goroutine added WITHOUT one, silently re-opening the forensic gap. Every
 // `go` statement in supervise.go must defer guardSupervisorGoroutine, so a
 // new unguarded long-lived goroutine fails this test at review time rather
 // than during an unexplained production death.
+//
+// COVERAGE IS FILE-SCOPED, and that is a real limit worth stating: this test
+// parses supervise.go ONLY. A long-lived supervisor goroutine launched from
+// any other file in the package — or moved out of supervise.go by a future
+// refactor — leaves this test's coverage silently, with no failure to warn
+// anyone. The guard helper itself is package-wide; only the enforcement is
+// file-scoped. Widening enforcement to the whole package would need an
+// allowlist for the many short-lived test/helper goroutines, which is why it
+// is scoped here rather than being scoped by accident.
 func TestSuperviseLongLivedGoroutinesAreGuarded(t *testing.T) {
 	const src = "supervise.go"
 	fset := token.NewFileSet()
@@ -188,6 +198,19 @@ func funcLitDefersGuard(lit *ast.FuncLit) bool {
 // that installs the sink and then panics for real.
 const forensicsSinkChildEnv = "MCPHUB_TEST_STDERR_SINK_CHILD_STATEDIR"
 
+// forensicsSinkChildModeEnv selects WHICH goroutine the child panics on.
+// The two modes cover structurally different capture paths and neither
+// substitutes for the other:
+//
+//	"goroutine" (default) — panic on a background goroutine. No deferred
+//	    function of the panicking goroutine touches the sink, so capture
+//	    depends only on the std-handle redirect still being installed.
+//	"main" — panic on the goroutine that owns the sink's deferred release.
+//	    Capture depends on that defer being panic-AWARE. A plain
+//	    `defer sink.release()` fails this mode and passes the other, which
+//	    is exactly how the hole survived the first round of review.
+const forensicsSinkChildModeEnv = "MCPHUB_TEST_STDERR_SINK_CHILD_MODE"
+
 // runForensicsSinkCrashChild is the crash-child body invoked from the
 // package's single TestMain (settings_registry_test.go) when
 // forensicsSinkChildEnv is set. It installs the sink and then dies of a
@@ -198,6 +221,11 @@ const forensicsSinkChildEnv = "MCPHUB_TEST_STDERR_SINK_CHILD_STATEDIR"
 //
 // Never returns.
 func runForensicsSinkCrashChild(stateDir string) {
+	if os.Getenv(forensicsSinkChildModeEnv) == "main" {
+		_ = forensicsSinkCrashOnMainGoroutine(stateDir)
+		os.Exit(4) // unreachable: the panic above kills the process
+	}
+
 	sink := openSupervisorStderrSink(stateDir)
 	if !sink.redirected {
 		// Report the refusal through the ORIGINAL stderr so the parent can
@@ -211,6 +239,20 @@ func runForensicsSinkCrashChild(stateDir string) {
 	go func() { panic("forensics-child-runtime-panic") }()
 	time.Sleep(30 * time.Second) // killed by the panic long before this
 	os.Exit(4)
+}
+
+// forensicsSinkCrashOnMainGoroutine mirrors runSupervise's EXACT shape —
+// named error return, `defer sink.releaseOnExit(&err)`, then a panic on the
+// same goroutine that registered that defer. Any divergence here would make
+// the test prove something other than the production path.
+func forensicsSinkCrashOnMainGoroutine(stateDir string) (err error) {
+	sink := openSupervisorStderrSink(stateDir)
+	if !sink.redirected {
+		fmt.Fprintf(os.Stderr, "CHILD-SINK-NOT-REDIRECTED reason=%s err=%v\n", sink.reason, sink.err)
+		os.Exit(3)
+	}
+	defer sink.releaseOnExit(&err)
+	panic("forensics-child-main-goroutine-panic")
 }
 
 // TestSupervisorStderrSink_CapturesRuntimePanic is the end-to-end proof of
@@ -252,6 +294,128 @@ func TestSupervisorStderrSink_CapturesRuntimePanic(t *testing.T) {
 	}
 	if !strings.Contains(content, fmt.Sprintf("pid=%d", cmd.Process.Pid)) {
 		t.Fatalf("session banner does not name the child pid %d.\nsink:\n%s", cmd.Process.Pid, content)
+	}
+}
+
+// TestSupervisorStderrSink_CapturesMainGoroutinePanic closes the hole the
+// background-goroutine test structurally could not see.
+//
+// runSupervise's own goroutine runs the whole of startup, the final select
+// loop, and every signal / IPC-exit handler — so it is the MOST likely place
+// for a supervisor to die, and plausibly the shape of the 19 s and 59 s
+// sessions in the forensic window. Go runs a panicking goroutine's defers
+// BEFORE printing the traceback, so a non-panic-aware
+// `defer sink.release()` restores the (detached ⇒ nowhere) stderr first and
+// the traceback is lost.
+//
+// MUTATION PROOF: replace releaseOnExit's recover branch with a plain
+// s.release() and this test FAILS while
+// TestSupervisorStderrSink_CapturesRuntimePanic still PASSES.
+func TestSupervisorStderrSink_CapturesMainGoroutinePanic(t *testing.T) {
+	stateDir := t.TempDir()
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestSupervisorStderrSink_CapturesMainGoroutinePanic")
+	cmd.Env = append(os.Environ(),
+		forensicsSinkChildEnv+"="+stateDir,
+		forensicsSinkChildModeEnv+"=main",
+	)
+	out, err := cmd.CombinedOutput()
+
+	if err == nil {
+		t.Fatalf("child exited 0; a re-raised panic must still kill the process (never swallowed).\nchild output:\n%s", out)
+	}
+	if strings.Contains(string(out), "CHILD-SINK-NOT-REDIRECTED") {
+		t.Fatalf("child refused to install the sink:\n%s", out)
+	}
+
+	raw, readErr := os.ReadFile(filepath.Join(stateDir, api.SupervisorStderrSinkFileLeaf))
+	if readErr != nil {
+		t.Fatalf("sink file absent after main-goroutine death: %v\nchild output:\n%s", readErr, out)
+	}
+	content := string(raw)
+
+	// The load-bearing assertion: the RUNTIME traceback, not merely our own
+	// marker, must be in the sink.
+	if !strings.Contains(content, "panic: forensics-child-main-goroutine-panic") {
+		t.Fatalf("sink did not capture the MAIN-goroutine runtime panic — the deferred release restored stderr before the runtime printed.\nsink:\n%s", content)
+	}
+	if !strings.Contains(content, "goroutine") {
+		t.Fatalf("sink captured the panic line but not the traceback.\nsink:\n%s", content)
+	}
+	// Proves the value was preserved through recover/re-raise rather than
+	// replaced or swallowed.
+	if !strings.Contains(content, "recovered") {
+		t.Fatalf("expected a re-raised panic marker (recovered/repanicked) proving capture-then-re-raise.\nsink:\n%s", content)
+	}
+	if !strings.Contains(content, "MAIN-GOROUTINE PANIC=") {
+		t.Fatalf("sink missing the main-goroutine panic marker that distinguishes it from a background-goroutine death.\nsink:\n%s", content)
+	}
+	// The traceback must NOT have leaked to the original stderr instead.
+	if strings.Contains(string(out), "panic: forensics-child-main-goroutine-panic") {
+		t.Fatalf("traceback went to the child's ORIGINAL stderr, not the sink — under detached autostart that is the void.\nchild output:\n%s", out)
+	}
+}
+
+// TestSupervisorStderrSink_RecordsErrorExit proves a non-panic error return
+// is distinguishable from a hard death in the sink.
+//
+// Without this, an early startup failure left the sink holding a bare
+// session banner with no marker — byte-identical to what a crash leaves,
+// which would send an operator hunting a crash that never happened. cobra
+// prints the returned error only AFTER runSupervise returns, by which point
+// the restore has already redirected it to the detached void.
+func TestSupervisorStderrSink_RecordsErrorExit(t *testing.T) {
+	stateDir := t.TempDir()
+	sink := openSupervisorStderrSink(stateDir)
+	if !sink.redirected {
+		sink.release()
+		t.Skipf("stderr not redirectable in this environment (reason=%q)", sink.reason)
+	}
+
+	// Mirror runSupervise's shape: named return + deferred releaseOnExit.
+	func() (err error) {
+		defer sink.releaseOnExit(&err)
+		return fmt.Errorf("probe-startup-failure")
+	}()
+
+	raw, readErr := os.ReadFile(filepath.Join(stateDir, api.SupervisorStderrSinkFileLeaf))
+	if readErr != nil {
+		t.Fatalf("read sink: %v", readErr)
+	}
+	content := string(raw)
+	if !strings.Contains(content, "error-exit=probe-startup-failure") {
+		t.Fatalf("sink does not record the error return; a startup failure is indistinguishable from a hard death.\nsink:\n%s", content)
+	}
+	if sink.redirected {
+		t.Fatal("releaseOnExit must still release on a non-panic error return")
+	}
+}
+
+// TestSupervisorStderrSink_ReleaseOnExitCleanPathReleases guards the
+// ordinary success path: no panic, no error, so the sink must be released
+// normally (the handle-leak fix must survive the panic-aware rework).
+func TestSupervisorStderrSink_ReleaseOnExitCleanPathReleases(t *testing.T) {
+	stateDir := t.TempDir()
+	sink := openSupervisorStderrSink(stateDir)
+	if !sink.redirected {
+		sink.release()
+		t.Skipf("stderr not redirectable in this environment (reason=%q)", sink.reason)
+	}
+
+	func() (err error) {
+		defer sink.releaseOnExit(&err)
+		return nil
+	}()
+
+	if sink.redirected {
+		t.Fatal("clean return must release the sink; an unreleased handle makes the file undeletable on Windows")
+	}
+	raw, err := os.ReadFile(filepath.Join(stateDir, api.SupervisorStderrSinkFileLeaf))
+	if err != nil {
+		t.Fatalf("read sink: %v", err)
+	}
+	if strings.Contains(string(raw), "error-exit=") {
+		t.Fatalf("clean return must not write an error marker.\nsink:\n%s", string(raw))
 	}
 }
 

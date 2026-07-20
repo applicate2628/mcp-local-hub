@@ -459,7 +459,12 @@ type runningProcessIdentity struct {
 // Phase-6 scope: lock → audit log → event loop → IPC listener → wait
 // for signal → cancel loop → return. Reconciliation, IPC dispatch,
 // and quiesce-drain are wired in later tasks.
-func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobProtectionFlag bool) error {
+// The return is NAMED so the stderr-sink exit hook (releaseOnExit, deferred
+// below) can observe a non-nil error return and record it into the sink
+// before restoring stderr — cobra prints the returned error only AFTER this
+// function returns, by which point the restore has already sent it to the
+// detached void.
+func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobProtectionFlag bool) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -495,15 +500,17 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	//
 	// Placed AFTER the singleton lock deliberately: a losing duplicate
 	// supervisor must not rotate or write the real supervisor's sink.
-	// Placed BEFORE the event log so a panic during the remaining startup
-	// is still captured. Never fatal — losing stderr capture degrades
-	// forensics, it does not degrade supervision.
+	// Placed BEFORE the event log so a panic during the remaining startup —
+	// including a panic on THIS (main) goroutine — is captured. Never fatal:
+	// losing stderr capture degrades forensics, not supervision.
 	stderrSink := openSupervisorStderrSink(stateDir)
-	// Release on every return path. In production this fires microseconds
-	// before process exit; it matters because runSupervise also returns in
-	// tests, where an unreleased rebound handle keeps the sink file open and
-	// undeletable. See (*supervisorStderrSink).release.
-	defer stderrSink.release()
+	// releaseOnExit, NOT a bare release(): a plain deferred release runs
+	// BEFORE the runtime prints a main-goroutine traceback and would restore
+	// stderr out from under it, sending the traceback to the detached void.
+	// releaseOnExit keeps the sink bound while unwinding, re-raises the
+	// panic (never swallows), and records a non-nil error return before
+	// restoring. See (*supervisorStderrSink).releaseOnExit.
+	defer stderrSink.releaseOnExit(&err)
 
 	// Open audit log. The log handle is process-lifetime; per-Emit
 	// flock+mutex serialization happens inside the helper. Close is a

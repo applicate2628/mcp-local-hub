@@ -32,8 +32,18 @@ const SupervisorStderrSinkFileLeaf = "supervisor-stderr.log"
 // SupervisorStderrSinkRotateSizeBytes is the 10 MB rotation threshold,
 // deliberately identical to supervisorEventLogRotateSize /
 // GUIEventLogRotateSizeBytes / WatchdogLogRotateSizeBytes so every file in
-// the state-dir log family shares ONE ceiling. Active + .1 bounds the pair
-// at ~20 MB.
+// the state-dir log family shares ONE ceiling.
+//
+// NOT a hard ~20 MB bound on the pair, unlike the JSONL logs. Those re-check
+// size on every Emit, so neither file can exceed the threshold by more than
+// one entry. This sink is rotated only at open (see
+// RotateSupervisorStderrSinkIfOversize for why mid-session rotation would
+// lose panics), so a single long-lived session that keeps writing grows the
+// ACTIVE file without limit, and at the next open that oversized file
+// becomes an equally oversized .1. The honest statement is: the sink is
+// bounded to 10 MB per file across a restart boundary, and unbounded within
+// one session. The heartbeat's stderr_sink_oversize flag exists precisely
+// because that residual is real rather than theoretical.
 const SupervisorStderrSinkRotateSizeBytes int64 = 10 * 1024 * 1024
 
 // RotateSupervisorStderrSinkIfOversize renames path -> path+".1" when the
