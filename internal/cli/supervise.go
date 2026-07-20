@@ -487,6 +487,24 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	}
 	defer lk.Release()
 
+	// Bind this process's stderr to a durable sink BEFORE anything else can
+	// panic. A Go runtime panic writes to the raw stderr descriptor and
+	// exits 2 without running any deferred Emit; under detached autostart
+	// that descriptor is bound to nothing, which is why 8 of 9 supervisor
+	// deaths in the 2026-07-20 forensic window left no artifact at all.
+	//
+	// Placed AFTER the singleton lock deliberately: a losing duplicate
+	// supervisor must not rotate or write the real supervisor's sink.
+	// Placed BEFORE the event log so a panic during the remaining startup
+	// is still captured. Never fatal — losing stderr capture degrades
+	// forensics, it does not degrade supervision.
+	stderrSink := openSupervisorStderrSink(stateDir)
+	// Release on every return path. In production this fires microseconds
+	// before process exit; it matters because runSupervise also returns in
+	// tests, where an unreleased rebound handle keeps the sink file open and
+	// undeletable. See (*supervisorStderrSink).release.
+	defer stderrSink.release()
+
 	// Open audit log. The log handle is process-lifetime; per-Emit
 	// flock+mutex serialization happens inside the helper. Close is a
 	// no-op today (see supervisor_events.go:219) but kept on the
@@ -515,6 +533,17 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			"state_dir":             stateDir,
 		},
 	})
+	// Record the stderr-capture disposition so an operator can tell, from the
+	// event log alone, whether a future death WILL leave a traceback on disk.
+	// A `redirect-failed` row at warn severity is the honest signal that the
+	// forensic gap is still open on this host.
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: stderrSink.severity(),
+		Source:   "lifecycle",
+		Event:    "supervisor-stderr-sink",
+		Body:     stderrSink.auditBody(),
+	})
+
 	if executableLookupErr != nil {
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "warn",
@@ -685,7 +714,19 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		})
 	})
 
-	go loop.Run(loopCtx)
+	// Every long-lived supervisor goroutine is launched through a closure
+	// that defers guardSupervisorGoroutine. SetPanicHandler above covers ONLY
+	// panics raised inside loop DISPATCH; a panic anywhere else on any of
+	// these goroutines would otherwise kill the process with no event and no
+	// supervisor-exit row — the forensic gap that left 8 of 9 supervisor
+	// deaths unattributable over the 2026-07-20 window. The guard re-raises,
+	// so death semantics are unchanged; only attribution is added.
+	// TestSuperviseLongLivedGoroutinesAreGuarded enforces that every `go` in
+	// this file carries one.
+	go func() {
+		defer guardSupervisorGoroutine(events, "event-loop-run", "")
+		loop.Run(loopCtx)
+	}()
 
 	// reconcileReady mirrors the spec §"Migration step 14:
 	// reconcile-ready not all-daemons-healthy" flag. Migration / upgrade
@@ -915,7 +956,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		// is the exit signal during the graceful-exit flow). Each
 		// accepted connection gets its own handler goroutine so a slow
 		// client never blocks the next Accept.
-		go acceptIPCConnections(listener, deps)
+		go func() {
+			defer guardSupervisorGoroutine(events, "ipc-accept-loop", "")
+			acceptIPCConnections(listener, deps)
+		}()
 	}
 
 	// Startup reconcile pass. Wires the parsed supervisor-intent.json
@@ -1037,7 +1081,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// nil (production wiring); tests with a fake spawn fn don't
 	// receive crash events and don't need this goroutine.
 	if reconcileSpawnFn == nil {
-		go runCrashEventBridge(loopCtx, crashCh, loop, events)
+		go func() {
+			defer guardSupervisorGoroutine(events, "crash-event-bridge", "")
+			runCrashEventBridge(loopCtx, crashCh, loop, events)
+		}()
 		// F1 pre-spawn port-owner gate wiring (decision D-A). Split loop/worker so
 		// NO blocking work runs on the event loop (codex-P1):
 		//   - portOwnerFn: the LOOP's owner probe, wrapped in a short deadline via
@@ -1057,7 +1104,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		}
 		ctrl.squatterLimiter = newSquatterReapLimiter()
 		ctrl.portGateCh = make(chan portGateReq, portGateChCapacity)
-		go ctrl.runPortGateWorker(loopCtx)
+		go func() {
+			defer guardSupervisorGoroutine(events, "port-gate-worker", "")
+			ctrl.runPortGateWorker(loopCtx)
+		}()
 		// L1 ephemeral-collision self-heal wiring. Same split-loop/worker
 		// discipline as the F1 port-gate above: the blocking AllocatePort +
 		// atomic registry/intent re-persist runs on ONE off-loop worker; the loop
@@ -1086,9 +1136,15 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		// later on-loop ephemeralRangeContainsFn call — including the FIRST L3
 		// terminal emit in a fixed-global storm — hits the warm cache instead of
 		// spawning netsh on the event loop goroutine.
-		go func() { _, _ = ephemeralRangePortContains(0) }()
+		go func() {
+			defer guardSupervisorGoroutine(events, "ephemeral-range-warmup", "")
+			_, _ = ephemeralRangePortContains(0)
+		}()
 		ctrl.reallocCh = make(chan reallocReq, reallocChCapacity)
-		go ctrl.runReallocWorker(loopCtx)
+		go func() {
+			defer guardSupervisorGoroutine(events, "realloc-worker", "")
+			ctrl.runReallocWorker(loopCtx)
+		}()
 		// P2a: the port-squatter reap capability (single owner, beside the
 		// spawn/terminate closures above) wraps TerminatePIDWithIdentity. The
 		// monitor owns the rate-limit state; the sweep classifies + reaps a
@@ -1108,13 +1164,19 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			}
 			return desired != api.IntentDesiredRunning || activeStop
 		}
-		go startSupervisorLivenessMonitor(loopCtx.Done(), stateDir, intent, runtimeTracker, loop, events, squatterReapFn, f3StoppedFn)
+		go func() {
+			defer guardSupervisorGoroutine(events, "supervisor-liveness-monitor", "")
+			startSupervisorLivenessMonitor(loopCtx.Done(), stateDir, intent, runtimeTracker, loop, events, squatterReapFn, f3StoppedFn)
+		}()
 		// F2: quarantine parole monitor. A threshold-quarantined daemon used to
 		// stay dead "until supervisor restart"; this ticks the in-memory parole
 		// ladder and posts an automatic EvManualRestart after a bounded cooldown
 		// so an external kill-storm (or a transient false-mismatch burst) self-
 		// heals without a full supervisor restart.
-		go ctrl.runQuarantineParoleMonitor(loopCtx)
+		go func() {
+			defer guardSupervisorGoroutine(events, "quarantine-parole-monitor", "")
+			ctrl.runQuarantineParoleMonitor(loopCtx)
+		}()
 	}
 
 	// IntentWatcher: poll <state-dir>/{supervisor,daemon}-intent.json
@@ -1210,7 +1272,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		}
 		previousDaemonIntent = updatedDaemonIntent
 	})
-	go watcher.Run(loopCtx)
+	go func() {
+		defer guardSupervisorGoroutine(events, "intent-watcher", "")
+		watcher.Run(loopCtx)
+	}()
 
 	if intent != nil {
 		reconciler := NewReconciler(spawnFn, terminateFn)
@@ -1259,7 +1324,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		// Phase 4-E1: Reconcile reads stops via the unified source (same as
 		// the cache seed above) so the startup spawn/terminate decision and
 		// the SM read the new canonical stop path.
-		go reconciler.Reconcile(intent, unifiedStops, currentRunning, time.Now().UTC())
+		go func() {
+			defer guardSupervisorGoroutine(events, "initial-reconcile", "")
+			reconciler.Reconcile(intent, unifiedStops, currentRunning, time.Now().UTC())
+		}()
 	}
 
 	// Mark reconcile-ready. The flag transitions false → true once the
@@ -1298,9 +1366,25 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			},
 		})
 	})
-	go runMaintenanceScheduler(loopCtx.Done(), &gracefulInProgress, maintenanceScheduler, func() []api.MaintenanceTimer {
-		return maintenanceTimersFromController(ctrl)
-	}, 60*time.Second)
+	go func() {
+		defer guardSupervisorGoroutine(events, "maintenance-scheduler", "")
+		runMaintenanceScheduler(loopCtx.Done(), &gracefulInProgress, maintenanceScheduler, func() []api.MaintenanceTimer {
+			return maintenanceTimersFromController(ctrl)
+		}, 60*time.Second)
+	}()
+
+	// Periodic liveness row. Since #566 removed the read-only status-poll
+	// audit flood (~96% of rows), a healthy supervisor can emit nothing for
+	// hours — making quiet-and-healthy indistinguishable on disk from dead.
+	// The heartbeat makes ABSENCE of rows positive evidence of death with a
+	// bounded detection latency; see supervisorHeartbeatInterval for the
+	// interval argument. Decision-inert: no restart, backoff, quarantine, or
+	// spawn path reads it.
+	go func() {
+		defer guardSupervisorGoroutine(events, "supervisor-heartbeat", "")
+		runSupervisorHeartbeat(loopCtx.Done(), events, runtimeTracker, stderrSink.path,
+			time.Now().UTC(), supervisorHeartbeatInterval)
+	}()
 
 	shutdownMaintenance := func(reason string) {
 		result := maintenanceProcSpawner.Shutdown(30 * time.Second)
@@ -1372,6 +1456,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		gracefulInProgress.Enter()
 		loopCancel()
 		shutdownMaintenance("signal")
+		// Closing banner in the stderr sink. Its ABSENCE before the next
+		// session banner is what makes "this session died" provable from
+		// the sink alone, independent of the event log.
+		stderrSink.noteGracefulExit("signal")
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -1402,6 +1490,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		gracefulInProgress.Enter()
 		loopCancel()
 		shutdownMaintenance("test-exit")
+		stderrSink.noteGracefulExit("test-exit")
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -1434,6 +1523,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		gracefulInProgress.Enter()
 		loopCancel()
 		shutdownMaintenance("ipc-exit-graceful")
+		stderrSink.noteGracefulExit("ipc-exit-graceful")
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -1463,6 +1553,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		gracefulInProgress.Enter()
 		loopCancel()
 		shutdownMaintenance("context-cancel")
+		stderrSink.noteGracefulExit("context-cancel")
 		return ctx.Err()
 	}
 }
@@ -1648,7 +1739,10 @@ func acceptIPCConnections(
 			continue
 		}
 		consecErrs = 0
-		go serveIPCConn(conn, listener, deps)
+		go func() {
+			defer guardSupervisorGoroutine(deps.events, "ipc-connection-handler", "")
+			serveIPCConn(conn, listener, deps)
+		}()
 	}
 }
 
@@ -1976,6 +2070,7 @@ func handleQuiesceTimers(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps
 	handler := quiesceHandlerFactory(deps.stateDir)
 	resultCh := make(chan QuiesceResult, 1)
 	go func() {
+		defer guardSupervisorGoroutine(deps.events, "quiesce-timers-drain", "")
 		defer deps.gracefulInProgress.Exit()
 		// 5s grace window beyond the requested deadline so the drain
 		// goroutine's ctx is honored even when the caller is sloppy.
@@ -3844,6 +3939,12 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		handedOff = true
 		jobForWait := daemonJob // capture before goroutine launch
 		go func() {
+			// Guard FIRST so it is the outermost defer (LIFO): a panic in
+			// the Job-handle release, the exit-code classification, or the
+			// crash-channel post below would otherwise kill the supervisor
+			// with no attribution. TaskName is carried so the row names the
+			// daemon whose wait goroutine died.
+			defer guardSupervisorGoroutine(events, "daemon-child-wait", taskName)
 			<-spawnLogged
 			waitErr := cmd.Wait()
 			if jobForWait != nil {
