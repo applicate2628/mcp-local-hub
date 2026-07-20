@@ -42,7 +42,6 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
-	"mcp-local-hub/internal/process"
 )
 
 // supervisorRestartResponse reports each step's outcome so the
@@ -347,12 +346,11 @@ func waitForLockRelease(stateDir string, deadline time.Duration) {
 // closure) so the spawn CONFIGURATION can be asserted without actually
 // starting a supervisor.
 //
-// Both halves of the detach are applied here and neither is optional:
-//
-//   - configureDetached blocks console INHERITANCE at create time.
-//   - process.SuppressConsoleAttach stops the child — the same binary —
-//     from calling AttachConsole(ATTACH_PARENT_PROCESS) in its own main()
-//     and making itself a console client anyway.
+// configureDetachedSupervisor applies BOTH halves of the detach and
+// neither is optional: the creation flags block console INHERITANCE at
+// create time, and the suppression marker stops the child — the same
+// binary — from calling AttachConsole(ATTACH_PARENT_PROCESS) in its own
+// main() and making itself a console client anyway.
 //
 // Measured against a real -H windowsgui build with this site's exact flag
 // set (DETACHED|NEW_GROUP|BREAKAWAY, 0x01000208): without the marker the
@@ -363,16 +361,15 @@ func waitForLockRelease(stateDir string, deadline time.Duration) {
 // supervisor would inherit the terminal's lifetime and take the whole
 // daemon fleet down with it when that window closes.
 //
-// The marker is applied HERE rather than inside configureDetached because
-// that helper is shared with SpawnRestartV3GUI, which spawns a replacement
-// GUI, not a supervisor — see the note there.
+// Picking configureDetachedSupervisor (rather than configureDetachedGUI)
+// IS the console decision for this spawn — see both constructors in
+// supervisor_restart_{windows,other}.go.
 func newDetachedSupervisorCmd(exe string) *exec.Cmd {
 	c := exec.Command(exe, "supervise")
 	c.Stdin = nil
 	c.Stdout = nil
 	c.Stderr = nil
-	configureDetached(c) // platform-specific (see _windows.go / _other.go)
-	process.SuppressConsoleAttach(c)
+	configureDetachedSupervisor(c) // platform-specific (see _windows.go / _other.go)
 	return c
 }
 

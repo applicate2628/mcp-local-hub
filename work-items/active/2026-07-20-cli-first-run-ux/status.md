@@ -78,6 +78,29 @@ of its known instances would leave the rest of the class in place at known addre
   requires the console; the asymmetry is pinned by a test.
 - 6 further mutations, each killed by the assertion.
 
+### Review round 3 (2026-07-20): architecture review REVISE on the round-2 delta — all addressed
+Confirmed holding and NOT touched: `resolveReleaseConsole` as sole policy owner (C2 closed, not relocated);
+the sink-capture fix as structural; marker preserved on every retry incl. `CreationFlags = 0`; composition
+with the sibling forensics branch load-bearing in the right direction (that branch keys on
+`GetConsoleMode(STD_ERROR_HANDLE)`, so without suppression a console-attached supervisor would be
+misclassified interactive and skip the redirect).
+
+| # | Finding | Disposition |
+|---|---|---|
+| FIX-1 | BLOCKER: durable sink engaged AFTER `release()` — silent-loss window for the supervisor crash line | FIXED — engage both sinks BEFORE release; mutex deliberately not widened across the syscall |
+| FIX-2 | Asymmetry justification cited Ctrl-C, already false via `CREATE_NEW_PROCESS_GROUP`; asserted in comment AND test message | FIXED — justification is terminal OUTPUT only, in both places |
+| F2 | Marker inherited by every daemon + third-party MCP child | Lead decision: INTENDED. Pinned by `TestComposeChildEnvPropagatesConsoleAttachSuppression`; CLAUDE.md states the subtree contract |
+| F4 | One `configureDetached` shared by two spawns with opposite console needs | Lead decision: SPLIT into `configureDetachedSupervisor` / `configureDetachedGUI`; asymmetry test now guards the CHOICE |
+| F4b | Marker applied Windows-only in `internal/cli`, unconditionally in `internal/gui` | FIXED — applied in every platform variant of both supervisor configurators; one answer per platform |
+| F5 | Visibility change bundled into a console-lifetime commit | Not routed (lead) — reviewer-requested, stays |
+
+A **FOURTH** spawn site neither the lead nor I enumerated — `spawnStandaloneSupervisor`
+(`internal/cli/supervise_ensure_alive.go`, the GUI-independent liveness relaunch) — was already covered
+because `internal/cli` folds the marker into `configureSupervisorDetach`. That is the argument for the
+folded shape, and F4 brings `internal/gui` to the same structural footing.
+
+7 further mutations, each killed by the assertion.
+
 ## Requirement #4 (operator, added 2026-07-20): GUI must survive the launching terminal
 Operator, verbatim: "при закрытии терминала, из которого я запускал `mcphub gui`, он тоже закрывается
 (пропадает из трея)" + "какого хрена оно вообще привязывается к терминалу, сколько это может повторяться!"

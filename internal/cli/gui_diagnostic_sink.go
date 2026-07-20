@@ -14,6 +14,13 @@ import (
 // would otherwise have gone to a closed console handle.
 const guiConsoleReleasedDiagnosticEvent = "gui-console-released-diagnostic"
 
+// logGUIDiagnosticEvent is the durable-emit seam. Production points at
+// api.LogHubMcpEvent; tests swap it to observe that a post-release write
+// actually reached the durable sink rather than only the (dead) console.
+// Without the seam the assertion would have to read the hub-mcp log file,
+// which makes an ordering test depend on state-dir plumbing.
+var logGUIDiagnosticEvent = api.LogHubMcpEvent
+
 // consoleReleaseSink is the ONE writer every GUI runtime diagnostic goes
 // through, and the reason there is a single one is the failure it exists
 // to prevent.
@@ -96,7 +103,7 @@ func (s *consoleReleaseSink) Write(p []byte) (int, error) {
 		// One fmt.Fprintf produces exactly one Write of the whole
 		// formatted message, so one event per operator-facing line.
 		if msg := strings.TrimRight(string(p), "\r\n"); strings.TrimSpace(msg) != "" {
-			_ = api.LogHubMcpEvent("warn", guiConsoleReleasedDiagnosticEvent, map[string]any{
+			_ = logGUIDiagnosticEvent("warn", guiConsoleReleasedDiagnosticEvent, map[string]any{
 				"message": msg,
 			})
 		}
@@ -139,12 +146,32 @@ func installGUIRuntimeSinks(cmd interface {
 	cmd.SetErr(guiRuntimeStderr)
 }
 
-// releaseConsoleForBackgroundGUI performs the console release and the sink
-// switch as ONE step, because they are one decision: after this returns,
+// releaseConsoleForBackgroundGUI performs the sink switch and the console
+// release as ONE step, because they are one decision: after this returns,
 // console-backed stdio is dead and the durable sink is the reason the next
 // diagnostic still lands somewhere.
+//
+// ORDER IS LOAD-BEARING: engage BOTH sinks BEFORE releasing.
+//
+// Releasing first opens a window in which Write sees durable=false, writes
+// only to the now-dead console, and returns len(p), nil — losing the line
+// with no error, which is the exact silent-loss shape this sink exists to
+// prevent. The window is not theoretical: the supervisor exit monitor runs
+// on its own goroutine and writes "supervisor exited unexpectedly (PID
+// %d)…" through guiRuntimeStderr, and that message is the only record of a
+// supervisor crash that predates the supervisor's own audit log. Engaging
+// the two sinks sequentially would also leave an instant where stdout is
+// durable and stderr is not.
+//
+// Engaging first is strictly safe: the console fallback is still alive at
+// that moment, so a concurrent write merely lands in BOTH the event log and
+// a console that is about to close. Duplicating a line or two costs
+// nothing; losing the crash line costs the diagnosis.
+//
+// The mutex is deliberately NOT held across release(): that would couple a
+// syscall to the write lock and stall every logger in the process.
 func releaseConsoleForBackgroundGUI(release func()) {
-	release()
 	guiRuntimeStdout.engageDurableSink()
 	guiRuntimeStderr.engageDurableSink()
+	release()
 }

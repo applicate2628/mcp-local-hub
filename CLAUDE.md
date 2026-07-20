@@ -408,6 +408,21 @@ Any code path that spawns `mcphub` as a long-lived background process MUST set
 `mcphub supervise` typed in a terminal keeps its console (no env, no
 suppression).
 
+The marker **propagates to the whole subtree, and that is intended**: daemon
+child environments are composed from the supervisor's `os.Environ()`
+(`internal/daemon/host.go` `composeChildEnv`), so every managed daemon — and
+every third-party MCP server under it — inherits the variable. A managed daemon
+IS a detached background child and should never attach a console; for
+third-party children (`uvx`/`npx`/`python`/`node`) the variable is unrecognized
+and inert. Do not add it to an `UnsetEnv` or strip list "for cleanliness" —
+`TestComposeChildEnvPropagatesConsoleAttachSuppression` pins the inheritance.
+
+In `internal/gui` the choice is structural rather than a note to remember:
+`configureDetachedSupervisor` suppresses the attach and `configureDetachedGUI`
+does not, because the RestartV3 replacement **GUI** must keep the operator's
+terminal output under `--foreground`. Pick the constructor that matches what
+you are spawning.
+
 Verify a new spawn path with a probe, not by reading the flags: build a real
 `-H windowsgui` binary and have the console-owning parent call
 `GetConsoleProcessList` against the child PID. Reading `DETACHED_PROCESS` and
