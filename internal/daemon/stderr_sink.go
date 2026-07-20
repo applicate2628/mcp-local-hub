@@ -80,10 +80,51 @@ func isStderrTerminal() bool {
 // 10MB cap, 5 keep). Anything that needs durability MUST also write to
 // LogPath; daemonDiagWriter is the BEST-EFFORT mirror.
 func daemonDiagWriter() io.Writer {
+	stderrIsTerminalMu.RLock()
+	override := daemonDiagWriterOverride
+	stderrIsTerminalMu.RUnlock()
+	if override != nil {
+		return override
+	}
 	if isStderrTerminal() {
 		return os.Stderr
 	}
 	return io.Discard
+}
+
+// daemonDiagWriterOverride, when non-nil, replaces the writer daemonDiagWriter
+// returns. Test-only seam (SetDaemonDiagWriterForTest); nil in production, so
+// the terminal-vs-discard contract above is unchanged. Guarded by
+// stderrIsTerminalMu — the SAME lock as the terminal probe — so the two
+// overrides cannot race each other or a concurrent daemonDiagWriter read.
+var daemonDiagWriterOverride io.Writer
+
+// SetDaemonDiagWriterForTest redirects daemon-side diagnostic emissions to w for
+// the duration of a test, so a test can assert an operator-visible warning
+// instead of relying on the ambient TTY state. Returns a restore closure that
+// MUST be invoked (use `defer`).
+//
+// Same ONE-override-at-a-time contract as SetStderrIsTerminalForTest, for the
+// same reason: overlapping overrides cannot converge to the original writer in
+// all restore orderings.
+func SetDaemonDiagWriterForTest(w io.Writer) func() {
+	stderrIsTerminalMu.Lock()
+	if daemonDiagWriterOverride != nil {
+		stderrIsTerminalMu.Unlock()
+		panic("daemon.SetDaemonDiagWriterForTest: another override is already active; release the prior restore() first")
+	}
+	daemonDiagWriterOverride = w
+	stderrIsTerminalMu.Unlock()
+	var released bool
+	return func() {
+		stderrIsTerminalMu.Lock()
+		defer stderrIsTerminalMu.Unlock()
+		if released {
+			return
+		}
+		daemonDiagWriterOverride = nil
+		released = true
+	}
 }
 
 // DaemonDiagWriter is the exported equivalent of daemonDiagWriter for

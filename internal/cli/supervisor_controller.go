@@ -33,6 +33,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -3857,7 +3858,13 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 		_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, d.TaskName)
 	}
 
-	backoff := computeRespawnBackoff(failures)
+	// Arm FIRST so the audit row can report the duration actually armed
+	// (base + upward jitter) rather than the pre-jitter ladder value — an
+	// operator correlating `backoff_seconds` against observed respawn times
+	// must not see a number the supervisor never used. backoff_base_seconds
+	// keeps the deterministic ladder value visible alongside it.
+	base := computeRespawnBackoff(failures)
+	armed := c.armRespawnBackoffTimer(*d, d.TaskName, base)
 	if c.events != nil {
 		_ = c.events.Emit(api.SupervisorEvent{
 			Severity: "info",
@@ -3865,14 +3872,13 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 			Event:    "daemon-respawn-scheduled",
 			TaskName: d.TaskName,
 			Body: map[string]any{
-				"failures_in_30m": failures,
-				"backoff_seconds": int(backoff / time.Second),
-				"exit_code":       exitCode,
+				"failures_in_30m":      failures,
+				"backoff_seconds":      int(armed / time.Second),
+				"backoff_base_seconds": int(base / time.Second),
+				"exit_code":            exitCode,
 			},
 		})
 	}
-
-	c.armRespawnBackoffTimer(*d, d.TaskName, backoff)
 }
 
 // nextRespawnArmGen takes the next GLOBAL monotonic arm epoch, records it as the
@@ -3896,7 +3902,14 @@ func (c *supervisorController) nextRespawnArmGen(key string) uint64 {
 // pre-spawn port-owner gate (holdSpawnInBackoff) can re-arm the SAME timer
 // mechanism when it holds a doomed spawn back WITHOUT recording a crash — one
 // owner for "arm the respawn timer", no duplicated timer-goroutine logic.
-func (c *supervisorController) armRespawnBackoffTimer(descriptor api.SupervisorDaemon, taskName string, backoff time.Duration) {
+// Herd decorrelation: the UPWARD-ONLY jitter is applied HERE, at the single
+// owner of "arm the respawn timer", so every arm path (handleBackoffWaiting,
+// holdSpawnInBackoff, the realloc re-arms, the foreign-squatter hold) is
+// decorrelated without duplicating the spread rule per call site. Returns the
+// duration ACTUALLY armed so callers can audit the real value rather than the
+// pre-jitter base.
+func (c *supervisorController) armRespawnBackoffTimer(descriptor api.SupervisorDaemon, taskName string, backoff time.Duration) time.Duration {
+	backoff = jitteredRespawnBackoff(backoff, rand.Float64())
 	// Arm the backoff timer in a goroutine so the event loop stays
 	// responsive. When the timer fires, post EvTimerDue so the SM
 	// moves StBackoffWaiting -> StSpawning (or StQuarantined per the
@@ -4012,6 +4025,7 @@ func (c *supervisorController) armRespawnBackoffTimer(descriptor api.SupervisorD
 			}
 		}
 	}()
+	return backoff
 }
 
 // errSpawnHeldPortSquatter is the sentinel executeSideEffect returns when the
@@ -4351,6 +4365,52 @@ func computeRespawnBackoff(failures int) time.Duration {
 		return respawnBackoffMax
 	}
 	return d
+}
+
+// respawnBackoffJitterFraction and respawnBackoffJitterMax bound the UPWARD-ONLY
+// spread applied to the base ladder by jitteredRespawnBackoff.
+//
+// Why jitter at all: a fleet of same-server daemons (the six serena workspace
+// proxies) cold-starts within ~1 s of every supervisor start, contends for CPU,
+// fails within ~250 ms of each other, and then re-arms on an IDENTICAL
+// deterministic ladder — so every retry wave re-collides at full width and the
+// contention that caused the first failure is reproduced exactly. Spreading the
+// arm times breaks that lockstep.
+//
+// Why UPWARD-ONLY: a downward (AWS "equal jitter") spread would let a daemon
+// retry SOONER than today's ladder, which would accelerate the sliding-window
+// crash count toward the 10-in-30-min quarantine threshold. Adding only
+// non-negative jitter guarantees the retry rate never exceeds the current
+// schedule, so this cannot regress quarantine timing.
+//
+// The absolute cap keeps the tail bounded: at the respawnBackoffMax plateau the
+// spread is 10 s, not another 30 s of recovery latency.
+const (
+	respawnBackoffJitterFraction = 0.5
+	respawnBackoffJitterMax      = 10 * time.Second
+)
+
+// jitteredRespawnBackoff spreads a base backoff upward by r ∈ [0,1) of the
+// bounded jitter span. PURE in (base, r) so the ladder + spread are testable
+// without touching randomness; armRespawnBackoffTimer supplies rand.Float64().
+//
+// base <= 0 is returned unchanged: a zero backoff means "respawn now" (the
+// failures<=0 case), and delaying it would change spawn semantics.
+func jitteredRespawnBackoff(base time.Duration, r float64) time.Duration {
+	if base <= 0 {
+		return base
+	}
+	if r < 0 {
+		r = 0
+	}
+	if r > 1 {
+		r = 1
+	}
+	span := time.Duration(float64(base) * respawnBackoffJitterFraction)
+	if span > respawnBackoffJitterMax {
+		span = respawnBackoffJitterMax
+	}
+	return base + time.Duration(float64(span)*r)
 }
 
 // respawnFailureWindow is the sliding window inside which crashes
