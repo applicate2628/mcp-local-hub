@@ -806,13 +806,13 @@ describe("DashboardScreen — supervisor-down fail-loud (Workstream B §3.1)", (
 
     const { findByTestId, queryByText } = render(<DashboardScreen />);
 
-    // Startup grace: the FIRST 500 renders the calm Loading state, not the
-    // banner — the supervisor may simply be coming up. Advance past the
-    // grace (the 30s poll re-fires each tick; flush the pending status
-    // promise between advances) so failCount exceeds STARTUP_GRACE_POLLS
-    // and the PERSISTENT-down fail-loud banner takes over. The §3.1
-    // assertion below is unchanged — a persistent down MUST still surface
-    // the degraded banner; we just exercise it past the grace.
+    // Restart-grace debounce: the FIRST 500 renders the calm Loading state,
+    // not the banner — the supervisor may simply be coming up. Advance past
+    // the grace window (the 30s poll re-fires each tick; the grace-deadline
+    // timer flips persistentlyDegraded once RESTART_GRACE_MS elapses) so the
+    // PERSISTENT-down fail-loud banner takes over. The §3.1 assertion below
+    // is unchanged — a persistent down MUST still surface the degraded
+    // banner; we just exercise it past the grace.
     await vi.advanceTimersByTimeAsync(30_000);
     await vi.advanceTimersByTimeAsync(30_000);
     await vi.advanceTimersByTimeAsync(30_000);
@@ -864,6 +864,444 @@ describe("DashboardScreen — supervisor-down fail-loud (Workstream B §3.1)", (
     });
     // The error banner must be absent when the supervisor is up.
     expect(queryByTestId("dashboard-error")).toBeNull();
+  });
+
+  // Fix B (bug 2026-07-19): a transient supervisor restart/handoff window
+  // (deploy, RestartV3 self-restart) makes /api/status fail for a few
+  // seconds AFTER the dashboard has already loaded. That must NOT flash the
+  // RED banner — it debounces to a calm reconnecting cue within
+  // RESTART_GRACE_MS, and only turns RED once the streak passes the bound
+  // (fail-loud on a genuine prolonged outage preserved).
+  it("debounces the RED banner across a restart window: calm reconnecting cue within grace, RED past the bound", async () => {
+    let statusFails = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        if (statusFails) {
+          return Promise.resolve(
+            jsonResponse(500, {
+              error: "supervisor unreachable — restart the hub",
+              code: "STATUS_FAILED",
+            }),
+          );
+        }
+        return Promise.resolve(statusResponse([runningRow]));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { findAllByRole, findByTestId, queryByTestId, queryByText } = render(
+      <DashboardScreen />,
+    );
+
+    // One successful /api/status → hasEverLoaded=true, cards render, no error.
+    await waitFor(async () => {
+      const buttons = await findAllByRole("button");
+      expect(buttons.length).toBe(4); // 2 bulk + 2 per-card
+    });
+    expect(queryByTestId("dashboard-error")).toBeNull();
+
+    // Supervisor enters a restart/handoff window: /api/status now 500s.
+    statusFails = true;
+
+    // Advance to the next 30s poll — the first failure marks degradedSince,
+    // but we are still WITHIN the grace window (elapsed 0 < RESTART_GRACE_MS).
+    // A calm reconnecting cue renders, NOT the RED banner.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(queryByTestId("dashboard-error")).toBeNull();
+    const reconnecting = await findByTestId("dashboard-reconnecting");
+    expect(reconnecting.textContent).toContain("Reconnecting");
+
+    // Advance PAST RESTART_GRACE_MS (20s) from the first failure. At the bound
+    // the grace-deadline effect fires ONE fresh /api/status recheck; the
+    // supervisor is still down so it resolves 500 → a fresh failing observation
+    // AT the bound flips `persistentlyDegraded` and the RED fail-loud banner
+    // takes over (prolonged outage → RED preserved). The advance is wrapped in
+    // `act` because RED now comes from the async recheck resolving inside the
+    // effect (grace-timer → re-render → effect → recheck → setState), and act()
+    // flushes that render+microtask chain under fake timers.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_001);
+    });
+    const banner = await findByTestId("dashboard-error");
+    expect(banner.textContent).toContain("supervisor unreachable — restart the hub");
+    // The reconnecting cue is gone; the RecoveryActions affordance is present.
+    expect(queryByTestId("dashboard-reconnecting")).toBeNull();
+    expect(queryByText("Restart supervisor")).not.toBeNull();
+  });
+});
+
+// Fix B round-2 (decision 2026-07-19-dashboard-degraded-fresh-observation-gated-red,
+// `## Correction`): RED is a PURE render-time comparison of two committed
+// observation timestamps (`lastFailAt - degradedSince >= bound`), never elapsed
+// time and never a latched boolean. These repros lock in the two P1 concurrency
+// defects the reverted round-1 boolean+recheck-confirmer shipped, plus the
+// original bot-#564-P1 stale-sample false RED that the base ELAPSED gate had.
+describe("DashboardScreen — fresh-observation-gated RED (Fix B round-2)", () => {
+  // The exact 500 envelope api.ErrSupervisorDown surfaces.
+  const supervisorDown500 = () =>
+    jsonResponse(500, {
+      error: "supervisor unreachable — restart the hub",
+      code: "STATUS_FAILED",
+    });
+  const runningDelta = {
+    server: "memory",
+    daemon: "default",
+    port: 9123,
+    pid: 12345,
+    state: "Running",
+  };
+
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  // bot #564 P1 (the base ELAPSED gate's bug): a supervisor that RECOVERS
+  // silently within grace (no daemon-state SSE delta, no interim poll) was
+  // flipped RED purely on elapsed time at the bound — a false RED on a stale
+  // failure sample. The timestamp gate fires ONE fresh recheck AT the bound;
+  // it observes HEALTH → clears the streak → no RED. FAILS on the base elapsed
+  // gate (which would show RED at the bound regardless of the fresh sample).
+  it("silent recovery within grace: the bound recheck observes health → no false RED", async () => {
+    let healthy = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        return Promise.resolve(healthy ? statusResponse([runningRow]) : supervisorDown500());
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      if (url === "/api/hub/health") {
+        return Promise.resolve(jsonResponse(200, { state: "healthy", degraded: false }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { findAllByRole, findByTestId, queryByTestId } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      expect((await findAllByRole("button")).length).toBe(4);
+    });
+
+    // A transient blip marks the streak via the SSE poller-error (no poll needed).
+    // The supervisor is ALREADY healthy again (healthy stays true) — it just
+    // never emitted a clearing daemon-state delta.
+    act(() => {
+      dispatchSse("poller-error", { err: "supervisor unreachable — restart the hub" });
+    });
+    expect(queryByTestId("dashboard-error")).toBeNull();
+    await findByTestId("dashboard-reconnecting");
+
+    // Cross the grace bound (RESTART_GRACE_MS = 20_000). At the bound the recheck
+    // GETs /api/status → success → clears the streak. No RED on the stale sample.
+    // (A second act flush lets the async recheck's success resolution — issued
+    // mid-advance from inside the grace effect — commit under fake timers.)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000 + 2_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    // The bound recheck observed HEALTH → cards render, NO RED, no reconnecting.
+    await findByTestId("dashboard-card");
+    expect(queryByTestId("dashboard-error")).toBeNull();
+    expect(queryByTestId("dashboard-reconnecting")).toBeNull();
+    expect(document.querySelectorAll(".cards .card").length).toBeGreaterThan(0);
+  });
+
+  // R1 — round-1 Defect 2 (stale recheck after recovery re-stamps RED on a new
+  // age-0 streak). The corrected render gate compares the two timestamps: a
+  // failing recheck that resolves AFTER an SSE recovery re-latches an AGE-0
+  // streak (lastFailAt - degradedSince = 0 < bound) so it can NEVER stamp RED.
+  // (On round-1 the recheck's .then set redConfirmed=true and the catch re-set
+  // degradedSince → RED. FAILS on round-1's boolean gate; here dashboard-error
+  // stays null.) A fresh failing observation legitimately opens a NEW grace
+  // window (calm reconnecting cue), which is correct — the guard is NO RED.
+  it("stale failing recheck after an SSE recovery never stamps RED (age-0 streak)", async () => {
+    let statusCall = 0;
+    let resolveRecheck!: (r: Response) => void;
+    const deferredRecheck = new Promise<Response>((res) => {
+      resolveRecheck = res;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        statusCall += 1;
+        if (statusCall === 1) return Promise.resolve(statusResponse([runningRow])); // mount
+        if (statusCall === 2) return Promise.resolve(supervisorDown500()); // poll@30s
+        return deferredRecheck; // call 3 = bound recheck, deferred/controlled
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      if (url === "/api/hub/health") {
+        return Promise.resolve(jsonResponse(200, { state: "healthy", degraded: false }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { findAllByRole, queryByTestId } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      expect((await findAllByRole("button")).length).toBe(4);
+    });
+
+    // poll@30s → 500 → amber (within grace).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(queryByTestId("dashboard-error")).toBeNull();
+
+    // Cross the bound → the ONE recheck is issued but stays IN-FLIGHT (deferred).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_001);
+    });
+    expect(statusCall).toBe(3); // the bound recheck was issued
+    expect(queryByTestId("dashboard-error")).toBeNull(); // still no RED (recheck pending)
+
+    // SSE Running delta → recovery: streak clears, cards render, no error.
+    act(() => {
+      dispatchSse("daemon-state", runningDelta);
+    });
+    await waitFor(() => {
+      expect(document.querySelectorAll(".cards .card").length).toBeGreaterThan(0);
+    });
+    expect(queryByTestId("dashboard-error")).toBeNull();
+
+    // NOW the stale recheck resolves FAILING, AFTER the recovery. It re-latches
+    // an age-0 streak (degradedSince and lastFailAt are the same instant) → the
+    // timestamp gate yields 0 < bound → NO false RED. (This is the Defect-2
+    // guard: on round-1 the banner would go RED here.)
+    await act(async () => {
+      resolveRecheck(supervisorDown500());
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(queryByTestId("dashboard-error")).toBeNull();
+  });
+
+  // R2 — round-1 Defect 1 (a hung recheck was the SINGLE RED writer → RED never
+  // fired). RED now has NO single writer: any resolved-failing past-bound
+  // observation confirms it. Here the bound recheck HANGS forever, yet the next
+  // 30s poll confirms RED. (FAILS on round-1's single-writer gate AND on the
+  // base elapsed gate — see the mid-test assertion.)
+  it("a hung recheck does not wedge RED: the next failing poll still confirms it", async () => {
+    let statusCall = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        statusCall += 1;
+        if (statusCall === 1) return Promise.resolve(statusResponse([runningRow])); // mount
+        if (statusCall === 3) return new Promise<Response>(() => {}); // bound recheck HANGS
+        return Promise.resolve(supervisorDown500()); // every poll (2, 4, ...) fails
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      if (url === "/api/hub/health") {
+        return Promise.resolve(jsonResponse(200, { state: "healthy", degraded: false }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { findAllByRole, findByTestId, queryByTestId } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      expect((await findAllByRole("button")).length).toBe(4);
+    });
+
+    // poll@30s → 500 → amber.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(queryByTestId("dashboard-error")).toBeNull();
+
+    // Cross the bound → the recheck is issued and HANGS. Round-1 would be wedged
+    // here (its single writer never resolves). The base elapsed gate would
+    // WRONGLY show RED at the bound (this assertion is what fails on the base).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_001);
+    });
+    expect(statusCall).toBe(3); // recheck issued (and hung)
+    expect(queryByTestId("dashboard-error")).toBeNull(); // no RED yet — recheck hung, no fresh sample
+
+    // The NEXT 30s poll resolves 500 — a fresh failing observation past the bound
+    // (lastFailAt=~60s, degradedSince=~30s → >= bound) → RED, despite the hung
+    // recheck. No single writer.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    const banner = await findByTestId("dashboard-error");
+    expect(banner.textContent).toContain("supervisor unreachable — restart the hub");
+  });
+
+  // R2b — the REQUEST_TIMEOUT_MS abort closes the wedged-handler fail-unsafe: a
+  // handler that accepts TCP but never responds makes every /api/status hang.
+  // The bound recheck hangs too, but its abort turns it into a RESOLVED failing
+  // observation (AbortError) past the bound → RED (with the timeout message).
+  // Without the abort the banner would hang amber forever.
+  it("the abort deadline confirms RED when the recheck hangs (wedged-handler fail-safe)", async () => {
+    let firstStatus = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: Request | string | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") {
+          if (firstStatus) {
+            firstStatus = false;
+            return Promise.resolve(statusResponse([runningRow])); // mount success
+          }
+          // Wedged handler: hang until the client abort fires.
+          return new Promise<Response>((_, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("aborted", "AbortError"));
+            });
+          });
+        }
+        if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+        if (url === "/api/hub/health") {
+          return Promise.resolve(jsonResponse(200, { state: "healthy", degraded: false }));
+        }
+        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+      },
+    );
+
+    const { findAllByRole, findByTestId, queryByTestId } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      expect((await findAllByRole("button")).length).toBe(4);
+    });
+
+    // Mark the streak via SSE (immediate, no hang).
+    act(() => {
+      dispatchSse("poller-error", { err: "supervisor unreachable — restart the hub" });
+    });
+    await findByTestId("dashboard-reconnecting");
+
+    // Cross the bound (RESTART_GRACE_MS = 20_000) → the recheck fires and HANGS
+    // (not yet aborted).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000 + 200);
+    });
+    expect(queryByTestId("dashboard-error")).toBeNull(); // still amber — abort pending
+
+    // Cross the abort deadline (REQUEST_TIMEOUT_MS = 8_000) → the recheck aborts
+    // → AbortError → a resolved failing observation past the bound → RED with the
+    // timeout message.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    const banner = await findByTestId("dashboard-error");
+    expect(banner.textContent).toContain("supervisor not responding (timed out)");
+  });
+
+  // Round-3 request-freshness guard (Sol Area-4 / arch F1): two /api/status calls
+  // are in flight and resolve OUT OF ISSUE ORDER. A later-issued FAILING poll (B)
+  // sets RED; an earlier-issued SUCCESS recheck (A, from a momentary up-blip) then
+  // resolves STALE. Without the loadSeqRef/appliedSeqRef guard, A's success clears
+  // degradedSince/lastFailAt → RED is falsely dropped/delayed. The guard drops A
+  // (seq < appliedSeqRef, a later-issued call already applied) → RED PRESERVED.
+  // FAILS on the HEAD baseline (no guard): the stale success clears the banner.
+  it("out-of-order resolution: a stale-issued success does not clear a fresher-issued failure's RED", async () => {
+    let statusCall = 0;
+    let resolveA!: (r: Response) => void; // earlier-issued bound recheck (up-blip → success)
+    let resolveB!: (r: Response) => void; // later-issued 30s poll (failure)
+    const deferredA = new Promise<Response>((res) => {
+      resolveA = res;
+    });
+    const deferredB = new Promise<Response>((res) => {
+      resolveB = res;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        statusCall += 1;
+        if (statusCall === 1) return Promise.resolve(statusResponse([runningRow])); // mount
+        if (statusCall === 2) return deferredA; // bound recheck (issued EARLIER), deferred
+        if (statusCall === 3) return deferredB; // 30s poll (issued LATER), deferred
+        return Promise.resolve(supervisorDown500());
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      if (url === "/api/hub/health") {
+        return Promise.resolve(jsonResponse(200, { state: "healthy", degraded: false }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { findAllByRole, findByTestId, queryByTestId } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      expect((await findAllByRole("button")).length).toBe(4);
+    });
+
+    // Start the streak via SSE (no fetch), then cross the bound → the ONE recheck
+    // (call 2 = A, issued EARLIER) fires and stays in flight (deferred).
+    act(() => {
+      dispatchSse("poller-error", { err: "supervisor unreachable — restart the hub" });
+    });
+    await findByTestId("dashboard-reconnecting");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_001);
+    });
+    expect(statusCall).toBe(2); // A (bound recheck) issued, in flight
+
+    // Advance to the next 30s poll → call 3 = B (issued LATER) fires, in flight.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(statusCall).toBe(3); // B (poll) issued — both A and B now in flight
+    expect(queryByTestId("dashboard-error")).toBeNull(); // no RED yet (both pending)
+
+    // Resolve B FIRST (later-issued, fresh failing observation, past bound) → RED.
+    // advanceTimersByTimeAsync fully flushes B's async fetch→setState→re-render
+    // chain (2 Promise.resolve ticks are too few to walk fetchOrThrow's awaits).
+    await act(async () => {
+      resolveB(supervisorDown500());
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    const banner2 = await findByTestId("dashboard-error");
+    expect(banner2.textContent).toContain("supervisor unreachable — restart the hub");
+
+    // Resolve A LAST (earlier-issued, STALE success). With the guard it is dropped
+    // (seq 2 < appliedSeqRef 3) → does NOT clear the streak → RED PRESERVED. Without
+    // the guard (HEAD baseline) A's success would run setDegradedSince(null)/
+    // setLastFailAt(null) → RED falsely cleared → this assertion FAILS (teeth).
+    await act(async () => {
+      resolveA(statusResponse([runningRow]));
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(queryByTestId("dashboard-error")).not.toBeNull(); // RED preserved (stale A dropped)
+    expect(queryByTestId("dashboard-reconnecting")).toBeNull();
+  });
+
+  // Anti-D1 sampling-density guard: a persistent outage over a ~51s window issues
+  // EXACTLY 3 /api/status calls — mount + the 30s poll + the ONE bound recheck.
+  // A fast-poll-while-degraded (the reverted D1 fix) would issue ~10 here and let
+  // a flapping supervisor streak-reset RED away.
+  it("sampling density: exactly one recheck per streak, no fast poll (anti-D1)", async () => {
+    let statusCalls = 0;
+    let healthy = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        statusCalls += 1;
+        return Promise.resolve(healthy ? statusResponse([runningRow]) : supervisorDown500());
+      }
+      if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+      if (url === "/api/hub/health") {
+        return Promise.resolve(jsonResponse(200, { state: "healthy", degraded: false }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const { findAllByRole } = render(<DashboardScreen />);
+    await waitFor(async () => {
+      expect((await findAllByRole("button")).length).toBe(4); // mount success (call 1)
+    });
+
+    // Supervisor goes down persistently.
+    healthy = false;
+    // ~51s window: poll@30s (call 2) + bound recheck@~50s (call 3). The poll@60s
+    // is NOT reached at 51s, and there is NO fast poll → exactly 3 calls.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(51_000);
+    });
+    expect(statusCalls).toBe(3);
   });
 });
 

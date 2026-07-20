@@ -50,20 +50,92 @@ function hubHealthMessage(h: HubHealth): string {
 type BulkAction = "restart" | "stop";
 type BulkOutcome = { action: BulkAction; state: "done" | "error" };
 
+// RESTART_GRACE_MS bounds the restart/handoff-window debounce for the RED
+// `dashboard-error` banner AFTER the dashboard has already loaded real data.
+// A mid-session supervisor restart (deploy, RestartV3 self-restart) makes
+// /api/status fail transiently for a few seconds — an EXPECTED, self-healing
+// event — so we hold the RED banner until we've been degraded for at least
+// this long. ~20s covers the RestartV3 readiness/handoff envelope (supervisor
+// waitFor=15s + phase budgets) yet stays below an operator-action horizon, so
+// a genuine prolonged outage still turns RED shortly after (fail-loud
+// preserved).
+const RESTART_GRACE_MS = 20_000;
+
+// STARTUP_GRACE_MS is the WIDER tolerance used only while the dashboard has
+// NEVER loaded real data (`!hasEverLoaded`). A never-loaded dashboard is in
+// the initial supervisor-IPC bind window, which on a logon autostart-storm
+// (many daemons cold-starting at once) legitimately takes longer than a
+// mid-session restart. ~45s tolerates that cold-start bind without flashing
+// RED, while still turning RED on a genuinely stuck first bind. This is NOT a
+// second parallel grace mechanism: the SAME `degradedSince` owner is compared
+// against this threshold instead of RESTART_GRACE_MS, branched on
+// `hasEverLoaded`.
+const STARTUP_GRACE_MS = 45_000;
+
+// graceThresholdMs picks the applicable grace bound for the CURRENT load
+// state — the single place the two thresholds are selected, so the render
+// gate and the deadline timer never diverge.
+function graceThresholdMs(hasEverLoaded: boolean): number {
+  return hasEverLoaded ? RESTART_GRACE_MS : STARTUP_GRACE_MS;
+}
+
+// REQUEST_TIMEOUT_MS bounds EVERY /api/status fetch with a client-side abort.
+// A supervisor whose HTTP handler accepts the TCP connection but never writes
+// a response (a wedged goroutine, a deadlocked IPC dial) makes the browser
+// `fetch` hang FOREVER — a fail-unsafe class the render-time RED gate cannot
+// close on its own, because a request that never resolves never produces a
+// failing observation to time-stamp. The abort turns that silent hang into a
+// resolved failing observation (an AbortError → `lastFailAt`), so a genuinely
+// wedged supervisor still earns RED. 8s is chosen to sit ABOVE the 5s backend
+// IPC deadline (internal/api/health.go:424 — a real 500 STATUS_FAILED resolves
+// in <=5s and is NOT aborted, so its message still reaches the banner) and
+// BELOW the 30s poll backstop (so a hung poll is abandoned before the next
+// poll would fire).
+const REQUEST_TIMEOUT_MS = 8_000;
+
 export function DashboardScreen() {
   const [state, setState] = useState<Record<string, DaemonStatus>>({});
   const [error, setError] = useState<string | null>(null);
-  // Startup grace: at supervisor START the IPC isn't listening yet (~30s)
-  // so /api/status fails transiently — that's the supervisor still coming
-  // up, NOT a real failure. `hasEverLoaded` records whether we've ever
-  // seen real data (a successful /api/status OR a live SSE delta); until
-  // then a small number of failures (failCount <= STARTUP_GRACE_POLLS)
-  // renders a calm "Loading…" instead of the alarming degraded banner.
-  // A PERSISTENT down still surfaces the banner (the §3.1 fail-loud is
-  // preserved): once the grace is exceeded — or the dashboard had loaded
-  // and the supervisor THEN went down — the `if (error)` branch wins.
+  // Restart-grace debounce — the SINGLE owner of the transient-vs-persistent
+  // decision. A supervisor restart/handoff window (deploy, RestartV3
+  // self-restart) makes /api/status fail for a few seconds; that is an
+  // EXPECTED, self-healing event, NOT a hard failure. `degradedSince` records
+  // a MONOTONIC `performance.now()` timestamp of the healthy→failing
+  // transition (the FIRST failure of a streak) from EITHER failure source —
+  // the ~30s HTTP-poll catch AND the SSE `poller-error` handler (the raw poll
+  // count is the wrong signal because the SSE path never bumps it). A
+  // monotonic clock is used deliberately: a backward wall-clock step (NTP / VM
+  // time correction) during the grace window must NOT be able to disarm the
+  // banner. ANY success — a successful /api/status OR a live SSE delta —
+  // clears it back to null. The RED `dashboard-error` banner only fires once
+  // the streak has lasted >= the applicable threshold (RESTART_GRACE_MS once
+  // loaded, STARTUP_GRACE_MS while never-loaded — see `persistentlyDegraded`
+  // at the render gate); within the grace we show a calm reconnecting cue.
+  // This is the ONE time-based grace owner — there is no second parallel grace
+  // mechanism; the two thresholds are just a `hasEverLoaded` branch over the
+  // same owner.
   const [hasEverLoaded, setHasEverLoaded] = useState(false);
-  const [failCount, setFailCount] = useState(0);
+  const [degradedSince, setDegradedSince] = useState<number | null>(null);
+  // lastFailAt is the monotonic `performance.now()` at which the MOST RECENT
+  // RESOLVED FAILING /api/status observation resolved — a 500, a client abort
+  // (AbortError from REQUEST_TIMEOUT_MS), or an SSE `poller-error`. It is the
+  // ONLY thing that earns RED, and it is a COMMITTED observation timestamp, not
+  // a latched boolean and not elapsed time. RED is decided at render time by
+  // comparing this against `degradedSince` (see `persistentlyDegraded`): the
+  // streak (identified by its unique monotonic `degradedSince` value) only goes
+  // RED once a fresh failing observation lands AT/after the grace bound. Any of
+  // the three failing sources (the deadline recheck, the next 30s poll, the SSE
+  // poller-error) can write it, so there is NO single async writer that a hang
+  // could wedge (round-1's SPOF). It is cleared to null on any success and by
+  // the streak-reset effect when `degradedSince` returns to null.
+  const [lastFailAt, setLastFailAt] = useState<number | null>(null);
+  // graceTick is incremented by the grace-deadline timer to (a) force a
+  // re-render exactly when the grace elapses, so the banner appears at the
+  // bound even if no further poll or SSE event arrives (the 30s poll would
+  // otherwise delay it), and (b) re-run the deadline effect so it SELF-RE-ARMS
+  // a fresh timer if the bound has not actually been reached yet (belt-and-
+  // suspenders against timer/clock skew) — see the effect below.
+  const [graceTick, setGraceTick] = useState(0);
   // reloadTrigger is bumped by RecoveryActions after a successful
   // cleanup/restart so /api/status refetches immediately instead of
   // waiting for the 30 s poll interval. Pure state-bump pattern —
@@ -94,43 +166,162 @@ export function DashboardScreen() {
     [],
   );
 
+  // mountedRef gates every `loadStatus` state-apply. `loadStatus` is now a
+  // hoisted `useCallback` (single fetch+apply owner) that can resolve after the
+  // component unmounts — so this ref replaces the old effect-local `cancelled`
+  // flag. It starts `true` so the very first mount-time `loadStatus` (issued by
+  // the poll effect below before this effect runs) is never dropped.
+  const mountedRef = useRef(true);
+  // recheckIssuedRef is a per-streak once-guard: the grace-deadline effect fires
+  // AT MOST ONE `/api/status` recheck per degraded streak (anti-D1 — no fast
+  // polling, so a flapping supervisor cannot streak-reset RED away). It is a
+  // fail-safe ISSUE throttle only; it is OFF the RED-decision path (RED reads
+  // committed timestamps, never this flag), so the recheck can safely be
+  // fire-and-forget. Reset by the streak-reset effect when the streak clears.
+  const recheckIssuedRef = useRef(false);
+  // loadStatus issue-freshness guard. loadSeqRef is a monotonic per-call issue
+  // counter (++ at call time); appliedSeqRef is the highest issue seq that has
+  // committed a state apply. Two /api/status calls can be in flight at once — the
+  // bound recheck vs the 30s poll, or a reloadTrigger reload vs a prior in-flight
+  // poll — and resolve OUT OF ISSUE ORDER. Without this, a stale-by-issue success
+  // can clear degradedSince/lastFailAt that a fresher-issued failure already
+  // committed → RED falsely cleared/delayed. Every apply (success AND catch)
+  // drops if a later-issued call already applied (last-issued-wins), mirroring the
+  // resyncHubHealth fetch-seq idiom — but deliberately NOT its SSE-seq clause: a
+  // fresh HTTP success is authoritative over a stale SSE failing signal here, so
+  // this guard is scoped to HTTP-vs-HTTP ordering only. Refs, not state: they
+  // ORDER applies, never render.
+  const loadSeqRef = useRef(0);
+  const appliedSeqRef = useRef(0);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // loadStatus is the SINGLE /api/status fetch+apply owner (hoisted out of the
+  // poll effect so the grace-deadline recheck can share it). It returns a
+  // boolean so a caller that awaits it can branch on success/failure, but the
+  // RED decision NEVER depends on its return value — it depends only on the two
+  // committed timestamps it writes (`degradedSince`, `lastFailAt`).
+  const loadStatus = useCallback(async (): Promise<boolean> => {
+    // Capture this call's issue order FIRST (before the fetch), so an
+    // out-of-order resolution can be dropped by the apply-gates below.
+    const seq = ++loadSeqRef.current;
+    // Bound the fetch with a client abort (see REQUEST_TIMEOUT_MS). Uses
+    // AbortController + setTimeout deliberately (NOT AbortSignal.timeout) so the
+    // deadline is drivable under Vitest fake timers. The signal threads through
+    // fetchOrThrow's existing `init` argument (api.ts) — fetchOrThrow itself is
+    // unchanged.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const rows = await fetchOrThrow<DaemonStatus[]>("/api/status", "array", {
+        signal: controller.signal,
+      });
+      if (!mountedRef.current) return false;
+      // Drop a stale-by-issue apply: a later-issued call already committed.
+      if (seq < appliedSeqRef.current) return true;
+      appliedSeqRef.current = seq;
+      const next: Record<string, DaemonStatus> = {};
+      // Scheduler-maintenance rows (weekly-refresh tasks) have no
+      // meaningful "Restart" action. Rendering them would produce a
+      // blank-name card whose Restart button hits
+      // /api/servers//restart → invalid target.
+      for (const row of rows.filter((r) => !r.is_maintenance)) {
+        next[keyFor(row)] = row;
+      }
+      setState(next);
+      setError(null);
+      setHasEverLoaded(true);
+      // Success clears the streak: both the start-of-streak marker and the
+      // failing-observation timestamp. (The streak-reset effect also nulls
+      // lastFailAt when degradedSince goes null — this is the direct clear.)
+      setDegradedSince(null);
+      setLastFailAt(null);
+      return true;
+    } catch (err) {
+      if (!mountedRef.current) return false;
+      // Drop a stale-by-issue apply: a later-issued call already committed.
+      if (seq < appliedSeqRef.current) return false;
+      appliedSeqRef.current = seq;
+      const e = err as Error;
+      // An abort means the supervisor accepted the connection but never
+      // answered within the deadline — a distinct, actionable failure from a
+      // backend-reported 500. Map it to a plain-language message; any other
+      // error carries the backend/degraded message fetchOrThrow surfaced.
+      const message =
+        e && e.name === "AbortError"
+          ? "supervisor not responding (timed out)"
+          : e.message;
+      setError(message);
+      // Mark the healthy→failing transition once per streak — keep the FIRST
+      // failure's MONOTONIC timestamp (prev ?? performance.now()) so the grace
+      // window measures from the start of the outage, not the latest poll, and
+      // is immune to a wall-clock step.
+      setDegradedSince((prev) => prev ?? performance.now());
+      // Record this RESOLVED failing observation. Compared against degradedSince
+      // at render time, it is what earns RED once it lands at/after the bound.
+      setLastFailAt(performance.now());
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }, []);
+
   // Status bootstrap + polling. The 30s poll backs the supervisor IPC
   // status path while live daemon-state SSE deltas are still on the
-  // legacy scheduler stream.
+  // legacy scheduler stream. NO fast poll while degraded (anti-D1: a higher
+  // sampling density would let a flapping supervisor streak-reset RED away).
   useEffect(() => {
-    let cancelled = false;
-    async function loadStatus() {
-      try {
-        const rows = await fetchOrThrow<DaemonStatus[]>("/api/status", "array");
-        if (cancelled) return;
-        const next: Record<string, DaemonStatus> = {};
-        // Scheduler-maintenance rows (weekly-refresh tasks) have no
-        // meaningful "Restart" action. Rendering them would produce a
-        // blank-name card whose Restart button hits
-        // /api/servers//restart → invalid target.
-        for (const row of rows.filter((r) => !r.is_maintenance)) {
-          next[keyFor(row)] = row;
-        }
-        setState(next);
-        setError(null);
-        setHasEverLoaded(true);
-        setFailCount(0);
-      } catch (err) {
-        if (!cancelled) {
-          setError((err as Error).message);
-          setFailCount((c) => c + 1);
-        }
-      }
-    }
     void loadStatus();
     const poll = setInterval(() => {
       void loadStatus();
     }, 30_000);
     return () => {
-      cancelled = true;
       clearInterval(poll);
     };
-  }, [reloadTrigger]);
+  }, [reloadTrigger, loadStatus]);
+
+  // Grace-deadline effect: while a streak is within grace, self-re-arm a timer
+  // that bumps `graceTick` exactly when the bound elapses (so this effect
+  // re-runs at the bound even if no poll/SSE arrives). AT the bound, fire ONE
+  // fresh `/api/status` recheck — a POSITIVE fresh observation, so a supervisor
+  // that recovered silently within grace (no SSE delta, no interim poll) is
+  // re-observed as HEALTHY at the bound and never flips a false RED on a stale
+  // sample (bot #564 P1). The recheck is FIRE-AND-FORGET: RED is decided purely
+  // by the render-time timestamp compare, so a hung recheck cannot wedge the
+  // banner — the 30s poll and the SSE poller-error remain independent failing-
+  // observation sources (no single-writer SPOF). recheckIssuedRef throttles it
+  // to once per streak. Uses the SAME monotonic clock as degradedSince (never
+  // Date.now()) and the hasEverLoaded-branched threshold.
+  useEffect(() => {
+    if (degradedSince === null) return;
+    const remaining =
+      graceThresholdMs(hasEverLoaded) - (performance.now() - degradedSince);
+    if (remaining <= 0) {
+      if (recheckIssuedRef.current) return;
+      recheckIssuedRef.current = true;
+      void loadStatus();
+      return;
+    }
+    const t = setTimeout(() => setGraceTick((n: number) => n + 1), remaining);
+    return () => clearTimeout(t);
+  }, [degradedSince, graceTick, hasEverLoaded, loadStatus]);
+
+  // Streak-reset effect: the SINGLE clearer of the per-streak recheck guard and
+  // the failing-observation timestamp. Reached whenever `degradedSince` returns
+  // to null — by BOTH recovery sources: a successful `loadStatus` and an SSE
+  // daemon-state delta (`onDelta` nulls degradedSince). Nulling lastFailAt here
+  // guarantees a NEW streak starts with no stale failing timestamp, and
+  // re-arming recheckIssuedRef lets the next streak issue its own one recheck.
+  useEffect(() => {
+    if (degradedSince === null) {
+      recheckIssuedRef.current = false;
+      setLastFailAt(null);
+    }
+  }, [degradedSince]);
 
   useEffect(() => {
     let cancelled = false;
@@ -170,10 +361,11 @@ export function DashboardScreen() {
     // startup 500, even though /api/events is streaming fine.
     // (GitHub Codex PR #1 R1.)
     setError(null);
-    // A live delta means we have real data, so the startup grace is over:
-    // any subsequent /api/status failure is a real degradation, not the
-    // transient supervisor-startup window.
+    // A live delta is a success from the SSE source: clear the restart-grace
+    // timestamp (the single owner both failure sources feed) and record that
+    // we have loaded real data.
     setHasEverLoaded(true);
+    setDegradedSince(null);
     setState((prev) => {
       if (body.state === "Gone") {
         const next = { ...prev };
@@ -238,6 +430,16 @@ export function DashboardScreen() {
   const onPollerError = useCallback((ev: MessageEvent) => {
     const body = JSON.parse(ev.data) as { err?: string };
     setError(body.err ?? "supervisor unreachable");
+    // Source-agnostic degraded marker: the SSE path never bumps the HTTP poll
+    // count, so `degradedSince` is the single owner both sources feed. Keep the
+    // first failure's MONOTONIC `performance.now()` timestamp across the streak
+    // — the SAME clock the HTTP catch records and the grace timer/compare read,
+    // so a wall-clock step can't skew the debounce (bot #564 P1).
+    setDegradedSince((prev) => prev ?? performance.now());
+    // The SSE poller-error IS a resolved failing observation — record its
+    // timestamp so it can earn RED once it lands at/after the grace bound, the
+    // same as a failing HTTP poll or the deadline recheck (no single writer).
+    setLastFailAt(performance.now());
   }, []);
 
   // SSE handler for daemon-failed (backend rising-edge failure event,
@@ -491,13 +693,27 @@ export function DashboardScreen() {
   const runAll = () => fireBulk("restart");
   const stopAll = () => fireBulk("stop");
 
-  // Startup grace: while we've never loaded real data and only a few
-  // failures have happened, show a calm "Loading…" — the supervisor is
-  // still binding its IPC. Once the grace is exceeded (persistent down),
-  // or once we HAD loaded and the supervisor went down (hasEverLoaded),
-  // the `if (error)` fail-loud banner below wins.
-  const STARTUP_GRACE_POLLS = 2;
-  if (!hasEverLoaded && failCount <= STARTUP_GRACE_POLLS) {
+  // Restart-grace debounce, as a PURE render-time comparison of two committed
+  // observation timestamps — never elapsed wall-time, never a latched boolean.
+  // RED requires a fresh RESOLVED failing observation (`lastFailAt`) that landed
+  // AT/after the grace bound MEASURED FROM this streak's start (`degradedSince`).
+  // Streak identity is the monotonic `degradedSince` value: re-latching a streak
+  // needs an intervening success (real wall time), so a stale failing recheck
+  // that resolves after a recovery re-latches an AGE-0 streak
+  // (lastFailAt - degradedSince = 0 < bound) and can NEVER stamp RED on it
+  // (round-1 Defect 2). A degraded streak shorter than the bound stays a calm
+  // reconnecting cue (transient restart/handoff window); a genuine prolonged
+  // outage still turns RED (fail-loud preserved).
+  const persistentlyDegraded =
+    degradedSince !== null &&
+    lastFailAt !== null &&
+    lastFailAt - degradedSince >= graceThresholdMs(hasEverLoaded);
+
+  // Never loaded + still within grace → calm "supervisor is starting"
+  // Loading. Covers both the pristine mount (no failure yet) and the startup
+  // window where the first /api/status calls fail while the supervisor binds
+  // its IPC.
+  if (!hasEverLoaded && !persistentlyDegraded) {
     return (
       <div>
         <h1>Dashboard</h1>
@@ -509,6 +725,31 @@ export function DashboardScreen() {
   }
 
   if (error) {
+    // Within grace (already loaded, or the startup grace elapsed into a
+    // post-load reconnect) → a CALM amber reconnecting cue, NOT the RED
+    // banner. RecoveryActions stays reachable so the operator can still act
+    // during a stuck restart.
+    if (!persistentlyDegraded) {
+      return (
+        <div>
+          <h1>Dashboard</h1>
+          <p
+            class="dashboard-reconnecting"
+            data-testid="dashboard-reconnecting"
+            role="status"
+            style="color: var(--warning, #bf8700)"
+          >
+            <span aria-hidden="true">○</span> Reconnecting…{" "}
+            <span class="dashboard-loading-note">the supervisor is restarting</span>
+          </p>
+          <RecoveryActions
+            context="error"
+            onReloadStatus={() => setReloadTrigger((n) => n + 1)}
+          />
+        </div>
+      );
+    }
+    // Past grace → the EXISTING RED fail-loud banner + RecoveryActions.
     return (
       <div>
         <h1>Dashboard</h1>
