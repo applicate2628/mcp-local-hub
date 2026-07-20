@@ -342,6 +342,15 @@ func acquireSingleInstanceWithHandoff(ctx context.Context, pidportPath string, p
 	restartV3Enabled := gui.RestartV3Enabled()
 	var options gui.SingleInstanceAcquireOptions
 	if restartV3Enabled {
+		// The reservation-aware acquire path validates the pidport as ABSOLUTE
+		// (validateGUIOwnerLeasePath); PidportPath can return a relative path
+		// under a relative XDG_STATE_HOME/LOCALAPPDATA — the legacy no-options
+		// path tolerated it, the options path rejects it, which would block an
+		// ordinary gate-on startup. Normalize to absolute first (bot #568 P2);
+		// the resolved file is identical to the legacy CWD-relative one.
+		if abs, err := filepath.Abs(pidportPath); err == nil {
+			pidportPath = abs
+		}
 		deadlines := gui.DefaultRestartDeadlines()
 		options = gui.SingleInstanceAcquireOptions{
 			RestartV3Enabled: true,
