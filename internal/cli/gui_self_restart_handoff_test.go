@@ -649,6 +649,57 @@ func TestAcquireHandoff_NoEnvSingleShot(t *testing.T) {
 	}
 }
 
+// TestAcquireHandoff_OrdinaryEntrantHonorsRestartV3Reservation ensures a
+// normal GUI launch cannot steal the flock after a restarting parent releases
+// it for its designated child. The ordinary path has no child nonce, so a
+// fresh reserved marker must reject it and leave the flock available.
+func TestAcquireHandoff_OrdinaryEntrantHonorsRestartV3Reservation(t *testing.T) {
+	// Force the RestartV3 gate ON so the reservation-aware path is exercised
+	// even when the test process starts with MCPHUB_GUI_RESTART_V3=0 — otherwise
+	// the legacy no-options acquire takes the free flock and this test fails
+	// (bot #568 P2). Mirrors the gate-on idiom used by the other handoff tests.
+	t.Setenv("MCPHUB_GUI_RESTART_V3", "1")
+	stateDir := t.TempDir()
+	pidport := filepath.Join(stateDir, gui.PidportFileLeaf)
+	deadlines := gui.DefaultRestartDeadlines()
+	store := gui.NewHandoffMarkerStore(stateDir, deadlines)
+
+	started, err := store.Begin(gui.HandoffBegin{
+		Generation: "ordinary-entrant-reservation",
+		Route:      gui.HandoffRouteSamePort,
+		OldPort:    9125,
+		NewPort:    9125,
+		OldPID:     100,
+	})
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	if _, err := store.Reserve(
+		started.Generation,
+		started.Sequence,
+		time.Now().Add(deadlines.Reservation),
+		"designated-child-hash",
+		101,
+	); err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+
+	lock, err := acquireSingleInstanceWithHandoff(context.Background(), pidport, 9125)
+	if lock != nil {
+		lock.Release()
+		t.Fatal("ordinary entrant acquired a fresh reserved GUI flock")
+	}
+	if !errors.Is(err, gui.ErrHandoffReserved) {
+		t.Fatalf("ordinary entrant error = %v, want ErrHandoffReserved", err)
+	}
+
+	lease, err := gui.AcquireSingleInstanceAt(pidport, 9125)
+	if err != nil {
+		t.Fatalf("reservation rejection left flock unavailable: %v", err)
+	}
+	lease.Release()
+}
+
 // TestAcquireHandoff_EnvRetriesUntilRelease: with the handoff env set, a
 // busy lock is RETRIED; once the holder releases (mid-flight, simulating
 // the outgoing parent's exit) the child acquires it. Uses a short test

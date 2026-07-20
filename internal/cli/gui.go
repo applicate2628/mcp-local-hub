@@ -327,17 +327,45 @@ func bindRestartV3ChildStandby(
 }
 
 // acquireSingleInstanceWithHandoff owns the normal GUI single-instance acquire.
-// The current RestartV3 structured child does not enter this helper; it uses the
-// reservation-aware standby path in runRestartV3ChildStartup. A handoff value of
-// exactly "1" enables a bounded retry only for the cross-version upgrade bridge
-// where an already-running v1 parent launches a rename-aside-deployed v3 binary.
+// When RestartV3 is enabled, every ordinary entrant uses the reservation-aware
+// path so it cannot take the flock during a designated child's reservation.
+// The structured child supplies its nonce through runRestartV3ChildStartup. A
+// handoff value of exactly "1" enables a bounded retry only for the cross-version
+// upgrade bridge where an already-running v1 parent launches a rename-aside-
+// deployed v3 binary.
 //
 // Only ErrSingleInstanceBusy is retried; any other acquire error (write
 // failure, etc.) returns immediately. On deadline expiry the last busy
 // error is returned so the caller's existing handshake/--force flow runs
 // exactly as before for a genuinely-occupied lock.
 func acquireSingleInstanceWithHandoff(ctx context.Context, pidportPath string, port int) (*gui.SingleInstanceLock, error) {
-	lock, err := gui.AcquireSingleInstanceAt(pidportPath, port)
+	restartV3Enabled := gui.RestartV3Enabled()
+	var options gui.SingleInstanceAcquireOptions
+	if restartV3Enabled {
+		// The reservation-aware acquire path validates the pidport as ABSOLUTE
+		// (validateGUIOwnerLeasePath); PidportPath can return a relative path
+		// under a relative XDG_STATE_HOME/LOCALAPPDATA — the legacy no-options
+		// path tolerated it, the options path rejects it, which would block an
+		// ordinary gate-on startup. Normalize to absolute first (bot #568 P2);
+		// the resolved file is identical to the legacy CWD-relative one.
+		if abs, err := filepath.Abs(pidportPath); err == nil {
+			pidportPath = abs
+		}
+		deadlines := gui.DefaultRestartDeadlines()
+		options = gui.SingleInstanceAcquireOptions{
+			RestartV3Enabled: true,
+			MarkerStore:      gui.NewHandoffMarkerStore(filepath.Dir(pidportPath), deadlines),
+			Deadlines:        deadlines,
+		}
+	}
+	acquire := func() (*gui.SingleInstanceLock, error) {
+		if !restartV3Enabled {
+			return gui.AcquireSingleInstanceAt(pidportPath, port)
+		}
+		return gui.AcquireSingleInstanceAt(pidportPath, port, options)
+	}
+
+	lock, err := acquire()
 	if err == nil || !errors.Is(err, gui.ErrSingleInstanceBusy) {
 		return lock, err
 	}
@@ -351,7 +379,7 @@ func acquireSingleInstanceWithHandoff(ctx context.Context, pidportPath string, p
 			return nil, err
 		case <-time.After(selfRestartHandoffAcquireBackoff):
 		}
-		lock, err = gui.AcquireSingleInstanceAt(pidportPath, port)
+		lock, err = acquire()
 		if err == nil || !errors.Is(err, gui.ErrSingleInstanceBusy) {
 			return lock, err
 		}
