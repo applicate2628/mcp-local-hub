@@ -88,6 +88,13 @@ func newDaemonCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "daemon",
 		Short: "Run or recover a daemon (the run path is invoked by the supervisor, not by humans)",
+		// Hidden from `mcphub --help`: `daemon run` is spawned by the
+		// supervisor, never typed. The one operator-facing subcommand,
+		// `daemon recover <task>`, is quoted VERBATIM in the runtime
+		// messages that call for it (supervise_squatter.go, the
+		// bind-access-denied remedy), so hiding the parent costs no
+		// discoverability. Still fully usable, incl. `daemon --help`.
+		Hidden: true,
 		Long: `Run a single mcp-local-hub daemon. This is the actual server process
 that Task Scheduler launches per the scheduler task XML's <Exec>/<Command>
 and <Arguments> fields. Not intended for interactive use.

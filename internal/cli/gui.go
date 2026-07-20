@@ -22,6 +22,7 @@ import (
 	"mcp-local-hub/internal/api/serena_routing"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/gui"
+	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/tray"
 
 	"github.com/spf13/cobra"
@@ -1235,6 +1236,32 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 			fmt.Fprintf(cmd.OutOrStderr(), "supervisor shutdown: %v\n", err)
 		}
 	}()
+
+	// Startup is complete: the listener is bound, the port has been
+	// reported, and the supervisor is up. From here `mcphub gui` is a
+	// long-lived BACKGROUND app, so release the parent console — otherwise
+	// the terminal it was launched from owns its lifetime and closing that
+	// terminal kills the GUI and its tray icon (CTRL_CLOSE_EVENT to every
+	// attached console client). See process.ReleaseParentConsole.
+	//
+	// Placed here for two ordering reasons:
+	//   - AFTER every operator-facing startup line ("GUI listening on …",
+	//     "supervisor: …"), because releasing the console discards all
+	//     later stdout/stderr writes.
+	//   - BEFORE the browser and tray spawns below. `mcphub tray` is the
+	//     same Windows-subsystem binary and attaches to ITS parent's
+	//     console at startup; releasing first means the tray has no console
+	//     to inherit, so it survives the terminal too. Releasing after the
+	//     tray spawn would leave the exact "tray disappears" symptom.
+	//
+	// --no-tray opts OUT: it marks a foreground/dev run (the documented
+	// `mcphub gui --no-browser --no-tray --port 9125` frontend workflow,
+	// and the E2E fixtures), where the operator wants the console and
+	// Ctrl-C to keep working. The tray is the signal that this launch is a
+	// background app.
+	if !noTray {
+		process.ReleaseParentConsole()
+	}
 
 	if shouldAutoLaunchBrowser(startup, noBrowser) {
 		url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())

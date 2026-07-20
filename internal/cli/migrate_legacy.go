@@ -23,6 +23,10 @@ func newMigrateLegacyCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "migrate-legacy",
 		Short: "Detect + migrate disabled mcp-language-server entries into managed registry",
+		// Hidden: one-shot conversion of pre-hub disabled
+		// mcp-language-server client entries. Irrelevant on a fresh install
+		// and a no-op once run.
+		Hidden: true,
 		Long: `Scan every installed MCP client config (Codex + Claude Code) for
 disabled entries whose command is mcp-language-server. For each unique
 workspace, emit one 'mcphub register' — which allocates ports, creates

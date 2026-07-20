@@ -26,9 +26,8 @@ func main() {
 	attachParentConsoleIfAvailable()
 	cli.SetBuildInfo(version, commit, buildDate)
 
-	// Explorer double-click: no args and no parent console ⇒ auto-launch GUI.
-	// (Detect by checking whether os.Args has any command and stdout is a
-	// pipe/console. If neither, route to `gui`.)
+	// A bare invocation (no subcommand) is the first-run entry point: route
+	// it to `gui` so `mcphub` starts the hub + GUI. See shouldAutoLaunchGUI.
 	if shouldAutoLaunchGUI() {
 		os.Args = append(os.Args, "gui")
 	}
@@ -61,25 +60,27 @@ func main() {
 	}
 }
 
-// shouldAutoLaunchGUI returns true when we were started with no command-line
-// arguments AND we have no console attached — the hallmark of an Explorer
-// double-click on a Windows-subsystem binary.
+// shouldAutoLaunchGUI reports whether this invocation carried no subcommand
+// and should therefore be routed to `gui`.
+//
+// Contract: a BARE `mcphub` launches the hub + GUI, regardless of whether a
+// console is attached. Both entry points the operator actually uses converge
+// here — an Explorer double-click (no console) and `mcphub` typed at a
+// terminal (console attached) — so "install it, run it, it works" holds in
+// both. The pre-2026-07 behavior additionally required "no console attached",
+// which made a terminal `mcphub` dump the full command list instead.
+//
+// Anything with at least one argument is untouched: `mcphub --help`,
+// `mcphub help`, and every subcommand keep their existing behavior because
+// they never reach this branch.
 func shouldAutoLaunchGUI() bool {
-	if len(os.Args) > 1 {
-		return false
-	}
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		// Invalid handle (typical for GUI subsystem with no parent console,
-		// no redirect) → launch GUI.
-		return true
-	}
-	// If stdout is a character device (console), we're in a shell — don't
-	// auto-launch GUI; let cobra's default help print normally.
-	if (fi.Mode() & os.ModeCharDevice) != 0 {
-		return false
-	}
-	// stdout is a regular file or pipe — user redirected output, so don't
-	// launch GUI; let cobra's default help print to the redirect target.
-	return false
+	return shouldAutoLaunchGUIForArgs(os.Args)
+}
+
+// shouldAutoLaunchGUIForArgs is the pure, testable core of
+// shouldAutoLaunchGUI. args follows the os.Args convention: args[0] is the
+// program path, so a bare invocation has length 1. A zero-length slice is
+// treated as bare (defensive; the Go runtime always supplies argv[0]).
+func shouldAutoLaunchGUIForArgs(args []string) bool {
+	return len(args) <= 1
 }

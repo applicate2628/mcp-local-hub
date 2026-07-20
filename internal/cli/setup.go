@@ -275,11 +275,11 @@ func newSetupCmdReal() *cobra.Command {
 	var fixEphemeralRange bool
 	c := &cobra.Command{
 		Use:   "setup",
-		Short: "Install mcphub to ~/.local/bin, register PATH, install watchdog task",
+		Short: "Install mcphub to ~/.local/bin, register PATH, install the supervisor-liveness task",
 		Long: `Canonicalize the mcphub binary at ~/.local/bin/mcphub.exe (Windows) or
 ~/.local/bin/mcphub (Linux/macOS), ensure that directory is on user PATH,
-and install the watchdog scheduled task that auto-recovers daemons every
-5 minutes.
+and install the supervisor-liveness scheduled task that relaunches the
+supervisor/GUI owner if it dies mid-session (cadence ~1 min).
 
 What setup does:
   1. Copies the currently-running mcphub binary to ~/.local/bin/
@@ -288,14 +288,19 @@ What setup does:
      broadcasts WM_SETTINGCHANGE so new shells pick it up
   3. Linux/macOS: prints the 'export PATH=...' line to paste into shell rc
      (does NOT modify rc files automatically)
-  4. Verifies the watchdog state directory is reachable (plan §16);
+  4. Verifies the hub state directory is reachable (plan §16);
      fails with exit 8 if not.
   5. Attempts to ensure every eligible present MCP client has mcp-language-server-<lang>
      entries pointing at the GUI LSP router URL
      http://localhost:<gui_server.port>/lsp/<lang>/mcp, migrating old
      per-project LSP proxy URLs after timestamped backups. Failures are
-     warned and do not block watchdog setup.
-  6. Installs \mcp-local-hub-watchdog scheduled task (cadence 5 min).
+     warned and do not block the liveness-task install.
+  6. Installs the \mcp-local-hub-liveness scheduled task (cadence ~1 min),
+     which probes the supervisor lock and relaunches the supervisor/GUI
+     owner when no live holder exists. Fail-closed: a failed install aborts
+     setup (exit 12). Also best-effort removes any leftover
+     \mcp-local-hub-watchdog task from a pre-v0.6 host — the v0.4.x
+     watchdog was deleted in v0.6 and is no longer installed.
      Refuses if the current process is elevated (plan §42) unless
      --allow-elevated is passed; with --allow-elevated, a high-priority
      audit entry is written first and audit-write failure is fail-
@@ -358,17 +363,19 @@ Caveats:
     the copy step fails with 'target is in use' — run 'mcphub stop --all'
     first, or kill the daemon processes manually.
   - --allow-elevated overrides plan §42 administrator-install refusal.
-    Use it ONLY when you know the watchdog must run as the elevated
-    user. The override is recorded in intent-audit.log with Priority=high.
+    Use it ONLY when you know the supervisor-liveness task must run as
+    the elevated user. The override is recorded in intent-audit.log with
+    Priority=high.
 
 Exit codes:
   0   success
   8   state-dir sanity rejected (plan §16: KnownFolder unavailable
       or POSIX parent insecure)
   11  --allow-elevated audit write failed (plan §61)
+  12  supervisor-liveness task install failed (fail-closed)
   Other failures use cobra's default non-zero exit.
 
-See also: install, scheduler upgrade, watchdog install, watchdog uninstall.`,
+See also: install, uninstall, autostart, supervise.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if rollbackLSPRouter {
 				return runSetupLSPClientRouter(cmd.OutOrStdout(), true)

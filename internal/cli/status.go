@@ -19,17 +19,21 @@ func newStatusCmdReal() *cobra.Command {
 	var forceMaterialize bool
 	c := &cobra.Command{
 		Use:   "status",
-		Short: "Show state of all mcp-local-hub scheduler tasks",
-		Long: `Print a table of every 'mcp-local-hub-*' Task Scheduler task with state,
-port, PID, RAM, uptime, and next-run time (for scheduled tasks).
+		Short: "Show the state of every mcp-local-hub daemon",
+		Long: `Print a table of every 'mcp-local-hub-*' daemon with state, port, PID,
+RAM, uptime, and next-run time (where one applies).
+
+Since v0.5 the supervisor owns daemon lifecycle, so state is read over
+the supervisor IPC status seam. The legacy Task Scheduler scan remains
+only as the fallback for a host running without that wiring.
 
 State column:
   Running    — port is bound, daemon process alive
-  Starting   — scheduler is mid-launch; port not yet bound
-  Scheduled  — task idle, no live daemon, but a future trigger will fire
+  Starting   — mid-launch; port not yet bound
+  Scheduled  — no live daemon, but a future trigger will fire
                (e.g. -weekly-refresh tasks)
-  Stopped    — task idle, no future trigger, no daemon. Run 'restart' to revive.
-  Disabled   — scheduler marked task as disabled (rare)
+  Stopped    — no future trigger, no daemon. Run 'restart' to revive.
+  Disabled   — marked disabled (rare)
 
 --health adds an MCP protocol smoke test per Running daemon. The
 column shows either the tool count returned by tools/list ("OK N")

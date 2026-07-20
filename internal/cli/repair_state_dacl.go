@@ -22,6 +22,11 @@ func newRepairStateDACLCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "repair-state-dacl --path <state-file> [--yes]",
 		Short: "Repair owner-only permissions on stale state files",
+		// Hidden: single-file DACL remediation. It is only ever needed in
+		// response to a state-file permission refusal, and that refusal
+		// message (api.StateFileDACLRunbookPointer) hands the operator the
+		// exact `mcphub repair-state-dacl --path <file>` invocation.
+		Hidden: true,
 		Long: `Repair stale hub state files whose own file DACL or mode is broader than
 the owner-only allowlist. This is an operator-initiated remediation only; it
 does not trust or read file contents before repair.

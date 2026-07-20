@@ -61,6 +61,9 @@ func newIntentCollapseCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "intent-collapse",
 		Short: "Preview the dual-intent (daemon-intent → supervisor-intent stops) merge",
+		// Hidden: deploy-time preview tool for the Phase 4-E1 collapse.
+		// Read-only developer/deployer diagnostic, not an operator command.
+		Hidden: true,
 		Long: `Computes the Phase 4-E1 dual-intent collapse against the LIVE
 state directory and prints the per-task merge decisions WITHOUT touching
 disk. Use this to validate what the deploy-time collapse would do before

@@ -13,16 +13,19 @@ func newStopCmdReal() *cobra.Command {
 	var all bool
 	c := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop daemon(s) without uninstalling (tasks and configs remain)",
-		Long: `Kill the live daemon process (by port) and /End its scheduler task.
-Scheduler task XML, client-config entries, and backups are untouched —
-you can 'restart' the same daemon back up later, or 'uninstall' to
-remove the task entirely.
+		Short: "Stop daemon(s) without uninstalling (registration and configs remain)",
+		Long: `Stop the selected daemons. Supervisor-owned daemons are stopped through
+the supervisor first; anything left over falls through to the legacy
+scheduler-task path (kill by port, then /End the task).
+
+Registration, client-config entries, and backups are untouched — you can
+'restart' the same daemon back up later, or 'uninstall' to remove it
+entirely.
 
 Examples:
   mcphub stop --server serena                # all serena daemons
   mcphub stop --server serena --daemon codex # one daemon
-  mcphub stop --all                          # every mcp-local-hub-* task
+  mcphub stop --all                          # every mcp-local-hub-* daemon
 
 When to use:
   - Before 'mcphub setup' if the canonical binary is in use

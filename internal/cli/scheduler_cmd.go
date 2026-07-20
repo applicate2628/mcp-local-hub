@@ -12,6 +12,10 @@ func newSchedulerCmdReal() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "scheduler",
 		Short: "Scheduler-level operations (upgrade tasks, manage weekly refresh)",
+		// Hidden: low-level Task Scheduler metadata surgery. Since v0.5 the
+		// supervisor owns daemon lifecycle, so this is an advanced repair
+		// tool rather than part of any normal operator flow.
+		Hidden: true,
 		Long: `Manage Windows Task Scheduler task metadata directly, without
 reinstalling servers.
 

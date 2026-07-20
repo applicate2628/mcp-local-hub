@@ -198,6 +198,11 @@ func newStrictModeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "strict-mode {enable|disable}",
 		Short: "Atomically toggle supervisor strict-mode (intent + autostart shim)",
+		// Hidden: advanced security-posture toggle. The one path that
+		// REQUIRES it — recovery from a STRICT_MODE_REVERT_FAILED (exit 10)
+		// breadcrumb — names `mcphub strict-mode --recover` verbatim in its
+		// own error text, so hiding it costs no discoverability.
+		Hidden: true,
 		Long: `mcphub strict-mode mutates the supervisor's strict-mode policy by
 writing supervisor-intent.json AND the autostart shim's argv in a
 single atomic operation. If either write fails, the other is reverted

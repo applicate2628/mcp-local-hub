@@ -30,6 +30,10 @@ func newRelayCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "relay",
 		Short: "Forward stdio MCP to an HTTP MCP endpoint (for clients lacking HTTP support)",
+		// Hidden: relay runs as a CHILD of a stdio-only MCP client and is
+		// written into that client's config by `install`/`migrate`. It is
+		// machine-invoked; an operator never types it.
+		Hidden: true,
 		Long: `Relay runs as a child process of a stdio-only MCP client and
 forwards JSON-RPC 2.0 messages to a Streamable HTTP MCP endpoint.
 Use --server and --daemon together to look up the URL from the
