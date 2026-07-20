@@ -104,11 +104,61 @@ to match today's numbers, because the harm is asymmetric: a cap set too high
 costs bounded latency, while a cap set too low manufactures false timeouts and a
 report that is mostly UNKNOWN. Full argument in `process_probe_exec.go`.
 
-**Follow-up this bug also covers:** interrupting an already-in-flight probe
-would require threading a context through the `lookupProcess` seam, which has
-**97 test fakes**. Until then the readiness report can overshoot its 20s budget
-by at most one probe chain (~80s worst case), which is stated in the
-`allServerReadinessBudget` comment rather than implied away.
+## Follow-up A — the readiness budget does NOT gate the admission phase
+
+**This is the dominant unbounded-latency path and it is NOT covered by the
+budget threading already shipped.** An earlier revision of this file claimed a
+"~80s worst case (20s budget + one 60s chain)". That number was wrong by an
+order of magnitude and is corrected here.
+
+Two independent reasons:
+
+1. **`AdmissionCheck` is un-budgeted.** `readiness.go:564` calls it with no
+   budget, and `admission_check.go:216` / `:227` run the full ownership chain per
+   in-use port arm BEFORE any budget-gated `fixedPortStatus` row executes. The
+   shipped budget gates only the detail rows layered on top, not the probes that
+   actually seed `Ready`.
+2. **One ownership call is not one chain.** `portHeldByOurDaemonForPortArm`
+   stacks several independently-capped probes, and the ancestry walk mints a
+   FRESH `probeChainBudget` per iteration (`internalPortParentWalkDepth = 3`):
+
+   ```
+   IPC ~5s + lookupProcess (netstat 45s + wmic 45s) + walk 3x60s
+     + lookupProcess again 90s + processIdentityByPID 2x60s + schtasks 15s
+   ~= 500s for ONE port arm on a fully wedged host
+   x2 arms for a native-http daemon ~= 16 min (more for a multi-daemon manifest)
+   ```
+
+   This is a full-wedge CEILING, not a typical figure — a healthy host
+   short-circuits at `portAvailable` before any subprocess runs, and the measured
+   real-world fleet report is ~24s. But the ceiling is MINUTES.
+
+**Why it was not threaded:** `AdmissionCheck` is shared with the install
+Preflight gate (`install.go:1844`), where truncating an ownership probe would be
+actively harmful — Preflight must probe properly before mutating. A readiness-only
+budget therefore cannot simply be added to its signature; it needs a design that
+distinguishes the diagnostic caller from the gating caller.
+
+**Also disclosed:** raising the probe caps (15s/20s -> 45s/60s) to accommodate the
+31s record made this wedged corner ~3x slower than before (~180s -> ~500s per port
+arm). Deliberate honesty-over-latency trade; see the cap argument in
+`process_probe_exec.go`.
+
+## Follow-up B — in-flight probes are not interruptible
+
+Interrupting an already-running probe would require threading a context through
+the `lookupProcess` seam, which has **97 test fakes**. Until then a probe that has
+started always runs to its own cap.
+
+## Follow-up C — a preflight test is real-WMI-load-bound
+
+`TestPreflight_AllowsSupervisorIntentNativeHTTPInternalPortAndRejectsRowlessPort`
+exercises the real probe stack: measured 55.8s here and 14.6s by a reviewer on
+another host, i.e. it floats with host WMI load rather than with any deadline. Its
+subject is admission logic, not the probe stack, so it should fake the identity
+seam (the `fakeProcessNameAndParent` / `fakeProcessNameAndParentTimingOut` pattern
+now exists in `install_own_port_test.go`). Left alone here to keep a
+documentation-only round free of test-behavior changes.
 
 ## Related fix
 

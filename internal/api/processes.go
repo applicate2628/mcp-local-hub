@@ -709,7 +709,7 @@ func procNameAndParent(pid int) (image string, parentPID int, ok bool) {
 // boolean shape for callers that already fail closed on any negative.
 func procNameAndParentErr(pid int) (image string, parentPID int, err error) {
 	if pid <= 0 {
-		return "", 0, errProcessNotFound
+		return "", 0, errProcessIdentityUnresolved
 	}
 	// ONE deadline for the whole wmic→PowerShell chain. This was the frame the
 	// readiness hang was captured in: a bare cmd.Output() here is an infinite
@@ -745,7 +745,7 @@ func procNameAndParentErr(pid int) (image string, parentPID int, err error) {
 		// the process is absent — we only established that we do not know.
 		return "", 0, fmt.Errorf("identity probe for pid %d: %w", pid, ErrProbeTimeout)
 	}
-	return "", 0, errProcessNotFound
+	return "", 0, errProcessIdentityUnresolved
 }
 
 // runWmicNameParent runs `wmic process where ProcessId=N get Name,ParentProcessId /format:csv`

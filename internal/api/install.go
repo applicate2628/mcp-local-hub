@@ -2275,9 +2275,25 @@ var processIdentityByPID func(pid int) (image, parentImage string, ok bool)
 // into a silent lie. Callers MUST branch on errors.Is(err, ErrProbeTimeout).
 var processNameAndParentByPID func(pid int) (image string, parentPID int, err error)
 
-// errProcessNotFound is the definitive negative: the probe surface answered and
-// the PID is genuinely absent. Distinct from ErrProbeTimeout ("did not answer").
-var errProcessNotFound = errors.New("process not found")
+// errProcessIdentityUnresolved is the NON-TIMEOUT negative: the probe chain
+// finished without being cut by a deadline, and produced no identity row.
+//
+// Deliberately NOT named "process not found", which would overclaim. It covers
+// BOTH "the probe answered and the PID is genuinely absent" AND "the probe
+// surface failed for a non-timeout reason" (wmic absent AND PowerShell refused,
+// e.g. an execution-policy or AppLocker denial). Only the first is proven
+// absence; the second is a surface failure.
+//
+// Both are treated the same by the one consumer
+// (internalPortListenerChainsToWrapperPID): they keep the documented
+// "process lookup unavailable" ownership downgrade. That is the PRE-EXISTING
+// posture, unchanged by the timeout work — a blocked PowerShell is genuinely
+// closer to "no probe surface on this host" than to "the probe is mid-answer".
+// The distinction that MATTERS for correctness, and the one the timeout fix
+// added, is timeout-vs-not: a probe still capable of answering must never
+// license the downgrade. Splitting surface-failure from proven-absence is a
+// further refinement, not a live defect.
+var errProcessIdentityUnresolved = errors.New("process identity unresolved (no timeout)")
 
 const mcphubProcessImageName = "mcphub.exe"
 

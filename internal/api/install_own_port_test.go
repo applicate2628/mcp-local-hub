@@ -507,7 +507,7 @@ func TestPreflight_ExternalPortDoesNotMatchSupervisorIntentInternalPort(t *testi
 }
 
 // fakeProcessNameAndParent models a probe surface that ANSWERS: an absent row
-// is a definitive "no such process" (errProcessNotFound), NOT a timeout. Use
+// is a definitive "no such process" (errProcessIdentityUnresolved), NOT a timeout. Use
 // fakeProcessNameAndParentTimingOut for the did-not-answer case — the two drive
 // opposite ownership decisions.
 func fakeProcessNameAndParent(rows map[int]struct {
@@ -517,7 +517,7 @@ func fakeProcessNameAndParent(rows map[int]struct {
 	return func(pid int) (string, int, error) {
 		row, ok := rows[pid]
 		if !ok {
-			return "", 0, errProcessNotFound
+			return "", 0, errProcessIdentityUnresolved
 		}
 		return row.image, row.parent, nil
 	}

@@ -1175,18 +1175,41 @@ func checkServerReadinessByNameWithBudget(name string, scope AdmissionScope, bud
 //     target for "slow but still a working panel"; beyond that the operator
 //     reads the UI as broken, and an honest partial report beats a spinner.
 //
-// WORST CASE IS NOT 20s — state it plainly rather than let the target imply it.
-// The budget is checked before each server AND before each port's ownership
-// probe (fixedPortStatus), but a probe already in flight is not interrupted, so
-// the report can overshoot by at most ONE probe chain:
+// WORST CASE IS MINUTES, NOT 20s — and NOT the "20s + one chain = 80s" this
+// comment claimed in an earlier revision. That figure was wrong by an order of
+// magnitude, for two reasons worth naming so the next reader does not re-derive
+// them:
 //
-//	20s budget + probeChainBudget (60s) ~= 80s worst case.
+//  1. THE BUDGET DOES NOT GATE THE PROBES THAT SEED `Ready`. AdmissionCheck
+//     (called un-budgeted at the top of checkServerReadinessWithBudget) runs the
+//     FULL ownership chain per in-use port arm — admission_check.go:216 and :227
+//     — BEFORE any budget-gated fixedPortStatus row executes. The budget only
+//     gates the detail rows layered on top.
+//  2. ONE OWNERSHIP CALL IS NOT ONE CHAIN. portHeldByOurDaemonForPortArm stacks
+//     several independently-capped probes, and the ancestry walk mints a FRESH
+//     probeChainBudget per iteration (internalPortParentWalkDepth = 3):
 //
-// Before the budget was threaded down to the port level the overshoot was one
-// whole SERVER (every port, every probe), which on a WMI-congested host is
-// minutes. Interrupting an in-flight probe would need context threading through
-// the lookupProcess seam, which has 97 test fakes; that is filed rather than
-// forced (see the readiness-fan-out bug).
+//     IPC ~5s + lookupProcess (netstat 45s + wmic 45s) + walk 3x60s
+//     + lookupProcess again 90s + processIdentityByPID 2x60s + schtasks 15s
+//     ~= 500s for ONE port arm on a fully wedged host,
+//     x2 arms for a native-http daemon ~= 16 min, more for a multi-daemon manifest.
+//
+// That is a full-wedge CEILING with every cap maxed, not a typical figure: a
+// healthy host never enters it (a free port short-circuits at portAvailable
+// before any subprocess runs), and the measured real-world fleet report is ~24s.
+// But the ceiling is minutes and the comment must say so.
+//
+// THE TRADE, STATED PLAINLY: raising the probe caps (15s/20s -> 45s/60s) to
+// accommodate the repo's recorded 31s wmic measurement made this wedged corner
+// roughly 3x SLOWER than before (~180s -> ~500s per port arm). That is a
+// deliberate choice of honesty over latency — a cap low enough to keep the
+// corner fast manufactures false timeouts on a healthy-but-slow host, and a
+// report that is mostly UNKNOWN is useless. Bounded-and-slow beats fast-and-wrong.
+//
+// Closing the gap needs the budget threaded into AdmissionCheck, which is SHARED
+// with the install Preflight gate (install.go:1844) where truncating a probe
+// would be actively harmful — so it is filed, not forced (see the
+// readiness-fan-out bug, "un-gated admission phase").
 //
 // Kept as a var, not a const, so the fan-out regression test can shrink it and
 // exercise the truncation path deterministically instead of waiting 20s.
