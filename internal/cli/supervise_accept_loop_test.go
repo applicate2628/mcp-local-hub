@@ -698,7 +698,10 @@ func TestServeIPCConn_HelloWriteFailureIsIsolated(t *testing.T) {
 	// feed the accept-error BUDGET is proven separately + falsifiably by
 	// TestServeIPCConn_HelloFailureDoesNotFeedAcceptBudget (which drives
 	// the real loop).
-	serveIPCConn(conn, listener, deps)
+	// Zero ipcAcceptTiming: no accept timestamp, so the stall-dump arm is a
+	// no-op here (deps.stallDump is nil anyway). This test is about the
+	// hello-failure event, not the stall trigger.
+	serveIPCConn(conn, listener, deps, ipcAcceptTiming{})
 
 	if !conn.closed.Load() {
 		t.Error("hello-write failure must close the connection")
@@ -800,7 +803,9 @@ func TestServeIPCConn_HelloIsFirstFrame(t *testing.T) {
 	defer clientConn.Close()
 	done := make(chan struct{})
 	go func() {
-		serveIPCConn(serverConn, listener, deps)
+		// Zero ipcAcceptTiming: no accept timestamp, so the stall-dump arm
+		// is a no-op. This test asserts hello-frame ordering, not stalls.
+		serveIPCConn(serverConn, listener, deps, ipcAcceptTiming{})
 		close(done)
 	}()
 

@@ -328,6 +328,12 @@ running (or liveness is undeterminable) it is a no-op. Always exits 0.
 			return runSupervise(cmd.Context(), noIPC, strictMode, strictJobProtection)
 		},
 	}
+	// Operator-facing manual trigger for the goroutine-stack capture. It is
+	// a pure file write (no IPC), so it works while the accept path is
+	// wedged — see supervise_dump_stacks.go. Placed under `supervise`
+	// because CLAUDE.md names `mcphub supervise --help` the canonical
+	// supervisor management surface.
+	cmd.AddCommand(newSuperviseDumpStacksCmd())
 	cmd.Flags().BoolVar(&noIPC, "no-ipc", false, "skip IPC listener (test flag)")
 	cmd.Flags().BoolVar(&strictMode, "strict-mode", false, "enforce strict parent-dir DACL gate")
 	cmd.Flags().BoolVar(&strictJobProtection, "strict-job-protection", false,
@@ -386,8 +392,14 @@ func (g *gracefulCounter) InProgress() bool { return g.n.Load() > 0 }
 // handleIPCConn would obscure the contract; the bundle keeps the
 // dependency surface visible.
 type ipcDispatchDeps struct {
-	stateDir          string
-	events            *api.SupervisorEventLog
+	stateDir string
+	events   *api.SupervisorEventLog
+	// stallDump arms the goroutine-stack capture when a connection's
+	// accept-to-hello interval crosses the stall threshold. nil disables
+	// the automatic arm entirely (every method is nil-receiver safe), which
+	// is what the unit tests constructing a bare ipcDispatchDeps{} get.
+	// See supervise_stall_dump.go.
+	stallDump         *stallDumpTrigger
 	runtimeTracker    *DaemonRuntimeTracker
 	statusCoalescer   *statusPortOwnersCoalescer
 	reconcileReady    *atomic.Bool
@@ -889,9 +901,24 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			},
 		})
 
+		// Goroutine-stack capture for the accept-path stall class. Two
+		// independent goroutines, both scoped to loopCtx (cancelled by the
+		// deferred loopCancel above): the capture worker, and the operator
+		// sentinel watcher. Neither requires the supervisor to service an
+		// IPC connection, which is the whole point — IPC accept is the path
+		// that stalls. See supervise_stall_dump.go.
+		//
+		// Wired inside !noIPC because the class being diagnosed is an
+		// IPC-accept stall; --no-ipc is a test-only mode with no accept
+		// loop to observe.
+		stallDump := newStallDumpTrigger(stateDir, events)
+		go stallDump.Run(loopCtx)
+		go runStallDumpSentinelWatcher(loopCtx, stateDir, stallDump)
+
 		deps := ipcDispatchDeps{
 			stateDir:           stateDir,
 			events:             events,
+			stallDump:          stallDump,
 			runtimeTracker:     runtimeTracker,
 			statusCoalescer:    newStatusPortOwnersCoalescer(runtimeTracker),
 			reconcileReady:     &reconcileReady,
@@ -1593,7 +1620,12 @@ func acceptIPCConnections(
 ) {
 	consecErrs := 0
 	for {
+		// Both stamps are taken on THIS goroutine so the measured
+		// accept-to-hello interval never absorbs the scheduling delay of
+		// the per-connection goroutine below (see ipcAcceptTiming).
+		enteredAccept := time.Now()
 		conn, err := listener.Accept()
+		acceptedAt := time.Now()
 		if err != nil {
 			// listener.Close() returns net.ErrClosed via Accept on
 			// graceful exit. That is the ONE error that signals
@@ -1648,7 +1680,10 @@ func acceptIPCConnections(
 			continue
 		}
 		consecErrs = 0
-		go serveIPCConn(conn, listener, deps)
+		go serveIPCConn(conn, listener, deps, ipcAcceptTiming{
+			acceptedAt:  acceptedAt,
+			acceptDwell: acceptedAt.Sub(enteredAccept),
+		})
 	}
 }
 
@@ -1666,8 +1701,16 @@ func acceptIPCConnections(
 // faults, not per-connection handshake races). The hello stays the
 // FIRST server frame the client reads — only its timing moved off the
 // accept loop.
-func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps) {
-	if err := listener.WriteHello(conn); err != nil {
+func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps, timing ipcAcceptTiming) {
+	err := listener.WriteHello(conn)
+	// Passive stall observation. Two operations: one monotonic delta and
+	// one non-blocking channel send (nil-receiver safe when the trigger is
+	// not wired). It cannot block this goroutine and it cannot block the
+	// accept loop. Armed on BOTH outcomes because the bug's own mechanism
+	// ends in a hello-write error after the client abandons at 5s — see
+	// stallDumpTrigger.maybeArmOnHello.
+	deps.stallDump.maybeArmOnHello(timing, err)
+	if err != nil {
 		_ = conn.Close()
 		// Non-blocking emit (TryEmit): the conn is already reaped, and
 		// the accept loop keeps spawning one goroutine per connection —
