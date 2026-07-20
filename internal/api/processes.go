@@ -1,9 +1,9 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -199,12 +199,15 @@ func parseProcessSnapshotRow(record string, header process.WmicCSVHeader) (procR
 // column order places it. Returned as a single string for convenience; callers
 // wrap in strings.NewReader.
 func runProcessSnapshot() (string, error) {
+	// One deadline shared by the wmic attempt AND the PowerShell fallback, so a
+	// slow wmic cannot buy a second full-price attempt (see probeChainBudget).
+	ctx, cancel := newProbeChainContext()
+	defer cancel()
+
 	// Legacy path: wmic (present on Windows 10 and older Windows 11).
-	wmicCmd := exec.Command("wmic", "process", "get",
+	wmicOut, wmicErr := runProbeCommandCtx(ctx, "wmic", "process", "get",
 		"CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize",
 		"/format:csv")
-	process.NoConsole(wmicCmd)
-	wmicOut, wmicErr := wmicCmd.Output()
 	if wmicErr == nil {
 		return string(wmicOut), nil
 	}
@@ -225,11 +228,9 @@ func runProcessSnapshot() (string, error) {
 		$exe = if ($_.ExecutablePath) { $_.ExecutablePath } else { '' }
 		[string]::Format('HOST,"{0}",{1},"{2}",{3},{4},{5}', $cmdline, $created, $exe, $_.ParentProcessId, $_.ProcessId, $_.WorkingSetSize)
 	}`
-	psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
-	process.NoConsole(psCmd)
-	psOut, psErr := psCmd.Output()
+	psOut, psErr := runProbeCommandCtx(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 	if psErr != nil {
-		return "", fmt.Errorf("both wmic and PowerShell process snapshot failed: wmic=%v; powershell=%v", wmicErr, psErr)
+		return "", fmt.Errorf("both wmic and PowerShell process snapshot failed: wmic=%v; powershell=%w", wmicErr, psErr)
 	}
 	header := "Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize\n"
 	return header + string(psOut), nil
@@ -269,10 +270,12 @@ type ProcessInfo struct {
 // "target in use" leaving daemons down (exactly the regression A8
 // was added to prevent).
 func runMatchingProcessesSnapshot() ([]byte, error) {
-	wmicCmd := exec.Command("wmic", "process", "get",
-		"CommandLine,ProcessId,WorkingSetSize", "/format:csv")
-	process.NoConsole(wmicCmd)
-	if out, err := wmicCmd.Output(); err == nil {
+	// Shared wmic→PowerShell chain deadline (see probeChainBudget).
+	ctx, cancel := newProbeChainContext()
+	defer cancel()
+
+	if out, err := runProbeCommandCtx(ctx, "wmic", "process", "get",
+		"CommandLine,ProcessId,WorkingSetSize", "/format:csv"); err == nil {
 		return out, nil
 	} else {
 		// PS fallback below. Hold wmic error in case PS also fails.
@@ -280,11 +283,9 @@ func runMatchingProcessesSnapshot() ([]byte, error) {
 			$cmdline = if ($_.CommandLine) { ($_.CommandLine -replace '"', '""') } else { '' }
 			[string]::Format('HOST,"{0}",{1},{2}', $cmdline, $_.ProcessId, $_.WorkingSetSize)
 		}`
-		psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
-		process.NoConsole(psCmd)
-		psOut, psErr := psCmd.Output()
+		psOut, psErr := runProbeCommandCtx(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 		if psErr != nil {
-			return nil, fmt.Errorf("both wmic and PowerShell process listing failed: wmic=%v; powershell=%v", err, psErr)
+			return nil, fmt.Errorf("both wmic and PowerShell process listing failed: wmic=%v; powershell=%w", err, psErr)
 		}
 		header := "Node,CommandLine,ProcessId,WorkingSetSize\n"
 		return append([]byte(header), psOut...), nil
@@ -435,9 +436,7 @@ func init() {
 			return 0, 0, 0, false
 		}
 		// Step 1: PID via netstat
-		netstatCmd := exec.Command("netstat", "-ano")
-		process.NoConsole(netstatCmd)
-		out, err := netstatCmd.Output()
+		out, err := runProbeCommand(probeCommandTimeout, "netstat", "-ano")
 		if err != nil {
 			return 0, 0, 0, false
 		}
@@ -452,11 +451,9 @@ func init() {
 			return 0, 0, 0, false
 		}
 		// Step 2: RAM + CreationDate via wmic
-		wmicLookupCmd := exec.Command("wmic", "process", "where",
+		out2, err := runProbeCommand(probeCommandTimeout, "wmic", "process", "where",
 			fmt.Sprintf("ProcessId=%d", pid),
 			"get", "WorkingSetSize,CreationDate", "/format:csv")
-		process.NoConsole(wmicLookupCmd)
-		out2, err := wmicLookupCmd.Output()
 		if err != nil {
 			return pid, 0, 0, true
 		}
@@ -535,9 +532,7 @@ func init() {
 		}
 
 		// Step 1: one netstat -ano → build port→pid map.
-		netCmd := exec.Command("netstat", "-ano")
-		process.NoConsole(netCmd)
-		out, err := netCmd.Output()
+		out, err := runProbeCommand(probeCommandTimeout, "netstat", "-ano")
 		if err != nil {
 			return result
 		}
@@ -594,11 +589,9 @@ func init() {
 			first = false
 			fmt.Fprintf(&wmicWhere, "ProcessId=%d", pid)
 		}
-		wmicMultiCmd := exec.Command("wmic", "process", "where",
+		out2, err := runProbeCommand(probeCommandTimeout, "wmic", "process", "where",
 			wmicWhere.String(),
 			"get", "ProcessId,WorkingSetSize,CreationDate", "/format:csv")
-		process.NoConsole(wmicMultiCmd)
-		out2, err := wmicMultiCmd.Output()
 		if err != nil {
 			// Fall back to PIDs without RAM/uptime — still useful.
 			for port, pid := range portToPID {
@@ -706,16 +699,25 @@ func procNameAndParent(pid int) (image string, parentPID int, ok bool) {
 	if pid <= 0 {
 		return "", 0, false
 	}
+	// ONE deadline for the whole wmic→PowerShell chain. This was the frame the
+	// readiness hang was captured in: a bare cmd.Output() here is an infinite
+	// WaitForSingleObject, and the caller (portHeldByOurDaemon → fixedPortStatus
+	// → the GUI readiness handler) had no deadline of its own to fall back on.
+	ctx, cancel := newProbeChainContext()
+	defer cancel()
+
 	// Try wmic first.
-	if out, err := runWmicNameParent(pid); err == nil {
+	if out, err := runWmicNameParent(ctx, pid); err == nil {
 		if name, pp, parsed := parseNameParent(out); parsed {
 			return name, pp, true
 		}
 	}
 	// PowerShell fallback (Get-CimInstance). Emits a single CSV-shaped
 	// line: `Node,Name,ParentProcessId` (matching wmic's column order
-	// after the leading Node column).
-	if out, err := runPSNameParent(pid); err == nil {
+	// after the leading Node column). Shares ctx with the wmic attempt above:
+	// the fallback covers "wmic.exe removed on 24H2+" (which fails FAST), not
+	// "wmic is slow", so it must not restart the clock.
+	if out, err := runPSNameParent(ctx, pid); err == nil {
 		if name, pp, parsed := parseNameParent(out); parsed {
 			return name, pp, true
 		}
@@ -723,14 +725,14 @@ func procNameAndParent(pid int) (image string, parentPID int, ok bool) {
 	return "", 0, false
 }
 
-// runWmicNameParent runs `wmic process where ProcessId=N get Name,ParentProcessId /format:csv`.
-// Returns raw CSV output and the wmic process error (if any).
-func runWmicNameParent(pid int) (string, error) {
-	cmd := exec.Command("wmic", "process", "where",
+// runWmicNameParent runs `wmic process where ProcessId=N get Name,ParentProcessId /format:csv`
+// under the caller's chain deadline. Returns raw CSV output and the wmic
+// process error (if any); a deadline cut is reported as ErrProbeTimeout so the
+// caller can tell "did not answer in time" from "answered with a failure".
+func runWmicNameParent(ctx context.Context, pid int) (string, error) {
+	out, err := runProbeCommandCtx(ctx, "wmic", "process", "where",
 		fmt.Sprintf("ProcessId=%d", pid),
 		"get", "Name,ParentProcessId", "/format:csv")
-	process.NoConsole(cmd)
-	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
@@ -745,14 +747,12 @@ func runWmicNameParent(pid int) (string, error) {
 //
 // The leading Node column is hard-coded to a placeholder ("HOST") to
 // match wmic's output structure exactly — the parser ignores it.
-func runPSNameParent(pid int) (string, error) {
+func runPSNameParent(ctx context.Context, pid int) (string, error) {
 	psScript := fmt.Sprintf(
 		`$p = Get-CimInstance Win32_Process -Filter 'ProcessId=%d'; if ($p) { '{0},{1},{2}' -f 'HOST', $p.Name, $p.ParentProcessId }`,
 		pid,
 	)
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
-	process.NoConsole(cmd)
-	out, err := cmd.Output()
+	out, err := runProbeCommandCtx(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", psScript)
 	if err != nil {
 		return "", err
 	}

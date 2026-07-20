@@ -393,7 +393,12 @@ func fixedPortStatus(port int, server, daemon string, internal bool) (bool, stri
 		return false, fmt.Sprintf("%s %d is outside the valid range 1..65535", kind, port)
 	}
 	if !portAvailable(port) && !portHeldByOurDaemonForPortArm(port, server, daemon, internal) {
-		return false, fmt.Sprintf("port %d is already in use by another process", port)
+		// Fail-closed and HONEST about which of the two it is. The ownership
+		// gate returns false both when the holder is provably foreign AND when
+		// the OS ownership probe could not answer (wmic/PowerShell hit their
+		// deadline, the PID vanished mid-probe). Claiming "another process" in
+		// the second case asserts something we did not establish.
+		return false, fmt.Sprintf("port %d is in use by a process that is not this server's daemon, or its ownership could not be verified", port)
 	}
 	return true, ""
 }
@@ -1101,6 +1106,46 @@ func CheckServerReadinessByNameWithScope(name string, scope AdmissionScope) (*Re
 	return CheckServerReadinessWithScope(m, scope), nil
 }
 
+// allServerReadinessBudget bounds the WHOLE fleet-wide readiness report.
+//
+// Sizing argument (not a round guess):
+//   - Readiness is a PRE-install diagnostic. In its intended use the server is
+//     not running yet, so its port is free, portAvailable answers from a plain
+//     net.Listen, and NO subprocess probe runs at all — the whole report is
+//     milliseconds. The budget is invisible in the common case.
+//   - The expensive path (netstat + wmic + PowerShell + schtasks per port) only
+//     fires for ports ALREADY in use, i.e. servers already running — precisely
+//     the servers whose readiness answer matters least.
+//   - This endpoint is operator-facing (the GUI readiness panel). 20s is the
+//     outer edge of "slow but still a working panel"; beyond that the operator
+//     reads the UI as broken, and an honest partial report beats a spinner.
+//
+// Kept as a var, not a const, so the fan-out regression test can shrink it and
+// exercise the truncation path deterministically instead of waiting 20s.
+var allServerReadinessBudget = 20 * time.Second
+
+// readinessClock is the time source for the fan-out budget. Test seam: a fake
+// clock makes budget exhaustion deterministic rather than dependent on real
+// probe latency (a test that hopes a real probe is slow is a design defect).
+var readinessClock = time.Now
+
+// budgetExhaustedReport is the HONEST degraded result for a server the fan-out
+// budget did not reach. It is never Ready: an unprobed server is unknown, and a
+// readiness endpoint that reports unknown as ready is worse than one that
+// times out.
+func budgetExhaustedReport(name string) *ReadinessReport {
+	return &ReadinessReport{
+		Server: name,
+		Ready:  false,
+		Requirements: []ReadinessRequirement{{
+			Name:   "readiness probe",
+			OK:     false,
+			Reason: fmt.Sprintf("readiness was NOT determined for this server: the fleet-wide probe budget (%s) was exhausted before it was checked, so this is an UNKNOWN state, not a detected problem", allServerReadinessBudget),
+			Fix:    "Check this server on its own (its per-server readiness view re-runs the probes with a fresh budget). A whole-fleet timeout usually means many daemons are already running and the per-port OS ownership probes are queueing on the Windows WMI service.",
+		}},
+	}
+}
+
 // AllServerReadiness resolves every embedded/installed server manifest and
 // returns a readiness report per server, so the GUI can show a fleet-wide
 // "what needs fixing before this works" view. A manifest that fails to
@@ -1114,8 +1159,27 @@ func AllServerReadiness() []*ReadinessReport {
 	if err != nil {
 		return nil
 	}
+	// Per-probe deadlines (process_probe_exec.go) stop any SINGLE probe from
+	// blocking forever, but they do not stop N servers × M ports × several
+	// WMI-backed probes from STACKING: measured on a loaded reference host, this
+	// serial fan-out took 338s for 15 servers, overrunning even a 5-minute
+	// budget. The fan-out is this function's own responsibility, so the
+	// whole-report budget lives here — the only layer that knows how many
+	// servers there are.
+	//
+	// Probes run SERIALLY (one server at a time, one port at a time). The budget
+	// is therefore checked between servers, and the total bound is
+	// budget + one server's worst-case probe cost — the overshoot is bounded
+	// because that last server's own probes are individually deadline-capped.
+	deadline := readinessClock().Add(allServerReadinessBudget)
 	out := make([]*ReadinessReport, 0, len(names))
-	for _, name := range names {
+	for i, name := range names {
+		// Never truncate the FIRST server: a report where nothing was probed is
+		// useless, and the per-probe caps already bound one server's cost.
+		if i > 0 && !readinessClock().Before(deadline) {
+			out = append(out, budgetExhaustedReport(name))
+			continue
+		}
 		rep, err := CheckServerReadinessByName(name)
 		if err != nil {
 			// err wraps the manifest's absolute disk path (os.PathError); this
