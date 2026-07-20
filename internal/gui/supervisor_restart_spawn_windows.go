@@ -12,7 +12,7 @@ import (
 )
 
 // startDetachedSupervisorTolerant starts the detached supervisor cmd produced
-// by build (configureDetached has already set DETACHED|NEW_GROUP|BREAKAWAY).
+// by build (configureDetachedSupervisor has already set DETACHED|NEW_GROUP|BREAKAWAY).
 // CREATE_BREAKAWAY_FROM_JOB lets the manual-restart supervisor escape an
 // inherited KILL_ON_JOB_CLOSE job — the same orphan-escape the AUTOMATIC spawn
 // paths in internal/cli gained in the §5 fix. Per Microsoft docs, CreateProcess

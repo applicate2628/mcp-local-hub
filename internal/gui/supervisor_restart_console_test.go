@@ -43,7 +43,7 @@ func TestNewDetachedSupervisorCmdSuppressesConsoleAttach(t *testing.T) {
 			process.SuppressConsoleAttachEnv)
 	}
 	if cmd.SysProcAttr == nil {
-		t.Error("configureDetached did not run: the marker suppresses the deliberate re-attach, " +
+		t.Error("configureDetachedSupervisor did not run: the marker suppresses the deliberate re-attach, " +
 			"but only the creation flags block console INHERITANCE at create time")
 	}
 }

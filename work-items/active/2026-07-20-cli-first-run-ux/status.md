@@ -129,3 +129,30 @@ SUPERVISOR / RestartV3 child — never the GUI-launched-from-a-terminal case.
 Implementer instructed: if (a) is insufficient for the operator goal and (b) cannot be done safely as a
 bounded edit, STOP and report that it needs a design pass rather than hacking it. Empirical proof required:
 launch from a real console, CLOSE it, show the GUI still alive; state whether the prompt returns.
+
+## Mutation ledger — three dead entries, and why
+
+Three round-2 mutations now report `SETUP-ERROR`. They are recorded here rather
+than dropped, because a future reader who finds three unexplained SETUP-ERRORs
+cannot otherwise tell this case from a rotted suite.
+
+**Cause:** their anchor was removed by the F4 configurator split. They targeted
+the hand-applied `MCPHUB_NO_CONSOLE_ATTACH` marker at each call site; that marker
+now lives inside `configureDetachedSupervisor`, so there is nothing at the call
+site left to mutate.
+
+**Superseded by** the round-3 constructor-choice mutations:
+`TestSupervisorSpawnUsesTheSuppressingConfigurator`,
+`TestRestartV3GUISpawnUsesTheNonSuppressingConfigurator`, and
+`TestDetachedConfiguratorsDifferOnlyInConsoleSuppression`.
+
+**Coverage went UP, not down.** The dead mutations tested "did someone remember
+to hand-apply the marker at this call site". The replacements test "did this call
+site pick the right constructor" PLUS "do the two constructors differ on exactly
+one axis". That second property did not exist before the split and is strictly
+stronger: the old form could not catch a *new* supervisor spawn written against
+the shared helper — which was F4's entire regression risk.
+
+These mutations are dead because the defect class they guarded was made
+structurally unreachable. That is the good reason for a mutation to expire, and
+categorically different from one dying because a test was deleted.
