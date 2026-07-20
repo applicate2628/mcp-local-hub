@@ -24,6 +24,13 @@ stale v0.4.x language).
 - **Bare-run** → **launch hub+GUI** (same as `mcphub gui`), regardless of console. `--help`/`help` keep
   printing the command list.
 - **Command list** → **hide internals + group the rest** (Setup / Servers / Runtime / Secrets / Diagnostics).
+  - **Deviation from the recorded names, deliberate (2026-07-20).** Three of the five shipped under
+    different titles: `Servers` → **"MCP servers:"**, `Runtime` → **"Running the hub:"**, `Diagnostics` →
+    **"Maintenance:"** (`internal/cli/root.go:28-56`). The first two are the same concept spelled for an
+    operator reading a help screen. The third is a correction, not a rename: the group holds `backups`,
+    `rollback`, `cleanup`, `config`, `settings`, `version` and (post-review) `scheduler` + `reconcile` —
+    those are maintenance actions, and only two of them diagnose anything, so "Diagnostics" would have
+    mislabeled the group it names. Recorded here rather than silently left to disagree with the code.
 
 ## Scope
 `cmd/mcphub/main.go` (shouldAutoLaunchGUI), `internal/cli/root.go` (groups), the internal commands' `Hidden`,
@@ -34,7 +41,42 @@ the supervisor/daemon runtime.
 | Stage | Owner | Status |
 |---|---|---|
 | Evidence + operator decisions | main conv ($lead) | PASS |
-| Implement | $backend-engineer | dispatched |
+| Implement | $backend-engineer | delivered — commit `27f42953` |
+| Review (architecture + adversarial QA) | 2 independent reviewers | REVISE — 9 findings |
+| Revision (FIX-1 … FIX-9) | $backend-engineer | delivered — awaiting lead gate |
+
+### Review round 1 (2026-07-20): REVISE, 9 findings, all addressed
+Filed bugs: `2026-07-20-gui-spawned-supervisor-console-client` (high),
+`2026-07-20-post-console-release-diagnostics-discarded` (medium),
+`2026-07-20-internal-process-suite-flake-unidentified` (low, pre-existing/adjacent).
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | GUI-spawned supervisor re-attached to the console; fleet still died with the terminal | FIXED at the supervisor (attach suppressed), not by reordering |
+| 2 | Post-release diagnostics written to a dead handle with no file sink | FIXED — switchable sink on the command's writers + the supervisor monitor |
+| 3 | `--no-tray` silently controlled process lifetime | FIXED — `--foreground` added; policy resolved once from console state |
+| 4 | Bare-`mcphub` contract change had no opt-out | FIXED — `MCPHUB_NO_AUTO_GUI=1`, outside the pure seam |
+| 5 | Six hidden commands lost tab-completion, their only discovery surface | `scheduler` + `reconcile` un-hidden; other four accepted-with-rationale in code |
+| 6 | Hidden-command/GroupID invariant had no enforcement | FIXED — `internal/cli/root_test.go` |
+| 7 | `stderrIsValid()` became load-bearing by accident | FIXED — second consumer documented; handle behavior measured and pinned |
+| 8 | Six stale premise comments (repo rule C6) | FIXED |
+| 9 | Record inaccuracies (`45 → 36`, stale stage row, group names) | FIXED — true count is **45 → 35**, now **45 → 37** after finding 5 |
+
+### Review round 2 (2026-07-20): lead returned the adjacent finding — FIXED in-branch
+`2026-07-20-detached-supervisor-spawns-still-console-clients` was filed as adjacent and sent back
+under the **all-return-paths discipline**: having enumerated the defect class, shipping FIX-1 on one
+of its known instances would leave the rest of the class in place at known addresses.
+
+- Enumeration corrected: `install_upgrade.go:424` is a **comment site**, not a spawn site (it calls
+  `Deps.StartSupervisor` through an interface). Two real spawn configurations, one stale-text fix.
+- Both fixed through the single owner `process.SuppressConsoleAttach`; inline `build` closures
+  extracted to package-level constructors so each spawn config is assertable without spawning.
+- Per-site external probes: every flag set ATTACHES without the marker and never attaches with it —
+  **including `CreationFlags=0`**, the degraded retry, where the marker is the only surviving
+  protection on a host that refuses the detach flags.
+- `newRestartV3GUICmd` (RestartV3 replacement **GUI**) deliberately NOT suppressed — `--foreground`
+  requires the console; the asymmetry is pinned by a test.
+- 6 further mutations, each killed by the assertion.
 
 ## Requirement #4 (operator, added 2026-07-20): GUI must survive the launching terminal
 Operator, verbatim: "при закрытии терминала, из которого я запускал `mcphub gui`, он тоже закрывается

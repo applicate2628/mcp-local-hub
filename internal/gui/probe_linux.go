@@ -95,7 +95,8 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 
 	// /proc/<pid>/cmdline (NUL-delimited args). Preserve empty argv
 	// tokens — they're valid in /proc/<pid>/cmdline and the identity
-	// gate's `argv[1] == "gui" OR len(argv) == 1` check uses
+	// gate's `argv[1] == "gui" OR len(argv) == 1` check (the no-arg
+	// launch: Explorer double-click OR a bare `mcphub` at a terminal) uses
 	// positional semantics, so collapsing `mcphub ""` to a single-arg
 	// argv would let a non-GUI invocation pass len(argv)==1 and
 	// incorrectly authorize --force --kill.

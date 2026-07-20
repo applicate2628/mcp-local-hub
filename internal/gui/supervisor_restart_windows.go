@@ -8,11 +8,23 @@ import (
 )
 
 // configureDetached sets Windows-specific flags on cmd so the spawned
-// process becomes its own process group AND detaches from the parent
+// process becomes its own process group AND does not INHERIT the parent
 // console. The combination is required for the spawned supervisor to
 // outlive the GUI process that started it.
 //
-// DETACHED_PROCESS                 — child has no console.
+// NOT SUFFICIENT ON ITS OWN for an mcphub child. These flags stop console
+// inheritance at create time; they do not stop the child from calling
+// AttachConsole(ATTACH_PARENT_PROCESS) afterwards, which mcphub's own
+// main() does as its first statement. A caller spawning a SUPERVISOR must
+// therefore also apply process.SuppressConsoleAttach — see
+// newDetachedSupervisorCmd in supervisor_restart.go. newRestartV3GUICmd
+// deliberately does not, because it spawns a replacement GUI whose
+// --foreground semantics require the console; the note there explains why.
+//
+// DETACHED_PROCESS                 — child does not inherit this console
+//
+//	(it can still attach one itself; see above).
+//
 // CREATE_NEW_PROCESS_GROUP         — child gets its own Ctrl-C group;
 //
 //	a Ctrl-C in the parent terminal does NOT propagate.

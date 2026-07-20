@@ -12,3 +12,12 @@ package process
 // GUI path on POSIX is not the shipped operator entry point. Keeping the
 // seam cross-platform lets the caller stay build-tag free.
 func ReleaseParentConsole() {}
+
+// HasConsole reports false on non-Windows platforms.
+//
+// This is not a stub-shaped lie: the property it names is "this process is
+// a client of a Windows console object and can therefore be terminated by
+// CTRL_CLOSE_EVENT when that console closes". No POSIX process has that
+// property, and ReleaseParentConsole is correspondingly a no-op here, so
+// "false" is the accurate answer and callers correctly skip the release.
+func HasConsole() bool { return false }

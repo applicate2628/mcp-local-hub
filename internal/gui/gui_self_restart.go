@@ -246,6 +246,30 @@ func (p *retainedRestartGUIProcess) DetachAtRelease() error {
 	return nil
 }
 
+// newRestartV3GUICmd builds the detached replacement-GUI command for the
+// RestartV3 self-restart. Package-level so the spawn CONFIGURATION can be
+// asserted without starting a GUI.
+//
+// DELIBERATELY NOT process.SuppressConsoleAttach, unlike the supervisor
+// spawn in supervisor_restart.go. This child is a replacement GUI, not a
+// supervisor, and it re-parses the SAME argv — so under --foreground /
+// --no-tray the operator has explicitly asked for a console-attached GUI,
+// and suppressing the attach would silently kill their terminal output and
+// Ctrl-C across a restart. In the default background mode the parent has
+// already released its console, so there is none for this child to attach
+// to and the marker would be a no-op that verifies nothing. Neither case
+// wants suppression, so adding it here would be a defensive call with no
+// verified precondition.
+func newRestartV3GUICmd(exe string, childArgs, childEnv []string) *exec.Cmd {
+	cmd := exec.Command(exe, childArgs...)
+	cmd.Env = childEnv
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	configureDetached(cmd)
+	return cmd
+}
+
 // SpawnRestartV3GUI starts the parser-rebuilt CLI argv with a structured,
 // non-secret handoff descriptor and RETAINS the OS process handle. Unlike the
 // v1 helper it does not start cmd.Wait: the coordinator alone may terminate
@@ -265,15 +289,7 @@ func SpawnRestartV3GUI(argv []string, handoff SelfRestartHandoff) (RestartParent
 	}
 	childArgs := append([]string(nil), argv...)
 	childEnv := replaceEnvironmentValue(os.Environ(), SelfRestartHandoffEnv, rawHandoff)
-	build := func() *exec.Cmd {
-		cmd := exec.Command(exe, childArgs...)
-		cmd.Env = childEnv
-		cmd.Stdin = nil
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-		configureDetached(cmd)
-		return cmd
-	}
+	build := func() *exec.Cmd { return newRestartV3GUICmd(exe, childArgs, childEnv) }
 	cmd, err := startDetachedSupervisorTolerant(build)
 	if err != nil {
 		return nil, fmt.Errorf("start retained replacement gui: %w", err)

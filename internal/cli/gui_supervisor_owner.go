@@ -81,10 +81,38 @@ const supervisorReadyPollInterval = 200 * time.Millisecond
 // function never leaks zombies. The caller is responsible for calling
 // Stop on the returned owner during shutdown.
 // stderrSinkFromContext returns the io.Writer the GUI uses to log
-// supervisor monitor warnings. Defaults to os.Stderr if the caller
-// did not inject one; tests inject a buffer to capture log output.
-// Package-level so the test seam is centralized.
-var supervisorMonitorStderr io.Writer = os.Stderr
+// supervisor monitor warnings. Tests inject a buffer to capture log
+// output. Package-level so the test seam is centralized.
+//
+// The default is the switchable guiRuntimeStderr rather than a bare
+// os.Stderr, and that is load-bearing: this sink is captured into each
+// supervisorOwner at construction time, which happens BEFORE the GUI
+// releases its console. A plain os.Stderr captured there would still be
+// pointing at the console handle after the release, so the supervisor
+// exit-attribution warning below — the only record of a supervisor crash
+// that predates the supervisor's own audit log — would be written to a
+// dead handle and silently lost. Going through the switchable sink means
+// the already-captured reference follows the switch.
+var supervisorMonitorStderr io.Writer = guiRuntimeStderr
+
+// newGUISupervisorCmd builds the detached `<bin> supervise [--strict-mode]`
+// command the GUI spawns. Package-level (rather than an inline closure) so the
+// spawn CONFIGURATION can be asserted without a real `mcphub supervise`.
+//
+// This is also the RESPAWN path: the manager's spawn seam resolves to
+// ensureSupervisorRunning, so every replacement supervisor the respawn loop
+// starts is built right here — and so is every degraded retry inside
+// startSupervisorDetachedBreakaway, which rebuilds through this function with
+// creation flags stripped. The console-attach suppression comes from
+// configureSupervisorDetach and therefore rides along on all of them.
+func newGUISupervisorCmd(mcphubBin string, args []string, stderr io.Writer) *exec.Cmd {
+	c := exec.Command(mcphubBin, args...)
+	c.Stdin = nil
+	c.Stdout = io.Discard
+	c.Stderr = stderr
+	configureSupervisorDetach(c)
+	return c
+}
 
 func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode bool, waitFor time.Duration) (*supervisorOwner, error) {
 	stateDir, err := api.DaemonStateDir()
@@ -141,14 +169,7 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 	// stderr buffer, so the breakaway-tolerant flagless retry (PART 1)
 	// can rebuild an equivalent cmd whose stderr the readiness-timeout
 	// error still reads.
-	build := func() *exec.Cmd {
-		c := exec.Command(mcphubBin, args...)
-		c.Stdin = nil
-		c.Stdout = io.Discard
-		c.Stderr = stderrBuf
-		configureSupervisorDetach(c)
-		return c
-	}
+	build := func() *exec.Cmd { return newGUISupervisorCmd(mcphubBin, args, stderrBuf) }
 	// PART 1 (§5 permanent fix): spawn with CREATE_BREAKAWAY_FROM_JOB so
 	// the long-lived supervisor escapes any KILL_ON_JOB_CLOSE job it would
 	// otherwise inherit from the GUI's launcher — the same asymmetry the

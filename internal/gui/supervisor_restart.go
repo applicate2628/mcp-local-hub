@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/process"
 )
 
 // supervisorRestartResponse reports each step's outcome so the
@@ -341,6 +342,40 @@ func waitForLockRelease(stateDir string, deadline time.Duration) {
 	}
 }
 
+// newDetachedSupervisorCmd builds the detached `<exe> supervise` command
+// for the manual-restart path. Package-level (rather than an inline
+// closure) so the spawn CONFIGURATION can be asserted without actually
+// starting a supervisor.
+//
+// Both halves of the detach are applied here and neither is optional:
+//
+//   - configureDetached blocks console INHERITANCE at create time.
+//   - process.SuppressConsoleAttach stops the child — the same binary —
+//     from calling AttachConsole(ATTACH_PARENT_PROCESS) in its own main()
+//     and making itself a console client anyway.
+//
+// Measured against a real -H windowsgui build with this site's exact flag
+// set (DETACHED|NEW_GROUP|BREAKAWAY, 0x01000208): without the marker the
+// child appears in the parent's GetConsoleProcessList; with it, never.
+//
+// This bites when the GUI still holds a console (--foreground / --no-tray)
+// and the operator triggers a supervisor restart: the replacement
+// supervisor would inherit the terminal's lifetime and take the whole
+// daemon fleet down with it when that window closes.
+//
+// The marker is applied HERE rather than inside configureDetached because
+// that helper is shared with SpawnRestartV3GUI, which spawns a replacement
+// GUI, not a supervisor — see the note there.
+func newDetachedSupervisorCmd(exe string) *exec.Cmd {
+	c := exec.Command(exe, "supervise")
+	c.Stdin = nil
+	c.Stdout = nil
+	c.Stderr = nil
+	configureDetached(c) // platform-specific (see _windows.go / _other.go)
+	process.SuppressConsoleAttach(c)
+	return c
+}
+
 // spawnDetachedSupervisor starts `<this-binary> supervise` as a
 // detached child that outlives the current GUI process. Returns the
 // child PID on success.
@@ -357,14 +392,7 @@ func spawnDetachedSupervisor() (int, error) {
 	if resolved, lerr := filepath.EvalSymlinks(exe); lerr == nil {
 		exe = resolved
 	}
-	build := func() *exec.Cmd {
-		c := exec.Command(exe, "supervise")
-		c.Stdin = nil
-		c.Stdout = nil
-		c.Stderr = nil
-		configureDetached(c) // platform-specific (see _windows.go / _other.go)
-		return c
-	}
+	build := func() *exec.Cmd { return newDetachedSupervisorCmd(exe) }
 	// §5-follow-up: route the manual-restart spawn through the breakaway-tolerant
 	// helper so it gains the same CREATE_BREAKAWAY_FROM_JOB orphan-escape +
 	// ERROR_ACCESS_DENIED flagless-retry the automatic (cli) spawn paths got — it

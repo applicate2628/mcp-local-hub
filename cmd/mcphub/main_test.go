@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 // TestShouldAutoLaunchGUIForArgs pins the bare-run routing contract:
 // `mcphub` with no subcommand routes to `gui`; anything carrying an
@@ -49,5 +52,64 @@ func TestShouldAutoLaunchGUIIsConsoleIndependent(t *testing.T) {
 	if !shouldAutoLaunchGUIForArgs([]string{"mcphub"}) {
 		t.Fatal("bare `mcphub` must route to gui regardless of console attachment; " +
 			"a console/stdout probe has been reintroduced into the routing decision")
+	}
+}
+
+// TestShouldAutoLaunchGUI_EnvOptOut pins the escape hatch for the
+// bare-`mcphub` CONTRACT CHANGE. Bare `mcphub` went from "print help, exit
+// 0" to "bind a port, spawn a supervisor, block forever", which breaks any
+// script, CI step or healthcheck that ran it as a cheap liveness probe.
+// MCPHUB_NO_AUTO_GUI=1 restores the old behavior for those callers.
+//
+// It exercises shouldAutoLaunchGUI (the impure wrapper) rather than
+// shouldAutoLaunchGUIForArgs, because keeping the env read OUT of the pure
+// seam is the design being pinned: the seam stays table-testable and the
+// ambient read stays in one place.
+func TestShouldAutoLaunchGUI_EnvOptOut(t *testing.T) {
+	origArgs := os.Args
+	t.Cleanup(func() { os.Args = origArgs })
+	os.Args = []string{"mcphub"}
+
+	tests := []struct {
+		name string
+		val  string
+		set  bool
+		want bool
+	}{
+		{"unset: bare mcphub starts the hub", "", false, true},
+		{"empty value is not an opt-out", "", true, true},
+		{"0 is not an opt-out", "0", true, true},
+		{"arbitrary value is not an opt-out", "yes-please", true, true},
+
+		{"1 opts out", "1", true, false},
+		{"true opts out", "true", true, false},
+		{"TRUE opts out (case-insensitive)", "TRUE", true, false},
+		{"padded value opts out (trimmed)", "  1  ", true, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.set {
+				t.Setenv(NoAutoGUIEnv, tc.val)
+			} else {
+				t.Setenv(NoAutoGUIEnv, "")
+				os.Unsetenv(NoAutoGUIEnv)
+			}
+			if got := shouldAutoLaunchGUI(); got != tc.want {
+				t.Errorf("shouldAutoLaunchGUI() with %s=%q (set=%v) = %v, want %v",
+					NoAutoGUIEnv, tc.val, tc.set, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestShouldAutoLaunchGUI_OptOutDoesNotLeakIntoThePureSeam guards the
+// separation itself: the env var must change the wrapper's answer and
+// leave the pure seam untouched, so the table test above stays
+// environment-independent.
+func TestShouldAutoLaunchGUI_OptOutDoesNotLeakIntoThePureSeam(t *testing.T) {
+	t.Setenv(NoAutoGUIEnv, "1")
+	if !shouldAutoLaunchGUIForArgs([]string{"mcphub"}) {
+		t.Fatal("MCPHUB_NO_AUTO_GUI leaked into shouldAutoLaunchGUIForArgs; " +
+			"the pure seam must stay a function of argv alone")
 	}
 }

@@ -38,14 +38,51 @@ KOSYAK examples:
 
 After local tests:
 
-```powershell
-Get-Process -Name 'mcphub' -ErrorAction SilentlyContinue | Stop-Process -Force
-```
-
 Tests spawn `mcphub.exe` daemons on real ports; failing to sweep blocks the
 next test run with port-9128 collisions.
 
-KOSYAK example: `feedback_clean_test_processes.md`.
+**NEVER sweep by image name.** The blanket form below is BANNED:
+
+```powershell
+# BANNED — kills the operator's LIVE fleet, not just test leftovers
+Get-Process -Name 'mcphub' -ErrorAction SilentlyContinue | Stop-Process -Force
+```
+
+The live supervisor, the GUI, and every managed daemon are all `mcphub.exe`.
+A name-matched sweep cannot tell them apart from test leftovers, so it kills
+the running fleet, and the `\mcp-local-hub-liveness` task then silently
+resurrects the supervisor — which is why the damage stayed invisible.
+
+Measured on 2026-07-20 (`supervisor-events.log` forensics, work-item
+`2026-07-20-supervisor-never-crash-reliability`): name-matched sweeps were the
+**single largest source of supervisor death** on the dev host. The probe table
+is conclusive — `Stop-Process -Force` is the ONLY mechanism producing daemon
+exit code `0xFFFFFFFF`; every kill path mcphub itself owns exits with code 1.
+Observed signature: 3 daemons killed within a 16 ms spread, then
+`liveness-relaunched-owner "supervisor down"` 53 s later; each such death cost
+~29 daemon respawns. 8 of 9 supervisor starts in a 42-hour window had no
+`supervisor-exit` row at all.
+
+Use the identity-gated sweep instead — it kills ONLY binaries outside the
+installed path (test builds live in the repo, a worktree, or a temp dir):
+
+```powershell
+$installed = Join-Path $env:USERPROFILE '.local\bin\mcphub.exe'
+Get-CimInstance Win32_Process -Filter "Name='mcphub.exe'" |
+  Where-Object { $_.ExecutablePath -and $_.ExecutablePath -ne $installed } |
+  ForEach-Object {
+    Write-Host "killing test binary PID $($_.ProcessId): $($_.ExecutablePath)"
+    Stop-Process -Id $_.ProcessId -Force
+  }
+```
+
+Inspect before killing whenever the list is not obviously test-only. If a
+leftover process IS at the installed path, it belongs to the live fleet —
+leave it alone and find out why the test spawned it (that is a test-isolation
+defect, tracked as the state-dir leak channel in the same work-item).
+
+KOSYAK examples: `feedback_clean_test_processes.md`,
+`feedback_kosyak_mcphub_sweep_kills_running_daemons.md`.
 
 ### Step 3 — Push + open PR
 
@@ -309,6 +346,73 @@ KOSYAK (2026-06-17): wasted a round fumbling local publish (EOTP →
 mis-set the OTP as `_authToken` → E401 → clobbered the session token)
 before remembering the canonical tag-push path that `v0.4.6`/`v0.4.7`
 already used. Tag-push first; never local-publish.
+
+## CLI entry point + console lifetime (2026-07)
+
+### Bare `mcphub` starts the hub + GUI
+
+A bare invocation (no subcommand) routes to `gui`. This is deliberate: the
+first-run contract is "install it, run `mcphub`, it works" — not a 40-command
+help dump. Both entry points converge here, an Explorer double-click and
+`mcphub` typed at a terminal.
+
+The predicate is purely `len(os.Args) <= 1` (`cmd/mcphub/main.go`). The
+pre-2026-07 version additionally required "no console attached" via an
+`os.Stdout.Stat()` / `ModeCharDevice` probe, which is why a terminal `mcphub`
+used to print the command list.
+
+**This is a behavior change with a real blast radius.** Anything with at least
+one argument is untouched (`--help`, `help`, every subcommand), but a bare
+`mcphub` in a script, CI step, healthcheck, or a redirected/piped run
+(`mcphub | more`, `mcphub > out.txt`) now boots the full hub instead of printing
+help — or exits 1 on the single-instance lock if a GUI is already up. The
+redirect case is intended, not an oversight: re-adding a stdout probe would
+resurrect exactly the environment-dependence this removed.
+
+Opt out with **`MCPHUB_NO_AUTO_GUI=1`** — bare `mcphub` then prints help and
+exits 0. That is the lever for CI and piped callers.
+
+### `--foreground` and console lifetime
+
+`mcphub gui` is a long-lived background app, so on Windows it **releases the
+parent console** after startup (`process.ReleaseParentConsole`). Without that,
+closing the terminal it was launched from sends `CTRL_CLOSE_EVENT` to every
+attached console client and kills the GUI plus its tray icon.
+
+- **`--foreground`** keeps the console attached: startup output keeps flowing,
+  Ctrl-C keeps working, and the GUI dies with its terminal. Use it for dev runs.
+- **`--no-tray` implies `--foreground`.** The documented frontend workflow
+  (`mcphub gui --no-browser --no-tray --port 9125`) and the E2E fixtures both
+  rely on keeping the console; taking it away silently would be a regression.
+
+The policy is resolved ONCE at the top (`resolveReleaseConsole(ConsoleAttached(),
+foreground, noTray)`) and passed down as a value — no lower layer re-derives it
+from a flag.
+
+Note the shell does **not** get its prompt back: `cmd /c mcphub gui` still blocks,
+because cmd waits on the process handle regardless of console attachment.
+Releasing the console fixes *survival*, not *prompt return*.
+
+### Detached spawns of the same binary must suppress the attach
+
+`mcphub` attaches to a parent console as the first statement of `main()`
+(`cmd/mcphub/console_windows.go`). `DETACHED_PROCESS |
+CREATE_NEW_PROCESS_GROUP` blocks console **inheritance at create** — it does NOT
+stop the child from explicitly attaching afterwards. A detached child of a
+console-holding parent therefore re-joins that console and dies with the
+terminal.
+
+Any code path that spawns `mcphub` as a long-lived background process MUST set
+**`MCPHUB_NO_CONSOLE_ATTACH=1`** via the single owner
+`process.SuppressConsoleAttach` — never by re-typing the env name. Interactive
+`mcphub supervise` typed in a terminal keeps its console (no env, no
+suppression).
+
+Verify a new spawn path with a probe, not by reading the flags: build a real
+`-H windowsgui` binary and have the console-owning parent call
+`GetConsoleProcessList` against the child PID. Reading `DETACHED_PROCESS` and
+concluding "it cannot have a console" is precisely the inspection-only reasoning
+that let this class survive in four separate call sites.
 
 ## GUI frontend (Phase 3B-II onward)
 

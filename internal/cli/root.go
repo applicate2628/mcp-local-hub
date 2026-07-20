@@ -97,6 +97,14 @@ Run "mcphub" with no arguments to start the hub and open the GUI.`,
 		newConfigCmd(),
 		newSettingsCmd(),
 		newVersionCmd(),
+		// Advanced repair tools. Operator-facing but rarely needed, and —
+		// unlike `daemon recover`, `repair-state-dacl`, `strict-mode
+		// --recover` and `hub-mcp regenerate-*` — NOT quoted in any runtime
+		// error, so the listing and shell completion are their only
+		// discovery surfaces. Each constructor carries the visibility
+		// rationale next to its own decision.
+		newSchedulerCmd(),
+		newReconcileCmd(),
 	)
 
 	// Internal / machine-invoked / advanced-diagnostic surfaces. Each sets
@@ -104,12 +112,17 @@ Run "mcphub" with no arguments to start the hub and open the GUI.`,
 	// (including `<cmd> --help`); they are only omitted from the top-level
 	// listing. They need no GroupID — cobra never renders an unavailable
 	// command, so they cannot fall into "Additional Commands".
+	//
+	// Hiding costs MORE than the help listing: cobra's IsAvailableCommand()
+	// is false for a hidden command, so hidden commands are absent from
+	// shell tab-completion too (cobra v1.10.2 completions.go:518). Each
+	// entry below is either machine-invoked, or named verbatim in the
+	// runtime error that calls for it, or carries an explicit
+	// accepted-loss note in its own constructor.
 	root.AddCommand(
 		newDaemonCmd(),
 		newRelayCmd(),
-		newSchedulerCmd(),
 		newWeeklyRefreshCmd(),
-		newReconcileCmd(),
 		newIntentCollapseCmd(),
 		newStrictModeCmd(),
 		newRepairStateDACLCmd(),

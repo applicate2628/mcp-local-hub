@@ -2,12 +2,47 @@
 
 package process
 
-import "syscall"
+import (
+	"syscall"
+	"unsafe"
+)
 
 // FreeConsole is not exposed by golang.org/x/sys/windows (v0.46.0), so it
 // is resolved directly — the same LazyDLL idiom cmd/mcphub's
 // console_windows.go uses for its AttachConsole counterpart.
-var procFreeConsole = syscall.NewLazyDLL("kernel32.dll").NewProc("FreeConsole")
+var (
+	kernel32                  = syscall.NewLazyDLL("kernel32.dll")
+	procFreeConsole           = kernel32.NewProc("FreeConsole")
+	procGetConsoleProcessList = kernel32.NewProc("GetConsoleProcessList")
+)
+
+// HasConsole reports whether this process is currently a CLIENT of a
+// console — i.e. whether a closing terminal can deliver CTRL_CLOSE_EVENT
+// to it. It is the probe half of the pair whose mutate half is
+// ReleaseParentConsole.
+//
+// GetConsoleProcessList is the correct primitive and the obvious-looking
+// alternatives are not:
+//
+//   - GetConsoleWindow() != 0 is WRONG under a pseudoconsole (ConPTY, what
+//     Windows Terminal uses): an attached process has no console WINDOW, so
+//     the probe reports "no console" while the process is very much a
+//     client and very much killable by the closing terminal.
+//   - "did AttachConsole succeed" is WRONG as a proxy because it cannot see
+//     a console the process already had, and it conflates "I attached one"
+//     with "I am attached".
+//
+// GetConsoleProcessList returns 0 (with ERROR_INVALID_HANDLE) when the
+// caller has no console, and a nonzero client count otherwise. The count
+// itself is not interesting here — only zero vs nonzero — so the small
+// stack buffer is sufficient even on a console with many clients (a
+// too-small buffer still returns the required size, which is nonzero).
+func HasConsole() bool {
+	var buf [4]uint32
+	n, _, _ := procGetConsoleProcessList.Call(
+		uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	return n != 0
+}
 
 // ReleaseParentConsole detaches this process from the console it is
 // attached to, if any.

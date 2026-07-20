@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"mcp-local-hub/internal/cli"
 )
@@ -23,8 +24,14 @@ var (
 )
 
 func main() {
-	attachParentConsoleIfAvailable()
+	consoleAttached := attachParentConsoleIfAvailable()
 	cli.SetBuildInfo(version, commit, buildDate)
+	// Parse-once-inject-down: whether this process is a console client is
+	// ambient process state that only main() can observe (the attach is
+	// main's first statement). Every downstream console-lifetime decision
+	// consumes THIS value instead of re-deriving console policy from an
+	// unrelated flag.
+	cli.SetConsoleAttached(consoleAttached)
 
 	// A bare invocation (no subcommand) is the first-run entry point: route
 	// it to `gui` so `mcphub` starts the hub + GUI. See shouldAutoLaunchGUI.
@@ -73,8 +80,33 @@ func main() {
 // Anything with at least one argument is untouched: `mcphub --help`,
 // `mcphub help`, and every subcommand keep their existing behavior because
 // they never reach this branch.
+//
+// OPT-OUT: MCPHUB_NO_AUTO_GUI=1 restores the pre-2026-07 behavior for a
+// bare `mcphub` (print the command list, exit 0). This exists because the
+// routing change above is a CONTRACT change on the bare invocation — it
+// went from "print help, exit 0" to "bind a port, spawn a supervisor,
+// block forever" — and anything that ran bare `mcphub` as a cheap liveness
+// or smoke check (CI step, healthcheck, packaging test, a bare `mcphub`
+// over ssh) would otherwise hang or, if a GUI is already up, exit 1 on the
+// single-instance lock. The env var is the escape hatch for those callers;
+// it is deliberately checked HERE and not in the pure seam below.
 func shouldAutoLaunchGUI() bool {
+	if autoLaunchGUIOptedOut() {
+		return false
+	}
 	return shouldAutoLaunchGUIForArgs(os.Args)
+}
+
+// NoAutoGUIEnv opts a bare `mcphub` out of the auto-GUI route.
+const NoAutoGUIEnv = "MCPHUB_NO_AUTO_GUI"
+
+// autoLaunchGUIOptedOut isolates the ambient-environment read so
+// shouldAutoLaunchGUIForArgs stays pure and table-testable. Truthy
+// parsing mirrors the repo's other env knobs ("1" or "true" after
+// trim+lowercase).
+func autoLaunchGUIOptedOut() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(NoAutoGUIEnv)))
+	return v == "1" || v == "true"
 }
 
 // shouldAutoLaunchGUIForArgs is the pure, testable core of
