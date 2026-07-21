@@ -19,17 +19,21 @@ func newStatusCmdReal() *cobra.Command {
 	var forceMaterialize bool
 	c := &cobra.Command{
 		Use:   "status",
-		Short: "Show state of all mcp-local-hub scheduler tasks",
-		Long: `Print a table of every 'mcp-local-hub-*' Task Scheduler task with state,
-port, PID, RAM, uptime, and next-run time (for scheduled tasks).
+		Short: "Show the state of every mcp-local-hub daemon",
+		Long: `Print a table of every 'mcp-local-hub-*' daemon with state, port, PID,
+RAM, uptime, and next-run time (where one applies).
+
+Since v0.5 the supervisor owns daemon lifecycle, so state is read over
+the supervisor IPC status seam. The legacy Task Scheduler scan remains
+only as the fallback for a host running without that wiring.
 
 State column:
   Running    — port is bound, daemon process alive
-  Starting   — scheduler is mid-launch; port not yet bound
-  Scheduled  — task idle, no live daemon, but a future trigger will fire
+  Starting   — mid-launch; port not yet bound
+  Scheduled  — no live daemon, but a future trigger will fire
                (e.g. -weekly-refresh tasks)
-  Stopped    — task idle, no future trigger, no daemon. Run 'restart' to revive.
-  Disabled   — scheduler marked task as disabled (rare)
+  Stopped    — no future trigger, no daemon. Run 'restart' to revive.
+  Disabled   — marked disabled (rare)
 
 --health adds an MCP protocol smoke test per Running daemon. The
 column shows either the tool count returned by tools/list ("OK N")
@@ -188,7 +192,68 @@ func printDefaultStatusTable(cmd *cobra.Command, rows []api.DaemonStatus, probeH
 				name, r.State, port, pid, ram, uptime, r.NextRun)
 		}
 	}
+	printSpawnHoldNotice(cmd, rows)
 	return nil
+}
+
+// printSpawnHoldNotice explains, in plain words, any daemon the pre-spawn
+// existence gate (P1.1) is holding because a path it needs is absent.
+//
+// Without this the table shows a column of "Stopped" rows and no reason — which
+// is exactly the experience that cost an operator a working day: everything
+// red, no explanation, the actual remedy (reinstall mcphub) invisible. The
+// STATE column cannot carry it; a real sentence after the table can.
+//
+// When every held daemon shares one missing path — the incident's shape, since
+// all daemons are started from one mcphub.exe — the shared cause is stated ONCE
+// instead of repeated per row.
+func printSpawnHoldNotice(cmd *cobra.Command, rows []api.DaemonStatus) {
+	out := cmd.OutOrStdout()
+	// The message embeds SpawnHoldPath, which is a filesystem path taken from
+	// the supervisor descriptor — a workspace basename or install directory.
+	// POSIX basenames may legally contain ESC / OSC / BEL bytes (see
+	// stripTerminalControls below), so a deleted directory whose name carries
+	// control sequences would otherwise emit them raw here and spoof rows in
+	// the operator's terminal. spawnHoldDaemonLabel already strips; the message
+	// must too, or the hardening has a hole exactly where attacker-influenced
+	// text is most likely to appear.
+	if fleet := DeriveFleetWideSpawnHold(rows); fleet != nil {
+		fmt.Fprintf(out, "\n! %d servers cannot start, all for the same reason: %s\n",
+			fleet.Count, stripTerminalControls(fleet.Message))
+		return
+	}
+	for _, r := range rows {
+		if r.SpawnHoldReason == "" {
+			continue
+		}
+		fmt.Fprintf(out, "\n! %s cannot start: %s\n",
+			spawnHoldDaemonLabel(r),
+			stripTerminalControls(spawnHoldOperatorMessage(r.SpawnHoldReason, r.SpawnHoldPath)))
+	}
+}
+
+// spawnHoldDaemonLabel names the daemon in a hold notice, never blank.
+//
+// statusDisplayName falls back to TaskName, which can be empty; an
+// unidentifiable "! cannot start" line would tell the operator something is
+// broken without saying WHAT — the failure this whole feature exists to
+// prevent. Server/daemon is always populated and is the identity the operator
+// recognizes anyway ("memory", "fetch"). Terminal controls are stripped for the
+// same reason the rest of this file strips them: these names come from
+// client-config keys and workspace basenames, which may legally contain ESC/BEL
+// bytes that would otherwise spoof rows in a terminal.
+func spawnHoldDaemonLabel(r api.DaemonStatus) string {
+	if name := statusDisplayName(r); name != "" {
+		return name
+	}
+	label := r.Server
+	if r.Daemon != "" && r.Daemon != "default" {
+		label += "/" + r.Daemon
+	}
+	if label == "" {
+		return "(unnamed daemon)"
+	}
+	return stripTerminalControls(label)
 }
 
 var statusScanFn = func(a *api.API) (*api.ScanResult, error) {
@@ -279,6 +344,11 @@ func printWorkspaceScopedTable(cmd *cobra.Command, rows []api.DaemonStatus, prob
 				name, r.State, port, lifecycle, lastUsed, lastErr)
 		}
 	}
+	// Same notice as printDefaultStatusTable. Its absence here was an
+	// asymmetry, not a decision: `--workspace-scoped` is the view most likely
+	// to be showing a daemon held for a MISSING WORKSPACE, so it is the last
+	// table that should stay silent about it.
+	printSpawnHoldNotice(cmd, rows)
 	return nil
 }
 

@@ -246,6 +246,35 @@ func (p *retainedRestartGUIProcess) DetachAtRelease() error {
 	return nil
 }
 
+// newRestartV3GUICmd builds the detached replacement-GUI command for the
+// RestartV3 self-restart. Package-level so the spawn CONFIGURATION can be
+// asserted without starting a GUI.
+//
+// DELIBERATELY uses configureDetachedGUI, NOT configureDetachedSupervisor.
+// This child is a replacement GUI, not a supervisor, and it re-parses the
+// SAME argv — so under --foreground / --no-tray the operator has explicitly
+// asked for a console-attached GUI, and suppressing the attach would
+// silently remove the restarted GUI's terminal output. In the default
+// background mode the parent has already released its console, so there is
+// none for this child to attach to and suppression would be a no-op that
+// verifies nothing. Neither case wants it, so applying it here would be a
+// defensive call with no verified precondition.
+//
+// The justification is terminal OUTPUT only. Ctrl-C is NOT part of it: the
+// operator's Ctrl-C is already severed by CREATE_NEW_PROCESS_GROUP, which
+// configureDetachedGUI sets and which supervisor_restart_windows.go
+// documents as not propagating. That holds with or without the attach
+// marker, so citing it here would argue from a false premise.
+func newRestartV3GUICmd(exe string, childArgs, childEnv []string) *exec.Cmd {
+	cmd := exec.Command(exe, childArgs...)
+	cmd.Env = childEnv
+	cmd.Stdin = nil
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	configureDetachedGUI(cmd)
+	return cmd
+}
+
 // SpawnRestartV3GUI starts the parser-rebuilt CLI argv with a structured,
 // non-secret handoff descriptor and RETAINS the OS process handle. Unlike the
 // v1 helper it does not start cmd.Wait: the coordinator alone may terminate
@@ -265,15 +294,7 @@ func SpawnRestartV3GUI(argv []string, handoff SelfRestartHandoff) (RestartParent
 	}
 	childArgs := append([]string(nil), argv...)
 	childEnv := replaceEnvironmentValue(os.Environ(), SelfRestartHandoffEnv, rawHandoff)
-	build := func() *exec.Cmd {
-		cmd := exec.Command(exe, childArgs...)
-		cmd.Env = childEnv
-		cmd.Stdin = nil
-		cmd.Stdout = nil
-		cmd.Stderr = nil
-		configureDetached(cmd)
-		return cmd
-	}
+	build := func() *exec.Cmd { return newRestartV3GUICmd(exe, childArgs, childEnv) }
 	cmd, err := startDetachedSupervisorTolerant(build)
 	if err != nil {
 		return nil, fmt.Errorf("start retained replacement gui: %w", err)

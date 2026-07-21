@@ -733,6 +733,29 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
 .dashboard-unmanaged-stdio a {
   font-weight: 700;
 }
+/* Pre-spawn existence gate (P1.1): the fleet-wide "cannot start" headline.
+   Red, because every server being unable to start is the most severe steady
+   state the Dashboard can show — and the incident this exists for was read by
+   its operator as "everything is red with no explanation". The banner supplies
+   the explanation and the remedy in plain words. Uses the same geometry as the
+   hub-health banner above so the two stack consistently. */
+.dashboard-fleet-hold {
+  display: block;
+  margin: var(--gap-xs) 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--text);
+  font-weight: 500;
+}
+/* Per-daemon "Cannot start" metric row. Amber: the individual card is a detail
+   view under the banner, and the daemon recovers by itself once the path is
+   back, so it must not shout louder than the fleet-wide headline. */
+.card-kv-hold > span:last-child {
+  color: var(--warn-text, #b45309);
+  font-weight: 600;
+}
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--gap-md); margin-top: var(--gap-md); }
 /* The card border is backed by a 1px box-shadow RING in addition to the CSS
    `border`. The `.cards` grid below uses `repeat(auto-fit, minmax(240px, 1fr))`,

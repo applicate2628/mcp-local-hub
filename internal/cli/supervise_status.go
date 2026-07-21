@@ -380,6 +380,13 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 		if runtimeState.JobProtection != nil {
 			row["job_protection"] = *runtimeState.JobProtection
 		}
+		// Surface a pre-spawn existence-gate HOLD (P1.1) so the operator sees
+		// WHY a daemon is not running and WHAT to do, rather than an
+		// unexplained non-running row. Omitted entirely on the happy path.
+		if runtimeState.SpawnHoldReason != "" {
+			row["spawn_hold_reason"] = runtimeState.SpawnHoldReason
+			row["spawn_hold_path"] = runtimeState.SpawnHoldPath
+		}
 		// Per-daemon resident-set-size (RAM). Looked up by the live
 		// current_pid only when the daemon is actually Running — a
 		// port-stale daemon already had CurrentPID zeroed above (stateText

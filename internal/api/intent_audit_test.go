@@ -147,11 +147,39 @@ func TestIntentAudit_CallerFieldsPopulated(t *testing.T) {
 	if parsed.Location() != time.UTC {
 		t.Errorf("caller_start_time location: got %v, want UTC", parsed.Location())
 	}
-	// ±2 minutes window for fresh test process — start time is precise on
-	// modern OS but CI noise + virtualization can widen the gap.
-	delta := time.Since(parsed).Abs()
-	if delta > 2*time.Minute {
-		t.Errorf("caller_start_time delta = %v; want within ±2min of now (process just started)", delta)
+	// Compare against the SAME source the production writer uses, not against
+	// time.Now().
+	//
+	// This assertion used to read `time.Since(parsed) > 2*time.Minute` with the
+	// comment "process just started". That is not a clock tolerance — `parsed`
+	// is THIS test binary's own start time, so `time.Since(parsed)` is simply
+	// how long the package has been running. It was a hidden budget on SUITE
+	// DURATION, and it began failing deterministically once internal/api grew
+	// past two minutes (observed deltas 4m10s / 4m34s / 4m16s across runs). The
+	// failure was repeatedly dismissed as a flake; it never was one.
+	//
+	// The real invariant is that the field carries this process's start time,
+	// serialized as UTC RFC3339Nano. Comparing to CallerStartTime() tests
+	// exactly that and is immune to how long the suite takes.
+	//
+	// The tolerance absorbs per-OS whole-second truncation in the start-time
+	// conversion, not elapsed time: both sides read the same fixed instant, so
+	// any difference is representational.
+	//
+	// SCOPE OF THIS ASSERTION — it is a CONSISTENCY check, not an oracle.
+	// It proves the writer emitted what CallerStartTime() returns, which
+	// catches a writer that reaches for some other source. It CANNOT catch a
+	// regression INSIDE CallerStartTime itself (e.g. a bad process-time
+	// conversion, or a fallback to time.Now()), because both sides would then
+	// agree. That independent oracle is
+	// TestIntentAudit_CallerStartTimeAgainstIndependentOracle below, which
+	// compares against a PARENT process's wall clock across a deliberately
+	// delayed child.
+	const startTimeTolerance = 2 * time.Second
+	want := CallerStartTime()
+	if delta := parsed.Sub(want).Abs(); delta > startTimeTolerance {
+		t.Errorf("caller_start_time = %v, want CallerStartTime() = %v (delta %v > %v)",
+			parsed, want, delta, startTimeTolerance)
 	}
 	// ts must also be UTC RFC3339Nano.
 	tsTopRaw, ok := got["ts"].(string)

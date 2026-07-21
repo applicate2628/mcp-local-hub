@@ -97,10 +97,11 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 			// NO manifest fallback (design §4) — a missing/inconsistent
 			// spec fails loud rather than re-reading the embedded legacy
 			// kind:global manifest (the defect this redesign kills).
-			spec, err := loadSerenaProxyRuntimeSpec(taskNameFlag, canonical, portFlag)
+			desc, err := loadSerenaProxyDescriptor(taskNameFlag, canonical, portFlag)
 			if err != nil {
 				return err
 			}
+			spec := desc.RuntimeSpec
 
 			// Resolve env (secret:KEY -> vault lookup) over the spec's raw
 			// env refs (cleartext-free on disk; resolved in-process here).
@@ -146,14 +147,7 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 			// plus the internal upstream port the child binds.
 			childArgs := serenaProxyChildArgs(spec)
 
-			h, err := daemon.NewHTTPHost(daemon.HTTPHostConfig{
-				Command:      spec.ChildCommand,
-				Args:         childArgs,
-				Env:          env,
-				UnsetEnv:     unsetEnv,
-				UpstreamPort: spec.UpstreamPort,
-				LogPath:      logPath,
-			})
+			h, err := daemon.NewHTTPHost(serenaProxyHTTPHostConfig(desc, childArgs, env, unsetEnv, logPath))
 			if err != nil {
 				return fmt.Errorf("NewHTTPHost: %w", err)
 			}
@@ -224,7 +218,25 @@ func newDaemonSerenaProxyCmd() *cobra.Command {
 // canonicalWorkspace MUST already be the canonical form of the --workspace
 // flag; flagPort is the raw --port value. The caller resolves both before
 // calling.
+//
+// Thin delegate over loadSerenaProxyDescriptor, which is the single reader +
+// validator. RunE takes the descriptor form because it also needs the
+// descriptor's supervisory first-bind deadline to bound the upstream readiness
+// probe; callers that only need the spec keep this narrower signature.
 func loadSerenaProxyRuntimeSpec(taskName, canonicalWorkspace string, flagPort int) (*api.DaemonRuntimeSpec, error) {
+	d, err := loadSerenaProxyDescriptor(taskName, canonicalWorkspace, flagPort)
+	if err != nil {
+		return nil, err
+	}
+	return d.RuntimeSpec, nil
+}
+
+// loadSerenaProxyDescriptor is the single reader + validator behind
+// loadSerenaProxyRuntimeSpec: it returns the WHOLE validated supervisor-intent
+// descriptor (guaranteed non-nil RuntimeSpec on success) so the caller can also
+// read descriptor-level fields — notably StartupBindDeadlineSeconds, the outer
+// budget the inner readiness probe must expire beneath.
+func loadSerenaProxyDescriptor(taskName, canonicalWorkspace string, flagPort int) (*api.SupervisorDaemon, error) {
 	// Resolve the control-plane intent path via the supervisor-injected env
 	// channel (MCPHUB_SUPERVISOR_INTENT_PATH), falling back to
 	// DefaultSupervisorIntentPath only when the channel is unset. The channel is
@@ -264,7 +276,32 @@ func loadSerenaProxyRuntimeSpec(taskName, canonicalWorkspace string, flagPort in
 	if canonicalWorkspace != spec.WorkspacePath || canonicalWorkspace != d.Workspace {
 		return nil, fmt.Errorf("serena-proxy: --workspace %q disagrees with descriptor (runtime_spec.workspace_path=%q, descriptor.workspace=%q) for task %q; reinstall the serena dynamic pool", canonicalWorkspace, spec.WorkspacePath, d.Workspace, taskName)
 	}
-	return spec, nil
+	return d, nil
+}
+
+// serenaProxyHTTPHostConfig builds the HTTPHost config for one serena-proxy
+// from its validated supervisor-intent descriptor. Extracted from RunE so the
+// inner-vs-outer timeout wiring is exercised by tests directly instead of being
+// re-derived (a re-derived copy would keep passing if RunE drifted).
+//
+// The load-bearing field is OuterBindDeadline: it hands the host THIS
+// descriptor's supervisory first-bind deadline so NewHTTPHost can derive a
+// readiness budget that expires beneath it. Leaving HealthTimeout unset used to
+// fall to the generic 30 s default while the supervisor granted this descriptor
+// 120 s, so the child declared "upstream not ready after 30s" and exited 1 while
+// a healthy serena was still cold-indexing (measured ~46 s) — the supervisor's
+// 120 s was unreachable for that failure mode. The number itself stays owned by
+// api.EffectiveStartupBindDeadlineSeconds and is never re-typed here.
+func serenaProxyHTTPHostConfig(desc *api.SupervisorDaemon, childArgs []string, env map[string]string, unsetEnv []string, logPath string) daemon.HTTPHostConfig {
+	return daemon.HTTPHostConfig{
+		Command:           desc.RuntimeSpec.ChildCommand,
+		Args:              childArgs,
+		Env:               env,
+		UnsetEnv:          unsetEnv,
+		UpstreamPort:      desc.RuntimeSpec.UpstreamPort,
+		LogPath:           logPath,
+		OuterBindDeadline: time.Duration(api.EffectiveStartupBindDeadlineSeconds(*desc)) * time.Second,
+	}
 }
 
 // serenaProxyChildArgs returns the final upstream child argv:

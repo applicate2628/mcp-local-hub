@@ -22,6 +22,7 @@ import (
 	"mcp-local-hub/internal/api/serena_routing"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/gui"
+	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/tray"
 
 	"github.com/spf13/cobra"
@@ -414,6 +415,7 @@ func newGuiCmdReal() *cobra.Command {
 		resetPort  bool
 		strictMode bool
 		reveal     bool
+		foreground bool
 	)
 	c := &cobra.Command{
 		Use:   "gui",
@@ -588,6 +590,26 @@ activates the first window and exits 0.`,
 				emitInvalidGUIPortWarning(cmd.OutOrStderr(), portIntent, fallback)
 			}
 
+			// Resolve the console-lifetime policy ONCE, here, where the
+			// flags live — the runtime below consumes this decision and
+			// never re-derives it.
+			//
+			// The real discriminator is whether a console exists to
+			// release, not whether the tray is on. Before this, the
+			// release was gated on `!noTray`, which silently overloaded a
+			// cosmetic flag into a process-lifetime policy: an operator
+			// who wanted "hub + GUI, no tray icon" also got terminal-
+			// coupled lifetime, and "tray on, keep my console" was
+			// inexpressible. --foreground now expresses that directly.
+			//
+			// --no-tray keeps implying --foreground deliberately: it is
+			// the documented dev workflow (`mcphub gui --no-browser
+			// --no-tray --port 9125`, CLAUDE.md) and the E2E fixtures,
+			// where Ctrl-C must keep working. Making it stop implying
+			// foreground would silently take the console away from
+			// exactly the runs that need it.
+			releaseConsole := resolveReleaseConsole(ConsoleAttached(), foreground, noTray)
+
 			handoff := os.Getenv(selfRestartHandoffEnv)
 			if isRestartV3ChildLaunch(gui.RestartV3Enabled(), handoff) {
 				handoff = consumeSelfRestartHandoff(handoff)
@@ -597,7 +619,7 @@ activates the first window and exits 0.`,
 				}
 				return startRestartV3GUIChild(
 					cmd, ctx, stop, handoff, pidportPath, descriptor.TargetPort,
-					noBrowser, noTray, strictMode,
+					noBrowser, noTray, strictMode, releaseConsole,
 				)
 			}
 
@@ -646,7 +668,7 @@ activates the first window and exits 0.`,
 							// Take-over succeeded: continue into Phase B
 							// with the freshly-acquired lock. Helper
 							// extraction (no goto) keeps repo style intact.
-							return startGuiServer(cmd, ctx, stop, newLock, port, noBrowser, noTray, strictMode, pidportPath)
+							return startGuiServer(cmd, ctx, stop, newLock, port, noBrowser, noTray, strictMode, releaseConsole, pidportPath)
 						}
 						return forceExit(exitCode)
 					}
@@ -667,12 +689,13 @@ activates the first window and exits 0.`,
 				fmt.Fprintln(cmd.OutOrStdout(), "activated existing mcphub gui")
 				return nil
 			}
-			return startGuiServer(cmd, ctx, stop, lock, port, noBrowser, noTray, strictMode, pidportPath)
+			return startGuiServer(cmd, ctx, stop, lock, port, noBrowser, noTray, strictMode, releaseConsole, pidportPath)
 		},
 	}
 	c.Flags().IntVar(&port, "port", 0, "TCP port on 127.0.0.1 in [1024,65535] (0 = auto-pick from ephemeral)")
 	c.Flags().BoolVar(&noBrowser, "no-browser", false, "do not auto-launch a browser window")
-	c.Flags().BoolVar(&noTray, "no-tray", false, "do not show the system-tray icon")
+	c.Flags().BoolVar(&noTray, "no-tray", false, "do not show the system-tray icon (also implies --foreground: the GUI stays attached to the launching terminal and exits when that terminal closes)")
+	c.Flags().BoolVar(&foreground, "foreground", false, "keep the launching terminal's console: Ctrl-C works and the GUI exits when that terminal closes. Default is background — the GUI releases the console at startup and survives the terminal. Implied by --no-tray.")
 	c.Flags().BoolVar(&force, "force", false, "stuck-instance recovery: print the diagnostic (PRINT-ONLY; add --reveal to also open the lock folder in the file manager). Add --kill to terminate the recorded PID after a three-part identity gate.")
 	c.Flags().BoolVar(&kill, "kill", false, "with --force: kill the recorded PID (image/argv/start-time gate); SIGKILL/TerminateProcess. The kernel releases the flock as a side effect.")
 	c.Flags().BoolVar(&yes, "yes", false, "with --force --kill or --reset-port: skip the confirmation prompt (required in non-interactive shells).")
@@ -812,9 +835,9 @@ func activateDashboardFromTray(
 // Helper-extraction approach (preferred over goto + label) keeps the
 // repo's existing control-flow style. See plan task 4 §"alternative".
 func startGuiServer(cmd *cobra.Command, ctx context.Context, stop context.CancelFunc,
-	lock *gui.SingleInstanceLock, port int, noBrowser, noTray, strictMode bool, pidportPath string) error {
+	lock *gui.SingleInstanceLock, port int, noBrowser, noTray, strictMode, releaseConsole bool, pidportPath string) error {
 	return startGuiServerWithStartup(
-		cmd, ctx, stop, lock, port, noBrowser, noTray, strictMode, pidportPath, nil,
+		cmd, ctx, stop, lock, port, noBrowser, noTray, strictMode, releaseConsole, pidportPath, nil,
 	)
 }
 
@@ -874,6 +897,7 @@ func startRestartV3GUIChild(
 	noBrowser bool,
 	noTray bool,
 	strictMode bool,
+	releaseConsole bool,
 ) error {
 	deadlines := gui.DefaultRestartDeadlines()
 	return runRestartV3ChildStartup(ctx, restartV3ChildStartupConfig{
@@ -899,6 +923,7 @@ func startRestartV3GUIChild(
 				noBrowser,
 				noTray,
 				strictMode,
+				releaseConsole,
 				pidportPath,
 				&guiServerStartup{server: server, listenerOwner: owner, bound: bound},
 			)
@@ -917,13 +942,19 @@ func shouldAutoLaunchBrowser(startup *guiServerStartup, noBrowser bool) bool {
 }
 
 func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop context.CancelFunc,
-	lock gui.SingleInstanceLease, port int, noBrowser, noTray, strictMode bool, pidportPath string,
+	lock gui.SingleInstanceLease, port int, noBrowser, noTray, strictMode, releaseConsole bool, pidportPath string,
 	startup *guiServerStartup) error {
 	ownedLease, ok := lock.(*releaseOnceLease)
 	if !ok {
 		ownedLease = &releaseOnceLease{lease: lock}
 	}
 	defer ownedLease.Release()
+
+	// Route this command's output through the switchable diagnostic sinks
+	// BEFORE anything is written, so every cmd.OutOrStdout()/OutOrStderr()
+	// site below — including ones added later, which is the point — keeps
+	// working after the console is released. Pass-through until then.
+	installGUIRuntimeSinks(cmd)
 
 	// Phase B: start the HTTP server. Server.Start binds 127.0.0.1
 	// on the configured port (0 = OS-assigned) and signals ready
@@ -1235,6 +1266,38 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 			fmt.Fprintf(cmd.OutOrStderr(), "supervisor shutdown: %v\n", err)
 		}
 	}()
+
+	// Startup is complete: the listener is bound, the port has been
+	// reported, and the supervisor is up. From here `mcphub gui` is a
+	// long-lived BACKGROUND app, so release the parent console — otherwise
+	// the terminal it was launched from owns its lifetime and closing that
+	// terminal kills the GUI and its tray icon (CTRL_CLOSE_EVENT to every
+	// attached console client). See process.ReleaseParentConsole.
+	//
+	// releaseConsole is resolved ONCE by newGuiCmdReal from the injected
+	// console state plus --foreground/--no-tray; this layer consumes the
+	// decision and deliberately does not re-derive it from a flag.
+	//
+	// Placed here for two ordering reasons:
+	//   - AFTER every operator-facing startup line ("GUI listening on …",
+	//     "supervisor: …"), because releasing the console discards all
+	//     later console-backed stdout/stderr writes. Diagnostics written
+	//     after this point survive via the durable sink engaged below, not
+	//     by luck.
+	//   - BEFORE the browser and tray spawns below. `mcphub tray` is the
+	//     same Windows-subsystem binary and attaches to ITS parent's
+	//     console at startup; releasing first means the tray has no console
+	//     to inherit, so it survives the terminal too. Releasing after the
+	//     tray spawn would leave the exact "tray disappears" symptom.
+	//
+	// The GUI-spawned SUPERVISOR above is NOT protected by this ordering —
+	// it is spawned before this point and, being the same binary, used to
+	// attach itself to the very console we are about to drop. Its immunity
+	// comes from configureSupervisorDetach marking the child
+	// attach-suppressed, which holds no matter where this release sits.
+	if releaseConsole {
+		releaseConsoleForBackgroundGUI(process.ReleaseParentConsole)
+	}
 
 	if shouldAutoLaunchBrowser(startup, noBrowser) {
 		url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())

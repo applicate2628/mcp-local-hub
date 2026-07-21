@@ -305,11 +305,26 @@ func (w *windowsScheduler) Stop(name string) error {
 	return nil
 }
 
+// statusQueryTimeout bounds the per-task `schtasks /Query`. Measured at ~177ms
+// on a loaded reference host, so 15s never cuts a healthy answer; its job is to
+// stop a wedged schtasks child from blocking the caller forever. Status sits on
+// the GUI readiness path (via the port-ownership gate), where a bare
+// exec.Command + CombinedOutput() is an unbounded wait with no recovery.
+const statusQueryTimeout = 15 * time.Second
+
 func (w *windowsScheduler) Status(name string) (TaskStatus, error) {
-	cmd := exec.Command(w.schtasksPath, "/Query", "/TN", name, "/V", "/FO", "LIST")
+	ctx, cancel := context.WithTimeout(context.Background(), statusQueryTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, w.schtasksPath, "/Query", "/TN", name, "/V", "/FO", "LIST")
+	// Bound the gap between "child killed" and "Wait returns" — a grandchild
+	// holding the output pipe would otherwise keep CombinedOutput blocked.
+	cmd.WaitDelay = 2 * time.Second
 	process.NoConsole(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctx.Err() != nil {
+			return TaskStatus{}, fmt.Errorf("schtasks /Query %q: %w", name, ctx.Err())
+		}
 		return TaskStatus{}, fmt.Errorf("schtasks /Query: %w: %s", err, string(out))
 	}
 	return parseTaskQueryOutput(string(out), name), nil

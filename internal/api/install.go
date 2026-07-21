@@ -685,6 +685,7 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 	// Daemon/Port, which enrichStatusWithRegistry preserves (the manifest-port
 	// lookup only overwrites when the manifest actually has a matching port).
 	mergeSupervisorOnlyDaemonRows(&result, seen)
+	enrichStatusWithSpawnHolds(result)
 	enrichStatusWithRegistry(result, "", regPath)
 	finalizeRegistryOnlyWorkspaceStates(result, registryOnlyLive)
 	if opts.ProbeHealth {
@@ -694,6 +695,63 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 		forceMaterializeWorkspaceScoped(result, regPath)
 	}
 	return result, nil
+}
+
+// enrichStatusWithSpawnHolds fills SpawnHoldReason/SpawnHoldPath on rows built
+// by the StatusWithOpts family from supervisor-state.json.
+//
+// WHY THIS EXISTS. StatusWithOpts builds rows from three sources that CANNOT
+// know about a spawn hold — the scheduler task list, the registry LSP entries,
+// and supervisor-intent.json (the DESCRIPTOR file). The hold lives in
+// supervisor-STATE.json, which none of them read. Without this step
+// `mcphub status --health`, `--workspace-scoped`, `--force-materialize`,
+// StatusWithHealth, and the unwired-host `/api/status` fallback all render a
+// held daemon with NO explanation — while bare `mcphub status` (the supervisor
+// IPC path) explains it fine.
+//
+// That asymmetry is the worst possible shape for this feature: `--health` is
+// precisely what an operator runs WHEN THEY SUSPECT SOMETHING IS WRONG, so the
+// one command most likely to be typed during the incident was the one path that
+// dropped the answer. The pre-spawn gate exists because a correct diagnosis
+// that never reaches a human is worth nothing.
+//
+// One enrichment step rather than three constructor patches: the scheduler and
+// registry rows have no access to the state file at all, so the fix has to be a
+// join, and a single join is also a single place to keep correct.
+//
+// Best-effort by design: an unreadable/absent state file leaves the rows
+// exactly as they were. A missing explanation must never turn a working status
+// command into an error.
+func enrichStatusWithSpawnHolds(rows []DaemonStatus) {
+	if len(rows) == 0 {
+		return
+	}
+	state, err := readSupervisorStateForStatus()
+	if err != nil || state == nil || len(state.Daemons) == 0 {
+		return
+	}
+	for i := range rows {
+		if rows[i].TaskName == "" {
+			continue
+		}
+		d, ok := state.Daemons[canonicalIntentTaskKey(rows[i].TaskName)]
+		if !ok {
+			continue
+		}
+		rows[i].SpawnHoldReason = d.SpawnHoldReason
+		rows[i].SpawnHoldPath = d.SpawnHoldPath
+	}
+}
+
+// readSupervisorStateForStatus loads supervisor-state.json for the status
+// join above. Mirrors readSupervisorIntentForStatus (same state dir, same
+// best-effort contract, same daemonStateRootOverride test seam).
+func readSupervisorStateForStatus() (*SupervisorStateFile, error) {
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		return nil, err
+	}
+	return ReadSupervisorState(joinStateFilePath(stateDir, supervisorStateFileLeaf))
 }
 
 // readSupervisorIntentForStatus loads the supervisor-intent.json descriptor
@@ -2041,13 +2099,36 @@ func portHeldBySupervisorIntentDaemonForPortArm(port int, server, daemon string,
 
 const internalPortParentWalkDepth = 3
 
+// internalPortListenerChainsToWrapperPID reports whether the process listening
+// on an internal upstream port descends from our supervisor wrapper PID.
+//
+// The (owned, resolved) pair drives a DOWNGRADE in the caller: resolved=false
+// means "this host has no usable identity-probe surface", and the caller then
+// trusts the descriptor row alone and returns "held by our daemon". That
+// downgrade is only sound for a STRUCTURALLY absent probe surface. A probe that
+// ran and timed out must NOT take it — otherwise a foreign process squatting the
+// internal port while WMI is congested is reported as ours, and the readiness
+// endpoint answers Ready=true on evidence it never obtained.
+//
+// So a timeout returns (false, TRUE): resolved, and NOT owned. The caller then
+// reports the port as not-held, and readiness degrades to an honest not-ready
+// instead of a silent lie.
 func internalPortListenerChainsToWrapperPID(port int, wrapperPID int) (owned bool, resolved bool) {
 	if wrapperPID <= 0 {
 		return false, true
 	}
-	listenerPID, havePortPID := supervisorOwnedPortPID(port)
-	if !havePortPID {
+	listenerPID, portPIDOutcome := supervisorOwnedPortPIDOutcome(port)
+	switch portPIDOutcome {
+	case probeSurfaceUnavailable:
+		// No port-owner probe wired at all (non-Windows, or an unwired test):
+		// the documented downgrade applies.
 		return false, false
+	case probeUnknown:
+		// The port-owner probe ran and did not answer. The caller only reaches
+		// here for a port that IS bound (fixedPortStatus gates on
+		// !portAvailable), so "bound but no resolvable owner" is an unknown, not
+		// a licence to claim ownership.
+		return false, true
 	}
 	if listenerPID == wrapperPID {
 		return true, true
@@ -2057,8 +2138,14 @@ func internalPortListenerChainsToWrapperPID(port int, wrapperPID int) (owned boo
 	}
 	cur := listenerPID
 	for depth := 0; depth < internalPortParentWalkDepth; depth++ {
-		_, parentPID, ok := processNameAndParentByPID(cur)
-		if !ok {
+		_, parentPID, err := processNameAndParentByPID(cur)
+		if err != nil {
+			if errors.Is(err, ErrProbeTimeout) {
+				// Ownership UNKNOWN — resolved, but explicitly NOT owned.
+				return false, true
+			}
+			// Definitive negative (PID gone, no probe surface for this row):
+			// keep the documented downgrade.
 			return false, false
 		}
 		if parentPID == wrapperPID {
@@ -2153,15 +2240,39 @@ func supervisorIntentDaemonTaskName(row SupervisorDaemon, server, daemon string)
 	return canonicalIntentTaskKey("mcp-local-hub-" + server + "-" + daemon)
 }
 
-func supervisorOwnedPortPID(port int) (int, bool) {
+// probeOutcome is the tri-state every OS-fact ownership probe actually has.
+// Collapsing it to a bool is what let "the probe timed out" be read as "the
+// probe surface is absent", which in turn licensed an ownership downgrade on
+// evidence that was never obtained.
+type probeOutcome int
+
+const (
+	probeResolved           probeOutcome = iota // the probe answered
+	probeSurfaceUnavailable                     // no probe wired on this host (non-Windows, unwired test)
+	probeUnknown                                // the probe ran but did not answer
+)
+
+// supervisorOwnedPortPIDOutcome is the single owner of "who listens on this
+// port", reporting WHY it could not answer rather than only that it could not.
+//
+// A non-nil lookupProcess that returns !ok is classified probeUnknown, not
+// probeSurfaceUnavailable: the ownership gate is only consulted for a port that
+// is already bound (fixedPortStatus gates on !portAvailable), so "bound, yet no
+// resolvable owner" is an unresolved probe — never a reason to claim the port.
+func supervisorOwnedPortPIDOutcome(port int) (int, probeOutcome) {
 	if lookupProcess == nil {
-		return 0, false
+		return 0, probeSurfaceUnavailable
 	}
 	pid, _, _, ok := lookupProcess(port)
 	if !ok || pid == 0 {
-		return 0, false
+		return 0, probeUnknown
 	}
-	return pid, true
+	return pid, probeResolved
+}
+
+func supervisorOwnedPortPID(port int) (int, bool) {
+	pid, outcome := supervisorOwnedPortPIDOutcome(port)
+	return pid, outcome == probeResolved
 }
 
 func statusOwnedByCurrentUser(owner string) bool {
@@ -2207,7 +2318,40 @@ var processIdentityByPID func(pid int) (image, parentImage string, ok bool)
 // for callers that need a bounded ancestry walk rather than only the direct
 // parent image. Production is wired in processes.go next to processIdentityByPID;
 // tests supply fakes.
-var processNameAndParentByPID func(pid int) (image string, parentPID int, ok bool)
+//
+// It returns an ERROR rather than a bool because its one production consumer
+// (internalPortListenerChainsToWrapperPID) must distinguish two cases that a
+// bool collapses into an indistinguishable `!ok`:
+//
+//   - the probe ANSWERED "no such process" — a definitive negative, for which
+//     the documented "process lookup unavailable" ownership downgrade applies;
+//   - the probe DID NOT ANSWER in time (ErrProbeTimeout) — ownership is UNKNOWN,
+//     and taking the downgrade there would report a foreign-squatted port as
+//     "held by our daemon", i.e. Ready=true on evidence we never obtained.
+//
+// Collapsing those two is what let a bounded-probe timeout turn a visible hang
+// into a silent lie. Callers MUST branch on errors.Is(err, ErrProbeTimeout).
+var processNameAndParentByPID func(pid int) (image string, parentPID int, err error)
+
+// errProcessIdentityUnresolved is the NON-TIMEOUT negative: the probe chain
+// finished without being cut by a deadline, and produced no identity row.
+//
+// Deliberately NOT named "process not found", which would overclaim. It covers
+// BOTH "the probe answered and the PID is genuinely absent" AND "the probe
+// surface failed for a non-timeout reason" (wmic absent AND PowerShell refused,
+// e.g. an execution-policy or AppLocker denial). Only the first is proven
+// absence; the second is a surface failure.
+//
+// Both are treated the same by the one consumer
+// (internalPortListenerChainsToWrapperPID): they keep the documented
+// "process lookup unavailable" ownership downgrade. That is the PRE-EXISTING
+// posture, unchanged by the timeout work — a blocked PowerShell is genuinely
+// closer to "no probe surface on this host" than to "the probe is mid-answer".
+// The distinction that MATTERS for correctness, and the one the timeout fix
+// added, is timeout-vs-not: a probe still capable of answering must never
+// license the downgrade. Splitting surface-failure from proven-absence is a
+// further refinement, not a live defect.
+var errProcessIdentityUnresolved = errors.New("process identity unresolved (no timeout)")
 
 const mcphubProcessImageName = "mcphub.exe"
 

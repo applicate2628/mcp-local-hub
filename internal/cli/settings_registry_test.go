@@ -305,6 +305,16 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	// Stderr-sink crash-child fast-path. Same sentinel-gated shape as the
+	// env-dump helper above: TestSupervisorStderrSink_CapturesRuntimePanic
+	// re-execs THIS binary to prove that a real Go runtime panic lands in the
+	// sink file. Proving that requires an actual process death, which cannot
+	// be staged in-process. Short-circuits before m.Run() so the child never
+	// runs the suite. Body lives in supervisor_death_forensics_test.go.
+	if stateDir := os.Getenv(forensicsSinkChildEnv); stateDir != "" {
+		runForensicsSinkCrashChild(stateDir)
+	}
+
 	api.EnableSupervisorIPCTestPipeIsolation()
 
 	// stateDirFunc ships env-free in production (productionStateDir →

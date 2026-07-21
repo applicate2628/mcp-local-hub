@@ -15,6 +15,11 @@
 //   - RAM        — d.ram_bytes, humanized by formatBytes ("48 MB"); the
 //                  row is omitted when absent (non-Windows host, port-
 //                  stale/Idle daemon, or PID-recycled lookup miss).
+//   - Cannot start — d.spawn_hold_reason (pre-spawn existence gate, P1.1):
+//                  the supervisor is HOLDING this daemon because a path it
+//                  needs is absent. Plain-language cause + remedy, because the
+//                  operator this exists for does not read log files. Absent
+//                  reason renders nothing. Copy lives in lib/spawnHold.ts.
 //   - Orphan PID — d.orphan_pid (Windows post-create orphan; diagnostic).
 //   - Job Protection — d.job_protection === false (orphan-protection
 //                  fallback fired; warning badge). nil/true render nothing.
@@ -30,11 +35,28 @@
 // (it carries the interactive Flowbite badge), not here.
 //
 // The markup, classes, and data-testids match what previously lived
-// inline in Dashboard.tsx so the existing Dashboard tests (uptime-row /
-// ram-row / orphan-pid-row / job-protection-row, and the 4-button
-// non-interactive-rows invariant) keep passing unchanged.
+// inline in Dashboard.tsx so the existing Dashboard tests keep passing
+// unchanged.
+//
+// ACTUAL TEST COVERAGE (verified 2026-07-20 by grepping every *.test.* under
+// frontend/src and internal/gui/e2e — do not restate this from memory):
+//   COVERED   uptime-row, ram-row        — Dashboard.test.tsx
+//   COVERED   spawn-hold-row             — Dashboard.test.tsx
+//   COVERED   the non-interactive-rows (button-count) invariant
+//   NOT COVERED  orphan-pid-row, job-protection-row — no test anywhere
+//                references these testids. They render only on rare
+//                failure paths (a post-create orphan whose kill failed; a
+//                per-spawn Job-Object allocation failure), which is exactly
+//                why nobody exercised them — and exactly why a silent
+//                regression there would go unnoticed.
+//
+// An earlier revision of this comment claimed all four were covered. They
+// were not. A wrong coverage claim is worse than no claim: it is the reason
+// a reviewer stops looking. Tracked in
+// work-items/bugs/2026-07-20-spawn-hold-delivery-seams-untested.md.
 
 import { formatBytes, formatUptime } from "../lib/format";
+import { spawnHoldBadge, spawnHoldMessage } from "../lib/spawnHold";
 import type { DaemonStatus } from "../types";
 
 export function DaemonMetrics({ daemon: d }: { daemon: DaemonStatus }) {
@@ -55,6 +77,14 @@ export function DaemonMetrics({ daemon: d }: { daemon: DaemonStatus }) {
         <span>PID</span>
         <span>{d.pid ?? "—"}</span>
       </div>
+      {d.spawn_hold_reason ? (
+        <div class="card-kv card-kv-hold" data-testid="spawn-hold-row" data-hold-reason={d.spawn_hold_reason}>
+          <span>Cannot start</span>
+          <span title={spawnHoldMessage(d.spawn_hold_reason, d.spawn_hold_path ?? "")}>
+            {spawnHoldBadge(d.spawn_hold_reason)} ⚠
+          </span>
+        </div>
+      ) : null}
       {d.orphan_pid ? (
         <div class="card-kv" data-testid="orphan-pid-row">
           <span>Orphan PID</span>

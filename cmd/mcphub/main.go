@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"mcp-local-hub/internal/cli"
 )
@@ -23,12 +24,17 @@ var (
 )
 
 func main() {
-	attachParentConsoleIfAvailable()
+	consoleAttached := attachParentConsoleIfAvailable()
 	cli.SetBuildInfo(version, commit, buildDate)
+	// Parse-once-inject-down: whether this process is a console client is
+	// ambient process state that only main() can observe (the attach is
+	// main's first statement). Every downstream console-lifetime decision
+	// consumes THIS value instead of re-deriving console policy from an
+	// unrelated flag.
+	cli.SetConsoleAttached(consoleAttached)
 
-	// Explorer double-click: no args and no parent console ⇒ auto-launch GUI.
-	// (Detect by checking whether os.Args has any command and stdout is a
-	// pipe/console. If neither, route to `gui`.)
+	// A bare invocation (no subcommand) is the first-run entry point: route
+	// it to `gui` so `mcphub` starts the hub + GUI. See shouldAutoLaunchGUI.
 	if shouldAutoLaunchGUI() {
 		os.Args = append(os.Args, "gui")
 	}
@@ -61,25 +67,52 @@ func main() {
 	}
 }
 
-// shouldAutoLaunchGUI returns true when we were started with no command-line
-// arguments AND we have no console attached — the hallmark of an Explorer
-// double-click on a Windows-subsystem binary.
+// shouldAutoLaunchGUI reports whether this invocation carried no subcommand
+// and should therefore be routed to `gui`.
+//
+// Contract: a BARE `mcphub` launches the hub + GUI, regardless of whether a
+// console is attached. Both entry points the operator actually uses converge
+// here — an Explorer double-click (no console) and `mcphub` typed at a
+// terminal (console attached) — so "install it, run it, it works" holds in
+// both. The pre-2026-07 behavior additionally required "no console attached",
+// which made a terminal `mcphub` dump the full command list instead.
+//
+// Anything with at least one argument is untouched: `mcphub --help`,
+// `mcphub help`, and every subcommand keep their existing behavior because
+// they never reach this branch.
+//
+// OPT-OUT: MCPHUB_NO_AUTO_GUI=1 restores the pre-2026-07 behavior for a
+// bare `mcphub` (print the command list, exit 0). This exists because the
+// routing change above is a CONTRACT change on the bare invocation — it
+// went from "print help, exit 0" to "bind a port, spawn a supervisor,
+// block forever" — and anything that ran bare `mcphub` as a cheap liveness
+// or smoke check (CI step, healthcheck, packaging test, a bare `mcphub`
+// over ssh) would otherwise hang or, if a GUI is already up, exit 1 on the
+// single-instance lock. The env var is the escape hatch for those callers;
+// it is deliberately checked HERE and not in the pure seam below.
 func shouldAutoLaunchGUI() bool {
-	if len(os.Args) > 1 {
+	if autoLaunchGUIOptedOut() {
 		return false
 	}
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		// Invalid handle (typical for GUI subsystem with no parent console,
-		// no redirect) → launch GUI.
-		return true
-	}
-	// If stdout is a character device (console), we're in a shell — don't
-	// auto-launch GUI; let cobra's default help print normally.
-	if (fi.Mode() & os.ModeCharDevice) != 0 {
-		return false
-	}
-	// stdout is a regular file or pipe — user redirected output, so don't
-	// launch GUI; let cobra's default help print to the redirect target.
-	return false
+	return shouldAutoLaunchGUIForArgs(os.Args)
+}
+
+// NoAutoGUIEnv opts a bare `mcphub` out of the auto-GUI route.
+const NoAutoGUIEnv = "MCPHUB_NO_AUTO_GUI"
+
+// autoLaunchGUIOptedOut isolates the ambient-environment read so
+// shouldAutoLaunchGUIForArgs stays pure and table-testable. Truthy
+// parsing mirrors the repo's other env knobs ("1" or "true" after
+// trim+lowercase).
+func autoLaunchGUIOptedOut() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(NoAutoGUIEnv)))
+	return v == "1" || v == "true"
+}
+
+// shouldAutoLaunchGUIForArgs is the pure, testable core of
+// shouldAutoLaunchGUI. args follows the os.Args convention: args[0] is the
+// program path, so a bare invocation has length 1. A zero-length slice is
+// treated as bare (defensive; the Go runtime always supplies argv[0]).
+func shouldAutoLaunchGUIForArgs(args []string) bool {
+	return len(args) <= 1
 }

@@ -33,6 +33,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -279,6 +280,13 @@ type supervisorController struct {
 	failureWindow       time.Duration
 	quarantineThreshold int
 
+	// jitterSource, when non-nil, replaces rand.Float64 as the respawn-backoff
+	// jitter fraction (see respawnJitterFraction). Production leaves it nil.
+	// Tests pin it because the spread is sub-second across most of the ladder —
+	// the first respawn's 1s base takes 0-500ms — so asserting on an armed delay
+	// without pinning it would be a coin flip.
+	jitterSource func() float64
+
 	// F1 pre-spawn port-owner gate (decision D-A) — split across the loop and a
 	// dedicated off-loop worker so the loop NEVER runs the blocking classify/reap
 	// (codex-P1: WMI identity lookup + 5s terminate-wait on the event loop would
@@ -314,6 +322,24 @@ type supervisorController struct {
 	// (Codex PR-3 round-2 P2). Set on a successful dispatch, cleared when the worker
 	// finishes. Combined with the worker's port re-probe staleness guard.
 	portGateInFlight sync.Map // canonical taskName -> struct{}
+
+	// --- Pre-spawn existence gate (P1.1) wiring ------------------------------
+	// spawnPathStatFn is the path probe the gate uses. nil (production and every
+	// existing test) falls back to os.Stat; tests inject it to exercise the
+	// fail-open arms (access-denied, I/O error) without needing a real ACL.
+	// Unlike the F1 port gate this gate needs NO worker: a hold is self-healing
+	// through the armed re-probe timer, so it is ALWAYS ACTIVE rather than
+	// wired-only. It is inert for descriptors with nothing to probe (empty
+	// Command and empty Workspace), which is the shape direct-construction
+	// controller tests use.
+	//
+	// spawnHolds bounds the held-daemon event stream (first observation warn,
+	// then at most one error rollup per missingPathEscalateAfter). It is touched
+	// ONLY from the loop goroutine (preSpawnMissingPathHold / clearSpawnHold are
+	// reached exclusively through handleLoopEvent -> executeSideEffect) and
+	// carries its own mutex so a future off-loop reader is safe.
+	spawnPathStatFn spawnPathStatFunc
+	spawnHolds      *spawnHoldMarkers
 
 	// --- Ephemeral-collision self-heal (L1) wiring ---------------------------
 	// reallocCh carries loop→worker port-REALLOCATION requests (a dynamic-pool
@@ -3513,6 +3539,18 @@ func (c *supervisorController) executeSideEffect(
 		//   2. preSpawnPortGateHold: probe the owner. Free / error / deadline →
 		//      proceed. Owned → hold in backoff (no crash increment) + dispatch the
 		//      classify+reap to the worker, and return the sentinel.
+		//
+		// The EXISTENCE gate (P1.1) runs FIRST and, unlike the port gate, on
+		// EVERY create-process transition including EvChildExit-at-StExiting:
+		// the port gate excludes that event because our own dying child owns
+		// the port, but whether the binary/workspace exists is independent of
+		// which event drove the spawn. It is also the cheaper probe (two local
+		// os.Stat calls vs a netstat owner lookup), so a missing binary short-
+		// circuits before we pay for a port probe that cannot matter. A hold
+		// here consumes NO crash budget and re-probes on the armed timer.
+		if held := c.preSpawnMissingPathHold(d, ev); held != nil {
+			return held
+		}
 		if ev.Kind != api.EvChildExit {
 			if _, cleared := c.gateCleared.LoadAndDelete(ev.TaskName); !cleared {
 				if held := c.preSpawnPortGateHold(d, ev); held != nil {
@@ -3857,7 +3895,24 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 		_ = persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, d.TaskName)
 	}
 
-	backoff := computeRespawnBackoff(failures)
+	// Arm FIRST so the audit row can report the duration actually armed
+	// (base + upward jitter) rather than the pre-jitter ladder value — an
+	// operator correlating the record against observed respawn times must not
+	// see a number the supervisor never used.
+	//
+	// The precise fields are the MILLISECOND ones. Jitter is sub-second across
+	// most of the ladder (the first respawn's 1 s base takes 0-500 ms), so a
+	// seconds-granularity field TRUNCATES the entire spread away: every first
+	// respawn would report 1 regardless of whether 1.0 s or 1.5 s was armed,
+	// which is exactly the correlation this row exists to support.
+	//
+	// `backoff_seconds` is PRE-EXISTING operator-visible output (it predates the
+	// jitter change), so it is preserved verbatim — same name, same
+	// truncated-toward-zero seconds semantics — for log consumers and runbooks
+	// that already grep it. It is a coarse summary, NOT the correlation field;
+	// read backoff_ms when the exact armed delay matters.
+	base := computeRespawnBackoff(failures)
+	armed := c.armRespawnBackoffTimer(*d, d.TaskName, base)
 	if c.events != nil {
 		_ = c.events.Emit(api.SupervisorEvent{
 			Severity: "info",
@@ -3866,13 +3921,17 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 			TaskName: d.TaskName,
 			Body: map[string]any{
 				"failures_in_30m": failures,
-				"backoff_seconds": int(backoff / time.Second),
+				// Coarse, backward-compatible, TRUNCATED to whole seconds.
+				"backoff_seconds": int(armed / time.Second),
+				// Precise: the delay actually armed, and the deterministic
+				// ladder value it was derived from. armed-minus-base is the
+				// jitter that was applied.
+				"backoff_ms":      armed.Milliseconds(),
+				"backoff_base_ms": base.Milliseconds(),
 				"exit_code":       exitCode,
 			},
 		})
 	}
-
-	c.armRespawnBackoffTimer(*d, d.TaskName, backoff)
 }
 
 // nextRespawnArmGen takes the next GLOBAL monotonic arm epoch, records it as the
@@ -3896,7 +3955,14 @@ func (c *supervisorController) nextRespawnArmGen(key string) uint64 {
 // pre-spawn port-owner gate (holdSpawnInBackoff) can re-arm the SAME timer
 // mechanism when it holds a doomed spawn back WITHOUT recording a crash — one
 // owner for "arm the respawn timer", no duplicated timer-goroutine logic.
-func (c *supervisorController) armRespawnBackoffTimer(descriptor api.SupervisorDaemon, taskName string, backoff time.Duration) {
+// Herd decorrelation: the UPWARD-ONLY jitter is applied HERE, at the single
+// owner of "arm the respawn timer", so every arm path (handleBackoffWaiting,
+// holdSpawnInBackoff, the realloc re-arms, the foreign-squatter hold) is
+// decorrelated without duplicating the spread rule per call site. Returns the
+// duration ACTUALLY armed so callers can audit the real value rather than the
+// pre-jitter base.
+func (c *supervisorController) armRespawnBackoffTimer(descriptor api.SupervisorDaemon, taskName string, backoff time.Duration) time.Duration {
+	backoff = jitteredRespawnBackoff(backoff, c.respawnJitterFraction())
 	// Arm the backoff timer in a goroutine so the event loop stays
 	// responsive. When the timer fires, post EvTimerDue so the SM
 	// moves StBackoffWaiting -> StSpawning (or StQuarantined per the
@@ -4012,6 +4078,7 @@ func (c *supervisorController) armRespawnBackoffTimer(descriptor api.SupervisorD
 			}
 		}
 	}()
+	return backoff
 }
 
 // errSpawnHeldPortSquatter is the sentinel executeSideEffect returns when the
@@ -4112,7 +4179,7 @@ func (c *supervisorController) preSpawnPortGateHold(d *api.SupervisorDaemon, ev 
 	dResolved := *d
 	dResolved.Port = port
 	c.tryDispatchPortGate(portGateReq{d: dResolved, ownerPID: ownerPID})
-	return c.holdSpawnInBackoff(d, ev, squatterForeignHoldDelay)
+	return c.holdSpawnInBackoff(d, ev, squatterForeignHoldDelay, errSpawnHeldPortSquatter)
 }
 
 // tryDispatchPortGate hands a port-gate request to the off-loop worker WITHOUT
@@ -4311,9 +4378,12 @@ func (c *supervisorController) handlePortGateReq(ctx context.Context, req portGa
 // march never advances. It mirrors handleBackoffWaiting's tracker/timer wiring
 // minus the RecordCrashAndCountInWindow increment. Returns the sentinel so the
 // force-respawn IPC path reports the deferral (the backoff path drops it).
-func (c *supervisorController) holdSpawnInBackoff(d *api.SupervisorDaemon, ev api.LoopEvent, rearm time.Duration) error {
+// The sentinel parameter lets each pre-spawn gate return its OWN honest cause
+// (port squatter vs missing path) while sharing one hold mechanism — the
+// force-respawn IPC path surfaces that sentinel's message to the operator.
+func (c *supervisorController) holdSpawnInBackoff(d *api.SupervisorDaemon, ev api.LoopEvent, rearm time.Duration, sentinel error) error {
 	if c == nil || d == nil {
-		return errSpawnHeldPortSquatter
+		return sentinel
 	}
 	c.smStates.Store(ev.TaskName, api.StBackoffWaiting)
 	if c.tracker != nil {
@@ -4323,7 +4393,7 @@ func (c *supervisorController) holdSpawnInBackoff(d *api.SupervisorDaemon, ev ap
 		}
 	}
 	c.armRespawnBackoffTimer(*d, d.TaskName, rearm)
-	return errSpawnHeldPortSquatter
+	return sentinel
 }
 
 // computeRespawnBackoff returns the wait duration before the
@@ -4351,6 +4421,64 @@ func computeRespawnBackoff(failures int) time.Duration {
 		return respawnBackoffMax
 	}
 	return d
+}
+
+// respawnBackoffJitterFraction and respawnBackoffJitterMax bound the UPWARD-ONLY
+// spread applied to the base ladder by jitteredRespawnBackoff.
+//
+// Why jitter at all: a fleet of same-server daemons (the six serena workspace
+// proxies) cold-starts within ~1 s of every supervisor start, contends for CPU,
+// fails within ~250 ms of each other, and then re-arms on an IDENTICAL
+// deterministic ladder — so every retry wave re-collides at full width and the
+// contention that caused the first failure is reproduced exactly. Spreading the
+// arm times breaks that lockstep.
+//
+// Why UPWARD-ONLY: a downward (AWS "equal jitter") spread would let a daemon
+// retry SOONER than today's ladder, which would accelerate the sliding-window
+// crash count toward the 10-in-30-min quarantine threshold. Adding only
+// non-negative jitter guarantees the retry rate never exceeds the current
+// schedule, so this cannot regress quarantine timing.
+//
+// The absolute cap keeps the tail bounded: at the respawnBackoffMax plateau the
+// spread is 10 s, not another 30 s of recovery latency.
+const (
+	respawnBackoffJitterFraction = 0.5
+	respawnBackoffJitterMax      = 10 * time.Second
+)
+
+// respawnJitterFraction returns the jitter fraction for the next arm. Production
+// uses rand.Float64; a test may pin it via the jitterSource field to make an
+// armed delay deterministic (the spread is sub-second on most of the ladder, so
+// asserting on it otherwise would be a coin flip).
+func (c *supervisorController) respawnJitterFraction() float64 {
+	if c.jitterSource != nil {
+		return c.jitterSource()
+	}
+	return rand.Float64()
+}
+
+// jitteredRespawnBackoff spreads a base backoff upward by r ∈ [0,1) of the
+// bounded jitter span. PURE in (base, r) so the ladder + spread are testable
+// without touching randomness; armRespawnBackoffTimer supplies the fraction via
+// respawnJitterFraction (rand.Float64 in production, pinned in tests).
+//
+// base <= 0 is returned unchanged: a zero backoff means "respawn now" (the
+// failures<=0 case), and delaying it would change spawn semantics.
+func jitteredRespawnBackoff(base time.Duration, r float64) time.Duration {
+	if base <= 0 {
+		return base
+	}
+	if r < 0 {
+		r = 0
+	}
+	if r > 1 {
+		r = 1
+	}
+	span := time.Duration(float64(base) * respawnBackoffJitterFraction)
+	if span > respawnBackoffJitterMax {
+		span = respawnBackoffJitterMax
+	}
+	return base + time.Duration(float64(span)*r)
 }
 
 // respawnFailureWindow is the sliding window inside which crashes

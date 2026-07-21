@@ -73,6 +73,27 @@ type DaemonStatus struct {
 	// the field) is read after upgrade.
 	JobProtection *bool `json:"job_protection,omitempty"`
 
+	// SpawnHoldReason / SpawnHoldPath surface the pre-spawn existence gate
+	// (P1.1) HOLDING this daemon because a path it needs is absent.
+	// SpawnHoldReason is a stable id ("missing-binary" / "missing-workspace");
+	// SpawnHoldPath is the exact absent path. Both empty on the happy path.
+	//
+	// The id — not a prose string — is the wire contract on purpose: a badge, a
+	// tooltip and a CLI line are three renderings of ONE fact, so each surface
+	// owns its own wording while the id stays the single stable identifier
+	// machine consumers key on.
+	//
+	// This is a HOLD, not a quarantine: no crash budget was consumed and the
+	// daemon starts automatically once the path exists. The GUI Dashboard uses
+	// these to tell a non-technical operator what is wrong and what to do; when
+	// every held daemon shares one path (the incident: all 12 daemons spawn from
+	// one mcphub.exe) the Dashboard collapses them into a single headline rather
+	// than repeating an identical red card per daemon.
+	//
+	// Sourced from the v0.5.x supervisor IPC path.
+	SpawnHoldReason string `json:"spawn_hold_reason,omitempty"`
+	SpawnHoldPath   string `json:"spawn_hold_path,omitempty"`
+
 	// MCP-level health probe (populated only by Status with probeHealth=true).
 	// Running daemon / bound port does NOT imply the MCP protocol is alive —
 	// the subprocess may be in a broken state, or (in gdb/lldb's case) the

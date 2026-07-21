@@ -457,6 +457,16 @@ func supervisorEventLogFileSize(path string) (int64, bool) {
 // failures on the existing .1 are propagated so the caller can
 // surface them (rather than silently overwriting the rename).
 func rotateSupervisorEventLogFile(path string) error {
+	return rotateLogFileToBackup(path)
+}
+
+// rotateLogFileToBackup is the single owner of the "rename active ->
+// ${path}.1, replacing any existing backup" mechanic shared by the
+// supervisor event log and the supervisor stderr sink. Kept as one owner
+// so the two cannot drift on the .1-retention or vanished-file semantics.
+// Per-file delete failures on the existing .1 are propagated so the caller
+// can surface them (rather than silently overwriting the rename).
+func rotateLogFileToBackup(path string) error {
 	target := path + supervisorEventLogRotatedSuffix
 	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove existing rotated %s: %w", target, err)
@@ -465,7 +475,7 @@ func rotateSupervisorEventLogFile(path string) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil // race: file vanished between Stat and Rename, no-op
 		}
-		return fmt.Errorf("rotate supervisor event log %s: %w", path, err)
+		return fmt.Errorf("rotate log file %s: %w", path, err)
 	}
 	return nil
 }

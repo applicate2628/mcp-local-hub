@@ -49,6 +49,13 @@ func newReconcileCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "reconcile",
 		Short: "Surface and (optionally) apply intent/scheduler drift to the running supervisor",
+		// VISIBLE, under Maintenance. The supervisor reconciles continuously
+		// on its own, so this is a manual inspection and repair hatch rather
+		// than a normal operator step — but it is an operator-facing one,
+		// and no runtime error names it, so the top-level listing and shell
+		// completion are its only discovery surfaces (cobra drops hidden
+		// commands from tab-completion as well as from --help). Same
+		// rationale as `scheduler`; root.go groups it under Maintenance.
 		Long: `Walks the supervisor-intent.json daemons, the scheduler-registered
 mcp-local-hub-* tasks, and the per-task daemon-intent.json desired
 state; surfaces every (task, drift-class) pair as a row in the drift

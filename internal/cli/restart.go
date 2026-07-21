@@ -13,26 +13,29 @@ func newRestartCmdReal() *cobra.Command {
 	var all bool
 	c := &cobra.Command{
 		Use:   "restart",
-		Short: "Restart daemon(s): stop + re-run scheduler tasks",
-		Long: `Kill the live daemon process (by port) and re-run its scheduler task(s).
-Equivalent to 'mcphub stop' + 'schtasks /Run' in one step, with the
-kill-before-rerun ordering that a naive 'schtasks /End + /Run' misses
-(scheduler /End only ends the task action, not the spawned daemon; the
-port stays bound, next /Run silently fails).
+		Short: "Restart daemon(s): stop, then bring them back up",
+		Long: `Restart the selected daemons. Supervisor-owned daemons are restarted
+through the supervisor first; anything left over falls through to the
+legacy scheduler-task path for hosts still running that way.
+
+On the scheduler path this preserves the kill-before-rerun ordering that
+a naive 'schtasks /End + /Run' misses (/End only ends the task action,
+not the spawned daemon; the port stays bound and the next /Run silently
+fails).
 
 Examples:
   mcphub restart --server serena                # restart all daemons for one server
   mcphub restart --server serena --daemon codex # just one daemon
-  mcphub restart --all                          # restart every mcp-local-hub-* task
+  mcphub restart --all                          # restart every mcp-local-hub-* daemon
                                                 # (skips -weekly-refresh tasks)
 
 When to use:
   - After rebuilding the mcphub binary — pick up the new embedded code
   - After editing a manifest (daemons read manifests at startup, not live)
   - After updating a secret that a daemon consumes via env
-  - When 'status' shows a task Stopped and you need it back up
+  - When 'status' shows a daemon Stopped and you need it back up
 
-See also: stop, status, scheduler upgrade, setup.`,
+See also: stop, status, logs, supervise.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
 			var (

@@ -945,8 +945,9 @@ func upgradeBuildVersion() string {
 
 // findRunningGUIsOnTarget enumerates running mcphub.exe processes
 // whose image path equals `target` AND whose first non-image argv
-// element is "gui" (or no args at all — Explorer-double-click
-// entry path per cmd/mcphub/main.go shouldAutoLaunchGUI).
+// element is "gui" (or no args at all — the no-arg launch, i.e. an
+// Explorer double-click OR a bare `mcphub` typed at a terminal, both
+// of which cmd/mcphub/main.go shouldAutoLaunchGUI routes to gui).
 //
 // Returns ([], nil) on POSIX (the GUI lives only on Windows
 // builds; the install --upgrade flow on POSIX is mostly a
@@ -989,8 +990,9 @@ func findRunningGUIsOnTarget(a *api.API, target string) ([]api.ProcessInfo, erro
 //     target string.
 //
 // After the image-path match (either path), the next non-space
-// token must be "gui" (or end-of-string for Explorer-double-
-// click launch per cmd/mcphub/main.go shouldAutoLaunchGUI).
+// token must be "gui" (or end-of-string for a no-arg launch —
+// Explorer double-click OR a bare `mcphub` typed at a terminal —
+// per cmd/mcphub/main.go shouldAutoLaunchGUI).
 //
 // Rejects daemon invocations (`mcphub.exe daemon --server ...`),
 // the tray child (`mcphub.exe tray`), watchdog ticks, and
@@ -1152,8 +1154,9 @@ func sameFileOrFalse(path1, path2 string) bool {
 // firstArgIsGUI reports whether the first whitespace-delimited
 // token of rest is exactly "gui" (case-sensitive — Cobra
 // subcommand routing is case-sensitive). Empty rest counts as
-// "gui" (Explorer-double-click landing per cmd/mcphub/main.go
-// shouldAutoLaunchGUI).
+// "gui": a no-arg launch (Explorer double-click OR a bare `mcphub`
+// typed at a terminal) lands on gui per cmd/mcphub/main.go
+// shouldAutoLaunchGUI.
 func firstArgIsGUI(rest string) bool {
 	if rest == "" {
 		return true

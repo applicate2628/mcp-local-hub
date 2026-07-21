@@ -127,6 +127,20 @@ type DaemonRow struct {
 	State         string  `json:"state"` // "running" | "stopped" | "starting" | "failed" | "unknown"
 	RestartCount  int     `json:"restart_count"`
 	LastRestartAt *string `json:"last_restart_at"`
+	// SpawnHoldReason / SpawnHoldPath project the pre-spawn existence-gate hold
+	// (P1.1) onto the /api/health wire.
+	//
+	// Without them this row STRUCTURALLY cannot explain why a daemon is not
+	// running: `state` would read "stopped" with no cause anywhere in the
+	// payload. /api/health is a surface an operator (or a monitor) consults
+	// exactly when something looks wrong, so dropping the one field that names
+	// the cause reproduces the incident this gate was built to end — the
+	// supervisor knowing the answer while every surface stays silent.
+	//
+	// Additive and omitempty: absent on the happy path, so the existing wire
+	// shape is unchanged for healthy fleets.
+	SpawnHoldReason string `json:"spawn_hold_reason,omitempty"`
+	SpawnHoldPath   string `json:"spawn_hold_path,omitempty"`
 }
 
 type ProbesSection struct {
@@ -483,6 +497,10 @@ func (a *API) computeDaemonsSection(ctx context.Context, nowMs int64, refresh bo
 				RAMBytes:    r.RAMBytes,
 				UptimeSec:   r.UptimeSec,
 				State:       normalizeDaemonState(r.State),
+				// Pre-spawn existence-gate hold: carried so /api/health can say
+				// WHY a daemon is stopped, not just that it is.
+				SpawnHoldReason: r.SpawnHoldReason,
+				SpawnHoldPath:   r.SpawnHoldPath,
 				// RestartCount + LastRestartAt: existing DaemonStatus
 				// doesn't currently expose them; default 0/nil. Future
 				// scheduler integration fills them.
