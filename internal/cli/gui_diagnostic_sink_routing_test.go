@@ -2,10 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
+
+	"mcp-local-hub/internal/gui"
 
 	"github.com/spf13/cobra"
 )
@@ -135,18 +139,37 @@ func readGUISource(t *testing.T) ([]byte, error) {
 // needs a bound listener, a supervisor and a tray to reach most of its
 // diagnostics, so they are not exercisable in a unit test on this host.
 //
-// This scans the source instead: within startGuiServerWithStartup's region —
-// everything after installGUIRuntimeSinks — no cmd.OutOrStderr() may appear.
-// The `--force` / `--reset-port` helpers below that region legitimately keep
-// OutOrStderr(): they run BEFORE the sinks are installed, where outWriter is
-// nil and OutOrStderr() genuinely is os.Stderr, and their tests wire a single
-// buffer via SetOut alone.
+// This scans the source instead, and it covers TWO disjoint regions for TWO
+// DIFFERENT reasons, because source-order is not the same as invocation-order:
+//
+//  1. The post-install region — everything from installGUIRuntimeSinks(cmd) to
+//     runSessionCleanupTicker. Every diagnostic there executes AFTER the sink's
+//     SetOut, so an OutOrStderr() there resolves (through cobra's getOut) to the
+//     STDOUT sink and misroutes. The `--force` / `--reset-port` helpers BELOW
+//     that region legitimately keep OutOrStderr(): they run BEFORE the sinks are
+//     installed, where outWriter is nil and OutOrStderr() genuinely is os.Stderr,
+//     and their tests wire a single buffer via SetOut alone.
+//
+//  2. The buildRestartV3ParentDependencies region — which sits ABOVE the install
+//     marker, so region (1) is STRUCTURALLY BLIND to it. That function builds the
+//     targetPort closure, which is DEFINED pre-sink but INVOKED post-sink: it
+//     runs only when RestartCoordinator.Start calls it
+//     (internal/gui/gui_restart_protocol.go) on /api/gui/restart, after the sinks
+//     are installed. So at invocation time its OutOrStderr() resolves to the
+//     STDOUT sink exactly like a post-install site would — a defect region (1)
+//     could never see because the call site's source position is pre-install.
+//     RestartV3 is default-ON (internal/gui/gui_restart_gate.go), so this path is
+//     live. The check is scoped to the function's own byte-region so the
+//     genuinely pre-sink INLINE emitInvalidGUIPortWarning site in newGuiCmdReal's
+//     RunE (which runs before any startGuiServer* call, where OutOrStderr() is
+//     really os.Stderr) is not swept in.
 func TestGUIStderrIntentSitesUseErrOrStderr(t *testing.T) {
 	src, err := readGUISource(t)
 	if err != nil {
 		t.Fatalf("read gui.go: %v", err)
 	}
 
+	// Region 1: everything after the sink is installed.
 	const (
 		installMarker = "installGUIRuntimeSinks(cmd)"
 		endMarker     = "func runSessionCleanupTicker("
@@ -167,5 +190,110 @@ func TestGUIStderrIntentSitesUseErrOrStderr(t *testing.T) {
 			"cobra resolves it through getOut(), so with the sink's SetOut installed it "+
 			"returns the STDOUT sink and the diagnostic lands on stdout. "+
 			"Use cmd.ErrOrStderr() for anything whose intent is stderr.", line)
+	}
+
+	// Region 2: the deferred targetPort closure inside
+	// buildRestartV3ParentDependencies. It is DEFINED before the install marker
+	// (so region 1 cannot see it) but INVOKED after it, so it has the same
+	// misrouting exposure. Scope strictly to this function's byte-region so the
+	// genuinely pre-sink inline site at newGuiCmdReal's RunE is excluded.
+	const (
+		deferredStartMarker = "func buildRestartV3ParentDependencies("
+		deferredEndMarker   = "func runRestartV3ChildStartup("
+	)
+	dStart := bytes.Index(src, []byte(deferredStartMarker))
+	if dStart < 0 {
+		t.Fatalf("marker %q not found; if the function was renamed, update this guard", deferredStartMarker)
+	}
+	dEnd := bytes.Index(src, []byte(deferredEndMarker))
+	if dEnd < 0 || dEnd <= dStart {
+		t.Fatalf("marker %q not found after %q; update this guard", deferredEndMarker, deferredStartMarker)
+	}
+
+	deferredRegion := src[dStart:dEnd]
+	if idx := bytes.Index(deferredRegion, []byte("cmd.OutOrStderr()")); idx >= 0 {
+		line := 1 + bytes.Count(src[:dStart+idx], []byte("\n"))
+		t.Errorf("gui.go:%d uses cmd.OutOrStderr() inside buildRestartV3ParentDependencies. "+
+			"The targetPort closure is DEFINED pre-sink but INVOKED at restart time by "+
+			"RestartCoordinator.Start (internal/gui/gui_restart_protocol.go) AFTER the sinks "+
+			"are installed, so cobra's getOut() resolves it to the STDOUT sink and the "+
+			"invalid-persisted-port warning lands on stdout. Use cmd.ErrOrStderr().", line)
+	}
+	// Positive assertion: the invalid-persisted-port warning must still route
+	// through the stderr accessor. This also fails closed if the emit call is
+	// removed outright, so the region-2 negative check above cannot pass vacuously.
+	if !bytes.Contains(deferredRegion, []byte("cmd.ErrOrStderr()")) {
+		t.Errorf("buildRestartV3ParentDependencies no longer routes any diagnostic through " +
+			"cmd.ErrOrStderr(); the restart-time invalid-persisted-port warning must reach the " +
+			"stderr sink. If emitInvalidGUIPortWarning was moved or removed, update this guard.")
+	}
+}
+
+// TestRestartV3TargetPortWarningRoutesToStderrSink is the runtime companion to
+// the region-2 source guard above. The source guard proves no cmd.OutOrStderr()
+// survives inside buildRestartV3ParentDependencies; this drives the closure for
+// real — with the diagnostic sink already installed — and proves the
+// invalid-persisted-port warning lands on the STDERR sink, never on stdout.
+//
+// It reproduces the defect's invocation-time conditions exactly: the sink is
+// installed on the command FIRST (so cmd.OutOrStderr() would resolve to the
+// STDOUT sink through cobra's getOut), THEN the deferred targetPort closure is
+// invoked, exactly as RestartCoordinator.Start invokes it at /api/gui/restart
+// time. A revert of the emit site to cmd.OutOrStderr() flips both assertions:
+// the warning would appear on stdout and be absent from stderr.
+//
+// Host-safety note: emitInvalidGUIPortWarning also fires an async, best-effort
+// api.LogHubMcpEvent goroutine. The package TestMain redirects the api state
+// root (api.SetDaemonStateRootForTest) plus LOCALAPPDATA / XDG_* to a throwaway
+// temp dir for the whole cli test package, so that log write never touches the
+// real host. Only the synchronous sink write reaches the stdout/stderr buffers
+// asserted below.
+func TestRestartV3TargetPortWarningRoutesToStderrSink(t *testing.T) {
+	cmd, stdout, stderr := installSinksOnFreshCommand(t)
+
+	runtime := restartV3ParentRuntime{
+		// An unparseable persisted port forces guiPortIntentInvalid — the one
+		// classification emitInvalidGUIPortWarning acts on.
+		SettingsGet: func(string) (string, error) { return "not-a-port", nil },
+		Spawn: func([]string, gui.SelfRestartHandoff) (gui.RestartParentChild, error) {
+			t.Fatal("Spawn must not be reached: TargetPort resolves the port, it does not spawn")
+			return nil, nil
+		},
+		Confirm: func(context.Context, int, []byte, gui.AuthenticatedReadinessIdentity) error { return nil },
+		Exit:    func() {},
+	}
+
+	deps, err := buildRestartV3ParentDependencies(
+		context.Background(), cmd, &phaseGCLILease{},
+		filepath.Join(t.TempDir(), "pidport"),
+		func() int { return 9125 },
+		[]string{"gui"}, runtime,
+	)
+	if err != nil {
+		t.Fatalf("buildRestartV3ParentDependencies: %v", err)
+	}
+
+	// A valid actual port passes validPersistedGUIPort; the INVALID persisted
+	// port (from SettingsGet) is what triggers the warning. TargetPort falls back
+	// to the actual port for invalid intent, so this returns 9125, nil.
+	got, err := deps.TargetPort(9125)
+	if err != nil {
+		t.Fatalf("TargetPort: %v", err)
+	}
+	if got != 9125 {
+		t.Fatalf("TargetPort = %d, want 9125 (fallback to actual port on invalid persisted intent)", got)
+	}
+
+	// gui-port-persisted-invalid is the load-bearing token of the warning line
+	// (formatInvalidGUIPortWarning); the async log event carries the same token
+	// but never touches these buffers.
+	const marker = "gui-port-persisted-invalid"
+	if !bytes.Contains(stderr.Bytes(), []byte(marker)) {
+		t.Errorf("restart-time invalid-persisted-port warning did not reach the STDERR sink; "+
+			"stderr=%q stdout=%q", stderr.String(), stdout.String())
+	}
+	if bytes.Contains(stdout.Bytes(), []byte(marker)) {
+		t.Errorf("restart-time invalid-persisted-port warning leaked onto STDOUT; a script "+
+			"consuming `mcphub gui` stdout would see it as normal output. stdout=%q", stdout.String())
 	}
 }

@@ -166,15 +166,21 @@ func buildRestartV3ParentDependencies(
 			if cmd.Flags().Changed("port") {
 				fallback = guiPortFallbackExplicitFlag
 			}
-			// PRE-SINK site: this runs BEFORE installGUIRuntimeSinks, so the
-			// out writer is whatever an embedding caller configured (or nil).
-			// OutOrStderr() is CORRECT here for the same reason the --force /
-			// --reset-port helpers keep it: with no out writer set it IS
-			// os.Stderr, and with one set it honours the caller's stream.
-			// ErrOrStderr() would follow the unset err-writer chain straight to
-			// os.Stderr and silently bypass that caller. The OutOrStderr defect
-			// this change fixes only exists AFTER the sink sets an out writer.
-			emitInvalidGUIPortWarning(cmd.OutOrStderr(), resolved, fallback)
+			// DEFERRED-CLOSURE site: this closure is DEFINED here, ABOVE the
+			// sink-install call in startGuiServerWithStartup — but source order
+			// is NOT invocation order. targetPort is never called inline; it runs only
+			// when RestartCoordinator.Start invokes it
+			// (internal/gui/gui_restart_protocol.go), which fires on
+			// /api/gui/restart — long AFTER startGuiServerWithStartup installed
+			// the sinks. At INVOCATION time cobra's getOut() resolves
+			// OutOrStderr() to the guiRuntimeStdout sink, so OutOrStderr() would
+			// silently land this warning on stdout — exactly the regression this
+			// change fixes. ErrOrStderr() is therefore required. Unlike the
+			// genuinely pre-sink inline site in newGuiCmdReal's RunE, there is no
+			// embedding-caller concern here: by invocation time the sink owns
+			// BOTH streams, so ErrOrStderr() reaches the durable stderr sink, not
+			// a caller's writer.
+			emitInvalidGUIPortWarning(cmd.ErrOrStderr(), resolved, fallback)
 		}
 		intentMu.Lock()
 		intent = resolved
