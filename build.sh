@@ -4,7 +4,7 @@
 # Output goes to bin/ (standard Go project layout; gitignored).
 set -euo pipefail
 
-VERSION="0.4.26"
+VERSION="0.4.27"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
