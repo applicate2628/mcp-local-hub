@@ -157,3 +157,54 @@ Low: the underlying supervisor IPC code is correct (tests pass in
 isolation); the defect is test-harness spawn/poll contention in
 full-package runs. Out of scope for D.3b-2 (migrate command), which is
 hermetic and introduced zero new failures.
+
+---
+
+## Third observation 2026-07-20 — QuiesceHandler drain-count variant (distinct mechanism, same class)
+
+Observed while running the mandatory gate on branch
+`feat/supervisor-death-forensics`. Same class (cli supervise tests fail
+under full-package load, pass in isolation) but a THIRD mechanism, distinct
+from both the pipe-contention (PR #264) and the TempDir-cleanup handle-race
+(2026-07-18) already recorded above:
+
+```
+--- FAIL: TestQuiesceHandler_DrainsTransients (5.05s)
+    supervise_quiesce_test.go:133: expected drained=1, got 0 (still_running=[89092])
+--- FAIL: TestQuiesceHandler_MixedDrainedAndStillRunning (2.05s)
+    supervise_quiesce_test.go:309: expected drained=1 (short child), got 0 (still_running=[166336 95312])
+```
+
+**Mechanism:** these tests spawn a real short-lived child and assert it has
+exited inside a fixed drain window (`supervise_quiesce_test.go:304-306`
+comments it as "short child exits in ~200ms" against a 2000 ms budget). On a
+loaded host the child does not get scheduled to completion inside the
+budget, so `drained` reads 0. It is a wall-clock race against process
+scheduling, not an IPC or cleanup race.
+
+**Load context for the observation:** the host was running a full live fleet
+(38 `mcphub.exe` processes) concurrently with a 12-minute test suite.
+
+**Confirmed pre-existing** — reproduced on pristine `master` @ `d8ab4777`
+with all branch changes stashed, 3 runs: 1 pass / 2 fail, e.g.
+`expected drained=1 (short child), got 0 (still_running=[180624 139212])`.
+
+Additionally proven by code-path exclusion for that branch: the branch's only
+quiesce-adjacent edit is one `defer guardSupervisorGoroutine(...)` line inside
+`handleQuiesceTimers` (the IPC handler goroutine), while
+`internal/cli/supervise_quiesce.go` — which defines `NewQuiesceHandler` and
+`Drain` — is UNMODIFIED, and both failing tests call `handler.Drain(...)`
+directly without entering the IPC handler at all.
+
+`TestSuperviseCommand_StatusIPC_UnknownCommand` also failed in that same
+full-package run and passed in isolation — that one is the already-recorded
+2026-07-18 variant, not a new mechanism.
+
+**Suggested fix for this variant specifically:** the drain tests should not
+assert on natural child-exit timing. Have the short-lived child signal its
+own exit through an observable (a file it removes, or a pipe close) and wait
+on that with a generous deadline, so the assertion is on drain ACCOUNTING
+(`drained = initial - still_alive`) rather than on the host scheduling a
+process within 200 ms. This is the same "engineer the window deterministically
+rather than rely on it staying measurable" discipline the repo already applies
+elsewhere.

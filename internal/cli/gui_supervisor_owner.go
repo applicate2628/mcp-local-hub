@@ -221,7 +221,13 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 			if stderrTail != "" {
 				return nil, fmt.Errorf("supervisor owner: spawned PID %d but IPC not reachable within %s; check supervisor-events.log; supervisor stderr tail: %s", proc.Pid, waitFor, stderrTail)
 			}
-			return nil, fmt.Errorf("supervisor owner: spawned PID %d but IPC not reachable within %s; check supervisor-events.log", proc.Pid, waitFor)
+			// An EMPTY tail no longer means "the supervisor printed nothing".
+			// Once the child passes its singleton lock it rebinds its own
+			// stderr to the sink file, so post-lock crash text — including a
+			// runtime panic traceback — goes there and never reaches this
+			// buffer. Naming the sink keeps the PR #212 r5 diagnosability
+			// contract intact instead of silently pointing at an empty tail.
+			return nil, fmt.Errorf("supervisor owner: spawned PID %d but IPC not reachable within %s; no stderr captured before it rebound stderr — check supervisor-events.log and %s", proc.Pid, waitFor, supervisorStderrSinkHint())
 		}
 		select {
 		case <-ctx.Done():
@@ -600,8 +606,12 @@ func (s *supervisorOwner) startExitMonitor(proc *os.Process) {
 				fmt.Fprintf(s.stderrSink, "warning: supervisor exited unexpectedly (PID %d): %v; stderr tail: %s\n",
 					proc.Pid, exitErr, stderrTail)
 			} else {
-				fmt.Fprintf(s.stderrSink, "warning: supervisor exited unexpectedly (PID %d): %v; check supervisor-events.log\n",
-					proc.Pid, exitErr)
+				// Same blindness as the readiness-timeout path above: a
+				// post-lock death writes its traceback to the child's own
+				// sink, not to this buffer, so an empty tail must point the
+				// operator at the sink rather than imply silence.
+				fmt.Fprintf(s.stderrSink, "warning: supervisor exited unexpectedly (PID %d): %v; no stderr captured before it rebound stderr — check supervisor-events.log and %s\n",
+					proc.Pid, exitErr, supervisorStderrSinkHint())
 			}
 		}
 	}()

@@ -655,6 +655,25 @@ shared with the v0.4.x watchdog state dir for byte-symmetric rollback):
                                       # value; they were removed (2026-06-20 supervisor audit P3) so the
                                       # persisted schema matches what the code actually writes.
   supervisor-events.log               # NEW: JSONL audit trail; 16 KB per-entry cap; 10 MB rotation → .log.1 (schema below)
+  supervisor-stderr.log               # NEW (death forensics): the supervisor's OWN captured stderr. NOT JSONL and
+                                      # NOT written by our code — the supervisor rebinds its OS-level stderr handle
+                                      # (Windows SetStdHandle / POSIX dup) at startup so the Go RUNTIME's panic
+                                      # output (`panic: ...` + goroutine traceback) lands on disk. Closes the gap
+                                      # where the supervisor died 8 of 9 starts with no `supervisor-exit` row and
+                                      # no WER record. Rotated 10 MB → .log.1 AT OPEN ONLY (mid-session rotation
+                                      # would leave a window where a panic is lost), so it is bounded per file
+                                      # across a restart but UNBOUNDED within one long session; the
+                                      # `supervisor-heartbeat` row carries `stderr_sink_oversize` when that fires.
+                                      # Markers: `session-start=` per session, `graceful-exit=` on a clean stop,
+                                      # `error-exit=` on a startup error return, `MAIN-GOROUTINE PANIC=` before a
+                                      # main-goroutine traceback. A session banner with NO following marker is the
+                                      # positive evidence that the session died.
+                                      # REDIRECT FIRES ONLY WHEN STDERR IS NOT A CONSOLE. An operator running
+                                      # `mcphub supervise` in a terminal keeps their stderr untouched. But the test
+                                      # is "is this handle a console", not "did the operator intend to see it": a
+                                      # deliberate shell redirect (`mcphub supervise 2> err.log`) or a non-console
+                                      # terminal such as mintty/Git-Bash is NOT a console handle, so its stderr IS
+                                      # hijacked into this sink. Read supervisor-stderr.log if a redirect looks empty.
   supervisor.lock                     # NEW: supervisor singleton flock; sidecar JSON carries {pid, start_time}
                                       # IPC clients read this BEFORE opening the named pipe / unix socket for handshake
   # migration-journal-<UTC-ts>/       # REMOVED in v0.6 Phase F (the forward-migration engine that wrote it is deleted)

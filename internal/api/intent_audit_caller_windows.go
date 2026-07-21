@@ -8,8 +8,11 @@
 //
 // Stable for fresh process start: GetProcessTimes returns the kernel-
 // recorded creation time of the current process, not now(). Tests in
-// intent_audit_test.go assert the value lands within ±2min of
-// time.Now() because the test process is short-lived.
+// intent_audit_test.go assert the emitted value equals this function's own
+// result. They deliberately do NOT compare against a ±2min window around
+// time.Now(): that older assertion tested how long the api suite takes to
+// reach the test rather than the field's correctness, and it failed the
+// CORRECT implementation once the package run exceeded two minutes.
 
 package api
 
