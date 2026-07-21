@@ -6,19 +6,35 @@ import (
 	"fmt"
 	"os"
 	"syscall"
+
+	"golang.org/x/term"
 )
 
 // stderrIsInteractiveConsole reports whether this process's stderr is a
-// terminal the operator is watching. A tty is a character device; a pipe,
-// a regular file, and a closed/rebound descriptor are not. Stat failure is
-// treated as non-interactive (the detached shape), so the redirect fires
-// and capture is preserved.
+// terminal the operator is actually watching. It exists only to spare such
+// an operator a hijacked terminal; everything else must be captured.
+//
+// This has to be a TTY test, NOT a character-device test. /dev/null is a
+// character device, so the previous os.ModeCharDevice check reported a
+// detached launch like `mcphub supervise 2>/dev/null` as interactive: the
+// redirect was skipped, the Go runtime's panic traceback went to the void,
+// and the audit row claimed "interactive-console" while capture was in fact
+// disabled. That is precisely the detached-death case this sink exists to
+// record, so the predicate was silently defeating its own mechanism.
+//
+// term.IsTerminal is an ioctl termios get (TCGETS on Linux, TIOCGETA on
+// Darwin — the per-OS request constant is maintained upstream). It succeeds
+// only on a real tty and fails with ENOTTY on /dev/null, a pipe, and a
+// regular file. Any failure therefore reads as "not a terminal", which is
+// the fail-safe direction: redirect, and capture. Losing a panic traceback
+// is far worse than hijacking a terminal we were unsure about.
+//
+// fd 2 is tested rather than the os.Stderr variable because fd 2 is the
+// descriptor the Go runtime writes panics to, and the one
+// redirectProcessStderr rebinds. This is the same predicate the sibling
+// daemon-side sink uses (internal/daemon/stderr_sink.go).
 func stderrIsInteractiveConsole() bool {
-	st, err := os.Stderr.Stat()
-	if err != nil {
-		return false
-	}
-	return st.Mode()&os.ModeCharDevice != 0
+	return term.IsTerminal(2)
 }
 
 // sinkOwnsProcessStderrFD reports whether the sink file IS the process

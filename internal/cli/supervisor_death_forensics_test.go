@@ -546,6 +546,73 @@ func TestSupervisorStderrSink_ReleaseOnExitCleanPathReleases(t *testing.T) {
 	}
 }
 
+// TestSupervisorStderrSink_DevNullIsNotInteractive pins the interactive
+// predicate against the failure mode that made it defeat its own mechanism:
+// a character-device test is NOT a terminal test.
+//
+// os.DevNull is a character device but a terminal on neither platform. A
+// detached launch redirected to it — `mcphub supervise 2>/dev/null` — is
+// exactly the shape supervisor-stderr.log exists to capture, so the
+// predicate MUST report it as non-interactive. The superseded
+// os.ModeCharDevice implementation returned true here: the redirect was
+// skipped, a runtime panic traceback was discarded, and the audit row
+// still claimed "interactive-console".
+//
+// WHERE THIS TEST ACTUALLY DISCRIMINATES — read before trusting a green run:
+//
+//   - On POSIX it is decisive. redirectProcessStderr dup3/dup2s onto fd 2,
+//     and both the fixed predicate (term.IsTerminal(2)) and the superseded
+//     one (os.Stderr.Stat(), i.e. fstat on fd 2) observe that rebinding.
+//     Mutation-proven on real Linux: restoring the ModeCharDevice body makes
+//     this test FAIL.
+//   - On Windows it exercises the path but CANNOT tell the two predicates
+//     apart, so a green run here is not evidence for the fix. Windows binds
+//     stderr via SetStdHandle, which moves the OS std handle while leaving
+//     the os.Stderr variable on the original; a char-device mutant reading
+//     os.Stderr.Stat() therefore never observes NUL and survives. The
+//     Windows twin is GetConsoleMode-based and was never affected by this
+//     defect.
+//
+// The test binds the PROCESS stderr, so it restores unconditionally — a
+// leaked binding would silently blind every later test in this binary.
+func TestSupervisorStderrSink_DevNullIsNotInteractive(t *testing.T) {
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open %s: %v", os.DevNull, err)
+	}
+	defer func() { _ = devNull.Close() }()
+
+	// Premise guard. If this platform ever stopped reporting DevNull as a
+	// character device, the assertion below would still pass but would no
+	// longer distinguish a tty test from a char-device test — it would go
+	// vacuous without failing. Refuse to report a silent pass.
+	st, err := devNull.Stat()
+	if err != nil {
+		t.Fatalf("stat %s: %v", os.DevNull, err)
+	}
+	if st.Mode()&os.ModeCharDevice == 0 {
+		t.Skipf("%s is not a character device here (mode %v); this test can no longer tell a tty check apart from a char-device check", os.DevNull, st.Mode())
+	}
+
+	saved, err := captureStderrBinding()
+	if err != nil {
+		t.Fatalf("capture stderr binding: %v", err)
+	}
+	defer func() {
+		if err := saved.restore(); err != nil {
+			t.Errorf("restore process stderr (later tests in this binary would lose stderr): %v", err)
+		}
+	}()
+
+	if err := redirectProcessStderr(devNull); err != nil {
+		t.Fatalf("bind process stderr to %s: %v", os.DevNull, err)
+	}
+
+	if stderrIsInteractiveConsole() {
+		t.Fatalf("stderr bound to %s reported as an interactive console; the redirect would be skipped and a runtime panic traceback discarded — the exact detached-death case this sink exists to record", os.DevNull)
+	}
+}
+
 // TestSupervisorStderrSink_OwnsProcessStderrFDPredicate guards the release
 // path's fd-2 exception in the direction this host can actually observe.
 //
