@@ -120,9 +120,9 @@ func TestGuardSupervisorGoroutine_NilEventLogStillReRaises(t *testing.T) {
 
 func panicFromNestedFrame() { panic("forensics-probe-panic") }
 
-// wedgeSupervisorEventLog parks the event log so that any further Emit —
-// blocking OR EmitWithTimeout — cannot make progress, and returns a release
-// func.
+// wedgeSupervisorEventLog parks the event log so a blocking Emit cannot make
+// progress and a timeout-mode Emit must wait until its deadline, then returns
+// a release func.
 //
 // Two things are wedged, and BOTH are required to model the real hazard:
 //
@@ -132,8 +132,8 @@ func panicFromNestedFrame() { panic("forensics-probe-panic") }
 //     BLOCKING Emit — supervisor_events.go:315 takes `mu` unbounded and :324
 //     then waits on the flock while still holding it.
 //
-// (2) is the part that makes EmitWithTimeout insufficient on its own: a
-// timeout-mode emit parks on `mu` before its own deadline logic runs.
+// (2) causes a timeout-mode emit to wait for the mutex until its configured
+// deadline, which is why this helper still models contention for guard tests.
 //
 // The helper ASSERTS the wedge actually took hold. Without that assertion a
 // change in flock semantics would silently turn every test built on this into

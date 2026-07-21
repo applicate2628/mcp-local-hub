@@ -27,21 +27,17 @@ const supervisorGoroutinePanicEmitBudget = 2 * time.Second
 // emitSupervisorPanicEventBounded writes the panic row without ever blocking
 // the caller for longer than supervisorGoroutinePanicEmitBudget.
 //
-// WHY A GOROUTINE + SELECT RATHER THAN JUST EmitWithTimeout. Both are needed,
-// and the outer bound is the load-bearing one:
+// WHY A GOROUTINE + SELECT AROUND EmitWithTimeout. The event log provides its
+// own bounded wait, while this outer bound independently protects the panic
+// path should that implementation regress or an unexpected blocking operation
+// be added to it:
 //
-//	SupervisorEventLog.emit (supervisor_events.go:305-317) takes the
-//	in-process mutex `l.mu` with an UNBOUNDED Lock() for every mode except
-//	TryEmit, and then — in the blocking mode — holds that mutex across an
-//	UNBOUNDED l.lock.Lock() flock wait (:324). So a single concurrent
-//	blocking Emit (the supervisor heartbeat is exactly such a caller) that is
-//	parked on a wedged flock holds `mu` indefinitely, and a subsequent
-//	EmitWithTimeout parks on `mu` BEFORE its own timeout logic is ever
-//	reached. EmitWithTimeout alone therefore does NOT bound this call site.
+//	A blocking Emit can hold the event-log mutex indefinitely while it waits
+//	for a wedged flock. EmitWithTimeout bounds its own wait for both locks,
+//	but the outer bound keeps the panic path independent of those internals.
 //
 // Bounding the wait in the GUARD, independent of the event log's internals,
-// is the only construction that holds regardless of which mode another
-// goroutine is wedged in.
+// ensures a wedged logger can never delay re-raising this panic.
 //
 // WHY IT MATTERS SO MUCH HERE. Without the bound, a panic in any guarded
 // goroutine turned into a permanently HUNG supervisor: it never reached
@@ -55,9 +51,9 @@ const supervisorGoroutinePanicEmitBudget = 2 * time.Second
 // bookkeeping and must never be allowed to delay or prevent it — matching the
 // ordering discipline the sibling stall-dump work uses.
 //
-// The abandoned goroutine is deliberately not waited on: it may stay parked on
-// the wedged lock forever, but the process is about to be terminated by the
-// runtime, so it cannot outlive anything.
+// The abandoned goroutine is deliberately not waited on. It normally exits
+// through EmitWithTimeout's bound; if that guarantee regresses, the process is
+// about to be terminated by the runtime, so it cannot outlive anything.
 func emitSupervisorPanicEventBounded(events *api.SupervisorEventLog, evt api.SupervisorEvent) {
 	done := make(chan struct{})
 	go func() {

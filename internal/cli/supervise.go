@@ -1843,16 +1843,13 @@ func serveIPCConn(conn net.Conn, listener ipcAcceptor, deps ipcDispatchDeps, tim
 		// park these per-connection goroutines. TryEmit skips on
 		// contention (both the in-process mutex AND the cross-process
 		// flock are TryLock'd), so each goroutine returns immediately,
-		// truly bounding accumulation. EmitWithTimeout does NOT work
-		// here: SupervisorEventLog.emit takes the in-process mutex with a
-		// blocking Lock BEFORE its timeout applies (only the flock wait
-		// is bounded), so under combined contention the Nth writer still
-		// queues ~N×timeout on that mutex (codex review, PR #530). The
-		// cost of TryEmit is a best-effort drop of some ipc-hello-write-
-		// error rows under a burst — acceptable: bounding the goroutine
-		// park is the safety priority, and the burst is independently
-		// visible via the flap / status timeouts. Nil-guarded to match
-		// the ipc-command call site in handleIPCConn.
+		// truly bounding accumulation. EmitWithTimeout also has a bounded
+		// wait, but TryEmit avoids keeping a goroutine alive for even that
+		// budget during a failure flood. The cost is a best-effort drop of
+		// some ipc-hello-write-error rows under a burst — acceptable:
+		// bounding the goroutine park is the safety priority, and the
+		// burst is independently visible via the flap / status timeouts.
+		// Nil-guarded to match the ipc-command call site in handleIPCConn.
 		if deps.events != nil {
 			_ = deps.events.TryEmit(api.SupervisorEvent{
 				Severity: "warn",
