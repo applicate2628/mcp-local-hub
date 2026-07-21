@@ -384,7 +384,7 @@ func availabilityProbePasses(p *config.AvailabilityProbe) (bool, string) {
 // "free") and a port bound-but-not-listening (Codex #377 r15/r16). Preflight
 // keeps its own dial-based, supervisor-intent-aware collision check (richer than
 // this simple probe) and only shares the range guard. Returns (ok, reason).
-func fixedPortStatus(port int, server, daemon string, internal bool) (bool, string) {
+func fixedPortStatus(budget readinessBudget, port int, server, daemon string, internal bool) (bool, string) {
 	if port < 1 || port > 65535 {
 		kind := "port"
 		if internal {
@@ -392,10 +392,51 @@ func fixedPortStatus(port int, server, daemon string, internal bool) (bool, stri
 		}
 		return false, fmt.Sprintf("%s %d is outside the valid range 1..65535", kind, port)
 	}
-	if !portAvailable(port) && !portHeldByOurDaemonForPortArm(port, server, daemon, internal) {
-		return false, fmt.Sprintf("port %d is already in use by another process", port)
+	if portAvailable(port) {
+		return true, ""
+	}
+	// The port IS bound. Establishing WHOSE it is costs a chain of WMI-backed OS
+	// probes whose individual caps are deliberately generous (see
+	// probeCommandTimeout). Checking the shared budget HERE — not merely between
+	// servers — is what keeps those generous caps from stacking: the report can
+	// overshoot by at most one probe chain rather than by one whole server.
+	if budget.exhausted() {
+		// Distinct from the foreign-owner verdict below: we did not probe at all,
+		// so this is UNKNOWN. The operator runbooks differ — "WMI is slow, retry"
+		// is not "reclaim a squatted port".
+		return false, fmt.Sprintf("port %d is in use, but its ownership was NOT probed: the readiness time budget was already spent. This is UNKNOWN, not a detected conflict — re-check this server on its own for a definitive answer", port)
+	}
+	if !portHeldByOurDaemonForPortArm(port, server, daemon, internal) {
+		// Fail-closed and HONEST about which of the two it is. The ownership
+		// gate returns false both when the holder is provably foreign AND when
+		// the OS ownership probe ran but could not answer (wmic/PowerShell hit
+		// their deadline, the PID vanished mid-probe). Claiming "another process"
+		// in the second case asserts something we did not establish.
+		return false, fmt.Sprintf("port %d is in use by a process that is not this server's daemon, or its ownership could not be verified", port)
 	}
 	return true, ""
+}
+
+// readinessBudget is the ONE deadline a readiness report shares across all of
+// its OS probes. The zero value is an unlimited budget, so callers that do not
+// opt in (and tests) behave exactly as before.
+//
+// It exists because per-probe caps alone cannot bound a report: N ports x a
+// generous per-probe cap still stacks without something checking elapsed time
+// BETWEEN probes. This is that something.
+type readinessBudget struct {
+	deadline time.Time
+}
+
+func newReadinessBudget(d time.Duration) readinessBudget {
+	return readinessBudget{deadline: readinessClock().Add(d)}
+}
+
+func (b readinessBudget) exhausted() bool {
+	if b.deadline.IsZero() {
+		return false
+	}
+	return !readinessClock().Before(b.deadline)
 }
 
 // entryScript is one entry-script target the node/python gate stats. daemon is
@@ -500,10 +541,23 @@ func CheckServerReadiness(m *config.ServerManifest) *ReadinessReport {
 	return CheckServerReadinessWithScope(m, AdmissionScope{})
 }
 
+// singleServerReadinessBudget bounds ONE server's report — the `?server=` GET
+// and the draft POST. Sized larger than a single server's share of the fleet
+// budget because this path is an explicit, operator-initiated request about one
+// server: it is worth probing properly rather than truncating early. Still
+// finite, so a WMI-congested host cannot hold the request open indefinitely.
+var singleServerReadinessBudget = 90 * time.Second
+
 // CheckServerReadinessWithScope runs readiness checks for the install scope.
 // A daemon-filtered install must not be blocked by sibling daemons that the
 // actual install path will skip during Preflight and planning.
 func CheckServerReadinessWithScope(m *config.ServerManifest, scope AdmissionScope) *ReadinessReport {
+	return checkServerReadinessWithBudget(m, scope, newReadinessBudget(singleServerReadinessBudget))
+}
+
+// checkServerReadinessWithBudget is the implementation; the budget is the ONE
+// deadline every OS probe in this report shares.
+func checkServerReadinessWithBudget(m *config.ServerManifest, scope AdmissionScope, budget readinessBudget) *ReadinessReport {
 	// Run the scope-independent admission gate ONCE and reuse it both to seed
 	// Ready and to surface its advisory (Optional) findings as visible rows
 	// below — re-calling AdmissionCheck would repeat the port/binary probes.
@@ -799,7 +853,7 @@ func CheckServerReadinessWithScope(m *config.ServerManifest, scope AdmissionScop
 			continue
 		}
 		portName := fmt.Sprintf("port %d (%s)", d.Port, d.Name)
-		if ok, reason := fixedPortStatus(d.Port, m.Name, d.Name, false); !ok {
+		if ok, reason := fixedPortStatus(budget, d.Port, m.Name, d.Name, false); !ok {
 			add(ReadinessRequirement{Name: portName, OK: false, Reason: reason,
 				Fix: "Set a valid free fixed port (1..65535) for this daemon in the manifest."})
 		} else {
@@ -808,7 +862,7 @@ func CheckServerReadinessWithScope(m *config.ServerManifest, scope AdmissionScop
 		if m.Transport == config.TransportNativeHTTP {
 			internal := d.Port + config.NativeHTTPInternalPortOffset
 			iname := fmt.Sprintf("internal port %d (%s)", internal, d.Name)
-			if ok, reason := fixedPortStatus(internal, m.Name, d.Name, true); !ok {
+			if ok, reason := fixedPortStatus(budget, internal, m.Name, d.Name, true); !ok {
 				add(ReadinessRequirement{Name: iname, OK: false, Reason: reason,
 					Fix: "Free the port or change the daemon port (internal = external + offset, both must be 1..65535)."})
 			} else {
@@ -1090,6 +1144,12 @@ func CheckServerReadinessByName(name string) (*ReadinessReport, error) {
 // CheckServerReadinessByNameWithScope resolves a server manifest and runs a
 // scope-aware readiness report for partial installs.
 func CheckServerReadinessByNameWithScope(name string, scope AdmissionScope) (*ReadinessReport, error) {
+	return checkServerReadinessByNameWithBudget(name, scope, newReadinessBudget(singleServerReadinessBudget))
+}
+
+// checkServerReadinessByNameWithBudget lets the fleet fan-out pass ONE budget
+// shared across every server, instead of each server minting a fresh one.
+func checkServerReadinessByNameWithBudget(name string, scope AdmissionScope, budget readinessBudget) (*ReadinessReport, error) {
 	data, err := loadManifestYAMLEmbedFirst(name)
 	if err != nil {
 		return nil, fmt.Errorf("resolve manifest %q: %w", name, err)
@@ -1098,7 +1158,83 @@ func CheckServerReadinessByNameWithScope(name string, scope AdmissionScope) (*Re
 	if err != nil {
 		return nil, fmt.Errorf("parse manifest %q: %w", name, err)
 	}
-	return CheckServerReadinessWithScope(m, scope), nil
+	return checkServerReadinessWithBudget(m, scope, budget), nil
+}
+
+// allServerReadinessBudget bounds the WHOLE fleet-wide readiness report.
+//
+// Sizing argument (not a round guess):
+//   - Readiness is a PRE-install diagnostic. In its intended use the server is
+//     not running yet, so its port is free, portAvailable answers from a plain
+//     net.Listen, and NO subprocess probe runs at all — the whole report is
+//     milliseconds. The budget is invisible in the common case.
+//   - The expensive path (netstat + wmic + PowerShell + schtasks per port) only
+//     fires for ports ALREADY in use, i.e. servers already running — precisely
+//     the servers whose readiness answer matters least.
+//   - This endpoint is operator-facing (the GUI readiness panel). 20s is the
+//     target for "slow but still a working panel"; beyond that the operator
+//     reads the UI as broken, and an honest partial report beats a spinner.
+//
+// WORST CASE IS MINUTES, NOT 20s — and NOT the "20s + one chain = 80s" this
+// comment claimed in an earlier revision. That figure was wrong by an order of
+// magnitude, for two reasons worth naming so the next reader does not re-derive
+// them:
+//
+//  1. THE BUDGET DOES NOT GATE THE PROBES THAT SEED `Ready`. AdmissionCheck
+//     (called un-budgeted at the top of checkServerReadinessWithBudget) runs the
+//     FULL ownership chain per in-use port arm — admission_check.go:216 and :227
+//     — BEFORE any budget-gated fixedPortStatus row executes. The budget only
+//     gates the detail rows layered on top.
+//  2. ONE OWNERSHIP CALL IS NOT ONE CHAIN. portHeldByOurDaemonForPortArm stacks
+//     several independently-capped probes, and the ancestry walk mints a FRESH
+//     probeChainBudget per iteration (internalPortParentWalkDepth = 3):
+//
+//     IPC ~5s + lookupProcess (netstat 45s + wmic 45s) + walk 3x60s
+//     + lookupProcess again 90s + processIdentityByPID 2x60s + schtasks 15s
+//     ~= 500s for ONE port arm on a fully wedged host,
+//     x2 arms for a native-http daemon ~= 16 min, more for a multi-daemon manifest.
+//
+// That is a full-wedge CEILING with every cap maxed, not a typical figure: a
+// healthy host never enters it (a free port short-circuits at portAvailable
+// before any subprocess runs), and the measured real-world fleet report is ~24s.
+// But the ceiling is minutes and the comment must say so.
+//
+// THE TRADE, STATED PLAINLY: raising the probe caps (15s/20s -> 45s/60s) to
+// accommodate the repo's recorded 31s wmic measurement made this wedged corner
+// roughly 3x SLOWER than before (~180s -> ~500s per port arm). That is a
+// deliberate choice of honesty over latency — a cap low enough to keep the
+// corner fast manufactures false timeouts on a healthy-but-slow host, and a
+// report that is mostly UNKNOWN is useless. Bounded-and-slow beats fast-and-wrong.
+//
+// Closing the gap needs the budget threaded into AdmissionCheck, which is SHARED
+// with the install Preflight gate (install.go:1844) where truncating a probe
+// would be actively harmful — so it is filed, not forced (see the
+// readiness-fan-out bug, "un-gated admission phase").
+//
+// Kept as a var, not a const, so the fan-out regression test can shrink it and
+// exercise the truncation path deterministically instead of waiting 20s.
+var allServerReadinessBudget = 20 * time.Second
+
+// readinessClock is the time source for the fan-out budget. Test seam: a fake
+// clock makes budget exhaustion deterministic rather than dependent on real
+// probe latency (a test that hopes a real probe is slow is a design defect).
+var readinessClock = time.Now
+
+// budgetExhaustedReport is the HONEST degraded result for a server the fan-out
+// budget did not reach. It is never Ready: an unprobed server is unknown, and a
+// readiness endpoint that reports unknown as ready is worse than one that
+// times out.
+func budgetExhaustedReport(name string) *ReadinessReport {
+	return &ReadinessReport{
+		Server: name,
+		Ready:  false,
+		Requirements: []ReadinessRequirement{{
+			Name:   "readiness probe",
+			OK:     false,
+			Reason: fmt.Sprintf("readiness was NOT determined for this server: the fleet-wide probe budget (%s) was exhausted before it was checked, so this is an UNKNOWN state, not a detected problem", allServerReadinessBudget),
+			Fix:    "Check this server on its own (its per-server readiness view re-runs the probes with a fresh budget). A whole-fleet timeout usually means many daemons are already running and the per-port OS ownership probes are queueing on the Windows WMI service.",
+		}},
+	}
 }
 
 // AllServerReadiness resolves every embedded/installed server manifest and
@@ -1114,9 +1250,28 @@ func AllServerReadiness() []*ReadinessReport {
 	if err != nil {
 		return nil
 	}
+	// Per-probe deadlines (process_probe_exec.go) stop any SINGLE probe from
+	// blocking forever, but they do not stop N servers × M ports × several
+	// WMI-backed probes from STACKING: measured on a loaded reference host, this
+	// serial fan-out took 338s for 15 servers, overrunning even a 5-minute
+	// budget. The fan-out is this function's own responsibility, so the
+	// whole-report budget lives here — the only layer that knows how many
+	// servers there are.
+	//
+	// Probes run SERIALLY (one server at a time, one port at a time). The budget
+	// is therefore checked between servers, and the total bound is
+	// budget + one server's worst-case probe cost — the overshoot is bounded
+	// because that last server's own probes are individually deadline-capped.
+	budget := newReadinessBudget(allServerReadinessBudget)
 	out := make([]*ReadinessReport, 0, len(names))
-	for _, name := range names {
-		rep, err := CheckServerReadinessByName(name)
+	for i, name := range names {
+		// Never truncate the FIRST server: a report where nothing was probed is
+		// useless, and the per-probe caps already bound one server's cost.
+		if i > 0 && budget.exhausted() {
+			out = append(out, budgetExhaustedReport(name))
+			continue
+		}
+		rep, err := checkServerReadinessByNameWithBudget(name, AdmissionScope{}, budget)
 		if err != nil {
 			// err wraps the manifest's absolute disk path (os.PathError); this
 			// report is GUI-rendered, so do NOT echo it — name only the server
