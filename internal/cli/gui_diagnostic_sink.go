@@ -35,8 +35,21 @@ var logGUIDiagnosticEvent = api.LogHubMcpEvent
 //
 // Fixing that per-call-site would mean editing every writer and trusting
 // every future one to remember. Instead the sink is installed as the
-// command's out/err writer, so existing AND future `cmd.OutOrStderr()`
-// sites are covered without knowing this exists.
+// command's out AND err writer, so existing AND future sites that resolve
+// a writer through the command are covered without knowing this exists.
+//
+// One cobra detail decides WHICH sink a site gets, and an earlier revision
+// of this comment got it wrong. cobra resolves OutOrStdout() and
+// OutOrStderr() through the SAME getOut() (command.go:393-400), and getOut
+// returns c.outWriter whenever it is non-nil (command.go:412-415) — the
+// os.Stderr argument is only the default for the no-out-writer case. So
+// once SetOut is installed below, `cmd.OutOrStderr()` resolves to the
+// STDOUT sink. Installing the sinks does NOT retarget it, and never did.
+//
+// `cmd.ErrOrStderr()` (getErr → c.errWriter) is the only accessor that
+// reaches guiRuntimeStderr. Every diagnostic whose intent is stderr must
+// therefore call ErrOrStderr(); on this command OutOrStderr() means
+// "stdout, falling back to stderr" and nothing more.
 //
 // Post-release it DUAL-WRITES: durable hub-mcp event first, then the
 // original stream. The second write matters — FreeConsole closes console
@@ -66,7 +79,7 @@ func newConsoleReleaseSink(fallback io.Writer) *consoleReleaseSink {
 // setFallback points the sink at the stream it should keep forwarding to.
 //
 // The identity guard is load-bearing, not defensive noise: the install
-// sequence in startGuiServerWithStartup captures cmd.OutOrStderr() and
+// sequence in startGuiServerWithStartup captures cmd.ErrOrStderr() and
 // then calls cmd.SetErr(sink), so a SECOND GUI start in the same process
 // (an in-process test) would otherwise hand the sink itself as its own
 // fallback and every write would recurse until the stack died.
@@ -134,14 +147,20 @@ var (
 // installGUIRuntimeSinks routes the GUI command's output through the
 // switchable sinks. Capturing the current writers BEFORE SetOut/SetErr
 // preserves whatever a caller (or a test) injected as the real target.
+//
+// The stderr fallback is captured via ErrOrStderr(), NOT OutOrStderr():
+// per the getOut note above, the latter would hand the stderr sink the OUT
+// writer — a test's stdout buffer on the first install, and guiRuntimeStdout
+// itself on a second one in the same process, which the setFallback identity
+// guard cannot catch because guiRuntimeStdout is not guiRuntimeStderr.
 func installGUIRuntimeSinks(cmd interface {
 	OutOrStdout() io.Writer
-	OutOrStderr() io.Writer
+	ErrOrStderr() io.Writer
 	SetOut(io.Writer)
 	SetErr(io.Writer)
 }) {
 	guiRuntimeStdout.setFallback(cmd.OutOrStdout())
-	guiRuntimeStderr.setFallback(cmd.OutOrStderr())
+	guiRuntimeStderr.setFallback(cmd.ErrOrStderr())
 	cmd.SetOut(guiRuntimeStdout)
 	cmd.SetErr(guiRuntimeStderr)
 }

@@ -166,7 +166,21 @@ func buildRestartV3ParentDependencies(
 			if cmd.Flags().Changed("port") {
 				fallback = guiPortFallbackExplicitFlag
 			}
-			emitInvalidGUIPortWarning(cmd.OutOrStderr(), resolved, fallback)
+			// DEFERRED-CLOSURE site: this closure is DEFINED here, ABOVE the
+			// sink-install call in startGuiServerWithStartup — but source order
+			// is NOT invocation order. targetPort is never called inline; it runs only
+			// when RestartCoordinator.Start invokes it
+			// (internal/gui/gui_restart_protocol.go), which fires on
+			// /api/gui/restart — long AFTER startGuiServerWithStartup installed
+			// the sinks. At INVOCATION time cobra's getOut() resolves
+			// OutOrStderr() to the guiRuntimeStdout sink, so OutOrStderr() would
+			// silently land this warning on stdout — exactly the regression this
+			// change fixes. ErrOrStderr() is therefore required. Unlike the
+			// genuinely pre-sink inline site in newGuiCmdReal's RunE, there is no
+			// embedding-caller concern here: by invocation time the sink owns
+			// BOTH streams, so ErrOrStderr() reaches the durable stderr sink, not
+			// a caller's writer.
+			emitInvalidGUIPortWarning(cmd.ErrOrStderr(), resolved, fallback)
 		}
 		intentMu.Lock()
 		intent = resolved
@@ -587,6 +601,9 @@ activates the first window and exits 0.`,
 				if flagChanged {
 					fallback = guiPortFallbackExplicitFlag
 				}
+				// PRE-SINK site — see the sibling call in the restart-argv path.
+				// installGUIRuntimeSinks has not run yet, so OutOrStderr() still
+				// means stderr-or-the-caller's-stream, which is what is wanted.
 				emitInvalidGUIPortWarning(cmd.OutOrStderr(), portIntent, fallback)
 			}
 
@@ -951,9 +968,15 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	defer ownedLease.Release()
 
 	// Route this command's output through the switchable diagnostic sinks
-	// BEFORE anything is written, so every cmd.OutOrStdout()/OutOrStderr()
+	// BEFORE anything is written, so every cmd.OutOrStdout()/ErrOrStderr()
 	// site below — including ones added later, which is the point — keeps
 	// working after the console is released. Pass-through until then.
+	//
+	// Below this line the stderr accessor is ErrOrStderr(), NOT OutOrStderr():
+	// cobra resolves OutOrStderr() through getOut(), which returns the out
+	// writer once SetOut is installed here, so an OutOrStderr() diagnostic
+	// would land on STDOUT. See gui_diagnostic_sink.go. The `--force` /
+	// `--reset-port` paths run BEFORE this call and are unaffected either way.
 	installGUIRuntimeSinks(cmd)
 
 	// Phase B: start the HTTP server. Server.Start binds 127.0.0.1
@@ -1011,17 +1034,17 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	if regErr == nil {
 		reg := api.NewRegistry(registryPath)
 		if err := reg.Load(); err != nil {
-			fmt.Fprintf(cmd.OutOrStderr(),
+			fmt.Fprintf(cmd.ErrOrStderr(),
 				"serena-router: registry load warning (will retry lazily on first call): %v\n", err)
 		}
 		resolver := serena_routing.NewWorkspaceResolver(reg, registryPath)
 		sessions := serena_routing.NewSessionRouter()
 		s.SetSerenaRouterProduction(resolver, sessions)
 		if rawManifest, err := api.NewAPI().ManifestGet("mcp-language-server"); err != nil {
-			fmt.Fprintf(cmd.OutOrStderr(),
+			fmt.Fprintf(cmd.ErrOrStderr(),
 				"lsp-router: manifest load failed; /lsp/<language>/mcp will return errors until next restart: %v\n", err)
 		} else if m, err := config.ParseManifest(strings.NewReader(rawManifest)); err != nil {
-			fmt.Fprintf(cmd.OutOrStderr(),
+			fmt.Fprintf(cmd.ErrOrStderr(),
 				"lsp-router: manifest parse failed; /lsp/<language>/mcp will return errors until next restart: %v\n", err)
 		} else {
 			// Separate registry handle for the LSP resolver: it refreshes
@@ -1092,13 +1115,13 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 		// mid serena call; non-destructive (re-registers on next open).
 		go runWorkspacePruneTicker(ctx, s, 60*time.Second)
 	} else {
-		fmt.Fprintf(cmd.OutOrStderr(),
+		fmt.Fprintf(cmd.ErrOrStderr(),
 			"serena-router: registry path resolution failed; /serena/mcp will return 503 until next restart: %v\n", regErr)
 	}
 	wireDashboardActivation(
 		s,
 		noBrowser,
-		cmd.OutOrStderr(),
+		cmd.ErrOrStderr(),
 		gui.FocusBrowserWindow,
 		gui.LaunchBrowser,
 		gui.HeadlessSession,
@@ -1168,7 +1191,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 		// takeover path.
 		actualPort := s.Port()
 		if err := gui.WritePidport(pidportPath, os.Getpid(), actualPort); err != nil {
-			fmt.Fprintf(cmd.OutOrStderr(), "warning: pidport rewrite: %v\n", err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: pidport rewrite: %v\n", err)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "GUI listening on http://127.0.0.1:%d\n", actualPort)
 	case err := <-errCh:
@@ -1211,13 +1234,13 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	// the suppression instead of seeing a permanently-empty
 	// Dashboard with no diagnostic.
 	if os.Getenv("MCPHUB_E2E_SUPERVISOR") == "none" {
-		fmt.Fprintln(cmd.OutOrStderr(),
+		fmt.Fprintln(cmd.ErrOrStderr(),
 			"warning: MCPHUB_E2E_SUPERVISOR=none is set — supervisor spawn suppressed (test seam; not for production use)")
 		return <-errCh
 	}
 	supervisorBin, binErr := resolveMCPHubBinary()
 	if binErr != nil {
-		fmt.Fprintf(cmd.OutOrStderr(), "warning: resolve mcphub binary for supervisor spawn: %v\n", binErr)
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: resolve mcphub binary for supervisor spawn: %v\n", binErr)
 	}
 	// The manager owns the swappable "current live supervisor owner"
 	// handle. For a GUI-SPAWNED supervisor it also runs a bounded
@@ -1229,7 +1252,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	if supervisorBin != "" {
 		supervisor, spawnErr := ensureSupervisorRunning(ctx, supervisorBin, strictMode, 15*time.Second)
 		if spawnErr != nil {
-			fmt.Fprintf(cmd.OutOrStderr(), "warning: supervisor: %v\n", spawnErr)
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: supervisor: %v\n", spawnErr)
 		} else if supervisor.Spawned() {
 			fmt.Fprintf(cmd.OutOrStdout(), "supervisor: spawned PID %d (GUI owns lifecycle)\n", supervisor.Pid())
 		} else {
@@ -1263,7 +1286,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := stopSupervisorManagerUnlessSelfRestart(shutdownCtx, manager, &selfRestartExitRequested); err != nil {
-			fmt.Fprintf(cmd.OutOrStderr(), "supervisor shutdown: %v\n", err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "supervisor shutdown: %v\n", err)
 		}
 	}()
 
@@ -1302,7 +1325,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	if shouldAutoLaunchBrowser(startup, noBrowser) {
 		url := fmt.Sprintf("http://127.0.0.1:%d/", s.Port())
 		if err := gui.LaunchBrowser(url); err != nil {
-			fmt.Fprintf(cmd.OutOrStderr(), "warning: could not auto-launch browser: %v\n", err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not auto-launch browser: %v\n", err)
 		}
 	}
 	if !noTray {
@@ -1365,7 +1388,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 					activateDashboardFromTray(
 						pidportPath,
 						port,
-						cmd.OutOrStderr(),
+						cmd.ErrOrStderr(),
 						gui.TryActivateIncumbent,
 						gui.LaunchBrowser,
 					)
@@ -1374,7 +1397,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 				StateReadRelaxCh: stateRelaxCh,
 				ToggleStateReadRelax: func() {
 					if err := postToggleStateRelax(ctx, port, stateRelaxCh); err != nil {
-						fmt.Fprintf(cmd.OutOrStderr(), "tray: toggle state-read-relax: %v\n", err)
+						fmt.Fprintf(cmd.ErrOrStderr(), "tray: toggle state-read-relax: %v\n", err)
 					}
 				},
 				Quit: stop,
@@ -1384,18 +1407,18 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 					// don't block the shutdown — partial cleanup beats
 					// a hung GUI.
 					if err := postBulk("stop"); err != nil {
-						fmt.Fprintf(cmd.OutOrStderr(), "tray: POST /api/stop-all: %v\n", err)
+						fmt.Fprintf(cmd.ErrOrStderr(), "tray: POST /api/stop-all: %v\n", err)
 					}
 					stop()
 				},
 				RunAllDaemons: func() {
 					if err := postBulk("restart"); err != nil {
-						fmt.Fprintf(cmd.OutOrStderr(), "tray: POST /api/restart-all: %v\n", err)
+						fmt.Fprintf(cmd.ErrOrStderr(), "tray: POST /api/restart-all: %v\n", err)
 					}
 				},
 				StopAllDaemons: func() {
 					if err := postBulk("stop"); err != nil {
-						fmt.Fprintf(cmd.OutOrStderr(), "tray: POST /api/stop-all: %v\n", err)
+						fmt.Fprintf(cmd.ErrOrStderr(), "tray: POST /api/stop-all: %v\n", err)
 					}
 				},
 				RescanClients: func() {
@@ -1419,11 +1442,11 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 					// Codex bot review on PR #48 P2.
 					dir := api.DefaultLogDir()
 					if err := os.MkdirAll(dir, 0700); err != nil {
-						fmt.Fprintf(cmd.OutOrStderr(), "tray: mkdir logs folder: %v\n", err)
+						fmt.Fprintf(cmd.ErrOrStderr(), "tray: mkdir logs folder: %v\n", err)
 						return
 					}
 					if err := gui.OpenPath(dir); err != nil {
-						fmt.Fprintf(cmd.OutOrStderr(), "tray: open logs folder: %v\n", err)
+						fmt.Fprintf(cmd.ErrOrStderr(), "tray: open logs folder: %v\n", err)
 					}
 				},
 				OpenDataFolder: func() {
@@ -1433,15 +1456,15 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 					// Codex bot review on PR #48 P2.
 					dir := filepath.Dir(api.SettingsPath())
 					if err := os.MkdirAll(dir, 0700); err != nil {
-						fmt.Fprintf(cmd.OutOrStderr(), "tray: mkdir data folder: %v\n", err)
+						fmt.Fprintf(cmd.ErrOrStderr(), "tray: mkdir data folder: %v\n", err)
 						return
 					}
 					if err := gui.OpenPath(dir); err != nil {
-						fmt.Fprintf(cmd.OutOrStderr(), "tray: open data folder: %v\n", err)
+						fmt.Fprintf(cmd.ErrOrStderr(), "tray: open data folder: %v\n", err)
 					}
 				},
 			}); err != nil {
-				fmt.Fprintf(cmd.OutOrStderr(), "tray: %v (GUI continues without tray)\n", err)
+				fmt.Fprintf(cmd.ErrOrStderr(), "tray: %v (GUI continues without tray)\n", err)
 			}
 		}()
 	}
