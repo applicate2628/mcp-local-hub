@@ -77,6 +77,46 @@ const maxHTTPHostGETStreams = 32
 // 60s httpClient timeout.
 const httpHostCleanupTimeout = 5 * time.Second
 
+// defaultHTTPHostHealthTimeout is the readiness budget for a host whose caller
+// declares NO OuterBindDeadline. It stays 30 s (the value since f80d4bbf, sized
+// for the lightweight native-http bridges this host was written for) so daemons
+// that do not run under a supervisory first-bind deadline keep byte-identical
+// failure-detection latency.
+const defaultHTTPHostHealthTimeout = 30 * time.Second
+
+// httpHostReadyBudgetNum/Den are the fraction of an OuterBindDeadline that the
+// readiness probe may consume — the SINGLE owner of the inner<outer margin, used
+// both to DERIVE an unset HealthTimeout and to CLAMP an over-large one, so the
+// two can never disagree.
+//
+// 3/4 is chosen against the measured numbers rather than picked round: serena's
+// outer deadline is 120 s (api.serenaStartupBindDeadlineSeconds, sized off a
+// measured 46 s cold Go-LSP index), so the inner budget lands at 90 s — ~2x the
+// measured cold index, which is the headroom the probe actually needs when the
+// machine is contended, while still leaving a 30 s absolute margin for the
+// child's spawn latency, the final probe interval, stopLocked teardown, process
+// exit, and the supervisor observing that exit. Expressing it as a FRACTION (not
+// a fixed subtraction) keeps the margin proportional across the whole legal
+// range of outer deadlines: an operator-set 600 s cap yields 450 s inner, not
+// 570 s, which would leave a proportionally thin margin.
+const (
+	httpHostReadyBudgetNum = 3
+	httpHostReadyBudgetDen = 4
+)
+
+// maxHealthTimeoutUnder returns the largest readiness budget permitted beneath
+// an outer first-bind deadline. Total: the 1 ns floor keeps a degenerate
+// sub-nanosecond-scale outer (unreachable from production, where the outer is
+// whole seconds) from yielding a zero budget that would fail the probe before
+// its first attempt.
+func maxHealthTimeoutUnder(outer time.Duration) time.Duration {
+	inner := outer * httpHostReadyBudgetNum / httpHostReadyBudgetDen
+	if inner <= 0 {
+		return 1
+	}
+	return inner
+}
+
 // HTTPHostConfig describes one native-http-host instance.
 type HTTPHostConfig struct {
 	Command string            // subprocess executable (e.g. "uvx")
@@ -89,8 +129,25 @@ type HTTPHostConfig struct {
 	UpstreamPort int    // port the subprocess listens on (internal)
 	UpstreamPath string // MCP endpoint path; defaults to "/mcp"
 	// HealthTimeout bounds how long Start() waits for the upstream
-	// server to begin accepting connections. Default 30 s.
+	// server to begin accepting connections. Resolution order:
+	// explicit value → derived from OuterBindDeadline (see below) →
+	// defaultHTTPHostHealthTimeout.
 	HealthTimeout time.Duration
+	// OuterBindDeadline is the SUPERVISORY first-bind deadline this host runs
+	// under — the budget an outer lifecycle owner grants the whole daemon to
+	// bind its port before IT declares a bind timeout. For a supervisor-spawned
+	// daemon that is api.EffectiveStartupBindDeadlineSeconds for the descriptor;
+	// zero means "no outer owner declared one" (a stdio child, a test).
+	//
+	// It exists to keep the INNER readiness budget (HealthTimeout) strictly
+	// below the OUTER one. Those two budgets are set in different packages by
+	// different owners, and nothing used to relate them: the serena path left
+	// HealthTimeout unset (→ 30 s) while its descriptor granted 120 s, so the
+	// child killed itself at 30 s and the supervisor's 120 s was unreachable
+	// dead code for that failure mode — a slow-but-healthy backend was reported
+	// as a launch failure and respawned forever. See NewHTTPHost for the
+	// derive-and-clamp rule that now enforces inner < outer structurally.
+	OuterBindDeadline time.Duration
 	// LogPath, when set, receives subprocess stdout+stderr tee'd into
 	// a rotated log file (10 MB, 5 rotations via rotatingFileWriter).
 	// When empty AND mcphub's own stderr is a real terminal,
@@ -113,8 +170,23 @@ func NewHTTPHost(cfg HTTPHostConfig) (*HTTPHost, error) {
 	if path == "" {
 		path = "/mcp"
 	}
-	if cfg.HealthTimeout <= 0 {
-		cfg.HealthTimeout = 30 * time.Second
+	// Resolve the readiness budget and ENFORCE inner < outer (see
+	// HTTPHostConfig.OuterBindDeadline). The ordering is enforced here, at the
+	// point the budget is consumed, rather than only at the call sites — a
+	// caller that hand-sets an over-large HealthTimeout is clamped instead of
+	// silently re-inverting the two layers. Mirrors the timeout-ordering
+	// clamp+warn in NewLazyProxy (lazy_proxy.go:311-345).
+	switch {
+	case cfg.HealthTimeout <= 0 && cfg.OuterBindDeadline > 0:
+		cfg.HealthTimeout = maxHealthTimeoutUnder(cfg.OuterBindDeadline)
+	case cfg.HealthTimeout <= 0:
+		cfg.HealthTimeout = defaultHTTPHostHealthTimeout
+	case cfg.OuterBindDeadline > 0 && cfg.HealthTimeout > maxHealthTimeoutUnder(cfg.OuterBindDeadline):
+		clamped := maxHealthTimeoutUnder(cfg.OuterBindDeadline)
+		fmt.Fprintf(daemonDiagWriter(),
+			"warn: http_host: HealthTimeout (%s) exceeds %d/%d of OuterBindDeadline (%s); clamping to %s so the readiness probe fails before the outer first-bind deadline\n",
+			cfg.HealthTimeout, httpHostReadyBudgetNum, httpHostReadyBudgetDen, cfg.OuterBindDeadline, clamped)
+		cfg.HealthTimeout = clamped
 	}
 	cfg.UpstreamPath = path
 	return &HTTPHost{
@@ -291,6 +363,13 @@ func (h *HTTPHost) waitForReady(ctx context.Context) error {
 
 // ChildExited returns a channel closed when the subprocess exits.
 func (h *HTTPHost) ChildExited() <-chan struct{} { return h.childExited }
+
+// HealthTimeout returns the RESOLVED upstream-readiness budget — after the
+// default / OuterBindDeadline-derivation / clamp rules in NewHTTPHost, not the
+// caller's raw request. Exposed so a cross-package test can assert the
+// inner-budget-vs-outer-deadline ordering against the value the host will
+// actually enforce.
+func (h *HTTPHost) HealthTimeout() time.Duration { return h.cfg.HealthTimeout }
 
 // ExitState returns the subprocess's ProcessState after it has exited,
 // or nil if the process has not yet been spawned or is still running.
