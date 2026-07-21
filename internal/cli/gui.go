@@ -166,7 +166,15 @@ func buildRestartV3ParentDependencies(
 			if cmd.Flags().Changed("port") {
 				fallback = guiPortFallbackExplicitFlag
 			}
-			emitInvalidGUIPortWarning(cmd.ErrOrStderr(), resolved, fallback)
+			// PRE-SINK site: this runs BEFORE installGUIRuntimeSinks, so the
+			// out writer is whatever an embedding caller configured (or nil).
+			// OutOrStderr() is CORRECT here for the same reason the --force /
+			// --reset-port helpers keep it: with no out writer set it IS
+			// os.Stderr, and with one set it honours the caller's stream.
+			// ErrOrStderr() would follow the unset err-writer chain straight to
+			// os.Stderr and silently bypass that caller. The OutOrStderr defect
+			// this change fixes only exists AFTER the sink sets an out writer.
+			emitInvalidGUIPortWarning(cmd.OutOrStderr(), resolved, fallback)
 		}
 		intentMu.Lock()
 		intent = resolved
@@ -587,7 +595,10 @@ activates the first window and exits 0.`,
 				if flagChanged {
 					fallback = guiPortFallbackExplicitFlag
 				}
-				emitInvalidGUIPortWarning(cmd.ErrOrStderr(), portIntent, fallback)
+				// PRE-SINK site — see the sibling call in the restart-argv path.
+				// installGUIRuntimeSinks has not run yet, so OutOrStderr() still
+				// means stderr-or-the-caller's-stream, which is what is wanted.
+				emitInvalidGUIPortWarning(cmd.OutOrStderr(), portIntent, fallback)
 			}
 
 			// Resolve the console-lifetime policy ONCE, here, where the
