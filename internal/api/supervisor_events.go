@@ -175,8 +175,9 @@ var ErrSupervisorEventMissingSource = errors.New("supervisor event log: missing 
 var ErrSupervisorEventIdentityOversize = errors.New("supervisor event log: identity field (event/source/task_name) exceeds 1024-byte cap")
 
 // ErrSupervisorEventEmitTimeout reports that EmitWithTimeout could not acquire
-// the event-log flock inside its bounded wait. Callers that need a durable
-// fallback can distinguish this best-effort skip from a successful append.
+// the event-log mutex or flock inside its bounded wait. Callers that need a
+// durable fallback can distinguish this best-effort skip from a successful
+// append.
 var ErrSupervisorEventEmitTimeout = errors.New("supervisor event log: bounded emit timed out")
 
 // ---------------------------------------------------------------------------
@@ -260,9 +261,10 @@ func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
 }
 
 // EmitWithTimeout serializes the entry and appends it, waiting up to timeout
-// for the cross-process flock via TryLockContext. On timeout (or a defensive
-// not-locked) it returns ErrSupervisorEventEmitTimeout so callers can arrange a
-// durable fallback; it does NOT block indefinitely.
+// for both its in-process mutex and the cross-process flock via
+// TryLockContext. On timeout (or a defensive not-locked) it returns
+// ErrSupervisorEventEmitTimeout so callers can arrange a durable fallback; it
+// does NOT block indefinitely.
 //
 // Use this for an audit row that is the ONLY record of a state mutation AND is
 // emitted while the caller still holds another lock (e.g. the strict-mode CLI
@@ -302,12 +304,27 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 		return err
 	}
 
-	// In-process serialization first — guards against two goroutines
-	// in the same supervisor binary racing past the flock acquire. Only the
-	// pure non-blocking mode (emitTry) skips on in-process contention; the
-	// timeout mode blocks briefly here (same-process mu is fast) and bounds
-	// its wait at the cross-process flock below.
-	if mode == emitTry {
+	// In-process serialization first — guards against two goroutines in the
+	// same supervisor binary racing past the flock acquire.
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if mode == emitTimeout {
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		// A blocking Emit can hold mu while it waits indefinitely for the
+		// cross-process flock. Poll rather than using Lock so this mode's
+		// timeout covers that contention too.
+		retry := time.NewTicker(eventLogEmitRetryDelay)
+		defer retry.Stop()
+		for !l.mu.TryLock() {
+			select {
+			case <-ctx.Done():
+				return ErrSupervisorEventEmitTimeout
+			case <-retry.C:
+			}
+		}
+	} else if mode == emitTry {
 		if !l.mu.TryLock() {
 			return nil
 		}
@@ -329,8 +346,6 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 			return nil
 		}
 	case emitTimeout:
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
 		var locked bool
 		locked, lockErr = l.lock.TryLockContext(ctx, eventLogEmitRetryDelay)
 		if !locked {

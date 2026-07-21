@@ -345,6 +345,37 @@ func TestSupervisorEventLog_EmitWithTimeoutSkipsWedgedLock(t *testing.T) {
 	}
 }
 
+// TestSupervisorEventLog_EmitWithTimeoutSkipsContendedMutex verifies the
+// timeout covers in-process contention as well as the cross-process flock. A
+// blocking Emit may hold mu indefinitely while it waits for a wedged flock,
+// so acquiring this mutex must not use an unbounded Lock.
+func TestSupervisorEventLog_EmitWithTimeoutSkipsContendedMutex(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "supervisor-events.log")
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = logger.Close() }()
+
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+
+	const timeout = 50 * time.Millisecond
+	start := time.Now()
+	err = logger.EmitWithTimeout(SupervisorEvent{
+		Severity: "info",
+		Source:   "autostart",
+		Event:    "emit-timeout-mutex-contended",
+	}, timeout)
+	if !errors.Is(err, ErrSupervisorEventEmitTimeout) {
+		t.Fatalf("EmitWithTimeout under in-process contention error = %v, want ErrSupervisorEventEmitTimeout", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("EmitWithTimeout blocked %s despite its %s mutex budget", elapsed, timeout)
+	}
+}
+
 // TestSupervisorEventLog_EmitWithTimeoutWritesUncontended confirms the common
 // case: with no contention, EmitWithTimeout durably appends the row (it is NOT
 // lossy like TryEmit — the whole point vs the round-2 TryEmit attempt).
