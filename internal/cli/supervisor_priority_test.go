@@ -14,33 +14,43 @@ func TestDecideSupervisorPriorityRaise(t *testing.T) {
 		wantRaise  bool
 	}{
 		{
-			// The whole point: IDLE must be raised to the floor.
-			// MUTANT "floor := rankIdle" → returns raise=false here → FAILS.
-			// MUTANT "target := rankIdle" → target != rankBelowNormal → FAILS.
-			name: "idle raises to below-normal", current: rankIdle,
-			wantTarget: rankBelowNormal, wantRaise: true,
+			// The whole point: IDLE must be raised to the floor (NORMAL).
+			// MUTANT "floor := rankIdle" → idle >= idle → raise=false here → FAILS.
+			// MUTANT "floor := rankBelowNormal" (the OLD #577 floor, below the
+			//   new one) → target == rankBelowNormal != rankNormal → FAILS. This
+			//   is the guard that a mutant raising to a class below NORMAL breaks.
+			// MUTANT "target := rankIdle" → target != rankNormal → FAILS.
+			name: "idle raises to normal", current: rankIdle,
+			wantTarget: rankNormal, wantRaise: true,
 		},
 		{
-			// Already at the floor → no-op.
-			// MUTANT ">= → >" → 1 > 1 is false → would raise at the floor → FAILS.
-			name: "below-normal is at floor, no raise", current: rankBelowNormal,
-			wantRaise: false,
+			// BELOW_NORMAL is now BELOW the floor and MUST be raised to NORMAL.
+			// This is the semantic flip vs #577 (where BELOW_NORMAL was at-floor).
+			// MUTANT "floor := rankBelowNormal" (the OLD floor) → below-normal >=
+			//   below-normal → raise=false → FAILS (this case pins the new floor).
+			name: "below-normal raises to normal", current: rankBelowNormal,
+			wantTarget: rankNormal, wantRaise: true,
 		},
 		{
-			// Never LOWER a NORMAL process to the floor.
-			// A raw-constant comparison (IDLE 0x40 vs BELOW_NORMAL 0x4000) would
-			// mis-rank NORMAL (0x20) as below the floor and lower it → this case
-			// is why the decision is on ranks, not constants.
+			// NORMAL is now AT the floor → no-op.
+			// MUTANT ">= → >" → 2 > 2 is false → would raise at the floor → FAILS.
 			// MUTANT ">= → <=" → raises NORMAL to the floor → FAILS.
-			name: "normal is above floor, no raise", current: rankNormal,
+			name: "normal is at floor, no raise", current: rankNormal,
 			wantRaise: false,
 		},
 		{
+			// Never LOWER an ABOVE_NORMAL process to the floor.
+			// A raw-constant comparison would mis-rank the classes and lower it →
+			// this is why the decision is on ranks, not the Win32 constants.
+			// MUTANT "drop the never-lower guard" → above-normal falls through to
+			//   "raise to floor" → target rankNormal < rankAboveNormal (lowering)
+			//   with raise=true → FAILS.
 			name: "above-normal is above floor, no raise", current: rankAboveNormal,
 			wantRaise: false,
 		},
 		{
-			// Never lower a HIGH process.
+			// Never lower a HIGH process. Also catches the dropped never-lower
+			// guard (would lower HIGH to NORMAL).
 			name: "high is above floor, no raise", current: rankHigh,
 			wantRaise: false,
 		},

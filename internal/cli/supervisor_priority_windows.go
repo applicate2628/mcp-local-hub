@@ -77,18 +77,28 @@ func rankToPriorityClass(rank priorityRank) uint32 {
 }
 
 // ensureSupervisorPriorityFloor raises THIS supervisor process to at least
-// BELOW_NORMAL_PRIORITY_CLASS when it was launched at a lower class
-// (IDLE), and is a no-op otherwise. It is the durable, in-binary fix for
-// the fleet inheriting IDLE from whichever scheduled task launched the
-// supervisor — most acutely the liveness recovery task
-// (<Priority>9</Priority> = IDLE), one class WORSE than the normal
-// autostart task (<Priority>7</Priority> = BELOW_NORMAL).
+// NORMAL_PRIORITY_CLASS when it was launched at a lower class (IDLE or
+// BELOW_NORMAL), and is a no-op otherwise. It is the durable, in-binary fix
+// for the fleet being scheduled too rarely under host load. Both scheduled
+// launch classes are below the floor and are lifted: the liveness recovery
+// task (<Priority>9</Priority> = IDLE) and the autostart / liveness tasks'
+// <Priority>7</Priority> = BELOW_NORMAL.
+//
+// FLOOR = NORMAL (raised from BELOW_NORMAL; see supervisor_priority.go for
+// the const and the live A/B evidence). A live A/B on the operator's fleet
+// showed BELOW_NORMAL still left a red tail on /api/status under host load
+// (as low as 2/6), while NORMAL was 10/10; a goroutine dump during a stall
+// showed the supervisor internally IDLE, so the red is pure OS scheduling
+// latency, not mcphub CPU. Because the supervisor is idle-until-used, NORMAL
+// costs ~nothing in CPU — it only buys scheduling latency when the host is
+// busy.
 //
 // Correctness is INDEPENDENT of the launcher: the autostart task, the
 // liveness task, or a manual `mcphub supervise` run all converge on the
-// floor. Existing hosts (whose installed liveness task is still IDLE) are
-// corrected WITHOUT a reinstall, because the supervisor sets its OWN class
-// at startup rather than trusting what launched it.
+// floor. Existing hosts (whose installed tasks launch the supervisor at
+// IDLE or BELOW_NORMAL) are corrected WITHOUT a reinstall, because the
+// supervisor sets its OWN class at startup rather than trusting what
+// launched it.
 //
 // FLEET PROPAGATION (no per-spawn code needed). The caller invokes this
 // BEFORE the reconcile loop spawns any daemon, and the daemon spawn path
@@ -96,18 +106,23 @@ func rankToPriorityClass(rank priorityRank) uint32 {
 // documented Win32 rule — "If the calling process is IDLE_PRIORITY_CLASS or
 // BELOW_NORMAL_PRIORITY_CLASS, the new process will inherit this class"
 // (learn.microsoft.com/windows/win32/procthread/scheduling-priorities) —
-// every daemon spawned afterwards inherits this raised floor at
-// CreateProcess time. The inheritance is asymmetric in our favour: a parent
-// at NORMAL or above yields children that DEFAULT to NORMAL, which is still
-// >= the floor, so the fleet is always at least BELOW_NORMAL regardless of
-// the supervisor's class.
+// a daemon spawned by the raised (NORMAL) supervisor is NOT covered by that
+// inheritance clause, so it takes the CreateProcess DEFAULT of NORMAL —
+// which equals the floor. The mechanism differs from the old BELOW_NORMAL
+// floor (which relied on the clause FIRING to propagate BELOW_NORMAL) but
+// the outcome is the same-or-better: the fleet is always at least NORMAL. A
+// future launcher at ABOVE_NORMAL+ likewise yields NORMAL-default children,
+// still >= the floor.
 //
 // RAISE-ONLY / NEVER-LOWER / NEVER-IDLE: if the process is already at or
-// above the floor (a future launcher at NORMAL+, or the already-correct
-// autostart path) it is left untouched. Every outcome is audited to
-// supervisor-events.log; a raise failure (e.g. SetPriorityClass denied by
-// policy) is NON-FATAL — a supervisor that could not raise its own priority
-// still supervises, just under the launcher's class.
+// above the floor (a launcher at NORMAL+, e.g. a future task authored at
+// NORMAL, or a process already raised on a prior tick) it is left
+// untouched — an ABOVE_NORMAL/HIGH/REALTIME process is NEVER lowered to
+// NORMAL. Every outcome is audited to supervisor-events.log; a raise
+// failure (e.g. SetPriorityClass denied by policy) is NON-FATAL — a
+// supervisor that could not raise its own priority still supervises, just
+// under the launcher's class (BELOW_NORMAL for the Priority-7 tasks, which
+// the live A/B showed is degraded-but-functional rather than dead).
 func ensureSupervisorPriorityFloor(events *api.SupervisorEventLog) {
 	current, err := getCurrentPriorityClassFn()
 	if err != nil {

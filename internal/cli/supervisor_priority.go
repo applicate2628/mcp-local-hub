@@ -53,15 +53,38 @@ const (
 // for the supervisor and — by Windows CreateProcess inheritance — the
 // daemon fleet it spawns.
 //
-// Chosen = BELOW_NORMAL, DELIBERATELY not NORMAL. The normal autostart
-// task authors <Priority>7</Priority>, which Task Scheduler maps to
-// BELOW_NORMAL_PRIORITY_CLASS; that encodes a considered "polite
-// background service" intent. This floor HONORS that intent — it lifts a
-// process launched at IDLE (the recovery/liveness path) up to the SAME
-// class the normal path already uses, and no higher. A background MCP
-// supervisor being "not starved" is the goal, NOT being "prioritised over
-// the operator's foreground work", so we do not jump to NORMAL/ABOVE_NORMAL.
-const supervisorPriorityFloorRank = rankBelowNormal
+// Chosen = NORMAL. This is a DELIBERATE REVERSAL of PR #577's original
+// BELOW_NORMAL floor, made on new live evidence, NOT a design drift.
+//
+// PR #577 picked BELOW_NORMAL to "honor the polite background service"
+// intent of the autostart task's <Priority>7</Priority>. A live A/B on the
+// operator's deployed v0.4.26 fleet then showed that BELOW_NORMAL is not
+// enough under real host load:
+//   - BELOW_NORMAL, heavy host load: /api/status succeeded only 4/6, and
+//     earlier as low as 2/6 (13s replies against a 30s timeout).
+//   - BELOW_NORMAL, moderate load: 9/10.
+//   - The SAME fleet raised to NORMAL: 10/10, immediately.
+//   - A goroutine dump taken DURING a stall showed the supervisor
+//     INTERNALLY IDLE (zero runnable goroutines, no internal stall). The
+//     red tail is therefore pure OS scheduling latency under host load, not
+//     mcphub burning CPU.
+//
+// Because the supervisor is idle-until-used, NORMAL costs ~nothing in CPU
+// (an idle process at NORMAL is not scheduled any more often than one at
+// BELOW_NORMAL until it actually has work) — it only buys scheduling
+// latency for the status responder when the host is busy. The operator
+// explicitly accepted the tradeoff (mcphub now competes with foreground
+// work at NORMAL) precisely because that CPU cost is near-zero while the
+// responsiveness win is decisive.
+//
+// The floor stays RAISE-ONLY / NEVER-LOWER / NEVER-IDLE: a process already
+// at NORMAL or above (ABOVE_NORMAL / HIGH / REALTIME, or a future launcher
+// at NORMAL) is left untouched — the floor only lifts a process launched
+// BELOW it (IDLE or BELOW_NORMAL, i.e. the liveness/autostart launch class)
+// up to NORMAL, and never higher. We do not jump to ABOVE_NORMAL/HIGH: the
+// goal is "not starved and promptly scheduled", not "prioritised over the
+// operator's foreground work beyond parity".
+const supervisorPriorityFloorRank = rankNormal
 
 // decideSupervisorPriorityRaise is the pure, OS-agnostic core of the
 // priority-floor policy. Given the process's CURRENT rank it returns the
@@ -69,10 +92,10 @@ const supervisorPriorityFloorRank = rankBelowNormal
 //
 // Invariants (mutation-tested in supervisor_priority_test.go):
 //   - RAISE-ONLY / NEVER-LOWER: it never returns raise=true with a target
-//     BELOW the current rank. A process already at or above the floor is
-//     left alone (raise=false).
-//   - NEVER-IDLE: when raise=true the target is the floor (BELOW_NORMAL),
-//     never rankIdle. The supervisor must never lower ITSELF to IDLE.
+//     BELOW the current rank. A process already at or above the floor
+//     (NORMAL / ABOVE_NORMAL / HIGH / REALTIME) is left alone (raise=false).
+//   - NEVER-IDLE: when raise=true the target is the floor (NORMAL), never
+//     rankIdle. The supervisor must never lower ITSELF to IDLE.
 //   - DON'T-TOUCH-UNKNOWN: an unrecognized current rank yields raise=false,
 //     because lowering an unknown-but-possibly-higher class must never
 //     happen.
@@ -83,9 +106,10 @@ func decideSupervisorPriorityRaise(current priorityRank) (target priorityRank, r
 		return rankUnknown, false
 	}
 	if current >= supervisorPriorityFloorRank {
-		// Already polite-or-higher; never lower.
+		// Already at-floor-or-higher (NORMAL / ABOVE_NORMAL / HIGH /
+		// REALTIME); never lower.
 		return current, false
 	}
-	// Below the floor (i.e. IDLE) → raise to the floor.
+	// Below the floor (IDLE or BELOW_NORMAL) → raise to the floor.
 	return supervisorPriorityFloorRank, true
 }
