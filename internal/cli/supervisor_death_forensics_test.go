@@ -171,7 +171,66 @@ func wedgeSupervisorEventLog(t *testing.T, logPath string) (*api.SupervisorEvent
 		// Still parked — the wedge holds.
 	}
 
-	return events, func() { _ = blocker.Unlock() }
+	// Release must DRAIN, not merely unlock. Unlocking alone lets writers
+	// finish asynchronously, so t.TempDir()'s RemoveAll can run while a write
+	// is still in flight — and Windows refuses to delete a directory holding a
+	// live handle.
+	return events, func() {
+		_ = blocker.Unlock()
+		<-parked
+		_ = events.Close()
+		_ = blocker.Close()
+		waitForEventLogHandlesReleased(t, logPath)
+	}
+}
+
+// waitForEventLogHandlesReleased blocks until nothing holds the wedged event
+// log open, or a bounded budget expires.
+//
+// This exists because of DELIBERATE production behaviour, not a defect.
+// guardSupervisorGoroutine's bounded emit ABANDONS its emit goroutine once the
+// budget expires — that is the entire point of the bound: a crash must re-raise
+// even when the event log is wedged, so leaking a goroutine is strictly better
+// than hanging the supervisor. That abandoned goroutine is still parked on the
+// flock; the moment the wedge releases it proceeds to write, through a handle
+// the test has no way to observe or join.
+//
+// t.TempDir() then races it: RemoveAll runs while the write is in flight, and
+// Windows refuses to delete a directory containing a live handle. It surfaced
+// as an intermittent "TempDir RemoveAll cleanup: The directory is not empty"
+// that MOVED between the two wedge tests run to run and vanished when either
+// ran in isolation — the signature of a leaked handle, not a flake.
+//
+// Draining the wedge helper's own probe goroutine was NOT sufficient: it
+// removed most occurrences and left the real one, which still reproduced under
+// `-race -count=5`. That is why this waits on the ARTIFACT rather than on any
+// goroutine it can name — the offending writer is by design unnameable.
+//
+// Removability is the probe: os.Remove fails while a handle is open on Windows
+// and succeeds once every writer is gone. Failure to converge is LOGGED, not
+// failed: the subject of these tests is the guard's timing, and the OS temp
+// sweeper reclaims the directory either way. Failing here would trade a real
+// assertion for a cleanup artifact.
+func waitForEventLogHandlesReleased(t *testing.T, logPath string) {
+	t.Helper()
+	gone := func(p string) bool {
+		if err := os.Remove(p); err == nil {
+			return true
+		}
+		_, err := os.Stat(p)
+		return os.IsNotExist(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if gone(logPath+".lock") && gone(logPath) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Logf("event-log handles still held after 5s (detached emit goroutine); leaving %s to the OS temp sweeper", logPath)
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 // TestGuardSupervisorGoroutine_ReRaisesWhenEventLogWedged is the regression

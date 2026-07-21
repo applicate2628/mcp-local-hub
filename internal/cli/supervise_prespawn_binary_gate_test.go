@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -60,7 +61,35 @@ func prespawnGateController(t *testing.T, command string) (*supervisorController
 	}
 	ctrl.smStates.Store(task, api.StBackoffWaiting)
 	loop.RegisterHandler(ctrl.handleLoopEvent)
-	go loop.Run(ctrl.ctx)
+
+	// The loop must be CANCELLED AND JOINED before the test's temp dir is
+	// removed, not merely cancelled.
+	//
+	// Several tests here return the moment they observe what they came for
+	// (a spawn attempt, a state transition) while the loop is still running.
+	// The loop writes supervisor-state.json through the hardened state-file
+	// pipeline, so a write can be in flight when t.TempDir()'s RemoveAll runs
+	// — and Windows refuses to delete a directory holding a live handle. It
+	// surfaced as an intermittent "TempDir RemoveAll cleanup: ...
+	// hardened-parent: The directory is not empty" on whichever test happened
+	// to exit first, which is why it looked like a flake that moved around.
+	//
+	// The pre-existing t.Cleanup(cancel) in lostChildParoleController only
+	// SIGNALS; nothing waited for Run to return. A private child context makes
+	// the cancel+join a single cleanup owned here, and because it is
+	// registered AFTER t.TempDir() it runs BEFORE the directory removal
+	// (t.Cleanup is LIFO).
+	loopCtx, loopCancel := context.WithCancel(ctrl.ctx)
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		loop.Run(loopCtx)
+	}()
+	t.Cleanup(func() {
+		loopCancel()
+		<-loopDone
+	})
+
 	return ctrl, loop, &spawnCalls, task
 }
 
