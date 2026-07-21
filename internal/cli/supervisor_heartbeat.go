@@ -20,11 +20,13 @@ import (
 //
 // WHY 60 SECONDS — argued against the two constraints that bound it.
 //
-// Against the 10 MB rotation budget: one heartbeat row is ~260 bytes
-// (envelope + four body fields), so 60 s costs 1440 rows/day ≈ 375 KB/day.
-// The active log alone therefore holds ~27 days of continuous liveness
-// history, and ~54 days across the active+.1 pair. The forensic
-// investigation that motivated this work needed a 42-hour window; 27 days
+// Against the 10 MB rotation budget: one heartbeat row is ~290 bytes
+// (envelope + four body fields + the always-present gap_seconds; the
+// delayed/attribution fields appear only on an anomalous beat), so 60 s
+// costs 1440 rows/day ≈ 420 KB/day.
+// The active log alone therefore holds ~24 days of continuous liveness
+// history, and ~48 days across the active+.1 pair. The forensic
+// investigation that motivated this work needed a 42-hour window; 24 days
 // clears it by more than an order of magnitude. For scale, this is ~4% of
 // the ~1400 rows/HOUR the log carried BEFORE #566 removed the poll flood —
 // heartbeats restore continuous liveness evidence at a small fraction of
@@ -69,13 +71,42 @@ func runSupervisorHeartbeat(
 		return
 	}
 
+	// Gap accounting. A heartbeat whose ABSENCE means death must be able to
+	// explain a hole it survived, otherwise a stalled beat is indistinguishable
+	// from the death it is supposed to detect — trading one ambiguity for
+	// another. lastBeatAt anchors the observed gap; lastEmitBlock attributes it.
+	var lastBeatAt time.Time
+	var lastEmitBlock time.Duration
+
 	emit := func() {
+		now := time.Now().UTC()
 		daemonCount, runningCount := supervisorDaemonCounts(tracker)
 		body := map[string]any{
 			"pid":                  os.Getpid(),
 			"uptime_seconds":       int64(time.Since(startedAt).Seconds()),
 			"daemon_count":         daemonCount,
 			"running_daemon_count": runningCount,
+		}
+
+		if !lastBeatAt.IsZero() {
+			gap := now.Sub(lastBeatAt)
+			// Always present after the first beat so a reader never has to
+			// diff timestamps by hand to see the shape of the series.
+			body["gap_seconds"] = int64(gap.Seconds())
+			if gap > interval+interval/2 {
+				// The beat is LATE. Say so explicitly rather than leaving the
+				// operator (or a future me) to infer a phantom outage from a
+				// hole in the series.
+				body["beat_delayed"] = true
+				body["expected_interval_seconds"] = int64(interval.Seconds())
+			}
+			// Attribution: how long the PREVIOUS emit was parked inside the
+			// event log. This is what distinguishes "the log was wedged" from
+			// "the process was descheduled/suspended" — the gap alone cannot.
+			// Reported only when it actually explains something.
+			if lastEmitBlock > interval/2 {
+				body["previous_emit_block_ms"] = lastEmitBlock.Milliseconds()
+			}
 		}
 		// Surface the open-time-rotation-only residual documented on
 		// api.RotateSupervisorStderrSinkIfOversize: a session that writes
@@ -91,12 +122,19 @@ func runSupervisorHeartbeat(
 		// momentary contention and merely delays a beat. A permanently
 		// wedged event-log flock would silence every other row too, so it is
 		// not a failure mode the heartbeat alone should trade accuracy for.
+		emitStart := time.Now()
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: api.SupervisorEventSeverityInfo,
 			Source:   api.SupervisorEventSourceLifecycle,
 			Event:    "supervisor-heartbeat",
 			Body:     body,
 		})
+		// Measured AFTER the emit returns, so it is carried by the NEXT beat —
+		// a beat cannot report how long its own write blocked.
+		lastEmitBlock = time.Since(emitStart)
+		// Anchored to the PRE-emit instant so gap_seconds matches the deltas an
+		// operator reads off the rows' own `ts` fields (marshalled at emit entry).
+		lastBeatAt = now
 	}
 
 	// Beat immediately so a session shorter than one interval still proves

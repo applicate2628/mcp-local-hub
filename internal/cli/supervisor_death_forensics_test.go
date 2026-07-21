@@ -10,9 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api"
 )
@@ -116,6 +119,130 @@ func TestGuardSupervisorGoroutine_NilEventLogStillReRaises(t *testing.T) {
 }
 
 func panicFromNestedFrame() { panic("forensics-probe-panic") }
+
+// wedgeSupervisorEventLog parks the event log so that any further Emit —
+// blocking OR EmitWithTimeout — cannot make progress, and returns a release
+// func.
+//
+// Two things are wedged, and BOTH are required to model the real hazard:
+//
+//  1. the cross-process flock on supervisor-events.log.lock, held by a
+//     separate flock handle (what another mcphub process would hold);
+//  2. the in-process mutex `l.mu`, held by a goroutine parked inside a
+//     BLOCKING Emit — supervisor_events.go:315 takes `mu` unbounded and :324
+//     then waits on the flock while still holding it.
+//
+// (2) is the part that makes EmitWithTimeout insufficient on its own: a
+// timeout-mode emit parks on `mu` before its own deadline logic runs.
+//
+// The helper ASSERTS the wedge actually took hold. Without that assertion a
+// change in flock semantics would silently turn every test built on this into
+// a vacuous pass.
+func wedgeSupervisorEventLog(t *testing.T, logPath string) (*api.SupervisorEventLog, func()) {
+	t.Helper()
+
+	events, err := api.OpenSupervisorEventLog(logPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+
+	blocker := flock.New(logPath + ".lock")
+	if err := blocker.Lock(); err != nil {
+		t.Fatalf("acquire blocking flock: %v", err)
+	}
+
+	// Park a blocking Emit so it holds `mu` while waiting on the held flock.
+	parked := make(chan struct{})
+	go func() {
+		defer close(parked)
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: api.SupervisorEventSeverityInfo,
+			Source:   api.SupervisorEventSourceLifecycle,
+			Event:    "wedge-probe",
+		})
+	}()
+
+	// Assert the wedge is REAL: the parked Emit must not complete.
+	select {
+	case <-parked:
+		_ = blocker.Unlock()
+		t.Skip("event-log flock did not contend in-process on this platform; the wedge could not be established, so this test would be vacuous")
+	case <-time.After(500 * time.Millisecond):
+		// Still parked — the wedge holds.
+	}
+
+	return events, func() { _ = blocker.Unlock() }
+}
+
+// TestGuardSupervisorGoroutine_ReRaisesWhenEventLogWedged is the regression
+// guard for the worst failure mode this branch could have shipped.
+//
+// With a plain blocking `events.Emit` in the guard, a panic in ANY guarded
+// goroutine parked forever on the event-log lock: it never reached panic(r),
+// so the process never died, never produced the runtime traceback the stderr
+// sink exists to capture, and kept holding supervisor.lock — so the liveness
+// task saw a live holder and never relaunched. A crash silently became a
+// permanent outage, inverting the branch's purpose.
+//
+// MUTATION PROOF: change emitSupervisorPanicEventBounded back to a direct
+// events.Emit(...) and this test FAILS (times out waiting for the re-raise)
+// while every other guard test still passes.
+func TestGuardSupervisorGoroutine_ReRaisesWhenEventLogWedged(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, api.SupervisorEventLogFileLeaf)
+	events, release := wedgeSupervisorEventLog(t, logPath)
+	defer release()
+
+	reRaised := make(chan any, 1)
+	go func() {
+		defer func() { reRaised <- recover() }()
+		func() {
+			defer guardSupervisorGoroutine(events, "wedged-log-worker", "")
+			panic("wedged-log-probe-panic")
+		}()
+	}()
+
+	// Bound generously above the guard's own budget but far below "forever".
+	// A pre-fix guard never fires this channel at all.
+	select {
+	case got := <-reRaised:
+		if got == nil {
+			t.Fatal("guard swallowed the panic under a wedged event log")
+		}
+		if fmt.Sprint(got) != "wedged-log-probe-panic" {
+			t.Fatalf("re-raised value = %v, want the original panic value", got)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("guard did not re-raise within 15s while the event log was wedged — the supervisor would hang forever holding supervisor.lock instead of dying and being relaunched")
+	}
+}
+
+// TestGuardSupervisorGoroutine_BoundedEmitBudgetIsRespected pins the wait to
+// the declared budget rather than merely "eventually". A budget that silently
+// grew to minutes would still pass the test above while badly delaying death.
+func TestGuardSupervisorGoroutine_BoundedEmitBudgetIsRespected(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, api.SupervisorEventLogFileLeaf)
+	events, release := wedgeSupervisorEventLog(t, logPath)
+	defer release()
+
+	start := time.Now()
+	func() {
+		defer func() { _ = recover() }()
+		func() {
+			defer guardSupervisorGoroutine(events, "budget-worker", "")
+			panic("budget-probe")
+		}()
+	}()
+	elapsed := time.Since(start)
+
+	// Allow generous scheduling slack over the budget, but catch an
+	// order-of-magnitude regression.
+	if max := 3 * supervisorGoroutinePanicEmitBudget; elapsed > max {
+		t.Fatalf("guard took %v to re-raise under a wedged log; budget is %v (max tolerated %v)",
+			elapsed, supervisorGoroutinePanicEmitBudget, max)
+	}
+}
 
 // TestSuperviseLongLivedGoroutinesAreGuarded is a STRUCTURAL regression
 // guard over the supervisor composition root. As of this change supervise.go
@@ -419,6 +546,39 @@ func TestSupervisorStderrSink_ReleaseOnExitCleanPathReleases(t *testing.T) {
 	}
 }
 
+// TestSupervisorStderrSink_OwnsProcessStderrFDPredicate guards the release
+// path's fd-2 exception in the direction this host can actually observe.
+//
+// On Windows the predicate must be FALSE for an ordinary sink file, so
+// release() still closes it — otherwise the handle-leak fix that made every
+// TestRunSupervise_* temp-dir cleanup pass would silently regress.
+//
+// The POSIX true-branch (sink allocated ON fd 2 when the parent handed us a
+// closed stderr, where closing would destroy the restored descriptor) cannot
+// be exercised here: the Windows implementation is a constant false, and this
+// host cannot run the POSIX build. It is covered by cross-compile vet plus the
+// reasoning recorded on release(); a runtime check needs a Linux host with fd 2
+// closed at exec.
+func TestSupervisorStderrSink_OwnsProcessStderrFDPredicate(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "sink-fd-probe-*")
+	if err != nil {
+		t.Fatalf("temp file: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if runtime.GOOS == "windows" {
+		if sinkOwnsProcessStderrFD(f) {
+			t.Fatal("Windows binds stderr by HANDLE, never by descriptor number; the predicate must be false so release() still closes the sink")
+		}
+		return
+	}
+	// POSIX: an ordinary temp file is not fd 2 (the test binary has a real
+	// stderr), so the predicate must still be false here.
+	if sinkOwnsProcessStderrFD(f) {
+		t.Fatalf("temp file reported as owning fd 2 (actual fd %d)", f.Fd())
+	}
+}
+
 // TestSupervisorStderrSink_RotatesAtOpenBoundary proves the sink honors the
 // 10 MB -> .1 discipline when it is opened, so restarts cannot grow it
 // without bound.
@@ -602,12 +762,127 @@ func TestRunSupervisorHeartbeat_StopsOnDone(t *testing.T) {
 	}
 }
 
+// TestRunSupervisorHeartbeat_ReportsGapAfterStall proves a stalled heartbeat
+// EXPLAINS ITSELF on recovery instead of leaving a silent hole.
+//
+// The heartbeat deliberately uses a BLOCKING Emit: a dropped beat would be a
+// false death signal, and this branch exists to make heartbeat-absence mean
+// death. But blocking trades one ambiguity for another unless the beat that
+// survives the stall says how long the hole was and why — otherwise an
+// operator six months from now chases a phantom outage that was really a
+// wedged event log.
+//
+// The stall here is REAL, not simulated: the event log is wedged exactly as a
+// competing process would wedge it (see wedgeSupervisorEventLog), so the first
+// beat genuinely parks inside Emit.
+//
+// MUTATION PROOF: delete the gap_seconds / previous_emit_block_ms bookkeeping
+// from emit() and this test FAILS while every other heartbeat test passes.
+func TestRunSupervisorHeartbeat_ReportsGapAfterStall(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, api.SupervisorEventLogFileLeaf)
+	events, release := wedgeSupervisorEventLog(t, logPath)
+
+	const interval = 100 * time.Millisecond
+	const stall = 2 * time.Second
+
+	done := make(chan struct{})
+	defer close(done)
+	go runSupervisorHeartbeat(done, events, NewDaemonRuntimeTracker(), "", time.Now().UTC(), interval)
+
+	// Hold the wedge so the first beat parks inside Emit, then let it through.
+	time.Sleep(stall)
+	release()
+
+	// Wait for the recovery beat (the one that must carry the explanation).
+	var beats []supervisorEventEntry
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		beats = readSupervisorEvents(t, logPath, "supervisor-heartbeat")
+		if len(beats) >= 2 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(beats) < 2 {
+		t.Fatalf("got %d heartbeat rows, want >= 2 (the stalled beat plus the recovery beat that explains it)", len(beats))
+	}
+
+	// Find a beat that reports a gap large enough to be the stall.
+	var explained *supervisorEventEntry
+	for i := range beats {
+		raw, ok := beats[i].Body["gap_seconds"]
+		if !ok {
+			continue
+		}
+		if gap, ok := raw.(float64); ok && gap >= 1 {
+			explained = &beats[i]
+			break
+		}
+	}
+	if explained == nil {
+		t.Fatalf("no heartbeat reported a gap covering the %v stall; a silent hole is indistinguishable from death.\nbeats: %+v", stall, beats)
+	}
+
+	if delayed, _ := explained.Body["beat_delayed"].(bool); !delayed {
+		t.Errorf("beat covering the stall did not set beat_delayed; body = %v", explained.Body)
+	}
+	if _, ok := explained.Body["expected_interval_seconds"]; !ok {
+		t.Errorf("delayed beat omitted expected_interval_seconds, so a reader cannot tell how late it was; body = %v", explained.Body)
+	}
+	// Attribution: the stall must be traceable to the event log being wedged,
+	// not merely reported as elapsed time.
+	blockRaw, ok := explained.Body["previous_emit_block_ms"]
+	if !ok {
+		t.Fatalf("delayed beat omitted previous_emit_block_ms; the gap is reported but NOT attributed, so a wedged log looks the same as a descheduled process. body = %v", explained.Body)
+	}
+	if blockMS, ok := blockRaw.(float64); !ok || blockMS < 500 {
+		t.Errorf("previous_emit_block_ms = %v, want >= 500 for a %v stall", blockRaw, stall)
+	}
+}
+
+// TestRunSupervisorHeartbeat_FirstBeatHasNoGap guards against the gap fields
+// being fabricated on the very first beat, where there is no previous beat to
+// measure from. A bogus gap_seconds on beat one would misreport a healthy
+// start as a recovered stall.
+func TestRunSupervisorHeartbeat_FirstBeatHasNoGap(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, api.SupervisorEventLogFileLeaf)
+	events, err := api.OpenSupervisorEventLog(logPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+
+	done := make(chan struct{})
+	go runSupervisorHeartbeat(done, events, NewDaemonRuntimeTracker(), "", time.Now().UTC(), time.Hour)
+	deadline := time.Now().Add(5 * time.Second)
+	var beats []supervisorEventEntry
+	for time.Now().Before(deadline) {
+		beats = readSupervisorEvents(t, logPath, "supervisor-heartbeat")
+		if len(beats) >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(done)
+
+	if len(beats) == 0 {
+		t.Fatal("no immediate first beat")
+	}
+	if _, ok := beats[0].Body["gap_seconds"]; ok {
+		t.Errorf("first beat carries gap_seconds with no previous beat to measure from; body = %v", beats[0].Body)
+	}
+	if _, ok := beats[0].Body["beat_delayed"]; ok {
+		t.Errorf("first beat marked delayed; body = %v", beats[0].Body)
+	}
+}
+
 // TestSupervisorHeartbeatInterval_FitsRotationBudget locks the interval
 // justification into a test so a future retune must re-argue it. At the
 // documented ~260 bytes/row the active 10 MB log must hold well over the
 // 42-hour forensic window that motivated this work.
 func TestSupervisorHeartbeatInterval_FitsRotationBudget(t *testing.T) {
-	const approxRowBytes = 260
+	const approxRowBytes = 290
 	rowsPerDay := int64(24*time.Hour) / int64(supervisorHeartbeatInterval)
 	bytesPerDay := rowsPerDay * approxRowBytes
 	daysOfHistory := api.SupervisorStderrSinkRotateSizeBytes / bytesPerDay

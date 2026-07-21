@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"runtime"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -16,6 +17,60 @@ import (
 // The untruncated traceback is independently available in the stderr sink,
 // which the re-raised panic writes to.
 const supervisorGoroutinePanicStackCap = 8192
+
+// supervisorGoroutinePanicEmitBudget caps how long the panic guard will wait
+// for its audit row before abandoning it and re-raising. Sized to comfortably
+// win an uncontended flock while being far too short to matter to a process
+// that is dying anyway.
+const supervisorGoroutinePanicEmitBudget = 2 * time.Second
+
+// emitSupervisorPanicEventBounded writes the panic row without ever blocking
+// the caller for longer than supervisorGoroutinePanicEmitBudget.
+//
+// WHY A GOROUTINE + SELECT RATHER THAN JUST EmitWithTimeout. Both are needed,
+// and the outer bound is the load-bearing one:
+//
+//	SupervisorEventLog.emit (supervisor_events.go:305-317) takes the
+//	in-process mutex `l.mu` with an UNBOUNDED Lock() for every mode except
+//	TryEmit, and then — in the blocking mode — holds that mutex across an
+//	UNBOUNDED l.lock.Lock() flock wait (:324). So a single concurrent
+//	blocking Emit (the supervisor heartbeat is exactly such a caller) that is
+//	parked on a wedged flock holds `mu` indefinitely, and a subsequent
+//	EmitWithTimeout parks on `mu` BEFORE its own timeout logic is ever
+//	reached. EmitWithTimeout alone therefore does NOT bound this call site.
+//
+// Bounding the wait in the GUARD, independent of the event log's internals,
+// is the only construction that holds regardless of which mode another
+// goroutine is wedged in.
+//
+// WHY IT MATTERS SO MUCH HERE. Without the bound, a panic in any guarded
+// goroutine turned into a permanently HUNG supervisor: it never reached
+// panic(r), so it never produced the runtime traceback the stderr sink exists
+// to capture, never exited, and kept holding supervisor.lock — so the
+// liveness task saw a live holder and did not relaunch. A crash became a
+// silent permanent outage, inverting the purpose of this whole change.
+//
+// EVIDENCE BEFORE BOOKKEEPING: the durable evidence is the runtime traceback
+// produced by the re-raise (captured by the stderr sink). This event row is
+// bookkeeping and must never be allowed to delay or prevent it — matching the
+// ordering discipline the sibling stall-dump work uses.
+//
+// The abandoned goroutine is deliberately not waited on: it may stay parked on
+// the wedged lock forever, but the process is about to be terminated by the
+// runtime, so it cannot outlive anything.
+func emitSupervisorPanicEventBounded(events *api.SupervisorEventLog, evt api.SupervisorEvent) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Inner bound keeps the common (merely contended) case tidy; the
+		// outer select is what makes the total wait guaranteed.
+		_ = events.EmitWithTimeout(evt, supervisorGoroutinePanicEmitBudget)
+	}()
+	select {
+	case <-done:
+	case <-time.After(supervisorGoroutinePanicEmitBudget):
+	}
+}
 
 // guardSupervisorGoroutine makes an otherwise-silent goroutine panic
 // attributable, then RE-RAISES it.
@@ -63,7 +118,7 @@ func guardSupervisorGoroutine(events *api.SupervisorEventLog, role string, taskN
 	if events != nil {
 		buf := make([]byte, supervisorGoroutinePanicStackCap)
 		n := runtime.Stack(buf, false)
-		_ = events.Emit(api.SupervisorEvent{
+		emitSupervisorPanicEventBounded(events, api.SupervisorEvent{
 			Severity: api.SupervisorEventSeverityError,
 			Source:   api.SupervisorEventSourceLifecycle,
 			Event:    "supervisor-goroutine-panic",
@@ -76,8 +131,9 @@ func guardSupervisorGoroutine(events *api.SupervisorEventLog, role string, taskN
 		})
 	}
 
-	// Re-raise. The supervisor dies exactly as it did before this guard
-	// existed — loudly, with a runtime traceback, exit 2 — but now with a
-	// durable row naming which goroutine did it.
+	// Re-raise UNCONDITIONALLY — reached whether the emit above succeeded,
+	// timed out, or was abandoned. The supervisor dies exactly as it did
+	// before this guard existed (runtime traceback, exit 2, recovery layer
+	// respawns); only attribution is added.
 	panic(r)
 }

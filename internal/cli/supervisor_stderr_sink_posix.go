@@ -21,6 +21,19 @@ func stderrIsInteractiveConsole() bool {
 	return st.Mode()&os.ModeCharDevice != 0
 }
 
+// sinkOwnsProcessStderrFD reports whether the sink file IS the process
+// stderr descriptor (fd 2) rather than merely being bound to it.
+//
+// This happens when the parent handed us a process with fd 2 closed: open(2)
+// returns the lowest free descriptor, which is then 2 itself. It is the same
+// degenerate case redirectProcessStderr already accepts as "already bound".
+//
+// It matters on RELEASE because closing such a file closes fd 2 itself. See
+// (*supervisorStderrSink).release for the consequence.
+func sinkOwnsProcessStderrFD(f *os.File) bool {
+	return f != nil && int(f.Fd()) == 2
+}
+
 // savedStderrBinding holds the process stderr binding displaced by a
 // redirect, so release() can put it back. The saved descriptor is a dup of
 // fd 2 taken before the redirect.

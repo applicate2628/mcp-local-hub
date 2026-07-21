@@ -184,13 +184,26 @@ func openSupervisorStderrSink(stateDir string) *supervisorStderrSink {
 // Closing first would leave stderr pointing at a closed handle for the
 // window in between, so a panic in that window would be lost — and lost
 // silently, which is the failure mode this whole change exists to remove.
+// THE fd-2 EXCEPTION (POSIX). When the parent handed us a process with fd 2
+// closed, os.OpenFile hands the sink the lowest free descriptor — which is 2
+// itself, the degenerate case redirectProcessStderr accepts as already-bound.
+// In that case s.file IS fd 2, so the Close() below would close the very
+// descriptor restore() just rebound, leaving the process with no stderr at
+// all and — worse — with fd 2 free for the next open() to claim, so a later
+// stray write to os.Stderr would land in an unrelated file. We therefore skip
+// the close and leave fd 2 bound to the sink: strictly safer, since the only
+// cost is one descriptor held for the process lifetime while any stray stderr
+// write goes somewhere forensically useful. Always false on Windows, where
+// stderr is bound by HANDLE rather than by descriptor number.
 func (s *supervisorStderrSink) release() {
 	if s == nil || !s.redirected {
 		return
 	}
 	_ = s.saved.restore()
 	if s.file != nil {
-		_ = s.file.Close()
+		if !sinkOwnsProcessStderrFD(s.file) {
+			_ = s.file.Close()
+		}
 		s.file = nil
 	}
 	s.redirected = false

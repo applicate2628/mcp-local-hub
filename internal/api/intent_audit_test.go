@@ -165,6 +165,16 @@ func TestIntentAudit_CallerFieldsPopulated(t *testing.T) {
 	// The tolerance absorbs per-OS whole-second truncation in the start-time
 	// conversion, not elapsed time: both sides read the same fixed instant, so
 	// any difference is representational.
+	//
+	// SCOPE OF THIS ASSERTION — it is a CONSISTENCY check, not an oracle.
+	// It proves the writer emitted what CallerStartTime() returns, which
+	// catches a writer that reaches for some other source. It CANNOT catch a
+	// regression INSIDE CallerStartTime itself (e.g. a bad process-time
+	// conversion, or a fallback to time.Now()), because both sides would then
+	// agree. That independent oracle is
+	// TestIntentAudit_CallerStartTimeAgainstIndependentOracle below, which
+	// compares against a PARENT process's wall clock across a deliberately
+	// delayed child.
 	const startTimeTolerance = 2 * time.Second
 	want := CallerStartTime()
 	if delta := parsed.Sub(want).Abs(); delta > startTimeTolerance {

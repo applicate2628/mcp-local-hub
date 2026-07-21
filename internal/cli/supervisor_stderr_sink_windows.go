@@ -32,6 +32,12 @@ func stderrIsInteractiveConsole() bool {
 	return windows.GetConsoleMode(h, &mode) == nil
 }
 
+// sinkOwnsProcessStderrFD is always false on Windows: stderr is bound via
+// SetStdHandle with a distinct HANDLE, never by occupying a numbered
+// descriptor slot, so closing the sink file can never close the restored
+// stderr. The POSIX build has the real implementation.
+func sinkOwnsProcessStderrFD(*os.File) bool { return false }
+
 // savedStderrBinding holds the process stderr binding displaced by a
 // redirect, so release() can put it back.
 type savedStderrBinding struct {
