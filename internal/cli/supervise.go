@@ -563,6 +563,16 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		Body:     stderrSink.auditBody(),
 	})
 
+	// Correct an inherited IDLE_PRIORITY_CLASS BEFORE the reconcile loop
+	// spawns any daemon, so the fleet inherits the raised floor at
+	// CreateProcess time (see supervisor_priority.go). Resolved ONCE at
+	// startup — the same place strictJobProtection is resolved — so the
+	// policy is not re-derived per spawn. Raise-only, never IDLE, non-fatal;
+	// a no-op on non-Windows. This is durable across restart, unlike a live
+	// operator raise: whatever the launching task's priority, the supervisor
+	// sets its own class here.
+	ensureSupervisorPriorityFloor(events)
+
 	if executableLookupErr != nil {
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "warn",
