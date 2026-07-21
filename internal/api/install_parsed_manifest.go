@@ -1446,6 +1446,17 @@ func legacySchedulerTaskPortOwnedBySupervisor(taskName string, port int) bool {
 // intent file under the per-user state directory.
 const supervisorIntentFileLeaf = "supervisor-intent.json"
 
+// supervisorStateFileLeaf is the canonical basename of the supervisor RUNTIME
+// state file, the sibling of supervisorIntentFileLeaf above. Intent is what the
+// operator asked for; state is what the supervisor observed — the spawn-hold
+// reason lives in the latter, which is why the status join reads this file and
+// not the intent one.
+//
+// NOTE: internal/cli still spells this basename as a literal in several places
+// (supervise.go). Consolidating those is deliberately NOT done here — it is
+// unrelated to this change and would widen a bugfix into a refactor.
+const supervisorStateFileLeaf = "supervisor-state.json"
+
 // buildMergedSupervisorIntent loads the existing supervisor-intent.json (if
 // any), removes the daemons this install owns for m.Name (all rows on a full
 // install, or only daemonFilter's row on a partial install), appends the

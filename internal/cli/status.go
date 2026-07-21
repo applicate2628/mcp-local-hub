@@ -340,6 +340,11 @@ func printWorkspaceScopedTable(cmd *cobra.Command, rows []api.DaemonStatus, prob
 				name, r.State, port, lifecycle, lastUsed, lastErr)
 		}
 	}
+	// Same notice as printDefaultStatusTable. Its absence here was an
+	// asymmetry, not a decision: `--workspace-scoped` is the view most likely
+	// to be showing a daemon held for a MISSING WORKSPACE, so it is the last
+	// table that should stay silent about it.
+	printSpawnHoldNotice(cmd, rows)
 	return nil
 }
 

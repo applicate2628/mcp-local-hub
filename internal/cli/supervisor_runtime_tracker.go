@@ -65,12 +65,23 @@ type DaemonRuntimeEntry struct {
 	// (P1.1) is holding this daemon because a path it needs is absent — a
 	// stable id ("missing-binary" / "missing-workspace") plus the exact path.
 	//
-	// Deliberately NOT cleared by clearJobProtectionLocked or the state-
-	// transition marks (MarkBackoff in particular): the gate marks the hold
-	// BEFORE calling holdSpawnInBackoff so one MarkBackoff + persist pass
-	// writes both the backoff state and the reason. The gate is the SOLE owner
-	// and clears them itself (ClearSpawnHold) on the first pass where nothing
-	// is absent.
+	// Cleared by clearSpawnHoldLocked on every lifecycle mark that ends an
+	// attempt to START this daemon — MarkExited / MarkExitedIfCurrent (and so
+	// MarkTerminated), MarkSpawnFailed / MarkSpawnFailedPreservePID, and
+	// MarkQuarantined — with ONE deliberate exception: MarkBackoff. The gate
+	// records the hold and THEN calls holdSpawnInBackoff, so clearing in
+	// MarkBackoff would erase the reason it just wrote; instead that single
+	// MarkBackoff + persist pass writes the backoff state and the reason
+	// together.
+	//
+	// The MarkExited clear is load-bearing, not tidiness. A stopped daemon gets
+	// NO later create-process pass, so the gate's own ClearSpawnHold can never
+	// run for it; without the clear the persisted hold would keep telling the
+	// CLI and the GUI that a path is missing and the daemon will auto-start,
+	// long after the operator fixed the path and stopped the daemon on purpose.
+	//
+	// The gate remains the sole SETTER; it also clears (ClearSpawnHold) on the
+	// first create-process pass where nothing is absent.
 	SpawnHoldReason string `json:",omitempty"`
 	SpawnHoldPath   string `json:",omitempty"`
 }
@@ -321,6 +332,24 @@ func (t *DaemonRuntimeTracker) MarkJobProtection(taskName string, protected *boo
 	t.entries[taskName] = entry
 }
 
+// clearSpawnHoldLocked drops any recorded pre-spawn hold. Caller holds t.mu.
+//
+// A hold is a statement about a daemon the supervisor is STILL TRYING to start.
+// The moment a task stops being started — it exited, it was terminated, or the
+// operator stopped it — that statement is no longer true and must not survive.
+//
+// This matters more than an ordinary stale field. A stopped daemon gets NO
+// later create-process pass, so the gate's own ClearSpawnHold can never run for
+// it; without this the persisted hold would keep telling the CLI and the GUI
+// that a path is missing and the daemon will auto-start, long after the
+// operator fixed the path and stopped the daemon on purpose. A diagnostic that
+// keeps asserting a condition after it is gone teaches people to ignore it —
+// exactly the outcome this gate exists to prevent.
+func clearSpawnHoldLocked(entry *DaemonRuntimeEntry) {
+	entry.SpawnHoldReason = ""
+	entry.SpawnHoldPath = ""
+}
+
 // MarkSpawnHold records that the pre-spawn existence gate is holding this task
 // because reasonID's path is absent. Called BEFORE holdSpawnInBackoff so that
 // call's MarkBackoff + persist writes the backoff state and the hold reason in
@@ -404,6 +433,7 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailed(taskName string, err error) {
 	entry.LastError = errorString(err)
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
+	clearSpawnHoldLocked(&entry)
 	t.entries[taskName] = entry
 }
 
@@ -447,6 +477,7 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailedPreservePID(taskName string, err e
 	entry.StartedAt = time.Time{}
 	entry.LastError = errorString(err)
 	clearJobProtectionLocked(&entry)
+	clearSpawnHoldLocked(&entry)
 	t.entries[taskName] = entry
 }
 
@@ -464,6 +495,7 @@ func (t *DaemonRuntimeTracker) MarkExited(taskName string) {
 	entry.LastError = ""
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
+	clearSpawnHoldLocked(&entry)
 	t.entries[taskName] = entry
 }
 
@@ -497,6 +529,7 @@ func (t *DaemonRuntimeTracker) MarkExitedIfCurrent(taskName string, pidGeneratio
 	entry.LastError = ""
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
+	clearSpawnHoldLocked(&entry)
 	t.entries[taskName] = entry
 	return true
 }
@@ -557,6 +590,7 @@ func (t *DaemonRuntimeTracker) MarkQuarantined(taskName string) {
 	entry.StartedAt = time.Time{}
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
+	clearSpawnHoldLocked(&entry)
 	t.entries[taskName] = entry
 }
 

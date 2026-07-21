@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -270,10 +271,33 @@ func TestClassifySpawnPath_FailOpenArms(t *testing.T) {
 // Holding is correct either way, but the REMEDY differs: telling that operator
 // to reinstall mcphub is wrong — their installation is fine and reinstalling
 // cannot fix an offline share. The volume-root probe separates the two.
+// It is PLATFORM-SPLIT rather than Windows-only-with-a-skip, because the POSIX
+// behaviour is a documented degradation that deserves its own assertion:
+// filepathlite.volumeNameLen returns 0 on unix, so VolumeName is always empty,
+// spawnPathVolumeRoot returns "", and the unavailable verdict is UNREACHABLE
+// there by construction. Those hosts keep the generic missing-* remedy rather
+// than asserting a drive state they cannot observe.
+//
+// The Windows-literal form of this test previously ran on every platform and
+// would have FAILED the Ubuntu CI leg: unix IsAbs is HasPrefix(path, "/")
+// (verified in $GOROOT/src/internal/filepathlite/path_unix.go), so
+// `Z:\tools\mcphub.exe` is not absolute there and classifySpawnPath returns
+// Indeterminate before the injected stat is ever called. Note `GOOS=linux go
+// vet` cannot catch this class: it type-checks, it does not RUN assertions.
 func TestClassifySpawnPath_UnavailableVolumeIsNotAMissingFile(t *testing.T) {
 	// A stat that fails with not-exist for EVERYTHING, including the volume
 	// root: the whole drive is gone.
 	wholeVolumeGone := func(string) (os.FileInfo, error) { return nil, fs.ErrNotExist }
+
+	if runtime.GOOS != "windows" {
+		// POSIX: no volume concept, so a missing absolute path is always the
+		// plain "deleted" verdict and NEVER the unavailable one.
+		if got := classifySpawnPath(wholeVolumeGone, "/mnt/share/tools/mcphub"); got != spawnPathAbsent {
+			t.Fatalf("POSIX missing path classified %v, want spawnPathAbsent (the unavailable verdict is unreachable without a volume name)", got)
+		}
+		return
+	}
+
 	if got := classifySpawnPath(wholeVolumeGone, `Z:\tools\mcphub.exe`); got != spawnPathUnavailable {
 		t.Fatalf("disconnected volume classified %v, want spawnPathUnavailable — the operator would be told to reinstall, which cannot fix an offline drive", got)
 	}
@@ -471,6 +495,29 @@ func TestPrintSpawnHoldNotice(t *testing.T) {
 		}
 	})
 
+	// The workspace-scoped table is the view MOST likely to be showing a daemon
+	// held for a missing workspace, so it is the last table that should stay
+	// silent about it. Its omission was an asymmetry with printDefaultStatusTable,
+	// not a decision.
+	t.Run("the workspace-scoped table prints the notice too", func(t *testing.T) {
+		var buf bytes.Buffer
+		cmd := &cobra.Command{}
+		cmd.SetOut(&buf)
+		row := api.DaemonStatus{
+			Server: "serena", Daemon: "default", State: "Stopped",
+			IsWorkspaceScoped: true,
+			SpawnHoldReason:   missingWorkspaceReasonID,
+			SpawnHoldPath:     `C:\projects\deleted`,
+		}
+		if err := printWorkspaceScopedTable(cmd, []api.DaemonStatus{row}, false); err != nil {
+			t.Fatalf("printWorkspaceScopedTable: %v", err)
+		}
+		got := buf.String()
+		if !strings.Contains(got, "cannot start") || !strings.Contains(got, `C:\projects\deleted`) {
+			t.Fatalf("--workspace-scoped must explain a held daemon, not just print a Stopped row; got:\n%s", got)
+		}
+	})
+
 	t.Run("a healthy fleet prints nothing", func(t *testing.T) {
 		var buf bytes.Buffer
 		cmd := &cobra.Command{}
@@ -480,6 +527,66 @@ func TestPrintSpawnHoldNotice(t *testing.T) {
 			t.Fatalf("healthy fleet must print no notice; got:\n%s", got)
 		}
 	})
+}
+
+// --- A hold must not outlive the attempt to start ----------------------------
+
+// TestSpawnHold_ClearedWhenDaemonStops reproduces the reported chain: an
+// operator stops a daemon WHILE the pre-spawn gate is holding it. The
+// StBackoffWaiting + EvIntentUpdate(stopped) transition lands in StIdle, where
+// the controller calls MarkExited.
+//
+// A stopped daemon gets NO later create-process pass, so the gate's own
+// ClearSpawnHold can never run for it. Before the fix the hold was persisted
+// and kept telling the CLI and the GUI that a path was missing and the daemon
+// would auto-start — after the operator had already fixed the path and stopped
+// the daemon deliberately. A diagnostic that keeps asserting a condition once
+// it is gone teaches people to ignore it, which is the exact failure this gate
+// exists to end.
+func TestSpawnHold_ClearedWhenDaemonStops(t *testing.T) {
+	tracker := NewDaemonRuntimeTracker()
+	const task = `\mcp-local-hub-memory-default`
+
+	assertHeld := func(t *testing.T, want bool, whenever string) {
+		t.Helper()
+		snap := tracker.Snapshot()[canonicalSupervisorTaskName(task)]
+		got := snap.SpawnHoldReason != ""
+		if got != want {
+			t.Fatalf("%s: hold present = %v, want %v (reason=%q path=%q)",
+				whenever, got, want, snap.SpawnHoldReason, snap.SpawnHoldPath)
+		}
+	}
+
+	// The gate marks the hold, then holdSpawnInBackoff -> MarkBackoff. The hold
+	// MUST survive that pair, or the feature never reaches an operator at all.
+	tracker.MarkSpawnHold(task, missingBinaryReasonID, `C:\gone\mcphub.exe`)
+	tracker.MarkBackoff(task)
+	assertHeld(t, true, "after MarkSpawnHold + MarkBackoff")
+
+	// Operator stops the daemon: StBackoffWaiting + EvIntentUpdate(stopped) ->
+	// StIdle -> MarkExited. The statement "cannot start, will auto-start" is no
+	// longer true and must not persist.
+	tracker.MarkExited(task)
+	assertHeld(t, false, "after the operator stopped the daemon (MarkExited)")
+
+	// Every other lifecycle mark that ends a start attempt clears it too.
+	for _, tc := range []struct {
+		name string
+		end  func()
+	}{
+		{"MarkTerminated", func() { tracker.MarkTerminated(task) }},
+		{"MarkQuarantined", func() { tracker.MarkQuarantined(task) }},
+		{"MarkSpawnFailed", func() { tracker.MarkSpawnFailed(task, errors.New("boom")) }},
+		{"MarkSpawnFailedPreservePID", func() { tracker.MarkSpawnFailedPreservePID(task, errors.New("boom"), 4242) }},
+		{"MarkExitedIfCurrent", func() { tracker.MarkExitedIfCurrent(task, 999) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tracker.MarkSpawnHold(task, missingBinaryReasonID, `C:\gone\mcphub.exe`)
+			assertHeld(t, true, "re-armed before "+tc.name)
+			tc.end()
+			assertHeld(t, false, "after "+tc.name)
+		})
+	}
 }
 
 // --- Delivery chain: producer half -------------------------------------------
