@@ -280,6 +280,13 @@ type supervisorController struct {
 	failureWindow       time.Duration
 	quarantineThreshold int
 
+	// jitterSource, when non-nil, replaces rand.Float64 as the respawn-backoff
+	// jitter fraction (see respawnJitterFraction). Production leaves it nil.
+	// Tests pin it because the spread is sub-second across most of the ladder —
+	// the first respawn's 1s base takes 0-500ms — so asserting on an armed delay
+	// without pinning it would be a coin flip.
+	jitterSource func() float64
+
 	// F1 pre-spawn port-owner gate (decision D-A) — split across the loop and a
 	// dedicated off-loop worker so the loop NEVER runs the blocking classify/reap
 	// (codex-P1: WMI identity lookup + 5s terminate-wait on the event loop would
@@ -3860,9 +3867,20 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 
 	// Arm FIRST so the audit row can report the duration actually armed
 	// (base + upward jitter) rather than the pre-jitter ladder value — an
-	// operator correlating `backoff_seconds` against observed respawn times
-	// must not see a number the supervisor never used. backoff_base_seconds
-	// keeps the deterministic ladder value visible alongside it.
+	// operator correlating the record against observed respawn times must not
+	// see a number the supervisor never used.
+	//
+	// The precise fields are the MILLISECOND ones. Jitter is sub-second across
+	// most of the ladder (the first respawn's 1 s base takes 0-500 ms), so a
+	// seconds-granularity field TRUNCATES the entire spread away: every first
+	// respawn would report 1 regardless of whether 1.0 s or 1.5 s was armed,
+	// which is exactly the correlation this row exists to support.
+	//
+	// `backoff_seconds` is PRE-EXISTING operator-visible output (it predates the
+	// jitter change), so it is preserved verbatim — same name, same
+	// truncated-toward-zero seconds semantics — for log consumers and runbooks
+	// that already grep it. It is a coarse summary, NOT the correlation field;
+	// read backoff_ms when the exact armed delay matters.
 	base := computeRespawnBackoff(failures)
 	armed := c.armRespawnBackoffTimer(*d, d.TaskName, base)
 	if c.events != nil {
@@ -3872,10 +3890,15 @@ func (c *supervisorController) handleBackoffWaiting(d *api.SupervisorDaemon, ev 
 			Event:    "daemon-respawn-scheduled",
 			TaskName: d.TaskName,
 			Body: map[string]any{
-				"failures_in_30m":      failures,
-				"backoff_seconds":      int(armed / time.Second),
-				"backoff_base_seconds": int(base / time.Second),
-				"exit_code":            exitCode,
+				"failures_in_30m": failures,
+				// Coarse, backward-compatible, TRUNCATED to whole seconds.
+				"backoff_seconds": int(armed / time.Second),
+				// Precise: the delay actually armed, and the deterministic
+				// ladder value it was derived from. armed-minus-base is the
+				// jitter that was applied.
+				"backoff_ms":      armed.Milliseconds(),
+				"backoff_base_ms": base.Milliseconds(),
+				"exit_code":       exitCode,
 			},
 		})
 	}
@@ -3909,7 +3932,7 @@ func (c *supervisorController) nextRespawnArmGen(key string) uint64 {
 // duration ACTUALLY armed so callers can audit the real value rather than the
 // pre-jitter base.
 func (c *supervisorController) armRespawnBackoffTimer(descriptor api.SupervisorDaemon, taskName string, backoff time.Duration) time.Duration {
-	backoff = jitteredRespawnBackoff(backoff, rand.Float64())
+	backoff = jitteredRespawnBackoff(backoff, c.respawnJitterFraction())
 	// Arm the backoff timer in a goroutine so the event loop stays
 	// responsive. When the timer fires, post EvTimerDue so the SM
 	// moves StBackoffWaiting -> StSpawning (or StQuarantined per the
@@ -4390,9 +4413,21 @@ const (
 	respawnBackoffJitterMax      = 10 * time.Second
 )
 
+// respawnJitterFraction returns the jitter fraction for the next arm. Production
+// uses rand.Float64; a test may pin it via the jitterSource field to make an
+// armed delay deterministic (the spread is sub-second on most of the ladder, so
+// asserting on it otherwise would be a coin flip).
+func (c *supervisorController) respawnJitterFraction() float64 {
+	if c.jitterSource != nil {
+		return c.jitterSource()
+	}
+	return rand.Float64()
+}
+
 // jitteredRespawnBackoff spreads a base backoff upward by r ∈ [0,1) of the
 // bounded jitter span. PURE in (base, r) so the ladder + spread are testable
-// without touching randomness; armRespawnBackoffTimer supplies rand.Float64().
+// without touching randomness; armRespawnBackoffTimer supplies the fraction via
+// respawnJitterFraction (rand.Float64 in production, pinned in tests).
 //
 // base <= 0 is returned unchanged: a zero backoff means "respawn now" (the
 // failures<=0 case), and delaying it would change spawn semantics.
