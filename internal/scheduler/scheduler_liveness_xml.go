@@ -106,6 +106,25 @@ func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
 	// manifest-per-poll REVISION 4. This fixes NEW installs; the supervisor's own
 	// startup priority-floor raise (ensureSupervisorPriorityFloor) fixes EXISTING
 	// hosts whose installed liveness task is still IDLE.
+	//
+	// This <Priority> STAYS 7 (BELOW_NORMAL) even though the supervisor's
+	// priority FLOOR was later raised from BELOW_NORMAL to NORMAL on live A/B
+	// evidence (supervisor_priority.go). It is NOT raised to match the floor,
+	// deliberately, for three reasons:
+	//  1. Single owner. ensureSupervisorPriorityFloor is the ONE owner of the
+	//     supervisor's RUNTIME priority — it lifts the process to NORMAL at
+	//     startup regardless of what launched it. This <Priority> must not
+	//     become a second, drifting source of truth; it now governs only the
+	//     negligible pre-raise launch window and the ensure-alive ACTION
+	//     process itself (which serves no status IPC).
+	//  2. The action SHOULD stay polite. `supervise --ensure-alive` is a ~1-min
+	//     background flock probe; its rare supervisor-down branch spawns a
+	//     DETACHED CHILD `mcphub supervise` that self-raises to NORMAL on its
+	//     own startup, so the RECOVERED supervisor still reaches NORMAL without
+	//     this probe competing with foreground work every tick.
+	//  3. Degraded fallback. If the self-raise is denied by policy (non-fatal),
+	//     the supervisor lands at the launch class BELOW_NORMAL — the class the
+	//     live A/B showed is degraded-but-functional — not IDLE.
 	buf.WriteString("  <Settings>\n")
 	buf.WriteString("    <Hidden>false</Hidden>\n")
 	buf.WriteString("    <Priority>7</Priority>\n")

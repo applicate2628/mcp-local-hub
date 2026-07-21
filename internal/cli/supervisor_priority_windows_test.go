@@ -47,10 +47,11 @@ func TestPriorityClassRankMapping(t *testing.T) {
 		t.Errorf("priorityClassToRank(unknown) = %d, want rankUnknown (%d)", got, rankUnknown)
 	}
 
-	// The floor must map to BELOW_NORMAL and NEVER to IDLE — a mapping-layer
-	// guard complementing the decision-layer never-IDLE invariant.
-	if got := rankToPriorityClass(supervisorPriorityFloorRank); got != windows.BELOW_NORMAL_PRIORITY_CLASS {
-		t.Errorf("rankToPriorityClass(floor) = 0x%x, want BELOW_NORMAL 0x%x", got, uint32(windows.BELOW_NORMAL_PRIORITY_CLASS))
+	// The floor must map to NORMAL and NEVER to IDLE — a mapping-layer guard
+	// complementing the decision-layer never-IDLE invariant. (Floor raised
+	// from BELOW_NORMAL to NORMAL on live A/B evidence; see supervisor_priority.go.)
+	if got := rankToPriorityClass(supervisorPriorityFloorRank); got != windows.NORMAL_PRIORITY_CLASS {
+		t.Errorf("rankToPriorityClass(floor) = 0x%x, want NORMAL 0x%x", got, uint32(windows.NORMAL_PRIORITY_CLASS))
 	}
 	if rankToPriorityClass(supervisorPriorityFloorRank) == windows.IDLE_PRIORITY_CLASS {
 		t.Fatalf("floor must never map to IDLE_PRIORITY_CLASS")
@@ -75,19 +76,21 @@ func TestEnsureSupervisorPriorityFloorOrchestration(t *testing.T) {
 		wantEvent string
 	}{
 		{
-			name:      "idle is raised to below-normal",
+			name:      "idle is raised to normal",
 			getClass:  windows.IDLE_PRIORITY_CLASS,
-			wantSetTo: windows.BELOW_NORMAL_PRIORITY_CLASS,
+			wantSetTo: windows.NORMAL_PRIORITY_CLASS,
 			wantEvent: "supervisor-priority-raised",
 		},
 		{
-			name:      "already below-normal is a no-op",
+			// BELOW_NORMAL is now below the floor → raised to NORMAL (the
+			// semantic flip vs #577, where this was a no-op at-floor case).
+			name:      "below-normal is raised to normal",
 			getClass:  windows.BELOW_NORMAL_PRIORITY_CLASS,
-			wantSetTo: 0,
-			wantEvent: "supervisor-priority-ok",
+			wantSetTo: windows.NORMAL_PRIORITY_CLASS,
+			wantEvent: "supervisor-priority-raised",
 		},
 		{
-			name:      "normal is not lowered",
+			name:      "normal is at floor, a no-op",
 			getClass:  windows.NORMAL_PRIORITY_CLASS,
 			wantSetTo: 0,
 			wantEvent: "supervisor-priority-ok",
@@ -108,7 +111,7 @@ func TestEnsureSupervisorPriorityFloorOrchestration(t *testing.T) {
 			name:      "raise failure is audited",
 			getClass:  windows.IDLE_PRIORITY_CLASS,
 			setErr:    setErr,
-			wantSetTo: windows.BELOW_NORMAL_PRIORITY_CLASS, // Set IS attempted
+			wantSetTo: windows.NORMAL_PRIORITY_CLASS, // Set IS attempted
 			wantEvent: "supervisor-priority-raise-failed",
 		},
 	}
