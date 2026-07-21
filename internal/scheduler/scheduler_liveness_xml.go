@@ -93,9 +93,22 @@ func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
 	buf.WriteString("  </Principals>\n")
 
 	// Settings — background priority + hard 1-min cap.
+	//
+	// <Priority>7</Priority> maps to BELOW_NORMAL_PRIORITY_CLASS, MATCHING the
+	// autostart supervisor task (buildCreateXML, scheduler_windows.go). It was
+	// <Priority>9</Priority> (IDLE_PRIORITY_CLASS) — one class WORSE — which made
+	// the RECOVERY path worse than the normal path: this action's supervisor-down
+	// branch spawns a DETACHED CHILD `mcphub supervise` (spawnStandaloneSupervisor),
+	// and per the Win32 rule that a child inherits an IDLE/BELOW_NORMAL parent's
+	// class, that recovered supervisor — and every daemon it spawns — inherited
+	// IDLE and was scheduled so rarely on a busy host that the status IPC stalled
+	// for tens of seconds. See work-item 2026-07-21-status-ipc-reparses-every-
+	// manifest-per-poll REVISION 4. This fixes NEW installs; the supervisor's own
+	// startup priority-floor raise (ensureSupervisorPriorityFloor) fixes EXISTING
+	// hosts whose installed liveness task is still IDLE.
 	buf.WriteString("  <Settings>\n")
 	buf.WriteString("    <Hidden>false</Hidden>\n")
-	buf.WriteString("    <Priority>9</Priority>\n")
+	buf.WriteString("    <Priority>7</Priority>\n")
 	buf.WriteString("    <ExecutionTimeLimit>PT1M</ExecutionTimeLimit>\n")
 	buf.WriteString("    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n")
 	buf.WriteString("    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n")
