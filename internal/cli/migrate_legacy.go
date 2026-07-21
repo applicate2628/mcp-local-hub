@@ -23,6 +23,17 @@ func newMigrateLegacyCmdReal() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "migrate-legacy",
 		Short: "Detect + migrate disabled mcp-language-server entries into managed registry",
+		// Hidden: one-shot conversion of pre-hub disabled
+		// mcp-language-server client entries. Irrelevant on a fresh install
+		// and a no-op once run.
+		//
+		// Discoverability loss ACCEPTED (2026-07-20): hiding drops it from
+		// tab-completion too, and no runtime error names it — but its
+		// audience is an operator upgrading from a pre-hub install, who is
+		// following the documented upgrade path (CLAUDE.md "Subcommands"),
+		// not browsing the command list. A one-shot legacy migration does
+		// not belong in the steady-state listing.
+		Hidden: true,
 		Long: `Scan every installed MCP client config (Codex + Claude Code) for
 disabled entries whose command is mcp-language-server. For each unique
 workspace, emit one 'mcphub register' — which allocates ports, creates

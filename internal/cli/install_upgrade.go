@@ -426,9 +426,15 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// Windows: `schtasks /Run /TN \mcp-local-hub-supervisor` if the
 	// scheduled-task shim is installed; otherwise detached
 	// CreateProcess with DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP
-	// (the new supervisor's stdin/stdout/stderr inherit nothing
-	// from this CLI process, so it survives the upgrade caller's
-	// own exit).
+	// plus the console-attach suppression marker (the new
+	// supervisor's stdin/stdout/stderr inherit nothing from this CLI
+	// process AND it never attaches a console of its own, so it
+	// survives both the upgrade caller's exit and the closing of the
+	// terminal the upgrade was typed into). Surviving the caller's
+	// EXIT and surviving the caller's CONSOLE are different
+	// properties; the creation flags deliver only the first. See
+	// spawnSupervisorDetached in install_migration_wiring_windows.go,
+	// which is the Deps.StartSupervisor implementation this calls.
 	// Linux managed: `systemctl --user restart mcphub-supervisor.service`.
 	// Linux unmanaged: `mcphub supervise &` (detached background).
 	// macOS managed: `launchctl kickstart -k gui/<uid>/com.applicate2628.mcphub-supervisor`.

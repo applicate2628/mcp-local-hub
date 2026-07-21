@@ -428,29 +428,65 @@ func portBindWaitForRelease(port int, timeout time.Duration) error {
 // Supervisor spawn wiring.
 // ---------------------------------------------------------------------------
 
+// newInstallSupervisorCmd builds the detached `<exe> supervise [--strict-mode]`
+// command for the install/upgrade path. Package-level (rather than an inline
+// closure) so the spawn CONFIGURATION can be asserted without starting a
+// supervisor.
+//
+// The creation flags block console INHERITANCE only. The child is this same
+// binary and its main() calls AttachConsole(ATTACH_PARENT_PROCESS), so without
+// the marker it re-attaches to whatever console the CLI holds — and `mcphub
+// install --upgrade` is normally TYPED AT A TERMINAL, so that console exists.
+// The operator then closes the window believing the upgrade finished,
+// CTRL_CLOSE_EVENT reaches the brand-new supervisor, and KILL_ON_JOB_CLOSE
+// reaps the fleet it just started. Measured with this site's exact flag set
+// (0x00000208): no marker -> the child appears in the parent's
+// GetConsoleProcessList; marker -> never.
+//
+// The marker also covers the degraded retries in
+// startSupervisorDetachedBreakaway, which rebuild through this same function.
+// That matters more than it looks: on a locked-down host those retries STRIP
+// creation flags, so the marker is the only protection that survives them —
+// measured at CreationFlags=0, where it still holds.
+func newInstallSupervisorCmd(exePath string, args []string) *exec.Cmd {
+	c := exec.Command(exePath, args...)
+	c.SysProcAttr = &windows.SysProcAttr{
+		CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP,
+	}
+	process.SuppressConsoleAttach(c)
+	return c
+}
+
+// installSupervisorCmdBuilder returns the builder the spawn path hands to
+// startSupervisorDetachedBreakaway. Package-level so a test can invoke the
+// builder REPEATEDLY and assert that each rebuild — not merely the first
+// attempt — carries the console-attach suppression, which is the property the
+// degraded ERROR_ACCESS_DENIED retries depend on.
+func installSupervisorCmdBuilder(exePath string, strictMode bool) func() *exec.Cmd {
+	args := []string{"supervise"}
+	if strictMode {
+		args = append(args, "--strict-mode")
+	}
+	return func() *exec.Cmd { return newInstallSupervisorCmd(exePath, args) }
+}
+
 // spawnSupervisorDetached returns a closure that launches
 // `<exe> supervise [--strict-mode]` as a detached background process via the
 // per-OS process-detachment primitive.
 //
 // Windows: DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP so the new supervisor's
-// stdin/stdout/stderr inherit nothing from this CLI process. It survives the
-// CLI's own exit.
+// stdin/stdout/stderr inherit nothing from this CLI process, PLUS
+// process.SuppressConsoleAttach so it never acquires a console of its own.
+// Both halves are required and the creation flags alone are not enough — see
+// newInstallSupervisorCmd above for the measurement. The spawned supervisor
+// survives the CLI's own exit AND the closing of the terminal the operator ran
+// `mcphub install --upgrade` in.
 func spawnSupervisorDetached(exePath string, strictMode bool) func() error {
 	return func() error {
-		args := []string{"supervise"}
-		if strictMode {
-			args = append(args, "--strict-mode")
-		}
 		// build constructs a fresh detached supervisor cmd so the
 		// breakaway-tolerant flagless retry (PART 1) can rebuild an
 		// equivalent one if the parent job forbids breakaway.
-		build := func() *exec.Cmd {
-			c := exec.Command(exePath, args...)
-			c.SysProcAttr = &windows.SysProcAttr{
-				CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP,
-			}
-			return c
-		}
+		build := installSupervisorCmdBuilder(exePath, strictMode)
 		// PART 1 (§5 permanent fix): add CREATE_BREAKAWAY_FROM_JOB so the
 		// new supervisor escapes any KILL_ON_JOB_CLOSE job inherited from
 		// the install/migrate CLI's launcher. On a locked-down host that

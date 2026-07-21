@@ -12,6 +12,17 @@ func newSchedulerCmdReal() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "scheduler",
 		Short: "Scheduler-level operations (upgrade tasks, manage weekly refresh)",
+		// VISIBLE, under Maintenance. Low-level Task Scheduler metadata
+		// surgery: since v0.5 the supervisor owns daemon lifecycle, so this
+		// is an advanced repair tool rather than part of any normal operator
+		// flow — but it IS operator-facing, and it is named in no runtime
+		// error, so the top-level listing and shell completion are its only
+		// discovery surfaces. Hiding it deleted both (cobra's
+		// IsAvailableCommand() is false for a hidden command, so hidden
+		// commands drop out of tab-completion too, not just --help).
+		// "Advanced repair tool" is precisely what the Maintenance group is
+		// for, and root.go groups it there (grouping is root-owned;
+		// visibility is owned here).
 		Long: `Manage Windows Task Scheduler task metadata directly, without
 reinstalling servers.
 

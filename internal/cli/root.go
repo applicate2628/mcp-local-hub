@@ -17,66 +17,151 @@ import (
 //
 // Named "mcphub" (rather than "mcp") to avoid the name collision with the
 // Python mcp SDK which installs a binary of the same name via pip.
+// Command group IDs for the `mcphub --help` listing. Grouping is a
+// ROOT-level layout concern and is therefore owned here; per-command
+// VISIBILITY (`Hidden`) stays with each command's own constructor, matching
+// the existing idiom in tray_cmd.go / weekly_refresh.go.
+//
+// Every VISIBLE command must be assigned a group: cobra collects ungrouped
+// available commands under a generic "Additional Commands" heading, which
+// would reintroduce exactly the undifferentiated list this grouping removes.
+const (
+	groupSetup       = "setup"
+	groupServers     = "servers"
+	groupRuntime     = "runtime"
+	groupSecrets     = "secrets"
+	groupMaintenance = "maintenance"
+)
+
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "mcphub",
-		Short:         "Local shared-daemon manager for MCP servers",
+		Use:   "mcphub",
+		Short: "Local shared-daemon manager for MCP servers",
+		Long: `mcphub runs your MCP servers as shared local daemons instead of one
+process per client, and points every MCP client at them.
+
+Run "mcphub" with no arguments to start the hub and open the GUI.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newInstallCmd())
-	root.AddCommand(newAdoptCmd())
-	root.AddCommand(newDeAdoptCmd())
-	root.AddCommand(newAdoptProvenanceCmd())
-	root.AddCommand(newUpgradeCmd())
-	root.AddCommand(newSetupCmd())
-	root.AddCommand(newUninstallCmd())
-	root.AddCommand(newStatusCmd())
-	root.AddCommand(newScanCmd())
-	root.AddCommand(newMigrateCmd())
-	root.AddCommand(newRestartCmd())
-	root.AddCommand(newStopCmd())
-	root.AddCommand(newRollbackCmd())
-	root.AddCommand(newDaemonCmd())
-	root.AddCommand(newRelayCmd())
-	root.AddCommand(newSecretsCmd())
-	root.AddCommand(newVersionCmd())
-	root.AddCommand(newLogsCmd())
-	root.AddCommand(newCleanupCmd())
-	root.AddCommand(newBackupsCmd())
-	root.AddCommand(newManifestCmd())
-	root.AddCommand(newSchedulerCmd())
-	root.AddCommand(newSettingsCmd())
-	root.AddCommand(newConfigCmd())
-	root.AddCommand(newRegisterCmd())
-	root.AddCommand(newUnregisterCmd())
-	root.AddCommand(newTrustCmd())
-	root.AddCommand(newUntrustCmd())
-	root.AddCommand(newWorkspacesCmd())
-	root.AddCommand(newWorkspaceCmd())
-	root.AddCommand(newLanguageServerCmd())
-	root.AddCommand(newLSPRouterCmd())
-	root.AddCommand(newMigrateLegacyCmd())
-	root.AddCommand(newImportCmd())
-	root.AddCommand(newWeeklyRefreshCmd())
-	root.AddCommand(newGuiCmd())
-	root.AddCommand(newTrayCmd())
-	root.AddCommand(newSuperviseCmd())
-	root.AddCommand(newReconcileCmd())
-	root.AddCommand(newIntentCollapseCmd())
-	root.AddCommand(newAutostartCmd())
-	root.AddCommand(newStrictModeCmd())
-	root.AddCommand(newRepairStateDACLCmd())
-	root.AddCommand(newHubMcpCmd())
-	root.AddCommand(newMarketplaceCmd())
-	root.AddCommand(lldb.NewCommand())
-	root.AddCommand(gdb.NewCommand())
-	root.AddCommand(godbolt.NewCommand())
-	root.AddCommand(perftools.NewCommand())
-	root.AddCommand(oneapirun.NewCommand())
-	root.AddCommand(drmemory.NewCommand())
-	root.AddCommand(vtune.NewCommand())
+
+	// Groups must be registered BEFORE any command claiming them: cobra's
+	// AddCommand panics on a GroupID with no matching group.
+	root.AddGroup(
+		&cobra.Group{ID: groupSetup, Title: "Setup:"},
+		&cobra.Group{ID: groupServers, Title: "MCP servers:"},
+		&cobra.Group{ID: groupRuntime, Title: "Running the hub:"},
+		&cobra.Group{ID: groupSecrets, Title: "Secrets:"},
+		&cobra.Group{ID: groupMaintenance, Title: "Maintenance:"},
+	)
+
+	addGrouped(root, groupSetup,
+		newSetupCmd(),
+		newInstallCmd(),
+		newUninstallCmd(),
+		newUpgradeCmd(),
+		newAutostartCmd(),
+		newImportCmd(),
+	)
+	addGrouped(root, groupServers,
+		newScanCmd(),
+		newAdoptCmd(),
+		newDeAdoptCmd(),
+		newMigrateCmd(),
+		newManifestCmd(),
+		newMarketplaceCmd(),
+		newLanguageServerCmd(),
+		newLSPRouterCmd(),
+		newRegisterCmd(),
+		newUnregisterCmd(),
+		newWorkspaceCmd(),
+		newWorkspacesCmd(),
+		newTrustCmd(),
+		newUntrustCmd(),
+	)
+	addGrouped(root, groupRuntime,
+		newGuiCmd(),
+		newStatusCmd(),
+		newRestartCmd(),
+		newStopCmd(),
+		newLogsCmd(),
+		newSuperviseCmd(),
+	)
+	addGrouped(root, groupSecrets,
+		newSecretsCmd(),
+	)
+	addGrouped(root, groupMaintenance,
+		newBackupsCmd(),
+		newRollbackCmd(),
+		newCleanupCmd(),
+		newConfigCmd(),
+		newSettingsCmd(),
+		newVersionCmd(),
+		// Advanced repair tools. Operator-facing but rarely needed, and —
+		// unlike `daemon recover`, `repair-state-dacl`, `strict-mode
+		// --recover` and `hub-mcp regenerate-*` — NOT quoted in any runtime
+		// error, so the listing and shell completion are their only
+		// discovery surfaces. Each constructor carries the visibility
+		// rationale next to its own decision.
+		newSchedulerCmd(),
+		newReconcileCmd(),
+	)
+
+	// Internal / machine-invoked / advanced-diagnostic surfaces. Each sets
+	// Hidden in its own constructor, so these still work exactly as before
+	// (including `<cmd> --help`); they are only omitted from the top-level
+	// listing. They need no GroupID — cobra never renders an unavailable
+	// command, so they cannot fall into "Additional Commands".
+	//
+	// Hiding costs MORE than the help listing: cobra's IsAvailableCommand()
+	// is false for a hidden command, so hidden commands are absent from
+	// shell tab-completion too (cobra v1.10.2 completions.go:518). Each
+	// entry below is either machine-invoked, or named verbatim in the
+	// runtime error that calls for it, or carries an explicit
+	// accepted-loss note in its own constructor.
+	root.AddCommand(
+		newDaemonCmd(),
+		newRelayCmd(),
+		newWeeklyRefreshCmd(),
+		newIntentCollapseCmd(),
+		newStrictModeCmd(),
+		newRepairStateDACLCmd(),
+		newHubMcpCmd(),
+		newAdoptProvenanceCmd(),
+		newMigrateLegacyCmd(),
+		newTrayCmd(),
+	)
+
+	// Debugger / profiler MCP bridges. Each already sets Hidden in its own
+	// package; they are machine-invoked bridge entry points, not operator
+	// commands.
+	root.AddCommand(
+		lldb.NewCommand(),
+		gdb.NewCommand(),
+		godbolt.NewCommand(),
+		perftools.NewCommand(),
+		oneapirun.NewCommand(),
+		drmemory.NewCommand(),
+		vtune.NewCommand(),
+	)
+
+	// cobra's auto-generated `help` and `completion` are available commands
+	// too; without an explicit group they render under "Additional
+	// Commands". Park them in Maintenance so the listing has no catch-all.
+	root.SetHelpCommandGroupID(groupMaintenance)
+	root.SetCompletionCommandGroupID(groupMaintenance)
+
 	return root
+}
+
+// addGrouped stamps groupID on each command and registers it with root.
+// Assigning the group at registration keeps the whole help layout readable
+// in one place instead of scattering GroupID across ~40 constructor files.
+func addGrouped(root *cobra.Command, groupID string, cmds ...*cobra.Command) {
+	for _, c := range cmds {
+		c.GroupID = groupID
+		root.AddCommand(c)
+	}
 }
 
 // Stub constructors — each returns a cobra.Command that prints "not implemented yet".

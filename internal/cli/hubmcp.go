@@ -30,6 +30,11 @@ func newHubMcpCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "hub-mcp",
 		Short: "Hub MCP endpoint operations",
+		// Hidden: hub endpoint internals (token/instance-id rotation). The
+		// GUI and `install --reconcile-hub-mode` drive this surface; the
+		// two subcommands an operator may need are named verbatim in the
+		// corruption/rotation errors that require them.
+		Hidden: true,
 		Long: `Operate on the G4 unified hub MCP endpoint.
 
 The endpoint is the single HTTP listener (default port from

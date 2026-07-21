@@ -976,10 +976,11 @@ func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duratio
 //
 //  1. matchBasename(image) — "mcphub.exe" Windows / "mcphub" POSIX.
 //  2. argv subcommand: argv[1] == "gui" OR len(argv) == 1.
-//     The len(argv)==1 branch covers cmd/mcphub/main.go:32 which
-//     internally appends "gui" to os.Args when invoked with no
-//     arguments (Explorer/Start-menu double-click); externally the
-//     command line is just the executable path.
+//     The len(argv)==1 branch covers cmd/mcphub/main.go, which
+//     internally appends "gui" to os.Args on a no-arg launch —
+//     an Explorer/Start-menu double-click OR a bare `mcphub` typed
+//     at a terminal; externally the command line is just the
+//     executable path in both cases.
 //  3. process start time ≤ pidport mtime + 1s tolerance.
 //
 // Codex r4 #7: never os.Remove the lock file. The OS releases the
@@ -1411,7 +1412,8 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 }
 
 // cmdlineIsGui implements the rev 9 argv-subcommand gate:
-// argv[1] == "gui" OR len(argv) == 1 (Explorer no-arg auto-gui).
+// argv[1] == "gui" OR len(argv) == 1 (no-arg auto-gui: Explorer
+// double-click OR a bare `mcphub` typed at a terminal).
 func cmdlineIsGui(argv []string) bool {
 	if len(argv) == 1 {
 		return true

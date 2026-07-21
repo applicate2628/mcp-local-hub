@@ -21,6 +21,11 @@ func newAdoptProvenanceCmdReal() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "adopt-provenance",
 		Short: "Inspect and manage adopt-provenance records",
+		// Hidden: record-store maintenance subordinate to `adopt`/`de-adopt`.
+		// The records are captured and reclaimed automatically (UPSERT on
+		// re-adopt, 24h GC); this is the manual hatch for a stale or
+		// blocking record.
+		Hidden: true,
 		Long: "Adopt-provenance records are the durable pre-adopt snapshots `mcphub adopt` " +
 			"captures so `mcphub de-adopt` can restore a client to its exact pre-adopt config. " +
 			"These subcommands manage stale or blocking records.",

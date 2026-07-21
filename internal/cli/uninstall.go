@@ -31,9 +31,9 @@ func newUninstallCmdReal() *cobra.Command {
 	var server string
 	c := &cobra.Command{
 		Use:   "uninstall",
-		Short: "Remove an installed MCP server (scheduler + client bindings)",
-		Long: `Reverse of 'install': deletes the scheduler tasks and removes the
-server's entry from every managed client config declared by the manifest.
+		Short: "Remove an installed MCP server (registration + client bindings)",
+		Long: `Reverse of 'install': removes the server's registration and its entry
+from every managed client config declared by the manifest.
 
 What uninstall does:
   1. Reads the manifest to know which tasks + which clients to touch.
@@ -42,11 +42,13 @@ What uninstall does:
   3. Deletes each 'mcp-local-hub-<server>-*' Task Scheduler task.
   4. Removes the server's entry from each client config.
   5. ONLY on success of (1)-(4): if this was the last managed server,
-     removes the watchdog scheduled task and the Windows EventLog source
-     'mcp-local-hub' (plan §60; POSIX no-op). When other managed servers
-     remain, the watchdog stays installed for them. When the per-server
-     uninstall failed, the watchdog also stays installed so auto-recovery
-     keeps running for whatever tasks remain (bot P1.1 fix).
+     removes the hub-wide scheduled tasks — the \mcp-local-hub-liveness
+     task plus any leftover pre-v0.6 \mcp-local-hub-watchdog task — and
+     the Windows EventLog source 'mcp-local-hub' (plan §60; POSIX no-op).
+     When other managed servers remain, those hub-wide tasks stay
+     installed for them. When the per-server uninstall failed, they also
+     stay installed so owner-death recovery keeps running for whatever
+     remains (bot P1.1 fix).
   6. Does NOT delete .bak-mcp-local-hub-* backup files — they remain on disk.
   7. Does NOT delete live daemon processes — Task Scheduler's task delete
      only removes task metadata; existing processes keep running until they
