@@ -197,7 +197,15 @@ func (p *StatusPoller) poll(ctx context.Context) {
 			prev.OrphanPID == r.OrphanPID &&
 			prev.StalePID == r.StalePID &&
 			prev.LastResult == r.LastResult &&
-			boolPtrEqual(prev.JobProtection, r.JobProtection) {
+			boolPtrEqual(prev.JobProtection, r.JobProtection) &&
+			// Pre-spawn existence-gate hold (P1.1). MUST be part of the delta
+			// key: a daemon whose binary vanishes (or reappears) can change
+			// ONLY these two fields, and without them the unchanged-continue
+			// above would silently swallow exactly the transition the operator
+			// needs to see. Same trap TestPoller_EmitsDeltaOnJobProtectionChange
+			// guards for job_protection.
+			prev.SpawnHoldReason == r.SpawnHoldReason &&
+			prev.SpawnHoldPath == r.SpawnHoldPath {
 			continue
 		}
 		// Rising-edge failure detection (computed against the OLD row,
@@ -241,6 +249,15 @@ func (p *StatusPoller) poll(ctx context.Context) {
 		} else if ok && prev.JobProtection != nil {
 			body["job_protection"] = nil
 		}
+		// Pre-spawn existence-gate hold (P1.1). Emitted UNCONDITIONALLY rather
+		// than only-when-set: the frontend delta merge is a shallow spread over
+		// the prior row (Dashboard.tsx), so an omitted key keeps its STALE
+		// value. Always sending both keys means a recovered daemon (empty
+		// strings) actively clears the banner and the badge instead of leaving
+		// a "binary missing" warning on screen after the operator reinstalled.
+		// This is the string analogue of the explicit JSON-null clear above.
+		body["spawn_hold_reason"] = r.SpawnHoldReason
+		body["spawn_hold_path"] = r.SpawnHoldPath
 		p.events.Publish(Event{
 			Type: "daemon-state",
 			Body: body,

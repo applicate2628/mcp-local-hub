@@ -1416,6 +1416,88 @@ describe("formatBytes", () => {
   });
 });
 
+// Pre-spawn existence gate (P1.1) — RENDER coverage.
+//
+// The pure collapse rule and the copy are unit-tested in lib/spawnHold.test.ts.
+// That is NOT the same as proving the Dashboard renders them: an earlier
+// revision shipped a correct derivation whose banner nothing verified, and the
+// whole feature exists because a correct diagnosis that never reaches a screen
+// is worth nothing. These tests drive the real screen from /api/status rows.
+describe("DashboardScreen — spawn-hold delivery (banner + card row)", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  const BIN = "C:\\Users\\dev\\.local\\bin\\mcphub.exe";
+  const heldRow = (server: string): DaemonStatus => ({
+    server,
+    daemon: "default",
+    state: "Stopped",
+    spawn_hold_reason: "missing-binary",
+    spawn_hold_path: BIN,
+  });
+
+  it("renders the fleet banner naming the cause, the path and the remedy", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      statusResponse([heldRow("memory"), heldRow("fetch"), heldRow("time")]),
+    );
+    const { findByTestId } = render(<DashboardScreen />);
+
+    const banner = await findByTestId("dashboard-fleet-hold");
+    expect(banner.getAttribute("data-hold-reason")).toBe("missing-binary");
+    expect(banner.getAttribute("data-hold-count")).toBe("3");
+    // role=alert is load-bearing: the operator must not have to go looking.
+    expect(banner.getAttribute("role")).toBe("alert");
+    expect(banner.textContent).toContain("3 servers cannot start");
+    expect(banner.textContent).toContain(BIN);
+    expect(banner.textContent?.toLowerCase()).toContain("reinstall");
+  });
+
+  it("renders the per-card row so the operator sees WHICH server is held", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([heldRow("memory")]));
+    const { findByTestId } = render(<DashboardScreen />);
+
+    const row = await findByTestId("spawn-hold-row");
+    expect(row.getAttribute("data-hold-reason")).toBe("missing-binary");
+    expect(row.textContent).toContain("Cannot start");
+    expect(row.textContent).toContain("mcphub program file missing");
+  });
+
+  // FIX-3: on a one-server host the card's remedy is hover-only, so the banner
+  // must still fire — otherwise the cause is visible and the fix is not.
+  it("still banners the remedy when only ONE server is held", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      statusResponse([heldRow("memory"), { server: "time", daemon: "default", state: "Running" }]),
+    );
+    const { findByTestId } = render(<DashboardScreen />);
+
+    const banner = await findByTestId("dashboard-fleet-hold");
+    expect(banner.textContent).toContain("1 server cannot start");
+    expect(banner.textContent?.toLowerCase()).toContain("reinstall");
+  });
+
+  it("shows no banner and no hold row for a healthy fleet", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      statusResponse([
+        { server: "memory", daemon: "default", state: "Running", pid: 42, uptime_sec: 300 },
+      ]),
+    );
+    const { findByTestId, queryByTestId } = render(<DashboardScreen />);
+    // Anchor on a row that DOES render for a healthy daemon, so the absence
+    // assertions below run against a fully-rendered card rather than an empty
+    // screen (which would make them vacuously true).
+    await findByTestId("uptime-row");
+    expect(queryByTestId("dashboard-fleet-hold")).toBeNull();
+    expect(queryByTestId("spawn-hold-row")).toBeNull();
+  });
+});
+
 describe("DashboardScreen — expanded-card metrics (Uptime + RAM)", () => {
   beforeEach(() => {
     cleanup();

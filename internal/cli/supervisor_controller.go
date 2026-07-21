@@ -323,6 +323,24 @@ type supervisorController struct {
 	// finishes. Combined with the worker's port re-probe staleness guard.
 	portGateInFlight sync.Map // canonical taskName -> struct{}
 
+	// --- Pre-spawn existence gate (P1.1) wiring ------------------------------
+	// spawnPathStatFn is the path probe the gate uses. nil (production and every
+	// existing test) falls back to os.Stat; tests inject it to exercise the
+	// fail-open arms (access-denied, I/O error) without needing a real ACL.
+	// Unlike the F1 port gate this gate needs NO worker: a hold is self-healing
+	// through the armed re-probe timer, so it is ALWAYS ACTIVE rather than
+	// wired-only. It is inert for descriptors with nothing to probe (empty
+	// Command and empty Workspace), which is the shape direct-construction
+	// controller tests use.
+	//
+	// spawnHolds bounds the held-daemon event stream (first observation warn,
+	// then at most one error rollup per missingPathEscalateAfter). It is touched
+	// ONLY from the loop goroutine (preSpawnMissingPathHold / clearSpawnHold are
+	// reached exclusively through handleLoopEvent -> executeSideEffect) and
+	// carries its own mutex so a future off-loop reader is safe.
+	spawnPathStatFn spawnPathStatFunc
+	spawnHolds      *spawnHoldMarkers
+
 	// --- Ephemeral-collision self-heal (L1) wiring ---------------------------
 	// reallocCh carries loop→worker port-REALLOCATION requests (a dynamic-pool
 	// proxy that exited exitBindRefused because a foreign process stole its
@@ -3521,6 +3539,18 @@ func (c *supervisorController) executeSideEffect(
 		//   2. preSpawnPortGateHold: probe the owner. Free / error / deadline →
 		//      proceed. Owned → hold in backoff (no crash increment) + dispatch the
 		//      classify+reap to the worker, and return the sentinel.
+		//
+		// The EXISTENCE gate (P1.1) runs FIRST and, unlike the port gate, on
+		// EVERY create-process transition including EvChildExit-at-StExiting:
+		// the port gate excludes that event because our own dying child owns
+		// the port, but whether the binary/workspace exists is independent of
+		// which event drove the spawn. It is also the cheaper probe (two local
+		// os.Stat calls vs a netstat owner lookup), so a missing binary short-
+		// circuits before we pay for a port probe that cannot matter. A hold
+		// here consumes NO crash budget and re-probes on the armed timer.
+		if held := c.preSpawnMissingPathHold(d, ev); held != nil {
+			return held
+		}
 		if ev.Kind != api.EvChildExit {
 			if _, cleared := c.gateCleared.LoadAndDelete(ev.TaskName); !cleared {
 				if held := c.preSpawnPortGateHold(d, ev); held != nil {
@@ -4149,7 +4179,7 @@ func (c *supervisorController) preSpawnPortGateHold(d *api.SupervisorDaemon, ev 
 	dResolved := *d
 	dResolved.Port = port
 	c.tryDispatchPortGate(portGateReq{d: dResolved, ownerPID: ownerPID})
-	return c.holdSpawnInBackoff(d, ev, squatterForeignHoldDelay)
+	return c.holdSpawnInBackoff(d, ev, squatterForeignHoldDelay, errSpawnHeldPortSquatter)
 }
 
 // tryDispatchPortGate hands a port-gate request to the off-loop worker WITHOUT
@@ -4348,9 +4378,12 @@ func (c *supervisorController) handlePortGateReq(ctx context.Context, req portGa
 // march never advances. It mirrors handleBackoffWaiting's tracker/timer wiring
 // minus the RecordCrashAndCountInWindow increment. Returns the sentinel so the
 // force-respawn IPC path reports the deferral (the backoff path drops it).
-func (c *supervisorController) holdSpawnInBackoff(d *api.SupervisorDaemon, ev api.LoopEvent, rearm time.Duration) error {
+// The sentinel parameter lets each pre-spawn gate return its OWN honest cause
+// (port squatter vs missing path) while sharing one hold mechanism — the
+// force-respawn IPC path surfaces that sentinel's message to the operator.
+func (c *supervisorController) holdSpawnInBackoff(d *api.SupervisorDaemon, ev api.LoopEvent, rearm time.Duration, sentinel error) error {
 	if c == nil || d == nil {
-		return errSpawnHeldPortSquatter
+		return sentinel
 	}
 	c.smStates.Store(ev.TaskName, api.StBackoffWaiting)
 	if c.tracker != nil {
@@ -4360,7 +4393,7 @@ func (c *supervisorController) holdSpawnInBackoff(d *api.SupervisorDaemon, ev ap
 		}
 	}
 	c.armRespawnBackoffTimer(*d, d.TaskName, rearm)
-	return errSpawnHeldPortSquatter
+	return sentinel
 }
 
 // computeRespawnBackoff returns the wait duration before the

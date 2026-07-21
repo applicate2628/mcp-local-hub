@@ -1067,6 +1067,9 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		reapIntentReader: func() (*api.SupervisorIntentFile, error) {
 			return api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
 		},
+		// Pre-spawn existence gate (P1.1) dedupe state. spawnPathStatFn stays
+		// nil so the gate uses os.Stat; only tests inject a probe.
+		spawnHolds: newSpawnHoldMarkers(),
 	}
 	ctrl.intentCache.Refresh(intent)
 	// Phase 4-E2: feed the stop predicate from the UNIFIED stops source.

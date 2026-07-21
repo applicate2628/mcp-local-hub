@@ -685,6 +685,7 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 	// Daemon/Port, which enrichStatusWithRegistry preserves (the manifest-port
 	// lookup only overwrites when the manifest actually has a matching port).
 	mergeSupervisorOnlyDaemonRows(&result, seen)
+	enrichStatusWithSpawnHolds(result)
 	enrichStatusWithRegistry(result, "", regPath)
 	finalizeRegistryOnlyWorkspaceStates(result, registryOnlyLive)
 	if opts.ProbeHealth {
@@ -694,6 +695,63 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 		forceMaterializeWorkspaceScoped(result, regPath)
 	}
 	return result, nil
+}
+
+// enrichStatusWithSpawnHolds fills SpawnHoldReason/SpawnHoldPath on rows built
+// by the StatusWithOpts family from supervisor-state.json.
+//
+// WHY THIS EXISTS. StatusWithOpts builds rows from three sources that CANNOT
+// know about a spawn hold — the scheduler task list, the registry LSP entries,
+// and supervisor-intent.json (the DESCRIPTOR file). The hold lives in
+// supervisor-STATE.json, which none of them read. Without this step
+// `mcphub status --health`, `--workspace-scoped`, `--force-materialize`,
+// StatusWithHealth, and the unwired-host `/api/status` fallback all render a
+// held daemon with NO explanation — while bare `mcphub status` (the supervisor
+// IPC path) explains it fine.
+//
+// That asymmetry is the worst possible shape for this feature: `--health` is
+// precisely what an operator runs WHEN THEY SUSPECT SOMETHING IS WRONG, so the
+// one command most likely to be typed during the incident was the one path that
+// dropped the answer. The pre-spawn gate exists because a correct diagnosis
+// that never reaches a human is worth nothing.
+//
+// One enrichment step rather than three constructor patches: the scheduler and
+// registry rows have no access to the state file at all, so the fix has to be a
+// join, and a single join is also a single place to keep correct.
+//
+// Best-effort by design: an unreadable/absent state file leaves the rows
+// exactly as they were. A missing explanation must never turn a working status
+// command into an error.
+func enrichStatusWithSpawnHolds(rows []DaemonStatus) {
+	if len(rows) == 0 {
+		return
+	}
+	state, err := readSupervisorStateForStatus()
+	if err != nil || state == nil || len(state.Daemons) == 0 {
+		return
+	}
+	for i := range rows {
+		if rows[i].TaskName == "" {
+			continue
+		}
+		d, ok := state.Daemons[canonicalIntentTaskKey(rows[i].TaskName)]
+		if !ok {
+			continue
+		}
+		rows[i].SpawnHoldReason = d.SpawnHoldReason
+		rows[i].SpawnHoldPath = d.SpawnHoldPath
+	}
+}
+
+// readSupervisorStateForStatus loads supervisor-state.json for the status
+// join above. Mirrors readSupervisorIntentForStatus (same state dir, same
+// best-effort contract, same daemonStateRootOverride test seam).
+func readSupervisorStateForStatus() (*SupervisorStateFile, error) {
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		return nil, err
+	}
+	return ReadSupervisorState(joinStateFilePath(stateDir, supervisorStateFileLeaf))
 }
 
 // readSupervisorIntentForStatus loads the supervisor-intent.json descriptor

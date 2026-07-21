@@ -95,6 +95,29 @@ type SupervisorDaemonState struct {
 	//                 entry (post-incident only) and the actual daemon
 	//                 state.
 	JobProtection *bool `json:"job_protection,omitempty"`
+
+	// SpawnHoldReason / SpawnHoldPath record that the pre-spawn existence gate
+	// (P1.1) is HOLDING this daemon because a path it needs is absent.
+	// SpawnHoldReason is a stable id ("missing-binary" / "missing-workspace");
+	// SpawnHoldPath is the exact absent path. Empty on the happy path.
+	//
+	// This is a HOLD, not a quarantine: no crash budget was consumed, the
+	// supervisor re-probes on an armed timer, and the daemon starts by itself
+	// the moment the path exists again. The pair exists so the cause and the
+	// remedy reach a NON-TECHNICAL operator on the GUI Dashboard — the incident
+	// that motivated it cost a working day precisely because the only signal was
+	// a threshold message in a log file the person could not read.
+	//
+	// DECISION-INERT (mandatory). Nothing may read these fields to make a
+	// restart, backoff, quarantine or spawn decision — the gate always re-probes
+	// the filesystem and never consults persisted state. They are surfaced by
+	// `mcphub status --json` and the GUI only. This preserves the threat model
+	// documented in CLAUDE.md: a co-resident attacker who swaps
+	// supervisor-state.json can at worst produce a wrong dashboard string, never
+	// a control-flow change. A stale pair left by a cold restart is corrected by
+	// the first gate pass for that daemon (which clears it).
+	SpawnHoldReason string `json:"spawn_hold_reason,omitempty"`
+	SpawnHoldPath   string `json:"spawn_hold_path,omitempty"`
 }
 
 // TransientPID tracks maintenance-timer fire-and-forget children that
