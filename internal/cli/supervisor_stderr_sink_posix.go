@@ -7,6 +7,7 @@ import (
 	"os"
 	"syscall"
 
+	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
@@ -63,6 +64,12 @@ func captureStderrBinding() (savedStderrBinding, error) {
 	dup, err := syscall.Dup(2)
 	if err != nil {
 		return savedStderrBinding{}, fmt.Errorf("dup(2): %w", err)
+	}
+	// syscall.Dup clears FD_CLOEXEC. This binding remains open until the
+	// supervisor exits, so it must not be inherited by supervised children.
+	if _, err := unix.FcntlInt(uintptr(dup), unix.F_SETFD, unix.FD_CLOEXEC); err != nil {
+		_ = syscall.Close(dup)
+		return savedStderrBinding{}, fmt.Errorf("set close-on-exec on saved stderr dup: %w", err)
 	}
 	return savedStderrBinding{dupFD: dup, file: os.Stderr}, nil
 }
