@@ -33,6 +33,18 @@ func verifyPIDExecutablePath(pid int, expectedPath string) error {
 		}
 		return fmt.Errorf("%w: PID %d executable proof unavailable: %v", ErrProcessIdentityMismatch, pid, err)
 	}
+	// IDENTITY-GATE SHORT-CIRCUIT — the POSIX twin of the branch in
+	// executablePathMatches (pid_identity_windows.go); see that comment for the
+	// full invariant. In short: this gate proves the process at this PID is the
+	// binary we spawned rather than an unrelated process that inherited a
+	// recycled PID. Skipping normalization when the two spellings are already
+	// identical cannot weaken it, because this branch only ever answers
+	// "matches" — every difference still takes the full normalize-and-compare
+	// below, unchanged. Nothing is retained between calls, so there is no entry
+	// that can go stale against a binary swap or a repointed symlink.
+	if got == expectedPath {
+		return nil
+	}
 	expected, err := normalizeExpectedExecutablePath(expectedPath)
 	if err != nil {
 		return err

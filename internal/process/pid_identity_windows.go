@@ -226,6 +226,38 @@ func queryProcessImagePath(h windows.Handle) (string, error) {
 }
 
 func executablePathMatches(got, expected string) bool {
+	if got == "" || expected == "" {
+		return false
+	}
+	// IDENTITY-GATE SHORT-CIRCUIT.
+	//
+	// WHAT THIS GATE PROTECTS AGAINST: Windows reuses PIDs. A PID the
+	// supervisor recorded for one of its daemons can, after that daemon
+	// exits, belong to an unrelated — possibly hostile — process. This
+	// comparison is one of the conjuncts (with the basename check and the
+	// kernel creation-time check in verifyHandleIdentity) that proves the
+	// process now holding this PID is the binary we spawned, before callers
+	// report it healthy or terminate it.
+	//
+	// WHY SKIPPING NORMALIZATION HERE CANNOT WEAKEN THAT: this branch can
+	// only ever answer "equal". Any difference falls through to the full
+	// normalize-and-compare below, byte-for-byte unchanged — so the
+	// REJECTION path, which is the security-relevant direction, is not
+	// touched at all. Normalization is a deterministic function of (path,
+	// filesystem state), so two spellings that are already equal under the
+	// same comparison this function ends with necessarily produce canonical
+	// forms that are also equal under it. The branch therefore skips work
+	// whose result is already determined; it cannot turn a mismatch into a
+	// match.
+	//
+	// This is NOT a cache: nothing is retained between calls, so there is no
+	// entry that can go stale against a binary swap, a repointed symlink, or
+	// an `mcphub install --upgrade` rename-aside. Do not "optimize" this
+	// into a memo — TestExecutablePathMatchesReresolvesAfterBinarySwap and
+	// TestNormalizeWindowsExecutablePathFollowsSymlinkRepoint pin that.
+	if strings.EqualFold(got, expected) {
+		return true
+	}
 	got = normalizeWindowsExecutablePath(got)
 	expected = normalizeWindowsExecutablePath(expected)
 	return got != "" && expected != "" && strings.EqualFold(got, expected)
