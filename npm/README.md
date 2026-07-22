@@ -29,40 +29,24 @@ in its `optionalDependencies`, and npm installs **only** the sub-package whose
 (`bin/cli.js`) then locates that platform binary and execs it, passing your
 arguments through and propagating its exit code.
 
-There is **no `postinstall` _download_ script** by design: a postinstall that
-FETCHES a binary over the network is the top npm supply-chain attack vector.
-The binary arrives purely through the optional dependency npm itself installs,
-and it still resolves under `npm install --ignore-scripts` (that flag skips
-lifecycle scripts, not optional dependencies).
+There is **no `postinstall` script** by design: lifecycle scripts run for local
+and transitive dependency installs as well as intentional global CLI installs,
+so they must not modify files outside the package tree. The binary arrives
+purely through the optional dependency npm itself installs, and it still
+resolves under `npm install --ignore-scripts` (that flag skips lifecycle
+scripts, not optional dependencies).
 
-## Canonicalize into `~/.local/bin` (copy-only postinstall)
+## Refresh `~/.local/bin` after an npm upgrade
 
-The package **does** ship one lifecycle script, `scripts/postinstall.js`, but it
-performs **no network I/O**. On Windows the canonical `~/.local/bin/mcphub.exe`
-sits *earlier* on `PATH` than the npm global bin by design — the scheduler
-tasks, the supervisor's own-child spawn, and `mcphub install --upgrade` all
-reference `~/.local/bin`; npm is only the delivery vehicle. Without this hook,
-`npm install -g mcp-local-hub@<newer>` would leave a **stale** `~/.local/bin`
-binary shadowing the fresh npm one.
-
-The postinstall closes that gap: it resolves the platform binary npm just
-installed and asks it to **copy itself** into `~/.local/bin` via the binary-only
-`mcphub canonicalize` entry point (no PATH edits, no scheduled tasks, no
-prompts/elevation, no fleet restart). The copy is lock-safe on Windows — if the
-running fleet holds the canonical binary, the prior copy is renamed aside to
-`.old-<ts>` (the same crash-safe swap `install --upgrade` uses) and the new
-binary takes effect on the next fleet/supervisor restart.
-
-It is **fully fail-safe**: a copy failure (permission, file lock, missing
-`~/.local`) never breaks `npm install` — it prints a one-line notice pointing at
-`mcphub setup` and exits 0.
-
-**`--ignore-scripts`:** the postinstall does not run, so `~/.local/bin` is left
-as-is. Reconcile it manually with:
+`~/.local/bin` may precede the npm global bin on `PATH`. After an intentional
+global npm upgrade, refresh that canonical binary explicitly:
 
 ```bash
 mcphub setup
 ```
+
+`mcphub canonicalize` performs only the binary copy; `mcphub setup` is the
+documented command and also ensures the canonical directory is configured.
 
 ## Supported platforms and support tiers
 
@@ -98,10 +82,7 @@ fallback channel:
 - `bin/cli.js` — the platform-resolver shim (Node built-ins only; imports the
   shared map from `lib/platform-binary.js`).
 - `lib/platform-binary.js` — the single owner of the
-  `${platform}-${arch}` → sub-package map + binary basename, shared by
-  `bin/cli.js` and `scripts/postinstall.js`.
-- `scripts/postinstall.js` — the copy-only canonicalize hook (see
-  "Canonicalize into `~/.local/bin`" above); no network I/O, fully fail-safe.
+  `${platform}-${arch}` → sub-package map + binary basename.
 - `generate-platform-packages.js` — regenerates the six
   `packages/<platform>-<arch>/` sub-packages from one GOOS/GOARCH→os/cpu map.
   The sub-packages are generated artifacts (`@applicate2628/mcp-local-hub-*`);

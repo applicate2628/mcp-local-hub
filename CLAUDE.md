@@ -347,42 +347,14 @@ mis-set the OTP as `_authToken` → E401 → clobbered the session token)
 before remembering the canonical tag-push path that `v0.4.6`/`v0.4.7`
 already used. Tag-push first; never local-publish.
 
-### npm install canonicalizes into `~/.local/bin` (copy-only postinstall)
+### npm upgrades do not canonicalize automatically
 
-`~/.local/bin/mcphub[.exe]` is the CANONICAL binary the whole product
-points at (scheduler tasks, the supervisor's own-child spawn, and
-`install --upgrade`'s rename-aside target), and it sits EARLIER on PATH
-than the npm global bin BY DESIGN — npm is only the delivery vehicle. So
-without help, `npm install -g mcp-local-hub@<newer>` left a STALE
-`~/.local/bin` binary shadowing the fresh npm one, and nothing propagated
-the update (bug
-`work-items/bugs/2026-07-22-canonical-local-bin-binary-not-auto-updated-from-npm.md`;
-operator decision: **"npm должен ставить в local тоже"**).
-
-The fix is a **copy-only** `postinstall` in the META package
-(`npm/scripts/postinstall.js`): it resolves the platform binary npm just
-installed (via the shared `npm/lib/platform-binary.js` map — single owner,
-also used by `bin/cli.js`) and spawns it with the binary-only
-`mcphub canonicalize` subcommand (`internal/cli/canonicalize.go`), which
-copies the FRESH binary into `~/.local/bin` and NOTHING else — no PATH
-edit, no scheduled task, no client-config rewrite, no prompt/elevation, no
-fleet reap/restart. It reuses the existing `copyExe` + `setupTargetPath`
-owners and, for the Windows file-lock case (running fleet holds the
-canonical `.exe`), the SAME `api.RenameAsideReplace` swap `install
---upgrade` uses; the new binary takes effect on the next fleet/supervisor
-restart. It is IDEMPOTENT (byte-identical target → no-op, no `.old-<ts>`
-churn).
-
-Security stance reconciled, NOT discarded: the `bin/cli.js` comment now
-reads "no postinstall **DOWNLOAD** step" — a network-free copy of an
-already-installed local file is a different, defensible risk profile than
-the supply-chain-vector downloading postinstall. **FAIL-SAFE is
-load-bearing:** any canonicalize failure (permission, file lock,
-`--ignore-scripts`, missing `~/.local`) is swallowed — the postinstall
-prints a one-line notice pointing at `mcphub setup` and exits 0, so
-`npm install` NEVER breaks. Under `npm install --ignore-scripts` the
-postinstall does not run at all; the documented manual fallback is
-`mcphub setup` (or the hidden `mcphub canonicalize`).
+The npm META package deliberately ships no lifecycle script. Lifecycle hooks
+also run for local and transitive dependency installs, so they must not mutate
+the user's `~/.local/bin` outside the package tree. After an intentional
+`npm install -g mcp-local-hub@<newer>`, the operator must run `mcphub setup` to
+refresh the canonical binary. `mcphub canonicalize` remains the hidden,
+binary-only alternative when no setup work is needed.
 
 ## CLI entry point + console lifetime (2026-07)
 

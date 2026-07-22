@@ -22,8 +22,7 @@
   "author": "Dmitry Denisenko (@applicate2628)",
   "type": "commonjs",
   "scripts": {
-    "postinstall": "node scripts/postinstall.js",
-    "test": "node --test sync-version.test.js postinstall.test.js"
+    "test": "node --test sync-version.test.js"
   },
   "bin": {
     "mcphub": "bin/cli.js"
@@ -31,7 +30,6 @@
   "files": [
     "bin/cli.js",
     "lib/platform-binary.js",
-    "scripts/postinstall.js",
     "README.md"
   ],
   "optionalDependencies": {

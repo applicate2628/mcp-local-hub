@@ -16,11 +16,8 @@ import (
 
 // newCanonicalizeCmdReal returns the hidden `mcphub canonicalize` command: a
 // minimal, non-interactive, BINARY-ONLY copy of the currently-running mcphub
-// into the canonical ~/.local/bin. It exists so the npm package's postinstall
-// hook (npm/scripts/postinstall.js) can invoke the FRESHLY-installed platform
-// binary to canonicalize itself, so `npm install -g mcp-local-hub@<newer>`
-// refreshes the authoritative ~/.local/bin binary directly (bug
-// 2026-07-22-canonical-local-bin-binary-not-auto-updated-from-npm).
+// into the canonical ~/.local/bin. It is available for explicit operator use
+// when a newly installed binary needs to refresh the canonical copy.
 //
 // Unlike `mcphub setup`, this command deliberately does NOT:
 //   - register PATH (that is a one-time setup concern; the canonical path has
@@ -46,10 +43,9 @@ Unlike 'mcphub setup', this command does NOT register PATH, install the
 supervisor-liveness scheduled task, rewrite client MCP configs, probe the OS
 ephemeral range, prompt, request elevation, or reap/restart the running fleet.
 
-It is the minimal, non-interactive canonicalize step the npm package's
-postinstall hook (npm/scripts/postinstall.js) runs on the freshly installed
-platform binary, so 'npm install -g mcp-local-hub@<newer>' refreshes the
-authoritative ~/.local/bin binary directly. The copy is lock-safe on Windows:
+It is the minimal, non-interactive canonicalize step for refreshing the
+authoritative ~/.local/bin binary after installing a newer version. The copy is
+lock-safe on Windows:
 if the running fleet holds the canonical binary, the prior binary is renamed
 aside to '.old-<ts>' (the same crash-safe swap 'mcphub install --upgrade'
 uses) and the new binary takes effect on the next fleet/supervisor restart.
@@ -57,8 +53,7 @@ uses) and the new binary takes effect on the next fleet/supervisor restart.
 Idempotent: a no-op when the running binary already IS the canonical target,
 or when the canonical binary is already byte-identical to this one.
 
-For hosts installed with 'npm install --ignore-scripts' (which skips the
-postinstall), the manual equivalent is 'mcphub setup'.`,
+The documented operator-facing equivalent is 'mcphub setup'.`,
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -1,10 +1,9 @@
 "use strict";
 // Single source of truth mapping the host to its platform sub-package and the
 // binary basename inside it. Shared by:
-//   * bin/cli.js           — the runtime platform-resolver shim, and
-//   * scripts/postinstall.js — the ~/.local/bin canonicalize hook,
-// so the PACKAGE_BY_PLATFORM map + basename rule have exactly ONE owner instead
-// of drifting copies. Node built-ins only; no runtime dependencies — requiring
+//   * bin/cli.js — the runtime platform-resolver shim.
+// The PACKAGE_BY_PLATFORM map + basename rule have exactly ONE owner. Node
+// built-ins only; no runtime dependencies — requiring
 // this file can never pull in a package that failed to install.
 //
 // A new platform target is added in three coordinated places: the TARGETS

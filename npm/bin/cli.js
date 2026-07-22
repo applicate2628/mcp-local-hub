@@ -14,20 +14,11 @@
 //   3. `spawnSync`s it with our argv tail and inherited stdio,
 //   4. propagates the child's exit code (and signal) verbatim.
 //
-// SECURITY: there is deliberately NO postinstall DOWNLOAD step — a postinstall
-// that FETCHES a binary over the network is the top npm supply-chain attack
-// vector. The platform binary arrives purely through the optionalDependency npm
-// itself installed, and it still resolves under `npm install --ignore-scripts`
-// (that flag skips lifecycle scripts, not optional dependencies).
-//
-// The package DOES ship one lifecycle script, scripts/postinstall.js, but it
-// performs NO network I/O: it only COPIES the already-installed local platform
-// binary into the canonical ~/.local/bin (via `mcphub canonicalize`) so a bare
-// `mcphub` runs the version npm just delivered. A copy-only step is a
-// different, far narrower risk profile than a downloading postinstall, and it
-// is fully fail-safe — a copy failure never breaks `npm install`. Under
-// `--ignore-scripts` it simply does not run, and the operator reconciles
-// ~/.local with `mcphub setup`.
+// SECURITY: this package ships no postinstall script. The platform binary
+// arrives purely through the optionalDependency npm itself installs, and it
+// still resolves under `npm install --ignore-scripts` (that flag skips
+// lifecycle scripts, not optional dependencies). To update the canonical
+// ~/.local/bin copy after a global npm upgrade, run `mcphub setup` explicitly.
 
 "use strict";
 
@@ -35,8 +26,8 @@ const { spawnSync } = require("node:child_process");
 const { PACKAGE_BY_PLATFORM, binaryBasename } = require("../lib/platform-binary");
 
 // PACKAGE_BY_PLATFORM (the `${process.platform}-${process.arch}` -> sub-package
-// map) and binaryBasename now live in ../lib/platform-binary.js, the single
-// owner shared with scripts/postinstall.js (imported above). Support tiers are
+// map) and binaryBasename live in ../lib/platform-binary.js, their single
+// owner. Support tiers are
 // documented in npm/README.md and each sub-package description: win32-x64 is
 // GA; the rest are best-effort (the CLI runs everywhere we cross-compile;
 // supervisor lifecycle is Windows-GA / Linux-beta / macOS-preview).

@@ -4,7 +4,7 @@ severity: high
 found-by: operator, fresh-laptop npm upgrade (0.4.27 → 0.4.28 console-subsystem fix would not take effect)
 affected-surface: npm/bin/cli.js (the shim); internal/cli/setup.go Bootstrap (~/.local/bin canonicalization)
 context: operator-reported, live on the laptop
-status: implemented
+status: superseded
 ---
 
 ## What happened
@@ -209,3 +209,11 @@ restart picks it up), but the ALREADY-running supervisor keeps its old image
 until it is restarted — a brief mixed-version window, strictly better than the
 permanent staleness this bug describes, and the same window `install --upgrade`
 manages before its own restart step.
+
+## Security remediation (2026-07-22)
+
+The copy-only npm `postinstall` was removed after it was found to run for local
+and transitive dependency installs and silently replace `~/.local/bin/mcphub`.
+The meta package now ships no lifecycle script; after an intentional global npm
+upgrade, the operator explicitly runs `mcphub setup` (or `mcphub canonicalize`
+for the binary-only operation) to refresh the canonical copy.
