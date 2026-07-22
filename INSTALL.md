@@ -59,6 +59,12 @@ If you skip this step, `mcphub install` will detect that `mcphub.exe` isn't on P
 
 Moving or rebuilding the binary later: run `setup` again from the new location. It copies the new binary over `~/.local/bin/mcphub.exe`, so existing scheduler tasks — which point at that absolute path — keep working without any rewrite. If you need to migrate tasks that still reference an old absolute path (e.g. dev checkout tasks created before setup), run `mcphub scheduler upgrade` once.
 
+### Installed via npm? The canonical binary is refreshed automatically
+
+`~/.local/bin` sits *earlier* on `PATH` than the npm global bin by design (the scheduler tasks and `install --upgrade` all point at `~/.local/bin`). So a bare `mcphub` always runs the `~/.local/bin` copy — npm is only the delivery vehicle. To keep that copy fresh, `npm install -g mcp-local-hub@<newer>` runs a **copy-only** postinstall (`scripts/postinstall.js`) that asks the freshly-installed platform binary to canonicalize itself into `~/.local/bin` via `mcphub canonicalize` (binary copy only — no PATH edits, no scheduled tasks, no download, no fleet restart). It is lock-safe on Windows (rename-aside if the running fleet holds the file) and fully fail-safe (a copy failure never breaks `npm install`; it prints a one-line notice pointing here).
+
+If you installed with `npm install --ignore-scripts`, the postinstall is skipped — run `mcphub setup` (or `mcphub canonicalize`) once to refresh `~/.local/bin` manually.
+
 ## First install
 
 Ten servers ship with manifests: `serena`, `memory`, `sequential-thinking`, `wolfram`, `godbolt`, `paper-search-mcp`, `time`, `gdb`, `lldb`, `perftools`. Each is installed independently. Start with Serena (Phase 1 flagship):

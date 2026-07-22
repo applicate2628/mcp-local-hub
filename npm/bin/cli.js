@@ -14,42 +14,39 @@
 //   3. `spawnSync`s it with our argv tail and inherited stdio,
 //   4. propagates the child's exit code (and signal) verbatim.
 //
-// SECURITY: there is deliberately NO postinstall download step. postinstall is
-// the top npm supply-chain attack vector and breaks under
-// `npm install --ignore-scripts`. The binary arrives purely through the
-// optionalDependency that npm itself installed.
+// SECURITY: there is deliberately NO postinstall DOWNLOAD step — a postinstall
+// that FETCHES a binary over the network is the top npm supply-chain attack
+// vector. The platform binary arrives purely through the optionalDependency npm
+// itself installed, and it still resolves under `npm install --ignore-scripts`
+// (that flag skips lifecycle scripts, not optional dependencies).
+//
+// The package DOES ship one lifecycle script, scripts/postinstall.js, but it
+// performs NO network I/O: it only COPIES the already-installed local platform
+// binary into the canonical ~/.local/bin (via `mcphub canonicalize`) so a bare
+// `mcphub` runs the version npm just delivered. A copy-only step is a
+// different, far narrower risk profile than a downloading postinstall, and it
+// is fully fail-safe — a copy failure never breaks `npm install`. Under
+// `--ignore-scripts` it simply does not run, and the operator reconciles
+// ~/.local with `mcphub setup`.
 
 "use strict";
 
 const { spawnSync } = require("node:child_process");
+const { PACKAGE_BY_PLATFORM, binaryBasename } = require("../lib/platform-binary");
 
-// GOOS/GOARCH support tiers are documented in npm/README.md and each
-// sub-package description. win32-x64 is GA; the rest are best-effort
-// (the CLI runs everywhere we cross-compile; supervisor lifecycle is
-// Windows-GA / Linux-beta / macOS-preview per the project release scope).
+// PACKAGE_BY_PLATFORM (the `${process.platform}-${process.arch}` -> sub-package
+// map) and binaryBasename now live in ../lib/platform-binary.js, the single
+// owner shared with scripts/postinstall.js (imported above). Support tiers are
+// documented in npm/README.md and each sub-package description: win32-x64 is
+// GA; the rest are best-effort (the CLI runs everywhere we cross-compile;
+// supervisor lifecycle is Windows-GA / Linux-beta / macOS-preview).
 //
-// Keyed by `${process.platform}-${process.arch}` (Node's own identifiers).
-// Node reports Apple-Silicon-native as `arm64` and Intel/Rosetta as `x64`.
-// ROSETTA CAVEAT: on an arm64 Mac with no native arm64 install present (or
-// when Node itself runs under Rosetta and reports `process.arch === "x64"`),
-// the darwin-x64 binary runs fine under Rosetta 2 translation — that is an
-// ACCEPTABLE fallback, not an error. We do not attempt to force-prefer the
-// arm64 build; we trust the package npm actually installed for this host.
-const PACKAGE_BY_PLATFORM = {
-  "win32-x64": "@applicate2628/mcp-local-hub-win32-x64",
-  "win32-arm64": "@applicate2628/mcp-local-hub-win32-arm64",
-  "darwin-x64": "@applicate2628/mcp-local-hub-darwin-x64",
-  "darwin-arm64": "@applicate2628/mcp-local-hub-darwin-arm64",
-  "linux-x64": "@applicate2628/mcp-local-hub-linux-x64",
-  "linux-arm64": "@applicate2628/mcp-local-hub-linux-arm64",
-};
-
-// The binary basename inside each sub-package. Windows targets carry the
-// .exe suffix; POSIX targets do not. Matches the `bin`/`files` entry the
-// generator writes into each sub-package's package.json.
-function binaryBasename(platform) {
-  return platform === "win32" ? "mcphub.exe" : "mcphub";
-}
+// ROSETTA CAVEAT: Node reports Apple-Silicon-native as `arm64` and
+// Intel/Rosetta as `x64`. On an arm64 Mac with no native arm64 install present
+// (or when Node itself runs under Rosetta and reports `process.arch === "x64"`),
+// the darwin-x64 binary runs fine under Rosetta 2 translation — an ACCEPTABLE
+// fallback, not an error. We do not force-prefer the arm64 build; we trust the
+// package npm actually installed for this host.
 
 const RELEASES_URL =
   "https://github.com/applicate2628/mcp-local-hub/releases";
