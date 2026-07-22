@@ -130,6 +130,11 @@ Run "mcphub" with no arguments to start the hub and open the GUI.`,
 		newAdoptProvenanceCmd(),
 		newMigrateLegacyCmd(),
 		newTrayCmd(),
+		// Binary-only canonicalize entry point invoked by the npm postinstall
+		// hook (npm/scripts/postinstall.js) on the freshly installed platform
+		// binary. Hidden: machine-invoked, and the documented operator-facing
+		// equivalent is `mcphub setup`.
+		newCanonicalizeCmdReal(),
 	)
 
 	// Debugger / profiler MCP bridges. Each already sets Hidden in its own
