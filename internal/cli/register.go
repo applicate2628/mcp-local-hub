@@ -34,7 +34,8 @@ func newRegisterCmdReal() *cobra.Command {
 		Short: "Register workspace-scoped mcp-language-server daemons (lazy-mode)",
 		Long: `Allocate one lazy proxy per (workspace, language), create the launch
 surface, and write managed entries into every default MCP client config
-(claude-code, codex-cli, cursor).
+(claude-code, codex-cli). Cursor and the other clients are opt-in — bound only
+when the manifest declares an explicit client binding for them.
 
 Lazy mode:
   - No LSP binary preflight at register time. A missing binary surfaces

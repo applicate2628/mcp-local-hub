@@ -2,16 +2,16 @@
 
 mcp-local-hub writes MCP-server entries into each client's own config file, so
 the client connects to hub-managed servers. As of 2026-06-17 it supports **46
-clients**. Three are installed by default (`--all` / fresh install); the rest are
+clients**. Two are installed by default (`--all` / fresh install); the rest are
 opt-in (`mcphub install --server X --client <name>`).
 
-## Default-install (3)
+## Default-install (2)
 
-`claude-code` · `codex-cli` · `cursor`
+`claude-code` · `codex-cli`
 
-## Opt-in (43)
+## Opt-in (44)
 
-**Original / Wave-2:** `vscode` · `gemini-cli` · `qwen-cli` · `antigravity` ·
+**Original / Wave-2:** `cursor` · `vscode` · `gemini-cli` · `qwen-cli` · `antigravity` ·
 `zed` · `kiro` · `windsurf` · `cline` · `kilocode` · `opencode` · `hermes` ·
 `openclaw`
 
