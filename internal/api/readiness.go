@@ -1085,7 +1085,7 @@ func checkServerReadinessWithBudget(m *config.ServerManifest, scope AdmissionSco
 	// user-actionable inline prompts; this is the one catch-all blocker.
 	// Validate EXACTLY the operator's effective default-install client set —
 	// the same scope a normal `mcphub install` uses. NOT the bare
-	// BuildPlan(m,"") compile-time trio (which would MISS a bad binding on a
+	// BuildPlan(m,"") compile-time default set (which would MISS a bad binding on a
 	// client the operator persisted into their default set), and NOT
 	// IncludeAllClients (which would validate OPT-IN bindings a default install
 	// never touches → a false Ready=false on a bad opt-in binding, Codex #377

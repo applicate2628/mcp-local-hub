@@ -86,11 +86,11 @@ func TestLegacyUpgradeTaskLooksDaemon_ExcludesWorkspaceScopedTasks(t *testing.T)
 //
 // Pre-fix the body passed api.InstallOpts{Server, Writer} with NO
 // ClientsInclude → api.installClientPredicate fell back to
-// clients.DefaultInstallClientNames() (claude-code/codex-cli/cursor) and the
+// clients.DefaultInstallClientNames() (claude-code/codex-cli) and the
 // install ADDED/OVERWROTE those clients' entries. This test asserts the
 // captured ClientsInclude selects ZERO supported clients (via the same api
 // predicate), so it FAILS pre-fix (the captured opts would carry no/nil
-// ClientsInclude → predicate selects the default 3).
+// ClientsInclude → predicate selects the default set).
 func TestUpgradeInstallServer_PassesNoClientWriteOpts(t *testing.T) {
 	resetUpgradeSeams(t)
 

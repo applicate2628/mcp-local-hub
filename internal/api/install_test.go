@@ -289,19 +289,21 @@ func TestBuildPlan_NoFilter_FullInstall(t *testing.T) {
 		t.Errorf("len(SchedulerTasks) = %d, want 4", len(p.SchedulerTasks))
 	}
 	// Default install targets only safe/default clients.
-	if len(p.ClientUpdates) != 3 {
-		t.Errorf("len(ClientUpdates) = %d, want 3", len(p.ClientUpdates))
+	if len(p.ClientUpdates) != 2 {
+		t.Errorf("len(ClientUpdates) = %d, want 2", len(p.ClientUpdates))
 	}
 	gotClients := map[string]bool{}
 	for _, u := range p.ClientUpdates {
 		gotClients[u.Client] = true
 	}
-	for _, want := range []string{"claude-code", "codex-cli", "cursor"} {
+	for _, want := range []string{"claude-code", "codex-cli"} {
 		if !gotClients[want] {
 			t.Errorf("default client %q missing from plan: %+v", want, p.ClientUpdates)
 		}
 	}
-	for _, optIn := range []string{"gemini-cli", "antigravity", "qwen-cli", "vscode"} {
+	// cursor is now OPT-IN (like vscode/gemini-cli) — a bare install must NOT
+	// touch it; it is reachable only via --clients cursor / --all-clients.
+	for _, optIn := range []string{"cursor", "gemini-cli", "antigravity", "qwen-cli", "vscode"} {
 		if gotClients[optIn] {
 			t.Errorf("opt-in client %q should not be in default plan: %+v", optIn, p.ClientUpdates)
 		}

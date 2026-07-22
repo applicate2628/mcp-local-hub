@@ -855,7 +855,7 @@ type clientDescriptor struct {
 // 7 are the original clients (stable order); then the 8 Wave 2 opt-in clients;
 // then the 4 agent-skills-reconciliation opt-in clients (copilot-cli, amazon-q,
 // openhands, aider). None of the opt-in entries set defaultInstall — every one
-// stays opt-in, so a fresh install touches only the 3 defaultInstall clients.
+// stays opt-in, so a fresh install touches only the 2 defaultInstall clients.
 //
 // This is a function, not a package-level var, on purpose: the descriptors
 // reference the New* factories, and some factories (e.g. NewCursor) call
@@ -866,7 +866,10 @@ func clientRegistry() []clientDescriptor {
 	return []clientDescriptor{
 		{name: "claude-code", defaultInstall: true, factory: NewClaudeCode},
 		{name: "codex-cli", defaultInstall: true, factory: NewCodexCLI},
-		{name: "cursor", defaultInstall: true, factory: NewCursor},
+		// cursor is a SUPPORTED client but OPT-IN (no defaultInstall) — a fresh
+		// install touches only claude-code + codex-cli; target cursor explicitly
+		// via --clients cursor (matches vscode / gemini-cli below).
+		{name: "cursor", factory: NewCursor},
 		{name: "vscode", factory: NewVSCode},
 		{name: "gemini-cli", factory: NewGeminiCLI},
 		{name: "qwen-cli", factory: NewQwenCLI},

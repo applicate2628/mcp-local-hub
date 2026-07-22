@@ -52,12 +52,12 @@ What install does:
   3. Starts the scheduler tasks immediately (won't wait for next logon)
   4. Writes a timestamped backup for each client config it touches
   5. Patches each client's config per the manifest's client_bindings list:
-     default clients are Claude Code, Codex CLI, and Cursor; Gemini CLI,
+     default clients are Claude Code and Codex CLI; Cursor, Gemini CLI,
      Qwen CLI, VS Code, Antigravity, Zed, Kiro, Windsurf, Cline, Kilo Code,
      OpenCode, Hermes, and OpenClaw are opt-in via --clients or --all-clients
 
 Examples:
-  mcphub install --server serena               # default clients: claude-code,codex-cli,cursor
+  mcphub install --server serena               # default clients: claude-code,codex-cli
   mcphub install --server serena --clients qwen-cli,vscode
   mcphub install --server serena --all-clients # every manifest client binding
   mcphub install --server serena --daemon codex # install only one daemon
@@ -244,7 +244,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 	}
 	c.Flags().StringVar(&server, "server", "", "server name (matches servers/<name>/manifest.yaml)")
 	c.Flags().StringVar(&daemonFilter, "daemon", "", "install only this daemon (+ its client bindings); omit to install all")
-	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: claude-code,codex-cli,cursor)")
+	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: claude-code,codex-cli)")
 	c.Flags().BoolVar(&allClients, "all-clients", false, "install into every client binding declared by the manifest")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print planned actions without making changes")
 	c.Flags().BoolVar(&all, "all", false, "install every manifest under servers/")
@@ -1291,7 +1291,7 @@ func upgradeRestartTasks(taskNames []string) ([]api.RestartResult, error) {
 // into supervisor intent AFTER the binary copy — it must NOT touch client
 // configs (the pre-v0.6 upgrade only stopped/copied/restarted daemons). An
 // empty/nil ClientsInclude makes api.installClientPredicate fall back to
-// clients.DefaultInstallClientNames() (claude-code, codex-cli, cursor), so the
+// clients.DefaultInstallClientNames() (claude-code, codex-cli), so the
 // migration would ADD/OVERWRITE those clients' entries even for an operator who
 // installed only an opt-in client or hand-customized those configs.
 //

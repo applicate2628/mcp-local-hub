@@ -522,7 +522,7 @@ var setupInstallServerFn func(server string, out io.Writer) error
 
 // runSetupInstallServer installs the named server headlessly via the same
 // api.Install path the `mcphub install --server` command uses, with the
-// default install clients (claude-code, codex-cli, cursor). A no-op when
+// default install clients (claude-code, codex-cli). A no-op when
 // server is empty. Callers MUST have run validateSetupServerArg first; this
 // function trusts the name is a known manifest.
 func runSetupInstallServer(out io.Writer, server string) error {

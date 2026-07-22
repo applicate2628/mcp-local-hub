@@ -3,8 +3,9 @@
 // GUI management surface for the operator override of the default-install
 // client set (Settings → Clients panel; redesign spec §9 multi-agent table
 // / line 204). The compile-time default-install set is the fixed
-// {claude-code, codex-cli, cursor} trio (clients.DefaultInstallClientNames,
-// derived from each clientRegistry descriptor's defaultInstall flag). This
+// {claude-code, codex-cli} set (clients.DefaultInstallClientNames, derived
+// from each clientRegistry descriptor's defaultInstall flag; cursor is a
+// supported but opt-in client, not in the default set). This
 // handler lets the operator override that set from the GUI without editing
 // source: the chosen set is persisted to gui-preferences.yaml and becomes
 // the effective default for installs that do NOT request an explicit
@@ -67,8 +68,8 @@ func registerClientInstallPrefsRoutes(s *Server) {
 
 // clientInstallPrefsClientDTO is one client row in the GET response: its
 // stable id, whether the COMPILE-TIME registry marks it default-install
-// (so the UI can label the canonical trio), and whether it is currently in
-// the effective default-install set.
+// (so the UI can label the canonical default set), and whether it is
+// currently in the effective default-install set.
 type clientInstallPrefsClientDTO struct {
 	Name           string `json:"name"`
 	CompileDefault bool   `json:"compile_default"`
@@ -77,8 +78,8 @@ type clientInstallPrefsClientDTO struct {
 
 // clientInstallPrefsResponse is the wire shape of GET / POST. Clients is
 // always a non-nil array (registry order). OverrideActive reports whether
-// an explicit operator override is persisted (vs. the compile-time trio
-// fallback) so the UI can show a "using defaults" vs. "customized" hint.
+// an explicit operator override is persisted (vs. the compile-time default
+// set fallback) so the UI can show a "using defaults" vs. "customized" hint.
 type clientInstallPrefsResponse struct {
 	Clients        []clientInstallPrefsClientDTO `json:"clients"`
 	OverrideActive bool                          `json:"override_active"`
@@ -102,7 +103,7 @@ func (s *Server) clientInstallPrefsHandler(w http.ResponseWriter, r *http.Reques
 // clientInstallPrefsList handles GET /api/client-install-prefs. Returns
 // every supported client with its compile-default + selected flags plus
 // whether an override is active. An absent gui-preferences.yaml yields the
-// compile-time trio selected (override_active=false) — the normal
+// compile-time default set selected (override_active=false) — the normal
 // first-run path.
 func (s *Server) clientInstallPrefsList(w http.ResponseWriter, _ *http.Request) {
 	snap, err := clientInstallPrefsView()

@@ -473,7 +473,7 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 // selection wins and the predicate never even consults the override.
 //
 // A read error (corrupt gui-preferences.yaml) is swallowed to nil: the
-// install then proceeds on the compile-time default trio rather than
+// install then proceeds on the compile-time default set rather than
 // failing the whole install over an unreadable GUI-preference file. The
 // override is a convenience layer; it must never make `mcphub install`
 // harder to complete than it was before the feature existed.
@@ -1584,7 +1584,7 @@ type BuildPlanOpts struct {
 	// seam ON PURPOSE: it keeps BuildPlanWithOpts hermetic. A direct
 	// BuildPlanWithOpts/BuildPlan caller (every unit test, plus any future
 	// caller that wants the pure compile-time default) leaves this nil and
-	// gets the {claude-code, codex-cli, cursor} trio regardless of what
+	// gets the {claude-code, codex-cli} set regardless of what
 	// gui-preferences.yaml on the host happens to contain. Only the
 	// top-level install entry points (Install / installFromManifestDir)
 	// resolve the override from disk and populate this.
@@ -1746,7 +1746,7 @@ func installClientPredicate(opts BuildPlanOpts) (func(string) bool, error) {
 	//   2. DefaultClientsOverride (the operator's persisted default-install
 	//      set, resolved from gui-preferences.yaml by the top-level Install
 	//      entry points) — replaces the compile-time fallback;
-	//   3. clients.DefaultInstallClientNames() — the compile-time trio.
+	//   3. clients.DefaultInstallClientNames() — the compile-time default set.
 	// Keeping the override in this field (not a disk read here) is what
 	// keeps BuildPlanWithOpts hermetic for direct callers/tests.
 	var names []string
