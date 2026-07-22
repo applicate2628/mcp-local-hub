@@ -110,7 +110,22 @@ jobs:
           LD="-s -w -X main.version=$V -X main.commit=$COMMIT -X main.buildDate=$DATE"
           build() { # $1=GOOS $2=GOARCH $3=dir $4=binname
             echo "build $1/$2 -> npm/packages/$3/bin/$4"
-            GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "$LD" -o "npm/packages/$3/bin/$4" ./cmd/mcphub
+            # Windows targets MUST link with `-H windowsgui` so the PE subsystem
+            # is WINDOWS_GUI (2), not console (3). A console-subsystem mcphub.exe
+            # makes Windows allocate a console window for EVERY process — the
+            # GUI, the supervisor, and each daemon — so `mcphub gui` sprays 10+
+            # consoles and they respawn on close (daemon dies -> supervisor
+            # respawns -> new console). build.sh already does this; the release
+            # pipeline silently did not, so npm-installed Windows users got a
+            # console-subsystem binary while build.sh deploys did not. mcphub is
+            # a GUI-subsystem binary by design and attaches to the parent console
+            # (attachParentConsoleIfAvailable) to show CLI output — see CLAUDE.md
+            # "CLI entry point + console lifetime". `-H windowsgui` is a linker
+            # flag and cross-compiles cleanly from the Linux runner; it is
+            # meaningless on darwin/linux, so apply it to windows ONLY.
+            local ld="$LD"
+            if [ "$1" = "windows" ]; then ld="$LD -H windowsgui"; fi
+            GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "$ld" -o "npm/packages/$3/bin/$4" ./cmd/mcphub
           }
           build windows amd64 win32-x64    mcphub.exe
           build windows arm64 win32-arm64  mcphub.exe
@@ -120,6 +135,33 @@ jobs:
           build linux   arm64 linux-arm64  mcphub
           chmod +x npm/packages/darwin-*/bin/mcphub npm/packages/linux-*/bin/mcphub || true
           ls -l npm/packages/*/bin/
+
+      - name: Assert Windows binaries are GUI-subsystem (not console)
+        shell: bash
+        run: |
+          # A console-subsystem mcphub.exe makes Windows allocate a console
+          # window per process, so `mcphub gui` sprays 10+ consoles that respawn
+          # on close. This shipped once (npm binaries lacked `-H windowsgui`
+          # while build.sh deploys had it), silently, because nothing checked.
+          # Fail the release if either win32 target is not PE subsystem 2 (GUI).
+          python3 - <<'PY'
+          import struct, sys
+          def subsystem(path):
+              d = open(path, "rb").read()
+              e = struct.unpack_from("<I", d, 0x3C)[0]
+              assert d[e:e+4] == b"PE\x00\x00", f"{path}: not a PE file"
+              return struct.unpack_from("<H", d, e + 24 + 68)[0]
+          bad = []
+          for p in ("npm/packages/win32-x64/bin/mcphub.exe",
+                    "npm/packages/win32-arm64/bin/mcphub.exe"):
+              s = subsystem(p)
+              print(f"{p}: PE subsystem {s} ({'GUI' if s==2 else 'CONSOLE' if s==3 else '?'})")
+              if s != 2:
+                  bad.append(f"{p} is subsystem {s}, want 2 (GUI) — build must pass -H windowsgui")
+          if bad:
+              print("RELEASE BLOCKED:", *bad, sep="\n  ")
+              sys.exit(1)
+          PY
 
       - name: Assert built binary version matches package.json
         shell: bash
