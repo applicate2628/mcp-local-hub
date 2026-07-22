@@ -1,10 +1,11 @@
 // SectionClients — Settings panel for the default-install client set
 // override (redesign spec §9 multi-agent table / line 204). The compile-time
-// default-install set is the fixed {claude-code, codex-cli, cursor} trio;
-// this panel lets the operator toggle which clients are in the
-// default-install set (the trio plus opt-ins) without CLI flags. The chosen
-// set is persisted to gui-preferences.yaml and becomes the effective default
-// for installs that do not name an explicit --clients target.
+// default-install set is the fixed {claude-code, codex-cli} set (cursor is a
+// supported but opt-in client); this panel lets the operator toggle which
+// clients are in the default-install set (the default set plus opt-ins)
+// without CLI flags. The chosen set is persisted to gui-preferences.yaml and
+// becomes the effective default for installs that do not name an explicit
+// --clients target.
 //
 // This is a self-contained section (no SettingsSnapshot prop, like
 // SectionTrustedRoots / SectionMaintenance) because the override has its own
@@ -117,7 +118,7 @@ export function SectionClients(): preact.JSX.Element {
     <SettingsCard
       section="clients"
       title="Clients"
-      infoTip="Choose which MCP clients a default install touches. The default set is claude-code, codex-cli, and cursor; other clients are opt-in. Installs that do not name an explicit client target use this set. Already-installed servers are unaffected until you reinstall them."
+      infoTip="Choose which MCP clients a default install touches. The default set is claude-code and codex-cli; other clients (including cursor) are opt-in. Installs that do not name an explicit client target use this set. Already-installed servers are unaffected until you reinstall them."
       subtitle={
         <>
           Pick the clients in the default-install set. A plain install (Servers
@@ -146,7 +147,10 @@ export function SectionClients(): preact.JSX.Element {
           <p class="m-0 mb-3 text-xs text-app-muted" data-testid="client-prefs-mode">
             {state.overrideActive
               ? "Using a custom default-install set."
-              : "Using the built-in default set (claude-code, codex-cli, cursor)."}
+              : `Using the built-in default set (${state.rows
+                  .filter((r) => r.compile_default)
+                  .map((r) => r.name)
+                  .join(", ")}).`}
           </p>
 
           <ul

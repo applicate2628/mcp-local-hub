@@ -27,6 +27,64 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
+// TestDefaultClientBindings_DerivedFromDefaultInstallSet pins the register-time
+// implicit workspace binding set (used when a manifest declares no
+// client_bindings — register.go:773 / register_supervisor.go:270) to the
+// install-time default-install set. A bare `mcphub register` of a
+// workspace-scoped manifest with no client_bindings must bind exactly the
+// default-install clients (claude-code, codex-cli), never the opt-in cursor —
+// the same invariant `mcphub install` enforces via DefaultInstallClientNames.
+// Deriving defaultClientBindings from clients.DefaultInstallClientNames() is
+// what keeps the two paths in lockstep; this test fails if cursor (or any
+// opt-in client) leaks back into the register-time default.
+func TestDefaultClientBindings_DerivedFromDefaultInstallSet(t *testing.T) {
+	got := map[string]string{} // client -> URLPath
+	for _, b := range defaultClientBindings {
+		if _, dup := got[b.Client]; dup {
+			t.Fatalf("duplicate client %q in defaultClientBindings", b.Client)
+		}
+		got[b.Client] = b.URLPath
+	}
+
+	// It must equal the default-install set minus relay-stdio adapters (which
+	// cannot take a URL-only workspace binding). This asserts the derivation is
+	// faithful — not a hand-maintained parallel list that can drift.
+	want := map[string]bool{}
+	for _, name := range clients.DefaultInstallClientNames() {
+		if clients.IsRelayStdio(name) {
+			continue
+		}
+		want[name] = true
+	}
+	if len(got) != len(want) {
+		t.Fatalf("defaultClientBindings clients = %v, want (default-install minus relay-stdio) = %v", got, want)
+	}
+	for name := range want {
+		if _, ok := got[name]; !ok {
+			t.Fatalf("default-install client %q missing from defaultClientBindings: %v", name, got)
+		}
+	}
+
+	// The invariant the operator asked for: cursor is opt-in, so the register-
+	// time default must NOT bind it.
+	if _, leaked := got["cursor"]; leaked {
+		t.Fatalf("cursor is opt-in and must not be in the register-time default bindings: %v", got)
+	}
+	// Concrete pin for today's default set.
+	for _, name := range []string{"claude-code", "codex-cli"} {
+		if _, ok := got[name]; !ok {
+			t.Fatalf("default client %q missing from defaultClientBindings: %v", name, got)
+		}
+	}
+	// Every binding carries the standard /mcp URL path (register writes URL
+	// entries, so a blank/other path would break the workspace binding).
+	for client, urlPath := range got {
+		if urlPath != "/mcp" {
+			t.Fatalf("client %q default binding URLPath = %q, want /mcp", client, urlPath)
+		}
+	}
+}
+
 // --- Test harness -------------------------------------------------------
 //
 // newRegisterHarness installs fake scheduler + clients + registry path

@@ -36,14 +36,32 @@ import (
 )
 
 // defaultClientBindings is the implicit client binding set used when a
-// workspace-scoped manifest does not declare client_bindings. Matches the
-// default install clients that support per-entry URLs. Opt-in clients and
-// Antigravity's stdio-relay model are intentionally excluded from the implicit
-// workspace-scoped write set.
-var defaultClientBindings = []config.ClientBinding{
-	{Client: "claude-code", URLPath: "/mcp"},
-	{Client: "codex-cli", URLPath: "/mcp"},
-	{Client: "cursor", URLPath: "/mcp"},
+// workspace-scoped manifest does not declare client_bindings. It is DERIVED
+// from clients.DefaultInstallClientNames() — the single owner of default-install
+// membership (the registry defaultInstall flag) — filtered to URL-capable
+// adapters. Deriving (rather than re-listing the names here) keeps the register
+// path in lockstep with the install path: a client that joins or leaves the
+// default-install set (e.g. cursor becoming opt-in) propagates automatically,
+// with no second list to drift. Opt-in clients are excluded by construction
+// (they are not in DefaultInstallClientNames), and relay-stdio adapters (e.g.
+// Antigravity's stdio-relay model) are excluded by the IsRelayStdio filter
+// because they require relay context, not a URL-only workspace binding.
+var defaultClientBindings = buildDefaultClientBindings()
+
+// buildDefaultClientBindings derives the implicit workspace-registration
+// bindings from the default-install client set, dropping relay-stdio adapters
+// (which cannot take a URL-only entry) and pairing each remaining client with
+// the standard "/mcp" URL path.
+func buildDefaultClientBindings() []config.ClientBinding {
+	names := clients.DefaultInstallClientNames()
+	bindings := make([]config.ClientBinding, 0, len(names))
+	for _, name := range names {
+		if clients.IsRelayStdio(name) {
+			continue
+		}
+		bindings = append(bindings, config.ClientBinding{Client: name, URLPath: "/mcp"})
+	}
+	return bindings
 }
 
 // RegisterOpts controls a Register invocation.
