@@ -1,7 +1,10 @@
-<#
+﻿<#
 .SYNOPSIS
-  Increment-1 north-star survival probe: mcphub route keeps forwarding
-  /serena/mcp tool-calls after the GUI process dies.
+  Increment-1 + sub-increment 2a north-star survival probe: mcphub route
+  keeps forwarding /serena/mcp tool-calls after the GUI process dies, on
+  the SETTINGS-DRIVEN mcp_front.port (not a hardcoded --port flag) — the
+  same port a real client config would carry after `mcphub install
+  --reconcile-mcp-front`.
 
 .DESCRIPTION
   See README.md in this directory for the full narrative + hard safety
@@ -9,6 +12,18 @@
   sequence run during the Increment-1 F1/F2/F3 review-response session
   (2026-07-25); see transcript-2026-07-25.md for that session's captured
   output.
+
+  Sub-increment 2a extension (2026-07-25,
+  work-items/decisions/2026-07-25-increment2-mcp-front-port-ownership.md):
+  the route daemon is now launched WITHOUT an explicit --port flag, after
+  `mcphub settings set mcp_front.port <N>` — exercising the real production
+  code path (internal/cli/route.go's flag-not-Changed branch resolving
+  mcp_front.port) rather than only the --port-flag path Increment 1 probed.
+  A second assertion after the GUI kill hits the GUI's OWN dashboard/API
+  surface (/api/version) on port 19125 and confirms it is refused,
+  DISTINCT from the /serena/mcp refusal check the Increment-1 probe already
+  had — "the GUI dashboard is refused" is a claim about the whole GUI
+  process being dead, not just its /serena/mcp mount.
 
   HARD SAFETY (do not weaken):
     - Every mcphub-shaped process is launched via Start-Process
@@ -48,14 +63,21 @@ function Assert-IdentityAndKill($ProcId, $ExpectedPath, $Label) {
 }
 
 # --- 1. Scratch layout -------------------------------------------------
+# Adjacent fix (sub-increment 2a, mechanical rename only): the original
+# Increment-1 script named this local variable $home, which collides with
+# PowerShell's own read-only automatic $HOME variable (case-insensitive) —
+# assigning to it throws "Cannot overwrite variable HOME because it is
+# read-only or constant" and blocks the script from running AT ALL on both
+# Windows PowerShell 5.1 and PowerShell 7, on this host. Renamed to
+# $homeDir; zero other change to this script's behavior.
 $bin        = Join-Path $ScratchDir 'bin'
 $fakeDir    = Join-Path $ScratchDir 'fake-daemon'
-$home       = Join-Path $ScratchDir 'home'
+$homeDir    = Join-Path $ScratchDir 'home'
 $appdata    = Join-Path $ScratchDir 'appdata'
 $state      = Join-Path $ScratchDir 'state'
 $logs       = Join-Path $ScratchDir 'logs'
 $workspace  = Join-Path $ScratchDir 'workspace\MyProject'
-New-Item -ItemType Directory -Force -Path $bin, $fakeDir, $home, $appdata, $state, $logs, "$workspace\src", "$workspace\.serena" | Out-Null
+New-Item -ItemType Directory -Force -Path $bin, $fakeDir, $homeDir, $appdata, $state, $logs, "$workspace\src", "$workspace\.serena" | Out-Null
 Set-Content -Path "$workspace\src\main.go" -Value "package main"
 Set-Content -Path "$workspace\.serena\project.yml" -Value "project_name: MyProject"
 
@@ -90,7 +112,7 @@ try {
 }
 
 # --- 4. Launch fake-daemon + GUI + route, all detached + redirected ----
-$env:USERPROFILE               = $home
+$env:USERPROFILE               = $homeDir
 $env:LOCALAPPDATA              = $appdata
 $env:MCPHUB_STATE_DIR_OVERRIDE = $state
 $env:MCPHUB_E2E_SUPERVISOR     = 'none'
@@ -101,7 +123,15 @@ $fakeProc  = Start-Process -FilePath "$fakeDir\fake-daemon.exe" -ArgumentList '-
     -WindowStyle Hidden -PassThru -RedirectStandardOutput "$logs\fake.out.log" -RedirectStandardError "$logs\fake.err.log"
 $guiProc   = Start-Process -FilePath "$bin\mcphub-probe.exe" -ArgumentList 'gui', '--no-browser', '--no-tray', '--port', '19125' `
     -WindowStyle Hidden -PassThru -RedirectStandardOutput "$logs\gui.out.log" -RedirectStandardError "$logs\gui.err.log"
-$routeProc = Start-Process -FilePath "$bin\mcphub-probe.exe" -ArgumentList 'route', '--port', '19137' `
+
+# Sub-increment 2a: persist mcp_front.port = 19137 as a SETTING (not a
+# --port flag) BEFORE launching route, then launch `mcphub route` with NO
+# --port at all — exercising internal/cli/route.go's real production
+# fallback (flag-not-Changed -> resolveMCPFrontPortFn -> the mcp_front.port
+# setting), the same code path a supervisor-spawned route daemon uses.
+& "$bin\mcphub-probe.exe" settings set mcp_front.port 19137
+if ($LASTEXITCODE -ne 0) { throw "settings set mcp_front.port failed" }
+$routeProc = Start-Process -FilePath "$bin\mcphub-probe.exe" -ArgumentList 'route' `
     -WindowStyle Hidden -PassThru -RedirectStandardOutput "$logs\route.out.log" -RedirectStandardError "$logs\route.err.log"
 
 Start-Sleep -Seconds 2
@@ -132,17 +162,30 @@ Write-Host "BEFORE kill — route(19137): $($before19137.Status) $($before19137.
 Assert-IdentityAndKill $guiProc.Id $probeExe 'gui'
 Start-Sleep -Milliseconds 800
 
-# --- 7. Repeat on the route port; confirm GUI port refused -------------
+# --- 7. Repeat on the route port; confirm GUI port + GUI dashboard refused
 $after19137 = Invoke-ToolCall 19137 $body2
 $after19125 = Invoke-ToolCall 19125 $body2
 Write-Host "AFTER kill — route(19137): $($after19137.Status) $($after19137.Body)"
-Write-Host "AFTER kill — GUI(19125): ok=$($after19125.Ok) detail=$($after19125.Body)"
+Write-Host "AFTER kill — GUI(19125) /serena/mcp: ok=$($after19125.Ok) detail=$($after19125.Body)"
+
+# Sub-increment 2a: "the GUI dashboard on 9125 is refused" is a claim about
+# the whole GUI PROCESS being dead, distinct from the /serena/mcp mount
+# check above — probe the GUI's own dashboard/API surface (/api/version,
+# the same lightweight GET the About screen round-trips) separately.
+try {
+    $dash = Invoke-WebRequest -Uri 'http://127.0.0.1:19125/api/version' -UseBasicParsing -TimeoutSec 5
+    $dashRefused = $false
+    Write-Host "AFTER kill — GUI(19125) /api/version: UNEXPECTEDLY responded status=$([int]$dash.StatusCode)"
+} catch {
+    $dashRefused = $true
+    Write-Host "AFTER kill — GUI(19125) /api/version: refused ($($_.Exception.Message)) — expected."
+}
 
 # --- 8. Verdict ---------------------------------------------------------
-$pass = $before19125.Status -eq 200 -and $before19137.Status -eq 200 -and $after19137.Status -eq 200 -and (-not $after19125.Ok)
+$pass = $before19125.Status -eq 200 -and $before19137.Status -eq 200 -and $after19137.Status -eq 200 -and (-not $after19125.Ok) -and $dashRefused
 Write-Host ""
 if ($pass) {
-    Write-Host "PROBE RESULT: PASS — route daemon forwarded the SAME real tool-call after the GUI died; GUI port refused."
+    Write-Host "PROBE RESULT: PASS — route daemon (settings-driven mcp_front.port, no --port flag) forwarded the SAME real tool-call after the GUI died; GUI port AND GUI dashboard both refused."
 } else {
     Write-Host "PROBE RESULT: FAIL — see the BEFORE/AFTER lines above."
 }

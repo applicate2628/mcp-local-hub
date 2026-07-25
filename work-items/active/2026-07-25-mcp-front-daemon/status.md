@@ -236,3 +236,170 @@ Blocking:
 F1/F2/F3 fixed and committed (6f2d0d0d, f262df68, b5da2a04) on the same branch,
 no push/PR. Orchestrator/architect re-verifies, then routes to Fable acceptance
 → supervisor-descriptor wiring. Still HELD for Tuesday's bot.
+
+## Sub-increment 2a (backend-engineer, 2026-07-25) — DORMANT mechanism: setting + reconcile command
+
+Design: work-items/decisions/2026-07-25-increment2-mcp-front-port-ownership.md
+(Mechanism B, accepted by lead 2026-07-25). Scope: build the settings-owned
+`mcp_front.port`, source the route daemon's port from it, retarget the
+serena/LSP client-URL port consumers, and add the operator-gated
+`mcphub install --reconcile-mcp-front[/--rollback]` command — WITHOUT running
+any client-config rewrite automatically. GUI stays on 9125; zero
+GUI-lifecycle code touched.
+
+### Delivered
+
+1. **Setting** `mcp_front.port` (internal/api/settings_registry.go, Section
+   "advanced" — see the entry's own comment for why not a new frontend
+   section): TypeInt, Default `strconv.Itoa(DefaultMCPFrontPort)` (9137),
+   Min 1024, Max 65535. New primitives in internal/api/mcp_front_port.go:
+   `MCPFrontPortSettingKey`, `DefaultMCPFrontPort`,
+   `(a *API) ResolveMCPFrontPort() (int, error)` (strict, write-path),
+   `(a *API) MCPFrontPortOrDefault() int` (graceful, read-path).
+2. **Route port source**: `internal/cli/supervise.go`'s
+   `ensureBuiltinRouteDaemonAtStartup` and `internal/cli/route.go`'s
+   `newRouteCmd` RunE now resolve `mcp_front.port` via the new
+   `resolveMCPFrontPortFn` seam (internal/cli/mcp_front_port.go), falling
+   back to `DefaultRouteDaemonPort` on any settings-read failure — behavior
+   for the supervisor's own spawn and a bare `mcphub route` (no `--port`)
+   unchanged from the caller's perspective when the setting is unset.
+   `route.go`'s construction logic was extracted into `buildRouteServer`
+   (no behavior change) so a test can exercise the exact production wiring
+   without a real TCP listener.
+3. **Consumer sweep** (mandatory exhaustive sweep, reported in the
+   implementer's final message): `SerenaReconcileOpts` gained a `Port int`
+   field (0 = unchanged pidport-discovery path every existing caller uses;
+   >0 = the new mcp-front reconcile's direct-port path, still liveness-
+   proven via the same readiness ping before any write, new sentinel
+   `ErrSerenaReconcileRouteNotLive`). `LSPClientRouterOpts.GUIPort` needed
+   NO code change — the new command just passes mcp_front.port explicitly
+   through the field's existing generic semantics. `scan.go`'s `classify()`
+   now takes an additional `mcpFrontPort` parameter and recognizes a serena
+   router entry on EITHER the GUI port or mcp_front.port as via-hub, via a
+   new `IsLiveSerenaRouterURLAnyPort` (internal/api/serena_client_reconcile.go)
+   — a naive OR of two single-port `IsLiveSerenaRouterURL` calls was tried
+   first and found to be WRONG (a real regression caught by the full test
+   gate: an unknown/zero port on one side of the OR degrades to
+   always-true, defeating the other side's stale-port detection); fixed
+   with the proper multi-port helper, mutation-proven.
+   `install.go:1713`/`migrate.go:234,263` (the LIVE `mcphub install`/
+   `mcphub migrate <client>` GUI-pidport-discovery paths) were deliberately
+   LEFT UNCHANGED — retargeting them would be a live, automatic client-URL
+   behavior change for every ordinary install/migrate invocation, which
+   directly conflicts with the "dormant mechanism, no auto client rewrite"
+   constraint; item 4 of the design also scopes the new command's
+   composition to `ReconcileSerenaClientsToRouter` + `EnsureLSPRouterClientEntries`
+   only, not install.go/migrate.go's internals.
+4. **`mcphub install --reconcile-mcp-front[/--rollback]`**
+   (internal/cli/install_reconcile_mcp_front.go): thin composition over
+   `api.ReconcileSerenaClientsToRouter` (Port path) +
+   `a.EnsureLSPRouterClientEntries` (forward) and
+   `api.RestoreSerenaReconcileApplied` + `a.RollbackLSPRouterClientEntries`
+   (rollback) — no reconcile/backup/rollback logic reimplemented. Fail-closed:
+   serena's own liveness proof runs first and gates the WHOLE command (LSP is
+   never touched if the route isn't proven live). The forward run persists
+   its serena `MigrateReport` to `<state-dir>/mcp-front-reconcile-serena-report.json`
+   (hardened `WriteStateFileAtomic`) so a later, separate `--rollback`
+   invocation can restore each client from its captured backup; rollback
+   deletes the report on success. Emits `mcp-front-reconciled` events
+   (source install, `action: reconcile|rollback`).
+5. **I6 regression guard**: `internal/cli/route_i6_readonly_test.go`
+   mirrors the F1 falsifying test but exercises the real, extracted
+   `buildRouteServer` construction path — an unregistered-workspace
+   tool-call still 503s with zero registry mutation and zero
+   supervisor-intent.json creation. Mutation-proven (swapping
+   `SetSerenaRouterReadOnly` for `SetSerenaRouterProduction` makes it fail).
+6. **Probe extended + re-run, PASS**: `probe/run-probe.ps1` now sets
+   `mcp_front.port` via `mcphub settings set` and launches `mcphub route`
+   with NO `--port` flag (exercising the settings-driven fallback), and adds
+   a second, distinct assertion that the GUI's own dashboard/API surface
+   (`/api/version`) is refused after the GUI is killed (previously only
+   `/serena/mcp` was checked). Adjacent fix: the script's `$home` local
+   variable collided with PowerShell's own read-only automatic `$HOME`,
+   blocking the script from running at all on this host under EITHER
+   PowerShell 5.1 or 7 — renamed to `$homeDir` (mechanical only, needed to
+   execute the probe at all). Added a UTF-8 BOM (legacy `powershell.exe`
+   otherwise misreads the script's non-ASCII em-dashes under the system
+   codepage). Full transcript: PASS — route daemon (settings-driven,
+   no `--port`) forwarded the same real tool-call after the GUI died; GUI
+   port AND GUI dashboard both refused.
+
+### P4/P5 (verify open probes)
+
+- **P4** (hardcoded 9125/serena or 9125/lsp dependency in docs/scripts/CI/configs):
+  none found. `.github/`, `scripts/`, `configs/`, `build.sh`/`build.ps1` have
+  zero 9125 references. The only 9125 hits anywhere are: historical
+  phase-N verification/plan docs (what shipped at the time, not living
+  contracts), the GUI's OWN web-UI port default (`gui_server.port`,
+  unaffected — GUI stays on 9125), a pre-existing documented port-collision
+  footgun (wolfram manifest vs GUI default, DM-2, unrelated), and 3 GUI
+  Settings/Servers E2E fixtures that mock the GUI's own port badge/scan
+  behavior (unrelated to the serena/LSP router's port).
+- **P5** (consumer sweep exhaustiveness): reported above under "Consumer
+  sweep" — every `SerenaRouterClientURL`/`IsLiveSerenaRouterURL`/
+  `lspRouterGUIPort`/`discoverLiveGUIPort` caller was enumerated
+  (re-grepped post-change to confirm); `client_install_prefs.go`'s two
+  additional `lspRouterGUIPort` callers (`DisableLSPRouterClient`/
+  `EnableLSPRouterClient`, GUI per-client toggle actions) were found and
+  confirmed unaffected (still pass `GUIPort: s.Port()` from their own
+  caller, untouched).
+
+### Gate
+
+`go build ./...` + `go vet ./...` clean (verified repeatedly across the
+session, including after every fix). `internal/api`'s full suite is clean
+and deterministic — verified green 4+ times, both `go test ./...` and
+`-tags=test_state_path_env`, including after the `classify()` fix below.
+
+`go test ./...` (both tagged and untagged) surfaces THREE already-
+documented-or-newly-filed, PRE-EXISTING host defects, none touched by this
+diff (each individually re-verified via `git stash -u` back to the accepted
+tip `301081a2`, reproducing identically):
+
+1. `TestCleanupAggressive_IncludeClassFlagOverridesWithWarning` — a real
+   panic in `internal/api/cleanup.go` (already filed,
+   work-items/bugs/2026-07-25-findwindowsexeextensionend-index-out-of-range.md).
+2. 8-9 deterministic ~3.0s-timeout failures in `TestF1_*`/`TestF3_*`
+   (supervise_lostchild_f1_f3_test.go) and `TestRealloc_*`
+   (supervise_realloc_test.go) — same batch, same shared timing defect
+   class (newly filed this session,
+   work-items/bugs/2026-07-25-supervise-lostchild-f1-f3-timing-tests-fail-on-this-host.md).
+3. A nondeterministic Windows `t.TempDir()` cleanup race
+   ("`unlinkat ...: The directory is not empty`") recurring under a
+   DIFFERENT `TestSuperviseCommand_*` test name each run (4 distinct names
+   observed this session alone) — the SAME class Increment 1b's own
+   status.md entry above already informally flagged for 2 of those names;
+   given a dedicated bug-registry entry was still missing, filed properly
+   this session (work-items/bugs/2026-07-25-supervisecommand-tempdir-cleanup-race-lingering-subprocess-handle.md).
+
+A comprehensive TARGETED internal/cli regression sweep (every
+`TestSuperviseCommand_*`/`TestRunSupervise_*`/`TestEnsureBuiltinRouteDaemonAtStartup*`/
+`TestBuildBuiltinRouteDaemon*`/`TestProductionSpawnFn_RouteDescriptor*`/
+`TestDefaultRouteDaemonPort_*`/`TestBuildRouteServer_*`/
+`TestRunReconcileMCPFront_*`/`TestMCPFrontPortSettingDefaultMatchesRouteDaemonPort`/
+`TestResolveMCPFrontPortFn_*`/`TestMigrateSerena_*`/`TestInstall*`/
+`TestReconcileHubMode*` plus daemon-env/intent-load coverage), re-run 5
+times, passed clean 3/5 — the other 2 failures were, in each case, exactly
+one instance of the already-documented `TestSuperviseCommand_*` TempDir
+race (#3 above) under a different name, never a logic/assertion failure and
+never one of this diff's own new tests.
+
+New/changed tests are individually mutation-proven: the I6 regression
+guard, the reconcile fail-closed gate (both the CLI-level wiring and
+`resolveSerenaReconcilePort`'s own ping check), and the `classify()`
+multi-port widening. The last one caught a REAL regression mid-session: a
+naive `IsLiveSerenaRouterURL(e,a) || IsLiveSerenaRouterURL(e,b)` degrades to
+always-true whenever EITHER port argument is 0/unknown (each call's own
+single-port "unknown port, can't prove staleness" fallback), defeating the
+OTHER port's legitimate stale-port detection — caught by 3 pre-existing
+`TestClassify` "stale GUI port -> external" cases, fixed with a proper
+`IsLiveSerenaRouterURLAnyPort` helper, mutation-proven both ways.
+
+### Next action
+
+Held for Tuesday's bot per the existing constraint. Orchestrator/architect
+decides 2a-alone vs. bundling 2b (auto-register restoration) before the
+operator is told this mechanism is ready — 2a alone regresses new-workspace
+auto-registration for any client actually pointed at mcp_front.port via
+`--reconcile-mcp-front` (I6, intended + gated, restored by 2b) — the design
+record's own open question, not yet decided in this session.
