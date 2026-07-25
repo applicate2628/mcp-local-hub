@@ -76,6 +76,20 @@
 //   - Any other ${...} variable, $ENV{...} reference, or $<...> generator
 //     expression is never evaluated (see the Reason constants below).
 //
+// # Conditional calls: the path is resolved anyway
+//
+// A call textually nested inside an if()/elseif()/else() block answers two
+// INDEPENDENT questions: "where does this point?" (fully statically
+// computable from the text, same as an unconditional call) and "will it
+// execute?" (genuinely unknown without evaluating CMake). This package only
+// answers the first question, via Status — Edge.Conditional records the
+// second as a plain fact, never gating resolution. A conditional edge is
+// Resolved exactly when its path is computed AND the target exists, same
+// rule as an unconditional edge; Conditional does not change Status, and
+// Status never implies whether the branch is actually taken. Read
+// Conditional: true as "this edge exists in the source, but a cmake trace is
+// required to know if it is ever reached at configure time."
+//
 // # Known, documented simplifications
 //
 //   - Argument parsing takes only the FIRST whitespace/quote-delimited token
@@ -83,12 +97,16 @@
 //     ignoring trailing keyword arguments (OPTIONAL, RESULT_VARIABLE,
 //     EXCLUDE_FROM_ALL, add_subdirectory's optional binary-dir argument).
 //     This matches the dominant real-world call shape.
-//   - Conditional-branch detection is a simple if()/endif() nesting counter
-//     per file; it does not model elseif()/else() branch selection (any call
-//     nested inside ANY if()...endif() block is treated as conditional,
-//     regardless of which branch it is textually in) and it does NOT detect
-//     that a call sits inside a function()/macro() body (whose execution is
-//     also deferred) — that is a documented, out-of-scope limitation.
+//   - Conditional detection (Edge.Conditional) is a simple if()/endif()
+//     nesting counter per file; it does not model elseif()/else() branch
+//     selection (any call nested inside ANY if()...endif() block is flagged
+//     conditional, regardless of which branch it is textually in), it is NOT
+//     transitive (a call is flagged only by an if() in its OWN file — if
+//     that file was itself reached via a conditional edge, this package does
+//     not propagate that fact onto the file's own unconditional-looking
+//     calls), and it does NOT detect that a call sits inside a
+//     function()/macro() body (whose execution is also deferred) — all
+//     documented, out-of-scope limitations.
 //   - Bracket-argument syntax (CMake's `[[...]]` / `[=[...]=]` long strings)
 //     is not recognized; only unquoted and double-quoted arguments are.
 //   - A file-read failure AFTER a successful Stat (e.g. permission denied on
@@ -99,23 +117,19 @@
 //     which behaves identically for the same reason: bounding the SCAN, not
 //     re-litigating whether the target exists.
 //   - CONFIRMED via a real read-only run against a vcpkg-style overlay-ports
-//     tree: this scanner cannot distinguish a genuine include()/
-//     add_subdirectory() DIRECTIVE from those same command names appearing
-//     INSIDE an unrelated string-literal ARGUMENT to some other command —
-//     e.g. vcpkg_replace_string(...) commonly embeds literal text like
-//     "add_subdirectory(python)" as a find/replace pattern applied to a
-//     DIFFERENT file, not as a real call. This scanner has no notion of
-//     "which command's argument list am I already inside", so it will
-//     surface a spurious Edge for such text. The tri-state safety contract
-//     still holds (a spurious edge either fails to parse as balanced syntax
-//     and lands on ReasonParseError, or resolves/dangles against whatever the
-//     embedded text happens to name — it is never silently swallowed as a
-//     false Resolved for something that doesn't exist), but the edge COUNT
-//     and per-file edge attribution can overcount genuine CMake directives
-//     in files that embed such find/replace strings. Treat a non-trivial
-//     ParseError or unexpected Dangling next to a vcpkg_replace_string(...)
-//     call as a candidate for this class before assuming it is a real broken
-//     reference.
+//     tree: a command name can appear INSIDE an unrelated string-literal
+//     ARGUMENT to some other command — e.g. vcpkg_replace_string(...)
+//     commonly embeds literal text like "add_subdirectory(python)" as a
+//     find/replace pattern applied to a DIFFERENT file, not as a real call.
+//     This package reuses its existing quote-tracking (the same primitive
+//     that already strips `#` comments outside quotes) to detect this: a
+//     match whose opening `(` falls inside a double-quoted span is skipped
+//     entirely — no Edge is emitted for it — and counted in
+//     Result.SkippedInStringLiteral for transparency. This guard inherits
+//     the same scope as the rest of this package's quote handling (simple
+//     `\"`-escaped double quotes only; CMake bracket-argument strings
+//     `[[...]]`/`[=[...]=]` are not modeled, so a command-name-like
+//     substring inside ONE of those is not caught by this guard).
 package cmakegraph
 
 import (
@@ -173,9 +187,6 @@ const (
 	// and no .cmake suffix — a bare CMake module name resolved via
 	// CMAKE_MODULE_PATH, which this package does not have access to.
 	ReasonModuleNameNotPath Reason = "module_name_not_path"
-	// ReasonConditionalBranch: the call site is textually nested inside an
-	// if()...endif() block whose condition this package does not evaluate.
-	ReasonConditionalBranch Reason = "conditional_branch"
 	// ReasonParseError: the call's own argument syntax could not be safely
 	// extracted (empty argument, unterminated quote).
 	ReasonParseError Reason = "parse_error"
@@ -219,6 +230,13 @@ type Edge struct {
 	// the scanner chose not to trust or not to follow it). Empty for every
 	// other unresolved reason, since no path was ever computed.
 	ResolvedPath string
+	// Conditional is true when this call is textually nested inside an
+	// if()/elseif()/else() block in ITS OWN file (see the package doc's
+	// "Conditional calls" section). It is independent of Status: a
+	// conditional edge is Resolved/Dangling by the exact same os.Stat rule as
+	// an unconditional one. Conditional == true means only "whether this
+	// executes at configure time is unknown", never "the path is unknown".
+	Conditional bool
 }
 
 // Histogram tallies edges by outcome. This is the operator-facing go/no-go metric.
@@ -241,6 +259,14 @@ type Result struct {
 	// (deduplicated, sorted, absolute+symlink-resolved paths).
 	Files     []string
 	Histogram Histogram
+	// SkippedInStringLiteral counts include()/add_subdirectory()-shaped
+	// matches whose opening `(` fell inside a double-quoted string — a
+	// command name embedded in an unrelated string argument (e.g.
+	// vcpkg_replace_string(...)'s find/replace text), not a real directive.
+	// These produce NO Edge at all (see the package doc's D3 note); this
+	// counter is the only trace they leave, so a run's edge count is never
+	// silently inflated without visibility into why.
+	SkippedInStringLiteral int
 }
 
 // Options bounds a walk. Zero-value fields fall back to the Default* constants.
@@ -286,18 +312,108 @@ func Walk(startFile, workspaceRoot string, opts Options) (*Result, error) {
 	if strings.TrimSpace(startFile) == "" {
 		return nil, errors.New("cmakegraph: startFile is required")
 	}
+	w, err := newWalker(workspaceRoot, opts)
+	if err != nil {
+		return nil, err
+	}
+	absStart, err := w.walkRoot(startFile)
+	if err != nil {
+		return nil, err
+	}
+	return w.result(absStart), nil
+}
+
+// WalkTree finds EVERY file under root matching one of entryNames and walks
+// each as an independent root, sharing ONE traversal state across all of
+// them — so a file is scanned at most once regardless of how many roots
+// would reach it, which is what guarantees the merged Result never contains
+// a duplicate edge (rather than merging N independent walks and de-duplicating
+// after the fact). workspaceRoot for every constituent walk is root itself.
+//
+// entryNames entries are either an exact basename (case-insensitive, e.g.
+// "CMakeLists.txt") or an extension pattern "*.ext" (case-insensitive, e.g.
+// "*.cmake"). Passing []string{"*.cmake", "CMakeLists.txt"} scans the WHOLE
+// tree's CMake-processable files as independent roots — the right choice for
+// a tree with no single top-level CMakeLists.txt (e.g. a vcpkg-style
+// overlay-ports tree, where the real graph lives across portfile.cmake AND
+// vcpkg's own toolchain/port-tweak *.cmake helper files, most of which no
+// portfile.cmake ever reaches directly). Passing []string{"portfile.cmake"}
+// reproduces the earlier, narrower "one root per port" behavior.
+//
+// Depth (MaxDepth) is bounded PER ROOT, same as a single Walk. MaxNodes is a
+// WHOLE-TREE bound shared across every root in this call (len of the shared
+// visited set), since the point of a total-node cap is bounding the overall
+// scan cost, not each root's slice of it.
+func WalkTree(root string, entryNames []string, opts Options) (*Result, error) {
+	if len(entryNames) == 0 {
+		return nil, errors.New("cmakegraph: entryNames must be non-empty")
+	}
+	w, err := newWalker(root, opts)
+	if err != nil {
+		return nil, err
+	}
+	var starts []string
+	walkErr := filepath.WalkDir(w.workspaceRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// Best-effort: an unreadable entry is skipped, not fatal.
+			return nil
+		}
+		if !d.IsDir() && matchesEntry(d.Name(), entryNames) {
+			starts = append(starts, path)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("cmakegraph: enumerate entry files under %s: %w", w.workspaceRoot, walkErr)
+	}
+	sort.Strings(starts) // deterministic root order, so a shared file's edge always attributes to the same first-seen context
+
+	for _, s := range starts {
+		if _, err := w.walkRoot(s); err != nil {
+			return nil, fmt.Errorf("cmakegraph: walk %s: %w", s, err)
+		}
+	}
+	return w.result(w.workspaceRoot), nil
+}
+
+// matchesEntry reports whether name (a bare file basename) matches one of
+// patterns. A pattern of the form "*.ext" matches by extension
+// (case-insensitive); any other pattern matches the exact basename
+// (case-insensitive).
+func matchesEntry(name string, patterns []string) bool {
+	lower := strings.ToLower(name)
+	for _, p := range patterns {
+		lp := strings.ToLower(p)
+		if strings.HasPrefix(lp, "*.") {
+			if strings.HasSuffix(lower, lp[1:]) {
+				return true
+			}
+			continue
+		}
+		if lower == lp {
+			return true
+		}
+	}
+	return false
+}
+
+// walker carries traversal state SHARED across every root walked in one Walk
+// or WalkTree call — this is what guarantees a file is scanned at most once
+// (and so its edges appear at most once) no matter how many roots reach it.
+type walker struct {
+	opts              Options
+	workspaceRoot     string // absolute, NOT symlink-resolved (used for ${CMAKE_SOURCE_DIR} substitution)
+	realWorkspaceRoot string // symlink-resolved, used for the boundary check
+	visited           map[string]bool
+	files             map[string]bool
+	edges             []Edge
+	skippedInString   int
+}
+
+// newWalker validates workspaceRoot and constructs empty shared traversal state.
+func newWalker(workspaceRoot string, opts Options) (*walker, error) {
 	if strings.TrimSpace(workspaceRoot) == "" {
 		return nil, errors.New("cmakegraph: workspaceRoot is required (it is the hard outside_workspace boundary and the ${CMAKE_SOURCE_DIR} value)")
-	}
-	absStart, err := filepath.Abs(startFile)
-	if err != nil {
-		return nil, fmt.Errorf("cmakegraph: resolve start file: %w", err)
-	}
-	if fi, statErr := os.Stat(absStart); statErr != nil || fi.IsDir() {
-		if statErr != nil {
-			return nil, fmt.Errorf("cmakegraph: start file %s: %w", absStart, statErr)
-		}
-		return nil, fmt.Errorf("cmakegraph: start file %s is a directory, want a file", absStart)
 	}
 	absRoot, err := filepath.Abs(workspaceRoot)
 	if err != nil {
@@ -307,102 +423,41 @@ func Walk(startFile, workspaceRoot string, opts Options) (*Result, error) {
 	if resolved, evalErr := filepath.EvalSymlinks(absRoot); evalErr == nil {
 		realRoot = resolved
 	}
-
-	w := &walker{
+	return &walker{
 		opts:              opts.normalized(),
 		workspaceRoot:     absRoot,
 		realWorkspaceRoot: realRoot,
 		visited:           map[string]bool{},
 		files:             map[string]bool{},
+	}, nil
+}
+
+// walkRoot validates startFile and scans it as a fresh traversal root — UNLESS
+// it was already visited (as an earlier root, or reached via traversal from
+// one), in which case it is a no-op: its edges were already discovered.
+// Returns the absolute path of startFile.
+func (w *walker) walkRoot(startFile string) (string, error) {
+	absStart, err := filepath.Abs(startFile)
+	if err != nil {
+		return "", fmt.Errorf("cmakegraph: resolve start file: %w", err)
+	}
+	if fi, statErr := os.Stat(absStart); statErr != nil || fi.IsDir() {
+		if statErr != nil {
+			return "", fmt.Errorf("cmakegraph: start file %s: %w", absStart, statErr)
+		}
+		return "", fmt.Errorf("cmakegraph: start file %s is a directory, want a file", absStart)
 	}
 	canonStart := w.canonicalize(absStart)
+	if w.visited[canonStart] {
+		return absStart, nil
+	}
 	w.visited[canonStart] = true
 	w.files[canonStart] = true
 	w.walkFile(absStart, filepath.Dir(canonStart), 0, []string{canonStart})
-
-	return w.result(absStart, absRoot), nil
+	return absStart, nil
 }
 
-// WalkTree finds every file under root whose basename matches one of
-// entryNames (e.g. "CMakeLists.txt", "portfile.cmake") and walks each as an
-// independent root (its own depth/node budget), merging every edge, scanned
-// file, and histogram count into one Result. workspaceRoot for every
-// constituent walk is root itself. This is the entry point for a tree with NO
-// single top-level CMakeLists.txt — e.g. a vcpkg-style overlay-ports tree
-// where every port is its own independent portfile.cmake unit.
-func WalkTree(root string, entryNames []string, opts Options) (*Result, error) {
-	if strings.TrimSpace(root) == "" {
-		return nil, errors.New("cmakegraph: root is required")
-	}
-	if len(entryNames) == 0 {
-		return nil, errors.New("cmakegraph: entryNames must be non-empty")
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return nil, fmt.Errorf("cmakegraph: resolve root: %w", err)
-	}
-	nameSet := make(map[string]bool, len(entryNames))
-	for _, n := range entryNames {
-		nameSet[n] = true
-	}
-	var starts []string
-	walkErr := filepath.WalkDir(absRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			// Best-effort: an unreadable entry is skipped, not fatal.
-			return nil
-		}
-		if !d.IsDir() && nameSet[d.Name()] {
-			starts = append(starts, path)
-		}
-		return nil
-	})
-	if walkErr != nil {
-		return nil, fmt.Errorf("cmakegraph: enumerate entry files under %s: %w", absRoot, walkErr)
-	}
-	sort.Strings(starts)
-
-	merged := &Result{
-		Root:          absRoot,
-		WorkspaceRoot: absRoot,
-		Histogram:     Histogram{ByReason: map[Reason]int{}},
-	}
-	fileSet := map[string]bool{}
-	for _, s := range starts {
-		res, err := Walk(s, absRoot, opts)
-		if err != nil {
-			return nil, fmt.Errorf("cmakegraph: walk %s: %w", s, err)
-		}
-		merged.Edges = append(merged.Edges, res.Edges...)
-		for _, f := range res.Files {
-			fileSet[f] = true
-		}
-		merged.Histogram.Resolved += res.Histogram.Resolved
-		merged.Histogram.Dangling += res.Histogram.Dangling
-		merged.Histogram.Unresolved += res.Histogram.Unresolved
-		for r, n := range res.Histogram.ByReason {
-			merged.Histogram.ByReason[r] += n
-		}
-	}
-	files := make([]string, 0, len(fileSet))
-	for f := range fileSet {
-		files = append(files, f)
-	}
-	sort.Strings(files)
-	merged.Files = files
-	return merged, nil
-}
-
-// walker carries traversal state for one Walk call.
-type walker struct {
-	opts              Options
-	workspaceRoot     string // absolute, NOT symlink-resolved (used for ${CMAKE_SOURCE_DIR} substitution)
-	realWorkspaceRoot string // symlink-resolved, used for the boundary check
-	visited           map[string]bool
-	files             map[string]bool
-	edges             []Edge
-}
-
-func (w *walker) result(root, workspaceRoot string) *Result {
+func (w *walker) result(root string) *Result {
 	sortedFiles := make([]string, 0, len(w.files))
 	for f := range w.files {
 		sortedFiles = append(sortedFiles, f)
@@ -422,11 +477,12 @@ func (w *walker) result(root, workspaceRoot string) *Result {
 		}
 	}
 	return &Result{
-		Root:          root,
-		WorkspaceRoot: workspaceRoot,
-		Edges:         w.edges,
-		Files:         sortedFiles,
-		Histogram:     hist,
+		Root:                   root,
+		WorkspaceRoot:          w.workspaceRoot,
+		Edges:                  w.edges,
+		Files:                  sortedFiles,
+		Histogram:              hist,
+		SkippedInStringLiteral: w.skippedInString,
 	}
 }
 
@@ -446,16 +502,19 @@ func (w *walker) walkFile(file, sourceDir string, depth int, ancestors []string)
 		// stop expanding the graph from this node (see package doc).
 		return
 	}
-	clean := stripComments(data)
+	clean, quoted := preprocess(data)
 	canonSelf := w.canonicalize(file)
 	listDir := filepath.Dir(canonSelf)
 
-	for _, c := range extractCalls(clean) {
-		line := lineOf(clean, c.Offset)
-		e := Edge{Kind: c.Kind, FromFile: canonSelf, Line: line, RawArg: c.RawArg}
+	calls, skipped := extractCalls(clean, quoted)
+	w.skippedInString += skipped
 
-		condDepth := conditionalDepthBefore(clean, c.Offset)
-		candidate, reason, ok := classifyArg(c.Kind, c.RawArg, c.Malformed, condDepth, listDir, sourceDir, w.workspaceRoot)
+	for _, c := range calls {
+		line := lineOf(clean, c.Offset)
+		conditional := conditionalDepthBefore(clean, quoted, c.Offset) > 0
+		e := Edge{Kind: c.Kind, FromFile: canonSelf, Line: line, RawArg: c.RawArg, Conditional: conditional}
+
+		candidate, reason, ok := classifyArg(c.Kind, c.RawArg, c.Malformed, listDir, sourceDir, w.workspaceRoot)
 		if !ok {
 			e.Status = StatusUnresolved
 			e.Reason = reason
@@ -504,8 +563,10 @@ func (w *walker) walkFile(file, sourceDir string, depth int, ancestors []string)
 			e.Status = StatusUnresolved
 			e.Reason = ReasonCyclic
 		case w.visited[canonTarget]:
-			// Diamond: already resolved via a different path. Not a cycle;
-			// not re-scanned (its edges were already discovered).
+			// Already scanned — either a diamond re-include from a sibling
+			// path, or this exact file was itself (or will be) walked as its
+			// own independent WalkTree root. Not a cycle; not re-scanned
+			// (its edges were already discovered exactly once).
 			e.Status = StatusResolved
 		case depth+1 > w.opts.MaxDepth || len(w.visited) >= w.opts.MaxNodes:
 			e.Status = StatusUnresolved
@@ -602,26 +663,34 @@ func readBounded(path string, maxBytes int64) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-// stripComments blanks out `# ... end-of-line` comments (outside double
-// quotes) while preserving byte length and newline positions, so offset/line
-// math on the returned slice stays valid against the original file.
-func stripComments(data []byte) []byte {
-	out := make([]byte, len(data))
-	copy(out, data)
+// preprocess scans data ONCE, returning (a) a comment-stripped copy safe for
+// regex scanning — `# ... end-of-line` comments outside double quotes are
+// blanked to spaces, preserving byte length and newline positions so
+// offset/line math against the original file stays valid — and (b) a
+// parallel boolean mask, quoted[i], true iff byte i of the RETURNED clean
+// slice sits inside a double-quoted span in the source. Both share the same
+// quote-toggle state machine (an unescaped `"` toggles; `\"` does not).
+func preprocess(data []byte) (clean []byte, quoted []bool) {
+	clean = make([]byte, len(data))
+	copy(clean, data)
+	quoted = make([]bool, len(data))
 	inQuote := false
-	for i := 0; i < len(out); i++ {
-		c := out[i]
+	for i := 0; i < len(clean); i++ {
+		c := clean[i]
 		switch {
-		case c == '"' && (i == 0 || out[i-1] != '\\'):
+		case c == '"' && (i == 0 || clean[i-1] != '\\'):
 			inQuote = !inQuote
+			quoted[i] = inQuote
 		case c == '#' && !inQuote:
-			for i < len(out) && out[i] != '\n' {
-				out[i] = ' '
+			for i < len(clean) && clean[i] != '\n' {
+				clean[i] = ' '
 				i++
 			}
+		default:
+			quoted[i] = inQuote
 		}
 	}
-	return out
+	return clean, quoted
 }
 
 var commandRe = regexp.MustCompile(`(?i)\b(include|add_subdirectory)\s*\(`)
@@ -636,9 +705,13 @@ type rawCall struct {
 }
 
 // extractCalls finds every include()/add_subdirectory() call in clean
-// (comment-stripped) content and extracts each one's first argument token.
-func extractCalls(clean []byte) []rawCall {
-	var calls []rawCall
+// (comment-stripped) content and extracts each one's first argument token. A
+// match whose opening `(` falls inside a double-quoted span per quoted (a
+// command name embedded in an unrelated string-literal argument, e.g.
+// vcpkg_replace_string(...)'s find/replace text — see the package doc's D3
+// note) is skipped entirely: no rawCall is produced for it, and skipped is
+// incremented instead.
+func extractCalls(clean []byte, quoted []bool) (calls []rawCall, skipped int) {
 	for _, loc := range commandRe.FindAllSubmatchIndex(clean, -1) {
 		nameStart, nameEnd := loc[2], loc[3]
 		name := strings.ToLower(string(clean[nameStart:nameEnd]))
@@ -652,6 +725,10 @@ func extractCalls(clean []byte) []rawCall {
 			continue
 		}
 		openParen := loc[1] - 1 // loc[1] is the match end, right after '('
+		if openParen >= 0 && openParen < len(quoted) && quoted[openParen] {
+			skipped++
+			continue
+		}
 		closeIdx, ok := findMatchingParen(clean, openParen)
 		if !ok {
 			calls = append(calls, rawCall{Kind: kind, Offset: loc[0], Malformed: true})
@@ -661,7 +738,7 @@ func extractCalls(clean []byte) []rawCall {
 		tok, tokOK := firstToken(argText)
 		calls = append(calls, rawCall{Kind: kind, Offset: loc[0], RawArg: tok, Malformed: !tokOK})
 	}
-	return calls
+	return calls, skipped
 }
 
 // findMatchingParen returns the index of the ')' matching the '(' at
@@ -712,14 +789,21 @@ func firstToken(s string) (string, bool) {
 }
 
 // conditionalDepthBefore returns the if()/endif() nesting depth immediately
-// before offset, using a simple per-file if()=+1 / endif()=-1 counter. It
-// does not model elseif()/else() branch selection or function()/macro()
-// bodies — see the package doc's "Known, documented simplifications".
-func conditionalDepthBefore(clean []byte, offset int) int {
+// before offset, using a simple per-file if()=+1 / endif()=-1 counter. A
+// match whose opening `(` is inside a quoted string (per quoted — same guard
+// as extractCalls) is ignored, so an if(/endif( appearing inside an
+// unrelated string literal cannot corrupt the count. This does not model
+// elseif()/else() branch selection or function()/macro() bodies — see the
+// package doc's "Known, documented simplifications".
+func conditionalDepthBefore(clean []byte, quoted []bool, offset int) int {
 	depth := 0
 	for _, loc := range condRe.FindAllSubmatchIndex(clean, -1) {
 		if loc[0] >= offset {
 			break
+		}
+		openParen := loc[1] - 1
+		if openParen >= 0 && openParen < len(quoted) && quoted[openParen] {
+			continue
 		}
 		name := strings.ToLower(string(clean[loc[2]:loc[3]]))
 		if name == "if" {
@@ -749,16 +833,16 @@ func lineOf(data []byte, offset int) int {
 
 // classifyArg applies the resolution precedence documented at the package
 // level and returns either a concrete candidate path (ok=true) or an
-// unresolved reason (ok=false, candidate="").
-func classifyArg(kind EdgeKind, rawArg string, malformed bool, condDepth int, listDir, sourceDir, workspaceRoot string) (candidate string, reason Reason, ok bool) {
+// unresolved reason (ok=false, candidate=""). Whether the call is inside a
+// conditional block is NOT a resolution input here — it is recorded on the
+// Edge separately (Edge.Conditional) and never blocks path computation; see
+// the package doc's "Conditional calls" section.
+func classifyArg(kind EdgeKind, rawArg string, malformed bool, listDir, sourceDir, workspaceRoot string) (candidate string, reason Reason, ok bool) {
 	if malformed || strings.TrimSpace(rawArg) == "" {
 		return "", ReasonParseError, false
 	}
 	if strings.Contains(rawArg, "$<") {
 		return "", ReasonGeneratorExpression, false
-	}
-	if condDepth > 0 {
-		return "", ReasonConditionalBranch, false
 	}
 	if strings.Contains(rawArg, "$ENV{") {
 		return "", ReasonNonStaticVariable, false

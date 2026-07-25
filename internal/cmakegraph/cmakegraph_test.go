@@ -326,30 +326,71 @@ func TestModuleNameNotPath_BareIncludeName(t *testing.T) {
 	}
 }
 
-// --- Additional coverage: conditional branch --------------------------------
-func TestConditionalBranch_CallInsideIfNotEvaluated(t *testing.T) {
+// --- Additional coverage (D2): Conditional is informational, never gates
+// resolution — a conditional call's PATH is resolved by the exact same
+// os.Stat rule as an unconditional one, and a Resolved conditional edge is
+// still traversed further. -------------------------------------------------
+func TestConditional_PathResolvedNormallyOrthogonalToStatus(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "CMakeLists.txt",
-		"if(SOME_FLAG)\n"+
-			"  include(${CMAKE_CURRENT_LIST_DIR}/conditional.cmake)\n"+
-			"endif()\n"+
-			"include(${CMAKE_CURRENT_LIST_DIR}/unconditional.cmake)\n")
+		"if(SOME_FLAG)\n"+ // line 1
+			"  include(${CMAKE_CURRENT_LIST_DIR}/conditional.cmake)\n"+ // line 2: conditional, exists -> Resolved
+			"  include(${CMAKE_CURRENT_LIST_DIR}/conditional_missing.cmake)\n"+ // line 3: conditional, absent -> Dangling
+			"endif()\n"+ // line 4
+			"include(${CMAKE_CURRENT_LIST_DIR}/unconditional.cmake)\n") // line 5: unconditional -> Resolved
+	writeFile(t, root, "conditional.cmake", `include(${CMAKE_CURRENT_LIST_DIR}/nested_from_conditional.cmake)`)
+	writeFile(t, root, "nested_from_conditional.cmake", `# leaf, reached only by descending into a Resolved conditional edge`)
 	writeFile(t, root, "unconditional.cmake", `# leaf`)
 
 	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
-	if len(res.Edges) != 2 {
-		t.Fatalf("edges = %d, want 2: %+v", len(res.Edges), res.Edges)
+	// 3 top-level edges (lines 2, 3, 5) + 1 edge discovered by descending
+	// into the Resolved conditional edge at line 2 (proving a conditional
+	// Resolved edge is traversed exactly like an unconditional one).
+	if len(res.Edges) != 4 {
+		t.Fatalf("edges = %d, want 4: %+v", len(res.Edges), res.Edges)
 	}
-	condEdge := edgeByLine(t, res, 2)
-	if condEdge.Status != StatusUnresolved || condEdge.Reason != ReasonConditionalBranch {
-		t.Fatalf("conditional edge = {%v,%v}, want {Unresolved,conditional_branch}", condEdge.Status, condEdge.Reason)
+
+	resolvedCond := edgeByLine(t, res, 2)
+	if resolvedCond.Status != StatusResolved || !resolvedCond.Conditional {
+		t.Fatalf("conditional+existing edge = {%v,Conditional:%v}, want {Resolved,Conditional:true} — the path must be resolved despite the if() guard", resolvedCond.Status, resolvedCond.Conditional)
 	}
-	uncondEdge := edgeByLine(t, res, 4)
-	if uncondEdge.Status != StatusResolved {
-		t.Fatalf("unconditional edge = %v, want Resolved (must not be poisoned by an unrelated if-block)", uncondEdge.Status)
+
+	danglingCond := edgeByLine(t, res, 3)
+	if danglingCond.Status != StatusDangling || !danglingCond.Conditional {
+		t.Fatalf("conditional+missing edge = {%v,Conditional:%v}, want {Dangling,Conditional:true} — Conditional must not force Resolved, and Dangling must not force Conditional:false", danglingCond.Status, danglingCond.Conditional)
+	}
+
+	uncondEdge := edgeByLine(t, res, 5)
+	if uncondEdge.Status != StatusResolved || uncondEdge.Conditional {
+		t.Fatalf("unconditional edge = {%v,Conditional:%v}, want {Resolved,Conditional:false} — must not be poisoned by an unrelated if-block", uncondEdge.Status, uncondEdge.Conditional)
+	}
+
+	// The edge discovered inside conditional.cmake (reached by descending
+	// past the Resolved conditional edge) is itself NOT conditional — its
+	// own file has no if() around it. Conditional is per-file-lexical, not
+	// transitive (see package doc).
+	var nestedEdge *Edge
+	for i := range res.Edges {
+		if filepath.Base(res.Edges[i].FromFile) == "conditional.cmake" {
+			nestedEdge = &res.Edges[i]
+		}
+	}
+	if nestedEdge == nil {
+		t.Fatalf("expected an edge discovered from conditional.cmake (proves recursion past a conditional Resolved edge); edges=%+v", res.Edges)
+	}
+	if nestedEdge.Status != StatusResolved || nestedEdge.Conditional {
+		t.Fatalf("nested edge from conditional.cmake = {%v,Conditional:%v}, want {Resolved,Conditional:false} (Conditional is not transitive)", nestedEdge.Status, nestedEdge.Conditional)
+	}
+
+	// ReasonConditionalBranch no longer exists in the Reason enum at all (D2
+	// removed it) — every edge above landed on Resolved/Dangling, and the
+	// histogram's Unresolved bucket must be empty since none of this
+	// fixture's edges hit any OTHER unresolved reason either.
+	if res.Histogram.Unresolved != 0 {
+		t.Fatalf("Unresolved count = %d, want 0: %+v", res.Histogram.Unresolved, res.Edges)
 	}
 }
 
@@ -477,6 +518,108 @@ func TestCommentedOutInclude_NotDiscovered(t *testing.T) {
 	}
 	if len(res.Edges) != 0 {
 		t.Fatalf("edges = %d, want 0 (commented-out call must not be scanned): %+v", len(res.Edges), res.Edges)
+	}
+}
+
+// --- Additional coverage (D3): a command name embedded inside an unrelated
+// string-literal argument (the vcpkg_replace_string(...) pattern actually
+// observed against the operator's real tree) produces NO edge — it is
+// skipped and counted, never treated as a real directive. --------------------
+func TestStringLiteralGuard_CommandNameInsideStringIsSkipped(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt",
+		"vcpkg_replace_string(\n"+
+			`    "${SOURCE_PATH}/CMakeLists.txt"`+"\n"+
+			`    "add_subdirectory(src/Tutorials/"`+"\n"+
+			`    "# add_subdirectory(src/Tutorials/"`+"\n"+
+			")\n"+
+			"include(${CMAKE_CURRENT_LIST_DIR}/real.cmake)\n")
+	writeFile(t, root, "real.cmake", `# leaf`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	// Only the genuine include() survives as an edge; the two
+	// add_subdirectory(-shaped occurrences inside the quoted find/replace
+	// strings must produce NO edge at all.
+	if len(res.Edges) != 1 {
+		t.Fatalf("edges = %d, want 1 (only the real include(), none from the quoted find/replace text): %+v", len(res.Edges), res.Edges)
+	}
+	if res.Edges[0].Kind != EdgeInclude || res.Edges[0].Status != StatusResolved {
+		t.Fatalf("surviving edge = %+v, want the real Resolved include()", res.Edges[0])
+	}
+	// The FIRST occurrence ("add_subdirectory(src/Tutorials/" — its `(` is
+	// unambiguously inside the quotes) must be caught. Accept either 1 or 2
+	// depending on whether the second (commented + quoted) occurrence's `(`
+	// is also inside the quote span; assert it is AT LEAST 1 so the guard is
+	// proven to fire, without over-constraining on a construct this package
+	// doesn't otherwise need to disambiguate further.
+	if res.SkippedInStringLiteral < 1 {
+		t.Fatalf("SkippedInStringLiteral = %d, want >= 1", res.SkippedInStringLiteral)
+	}
+}
+
+// --- Additional coverage (D1): WalkTree with a "*.cmake" pattern reaches
+// files no portfile.cmake ever references directly — e.g. vcpkg's own
+// toolchain/port-tweak helper files — which a portfile.cmake-only root scan
+// would have missed entirely. -----------------------------------------------
+func TestWalkTree_WildcardPatternReachesFilesNoPortfileReferences(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "ports/someport/portfile.cmake", `# does not include the toolchain at all`)
+	writeFile(t, root, "toolchains/mytoolchain.cmake", `include(${CMAKE_CURRENT_LIST_DIR}/toolchain_helper.cmake)`)
+	writeFile(t, root, "toolchains/toolchain_helper.cmake", `# leaf`)
+
+	narrow, err := WalkTree(root, []string{"portfile.cmake"}, DefaultOptions())
+	if err != nil {
+		t.Fatalf("WalkTree (narrow): %v", err)
+	}
+	if len(narrow.Edges) != 0 {
+		t.Fatalf("narrow (portfile.cmake-only) scan edges = %d, want 0 — the toolchain file is unreachable from any portfile.cmake: %+v", len(narrow.Edges), narrow.Edges)
+	}
+
+	wide, err := WalkTree(root, []string{"*.cmake", "CMakeLists.txt"}, DefaultOptions())
+	if err != nil {
+		t.Fatalf("WalkTree (wide): %v", err)
+	}
+	if len(wide.Edges) != 1 {
+		t.Fatalf("wide (*.cmake) scan edges = %d, want 1 (the toolchain file's own include, discovered by walking it as an independent root): %+v", len(wide.Edges), wide.Edges)
+	}
+	if wide.Edges[0].Status != StatusResolved {
+		t.Fatalf("toolchain edge = %v, want Resolved", wide.Edges[0].Status)
+	}
+}
+
+// --- Additional coverage (D1): a file reachable BOTH as its own independent
+// WalkTree root AND via traversal from a sibling root must be scanned
+// exactly once — its edges must never be duplicated in the merged Result. --
+func TestWalkTree_SharedFileScannedOnceNotDuplicated(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "ports/portA/portfile.cmake", `include(${CMAKE_CURRENT_LIST_DIR}/../../common/helper.cmake)`)
+	writeFile(t, root, "ports/portB/portfile.cmake", `include(${CMAKE_CURRENT_LIST_DIR}/../../common/helper.cmake)`)
+	writeFile(t, root, "common/helper.cmake", `include(${CMAKE_CURRENT_LIST_DIR}/helper_leaf.cmake)`)
+	writeFile(t, root, "common/helper_leaf.cmake", `# leaf`)
+
+	res, err := WalkTree(root, []string{"*.cmake"}, DefaultOptions())
+	if err != nil {
+		t.Fatalf("WalkTree: %v", err)
+	}
+	// 3 roots discovered (portA/portfile.cmake, portB/portfile.cmake,
+	// common/helper.cmake) produce: portA's include, portB's include, and
+	// EXACTLY ONE edge from helper.cmake's own include(helper_leaf.cmake) —
+	// never two, even though helper.cmake is both an independent root AND
+	// reached via traversal from two different ports.
+	helperOwnEdges := 0
+	for _, e := range res.Edges {
+		if filepath.Base(e.FromFile) == "helper.cmake" {
+			helperOwnEdges++
+		}
+	}
+	if helperOwnEdges != 1 {
+		t.Fatalf("edges FROM helper.cmake = %d, want exactly 1 (must not be duplicated across the 3 roots that all reach it): %+v", helperOwnEdges, res.Edges)
+	}
+	if len(res.Edges) != 3 {
+		t.Fatalf("total edges = %d, want 3 (portA->helper, portB->helper, helper->leaf, each exactly once): %+v", len(res.Edges), res.Edges)
 	}
 }
 
