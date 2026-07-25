@@ -3,6 +3,7 @@ package cmakegraph
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -549,15 +550,12 @@ func TestStringLiteralGuard_CommandNameInsideStringIsSkipped(t *testing.T) {
 	if res.Edges[0].Kind != EdgeInclude || res.Edges[0].Status != StatusResolved {
 		t.Fatalf("surviving edge = %+v, want the real Resolved include()", res.Edges[0])
 	}
-	// The FIRST occurrence ("add_subdirectory(src/Tutorials/" — its `(` is
-	// unambiguously inside the quotes) must be caught. Accept either 1 or 2
-	// depending on whether the second (commented + quoted) occurrence's `(`
-	// is also inside the quote span; assert it is AT LEAST 1 so the guard is
-	// proven to fire, without over-constraining on a construct this package
-	// doesn't otherwise need to disambiguate further.
-	if res.SkippedInStringLiteral < 1 {
-		t.Fatalf("SkippedInStringLiteral = %d, want >= 1", res.SkippedInStringLiteral)
-	}
+	// The single-pass lexer treats the WHOLE vcpkg_replace_string(...) call
+	// as one opaque top-level command span (its quoted arguments, including
+	// the add_subdirectory(-shaped text, are consumed by skipQuoted and never
+	// independently re-scanned for embedded commands) — there is no separate
+	// "skipped" counter to check anymore; the guarantee is structural, and
+	// len(res.Edges) == 1 above already proves it held.
 }
 
 // --- Additional coverage (D1): WalkTree with a "*.cmake" pattern reaches
@@ -665,3 +663,426 @@ func TestWalkTree_IndependentPortLikeUnits(t *testing.T) {
 		t.Fatalf("edges = %d, want 2 (one per port)", len(res.Edges))
 	}
 }
+
+// =====================================================================
+// P3-8 shadow-path fixtures: the scanner's CANDIDATE exists but CMake's
+// REAL target does not (or vice versa) — these are the fixtures a
+// cross-family adversarial review (codex Sol, xhigh) demanded because the
+// original mutation proof only exercised the "missing candidate ->
+// Dangling" class, which every wrong-file-class bug below PASSES. Each
+// test here was first run against the PRE-FIX code and confirmed to fail
+// exactly as predicted (the falsification the review required) before the
+// corresponding fix landed; they are now permanent regressions.
+// =====================================================================
+
+// P1-1: relative include() must resolve against CMAKE_CURRENT_SOURCE_DIR,
+// not CMAKE_CURRENT_LIST_DIR. Shadow path: a decoy file exists at the WRONG
+// (CMAKE_CURRENT_LIST_DIR-based) location; the CORRECT
+// (CMAKE_CURRENT_SOURCE_DIR-based) location is empty, so real CMake would
+// see this as Dangling. A resolver using the wrong base directory reports
+// Resolved against the decoy instead.
+func TestP1_1_RelativeIncludeResolvesAgainstCurrentSourceDirNotListDir(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", `include(sub/helper.cmake)`)
+	writeFile(t, root, "sub/helper.cmake", `include(local.cmake)`)
+	writeFile(t, root, "sub/local.cmake", `# decoy: exists only at the WRONG (CMAKE_CURRENT_LIST_DIR) location`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	var helperEdge *Edge
+	for i := range res.Edges {
+		if filepath.Base(res.Edges[i].FromFile) == "helper.cmake" {
+			helperEdge = &res.Edges[i]
+		}
+	}
+	if helperEdge == nil {
+		t.Fatalf("expected an edge from helper.cmake; edges=%+v", res.Edges)
+	}
+	wantPath := filepath.Join(realpath(t, root), "local.cmake")
+	if helperEdge.Status != StatusDangling || helperEdge.ResolvedPath != wantPath {
+		t.Fatalf("got {%v,%q}, want {Dangling,%q} — real CMake resolves relative include() against CMAKE_CURRENT_SOURCE_DIR (root), not CMAKE_CURRENT_LIST_DIR (root/sub)",
+			helperEdge.Status, helperEdge.ResolvedPath, wantPath)
+	}
+}
+
+// P1-1 companion: the SAME bare-relative shape at the TOP LEVEL (not inside
+// an included file) is unaffected, since CMAKE_CURRENT_SOURCE_DIR and
+// CMAKE_CURRENT_LIST_DIR coincide there — proving the fix only changes
+// behavior where the two variables actually diverge.
+func TestP1_1_TopLevelBareRelativeUnaffected(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", `include(sub/helper.cmake)`)
+	writeFile(t, root, "sub/helper.cmake", `# leaf`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 1 || res.Edges[0].Status != StatusResolved {
+		t.Fatalf("edges=%+v, want 1 Resolved edge (CMAKE_CURRENT_SOURCE_DIR == CMAKE_CURRENT_LIST_DIR at the top level)", res.Edges)
+	}
+}
+
+// P1-2: ${CMAKE_CURRENT_LIST_DIR} inside a macro() body reflects the
+// bottom-most INVOKING file at expansion time (CMake's own documented
+// behavior), not the defining file — this package cannot know the invoker
+// statically, so it must refuse rather than substitute the defining file's
+// own directory. Shadow path: a decoy exists at the (wrong) defining-file
+// location.
+func TestP1_2_CurrentListDirInsideMacroBodyRefused(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", `include(${CMAKE_CURRENT_LIST_DIR}/sub/defs.cmake)`)
+	writeFile(t, root, "sub/defs.cmake",
+		"macro(load_target)\n"+
+			"  include(${CMAKE_CURRENT_LIST_DIR}/target.cmake)\n"+
+			"endmacro()\n")
+	writeFile(t, root, "sub/target.cmake", `# decoy: exists only at the defining file's (possibly wrong) directory`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	var macroEdge *Edge
+	for i := range res.Edges {
+		if filepath.Base(res.Edges[i].FromFile) == "defs.cmake" {
+			macroEdge = &res.Edges[i]
+		}
+	}
+	if macroEdge == nil {
+		t.Fatalf("expected an edge from defs.cmake; edges=%+v", res.Edges)
+	}
+	if macroEdge.Status != StatusUnresolved || macroEdge.Reason != ReasonDeferredMacroContext {
+		t.Fatalf("got {%v,%v}, want {Unresolved,deferred_macro_context}", macroEdge.Status, macroEdge.Reason)
+	}
+	if macroEdge.ResolvedPath != "" {
+		t.Fatalf("deferred_macro_context edge must have no ResolvedPath (never computed): got %q", macroEdge.ResolvedPath)
+	}
+}
+
+// P1-2 companion + the operator's requested blast-radius measurement: a
+// function() body gates the same way, and a call OUTSIDE any macro/function
+// in the SAME file is unaffected.
+func TestP1_2_FunctionBodyAlsoGatesAndOutsideCallUnaffected(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt",
+		"function(load_target)\n"+
+			"  include(${CMAKE_CURRENT_LIST_DIR}/inside.cmake)\n"+
+			"endfunction()\n"+
+			"include(${CMAKE_CURRENT_LIST_DIR}/outside.cmake)\n")
+	writeFile(t, root, "outside.cmake", `# leaf`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	insideEdge := edgeByLine(t, res, 2)
+	if insideEdge.Status != StatusUnresolved || insideEdge.Reason != ReasonDeferredMacroContext {
+		t.Fatalf("function-body edge = {%v,%v}, want {Unresolved,deferred_macro_context}", insideEdge.Status, insideEdge.Reason)
+	}
+	outsideEdge := edgeByLine(t, res, 4)
+	if outsideEdge.Status != StatusResolved {
+		t.Fatalf("outside-function edge = %v, want Resolved (must not be poisoned by an unrelated function() body)", outsideEdge.Status)
+	}
+}
+
+// P1-3: an arbitrary *.cmake file scanned as an independent WalkTree
+// discovery root has no verified CMAKE_CURRENT_SOURCE_DIR — a bare-relative
+// argument there must refuse, not assume "its own directory". Shadow path:
+// a decoy exists relative to the file's own (unverified) directory.
+func TestP1_3_StandaloneRootBareRelativeRefusedUnverified(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "helpers/some_helper.cmake", `include(local.cmake)`)
+	writeFile(t, root, "helpers/local.cmake", `# decoy: exists only relative to the INVENTED (unverified) source dir`)
+
+	res, err := WalkTree(root, []string{"*.cmake"}, DefaultOptions())
+	if err != nil {
+		t.Fatalf("WalkTree: %v", err)
+	}
+	var edge *Edge
+	for i := range res.Edges {
+		if filepath.Base(res.Edges[i].FromFile) == "some_helper.cmake" {
+			edge = &res.Edges[i]
+		}
+	}
+	if edge == nil {
+		t.Fatalf("expected an edge from some_helper.cmake; edges=%+v", res.Edges)
+	}
+	if edge.Status != StatusUnresolved || edge.Reason != ReasonUnverifiedSourceDir {
+		t.Fatalf("got {%v,%v}, want {Unresolved,unverified_source_dir}", edge.Status, edge.Reason)
+	}
+}
+
+// P1-3 companion: the SAME bare-relative shape from a GENUINE CMakeLists.txt
+// root (a verified context) still resolves normally — proving the fix
+// narrowly targets unverified contexts, not bare-relative resolution as a
+// whole.
+func TestP1_3_CMakeListsRootBareRelativeStillResolves(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", `include(local.cmake)`)
+	writeFile(t, root, "local.cmake", `# leaf`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 1 || res.Edges[0].Status != StatusResolved {
+		t.Fatalf("edges=%+v, want 1 Resolved edge (a CMakeLists.txt root's context is verified)", res.Edges)
+	}
+}
+
+// P1-3: add_subdirectory() resolved from a verified context correctly
+// establishes a FRESH verified context for the child, regardless of how the
+// parent's own context was established (absolute-variable or bare-relative
+// under an already-verified parent).
+func TestP1_3_AddSubdirectoryEstablishesFreshVerifiedContext(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", `add_subdirectory(child)`)
+	writeFile(t, root, "child/CMakeLists.txt", `include(local.cmake)`)
+	writeFile(t, root, "child/local.cmake", `# leaf, relative to child's OWN (freshly verified) source dir`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	var childEdge *Edge
+	for i := range res.Edges {
+		if filepath.Base(res.Edges[i].FromFile) == "CMakeLists.txt" && strings.Contains(filepath.ToSlash(res.Edges[i].FromFile), "/child") {
+			childEdge = &res.Edges[i]
+		}
+	}
+	if childEdge == nil {
+		t.Fatalf("expected an edge from child/CMakeLists.txt; edges=%+v", res.Edges)
+	}
+	if childEdge.Status != StatusResolved {
+		t.Fatalf("child's bare-relative include = %v, want Resolved (add_subdirectory establishes a fresh verified context)", childEdge.Status)
+	}
+}
+
+// P1-4: $CACHE{...} must be refused before any stat is attempted, same
+// bucket as $ENV{...} — never stat'd as literal text.
+func TestP1_4_CacheVariableRefused(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", `include($CACHE{P}.cmake)`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 1 {
+		t.Fatalf("edges = %d, want 1: %+v", len(res.Edges), res.Edges)
+	}
+	e := res.Edges[0]
+	if e.Status != StatusUnresolved || e.Reason != ReasonNonStaticVariable {
+		t.Fatalf("got {%v,%v}, want {Unresolved,non_static_variable}", e.Status, e.Reason)
+	}
+}
+
+// P1-4: an argument containing a raw backslash is refused (escape sequences
+// are never decoded). The CORRECT (space, no backslash) file exists on
+// disk; a resolver that stats the raw backslash-bearing text would never
+// find it anyway on Windows (backslash is the path separator), but the
+// point is it must not even TRY — it must refuse outright.
+func TestP1_4_BackslashEscapeSequenceRefused(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", `include("foo\ bar.cmake")`)
+	writeFile(t, root, "foo bar.cmake", `# the file CMake would actually open, after decoding \  as a literal space`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 1 {
+		t.Fatalf("edges = %d, want 1: %+v", len(res.Edges), res.Edges)
+	}
+	e := res.Edges[0]
+	if e.Status != StatusUnresolved || e.Reason != ReasonParseError {
+		t.Fatalf("got {%v,%v}, want {Unresolved,parse_error} — escape sequences must be refused, not decoded or stat'd raw", e.Status, e.Reason)
+	}
+	if e.ResolvedPath != "" {
+		t.Fatalf("must never compute a path for a backslash-bearing argument: got %q", e.ResolvedPath)
+	}
+}
+
+// P1-4: CMake bracket-argument syntax is recognized (so it doesn't get
+// mis-parsed as a bare token) but its content is never extracted as a path.
+func TestP1_4_BracketArgumentRefused(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", "include([[some/path.cmake]])\n")
+	writeFile(t, root, "some/path.cmake", `# decoy: must never be reached via bracket-argument content`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 1 {
+		t.Fatalf("edges = %d, want 1: %+v", len(res.Edges), res.Edges)
+	}
+	e := res.Edges[0]
+	if e.Status != StatusUnresolved || e.Reason != ReasonParseError {
+		t.Fatalf("got {%v,%v}, want {Unresolved,parse_error}", e.Status, e.Reason)
+	}
+}
+
+// P1-5: message(include(existing.cmake)) is a single, syntactically legal
+// unquoted argument to message() (balanced nested parens), NOT an include()
+// directive. existing.cmake genuinely exists — proving the false positive
+// is about misinterpreting syntax, not a coincidental dangling miss.
+func TestP1_5_NestedCommandInBalancedParensNotMisreadAsDirective(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", `message(include(existing.cmake))`)
+	writeFile(t, root, "existing.cmake", `# leaf`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 0 {
+		t.Fatalf("edges = %d, want 0: %+v", len(res.Edges), res.Edges)
+	}
+}
+
+// P1-5: message(if(fake)) must not corrupt the if()/endif() nesting counter
+// used for Edge.Conditional — a REAL if()/endif() pair afterward must still
+// correctly gate a REAL call.
+func TestP1_5_FakeNestedIfDoesNotCorruptConditionalTracking(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt",
+		"message(if(fake))\n"+
+			"if(REAL_FLAG)\n"+
+			"  include(${CMAKE_CURRENT_LIST_DIR}/real_conditional.cmake)\n"+
+			"endif()\n")
+	writeFile(t, root, "real_conditional.cmake", `# leaf`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 1 {
+		t.Fatalf("edges = %d, want 1: %+v", len(res.Edges), res.Edges)
+	}
+	e := res.Edges[0]
+	if e.Status != StatusResolved || !e.Conditional {
+		t.Fatalf("got {%v,Conditional:%v}, want {Resolved,Conditional:true} — the fake if( inside message(...) must not corrupt the REAL if()/endif() nesting count", e.Status, e.Conditional)
+	}
+}
+
+// P1-5: escape parity — message("x\\") must correctly recognize the
+// backslash-backslash as ONE escaped backslash (not "escaped quote-to-come"),
+// so the string closes normally and a REAL command afterward is still
+// discovered. A naive "look at only the immediately preceding byte" check
+// gets this wrong and can swallow the next real command.
+func TestP1_5_EscapeParityDoesNotSwallowNextCommand(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt",
+		`message("x\\")`+"\n"+
+			"include(${CMAKE_CURRENT_LIST_DIR}/real.cmake)\n")
+	writeFile(t, root, "real.cmake", `# leaf`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 1 {
+		t.Fatalf("edges = %d, want 1 (the real include() after message(\"x\\\\\") must still be discovered): %+v", len(res.Edges), res.Edges)
+	}
+	if res.Edges[0].Status != StatusResolved {
+		t.Fatalf("edge = %v, want Resolved", res.Edges[0].Status)
+	}
+}
+
+// P1-5: bracket comments are matched to their ACTUAL closing bracket, not
+// just stripped on the opening line — a command-name-shaped substring
+// spanning multiple lines inside one must not be discovered.
+func TestP1_5_BracketCommentMatchedAcrossMultipleLines(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt",
+		"#[[ this is a bracket comment\n"+
+			"include(should_not_be_found.cmake)\n"+
+			"still inside the comment\n"+
+			"]]\n"+
+			"include(${CMAKE_CURRENT_LIST_DIR}/real.cmake)\n")
+	writeFile(t, root, "should_not_be_found.cmake", `# decoy`)
+	writeFile(t, root, "real.cmake", `# leaf`)
+
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 1 {
+		t.Fatalf("edges = %d, want 1 (only the include() AFTER the bracket comment): %+v", len(res.Edges), res.Edges)
+	}
+	if filepath.Base(res.Edges[0].ResolvedPath) != "real.cmake" {
+		t.Fatalf("resolved = %q, want real.cmake", res.Edges[0].ResolvedPath)
+	}
+}
+
+// P1-6: MaxNodes must gate independent-root ADMISSION, not just edge
+// traversal within an already-admitted root, and the refusal must be
+// visible.
+func TestP1_6_NodeCapGatesRootAdmissionAndIsVisible(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "a.cmake", `# leaf a`)
+	writeFile(t, root, "b.cmake", `# leaf b`)
+
+	res, err := WalkTree(root, []string{"*.cmake"}, Options{MaxDepth: DefaultMaxDepth, MaxNodes: 1, MaxFileBytes: DefaultMaxFileBytes})
+	if err != nil {
+		t.Fatalf("WalkTree: %v", err)
+	}
+	if len(res.Files) != 1 {
+		t.Fatalf("files scanned = %d, want 1: %v", len(res.Files), res.Files)
+	}
+	if !res.NodeCapTruncated || res.RootsSkippedByNodeCap != 1 {
+		t.Fatalf("NodeCapTruncated=%v RootsSkippedByNodeCap=%d, want {true,1}", res.NodeCapTruncated, res.RootsSkippedByNodeCap)
+	}
+}
+
+// P2-7: a byte-cap-exceeding file is recorded in Result.UnscannedFiles — its
+// own outgoing edges are known-missing, not silently absent with no trace.
+// The edge leading TO the oversized file remains Resolved (the filesystem
+// fact "it exists" is still true).
+func TestP2_7_ByteCapSkipIsVisibleNotSilent(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", `include(${CMAKE_CURRENT_LIST_DIR}/huge.cmake)`)
+	huge := make([]byte, 200)
+	for i := range huge {
+		huge[i] = '#'
+	}
+	huge = append(huge, []byte("\ninclude(${CMAKE_CURRENT_LIST_DIR}/never_seen.cmake)\n")...)
+	if err := os.WriteFile(filepath.Join(root, "huge.cmake"), huge, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "never_seen.cmake", `# leaf`)
+
+	opts := Options{MaxDepth: DefaultMaxDepth, MaxNodes: DefaultMaxNodes, MaxFileBytes: 50}
+	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, opts)
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 1 || res.Edges[0].Status != StatusResolved {
+		t.Fatalf("edges=%+v, want 1 Resolved edge (huge.cmake exists; only its OWN content is unreadable)", res.Edges)
+	}
+	if len(res.UnscannedFiles) != 1 || filepath.Base(res.UnscannedFiles[0].Path) != "huge.cmake" {
+		t.Fatalf("UnscannedFiles=%+v, want exactly 1 entry for huge.cmake", res.UnscannedFiles)
+	}
+	if res.UnscannedFiles[0].Reason == "" {
+		t.Fatalf("UnscannedFiles[0].Reason must not be empty")
+	}
+}
+
+// --- Mutation proof retargeted to the WRONG-FILE class (P3-8) --------------
+//
+// The original mutation proof (TestMutationProof_DanglingPathNeverReportedResolved,
+// above) only proves a resolver that forgets to check existence reports
+// Dangling instead of Resolved for a MISSING candidate — every wrong-base-
+// directory bug in this file passes that test unchanged (it still checks
+// existence; it just checks the WRONG path). This mutation targets exactly
+// that class: temporarily reintroduce the P1-1 bug (resolve include()
+// against CMAKE_CURRENT_LIST_DIR instead of CMAKE_CURRENT_SOURCE_DIR) and
+// confirm TestP1_1_RelativeIncludeResolvesAgainstCurrentSourceDirNotListDir
+// fails against it. This is exercised manually during review (mutate
+// classifyArg's `p = filepath.Join(ctx.dir, p)` to use listDir instead,
+// rerun -run TestP1_1_, confirm FAIL, revert) — recorded here as a
+// permanent comment pointing at the exact test so a future reviewer can
+// repeat the mutation without guessing which test covers it.

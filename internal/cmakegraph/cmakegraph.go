@@ -27,6 +27,23 @@
 // against a caller-supplied workspace boundary (including symlink
 // resolution) before being trusted.
 //
+// # FAIL CLOSED is the governing principle
+//
+// Where the true CMake context is not provable from static text, the answer
+// is StatusUnresolved with a Reason — NEVER StatusResolved. A cross-family
+// adversarial review found that an earlier version of this package satisfied
+// the letter of "Resolved means os.Stat succeeded" while violating the
+// spirit of it: the CANDIDATE PATH or the CALL SITE ITSELF could be wrong
+// (resolved against the wrong base directory, or lexically inside a
+// macro()/function() body where the substituted variable's true value is
+// invocation-dependent), so a file existing at the computed path did not
+// mean it was the file CMake would actually use. Under this package's
+// contract that is a false Resolved — the one failure mode that makes the
+// tool worse than useless. Every fix below narrows Resolved rather than
+// widening it: expect the resolved fraction of any real tree to be smaller
+// than a naive lexical scan would suggest. A smaller true number beats a
+// larger unverified one.
+//
 // # Tri-state resolution, never a false positive
 //
 // Every include()/add_subdirectory() call site becomes one Edge with one of
@@ -34,47 +51,16 @@
 //
 //   - StatusResolved: a concrete path was computed AND os.Stat confirms the
 //     target exists (a file for include(), or a directory containing its own
-//     CMakeLists.txt for add_subdirectory()).
-//   - StatusDangling: a concrete path was computed but the target is absent.
-//     This is a real finding (a broken include), not a scanner failure.
-//   - StatusUnresolved: the scanner could not safely compute a path at all.
-//     Reason names exactly why (see the Reason constants) — this is the
-//     scanner declining to guess rather than reporting a wrong "resolved".
-//
-// The design goal is: it is always safe to trust a StatusResolved edge, and
-// StatusUnresolved always means "the scanner does not know", never "the
-// scanner assumed and might be wrong".
-//
-// # What is (and is NOT) lexically substituted
-//
-//   - ${CMAKE_CURRENT_LIST_DIR} is ALWAYS safe to substitute: by CMake's own
-//     semantics it is exactly the directory of the file containing the call,
-//     with no dependency on how that file was reached (include() chain or
-//     add_subdirectory() chain). No CMake evaluation is needed for it.
-//   - ${CMAKE_SOURCE_DIR} is a project-wide constant (the top of the whole
-//     tree) fixed once at the very top and invariant regardless of nesting
-//     depth, so it is substituted with the caller-supplied workspace root
-//     whenever a root is supplied — which Walk/WalkTree always require.
-//   - ${CMAKE_CURRENT_SOURCE_DIR} is DELIBERATELY NEVER substituted, even
-//     though this package tracks an internal notion of "current source
-//     directory" to resolve bare (variable-free) add_subdirectory() targets.
-//     Real CMake's CMAKE_CURRENT_SOURCE_DIR changes only on add_subdirectory()
-//     and is INHERITED (unchanged) across include() calls — so it diverges
-//     from CMAKE_CURRENT_LIST_DIR precisely inside an included file, and its
-//     true value also depends on whether the call site is reached through an
-//     add_subdirectory() chain the scanner does not fully evaluate (e.g. a
-//     call inside an unevaluated conditional, or inside a helper file that is
-//     itself include()-d from more than one place). This package's own
-//     internal sourceDir bookkeeping is a best-effort approximation good
-//     enough to resolve the common bare-relative add_subdirectory(name) case;
-//     it is intentionally NEVER exposed as a substitution for a LITERAL
-//     "${CMAKE_CURRENT_SOURCE_DIR}" token in scanned text, because doing so
-//     would require accurately modelling CMake's directory-scope stack across
-//     arbitrary nesting and conditionals — exactly the kind of guess this
-//     package refuses to make. Any occurrence of the literal token is
-//     classified StatusUnresolved / ReasonNonStaticVariable.
-//   - Any other ${...} variable, $ENV{...} reference, or $<...> generator
-//     expression is never evaluated (see the Reason constants below).
+//     CMakeLists.txt for add_subdirectory()) AND the computation itself
+//     rested only on premises this package can verify (see the sections
+//     below) — never on an invented or invocation-dependent guess.
+//   - StatusDangling: a concrete, verified path was computed but the target
+//     is absent. This is a real finding (a broken include), not a scanner
+//     failure.
+//   - StatusUnresolved: the scanner could not safely compute a verified path
+//     at all. Reason names exactly why (see the Reason constants) — this is
+//     the scanner declining to guess rather than reporting a wrong
+//     "resolved".
 //
 // # Conditional calls: the path is resolved anyway
 //
@@ -90,6 +76,124 @@
 // Conditional: true as "this edge exists in the source, but a cmake trace is
 // required to know if it is ever reached at configure time."
 //
+// # Relative include()/add_subdirectory() arguments resolve against
+// CMAKE_CURRENT_SOURCE_DIR, NOT CMAKE_CURRENT_LIST_DIR
+//
+// CMake's own include() implementation resolves a relative argument against
+// the CURRENT SOURCE DIRECTORY (the add_subdirectory()-established directory
+// scope), not the calling list file's own directory. These two are IDENTICAL
+// at the top of a file that is not itself include()-d, but DIVERGE precisely
+// inside an included file: CMAKE_CURRENT_LIST_DIR becomes the included
+// file's own directory, while CMAKE_CURRENT_SOURCE_DIR stays whatever the
+// enclosing directory scope already was (include() never changes it — only
+// add_subdirectory() does). This package tracks CMAKE_CURRENT_SOURCE_DIR
+// internally (see sourceContext below) and uses it as the base for BOTH
+// include() and add_subdirectory() bare-relative arguments. An argument that
+// explicitly writes ${CMAKE_CURRENT_LIST_DIR} still resolves against the
+// calling file's own directory — that is literally what the variable means,
+// unconditionally, and is exactly why real CMake code (including this
+// package's own primary field-tested source, a vcpkg-style overlay-ports
+// tree) idiomatically writes ${CMAKE_CURRENT_LIST_DIR} explicitly rather than
+// relying on the bare-relative form.
+//
+// # Source-dir context must be VERIFIED, never invented
+//
+// A CMakeLists.txt file reached as a Walk/WalkTree root, or as an
+// add_subdirectory() target, has a well-founded CMAKE_CURRENT_SOURCE_DIR:
+// its own directory. An arbitrary *.cmake file scanned as an independent
+// WalkTree discovery root (e.g. under a "*.cmake" entryNames pattern) does
+// NOT — such a file could be include()-d from anywhere in the real project,
+// under any CMAKE_CURRENT_SOURCE_DIR, and this package has no way to know
+// which. sourceContext.verified tracks this distinction; a bare-relative
+// argument resolved against an UNVERIFIED context is refused
+// (StatusUnresolved / ReasonUnverifiedSourceDir) rather than guessed from
+// "the file's own directory". Verification propagates correctly through
+// traversal: include() never changes verified-ness (it doesn't change the
+// source dir at all); a successfully-resolved add_subdirectory() target is
+// ALWAYS verified going forward (reaching that point means the candidate was
+// computed either from an absolute variable or from an already-verified
+// context, so the child's own directory is now concretely known regardless
+// of how uncertain the ORIGINAL root was).
+//
+// Traversal state (the visited/dedup set) is keyed by (file, sourceContext),
+// not file path alone — a file legitimately reachable under two DIFFERENT
+// verified contexts is explored under both, rather than the second visit
+// being silently suppressed by the first (which would erase a context this
+// package could otherwise have verified). Result.Files still lists each
+// physical file once (it answers "what did we open", not "under how many
+// contexts"); Edge.FromFile can therefore appear more than once across
+// genuinely different contexts, each independently resolved.
+//
+// ${CMAKE_CURRENT_LIST_DIR} is NOT purely lexical either: CMake documents it
+// as reflecting the BOTTOM-MOST INVOKING file when the reference sits inside
+// a macro()/function() body, not the file that defines the macro/function.
+// This package detects that a call is lexically inside an open
+// macro()/function()...endmacro()/endfunction() block (a simple per-file
+// nesting counter, like the if()/endif() one) and refuses any
+// ${CMAKE_CURRENT_LIST_DIR} substitution there — StatusUnresolved /
+// ReasonDeferredMacroContext — rather than substituting the DEFINING file's
+// own directory, which would silently assume the macro is invoked from
+// itself. This does not model macro/function INVOCATION at all (v1 scope);
+// it only detects the DEFINITION-site nesting.
+//
+// # Unsupported argument syntax fails closed, never stats raw text
+//
+// Beyond the already-refused ${...} variables, $ENV{...}, and $<...>
+// generator expressions: $CACHE{...} cache-variable references are refused
+// the same way (ReasonNonStaticVariable); CMake bracket-argument syntax
+// (`[[...]]`, `[=[...]=]`) is recognized structurally by the lexer (see
+// below) but its content is never extracted as a path (ReasonParseError —
+// this package declines to support the form, rather than guessing at
+// mis-parsed content); and any argument containing a raw backslash is
+// refused outright (ReasonParseError) rather than attempting to decode
+// CMake's escape-sequence rules — a decode bug on a Windows-style path is
+// exactly the kind of false Resolved (or worse, a wrong absolute path
+// silently stat'd) this package's contract forbids.
+//
+// # The lexer: one structural pass, not regex + a bolted-on quote mask
+//
+// Call sites are discovered by scanTopLevelCommands, a single forward pass
+// over the RAW file bytes that understands: line comments (# to end of
+// line), bracket comments (#[[ ... ]], #[=[ ... ]=], ... — matched to their
+// ACTUAL closing bracket, not just stripped on the opening line), quoted
+// arguments with correct escape PARITY (a run of N backslashes immediately
+// before a quote character closes the string iff N is even — not "look at
+// only the one preceding byte", which mis-parses message("x\\") and can
+// swallow the next real command), bracket arguments (recognized as opaque,
+// not decoded), and — the key structural property — COMMAND NESTING: once
+// the scanner is inside one command's argument-list span (from its `(` to
+// the matching `)`, correctly skipping over quoted/bracket spans and nested
+// balanced parens), it never independently re-recognizes a command-name-
+// shaped substring WITHIN that span as a fresh top-level call. This is what
+// makes message(include(existing.cmake)) — a single, syntactically legal
+// unquoted argument to message(), NOT an include() directive — produce no
+// edge, and what makes message(if(fake)) unable to corrupt the
+// if()/endif()/macro()/function() nesting counters used for Edge.Conditional
+// and the deferred-macro-context gate: those counters are derived from the
+// SAME top-level command list, so a command name nested inside another
+// call's argument list was never a candidate to affect them in the first
+// place.
+//
+// An unbalanced/unterminated command call (missing closing paren before EOF)
+// halts scanning of the REST of that file — no resync heuristic is
+// attempted after a genuine syntax breakdown; commands recognized BEFORE the
+// break point are unaffected, and other files are scanned independently.
+//
+// # MaxNodes governs root ADMISSION too, and byte-cap skips are visible
+//
+// WalkTree enumerates every candidate root file cheaply (a directory listing
+// is not itself bounded by MaxNodes), but walkRoot refuses to ADMIT
+// (traverse-state-track and scan) a new root once the shared visited set
+// already holds MaxNodes entries — Result.NodeCapTruncated and
+// Result.RootsSkippedByNodeCap make this visible rather than silently
+// scanning every independent root regardless of the configured cap.
+// Separately, a file that could not be read at all (byte-cap trip,
+// permission error, TOCTOU race after a successful Stat) is recorded in
+// Result.UnscannedFiles with its reason — the edge that led to it still
+// carries a genuine StatusResolved (the filesystem fact "this file exists"
+// remains true), but its own outgoing edges are known-missing, not silently
+// absent with no trace.
+//
 // # Known, documented simplifications
 //
 //   - Argument parsing takes only the FIRST whitespace/quote-delimited token
@@ -97,49 +201,33 @@
 //     ignoring trailing keyword arguments (OPTIONAL, RESULT_VARIABLE,
 //     EXCLUDE_FROM_ALL, add_subdirectory's optional binary-dir argument).
 //     This matches the dominant real-world call shape.
-//   - Conditional detection (Edge.Conditional) is a simple if()/endif()
-//     nesting counter per file; it does not model elseif()/else() branch
-//     selection (any call nested inside ANY if()...endif() block is flagged
-//     conditional, regardless of which branch it is textually in), it is NOT
-//     transitive (a call is flagged only by an if() in its OWN file — if
-//     that file was itself reached via a conditional edge, this package does
-//     not propagate that fact onto the file's own unconditional-looking
-//     calls), and it does NOT detect that a call sits inside a
-//     function()/macro() body (whose execution is also deferred) — all
-//     documented, out-of-scope limitations.
-//   - Bracket-argument syntax (CMake's `[[...]]` / `[=[...]=]` long strings)
-//     is not recognized; only unquoted and double-quoted arguments are.
-//   - A file-read failure AFTER a successful Stat (e.g. permission denied on
-//     open, a TOCTOU race) leaves the edge that led to it Resolved (the
-//     filesystem fact "the target exists" remains true) but the scanner
-//     simply does not descend further into it — no further edges are
-//     discovered from that file. This is different from a byte-cap trip,
-//     which behaves identically for the same reason: bounding the SCAN, not
-//     re-litigating whether the target exists.
-//   - CONFIRMED via a real read-only run against a vcpkg-style overlay-ports
-//     tree: a command name can appear INSIDE an unrelated string-literal
-//     ARGUMENT to some other command — e.g. vcpkg_replace_string(...)
-//     commonly embeds literal text like "add_subdirectory(python)" as a
-//     find/replace pattern applied to a DIFFERENT file, not as a real call.
-//     This package reuses its existing quote-tracking (the same primitive
-//     that already strips `#` comments outside quotes) to detect this: a
-//     match whose opening `(` falls inside a double-quoted span is skipped
-//     entirely — no Edge is emitted for it — and counted in
-//     Result.SkippedInStringLiteral for transparency. This guard inherits
-//     the same scope as the rest of this package's quote handling (simple
-//     `\"`-escaped double quotes only; CMake bracket-argument strings
-//     `[[...]]`/`[=[...]=]` are not modeled, so a command-name-like
-//     substring inside ONE of those is not caught by this guard).
+//   - Conditional and deferred-macro-context detection are simple per-file
+//     nesting counters; they do not model elseif()/else() branch selection
+//     (any call nested inside ANY if()...endif() block is flagged
+//     conditional, regardless of which branch it is textually in), are NOT
+//     transitive across file boundaries (a call is flagged only by an
+//     if()/macro()/function() in ITS OWN file — if that file was itself
+//     reached via a conditional or deferred-macro edge, this package does
+//     not propagate that fact onto the file's own calls), and do not model
+//     macro/function INVOCATION (only lexical DEFINITION-site nesting).
+//   - CMAKE_MODULE_PATH is never consulted: a bare include() argument with no
+//     path separator and no .cmake suffix is refused (ReasonModuleNameNotPath)
+//     rather than guessed, regardless of what CMAKE_MODULE_PATH might
+//     actually contain for a real project.
+//   - The (file, sourceContext)-keyed traversal means a file reachable under
+//     multiple DIFFERENT verified contexts is fully re-explored under each —
+//     more thorough than the earlier canonical-path-only dedup, at the cost
+//     of potentially redundant re-scanning bounded by MaxNodes.
 package cmakegraph
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 )
@@ -150,11 +238,11 @@ type Status int
 const (
 	// StatusUnknown is the zero value and must never appear in a returned Edge.
 	StatusUnknown Status = iota
-	// StatusResolved means a concrete path was computed AND confirmed to exist.
+	// StatusResolved means a concrete, VERIFIED path was computed AND confirmed to exist.
 	StatusResolved
-	// StatusDangling means a concrete path was computed but the target is absent.
+	// StatusDangling means a concrete, VERIFIED path was computed but the target is absent.
 	StatusDangling
-	// StatusUnresolved means no concrete path could safely be computed; see Reason.
+	// StatusUnresolved means no concrete, safely-verified path could be computed; see Reason.
 	StatusUnresolved
 )
 
@@ -177,8 +265,9 @@ type Reason string
 
 const (
 	// ReasonNonStaticVariable: the argument references a ${...} variable (or
-	// $ENV{...}) this package does not know is safe to substitute — including
-	// the deliberately-unresolved ${CMAKE_CURRENT_SOURCE_DIR}.
+	// $ENV{...}, or $CACHE{...}) this package does not know is safe to
+	// substitute — including the deliberately-unresolved
+	// ${CMAKE_CURRENT_SOURCE_DIR}.
 	ReasonNonStaticVariable Reason = "non_static_variable"
 	// ReasonGeneratorExpression: the argument contains a $<...> generator
 	// expression, which is only meaningful at CMake generate time.
@@ -188,7 +277,10 @@ const (
 	// CMAKE_MODULE_PATH, which this package does not have access to.
 	ReasonModuleNameNotPath Reason = "module_name_not_path"
 	// ReasonParseError: the call's own argument syntax could not be safely
-	// extracted (empty argument, unterminated quote).
+	// extracted as a path — an empty argument list, an unterminated quote,
+	// CMake bracket-argument syntax (recognized but not decoded), or an
+	// argument containing a raw backslash (escape sequences are refused,
+	// never decoded — see the package doc).
 	ReasonParseError Reason = "parse_error"
 	// ReasonCyclic: the resolved target is already an ancestor of this call
 	// site on the current traversal path — a genuine circular reference.
@@ -199,6 +291,17 @@ const (
 	// ReasonOutsideWorkspace: the computed path, after symlink resolution,
 	// escapes the caller-supplied workspace root.
 	ReasonOutsideWorkspace Reason = "outside_workspace"
+	// ReasonDeferredMacroContext: the argument references
+	// ${CMAKE_CURRENT_LIST_DIR} from a call site lexically inside an open
+	// macro()/function() body, where the variable's true value depends on
+	// the invoking file at expansion time, not the defining file.
+	ReasonDeferredMacroContext Reason = "deferred_macro_context"
+	// ReasonUnverifiedSourceDir: a relative argument would need to resolve
+	// against CMAKE_CURRENT_SOURCE_DIR, but the current traversal context's
+	// source directory was never verified (e.g. an arbitrary *.cmake file
+	// scanned as an independent discovery root) — this package refuses to
+	// invent one.
+	ReasonUnverifiedSourceDir Reason = "unverified_source_dir"
 )
 
 // EdgeKind distinguishes the two directives this package tracks.
@@ -212,7 +315,7 @@ const (
 // Edge is one include()/add_subdirectory() call site discovered while
 // scanning a file, plus its resolution outcome.
 type Edge struct {
-	Kind   EdgeKind
+	Kind EdgeKind
 	// FromFile is the absolute, symlink-resolved path of the file containing the call.
 	FromFile string
 	// Line is the 1-based line number of the call's opening `(` in FromFile.
@@ -247,6 +350,16 @@ type Histogram struct {
 	ByReason   map[Reason]int
 }
 
+// UnscannedFile records a file this package could not read at all (byte-cap
+// trip, permission error, or a TOCTOU race after a successful Stat) — its
+// own outgoing edges are therefore known-missing from the Result, not
+// silently absent. Path is best-effort (absolute, symlink-resolved when
+// possible).
+type UnscannedFile struct {
+	Path   string
+	Reason string
+}
+
 // Result is the full output of one Walk or WalkTree call.
 type Result struct {
 	// Root is the absolute path this walk started from (a file for Walk's
@@ -256,17 +369,21 @@ type Result struct {
 	WorkspaceRoot string
 	Edges         []Edge
 	// Files lists every file this package actually opened and scanned
-	// (deduplicated, sorted, absolute+symlink-resolved paths).
+	// (deduplicated, sorted, absolute+symlink-resolved paths) — one entry
+	// per PHYSICAL file regardless of how many distinct source contexts it
+	// was explored under.
 	Files     []string
 	Histogram Histogram
-	// SkippedInStringLiteral counts include()/add_subdirectory()-shaped
-	// matches whose opening `(` fell inside a double-quoted string — a
-	// command name embedded in an unrelated string argument (e.g.
-	// vcpkg_replace_string(...)'s find/replace text), not a real directive.
-	// These produce NO Edge at all (see the package doc's D3 note); this
-	// counter is the only trace they leave, so a run's edge count is never
-	// silently inflated without visibility into why.
-	SkippedInStringLiteral int
+	// NodeCapTruncated is true iff at least one independent WalkTree root was
+	// refused admission because the shared MaxNodes budget was already
+	// exhausted (as opposed to a within-traversal ReasonDepthLimit edge).
+	NodeCapTruncated bool
+	// RootsSkippedByNodeCap counts how many independent roots were refused
+	// admission for that reason.
+	RootsSkippedByNodeCap int
+	// UnscannedFiles lists every file whose CONTENT could not be read (byte
+	// cap, permission error, race) — see UnscannedFile's doc.
+	UnscannedFiles []UnscannedFile
 }
 
 // Options bounds a walk. Zero-value fields fall back to the Default* constants.
@@ -325,25 +442,24 @@ func Walk(startFile, workspaceRoot string, opts Options) (*Result, error) {
 
 // WalkTree finds EVERY file under root matching one of entryNames and walks
 // each as an independent root, sharing ONE traversal state across all of
-// them — so a file is scanned at most once regardless of how many roots
-// would reach it, which is what guarantees the merged Result never contains
-// a duplicate edge (rather than merging N independent walks and de-duplicating
-// after the fact). workspaceRoot for every constituent walk is root itself.
+// them — so a file is scanned at most once PER DISTINCT SOURCE CONTEXT
+// regardless of how many roots would reach it. workspaceRoot for every
+// constituent walk is root itself.
 //
 // entryNames entries are either an exact basename (case-insensitive, e.g.
 // "CMakeLists.txt") or an extension pattern "*.ext" (case-insensitive, e.g.
 // "*.cmake"). Passing []string{"*.cmake", "CMakeLists.txt"} scans the WHOLE
 // tree's CMake-processable files as independent roots — the right choice for
 // a tree with no single top-level CMakeLists.txt (e.g. a vcpkg-style
-// overlay-ports tree, where the real graph lives across portfile.cmake AND
-// vcpkg's own toolchain/port-tweak *.cmake helper files, most of which no
-// portfile.cmake ever reaches directly). Passing []string{"portfile.cmake"}
-// reproduces the earlier, narrower "one root per port" behavior.
+// overlay-ports tree). A non-CMakeLists.txt root's source-dir context is
+// UNVERIFIED (see the package doc); passing []string{"portfile.cmake"}
+// reproduces the earlier, narrower "one root per port" behavior with the
+// same unverified-context treatment.
 //
 // Depth (MaxDepth) is bounded PER ROOT, same as a single Walk. MaxNodes is a
-// WHOLE-TREE bound shared across every root in this call (len of the shared
-// visited set), since the point of a total-node cap is bounding the overall
-// scan cost, not each root's slice of it.
+// WHOLE-TREE bound shared across every root in this call, enforced at ROOT
+// ADMISSION too (see Result.NodeCapTruncated) — not only when following an
+// edge within an already-admitted root.
 func WalkTree(root string, entryNames []string, opts Options) (*Result, error) {
 	if len(entryNames) == 0 {
 		return nil, errors.New("cmakegraph: entryNames must be non-empty")
@@ -397,17 +513,52 @@ func matchesEntry(name string, patterns []string) bool {
 	return false
 }
 
+// sourceContext is this package's tracked approximation of CMake's
+// CMAKE_CURRENT_SOURCE_DIR at one point in the traversal, plus whether that
+// approximation is VERIFIED (known with confidence) or only a fallback that
+// must not be used to resolve a bare-relative argument. See the package
+// doc's "Source-dir context must be VERIFIED, never invented" section.
+type sourceContext struct {
+	dir      string
+	verified bool
+}
+
+// visitKey identifies one (file, source-context) traversal node. Keying by
+// context as well as file path is what lets a file reachable under multiple
+// DIFFERENT verified contexts be explored under each, rather than a second
+// visit being silently suppressed by the first.
+type visitKey struct {
+	file string
+	ctx  sourceContext
+}
+
+// dedupCtx normalizes ctx for use as a visitKey. An UNVERIFIED context's dir
+// is never actually consulted by classifyArg (a bare-relative argument
+// refuses on !ctx.verified before ever reading ctx.dir), so two DIFFERENT
+// unverified contexts reaching the same file are operationally
+// indistinguishable — collapsing them to one shared key avoids redundant
+// re-scans that could only ever reproduce identical results, without
+// weakening the P1-3 fix for VERIFIED contexts (which remain fully
+// distinct, dir and all).
+func dedupCtx(ctx sourceContext) sourceContext {
+	if !ctx.verified {
+		return sourceContext{verified: false}
+	}
+	return ctx
+}
+
 // walker carries traversal state SHARED across every root walked in one Walk
-// or WalkTree call — this is what guarantees a file is scanned at most once
-// (and so its edges appear at most once) no matter how many roots reach it.
+// or WalkTree call.
 type walker struct {
-	opts              Options
-	workspaceRoot     string // absolute, NOT symlink-resolved (used for ${CMAKE_SOURCE_DIR} substitution)
-	realWorkspaceRoot string // symlink-resolved, used for the boundary check
-	visited           map[string]bool
-	files             map[string]bool
-	edges             []Edge
-	skippedInString   int
+	opts                  Options
+	workspaceRoot         string // absolute, NOT symlink-resolved (used for ${CMAKE_SOURCE_DIR} substitution)
+	realWorkspaceRoot     string // symlink-resolved, used for the boundary check
+	visited               map[visitKey]bool
+	files                 map[string]bool
+	edges                 []Edge
+	unscanned             []UnscannedFile
+	nodeCapTruncated      bool
+	rootsSkippedByNodeCap int
 }
 
 // newWalker validates workspaceRoot and constructs empty shared traversal state.
@@ -427,15 +578,19 @@ func newWalker(workspaceRoot string, opts Options) (*walker, error) {
 		opts:              opts.normalized(),
 		workspaceRoot:     absRoot,
 		realWorkspaceRoot: realRoot,
-		visited:           map[string]bool{},
+		visited:           map[visitKey]bool{},
 		files:             map[string]bool{},
 	}, nil
 }
 
-// walkRoot validates startFile and scans it as a fresh traversal root — UNLESS
-// it was already visited (as an earlier root, or reached via traversal from
-// one), in which case it is a no-op: its edges were already discovered.
-// Returns the absolute path of startFile.
+// walkRoot validates startFile and scans it as a fresh traversal root —
+// UNLESS admission is refused because the shared MaxNodes budget is already
+// exhausted (Result.NodeCapTruncated / RootsSkippedByNodeCap), or it was
+// already visited under the SAME (file, context) key. Its verified-ness is
+// CMakeLists.txt-based: a root literally named CMakeLists.txt is treated as
+// a genuine directory-scope root (own directory = CMAKE_CURRENT_SOURCE_DIR);
+// any other filename (an arbitrary *.cmake discovery root) is UNVERIFIED —
+// see the package doc. Returns the absolute path of startFile.
 func (w *walker) walkRoot(startFile string) (string, error) {
 	absStart, err := filepath.Abs(startFile)
 	if err != nil {
@@ -448,12 +603,20 @@ func (w *walker) walkRoot(startFile string) (string, error) {
 		return "", fmt.Errorf("cmakegraph: start file %s is a directory, want a file", absStart)
 	}
 	canonStart := w.canonicalize(absStart)
-	if w.visited[canonStart] {
+	verified := strings.EqualFold(filepath.Base(canonStart), "CMakeLists.txt")
+	ctx := sourceContext{dir: filepath.Dir(canonStart), verified: verified}
+	key := visitKey{file: canonStart, ctx: dedupCtx(ctx)}
+	if w.visited[key] {
 		return absStart, nil
 	}
-	w.visited[canonStart] = true
+	if len(w.visited) >= w.opts.MaxNodes {
+		w.nodeCapTruncated = true
+		w.rootsSkippedByNodeCap++
+		return absStart, nil
+	}
+	w.visited[key] = true
 	w.files[canonStart] = true
-	w.walkFile(absStart, filepath.Dir(canonStart), 0, []string{canonStart})
+	w.walkFile(absStart, ctx, 0, []string{canonStart})
 	return absStart, nil
 }
 
@@ -477,44 +640,80 @@ func (w *walker) result(root string) *Result {
 		}
 	}
 	return &Result{
-		Root:                   root,
-		WorkspaceRoot:          w.workspaceRoot,
-		Edges:                  w.edges,
-		Files:                  sortedFiles,
-		Histogram:              hist,
-		SkippedInStringLiteral: w.skippedInString,
+		Root:                  root,
+		WorkspaceRoot:         w.workspaceRoot,
+		Edges:                 w.edges,
+		Files:                 sortedFiles,
+		Histogram:             hist,
+		NodeCapTruncated:      w.nodeCapTruncated,
+		RootsSkippedByNodeCap: w.rootsSkippedByNodeCap,
+		UnscannedFiles:        w.unscanned,
 	}
 }
 
 // walkFile scans one file's content for include()/add_subdirectory() calls
-// and recurses into newly-resolved, in-budget, non-cyclic targets.
-// sourceDir is this package's internal (never textually substituted) tracked
-// approximation of CMAKE_CURRENT_SOURCE_DIR, used ONLY to resolve bare
-// (variable-free) add_subdirectory() targets. ancestors is the current DFS
-// path (canonical file paths) used for true-cycle detection — distinct from
-// the whole-run visited set, so a diamond re-include is never misreported as
-// a cycle.
-func (w *walker) walkFile(file, sourceDir string, depth int, ancestors []string) {
+// and recurses into newly-resolved, in-budget, non-cyclic targets. ctx is
+// this traversal path's current source context (see sourceContext).
+// ancestors is the current DFS path (canonical file paths, context-
+// independent — see the package doc) used for true-cycle detection.
+func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors []string) {
 	data, err := readBounded(file, w.opts.MaxFileBytes)
 	if err != nil {
-		// Cannot scan further. The edge that led here already recorded its
-		// own Resolved/Dangling verdict from filesystem facts alone; we just
-		// stop expanding the graph from this node (see package doc).
+		w.unscanned = append(w.unscanned, UnscannedFile{Path: w.canonicalize(file), Reason: err.Error()})
 		return
 	}
-	clean, quoted := preprocess(data)
 	canonSelf := w.canonicalize(file)
 	listDir := filepath.Dir(canonSelf)
 
-	calls, skipped := extractCalls(clean, quoted)
-	w.skippedInString += skipped
+	condDepth := 0
+	macroDepth := 0
+	for _, c := range scanTopLevelCommands(data) {
+		switch c.Name {
+		case "if":
+			condDepth++
+			continue
+		case "endif":
+			if condDepth > 0 {
+				condDepth--
+			}
+			continue
+		case "macro", "function":
+			macroDepth++
+			continue
+		case "endmacro", "endfunction":
+			if macroDepth > 0 {
+				macroDepth--
+			}
+			continue
+		}
 
-	for _, c := range calls {
-		line := lineOf(clean, c.Offset)
-		conditional := conditionalDepthBefore(clean, quoted, c.Offset) > 0
-		e := Edge{Kind: c.Kind, FromFile: canonSelf, Line: line, RawArg: c.RawArg, Conditional: conditional}
+		var kind EdgeKind
+		switch c.Name {
+		case "include":
+			kind = EdgeInclude
+		case "add_subdirectory":
+			kind = EdgeAddSubdirectory
+		default:
+			continue
+		}
 
-		candidate, reason, ok := classifyArg(c.Kind, c.RawArg, c.Malformed, listDir, sourceDir, w.workspaceRoot)
+		var rawArg string
+		malformed := c.Malformed
+		if !malformed {
+			var ok bool
+			rawArg, ok = firstArgument(data[c.ArgStart:c.ArgEnd])
+			malformed = !ok
+		}
+
+		e := Edge{
+			Kind:        kind,
+			FromFile:    canonSelf,
+			Line:        lineOf(data, c.NameOffset),
+			RawArg:      rawArg,
+			Conditional: condDepth > 0,
+		}
+
+		candidate, reason, ok := classifyArg(kind, rawArg, malformed, macroDepth > 0, listDir, ctx, w.workspaceRoot)
 		if !ok {
 			e.Status = StatusUnresolved
 			e.Reason = reason
@@ -531,17 +730,17 @@ func (w *walker) walkFile(file, sourceDir string, depth int, ancestors []string)
 		}
 		e.ResolvedPath = candidate
 
-		var targetFile, newSourceDir string
+		var targetFile string
 		var exists bool
-		switch c.Kind {
+		var newCtx sourceContext
+		switch kind {
 		case EdgeInclude:
 			if fi, statErr := os.Stat(candidate); statErr == nil && !fi.IsDir() {
 				exists = true
 				targetFile = candidate
 			}
-			newSourceDir = sourceDir
+			newCtx = ctx // include() never changes CMAKE_CURRENT_SOURCE_DIR
 		case EdgeAddSubdirectory:
-			newSourceDir = candidate
 			if fi, statErr := os.Stat(candidate); statErr == nil && fi.IsDir() {
 				cml := filepath.Join(candidate, "CMakeLists.txt")
 				if cfi, cerr := os.Stat(cml); cerr == nil && !cfi.IsDir() {
@@ -549,6 +748,12 @@ func (w *walker) walkFile(file, sourceDir string, depth int, ancestors []string)
 					targetFile = cml
 				}
 			}
+			// Reaching this point means `candidate` was computed either from
+			// an absolute variable or from an already-verified ctx (see
+			// classifyArg) — the child's own source dir is therefore now
+			// concretely known, regardless of how uncertain the traversal
+			// was before this edge.
+			newCtx = sourceContext{dir: candidate, verified: true}
 		}
 
 		if !exists {
@@ -558,28 +763,30 @@ func (w *walker) walkFile(file, sourceDir string, depth int, ancestors []string)
 		}
 
 		canonTarget := w.canonicalize(targetFile)
+		key := visitKey{file: canonTarget, ctx: dedupCtx(newCtx)}
 		switch {
 		case containsStr(ancestors, canonTarget):
 			e.Status = StatusUnresolved
 			e.Reason = ReasonCyclic
-		case w.visited[canonTarget]:
-			// Already scanned — either a diamond re-include from a sibling
-			// path, or this exact file was itself (or will be) walked as its
-			// own independent WalkTree root. Not a cycle; not re-scanned
-			// (its edges were already discovered exactly once).
+		case w.visited[key]:
+			// Already explored under this EXACT (file, context) — a diamond
+			// re-include/re-add from a sibling path under the same context.
+			// Not a cycle; not re-scanned (its edges were already
+			// discovered). A DIFFERENT context for the same file is NOT
+			// suppressed here (see visitKey's doc).
 			e.Status = StatusResolved
 		case depth+1 > w.opts.MaxDepth || len(w.visited) >= w.opts.MaxNodes:
 			e.Status = StatusUnresolved
 			e.Reason = ReasonDepthLimit
 		default:
 			e.Status = StatusResolved
-			w.visited[canonTarget] = true
+			w.visited[key] = true
 			w.files[canonTarget] = true
 			w.edges = append(w.edges, e)
 			nextAncestors := make([]string, len(ancestors)+1)
 			copy(nextAncestors, ancestors)
 			nextAncestors[len(ancestors)] = canonTarget
-			w.walkFile(targetFile, newSourceDir, depth+1, nextAncestors)
+			w.walkFile(targetFile, newCtx, depth+1, nextAncestors)
 			continue
 		}
 		w.edges = append(w.edges, e)
@@ -663,188 +870,35 @@ func readBounded(path string, maxBytes int64) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-// preprocess scans data ONCE, returning (a) a comment-stripped copy safe for
-// regex scanning — `# ... end-of-line` comments outside double quotes are
-// blanked to spaces, preserving byte length and newline positions so
-// offset/line math against the original file stays valid — and (b) a
-// parallel boolean mask, quoted[i], true iff byte i of the RETURNED clean
-// slice sits inside a double-quoted span in the source. Both share the same
-// quote-toggle state machine (an unescaped `"` toggles; `\"` does not).
-func preprocess(data []byte) (clean []byte, quoted []bool) {
-	clean = make([]byte, len(data))
-	copy(clean, data)
-	quoted = make([]bool, len(data))
-	inQuote := false
-	for i := 0; i < len(clean); i++ {
-		c := clean[i]
-		switch {
-		case c == '"' && (i == 0 || clean[i-1] != '\\'):
-			inQuote = !inQuote
-			quoted[i] = inQuote
-		case c == '#' && !inQuote:
-			for i < len(clean) && clean[i] != '\n' {
-				clean[i] = ' '
-				i++
-			}
-		default:
-			quoted[i] = inQuote
-		}
-	}
-	return clean, quoted
-}
-
-var commandRe = regexp.MustCompile(`(?i)\b(include|add_subdirectory)\s*\(`)
-var condRe = regexp.MustCompile(`(?i)\b(if|endif)\s*\(`)
-
-// rawCall is one lexically-discovered include()/add_subdirectory() call site.
-type rawCall struct {
-	Kind      EdgeKind
-	Offset    int // offset of the command-name start, used for line numbers
-	RawArg    string
-	Malformed bool // true when the call syntax could not be safely parsed
-}
-
-// extractCalls finds every include()/add_subdirectory() call in clean
-// (comment-stripped) content and extracts each one's first argument token. A
-// match whose opening `(` falls inside a double-quoted span per quoted (a
-// command name embedded in an unrelated string-literal argument, e.g.
-// vcpkg_replace_string(...)'s find/replace text — see the package doc's D3
-// note) is skipped entirely: no rawCall is produced for it, and skipped is
-// incremented instead.
-func extractCalls(clean []byte, quoted []bool) (calls []rawCall, skipped int) {
-	for _, loc := range commandRe.FindAllSubmatchIndex(clean, -1) {
-		nameStart, nameEnd := loc[2], loc[3]
-		name := strings.ToLower(string(clean[nameStart:nameEnd]))
-		var kind EdgeKind
-		switch name {
-		case "include":
-			kind = EdgeInclude
-		case "add_subdirectory":
-			kind = EdgeAddSubdirectory
-		default:
-			continue
-		}
-		openParen := loc[1] - 1 // loc[1] is the match end, right after '('
-		if openParen >= 0 && openParen < len(quoted) && quoted[openParen] {
-			skipped++
-			continue
-		}
-		closeIdx, ok := findMatchingParen(clean, openParen)
-		if !ok {
-			calls = append(calls, rawCall{Kind: kind, Offset: loc[0], Malformed: true})
-			continue
-		}
-		argText := string(clean[loc[1]:closeIdx])
-		tok, tokOK := firstToken(argText)
-		calls = append(calls, rawCall{Kind: kind, Offset: loc[0], RawArg: tok, Malformed: !tokOK})
-	}
-	return calls, skipped
-}
-
-// findMatchingParen returns the index of the ')' matching the '(' at
-// data[openIdx], skipping parens inside double-quoted spans. ok is false if
-// no matching close was found before EOF.
-func findMatchingParen(data []byte, openIdx int) (int, bool) {
-	depth := 0
-	inQuote := false
-	for i := openIdx; i < len(data); i++ {
-		c := data[i]
-		switch {
-		case c == '"' && (i == 0 || data[i-1] != '\\'):
-			inQuote = !inQuote
-		case inQuote:
-			// inside a quoted string; parens here don't count
-		case c == '(':
-			depth++
-		case c == ')':
-			depth--
-			if depth == 0 {
-				return i, true
-			}
-		}
-	}
-	return -1, false
-}
-
-// firstToken returns the first whitespace- or quote-delimited token in s,
-// stripping surrounding quotes. ok is false for an empty/whitespace-only
-// argument list or an unterminated quote.
-func firstToken(s string) (string, bool) {
-	s = strings.TrimLeft(s, " \t\r\n")
-	if s == "" {
-		return "", false
-	}
-	if s[0] == '"' {
-		for i := 1; i < len(s); i++ {
-			if s[i] == '"' && s[i-1] != '\\' {
-				return s[1:i], true
-			}
-		}
-		return "", false
-	}
-	if end := strings.IndexAny(s, " \t\r\n"); end >= 0 {
-		return s[:end], true
-	}
-	return s, true
-}
-
-// conditionalDepthBefore returns the if()/endif() nesting depth immediately
-// before offset, using a simple per-file if()=+1 / endif()=-1 counter. A
-// match whose opening `(` is inside a quoted string (per quoted — same guard
-// as extractCalls) is ignored, so an if(/endif( appearing inside an
-// unrelated string literal cannot corrupt the count. This does not model
-// elseif()/else() branch selection or function()/macro() bodies — see the
-// package doc's "Known, documented simplifications".
-func conditionalDepthBefore(clean []byte, quoted []bool, offset int) int {
-	depth := 0
-	for _, loc := range condRe.FindAllSubmatchIndex(clean, -1) {
-		if loc[0] >= offset {
-			break
-		}
-		openParen := loc[1] - 1
-		if openParen >= 0 && openParen < len(quoted) && quoted[openParen] {
-			continue
-		}
-		name := strings.ToLower(string(clean[loc[2]:loc[3]]))
-		if name == "if" {
-			depth++
-		} else {
-			depth--
-			if depth < 0 {
-				depth = 0
-			}
-		}
-	}
-	return depth
-}
-
-func lineOf(data []byte, offset int) int {
-	if offset > len(data) {
-		offset = len(data)
-	}
-	line := 1
-	for _, b := range data[:offset] {
-		if b == '\n' {
-			line++
-		}
-	}
-	return line
-}
+// --- classification ------------------------------------------------------
 
 // classifyArg applies the resolution precedence documented at the package
-// level and returns either a concrete candidate path (ok=true) or an
-// unresolved reason (ok=false, candidate=""). Whether the call is inside a
-// conditional block is NOT a resolution input here — it is recorded on the
-// Edge separately (Edge.Conditional) and never blocks path computation; see
-// the package doc's "Conditional calls" section.
-func classifyArg(kind EdgeKind, rawArg string, malformed bool, listDir, sourceDir, workspaceRoot string) (candidate string, reason Reason, ok bool) {
+// level and returns either a concrete, VERIFIED candidate path (ok=true) or
+// an unresolved reason (ok=false, candidate=""). deferredMacro is true when
+// this call site is lexically inside an open macro()/function() body (see
+// ReasonDeferredMacroContext). ctx is the CURRENT traversal source context
+// (see sourceContext) — required (and must be verified) to resolve a
+// bare-relative argument.
+func classifyArg(kind EdgeKind, rawArg string, malformed, deferredMacro bool, listDir string, ctx sourceContext, workspaceRoot string) (candidate string, reason Reason, ok bool) {
 	if malformed || strings.TrimSpace(rawArg) == "" {
+		return "", ReasonParseError, false
+	}
+	// P1-4: escape sequences are refused, never decoded — a decode mistake
+	// on a Windows-style path is exactly the false-Resolved class this
+	// package must not produce.
+	if strings.Contains(rawArg, `\`) {
 		return "", ReasonParseError, false
 	}
 	if strings.Contains(rawArg, "$<") {
 		return "", ReasonGeneratorExpression, false
 	}
-	if strings.Contains(rawArg, "$ENV{") {
+	// P1-2: ${CMAKE_CURRENT_LIST_DIR} is not purely lexical inside a
+	// macro()/function() body — refuse rather than substitute the DEFINING
+	// file's own directory.
+	if deferredMacro && strings.Contains(rawArg, "${CMAKE_CURRENT_LIST_DIR}") {
+		return "", ReasonDeferredMacroContext, false
+	}
+	if strings.Contains(rawArg, "$ENV{") || strings.Contains(rawArg, "$CACHE{") {
 		return "", ReasonNonStaticVariable, false
 	}
 
@@ -858,13 +912,16 @@ func classifyArg(kind EdgeKind, rawArg string, malformed bool, listDir, sourceDi
 		return "", ReasonModuleNameNotPath, false
 	}
 
-	base := listDir
-	if kind == EdgeAddSubdirectory {
-		base = sourceDir
-	}
 	p := substituted
 	if !filepath.IsAbs(p) {
-		p = filepath.Join(base, p)
+		// P1-1: a relative argument (no CMAKE_CURRENT_LIST_DIR/
+		// CMAKE_SOURCE_DIR was used) resolves against
+		// CMAKE_CURRENT_SOURCE_DIR for BOTH include() and add_subdirectory()
+		// — see the package doc. This requires a VERIFIED context (P1-3).
+		if !ctx.verified {
+			return "", ReasonUnverifiedSourceDir, false
+		}
+		p = filepath.Join(ctx.dir, p)
 	}
 	return filepath.Clean(p), "", true
 }
@@ -910,4 +967,264 @@ func substituteKnownVars(s, listDir, workspaceRoot string) (string, bool) {
 		i = start + end + 1
 	}
 	return b.String(), true
+}
+
+// --- the lexer: one structural pass --------------------------------------
+
+// commandInvocation is one TOP-LEVEL CMake command call discovered by
+// scanTopLevelCommands — one that is NOT nested inside another command's own
+// argument-list span.
+type commandInvocation struct {
+	Name       string // lowercased
+	NameOffset int    // offset of the command name's first character, used for line numbers
+	ArgStart   int    // offset just after '('
+	ArgEnd     int    // offset of the matching ')'
+	Malformed  bool   // true if no matching ')' was found before EOF
+}
+
+// scanTopLevelCommands performs ONE forward pass over data and returns every
+// top-level command invocation. See the package doc's "The lexer" section
+// for exactly what "top-level" excludes and why.
+func scanTopLevelCommands(data []byte) []commandInvocation {
+	var cmds []commandInvocation
+	i := 0
+	for i < len(data) {
+		c := data[i]
+		switch {
+		case isSpace(c):
+			i++
+		case c == '#':
+			if contentStart, eq, ok := matchBracketOpen(data, i+1); ok {
+				end := findBracketClose(data, contentStart, eq)
+				if end < 0 {
+					i = len(data)
+				} else {
+					i = end
+				}
+			} else {
+				for i < len(data) && data[i] != '\n' {
+					i++
+				}
+			}
+		case isIdentStart(c):
+			start := i
+			for i < len(data) && isIdentCont(data[i]) {
+				i++
+			}
+			name := strings.ToLower(string(data[start:i]))
+			j := i
+			for j < len(data) && isSpace(data[j]) {
+				j++
+			}
+			if j < len(data) && data[j] == '(' {
+				argStart := j + 1
+				argEnd, ok := scanArgList(data, argStart)
+				cmds = append(cmds, commandInvocation{
+					Name: name, NameOffset: start, ArgStart: argStart, ArgEnd: argEnd, Malformed: !ok,
+				})
+				if ok {
+					i = argEnd + 1
+				} else {
+					// Unbalanced call: stop scanning the rest of this file
+					// (see the package doc — no resync heuristic).
+					i = len(data)
+				}
+			}
+			// else: a bare identifier with no call following it; already
+			// advanced past it, nothing more to do.
+		default:
+			i++
+		}
+	}
+	return cmds
+}
+
+// scanArgList returns the index of the ')' matching the '(' whose contents
+// start at `start` (i.e. depth is already 1), correctly treating quoted
+// strings, bracket arguments, bracket/line comments, and escaped characters
+// as opaque — including any command-name-shaped text within them, which is
+// exactly what prevents message(include(x.cmake)) from being misread as a
+// real include(). ok is false if no matching close was found before EOF.
+func scanArgList(data []byte, start int) (int, bool) {
+	depth := 1
+	i := start
+	for i < len(data) {
+		c := data[i]
+		switch {
+		case c == '"':
+			end, ok := skipQuoted(data, i)
+			if !ok {
+				return len(data), false
+			}
+			i = end
+		case c == '\\':
+			i += 2
+		case c == '[':
+			if end, ok := skipBracketArg(data, i); ok {
+				i = end
+			} else {
+				i++ // a literal '[' outside any bracket-open sequence
+			}
+		case c == '#':
+			if contentStart, eq, ok := matchBracketOpen(data, i+1); ok {
+				end := findBracketClose(data, contentStart, eq)
+				if end < 0 {
+					return len(data), false
+				}
+				i = end
+			} else {
+				for i < len(data) && data[i] != '\n' {
+					i++
+				}
+			}
+		case c == '(':
+			depth++
+			i++
+		case c == ')':
+			depth--
+			i++
+			if depth == 0 {
+				return i - 1, true
+			}
+		default:
+			i++
+		}
+	}
+	return i, false
+}
+
+// skipQuoted returns the index JUST AFTER the closing quote, given
+// data[start] == '"', with CORRECT escape parity: a run of N consecutive
+// backslashes immediately before a '"' closes the string iff N is even (an
+// escaped backslash consumes two bytes atomically, so it can never itself
+// "protect" the following character from being read fresh). ok is false if
+// no unescaped closing quote is found before EOF.
+func skipQuoted(data []byte, start int) (int, bool) {
+	i := start + 1
+	for i < len(data) {
+		switch data[i] {
+		case '\\':
+			i += 2 // the escaped character (whatever it is) is consumed atomically
+		case '"':
+			return i + 1, true
+		default:
+			i++
+		}
+	}
+	return i, false
+}
+
+// matchBracketOpen reports whether data[i] begins a CMake bracket sequence
+// "[" "="*N "[" , returning the offset just after it (contentStart) and N.
+func matchBracketOpen(data []byte, i int) (contentStart, eqCount int, ok bool) {
+	if i < 0 || i >= len(data) || data[i] != '[' {
+		return 0, 0, false
+	}
+	j := i + 1
+	eq := 0
+	for j < len(data) && data[j] == '=' {
+		eq++
+		j++
+	}
+	if j < len(data) && data[j] == '[' {
+		return j + 1, eq, true
+	}
+	return 0, 0, false
+}
+
+// findBracketClose finds the closing "]" "="*eqCount "]" sequence starting
+// the search at `from`, returning the index JUST AFTER it, or -1 if not
+// found before EOF.
+func findBracketClose(data []byte, from, eqCount int) int {
+	if from < 0 || from > len(data) {
+		return -1
+	}
+	closer := "]" + strings.Repeat("=", eqCount) + "]"
+	idx := bytes.Index(data[from:], []byte(closer))
+	if idx < 0 {
+		return -1
+	}
+	return from + idx + len(closer)
+}
+
+// skipBracketArg skips a full bracket-argument span starting at data[i]=='['.
+// ok is false if data[i] does not actually begin a valid bracket-open
+// sequence, or if no matching close is found before EOF.
+func skipBracketArg(data []byte, i int) (int, bool) {
+	contentStart, eq, ok := matchBracketOpen(data, i)
+	if !ok {
+		return i, false
+	}
+	end := findBracketClose(data, contentStart, eq)
+	if end < 0 {
+		return len(data), false
+	}
+	return end, true
+}
+
+func isIdentStart(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func isIdentCont(c byte) bool {
+	return isIdentStart(c) || (c >= '0' && c <= '9')
+}
+
+func isSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n'
+}
+
+// firstArgument returns the first argument in argText (the raw bytes between
+// a call's outer parens), stripping surrounding quotes but NEVER decoding
+// escape sequences (the caller refuses any argument containing a backslash —
+// see classifyArg). ok is false for an empty/whitespace-only argument list,
+// an unterminated quote, or CMake bracket-argument syntax (recognized, but
+// its content is never extracted as a path — P1-4).
+func firstArgument(argText []byte) (string, bool) {
+	i := 0
+	for i < len(argText) && isSpace(argText[i]) {
+		i++
+	}
+	if i >= len(argText) {
+		return "", false
+	}
+	if argText[i] == '"' {
+		end, ok := skipQuoted(argText, i)
+		if !ok {
+			return "", false
+		}
+		return string(argText[i+1 : end-1]), true
+	}
+	if _, _, ok := matchBracketOpen(argText, i); ok {
+		return "", false
+	}
+	start := i
+	for i < len(argText) {
+		c := argText[i]
+		if isSpace(c) {
+			break
+		}
+		if c == '\\' {
+			i += 2
+			continue
+		}
+		i++
+	}
+	if i > len(argText) {
+		i = len(argText)
+	}
+	return string(argText[start:i]), true
+}
+
+func lineOf(data []byte, offset int) int {
+	if offset > len(data) {
+		offset = len(data)
+	}
+	line := 1
+	for _, b := range data[:offset] {
+		if b == '\n' {
+			line++
+		}
+	}
+	return line
 }
