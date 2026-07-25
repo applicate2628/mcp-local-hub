@@ -3,10 +3,9 @@ package gui
 
 import (
 	"fmt"
-	"net"
 	"net/http"
-	"net/url"
-	"strings"
+
+	"mcp-local-hub/internal/mcproute"
 )
 
 // httpHandler is the production entrypoint for all GUI HTTP traffic.
@@ -35,34 +34,19 @@ func (s *Server) requireAllowedHost(next http.Handler) http.Handler {
 	})
 }
 
+// allowedHost and allowedOrigin delegate to mcproute's port-bound guard
+// (internal/mcproute/originguard.go). This Server-side wrapper is the ONLY
+// GUI-process coupling the guard has (s.effectivePort()) — see the
+// Increment-1 decision record
+// (work-items/decisions/2026-07-25-mcp-data-plane-off-gui-onto-supervised-
+// front-daemon.md). Behavior is byte-identical to the pre-extraction
+// implementation; only the port-independent predicate logic moved.
 func (s *Server) allowedHost(hostport string) bool {
-	wantPort := s.effectivePort()
-	if wantPort <= 0 {
-		return false
-	}
-	host, port, err := net.SplitHostPort(hostport)
-	if err != nil {
-		// No explicit port: browsers omit :80 for default HTTP port.
-		// Accept the bare-host form only when the GUI is bound to port 80.
-		if wantPort != 80 {
-			return false
-		}
-		host = hostport
-	} else if port != fmt.Sprintf("%d", wantPort) {
-		return false
-	}
-	return strings.EqualFold(host, "localhost") || host == "127.0.0.1"
+	return mcproute.AllowedHost(hostport, s.effectivePort())
 }
 
 func (s *Server) allowedOrigin(origin string) bool {
-	u, err := url.Parse(origin)
-	if err != nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return false
-	}
-	if u.Path != "" && u.Path != "/" {
-		return false
-	}
-	return s.allowedHost(u.Host)
+	return mcproute.AllowedOrigin(origin, s.effectivePort())
 }
 
 func (s *Server) effectivePort() int {
