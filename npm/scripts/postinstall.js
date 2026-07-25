@@ -13,6 +13,25 @@
 // в local тоже"). This hook propagates the fresh binary into ~/.local/bin at
 // install time.
 //
+// GLOBAL-INSTALL-ONLY GUARD (load-bearing): this hook does real work ONLY when
+// npm is running a GLOBAL install (`npm install -g` / `npm i -g`). A local
+// install of this package into a project's own node_modules, or a TRANSITIVE
+// install where mcp-local-hub is merely a dependency of some other package,
+// must never mutate the developer's canonical ~/.local/bin PATH binary — that
+// would be a surprising supply-chain-adjacent side effect on a host that never
+// asked for mcphub at all (PR #585 / bot review). Detection reads
+// `process.env.npm_config_global`, which npm mirrors from its own resolved
+// `global` config into every lifecycle script's environment
+// (https://docs.npmjs.com/cli/v11/using-npm/config#environment-variables).
+// Empirically verified on this repo's toolchain host (npm 11.17.0, 2026-07-25):
+// `npm install -g <pkg>` sets `npm_config_global=true` for postinstall; a bare
+// local `npm install <pkg>` and an install where `<pkg>` is only a transitive
+// dependency both leave it unset. Comparing `npm_config_prefix` against
+// `npm_config_global_prefix` was considered and REJECTED as a detection
+// signal — the same probe showed both env vars hold the SAME value (the
+// global prefix) during a LOCAL install too, so that comparison cannot tell
+// the two cases apart.
+//
 // COPY-ONLY, NO DOWNLOAD: this script performs NO network I/O. It resolves the
 // platform binary npm ALREADY installed (the optionalDependency) and asks THAT
 // binary to copy ITSELF into the canonical path via `mcphub canonicalize` — a
@@ -21,12 +40,13 @@
 // different, far narrower risk profile than a supply-chain-vector "postinstall
 // that DOWNLOADS"; see the SECURITY note in bin/cli.js.
 //
-// FAIL-SAFE (load-bearing): this script ALWAYS exits 0. Any failure — no
-// platform package for this host, the optionalDependency not installed, the
-// binary failing to launch, or `mcphub canonicalize` exiting non-zero because
-// the running fleet holds the file — is reported as a one-line notice pointing
-// at `mcphub setup` and then swallowed. A canonicalize failure must NEVER break
-// `npm install`.
+// FAIL-SAFE (load-bearing): this script ALWAYS exits 0. Any failure — not a
+// global install, no platform package for this host, the optionalDependency
+// not installed, the binary failing to launch, or `mcphub canonicalize`
+// exiting non-zero because the running fleet holds the file — is reported as
+// a one-line notice and then swallowed (the global-install skip notice does
+// not point at `mcphub setup`; every other branch does). A canonicalize
+// failure must NEVER break `npm install`.
 //
 // --ignore-scripts: npm skips this script entirely; the ~/.local/bin binary is
 // then left as-is and the operator reconciles it manually with `mcphub setup`.
@@ -43,7 +63,21 @@ function notice(msg) {
   process.stderr.write(`mcp-local-hub: ${msg}\n`);
 }
 
+// npm sets npm_config_<key> environment variables mirroring its own resolved
+// config for every lifecycle script; `global` is a first-class npm config key
+// (the `-g`/`--global` flag) that has carried this exact env-var name across
+// every npm major version this project supports. See the file-header comment
+// above for the citation + empirical verification this relies on.
+function isGlobalNpmInstall() {
+  return process.env.npm_config_global === "true";
+}
+
 function canonicalize() {
+  if (!isGlobalNpmInstall()) {
+    notice("skipping ~/.local/bin canonicalize (not a global install)");
+    return;
+  }
+
   const key = `${process.platform}-${process.arch}`;
   const pkg = PACKAGE_BY_PLATFORM[key];
   if (!pkg) {
