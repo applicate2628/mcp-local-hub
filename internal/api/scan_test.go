@@ -1304,6 +1304,79 @@ func TestClassify_MCPFrontPort(t *testing.T) {
 	}
 }
 
+// TestClassify_MCPFrontPort_DoesNotSubtractCLIUnknownPortDegrade is the P2
+// falsifying guard for the adversarial-gate finding on sub-increment 2a: a
+// port-knowledge widening may only ADD certainty, never SUBTRACT the prior
+// "guiPort<=0 -> can't prove staleness, trust shape" degrade
+// IsLiveSerenaRouterURL always had for the CLI-unknown-GUI-port case.
+//
+// The regression: production always resolves mcpFrontPort via
+// MCPFrontPortOrDefault(), which NEVER returns 0 (falls back to
+// DefaultMCPFrontPort=9137). Passing that unconditionally into
+// IsLiveSerenaRouterURLAnyPort(endpoint, guiPort, mcpFrontPort) makes
+// mcpFrontPort ALWAYS "known", which — on the CLI scan path (guiPort==0,
+// e.g. `mcphub scan`, internal/cli/scan.go) — silently removed the
+// existing degrade for a client still on TODAY's live GUI port (:9125),
+// the default/dormant state on EVERY host until an operator explicitly
+// runs `mcphub install --reconcile-mcp-front`. That flips via-hub ->
+// external, and "external" is not in the pretty `mcphub scan` output's
+// bucket list, so the operator's serena row would vanish from the CLI
+// table entirely.
+//
+// Mutation-proven: temporarily reverting classify()'s effectiveMCPFrontPort
+// gate to pass mcpFrontPort straight through (the pre-fix behavior) makes
+// every case below fail — see the implementation note for the exact
+// mutation applied and reverted during verification.
+func TestClassify_MCPFrontPort_DoesNotSubtractCLIUnknownPortDegrade(t *testing.T) {
+	manifests := map[string]bool{"serena": true}
+	cases := []struct {
+		name  string
+		entry *ScanEntry
+		want  string
+	}{
+		{
+			// Dormant/default state: every host today, before any operator
+			// has run --reconcile-mcp-front. The CLI scan (guiPort=0) must
+			// still recognize this as via-hub, exactly as it did before
+			// mcp_front.port existed.
+			name:  "CLI scan, dormant default state (client still on live GUI port 9125) -> via-hub",
+			entry: &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp"}}},
+			want:  "via-hub",
+		},
+		{
+			// Same dormant state, but an INHERITED cell (mimocode import
+			// layer) — must classify via-hub-inherited, not via-hub and not
+			// external, mirroring finding #1's guard.
+			name:  "CLI scan, dormant default state, INHERITED cell -> via-hub-inherited",
+			entry: &ScanEntry{ClientPresence: map[string]ClientEntry{"mimocode": {Transport: "http", Endpoint: "http://127.0.0.1:9125/serena/mcp", Inherited: true}}},
+			want:  "via-hub-inherited",
+		},
+		{
+			// Post-reconcile symmetric case: an operator DID run
+			// --reconcile-mcp-front, the client now points at mcp_front.port
+			// (9137). The CLI scan (still guiPort=0 — it never knows the
+			// live GUI port) must ALSO recognize this as via-hub via the
+			// same shape-only degrade, not just the dormant-9125 case.
+			name:  "CLI scan, post-reconcile state (client on mcp_front.port 9137) -> via-hub",
+			entry: &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9137/serena/mcp"}}},
+			want:  "via-hub",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// guiPort:0 (CLI-unknown, matches internal/cli/scan.go's
+			// ScanOpts{} omission) + mcpFrontPort:9137 (what
+			// MCPFrontPortOrDefault() ALWAYS resolves to in production,
+			// persisted or default) — the exact combination production
+			// passes on every un-reconciled host today.
+			got := classify(tc.entry, "serena", manifests, []int{9121}, 0, 9137)
+			if got != tc.want {
+				t.Fatalf("classify(serena, guiPort=0, mcpFrontPort=9137) = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // firstPerSessionServer returns a deterministic name known to live in
 // perSessionServers, so TestClassify does not hardcode a value that
 // could later rotate as that list is edited.

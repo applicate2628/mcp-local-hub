@@ -2025,6 +2025,33 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 	if perSessionServers[name] {
 		return "per-session"
 	}
+	// P2 fix (adversarial-gate finding on sub-increment 2a): a port-
+	// knowledge widening may only ADD certainty, never SUBTRACT a prior
+	// degrade. IsLiveSerenaRouterURLAnyPort's own "all-ports-unknown ->
+	// degrade to shape-only" rule requires EVERY supplied port to be <=0 —
+	// but mcpFrontPort is caller-resolved via MCPFrontPortOrDefault(), which
+	// NEVER returns 0 (it falls back to DefaultMCPFrontPort). So on the CLI
+	// scan path (guiPort==0, the caller has NO live-port context at all),
+	// mcpFrontPort alone was unconditionally making the port "known",
+	// silently REMOVING the pre-2a degrade for the CLI's most common case: a
+	// serena client still on today's live GUI port (:9125), which is the
+	// default/dormant state on EVERY host until an operator explicitly runs
+	// `mcphub install --reconcile-mcp-front`. That misclassified via-hub as
+	// external, and external is not in the pretty `mcphub scan` output
+	// bucket list (internal/cli/scan.go's scanStatusBuckets) — the
+	// operator's serena row vanished from the CLI table entirely.
+	//
+	// Fix: mcpFrontPort only gets to act as a genuine second known-live-port
+	// candidate when guiPort is ALSO known (guiPort>0 — the GUI's own scan
+	// call sites, which always pass s.Port()). When guiPort<=0, treat
+	// mcpFrontPort as unknown too, restoring the exact pre-2a degrade for
+	// the CLI path (any serena-router-shaped URL is trusted, on ANY port,
+	// dormant :9125 or post-reconcile :9137 alike — matching
+	// IsLiveSerenaRouterURL's own single-argument guiPort<=0 contract).
+	effectiveMCPFrontPort := mcpFrontPort
+	if guiPort <= 0 {
+		effectiveMCPFrontPort = 0
+	}
 	hasHub := false
 	hasStdio := false
 	// hasRemoteExternal: at least one client routes this server through a
@@ -2064,7 +2091,7 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 	for _, c := range e.ClientPresence {
 		if c.Transport == "http" && clients.IsHubHTTPURL(c.Endpoint) {
 			switch {
-			case IsSerenaServer(name) && IsLiveSerenaRouterURLAnyPort(c.Endpoint, guiPort, mcpFrontPort):
+			case IsSerenaServer(name) && IsLiveSerenaRouterURLAnyPort(c.Endpoint, guiPort, effectiveMCPFrontPort):
 				// serena's canonical client URL is the /serena/mcp router on
 				// EITHER the LIVE GUI port OR the settings-owned mcp_front.port
 				// (sub-increment 2a) — recognize both as via-hub regardless of
@@ -2129,7 +2156,7 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 				// (sub-increment 2a). A stale or absent relay --url should
 				// remain re-migratable rather than looking hub-managed while
 				// the client dials a dead port.
-				if IsLiveSerenaRouterURLAnyPort(c.RelayURL, guiPort, mcpFrontPort) {
+				if IsLiveSerenaRouterURLAnyPort(c.RelayURL, guiPort, effectiveMCPFrontPort) {
 					hasHub = true
 				} else {
 					hasRemoteExternal = true
