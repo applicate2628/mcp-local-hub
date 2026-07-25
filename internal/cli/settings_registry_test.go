@@ -315,6 +315,62 @@ func TestMain(m *testing.M) {
 		runForensicsSinkCrashChild(stateDir)
 	}
 
+	// Built-in route-daemon spawn fast-path (Increment 1b,
+	// work-items/decisions/2026-07-25-supervisor-builtin-singleton-daemon.md).
+	// ensureBuiltinRouteDaemonAtStartup now seeds a real SupervisorDaemon row
+	// (Command=canonicalMcphubPath(), Args=["route","--port",...]) into
+	// supervisor-intent.json on EVERY runSupervise cold start — including
+	// inside any test that exercises the real command (newSuperviseCmd /
+	// runSupervise) WITHOUT stubbing reconcileSpawnFn via
+	// setReconcileSpawnFnForTest. In this test binary, canonicalMcphubPath()
+	// resolves to THIS binary, so the production spawn closure's
+	// `exec.Command(cmdPath, "route", "--port", <port>)` launches THIS test
+	// binary with argv[1]=="route" — a bare non-flag positional arg the
+	// `flag` package stops parsing at, so `go test`'s own generated main()
+	// would fall back to its DEFAULT flags (no `-test.run` filter) and re-run
+	// the ENTIRE package's test suite recursively inside what is supposed to
+	// be a lightweight spawned child. Unlike the two sentinel-gated helpers
+	// above (deliberate, explicitly-invoked test doubles), this path is an
+	// ordinary REAL descriptor reaching the REAL production spawn closure —
+	// so it is gated on the descriptor's own fixed, deterministic argv shape
+	// rather than an opt-in env sentinel. Mirrors the same "exit immediately,
+	// never call m.Run()" shape as the two fast-paths above.
+	if len(os.Args) >= 2 && os.Args[1] == "route" {
+		os.Stderr.WriteString("internal/cli test binary invoked with argv[1]==\"route\" " +
+			"(the built-in route daemon's spawn argv) — exiting immediately instead of " +
+			"recursively running the test suite\n")
+		os.Exit(0)
+	}
+
+	// Package-wide safe default for reconcileSpawnFn (Increment 1b). Before
+	// ensureBuiltinRouteDaemonAtStartup existed, supervisor-intent.json was
+	// ALWAYS empty in every test's fresh state dir, so runSupervise's initial
+	// reconcile pass never had anything to spawn and reconcileSpawnFn==nil
+	// (→ falls back to the REAL production spawn closure, supervise.go's
+	// `if spawnFn == nil { spawnFn = makeProductionSpawnFnWithStatePath(...) }`)
+	// was dead code for every test that doesn't explicitly stub it. Now the
+	// built-in route daemon row is ALWAYS seeded, so any test that exercises
+	// the real command (newSuperviseCmd / runSupervise) without calling
+	// setReconcileSpawnFnForTest reaches a REAL exec.Command(canonicalMcphubPath(),
+	// "route", "--port", ...) — i.e. a real child process, real Job-Object
+	// lifecycle, and a real (fixed, shared) port bind, none of which any such
+	// test was written to expect or tear down. The argv fast-path above closes
+	// the worst case (the child recursively re-running this whole suite); this
+	// default closes the rest of the class (child-process lifecycle/handle-
+	// release races against the test's own tempdir cleanup, and a fixed-port
+	// bind that a genuinely concurrent test run could collide on) by making
+	// the SAME default runSupervise already falls back to for a nil
+	// reconcileSpawnFn a harmless no-op instead of the real production spawn,
+	// UNLESS a test explicitly opts in via setReconcileSpawnFnForTest (which
+	// every existing spawn-fan-out test in supervise_reconcile_wiring_test.go
+	// already does, overriding this default with its own fake and restoring
+	// to it afterward — this default is invisible to those tests). No
+	// existing test relied on reconcileSpawnFn==nil reaching production
+	// (verified: none did, because until now nothing was ever in the intent
+	// to spawn), so this changes no test's observed behavior except
+	// neutralizing the newly-introduced real-spawn hazard.
+	reconcileSpawnFn = func(api.SupervisorDaemon) error { return nil }
+
 	api.EnableSupervisorIPCTestPipeIsolation()
 
 	// stateDirFunc ships env-free in production (productionStateDir →

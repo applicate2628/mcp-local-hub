@@ -888,6 +888,20 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		})
 		return startupErr
 	}
+
+	// Increment 1b (work-items/decisions/2026-07-25-supervisor-builtin-
+	// singleton-daemon.md): ensure the built-in `mcphub route` front daemon's
+	// reserved row exists in supervisor-intent.json BEFORE the initial
+	// reconcile plan is built, so this cold start's own reconcile pass spawns
+	// it like any other daemon — not just the NEXT restart. The reassignment
+	// is load-bearing, not cosmetic: on a genuinely fresh host `intent` is nil
+	// here (loadIntentFiles found no supervisor-intent.json yet), and the
+	// initial-reconcile call further below is itself gated on `intent !=
+	// nil` — so this MUST replace `intent` with the (possibly
+	// newly-allocated) returned value, not just call the seeder for its
+	// side effect and keep using the old (possibly nil) local variable.
+	intent = ensureBuiltinRouteDaemonAtStartup(stateDir, intent, events)
+
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
 	runtimeTracker, currentRunning, runningPIDs, stateErr := loadSupervisorStartupRuntime(stateDir)
 	if stateErr != nil {
@@ -2463,6 +2477,112 @@ func hasUnmergedActiveLegacyStops(supervisorIntent *api.SupervisorIntentFile, da
 		}
 	}
 	return false
+}
+
+// ensureBuiltinRouteDaemonAtStartup ensures the reserved built-in
+// `mcphub route` front daemon row exists (and stays canonical) in
+// supervisor-intent.json, per work-items/decisions/2026-07-25-supervisor-
+// builtin-singleton-daemon.md. It is a startup seeder ONLY — it does not
+// spawn, reconcile, or restart anything; it just guarantees the descriptor
+// api.EnsureBuiltinRouteDaemon builds is durably on disk before the reconcile
+// plan and the 60s IntentWatcher re-read (which would otherwise orphan-drop
+// an in-memory-only row) ever see it.
+//
+// intent is the already-loaded *api.SupervisorIntentFile this cold start is
+// about to feed into reconcile. It returns the (possibly newly-allocated)
+// intent with the row applied — the CALLER MUST reassign its own `intent`
+// variable to the return value, not just pass its existing pointer and
+// assume in-place mutation: on a genuinely fresh host (no supervisor-intent.json
+// on disk yet) loadIntentFiles returns a nil intent, and runSupervise's own
+// initial-reconcile call is gated on `if intent != nil` (supervise.go, well
+// below this call site) — a nil-in-nil-out no-op here would silently skip
+// seeding the row on exactly the first-ever boot this feature most needs to
+// cover, deferring it to the next 60s IntentWatcher poll instead of this
+// cold start's own first reconcile pass. Returning a freshly-allocated
+// &api.SupervisorIntentFile{Version: 1} for that case closes the gap.
+//
+// Mutating (or allocating) intent here means THIS start's own first
+// reconcile pass already sees the row, not just the next restart. The
+// persist step re-applies the same idempotent upsert against a FRESH
+// flock-held read (MutateSupervisorIntentIfChanged), so a concurrent writer
+// (e.g. an install running at the same moment) can never lose this row or
+// have this row clobber it.
+//
+// A resolution or persist failure is reported via a warn event
+// (builtin-route-ensure-failed) and otherwise swallowed: the route daemon
+// simply won't auto-spawn this session (no worse than before Increment 1b),
+// but the supervisor's own startup must not fail loud over a single
+// best-effort seeding step for an always-secondary daemon. On a resolution
+// failure the ORIGINAL intent (possibly nil) is returned unchanged, so a
+// pre-existing nil-intent-skips-reconcile behavior is preserved exactly —
+// this seeder never turns a real failure into a fabricated non-nil intent.
+func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIntentFile, events *api.SupervisorEventLog) *api.SupervisorIntentFile {
+	supervisorIntentPath := filepath.Join(stateDir, "supervisor-intent.json")
+
+	cmdPath := canonicalMcphubPath()
+	if cmdPath == "" {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "builtin-route-ensure-failed",
+			Body: map[string]any{
+				"err":  "resolve mcphub binary path (os.Executable) failed",
+				"path": supervisorIntentPath,
+			},
+		})
+		return intent
+	}
+	if intent == nil {
+		intent = &api.SupervisorIntentFile{Version: 1}
+	}
+	port := DefaultRouteDaemonPort
+
+	hadRow := false
+	for _, d := range intent.Daemons {
+		if d.TaskName == api.BuiltinRouteTaskName {
+			hadRow = true
+			break
+		}
+	}
+
+	changed := api.EnsureBuiltinRouteDaemon(intent, cmdPath, port)
+	action := "unchanged"
+	if changed {
+		if hadRow {
+			action = "replaced"
+		} else {
+			action = "added"
+		}
+	}
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: "info",
+		Source:   "lifecycle",
+		Event:    "builtin-route-ensured",
+		TaskName: api.BuiltinRouteTaskName,
+		Body: map[string]any{
+			"action": action,
+			"port":   port,
+		},
+	})
+	if !changed {
+		return intent
+	}
+
+	if err := api.MutateSupervisorIntentIfChanged(supervisorIntentPath, func(f *api.SupervisorIntentFile) (bool, error) {
+		return api.EnsureBuiltinRouteDaemon(f, cmdPath, port), nil
+	}); err != nil {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "builtin-route-ensure-failed",
+			TaskName: api.BuiltinRouteTaskName,
+			Body: map[string]any{
+				"err":  err.Error(),
+				"path": supervisorIntentPath,
+			},
+		})
+	}
+	return intent
 }
 
 // loadIntentFiles attempts to read the supervisor-intent.json and
