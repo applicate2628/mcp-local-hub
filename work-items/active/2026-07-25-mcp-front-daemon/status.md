@@ -95,7 +95,11 @@ internal ultracode gate now; hold merge.
       sentinel-gated fast-paths) plus the root fix — `reconcileSpawnFn`
       defaults to a safe no-op for the whole test binary unless a test opts in
       via `setReconcileSpawnFnForTest` (verified zero existing tests relied on
-      the nil-default reaching production). `TestSuperviseCommand_StatusIPC_ReconcileReady`'s
+      the nil-default reaching production — TRUE in isolation, but see the
+      2026-07-25 adversarial-gate correction below: this claim did NOT cover
+      the SEPARATE effect of route seeding itself on tests that install their
+      OWN fake spawn closure, which the nil-default is irrelevant to).
+      `TestSuperviseCommand_StatusIPC_ReconcileReady`'s
       stale "daemons array is always empty" assertion updated to match the new,
       intended behavior (exactly one entry: the built-in route daemon).
       Probe (advisory): read `serena_router.go`/`lsp_router.go`'s forward path —
@@ -129,6 +133,77 @@ internal ultracode gate now; hold merge.
       3a1d265f (S4), fa4b53de (S5), 8de7a630 (adjacent-finding bug doc),
       621d6f0a (decision record). NOT pushed — held for Tuesday's bot per the
       constraint above.
+- [x] **Adversarial gate finding (independent Opus reviewer, 2026-07-25) —
+      BLOCKING P1, fixed.** The 0ab0ffc7 verification pass scoped its
+      `internal/cli` `-run` filter to dodge the documented flaky/crashy full
+      sweep, and that filter happened to exclude 3 cardinality/timing-sensitive
+      tests in `supervise_reconcile_wiring_test.go` that install their OWN
+      fake spawn closure (NOT shielded by the TestMain `reconcileSpawnFn`
+      no-op default, since they override it): `TestRunSupervise_
+      SpawnsDaemonsFromIntent` (asserted exactly 1 spawn, got 2),
+      `TestRunSupervise_NoIntentNoSpawn` (asserted 0 spawns, got 1 — route),
+      `TestRunSupervise_ReconcileReadyBeforeSpawnCompletes` (fake's
+      unconditional `close(spawnEntered)` double-closed on the 2nd spawn call
+      → panic, crashing the whole test binary). All three deterministic
+      failures, confirmed by the adversarial gate running the suite
+      un-narrowed.
+      **P2 correction (also raised by the gate):** 0ab0ffc7's commit message
+      claim "this changes zero tests' observed behavior... none relied on the
+      nil-default" was TRUE only for the `reconcileSpawnFn` TestMain default
+      in isolation; it did not account for route SEEDING itself breaking
+      these 3 tests, which were never run as part of that verification. See
+      the correction language above (line ~97) and commit 7c3acbf6's message
+      for the full accounting.
+      **Fix (architect/lead decision, Candidate B):** one documented
+      test-only seam — `builtinRouteSeedingDisabledForTest` (package var) +
+      `setBuiltinRouteSeedingDisabledForTest() (restore func)` in
+      `internal/cli/supervise.go`, mirroring `setReconcileSpawnFnForTest`,
+      honored at the top of `ensureBuiltinRouteDaemonAtStartup`. Default
+      FALSE (production: seeding ON). Applied surgically to exactly the 3
+      tests above (each carries a comment explaining the suppression and
+      pointing at where route's own behavior is covered instead) — NOT a
+      global TestMain default, so any other/future wiring test still sees
+      route seeding ON by default.
+      Also: O1 (advisory) — code comment in `ensureBuiltinRouteDaemonAtStartup`
+      documenting the accepted degrade-to-non-durable path when
+      `MutateSupervisorIntentIfChanged` fails (in-memory intent carries
+      route this session; disk doesn't; next 60s IntentWatcher poll may reap
+      it as an orphan, repeating each restart until the write failure
+      clears — warn-surfaced, rare, accepted as-is). O2 (advisory) — reworded
+      the `TestMain` `argv[1]=="route"` fast-path's comment from "necessary"
+      to "defense-in-depth" (the `reconcileSpawnFn` no-op default already
+      makes the recursive-exec path unreachable via the normal
+      `runSupervise` path; the argv guard is a second, independent layer for
+      a hypothetical future test constructing the production spawn closure
+      directly).
+      **Full-suite re-verification (this time un-narrowed, per the gate's
+      instruction):**
+      - `go build ./...` + `go vet ./...` clean.
+      - `go test -count=10 -run '^TestRunSupervise_(SpawnsDaemonsFromIntent|
+        NoIntentNoSpawn|ReconcileReadyBeforeSpawnCompletes)$'
+        ./internal/cli/...` → 30/30 individual PASS (10 iterations × 3
+        tests), zero panics, zero "close of closed channel".
+      - `go test -count=1 ./internal/api/` → clean (exit 0).
+      - `go test -count=1 -skip
+        'TestCleanupAggressive_IncludeClassFlagOverridesWithWarning'
+        ./internal/cli/` → 13 failures, ALL pre-existing and unrelated,
+        confirmed via `git stash -u` against the pre-fix commit tip:
+        11× the documented "`C:\mcphub.exe` missing" host-env class
+        (`TestF1_*`/`TestF3_*`/`TestRealloc_*`) the coordinator named; 2×
+        a previously-undocumented (independently found + verified by this
+        implementer, NOT named by the coordinator) nondeterministic Windows
+        TempDir-cleanup race (`TestF1_GateClearedClearedOnSettle`,
+        `TestSuperviseCommand_AcquiresLockAndExitsOnSignal`), confirmed
+        pre-existing (reproduces on the untouched tip under a DIFFERENT test
+        name each run) and confirmed NOT route-caused (both pass 5/5 in
+        isolation). Zero deterministic route-caused failures remain.
+      - The 1 known pre-existing crash
+        (`TestCleanupAggressive_IncludeClassFlagOverridesWithWarning`,
+        `findWindowsExeExtensionEnd` index-out-of-range, filed in this
+        branch's history, reportedly already fixed on branch #587) excluded
+        via `-skip` per the close condition; not re-verified against #587
+        (outside this worktree).
+      Commit: 7c3acbf6.
 - [ ] HOLD merge for Tuesday's bot.
 
 ## Review verdict (Opus architecture-reviewer, 2026-07-25) — REVISE
