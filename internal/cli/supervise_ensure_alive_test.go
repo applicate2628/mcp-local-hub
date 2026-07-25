@@ -61,6 +61,13 @@ func TestEnsureAlive_LiveLock_NoOp(t *testing.T) {
 	if running, _, perr := api.SupervisorRunningUnderStateDir(stateDir); perr != nil || !running {
 		t.Fatalf("precondition: probe must report running with the lock held; got running=%v err=%v", running, perr)
 	}
+	// CORRECTION #5 (test isolation): Part B's headless-fleet recovery added a
+	// guiOwnerAliveFn() call to the `if running` branch. Without this fake,
+	// this test would fall through to the REAL probeGUIOwnerAlive and probe
+	// the developer's actual %LOCALAPPDATA% pidport — the fleet-wipe-class
+	// incident this file's header (:26-28) warns about. GUI-alive keeps this
+	// test on the pre-existing "supervisor running; no action" no-op path.
+	liveGUIOwner(t, 9999, 9125)
 
 	var relaunches int32
 	restoreSeam := setLivenessRelaunchFnForTest(func() error {
@@ -89,7 +96,21 @@ func TestEnsureAlive_LiveLock_NoOp(t *testing.T) {
 // counterpart below) so the real pidport is never probed.
 func noLiveGUIOwner(t *testing.T) {
 	t.Helper()
-	restore := setGUIOwnerAliveFnForTest(func() (bool, int) { return false, 0 })
+	restore := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return false, 0, 0 })
+	t.Cleanup(restore)
+}
+
+// liveGUIOwner installs the GUI-incumbent probe seam reporting a live GUI
+// owner at the given pid/port. Every test that holds the supervisor lock
+// (running=true) and drives runEnsureAlive MUST install this (or
+// noLiveGUIOwner) so the headless-fleet branch added alongside this helper
+// never falls through to the REAL probeGUIOwnerAlive and touches the
+// developer's actual %LOCALAPPDATA% pidport (the same §11.10 fleet-wipe
+// safety this file's header already established for the supervisor-down
+// side).
+func liveGUIOwner(t *testing.T, pid, port int) {
+	t.Helper()
+	restore := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return true, pid, port })
 	t.Cleanup(restore)
 }
 
@@ -146,7 +167,7 @@ func TestEnsureAlive_FreeLock_LiveGUIOwner_RelaunchesStandalone(t *testing.T) {
 	}
 
 	// A live GUI owner IS present (the dead-child-under-live-owner topology).
-	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int) { return true, 4242 })
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return true, 4242, 0 })
 	defer restoreGUI()
 
 	var standaloneCalls, autostartCalls int32
@@ -191,7 +212,7 @@ func TestEnsureAlive_FreeLock_LiveGUIOwner_StandaloneRelaunchFails(t *testing.T)
 	if running, _, perr := api.SupervisorRunningUnderStateDir(stateDir); perr != nil || running {
 		t.Fatalf("precondition: probe must report not-running; got running=%v err=%v", running, perr)
 	}
-	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int) { return true, 4242 })
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return true, 4242, 0 })
 	defer restoreGUI()
 
 	restoreStandalone := setStandaloneRelaunchFnForTest(func() error {
@@ -266,6 +287,11 @@ func TestEnsureAlive_Falsification_HealthyNeverRelaunches(t *testing.T) {
 		t.Fatalf("acquire supervisor lock: %v", err)
 	}
 	defer lk.Release()
+	// CORRECTION #5 (test isolation): see TestEnsureAlive_LiveLock_NoOp's
+	// identical fix above — without this fake, Part B's guiOwnerAliveFn()
+	// call on the `if running` branch would probe the developer's real
+	// %LOCALAPPDATA% pidport on every one of the ticks below.
+	liveGUIOwner(t, 9999, 9125)
 
 	var relaunches int32
 	restoreSeam := setLivenessRelaunchFnForTest(func() error {
@@ -318,6 +344,182 @@ func TestEnsureAlive_RelaunchFailure_StillExitsZero(t *testing.T) {
 	// Durable observability (PR #283 review P3-d): a chronically-failing
 	// relaunch must be visible despite Task Scheduler discarding stdout.
 	assertSupervisorEvent(t, stateDir, "liveness-relaunch-failed")
+}
+
+// ---------------------------------------------------------------------------
+// Part B falsification suite: headless-fleet recovery (supervisor alive, GUI
+// owner dead). Each test's doc comment names the exact mutation it detects.
+// ---------------------------------------------------------------------------
+
+// rewriteEnsureAliveSupervisorLockOwnerStartedAt overwrites the ALREADY-HELD
+// supervisor.lock's owner sidecar with a fabricated StartedAt, without
+// releasing the flock — SupervisorRunningUnderStateDir only inspects the
+// flock (never the sidecar content) to decide running=true/false, so this
+// lets a test control the boot-grace suppressor's uptime input independently
+// of when AcquireSupervisorLock itself ran. The sidecar write goes through
+// its own lock file (<path>.owner.json.lock), distinct from the held
+// supervisor.lock.lock, so it does not contend with the caller's held lock.
+func rewriteEnsureAliveSupervisorLockOwnerStartedAt(t *testing.T, stateDir string, startedAt time.Time) {
+	t.Helper()
+	lockPath := filepath.Join(stateDir, "supervisor.lock")
+	owner := api.SupervisorLockOwner{PID: os.Getpid(), StartedAt: startedAt.UTC().Format(time.RFC3339Nano)}
+	if err := api.WriteStateFileAtomic(lockPath+".owner.json", owner); err != nil {
+		t.Fatalf("rewrite supervisor.lock owner sidecar: %v", err)
+	}
+}
+
+// TestEnsureAlive_HeadlessFleet_RelaunchesGUI covers the headless-fleet
+// class this insertion exists for: the supervisor holds its flock (running)
+// but no live GUI owner holds the pidport lock, the supervisor is well past
+// its boot-grace window, and no restart-v3 handoff marker exists. The action
+// MUST relaunch the GUI owner exactly once via the SAME seam genuine
+// owner-death already uses, and MUST record both the detection and the
+// relaunch as durable events.
+//
+// MUTATION: revert the `if running` insertion (supervise_ensure_alive.go)
+// back to the bare no-op — guiOwnerAliveFn is never consulted, the relaunch
+// seam is never called, and this test's "want exactly 1" assertion fails.
+func TestEnsureAlive_HeadlessFleet_RelaunchesGUI(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	// Well past ensureAliveHeadlessFleetBootGrace (45s) so the boot-grace
+	// suppressor does not mask the relaunch this test is proving.
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+
+	// GUI is dead: guiOwnerAliveFn reports a stale (but non-zero, for
+	// realism) pid/port recorded in the last pidport write.
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return false, 5555, 9125 })
+	defer restoreGUI()
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v (must always return nil / exit 0)", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 1 {
+		t.Errorf("relaunch seam called %d times on a headless fleet; want exactly 1", got)
+	}
+	if !strings.Contains(out.String(), "headless fleet") || !strings.Contains(out.String(), "relaunched GUI owner") {
+		t.Errorf("output should report the headless-fleet relaunch; got %q", out.String())
+	}
+	assertSupervisorEvent(t, stateDir, "gui-headless-fleet-detected")
+	assertSupervisorEvent(t, stateDir, "liveness-relaunched-gui-headless-fleet")
+}
+
+// TestEnsureAlive_HeadlessFleet_BootGraceSuppresses covers the boot-grace
+// suppressor: the supervisor's own StartedAt is fresh (well inside
+// ensureAliveHeadlessFleetBootGrace), so even with GUI reported dead the
+// action MUST NOT relaunch this tick.
+//
+// MUTATION: delete the boot-grace check (or its uptime comparison) in
+// runEnsureAliveHeadlessFleet — the action falls through to the relaunch
+// unconditionally and this test's "want 0" assertion fails.
+func TestEnsureAlive_HeadlessFleet_BootGraceSuppresses(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	// StartedAt defaults to "now" (AcquireSupervisorLock's own write) — well
+	// inside the 45s boot-grace window. No rewrite needed.
+
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return false, 5555, 9125 })
+	defer restoreGUI()
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v (must always return nil / exit 0)", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Errorf("relaunch seam called %d times inside the boot-grace window; want 0", got)
+	}
+	if !strings.Contains(out.String(), "boot-grace") {
+		t.Errorf("output should report the boot-grace suppression; got %q", out.String())
+	}
+	assertSupervisorEvent(t, stateDir, "gui-headless-fleet-relaunch-suppressed")
+	assertSupervisorEventBody(t, stateDir, "gui-headless-fleet-relaunch-suppressed", `"reason":"boot-grace"`)
+}
+
+// TestEnsureAlive_HeadlessFleet_LiveHandoffSuppresses covers the live-handoff
+// suppressor: an unexpired restart-v3 in-progress handoff marker means the
+// GUI is mid-self-restart, not dead, so the action MUST NOT relaunch even
+// though guiOwnerAliveFn reports no live owner. The supervisor's StartedAt is
+// fabricated OLD (past boot-grace) so this test isolates the live-handoff
+// check specifically — a broken live-handoff check cannot hide behind a
+// boot-grace suppression that would mask it.
+//
+// MUTATION: delete the phaseDeadline/now.Before check in
+// ensureAliveHeadlessFleetLiveHandoffSuppressed — the marker is read but
+// never suppresses, the action falls through to the relaunch, and this
+// test's "want 0" assertion fails.
+func TestEnsureAlive_HeadlessFleet_LiveHandoffSuppresses(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return false, 5555, 9125 })
+	defer restoreGUI()
+
+	// Plant a real, unexpired in-progress restart-v3 handoff marker via the
+	// production HandoffMarkerStore (default Freshness is 3 minutes) — this
+	// is the SAME store ensureAliveHeadlessFleetLiveHandoffSuppressed reads,
+	// not a Phase-I fake, per this suppressor's deliberately independent read.
+	deadlines := gui.DefaultRestartDeadlines()
+	store := gui.NewHandoffMarkerStore(stateDir, deadlines)
+	if _, err := store.Begin(gui.HandoffBegin{
+		Generation: "headless-fleet-live-handoff",
+		Route:      gui.HandoffRouteSamePort,
+		OldPort:    9125,
+		NewPort:    9125,
+		OldPID:     5555,
+	}); err != nil {
+		t.Fatalf("Begin handoff marker: %v", err)
+	}
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v (must always return nil / exit 0)", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Errorf("relaunch seam called %d times during an unexpired restart-v3 handoff; want 0", got)
+	}
+	if !strings.Contains(out.String(), "live-handoff") {
+		t.Errorf("output should report the live-handoff suppression; got %q", out.String())
+	}
+	assertSupervisorEvent(t, stateDir, "gui-headless-fleet-relaunch-suppressed")
+	assertSupervisorEventBody(t, stateDir, "gui-headless-fleet-relaunch-suppressed", `"reason":"live-handoff"`)
 }
 
 type ensureAliveGUIRecoveryMarkerFake struct {
@@ -618,6 +820,19 @@ func installEnsureAliveGUIRecoveryTestDependencies(
 	t.Cleanup(restore)
 }
 
+// holdEnsureAliveSupervisorLock holds the REAL supervisor.lock flock so
+// SupervisorRunningUnderStateDir reports running=true, for tests exercising
+// the Phase-I GUI-restart marker classifier layered on top of a healthy
+// running supervisor. It ALSO installs a live-GUI-owner fake: since Part B
+// (headless-fleet recovery) added a guiOwnerAliveFn() call to the `if
+// running` branch, a caller here that drove runEnsureAlive without this fake
+// would fall through to the REAL probeGUIOwnerAlive and probe the
+// developer's actual %LOCALAPPDATA% pidport — the exact fleet-wipe-class
+// risk this file's header (:26-28) warns about. GUI-alive is the correct
+// fixture for these tests regardless: it keeps runEnsureAlive on its
+// existing "supervisor running; no action" no-op line (Part B's
+// headless-fleet path only fires when GUI is dead), so none of the
+// Phase-I-focused assertions in this file's other tests change.
 func holdEnsureAliveSupervisorLock(t *testing.T, stateDir string) {
 	t.Helper()
 	lock, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
@@ -625,6 +840,7 @@ func holdEnsureAliveSupervisorLock(t *testing.T, stateDir string) {
 		t.Fatalf("acquire supervisor lock: %v", err)
 	}
 	t.Cleanup(lock.Release)
+	liveGUIOwner(t, 9999, 9125)
 }
 
 func TestEnsureAliveGUIRecovery_ConcurrentTicksUseProductionFlockExclusion(t *testing.T) {
@@ -1239,4 +1455,25 @@ func assertSupervisorEvent(t *testing.T, stateDir, wantEvent string) {
 	if !strings.Contains(string(raw), needle) {
 		t.Fatalf("supervisor-events.log missing event %q; log body=%q", wantEvent, string(raw))
 	}
+}
+
+// assertSupervisorEventBody fails the test unless supervisor-events.log
+// under stateDir contains a line carrying BOTH the "event" discriminator AND
+// the given body substring (e.g. `"reason":"boot-grace"`) — used where two
+// call sites share one event name and only the body distinguishes them
+// (gui-headless-fleet-relaunch-suppressed's machine-filterable reason field).
+func assertSupervisorEventBody(t *testing.T, stateDir, wantEvent, wantBodySubstring string) {
+	t.Helper()
+	logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read supervisor-events.log %q: %v", logPath, err)
+	}
+	eventNeedle := `"event":"` + wantEvent + `"`
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, eventNeedle) && strings.Contains(line, wantBodySubstring) {
+			return
+		}
+	}
+	t.Fatalf("supervisor-events.log has no %q row carrying %q; log body=%q", wantEvent, wantBodySubstring, string(raw))
 }

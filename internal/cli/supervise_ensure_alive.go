@@ -107,6 +107,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -187,11 +188,16 @@ func spawnStandaloneSupervisor() error {
 // read-only gui.Probe; the unit test swaps in a recording fake so the real
 // %LOCALAPPDATA% pidport is never touched.
 //
-// Returns (alive, pid). A probe that cannot read the pidport (no file, parse
-// error) reports alive=false — the absence of a recorded live owner is the
-// genuine OWNER-death case the relaunch path is for. Production callers MUST
-// NOT reassign this var directly — setGUIOwnerAliveFnForTest is the only
-// allowed write path.
+// Returns (alive, pid, port). port is the recorded pidport's Verdict.Port —
+// widened from the original (bool, int) shape (zero external callers of this
+// var outside this package) so the headless-fleet recovery path
+// (runEnsureAliveHeadlessFleet) can dial the GUI's actual configured port for
+// its non-gating serving attestation instead of assuming a hardcoded 9125. A
+// probe that cannot read the pidport (no file, parse error) reports
+// alive=false, port=0 — the absence of a recorded live owner is the genuine
+// OWNER-death case the relaunch path is for. Production callers MUST NOT
+// reassign this var directly — setGUIOwnerAliveFnForTest is the only allowed
+// write path.
 var guiOwnerAliveFn = probeGUIOwnerAlive
 
 // ensureAliveGUIRecoveryStore is the narrow marker authority Phase I needs:
@@ -245,7 +251,7 @@ func setStandaloneRelaunchFnForTest(fn func() error) func() {
 // supervise_ensure_alive_test.go invokes this. The default production probe
 // reads the real pidport, so tests MUST install a fake to exercise the
 // live-GUI-owner branch without touching the developer's running GUI.
-func setGUIOwnerAliveFnForTest(fn func() (bool, int)) func() {
+func setGUIOwnerAliveFnForTest(fn func() (bool, int, int)) func() {
 	prev := guiOwnerAliveFn
 	guiOwnerAliveFn = fn
 	return func() { guiOwnerAliveFn = prev }
@@ -263,7 +269,9 @@ func setEnsureAliveGUIRecoveryDependenciesForTest(deps ensureAliveGUIRecoveryDep
 // probeGUIOwnerAlive reports whether a live `mcphub gui` process owns the GUI
 // single-instance (pidport) lock. Read-only: it runs gui.Probe (no destructive
 // action) and returns the BARE Verdict.PIDAlive bit, NOT a Verdict-class
-// semantic.
+// semantic — plus Verdict.PID and Verdict.Port so callers never need to
+// hardcode the GUI's port (it is operator-configurable via --port /
+// gui_server settings).
 //
 // PLATFORM CONTRACT (PR #283 review P3-a — the doc must not over-claim):
 // Verdict.PIDAlive is set from the OS identity probe (id.Alive,
@@ -306,18 +314,18 @@ func setEnsureAliveGUIRecoveryDependenciesForTest(deps ensureAliveGUIRecoveryDep
 // VerdictHealthy instead would also fix the macOS gap above (VerdictHealthy is a
 // ping-only verdict that holds on macOS), but that polarity change is deferred
 // as a separate decision, not folded into this fix.
-func probeGUIOwnerAlive() (bool, int) {
+func probeGUIOwnerAlive() (bool, int, int) {
 	pidportPath, err := gui.PidportPath()
 	if err != nil {
 		// Cannot resolve the pidport path → cannot confirm a live owner.
 		// Treat as "no live owner" so the genuine OWNER-death relaunch path
 		// is not suppressed by a path-resolution hiccup.
-		return false, 0
+		return false, 0, 0
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	v := gui.Probe(ctx, pidportPath)
-	return v.PIDAlive, v.PID
+	return v.PIDAlive, v.PID, v.Port
 }
 
 // relaunchSupervisorOwner re-fires the autostart scheduled task
@@ -657,6 +665,210 @@ func ensureAliveGUIRecoveryEventFields(record *gui.HandoffMarkerRecord, reasonCo
 	return fields
 }
 
+// ---------------------------------------------------------------------------
+// Part B: headless-fleet recovery (supervisor alive, GUI owner dead).
+//
+// runEnsureAlive's `if running` branch used to be a bare no-op: a live
+// supervisor was always treated as "nothing to do", without ever checking
+// whether its GUI owner was still alive. The GUI hosts the serena/LSP router
+// (and, in hub-aggregate mode, the hub listener) on its own HTTP port — none
+// of that comes back on its own if the GUI process dies while its supervisor
+// keeps running (a crash, `taskkill /F` of just the GUI PID, an OOM-kill, or
+// an unhandled panic). The fleet then looks "up" from the supervisor's point
+// of view while every MCP client sees nothing but connection failures /
+// "Subprocess initialization did not complete" until an operator notices and
+// manually runs `mcphub gui` — the live incident this recovers (~4h headless
+// after a reboot until manual relaunch).
+// ---------------------------------------------------------------------------
+
+const (
+	// ensureAliveHeadlessFleetBootGrace suppresses headless-fleet recovery
+	// while the supervisor itself started very recently. It exists so a
+	// supervisor that JUST cold-started (autostart racing this very ~1-min
+	// tick) is not misdiagnosed as a headless fleet before its own GUI
+	// counterpart has had a chance to catch up. Chosen well above typical
+	// GUI startup time and comfortably inside one liveness-tick period, so a
+	// genuinely dead GUI is still recovered within ~2 ticks of a cold boot.
+	ensureAliveHeadlessFleetBootGrace = 45 * time.Second
+
+	// ensureAliveHeadlessFleetServingProbeTimeout bounds the non-gating
+	// serving attestation recorded on a successful relaunch event. It is
+	// diagnostic only (see probeGUIServingWithinTimeout) and must never let
+	// a hung dial/response stall the ensure-alive tick.
+	ensureAliveHeadlessFleetServingProbeTimeout = 5 * time.Second
+)
+
+// runEnsureAliveHeadlessFleet is invoked from runEnsureAlive's `if running`
+// branch once guiOwnerAliveFn has already reported no live GUI owner. It
+// applies two independent fail-closed suppressors before relaunching the GUI
+// owner via the SAME seam genuine owner-death already uses
+// (livenessRelaunchFn / relaunchSupervisorOwner): re-firing the autostart
+// task's `mcphub gui` finds the supervisor already alive and ADOPTS it
+// (gui_supervisor_owner.go's ensureSupervisorRunning, spawned:false) instead
+// of starting a second one — zero daemon churn, exactly the same idempotent
+// property the existing owner-death branch below already relies on.
+//
+// This function has no return value: every exit path here is followed by a
+// `return nil` in the caller, matching the best-effort, always-exit-0
+// contract the rest of this file's ensure-alive action upholds.
+func runEnsureAliveHeadlessFleet(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int) {
+	now := time.Now().UTC()
+
+	uptimeSeconds, uptimeErr := ensureAliveHeadlessFleetSupervisorUptime(stateDir, now)
+	detectedBody := map[string]any{
+		"supervisor_pid":  supervisorPID,
+		"gui_pidport_pid": guiPID,
+	}
+	if uptimeErr == nil {
+		detectedBody["supervisor_uptime_s"] = uptimeSeconds
+	}
+	fmt.Fprintf(out, "ensure-alive: supervisor running (pid=%d) but no live GUI owner holds the single-instance lock (pidport pid=%d); evaluating headless-fleet recovery\n", supervisorPID, guiPID)
+	emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo, "gui-headless-fleet-detected",
+		"supervisor is running but no live GUI owner holds the single-instance lock",
+		detectedBody)
+
+	// (a) Live-handoff suppressor: an unexpired restart-v3 handoff marker
+	// means the GUI is mid-self-restart, not dead.
+	if handoffSuppressed, handoffErr := ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir, now); handoffErr != nil {
+		ensureAliveHeadlessFleetSuppress(stateDir, out, "live-handoff", fmt.Sprintf("restart-v3 handoff marker unreadable (will retry next tick): %v", handoffErr))
+		return
+	} else if handoffSuppressed {
+		ensureAliveHeadlessFleetSuppress(stateDir, out, "live-handoff", "an unexpired restart-v3 handoff is in progress")
+		return
+	}
+
+	// (b) Boot-grace suppressor: the supervisor itself may have just started.
+	if uptimeErr != nil {
+		ensureAliveHeadlessFleetSuppress(stateDir, out, "boot-grace", fmt.Sprintf("supervisor start time undeterminable (will retry next tick): %v", uptimeErr))
+		return
+	}
+	if uptimeSeconds < ensureAliveHeadlessFleetBootGrace.Seconds() {
+		ensureAliveHeadlessFleetSuppress(stateDir, out, "boot-grace", fmt.Sprintf("supervisor uptime %.0fs is within the %s boot-grace window", uptimeSeconds, ensureAliveHeadlessFleetBootGrace))
+		return
+	}
+
+	// (c) Neither suppressor fired: relaunch via the SAME seam the
+	// genuine-owner-death branch below uses.
+	if relaunchErr := livenessRelaunchFn(); relaunchErr != nil {
+		fmt.Fprintf(out, "ensure-alive: headless fleet (supervisor pid=%d); GUI-owner relaunch FAILED (will retry next tick): %v\n", supervisorPID, relaunchErr)
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn, "liveness-gui-headless-relaunch-failed",
+			"supervisor running with no live GUI owner; the GUI-owner relaunch failed; will retry next tick",
+			map[string]any{
+				"relaunch_target": autostart.WindowsTaskName,
+				"supervisor_pid":  supervisorPID,
+				"error":           relaunchErr.Error(),
+			})
+		return
+	}
+
+	servingProbeOK := probeGUIServingWithinTimeout(guiPort)
+	fmt.Fprintf(out, "ensure-alive: headless fleet (supervisor pid=%d); relaunched GUI owner via %s\n", supervisorPID, autostart.WindowsTaskName)
+	emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo, "liveness-relaunched-gui-headless-fleet",
+		"supervisor running with no live GUI owner; re-fired the autostart task to relaunch the GUI (adopts the live supervisor, zero daemon churn)",
+		map[string]any{
+			"relaunch_target":  autostart.WindowsTaskName,
+			"supervisor_pid":   supervisorPID,
+			"serving_probe_ok": servingProbeOK,
+		})
+}
+
+// ensureAliveHeadlessFleetSuppress writes the shared suppressed-tick
+// diagnostic + durable event. reason is machine-filterable: exactly
+// "live-handoff" or "boot-grace".
+func ensureAliveHeadlessFleetSuppress(stateDir string, out io.Writer, reason, detail string) {
+	fmt.Fprintf(out, "ensure-alive: headless-fleet relaunch suppressed (%s): %s\n", reason, detail)
+	emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo, "gui-headless-fleet-relaunch-suppressed",
+		"headless-fleet relaunch suppressed",
+		map[string]any{"reason": reason, "detail": detail})
+}
+
+// ensureAliveHeadlessFleetSupervisorUptime reads the supervisor lock-owner
+// sidecar directly. SupervisorRunningUnderStateDir (supervisor_lock.go:248)
+// deliberately does not surface StartedAt (it only proves liveness via the
+// flock itself), so this is an independent read of the same sidecar
+// AcquireSupervisorLock writes. Fail-closed: any read or parse error is
+// returned to the caller, which suppresses this tick rather than guessing.
+func ensureAliveHeadlessFleetSupervisorUptime(stateDir string, now time.Time) (seconds float64, err error) {
+	owner, err := api.ReadSupervisorLockOwner(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		return 0, err
+	}
+	startedAt, err := time.Parse(time.RFC3339Nano, owner.StartedAt)
+	if err != nil {
+		return 0, err
+	}
+	return now.Sub(startedAt).Seconds(), nil
+}
+
+// ensureAliveHeadlessFleetLiveHandoffSuppressed reports whether an unexpired
+// restart-v3 handoff marker means the headless-fleet state observed this
+// tick is actually a legitimate GUI self-restart in flight (the old GUI
+// released its single-instance lease and the designated child has not
+// re-acquired it yet), not a genuine death.
+//
+// This is a DELIBERATELY independent second read: it does not thread state
+// out of runEnsureAliveGUIRecovery (that function returns void — there is
+// nothing to thread) and does not route through the ensureAliveGUIRecoveryDeps
+// fakes Phase I's classifier uses, so a test that stubs only Phase I's
+// dependencies cannot silently disable this suppressor too.
+//
+// Fail-closed: a marker-store read error suppresses (treated the same as an
+// in-flight handoff) rather than falling through to a relaunch that could
+// race a legitimate self-restart.
+func ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir string, now time.Time) (suppressed bool, err error) {
+	if !gui.RestartV3Enabled() {
+		return false, nil
+	}
+	canonicalStateDir, absErr := filepath.Abs(filepath.Clean(stateDir))
+	if absErr != nil {
+		return true, absErr
+	}
+	// Mirrors runEnsureAliveGUIRecovery's absent-state-dir short-circuit
+	// (~:410 above): an absent directory cannot contain a marker, and
+	// HandoffMarkerStore.Read's record lock would otherwise create the
+	// directory here. Unreachable in practice on this path (the caller only
+	// reaches here once SupervisorRunningUnderStateDir already found
+	// stateDir's supervisor.lock, which implies the directory exists) but
+	// kept for defensive parity with the sibling classifier.
+	if _, statErr := os.Stat(canonicalStateDir); errors.Is(statErr, os.ErrNotExist) {
+		return false, nil
+	}
+	record, readErr := gui.NewHandoffMarkerStore(canonicalStateDir, gui.DefaultRestartDeadlines()).Read()
+	if readErr != nil {
+		return true, readErr
+	}
+	if record == nil {
+		return false, nil
+	}
+	phaseDeadline, _, eligible := ensureAliveGUIRecoveryPhaseDeadline(record)
+	if !eligible || phaseDeadline.IsZero() {
+		return false, nil
+	}
+	return now.Before(phaseDeadline), nil
+}
+
+// probeGUIServingWithinTimeout is a bounded, non-gating attestation stamped
+// on the liveness-relaunched-gui-headless-fleet event as serving_probe_ok.
+// It dials the port the PRE-relaunch guiOwnerAliveFn probe observed
+// (gui.Verdict.Port) — NEVER a hardcoded port, since the GUI's HTTP port is
+// operator-configurable (--port, gui_server settings). A false result is the
+// common case: schtasks /Run does not wait for the child to start, so the
+// newly-relaunched GUI has typically not bound its port yet by the time this
+// runs. The field is diagnostic only and never influences the relaunch
+// decision already made by the caller above.
+func probeGUIServingWithinTimeout(port int) bool {
+	if port <= 0 {
+		return false
+	}
+	client := &http.Client{Timeout: ensureAliveHeadlessFleetServingProbeTimeout}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/version", port))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
 // runEnsureAlive is the body of `mcphub supervise --ensure-alive`. It is the
 // testable entrypoint: the cobra wrapper resolves the real state dir via
 // stateDirFunc() and passes it here. The unit test passes a temp dir directly
@@ -683,7 +895,18 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 		return nil
 	}
 	if running {
-		// Common case: a supervisor holds the lock. No-op.
+		// A supervisor holds the lock. That is the fully-healthy no-op case
+		// ONLY when a live GUI owner is also present — see Part B above: a
+		// supervisor that has outlived its GUI (crash / taskkill / OOM of
+		// just the GUI PID) is a HEADLESS FLEET, not a healthy one, and is
+		// recovered by runEnsureAliveHeadlessFleet instead of falling
+		// through to the plain no-op below.
+		if guiAlive, guiPID, guiPort := guiOwnerAliveFn(); !guiAlive {
+			runEnsureAliveHeadlessFleet(stateDir, out, pid, guiPID, guiPort)
+			return nil
+		}
+		// Common case: a supervisor holds the lock and a live GUI owner is
+		// present. No-op.
 		fmt.Fprintf(out, "ensure-alive: supervisor running (pid=%d); no action\n", pid)
 		return nil
 	}
@@ -696,7 +919,7 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 	//     DIRECTLY via a detached standalone `mcphub supervise` spawn.
 	//   - no live GUI owner → genuine OWNER death. Re-fire the autostart GUI
 	//     task to re-establish BOTH the GUI owner and its supervisor.
-	if guiAlive, guiPID := guiOwnerAliveFn(); guiAlive {
+	if guiAlive, guiPID, _ := guiOwnerAliveFn(); guiAlive {
 		// Recover the supervisor WITHOUT touching the GUI. Re-firing the
 		// autostart task here would short-circuit to activate-window
 		// (single-instance busy) and recover nothing — the old gap-B
