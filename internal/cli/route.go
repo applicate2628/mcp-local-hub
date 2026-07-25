@@ -11,12 +11,28 @@
 //   - Port P (the GUI's own port, default 9125), every client config, the
 //     gui.pidport single-instance lock, and the RestartV3 coordinator/handoff
 //     are completely untouched by this file.
-//   - READ-ONLY on the registry + supervisor-intent: this command never wires
-//     api.SetSerenaAutoRegisterCutoverPrimitives (the supervisor reap+install+
-//     start cutover stays exclusively GUI-owned — see internal/cli/gui.go's
-//     runGUI) and starts no idle/prune/reconcile ticker (session cleanup,
-//     backend-loss reconcile, idle-shutdown, workspace-prune all stay
-//     GUI-owned background loops).
+//   - READ-ONLY on the registry + supervisor-intent, ENFORCED (not merely
+//     omission-based — bot/architect review finding F1, 2026-07-25): this
+//     command never wires api.SetSerenaAutoRegisterCutoverPrimitives (the
+//     supervisor reap+install+start cutover stays exclusively GUI-owned —
+//     see internal/cli/gui.go's runGUI) and starts no idle/prune/reconcile
+//     ticker (session cleanup, backend-loss reconcile, idle-shutdown,
+//     workspace-prune all stay GUI-owned background loops). Omitting the
+//     cutover primitives is NOT sufficient on its own: the router deps'
+//     AutoRegisterFn (new-workspace registration) and WakeIdleFn (which can
+//     clear an idle-stop on supervisor-intent) are both real registry/intent
+//     WRITES reachable on the happy path regardless of the cutover wiring, so
+//     this command constructs the router deps via gui.Server's dedicated
+//     SetSerenaRouterReadOnly / SetLSPRouterReadOnly (AutoRegisterFn/
+//     WakeIdleFn nil) instead of SetSerenaRouterProduction/
+//     SetLSPRouterProduction, and sets gui.Config.ReadOnlyRouterMode so the
+//     one remaining write call site independent of deps wiring
+//     (maybePersistSerenaActivity's debounced registry LastToolsCallAt
+//     write, internal/gui/serena_idle_sweeper.go) is also gated off. An
+//     unregistered-workspace tool-call therefore fails loud with a 503
+//     "register workspace first" — registration and activity-persistence
+//     stay exclusively GUI-owned; this process only ever forwards to
+//     ALREADY-registered workspaces.
 //
 // Implementation note (Adjacent finding, see the Increment-1 implementation
 // report): the serena/LSP router HANDLER itself (internal/gui/serena_router.go
@@ -114,9 +130,10 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	actualPort := ln.Addr().(*net.TCPAddr).Port
 
 	s := gui.NewServer(gui.Config{
-		Port:    actualPort,
-		Version: versionString(),
-		PID:     os.Getpid(),
+		Port:               actualPort,
+		Version:            versionString(),
+		PID:                os.Getpid(),
+		ReadOnlyRouterMode: true,
 	})
 
 	registryPath, regErr := api.DefaultRegistryPath()
@@ -131,7 +148,9 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	}
 	resolver := serena_routing.NewWorkspaceResolver(reg, registryPath)
 	sessions := serena_routing.NewSessionRouter()
-	s.SetSerenaRouterProduction(resolver, sessions)
+	// Read-only wiring (F1): nils AutoRegisterFn + WakeIdleFn — see
+	// gui.Server.SetSerenaRouterReadOnly's doc comment and the file header.
+	s.SetSerenaRouterReadOnly(resolver, sessions)
 
 	if rawManifest, err := api.NewAPI().ManifestGet("mcp-language-server"); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(),
@@ -149,7 +168,9 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 		lspReg := api.NewRegistry(registryPath)
 		lspResolver := lsp_routing.NewWorkspaceResolver(lspReg, registryPath, m.Languages)
 		lspSessions := lsp_routing.NewSessionRouter()
-		s.SetLSPRouterProduction(lspResolver, lspSessions, m.Languages)
+		// Read-only wiring (F1): nils AutoRegisterFn — see
+		// gui.Server.SetLSPRouterReadOnly's doc comment and the file header.
+		s.SetLSPRouterReadOnly(lspResolver, lspSessions, m.Languages)
 	}
 
 	// Deliberately absent (Increment 1 constraint — see file header):
@@ -163,6 +184,11 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	//     workspace auto-prune sweep): none are started here.
 	//   - gui.Server.Start / ContinueWithGUIListener / composeGuiServerRestartV3:
 	//     this process serves RouteHandler() on its own bare listener instead.
+	//   - a NON-nil AutoRegisterFn / WakeIdleFn on either router's deps, and
+	//     registry writes from maybePersistSerenaActivity: see F1 above —
+	//     SetSerenaRouterReadOnly/SetLSPRouterReadOnly + ReadOnlyRouterMode
+	//     jointly enforce this rather than relying on cutover-primitive
+	//     omission alone.
 
 	httpSrv := &http.Server{
 		Handler:           s.RouteHandler(),

@@ -118,6 +118,50 @@ func (s *Server) SetLSPRouterProduction(resolver *lsp_routing.WorkspaceResolver,
 	})
 }
 
+// SetLSPRouterReadOnly wires the resolver + session router for a READ-ONLY
+// forwarder — the standalone `mcphub route` front daemon (internal/cli/
+// route.go). Unlike SetLSPRouterProduction, AutoRegisterFn is left nil:
+//
+//   - For an ALREADY-registered workspace (resolved.Registered true),
+//     workspaceFromResolvedLSPPath's `if deps.AutoRegisterFn != nil` branch
+//     is skipped entirely, so the resolved registry entry is returned
+//     directly — no api.EnsureLSPRegistered call (which upserts the
+//     registry) at all, even for a re-touch of a workspace already known.
+//   - For an UNREGISTERED first-touch path, workspaceFromResolvedLSPPath's
+//     `if deps.AutoRegisterFn == nil` guard returns the canonical
+//     "LSP auto-register is not configured" 503 — the pre-existing
+//     back-compat path for partially-wired routing, not a nil-panic.
+//   - lspPathlessWorkspace's own `if deps.AutoRegisterFn == nil { return &ws,
+//     true }` guard means a pathless re-touch of a session-bound workspace
+//     also never calls EnsureLSPRegistered.
+//
+// TrustedRootCheckFn stays wired (api.LSPWorkspaceRootTrusted) — it is a
+// pure READ of <state-dir>/lsp-trusted-roots.json, consulted only on the
+// first-touch path, which is unreachable anyway once AutoRegisterFn is nil;
+// keeping it wired costs nothing and keeps this constructor's deps shape
+// consistent with the production one.
+func (s *Server) SetLSPRouterReadOnly(resolver *lsp_routing.WorkspaceResolver, sessions *lsp_routing.SessionRouter, languages []config.LanguageSpec) {
+	if s == nil || resolver == nil || sessions == nil {
+		return
+	}
+	backendByLanguage := map[string]string{}
+	for _, spec := range languages {
+		if spec.Name != "" && spec.Backend != "" {
+			backendByLanguage[spec.Name] = spec.Backend
+		}
+	}
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver: resolver,
+		Sessions: sessions,
+		BackendKindForLanguage: func(language string) (string, bool) {
+			kind, ok := backendByLanguage[language]
+			return kind, ok
+		},
+		// AutoRegisterFn deliberately nil — see doc comment.
+		TrustedRootCheckFn: api.LSPWorkspaceRootTrusted,
+	})
+}
+
 func (s *Server) SetLSPRouterDeps(deps *lspRouterDeps) {
 	s.lspRouterDeps.Store(deps)
 }

@@ -36,6 +36,23 @@ type Config struct {
 	PID int
 	// RestartV3Enabled is the composition-root-resolved GUI restart gate.
 	RestartV3Enabled bool
+	// ReadOnlyRouterMode marks this Server instance as forbidden from ever
+	// writing the registry or supervisor-intent from router request-handling
+	// paths — the invariant the standalone `mcphub route` front daemon
+	// (internal/cli/route.go) needs so a second, GUI-independent process
+	// serving /serena/mcp + /lsp/<language>/mcp can never split-brain-write
+	// alongside the GUI (the decision record's non-negotiable "READ-ONLY on
+	// the registry + supervisor-intent" constraint —
+	// work-items/decisions/2026-07-25-mcp-data-plane-off-gui-onto-supervised-
+	// front-daemon.md). Consulted at the specific persist site
+	// (maybePersistSerenaActivity, internal/gui/serena_idle_sweeper.go) that
+	// writes on the router's happy path independent of which AutoRegisterFn/
+	// WakeIdleFn a caller wires — a construction-time flag rather than a
+	// per-deps toggle, so it holds even if a future caller mis-wires
+	// SetSerenaRouterProduction on a Server meant to stay read-only. False
+	// (the zero value) for every existing caller (the GUI itself), so this is
+	// purely additive and changes no existing behavior.
+	ReadOnlyRouterMode bool
 }
 
 // scanner is the narrow interface that the /api/scan handler needs.
