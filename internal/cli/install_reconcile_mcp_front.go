@@ -49,6 +49,28 @@ import (
 // hardened WriteStateFileAtomic pipeline every other state file uses.
 const mcpFrontReconcileSerenaReportLeaf = "mcp-front-reconcile-serena-report.json"
 
+// mcpFrontReconcileReport is the persisted artifact envelope: the forward
+// run's port ALONGSIDE its serena MigrateReport (not just the bare report).
+//
+// Hardening (adversarial-gate F2, 2026-07-25): api.RollbackLSPRouterClientEntries
+// needs to know which port to recognize as "owned by this reconcile" to
+// identify+remove the LSP router entries it wrote. Re-resolving the CURRENT
+// mcp_front.port setting at rollback time is correct only if the operator
+// has not changed the setting between the forward run and the rollback —
+// a hidden footgun this repo's standing principle rejects ("the hub
+// remembers, not the human"). Persisting the forward-run port here and
+// reading it back at rollback time closes that gap regardless of any
+// later setting change.
+//
+// Port is additive to what was persisted before this hardening; a Port of
+// 0 on an older artifact means "not recorded" and the rollback falls back
+// to re-resolving the live setting (the prior behavior) rather than
+// failing.
+type mcpFrontReconcileReport struct {
+	Port   int                `json:"port"`
+	Serena *api.MigrateReport `json:"serena"`
+}
+
 // mcpFrontReconcileTimeout bounds the whole reconcile-mcp-front run
 // (liveness probe + every in-scope client write for both serena and LSP).
 // Generous relative to the two per-request 2s budgets
@@ -113,14 +135,17 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API) error {
 		return fmt.Errorf("reconcile-mcp-front: serena client reconcile: %w", serr)
 	}
 
-	// Persist the serena report BEFORE the LSP reconcile runs, so a crash or
-	// a subsequent LSP-side failure still leaves a rollback-capable record of
-	// the serena writes that already landed on disk.
+	// Persist the port ALONGSIDE the serena report (F2 hardening — see
+	// mcpFrontReconcileReport's doc comment) BEFORE the LSP reconcile runs,
+	// so a crash or a subsequent LSP-side failure still leaves a
+	// rollback-capable record of the serena writes that already landed on
+	// disk.
 	reportPath, perr := mcpFrontReconcileSerenaReportPathFn()
 	if perr != nil {
 		return fmt.Errorf("reconcile-mcp-front: %w (serena client configs were already rewritten; re-run `mcphub install --reconcile-mcp-front --rollback` will not find a report to restore from until this is fixed)", perr)
 	}
-	if werr := api.WriteStateFileAtomic(reportPath, serenaReport); werr != nil {
+	persisted := mcpFrontReconcileReport{Port: port, Serena: serenaReport}
+	if werr := api.WriteStateFileAtomic(reportPath, persisted); werr != nil {
 		return fmt.Errorf("reconcile-mcp-front: persist serena reconcile report to %s: %w (serena client configs were already rewritten; rollback needs this file)", reportPath, werr)
 	}
 
@@ -169,12 +194,16 @@ func runRollbackMCPFront(cmd *cobra.Command, a *api.API) error {
 		}
 		return fmt.Errorf("reconcile-mcp-front --rollback: read %s: %w", reportPath, rerr)
 	}
-	var serenaReport api.MigrateReport
-	if uerr := json.Unmarshal(raw, &serenaReport); uerr != nil {
+	var persisted mcpFrontReconcileReport
+	if uerr := json.Unmarshal(raw, &persisted); uerr != nil {
 		return fmt.Errorf("reconcile-mcp-front --rollback: parse %s: %w", reportPath, uerr)
 	}
+	if persisted.Serena == nil {
+		return fmt.Errorf("reconcile-mcp-front --rollback: %s carries no serena report (corrupt or unrecognized artifact)", reportPath)
+	}
+	serenaReport := persisted.Serena
 
-	if rerr := api.RestoreSerenaReconcileApplied(&serenaReport, nil); rerr != nil {
+	if rerr := api.RestoreSerenaReconcileApplied(serenaReport, nil); rerr != nil {
 		return fmt.Errorf("reconcile-mcp-front --rollback: restore serena clients: %w", rerr)
 	}
 
@@ -184,18 +213,19 @@ func runRollbackMCPFront(cmd *cobra.Command, a *api.API) error {
 	// to know which port to recognize as "owned by this reconcile" so it can
 	// identify and remove those entries.
 	//
-	// ASSUMPTION (UNVERIFIED): re-resolving the CURRENT mcp_front.port
-	// setting is correct only if the operator has not changed the setting
-	// between the forward run and this rollback. This command does not
-	// persist the forward run's port separately from the serena report's
-	// already-written URLs (which do encode it, but LSPClientRouterOpts.GUIPort
-	// is consulted for ownership recognition, not re-derived from the serena
-	// report). If a mismatch ever proves to matter in practice, the fix is to
-	// persist the forward-run port alongside the serena report and read it
-	// back here instead of re-resolving the live setting.
-	port, err := a.ResolveMCPFrontPort()
-	if err != nil {
-		return fmt.Errorf("reconcile-mcp-front --rollback: resolve mcp_front.port: %w", err)
+	// F2 hardening: use the PERSISTED forward-run port (mcpFrontReconcileReport.Port)
+	// rather than re-resolving the live mcp_front.port setting, so an
+	// operator changing the setting between the forward run and this
+	// rollback cannot strand the LSP entries the forward run actually wrote.
+	// Port==0 means an older artifact predating this field — fall back to
+	// the live setting rather than failing.
+	port := persisted.Port
+	if port <= 0 {
+		var err error
+		port, err = a.ResolveMCPFrontPort()
+		if err != nil {
+			return fmt.Errorf("reconcile-mcp-front --rollback: resolve mcp_front.port (no port recorded in %s): %w", reportPath, err)
+		}
 	}
 	lspReport, lerr := a.RollbackLSPRouterClientEntries(api.LSPClientRouterOpts{
 		GUIPort:     port,

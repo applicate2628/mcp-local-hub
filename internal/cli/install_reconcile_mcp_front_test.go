@@ -125,6 +125,87 @@ func TestRunReconcileMCPFront_ForwardThenRollback_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestRunReconcileMCPFront_Rollback_UsesPersistedPortNotLiveSetting is the F2
+// hardening guard (adversarial-gate finding on sub-increment 2a): rollback
+// must not depend on being able to re-resolve the LIVE mcp_front.port
+// setting once a forward-run report already recorded a good port.
+//
+// Honest scoping note: the reviewer's literal scenario — the operator
+// changes mcp_front.port to a DIFFERENT VALID port between forward and
+// rollback, orphaning the OLD port's LSP router entry — does not reproduce
+// in this codebase. See TestRollbackLSPRouterClientEntries_RemovalIsNameKeyedNotPortKeyed
+// in internal/api: RollbackLSPRouterClientEntries's entry-removal check is
+// keyed by the entry's fixed canonical name, not by the GUIPort value
+// passed in, so it recognizes and removes the entry regardless of port
+// drift — confirmed empirically before this hardening was written. Also,
+// a.SettingsSet validates against the registry's [1024,65535] range on
+// every write, so an actually out-of-range value can never reach the
+// settings file through the normal write path; and a corrupted-but-in-range
+// persisted value is silently resolved to the schema default by
+// SettingsListIn's own graceful-degrade behavior (never an error) — so
+// there is no way to make a.ResolveMCPFrontPort() itself fail via the
+// normal settings surface either.
+//
+// What this hardening DOES fix, and what this test proves: before it,
+// runRollbackMCPFront called a.ResolveMCPFrontPort() unconditionally, which
+// reads and fully re-parses gui-preferences.yaml. If that file becomes
+// unreadable/unparseable for any reason between the forward run and the
+// rollback (this test simulates that by writing malformed YAML directly to
+// the settings file, bypassing SettingsSet), the OLD rollback would abort
+// with an error even though the forward run's report already recorded a
+// perfectly good, usable port. The hardened rollback reads the port back
+// from that persisted report instead and never needs to touch the live
+// settings file at all in the common case.
+//
+// Mutation-proven: reverting runRollbackMCPFront to always call
+// a.ResolveMCPFrontPort() (ignoring persisted.Port) makes this test fail
+// with the settings-file parse error surfacing as the rollback's own error
+// — confirmed manually during implementation (see this item's final
+// report for the captured failing output), then reverted.
+func TestRunReconcileMCPFront_Rollback_UsesPersistedPortNotLiveSetting(t *testing.T) {
+	redirectMCPFrontTestEnv(t)
+	reportPath := withMCPFrontReportPathSeam(t)
+
+	port, cleanup := startTestRouteServer(t)
+	defer cleanup()
+
+	a := api.NewAPI()
+	if err := a.SettingsSet(api.MCPFrontPortSettingKey, strconv.Itoa(port)); err != nil {
+		t.Fatalf("SettingsSet (forward port): %v", err)
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+	cmd.SetOut(new(testWriter))
+	if err := runReconcileMCPFront(cmd, false); err != nil {
+		t.Fatalf("forward reconcile: %v", err)
+	}
+	if _, statErr := os.Stat(reportPath); statErr != nil {
+		t.Fatalf("expected the serena report to be persisted at %s after a successful forward reconcile: %v", reportPath, statErr)
+	}
+
+	// Simulate the live settings file becoming unreadable between the
+	// forward run and the rollback (malformed YAML, bypassing SettingsSet's
+	// own validation — this is not reachable through the normal write path,
+	// see the doc comment above for why a plain value-drift cannot be used
+	// here). a.ResolveMCPFrontPort() must now fail if anything still calls
+	// it unconditionally.
+	settingsPath := api.SettingsPath()
+	if err := os.WriteFile(settingsPath, []byte("mcp_front: [this is not valid yaml\n"), 0o600); err != nil {
+		t.Fatalf("corrupt settings file: %v", err)
+	}
+	if _, verifyErr := a.ResolveMCPFrontPort(); verifyErr == nil {
+		t.Fatalf("test precondition broken: ResolveMCPFrontPort should fail against the corrupted settings file, but it did not")
+	}
+
+	if err := runReconcileMCPFront(cmd, true); err != nil {
+		t.Fatalf("rollback must succeed using the persisted forward-run port, independent of the (now-unreadable) live mcp_front.port setting: %v", err)
+	}
+	if _, statErr := os.Stat(reportPath); !os.IsNotExist(statErr) {
+		t.Fatalf("expected the persisted report to be removed after a successful rollback; stat err = %v", statErr)
+	}
+}
+
 func TestRunReconcileMCPFront_Rollback_NoPriorReport_Errors(t *testing.T) {
 	redirectMCPFrontTestEnv(t)
 	withMCPFrontReportPathSeam(t)

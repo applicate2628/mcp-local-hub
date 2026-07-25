@@ -1239,3 +1239,68 @@ func assertRelayEntryFieldsSufficient(t *testing.T, label string, entry clients.
 		t.Errorf("%s: both RelayURL and URL empty — relay-stdio AddEntry has no forward target to relay to", label)
 	}
 }
+
+// TestRollbackLSPRouterClientEntries_RemovalIsNameKeyedNotPortKeyed pins an
+// invariant surfaced while investigating an adversarial-gate F2 finding on
+// sub-increment 2a (`internal/cli/install_reconcile_mcp_front.go`): the
+// reviewer's literal claim was that a `mcp_front.port` setting change
+// between a forward reconcile and a later `--rollback` would leave the
+// shared `mcp-language-server-<language>` router entry this package writes
+// UNRECOGNIZED at rollback time (port-keyed ownership), stranding it as an
+// orphan.
+//
+// That does not reproduce: RollbackLSPRouterClientEntries's removal check
+// (lsp_client_router.go, the `routerName := LSPRouterEntryName(language)` /
+// `entryIsOwnedLSPRouterForLanguage(routerName, ...)` call) always looks the
+// entry up BY ITS FIXED CANONICAL NAME, so entryIsOwnedLSPRouterForLanguage's
+// own `reservedName` shortcut (entryName == LSPRouterEntryName(language)) is
+// unconditionally true at that call site regardless of which `guiPort` is
+// passed in — the port argument does not gate this removal decision. This
+// test proves it directly: the rollback still removes the entry even when
+// given a GUIPort that differs from the one the forward write used.
+//
+// This guard exists so a FUTURE change that narrows removal to a
+// port-matched entry (which would reintroduce exactly the orphan risk the
+// reviewer described) fails loudly here instead of shipping silently. It
+// does not by itself justify skipping the separate persisted-port hardening
+// in install_reconcile_mcp_front.go — that hardening removes a different,
+// real dependency (rollback needing to successfully RE-RESOLVE the live
+// mcp_front.port setting at all), covered by
+// TestRunReconcileMCPFront_Rollback_UsesPersistedPortNotLiveSetting in
+// internal/cli.
+func TestRollbackLSPRouterClientEntries_RemovalIsNameKeyedNotPortKeyed(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+	claude := newLSPRouterFakeClient(t, "claude-code", true)
+	clientMap := map[string]clients.Client{"claude-code": claude}
+
+	if _, err := NewAPI().EnsureLSPRouterClientEntries(LSPClientRouterOpts{
+		GUIPort: 9137, // port A (forward-time mcp_front.port)
+		Clients: clientMap,
+	}); err != nil {
+		t.Fatalf("forward EnsureLSPRouterClientEntries: %v", err)
+	}
+
+	entryName := "mcp-language-server-go"
+	got, err := claude.GetEntry(entryName)
+	if err != nil {
+		t.Fatalf("GetEntry after forward: %v", err)
+	}
+	if got == nil || got.URL != "http://127.0.0.1:9137/lsp/go/mcp" {
+		t.Fatalf("forward write missing/wrong: %+v", got)
+	}
+
+	if _, err := NewAPI().RollbackLSPRouterClientEntries(LSPClientRouterOpts{
+		GUIPort: 9201, // port B, DIFFERENT from the forward-time port
+		Clients: clientMap,
+	}); err != nil {
+		t.Fatalf("rollback RollbackLSPRouterClientEntries: %v", err)
+	}
+
+	got2, err := claude.GetEntry(entryName)
+	if err != nil {
+		t.Fatalf("GetEntry after rollback: %v", err)
+	}
+	if got2 != nil {
+		t.Errorf("entry NOT removed after port-drifted rollback (removal has become port-keyed — this reintroduces the F2 orphan risk): %+v", got2)
+	}
+}
