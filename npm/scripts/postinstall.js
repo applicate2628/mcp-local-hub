@@ -19,18 +19,27 @@
 // install where mcp-local-hub is merely a dependency of some other package,
 // must never mutate the developer's canonical ~/.local/bin PATH binary — that
 // would be a surprising supply-chain-adjacent side effect on a host that never
-// asked for mcphub at all (PR #585 / bot review). Detection reads
-// `process.env.npm_config_global`, which npm mirrors from its own resolved
-// `global` config into every lifecycle script's environment
-// (https://docs.npmjs.com/cli/v11/using-npm/config#environment-variables).
-// Empirically verified on this repo's toolchain host (npm 11.17.0, 2026-07-25):
-// `npm install -g <pkg>` sets `npm_config_global=true` for postinstall; a bare
-// local `npm install <pkg>` and an install where `<pkg>` is only a transitive
-// dependency both leave it unset. Comparing `npm_config_prefix` against
-// `npm_config_global_prefix` was considered and REJECTED as a detection
-// signal — the same probe showed both env vars hold the SAME value (the
-// global prefix) during a LOCAL install too, so that comparison cannot tell
-// the two cases apart.
+// asked for mcphub at all (PR #585 / bot review).
+//
+// Detection is TWO gates, both required (see `globalInstallSkipReason` below
+// for the per-gate citations and the empirical probes behind them):
+//   1. npm reports a global-install transaction — read from BOTH
+//      `npm_config_global` and `npm_config_location`, because npm surfaces the
+//      same intent under different keys for `-g` vs `--location=global`.
+//   2. THIS package is that install's top-level target — its own directory
+//      sits directly in the global node_modules root, not nested inside
+//      another package. Gate 1 alone is insufficient: npm sets
+//      npm_config_global=true for the lifecycle scripts of TRANSITIVE
+//      dependencies of a `-g` install too, so a package that merely depends on
+//      mcp-local-hub would otherwise silently replace the operator's PATH
+//      binary (bot PR #586).
+// Every unverifiable state FAILS CLOSED (skip + notice).
+//
+// Comparing `npm_config_prefix` against `npm_config_global_prefix` was
+// considered and REJECTED as a detection signal — a probe showed both env vars
+// hold the SAME value (the global prefix) during a LOCAL install too, so that
+// comparison cannot tell the two cases apart. Gate 2 compares the PACKAGE'S
+// OWN location against the global root instead, which does separate them.
 //
 // COPY-ONLY, NO DOWNLOAD: this script performs NO network I/O. It resolves the
 // platform binary npm ALREADY installed (the optionalDependency) and asks THAT
@@ -54,6 +63,8 @@
 "use strict";
 
 const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
 const { PACKAGE_BY_PLATFORM, binaryBasename } = require("../lib/platform-binary");
 
 const SETUP_FALLBACK = "run `mcphub setup` to update ~/.local/bin manually";
@@ -63,18 +74,106 @@ function notice(msg) {
   process.stderr.write(`mcp-local-hub: ${msg}\n`);
 }
 
-// npm sets npm_config_<key> environment variables mirroring its own resolved
-// config for every lifecycle script; `global` is a first-class npm config key
-// (the `-g`/`--global` flag) that has carried this exact env-var name across
-// every npm major version this project supports. See the file-header comment
-// above for the citation + empirical verification this relies on.
-function isGlobalNpmInstall() {
-  return process.env.npm_config_global === "true";
+// GATE 1 — is npm running a global-install transaction at all?
+//
+// npm mirrors its resolved config into npm_config_<key> for every lifecycle
+// script, but the "install globally" intent arrives under TWO DIFFERENT keys
+// depending on how the operator spelled it. Probed on npm 11.17.0 (this
+// repo's toolchain host, 2026-07-26) by dumping the env from a lifecycle
+// script:
+//     npm ... -g / --global      -> npm_config_global="true", location unset
+//     npm ... --location=global  -> npm_config_global unset,  location="global"
+// `--location=global` is a documented global-install mode
+// (https://docs.npmjs.com/cli/v11/using-npm/config#location), so reading only
+// npm_config_global silently takes the non-global branch for it and leaves the
+// ~/.local/bin binary stale — defeating this hook for a supported invocation.
+// Boolean forms are normalized rather than compared to the literal "true".
+function npmReportsGlobalTransaction() {
+  const flag = String(process.env.npm_config_global ?? "").trim().toLowerCase();
+  if (flag === "true" || flag === "1") return true;
+  return String(process.env.npm_config_location ?? "").trim().toLowerCase() === "global";
+}
+
+// Global root layout per npm's folders documentation: <prefix>/node_modules on
+// Windows, <prefix>/lib/node_modules everywhere else. Verified on the
+// toolchain host: npm_config_prefix="C:\...\nodejs" and `npm root -g` reports
+// "C:\...\nodejs\node_modules".
+function globalNodeModulesRoot() {
+  const prefix = process.env.npm_config_prefix;
+  if (!prefix) return null;
+  return process.platform === "win32"
+    ? path.join(prefix, "node_modules")
+    : path.join(prefix, "lib", "node_modules");
+}
+
+function samePath(a, b) {
+  const left = path.resolve(a);
+  const right = path.resolve(b);
+  // Windows paths are case-insensitive; realpath does not normalize case.
+  return process.platform === "win32"
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
+}
+
+// GATE 2 — is THIS package the top-level target of that global install?
+//
+// Gate 1 is necessary but NOT sufficient. When some OTHER package depends on
+// mcp-local-hub and that parent is installed with `npm i -g`, npm runs the
+// lifecycle scripts of its transitive dependencies with the SAME
+// npm_config_global=true. Gate 1 alone would therefore let a host that never
+// asked for mcphub have its canonical PATH binary replaced — precisely the
+// transitive case this guard exists to prevent (bot PR #586).
+//
+// The two cases are distinguishable by LOCATION, verified on the toolchain
+// host: a top-level global install lands directly at <globalRoot>/<name>
+// ("C:\...\node_modules\mcp-local-hub"), while a nested dependency lands one
+// level deeper, under its parent's own node_modules
+// ("...\node_modules\mcp-local-hub\node_modules\@applicate2628\...").
+// A lifecycle script's cwd is the package's own directory, so comparing that
+// against the derived global root separates them.
+//
+// This is NOT the rejected npm_config_prefix-vs-npm_config_global_prefix probe
+// described in the file header: that compared two PREFIXES (identical during a
+// local install, hence useless). This compares the PACKAGE'S OWN LOCATION
+// against the global root, which differs in exactly the cases we must tell
+// apart. It also backstops gate 1: an operator with `location=global` in their
+// .npmrc running an ordinary local install lands in a project node_modules and
+// is correctly skipped here.
+//
+// Returns null when this IS a top-level global install of this package, or a
+// human-readable skip reason otherwise. Unverifiable states FAIL CLOSED
+// (skip): leaving ~/.local/bin stale is recoverable with `mcphub setup`,
+// whereas clobbering a PATH binary nobody asked us to touch is not.
+function globalInstallSkipReason() {
+  if (!npmReportsGlobalTransaction()) return "not a global install";
+
+  const root = globalNodeModulesRoot();
+  if (!root) return "cannot verify the global install root (npm_config_prefix is unset)";
+
+  let selfDir;
+  let rootDir;
+  try {
+    selfDir = fs.realpathSync(process.cwd());
+    rootDir = fs.realpathSync(root);
+  } catch {
+    // Either path is missing or unreadable — we cannot prove we are the
+    // top-level target, so we must not act.
+    return "cannot verify the global install root on disk";
+  }
+
+  const parent = path.dirname(selfDir);
+  if (samePath(parent, rootDir)) return null;
+  // Scoped package: <globalRoot>/@scope/<name>.
+  if (path.basename(parent).startsWith("@") && samePath(path.dirname(parent), rootDir)) {
+    return null;
+  }
+  return "this package is a dependency of the global install, not its target";
 }
 
 function canonicalize() {
-  if (!isGlobalNpmInstall()) {
-    notice("skipping ~/.local/bin canonicalize (not a global install)");
+  const skip = globalInstallSkipReason();
+  if (skip) {
+    notice(`skipping ~/.local/bin canonicalize (${skip})`);
     return;
   }
 

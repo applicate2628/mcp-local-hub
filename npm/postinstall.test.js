@@ -1,12 +1,27 @@
 "use strict";
-// Black-box fail-safe test for scripts/postinstall.js: the canonicalize hook
-// MUST exit 0 and point the operator at `mcphub setup` when the platform
-// binary cannot be resolved — a canonicalize failure must never break
-// `npm install`. It also MUST run its real-work path (resolve + spawn) ONLY
-// when npm reports a GLOBAL install via `npm_config_global`, and MUST skip
-// that work — without ever attempting to resolve or spawn the platform
-// binary — for a local or transitive install (bot PR #585 concern; see the
-// GLOBAL-INSTALL-ONLY GUARD comment in scripts/postinstall.js).
+// Black-box fail-safe tests for scripts/postinstall.js.
+//
+// The canonicalize hook MUST exit 0 and point the operator at `mcphub setup`
+// when the platform binary cannot be resolved — a canonicalize failure must
+// never break `npm install`.
+//
+// It MUST also run its real-work path (resolve + spawn) ONLY for a global
+// install whose TOP-LEVEL TARGET is this package, and skip that work — without
+// ever attempting to resolve or spawn the platform binary — otherwise. Two
+// gates enforce that (see the GLOBAL-INSTALL-ONLY GUARD comment in
+// scripts/postinstall.js):
+//
+//   gate 1: npm reports a global transaction, spelled EITHER as
+//           npm_config_global=true (`-g`) OR npm_config_location=global
+//           (`--location=global`) — bot PR #586 finding 1.
+//   gate 2: this package's own directory sits directly in the global
+//           node_modules root, so a TRANSITIVE dependency of some other
+//           `npm i -g` install (which npm also runs with
+//           npm_config_global=true) is skipped — bot PR #586 finding 2.
+//
+// Unverifiable states fail CLOSED (skip), because leaving ~/.local/bin stale
+// is recoverable with `mcphub setup` while clobbering a PATH binary nobody
+// asked us to touch is not.
 
 const { test } = require("node:test");
 const assert = require("node:assert");
@@ -17,138 +32,245 @@ const path = require("node:path");
 
 const { PACKAGE_BY_PLATFORM } = require("./lib/platform-binary");
 
-// Shared fixture builder: reproduces the published package's relative layout
-// (lib/ + scripts/) so the script's `require("../lib/platform-binary")`
-// resolves exactly as it would once installed, AND forces a deterministic
-// resolve FAILURE on any host (a platform package dir with a package.json but
-// NO bin binary) so that even if a test's guard assertion is wrong, the
-// script can never resolve — let alone spawn — a real binary. This is the
-// safety net that keeps every test in this file side-effect-free regardless
-// of which branch the code under test actually takes.
-function buildFixture() {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mcphub-postinstall-"));
-  // Mirror the published meta package: CommonJS, so the copied scripts load
-  // as CommonJS regardless of any ancestor package.json on the test host.
+// Where npm puts globally-installed packages, per its folders documentation.
+// Mirrored here so the fixture reproduces the REAL on-disk shape gate 2
+// inspects; a fixture that ignored this would make every gate-2 test vacuous.
+function globalRootFor(prefix) {
+  return process.platform === "win32"
+    ? path.join(prefix, "node_modules")
+    : path.join(prefix, "lib", "node_modules");
+}
+
+// Copies the published package's relative layout (package.json + lib/ +
+// scripts/) into `pkgDir` so the script's `require("../lib/platform-binary")`
+// resolves exactly as it would once installed, AND plants a platform-package
+// stub with a package.json but NO bin binary so `require.resolve` is FORCED to
+// fail on any host. That stub is the safety net that keeps every test in this
+// file side-effect-free: even if a guard assertion were wrong, the script can
+// never resolve — let alone spawn — a real binary.
+function materializePackage(pkgDir) {
+  fs.mkdirSync(pkgDir, { recursive: true });
+  // Mirror the published meta package: CommonJS, so the copied scripts load as
+  // CommonJS regardless of any ancestor package.json on the test host.
   fs.writeFileSync(
-    path.join(tmp, "package.json"),
-    JSON.stringify({ name: "mcp-local-hub-postinstall-fixture", type: "commonjs" }) + "\n",
+    path.join(pkgDir, "package.json"),
+    JSON.stringify({ name: "mcp-local-hub", type: "commonjs" }) + "\n",
   );
-  fs.mkdirSync(path.join(tmp, "lib"));
-  fs.mkdirSync(path.join(tmp, "scripts"));
+  fs.mkdirSync(path.join(pkgDir, "lib"));
+  fs.mkdirSync(path.join(pkgDir, "scripts"));
   fs.copyFileSync(
     path.join(__dirname, "lib", "platform-binary.js"),
-    path.join(tmp, "lib", "platform-binary.js"),
+    path.join(pkgDir, "lib", "platform-binary.js"),
   );
   fs.copyFileSync(
     path.join(__dirname, "scripts", "postinstall.js"),
-    path.join(tmp, "scripts", "postinstall.js"),
+    path.join(pkgDir, "scripts", "postinstall.js"),
   );
 
-  // require.resolve(`<pkg>/bin/<name>`) then throws (file missing) AND this
-  // local dir shadows any real platform package elsewhere on the machine, so
-  // the test never spawns a real binary. On an unsupported host the map miss
-  // takes the "no platform binary" branch — also exit 0 + fallback notice.
   const key = `${process.platform}-${process.arch}`;
   const pkg = PACKAGE_BY_PLATFORM[key];
   if (pkg) {
-    const pkgDir = path.join(tmp, "node_modules", ...pkg.split("/"));
-    fs.mkdirSync(pkgDir, { recursive: true });
+    const stubDir = path.join(pkgDir, "node_modules", ...pkg.split("/"));
+    fs.mkdirSync(stubDir, { recursive: true });
     fs.writeFileSync(
-      path.join(pkgDir, "package.json"),
+      path.join(stubDir, "package.json"),
       JSON.stringify({ name: pkg, version: "0.0.0" }) + "\n",
     );
   } else {
-    fs.mkdirSync(path.join(tmp, "node_modules"));
+    // Unsupported host: the map miss takes the "no platform binary" branch,
+    // which is also exit 0 + fallback notice.
+    fs.mkdirSync(path.join(pkgDir, "node_modules"), { recursive: true });
   }
-  return tmp;
 }
 
-function runPostinstall(tmp, extraEnv) {
-  // Fresh HOME/USERPROFILE so nothing here can touch the real ~/.local.
-  // `npm_config_global` is deleted from the inherited base FIRST (this test
-  // file itself might be running under `npm test`, whose own env could carry
-  // an inherited value) so the test's intent (set vs left unset via
-  // `extraEnv`) is never accidentally satisfied by whatever launched this
-  // test runner; `extraEnv` is applied afterward and wins when it sets it.
-  const env = { ...process.env, HOME: tmp, USERPROFILE: tmp };
+// `placement` decides where the package sits relative to the global root —
+// which is exactly what gate 2 adjudicates:
+//   "top-level"  -> <globalRoot>/mcp-local-hub          (a real `npm i -g mcp-local-hub`)
+//   "scoped"     -> <globalRoot>/@acme/mcp-local-hub    (same, for a scoped name)
+//   "transitive" -> <globalRoot>/parent-pkg/node_modules/mcp-local-hub
+//                   (mcphub pulled in by someone else's `npm i -g parent-pkg`)
+//   "local"      -> <base>/project/node_modules/mcp-local-hub (ordinary local install)
+function buildFixture(placement = "top-level") {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "mcphub-postinstall-"));
+  const prefix = path.join(base, "prefix");
+  const globalRoot = globalRootFor(prefix);
+  fs.mkdirSync(globalRoot, { recursive: true });
+
+  // A HOME/USERPROFILE of its own, so nothing here can reach the real ~/.local.
+  const home = path.join(base, "home");
+  fs.mkdirSync(home, { recursive: true });
+
+  let pkgDir;
+  switch (placement) {
+    case "top-level":
+      pkgDir = path.join(globalRoot, "mcp-local-hub");
+      break;
+    case "scoped":
+      pkgDir = path.join(globalRoot, "@acme", "mcp-local-hub");
+      break;
+    case "transitive":
+      pkgDir = path.join(globalRoot, "parent-pkg", "node_modules", "mcp-local-hub");
+      break;
+    case "local":
+      pkgDir = path.join(base, "project", "node_modules", "mcp-local-hub");
+      break;
+    default:
+      throw new Error(`unknown placement: ${placement}`);
+  }
+
+  materializePackage(pkgDir);
+  return { base, prefix, globalRoot, home, pkgDir };
+}
+
+function runPostinstall(fixture, extraEnv) {
+  // Every npm_config_* key this script reads is deleted from the inherited
+  // base env FIRST — this test file may itself be running under `npm test`,
+  // whose environment could otherwise satisfy a test's intent by accident.
+  // `extraEnv` is applied afterward and wins; a key set to `undefined` there
+  // is deleted, which is how the "npm_config_prefix unset" case is expressed.
+  const env = { ...process.env, HOME: fixture.home, USERPROFILE: fixture.home };
   delete env.npm_config_global;
-  Object.assign(env, extraEnv);
-  return spawnSync(process.execPath, [path.join(tmp, "scripts", "postinstall.js")], {
+  delete env.npm_config_location;
+  env.npm_config_prefix = fixture.prefix;
+  for (const [key, value] of Object.entries(extraEnv || {})) {
+    if (value === undefined) delete env[key];
+    else env[key] = value;
+  }
+
+  return spawnSync(process.execPath, [path.join(fixture.pkgDir, "scripts", "postinstall.js")], {
     encoding: "utf8",
     env,
+    // A lifecycle script runs with the package directory as cwd; gate 2 reads
+    // process.cwd(), so this is load-bearing, not incidental.
+    cwd: fixture.pkgDir,
   });
 }
 
-test("postinstall exits 0 with a `mcphub setup` fallback when the platform binary is unresolvable (global install)", () => {
-  const tmp = buildFixture();
+function withFixture(placement, fn) {
+  const fixture = buildFixture(placement);
   try {
-    // This is the resolve-failure branch, which is only reachable when the
-    // global-install guard passes — so this test doubles as proof that a
-    // global install proceeds past the guard into the resolve/spawn logic.
-    const res = runPostinstall(tmp, { npm_config_global: "true" });
+    fn(fixture);
+  } finally {
+    fs.rmSync(fixture.base, { recursive: true, force: true });
+  }
+}
 
-    assert.strictEqual(
-      res.status,
-      0,
-      `postinstall must exit 0 on a resolve failure; got ${res.status}\nstderr:\n${res.stderr}`,
+// Asserts the guard PASSED: the script reached the resolve/spawn logic and
+// failed there (the fixture guarantees resolution fails), exiting 0 with the
+// `mcphub setup` fallback and no skip notice.
+function assertReachedRealWork(res) {
+  assert.strictEqual(
+    res.status,
+    0,
+    `postinstall must exit 0 on a resolve failure; got ${res.status}\nstderr:\n${res.stderr}`,
+  );
+  assert.match(
+    res.stderr,
+    /mcphub setup/,
+    `fallback notice must point at \`mcphub setup\`; stderr:\n${res.stderr}`,
+  );
+  // The GUARD's skip notice is `skipping ... canonicalize (<reason>)`; the
+  // resolve/spawn failure notices use `...; skipping ... canonicalize — run
+  // \`mcphub setup\``. Match the parenthesized reason so this asserts the guard
+  // did not fire, without also rejecting the resolve-failure branch we WANT.
+  assert.doesNotMatch(
+    res.stderr,
+    /skipping ~\/\.local\/bin canonicalize \(/,
+    `a top-level global install must not print the guard's skip notice; stderr:\n${res.stderr}`,
+  );
+}
+
+// Asserts the guard FIRED before any resolve/spawn attempt. Neither the
+// "no platform binary" nor the "platform binary not installed" notice (both of
+// which only fire from INSIDE the resolve logic) may appear, and the notice
+// must not point at `mcphub setup` the way every resolve/spawn failure does.
+function assertSkippedBeforeRealWork(res, reasonPattern) {
+  assert.strictEqual(
+    res.status,
+    0,
+    `postinstall must still exit 0 when skipping; got ${res.status}\nstderr:\n${res.stderr}`,
+  );
+  assert.match(
+    res.stderr,
+    reasonPattern,
+    `skip notice must state the right reason; stderr:\n${res.stderr}`,
+  );
+  assert.doesNotMatch(
+    res.stderr,
+    /platform binary|mcphub canonicalize|mcphub setup/,
+    `a skipped install must never reach resolve/spawn code; stderr:\n${res.stderr}`,
+  );
+}
+
+test("global install via `-g` (npm_config_global) reaches the resolve/spawn path", () => {
+  withFixture("top-level", (fixture) => {
+    assertReachedRealWork(runPostinstall(fixture, { npm_config_global: "true" }));
+  });
+});
+
+// Bot PR #586 finding 1: `npm install --location=global` is a documented
+// global-install mode that sets npm_config_location instead of
+// npm_config_global. Probed on npm 11.17.0: `-g` sets global=true with
+// location unset; `--location=global` sets location=global with global unset.
+test("global install via `--location=global` reaches the resolve/spawn path", () => {
+  withFixture("top-level", (fixture) => {
+    assertReachedRealWork(
+      runPostinstall(fixture, { npm_config_global: undefined, npm_config_location: "global" }),
     );
-    assert.match(
-      res.stderr,
-      /mcphub setup/,
-      `fallback notice must point at \`mcphub setup\`; stderr:\n${res.stderr}`,
-    );
-    assert.doesNotMatch(
-      res.stderr,
+  });
+});
+
+test("a scoped top-level global install is still recognized as the target", () => {
+  withFixture("scoped", (fixture) => {
+    assertReachedRealWork(runPostinstall(fixture, { npm_config_global: "true" }));
+  });
+});
+
+test("no global signal at all skips canonicalize without resolving or spawning", () => {
+  withFixture("local", (fixture) => {
+    assertSkippedBeforeRealWork(runPostinstall(fixture, {}), /not a global install/);
+  });
+});
+
+test("npm_config_global=false (npm's own negative form) is treated as non-global", () => {
+  withFixture("local", (fixture) => {
+    assertSkippedBeforeRealWork(
+      runPostinstall(fixture, { npm_config_global: "false" }),
       /not a global install/,
-      `a global install must not print the skip notice; stderr:\n${res.stderr}`,
     );
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
+  });
 });
 
-test("postinstall skips ~/.local/bin canonicalize without resolving/spawning anything when npm_config_global is unset (local/transitive install)", () => {
-  const tmp = buildFixture();
-  try {
-    const res = runPostinstall(tmp, {});
-
-    assert.strictEqual(
-      res.status,
-      0,
-      `postinstall must still exit 0 when skipping; got ${res.status}\nstderr:\n${res.stderr}`,
+// Bot PR #586 finding 2: npm runs the lifecycle scripts of a `-g` install's
+// TRANSITIVE dependencies with npm_config_global=true as well. Gate 1 alone
+// would let that replace the PATH binary of a host that never asked for
+// mcphub — the exact case this guard claims to prevent.
+test("a transitive dependency of a global install is skipped even though npm reports global", () => {
+  withFixture("transitive", (fixture) => {
+    assertSkippedBeforeRealWork(
+      runPostinstall(fixture, { npm_config_global: "true" }),
+      /dependency of the global install, not its target/,
     );
-    assert.match(
-      res.stderr,
-      /skipping ~\/\.local\/bin canonicalize \(not a global install\)/,
-      `local/transitive install must print the skip notice; stderr:\n${res.stderr}`,
-    );
-    // Proves the guard fired BEFORE any resolve/spawn attempt: neither the
-    // "no platform binary" nor the "platform binary not installed" fallback
-    // notice (which only fire from inside the resolve logic) appears, and
-    // the notice does not point at `mcphub setup` the way every resolve/spawn
-    // failure notice does.
-    assert.doesNotMatch(
-      res.stderr,
-      /platform binary|mcphub canonicalize|mcphub setup/,
-      `local/transitive install must never reach resolve/spawn code; stderr:\n${res.stderr}`,
-    );
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
+  });
 });
 
-test("postinstall skips ~/.local/bin canonicalize when npm_config_global=false (npm's own negative form)", () => {
-  const tmp = buildFixture();
-  try {
-    const res = runPostinstall(tmp, { npm_config_global: "false" });
-
-    assert.strictEqual(res.status, 0, `postinstall must exit 0; got ${res.status}\nstderr:\n${res.stderr}`);
-    assert.match(
-      res.stderr,
-      /skipping ~\/\.local\/bin canonicalize \(not a global install\)/,
-      `npm_config_global=false must be treated as non-global; stderr:\n${res.stderr}`,
+// Gate 2 also backstops gate 1: an operator carrying `location=global` in
+// their .npmrc while running an ordinary local install lands in a project's
+// node_modules, not the global root.
+test("`location=global` from config does not authorize an ordinary local install", () => {
+  withFixture("local", (fixture) => {
+    assertSkippedBeforeRealWork(
+      runPostinstall(fixture, { npm_config_location: "global" }),
+      /dependency of the global install, not its target/,
     );
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
+  });
+});
+
+test("an unverifiable global root fails CLOSED rather than canonicalizing", () => {
+  withFixture("top-level", (fixture) => {
+    assertSkippedBeforeRealWork(
+      runPostinstall(fixture, { npm_config_global: "true", npm_config_prefix: undefined }),
+      /cannot verify the global install root/,
+    );
+  });
 });
