@@ -471,7 +471,6 @@ activates the first window and exits 0.`,
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
-			defer stop()
 
 			// GUI exit-reason attribution: an ADDITIONAL signal.Notify
 			// observer alongside NotifyContext above. Go's signal package
@@ -480,27 +479,43 @@ activates the first window and exits 0.`,
 			// does — it does not steal, delay, or duplicate delivery.
 			// Second-signal handling is unchanged from the pre-existing
 			// NotifyContext registration (this observer adds no new signal
-			// semantics). NotifyContext's own
-			// ctx.Done() carries no information about WHICH signal fired;
-			// this is the only way to attribute the exit to sigint vs
-			// sigterm without rewriting NotifyContext itself. Runs in its
-			// own goroutine so a wedged event-log flock (bounded by
-			// guiExitReasonEmitTimeout) can never delay Ctrl-C
-			// responsiveness; the goroutine is best-effort and outlives
-			// RunE only long enough for the process itself to exit.
+			// semantics). NotifyContext's own ctx.Done() carries no
+			// information about WHICH signal fired; this is the only way to
+			// attribute the exit to sigint vs sigterm without rewriting
+			// NotifyContext itself.
+			//
+			// Runs in its own goroutine so a wedged event-log flock
+			// (bounded by guiExitReasonEmitTimeout) can never delay Ctrl-C
+			// responsiveness. P2-5 REVIEW FIX: the goroutine used to be
+			// fire-and-forget (best-effort, "outlives RunE only long enough
+			// for the process itself to exit") — a fast shutdown could
+			// therefore let the process exit before the goroutine's
+			// gui.EmitExitReasonEvent call ever ran, silently losing the
+			// attribution. It is now JOINED: exitReasonWG.Wait() below
+			// blocks (bounded — see awaitGUIExitSignalReason's doc) until
+			// the attribution attempt has completed or was correctly
+			// skipped, before this deferred cleanup — and therefore RunE
+			// itself — returns.
 			guiExitSignalCh := make(chan os.Signal, 1)
 			signal.Notify(guiExitSignalCh, syscall.SIGINT, syscall.SIGTERM)
-			defer signal.Stop(guiExitSignalCh)
+			var exitReasonWG sync.WaitGroup
+			exitReasonWG.Add(1)
 			go func() {
-				sig, ok := <-guiExitSignalCh
-				if !ok {
-					return
-				}
-				reason := gui.GUIExitReasonSIGTERM
-				if sig == syscall.SIGINT {
-					reason = gui.GUIExitReasonSIGINT
-				}
-				gui.EmitExitReasonEvent(reason, nil)
+				defer exitReasonWG.Done()
+				awaitGUIExitSignalReason(ctx, guiExitSignalCh, gui.EmitExitReasonEvent)
+			}()
+			defer func() {
+				// stop() FIRST and unconditionally: it guarantees ctx.Done()
+				// fires (idempotent — context.CancelFunc tolerates repeat
+				// calls) even when RunE is returning for a reason that never
+				// touched ctx itself (e.g. an early startup error before any
+				// signal/shutdown). Without this ordering,
+				// awaitGUIExitSignalReason could still be parked on its
+				// select with NEITHER branch ready, and Wait() below would
+				// hang forever instead of returning promptly.
+				stop()
+				signal.Stop(guiExitSignalCh)
+				exitReasonWG.Wait()
 			}()
 
 			// Phase 5 Task 5.3: --reset-port is a state-dir operation
@@ -1434,7 +1449,11 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 					// GUI exit-reason attribution: emit BEFORE stop() so the
 					// event is durable even if shutdown proceeds quickly.
 					// Bounded (guiExitReasonEmitTimeout) — never delays Quit
-					// beyond that ceiling.
+					// beyond that ceiling. If an OS signal races this click,
+					// gui.EmitExitReasonEvent's own process-wide
+					// first-trigger-wins dedup (P2-5 review fix) ensures only
+					// whichever call actually runs first is durably recorded
+					// — never both.
 					gui.EmitExitReasonEvent(gui.GUIExitReasonTrayQuit, nil)
 					stop()
 				},

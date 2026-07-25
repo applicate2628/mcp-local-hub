@@ -13,6 +13,7 @@ package gui
 
 import (
 	"path/filepath"
+	"sync"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -38,8 +39,26 @@ const (
 	GUIExitReasonSelfRestart        GUIExitReason = "self-restart-v3"
 )
 
-// EmitExitReasonEvent records, as a bounded best-effort row in
-// supervisor-events.log, WHICH trigger began a `mcphub gui` process's exit.
+// exitReasonOnce is the process-wide first-trigger-wins guard (P2-5 review
+// fix). A `mcphub gui` process exits exactly once, so at most one of its
+// several possible triggers (an OS signal, a tray Quit/QuitAndStopAll click,
+// a restart-v3 self-restart) is the TRUE reason; without this guard a signal
+// racing a tray click (or any other pair of triggers firing close together
+// during a fast shutdown) would each independently call EmitExitReasonEvent
+// and write two conflicting rows for one shutdown. Reset only via
+// ResetExitReasonDedupForTest — production never resets it.
+var exitReasonOnce sync.Once
+
+// EmitExitReasonEvent records, AT MOST ONCE per process and as a bounded
+// best-effort row in supervisor-events.log, WHICH trigger began a
+// `mcphub gui` process's exit. EmitExitReasonEvent is the single owner of
+// this invariant across every call site — internal/cli/gui.go's signal
+// observer and tray Quit/QuitAndStopAll handlers, and this package's own
+// RequestSelfRestartExit — so first-trigger-wins dedup lives here exactly
+// once rather than being re-implemented at each call site (C1: one owner
+// per cross-cutting invariant). The FIRST call in the process actually
+// writes the row; every later call (any reason, any call site) is a silent
+// no-op.
 //
 // Best-effort: an unresolvable state dir or a wedged event-log flock is
 // silently swallowed (mirrors emitLivenessEvent's polarity in
@@ -47,6 +66,12 @@ const (
 // never a gate, and MUST NOT delay or fail the exit it is describing beyond
 // the bounded guiExitReasonEmitTimeout.
 func EmitExitReasonEvent(reason GUIExitReason, extra map[string]any) {
+	exitReasonOnce.Do(func() {
+		emitExitReasonEventOnce(reason, extra)
+	})
+}
+
+func emitExitReasonEventOnce(reason GUIExitReason, extra map[string]any) {
 	stateDir, err := api.DaemonStateDirReadOnly()
 	if err != nil {
 		return
@@ -67,4 +92,15 @@ func EmitExitReasonEvent(reason GUIExitReason, extra map[string]any) {
 		Event:    "gui-exit-reason",
 		Body:     body,
 	}, guiExitReasonEmitTimeout)
+}
+
+// ResetExitReasonDedupForTest clears the process-wide first-trigger-wins
+// guard so a test can exercise EmitExitReasonEvent's per-reason round-trip
+// (or the dedup itself) more than once in the same test binary. Production
+// code never calls this. Test-only — mirrors ResetRestartV3ResolvedForTest's
+// exported-from-a-production-file pattern (gui_restart_gate.go) so a test in
+// THIS package can reset the guard between cases without a private
+// per-file copy.
+func ResetExitReasonDedupForTest() {
+	exitReasonOnce = sync.Once{}
 }
