@@ -88,6 +88,54 @@ stub `Exit`/`Quit` functions), so this instrumentation is inert under `go test`.
   `Get-CimInstance Win32_Process`; the only running `mcphub.exe` processes were the
   operator's live fleet at the installed `~/.local/bin` path — left untouched).
 
+## Review round 2 — independent cross-family reviewer, 5 findings, all fixed
+
+An independent cross-family reviewer returned REVISE against the round-1 delivery above.
+All 5 findings were reproduced with a failing test first, fixed, and mutation-proven
+(guard temporarily removed, target test confirmed to fail, guard restored) before
+committing. 5 new commits on this branch:
+
+- **`90fcf526`** (P1-1) — `guiOwnerAliveFn`/`probeGUIOwnerAlive` widened from a bare bool
+  to a `guiOwnerProbeState` tri-state (`guiOwnerStateAlive` /
+  `guiOwnerStateConfirmedDead` / `guiOwnerStateUnknown`) keyed on `Verdict.Class`. The
+  round-1 bool collapsed a malformed/unresolvable probe into the same value a
+  confirmed-dead owner produces, which AUTHORIZED the headless-fleet relaunch (a
+  `schtasks /Run` against a `StopExisting` task) on a merely-ambiguous read — the worst
+  finding. Only `guiOwnerStateConfirmedDead` (`VerdictDeadPID`) authorizes that relaunch
+  now; `guiOwnerStateUnknown` suppresses (headless-fleet branch) or routes to the
+  GUI-independent standalone relaunch (supervisor-down branch) instead. Side effect: also
+  fixes a pre-existing macOS gap (a ping-matching Healthy verdict used to read
+  `PIDAlive=false` there).
+- **`9f278d5e`** (P1-2) — `ensureAliveHeadlessFleetLiveHandoffSuppressed` no longer gates
+  its handoff-marker READ on this process's own `gui.RestartV3Enabled()`. That resolver
+  legitimately gates whether THIS process may INITIATE a v3 restart; it must not disable
+  RECOGNITION of another process's already-in-flight handoff marker. Added
+  `gui.ResetRestartV3ResolvedForTest` (single owner, replacing a private test-only copy)
+  so a cross-package test can force the gate's value despite its process-wide
+  `sync.Once`.
+- **`fad399df`** (P1-3) — added the `guiServingProbeFn` injectable seam so
+  `TestEnsureAlive_HeadlessFleet_RelaunchesGUI` no longer issues a real HTTP GET to
+  `127.0.0.1:9125` (the well-known default GUI port) when it "fakes" a relaunch — the
+  post-relaunch serving attestation was calling the real probe unconditionally.
+- **`91d7da93`** (P1-4) — `SupervisorEventLog.emit`'s `emitTimeout` mode now bounds the
+  ENTIRE write (rotation/open/write/close), not just mutex+flock acquisition. Fixed in
+  the shared `internal/api/supervisor_events.go` (not any one caller) since 6 call sites
+  across 3 packages rely on the same documented "never hang forever" contract, most
+  notably `RequestSelfRestartExit` emitting synchronously right before `os.Exit(0)`.
+- **`cde73948`** (P2-5) — `gui.EmitExitReasonEvent` now dedups process-wide
+  (`exitReasonOnce`, first-trigger-wins) so a signal racing a tray Quit can't write two
+  conflicting reasons. Extracted `internal/cli/gui_exit_signal.go`'s
+  `awaitGUIExitSignalReason` so RunE's signal observer selects on `ctx.Done()` as well as
+  the signal channel — making it safe to JOIN via a `sync.WaitGroup` before RunE returns
+  (round-1's version was fire-and-forget, so a fast shutdown could exit before its event
+  landed).
+
+Gate for this round: `go build ./...` clean, `go vet ./...` clean, scoped `-run`
+tests green on `internal/api` (`SupervisorEvent`), `internal/cli`
+(`EnsureAlive|ExitSignal|AwaitGUIExitSignalReason|ProbeGUIOwnerAlive`), and
+`internal/gui` (`TestEmitExitReasonEvent|RestartV3`) — no unscoped sweep, no real
+`mcphub` process started or killed.
+
 ## Status: delivered, NOT pushed
 
 Bot review is down until Tuesday per instruction — no `git push` / PR opened. Branch is
