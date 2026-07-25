@@ -317,24 +317,28 @@ func TestMain(m *testing.M) {
 
 	// Built-in route-daemon spawn fast-path (Increment 1b,
 	// work-items/decisions/2026-07-25-supervisor-builtin-singleton-daemon.md).
-	// ensureBuiltinRouteDaemonAtStartup now seeds a real SupervisorDaemon row
-	// (Command=canonicalMcphubPath(), Args=["route","--port",...]) into
-	// supervisor-intent.json on EVERY runSupervise cold start — including
-	// inside any test that exercises the real command (newSuperviseCmd /
-	// runSupervise) WITHOUT stubbing reconcileSpawnFn via
-	// setReconcileSpawnFnForTest. In this test binary, canonicalMcphubPath()
-	// resolves to THIS binary, so the production spawn closure's
-	// `exec.Command(cmdPath, "route", "--port", <port>)` launches THIS test
-	// binary with argv[1]=="route" — a bare non-flag positional arg the
+	// DEFENSE-IN-DEPTH, not the primary guard (reviewer O2): the
+	// reconcileSpawnFn default installed below already makes the recursive-exec
+	// path this guards against UNREACHABLE via the normal newSuperviseCmd/
+	// runSupervise path, because no test in this binary ever reaches the real
+	// production spawn closure (makeProductionSpawnFnWithStatePath) anymore
+	// unless it calls that constructor directly (as TestProductionSpawnFn_*
+	// already does, deliberately, with non-route argv). This fast-path exists
+	// as a second, independent layer in case some FUTURE test constructs the
+	// production spawn closure directly with a literal route-shaped
+	// descriptor (Command=canonicalMcphubPath(), Args=["route","--port",...])
+	// and forgets to point Command somewhere other than the test binary: in
+	// this test binary, canonicalMcphubPath() resolves to THIS binary, so
+	// `exec.Command(cmdPath, "route", "--port", <port>)` would launch THIS
+	// test binary with argv[1]=="route" — a bare non-flag positional arg the
 	// `flag` package stops parsing at, so `go test`'s own generated main()
 	// would fall back to its DEFAULT flags (no `-test.run` filter) and re-run
 	// the ENTIRE package's test suite recursively inside what is supposed to
 	// be a lightweight spawned child. Unlike the two sentinel-gated helpers
-	// above (deliberate, explicitly-invoked test doubles), this path is an
-	// ordinary REAL descriptor reaching the REAL production spawn closure —
-	// so it is gated on the descriptor's own fixed, deterministic argv shape
-	// rather than an opt-in env sentinel. Mirrors the same "exit immediately,
-	// never call m.Run()" shape as the two fast-paths above.
+	// above (deliberate, explicitly-invoked test doubles), this path is gated
+	// on the descriptor's own fixed, deterministic argv shape rather than an
+	// opt-in env sentinel. Mirrors the same "exit immediately, never call
+	// m.Run()" shape as the two fast-paths above.
 	if len(os.Args) >= 2 && os.Args[1] == "route" {
 		os.Stderr.WriteString("internal/cli test binary invoked with argv[1]==\"route\" " +
 			"(the built-in route daemon's spawn argv) — exiting immediately instead of " +

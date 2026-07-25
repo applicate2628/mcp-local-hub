@@ -210,6 +210,47 @@ func setReconcileSpawnFnForTest(fn SpawnFunc) func() {
 	return func() { reconcileSpawnFn = prev }
 }
 
+// builtinRouteSeedingDisabledForTest is a package-private test seam,
+// mirroring reconcileSpawnFn / setReconcileSpawnFnForTest above.
+// Default (production, and the default for every test that does not
+// call the accessor below) is FALSE — built-in route-daemon seeding
+// stays ON, matching real supervisor behavior. Honored at the top of
+// ensureBuiltinRouteDaemonAtStartup.
+//
+// Why this seam exists (Increment 1b adversarial-review P1, 2026-07-25):
+// ensureBuiltinRouteDaemonAtStartup makes supervisor-intent.json NEVER
+// empty on any cold start (every start now seeds a route row). A small
+// number of EXISTING reconcile-wiring tests
+// (TestRunSupervise_SpawnsDaemonsFromIntent,
+// TestRunSupervise_NoIntentNoSpawn,
+// TestRunSupervise_ReconcileReadyBeforeSpawnCompletes — all in
+// supervise_reconcile_wiring_test.go) install their OWN fake spawn
+// closure via setReconcileSpawnFnForTest and assert an EXACT spawn
+// count/identity for a single non-route descriptor; they are not
+// shielded by reconcileSpawnFn's TestMain-installed no-op default
+// (settings_registry_test.go) because they explicitly override that
+// default with their own fake to observe fan-out. Those tests are
+// about the reconcile→spawn WIRING CONTRACT, not the route feature —
+// so THEY suppress route seeding via this seam, restoring their exact-
+// count assertions, rather than the route feature's own tests
+// (internal/cli/builtin_route_daemon_test.go,
+// TestSuperviseCommand_StatusIPC_ReconcileReady) disabling it, which
+// would hide the very behavior those tests exist to cover. Applied
+// surgically per-test, not as a global TestMain default, so any OTHER
+// wiring test added later that does not call this accessor still sees
+// route seeding ON by default — the same posture production has.
+var builtinRouteSeedingDisabledForTest bool
+
+// setBuiltinRouteSeedingDisabledForTest disables the built-in route-daemon
+// startup seeder for the duration of one test. Returns a restore function
+// the test defers to reinstate the (production-matching) default before the
+// next test runs.
+func setBuiltinRouteSeedingDisabledForTest() func() {
+	prev := builtinRouteSeedingDisabledForTest
+	builtinRouteSeedingDisabledForTest = true
+	return func() { builtinRouteSeedingDisabledForTest = prev }
+}
+
 // setReconcileTerminateFnForTest is the terminate-side companion of
 // setReconcileSpawnFnForTest. Currently unused by tests because the
 // startup-only reconcile scope never terminates daemons (no daemon
@@ -2517,6 +2558,9 @@ func hasUnmergedActiveLegacyStops(supervisorIntent *api.SupervisorIntentFile, da
 // pre-existing nil-intent-skips-reconcile behavior is preserved exactly —
 // this seeder never turns a real failure into a fabricated non-nil intent.
 func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIntentFile, events *api.SupervisorEventLog) *api.SupervisorIntentFile {
+	if builtinRouteSeedingDisabledForTest {
+		return intent
+	}
 	supervisorIntentPath := filepath.Join(stateDir, "supervisor-intent.json")
 
 	cmdPath := canonicalMcphubPath()
@@ -2568,6 +2612,18 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 		return intent
 	}
 
+	// Reviewer O1 (adversarial gate, 2026-07-25): if THIS write fails, the
+	// in-memory `intent` returned below already carries the route row (this
+	// session's own reconcile pass spawns it), but the disk copy does not.
+	// The next 60s IntentWatcher poll re-reads disk, refreshes intentCache to
+	// the route-less snapshot, and the orphan-reap path may terminate the
+	// just-spawned route daemon ~60s later as an undesired orphan — repeating
+	// on every restart until the underlying write failure (disk full,
+	// permission, DACL gate) is cleared. This degrades to "route daemon
+	// churns every ~60s" rather than "route daemon never runs", and the
+	// failure is surfaced via the warn event below (never silent), so it is
+	// accepted as-is rather than adding retry/backoff machinery for a rare,
+	// operator-visible disk-write failure.
 	if err := api.MutateSupervisorIntentIfChanged(supervisorIntentPath, func(f *api.SupervisorIntentFile) (bool, error) {
 		return api.EnsureBuiltinRouteDaemon(f, cmdPath, port), nil
 	}); err != nil {
