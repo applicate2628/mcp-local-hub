@@ -136,10 +136,14 @@ func (s *Server) SetLSPRouterProduction(resolver *lsp_routing.WorkspaceResolver,
 //     also never calls EnsureLSPRegistered.
 //
 // TrustedRootCheckFn stays wired (api.LSPWorkspaceRootTrusted) — it is a
-// pure READ of <state-dir>/lsp-trusted-roots.json, consulted only on the
-// first-touch path, which is unreachable anyway once AutoRegisterFn is nil;
-// keeping it wired costs nothing and keeps this constructor's deps shape
-// consistent with the production one.
+// pure READ of <state-dir>/lsp-trusted-roots.json. With AutoRegisterFn nil
+// the first-touch path itself is NOT unreachable: lspWorkspaceRootIsTrusted
+// still runs and the READ still executes on every unregistered first-touch
+// call. What becomes unreachable is only the WRITE the trust gate exists to
+// authorize — the AutoRegisterFn == nil check further down the same
+// function is what actually stops an EnsureLSPRegistered call, after the
+// trust check has already run. Keeping the gate wired costs nothing and
+// keeps this constructor's deps shape consistent with the production one.
 func (s *Server) SetLSPRouterReadOnly(resolver *lsp_routing.WorkspaceResolver, sessions *lsp_routing.SessionRouter, languages []config.LanguageSpec) {
 	if s == nil || resolver == nil || sessions == nil {
 		return

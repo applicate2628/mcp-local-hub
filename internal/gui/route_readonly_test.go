@@ -10,8 +10,16 @@
 // transcript): temporarily re-wiring SetSerenaRouterReadOnly's AutoRegisterFn
 // to a non-nil stub that performs a real registry write makes
 // TestSetSerenaRouterReadOnly_UnregisteredWorkspace_Returns503WithNoRegistryMutation
-// fail on BOTH assertions (status code and registry-entry count) — the two
-// assertions this test makes are exactly what the F1 fix depends on.
+// fail at the FIRST assertion it reaches — the status-code check — because
+// t.Fatalf halts the test there; the mutation diverts the request onto a
+// forward-attempt path instead of the canonical 503, so this specific
+// mutation never even reaches the registry-entry-count assertions. That is
+// not a gap in the test: each assertion independently guards its own
+// property. Assertion 1 alone catches any status-shape regression even if
+// the registry stayed untouched; assertions 2-3 would independently catch a
+// registry mutation that happened to preserve the 503 status (e.g. a write
+// added AFTER the response was already written). Together they are exactly
+// what the F1 fix depends on.
 package gui
 
 import (
