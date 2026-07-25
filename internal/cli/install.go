@@ -38,6 +38,8 @@ func newInstallCmdReal() *cobra.Command {
 	var all bool
 	var allClients bool
 	var reconcileHubMode bool
+	var reconcileMCPFront bool
+	var rollbackMCPFront bool
 	var upgrade bool
 	var check bool
 	c := &cobra.Command{
@@ -103,8 +105,8 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				// than implementing a half-baked preview; the upgrade
 				// flow is short enough that the operator can run
 				// `mcphub stop --all && mcphub status` for a preview.
-				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || reconcileHubMode || dryRun {
-					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--reconcile-hub-mode/--dry-run")
+				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || reconcileHubMode || reconcileMCPFront || dryRun {
+					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--reconcile-hub-mode/--reconcile-mcp-front/--dry-run")
 				}
 				// v0.6 Phase F: the v0.4.x→v0.5.0 forward-migration engine and
 				// the `--rollback-to-legacy` demotion path are deleted (there
@@ -140,7 +142,29 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if strings.TrimSpace(clientsFlag) != "" || allClients {
 					return fmt.Errorf("--reconcile-hub-mode is mutually exclusive with --clients/--all-clients; reconcile walks every (manifest, client) tuple from disk")
 				}
+				if reconcileMCPFront {
+					return fmt.Errorf("--reconcile-hub-mode is mutually exclusive with --reconcile-mcp-front")
+				}
 				return runReconcileHubMode(cmd, dryRun)
+			}
+			// Sub-increment 2a (work-items/decisions/2026-07-25-increment2-mcp-
+			// front-port-ownership.md): --reconcile-mcp-front is the ONE
+			// operator-gated write path that rewrites in-scope client
+			// serena/LSP entries from the GUI port to the settings-owned
+			// mcp_front.port (the supervisor-managed `mcphub route` front
+			// daemon's port) — nothing else in this codebase runs this
+			// automatically. --rollback reverses the most recent such run.
+			if reconcileMCPFront {
+				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients {
+					return fmt.Errorf("--reconcile-mcp-front is mutually exclusive with --server/--daemon/--all/--clients/--all-clients")
+				}
+				if dryRun {
+					return fmt.Errorf("--reconcile-mcp-front does not support --dry-run yet (it always proves route liveness before writing; use --rollback to reverse a run)")
+				}
+				return runReconcileMCPFront(cmd, rollbackMCPFront)
+			}
+			if rollbackMCPFront {
+				return fmt.Errorf("--rollback requires --reconcile-mcp-front")
 			}
 			// --check: read-only readiness probe. Print the report (blockers +
 			// optional advisories) for --server and exit 0 WITHOUT installing,
@@ -252,6 +276,14 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		"run the bidirectional hub-endpoint reconciler against the current gui_server.hub_endpoint_enabled setting; "+
 			"rewrites every client config to/from the mcphub-hub aggregate entry. "+
 			"Run AFTER flipping the Settings toggle and restarting the hub.")
+	c.Flags().BoolVar(&reconcileMCPFront, "reconcile-mcp-front", false,
+		"rewrite in-scope client serena/LSP entries to the settings-owned mcp_front.port "+
+			"(the supervisor-managed `mcphub route` front daemon), instead of the GUI's own port. "+
+			"Fails closed unless `mcphub route` is proven live on mcp_front.port first. "+
+			"Combine with --rollback to reverse the most recent run.")
+	c.Flags().BoolVar(&rollbackMCPFront, "rollback", false,
+		"with --reconcile-mcp-front: reverse the most recent reconcile-mcp-front run "+
+			"(restores serena entries from their captured backups; removes/restores LSP router entries).")
 	c.Flags().BoolVar(&upgrade, "upgrade", false,
 		"upgrade the canonical mcphub binary at ~/.local/bin/mcphub.exe to the currently-running build: "+
 			"stop every mcp-local-hub-* daemon, copy this binary over the canonical path, "+
