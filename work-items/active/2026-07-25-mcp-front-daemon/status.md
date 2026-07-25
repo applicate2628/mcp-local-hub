@@ -65,7 +65,70 @@ internal ultracode gate now; hold merge.
       non-blocking; `go test` non-race and the touched-package suites are
       fully green).
 - [ ] Re-verify PASS → Fable acceptance.
-- [ ] Supervisor daemon-descriptor wiring (auto-spawn `mcphub route`) — deferred sub-step.
+- [x] Supervisor daemon-descriptor wiring (auto-spawn `mcphub route`) — Increment
+      1b (backend-engineer). Decision record filed:
+      work-items/decisions/2026-07-25-supervisor-builtin-singleton-daemon.md.
+      Seams: `internal/api/builtin_route_daemon.go` (new — BuildBuiltinRouteDaemon
+      + EnsureBuiltinRouteDaemon, reserved TaskName `\mcp-local-hub-route-front` /
+      Server "route"); `internal/cli/supervise.go` (`ensureBuiltinRouteDaemonAtStartup`
+      call site right after `loadIntentFiles`, persists via the existing flocked
+      `api.MutateSupervisorIntentIfChanged`). Zero changes to SpawnFunc body,
+      reconcile decision logic, restart-policy SM, `composeChildEnv`, or merge
+      ownership predicates — the route descriptor's argv (`route --port N`)
+      matches neither proxy-exclusion predicate (both require `Args[0]=="daemon"`).
+      Real bug found + fixed during verification: `loadIntentFiles` returns a
+      NIL intent on a genuinely fresh host, and `runSupervise`'s own
+      initial-reconcile call is gated on `intent != nil` further down the same
+      function — a naive nil-guard-and-return would have silently skipped
+      seeding on exactly the first-ever boot. Fixed by allocating a fresh
+      `&api.SupervisorIntentFile{Version: 1}` when nil and reassigning the
+      caller's `intent` variable to the (possibly new) returned pointer.
+      Also found + fixed a test-suite-only hazard: because
+      `canonicalMcphubPath()` resolves to the TEST BINARY inside internal/cli
+      tests, and no existing `supervise_test.go` test stubs `reconcileSpawnFn`,
+      the newly-always-present route row made the REAL production spawn
+      closure exec the test binary with `argv[1]=="route"` — a bare positional
+      the `flag` package stops parsing at, so `go test`'s generated main()
+      would recursively re-run the ENTIRE suite inside what should be a
+      lightweight spawned child. Fixed in `settings_registry_test.go`'s
+      `TestMain`: an argv-gated fast-path (mirrors the file's two existing
+      sentinel-gated fast-paths) plus the root fix — `reconcileSpawnFn`
+      defaults to a safe no-op for the whole test binary unless a test opts in
+      via `setReconcileSpawnFnForTest` (verified zero existing tests relied on
+      the nil-default reaching production). `TestSuperviseCommand_StatusIPC_ReconcileReady`'s
+      stale "daemons array is always empty" assertion updated to match the new,
+      intended behavior (exactly one entry: the built-in route daemon).
+      Probe (advisory): read `serena_router.go`/`lsp_router.go`'s forward path —
+      both routers are pure HTTP forwarders (`defaultUpstreamURL` dials
+      `127.0.0.1:<workspace daemon port>/mcp`); `mcphub route` spawns no
+      in-process LSP/serena backends and has no Job-Object children of its own,
+      so there is no GUI-backend doubling risk.
+      S4 guard tests (5, all mutation-proven): `internal/api/builtin_route_daemon_test.go`
+      (`TestBuiltinRouteDaemon_SurvivesUnrelatedServerInstallThenUninstall`,
+      `TestBuiltinRouteDaemon_ReservedServerNameNotClaimedByAnyShippedManifest`),
+      `internal/cli/builtin_route_daemon_test.go`
+      (`TestEnsureBuiltinRouteDaemonAtStartup_PersistsAndSurvivesReread`,
+      `TestProductionSpawnFn_RouteDescriptorInheritsConsoleAttachSuppression`,
+      `TestBuildBuiltinRouteDaemon_PortMatchesArgsPortFlag`).
+      S5 cosmetic doc nits fixed: `internal/gui/lsp_router.go` (trust-READ vs
+      auto-register-WRITE reachability), `internal/gui/route_readonly_test.go`
+      (Fatalf-halts-at-first-assertion wording).
+      Adjacent finding filed (not fixed, out of scope, confirmed pre-existing
+      via `git stash -u` on the unmodified branch tip):
+      `work-items/bugs/2026-07-25-findwindowsexeextensionend-index-out-of-range.md`.
+      Gate: `go build ./...` + `go vet ./...` clean; full `internal/api` +
+      `internal/gui` + every other non-`internal/cli` package suite green;
+      `internal/cli` full sweep intentionally NOT run (documented flaky/crashy
+      on this host — confirmed pre-existing via the same stash test, unrelated
+      to this diff); a comprehensive targeted `internal/cli` regression set
+      (every `TestSuperviseCommand*`/`TestSupervise_*`/`TestProductionSpawnFn*`/
+      `TestLoadIntentFiles*`/`TestMergeDaemonEnv*`/`TestHasUnmergedActiveLegacyStops*`
+      plus the 3 new tests) green, re-run 5x with zero flakes; the 5 new S4
+      tests individually re-run 10x each with zero flakes.
+      Commits: 0ab0ffc7 (S1+S2 + nil-intent fix + test-hazard fix),
+      3a1d265f (S4), fa4b53de (S5), 8de7a630 (adjacent-finding bug doc),
+      621d6f0a (decision record). NOT pushed — held for Tuesday's bot per the
+      constraint above.
 - [ ] HOLD merge for Tuesday's bot.
 
 ## Review verdict (Opus architecture-reviewer, 2026-07-25) — REVISE
