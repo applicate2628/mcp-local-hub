@@ -850,13 +850,27 @@ func ensureAliveHeadlessFleetSupervisorUptime(stateDir string, now time.Time) (s
 // fakes Phase I's classifier uses, so a test that stubs only Phase I's
 // dependencies cannot silently disable this suppressor too.
 //
+// P1-2 REVIEW FIX: this function ALWAYS attempts the marker read — it does
+// NOT gate on gui.RestartV3Enabled(). A prior version early-returned
+// (false, nil) whenever THIS process's own RestartV3Enabled() resolved
+// false, which meant an ensure-alive invocation with, say,
+// MCPHUB_GUI_RESTART_V3=0 in its environment (a different env than the GUI
+// process actually mid-handoff, or a rollback window where the two
+// processes' resolutions diverge) would ignore a real, unexpired handoff
+// marker written by another process and race its relanuch against a
+// legitimate in-flight self-restart. gui.RestartV3Enabled() legitimately
+// gates whether THIS process may INITIATE a v3 restart (see
+// runEnsureAliveGUIRecovery's own gate above, which is intentionally
+// unchanged); it must never gate RECOGNITION of another process's
+// already-in-flight handoff — that is a pure, side-effect-free read of an
+// on-disk marker (HandoffMarkerStore.Read / DefaultRestartDeadlines do not
+// themselves depend on RestartV3Enabled in any way), so there is no reason
+// to skip it.
+//
 // Fail-closed: a marker-store read error suppresses (treated the same as an
 // in-flight handoff) rather than falling through to a relaunch that could
 // race a legitimate self-restart.
 func ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir string, now time.Time) (suppressed bool, err error) {
-	if !gui.RestartV3Enabled() {
-		return false, nil
-	}
 	canonicalStateDir, absErr := filepath.Abs(filepath.Clean(stateDir))
 	if absErr != nil {
 		return true, absErr

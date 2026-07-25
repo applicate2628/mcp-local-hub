@@ -676,6 +676,80 @@ func TestEnsureAlive_FreeLock_UnknownGUIOwnerState_UsesStandaloneRelaunch(t *tes
 	assertSupervisorEvent(t, stateDir, "liveness-relaunched-supervisor-under-gui")
 }
 
+// TestEnsureAlive_HeadlessFleet_LiveHandoffSuppresses_EvenWithRestartV3GateOff
+// reproduces the P1-2 review finding: ensureAliveHeadlessFleetLiveHandoffSuppressed
+// used to gate its marker READ on gui.RestartV3Enabled() — the SAME feature
+// flag that legitimately gates whether THIS process may INITIATE a v3
+// restart (runEnsureAliveGUIRecovery's own gate). Recognition of ANOTHER
+// process's already-in-flight handoff must never depend on that local
+// resolution: this test forces gui.RestartV3Enabled() to resolve false in
+// THIS process (the reviewer's exact reproduction:
+// MCPHUB_GUI_RESTART_V3=0) while a real, unexpired handoff marker sits on
+// disk, and confirms the headless-fleet relaunch is STILL suppressed.
+//
+// MUTATION: reintroduce `if !gui.RestartV3Enabled() { return false, nil }`
+// at the top of ensureAliveHeadlessFleetLiveHandoffSuppressed — this test's
+// "want 0 relaunches" assertion fails (the marker read is skipped, the
+// suppressor never fires, and the dangerous relaunch proceeds).
+func TestEnsureAlive_HeadlessFleet_LiveHandoffSuppresses_EvenWithRestartV3GateOff(t *testing.T) {
+	gui.ResetRestartV3ResolvedForTest()
+	t.Cleanup(gui.ResetRestartV3ResolvedForTest)
+	t.Setenv("MCPHUB_GUI_RESTART_V3", "0")
+	if gui.RestartV3Enabled() {
+		t.Fatal("precondition: RestartV3Enabled() must resolve false for this reproduction (MCPHUB_GUI_RESTART_V3=0)")
+	}
+
+	stateDir := ensureAliveTestStateDir(t)
+
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	// Well past boot-grace so only the live-handoff suppressor (not
+	// boot-grace) can explain a "no relaunch" outcome.
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) { return guiOwnerStateConfirmedDead, 5555, 9125 })
+	defer restoreGUI()
+
+	// Plant a real, unexpired in-progress handoff marker via the production
+	// HandoffMarkerStore — the SAME store the suppressor reads. Its
+	// construction and Read() do not consult RestartV3Enabled() at all, so
+	// this call succeeds regardless of the gate value above.
+	deadlines := gui.DefaultRestartDeadlines()
+	store := gui.NewHandoffMarkerStore(stateDir, deadlines)
+	if _, err := store.Begin(gui.HandoffBegin{
+		Generation: "gate-off-live-handoff",
+		Route:      gui.HandoffRouteSamePort,
+		OldPort:    9125,
+		NewPort:    9125,
+		OldPID:     5555,
+	}); err != nil {
+		t.Fatalf("Begin handoff marker: %v", err)
+	}
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v (must always return nil / exit 0)", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Errorf("relaunch seam called %d times despite an unexpired handoff marker (with this process's RestartV3Enabled()==false); want 0 (recognition of another process's marker must not depend on this process's own feature-gate resolution)", got)
+	}
+	if !strings.Contains(out.String(), "live-handoff") {
+		t.Errorf("output should report the live-handoff suppression; got %q", out.String())
+	}
+	assertSupervisorEvent(t, stateDir, "gui-headless-fleet-relaunch-suppressed")
+	assertSupervisorEventBody(t, stateDir, "gui-headless-fleet-relaunch-suppressed", `"reason":"live-handoff"`)
+}
+
 type ensureAliveGUIRecoveryMarkerFake struct {
 	mu                    sync.Mutex
 	record                *gui.HandoffMarkerRecord

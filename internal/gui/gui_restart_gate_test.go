@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
 	"mcp-local-hub/internal/api/apitest"
@@ -29,9 +28,12 @@ func (s *restartV3InertMatrixStarter) Start() (RestartCoordinatorStart, error) {
 	}, nil
 }
 
+// resetRestartV3ResolverForTest is a thin in-package alias for the exported
+// ResetRestartV3ResolvedForTest (gui_restart_gate.go) — single owner of the
+// reset logic (C1), kept here only so this file's existing call sites don't
+// all need renaming.
 func resetRestartV3ResolverForTest() {
-	restartV3Once = sync.Once{}
-	restartV3Resolved = false
+	ResetRestartV3ResolvedForTest()
 }
 
 func TestRestartV3Enabled_DefaultOverrideAndProcessStability(t *testing.T) {
