@@ -72,11 +72,32 @@ import (
 )
 
 // DefaultRouteDaemonPort is the fixed secondary port `mcphub route` binds by
-// default. It is intentionally distinct from the GUI's default port 9125 —
-// Increment 1 is contract-neutral: no client config points at it, so any
-// unused port works, but a fixed default (rather than always-ephemeral) lets
-// an operator or the supervisor descriptor reach it at a predictable address.
-const DefaultRouteDaemonPort = 9126
+// default. It is intentionally distinct from the GUI's default port
+// (config.ReservedGUIPort, 9125) — Increment 1 is contract-neutral: no client
+// config points at it, so any unused port works, but a fixed default (rather
+// than always-ephemeral) lets an operator or the supervisor descriptor reach
+// it at a predictable address.
+//
+// Port choice (bot/architect review finding F2, 2026-07-25): 9126 collided
+// with godbolt (configs/ports.yaml). The repo's single-owner port-map
+// convention (documented in internal/api/serena_dynamic_pool.go and
+// internal/api/global_port_alloc.go) is:
+//
+//	9121–9149  hand-assigned globals (configs/ports.yaml; highest assigned
+//	           today is vtune at 9136 — room to grow up to 9149)
+//	9150–9199  serena dynamic pool (internal/api.EffectiveSerenaPortPool)
+//	9200–9299  legacy LSP workspace-proxy rows
+//	9300–9399  marketplace single-daemon globals
+//	9400–9599  current LSP workspace-proxy pool
+//
+// 9137 sits in the "hand-assigned globals, room to grow" band, immediately
+// above the highest port configs/ports.yaml currently assigns (9136/vtune),
+// and well below the serena dynamic pool's 9150 start — it collides with
+// neither. TestDefaultRouteDaemonPort_NotInPortsYAMLOrGUIOrSerenaPool
+// (internal/cli/route_port_test.go) mechanically re-verifies this against
+// the live configs/ports.yaml and the serena pool's effective range on every
+// build, so a future edit to either cannot silently reintroduce a collision.
+const DefaultRouteDaemonPort = 9137
 
 // routeShutdownGrace bounds how long the HTTP server waits for in-flight
 // requests to finish on a graceful shutdown (SIGINT/SIGTERM) before this
