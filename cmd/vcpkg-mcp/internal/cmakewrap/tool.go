@@ -94,14 +94,26 @@ type Result struct {
 	Status Status `json:"status"`
 	Reason Reason `json:"reason,omitempty"`
 
-	Root          string `json:"root,omitempty"`
-	WorkspaceRoot string `json:"workspace_root,omitempty"`
-	Edges         []Edge `json:"edges,omitempty"`
+	Root          string   `json:"root,omitempty"`
+	WorkspaceRoot string   `json:"workspace_root,omitempty"`
+	Edges         []Edge   `json:"edges,omitempty"`
 	Files         []string `json:"files,omitempty"`
 	// Histogram is cmakegraph.Histogram VERBATIM — the operator-facing
 	// go/no-go metric this tool must not re-derive or re-interpret.
-	Histogram              cmakegraph.Histogram `json:"histogram"`
-	SkippedInStringLiteral int                  `json:"skipped_in_string_literal"`
+	Histogram cmakegraph.Histogram `json:"histogram"`
+
+	// The three fields below are cmakegraph's own COVERAGE-HONESTY signals,
+	// forwarded verbatim. They state where the walk stopped short, so a
+	// caller never mistakes a truncated graph for a complete one.
+	//
+	// NodeCapTruncated / RootsSkippedByNodeCap: at least one independent
+	// root was refused admission because the shared node budget was already
+	// exhausted — edges from it are MISSING, not absent.
+	NodeCapTruncated      bool `json:"node_cap_truncated"`
+	RootsSkippedByNodeCap int  `json:"roots_skipped_by_node_cap,omitempty"`
+	// UnscannedFiles lists files whose CONTENT could not be read (byte cap,
+	// permission error, race). Their includes are unknown, not zero.
+	UnscannedFiles []cmakegraph.UnscannedFile `json:"unscanned_files,omitempty"`
 
 	Evidence evidence.Evidence `json:"evidence"`
 }
@@ -180,14 +192,16 @@ func run(args Args, walk walkFn, walkTree walkTreeFn) Result {
 	}
 
 	return Result{
-		Status:                 evidence.StatusOK,
-		Root:                   cgResult.Root,
-		WorkspaceRoot:           cgResult.WorkspaceRoot,
-		Edges:                   edges,
-		Files:                   cgResult.Files,
-		Histogram:               cgResult.Histogram,
-		SkippedInStringLiteral:  cgResult.SkippedInStringLiteral,
-		Evidence:                ev,
+		Status:                evidence.StatusOK,
+		Root:                  cgResult.Root,
+		WorkspaceRoot:         cgResult.WorkspaceRoot,
+		Edges:                 edges,
+		Files:                 cgResult.Files,
+		Histogram:             cgResult.Histogram,
+		NodeCapTruncated:      cgResult.NodeCapTruncated,
+		RootsSkippedByNodeCap: cgResult.RootsSkippedByNodeCap,
+		UnscannedFiles:        cgResult.UnscannedFiles,
+		Evidence:              ev,
 	}
 }
 
