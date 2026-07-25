@@ -403,3 +403,60 @@ func TestSupervisorEventLog_EmitWithTimeoutWritesUncontended(t *testing.T) {
 		t.Fatalf("EmitWithTimeout uncontended did not write the event; log=%q", raw)
 	}
 }
+
+// TestSupervisorEventLog_EmitWithTimeoutBoundsStalledWrite reproduces the
+// P1-4 review finding: EmitWithTimeout previously bounded only lock
+// ACQUISITION (the mutex + flock), never the rotation-check/open/write/close
+// that follows once both locks are held. A filesystem or antivirus stall
+// INSIDE that locked body — ordinary syscalls with no cancellable surface —
+// could therefore block the caller indefinitely despite the documented
+// "never hang forever" contract. This is exactly what blocks
+// RequestSelfRestartExit (internal/gui/gui_self_restart.go), which emits
+// synchronously immediately before os.Exit(0).
+//
+// Uses the injectable supervisorEventWriteFn seam to simulate a write that
+// blocks past the caller's whole timeout budget, then asserts
+// EmitWithTimeout still returns within a bound close to that budget instead
+// of waiting for the injected write to finish.
+//
+// MUTATION: revert emit's emitTimeout branch to call
+// supervisorEventWriteFn/writeEventLine synchronously (no goroutine/select) —
+// this test then blocks until the injected write unblocks (well past its
+// budget) and the elapsed-time assertion fails.
+func TestSupervisorEventLog_EmitWithTimeoutBoundsStalledWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "supervisor-events.log")
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = logger.Close() }()
+
+	release := make(chan struct{})
+	restore := SetSupervisorEventWriteFnForTest(func(l *SupervisorEventLog, raw []byte) error {
+		<-release // simulates a filesystem/AV stall that outlives the caller's budget
+		return l.writeEventLine(raw)
+	})
+	defer func() {
+		close(release) // let the abandoned worker goroutine finish so it releases l's locks and does not leak past this test
+		restore()
+	}()
+
+	const timeout = 150 * time.Millisecond
+	start := time.Now()
+	err = logger.EmitWithTimeout(SupervisorEvent{
+		Severity: "info",
+		Source:   "autostart",
+		Event:    "emit-timeout-stalled-write",
+	}, timeout)
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrSupervisorEventEmitTimeout) {
+		t.Fatalf("EmitWithTimeout with a stalled write error = %v, want ErrSupervisorEventEmitTimeout", err)
+	}
+	if elapsed > time.Second {
+		t.Errorf("EmitWithTimeout blocked %s despite its %s budget — the write phase is not bounded (P1-4 review finding)", elapsed, timeout)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("EmitWithTimeout returned before the stalled write committed, but the log already exists: %v", statErr)
+	}
+}

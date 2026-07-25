@@ -298,6 +298,26 @@ func (l *SupervisorEventLog) TryEmit(evt SupervisorEvent) error {
 	return l.emit(evt, emitTry, 0)
 }
 
+// supervisorEventWriteFn is the injectable file-write SEAM (P1-4 review
+// fix). Production always resolves to (*SupervisorEventLog).writeEventLine;
+// a test substitutes a fake that blocks past a caller's timeout budget to
+// prove EmitWithTimeout's outer bound covers the write phase itself, not
+// just lock acquisition. Reassigning this directly from production code is
+// forbidden — SetSupervisorEventWriteFnForTest is the only allowed write
+// path, and callers MUST restore it before the next test runs.
+var supervisorEventWriteFn = func(l *SupervisorEventLog, raw []byte) error {
+	return l.writeEventLine(raw)
+}
+
+// SetSupervisorEventWriteFnForTest installs a test file-write function.
+// Returns an "uninstall" function tests defer to restore production wiring.
+// Only supervisor_events_test.go invokes this.
+func SetSupervisorEventWriteFnForTest(fn func(l *SupervisorEventLog, raw []byte) error) func() {
+	prev := supervisorEventWriteFn
+	supervisorEventWriteFn = fn
+	return func() { supervisorEventWriteFn = prev }
+}
+
 func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, timeout time.Duration) error {
 	raw, err := marshalSupervisorEventLine(evt)
 	if err != nil {
@@ -331,7 +351,11 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 	} else {
 		l.mu.Lock()
 	}
-	defer l.mu.Unlock()
+	// l.mu is now held by this goroutine. Every return path below releases
+	// it EXACTLY once — either directly here (lock-acquisition failure, or
+	// the synchronous emitBlocking/emitTry write below) or, on the bounded
+	// emitTimeout success path, by handing ownership to a spawned worker
+	// goroutine (never both — see the mode-specific branch further down).
 
 	// OS-level serialization across processes (e.g. supervisor +
 	// install CLI emitting migration events concurrently).
@@ -343,6 +367,7 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 		var locked bool
 		locked, lockErr = l.lock.TryLock()
 		if lockErr == nil && !locked {
+			l.mu.Unlock()
 			return nil
 		}
 	case emitTimeout:
@@ -353,16 +378,65 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 			// (false, nil): report the bounded skip so a mutation-audit caller
 			// can fall back after leaving its critical path. Only a genuine
 			// non-timeout lock error falls through to be reported below.
+			l.mu.Unlock()
 			if lockErr == nil || errors.Is(lockErr, context.DeadlineExceeded) {
 				return ErrSupervisorEventEmitTimeout
 			}
 		}
 	}
 	if lockErr != nil {
+		l.mu.Unlock()
 		return fmt.Errorf("supervisor event log flock: %w", lockErr)
 	}
-	defer func() { _ = l.lock.Unlock() }()
 
+	// Both locks are held by this goroutine. The remaining work — rotation
+	// check, file open, append write, close — is ordinary filesystem I/O
+	// with no cancellable syscall surface (os.OpenFile, os.Rename,
+	// (*os.File).Write/Close accept no context). A filesystem or antivirus
+	// stall here previously blocked the caller indefinitely regardless of
+	// mode, defeating EmitWithTimeout's documented "never hang forever"
+	// contract (P1-4 review finding: the timeout only ever bounded lock
+	// ACQUISITION, never the write itself). emitBlocking/emitTry already
+	// accept an unbounded wait by contract (see their own doc comments), so
+	// only emitTimeout gets the bounded wrapper below.
+	if mode != emitTimeout {
+		defer l.mu.Unlock()
+		defer func() { _ = l.lock.Unlock() }()
+		return supervisorEventWriteFn(l, raw)
+	}
+
+	// Hand off both locks to a worker goroutine so this call can give up
+	// waiting without unlocking out from under a write that may still be in
+	// flight. The worker releases both locks itself when writeEventLine
+	// returns, whether or not anyone is still waiting on it — mirroring the
+	// owned-probe release discipline in
+	// runEnsureAliveGUIRecoveryFree (internal/cli/supervise_ensure_alive.go):
+	// the locks either return to this call while it is still waiting, or
+	// this call gives up first and the abandoned goroutine finishes the
+	// write and releases them whenever the stall clears. Either way a
+	// successor Emit can never acquire either lock before the abandoned
+	// write actually completes, so log-line interleaving is still
+	// impossible.
+	done := make(chan error, 1)
+	go func() {
+		defer l.mu.Unlock()
+		defer func() { _ = l.lock.Unlock() }()
+		done <- supervisorEventWriteFn(l, raw)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ErrSupervisorEventEmitTimeout
+	}
+}
+
+// writeEventLine performs the rotation check, file open, and append write
+// for an emit call that already holds both the in-process mutex and the
+// cross-process flock. Callers MUST hold both locks before calling this and
+// release them only after it returns (directly, or — for the bounded
+// emitTimeout path in emit — via the worker goroutine that calls it).
+func (l *SupervisorEventLog) writeEventLine(raw []byte) error {
 	// Rotation check.
 	if size, ok := supervisorEventLogFileSize(l.path); ok && size >= supervisorEventLogRotateSize {
 		if rotErr := rotateSupervisorEventLogFile(l.path); rotErr != nil {
