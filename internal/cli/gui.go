@@ -473,6 +473,35 @@ activates the first window and exits 0.`,
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 
+			// GUI exit-reason attribution: an ADDITIONAL signal.Notify
+			// observer alongside NotifyContext above. Go's signal package
+			// fans out each incoming OS signal to every registered channel,
+			// so this receives the exact same SIGINT/SIGTERM NotifyContext
+			// does — it does not steal, delay, or duplicate delivery, and a
+			// second Ctrl-C still terminates the process via Go's default
+			// double-signal behavior exactly as before. NotifyContext's own
+			// ctx.Done() carries no information about WHICH signal fired;
+			// this is the only way to attribute the exit to sigint vs
+			// sigterm without rewriting NotifyContext itself. Runs in its
+			// own goroutine so a wedged event-log flock (bounded by
+			// guiExitReasonEmitTimeout) can never delay Ctrl-C
+			// responsiveness; the goroutine is best-effort and outlives
+			// RunE only long enough for the process itself to exit.
+			guiExitSignalCh := make(chan os.Signal, 1)
+			signal.Notify(guiExitSignalCh, syscall.SIGINT, syscall.SIGTERM)
+			defer signal.Stop(guiExitSignalCh)
+			go func() {
+				sig, ok := <-guiExitSignalCh
+				if !ok {
+					return
+				}
+				reason := gui.GUIExitReasonSIGTERM
+				if sig == syscall.SIGINT {
+					reason = gui.GUIExitReasonSIGINT
+				}
+				gui.EmitExitReasonEvent(reason, nil)
+			}()
+
 			// Phase 5 Task 5.3: --reset-port is a state-dir operation
 			// (clears the persisted Port in hub-mcp.endpoint.json)
 			// that intentionally does NOT start a server. The
@@ -1400,8 +1429,17 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 						fmt.Fprintf(cmd.ErrOrStderr(), "tray: toggle state-read-relax: %v\n", err)
 					}
 				},
-				Quit: stop,
+				Quit: func() {
+					// GUI exit-reason attribution: emit BEFORE stop() so the
+					// event is durable even if shutdown proceeds quickly.
+					// Bounded (guiExitReasonEmitTimeout) — never delays Quit
+					// beyond that ceiling.
+					gui.EmitExitReasonEvent(gui.GUIExitReasonTrayQuit, nil)
+					stop()
+				},
 				QuitAndStopAll: func() {
+					// GUI exit-reason attribution: see Quit above.
+					gui.EmitExitReasonEvent(gui.GUIExitReasonTrayQuitAndStopAll, nil)
 					// Stop all via HTTP (so the Dashboard sees the SSE
 					// lifecycle), then trigger the GUI shutdown. Errors
 					// don't block the shutdown — partial cleanup beats

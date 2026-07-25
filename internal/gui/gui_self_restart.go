@@ -173,7 +173,18 @@ var selfRestartExitFn = func() { os.Exit(0) }
 // RequestSelfRestartExit crosses the self-restart-specific process boundary.
 // The production seam is os.Exit, intentionally bypassing normal-return
 // defers such as CLI supervisor manager.Stop.
-func RequestSelfRestartExit() { selfRestartExitFn() }
+//
+// The exit-reason event is emitted SYNCHRONOUSLY and bounded
+// (guiExitReasonEmitTimeout) BEFORE selfRestartExitFn runs: os.Exit executes
+// no deferred functions, so a `defer EmitExitReasonEvent(...)` here would
+// never fire. No test calls this function directly (tests inject their own
+// Exit closure into the restart coordinator instead — see
+// defaultRestartV3ParentRuntime in internal/cli/gui.go), so this call never
+// touches a real supervisor-events.log during `go test`.
+func RequestSelfRestartExit() {
+	EmitExitReasonEvent(GUIExitReasonSelfRestart, nil)
+	selfRestartExitFn()
+}
 
 type retainedRestartGUIProcess struct {
 	mu          sync.Mutex
