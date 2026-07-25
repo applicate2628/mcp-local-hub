@@ -195,6 +195,23 @@ var SettingsRegistry = []SettingDef{
 	{Key: "advanced.force_kill", Section: "advanced", Type: TypeAction,
 		RenderKind: RenderCustom,
 		Help:       "Kill the recorded mcphub process holding the lock. Only available when diagnostic shows Stuck."},
+	// mcp_front.port lives under the "advanced" section (not a new
+	// "mcp_front" section) deliberately: the frontend's SECTION_IDS union
+	// (internal/gui/frontend/src/screens/Settings.tsx) is a fixed, hand-
+	// maintained list with a dedicated component per section, and adding a
+	// new section is a frontend concern out of scope for this (backend-only)
+	// sub-increment. Placing it under the existing "advanced" section keeps
+	// it visible in the GUI via the generic FieldRenderer (same renderer
+	// gui_server.port uses) and fully manageable via `mcphub settings
+	// {list,get,set}` without any frontend change. Key name intentionally
+	// does NOT follow the "prefix must match Section" convention every other
+	// entry in this table uses — nothing in the codebase enforces that
+	// convention mechanically, and the bare "mcp_front.port" key is the
+	// literal key name the front-daemon decision record + every resolver in
+	// this codebase already reference (api.MCPFrontPortSettingKey).
+	{Key: MCPFrontPortSettingKey, Section: "advanced", Type: TypeInt,
+		Default: strconv.Itoa(DefaultMCPFrontPort), Min: intPtr(1024), Max: intPtr(65535),
+		Help: "Port for the supervisor-managed MCP front daemon (`mcphub route`) that serves /serena/mcp + /lsp/<language>/mcp independently of the GUI process, so serena+LSP MCP survive GUI restarts/exits. Restart of `mcphub route` (or the supervisor) is required to take effect. This setting alone does not rewrite any client config — run `mcphub install --reconcile-mcp-front` to repoint installed clients at the new port."},
 }
 
 // findDef returns the SettingDef for the given key, or nil if unknown.
