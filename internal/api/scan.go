@@ -711,6 +711,18 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	entries := map[string]*ScanEntry{}
 	presence := probeClientConfigPresence(opts)
 	paths := opts.effectiveConfigPaths()
+	// Sub-increment 2a: a serena client entry may now legitimately point at
+	// EITHER the GUI's live port (opts.GUIPort) OR the settings-owned
+	// mcp_front.port (once an operator has run `mcphub install
+	// --reconcile-mcp-front`) — both are the SAME /serena/mcp router shape,
+	// just on two different ports. classify() must recognize both as
+	// via-hub, or a correctly-routed post-reconcile client would misclassify
+	// as a stale/external entry (the exact serena-client-revert-on-manifest-
+	// sync read-side defect this file already guards against for the GUI
+	// port alone). Best-effort/graceful: a settings-read failure degrades to
+	// the compiled default rather than failing the whole scan — this is a
+	// read-only classification widening, not a write path.
+	mcpFrontPort := a.MCPFrontPortOrDefault()
 	// §9.2 drift-prevention: ADJUST the generic per-client presence verdict for
 	// any client with a presencePostProbes hook, dispatched through the registry
 	// instead of inlining a named client. Today only MiMoCode registers one — the
@@ -796,7 +808,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		// loopback entry that backend classifies "external" must not render
 		// as a green via-hub cell).
 		e.DaemonPorts = manifestCache.daemonPorts(name)
-		e.Status = classify(e, name, manifestNames, e.DaemonPorts, opts.GUIPort)
+		e.Status = classify(e, name, manifestNames, e.DaemonPorts, opts.GUIPort, mcpFrontPort)
 		// Managed is the explicit hub-routed flag — set true iff the
 		// classifier landed on "via-hub". Keeping it derived from Status (one
 		// owner) avoids a second hub-detection path drifting out of sync with
@@ -822,7 +834,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 			ClientPresence: map[string]ClientEntry{},
 		}
 		e.DaemonPorts = manifestCache.daemonPorts(name)
-		e.Status = classify(e, name, manifestNames, e.DaemonPorts, opts.GUIPort)
+		e.Status = classify(e, name, manifestNames, e.DaemonPorts, opts.GUIPort, mcpFrontPort)
 		e.Managed = e.Status == "via-hub" // always false here (empty presence), kept for symmetry with the main loop.
 		entries[name] = e
 	}
@@ -2009,7 +2021,7 @@ func loopbackPortMatchesDaemon(endpoint string, daemonPorts []int) bool {
 	return false
 }
 
-func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPorts []int, guiPort int) string {
+func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPorts []int, guiPort int, mcpFrontPort int) string {
 	if perSessionServers[name] {
 		return "per-session"
 	}
@@ -2052,14 +2064,15 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 	for _, c := range e.ClientPresence {
 		if c.Transport == "http" && clients.IsHubHTTPURL(c.Endpoint) {
 			switch {
-			case IsSerenaServer(name) && IsLiveSerenaRouterURL(c.Endpoint, guiPort):
-				// serena's canonical client URL is the /serena/mcp router on the
-				// LIVE GUI port — recognize it as via-hub regardless of the
-				// manifest's legacy per-daemon port (9121). Without this, a
-				// correctly-routed serena entry parses its port (the GUI port) as
-				// not-a-daemon-port and is misclassified as external, so the matrix
-				// shows a connected serena as not-connected (serena-client-revert-
-				// on-manifest-sync read-side).
+			case IsSerenaServer(name) && IsLiveSerenaRouterURLAnyPort(c.Endpoint, guiPort, mcpFrontPort):
+				// serena's canonical client URL is the /serena/mcp router on
+				// EITHER the LIVE GUI port OR the settings-owned mcp_front.port
+				// (sub-increment 2a) — recognize both as via-hub regardless of
+				// the manifest's legacy per-daemon port (9121). Without this, a
+				// correctly-routed serena entry parses its port (the GUI port or
+				// the front-daemon port) as not-a-daemon-port and is misclassified
+				// as external, so the matrix shows a connected serena as
+				// not-connected (serena-client-revert-on-manifest-sync read-side).
 				//
 				// Inherited-source gate (mirrors the daemon-port branch below): a
 				// serena router cell sourced from an import / below-write-target
@@ -2111,10 +2124,12 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 		}
 		if c.Transport == "relay" {
 			if IsSerenaServer(name) {
-				// Serena relay entries must target the LIVE /serena/mcp router.
-				// A stale or absent relay --url should remain re-migratable rather
-				// than looking hub-managed while the client dials a dead GUI port.
-				if IsLiveSerenaRouterURL(c.RelayURL, guiPort) {
+				// Serena relay entries must target the LIVE /serena/mcp router,
+				// on either the GUI port or the front-daemon's mcp_front.port
+				// (sub-increment 2a). A stale or absent relay --url should
+				// remain re-migratable rather than looking hub-managed while
+				// the client dials a dead port.
+				if IsLiveSerenaRouterURLAnyPort(c.RelayURL, guiPort, mcpFrontPort) {
 					hasHub = true
 				} else {
 					hasRemoteExternal = true

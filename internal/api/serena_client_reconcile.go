@@ -113,14 +113,40 @@ func IsHubOwnedSerenaRouterEntry(e *clients.MCPEntry) bool {
 // the LIVE GUI port. guiPort<=0 means the caller has no live port, so degrade to
 // the port-agnostic shape check and never claim staleness without proof.
 func IsLiveSerenaRouterURL(endpoint string, guiPort int) bool {
+	return IsLiveSerenaRouterURLAnyPort(endpoint, guiPort)
+}
+
+// IsLiveSerenaRouterURLAnyPort is the multi-port generalization of
+// IsLiveSerenaRouterURL: an entry counts as live if its port matches ANY of
+// the caller's known-live ports (sub-increment 2a — a serena router entry
+// may legitimately point at the GUI's live port OR the settings-owned
+// mcp_front.port). A naive `IsLiveSerenaRouterURL(e, a) ||
+// IsLiveSerenaRouterURL(e, b)` is WRONG here: IsLiveSerenaRouterURL degrades
+// to "true" whenever its OWN single port argument is <=0 (the CLI-unknown-
+// port case), so OR-ing two such calls would make a genuinely stale entry
+// match via-hub as soon as EITHER port happens to be unknown — exactly the
+// class of bug TestClassify's "stale GUI port -> external" cases catch.
+//
+// Correct semantics: if NONE of the supplied ports are known (all <=0),
+// degrade to the port-agnostic shape check (matches IsLiveSerenaRouterURL's
+// single-argument behavior with guiPort<=0 exactly). If AT LEAST ONE port is
+// known (>0), the entry must match one of the KNOWN ports — an unknown port
+// contributes no vote either way.
+func IsLiveSerenaRouterURLAnyPort(endpoint string, ports ...int) bool {
 	if !IsSerenaRouterURL(endpoint) {
 		return false
 	}
-	if guiPort <= 0 {
-		return true
+	anyKnown := false
+	for _, port := range ports {
+		if port <= 0 {
+			continue
+		}
+		anyKnown = true
+		if p, ok := loopbackEntryPort(endpoint); ok && p == port {
+			return true
+		}
 	}
-	p, ok := loopbackEntryPort(endpoint)
-	return ok && p == guiPort
+	return !anyKnown
 }
 
 // IsSerenaServer reports whether a server name is the dynamic-pool serena server
@@ -201,9 +227,27 @@ func parseGUIPidportFile(path string) (pid, port int, err error) {
 // so Phase 4 can wire the gui-package primitives across the
 // api->gui-can't-import-api boundary.
 type SerenaReconcileOpts struct {
+	// Port, when non-zero, is used DIRECTLY as the client-URL port instead
+	// of discovering it via the GUI pidport file — still liveness-probed
+	// via Ping before any client write (fail-closed), just against a
+	// caller-supplied port rather than a pidport-discovered one. PidportPath
+	// / ReadPidport / VerifyIdentity are ignored when Port is set.
+	//
+	// This is the seam sub-increment 2a's `mcphub install
+	// --reconcile-mcp-front` command uses to point clients at the
+	// settings-owned mcp_front.port (internal/api.ResolveMCPFrontPort)
+	// instead of the GUI's ephemeral, pidport-discovered port — the whole
+	// point of the front-daemon decision is that the client-facing port no
+	// longer needs the GUI process to be alive to be known, only to be
+	// PROVEN live via the same readiness probe. Zero (the default) preserves
+	// every existing caller's behavior (migrate_serena.go's GUI-pidport
+	// discovery) unchanged.
+	Port int
+
 	// PidportPath is the absolute path to the GUI pidport file. Phase 4
 	// supplies gui.PidportPath(); tests supply a temp path. Required — an
-	// empty path fails closed (we never guess the router port).
+	// empty path fails closed (we never guess the router port) — UNLESS
+	// Port is set, in which case pidport discovery is skipped entirely.
 	PidportPath string
 
 	// ReadPidport parses the pidport file at PidportPath into (pid, port).
@@ -275,6 +319,14 @@ type SerenaReconcileOpts struct {
 // readiness ping bound the URL to a live, local GUI).
 var ErrSerenaReconcileGUINotLive = errors.New("serena client-reconcile: GUI not live (start `mcphub gui` first); refusing to write a guessed router URL")
 
+// ErrSerenaReconcileRouteNotLive is the Port-path counterpart of
+// ErrSerenaReconcileGUINotLive: returned when SerenaReconcileOpts.Port is
+// set but the readiness ping against it fails. Kept as a distinct sentinel
+// (rather than reusing ErrSerenaReconcileGUINotLive) because its message
+// names the correct remediation — `mcphub route` / `mcphub supervise`, not
+// `mcphub gui` — for the mcp-front reconcile command's own fail-closed gate.
+var ErrSerenaReconcileRouteNotLive = errors.New("serena client-reconcile: mcp front route daemon not live (start `mcphub route` or `mcphub supervise` first); refusing to write a guessed router URL")
+
 // ReconcileSerenaClientsToRouter rewrites each in-scope client's serena MCP
 // entry to the constant /serena/mcp router URL on the live GUI port, then
 // (optionally) removes the legacy localhost:9121 entry — but ONLY after the
@@ -298,10 +350,11 @@ var ErrSerenaReconcileGUINotLive = errors.New("serena client-reconcile: GUI not 
 func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpts) (*MigrateReport, error) {
 	report := &MigrateReport{}
 
-	// 1. Discover the live GUI port (fail-closed). This MUST happen before
-	//    any client write so a stale/absent pidport or a dead listener
-	//    never results in a guessed URL being persisted.
-	port, err := discoverLiveGUIPort(ctx, opts)
+	// 1. Resolve + prove the client-URL port live (fail-closed). This MUST
+	//    happen before any client write so a stale/absent pidport, an unproven
+	//    Port override, or a dead listener never results in a guessed URL
+	//    being persisted.
+	port, err := resolveSerenaReconcilePort(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -504,6 +557,29 @@ func inScopeReconcileClients(include []string) []string {
 		}
 	}
 	return out
+}
+
+// resolveSerenaReconcilePort resolves the client-URL port for this
+// reconcile run. opts.Port>0 takes the direct path (used by the mcp-front
+// reconcile command): the port is already known (a settings value, not
+// discovered), so it is proven live via the SAME readiness ping
+// discoverLiveGUIPort uses (opts.Ping, default defaultRouterReadinessPing)
+// before being trusted — a bare "the setting says 9137" is never enough to
+// write a client config, only "9137 answered the MCP initialize lifecycle
+// like the real router" is. opts.Port==0 (every existing caller) is
+// unchanged: pidport-based GUI discovery.
+func resolveSerenaReconcilePort(ctx context.Context, opts SerenaReconcileOpts) (int, error) {
+	if opts.Port > 0 {
+		ping := opts.Ping
+		if ping == nil {
+			ping = defaultRouterReadinessPing
+		}
+		if perr := ping(ctx, opts.Port); perr != nil {
+			return 0, fmt.Errorf("%w: port %d did not answer the readiness ping: %v", ErrSerenaReconcileRouteNotLive, opts.Port, perr)
+		}
+		return opts.Port, nil
+	}
+	return discoverLiveGUIPort(ctx, opts)
 }
 
 // discoverLiveGUIPort reads the GUI pidport, confirms the GUI is live via a

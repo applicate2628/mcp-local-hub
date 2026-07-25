@@ -21,8 +21,15 @@ const (
 // LSPClientRouterOpts controls the client-config reconcile that points
 // eligible present MCP clients at the workspace-agnostic LSP router.
 type LSPClientRouterOpts struct {
-	// GUIPort is the configured GUI/router port. Zero means read the
-	// validated gui_server.port setting through SettingsGet.
+	// GUIPort is the port written into LSP router client URLs. Zero means
+	// read the validated gui_server.port setting through SettingsGet.
+	// Despite the field name it is a plain port value, not GUI-specific:
+	// sub-increment 2a's `mcphub install --reconcile-mcp-front` command
+	// passes the settings-owned mcp_front.port here explicitly (a non-zero
+	// value skips the gui_server.port read entirely), pointing LSP router
+	// client URLs at the supervisor-managed front daemon instead of the
+	// GUI. Every existing caller keeps passing 0 or the live GUI port, so
+	// this is purely an additive use of an already-generic field.
 	GUIPort int
 	// Languages optionally narrows the manifest language set. Empty means
 	// every language declared by servers/mcp-language-server/manifest.yaml.

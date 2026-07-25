@@ -246,6 +246,89 @@ func TestSerenaClientReconcile_DiscoversPortFromLivePidport_FailsClosedWhenAbsen
 	})
 }
 
+// TestSerenaClientReconcile_PortOverride covers sub-increment 2a's
+// SerenaReconcileOpts.Port seam — the `mcphub install --reconcile-mcp-front`
+// command's port source, distinct from the pidport-discovery path every
+// other existing caller (migrate_serena.go) still uses unchanged.
+func TestSerenaClientReconcile_PortOverride(t *testing.T) {
+	managedEntriesTestHelper(t)
+
+	// (1) Port>0 + live Ping: writes the router URL at Port, and
+	//     PidportPath/ReadPidport/VerifyIdentity are never consulted (left
+	//     zero-valued here — a pidport-discovery attempt would fail closed
+	//     since PidportPath is empty, proving this path truly bypasses it).
+	t.Run("port_override_bypasses_pidport_discovery", func(t *testing.T) {
+		cs := fakeReconcileClientMap()
+		report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
+			Port:    9137,
+			Ping:    okPing,
+			Clients: cs,
+		})
+		if err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		if len(report.Applied) == 0 {
+			t.Fatalf("expected applied rewrites, got none")
+		}
+		want := "http://127.0.0.1:9137/serena/mcp"
+		for _, a := range report.Applied {
+			if a.URL != want {
+				t.Errorf("client %s URL = %q, want %q", a.Client, a.URL, want)
+			}
+		}
+	})
+
+	// (2) Port>0 + failing Ping: fails closed with ErrSerenaReconcileRouteNotLive
+	//     (the Port-path sentinel, distinct from ErrSerenaReconcileGUINotLive),
+	//     zero client writes. Mutation-proven: removing the ping call from
+	//     resolveSerenaReconcilePort's Port>0 branch makes this sub-test fail
+	//     because err becomes nil and every client gets a written entry.
+	t.Run("port_override_ping_failure_fails_closed", func(t *testing.T) {
+		cs := fakeReconcileClientMap()
+		failPing := func(context.Context, int) error { return errors.New("connection refused") }
+		_, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
+			Port:    9137,
+			Ping:    failPing,
+			Clients: cs,
+		})
+		if !errors.Is(err, ErrSerenaReconcileRouteNotLive) {
+			t.Fatalf("expected ErrSerenaReconcileRouteNotLive, got %v", err)
+		}
+		if errors.Is(err, ErrSerenaReconcileGUINotLive) {
+			t.Fatalf("Port-path failure must NOT satisfy errors.Is(ErrSerenaReconcileGUINotLive) — it is a distinct sentinel with route-specific remediation text")
+		}
+		for name, c := range cs {
+			if fc := c.(*reconcileFakeClient); fc.addCalls != 0 {
+				t.Errorf("client %s: AddEntry called %d times after port-override ping failure; want 0", name, fc.addCalls)
+			}
+		}
+	})
+
+	// (3) Port==0 (the zero value, every existing caller's default): still
+	//     goes through pidport discovery, unaffected by the new field's
+	//     existence. Guards against a regression where Port's mere presence
+	//     in the struct accidentally short-circuits the pidport path.
+	t.Run("zero_port_falls_back_to_pidport_discovery_unchanged", func(t *testing.T) {
+		pp := seedPidport(t, 4242, 9125)
+		cs := fakeReconcileClientMap()
+		report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
+			PidportPath:    pp,
+			Ping:           okPing,
+			VerifyIdentity: okGUIIdentity,
+			Clients:        cs,
+		})
+		if err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		want := "http://127.0.0.1:9125/serena/mcp"
+		for _, a := range report.Applied {
+			if a.URL != want {
+				t.Errorf("client %s URL = %q, want %q (pidport-discovered port, unaffected by the Port field)", a.Client, a.URL, want)
+			}
+		}
+	})
+}
+
 // TestSerenaClientReconcile_RejectsStalePidportSpoofedRouter verifies the
 // production discovery path does not trust a stale pidport port even when a
 // local listener fully mimics the /serena/mcp readiness signature AND echoes
