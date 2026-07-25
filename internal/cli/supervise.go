@@ -2579,7 +2579,11 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 	if intent == nil {
 		intent = &api.SupervisorIntentFile{Version: 1}
 	}
-	port := DefaultRouteDaemonPort
+	// Sub-increment 2a: the route daemon's port is now settings-owned
+	// (mcp_front.port), not a bare compiled constant — resolveMCPFrontPortFn
+	// falls back to DefaultRouteDaemonPort on any settings-read failure, so
+	// this call site's behavior is unchanged when the setting is unset/unreadable.
+	port := resolveMCPFrontPortFn()
 
 	hadRow := false
 	for _, d := range intent.Daemons {

@@ -124,13 +124,24 @@ supervisor-intent — it never reaps, installs, or starts the supervisor, and
 runs no idle/prune/reconcile ticker. Client configs and the GUI's own port
 are completely untouched.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Sub-increment 2a: an explicit --port flag always wins (this is
+			// what the supervisor descriptor passes — ensureBuiltinRouteDaemonAtStartup
+			// resolves mcp_front.port itself and bakes it into the spawned
+			// argv, so the common production path never reaches the branch
+			// below). Only a manual `mcphub route` invocation with no --port
+			// falls through to the settings-driven resolution, so an operator
+			// running the daemon by hand for testing/probing still gets the
+			// same port the supervisor would have chosen.
+			if !cmd.Flags().Changed("port") {
+				port = resolveMCPFrontPortFn()
+			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 			return runRoute(ctx, cmd, port)
 		},
 	}
 	cmd.Flags().IntVar(&port, "port", DefaultRouteDaemonPort,
-		"port to bind on 127.0.0.1 (0 = OS-assigned ephemeral port)")
+		"port to bind on 127.0.0.1 (0 = OS-assigned ephemeral port); default sources the mcp_front.port setting when omitted")
 	return cmd
 }
 
@@ -143,15 +154,19 @@ are completely untouched.`,
 // atomic is unset (which it always is here, since this command never calls
 // gui.Server.Start/ContinueWithGUIListener), so the guard needs a concrete,
 // already-resolved port at construction time.
-func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		return fmt.Errorf("bind route daemon listener on port %d: %w", port, err)
-	}
-	actualPort := ln.Addr().(*net.TCPAddr).Port
-
+// buildRouteServer constructs the gui.Server the route daemon serves,
+// wired EXACTLY the way runRoute wires it (read-only serena+LSP routers, no
+// cutover primitives, no background tickers). Extracted (sub-increment 2a)
+// so a test can exercise the real, shipped construction path via
+// s.RouteHandler() without needing a real TCP listener/goroutine — see
+// route_i6_readonly_test.go's mutation-proven regression guard for the F1
+// read-only invariant (registry + supervisor-intent untouched on an
+// unregistered-workspace tool-call), which this increment's new
+// --reconcile-mcp-front command makes reachable from a second, additional
+// client-facing port.
+func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, error) {
 	s := gui.NewServer(gui.Config{
-		Port:               actualPort,
+		Port:               port,
 		Version:            versionString(),
 		PID:                os.Getpid(),
 		ReadOnlyRouterMode: true,
@@ -159,8 +174,7 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 
 	registryPath, regErr := api.DefaultRegistryPath()
 	if regErr != nil {
-		_ = ln.Close()
-		return fmt.Errorf("resolve registry path: %w", regErr)
+		return nil, fmt.Errorf("resolve registry path: %w", regErr)
 	}
 	reg := api.NewRegistry(registryPath)
 	if err := reg.Load(); err != nil {
@@ -192,6 +206,21 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 		// Read-only wiring (F1): nils AutoRegisterFn — see
 		// gui.Server.SetLSPRouterReadOnly's doc comment and the file header.
 		s.SetLSPRouterReadOnly(lspResolver, lspSessions, m.Languages)
+	}
+	return s, nil
+}
+
+func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return fmt.Errorf("bind route daemon listener on port %d: %w", port, err)
+	}
+	actualPort := ln.Addr().(*net.TCPAddr).Port
+
+	s, err := buildRouteServer(cmd, actualPort)
+	if err != nil {
+		_ = ln.Close()
+		return err
 	}
 
 	// Deliberately absent (Increment 1 constraint — see file header):
