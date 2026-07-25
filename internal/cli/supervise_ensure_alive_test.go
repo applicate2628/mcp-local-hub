@@ -405,7 +405,8 @@ func TestEnsureAlive_HeadlessFleet_RelaunchesGUI(t *testing.T) {
 	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
 
 	// GUI is dead: guiOwnerAliveFn reports a stale (but non-zero, for
-	// realism) pid/port recorded in the last pidport write.
+	// realism — the REAL default GUI port 9125) pid/port recorded in the
+	// last pidport write.
 	restoreGUI := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) { return guiOwnerStateConfirmedDead, 5555, 9125 })
 	defer restoreGUI()
 
@@ -416,6 +417,20 @@ func TestEnsureAlive_HeadlessFleet_RelaunchesGUI(t *testing.T) {
 	})
 	defer restoreSeam()
 
+	// P1-3 review fix: the post-relaunch serving attestation MUST go
+	// through the injectable seam, never a real HTTP dial — this fake
+	// records the port it was called with (proving the widened
+	// guiOwnerAliveFn port value threads through correctly) without ever
+	// touching port 9125 on this or any other host, live fleet or not.
+	var servingProbeCalls int32
+	var servingProbePort int32
+	restoreServingProbe := setGUIServingProbeFnForTest(func(port int) bool {
+		atomic.AddInt32(&servingProbeCalls, 1)
+		atomic.StoreInt32(&servingProbePort, int32(port))
+		return true
+	})
+	defer restoreServingProbe()
+
 	out := &bytes.Buffer{}
 	if err := runEnsureAlive(stateDir, out); err != nil {
 		t.Fatalf("runEnsureAlive: %v (must always return nil / exit 0)", err)
@@ -423,11 +438,18 @@ func TestEnsureAlive_HeadlessFleet_RelaunchesGUI(t *testing.T) {
 	if got := atomic.LoadInt32(&relaunches); got != 1 {
 		t.Errorf("relaunch seam called %d times on a headless fleet; want exactly 1", got)
 	}
+	if got := atomic.LoadInt32(&servingProbeCalls); got != 1 {
+		t.Errorf("serving-probe seam called %d times; want exactly 1 (no real network dial)", got)
+	}
+	if got := atomic.LoadInt32(&servingProbePort); got != 9125 {
+		t.Errorf("serving-probe seam called with port %d; want 9125 (the widened guiOwnerAliveFn port value must thread through unchanged)", got)
+	}
 	if !strings.Contains(out.String(), "headless fleet") || !strings.Contains(out.String(), "relaunched GUI owner") {
 		t.Errorf("output should report the headless-fleet relaunch; got %q", out.String())
 	}
 	assertSupervisorEvent(t, stateDir, "gui-headless-fleet-detected")
 	assertSupervisorEvent(t, stateDir, "liveness-relaunched-gui-headless-fleet")
+	assertSupervisorEventBody(t, stateDir, "liveness-relaunched-gui-headless-fleet", `"serving_probe_ok":true`)
 }
 
 // TestEnsureAlive_HeadlessFleet_BootGraceSuppresses covers the boot-grace

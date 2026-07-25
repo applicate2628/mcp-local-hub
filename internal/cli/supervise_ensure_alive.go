@@ -799,7 +799,7 @@ func runEnsureAliveHeadlessFleet(stateDir string, out io.Writer, supervisorPID, 
 		return
 	}
 
-	servingProbeOK := probeGUIServingWithinTimeout(guiPort)
+	servingProbeOK := guiServingProbeFn(guiPort)
 	fmt.Fprintf(out, "ensure-alive: headless fleet (supervisor pid=%d); relaunched GUI owner via %s\n", supervisorPID, autostart.WindowsTaskName)
 	emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo, "liveness-relaunched-gui-headless-fleet",
 		"supervisor running with no live GUI owner; re-fired the autostart task to relaunch the GUI (adopts the live supervisor, zero daemon churn)",
@@ -899,6 +899,34 @@ func ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir string, now time.Tim
 	return now.Before(phaseDeadline), nil
 }
 
+// guiServingProbeFn is the injectable non-gating serving-attestation SEAM
+// (P1-3 review fix). Production dials the real port via
+// probeGUIServingWithinTimeout; the unit test swaps in a recording fake so
+// runEnsureAliveHeadlessFleet's test never issues a real HTTP GET against
+// ANY host port — including, in the pre-fix test, the well-known default GUI
+// port (9125), which a live operator fleet is very likely to have bound.
+// Before this seam, the test's fake guiOwnerAliveFn returned a plausible
+// port value, but the post-relaunch serving attestation below called the
+// REAL probeGUIServingWithinTimeout unconditionally, so the fake relaunch
+// (livenessRelaunchFn was stubbed to a no-op) was followed by a genuine
+// network dial to 127.0.0.1:<that port> — reaching the operator's actual
+// running GUI if one happened to be listening there. Production callers
+// MUST NOT reassign this var directly — setGUIServingProbeFnForTest is the
+// only allowed write path.
+var guiServingProbeFn = probeGUIServingWithinTimeout
+
+// setGUIServingProbeFnForTest installs a test serving-probe function.
+// Returns an "uninstall" function tests defer to restore production wiring.
+// Only supervise_ensure_alive_test.go invokes this; the default dials a real
+// HTTP GET, so every test that exercises runEnsureAliveHeadlessFleet's
+// success path MUST install a fake here (a recording fake, never a real
+// ambient port) per the P1-3 review fix.
+func setGUIServingProbeFnForTest(fn func(port int) bool) func() {
+	prev := guiServingProbeFn
+	guiServingProbeFn = fn
+	return func() { guiServingProbeFn = prev }
+}
+
 // probeGUIServingWithinTimeout is a bounded, non-gating attestation stamped
 // on the liveness-relaunched-gui-headless-fleet event as serving_probe_ok.
 // It dials the port the PRE-relaunch guiOwnerAliveFn probe observed
@@ -907,7 +935,9 @@ func ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir string, now time.Tim
 // common case: schtasks /Run does not wait for the child to start, so the
 // newly-relaunched GUI has typically not bound its port yet by the time this
 // runs. The field is diagnostic only and never influences the relaunch
-// decision already made by the caller above.
+// decision already made by the caller above. Called ONLY through the
+// guiServingProbeFn seam above — never directly from
+// runEnsureAliveHeadlessFleet — so tests can intercept it.
 func probeGUIServingWithinTimeout(port int) bool {
 	if port <= 0 {
 		return false
