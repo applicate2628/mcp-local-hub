@@ -119,16 +119,23 @@ func detectTripletFromPortDir(fsys FS, portDir string) (triplet string, candidat
 // classifyPortDir lists portDir and classifies every recognizable log file
 // for the given (already-known) triplet. otherLogPaths collects every
 // other *.log/*.txt file in the directory (artifact dumps, abi info) so
-// LogPaths always includes them even though they are not diagnostic-scanned.
-func classifyPortDir(fsys FS, portDir, triplet string) (phases []phaseLogFile, otherLogPaths []string, stdoutNarration string, err error) {
+// LogPaths always includes them even though they are not diagnostic-scanned
+// as a PRIMARY source; configureLogYAMLPaths is the subset of those that
+// are CMakeConfigureLog.yaml.log artifacts — callers may scan these as a
+// last resort, but per the scout-pass finding, a diagnostic recovered there
+// can belong to a try_compile CAPABILITY PROBE rather than the port's real
+// build, so it is kept separate rather than silently folded into the
+// primary phase scan.
+func classifyPortDir(fsys FS, portDir, triplet string) (phases []phaseLogFile, otherLogPaths []string, configureLogYAMLPaths []string, stdoutNarration string, err error) {
 	entries, err := fsys.ReadDir(portDir)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, nil, "", err
 	}
 
 	configOutName := "config-" + triplet + "-out.log"
 	configErrName := "config-" + triplet + "-err.log"
 	installPrefix := "install-" + triplet + "-"
+	patchPrefix := "patch-" + triplet + "-"
 	stdoutName := "stdout-" + triplet + ".log"
 
 	for _, e := range entries {
@@ -155,6 +162,18 @@ func classifyPortDir(fsys FS, portDir, triplet string) (phases []phaseLogFile, o
 		case strings.HasPrefix(name, installPrefix) && strings.HasSuffix(name, "-err.log"):
 			cfg := strings.TrimSuffix(strings.TrimPrefix(name, installPrefix), "-err.log")
 			phases = append(phases, phaseLogFile{Phase: PhaseInstall, Stream: "err", Config: cfg, Path: full})
+		case strings.HasPrefix(name, patchPrefix) && strings.HasSuffix(name, "-out.log"):
+			// Config field repurposed to hold the 0-based patch ordinal N
+			// (patch-<triplet>-<N>-out.log) — same "extra descriptor" slot
+			// build-config normally occupies, never both at once.
+			ord := strings.TrimSuffix(strings.TrimPrefix(name, patchPrefix), "-out.log")
+			phases = append(phases, phaseLogFile{Phase: PhasePatch, Stream: "out", Config: ord, Path: full})
+		case strings.HasPrefix(name, patchPrefix) && strings.HasSuffix(name, "-err.log"):
+			ord := strings.TrimSuffix(strings.TrimPrefix(name, patchPrefix), "-err.log")
+			phases = append(phases, phaseLogFile{Phase: PhasePatch, Stream: "err", Config: ord, Path: full})
+		case strings.HasSuffix(name, "CMakeConfigureLog.yaml.log"):
+			configureLogYAMLPaths = append(configureLogYAMLPaths, full)
+			otherLogPaths = append(otherLogPaths, full)
 		case strings.HasSuffix(name, ".log") || strings.HasSuffix(name, ".txt"):
 			// Every other artifact (config-<triplet>-<cfg>-ninja.log,
 			// -CMakeCache.txt.log, -CMakeConfigureLog.yaml.log,
@@ -164,5 +183,5 @@ func classifyPortDir(fsys FS, portDir, triplet string) (phases []phaseLogFile, o
 			otherLogPaths = append(otherLogPaths, full)
 		}
 	}
-	return phases, otherLogPaths, stdoutNarration, nil
+	return phases, otherLogPaths, configureLogYAMLPaths, stdoutNarration, nil
 }

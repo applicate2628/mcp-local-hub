@@ -181,7 +181,7 @@ func LastFailure(args Args, deps Deps) Result {
 	}
 
 	// --- Step 7: classify phase logs -----------------------------------------
-	phases, otherLogPaths, stdoutNarration, err := classifyPortDir(deps.FS, portDir, triplet)
+	phases, otherLogPaths, configureLogYAMLPaths, stdoutNarration, err := classifyPortDir(deps.FS, portDir, triplet)
 	if err != nil {
 		res := unknownResult(ReasonNoPhaseLogsFound, ev, notes, sources)
 		res.FailedTarget = port
@@ -198,11 +198,15 @@ func LastFailure(args Args, deps Deps) Result {
 	}
 
 	// --- Step 8: scan phases in build order, last phase with a match wins ---
-	phaseOrder := []Phase{PhaseExtract, PhaseConfig, PhaseInstall}
+	// A "FAILED:" line ANYWHERE can be the tail of a user-interrupted build
+	// (scout-pass trap 2) rather than a genuine defect — checked across
+	// every phase log read, never assumed absent.
+	phaseOrder := []Phase{PhaseExtract, PhasePatch, PhaseConfig, PhaseInstall}
 	var chosenPhase Phase
 	var chosenDiags []Diagnostic
 	var allLogPaths []string
 	var chosenOutLog, chosenErrLog string
+	interrupted := false
 
 	for _, ph := range phaseOrder {
 		var thisPhaseDiags []Diagnostic
@@ -216,6 +220,9 @@ func LastFailure(args Args, deps Deps) Result {
 			data, rerr := deps.FS.ReadFile(pf.Path)
 			if rerr != nil {
 				continue
+			}
+			if DetectInterrupted(data) {
+				interrupted = true
 			}
 			d := ScanDiagnostics(data)
 			thisPhaseDiags = append(thisPhaseDiags, d...)
@@ -233,13 +240,16 @@ func LastFailure(args Args, deps Deps) Result {
 	}
 
 	// Bonus/fallback: the top-level per-port narration log, only consulted
-	// when none of the three phase logs yielded a match.
+	// when none of the primary phase logs yielded a match.
 	if stdoutNarration != "" {
 		allLogPaths = append(allLogPaths, stdoutNarration)
 		ev.AddPath(stdoutNarration)
 	}
 	if len(chosenDiags) == 0 && stdoutNarration != "" {
 		if data, rerr := deps.FS.ReadFile(stdoutNarration); rerr == nil {
+			if DetectInterrupted(data) {
+				interrupted = true
+			}
 			if d := ScanDiagnostics(data); len(d) > 0 {
 				chosenPhase = PhaseInstall
 				chosenDiags = d
@@ -248,8 +258,36 @@ func LastFailure(args Args, deps Deps) Result {
 		}
 	}
 
+	// Second-to-last resort: a CMakeConfigureLog.yaml.log capability-probe
+	// dump. A diagnostic recovered ONLY here may describe a try_compile
+	// probe rather than the port's real build (scout-pass finding) — the
+	// note below flags exactly that caveat so a caller does not over-trust
+	// it as strongly as a primary-phase-log diagnostic.
+	usedCapabilityProbeLog := false
+	if len(chosenDiags) == 0 {
+		for _, p := range configureLogYAMLPaths {
+			data, rerr := deps.FS.ReadFile(p)
+			if rerr != nil {
+				continue
+			}
+			if DetectInterrupted(data) {
+				interrupted = true
+			}
+			if d := ScanDiagnostics(data); len(d) > 0 {
+				chosenPhase = PhaseConfig
+				chosenDiags = d
+				chosenOutLog = p
+				usedCapabilityProbeLog = true
+				break
+			}
+		}
+	}
+
 	overlayChain, overlayNotes := resolveOverlayChain(args, wrapperInfo, wrapperOK, deps)
 	notes = append(notes, overlayNotes...)
+	if usedCapabilityProbeLog {
+		notes = append(notes, NoteDiagnosticFromCapabilityProbeLog)
+	}
 
 	exactCommand := extractExactCommand(deps.FS, chosenPhase, chosenOutLog, chosenErrLog, wrapperOK, wrapperInfo)
 
@@ -264,6 +302,15 @@ func LastFailure(args Args, deps Deps) Result {
 	}
 	if wrapperOK && wrapperInfo.ExitCode != nil {
 		base.ExitCode = wrapperInfo.ExitCode
+	}
+
+	if interrupted {
+		// A ninja user-interrupt overrides any "FAILED:"-shaped match found
+		// alongside it — the build was stopped, not broken; reporting it as
+		// a defect would misdirect the operator (scout-pass trap 2).
+		base.Status = evidence.StatusUnknown
+		base.Reason = ReasonBuildInterrupted
+		return base
 	}
 
 	if len(chosenDiags) == 0 {

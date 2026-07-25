@@ -1,0 +1,2 @@
+[1/1] "C:/msys64/ucrt64/bin/cmake.exe" -E chdir ".." "C:/msys64/ucrt64/bin/cmake.exe" "R:/b/cl/probelib/src" "-G" "Ninja"
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed

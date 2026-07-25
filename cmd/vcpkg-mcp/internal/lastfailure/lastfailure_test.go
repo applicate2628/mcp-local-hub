@@ -125,6 +125,77 @@ func TestScanDiagnostics_GCCClangShape(t *testing.T) {
 	}
 }
 
+// TestScanDiagnostics_ScoutPassTraps_NeverMatch covers traps 1, 3, 4, 5 from
+// the 2026-07-26 scout pass over 618 real buildtrees log files: a
+// successful patch's non-empty stderr, a comment containing "error", an
+// echoed command-line flag, and CMake cache variable NAMES containing
+// "ERROR" — none of these are a genuine diagnostic and none must match.
+func TestScanDiagnostics_ScoutPassTraps_NeverMatch(t *testing.T) {
+	trapLines := []string{
+		// Trap 1: a non-empty *-err.log from a SUCCESSFUL patch apply —
+		// verified real sample (boost-atomic\patch-wingpl-0-err.log and
+		// three siblings): non-empty stderr is NOT evidence of failure.
+		`Checking patch fix-cmake.patch...`,
+		`Applied patch fix-cmake.patch cleanly.`,
+		// Trap 3: comment text containing the word "error" — verified real
+		// sample (boost-atomic\config-wingpl-rel-ninja.log).
+		`# A missing CMake input file is not an error.`,
+		// Trap 4: an echoed command-line flag containing "error" — verified
+		// real sample (same file, a printed ctest invocation).
+		`--no-tests=error`,
+		// Trap 5: CMake cache variable NAMES containing "ERROR" — verified
+		// real sample (boost-atomic\config-wingpl-rel-CMakeCache.txt.log).
+		`CMAKE_ERROR_ON_ABSOLUTE_INSTALL_DESTINATION:UNINITIALIZED=ON`,
+		`CMAKE_ERROR_DEPRECATED:INTERNAL=OFF`,
+		// A CMake capability-probe result line containing "Failed" (not
+		// "FAILED:") — verified real sample (boost-thread\config-wingpl-out.log).
+		`-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed`,
+	}
+	diags := ScanDiagnostics([]byte(strings.Join(trapLines, "\n")))
+	if len(diags) != 0 {
+		t.Fatalf("scout-pass trap lines matched as diagnostics: %+v (must be zero)", diags)
+	}
+}
+
+// TestScanDiagnostics_RealScoutPassSample_MSVCFatalErrorPlusNinjaFailed
+// reproduces the exact verbatim sample from the scout pass
+// (boost-atomic\config-wingpl-rel-CMakeConfigureLog.yaml.log): a real MSVC
+// fatal error immediately followed by ninja's own FAILED: summary line and
+// a non-interrupted "subcommand failed" tail (as opposed to "interrupted by
+// user").
+func TestScanDiagnostics_RealScoutPassSample_MSVCFatalErrorPlusNinjaFailed(t *testing.T) {
+	content := strings.Join([]string{
+		`src.cxx(1): fatal error C1083: Cannot open include file: 'pthread.h': No such file or directory`,
+		`FAILED: [code=2] CMakeFiles/cmTC_e5bae.dir/src.cxx.obj`,
+		`ninja: build stopped: subcommand failed.`,
+	}, "\n")
+
+	diags := ScanDiagnostics([]byte(content))
+	if len(diags) != 2 {
+		t.Fatalf("got %d diagnostics, want 2 (fatal error + ninja FAILED): %+v", len(diags), diags)
+	}
+	if diags[0].Severity != "error" || diags[0].Line != 1 || !strings.Contains(diags[0].Text, "C1083") {
+		t.Errorf("first diagnostic = %+v, want the normalized fatal error", diags[0])
+	}
+	if diags[1].Severity != "error" || diags[1].File != "CMakeFiles/cmTC_e5bae.dir/src.cxx.obj" {
+		t.Errorf("second diagnostic = %+v, want the ninja FAILED target", diags[1])
+	}
+	if DetectInterrupted([]byte(content)) {
+		t.Error("\"subcommand failed\" must NOT be classified as a user interrupt")
+	}
+}
+
+func TestDetectInterrupted(t *testing.T) {
+	interrupted := "FAILED: [code=1] foo.obj\nUser interrupt\nninja: build stopped: interrupted by user.\n"
+	if !DetectInterrupted([]byte(interrupted)) {
+		t.Error("expected the real interrupt sample to be detected")
+	}
+	notInterrupted := "FAILED: [code=2] foo.obj\nninja: build stopped: subcommand failed.\n"
+	if DetectInterrupted([]byte(notInterrupted)) {
+		t.Error("a genuine subcommand failure must not be classified as interrupted")
+	}
+}
+
 // --- lastfailure.go: full orchestration, buildtrees-primary -------------
 
 func TestLastFailure_Case_A_BuildtreesPlusWrapper(t *testing.T) {
@@ -300,6 +371,95 @@ func TestLastFailure_MultipleFailedPortsAmbiguous_NeverSilentlyPicks(t *testing.
 		if !strings.Contains(res.FailedTarget, want) {
 			t.Errorf("failed_target = %q, want it to list %q", res.FailedTarget, want)
 		}
+	}
+}
+
+// TestLastFailure_BuildInterrupted_NotReportedAsFailure is the integration
+// mutation proof for scout-pass trap 2: a "FAILED: [code=1]" line followed
+// by "User interrupt" / "ninja: build stopped: interrupted by user." must
+// be classified build_interrupted, never reported as a genuine build
+// defect (which would misdirect the operator into "fixing" nothing).
+func TestLastFailure_BuildInterrupted_NotReportedAsFailure(t *testing.T) {
+	args := Args{
+		Port:           "interruptedlib",
+		BuildtreesRoot: "testdata/failing_port/buildtrees",
+	}
+	res := LastFailure(args, testDeps())
+	if res.Status != evidence.StatusUnknown || res.Reason != ReasonBuildInterrupted {
+		t.Fatalf("got status=%v reason=%v, want unknown/build_interrupted; result=%+v", res.Status, res.Reason, res)
+	}
+}
+
+// TestLastFailure_PatchPhaseFileRecognized_InSituWithRealFailure exercises
+// patch-phase file classification alongside a REAL install-phase failure
+// (somelib): the patch phase's own successful, non-empty stderr must not
+// change which phase/diagnostic gets reported.
+func TestLastFailure_PatchPhaseFileRecognized_InSituWithRealFailure(t *testing.T) {
+	args := Args{
+		Port:           "somelib",
+		BuildtreesRoot: "testdata/failing_port/buildtrees",
+	}
+	res := LastFailure(args, testDeps())
+	if res.Status != evidence.StatusFailed {
+		t.Fatalf("status = %v, want failed (from the real install-phase diagnostic)", res.Status)
+	}
+	if res.Phase != PhaseBuild {
+		t.Errorf("phase = %q, want build — the patch phase succeeding must not change which phase is reported", res.Phase)
+	}
+	foundPatchLog := false
+	for _, p := range res.LogPaths {
+		if strings.Contains(p, "patch-cl-0") {
+			foundPatchLog = true
+		}
+	}
+	if !foundPatchLog {
+		t.Error("expected the patch-phase log to be classified and listed in log_paths")
+	}
+}
+
+// TestLastFailure_SuccessfulPatchAlone_NeverFabricatesFailure is the
+// isolated integration mutation proof for scout-pass trap 1: patchonlylib's
+// ONLY non-empty log anywhere in its buildtrees is patch-cl-0-err.log, and
+// its content is a SUCCESSFUL patch-apply transcript ("Checking patch...",
+// "Applied patch...cleanly."), not a diagnostic. No other phase log
+// carries any content at all, so if a regression treated "stderr
+// non-empty" as failure evidence (rather than requiring an anchored
+// diagnostic shape), this specific fixture would flip from the correct
+// unknown/no_diagnostic_found to a fabricated `failed`.
+func TestLastFailure_SuccessfulPatchAlone_NeverFabricatesFailure(t *testing.T) {
+	args := Args{
+		Port:           "patchonlylib",
+		BuildtreesRoot: "testdata/failing_port/buildtrees",
+	}
+	res := LastFailure(args, testDeps())
+	if res.Status != evidence.StatusUnknown || res.Reason != ReasonNoDiagnosticFound {
+		t.Fatalf("got status=%v reason=%v, want unknown/no_diagnostic_found — a successful patch's non-empty stderr must never be treated as failure evidence; result=%+v", res.Status, res.Reason, res)
+	}
+	if len(res.Diagnostics) != 0 {
+		t.Fatalf("fabricated diagnostics from a successful patch's non-empty stderr: %+v", res.Diagnostics)
+	}
+}
+
+// TestLastFailure_CapabilityProbeLogFallback_NotedAsSuch: no primary phase
+// log shows a failure, but a config-<triplet>-<cfg>-CMakeConfigureLog.yaml.log
+// artifact (a try_compile capability-probe dump) does. The tool must still
+// surface the diagnostic (never silently drop real evidence) but flag it
+// with the capability-probe note so a caller does not over-trust it as
+// strongly as a primary-phase-log diagnostic.
+func TestLastFailure_CapabilityProbeLogFallback_NotedAsSuch(t *testing.T) {
+	args := Args{
+		Port:           "probelib",
+		BuildtreesRoot: "testdata/failing_port/buildtrees",
+	}
+	res := LastFailure(args, testDeps())
+	if res.Status != evidence.StatusFailed {
+		t.Fatalf("status = %v, want failed (recovered from the capability-probe log); result=%+v", res.Status, res)
+	}
+	if !containsNote(res.Notes, NoteDiagnosticFromCapabilityProbeLog) {
+		t.Errorf("notes = %v, want diagnostic_from_capability_probe_log", res.Notes)
+	}
+	if !hasErrorDiagnostic(res.Diagnostics, "C1083") {
+		t.Errorf("diagnostics = %+v, want the C1083 fatal error recovered from the probe log", res.Diagnostics)
 	}
 }
 

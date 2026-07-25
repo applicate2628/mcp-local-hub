@@ -47,7 +47,49 @@ var (
 
 	msvcLinkDiagRE = regexp.MustCompile(
 		`^(?P<file>[^:()\r\n]+?)\s*:\s+(?P<sev>fatal error|error|warning)\s+(?P<code>LNK\d+)\s*:\s*(?P<msg>.+)$`)
+
+	// ninjaFailedRE matches ninja's own build-step failure summary line,
+	// e.g. `FAILED: [code=2] CMakeFiles/cmTC_e5bae.dir/src.cxx.obj` —
+	// verified real sample (scout pass, boost-atomic\config-wingpl-rel-
+	// CMakeConfigureLog.yaml.log). Anchored on the literal "FAILED:" token
+	// ninja itself emits; no CMake status line or comment observed across
+	// 618 real log files begins with this exact token (the closest look-
+	// alike, `-- Performing Test X - Failed`, starts with "--", not
+	// "FAILED:"). A ninja FAILED line names a build TARGET, not a source
+	// file:line, so it carries no Line — but per the scout pass, a
+	// "FAILED:" line can ALSO be the tail of a user-interrupted build
+	// ("User interrupt" / "ninja: build stopped: interrupted by user."
+	// immediately follows), which callers must check separately via
+	// DetectInterrupted before trusting this as a real failure.
+	ninjaFailedRE = regexp.MustCompile(`^FAILED:\s*(?:\[code=-?\d+\]\s*)?(?P<target>.+)$`)
 )
+
+// interruptMarkers are exact narrative phrases ninja emits when a build was
+// stopped by an operator/process signal rather than a genuine build defect
+// — verified real sample (scout pass, boost-thread\config-wingpl-out.log):
+// "FAILED: [code=1]" immediately followed by "User interrupt" and "ninja:
+// build stopped: interrupted by user.". These are deliberately matched as
+// plain substrings rather than an anchored shape: unlike "error" (a common
+// English word that collides with filenames/comments), these are fixed,
+// low-ambiguity ninja-owned narration sentences with negligible risk of
+// appearing as an unrelated false positive.
+var interruptMarkers = []string{
+	"User interrupt",
+	"ninja: build stopped: interrupted by user.",
+}
+
+// DetectInterrupted reports whether content carries a ninja user-interrupt
+// marker. A "FAILED:" line in the same log must NOT be reported as a real
+// build failure when this is true — the build was stopped, not broken.
+func DetectInterrupted(content []byte) bool {
+	s := string(content)
+	for _, m := range interruptMarkers {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
+}
 
 // normalizeSeverity folds "fatal error" into "error" (same category, just
 // MSVC's own more urgent spelling) so callers switch on a small set.
@@ -86,6 +128,13 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 		return Diagnostic{
 			File:     strings.TrimSpace(m[msvcLinkDiagRE.SubexpIndex("file")]),
 			Severity: normalizeSeverity(m[msvcLinkDiagRE.SubexpIndex("sev")]),
+			Text:     line,
+		}, true
+	}
+	if m := ninjaFailedRE.FindStringSubmatch(line); m != nil {
+		return Diagnostic{
+			File:     strings.TrimSpace(m[ninjaFailedRE.SubexpIndex("target")]),
+			Severity: "error",
 			Text:     line,
 		}, true
 	}

@@ -73,6 +73,15 @@ const (
 	// unambiguous marker files (stdout-<triplet>.log, <triplet>.vcpkg_abi_info.txt)
 	// named MORE than one distinct triplet — never silently picked.
 	ReasonTripletAmbiguous Reason = "triplet_ambiguous"
+	// ReasonBuildInterrupted: a phase log carries an operator/process
+	// interrupt marker ("User interrupt", "ninja: build stopped:
+	// interrupted by user.") rather than a genuine build defect. Verified
+	// real case (scout pass, boost-thread\config-wingpl-out.log): a
+	// "FAILED: [code=1]" line immediately followed by "User interrupt" —
+	// reporting this as a build failure would misdirect the operator
+	// toward fixing a bug that does not exist; the build was stopped, not
+	// broken. Deliberately distinct from ReasonNoDiagnosticFound.
+	ReasonBuildInterrupted Reason = "build_interrupted"
 )
 
 // Note is a small closed vocabulary of non-authoritative observations
@@ -96,6 +105,16 @@ const (
 	// present and does NOT name this port — real evidence the port did
 	// not fail in that run, not a guess.
 	NoteWrapperConfirmsNoFailure Note = "wrapper_confirms_port_not_failed"
+	// NoteDiagnosticFromCapabilityProbeLog: the reported diagnostic was
+	// recovered only from a CMakeConfigureLog.yaml.log artifact (a
+	// last-resort source, scanned only when the primary phase logs show
+	// nothing). Real observed nesting (scout pass,
+	// boost-atomic\config-wingpl-rel-CMakeConfigureLog.yaml.log): a
+	// try_compile CAPABILITY PROBE (e.g. FindThreads.cmake checking for
+	// pthread.h) commonly fails as a NORMAL part of feature detection —
+	// a diagnostic from this source may describe a probe, not the port's
+	// actual build failure. Surfaced so a caller does not over-trust it.
+	NoteDiagnosticFromCapabilityProbeLog Note = "diagnostic_from_capability_probe_log"
 )
 
 // ContextSource names one input the answer actually rests on. Closed enum,
@@ -108,16 +127,22 @@ const (
 )
 
 // Phase is the build phase a diagnostic (or the failure overall) belongs
-// to. Values extract/config/install mirror the exact file-phase tokens
-// observed in a real buildtrees directory; build is inferred (not a
-// separate log file) when a diagnostic inside an install-phase log has
-// compiler/linker diagnostic shape rather than a CMake install-step
+// to. Values extract/patch/config/install mirror the exact file-phase
+// tokens observed in a real buildtrees directory (scout pass over 618 real
+// log files confirmed exactly these four phases, plus the wrapper-produced
+// "stdout" narration stream which is not a vcpkg phase); build is inferred
+// (not a separate log file) when a diagnostic inside an install-phase log
+// has compiler/linker diagnostic shape rather than a CMake install-step
 // message — vcpkg's own ninja invocation compiles AND installs in one
 // "install" step, so a compile error physically lands in the install log.
 type Phase string
 
 const (
 	PhaseExtract Phase = "extract"
+	// PhasePatch: patch-<triplet>-<N>-{out,err}.log, N = 0-based patch
+	// ordinal. Applying a port's patches sequentially, between extract and
+	// configure.
+	PhasePatch   Phase = "patch"
 	PhaseConfig  Phase = "config"
 	PhaseBuild   Phase = "build"
 	PhaseInstall Phase = "install"
