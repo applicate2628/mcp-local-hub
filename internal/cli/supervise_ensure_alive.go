@@ -181,6 +181,40 @@ func spawnStandaloneSupervisor() error {
 	return nil
 }
 
+// guiOwnerProbeState classifies the DEFINITIVENESS of a GUI single-instance
+// owner probe. Before the P1-1 review fix, guiOwnerAliveFn returned a bare
+// bool that collapsed "the recorded owner is confirmed dead" (safe to
+// authorize a GUI-owner-killing relaunch) together with "the probe could not
+// determine liveness at all" (pidport path unresolvable, pidport
+// missing/garbage/out-of-range — gui.VerdictMalformed — or a
+// probe-unsupported platform) into the SAME alive=false value. Because the
+// autostart task's relaunch (relaunchSupervisorOwner) fires `schtasks /Run`
+// against a MultipleInstances=StopExisting task (scheduler_windows.go), that
+// collapse AUTHORIZED terminating a possibly-still-alive GUI on every tick a
+// probe merely came back ambiguous — the worst finding in the review. Only
+// guiOwnerStateConfirmedDead may authorize that relaunch;
+// guiOwnerStateUnknown must suppress it exactly like guiOwnerStateAlive does.
+type guiOwnerProbeState int
+
+const (
+	// guiOwnerStateUnknown: the probe could NOT determine liveness. Covers
+	// gui.PidportPath() resolution failure, gui.VerdictMalformed (pidport
+	// unreadable/garbage/out-of-range port), and any verdict class this
+	// mapping does not otherwise recognize. MUST be treated exactly like
+	// guiOwnerStateAlive by every consumer — never authorize a relaunch
+	// that could terminate a possibly-live GUI on an ambiguous read.
+	guiOwnerStateUnknown guiOwnerProbeState = iota
+	// guiOwnerStateAlive: a live PID holds the recorded single-instance
+	// lock (gui.VerdictHealthy or gui.VerdictLiveUnreachable — alive but
+	// not answering ping).
+	guiOwnerStateAlive
+	// guiOwnerStateConfirmedDead: the recorded PID is confirmed NOT
+	// running (gui.VerdictDeadPID) — the ordinary crash/taskkill/OOM
+	// topology this whole recovery feature targets, and the ONLY state
+	// that may authorize a GUI-owner-killing relaunch.
+	guiOwnerStateConfirmedDead
+)
+
 // guiOwnerAliveFn is the injectable GUI-incumbent probe SEAM. It reports
 // whether a live `mcphub gui` process currently owns the GUI single-instance
 // (pidport) lock — i.e. an OWNER process is still alive even though the
@@ -188,16 +222,16 @@ func spawnStandaloneSupervisor() error {
 // read-only gui.Probe; the unit test swaps in a recording fake so the real
 // %LOCALAPPDATA% pidport is never touched.
 //
-// Returns (alive, pid, port). port is the recorded pidport's Verdict.Port —
+// Returns (state, pid, port). port is the recorded pidport's Verdict.Port —
 // widened from the original (bool, int) shape (zero external callers of this
 // var outside this package) so the headless-fleet recovery path
 // (runEnsureAliveHeadlessFleet) can dial the GUI's actual configured port for
-// its non-gating serving attestation instead of assuming a hardcoded 9125. A
-// probe that cannot read the pidport (no file, parse error) reports
-// alive=false, port=0 — the absence of a recorded live owner is the genuine
-// OWNER-death case the relaunch path is for. Production callers MUST NOT
-// reassign this var directly — setGUIOwnerAliveFnForTest is the only allowed
-// write path.
+// its non-gating serving attestation instead of assuming a hardcoded 9125.
+// state is guiOwnerStateUnknown when the probe cannot read the pidport (no
+// file, parse error, out-of-range port) — see guiOwnerProbeState's doc for
+// why this MUST NOT be conflated with a confirmed-dead owner. Production
+// callers MUST NOT reassign this var directly — setGUIOwnerAliveFnForTest is
+// the only allowed write path.
 var guiOwnerAliveFn = probeGUIOwnerAlive
 
 // ensureAliveGUIRecoveryStore is the narrow marker authority Phase I needs:
@@ -251,7 +285,7 @@ func setStandaloneRelaunchFnForTest(fn func() error) func() {
 // supervise_ensure_alive_test.go invokes this. The default production probe
 // reads the real pidport, so tests MUST install a fake to exercise the
 // live-GUI-owner branch without touching the developer's running GUI.
-func setGUIOwnerAliveFnForTest(fn func() (bool, int, int)) func() {
+func setGUIOwnerAliveFnForTest(fn func() (guiOwnerProbeState, int, int)) func() {
 	prev := guiOwnerAliveFn
 	guiOwnerAliveFn = fn
 	return func() { guiOwnerAliveFn = prev }
@@ -268,64 +302,68 @@ func setEnsureAliveGUIRecoveryDependenciesForTest(deps ensureAliveGUIRecoveryDep
 
 // probeGUIOwnerAlive reports whether a live `mcphub gui` process owns the GUI
 // single-instance (pidport) lock. Read-only: it runs gui.Probe (no destructive
-// action) and returns the BARE Verdict.PIDAlive bit, NOT a Verdict-class
-// semantic — plus Verdict.PID and Verdict.Port so callers never need to
-// hardcode the GUI's port (it is operator-configurable via --port /
-// gui_server settings).
+// action) and classifies the result into the guiOwnerProbeState tri-state,
+// plus Verdict.PID and Verdict.Port so callers never need to hardcode the
+// GUI's port (it is operator-configurable via --port / gui_server settings).
 //
-// PLATFORM CONTRACT (PR #283 review P3-a — the doc must not over-claim):
-// Verdict.PIDAlive is set from the OS identity probe (id.Alive,
-// single_instance.go:483). It is true only on platforms where that probe can
-// OBSERVE the process — Windows amd64 (GA) and Linux (beta, processID
-// implemented). On platforms where the identity probe is unsupported (macOS
-// and Windows non-amd64), probeOnce force-sets PIDAlive=false
-// (single_instance.go:515-517,534-536), AND the VerdictHealthy early-return
-// (single_instance.go:499-504) does NOT re-set PIDAlive — so even a perfectly
-// healthy, ping-responding live GUI yields Verdict{Class:Healthy,
-// PIDAlive:false} there. Consequence: on macOS / Windows-non-amd64 this probe
-// returns (false, pid) for a LIVE healthy owner, so runEnsureAlive does NOT
-// take the standalone-supervisor RECOVERY path (§5 PART 2) and instead falls
-// through to the autostart (livenessRelaunchFn) path — which is inert there
-// (scheduler.New returns "not implemented" on non-Windows), so the only effect
-// is a misleading "liveness-relaunch-failed" warn rather than a real recovery.
-// This is Windows-GA-posture consistent: macOS is preview and Windows-non-amd64
-// is not a shipped target, so the degraded recovery there is bounded. On
-// Windows amd64 (GA) and Linux (beta) PIDAlive is observed correctly and the
-// standalone-recovery path engages as designed.
+// P1-1 REVIEW FIX: this function used to return the bare Verdict.PIDAlive
+// bool, which collapsed gui.VerdictMalformed (pidport unreadable/garbage/
+// out-of-range port) and a path-resolution failure into the SAME value as a
+// confirmed-dead owner (gui.VerdictDeadPID) — both read as alive=false. Since
+// runEnsureAliveHeadlessFleet (supervisor alive, GUI reported dead) and the
+// supervisor-down branch in runEnsureAlive both AUTHORIZE a relaunch on that
+// value, and the autostart relaunch fires `schtasks /Run` against a
+// MultipleInstances=StopExisting task, a merely-AMBIGUOUS probe result (a
+// transient I/O hiccup, a corrupted pidport, or any other Malformed cause)
+// could terminate a perfectly healthy GUI EVERY TICK. Classifying on
+// Verdict.Class instead lets the caller tell "confirmed dead" apart from
+// "we don't know," so only a genuine gui.VerdictDeadPID authorizes that
+// relaunch; everything else (including path-resolution failure) reports
+// guiOwnerStateUnknown, which every consumer MUST treat like a live owner.
 //
-// alive=true → the recorded PID is observed alive → the supervisor-down state
-// is a dead-CHILD-under-live-OWNER topology; runEnsureAlive recovers it via the
-// standalone `mcphub supervise` spawn (§5 PART 2), leaving the GUI untouched.
-// alive=false → no observable live owner (DeadPID / Malformed / unresolvable
-// path, OR an unobservable-but-healthy owner on the probe-unsupported platforms
-// above) → treated as genuine OWNER death; runEnsureAlive re-fires the autostart
-// GUI task to re-establish both the GUI owner and its supervisor.
+// Class mapping:
+//   - gui.VerdictDeadPID                                  → guiOwnerStateConfirmedDead
+//     (the ordinary crash/taskkill/OOM topology: the pidport still names the
+//     LAST daemon PID, but processID(pid).Alive is false — this is the
+//     common case the whole headless-fleet recovery feature targets.)
+//   - gui.VerdictHealthy, gui.VerdictLiveUnreachable       → guiOwnerStateAlive
+//     (LiveUnreachable is an alive-but-not-answering-ping owner, e.g. a GUI
+//     mid-restart — still a live process, never safe to kill via the
+//     GUI-owner-killing autostart relaunch.)
+//   - gui.VerdictMalformed, or gui.PidportPath() error     → guiOwnerStateUnknown
+//     (pidport missing/garbage/out-of-range port, or the path itself could
+//     not be resolved — the probe genuinely cannot tell if an owner exists.)
 //
-// DELIBERATELY the bare PIDAlive bit, NOT Verdict.Class == VerdictHealthy
-// (PR #283 review P3-b). Keying on PIDAlive treats an alive-but-unreachable
-// owner (VerdictLiveUnreachable — alive PID, ping failing, e.g. a GUI
-// mid-restart) as a live owner, so a supervisor-down state there takes the
-// standalone-recovery path (recover the supervisor without disturbing the GUI)
-// rather than the autostart path. The narrow PID-recycle false-positive (a
-// recycled PID makes a dead owner look alive) at worst routes recovery through
-// the standalone spawn instead of the autostart task — the supervisor recovers
-// either way; only the GUI re-establishment differs — and self-heals on the
-// next tick once the recycled PID dies or the pidport is overwritten. Keying on
-// VerdictHealthy instead would also fix the macOS gap above (VerdictHealthy is a
-// ping-only verdict that holds on macOS), but that polarity change is deferred
-// as a separate decision, not folded into this fix.
-func probeGUIOwnerAlive() (bool, int, int) {
+// PLATFORM NOTE: on platforms where the OS identity probe is unsupported
+// (macOS, Windows non-amd64), processIDImpl returns a sentinel error and
+// probeOnce classifies the result as VerdictLiveUnreachable (never Malformed
+// or DeadPID there — see single_instance.go's macOSUnsupported/
+// archUnsupported branches) — so this Class-based mapping resolves those
+// platforms to guiOwnerStateAlive for BOTH a ping-matching AND a
+// ping-failing owner, correctly treating an unobservable-but-plausibly-alive
+// owner as one that must not be killed. This also fixes a pre-existing
+// platform gap in the old PIDAlive-keyed version: PIDAlive was force-set
+// false on those platforms even for a ping-matching VerdictHealthy owner, so
+// a healthy macOS GUI used to read as alive=false; keying on Class instead
+// reads it correctly as guiOwnerStateAlive.
+func probeGUIOwnerAlive() (guiOwnerProbeState, int, int) {
 	pidportPath, err := gui.PidportPath()
 	if err != nil {
-		// Cannot resolve the pidport path → cannot confirm a live owner.
-		// Treat as "no live owner" so the genuine OWNER-death relaunch path
-		// is not suppressed by a path-resolution hiccup.
-		return false, 0, 0
+		// Cannot resolve the pidport path → cannot confirm ANY liveness
+		// fact. Unknown, not confirmed-dead — see guiOwnerProbeState's doc.
+		return guiOwnerStateUnknown, 0, 0
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	v := gui.Probe(ctx, pidportPath)
-	return v.PIDAlive, v.PID, v.Port
+	switch v.Class {
+	case gui.VerdictDeadPID:
+		return guiOwnerStateConfirmedDead, v.PID, v.Port
+	case gui.VerdictHealthy, gui.VerdictLiveUnreachable:
+		return guiOwnerStateAlive, v.PID, v.Port
+	default: // gui.VerdictMalformed, or any class this mapping does not expect.
+		return guiOwnerStateUnknown, v.PID, v.Port
+	}
 }
 
 // relaunchSupervisorOwner re-fires the autostart scheduled task
@@ -901,48 +939,78 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 		// just the GUI PID) is a HEADLESS FLEET, not a healthy one, and is
 		// recovered by runEnsureAliveHeadlessFleet instead of falling
 		// through to the plain no-op below.
-		if guiAlive, guiPID, guiPort := guiOwnerAliveFn(); !guiAlive {
+		//
+		// P1-1 review fix: only guiOwnerStateConfirmedDead may reach the
+		// headless-fleet relaunch (which re-fires the autostart task
+		// against a MultipleInstances=StopExisting scheduled task).
+		// guiOwnerStateUnknown (pidport malformed/unresolvable) MUST be
+		// treated like guiOwnerStateAlive — suppress, never authorize a
+		// relaunch that could terminate a possibly-live GUI on an
+		// ambiguous read.
+		switch guiState, guiPID, guiPort := guiOwnerAliveFn(); guiState {
+		case guiOwnerStateConfirmedDead:
 			runEnsureAliveHeadlessFleet(stateDir, out, pid, guiPID, guiPort)
 			return nil
+		case guiOwnerStateUnknown:
+			fmt.Fprintf(out, "ensure-alive: supervisor running (pid=%d); GUI owner state undeterminable (pidport malformed/unresolvable); no action (will retry next tick)\n", pid)
+			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+				"gui-owner-probe-undeterminable",
+				"supervisor running; GUI owner probe returned an ambiguous/malformed result; suppressing headless-fleet recovery this tick rather than risk killing a possibly-live GUI",
+				map[string]any{"supervisor_pid": pid})
+			return nil
 		}
-		// Common case: a supervisor holds the lock and a live GUI owner is
-		// present. No-op.
+		// Common case (guiOwnerStateAlive): a supervisor holds the lock and
+		// a live GUI owner is present. No-op.
 		fmt.Fprintf(out, "ensure-alive: supervisor running (pid=%d); no action\n", pid)
 		return nil
 	}
 
-	// Supervisor is down. Distinguish the two topologies and recover BOTH
-	// (§5 permanent fix PART 2 — the dead-supervisor-under-live-GUI case is
-	// no longer a suppressed deadlock):
-	//   - live GUI owner present → the supervisor CHILD died but the GUI
-	//     owner (and its :9125 hub router) is fine. Recover the supervisor
-	//     DIRECTLY via a detached standalone `mcphub supervise` spawn.
-	//   - no live GUI owner → genuine OWNER death. Re-fire the autostart GUI
-	//     task to re-establish BOTH the GUI owner and its supervisor.
-	if guiAlive, guiPID, _ := guiOwnerAliveFn(); guiAlive {
+	// Supervisor is down. Distinguish the topologies and recover
+	// appropriately (§5 permanent fix PART 2 — the dead-supervisor-under-
+	// live-GUI case is no longer a suppressed deadlock):
+	//   - live GUI owner present, OR owner state undeterminable → the
+	//     supervisor CHILD died but the GUI owner may still be fine (or we
+	//     cannot prove otherwise). Recover the supervisor DIRECTLY via a
+	//     detached standalone `mcphub supervise` spawn — never the
+	//     GUI-owner-killing autostart relaunch, since P1-1's ambiguous-read
+	//     case applies here identically to the headless-fleet branch above.
+	//   - confirmed no live GUI owner → genuine OWNER death. Re-fire the
+	//     autostart GUI task to re-establish BOTH the GUI owner and its
+	//     supervisor.
+	if guiState, guiPID, _ := guiOwnerAliveFn(); guiState != guiOwnerStateConfirmedDead {
+		unknown := guiState == guiOwnerStateUnknown
 		// Recover the supervisor WITHOUT touching the GUI. Re-firing the
-		// autostart task here would short-circuit to activate-window
-		// (single-instance busy) and recover nothing — the old gap-B
-		// deadlock. A direct standalone `mcphub supervise` spawn takes the
-		// singleton flock (idempotent against a racing duplicate) and the
-		// GUI's poller reconnects to it via IPC.
+		// autostart task here would either short-circuit to activate-window
+		// (single-instance busy, the old gap-B deadlock) or — on an
+		// ambiguous probe — risk killing a possibly-live GUI via the
+		// task's StopExisting policy. A direct standalone `mcphub
+		// supervise` spawn takes the singleton flock (idempotent against a
+		// racing duplicate) and the GUI's poller reconnects to it via IPC.
 		if relaunchErr := standaloneRelaunchFn(); relaunchErr != nil {
-			fmt.Fprintf(out, "ensure-alive: supervisor down under a live GUI owner (pid=%d); standalone supervisor relaunch FAILED (will retry next tick): %v\n", guiPID, relaunchErr)
+			if unknown {
+				fmt.Fprintf(out, "ensure-alive: supervisor down and GUI owner state undeterminable (pidport malformed/unresolvable); standalone supervisor relaunch FAILED (will retry next tick): %v\n", relaunchErr)
+			} else {
+				fmt.Fprintf(out, "ensure-alive: supervisor down under a live GUI owner (pid=%d); standalone supervisor relaunch FAILED (will retry next tick): %v\n", guiPID, relaunchErr)
+			}
 			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
 				"liveness-standalone-relaunch-failed",
-				"supervisor down under a live GUI owner; the GUI-independent standalone supervisor relaunch failed; will retry next tick",
-				map[string]any{"gui_owner_pid": guiPID, "error": relaunchErr.Error()})
+				"supervisor down under a live-or-undeterminable GUI owner; the GUI-independent standalone supervisor relaunch failed; will retry next tick",
+				map[string]any{"gui_owner_pid": guiPID, "gui_owner_state_unknown": unknown, "error": relaunchErr.Error()})
 			return nil
 		}
-		fmt.Fprintf(out, "ensure-alive: supervisor down under a live GUI owner (pid=%d); relaunched a detached standalone supervisor (GUI-independent recovery)\n", guiPID)
+		if unknown {
+			fmt.Fprintf(out, "ensure-alive: supervisor down and GUI owner state undeterminable (pidport malformed/unresolvable); relaunched a detached standalone supervisor (GUI-independent recovery, will not risk killing a possibly-live GUI)\n")
+		} else {
+			fmt.Fprintf(out, "ensure-alive: supervisor down under a live GUI owner (pid=%d); relaunched a detached standalone supervisor (GUI-independent recovery)\n", guiPID)
+		}
 		emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo,
 			"liveness-relaunched-supervisor-under-gui",
-			"supervisor down while a live GUI owner held the single-instance lock; spawned a detached standalone supervisor to recover it without disturbing the GUI",
-			map[string]any{"gui_owner_pid": guiPID})
+			"supervisor down while a live-or-undeterminable GUI owner held the single-instance lock; spawned a detached standalone supervisor to recover it without disturbing the GUI",
+			map[string]any{"gui_owner_pid": guiPID, "gui_owner_state_unknown": unknown})
 		return nil
 	}
 
-	// No live GUI owner → genuine OWNER death. Relaunch via the seam.
+	// Confirmed no live GUI owner → genuine OWNER death. Relaunch via the seam.
 	if relaunchErr := livenessRelaunchFn(); relaunchErr != nil {
 		// Best-effort: record + exit 0. The next ~1-min tick retries. Mirror
 		// to the durable log so a chronically-failing relaunch (e.g. the

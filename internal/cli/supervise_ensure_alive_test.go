@@ -88,29 +88,42 @@ func TestEnsureAlive_LiveLock_NoOp(t *testing.T) {
 	}
 }
 
-// noLiveGUIOwner installs the GUI-incumbent probe seam reporting NO live GUI
-// owner. This is the genuine OWNER-death topology the relaunch path is for, and
-// it ALSO keeps the test off the real %LOCALAPPDATA% gui.pidport (state safety:
-// the production probe reads the developer's running GUI). Every test that
-// exercises a supervisor-down branch MUST install this (or its live-owner
-// counterpart below) so the real pidport is never probed.
+// noLiveGUIOwner installs the GUI-incumbent probe seam reporting a
+// CONFIRMED-dead GUI owner (guiOwnerStateConfirmedDead). This is the genuine
+// OWNER-death topology the relaunch path is for, and it ALSO keeps the test
+// off the real %LOCALAPPDATA% gui.pidport (state safety: the production probe
+// reads the developer's running GUI). Every test that exercises a
+// supervisor-down branch MUST install this (or its live-owner counterpart
+// below) so the real pidport is never probed.
 func noLiveGUIOwner(t *testing.T) {
 	t.Helper()
-	restore := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return false, 0, 0 })
+	restore := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) { return guiOwnerStateConfirmedDead, 0, 0 })
 	t.Cleanup(restore)
 }
 
 // liveGUIOwner installs the GUI-incumbent probe seam reporting a live GUI
-// owner at the given pid/port. Every test that holds the supervisor lock
-// (running=true) and drives runEnsureAlive MUST install this (or
-// noLiveGUIOwner) so the headless-fleet branch added alongside this helper
-// never falls through to the REAL probeGUIOwnerAlive and touches the
+// owner (guiOwnerStateAlive) at the given pid/port. Every test that holds the
+// supervisor lock (running=true) and drives runEnsureAlive MUST install this
+// (or noLiveGUIOwner) so the headless-fleet branch added alongside this
+// helper never falls through to the REAL probeGUIOwnerAlive and touches the
 // developer's actual %LOCALAPPDATA% pidport (the same §11.10 fleet-wipe
 // safety this file's header already established for the supervisor-down
 // side).
 func liveGUIOwner(t *testing.T, pid, port int) {
 	t.Helper()
-	restore := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return true, pid, port })
+	restore := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) { return guiOwnerStateAlive, pid, port })
+	t.Cleanup(restore)
+}
+
+// unknownGUIOwnerState installs the GUI-incumbent probe seam reporting an
+// AMBIGUOUS probe result (guiOwnerStateUnknown) — the pidport was
+// missing/garbage/out-of-range, or its path could not be resolved. Every
+// consumer of guiOwnerAliveFn MUST treat this exactly like a live owner
+// (never authorize a GUI-owner-killing relaunch on an ambiguous read — P1-1
+// review finding).
+func unknownGUIOwnerState(t *testing.T, pid, port int) {
+	t.Helper()
+	restore := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) { return guiOwnerStateUnknown, pid, port })
 	t.Cleanup(restore)
 }
 
@@ -167,7 +180,7 @@ func TestEnsureAlive_FreeLock_LiveGUIOwner_RelaunchesStandalone(t *testing.T) {
 	}
 
 	// A live GUI owner IS present (the dead-child-under-live-owner topology).
-	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return true, 4242, 0 })
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) { return guiOwnerStateAlive, 4242, 0 })
 	defer restoreGUI()
 
 	var standaloneCalls, autostartCalls int32
@@ -212,7 +225,7 @@ func TestEnsureAlive_FreeLock_LiveGUIOwner_StandaloneRelaunchFails(t *testing.T)
 	if running, _, perr := api.SupervisorRunningUnderStateDir(stateDir); perr != nil || running {
 		t.Fatalf("precondition: probe must report not-running; got running=%v err=%v", running, perr)
 	}
-	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return true, 4242, 0 })
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) { return guiOwnerStateAlive, 4242, 0 })
 	defer restoreGUI()
 
 	restoreStandalone := setStandaloneRelaunchFnForTest(func() error {
@@ -393,7 +406,7 @@ func TestEnsureAlive_HeadlessFleet_RelaunchesGUI(t *testing.T) {
 
 	// GUI is dead: guiOwnerAliveFn reports a stale (but non-zero, for
 	// realism) pid/port recorded in the last pidport write.
-	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return false, 5555, 9125 })
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) { return guiOwnerStateConfirmedDead, 5555, 9125 })
 	defer restoreGUI()
 
 	var relaunches int32
@@ -436,7 +449,7 @@ func TestEnsureAlive_HeadlessFleet_BootGraceSuppresses(t *testing.T) {
 	// StartedAt defaults to "now" (AcquireSupervisorLock's own write) — well
 	// inside the 45s boot-grace window. No rewrite needed.
 
-	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return false, 5555, 9125 })
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) { return guiOwnerStateConfirmedDead, 5555, 9125 })
 	defer restoreGUI()
 
 	var relaunches int32
@@ -482,7 +495,7 @@ func TestEnsureAlive_HeadlessFleet_LiveHandoffSuppresses(t *testing.T) {
 	defer lk.Release()
 	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
 
-	restoreGUI := setGUIOwnerAliveFnForTest(func() (bool, int, int) { return false, 5555, 9125 })
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) { return guiOwnerStateConfirmedDead, 5555, 9125 })
 	defer restoreGUI()
 
 	// Plant a real, unexpired in-progress restart-v3 handoff marker via the
@@ -520,6 +533,147 @@ func TestEnsureAlive_HeadlessFleet_LiveHandoffSuppresses(t *testing.T) {
 	}
 	assertSupervisorEvent(t, stateDir, "gui-headless-fleet-relaunch-suppressed")
 	assertSupervisorEventBody(t, stateDir, "gui-headless-fleet-relaunch-suppressed", `"reason":"live-handoff"`)
+}
+
+// ---------------------------------------------------------------------------
+// P1-1 review fix: the GUI-owner probe fails OPEN on an ambiguous read.
+//
+// Before this fix, guiOwnerAliveFn returned a bare bool that collapsed
+// gui.VerdictMalformed (pidport unreadable/garbage/out-of-range) and a
+// path-resolution failure into the SAME alive=false value a confirmed-dead
+// owner (gui.VerdictDeadPID) produces. Both runEnsureAlive call sites
+// AUTHORIZED a relaunch on alive=false — and the headless-fleet relaunch
+// re-fires the autostart task against a MultipleInstances=StopExisting
+// scheduled task, so an ambiguous probe (not a confirmed-dead owner) could
+// terminate a perfectly healthy GUI every ~1-min tick. Each test below
+// demonstrates the DANGEROUS behavior a bare-bool collapse would produce
+// (a relaunch that must instead be suppressed) and is proven by the
+// mutation described in its comment.
+// ---------------------------------------------------------------------------
+
+// TestProbeGUIOwnerAlive_MalformedPidportMapsToUnknown is a direct,
+// non-seam-based test of probeGUIOwnerAlive's own Verdict.Class mapping: a
+// genuinely corrupt pidport file (garbage bytes, not a parseable "<pid>
+// <port>" line) must classify as guiOwnerStateUnknown, never
+// guiOwnerStateConfirmedDead. Uses ensureAliveTestStateDir's LOCALAPPDATA
+// redirection so gui.PidportPath() resolves inside the temp tree — this
+// never touches the developer's real %LOCALAPPDATA% pidport.
+//
+// MUTATION: revert probeGUIOwnerAlive's Class switch to `return v.PIDAlive,
+// v.PID, v.Port` (the pre-fix bare-bool shape widened back to a state) —
+// VerdictMalformed's zero-value PIDAlive=false would then read as
+// guiOwnerStateConfirmedDead-equivalent and this test's "want Unknown"
+// assertion fails.
+func TestProbeGUIOwnerAlive_MalformedPidportMapsToUnknown(t *testing.T) {
+	ensureAliveTestStateDir(t)
+
+	pidportPath, err := gui.PidportPath()
+	if err != nil {
+		t.Fatalf("resolve redirected pidport path: %v", err)
+	}
+	if err := os.WriteFile(pidportPath, []byte("not-a-valid-pidport-line"), 0o600); err != nil {
+		t.Fatalf("write malformed pidport: %v", err)
+	}
+
+	state, _, _ := probeGUIOwnerAlive()
+	if state != guiOwnerStateUnknown {
+		t.Fatalf("probeGUIOwnerAlive on a malformed pidport = %v, want guiOwnerStateUnknown (a corrupt/garbage pidport must never be classified as a confirmed-dead owner)", state)
+	}
+}
+
+// TestEnsureAlive_HeadlessFleet_UnknownGUIOwnerStateSuppresses reproduces the
+// WORST P1-1 danger directly: the supervisor is alive and well past its
+// boot-grace window, but the GUI-owner probe is AMBIGUOUS (guiOwnerStateUnknown)
+// rather than confirmed-dead. The action MUST suppress — never authorize the
+// headless-fleet relaunch, which would fire `schtasks /Run` against a
+// StopExisting-policy task and could terminate a possibly-still-healthy GUI.
+//
+// MUTATION: change the `case guiOwnerStateUnknown:` branch in runEnsureAlive
+// back to falling through to runEnsureAliveHeadlessFleet (the pre-fix
+// bare-bool behavior collapsed Unknown and ConfirmedDead into one branch) —
+// this test's "want 0" assertion fails (relaunches becomes 1).
+func TestEnsureAlive_HeadlessFleet_UnknownGUIOwnerStateSuppresses(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	// Well past ensureAliveHeadlessFleetBootGrace (45s) so the boot-grace
+	// suppressor cannot be the reason for the "no relaunch" outcome — only
+	// the Unknown-state guard can be.
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+
+	unknownGUIOwnerState(t, 0, 0)
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v (must always return nil / exit 0)", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Errorf("relaunch seam called %d times on an AMBIGUOUS GUI-owner probe; want 0 (an undeterminable read must never authorize a relaunch that could kill a live GUI)", got)
+	}
+	if !strings.Contains(out.String(), "undeterminable") {
+		t.Errorf("output should report the GUI owner state as undeterminable; got %q", out.String())
+	}
+	assertSupervisorEvent(t, stateDir, "gui-owner-probe-undeterminable")
+}
+
+// TestEnsureAlive_FreeLock_UnknownGUIOwnerState_UsesStandaloneRelaunch covers
+// the second P1-1 call site: the supervisor is DOWN (confirmed — the free
+// flock) and the GUI-owner probe is ambiguous. Recovery is still warranted
+// (nothing about the supervisor's own state is in doubt), but the action
+// MUST pick the GUI-independent standalone relaunch, never the
+// GUI-owner-killing autostart relaunch — the same "never risk killing a
+// possibly-live GUI on an ambiguous read" invariant as the headless-fleet
+// branch above.
+//
+// MUTATION: change `guiState != guiOwnerStateConfirmedDead` back to
+// `guiState == guiOwnerStateAlive` (the narrower pre-fix-equivalent
+// condition) — Unknown would then fall through to the autostart branch and
+// this test's "want autostartCalls == 0" assertion fails.
+func TestEnsureAlive_FreeLock_UnknownGUIOwnerState_UsesStandaloneRelaunch(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	if running, _, perr := api.SupervisorRunningUnderStateDir(stateDir); perr != nil || running {
+		t.Fatalf("precondition: probe must report not-running with no lock holder; got running=%v err=%v", running, perr)
+	}
+
+	unknownGUIOwnerState(t, 0, 0)
+
+	var standaloneCalls, autostartCalls int32
+	restoreStandalone := setStandaloneRelaunchFnForTest(func() error {
+		atomic.AddInt32(&standaloneCalls, 1)
+		return nil
+	})
+	defer restoreStandalone()
+	restoreAutostart := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&autostartCalls, 1)
+		return nil
+	})
+	defer restoreAutostart()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v (must always return nil / exit 0)", err)
+	}
+	if got := atomic.LoadInt32(&standaloneCalls); got != 1 {
+		t.Errorf("standalone relaunch fired %d times under an ambiguous GUI-owner probe; want 1", got)
+	}
+	if got := atomic.LoadInt32(&autostartCalls); got != 0 {
+		t.Errorf("autostart-task (GUI-owner-killing) relaunch fired %d times under an ambiguous GUI-owner probe; want 0", got)
+	}
+	if !strings.Contains(out.String(), "undeterminable") {
+		t.Errorf("output should report the GUI owner state as undeterminable; got %q", out.String())
+	}
+	assertSupervisorEvent(t, stateDir, "liveness-relaunched-supervisor-under-gui")
 }
 
 type ensureAliveGUIRecoveryMarkerFake struct {
