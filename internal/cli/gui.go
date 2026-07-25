@@ -477,9 +477,10 @@ activates the first window and exits 0.`,
 			// observer alongside NotifyContext above. Go's signal package
 			// fans out each incoming OS signal to every registered channel,
 			// so this receives the exact same SIGINT/SIGTERM NotifyContext
-			// does — it does not steal, delay, or duplicate delivery, and a
-			// second Ctrl-C still terminates the process via Go's default
-			// double-signal behavior exactly as before. NotifyContext's own
+			// does — it does not steal, delay, or duplicate delivery.
+			// Second-signal handling is unchanged from the pre-existing
+			// NotifyContext registration (this observer adds no new signal
+			// semantics). NotifyContext's own
 			// ctx.Done() carries no information about WHICH signal fired;
 			// this is the only way to attribute the exit to sigint vs
 			// sigterm without rewriting NotifyContext itself. Runs in its
