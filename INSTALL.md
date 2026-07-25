@@ -80,8 +80,6 @@ Expected output:
 ✓ claude-code → http://localhost:9121/mcp
   backup: C:\Users\<you>\.codex\config.toml.bak-mcp-local-hub-<timestamp>
 ✓ codex-cli → http://localhost:9122/mcp
-  backup: C:\Users\<you>\.cursor\mcp.json.bak-mcp-local-hub-<timestamp>
-✓ cursor → http://localhost:9121/mcp
 ✓ Started: mcp-local-hub-serena-claude
 ✓ Started: mcp-local-hub-serena-codex
 
