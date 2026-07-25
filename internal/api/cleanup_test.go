@@ -544,3 +544,74 @@ func TestOrphanProcessJSONOmitsRawCmdline(t *testing.T) {
 		t.Errorf("JSON still contains legacy `cmdline` key: %s", js)
 	}
 }
+
+// TestFindWindowsExeExtensionEndNonASCIIByteExpansion guards bug
+// 2026-07-25 (HIGH-severity, reachable from `mcphub cleanup aggressive`):
+// a prior implementation lowercased the WHOLE cmdline up front
+// (`lower := strings.ToLower(s)`) to search for Windows exe extensions,
+// then indexed the ORIGINAL string `s` at the resulting offsets
+// (`s[end]`, `end == len(s)`). strings.ToLower does not preserve UTF-8
+// byte length for every rune — U+023A ('Ⱥ', 2 bytes) lowercases to 'ⱥ'
+// (U+2C65, 3 bytes) — so a non-ASCII byte anywhere before the matched
+// extension shifts every subsequent lower-space offset out of alignment
+// with s. With the extension anchored at the very end of the string (no
+// trailing whitespace/args), the shifted offset ran past len(s) and the
+// boundary check `s[end]` panicked.
+//
+// Verified empirically against the pre-fix code before writing this
+// test: it panicked with exactly this shape —
+// "panic: runtime error: index out of range [20] with length 19" — for
+// this very fixture (see the fix commit message for the captured
+// output). Mutation-proven: reverting findWindowsExeExtensionEnd to the
+// `lower := strings.ToLower(s)` / `strings.Index(lower[...], ext)` /
+// `s[end]` shape makes this test fail (panic) again.
+func TestFindWindowsExeExtensionEndNonASCIIByteExpansion(t *testing.T) {
+	s := "C:\\Ⱥtools\\node.exe"
+	if want := 19; len(s) != want {
+		t.Fatalf("test fixture drifted: len(s) = %d, want %d (Ⱥ is U+023A, 2 UTF-8 bytes)", len(s), want)
+	}
+	var end int
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("findWindowsExeExtensionEnd(%q) panicked: %v", s, r)
+			}
+		}()
+		end = findWindowsExeExtensionEnd(s)
+	}()
+	if end != len(s) {
+		t.Errorf("findWindowsExeExtensionEnd(%q) = %d, want %d (len(s), since .exe ends the string with no trailing whitespace)", s, end, len(s))
+	}
+}
+
+// TestFirstTokenBasenameNonASCIIOffsetPreserving guards the same bug
+// (2026-07-25) at the CALLER level: firstTokenBasename slices the
+// ORIGINAL cmdline `s` at the index findWindowsExeExtensionEnd returns
+// (cleanup.go ~:229). When the exe extension is NOT at the very end of
+// the string (real arguments follow), the byte-length divergence from
+// strings.ToLower doesn't panic — it silently mis-anchors the boundary
+// check so the extension match is rejected, and firstTokenBasename falls
+// back to the first-whitespace split. For a WMIC-stripped path with an
+// embedded space ("Program Files"), that fallback reproduces the exact
+// truncation bug findWindowsExeExtensionEnd was built to prevent (codex
+// bot PR #143 round 1 P2) — "C:\Program"-style truncation instead of
+// "node.exe" — just triggered by a leading non-ASCII byte instead of the
+// original all-ASCII cause. This is the "worse than the panic" half of
+// the bug: a WRONG split silently returned instead of a crash.
+//
+// Mutation-proven alongside the test above: reverting
+// findWindowsExeExtensionEnd to the buggy shape makes
+// redactCmdlineForDisplay return a truncated non-.exe basename here
+// instead of "node.exe".
+func TestFirstTokenBasenameNonASCIIOffsetPreserving(t *testing.T) {
+	s := "C:\\ȺProgram Files\\nodejs\\node.exe -y @modelcontextprotocol/server-memory"
+	const wantEnd = 34 // verified: right after "node.exe", s[34] == ' '
+	end := findWindowsExeExtensionEnd(s)
+	if end != wantEnd {
+		t.Errorf("findWindowsExeExtensionEnd(%q) = %d, want %d", s, end, wantEnd)
+	}
+	got := redactCmdlineForDisplay(s)
+	if got != "node.exe" {
+		t.Errorf("redactCmdlineForDisplay(%q) = %q, want %q", s, got, "node.exe")
+	}
+}
