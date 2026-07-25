@@ -221,4 +221,3 @@ func TestSetSerenaRouterReadOnly_RegisteredWorkspaceUnreachableBackend_NoSharedS
 		t.Fatalf("hub-mcp.log exists at %s after a request via the read-only route wiring — the route daemon must never write the GUI-owned shared event log", hubLog)
 	}
 }
-
