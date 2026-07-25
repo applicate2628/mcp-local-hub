@@ -46,6 +46,12 @@ type WorkspaceResolver struct {
 	reg          *api.Registry
 	registryPath string
 	markers      map[string][]string
+	// readOnly, when true, makes refresh() reload the registry WITHOUT ever
+	// taking Registry.Lock() (the cross-process exclusive flock, which also
+	// CREATES <registry>.lock + the state directory on first acquire). See
+	// NewReadOnlyWorkspaceResolver's doc comment (serena_routing package) for
+	// the safety argument and the P2-3 finding this closes.
+	readOnly bool
 
 	mu        sync.RWMutex
 	lastMtime time.Time
@@ -60,6 +66,25 @@ func NewWorkspaceResolver(reg *api.Registry, registryPath string, languages []co
 		reg:          reg,
 		registryPath: registryPath,
 		markers:      markerMap(languages),
+	}
+}
+
+// NewReadOnlyWorkspaceResolver is the LSP twin of
+// serena_routing.NewReadOnlyWorkspaceResolver: a resolver identical to
+// NewWorkspaceResolver except its refresh NEVER takes Registry.Lock() — for
+// the standalone `mcphub route` front daemon (internal/cli/route.go), which
+// must never contend with the GUI's own registry writers for the SAME
+// cross-process exclusive lock (P2-3 finding). See the serena_routing
+// package's NewReadOnlyWorkspaceResolver doc comment for the full safety
+// argument (every registry write is atomic-rename-published, so an unlocked
+// concurrent reader always sees a complete pre- or post-write snapshot,
+// never a torn file).
+func NewReadOnlyWorkspaceResolver(reg *api.Registry, registryPath string, languages []config.LanguageSpec) *WorkspaceResolver {
+	return &WorkspaceResolver{
+		reg:          reg,
+		registryPath: registryPath,
+		markers:      markerMap(languages),
+		readOnly:     true,
 	}
 }
 
@@ -322,13 +347,23 @@ func (r *WorkspaceResolver) refresh() {
 		return
 	}
 
-	unlock, err := r.reg.Lock()
-	if err != nil {
-		return
-	}
-	defer unlock()
-	if err := r.reg.Load(); err != nil {
-		return
+	if r.readOnly {
+		// P2-3 fix: never take Registry.Lock() (see
+		// NewReadOnlyWorkspaceResolver's doc comment for the safety
+		// argument). Load() alone performs no locking and creates no
+		// directory/lock file of its own.
+		if err := r.reg.Load(); err != nil {
+			return
+		}
+	} else {
+		unlock, err := r.reg.Lock()
+		if err != nil {
+			return
+		}
+		defer unlock()
+		if err := r.reg.Load(); err != nil {
+			return
+		}
 	}
 	entries := r.reg.LSPEntries()
 

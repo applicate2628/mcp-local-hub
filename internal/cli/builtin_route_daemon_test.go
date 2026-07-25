@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/api"
@@ -72,6 +73,129 @@ func TestEnsureBuiltinRouteDaemonAtStartup_PersistsAndSurvivesReread(t *testing.
 	}
 	if !supervisorIntentHasBuiltinRouteRow(reread) {
 		t.Fatalf("re-read of supervisor-intent.json (simulating the IntentWatcher's periodic re-read) is missing %s row — the row was not durably persisted, only mutated in-memory", api.BuiltinRouteTaskName)
+	}
+}
+
+// TestEnsureBuiltinRouteDaemonAtStartup_PersistFailurePreservesExistingRow is
+// the P1-2 falsifying test (adversarial cross-family review): a persist
+// failure must NEVER leave the in-memory `intent` return value AHEAD of what
+// is durably on disk. This test seeds intent with an EXISTING route row (an
+// older command/port, simulating a prior successful boot), then forces the
+// persist write to fail deterministically by pointing stateDir's
+// supervisor-intent.json at a path whose parent cannot be created (stateDir
+// itself is a FILE, not a directory, so
+// MutateSupervisorIntentIfChanged's os.MkdirAll(filepath.Dir(path)) —
+// i.e. os.MkdirAll(stateDir) — fails).
+//
+// Mutation-proven: reverting to the pre-fix ordering (mutate `intent` BEFORE
+// attempting the persist, return it unconditionally) makes this test fail —
+// the returned intent's route row would carry the NEW command/port even
+// though the disk write never happened, which is exactly the "reconcile
+// plan runs ahead of disk" bug the next 60s IntentWatcher poll would then
+// have to un-do by killing the freshly-spawned daemon as an orphan.
+func TestEnsureBuiltinRouteDaemonAtStartup_PersistFailurePreservesExistingRow(t *testing.T) {
+	parent := t.TempDir()
+	stateDir := filepath.Join(parent, "not-a-directory")
+	if err := os.WriteFile(stateDir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("seed non-directory stateDir: %v", err)
+	}
+
+	eventsPath := filepath.Join(parent, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+
+	oldRow := api.BuildBuiltinRouteDaemon("/old/mcphub", 19999)
+	intent := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{oldRow}}
+
+	got := ensureBuiltinRouteDaemonAtStartup(stateDir, intent, events)
+	_ = events.Close()
+
+	if got == nil {
+		t.Fatalf("ensureBuiltinRouteDaemonAtStartup returned nil intent")
+	}
+	if len(got.Daemons) != 1 {
+		t.Fatalf("Daemons count = %d, want 1 (the old row preserved, no duplicate/no drop): %+v", len(got.Daemons), got.Daemons)
+	}
+	if got.Daemons[0].Command != oldRow.Command || got.Daemons[0].Port != oldRow.Port {
+		t.Fatalf("route row changed despite a persist failure: got %+v, want unchanged %+v", got.Daemons[0], oldRow)
+	}
+
+	raw, rerr := os.ReadFile(eventsPath)
+	if rerr != nil {
+		t.Fatalf("read events log: %v", rerr)
+	}
+	if !strings.Contains(string(raw), `"event":"builtin-route-ensure-failed"`) {
+		t.Fatalf("builtin-route-ensure-failed event missing from audit log:\n%s", string(raw))
+	}
+}
+
+// TestEnsureBuiltinRouteDaemonAtStartup_PortResolutionFailurePreservesExistingRow
+// is the P2-5 falsifying test: a corrupt gui-preferences.yaml must not make
+// the supervisor silently canonicalize the reserved route-daemon row back
+// onto DefaultMCPFrontPort. This test seeds an existing row on a
+// DIFFERENT, non-default port (simulating an operator who already ran
+// `mcphub install --reconcile-mcp-front` onto a custom port), corrupts the
+// settings file, and asserts the row's port is left completely untouched.
+//
+// Mutation-proven: reverting resolveMCPFrontPortStrictFn's call site back to
+// resolveMCPFrontPortFn (the graceful MCPFrontPortOrDefault fallback) makes
+// this test fail — the row's port would be silently rewritten to
+// api.DefaultMCPFrontPort (9137) despite the corrupt settings file.
+func TestEnsureBuiltinRouteDaemonAtStartup_PortResolutionFailurePreservesExistingRow(t *testing.T) {
+	// api.SettingsPath (unlike api.DaemonStateDir) reads LOCALAPPDATA
+	// directly, not the in-memory daemonStateRootOverride — mirrors
+	// api.DefaultRegistryPath. t.Setenv overrides internal/cli's TestMain
+	// global default for just this test and auto-restores.
+	settingsStateDir := t.TempDir()
+	t.Setenv("LOCALAPPDATA", settingsStateDir)
+
+	corruptPath := filepath.Join(settingsStateDir, "mcp-local-hub", "gui-preferences.yaml")
+	if err := os.MkdirAll(filepath.Dir(corruptPath), 0o700); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	if err := os.WriteFile(corruptPath, []byte("mcp_front: [unterminated\n"), 0o600); err != nil {
+		t.Fatalf("write corrupt settings file: %v", err)
+	}
+
+	stateDir := t.TempDir()
+	eventsPath := filepath.Join(stateDir, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+
+	const configuredPort = 40017
+	oldRow := api.BuildBuiltinRouteDaemon("/some/mcphub", configuredPort)
+	intent := &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{oldRow}}
+
+	got := ensureBuiltinRouteDaemonAtStartup(stateDir, intent, events)
+	_ = events.Close()
+
+	if got == nil || len(got.Daemons) != 1 {
+		t.Fatalf("ensureBuiltinRouteDaemonAtStartup: got %+v, want the single pre-existing row untouched", got)
+	}
+	if got.Daemons[0].Port != configuredPort {
+		t.Fatalf("route row port = %d, want %d (unchanged) — a corrupt settings file must never silently canonicalize this row back to the default port", got.Daemons[0].Port, configuredPort)
+	}
+	if got.Daemons[0].Command != oldRow.Command {
+		t.Fatalf("route row command = %q, want %q (unchanged)", got.Daemons[0].Command, oldRow.Command)
+	}
+
+	// Disk must ALSO stay untouched — no supervisor-intent.json should have
+	// been created at all (the ensure was skipped entirely on the
+	// resolution failure, before any persist attempt).
+	if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); statErr == nil {
+		t.Fatalf("supervisor-intent.json was created despite a port-resolution failure; the ensure must be skipped entirely, not persist a fabricated port")
+	}
+
+	raw, rerr := os.ReadFile(eventsPath)
+	if rerr != nil {
+		t.Fatalf("read events log: %v", rerr)
+	}
+	if !strings.Contains(string(raw), `"event":"builtin-route-ensure-failed"`) {
+		t.Fatalf("builtin-route-ensure-failed event missing from audit log:\n%s", string(raw))
 	}
 }
 

@@ -81,6 +81,14 @@ type lspRouterDeps struct {
 	// without the gate wired), the router fails CLOSED on first touch:
 	// an unset gate must never silently authorize untrusted paths.
 	TrustedRootCheckFn func(workspaceRoot string) (bool, error)
+	// AuditFn is the diagnostic sink forwardLSPNotificationDetached uses to
+	// report a best-effort notification-forward failure/non-2xx. Nil (every
+	// existing caller, including SetLSPRouterProduction) falls back to
+	// api.LogHubMcpEvent — unchanged production behavior. SetLSPRouterReadOnly
+	// (P1-1 fix, adversarial cross-family review) wires this explicitly to
+	// routeReadOnlySink so the standalone `mcphub route` front daemon never
+	// writes the GUI-owned shared hub-mcp.log.
+	AuditFn func(level, event string, fields map[string]any) error
 }
 
 var lspRouterTestSeam func() *lspRouterDeps
@@ -163,6 +171,14 @@ func (s *Server) SetLSPRouterReadOnly(resolver *lsp_routing.WorkspaceResolver, s
 		},
 		// AutoRegisterFn deliberately nil — see doc comment.
 		TrustedRootCheckFn: api.LSPWorkspaceRootTrusted,
+		// AuditFn (P1-1 fix): every other caller leaves this nil so
+		// forwardLSPNotificationDetached's own default falls back to
+		// api.LogHubMcpEvent, which appends to the SHARED
+		// <state-dir>/hub-mcp.log the GUI process owns. That default is wrong
+		// for THIS constructor specifically — wired explicitly here to
+		// routeReadOnlySink (route_readonly_audit.go), which never touches
+		// hub-mcp.log.
+		AuditFn: routeReadOnlySink,
 	})
 }
 
@@ -835,10 +851,20 @@ func (s *Server) handleLSPNotification(
 			"MCP-Protocol-Version": r.Header.Get("MCP-Protocol-Version"),
 		}
 		method, port := tb.Method, ws.Port
+		// Resolve the audit sink BEFORE the goroutine launches (P1-1 fix): the
+		// default (deps.AuditFn nil, every production/GUI caller) falls back
+		// to api.LogHubMcpEvent, unchanged from before this fix.
+		// SetLSPRouterReadOnly wires deps.AuditFn to routeReadOnlySink so the
+		// standalone route daemon's best-effort forward diagnostics never
+		// reach the GUI-owned shared hub-mcp.log.
+		auditFn := deps.AuditFn
+		if auditFn == nil {
+			auditFn = api.LogHubMcpEvent
+		}
 		fwdCtx, cancel := cleanupContext(upstreamTimeout)
 		go func() {
 			defer cancel()
-			forwardLSPNotificationDetached(fwdCtx, httpClient, upstreamURL, method, hdrs, body, port)
+			forwardLSPNotificationDetached(fwdCtx, httpClient, upstreamURL, method, hdrs, body, port, auditFn)
 		}()
 	}
 	w.WriteHeader(http.StatusAccepted)
@@ -847,15 +873,20 @@ func (s *Server) handleLSPNotification(
 // forwardLSPNotificationDetached POSTs a genuine notifications/* body to the
 // bound workspace daemon's /mcp on a DETACHED, bounded context. Best-effort:
 // the router already answered the client 202 (a notification has no response),
-// so a transport failure or a non-2xx upstream status is audited (warn to
-// hub-mcp.log) but NEVER propagated. Mirrors serena's
-// forwardSerenaCancelledUpstream. All inputs are value snapshots taken before
-// the goroutine launched, so nothing here touches the (now-returned) handler's
-// ResponseWriter or *http.Request.
-func forwardLSPNotificationDetached(ctx context.Context, httpClient *http.Client, upstreamURL, method string, hdrs map[string]string, body []byte, port int) {
+// so a transport failure or a non-2xx upstream status is audited via auditFn
+// but NEVER propagated. Mirrors serena's forwardSerenaCancelledUpstream. All
+// inputs are value snapshots taken before the goroutine launched, so nothing
+// here touches the (now-returned) handler's ResponseWriter or *http.Request.
+//
+// auditFn is the caller-resolved diagnostic sink (handleLSPNotification
+// resolves deps.AuditFn, defaulting to api.LogHubMcpEvent when nil) — P1-1
+// fix: this function must never hardcode api.LogHubMcpEvent directly, or the
+// standalone read-only route daemon's notification-forward failures would
+// write the GUI-owned shared hub-mcp.log.
+func forwardLSPNotificationDetached(ctx context.Context, httpClient *http.Client, upstreamURL, method string, hdrs map[string]string, body []byte, port int, auditFn func(level, event string, fields map[string]any) error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, bytes.NewReader(body))
 	if err != nil {
-		_ = api.LogHubMcpEvent("warn", "lsp-notification-forward-failed", map[string]any{
+		_ = auditFn("warn", "lsp-notification-forward-failed", map[string]any{
 			"port": port, "method": method, "err": "build request: " + err.Error(),
 		})
 		return
@@ -871,7 +902,7 @@ func forwardLSPNotificationDetached(ctx context.Context, httpClient *http.Client
 	req.Header.Del("Mcp-Session-Id")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		_ = api.LogHubMcpEvent("warn", "lsp-notification-forward-failed", map[string]any{
+		_ = auditFn("warn", "lsp-notification-forward-failed", map[string]any{
 			"port": port, "method": method, "err": err.Error(),
 		})
 		return
@@ -879,7 +910,7 @@ func forwardLSPNotificationDetached(ctx context.Context, httpClient *http.Client
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		_ = api.LogHubMcpEvent("warn", "lsp-notification-forward-non2xx", map[string]any{
+		_ = auditFn("warn", "lsp-notification-forward-non2xx", map[string]any{
 			"port": port, "method": method, "status": resp.StatusCode,
 		})
 	}

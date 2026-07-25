@@ -36,6 +36,12 @@ const serenaProjectMarker = ".serena/project.yml"
 type WorkspaceResolver struct {
 	reg          *api.Registry
 	registryPath string
+	// readOnly, when true, makes refresh() reload the registry WITHOUT ever
+	// taking Registry.Lock() (the cross-process exclusive flock, which also
+	// CREATES <registry>.lock + the state directory on first acquire). See
+	// NewReadOnlyWorkspaceResolver's doc comment for the safety argument and
+	// the P2-3 finding this closes.
+	readOnly bool
 
 	mu        sync.RWMutex
 	lastMtime time.Time
@@ -54,6 +60,31 @@ type WorkspaceResolver struct {
 // share the same resolver type without a Registry getter.
 func NewWorkspaceResolver(reg *api.Registry, registryPath string) *WorkspaceResolver {
 	return &WorkspaceResolver{reg: reg, registryPath: registryPath}
+}
+
+// NewReadOnlyWorkspaceResolver returns a resolver identical to
+// NewWorkspaceResolver except its refresh NEVER takes Registry.Lock() — for
+// the standalone `mcphub route` front daemon (internal/cli/route.go), which
+// must never contend with the GUI's own registry writers for the SAME
+// cross-process exclusive lock (P2-3 finding, adversarial cross-family
+// review of Increment 1): a blocking Lock() there could stall route traffic
+// behind a slow GUI mutation, or (more importantly) stall a GUI mutation
+// behind route traffic, and Lock() unconditionally creates <registry>.lock +
+// the state directory on first acquire even when nothing needs writing.
+//
+// Safety argument for the unlocked reload: every registry write goes through
+// the hardened state-file pipeline (api.SecureWriteClientConfig-backed,
+// documented in workspace_registry.go's Save()), which publishes via an
+// atomic rename across a held file handle. A concurrent unlocked reader
+// therefore always observes either the complete pre-write or the complete
+// post-write content — never a torn/partial file — so skipping the lock
+// cannot corrupt the in-memory cache. At worst, a reload that races a
+// concurrent write sees the OLDER complete snapshot and re-reads on the
+// NEXT mtime-triggered refresh; every other production/GUI caller
+// (NewWorkspaceResolver) is completely unaffected — this is a strictly
+// reduced-guarantee, additive variant.
+func NewReadOnlyWorkspaceResolver(reg *api.Registry, registryPath string) *WorkspaceResolver {
+	return &WorkspaceResolver{reg: reg, registryPath: registryPath, readOnly: true}
 }
 
 // NewDefaultWorkspaceResolver constructs a resolver bound to reg using
@@ -120,29 +151,40 @@ func (r *WorkspaceResolver) refresh() {
 		return
 	}
 
-	unlock, err := r.reg.Lock()
-	if err != nil {
-		// The registry file exists (stat succeeded) but its cross-process lock
-		// could not be acquired. This is NOT a transient missing-file case — it
-		// is a genuine error (lock contention, permission, or a stuck holder), so
-		// emit the same operator-visible diagnostic the stat-error path above
-		// uses rather than returning silently. We still preserve the cached
-		// snapshot (best-effort routing-availability posture, documented above)
-		// instead of flipping into an error state; the diagnostic just makes the
-		// degraded reload observable so an operator's workspaces.yaml edit not
-		// taking effect is not invisible.
-		fmt.Fprintf(os.Stderr, "serena_routing: lock registry %s: %v; preserving cached snapshot\n", r.registryPath, err)
-		return
-	}
-	defer unlock()
-	if err := r.reg.Load(); err != nil {
-		// The registry file exists and was locked, but parsing/loading it failed
-		// (e.g. a malformed YAML after an operator hand-edit). Same fail-loud
-		// diagnostic as the lock-error and stat-error paths: surface the load
-		// failure so a stale cached view being served is operator-visible,
-		// while still preserving the prior snapshot for routing availability.
-		fmt.Fprintf(os.Stderr, "serena_routing: load registry %s: %v; preserving cached snapshot\n", r.registryPath, err)
-		return
+	if r.readOnly {
+		// P2-3 fix: never take Registry.Lock() (see
+		// NewReadOnlyWorkspaceResolver's doc comment for the safety
+		// argument). Load() alone performs no locking and creates no
+		// directory/lock file of its own.
+		if err := r.reg.Load(); err != nil {
+			fmt.Fprintf(os.Stderr, "serena_routing: load registry %s (read-only, unlocked): %v; preserving cached snapshot\n", r.registryPath, err)
+			return
+		}
+	} else {
+		unlock, err := r.reg.Lock()
+		if err != nil {
+			// The registry file exists (stat succeeded) but its cross-process lock
+			// could not be acquired. This is NOT a transient missing-file case — it
+			// is a genuine error (lock contention, permission, or a stuck holder), so
+			// emit the same operator-visible diagnostic the stat-error path above
+			// uses rather than returning silently. We still preserve the cached
+			// snapshot (best-effort routing-availability posture, documented above)
+			// instead of flipping into an error state; the diagnostic just makes the
+			// degraded reload observable so an operator's workspaces.yaml edit not
+			// taking effect is not invisible.
+			fmt.Fprintf(os.Stderr, "serena_routing: lock registry %s: %v; preserving cached snapshot\n", r.registryPath, err)
+			return
+		}
+		defer unlock()
+		if err := r.reg.Load(); err != nil {
+			// The registry file exists and was locked, but parsing/loading it failed
+			// (e.g. a malformed YAML after an operator hand-edit). Same fail-loud
+			// diagnostic as the lock-error and stat-error paths: surface the load
+			// failure so a stale cached view being served is operator-visible,
+			// while still preserving the prior snapshot for routing availability.
+			fmt.Fprintf(os.Stderr, "serena_routing: load registry %s: %v; preserving cached snapshot\n", r.registryPath, err)
+			return
+		}
 	}
 	entries := r.reg.SerenaEntries()
 

@@ -2542,12 +2542,21 @@ func hasUnmergedActiveLegacyStops(supervisorIntent *api.SupervisorIntentFile, da
 // cold start's own first reconcile pass. Returning a freshly-allocated
 // &api.SupervisorIntentFile{Version: 1} for that case closes the gap.
 //
-// Mutating (or allocating) intent here means THIS start's own first
-// reconcile pass already sees the row, not just the next restart. The
-// persist step re-applies the same idempotent upsert against a FRESH
-// flock-held read (MutateSupervisorIntentIfChanged), so a concurrent writer
-// (e.g. an install running at the same moment) can never lose this row or
-// have this row clobber it.
+// Persist-before-adopt ordering (P1-2 fix, adversarial cross-family review):
+// the disk write (MutateSupervisorIntentIfChanged, a fresh flock-held
+// read-modify-write against whatever is CURRENTLY on disk) runs FIRST. Only
+// after that write actually SUCCEEDS does this function apply the identical
+// mutation to the caller's own in-memory `intent` — so THIS cold start's own
+// reconcile pass adopts the row only once it is durably committed. The
+// pre-fix version mutated the caller's `intent` BEFORE attempting the
+// persist and returned it regardless of whether the persist succeeded: on a
+// persist failure this cold start's reconcile pass would spawn the route
+// daemon anyway (from the in-memory-only row) while the disk copy stayed
+// route-less — and the next 60s IntentWatcher poll, which re-reads only what
+// is on disk, would then treat the freshly-spawned daemon as an orphan and
+// kill it, repeating on every restart until the write failure cleared. This
+// version can never run the in-memory reconcile plan ahead of what is
+// durably on disk.
 //
 // A resolution or persist failure is reported via a warn event
 // (builtin-route-ensure-failed) and otherwise swallowed: the route daemon
@@ -2579,11 +2588,42 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 	if intent == nil {
 		intent = &api.SupervisorIntentFile{Version: 1}
 	}
-	// Sub-increment 2a: the route daemon's port is now settings-owned
-	// (mcp_front.port), not a bare compiled constant — resolveMCPFrontPortFn
-	// falls back to DefaultRouteDaemonPort on any settings-read failure, so
-	// this call site's behavior is unchanged when the setting is unset/unreadable.
-	port := resolveMCPFrontPortFn()
+
+	// P2-5 fix (adversarial cross-family review): resolve the STRICT
+	// (write-path) accessor, not the graceful MCPFrontPortOrDefault fallback
+	// resolveMCPFrontPortFn wraps. This function durably PERSISTS the
+	// resolved port into the reserved route-daemon row — exactly the WRITE
+	// path api.ResolveMCPFrontPort's own doc comment says must propagate a
+	// read/parse/range failure rather than silently substitute
+	// DefaultMCPFrontPort. The pre-fix graceful fallback meant a corrupt
+	// gui-preferences.yaml silently canonicalized this row back to port 9137
+	// even after an operator had reconciled every client onto a DIFFERENT
+	// configured port (`mcphub install --reconcile-mcp-front`) — moving the
+	// daemon off the port every client actually points at, with no
+	// resolution-error event at all.
+	port, portErr := resolveMCPFrontPortStrictFn()
+	if portErr != nil {
+		// Preserve the existing descriptor (if any) or fail loudly — never
+		// silently rewrite to the default. Skip the ensure entirely this
+		// boot: the existing row (if hadRow) is left completely untouched,
+		// and a fresh install with no row yet simply does not get one this
+		// boot rather than getting one seeded with a port the operator never
+		// configured. The next boot (or the next 60s IntentWatcher poll,
+		// which does not re-run this seeder) gets another chance once the
+		// settings file is repaired.
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "builtin-route-ensure-failed",
+			TaskName: api.BuiltinRouteTaskName,
+			Body: map[string]any{
+				"err":   portErr.Error(),
+				"path":  supervisorIntentPath,
+				"phase": "resolve-port",
+			},
+		})
+		return intent
+	}
 
 	hadRow := false
 	for _, d := range intent.Daemons {
@@ -2593,13 +2633,72 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 		}
 	}
 
-	changed := api.EnsureBuiltinRouteDaemon(intent, cmdPath, port)
+	// P1-2 fix (adversarial cross-family review): persist FIRST, against a
+	// FRESH flock-held disk read (MutateSupervisorIntentIfChanged clones the
+	// current on-disk file and mutates the clone) — never the caller's own
+	// possibly-stale `intent`. Only once this write actually SUCCEEDS is the
+	// identical mutation applied to the caller's in-memory `intent` further
+	// below, so this cold start's own reconcile plan can never run ahead of
+	// what is durably on disk. A P2-4 reserved-name collision surfaces here
+	// as an ordinary mutate error (EnsureBuiltinRouteDaemon returns it
+	// instead of silently overwriting or silently accepting the foreign
+	// row) — the persist is correctly aborted, nothing is written, and this
+	// function reports the failure below exactly like a disk-write failure.
+	var changed bool
+	persistErr := api.MutateSupervisorIntentIfChanged(supervisorIntentPath, func(f *api.SupervisorIntentFile) (bool, error) {
+		c, ensureErr := api.EnsureBuiltinRouteDaemon(f, cmdPath, port)
+		if ensureErr != nil {
+			return false, ensureErr
+		}
+		changed = c
+		return c, nil
+	})
+	if persistErr != nil {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "builtin-route-ensure-failed",
+			TaskName: api.BuiltinRouteTaskName,
+			Body: map[string]any{
+				"err":  persistErr.Error(),
+				"path": supervisorIntentPath,
+			},
+		})
+		// The disk write did not land (or was correctly refused, e.g. a
+		// reserved-name collision) — return the ORIGINAL in-memory intent
+		// completely unchanged. This cold start's reconcile plan must never
+		// diverge from what is durably on disk.
+		return intent
+	}
+
 	action := "unchanged"
 	if changed {
 		if hadRow {
 			action = "replaced"
 		} else {
 			action = "added"
+		}
+		// The persist above just committed this exact mutation to disk under
+		// a fresh read — apply the identical, now-proven-safe mutation to
+		// the caller's own in-memory intent so THIS cold start's own initial
+		// reconcile pass also sees the row, not just the next restart. Errors
+		// are not expected here (the identical mutation just succeeded above
+		// against a structurally equivalent fresh-loaded snapshot — `intent`
+		// itself came from this same boot's loadIntentFiles, before any other
+		// mutation), but fail safe rather than silently ignore one.
+		if _, err := api.EnsureBuiltinRouteDaemon(intent, cmdPath, port); err != nil {
+			_ = events.Emit(api.SupervisorEvent{
+				Severity: "warn",
+				Source:   "lifecycle",
+				Event:    "builtin-route-ensure-failed",
+				TaskName: api.BuiltinRouteTaskName,
+				Body: map[string]any{
+					"err":   err.Error(),
+					"path":  supervisorIntentPath,
+					"phase": "in-memory-reapply",
+				},
+			})
+			return intent
 		}
 	}
 	_ = events.Emit(api.SupervisorEvent{
@@ -2612,36 +2711,6 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 			"port":   port,
 		},
 	})
-	if !changed {
-		return intent
-	}
-
-	// Reviewer O1 (adversarial gate, 2026-07-25): if THIS write fails, the
-	// in-memory `intent` returned below already carries the route row (this
-	// session's own reconcile pass spawns it), but the disk copy does not.
-	// The next 60s IntentWatcher poll re-reads disk, refreshes intentCache to
-	// the route-less snapshot, and the orphan-reap path may terminate the
-	// just-spawned route daemon ~60s later as an undesired orphan — repeating
-	// on every restart until the underlying write failure (disk full,
-	// permission, DACL gate) is cleared. This degrades to "route daemon
-	// churns every ~60s" rather than "route daemon never runs", and the
-	// failure is surfaced via the warn event below (never silent), so it is
-	// accepted as-is rather than adding retry/backoff machinery for a rare,
-	// operator-visible disk-write failure.
-	if err := api.MutateSupervisorIntentIfChanged(supervisorIntentPath, func(f *api.SupervisorIntentFile) (bool, error) {
-		return api.EnsureBuiltinRouteDaemon(f, cmdPath, port), nil
-	}); err != nil {
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: "warn",
-			Source:   "lifecycle",
-			Event:    "builtin-route-ensure-failed",
-			TaskName: api.BuiltinRouteTaskName,
-			Body: map[string]any{
-				"err":  err.Error(),
-				"path": supervisorIntentPath,
-			},
-		})
-	}
 	return intent
 }
 

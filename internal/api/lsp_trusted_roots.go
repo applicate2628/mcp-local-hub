@@ -92,8 +92,29 @@ type LSPTrustedRootsFile struct {
 // Honors the daemonStateRootOverride test seam
 // (api.SetDaemonStateRootForTest) so cross-package tests redirect it
 // without env vars, mirroring DefaultSupervisorIntentPath.
+//
+// This is the WRITE-path resolver — it CREATES the state directory on first
+// call (DaemonStateDir()). Use DefaultLSPTrustedRootsPathReadOnly for a pure
+// read that must never create anything as a side effect.
 func DefaultLSPTrustedRootsPath() (string, error) {
 	stateDir, err := DaemonStateDir()
+	if err != nil {
+		return "", err
+	}
+	return joinStateFilePath(stateDir, LSPTrustedRootsFileLeaf), nil
+}
+
+// DefaultLSPTrustedRootsPathReadOnly is the read-only counterpart of
+// DefaultLSPTrustedRootsPath (P2-3 fix, adversarial cross-family review of
+// Increment 1): it resolves the SAME path but via DaemonStateDirReadOnly,
+// which never creates the state directory. LoadDefaultLSPTrustedRoots uses
+// this — a pure read of the trust store must never have the side effect of
+// creating <state-dir> on a host where nothing has run yet (the standalone
+// `mcphub route` front daemon's TrustedRootCheckFn reads this store on every
+// first-touch LSP request; a read creating directory state would falsify
+// its documented read-only invariant just as surely as a registry write).
+func DefaultLSPTrustedRootsPathReadOnly() (string, error) {
+	stateDir, err := DaemonStateDirReadOnly()
 	if err != nil {
 		return "", err
 	}
@@ -183,9 +204,16 @@ func LoadLSPTrustedRoots(path string) (*LSPTrustedRootsFile, error) {
 }
 
 // LoadDefaultLSPTrustedRoots resolves the default store path and loads
-// it (tolerating an absent file).
+// it (tolerating an absent file). This is a pure READ: it resolves the path
+// via DefaultLSPTrustedRootsPathReadOnly (P2-3 fix) so calling it can never
+// create the state directory as a side effect — every caller (the router's
+// LSPWorkspaceRootTrusted gate, `mcphub trust list`, the GUI's read handler)
+// only ever wants to know what is currently trusted, never to provision
+// state. BlessDefaultTrustedRoot / RemoveDefaultTrustedRoot (the only
+// legitimate writers) resolve their own path via DefaultLSPTrustedRootsPath
+// directly and are unaffected by this change.
 func LoadDefaultLSPTrustedRoots() (*LSPTrustedRootsFile, error) {
-	path, err := DefaultLSPTrustedRootsPath()
+	path, err := DefaultLSPTrustedRootsPathReadOnly()
 	if err != nil {
 		return nil, err
 	}

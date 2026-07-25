@@ -63,6 +63,20 @@ func TestResolveMCPFrontPort_FreshHostUsesRegistryDefault(t *testing.T) {
 // ResolveMCPFrontPort to swallow the yaml.Unmarshal error (returning nil
 // instead of propagating it) makes TestResolveMCPFrontPort_
 // ErrorsOnCorruptSettingsFile below fail because err becomes nil.
+//
+// Scope note (P2-5 fix, adversarial cross-family review of the
+// mcphub-front-daemon Increment 1 review): this graceful fallback remains
+// correct for MCPFrontPortOrDefault's own documented read-only/best-effort
+// consumers (the scan classifier, `mcphub route`'s own --port flag default
+// via internal/cli.resolveMCPFrontPortFn). It is NOT used any more by
+// internal/cli.ensureBuiltinRouteDaemonAtStartup — that call site is a WRITE
+// path (it durably persists the resolved port into the reserved route-daemon
+// row) and was switched to the strict api.ResolveMCPFrontPort accessor
+// (via resolveMCPFrontPortStrictFn) precisely so a corrupt settings file
+// there propagates instead of silently canonicalizing the row back onto
+// DefaultMCPFrontPort. See internal/cli/builtin_route_daemon_test.go's
+// TestEnsureBuiltinRouteDaemonAtStartup_PortResolutionFailurePreservesExistingRow
+// for that corrected-contract regression test.
 func TestMCPFrontPortOrDefault_FallsBackOnCorruptSettingsFile(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("LOCALAPPDATA", tmp)

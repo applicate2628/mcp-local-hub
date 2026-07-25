@@ -25,14 +25,17 @@ package cli
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 
 	"github.com/spf13/cobra"
 )
@@ -131,6 +134,116 @@ func TestBuildRouteServer_UnregisteredWorkspace_Returns503WithNoRegistryOrSuperv
 			t.Fatalf("stat %s: %v", intentPath, statErr)
 		}
 	}
+}
+
+// TestBuildRouteServer_RegisteredWorkspaceUnreachableBackend_NoSharedStateFileWrite
+// is the P1-1 + P2-6 falsifying test through the REAL production
+// construction path (buildRouteServer), rather than gui.Server's helpers in
+// isolation (internal/gui/route_readonly_test.go carries the companion
+// test). Unlike the unregistered-workspace test above, this REGISTERS the
+// workspace first so the request reaches the upstream-forward path — the
+// "serena-upstream-unreachable" branch that used to write hub-mcp.log (P1-1)
+// — and asserts a COMPLETE before/after state-directory inventory (P2-6: the
+// pre-existing test above only ever exercised the early-503 path, which
+// returns before any forward attempt or persist call could run, so it never
+// falsified the actual P1-1 bug).
+//
+// Mutation-proven: temporarily reverting gui.SetSerenaRouterReadOnly to
+// leave AuditFn nil (its pre-P1-1-fix shape) makes this test fail —
+// hub-mcp.log appears under the isolated state dir after the request.
+func TestBuildRouteServer_RegisteredWorkspaceUnreachableBackend_NoSharedStateFileWrite(t *testing.T) {
+	tmp := apitest.HardenedTempDir(t)
+	t.Setenv("LOCALAPPDATA", tmp)
+	restoreState := api.SetDaemonStateRootForTest(tmp)
+	t.Cleanup(restoreState)
+
+	root := filepath.Join(tmp, "workspace-root")
+	ws := i6MakeSerenaWorkspace(t, root, "Trusted")
+	toolFile := i6WriteWorkspaceFile(t, ws, "src", "main.go")
+
+	// Reserve then immediately close a TCP port so the upstream forward hits
+	// a real connection-refused failure.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	deadPort := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close reserved port: %v", err)
+	}
+
+	registryPath, rerr := api.DefaultRegistryPath()
+	if rerr != nil {
+		t.Fatalf("resolve registry path: %v", rerr)
+	}
+	reg := api.NewRegistry(registryPath)
+	if err := reg.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey:  api.WorkspaceKey(ws),
+		WorkspacePath: ws,
+		Language:      api.SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          deadPort,
+		TaskName:      "mcp-local-hub-serena-trusted",
+	}); err != nil {
+		t.Fatalf("PutSerena: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save registry: %v", err)
+	}
+
+	cmd := &cobra.Command{}
+	s, err := buildRouteServer(cmd, mcpFrontI6TestPort)
+	if err != nil {
+		t.Fatalf("buildRouteServer: %v", err)
+	}
+
+	before := i6SnapshotTree(t, tmp)
+
+	body := i6BuildToolCallBody(t, "find_symbol", map[string]any{"relative_path": toolFile})
+	req := httptest.NewRequest(http.MethodPost, "/serena/mcp", strings.NewReader(body))
+	req.Host = "127.0.0.1:19321"
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Origin", "http://127.0.0.1:19321")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.RouteHandler().ServeHTTP(rr, req)
+
+	if rr.Code == http.StatusOK {
+		t.Fatalf("status = 200; fixture expected a forward failure against a closed port, got success body=%s", rr.Body.String())
+	}
+
+	after := i6SnapshotTree(t, tmp)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("state directory %s changed after a registered-workspace, unreachable-backend request via `mcphub route`'s real construction path (want ZERO shared-state writes beyond the registry seeded above):\nbefore=%v\nafter=%v", tmp, before, after)
+	}
+
+	hubLog := filepath.Join(tmp, "hub-mcp.log")
+	if _, statErr := os.Stat(hubLog); statErr == nil {
+		t.Fatalf("hub-mcp.log exists at %s after a request via `mcphub route` — the route daemon must never write the GUI-owned shared event log", hubLog)
+	}
+}
+
+func i6SnapshotTree(t *testing.T, root string) map[string][2]int64 {
+	t.Helper()
+	out := map[string][2]int64{}
+	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, p)
+		if rerr != nil {
+			return rerr
+		}
+		out[rel] = [2]int64{info.Size(), info.ModTime().UnixNano()}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	return out
 }
 
 func i6MakeSerenaWorkspace(t *testing.T, root, name string) string {

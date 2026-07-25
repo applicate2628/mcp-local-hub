@@ -27,7 +27,8 @@
 package api
 
 import (
-	"slices"
+	"fmt"
+	"reflect"
 	"strconv"
 )
 
@@ -71,19 +72,46 @@ func BuildBuiltinRouteDaemon(command string, port int) SupervisorDaemon {
 	}
 }
 
+// ErrBuiltinRouteTaskNameCollision is returned by EnsureBuiltinRouteDaemon
+// when an existing supervisor-intent row carries the reserved
+// BuiltinRouteTaskName canonical key but its Server/Daemon identity does NOT
+// match the reserved (BuiltinRouteServer, BuiltinRouteDaemonName) pair (P2-4,
+// adversarial review of Increment 1). Such a row was never written by this
+// seeder — it is a foreign row squatting on the reserved name (an operator
+// hand-edit, a stale migration artifact, or a bug elsewhere) — and must never
+// be silently overwritten or silently treated as "already canonical".
+var ErrBuiltinRouteTaskNameCollision = fmt.Errorf("supervisor-intent row collides with the reserved built-in route daemon task name %q but its server/daemon identity does not match the reserved (%q, %q) pair; refusing to overwrite a foreign row", BuiltinRouteTaskName, BuiltinRouteServer, BuiltinRouteDaemonName)
+
 // EnsureBuiltinRouteDaemon UPSERTs the built-in route daemon row into
 // f.Daemons, keyed by the reserved BuiltinRouteTaskName:
 //
 //   - absent -> appends the canonical row, returns changed=true ("added").
-//   - present but its Command/Args/Port drifted from the canonical shape
-//     (e.g. a binary relocation, or a future DefaultRouteDaemonPort bump) ->
-//     REPLACES the row wholesale with the canonical one, returns
-//     changed=true ("replaced").
-//   - present and already canonical -> leaves f untouched, returns
-//     changed=false ("unchanged").
+//   - present, carries the reserved (Server, Daemon) identity, but the rest
+//     of the descriptor (Command/Args/Port/Env/Workspace/...) drifted from
+//     the canonical shape (e.g. a binary relocation, or a future
+//     DefaultRouteDaemonPort bump) -> REPLACES the row wholesale with the
+//     canonical one, returns changed=true ("replaced").
+//   - present, carries the reserved identity, and is ALREADY the complete
+//     canonical descriptor -> leaves f untouched, returns changed=false
+//     ("unchanged").
+//   - present but its Server/Daemon does NOT match the reserved identity
+//     (P2-4: a foreign row squatting on the reserved task name, detected
+//     regardless of whether its Command/Args/Port happen to coincide with
+//     the canonical shape) -> returns (false, ErrBuiltinRouteTaskNameCollision)
+//     and leaves f completely untouched. The caller must surface this loudly
+//     rather than silently clobbering or silently accepting the foreign row.
+//   - two or more rows legitimately carry the reserved identity (should not
+//     normally happen; a defensive collapse for a prior bug or hand-edit) ->
+//     the FIRST is upserted to the canonical descriptor, every OTHER
+//     canonical-key row is removed, returns changed=true.
 //
-// f==nil is a no-op (changed=false) — callers only ever pass an already-
-// loaded/cloned *SupervisorIntentFile.
+// The "already canonical" check compares the COMPLETE descriptor (every
+// field of SupervisorDaemon via reflect.DeepEqual), not just Command/Args/
+// Port — comparing a subset of fields would silently accept drift in any
+// field left out of the comparison (P2-4).
+//
+// f==nil is a no-op (changed=false, nil) — callers only ever pass an
+// already-loaded/cloned *SupervisorIntentFile.
 //
 // This function only edits the in-memory file; it does not persist
 // anything. The caller (internal/cli/supervise.go, after loadIntentFiles)
@@ -91,22 +119,56 @@ func BuildBuiltinRouteDaemon(command string, port int) SupervisorDaemon {
 // read-modify-write path every other supervisor-intent mutation uses
 // (MutateSupervisorIntentIfChanged) — an in-memory-only add would be
 // dropped by the next IntentWatcher re-read.
-func EnsureBuiltinRouteDaemon(f *SupervisorIntentFile, command string, port int) bool {
+func EnsureBuiltinRouteDaemon(f *SupervisorIntentFile, command string, port int) (bool, error) {
 	if f == nil {
-		return false
+		return false, nil
 	}
 	want := BuildBuiltinRouteDaemon(command, port)
+
+	matchedIdx := -1
+	duplicateIdxs := make([]int, 0, 1)
 	for i := range f.Daemons {
 		if canonicalIntentTaskKey(f.Daemons[i].TaskName) != BuiltinRouteTaskName {
 			continue
 		}
 		existing := f.Daemons[i]
-		if existing.Command == want.Command && existing.Port == want.Port && slices.Equal(existing.Args, want.Args) {
-			return false
+		if existing.Server != BuiltinRouteServer || existing.Daemon != BuiltinRouteDaemonName {
+			// A foreign row squatting on the reserved task name — reject the
+			// WHOLE operation loudly rather than overwrite it (wholesale
+			// clobber) or accept it unchanged (under-canonicalization). f is
+			// left completely untouched.
+			return false, fmt.Errorf("%w (found server=%q daemon=%q command=%q)", ErrBuiltinRouteTaskNameCollision, existing.Server, existing.Daemon, existing.Command)
 		}
-		f.Daemons[i] = want
-		return true
+		if matchedIdx == -1 {
+			matchedIdx = i
+			continue
+		}
+		duplicateIdxs = append(duplicateIdxs, i)
 	}
-	f.Daemons = append(f.Daemons, want)
-	return true
+
+	if matchedIdx == -1 {
+		f.Daemons = append(f.Daemons, want)
+		return true, nil
+	}
+
+	changed := len(duplicateIdxs) > 0
+	if !reflect.DeepEqual(f.Daemons[matchedIdx], want) {
+		f.Daemons[matchedIdx] = want
+		changed = true
+	}
+	if len(duplicateIdxs) > 0 {
+		drop := make(map[int]struct{}, len(duplicateIdxs))
+		for _, idx := range duplicateIdxs {
+			drop[idx] = struct{}{}
+		}
+		kept := make([]SupervisorDaemon, 0, len(f.Daemons)-len(drop))
+		for i, d := range f.Daemons {
+			if _, isDup := drop[i]; isDup {
+				continue
+			}
+			kept = append(kept, d)
+		}
+		f.Daemons = kept
+	}
+	return changed, nil
 }

@@ -181,7 +181,11 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, error) {
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"route: registry load warning (will retry lazily on first call): %v\n", err)
 	}
-	resolver := serena_routing.NewWorkspaceResolver(reg, registryPath)
+	// P2-3 fix (adversarial cross-family review): the read-only constructor
+	// (never takes Registry.Lock(), the cross-process exclusive flock the
+	// GUI's own writers need) — see
+	// serena_routing.NewReadOnlyWorkspaceResolver's doc comment.
+	resolver := serena_routing.NewReadOnlyWorkspaceResolver(reg, registryPath)
 	sessions := serena_routing.NewSessionRouter()
 	// Read-only wiring (F1): nils AutoRegisterFn + WakeIdleFn — see
 	// gui.Server.SetSerenaRouterReadOnly's doc comment and the file header.
@@ -201,7 +205,10 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, error) {
 		// /lsp/<lang>/mcp traffic (the data race gui.go's comment documents at
 		// its own registry-construction site).
 		lspReg := api.NewRegistry(registryPath)
-		lspResolver := lsp_routing.NewWorkspaceResolver(lspReg, registryPath, m.Languages)
+		// P2-3 fix: the read-only constructor — see
+		// serena_routing.NewReadOnlyWorkspaceResolver's doc comment (the LSP
+		// resolver's NewReadOnlyWorkspaceResolver mirrors the same argument).
+		lspResolver := lsp_routing.NewReadOnlyWorkspaceResolver(lspReg, registryPath, m.Languages)
 		lspSessions := lsp_routing.NewSessionRouter()
 		// Read-only wiring (F1): nils AutoRegisterFn — see
 		// gui.Server.SetLSPRouterReadOnly's doc comment and the file header.

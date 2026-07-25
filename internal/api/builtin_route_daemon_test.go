@@ -12,6 +12,7 @@ package api
 import (
 	"io"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"mcp-local-hub/internal/config"
@@ -94,6 +95,157 @@ func TestBuiltinRouteDaemon_SurvivesUnrelatedServerInstallThenUninstall(t *testi
 	}
 	if !hasBuiltinRouteDaemonRow(final) {
 		t.Fatalf("uninstalling unrelated server \"demo\" dropped the built-in route row; final.Daemons=%+v", final.Daemons)
+	}
+}
+
+// TestEnsureBuiltinRouteDaemon_ForeignRowCollisionRejectedLoudly is the P2-4
+// falsifying test (adversarial review, mcphub-front-daemon Increment 1):
+// EnsureBuiltinRouteDaemon matched purely on the canonical task-name key, so
+// a pre-existing row that happens to carry the reserved task name but a
+// DIFFERENT identity (Server/Command) — e.g. an operator hand-edit, a stale
+// migration artifact, or a future bug elsewhere that writes under this name —
+// was silently wholesale-replaced with the canonical route descriptor. That
+// destroys whatever the foreign row represented with no diagnostic at all.
+// The corrected contract must refuse (return an error) instead.
+//
+// Mutation-proven: reverting EnsureBuiltinRouteDaemon to compare only
+// Command/Args/Port (the pre-fix shape) makes this test fail — the foreign
+// row is replaced with no error.
+func TestEnsureBuiltinRouteDaemon_ForeignRowCollisionRejectedLoudly(t *testing.T) {
+	f := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{
+				TaskName: BuiltinRouteTaskName,
+				Server:   "some-other-server",
+				Daemon:   "default",
+				Command:  `C:\custom.exe`,
+				Args:     []string{"custom", "--flag"},
+				Port:     9999,
+			},
+		},
+	}
+	before := append([]SupervisorDaemon(nil), f.Daemons...)
+
+	changed, err := EnsureBuiltinRouteDaemon(f, "/fake/mcphub", 9137)
+	if err == nil {
+		t.Fatalf("EnsureBuiltinRouteDaemon: got changed=%v, err=nil; want a collision error — a foreign row squatting on the reserved task name %q must never be silently overwritten", changed, BuiltinRouteTaskName)
+	}
+	if changed {
+		t.Errorf("EnsureBuiltinRouteDaemon reported changed=true alongside an error; the foreign row must be left untouched")
+	}
+	if len(f.Daemons) != len(before) || !reflect.DeepEqual(f.Daemons[0], before[0]) {
+		t.Fatalf("foreign row was mutated despite the collision error: got %+v, want unchanged %+v", f.Daemons, before)
+	}
+}
+
+// TestEnsureBuiltinRouteDaemon_ServerDaemonDriftIsNotSilentlyAcceptedAsCanonical
+// is the P2-4 under-canonicalization falsifying test: a row whose
+// Command/Args/Port already match the canonical descriptor but whose
+// Server/Daemon differ from the reserved identity (BuiltinRouteServer/
+// BuiltinRouteDaemonName) is NOT "already canonical" — it is the same
+// collision class as the wholesale-clobber case above, just with a
+// coincidentally-matching Command/Args/Port. The pre-fix comparison (which
+// only checked Command/Args/Port) treated this as changed=false ("already
+// correct"), silently leaving a non-canonical Server/Daemon in place forever.
+//
+// Mutation-proven: reverting to the Command/Args/Port-only comparison makes
+// this test fail — EnsureBuiltinRouteDaemon returns changed=false, nil
+// instead of an error.
+func TestEnsureBuiltinRouteDaemon_ServerDaemonDriftIsNotSilentlyAcceptedAsCanonical(t *testing.T) {
+	want := BuildBuiltinRouteDaemon("/fake/mcphub", 9137)
+	f := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{
+				TaskName: BuiltinRouteTaskName,
+				Server:   "drifted-server",
+				Daemon:   "drifted-daemon",
+				Command:  want.Command,
+				Args:     append([]string(nil), want.Args...),
+				Port:     want.Port,
+			},
+		},
+	}
+
+	changed, err := EnsureBuiltinRouteDaemon(f, "/fake/mcphub", 9137)
+	if err == nil {
+		t.Fatalf("EnsureBuiltinRouteDaemon: got changed=%v, err=nil; want a collision error — Server/Daemon drift from the reserved identity must not be silently treated as already-canonical", changed)
+	}
+}
+
+// TestEnsureBuiltinRouteDaemon_OwnRowFullCanonicalCompare proves the upsert
+// still works correctly for rows that DO carry the reserved identity
+// (Server==BuiltinRouteServer, Daemon==BuiltinRouteDaemonName): absent ->
+// added, present-and-canonical -> unchanged, present-and-drifted (e.g. a
+// relocated binary) -> replaced. This is the non-collision happy path the
+// P2-4 fix must not regress.
+func TestEnsureBuiltinRouteDaemon_OwnRowFullCanonicalCompare(t *testing.T) {
+	// Absent -> added.
+	f := &SupervisorIntentFile{Version: 1}
+	changed, err := EnsureBuiltinRouteDaemon(f, "/fake/mcphub", 9137)
+	if err != nil {
+		t.Fatalf("EnsureBuiltinRouteDaemon (absent): unexpected error: %v", err)
+	}
+	if !changed {
+		t.Fatalf("EnsureBuiltinRouteDaemon (absent): changed=false, want true")
+	}
+	if len(f.Daemons) != 1 {
+		t.Fatalf("EnsureBuiltinRouteDaemon (absent): len(Daemons)=%d, want 1", len(f.Daemons))
+	}
+
+	// Present-and-canonical -> unchanged.
+	changed, err = EnsureBuiltinRouteDaemon(f, "/fake/mcphub", 9137)
+	if err != nil {
+		t.Fatalf("EnsureBuiltinRouteDaemon (canonical): unexpected error: %v", err)
+	}
+	if changed {
+		t.Errorf("EnsureBuiltinRouteDaemon (canonical): changed=true, want false (already canonical)")
+	}
+
+	// Present-and-drifted (binary relocated) -> replaced.
+	changed, err = EnsureBuiltinRouteDaemon(f, "/fake/mcphub-relocated", 9137)
+	if err != nil {
+		t.Fatalf("EnsureBuiltinRouteDaemon (drifted command): unexpected error: %v", err)
+	}
+	if !changed {
+		t.Fatalf("EnsureBuiltinRouteDaemon (drifted command): changed=false, want true")
+	}
+	if f.Daemons[0].Command != "/fake/mcphub-relocated" {
+		t.Fatalf("EnsureBuiltinRouteDaemon (drifted command): Command = %q, want the relocated path", f.Daemons[0].Command)
+	}
+	if len(f.Daemons) != 1 {
+		t.Fatalf("EnsureBuiltinRouteDaemon (drifted command): len(Daemons)=%d, want 1 (no duplicate row)", len(f.Daemons))
+	}
+}
+
+// TestEnsureBuiltinRouteDaemon_DuplicateCanonicalKeyRowsCollapseToOne covers
+// the "remove duplicate canonical-key rows" half of the P2-4 fix: if two
+// rows both carry the reserved task name (and both carry the reserved
+// identity, so neither is a foreign-collision), the upsert must collapse
+// them to exactly one canonical row rather than leaving a duplicate behind.
+func TestEnsureBuiltinRouteDaemon_DuplicateCanonicalKeyRowsCollapseToOne(t *testing.T) {
+	dup := BuildBuiltinRouteDaemon("/fake/mcphub-stale", 9137)
+	f := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{dup, dup},
+	}
+
+	changed, err := EnsureBuiltinRouteDaemon(f, "/fake/mcphub", 9137)
+	if err != nil {
+		t.Fatalf("EnsureBuiltinRouteDaemon: unexpected error: %v", err)
+	}
+	if !changed {
+		t.Fatalf("EnsureBuiltinRouteDaemon: changed=false, want true (duplicate collapse + command update)")
+	}
+	count := 0
+	for _, d := range f.Daemons {
+		if canonicalIntentTaskKey(d.TaskName) == BuiltinRouteTaskName {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("EnsureBuiltinRouteDaemon: %d rows carry the reserved task name after upsert, want exactly 1: %+v", count, f.Daemons)
 	}
 }
 

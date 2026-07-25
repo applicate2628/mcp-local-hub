@@ -285,6 +285,16 @@ func (s *Server) SetSerenaRouterReadOnly(resolver *serena_routing.WorkspaceResol
 		Resolver: resolver,
 		Sessions: sessions,
 		// AutoRegisterFn and WakeIdleFn deliberately nil — see doc comment.
+		//
+		// AuditFn (P1-1 fix, adversarial cross-family review): every other
+		// caller leaves this nil so serenaRouterHandler's own default falls
+		// back to api.LogHubMcpEvent, which appends to the SHARED
+		// <state-dir>/hub-mcp.log the GUI process owns. That default is wrong
+		// for THIS constructor specifically — the whole point of the
+		// standalone route daemon is that it never writes GUI-owned shared
+		// state — so it is wired explicitly here to routeReadOnlySink
+		// (route_readonly_audit.go), which never touches hub-mcp.log.
+		AuditFn: routeReadOnlySink,
 	})
 }
 
