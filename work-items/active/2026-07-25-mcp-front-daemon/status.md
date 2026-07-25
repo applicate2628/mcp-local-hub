@@ -403,3 +403,123 @@ operator is told this mechanism is ready — 2a alone regresses new-workspace
 auto-registration for any client actually pointed at mcp_front.port via
 `--reconcile-mcp-front` (I6, intended + gated, restored by 2b) — the design
 record's own open question, not yet decided in this session.
+
+## Adversarial gate (independent Opus reviewer) round on sub-increment 2a — F1 fixed, F2 hardened
+
+Correction to the "Gate" section above: that section's characterization of
+the `classify()` multi-port widening as fully correct was INCOMPLETE — the
+widening itself was right, but the CALL SITE feeding it `mcpFrontPort` was
+not, per the finding below (F1). Both findings addressed on the same branch,
+same worktree, still held for Tuesday's bot (no push/PR).
+
+### F1 (P2, BLOCKING) — fixed, commit c5566269
+
+The reviewer's finding, independently confirmed by direct code reading
+before any fix: `api.MCPFrontPortOrDefault()` never returns 0 (falls back
+to `DefaultMCPFrontPort` on any resolution failure), and `scan.go`'s
+`ScanFrom` computes it unconditionally and passes it into
+`IsLiveSerenaRouterURLAnyPort` regardless of whether `guiPort` is itself
+known. `IsLiveSerenaRouterURLAnyPort`'s own "degrade to shape-only trust"
+rule requires EVERY supplied port to be `<=0` — since mcpFrontPort was
+always known, that rule could never fire on the CLI `mcphub scan` path
+(`guiPort==0`), silently removing the pre-2a degrade for the CLI's most
+common case: a serena client still on today's live GUI port (:9125), the
+default/dormant state on every host until an operator runs
+`--reconcile-mcp-front`. That flipped via-hub to external, and external is
+not in `mcphub scan`'s pretty-output bucket list — the operator's serena
+row vanished from the CLI table entirely. The GUI's own scan call sites
+(always passing a live `guiPort`) were unaffected. Pre-existing
+`TestClassify` cases at `guiPort:0` left the (new) `mcpFrontPort` table
+field at its zero-value default — a value production never produces —
+which is why the full suite stayed green despite the regression.
+
+**Fix (architect decision, Candidate A):** `mcpFrontPort` only participates
+in the known-port set when `guiPort>0` too; `IsLiveSerenaRouterURLAnyPort`
+itself is unchanged (its own semantics were confirmed correct — the defect
+was entirely at the call site). Added 3 mutation-proven `TestClassify`
+cases (`guiPort:0`, `mcpFrontPort:9137`): dormant (`client@9125` ->
+via-hub), its inherited-cell variant (-> via-hub-inherited), and the
+post-reconcile symmetric case (`client@9137` -> via-hub). Mutation proof:
+reverting to the unconditional pass-through made 2 of 3 fail exactly as
+predicted (the 3rd coincidentally passes since its port equals
+mcpFrontPort); reverted back, all pass.
+
+### F2 (P3) — investigated, hardened anyway per architect decision; commit 21cc7f78
+
+Reviewer's claim: rollback re-resolves the CURRENT `mcp_front.port` setting
+and passes it to `RollbackLSPRouterClientEntries`'s `GUIPort`; if the
+operator changes the setting between the forward run and a later
+`--rollback`, the LSP router entries written at the OLD port would be
+unrecognized and orphaned.
+
+**Investigation finding (before implementing the requested fix):** does
+NOT reproduce as literally described. `RollbackLSPRouterClientEntries`'s
+removal check (`internal/api/lsp_client_router.go`) always looks the entry
+up by its FIXED CANONICAL NAME (`routerName := LSPRouterEntryName(language)`),
+which unconditionally satisfies `entryIsOwnedLSPRouterForLanguage`'s own
+`reservedName` shortcut — so removal is name-keyed, not port-keyed, and the
+`GUIPort` argument does not gate it. Proved this directly with a new
+permanent guard, `TestRollbackLSPRouterClientEntries_RemovalIsNameKeyedNotPortKeyed`
+(internal/api/lsp_client_router_test.go): forward at port A, rollback with
+a DIFFERENT port B — the entry is still removed.
+
+Per the architect's explicit decision, the persisted-port hardening was
+implemented anyway as legitimate defense-in-depth: it closes a real, if
+narrower, dependency — before this change, rollback called
+`a.ResolveMCPFrontPort()` unconditionally, fully re-reading/re-parsing the
+live settings file; if that file became unreadable/unparseable for any
+reason between the forward run and the rollback, rollback aborted with an
+error even though the forward run's report already recorded a perfectly
+good port. The forward reconcile now persists an additive envelope
+(`mcpFrontReconcileReport{Port, Serena}`) instead of the bare serena
+`MigrateReport`; rollback reads `.Port` back for `RollbackLSPRouterClientEntries`'s
+`GUIPort`, falling back to `a.ResolveMCPFrontPort()` only when `.Port<=0`
+(an older artifact predating this field). The stale "ASSUMPTION
+(UNVERIFIED)" comment this rollback previously carried is removed.
+
+New test: `TestRunReconcileMCPFront_Rollback_UsesPersistedPortNotLiveSetting`
+— forward reconcile succeeds, the live settings file is then corrupted
+(malformed YAML, bypassing `SettingsSet`'s own range validation — an
+actually out-of-range value can never reach the file through the normal
+write path, and an in-range-but-drifted value would not itself break
+anything since removal is name-keyed per the finding above), then rollback
+must still succeed using the persisted port. Mutation proof: reverting to
+always call `a.ResolveMCPFrontPort()` makes this test fail with the
+settings-file parse error surfacing as the rollback's own error; reverted
+back, test passes.
+
+### Gate (F1+F2 round)
+
+`go build ./...` + `go vet ./...` clean, both tagged
+(`-tags=test_state_path_env`) and untagged. Full `internal/api` suite green
+twice (`go test -tags=test_state_path_env -count=1 -timeout 5m
+./internal/api/`, ~81-83s each run) — not scoped narrower, per the gate
+instruction. All `TestClassify`/`TestClassify_MCPFrontPort*` subtests green
+(including the 3 new F1 guards). All `TestRunReconcileMCPFront_*` (5,
+including the new F2 test) green.
+`TestRollbackLSPRouterClientEntries_RemovalIsNameKeyedNotPortKeyed` green.
+
+Full `internal/cli` sweep re-run this round (`-skip
+TestCleanupAggressive_IncludeClassFlagOverridesWithWarning`, the one
+already-documented crash): 11 failures, ALL matching the already-filed
+pre-existing classes from the prior round (`TestF1_*`/`TestF3_*` in
+supervise_lostchild_f1_f3_test.go, `TestRealloc_*` in
+supervise_realloc_test.go) — zero new failures, zero panics, nothing
+related to `classify()`/reconcile/rollback.
+
+Adjacent finding filed (not fixed, confirmed pre-existing via `git stash -u`
+against the accepted tip 16c34eba, unrelated to this diff — lives entirely
+in `internal/api/cleanup.go`):
+`work-items/bugs/2026-07-25-findwindowsexeextensionend-unicode-length-mismatch-panic.md`
+— `findWindowsExeExtensionEnd` indexes the ORIGINAL string with offsets
+computed against a separately-lowercased copy, panicking when
+`strings.ToLower` changes UTF-8 byte length for some rune in a live
+process's actual command line on this host.
+
+Commits: c5566269 (F1), 21cc7f78 (F2), 57fbc36e (adjacent-finding doc).
+NOT pushed — still held for Tuesday's bot.
+
+### Next action
+
+Report F1/F2 fix round back to the coordinator/architect. Still HELD for
+Tuesday's bot; no push/PR this session.
