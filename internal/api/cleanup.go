@@ -1003,14 +1003,46 @@ func basenameAcrossSeparators(p string) string {
 	return p
 }
 
+// hasSuffixASCIIFold reports whether s ends with suffix, comparing ASCII
+// letters case-insensitively. Unlike `strings.HasSuffix`/`strings.CutSuffix`
+// over a `strings.ToLower` copy, it never builds a differently-sized string,
+// so `len(s)-len(suffix)` is always a valid byte offset into the ORIGINAL s.
+// suffix is expected to be pure ASCII (true for every caller here). A match
+// can never land mid-rune: every byte of an ASCII suffix is < 0x80, and no
+// byte of a multi-byte UTF-8 sequence ever is.
+func hasSuffixASCIIFold(s, suffix string) bool {
+	if len(suffix) > len(s) {
+		return false
+	}
+	off := len(s) - len(suffix)
+	for i := 0; i < len(suffix); i++ {
+		if !asciiEqualFold(s[off+i], suffix[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // stripExtension drops a recognized Windows exe extension from the
 // tail of name, case-insensitively. Returns name unchanged when no
 // match.
+//
+// Bug 2026-07-26 (same defect class as findWindowsExeExtensionEnd above,
+// found by cross-family review of the fix for that one): this used to
+// `strings.CutSuffix` a `strings.ToLower(name)` copy and then slice the
+// ORIGINAL `name` at `len(rest)`. strings.ToLower does NOT preserve UTF-8
+// byte length for every rune — U+023A ('Ⱥ', 2 bytes) lowercases to U+2C65
+// ('ⱥ', 3 bytes) — so any such rune in `name` made the lowered copy LONGER
+// than the original and `len(rest)` an offset into a string that no longer
+// exists. Reproduced: "Ⱥ.exe" returned "Ⱥ." (silently wrong) and
+// "ȺȺȺȺȺ.exe" panicked with `slice bounds out of range [:15] with length
+// 14`. Reachable from aggressive cleanup via firstTokenBasename. The
+// extensions are pure ASCII, so an ASCII-fold suffix test over the original
+// string is both correct and index-safe.
 func stripExtension(name string) string {
-	low := strings.ToLower(name)
 	for _, ext := range []string{".exe", ".cmd", ".bat", ".ps1"} {
-		if rest, ok := strings.CutSuffix(low, ext); ok {
-			return name[:len(rest)]
+		if hasSuffixASCIIFold(name, ext) {
+			return name[:len(name)-len(ext)]
 		}
 	}
 	return name

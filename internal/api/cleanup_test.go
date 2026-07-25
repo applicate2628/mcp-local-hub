@@ -615,3 +615,63 @@ func TestFirstTokenBasenameNonASCIIOffsetPreserving(t *testing.T) {
 		t.Errorf("redactCmdlineForDisplay(%q) = %q, want %q", s, got, "node.exe")
 	}
 }
+
+// stripExtension carried the SAME byte-space defect as
+// findWindowsExeExtensionEnd: it CutSuffix'd a strings.ToLower copy and then
+// sliced the ORIGINAL at the lowered copy's offset. 'Ⱥ' (U+023A, 2 bytes)
+// lowercases to 'ⱥ' (U+2C65, 3 bytes), so each one made the copy a byte
+// longer than the original. One such rune silently returned a WRONG result;
+// enough of them ran the slice past the end and panicked. Both halves are
+// asserted here — a panic-only test would let the silent-corruption half
+// regress unnoticed.
+func TestStripExtensionNonASCIIByteExpansion(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		want string
+	}{
+		// Pre-fix: returned "Ⱥ." — the trailing dot survived because the
+		// slice index was one byte too long. No panic, just a wrong answer.
+		{"single expanding rune", "Ⱥ.exe", "Ⱥ"},
+		// Pre-fix: panicked (slice bounds out of range) — five expanding
+		// runes pushed the index five bytes past the original's length.
+		{"enough expanding runes to overrun", "ȺȺȺȺȺ.exe", "ȺȺȺȺȺ"},
+		{"expanding rune mid-name", "nodeȺserver.CMD", "nodeȺserver"},
+		// Plain ASCII must be untouched by the change.
+		{"ascii lower", "node.exe", "node"},
+		{"ascii upper", "NODE.EXE", "NODE"},
+		{"ascii mixed", "Node.Bat", "Node"},
+		{"unrecognized extension", "node.dll", "node.dll"},
+		{"no extension", "node", "node"},
+		// The extension text itself must not be mistaken for a name.
+		{"bare extension", ".exe", ""},
+		{"shorter than extension", "ex", "ex"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// A pre-fix regression shows up as a panic here, not just a
+			// failed comparison, so name it explicitly.
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("stripExtension(%q) panicked: %v", tc.in, r)
+				}
+			}()
+			if got := stripExtension(tc.in); got != tc.want {
+				t.Errorf("stripExtension(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// The defect is reachable from aggressive cleanup, not just from the helper:
+// firstTokenBasename feeds stripExtension on a real command line.
+func TestStripExtensionReachableFromCmdlineBasename(t *testing.T) {
+	const cmdline = `C:\ȺȺȺȺȺtools\ȺȺȺȺȺ.exe --serve`
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("stripExtension via firstTokenBasename panicked: %v", r)
+		}
+	}()
+	if got := stripExtension(firstTokenBasename(cmdline)); got != "ȺȺȺȺȺ" {
+		t.Errorf("stripExtension(firstTokenBasename(%q)) = %q, want %q", cmdline, got, "ȺȺȺȺȺ")
+	}
+}
