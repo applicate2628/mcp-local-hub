@@ -1,0 +1,8 @@
+Change Dir: 'R:/b/wingpl/boost-algorithm/wingpl-rel'
+Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" -v -v -j29 install
+[0/1] C:\windows\system32\cmd.exe /C "cd /D R:\b\wingpl\boost-algorithm\wingpl-rel && C:\msys64\ucrt64\bin\cmake.exe -P cmake_install.cmake"
+-- Install configuration: "Release"
+-- Installing: R:/vcpkg-cache/packages/boost-algorithm_wingpl/include/boost/algorithm/algorithm.hpp
+-- Installing: R:/vcpkg-cache/packages/boost-system_wingpl/include/boost/system/detail/error_category.hpp
+-- Installing: R:/vcpkg-cache/packages/boost-compat_wingpl/include/boost/compat/detail/throw_system_error.hpp
+-- Installing: R:/vcpkg-cache/packages/boost-algorithm_wingpl/lib/cmake/boost_algorithm-1.91.0/boost_algorithm-config.cmake

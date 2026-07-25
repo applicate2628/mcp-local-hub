@@ -1,0 +1,8 @@
+Change Dir: 'R:/b/cl/somelib/cl-rel'
+Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" -v -v -j8 install
+[1/5] C:\PROGRA~1\MICROS~3\2022\COMMUN~1\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\cl.exe /c /nologo /W3 /EHsc /Fofoo.obj R:\b\cl\somelib\src\somelib-1.0.clean\foo.cpp
+FAILED: CMakeFiles/somelib.dir/foo.cpp.obj
+C:\PROGRA~1\MICROS~3\2022\COMMUN~1\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\cl.exe /c /nologo /W3 /EHsc /Fofoo.obj R:\b\cl\somelib\src\somelib-1.0.clean\foo.cpp
+R:\b\cl\somelib\src\somelib-1.0.clean\error_estimator.h(12): warning C4244: 'initializing': conversion from 'double' to 'int', possible loss of data
+R:\b\cl\somelib\src\somelib-1.0.clean\foo.cpp(42): error C2065: 'undeclared_thing': undeclared identifier
+ninja: build stopped: subcommand failed.

@@ -1,0 +1,7 @@
+[2026-07-24 21:35:11] triplet=cl
+command: C:\vcpkg\vcpkg.exe install somelib --overlay-ports=C:\vcpkg/vcpkg-builds/overlays/ports --overlay-ports=C:\vcpkg/vcpkg-builds/overlays/ports_upd --overlay-ports=C:\vcpkg/vcpkg-builds/overlays/ports_mkl --overlay-triplets=C:\vcpkg/vcpkg-builds/overlays/triplets --triplet=cl --x-buildtrees-root=r:/b/cl --x-packages-root=r:/vcpkg-cache/packages/cl --clean-buildtrees-after-build --clean-packages-after-build --no-binarycaching --keep-going --enforce-port-checks --recurse --x-install-root=q:/vcpkg-libs/cl --host-triplet=cl
+exit_code: 1
+build_failed_count: 1
+failed_ports:
+- somelib:cl
+

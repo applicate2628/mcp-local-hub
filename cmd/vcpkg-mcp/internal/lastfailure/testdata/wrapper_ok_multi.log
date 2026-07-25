@@ -1,0 +1,9 @@
+[2026-07-24 21:35:11] triplet=cl
+command: C:\vcpkg\vcpkg.exe install somelib otherlib thirdlib --overlay-ports=C:\vcpkg/vcpkg-builds/overlays/ports --triplet=cl --x-buildtrees-root=r:/b/cl --x-install-root=q:/vcpkg-libs/cl --host-triplet=cl
+exit_code: 1
+build_failed_count: 3
+failed_ports:
+- somelib:cl
+- otherlib:cl
+- thirdlib:cl
+

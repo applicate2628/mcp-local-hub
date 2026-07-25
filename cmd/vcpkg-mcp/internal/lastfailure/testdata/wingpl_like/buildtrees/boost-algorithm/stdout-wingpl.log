@@ -1,0 +1,9 @@
+** Using msvc compiler for boost-algorithm: C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x64/cl.exe
+Downloading https://github.com/boostorg/algorithm/archive/boost-1.91.0.tar.gz -> boostorg-algorithm-boost-1.91.0.tar.gz
+Successfully downloaded boostorg-algorithm-boost-1.91.0.tar.gz
+-- Extracting source Q:/vcpkg-downloads/boostorg-algorithm-boost-1.91.0.tar.gz
+-- Using source at R:/b/wingpl/boost-algorithm/src/ost-1.91.0-59781f854a.clean
+-- Configuring wingpl
+-- Building wingpl-rel
+-- Installing: R:/vcpkg-cache/packages/boost-algorithm_wingpl/share/boost-algorithm/copyright
+-- Performing post-build validation

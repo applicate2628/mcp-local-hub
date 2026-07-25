@@ -1,0 +1,1 @@
+[1/1] "C:/msys64/ucrt64/bin/cmake.exe" -E chdir ".." "C:/msys64/ucrt64/bin/cmake.exe" "R:/b/wingpl/boost-algorithm/src/ost-1.91.0-59781f854a.clean" "-G" "Ninja" "-DCMAKE_BUILD_TYPE=Release" "-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=wingpl"

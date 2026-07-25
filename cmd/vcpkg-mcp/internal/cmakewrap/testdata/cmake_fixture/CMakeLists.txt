@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.20)
+project(Fixture)
+include(${CMAKE_CURRENT_LIST_DIR}/helper.cmake)
+include(missing_helper.cmake)
+add_subdirectory(sub)
