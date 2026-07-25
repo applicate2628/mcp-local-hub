@@ -309,8 +309,24 @@ var windowsExeExtensions = []string{".exe", ".com", ".cmd", ".bat", ".ps1"}
 // `C:\Program Files\nodejs\node.exe -y server-memory` to `C:\Program`
 // because the first space won. This helper finds `.exe ` and returns
 // the index after the extension instead.
+//
+// Bug 2026-07-25 (index-out-of-range panic): a prior version lowercased
+// the WHOLE string up front (`lower := strings.ToLower(s)`) and searched
+// `lower` for the extensions, but then indexed the ORIGINAL string `s` at
+// the resulting offsets (`s[end]`, `end == len(s)`). strings.ToLower does
+// NOT preserve UTF-8 byte length for every rune — e.g. U+023A ('Ⱥ', 2
+// bytes) lowercases to 'ⱥ' (U+2C65, 3 bytes) — so a non-ASCII byte
+// anywhere before a match shifts every subsequent `lower`-space offset
+// out of alignment with `s`. That produced BOTH an out-of-range panic
+// (`s[end]` with `end > len(s)`) and, in cases that didn't panic, a
+// WRONG split offset silently returned to the caller (firstTokenBasename
+// slices `s` at this index). The extensions and boundary characters
+// matched here (.exe/.com/.cmd/.bat/.ps1, space/tab/\n/\r) are all pure
+// ASCII, so the fix performs an ASCII-only case-fold search directly
+// over `s` (via indexASCIIFold) instead of building a possibly
+// differently-sized `lower` copy — every returned index is guaranteed to
+// be a valid `s` byte offset.
 func findWindowsExeExtensionEnd(s string) int {
-	lower := strings.ToLower(s)
 	bestIdx := -1
 	for _, ext := range windowsExeExtensions {
 		// Walk every occurrence; pick the first one that is followed by
@@ -318,8 +334,8 @@ func findWindowsExeExtensionEnd(s string) int {
 		// so an extension inside a later argument cannot overshadow the
 		// path's actual executable.
 		searchFrom := 0
-		for searchFrom < len(lower) {
-			idx := strings.Index(lower[searchFrom:], ext)
+		for searchFrom < len(s) {
+			idx := indexASCIIFold(s[searchFrom:], ext)
 			if idx < 0 {
 				break
 			}
@@ -339,6 +355,51 @@ func findWindowsExeExtensionEnd(s string) int {
 		}
 	}
 	return bestIdx
+}
+
+// asciiEqualFold reports whether a and b are byte-equal after ASCII-only
+// case folding (A-Z treated as equal to a-z). Non-ASCII bytes (>= 0x80,
+// which only ever appear as UTF-8 continuation/lead bytes in the inputs
+// this is used on) compare literally — they never match an ASCII letter,
+// which is exactly the desired behavior since the windowsExeExtensions
+// and boundary characters are all pure ASCII.
+func asciiEqualFold(a, b byte) bool {
+	if a >= 'A' && a <= 'Z' {
+		a += 'a' - 'A'
+	}
+	if b >= 'A' && b <= 'Z' {
+		b += 'a' - 'A'
+	}
+	return a == b
+}
+
+// indexASCIIFold returns the byte index of the first occurrence of substr
+// in s, comparing ASCII letters case-insensitively (e.g. ".exe" matches
+// ".exe", ".EXE", ".Exe" ...). Unlike
+// `strings.Index(strings.ToLower(s), strings.ToLower(substr))`, this NEVER
+// builds a modified copy of s with a different byte length, so a returned
+// index is always a valid offset into the ORIGINAL s — required here
+// because strings.ToLower does not preserve UTF-8 byte length for every
+// rune (see findWindowsExeExtensionEnd's bug 2026-07-25 comment). substr
+// is expected to be pure ASCII (true for every caller in this file).
+func indexASCIIFold(s, substr string) int {
+	if len(substr) == 0 {
+		return 0
+	}
+	n := len(s) - len(substr)
+	for i := 0; i <= n; i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			if !asciiEqualFold(s[i+j], substr[j]) {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
 }
 
 // firstWhitespaceTerminatesPath returns true when the character
@@ -942,14 +1003,46 @@ func basenameAcrossSeparators(p string) string {
 	return p
 }
 
+// hasSuffixASCIIFold reports whether s ends with suffix, comparing ASCII
+// letters case-insensitively. Unlike `strings.HasSuffix`/`strings.CutSuffix`
+// over a `strings.ToLower` copy, it never builds a differently-sized string,
+// so `len(s)-len(suffix)` is always a valid byte offset into the ORIGINAL s.
+// suffix is expected to be pure ASCII (true for every caller here). A match
+// can never land mid-rune: every byte of an ASCII suffix is < 0x80, and no
+// byte of a multi-byte UTF-8 sequence ever is.
+func hasSuffixASCIIFold(s, suffix string) bool {
+	if len(suffix) > len(s) {
+		return false
+	}
+	off := len(s) - len(suffix)
+	for i := 0; i < len(suffix); i++ {
+		if !asciiEqualFold(s[off+i], suffix[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 // stripExtension drops a recognized Windows exe extension from the
 // tail of name, case-insensitively. Returns name unchanged when no
 // match.
+//
+// Bug 2026-07-26 (same defect class as findWindowsExeExtensionEnd above,
+// found by cross-family review of the fix for that one): this used to
+// `strings.CutSuffix` a `strings.ToLower(name)` copy and then slice the
+// ORIGINAL `name` at `len(rest)`. strings.ToLower does NOT preserve UTF-8
+// byte length for every rune — U+023A ('Ⱥ', 2 bytes) lowercases to U+2C65
+// ('ⱥ', 3 bytes) — so any such rune in `name` made the lowered copy LONGER
+// than the original and `len(rest)` an offset into a string that no longer
+// exists. Reproduced: "Ⱥ.exe" returned "Ⱥ." (silently wrong) and
+// "ȺȺȺȺȺ.exe" panicked with `slice bounds out of range [:15] with length
+// 14`. Reachable from aggressive cleanup via firstTokenBasename. The
+// extensions are pure ASCII, so an ASCII-fold suffix test over the original
+// string is both correct and index-safe.
 func stripExtension(name string) string {
-	low := strings.ToLower(name)
 	for _, ext := range []string{".exe", ".cmd", ".bat", ".ps1"} {
-		if rest, ok := strings.CutSuffix(low, ext); ok {
-			return name[:len(rest)]
+		if hasSuffixASCIIFold(name, ext) {
+			return name[:len(name)-len(ext)]
 		}
 	}
 	return name
