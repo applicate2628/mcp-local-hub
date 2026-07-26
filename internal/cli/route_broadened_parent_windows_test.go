@@ -101,7 +101,7 @@ func TestBuildRouteServer_BroadenedParentRegistryRead_NoHubMcpLogWrite(t *testin
 	}
 
 	cmd := &cobra.Command{}
-	s, err := buildRouteServer(cmd, mcpFrontI6TestPort)
+	s, _, err := buildRouteServer(cmd, mcpFrontI6TestPort)
 	if err != nil {
 		t.Fatalf("buildRouteServer: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestBuildRouteServer_BroadenedParentLSPTrustedRootRead_NoHubMcpLogWrite(t *
 	// missing-file determination).
 
 	cmd := &cobra.Command{}
-	s, err := buildRouteServer(cmd, mcpFrontI6TestPort)
+	s, _, err := buildRouteServer(cmd, mcpFrontI6TestPort)
 	if err != nil {
 		t.Fatalf("buildRouteServer: %v", err)
 	}

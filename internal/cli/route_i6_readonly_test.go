@@ -59,7 +59,7 @@ func TestBuildRouteServer_UnregisteredWorkspace_Returns503WithNoRegistryOrSuperv
 	toolFile := i6WriteWorkspaceFile(t, ws, "src", "main.go")
 
 	cmd := &cobra.Command{}
-	s, err := buildRouteServer(cmd, mcpFrontI6TestPort)
+	s, _, err := buildRouteServer(cmd, mcpFrontI6TestPort)
 	if err != nil {
 		t.Fatalf("buildRouteServer: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestBuildRouteServer_RegisteredWorkspaceUnreachableBackend_NoSharedStateFil
 	}
 
 	cmd := &cobra.Command{}
-	s, err := buildRouteServer(cmd, mcpFrontI6TestPort)
+	s, _, err := buildRouteServer(cmd, mcpFrontI6TestPort)
 	if err != nil {
 		t.Fatalf("buildRouteServer: %v", err)
 	}

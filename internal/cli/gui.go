@@ -1058,7 +1058,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 			lspResolver := lsp_routing.NewWorkspaceResolver(lspReg, registryPath, m.Languages)
 			lspSessions := lsp_routing.NewSessionRouter()
 			s.SetLSPRouterProduction(lspResolver, lspSessions, m.Languages)
-			go runLSPSessionCleanupTicker(ctx, lspSessions, time.Hour, lsp_routing.DefaultSessionTTL)
+			go runLSPSessionCleanupTicker(ctx, lspSessions, sessionCleanupInterval, lsp_routing.DefaultSessionTTL)
 		}
 		// Phase 5 (bot PR #253 finding 1): wire the one-time supervisor
 		// cutover the auto-register-on-miss path runs when introducing the
@@ -1086,7 +1086,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 		// goroutine (rather than spawning a second ticker) keeps one
 		// correctly-shutdown background loop and ages every store on the
 		// same 24h idle clock.
-		go runSessionCleanupTicker(ctx, s, sessions, time.Hour, serena_routing.DefaultSessionTTL)
+		go runSessionCleanupTicker(ctx, s, sessions, sessionCleanupInterval, serena_routing.DefaultSessionTTL)
 		// §3 fail-loud reconcile FALLBACK: a faster, lighter ticker that polls
 		// the supervisor IPC status and tears down router sessions for any
 		// serena workspace whose daemon restarted (PID changed) or vanished
@@ -1481,9 +1481,23 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	return <-errCh
 }
 
+// sessionCleanupInterval is the cadence of every MCP session-expiry sweep in
+// this process family (serena + LSP, GUI + standalone route daemon).
+//
+// Single-owned because the route daemon became a THIRD driver of these same
+// sweeps (codex bot PR #588 — see runRouteSessionExpiry): three copies of a
+// bare `time.Hour` literal is exactly the drift the cadence should not be
+// exposed to. It is deliberately far shorter than the 24h
+// serena_routing.DefaultSessionTTL / lsp_routing.DefaultSessionTTL it enforces
+// — the sweep is a cheap map walk, so the interval only bounds how long an
+// already-expired binding lingers.
+const sessionCleanupInterval = time.Hour
+
 // runSessionCleanupTicker drops serena session bindings whose lastSeen
-// is older than ttl. It is owned by the GUI server lifecycle and exits
-// when ctx is cancelled.
+// is older than ttl. It exits when ctx is cancelled.
+//
+// It is driven by the GUI server lifecycle AND by the standalone `mcphub
+// route` front daemon, which owns its own independent session routers.
 //
 // Finding 2: each tick sweeps BOTH the cross-package sticky-routing
 // SessionRouter (sessions.CleanupWithTTL) AND the gui Server's two

@@ -20,8 +20,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/process"
 
 	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
@@ -104,11 +106,30 @@ func seedSupervisorOwnedRoutePort(t *testing.T, port int) {
 		t.Fatalf("seed supervisor-intent: %v", werr)
 	}
 
+	// started_at is the REAL kernel-recorded creation time of the process the
+	// state file names, exactly as a live supervisor records for the child it
+	// spawned. It is not forged: the port really is held by this process, so
+	// its true start time is the truthful value here.
+	//
+	// The ownership gate binds the port owner to this timestamp (step 5), which
+	// is what makes a recycled PID fail. Seeding a bogus value would forge the
+	// proof; seeding the real one leaves that leg armed, so
+	// TestMCPFrontOwnership_ForwardRefusesPIDReuseImpostor can exercise it by
+	// changing this ONE fact.
+	selfStart, sok := process.ProcessStartTime(os.Getpid())
+	if !sok {
+		t.Skipf("this platform cannot read a process start time, so the supervisor-ownership gate is unavailable here by design")
+	}
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
 	if werr := api.WriteSupervisorState(statePath, &api.SupervisorStateFile{
 		Version: 1,
 		Daemons: map[string]api.SupervisorDaemonState{
-			api.BuiltinRouteTaskName: {State: "running", CurrentPID: os.Getpid(), PIDGeneration: 1},
+			api.BuiltinRouteTaskName: {
+				State:         "running",
+				CurrentPID:    os.Getpid(),
+				PIDGeneration: 1,
+				StartedAt:     selfStart.UTC().Format(time.RFC3339Nano),
+			},
 		},
 	}); werr != nil {
 		t.Fatalf("seed supervisor-state: %v", werr)
@@ -138,7 +159,7 @@ func startTestRouteServer(t *testing.T) (port int, cleanup func()) {
 		t.Fatalf("listen: %v", err)
 	}
 	actualPort := ln.Addr().(*net.TCPAddr).Port
-	s, berr := buildRouteServer(&cobra.Command{}, actualPort)
+	s, _, berr := buildRouteServer(&cobra.Command{}, actualPort)
 	if berr != nil {
 		_ = ln.Close()
 		t.Fatalf("buildRouteServer: %v", berr)

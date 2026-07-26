@@ -239,25 +239,19 @@ func (a *API) ensureLSPRouterClientEntriesWithLoaded(
 				})
 			}
 
-			for _, legacyName := range lspLegacyCandidateEntryNames(regEntries, language, clientName) {
-				if legacyName == targetName {
-					continue
-				}
-				legacy, err := adapter.GetEntry(legacyName)
-				if err != nil {
-					report.Failed = append(report.Failed, lspFailure(clientName, language, legacyName, "read", err))
-					continue
-				}
-				if legacy == nil || !entryPointsAtLegacyLSPPort(legacy, portsByLanguage[language]) {
-					continue
-				}
+			legacyEntries, legacyReadErrs := collectLegacyLSPEntriesToMigrate(
+				adapter, regEntries, portsByLanguage[language], language, clientName, targetName)
+			for _, readErr := range legacyReadErrs {
+				report.Failed = append(report.Failed, lspFailure(clientName, language, readErr.Name, "read", readErr.Err))
+			}
+			for _, legacy := range legacyEntries {
 				// Leave registry ClientEntries on the legacy name so rollback
 				// can reconstruct pre-router entries; GUI reads recognize the
 				// shared router name separately for visibility.
 				ops = append(ops, lspClientRouterOp{
 					kind:      "remove",
 					language:  language,
-					entryName: legacyName,
+					entryName: legacy.Name,
 				})
 			}
 		}
@@ -753,6 +747,71 @@ func entryMatchesLSPRouter(entry *clients.MCPEntry, targetURL string) bool {
 		return true
 	}
 	return entry.RelayURL == targetURL && isCurrentMcphubRelayBinary(entry.RelayExePath)
+}
+
+// lspLegacyLiveEntry is one legacy per-workspace LSP entry that is present in
+// a client's config right now AND still points at a registry-owned proxy port.
+type lspLegacyLiveEntry struct {
+	Name  string
+	Entry *clients.MCPEntry
+}
+
+// lspLegacyEntryReadError is a per-candidate read failure, surfaced to the
+// caller rather than swallowed so each call site keeps its own error polarity
+// (the forward pass records a per-entry Failed row and continues; the snapshot
+// fails the whole capture closed).
+type lspLegacyEntryReadError struct {
+	Name string
+	Err  error
+}
+
+// collectLegacyLSPEntriesToMigrate is the SINGLE OWNER of the question "which
+// legacy per-workspace entries does the router reconcile migrate away for this
+// (client, language)".
+//
+// It exists because two sides must agree on that answer and used to derive it
+// independently — with only one of them actually implementing it (codex bot PR
+// #588). ensureLSPRouterClientEntriesWithLoaded DELETES every entry this
+// returns, while SnapshotLSPRouterClientEntries captured only the canonical
+// `mcp-language-server-<language>` row. A client still on registry-backed
+// per-workspace entries therefore had its real pre-state silently outside the
+// recovery record: the forward pass removed those entries and `--rollback`,
+// iterating the snapshot, could not put back what was never captured. The host
+// ends up worse than before the "reversible" cutover — the failure class the
+// whole recovery-record lifecycle exists to prevent, reached through a client
+// shape the record did not model.
+//
+// Routing both the mutation and the capture through this one function makes
+// the two surfaces equal BY CONSTRUCTION: a future change to which entries are
+// migrated away automatically changes what the snapshot preserves, so they
+// cannot drift apart again.
+//
+// A candidate that equals targetName is skipped: that is the canonical entry,
+// which the forward pass rewrites (never deletes) and the snapshot captures on
+// its own canonical row.
+func collectLegacyLSPEntriesToMigrate(
+	adapter clients.Client,
+	regEntries []WorkspaceEntry,
+	legacyPorts map[int]bool,
+	language, clientName, targetName string,
+) ([]lspLegacyLiveEntry, []lspLegacyEntryReadError) {
+	var found []lspLegacyLiveEntry
+	var readErrs []lspLegacyEntryReadError
+	for _, legacyName := range lspLegacyCandidateEntryNames(regEntries, language, clientName) {
+		if legacyName == targetName {
+			continue
+		}
+		legacy, err := adapter.GetEntry(legacyName)
+		if err != nil {
+			readErrs = append(readErrs, lspLegacyEntryReadError{Name: legacyName, Err: err})
+			continue
+		}
+		if legacy == nil || !entryPointsAtLegacyLSPPort(legacy, legacyPorts) {
+			continue
+		}
+		found = append(found, lspLegacyLiveEntry{Name: legacyName, Entry: legacy})
+	}
+	return found, readErrs
 }
 
 func entryMatchesURL(entry *clients.MCPEntry, targetURL string) bool {

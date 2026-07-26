@@ -164,17 +164,39 @@ are completely untouched.`,
 // unregistered-workspace tool-call), which this increment's new
 // --reconcile-mcp-front command makes reachable from a second, additional
 // client-facing port.
-func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, error) {
+// routeSessionStores are the session routers buildRouteServer created, handed
+// back so the caller can drive their periodic expiry.
+//
+// WHY THEY ARE RETURNED (codex bot PR #588). These maps are OWNED by this
+// process: `mcphub route` constructs its own serena and LSP SessionRouters, and
+// the sweeps that expire them (runSessionCleanupTicker /
+// runLSPSessionCleanupTicker) live in the GUI's lifecycle and drive the GUI's
+// OWN routers. Nothing expired these, so a long-lived route daemon — which is
+// exactly what this process is designed to be, supervisor-managed and always
+// on — accumulated one binding per MCP session for its entire uptime and never
+// released any. The file header's "starts no idle/prune/reconcile ticker" rule
+// is about not performing GUI-owned WORK on shared state; expiring this
+// process's own in-memory maps is neither.
+//
+// lsp may be nil: the LSP router is only wired when the mcp-language-server
+// manifest loads and parses.
+type routeSessionStores struct {
+	serena *serena_routing.SessionRouter
+	lsp    *lsp_routing.SessionRouter
+}
+
+func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, *routeSessionStores, error) {
 	s := gui.NewServer(gui.Config{
 		Port:               port,
 		Version:            versionString(),
 		PID:                os.Getpid(),
 		ReadOnlyRouterMode: true,
 	})
+	stores := &routeSessionStores{}
 
 	registryPath, regErr := api.DefaultRegistryPath()
 	if regErr != nil {
-		return nil, fmt.Errorf("resolve registry path: %w", regErr)
+		return nil, nil, fmt.Errorf("resolve registry path: %w", regErr)
 	}
 	reg := api.NewRegistry(registryPath)
 	// finding 1 (adversarial cross-family review round 3): every registry
@@ -199,6 +221,7 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, error) {
 	// Read-only wiring (F1): nils AutoRegisterFn + WakeIdleFn — see
 	// gui.Server.SetSerenaRouterReadOnly's doc comment and the file header.
 	s.SetSerenaRouterReadOnly(resolver, sessions)
+	stores.serena = sessions
 
 	if rawManifest, err := api.NewAPI().ManifestGet("mcp-language-server"); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(),
@@ -226,8 +249,37 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, error) {
 		// Read-only wiring (F1): nils AutoRegisterFn — see
 		// gui.Server.SetLSPRouterReadOnly's doc comment and the file header.
 		s.SetLSPRouterReadOnly(lspResolver, lspSessions, m.Languages)
+		stores.lsp = lspSessions
 	}
-	return s, nil
+	return s, stores, nil
+}
+
+// runRouteSessionExpiry starts the periodic session sweeps for the routers
+// THIS process owns, reusing the GUI's own ticker drivers.
+//
+// Both goroutines stop with ctx, which runRoute cancels on SIGINT/SIGTERM, so
+// they cannot outlive the daemon. The serena sweep is passed the gui.Server so
+// it also reclaims the server's two router-owned session stores — those are
+// in-memory maps belonging to THIS process's handler, and SweepSerenaSessions
+// touches nothing else (no registry, no supervisor-intent, no shared log), so
+// it is compatible with this daemon's read-only posture.
+//
+// interval and ttl are parameters rather than the constants read inline so a
+// test can drive a real sweep to completion instead of waiting an hour. ONE
+// ttl covers both routers because they age on one shared idle clock
+// (serena_routing.DefaultSessionTTL == lsp_routing.DefaultSessionTTL ==
+// daemonSessionTTL == 24h) — the same single-ttl shape runSessionCleanupTicker
+// already uses for the sticky router and the server-owned stores.
+func runRouteSessionExpiry(ctx context.Context, s *gui.Server, stores *routeSessionStores, interval, ttl time.Duration) {
+	if stores == nil {
+		return
+	}
+	if stores.serena != nil {
+		go runSessionCleanupTicker(ctx, s, stores.serena, interval, ttl)
+	}
+	if stores.lsp != nil {
+		go runLSPSessionCleanupTicker(ctx, stores.lsp, interval, ttl)
+	}
 }
 
 func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
@@ -237,11 +289,16 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	}
 	actualPort := ln.Addr().(*net.TCPAddr).Port
 
-	s, err := buildRouteServer(cmd, actualPort)
+	s, sessionStores, err := buildRouteServer(cmd, actualPort)
 	if err != nil {
 		_ = ln.Close()
 		return err
 	}
+
+	// Expire this process's OWN session maps. Without it a long-lived,
+	// always-on route daemon grows one binding per MCP session forever — the
+	// GUI-owned sweeps drive the GUI's routers, not these (codex bot PR #588).
+	runRouteSessionExpiry(ctx, s, sessionStores, sessionCleanupInterval, serena_routing.DefaultSessionTTL)
 
 	// Deliberately absent (Increment 1 constraint — see file header):
 	//   - api.SetSerenaAutoRegisterCutoverPrimitives: the supervisor

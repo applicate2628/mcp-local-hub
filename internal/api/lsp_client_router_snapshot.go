@@ -99,12 +99,31 @@ func (s LSPRouterEntrySnapshot) restorable() bool {
 // the recorded pre-state), so a superset is free; a subset computed from a
 // second, independently-derived enablement predicate would be a drift hazard.
 //
+// BOTH MUTATED SHAPES ARE CAPTURED (codex bot PR #588). The forward pass does
+// not only rewrite the canonical `mcp-language-server-<language>` entry — it
+// also DELETES every legacy registry-backed per-workspace entry that still
+// points at a registry-owned proxy port. Capturing only the canonical shape
+// left a client on the legacy shape with its true pre-state unrecorded: the
+// cutover removed those entries and the rollback, which iterates this
+// snapshot, had nothing to put back. Both sides now derive the legacy set from
+// the one owner (collectLegacyLSPEntriesToMigrate), so the captured surface
+// equals the mutated surface by construction rather than by two authors
+// agreeing.
+//
 // opts.GUIPort is not consulted — this is a pure read of what is on disk now.
 func (a *API) SnapshotLSPRouterClientEntries(opts LSPClientRouterOpts) ([]LSPRouterEntrySnapshot, error) {
 	languages, err := loadLSPRouterLanguages(opts.Languages)
 	if err != nil {
 		return nil, err
 	}
+	// The legacy shape is defined by the registry (which per-workspace entry
+	// names exist, and which proxy ports they may point at), exactly as the
+	// forward pass resolves it.
+	regEntries, err := loadLSPRouterRegistryEntries()
+	if err != nil {
+		return nil, fmt.Errorf("snapshot lsp router pre-state: load registry: %w", err)
+	}
+	portsByLanguage := lspRegistryPortsByLanguage(regEntries)
 	clientMap := opts.Clients
 	if clientMap == nil {
 		clientMap = clients.AllClients()
@@ -130,6 +149,33 @@ func (a *API) SnapshotLSPRouterClientEntries(opts LSPClientRouterOpts) ([]LSPRou
 				row.Raw = live.Raw
 			}
 			out = append(out, row)
+
+			// Legacy per-workspace entries the forward pass will DELETE. Only
+			// entries that are present AND legacy-shaped are recorded — the
+			// same predicate that decides the deletion — so the snapshot
+			// carries a restorable row for each one and nothing else.
+			legacyEntries, legacyReadErrs := collectLegacyLSPEntriesToMigrate(
+				adapter, regEntries, portsByLanguage[language], language, clientName, entryName)
+			if len(legacyReadErrs) > 0 {
+				// FAIL-CLOSED, same posture as the canonical read above: an
+				// unreadable candidate must not be emitted as (or silently
+				// reduced to) "no legacy entry here", because the forward pass
+				// may still delete it and the rollback would then have no row.
+				first := legacyReadErrs[0]
+				return nil, fmt.Errorf("snapshot lsp router pre-state: read %s legacy entry %s: %w", clientName, first.Name, first.Err)
+			}
+			for _, legacy := range legacyEntries {
+				out = append(out, LSPRouterEntrySnapshot{
+					Client:    clientName,
+					Language:  language,
+					EntryName: legacy.Name,
+					Present:   true,
+					URL:       legacy.Entry.URL,
+					RelayURL:  legacy.Entry.RelayURL,
+					Disabled:  legacy.Entry.Disabled,
+					Raw:       legacy.Entry.Raw,
+				})
+			}
 		}
 	}
 	return out, nil

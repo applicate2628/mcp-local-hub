@@ -29,15 +29,14 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
 	"mcp-local-hub/internal/clients"
 )
@@ -585,6 +584,54 @@ func RestoreSerenaReconcileApplied(report *MigrateReport, allClients map[string]
 	return errors.Join(errs...)
 }
 
+// SerenaClientEntryFingerprint returns a stable content hash of ONE client's
+// live `serena` entry, for use as a divergence baseline across two separate
+// command invocations.
+//
+// WHY (codex bot PR #588). RestoreSerenaReconcileApplied overwrites the live
+// entry from the recorded backup unconditionally. A recovery record can stay
+// active indefinitely — the forward run and its `--rollback` are separate
+// operator actions with no bound between them — so by rollback time the
+// operator may have edited that entry themselves (repointed it at a remote
+// serena, added headers, disabled it). Overwriting it silently discards their
+// work with no warning and no way back. The LSP side of this same command
+// already refuses that (RestoreLSPRouterClientEntriesSnapshot's ownership and
+// exact-match guards); the serena side had no equivalent, and this is the
+// primitive that gives it one: record the fingerprint of what the forward run
+// LEFT, re-compute it before restoring, and refuse when they differ.
+//
+// Returns ("", nil) when the entry is ABSENT — a real, distinguishable state
+// (the operator deleted it), never conflated with a hash.
+//
+// The hash covers the adapter's whole projected entry, not just its URL, so a
+// changed header / env / relay shape is caught too. encoding/json emits map
+// keys in sorted order, which is what makes this stable across processes.
+func SerenaClientEntryFingerprint(clientName string, allClients map[string]clients.Client) (string, error) {
+	if allClients == nil {
+		allClients = clients.AllClients()
+	}
+	adapter := allClients[clientName]
+	if adapter == nil {
+		return "", fmt.Errorf("serena entry fingerprint %s: no adapter on this host", clientName)
+	}
+	if !adapter.Exists() {
+		return "", nil
+	}
+	entry, err := adapter.GetEntry(serenaEntryName)
+	if err != nil {
+		return "", fmt.Errorf("serena entry fingerprint %s: %w", clientName, err)
+	}
+	if entry == nil {
+		return "", nil
+	}
+	raw, merr := json.Marshal(entry)
+	if merr != nil {
+		return "", fmt.Errorf("serena entry fingerprint %s: %w", clientName, merr)
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
 // inScopeReconcileClients returns the client names to reconcile: the full
 // serenaReconcileClientSet() unless include narrows it. Narrowing preserves
 // the canonical order and drops names not in the set (so a caller cannot
@@ -759,20 +806,32 @@ func defaultGUIPidportIdentityCheck(ctx context.Context, pid, port int) error {
 // bound port before rewriting client configs
 // (internal/cli/install.go:348-374) and keeps the address loopback-only so a
 // remote/spoofed endpoint can never satisfy it.
+// ErrSerenaRouterRouteNotLive is the fail-closed sentinel for the exported
+// serena route assertion below. It mirrors ErrLSPRouterRouteNotLive so a
+// caller that gates on route liveness treats both surfaces alike.
+var ErrSerenaRouterRouteNotLive = errors.New("the /serena/mcp router route is not live at mcp_front.port")
+
+// AssertSerenaRouterRouteLive is the exported, side-effect-free form of the
+// serena route proof (defaultRouterReadinessPing), so a caller can establish
+// route liveness BEFORE any mutating call rather than relying on the probe
+// embedded inside ReconcileSerenaClientsToRouter.
+//
+// That embedded probe stays exactly where it is — it is the serena reconcile's
+// own guarantee and must not depend on callers remembering to pre-check. This
+// is the second, explicit user of the same proof, for a caller that also
+// rewrites OTHER surfaces and therefore cannot use one surface's internal gate
+// as its whole-command gate (codex bot PR #588).
+func AssertSerenaRouterRouteLive(ctx context.Context, port int) error {
+	if port <= 0 {
+		return fmt.Errorf("%w: refusing to probe non-positive port %d", ErrSerenaRouterRouteNotLive, port)
+	}
+	if err := defaultRouterReadinessPing(ctx, port); err != nil {
+		return fmt.Errorf("%w: %v", ErrSerenaRouterRouteNotLive, err)
+	}
+	return nil
+}
+
 func defaultRouterReadinessPing(ctx context.Context, port int) error {
-	url := fmt.Sprintf("http://127.0.0.1:%d%s", port, SerenaRouterURLPath)
-	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodHead, url, nil)
-	if err != nil {
-		return err
-	}
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	_ = resp.Body.Close()
 	// Verify this is actually the mcphub serena router, NOT just any local HTTP
 	// server that happened to reuse a stale pidport's port (bot PR #248 P1). The
 	// router answers a non-POST request (our HEAD) with 405 + `Allow: POST`
@@ -781,8 +840,13 @@ func defaultRouterReadinessPing(ctx context.Context, port int) error {
 	// listening here; fail closed so the reconcile never rewrites client configs
 	// to an unrelated service (the prior "any HTTP response = live GUI" check
 	// broke the fail-closed discovery guarantee).
-	if resp.StatusCode != http.StatusMethodNotAllowed || !strings.Contains(strings.ToUpper(resp.Header.Get("Allow")), "POST") {
-		return fmt.Errorf("port %d responded but is not the mcphub serena router (HEAD %s -> status %d, Allow=%q; expected 405 with Allow: POST) — the GUI may not be up, or the pidport is stale and the port was reused by another service", port, SerenaRouterURLPath, resp.StatusCode, resp.Header.Get("Allow"))
+	//
+	// The signature check itself lives in routerRouteShapeProbe
+	// (lsp_router_readiness.go) because the LSP route assertion added in the
+	// same round must apply the IDENTICAL definition of "this is an mcphub MCP
+	// router"; two copies of that predicate would be free to drift.
+	if err := routerRouteShapeProbe(ctx, port, SerenaRouterURLPath); err != nil {
+		return fmt.Errorf("%w — the GUI may not be up, or the pidport is stale and the port was reused by another service", err)
 	}
 	// Step 2 (bot PR #248 P2): verify the router actually SERVES the MCP session
 	// lifecycle before we point any client at it. The HEAD/405 check above only
@@ -802,34 +866,10 @@ func defaultRouterReadinessPing(ctx context.Context, port int) error {
 // (the pre-router-completion state, where it only routes tool calls by
 // params.name) → fail closed. Loopback-only; same 2s budget as the HEAD ping.
 func mcpInitializeProbe(ctx context.Context, port int) error {
-	url := fmt.Sprintf("http://127.0.0.1:%d%s", port, SerenaRouterURLPath)
-	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	const initBody = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mcphub-reconcile-probe","version":"0"}}}`
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, strings.NewReader(initBody))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("router at port %d does not serve the MCP lifecycle: initialize -> status %d (the /serena/mcp router must synthesize/handle initialize before clients are pointed at it; body=%.200s)", port, resp.StatusCode, string(raw))
-	}
-	var rpc struct {
-		Result json.RawMessage `json:"result"`
-		Error  json.RawMessage `json:"error"`
-	}
-	if jerr := json.Unmarshal(raw, &rpc); jerr != nil {
-		return fmt.Errorf("router at port %d returned a non-JSON-RPC initialize response: %w", port, jerr)
-	}
-	if len(rpc.Error) > 0 || len(rpc.Result) == 0 {
-		return fmt.Errorf("router at port %d rejected MCP initialize (no result; error=%s) — it does not yet serve the non-tool lifecycle (router-completion phase pending)", port, string(rpc.Error))
+	// Shared owner — see routerInitializeLifecycleProbe (lsp_router_readiness.go)
+	// for why the lifecycle assertion is not duplicated per route.
+	if err := routerInitializeLifecycleProbe(ctx, port, SerenaRouterURLPath); err != nil {
+		return fmt.Errorf("%w — the router must synthesize/handle the non-tool lifecycle before clients are pointed at it", err)
 	}
 	return nil
 }

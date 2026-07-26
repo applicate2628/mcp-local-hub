@@ -104,6 +104,22 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				return fmt.Errorf("--rollback requires --reconcile-mcp-front")
 			}
 
+			// codex bot PR #588 P1 closure, same shape and same reason as the
+			// --rollback gate above. --check promises a READ-ONLY readiness
+			// report ("print the report and exit 0 WITHOUT installing,
+			// bootstrapping, or mutating anything"), but its own handler sits
+			// BELOW the mode dispatches — so --check combined with --upgrade,
+			// --reconcile-hub-mode, or --reconcile-mcp-front never reached it
+			// and performed the real, mutating operation instead. A flag whose
+			// contract is "change nothing" silently rewriting client configs is
+			// the worst form of this defect, so the gate is hoisted to the top
+			// where it covers every mode by construction rather than being
+			// re-enumerated in each mode's exclusivity list (the shape that
+			// already failed once here).
+			if check && (upgrade || reconcileHubMode || reconcileMCPFront) {
+				return fmt.Errorf("--check is mutually exclusive with --upgrade/--reconcile-hub-mode/--reconcile-mcp-front; --check is a read-only readiness probe and those modes mutate")
+			}
+
 			// Bug-bash A7 minimal closure (#4): --upgrade is the
 			// one-shot binary replacement entry point. Pre-A7 the
 			// operator had to stop daemons, run `mcphub setup` to

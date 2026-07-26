@@ -38,24 +38,37 @@
 //     this port is that child". Same primitive, and same fail-closed posture,
 //     as defaultGUIPidportIdentityCheck (bot PR #252 P1: never trust a
 //     self-reported PID).
-//  5. image identity — the owning process must be the mcphub binary, on every
+//  5. process-generation identity — the owning process's kernel-recorded
+//     creation time must match the started_at the supervisor recorded for that
+//     child. Steps 3 and 4 compare PID NUMBERS, and numbers are recycled: if
+//     the supervised child exits and a standalone `mcphub route` is assigned
+//     its PID and binds the port before the supervisor reconciles, every
+//     PID-number check passes and the image check adds nothing (the impostor
+//     is the same binary). Only the start time distinguishes the process the
+//     supervisor spawned from a later one wearing its number.
+//  6. image identity — the owning process must be the mcphub binary, on every
 //     platform that can resolve a PID's image (imageIdentityProbeSupported).
-//     This is defense-in-depth against PID reuse between the supervisor's
-//     state write and this read.
 //
 // PLATFORM POSTURE (explicit, never a silent downgrade):
 //
-//   - Windows (GA): all five checks run. An unresolvable image is a REFUSAL,
-//     not a skip.
-//   - Linux (beta): steps 1-4 run against the /proc socket tables; step 5 is
-//     structurally unavailable (there is no image resolver on this target, so
-//     imageIdentityProbeSupported is false) and is documented as such rather
-//     than faked. The PID chain still binds the listener to the supervisor's
-//     recorded child.
-//   - macOS (preview) and other POSIX: step 4's resolver is a fail-closed stub,
-//     so the gate REFUSES with that platform's own error. The cutover is not
-//     available there, which is honest — the ownership proof it depends on is
-//     not implementable on that target yet.
+//   - Windows (GA): all six checks run. An unresolvable image or start time is
+//     a REFUSAL, not a skip.
+//   - Linux (beta): steps 1-5 run against the /proc socket tables and
+//     /proc/<pid>/stat; step 6 is structurally unavailable (there is no image
+//     resolver on this target, so imageIdentityProbeSupported is false) and is
+//     documented as such rather than faked. Step 5 still binds the listener to
+//     the exact process generation the supervisor spawned, which is the
+//     stronger of the two.
+//   - macOS (preview) and other POSIX: step 4's resolver is a fail-closed stub
+//     AND step 5's start-time probe is unavailable
+//     (startTimeIdentityProbeSupported is false), so the gate REFUSES on both
+//     counts. The cutover is not available there, which is honest — the
+//     ownership proof it depends on is not implementable on that target yet.
+//
+// Every capability question above is answered by a DECLARED per-target
+// constant, never inferred from a failed probe: "this platform cannot do X" and
+// "X failed here" must lead to different outcomes, and only a declaration can
+// tell them apart.
 //
 // RESIDUAL. supervisor-intent.json and supervisor-state.json are ordinary
 // state files. On a host whose %LOCALAPPDATA% parent grants FILE_DELETE_CHILD
@@ -70,8 +83,11 @@ package api
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/process"
 )
 
 // ErrMCPFrontPortNotSupervisorOwned is the fail-closed sentinel every refusal
@@ -179,16 +195,63 @@ func AssertMCPFrontPortSupervisorOwned(port int) error {
 			ErrMCPFrontPortNotSupervisorOwned, port, ownerPID, row.CurrentPID, statePath, mcpFrontOwnershipRemedy)
 	}
 
-	// (5) Image identity, where the platform can answer at all.
+	// (5) PROCESS-GENERATION identity: the port owner must be the SAME
+	//     PROCESS the supervisor recorded, not merely the same PID NUMBER.
+	//
+	//     A PID is not an identity in this codebase and never has been
+	//     (supervisor_lock.go says so explicitly: a recorded PID "can only
+	//     ever be a diagnostic hint, never the ownership decision"). Steps 3
+	//     and 4 compare PID NUMBERS, and a number is recycled: if the
+	//     supervised child exits and a standalone `mcphub route` started by
+	//     hand happens to be assigned its PID and binds the port before the
+	//     supervisor reconciles its state file, then the liveness check, the
+	//     socket-owner equality, and the image check ALL pass — the impostor
+	//     is the same binary, so image identity adds nothing here. The gate
+	//     would then certify an unsupervised listener as supervisor-owned,
+	//     which is the exact outcome it exists to prevent.
+	//
+	//     The kernel-recorded process CREATION TIME is what closes it. A
+	//     recycled PID belongs to a process that started later than the one
+	//     the supervisor recorded, so it cannot match started_at. This is the
+	//     same proof the repo's destructive terminate-by-PID path already
+	//     requires before it will kill anything (internal/process's
+	//     PIDIdentityProof.StartedAt); certifying a listener that every client
+	//     config is about to be pointed at deserves no weaker a standard.
+	if !startTimeIdentityProbeSupported {
+		return fmt.Errorf("%w: this platform cannot read a process's kernel-recorded start time, so the port owner cannot be bound to the supervisor's recorded route-child process generation. Refusing rather than accepting a PID-number match, which a recycled PID satisfies; %s",
+			ErrMCPFrontPortNotSupervisorOwned, mcpFrontOwnershipRemedy)
+	}
+	if strings.TrimSpace(row.StartedAt) == "" {
+		return fmt.Errorf("%w: %s records the route daemon as running at PID %d but carries no started_at for it, so that PID cannot be bound to the process the supervisor actually spawned (a recycled PID would be indistinguishable). Restart the supervisor so it re-records the route child, then re-run",
+			ErrMCPFrontPortNotSupervisorOwned, statePath, row.CurrentPID)
+	}
+	recordedStart, perr := time.Parse(time.RFC3339Nano, strings.TrimSpace(row.StartedAt))
+	if perr != nil {
+		return fmt.Errorf("%w: %s records started_at %q for route-daemon PID %d, which is not a valid RFC3339 timestamp: %v",
+			ErrMCPFrontPortNotSupervisorOwned, statePath, row.StartedAt, row.CurrentPID, perr)
+	}
+	observedStart, sok := processStartTimeFn(ownerPID)
+	if !sok {
+		return fmt.Errorf("%w: could not read the kernel-recorded start time of port-%d owner PID %d; this platform supports the probe, so an unresolvable start time fails closed rather than downgrading the proof to a bare PID-number match",
+			ErrMCPFrontPortNotSupervisorOwned, port, ownerPID)
+	}
+	if delta := recordedStart.UTC().Sub(observedStart.UTC()); delta > mcpFrontOwnerStartTolerance || delta < -mcpFrontOwnerStartTolerance {
+		return fmt.Errorf("%w: loopback port %d is owned by PID %d, which is the PID number the supervisor recorded but NOT the process it spawned — the supervisor recorded that child as starting at %s, while the process holding the port started at %s. The supervised child has exited and its PID was reused by another process (most commonly a standalone `mcphub route` started by hand, which nothing restarts); %s",
+			ErrMCPFrontPortNotSupervisorOwned, port, ownerPID,
+			recordedStart.UTC().Format(time.RFC3339Nano), observedStart.UTC().Format(time.RFC3339Nano), mcpFrontOwnershipRemedy)
+	}
+
+	// (6) Image identity, where the platform can answer at all.
 	image, iok := guiImageForPIDFn(ownerPID)
 	if !iok {
 		if imageIdentityProbeSupported {
 			return fmt.Errorf("%w: could not resolve the image of port-%d owner PID %d; this platform supports image identity, so an unresolvable image fails closed rather than downgrading the proof", ErrMCPFrontPortNotSupervisorOwned, port, ownerPID)
 		}
 		// Documented tier: this target has no image resolver at all (see the
-		// PLATFORM POSTURE block in this file's header). Steps 1-4 already
-		// bound the listener to the supervisor's recorded child; the image
-		// check would only add PID-reuse hardening on top of that.
+		// PLATFORM POSTURE block in this file's header). Step 5 has already
+		// bound the listener to the exact process generation the supervisor
+		// spawned, which is the stronger of the two proofs; the image check
+		// adds defense against a same-PID-same-start-time coincidence.
 		return nil
 	}
 	if !clients.IsMcphubBinary(image) {
@@ -196,6 +259,23 @@ func AssertMCPFrontPortSupervisorOwned(port int) error {
 	}
 	return nil
 }
+
+// mcpFrontOwnerStartTolerance bounds the difference allowed between the
+// supervisor's recorded started_at for its route child and that process's
+// kernel-recorded creation time.
+//
+// The supervisor stamps started_at around the spawn, so the two differ by
+// scheduling jitter, not by seconds. The window matches the package-wide
+// PID-identity tolerance internal/process uses for the same comparison on its
+// destructive paths; it is wide enough for a loaded machine and far narrower
+// than any realistic PID-reuse interval.
+const mcpFrontOwnerStartTolerance = 2 * time.Second
+
+// processStartTimeFn is the start-time probe seam, mirroring
+// loopbackPortOwnerFn / guiImageForPIDFn so a test can drive the PID-reuse
+// branch without arranging a real PID collision (which is not reproducible on
+// demand).
+var processStartTimeFn = process.ProcessStartTime
 
 // supervisorDaemonStateRunning is the durable persisted state a spawned daemon
 // carries in supervisor-state.json. The only other durable value is the

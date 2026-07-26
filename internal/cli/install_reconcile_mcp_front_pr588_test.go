@@ -439,8 +439,17 @@ func TestMCPFrontPR588_MergePreservesRecordedRowsAndAddsNewOnes(t *testing.T) {
 
 	merged := mergeMCPFrontReconcileReport(prior, 9200, serena, lsp, pins)
 
-	if merged.Port != 9137 {
-		t.Fatalf("merge must keep the FIRST generation's port: got %d, want 9137", merged.Port)
+	// The port polarity is the OPPOSITE of the pre-state fields below, and
+	// this assertion was inverted when the record was first written (it
+	// demanded the FIRST generation's 9137). Port does not describe the
+	// pre-reconcile state — it describes what the most recent forward run
+	// WROTE into the live client configs, and generation 2 really did move
+	// them to 9200. Keeping 9137 made the rollback judge the live entries
+	// against a port the command had stopped writing, so its absent-row
+	// removal guard stopped matching and the entries the cutover created were
+	// left behind pointing at a retired port (codex bot PR #588).
+	if merged.Port != 9200 {
+		t.Fatalf("merge must adopt the LATEST generation's port (that is the port now written into the live client configs): got %d, want 9200", merged.Port)
 	}
 	if !merged.SnapshotComplete {
 		t.Fatalf("every record this merge produces carries both recovery sections, so it must be marked snapshot-complete; the rollback refuses one that is not")
