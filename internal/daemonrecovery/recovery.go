@@ -509,11 +509,10 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 			// post-kill slice. Any time it consumes reduces the subsequent port
 			// wait; the fresh RespawnReserve context below remains untouched.
 			auditBudget := boundedPortWaitBudget(deps.AuditEmitTimeout, deps.PostKillTimeout, deps.RespawnReserve, deps.Now().Sub(postKillStarted))
-			if auditBudget <= 0 || emitRecoverAuditEventWithTimeout(stateDir, committedAudit, auditBudget) != nil {
-				audit := committedAudit
-				postCommitAudits = append(postCommitAudits, func() {
-					emitRecoverAuditEvent(stateDir, audit)
-				})
+			if auditBudget <= 0 {
+				queueIdempotentAuditFallback(&postCommitAudits, stateDir, committedAudit, nil)
+			} else if pending, emitErr := emitRecoverAuditEventWithTimeoutTracked(stateDir, committedAudit, auditBudget); emitErr != nil {
+				queueIdempotentAuditFallback(&postCommitAudits, stateDir, committedAudit, pending)
 			}
 			terminationElapsed := deps.Now().Sub(postKillStarted)
 			waitBudget := boundedPortWaitBudget(deps.PortWaitTimeout, deps.PostKillTimeout, deps.RespawnReserve, terminationElapsed)
@@ -732,11 +731,60 @@ func emitRecoverAuditEvent(stateDir string, event api.SupervisorEvent) {
 	_ = logger.Emit(event)
 }
 
-func emitRecoverAuditEventWithTimeout(stateDir string, event api.SupervisorEvent, timeout time.Duration) error {
+// emitRecoverAuditEventWithTimeoutTracked replaces the prior
+// emitRecoverAuditEventWithTimeout (residual 2 review fix; removed — it had
+// no other callers once this file's one bounded pre-respawn attempt was
+// widened to track its worker). On a timeout it ALSO returns a
+// *api.PendingSupervisorEventEmit exposing the abandoned worker's eventual
+// completion, so queueIdempotentAuditFallback can await the SAME write
+// instead of enqueuing an independent duplicate.
+func emitRecoverAuditEventWithTimeoutTracked(stateDir string, event api.SupervisorEvent, timeout time.Duration) (*api.PendingSupervisorEventEmit, error) {
 	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = logger.Close() }()
-	return logger.EmitWithTimeout(event, timeout)
+	return logger.EmitWithTimeoutTracked(event, timeout)
+}
+
+// daemonRecoveryLateAuditGrace bounds how long the queued post-respawn
+// fallback (queueIdempotentAuditFallback) waits for an
+// EmitWithTimeoutTracked worker that was still running when its caller gave
+// up. A timeout from the shared event-log primitive does NOT mean the write
+// was lost — writeEventLine has no cancellable syscall surface, so the
+// abandoned worker keeps running and (usually) finishes shortly after.
+// Waiting here first — instead of firing an unconditional independent
+// duplicate write — is what makes this fallback idempotent against a
+// late-but-successful original write. Chosen well above the ordinary case
+// (a filesystem hiccup clearing within tens or a few hundred milliseconds)
+// while staying short enough that a GENUINELY wedged writer cannot delay
+// recovery's already-past-respawn completion for long.
+const daemonRecoveryLateAuditGrace = 2 * time.Second
+
+// queueIdempotentAuditFallback appends the ONE fallback closure that decides,
+// at post-respawn execution time, whether an independent duplicate write is
+// actually needed (residual 2 review fix). pending is non-nil only when the
+// preceding EmitWithTimeoutTracked call genuinely timed out with a worker
+// still in flight (never on an open/marshal failure, where there is nothing
+// to wait for).
+//
+//   - pending != nil: await the SAME abandoned worker (bounded by
+//     daemonRecoveryLateAuditGrace) before deciding. If it reports success
+//     (nil error) the original write already landed — return without
+//     writing again, so exactly one row exists. Only if the worker is
+//     STILL not done (or reports its own real error) does the fallback fire
+//     an independent write, same as before this fix.
+//   - pending == nil: nothing to await — the original attempt never even
+//     started (audit budget exhausted) or failed outright (log-open
+//     failure), so the independent write is the only copy and fires
+//     unconditionally, exactly as before this fix.
+func queueIdempotentAuditFallback(postCommitAudits *[]func(), stateDir string, audit api.SupervisorEvent, pending *api.PendingSupervisorEventEmit) {
+	*postCommitAudits = append(*postCommitAudits, func() {
+		if pending != nil {
+			if waitErr := pending.Wait(daemonRecoveryLateAuditGrace); waitErr == nil {
+				return // the original write landed while we waited — exactly one row.
+			}
+		}
+		emitRecoverAuditEvent(stateDir, audit)
+	})
 }

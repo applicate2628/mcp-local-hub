@@ -180,6 +180,52 @@ var ErrSupervisorEventIdentityOversize = errors.New("supervisor event log: ident
 // append.
 var ErrSupervisorEventEmitTimeout = errors.New("supervisor event log: bounded emit timed out")
 
+// PendingSupervisorEventEmit exposes the EVENTUAL completion of an
+// EmitWithTimeoutTracked call that timed out (residual 2 review fix). A
+// timeout does NOT mean the write was lost: writeEventLine's rotation/open/
+// write/close have no cancellable syscall surface, so the worker goroutine
+// that already holds both the in-process mutex and the cross-process flock
+// keeps running and (usually) finishes shortly after its caller gives up
+// (see emit's emitTimeout branch). A caller whose fallback path would
+// otherwise enqueue an INDEPENDENT duplicate write (identical Event/Source/
+// Body) MUST instead await this handle first via Wait, so a late-but-
+// successful original write is never followed by a second, redundant row.
+type PendingSupervisorEventEmit struct {
+	done <-chan error
+}
+
+// Wait blocks up to timeout for the abandoned worker to finish its write.
+// Returns the worker's own completion error (nil on a successful append), or
+// ErrSupervisorEventEmitTimeout again if it still has not finished within
+// the bound — the caller remains free to treat that as "still unknown" and
+// fall back to an independent write as a last resort. A non-positive timeout
+// performs a single non-blocking check. Safe to call on a nil receiver
+// (returns ErrSupervisorEventEmitTimeout immediately). Call AT MOST ONCE per
+// handle: the underlying channel is drained by the first receive, so a
+// second call would simply wait out its own timeout and report
+// ErrSupervisorEventEmitTimeout regardless of the first call's real result.
+func (p *PendingSupervisorEventEmit) Wait(timeout time.Duration) error {
+	if p == nil || p.done == nil {
+		return ErrSupervisorEventEmitTimeout
+	}
+	if timeout <= 0 {
+		select {
+		case err := <-p.done:
+			return err
+		default:
+			return ErrSupervisorEventEmitTimeout
+		}
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-p.done:
+		return err
+	case <-timer.C:
+		return ErrSupervisorEventEmitTimeout
+	}
+}
+
 // ---------------------------------------------------------------------------
 // SupervisorEventLog — constructor + Emit.
 // ---------------------------------------------------------------------------
@@ -257,7 +303,8 @@ const (
 const eventLogEmitRetryDelay = 10 * time.Millisecond
 
 func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
-	return l.emit(evt, emitBlocking, 0)
+	_, err := l.emit(evt, emitBlocking, 0)
+	return err
 }
 
 // EmitWithTimeout serializes the entry and appends it, waiting up to timeout
@@ -274,7 +321,34 @@ func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
 // NOT lossy under normal contention (unlike TryEmit) — while capping how long
 // the caller's outer lock can be held if the event-log flock is wedged, so a
 // stalled writer can never make the caller hang forever holding its lock.
+//
+// This signature is unchanged by residual 2's fix and stays the right choice
+// for every caller that treats the timeout as purely observability (ignores
+// the error, or has its own independent outer bound) — see
+// EmitWithTimeoutTracked's doc for the one case that needs more.
 func (l *SupervisorEventLog) EmitWithTimeout(evt SupervisorEvent, timeout time.Duration) error {
+	_, err := l.emit(evt, emitTimeout, timeout)
+	return err
+}
+
+// EmitWithTimeoutTracked behaves exactly like EmitWithTimeout, but on a
+// timeout ALSO returns a *PendingSupervisorEventEmit exposing the abandoned
+// worker's eventual completion (residual 2 review fix). A timeout does NOT
+// mean the write was lost — writeEventLine has no cancellable syscall
+// surface, so the worker keeps running in the background holding both
+// locks. A caller whose fallback path would otherwise enqueue an
+// INDEPENDENT duplicate write (identical Event/Source/Body) MUST await the
+// returned handle first (see PendingSupervisorEventEmit.Wait), so a
+// late-but-successful original write is never followed by a second,
+// redundant row.
+//
+// The returned handle is non-nil ONLY when err is
+// ErrSupervisorEventEmitTimeout AND a worker was actually spawned (i.e. both
+// locks were acquired before the deadline). It is nil on immediate success
+// (nothing to wait for), nil on every other error (marshal/validation
+// failures and lock-acquisition timeouts never spawn a worker), and nil on
+// emitBlocking/emitTry (which never spawn one either).
+func (l *SupervisorEventLog) EmitWithTimeoutTracked(evt SupervisorEvent, timeout time.Duration) (*PendingSupervisorEventEmit, error) {
 	return l.emit(evt, emitTimeout, timeout)
 }
 
@@ -295,7 +369,8 @@ func (l *SupervisorEventLog) EmitWithTimeout(evt SupervisorEvent, timeout time.D
 // losing the observability row never loses the repair itself. Do not adopt
 // TryEmit for an event that is the only record of a state mutation.
 func (l *SupervisorEventLog) TryEmit(evt SupervisorEvent) error {
-	return l.emit(evt, emitTry, 0)
+	_, err := l.emit(evt, emitTry, 0)
+	return err
 }
 
 // supervisorEventWriteFn is the injectable file-write SEAM (P1-4 review
@@ -318,10 +393,10 @@ func SetSupervisorEventWriteFnForTest(fn func(l *SupervisorEventLog, raw []byte)
 	return func() { supervisorEventWriteFn = prev }
 }
 
-func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, timeout time.Duration) error {
+func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, timeout time.Duration) (*PendingSupervisorEventEmit, error) {
 	raw, err := marshalSupervisorEventLine(evt)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// In-process serialization first — guards against two goroutines in the
@@ -340,13 +415,13 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 		for !l.mu.TryLock() {
 			select {
 			case <-ctx.Done():
-				return ErrSupervisorEventEmitTimeout
+				return nil, ErrSupervisorEventEmitTimeout
 			case <-retry.C:
 			}
 		}
 	} else if mode == emitTry {
 		if !l.mu.TryLock() {
-			return nil
+			return nil, nil
 		}
 	} else {
 		l.mu.Lock()
@@ -368,7 +443,7 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 		locked, lockErr = l.lock.TryLock()
 		if lockErr == nil && !locked {
 			l.mu.Unlock()
-			return nil
+			return nil, nil
 		}
 	case emitTimeout:
 		var locked bool
@@ -380,13 +455,13 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 			// non-timeout lock error falls through to be reported below.
 			l.mu.Unlock()
 			if lockErr == nil || errors.Is(lockErr, context.DeadlineExceeded) {
-				return ErrSupervisorEventEmitTimeout
+				return nil, ErrSupervisorEventEmitTimeout
 			}
 		}
 	}
 	if lockErr != nil {
 		l.mu.Unlock()
-		return fmt.Errorf("supervisor event log flock: %w", lockErr)
+		return nil, fmt.Errorf("supervisor event log flock: %w", lockErr)
 	}
 
 	// Both locks are held by this goroutine. The remaining work — rotation
@@ -402,7 +477,7 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 	if mode != emitTimeout {
 		defer l.mu.Unlock()
 		defer func() { _ = l.lock.Unlock() }()
-		return supervisorEventWriteFn(l, raw)
+		return nil, supervisorEventWriteFn(l, raw)
 	}
 
 	// Hand off both locks to a worker goroutine so this call can give up
@@ -417,6 +492,11 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 	// successor Emit can never acquire either lock before the abandoned
 	// write actually completes, so log-line interleaving is still
 	// impossible.
+	//
+	// residual 2 review fix: `done` is also handed to the caller (wrapped in
+	// a *PendingSupervisorEventEmit) on the timeout path below, so a caller
+	// that needs idempotency against a late-but-successful write can await
+	// this SAME operation instead of racing an independent duplicate.
 	done := make(chan error, 1)
 	go func() {
 		defer l.mu.Unlock()
@@ -425,9 +505,9 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 	}()
 	select {
 	case err := <-done:
-		return err
+		return nil, err
 	case <-ctx.Done():
-		return ErrSupervisorEventEmitTimeout
+		return &PendingSupervisorEventEmit{done: done}, ErrSupervisorEventEmitTimeout
 	}
 }
 

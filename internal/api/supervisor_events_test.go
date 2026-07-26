@@ -460,3 +460,103 @@ func TestSupervisorEventLog_EmitWithTimeoutBoundsStalledWrite(t *testing.T) {
 		t.Fatalf("EmitWithTimeout returned before the stalled write committed, but the log already exists: %v", statErr)
 	}
 }
+
+// TestSupervisorEventLog_EmitWithTimeoutTrackedPendingObservesLateWrite
+// reproduces residual 2 (P1, review round 3): EmitWithTimeout's timeout does
+// NOT mean the abandoned worker's write was lost — writeEventLine has no
+// cancellable syscall surface, so the worker keeps running and (usually)
+// finishes shortly after. EmitWithTimeoutTracked's returned
+// *PendingSupervisorEventEmit must let a caller observe that SAME write's
+// eventual completion instead of having no way to know the write actually
+// landed.
+//
+// MUTATION: revert EmitWithTimeoutTracked to discard the pending handle
+// (`_, err := l.emit(...); return nil, err`) — this test's `pending` is nil
+// and Wait's nil-receiver contract returns ErrSupervisorEventEmitTimeout
+// immediately instead of observing the release, so the "Wait returns nil
+// once released" assertion fails.
+func TestSupervisorEventLog_EmitWithTimeoutTrackedPendingObservesLateWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "supervisor-events.log")
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = logger.Close() }()
+
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	safeRelease := func() { releaseOnce.Do(func() { close(release) }) }
+	restore := SetSupervisorEventWriteFnForTest(func(l *SupervisorEventLog, raw []byte) error {
+		<-release // simulates a filesystem/AV stall that outlives the caller's budget
+		return l.writeEventLine(raw)
+	})
+	defer func() {
+		safeRelease() // no-op if the in-test goroutine below already released it
+		restore()
+	}()
+
+	const timeout = 150 * time.Millisecond
+	start := time.Now()
+	pending, err := logger.EmitWithTimeoutTracked(SupervisorEvent{
+		Severity: "info",
+		Source:   "autostart",
+		Event:    "emit-timeout-tracked-stalled-write",
+	}, timeout)
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrSupervisorEventEmitTimeout) {
+		t.Fatalf("EmitWithTimeoutTracked with a stalled write error = %v, want ErrSupervisorEventEmitTimeout", err)
+	}
+	if elapsed > time.Second {
+		t.Errorf("EmitWithTimeoutTracked blocked %s despite its %s budget", elapsed, timeout)
+	}
+	if pending == nil {
+		t.Fatalf("pending handle is nil after a genuine timeout; want a non-nil handle to await the abandoned worker")
+	}
+
+	// Release the stalled write from a separate goroutine WHILE Wait is
+	// blocking, so this test genuinely exercises "late worker release"
+	// rather than releasing before Wait is even called.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		safeRelease()
+	}()
+	waitErr := pending.Wait(2 * time.Second)
+	if waitErr != nil {
+		t.Fatalf("pending.Wait after the late release = %v, want nil (the original write succeeded)", waitErr)
+	}
+	raw, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("read log: %v", readErr)
+	}
+	if got := strings.Count(string(raw), "emit-timeout-tracked-stalled-write"); got != 1 {
+		t.Fatalf("event log has %d rows for this event, want exactly 1", got)
+	}
+}
+
+// TestSupervisorEventLog_EmitWithTimeoutTrackedPendingNilOnImmediateSuccess
+// pins the OTHER half of the contract: when the write completes before the
+// caller's timeout, there is nothing to wait for and the returned handle
+// must be nil (a caller checking `pending != nil` before calling Wait must
+// not be tricked into waiting on a handle that was never populated).
+func TestSupervisorEventLog_EmitWithTimeoutTrackedPendingNilOnImmediateSuccess(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "supervisor-events.log")
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = logger.Close() }()
+
+	pending, err := logger.EmitWithTimeoutTracked(SupervisorEvent{
+		Severity: "info",
+		Source:   "autostart",
+		Event:    "emit-timeout-tracked-ok",
+	}, 5*time.Second)
+	if err != nil {
+		t.Fatalf("EmitWithTimeoutTracked uncontended: %v", err)
+	}
+	if pending != nil {
+		t.Fatalf("pending handle is non-nil on immediate success; want nil (nothing to wait for)")
+	}
+}
