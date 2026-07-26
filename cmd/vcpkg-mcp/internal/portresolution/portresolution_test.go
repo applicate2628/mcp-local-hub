@@ -1,8 +1,11 @@
 package portresolution
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +20,8 @@ type fakeDeps struct {
 	// portManifests maps absolute port directory paths to whether they
 	// contain a manifest. This simplifies testing.
 	portManifests map[string]bool
+	// readDirErrors injects unreadable-directory failures by absolute path.
+	readDirErrors map[string]error
 }
 
 func (fd *fakeDeps) Stat(path string) (os.FileInfo, error) {
@@ -27,6 +32,9 @@ func (fd *fakeDeps) Stat(path string) (os.FileInfo, error) {
 }
 
 func (fd *fakeDeps) ReadDir(path string) ([]os.DirEntry, error) {
+	if err := fd.readDirErrors[path]; err != nil {
+		return nil, err
+	}
 	// For simplicity in testing, we pre-populate portManifests.
 	// This avoids complex directory structure simulation.
 	if fd.portManifests[path] {
@@ -131,9 +139,9 @@ func TestBuiltinOnly(t *testing.T) {
 
 	deps := &fakeDeps{
 		files: map[string]os.FileInfo{
-			tmpDir:              newFakeStat("tmpdir", true),
+			tmpDir:                         newFakeStat("tmpdir", true),
 			filepath.Join(tmpDir, "ports"): newFakeStat("ports", true),
-			builtinPortDir:      newFakeStat("myport", true),
+			builtinPortDir:                 newFakeStat("myport", true),
 		},
 		portManifests: map[string]bool{
 			builtinPortDir: true,
@@ -155,6 +163,9 @@ func TestBuiltinOnly(t *testing.T) {
 	if res.Winner.Directory != builtinPortDir {
 		t.Errorf("expected winner directory %q, got %q", builtinPortDir, res.Winner.Directory)
 	}
+	if len(res.AllCandidates) != 1 || res.AllCandidates[0].State != CandidateStateFound {
+		t.Errorf("expected one found builtin candidate, got %+v", res.AllCandidates)
+	}
 	if len(res.Shadows) != 0 {
 		t.Errorf("expected no shadows, got %d", len(res.Shadows))
 	}
@@ -169,11 +180,11 @@ func TestOverlayWinsOverBuiltin(t *testing.T) {
 
 	deps := &fakeDeps{
 		files: map[string]os.FileInfo{
-			tmpDir:              newFakeStat("tmpdir", true),
-			overlayDir:          newFakeStat("overlay1", true),
-			overlayPortDir:      newFakeStat("myport", true),
+			tmpDir:                         newFakeStat("tmpdir", true),
+			overlayDir:                     newFakeStat("overlay1", true),
+			overlayPortDir:                 newFakeStat("myport", true),
 			filepath.Join(tmpDir, "ports"): newFakeStat("ports", true),
-			builtinPortDir:      newFakeStat("myport", true),
+			builtinPortDir:                 newFakeStat("myport", true),
 		},
 		portManifests: map[string]bool{
 			overlayPortDir: true,
@@ -215,13 +226,13 @@ func TestFirstOverlayWinsOverSecond(t *testing.T) {
 
 	deps := &fakeDeps{
 		files: map[string]os.FileInfo{
-			tmpDir:              newFakeStat("tmpdir", true),
-			overlay1Dir:         newFakeStat("overlay1", true),
-			overlay1PortDir:     newFakeStat("myport", true),
-			overlay2Dir:         newFakeStat("overlay2", true),
-			overlay2PortDir:     newFakeStat("myport", true),
+			tmpDir:                         newFakeStat("tmpdir", true),
+			overlay1Dir:                    newFakeStat("overlay1", true),
+			overlay1PortDir:                newFakeStat("myport", true),
+			overlay2Dir:                    newFakeStat("overlay2", true),
+			overlay2PortDir:                newFakeStat("myport", true),
 			filepath.Join(tmpDir, "ports"): newFakeStat("ports", true),
-			builtinPortDir:      newFakeStat("myport", true),
+			builtinPortDir:                 newFakeStat("myport", true),
 		},
 		portManifests: map[string]bool{
 			overlay1PortDir: true,
@@ -260,8 +271,8 @@ func TestPortNotFound(t *testing.T) {
 
 	deps := &fakeDeps{
 		files: map[string]os.FileInfo{
-			tmpDir:     newFakeStat("tmpdir", true),
-			overlayDir: newFakeStat("overlay1", true),
+			tmpDir:                         newFakeStat("tmpdir", true),
+			overlayDir:                     newFakeStat("overlay1", true),
 			filepath.Join(tmpDir, "ports"): newFakeStat("ports", true),
 		},
 		portManifests: map[string]bool{},
@@ -309,11 +320,11 @@ func TestCandidateDirWithoutManifest(t *testing.T) {
 
 	deps := &fakeDeps{
 		files: map[string]os.FileInfo{
-			tmpDir:              newFakeStat("tmpdir", true),
-			overlayDir:          newFakeStat("overlay1", true),
-			overlayPortDir:      newFakeStat("myport", true),
+			tmpDir:                         newFakeStat("tmpdir", true),
+			overlayDir:                     newFakeStat("overlay1", true),
+			overlayPortDir:                 newFakeStat("myport", true),
 			filepath.Join(tmpDir, "ports"): newFakeStat("ports", true),
-			builtinPortDir:      newFakeStat("myport", true),
+			builtinPortDir:                 newFakeStat("myport", true),
 		},
 		portManifests: map[string]bool{
 			overlayPortDir: false, // exists but no manifest
@@ -342,6 +353,9 @@ func TestCandidateDirWithoutManifest(t *testing.T) {
 	for _, cand := range res.AllCandidates {
 		if cand.Directory == overlayPortDir && !cand.PortDirFound {
 			found = true
+			if cand.State != CandidateStateAbsent {
+				t.Errorf("expected absent candidate state, got %q", cand.State)
+			}
 			if cand.Reason == "" {
 				t.Errorf("expected non-empty reason for rejected overlay candidate")
 			}
@@ -385,14 +399,14 @@ func TestBuiltinNotCheckedWhenVcpkgRootAbsent(t *testing.T) {
 		t.Errorf("expected overlay to win, got %q", res.Winner.Directory)
 	}
 
-	// Verify that builtin was NOT checked (should have only overlay candidate).
-	for _, cand := range res.AllCandidates {
-		if cand.Source == "builtin" || cand.Source != overlayDir {
-			// If any candidate has "builtin" in source, that's a problem.
-			if cand.Source != overlayDir {
-				t.Errorf("unexpected candidate source %q, expected only overlay", cand.Source)
-			}
-		}
+	// Verify that builtin was NOT checked, but that fact is structured rather
+	// than omitted from the serialized result.
+	if len(res.AllCandidates) != 2 {
+		t.Fatalf("expected overlay and builtin-not-checked candidates, got %d", len(res.AllCandidates))
+	}
+	builtin := res.AllCandidates[1]
+	if builtin.Source != "builtin" || builtin.State != CandidateStateNotChecked {
+		t.Errorf("expected builtin not_checked metadata, got %+v", builtin)
 	}
 }
 
@@ -420,9 +434,9 @@ func TestPortWithWhitespace(t *testing.T) {
 
 	deps := &fakeDeps{
 		files: map[string]os.FileInfo{
-			tmpDir:              newFakeStat("tmpdir", true),
+			tmpDir:                         newFakeStat("tmpdir", true),
 			filepath.Join(tmpDir, "ports"): newFakeStat("ports", true),
-			builtinPortDir:      newFakeStat("myport", true),
+			builtinPortDir:                 newFakeStat("myport", true),
 		},
 		portManifests: map[string]bool{
 			builtinPortDir: true,
@@ -455,15 +469,15 @@ func TestShadowListOrder(t *testing.T) {
 
 	deps := &fakeDeps{
 		files: map[string]os.FileInfo{
-			tmpDir:              newFakeStat("tmpdir", true),
-			overlay1Dir:         newFakeStat("overlay1", true),
-			overlay1PortDir:     newFakeStat("myport", true),
-			overlay2Dir:         newFakeStat("overlay2", true),
-			overlay2PortDir:     newFakeStat("myport", true),
-			overlay3Dir:         newFakeStat("overlay3", true),
-			overlay3PortDir:     newFakeStat("myport", true),
+			tmpDir:                         newFakeStat("tmpdir", true),
+			overlay1Dir:                    newFakeStat("overlay1", true),
+			overlay1PortDir:                newFakeStat("myport", true),
+			overlay2Dir:                    newFakeStat("overlay2", true),
+			overlay2PortDir:                newFakeStat("myport", true),
+			overlay3Dir:                    newFakeStat("overlay3", true),
+			overlay3PortDir:                newFakeStat("myport", true),
 			filepath.Join(tmpDir, "ports"): newFakeStat("ports", true),
-			builtinPortDir:      newFakeStat("myport", true),
+			builtinPortDir:                 newFakeStat("myport", true),
 		},
 		portManifests: map[string]bool{
 			overlay1PortDir: true,
@@ -507,13 +521,13 @@ func TestAllCandidatesRecorded(t *testing.T) {
 
 	deps := &fakeDeps{
 		files: map[string]os.FileInfo{
-			tmpDir:              newFakeStat("tmpdir", true),
-			overlay1Dir:         newFakeStat("overlay1", true),
-			overlay1PortDir:     newFakeStat("myport", true),
-			overlay2Dir:         newFakeStat("overlay2", true),
-			overlay2PortDir:     newFakeStat("myport", true),
+			tmpDir:                         newFakeStat("tmpdir", true),
+			overlay1Dir:                    newFakeStat("overlay1", true),
+			overlay1PortDir:                newFakeStat("myport", true),
+			overlay2Dir:                    newFakeStat("overlay2", true),
+			overlay2PortDir:                newFakeStat("myport", true),
 			filepath.Join(tmpDir, "ports"): newFakeStat("ports", true),
-			builtinPortDir:      newFakeStat("myport", true),
+			builtinPortDir:                 newFakeStat("myport", true),
 		},
 		portManifests: map[string]bool{
 			overlay1PortDir: true,
@@ -551,11 +565,11 @@ func TestEvidenceIncludesPaths(t *testing.T) {
 
 	deps := &fakeDeps{
 		files: map[string]os.FileInfo{
-			tmpDir:              newFakeStat("tmpdir", true),
-			overlayDir:          newFakeStat("overlay1", true),
-			overlayPortDir:      newFakeStat("myport", true),
+			tmpDir:                         newFakeStat("tmpdir", true),
+			overlayDir:                     newFakeStat("overlay1", true),
+			overlayPortDir:                 newFakeStat("myport", true),
 			filepath.Join(tmpDir, "ports"): newFakeStat("ports", true),
-			builtinPortDir:      newFakeStat("myport", true),
+			builtinPortDir:                 newFakeStat("myport", true),
 		},
 		portManifests: map[string]bool{
 			overlayPortDir: true,
@@ -644,5 +658,143 @@ func TestNoOverlayToOverlayShadowingWhenUnique(t *testing.T) {
 
 	if res.OverlayToOverlayShadowingOccurred {
 		t.Errorf("expected OverlayToOverlayShadowingOccurred=false when port appears in only one overlay")
+	}
+}
+
+// Test: an unreadable higher-precedence overlay means a later match cannot be
+// reported as the definitive winner.
+func TestHigherPrecedenceUnreadableOverlayFailsClosed(t *testing.T) {
+	tmpDir := t.TempDir()
+	missingOverlay := filepath.Join(tmpDir, "missing-overlay")
+	lowerOverlay := filepath.Join(tmpDir, "lower-overlay")
+	lowerPortDir := filepath.Join(lowerOverlay, "myport")
+
+	deps := &fakeDeps{
+		files: map[string]os.FileInfo{
+			tmpDir:       newFakeStat("tmpdir", true),
+			lowerOverlay: newFakeStat("lower-overlay", true),
+			lowerPortDir: newFakeStat("myport", true),
+		},
+		portManifests: map[string]bool{lowerPortDir: true},
+	}
+
+	res := ResolvePort(Args{
+		Port:         "myport",
+		OverlayPorts: []string{missingOverlay, lowerOverlay},
+	}, deps.toDeps())
+
+	if res.Status != evidence.StatusUnknown {
+		t.Fatalf("expected unknown because higher-precedence overlay %q was unreadable, got %v", missingOverlay, res.Status)
+	}
+	if res.Reason != ReasonHigherPrecedenceOverlayUnreadable {
+		t.Fatalf("expected higher_precedence_overlay_unreadable, got %q", res.Reason)
+	}
+	if res.BlockingCandidate == nil || res.BlockingCandidate.Source != missingOverlay {
+		t.Fatalf("expected blocking candidate for %q, got %+v", missingOverlay, res.BlockingCandidate)
+	}
+	if res.BlockingCandidate.State != CandidateStateUnreadable {
+		t.Fatalf("expected unreadable blocking state, got %q", res.BlockingCandidate.State)
+	}
+	if res.Winner != nil {
+		t.Fatalf("expected no definitive winner, got %+v", res.Winner)
+	}
+}
+
+// Test: a permission failure while inspecting a higher-precedence port
+// candidate is unreadable, not an absence that a lower overlay can bypass.
+func TestHigherPrecedencePortCandidateReadErrorFailsClosed(t *testing.T) {
+	tmpDir := t.TempDir()
+	higherOverlay := filepath.Join(tmpDir, "higher-overlay")
+	higherPortDir := filepath.Join(higherOverlay, "myport")
+	lowerOverlay := filepath.Join(tmpDir, "lower-overlay")
+	lowerPortDir := filepath.Join(lowerOverlay, "myport")
+	deps := &fakeDeps{
+		files: map[string]os.FileInfo{
+			tmpDir:        newFakeStat("tmpdir", true),
+			higherOverlay: newFakeStat("higher-overlay", true),
+			higherPortDir: newFakeStat("myport", true),
+			lowerOverlay:  newFakeStat("lower-overlay", true),
+			lowerPortDir:  newFakeStat("myport", true),
+		},
+		portManifests: map[string]bool{lowerPortDir: true},
+		readDirErrors: map[string]error{higherPortDir: errors.New("permission denied")},
+	}
+
+	res := ResolvePort(Args{Port: "myport", OverlayPorts: []string{higherOverlay, lowerOverlay}}, deps.toDeps())
+	if res.Status != evidence.StatusUnknown || res.Reason != ReasonHigherPrecedenceOverlayUnreadable {
+		t.Fatalf("expected unknown higher-precedence unreadable result, got %v (%q)", res.Status, res.Reason)
+	}
+	if res.BlockingCandidate == nil || res.BlockingCandidate.State != CandidateStateUnreadable {
+		t.Fatalf("expected unreadable blocking candidate, got %+v", res.BlockingCandidate)
+	}
+}
+
+// Test: omitting vcpkg_root is disclosed in serialized candidate metadata.
+func TestBuiltinNotCheckedIsStructuredCandidateMetadata(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	overlayPortDir := filepath.Join(overlayDir, "myport")
+	deps := &fakeDeps{
+		files: map[string]os.FileInfo{
+			tmpDir:         newFakeStat("tmpdir", true),
+			overlayDir:     newFakeStat("overlay", true),
+			overlayPortDir: newFakeStat("myport", true),
+		},
+		portManifests: map[string]bool{overlayPortDir: true},
+	}
+
+	res := ResolvePort(Args{Port: "myport", OverlayPorts: []string{overlayDir}}, deps.toDeps())
+	wire, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(wire), `"source":"builtin"`) || !strings.Contains(string(wire), `"state":"not_checked"`) {
+		t.Fatalf("expected a structured builtin not_checked disclosure, got %s", wire)
+	}
+}
+
+// Test: roots are contractually absolute; relative inputs must not be made
+// dependent on the process working directory.
+func TestRelativeRootsAreRejected(t *testing.T) {
+	for _, tc := range []struct {
+		args        Args
+		invalidRoot string
+	}{
+		{args: Args{Port: "myport", OverlayPorts: []string{"relative-overlay"}}, invalidRoot: "relative-overlay"},
+		{args: Args{Port: "myport", VcpkgRoot: "relative-vcpkg"}, invalidRoot: "relative-vcpkg"},
+	} {
+		t.Run("relative root", func(t *testing.T) {
+			res := ResolvePort(tc.args, DefaultDeps())
+			if res.Status != evidence.StatusFailed {
+				t.Fatalf("expected failed for relative root, got %v (%q)", res.Status, res.Reason)
+			}
+			if res.Reason != ReasonRelativeRoot || res.InvalidRoot != tc.invalidRoot {
+				t.Fatalf("expected named relative-root error for %q, got reason=%q root=%q", tc.invalidRoot, res.Reason, res.InvalidRoot)
+			}
+		})
+	}
+}
+
+// Test: validation trims overlay roots, and the inspected path must use that
+// same normalized value rather than the whitespace-padded input spelling.
+func TestWhitespacePaddedAbsoluteOverlayResolves(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlayDir := filepath.Join(tmpDir, "overlay")
+	overlayPortDir := filepath.Join(overlayDir, "myport")
+	deps := &fakeDeps{
+		files: map[string]os.FileInfo{
+			tmpDir:         newFakeStat("tmpdir", true),
+			overlayDir:     newFakeStat("overlay", true),
+			overlayPortDir: newFakeStat("myport", true),
+		},
+		portManifests: map[string]bool{overlayPortDir: true},
+	}
+
+	res := ResolvePort(Args{
+		Port:         "myport",
+		OverlayPorts: []string{"  " + overlayDir + "  "},
+	}, deps.toDeps())
+	if res.Status != evidence.StatusOK || res.Winner == nil || res.Winner.Directory != overlayPortDir {
+		t.Fatalf("expected padded absolute overlay to resolve %q, got status=%v winner=%+v", overlayPortDir, res.Status, res.Winner)
 	}
 }

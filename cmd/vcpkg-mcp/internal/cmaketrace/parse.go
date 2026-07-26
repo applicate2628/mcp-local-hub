@@ -66,9 +66,10 @@ func parseTraceLines(data []byte) parseResult {
 			continue
 		}
 
-		if tl.Cmd == "" {
-			// Valid JSON, but missing the one field every real command
-			// record must carry, and not a header shape either.
+		if tl.File == "" || tl.Line <= 0 || tl.Cmd == "" {
+			// A real command record must identify the source location and
+			// command. Anything less is malformed input, never positive
+			// execution evidence (in particular, never line 0 evidence).
 			res.malformedCount++
 			continue
 		}

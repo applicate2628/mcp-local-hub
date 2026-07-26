@@ -92,7 +92,7 @@ func PinStatus(args Args, deps Deps) Result {
 		remoteRefs = defaultRemoteRefs
 	}
 
-	var out Result
+	out := Result{Ports: make([]PortResult, 0, len(args.PortDirs))}
 	for _, dir := range args.PortDirs {
 		out.Ports = append(out.Ports, pinStatusOne(dir, args.DisableNetwork, fsys, remoteRefs, nowFn))
 	}
@@ -142,6 +142,7 @@ func pinStatusOne(portDir string, disableNetwork bool, fsys FS, remoteRefs remot
 	res.Pin = parsed.Pin
 	res.Candidates = parsed.Candidates
 	res.UnresolvedGuardVariable = parsed.UnresolvedGuardVariable
+	res.UnresolvedHeadRefVariable = parsed.UnresolvedHeadRefVariable
 
 	if parsed.UnresolvedGuardVariable != "" {
 		res.Status = evidence.StatusUnknown
@@ -157,6 +158,11 @@ func pinStatusOne(portDir string, disableNetwork bool, fsys FS, remoteRefs remot
 	if parsed.Remote.Kind == RemoteDistfile || parsed.Remote.Kind == RemoteNone {
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonNotGitComparable
+		return res
+	}
+	if parsed.UnresolvedHeadRefVariable != "" {
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonHeadRefUnresolvable
 		return res
 	}
 
@@ -224,8 +230,11 @@ func pinStatusOne(portDir string, disableNetwork bool, fsys FS, remoteRefs remot
 	// still have a ref by this name" — a tag/branch pin has no fixed
 	// baseline commit to compare against without downloading the source,
 	// which this package never does.
-	if _, found := refFound(refs, effectiveRef); found {
-		res.Status = evidence.StatusOK
+	if sha, found := refFound(refs, effectiveRef); found {
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonNamedRefNotComparable
+		res.NamedRef = effectiveRef
+		res.NamedRefSHA = sha
 		return res
 	}
 	res.Status = evidence.StatusUnknown

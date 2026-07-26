@@ -36,8 +36,9 @@
 //
 // Executed lines are POSITIVE evidence only. "Line N is not in the executed
 // set" means "not observed in THIS trace", which is NOT the same claim as
-// "unreachable": the trace may be truncated (see Result.Truncated), or the
-// file containing line N may never have been processed at all in this run
+// "unreachable": the trace input may be incomplete (see
+// Result.InputIncomplete), the returned records may be capped (see
+// Result.Truncated), or the file containing line N may never have been processed at all in this run
 // (see Result.FilesInTrace — a caller can check whether a file appears in
 // the trace at all before drawing any conclusion about a line inside it).
 // This package never itself labels a line "dead"; it only ever returns
@@ -55,7 +56,8 @@ import (
 	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
 )
 
-// Reason is populated only when Status == evidence.StatusUnknown. Closed enum.
+// Reason is populated when Status == evidence.StatusUnknown and, for
+// ReasonInputMalformed, when Result.InputIncomplete is true. Closed enum.
 type Reason string
 
 const (
@@ -79,6 +81,10 @@ const (
 	// filters — or because the trace genuinely carries zero command
 	// records — nothing remains in Records to report.
 	ReasonNoRecordsMatched Reason = "no_records_matched"
+	// ReasonInputMalformed: one or more non-blank lines were not valid
+	// json-v1 command records. The valid records remain positive evidence,
+	// but the input is incomplete so no absence conclusion is supported.
+	ReasonInputMalformed Reason = "input_malformed"
 )
 
 // Status aliases evidence.Status so callers of this package do not need a
@@ -179,6 +185,14 @@ type Result struct {
 	// killed build is the NORMAL case, not an exception — parsing always
 	// continues past a malformed line.
 	MalformedLineCount int `json:"malformed_line_count"`
+	// InputIncomplete reports that malformed input was observed. When true,
+	// records and indexes remain positive evidence only; no absence
+	// conclusion from this result is supported. It is independent from
+	// Truncated, which describes only the returned Records cap.
+	InputIncomplete bool `json:"input_incomplete"`
+	// InputIncompleteReason explains why InputIncomplete is true. It is not
+	// Result.Reason because valid records can still produce an ok status.
+	InputIncompleteReason Reason `json:"input_incomplete_reason,omitempty"`
 	// VersionHeaderPresent reports whether a {"version":{...}} header line
 	// was found anywhere in the trace. A concatenated or trimmed trace file
 	// may lack one; that is reported here, never treated as a parse failure.
@@ -239,10 +253,12 @@ func Trace(args Args, deps Deps) Result {
 		// command record — not a json-v1 trace at all (e.g. a plain
 		// configure log passed in by mistake).
 		return Result{
-			Status:             evidence.StatusUnknown,
-			Reason:             ReasonNotJSONLines,
-			MalformedLineCount: parsed.malformedCount,
-			Evidence:           ev,
+			Status:                evidence.StatusUnknown,
+			Reason:                ReasonNotJSONLines,
+			MalformedLineCount:    parsed.malformedCount,
+			InputIncomplete:       parsed.malformedCount > 0,
+			InputIncompleteReason: incompleteReason(parsed.malformedCount),
+			Evidence:              ev,
 		}
 	}
 
@@ -262,14 +278,16 @@ func Trace(args Args, deps Deps) Result {
 	}
 
 	base := Result{
-		IncludeChain:         includeChain,
-		Records:              records,
-		ExecutedLines:        executedLines,
-		FilesInTrace:         filesInTrace,
-		MalformedLineCount:   parsed.malformedCount,
-		VersionHeaderPresent: parsed.versionHeaderPresent,
-		Truncated:            truncated,
-		Evidence:             ev,
+		IncludeChain:          includeChain,
+		Records:               records,
+		ExecutedLines:         executedLines,
+		FilesInTrace:          filesInTrace,
+		MalformedLineCount:    parsed.malformedCount,
+		InputIncomplete:       parsed.malformedCount > 0,
+		InputIncompleteReason: incompleteReason(parsed.malformedCount),
+		VersionHeaderPresent:  parsed.versionHeaderPresent,
+		Truncated:             truncated,
+		Evidence:              ev,
 	}
 
 	if len(filtered) == 0 {
@@ -280,6 +298,13 @@ func Trace(args Args, deps Deps) Result {
 
 	base.Status = evidence.StatusOK
 	return base
+}
+
+func incompleteReason(malformedCount int) Reason {
+	if malformedCount == 0 {
+		return ""
+	}
+	return ReasonInputMalformed
 }
 
 // filterRecords narrows records to those matching file (exact match) and

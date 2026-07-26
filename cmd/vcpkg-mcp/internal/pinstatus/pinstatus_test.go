@@ -185,8 +185,8 @@ vcpkg_from_github(REPO continuable/continuable REF "${VERSION}" SHA512 0)
 			deps := Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"refs/tags/" + tc.version: commitA}}, nil), Now: fixedNow()}
 
 			p := PinStatus(Args{PortDirs: []string{dir}}, deps).Ports[0]
-			if p.Status != evidence.StatusOK {
-				t.Fatalf("status=%v reason=%v, want current", p.Status, p.Reason)
+			if p.Status != evidence.StatusUnknown || p.Reason != ReasonNamedRefNotComparable {
+				t.Fatalf("status=%v reason=%v, want unknown/named_ref_not_comparable", p.Status, p.Reason)
 			}
 			if p.Pin.Ref != "${VERSION}" || p.Pin.ResolvedRef != tc.version || p.Pin.ResolvedFrom != RefValueSourceManifest {
 				t.Fatalf("pin = %+v, want manifest-resolved %q", p.Pin, tc.version)
@@ -315,8 +315,8 @@ vcpkg_from_github(REPO example/bracket REF [=[${VERSION}]]literal]=] SHA512 0)
 	ref := "${VERSION}]]literal"
 	remote := "https://github.com/example/bracket.git"
 	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"refs/tags/" + ref: commitA}}, nil), Now: fixedNow()}).Ports[0]
-	if p.Status != evidence.StatusOK || p.Pin.Ref != ref {
-		t.Fatalf("status=%v reason=%v pin=%+v, want bracket literal %q", p.Status, p.Reason, p.Pin, ref)
+	if p.Status != evidence.StatusUnknown || p.Reason != ReasonNamedRefNotComparable || p.Pin.Ref != ref {
+		t.Fatalf("status=%v reason=%v pin=%+v, want unknown named ref with bracket literal %q", p.Status, p.Reason, p.Pin, ref)
 	}
 }
 
@@ -324,8 +324,22 @@ func TestQuotedArgumentContinuationJoinsLines(t *testing.T) {
 	dir := newPort(t, "continued", "\nvcpkg_from_github(REPO example/continued REF \"v1.\\\n2.3\" SHA512 0)\n")
 	remote := "https://github.com/example/continued.git"
 	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"refs/tags/v1.2.3": commitA}}, nil), Now: fixedNow()}).Ports[0]
-	if p.Status != evidence.StatusOK || p.Pin.Ref != "v1.2.3" {
-		t.Fatalf("status=%v reason=%v pin=%+v, want continued quoted REF", p.Status, p.Reason, p.Pin)
+	if p.Status != evidence.StatusUnknown || p.Reason != ReasonNamedRefNotComparable || p.Pin.Ref != "v1.2.3" {
+		t.Fatalf("status=%v reason=%v pin=%+v, want unknown named ref with continued quoted REF", p.Status, p.Reason, p.Pin)
+	}
+}
+
+func TestCallScannerKeepsCloseParenInsideQuotedRef(t *testing.T) {
+	parsed, ok := parsePortfile(`vcpkg_from_github(REPO example/quoted REF "release)candidate" SHA512 0)`)
+	if !ok || parsed.Pin.Ref != "release)candidate" {
+		t.Fatalf("ok=%v pin=%+v, want quoted REF with literal close paren", ok, parsed.Pin)
+	}
+}
+
+func TestCallScannerKeepsCloseParenInsideBracketArgument(t *testing.T) {
+	parsed, ok := parsePortfile(`vcpkg_from_github(REPO example/bracket REF [[release)candidate]] SHA512 0)`)
+	if !ok || parsed.Pin.Ref != "release)candidate" {
+		t.Fatalf("ok=%v pin=%+v, want bracket REF with literal close paren", ok, parsed.Pin)
 	}
 }
 
@@ -486,7 +500,7 @@ func TestMissingPortfile_UnknownPortfileUnparsable(t *testing.T) {
 	}
 }
 
-func TestGitHubTagRef_FoundOnRemote_Current(t *testing.T) {
+func TestGitHubTagRef_FoundOnRemote_UnknownNamedRefNotComparable(t *testing.T) {
 	dir := newPort(t, "taggedlib", `
 vcpkg_from_github(
     REPO example/taggedlib
@@ -506,8 +520,40 @@ vcpkg_from_github(
 	if p.Pin.Shape != RefShapeTag {
 		t.Fatalf("pin.shape = %v, want tag", p.Pin.Shape)
 	}
-	if p.Status != evidence.StatusOK {
-		t.Fatalf("status = %v reason = %v, want ok", p.Status, p.Reason)
+	if p.Status != evidence.StatusUnknown || p.Reason != ReasonNamedRefNotComparable {
+		t.Fatalf("status = %v reason = %v, want unknown/named_ref_not_comparable", p.Status, p.Reason)
+	}
+	if got := namedRefEvidence(t, p); got.ref != "v1.2.3" || got.sha != commitA {
+		t.Fatalf("named ref = %q sha=%q, want v1.2.3/%q", got.ref, got.sha, commitA)
+	}
+}
+
+func TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit(t *testing.T) {
+	tests := []struct {
+		name, ref, remoteRef string
+	}{
+		{name: "tag", ref: "v1.2.3", remoteRef: "refs/tags/v1.2.3"},
+		{name: "branch", ref: "release", remoteRef: "refs/heads/release"},
+		{name: "resolved variable tag", ref: "${RELEASE}", remoteRef: "refs/tags/v9.8.7"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			prefix := ""
+			wantRef := tc.ref
+			if tc.ref == "${RELEASE}" {
+				prefix = "set(RELEASE v9.8.7)\n"
+				wantRef = "v9.8.7"
+			}
+			dir := newPort(t, tc.name, prefix+"vcpkg_from_github(REPO example/"+strings.ReplaceAll(tc.name, " ", "-")+" REF "+tc.ref+" SHA512 0)")
+			remote := "https://github.com/example/" + strings.ReplaceAll(tc.name, " ", "-") + ".git"
+			p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {tc.remoteRef: commitB}}, nil), Now: fixedNow()}).Ports[0]
+			if p.Status != evidence.StatusUnknown || p.Reason != ReasonNamedRefNotComparable {
+				t.Fatalf("status=%v reason=%v, want unknown/named_ref_not_comparable", p.Status, p.Reason)
+			}
+			if got := namedRefEvidence(t, p); got.ref != wantRef || got.sha != commitB {
+				t.Fatalf("named ref=%q sha=%q, want %q/%q", got.ref, got.sha, wantRef, commitB)
+			}
+		})
 	}
 }
 
@@ -560,6 +606,70 @@ vcpkg_from_github(
 	}
 }
 
+func TestUnresolvedHeadRefDoesNotFallBackToRemoteHEAD(t *testing.T) {
+	dir := newPort(t, "unresolved-head-ref", `
+vcpkg_from_github(REPO example/head-ref REF `+commitA+` HEAD_REF ${MISSING_HEAD_REF} SHA512 0)
+`)
+	remote := "https://github.com/example/head-ref.git"
+	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitA}}, nil), Now: fixedNow()}).Ports[0]
+	if p.Status != evidence.StatusUnknown || p.Reason != ReasonHeadRefUnresolvable {
+		t.Fatalf("status=%v reason=%v, want unknown/head_ref_unresolvable", p.Status, p.Reason)
+	}
+	if got := unresolvedHeadRefVariable(t, p); got != "MISSING_HEAD_REF" {
+		t.Fatalf("unresolved head ref variable=%q, want MISSING_HEAD_REF", got)
+	}
+}
+
+func TestAbsentHeadRefStillUsesRemoteHEAD(t *testing.T) {
+	dir := newPort(t, "absent-head-ref", `vcpkg_from_github(REPO example/absent-head REF `+commitA+` SHA512 0)`)
+	remote := "https://github.com/example/absent-head.git"
+	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitA}}, nil), Now: fixedNow()}).Ports[0]
+	if p.Status != evidence.StatusOK || p.TrackedRef != "HEAD" {
+		t.Fatalf("status=%v reason=%v tracked=%q, want current against HEAD", p.Status, p.Reason, p.TrackedRef)
+	}
+}
+
+func TestEmptyResultMarshalsPortsAsArray(t *testing.T) {
+	data, err := json.Marshal(PinStatus(Args{}, Deps{Now: fixedNow()}))
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if string(data) != `{"ports":[]}` {
+		t.Fatalf("empty result JSON = %s, want {\"ports\":[]}", data)
+	}
+}
+
+type namedRefObservation struct{ ref, sha string }
+
+func namedRefEvidence(t *testing.T, p PortResult) namedRefObservation {
+	t.Helper()
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	ref, _ := raw["named_ref"].(string)
+	sha, _ := raw["named_ref_sha"].(string)
+	return namedRefObservation{ref: ref, sha: sha}
+}
+
+func unresolvedHeadRefVariable(t *testing.T, p PortResult) string {
+	t.Helper()
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	value, _ := raw["unresolved_head_ref_variable"].(string)
+	return value
+}
+
 // --- the hard limit: no "behind" verdict anywhere ---------------------------
 
 // TestNoCodePathProducesBehind is a static assertion over the CLOSED enums:
@@ -573,6 +683,8 @@ func TestNoCodePathProducesBehind(t *testing.T) {
 		ReasonPinNotAtTip,
 		ReasonRefUnresolvable,
 		ReasonRefNotFoundOnRemote,
+		ReasonNamedRefNotComparable,
+		ReasonHeadRefUnresolvable,
 		ReasonRemoteQueryFailed,
 		ReasonNetworkDisabled,
 		ReasonPortfileUnparsable,
@@ -608,6 +720,7 @@ vcpkg_from_git(URL https://example.com/x/y.git REF ${MY_REF})`)
 	tagFound := newPort(t, "tag-found", `vcpkg_from_github(REPO a/tagged REF v2.0.0 SHA512 0)`)
 	branchMissing := newPort(t, "branch-missing", `vcpkg_from_github(REPO a/branched REF gone SHA512 0)`)
 	unresolvable := newPort(t, "unresolvable2", `vcpkg_from_github(REPO a/unresolvable REF ${NOPE} SHA512 0)`)
+	unresolvedHeadRef := newPort(t, "unresolved-head-ref", `vcpkg_from_github(REPO a/unresolved-head REF `+commitA+` HEAD_REF ${NOPE} SHA512 0)`)
 	queryErr := newPort(t, "query-err", `vcpkg_from_github(REPO a/errors REF `+commitA+` SHA512 0)`)
 	guardUnresolvable := newPort(t, "guard-unresolvable", `if(PORT_SWITCH)
 vcpkg_from_github(REPO a/first REF `+commitA+` SHA512 0)
@@ -618,10 +731,11 @@ endif()`)
 vcpkg_from_github(REPO a/two REF `+commitB+` SHA512 0)`)
 
 	refs := map[string]map[string]string{
-		"https://github.com/a/b.git":        {"HEAD": commitA},
-		"https://example.com/x/y.git":       {"HEAD": commitC},
-		"https://github.com/a/tagged.git":   {"refs/tags/v2.0.0": commitA},
-		"https://github.com/a/branched.git": {"refs/heads/main": commitA},
+		"https://github.com/a/b.git":               {"HEAD": commitA},
+		"https://example.com/x/y.git":              {"HEAD": commitC},
+		"https://github.com/a/tagged.git":          {"refs/tags/v2.0.0": commitA},
+		"https://github.com/a/branched.git":        {"refs/heads/main": commitA},
+		"https://github.com/a/unresolved-head.git": {"HEAD": commitA},
 	}
 	errs := map[string]error{
 		"https://github.com/a/errors.git": errors.New("fake network error"),
@@ -629,11 +743,11 @@ vcpkg_from_github(REPO a/two REF `+commitB+` SHA512 0)`)
 	deps := Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(refs, errs), Now: fixedNow()}
 
 	res := PinStatus(Args{PortDirs: []string{
-		ghEqual, ghDiff, gitVar, distfile, meta, tagFound, branchMissing, unresolvable, queryErr, guardUnresolvable, multipleFetch,
+		ghEqual, ghDiff, gitVar, distfile, meta, tagFound, branchMissing, unresolvable, unresolvedHeadRef, queryErr, guardUnresolvable, multipleFetch,
 	}}, deps)
 
-	if len(res.Ports) != 11 {
-		t.Fatalf("got %d port results, want 11", len(res.Ports))
+	if len(res.Ports) != 12 {
+		t.Fatalf("got %d port results, want 12", len(res.Ports))
 	}
 
 	// Scrub harness-only fields before the substring scan: PortDir and
@@ -659,7 +773,7 @@ vcpkg_from_github(REPO a/two REF `+commitB+` SHA512 0)`)
 	// Sanity: the diverged-commit port really did take the pin_not_at_tip
 	// path (proving this sweep actually exercises the comparison branch the
 	// "never behind" assertion is protecting, not just skipping past it).
-	found, foundGuard, foundMultiple := false, false, false
+	found, foundGuard, foundMultiple, foundUnresolvedHeadRef := false, false, false, false
 	for _, p := range res.Ports {
 		if p.PortDir == ghDiff {
 			found = true
@@ -673,12 +787,15 @@ vcpkg_from_github(REPO a/two REF `+commitB+` SHA512 0)`)
 		if p.PortDir == multipleFetch && p.Reason == ReasonMultipleFetchCalls {
 			foundMultiple = true
 		}
+		if p.PortDir == unresolvedHeadRef && p.Reason == ReasonHeadRefUnresolvable {
+			foundUnresolvedHeadRef = true
+		}
 	}
 	if !found {
 		t.Fatalf("ghDiff result missing from batch")
 	}
-	if !foundGuard || !foundMultiple {
-		t.Fatalf("runtime sweep missed ambiguity branches: guard=%v multiple=%v", foundGuard, foundMultiple)
+	if !foundGuard || !foundMultiple || !foundUnresolvedHeadRef {
+		t.Fatalf("runtime sweep missed unknown branches: guard=%v multiple=%v unresolvedHeadRef=%v", foundGuard, foundMultiple, foundUnresolvedHeadRef)
 	}
 }
 

@@ -66,10 +66,9 @@ const (
 // Reason is populated only when Status == evidence.StatusUnknown. Closed
 // enum. The task's minimum set (not_git_comparable, pin_not_at_tip,
 // ref_unresolvable, remote_query_failed, network_disabled,
-// portfile_unparsable) is extended with one more precise value,
-// ref_not_found_on_remote, so a genuinely-missing tag/branch is not
-// conflated with a local ${VARIABLE} resolution failure — both are real,
-// distinct causes and the enum stays closed either way.
+// portfile_unparsable) is extended with precise values for a missing remote
+// tag/branch, an existing but non-comparable named ref, and an unresolved
+// HEAD_REF variable. These are distinct facts and the enum stays closed.
 type Reason string
 
 const (
@@ -92,6 +91,14 @@ const (
 	// purely local parsing problem — this one required a live query to
 	// discover.
 	ReasonRefNotFoundOnRemote Reason = "ref_not_found_on_remote"
+	// ReasonNamedRefNotComparable: REF (or its resolved literal) is a named
+	// tag or branch that the remote still advertises. Its current target can
+	// be observed, but that does not prove the port's pin is current.
+	ReasonNamedRefNotComparable Reason = "named_ref_not_comparable"
+	// ReasonHeadRefUnresolvable: HEAD_REF was supplied as a ${VARIABLE}, but
+	// its local value could not be resolved. This is distinct from omitting
+	// HEAD_REF, which intentionally uses the remote's default HEAD.
+	ReasonHeadRefUnresolvable Reason = "head_ref_unresolvable"
 	// ReasonRemoteQueryFailed: the injected remoteRefsFn returned an error,
 	// OR it succeeded but returned nothing usable to compare a commit-shaped
 	// pin against (no HEAD entry, no matching HEAD_REF branch). Either way
@@ -152,13 +159,14 @@ type Pin struct {
 // entire portfile; only ActiveForDefault candidates participate in source
 // selection and ambiguity decisions.
 type FetchCandidate struct {
-	Remote           Remote `json:"remote"`
-	Pin              Pin    `json:"pin"`
-	HeadRef          string `json:"head_ref,omitempty"`
-	Guard            string `json:"guard,omitempty"`
-	GuardVariable    string `json:"guard_variable,omitempty"`
-	ActiveForDefault bool   `json:"active_for_default"`
-	BindsSourcePath  bool   `json:"binds_source_path,omitempty"`
+	Remote                    Remote `json:"remote"`
+	Pin                       Pin    `json:"pin"`
+	HeadRef                   string `json:"head_ref,omitempty"`
+	UnresolvedHeadRefVariable string `json:"unresolved_head_ref_variable,omitempty"`
+	Guard                     string `json:"guard,omitempty"`
+	GuardVariable             string `json:"guard_variable,omitempty"`
+	ActiveForDefault          bool   `json:"active_for_default"`
+	BindsSourcePath           bool   `json:"binds_source_path,omitempty"`
 }
 
 // PortResult is the vcpkg_pin_status answer for one port directory.
@@ -175,6 +183,9 @@ type PortResult struct {
 	// UnresolvedGuardVariable names the CMake variable that prevented source
 	// selection when Reason is ReasonGuardUnresolvable.
 	UnresolvedGuardVariable string `json:"unresolved_guard_variable,omitempty"`
+	// UnresolvedHeadRefVariable names a supplied HEAD_REF variable that could
+	// not be resolved. It is deliberately distinct from an omitted HEAD_REF.
+	UnresolvedHeadRefVariable string `json:"unresolved_head_ref_variable,omitempty"`
 
 	// PinnedSHA / TipSHA are populated only for the commit-shaped comparison
 	// path (Status==ok, or Status==unknown(pin_not_at_tip)) — both SHAs are
@@ -189,6 +200,12 @@ type PortResult struct {
 	// CompareURL is a browsable diff link, populated only when Remote.Kind
 	// is a recognized forge (github/gitlab) and both SHAs are known.
 	CompareURL string `json:"compare_url,omitempty"`
+
+	// NamedRef and NamedRefSHA record an existing tag or branch that cannot
+	// be compared for currency without fetching source history. They are set
+	// only with ReasonNamedRefNotComparable.
+	NamedRef    string `json:"named_ref,omitempty"`
+	NamedRefSHA string `json:"named_ref_sha,omitempty"`
 
 	// ObservedAt is when THIS call queried (or, for network-disabled/parse
 	// failures, would have queried) the remote. This package does not

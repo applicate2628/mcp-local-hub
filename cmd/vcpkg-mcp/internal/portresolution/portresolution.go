@@ -49,11 +49,29 @@ const (
 	ReasonRootUnreadable Reason = "root_unreadable"
 	// ReasonEmptyPort: the port name is empty or whitespace-only.
 	ReasonEmptyPort Reason = "empty_port"
+	// ReasonRelativeRoot: a supplied root was relative, which would make
+	// resolution depend on the process working directory.
+	ReasonRelativeRoot Reason = "relative_root"
+	// ReasonHigherPrecedenceOverlayUnreadable: an overlay before the reported
+	// winner could not be examined, so the true winner is unknown.
+	ReasonHigherPrecedenceOverlayUnreadable Reason = "higher_precedence_overlay_unreadable"
+)
+
+// CandidateState describes whether a candidate was found, absent, unreadable,
+// or deliberately not checked.
+type CandidateState string
+
+const (
+	CandidateStateFound      CandidateState = "found"
+	CandidateStateAbsent     CandidateState = "absent"
+	CandidateStateUnreadable CandidateState = "unreadable"
+	CandidateStateNotChecked CandidateState = "not_checked"
 )
 
 // CandidateLocation is one directory that was checked during resolution.
 type CandidateLocation struct {
-	// Directory is the absolute path to the candidate directory.
+	// Directory is the absolute path to the candidate directory. It is empty
+	// when State is not_checked because no path could be formed.
 	Directory string `json:"directory"`
 	// Source describes which overlay (or "builtin") this path came from.
 	Source string `json:"source"`
@@ -61,6 +79,9 @@ type CandidateLocation struct {
 	// or vcpkg.json. Directories that exist but hold neither manifest file
 	// are recorded as candidates with PortDirFound=false and a reason.
 	PortDirFound bool `json:"port_dir_found"`
+	// State is the machine-readable inspection result. PortDirFound is retained
+	// for compatibility; State distinguishes absence from unreadability.
+	State CandidateState `json:"state"`
 	// Reason is populated when PortDirFound=false, explaining why this
 	// candidate was rejected (e.g. "directory does not exist", "no
 	// portfile.cmake or vcpkg.json found").
@@ -93,11 +114,16 @@ type Result struct {
 	Reason Reason `json:"reason,omitempty"`
 	// Winner describes the winning port definition when Status == ok.
 	Winner *Winner `json:"winner,omitempty"`
-	// AllCandidates lists every candidate location that was checked, in the
-	// order they were checked (overlays first in precedence order, then
-	// builtin). Always populated when Status == ok; populated with all
-	// checked locations when Status == unknown.
+	// AllCandidates lists every candidate location in precedence order
+	// (overlays first, then builtin), including a typed not_checked builtin
+	// entry when vcpkg_root was omitted.
 	AllCandidates []CandidateLocation `json:"all_candidates,omitempty"`
+	// BlockingCandidate identifies the unreadable higher-precedence candidate
+	// that prevents a definitive winner.
+	BlockingCandidate *CandidateLocation `json:"blocking_candidate,omitempty"`
+	// InvalidRoot identifies the supplied relative root rejected as invalid
+	// input, so callers do not need to infer it from ambient working state.
+	InvalidRoot string `json:"invalid_root,omitempty"`
 	// Shadows lists every lower-precedence definition of this port that was
 	// shadowed by the winner. Populated only when Status == ok and at least
 	// one shadowed definition exists.
@@ -106,7 +132,7 @@ type Result struct {
 	// shadowing was detected (one port name in two overlay dirs). In practice
 	// this may be rare if overlays are curated, but the precedence order
 	// must still be respected as contract.
-	OverlayToOverlayShadowingOccurred bool `json:"overlay_to_overlay_shadowing_occurred,omitempty"`
+	OverlayToOverlayShadowingOccurred bool              `json:"overlay_to_overlay_shadowing_occurred,omitempty"`
 	Evidence                          evidence.Evidence `json:"evidence"`
 }
 
@@ -134,52 +160,61 @@ func DefaultDeps() Deps {
 	}
 }
 
-// hasPortManifest reports whether dir contains portfile.cmake or vcpkg.json.
-// Returns (true, "") if a manifest exists, (false, reason) if not.
-func hasPortManifest(deps Deps, dir string) (bool, string) {
+// inspectRoot establishes whether a supplied root is readable. A missing root
+// is unreadable rather than absent: its unexamined contents could contain the
+// port and therefore affect precedence.
+func inspectRoot(deps Deps, dir string) (CandidateState, string) {
+	fi, err := deps.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return CandidateStateUnreadable, "root directory does not exist"
+		}
+		return CandidateStateUnreadable, err.Error()
+	}
+	if !fi.IsDir() {
+		return CandidateStateUnreadable, "root path is not a directory"
+	}
+	if _, err := deps.ReadDir(dir); err != nil {
+		return CandidateStateUnreadable, err.Error()
+	}
+	return CandidateStateFound, ""
+}
+
+// inspectPortCandidate reports whether dir contains portfile.cmake or
+// vcpkg.json. It distinguishes an absent definition from an unreadable one.
+func inspectPortCandidate(deps Deps, dir string) (CandidateState, string) {
 	if dir == "" {
-		return false, "empty directory path"
+		return CandidateStateUnreadable, "empty directory path"
 	}
 
 	// Check existence of the directory itself.
 	fi, err := deps.Stat(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return false, "directory does not exist"
+			return CandidateStateAbsent, "directory does not exist"
 		}
-		// Permission denied or other I/O error.
-		return false, err.Error()
+		return CandidateStateUnreadable, err.Error()
 	}
 	if !fi.IsDir() {
-		return false, "path is not a directory"
+		return CandidateStateAbsent, "path is not a directory"
 	}
 
 	// Read the directory to check for manifest files.
 	entries, err := deps.ReadDir(dir)
 	if err != nil {
-		return false, err.Error()
+		if os.IsNotExist(err) {
+			return CandidateStateAbsent, "directory does not exist"
+		}
+		return CandidateStateUnreadable, err.Error()
 	}
 
 	for _, entry := range entries {
 		if !entry.IsDir() && (entry.Name() == "portfile.cmake" || entry.Name() == "vcpkg.json") {
-			return true, ""
+			return CandidateStateFound, ""
 		}
 	}
 
-	return false, "no portfile.cmake or vcpkg.json found"
-}
-
-// absolutize converts path to absolute, handling errors gracefully. Returns
-// the absolute path and whether it succeeded.
-func absolutize(deps Deps, path string) (string, bool) {
-	if path == "" {
-		return "", false
-	}
-	abs, err := deps.Abs(path)
-	if err != nil {
-		return "", false
-	}
-	return abs, true
+	return CandidateStateAbsent, "no portfile.cmake or vcpkg.json found"
 }
 
 // ResolvePort resolves a port name against overlay directories and the
@@ -199,6 +234,24 @@ func ResolvePort(args Args, deps Deps) Result {
 
 	port := strings.TrimSpace(args.Port)
 
+	// Roots are an explicit absolute-path contract. Never call Abs here: doing
+	// so would silently bind relative inputs to the process working directory.
+	for _, overlayPath := range args.OverlayPorts {
+		overlayPath = strings.TrimSpace(overlayPath)
+		if overlayPath != "" && !filepath.IsAbs(overlayPath) {
+			res.Status = evidence.StatusFailed
+			res.Reason = ReasonRelativeRoot
+			res.InvalidRoot = overlayPath
+			return res
+		}
+	}
+	if vcpkgRoot := strings.TrimSpace(args.VcpkgRoot); vcpkgRoot != "" && !filepath.IsAbs(vcpkgRoot) {
+		res.Status = evidence.StatusFailed
+		res.Reason = ReasonRelativeRoot
+		res.InvalidRoot = vcpkgRoot
+		return res
+	}
+
 	// Gate 2: At least one root must be supplied (overlay or vcpkg).
 	hasOverlays := len(args.OverlayPorts) > 0
 	hasVcpkg := strings.TrimSpace(args.VcpkgRoot) != ""
@@ -209,37 +262,52 @@ func ResolvePort(args Args, deps Deps) Result {
 	}
 
 	var winner *Winner
+	winnerPrecedence := -1
 	var overlayToOverlayHit bool
+	var blockingOverlay *CandidateLocation
+	blockingOverlayPrecedence := -1
+	builtinUnreadable := false
 
 	// Check overlays in precedence order (first match wins).
 	for overlayIdx, overlayPath := range args.OverlayPorts {
-		if strings.TrimSpace(overlayPath) == "" {
+		overlayPath = strings.TrimSpace(overlayPath)
+		if overlayPath == "" {
 			continue
 		}
 
-		absPath, ok := absolutize(deps, overlayPath)
-		if !ok {
-			// Record as a candidate that couldn't be read.
-			res.AllCandidates = append(res.AllCandidates, CandidateLocation{
-				Directory:    overlayPath,
-				Source:       "overlay-" + formatOverlayIndex(overlayIdx),
-				PortDirFound: false,
-				Reason:       "overlay path could not be converted to absolute",
-			})
-			res.Evidence.AddPath(overlayPath)
-			continue
-		}
-
-		portPath := filepath.Join(absPath, port)
+		portPath := filepath.Join(overlayPath, port)
 		res.Evidence.AddPath(portPath)
 
-		found, reason := hasPortManifest(deps, portPath)
+		if state, reason := inspectRoot(deps, overlayPath); state == CandidateStateUnreadable {
+			candidate := CandidateLocation{
+				Directory: portPath,
+				Source:    formatOverlaySource(overlayPath, overlayIdx),
+				State:     CandidateStateUnreadable,
+				Reason:    "overlay root unreadable: " + reason,
+			}
+			res.AllCandidates = append(res.AllCandidates, candidate)
+			if blockingOverlay == nil {
+				blocking := candidate
+				blockingOverlay = &blocking
+				blockingOverlayPrecedence = overlayIdx
+			}
+			continue
+		}
+
+		state, reason := inspectPortCandidate(deps, portPath)
+		found := state == CandidateStateFound
 		res.AllCandidates = append(res.AllCandidates, CandidateLocation{
 			Directory:    portPath,
 			Source:       formatOverlaySource(overlayPath, overlayIdx),
 			PortDirFound: found,
+			State:        state,
 			Reason:       reason,
 		})
+		if state == CandidateStateUnreadable && blockingOverlay == nil {
+			blocking := res.AllCandidates[len(res.AllCandidates)-1]
+			blockingOverlay = &blocking
+			blockingOverlayPrecedence = overlayIdx
+		}
 
 		if found {
 			if winner == nil {
@@ -248,6 +316,7 @@ func ResolvePort(args Args, deps Deps) Result {
 					Directory: portPath,
 					Source:    formatOverlaySource(overlayPath, overlayIdx),
 				}
+				winnerPrecedence = overlayIdx
 			} else {
 				// Overlay-to-overlay shadowing detected.
 				overlayToOverlayHit = true
@@ -262,66 +331,72 @@ func ResolvePort(args Args, deps Deps) Result {
 	// Check builtin (only if vcpkg_root is supplied).
 	if hasVcpkg {
 		vcpkgRoot := strings.TrimSpace(args.VcpkgRoot)
-		absRoot, ok := absolutize(deps, vcpkgRoot)
-		if !ok {
+		builtinPortPath := filepath.Join(vcpkgRoot, "ports", port)
+		res.Evidence.AddPath(builtinPortPath)
+		if state, reason := inspectRoot(deps, vcpkgRoot); state == CandidateStateUnreadable {
+			builtinUnreadable = true
 			// If we already have a winner from an overlay, don't fail.
 			// But record the builtin as unreadable.
 			res.AllCandidates = append(res.AllCandidates, CandidateLocation{
-				Directory:    vcpkgRoot,
+				Directory:    builtinPortPath,
 				Source:       "builtin (vcpkg_root)",
 				PortDirFound: false,
-				Reason:       "vcpkg_root path could not be converted to absolute",
+				State:        CandidateStateUnreadable,
+				Reason:       "vcpkg_root unreadable: " + reason,
 			})
-			res.Evidence.AddPath(vcpkgRoot)
+		} else {
+			state, reason := inspectPortCandidate(deps, builtinPortPath)
+			found := state == CandidateStateFound
+			builtinSource := "builtin " + filepath.Join(vcpkgRoot, "ports")
+			res.AllCandidates = append(res.AllCandidates, CandidateLocation{
+				Directory:    builtinPortPath,
+				Source:       builtinSource,
+				PortDirFound: found,
+				State:        state,
+				Reason:       reason,
+			})
 
-			if winner != nil {
-				// We have an overlay winner, so the result is ok.
-				res.Status = evidence.StatusOK
-				res.Winner = winner
-				res.OverlayToOverlayShadowingOccurred = overlayToOverlayHit
-				return res
-			}
-
-			// No winner at all and builtin unreadable is an unknown result.
-			res.Status = evidence.StatusUnknown
-			res.Reason = ReasonRootUnreadable
-			return res
-		}
-
-		builtinPortPath := filepath.Join(absRoot, "ports", port)
-		res.Evidence.AddPath(builtinPortPath)
-
-		found, reason := hasPortManifest(deps, builtinPortPath)
-		builtinSource := "builtin " + filepath.Join(absRoot, "ports")
-		res.AllCandidates = append(res.AllCandidates, CandidateLocation{
-			Directory:    builtinPortPath,
-			Source:       builtinSource,
-			PortDirFound: found,
-			Reason:       reason,
-		})
-
-		if found {
-			if winner == nil {
-				// Builtin wins if no overlay matched.
-				winner = &Winner{
-					Directory: builtinPortPath,
-					Source:    builtinSource,
+			if found {
+				if winner == nil {
+					// Builtin wins if no overlay matched.
+					winner = &Winner{
+						Directory: builtinPortPath,
+						Source:    builtinSource,
+					}
+					winnerPrecedence = len(args.OverlayPorts)
+				} else {
+					// Overlay already won, builtin is shadowed.
+					res.Shadows = append(res.Shadows, Shadow{
+						Directory: builtinPortPath,
+						Source:    builtinSource,
+					})
 				}
-			} else {
-				// Overlay already won, builtin is shadowed.
-				res.Shadows = append(res.Shadows, Shadow{
-					Directory: builtinPortPath,
-					Source:    builtinSource,
-				})
 			}
 		}
+	} else {
+		res.AllCandidates = append(res.AllCandidates, CandidateLocation{
+			Source: "builtin",
+			State:  CandidateStateNotChecked,
+			Reason: "vcpkg_root was not supplied",
+		})
 	}
 
 	// Return final result.
+	if blockingOverlay != nil && (winner == nil || blockingOverlayPrecedence < winnerPrecedence) {
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonHigherPrecedenceOverlayUnreadable
+		res.BlockingCandidate = blockingOverlay
+		return res
+	}
 	if winner != nil {
 		res.Status = evidence.StatusOK
 		res.Winner = winner
 		res.OverlayToOverlayShadowingOccurred = overlayToOverlayHit
+		return res
+	}
+	if builtinUnreadable {
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonRootUnreadable
 		return res
 	}
 
@@ -336,7 +411,7 @@ func formatOverlayIndex(idx int) string {
 	if idx < 10 {
 		return "0" + string(rune('0'+idx))
 	}
-	return string(rune('0' + (idx / 10))) + string(rune('0' + (idx % 10)))
+	return string(rune('0'+(idx/10))) + string(rune('0'+(idx%10)))
 }
 
 // formatOverlaySource returns a human-readable source label for an overlay.

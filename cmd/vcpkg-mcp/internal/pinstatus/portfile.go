@@ -38,12 +38,13 @@ type versionManifest struct {
 // never executes CMake; an unresolved guard is returned explicitly instead of
 // selecting a plausible-looking source call.
 type parsedPortfile struct {
-	Remote                  Remote
-	Pin                     Pin
-	HeadRef                 string
-	Candidates              []FetchCandidate
-	UnresolvedGuardVariable string
-	MultipleFetchCalls      bool
+	Remote                    Remote
+	Pin                       Pin
+	HeadRef                   string
+	UnresolvedHeadRefVariable string
+	Candidates                []FetchCandidate
+	UnresolvedGuardVariable   string
+	MultipleFetchCalls        bool
 }
 
 var fetchFuncNames = map[string]bool{
@@ -465,8 +466,11 @@ func buildPin(content string, manifest []byte, ref argValue) Pin {
 
 func parseFetchCandidate(name, content string, manifest []byte, args string) FetchCandidate {
 	kv := extractKeyedArgValues(tokenize(args))
-	headRef, _, _ := resolveMaybeVariable(content, kv["HEAD_REF"])
+	headRef, headRefWasVariable, headRefResolved := resolveMaybeVariable(content, kv["HEAD_REF"])
 	candidate := FetchCandidate{HeadRef: headRef, BindsSourcePath: kv["OUT_SOURCE_PATH"].Text == "SOURCE_PATH"}
+	if headRefWasVariable && !headRefResolved {
+		candidate.UnresolvedHeadRefVariable = unresolvedVariableName(kv["HEAD_REF"])
+	}
 	switch name {
 	case "vcpkg_download_distfile":
 		candidate.Remote = Remote{Kind: RemoteDistfile}
@@ -498,6 +502,17 @@ func parseFetchCandidate(name, content string, manifest []byte, args string) Fet
 		candidate.Pin = buildPin(content, manifest, kv["REF"])
 	}
 	return candidate
+}
+
+func unresolvedVariableName(raw argValue) string {
+	if raw.Raw {
+		return ""
+	}
+	m := variableRefRE.FindStringSubmatch(strings.TrimSpace(raw.Text))
+	if m == nil {
+		return ""
+	}
+	return m[1]
 }
 
 type guardState struct {
@@ -682,10 +697,10 @@ func parsePortfileWithManifest(content string, manifest []byte) (parsedPortfile,
 			return parsedPortfile{Candidates: candidates, MultipleFetchCalls: true}, true
 		}
 		selected := viableCandidates[bound]
-		return parsedPortfile{Remote: selected.Remote, Pin: selected.Pin, HeadRef: selected.HeadRef, Candidates: candidates}, true
+		return parsedPortfile{Remote: selected.Remote, Pin: selected.Pin, HeadRef: selected.HeadRef, UnresolvedHeadRefVariable: selected.UnresolvedHeadRefVariable, Candidates: candidates}, true
 	}
 	selected := viableCandidates[0]
-	return parsedPortfile{Remote: selected.Remote, Pin: selected.Pin, HeadRef: selected.HeadRef, Candidates: candidates}, true
+	return parsedPortfile{Remote: selected.Remote, Pin: selected.Pin, HeadRef: selected.HeadRef, UnresolvedHeadRefVariable: selected.UnresolvedHeadRefVariable, Candidates: candidates}, true
 }
 
 func firstNonEmpty(values ...string) string {

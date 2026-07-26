@@ -1,6 +1,7 @@
 package cmaketrace
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -271,6 +272,12 @@ func TestTrace_MaxRecordsCapsAndSetsTruncated(t *testing.T) {
 	if !res.Truncated {
 		t.Errorf("Truncated = false, want true")
 	}
+	if res.InputIncomplete {
+		t.Errorf("InputIncomplete = true, want false: MaxRecords capping is not malformed input")
+	}
+	if res.InputIncompleteReason != "" {
+		t.Errorf("InputIncompleteReason = %q, want empty for a complete capped input", res.InputIncompleteReason)
+	}
 }
 
 func TestTrace_MaxRecordsZeroUsesDefaultAndDoesNotTruncateASmallTrace(t *testing.T) {
@@ -369,4 +376,71 @@ func TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim(t *testing.T) {
 			t.Fatalf("/proj/CMakeLists.txt missing from FilesInTrace")
 		}
 	})
+}
+
+func TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete(t *testing.T) {
+	content := `{"version":{"major":1,"minor":0}}
+{"file":"/proj/CMakeLists.txt","line":1,"cmd":"project","args":["p"]}
+{"file":"/proj/CMakeLists.txt","line":2,"cmd":"message","args":["cut off"]
+`
+	path := writeTrace(t, content)
+
+	res := Trace(Args{TracePath: path}, defaultDeps())
+
+	if res.Status != evidence.StatusOK {
+		t.Fatalf("Status/Reason = %v/%v, want ok with positive evidence retained", res.Status, res.Reason)
+	}
+	if !res.InputIncomplete {
+		t.Fatalf("InputIncomplete = false, want true for a trace ending mid-record")
+	}
+	if res.InputIncompleteReason != ReasonInputMalformed {
+		t.Errorf("InputIncompleteReason = %q, want %q", res.InputIncompleteReason, ReasonInputMalformed)
+	}
+	if res.Truncated {
+		t.Errorf("Truncated = true, want false: input incompleteness is independent of the MaxRecords cap")
+	}
+	if res.MalformedLineCount != 1 {
+		t.Errorf("MalformedLineCount = %d, want 1", res.MalformedLineCount)
+	}
+
+	wire, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshaling Result: %v", err)
+	}
+	if !strings.Contains(string(wire), `"input_incomplete":true`) || !strings.Contains(string(wire), `"input_incomplete_reason":"input_malformed"`) {
+		t.Errorf("wire Result = %s, want explicit input incompleteness disclosure", wire)
+	}
+}
+
+func TestTrace_InvalidMandatoryRecordFieldsAreMalformedNotEvidence(t *testing.T) {
+	content := `{"version":{"major":1,"minor":0}}
+{"file":"/proj/CMakeLists.txt","line":7,"cmd":"project","args":["p"]}
+{"cmd":"message","args":["missing file and line"]}
+{"line":8,"cmd":"message","args":["missing file"]}
+{"file":"/proj/CMakeLists.txt","cmd":"message","args":["missing line"]}
+{"file":"/proj/CMakeLists.txt","line":0,"cmd":"message","args":["zero line"]}
+{"file":"/proj/CMakeLists.txt","line":9}
+`
+	path := writeTrace(t, content)
+
+	res := Trace(Args{TracePath: path}, defaultDeps())
+
+	if res.Status != evidence.StatusOK {
+		t.Fatalf("Status/Reason = %v/%v, want ok with the one valid record retained", res.Status, res.Reason)
+	}
+	if res.MalformedLineCount != 5 {
+		t.Errorf("MalformedLineCount = %d, want 5 invalid command records", res.MalformedLineCount)
+	}
+	if !res.InputIncomplete {
+		t.Errorf("InputIncomplete = false, want true when invalid records make absence conclusions unsupported")
+	}
+	if len(res.Records) != 1 || res.Records[0].Line != 7 {
+		t.Fatalf("Records = %+v, want only the valid record at line 7", res.Records)
+	}
+	if !reflect.DeepEqual(res.FilesInTrace, []string{"/proj/CMakeLists.txt"}) {
+		t.Errorf("FilesInTrace = %+v, want only the valid record's file", res.FilesInTrace)
+	}
+	if !reflect.DeepEqual(res.ExecutedLines, []FileLines{{File: "/proj/CMakeLists.txt", Lines: []int{7}}}) {
+		t.Errorf("ExecutedLines = %+v, want no manufactured line 0 evidence", res.ExecutedLines)
+	}
 }
