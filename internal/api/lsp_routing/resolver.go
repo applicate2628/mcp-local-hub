@@ -57,7 +57,22 @@ type WorkspaceResolver struct {
 	lastMtime time.Time
 	loaded    bool
 	cached    []api.WorkspaceEntry
+
+	// refreshMu serializes the reload-and-publish critical section across
+	// concurrent refresh() calls (A2 fix, architecture-adversarial-
+	// reverify.md + qa-adversarial-falsifiers.md, work-items/active/2026-07-
+	// 25-mcp-front-daemon/). See serena_routing.WorkspaceResolver's own
+	// refreshMu doc comment for the full mechanism/safety argument — this
+	// is the LSP twin of the identical fix. It is a purely in-process
+	// mutex and does NOT reintroduce the cross-process Registry.Lock()
+	// flock the read-only variant avoids.
+	refreshMu sync.Mutex
 }
+
+// refreshLoadedHookForTest is the LSP twin of
+// serena_routing.refreshLoadedHookForTest — see its doc comment. Always nil
+// in production.
+var refreshLoadedHookForTest func(entries []api.WorkspaceEntry)
 
 // NewWorkspaceResolver returns a resolver bound to reg, registryPath, and the
 // manifest language specs that define project markers.
@@ -318,16 +333,31 @@ func (r *WorkspaceResolver) snapshotRegistry() *api.Registry {
 
 // refresh re-reads the registry file when its mtime has advanced past the last
 // observed value. Reload failures preserve the previous cache.
+//
+// Locking: the cheap "nothing changed" check (staleness()) is unserialized
+// so the common no-change path stays lock-light. An actual reload is
+// serialized end-to-end (Load through publish) under refreshMu — see the
+// struct's own refreshMu doc comment for why this is required (A2 fix) and
+// why it does not reintroduce the cross-process registry lock the
+// read-only variant avoids.
 func (r *WorkspaceResolver) refresh() {
 	if r == nil || r.reg == nil || r.registryPath == "" {
 		return
 	}
-	fi, statErr := os.Stat(r.registryPath)
+	if stale, _, _ := r.staleness(); !stale {
+		return
+	}
 
-	r.mu.RLock()
-	lastMtime := r.lastMtime
-	cacheEmpty := !r.loaded
-	r.mu.RUnlock()
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+
+	// Re-check now that we hold refreshMu: another goroutine may have
+	// already completed an equivalent-or-newer reload while we waited for
+	// the lock.
+	stale, fi, statErr := r.staleness()
+	if !stale {
+		return
+	}
 
 	if statErr != nil {
 		if errors.Is(statErr, fs.ErrNotExist) {
@@ -343,9 +373,6 @@ func (r *WorkspaceResolver) refresh() {
 	}
 
 	mtime := fi.ModTime()
-	if !cacheEmpty && mtime.Equal(lastMtime) {
-		return
-	}
 
 	if r.readOnly {
 		// P2-3 fix: never take Registry.Lock() (see
@@ -367,11 +394,34 @@ func (r *WorkspaceResolver) refresh() {
 	}
 	entries := r.reg.LSPEntries()
 
+	if refreshLoadedHookForTest != nil {
+		refreshLoadedHookForTest(entries)
+	}
+
 	r.mu.Lock()
 	r.cached = entries
 	r.loaded = true
 	r.lastMtime = mtime
 	r.mu.Unlock()
+}
+
+// staleness reports whether the registry file's current mtime differs from
+// the resolver's last-observed generation (or nothing has ever loaded
+// successfully), alongside the stat result that produced the answer so a
+// caller does not have to re-stat to act on it.
+func (r *WorkspaceResolver) staleness() (stale bool, fi os.FileInfo, statErr error) {
+	fi, statErr = os.Stat(r.registryPath)
+	r.mu.RLock()
+	lastMtime := r.lastMtime
+	cacheEmpty := !r.loaded
+	r.mu.RUnlock()
+	if statErr != nil {
+		return true, fi, statErr
+	}
+	if !cacheEmpty && fi.ModTime().Equal(lastMtime) {
+		return false, fi, nil
+	}
+	return true, fi, nil
 }
 
 func isWindowsUNCPath(path string) bool {

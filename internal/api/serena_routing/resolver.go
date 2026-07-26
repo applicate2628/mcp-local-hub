@@ -47,7 +47,44 @@ type WorkspaceResolver struct {
 	lastMtime time.Time
 	loaded    bool                 // true after first successful Load, even with zero serena rows
 	cached    []api.WorkspaceEntry // snapshot of reg.SerenaEntries()
+
+	// refreshMu serializes the reload-and-publish critical section across
+	// concurrent refresh() calls (A2 fix, architecture-adversarial-
+	// reverify.md + qa-adversarial-falsifiers.md, work-items/active/2026-07-
+	// 25-mcp-front-daemon/). Without it, two overlapping refreshes could
+	// each Load() a DIFFERENT complete registry generation and then race to
+	// publish under r.mu.Lock() independently — whichever happens to
+	// acquire r.mu.Lock() LAST wins regardless of which generation is
+	// actually newer, so an older generation could overwrite a newer one
+	// already served to callers. Holding refreshMu across the WHOLE reload
+	// (Load through publish), not just the final r.mu section, makes
+	// concurrent reloads mutually exclusive: whichever acquires refreshMu
+	// second always re-stats and re-loads AFTER the first one's publish
+	// completed, so the generation it observes is guaranteed to be at
+	// least as new as what was already published — publication order
+	// becomes monotonic with real time.
+	//
+	// This is a purely in-process mutex. It does NOT reintroduce the
+	// cross-process Registry.Lock() flock the read-only variant exists to
+	// avoid (see NewReadOnlyWorkspaceResolver's doc comment) — the
+	// readOnly branch below still never touches that lock, so the route
+	// daemon still cannot contend with (or block) a concurrent GUI writer.
+	//
+	// The cheap "nothing changed" fast path in staleness() stays reachable
+	// WITHOUT acquiring refreshMu, so the common steady-state case (no
+	// reload needed) pays no serialization cost.
+	refreshMu sync.Mutex
 }
+
+// refreshLoadedHookForTest, when non-nil, is invoked synchronously with the
+// freshly-loaded entries slice right after a reload has read complete
+// registry content but BEFORE that content is published to the resolver's
+// cache (still inside the refreshMu critical section). Package-internal
+// tests use it to deterministically engineer two overlapping reloads
+// without relying on a naturally-occurring race window staying observable
+// (see TestNewReadOnlyWorkspaceResolver_ConcurrentRefreshesCannotRegress).
+// Always nil in production.
+var refreshLoadedHookForTest func(entries []api.WorkspaceEntry)
 
 // NewWorkspaceResolver returns a resolver bound to reg and the on-disk
 // path of the registry file. The caller is responsible for calling
@@ -117,21 +154,31 @@ func (r *WorkspaceResolver) snapshot() []api.WorkspaceEntry {
 // refresh re-reads the registry file when its mtime has advanced past
 // the last observed value. Callers must NOT hold r.mu when entering.
 //
-// Locking: refresh acquires r.mu twice -- first as RLock to read the
-// stored mtime, then as Lock to install a new snapshot. Splitting the
-// critical sections keeps the common no-change path cheap. Between the
-// two critical sections we acquire the registry cross-process lock so
-// the load is consistent with any concurrent writer.
+// Locking: the cheap "nothing changed" check (staleness()) is unserialized
+// so the common no-change path stays lock-light. An actual reload is
+// serialized end-to-end (Load through publish) under refreshMu — see the
+// struct's own doc comment for why this is required (A2 fix) and why it
+// does not reintroduce the cross-process registry lock the read-only
+// variant avoids.
 func (r *WorkspaceResolver) refresh() {
 	if r.reg == nil || r.registryPath == "" {
 		return
 	}
-	fi, statErr := os.Stat(r.registryPath)
+	if stale, _, _ := r.staleness(); !stale {
+		return
+	}
 
-	r.mu.RLock()
-	lastMtime := r.lastMtime
-	cacheEmpty := !r.loaded
-	r.mu.RUnlock()
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+
+	// Re-check now that we hold refreshMu: another goroutine may have
+	// already completed an equivalent-or-newer reload while we waited for
+	// the lock. This re-stats rather than reusing the pre-lock result, so
+	// it reflects the registry's actual state at this moment.
+	stale, fi, statErr := r.staleness()
+	if !stale {
+		return
+	}
 
 	if statErr != nil {
 		if errors.Is(statErr, fs.ErrNotExist) {
@@ -147,9 +194,6 @@ func (r *WorkspaceResolver) refresh() {
 	}
 
 	mtime := fi.ModTime()
-	if !cacheEmpty && mtime.Equal(lastMtime) {
-		return
-	}
 
 	if r.readOnly {
 		// P2-3 fix: never take Registry.Lock() (see
@@ -188,11 +232,34 @@ func (r *WorkspaceResolver) refresh() {
 	}
 	entries := r.reg.SerenaEntries()
 
+	if refreshLoadedHookForTest != nil {
+		refreshLoadedHookForTest(entries)
+	}
+
 	r.mu.Lock()
 	r.cached = entries
 	r.loaded = true
 	r.lastMtime = mtime
 	r.mu.Unlock()
+}
+
+// staleness reports whether the registry file's current mtime differs from
+// the resolver's last-observed generation (or nothing has ever loaded
+// successfully), alongside the stat result that produced the answer so a
+// caller does not have to re-stat to act on it.
+func (r *WorkspaceResolver) staleness() (stale bool, fi os.FileInfo, statErr error) {
+	fi, statErr = os.Stat(r.registryPath)
+	r.mu.RLock()
+	lastMtime := r.lastMtime
+	cacheEmpty := !r.loaded
+	r.mu.RUnlock()
+	if statErr != nil {
+		return true, fi, statErr
+	}
+	if !cacheEmpty && fi.ModTime().Equal(lastMtime) {
+		return false, fi, nil
+	}
+	return true, fi, nil
 }
 
 // ListWorkspaces returns a snapshot of every registered serena workspace
