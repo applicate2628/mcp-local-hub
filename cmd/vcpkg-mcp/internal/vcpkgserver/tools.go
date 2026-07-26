@@ -7,9 +7,13 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"mcp-local-hub/cmd/vcpkg-mcp/internal/cmaketrace"
 	"mcp-local-hub/cmd/vcpkg-mcp/internal/cmakewrap"
 	"mcp-local-hub/cmd/vcpkg-mcp/internal/discovery"
 	"mcp-local-hub/cmd/vcpkg-mcp/internal/lastfailure"
+	"mcp-local-hub/cmd/vcpkg-mcp/internal/patchesapply"
+	"mcp-local-hub/cmd/vcpkg-mcp/internal/pinstatus"
+	"mcp-local-hub/cmd/vcpkg-mcp/internal/portresolution"
 )
 
 // registerTools mounts every increment-1 tool handler. Single registration
@@ -84,6 +88,110 @@ func registerTools(vs *VcpkgServer) {
 	}, vs.lastFailureTool)
 
 	vs.server.AddTool(&mcp.Tool{
+		Name: "vcpkg_port_resolution",
+		Description: "Determine which port definition wins across overlay ports and builtin ports, and report every location checked. " +
+			"When vcpkg_root is omitted, the builtin fallback is NOT checked; the result states only what the supplied overlays established.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"port": map[string]any{
+					"type":        "string",
+					"description": "Required port name to resolve.",
+				},
+				"vcpkg_root": map[string]any{
+					"type":        "string",
+					"description": "Optional absolute vcpkg root; enables checking its builtin ports fallback.",
+				},
+				"overlay_ports": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional absolute overlay directories in precedence order; the first matching definition wins.",
+				},
+			},
+		},
+	}, vs.portResolutionTool)
+
+	vs.server.AddTool(&mcp.Tool{
+		Name: "vcpkg_pin_status",
+		Description: "Check whether a port's source pin matches what its remote advertises NOW. Verdicts are current or unknown(reason); " +
+			"this tool cannot say \"behind\" because git ls-remote cannot prove a differing pin is an ancestor rather than diverged or rebased away. " +
+			"It is not a staleness checker.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"port_dirs": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Absolute port directories, each expected to contain portfile.cmake.",
+				},
+				"disable_network": map[string]any{
+					"type":        "boolean",
+					"description": "When true, do not query remotes; each requested port reports unknown(network_disabled).",
+				},
+			},
+		},
+	}, vs.pinStatusTool)
+
+	vs.server.AddTool(&mcp.Tool{
+		Name: "vcpkg_patches_apply",
+		Description: "Statically analyze a portfile to report which patches WOULD apply for a triplet, in order. It applies nothing. " +
+			"Guards that static analysis cannot decide are returned in an undecidable bucket instead of guessed either way.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"port_dir": map[string]any{
+					"type":        "string",
+					"description": "Required absolute port directory containing portfile.cmake.",
+				},
+				"triplet": map[string]any{
+					"type":        "string",
+					"description": "Required triplet used to evaluate patch guards.",
+				},
+				"vcpkg_root": map[string]any{
+					"type":        "string",
+					"description": "Optional vcpkg root for $ENV{VCPKG_ROOT} expansion in patch paths.",
+				},
+				"port_name": map[string]any{
+					"type":        "string",
+					"description": "Optional override for the ${PORT} builtin; defaults to the port_dir base name.",
+				},
+				"var_overrides": map[string]any{
+					"type":                 "object",
+					"additionalProperties": map[string]any{"type": "string"},
+					"description":          "Optional explicit CMake variable values used while evaluating guards.",
+				},
+			},
+		},
+	}, vs.patchesApplyTool)
+
+	vs.server.AddTool(&mcp.Tool{
+		Name: "vcpkg_cmake_trace",
+		Description: "Read an EXISTING cmake --trace-format=json-v1 trace and report the executed CMake lines, expansions, and include order. " +
+			"Executed lines are positive evidence only: an absent line means \"not observed in this trace\", never \"unreachable\". It never runs cmake.",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"trace_path": map[string]any{
+					"type":        "string",
+					"description": "Required absolute path to an existing json-v1 CMake trace.",
+				},
+				"file": map[string]any{
+					"type":        "string",
+					"description": "Optional exact CMake file path filter for returned records.",
+				},
+				"command": map[string]any{
+					"type":        "string",
+					"description": "Optional case-insensitive CMake command filter for returned records.",
+				},
+				"max_records": map[string]any{
+					"type":        "integer",
+					"description": "Optional cap for returned records; zero uses the package default.",
+				},
+			},
+		},
+	}, vs.cmakeTraceTool)
+
+	vs.server.AddTool(&mcp.Tool{
 		Name: "cmake_include_graph",
 		Description: "Thin wrapper over the hub's internal/cmakegraph static resolver: statically " +
 			"resolves the CMake include()/add_subdirectory() graph WITHOUT ever invoking cmake. " +
@@ -143,6 +251,50 @@ func (vs *VcpkgServer) lastFailureTool(ctx context.Context, req *mcp.CallToolReq
 		}
 	}
 	res := lastfailure.LastFailure(args, lastfailure.DefaultDeps())
+	return jsonResult(res)
+}
+
+func (vs *VcpkgServer) portResolutionTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args portresolution.Args
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+		}
+	}
+	res := portresolution.ResolvePort(args, portresolution.DefaultDeps())
+	return jsonResult(res)
+}
+
+func (vs *VcpkgServer) pinStatusTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args pinstatus.Args
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+		}
+	}
+	res := pinstatus.PinStatus(args, pinstatus.DefaultDeps())
+	return jsonResult(res)
+}
+
+func (vs *VcpkgServer) patchesApplyTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args patchesapply.Args
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+		}
+	}
+	res := patchesapply.ApplyOrder(args)
+	return jsonResult(res)
+}
+
+func (vs *VcpkgServer) cmakeTraceTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args cmaketrace.Args
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+		}
+	}
+	res := cmaketrace.Trace(args, cmaketrace.DefaultDeps())
 	return jsonResult(res)
 }
 
