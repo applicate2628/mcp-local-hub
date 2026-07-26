@@ -1,19 +1,19 @@
 # Supported MCP clients
 
 mcp-local-hub writes MCP-server entries into each client's own config file, so
-the client connects to hub-managed servers. As of 2026-06-17 it supports **46
+the client connects to hub-managed servers. It currently supports **47
 clients**. Two are installed by default (`--all` / fresh install); the rest are
-opt-in (`mcphub install --server X --client <name>`).
+opt-in (`mcphub install --server X --clients <name>`).
 
 ## Default-install (2)
 
 `claude-code` · `codex-cli`
 
-## Opt-in (44)
+## Opt-in (45)
 
 **Original / Wave-2:** `cursor` · `vscode` · `gemini-cli` · `qwen-cli` · `antigravity` ·
-`zed` · `kiro` · `windsurf` · `cline` · `kilocode` · `opencode` · `hermes` ·
-`openclaw`
+`zed` · `kiro` · `windsurf` · `cline` · `kilocode` · `opencode` · `mimocode` ·
+`hermes` · `openclaw`
 
 **agent-skills vendor reconciliation (2026-06-17):** `copilot-cli` · `amazon-q` ·
 `openhands` · `aider` · `bob` · `codebuddy` · `command-code` · `cortex` ·

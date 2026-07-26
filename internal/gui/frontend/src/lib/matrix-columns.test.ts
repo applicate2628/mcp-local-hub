@@ -150,7 +150,7 @@ describe("effectiveVisibleClients", () => {
 
   it("shows a NEWER non-core client (warp) when auto-detected", () => {
     // warp is a non-core client added after the original wave-2 set. With
-    // the full 46-client universe it must auto-show on detection.
+    // the full 47-client universe it must auto-show on detection.
     const cols = effectiveVisibleClients(scan({ warp: "ok" }), {});
     expect(cols).toEqual([...CORE_CLIENTS, "warp"]);
   });

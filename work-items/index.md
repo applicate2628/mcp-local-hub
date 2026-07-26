@@ -53,6 +53,7 @@ reconciliation records, not open tasks.
 
 | Item | Closed | Outcome |
 |---|---|---|
+| [2026-07-26-cursor-opt-in-review-fixes](archive/2026-07/2026-07-26-cursor-opt-in-review-fixes/closure.md) | 2026-07-26 | PASS — Cursor remains explicit opt-in; workspace-register fallback derives from registry-owned defaults; all stale user-facing/count derivatives corrected; scoped tests, build, vet, generator, exhaustive sweep, external QA, and external architecture gates passed. |
 | [2026-06-17-phase1-audit-findings](archive/2026-07/2026-06-17-phase1-audit-findings.md) | 2026-07-15 | Phase 1 arch+security audit. **HEAD-reconciled 2026-07-15 (the inline fixed-markers were stale):** 6/6 findings resolved-or-exempt (P1 state-fanout, config-path |
 | | | double-encode, dual state-enum, hand-rolled atomic writers, path-validate raw-error — all FIXED with backing tests; backups path-echo EXEMPT-by-design). Finding 4's residual (4 GUI state-dir-error POSIX path-leak sites) |
 | | | **FIXED 2026-07-15** — the 4 sites now route through `writeAPIErrorRedacted` + a `state_dir_error_redaction_test.go` structural guard; the backlog tracker is removed on delivery. See the doc's |

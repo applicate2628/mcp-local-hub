@@ -53,7 +53,7 @@ import type {
 // show while every non-core opt-in client appears only when detected on the
 // host (detection-gated, see routing.ts::visibleClients). The non-core
 // universe is derived live from the scan's client_config_presence map (one
-// key per clients.SupportedClientNames(), all 46 backend clients), so any
+// key per clients.SupportedClientNames(), all 47 backend clients), so any
 // supported client surfaces when installed — no hardcoded column list to
 // drift behind the backend registry.
 // On top of that auto-detected base the operator's manual show/hide

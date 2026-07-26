@@ -456,7 +456,7 @@ func callApplyOpsForClient(client string, ops []ClientUpdatePlan) error {
 // aggregate "mcphub-hub" entry is a pure HTTP URL with auth headers, which
 // relay-stdio adapters would reject. Keep these opt-in clients out of hub
 // reconcile entirely. Operators who installed one manually need to rerun
-// `mcphub install --server X --client <name>` after toggling the gate.
+// `mcphub install --server X --clients <name>` after toggling the gate.
 //
 // The "is this adapter relay-stdio" fact is owned by clients.IsRelayStdio
 // (each adapter declares its own Client.IsRelayStdio truth); every gate in

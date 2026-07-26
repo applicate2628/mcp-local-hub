@@ -43,8 +43,8 @@ The install/read surfaces now distinguish default and opt-in clients:
 
 | Group | Client ids | Planning note |
 |---|---|---|
-| Default | `claude-code`, `codex-cli`, `cursor` | Safe first-run write set for `install` and workspace `register`. |
-| Opt-in | `vscode`, `gemini-cli`, `qwen-cli`, `antigravity` | User must pass `--clients ...` or `--all-clients`; keep live smoke and import compatibility in the release-hardening backlog. |
+| Default | `claude-code`, `codex-cli` | Safe first-run write set for `install` and workspace `register`. |
+| Opt-in | `cursor`, `vscode`, `gemini-cli`, `qwen-cli`, `antigravity` | User must pass `--clients ...` or `--all-clients`; keep live smoke and import compatibility in the release-hardening backlog. |
 
 ## Do Not Copy Directly
 
@@ -83,7 +83,7 @@ The install/read surfaces now distinguish default and opt-in clients:
 
 - `API`: Application Programming Interface; here, local HTTP routes used by the GUI and CLI wrappers.
 - `CLI`: Command-Line Interface; shell commands such as `mcphub install`.
-- `Cursor`: Cursor editor/agent client; now part of the default install target set.
+- `Cursor`: Cursor editor/agent client; a supported explicit opt-in install target.
 - `GUI`: Graphical User Interface; the embedded local web interface and tray surface.
 - `JSON5`: JSON-compatible config format that supports comments and trailing commas.
 - `MCP`: Model Context Protocol; the protocol used by managed clients and servers.

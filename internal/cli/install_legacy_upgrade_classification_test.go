@@ -116,7 +116,7 @@ func TestUpgradeInstallServer_PassesNoClientWriteOpts(t *testing.T) {
 	}
 
 	// Resolve the captured ClientsInclude through the SAME predicate the real
-	// install uses, against a manifest with all three default-client bindings.
+	// install uses, against a manifest with all three explicit client bindings.
 	// Zero ClientUpdates proves the call site suppressed default-client writes.
 	m := defaultClientManifestFixture()
 	plan, err := api.BuildPlanWithOpts(m, api.BuildPlanOpts{
@@ -179,8 +179,8 @@ func TestUpgradeNoClientWriteSentinel_SelectsZeroClients(t *testing.T) {
 }
 
 // defaultClientManifestFixture returns a minimal global manifest carrying one
-// daemon and the three default-install client bindings (claude-code, codex-cli,
-// cursor). A non-empty ClientBindings set is load-bearing for the FIX 3
+// daemon and three explicit client bindings (claude-code, codex-cli, cursor).
+// A non-empty ClientBindings set is load-bearing for the FIX 3
 // regression: it is what makes the default-client install plan emit
 // ClientUpdates, so the zero-ClientUpdates assertion is meaningful.
 func defaultClientManifestFixture() *config.ServerManifest {
