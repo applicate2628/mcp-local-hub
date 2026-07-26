@@ -18,4 +18,3 @@ audit, writer atomicity verification, and narrowly scoped mutation tests.
 - No unfiltered `go test ./...`.
 - No whole-package suite for `internal/api`, `internal/gui`, or `internal/cli`.
 - Safe static checks are `go build ./...` and `go vet ./...`.
-

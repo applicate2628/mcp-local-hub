@@ -179,9 +179,9 @@ see A3.
 
 ## A1 — Read-Only State Access Writes Shared Diagnostics
 
-**Severity:** Critical  
+**Severity:** Critical
 **Architecture laws:** C1 single owner, D2 diagnostic port, D4 global/shared
-resource ownership  
+resource ownership
 **Fix class:** `design-decision`
 
 ### Exact mechanism
@@ -265,9 +265,9 @@ diagnostic sink receives the permission warning.
 
 ## A2 — Resolver Refresh Lacks One Immutable-Generation Owner
 
-**Severity:** High  
+**Severity:** High
 **Architecture laws:** C1 single owner, D4 shared-state lifecycle, D5
-per-datum ownership  
+per-datum ownership
 **Fix class:** `design-decision`
 
 ### Exact mechanism
@@ -344,9 +344,9 @@ for the deterministic generation-order test.
 
 ## A3 — Startup Seeder Does Not Return the Committed Intent Generation
 
-**Severity:** High  
+**Severity:** High
 **Architecture laws:** C1 state owner, D1 typed failure, D4 persisted-state
-lifecycle  
+lifecycle
 **Fix class:** `design-decision`
 
 ### Exact mechanism

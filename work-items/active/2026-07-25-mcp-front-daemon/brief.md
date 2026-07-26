@@ -58,4 +58,3 @@
 - Exact tests selected from the changed test files, always with `-run`.
 - Controlled source mutations applied only to a temporary detached worktree or
   temporary source copy, never the operator's live worktree or state.
-
