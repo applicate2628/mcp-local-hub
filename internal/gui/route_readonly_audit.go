@@ -21,41 +21,24 @@
 // (production/GUI) construction path is completely unaffected — this file
 // adds no new behavior to SetSerenaRouterProduction/SetLSPRouterProduction,
 // which continue to default to api.LogHubMcpEvent exactly as before.
+//
+// The implementation moved to api.RouteReadOnlyStderrSink (finding 1,
+// work-items/bugs/2026-07-26-route-daemon-state-read-unhardened-parent-
+// fallback-writes-hub-mcp-log.md): internal/api/serena_routing and
+// internal/api/lsp_routing need the SAME sink for the shared inode-anchored
+// state-file reader's relax-fallback diagnostic, and neither may import this
+// gui package (gui already imports both of them, so the reverse import
+// would cycle). This unexported wrapper is kept so every existing reference
+// in this package (serena_router.go, lsp_router.go) needs no change.
 package gui
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"time"
-
 	"mcp-local-hub/internal/api"
 )
 
 // routeReadOnlySink implements the AuditFn seam
 // (func(level, event string, fields map[string]any) error) for the
-// GUI-independent, registry/supervisor-intent read-only route daemon. It
-// mirrors api.LogHubMcpEvent's envelope shape (ts/level/event merge order,
-// RedactToken scrubbing) so an operator sees a familiar structure, but routes
-// the line to this process's own stderr instead of the shared hub-mcp.log —
-// the route daemon has no shared-state write surface at all, so its own
-// diagnostics must never land on one.
+// GUI-independent, registry/supervisor-intent read-only route daemon.
 func routeReadOnlySink(level, event string, fields map[string]any) error {
-	if level == "" {
-		level = "info"
-	}
-	rec := make(map[string]any, len(fields)+3)
-	for k, v := range fields {
-		rec[k] = v
-	}
-	rec["ts"] = time.Now().UTC().Format(time.RFC3339Nano)
-	rec["level"] = level
-	rec["event"] = event
-	raw, err := json.Marshal(rec)
-	if err != nil {
-		return fmt.Errorf("marshal route diagnostic event: %w", err)
-	}
-	redacted := api.RedactToken(string(raw))
-	_, err = fmt.Fprintln(os.Stderr, redacted)
-	return err
+	return api.RouteReadOnlyStderrSink(level, event, fields)
 }

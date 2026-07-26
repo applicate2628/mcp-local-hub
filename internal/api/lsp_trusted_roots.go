@@ -186,7 +186,17 @@ func CanonicalizeTrustedRoot(p string) (string, error) {
 // than a second path lookup, so a symlink/reparse or directory-entry swap cannot
 // inject attacker-chosen trusted roots.
 func LoadLSPTrustedRoots(path string) (*LSPTrustedRootsFile, error) {
-	raw, err := readStateFileInodeAnchored(path)
+	return LoadLSPTrustedRootsWithAuditSink(path, nil)
+}
+
+// LoadLSPTrustedRootsWithAuditSink is LoadLSPTrustedRoots with the shared
+// state-file reader's relax-fallback diagnostic redirected to sink instead
+// of the process-default LogHubMcpEvent (nil sink is exactly equivalent to
+// LoadLSPTrustedRoots). See LSPWorkspaceRootTrustedWithAuditSink and finding
+// 1 (work-items/bugs/2026-07-26-route-daemon-state-read-unhardened-parent-
+// fallback-writes-hub-mcp-log.md).
+func LoadLSPTrustedRootsWithAuditSink(path string, sink func(level, event string, fields map[string]any) error) (*LSPTrustedRootsFile, error) {
+	raw, err := ReadStateFileInodeAnchoredWithAuditSink(path, sink)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return &LSPTrustedRootsFile{Version: lspTrustedRootsVersion}, nil
@@ -218,6 +228,17 @@ func LoadDefaultLSPTrustedRoots() (*LSPTrustedRootsFile, error) {
 		return nil, err
 	}
 	return LoadLSPTrustedRoots(path)
+}
+
+// LoadDefaultLSPTrustedRootsWithAuditSink is LoadDefaultLSPTrustedRoots with
+// the relax-fallback diagnostic redirected to sink (nil preserves the
+// default). See LSPWorkspaceRootTrustedWithAuditSink.
+func LoadDefaultLSPTrustedRootsWithAuditSink(sink func(level, event string, fields map[string]any) error) (*LSPTrustedRootsFile, error) {
+	path, err := DefaultLSPTrustedRootsPathReadOnly()
+	if err != nil {
+		return nil, err
+	}
+	return LoadLSPTrustedRootsWithAuditSink(path, sink)
 }
 
 // canonicalizedRootSet returns the file's roots canonicalized + deduped.
@@ -327,7 +348,23 @@ func (f *LSPTrustedRootsFile) LSPWorkspaceRootTrusted(workspaceRoot string) bool
 // auto-register) rather than silently trusting. The router maps the
 // error to the same refusal it would emit for an untrusted path.
 func LSPWorkspaceRootTrusted(workspaceRoot string) (bool, error) {
-	f, err := LoadDefaultLSPTrustedRoots()
+	return LSPWorkspaceRootTrustedWithAuditSink(workspaceRoot, nil)
+}
+
+// LSPWorkspaceRootTrustedWithAuditSink is LSPWorkspaceRootTrusted with the
+// underlying store read's relax-fallback diagnostic redirected to sink
+// instead of the process-default LogHubMcpEvent (nil sink is exactly
+// equivalent to LSPWorkspaceRootTrusted). finding 1
+// (work-items/bugs/2026-07-26-route-daemon-state-read-unhardened-parent-
+// fallback-writes-hub-mcp-log.md): the read-only `mcphub route` front
+// daemon wires this with RouteReadOnlyStderrSink (via
+// SetLSPRouterReadOnly's TrustedRootCheckFn) so its trusted-root read never
+// reaches the GUI-owned shared hub-mcp.log even under a default-relax
+// broadened parent — this read runs on every unregistered-workspace
+// first-touch LSP call regardless of AutoRegisterFn wiring (see
+// SetLSPRouterReadOnly's doc comment).
+func LSPWorkspaceRootTrustedWithAuditSink(workspaceRoot string, sink func(level, event string, fields map[string]any) error) (bool, error) {
+	f, err := LoadDefaultLSPTrustedRootsWithAuditSink(sink)
 	if err != nil {
 		return false, err
 	}

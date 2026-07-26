@@ -177,6 +177,15 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, error) {
 		return nil, fmt.Errorf("resolve registry path: %w", regErr)
 	}
 	reg := api.NewRegistry(registryPath)
+	// finding 1 (adversarial cross-family review round 3): every registry
+	// Load() this process performs (this call and every later reload inside
+	// serena_routing.WorkspaceResolver.refresh()) must never fall back to
+	// the shared api.LogHubMcpEvent sink on a default-relax parent-DACL
+	// read — that would write the GUI-owned hub-mcp.log from this
+	// read-only daemon exactly as surely as a registry mutation would. Set
+	// BEFORE the first Load() so no read on this *Registry ever reaches
+	// the default sink.
+	reg.SetAuditSink(api.RouteReadOnlyStderrSink)
 	if err := reg.Load(); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"route: registry load warning (will retry lazily on first call): %v\n", err)
@@ -205,6 +214,10 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, error) {
 		// /lsp/<lang>/mcp traffic (the data race gui.go's comment documents at
 		// its own registry-construction site).
 		lspReg := api.NewRegistry(registryPath)
+		// finding 1: same reasoning as the serena registry's SetAuditSink
+		// call above — this resolver's refresh() also calls Load() on this
+		// SAME *Registry.
+		lspReg.SetAuditSink(api.RouteReadOnlyStderrSink)
 		// P2-3 fix: the read-only constructor — see
 		// serena_routing.NewReadOnlyWorkspaceResolver's doc comment (the LSP
 		// resolver's NewReadOnlyWorkspaceResolver mirrors the same argument).

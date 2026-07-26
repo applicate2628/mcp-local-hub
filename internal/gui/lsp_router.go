@@ -170,7 +170,22 @@ func (s *Server) SetLSPRouterReadOnly(resolver *lsp_routing.WorkspaceResolver, s
 			return kind, ok
 		},
 		// AutoRegisterFn deliberately nil — see doc comment.
-		TrustedRootCheckFn: api.LSPWorkspaceRootTrusted,
+		//
+		// TrustedRootCheckFn (finding 1, adversarial cross-family review
+		// round 3): the plain api.LSPWorkspaceRootTrusted default reads
+		// lsp-trusted-roots.json through the shared inode-anchored state
+		// reader, whose default-relax parent-DACL fallback used to call
+		// api.LogHubMcpEvent directly — the SAME shared hub-mcp.log write
+		// this constructor's AuditFn wiring exists to avoid, just via a
+		// different, lower-layer emit site outside serena_router.go/
+		// lsp_router.go's own AuditFn seam. Routed through
+		// LSPWorkspaceRootTrustedWithAuditSink + routeReadOnlySink so this
+		// read never reaches hub-mcp.log even when the parent-gate relax
+		// fires — see api.LSPWorkspaceRootTrustedWithAuditSink's doc
+		// comment.
+		TrustedRootCheckFn: func(workspaceRoot string) (bool, error) {
+			return api.LSPWorkspaceRootTrustedWithAuditSink(workspaceRoot, routeReadOnlySink)
+		},
 		// AuditFn (P1-1 fix): every other caller leaves this nil so
 		// forwardLSPNotificationDetached's own default falls back to
 		// api.LogHubMcpEvent, which appends to the SHARED

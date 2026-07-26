@@ -4,8 +4,46 @@ severity: low
 found-by: backend-engineer, P1-1/P2-3 adversarial-review fix round (mcphub-front-daemon Increment 1)
 affected-surface: internal/api/hub_mcp_state_read_inode_windows.go, internal/api/hub_mcp_state_read_inode_posix.go (readStateFileInodeAnchored's "unhardened parent" relax-fallback diagnostic)
 context: adjacent-finding
-status: open
+status: fixed
+fixed-by: backend-engineer, round-3 adversarial cross-family review (finding 1), 2026-07-26
 ---
+
+## Resolution (2026-07-26)
+
+Fixed as finding 1 of the round-3 review pass. The reviewer established this
+was in scope (not merely adjacent) because it reopened the branch's central
+READ-ONLY claim.
+
+An injectable diagnostic-sink seam was threaded through the shared
+inode-anchored state reader:
+
+- `readStateFileInodeAnchoredWithOptions` (both the Windows and POSIX legs)
+  gained a trailing `auditSink` parameter; every existing call site now
+  passes `LogHubMcpEvent` explicitly, preserving prior behavior exactly.
+- `api.ReadStateFileInodeAnchoredWithAuditSink(path, sink)` is the new
+  per-call (not process-global) entry point — a nil sink is exactly
+  equivalent to the old default.
+- `api.Registry.SetAuditSink(sink)` lets a caller redirect the sink `Load()`
+  uses; `api.LSPWorkspaceRootTrustedWithAuditSink(root, sink)` does the same
+  for the trusted-root read.
+- `api.RouteReadOnlyStderrSink` (moved from `internal/gui.routeReadOnlySink`,
+  which now delegates to it) is the concrete stderr-only sink. It lives in
+  `internal/api` — the lowest common package both `internal/gui` and
+  `internal/api/serena_routing`/`internal/api/lsp_routing` already import —
+  so no package gained a new layering-violating dependency.
+- `internal/cli/route.go`'s `buildRouteServer` calls `reg.SetAuditSink(...)`
+  on both `*Registry` instances (serena + LSP) right after construction, and
+  `internal/gui/lsp_router.go`'s `SetLSPRouterReadOnly` wires
+  `TrustedRootCheckFn` through the audit-sink variant.
+
+Regression coverage: `internal/cli/route_broadened_parent_windows_test.go`
+(two new tests, real production `buildRouteServer` construction path, a
+genuinely broadened — not hardened — state-dir DACL) proves the relax
+fallback still fires but lands on the route daemon's own stderr sink, never
+`hub-mcp.log`/`hub-mcp.log.lock`. Both tests were mutation-proven: reverting
+either `SetAuditSink` call or the `TrustedRootCheckFn` closure makes the
+corresponding test fail with the file present, confirming the guard is
+load-bearing.
 
 ## What happened
 

@@ -1,4 +1,53 @@
-# MCP front daemon — Increment 1
+---
+template: review
+orchestration: light
+started: 2026-07-26
+updated: 2026-07-26 00:00
+---
+
+## Current state
+
+- **Primary task**: re-verify the seven prior findings after commits `3f72365d`
+  and `d6c0501f`.
+- **Primary task status**: active
+- **Interruption marker**: none
+- **Stage**: architecture gate complete — REVISE
+- **Main conv role**: final reconciliation
+- **Last accepted artifact**: `qa-adversarial-falsifiers.md` (QA artifact PASS;
+  product closure REVISE)
+- **Open obligations before closeout**: fix request-time shared audit writes,
+  resolver generation regression, and seeder committed-generation/nil-failure
+  convergence; re-run QA and architecture gates
+- **Epic**: none
+- **Depends-on**: none
+- **Priority**: high
+
+## Active agents
+
+| Agent | Role | Model/effort | Status | Launched |
+| --- | --- | --- | --- | --- |
+| none | none | none | not launched | n/a |
+
+## Completed agents
+
+| Agent | Role | Result | Artifact |
+| --- | --- | --- | --- |
+| recovery-index-audit | knowledge-archivist | PASS | `recovery-index-audit.md` |
+| review-plan | planner | INTERRUPTED(no-artifact) twice; main-session recovery PASS | `plan.md` |
+| analyst-reverify | analyst | PASS (product closure REVISE) | `research-reverify.md` |
+| qa-mutation-reverify | qa-engineer | PASS (product closure REVISE) | `qa-reverify.md` |
+| architecture-claim-reverify | architecture-reviewer | REVISE | `architecture-claim-reverify.md` |
+| architecture-adversarial-reverify | architecture-reviewer | REVISE | `architecture-adversarial-reverify.md` |
+| qa-adversarial-falsifiers | qa-engineer | PASS (product closure REVISE) | `qa-adversarial-falsifiers.md` |
+
+## Next action
+
+Return the three design-decision blockers to `$architect`; after fixes, repeat
+the exact mutation/falsifier matrix and both architecture review angles.
+
+---
+
+# Legacy delivery history — MCP front daemon Increment 1
 
 Template: full-delivery (reliability/architecture-critical). Orchestration weight: requiresLead.
 Branch: feat/mcp-front-daemon (worktree d:/dev/mcphub-front-daemon, off origin/master 1889cff6).

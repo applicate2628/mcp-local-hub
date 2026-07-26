@@ -44,6 +44,7 @@ func ConsumeStateSecretFileInodeAnchored(path string, expectedBytes int64) ([]by
 		expectedBytes,
 		false,
 		true,
+		LogHubMcpEvent,
 	)
 	if err != nil {
 		return nil, err
@@ -54,6 +55,32 @@ func ConsumeStateSecretFileInodeAnchored(path string, expectedBytes int64) ([]by
 		return nil, fmt.Errorf("consume state secret %s: size = %d, want %d bytes", path, actual, expectedBytes)
 	}
 	return value, nil
+}
+
+// ReadStateFileInodeAnchoredWithAuditSink is a per-call variant of
+// ReadStateFileInodeAnchored that redirects the relax-fallback diagnostic
+// event (readStateFileInodeAnchoredWithOptions' "unhardened-parent/file-
+// fallback" warn events) to sink instead of the process-default
+// LogHubMcpEvent. A nil sink is exactly equivalent to
+// ReadStateFileInodeAnchored — this is a strictly additive entry point; no
+// existing caller's behavior changes.
+//
+// Unlike a package-level override, this composes safely with concurrent or
+// parallel callers in the same process (each call carries its own sink),
+// which matters because this same process (e.g. a test binary, or the GUI
+// in-process) may have OTHER callers that expect the LogHubMcpEvent default.
+//
+// finding 1 (work-items/bugs/2026-07-26-route-daemon-state-read-unhardened-
+// parent-fallback-writes-hub-mcp-log.md): the read-only `mcphub route` front
+// daemon passes RouteReadOnlyStderrSink here (via Registry.SetAuditSink and
+// LSPWorkspaceRootTrustedWithAuditSink) so its registry and trusted-root
+// reads never reach the GUI-owned shared hub-mcp.log even when the parent-
+// DACL/mode gate hits its default-relax fallback.
+func ReadStateFileInodeAnchoredWithAuditSink(path string, sink func(level, event string, fields map[string]any) error) ([]byte, error) {
+	if sink == nil {
+		sink = LogHubMcpEvent
+	}
+	return readStateFileInodeAnchoredWithOptions(path, operatorRequiresSingleUserHome, stateFileReadCapBytes(path), true, false, sink)
 }
 
 // ReadStateFileInodeAnchoredEnvStrictOnly is the bootstrap variant for recovery
