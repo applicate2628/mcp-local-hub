@@ -43,5 +43,5 @@ global:
     port: 9136
   - server: vcpkg
     daemon: default
-    port: 9137
+    port: 9138
 workspace_scoped: []
