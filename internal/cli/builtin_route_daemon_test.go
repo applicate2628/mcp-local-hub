@@ -31,13 +31,23 @@ import (
 // refreshSupervisorIntent reads back OFF DISK. This test proves the row
 // survives exactly that re-read, not just the caller's own copy.
 //
+// Assertion (a) reads the RETURN VALUE, not the original `intent` variable
+// passed in (finding A3 fix, architecture-adversarial-reverify.md +
+// qa-adversarial-falsifiers.md): the caller's own pre-lock copy is no longer
+// mutated in place — the function instead returns the exact generation
+// observed/committed under the supervisor-intent flock, which the caller
+// (internal/cli/supervise.go's runSupervise) is documented to reassign its
+// own `intent` variable to. Checking the original pointer's identity would
+// test a since-removed implementation detail, not the documented contract.
+//
 // Mutation proof: temporarily commenting out this function's
-// `api.MutateSupervisorIntentIfChanged(...)` call (persisting nothing, only
-// mutating the in-memory `intent` argument) makes assertion (b) below fail
-// with "re-read of supervisor-intent.json ... is missing" while assertion (a)
-// still passes — isolating exactly the orphan-drop bug this test exists to
-// catch. Reverted after confirming the failure; see the implementation
-// report for the transcript.
+// `api.MutateSupervisorIntentIfChangedReturning(...)` call (persisting
+// nothing, returning the original intent untouched) makes assertion (b)
+// below fail with "re-read of supervisor-intent.json ... is missing" while
+// assertion (a) also fails (the returned value would carry no row either,
+// since nothing would have been persisted or reapplied) — isolating exactly
+// the orphan-drop bug this test exists to catch. Reverted after confirming
+// the failure; see the implementation report for the transcript.
 func TestEnsureBuiltinRouteDaemonAtStartup_PersistsAndSurvivesReread(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 
@@ -54,12 +64,13 @@ func TestEnsureBuiltinRouteDaemonAtStartup_PersistsAndSurvivesReread(t *testing.
 	// *SupervisorIntentFile downstream — mirror that shape here).
 	intent := &api.SupervisorIntentFile{Version: 1}
 
-	ensureBuiltinRouteDaemonAtStartup(stateDir, intent, events)
+	got := ensureBuiltinRouteDaemonAtStartup(stateDir, intent, events)
 
-	// Assertion (a): THIS cold start's own in-memory intent (the one about
-	// to feed the initial reconcile plan) already carries the row.
-	if !supervisorIntentHasBuiltinRouteRow(intent) {
-		t.Fatalf("in-memory intent has no %s row after ensureBuiltinRouteDaemonAtStartup", api.BuiltinRouteTaskName)
+	// Assertion (a): THIS cold start's own returned intent (the one the
+	// caller reassigns its `intent` variable to, and about to feed the
+	// initial reconcile plan) already carries the row.
+	if !supervisorIntentHasBuiltinRouteRow(got) {
+		t.Fatalf("returned intent has no %s row after ensureBuiltinRouteDaemonAtStartup", api.BuiltinRouteTaskName)
 	}
 
 	// Assertion (b): a SEPARATE, independent read of supervisor-intent.json

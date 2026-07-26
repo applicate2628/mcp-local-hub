@@ -2530,42 +2530,44 @@ func hasUnmergedActiveLegacyStops(supervisorIntent *api.SupervisorIntentFile, da
 // an in-memory-only row) ever see it.
 //
 // intent is the already-loaded *api.SupervisorIntentFile this cold start is
-// about to feed into reconcile. It returns the (possibly newly-allocated)
-// intent with the row applied — the CALLER MUST reassign its own `intent`
-// variable to the return value, not just pass its existing pointer and
-// assume in-place mutation: on a genuinely fresh host (no supervisor-intent.json
-// on disk yet) loadIntentFiles returns a nil intent, and runSupervise's own
-// initial-reconcile call is gated on `if intent != nil` (supervise.go, well
-// below this call site) — a nil-in-nil-out no-op here would silently skip
-// seeding the row on exactly the first-ever boot this feature most needs to
-// cover, deferring it to the next 60s IntentWatcher poll instead of this
-// cold start's own first reconcile pass. Returning a freshly-allocated
-// &api.SupervisorIntentFile{Version: 1} for that case closes the gap.
+// about to feed into reconcile. It returns the intent this cold start MUST
+// adopt — the CALLER MUST reassign its own `intent` variable to the return
+// value, not just pass its existing pointer and assume in-place mutation.
 //
-// Persist-before-adopt ordering (P1-2 fix, adversarial cross-family review):
-// the disk write (MutateSupervisorIntentIfChanged, a fresh flock-held
-// read-modify-write against whatever is CURRENTLY on disk) runs FIRST. Only
-// after that write actually SUCCEEDS does this function apply the identical
-// mutation to the caller's own in-memory `intent` — so THIS cold start's own
-// reconcile pass adopts the row only once it is durably committed. The
-// pre-fix version mutated the caller's `intent` BEFORE attempting the
-// persist and returned it regardless of whether the persist succeeded: on a
-// persist failure this cold start's reconcile pass would spawn the route
-// daemon anyway (from the in-memory-only row) while the disk copy stayed
-// route-less — and the next 60s IntentWatcher poll, which re-reads only what
-// is on disk, would then treat the freshly-spawned daemon as an orphan and
-// kill it, repeating on every restart until the write failure cleared. This
-// version can never run the in-memory reconcile plan ahead of what is
-// durably on disk.
+// Two independent contracts on the return value (finding A3,
+// work-items/active/2026-07-25-mcp-front-daemon/architecture-adversarial-
+// reverify.md, runtime-proven by qa-adversarial-falsifiers.md):
+//
+//  1. On any PRE-COMMIT failure (binary-path resolution, strict port
+//     resolution, or the locked persist itself) this function returns the
+//     ORIGINAL caller intent completely UNCHANGED — including nil. A
+//     genuinely fresh host (no supervisor-intent.json yet) passes nil here,
+//     and runSupervise's own initial-reconcile call is gated on `intent !=
+//     nil` further below this call site; fabricating a non-nil empty intent
+//     on a resolution failure would incorrectly enable that gate. The
+//     pre-A3-fix version allocated a fresh non-nil intent BEFORE strict port
+//     resolution, so a portErr or persistErr on a nil input silently turned
+//     nil into `&api.SupervisorIntentFile{Version: 1}` — this version keeps
+//     a separate originalIntent reference that is never touched by the
+//     nil-substitution used only for the (read-only) hadRow check below.
+//  2. On SUCCESS (including the "unchanged" no-op case) this function
+//     returns the EXACT generation api.MutateSupervisorIntentIfChangedReturning
+//     observed under the flock — a fresh disk read with the built-in row
+//     applied — NOT the caller's own pre-lock `intent` with the same mutation
+//     reapplied to it. QA proved the reapply-to-stale-copy approach silently
+//     drops a concurrent writer's changes: if a second writer commits a
+//     daemon, a stop, or a strict-mode flip to disk between this boot's
+//     initial load and this seeder's lock acquisition, that generation lands
+//     on disk (this function's own read is fresh, under the lock) but was
+//     invisible to the returned value the old reapply-based version produced.
+//     Adopting the observed snapshot wholesale is what makes the caller's
+//     controller-cache seed and initial reconcile pass agree with disk.
 //
 // A resolution or persist failure is reported via a warn event
 // (builtin-route-ensure-failed) and otherwise swallowed: the route daemon
 // simply won't auto-spawn this session (no worse than before Increment 1b),
 // but the supervisor's own startup must not fail loud over a single
-// best-effort seeding step for an always-secondary daemon. On a resolution
-// failure the ORIGINAL intent (possibly nil) is returned unchanged, so a
-// pre-existing nil-intent-skips-reconcile behavior is preserved exactly —
-// this seeder never turns a real failure into a fabricated non-nil intent.
+// best-effort seeding step for an always-secondary daemon.
 func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIntentFile, events *api.SupervisorEventLog) *api.SupervisorIntentFile {
 	if builtinRouteSeedingDisabledForTest {
 		return intent
@@ -2585,8 +2587,16 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 		})
 		return intent
 	}
-	if intent == nil {
-		intent = &api.SupervisorIntentFile{Version: 1}
+
+	// originalIntent preserves EXACTLY what the caller passed, including
+	// nil, for every pre-commit failure return below (contract 1 above).
+	// workingIntent is a non-nil stand-in usable for the read-only hadRow
+	// check further down; it is NEVER itself returned — only originalIntent
+	// or the locked mutation's own observed snapshot are.
+	originalIntent := intent
+	workingIntent := intent
+	if workingIntent == nil {
+		workingIntent = &api.SupervisorIntentFile{Version: 1}
 	}
 
 	// P2-5 fix (adversarial cross-family review): resolve the STRICT
@@ -2604,7 +2614,8 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 	port, portErr := resolveMCPFrontPortStrictFn()
 	if portErr != nil {
 		// Preserve the existing descriptor (if any) or fail loudly — never
-		// silently rewrite to the default. Skip the ensure entirely this
+		// silently rewrite to the default, and never fabricate a non-nil
+		// intent from a nil one (contract 1). Skip the ensure entirely this
 		// boot: the existing row (if hadRow) is left completely untouched,
 		// and a fresh install with no row yet simply does not get one this
 		// boot rather than getting one seeded with a port the operator never
@@ -2622,36 +2633,31 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 				"phase": "resolve-port",
 			},
 		})
-		return intent
+		return originalIntent
 	}
 
 	hadRow := false
-	for _, d := range intent.Daemons {
+	for _, d := range workingIntent.Daemons {
 		if d.TaskName == api.BuiltinRouteTaskName {
 			hadRow = true
 			break
 		}
 	}
 
-	// P1-2 fix (adversarial cross-family review): persist FIRST, against a
-	// FRESH flock-held disk read (MutateSupervisorIntentIfChanged clones the
-	// current on-disk file and mutates the clone) — never the caller's own
-	// possibly-stale `intent`. Only once this write actually SUCCEEDS is the
-	// identical mutation applied to the caller's in-memory `intent` further
-	// below, so this cold start's own reconcile plan can never run ahead of
-	// what is durably on disk. A P2-4 reserved-name collision surfaces here
-	// as an ordinary mutate error (EnsureBuiltinRouteDaemon returns it
-	// instead of silently overwriting or silently accepting the foreign
-	// row) — the persist is correctly aborted, nothing is written, and this
-	// function reports the failure below exactly like a disk-write failure.
-	var changed bool
-	persistErr := api.MutateSupervisorIntentIfChanged(supervisorIntentPath, func(f *api.SupervisorIntentFile) (bool, error) {
-		c, ensureErr := api.EnsureBuiltinRouteDaemon(f, cmdPath, port)
-		if ensureErr != nil {
-			return false, ensureErr
-		}
-		changed = c
-		return c, nil
+	// A3 fix: use the Returning variant and adopt its OBSERVED generation
+	// (result.Intent) rather than reapplying this same mutation to the
+	// caller's own possibly-stale `workingIntent`/`originalIntent`. The
+	// locked read is always a fresh disk read regardless of whether a write
+	// happens (Changed==false still returns the freshly-read file), so this
+	// is correct for the "unchanged" no-op case too — a concurrent writer's
+	// change can be visible on disk even when the route row itself needed no
+	// edit. A P2-4 reserved-name collision surfaces here as an ordinary
+	// mutate error (EnsureBuiltinRouteDaemon returns it instead of silently
+	// overwriting or silently accepting the foreign row) — the persist is
+	// correctly aborted, nothing is written, and this function reports the
+	// failure below exactly like a disk-write failure.
+	result, persistErr := api.MutateSupervisorIntentIfChangedReturning(supervisorIntentPath, func(f *api.SupervisorIntentFile) (bool, error) {
+		return api.EnsureBuiltinRouteDaemon(f, cmdPath, port)
 	})
 	if persistErr != nil {
 		_ = events.Emit(api.SupervisorEvent{
@@ -2666,39 +2672,17 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 		})
 		// The disk write did not land (or was correctly refused, e.g. a
 		// reserved-name collision) — return the ORIGINAL in-memory intent
-		// completely unchanged. This cold start's reconcile plan must never
-		// diverge from what is durably on disk.
-		return intent
+		// completely unchanged (contract 1). This cold start's reconcile
+		// plan must never diverge from what is durably on disk.
+		return originalIntent
 	}
 
 	action := "unchanged"
-	if changed {
+	if result.Changed {
 		if hadRow {
 			action = "replaced"
 		} else {
 			action = "added"
-		}
-		// The persist above just committed this exact mutation to disk under
-		// a fresh read — apply the identical, now-proven-safe mutation to
-		// the caller's own in-memory intent so THIS cold start's own initial
-		// reconcile pass also sees the row, not just the next restart. Errors
-		// are not expected here (the identical mutation just succeeded above
-		// against a structurally equivalent fresh-loaded snapshot — `intent`
-		// itself came from this same boot's loadIntentFiles, before any other
-		// mutation), but fail safe rather than silently ignore one.
-		if _, err := api.EnsureBuiltinRouteDaemon(intent, cmdPath, port); err != nil {
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: "warn",
-				Source:   "lifecycle",
-				Event:    "builtin-route-ensure-failed",
-				TaskName: api.BuiltinRouteTaskName,
-				Body: map[string]any{
-					"err":   err.Error(),
-					"path":  supervisorIntentPath,
-					"phase": "in-memory-reapply",
-				},
-			})
-			return intent
 		}
 	}
 	_ = events.Emit(api.SupervisorEvent{
@@ -2711,7 +2695,9 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 			"port":   port,
 		},
 	})
-	return intent
+	// Contract 2: adopt the exact generation observed/committed under the
+	// flock, not the caller's own pre-lock copy.
+	return result.Intent
 }
 
 // loadIntentFiles attempts to read the supervisor-intent.json and
