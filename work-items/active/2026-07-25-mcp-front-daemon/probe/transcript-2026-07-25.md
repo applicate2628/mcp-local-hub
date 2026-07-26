@@ -52,8 +52,8 @@ the target machine actively refused it. (127.0.0.1:19125)
 ```
 
 Cleanup: route pid 37736 killed (identity-verified); final sweep of
-`mcphub*` showed only the operator's real fleet at
-`C:\Users\dima_\.local\bin\mcphub.exe` — untouched.
+`mcphub*` showed only the operator's real fleet at the installed path
+(`%USERPROFILE%\.local\bin\mcphub.exe`) — untouched.
 
 **Gap this run left open (F3 advisory):** `initialize` is synthesized by the
 router itself with no workspace/daemon involved — it does not prove a
