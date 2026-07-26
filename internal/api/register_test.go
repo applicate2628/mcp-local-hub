@@ -29,19 +29,31 @@ import (
 
 // TestDefaultClientBindings_DerivedFromDefaultInstallSet pins the register-time
 // implicit workspace binding set (used when a manifest declares no
-// client_bindings — register.go:773 / register_supervisor.go:270) to the
+// client_bindings — effectiveClientBindings, consumed by registerOneLanguage
+// and registerOneLanguageSupervised) to the
 // install-time default-install set. A bare `mcphub register` of a
 // workspace-scoped manifest with no client_bindings must bind exactly the
 // default-install clients (claude-code, codex-cli), never the opt-in cursor —
 // the same invariant `mcphub install` enforces via DefaultInstallClientNames.
-// Deriving defaultClientBindings from clients.DefaultInstallClientNames() is
-// what keeps the two paths in lockstep; this test fails if cursor (or any
-// opt-in client) leaks back into the register-time default.
+// Deriving the bindings from clients.DefaultInstallClientNames() is what keeps
+// the two paths in lockstep; this test fails if cursor (or any opt-in client)
+// leaks back into the register-time default.
+//
+// LOCALAPPDATA is redirected to an empty temp dir so SettingsPath() resolves to
+// a NON-EXISTENT gui-preferences.yaml: this test pins the NO-OVERRIDE
+// (compile-time) branch of defaultClientBindingsNow, and must never read — or
+// depend on the contents of — the operator's real preferences file. The
+// override branch is pinned separately by
+// TestRegisterBindings_HonorPersistedDefaultClientsOverride.
 func TestDefaultClientBindings_DerivedFromDefaultInstallSet(t *testing.T) {
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmpState)
+	t.Setenv("XDG_DATA_HOME", tmpState)
+
 	got := map[string]string{} // client -> URLPath
-	for _, b := range defaultClientBindings {
+	for _, b := range defaultClientBindingsNow() {
 		if _, dup := got[b.Client]; dup {
-			t.Fatalf("duplicate client %q in defaultClientBindings", b.Client)
+			t.Fatalf("duplicate client %q in default bindings", b.Client)
 		}
 		got[b.Client] = b.URLPath
 	}
@@ -57,11 +69,11 @@ func TestDefaultClientBindings_DerivedFromDefaultInstallSet(t *testing.T) {
 		want[name] = true
 	}
 	if len(got) != len(want) {
-		t.Fatalf("defaultClientBindings clients = %v, want (default-install minus relay-stdio) = %v", got, want)
+		t.Fatalf("default bindings clients = %v, want (default-install minus relay-stdio) = %v", got, want)
 	}
 	for name := range want {
 		if _, ok := got[name]; !ok {
-			t.Fatalf("default-install client %q missing from defaultClientBindings: %v", name, got)
+			t.Fatalf("default-install client %q missing from default bindings: %v", name, got)
 		}
 	}
 
@@ -73,7 +85,7 @@ func TestDefaultClientBindings_DerivedFromDefaultInstallSet(t *testing.T) {
 	// Concrete pin for today's default set.
 	for _, name := range []string{"claude-code", "codex-cli"} {
 		if _, ok := got[name]; !ok {
-			t.Fatalf("default client %q missing from defaultClientBindings: %v", name, got)
+			t.Fatalf("default client %q missing from default bindings: %v", name, got)
 		}
 	}
 	// Every binding carries the standard /mcp URL path (register writes URL
@@ -124,6 +136,20 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	prevStateRoot := daemonStateRootOverride
 	daemonStateRootOverride = hardenedTempDir(t)
 	t.Cleanup(func() { daemonStateRootOverride = prevStateRoot })
+
+	// Redirect SettingsPath() to an empty temp dir. The register path resolves
+	// its implicit client bindings through defaultClientBindingsNow, which reads
+	// the operator's persisted `clients.default_install` from
+	// gui-preferences.yaml at CALL TIME. Without this redirect every harness
+	// test would read the developer's REAL %LOCALAPPDATA% preferences file, so a
+	// machine that happens to have an override persisted would silently change
+	// which clients these tests expect — a host-dependent result masquerading as
+	// a pass. An absent file means "no override" and yields the compile-time
+	// default set, which is what the harness tests assume. Tests that WANT an
+	// override write one into this temp dir via SetDefaultInstallClientNames.
+	settingsRoot := t.TempDir()
+	t.Setenv("LOCALAPPDATA", settingsRoot)
+	t.Setenv("XDG_DATA_HOME", settingsRoot)
 
 	origSchedulerNew := testSchedulerFactory
 	origClientFactory := testClientFactory
@@ -1315,6 +1341,75 @@ func TestRegister_SurvivesSharedWeeklyRefreshFailure(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "warning: ensure shared weekly-refresh task") {
 		t.Errorf("expected warning in writer output; got:\n%s", buf.String())
+	}
+}
+
+// TestRegister_SupervisedHonorsPersistedDefaultClientsOverride pins the
+// SUPERVISED register lane to the same client-scope owner the legacy lane uses.
+//
+// registerOneLanguageSupervised carried a hand-rolled copy of the owner:
+//
+//	bindingsPre := m.ClientBindings
+//	if len(bindingsPre) == 0 { bindingsPre = defaultClientBindings }
+//
+// byte-for-byte what effectiveClientBindings owns. It was harmless while the
+// owner was a frozen compile-time snapshot, so the duplicate and the owner
+// happened to agree. The moment the owner learned to read the operator's
+// persisted clients.default_install, the copy did NOT — and the two lanes
+// diverged in the most damaging possible way: the supervised WRITE path would
+// bind the compile-time set while the cleanup gate
+// (boundClientNames(effectiveClientBindings(m)), which both lanes share)
+// computed the override set. A client in the override but not the compile-time
+// set would then be treated as "bound" by cleanup — its direct entry deleted —
+// while the write path never actually wrote it a replacement. That is exactly
+// the write-vs-cleanup divergence this branch set out to close, one lane over.
+//
+// The override ADDS opt-in cursor and DROPS codex-cli, so only a genuinely
+// applied override yields the asserted set.
+func TestRegister_SupervisedHonorsPersistedDefaultClientsOverride(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+	defer restoreState()
+
+	origReconcile := registerSupervisorReconcileFn
+	registerSupervisorReconcileFn = func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+		return ReconcileResponse{DryRun: false}, nil
+	}
+	defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+	// newRegisterHarness redirects SettingsPath() into a temp dir, so this
+	// persists the override there — never into the operator's real file.
+	if err := mustNewAPI(t).SetDefaultInstallClientNames([]string{"claude-code", "cursor"}); err != nil {
+		t.Fatalf("persist default-install override: %v", err)
+	}
+
+	m := nineLanguageManifest()
+	m.ClientBindings = nil // shipped manifest declares none → derived defaults
+
+	ws := t.TempDir()
+	report, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"go"}, RegisterOpts{
+		Writer:          &bytes.Buffer{},
+		SupervisedProxy: true,
+	})
+	if err != nil {
+		t.Fatalf("Register supervised: %v", err)
+	}
+	if len(report.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(report.Entries))
+	}
+	got := report.Entries[0].ClientEntries
+
+	if _, ok := got["cursor"]; !ok {
+		t.Errorf("supervised register wrote NO entry for cursor, which the operator's persisted "+
+			"clients.default_install selects — the supervised lane is resolving its bindings from a "+
+			"hand-rolled copy of the compile-time default instead of effectiveClientBindings, so the "+
+			"cleanup gate (which DOES read the owner) will treat cursor as bound and delete its direct "+
+			"entry with no replacement; ClientEntries=%v", got)
+	}
+	if _, ok := got["codex-cli"]; ok {
+		t.Errorf("supervised register wrote an entry for codex-cli, which the operator's persisted "+
+			"clients.default_install EXCLUDES; ClientEntries=%v", got)
 	}
 }
 
@@ -3883,6 +3978,96 @@ func TestRegister_CleanupSkipsClientsThatGotNoReplacement(t *testing.T) {
 	if _, ok := h.fakeClients.stdioEntries["codex-cli"]["legacy-go-bound"]; ok {
 		t.Errorf("codex-cli's superseded direct LSP entry survived; the bound client's entry IS replaced " +
 			"and must still be cleaned up")
+	}
+}
+
+// TestRegister_CleanupRejectsRouterEntryOnStalePort pins the PORT half of the
+// replacement gate: a shared LSP-router entry only counts as a working
+// replacement when it names the port the router actually listens on.
+//
+// clientHasActiveLSPRouterReplacement delegates ownership to
+// entryIsOwnedLSPRouterForLanguage, whose `reservedName || (guiPort > 0 && ...)`
+// disjunction short-circuits on the reserved NAME — and the name is
+// unconditionally reserved at that call site, because the entry was fetched BY
+// LSPRouterEntryName(language). The probe therefore proved only "an entry with
+// the reserved name exists, is enabled, and parses as /lsp/<lang>/mcp" — at ANY
+// port. (Passing a non-zero guiPort into that helper would NOT fix it; the
+// name short-circuit still wins. The port has to be checked in the probe.)
+//
+// The operator-reachable failure: change gui_server.port in Settings
+// (pending-restart) or run `mcphub gui --reset-port`, and every client's
+// mcp-language-server-<lang> entry still names the OLD port until
+// EnsureLSPRouterClientEntries re-runs. Register would read routed=true, add
+// the go/gopls aliases, and back up + RemoveEntry the client's LIVE direct
+// entry — leaving one dead router entry and no working Go LSP. That is the
+// "removed with nothing put in its place" defect the gate exists to prevent.
+//
+// cursor is unbound (opt-in) and holds router entries for BOTH languages; only
+// the `go` one names the live port (9125, the gui_server.port registry
+// default the harness's empty settings dir resolves to):
+//
+//	go     → router entry on the LIVE port  → replacement real → direct entry removed
+//	python → router entry on a STALE port   → replacement dead → direct entry MUST survive
+//
+// Asserting both directions keeps the fix honest: refusing every router entry
+// would also pass the python case while breaking the go one.
+func TestRegister_CleanupRejectsRouterEntryOnStalePort(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+
+	ws := t.TempDir()
+	canonical := mustCanonical(t, ws)
+
+	direct := func(entryName, lspLanguage string) clients.LanguageServerStdioEntry {
+		return clients.LanguageServerStdioEntry{
+			Name:     entryName,
+			Command:  "mcp-language-server",
+			Language: lspLanguage,
+			Args:     []string{"--lsp", lspLanguage, "--workspace", canonical},
+		}
+	}
+	h.fakeClients.stdioEntries["cursor"] = map[string]clients.LanguageServerStdioEntry{
+		"legacy-go":     direct("legacy-go", "gopls"),
+		"legacy-python": direct("legacy-python", "pyright-langserver"),
+	}
+	// Guard the premise: the live router port really is the registry default,
+	// so "stale" below is genuinely a different port.
+	livePort, err := mustNewAPI(t).lspRouterGUIPort(0)
+	if err != nil {
+		t.Fatalf("resolve live router port: %v", err)
+	}
+	if livePort != 9125 {
+		t.Fatalf("test premise broken: expected the gui_server.port default 9125, got %d", livePort)
+	}
+	const stalePort = 9199
+	h.fakeClients.entries["cursor"][LSPRouterEntryName("go")] =
+		fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", livePort)
+	h.fakeClients.entries["cursor"][LSPRouterEntryName("python")] =
+		fmt.Sprintf("http://127.0.0.1:%d/lsp/python/mcp", stalePort)
+
+	m := nineLanguageManifest()
+	m.ClientBindings = nil // shipped manifest declares none → derived defaults
+
+	if boundClientNames(effectiveClientBindings(m))["cursor"] {
+		t.Fatalf("test premise broken: cursor must be opt-in (absent from the effective bindings)")
+	}
+
+	if _, err := mustNewAPI(t).registerWithManifest(
+		m, ws, []string{"go", "python"}, RegisterOpts{Writer: &bytes.Buffer{}},
+	); err != nil {
+		t.Fatalf("registerWithManifest: %v", err)
+	}
+
+	if _, stillThere := h.fakeClients.stdioEntries["cursor"]["legacy-python"]; !stillThere {
+		t.Errorf("cursor's direct `python` entry was deleted on the strength of a router entry pointing at "+
+			"port %d while the router actually listens on %d — that entry is dead, so the client is left "+
+			"with no working python LSP at all. The replacement probe must verify the PORT, not just the "+
+			"reserved entry name.", stalePort, livePort)
+	}
+	if _, stillThere := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; stillThere {
+		t.Errorf("cursor's superseded direct `go` entry survived even though its router entry names the LIVE "+
+			"port %d — the port gate must not reject a genuinely working replacement, or the superseded "+
+			"direct entry duplicates the router's servers/tools forever", livePort)
 	}
 }
 

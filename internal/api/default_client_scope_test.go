@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 )
 
@@ -137,6 +138,102 @@ weekly_refresh: false
 			t.Errorf("bulk install planned %q, which the operator's persisted clients.default_install "+
 				"EXCLUDES — the override is not being applied; planned=%v\noutput:\n%s",
 				notWant, planned, buf.String())
+		}
+	}
+}
+
+// TestRegisterBindings_HonorPersistedDefaultClientsOverride pins the REGISTER
+// lane to the same operator-persisted default-install client set the INSTALL
+// lane already honors.
+//
+// client_install_prefs.go declares DefaultInstallClientNamesEffective to be
+// "the single owner of what is the default-install set once an operator
+// override may exist". Register did not honor that contract: it snapshotted the
+// COMPILE-TIME clients.DefaultInstallClientNames() into a package-level var at
+// init, so the persisted `clients.default_install` was invisible to it forever.
+//
+// The operator-visible defect: tick Cursor in Settings -> Clients, and
+// `mcphub install --server serena` writes cursor while `mcphub register
+// D:\proj python` (and the GUI project-LSP toggle, which calls the same
+// api.Register) writes claude-code + codex-cli only — silently, since
+// registerOneLanguage prints only successes. There was no recovery lever:
+// register has no --clients flag, RegisterOpts has no client field, and the
+// only manifest register loads is the EMBEDDED mcp-language-server manifest,
+// which declares no client_bindings (manifest_source.go deliberately ignores a
+// disk copy of a shipped server's manifest).
+//
+// The override is deliberately BOTH additive and subtractive versus the
+// compile-time set {claude-code, codex-cli}: it ADDS opt-in cursor and DROPS
+// codex-cli. Only a genuinely applied override yields that exact set, so no
+// fallback can satisfy the assertions.
+func TestRegisterBindings_HonorPersistedDefaultClientsOverride(t *testing.T) {
+	tmpState := t.TempDir()
+	t.Setenv("LOCALAPPDATA", tmpState)
+	t.Setenv("XDG_DATA_HOME", tmpState)
+	t.Setenv("XDG_STATE_HOME", tmpState)
+
+	a := NewAPI()
+	if err := a.SetDefaultInstallClientNames([]string{"claude-code", "cursor"}); err != nil {
+		t.Fatalf("persist default-install override: %v", err)
+	}
+
+	// Guard the premise: the compile-time set really does differ from the
+	// override, so "register agrees with install" cannot pass by coincidence.
+	compile := map[string]bool{}
+	for _, n := range clients.DefaultInstallClientNames() {
+		compile[n] = true
+	}
+	if compile["cursor"] || !compile["codex-cli"] {
+		t.Fatalf("test premise broken: compile-time default set must exclude cursor and include codex-cli; got %v", compile)
+	}
+
+	// REGISTER lane: the shipped mcp-language-server manifest declares no
+	// client_bindings, so register falls through to the implicit default set.
+	// That fallback is the code path under test.
+	registerScope := map[string]bool{}
+	for _, b := range effectiveClientBindings(&config.ServerManifest{Name: "mcp-language-server"}) {
+		registerScope[b.Client] = true
+	}
+
+	for _, want := range []string{"claude-code", "cursor"} {
+		if !registerScope[want] {
+			t.Errorf("register dropped %q, which the operator's persisted clients.default_install selects — "+
+				"`mcphub register` is ignoring the override that `mcphub install` honors, and there is no "+
+				"--clients flag or editable manifest to recover with; registerScope=%v", want, registerScope)
+		}
+	}
+	if registerScope["codex-cli"] {
+		t.Errorf("register bound codex-cli, which the operator's persisted clients.default_install EXCLUDES — "+
+			"the override is not being applied; registerScope=%v", registerScope)
+	}
+
+	// CROSS-LANE AGREEMENT: the whole point of the fix is that the two lanes
+	// answer "which clients does this operator's default set name" identically.
+	// Resolve the install lane through its OWN owner (the plan builder's
+	// predicate inputs) and compare, so a future change that moves one lane off
+	// the shared owner fails here rather than silently re-diverging.
+	installScope := map[string]bool{}
+	for _, n := range a.resolveDefaultClientsOverride(InstallOpts{}) {
+		installScope[n] = true
+	}
+	if len(installScope) == 0 {
+		t.Fatalf("test premise broken: the install lane resolved no default-clients override at all")
+	}
+	// Register additionally drops relay-stdio adapters (they cannot take a
+	// URL-only workspace binding), so compare on the URL-capable subset.
+	for name := range installScope {
+		if clients.IsRelayStdio(name) {
+			continue
+		}
+		if !registerScope[name] {
+			t.Errorf("install would write client %q but register would not — the two lanes disagree about the "+
+				"operator's default-install set; install=%v register=%v", name, installScope, registerScope)
+		}
+	}
+	for name := range registerScope {
+		if !installScope[name] {
+			t.Errorf("register would write client %q but install would not — the two lanes disagree about the "+
+				"operator's default-install set; install=%v register=%v", name, installScope, registerScope)
 		}
 	}
 }

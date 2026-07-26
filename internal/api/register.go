@@ -35,25 +35,43 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
-// defaultClientBindings is the implicit client binding set used when a
-// workspace-scoped manifest does not declare client_bindings. It is DERIVED
-// from clients.DefaultInstallClientNames() — the single owner of default-install
-// membership (the registry defaultInstall flag) — filtered to URL-capable
-// adapters. Deriving (rather than re-listing the names here) keeps the register
-// path in lockstep with the install path: a client that joins or leaves the
-// default-install set (e.g. cursor becoming opt-in) propagates automatically,
-// with no second list to drift. Opt-in clients are excluded by construction
-// (they are not in DefaultInstallClientNames), and relay-stdio adapters (e.g.
-// Antigravity's stdio-relay model) are excluded by the IsRelayStdio filter
-// because they require relay context, not a URL-only workspace binding.
-var defaultClientBindings = buildDefaultClientBindings()
-
-// buildDefaultClientBindings derives the implicit workspace-registration
-// bindings from the default-install client set, dropping relay-stdio adapters
-// (which cannot take a URL-only entry) and pairing each remaining client with
-// the standard "/mcp" URL path.
-func buildDefaultClientBindings() []config.ClientBinding {
+// defaultClientBindingsNow resolves the implicit client binding set used when a
+// workspace-scoped manifest does not declare client_bindings.
+//
+// It reads the operator's EFFECTIVE default-install set AT CALL TIME through
+// DefaultInstallClientNamesEffectiveIn, which client_install_prefs.go declares
+// to be "the single owner of what is the default-install set once an operator
+// override may exist". This used to be a package-level `var` snapshot of
+// clients.DefaultInstallClientNames() evaluated at package init, which made
+// register the ONE consumer that ignored the persisted `clients.default_install`
+// override every other consumer honors — install via resolveDefaultClientsOverride
+// (install.go), the shared LSP router via ClientInstallEnabledSet
+// (lsp_client_router.go), and readiness via this very accessor (readiness.go).
+//
+// Concretely: an operator who ticks Cursor in Settings → Clients got cursor
+// from `mcphub install` but NOT from `mcphub register` or the GUI project-LSP
+// toggle, and had no lever to close the gap — register exposes no --clients
+// flag, RegisterOpts has no client field, and the only manifest register ever
+// loads is the EMBEDDED mcp-language-server manifest, which declares no
+// client_bindings (and manifest_source.go deliberately IGNORES a disk copy of a
+// shipped server's manifest). That makes this fallback not a rare edge but the
+// ONLY path register takes, so the stale snapshot silently governed every
+// workspace registration.
+//
+// Fallback posture mirrors readiness.go's own client-scope resolution: on a
+// read error (corrupt or unreadable gui-preferences.yaml) fall back to the
+// compile-time default set
+// rather than failing the register. The override is a convenience layer and
+// must never make `mcphub register` harder to complete than before it existed.
+//
+// Relay-stdio adapters (e.g. Antigravity's stdio-relay model) are excluded by
+// the IsRelayStdio filter because they require relay context, not a URL-only
+// workspace binding.
+func defaultClientBindingsNow() []config.ClientBinding {
 	names := clients.DefaultInstallClientNames()
+	if eff, err := (&API{}).DefaultInstallClientNamesEffectiveIn(SettingsPath()); err == nil && len(eff) > 0 {
+		names = eff
+	}
 	bindings := make([]config.ClientBinding, 0, len(names))
 	for _, name := range names {
 		if clients.IsRelayStdio(name) {
@@ -85,7 +103,7 @@ func effectiveClientBindings(m *config.ServerManifest) []config.ClientBinding {
 	if len(m.ClientBindings) > 0 {
 		return m.ClientBindings
 	}
-	return defaultClientBindings
+	return defaultClientBindingsNow()
 }
 
 // boundClientNames is the set of client names the supplied bindings write to.
@@ -117,18 +135,47 @@ func boundClientNames(bindings []config.ClientBinding) map[string]bool {
 //
 // The ownership decision itself is NOT re-implemented here: it delegates to
 // entryIsOwnedLSPRouterForLanguage, the single owner shared with the router
-// reconcile and with shouldPreserveSharedLSPRouterEntry. guiPort 0 means "do
-// not require a specific port" — the reserved entry name is the ownership
-// proof, matching shouldPreserveSharedLSPRouterEntry's convention. Disabled
-// entries do NOT count: a disabled router entry is not a working replacement,
-// so removing the direct entry would disconnect the client anyway.
-func clientHasActiveLSPRouterReplacement(client registerClient, language string) (bool, error) {
+// reconcile and with shouldPreserveSharedLSPRouterEntry. Disabled entries do
+// NOT count: a disabled router entry is not a working replacement, so removing
+// the direct entry would disconnect the client anyway.
+//
+// PORT GATE (routerPort). Ownership alone is NOT sufficient here, because this
+// probe is the gate on a DESTRUCTIVE removal and must prove the replacement
+// actually WORKS, not merely that we own the entry. entryIsOwnedLSPRouterForLanguage
+// answers the ownership question and short-circuits on `reservedName` — which is
+// unconditionally true at this call site, since the entry was fetched BY
+// LSPRouterEntryName(language). Passing a non-zero guiPort into it would NOT
+// help: its `reservedName || (guiPort > 0 && ...)` disjunction still returns
+// owned on the name alone. So the port must be checked HERE.
+//
+// Without it the probe degenerated to "an entry with the reserved name exists,
+// is enabled, and its URL parses as /lsp/<lang>/mcp" — at ANY port. An operator
+// who changed gui_server.port (pending-restart) or ran `mcphub gui --reset-port`
+// leaves stale-port router entries behind until EnsureLSPRouterClientEntries
+// re-runs; register would read routed=true and delete the client's LIVE direct
+// entry, leaving one dead router entry and no working LSP — exactly the
+// "removed with nothing put in its place" defect this gate exists to prevent.
+//
+// routerPort is resolved ONCE per cleanup run by the caller (rather than per
+// probe) so every client/language decision in one register is judged against
+// the same port, and a single settings read serves the whole loop. A
+// non-positive routerPort means the caller could not resolve it; we then fail
+// CLOSED (no provable replacement → keep the operator's working direct entry),
+// matching the GetEntry-error posture above.
+func clientHasActiveLSPRouterReplacement(client registerClient, language string, routerPort int) (bool, error) {
 	entryName := LSPRouterEntryName(language)
 	live, err := client.GetEntry(entryName)
 	if err != nil {
 		return false, err
 	}
 	if live == nil || live.Disabled {
+		return false, nil
+	}
+	if routerPort <= 0 {
+		return false, nil
+	}
+	_, entryPort, ok := lspRouterURLLanguagePort(entryLSPRouterURL(live))
+	if !ok || entryPort != routerPort {
 		return false, nil
 	}
 	owned, _ := entryIsOwnedLSPRouterForLanguage(entryName, live, language, 0)
@@ -405,6 +452,19 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 ) []string {
 	keepN := a.EffectiveBackupKeepN()
 	var warnings []string
+	// Resolve the live LSP-router port ONCE for the whole cleanup run. It is the
+	// port a router entry must actually name to count as a working replacement
+	// (see clientHasActiveLSPRouterReplacement's PORT GATE). Resolving once keeps
+	// every client/language decision in this register judged against the SAME
+	// port and costs one settings read instead of one per probe. On a resolution
+	// failure we pass 0 (fail closed: no router-based replacement is provable, so
+	// direct entries are kept) and warn once rather than per client/language.
+	routerPort, routerPortErr := a.lspRouterGUIPort(0)
+	if routerPortErr != nil {
+		routerPort = 0
+		warnings = append(warnings, fmt.Sprintf(
+			"LSP router port unresolved (%v); keeping every direct LSP entry whose replacement is a shared router entry", routerPortErr))
+	}
 	for clientName, client := range allClients {
 		if client == nil || !client.Exists() {
 			continue
@@ -413,7 +473,7 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 		// lspCleanupAliasesForClient). A direct entry is only ever removed when
 		// THIS client ends up with a working hub-managed replacement for THAT
 		// language. Everything below operates on the narrowed alias set.
-		aliases, aliasWarnings := lspCleanupAliasesForClient(client, clientName, bySpec, languages, boundClients[clientName])
+		aliases, aliasWarnings := lspCleanupAliasesForClient(client, clientName, bySpec, languages, boundClients[clientName], routerPort)
 		warnings = append(warnings, aliasWarnings...)
 		if len(aliases) == 0 {
 			continue
@@ -488,7 +548,8 @@ func addLSPCleanupAlias(aliases map[string]bool, value string) {
 //     effectiveClientBindings).
 //  2. an already-live shared LSP-router entry for the individual language
 //     (clientHasActiveLSPRouterReplacement), which an opt-in client can hold
-//     without being in the default-install set.
+//     without being in the default-install set. routerPort is the live router
+//     port that entry must name to count; see that function's PORT GATE.
 //
 // The grain is per (client, LANGUAGE), not per client, on purpose. A client
 // holding a router entry for `go` but not for `python` must have only its
@@ -505,6 +566,7 @@ func lspCleanupAliasesForClient(
 	bySpec map[string]config.LanguageSpec,
 	languages []string,
 	bound bool,
+	routerPort int,
 ) (map[string]bool, []string) {
 	aliases := map[string]bool{}
 	var warnings []string
@@ -514,7 +576,7 @@ func lspCleanupAliasesForClient(
 			continue
 		}
 		if !bound {
-			routed, err := clientHasActiveLSPRouterReplacement(client, lang)
+			routed, err := clientHasActiveLSPRouterReplacement(client, lang, routerPort)
 			if err != nil {
 				warnings = append(warnings, fmt.Sprintf(
 					"%s LSP router replacement probe for %s failed: %v; keeping any direct %s entry", clientName, lang, err, lang))

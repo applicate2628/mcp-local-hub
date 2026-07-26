@@ -265,10 +265,7 @@ func (a *API) registerOneLanguageSupervised(
 	}
 	legacyTaskDeleted = len(priorXML) > 0
 
-	bindingsPre := m.ClientBindings
-	if len(bindingsPre) == 0 {
-		bindingsPre = defaultClientBindings
-	}
+	bindingsPre := effectiveClientBindings(m)
 	entryNameByClient := map[string]string{}
 	if had {
 		for k, v := range prior.ClientEntries {

@@ -33,9 +33,13 @@ func newRegisterCmdReal() *cobra.Command {
 		Use:   "register <workspace> [language...]",
 		Short: "Register workspace-scoped mcp-language-server daemons (lazy-mode)",
 		Long: `Allocate one lazy proxy per (workspace, language), create the launch
-surface, and write managed entries into every default MCP client config
-(claude-code, codex-cli). Cursor and the other clients are opt-in — bound only
-when the manifest declares an explicit client binding for them.
+surface, and write managed entries into every default-install MCP client config
+(claude-code, codex-cli by default). Cursor and the other clients are opt-in:
+add them to your default-install set in the GUI under Settings -> Clients
+(persisted as ` + "`clients.default_install`" + ` in gui-preferences.yaml) and register
+will bind them too, exactly as ` + "`mcphub install`" + ` does. There is no --clients
+flag on register, and editing the shipped mcp-language-server manifest does not
+work — it is embedded in the binary.
 
 Lazy mode:
   - No LSP binary preflight at register time. A missing binary surfaces
