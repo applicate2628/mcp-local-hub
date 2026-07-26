@@ -592,6 +592,10 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 			return unregisterLSPWorkspaceFn(rawPath, langs)
 		},
 		RemoveSerenaIntent: removeSerenaSupervisorIntentFn,
+		SetSerenaPendingRemoval: func(pending bool) error {
+			reg := api.NewRegistry(regPath)
+			return reg.SetSerenaPendingRemoval(wsKey, legacyWSKey, pending)
+		},
 		DeleteSerenaRow: func() (int, error) {
 			reg := api.NewRegistry(regPath)
 			unlock, err := reg.Lock()

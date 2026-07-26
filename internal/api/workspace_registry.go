@@ -75,6 +75,22 @@ type WorkspaceEntry struct {
 	RegisteredAt  time.Time `yaml:"registered_at,omitempty"`
 	RegisteredVia string    `yaml:"registered_via,omitempty"` // "manual" | "auto-detect" | "migration"
 	Languages     []string  `yaml:"languages,omitempty"`      // snapshot of .serena/project.yml at register time
+
+	// PendingSerenaRemoval marks a serena (sentinel) row as mid-unregister:
+	// the paired supervisor-intent descriptor teardown has started (or is
+	// about to start) but this registry row has not yet been deleted. Set by
+	// PruneWorkspacePhases's serena branch BEFORE it calls RemoveSerenaIntent,
+	// cleared again if that teardown fails (so a retry sees a normal orphan
+	// row), and rendered moot once DeleteSerenaRow removes the row entirely.
+	//
+	// RepairSerenaIntentFromRegistry MUST skip a row with this flag set: the
+	// window between removing the intent descriptor (which nudges an
+	// apply-mode reconcile) and deleting this registry row is exactly the
+	// state repair's orphan classifier cannot otherwise tell apart from a
+	// crash-orphan (registry row present, no matching intent daemon) — so
+	// without this flag, an unregister resurrects the very row it just tore
+	// down (see work-items/bugs — unregister-resurrects-serena-intent).
+	PendingSerenaRemoval bool `yaml:"pending_serena_removal,omitempty"`
 }
 
 // Registry is the on-disk source of truth for workspace-scoped daemons.
@@ -418,6 +434,46 @@ func (r *Registry) RemoveByBackend(workspaceKey string, backendFilter string) in
 	}
 	r.Workspaces = kept
 	return removed
+}
+
+// SetSerenaPendingRemoval loads the registry under its OWN lock, flips
+// PendingSerenaRemoval to `pending` for the serena (sentinel) row(s) matching
+// wsKey (and legacyWSKey, when non-empty and distinct), and saves. A missing
+// row for a key is a silent no-op — mirrors PutLifecycle's tolerant
+// unregistered-late-write semantics: the caller has already classified this
+// workspace as having a serena row in scope, and a row that disappeared
+// between that classification and this call means a concurrent actor already
+// resolved it, which the caller's own subsequent steps surface honestly.
+//
+// Callers: PruneWorkspacePhases (internal/api/prune_workspace.go) sets
+// pending=true BEFORE the paired supervisor-intent teardown (RemoveSerenaIntent)
+// and clears it (pending=false) if that teardown fails, so
+// RepairSerenaIntentFromRegistry can tell "deliberately being removed" apart
+// from "orphaned by a crash" for exactly the window between the intent
+// descriptor's removal and this registry row's eventual delete.
+func (r *Registry) SetSerenaPendingRemoval(wsKey, legacyWSKey string, pending bool) error {
+	unlock, err := r.Lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := r.Load(); err != nil {
+		return err
+	}
+	changed := false
+	for _, key := range dedupeWorkspaceKeys(wsKey, legacyWSKey) {
+		e, ok := r.GetSerena(key)
+		if !ok || e.PendingSerenaRemoval == pending {
+			continue
+		}
+		e.PendingSerenaRemoval = pending
+		r.Put(e)
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return r.Save()
 }
 
 // PutLifecycle loads the registry under lock, updates the lifecycle state +

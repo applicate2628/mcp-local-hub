@@ -70,10 +70,22 @@ type PruneReport struct {
 //   - DeleteSerenaRow commits the serena registry-row delete and returns the
 //     count removed. It runs ONLY after RemoveSerenaIntent succeeds (the
 //     teardown-before-delete invariant).
+//   - SetSerenaPendingRemoval flips WorkspaceEntry.PendingSerenaRemoval for the
+//     workspace's serena row. PruneWorkspacePhases calls it with pending=true
+//     BEFORE RemoveSerenaIntent and pending=false if RemoveSerenaIntent fails
+//     (a retry must see a normal orphan row again, not a permanently-skipped
+//     one). This is the unregister-resurrects-serena-intent fix: it marks the
+//     row so RepairSerenaIntentFromRegistry — which can run INSIDE the SAME
+//     reconcile round trip RemoveSerenaIntent triggers — can tell "deliberately
+//     being removed" apart from "orphaned by a crash" and skip it instead of
+//     re-appending the very row this teardown is removing. Nil is tolerated
+//     (a caller with no serena row in scope, or a test that does not care)
+//     and simply skips the mark/clear step.
 type PruneWorkspaceTeardown struct {
-	LSPUnregister      func(workspacePath string, languages []string) (*UnregisterReport, error)
-	RemoveSerenaIntent func(canonicalWorkspacePath string) (bool, error)
-	DeleteSerenaRow    func() (int, error)
+	LSPUnregister           func(workspacePath string, languages []string) (*UnregisterReport, error)
+	RemoveSerenaIntent      func(canonicalWorkspacePath string) (bool, error)
+	DeleteSerenaRow         func() (int, error)
+	SetSerenaPendingRemoval func(pending bool) error
 }
 
 // PruneWorkspace tears down a workspace's daemon rows in the SAME order the CLI
@@ -142,6 +154,10 @@ func (a *API) PruneWorkspace(workspacePath string, backend string) (*PruneReport
 	td := PruneWorkspaceTeardown{
 		LSPUnregister:      func(p string, langs []string) (*UnregisterReport, error) { return a.Unregister(p, langs) },
 		RemoveSerenaIntent: a.RemoveSerenaSupervisorIntentForWorkspace,
+		SetSerenaPendingRemoval: func(pending bool) error {
+			reg := NewRegistry(regPath)
+			return reg.SetSerenaPendingRemoval(wsKey, legacyWSKey, pending)
+		},
 		DeleteSerenaRow: func() (int, error) {
 			reg := NewRegistry(regPath)
 			unlock, lerr := reg.Lock()
@@ -217,6 +233,11 @@ func (a *API) ListAllWorkspaceRows() ([]*WorkspaceEntry, error) {
 //     reconcile failure RemoveSerenaIntent restores the descriptor and returns a
 //     retry-asking error; returning here WITHOUT deleting the row keeps the
 //     durable record that drives the next retry's paired teardown intact.
+//     IMMEDIATELY before RemoveSerenaIntent runs, td.SetSerenaPendingRemoval(true)
+//     marks the row so a reconcile nudged INSIDE RemoveSerenaIntent cannot
+//     mistake this deliberate teardown for a crash-orphan and resurrect the row
+//     (unregister-resurrects-serena-intent fix); a RemoveSerenaIntent failure
+//     clears the mark back to false so a retry sees a normal orphan row again.
 //
 // wantLSP / wantSerena gate the two phases (the caller decides scope from its
 // own classification). report accumulates the per-backend outcome + warnings;
@@ -235,7 +256,23 @@ func PruneWorkspacePhases(workspacePath, canonical string, lspLangs []string, wa
 
 	if wantSerena {
 		if td.RemoveSerenaIntent != nil {
+			if td.SetSerenaPendingRemoval != nil {
+				if merr := td.SetSerenaPendingRemoval(true); merr != nil {
+					return fmt.Errorf("mark workspace %s pending serena removal: %w", canonical, merr)
+				}
+			}
 			if _, serr := td.RemoveSerenaIntent(canonical); serr != nil {
+				if td.SetSerenaPendingRemoval != nil {
+					// Teardown failed (refused, or a live reconcile could not confirm
+					// the descriptor's removal) — clear the mark so the row is a
+					// normal orphan again for the operator's retry or the
+					// supervisor's own startup self-heal. Best-effort: a clear
+					// failure here is secondary to the ALREADY-FAILED teardown this
+					// function is about to report, and the row simply stays
+					// pending-removal (repair keeps skipping it) until the next
+					// successful unregister attempt clears it.
+					_ = td.SetSerenaPendingRemoval(false)
+				}
 				return fmt.Errorf("paired serena supervisor teardown for workspace %s: %w", canonical, serr)
 			}
 		}

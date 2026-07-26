@@ -192,6 +192,20 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 		if ws.Language != SerenaLanguageSentinel || ws.WorkspacePath == "" {
 			continue
 		}
+		// Mid-unregister guard (unregister-resurrects-serena-intent fix). A row
+		// PruneWorkspacePhases has flagged PendingSerenaRemoval is DELIBERATELY
+		// being torn down: its matching intent descriptor was just removed (or is
+		// about to be) and a reconcile was nudged in the SAME window this repair
+		// can run in. Without this check, that transient
+		// registry-row-present/intent-row-absent state is indistinguishable from
+		// a genuine crash-orphan, and repair would re-append the very row the
+		// operator just unregistered. Skip silently — not a defer, not a warning:
+		// this is expected, self-resolving state (the row disappears for good once
+		// DeleteSerenaRow commits, or the flag clears if the teardown fails and a
+		// normal orphan classification applies on the next pass).
+		if ws.PendingSerenaRemoval {
+			continue
+		}
 		// Divergence guard: WorkspaceKey must equal WorkspaceKey(WorkspacePath).
 		// Detection keys off ws.WorkspaceKey, but the materialized daemon's TaskName
 		// derives from WorkspaceKey(ws.WorkspacePath) (BuildSupervisorDaemonsForSerena

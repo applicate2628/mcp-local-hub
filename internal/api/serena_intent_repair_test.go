@@ -746,3 +746,76 @@ func TestRepairSerenaIntentFromRegistry_EventLogLockContentionDoesNotBlockOrHold
 	}
 	_ = intentLock.Unlock()
 }
+
+// ---------------------------------------------------------------------------
+// 12. PendingSerenaRemoval guard (unregister-resurrects-serena-intent fix,
+//     mcphub-register-intent REVISE round 2 BLOCKING 1) — a registry row
+//     flagged PendingSerenaRemoval is SKIPPED, not treated as an orphan, even
+//     though it has no matching intent daemon (the exact transient shape
+//     unregister's teardown-before-delete ordering produces). Mirrors tests
+//     9/10's skip-not-defer-not-append shape.
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_PendingSerenaRemoval_SkippedNotReappended(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	healthyPath, healthyPort := liveWorkspace(t), 9150
+	pendingPath, pendingPort := liveWorkspace(t), 9151
+
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	pendingKey := seedSerenaRegistryRow(t, regPath, pendingPath, pendingPort)
+
+	// Flag the pending row exactly as PruneWorkspacePhases does before it
+	// removes the matching intent descriptor.
+	reg := NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		t.Fatalf("lock registry: %v", err)
+	}
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	e, ok := reg.GetSerena(pendingKey)
+	if !ok {
+		t.Fatalf("precondition: seeded pending row %q not found", pendingKey)
+	}
+	e.PendingSerenaRemoval = true
+	reg.Put(e)
+	if err := reg.Save(); err != nil {
+		t.Fatalf("save registry with pending flag: %v", err)
+	}
+	unlock()
+
+	// Intent carries ONLY the healthy daemon — the pending row's descriptor
+	// has already been removed by the (simulated) in-flight unregister, which
+	// is exactly what makes it look like an orphan without the flag.
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
+	})
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent before: %v", err)
+	}
+
+	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (pending-removal row must NOT be resurrected)", repaired)
+	}
+	if len(deferred) != 0 {
+		t.Errorf("deferred = %v, want none (pending-removal is a skip, not a defer)", deferred)
+	}
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent after: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("intent written for a pending-removal row (must not append):\nbefore=%s\nafter=%s", before, after)
+	}
+	if got := readIntent(t, intentPath); got.HasSerenaDaemonForWorkspaceKey(pendingKey) {
+		t.Errorf("pending-removal key %q was appended (must be skipped)", pendingKey)
+	}
+}

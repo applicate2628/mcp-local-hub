@@ -424,6 +424,119 @@ func TestRegistry_SerenaSentinel_RoundTripsNewFields(t *testing.T) {
 	}
 }
 
+// TestRegistry_SetSerenaPendingRemoval_SetsAndClears is the round-trip test
+// for the unregister-resurrects-serena-intent fix (mcphub-register-intent
+// REVISE round 2, BLOCKING 1): PruneWorkspacePhases flips this flag true
+// BEFORE the paired intent teardown and false again if that teardown fails.
+func TestRegistry_SetSerenaPendingRemoval_SetsAndClears(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspaces.yaml")
+	reg := NewRegistry(path)
+	if err := reg.PutSerena(WorkspaceEntry{
+		WorkspaceKey:  "abcd1234",
+		WorkspacePath: "c:/ws/foo",
+		Language:      SerenaLanguageSentinel,
+		Backend:       "serena",
+		Port:          9500,
+		TaskName:      "mcp-local-hub-serena-abcd1234",
+	}); err != nil {
+		t.Fatalf("PutSerena: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if err := reg.SetSerenaPendingRemoval("abcd1234", "", true); err != nil {
+		t.Fatalf("SetSerenaPendingRemoval(true): %v", err)
+	}
+	reg2 := NewRegistry(path)
+	if err := reg2.Load(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	got, ok := reg2.GetSerena("abcd1234")
+	if !ok {
+		t.Fatal("row missing after SetSerenaPendingRemoval(true)")
+	}
+	if !got.PendingSerenaRemoval {
+		t.Error("PendingSerenaRemoval = false after SetSerenaPendingRemoval(true)")
+	}
+
+	// Clear (mirrors the failed-teardown recovery path).
+	if err := reg2.SetSerenaPendingRemoval("abcd1234", "", false); err != nil {
+		t.Fatalf("SetSerenaPendingRemoval(false): %v", err)
+	}
+	reg3 := NewRegistry(path)
+	if err := reg3.Load(); err != nil {
+		t.Fatalf("reload after clear: %v", err)
+	}
+	got3, ok := reg3.GetSerena("abcd1234")
+	if !ok {
+		t.Fatal("row missing after SetSerenaPendingRemoval(false)")
+	}
+	if got3.PendingSerenaRemoval {
+		t.Error("PendingSerenaRemoval = true after SetSerenaPendingRemoval(false)")
+	}
+}
+
+// TestRegistry_SetSerenaPendingRemoval_NoOpOnMissingRow mirrors
+// TestRegistry_PutLifecycleNoOpOnMissingEntry's ghost-resurrection guard: a
+// workspace key with no serena row is a silent no-op, never a ghost row.
+func TestRegistry_SetSerenaPendingRemoval_NoOpOnMissingRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspaces.yaml")
+	reg := NewRegistry(path)
+	if err := reg.SetSerenaPendingRemoval("deadbeef", "", true); err != nil {
+		t.Fatalf("SetSerenaPendingRemoval: %v", err)
+	}
+	reg2 := NewRegistry(path)
+	if err := reg2.Load(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(reg2.Workspaces) != 0 {
+		t.Errorf("registry has %d entries, want 0 (ghost-row leak)", len(reg2.Workspaces))
+	}
+}
+
+// TestRegistry_SetSerenaPendingRemoval_BothCanonicalAndLegacyKeys flags BOTH
+// rows when the canonical and legacy keys diverge and both have a serena row
+// — mirrors how unregister's own DeleteSerenaRow handles the same
+// canonical/legacy pair (workspace_cmd.go, prune_workspace.go).
+func TestRegistry_SetSerenaPendingRemoval_BothCanonicalAndLegacyKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workspaces.yaml")
+	reg := NewRegistry(path)
+	if err := reg.PutSerena(WorkspaceEntry{
+		WorkspaceKey: "canonical1", WorkspacePath: "c:/ws/foo",
+		Language: SerenaLanguageSentinel, Backend: "serena", Port: 9500,
+		TaskName: "mcp-local-hub-serena-canonical1",
+	}); err != nil {
+		t.Fatalf("PutSerena canonical: %v", err)
+	}
+	if err := reg.PutSerena(WorkspaceEntry{
+		WorkspaceKey: "legacy999", WorkspacePath: "c:/ws/foo",
+		Language: SerenaLanguageSentinel, Backend: "serena", Port: 9501,
+		TaskName: "mcp-local-hub-serena-legacy999",
+	}); err != nil {
+		t.Fatalf("PutSerena legacy: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	if err := reg.SetSerenaPendingRemoval("canonical1", "legacy999", true); err != nil {
+		t.Fatalf("SetSerenaPendingRemoval: %v", err)
+	}
+	reg2 := NewRegistry(path)
+	if err := reg2.Load(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	canonical, ok := reg2.GetSerena("canonical1")
+	if !ok || !canonical.PendingSerenaRemoval {
+		t.Errorf("canonical row PendingSerenaRemoval = %v (ok=%v), want true", canonical.PendingSerenaRemoval, ok)
+	}
+	legacy, ok := reg2.GetSerena("legacy999")
+	if !ok || !legacy.PendingSerenaRemoval {
+		t.Errorf("legacy row PendingSerenaRemoval = %v (ok=%v), want true", legacy.PendingSerenaRemoval, ok)
+	}
+}
+
 func TestRegistry_SerenaSentinel_CoexistsWithLSPRows(t *testing.T) {
 	reg := NewRegistry(filepath.Join(t.TempDir(), "workspaces.yaml"))
 	lsps := []string{"go", "typescript", "markdown"}
