@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -81,7 +83,7 @@ vcpkg_from_github(
 		Now:        fixedNow(),
 	}
 
-	res := PinStatus(Args{PortDirs: []string{dir}}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps)
 	if len(res.Ports) != 1 {
 		t.Fatalf("got %d ports, want 1", len(res.Ports))
 	}
@@ -115,7 +117,7 @@ vcpkg_from_github(
 		Now:        fixedNow(),
 	}
 
-	res := PinStatus(Args{PortDirs: []string{dir}}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps)
 	p := res.Ports[0]
 	if p.Status != evidence.StatusUnknown || p.Reason != ReasonPinNotAtTip {
 		t.Fatalf("status=%v reason=%v, want unknown/pin_not_at_tip", p.Status, p.Reason)
@@ -147,7 +149,7 @@ vcpkg_from_git(
 		Now:        fixedNow(),
 	}
 
-	res := PinStatus(Args{PortDirs: []string{dir}}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps)
 	p := res.Ports[0]
 	if p.Remote.Kind != RemoteGit || p.Remote.URL != remote {
 		t.Fatalf("remote = %+v", p.Remote)
@@ -184,7 +186,7 @@ vcpkg_from_github(REPO continuable/continuable REF "${VERSION}" SHA512 0)
 			remote := "https://github.com/continuable/continuable.git"
 			deps := Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"refs/tags/" + tc.version: commitA}}, nil), Now: fixedNow()}
 
-			p := PinStatus(Args{PortDirs: []string{dir}}, deps).Ports[0]
+			p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps).Ports[0]
 			if p.Status != evidence.StatusUnknown || p.Reason != ReasonNamedRefNotComparable {
 				t.Fatalf("status=%v reason=%v, want unknown/named_ref_not_comparable", p.Status, p.Reason)
 			}
@@ -203,7 +205,7 @@ else()
     vcpkg_download_distfile(ARCHIVE URLS "http://downloads.xiph.org/releases/speex/speexdsp-1.2.1.tar.gz" SHA512 0)
 endif()
 `)
-	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(nil, nil), Now: fixedNow()}).Ports[0]
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(nil, nil), Now: fixedNow()}).Ports[0]
 	if p.Status != evidence.StatusUnknown || p.Reason != ReasonNotGitComparable || p.Remote.Kind != RemoteDistfile {
 		t.Fatalf("got status=%v reason=%v remote=%+v; want release distfile", p.Status, p.Reason, p.Remote)
 	}
@@ -234,7 +236,7 @@ else()
 endif()
 `)
 	remote := "https://github.com/example/release.git"
-	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitB}}, nil), Now: fixedNow()}).Ports[0]
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitB}}, nil), Now: fixedNow()}).Ports[0]
 	if p.Status != evidence.StatusOK || p.Remote.Repo != "example/release" {
 		t.Fatalf("status=%v reason=%v remote=%+v, want guarded release source", p.Status, p.Reason, p.Remote)
 	}
@@ -255,7 +257,7 @@ else()
   vcpkg_from_github(REPO example/second REF `+commitA+` SHA512 0)
 endif()
 `)
-	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(nil, nil), Now: fixedNow()}).Ports[0]
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(nil, nil), Now: fixedNow()}).Ports[0]
 	if p.Status != evidence.StatusUnknown || p.Reason != ReasonGuardUnresolvable || p.UnresolvedGuardVariable != "PORT_SOURCE_SWITCH" {
 		t.Fatalf("status=%v reason=%v variable=%q", p.Status, p.Reason, p.UnresolvedGuardVariable)
 	}
@@ -270,7 +272,7 @@ vcpkg_from_github(REPO abdes/cryptopp-cmake REF `+commitA+` SHA512 0)
 vcpkg_from_github(OUT_SOURCE_PATH SOURCE_PATH REPO weidai11/cryptopp REF `+commitB+` SHA512 0)
 `)
 	remote := "https://github.com/weidai11/cryptopp.git"
-	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitB}}, nil), Now: fixedNow()}).Ports[0]
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitB}}, nil), Now: fixedNow()}).Ports[0]
 	if p.Status != evidence.StatusOK || p.Remote.Repo != "weidai11/cryptopp" {
 		t.Fatalf("status=%v reason=%v remote=%+v, want bound source", p.Status, p.Reason, p.Remote)
 	}
@@ -284,7 +286,7 @@ func TestMultipleUnboundFetchCallsReturnUnknownWithAllCandidates(t *testing.T) {
 vcpkg_from_github(REPO example/first REF `+commitA+` SHA512 0)
 vcpkg_from_github(REPO example/second REF `+commitB+` SHA512 0)
 `)
-	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(nil, nil), Now: fixedNow()}).Ports[0]
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(nil, nil), Now: fixedNow()}).Ports[0]
 	if p.Status != evidence.StatusUnknown || p.Reason != ReasonMultipleFetchCalls {
 		t.Fatalf("status=%v reason=%v, want unknown/multiple_fetch_calls", p.Status, p.Reason)
 	}
@@ -301,7 +303,7 @@ vcpkg_from_github(REPO decoy/never REF `+commitA+` SHA512 0)
 vcpkg_from_github(REPO real/source REF `+commitB+` SHA512 0)
 `)
 	remote := "https://github.com/real/source.git"
-	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitB}}, nil), Now: fixedNow()}).Ports[0]
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitB}}, nil), Now: fixedNow()}).Ports[0]
 	if p.Status != evidence.StatusOK || p.Remote.Repo != "real/source" {
 		t.Fatalf("status=%v reason=%v remote=%+v, bracket-comment decoy was not inert", p.Status, p.Reason, p.Remote)
 	}
@@ -314,7 +316,7 @@ vcpkg_from_github(REPO example/bracket REF [=[${VERSION}]]literal]=] SHA512 0)
 `)
 	ref := "${VERSION}]]literal"
 	remote := "https://github.com/example/bracket.git"
-	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"refs/tags/" + ref: commitA}}, nil), Now: fixedNow()}).Ports[0]
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"refs/tags/" + ref: commitA}}, nil), Now: fixedNow()}).Ports[0]
 	if p.Status != evidence.StatusUnknown || p.Reason != ReasonNamedRefNotComparable || p.Pin.Ref != ref {
 		t.Fatalf("status=%v reason=%v pin=%+v, want unknown named ref with bracket literal %q", p.Status, p.Reason, p.Pin, ref)
 	}
@@ -323,7 +325,7 @@ vcpkg_from_github(REPO example/bracket REF [=[${VERSION}]]literal]=] SHA512 0)
 func TestQuotedArgumentContinuationJoinsLines(t *testing.T) {
 	dir := newPort(t, "continued", "\nvcpkg_from_github(REPO example/continued REF \"v1.\\\n2.3\" SHA512 0)\n")
 	remote := "https://github.com/example/continued.git"
-	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"refs/tags/v1.2.3": commitA}}, nil), Now: fixedNow()}).Ports[0]
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"refs/tags/v1.2.3": commitA}}, nil), Now: fixedNow()}).Ports[0]
 	if p.Status != evidence.StatusUnknown || p.Reason != ReasonNamedRefNotComparable || p.Pin.Ref != "v1.2.3" {
 		t.Fatalf("status=%v reason=%v pin=%+v, want unknown named ref with continued quoted REF", p.Status, p.Reason, p.Pin)
 	}
@@ -361,7 +363,7 @@ vcpkg_from_gitlab(
 		Now:        fixedNow(),
 	}
 
-	res := PinStatus(Args{PortDirs: []string{dir}}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps)
 	p := res.Ports[0]
 	if p.Remote.Kind != RemoteGitLab {
 		t.Fatalf("remote.kind = %v, want gitlab", p.Remote.Kind)
@@ -391,7 +393,7 @@ vcpkg_download_distfile(ARCHIVE
 		Now:        fixedNow(),
 	}
 
-	res := PinStatus(Args{PortDirs: []string{dir}}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps)
 	p := res.Ports[0]
 	if p.Status != evidence.StatusUnknown || p.Reason != ReasonNotGitComparable {
 		t.Fatalf("status=%v reason=%v, want unknown/not_git_comparable", p.Status, p.Reason)
@@ -412,7 +414,7 @@ set(VCPKG_POLICY_EMPTY_PACKAGE enabled)
 		Now:        fixedNow(),
 	}
 
-	res := PinStatus(Args{PortDirs: []string{dir}}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps)
 	p := res.Ports[0]
 	if p.Status != evidence.StatusUnknown || p.Reason != ReasonNotGitComparable {
 		t.Fatalf("status=%v reason=%v, want unknown/not_git_comparable", p.Status, p.Reason)
@@ -437,7 +439,7 @@ vcpkg_from_github(
 		Now:        fixedNow(),
 	}
 
-	res := PinStatus(Args{PortDirs: []string{dir}}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps)
 	p := res.Ports[0]
 	if p.Status == evidence.StatusOK {
 		t.Fatalf("status = ok, must NEVER be ok when the remote query itself failed")
@@ -461,7 +463,7 @@ vcpkg_from_github(
 		Now:        fixedNow(),
 	}
 
-	res := PinStatus(Args{PortDirs: []string{dir}, DisableNetwork: true}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}, DisableNetwork: true}, deps)
 	p := res.Ports[0]
 	if p.Status != evidence.StatusUnknown || p.Reason != ReasonNetworkDisabled {
 		t.Fatalf("status=%v reason=%v, want unknown/network_disabled", p.Status, p.Reason)
@@ -479,7 +481,7 @@ func TestNetworkDisabled_FiresEvenForAPortDirThatDoesNotExist(t *testing.T) {
 		RemoteRefs: fakeRemote(nil, nil),
 		Now:        fixedNow(),
 	}
-	res := PinStatus(Args{PortDirs: []string{filepath.Join(t.TempDir(), "does-not-exist")}, DisableNetwork: true}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{filepath.Join(t.TempDir(), "does-not-exist")}, DisableNetwork: true}, deps)
 	p := res.Ports[0]
 	if p.Status != evidence.StatusUnknown || p.Reason != ReasonNetworkDisabled {
 		t.Fatalf("status=%v reason=%v, want unknown/network_disabled", p.Status, p.Reason)
@@ -493,7 +495,7 @@ func TestMissingPortfile_UnknownPortfileUnparsable(t *testing.T) {
 	}
 	deps := Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(nil, nil), Now: fixedNow()}
 
-	res := PinStatus(Args{PortDirs: []string{dir}}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps)
 	p := res.Ports[0]
 	if p.Status != evidence.StatusUnknown || p.Reason != ReasonPortfileUnparsable {
 		t.Fatalf("status=%v reason=%v, want unknown/portfile_unparsable", p.Status, p.Reason)
@@ -515,7 +517,7 @@ vcpkg_from_github(
 		Now:        fixedNow(),
 	}
 
-	res := PinStatus(Args{PortDirs: []string{dir}}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps)
 	p := res.Ports[0]
 	if p.Pin.Shape != RefShapeTag {
 		t.Fatalf("pin.shape = %v, want tag", p.Pin.Shape)
@@ -546,7 +548,7 @@ func TestNamedRefsFoundOnRemoteAreUnknownWithTheirObservedCommit(t *testing.T) {
 			}
 			dir := newPort(t, tc.name, prefix+"vcpkg_from_github(REPO example/"+strings.ReplaceAll(tc.name, " ", "-")+" REF "+tc.ref+" SHA512 0)")
 			remote := "https://github.com/example/" + strings.ReplaceAll(tc.name, " ", "-") + ".git"
-			p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {tc.remoteRef: commitB}}, nil), Now: fixedNow()}).Ports[0]
+			p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {tc.remoteRef: commitB}}, nil), Now: fixedNow()}).Ports[0]
 			if p.Status != evidence.StatusUnknown || p.Reason != ReasonNamedRefNotComparable {
 				t.Fatalf("status=%v reason=%v, want unknown/named_ref_not_comparable", p.Status, p.Reason)
 			}
@@ -572,7 +574,7 @@ vcpkg_from_github(
 		Now:        fixedNow(),
 	}
 
-	res := PinStatus(Args{PortDirs: []string{dir}}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps)
 	p := res.Ports[0]
 	if p.Pin.Shape != RefShapeBranch {
 		t.Fatalf("pin.shape = %v, want branch", p.Pin.Shape)
@@ -596,7 +598,7 @@ vcpkg_from_github(
 		Now:        fixedNow(),
 	}
 
-	res := PinStatus(Args{PortDirs: []string{dir}}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps)
 	p := res.Ports[0]
 	if p.Pin.Shape != RefShapeVariableResolved || p.Pin.ResolvedRef != "" {
 		t.Fatalf("pin = %+v, want variable_resolved with empty resolved_ref", p.Pin)
@@ -611,7 +613,7 @@ func TestUnresolvedHeadRefDoesNotFallBackToRemoteHEAD(t *testing.T) {
 vcpkg_from_github(REPO example/head-ref REF `+commitA+` HEAD_REF ${MISSING_HEAD_REF} SHA512 0)
 `)
 	remote := "https://github.com/example/head-ref.git"
-	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitA}}, nil), Now: fixedNow()}).Ports[0]
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitA}}, nil), Now: fixedNow()}).Ports[0]
 	if p.Status != evidence.StatusUnknown || p.Reason != ReasonHeadRefUnresolvable {
 		t.Fatalf("status=%v reason=%v, want unknown/head_ref_unresolvable", p.Status, p.Reason)
 	}
@@ -623,19 +625,43 @@ vcpkg_from_github(REPO example/head-ref REF `+commitA+` HEAD_REF ${MISSING_HEAD_
 func TestAbsentHeadRefStillUsesRemoteHEAD(t *testing.T) {
 	dir := newPort(t, "absent-head-ref", `vcpkg_from_github(REPO example/absent-head REF `+commitA+` SHA512 0)`)
 	remote := "https://github.com/example/absent-head.git"
-	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitA}}, nil), Now: fixedNow()}).Ports[0]
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitA}}, nil), Now: fixedNow()}).Ports[0]
 	if p.Status != evidence.StatusOK || p.TrackedRef != "HEAD" {
 		t.Fatalf("status=%v reason=%v tracked=%q, want current against HEAD", p.Status, p.Reason, p.TrackedRef)
 	}
 }
 
-func TestEmptyResultMarshalsPortsAsArray(t *testing.T) {
-	data, err := json.Marshal(PinStatus(Args{}, Deps{Now: fixedNow()}))
+// F23: an empty batch must be REFUSED with the tool-level tri-state, not
+// answered with {"ports":[]} — which is byte-identical to a successful
+// zero-work call and therefore indistinguishable from "all checked, all
+// fine". Ports still marshals as [] rather than null so the shape is stable.
+func TestF23_EmptyBatchIsRefusedWithATopLevelTriState(t *testing.T) {
+	res := PinStatus(context.Background(), Args{}, Deps{Now: fixedNow()})
+
+	if res.Status != evidence.StatusUnknown || res.Reason != BatchReasonNoPortDirs {
+		t.Fatalf("status=%v reason=%v, want unknown/no_port_dirs", res.Status, res.Reason)
+	}
+	data, err := json.Marshal(res)
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
-	if string(data) != `{"ports":[]}` {
-		t.Fatalf("empty result JSON = %s, want {\"ports\":[]}", data)
+	if string(data) != `{"status":"unknown","reason":"no_port_dirs","ports":[]}` {
+		t.Fatalf("empty result JSON = %s, want the tri-state form with ports as an array", data)
+	}
+}
+
+// F23 (companion): a batch that DID run reports ok at the tool level even
+// when individual ports are unknown — the two levels answer different
+// questions and must not be conflated.
+func TestF23_NonEmptyBatchReportsOKAtTheToolLevel(t *testing.T) {
+	dir := newPort(t, "dist-only", `vcpkg_download_distfile(A URLS "https://x/y.tar.gz" FILENAME "y.tar.gz" SHA512 0)`)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(nil, nil), Now: fixedNow()})
+
+	if res.Status != evidence.StatusOK || res.Reason != "" {
+		t.Fatalf("batch status=%v reason=%v, want ok with no batch reason", res.Status, res.Reason)
+	}
+	if len(res.Ports) != 1 || res.Ports[0].Status != evidence.StatusUnknown {
+		t.Fatalf("ports = %+v, want one unknown port under an ok batch", res.Ports)
 	}
 }
 
@@ -742,7 +768,7 @@ vcpkg_from_github(REPO a/two REF `+commitB+` SHA512 0)`)
 	}
 	deps := Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(refs, errs), Now: fixedNow()}
 
-	res := PinStatus(Args{PortDirs: []string{
+	res := PinStatus(context.Background(), Args{PortDirs: []string{
 		ghEqual, ghDiff, gitVar, distfile, meta, tagFound, branchMissing, unresolvable, unresolvedHeadRef, queryErr, guardUnresolvable, multipleFetch,
 	}}, deps)
 
@@ -813,7 +839,7 @@ func TestPinStatus_BatchOrderAndIndependence(t *testing.T) {
 		RemoteRefs: fakeRemote(map[string]map[string]string{"https://github.com/a/b.git": {"HEAD": commitA}}, nil),
 		Now:        fixedNow(),
 	}
-	res := PinStatus(Args{PortDirs: []string{ok, broken}}, deps)
+	res := PinStatus(context.Background(), Args{PortDirs: []string{ok, broken}}, deps)
 	if len(res.Ports) != 2 {
 		t.Fatalf("got %d ports, want 2", len(res.Ports))
 	}
@@ -822,5 +848,499 @@ func TestPinStatus_BatchOrderAndIndependence(t *testing.T) {
 	}
 	if res.Ports[1].PortDir != broken || res.Ports[1].Reason != ReasonPortfileUnparsable {
 		t.Fatalf("ports[1] = %+v", res.Ports[1])
+	}
+}
+
+// =====================================================================
+// Pre-submission cross-family review, round 2 (F8/F24/F25).
+// =====================================================================
+
+// credentialPortfile builds a port whose vcpkg_from_git URL embeds a
+// credential — valid CMake, and exactly the shape that used to be copied
+// verbatim into the result, the evidence and the compare URL.
+const credentialRemote = "https://user:s3cr3t-token@example.invalid/org/repo.git"
+
+// F24: the credential must not appear ANYWHERE in the marshaled result. The
+// assertion is deliberately a whole-document scan rather than a per-field
+// check: the whole point of the finding is that patching the two named
+// emission sites leaves the others (Candidates[].Remote.URL, CompareURL)
+// still leaking.
+func TestF24_CredentialNeverAppearsAnywhereInTheMarshaledResult(t *testing.T) {
+	dir := newPort(t, "cred", `vcpkg_from_git(
+    OUT_SOURCE_PATH SOURCE_PATH
+    URL `+credentialRemote+`
+    REF `+commitA+`
+)`)
+
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}},
+		Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(nil, nil), Now: fixedNow()})
+
+	data, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	doc := string(data)
+	for _, secret := range []string{"s3cr3t-token", "user:s3cr3t-token"} {
+		if strings.Contains(doc, secret) {
+			t.Fatalf("credential %q leaked into the MCP result document: %s", secret, doc)
+		}
+	}
+	if !strings.Contains(doc, "REDACTED") {
+		t.Fatalf("result does not show that a credential was present at all; redaction must be visible, not silent: %s", doc)
+	}
+}
+
+// F24: the query itself is refused. Redaction cannot reach argv — a
+// credential handed to `git ls-remote` is readable by every local account
+// for the lifetime of the child process.
+func TestF24_CredentialBearingRemoteIsRefusedNotQueried(t *testing.T) {
+	dir := newPort(t, "cred-refused", `vcpkg_from_git(
+    OUT_SOURCE_PATH SOURCE_PATH
+    URL `+credentialRemote+`
+    REF `+commitA+`
+)`)
+
+	var queried []string
+	spy := func(ctx context.Context, remote string) (map[string]string, error) {
+		queried = append(queried, remote)
+		return map[string]string{"HEAD": commitA}, nil
+	}
+
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}},
+		Deps{FS: DefaultFS(), RemoteRefs: spy, Now: fixedNow()}).Ports[0]
+
+	if len(queried) != 0 {
+		t.Fatalf("the credential-bearing remote was handed to the query function (%v); it must be refused "+
+			"before the child process is ever built", queried)
+	}
+	if p.Status != evidence.StatusUnknown || p.Reason != ReasonRemoteURLCredentialBearing {
+		t.Fatalf("status=%v reason=%v, want unknown/remote_url_credential_bearing", p.Status, p.Reason)
+	}
+}
+
+// F24: a NON-selected candidate can carry a credential too. This is the
+// emission point a per-site patch misses entirely, because the selected
+// remote is clean and nothing about the happy path looks wrong.
+func TestF24_CredentialOnANonSelectedCandidateIsAlsoRedacted(t *testing.T) {
+	dir := newPort(t, "cred-candidate", `if(SOME_UNSET_OPTION)
+vcpkg_from_git(OUT_SOURCE_PATH SOURCE_PATH URL `+credentialRemote+` REF `+commitA+`)
+else()
+vcpkg_from_github(OUT_SOURCE_PATH SOURCE_PATH REPO clean/repo REF `+commitA+` SHA512 0)
+endif()`)
+
+	res := PinStatus(context.Background(), Args{PortDirs: []string{dir}},
+		Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{
+			"https://github.com/clean/repo.git": {"HEAD": commitA},
+		}, nil), Now: fixedNow()})
+
+	data, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "s3cr3t-token") {
+		t.Fatalf("credential leaked via an audited but NON-selected candidate: %s", data)
+	}
+}
+
+// F24: the redactor itself, exercised directly over the shapes it must
+// survive — including ones url.Parse rejects, where failing to parse must
+// never mean failing to redact.
+func TestF24_RedactURLCoversUserinfoQueryParamsAndUnparsableInput(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		secret  string
+		wantSub string
+	}{
+		{"user and password", "https://alice:hunter2@host/r.git", "hunter2", "REDACTED@host/r.git"},
+		{"bare token as username", "https://ghp_abc123@host/r.git", "ghp_abc123", "REDACTED@host/r.git"},
+		{"secret query parameter", "https://host/r.git?access_token=abc123", "abc123", "access_token=REDACTED"},
+		{"unparsable authority", "https://bob:pw@ho st/r.git", "pw", "REDACTED@"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := redactURL(tc.in)
+			if strings.Contains(got, tc.secret) {
+				t.Fatalf("redactURL(%q) = %q, still contains %q", tc.in, got, tc.secret)
+			}
+			if !strings.Contains(got, tc.wantSub) {
+				t.Fatalf("redactURL(%q) = %q, want it to contain %q", tc.in, got, tc.wantSub)
+			}
+			if !hasEmbeddedCredential(tc.in) {
+				t.Fatalf("hasEmbeddedCredential(%q) = false, want true", tc.in)
+			}
+		})
+	}
+}
+
+// F24: a clean URL must round-trip BYTE-FOR-BYTE. An over-eager redactor
+// that re-encodes every URL would break copy-pasteability and churn results.
+func TestF24_CleanURLRoundTripsUnchanged(t *testing.T) {
+	for _, clean := range []string{
+		"https://github.com/nlohmann/json.git",
+		"https://gitlab.com/group/sub/proj.git",
+		"git@github.com:owner/repo.git",
+		"",
+	} {
+		if got := redactURL(clean); got != clean {
+			t.Fatalf("redactURL(%q) = %q, want it unchanged", clean, got)
+		}
+		if hasEmbeddedCredential(clean) {
+			t.Fatalf("hasEmbeddedCredential(%q) = true, want false", clean)
+		}
+	}
+}
+
+// F8: the request context must reach the query function. Discarding it for
+// context.Background() meant an MCP cancellation left the git child running
+// and the request pinned open.
+func TestF8_RequestContextReachesTheRemoteQuery(t *testing.T) {
+	dir := newPort(t, "ctx-threaded", `vcpkg_from_github(REPO a/b REF `+commitA+` SHA512 0)`)
+
+	type ctxKey string
+	const key ctxKey = "probe"
+	parent := context.WithValue(context.Background(), key, "carried")
+
+	var sawValue any
+	spy := func(ctx context.Context, remote string) (map[string]string, error) {
+		sawValue = ctx.Value(key)
+		return map[string]string{"HEAD": commitA}, nil
+	}
+
+	PinStatus(parent, Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: spy, Now: fixedNow()})
+
+	if sawValue != "carried" {
+		t.Fatalf("query function received ctx.Value = %v, want %q — the CALLER's context must be threaded "+
+			"through (a context.Background() substitute carries nothing)", sawValue, "carried")
+	}
+}
+
+// F8: an already-canceled request stops the batch instead of firing a git
+// subprocess per port, and reports the honest closed reason.
+func TestF8_CanceledRequestStopsTheBatchAndNeverQueries(t *testing.T) {
+	a := newPort(t, "cancel-a", `vcpkg_from_github(REPO a/b REF `+commitA+` SHA512 0)`)
+	b := newPort(t, "cancel-b", `vcpkg_from_github(REPO c/d REF `+commitA+` SHA512 0)`)
+
+	var queries int
+	spy := func(ctx context.Context, remote string) (map[string]string, error) {
+		queries++
+		return map[string]string{"HEAD": commitA}, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	res := PinStatus(ctx, Args{PortDirs: []string{a, b}}, Deps{FS: DefaultFS(), RemoteRefs: spy, Now: fixedNow()})
+
+	if queries != 0 {
+		t.Fatalf("%d remote queries fired under a canceled context, want 0", queries)
+	}
+	if len(res.Ports) != 2 {
+		t.Fatalf("ports = %d, want 2 (every requested port still gets an explicit verdict)", len(res.Ports))
+	}
+	for _, p := range res.Ports {
+		if p.Status != evidence.StatusUnknown || p.Reason != ReasonRemoteQueryCanceled {
+			t.Fatalf("port %s = %v/%v, want unknown/remote_query_canceled", p.PortDir, p.Status, p.Reason)
+		}
+	}
+}
+
+// F8: a deadline and a caller cancellation are DIFFERENT facts and get
+// different closed reasons — an operator acts on them differently.
+func TestF8_TimeoutAndCancellationAreDistinctReasons(t *testing.T) {
+	dir := newPort(t, "deadline", `vcpkg_from_github(REPO a/b REF `+commitA+` SHA512 0)`)
+
+	deadlineDeps := Deps{FS: DefaultFS(), Now: fixedNow(), RemoteRefs: func(ctx context.Context, remote string) (map[string]string, error) {
+		return nil, context.DeadlineExceeded
+	}}
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deadlineDeps).Ports[0]
+	if p.Reason != ReasonRemoteQueryTimeout {
+		t.Fatalf("reason = %v, want remote_query_timeout", p.Reason)
+	}
+
+	canceledDeps := Deps{FS: DefaultFS(), Now: fixedNow(), RemoteRefs: func(ctx context.Context, remote string) (map[string]string, error) {
+		return nil, context.Canceled
+	}}
+	p2 := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, canceledDeps).Ports[0]
+	if p2.Reason != ReasonRemoteQueryCanceled {
+		t.Fatalf("reason = %v, want remote_query_canceled", p2.Reason)
+	}
+}
+
+// F25: a remote advertising an enormous ref set must trip a bound and report
+// a closed resource-limit reason, NOT be indexed into an unbounded map.
+func TestF25_RefCountCeilingTripsAndSurfacesAClosedReason(t *testing.T) {
+	var payload strings.Builder
+	for i := 0; i <= MaxRemoteRefs; i++ {
+		fmt.Fprintf(&payload, "%s\trefs/heads/b%d\n", commitA, i)
+	}
+
+	_, err := parseLsRemoteStream(strings.NewReader(payload.String()))
+	if !errors.Is(err, ErrRemoteRefLimit) {
+		t.Fatalf("err = %v, want ErrRemoteRefLimit for a ref set above MaxRemoteRefs=%d", err, MaxRemoteRefs)
+	}
+
+	dir := newPort(t, "hostile-remote", `vcpkg_from_github(REPO a/b REF `+commitA+` SHA512 0)`)
+	deps := Deps{FS: DefaultFS(), Now: fixedNow(), RemoteRefs: func(ctx context.Context, remote string) (map[string]string, error) {
+		return nil, err
+	}}
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps).Ports[0]
+	if p.Status != evidence.StatusUnknown || p.Reason != ReasonRemoteRefLimit {
+		t.Fatalf("status=%v reason=%v, want unknown/remote_ref_limit", p.Status, p.Reason)
+	}
+}
+
+// F25: one absurdly long line must be refused rather than buffered whole. A
+// truncated half-ref would be worse than an error — it could silently turn
+// "this tag exists" into "this tag is gone".
+func TestF25_OverlongRefLineIsRefusedNotBuffered(t *testing.T) {
+	long := commitA + "\trefs/heads/" + strings.Repeat("x", MaxRemoteRefLineBytes+1) + "\n"
+
+	_, err := parseLsRemoteStream(strings.NewReader(long))
+	if !errors.Is(err, ErrRemoteRefLimit) {
+		t.Fatalf("err = %v, want ErrRemoteRefLimit for a line above MaxRemoteRefLineBytes=%d", err, MaxRemoteRefLineBytes)
+	}
+}
+
+// F25 (companion): an ordinary advertisement still parses exactly as before,
+// including the peeled-annotated-tag form. The ceilings must not change the
+// answer for real input.
+func TestF25_NormalAdvertisementStillParsesUnchanged(t *testing.T) {
+	payload := commitA + "\tHEAD\n" +
+		commitA + "\trefs/heads/main\n" +
+		commitB + "\trefs/tags/v1.0\n" +
+		commitC + "\trefs/tags/v1.0^{}\n"
+
+	refs, err := parseLsRemoteStream(strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("parseLsRemoteStream: %v", err)
+	}
+	want := map[string]string{
+		"HEAD":              commitA,
+		"refs/heads/main":   commitA,
+		"refs/tags/v1.0":    commitB,
+		"refs/tags/v1.0^{}": commitC,
+	}
+	if !reflect.DeepEqual(refs, want) {
+		t.Fatalf("refs = %+v, want %+v", refs, want)
+	}
+}
+
+// F24 (defence in depth): the gitlab CompareURL is built by string-editing
+// the remote URL, so it is a THIRD place a credential could re-enter the
+// result. End-to-end this path is currently unreachable for a
+// credential-bearing remote — the refusal in pinStatusOne fires first — so
+// this asserts the WIRING directly instead of pretending an end-to-end
+// fixture exercises it. If the refusal is ever relaxed, this is the guard
+// that keeps the compare link clean.
+func TestF24_CompareURLIsBuiltFromTheRedactedRemoteNotTheRawOne(t *testing.T) {
+	raw := Remote{Kind: RemoteGitLab, Repo: "group/proj", URL: "https://user:s3cr3t-token@gitlab.example/group/proj.git"}
+
+	leaky := buildCompareURL(raw, commitA, commitB)
+	if !strings.Contains(leaky, "s3cr3t-token") {
+		t.Fatalf("fixture no longer demonstrates the hazard: buildCompareURL over a RAW remote = %q", leaky)
+	}
+
+	safe := buildCompareURL(redactRemote(raw), commitA, commitB)
+	if strings.Contains(safe, "s3cr3t-token") {
+		t.Fatalf("compare URL built from the redacted remote still leaks the credential: %q", safe)
+	}
+	if !strings.Contains(safe, "/-/compare/"+commitA+"..."+commitB) {
+		t.Fatalf("redaction broke the compare link shape: %q", safe)
+	}
+}
+
+// F24 (invariant): whatever CompareURL a real call produces is derived from
+// the EMITTED (redacted) remote, never from a separately-held raw spelling.
+func TestF24_CompareURLDerivesFromTheEmittedRemote(t *testing.T) {
+	dir := newPort(t, "gitlab-compare", `vcpkg_from_gitlab(
+    OUT_SOURCE_PATH SOURCE_PATH
+    GITLAB_URL https://gitlab.example
+    REPO group/proj
+    REF `+commitA+`
+    SHA512 0
+)`)
+	remote := "https://gitlab.example/group/proj.git"
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{
+		FS:         DefaultFS(),
+		RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitB}}, nil),
+		Now:        fixedNow(),
+	}).Ports[0]
+
+	if p.CompareURL == "" {
+		t.Fatalf("no CompareURL produced; fixture does not exercise the path: %+v", p)
+	}
+	base := strings.TrimSuffix(p.Remote.URL, ".git")
+	if !strings.HasPrefix(p.CompareURL, base) {
+		t.Fatalf("CompareURL %q is not derived from the emitted remote %q", p.CompareURL, p.Remote.URL)
+	}
+}
+
+// F25: the whole-output byte ceiling is a backstop for a remote that streams
+// forever WITHOUT newlines the line ceiling could trip on.
+func TestF25_TotalOutputCeilingTripsWithoutAnyNewline(t *testing.T) {
+	_, err := parseLsRemoteStream(strings.NewReader(strings.Repeat("x", MaxRemoteRefLineBytes+1)))
+	if !errors.Is(err, ErrRemoteRefLimit) {
+		t.Fatalf("err = %v, want ErrRemoteRefLimit for an unterminated oversized stream", err)
+	}
+}
+
+// =====================================================================
+// FIELD P1 (operator, vcpkg-mcp 0.1.0, real vcpkg tree): a ref that
+// CONTAINS a CMake variable was compared VERBATIM against the remote and
+// reported as a definite negative. All three refs below exist upstream.
+//
+// Root cause: variableRefRE is anchored ^...$, so it matches only a ref
+// that is ENTIRELY one variable ("${VTK_GIT_REF}" — the vtk case that
+// correctly reported unresolvable) and never one that merely CONTAINS a
+// variable, which fell through to the literal-token path.
+//
+// A confident wrong NEGATIVE is the worst output this contract can emit:
+// it sends a maintainer to "fix" a pin that is already correct.
+// =====================================================================
+
+func TestFieldP1_RefContainingAVariableIsNeverReportedAsMissingUpstream(t *testing.T) {
+	cases := []struct {
+		port      string
+		portfile  string
+		manifest  string
+		remoteURL string
+		// remoteRefs is what the LIVE remote actually advertises.
+		remoteRefs map[string]string
+		wantRef    string
+	}{
+		{
+			port:       "double-conversion",
+			portfile:   "vcpkg_from_github(OUT_SOURCE_PATH SOURCE_PATH REPO google/double-conversion REF \"v${VERSION}\" SHA512 0)",
+			manifest:   `{"name":"double-conversion","version":"3.4.0"}`,
+			remoteURL:  "https://github.com/google/double-conversion.git",
+			remoteRefs: map[string]string{"refs/tags/v3.4.0": commitA, "HEAD": commitB},
+			wantRef:    "v3.4.0",
+		},
+		{
+			port:       "libxcrypt",
+			portfile:   "vcpkg_from_github(OUT_SOURCE_PATH SOURCE_PATH REPO besser82/libxcrypt REF \"v${VERSION}\" SHA512 0)",
+			manifest:   `{"name":"libxcrypt","version":"4.5.2"}`,
+			remoteURL:  "https://github.com/besser82/libxcrypt.git",
+			remoteRefs: map[string]string{"refs/tags/v4.5.2": commitA, "HEAD": commitB},
+			wantRef:    "v4.5.2",
+		},
+		{
+			port:       "xorg-macros",
+			portfile:   "vcpkg_from_git(OUT_SOURCE_PATH SOURCE_PATH URL https://gitlab.freedesktop.org/xorg/util/macros REF \"util-macros-${VERSION}\")",
+			manifest:   `{"name":"xorg-macros","version":"1.20.2"}`,
+			remoteURL:  "https://gitlab.freedesktop.org/xorg/util/macros",
+			remoteRefs: map[string]string{"refs/tags/util-macros-1.20.2": commitA, "HEAD": commitB},
+			wantRef:    "util-macros-1.20.2",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.port, func(t *testing.T) {
+			dir := newPort(t, tc.port, tc.portfile)
+			writeManifest(t, dir, tc.manifest)
+
+			p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{
+				FS:         DefaultFS(),
+				RemoteRefs: fakeRemote(map[string]map[string]string{tc.remoteURL: tc.remoteRefs}, nil),
+				Now:        fixedNow(),
+			}).Ports[0]
+
+			if p.Reason == ReasonRefNotFoundOnRemote {
+				t.Fatalf("reported ref_not_found_on_remote for %q, but that ref EXISTS upstream — a "+
+					"definite negative derived from an unexpanded variable is the worst possible output "+
+					"(pin=%+v)", p.Pin.Ref, p.Pin)
+			}
+			if p.Pin.ResolvedRef != tc.wantRef {
+				t.Fatalf("resolved_ref = %q, want %q expanded from the sibling vcpkg.json", p.Pin.ResolvedRef, tc.wantRef)
+			}
+			if p.Reason != ReasonNamedRefNotComparable {
+				t.Fatalf("reason = %v, want named_ref_not_comparable (the tag exists; a tag pin still cannot "+
+					"be compared for currency)", p.Reason)
+			}
+			if p.NamedRef != tc.wantRef || p.NamedRefSHA != commitA {
+				t.Fatalf("named_ref/%s named_ref_sha/%s, want %s/%s", p.NamedRef, p.NamedRefSHA, tc.wantRef, commitA)
+			}
+		})
+	}
+}
+
+// FIELD P1 (the FLOOR): even when expansion is impossible, the answer must
+// never be a negative. This is the guarantee that does not depend on the
+// expander understanding any particular variable.
+func TestFieldP1_UnexpandableRefFallsBackToUnresolvableNeverToANegative(t *testing.T) {
+	// No vcpkg.json, and no local set() — ${VERSION} cannot be resolved.
+	dir := newPort(t, "no-manifest", "vcpkg_from_github(REPO a/b REF \"v${VERSION}\" SHA512 0)")
+
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{
+		FS:         DefaultFS(),
+		RemoteRefs: fakeRemote(map[string]map[string]string{"https://github.com/a/b.git": {"HEAD": commitA}}, nil),
+		Now:        fixedNow(),
+	}).Ports[0]
+
+	if p.Reason == ReasonRefNotFoundOnRemote {
+		t.Fatalf("an UNEXPANDABLE ref was reported as missing upstream; it must degrade to unresolvable: %+v", p.Pin)
+	}
+	if p.Status != evidence.StatusUnknown || p.Reason != ReasonRefUnresolvable {
+		t.Fatalf("status=%v reason=%v, want unknown/ref_unresolvable", p.Status, p.Reason)
+	}
+	if p.Pin.UnresolvedVariable != "VERSION" {
+		t.Fatalf("unresolved_variable = %q, want %q", p.Pin.UnresolvedVariable, "VERSION")
+	}
+}
+
+// FIELD P1: the vtk shape (the ref that is ENTIRELY one variable) must keep
+// behaving exactly as it already did — that path was correct.
+func TestFieldP1_WholeStringVariableRefStillReportsUnresolvable(t *testing.T) {
+	dir := newPort(t, "vtk", "vcpkg_from_github(REPO Kitware/VTK REF ${VTK_GIT_REF} SHA512 0)")
+
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{
+		FS:         DefaultFS(),
+		RemoteRefs: fakeRemote(map[string]map[string]string{"https://github.com/Kitware/VTK.git": {"HEAD": commitA}}, nil),
+		Now:        fixedNow(),
+	}).Ports[0]
+
+	if p.Status != evidence.StatusUnknown || p.Reason != ReasonRefUnresolvable {
+		t.Fatalf("status=%v reason=%v, want unknown/ref_unresolvable (unchanged vtk behaviour)", p.Status, p.Reason)
+	}
+}
+
+// FIELD P1: ${PORT} is the other ubiquitous vcpkg ref idiom.
+func TestFieldP1_PortVariableExpandsFromThePortDirectoryName(t *testing.T) {
+	dir := newPort(t, "mylib", "vcpkg_from_github(REPO org/mylib REF \"${PORT}-${VERSION}\" SHA512 0)")
+	writeManifest(t, dir, `{"name":"mylib","version":"2.1"}`)
+
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{
+		FS:         DefaultFS(),
+		RemoteRefs: fakeRemote(map[string]map[string]string{"https://github.com/org/mylib.git": {"refs/tags/mylib-2.1": commitA}}, nil),
+		Now:        fixedNow(),
+	}).Ports[0]
+
+	if p.Pin.ResolvedRef != "mylib-2.1" {
+		t.Fatalf("resolved_ref = %q, want %q (${PORT} from the port dir, ${VERSION} from vcpkg.json)", p.Pin.ResolvedRef, "mylib-2.1")
+	}
+	if p.Pin.ResolvedFrom != RefValueSourceMixed {
+		t.Fatalf("resolved_from = %q, want %q for a ref drawing on two different sources", p.Pin.ResolvedFrom, RefValueSourceMixed)
+	}
+}
+
+// FIELD P1: the same defect class lived in every OTHER variable-bearing
+// field, because they all shared the one anchored regex. A REPO that merely
+// CONTAINS a variable used to yield a bogus remote URL built from the
+// unexpanded literal.
+func TestFieldP1_EmbeddedVariablesExpandInRepoAndUrlFieldsToo(t *testing.T) {
+	dir := newPort(t, "embedded-repo", `set(ORG_NAME "acme")
+vcpkg_from_github(REPO ${ORG_NAME}/widget REF `+commitA+` SHA512 0)`)
+
+	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{
+		FS:         DefaultFS(),
+		RemoteRefs: fakeRemote(map[string]map[string]string{"https://github.com/acme/widget.git": {"HEAD": commitA}}, nil),
+		Now:        fixedNow(),
+	}).Ports[0]
+
+	if p.Remote.Repo != "acme/widget" {
+		t.Fatalf("repo = %q, want %q — an embedded variable must expand here too", p.Remote.Repo, "acme/widget")
+	}
+	if p.Status != evidence.StatusOK {
+		t.Fatalf("status=%v reason=%v, want ok", p.Status, p.Reason)
 	}
 }

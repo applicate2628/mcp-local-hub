@@ -13,6 +13,9 @@
 package cmakewrap
 
 import (
+	"context"
+	"errors"
+	"path/filepath"
 	"strings"
 
 	"mcp-local-hub/internal/cmakegraph"
@@ -27,12 +30,20 @@ import (
 type Reason string
 
 const (
-	// ReasonArgsInvalid: neither root nor file was supplied, or file/root
-	// were both supplied to inconsistent effect.
+	// ReasonArgsInvalid: neither root nor file was supplied, or BOTH were.
+	// The two are declared mutually exclusive by the tool schema and they
+	// select different traversal modes, so honouring one and discarding the
+	// other would silently answer a question the caller did not ask.
 	ReasonArgsInvalid Reason = "args_invalid"
 	// ReasonWalkFailed: cmakegraph.Walk/WalkTree returned a Go error
-	// (e.g. the workspace root does not exist, or startFile is empty).
+	// (e.g. the workspace root does not exist, startFile is empty, the tree
+	// root lies outside workspace_root, or the root directory could not be
+	// enumerated at all).
 	ReasonWalkFailed Reason = "walk_failed"
+	// ReasonCanceled: the caller's context was canceled or its deadline
+	// expired before the walk finished. Kept distinct from ReasonWalkFailed
+	// because it says nothing about the tree — only that we stopped looking.
+	ReasonCanceled Reason = "canceled"
 )
 
 // Args is the cmake_include_graph tool's input contract.
@@ -57,6 +68,10 @@ type Args struct {
 	MaxNodes   int      `json:"max_nodes,omitempty"`
 	// MaxFileBytes bounds a per-file read; 0 uses cmakegraph's own default.
 	MaxFileBytes int64 `json:"max_file_bytes,omitempty"`
+	// MaxRoots bounds how many candidate roots Root mode ENUMERATES before it
+	// stops walking (Result.RootEnumerationCapped); 0 uses cmakegraph's own
+	// default. Separate from MaxNodes, which bounds admission, not discovery.
+	MaxRoots int `json:"max_roots,omitempty"`
 }
 
 // Edge is the JSON wire shape of one cmakegraph.Edge. Every field maps
@@ -111,8 +126,16 @@ type Result struct {
 	// exhausted — edges from it are MISSING, not absent.
 	NodeCapTruncated      bool `json:"node_cap_truncated"`
 	RootsSkippedByNodeCap int  `json:"roots_skipped_by_node_cap,omitempty"`
-	// UnscannedFiles lists files whose CONTENT could not be read (byte cap,
-	// permission error, race). Their includes are unknown, not zero.
+	// RootEnumerationCapped: root-mode discovery stopped at max_roots, so
+	// candidate roots beyond it were never even enumerated — the count is
+	// unknowable by construction, unlike roots_skipped_by_node_cap.
+	RootEnumerationCapped bool `json:"root_enumeration_capped"`
+	// UnscannedFiles lists every COVERAGE HOLE cmakegraph recorded: a file
+	// whose content could not be read (byte cap, permission error, race), a
+	// subtree that could not be enumerated, a root refused for escaping
+	// workspace_root, and the point enumeration was capped. Whatever is
+	// behind each entry is unknown, not zero. Each carries a CLOSED
+	// cmakegraph.CoverageReason plus a human-only detail string.
 	UnscannedFiles []cmakegraph.UnscannedFile `json:"unscanned_files,omitempty"`
 
 	Evidence evidence.Evidence `json:"evidence"`
@@ -126,20 +149,31 @@ type Status = evidence.Status
 // real filesystem — the same determinism seam used by discovery and
 // lastfailure. Production callers use RunGraph, which wires the real
 // cmakegraph.Walk/WalkTree.
-type walkFn func(startFile, workspaceRoot string, opts cmakegraph.Options) (*cmakegraph.Result, error)
-type walkTreeFn func(root string, entryNames []string, opts cmakegraph.Options) (*cmakegraph.Result, error)
+type walkFn func(ctx context.Context, startFile, workspaceRoot string, opts cmakegraph.Options) (*cmakegraph.Result, error)
+type walkTreeFn func(ctx context.Context, root, workspaceRoot string, entryNames []string, opts cmakegraph.Options) (*cmakegraph.Result, error)
 
 // RunGraph executes cmake_include_graph against the real cmakegraph
 // package. Kept as a thin entry point so the server package has one call
 // site; run is the fully-injectable implementation tests exercise.
-func RunGraph(args Args) Result {
-	return run(args, cmakegraph.Walk, cmakegraph.WalkTree)
+func RunGraph(ctx context.Context, args Args) Result {
+	return run(ctx, args, cmakegraph.Walk, cmakegraph.WalkTree)
 }
 
-func run(args Args, walk walkFn, walkTree walkTreeFn) Result {
+func run(ctx context.Context, args Args, walk walkFn, walkTree walkTreeFn) Result {
 	root := strings.TrimSpace(args.Root)
 	file := strings.TrimSpace(args.File)
 
+	// root and file are declared MUTUALLY EXCLUSIVE by the tool schema and
+	// select different traversal modes. Supplying both is not a caller
+	// preference to be resolved silently in root's favour — it is a request
+	// whose intent we cannot know, so it is refused rather than answered
+	// with an "ok" that analysed a tree the caller may not have meant.
+	if root != "" && file != "" {
+		var ev evidence.Evidence
+		ev.AddPath(root)
+		ev.AddPath(file)
+		return Result{Status: evidence.StatusUnknown, Reason: ReasonArgsInvalid, Evidence: ev}
+	}
 	if root == "" && file == "" {
 		return Result{Status: evidence.StatusUnknown, Reason: ReasonArgsInvalid}
 	}
@@ -149,7 +183,12 @@ func run(args Args, walk walkFn, walkTree walkTreeFn) Result {
 		if root != "" {
 			workspaceRoot = root
 		} else {
-			workspaceRoot = parentDir(file)
+			// filepath.Dir, never hand-rolled separator arithmetic: for a
+			// root-level file, "C:\CMakeLists.txt" must yield "C:\" (not the
+			// drive-relative "C:", whose meaning depends on the process's
+			// per-drive working directory) and "/CMakeLists.txt" must yield
+			// the root (not "").
+			workspaceRoot = filepath.Dir(file)
 		}
 	}
 
@@ -157,6 +196,7 @@ func run(args Args, walk walkFn, walkTree walkTreeFn) Result {
 		MaxDepth:     args.MaxDepth,
 		MaxNodes:     args.MaxNodes,
 		MaxFileBytes: args.MaxFileBytes,
+		MaxRoots:     args.MaxRoots,
 	}
 
 	var cgResult *cmakegraph.Result
@@ -166,9 +206,13 @@ func run(args Args, walk walkFn, walkTree walkTreeFn) Result {
 		if len(entryNames) == 0 {
 			entryNames = []string{"CMakeLists.txt", "*.cmake"}
 		}
-		cgResult, err = walkTree(root, entryNames, opts)
+		// workspaceRoot is passed through, NOT re-derived from root: it is
+		// both the escape boundary and the ${CMAKE_SOURCE_DIR} value, so
+		// pinning it to root would report includes that legitimately reach
+		// elsewhere in the caller's workspace as escaping it.
+		cgResult, err = walkTree(ctx, root, workspaceRoot, entryNames, opts)
 	} else {
-		cgResult, err = walk(file, workspaceRoot, opts)
+		cgResult, err = walk(ctx, file, workspaceRoot, opts)
 	}
 
 	if err != nil {
@@ -176,7 +220,11 @@ func run(args Args, walk walkFn, walkTree walkTreeFn) Result {
 		ev.AddPath(root)
 		ev.AddPath(file)
 		ev.AddPath(workspaceRoot)
-		return Result{Status: evidence.StatusUnknown, Reason: ReasonWalkFailed, Evidence: ev}
+		reason := ReasonWalkFailed
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			reason = ReasonCanceled
+		}
+		return Result{Status: evidence.StatusUnknown, Reason: reason, Evidence: ev}
 	}
 
 	var ev evidence.Evidence
@@ -200,15 +248,8 @@ func run(args Args, walk walkFn, walkTree walkTreeFn) Result {
 		Histogram:             cgResult.Histogram,
 		NodeCapTruncated:      cgResult.NodeCapTruncated,
 		RootsSkippedByNodeCap: cgResult.RootsSkippedByNodeCap,
+		RootEnumerationCapped: cgResult.RootEnumerationCapped,
 		UnscannedFiles:        cgResult.UnscannedFiles,
 		Evidence:              ev,
 	}
-}
-
-func parentDir(file string) string {
-	i := strings.LastIndexAny(file, `/\`)
-	if i < 0 {
-		return "."
-	}
-	return file[:i]
 }

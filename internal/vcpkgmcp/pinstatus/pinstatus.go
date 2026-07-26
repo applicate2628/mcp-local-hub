@@ -43,6 +43,7 @@ package pinstatus
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"time"
@@ -78,7 +79,17 @@ func DefaultDeps() Deps {
 // PinStatus answers vcpkg_pin_status for every directory in args.PortDirs,
 // in input order. One malformed or offline port never aborts the batch —
 // each PortDir gets its own independent PortResult.
-func PinStatus(args Args, deps Deps) Result {
+//
+// The batch itself carries a tri-state Status/Reason, distinct from the
+// per-port ones: an empty PortDirs is unknown(no_port_dirs), NOT an ok result
+// with an empty list, because "you asked about nothing" and "I checked
+// everything you asked about and it was fine" are different answers and a
+// caller must not have to guess which it got.
+//
+// ctx is honoured: cancellation or a deadline stops the batch, the remaining
+// ports report unknown(remote_query_canceled), and the child git processes
+// already started are terminated and reaped (see defaultRemoteRefs).
+func PinStatus(ctx context.Context, args Args, deps Deps) Result {
 	nowFn := deps.Now
 	if nowFn == nil {
 		nowFn = time.Now
@@ -91,10 +102,21 @@ func PinStatus(args Args, deps Deps) Result {
 	if remoteRefs == nil {
 		remoteRefs = defaultRemoteRefs
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	out := Result{Ports: make([]PortResult, 0, len(args.PortDirs))}
+	if len(args.PortDirs) == 0 {
+		return Result{
+			Status: evidence.StatusUnknown,
+			Reason: BatchReasonNoPortDirs,
+			Ports:  []PortResult{},
+		}
+	}
+
+	out := Result{Status: evidence.StatusOK, Ports: make([]PortResult, 0, len(args.PortDirs))}
 	for _, dir := range args.PortDirs {
-		out.Ports = append(out.Ports, pinStatusOne(dir, args.DisableNetwork, fsys, remoteRefs, nowFn))
+		out.Ports = append(out.Ports, pinStatusOne(ctx, dir, args.DisableNetwork, fsys, remoteRefs, nowFn))
 	}
 	return out
 }
@@ -102,8 +124,14 @@ func PinStatus(args Args, deps Deps) Result {
 // pinStatusOne answers vcpkg_pin_status for a single port directory. See
 // package doc for the overall contract; each early return below names the
 // exact Reason it produces and why.
-func pinStatusOne(portDir string, disableNetwork bool, fsys FS, remoteRefs remoteRefsFn, nowFn func() time.Time) PortResult {
+func pinStatusOne(ctx context.Context, portDir string, disableNetwork bool, fsys FS, remoteRefs remoteRefsFn, nowFn func() time.Time) PortResult {
 	res := PortResult{PortDir: portDir, ObservedAt: nowFn()}
+
+	if err := ctx.Err(); err != nil {
+		res.Status = evidence.StatusUnknown
+		res.Reason = cancellationReason(err)
+		return res
+	}
 
 	// DisableNetwork is checked first and unconditionally — per the input
 	// contract, EVERY port returns unknown(network_disabled) when set,
@@ -132,15 +160,21 @@ func pinStatusOne(portDir string, disableNetwork bool, fsys FS, remoteRefs remot
 	if manifestErr == nil {
 		res.Evidence.AddPath(manifestPath)
 	}
-	parsed, ok := parsePortfileWithManifest(string(data), manifest)
+	parsed, ok := parsePortfileWithManifest(string(data), manifest, filepath.Base(portDir))
 	if !ok {
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonPortfileUnparsable
 		return res
 	}
-	res.Remote = parsed.Remote
+	// THE credential boundary. `parsed` may carry a userinfo-bearing URL on
+	// the selected remote AND on any audited candidate; from here on nothing
+	// but queryURL (a local, never-emitted variable) holds the raw spelling.
+	// Every field assigned below is already redacted, so a later addition
+	// cannot leak by forgetting to call the redactor — see redact.go.
+	queryURL := parsed.Remote.URL
+	res.Remote = redactRemote(parsed.Remote)
 	res.Pin = parsed.Pin
-	res.Candidates = parsed.Candidates
+	res.Candidates = redactCandidates(parsed.Candidates)
 	res.UnresolvedGuardVariable = parsed.UnresolvedGuardVariable
 	res.UnresolvedHeadRefVariable = parsed.UnresolvedHeadRefVariable
 
@@ -166,13 +200,24 @@ func pinStatusOne(portDir string, disableNetwork bool, fsys FS, remoteRefs remot
 		return res
 	}
 
-	if parsed.Remote.URL == "" {
+	if queryURL == "" {
 		// A github/git/gitlab call whose mandatory REPO/URL/GITLAB_URL
 		// field is absent, or a ${VARIABLE} that failed to resolve — this
 		// package cannot identify a remote to query at all. A
 		// parse-completeness problem, not a live-remote problem.
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonPortfileUnparsable
+		return res
+	}
+
+	// Refuse to hand a credential to a child process. Redaction (above)
+	// already guarantees the value never reaches a RESULT field, but argv is
+	// a separate channel: on both Windows and Linux the full command line of
+	// a running process is readable by every local account, so querying at
+	// all would leak the token for the child's lifetime. See redact.go.
+	if hasEmbeddedCredential(queryURL) {
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonRemoteURLCredentialBearing
 		return res
 	}
 
@@ -191,11 +236,31 @@ func pinStatusOne(portDir string, disableNetwork bool, fsys FS, remoteRefs remot
 		return res
 	}
 
-	res.Evidence.AddCommand("git ls-remote " + parsed.Remote.URL)
-	refs, err := remoteRefs(context.Background(), parsed.Remote.URL)
+	// THE FLOOR (field-reported P1). Independently of whether the expander
+	// above understood this portfile, a ref that STILL carries a ${...}
+	// reference must never reach the remote comparison: comparing the literal
+	// string "v${VERSION}" against a remote's ref names yields
+	// ref_not_found_on_remote — a confident, wrong NEGATIVE that sends a
+	// maintainer to "fix" a pin which is already correct. Unresolvable is the
+	// honest verdict; this guard makes that structural rather than dependent
+	// on every future parser change getting it right.
+	//
+	// Pin.Literal is the one exception and is a real one, not a loophole: a
+	// bracket argument's contents are uninterpreted by CMake, so "${X}" there
+	// IS the ref's name and comparing it verbatim is correct.
+	if !parsed.Pin.Literal && strings.Contains(effectiveRef, "${") {
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonRefUnresolvable
+		return res
+	}
+
+	// Evidence is an EMITTED field like any other: it takes the redacted
+	// spelling, never queryURL.
+	res.Evidence.AddCommand("git ls-remote " + res.Remote.URL)
+	refs, err := remoteRefs(ctx, queryURL)
 	if err != nil {
 		res.Status = evidence.StatusUnknown
-		res.Reason = ReasonRemoteQueryFailed
+		res.Reason = remoteQueryReason(err)
 		return res
 	}
 
@@ -212,7 +277,10 @@ func pinStatusOne(portDir string, disableNetwork bool, fsys FS, remoteRefs remot
 		res.PinnedSHA = effectiveRef
 		res.TipSHA = tip
 		res.TrackedRef = tracked
-		res.CompareURL = buildCompareURL(parsed.Remote, effectiveRef, tip)
+		// res.Remote, not parsed.Remote: the gitlab compare link is built by
+		// string-editing the remote URL, so feeding it the raw spelling
+		// would reconstruct the credential in a THIRD emitted field.
+		res.CompareURL = buildCompareURL(res.Remote, effectiveRef, tip)
 		if strings.EqualFold(effectiveRef, tip) {
 			res.Status = evidence.StatusOK
 			return res
@@ -240,4 +308,30 @@ func pinStatusOne(portDir string, disableNetwork bool, fsys FS, remoteRefs remot
 	res.Status = evidence.StatusUnknown
 	res.Reason = ReasonRefNotFoundOnRemote
 	return res
+}
+
+// remoteQueryReason maps a remoteRefsFn error onto this package's CLOSED
+// Reason enum. Single owner, and deliberately identity-based (errors.Is) —
+// never a string match on an error message, which would silently reclassify
+// the day a dependency reworded one.
+func remoteQueryReason(err error) Reason {
+	switch {
+	case errors.Is(err, ErrRemoteRefLimit):
+		return ReasonRemoteRefLimit
+	case errors.Is(err, context.DeadlineExceeded):
+		return ReasonRemoteQueryTimeout
+	case errors.Is(err, context.Canceled):
+		return ReasonRemoteQueryCanceled
+	default:
+		return ReasonRemoteQueryFailed
+	}
+}
+
+// cancellationReason distinguishes the caller giving up from a deadline
+// expiring. Both stop the batch, but only one of them is our fault.
+func cancellationReason(err error) Reason {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return ReasonRemoteQueryTimeout
+	}
+	return ReasonRemoteQueryCanceled
 }

@@ -47,7 +47,9 @@
 package cmaketrace
 
 import (
+	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"sort"
@@ -85,6 +87,23 @@ const (
 	// json-v1 command records. The valid records remain positive evidence,
 	// but the input is incomplete so no absence conclusion is supported.
 	ReasonInputMalformed Reason = "input_malformed"
+	// ReasonByteLimit: the trace is larger than MaxTraceBytes, so parsing
+	// stopped partway through the file. Everything parsed remains positive
+	// evidence; nothing about the unread tail is known.
+	ReasonByteLimit Reason = "byte_limit"
+	// ReasonLineLimit: at least one line exceeded MaxLineBytes and was
+	// skipped without being parsed. A single JSON record that long is not a
+	// cmake trace record; it is refused rather than buffered.
+	ReasonLineLimit Reason = "line_limit"
+	// ReasonRecordLimit: MaxRecords records were materialized and parsing
+	// stopped. This bounds parse memory, the per-file line index, AND the
+	// response — every one of those is derived from the record set.
+	ReasonRecordLimit Reason = "record_limit"
+	// ReasonCanceled: the caller's context was canceled or its deadline
+	// expired mid-parse. Fails closed: no partial result is returned, because
+	// a truncated index would look exactly like a complete one that happened
+	// to observe fewer lines.
+	ReasonCanceled Reason = "canceled"
 )
 
 // Status aliases evidence.Status so callers of this package do not need a
@@ -99,8 +118,30 @@ const (
 	KindAddSubdirectory Kind = "add_subdirectory"
 )
 
-// DefaultMaxRecords is the sane cap applied when Args.MaxRecords <= 0.
+// DefaultMaxRecords is the sane cap applied to the RETURNED Records slice
+// when Args.MaxRecords <= 0.
 const DefaultMaxRecords = 1000
+
+// Parse-side ceilings. These bound what is MATERIALIZED, which is a different
+// job from DefaultMaxRecords (which only trims the returned slice, after
+// everything has already been read, split, parsed and indexed).
+//
+// This tool runs inside a SHARED daemon. A trace is operator-supplied but
+// arbitrarily large — a killed configure of a big project routinely leaves
+// hundreds of MiB — so "read it all, then cap the output" turns one call into
+// a memory-exhaustion event for every other tool in the process.
+const (
+	// MaxTraceBytes bounds total bytes consumed from the trace file.
+	MaxTraceBytes = 256 << 20 // 256 MiB
+	// MaxLineBytes bounds one JSON Lines record. cmake's own records are a
+	// few KiB at most; a longer line is refused, never buffered whole.
+	MaxLineBytes = 4 << 20 // 4 MiB
+	// MaxParsedRecords bounds records held in memory. Because IncludeChain,
+	// ExecutedLines and FilesInTrace are all DERIVED from the record set,
+	// this single ceiling bounds parse memory, both indexes, and the
+	// response size together.
+	MaxParsedRecords = 2000000
+)
 
 // Args is the vcpkg_cmake_trace tool's input contract.
 type Args struct {
@@ -190,9 +231,17 @@ type Result struct {
 	// conclusion from this result is supported. It is independent from
 	// Truncated, which describes only the returned Records cap.
 	InputIncomplete bool `json:"input_incomplete"`
-	// InputIncompleteReason explains why InputIncomplete is true. It is not
-	// Result.Reason because valid records can still produce an ok status.
-	InputIncompleteReason Reason `json:"input_incomplete_reason,omitempty"`
+	// InputIncompleteReasons explains why InputIncomplete is true. It is a
+	// LIST because the causes are independent and can coexist (a trace can be
+	// both malformed in places AND cut short by a ceiling), and it is
+	// separate from Result.Reason because valid records can still produce an
+	// ok status. Values are the closed Reason enum, in declaration order so
+	// the field is deterministic.
+	//
+	// This is the ONE incompleteness channel: malformed lines, the byte
+	// ceiling, the line ceiling and the record ceiling all report here rather
+	// than each growing its own parallel flag.
+	InputIncompleteReasons []Reason `json:"input_incomplete_reasons,omitempty"`
 	// VersionHeaderPresent reports whether a {"version":{...}} header line
 	// was found anywhere in the trace. A concatenated or trimmed trace file
 	// may lack one; that is reported here, never treated as a parse failure.
@@ -206,20 +255,55 @@ type Result struct {
 
 // FS abstracts the one filesystem call this package needs, so tests exercise
 // t.TempDir() fixtures without ever touching a real vcpkg/cmake install.
+//
+// It opens a STREAM rather than returning bytes: a trace is arbitrarily large
+// and this tool shares a daemon with everything else, so the whole file must
+// never be materialized just to parse it line by line. The caller owns
+// closing the returned reader.
 type FS interface {
-	ReadFile(path string) ([]byte, error)
+	Open(path string) (io.ReadCloser, error)
 }
 
 type osFS struct{}
 
-func (osFS) ReadFile(p string) ([]byte, error) { return os.ReadFile(p) }
+func (osFS) Open(p string) (io.ReadCloser, error) { return os.Open(p) }
 
 // DefaultFS wires FS to the real OS.
 func DefaultFS() FS { return osFS{} }
 
+// Limits are the parse-side ceilings. Every zero field falls back to the
+// corresponding Max* constant, so a caller that does not care supplies
+// nothing and gets the production bounds.
+//
+// They are injected rather than read from the constants directly so that
+// each ceiling is EXERCISABLE: a bound that cannot be reached in a test is a
+// bound nobody has ever seen work. This is config passed down from the
+// composition root, not a mutable package global.
+type Limits struct {
+	MaxTraceBytes    int64
+	MaxLineBytes     int
+	MaxParsedRecords int
+}
+
+func (l Limits) normalized() Limits {
+	if l.MaxTraceBytes <= 0 {
+		l.MaxTraceBytes = MaxTraceBytes
+	}
+	if l.MaxLineBytes <= 0 {
+		l.MaxLineBytes = MaxLineBytes
+	}
+	if l.MaxParsedRecords <= 0 {
+		l.MaxParsedRecords = MaxParsedRecords
+	}
+	return l
+}
+
 // Deps bounds every ambient input Trace reads.
 type Deps struct {
 	FS FS
+	// Limits overrides the parse-side ceilings; the zero value uses the
+	// documented production defaults.
+	Limits Limits
 }
 
 // DefaultDeps wires Deps to the real OS.
@@ -229,11 +313,22 @@ func DefaultDeps() Deps {
 
 // Trace implements vcpkg_cmake_trace. See package doc for the read-only
 // scope and the honesty invariants every field on Result exists to serve.
-func Trace(args Args, deps Deps) Result {
+//
+// ctx is observed throughout the streaming parse, so a canceled or timed-out
+// request stops reading immediately instead of finishing a multi-hundred-MiB
+// parse for a caller that has already gone away.
+func Trace(ctx context.Context, args Args, deps Deps) Result {
 	var ev evidence.Evidence
 	ev.AddPath(args.TracePath)
 
-	data, err := deps.FS.ReadFile(args.TracePath)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{Status: evidence.StatusUnknown, Reason: ReasonCanceled, Evidence: ev}
+	}
+
+	f, err := deps.FS.Open(args.TracePath)
 	if err != nil {
 		reason := ReasonTraceUnreadable
 		if errors.Is(err, fs.ErrNotExist) {
@@ -241,24 +336,32 @@ func Trace(args Args, deps Deps) Result {
 		}
 		return Result{Status: evidence.StatusUnknown, Reason: reason, Evidence: ev}
 	}
+	defer f.Close()
 
-	if strings.TrimSpace(string(data)) == "" {
-		return Result{Status: evidence.StatusUnknown, Reason: ReasonTraceEmpty, Evidence: ev}
+	parsed, parseErr := parseTraceStream(ctx, f, deps.Limits)
+	if parseErr != nil {
+		reason := ReasonTraceUnreadable
+		if errors.Is(parseErr, context.Canceled) || errors.Is(parseErr, context.DeadlineExceeded) {
+			reason = ReasonCanceled
+		}
+		return Result{Status: evidence.StatusUnknown, Reason: reason, Evidence: ev}
 	}
 
-	parsed := parseTraceLines(data)
+	if parsed.sawNoContent() {
+		return Result{Status: evidence.StatusUnknown, Reason: ReasonTraceEmpty, Evidence: ev}
+	}
 
 	if !parsed.versionHeaderPresent && len(parsed.records) == 0 {
 		// Every non-blank line failed to parse as EITHER a header or a
 		// command record — not a json-v1 trace at all (e.g. a plain
 		// configure log passed in by mistake).
 		return Result{
-			Status:                evidence.StatusUnknown,
-			Reason:                ReasonNotJSONLines,
-			MalformedLineCount:    parsed.malformedCount,
-			InputIncomplete:       parsed.malformedCount > 0,
-			InputIncompleteReason: incompleteReason(parsed.malformedCount),
-			Evidence:              ev,
+			Status:                 evidence.StatusUnknown,
+			Reason:                 ReasonNotJSONLines,
+			MalformedLineCount:     parsed.malformedCount,
+			InputIncomplete:        parsed.incomplete(),
+			InputIncompleteReasons: parsed.incompleteReasons(),
+			Evidence:               ev,
 		}
 	}
 
@@ -278,16 +381,16 @@ func Trace(args Args, deps Deps) Result {
 	}
 
 	base := Result{
-		IncludeChain:          includeChain,
-		Records:               records,
-		ExecutedLines:         executedLines,
-		FilesInTrace:          filesInTrace,
-		MalformedLineCount:    parsed.malformedCount,
-		InputIncomplete:       parsed.malformedCount > 0,
-		InputIncompleteReason: incompleteReason(parsed.malformedCount),
-		VersionHeaderPresent:  parsed.versionHeaderPresent,
-		Truncated:             truncated,
-		Evidence:              ev,
+		IncludeChain:           includeChain,
+		Records:                records,
+		ExecutedLines:          executedLines,
+		FilesInTrace:           filesInTrace,
+		MalformedLineCount:     parsed.malformedCount,
+		InputIncomplete:        parsed.incomplete(),
+		InputIncompleteReasons: parsed.incompleteReasons(),
+		VersionHeaderPresent:   parsed.versionHeaderPresent,
+		Truncated:              truncated,
+		Evidence:               ev,
 	}
 
 	if len(filtered) == 0 {
@@ -298,13 +401,6 @@ func Trace(args Args, deps Deps) Result {
 
 	base.Status = evidence.StatusOK
 	return base
-}
-
-func incompleteReason(malformedCount int) Reason {
-	if malformedCount == 0 {
-		return ""
-	}
-	return ReasonInputMalformed
 }
 
 // filterRecords narrows records to those matching file (exact match) and

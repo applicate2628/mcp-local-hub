@@ -45,9 +45,13 @@ const (
 	// RefShapeBranch: REF is a literal, non-hex token that does not look
 	// like a tag — treated as a branch name.
 	RefShapeBranch RefShape = "branch"
-	// RefShapeVariableResolved: REF as written is a ${VARIABLE} reference.
-	// ResolvedRef carries the literal value recovered from a local set()
-	// in the same portfile (empty when resolution failed).
+	// RefShapeVariableResolved: REF as written CONTAINS one or more ${VARIABLE}
+	// references — either the whole token ("${VTK_GIT_REF}") or an embedded
+	// one ("v${VERSION}", "util-macros-${VERSION}", "${PORT}-${VERSION}").
+	// ResolvedRef carries the fully-substituted literal, and is empty when
+	// ANY variable could not be resolved (see Pin.UnresolvedVariable) — a
+	// partially-expanded ref is never produced, because comparing one against
+	// a remote is how a false "ref does not exist" verdict gets manufactured.
 	RefShapeVariableResolved RefShape = "variable_resolved"
 	// RefShapeNone: no REF field was found at all (malformed/absent).
 	RefShapeNone RefShape = "none"
@@ -61,6 +65,14 @@ type RefValueSource string
 const (
 	RefValueSourceLocalSet RefValueSource = "local_set"
 	RefValueSourceManifest RefValueSource = "manifest"
+	// RefValueSourcePortName: ${PORT}, resolved from the port directory's own
+	// name — one of the two ubiquitous vcpkg ref idioms alongside ${VERSION}.
+	RefValueSourcePortName RefValueSource = "port_name"
+	// RefValueSourceMixed: the token contained SEVERAL variables that
+	// resolved from different sources (e.g. "${PORT}-${VERSION}"). Reported
+	// explicitly rather than left empty, because an empty ResolvedFrom means
+	// "not resolved at all".
+	RefValueSourceMixed RefValueSource = "mixed"
 )
 
 // Reason is populated only when Status == evidence.StatusUnknown. Closed
@@ -121,6 +133,44 @@ const (
 	// ReasonMultipleFetchCalls means several viable source-acquisition calls
 	// exist and none is explicitly bound to SOURCE_PATH.
 	ReasonMultipleFetchCalls Reason = "multiple_fetch_calls"
+	// ReasonRemoteQueryTimeout: the remote query exceeded its deadline —
+	// either the caller's, or this package's own RemoteQueryTimeout backstop.
+	// Distinct from ReasonRemoteQueryFailed because it is a live-remote
+	// LATENCY fact (retry later, or raise the budget), not a broken remote.
+	ReasonRemoteQueryTimeout Reason = "remote_query_timeout"
+	// ReasonRemoteQueryCanceled: the caller canceled before this port's query
+	// finished (or before it started). Says nothing at all about the port —
+	// it is the honest "we stopped looking" verdict, never coerced to ok.
+	ReasonRemoteQueryCanceled Reason = "remote_query_canceled"
+	// ReasonRemoteRefLimit: the remote's ref advertisement exceeded a
+	// configured bound (MaxRemoteRefs, MaxRemoteRefLineBytes, or
+	// MaxRemoteOutputBytes). Reported rather than answered from a truncated
+	// ref set, because a partial set can silently turn "this tag exists" into
+	// "this tag is gone".
+	ReasonRemoteRefLimit Reason = "remote_ref_limit"
+	// ReasonRemoteURLCredentialBearing: the portfile's remote URL embeds a
+	// credential (userinfo, or a secret-shaped query parameter). Querying it
+	// would place that secret in the child process's command line, which is
+	// world-readable on both Windows and Linux for the life of the process,
+	// so the query is refused. Every URL this package EMITS is redacted
+	// regardless (see redact.go); this reason covers the separate argv
+	// channel that redaction cannot reach.
+	ReasonRemoteURLCredentialBearing Reason = "remote_url_credential_bearing"
+)
+
+// BatchReason is the CLOSED enum for the WHOLE CALL's outcome — why the tool
+// invocation itself could not produce per-port answers at all. It is
+// deliberately a separate type from Reason (which is always per-port), so a
+// caller switching exhaustively over per-port reasons is never handed a value
+// that can only occur at the batch level. Same split as
+// cmakewrap.Reason vs cmakegraph.Reason.
+type BatchReason string
+
+const (
+	// BatchReasonNoPortDirs: port_dirs was omitted or empty. An empty batch
+	// is rejected rather than answered with an empty list, which would be
+	// indistinguishable from "checked everything, all fine".
+	BatchReasonNoPortDirs BatchReason = "no_port_dirs"
 )
 
 // Remote is the parsed remote source this port fetches from.
@@ -150,8 +200,21 @@ type Pin struct {
 	// RefShapeVariableResolved.
 	ResolvedRef string `json:"resolved_ref,omitempty"`
 	// ResolvedFrom distinguishes a same-portfile set() from a sibling
-	// vcpkg.json version field when ResolvedRef is populated.
+	// vcpkg.json version field, the port directory name, or a mix, when
+	// ResolvedRef is populated.
 	ResolvedFrom RefValueSource `json:"resolved_from,omitempty"`
+	// UnresolvedVariable names the FIRST ${NAME} this package could not
+	// resolve, when Shape is RefShapeVariableResolved and ResolvedRef is
+	// empty. It is the diagnostic that tells an operator which variable to
+	// supply, instead of leaving them with a bare "unresolvable".
+	UnresolvedVariable string `json:"unresolved_variable,omitempty"`
+	// Literal is true when REF came from a CMake BRACKET argument
+	// ([[...]] / [=[...]=]), whose contents CMake does not interpret. A "${"
+	// inside such a ref is part of the ref NAME, not a variable reference, so
+	// it is compared verbatim on purpose. This bit is what lets the
+	// unexpanded-ref guard distinguish "CMake would have expanded this and we
+	// could not" from "this genuinely is the ref's name".
+	Literal bool `json:"literal,omitempty"`
 }
 
 // FetchCandidate records one recognized source-acquisition call. Candidates
@@ -232,5 +295,16 @@ type Args struct {
 // Result is vcpkg_pin_status's output contract: one PortResult per entry in
 // Args.PortDirs, in input order.
 type Result struct {
+	// Status/Reason describe whether THIS TOOL CALL produced per-port answers
+	// at all — never a per-port verdict (see PortResult.Status/Reason for
+	// those). ok means the batch ran; individual ports may still be unknown.
+	// unknown(no_port_dirs) means there was nothing to run.
+	//
+	// Without this, an omitted port_dirs returned {"ports":[]} — byte-identical
+	// to a successful zero-work call — which violated the every-tool
+	// ok|failed|unknown(reason) contract this binary is built on.
+	Status Status      `json:"status"`
+	Reason BatchReason `json:"reason,omitempty"`
+
 	Ports []PortResult `json:"ports"`
 }

@@ -138,14 +138,19 @@ func registerTools(vs *VcpkgServer) {
 		Name: "vcpkg_pin_status",
 		Description: "Check whether a port's source pin matches what its remote advertises NOW. Verdicts are current or unknown(reason); " +
 			"this tool cannot say \"behind\" because git ls-remote cannot prove a differing pin is an ancestor rather than diverged or rebased away. " +
-			"It is not a staleness checker.",
+			"It is not a staleness checker. The call carries its OWN status/reason separate from each port's: an omitted or empty port_dirs is " +
+			"unknown(no_port_dirs), never an ok result with an empty list. Per-port unknown reasons are a closed enum: not_git_comparable, " +
+			"pin_not_at_tip, ref_unresolvable, ref_not_found_on_remote, named_ref_not_comparable, head_ref_unresolvable, remote_query_failed, " +
+			"remote_query_timeout, remote_query_canceled, remote_ref_limit, remote_url_credential_bearing, network_disabled, portfile_unparsable, " +
+			"guard_unresolvable, multiple_fetch_calls. Remote URLs are redacted on every emitted field, and a credential-bearing remote is " +
+			"refused rather than queried (its secret would otherwise appear in the child process's command line).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"port_dirs": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
-					"description": "Absolute port directories, each expected to contain portfile.cmake.",
+					"description": "Absolute port directories, each expected to contain portfile.cmake. Required and non-empty; an empty batch is refused with unknown(no_port_dirs).",
 				},
 				"disable_network": map[string]any{
 					"type":        "boolean",
@@ -206,7 +211,11 @@ func registerTools(vs *VcpkgServer) {
 	vs.server.AddTool(&mcp.Tool{
 		Name: "vcpkg_cmake_trace",
 		Description: "Read an EXISTING cmake --trace-format=json-v1 trace and report the executed CMake lines, expansions, and include order. " +
-			"Executed lines are positive evidence only: an absent line means \"not observed in this trace\", never \"unreachable\". It never runs cmake.",
+			"Executed lines are positive evidence only: an absent line means \"not observed in this trace\", never \"unreachable\". It never runs cmake. " +
+			"Parsing STREAMS under hard ceilings (total bytes, per-line bytes, records materialized) rather than reading the file whole; any ceiling " +
+			"that trips, and any malformed line, is reported in input_incomplete_reasons[] (closed enum: input_malformed, byte_limit, line_limit, " +
+			"record_limit) so a bounded read is never mistaken for a complete one. Cancellation is observed and returns unknown(canceled) with no " +
+			"partial result. Note truncated (the returned records cap) is a SEPARATE, narrower signal from input_incomplete.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -240,21 +249,27 @@ func registerTools(vs *VcpkgServer) {
 			"enum, and the operator-facing Histogram VERBATIM — this tool does not re-implement or " +
 			"re-interpret resolution. Use root to walk every CMakeLists.txt/*.cmake under a tree as " +
 			"independent roots (the right mode for an overlay-ports tree with no single top-level " +
-			"CMakeLists.txt); use file to walk a single starting file.",
+			"CMakeLists.txt); use file to walk a single starting file. Coverage is always reported, " +
+			"never assumed: unscanned_files[] carries every hole with a CLOSED reason (byte_cap_exceeded, " +
+			"file_unreadable, enumerate_failed, root_outside_workspace, root_enumeration_capped), so a " +
+			"subtree that could not be listed appears there rather than being silently omitted from an " +
+			"apparently-complete graph. Per-edge, dangling means VERIFIED absence only; a target whose " +
+			"existence could not be determined (access denied, sharing violation) is " +
+			"unresolved(target_unreadable).",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"root": map[string]any{
 					"type":        "string",
-					"description": "Directory to walk every entry_names match under as an independent root (cmakegraph.WalkTree). Mutually exclusive with file.",
+					"description": "Directory to walk every entry_names match under as an independent root (cmakegraph.WalkTree). Mutually exclusive with file — supplying BOTH is refused with unknown(args_invalid), never silently resolved in root's favour.",
 				},
 				"file": map[string]any{
 					"type":        "string",
-					"description": "Single file to start the walk from (cmakegraph.Walk). Mutually exclusive with root.",
+					"description": "Single file to start the walk from (cmakegraph.Walk). Mutually exclusive with root — supplying BOTH is refused with unknown(args_invalid).",
 				},
 				"workspace_root": map[string]any{
 					"type":        "string",
-					"description": "Boundary no resolved path may escape, and the value substituted for ${CMAKE_SOURCE_DIR}. Defaults to root, or file's containing directory.",
+					"description": "Boundary no resolved path may escape, and the value substituted for ${CMAKE_SOURCE_DIR}. Honoured in BOTH modes; it may be a parent of root. Defaults to root, or file's containing directory.",
 				},
 				"entry_names": map[string]any{
 					"type":        "array",
@@ -262,8 +277,9 @@ func registerTools(vs *VcpkgServer) {
 					"description": "Root mode only. Defaults to [\"CMakeLists.txt\", \"*.cmake\"].",
 				},
 				"max_depth":      map[string]any{"type": "integer", "description": "Optional traversal depth bound (per root)."},
-				"max_nodes":      map[string]any{"type": "integer", "description": "Optional whole-tree node count bound."},
+				"max_nodes":      map[string]any{"type": "integer", "description": "Optional whole-tree node count bound (root ADMISSION)."},
 				"max_file_bytes": map[string]any{"type": "integer", "description": "Optional per-file byte cap."},
+				"max_roots":      map[string]any{"type": "integer", "description": "Root mode only. Optional bound on how many candidate roots are ENUMERATED before the tree walk stops (root_enumeration_capped). Separate from max_nodes, which bounds admission, not discovery."},
 			},
 		},
 	}, vs.cmakeIncludeGraphTool)
@@ -311,7 +327,7 @@ func (vs *VcpkgServer) pinStatusTool(ctx context.Context, req *mcp.CallToolReque
 			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 		}
 	}
-	res := pinstatus.PinStatus(args, pinstatus.DefaultDeps())
+	res := pinstatus.PinStatus(ctx, args, pinstatus.DefaultDeps())
 	return jsonResult(res)
 }
 
@@ -333,7 +349,7 @@ func (vs *VcpkgServer) cmakeTraceTool(ctx context.Context, req *mcp.CallToolRequ
 			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 		}
 	}
-	res := cmaketrace.Trace(args, cmaketrace.DefaultDeps())
+	res := cmaketrace.Trace(ctx, args, cmaketrace.DefaultDeps())
 	return jsonResult(res)
 }
 
@@ -344,6 +360,6 @@ func (vs *VcpkgServer) cmakeIncludeGraphTool(ctx context.Context, req *mcp.CallT
 			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 		}
 	}
-	res := cmakewrap.RunGraph(args)
+	res := cmakewrap.RunGraph(ctx, args)
 	return jsonResult(res)
 }

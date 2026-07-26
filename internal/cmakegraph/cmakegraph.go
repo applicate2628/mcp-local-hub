@@ -54,9 +54,14 @@
 //     CMakeLists.txt for add_subdirectory()) AND the computation itself
 //     rested only on premises this package can verify (see the sections
 //     below) — never on an invented or invocation-dependent guess.
-//   - StatusDangling: a concrete, verified path was computed but the target
-//     is absent. This is a real finding (a broken include), not a scanner
-//     failure.
+//   - StatusDangling: a concrete, verified path was computed and the target
+//     is VERIFIABLY absent — os.Stat returned fs.ErrNotExist, or the target
+//     exists as the wrong TYPE (a directory where include() needs a file, a
+//     non-directory where add_subdirectory() needs one). This is a real
+//     finding (a broken include), not a scanner failure. An os.Stat that
+//     fails for ANY OTHER reason (access denied, sharing violation,
+//     transient I/O) proves nothing about absence and is
+//     StatusUnresolved/ReasonTargetUnreadable instead — see that constant.
 //   - StatusUnresolved: the scanner could not safely compute a verified path
 //     at all. Reason names exactly why (see the Reason constants) — this is
 //     the scanner declining to guess rather than reporting a wrong
@@ -160,7 +165,12 @@
 // before a quote character closes the string iff N is even — not "look at
 // only the one preceding byte", which mis-parses message("x\\") and can
 // swallow the next real command), bracket arguments (recognized as opaque,
-// not decoded), and — the key structural property — COMMAND NESTING: once
+// not decoded — and, critically, distinguishing "this '[' is not a bracket
+// opener at all" from "this IS a valid opener with no matching close": the
+// second is a syntax breakdown, because treating it as a literal '[' would
+// re-expose the payload's own bytes as executable syntax, letting a ')'
+// inside an unterminated `[=[` close the enclosing call so that a following
+// include() is read as a REAL edge), and — the key structural property — COMMAND NESTING: once
 // the scanner is inside one command's argument-list span (from its `(` to
 // the matching `)`, correctly skipping over quoted/bracket spans and nested
 // balanced parens), it never independently re-recognizes a command-name-
@@ -179,20 +189,48 @@
 // attempted after a genuine syntax breakdown; commands recognized BEFORE the
 // break point are unaffected, and other files are scanned independently.
 //
-// # MaxNodes governs root ADMISSION too, and byte-cap skips are visible
+// # Every coverage hole is REPORTED; bounds are enforced before allocation
 //
-// WalkTree enumerates every candidate root file cheaply (a directory listing
-// is not itself bounded by MaxNodes), but walkRoot refuses to ADMIT
-// (traverse-state-track and scan) a new root once the shared visited set
-// already holds MaxNodes entries — Result.NodeCapTruncated and
-// Result.RootsSkippedByNodeCap make this visible rather than silently
-// scanning every independent root regardless of the configured cap.
-// Separately, a file that could not be read at all (byte-cap trip,
-// permission error, TOCTOU race after a successful Stat) is recorded in
-// Result.UnscannedFiles with its reason — the edge that led to it still
-// carries a genuine StatusResolved (the filesystem fact "this file exists"
-// remains true), but its own outgoing edges are known-missing, not silently
-// absent with no trace.
+// The one thing this package must never do is hand back a partial graph that
+// LOOKS complete. Four distinct bounds and failures can stop it short, and
+// each has its own visible signal:
+//
+//   - MaxRoots bounds WalkTree's candidate-root ENUMERATION, so a tree with
+//     millions of matching files cannot grow the enumeration slice without
+//     bound before a single node is admitted (Result.RootEnumerationCapped).
+//   - MaxNodes gates root ADMISSION, not just edge traversal within an
+//     already-admitted root (Result.NodeCapTruncated,
+//     Result.RootsSkippedByNodeCap).
+//   - A subtree that cannot be ENUMERATED (an ACL-denied directory) is
+//     recorded as a CoverageEnumerateFailed hole and enumeration continues;
+//     a failure to enumerate the ROOT ITSELF is fatal and returns an error,
+//     because "no matching files here" and "could not look" are different
+//     answers and only one of them is evidence.
+//   - A file that could not be READ (byte-cap trip, permission error, TOCTOU
+//     race after a successful Stat) is recorded as a coverage hole with its
+//     closed CoverageReason — the edge that led to it still carries a genuine
+//     StatusResolved (the filesystem fact "this file exists" remains true),
+//     but its own outgoing edges are known-missing, not silently absent.
+//
+// Every one of those holes goes through ONE recorder (walker.recordCoverage)
+// into Result.UnscannedFiles, so a caller has a single place to look and no
+// future code path can drop a hole by forgetting to append.
+//
+// # The workspace boundary is enforced before the first read
+//
+// An enumerated root is canonicalized (symlinks resolved) and checked against
+// the workspace boundary BEFORE os.Stat or any read: a matching *.cmake entry
+// inside the tree may be a symlink pointing outside it, and opening it to
+// find that out would already have performed the read the boundary exists to
+// prevent. Such a root is refused and recorded, never scanned.
+//
+// # Cancellation
+//
+// Walk/WalkTree take a context and check it between roots, between files, and
+// between commands within a file. A canceled or timed-out walk RETURNS the
+// error rather than handing back the partial graph it had accumulated —
+// truncation is only ever reported through the coverage signals above, and a
+// caller must never have to guess which of the two it received.
 //
 // # Known, documented simplifications
 //
@@ -222,6 +260,7 @@ package cmakegraph
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -302,6 +341,42 @@ const (
 	// scanned as an independent discovery root) — this package refuses to
 	// invent one.
 	ReasonUnverifiedSourceDir Reason = "unverified_source_dir"
+	// ReasonTargetUnreadable: a concrete, verified path was computed but the
+	// filesystem could not tell us whether it EXISTS — os.Stat failed with
+	// something other than fs.ErrNotExist (access denied, a sharing
+	// violation, a transient I/O error, a too-long path). StatusDangling
+	// means VERIFIED ABSENCE and must never be used for that: an unreadable
+	// target is an unknown target, so it fails closed here instead.
+	ReasonTargetUnreadable Reason = "target_unreadable"
+)
+
+// CoverageReason is the CLOSED set of ways this package can fail to cover
+// part of the tree it was asked about. Every value here means "we know we
+// did NOT look at this", never "there was nothing here" — the whole point of
+// Result.UnscannedFiles is that a caller can tell those two apart.
+type CoverageReason string
+
+const (
+	// CoverageByteCapExceeded: the file is larger than Options.MaxFileBytes,
+	// so its content — and therefore its own outgoing edges — was never read.
+	CoverageByteCapExceeded CoverageReason = "byte_cap_exceeded"
+	// CoverageFileUnreadable: opening or reading the file failed (permission
+	// error, a TOCTOU race after a successful Stat, an I/O error).
+	CoverageFileUnreadable CoverageReason = "file_unreadable"
+	// CoverageEnumerateFailed: a directory subtree under WalkTree's root
+	// could not be enumerated (typically an ACL-denied directory). Any
+	// matching CMake file inside it was never discovered, so the returned
+	// graph is INCOMPLETE — it is not evidence that the subtree held nothing.
+	CoverageEnumerateFailed CoverageReason = "enumerate_failed"
+	// CoverageRootOutsideWorkspace: an enumerated root canonicalized (after
+	// symlink resolution) to a path outside the workspace boundary and was
+	// refused BEFORE any Stat or read. The boundary is the contract; a
+	// symlinked entry inside the tree does not get to escape it.
+	CoverageRootOutsideWorkspace CoverageReason = "root_outside_workspace"
+	// CoverageRootEnumerationCapped: Options.MaxRoots was reached while
+	// enumerating candidate roots, so enumeration stopped early. Path names
+	// the directory the walk was in when the cap tripped.
+	CoverageRootEnumerationCapped CoverageReason = "root_enumeration_capped"
 )
 
 // EdgeKind distinguishes the two directives this package tracks.
@@ -350,14 +425,18 @@ type Histogram struct {
 	ByReason   map[Reason]int
 }
 
-// UnscannedFile records a file this package could not read at all (byte-cap
-// trip, permission error, or a TOCTOU race after a successful Stat) — its
-// own outgoing edges are therefore known-missing from the Result, not
-// silently absent. Path is best-effort (absolute, symlink-resolved when
-// possible).
+// UnscannedFile records one COVERAGE HOLE: a file or subtree this package
+// knows it did not look inside. Whatever is behind it (edges, further files)
+// is known-missing from the Result, never silently absent. Path is
+// best-effort (absolute, symlink-resolved when possible).
+//
+// Reason is a CLOSED enum (see CoverageReason) so a caller can switch on it;
+// Detail carries the underlying error text for a human and is diagnostic
+// only — never parse it, never branch on it.
 type UnscannedFile struct {
 	Path   string
-	Reason string
+	Reason CoverageReason
+	Detail string
 }
 
 // Result is the full output of one Walk or WalkTree call.
@@ -381,8 +460,16 @@ type Result struct {
 	// RootsSkippedByNodeCap counts how many independent roots were refused
 	// admission for that reason.
 	RootsSkippedByNodeCap int
-	// UnscannedFiles lists every file whose CONTENT could not be read (byte
-	// cap, permission error, race) — see UnscannedFile's doc.
+	// RootEnumerationCapped is true iff WalkTree stopped ENUMERATING candidate
+	// roots because Options.MaxRoots was reached. Distinct from
+	// NodeCapTruncated: that one means "enumerated but not admitted", this one
+	// means "never even enumerated", so the number skipped is unknowable by
+	// construction. Either way the graph is incomplete.
+	RootEnumerationCapped bool
+	// UnscannedFiles lists every COVERAGE HOLE — a file whose content could
+	// not be read, a subtree that could not be enumerated, a root refused for
+	// escaping the workspace, and the point enumeration was capped at. See
+	// UnscannedFile's doc.
 	UnscannedFiles []UnscannedFile
 }
 
@@ -391,6 +478,12 @@ type Options struct {
 	MaxDepth     int
 	MaxNodes     int
 	MaxFileBytes int64
+	// MaxRoots bounds how many candidate root paths WalkTree will ENUMERATE
+	// (and therefore hold in memory) before it stops walking the tree. It is
+	// deliberately separate from MaxNodes: enumeration happens before, and is
+	// far cheaper per item than, admission, so collapsing the two would make
+	// the admission gate unreachable whenever every root is a leaf.
+	MaxRoots int
 }
 
 // Default bounds. These are deliberately conservative: this package parses
@@ -400,11 +493,17 @@ const (
 	DefaultMaxDepth     = 64
 	DefaultMaxNodes     = 20000
 	DefaultMaxFileBytes = 4 << 20 // 4 MiB
+	// DefaultMaxRoots bounds WalkTree's candidate-root enumeration. Sized
+	// well above DefaultMaxNodes so the node-cap admission gate stays the
+	// binding constraint on a normal tree, while a pathological tree
+	// (millions of matching files) can no longer grow the enumeration slice
+	// without bound before a single node is admitted.
+	DefaultMaxRoots = 200000
 )
 
 // DefaultOptions returns the recommended bounds for a typical project tree.
 func DefaultOptions() Options {
-	return Options{MaxDepth: DefaultMaxDepth, MaxNodes: DefaultMaxNodes, MaxFileBytes: DefaultMaxFileBytes}
+	return Options{MaxDepth: DefaultMaxDepth, MaxNodes: DefaultMaxNodes, MaxFileBytes: DefaultMaxFileBytes, MaxRoots: DefaultMaxRoots}
 }
 
 func (o Options) normalized() Options {
@@ -417,6 +516,9 @@ func (o Options) normalized() Options {
 	if o.MaxFileBytes <= 0 {
 		o.MaxFileBytes = DefaultMaxFileBytes
 	}
+	if o.MaxRoots <= 0 {
+		o.MaxRoots = DefaultMaxRoots
+	}
 	return o
 }
 
@@ -425,11 +527,15 @@ func (o Options) normalized() Options {
 // the hard boundary no resolved path may escape (ReasonOutsideWorkspace
 // otherwise) and the value substituted for ${CMAKE_SOURCE_DIR}. Read-only:
 // never writes, never executes cmake, never shells out.
-func Walk(startFile, workspaceRoot string, opts Options) (*Result, error) {
+//
+// ctx bounds the walk: a scan of a pathological tree is abandoned as soon as
+// the caller cancels or its deadline expires, and the error is RETURNED
+// rather than a partial graph being handed back as if it were complete.
+func Walk(ctx context.Context, startFile, workspaceRoot string, opts Options) (*Result, error) {
 	if strings.TrimSpace(startFile) == "" {
 		return nil, errors.New("cmakegraph: startFile is required")
 	}
-	w, err := newWalker(workspaceRoot, opts)
+	w, err := newWalker(ctx, workspaceRoot, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -437,14 +543,34 @@ func Walk(startFile, workspaceRoot string, opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := w.ctx.Err(); err != nil {
+		return nil, fmt.Errorf("cmakegraph: walk %s: %w", absStart, err)
+	}
 	return w.result(absStart), nil
 }
 
 // WalkTree finds EVERY file under root matching one of entryNames and walks
 // each as an independent root, sharing ONE traversal state across all of
 // them — so a file is scanned at most once PER DISTINCT SOURCE CONTEXT
-// regardless of how many roots would reach it. workspaceRoot for every
-// constituent walk is root itself.
+// regardless of how many roots would reach it.
+//
+// workspaceRoot is the boundary + ${CMAKE_SOURCE_DIR} value for every
+// constituent walk; it defaults to root when empty. It may be a PARENT of
+// root — that is the point of taking it separately: a caller scanning one
+// subdirectory of a larger workspace gets includes that reach elsewhere in
+// that workspace resolved, instead of falsely reported as escaping it. root
+// itself must lie within workspaceRoot, or WalkTree returns an error rather
+// than enumerating a tree whose every hit it would then have to refuse.
+//
+// # Coverage is reported, never assumed
+//
+// A subtree that cannot be enumerated (an ACL-denied directory) is recorded
+// as a CoverageEnumerateFailed hole in Result.UnscannedFiles and enumeration
+// continues; a failure to enumerate the ROOT ITSELF is fatal and returns an
+// error, because "no matching files" and "could not look" are not the same
+// answer. Enumeration is bounded by Options.MaxRoots
+// (Result.RootEnumerationCapped) so a tree with millions of matching files
+// cannot exhaust memory before the first node is even admitted.
 //
 // entryNames entries are either an exact basename (case-insensitive, e.g.
 // "CMakeLists.txt") or an extension pattern "*.ext" (case-insensitive, e.g.
@@ -460,36 +586,76 @@ func Walk(startFile, workspaceRoot string, opts Options) (*Result, error) {
 // WHOLE-TREE bound shared across every root in this call, enforced at ROOT
 // ADMISSION too (see Result.NodeCapTruncated) — not only when following an
 // edge within an already-admitted root.
-func WalkTree(root string, entryNames []string, opts Options) (*Result, error) {
+func WalkTree(ctx context.Context, root, workspaceRoot string, entryNames []string, opts Options) (*Result, error) {
 	if len(entryNames) == 0 {
 		return nil, errors.New("cmakegraph: entryNames must be non-empty")
 	}
-	w, err := newWalker(root, opts)
+	if strings.TrimSpace(root) == "" {
+		return nil, errors.New("cmakegraph: root is required")
+	}
+	if strings.TrimSpace(workspaceRoot) == "" {
+		workspaceRoot = root
+	}
+	w, err := newWalker(ctx, workspaceRoot, opts)
 	if err != nil {
 		return nil, err
 	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("cmakegraph: resolve tree root: %w", err)
+	}
+	if !w.withinWorkspace(absRoot) {
+		return nil, fmt.Errorf("cmakegraph: tree root %s is outside workspace root %s", absRoot, w.workspaceRoot)
+	}
+
 	var starts []string
-	walkErr := filepath.WalkDir(w.workspaceRoot, func(path string, d fs.DirEntry, err error) error {
+	rootEnumerationFailed := error(nil)
+	walkErr := filepath.WalkDir(absRoot, func(path string, d fs.DirEntry, err error) error {
+		if ctxErr := w.ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
-			// Best-effort: an unreadable entry is skipped, not fatal.
+			if path == absRoot {
+				// Could not enumerate the ROOT. Returning an empty,
+				// apparently-complete graph here would assert "this tree has
+				// no CMake files", which we have no evidence for.
+				rootEnumerationFailed = err
+				return err
+			}
+			// A subtree we could not look inside. Skipped, but RECORDED —
+			// whatever matching files it held are missing from the graph.
+			w.recordCoverage(path, CoverageEnumerateFailed, err.Error())
 			return nil
 		}
-		if !d.IsDir() && matchesEntry(d.Name(), entryNames) {
-			starts = append(starts, path)
+		if d.IsDir() || !matchesEntry(d.Name(), entryNames) {
+			return nil
 		}
+		if len(starts) >= w.opts.MaxRoots {
+			w.rootEnumerationCapped = true
+			w.recordCoverage(filepath.Dir(path), CoverageRootEnumerationCapped,
+				fmt.Sprintf("stopped enumerating candidate roots at MaxRoots=%d", w.opts.MaxRoots))
+			return fs.SkipAll
+		}
+		starts = append(starts, path)
 		return nil
 	})
+	if rootEnumerationFailed != nil {
+		return nil, fmt.Errorf("cmakegraph: enumerate entry files under %s: %w", absRoot, rootEnumerationFailed)
+	}
 	if walkErr != nil {
-		return nil, fmt.Errorf("cmakegraph: enumerate entry files under %s: %w", w.workspaceRoot, walkErr)
+		return nil, fmt.Errorf("cmakegraph: enumerate entry files under %s: %w", absRoot, walkErr)
 	}
 	sort.Strings(starts) // deterministic root order, so a shared file's edge always attributes to the same first-seen context
 
 	for _, s := range starts {
+		if err := w.ctx.Err(); err != nil {
+			return nil, fmt.Errorf("cmakegraph: walk %s: %w", absRoot, err)
+		}
 		if _, err := w.walkRoot(s); err != nil {
 			return nil, fmt.Errorf("cmakegraph: walk %s: %w", s, err)
 		}
 	}
-	return w.result(w.workspaceRoot), nil
+	return w.result(absRoot), nil
 }
 
 // matchesEntry reports whether name (a bare file basename) matches one of
@@ -550,6 +716,7 @@ func dedupCtx(ctx sourceContext) sourceContext {
 // walker carries traversal state SHARED across every root walked in one Walk
 // or WalkTree call.
 type walker struct {
+	ctx                   context.Context
 	opts                  Options
 	workspaceRoot         string // absolute, NOT symlink-resolved (used for ${CMAKE_SOURCE_DIR} substitution)
 	realWorkspaceRoot     string // symlink-resolved, used for the boundary check
@@ -559,10 +726,14 @@ type walker struct {
 	unscanned             []UnscannedFile
 	nodeCapTruncated      bool
 	rootsSkippedByNodeCap int
+	rootEnumerationCapped bool
 }
 
 // newWalker validates workspaceRoot and constructs empty shared traversal state.
-func newWalker(workspaceRoot string, opts Options) (*walker, error) {
+func newWalker(ctx context.Context, workspaceRoot string, opts Options) (*walker, error) {
+	if ctx == nil {
+		return nil, errors.New("cmakegraph: ctx is required")
+	}
 	if strings.TrimSpace(workspaceRoot) == "" {
 		return nil, errors.New("cmakegraph: workspaceRoot is required (it is the hard outside_workspace boundary and the ${CMAKE_SOURCE_DIR} value)")
 	}
@@ -575,12 +746,26 @@ func newWalker(workspaceRoot string, opts Options) (*walker, error) {
 		realRoot = resolved
 	}
 	return &walker{
+		ctx:               ctx,
 		opts:              opts.normalized(),
 		workspaceRoot:     absRoot,
 		realWorkspaceRoot: realRoot,
 		visited:           map[visitKey]bool{},
 		files:             map[string]bool{},
 	}, nil
+}
+
+// recordCoverage is the SINGLE owner of Result.UnscannedFiles. Every coverage
+// hole this package can produce — an unreadable file, an unenumerable
+// subtree, a root refused at the workspace boundary, the point enumeration
+// was capped — goes through here, so no future path can quietly drop a hole
+// on the floor by forgetting to append.
+func (w *walker) recordCoverage(path string, reason CoverageReason, detail string) {
+	w.unscanned = append(w.unscanned, UnscannedFile{
+		Path:   w.canonicalize(path),
+		Reason: reason,
+		Detail: detail,
+	})
 }
 
 // walkRoot validates startFile and scans it as a fresh traversal root —
@@ -591,10 +776,22 @@ func newWalker(workspaceRoot string, opts Options) (*walker, error) {
 // a genuine directory-scope root (own directory = CMAKE_CURRENT_SOURCE_DIR);
 // any other filename (an arbitrary *.cmake discovery root) is UNVERIFIED —
 // see the package doc. Returns the absolute path of startFile.
+//
+// The workspace boundary is enforced HERE, on the CANONICAL (symlink-resolved)
+// path, BEFORE os.Stat or any read: an enumerated tree entry may be a symlink
+// whose target lies outside the workspace, and opening it to find that out
+// would already have leaked the read the boundary exists to prevent. Such a
+// root is refused and recorded as a coverage hole, not scanned.
 func (w *walker) walkRoot(startFile string) (string, error) {
 	absStart, err := filepath.Abs(startFile)
 	if err != nil {
 		return "", fmt.Errorf("cmakegraph: resolve start file: %w", err)
+	}
+	canonStart := w.canonicalize(absStart)
+	if !w.withinWorkspace(canonStart) {
+		w.recordCoverage(canonStart, CoverageRootOutsideWorkspace,
+			fmt.Sprintf("root %s resolves outside workspace root %s", canonStart, w.realWorkspaceRoot))
+		return absStart, nil
 	}
 	if fi, statErr := os.Stat(absStart); statErr != nil || fi.IsDir() {
 		if statErr != nil {
@@ -602,7 +799,6 @@ func (w *walker) walkRoot(startFile string) (string, error) {
 		}
 		return "", fmt.Errorf("cmakegraph: start file %s is a directory, want a file", absStart)
 	}
-	canonStart := w.canonicalize(absStart)
 	verified := strings.EqualFold(filepath.Base(canonStart), "CMakeLists.txt")
 	ctx := sourceContext{dir: filepath.Dir(canonStart), verified: verified}
 	key := visitKey{file: canonStart, ctx: dedupCtx(ctx)}
@@ -647,6 +843,7 @@ func (w *walker) result(root string) *Result {
 		Histogram:             hist,
 		NodeCapTruncated:      w.nodeCapTruncated,
 		RootsSkippedByNodeCap: w.rootsSkippedByNodeCap,
+		RootEnumerationCapped: w.rootEnumerationCapped,
 		UnscannedFiles:        w.unscanned,
 	}
 }
@@ -657,9 +854,12 @@ func (w *walker) result(root string) *Result {
 // ancestors is the current DFS path (canonical file paths, context-
 // independent — see the package doc) used for true-cycle detection.
 func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors []string) {
+	if w.ctx.Err() != nil {
+		return
+	}
 	data, err := readBounded(file, w.opts.MaxFileBytes)
 	if err != nil {
-		w.unscanned = append(w.unscanned, UnscannedFile{Path: w.canonicalize(file), Reason: err.Error()})
+		w.recordCoverage(file, readCoverageReason(err), err.Error())
 		return
 	}
 	canonSelf := w.canonicalize(file)
@@ -668,6 +868,9 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 	condDepth := 0
 	macroDepth := 0
 	for _, c := range scanTopLevelCommands(data) {
+		if w.ctx.Err() != nil {
+			return
+		}
 		switch c.Name {
 		case "if":
 			condDepth++
@@ -731,19 +934,31 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 		e.ResolvedPath = candidate
 
 		var targetFile string
-		var exists bool
+		var exists, unreadable bool
 		var newCtx sourceContext
 		switch kind {
 		case EdgeInclude:
-			if fi, statErr := os.Stat(candidate); statErr == nil && !fi.IsDir() {
+			fi, statErr := os.Stat(candidate)
+			switch {
+			case statErr != nil && !errors.Is(statErr, fs.ErrNotExist):
+				unreadable = true
+			case statErr == nil && !fi.IsDir():
 				exists = true
 				targetFile = candidate
 			}
 			newCtx = ctx // include() never changes CMAKE_CURRENT_SOURCE_DIR
 		case EdgeAddSubdirectory:
-			if fi, statErr := os.Stat(candidate); statErr == nil && fi.IsDir() {
+			fi, statErr := os.Stat(candidate)
+			switch {
+			case statErr != nil && !errors.Is(statErr, fs.ErrNotExist):
+				unreadable = true
+			case statErr == nil && fi.IsDir():
 				cml := filepath.Join(candidate, "CMakeLists.txt")
-				if cfi, cerr := os.Stat(cml); cerr == nil && !cfi.IsDir() {
+				cfi, cerr := os.Stat(cml)
+				switch {
+				case cerr != nil && !errors.Is(cerr, fs.ErrNotExist):
+					unreadable = true
+				case cerr == nil && !cfi.IsDir():
 					exists = true
 					targetFile = cml
 				}
@@ -756,6 +971,15 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 			newCtx = sourceContext{dir: candidate, verified: true}
 		}
 
+		if unreadable {
+			// The filesystem refused to tell us whether the target exists.
+			// StatusDangling asserts VERIFIED ABSENCE, which we do not have —
+			// fail closed instead (see ReasonTargetUnreadable).
+			e.Status = StatusUnresolved
+			e.Reason = ReasonTargetUnreadable
+			w.edges = append(w.edges, e)
+			continue
+		}
 		if !exists {
 			e.Status = StatusDangling
 			w.edges = append(w.edges, e)
@@ -854,6 +1078,11 @@ func realOrNearestAncestor(p string) string {
 	}
 }
 
+// errByteCapExceeded is the sentinel readBounded returns when a file is
+// larger than Options.MaxFileBytes, so readCoverageReason can classify that
+// case by identity (errors.Is) rather than by matching an error STRING.
+var errByteCapExceeded = errors.New("cmakegraph: file exceeds byte cap")
+
 func readBounded(path string, maxBytes int64) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -865,9 +1094,21 @@ func readBounded(path string, maxBytes int64) ([]byte, error) {
 		return nil, err
 	}
 	if info.Size() > maxBytes {
-		return nil, fmt.Errorf("cmakegraph: %s exceeds byte cap (%d > %d)", path, info.Size(), maxBytes)
+		return nil, fmt.Errorf("%w: %s (%d > %d)", errByteCapExceeded, path, info.Size(), maxBytes)
 	}
-	return io.ReadAll(f)
+	// io.LimitReader is belt-and-braces against a file that GREW between the
+	// Stat above and the read: the size check alone is a TOCTOU window.
+	return io.ReadAll(io.LimitReader(f, maxBytes))
+}
+
+// readCoverageReason maps a readBounded error onto the CLOSED CoverageReason
+// enum. Single owner: every caller records the hole through recordCoverage
+// with the reason this function returns.
+func readCoverageReason(err error) CoverageReason {
+	if errors.Is(err, errByteCapExceeded) {
+		return CoverageByteCapExceeded
+	}
+	return CoverageFileUnreadable
 }
 
 // --- classification ------------------------------------------------------
@@ -1060,10 +1301,22 @@ func scanArgList(data []byte, start int) (int, bool) {
 		case c == '\\':
 			i += 2
 		case c == '[':
-			if end, ok := skipBracketArg(data, i); ok {
-				i = end
-			} else {
+			end, opener, closed := skipBracketArg(data, i)
+			switch {
+			case !opener:
 				i++ // a literal '[' outside any bracket-open sequence
+			case !closed:
+				// A RECOGNIZED bracket-argument opener with no matching
+				// close. Its contents are, by CMake's grammar, uninterpreted
+				// text — so falling through to treat the '[' as a literal
+				// would hand the payload's own bytes back to the scanner as
+				// executable syntax: a ')' inside the payload would close
+				// THIS call and whatever followed would be read as a fresh
+				// top-level command. The file's syntax is broken from here
+				// on; say so and stop, exactly as for an unbalanced paren.
+				return len(data), false
+			default:
+				i = end
 			}
 		case c == '#':
 			if contentStart, eq, ok := matchBracketOpen(data, i+1); ok {
@@ -1148,18 +1401,27 @@ func findBracketClose(data []byte, from, eqCount int) int {
 }
 
 // skipBracketArg skips a full bracket-argument span starting at data[i]=='['.
-// ok is false if data[i] does not actually begin a valid bracket-open
-// sequence, or if no matching close is found before EOF.
-func skipBracketArg(data []byte, i int) (int, bool) {
+//
+// It reports THREE distinct outcomes, because collapsing the last two into a
+// single "not ok" is a correctness bug (see scanArgList):
+//
+//   - opener=false: data[i] does not begin a bracket-open sequence at all.
+//     It is an ordinary literal '['; the caller should just step over it.
+//   - opener=true, closed=false: a VALID opener whose matching "]"+"="*N+"]"
+//     never appears before EOF. The argument is unterminated, so nothing
+//     after it can be interpreted — the caller must treat the call as
+//     malformed, never resume scanning inside the payload.
+//   - opener=true, closed=true: end is the offset just past the close.
+func skipBracketArg(data []byte, i int) (end int, opener, closed bool) {
 	contentStart, eq, ok := matchBracketOpen(data, i)
 	if !ok {
-		return i, false
+		return i, false, false
 	}
-	end := findBracketClose(data, contentStart, eq)
-	if end < 0 {
-		return len(data), false
+	closeEnd := findBracketClose(data, contentStart, eq)
+	if closeEnd < 0 {
+		return len(data), true, false
 	}
-	return end, true
+	return closeEnd, true, true
 }
 
 func isIdentStart(c byte) bool {

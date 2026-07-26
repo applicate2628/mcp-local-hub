@@ -71,7 +71,18 @@ var knownArgKeys = map[string]bool{
 }
 
 var (
-	variableRefRE = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
+	// embeddedVarRE matches a ${NAME} reference ANYWHERE in a token.
+	//
+	// It deliberately replaces an earlier ANCHORED `^\$\{...\}$` pattern that
+	// matched only a token consisting of NOTHING BUT one variable. That
+	// anchoring was the root cause of a field-reported P1: "${VTK_GIT_REF}"
+	// matched and was correctly reported unresolvable, while the far more
+	// common "v${VERSION}" did not match, fell through to the literal-token
+	// path, and was then compared VERBATIM against the remote's ref names —
+	// producing a confident "this ref does not exist upstream" for refs that
+	// do exist. A wrong negative is the worst output this contract can
+	// produce, so containment, not equality, is the correct test.
+	embeddedVarRE = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 	commitHexRE   = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 	tagLikeRE     = regexp.MustCompile(`^v?[0-9]+(\.[0-9]+){1,3}`)
 )
@@ -410,18 +421,97 @@ func resolveSetVariable(content, varName string) (string, bool) {
 	return "", false
 }
 
-func resolveMaybeVariable(content string, raw argValue) (value string, wasVar, ok bool) {
+// expandVariables is the SINGLE OWNER of ${NAME} substitution for every
+// variable-bearing portfile field (REF, HEAD_REF, REPO, URL, GITLAB_URL).
+// They previously each went through the anchored whole-token regex, so the
+// same wrong-negative defect existed on every one of them; routing them all
+// through here is what makes the fix cover the class rather than one field.
+//
+// Resolution order per variable, most specific first:
+//  1. a set(NAME ...) in the SAME portfile,
+//  2. ${VERSION} from the sibling vcpkg.json,
+//  3. ${PORT} from the port directory's own name.
+//
+// It fails CLOSED and TOTALLY: if any single variable cannot be resolved,
+// ok is false and unresolved names it. A partially-expanded string is never
+// returned, because a partially-expanded string compared against a remote is
+// exactly how a wrong negative is manufactured.
+func expandVariables(content string, manifest []byte, portName, text string) (expanded string, source RefValueSource, unresolved string, ok bool) {
+	if !strings.Contains(text, "${") {
+		return text, "", "", true
+	}
+	sources := map[RefValueSource]bool{}
+	expanded = embeddedVarRE.ReplaceAllStringFunc(text, func(match string) string {
+		if unresolved != "" {
+			return match
+		}
+		name := embeddedVarRE.FindStringSubmatch(match)[1]
+		value, src, resolved := resolveRefVariable(content, manifest, portName, name)
+		if !resolved {
+			unresolved = name
+			return match
+		}
+		sources[src] = true
+		return value
+	})
+	if unresolved != "" {
+		return "", "", unresolved, false
+	}
+	// A substituted value may itself contain a variable reference (e.g.
+	// set(A "${B}")). One pass is deliberate — refusing is honest, whereas
+	// looping risks a cycle and returning the half-expanded text would be
+	// the very defect this function exists to prevent.
+	if strings.Contains(expanded, "${") {
+		if m := embeddedVarRE.FindStringSubmatch(expanded); m != nil {
+			return "", "", m[1], false
+		}
+		return "", "", "nested_expansion", false
+	}
+	return expanded, singleSource(sources), "", true
+}
+
+// singleSource reports the one source every substitution came from, or
+// RefValueSourceMixed when a token drew on several. It is never left empty
+// for a successful expansion — an empty ResolvedFrom means "not resolved".
+func singleSource(sources map[RefValueSource]bool) RefValueSource {
+	switch len(sources) {
+	case 0:
+		return ""
+	case 1:
+		for s := range sources {
+			return s
+		}
+	}
+	return RefValueSourceMixed
+}
+
+func resolveRefVariable(content string, manifest []byte, portName, name string) (string, RefValueSource, bool) {
+	if value, ok := resolveSetVariable(content, name); ok {
+		return value, RefValueSourceLocalSet, true
+	}
+	switch name {
+	case "VERSION":
+		if value := manifestVersion(manifest); value != "" {
+			return value, RefValueSourceManifest, true
+		}
+	case "PORT":
+		if portName != "" {
+			return portName, RefValueSourcePortName, true
+		}
+	}
+	return "", "", false
+}
+
+func resolveMaybeVariable(content string, manifest []byte, portName string, raw argValue) (value string, wasVar, ok bool) {
 	text := strings.TrimSpace(raw.Text)
 	if text == "" {
 		return "", false, false
 	}
-	if !raw.Raw {
-		if m := variableRefRE.FindStringSubmatch(text); m != nil {
-			value, ok := resolveSetVariable(content, m[1])
-			return value, true, ok
-		}
+	if raw.Raw || !strings.Contains(text, "${") {
+		return text, false, true
 	}
-	return text, false, true
+	expanded, _, _, expandedOK := expandVariables(content, manifest, portName, text)
+	return expanded, true, expandedOK
 }
 
 func manifestVersion(data []byte) string {
@@ -437,36 +527,35 @@ func manifestVersion(data []byte) string {
 	return ""
 }
 
-func buildPin(content string, manifest []byte, ref argValue) Pin {
+func buildPin(content string, manifest []byte, portName string, ref argValue) Pin {
 	refRaw := strings.TrimSpace(ref.Text)
 	if refRaw == "" {
 		return Pin{Shape: RefShapeNone}
 	}
-	if !ref.Raw {
-		if m := variableRefRE.FindStringSubmatch(refRaw); m != nil {
-			pin := Pin{Ref: refRaw, Shape: RefShapeVariableResolved}
-			if value, ok := resolveSetVariable(content, m[1]); ok {
-				pin.ResolvedRef, pin.ResolvedFrom = value, RefValueSourceLocalSet
-			} else if m[1] == "VERSION" {
-				if value := manifestVersion(manifest); value != "" {
-					pin.ResolvedRef, pin.ResolvedFrom = value, RefValueSourceManifest
-				}
-			}
+	// A bracket argument ([[...]]) is uninterpreted CMake text, so ${...}
+	// inside it is literal and must NOT be expanded.
+	if !ref.Raw && strings.Contains(refRaw, "${") {
+		pin := Pin{Ref: refRaw, Shape: RefShapeVariableResolved}
+		expanded, source, unresolved, ok := expandVariables(content, manifest, portName, refRaw)
+		if !ok {
+			pin.UnresolvedVariable = unresolved
 			return pin
 		}
+		pin.ResolvedRef, pin.ResolvedFrom = expanded, source
+		return pin
 	}
 	if isCommitHex(refRaw) {
-		return Pin{Ref: refRaw, Shape: RefShapeCommit40Hex}
+		return Pin{Ref: refRaw, Shape: RefShapeCommit40Hex, Literal: ref.Raw}
 	}
 	if looksLikeTag(refRaw) {
-		return Pin{Ref: refRaw, Shape: RefShapeTag}
+		return Pin{Ref: refRaw, Shape: RefShapeTag, Literal: ref.Raw}
 	}
-	return Pin{Ref: refRaw, Shape: RefShapeBranch}
+	return Pin{Ref: refRaw, Shape: RefShapeBranch, Literal: ref.Raw}
 }
 
-func parseFetchCandidate(name, content string, manifest []byte, args string) FetchCandidate {
+func parseFetchCandidate(name, content string, manifest []byte, portName, args string) FetchCandidate {
 	kv := extractKeyedArgValues(tokenize(args))
-	headRef, headRefWasVariable, headRefResolved := resolveMaybeVariable(content, kv["HEAD_REF"])
+	headRef, headRefWasVariable, headRefResolved := resolveMaybeVariable(content, manifest, portName, kv["HEAD_REF"])
 	candidate := FetchCandidate{HeadRef: headRef, BindsSourcePath: kv["OUT_SOURCE_PATH"].Text == "SOURCE_PATH"}
 	if headRefWasVariable && !headRefResolved {
 		candidate.UnresolvedHeadRefVariable = unresolvedVariableName(kv["HEAD_REF"])
@@ -475,31 +564,31 @@ func parseFetchCandidate(name, content string, manifest []byte, args string) Fet
 	case "vcpkg_download_distfile":
 		candidate.Remote = Remote{Kind: RemoteDistfile}
 	case "vcpkg_from_github":
-		repo, _, _ := resolveMaybeVariable(content, kv["REPO"])
+		repo, _, _ := resolveMaybeVariable(content, manifest, portName, kv["REPO"])
 		candidate.Remote = Remote{Kind: RemoteGitHub, Repo: repo}
 		if repo != "" {
 			candidate.Remote.URL = "https://github.com/" + repo + ".git"
 		}
-		candidate.Pin = buildPin(content, manifest, kv["REF"])
+		candidate.Pin = buildPin(content, manifest, portName, kv["REF"])
 	case "vcpkg_from_git":
-		url, _, _ := resolveMaybeVariable(content, kv["URL"])
+		url, _, _ := resolveMaybeVariable(content, manifest, portName, kv["URL"])
 		candidate.Remote = Remote{Kind: RemoteGit, URL: url}
-		candidate.Pin = buildPin(content, manifest, kv["REF"])
+		candidate.Pin = buildPin(content, manifest, portName, kv["REF"])
 	case "vcpkg_from_gitlab":
 		gitlabURL := "https://gitlab.com"
 		if strings.TrimSpace(kv["GITLAB_URL"].Text) != "" {
-			if value, _, ok := resolveMaybeVariable(content, kv["GITLAB_URL"]); ok {
+			if value, _, ok := resolveMaybeVariable(content, manifest, portName, kv["GITLAB_URL"]); ok {
 				gitlabURL = value
 			} else {
 				gitlabURL = ""
 			}
 		}
-		repo, _, _ := resolveMaybeVariable(content, kv["REPO"])
+		repo, _, _ := resolveMaybeVariable(content, manifest, portName, kv["REPO"])
 		candidate.Remote = Remote{Kind: RemoteGitLab, Repo: repo}
 		if repo != "" && gitlabURL != "" {
 			candidate.Remote.URL = strings.TrimRight(gitlabURL, "/") + "/" + repo + ".git"
 		}
-		candidate.Pin = buildPin(content, manifest, kv["REF"])
+		candidate.Pin = buildPin(content, manifest, portName, kv["REF"])
 	}
 	return candidate
 }
@@ -508,7 +597,7 @@ func unresolvedVariableName(raw argValue) string {
 	if raw.Raw {
 		return ""
 	}
-	m := variableRefRE.FindStringSubmatch(strings.TrimSpace(raw.Text))
+	m := embeddedVarRE.FindStringSubmatch(strings.TrimSpace(raw.Text))
 	if m == nil {
 		return ""
 	}
@@ -597,10 +686,10 @@ func guardedState(parent guardState, active bool, unresolved, branch string) gua
 // parsePortfile preserves the original internal helper surface. Production
 // passes sibling manifest bytes through parsePortfileWithManifest.
 func parsePortfile(content string) (parsedPortfile, bool) {
-	return parsePortfileWithManifest(content, nil)
+	return parsePortfileWithManifest(content, nil, "")
 }
 
-func parsePortfileWithManifest(content string, manifest []byte) (parsedPortfile, bool) {
+func parsePortfileWithManifest(content string, manifest []byte, portName string) (parsedPortfile, bool) {
 	statements, ok := splitStatementsChecked(content)
 	if !ok {
 		return parsedPortfile{}, false
@@ -655,7 +744,7 @@ func parsePortfileWithManifest(content string, manifest []byte) (parsedPortfile,
 			if !fetchFuncNames[st.Name] {
 				continue
 			}
-			candidate := parseFetchCandidate(st.Name, content, manifest, st.Args)
+			candidate := parseFetchCandidate(st.Name, content, manifest, portName, st.Args)
 			candidate.GuardVariable = state.unknown
 			candidate.Guard = state.text
 			candidate.ActiveForDefault = state.active

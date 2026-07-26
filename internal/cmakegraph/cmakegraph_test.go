@@ -1,8 +1,11 @@
 package cmakegraph
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -67,7 +70,7 @@ func TestCurrentListDirChain_ResolvesPerFileNotPinnedToRoot(t *testing.T) {
 	writeFile(t, root, "sub/helper.cmake", `include(${CMAKE_CURRENT_LIST_DIR}/deeper.cmake)`)
 	writeFile(t, root, "sub/deeper.cmake", `# leaf file, no further includes`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -117,7 +120,7 @@ func TestMutationProof_DanglingPathNeverReportedResolved(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "CMakeLists.txt", `include(${CMAKE_CURRENT_LIST_DIR}/does-not-exist.cmake)`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -159,7 +162,7 @@ func TestCycle_DetectedNotInfiniteLoop(t *testing.T) {
 	done := make(chan *Result, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+		res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 		if err != nil {
 			errCh <- err
 			return
@@ -209,7 +212,7 @@ func TestOutsideWorkspace_DotDotEscape(t *testing.T) {
 	writeFile(t, parent, "outside.cmake", `# lives outside root`)
 	writeFile(t, root, "CMakeLists.txt", `include(${CMAKE_CURRENT_LIST_DIR}/../outside.cmake)`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -239,7 +242,7 @@ func TestOutsideWorkspace_SymlinkEscape(t *testing.T) {
 	}
 	writeFile(t, root, "CMakeLists.txt", `include(${CMAKE_CURRENT_LIST_DIR}/escape_link)`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -260,7 +263,7 @@ func TestNonStaticVariable_UnknownAndCurrentSourceDirBothRefused(t *testing.T) {
 		"include(${SOME_OTHER_VAR}/foo.cmake)\n"+
 			"include(${CMAKE_CURRENT_SOURCE_DIR}/bar.cmake)\n")
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -286,7 +289,7 @@ func TestCmakeSourceDir_ResolvesToWorkspaceRoot(t *testing.T) {
 	writeFile(t, root, "CMakeLists.txt", `include(${CMAKE_SOURCE_DIR}/tools/helper.cmake)`)
 	writeFile(t, root, "tools/helper.cmake", `# leaf`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -302,7 +305,7 @@ func TestGeneratorExpression_NeverEvaluated(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "CMakeLists.txt", `include($<BOOL:foo>/gen.cmake)`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -317,7 +320,7 @@ func TestModuleNameNotPath_BareIncludeName(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "CMakeLists.txt", `include(GNUInstallDirs)`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -343,7 +346,7 @@ func TestConditional_PathResolvedNormallyOrthogonalToStatus(t *testing.T) {
 	writeFile(t, root, "nested_from_conditional.cmake", `# leaf, reached only by descending into a Resolved conditional edge`)
 	writeFile(t, root, "unconditional.cmake", `# leaf`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -401,7 +404,7 @@ func TestAddSubdirectory_BareRelativeName(t *testing.T) {
 	writeFile(t, root, "CMakeLists.txt", `add_subdirectory(child)`)
 	writeFile(t, root, "child/CMakeLists.txt", `# leaf`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -424,7 +427,7 @@ func TestAddSubdirectory_MissingCMakeListsIsDangling(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -447,7 +450,7 @@ func TestDepthLimit_StopsExpansionAndReportsReason(t *testing.T) {
 	// MaxDepth=2 means: root(depth0) -> f1(depth1) -> f2(depth2) resolve, but
 	// the edge f2->f3 (which would be depth3) must be refused as depth_limit.
 	opts := Options{MaxDepth: 2, MaxNodes: DefaultMaxNodes, MaxFileBytes: DefaultMaxFileBytes}
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, opts)
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, opts)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -479,7 +482,7 @@ func TestNodeCap_StopsExpansionAndReportsReason(t *testing.T) {
 	// cap=1 to refuse BOTH new children). Use MaxNodes=1 so even the first
 	// child is refused (root alone already occupies the single slot).
 	opts := Options{MaxDepth: DefaultMaxDepth, MaxNodes: 1, MaxFileBytes: DefaultMaxFileBytes}
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, opts)
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, opts)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -496,7 +499,7 @@ func TestParseError_UnterminatedCall(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "CMakeLists.txt", `include(${CMAKE_CURRENT_LIST_DIR}/unterminated.cmake`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -513,7 +516,7 @@ func TestCommentedOutInclude_NotDiscovered(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "CMakeLists.txt", "# include(${CMAKE_CURRENT_LIST_DIR}/never.cmake)\n")
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -537,7 +540,7 @@ func TestStringLiteralGuard_CommandNameInsideStringIsSkipped(t *testing.T) {
 			"include(${CMAKE_CURRENT_LIST_DIR}/real.cmake)\n")
 	writeFile(t, root, "real.cmake", `# leaf`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -568,7 +571,7 @@ func TestWalkTree_WildcardPatternReachesFilesNoPortfileReferences(t *testing.T) 
 	writeFile(t, root, "toolchains/mytoolchain.cmake", `include(${CMAKE_CURRENT_LIST_DIR}/toolchain_helper.cmake)`)
 	writeFile(t, root, "toolchains/toolchain_helper.cmake", `# leaf`)
 
-	narrow, err := WalkTree(root, []string{"portfile.cmake"}, DefaultOptions())
+	narrow, err := WalkTree(context.Background(), root, root, []string{"portfile.cmake"}, DefaultOptions())
 	if err != nil {
 		t.Fatalf("WalkTree (narrow): %v", err)
 	}
@@ -576,7 +579,7 @@ func TestWalkTree_WildcardPatternReachesFilesNoPortfileReferences(t *testing.T) 
 		t.Fatalf("narrow (portfile.cmake-only) scan edges = %d, want 0 — the toolchain file is unreachable from any portfile.cmake: %+v", len(narrow.Edges), narrow.Edges)
 	}
 
-	wide, err := WalkTree(root, []string{"*.cmake", "CMakeLists.txt"}, DefaultOptions())
+	wide, err := WalkTree(context.Background(), root, root, []string{"*.cmake", "CMakeLists.txt"}, DefaultOptions())
 	if err != nil {
 		t.Fatalf("WalkTree (wide): %v", err)
 	}
@@ -598,7 +601,7 @@ func TestWalkTree_SharedFileScannedOnceNotDuplicated(t *testing.T) {
 	writeFile(t, root, "common/helper.cmake", `include(${CMAKE_CURRENT_LIST_DIR}/helper_leaf.cmake)`)
 	writeFile(t, root, "common/helper_leaf.cmake", `# leaf`)
 
-	res, err := WalkTree(root, []string{"*.cmake"}, DefaultOptions())
+	res, err := WalkTree(context.Background(), root, root, []string{"*.cmake"}, DefaultOptions())
 	if err != nil {
 		t.Fatalf("WalkTree: %v", err)
 	}
@@ -631,7 +634,7 @@ func TestDiamondInclude_NotMisreportedAsCyclic(t *testing.T) {
 	writeFile(t, root, "b.cmake", `include(${CMAKE_CURRENT_LIST_DIR}/shared.cmake)`)
 	writeFile(t, root, "shared.cmake", `# leaf`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -652,7 +655,7 @@ func TestWalkTree_IndependentPortLikeUnits(t *testing.T) {
 	writeFile(t, root, "portA/helpers.cmake", `# leaf`)
 	writeFile(t, root, "portB/portfile.cmake", `include(${CMAKE_CURRENT_LIST_DIR}/missing.cmake)`)
 
-	res, err := WalkTree(root, []string{"portfile.cmake"}, DefaultOptions())
+	res, err := WalkTree(context.Background(), root, root, []string{"portfile.cmake"}, DefaultOptions())
 	if err != nil {
 		t.Fatalf("WalkTree: %v", err)
 	}
@@ -687,7 +690,7 @@ func TestP1_1_RelativeIncludeResolvesAgainstCurrentSourceDirNotListDir(t *testin
 	writeFile(t, root, "sub/helper.cmake", `include(local.cmake)`)
 	writeFile(t, root, "sub/local.cmake", `# decoy: exists only at the WRONG (CMAKE_CURRENT_LIST_DIR) location`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -716,7 +719,7 @@ func TestP1_1_TopLevelBareRelativeUnaffected(t *testing.T) {
 	writeFile(t, root, "CMakeLists.txt", `include(sub/helper.cmake)`)
 	writeFile(t, root, "sub/helper.cmake", `# leaf`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -740,7 +743,7 @@ func TestP1_2_CurrentListDirInsideMacroBodyRefused(t *testing.T) {
 			"endmacro()\n")
 	writeFile(t, root, "sub/target.cmake", `# decoy: exists only at the defining file's (possibly wrong) directory`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -773,7 +776,7 @@ func TestP1_2_FunctionBodyAlsoGatesAndOutsideCallUnaffected(t *testing.T) {
 			"include(${CMAKE_CURRENT_LIST_DIR}/outside.cmake)\n")
 	writeFile(t, root, "outside.cmake", `# leaf`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -796,7 +799,7 @@ func TestP1_3_StandaloneRootBareRelativeRefusedUnverified(t *testing.T) {
 	writeFile(t, root, "helpers/some_helper.cmake", `include(local.cmake)`)
 	writeFile(t, root, "helpers/local.cmake", `# decoy: exists only relative to the INVENTED (unverified) source dir`)
 
-	res, err := WalkTree(root, []string{"*.cmake"}, DefaultOptions())
+	res, err := WalkTree(context.Background(), root, root, []string{"*.cmake"}, DefaultOptions())
 	if err != nil {
 		t.Fatalf("WalkTree: %v", err)
 	}
@@ -823,7 +826,7 @@ func TestP1_3_CMakeListsRootBareRelativeStillResolves(t *testing.T) {
 	writeFile(t, root, "CMakeLists.txt", `include(local.cmake)`)
 	writeFile(t, root, "local.cmake", `# leaf`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -842,7 +845,7 @@ func TestP1_3_AddSubdirectoryEstablishesFreshVerifiedContext(t *testing.T) {
 	writeFile(t, root, "child/CMakeLists.txt", `include(local.cmake)`)
 	writeFile(t, root, "child/local.cmake", `# leaf, relative to child's OWN (freshly verified) source dir`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -866,7 +869,7 @@ func TestP1_4_CacheVariableRefused(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "CMakeLists.txt", `include($CACHE{P}.cmake)`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -889,7 +892,7 @@ func TestP1_4_BackslashEscapeSequenceRefused(t *testing.T) {
 	writeFile(t, root, "CMakeLists.txt", `include("foo\ bar.cmake")`)
 	writeFile(t, root, "foo bar.cmake", `# the file CMake would actually open, after decoding \  as a literal space`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -912,7 +915,7 @@ func TestP1_4_BracketArgumentRefused(t *testing.T) {
 	writeFile(t, root, "CMakeLists.txt", "include([[some/path.cmake]])\n")
 	writeFile(t, root, "some/path.cmake", `# decoy: must never be reached via bracket-argument content`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -934,7 +937,7 @@ func TestP1_5_NestedCommandInBalancedParensNotMisreadAsDirective(t *testing.T) {
 	writeFile(t, root, "CMakeLists.txt", `message(include(existing.cmake))`)
 	writeFile(t, root, "existing.cmake", `# leaf`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -955,7 +958,7 @@ func TestP1_5_FakeNestedIfDoesNotCorruptConditionalTracking(t *testing.T) {
 			"endif()\n")
 	writeFile(t, root, "real_conditional.cmake", `# leaf`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -980,7 +983,7 @@ func TestP1_5_EscapeParityDoesNotSwallowNextCommand(t *testing.T) {
 			"include(${CMAKE_CURRENT_LIST_DIR}/real.cmake)\n")
 	writeFile(t, root, "real.cmake", `# leaf`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -1006,7 +1009,7 @@ func TestP1_5_BracketCommentMatchedAcrossMultipleLines(t *testing.T) {
 	writeFile(t, root, "should_not_be_found.cmake", `# decoy`)
 	writeFile(t, root, "real.cmake", `# leaf`)
 
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -1026,7 +1029,7 @@ func TestP1_6_NodeCapGatesRootAdmissionAndIsVisible(t *testing.T) {
 	writeFile(t, root, "a.cmake", `# leaf a`)
 	writeFile(t, root, "b.cmake", `# leaf b`)
 
-	res, err := WalkTree(root, []string{"*.cmake"}, Options{MaxDepth: DefaultMaxDepth, MaxNodes: 1, MaxFileBytes: DefaultMaxFileBytes})
+	res, err := WalkTree(context.Background(), root, root, []string{"*.cmake"}, Options{MaxDepth: DefaultMaxDepth, MaxNodes: 1, MaxFileBytes: DefaultMaxFileBytes})
 	if err != nil {
 		t.Fatalf("WalkTree: %v", err)
 	}
@@ -1056,7 +1059,7 @@ func TestP2_7_ByteCapSkipIsVisibleNotSilent(t *testing.T) {
 	writeFile(t, root, "never_seen.cmake", `# leaf`)
 
 	opts := Options{MaxDepth: DefaultMaxDepth, MaxNodes: DefaultMaxNodes, MaxFileBytes: 50}
-	res, err := Walk(filepath.Join(root, "CMakeLists.txt"), root, opts)
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, opts)
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
@@ -1086,3 +1089,376 @@ func TestP2_7_ByteCapSkipIsVisibleNotSilent(t *testing.T) {
 // rerun -run TestP1_1_, confirm FAIL, revert) — recorded here as a
 // permanent comment pointing at the exact test so a future reviewer can
 // repeat the mutation without guessing which test covers it.
+
+// =====================================================================
+// Pre-submission cross-family review, round 2 (F16/F17/F18/F22/F27).
+// Every test below was first run against the PRE-FIX code and confirmed
+// to fail — the mutation evidence is recorded in the review report.
+// =====================================================================
+
+// F18: a RECOGNIZED bracket-argument opener with no matching close must not
+// be downgraded to a literal '[' — doing so hands the payload's own bytes
+// back to the scanner as executable syntax. In the fixture below the
+// payload's ')' would close message(), after which include(real.cmake) would
+// be read as a genuine top-level call and emitted as a REAL edge to a file
+// that CMake would never process, because everything from `[=[` onwards is
+// uninterpreted text with no terminator.
+func TestF18_UnterminatedBracketArgumentDoesNotLeakPayloadAsSyntax(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", "message([=[payload ) include(real.cmake)\n")
+	// real.cmake EXISTS: if the scanner mis-parses, the fabricated edge would
+	// come back StatusResolved, which is the worst possible failure mode —
+	// a confident, verifiable-looking claim about a file CMake never reads.
+	writeFile(t, root, "real.cmake", "# decoy: must never be reached\n")
+
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 0 {
+		t.Fatalf("edges = %d, want 0 — an unterminated bracket argument must stop interpretation, "+
+			"never expose its payload as syntax: %+v", len(res.Edges), res.Edges)
+	}
+	for _, f := range res.Files {
+		if filepath.Base(f) == "real.cmake" {
+			t.Fatalf("real.cmake was scanned; it is inside an unterminated bracket argument and is not a real include: %v", res.Files)
+		}
+	}
+}
+
+// F18 (companion): a '[' that is NOT a bracket opener must still be treated
+// as an ordinary literal. This is the discrimination the fix turns on — if
+// it regressed to "any '[' is malformed", real CMake using '[' in an
+// unquoted argument would stop being scanned.
+func TestF18_LiteralBracketIsNotMistakenForAnUnterminatedOpener(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", "message(a[b)\ninclude(${CMAKE_CURRENT_LIST_DIR}/real.cmake)\n")
+	writeFile(t, root, "real.cmake", "# leaf\n")
+
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 1 || res.Edges[0].Status != StatusResolved {
+		t.Fatalf("edges = %+v, want exactly 1 Resolved edge: a bare '[' is a literal, not a bracket opener", res.Edges)
+	}
+}
+
+// F17: os.Stat failing for a reason OTHER than "not exist" proves nothing
+// about absence, so it must never be reported as StatusDangling — whose
+// contract is VERIFIED absence.
+//
+// The failure is injected via a path that cannot exist as a NAME on either
+// platform rather than via permissions, so the test is deterministic and
+// does not depend on running as a non-privileged user. A NUL byte in a path
+// makes the syscall fail with EINVAL/ENOENT-adjacent errors that are NOT
+// fs.ErrNotExist on Windows (ERROR_INVALID_NAME).
+func TestF17_NonAbsenceStatErrorIsUnresolvedNotDangling(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("ERROR_INVALID_NAME shape is Windows-specific; the POSIX equivalent needs a permission fixture")
+	}
+	root := t.TempDir()
+	// A trailing space + a reserved character produce ERROR_INVALID_NAME on
+	// Windows, which is emphatically not "the file is absent".
+	writeFile(t, root, "CMakeLists.txt", "include(${CMAKE_CURRENT_LIST_DIR}/bad>name.cmake)\n")
+
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 1 {
+		t.Fatalf("edges = %d, want 1: %+v", len(res.Edges), res.Edges)
+	}
+	e := res.Edges[0]
+	if e.Status == StatusDangling {
+		t.Fatalf("edge = dangling, want unresolved/target_unreadable — dangling asserts VERIFIED absence, "+
+			"but os.Stat failed with something other than fs.ErrNotExist: %+v", e)
+	}
+	if e.Status != StatusUnresolved || e.Reason != ReasonTargetUnreadable {
+		t.Fatalf("edge = {%v,%v}, want {Unresolved,target_unreadable}: %+v", e.Status, e.Reason, e)
+	}
+}
+
+// F17 (companion): a genuinely absent target must STILL be dangling. The fix
+// narrows dangling; it must not eliminate it.
+func TestF17_GenuinelyAbsentTargetIsStillDangling(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", "include(${CMAKE_CURRENT_LIST_DIR}/gone.cmake)\n")
+
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.Edges) != 1 || res.Edges[0].Status != StatusDangling {
+		t.Fatalf("edges = %+v, want 1 Dangling edge (fs.ErrNotExist IS verified absence)", res.Edges)
+	}
+}
+
+// F16: a subtree that could not be enumerated must be recorded as incomplete
+// coverage. Without this the wrapper returns an apparently-complete graph
+// with no UnscannedFiles entry, and a caller cannot tell "this subtree held
+// no CMake files" from "we were not allowed to look".
+//
+// The subtree is made genuinely unreadable (denied ACL on Windows, mode 000
+// on POSIX) and the INSTRUMENT IS VALIDATED FIRST: if a direct os.ReadDir of
+// that directory still succeeds, the denial did not take effect and the test
+// SKIPS rather than passing vacuously. A test that silently stops exercising
+// the path it names is worse than no test.
+func TestF16_UnenumerableSubtreeIsRecordedAsIncompleteCoverage(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "top.cmake", "# leaf\n")
+	sub := filepath.Join(root, "denied")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "denied/inner.cmake", "# a matching file we must never claim does not exist\n")
+	denyDirectoryListing(t, sub)
+
+	// Instrument validation: prove the denial actually bites before asserting
+	// anything about how the walker reacts to it.
+	if _, err := os.ReadDir(sub); err == nil {
+		t.Skip("directory-listing denial did not take effect on this host; nothing to exercise")
+	}
+
+	res, err := WalkTree(context.Background(), root, root, []string{"*.cmake"}, DefaultOptions())
+	if err != nil {
+		t.Fatalf("WalkTree: %v", err)
+	}
+	// top.cmake must still be scanned: one bad subtree never aborts the walk.
+	if len(res.Files) != 1 || filepath.Base(res.Files[0]) != "top.cmake" {
+		t.Fatalf("files = %v, want just top.cmake — a single unreadable subtree must not abort the walk", res.Files)
+	}
+	var sawHole bool
+	for _, u := range res.UnscannedFiles {
+		if u.Reason == CoverageEnumerateFailed {
+			sawHole = true
+		}
+	}
+	if !sawHole {
+		t.Fatalf("UnscannedFiles = %+v, want an enumerate_failed entry — without it this result is an "+
+			"apparently-complete graph that silently omits denied/inner.cmake", res.UnscannedFiles)
+	}
+}
+
+// denyDirectoryListing removes the current user's ability to list dir, and
+// registers a cleanup that restores it (registered AFTER t.TempDir's own
+// cleanup, so it runs BEFORE it and the temp tree can still be removed).
+func denyDirectoryListing(t *testing.T, dir string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		// Deny this account read access on the directory itself. Uses the
+		// well-known Everyone SID literal (locale-proof; a display name
+		// varies by system language).
+		run := func(args ...string) error {
+			return exec.Command("icacls", args...).Run()
+		}
+		if err := run(dir, "/deny", "*S-1-1-0:(RX)"); err != nil {
+			t.Skipf("icacls deny unavailable on this host: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = run(dir, "/remove:d", "*S-1-1-0")
+		})
+		return
+	}
+	if err := os.Chmod(dir, 0o000); err != nil {
+		t.Skipf("chmod 000 unavailable: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+}
+
+// F16 (the load-bearing half): a failure to enumerate the ROOT ITSELF must
+// TERMINATE with an error. Returning an empty, ok-looking graph would assert
+// "this tree contains no CMake files", which is precisely the confident
+// answer we have no evidence for.
+func TestF16_RootEnumerationFailureTerminatesWithError(t *testing.T) {
+	root := t.TempDir()
+	missing := filepath.Join(root, "no-such-directory")
+
+	_, err := WalkTree(context.Background(), missing, missing, []string{"*.cmake"}, DefaultOptions())
+	if err == nil {
+		t.Fatal("WalkTree returned nil error for an unenumerable root — an empty graph here is a false " +
+			"\"no CMake files found\" claim, not an answer")
+	}
+}
+
+// F22: a root must be rejected on the workspace boundary BEFORE it is
+// stat'ed or read. An enumerated *.cmake entry inside the tree may be a
+// symlink whose target lives outside workspace_root; opening it to discover
+// that would already have performed the read the boundary exists to prevent.
+func TestF22_SymlinkedRootEscapingWorkspaceIsRefusedBeforeAnyRead(t *testing.T) {
+	base := t.TempDir()
+	workspace := filepath.Join(base, "workspace")
+	outside := filepath.Join(base, "outside")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(outside, "secret.cmake")
+	if err := os.WriteFile(secret, []byte("include(${CMAKE_CURRENT_LIST_DIR}/leaked.cmake)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(workspace, "innocent.cmake")
+	if err := os.Symlink(secret, link); err != nil {
+		t.Skipf("cannot create symlink on this host (needs Developer Mode or admin on Windows): %v", err)
+	}
+
+	res, err := WalkTree(context.Background(), workspace, workspace, []string{"*.cmake"}, DefaultOptions())
+	if err != nil {
+		t.Fatalf("WalkTree: %v", err)
+	}
+	for _, f := range res.Files {
+		if strings.Contains(strings.ToLower(filepath.ToSlash(f)), "/outside/") {
+			t.Fatalf("scanned a file outside the workspace boundary: %v", res.Files)
+		}
+	}
+	if len(res.Edges) != 0 {
+		t.Fatalf("edges = %+v, want 0: the escaping root must never be read at all", res.Edges)
+	}
+	var sawRefusal bool
+	for _, u := range res.UnscannedFiles {
+		if u.Reason == CoverageRootOutsideWorkspace {
+			sawRefusal = true
+		}
+	}
+	if !sawRefusal {
+		t.Fatalf("UnscannedFiles = %+v, want a root_outside_workspace entry — a silent refusal is still a coverage hole", res.UnscannedFiles)
+	}
+}
+
+// F27: MaxNodes bounds ADMISSION, not enumeration, so it could never bound
+// the memory spent listing candidate roots. MaxRoots does, and the fact that
+// it tripped is reported rather than left to look like a complete scan.
+func TestF27_RootEnumerationIsBoundedAndTheCapIsVisible(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.cmake", "b.cmake", "c.cmake", "d.cmake"} {
+		writeFile(t, root, name, "# leaf\n")
+	}
+
+	opts := DefaultOptions()
+	opts.MaxRoots = 2
+	res, err := WalkTree(context.Background(), root, root, []string{"*.cmake"}, opts)
+	if err != nil {
+		t.Fatalf("WalkTree: %v", err)
+	}
+	if !res.RootEnumerationCapped {
+		t.Fatalf("RootEnumerationCapped = false, want true: enumeration stopped at MaxRoots=2 but the result " +
+			"claims to have seen the whole tree")
+	}
+	if len(res.Files) != 2 {
+		t.Fatalf("files scanned = %d (%v), want 2 — enumeration must STOP at the cap, not enumerate all four and admit two",
+			len(res.Files), res.Files)
+	}
+	var sawCap bool
+	for _, u := range res.UnscannedFiles {
+		if u.Reason == CoverageRootEnumerationCapped {
+			sawCap = true
+		}
+	}
+	if !sawCap {
+		t.Fatalf("UnscannedFiles = %+v, want a root_enumeration_capped entry", res.UnscannedFiles)
+	}
+}
+
+// F20 (cmakegraph half): WalkTree must honour a workspaceRoot that is a
+// PARENT of root. Pinning the workspace to root made every include reaching
+// a sibling directory of the caller's real workspace look like an escape.
+// It covers BOTH jobs workspaceRoot does, because the finding names both:
+// the escape BOUNDARY (the ../ include) and the ${CMAKE_SOURCE_DIR} value
+// (the absolute include). Pinning the workspace to root breaks each in a
+// different way, so a fix that only threaded one through would still fail
+// here.
+func TestF20_WalkTreeHonoursAParentWorkspaceRoot(t *testing.T) {
+	workspace := t.TempDir()
+	writeFile(t, workspace, "shared/helper.cmake", "# leaf\n")
+	writeFile(t, workspace, "shared/other.cmake", "# leaf\n")
+	writeFile(t, workspace, "ports/viaboundary.cmake",
+		"include(${CMAKE_CURRENT_LIST_DIR}/../shared/helper.cmake)\n")
+	writeFile(t, workspace, "ports/viasourcedir.cmake",
+		"include(${CMAKE_SOURCE_DIR}/shared/other.cmake)\n")
+	scanRoot := filepath.Join(workspace, "ports")
+
+	// Control: workspace pinned to the scan root — which is what the wrapper
+	// used to force regardless of what the caller passed.
+	pinned, err := WalkTree(context.Background(), scanRoot, scanRoot, []string{"*.cmake"}, DefaultOptions())
+	if err != nil {
+		t.Fatalf("WalkTree (workspace pinned to root): %v", err)
+	}
+	for _, e := range pinned.Edges {
+		if e.Status == StatusResolved {
+			t.Fatalf("control case produced a Resolved edge; with the workspace pinned to ports/ neither "+
+				"include can resolve: %+v", pinned.Edges)
+		}
+	}
+	var sawOutside bool
+	for _, e := range pinned.Edges {
+		if e.Reason == ReasonOutsideWorkspace {
+			sawOutside = true
+		}
+	}
+	if !sawOutside {
+		t.Fatalf("control case = %+v, want the ../shared include reported outside_workspace", pinned.Edges)
+	}
+
+	// The fix: the SUPPLIED parent workspace is used for both jobs.
+	res, err := WalkTree(context.Background(), scanRoot, workspace, []string{"*.cmake"}, DefaultOptions())
+	if err != nil {
+		t.Fatalf("WalkTree (parent workspace): %v", err)
+	}
+	if len(res.Edges) != 2 {
+		t.Fatalf("edges = %d, want 2: %+v", len(res.Edges), res.Edges)
+	}
+	for _, e := range res.Edges {
+		if e.Status != StatusResolved {
+			t.Fatalf("edge %+v = %v, want Resolved: workspace_root must be honoured as BOTH the escape "+
+				"boundary and the ${CMAKE_SOURCE_DIR} value", e, e.Status)
+		}
+	}
+}
+
+// Cancellation: a canceled walk must RETURN the error, never hand back the
+// partial graph it happened to accumulate as if it were complete.
+func TestCanceledWalkReturnsErrorNotAPartialGraph(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", "include(${CMAKE_CURRENT_LIST_DIR}/a.cmake)\n")
+	writeFile(t, root, "a.cmake", "# leaf\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := Walk(ctx, filepath.Join(root, "CMakeLists.txt"), root, DefaultOptions()); err == nil {
+		t.Fatal("Walk returned nil error for a canceled context")
+	}
+	if _, err := WalkTree(ctx, root, root, []string{"*.cmake"}, DefaultOptions()); err == nil {
+		t.Fatal("WalkTree returned nil error for a canceled context")
+	}
+}
+
+// The coverage reason is a CLOSED enum, not the free-form error string it
+// used to be — a caller can switch on it.
+func TestByteCapCoverageCarriesAClosedReasonAndADetail(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", "include(${CMAKE_CURRENT_LIST_DIR}/huge.cmake)\n")
+	huge := strings.Repeat("#", 200) + "\n"
+	if err := os.WriteFile(filepath.Join(root, "huge.cmake"), []byte(huge), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := DefaultOptions()
+	opts.MaxFileBytes = 50
+	res, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, opts)
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(res.UnscannedFiles) != 1 {
+		t.Fatalf("UnscannedFiles = %+v, want exactly 1", res.UnscannedFiles)
+	}
+	if res.UnscannedFiles[0].Reason != CoverageByteCapExceeded {
+		t.Fatalf("Reason = %q, want %q (closed enum, never a free-form error string)",
+			res.UnscannedFiles[0].Reason, CoverageByteCapExceeded)
+	}
+	if res.UnscannedFiles[0].Detail == "" {
+		t.Fatal("Detail must carry the underlying error text for a human")
+	}
+}

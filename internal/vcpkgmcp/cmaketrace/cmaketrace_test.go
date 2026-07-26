@@ -1,7 +1,10 @@
 package cmaketrace
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -44,7 +47,7 @@ func defaultDeps() Deps {
 func TestTrace_WellFormed_IncludeChainAndExecutedLines(t *testing.T) {
 	path := writeTrace(t, wellFormedTrace)
 
-	res := Trace(Args{TracePath: path}, defaultDeps())
+	res := Trace(context.Background(), Args{TracePath: path}, defaultDeps())
 
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("Status = %v, Reason = %v, want ok", res.Status, res.Reason)
@@ -109,7 +112,7 @@ func TestTrace_NoVersionHeader_ParsedAnyway(t *testing.T) {
 `
 	path := writeTrace(t, content)
 
-	res := Trace(Args{TracePath: path}, defaultDeps())
+	res := Trace(context.Background(), Args{TracePath: path}, defaultDeps())
 
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("Status = %v, Reason = %v, want ok", res.Status, res.Reason)
@@ -135,7 +138,7 @@ this is not json at all, a build got killed mid-line
 `
 	path := writeTrace(t, content)
 
-	res := Trace(Args{TracePath: path}, defaultDeps())
+	res := Trace(context.Background(), Args{TracePath: path}, defaultDeps())
 
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("Status = %v, Reason = %v, want ok", res.Status, res.Reason)
@@ -151,7 +154,7 @@ this is not json at all, a build got killed mid-line
 func TestTrace_EmptyFile(t *testing.T) {
 	path := writeTrace(t, "")
 
-	res := Trace(Args{TracePath: path}, defaultDeps())
+	res := Trace(context.Background(), Args{TracePath: path}, defaultDeps())
 
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonTraceEmpty {
 		t.Fatalf("Status/Reason = %v/%v, want unknown/trace_empty", res.Status, res.Reason)
@@ -166,7 +169,7 @@ CMake Error at CMakeLists.txt:10 (message):
 `
 	path := writeTrace(t, content)
 
-	res := Trace(Args{TracePath: path}, defaultDeps())
+	res := Trace(context.Background(), Args{TracePath: path}, defaultDeps())
 
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonNotJSONLines {
 		t.Fatalf("Status/Reason = %v/%v, want unknown/not_json_lines", res.Status, res.Reason)
@@ -180,7 +183,7 @@ func TestTrace_MissingPath(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "does-not-exist.json")
 
-	res := Trace(Args{TracePath: missing}, defaultDeps())
+	res := Trace(context.Background(), Args{TracePath: missing}, defaultDeps())
 
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonTraceNotFound {
 		t.Fatalf("Status/Reason = %v/%v, want unknown/trace_not_found", res.Status, res.Reason)
@@ -195,12 +198,12 @@ func TestTrace_MissingPath(t *testing.T) {
 // platform-specific file permission behavior.
 type fakeUnreadableFS struct{}
 
-func (fakeUnreadableFS) ReadFile(p string) ([]byte, error) {
+func (fakeUnreadableFS) Open(p string) (io.ReadCloser, error) {
 	return nil, &os.PathError{Op: "open", Path: p, Err: os.ErrPermission}
 }
 
 func TestTrace_Unreadable(t *testing.T) {
-	res := Trace(Args{TracePath: "irrelevant-fake-path.json"}, Deps{FS: fakeUnreadableFS{}})
+	res := Trace(context.Background(), Args{TracePath: "irrelevant-fake-path.json"}, Deps{FS: fakeUnreadableFS{}})
 
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonTraceUnreadable {
 		t.Fatalf("Status/Reason = %v/%v, want unknown/trace_unreadable", res.Status, res.Reason)
@@ -211,7 +214,7 @@ func TestTrace_FileAndCommandFilters(t *testing.T) {
 	path := writeTrace(t, wellFormedTrace)
 
 	t.Run("file filter narrows to one file", func(t *testing.T) {
-		res := Trace(Args{TracePath: path, File: "/proj/cmake/Utils.cmake"}, defaultDeps())
+		res := Trace(context.Background(), Args{TracePath: path, File: "/proj/cmake/Utils.cmake"}, defaultDeps())
 		if res.Status != evidence.StatusOK {
 			t.Fatalf("Status = %v, Reason = %v, want ok", res.Status, res.Reason)
 		}
@@ -221,7 +224,7 @@ func TestTrace_FileAndCommandFilters(t *testing.T) {
 	})
 
 	t.Run("command filter is case-insensitive across differing-case occurrences", func(t *testing.T) {
-		res := Trace(Args{TracePath: path, Command: "message"}, defaultDeps())
+		res := Trace(context.Background(), Args{TracePath: path, Command: "message"}, defaultDeps())
 		if res.Status != evidence.StatusOK {
 			t.Fatalf("Status = %v, Reason = %v, want ok", res.Status, res.Reason)
 		}
@@ -236,7 +239,7 @@ func TestTrace_FileAndCommandFilters(t *testing.T) {
 	})
 
 	t.Run("file and command combined", func(t *testing.T) {
-		res := Trace(Args{TracePath: path, File: "/proj/src/CMakeLists.txt", Command: "MESSAGE"}, defaultDeps())
+		res := Trace(context.Background(), Args{TracePath: path, File: "/proj/src/CMakeLists.txt", Command: "MESSAGE"}, defaultDeps())
 		if res.Status != evidence.StatusOK {
 			t.Fatalf("Status = %v, Reason = %v, want ok", res.Status, res.Reason)
 		}
@@ -248,7 +251,7 @@ func TestTrace_FileAndCommandFilters(t *testing.T) {
 	// IncludeChain and ExecutedLines are never narrowed by these filters --
 	// they reflect the whole trace regardless.
 	t.Run("include chain and executed lines stay whole-trace under a filter", func(t *testing.T) {
-		res := Trace(Args{TracePath: path, File: "/proj/cmake/Utils.cmake"}, defaultDeps())
+		res := Trace(context.Background(), Args{TracePath: path, File: "/proj/cmake/Utils.cmake"}, defaultDeps())
 		if len(res.IncludeChain) != 2 {
 			t.Errorf("len(IncludeChain) = %d, want 2 (unfiltered)", len(res.IncludeChain))
 		}
@@ -261,7 +264,7 @@ func TestTrace_FileAndCommandFilters(t *testing.T) {
 func TestTrace_MaxRecordsCapsAndSetsTruncated(t *testing.T) {
 	path := writeTrace(t, wellFormedTrace)
 
-	res := Trace(Args{TracePath: path, MaxRecords: 3}, defaultDeps())
+	res := Trace(context.Background(), Args{TracePath: path, MaxRecords: 3}, defaultDeps())
 
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("Status = %v, Reason = %v, want ok", res.Status, res.Reason)
@@ -275,15 +278,15 @@ func TestTrace_MaxRecordsCapsAndSetsTruncated(t *testing.T) {
 	if res.InputIncomplete {
 		t.Errorf("InputIncomplete = true, want false: MaxRecords capping is not malformed input")
 	}
-	if res.InputIncompleteReason != "" {
-		t.Errorf("InputIncompleteReason = %q, want empty for a complete capped input", res.InputIncompleteReason)
+	if len(res.InputIncompleteReasons) != 0 {
+		t.Errorf("InputIncompleteReasons = %v, want empty for a complete capped input", res.InputIncompleteReasons)
 	}
 }
 
 func TestTrace_MaxRecordsZeroUsesDefaultAndDoesNotTruncateASmallTrace(t *testing.T) {
 	path := writeTrace(t, wellFormedTrace)
 
-	res := Trace(Args{TracePath: path, MaxRecords: 0}, defaultDeps())
+	res := Trace(context.Background(), Args{TracePath: path, MaxRecords: 0}, defaultDeps())
 
 	if res.Truncated {
 		t.Errorf("Truncated = true, want false (7 records is well under DefaultMaxRecords=%d)", DefaultMaxRecords)
@@ -303,7 +306,7 @@ func TestTrace_ArgsPreservedVerbatim(t *testing.T) {
 `
 	path := writeTrace(t, content)
 
-	res := Trace(Args{TracePath: path}, defaultDeps())
+	res := Trace(context.Background(), Args{TracePath: path}, defaultDeps())
 
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("Status = %v, Reason = %v, want ok", res.Status, res.Reason)
@@ -325,7 +328,7 @@ func TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim(t *testing.T) {
 	// but the caller must be able to tell THIS apart from "the file ran but
 	// this particular line never executed" (checked below).
 	t.Run("unseen file yields no_records_matched and is absent from FilesInTrace", func(t *testing.T) {
-		res := Trace(Args{TracePath: path, File: "/proj/never/Seen.cmake"}, defaultDeps())
+		res := Trace(context.Background(), Args{TracePath: path, File: "/proj/never/Seen.cmake"}, defaultDeps())
 		if res.Status != evidence.StatusUnknown || res.Reason != ReasonNoRecordsMatched {
 			t.Fatalf("Status/Reason = %v/%v, want unknown/no_records_matched", res.Status, res.Reason)
 		}
@@ -350,7 +353,7 @@ func TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim(t *testing.T) {
 	// is absent from its ExecutedLines entry -- a structurally different
 	// (and weaker) absence claim than the file-never-seen case above.
 	t.Run("known file with an unobserved line is a distinct absence claim", func(t *testing.T) {
-		res := Trace(Args{TracePath: path}, defaultDeps())
+		res := Trace(context.Background(), Args{TracePath: path}, defaultDeps())
 		var sawKnownFile bool
 		for _, fl := range res.ExecutedLines {
 			if fl.File != "/proj/CMakeLists.txt" {
@@ -385,7 +388,7 @@ func TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete(t *testing.T) {
 `
 	path := writeTrace(t, content)
 
-	res := Trace(Args{TracePath: path}, defaultDeps())
+	res := Trace(context.Background(), Args{TracePath: path}, defaultDeps())
 
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("Status/Reason = %v/%v, want ok with positive evidence retained", res.Status, res.Reason)
@@ -393,8 +396,8 @@ func TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete(t *testing.T) {
 	if !res.InputIncomplete {
 		t.Fatalf("InputIncomplete = false, want true for a trace ending mid-record")
 	}
-	if res.InputIncompleteReason != ReasonInputMalformed {
-		t.Errorf("InputIncompleteReason = %q, want %q", res.InputIncompleteReason, ReasonInputMalformed)
+	if !reflect.DeepEqual(res.InputIncompleteReasons, []Reason{ReasonInputMalformed}) {
+		t.Errorf("InputIncompleteReasons = %v, want [%q]", res.InputIncompleteReasons, ReasonInputMalformed)
 	}
 	if res.Truncated {
 		t.Errorf("Truncated = true, want false: input incompleteness is independent of the MaxRecords cap")
@@ -407,7 +410,7 @@ func TestTrace_MidRecordInputIsIndependentlyMarkedIncomplete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshaling Result: %v", err)
 	}
-	if !strings.Contains(string(wire), `"input_incomplete":true`) || !strings.Contains(string(wire), `"input_incomplete_reason":"input_malformed"`) {
+	if !strings.Contains(string(wire), `"input_incomplete":true`) || !strings.Contains(string(wire), `"input_incomplete_reasons":["input_malformed"]`) {
 		t.Errorf("wire Result = %s, want explicit input incompleteness disclosure", wire)
 	}
 }
@@ -423,7 +426,7 @@ func TestTrace_InvalidMandatoryRecordFieldsAreMalformedNotEvidence(t *testing.T)
 `
 	path := writeTrace(t, content)
 
-	res := Trace(Args{TracePath: path}, defaultDeps())
+	res := Trace(context.Background(), Args{TracePath: path}, defaultDeps())
 
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("Status/Reason = %v/%v, want ok with the one valid record retained", res.Status, res.Reason)
@@ -442,5 +445,285 @@ func TestTrace_InvalidMandatoryRecordFieldsAreMalformedNotEvidence(t *testing.T)
 	}
 	if !reflect.DeepEqual(res.ExecutedLines, []FileLines{{File: "/proj/CMakeLists.txt", Lines: []int{7}}}) {
 		t.Errorf("ExecutedLines = %+v, want no manufactured line 0 evidence", res.ExecutedLines)
+	}
+}
+
+// =====================================================================
+// Pre-submission cross-family review, round 2 (F26).
+// =====================================================================
+
+// countingReadCloser reports how many bytes were actually pulled off the
+// underlying reader, which is how "did we stream or did we materialize the
+// whole thing" is OBSERVED rather than assumed.
+type countingReadCloser struct {
+	r      io.Reader
+	read   int64
+	closed bool
+}
+
+func (c *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.read += int64(n)
+	return n, err
+}
+
+func (c *countingReadCloser) Close() error { c.closed = true; return nil }
+
+type streamFS struct {
+	content string
+	last    *countingReadCloser
+}
+
+func (s *streamFS) Open(string) (io.ReadCloser, error) {
+	s.last = &countingReadCloser{r: strings.NewReader(s.content)}
+	return s.last, nil
+}
+
+// cancelAfterReader cancels the request PART WAY THROUGH the stream, which
+// is the only way to exercise the in-loop cancellation check: a context
+// already canceled at entry is caught by the cheap guard before the file is
+// even opened, so it proves nothing about the parse loop.
+type cancelAfterReader struct {
+	r       io.Reader
+	cancel  context.CancelFunc
+	after   int64
+	read    int64
+	closed  bool
+	tripped bool
+}
+
+func (c *cancelAfterReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.read += int64(n)
+	if !c.tripped && c.read >= c.after {
+		c.tripped = true
+		c.cancel()
+	}
+	return n, err
+}
+
+func (c *cancelAfterReader) Close() error { c.closed = true; return nil }
+
+// F26: cancellation observed DURING the parse stops the read mid-stream and
+// fails closed. Without the in-loop check, the whole trace is parsed and
+// indexed for a caller that has already gone away.
+func TestF26_CancellationDuringTheParseStopsReadingMidStream(t *testing.T) {
+	var big strings.Builder
+	big.WriteString("{\"version\":{\"major\":1,\"minor\":0}}\n")
+	for i := 1; i <= 200000; i++ {
+		fmt.Fprintf(&big, "{\"file\":\"/p/CMakeLists.txt\",\"line\":%d,\"cmd\":\"message\",\"args\":[\"x\"]}\n", i)
+	}
+	content := big.String()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	reader := &cancelAfterReader{r: strings.NewReader(content), cancel: cancel, after: 4096}
+	deps := Deps{FS: fsReturning(reader)}
+
+	res := Trace(ctx, Args{TracePath: "irrelevant"}, deps)
+
+	if res.Status != evidence.StatusUnknown || res.Reason != ReasonCanceled {
+		t.Fatalf("status=%v reason=%v, want unknown/canceled", res.Status, res.Reason)
+	}
+	if len(res.Records) != 0 {
+		t.Fatalf("a canceled parse returned %d records; it must fail closed", len(res.Records))
+	}
+	// The load-bearing assertion: we stopped EARLY. Reading the whole file
+	// and only then noticing the cancellation is the defect being fixed.
+	if reader.read > int64(len(content))/4 {
+		t.Fatalf("read %d of %d bytes after cancellation fired at %d — the parse loop is not observing "+
+			"the context", reader.read, len(content), reader.after)
+	}
+	if !reader.closed {
+		t.Fatal("the trace reader was not closed on the cancellation path")
+	}
+}
+
+// fsReturning hands out one prepared reader, so a test can observe exactly
+// how much of the stream the parser consumed.
+func fsReturning(rc io.ReadCloser) FS { return &singleReaderFS{rc: rc} }
+
+type singleReaderFS struct{ rc io.ReadCloser }
+
+func (s *singleReaderFS) Open(string) (io.ReadCloser, error) { return s.rc, nil }
+
+// F26: a request canceled BEFORE the call fails closed without reading at all.
+func TestF26_CanceledRequestFailsClosedAndStopsReading(t *testing.T) {
+	var big strings.Builder
+	big.WriteString("{\"version\":{\"major\":1,\"minor\":0}}\n")
+	for i := 1; i <= 200000; i++ {
+		fmt.Fprintf(&big, "{\"file\":\"/p/CMakeLists.txt\",\"line\":%d,\"cmd\":\"message\",\"args\":[\"x\"]}\n", i)
+	}
+	fs := &streamFS{content: big.String()}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	res := Trace(ctx, Args{TracePath: "irrelevant"}, Deps{FS: fs})
+
+	if res.Status != evidence.StatusUnknown || res.Reason != ReasonCanceled {
+		t.Fatalf("status=%v reason=%v, want unknown/canceled", res.Status, res.Reason)
+	}
+	if len(res.Records) != 0 || len(res.ExecutedLines) != 0 || len(res.IncludeChain) != 0 {
+		t.Fatalf("a canceled parse returned partial data (records=%d executed=%d chain=%d); it must fail closed",
+			len(res.Records), len(res.ExecutedLines), len(res.IncludeChain))
+	}
+	if fs.last != nil && fs.last.read > int64(len(big.String()))/2 {
+		t.Fatalf("read %d of %d bytes under an already-canceled context — cancellation is not being observed "+
+			"during the read", fs.last.read, len(big.String()))
+	}
+	if fs.last != nil && !fs.last.closed {
+		t.Fatal("the trace reader was not closed on the cancellation path")
+	}
+}
+
+// F26: the reader is closed on EVERY path, including the success path.
+func TestF26_TraceReaderIsClosedOnTheSuccessPath(t *testing.T) {
+	fs := &streamFS{content: wellFormedTrace}
+
+	res := Trace(context.Background(), Args{TracePath: "irrelevant"}, Deps{FS: fs})
+
+	if res.Status != evidence.StatusOK {
+		t.Fatalf("status=%v reason=%v, want ok", res.Status, res.Reason)
+	}
+	if !fs.last.closed {
+		t.Fatal("the trace reader was not closed on the success path")
+	}
+}
+
+// F26: an absurdly long line is refused, and the refusal is REPORTED through
+// the single incompleteness channel rather than silently dropped.
+func TestF26_OverlongLineIsRefusedAndReportedAsIncomplete(t *testing.T) {
+	content := "{\"version\":{\"major\":1,\"minor\":0}}\n" +
+		"{\"file\":\"/p/CMakeLists.txt\",\"line\":1,\"cmd\":\"project\",\"args\":[\"p\"]}\n" +
+		"{\"file\":\"/p/x.cmake\",\"line\":1,\"cmd\":\"message\",\"args\":[\"" + strings.Repeat("z", MaxLineBytes+1) + "\"]}\n"
+	fs := &streamFS{content: content}
+
+	res := Trace(context.Background(), Args{TracePath: "irrelevant"}, Deps{FS: fs})
+
+	if res.Status != evidence.StatusOK {
+		t.Fatalf("status=%v reason=%v, want ok — the valid records remain positive evidence", res.Status, res.Reason)
+	}
+	if !res.InputIncomplete {
+		t.Fatal("InputIncomplete = false; an over-ceiling line means the input was not fully read")
+	}
+	var sawLineLimit bool
+	for _, r := range res.InputIncompleteReasons {
+		if r == ReasonLineLimit {
+			sawLineLimit = true
+		}
+	}
+	if !sawLineLimit {
+		t.Fatalf("InputIncompleteReasons = %v, want it to include %q", res.InputIncompleteReasons, ReasonLineLimit)
+	}
+	// Parsing must stay in SYNC: the valid record before the monster line is
+	// still present, proving the oversized line was drained to its newline
+	// rather than leaving the reader mid-record.
+	if len(res.Records) != 1 {
+		t.Fatalf("records = %d, want 1 (the valid record preceding the oversized line)", len(res.Records))
+	}
+}
+
+// F26: independent incompleteness causes coexist and are ALL reported. One
+// scalar reason field could only ever have shown the first.
+func TestF26_MultipleIncompletenessCausesAreAllReported(t *testing.T) {
+	content := "{\"version\":{\"major\":1,\"minor\":0}}\n" +
+		"this line is not json at all\n" +
+		"{\"file\":\"/p/CMakeLists.txt\",\"line\":1,\"cmd\":\"project\",\"args\":[\"p\"]}\n" +
+		"{\"file\":\"/p/x.cmake\",\"line\":1,\"cmd\":\"message\",\"args\":[\"" + strings.Repeat("z", MaxLineBytes+1) + "\"]}\n"
+	fs := &streamFS{content: content}
+
+	res := Trace(context.Background(), Args{TracePath: "irrelevant"}, Deps{FS: fs})
+
+	want := map[Reason]bool{ReasonInputMalformed: false, ReasonLineLimit: false}
+	for _, r := range res.InputIncompleteReasons {
+		if _, ok := want[r]; ok {
+			want[r] = true
+		}
+	}
+	for reason, seen := range want {
+		if !seen {
+			t.Fatalf("InputIncompleteReasons = %v, missing %q — every independent cause must be reported",
+				res.InputIncompleteReasons, reason)
+		}
+	}
+}
+
+// F26: an empty trace is still distinguished from one whose every line was
+// malformed, without buffering the file to TrimSpace it whole.
+func TestF26_EmptyAndWhitespaceOnlyTracesStillReportTraceEmpty(t *testing.T) {
+	for _, content := range []string{"", "   \n\t\n  \n"} {
+		res := Trace(context.Background(), Args{TracePath: "irrelevant"}, Deps{FS: &streamFS{content: content}})
+		if res.Status != evidence.StatusUnknown || res.Reason != ReasonTraceEmpty {
+			t.Fatalf("content %q -> status=%v reason=%v, want unknown/trace_empty", content, res.Status, res.Reason)
+		}
+	}
+}
+
+// F26: the record ceiling bounds parse memory, and because IncludeChain /
+// ExecutedLines / FilesInTrace are all DERIVED from the record set, proving
+// this one ceiling binds proves the index and response ceilings bind too.
+// The limit is injected so the bound is actually EXERCISED rather than
+// declared and never reached.
+func TestF26_RecordCeilingBoundsParseIndexAndResponseTogether(t *testing.T) {
+	var content strings.Builder
+	content.WriteString("{\"version\":{\"major\":1,\"minor\":0}}\n")
+	for i := 1; i <= 50; i++ {
+		fmt.Fprintf(&content, "{\"file\":\"/p/f%d.cmake\",\"line\":%d,\"cmd\":\"include\",\"args\":[\"/p/x.cmake\"]}\n", i, i)
+	}
+
+	deps := Deps{FS: &streamFS{content: content.String()}, Limits: Limits{MaxParsedRecords: 5}}
+	res := Trace(context.Background(), Args{TracePath: "irrelevant"}, deps)
+
+	if res.Status != evidence.StatusOK {
+		t.Fatalf("status=%v reason=%v, want ok — records read before the ceiling stay positive evidence", res.Status, res.Reason)
+	}
+	if len(res.Records) != 5 {
+		t.Fatalf("records = %d, want 5 (the injected MaxParsedRecords)", len(res.Records))
+	}
+	// The derived indexes are bounded by the same ceiling, which is the
+	// whole reason one knob is enough.
+	if len(res.ExecutedLines) != 5 || len(res.FilesInTrace) != 5 || len(res.IncludeChain) != 5 {
+		t.Fatalf("derived indexes not bounded by the record ceiling: executed=%d files=%d chain=%d, want 5 each",
+			len(res.ExecutedLines), len(res.FilesInTrace), len(res.IncludeChain))
+	}
+	var sawRecordLimit bool
+	for _, r := range res.InputIncompleteReasons {
+		if r == ReasonRecordLimit {
+			sawRecordLimit = true
+		}
+	}
+	if !sawRecordLimit {
+		t.Fatalf("InputIncompleteReasons = %v, want it to include %q — a bounded parse must not look complete",
+			res.InputIncompleteReasons, ReasonRecordLimit)
+	}
+}
+
+// F26: the whole-file byte ceiling stops the read and is reported.
+func TestF26_ByteCeilingStopsTheReadAndIsReported(t *testing.T) {
+	var content strings.Builder
+	content.WriteString("{\"version\":{\"major\":1,\"minor\":0}}\n")
+	for i := 1; i <= 500; i++ {
+		fmt.Fprintf(&content, "{\"file\":\"/p/CMakeLists.txt\",\"line\":%d,\"cmd\":\"message\",\"args\":[\"x\"]}\n", i)
+	}
+	full := content.String()
+
+	fs := &streamFS{content: full}
+	deps := Deps{FS: fs, Limits: Limits{MaxTraceBytes: 1024}}
+	res := Trace(context.Background(), Args{TracePath: "irrelevant"}, deps)
+
+	var sawByteLimit bool
+	for _, r := range res.InputIncompleteReasons {
+		if r == ReasonByteLimit {
+			sawByteLimit = true
+		}
+	}
+	if !sawByteLimit {
+		t.Fatalf("InputIncompleteReasons = %v, want it to include %q", res.InputIncompleteReasons, ReasonByteLimit)
+	}
+	if fs.last.read >= int64(len(full)) {
+		t.Fatalf("read %d of %d bytes — the byte ceiling did not stop the read", fs.last.read, len(full))
+	}
+	if len(res.Records) == 0 {
+		t.Fatal("records read before the ceiling must be retained as positive evidence")
 	}
 }
