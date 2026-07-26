@@ -116,9 +116,18 @@ vcpkg_from_github(
 // --- 2. python3-style conditional accumulation across 3 triplets -----------
 
 const python3StylePortfile = `
-set(PATCHES "")
+set(PATCHES
+    "0001-base-01.patch"
+    "0002-base-02.patch"
+    "0003-base-03.patch"
+    "0004-base-04.patch"
+    "0005-base-05.patch"
+    "0006-base-06.patch"
+    "0007-base-07.patch"
+    "0008-base-08.patch"
+)
 if(VCPKG_LIBRARY_LINKAGE STREQUAL "static" AND NOT VCPKG_TARGET_IS_MINGW)
-    list(APPEND PATCHES "0002-static-library.patch")
+    list(APPEND PATCHES "0009-static-library.patch")
 endif()
 if(VCPKG_TARGET_IS_MINGW)
     list(APPEND PATCHES "0021-mingw-maintained-stack.patch" "0022-mingw-cpython-main-head-fixes.patch")
@@ -143,7 +152,15 @@ vcpkg_from_github(
 `
 
 var python3StylePatchFiles = []string{
-	"0002-static-library.patch",
+	"0001-base-01.patch",
+	"0002-base-02.patch",
+	"0003-base-03.patch",
+	"0004-base-04.patch",
+	"0005-base-05.patch",
+	"0006-base-06.patch",
+	"0007-base-07.patch",
+	"0008-base-08.patch",
+	"0009-static-library.patch",
 	"0021-mingw-maintained-stack.patch",
 	"0022-mingw-cpython-main-head-fixes.patch",
 	"0016-fix-win-cross.patch",
@@ -152,6 +169,10 @@ var python3StylePatchFiles = []string{
 }
 
 func TestApplyOrder_Python3StyleConditionalAccumulation(t *testing.T) {
+	base := []string{
+		"0001-base-01.patch", "0002-base-02.patch", "0003-base-03.patch", "0004-base-04.patch",
+		"0005-base-05.patch", "0006-base-06.patch", "0007-base-07.patch", "0008-base-08.patch",
+	}
 	overrides := map[string]string{
 		"VCPKG_CROSSCOMPILING": "OFF",
 		"WINSDK_VERSION":       "10.0.22000",
@@ -167,7 +188,7 @@ func TestApplyOrder_Python3StyleConditionalAccumulation(t *testing.T) {
 			t.Fatalf("status = %v, want ok; result=%+v", res.Status, res)
 		}
 		got := filenames(res.Applied)
-		want := []string{"0021-mingw-maintained-stack.patch", "0022-mingw-cpython-main-head-fixes.patch"}
+		want := append(append([]string{}, base...), "0021-mingw-maintained-stack.patch", "0022-mingw-cpython-main-head-fixes.patch")
 		if !equalStrings(got, want) {
 			t.Errorf("mingw applied = %v, want %v", got, want)
 		}
@@ -175,13 +196,16 @@ func TestApplyOrder_Python3StyleConditionalAccumulation(t *testing.T) {
 		// definitively guard-false for a MinGW triplet, never undecidable —
 		// VCPKG_TARGET_IS_MINGW is derivable and Kleene AND short-circuits
 		// through the nested CROSSCOMPILING/WINSDK sub-guards.
-		for _, f := range []string{"0002-static-library.patch", "0016-fix-win-cross.patch", "0017-fix-win.patch", "0007-workaround-windows-11-sdk-rc-compiler-error.patch"} {
+		for _, f := range []string{"0009-static-library.patch", "0016-fix-win-cross.patch", "0017-fix-win.patch", "0007-workaround-windows-11-sdk-rc-compiler-error.patch"} {
 			if findConditional(res, f) == nil {
 				t.Errorf("expected %s in conditional_not_applied for mingw triplet, got result=%+v", f, res)
 			}
 		}
 		if len(res.Undecidable) != 0 {
 			t.Errorf("expected zero undecidable for mingw triplet (outer guard is definitively false), got %+v", res.Undecidable)
+		}
+		if len(res.Orphaned) != 0 {
+			t.Errorf("base PATCHES plus guarded appends must leave zero false orphans, got %+v", res.Orphaned)
 		}
 	})
 
@@ -195,15 +219,18 @@ func TestApplyOrder_Python3StyleConditionalAccumulation(t *testing.T) {
 			t.Fatalf("status = %v, want ok; result=%+v", res.Status, res)
 		}
 		got := filenames(res.Applied)
-		want := []string{"0017-fix-win.patch", "0007-workaround-windows-11-sdk-rc-compiler-error.patch"}
+		want := append(append([]string{}, base...), "0017-fix-win.patch", "0007-workaround-windows-11-sdk-rc-compiler-error.patch")
 		if !equalStrings(got, want) {
 			t.Errorf("windows-non-mingw applied = %v, want %v", got, want)
 		}
 		if findConditional(res, "0016-fix-win-cross.patch") == nil {
 			t.Errorf("expected 0016-fix-win-cross.patch in conditional_not_applied (CROSSCOMPILING=OFF), got %+v", res)
 		}
-		if findConditional(res, "0002-static-library.patch") == nil {
-			t.Errorf("expected 0002-static-library.patch in conditional_not_applied (dynamic linkage), got %+v", res)
+		if findConditional(res, "0009-static-library.patch") == nil {
+			t.Errorf("expected 0009-static-library.patch in conditional_not_applied (dynamic linkage), got %+v", res)
+		}
+		if len(res.Orphaned) != 0 {
+			t.Errorf("base PATCHES plus guarded appends must leave zero false orphans, got %+v", res.Orphaned)
 		}
 	})
 
@@ -217,11 +244,36 @@ func TestApplyOrder_Python3StyleConditionalAccumulation(t *testing.T) {
 			t.Fatalf("status = %v, want ok; result=%+v", res.Status, res)
 		}
 		got := filenames(res.Applied)
-		want := []string{"0002-static-library.patch", "0017-fix-win.patch", "0007-workaround-windows-11-sdk-rc-compiler-error.patch"}
+		want := append(append([]string{}, base...), "0009-static-library.patch", "0017-fix-win.patch", "0007-workaround-windows-11-sdk-rc-compiler-error.patch")
 		if !equalStrings(got, want) {
 			t.Errorf("static applied = %v, want %v", got, want)
 		}
+		if len(res.Orphaned) != 0 {
+			t.Errorf("base PATCHES plus guarded appends must leave zero false orphans, got %+v", res.Orphaned)
+		}
 	})
+}
+
+func TestApplyOrder_NonliteralSetListThenAppend_LibmysqlShape(t *testing.T) {
+	portDir := writeFixture(t, `
+set(_libmysql_patches base-one.patch base-two.patch base-three.patch)
+if(VCPKG_CROSSCOMPILING)
+    list(APPEND _libmysql_patches cross-build.patch)
+endif()
+vcpkg_from_github(REPO mysql/mysql REF v1 SHA512 0 PATCHES ${_libmysql_patches})
+`, "base-one.patch", "base-two.patch", "base-three.patch", "cross-build.patch")
+
+	res := ApplyOrder(Args{
+		PortDir: portDir, Triplet: "x64-windows", PortName: "libmysql",
+		VarOverrides: map[string]string{"VCPKG_CROSSCOMPILING": "ON"},
+	})
+	want := []string{"base-one.patch", "base-two.patch", "base-three.patch", "cross-build.patch"}
+	if got := filenames(res.Applied); !equalStrings(got, want) {
+		t.Errorf("applied = %v, want %v", got, want)
+	}
+	if len(res.Orphaned) != 0 {
+		t.Errorf("all _libmysql_patches entries are referenced, got false orphans %+v", res.Orphaned)
+	}
 }
 
 // --- 3. Nested crosscompiling if/else picks exactly one of two patches -----
@@ -318,21 +370,50 @@ vcpkg_from_github(
 		t.Errorf("expected zero missing, got %+v", res.Missing)
 	}
 
-	// Sub-case: without VcpkgRoot, $ENV{VCPKG_ROOT} cannot resolve, so the
-	// path stays a literal unresolved string and Stat() naturally fails —
-	// exists=false, surfaced as missing, WITHOUT any special-cased branch.
+	// Sub-case: without VcpkgRoot, $ENV{VCPKG_ROOT} cannot resolve. The
+	// package must preserve that uncertainty rather than asserting missing.
 	t.Run("unresolvable_without_vcpkg_root", func(t *testing.T) {
 		res := ApplyOrder(Args{PortDir: portDir, Triplet: "x64-windows", PortName: "licensepp"})
 		if res.Status != evidence.StatusOK {
 			t.Fatalf("status = %v, want ok; result=%+v", res.Status, res)
 		}
-		if len(res.Applied) != 1 || res.Applied[0].Exists {
-			t.Errorf("expected 1 applied patch with exists=false when VcpkgRoot is unset, got %+v", res.Applied)
+		if len(res.Applied) != 0 {
+			t.Errorf("unresolved path must not be asserted applied, got %+v", res.Applied)
 		}
-		if len(res.Missing) != 1 {
-			t.Errorf("expected 1 missing entry, got %+v", res.Missing)
+		if len(res.Missing) != 0 {
+			t.Errorf("unresolved path must not be asserted missing, got %+v", res.Missing)
+		}
+		u := findUndecidable(res, "${_test_builtin_port_dir}/add-stdint.diff")
+		if u == nil {
+			t.Fatalf("expected unresolved path in undecidable, got %+v", res)
+		}
+		if !equalStrings(u.UnresolvedVars, []string{"$ENV{VCPKG_ROOT}"}) {
+			t.Errorf("unresolved vars = %v, want [$ENV{VCPKG_ROOT}]", u.UnresolvedVars)
 		}
 	})
+}
+
+func TestApplyOrder_AllCapsExtensionlessPatchIsNotDropped(t *testing.T) {
+	portDir := writeFixture(t, `
+vcpkg_from_github(PATCHES LEGACYPATCH REPO a/b REF v1 SHA512 0)
+`, "LEGACYPATCH")
+
+	res := ApplyOrder(Args{PortDir: portDir, Triplet: "x64-windows", PortName: "x"})
+	if got := filenames(res.Applied); !equalStrings(got, []string{"LEGACYPATCH"}) {
+		t.Errorf("ALL-CAPS extensionless PATCHES entry was dropped: applied = %v", got)
+	}
+}
+
+func TestApplyOrder_BracketArgumentOpeningNewlineIgnored(t *testing.T) {
+	portDir := writeFixture(t, "vcpkg_from_github(REPO a/b REF v1 SHA512 0 PATCHES [[\nnewline.patch]])\n", "newline.patch")
+
+	res := ApplyOrder(Args{PortDir: portDir, Triplet: "x64-windows", PortName: "x"})
+	if got := filenames(res.Applied); !equalStrings(got, []string{"newline.patch"}) {
+		t.Errorf("applied = %v, want [newline.patch] without an opening newline", got)
+	}
+	if len(res.Missing) != 0 || len(res.Orphaned) != 0 {
+		t.Errorf("opening bracket newline must not create a missing/orphan pair, got missing=%+v orphaned=%+v", res.Missing, res.Orphaned)
+	}
 }
 
 // --- 5. Orphaned file --------------------------------------------------------
@@ -354,6 +435,17 @@ vcpkg_from_github(REPO a/b REF v1 SHA512 0 PATCHES referenced.patch)
 	}
 	if len(res.Missing) != 0 {
 		t.Errorf("expected zero missing, got %+v", res.Missing)
+	}
+}
+
+func TestApplyOrder_OrphanedNestedFile(t *testing.T) {
+	portDir := writeFixture(t, `
+vcpkg_from_github(REPO a/b REF v1 SHA512 0 PATCHES nested/live.patch)
+`, "nested/live.patch", "nested/dead.patch")
+
+	res := ApplyOrder(Args{PortDir: portDir, Triplet: "x64-windows", PortName: "x"})
+	if findOrphaned(res, "dead.patch") == nil {
+		t.Errorf("expected nested/dead.patch orphaned, got %+v", res.Orphaned)
 	}
 }
 

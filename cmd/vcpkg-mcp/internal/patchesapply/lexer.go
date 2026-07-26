@@ -335,7 +335,16 @@ func tokenize(s string) []token {
 		case c == '[':
 			if eq, contentStart, isBracket := matchBracketOpen(s, i); isBracket {
 				if contentEnd, afterClose, closed := findBracketClose(s, contentStart, eq); closed {
-					tokens = append(tokens, token{Text: s[contentStart:contentEnd], Quoted: true, Raw: true})
+					content := s[contentStart:contentEnd]
+					// CMake bracket arguments ignore one newline immediately after
+					// the opening delimiter; keeping it turns a real filename into
+					// a different missing path.
+					if strings.HasPrefix(content, "\r\n") {
+						content = content[2:]
+					} else if strings.HasPrefix(content, "\n") {
+						content = content[1:]
+					}
+					tokens = append(tokens, token{Text: content, Quoted: true, Raw: true})
 					i = afterClose
 					continue
 				}

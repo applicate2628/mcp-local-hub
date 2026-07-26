@@ -38,6 +38,7 @@ package patchesapply
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
@@ -239,9 +240,24 @@ func applyOrder(args Args, deps Deps) Result {
 	ordinal := 0
 	for _, e := range entries {
 		resolvedPath := resolvePatchPath(e.expanded, portDir)
-		exists := pathExists(deps, resolvedPath)
-		if resolvedPath != "" {
+		pathUnresolved := dedupStrings(e.pathUnresolved)
+		exists := len(pathUnresolved) == 0 && pathExists(deps, resolvedPath)
+		if resolvedPath != "" && len(pathUnresolved) == 0 {
 			referenced[filepath.Clean(resolvedPath)] = true
+		}
+
+		// A path that retains an unresolved variable cannot be classified as
+		// applied or missing: either assertion would claim filesystem knowledge
+		// the evaluator does not have. Path uncertainty takes precedence over a
+		// decidable control-flow guard.
+		if len(pathUnresolved) != 0 {
+			res.Undecidable = append(res.Undecidable, UndecidablePatch{
+				Filename:       e.raw,
+				ResolvedPath:   resolvedPath,
+				Guard:          e.guardText,
+				UnresolvedVars: dedupStrings(append(append([]string{}, e.unresolvedVars...), pathUnresolved...)),
+			})
+			continue
 		}
 
 		switch e.guard {
@@ -310,30 +326,36 @@ func pathExists(deps Deps, path string) bool {
 	return err == nil && !fi.IsDir()
 }
 
-// findOrphans scans portDir's top-level entries for .patch/.diff files
+// findOrphans recursively scans portDir for .patch/.diff files
 // whose cleaned absolute path never appeared in referenced (any declared
 // entry, regardless of guard truth — an orphan is orphaned for every
 // triplet, not just this one). A ReadDir failure degrades to "no orphans
 // reported" rather than failing the whole call — the applied/conditional/
 // undecidable/missing buckets are already independently useful.
 func findOrphans(deps Deps, portDir string, referenced map[string]bool) []OrphanedPatch {
-	dirEntries, err := deps.ReadDir(portDir)
-	if err != nil {
-		return nil
-	}
 	var out []OrphanedPatch
-	for _, de := range dirEntries {
-		if de.IsDir() {
-			continue
+	var walk func(string)
+	walk = func(dir string) {
+		dirEntries, err := deps.ReadDir(dir)
+		if err != nil {
+			return
 		}
-		name := de.Name()
-		if !strings.HasSuffix(name, ".patch") && !strings.HasSuffix(name, ".diff") {
-			continue
-		}
-		full := filepath.Clean(filepath.Join(portDir, name))
-		if !referenced[full] {
-			out = append(out, OrphanedPatch{Filename: name, Path: full})
+		sort.Slice(dirEntries, func(i, j int) bool { return dirEntries[i].Name() < dirEntries[j].Name() })
+		for _, de := range dirEntries {
+			full := filepath.Clean(filepath.Join(dir, de.Name()))
+			if de.IsDir() {
+				walk(full)
+				continue
+			}
+			name := de.Name()
+			if !strings.HasSuffix(name, ".patch") && !strings.HasSuffix(name, ".diff") {
+				continue
+			}
+			if !referenced[full] {
+				out = append(out, OrphanedPatch{Filename: name, Path: full})
+			}
 		}
 	}
+	walk(portDir)
 	return out
 }

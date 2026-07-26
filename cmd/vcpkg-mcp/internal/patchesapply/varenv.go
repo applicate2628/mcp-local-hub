@@ -38,6 +38,7 @@ type listItem struct {
 	guard          Tri
 	guardText      string
 	unresolvedVars []string
+	pathUnresolved []string
 }
 
 func newVarEnv(portDir, portName, vcpkgRoot string, overrides map[string]string, triplet string) *varEnv {
@@ -134,24 +135,25 @@ func (env *varEnv) expand(s string) (result string, unresolved []string) {
 	// own discovery-order doc names VCPKG_ROOT as THE documented env
 	// convention for the vcpkg root; every other $ENV{} name is unresolved —
 	// this package injects no other ambient environment).
-	result = reEnvRef.ReplaceAllStringFunc(s, func(m string) string {
-		name := reEnvRef.FindStringSubmatch(m)[1]
-		if name == "VCPKG_ROOT" {
-			if env.vcpkgRoot == "" {
-				unresolved = append(unresolved, "$ENV{VCPKG_ROOT}")
-				return m
-			}
-			return env.vcpkgRoot
-		}
-		unresolved = append(unresolved, "$ENV{"+name+"}")
-		return m
-	})
-	// Iterate ${VAR} expansion: a resolved value might itself still contain
-	// a reference that only ANOTHER earlier set() resolved (e.g. chained
-	// get_filename_component calls); a handful of passes bounds pathological
-	// self-reference without an unbounded loop.
+	result = s
+	// Iterate both $ENV{} and ${} expansion. A resolved ${VAR} can reveal an
+	// unresolved $ENV{} reference from an earlier set(), which must be carried
+	// to the caller instead of becoming a false missing path.
 	for pass := 0; pass < 8; pass++ {
 		changed := false
+		result = reEnvRef.ReplaceAllStringFunc(result, func(m string) string {
+			name := reEnvRef.FindStringSubmatch(m)[1]
+			if name == "VCPKG_ROOT" {
+				if env.vcpkgRoot == "" {
+					unresolved = append(unresolved, "$ENV{VCPKG_ROOT}")
+					return m
+				}
+				changed = true
+				return env.vcpkgRoot
+			}
+			unresolved = append(unresolved, "$ENV{"+name+"}")
+			return m
+		})
 		result = reVarRef.ReplaceAllStringFunc(result, func(m string) string {
 			name := reVarRef.FindStringSubmatch(m)[1]
 			val := env.lookup(name)

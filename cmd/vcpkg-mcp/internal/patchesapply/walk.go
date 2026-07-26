@@ -26,6 +26,9 @@ type declaredPatch struct {
 	// unresolvedVars names the variables responsible for guard == Unknown.
 	// Populated only in that case.
 	unresolvedVars []string
+	// pathUnresolved names variables that remain in expanded. They make path
+	// existence unknowable even when the entry's control-flow guard is true.
+	pathUnresolved []string
 }
 
 // ifFrame tracks one open if()/elseif()/else() block while walking.
@@ -126,7 +129,7 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 				frames = frames[:len(frames)-1]
 			}
 		case "set":
-			handleSet(st.Args, env, active())
+			handleSet(st.Args, env, active(), guardText(), activeUnresolved())
 		case "get_filename_component":
 			handleGetFilenameComponent(st.Args, env, active())
 		case "list":
@@ -163,7 +166,7 @@ func notAllPrior(f *ifFrame) (Tri, []string) {
 // this set() would not execute for this triplet, so it is skipped entirely
 // — the environment is left exactly as an earlier branch (or no branch)
 // left it, matching real CMake control flow.
-func handleSet(argsRaw string, env *varEnv, active Tri) {
+func handleSet(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) {
 	if active == TriFalse {
 		return
 	}
@@ -173,14 +176,28 @@ func handleSet(argsRaw string, env *varEnv, active Tri) {
 	}
 	name := toks[0].Text
 	var parts []string
+	var items []listItem
 	for _, t := range toks[1:] {
 		if !t.Quoted && (t.Text == "CACHE" || t.Text == "PARENT_SCOPE" || t.Text == "FORCE") {
 			break
 		}
-		expanded, _ := env.expandToken(t)
+		expanded, pathUnresolved := env.expandToken(t)
 		parts = append(parts, expanded)
+		if expanded != "" {
+			items = append(items, listItem{
+				text:           expanded,
+				guard:          active,
+				guardText:      guardText,
+				unresolvedVars: unresolvedVars,
+				pathUnresolved: pathUnresolved,
+			})
+		}
 	}
 	env.scalars[name] = strings.Join(parts, ";")
+	// CMake set(VAR value...) establishes a list value, replacing any prior
+	// value; later list(APPEND VAR ...) extends this declaration in source
+	// order. Keeping the declaration here lets PATCHES ${VAR} expand both.
+	env.lists[name] = items
 }
 
 // handleGetFilenameComponent implements get_filename_component(<var>
@@ -225,12 +242,13 @@ func handleListAppend(argsRaw string, env *varEnv, active Tri, guardText string,
 	}
 	listName := toks[1].Text
 	for _, t := range toks[2:] {
-		expanded, _ := env.expandToken(t)
+		expanded, pathUnresolved := env.expandToken(t)
 		env.lists[listName] = append(env.lists[listName], listItem{
 			text:           expanded,
 			guard:          active,
 			guardText:      guardText,
 			unresolvedVars: unresolvedVars,
+			pathUnresolved: pathUnresolved,
 		})
 	}
 }
@@ -267,6 +285,7 @@ func extractPatchesArg(argsRaw string, env *varEnv, active Tri, guardText string
 								guard:          li.guard,
 								guardText:      li.guardText,
 								unresolvedVars: li.unresolvedVars,
+								pathUnresolved: li.pathUnresolved,
 							})
 						}
 						j++
@@ -274,13 +293,14 @@ func extractPatchesArg(argsRaw string, env *varEnv, active Tri, guardText string
 					}
 				}
 			}
-			expanded, _ := env.expandToken(t)
+			expanded, pathUnresolved := env.expandToken(t)
 			items = append(items, declaredPatch{
 				raw:            t.Text,
 				expanded:       expanded,
 				guard:          active,
 				guardText:      guardText,
 				unresolvedVars: unresolvedVars,
+				pathUnresolved: pathUnresolved,
 			})
 			j++
 		}
@@ -289,18 +309,26 @@ func extractPatchesArg(argsRaw string, env *varEnv, active Tri, guardText string
 	return found, items
 }
 
-// looksLikeKeywordArg heuristically distinguishes a vcpkg helper's OTHER
-// keyword-args (OUT_SOURCE_PATH, SHA512, HEAD_REF, ...) from a patch
-// filename/path: every real patch reference this package's traps show
-// either carries a file extension (a '.'), a path separator, or a ${VAR}/
-// $ENV{VAR} reference — none of which a plain ALL-CAPS keyword-arg name
-// does.
+// looksLikeKeywordArg identifies the vcpkg helper keyword names that end a
+// PATCHES argument list. Unknown ALL-CAPS barewords remain patch candidates:
+// they can be extensionless filenames and must never be silently omitted.
 func looksLikeKeywordArg(s string) bool {
-	if !rePlainIdent.MatchString(s) {
-		return false
-	}
-	if len(s) < 2 {
-		return false
-	}
-	return s == strings.ToUpper(s)
+	// An unknown ALL-CAPS bareword can be an extensionless filename. Treat it
+	// as a PATCHES value rather than silently dropping it; only documented
+	// helper keyword names terminate this argument list.
+	_, ok := knownKeywordArgs[s]
+	return ok
+}
+
+var knownKeywordArgs = map[string]struct{}{
+	"OUT_SOURCE_PATH":    {},
+	"REPO":               {},
+	"REF":                {},
+	"SHA512":             {},
+	"HEAD_REF":           {},
+	"URL":                {},
+	"URLS":               {},
+	"FILENAME":           {},
+	"DOWNLOADS":          {},
+	"FILE_DISAMBIGUATOR": {},
 }
