@@ -14,12 +14,15 @@
 // Exit codes:
 //
 //	0  — success (drift report printed; in --apply mode, transitions dispatched)
-//	1  — IPC dial / read / decode failure (supervisor unreachable or wire error)
+//	1  — IPC dial / read / decode failure (supervisor unreachable or wire error),
+//	     OR (--apply only) the supervisor's serena registry/intent self-heal
+//	     failed — see errSerenaRepairFailed below
 package cli
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -28,6 +31,18 @@ import (
 
 	"mcp-local-hub/internal/api"
 )
+
+// errSerenaRepairFailed is the sentinel `mcphub reconcile --apply` returns when
+// the supervisor answered normally but its serena registry/intent self-heal did
+// NOT complete (ReconcileResponse.SerenaRepairError non-empty).
+//
+// Exiting 0 there was the defect: a failed repair never lands the orphan in
+// supervisor-intent.json, so it never appears in the drift report either, and
+// the command printed `no drift — scheduler state and intent are already
+// aligned` over a workspace the operator had just registered and could not use.
+// Dry-run keeps exit 0 (it mutates nothing and a report is all it promised) but
+// still PRINTS the failure.
+var errSerenaRepairFailed = errors.New("serena registry/intent self-heal failed on the supervisor")
 
 // reconcileDialFn is the package-private indirection for
 // api.DialSupervisorIPCReconcile. Tests swap this with a fake that
@@ -90,9 +105,23 @@ See also: status, install --upgrade.`,
 			if jsonOut {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
-				return enc.Encode(resp)
+				if encErr := enc.Encode(resp); encErr != nil {
+					return encErr
+				}
+			} else if printErr := printReconcileTable(cmd.OutOrStdout(), resp); printErr != nil {
+				return printErr
 			}
-			return printReconcileTable(cmd.OutOrStdout(), resp)
+			// Report printed either way; now decide the exit. An apply-mode run
+			// whose serena self-heal failed must not exit 0 — the report above
+			// cannot show the orphan (it never reached the intent), so silence
+			// plus exit 0 is the whole defect.
+			if apply && resp.SerenaRepairError != "" {
+				return fmt.Errorf("%w: %s (the drift report above is still valid; "+
+					"re-run `mcphub reconcile --apply` once the cause is resolved, and see "+
+					"supervisor-events.log `serena-intent-repair-*` entries)",
+					errSerenaRepairFailed, resp.SerenaRepairError)
+			}
+			return nil
 		},
 	}
 	c.Flags().BoolVar(&apply, "apply", false,
@@ -113,6 +142,21 @@ func printReconcileTable(w io.Writer, resp api.ReconcileResponse) error {
 		mode, resp.DriftCount, resp.AppliedCount); err != nil {
 		return err
 	}
+	// A self-heal that never reached a verdict is printed FIRST and
+	// unconditionally: the counts below and the drift table underneath are both
+	// blind to the orphan it failed on, so this line is the only place the
+	// operator can learn the report is incomplete.
+	if resp.SerenaRepairError != "" {
+		verb := "serena orphan repair FAILED"
+		if resp.DryRun {
+			verb = "serena orphan repair PREVIEW failed"
+		}
+		if _, err := fmt.Fprintf(w, "%s: %s\n  (this pass could not materialize orphaned serena "+
+			"workspaces; they are absent from the drift table below because they never reached "+
+			"supervisor-intent.json)\n", verb, resp.SerenaRepairError); err != nil {
+			return err
+		}
+	}
 	// Serena orphan-repair preview/result (BLOCKING 3 fix): shown in BOTH
 	// modes so a dry-run reconcile predicts exactly what the next --apply
 	// would materialize, instead of hiding it as an apply-only side effect.
@@ -132,6 +176,13 @@ func printReconcileTable(w io.Writer, resp api.ReconcileResponse) error {
 		}
 	}
 	if resp.DriftCount == 0 {
+		// Never claim alignment when the self-heal above did not finish: the
+		// orphan it failed on is exactly the drift this line would be denying.
+		if resp.SerenaRepairError != "" {
+			_, err := fmt.Fprintln(w, "no drift against the intent as read — but the serena repair "+
+				"above failed, so alignment is NOT confirmed for orphaned serena workspaces")
+			return err
+		}
 		_, err := fmt.Fprintln(w, "no drift — scheduler state and intent are already aligned")
 		return err
 	}

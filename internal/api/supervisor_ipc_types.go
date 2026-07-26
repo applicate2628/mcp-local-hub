@@ -61,6 +61,23 @@ type ReconcileResponse struct {
 	// both modes.
 	SerenaOrphansRepaired int      `json:"serena_orphans_repaired"`
 	SerenaOrphansDeferred []string `json:"serena_orphans_deferred,omitempty"`
+
+	// SerenaRepairError carries the self-heal's own failure text when the
+	// repair (apply) or preview (dry-run) could not COMPLETE — a malformed
+	// serena catalog, a dynamic-pool fan-out the manifest shape rejected, an
+	// intent write that hit I/O. Empty means the self-heal ran to a verdict.
+	//
+	// It exists because a failed repair is INVISIBLE in every other field of
+	// this response: the orphan never reaches supervisor-intent.json, so it is
+	// absent from Drift too, and DriftCount==0 + AppliedCount==0 reads exactly
+	// like a healthy "no drift" pass while the registered workspace stays
+	// unusable. The handler deliberately does NOT fail the whole reconcile over
+	// it (the drift report is still valid, and `mcphub stop` / `mcphub restart`
+	// dispatch apply-mode reconciles whose real work must not be blocked by an
+	// unrelated serena row) — so representing it here is what keeps the caller
+	// from reading silence as success. `mcphub reconcile` prints it and, in
+	// --apply mode, exits non-zero on it.
+	SerenaRepairError string `json:"serena_repair_error,omitempty"`
 }
 
 // DriftEntry describes one (task_name, drift_class) pair the reconcile

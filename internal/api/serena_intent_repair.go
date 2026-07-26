@@ -49,6 +49,41 @@ const (
 	registryLockRetryDelay    = 25 * time.Millisecond
 )
 
+// serenaPendingRemovalLeaseTTL bounds how long a WorkspaceEntry's
+// PendingSerenaRemoval mark is honored as "an unregister is tearing this row
+// down right now" before the repair treats it as debris from an INTERRUPTED
+// unregister and recovers.
+//
+// Sizing: the marked window is [SetSerenaPendingRemoval(true) ->
+// RemoveSerenaIntent -> DeleteSerenaRow] in PruneWorkspacePhases. Its slow leg
+// is RemoveSerenaIntent's live-supervisor reconcile nudge, bounded by
+// DefaultReconcileTimeout (30s); the two registry writes around it are
+// sub-second. 10 minutes is ~20x that worst case, so a genuinely in-flight
+// teardown can never be mistaken for debris, while a lost one is recovered on
+// the next startup self-heal or apply-mode reconcile past the TTL rather than
+// never.
+const serenaPendingRemovalLeaseTTL = 10 * time.Minute
+
+// pendingSerenaRemovalLeaseFresh reports whether a PendingSerenaRemoval mark
+// stamped at stampedAt is still within its lease at now.
+//
+// Both tails fail toward RECOVERY, never toward the permanent skip this lease
+// exists to end:
+//   - a ZERO stamp cannot be aged (an older binary's write, or a hand edit), so
+//     it is expired;
+//   - a stamp in the FUTURE (clock step or skew) is honored only while it is
+//     less than one TTL ahead, so a clock jumped far forward and then back
+//     cannot pin a row as "being removed" indefinitely.
+func pendingSerenaRemovalLeaseFresh(stampedAt, now time.Time) bool {
+	if stampedAt.IsZero() {
+		return false
+	}
+	if stampedAt.After(now) {
+		return stampedAt.Sub(now) < serenaPendingRemovalLeaseTTL
+	}
+	return now.Sub(stampedAt) < serenaPendingRemovalLeaseTTL
+}
+
 type serenaIntentRepairEvent struct {
 	severity string
 	event    string
@@ -59,6 +94,12 @@ type serenaIntentRepairEvent struct {
 // RepairSerenaIntentFromRegistry re-reads the workspace registry and the
 // supervisor intent under FRESH locks and APPENDS the daemon rows for any
 // serena registry row whose per-workspace daemon is missing from the intent.
+//
+// It writes the REGISTRY in exactly one case: clearing a PendingSerenaRemoval
+// mark whose lease has expired (step 4b — debris from an unregister that never
+// reached its registry-row delete). That write happens inside the same held
+// registry flock as the classification, and it only ever drops a mark; it never
+// adds, removes, or otherwise edits a row.
 //
 // Returns:
 //   - repaired:  the number of serena daemon rows appended to the intent.
@@ -98,7 +139,8 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 // RepairSerenaIntentFromRegistry would act on — the same registry+intent
 // locks, the same orphan/deferred/skip rules, even the same manifest-shape
 // validation of the descriptors that would be appended — but NEVER writes
-// supervisor-intent.json and NEVER emits an audit event.
+// supervisor-intent.json, NEVER writes the registry (including the expired
+// pending-removal mark the commit path clears), and NEVER emits an audit event.
 //
 // This closes the "unpreviewed global side effect" gap (BLOCKING 3,
 // mcphub-register-intent REVISE round 2): before this existed, ONLY
@@ -231,9 +273,11 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 	// 4. Classify each serena registry row from THIS fresh read into: SKIP
 	//    (divergent key or stale path), DEFER (legacy nil-spec row), or APPEND
 	//    (orphan). A nil/missing intent makes every row an orphan.
+	now := time.Now().UTC()
 	var missing []WorkspaceEntry
 	var skippedDivergent []string
 	var deferredLegacy []string
+	var expiredRemovalMarks []WorkspaceEntry
 	for i := range rows {
 		ws := rows[i]
 		if ws.Language != SerenaLanguageSentinel || ws.WorkspacePath == "" {
@@ -250,8 +294,24 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 		// this is expected, self-resolving state (the row disappears for good once
 		// DeleteSerenaRow commits, or the flag clears if the teardown fails and a
 		// normal orphan classification applies on the next pass).
+		//
+		// The mark is honored only while its LEASE is fresh. "Self-resolving"
+		// holds for a teardown that RUNS to a verdict; it does NOT hold for one
+		// that is INTERRUPTED after the mark and the descriptor removal but
+		// before DeleteSerenaRow (the process is killed, or that delete's
+		// registry write fails) — nothing then ever clears the flag, and an
+		// unconditional skip here would strand the row forever: no daemon in the
+		// intent, the resolver still routing to it, and `mcphub workspace
+		// register` still rejecting it as already registered. Past the lease the
+		// row is classified as the ordinary crash-orphan it is (exactly the state
+		// an interruption BEFORE the mark would have left) and the stale mark is
+		// cleared below.
 		if ws.PendingSerenaRemoval {
-			continue
+			if pendingSerenaRemovalLeaseFresh(ws.PendingSerenaRemovalAt, now) {
+				continue
+			}
+			expiredRemovalMarks = append(expiredRemovalMarks, ws)
+			// fall through to the normal classification below
 		}
 		// Divergence guard: WorkspaceKey must equal WorkspaceKey(WorkspacePath).
 		// Detection keys off ws.WorkspaceKey, but the materialized daemon's TaskName
@@ -297,6 +357,44 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 			missing = append(missing, ws)
 		}
 	}
+	// 4b. Crash recovery for the pending-removal lease. Every row above whose
+	//     mark had aged out is debris from an unregister that never reached its
+	//     DeleteSerenaRow; it has ALREADY been reclassified normally (as an
+	//     orphan / healthy / deferred row, whichever it is). Clear the stale
+	//     mark so the registry stops asserting a teardown that is not happening
+	//     — we still hold the registry flock, so this write cannot race another
+	//     registry mutator.
+	//
+	//     Preview (commit=false) never writes: the classification above is
+	//     already identical in both modes, so skipping the clear here cannot
+	//     make preview and apply disagree about WHICH rows are orphaned.
+	//
+	//     A clear failure is NON-fatal and audited, never returned: the mark is
+	//     bookkeeping, the intent append below is the actual recovery, and
+	//     failing the whole repair over a registry write would keep the
+	//     workspace unusable for exactly the operator this branch exists to
+	//     rescue. The next pass re-classifies and retries the clear.
+	if len(expiredRemovalMarks) > 0 {
+		expiredKeys := missingWorkspaceKeys(expiredRemovalMarks)
+		body := map[string]any{
+			"expired_count":     len(expiredKeys),
+			"expired_workspace": expiredKeys,
+			"lease_ttl":         serenaPendingRemovalLeaseTTL.String(),
+			"reason":            "registry row carries a pending_serena_removal mark older than the lease; the unregister that set it never reached its registry-row delete (killed process, or a failed delete write), so the row is reclassified as an ordinary crash-orphan and the stale mark is cleared",
+			"operator_action":   "no action required — re-run `mcphub workspace unregister <path> --backend serena` if the removal was still intended",
+		}
+		if commit {
+			if cerr := clearExpiredSerenaRemovalMarks(reg, expiredRemovalMarks); cerr != nil {
+				body["clear_error"] = cerr.Error()
+			}
+		}
+		repairEvents = append(repairEvents, serenaIntentRepairEvent{
+			severity: SupervisorEventSeverityWarn,
+			event:    "serena-pending-removal-lease-expired",
+			body:     body,
+		})
+	}
+
 	if len(skippedDivergent) > 0 {
 		repairEvents = append(repairEvents, serenaIntentRepairEvent{
 			severity: SupervisorEventSeverityWarn,
@@ -418,6 +516,35 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 	// deferredLegacy (nil-spec rows that coexisted with the spec-bearing pool) is
 	// returned alongside the append count so the caller still surfaces them.
 	return len(newDaemons), deferredLegacy, nil
+}
+
+// clearExpiredSerenaRemovalMarks drops the PendingSerenaRemoval flag (and its
+// stamp) from each given row and commits the registry.
+//
+// Callers MUST already hold the registry flock: reg is the SAME already-loaded
+// *Registry the repair classified from, and (*Registry).Save takes no internal
+// lock by contract (see its doc comment), so this is a lock-held read-modify-
+// write inside the repair's own critical section — never a second acquisition.
+//
+// It re-reads each row out of reg rather than writing back the classification-
+// time copies, so an unrelated field another step of this same pass may have
+// touched is not reverted, and a row that vanished under us is skipped.
+func clearExpiredSerenaRemovalMarks(reg *Registry, expired []WorkspaceEntry) error {
+	changed := false
+	for i := range expired {
+		e, ok := reg.GetSerena(expired[i].WorkspaceKey)
+		if !ok || (!e.PendingSerenaRemoval && e.PendingSerenaRemovalAt.IsZero()) {
+			continue
+		}
+		e.PendingSerenaRemoval = false
+		e.PendingSerenaRemovalAt = time.Time{}
+		reg.Put(e)
+		changed = true
+	}
+	if !changed {
+		return nil
+	}
+	return reg.Save()
 }
 
 // missingWorkspaceKeys projects the WorkspaceKey of each entry.

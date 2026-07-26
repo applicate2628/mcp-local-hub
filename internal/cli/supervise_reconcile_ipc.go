@@ -152,19 +152,35 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// actual repairs and a dry-run preview describes nothing that happened). A
 	// repair/preview error or a deferred introduce-crash never fails this
 	// reconcile request either way.
+	//
+	// A repair/preview FAILURE is reported to the caller in
+	// ReconcileResponse.SerenaRepairError. It must be: a failed repair leaves
+	// the orphan out of the intent, hence out of the drift report too, so
+	// without this field the response is byte-identical to a healthy "no drift"
+	// pass and `mcphub reconcile --apply` printed `no drift` + exited 0 over a
+	// workspace that stayed unusable. Reporting it is NOT the same as failing
+	// the request: the drift report is still valid, and `mcphub stop` /
+	// `mcphub restart` dispatch apply-mode reconciles whose own work must not
+	// be blocked by an unrelated serena row — so the frame still carries OK.
+	// The same holds in dry-run, where a swallowed preview error would report
+	// `serena orphans would repair: 0` for a preview that never got a verdict;
+	// surfacing it keeps that number honest without making a dry-run fail.
 	var serenaRepaired int
 	var serenaDeferred []string
+	var serenaRepairErr string
 	if args.Apply {
 		var rErr error
 		serenaRepaired, serenaDeferred, rErr = api.NewAPI().RepairSerenaIntentFromRegistry(deps.stateDir)
 		emitSerenaIntentRepairOutcome(deps.events, serenaRepaired, serenaDeferred, rErr)
+		if rErr != nil {
+			serenaRepairErr = rErr.Error()
+		}
 	} else {
-		// Preview errors are deliberately swallowed (not surfaced in the
-		// response, not audited): a dry-run reconcile must never fail or
-		// mutate state just because the read-only preview hit a benign
-		// contention/manifest-shape condition the caller cannot act on from a
-		// dry-run anyway. The response fields simply stay at their zero value.
-		serenaRepaired, serenaDeferred, _ = api.NewAPI().PreviewSerenaIntentRepairFromRegistry(deps.stateDir)
+		var pErr error
+		serenaRepaired, serenaDeferred, pErr = api.NewAPI().PreviewSerenaIntentRepairFromRegistry(deps.stateDir)
+		if pErr != nil {
+			serenaRepairErr = pErr.Error()
+		}
 	}
 
 	// (1) Read supervisor-intent.json. Missing file is not a hard
@@ -454,6 +470,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		Drift:                 drift,
 		SerenaOrphansRepaired: serenaRepaired,
 		SerenaOrphansDeferred: serenaDeferred,
+		SerenaRepairError:     serenaRepairErr,
 	}
 	body, err := json.Marshal(resp)
 	if err != nil {

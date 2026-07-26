@@ -90,7 +90,34 @@ type WorkspaceEntry struct {
 	// crash-orphan (registry row present, no matching intent daemon) — so
 	// without this flag, an unregister resurrects the very row it just tore
 	// down (see work-items/bugs — unregister-resurrects-serena-intent).
+	//
+	// The flag is a LEASE, not a permanent verdict — see
+	// PendingSerenaRemovalAt.
 	PendingSerenaRemoval bool `yaml:"pending_serena_removal,omitempty"`
+
+	// PendingSerenaRemovalAt is the UTC instant PendingSerenaRemoval was
+	// stamped, and it is what makes the flag a bounded LEASE rather than a
+	// permanent skip. Without it, an unregister that DIED (or whose
+	// DeleteSerenaRow write failed) after SetSerenaPendingRemoval(true) and
+	// after the intent-descriptor removal but BEFORE the registry-row delete
+	// left the flag set forever: RepairSerenaIntentFromRegistry then skipped
+	// the row on every startup and every apply-mode reconcile, while the
+	// serena resolver kept routing to a daemon no supervisor would ever spawn
+	// and `mcphub workspace register` kept rejecting the workspace as already
+	// registered. Nothing ever cleared it (PruneWorkspacePhases clears the
+	// mark only on a RemoveSerenaIntent FAILURE, not on an interruption).
+	//
+	// With the stamp, the repair honors the mark only while the lease is
+	// fresh (serenaPendingRemovalLeaseTTL, sized far above the ~30 s worst
+	// case a live teardown needs) and otherwise treats the row as the ordinary
+	// crash-orphan it is — the exact state a crash BEFORE the mark would have
+	// produced — clearing the stale mark as it goes.
+	//
+	// A zero value on a row whose PendingSerenaRemoval is true (an older
+	// binary's write, or a hand edit) cannot be aged, so it is treated as
+	// EXPIRED: failing toward recovery is strictly safer than failing toward
+	// the permanent skip this field exists to end.
+	PendingSerenaRemovalAt time.Time `yaml:"pending_serena_removal_at,omitempty"`
 }
 
 // Registry is the on-disk source of truth for workspace-scoped daemons.
@@ -451,6 +478,13 @@ func (r *Registry) RemoveByBackend(workspaceKey string, backendFilter string) in
 // RepairSerenaIntentFromRegistry can tell "deliberately being removed" apart
 // from "orphaned by a crash" for exactly the window between the intent
 // descriptor's removal and this registry row's eventual delete.
+//
+// pending=true also (re)stamps PendingSerenaRemovalAt with the current UTC
+// instant, which is what bounds the mark's lifetime (see the field's doc
+// comment). It is stamped on EVERY pending=true call, including one against an
+// already-marked row: a retried unregister genuinely restarts the teardown, so
+// its lease legitimately restarts with it. pending=false clears BOTH the flag
+// and the stamp so no expired lease outlives the mark it belonged to.
 func (r *Registry) SetSerenaPendingRemoval(wsKey, legacyWSKey string, pending bool) error {
 	unlock, err := r.Lock()
 	if err != nil {
@@ -460,13 +494,25 @@ func (r *Registry) SetSerenaPendingRemoval(wsKey, legacyWSKey string, pending bo
 	if err := r.Load(); err != nil {
 		return err
 	}
+	now := time.Now().UTC()
 	changed := false
 	for _, key := range dedupeWorkspaceKeys(wsKey, legacyWSKey) {
 		e, ok := r.GetSerena(key)
-		if !ok || e.PendingSerenaRemoval == pending {
+		if !ok {
 			continue
 		}
-		e.PendingSerenaRemoval = pending
+		if !pending {
+			if !e.PendingSerenaRemoval && e.PendingSerenaRemovalAt.IsZero() {
+				continue
+			}
+			e.PendingSerenaRemoval = false
+			e.PendingSerenaRemovalAt = time.Time{}
+			r.Put(e)
+			changed = true
+			continue
+		}
+		e.PendingSerenaRemoval = true
+		e.PendingSerenaRemovalAt = now
 		r.Put(e)
 		changed = true
 	}

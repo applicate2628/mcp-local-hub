@@ -766,25 +766,15 @@ func TestRepairSerenaIntentFromRegistry_PendingSerenaRemoval_SkippedNotReappende
 	pendingKey := seedSerenaRegistryRow(t, regPath, pendingPath, pendingPort)
 
 	// Flag the pending row exactly as PruneWorkspacePhases does before it
-	// removes the matching intent descriptor.
-	reg := NewRegistry(regPath)
-	unlock, err := reg.Lock()
-	if err != nil {
-		t.Fatalf("lock registry: %v", err)
+	// removes the matching intent descriptor — through the production owner,
+	// so the row carries the same FRESH lease stamp a real in-flight teardown
+	// has. (Hand-setting the bool alone would model an UNSTAMPED mark, which is
+	// the interrupted-unregister case covered in
+	// serena_pending_removal_lease_test.go, not the in-flight one asserted
+	// here.)
+	if err := NewRegistry(regPath).SetSerenaPendingRemoval(pendingKey, "", true); err != nil {
+		t.Fatalf("SetSerenaPendingRemoval: %v", err)
 	}
-	if err := reg.Load(); err != nil {
-		t.Fatalf("load registry: %v", err)
-	}
-	e, ok := reg.GetSerena(pendingKey)
-	if !ok {
-		t.Fatalf("precondition: seeded pending row %q not found", pendingKey)
-	}
-	e.PendingSerenaRemoval = true
-	reg.Put(e)
-	if err := reg.Save(); err != nil {
-		t.Fatalf("save registry with pending flag: %v", err)
-	}
-	unlock()
 
 	// Intent carries ONLY the healthy daemon — the pending row's descriptor
 	// has already been removed by the (simulated) in-flight unregister, which
