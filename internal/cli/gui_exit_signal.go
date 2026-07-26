@@ -18,12 +18,65 @@ import (
 )
 
 // observeGUIExitSignal blocks until sigCh delivers a SIGINT/SIGTERM, or ctx
-// is done for any other reason. On a genuine signal, it attributes the exit
-// via emit AND cancels via cancelFn — IN THAT ORDER, from this SAME
-// goroutine — so the attribution attempt has definitely completed (or was
-// correctly skipped) before ctx.Done() is ever observable to anyone else. A
-// caller that joins (e.g. via sync.WaitGroup.Wait) the goroutine running
-// this function is guaranteed the same thing transitively.
+// is done for any other reason. On a genuine signal it cancels via cancelFn
+// AND attributes the exit via emit — IN THAT ORDER, from this SAME goroutine.
+//
+// ORDERING (round 4 review fix — cancel BEFORE emit). The two statements are
+// wildly asymmetric in cost:
+//
+//   - cancelFn() is a context cancel: it closes a channel and walks the
+//     child list. Bounded by memory access, effectively instantaneous.
+//   - emit is gui.EmitExitReasonEvent, which opens supervisor-events.log and
+//     appends a row under a CROSS-PROCESS flock, bounded by
+//     guiExitReasonEmitTimeout (2s, internal/gui/gui_exit_reason.go:26). The
+//     supervisor and the install CLI write that same log, so a contended or
+//     wedged flock makes it spend the FULL bound.
+//
+// The previous order (emit, then cancel) therefore delayed cancellation by up
+// to the whole emit bound. That is not academic: RunE threads THIS ctx into
+// runForceKill (internal/cli/gui.go:698) precisely so a Ctrl-C during
+// `mcphub gui --force --kill` aborts the destructive kill path — gui.Probe
+// and the post-kill acquire poll both select on it. Making the operator's
+// Ctrl-C wait on a contended event-log flock before the abort is even
+// signalled inverts the priority between a best-effort observability row and
+// an operator-issued abort of a destructive operation.
+//
+// WHAT STILL GUARANTEES ATTRIBUTION. The "a signal-caused exit is attributed
+// before the process tears down" guarantee does NOT come from this
+// function's internal statement order — it comes from the JOIN in
+// startGUIExitSignalObserver below (cancel -> wg.Wait -> signal.Stop), which
+// RunE arms with `defer stop()`. Go runs deferred functions on EVERY return
+// path, so stop() — and therefore wg.Wait() — blocks the RunE return until
+// this goroutine has returned, i.e. until emit has completed or been
+// correctly skipped. Cancelling first does not weaken that: the emit runs in
+// this goroutine either way, and the join waits for this goroutine either
+// way. It only moves the emit so it OVERLAPS the teardown it describes
+// instead of preceding the teardown's trigger. (`defer stop()` is registered
+// at the very top of RunE, so it runs LAST among RunE's defers — the real
+// shutdown work happens first and the emit overlaps it rather than
+// serializing behind it.)
+//
+// WHAT IS GIVEN UP, AND WHY IT IS SAFE. A consumer of ctx.Done() can now
+// observe cancellation before the row physically lands. Two ways that could
+// matter, both checked:
+//
+//  1. A ctx.Done() consumer terminating the process without unwinding RunE's
+//     defers would skip the join. There is no such consumer: the only
+//     os.Exit-bound seam in these packages is selfRestartExitFn
+//     (internal/gui/gui_self_restart.go:171), reached only from an explicit
+//     RequestSelfRestartExit call, never from a ctx cancellation — and that
+//     path emits synchronously on its own and is documented as outside this
+//     join's coverage regardless (see startGUIExitSignalObserver's
+//     "Coverage note").
+//  2. A ctx.Done() consumer racing this emit for EmitExitReasonEvent's
+//     process-wide first-trigger-wins sync.Once could misattribute the exit.
+//     There is no such consumer either: the only other call sites are the
+//     tray Quit / QuitAndStopAll handlers (internal/cli/gui.go:1427,1432),
+//     which fire from an operator click, not from ctx.Done().
+//
+// A caller that joins (e.g. via sync.WaitGroup.Wait) the goroutine running
+// this function still gets the completed-or-skipped attribution guarantee
+// transitively.
 //
 // P2-5 REVIEW FIX (durability): the pre-fix version was a fire-and-forget
 // goroutine that read ONLY sigCh with no ctx branch. A caller that tried to
@@ -55,7 +108,7 @@ import (
 // now called from the ONLY registration that exists for SIGINT/SIGTERM
 // (sigCh, owned by startGUIExitSignalObserver below) — ctx is a plain
 // derived context whose ONLY cancellation causes are (a) THIS function's
-// own signal branch, sequentially after emit, or (b) an external, explicit
+// own signal branch, or (b) an external, explicit
 // stop()/cancel() call from some OTHER, already-well-defined shutdown
 // trigger (RunE's own return, tray Quit — which records its own reason
 // before ever calling stop()). There is no longer a race between two
@@ -73,8 +126,15 @@ func observeGUIExitSignal(ctx context.Context, sigCh <-chan os.Signal, cancelFn 
 			// cancellation.
 			return
 		}
-		emitSignalReason(sig, emit)
+		// Cancel FIRST: an operator-issued abort must not queue behind a
+		// best-effort observability row that can spend the full
+		// guiExitReasonEmitTimeout on a contended event-log flock. The
+		// attribution is still performed by THIS goroutine immediately
+		// afterwards, and startGUIExitSignalObserver's join is what
+		// guarantees it completes before the caller proceeds. See this
+		// function's ORDERING doc above.
 		cancelFn()
+		emitSignalReason(sig, emit)
 	case <-ctx.Done():
 		// Canceled some other way (an explicit stop()/cancel() call on a
 		// non-signal shutdown path, or the parent context's own
@@ -132,7 +192,12 @@ func emitSignalReason(sig os.Signal, emit func(gui.GUIExitReason, map[string]any
 //  2. wg.Wait() SECOND — blocks until the observer goroutine has returned,
 //     which is what guarantees the attribution attempt (via emit) has
 //     completed or was correctly skipped before the caller itself
-//     continues.
+//     continues. Since the round-4 reordering inside observeGUIExitSignal
+//     (cancel before emit, so an operator's Ctrl-C is not delayed by a
+//     contended event-log flock), this join is the SOLE owner of that
+//     guarantee — it is no longer redundant with an intra-goroutine
+//     statement order. Removing it does not merely weaken a belt-and-braces
+//     property; it drops the durability guarantee outright.
 //  3. signal.Stop(sigCh) LAST, only once the observer's own decision is
 //     already settled. Round 3 review finding: the round-2 shape called
 //     signal.Stop BEFORE joining, so a signal that was independently

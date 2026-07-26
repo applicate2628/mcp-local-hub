@@ -510,9 +510,9 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 			// wait; the fresh RespawnReserve context below remains untouched.
 			auditBudget := boundedPortWaitBudget(deps.AuditEmitTimeout, deps.PostKillTimeout, deps.RespawnReserve, deps.Now().Sub(postKillStarted))
 			if auditBudget <= 0 {
-				queueIdempotentAuditFallback(&postCommitAudits, stateDir, committedAudit, nil)
+				queueIdempotentAuditFallback(&postCommitAudits, stateDir, committedAudit, nil, nil)
 			} else if pending, emitErr := emitRecoverAuditEventWithTimeoutTracked(stateDir, committedAudit, auditBudget); emitErr != nil {
-				queueIdempotentAuditFallback(&postCommitAudits, stateDir, committedAudit, pending)
+				queueIdempotentAuditFallback(&postCommitAudits, stateDir, committedAudit, pending, emitErr)
 			}
 			terminationElapsed := deps.Now().Sub(postKillStarted)
 			waitBudget := boundedPortWaitBudget(deps.PortWaitTimeout, deps.PostKillTimeout, deps.RespawnReserve, terminationElapsed)
@@ -787,7 +787,33 @@ func emitRecoverAuditEventWithTimeoutTracked(stateDir string, event api.Supervis
 //     (non-timeout) failure from the worker — meaning the row is confirmed
 //     absent rather than merely unconfirmed — makes a fresh write from this
 //     closure legitimate rather than a race against an unknown outcome.
-func queueIdempotentAuditFallback(postCommitAudits *[]func(), stateDir string, audit api.SupervisorEvent, pending *api.PendingSupervisorEventEmit) {
+//
+// emitErr is the tracked attempt's OWN returned error (nil when no attempt was
+// made at all — the auditBudget <= 0 call site). Round 4 review fix: the
+// pending != nil switch below already fails closed on a flock-release failure
+// reported by an ABANDONED worker, but that is not the only way one reaches
+// this function. EmitWithTimeoutTracked returns a non-nil handle ONLY when its
+// error is exactly ErrSupervisorEventEmitTimeout (supervisor_events.go's emit:
+// the handle is constructed on the ctx.Done() arm alone). An emit whose write
+// SETTLED before the deadline but whose cross-process flock could not be
+// released therefore returns (nil, err-matching-ErrSupervisorEventReleaseFailed)
+// — pending == nil, so the switch below was skipped entirely and the closure
+// fell through to an unconditional write. That outcome says nothing about the
+// ROW (the append phase completed and very likely committed) and everything
+// about the LOCK, so the unconditional write was both a probable duplicate AND
+// a probable hang: it opens a FRESH flock handle on the same file via the
+// BLOCKING emitRecoverAuditEvent, and the flock the settled emit failed to
+// release is still held by this very process. Fail closed identically to the
+// abandoned-worker case — the two are the same fact reported through two
+// different channels, so they get the same verdict.
+func queueIdempotentAuditFallback(postCommitAudits *[]func(), stateDir string, audit api.SupervisorEvent, pending *api.PendingSupervisorEventEmit, emitErr error) {
+	if errors.Is(emitErr, api.ErrSupervisorEventReleaseFailed) {
+		// Decided at QUEUE time rather than inside the closure: the outcome is
+		// already known here, and not enqueuing at all keeps "was a physical
+		// fallback write still needed?" a single observable decision instead
+		// of a closure that exists only to do nothing.
+		return
+	}
 	*postCommitAudits = append(*postCommitAudits, func() {
 		if pending != nil {
 			switch waitErr := pending.Wait(0); {

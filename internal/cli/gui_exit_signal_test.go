@@ -82,6 +82,83 @@ func TestObserveGUIExitSignal_SIGINTAttributesAndCancels(t *testing.T) {
 	}
 }
 
+// TestObserveGUIExitSignal_CancelsBeforeWaitingOnEmit pins the round-4 review
+// fix: on a genuine signal, cancellation must NOT queue behind the
+// attribution emit.
+//
+// The emit is gui.EmitExitReasonEvent in production — it appends to
+// supervisor-events.log under a CROSS-PROCESS flock and is bounded only by
+// guiExitReasonEmitTimeout (2s). The supervisor and the install CLI write the
+// same log, so a contended flock makes it spend the full bound. RunE threads
+// THIS ctx into runForceKill (gui.go:698) specifically so a Ctrl-C during
+// `mcphub gui --force --kill` aborts the destructive kill path, so an emit
+// that runs first put up to two seconds of best-effort observability in front
+// of an operator-issued abort.
+//
+// The fake emit here parks until the test releases it, standing in for that
+// contended flock. Two assertions, covering both halves of the corrected
+// contract:
+//
+//  1. ctx is ALREADY canceled at the moment emit is entered — cancellation
+//     did not wait for the row.
+//  2. the observer goroutine has NOT returned while emit is parked — so
+//     startGUIExitSignalObserver's wg.Wait() join still covers the
+//     attribution, which is now the SOLE owner of the "attributed before the
+//     process tears down" guarantee.
+//
+// MUTATION: restore the pre-fix order in observeGUIExitSignal (call
+// emitSignalReason(sig, emit) BEFORE cancelFn()) — assertion 1 fails with
+// "ctx.Err() at emit entry = <nil>", because the parked emit now blocks
+// cancellation instead of following it.
+func TestObserveGUIExitSignal_CancelsBeforeWaitingOnEmit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	sigCh <- syscall.SIGINT
+
+	emitEntered := make(chan struct{})
+	releaseEmit := make(chan struct{})
+	var ctxErrAtEmitEntry error
+	observerReturned := make(chan struct{})
+	go func() {
+		defer close(observerReturned)
+		observeGUIExitSignal(ctx, sigCh, cancel, func(reason gui.GUIExitReason, extra map[string]any) {
+			// Stands in for a contended supervisor-events.log flock: the
+			// production emit can burn the whole guiExitReasonEmitTimeout here.
+			ctxErrAtEmitEntry = ctx.Err()
+			close(emitEntered)
+			<-releaseEmit
+		})
+	}()
+
+	select {
+	case <-emitEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("emit was never entered after a SIGINT delivery")
+	}
+
+	// (1) Cancellation must already have happened.
+	if ctxErrAtEmitEntry == nil {
+		t.Errorf("ctx.Err() at emit entry = %v, want a non-nil cancellation: the signal must cancel BEFORE the attribution emit, so an operator's Ctrl-C during `mcphub gui --force --kill` is not delayed by a contended event-log flock", ctxErrAtEmitEntry)
+	}
+
+	// (2) The join must still cover the emit: the observer goroutine cannot
+	// have returned while the emit is parked.
+	select {
+	case <-observerReturned:
+		t.Fatal("observeGUIExitSignal returned while its emit was still in flight — a joining caller would no longer guarantee the attribution completed, and the join is now the SOLE owner of that guarantee")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseEmit)
+	select {
+	case <-observerReturned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("observeGUIExitSignal did not return after its emit was released")
+	}
+}
+
 // TestObserveGUIExitSignal_SIGTERMAttributes mirrors the SIGINT test for
 // SIGTERM, proving the reason mapping distinguishes the two signals.
 func TestObserveGUIExitSignal_SIGTERMAttributes(t *testing.T) {

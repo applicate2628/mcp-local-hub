@@ -782,6 +782,44 @@ type Verdict struct {
 	archUnsupported bool
 }
 
+// IdentityProbeUnsupported reports whether this Verdict was produced on a
+// platform where the OS identity probe (processIDImpl) could not run AT ALL —
+// darwin (errMacOSProbeUnsupported) or a Windows non-amd64 build
+// (errWindowsArchUnsupported, PEB offsets are 64-bit-only). It is the exported
+// read of the two unexported flags above, so a consumer OUTSIDE this package
+// can tell an OBSERVED liveness fact apart from an unobservable one without
+// those flags (or their JSON-invisibility) leaking.
+//
+// Why a consumer needs it: probeOnce routes an unsupported-probe Verdict to
+// VerdictLiveUnreachable, which on every supported platform means the strong
+// fact "the recorded PID IS alive, it just is not answering /api/ping". On an
+// unsupported platform it means only "we could not look". The Class alone
+// cannot distinguish the two, so a caller that treats VerdictLiveUnreachable
+// as proof of liveness draws a confident conclusion from a probe that never
+// ran (round 4 review finding on probeGUIOwnerAlive in
+// internal/cli/supervise_ensure_alive.go).
+//
+// NOTE the flags are stamped BEFORE probeOnce's pingMatched early return, so a
+// VerdictHealthy can also report true here. That combination is NOT ambiguous:
+// a ping whose reply carries the recorded PID is an independent, positive
+// liveness proof that needs no identity probe. Consumers must therefore branch
+// on this only for classes whose liveness claim actually rests on the identity
+// probe (VerdictLiveUnreachable), never as a blanket "distrust this verdict".
+func (v Verdict) IdentityProbeUnsupported() bool {
+	return v.macOSUnsupported || v.archUnsupported
+}
+
+// NewIdentityProbeUnsupportedVerdictForTest builds a Verdict that reports
+// IdentityProbeUnsupported() == true, so a test in ANOTHER package can
+// exercise its consumers' branch logic without running on darwin or a
+// Windows non-amd64 host (this repo's CI and dev host are windows/amd64,
+// where processIDImpl always succeeds and the flags are unreachable).
+// Mirrors NewPendingSupervisorEventEmitForTest's exported-test-constructor
+// pattern in internal/api. Only tests may call it.
+func NewIdentityProbeUnsupportedVerdictForTest(class VerdictClass, pid, port int) Verdict {
+	return Verdict{Class: class, PID: pid, Port: port, archUnsupported: true}
+}
+
 // KillOpts controls KillRecordedHolder behavior.
 type KillOpts struct {
 	// PingTimeout is how long pingIncumbent waits before declaring

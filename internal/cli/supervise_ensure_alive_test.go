@@ -581,11 +581,11 @@ func TestEnsureAlive_HeadlessFleet_LiveHandoffSuppresses(t *testing.T) {
 // redirection so gui.PidportPath() resolves inside the temp tree — this
 // never touches the developer's real %LOCALAPPDATA% pidport.
 //
-// MUTATION: revert probeGUIOwnerAlive's Class switch to `return v.PIDAlive,
-// v.PID, v.Port` (the pre-fix bare-bool shape widened back to a state) —
-// VerdictMalformed's zero-value PIDAlive=false would then read as
-// guiOwnerStateConfirmedDead-equivalent and this test's "want Unknown"
-// assertion fails.
+// MUTATION: revert classifyGUIOwnerVerdict (which probeGUIOwnerAlive
+// delegates its Class switch to) to `return v.PIDAlive` widened back to a
+// state, i.e. the pre-fix bare-bool shape — VerdictMalformed's zero-value
+// PIDAlive=false would then read as guiOwnerStateConfirmedDead-equivalent and
+// this test's "want Unknown" assertion fails.
 func TestProbeGUIOwnerAlive_MalformedPidportMapsToUnknown(t *testing.T) {
 	ensureAliveTestStateDir(t)
 
@@ -600,6 +600,100 @@ func TestProbeGUIOwnerAlive_MalformedPidportMapsToUnknown(t *testing.T) {
 	state, _, _ := probeGUIOwnerAlive()
 	if state != guiOwnerStateUnknown {
 		t.Fatalf("probeGUIOwnerAlive on a malformed pidport = %v, want guiOwnerStateUnknown (a corrupt/garbage pidport must never be classified as a confirmed-dead owner)", state)
+	}
+}
+
+// TestClassifyGUIOwnerVerdict_Matrix pins the whole gui.Verdict →
+// guiOwnerProbeState mapping, including the round-4 review fix: a
+// VerdictLiveUnreachable produced on a platform whose OS identity probe could
+// not run AT ALL must classify as guiOwnerStateUnknown, not
+// guiOwnerStateAlive.
+//
+// Why the distinction is load-bearing rather than cosmetic. On every
+// supported platform VerdictLiveUnreachable carries the strong fact "the
+// recorded PID IS alive, it just is not answering /api/ping". On darwin and
+// Windows non-amd64 — a SHIPPED target; the npm release publishes win32-arm64
+// — processIDImpl returns a sentinel error and probeOnce short-circuits to
+// that same class with PIDAlive force-set false, where it means only "we
+// could not look". Both states suppress the GUI-owner-killing autostart
+// relaunch, so this is NOT a safety regression either way; the difference is
+// CAPABILITY. guiOwnerStateAlive short-circuits runEnsureAlive to the plain
+// "supervisor running; no action" no-op, while guiOwnerStateUnknown routes to
+// runEnsureAliveGUIOwnerUnknownEscalation, whose bounded confirmation window
+// establishes death from the GUI's OWN single-instance flock — a
+// kernel-enforced signal that does not depend on the identity probe. Under
+// the pre-fix mapping a genuinely dead GUI owner on win-arm64 could never be
+// recovered: every tick confidently reported a live owner from a probe that
+// never ran.
+//
+// The Healthy row is the equal-and-opposite guard: probeOnce stamps the
+// unsupported flag BEFORE its pingMatched early return, so a VerdictHealthy
+// ALSO reports IdentityProbeUnsupported() == true. A ping reply carrying the
+// recorded PID is an independent positive liveness proof, so that row must
+// stay Alive — a blanket "distrust every verdict from this platform" would
+// discard it and reintroduce the older platform gap where a healthy macOS GUI
+// read as not-alive.
+//
+// MUTATION: delete the `if v.IdentityProbeUnsupported()` arm from
+// classifyGUIOwnerVerdict's VerdictLiveUnreachable case — the
+// "LiveUnreachableIdentityProbeUnsupported" subtest fails with
+// "classifyGUIOwnerVerdict = 1 (Alive), want 0 (Unknown)".
+func TestClassifyGUIOwnerVerdict_Matrix(t *testing.T) {
+	cases := []struct {
+		name    string
+		verdict gui.Verdict
+		want    guiOwnerProbeState
+		why     string
+	}{
+		{
+			name:    "LiveUnreachableIdentityProbeUnsupported",
+			verdict: gui.NewIdentityProbeUnsupportedVerdictForTest(gui.VerdictLiveUnreachable, 4242, 9125),
+			want:    guiOwnerStateUnknown,
+			why:     "the identity probe could not run, so this class carries no liveness fact; only the independent flock confirmation may escalate past it",
+		},
+		{
+			name:    "HealthyIdentityProbeUnsupported",
+			verdict: gui.NewIdentityProbeUnsupportedVerdictForTest(gui.VerdictHealthy, 4242, 9125),
+			want:    guiOwnerStateAlive,
+			why:     "a ping reply carrying the recorded PID proves liveness independently of the identity probe",
+		},
+		{
+			name:    "LiveUnreachableIdentityProbeRan",
+			verdict: gui.Verdict{Class: gui.VerdictLiveUnreachable, PID: 4242, Port: 9125, PIDAlive: true},
+			want:    guiOwnerStateAlive,
+			why:     "the identity probe ran and reported the PID alive; it is simply not answering ping",
+		},
+		{
+			name:    "Healthy",
+			verdict: gui.Verdict{Class: gui.VerdictHealthy, PID: 4242, Port: 9125, PIDAlive: true, PingMatch: true},
+			want:    guiOwnerStateAlive,
+			why:     "the ordinary healthy incumbent",
+		},
+		{
+			name:    "DeadPID",
+			verdict: gui.Verdict{Class: gui.VerdictDeadPID, PID: 4242, Port: 9125},
+			want:    guiOwnerStateConfirmedDead,
+			why:     "the ONLY class that may authorize the GUI-owner-killing relaunch",
+		},
+		{
+			name:    "Malformed",
+			verdict: gui.Verdict{Class: gui.VerdictMalformed},
+			want:    guiOwnerStateUnknown,
+			why:     "pidport missing/garbage/out-of-range port",
+		},
+		{
+			name:    "Indeterminate",
+			verdict: gui.Verdict{Class: gui.VerdictIndeterminate, PID: 4242},
+			want:    guiOwnerStateUnknown,
+			why:     "an ambiguous PLATFORM error is not the platform's own no-such-process signal",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyGUIOwnerVerdict(tc.verdict); got != tc.want {
+				t.Fatalf("classifyGUIOwnerVerdict = %d, want %d (%s)", got, tc.want, tc.why)
+			}
+		})
 	}
 }
 
@@ -980,6 +1074,133 @@ func TestEnsureAlive_HeadlessFleet_UnknownConfirmedDeadUnknownDoesNotReuseStaleT
 	}
 	if got := atomic.LoadInt32(&relaunches); got != 1 {
 		t.Errorf("relaunch seam called %d times after an Unknown->ConfirmedDead->Unknown sequence; want still exactly 1 (no additional escalation from the reused stale timestamp)", got)
+	}
+}
+
+// TestEnsureAlive_SupervisorDownTickResetsUnknownConfirmationMarker pins the
+// round-4 review fix on the marker's OTHER observation site.
+//
+// Round 3 established that the Unknown-confirmation window requires an
+// UNINTERRUPTED run of Unknown observations, and added
+// resetGUIOwnerUnknownConfirmationMarkerLogged to the two non-Unknown arms of
+// runEnsureAlive's supervisor-RUNNING switch. But runEnsureAlive consults the
+// SAME guiOwnerAliveFn classifier again in its supervisor-DOWN branch, and
+// that branch touched the marker on no path at all. So the continuity
+// invariant held only while the supervisor stayed up: an
+// Unknown(running) -> Alive(supervisor down) -> Unknown(running) sequence
+// still resumed the FIRST tick's stale timestamp, and a live GUI owner
+// observed during the supervisor-down tick — exactly the observation that
+// should reset the window hardest — was silently discarded.
+//
+// The supervisor-down tick here is the §5 PART-2 topology (supervisor child
+// died under a live GUI owner), which recovers via the GUI-independent
+// standalone spawn and neither arms nor consumes the window; its ONLY duty
+// toward the marker is to record that the Unknown run was interrupted.
+//
+// MUTATION: remove the `if guiState != guiOwnerStateUnknown {
+// resetGUIOwnerUnknownConfirmationMarkerLogged(stateDir, pid) }` block from
+// runEnsureAlive's supervisor-down branch — tick 2's "marker cleared"
+// assertion fails first, and tick 3's "want 0 relaunches" assertion fails
+// after it (the backdated window survives the interruption and reads as
+// already-elapsed).
+func TestEnsureAlive_SupervisorDownTickResetsUnknownConfirmationMarker(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	lockReleased := false
+	defer func() {
+		if !lockReleased {
+			lk.Release()
+		}
+	}()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+
+	restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
+	defer restoreLockProbe()
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+	var standaloneRelaunches int32
+	restoreStandalone := setStandaloneRelaunchFnForTest(func() error {
+		atomic.AddInt32(&standaloneRelaunches, 1)
+		return nil
+	})
+	defer restoreStandalone()
+	restoreServingProbe := setGUIServingProbeFnForTest(func(int) bool { return true })
+	defer restoreServingProbe()
+
+	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+
+	// Tick 1: supervisor RUNNING, GUI owner Unknown, flock unheld -- arms the
+	// confirmation window.
+	unknownGUIOwnerState(t, 0, 0)
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("tick1 runEnsureAlive: %v", err)
+	}
+	if _, statErr := os.Stat(markerPath); statErr != nil {
+		t.Fatalf("tick1: expected the marker to be armed: %v", statErr)
+	}
+	// Backdate PAST the full window (not to just short of it): the tick-3
+	// assertion must be decided by whether the marker SURVIVED the
+	// interruption, never by how much wall-clock the test happens to burn
+	// between ticks. A "just short of the window" backdate would make tick 3
+	// pass vacuously on a fast machine (the window is 90s; the three ticks
+	// run in tens of milliseconds), so the downstream consequence would go
+	// unasserted. Engineered deterministically per the repo's race-window
+	// assertion discipline: under the fix tick 2 clears the marker and tick 3
+	// arms a FRESH one (0 relaunches); without it tick 3 reads this
+	// already-elapsed timestamp and escalates (1 relaunch).
+	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-guiOwnerUnknownConfirmationWindow-time.Second)); err != nil {
+		t.Fatalf("backdate marker: %v", err)
+	}
+
+	// Tick 2: supervisor DOWN under a live GUI owner. Recovery is the
+	// GUI-independent standalone spawn; the Alive observation must ALSO reset
+	// the Unknown-confirmation window.
+	lk.Release()
+	lockReleased = true
+	if running, _, perr := api.SupervisorRunningUnderStateDir(stateDir); perr != nil || running {
+		t.Fatalf("precondition: probe must report not-running after releasing the lock; got running=%v err=%v", running, perr)
+	}
+	liveGUIOwner(t, 4242, 9125)
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("tick2 runEnsureAlive: %v", err)
+	}
+	if got := atomic.LoadInt32(&standaloneRelaunches); got != 1 {
+		t.Fatalf("tick2: standalone relaunch seam called %d times; want exactly 1 (precondition: this tick really did take the supervisor-down-under-live-GUI branch)", got)
+	}
+	// Errorf, not Fatalf: tick 3 below demonstrates the CONSEQUENCE of an
+	// uncleared marker (a spurious escalation from a window that was in fact
+	// interrupted), which is the reason this reset exists at all.
+	if _, statErr := os.Stat(markerPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("tick2: expected the confirmation marker to be cleared by the live-GUI-owner observation on the supervisor-down branch; stat err=%v", statErr)
+	}
+
+	// Tick 3: supervisor RUNNING again, Unknown, flock still unheld. Must NOT
+	// escalate -- the window restarts from THIS observation, because tick 2
+	// independently observed a LIVE owner.
+	lk2, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("re-acquire supervisor lock: %v", err)
+	}
+	defer lk2.Release()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+	unknownGUIOwnerState(t, 0, 0)
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("tick3 runEnsureAlive: %v", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Errorf("relaunch seam called %d times after an Unknown -> Alive(supervisor down) -> Unknown sequence; want 0 (the supervisor-down tick observed a LIVE GUI owner and must reset the window)", got)
+	}
+	if _, statErr := os.Stat(markerPath); statErr != nil {
+		t.Errorf("tick3: expected a FRESH marker to be armed (first observation of a new window): %v", statErr)
 	}
 }
 

@@ -199,14 +199,17 @@ type guiOwnerProbeState int
 const (
 	// guiOwnerStateUnknown: the probe could NOT determine liveness. Covers
 	// gui.PidportPath() resolution failure, gui.VerdictMalformed (pidport
-	// unreadable/garbage/out-of-range port), and any verdict class this
+	// unreadable/garbage/out-of-range port), a gui.VerdictLiveUnreachable
+	// produced on a platform whose OS identity probe could not run at all
+	// (gui.Verdict.IdentityProbeUnsupported), and any verdict class this
 	// mapping does not otherwise recognize. MUST be treated exactly like
 	// guiOwnerStateAlive by every consumer — never authorize a relaunch
 	// that could terminate a possibly-live GUI on an ambiguous read.
 	guiOwnerStateUnknown guiOwnerProbeState = iota
 	// guiOwnerStateAlive: a live PID holds the recorded single-instance
-	// lock (gui.VerdictHealthy or gui.VerdictLiveUnreachable — alive but
-	// not answering ping).
+	// lock — gui.VerdictHealthy (a ping reply carrying the recorded PID),
+	// or gui.VerdictLiveUnreachable from a platform whose identity probe
+	// genuinely ran (alive but not answering ping).
 	guiOwnerStateAlive
 	// guiOwnerStateConfirmedDead: the recorded PID is confirmed NOT
 	// running (gui.VerdictDeadPID) — the ordinary crash/taskkill/OOM
@@ -353,37 +356,9 @@ func setEnsureAliveGUIRecoveryDependenciesForTest(deps ensureAliveGUIRecoveryDep
 // relaunch; everything else (including path-resolution failure) reports
 // guiOwnerStateUnknown, which every consumer MUST treat like a live owner.
 //
-// Class mapping:
-//   - gui.VerdictDeadPID                                  → guiOwnerStateConfirmedDead
-//     (the ordinary crash/taskkill/OOM topology: the pidport still names the
-//     LAST daemon PID, but processID(pid).Alive is false — this is the
-//     common case the whole headless-fleet recovery feature targets.)
-//   - gui.VerdictHealthy, gui.VerdictLiveUnreachable       → guiOwnerStateAlive
-//     (LiveUnreachable is an alive-but-not-answering-ping owner, e.g. a GUI
-//     mid-restart — still a live process, never safe to kill via the
-//     GUI-owner-killing autostart relaunch.)
-//   - gui.VerdictMalformed, gui.VerdictIndeterminate, or a
-//     gui.PidportPath() error                              → guiOwnerStateUnknown
-//     (pidport missing/garbage/out-of-range port, an identity probe that
-//     returned an ambiguous PLATFORM error rather than the platform's own
-//     "no such process" signal, or the path itself could not be resolved —
-//     the probe genuinely cannot tell if an owner exists. Indeterminate
-//     reaches the default arm below, which is the CORRECT mapping and the
-//     whole reason that class exists: before it, such an error collapsed into
-//     VerdictDeadPID and AUTHORIZED the GUI-owner-killing relaunch.)
-//
-// PLATFORM NOTE: on platforms where the OS identity probe is unsupported
-// (macOS, Windows non-amd64), processIDImpl returns a sentinel error and
-// probeOnce classifies the result as VerdictLiveUnreachable (never Malformed
-// or DeadPID there — see single_instance.go's macOSUnsupported/
-// archUnsupported branches) — so this Class-based mapping resolves those
-// platforms to guiOwnerStateAlive for BOTH a ping-matching AND a
-// ping-failing owner, correctly treating an unobservable-but-plausibly-alive
-// owner as one that must not be killed. This also fixes a pre-existing
-// platform gap in the old PIDAlive-keyed version: PIDAlive was force-set
-// false on those platforms even for a ping-matching VerdictHealthy owner, so
-// a healthy macOS GUI used to read as alive=false; keying on Class instead
-// reads it correctly as guiOwnerStateAlive.
+// The Class mapping itself lives in classifyGUIOwnerVerdict below, so it is
+// unit-testable without a real pidport; this function only owns path
+// resolution and the bounded probe call.
 func probeGUIOwnerAlive() (guiOwnerProbeState, int, int) {
 	pidportPath, err := gui.PidportPath()
 	if err != nil {
@@ -394,13 +369,84 @@ func probeGUIOwnerAlive() (guiOwnerProbeState, int, int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	v := gui.Probe(ctx, pidportPath)
+	return classifyGUIOwnerVerdict(v), v.PID, v.Port
+}
+
+// classifyGUIOwnerVerdict is the single owner of the gui.Verdict →
+// guiOwnerProbeState mapping (extracted from probeGUIOwnerAlive so the
+// decision is testable against constructed Verdicts — the production path
+// needs a real %LOCALAPPDATA% pidport, and the unsupported-identity-probe
+// verdicts below are simply unreachable on this repo's windows/amd64 CI and
+// dev host).
+//
+// Class mapping:
+//   - gui.VerdictDeadPID                                  → guiOwnerStateConfirmedDead
+//     (the ordinary crash/taskkill/OOM topology: the pidport still names the
+//     LAST daemon PID, but processID(pid).Alive is false — this is the
+//     common case the whole headless-fleet recovery feature targets.)
+//   - gui.VerdictHealthy                                   → guiOwnerStateAlive
+//     (a ping reply carrying the recorded PID: an independent, positive
+//     liveness proof that holds on EVERY platform, including ones where the
+//     OS identity probe cannot run at all.)
+//   - gui.VerdictLiveUnreachable                           → guiOwnerStateAlive,
+//     but ONLY when the identity probe actually ran. See the PLATFORM NOTE.
+//   - gui.VerdictMalformed, gui.VerdictIndeterminate, an
+//     identity-probe-unsupported LiveUnreachable, or a
+//     gui.PidportPath() error                              → guiOwnerStateUnknown
+//     (pidport missing/garbage/out-of-range port, an identity probe that
+//     returned an ambiguous PLATFORM error rather than the platform's own
+//     "no such process" signal, an identity probe that could not run at all,
+//     or the path itself could not be resolved — the probe genuinely cannot
+//     tell if an owner exists. Indeterminate reaches the default arm below,
+//     which is the CORRECT mapping and the whole reason that class exists:
+//     before it, such an error collapsed into VerdictDeadPID and AUTHORIZED
+//     the GUI-owner-killing relaunch.)
+//
+// PLATFORM NOTE (round 4 review fix). On platforms where the OS identity
+// probe is unsupported — darwin, and Windows non-amd64, which is a SHIPPED
+// target (the npm release publishes win32-arm64) — processIDImpl returns a
+// sentinel error and probeOnce short-circuits to VerdictLiveUnreachable with
+// PIDAlive force-set false (single_instance.go's macOSUnsupported /
+// archUnsupported branches). On every supported platform that class carries
+// the strong fact "the recorded PID IS alive"; on those it carries only "we
+// could not look". Mapping both to guiOwnerStateAlive derived a CONFIDENT
+// decision from a probe that cannot run, and the cost was not merely
+// cosmetic: guiOwnerStateAlive short-circuits to the plain "supervisor
+// running; no action" no-op, whereas guiOwnerStateUnknown routes to
+// runEnsureAliveGUIOwnerUnknownEscalation, whose bounded confirmation window
+// establishes death from the GUI's OWN single-instance flock — a
+// kernel-enforced signal that does not depend on the identity probe at all.
+// So on win-arm64/darwin a genuinely dead GUI owner whose pidport still names
+// it could never be recovered: every tick confidently reported a live owner.
+// Routing it to Unknown is strictly safer AND strictly more capable —
+// Unknown suppresses the GUI-owner-killing relaunch exactly like Alive does
+// (guiOwnerProbeState's doc: "MUST be treated exactly like
+// guiOwnerStateAlive"), and only the independent flock confirmation may
+// escalate past it.
+//
+// A ping-matching owner on those same platforms stays guiOwnerStateAlive:
+// probeOnce stamps the unsupported flag BEFORE its pingMatched early return,
+// so VerdictHealthy can also report IdentityProbeUnsupported() == true, and
+// treating THAT as ambiguous would discard a valid positive proof. This also
+// preserves the pre-existing fix for the old PIDAlive-keyed version (PIDAlive
+// was force-set false on those platforms even for a ping-matching owner, so a
+// healthy macOS GUI used to read as alive=false).
+func classifyGUIOwnerVerdict(v gui.Verdict) guiOwnerProbeState {
 	switch v.Class {
 	case gui.VerdictDeadPID:
-		return guiOwnerStateConfirmedDead, v.PID, v.Port
-	case gui.VerdictHealthy, gui.VerdictLiveUnreachable:
-		return guiOwnerStateAlive, v.PID, v.Port
+		return guiOwnerStateConfirmedDead
+	case gui.VerdictHealthy:
+		return guiOwnerStateAlive
+	case gui.VerdictLiveUnreachable:
+		if v.IdentityProbeUnsupported() {
+			// "Alive but not answering ping" is what this class means only
+			// when the identity probe RAN. Here it did not — see the
+			// PLATFORM NOTE above.
+			return guiOwnerStateUnknown
+		}
+		return guiOwnerStateAlive
 	default: // gui.VerdictMalformed, gui.VerdictIndeterminate, or any class this mapping does not expect.
-		return guiOwnerStateUnknown, v.PID, v.Port
+		return guiOwnerStateUnknown
 	}
 }
 
@@ -1056,10 +1102,15 @@ func ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir string, now time.Tim
 // guiOwnerStateConfirmedDead tick therefore never runs this body at all —
 // which used to mean an Unknown -> Alive -> Unknown sequence REUSED the
 // first Unknown tick's already-stale timestamp on the second, treating an
-// interrupted observation as a continuous one. runEnsureAlive's caller now
-// resets the SAME marker (via resetGUIOwnerUnknownConfirmationMarker) on
-// every non-Unknown tick, so this function can keep assuming the window it
-// reads was opened by an UNINTERRUPTED run of Unknown observations.
+// interrupted observation as a continuous one. runEnsureAlive now resets the
+// SAME marker (via resetGUIOwnerUnknownConfirmationMarkerLogged) on every
+// non-Unknown observation of the GUI owner — in BOTH the supervisor-running
+// switch (its ConfirmedDead and Alive arms) and the supervisor-down branch
+// (round 4 review fix: that branch reads the identical classifier and used to
+// leave the marker untouched, so an interruption observed while the
+// supervisor happened to be down was invisible to this window) — so this
+// function can keep assuming the window it reads was opened by an
+// UNINTERRUPTED run of Unknown observations.
 func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int) bool {
 	markerPath := guiOwnerUnknownConfirmationMarkerPath(stateDir)
 	now := time.Now().UTC()
@@ -1372,7 +1423,26 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 	//   - confirmed no live GUI owner → genuine OWNER death. Re-fire the
 	//     autostart GUI task to re-establish BOTH the GUI owner and its
 	//     supervisor.
-	if guiState, guiPID, _ := guiOwnerAliveFn(); guiState != guiOwnerStateConfirmedDead {
+	guiState, guiPID, _ := guiOwnerAliveFn()
+	// Round 4 review fix: the Unknown-confirmation window requires an
+	// UNINTERRUPTED run of Unknown observations (see
+	// runEnsureAliveGUIOwnerUnknownEscalation's "Continuity" note). Round 3
+	// added that reset to the two non-Unknown arms of the supervisor-RUNNING
+	// switch above, but this supervisor-DOWN branch observes the very same
+	// classifier and never touched the marker at all — so an
+	// Unknown(running) -> Alive-or-ConfirmedDead(down) -> Unknown(running)
+	// sequence still let the later Unknown tick resume the FIRST tick's stale
+	// timestamp, treating an interrupted observation as continuous. The
+	// marker is one cross-tick invariant with one meaning; every non-Unknown
+	// observation of the GUI owner clears it, wherever that observation
+	// happens. (An Unknown observation here is NOT an interruption — it is a
+	// continuation of the same run — so it deliberately leaves the marker
+	// alone; this branch's own recovery is the GUI-independent standalone
+	// supervisor spawn, which neither arms nor consumes the window.)
+	if guiState != guiOwnerStateUnknown {
+		resetGUIOwnerUnknownConfirmationMarkerLogged(stateDir, pid)
+	}
+	if guiState != guiOwnerStateConfirmedDead {
 		unknown := guiState == guiOwnerStateUnknown
 		// Recover the supervisor WITHOUT touching the GUI. Re-firing the
 		// autostart task here would either short-circuit to activate-window

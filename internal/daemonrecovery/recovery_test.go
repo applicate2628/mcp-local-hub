@@ -1931,43 +1931,100 @@ func TestExecuteMapsRespawnSetupFailureToStateReadAndDialFailureToUnavailable(t 
 // would re-create exactly the two-writers-one-outcome duplicate this function
 // was built to remove.
 //
-// The other three rows are the pre-existing contract, asserted alongside so the
-// new case cannot be added by loosening one of them.
+// The other three tracked-worker rows are the pre-existing contract, asserted
+// alongside so the new case cannot be added by loosening one of them.
 //
-// MUTATION: delete the `case errors.Is(waitErr, api.ErrSupervisorEventReleaseFailed)`
-// arm from queueIdempotentAuditFallback. The release-failure outcome then falls
-// through to the unconditional fallback write and the subtest fails with
-// "audit rows = 1, want 0".
+// The two "Direct*" rows (pending == nil) are the round-4 review fix. A
+// release failure reaches this function through TWO channels, not one:
+// EmitWithTimeoutTracked returns a non-nil handle ONLY when its error is
+// exactly ErrSupervisorEventEmitTimeout (supervisor_events.go's emit builds
+// the handle on the ctx.Done() arm alone), so an emit whose write SETTLED
+// before the deadline but whose flock release failed returns
+// (nil, ErrSupervisorEventReleaseFailed) and used to skip the switch entirely
+// — falling through to an unconditional write that is both a probable
+// duplicate AND a probable hang (emitRecoverAuditEvent opens a fresh flock
+// handle on the same file with a BLOCKING Emit, while the unreleased flock is
+// still held by this very process; gofrs/flock conflicts against a second
+// handle in the SAME process, as verified for
+// TestEnsureAliveGUIRecovery_UnconfirmedLeaseReleaseDegradesToUnknown).
+//
+// MUTATION A: delete the `case errors.Is(waitErr, api.ErrSupervisorEventReleaseFailed)`
+// arm from queueIdempotentAuditFallback. The tracked release-failure outcome
+// then falls through to the unconditional fallback write and the
+// "ReleaseFailedRowMayHaveLanded" subtest fails with "audit rows = 1, want 0".
+//
+// MUTATION B: delete the `if errors.Is(emitErr, api.ErrSupervisorEventReleaseFailed)`
+// early return at the top of queueIdempotentAuditFallback. The
+// "DirectReleaseFailureRowMayHaveLanded" subtest fails with
+// "queued fallback closures = 1, want 0".
 func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 	cases := []struct {
-		name     string
-		outcome  error
-		wantRows int
-		why      string
+		name string
+		// tracked reports whether a worker handle exists (the emitTimeout
+		// hand-off). When false the row exercises the direct
+		// (pending == nil) channel and `outcome` is the tracked call's OWN
+		// returned error instead of the abandoned worker's completion.
+		tracked    bool
+		outcome    error
+		wantQueued int
+		wantRows   int
+		why        string
 	}{
 		{
-			name:     "ReleaseFailedRowMayHaveLanded",
-			outcome:  fmt.Errorf("%w: UnlockFileEx: simulated persistent failure", api.ErrSupervisorEventReleaseFailed),
-			wantRows: 0,
-			why:      "a release failure says nothing about the row; a fallback write would risk a duplicate",
+			name:       "ReleaseFailedRowMayHaveLanded",
+			tracked:    true,
+			outcome:    fmt.Errorf("%w: UnlockFileEx: simulated persistent failure", api.ErrSupervisorEventReleaseFailed),
+			wantQueued: 1,
+			wantRows:   0,
+			why:        "a release failure says nothing about the row; a fallback write would risk a duplicate",
 		},
 		{
-			name:     "WorkerWriteSucceeded",
-			outcome:  nil,
-			wantRows: 0,
-			why:      "the tracked worker's row already landed",
+			name:       "WorkerWriteSucceeded",
+			tracked:    true,
+			outcome:    nil,
+			wantQueued: 1,
+			wantRows:   0,
+			why:        "the tracked worker's row already landed",
 		},
 		{
-			name:     "WorkerStillUnsettled",
-			outcome:  api.ErrSupervisorEventEmitTimeout,
-			wantRows: 0,
-			why:      "unsettled by design; racing it with an independent write is the PILED defect",
+			name:       "WorkerStillUnsettled",
+			tracked:    true,
+			outcome:    api.ErrSupervisorEventEmitTimeout,
+			wantQueued: 1,
+			wantRows:   0,
+			why:        "unsettled by design; racing it with an independent write is the PILED defect",
 		},
 		{
-			name:     "GenuineWriteFailure",
-			outcome:  errors.New("write supervisor event log: simulated disk failure"),
-			wantRows: 1,
-			why:      "definitely settled as failed, so exactly one fresh attempt is legitimate",
+			name:       "GenuineWriteFailure",
+			tracked:    true,
+			outcome:    errors.New("write supervisor event log: simulated disk failure"),
+			wantQueued: 1,
+			wantRows:   1,
+			why:        "definitely settled as failed, so exactly one fresh attempt is legitimate",
+		},
+		{
+			name:       "DirectReleaseFailureRowMayHaveLanded",
+			tracked:    false,
+			outcome:    fmt.Errorf("%w: UnlockFileEx: simulated persistent failure", api.ErrSupervisorEventReleaseFailed),
+			wantQueued: 0,
+			wantRows:   0,
+			why:        "the emit SETTLED before its deadline (so there is no worker handle) but could not release the flock; the append phase ran and may have committed the row",
+		},
+		{
+			name:       "DirectGenuineWriteFailure",
+			tracked:    false,
+			outcome:    errors.New("write supervisor event log: simulated disk failure"),
+			wantQueued: 1,
+			wantRows:   1,
+			why:        "a settled non-release failure means no row exists and none is coming, so one fresh attempt is legitimate",
+		},
+		{
+			name:       "DirectNoAttemptMade",
+			tracked:    false,
+			outcome:    nil,
+			wantQueued: 1,
+			wantRows:   1,
+			why:        "the auditBudget<=0 call site: nothing was ever attempted, so this closure is the ONLY possible writer",
 		},
 	}
 	for _, tc := range cases {
@@ -1980,12 +2037,18 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			}
 
 			var postCommitAudits []func()
-			queueIdempotentAuditFallback(&postCommitAudits, stateDir, audit,
-				api.NewPendingSupervisorEventEmitForTest(tc.outcome))
-			if len(postCommitAudits) != 1 {
-				t.Fatalf("queued fallback closures = %d, want exactly 1", len(postCommitAudits))
+			if tc.tracked {
+				queueIdempotentAuditFallback(&postCommitAudits, stateDir, audit,
+					api.NewPendingSupervisorEventEmitForTest(tc.outcome), api.ErrSupervisorEventEmitTimeout)
+			} else {
+				queueIdempotentAuditFallback(&postCommitAudits, stateDir, audit, nil, tc.outcome)
 			}
-			postCommitAudits[0]()
+			if len(postCommitAudits) != tc.wantQueued {
+				t.Fatalf("queued fallback closures = %d, want %d (%s)", len(postCommitAudits), tc.wantQueued, tc.why)
+			}
+			for _, emitAudit := range postCommitAudits {
+				emitAudit()
+			}
 
 			logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
 			raw, err := os.ReadFile(logPath)

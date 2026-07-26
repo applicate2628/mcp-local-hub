@@ -739,6 +739,134 @@ func TestProbe_MacOSUnsupported_NoPing_ClassifiesLiveUnreachable(t *testing.T) {
 	}
 }
 
+// TestVerdict_IdentityProbeUnsupported_MatchesProbeOnce anchors the exported
+// IdentityProbeUnsupported() accessor to what probeOnce ACTUALLY produces, so
+// an out-of-package consumer (probeGUIOwnerAlive's classifier in
+// internal/cli) branches on the same fact the probe recorded rather than on a
+// re-derived guess. It also pins the non-obvious Healthy row.
+//
+// Both sentinels are injected through the processIDOverride seam, so the
+// darwin AND windows-non-amd64 shapes are both exercised on this
+// windows/amd64 host where neither is otherwise reachable — win32-arm64 is a
+// SHIPPED npm target, so its behavior cannot go untested just because the dev
+// host cannot produce it natively.
+//
+// MUTATION: change IdentityProbeUnsupported to `return v.macOSUnsupported`
+// (dropping the arch half) — the "windows-arch-unsupported, ping fails"
+// subtest fails with "IdentityProbeUnsupported() = false, want true".
+func TestVerdict_IdentityProbeUnsupported_MatchesProbeOnce(t *testing.T) {
+	cases := []struct {
+		name        string
+		identityErr error
+		// listen makes the probe find a live /api/ping answering with the
+		// recorded PID, so probeOnce takes its pingMatched early return.
+		listen   bool
+		wantCls  VerdictClass
+		wantFlag bool
+		why      string
+	}{
+		{
+			name:        "macos-unsupported-ping-fails",
+			identityErr: errMacOSProbeUnsupported,
+			wantCls:     VerdictLiveUnreachable,
+			wantFlag:    true,
+			why:         "the identity probe could not run and no ping answered: nothing at all is known about the PID",
+		},
+		{
+			name:        "windows-arch-unsupported-ping-fails",
+			identityErr: errWindowsArchUnsupported,
+			wantCls:     VerdictLiveUnreachable,
+			wantFlag:    true,
+			why:         "same shape on a Windows non-amd64 build (PEB offsets are 64-bit-only)",
+		},
+		{
+			name:        "identity-probe-ran-ping-fails",
+			identityErr: nil,
+			wantCls:     VerdictLiveUnreachable,
+			wantFlag:    false,
+			why:         "the probe ran and reported the PID alive; the class carries a real liveness fact",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prev := ProcessIDForTest()
+			defer RestoreProcessID(prev)
+			SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+				if tc.identityErr != nil {
+					return ProcessIdentity{}, tc.identityErr
+				}
+				return ProcessIdentity{Alive: true}, nil
+			})
+
+			dir := apitest.HardenedTempDir(t)
+			pidport := filepath.Join(dir, "gui.pidport")
+			// Port 1 has no listener — ping fails.
+			const probablyClosedPort = 1
+			if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// Backdate so the LiveUnreachable startup-retry loop does not fire.
+			oldMtime := time.Now().Add(-1 * time.Hour)
+			if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+				t.Fatalf("Chtimes: %v", err)
+			}
+
+			v := Probe(context.Background(), pidport)
+			if v.Class != tc.wantCls {
+				t.Fatalf("Class = %v, want %v (%s). Diagnose=%q", v.Class, tc.wantCls, tc.why, v.Diagnose)
+			}
+			if got := v.IdentityProbeUnsupported(); got != tc.wantFlag {
+				t.Fatalf("IdentityProbeUnsupported() = %v, want %v (%s)", got, tc.wantFlag, tc.why)
+			}
+		})
+	}
+
+	// The non-obvious row: probeOnce stamps the unsupported flags BEFORE its
+	// pingMatched early return, so a VerdictHealthy ALSO reports true here.
+	// Consumers must therefore branch on this accessor only for classes whose
+	// liveness claim rests on the identity probe — never as a blanket
+	// "distrust every verdict from this platform", which would throw away the
+	// independent positive proof a matching ping provides.
+	t.Run("healthy-under-unsupported-probe-still-flags", func(t *testing.T) {
+		prev := ProcessIDForTest()
+		defer RestoreProcessID(prev)
+		SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+			return ProcessIdentity{}, errWindowsArchUnsupported
+		})
+
+		// Healthy ping server reporting our own PID (same shape as
+		// TestProbe_MacOSUnsupported_HealthyPing_StillClassifiesHealthy).
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/ping" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pid": os.Getpid()})
+		}))
+		defer srv.Close()
+		port := portFromURL(t, srv.URL)
+
+		dir := apitest.HardenedTempDir(t)
+		pidport := filepath.Join(dir, "gui.pidport")
+		if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), port)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		oldMtime := time.Now().Add(-1 * time.Hour)
+		if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+			t.Fatalf("Chtimes: %v", err)
+		}
+
+		v := Probe(context.Background(), pidport)
+		if v.Class != VerdictHealthy {
+			t.Fatalf("Class = %v, want VerdictHealthy (a matching ping is a complete verdict regardless of identity-probe support). Diagnose=%q", v.Class, v.Diagnose)
+		}
+		if !v.IdentityProbeUnsupported() {
+			t.Fatal("IdentityProbeUnsupported() = false on a Healthy verdict from an unsupported-probe platform; want true (the flag records what the PROBE could do, not what the verdict concluded) — consumers rely on this to know they must gate the accessor by Class")
+		}
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Residual 1(a) review fix: probeOnce must map id.Indeterminate to
 // VerdictIndeterminate, never VerdictDeadPID, and KillRecordedHolder must
