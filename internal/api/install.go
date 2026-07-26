@@ -265,14 +265,8 @@ func (a *API) Install(opts InstallOpts) error {
 	if err := Preflight(m, opts.DaemonFilter); err != nil {
 		return err
 	}
-	// 3. Build plan.
-	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
-		DaemonFilter:           opts.DaemonFilter,
-		ClientsInclude:         opts.ClientsInclude,
-		IncludeAllClients:      opts.IncludeAllClients,
-		DefaultClientsOverride: a.resolveDefaultClientsOverride(opts),
-		GUIPort:                opts.GUIPort,
-	})
+	// 3. Build plan (opts resolved by the shared single owner).
+	plan, err := BuildPlanWithOpts(m, a.installBuildPlanOpts(opts))
 	if err != nil {
 		return err
 	}
@@ -420,16 +414,35 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err := Preflight(m, opts.DaemonFilter); err != nil {
 		return err
 	}
-	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
-		DaemonFilter:      opts.DaemonFilter,
-		ClientsInclude:    opts.ClientsInclude,
-		IncludeAllClients: opts.IncludeAllClients,
-		GUIPort:           opts.GUIPort,
-	})
+	plan, err := BuildPlanWithOpts(m, a.installBuildPlanOpts(opts))
 	if err != nil {
 		return err
 	}
 	return a.installPlanCoreWithSymlinkConsents(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
+}
+
+// installBuildPlanOpts is the SINGLE owner of "which BuildPlanOpts does an
+// install entry point use". Every plan-building install entry point — Install,
+// installUsingEmbedFirst (the per-server entry InstallAllWithOpts drives), and
+// installFromManifestDir — must go through it.
+//
+// It exists because the three had hand-copied the same struct literal and one
+// copy drifted: installUsingEmbedFirst omitted DefaultClientsOverride, so
+// `mcphub install --all` and the unfiltered GUI bulk install silently ignored
+// the operator's persisted `clients.default_install` set while single-server
+// installs honored it. The omission was invisible for as long as every
+// commonly-overridden client was ALSO a compile-time default; it became
+// reachable the moment cursor moved to opt-in (bot PR #583). Resolving the opts
+// in one place makes that class of drift structurally impossible rather than
+// re-fixed per site.
+func (a *API) installBuildPlanOpts(opts InstallOpts) BuildPlanOpts {
+	return BuildPlanOpts{
+		DaemonFilter:           opts.DaemonFilter,
+		ClientsInclude:         opts.ClientsInclude,
+		IncludeAllClients:      opts.IncludeAllClients,
+		DefaultClientsOverride: a.resolveDefaultClientsOverride(opts),
+		GUIPort:                opts.GUIPort,
+	}
 }
 
 // installFromManifestDir is Install-like but with an explicit manifestDir
@@ -453,13 +466,7 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err := Preflight(m, opts.DaemonFilter); err != nil {
 		return err
 	}
-	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
-		DaemonFilter:           opts.DaemonFilter,
-		ClientsInclude:         opts.ClientsInclude,
-		IncludeAllClients:      opts.IncludeAllClients,
-		DefaultClientsOverride: a.resolveDefaultClientsOverride(opts),
-		GUIPort:                opts.GUIPort,
-	})
+	plan, err := BuildPlanWithOpts(m, a.installBuildPlanOpts(opts))
 	if err != nil {
 		return err
 	}

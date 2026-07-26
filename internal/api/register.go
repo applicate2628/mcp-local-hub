@@ -65,7 +65,7 @@ func buildDefaultClientBindings() []config.ClientBinding {
 }
 
 // effectiveClientBindings is the SINGLE owner of "which clients does THIS
-// registration touch". Both consumers must read it: the write path (which
+// registration WRITE to". Both consumers must read it: the write path (which
 // creates the managed entries) and the post-register direct-LSP cleanup
 // (which deletes the entries those managed ones replace).
 //
@@ -76,6 +76,11 @@ func buildDefaultClientBindings() []config.ClientBinding {
 // and removed with nothing put in its place — leaving that client disconnected
 // (bot PR #583 finding 7). While cursor was still a default the two agreed by
 // accident and the divergence was invisible.
+//
+// NOTE the cleanup's question is the STRICTLY WIDER "does this client end up
+// with a working hub-managed replacement": a binding here is one way to get
+// one, an already-live shared LSP-router entry is the other. See
+// lspCleanupAliasesForClient.
 func effectiveClientBindings(m *config.ServerManifest) []config.ClientBinding {
 	if len(m.ClientBindings) > 0 {
 		return m.ClientBindings
@@ -83,18 +88,51 @@ func effectiveClientBindings(m *config.ServerManifest) []config.ClientBinding {
 	return defaultClientBindings
 }
 
-// clientsForBindings narrows the all-clients map to exactly those the supplied
-// bindings name. A binding whose client is not installed on this host is simply
-// absent from the result — the register path already skips it, and the cleanup
-// must not touch a client it never wrote to either way.
-func clientsForBindings(all map[string]registerClient, bindings []config.ClientBinding) map[string]registerClient {
-	out := make(map[string]registerClient, len(bindings))
+// boundClientNames is the set of client names the supplied bindings write to.
+// The post-register cleanup consults it to answer "did THIS registration just
+// write this client a managed entry for every registered language".
+func boundClientNames(bindings []config.ClientBinding) map[string]bool {
+	out := make(map[string]bool, len(bindings))
 	for _, b := range bindings {
-		if c, ok := all[b.Client]; ok {
-			out[b.Client] = c
-		}
+		out[b.Client] = true
 	}
 	return out
+}
+
+// clientHasActiveLSPRouterReplacement reports whether `client` ALREADY routes
+// `language` through the shared hub LSP-router entry — i.e. it holds a live,
+// enabled, hub-owned `mcp-language-server-<lang>` entry pointing at the
+// router's own /lsp/<lang>/mcp path.
+//
+// This is the second way a client can hold a valid managed replacement for a
+// direct stdio LSP entry, and it is INDEPENDENT of the default-install set:
+// ensureLSPRouterClientEntriesWithLoaded deliberately maintains router entries
+// for non-default clients that carry existing mcphub evidence
+// (clientHasLSPRouterEnablementEvidence), so an operator who explicitly
+// enabled cursor for the router has a working replacement even though cursor
+// is absent from effectiveClientBindings. Excluding such a client from cleanup
+// leaves its superseded direct stdio entry live ALONGSIDE the router entry —
+// duplicate servers/tools plus a retained legacy process (bot PR #583, the
+// follow-on finding against the first narrowing fix).
+//
+// The ownership decision itself is NOT re-implemented here: it delegates to
+// entryIsOwnedLSPRouterForLanguage, the single owner shared with the router
+// reconcile and with shouldPreserveSharedLSPRouterEntry. guiPort 0 means "do
+// not require a specific port" — the reserved entry name is the ownership
+// proof, matching shouldPreserveSharedLSPRouterEntry's convention. Disabled
+// entries do NOT count: a disabled router entry is not a working replacement,
+// so removing the direct entry would disconnect the client anyway.
+func clientHasActiveLSPRouterReplacement(client registerClient, language string) (bool, error) {
+	entryName := LSPRouterEntryName(language)
+	live, err := client.GetEntry(entryName)
+	if err != nil {
+		return false, err
+	}
+	if live == nil || live.Disabled {
+		return false, nil
+	}
+	owned, _ := entryIsOwnedLSPRouterForLanguage(entryName, live, language, 0)
+	return owned, nil
 }
 
 // RegisterOpts controls a Register invocation.
@@ -309,11 +347,15 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 		}
 		report.Entries = append(report.Entries, entry)
 	}
-	// Cleanup is narrowed to the clients this registration actually WROTE to.
-	// Passing the full allClients map here is what left an opt-in client's
-	// direct entry deleted with no managed replacement (see
-	// effectiveClientBindings).
-	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(bySpec, languages, canonical, clientsForBindings(allClients, effectiveClientBindings(m)), w)...)
+	// Cleanup is gated per (client, language) on "does this client end up with
+	// a working hub-managed replacement" — the bound set here, plus any live
+	// shared LSP-router entry the client already holds. Passing the full
+	// allClients map UNGATED is what left an opt-in client's direct entry
+	// deleted with no managed replacement; gating on the bound set ALONE is
+	// what left a router-routed opt-in client's superseded entry live next to
+	// its router entry. See lspCleanupAliasesForClient.
+	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(
+		bySpec, languages, canonical, allClients, boundClientNames(effectiveClientBindings(m)), w)...)
 	// EXPLICIT register → bless this workspace's canonical root as a
 	// trusted root for the GUI LSP router's first-touch auto-register
 	// gate. This is the operator-action seed: after an explicit register
@@ -358,25 +400,22 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 	languages []string,
 	canonicalWorkspace string,
 	allClients map[string]registerClient,
+	boundClients map[string]bool,
 	w io.Writer,
 ) []string {
-	aliases := map[string]bool{}
-	for _, lang := range languages {
-		spec, ok := bySpec[lang]
-		if !ok {
-			continue
-		}
-		addLSPCleanupAlias(aliases, lang)
-		addLSPCleanupAlias(aliases, spec.LspCommand)
-	}
-	if len(aliases) == 0 {
-		return nil
-	}
-
 	keepN := a.EffectiveBackupKeepN()
 	var warnings []string
 	for clientName, client := range allClients {
 		if client == nil || !client.Exists() {
+			continue
+		}
+		// REPLACEMENT GATE (per client, per language — see
+		// lspCleanupAliasesForClient). A direct entry is only ever removed when
+		// THIS client ends up with a working hub-managed replacement for THAT
+		// language. Everything below operates on the narrowed alias set.
+		aliases, aliasWarnings := lspCleanupAliasesForClient(client, clientName, bySpec, languages, boundClients[clientName])
+		warnings = append(warnings, aliasWarnings...)
+		if len(aliases) == 0 {
 			continue
 		}
 		// WORKSPACE-AWARE register grain (architect REVISE → Option C): consume the
@@ -433,6 +472,62 @@ func addLSPCleanupAlias(aliases map[string]bool, value string) {
 	if value != "" {
 		aliases[value] = true
 	}
+}
+
+// lspCleanupAliasesForClient builds the direct-entry match aliases for ONE
+// client. It is the single owner of the post-register cleanup's safety
+// invariant:
+//
+//	a direct stdio LSP entry may be removed from a client only when that
+//	client is left with a working hub-managed replacement for THAT language.
+//
+// Two independent sources of a replacement qualify:
+//
+//  1. `bound` — this registration just wrote the client a managed entry for
+//     every registered language (the client is named by
+//     effectiveClientBindings).
+//  2. an already-live shared LSP-router entry for the individual language
+//     (clientHasActiveLSPRouterReplacement), which an opt-in client can hold
+//     without being in the default-install set.
+//
+// The grain is per (client, LANGUAGE), not per client, on purpose. A client
+// holding a router entry for `go` but not for `python` must have only its
+// `go` direct entry cleaned; promoting it to a whole-client opt-in would
+// delete its python entry with no replacement — reopening exactly the defect
+// the binding narrowing closed.
+//
+// A GetEntry failure is reported as a warning and treated as "no replacement"
+// (fail-closed): when we cannot confirm a replacement exists we keep the
+// operator's working direct entry rather than deleting it on an unread config.
+func lspCleanupAliasesForClient(
+	client registerClient,
+	clientName string,
+	bySpec map[string]config.LanguageSpec,
+	languages []string,
+	bound bool,
+) (map[string]bool, []string) {
+	aliases := map[string]bool{}
+	var warnings []string
+	for _, lang := range languages {
+		spec, ok := bySpec[lang]
+		if !ok {
+			continue
+		}
+		if !bound {
+			routed, err := clientHasActiveLSPRouterReplacement(client, lang)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf(
+					"%s LSP router replacement probe for %s failed: %v; keeping any direct %s entry", clientName, lang, err, lang))
+				continue
+			}
+			if !routed {
+				continue
+			}
+		}
+		addLSPCleanupAlias(aliases, lang)
+		addLSPCleanupAlias(aliases, spec.LspCommand)
+	}
+	return aliases, warnings
 }
 
 // directLSPSurvivorMatchesWorkspace is the SINGLE-OWNER cross-kind survivor

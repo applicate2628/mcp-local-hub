@@ -153,7 +153,17 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if all || daemonFilter != "" {
 					return fmt.Errorf("--check is mutually exclusive with --all/--daemon")
 				}
-				rep, rerr := api.CheckServerReadinessByName(server)
+				// --check must report on the SAME client scope the install it
+				// previews would use, so an explicitly targeted opt-in client's
+				// broken binding is surfaced here instead of only at install time.
+				include, err := parseInstallClientsFlag(clientsFlag, allClients)
+				if err != nil {
+					return err
+				}
+				rep, rerr := api.CheckServerReadinessByNameWithScope(server, api.AdmissionScope{
+					ClientsInclude:    include,
+					IncludeAllClients: allClients,
+				})
 				if rerr != nil {
 					return rerr
 				}
@@ -219,16 +229,25 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			// `mcphub binary` requirement reflects the just-bootstrapped state.
 			// Print blockers (with guided fixes) and STOP if any; print
 			// unset-optional-secret advisories and PROCEED to install.
-			rep, rerr := api.CheckServerReadinessByNameWithScope(server, api.AdmissionScope{DaemonFilter: daemonFilter})
+			// Parse the client selection BEFORE readiness: readiness must
+			// validate the bindings this very install will apply, not the
+			// default-install set. An explicitly targeted opt-in client (e.g.
+			// `--clients cursor`) whose binding the planner rejects has to show
+			// up as a readiness blocker, not as a surprise install failure.
+			include, err := parseInstallClientsFlag(clientsFlag, allClients)
+			if err != nil {
+				return err
+			}
+			rep, rerr := api.CheckServerReadinessByNameWithScope(server, api.AdmissionScope{
+				DaemonFilter:      daemonFilter,
+				ClientsInclude:    include,
+				IncludeAllClients: allClients,
+			})
 			if rerr != nil {
 				return rerr
 			}
 			if blocked := renderReadinessReport(cmd.OutOrStdout(), rep); blocked {
 				return fmt.Errorf("%s is not ready to install — fix the blocker(s) above (or run `mcphub install --server %s --check` to re-print them)", server, server)
-			}
-			include, err := parseInstallClientsFlag(clientsFlag, allClients)
-			if err != nil {
-				return err
 			}
 			a := api.NewAPI()
 			return a.Install(api.InstallOpts{

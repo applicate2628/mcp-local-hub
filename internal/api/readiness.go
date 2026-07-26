@@ -1102,7 +1102,20 @@ func checkServerReadinessWithBudget(m *config.ServerManifest, scope AdmissionSco
 	// binding must not block readiness when BuildPlanWithOpts(DaemonFilter)
 	// would skip it (bot review readiness.go:366). Empty filter = full install
 	// = validate every daemon, unchanged from the global path.
-	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{DefaultClientsOverride: clientScope, DaemonFilter: scope.DaemonFilter}); err != nil {
+	// An EXPLICIT client selection (`--clients a,b` / `--all-clients`) overrides
+	// the default scope, because that is the scope the install about to run will
+	// use. installClientPredicate's documented precedence is IncludeAllClients >
+	// ClientsInclude > DefaultClientsOverride, so passing all three here
+	// reproduces the real install's resolution exactly rather than re-deriving
+	// it. Both fields are zero for a bare install, leaving the default-set
+	// behavior (and the Codex #377 r7 "do not validate untargeted opt-in
+	// bindings" rule) untouched.
+	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{
+		DefaultClientsOverride: clientScope,
+		ClientsInclude:         scope.ClientsInclude,
+		IncludeAllClients:      scope.IncludeAllClients,
+		DaemonFilter:           scope.DaemonFilter,
+	}); err != nil {
 		add(ReadinessRequirement{
 			Name: "install plan",
 			OK:   false,

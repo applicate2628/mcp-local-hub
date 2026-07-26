@@ -3885,3 +3885,77 @@ func TestRegister_CleanupSkipsClientsThatGotNoReplacement(t *testing.T) {
 			"and must still be cleaned up")
 	}
 }
+
+// TestRegister_CleanupCoversOptInClientRoutedThroughSharedLSPRouter pins the
+// SECOND half of the post-register cleanup invariant — the half the first
+// narrowing fix got wrong (bot PR #583, follow-on finding against
+// register.go:316).
+//
+// Narrowing cleanup to effectiveClientBindings alone was an over-correction.
+// An opt-in client is absent from those bindings, but it can still hold a
+// perfectly valid hub-managed replacement: ensureLSPRouterClientEntriesWithLoaded
+// deliberately maintains shared /lsp/<lang>/mcp router entries for NON-default
+// clients that carry existing mcphub evidence. Skipping such a client leaves its
+// superseded direct stdio entry live ALONGSIDE the router entry — duplicate
+// servers and tools, plus the legacy LSP process nobody reaps.
+//
+// The grain is per (client, LANGUAGE), and this test is built to prove exactly
+// that. cursor is unbound and holds a router entry for `go` ONLY:
+//
+//	go      → replacement exists (router)     → direct entry MUST be removed
+//	python  → no replacement whatsoever       → direct entry MUST survive
+//
+// A whole-client fix ("cursor has a router entry, so clean everything on
+// cursor") passes the go assertion and FAILS the python one — it would delete a
+// working entry with nothing to replace it, which is the original defect
+// reappearing one language over.
+func TestRegister_CleanupCoversOptInClientRoutedThroughSharedLSPRouter(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+
+	ws := t.TempDir()
+	canonical := mustCanonical(t, ws)
+
+	direct := func(entryName, lspLanguage string) clients.LanguageServerStdioEntry {
+		return clients.LanguageServerStdioEntry{
+			Name:     entryName,
+			Command:  "mcp-language-server",
+			Language: lspLanguage,
+			Args:     []string{"--lsp", lspLanguage, "--workspace", canonical},
+		}
+	}
+	// cursor is opt-in, so a bare register writes it NOTHING. It nonetheless
+	// carries direct entries for both registered languages.
+	h.fakeClients.stdioEntries["cursor"] = map[string]clients.LanguageServerStdioEntry{
+		"legacy-go":     direct("legacy-go", "gopls"),
+		"legacy-python": direct("legacy-python", "pyright-langserver"),
+	}
+	// ...and an ACTIVE, hub-owned shared LSP-router entry for `go` only. This is
+	// what the router reconcile leaves on an explicitly enabled non-default
+	// client (LSPRouterEntryName("go") pointed at the router's /lsp/go/mcp path).
+	h.fakeClients.entries["cursor"][LSPRouterEntryName("go")] = "http://127.0.0.1:9125/lsp/go/mcp"
+
+	m := nineLanguageManifest()
+	m.ClientBindings = nil // shipped manifest declares none → derived defaults
+
+	if boundClientNames(effectiveClientBindings(m))["cursor"] {
+		t.Fatalf("test premise broken: cursor must be opt-in (absent from the effective bindings)")
+	}
+
+	if _, err := mustNewAPI(t).registerWithManifest(
+		m, ws, []string{"go", "python"}, RegisterOpts{Writer: &bytes.Buffer{}},
+	); err != nil {
+		t.Fatalf("registerWithManifest: %v", err)
+	}
+
+	if _, stillThere := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; stillThere {
+		t.Errorf("cursor's superseded direct `go` entry survived even though cursor already routes `go` " +
+			"through the shared hub LSP router — the direct entry now duplicates the router entry's " +
+			"servers/tools and keeps the legacy process alive (bot PR #583, register.go:316)")
+	}
+	if _, stillThere := h.fakeClients.stdioEntries["cursor"]["legacy-python"]; !stillThere {
+		t.Errorf("cursor's direct `python` entry was removed, but cursor has NO replacement for python " +
+			"(its router entry covers `go` only) — that disconnects python and reopens the very defect " +
+			"the binding narrowing closed; the replacement gate must be per-LANGUAGE, not per-client")
+	}
+}

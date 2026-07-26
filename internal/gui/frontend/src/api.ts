@@ -1366,7 +1366,7 @@ export interface ClientInstallPrefRow {
 export interface ClientInstallPrefsResponse {
   clients: ClientInstallPrefRow[];
   // True when an explicit operator override is persisted (vs. the
-  // compile-time trio fallback).
+  // compile-time default-set fallback).
   override_active: boolean;
 }
 
@@ -1390,8 +1390,9 @@ function normalizeClientInstallPrefs(
 }
 
 // getClientInstallPrefs reads the current default-install client set. An
-// absent gui-preferences.yaml yields the compile-time trio selected with
-// override_active=false — the normal first-run path.
+// absent gui-preferences.yaml yields the compile-time default set
+// ({claude-code, codex-cli}) selected with override_active=false — the normal
+// first-run path.
 export async function getClientInstallPrefs(): Promise<ClientInstallPrefsResponse> {
   return normalizeClientInstallPrefs(
     await fetchOrThrow<Partial<ClientInstallPrefsResponse>>("/api/client-install-prefs", "object"),
