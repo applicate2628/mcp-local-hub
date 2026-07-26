@@ -128,6 +128,7 @@ claude mcp get serena    # shows: Status: ✓ Connected, Type: http
 | **gdb** | 9129 | stdio-bridge (uv run) | Multi-debugger with session management |
 | **lldb** | 9130 | **embedded Go bridge** | Auto-spawns `lldb.exe`, HTTP-multiplexes concurrent clients onto single TCP connection |
 | **perftools** | 9131 | **embedded Go** | clang-tidy + llvm-objdump + include-what-you-use over real projects; `hyperfine` is **opt-in only** (RCE surface — set `MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE=1`, see INSTALL) |
+| **vcpkg** | 9138 | **embedded Go** | vcpkg/CMake diagnostics — build-failure triage across nested builds, overlay-port precedence, pin auditing, static patch-apply order, CMake include graph. Read-only: never starts a build. Every tool answers `ok\|failed\|unknown(reason)`; see `servers/vcpkg/README.md` for how to read the verdicts |
 
 Plus **context7** as a direct HTTPS entry (no daemon, no scheduler task).
 
