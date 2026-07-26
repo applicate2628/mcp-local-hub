@@ -629,13 +629,38 @@ func runEnsureAliveGUIRecoveryFree(
 		return
 	}
 
-	release := sync.OnceFunc(probe.Lease.Release)
-	defer release()
+	// FAIL-CLOSED RELEASE DISCIPLINE (review finding 1). sync.OnceValue (not
+	// OnceFunc) keeps the exactly-once guarantee AND preserves the release
+	// outcome, so every consumer below sees the same verdict no matter which
+	// path called it first; the deferred call is the exactly-once backstop for
+	// the early returns.
+	//
+	// This used to be sync.OnceFunc(probe.Lease.Release), and Release() DISCARDS
+	// the error release() returns. When the bounded Unlock retries all failed,
+	// this tick could not tell, reported a state that invites an immediate GUI
+	// relaunch, and that relaunch would then fail to acquire the single-instance
+	// flock THIS one-shot process still holds — leaving the fleet headless.
+	// (Verified: gofrs/flock conflicts against a second handle in the SAME
+	// process, so a retained lease really does lock out a relaunched GUI.)
+	//
+	// The remedy is the invariant internal/gui/single_instance.go already states
+	// for every release() call site — "any release failure is reported as
+	// UNDETERMINABLE" — which this cross-package caller previously could not
+	// uphold. An unconfirmed release is bounded: the lock is freed when this
+	// short-lived process exits, so the NEXT tick retries against a genuinely
+	// free flock.
+	release := sync.OnceValue(probe.Lease.ReleaseErr)
+	defer func() { _ = release() }()
 
 	current := probe.Record
 	if current == nil || current.Generation != observed.Generation || current.Sequence != observed.Sequence || current.Phase != observed.Phase {
-		release()
-		emitEnsureAliveGUIRecoveryUnknown(stateDir, out, observed, "probe-record-mismatch", errors.New("Free owner probe did not preserve the observed marker generation, sequence, and phase"))
+		// Already Unknown, so an unconfirmed release cannot change the verdict —
+		// but it is still reported, joined onto the cause, rather than dropped.
+		cause := errors.New("Free owner probe did not preserve the observed marker generation, sequence, and phase")
+		if releaseErr := release(); releaseErr != nil {
+			cause = errors.Join(cause, fmt.Errorf("release owned probe lease: %w", releaseErr))
+		}
+		emitEnsureAliveGUIRecoveryUnknown(stateDir, out, observed, "probe-record-mismatch", cause)
 		return
 	}
 	if ctx.Err() != nil {
@@ -663,8 +688,19 @@ func runEnsureAliveGUIRecoveryFree(
 	// running: the CAS either returns while this worker still owns the flock, or
 	// the one-shot process exits and abandons both the goroutine and its OS lock.
 	// A successor can therefore never acquire the flock before a late CAS write.
-	release()
+	releaseErr := release()
 	if ctx.Err() != nil {
+		return
+	}
+	// The release gate precedes EVERY CAS-outcome branch below, because all of
+	// them either instruct a GUI relaunch ("run `mcphub gui`") or assert that one
+	// is already happening automatically. With the flock possibly still held by
+	// this process, any of those would send the operator — or the liveness body
+	// that runs next — into a relaunch that cannot acquire it. The CAS itself
+	// committed BEFORE this release under a genuinely owned lease, so the marker
+	// terminalization stays durable and correct; only the ADVICE is downgraded.
+	if releaseErr != nil {
+		emitEnsureAliveGUIRecoveryUnknown(stateDir, out, current, "owner-lease-release-unconfirmed", releaseErr)
 		return
 	}
 	if err != nil {

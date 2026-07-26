@@ -180,6 +180,17 @@ var ErrSupervisorEventIdentityOversize = errors.New("supervisor event log: ident
 // append.
 var ErrSupervisorEventEmitTimeout = errors.New("supervisor event log: bounded emit timed out")
 
+// ErrSupervisorEventReleaseFailed classifies an emit whose WRITE phase may
+// well have succeeded but whose cross-process flock could NOT be released
+// (review finding 2). It is the one emit outcome that says nothing about the
+// row and everything about the LOCK: this process may still hold the flock on
+// supervisor-events.log, so every other process that emits here — the
+// supervisor, the install CLI — is blocked until this one exits.
+//
+// Callers distinguish it with errors.Is. It is joined with, never substituted
+// for, a write error: an emit that failed BOTH ways reports both.
+var ErrSupervisorEventReleaseFailed = errors.New("supervisor event log: flock release failed; the cross-process lock may still be held")
+
 // PendingSupervisorEventEmit exposes the EVENTUAL completion of an
 // EmitWithTimeoutTracked call that timed out (residual 2 review fix). A
 // timeout does NOT mean the write was lost: writeEventLine's rotation/open/
@@ -194,8 +205,26 @@ type PendingSupervisorEventEmit struct {
 	done <-chan error
 }
 
-// Wait blocks up to timeout for the abandoned worker to finish its write.
-// Returns the worker's own completion error (nil on a successful append), or
+// NewPendingSupervisorEventEmitForTest builds a handle whose first Wait
+// immediately yields the given outcome. It exists so a CONSUMER of this handle
+// (e.g. daemonrecovery's queueIdempotentAuditFallback, whose branch logic
+// decides whether a duplicate audit row gets written) can be tested
+// deterministically, without staging a real stalled worker and then racing its
+// release. Only tests may call it.
+func NewPendingSupervisorEventEmitForTest(outcome error) *PendingSupervisorEventEmit {
+	done := make(chan error, 1)
+	done <- outcome
+	return &PendingSupervisorEventEmit{done: done}
+}
+
+// Wait blocks up to timeout for the abandoned worker to finish its write AND
+// release both locks — since review finding 2 the worker signals completion
+// only once its release outcome is known, so a result observed here can never
+// precede the release it reports.
+//
+// Returns the worker's own completion error: nil on a successful append that
+// also released cleanly, an error matching ErrSupervisorEventReleaseFailed when
+// the write landed but the cross-process flock could not be released, or
 // ErrSupervisorEventEmitTimeout again if it still has not finished within
 // the bound — the caller remains free to treat that as "still unknown" and
 // fall back to an independent write as a last resort. A non-positive timeout
@@ -277,6 +306,9 @@ func (l *SupervisorEventLog) Close() error { return nil }
 //   - ErrSupervisorEventMissingEvent if Event is empty.
 //   - ErrSupervisorEventMissingSource if Source is empty.
 //   - wrapped I/O / marshal errors on disk-level failures.
+//   - an error matching ErrSupervisorEventReleaseFailed when the append itself
+//     succeeded but the cross-process flock could not be released. Every emit
+//     mode can return this; it says the row is fine and the LOCK is not.
 //
 // Rotation: at the start of each Emit, if the existing log is
 // >= supervisorEventLogRotateSize, os.Rename(*.log, *.log.1). No
@@ -393,7 +425,55 @@ func SetSupervisorEventWriteFnForTest(fn func(l *SupervisorEventLog, raw []byte)
 	return func() { supervisorEventWriteFn = prev }
 }
 
-func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, timeout time.Duration) (*PendingSupervisorEventEmit, error) {
+// supervisorEventUnlockFn is the injectable cross-process-flock RELEASE seam,
+// the release-side sibling of supervisorEventWriteFn. Production always
+// resolves to (*flock.Flock).Unlock; a test substitutes a fake that fails
+// persistently to prove that a failed release is PROPAGATED to the caller
+// rather than discarded. gofrs/flock exposes no injection point of its own and
+// l.lock is a concrete *flock.Flock, so a seam here is the only way to
+// exercise the failure without a real locked-down filesystem.
+//
+// Reassigning this directly from production code is forbidden —
+// SetSupervisorEventUnlockFnForTest is the only allowed write path, and
+// callers MUST restore it before the next test runs.
+var supervisorEventUnlockFn = func(l *SupervisorEventLog) error {
+	return l.lock.Unlock()
+}
+
+// SetSupervisorEventUnlockFnForTest installs a test flock-release function.
+// Returns an "uninstall" function tests defer to restore production wiring.
+// Only supervisor_events_test.go invokes this.
+func SetSupervisorEventUnlockFnForTest(fn func(l *SupervisorEventLog) error) func() {
+	prev := supervisorEventUnlockFn
+	supervisorEventUnlockFn = fn
+	return func() { supervisorEventUnlockFn = prev }
+}
+
+// joinSupervisorEventReleaseErr folds a cross-process-flock RELEASE failure
+// into the emit result (review finding 2).
+//
+// Before this, `_ = l.lock.Unlock()` discarded the outcome, so a SUCCESSFUL
+// write followed by a failed UnlockFileEx returned nil — a success verdict —
+// while the flock stayed held. That is not a cosmetic loss: the supervisor and
+// the install CLI both emit into this same log across processes, so a silently
+// retained flock blocks every OTHER process's event-log write until this one
+// exits, and the caller that caused it is told nothing.
+//
+// The release failure is wrapped in ErrSupervisorEventReleaseFailed so a caller
+// can tell it apart from a write failure with errors.Is, and joined with (not
+// substituted for) any write error so neither cause is lost.
+func joinSupervisorEventReleaseErr(writeErr, releaseErr error) error {
+	if releaseErr == nil {
+		return writeErr
+	}
+	return errors.Join(writeErr, fmt.Errorf("%w: %w", ErrSupervisorEventReleaseFailed, releaseErr))
+}
+
+// emit's results are NAMED so the single deferred releaser below can fold a
+// cross-process-flock RELEASE failure into the error every return path already
+// produces (review finding 2). Every `return` here still states both results
+// explicitly; the releaser only ever ADDS a release failure on top.
+func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, timeout time.Duration) (pending *PendingSupervisorEventEmit, err error) {
 	raw, err := marshalSupervisorEventLine(evt)
 	if err != nil {
 		return nil, err
@@ -449,6 +529,20 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 	// authoritative record of whether THIS call owns the cross-process flock,
 	// so the theoretical (true, err) return that gofrs/flock does not
 	// currently produce still releases the flock instead of leaking it.
+	//
+	// The releaser also PROPAGATES a flock-release failure into the returned
+	// error (review finding 2). `_ = l.lock.Unlock()` used to discard it, so a
+	// successful write followed by a failed UnlockFileEx returned SUCCESS while
+	// the cross-process flock stayed held — blocking event-log writes in every
+	// other process that emits here. The mutex unlock stays UNCONDITIONAL and
+	// outside that branch: skipping it is the double-unlock class's mirror image
+	// and would wedge this log for the rest of the process's life.
+	//
+	// Capture the release seam ONCE, for the same reason writeFn is captured
+	// below: the emitTimeout worker is deliberately abandoned, so a package
+	// global it read at release time could be read arbitrarily late and race a
+	// test's Cleanup restore under -race.
+	unlockFn := supervisorEventUnlockFn
 	flockHeld := false
 	handedOff := false
 	defer func() {
@@ -456,7 +550,9 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 			return
 		}
 		if flockHeld {
-			_ = l.lock.Unlock()
+			if unlockErr := unlockFn(l); unlockErr != nil {
+				err = joinSupervisorEventReleaseErr(err, unlockErr)
+			}
 		}
 		l.mu.Unlock()
 	}()
@@ -557,9 +653,27 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 	// from unlocking out from under a write that is still in flight.
 	handedOff = true
 	go func() {
-		defer l.mu.Unlock()
-		defer func() { _ = l.lock.Unlock() }()
-		done <- writeFn(l, raw)
+		var (
+			writeErr  error
+			unlockErr error
+		)
+		// Both locks are released BEFORE the send on `done` (review finding 2).
+		// The previous shape sent from the goroutine body, so its two deferred
+		// releases ran AFTER the send — a caller awaiting this handle could
+		// observe SUCCESS strictly before the release outcome even existed, and
+		// a failed flock release was discarded on top of that. The inner
+		// function keeps the releases DEFERRED (so a panicking write still frees
+		// both locks) while moving the send after them.
+		//
+		// Release ORDER is deliberately unchanged: LIFO runs the flock unlock
+		// first, then the mutex, matching the synchronous releaser above. The
+		// mutex unlock stays unconditional.
+		func() {
+			defer l.mu.Unlock()
+			defer func() { unlockErr = unlockFn(l) }()
+			writeErr = writeFn(l, raw)
+		}()
+		done <- joinSupervisorEventReleaseErr(writeErr, unlockErr)
 	}()
 	select {
 	case err := <-done:

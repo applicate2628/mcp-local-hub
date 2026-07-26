@@ -797,6 +797,17 @@ func queueIdempotentAuditFallback(postCommitAudits *[]func(), stateDir string, a
 				// Still unsettled, and by design not waited on further: see
 				// the doc comment above. Do NOT write again here.
 				return
+			case errors.Is(waitErr, api.ErrSupervisorEventReleaseFailed):
+				// The worker could not release the cross-process flock. That
+				// says nothing about the ROW — the append phase ran, and may
+				// well have succeeded — so this branch's precondition ("no row
+				// exists and none is coming") is NOT met and a write here would
+				// re-introduce exactly the two-writers-one-outcome duplicate
+				// this function exists to prevent. Fail closed: skip the
+				// fallback. Losing one audit row while the event log's lock is
+				// already stuck is strictly better than a duplicate row, and
+				// the release failure is itself reported to the emit caller.
+				return
 			}
 			// A genuine (non-timeout) write failure: the tracked attempt is
 			// DEFINITELY settled as failed (no row exists and none is

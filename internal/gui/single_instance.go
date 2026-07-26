@@ -51,6 +51,26 @@ type SingleInstanceLease interface {
 	Release()
 }
 
+// OwnedSingleInstanceLease is a lease whose release outcome is OBSERVABLE.
+//
+// ProbeGUIOwnerLease hands a GUIOwnerLeaseStateFree caller an OWNED lease, and
+// that caller's contract is fail-closed on release, exactly like
+// ProbeSingleInstanceLockUnheld's: an UNCONFIRMED release may leave the flock
+// held by this process until it EXITS (see release()'s persistent-failure
+// residual note), so the caller must not go on to act as though the GUI
+// single-instance flock were free. Release() alone cannot express that — it
+// discards release()'s error — so the owned-probe seam requires ReleaseErr.
+type OwnedSingleInstanceLease interface {
+	SingleInstanceLease
+
+	// ReleaseErr releases the flock and REPORTS the outcome instead of
+	// discarding it. A non-nil error means the OS lock may still be held by
+	// this process, and the caller MUST classify its observation as Unknown.
+	// Like Release it is idempotent: a second call after a successful release
+	// is a no-op returning nil.
+	ReleaseErr() error
+}
+
 // SingleInstanceAcquireOptions enables the restart-v3 reservation check for a
 // single acquisition. Existing callers pass no options and retain the legacy
 // single-shot behavior without reading the marker.
@@ -85,10 +105,14 @@ type GUIOwnerLeaseProbeRequest struct {
 // GUIOwnerLeaseProbeResult represents Held(reason),
 // Free(owned_probe_lease), or Unknown(error). Lease is populated only for Free
 // and remains held until the caller releases it.
+//
+// Lease is an OwnedSingleInstanceLease, not a bare SingleInstanceLease: the
+// Free caller owns the flock and its release is load-bearing, so the seam must
+// let it observe whether the release actually happened.
 type GUIOwnerLeaseProbeResult struct {
 	State  GUIOwnerLeaseState
 	Reason error
-	Lease  SingleInstanceLease
+	Lease  OwnedSingleInstanceLease
 	Record *HandoffMarkerRecord
 }
 
@@ -279,6 +303,26 @@ func probeSingleInstanceLockUnheld(
 //     handshake can read it.
 func (l *SingleInstanceLock) Release() {
 	_ = l.release()
+}
+
+// ReleaseErr is Release with the outcome REPORTED rather than discarded, so a
+// caller whose next step depends on the flock actually being free can fail
+// closed instead of guessing (review finding 1).
+//
+// Release() is retained for the many call sites that release on a path where
+// nothing downstream re-acquires this flock, and where a discarded error is
+// therefore harmless. ReleaseErr is for the owned-probe callers — the ones this
+// file's own invariant already binds: "any release failure is reported as
+// UNDETERMINABLE", which every release() call site in this file upholds. Before
+// this method existed, the cross-package Phase-I caller in internal/cli could
+// not uphold it, because release() is unexported and Release() drops the error.
+//
+// A non-nil result does NOT mean the caller should retry — release() has
+// already exhausted its bounded Unlock retries and gofrs/flock leaves nothing
+// further to try (see the residual note in release()). It means "this process
+// may still hold the lock until it exits": treat the observation as Unknown.
+func (l *SingleInstanceLock) ReleaseErr() error {
+	return l.release()
 }
 
 func (l *SingleInstanceLock) release() error {

@@ -1417,6 +1417,12 @@ type ensureAliveGUIRecoveryLeaseFake struct {
 	once     sync.Once
 	releases atomic.Int32
 	released chan struct{}
+	// releaseErr, when non-nil, simulates a lease whose bounded Unlock retries
+	// ALL failed: gui.SingleInstanceLock.release() then reports the first error
+	// and the OS lock stays held until the process exits. It is returned on
+	// EVERY ReleaseErr call (not just the first) so the caller's exactly-once
+	// wrapper cannot mask it by observing a later nil.
+	releaseErr error
 }
 
 type ensureAliveGUIRecoveryReleaseCheckingWriter struct {
@@ -1430,6 +1436,11 @@ func (w *ensureAliveGUIRecoveryReleaseCheckingWriter) Write(p []byte) (int, erro
 		w.wroteBeforeRelease = true
 	}
 	return w.Buffer.Write(p)
+}
+
+func (l *ensureAliveGUIRecoveryLeaseFake) ReleaseErr() error {
+	l.Release()
+	return l.releaseErr
 }
 
 func (l *ensureAliveGUIRecoveryLeaseFake) Release() {
@@ -2147,4 +2158,88 @@ func assertSupervisorEventBody(t *testing.T, stateDir, wantEvent, wantBodySubstr
 		}
 	}
 	t.Fatalf("supervisor-events.log has no %q row carrying %q; log body=%q", wantEvent, wantBodySubstring, string(raw))
+}
+
+// TestEnsureAliveGUIRecovery_UnconfirmedLeaseReleaseDegradesToUnknown pins
+// review finding 1: when the owned-probe lease's release is NOT CONFIRMED, the
+// tick must degrade to the unknown/no-action diagnostic instead of advertising
+// a state that invites a GUI relaunch.
+//
+// The caller used to wrap the error-DISCARDING Release(), so an exhausted
+// bounded-Unlock retry loop was invisible. This one-shot process then still
+// held the GUI single-instance flock (release()'s documented persistent-failure
+// residual), while telling the operator to "run `mcphub gui`" or asserting the
+// owner was already being recovered automatically. A GUI started on that advice
+// cannot acquire the flock and dies, leaving the fleet headless. Verified
+// separately that gofrs/flock conflicts against a second handle in the SAME
+// process, so a retained lease really does lock out a relaunched GUI.
+//
+// Both supervisor states are covered because they produce DIFFERENT
+// relaunch-inviting messages from the same code path (running -> "run `mcphub
+// gui`"; down -> "being recovered automatically"), and the gate must preempt
+// both.
+//
+// MUTATION: revert the caller to `release := sync.OnceFunc(probe.Lease.Release)`
+// / `defer release()` / bare `release()` and drop the `if releaseErr != nil`
+// gate. The failure becomes invisible again and both subtests fail with
+// "unconfirmed lease release output = ... want the unknown/degraded diagnostic".
+func TestEnsureAliveGUIRecovery_UnconfirmedLeaseReleaseDegradesToUnknown(t *testing.T) {
+	cases := []struct {
+		name string
+		// holdSupervisor drives runEnsureAliveGUIRecoveryFree's own
+		// flock-authoritative supervisor probe, which selects which
+		// relaunch-inviting message the pre-fix code would have emitted.
+		holdSupervisor   bool
+		forbiddenMessage string
+	}{
+		{"SupervisorRunning", true, ensureAliveGUIFreeMessage},
+		{"SupervisorDown", false, ensureAliveGUIOwnerRecoveringMessage},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+			stateDir := ensureAliveTestStateDir(t)
+			if tc.holdSupervisor {
+				holdEnsureAliveSupervisorLock(t, stateDir)
+			}
+			store := &ensureAliveGUIRecoveryMarkerFake{
+				record: expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseReserved),
+			}
+			lease := &ensureAliveGUIRecoveryLeaseFake{
+				releaseErr: errors.New("UnlockFileEx: simulated persistent failure"),
+			}
+			installEnsureAliveGUIRecoveryTestDependencies(t, ensureAliveGUIRecoveryTestDeadlines(now), store, func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+				return gui.GUIOwnerLeaseProbeResult{
+					State:  gui.GUIOwnerLeaseStateFree,
+					Lease:  lease,
+					Record: cloneEnsureAliveGUIRecoveryRecord(store.record),
+				}
+			})
+			out := &bytes.Buffer{}
+
+			runEnsureAliveGUIRecovery(stateDir, out)
+
+			if !strings.Contains(out.String(), ensureAliveGUIUnknownMessage) {
+				t.Fatalf("unconfirmed lease release output = %q, want the unknown/degraded diagnostic %q", out.String(), ensureAliveGUIUnknownMessage)
+			}
+			if strings.Contains(out.String(), tc.forbiddenMessage) {
+				t.Fatalf("unconfirmed lease release still advertised %q, which invites a GUI relaunch against a flock this process may still hold: %q", tc.forbiddenMessage, out.String())
+			}
+			// The CAS committed BEFORE the release, under a genuinely owned
+			// lease, so terminalization must stay durable and complete: the fix
+			// downgrades the ADVICE, never the write.
+			interrupted, interruptCalls := store.snapshot()
+			if interruptCalls != 1 || interrupted == nil || interrupted.Phase != gui.HandoffPhaseInterrupted {
+				t.Fatalf("marker interrupt = record=%+v calls=%d, want exactly one terminal interrupted write", interrupted, interruptCalls)
+			}
+			// Exactly-once release still holds: the gate reads the memoized
+			// outcome, it does not re-release.
+			if got := lease.releases.Load(); got != 1 {
+				t.Fatalf("owned probe lease releases = %d, want exactly 1", got)
+			}
+			// Operator-visible in the durable log, not just on the discarded
+			// scheduled-task stdout.
+			assertSupervisorEvent(t, stateDir, "gui-restart-owner-unknown")
+		})
+	}
 }

@@ -522,10 +522,13 @@ func TestSupervisorEventLog_EmitWithTimeoutTrackedPendingObservesLateWrite(t *te
 	})
 	defer func() {
 		safeRelease() // no-op if the in-test goroutine below already released it
-		// Same join as the sibling test above: pending.Wait returns as soon as
-		// the worker sends on `done`, which is BEFORE its deferred flock/mutex
-		// unlocks run. Acquiring logger.mu here waits for that last unlock, so
-		// the worker holds nothing under dir when t.TempDir's RemoveAll fires.
+		// Same join as the sibling test above. Since review finding 2 the
+		// worker sends on `done` only AFTER both releases, so by the time
+		// pending.Wait has returned logger.mu is already free and this join is
+		// a cheap backstop rather than the load-bearing wait it used to be. It
+		// is kept because the join must still hold on the paths where no Wait
+		// ran at all (an earlier assertion failed before it), where the worker
+		// could otherwise still touch dir when t.TempDir's RemoveAll fires.
 		logger.mu.Lock()
 		logger.mu.Unlock()
 		restore()
@@ -687,5 +690,191 @@ func TestSupervisorEventLog_EmitWithTimeoutTrackedPendingNilOnImmediateSuccess(t
 	}
 	if pending != nil {
 		t.Fatalf("pending handle is non-nil on immediate success; want nil (nothing to wait for)")
+	}
+}
+
+// TestSupervisorEventLog_EmitReportsFlockReleaseFailure pins review finding 2:
+// a SUCCESSFUL write followed by a FAILED cross-process flock release must be
+// reported to the caller, not discarded.
+//
+// The pre-fix `_ = l.lock.Unlock()` returned a success verdict while the flock
+// stayed held. That is not a cosmetic loss — the supervisor and the install CLI
+// both emit into this same log across processes, so a silently retained flock
+// blocks every OTHER process's event-log write until this one exits, and the
+// caller that caused it is told nothing.
+//
+// All three emit modes are covered because they release through two DIFFERENT
+// owners: Emit/TryEmit release in emit's deferred releaser, while
+// EmitWithTimeout releases in the handed-off worker goroutine. A fix applied to
+// only one of them would leave the other silently discarding.
+//
+// MUTATION: restore `_ = l.lock.Unlock()` in emit's deferred releaser (and/or
+// `defer func() { _ = l.lock.Unlock() }()` in the worker). The release failure
+// is discarded again and the affected subtests fail with
+// "Emit returned nil; want the flock release failure reported".
+func TestSupervisorEventLog_EmitReportsFlockReleaseFailure(t *testing.T) {
+	cases := []struct {
+		name string
+		emit func(l *SupervisorEventLog, evt SupervisorEvent) error
+	}{
+		{"Emit", func(l *SupervisorEventLog, evt SupervisorEvent) error {
+			return l.Emit(evt)
+		}},
+		{"TryEmit", func(l *SupervisorEventLog, evt SupervisorEvent) error {
+			return l.TryEmit(evt)
+		}},
+		{"EmitWithTimeout", func(l *SupervisorEventLog, evt SupervisorEvent) error {
+			return l.EmitWithTimeout(evt, 5*time.Second)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "supervisor-events.log")
+			logger, err := OpenSupervisorEventLog(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = logger.Close() }()
+
+			releaseFailure := errors.New("UnlockFileEx: simulated persistent failure")
+			restore := SetSupervisorEventUnlockFnForTest(func(*SupervisorEventLog) error {
+				return releaseFailure
+			})
+			defer func() {
+				restore()
+				// The seam suppressed the REAL Unlock, so the flock is still
+				// held. Free it before t.TempDir's RemoveAll fires.
+				_ = logger.lock.Unlock()
+			}()
+
+			evt := SupervisorEvent{
+				Severity: "info",
+				Source:   "autostart",
+				Event:    "emit-flock-release-failure",
+			}
+			emitErr := tc.emit(logger, evt)
+			if emitErr == nil {
+				t.Fatalf("%s returned nil; want the flock release failure reported", tc.name)
+			}
+			if !errors.Is(emitErr, ErrSupervisorEventReleaseFailed) {
+				t.Fatalf("%s error = %v, want it classified as ErrSupervisorEventReleaseFailed", tc.name, emitErr)
+			}
+			// The concrete cause survives the wrap, so an operator sees the real
+			// syscall failure rather than only the classifier.
+			if !errors.Is(emitErr, releaseFailure) {
+				t.Fatalf("%s error = %v, want the underlying release cause preserved", tc.name, emitErr)
+			}
+			// A release failure must not be laundered into the bounded-skip
+			// sentinel: that would tell the caller to await a worker rather
+			// than that a cross-process lock is stuck.
+			if errors.Is(emitErr, ErrSupervisorEventEmitTimeout) {
+				t.Fatalf("%s reported a release failure as the bounded-skip sentinel: %v", tc.name, emitErr)
+			}
+			// This is a RELEASE failure, not a write failure: the row must
+			// still be on disk. Otherwise the test could pass for the wrong
+			// reason (an emit that simply failed earlier).
+			raw, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatalf("%s: read event log: %v", tc.name, readErr)
+			}
+			if !strings.Contains(string(raw), "emit-flock-release-failure") {
+				t.Fatalf("%s: event row missing from %q; the write itself should have succeeded", tc.name, string(raw))
+			}
+			// The in-process mutex is released EXACTLY once on this path: not
+			// still held (leak), not double-unlocked (runtime fatal). Its
+			// unlock is unconditional and must never be skipped just because
+			// the flock release failed.
+			if !logger.mu.TryLock() {
+				t.Fatalf("%s left l.mu held after a flock release failure", tc.name)
+			}
+			logger.mu.Unlock()
+		})
+	}
+}
+
+// TestSupervisorEventLog_TimeoutWorkerReleasesBeforeSignallingCompletion pins
+// the ORDERING half of review finding 2. The handed-off emitTimeout worker used
+// to send its result on `done` from the goroutine body, so its two deferred
+// releases ran AFTER the send: a caller awaiting the pending handle could
+// observe SUCCESS strictly before the release outcome even existed.
+//
+// The unlock seam deliberately sleeps so the window this assertion depends on
+// is engineered LARGE rather than raced against the natural (sub-microsecond)
+// one — a fast machine must not be able to turn this into a flake.
+//
+// MUTATION: restore the pre-fix worker body
+//
+//	defer l.mu.Unlock()
+//	defer func() { _ = l.lock.Unlock() }()
+//	done <- writeFn(l, raw)
+//
+// Wait then returns while the 250ms unlock seam is still running, and the test
+// fails with "pending.Wait returned before the release outcome existed".
+func TestSupervisorEventLog_TimeoutWorkerReleasesBeforeSignallingCompletion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "supervisor-events.log")
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = logger.Close() }()
+
+	releaseFailure := errors.New("UnlockFileEx: simulated persistent failure")
+	var unlockFinished atomic.Bool
+	restoreUnlock := SetSupervisorEventUnlockFnForTest(func(*SupervisorEventLog) error {
+		time.Sleep(250 * time.Millisecond)
+		unlockFinished.Store(true)
+		return releaseFailure
+	})
+
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	safeRelease := func() { releaseOnce.Do(func() { close(release) }) }
+	restoreWrite := SetSupervisorEventWriteFnForTest(func(l *SupervisorEventLog, raw []byte) error {
+		<-release // simulates a filesystem/AV stall that outlives the caller's budget
+		return l.writeEventLine(raw)
+	})
+	defer func() {
+		safeRelease()
+		// Join on the worker before touching the seams or the temp dir. Under
+		// the MUTATION this is load-bearing: there, Wait returns before the
+		// releases run, so the worker is still live at this point.
+		logger.mu.Lock()
+		logger.mu.Unlock()
+		restoreWrite()
+		restoreUnlock()
+		_ = logger.lock.Unlock()
+	}()
+
+	const timeout = 150 * time.Millisecond
+	pending, err := logger.EmitWithTimeoutTracked(SupervisorEvent{
+		Severity: "info",
+		Source:   "autostart",
+		Event:    "emit-timeout-worker-release-ordering",
+	}, timeout)
+	if !errors.Is(err, ErrSupervisorEventEmitTimeout) {
+		t.Fatalf("EmitWithTimeoutTracked with a stalled write error = %v, want ErrSupervisorEventEmitTimeout", err)
+	}
+	if pending == nil {
+		t.Fatal("pending handle is nil after a genuine timeout; want a handle to await the abandoned worker")
+	}
+
+	// Unblock the stalled write from a separate goroutine WHILE Wait blocks, so
+	// this genuinely exercises the late-worker path.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		safeRelease()
+	}()
+	waitErr := pending.Wait(10 * time.Second)
+
+	if !unlockFinished.Load() {
+		t.Fatal("pending.Wait returned before the release outcome existed; the worker signalled completion while its flock release was still in flight")
+	}
+	if !errors.Is(waitErr, ErrSupervisorEventReleaseFailed) {
+		t.Fatalf("pending.Wait error = %v, want the worker's flock release failure classified as ErrSupervisorEventReleaseFailed", waitErr)
+	}
+	if !errors.Is(waitErr, releaseFailure) {
+		t.Fatalf("pending.Wait error = %v, want the underlying release cause preserved", waitErr)
 	}
 }

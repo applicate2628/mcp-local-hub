@@ -1919,3 +1919,83 @@ func TestExecuteMapsRespawnSetupFailureToStateReadAndDialFailureToUnavailable(t 
 		})
 	}
 }
+
+// TestQueueIdempotentAuditFallbackOutcomeMatrix pins the ONE branch point that
+// decides whether a SECOND physical audit row gets written for a single event.
+//
+// The release-failure row is the case review finding 2 introduced: propagating
+// a flock-release failure means a NEW error class can now reach this switch,
+// and it does NOT satisfy the default branch's precondition ("the tracked
+// attempt is DEFINITELY settled as failed — no row exists and none is coming").
+// The append phase already ran and may well have succeeded, so writing here
+// would re-create exactly the two-writers-one-outcome duplicate this function
+// was built to remove.
+//
+// The other three rows are the pre-existing contract, asserted alongside so the
+// new case cannot be added by loosening one of them.
+//
+// MUTATION: delete the `case errors.Is(waitErr, api.ErrSupervisorEventReleaseFailed)`
+// arm from queueIdempotentAuditFallback. The release-failure outcome then falls
+// through to the unconditional fallback write and the subtest fails with
+// "audit rows = 1, want 0".
+func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
+	cases := []struct {
+		name     string
+		outcome  error
+		wantRows int
+		why      string
+	}{
+		{
+			name:     "ReleaseFailedRowMayHaveLanded",
+			outcome:  fmt.Errorf("%w: UnlockFileEx: simulated persistent failure", api.ErrSupervisorEventReleaseFailed),
+			wantRows: 0,
+			why:      "a release failure says nothing about the row; a fallback write would risk a duplicate",
+		},
+		{
+			name:     "WorkerWriteSucceeded",
+			outcome:  nil,
+			wantRows: 0,
+			why:      "the tracked worker's row already landed",
+		},
+		{
+			name:     "WorkerStillUnsettled",
+			outcome:  api.ErrSupervisorEventEmitTimeout,
+			wantRows: 0,
+			why:      "unsettled by design; racing it with an independent write is the PILED defect",
+		},
+		{
+			name:     "GenuineWriteFailure",
+			outcome:  errors.New("write supervisor event log: simulated disk failure"),
+			wantRows: 1,
+			why:      "definitely settled as failed, so exactly one fresh attempt is legitimate",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			audit := api.SupervisorEvent{
+				Severity: api.SupervisorEventSeverityInfo,
+				Source:   api.SupervisorEventSourceLifecycle,
+				Event:    "daemon-recovery-fallback-outcome-matrix",
+			}
+
+			var postCommitAudits []func()
+			queueIdempotentAuditFallback(&postCommitAudits, stateDir, audit,
+				api.NewPendingSupervisorEventEmitForTest(tc.outcome))
+			if len(postCommitAudits) != 1 {
+				t.Fatalf("queued fallback closures = %d, want exactly 1", len(postCommitAudits))
+			}
+			postCommitAudits[0]()
+
+			logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
+			raw, err := os.ReadFile(logPath)
+			if err != nil && !os.IsNotExist(err) {
+				t.Fatalf("read %s: %v", logPath, err)
+			}
+			rows := strings.Count(string(raw), audit.Event)
+			if rows != tc.wantRows {
+				t.Fatalf("audit rows = %d, want %d (%s); log=%q", rows, tc.wantRows, tc.why, string(raw))
+			}
+		})
+	}
+}
