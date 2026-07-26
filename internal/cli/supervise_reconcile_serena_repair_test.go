@@ -159,6 +159,12 @@ func TestReconcileIPC_ApplyRepairsSerenaIntentFromRegistryBeforeDrift(t *testing
 	if body.AppliedCount < 1 {
 		t.Errorf("AppliedCount = %d, want >= 1 (the orphan's spawn must be applied)", body.AppliedCount)
 	}
+	if body.SerenaOrphansRepaired != 1 {
+		t.Errorf("SerenaOrphansRepaired = %d, want 1 (matches the dry-run preview count — same classification, both modes)", body.SerenaOrphansRepaired)
+	}
+	if len(body.SerenaOrphansDeferred) != 0 {
+		t.Errorf("SerenaOrphansDeferred = %v, want none", body.SerenaOrphansDeferred)
+	}
 
 	// An EvIntentUpdate for the orphan's task name must actually be posted —
 	// proving this is a live reconcile effect, not just a durable file write.
@@ -195,8 +201,13 @@ func TestReconcileIPC_ApplyRepairsSerenaIntentFromRegistryBeforeDrift(t *testing
 }
 
 // TestReconcileIPC_DryRunDoesNotRepairSerenaIntentFromRegistry pins the
-// apply-mode scoping: a dry-run reconcile (apply=false) must NOT mutate
-// state, so the self-heal must not run at all when args.Apply is false.
+// write-scoping half of the BLOCKING 3 fix (mcphub-register-intent REVISE
+// round 2): a dry-run reconcile (apply=false) must NEVER mutate state, so
+// commit must not run when args.Apply is false. It ALSO pins the new
+// visibility half: the response's SerenaOrphansRepaired/SerenaOrphansDeferred
+// fields must report the SAME count a real --apply would materialize — a
+// dry-run reconcile can no longer hide that the very next `--apply` would
+// silently append this orphan.
 func TestReconcileIPC_DryRunDoesNotRepairSerenaIntentFromRegistry(t *testing.T) {
 	manifestDir := t.TempDir()
 	seedSerenaManifest(t, manifestDir, alreadyMigratedManifestYAML)
@@ -251,8 +262,17 @@ func TestReconcileIPC_DryRunDoesNotRepairSerenaIntentFromRegistry(t *testing.T) 
 	}
 	for _, d := range body.Drift {
 		if d.TaskName == `\mcp-local-hub-serena-`+orphanKey {
-			t.Fatalf("dry-run must not surface the orphan at all (no repair ran): %+v", d)
+			t.Fatalf("dry-run must not surface the orphan in the drift table (it is not in intent.Daemons — repair only PREVIEWS, it never appends): %+v", d)
 		}
+	}
+	// BLOCKING 3 fix: the preview count/deferred-keys must be visible in the
+	// response EVEN THOUGH nothing was written — this is what a dry-run
+	// reconcile could never show before this fix.
+	if body.SerenaOrphansRepaired != 1 {
+		t.Errorf("SerenaOrphansRepaired = %d, want 1 (the orphan a real --apply WOULD materialize)", body.SerenaOrphansRepaired)
+	}
+	if len(body.SerenaOrphansDeferred) != 0 {
+		t.Errorf("SerenaOrphansDeferred = %v, want none", body.SerenaOrphansDeferred)
 	}
 
 	intentPath := filepath.Join(fx.deps.stateDir, "supervisor-intent.json")

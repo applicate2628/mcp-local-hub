@@ -44,6 +44,23 @@ type ReconcileResponse struct {
 	DriftCount   int          `json:"drift_count"`
 	AppliedCount int          `json:"applied_count"` // 0 when dry-run
 	Drift        []DriftEntry `json:"drift"`
+
+	// SerenaOrphansRepaired / SerenaOrphansDeferred surface the serena
+	// registry/intent self-heal (RepairSerenaIntentFromRegistry /
+	// PreviewSerenaIntentRepairFromRegistry) computed in THIS SAME reconcile
+	// pass — in BOTH dry-run and apply mode (BLOCKING 3 fix,
+	// mcphub-register-intent REVISE round 2). Previously this repair only ever
+	// ran (and was only ever visible) in apply mode, so a dry-run reconcile
+	// could never show an operator what orphaned serena workspaces the very
+	// next `--apply` was about to silently materialize. SerenaOrphansRepaired
+	// is the count APPENDED in apply mode, or the count that WOULD be appended
+	// in dry-run mode (identical classification either way — see
+	// PreviewSerenaIntentRepairFromRegistry's doc comment). SerenaOrphansDeferred
+	// names workspace keys whose orphan could not be repaired this pass (a
+	// first-introduce-crash guard or a legacy nil-spec row) — same meaning in
+	// both modes.
+	SerenaOrphansRepaired int      `json:"serena_orphans_repaired"`
+	SerenaOrphansDeferred []string `json:"serena_orphans_deferred,omitempty"`
 }
 
 // DriftEntry describes one (task_name, drift_class) pair the reconcile

@@ -819,3 +819,65 @@ func TestRepairSerenaIntentFromRegistry_PendingSerenaRemoval_SkippedNotReappende
 		t.Errorf("pending-removal key %q was appended (must be skipped)", pendingKey)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 13. Preview symmetry (BLOCKING 3 fix) — PreviewSerenaIntentRepairFromRegistry
+//     reports the SAME count/deferred-keys RepairSerenaIntentFromRegistry
+//     would act on, but NEVER writes supervisor-intent.json.
+// ---------------------------------------------------------------------------
+
+func TestPreviewSerenaIntentRepairFromRegistry_ReportsWithoutWriting(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	healthyPath, healthyPort := liveWorkspace(t), 9150
+	orphanPath, orphanPort := liveWorkspace(t), 9151
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	orphanKey := seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
+
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
+	})
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent before: %v", err)
+	}
+
+	wouldRepair, deferred, err := NewAPI().PreviewSerenaIntentRepairFromRegistry(mustStateDir(t))
+	if err != nil {
+		t.Fatalf("PreviewSerenaIntentRepairFromRegistry: unexpected error: %v", err)
+	}
+	if wouldRepair != 1 {
+		t.Errorf("wouldRepair = %d, want 1 (the orphan)", wouldRepair)
+	}
+	if len(deferred) != 0 {
+		t.Errorf("deferred = %v, want none", deferred)
+	}
+
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent after preview: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("preview WROTE supervisor-intent.json (must be read-only):\nbefore=%s\nafter=%s", before, after)
+	}
+	if got := readIntent(t, intentPath); got.HasSerenaDaemonForWorkspaceKey(orphanKey) {
+		t.Errorf("preview appended the orphan key %q (must never write)", orphanKey)
+	}
+
+	// A REAL repair afterward must still append it — the preview did not
+	// consume or otherwise disturb the orphan's eligibility.
+	repaired, deferred2, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	if err != nil {
+		t.Fatalf("RepairSerenaIntentFromRegistry after preview: unexpected error: %v", err)
+	}
+	if repaired != 1 {
+		t.Errorf("repaired after preview = %d, want 1", repaired)
+	}
+	if len(deferred2) != 0 {
+		t.Errorf("deferred after preview = %v, want none", deferred2)
+	}
+	if got := readIntent(t, intentPath); !got.HasSerenaDaemonForWorkspaceKey(orphanKey) {
+		t.Errorf("orphan key %q not appended by the real repair following a preview", orphanKey)
+	}
+}

@@ -91,6 +91,44 @@ type serenaIntentRepairEvent struct {
 // missing-set computation and the append commit see one consistent, race-free
 // snapshot and no concurrent write can interleave between our read and our write.
 func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, deferred []string, err error) {
+	return repairSerenaIntentFromRegistry(stateDir, true)
+}
+
+// PreviewSerenaIntentRepairFromRegistry computes the IDENTICAL classification
+// RepairSerenaIntentFromRegistry would act on — the same registry+intent
+// locks, the same orphan/deferred/skip rules, even the same manifest-shape
+// validation of the descriptors that would be appended — but NEVER writes
+// supervisor-intent.json and NEVER emits an audit event.
+//
+// This closes the "unpreviewed global side effect" gap (BLOCKING 3,
+// mcphub-register-intent REVISE round 2): before this existed, ONLY
+// apply-mode reconcile ever computed which orphaned serena registry rows
+// would be materialized, so a dry-run `mcphub reconcile` could never predict
+// what the very next `--apply` was about to silently do — including to
+// workspaces the dry-run caller never asked about. handleReconcile now calls
+// this in dry-run mode and RepairSerenaIntentFromRegistry (via the shared
+// commit=true path) in apply mode, surfacing the SAME count/deferred-keys
+// tuple in ReconcileResponse either way.
+//
+// Returns wouldRepair (the count of daemon rows a real --apply WOULD append —
+// computed via the SAME BuildSupervisorDaemonsForSerena call the commit path
+// uses, so a manifest-shape rejection here is the SAME failure --apply would
+// hit, never a preview that promises a count apply cannot actually deliver),
+// the same deferred-key semantics as the commit variant, and a nil error on
+// every benign outcome (lock contention, empty registry, etc.) exactly like
+// the commit variant.
+func (a *API) PreviewSerenaIntentRepairFromRegistry(stateDir string) (wouldRepair int, deferred []string, err error) {
+	return repairSerenaIntentFromRegistry(stateDir, false)
+}
+
+// repairSerenaIntentFromRegistry is the shared implementation behind
+// RepairSerenaIntentFromRegistry (commit=true, the pre-existing behavior —
+// used by the supervisor's own startup self-heal) and
+// PreviewSerenaIntentRepairFromRegistry (commit=false — used by dry-run
+// reconcile). commit=false skips ONLY the final write + audit-event steps;
+// every read, lock, and classification decision is identical, so the two
+// modes can never diverge on WHICH rows are orphaned/deferred/skipped.
+func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int, deferred []string, err error) {
 	// 1. Resolve the registry + intent paths. stateDir is the SUPERVISOR's already-
 	//    resolved state root, threaded in by the caller — NOT re-resolved via
 	//    DaemonStateDir() here. The cli stateDirFunc honors MCPHUB_STATE_DIR_OVERRIDE
@@ -111,8 +149,17 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 	// are held, then let the lock defers below run before this earlier defer emits
 	// them with TryEmit. This preserves startup's non-fatal repair contract even if
 	// the event-log lock is wedged.
+	//
+	// Preview (commit=false) NEVER flushes these: the audit log records ACTUAL
+	// repairs, not what-if projections, and a dry-run reconcile may be polled
+	// far more often than an apply — flushing "would repair" / "would skip"
+	// warnings on every poll would spam supervisor-events.log with events that
+	// describe nothing that actually happened.
 	var repairEvents []serenaIntentRepairEvent
 	defer func() {
+		if !commit {
+			return
+		}
 		for _, evt := range repairEvents {
 			emitSerenaIntentRepairEvent(stateDir, evt)
 		}
@@ -339,6 +386,15 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 		// manifest-shape gate inside BuildSupervisorDaemonsForSerena refused —
 		// fail loud rather than silently report zero repairs.
 		return 0, nil, fmt.Errorf("serena intent repair: dynamic-pool fan-out produced no daemons for %d missing serena row(s) %v (manifest shape rejected)", len(missing), missingWorkspaceKeys(missing))
+	}
+
+	if !commit {
+		// Preview: report the count a real --apply WOULD append, computed via the
+		// EXACT same BuildSupervisorDaemonsForSerena call the commit path uses
+		// (so a manifest-shape rejection surfaces here as the SAME error --apply
+		// would hit — never a count preview promises that --apply cannot
+		// actually deliver). Never write, never emit an audit event.
+		return len(newDaemons), deferredLegacy, nil
 	}
 
 	intent.Daemons = append(intent.Daemons, newDaemons...)

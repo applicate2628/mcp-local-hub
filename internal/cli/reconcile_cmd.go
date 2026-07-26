@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -111,6 +112,24 @@ func printReconcileTable(w io.Writer, resp api.ReconcileResponse) error {
 	if _, err := fmt.Fprintf(w, "mode: %s\ndrift entries: %d\napplied transitions: %d\n",
 		mode, resp.DriftCount, resp.AppliedCount); err != nil {
 		return err
+	}
+	// Serena orphan-repair preview/result (BLOCKING 3 fix): shown in BOTH
+	// modes so a dry-run reconcile predicts exactly what the next --apply
+	// would materialize, instead of hiding it as an apply-only side effect.
+	if resp.SerenaOrphansRepaired > 0 || len(resp.SerenaOrphansDeferred) > 0 {
+		verb := "would repair"
+		if !resp.DryRun {
+			verb = "repaired"
+		}
+		if _, err := fmt.Fprintf(w, "serena orphans %s: %d\n", verb, resp.SerenaOrphansRepaired); err != nil {
+			return err
+		}
+		if len(resp.SerenaOrphansDeferred) > 0 {
+			if _, err := fmt.Fprintf(w, "serena orphans deferred (run `mcphub migrate serena legacy-to-dynamic-pool`): %s\n",
+				strings.Join(resp.SerenaOrphansDeferred, ", ")); err != nil {
+				return err
+			}
+		}
 	}
 	if resp.DriftCount == 0 {
 		_, err := fmt.Fprintln(w, "no drift — scheduler state and intent are already aligned")

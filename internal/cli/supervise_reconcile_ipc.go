@@ -126,25 +126,45 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	ctx, cancel := context.WithTimeout(baseReconcileContext(deps), reconcileHandlerTimeout)
 	defer cancel()
 
-	// (0) Apply-mode-only serena registry/intent self-heal (the P1 fix this
-	// closes: `mcphub workspace register` used to commit a workspaces.yaml
-	// row and print success WITHOUT ever touching supervisor-intent.json — no
-	// daemon row, no reconcile, no spawn). RepairSerenaIntentFromRegistry
-	// re-converges any serena registry row not yet reflected in intent
-	// (an explicit register, or a crash between an auto-register Save and
-	// its install commit) by APPENDING the missing daemon row — it never
-	// replace-alls. Running it here, BEFORE the intent read at step (1) below,
-	// means THIS reconcile pass computes drift (and, in apply mode, spawns)
-	// against the now-complete intent in the SAME round trip that
-	// `mcphub workspace register` triggers via DialSupervisorIPCReconcile
-	// (apply=true). Scoped to apply mode only: a dry-run reconcile must not
-	// mutate state. Mirrors the supervisor's own startup self-heal
-	// (runSupervise, supervise.go) — same non-fatal contract, same shared
-	// audit-emission helper (emitSerenaIntentRepairOutcome): a repair error or
-	// a deferred introduce-crash never fails this reconcile request.
+	// (0) Serena registry/intent self-heal (the P1 fix this closes: `mcphub
+	// workspace register` used to commit a workspaces.yaml row and print
+	// success WITHOUT ever touching supervisor-intent.json — no daemon row, no
+	// reconcile, no spawn). RepairSerenaIntentFromRegistry re-converges any
+	// serena registry row not yet reflected in intent (an explicit register, or
+	// a crash between an auto-register Save and its install commit) by
+	// APPENDING the missing daemon row — it never replace-alls. Running it
+	// here, BEFORE the intent read at step (1) below, means an apply-mode pass
+	// computes drift (and spawns) against the now-complete intent in the SAME
+	// round trip that `mcphub workspace register` triggers via
+	// DialSupervisorIPCReconcile (apply=true). Mirrors the supervisor's own
+	// startup self-heal (runSupervise, supervise.go).
+	//
+	// BOTH modes now compute the SAME classification (mcphub-register-intent
+	// REVISE round 2, BLOCKING 3 fix): before this, ONLY apply mode ever
+	// computed which orphaned serena rows would be materialized, so a dry-run
+	// reconcile could never show an operator what the very next `--apply`
+	// (possibly for a completely unrelated reason — a plain `mcphub reconcile
+	// --apply`, `mcphub stop`, `mcphub restart`, ...) was about to silently
+	// materialize. Apply mode COMMITS the append (RepairSerenaIntentFromRegistry,
+	// unchanged behavior, still audited via emitSerenaIntentRepairOutcome);
+	// dry-run mode only PREVIEWS it (PreviewSerenaIntentRepairFromRegistry —
+	// read-only, never writes, never audited, since the event log records
+	// actual repairs and a dry-run preview describes nothing that happened). A
+	// repair/preview error or a deferred introduce-crash never fails this
+	// reconcile request either way.
+	var serenaRepaired int
+	var serenaDeferred []string
 	if args.Apply {
-		repaired, deferredKeys, rErr := api.NewAPI().RepairSerenaIntentFromRegistry(deps.stateDir)
-		emitSerenaIntentRepairOutcome(deps.events, repaired, deferredKeys, rErr)
+		var rErr error
+		serenaRepaired, serenaDeferred, rErr = api.NewAPI().RepairSerenaIntentFromRegistry(deps.stateDir)
+		emitSerenaIntentRepairOutcome(deps.events, serenaRepaired, serenaDeferred, rErr)
+	} else {
+		// Preview errors are deliberately swallowed (not surfaced in the
+		// response, not audited): a dry-run reconcile must never fail or
+		// mutate state just because the read-only preview hit a benign
+		// contention/manifest-shape condition the caller cannot act on from a
+		// dry-run anyway. The response fields simply stay at their zero value.
+		serenaRepaired, serenaDeferred, _ = api.NewAPI().PreviewSerenaIntentRepairFromRegistry(deps.stateDir)
 	}
 
 	// (1) Read supervisor-intent.json. Missing file is not a hard
@@ -428,10 +448,12 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 
 	// (9) Response.
 	resp := api.ReconcileResponse{
-		DryRun:       !args.Apply,
-		DriftCount:   len(drift),
-		AppliedCount: appliedCount,
-		Drift:        drift,
+		DryRun:                !args.Apply,
+		DriftCount:            len(drift),
+		AppliedCount:          appliedCount,
+		Drift:                 drift,
+		SerenaOrphansRepaired: serenaRepaired,
+		SerenaOrphansDeferred: serenaDeferred,
 	}
 	body, err := json.Marshal(resp)
 	if err != nil {
