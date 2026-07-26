@@ -993,8 +993,20 @@ func ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir string, now time.Tim
 // (it delegated to runEnsureAliveHeadlessFleet), false when the caller
 // should print its standard "undeterminable; no action" message because
 // escalation could not establish an unheld-and-confirmed flock this tick.
+//
+// Continuity (round 3 finding P1-1): this function is the ONLY place that
+// arms or checks the confirmation window, but it is called ONLY from the
+// guiOwnerStateUnknown branch below. An intervening guiOwnerStateAlive or
+// guiOwnerStateConfirmedDead tick therefore never runs this body at all —
+// which used to mean an Unknown -> Alive -> Unknown sequence REUSED the
+// first Unknown tick's already-stale timestamp on the second, treating an
+// interrupted observation as a continuous one. runEnsureAlive's caller now
+// resets the SAME marker (via resetGUIOwnerUnknownConfirmationMarker) on
+// every non-Unknown tick, so this function can keep assuming the window it
+// reads was opened by an UNINTERRUPTED run of Unknown observations.
 func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int) bool {
-	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+	markerPath := guiOwnerUnknownConfirmationMarkerPath(stateDir)
+	now := time.Now().UTC()
 
 	unheld, probeErr := guiOwnerLockUnheldProbeFn()
 	if probeErr != nil || !unheld {
@@ -1002,11 +1014,15 @@ func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, sup
 		// either way we cannot confirm death independently this tick. Clear
 		// any in-progress confirmation window: the condition must be
 		// observed WITHOUT interruption.
-		_ = os.Remove(markerPath)
+		if resetErr := resetGUIOwnerUnknownConfirmationMarker(markerPath, now); resetErr != nil {
+			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+				"gui-owner-unknown-confirmation-reset-failed",
+				"could not durably clear the GUI-owner-unknown confirmation marker after an interrupting (held/undeterminable) flock observation; a stale window could otherwise survive into a later tick",
+				map[string]any{"supervisor_pid": supervisorPID, "error": resetErr.Error()})
+		}
 		return false
 	}
 
-	now := time.Now().UTC()
 	firstObserved, readErr := readGUIOwnerUnknownConfirmationMarker(markerPath)
 	if readErr != nil || firstObserved.IsZero() {
 		// First observation (or a corrupt/missing marker — treated
@@ -1028,10 +1044,23 @@ func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, sup
 	}
 
 	// Confirmed: the flock has read unheld for longer than the bounded
-	// confirmation window. Clear the marker before delegating (every
-	// outcome below starts fresh on the next occurrence) and route through
-	// the SAME recovery path + suppressors the confirmed-dead branch uses.
-	_ = os.Remove(markerPath)
+	// confirmation window. Round 3 finding P1-1: the prior fix ignored this
+	// reset's error (`_ = os.Remove(markerPath)`), which meant a failed
+	// removal left the ALREADY-CONSUMED, already-elapsed timestamp on disk;
+	// the very next tick then re-read the SAME stale value as "still
+	// elapsed" and escalated AGAIN immediately — before the relaunch this
+	// tick is about to trigger could possibly have acquired the
+	// single-instance lock yet. Refusing to escalate when the reset cannot
+	// be durably performed closes that hazard structurally: this function
+	// never delegates to the (destructive, re-firing) headless-fleet
+	// relaunch without FIRST confirming the window has been consumed.
+	if resetErr := resetGUIOwnerUnknownConfirmationMarker(markerPath, now); resetErr != nil {
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+			"gui-owner-unknown-confirmation-consume-failed",
+			"could not durably reset the GUI-owner-unknown confirmation marker before escalating; refusing to relaunch this tick rather than risk an immediate re-arm before the relaunch can take hold",
+			map[string]any{"supervisor_pid": supervisorPID, "error": resetErr.Error()})
+		return false
+	}
 	emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo,
 		"gui-owner-unknown-escalated-to-recovery",
 		"GUI owner state was ambiguous (pidport malformed/unresolvable) but the single-instance lock was independently confirmed unheld across the bounded confirmation window; treating as confirmed-dead for recovery purposes",
@@ -1042,6 +1071,82 @@ func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, sup
 		})
 	runEnsureAliveHeadlessFleet(stateDir, out, supervisorPID, guiPID, guiPort)
 	return true
+}
+
+// guiOwnerUnknownConfirmationMarkerPath is the single owner of the
+// confirmation marker's on-disk path, shared by the escalation function
+// above and runEnsureAlive's non-Unknown reset call sites below.
+func guiOwnerUnknownConfirmationMarkerPath(stateDir string) string {
+	return filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+}
+
+// resetGUIOwnerUnknownConfirmationMarker clears the durable confirmation
+// marker. It tries a plain remove first — the normal case, leaving the
+// marker fully absent — and only if that fails for a reason OTHER than
+// "already absent" falls back to overwriting the marker with the CURRENT
+// time instead of silently leaving the stale value in place. The only
+// thing ever read from the marker is "how long has the window been open,"
+// so overwriting with `now` closes the same hazard a successful delete
+// would: the elapsed-time computation restarts either way. Returns a
+// non-nil error only when BOTH the remove and the fallback write failed,
+// i.e. the marker's prior (possibly stale/already-consumed) value could not
+// be disturbed at all — callers must treat that as "cannot safely proceed"
+// rather than silently ignoring it (round 3 finding P1-1: a previously
+// ignored removal failure left an already-consumed timestamp on disk that
+// the next tick misread as "still elapsed," re-arming before a just-fired
+// relaunch could have taken hold).
+func resetGUIOwnerUnknownConfirmationMarker(markerPath string, now time.Time) error {
+	return guiOwnerUnknownConfirmationResetFn(markerPath, now)
+}
+
+// guiOwnerUnknownConfirmationResetFn is the injectable reset SEAM (round 3
+// review fix), mirroring the guiServingProbeFn / guiOwnerLockUnheldProbeFn
+// pattern already used in this file. Production always resolves to
+// defaultResetGUIOwnerUnknownConfirmationMarker; a test substitutes a fake
+// that deterministically fails to prove the fail-closed "refuse to
+// escalate" behavior when the durable marker reset cannot be performed at
+// all — a filesystem-level failure injection (e.g. a read-only marker path)
+// would also break unrelated state-dir writes sharing the same directory
+// (e.g. supervisor-events.log), so this is a dedicated, surgical seam
+// instead. Production callers MUST NOT reassign this var directly —
+// setGUIOwnerUnknownConfirmationResetFnForTest is the only allowed write
+// path.
+var guiOwnerUnknownConfirmationResetFn = defaultResetGUIOwnerUnknownConfirmationMarker
+
+// setGUIOwnerUnknownConfirmationResetFnForTest installs a test reset
+// function. Returns an "uninstall" function tests defer to restore
+// production wiring. Only supervise_ensure_alive_test.go invokes this.
+func setGUIOwnerUnknownConfirmationResetFnForTest(fn func(string, time.Time) error) func() {
+	prev := guiOwnerUnknownConfirmationResetFn
+	guiOwnerUnknownConfirmationResetFn = fn
+	return func() { guiOwnerUnknownConfirmationResetFn = prev }
+}
+
+// defaultResetGUIOwnerUnknownConfirmationMarker is the production reset
+// implementation: try a plain remove first, and only if that fails for a
+// reason OTHER than "already absent" fall back to overwriting the marker
+// with the CURRENT time. See resetGUIOwnerUnknownConfirmationMarker's own
+// doc comment for the full rationale.
+func defaultResetGUIOwnerUnknownConfirmationMarker(markerPath string, now time.Time) error {
+	if err := os.Remove(markerPath); err == nil || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return writeGUIOwnerUnknownConfirmationMarker(markerPath, now)
+}
+
+// resetGUIOwnerUnknownConfirmationMarkerLogged is the non-Unknown-tick
+// convenience wrapper shared by runEnsureAlive's guiOwnerStateConfirmedDead
+// and guiOwnerStateAlive branches: best-effort reset (this is the SAFE
+// direction — erring toward suppressing a future escalation is never
+// harmful, unlike the fail-closed treatment at the escalation point
+// itself), logging rather than silently swallowing a failure.
+func resetGUIOwnerUnknownConfirmationMarkerLogged(stateDir string, supervisorPID int) {
+	if resetErr := resetGUIOwnerUnknownConfirmationMarker(guiOwnerUnknownConfirmationMarkerPath(stateDir), time.Now().UTC()); resetErr != nil {
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+			"gui-owner-unknown-confirmation-reset-failed",
+			"could not durably clear the GUI-owner-unknown confirmation marker after a non-Unknown GUI-owner observation; a stale window could otherwise survive into a later Unknown tick",
+			map[string]any{"supervisor_pid": supervisorPID, "error": resetErr.Error()})
+	}
 }
 
 // readGUIOwnerUnknownConfirmationMarker returns the zero time (not an error)
@@ -1160,6 +1265,13 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 		// ambiguous read.
 		switch guiState, guiPID, guiPort := guiOwnerAliveFn(); guiState {
 		case guiOwnerStateConfirmedDead:
+			// Round 3 finding P1-1: reset any in-progress Unknown
+			// confirmation window before recovering through the ordinary
+			// confirmed-dead path. Without this, an Unknown -> ConfirmedDead
+			// -> Unknown sequence would let a LATER Unknown tick reuse the
+			// FIRST Unknown tick's stale timestamp, since this classifier
+			// result never otherwise touches the marker.
+			resetGUIOwnerUnknownConfirmationMarkerLogged(stateDir, pid)
 			runEnsureAliveHeadlessFleet(stateDir, out, pid, guiPID, guiPort)
 			return nil
 		case guiOwnerStateUnknown:
@@ -1182,7 +1294,12 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 			return nil
 		}
 		// Common case (guiOwnerStateAlive): a supervisor holds the lock and
-		// a live GUI owner is present. No-op.
+		// a live GUI owner is present. No-op. Round 3 finding P1-1: reset
+		// any in-progress Unknown confirmation window here too — an
+		// Unknown -> Alive -> Unknown sequence must not let the later
+		// Unknown tick reuse the earlier one's stale timestamp; the window
+		// requires an UNINTERRUPTED run of Unknown observations.
+		resetGUIOwnerUnknownConfirmationMarkerLogged(stateDir, pid)
 		fmt.Fprintf(out, "ensure-alive: supervisor running (pid=%d); no action\n", pid)
 		return nil
 	}

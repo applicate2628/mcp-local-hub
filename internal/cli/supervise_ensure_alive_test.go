@@ -832,6 +832,244 @@ func TestEnsureAlive_HeadlessFleet_UnknownEscalatesAfterConfirmationWindow(t *te
 	assertSupervisorEvent(t, stateDir, "liveness-relaunched-gui-headless-fleet")
 }
 
+// TestEnsureAlive_HeadlessFleet_UnknownAliveUnknownDoesNotReuseStaleTimestamp
+// reproduces round-3 review finding P1-1 (residual 1, part 1): the
+// confirmation window is armed ONLY inside
+// runEnsureAliveGUIOwnerUnknownEscalation, which is called ONLY from the
+// guiOwnerStateUnknown branch. An intervening guiOwnerStateAlive tick used
+// to never touch the marker at all, so a later Unknown tick would reuse the
+// FIRST Unknown tick's already-old timestamp as though the window had been
+// open continuously — even though a live GUI owner was independently
+// observed in between. Confirmation must be continuous: it requires an
+// UNINTERRUPTED run of Unknown observations, reset by any other state.
+//
+// MUTATION: remove the resetGUIOwnerUnknownConfirmationMarkerLogged call
+// from runEnsureAlive's guiOwnerStateAlive branch (the "common case" no-op)
+// — this test's tick-3 "want 0 relaunches" assertion fails, because the
+// marker backdated before tick 2 is never cleared and looks (falsely)
+// already elapsed by tick 3.
+func TestEnsureAlive_HeadlessFleet_UnknownAliveUnknownDoesNotReuseStaleTimestamp(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+
+	restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
+	defer restoreLockProbe()
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+	restoreServingProbe := setGUIServingProbeFnForTest(func(int) bool { return true })
+	defer restoreServingProbe()
+
+	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+
+	// Tick 1: Unknown, flock unheld -- arms the marker (first observation).
+	unknownGUIOwnerState(t, 0, 0)
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("tick1 runEnsureAlive: %v", err)
+	}
+	if _, statErr := os.Stat(markerPath); statErr != nil {
+		t.Fatalf("tick1: expected the marker to be armed: %v", statErr)
+	}
+	// Backdate the armed marker to just short of the full window, so that a
+	// small additional elapsed time (test overhead across ticks 2 and 3) is
+	// enough to cross guiOwnerUnknownConfirmationWindow IF -- and only if --
+	// the intervening Alive tick fails to reset it.
+	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-guiOwnerUnknownConfirmationWindow+200*time.Millisecond)); err != nil {
+		t.Fatalf("backdate marker: %v", err)
+	}
+
+	// Tick 2: Alive -- must reset the marker.
+	liveGUIOwner(t, 4242, 9125)
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("tick2 runEnsureAlive: %v", err)
+	}
+	if _, statErr := os.Stat(markerPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("tick2: expected the confirmation marker to be cleared by the intervening Alive observation; stat err=%v", statErr)
+	}
+
+	// Tick 3: Unknown again, flock still unheld. Must NOT escalate -- the
+	// window must restart from THIS observation, not resume the pre-Alive
+	// window that tick 2 should have cleared.
+	unknownGUIOwnerState(t, 0, 0)
+	out3 := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out3); err != nil {
+		t.Fatalf("tick3 runEnsureAlive: %v", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Errorf("relaunch seam called %d times after an Unknown->Alive->Unknown sequence; want 0 (the intervening Alive tick must reset the window)", got)
+	}
+	if _, statErr := os.Stat(markerPath); statErr != nil {
+		t.Errorf("tick3: expected a FRESH marker to be armed (first observation of a new window): %v", statErr)
+	}
+}
+
+// TestEnsureAlive_HeadlessFleet_UnknownConfirmedDeadUnknownDoesNotReuseStaleTimestamp
+// is the guiOwnerStateConfirmedDead sibling of the Alive test above: an
+// Unknown -> ConfirmedDead -> Unknown sequence must ALSO reset the
+// confirmation window, since guiOwnerStateConfirmedDead is likewise a
+// non-Unknown observation that never otherwise touches the marker (it goes
+// straight to runEnsureAliveHeadlessFleet on its own path).
+//
+// MUTATION: remove the resetGUIOwnerUnknownConfirmationMarkerLogged call
+// from runEnsureAlive's guiOwnerStateConfirmedDead branch — this test's
+// tick-3 "want 0 additional relaunches" assertion fails.
+func TestEnsureAlive_HeadlessFleet_UnknownConfirmedDeadUnknownDoesNotReuseStaleTimestamp(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+
+	restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
+	defer restoreLockProbe()
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+	restoreServingProbe := setGUIServingProbeFnForTest(func(int) bool { return true })
+	defer restoreServingProbe()
+
+	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+
+	// Tick 1: Unknown, flock unheld -- arms the marker.
+	unknownGUIOwnerState(t, 0, 0)
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("tick1 runEnsureAlive: %v", err)
+	}
+	if _, statErr := os.Stat(markerPath); statErr != nil {
+		t.Fatalf("tick1: expected the marker to be armed: %v", statErr)
+	}
+	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-guiOwnerUnknownConfirmationWindow+200*time.Millisecond)); err != nil {
+		t.Fatalf("backdate marker: %v", err)
+	}
+
+	// Tick 2: ConfirmedDead -- relaunches once via its own direct path AND
+	// must reset the Unknown-confirmation marker.
+	noLiveGUIOwner(t)
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("tick2 runEnsureAlive: %v", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 1 {
+		t.Fatalf("tick2: relaunch seam called %d times on ConfirmedDead; want exactly 1", got)
+	}
+	if _, statErr := os.Stat(markerPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("tick2: expected the confirmation marker to be cleared by the ConfirmedDead observation; stat err=%v", statErr)
+	}
+
+	// Tick 3: Unknown again, flock still unheld. Must NOT escalate a SECOND
+	// time -- the window must restart from THIS observation.
+	unknownGUIOwnerState(t, 0, 0)
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("tick3 runEnsureAlive: %v", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 1 {
+		t.Errorf("relaunch seam called %d times after an Unknown->ConfirmedDead->Unknown sequence; want still exactly 1 (no additional escalation from the reused stale timestamp)", got)
+	}
+}
+
+// TestEnsureAlive_HeadlessFleet_UnknownEscalationRefusesWhenResetFails
+// reproduces round-3 review finding P1-1 (residual 1, part 2): "marker
+// deletion failures are ignored, and a successful relaunch can immediately
+// re-arm before lock acquisition (a second-tick probe reproduced the
+// re-arm)". Before this fix, the escalation branch swallowed
+// os.Remove's error unconditionally; if the removal (and this fix's
+// overwrite fallback) both failed, the stale, already-consumed timestamp
+// stayed on disk and the VERY NEXT tick re-read it as "still elapsed,"
+// re-escalating before the FIRST relaunch could possibly have taken hold.
+//
+// This test injects a reset failure via the dedicated seam (not a
+// filesystem-level trick, which would also break the unrelated
+// supervisor-events.log write in the SAME state dir) across THREE ticks:
+// the first two ticks must refuse to escalate (0 relaunches) while the
+// reset keeps failing, and once the injected failure clears, the third
+// tick must escalate EXACTLY once, proving the mechanism is not
+// permanently wedged by a transient reset failure.
+//
+// MUTATION: change the escalation branch back to
+// `_ = resetGUIOwnerUnknownConfirmationMarker(...)` (ignore the error) --
+// this test's tick-1/tick-2 "want 0 relaunches" assertions fail (the
+// relaunch fires despite the reset failing, and fires AGAIN on tick 2
+// before the first relaunch's target process could have acquired the
+// lock).
+func TestEnsureAlive_HeadlessFleet_UnknownEscalationRefusesWhenResetFails(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+
+	unknownGUIOwnerState(t, 0, 0)
+	restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
+	defer restoreLockProbe()
+
+	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
+		t.Fatalf("seed confirmation marker: %v", err)
+	}
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+	restoreServingProbe := setGUIServingProbeFnForTest(func(int) bool { return true })
+	defer restoreServingProbe()
+
+	injectedErr := errors.New("injected: marker reset unavailable this tick")
+	restoreReset := setGUIOwnerUnknownConfirmationResetFnForTest(func(string, time.Time) error { return injectedErr })
+
+	// Tick 1: window already elapsed, but the reset is injected to fail.
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("tick1 runEnsureAlive: %v", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Errorf("tick1: relaunch seam called %d times despite the marker reset failing; want 0 (refuse to escalate)", got)
+	}
+	assertSupervisorEvent(t, stateDir, "gui-owner-unknown-confirmation-consume-failed")
+
+	// Tick 2: STILL failing -- must still refuse, not merely "refuse once
+	// then leak through on the next attempt".
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("tick2 runEnsureAlive: %v", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Errorf("tick2: relaunch seam called %d times despite the marker reset STILL failing; want 0", got)
+	}
+
+	// Tick 3: the transient failure clears -- recovery must proceed exactly
+	// once now that the reset can be durably performed.
+	restoreReset()
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("tick3 runEnsureAlive: %v", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 1 {
+		t.Errorf("tick3: relaunch seam called %d times once the reset stopped failing; want exactly 1", got)
+	}
+	if _, statErr := os.Stat(markerPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("confirmation marker still present after a successful escalation; want it cleared")
+	}
+}
+
 // TestEnsureAlive_FreeLock_UnknownGUIOwnerState_UsesStandaloneRelaunch covers
 // the second P1-1 call site: the supervisor is DOWN (confirmed — the free
 // flock) and the GUI-owner probe is ambiguous. Recovery is still warranted
