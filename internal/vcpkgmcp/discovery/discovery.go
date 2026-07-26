@@ -29,7 +29,7 @@ import (
 	"runtime"
 	"strings"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // Rule names which discovery step produced a candidate. Closed enum.

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/discovery"
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/discovery"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 func testDeps() Deps {

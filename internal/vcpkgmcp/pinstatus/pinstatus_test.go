@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // --- fixture helpers --------------------------------------------------------

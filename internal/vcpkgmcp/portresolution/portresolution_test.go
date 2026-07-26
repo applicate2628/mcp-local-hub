@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // fakeDeps creates a testable Deps with in-memory filesystem simulation.

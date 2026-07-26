@@ -47,7 +47,7 @@ import (
 	"strings"
 	"time"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // Deps bounds every ambient input PinStatus reads (filesystem, the network

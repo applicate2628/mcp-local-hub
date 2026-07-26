@@ -1,0 +1,59 @@
+name: vcpkg
+description: "vcpkg/CMake diagnostics — build-failure triage, overlay-port resolution, pin status, patch order, CMake trace reading."
+kind: global
+transport: stdio-bridge
+command: mcphub
+base_args:
+  - vcpkg
+
+env: {}
+
+# vcpkg/CMake diagnostic MCP server: read-only tools for vcpkg build-failure
+# triage (vcpkg_last_failure), overlay-port precedence (vcpkg_port_resolution),
+# pin auditing against upstream remotes (vcpkg_pin_status), static patch-apply
+# ordering (vcpkg_patches_apply), CMake trace reading (vcpkg_cmake_trace), CMake
+# include-graph resolution (cmake_include_graph), and root discovery
+# (vcpkg_discover_root). No build is ever started by this server; a live build
+# invocation is explicitly out of scope. Build/install roots and overlay chains
+# are always taken as explicit tool parameters (or VCPKG_ROOT / manifest /
+# labelled-heuristic discovery reported back to the caller) — never guessed
+# from a hardcoded machine-specific path. Full tool contracts + behavioural
+# invariants: work-items/decisions/2026-07-25-vcpkg-mcp-tool-contracts.md.
+#
+# Previously this server shipped as a standalone cmd/vcpkg-mcp executable —
+# its own build artifact, hand-written client-config entries carrying a
+# machine-specific absolute binary path, unsupervised, absent from `mcphub
+# status`, and untouched by a hub upgrade. That placement regressed against
+# the pattern this repo already uses for every other in-house MCP server
+# (see servers/godbolt/manifest.yaml, which documents the identical migration
+# in the opposite direction) and was corrected before this branch's first PR.
+# Decision: work-items/decisions/2026-07-26-vcpkg-mcp-must-follow-the-in-hub-server-pattern.md.
+
+daemons:
+  - name: default
+    port: 9137
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: cursor
+    daemon: default
+    url_path: /mcp
+  - client: vscode
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: qwen-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false

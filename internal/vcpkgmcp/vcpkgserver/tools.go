@@ -7,13 +7,13 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/cmaketrace"
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/cmakewrap"
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/discovery"
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/lastfailure"
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/patchesapply"
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/pinstatus"
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/portresolution"
+	"mcp-local-hub/internal/vcpkgmcp/cmaketrace"
+	"mcp-local-hub/internal/vcpkgmcp/cmakewrap"
+	"mcp-local-hub/internal/vcpkgmcp/discovery"
+	"mcp-local-hub/internal/vcpkgmcp/lastfailure"
+	"mcp-local-hub/internal/vcpkgmcp/patchesapply"
+	"mcp-local-hub/internal/vcpkgmcp/pinstatus"
+	"mcp-local-hub/internal/vcpkgmcp/portresolution"
 )
 
 // registerTools mounts every increment-1 tool handler. Single registration

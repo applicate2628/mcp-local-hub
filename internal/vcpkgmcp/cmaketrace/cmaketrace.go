@@ -53,7 +53,7 @@ import (
 	"sort"
 	"strings"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // Reason is populated when Status == evidence.StatusUnknown and, for

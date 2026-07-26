@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
 	"mcp-local-hub/internal/cmakegraph"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // TestRunGraph_RealWalkTree wires the ACTUAL cmakegraph.WalkTree against a

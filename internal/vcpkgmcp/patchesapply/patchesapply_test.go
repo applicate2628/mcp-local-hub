@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // writeFixture creates a temp port directory with portfile.cmake plus any

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/discovery"
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/discovery"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // Deps bounds every ambient input LastFailure reads, mirroring the

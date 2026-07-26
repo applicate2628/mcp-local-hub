@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // wellFormedTrace is a fixture json-v1 trace covering: a version header, an

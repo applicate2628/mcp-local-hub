@@ -4,15 +4,22 @@
 // mcp.Server + mcp.StdioTransport, mcp.Tool with a hand-written
 // map[string]any InputSchema, and the same errResult/jsonResult shape).
 //
-// Unlike godbolt/perftools this package is NOT embedded as an mcphub
-// subcommand and carries no cobra wrapper — the vcpkg-mcp design
-// (work-items/decisions/2026-07-25-vcpkg-mcp-tool-contracts.md,
-// "Implementation shape") requires this binary stay strictly
-// self-contained: its own package tree, no dependency on hub internals
-// other than internal/cmakegraph, and no hub code may import it. Keeping
-// this package under cmd/vcpkg-mcp/internal/ (rather than the top-level
-// internal/ used by godbolt/perftools) is what makes extraction to a
-// standalone repo later a directory move rather than a rewrite.
+// Like godbolt/perftools this package is embedded as an `mcphub vcpkg`
+// subcommand (internal/vcpkgmcp.NewCommand, wired in internal/cli/root.go).
+// It previously shipped as a standalone `cmd/vcpkg-mcp` executable, deliberately
+// kept self-contained under cmd/vcpkg-mcp/internal/ so extraction to its own
+// repo would be a directory move. That placement regressed against the
+// project's own prior decision — servers/godbolt/manifest.yaml documents the
+// identical migration in the opposite direction (Python-per-session process ->
+// one hub-managed Go daemon) and names the exact costs the standalone shape
+// re-introduced (no build.sh coverage, hand-written client entries with
+// machine-specific absolute paths, no supervision, a process per client instead
+// of one shared daemon, no hub-upgrade coverage). Decision:
+// work-items/decisions/2026-07-26-vcpkg-mcp-must-follow-the-in-hub-server-pattern.md.
+// This package now lives under the top-level internal/ tree (internal/vcpkgmcp/vcpkgserver)
+// exactly like godbolt/perftools, and internal/vcpkgmcp/... has no dependency on
+// hub internals other than internal/cmakegraph — an ordinary internal-to-internal
+// import now that both sides live under internal/.
 package vcpkgserver
 
 import (

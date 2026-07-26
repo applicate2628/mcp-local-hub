@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // Args is the input contract for ResolvePort.

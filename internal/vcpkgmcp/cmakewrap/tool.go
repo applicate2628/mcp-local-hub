@@ -15,8 +15,8 @@ package cmakewrap
 import (
 	"strings"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
 	"mcp-local-hub/internal/cmakegraph"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // Reason is this WRAPPER's own closed enum — distinct from

@@ -9,6 +9,7 @@ import (
 	"mcp-local-hub/internal/lldb"
 	"mcp-local-hub/internal/oneapirun"
 	"mcp-local-hub/internal/perftools"
+	"mcp-local-hub/internal/vcpkgmcp"
 	"mcp-local-hub/internal/vtune"
 )
 
@@ -148,6 +149,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.`,
 		oneapirun.NewCommand(),
 		drmemory.NewCommand(),
 		vtune.NewCommand(),
+		vcpkgmcp.NewCommand(),
 	)
 
 	// cobra's auto-generated `help` and `completion` are available commands

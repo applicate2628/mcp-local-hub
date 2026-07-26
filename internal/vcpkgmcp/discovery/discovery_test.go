@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // fakeFileInfo is a minimal os.FileInfo for tests that never touch a real

@@ -29,7 +29,7 @@
 package lastfailure
 
 import (
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // Reason is populated only when Status == evidence.StatusUnknown. Closed enum.

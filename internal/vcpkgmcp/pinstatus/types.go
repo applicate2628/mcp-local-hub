@@ -3,7 +3,7 @@ package pinstatus
 import (
 	"time"
 
-	"mcp-local-hub/cmd/vcpkg-mcp/internal/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // Status aliases evidence.Status so callers of this package do not need a
