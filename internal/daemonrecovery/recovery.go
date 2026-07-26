@@ -736,8 +736,8 @@ func emitRecoverAuditEvent(stateDir string, event api.SupervisorEvent) {
 // no other callers once this file's one bounded pre-respawn attempt was
 // widened to track its worker). On a timeout it ALSO returns a
 // *api.PendingSupervisorEventEmit exposing the abandoned worker's eventual
-// completion, so queueIdempotentAuditFallback can await the SAME write
-// instead of enqueuing an independent duplicate.
+// completion, so queueIdempotentAuditFallback can check the SAME write
+// instead of ever enqueuing an independent duplicate.
 func emitRecoverAuditEventWithTimeoutTracked(stateDir string, event api.SupervisorEvent, timeout time.Duration) (*api.PendingSupervisorEventEmit, error) {
 	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
 	if err != nil {
@@ -747,43 +747,61 @@ func emitRecoverAuditEventWithTimeoutTracked(stateDir string, event api.Supervis
 	return logger.EmitWithTimeoutTracked(event, timeout)
 }
 
-// daemonRecoveryLateAuditGrace bounds how long the queued post-respawn
-// fallback (queueIdempotentAuditFallback) waits for an
-// EmitWithTimeoutTracked worker that was still running when its caller gave
-// up. A timeout from the shared event-log primitive does NOT mean the write
-// was lost — writeEventLine has no cancellable syscall surface, so the
-// abandoned worker keeps running and (usually) finishes shortly after.
-// Waiting here first — instead of firing an unconditional independent
-// duplicate write — is what makes this fallback idempotent against a
-// late-but-successful original write. Chosen well above the ordinary case
-// (a filesystem hiccup clearing within tens or a few hundred milliseconds)
-// while staying short enough that a GENUINELY wedged writer cannot delay
-// recovery's already-past-respawn completion for long.
-const daemonRecoveryLateAuditGrace = 2 * time.Second
-
-// queueIdempotentAuditFallback appends the ONE fallback closure that decides,
-// at post-respawn execution time, whether an independent duplicate write is
-// actually needed (residual 2 review fix). pending is non-nil only when the
-// preceding EmitWithTimeoutTracked call genuinely timed out with a worker
-// still in flight (never on an open/marshal failure, where there is nothing
-// to wait for).
+// queueIdempotentAuditFallback appends the ONE closure that decides, at
+// post-respawn execution time, whether a physical write is still needed for
+// committedAudit (round 3 consolidation of the residual-2 review fix). The
+// prior shape (round 2) waited a SECOND, independently-invented grace
+// window (daemonRecoveryLateAuditGrace, 2s) for the abandoned worker before
+// giving up and firing an unconditional duplicate write. That was flagged
+// PILED: two writers were enforcing the same audit outcome with no shared
+// commit protocol — reproduced both ways: releasing the stalled worker
+// after the grace window produced two rows for one event, and holding it
+// forever left the fallback's own unbounded blocking Emit call hung, so
+// recovery itself never returned.
 //
-//   - pending != nil: await the SAME abandoned worker (bounded by
-//     daemonRecoveryLateAuditGrace) before deciding. If it reports success
-//     (nil error) the original write already landed — return without
-//     writing again, so exactly one row exists. Only if the worker is
-//     STILL not done (or reports its own real error) does the fallback fire
-//     an independent write, same as before this fix.
-//   - pending == nil: nothing to await — the original attempt never even
-//     started (audit budget exhausted) or failed outright (log-open
-//     failure), so the independent write is the only copy and fires
-//     unconditionally, exactly as before this fix.
+// The fix folds the fallback into the ALREADY-tracked operation instead of
+// layering a second one. There is exactly one physical writer per event:
+//
+//   - pending == nil: no worker was ever spawned for this event — either
+//     the bounded attempt's own configured budget (the "outer deadline",
+//     deps.AuditEmitTimeout as bounded by boundedPortWaitBudget) was already
+//     exhausted before the call could even try, or the call failed before
+//     acquiring both locks (log-open/marshal failure). This closure is the
+//     ONLY possible writer, so it fires unconditionally — unchanged from
+//     round 2.
+//   - pending != nil: a worker IS already in flight holding both locks.
+//     writeEventLine has no cancellable syscall surface (round 2's own
+//     finding), so that worker is guaranteed to eventually finish this
+//     exact append on its own, independent of anything this closure does.
+//     A single NON-BLOCKING peek (Wait(0)) is enough to catch the case
+//     where it already landed in the sliver of time since the tracked call
+//     gave up. If it is still unsettled, this closure adds NO further wait
+//     of its own — the tracked call already spent the full outer deadline,
+//     so there is nothing left to wait for, and inventing a second wait
+//     here is exactly the piling this consolidation removes. The abandoned
+//     worker keeps running and commits the row whenever the stall clears;
+//     the only accepted residual is that a one-shot CLI process that exits
+//     immediately after recover returns can end this goroutine before that
+//     happens (an existing property of the abandon-and-hope design, not a
+//     new one — see EmitWithTimeoutTracked's own doc). Only a DEFINITE
+//     (non-timeout) failure from the worker — meaning the row is confirmed
+//     absent rather than merely unconfirmed — makes a fresh write from this
+//     closure legitimate rather than a race against an unknown outcome.
 func queueIdempotentAuditFallback(postCommitAudits *[]func(), stateDir string, audit api.SupervisorEvent, pending *api.PendingSupervisorEventEmit) {
 	*postCommitAudits = append(*postCommitAudits, func() {
 		if pending != nil {
-			if waitErr := pending.Wait(daemonRecoveryLateAuditGrace); waitErr == nil {
-				return // the original write landed while we waited — exactly one row.
+			switch waitErr := pending.Wait(0); {
+			case waitErr == nil:
+				return // the tracked worker's write already landed -- the one physical row exists.
+			case errors.Is(waitErr, api.ErrSupervisorEventEmitTimeout):
+				// Still unsettled, and by design not waited on further: see
+				// the doc comment above. Do NOT write again here.
+				return
 			}
+			// A genuine (non-timeout) write failure: the tracked attempt is
+			// DEFINITELY settled as failed (no row exists and none is
+			// coming from it), so writing once here is a fresh attempt, not
+			// a race against an unknown outcome.
 		}
 		emitRecoverAuditEvent(stateDir, audit)
 	})

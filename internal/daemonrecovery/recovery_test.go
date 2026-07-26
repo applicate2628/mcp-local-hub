@@ -1213,37 +1213,65 @@ func TestExecuteAlreadyExitedBlockingAuditCannotPreemptRespawn(t *testing.T) {
 	}
 }
 
-// TestExecuteLateAuditWorkerCompletionProducesExactlyOneRow reproduces
-// residual 2 (P1, review round 3): EmitWithTimeout's timeout does NOT mean
-// the abandoned worker's write was lost — writeEventLine has no cancellable
-// syscall surface, so a stalled worker often finishes shortly after its
-// caller gives up. Before this fix, daemon recovery treated ANY timeout as
-// license to queue an unconditional independent duplicate write; if the
-// original worker's write later landed, the log gained TWO identical rows
-// for the same recovery action.
+// recoveryStallAuditWrite installs a supervisor-event write function that
+// blocks every append until the returned release func is called, and
+// returns the stateDir-relative helper to read the log afterward. Shared by
+// the two round-3 consolidation tests below: both need a worker that is
+// genuinely spawned (holds both locks) and abandoned when the bounded
+// tracked call gives up — the pending != nil case queueIdempotentAuditFallback
+// exists for. This differs from TestExecuteBlockingPostCommitAuditCannotPreemptRespawn,
+// which holds the REAL flock externally so the flock-ACQUIRE attempt itself
+// times out and no worker is ever spawned (the pending == nil case).
+func recoveryStallAuditWrite(t *testing.T, stateDir string) (release func()) {
+	t.Helper()
+	block := make(chan struct{})
+	var once sync.Once
+	release = func() { once.Do(func() { close(block) }) }
+	restore := api.SetSupervisorEventWriteFnForTest(func(l *api.SupervisorEventLog, raw []byte) error {
+		<-block
+		f, ferr := os.OpenFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if ferr != nil {
+			return ferr
+		}
+		defer f.Close()
+		_, werr := f.Write(raw)
+		return werr
+	})
+	t.Cleanup(func() {
+		release()
+		restore()
+	})
+	return release
+}
+
+// TestExecuteDoesNotHangWhenAuditWorkerNeverSettles reproduces the SECOND
+// half of the round-3 "PILED" finding on residual 2: holding the stalled
+// worker's write open INDEFINITELY (never releasing it) proved recovery
+// itself never returned. The round-2 shape's fallback waited a bounded
+// grace for the tracked worker, but on timeout fell through to an
+// UNBOUNDED blocking Emit call — which then hung forever contending for
+// the same flock the abandoned worker still held, so ExecuteWithDependencies
+// never returned regardless of how long the test was willing to wait.
 //
-// Unlike TestExecuteBlockingPostCommitAuditCannotPreemptRespawn (which holds
-// the REAL flock externally, so the emit call's own flock-acquire attempt
-// times out and NO worker is ever spawned — the pending==nil case),
-// this test stalls the WRITE STEP ITSELF via
-// api.SetSupervisorEventWriteFnForTest, so a worker IS spawned, holds both
-// locks, and is abandoned when the bounded caller gives up — the pending!=nil
-// case this fix's idempotent fallback exists for.
+// The round-3 fix folds the fallback into the already-tracked operation:
+// once the tracked call's own bounded attempt (the "outer deadline") times
+// out, the post-respawn closure performs a single NON-BLOCKING peek and
+// adds no further wait of its own — so recovery returns promptly even
+// though the write is still stalled and never released within this test.
 //
-// MUTATION: revert the call site (internal/daemonrecovery/recovery.go) to
-// discard the pending handle — e.g. call emitRecoverAuditEventWithTimeout
-// (the pre-fix untracked sibling) instead of
-// emitRecoverAuditEventWithTimeoutTracked — this test's "exactly 1 row"
-// assertion fails once the stalled write is released (two rows land: the
-// original delayed write plus the fallback's unconditional independent
-// write).
-func TestExecuteLateAuditWorkerCompletionProducesExactlyOneRow(t *testing.T) {
+// MUTATION: reintroduce any additional blocking wait in
+// queueIdempotentAuditFallback's pending != nil branch (e.g. calling
+// pending.Wait with a nonzero timeout, or falling through to
+// emitRecoverAuditEvent's unconditional blocking Emit on a timeout) — this
+// test's bound on how long ExecuteWithDependencies may take fails because
+// the stalled worker (never released here) makes any such wait or fallback
+// write hang for the lifetime of the test.
+func TestExecuteDoesNotHangWhenAuditWorkerNeverSettles(t *testing.T) {
 	d := recoveryDescriptor()
 	const ownerPID = 44000
 	calls := &recoveryCallLog{}
 	deps := recoveryDependencies(t, calls, d)
-	const auditTimeout = 60 * time.Millisecond
-	deps.AuditEmitTimeout = auditTimeout
+	deps.AuditEmitTimeout = 60 * time.Millisecond
 	probeCount := 0
 	deps.PortOwner = func(context.Context, int) (int, bool, error) {
 		probeCount++
@@ -1257,28 +1285,9 @@ func TestExecuteLateAuditWorkerCompletionProducesExactlyOneRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state dir: %v", err)
 	}
-
-	// Stall the SHARED event-log write step (not flock acquisition): the
-	// worker goroutine spawned inside EmitWithTimeoutTracked acquires both
-	// locks, then blocks in this injected function until the test releases
-	// it — reproducing "the timeout fired but the original write is still
-	// in flight," not "the flock was externally contended" (the sibling
-	// test above already covers that case).
-	release := make(chan struct{})
-	var releaseOnce sync.Once
-	safeRelease := func() { releaseOnce.Do(func() { close(release) }) }
-	defer safeRelease()
-	restoreWrite := api.SetSupervisorEventWriteFnForTest(func(l *api.SupervisorEventLog, raw []byte) error {
-		<-release
-		f, ferr := os.OpenFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-		if ferr != nil {
-			return ferr
-		}
-		defer f.Close()
-		_, werr := f.Write(raw)
-		return werr
-	})
-	defer restoreWrite()
+	// Deliberately never released within this test: recovery must still
+	// return, proving the fold removed the unbounded second wait/write.
+	recoveryStallAuditWrite(t, stateDir)
 
 	respawnDispatched := make(chan struct{})
 	deps.Respawn = func(_ context.Context, task string, force bool) (api.RespawnResult, error) {
@@ -1299,31 +1308,108 @@ func TestExecuteLateAuditWorkerCompletionProducesExactlyOneRow(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("respawn was not dispatched while the audit write was stalled")
 	}
-	// Confirm recovery is still blocked (inside the post-respawn fallback's
-	// pending.Wait) rather than having already returned — proving the
-	// bounded wait, not an accidental fast-path, is what is exercised next.
-	select {
-	case executeErr := <-done:
-		t.Fatalf("recovery returned before the stalled write was released: %v", executeErr)
-	case <-time.After(150 * time.Millisecond):
-	}
-
-	releaseStart := time.Now()
-	safeRelease() // the "late worker release" this test's name refers to
-
 	select {
 	case executeErr := <-done:
 		if executeErr != nil {
 			t.Fatalf("ExecuteWithDependencies: %v", executeErr)
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("recovery did not finish after the stalled write was released")
+	case <-time.After(4 * time.Second):
+		t.Fatal("recovery did not return even though the stalled audit write was never released -- the fallback is hung")
 	}
-	if elapsed := time.Since(releaseStart); elapsed > daemonRecoveryLateAuditGrace {
-		t.Errorf("recovery took %s to finish after release, want well under the %s grace bound", elapsed, daemonRecoveryLateAuditGrace)
+}
+
+// TestExecuteLateAuditWorkerSettlingAfterReturnProducesExactlyOneRow
+// reproduces the FIRST half of the round-3 "PILED" finding on residual 2:
+// releasing the stalled worker AFTER the fallback's own grace window had
+// already expired produced TWO audit rows (the delayed original write, plus
+// the fallback's unconditional independent write) — two writers enforcing
+// one outcome with no shared commit protocol.
+//
+// This test releases the stalled write only AFTER ExecuteWithDependencies
+// has ALREADY returned (proving the fold removed the synchronous wait
+// entirely, not just shortened it), then polls the log for the row to land
+// asynchronously and asserts it lands EXACTLY once, never twice.
+//
+// MUTATION: revert queueIdempotentAuditFallback's pending != nil branch to
+// perform an unconditional emitRecoverAuditEvent call after any bounded (or
+// zero) wait — once the stalled write is released post-return, the original
+// worker's write lands in addition to the fallback's write, and the "exactly
+// 1 row" assertion below fails with 2.
+func TestExecuteLateAuditWorkerSettlingAfterReturnProducesExactlyOneRow(t *testing.T) {
+	d := recoveryDescriptor()
+	const ownerPID = 44000
+	calls := &recoveryCallLog{}
+	deps := recoveryDependencies(t, calls, d)
+	deps.AuditEmitTimeout = 60 * time.Millisecond
+	probeCount := 0
+	deps.PortOwner = func(context.Context, int) (int, bool, error) {
+		probeCount++
+		if probeCount <= 2 {
+			return ownerPID, true, nil
+		}
+		return 0, false, nil
 	}
 
-	raw, err := os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+	stateDir, err := deps.StateDir()
+	if err != nil {
+		t.Fatalf("state dir: %v", err)
+	}
+	release := recoveryStallAuditWrite(t, stateDir)
+
+	respawnDispatched := make(chan struct{})
+	deps.Respawn = func(_ context.Context, task string, force bool) (api.RespawnResult, error) {
+		calls.order = append(calls.order, "respawn")
+		calls.respawn = append(calls.respawn, respawnCall{task: task, force: force})
+		close(respawnDispatched)
+		return api.RespawnResult{Success: true}, nil
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, executeErr := ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps)
+		done <- executeErr
+	}()
+
+	select {
+	case <-respawnDispatched:
+	case <-time.After(time.Second):
+		t.Fatal("respawn was not dispatched while the audit write was stalled")
+	}
+	// Recovery must ALREADY have returned without waiting for the stalled
+	// write at all -- the fold removed the synchronous wait, so this is not
+	// a race: it must settle well before any old fixed grace window would
+	// have expired.
+	select {
+	case executeErr := <-done:
+		if executeErr != nil {
+			t.Fatalf("ExecuteWithDependencies: %v", executeErr)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("recovery did not return promptly even though the fold removed the synchronous wait for the stalled write")
+	}
+
+	// Only now -- well after recovery has returned -- let the original
+	// worker's write land, simulating (and exceeding) the round-2 repro's
+	// "released after the grace window expired" timing.
+	release()
+
+	var raw []byte
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		raw, err = os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+		if err == nil && strings.Count(string(raw), `"event":"daemon-port-squatter-reaped"`) >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("committed-kill audit row never landed after release; last read err=%v raw=%s", err, raw)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Give any (incorrect) second writer a further window to land before
+	// the final count -- otherwise a reintroduced duplicate could race
+	// past this check and the test would falsely report success.
+	time.Sleep(200 * time.Millisecond)
+	raw, err = os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
 	if err != nil {
 		t.Fatalf("read event log: %v", err)
 	}
