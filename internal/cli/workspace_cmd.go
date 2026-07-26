@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -249,7 +250,26 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	// releaseRegLock is called explicitly right after reg.Save() below (step
+	// 6), BEFORE the supervisor-materialization step (8) — never held across
+	// it. RepairSerenaIntentFromRegistry (invoked server-side, inside the
+	// running supervisor's handleReconcile, by the reconcile-apply call at
+	// step 8) takes its OWN registry flock with only a brief bounded retry
+	// (~250ms total, tryLockRegistryBrief); holding THIS command's lock
+	// across that call would starve it into a silent no-op on every single
+	// register — which was the concrete mechanism behind the P1 this fixes
+	// (see the commit message). The idempotent nil-guard makes the deferred
+	// call below a harmless no-op once the explicit release has run, and
+	// still unlocks on every early-return path before that point (mirrors
+	// the releaseUnlock idiom in registerOneLanguageSupervised,
+	// register_supervisor.go).
+	releaseRegLock := func() {
+		if unlock != nil {
+			unlock()
+			unlock = nil
+		}
+	}
+	defer releaseRegLock()
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -289,6 +309,9 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	if err := reg.Save(); err != nil {
 		return err
 	}
+	// Release the registry lock NOW — see the releaseRegLock doc comment at
+	// acquisition time (step 3) for why this must happen before step 8 below.
+	releaseRegLock()
 
 	// 6b. EXPLICIT serena register → bless this workspace's canonical root as a
 	//     trusted root (area-5 co-design — REGRESSION-SAFETY). This is the serena
@@ -327,6 +350,37 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 		}
 	}
 
+	// 8. Materialize the registration through the supervisor. Nudge an
+	//    apply-mode reconcile: the running supervisor's handleReconcile
+	//    self-heals any registry/intent split (RepairSerenaIntentFromRegistry,
+	//    called server-side) BEFORE computing drift — so THIS workspace's
+	//    just-committed registry row is appended to supervisor-intent.json
+	//    and reconciled in the same round trip.
+	//
+	//    This is the fix for the register/unregister asymmetry: unregister
+	//    already has a supervisor-materialization counterpart
+	//    (removeSerenaSupervisorIntentFn ->
+	//    RemoveSerenaSupervisorIntentForWorkspace), but register had none —
+	//    it only ever wrote workspaces.yaml and printed an unconditional
+	//    success, regardless of whether any daemon would ever spawn.
+	//
+	//    Gate the final success message on BOTH: the reconcile request being
+	//    acknowledged (no error) AND a spec-bearing supervisor-intent row
+	//    actually present for this workspace key afterward. Printing an
+	//    unqualified success without both would reproduce the exact defect
+	//    this fixes. On anything short of full success, KEEP the registry
+	//    row (it is a valid, durable registration — the supervisor's own
+	//    startup self-heal or a later `mcphub reconcile --apply` will still
+	//    pick it up) and report an explicit, actionable partial-state error
+	//    instead of rolling back.
+	reconcileCtx, cancel := context.WithTimeout(cmd.Context(), api.DefaultReconcileTimeout)
+	defer cancel()
+	_, reconcileErr := serenaRegisterReconcileFn(reconcileCtx, true)
+	materialized, checkErr := serenaRegisterIntentCheckFn(wsKey)
+	if reconcileErr != nil || checkErr != nil || !materialized {
+		return workspaceRegisterPartialStateError(canonical, wsKey, entry, reconcileErr, checkErr)
+	}
+
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"Registered serena workspace %s (key %s)\n  port: %d\n  task: %s\n  languages: %s\n",
 		canonical, wsKey, entry.Port, entry.TaskName, strings.Join(languages, ", "))
@@ -334,6 +388,82 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 		fmt.Fprintln(cmd.OutOrStdout(), "  default: yes")
 	}
 	return nil
+}
+
+// serenaRegisterReconcileFn is the test-injectable seam over the
+// post-register supervisor materialization nudge (step 8 above). Production:
+// api.DialSupervisorIPCReconcile with apply=true — mirrors the api-package
+// seam shape (registerSupervisorReconcileFn, internal/api/register_supervisor.go:18).
+// Tests stub this to avoid a live supervisor / IPC transport; a stub that
+// wants to faithfully model "the supervisor received the request and
+// self-healed" calls the real api.RepairSerenaIntentFromRegistry itself
+// before returning its canned response — see
+// TestWorkspaceRegisterSerena_LiveSupervisorMaterializesBeforeSuccess.
+var serenaRegisterReconcileFn = api.DialSupervisorIPCReconcile
+
+// serenaRegisterIntentCheckFn is the test-injectable seam that checks
+// whether a spec-bearing supervisor-intent daemon row exists for a serena
+// workspace key, called AFTER the reconcile-apply nudge (step 8 above) to
+// gate the final success message. Defaults to the named production function
+// below (rather than an inline closure) so a test that stubs it for one
+// scenario can restore the REAL check for another by referencing
+// realSerenaRegisterIntentCheck directly, instead of duplicating its body.
+var serenaRegisterIntentCheckFn = realSerenaRegisterIntentCheck
+
+// realSerenaRegisterIntentCheck is the production body of
+// serenaRegisterIntentCheckFn: it reads supervisor-intent.json fresh through
+// the single-owner predicate
+// (api.SupervisorIntentFile).HasSpecBearingSerenaDaemonForWorkspaceKey. A
+// missing intent file means "not yet materialized" (false, nil) rather than
+// an error — the caller already has an explicit reconcileErr to report when
+// the IPC call itself failed; this seam only answers the observable
+// after-the-fact question "is the daemon row there now".
+func realSerenaRegisterIntentCheck(wsKey string) (bool, error) {
+	intentPath, err := api.DefaultSupervisorIntentPath()
+	if err != nil {
+		return false, err
+	}
+	intent, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return intent.HasSpecBearingSerenaDaemonForWorkspaceKey(wsKey), nil
+}
+
+// workspaceRegisterPartialStateError builds the operator-facing error for a
+// serena register whose registry row is committed and KEPT, but whose
+// supervisor-intent daemon row is not (yet) confirmed spec-bearing. Per the
+// design this fixes: never print an unqualified success while the workspace
+// is unusable — either it converged, or the message says plainly what did
+// not happen and what to run next.
+func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.WorkspaceEntry, reconcileErr, checkErr error) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "workspace %s (key %s) is registered in workspaces.yaml (port %d, task %s), "+
+		"but no spec-bearing supervisor daemon row is confirmed yet — the registration was kept, "+
+		"nothing was rolled back.\n", canonical, wsKey, entry.Port, entry.TaskName)
+	switch {
+	case reconcileErr != nil && errors.Is(reconcileErr, api.ErrSupervisorIPCUnavailable):
+		b.WriteString("  reason: no supervisor is running. Start it with `mcphub supervise` " +
+			"(or wait for autostart) — the supervisor's own startup self-heal will pick up this " +
+			"registration automatically.\n")
+	case reconcileErr != nil:
+		fmt.Fprintf(&b, "  reason: the supervisor reconcile request failed: %v\n", reconcileErr)
+		b.WriteString("  next step: once the supervisor is healthy, run `mcphub reconcile --apply` " +
+			"to retry materializing this workspace.\n")
+	case checkErr != nil:
+		fmt.Fprintf(&b, "  reason: could not verify the supervisor intent afterward: %v\n", checkErr)
+	default:
+		b.WriteString("  reason: the supervisor acknowledged the reconcile request but reported no " +
+			"spec-bearing daemon row for this workspace yet — this happens when this is the FIRST " +
+			"serena workspace and the dynamic pool has not been introduced (run `mcphub migrate serena " +
+			"legacy-to-dynamic-pool`), or when the self-heal was skipped due to a momentarily contended " +
+			"lock (retry with `mcphub reconcile --apply`). Check supervisor-events.log for a " +
+			"`serena-intent-repair-*` entry naming the exact cause.\n")
+	}
+	return errors.New(b.String())
 }
 
 // serenaRegisterBlessTrustedRootFn is the explicit-serena-register bless seam

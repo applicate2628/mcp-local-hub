@@ -43,6 +43,19 @@ type reconcileTestFixture struct {
 func newReconcileTestFixture(t *testing.T, intent *api.SupervisorIntentFile) *reconcileTestFixture {
 	t.Helper()
 	tmpHome := apitest.HardenedTempDir(t)
+	// handleReconcile's apply-mode branch now calls
+	// RepairSerenaIntentFromRegistry(deps.stateDir), which resolves the
+	// WORKSPACE REGISTRY through api.DefaultRegistryPath() — a resolver
+	// that is completely independent of deps.stateDir and instead reads the
+	// LOCALAPPDATA (Windows) / XDG_STATE_HOME (POSIX) env vars directly.
+	// Without this redirect, EVERY apply-mode test using this fixture would
+	// silently touch the real developer's live workspaces.yaml (mkdir +
+	// lock-file create at minimum) the first time it runs on this machine —
+	// exactly the live-state-touch this fix must never cause. Point both env
+	// vars at the SAME tmpHome the fixture already uses for
+	// supervisor-intent.json so both resolvers agree.
+	t.Setenv("LOCALAPPDATA", tmpHome)
+	t.Setenv("XDG_STATE_HOME", tmpHome)
 	intentPath := filepath.Join(tmpHome, "supervisor-intent.json")
 	if intent == nil {
 		intent = &api.SupervisorIntentFile{Version: 1}
@@ -1199,13 +1212,17 @@ func TestReconcileIPC_SupervisorOwnedMissingTaskAppliesStart(t *testing.T) {
 	// The original form of this test hardcoded a REAL workspace path, so its
 	// verdict depended on the developer's live workspaces.yaml (it broke the
 	// moment that workspace's go row moved under the @serena sentinel).
-	// Redirect both env vars so every platform resolves the registry under a
-	// temp root, then seed the BACKING row the descriptor needs for the spawn
-	// direction to stay post_ev_intent_update under the gate.
-	regRoot := t.TempDir()
-	t.Setenv("LOCALAPPDATA", regRoot)
-	t.Setenv("XDG_STATE_HOME", regRoot)
-
+	//
+	// newReconcileTestFixture ITSELF now redirects LOCALAPPDATA/XDG_STATE_HOME
+	// to its own temp root (so handleReconcile's apply-mode serena self-heal —
+	// RepairSerenaIntentFromRegistry — never touches the developer's live
+	// workspaces.yaml either). Construct the fixture FIRST, then resolve
+	// api.DefaultRegistryPath() and seed the LSP row AFTER — this test used to
+	// set up its OWN redirect to a separate regRoot BEFORE the fixture
+	// existed, which the fixture's later t.Setenv silently overrode (both
+	// calls target the same env vars; the later one wins), leaving the seeded
+	// row unreachable at handler time. Seeding after the fixture keeps both
+	// redirects pointed at the SAME directory.
 	ws := t.TempDir()
 	canonical, err := api.CanonicalWorkspacePathForCleanup(ws)
 	if err != nil {
@@ -1213,6 +1230,23 @@ func TestReconcileIPC_SupervisorOwnedMissingTaskAppliesStart(t *testing.T) {
 	}
 	key := api.WorkspaceKey(canonical)
 	taskName := `\mcp-local-hub-lsp-` + key + `-go`
+
+	intent := &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{
+			{
+				TaskName:  taskName,
+				Server:    "mcp-language-server",
+				Daemon:    "lsp-" + key + "-go",
+				Command:   "mcphub",
+				Args:      []string{"daemon", "workspace-proxy", "--port", "9200", "--workspace", ws, "--language", "go"},
+				Workspace: ws,
+				Port:      9200,
+			},
+		},
+	}
+	fx := newReconcileTestFixture(t, intent)
+
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
 		t.Fatalf("registry path: %v", err)
@@ -1232,21 +1266,6 @@ func TestReconcileIPC_SupervisorOwnedMissingTaskAppliesStart(t *testing.T) {
 		t.Fatalf("save seeded registry: %v", serr)
 	}
 
-	intent := &api.SupervisorIntentFile{
-		Version: 1,
-		Daemons: []api.SupervisorDaemon{
-			{
-				TaskName:  taskName,
-				Server:    "mcp-language-server",
-				Daemon:    "lsp-" + key + "-go",
-				Command:   "mcphub",
-				Args:      []string{"daemon", "workspace-proxy", "--port", "9200", "--workspace", ws, "--language", "go"},
-				Workspace: ws,
-				Port:      9200,
-			},
-		},
-	}
-	fx := newReconcileTestFixture(t, intent)
 	installSchedulerListFake(t, []scheduler.TaskStatus{})
 
 	req := api.IPCRequest{

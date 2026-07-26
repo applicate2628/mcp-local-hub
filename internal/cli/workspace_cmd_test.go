@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -124,6 +125,30 @@ func withStateDir(t *testing.T) string {
 	if !strings.HasPrefix(stateDir, dir) {
 		t.Fatalf("stateDir %s not under tempDir %s — SetDaemonStateRootForTest seam broken", stateDir, dir)
 	}
+
+	// Default supervisor-materialization stubs. `mcphub workspace register`
+	// (step 8) now nudges the supervisor to reconcile-apply and gates its
+	// success message on the result — the fix for the P1 where register
+	// printed an unqualified success without ever touching
+	// supervisor-intent.json. Most existing register tests using this helper
+	// are NOT exercising that materialization gate; they need register to
+	// behave as if a live, healthy supervisor immediately reconciled and
+	// reported the spec-bearing row, so they keep testing what they always
+	// tested (allocation, bless, default-marker, idempotency, ...) without
+	// also having to stub supervisor IPC by hand. Tests that specifically
+	// exercise the new gate (TestWorkspaceRegisterSerena_*) override BOTH
+	// seams again AFTER calling withStateDir and restore via their own
+	// t.Cleanup — cleanup runs LIFO, so their override is in effect for
+	// their own duration and this default resumes afterward.
+	origReconcile := serenaRegisterReconcileFn
+	serenaRegisterReconcileFn = func(context.Context, bool) (api.ReconcileResponse, error) {
+		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}, nil
+	}
+	t.Cleanup(func() { serenaRegisterReconcileFn = origReconcile })
+	origIntentCheck := serenaRegisterIntentCheckFn
+	serenaRegisterIntentCheckFn = func(string) (bool, error) { return true, nil }
+	t.Cleanup(func() { serenaRegisterIntentCheckFn = origIntentCheck })
+
 	return dir
 }
 

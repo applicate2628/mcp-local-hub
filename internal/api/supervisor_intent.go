@@ -503,6 +503,31 @@ func (f *SupervisorIntentFile) HasSerenaDaemonForWorkspaceKey(key string) bool {
 	return false
 }
 
+// HasSpecBearingSerenaDaemonForWorkspaceKey reports whether this intent
+// carries a serena per-workspace daemon row for the given workspace key WITH
+// a non-nil RuntimeSpec — i.e. a row the reconciler will actually spawn. A
+// bare HasSerenaDaemonForWorkspaceKey match is NOT sufficient: a legacy
+// pre-redesign nil-RuntimeSpec serena row occupies the task name, but the
+// reconciler excludes it from the spawn-desired set
+// (internal/cli/supervise_reconcile.go), so it is not a live daemon.
+//
+// Single owner of this predicate (C1): RepairSerenaIntentFromRegistry
+// (serena_intent_repair.go) and the explicit `mcphub workspace register`
+// post-materialize success gate (internal/cli/workspace_cmd.go) both call
+// this rather than re-deriving the task-name-plus-spec check locally.
+func (f *SupervisorIntentFile) HasSpecBearingSerenaDaemonForWorkspaceKey(key string) bool {
+	if f == nil {
+		return false
+	}
+	want := "mcp-local-hub-serena-" + key
+	for i := range f.Daemons {
+		if strings.TrimPrefix(f.Daemons[i].TaskName, `\`) == want && f.Daemons[i].RuntimeSpec != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // StopsAsDaemonIntentFile returns the supervisor-intent stops sub-block
 // shaped as a *DaemonIntentFile so the existing IsActiveStop readers
 // consume it with NO change to their value shape. The returned file's

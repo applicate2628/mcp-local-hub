@@ -32,7 +32,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -222,7 +221,7 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 		// the task name but the reconciler EXCLUDES it from the spawn-desired set
 		// (supervise_reconcile.go:177), so it is not a live daemon.
 		switch {
-		case intentHasSpecBearingSerenaDaemonForWorkspaceKey(intent, ws.WorkspaceKey):
+		case intent.HasSpecBearingSerenaDaemonForWorkspaceKey(ws.WorkspaceKey):
 			// Healthy — a spec-bearing daemon already owns this workspace.
 			continue
 		case intent != nil && intent.HasSerenaDaemonForWorkspaceKey(ws.WorkspaceKey):
@@ -379,29 +378,6 @@ func tryLockRegistryBrief(reg *Registry) (func(), bool, error) {
 		}
 	}
 	return nil, false, nil
-}
-
-// intentHasSpecBearingSerenaDaemonForWorkspaceKey reports whether the intent has
-// a serena per-workspace daemon for key WITH a non-nil RuntimeSpec — i.e. a row
-// the reconciler will actually spawn. A task-name match alone (the cheaper
-// HasSerenaDaemonForWorkspaceKey) is NOT sufficient: a legacy pre-redesign
-// nil-RuntimeSpec serena row carries the task name but the reconciler EXCLUDES it
-// from the spawn-desired set (internal/cli/supervise_reconcile.go:177), so it is
-// not a live daemon. The match mirrors HasSerenaDaemonForWorkspaceKey
-// (supervisor_intent.go) — bare-or-leading-backslash task name — plus the spec
-// requirement.
-func intentHasSpecBearingSerenaDaemonForWorkspaceKey(intent *SupervisorIntentFile, key string) bool {
-	if intent == nil {
-		return false
-	}
-	want := "mcp-local-hub-serena-" + key
-	for i := range intent.Daemons {
-		d := intent.Daemons[i]
-		if strings.TrimPrefix(d.TaskName, `\`) == want && d.RuntimeSpec != nil {
-			return true
-		}
-	}
-	return false
 }
 
 // firstRuntimeSpecCommand returns the Command of the first daemon in the intent
