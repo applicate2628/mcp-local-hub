@@ -124,7 +124,15 @@ func pinStatusOne(portDir string, disableNetwork bool, fsys FS, remoteRefs remot
 		return res
 	}
 
-	parsed, ok := parsePortfile(string(data))
+	// VERSION is commonly supplied by the sibling vcpkg.json rather than a
+	// set() in the portfile. A missing or malformed manifest is not itself a
+	// parse failure: it only leaves ${VERSION} unresolved.
+	manifestPath := filepath.Join(portDir, "vcpkg.json")
+	manifest, manifestErr := fsys.ReadFile(manifestPath)
+	if manifestErr == nil {
+		res.Evidence.AddPath(manifestPath)
+	}
+	parsed, ok := parsePortfileWithManifest(string(data), manifest)
 	if !ok {
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonPortfileUnparsable
@@ -132,6 +140,19 @@ func pinStatusOne(portDir string, disableNetwork bool, fsys FS, remoteRefs remot
 	}
 	res.Remote = parsed.Remote
 	res.Pin = parsed.Pin
+	res.Candidates = parsed.Candidates
+	res.UnresolvedGuardVariable = parsed.UnresolvedGuardVariable
+
+	if parsed.UnresolvedGuardVariable != "" {
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonGuardUnresolvable
+		return res
+	}
+	if parsed.MultipleFetchCalls {
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonMultipleFetchCalls
+		return res
+	}
 
 	if parsed.Remote.Kind == RemoteDistfile || parsed.Remote.Kind == RemoteNone {
 		res.Status = evidence.StatusUnknown

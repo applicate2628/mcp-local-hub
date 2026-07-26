@@ -1,47 +1,58 @@
 package pinstatus
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 )
 
-// parsedPortfile is the internal result of textually scanning one
-// portfile.cmake for its source-acquisition call. This package NEVER
-// executes CMake (per the design doc ban on running untrusted build
-// scripts to answer a read-only question) — every field here comes from a
-// best-effort text scan, never evaluation.
+// This is a small, faithful mirror of patchesapply/lexer.go's CMake lexical
+// rules. Keep the two implementations aligned: bracket comments/arguments
+// have delimiter-matched closing brackets, bracket values are Raw, and a
+// quoted trailing-backslash newline is a continuation, not a token boundary.
+
+type statement struct {
+	Name string
+	Args string
+}
+
+type token struct {
+	Text   string
+	Quoted bool
+	Raw    bool
+}
+
+type argValue struct {
+	Text string
+	Raw  bool
+}
+
+type versionManifest struct {
+	Version       string `json:"version"`
+	VersionString string `json:"version-string"`
+	VersionDate   string `json:"version-date"`
+	VersionSemver string `json:"version-semver"`
+}
+
+// parsedPortfile is the internal result of textually scanning a portfile. It
+// never executes CMake; an unresolved guard is returned explicitly instead of
+// selecting a plausible-looking source call.
 type parsedPortfile struct {
-	Remote Remote
-	Pin    Pin
-	// HeadRef is vcpkg_from_github/vcpkg_from_git/vcpkg_from_gitlab's own
-	// optional HEAD_REF parameter — real vcpkg syntax whose documented
-	// purpose IS exactly this "is this port up to date" check: it names
-	// which branch to track for currency, overriding the remote's default
-	// branch. Empty when not supplied (or supplied as an unresolvable
-	// ${VARIABLE} — HEAD_REF is enrichment-only, so a failed resolution
-	// degrades to the default-branch fallback rather than failing the
-	// whole call).
-	HeadRef string
+	Remote                  Remote
+	Pin                     Pin
+	HeadRef                 string
+	Candidates              []FetchCandidate
+	UnresolvedGuardVariable string
+	MultipleFetchCalls      bool
 }
 
-// fetchFuncNames are the vcpkg source-acquisition helpers this package
-// recognizes, in no particular priority — findFetchCall picks whichever
-// occurs FIRST (leftmost) in the file. vcpkg_from_git is a strict textual
-// prefix of vcpkg_from_github/vcpkg_from_gitlab, so every lookup requires
-// the opening '(' (optionally preceded by whitespace) to immediately follow
-// the name — "vcpkg_from_github(" never matches the vcpkg_from_git pattern
-// because 'h' follows, not '(' or whitespace.
-var fetchFuncNames = []string{
-	"vcpkg_from_github",
-	"vcpkg_from_git",
-	"vcpkg_from_gitlab",
-	"vcpkg_download_distfile",
+var fetchFuncNames = map[string]bool{
+	"vcpkg_from_github":       true,
+	"vcpkg_from_git":          true,
+	"vcpkg_from_gitlab":       true,
+	"vcpkg_download_distfile": true,
 }
 
-// knownArgKeys are the CMake keyword arguments this package extracts from a
-// fetch call's argument block. Multi-value keys (PATCHES, URLS, SHA512) are
-// recognized only so the tokenizer can find the NEXT known key correctly;
-// this package never uses their values.
 var knownArgKeys = map[string]bool{
 	"REPO":                    true,
 	"REF":                     true,
@@ -61,184 +72,387 @@ var knownArgKeys = map[string]bool{
 var (
 	variableRefRE = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
 	commitHexRE   = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
-	// tagLikeRE is a heuristic ONLY — informational classification of a
-	// literal (non-variable, non-commit) REF as "looks like a version tag".
-	// It never drives the ok/unknown verdict, which always keys off
-	// isCommitHex(effectiveRef) or a live existence check, never this
-	// label. vcpkg portfiles cannot syntactically distinguish a tag name
-	// from a branch name, so this is best-effort metadata, not a claim.
-	tagLikeRE = regexp.MustCompile(`^v?[0-9]+(\.[0-9]+){1,3}`)
+	tagLikeRE     = regexp.MustCompile(`^v?[0-9]+(\.[0-9]+){1,3}`)
 )
 
-// isCommitHex reports whether ref is a literal 40-hex-character commit SHA
-// — the only shape this package compares against a remote tip with
-// confidence.
-func isCommitHex(ref string) bool { return commitHexRE.MatchString(ref) }
-
-// looksLikeTag is the heuristic described on tagLikeRE.
+func isCommitHex(ref string) bool  { return commitHexRE.MatchString(ref) }
 func looksLikeTag(ref string) bool { return tagLikeRE.MatchString(ref) }
 
-// stripComments removes '#'-to-end-of-line CMake comments outside quoted
-// strings, one line at a time, so neither the fetch-call finder nor the
-// set() variable scanner is confused by a commented-out example.
+// stripComments is retained for focused parser callers. Unlike the former
+// line-based implementation it recognizes bracket comments and keeps quoted
+// and bracket arguments intact. Newlines are preserved for diagnostic shape.
 func stripComments(content string) string {
-	lines := strings.Split(content, "\n")
-	for i, line := range lines {
-		inQuotes := false
-		for j := 0; j < len(line); j++ {
-			switch line[j] {
-			case '"':
-				inQuotes = !inQuotes
-			case '#':
-				if !inQuotes {
-					lines[i] = line[:j]
-					j = len(line) // break out of the inner loop
+	var out strings.Builder
+	for i := 0; i < len(content); {
+		switch content[i] {
+		case '#':
+			if eq, start, ok := matchBracketOpen(content, i+1); ok {
+				_, after, closed := findBracketClose(content, start, eq)
+				if !closed {
+					return out.String()
+				}
+				out.WriteString(strings.Map(func(r rune) rune {
+					if r == '\n' || r == '\r' {
+						return r
+					}
+					return ' '
+				}, content[i:after]))
+				i = after
+				continue
+			}
+			j := strings.IndexByte(content[i:], '\n')
+			if j < 0 {
+				return out.String()
+			}
+			out.WriteString(content[i : i+j+1])
+			i += j + 1
+		case '"':
+			end := skipQuoted(content, i)
+			out.WriteString(content[i:end])
+			i = end
+		case '[':
+			if eq, start, ok := matchBracketOpen(content, i); ok {
+				_, after, closed := findBracketClose(content, start, eq)
+				if closed {
+					out.WriteString(content[i:after])
+					i = after
+					continue
 				}
 			}
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-// findFetchCall locates the first (leftmost) recognized fetch call in
-// content and returns its function name plus the raw text between its
-// balanced parentheses. ok is false only when a recognized function NAME
-// was found but its parentheses never balance before EOF — a genuinely
-// malformed file this package's text-only parser cannot make sense of.
-func findFetchCall(content string) (name, argsBlock string, ok bool) {
-	bestIdx := -1
-	bestName := ""
-	for _, n := range fetchFuncNames {
-		re := regexp.MustCompile(`\b` + regexp.QuoteMeta(n) + `\s*\(`)
-		loc := re.FindStringIndex(content)
-		if loc == nil {
-			continue
-		}
-		if bestIdx == -1 || loc[0] < bestIdx {
-			bestIdx = loc[0]
-			bestName = n
-		}
-	}
-	if bestIdx == -1 {
-		// No recognized call at all — a legitimate metapackage/provider
-		// shape, reported by the caller as RemoteNone, not a parse failure.
-		return "", "", true
-	}
-
-	parenOffset := strings.Index(content[bestIdx:], "(")
-	if parenOffset == -1 {
-		return bestName, "", false
-	}
-	start := bestIdx + parenOffset + 1
-	depth := 1
-	for i := start; i < len(content); i++ {
-		switch content[i] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth == 0 {
-				return bestName, content[start:i], true
-			}
-		}
-	}
-	// Reached EOF without the parentheses ever balancing.
-	return bestName, "", false
-}
-
-// tokenizeArgs splits a fetch call's argument block on whitespace, treating
-// a double-quoted span (no escape handling needed for vcpkg's own portfile
-// conventions) as one token with the quotes stripped.
-func tokenizeArgs(block string) []string {
-	var tokens []string
-	var cur strings.Builder
-	inQuotes := false
-	flush := func() {
-		if cur.Len() > 0 {
-			tokens = append(tokens, cur.String())
-			cur.Reset()
-		}
-	}
-	for i := 0; i < len(block); i++ {
-		c := block[i]
-		switch {
-		case c == '"':
-			inQuotes = !inQuotes
-		case !inQuotes && (c == ' ' || c == '\t' || c == '\n' || c == '\r'):
-			flush()
-		default:
-			cur.WriteByte(c)
-		}
-	}
-	flush()
-	return tokens
-}
-
-// extractKeyedArgs walks tokens picking out KEY VALUE pairs for every key
-// in knownArgKeys. Only the first value token following a key is kept
-// (sufficient for every field this package reads — REPO/REF/URL/
-// GITLAB_URL/HEAD_REF/FETCH_REF are all single-value vcpkg parameters).
-func extractKeyedArgs(tokens []string) map[string]string {
-	out := map[string]string{}
-	for i := 0; i < len(tokens); i++ {
-		key := tokens[i]
-		if !knownArgKeys[key] {
-			continue
-		}
-		if i+1 < len(tokens) && !knownArgKeys[tokens[i+1]] {
-			out[key] = tokens[i+1]
+			out.WriteByte(content[i])
 			i++
-		} else {
-			out[key] = ""
+		default:
+			out.WriteByte(content[i])
+			i++
+		}
+	}
+	return out.String()
+}
+
+func splitStatementsChecked(src string) (out []statement, ok bool) {
+	i, n := 0, len(src)
+	for i < n {
+		switch {
+		case src[i] == '#':
+			if eq, start, bracket := matchBracketOpen(src, i+1); bracket {
+				_, after, closed := findBracketClose(src, start, eq)
+				if !closed {
+					return out, false
+				}
+				i = after
+				continue
+			}
+			if j := strings.IndexByte(src[i:], '\n'); j >= 0 {
+				i += j + 1
+			} else {
+				i = n
+			}
+		case src[i] == '"':
+			i = skipQuoted(src, i)
+		case src[i] == '[':
+			if eq, start, bracket := matchBracketOpen(src, i); bracket {
+				_, after, closed := findBracketClose(src, start, eq)
+				if !closed {
+					return out, false
+				}
+				i = after
+				continue
+			}
+			i++
+		case isIdentStart(src[i]):
+			nameStart := i
+			for i < n && isIdentByte(src[i]) {
+				i++
+			}
+			name := src[nameStart:i]
+			j := i
+			for j < n && isSpaceOrNL(src[j]) {
+				j++
+			}
+			if j >= n || src[j] != '(' {
+				i = j
+				continue
+			}
+			argStart, depth, k := j+1, 1, j+1
+			for k < n && depth > 0 {
+				switch {
+				case src[k] == '"':
+					k = skipQuoted(src, k)
+				case src[k] == '#':
+					if eq, start, bracket := matchBracketOpen(src, k+1); bracket {
+						_, after, closed := findBracketClose(src, start, eq)
+						if !closed {
+							return out, false
+						}
+						k = after
+					} else if lineEnd := strings.IndexByte(src[k:], '\n'); lineEnd >= 0 {
+						k += lineEnd + 1
+					} else {
+						k = n
+					}
+				case src[k] == '[':
+					if eq, start, bracket := matchBracketOpen(src, k); bracket {
+						_, after, closed := findBracketClose(src, start, eq)
+						if !closed {
+							return out, false
+						}
+						k = after
+					} else {
+						k++
+					}
+				case src[k] == '(':
+					depth++
+					k++
+				case src[k] == ')':
+					depth--
+					k++
+				default:
+					k++
+				}
+			}
+			if depth != 0 {
+				return out, false
+			}
+			out = append(out, statement{Name: name, Args: src[argStart : k-1]})
+			i = k
+		default:
+			i++
+		}
+	}
+	return out, true
+}
+
+func skipQuoted(src string, start int) int {
+	for i := start + 1; i < len(src); i++ {
+		if src[i] == '\\' && i+1 < len(src) {
+			i++
+			continue
+		}
+		if src[i] == '"' {
+			return i + 1
+		}
+	}
+	return len(src)
+}
+
+func matchBracketOpen(src string, at int) (equals, contentStart int, ok bool) {
+	if at >= len(src) || src[at] != '[' {
+		return 0, 0, false
+	}
+	p := at + 1
+	for p < len(src) && src[p] == '=' {
+		p++
+	}
+	if p >= len(src) || src[p] != '[' {
+		return 0, 0, false
+	}
+	return p - at - 1, p + 1, true
+}
+
+func findBracketClose(src string, contentStart, equals int) (contentEnd, afterClose int, ok bool) {
+	for p := contentStart; p < len(src); p++ {
+		if src[p] != ']' {
+			continue
+		}
+		q := p + 1
+		for e := 0; e < equals && q < len(src) && src[q] == '='; e++ {
+			q++
+		}
+		if q == p+1+equals && q < len(src) && src[q] == ']' {
+			return p, q + 1, true
+		}
+	}
+	return 0, 0, false
+}
+
+func isIdentStart(c byte) bool { return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
+func isIdentByte(c byte) bool  { return isIdentStart(c) || c >= '0' && c <= '9' }
+func isSpaceOrNL(c byte) bool  { return c == ' ' || c == '\t' || c == '\r' || c == '\n' }
+
+func tokenize(s string) []token {
+	var out []token
+	for i := 0; i < len(s); {
+		switch {
+		case isSpaceOrNL(s[i]):
+			i++
+		case s[i] == '#':
+			if eq, start, bracket := matchBracketOpen(s, i+1); bracket {
+				if _, after, closed := findBracketClose(s, start, eq); closed {
+					i = after
+					continue
+				}
+			}
+			if j := strings.IndexByte(s[i:], '\n'); j >= 0 {
+				i += j + 1
+			} else {
+				i = len(s)
+			}
+		case s[i] == '"':
+			end := skipQuoted(s, i)
+			out = append(out, token{Text: unescapeQuoted(s[i+1 : end-1]), Quoted: true})
+			i = end
+		case s[i] == '[':
+			if eq, start, bracket := matchBracketOpen(s, i); bracket {
+				if end, after, closed := findBracketClose(s, start, eq); closed {
+					out = append(out, token{Text: s[start:end], Quoted: true, Raw: true})
+					i = after
+					continue
+				}
+			}
+			fallthrough
+		default:
+			start := i
+			for i < len(s) && !isSpaceOrNL(s[i]) && s[i] != '"' && s[i] != '#' && s[i] != '(' && s[i] != ')' {
+				i++
+			}
+			if start != i {
+				out = append(out, token{Text: s[start:i]})
+			} else {
+				i++
+			}
 		}
 	}
 	return out
 }
 
-// resolveSetVariable searches content for a `set(<varName> <value>)` call
-// (optionally quoted value) and returns its literal value. This is a text
-// scan, never CMake evaluation — it deliberately does not handle nested
-// variable expansion, generator expressions, or conditional set() calls,
-// matching the design doc's ban on executing untrusted build scripts.
+func unescapeQuoted(s string) string {
+	if !strings.Contains(s, "\\") {
+		return s
+	}
+	var out strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != '\\' || i+1 >= len(s) {
+			out.WriteByte(s[i])
+			continue
+		}
+		next := s[i+1]
+		switch {
+		case next == '\n':
+			i++
+		case next == '\r' && i+2 < len(s) && s[i+2] == '\n':
+			i += 2
+		case next == 't':
+			out.WriteByte('\t')
+			i++
+		case next == 'r':
+			out.WriteByte('\r')
+			i++
+		case next == 'n':
+			out.WriteByte('\n')
+			i++
+		case next >= 'A' && next <= 'Z' || next >= 'a' && next <= 'z' || next >= '0' && next <= '9':
+			out.WriteByte(s[i])
+			out.WriteByte(next)
+			i++
+		default:
+			out.WriteByte(next)
+			i++
+		}
+	}
+	return out.String()
+}
+
+// tokenizeArgs remains the simple string view used by focused existing tests.
+func tokenizeArgs(block string) []string {
+	tokens := tokenize(block)
+	out := make([]string, len(tokens))
+	for i := range tokens {
+		out[i] = tokens[i].Text
+	}
+	return out
+}
+
+func extractKeyedArgValues(tokens []token) map[string]argValue {
+	out := map[string]argValue{}
+	for i := 0; i < len(tokens); i++ {
+		if !knownArgKeys[tokens[i].Text] {
+			continue
+		}
+		if i+1 < len(tokens) && !knownArgKeys[tokens[i+1].Text] {
+			out[tokens[i].Text] = argValue{Text: tokens[i+1].Text, Raw: tokens[i+1].Raw}
+			i++
+		} else {
+			out[tokens[i].Text] = argValue{}
+		}
+	}
+	return out
+}
+
+// extractKeyedArgs is retained as the string-only view for existing callers.
+func extractKeyedArgs(tokens []string) map[string]string {
+	wrapped := make([]token, len(tokens))
+	for i := range tokens {
+		wrapped[i].Text = tokens[i]
+	}
+	values := extractKeyedArgValues(wrapped)
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = value.Text
+	}
+	return out
+}
+
 func resolveSetVariable(content, varName string) (string, bool) {
-	re := regexp.MustCompile(`(?m)\bset\(\s*` + regexp.QuoteMeta(varName) + `\s+"?([^")\s]+)"?\s*\)`)
-	m := re.FindStringSubmatch(content)
-	if m == nil {
+	statements, ok := splitStatementsChecked(content)
+	if !ok {
 		return "", false
 	}
-	return m[1], true
+	for _, st := range statements {
+		if !strings.EqualFold(st.Name, "set") {
+			continue
+		}
+		tokens := tokenize(st.Args)
+		if len(tokens) >= 2 && tokens[0].Text == varName && !tokens[1].Raw {
+			return tokens[1].Text, true
+		}
+	}
+	return "", false
 }
 
-// resolveMaybeVariable resolves raw (a keyed-arg value) when it is a
-// ${VARIABLE} reference, via resolveSetVariable against content. wasVar
-// reports whether raw was syntactically a variable reference at all; ok
-// reports whether a usable literal value was ultimately obtained (false for
-// both an empty/absent raw value and a variable that failed to resolve).
-func resolveMaybeVariable(content, raw string) (value string, wasVar, ok bool) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+func resolveMaybeVariable(content string, raw argValue) (value string, wasVar, ok bool) {
+	text := strings.TrimSpace(raw.Text)
+	if text == "" {
 		return "", false, false
 	}
-	if m := variableRefRE.FindStringSubmatch(raw); m != nil {
-		val, found := resolveSetVariable(content, m[1])
-		return val, true, found
+	if !raw.Raw {
+		if m := variableRefRE.FindStringSubmatch(text); m != nil {
+			value, ok := resolveSetVariable(content, m[1])
+			return value, true, ok
+		}
 	}
-	return raw, false, true
+	return text, false, true
 }
 
-// buildPin classifies refRaw (the fetch call's REF argument value) into a
-// Pin, resolving a ${VARIABLE} reference via a local set() when needed.
-func buildPin(content, refRaw string) Pin {
-	refRaw = strings.TrimSpace(refRaw)
+func manifestVersion(data []byte) string {
+	var manifest versionManifest
+	if len(data) == 0 || json.Unmarshal(data, &manifest) != nil {
+		return ""
+	}
+	for _, value := range []string{manifest.Version, manifest.VersionString, manifest.VersionDate, manifest.VersionSemver} {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func buildPin(content string, manifest []byte, ref argValue) Pin {
+	refRaw := strings.TrimSpace(ref.Text)
 	if refRaw == "" {
 		return Pin{Shape: RefShapeNone}
 	}
-	if m := variableRefRE.FindStringSubmatch(refRaw); m != nil {
-		pin := Pin{Ref: refRaw, Shape: RefShapeVariableResolved}
-		if val, ok := resolveSetVariable(content, m[1]); ok {
-			pin.ResolvedRef = val
+	if !ref.Raw {
+		if m := variableRefRE.FindStringSubmatch(refRaw); m != nil {
+			pin := Pin{Ref: refRaw, Shape: RefShapeVariableResolved}
+			if value, ok := resolveSetVariable(content, m[1]); ok {
+				pin.ResolvedRef, pin.ResolvedFrom = value, RefValueSourceLocalSet
+			} else if m[1] == "VERSION" {
+				if value := manifestVersion(manifest); value != "" {
+					pin.ResolvedRef, pin.ResolvedFrom = value, RefValueSourceManifest
+				}
+			}
+			return pin
 		}
-		return pin
 	}
 	if isCommitHex(refRaw) {
 		return Pin{Ref: refRaw, Shape: RefShapeCommit40Hex}
@@ -249,76 +463,236 @@ func buildPin(content, refRaw string) Pin {
 	return Pin{Ref: refRaw, Shape: RefShapeBranch}
 }
 
-// parsePortfile textually scans data (a portfile.cmake's content) for one
-// recognized fetch call. ok is false only for a genuinely malformed file
-// (a recognized function name whose parentheses never balance) — every
-// other outcome, including "no fetch call found at all" (RemoteNone), is a
-// valid parse.
+func parseFetchCandidate(name, content string, manifest []byte, args string) FetchCandidate {
+	kv := extractKeyedArgValues(tokenize(args))
+	headRef, _, _ := resolveMaybeVariable(content, kv["HEAD_REF"])
+	candidate := FetchCandidate{HeadRef: headRef, BindsSourcePath: kv["OUT_SOURCE_PATH"].Text == "SOURCE_PATH"}
+	switch name {
+	case "vcpkg_download_distfile":
+		candidate.Remote = Remote{Kind: RemoteDistfile}
+	case "vcpkg_from_github":
+		repo, _, _ := resolveMaybeVariable(content, kv["REPO"])
+		candidate.Remote = Remote{Kind: RemoteGitHub, Repo: repo}
+		if repo != "" {
+			candidate.Remote.URL = "https://github.com/" + repo + ".git"
+		}
+		candidate.Pin = buildPin(content, manifest, kv["REF"])
+	case "vcpkg_from_git":
+		url, _, _ := resolveMaybeVariable(content, kv["URL"])
+		candidate.Remote = Remote{Kind: RemoteGit, URL: url}
+		candidate.Pin = buildPin(content, manifest, kv["REF"])
+	case "vcpkg_from_gitlab":
+		gitlabURL := "https://gitlab.com"
+		if strings.TrimSpace(kv["GITLAB_URL"].Text) != "" {
+			if value, _, ok := resolveMaybeVariable(content, kv["GITLAB_URL"]); ok {
+				gitlabURL = value
+			} else {
+				gitlabURL = ""
+			}
+		}
+		repo, _, _ := resolveMaybeVariable(content, kv["REPO"])
+		candidate.Remote = Remote{Kind: RemoteGitLab, Repo: repo}
+		if repo != "" && gitlabURL != "" {
+			candidate.Remote.URL = strings.TrimRight(gitlabURL, "/") + "/" + repo + ".git"
+		}
+		candidate.Pin = buildPin(content, manifest, kv["REF"])
+	}
+	return candidate
+}
+
+type guardState struct {
+	active  bool
+	unknown string
+	text    string
+}
+type conditionFrame struct {
+	parent       guardState
+	conditions   []string
+	priorTrue    bool
+	priorUnknown string
+}
+
+func defaultCondition(tokens []token) (truth bool, unresolved string) {
+	if len(tokens) == 0 {
+		return false, "condition"
+	}
+	not := false
+	if strings.EqualFold(tokens[0].Text, "NOT") {
+		not, tokens = true, tokens[1:]
+	}
+	if len(tokens) != 1 || tokens[0].Raw {
+		return false, "condition"
+	}
+	value := tokens[0].Text
+	var known bool
+	switch strings.ToUpper(value) {
+	case "VCPKG_USE_HEAD_VERSION":
+		known, truth = true, false
+	case "ON", "TRUE", "YES", "Y", "1":
+		known, truth = true, true
+	case "OFF", "FALSE", "NO", "N", "0", "", "IGNORE", "NOTFOUND":
+		known, truth = true, false
+	}
+	if !known {
+		return false, value
+	}
+	if not {
+		truth = !truth
+	}
+	return truth, ""
+}
+
+func conditionText(tokens []token) string {
+	parts := make([]string, len(tokens))
+	for i := range tokens {
+		parts[i] = tokens[i].Text
+	}
+	return strings.Join(parts, " ")
+}
+
+func negatedConditions(conditions []string) string {
+	parts := make([]string, 0, len(conditions))
+	for _, condition := range conditions {
+		parts = append(parts, "NOT ("+condition+")")
+	}
+	return strings.Join(parts, " AND ")
+}
+
+func joinGuards(parent, branch string) string {
+	if parent == "" {
+		return branch
+	}
+	if branch == "" {
+		return parent
+	}
+	return parent + " AND " + branch
+}
+
+func guardedState(parent guardState, active bool, unresolved, branch string) guardState {
+	text := joinGuards(parent.text, branch)
+	if !parent.active || !active {
+		return guardState{text: text}
+	}
+	if parent.unknown != "" {
+		unresolved = parent.unknown
+	}
+	return guardState{active: true, unknown: unresolved, text: text}
+}
+
+// parsePortfile preserves the original internal helper surface. Production
+// passes sibling manifest bytes through parsePortfileWithManifest.
 func parsePortfile(content string) (parsedPortfile, bool) {
-	clean := stripComments(content)
-	funcName, block, ok := findFetchCall(clean)
+	return parsePortfileWithManifest(content, nil)
+}
+
+func parsePortfileWithManifest(content string, manifest []byte) (parsedPortfile, bool) {
+	statements, ok := splitStatementsChecked(content)
 	if !ok {
 		return parsedPortfile{}, false
 	}
-	if funcName == "" {
+	state := guardState{active: true}
+	var stack []conditionFrame
+	var candidates []FetchCandidate
+	var viableCandidates []FetchCandidate
+	var unresolved string
+	for _, st := range statements {
+		switch strings.ToLower(st.Name) {
+		case "if":
+			tokens := tokenize(st.Args)
+			condition := conditionText(tokens)
+			truth, unknown := defaultCondition(tokens)
+			stack = append(stack, conditionFrame{parent: state, conditions: []string{condition}, priorTrue: unknown == "" && truth, priorUnknown: unknown})
+			state = guardedState(state, unknown != "" || truth, unknown, condition)
+		case "elseif":
+			if len(stack) == 0 {
+				return parsedPortfile{}, false
+			}
+			frame := &stack[len(stack)-1]
+			tokens := tokenize(st.Args)
+			condition := conditionText(tokens)
+			truth, unknown := defaultCondition(tokens)
+			branch := negatedConditions(frame.conditions)
+			if branch != "" {
+				branch += " AND "
+			}
+			branch += "(" + condition + ")"
+			state = guardedState(frame.parent, !frame.priorTrue && (unknown != "" || truth), firstNonEmpty(frame.priorUnknown, unknown), branch)
+			frame.conditions = append(frame.conditions, condition)
+			if unknown == "" && truth {
+				frame.priorTrue = true
+			}
+			if frame.priorUnknown == "" && unknown != "" {
+				frame.priorUnknown = unknown
+			}
+		case "else":
+			if len(stack) == 0 {
+				return parsedPortfile{}, false
+			}
+			frame := &stack[len(stack)-1]
+			state = guardedState(frame.parent, !frame.priorTrue, frame.priorUnknown, negatedConditions(frame.conditions))
+		case "endif":
+			if len(stack) == 0 {
+				return parsedPortfile{}, false
+			}
+			state = stack[len(stack)-1].parent
+			stack = stack[:len(stack)-1]
+		default:
+			if !fetchFuncNames[st.Name] {
+				continue
+			}
+			candidate := parseFetchCandidate(st.Name, content, manifest, st.Args)
+			candidate.GuardVariable = state.unknown
+			candidate.Guard = state.text
+			candidate.ActiveForDefault = state.active
+			candidates = append(candidates, candidate)
+			if !state.active {
+				continue
+			}
+			viableCandidates = append(viableCandidates, candidate)
+			if state.unknown != "" {
+				if unresolved == "" {
+					unresolved = state.unknown
+				}
+			}
+		}
+	}
+	if len(stack) != 0 {
+		return parsedPortfile{}, false
+	}
+	if len(candidates) == 0 {
 		return parsedPortfile{Remote: Remote{Kind: RemoteNone}}, true
 	}
-
-	tokens := tokenizeArgs(block)
-	kv := extractKeyedArgs(tokens)
-	headRef, _, _ := resolveMaybeVariable(clean, kv["HEAD_REF"])
-
-	switch funcName {
-	case "vcpkg_download_distfile":
-		return parsedPortfile{Remote: Remote{Kind: RemoteDistfile}}, true
-
-	case "vcpkg_from_github":
-		repo, _, _ := resolveMaybeVariable(clean, kv["REPO"])
-		remote := Remote{Kind: RemoteGitHub, Repo: repo}
-		if repo != "" {
-			remote.URL = "https://github.com/" + repo + ".git"
-		}
-		return parsedPortfile{
-			Remote:  remote,
-			Pin:     buildPin(clean, kv["REF"]),
-			HeadRef: headRef,
-		}, true
-
-	case "vcpkg_from_git":
-		url, _, _ := resolveMaybeVariable(clean, kv["URL"])
-		return parsedPortfile{
-			Remote:  Remote{Kind: RemoteGit, URL: url},
-			Pin:     buildPin(clean, kv["REF"]),
-			HeadRef: headRef,
-		}, true
-
-	case "vcpkg_from_gitlab":
-		// GITLAB_URL defaults to vcpkg's own documented "https://gitlab.com"
-		// ONLY when the field is genuinely absent. When it IS present but a
-		// ${VARIABLE} reference that fails to resolve, that is a real
-		// resolution failure, not "absent" — defaulting past it would
-		// silently point the query at the wrong host, so gitlabURL is left
-		// empty instead, which propagates to an empty Remote.URL below and
-		// is reported as portfile_unparsable by the caller.
-		var gitlabURL string
-		if strings.TrimSpace(kv["GITLAB_URL"]) == "" {
-			gitlabURL = "https://gitlab.com"
-		} else if val, _, ok := resolveMaybeVariable(clean, kv["GITLAB_URL"]); ok {
-			gitlabURL = val
-		}
-		repo, _, _ := resolveMaybeVariable(clean, kv["REPO"])
-		remote := Remote{Kind: RemoteGitLab, Repo: repo}
-		if repo != "" && gitlabURL != "" {
-			remote.URL = strings.TrimRight(gitlabURL, "/") + "/" + repo + ".git"
-		}
-		return parsedPortfile{
-			Remote:  remote,
-			Pin:     buildPin(clean, kv["REF"]),
-			HeadRef: headRef,
-		}, true
+	if len(viableCandidates) == 0 {
+		return parsedPortfile{Remote: Remote{Kind: RemoteNone}, Candidates: candidates}, true
 	}
+	if unresolved != "" {
+		return parsedPortfile{Candidates: candidates, UnresolvedGuardVariable: unresolved}, true
+	}
+	if len(viableCandidates) > 1 {
+		bound := -1
+		for i := range viableCandidates {
+			if viableCandidates[i].BindsSourcePath {
+				if bound >= 0 {
+					return parsedPortfile{Candidates: candidates, MultipleFetchCalls: true}, true
+				}
+				bound = i
+			}
+		}
+		if bound < 0 {
+			return parsedPortfile{Candidates: candidates, MultipleFetchCalls: true}, true
+		}
+		selected := viableCandidates[bound]
+		return parsedPortfile{Remote: selected.Remote, Pin: selected.Pin, HeadRef: selected.HeadRef, Candidates: candidates}, true
+	}
+	selected := viableCandidates[0]
+	return parsedPortfile{Remote: selected.Remote, Pin: selected.Pin, HeadRef: selected.HeadRef, Candidates: candidates}, true
+}
 
-	// Unreachable: funcName always matches one of fetchFuncNames, which is
-	// exactly the switch's case set.
-	return parsedPortfile{}, false
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

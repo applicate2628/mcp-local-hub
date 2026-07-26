@@ -53,6 +53,16 @@ const (
 	RefShapeNone RefShape = "none"
 )
 
+// RefValueSource records where a ${VARIABLE} REF was resolved. It is empty
+// for literal refs and unresolved variables, so consumers never mistake a
+// manifest-derived version for a portfile-local value.
+type RefValueSource string
+
+const (
+	RefValueSourceLocalSet RefValueSource = "local_set"
+	RefValueSourceManifest RefValueSource = "manifest"
+)
+
 // Reason is populated only when Status == evidence.StatusUnknown. Closed
 // enum. The task's minimum set (not_git_comparable, pin_not_at_tip,
 // ref_unresolvable, remote_query_failed, network_disabled,
@@ -98,6 +108,12 @@ const (
 	// executes CMake, so it can only ever report what its own textual scan
 	// found.
 	ReasonPortfileUnparsable Reason = "portfile_unparsable"
+	// ReasonGuardUnresolvable means source selection depends on a CMake guard
+	// this textual parser cannot decide for the default configuration.
+	ReasonGuardUnresolvable Reason = "guard_unresolvable"
+	// ReasonMultipleFetchCalls means several viable source-acquisition calls
+	// exist and none is explicitly bound to SOURCE_PATH.
+	ReasonMultipleFetchCalls Reason = "multiple_fetch_calls"
 )
 
 // Remote is the parsed remote source this port fetches from.
@@ -126,6 +142,23 @@ type Pin struct {
 	// caller sees ReasonRefUnresolvable in that case) or when Shape is not
 	// RefShapeVariableResolved.
 	ResolvedRef string `json:"resolved_ref,omitempty"`
+	// ResolvedFrom distinguishes a same-portfile set() from a sibling
+	// vcpkg.json version field when ResolvedRef is populated.
+	ResolvedFrom RefValueSource `json:"resolved_from,omitempty"`
+}
+
+// FetchCandidate records one recognized source-acquisition call. Candidates
+// include calls whose default guard is false so an operator can audit the
+// entire portfile; only ActiveForDefault candidates participate in source
+// selection and ambiguity decisions.
+type FetchCandidate struct {
+	Remote           Remote `json:"remote"`
+	Pin              Pin    `json:"pin"`
+	HeadRef          string `json:"head_ref,omitempty"`
+	Guard            string `json:"guard,omitempty"`
+	GuardVariable    string `json:"guard_variable,omitempty"`
+	ActiveForDefault bool   `json:"active_for_default"`
+	BindsSourcePath  bool   `json:"binds_source_path,omitempty"`
 }
 
 // PortResult is the vcpkg_pin_status answer for one port directory.
@@ -136,6 +169,12 @@ type PortResult struct {
 
 	Remote Remote `json:"remote"`
 	Pin    Pin    `json:"pin"`
+	// Candidates records every recognized fetch call and its guard. A false
+	// default guard is retained for auditability but cannot be selected.
+	Candidates []FetchCandidate `json:"candidates,omitempty"`
+	// UnresolvedGuardVariable names the CMake variable that prevented source
+	// selection when Reason is ReasonGuardUnresolvable.
+	UnresolvedGuardVariable string `json:"unresolved_guard_variable,omitempty"`
 
 	// PinnedSHA / TipSHA are populated only for the commit-shaped comparison
 	// path (Status==ok, or Status==unknown(pin_not_at_tip)) — both SHAs are

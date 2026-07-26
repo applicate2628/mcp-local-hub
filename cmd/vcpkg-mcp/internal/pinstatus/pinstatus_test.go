@@ -29,6 +29,13 @@ func newPort(t *testing.T, name, content string) string {
 	return dir
 }
 
+func writeManifest(t *testing.T, portDir, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(portDir, "vcpkg.json"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile vcpkg.json: %v", err)
+	}
+}
+
 // fakeRemote builds a remoteRefsFn that returns refsByRemote[remote] (or an
 // error when errsByRemote[remote] is set), and never touches the network —
 // this is the injectable seam every test in this file substitutes.
@@ -151,8 +158,174 @@ vcpkg_from_git(
 	if p.Pin.ResolvedRef != commitC {
 		t.Fatalf("pin.resolved_ref = %q, want %q", p.Pin.ResolvedRef, commitC)
 	}
+	if p.Pin.ResolvedFrom != RefValueSourceLocalSet {
+		t.Fatalf("pin.resolved_from = %q, want %q", p.Pin.ResolvedFrom, RefValueSourceLocalSet)
+	}
 	if p.Status != evidence.StatusOK {
 		t.Fatalf("status = %v reason = %v, want ok (resolved ref equals fake HEAD)", p.Status, p.Reason)
+	}
+}
+
+func TestVersionRefResolvedFromSiblingManifestFields(t *testing.T) {
+	fields := []struct {
+		name, json, version string
+	}{
+		{"version", `{"version":"4.2.2"}`, "4.2.2"},
+		{"version-string", `{"version-string":"4.2.2-string"}`, "4.2.2-string"},
+		{"version-date", `{"version-date":"2026-07-26"}`, "2026-07-26"},
+		{"version-semver", `{"version-semver":"4.2.2-beta.1"}`, "4.2.2-beta.1"},
+	}
+	for _, tc := range fields {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := newPort(t, "continuable", `
+vcpkg_from_github(REPO continuable/continuable REF "${VERSION}" SHA512 0)
+`)
+			writeManifest(t, dir, tc.json)
+			remote := "https://github.com/continuable/continuable.git"
+			deps := Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"refs/tags/" + tc.version: commitA}}, nil), Now: fixedNow()}
+
+			p := PinStatus(Args{PortDirs: []string{dir}}, deps).Ports[0]
+			if p.Status != evidence.StatusOK {
+				t.Fatalf("status=%v reason=%v, want current", p.Status, p.Reason)
+			}
+			if p.Pin.Ref != "${VERSION}" || p.Pin.ResolvedRef != tc.version || p.Pin.ResolvedFrom != RefValueSourceManifest {
+				t.Fatalf("pin = %+v, want manifest-resolved %q", p.Pin, tc.version)
+			}
+		})
+	}
+}
+
+func TestDefaultGuardChoosesSpeexdspReleaseDistfile(t *testing.T) {
+	dir := newPort(t, "speexdsp", `
+if(VCPKG_USE_HEAD_VERSION)
+    vcpkg_from_gitlab(GITLAB_URL "https://gitlab.xiph.org" REPO xiph/speexdsp REF master HEAD_REF master)
+else()
+    vcpkg_download_distfile(ARCHIVE URLS "http://downloads.xiph.org/releases/speex/speexdsp-1.2.1.tar.gz" SHA512 0)
+endif()
+`)
+	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(nil, nil), Now: fixedNow()}).Ports[0]
+	if p.Status != evidence.StatusUnknown || p.Reason != ReasonNotGitComparable || p.Remote.Kind != RemoteDistfile {
+		t.Fatalf("got status=%v reason=%v remote=%+v; want release distfile", p.Status, p.Reason, p.Remote)
+	}
+	if p.Remote.Repo == "xiph/speexdsp" || p.Remote.URL == "https://gitlab.xiph.org/xiph/speexdsp.git" {
+		t.Fatalf("default false guard must not select GitLab source: %+v", p.Remote)
+	}
+	if len(p.Candidates) != 2 {
+		t.Fatalf("candidates=%+v, want both guarded calls", p.Candidates)
+	}
+	if p.Candidates[0].Remote.Repo != "xiph/speexdsp" || p.Candidates[0].Guard != "VCPKG_USE_HEAD_VERSION" || p.Candidates[0].ActiveForDefault {
+		t.Fatalf("head candidate=%+v, want recorded false GitLab guard", p.Candidates[0])
+	}
+	if p.Candidates[1].Remote.Kind != RemoteDistfile || p.Candidates[1].Guard != "NOT (VCPKG_USE_HEAD_VERSION)" || !p.Candidates[1].ActiveForDefault {
+		t.Fatalf("release candidate=%+v, want recorded true release guard", p.Candidates[1])
+	}
+}
+
+func TestConditionalSourceRecordsNestedElseIfElseGuard(t *testing.T) {
+	dir := newPort(t, "guarded", `
+if(VCPKG_USE_HEAD_VERSION)
+  vcpkg_from_github(REPO example/head REF `+commitA+` SHA512 0)
+elseif(OFF)
+  vcpkg_from_github(REPO example/disabled REF `+commitA+` SHA512 0)
+else()
+  if(ON)
+    vcpkg_from_github(REPO example/release REF `+commitB+` SHA512 0)
+  endif()
+endif()
+`)
+	remote := "https://github.com/example/release.git"
+	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitB}}, nil), Now: fixedNow()}).Ports[0]
+	if p.Status != evidence.StatusOK || p.Remote.Repo != "example/release" {
+		t.Fatalf("status=%v reason=%v remote=%+v, want guarded release source", p.Status, p.Reason, p.Remote)
+	}
+	if len(p.Candidates) != 3 {
+		t.Fatalf("candidates=%+v, want every guarded source call", p.Candidates)
+	}
+	wantGuard := "NOT (VCPKG_USE_HEAD_VERSION) AND NOT (OFF) AND ON"
+	if p.Candidates[2].Guard != wantGuard || !p.Candidates[2].ActiveForDefault {
+		t.Fatalf("release candidate=%+v, want active guard %q", p.Candidates[2], wantGuard)
+	}
+}
+
+func TestUnresolvedGuardReturnsCandidatesRatherThanGuess(t *testing.T) {
+	dir := newPort(t, "conditional", `
+if(PORT_SOURCE_SWITCH)
+  vcpkg_from_github(REPO example/first REF `+commitA+` SHA512 0)
+else()
+  vcpkg_from_github(REPO example/second REF `+commitA+` SHA512 0)
+endif()
+`)
+	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(nil, nil), Now: fixedNow()}).Ports[0]
+	if p.Status != evidence.StatusUnknown || p.Reason != ReasonGuardUnresolvable || p.UnresolvedGuardVariable != "PORT_SOURCE_SWITCH" {
+		t.Fatalf("status=%v reason=%v variable=%q", p.Status, p.Reason, p.UnresolvedGuardVariable)
+	}
+	if len(p.Candidates) != 2 || p.Candidates[0].Remote.Repo != "example/first" || p.Candidates[1].Remote.Repo != "example/second" {
+		t.Fatalf("candidates = %+v, want both guarded forks", p.Candidates)
+	}
+}
+
+func TestMultipleFetchCallsSelectsSourcePathAndReportsAllCandidates(t *testing.T) {
+	dir := newPort(t, "cryptopp-cmake", `
+vcpkg_from_github(REPO abdes/cryptopp-cmake REF `+commitA+` SHA512 0)
+vcpkg_from_github(OUT_SOURCE_PATH SOURCE_PATH REPO weidai11/cryptopp REF `+commitB+` SHA512 0)
+`)
+	remote := "https://github.com/weidai11/cryptopp.git"
+	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitB}}, nil), Now: fixedNow()}).Ports[0]
+	if p.Status != evidence.StatusOK || p.Remote.Repo != "weidai11/cryptopp" {
+		t.Fatalf("status=%v reason=%v remote=%+v, want bound source", p.Status, p.Reason, p.Remote)
+	}
+	if len(p.Candidates) != 2 || p.Candidates[0].BindsSourcePath || !p.Candidates[1].BindsSourcePath {
+		t.Fatalf("candidates=%+v, want all calls and second source binding", p.Candidates)
+	}
+}
+
+func TestMultipleUnboundFetchCallsReturnUnknownWithAllCandidates(t *testing.T) {
+	dir := newPort(t, "multiple", `
+vcpkg_from_github(REPO example/first REF `+commitA+` SHA512 0)
+vcpkg_from_github(REPO example/second REF `+commitB+` SHA512 0)
+`)
+	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(nil, nil), Now: fixedNow()}).Ports[0]
+	if p.Status != evidence.StatusUnknown || p.Reason != ReasonMultipleFetchCalls {
+		t.Fatalf("status=%v reason=%v, want unknown/multiple_fetch_calls", p.Status, p.Reason)
+	}
+	if len(p.Candidates) != 2 || p.Candidates[0].Remote.Repo != "example/first" || p.Candidates[1].Remote.Repo != "example/second" {
+		t.Fatalf("candidates = %+v, want both unbound calls", p.Candidates)
+	}
+}
+
+func TestBracketCommentDecoyFetchIsInert(t *testing.T) {
+	dir := newPort(t, "commented", `
+#[[
+vcpkg_from_github(REPO decoy/never REF `+commitA+` SHA512 0)
+]]
+vcpkg_from_github(REPO real/source REF `+commitB+` SHA512 0)
+`)
+	remote := "https://github.com/real/source.git"
+	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitB}}, nil), Now: fixedNow()}).Ports[0]
+	if p.Status != evidence.StatusOK || p.Remote.Repo != "real/source" {
+		t.Fatalf("status=%v reason=%v remote=%+v, bracket-comment decoy was not inert", p.Status, p.Reason, p.Remote)
+	}
+}
+
+func TestEqualsBracketArgumentRetainsLiteralDoubleClose(t *testing.T) {
+	dir := newPort(t, "bracket", `
+set(VERSION "must-not-expand")
+vcpkg_from_github(REPO example/bracket REF [=[${VERSION}]]literal]=] SHA512 0)
+`)
+	ref := "${VERSION}]]literal"
+	remote := "https://github.com/example/bracket.git"
+	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"refs/tags/" + ref: commitA}}, nil), Now: fixedNow()}).Ports[0]
+	if p.Status != evidence.StatusOK || p.Pin.Ref != ref {
+		t.Fatalf("status=%v reason=%v pin=%+v, want bracket literal %q", p.Status, p.Reason, p.Pin, ref)
+	}
+}
+
+func TestQuotedArgumentContinuationJoinsLines(t *testing.T) {
+	dir := newPort(t, "continued", "\nvcpkg_from_github(REPO example/continued REF \"v1.\\\n2.3\" SHA512 0)\n")
+	remote := "https://github.com/example/continued.git"
+	p := PinStatus(Args{PortDirs: []string{dir}}, Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"refs/tags/v1.2.3": commitA}}, nil), Now: fixedNow()}).Ports[0]
+	if p.Status != evidence.StatusOK || p.Pin.Ref != "v1.2.3" {
+		t.Fatalf("status=%v reason=%v pin=%+v, want continued quoted REF", p.Status, p.Reason, p.Pin)
 	}
 }
 
@@ -403,6 +576,8 @@ func TestNoCodePathProducesBehind(t *testing.T) {
 		ReasonRemoteQueryFailed,
 		ReasonNetworkDisabled,
 		ReasonPortfileUnparsable,
+		ReasonGuardUnresolvable,
+		ReasonMultipleFetchCalls,
 	}
 	for _, r := range reasons {
 		if strings.Contains(strings.ToLower(string(r)), "behind") {
@@ -434,6 +609,13 @@ vcpkg_from_git(URL https://example.com/x/y.git REF ${MY_REF})`)
 	branchMissing := newPort(t, "branch-missing", `vcpkg_from_github(REPO a/branched REF gone SHA512 0)`)
 	unresolvable := newPort(t, "unresolvable2", `vcpkg_from_github(REPO a/unresolvable REF ${NOPE} SHA512 0)`)
 	queryErr := newPort(t, "query-err", `vcpkg_from_github(REPO a/errors REF `+commitA+` SHA512 0)`)
+	guardUnresolvable := newPort(t, "guard-unresolvable", `if(PORT_SWITCH)
+vcpkg_from_github(REPO a/first REF `+commitA+` SHA512 0)
+else()
+vcpkg_from_github(REPO a/second REF `+commitA+` SHA512 0)
+endif()`)
+	multipleFetch := newPort(t, "multiple-fetch", `vcpkg_from_github(REPO a/one REF `+commitA+` SHA512 0)
+vcpkg_from_github(REPO a/two REF `+commitB+` SHA512 0)`)
 
 	refs := map[string]map[string]string{
 		"https://github.com/a/b.git":        {"HEAD": commitA},
@@ -447,11 +629,11 @@ vcpkg_from_git(URL https://example.com/x/y.git REF ${MY_REF})`)
 	deps := Deps{FS: DefaultFS(), RemoteRefs: fakeRemote(refs, errs), Now: fixedNow()}
 
 	res := PinStatus(Args{PortDirs: []string{
-		ghEqual, ghDiff, gitVar, distfile, meta, tagFound, branchMissing, unresolvable, queryErr,
+		ghEqual, ghDiff, gitVar, distfile, meta, tagFound, branchMissing, unresolvable, queryErr, guardUnresolvable, multipleFetch,
 	}}, deps)
 
-	if len(res.Ports) != 9 {
-		t.Fatalf("got %d port results, want 9", len(res.Ports))
+	if len(res.Ports) != 11 {
+		t.Fatalf("got %d port results, want 11", len(res.Ports))
 	}
 
 	// Scrub harness-only fields before the substring scan: PortDir and
@@ -477,7 +659,7 @@ vcpkg_from_git(URL https://example.com/x/y.git REF ${MY_REF})`)
 	// Sanity: the diverged-commit port really did take the pin_not_at_tip
 	// path (proving this sweep actually exercises the comparison branch the
 	// "never behind" assertion is protecting, not just skipping past it).
-	found := false
+	found, foundGuard, foundMultiple := false, false, false
 	for _, p := range res.Ports {
 		if p.PortDir == ghDiff {
 			found = true
@@ -485,9 +667,18 @@ vcpkg_from_git(URL https://example.com/x/y.git REF ${MY_REF})`)
 				t.Fatalf("ghDiff reason = %v, want pin_not_at_tip", p.Reason)
 			}
 		}
+		if p.PortDir == guardUnresolvable && p.Reason == ReasonGuardUnresolvable {
+			foundGuard = true
+		}
+		if p.PortDir == multipleFetch && p.Reason == ReasonMultipleFetchCalls {
+			foundMultiple = true
+		}
 	}
 	if !found {
 		t.Fatalf("ghDiff result missing from batch")
+	}
+	if !foundGuard || !foundMultiple {
+		t.Fatalf("runtime sweep missed ambiguity branches: guard=%v multiple=%v", foundGuard, foundMultiple)
 	}
 }
 
