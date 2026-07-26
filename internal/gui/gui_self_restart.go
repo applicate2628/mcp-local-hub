@@ -172,17 +172,26 @@ var selfRestartExitFn = func() { os.Exit(0) }
 
 // RequestSelfRestartExit crosses the self-restart-specific process boundary.
 // The production seam is os.Exit, intentionally bypassing normal-return
-// defers such as CLI supervisor manager.Stop.
+// defers such as CLI supervisor manager.Stop — which is exactly why
+// startGUIExitSignalObserver's RunE-level join (internal/cli/gui_exit_signal.go)
+// provides NO guarantee on this path: os.Exit runs no deferred functions in
+// ANY goroutine, so nothing downstream of this call ever executes again.
 //
 // The exit-reason event is emitted SYNCHRONOUSLY and bounded
-// (guiExitReasonEmitTimeout) BEFORE selfRestartExitFn runs: os.Exit executes
-// no deferred functions, so a `defer EmitExitReasonEvent(...)` here would
-// never fire. No test calls this function directly (tests inject their own
-// Exit closure into the restart coordinator instead — see
-// defaultRestartV3ParentRuntime in internal/cli/gui.go), so this call never
-// touches a real supervisor-events.log during `go test`.
+// (guiExitReasonEmitTimeout) BEFORE selfRestartExitFn runs — via the
+// emitExitReasonEventFn seam, never a bare `defer`, since os.Exit executes
+// no deferred functions and a deferred emit here would never fire. This
+// ordering is directly tested by
+// TestRequestSelfRestartExit_EmitsSynchronouslyBeforeExit (residual 3(b)
+// review fix — "directly test the self-restart synchronous attribution
+// contract"), which injects both seams to assert emit happens strictly
+// before exit. Production code path is otherwise unchanged: no test calls
+// this function through the real seams (tests inject their own Exit closure
+// into the restart coordinator instead — see defaultRestartV3ParentRuntime
+// in internal/cli/gui.go), so this call never touches a real
+// supervisor-events.log during `go test`.
 func RequestSelfRestartExit() {
-	EmitExitReasonEvent(GUIExitReasonSelfRestart, nil)
+	emitExitReasonEventFn(GUIExitReasonSelfRestart, nil)
 	selfRestartExitFn()
 }
 

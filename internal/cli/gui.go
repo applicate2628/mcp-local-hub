@@ -484,39 +484,13 @@ activates the first window and exits 0.`,
 			// attribute the exit to sigint vs sigterm without rewriting
 			// NotifyContext itself.
 			//
-			// Runs in its own goroutine so a wedged event-log flock
-			// (bounded by guiExitReasonEmitTimeout) can never delay Ctrl-C
-			// responsiveness. P2-5 REVIEW FIX: the goroutine used to be
-			// fire-and-forget (best-effort, "outlives RunE only long enough
-			// for the process itself to exit") — a fast shutdown could
-			// therefore let the process exit before the goroutine's
-			// gui.EmitExitReasonEvent call ever ran, silently losing the
-			// attribution. It is now JOINED: exitReasonWG.Wait() below
-			// blocks (bounded — see awaitGUIExitSignalReason's doc) until
-			// the attribution attempt has completed or was correctly
-			// skipped, before this deferred cleanup — and therefore RunE
-			// itself — returns.
-			guiExitSignalCh := make(chan os.Signal, 1)
-			signal.Notify(guiExitSignalCh, syscall.SIGINT, syscall.SIGTERM)
-			var exitReasonWG sync.WaitGroup
-			exitReasonWG.Add(1)
-			go func() {
-				defer exitReasonWG.Done()
-				awaitGUIExitSignalReason(ctx, guiExitSignalCh, gui.EmitExitReasonEvent)
-			}()
-			defer func() {
-				// stop() FIRST and unconditionally: it guarantees ctx.Done()
-				// fires (idempotent — context.CancelFunc tolerates repeat
-				// calls) even when RunE is returning for a reason that never
-				// touched ctx itself (e.g. an early startup error before any
-				// signal/shutdown). Without this ordering,
-				// awaitGUIExitSignalReason could still be parked on its
-				// select with NEITHER branch ready, and Wait() below would
-				// hang forever instead of returning promptly.
-				stop()
-				signal.Stop(guiExitSignalCh)
-				exitReasonWG.Wait()
-			}()
+			// startGUIExitSignalObserver (gui_exit_signal.go) owns the
+			// observer goroutine + its join as one seam, so the wiring
+			// itself is unit-testable (residual 3(b) review fix — the
+			// inline Add/Done/Wait this replaced had NO regression guard:
+			// removing it left every existing test green).
+			stopExitSignalObserver := startGUIExitSignalObserver(ctx, stop, awaitGUIExitSignalReason, gui.EmitExitReasonEvent)
+			defer stopExitSignalObserver()
 
 			// Phase 5 Task 5.3: --reset-port is a state-dir operation
 			// (clears the persisted Port in hub-mcp.endpoint.json)

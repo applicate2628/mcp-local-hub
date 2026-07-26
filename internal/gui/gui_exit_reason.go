@@ -104,3 +104,15 @@ func emitExitReasonEventOnce(reason GUIExitReason, extra map[string]any) {
 func ResetExitReasonDedupForTest() {
 	exitReasonOnce = sync.Once{}
 }
+
+// emitExitReasonEventFn is the injectable SEAM for RequestSelfRestartExit's
+// synchronous attribution contract (residual 3(b) review fix — "directly
+// test the self-restart synchronous attribution contract"). Production
+// resolves to the package's own EmitExitReasonEvent; a test substitutes a
+// recording fake so RequestSelfRestartExit's call ORDER (emit strictly
+// before the os.Exit-bound seam) is directly assertable without touching a
+// real supervisor-events.log or a real process exit. Mirrors
+// selfRestartExitFn's sibling seam immediately above/below it in
+// gui_self_restart.go. Production callers MUST NOT reassign this var
+// directly.
+var emitExitReasonEventFn = EmitExitReasonEvent

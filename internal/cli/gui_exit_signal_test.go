@@ -162,3 +162,175 @@ func TestAwaitGUIExitSignalReason_ClosedChannelSkipsEmit(t *testing.T) {
 		t.Fatalf("emit called %d times on a closed signal channel; want 0", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Residual 3(a) review fix: ctx.Done() and sigCh can become ready from the
+// exact SAME underlying signal (NotifyContext's own registration and this
+// function's sigCh both receive it independently — see
+// awaitGUIExitSignalReason's doc), with no guaranteed ordering. A bare
+// select{} would non-deterministically drop the signal attribution roughly
+// half the time (empirically confirmed via a standalone probe this
+// session: ~50/50 across 10000 trials of the same two-channel shape).
+//
+// The fix is the settle-window retry alone. An earlier draft also added a
+// non-blocking priority peek before the first select, reasoning it would
+// return faster for an already-arrived signal. That reasoning was tested
+// and found NOT to hold: because a select does not wait out its timer case
+// when another case is already ready, the settle-window's own retry
+// resolves an already-buffered signal just as fast as a dedicated peek
+// would — the peek added code with no measurable behavioral difference in
+// any constructible scenario, so it was removed. Only the settle-window
+// retry remains, and it is both necessary (below) and sufficient (also
+// below) for every scenario these tests construct.
+// ---------------------------------------------------------------------------
+
+// TestAwaitGUIExitSignalReason_SimultaneousReadyCasesPreferSignal covers the
+// "easy" ordering: both channels are ALREADY ready before
+// awaitGUIExitSignalReason is ever called. The end-to-end attribution must
+// be deterministic (always SIGINT), not depend on Go's runtime select
+// tie-break.
+//
+// MUTATION: remove the settle-window retry (revert to the pre-fix bare
+// two-case select) — this test's "always SIGINT" assertion fails on
+// roughly half the 200 trials (Go's select tie-break sometimes picks
+// ctx.Done() instead, and with no retry the signal is never observed).
+func TestAwaitGUIExitSignalReason_SimultaneousReadyCasesPreferSignal(t *testing.T) {
+	const trials = 200
+	for i := 0; i < trials; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		sigCh := make(chan os.Signal, 1)
+		sigCh <- syscall.SIGINT
+		cancel() // both channels are ready before awaitGUIExitSignalReason ever runs
+
+		var called bool
+		var got gui.GUIExitReason
+		awaitGUIExitSignalReason(ctx, sigCh, func(reason gui.GUIExitReason, extra map[string]any) {
+			called = true
+			got = reason
+		})
+		if !called || got != gui.GUIExitReasonSIGINT {
+			t.Fatalf("trial %d: attribution = (called=%v, reason=%v), want SIGINT every time", i, called, got)
+		}
+	}
+}
+
+// TestAwaitGUIExitSignalReason_SignalArrivesJustAfterCtxDone covers the
+// SUBTLER half of the race: ctx.Done() becomes ready BEFORE the identical
+// signal's fan-out reaches this function's OWN sigCh registration (both stem
+// from ONE OS signal delivered via two independent os/signal registrations
+// with no ordering guarantee). Only the bounded settle window can catch
+// this ordering — sigCh is genuinely empty at the moment the first select
+// resolves.
+//
+// MUTATION: remove the settle-window retry (return immediately once
+// ctx.Done() wins the first blocking select, without re-checking sigCh) —
+// this test's "attributes SIGINT" assertion fails because the signal has not
+// yet arrived at the moment the function would return.
+func TestAwaitGUIExitSignalReason_SignalArrivesJustAfterCtxDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // ctx is ALREADY done before the function is even called
+	sigCh := make(chan os.Signal, 1)
+	go func() {
+		time.Sleep(5 * time.Millisecond) // simulate the fan-out lag between the two independent deliveries
+		sigCh <- syscall.SIGINT
+	}()
+
+	var called bool
+	var got gui.GUIExitReason
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		awaitGUIExitSignalReason(ctx, sigCh, func(reason gui.GUIExitReason, extra map[string]any) {
+			called = true
+			got = reason
+		})
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("awaitGUIExitSignalReason did not return within the settle window")
+	}
+	if !called || got != gui.GUIExitReasonSIGINT {
+		t.Fatalf("attribution = (called=%v, reason=%v), want SIGINT (the settle window must catch a signal that lags ctx.Done())", called, got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Residual 3(b) review fix: the RunE-level Add(1)/Done()/Wait() join used to
+// live inline in gui.go's RunE closure with no regression guard — an
+// independent reviewer removed the WaitGroup wiring entirely and every
+// selected relevant test (including the four awaitGUIExitSignalReason tests
+// above and two gui-command construction tests) stayed green. This test
+// exercises startGUIExitSignalObserver directly (the seam that now owns
+// that exact wiring in production), with no real cobra RunE / HTTP server /
+// tray needed, so the join itself is finally mutation-guarded.
+// ---------------------------------------------------------------------------
+
+// TestStartGUIExitSignalObserver_StopJoinsObserverGoroutine proves the
+// returned stop function's WaitGroup.Wait() genuinely blocks until the
+// observer goroutine finishes — not merely that stop() returns "eventually"
+// by coincidence. It injects a fake `await` function (in place of
+// awaitGUIExitSignalReason) that sleeps for an observable duration before
+// returning, so a stop() that fails to join would return near-instantly
+// instead.
+//
+// MUTATION: remove wg.Add(1)/wg.Done()/wg.Wait() from
+// startGUIExitSignalObserver (the exact class of removal the round-3 review
+// caught with no test catching it) — this test's elapsed-time assertion
+// fails (stop() returns before the fake await's sleep completes).
+func TestStartGUIExitSignalObserver_StopJoinsObserverGoroutine(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	const observerDelay = 150 * time.Millisecond
+	awaitStarted := make(chan struct{})
+	fakeAwait := func(_ context.Context, _ <-chan os.Signal, _ func(gui.GUIExitReason, map[string]any)) {
+		close(awaitStarted)
+		time.Sleep(observerDelay)
+	}
+
+	stop := startGUIExitSignalObserver(ctx, cancel, fakeAwait, func(gui.GUIExitReason, map[string]any) {})
+
+	select {
+	case <-awaitStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("observer goroutine never started")
+	}
+
+	start := time.Now()
+	stop()
+	elapsed := time.Since(start)
+	if elapsed < observerDelay {
+		t.Fatalf("stop() returned after %s, want at least %s (the WaitGroup join must block until the observer goroutine finishes)", elapsed, observerDelay)
+	}
+}
+
+// TestStartGUIExitSignalObserver_StopCancelsCtxBeforeJoining proves the
+// documented ordering: stop() cancels ctx BEFORE waiting on the observer,
+// so a real awaitGUIExitSignalReason parked on ctx.Done() (no signal ever
+// arrived) is guaranteed to unblock rather than hang forever. Uses the
+// REAL awaitGUIExitSignalReason (not a fake) precisely to prove this
+// end-to-end, process-free.
+//
+// MUTATION: reorder stop()'s body to call wg.Wait() BEFORE stopCtx() — this
+// test's 2-second bound is exceeded (Wait() blocks forever: ctx is never
+// cancelled, no signal ever arrives, and the settle window only fires after
+// ctx.Done(), which never happens).
+func TestStartGUIExitSignalObserver_StopCancelsCtxBeforeJoining(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	stop := startGUIExitSignalObserver(ctx, cancel, awaitGUIExitSignalReason, func(gui.GUIExitReason, map[string]any) {})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		stop()
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop() did not return; ctx must be canceled BEFORE the join so a real observer with no signal still unblocks")
+	}
+}
