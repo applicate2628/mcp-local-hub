@@ -784,6 +784,20 @@ const (
 	// restart-v3 handoff marker (which runEnsureAliveHeadlessFleet's own
 	// live-handoff suppressor already covers once escalation delegates to
 	// it below).
+	//
+	// DESIGN-HONESTY NOTE (round 3 review): this constant is the confirmation
+	// window's OWN duration, NOT the end-to-end recovery bound from the
+	// moment the GUI owner actually died. The liveness task samples on a
+	// ~1-min cadence (PT1M, internal/scheduler/scheduler_liveness_xml.go:29),
+	// so the FIRST Unknown+unheld observation that arms the marker can
+	// itself land up to ~1 tick (≈60s) after the real death, and — because
+	// the window is checked only at tick granularity, not continuously — the
+	// tick that first observes an elapsed span ≥90s lands roughly two tick
+	// intervals after arming (a single ~60s tick interval is short of the
+	// 90s window; the next one is not). Composed, actual wall-clock recovery
+	// time from the underlying GUI death to the completed relaunch typically
+	// spans multiple ~1-min tick intervals — commonly in the ~90-180s range,
+	// not a flat 90 seconds. Do not advertise this as "recovers within 90s."
 	guiOwnerUnknownConfirmationWindow = 90 * time.Second
 )
 
