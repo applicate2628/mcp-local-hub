@@ -849,6 +849,30 @@ migration. Codes 9 / 10 below survive (strict-mode + the generic
       until `mcphub strict-mode --recover` runs or operator deletes manually.
 ```
 
+**`mcphub reconcile --apply` exits non-zero on a failed serena self-heal.**
+Previously the supervisor's `RepairSerenaIntentFromRegistry` failure was written
+to the audit log and the IPC handler still returned a success frame, so the
+command reported an aligned fleet over a self-heal that had not run. The
+failure now rides back on `ReconcileResponse.SerenaRepairError`, is printed, and
+drops the alignment claim; `--apply` returns the `errSerenaRepairFailed`
+sentinel and therefore exits 1.
+
+This is an **operational-contract change**, deliberately in the fail-loud
+direction (a monitoring surface must not read a swallowed self-heal failure as a
+clean pass). Two boundaries kept intentionally:
+
+- **The IPC frame stays OK.** `stop` / `restart` dispatch an apply-reconcile
+  in-process via `DialSupervisorIPCReconcile`; failing the frame would block
+  them on an unrelated serena repair. They are unaffected by the exit-code
+  change because they never shell out to the CLI.
+- **`--dry-run` still exits 0.** A preview that could not obtain a verdict
+  reports that in its output rather than failing the command.
+
+Nothing in-repo shells out to `mcphub reconcile`, so no internal caller changes
+behavior — but an EXTERNAL script that runs `reconcile --apply` and checks `$?`
+will newly see a non-zero exit when the self-heal fails. That is the intended
+signal, not a regression.
+
 ### Migration journal layout + retention — REMOVED in v0.6 Phase F
 
 > **This entire mechanism is gone.** v0.6 Phase F deleted the
