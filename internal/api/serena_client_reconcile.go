@@ -306,6 +306,31 @@ type SerenaReconcileOpts struct {
 	// pruning (Backup semantics). Phase 4 supplies effectiveBackupKeepN().
 	BackupKeepN int
 
+	// OnBackupCaptured, when non-nil, is the caller's WRITE-AHEAD hook: it is
+	// invoked for each in-scope client immediately AFTER that client's
+	// pre-rewrite backup lands on disk and STRICTLY BEFORE its config is
+	// mutated, with the client name and the backup path.
+	//
+	// WHY IT EXISTS. The recovery record a caller persists for this run is
+	// what its rollback restores from, and a record written AFTER the
+	// mutations it protects has a window in which the mutation is committed
+	// and the record is not: successful client rewrites followed by a failed
+	// state-file write leave every rewritten client on the new endpoint while
+	// rollback refuses, because no record exists. Handing the caller the
+	// backup path before the mutation lets it close that window — it can make
+	// the record durable first, and only then allow the write.
+	//
+	// CONTRACT. A non-nil return ABORTS that client's rewrite: its config is
+	// NOT touched, and it is recorded as a Failed row (retryable, exactly like
+	// a backup or AddEntry failure). Prevention, not compensation, is the
+	// whole point — there is nothing to undo for a mutation that never
+	// happened. The hook is called at most once per client per run, is never
+	// called for a DryRun row (nothing is backed up or written), and MUST NOT
+	// mutate any client config itself.
+	//
+	// nil (every pre-existing caller) preserves the previous behavior exactly.
+	OnBackupCaptured func(client, backupPath string) error
+
 	// DryRun reports the intended rewrites without touching any config
 	// file. Discovery (pidport + ping) still runs so a dry-run surfaces the
 	// "start the GUI first" failure too.
@@ -323,9 +348,16 @@ var ErrSerenaReconcileGUINotLive = errors.New("serena client-reconcile: GUI not 
 // ErrSerenaReconcileGUINotLive: returned when SerenaReconcileOpts.Port is
 // set but the readiness ping against it fails. Kept as a distinct sentinel
 // (rather than reusing ErrSerenaReconcileGUINotLive) because its message
-// names the correct remediation — `mcphub route` / `mcphub supervise`, not
-// `mcphub gui` — for the mcp-front reconcile command's own fail-closed gate.
-var ErrSerenaReconcileRouteNotLive = errors.New("serena client-reconcile: mcp front route daemon not live (start `mcphub route` or `mcphub supervise` first); refusing to write a guessed router URL")
+// names the correct remediation — `mcphub supervise`, not `mcphub gui` — for
+// the mcp-front reconcile command's own fail-closed gate.
+//
+// The remediation names ONLY `mcphub supervise` on purpose. This is a
+// LIVENESS sentinel, and liveness alone is not sufficient for the cutover: a
+// hand-started `mcphub route` satisfies this probe while
+// AssertMCPFrontPortSupervisorOwned still (correctly) refuses the run,
+// because nothing would restart it. Advertising it here would send the
+// operator to a remedy that cannot make the command succeed.
+var ErrSerenaReconcileRouteNotLive = errors.New("serena client-reconcile: mcp front route daemon not live (start `mcphub supervise`, or enable autostart, so the supervisor spawns its built-in route daemon); refusing to write a guessed router URL")
 
 // ReconcileSerenaClientsToRouter rewrites each in-scope client's serena MCP
 // entry to the constant /serena/mcp router URL on the live GUI port, then
@@ -427,6 +459,22 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 				Server: serenaEntryName, Client: clientName, Err: berr.Error(),
 			})
 			continue
+		}
+
+		// 2b. WRITE-AHEAD hand-off. The backup now exists but the config is
+		//     still untouched, so this is the last instant at which the
+		//     caller's recovery record can be made durable while the mutation
+		//     is still preventable. A refusal here leaves the client exactly
+		//     as it was — the strongest possible compensation, since there is
+		//     nothing committed to compensate for.
+		if opts.OnBackupCaptured != nil {
+			if jerr := opts.OnBackupCaptured(clientName, backupPath); jerr != nil {
+				report.Failed = append(report.Failed, FailedMigration{
+					Server: serenaEntryName, Client: clientName,
+					Err: fmt.Sprintf("write-ahead recovery record: %v (this client's config was NOT modified)", jerr),
+				})
+				continue
+			}
 		}
 
 		// 3. Router rewrite. On failure, DO NOT remove the legacy entry —

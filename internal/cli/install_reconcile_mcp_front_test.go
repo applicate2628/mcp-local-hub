@@ -23,8 +23,107 @@ import (
 
 	"mcp-local-hub/internal/api"
 
+	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
 )
+
+// seedSupervisorOwnedRoutePort makes the SUPERVISOR-OWNERSHIP gate
+// (api.AssertMCPFrontPortSupervisorOwned) pass for port, by materializing the
+// state a real supervised front daemon would have produced.
+//
+// It does NOT stub the gate out. Every step of the gate runs its production
+// code here: the supervisor-lock probe takes a real flock (held for the
+// duration of the test, which is exactly what a live supervisor does), the
+// canonical descriptor is read out of a real supervisor-intent.json, the
+// runtime row out of a real supervisor-state.json, and the PID liveness check
+// runs against a genuinely-live PID (this test process). Only the two OS
+// primitives that cannot be satisfied in-process — "who owns this loopback
+// socket" and "what image is that PID" — are injected, and they are injected
+// TRUTHFULLY: the test binary really is the process holding the port that
+// startTestRouteServer bound.
+//
+// That distinction is the whole point. A helper that disabled the gate would
+// let every forward test pass while proving nothing about ownership; this one
+// leaves the gate armed, so the refusal test
+// (TestMCPFrontOwnership_ForwardRefusesUnsupervisedRouteListener) exercises
+// the same code path with one fact changed.
+// seededSupervisorLock holds the flock seedSupervisorOwnedRoutePort took, so
+// a test can release it mid-run to simulate "no supervisor is running".
+// Package-level rather than returned because every existing call site wants
+// only the seeding side effect; these tests never run in parallel.
+var seededSupervisorLock *flock.Flock
+
+// releaseSeededSupervisorLock drops the supervisor-liveness evidence the seed
+// installed, turning a fully-supervised host into one where the route listener
+// is running with no supervisor behind it — the standalone `mcphub route`
+// case finding 3 is about.
+func releaseSeededSupervisorLock(t *testing.T) {
+	t.Helper()
+	if seededSupervisorLock == nil {
+		t.Fatalf("no seeded supervisor lock to release")
+	}
+	if err := seededSupervisorLock.Unlock(); err != nil {
+		t.Fatalf("release seeded supervisor lock: %v", err)
+	}
+	seededSupervisorLock = nil
+}
+
+func seedSupervisorOwnedRoutePort(t *testing.T, port int) {
+	t.Helper()
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("resolve state dir: %v", err)
+	}
+
+	// A held flock is what SupervisorRunningUnderStateDir actually probes, so
+	// the test holds one rather than faking the answer. gofrs/flock locks the
+	// `<path>.lock` sibling, and both Windows (per-HANDLE LockFileEx) and
+	// Linux (per-open-file-description flock(2)) refuse a second handle's
+	// TryLock even from the same process, so the probe reads "running".
+	lk := flock.New(filepath.Join(stateDir, "supervisor.lock.lock"))
+	got, lerr := lk.TryLock()
+	if lerr != nil || !got {
+		t.Fatalf("hold the supervisor lock for the ownership gate: got=%v err=%v", got, lerr)
+	}
+	seededSupervisorLock = lk
+	t.Cleanup(func() {
+		if seededSupervisorLock != nil {
+			_ = seededSupervisorLock.Unlock()
+			seededSupervisorLock = nil
+		}
+	})
+
+	intentPath, ierr := api.DefaultSupervisorIntentPath()
+	if ierr != nil {
+		t.Fatalf("resolve supervisor-intent path: %v", ierr)
+	}
+	if werr := api.WriteSupervisorIntent(intentPath, &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{api.BuildBuiltinRouteDaemon("mcphub.exe", port)},
+	}); werr != nil {
+		t.Fatalf("seed supervisor-intent: %v", werr)
+	}
+
+	statePath := filepath.Join(stateDir, "supervisor-state.json")
+	if werr := api.WriteSupervisorState(statePath, &api.SupervisorStateFile{
+		Version: 1,
+		Daemons: map[string]api.SupervisorDaemonState{
+			api.BuiltinRouteTaskName: {State: "running", CurrentPID: os.Getpid(), PIDGeneration: 1},
+		},
+	}); werr != nil {
+		t.Fatalf("seed supervisor-state: %v", werr)
+	}
+
+	t.Cleanup(api.SetPortOwnerIdentityProbesForTest(
+		func(p int) (int, bool, error) {
+			if p != port {
+				return 0, false, nil
+			}
+			return os.Getpid(), true, nil
+		},
+		func(int) (string, bool) { return "mcphub.exe", true },
+	))
+}
 
 // startTestRouteServer binds a REAL loopback listener and serves the actual
 // production route-daemon handler (buildRouteServer, the same construction
@@ -53,12 +152,20 @@ func startTestRouteServer(t *testing.T) (port int, cleanup func()) {
 
 // redirectMCPFrontTestEnv points every settings/client-config resolution at
 // a throwaway temp home for the duration of the test.
+//
+// It also pins the daemon state dir PER TEST. The package-global TestMain
+// redirect already keeps every test off the operator's real state dir, but it
+// is one SHARED directory: now that these tests seed supervisor-intent.json /
+// supervisor-state.json for the ownership gate, sharing would let one test's
+// seed satisfy (or contradict) another's. Per-test pinning keeps each seed
+// invisible to its neighbours.
 func redirectMCPFrontTestEnv(t *testing.T) {
 	t.Helper()
 	tmp := t.TempDir()
 	t.Setenv("LOCALAPPDATA", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
+	t.Cleanup(api.SetDaemonStateRootForTest(tmp))
 }
 
 // withMCPFrontReportPathSeam overrides mcpFrontReconcileSerenaReportPathFn to
@@ -82,6 +189,13 @@ func TestRunReconcileMCPFront_FailsClosedWhenRouteNotLive(t *testing.T) {
 	}
 	// Deliberately do NOT start a route server on 19399 — nothing is
 	// listening there.
+	//
+	// The supervisor-ownership gate runs BEFORE the liveness probe, so it is
+	// satisfied here on purpose: otherwise it would refuse first and this test
+	// would silently stop covering the LIVENESS refusal it is named for. The
+	// injected OS probe is the only part that is fictional (it reports this
+	// process as the port owner) — everything the gate reads off disk is real.
+	seedSupervisorOwnedRoutePort(t, 19399)
 
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
@@ -101,6 +215,8 @@ func TestRunReconcileMCPFront_ForwardThenRollback_RoundTrip(t *testing.T) {
 
 	port, cleanup := startTestRouteServer(t)
 	defer cleanup()
+
+	seedSupervisorOwnedRoutePort(t, port)
 
 	a := api.NewAPI()
 	if err := a.SettingsSet(api.MCPFrontPortSettingKey, strconv.Itoa(port)); err != nil {
@@ -175,6 +291,8 @@ func TestRunReconcileMCPFront_Rollback_UsesPersistedPortNotLiveSetting(t *testin
 
 	port, cleanup := startTestRouteServer(t)
 	defer cleanup()
+
+	seedSupervisorOwnedRoutePort(t, port)
 
 	a := api.NewAPI()
 	if err := a.SettingsSet(api.MCPFrontPortSettingKey, strconv.Itoa(port)); err != nil {

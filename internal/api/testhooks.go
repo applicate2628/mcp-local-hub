@@ -290,6 +290,46 @@ func SetClientWriteFallbackForTest() (restore func()) {
 	return func() { clients.WriteConfigFile = orig }
 }
 
+// SetPortOwnerIdentityProbesForTest injects the two OS-level identity
+// primitives (loopback port -> owner PID, and owner PID -> image basename)
+// that AssertMCPFrontPortSupervisorOwned and defaultGUIPidportIdentityCheck
+// depend on. A nil argument leaves that probe at its production default.
+//
+// It exists so a CROSS-PACKAGE test (internal/cli drives the whole
+// `--reconcile-mcp-front` command) can exercise the REAL ownership gate
+// instead of stubbing the gate itself out. That distinction is the point: a
+// test that neutralized the gate would prove only that the gate is callable,
+// never that it refuses an unsupervised listener. With these two probes
+// injected, every other step of the chain — supervisor lock, canonical intent
+// descriptor, supervisor-state row, PID liveness — runs its production code
+// against files the test seeded.
+//
+// Same testing.Testing() production guard as SetDaemonStateRootForTest: a
+// shipped binary that reached this surface would be able to forge a port
+// ownership proof, so calling it outside a test binary panics loudly.
+//
+// Returns a restore function; always invoke via t.Cleanup / defer.
+func SetPortOwnerIdentityProbesForTest(
+	owner func(port int) (int, bool, error),
+	image func(pid int) (string, bool),
+) (restore func()) {
+	if !testing.Testing() {
+		panic("api.SetPortOwnerIdentityProbesForTest called outside a test binary — this hook can forge an OS-level port-ownership proof; it exists exclusively for tests")
+	}
+	origOwner := loopbackPortOwnerFn
+	origImage := guiImageForPIDFn
+	if owner != nil {
+		loopbackPortOwnerFn = owner
+	}
+	if image != nil {
+		guiImageForPIDFn = image
+	}
+	return func() {
+		loopbackPortOwnerFn = origOwner
+		guiImageForPIDFn = origImage
+	}
+}
+
 // testSchedulerShim adapts a caller-supplied TestSchedulerIface to the
 // package-private testScheduler interface.
 type testSchedulerShim struct{ s TestSchedulerIface }

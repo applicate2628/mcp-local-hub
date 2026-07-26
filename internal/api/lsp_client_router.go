@@ -79,6 +79,21 @@ type LSPClientRouterReport struct {
 	Restored []LSPClientRouterChange
 	Skipped  []LSPClientRouterChange
 	Failed   []LSPClientRouterFailure
+
+	// Pending is written ONLY by RestoreLSPRouterClientEntriesSnapshot. It
+	// carries recovery rows that are neither restored nor failed but
+	// UNREACHABLE right now: a client that was present when the pre-state was
+	// captured but whose adapter or config file is absent at restore time.
+	//
+	// It is deliberately distinct from both siblings. Skipped means "we
+	// decided not to touch this, and that decision is final"; Failed means "we
+	// tried and the attempt errored". Pending means "this row still needs
+	// restoring and we could not even attempt it" — the caller must NOT retire
+	// the recovery record while any Pending row remains, or the row is lost
+	// forever the moment the client reappears. Treating an unreachable client
+	// as restored is precisely how a rollback record gets deleted while the
+	// client it describes is still on the new endpoint.
+	Pending []LSPClientRouterChange
 }
 
 type LSPRouterClientStatus struct {

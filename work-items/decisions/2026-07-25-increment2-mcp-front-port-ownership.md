@@ -40,9 +40,24 @@ separate in-process GUI listener); tracked separately, pending open probe P3.
 ## Phasing (expand-contract)
 - 2a (first PR): add `mcp_front.port` setting; route seeder + route.go read it; retarget
   the 3 client-URL port consumers; new `mcphub install --reconcile-mcp-front[/--rollback]`
-  (fail-closed on route liveness, reuses existing reconcile+backup+rollback); extend the
-  probe (kill GUI → client still 200 on mcp_front.port). Minimal, reversible, ZERO
-  GUI-lifecycle code.
+  (fail-closed on route OWNERSHIP + liveness, reuses existing reconcile+backup+rollback);
+  extend the probe (kill GUI → client still 200 on mcp_front.port). Minimal, reversible,
+  ZERO GUI-lifecycle code.
+
+  **Ownership, not just liveness (pre-submission review finding 3).** The cutover
+  requires the port to be served by a LIVE SUPERVISOR's own built-in route child
+  (`api.AssertMCPFrontPortSupervisorOwned`: supervisor lock held, canonical
+  `\mcp-local-hub-route-front` descriptor at exactly this port, supervisor-state row
+  `running`, and the kernel's owner of the loopback socket equal to that recorded PID).
+  A hand-started `mcphub route --port N` is the real route server and satisfies the
+  readiness probe perfectly, but nothing restarts it — so accepting it would rewrite
+  every in-scope client onto a port that goes dark when that shell closes, which is the
+  exact failure mode this increment exists to eliminate. Operator-visible consequence:
+  the standalone `mcphub route` path is fine for developing/testing the route daemon,
+  but the CUTOVER requires `mcphub supervise` (or autostart). Windows runs the full
+  proof; Linux runs it minus the image check (no image resolver on that target); macOS
+  and other POSIX refuse, because the OS socket-owner primitive the proof needs is a
+  fail-closed stub there.
 - 2b: restore auto-register-on-miss via GUI delegation (route signals the single-writer
   GUI on a trusted miss) — closes the I6 503-on-new-workspace regression.
 - 2c (deferred, iff open probe P4 finds a hard 9125 dependency): Mechanism-A literal-9125.

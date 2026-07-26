@@ -296,7 +296,9 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 	c.Flags().BoolVar(&reconcileMCPFront, "reconcile-mcp-front", false,
 		"rewrite in-scope client serena/LSP entries to the settings-owned mcp_front.port "+
 			"(the supervisor-managed `mcphub route` front daemon), instead of the GUI's own port. "+
-			"Fails closed unless `mcphub route` is proven live on mcp_front.port first. "+
+			"Fails closed unless a LIVE SUPERVISOR is serving mcp_front.port through its built-in "+
+			"route daemon: a hand-started `mcphub route` answers the readiness probe but nothing "+
+			"restarts it, so start `mcphub supervise` (or enable autostart) first. "+
 			"Combine with --rollback to reverse the most recent run.")
 	c.Flags().BoolVar(&rollbackMCPFront, "rollback", false,
 		"with --reconcile-mcp-front: reverse the most recent reconcile-mcp-front run "+

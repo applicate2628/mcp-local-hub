@@ -159,6 +159,7 @@ func TestMCPFrontPR588_ForwardRerunPreservesFirstGenerationRecord(t *testing.T) 
 
 	port, cleanup := startTestRouteServer(t)
 	defer cleanup()
+	seedSupervisorOwnedRoutePort(t, port)
 
 	a := api.NewAPI()
 	if err := a.SettingsSet(api.MCPFrontPortSettingKey, strconv.Itoa(port)); err != nil {
@@ -245,6 +246,7 @@ func TestMCPFrontPR588_RollbackRestoresPriorLSPRouterURL(t *testing.T) {
 
 	port, cleanup := startTestRouteServer(t)
 	defer cleanup()
+	seedSupervisorOwnedRoutePort(t, port)
 
 	a := api.NewAPI()
 	if err := a.SettingsSet(api.MCPFrontPortSettingKey, strconv.Itoa(port)); err != nil {
@@ -354,6 +356,7 @@ func TestMCPFrontPR588_ForwardRefusesUnreadablePriorReport(t *testing.T) {
 
 	port, cleanup := startTestRouteServer(t)
 	defer cleanup()
+	seedSupervisorOwnedRoutePort(t, port)
 	a := api.NewAPI()
 	if err := a.SettingsSet(api.MCPFrontPortSettingKey, strconv.Itoa(port)); err != nil {
 		t.Fatalf("SettingsSet: %v", err)
@@ -411,8 +414,11 @@ func TestMCPFrontPR588_MergePreservesRecordedRowsAndAddsNewOnes(t *testing.T) {
 		Serena: &api.MigrateReport{Applied: []api.AppliedMigration{
 			{Server: "serena", Client: "claude-code", URL: "front", BackupPath: "GEN1-BACKUP"},
 		}},
-		LSP: []api.LSPRouterEntrySnapshot{
+		LSP: &[]api.LSPRouterEntrySnapshot{
 			{Client: "claude-code", Language: "go", EntryName: "mcp-language-server-go", Present: true, URL: "GEN1-URL"},
+		},
+		Pins: []mcpFrontSerenaPin{
+			{Client: "claude-code", Origin: "GEN1-ROLLING", Path: "GEN1-BACKUP", SHA256: "GEN1-SUM"},
 		},
 	}
 	// Generation 2 re-reports claude-code (now carrying POST-generation-1
@@ -426,10 +432,34 @@ func TestMCPFrontPR588_MergePreservesRecordedRowsAndAddsNewOnes(t *testing.T) {
 		{Client: "cursor", Language: "go", EntryName: "mcp-language-server-go", Present: true, URL: "CURSOR-URL"},
 	}
 
-	merged := mergeMCPFrontReconcileReport(prior, 9200, serena, lsp)
+	pins := []mcpFrontSerenaPin{
+		{Client: "claude-code", Origin: "GEN2-ROLLING", Path: "GEN2-BACKUP", SHA256: "GEN2-SUM"},
+		{Client: "cursor", Origin: "CURSOR-ROLLING", Path: "CURSOR-BACKUP", SHA256: "CURSOR-SUM"},
+	}
+
+	merged := mergeMCPFrontReconcileReport(prior, 9200, serena, lsp, pins)
 
 	if merged.Port != 9137 {
 		t.Fatalf("merge must keep the FIRST generation's port: got %d, want 9137", merged.Port)
+	}
+	if !merged.SnapshotComplete {
+		t.Fatalf("every record this merge produces carries both recovery sections, so it must be marked snapshot-complete; the rollback refuses one that is not")
+	}
+	if merged.LSP == nil {
+		t.Fatalf("the merged record's lsp section must be non-nil (an explicit empty section, never a missing one) — a nil slice marshals to `null`, which the rollback cannot tell apart from a lost section")
+	}
+	pinPaths := map[string]string{}
+	for _, pin := range merged.Pins {
+		if _, dup := pinPaths[pin.Client]; dup {
+			t.Fatalf("merge produced a duplicate pin for %s: %+v", pin.Client, merged.Pins)
+		}
+		pinPaths[pin.Client] = pin.Path
+	}
+	if pinPaths["claude-code"] != "GEN1-BACKUP" {
+		t.Fatalf("merge overwrote the recorded pin for claude-code: got %q, want GEN1-BACKUP (the generation-2 pin copies the already-rewritten config)", pinPaths["claude-code"])
+	}
+	if pinPaths["cursor"] != "CURSOR-BACKUP" {
+		t.Fatalf("merge dropped the pin for a client generation 1 never migrated: got %q, want CURSOR-BACKUP", pinPaths["cursor"])
 	}
 	backups := map[string]string{}
 	for _, row := range merged.Serena.Applied {
@@ -446,7 +476,7 @@ func TestMCPFrontPR588_MergePreservesRecordedRowsAndAddsNewOnes(t *testing.T) {
 	}
 
 	urls := map[string]string{}
-	for _, row := range merged.LSP {
+	for _, row := range *merged.LSP {
 		key := lspSnapshotKey(row)
 		if _, dup := urls[key]; dup {
 			t.Fatalf("merge produced a duplicate lsp row for %s/%s", row.Client, row.Language)
