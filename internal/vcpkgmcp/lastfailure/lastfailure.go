@@ -2,6 +2,7 @@ package lastfailure
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -19,12 +20,33 @@ type Deps struct {
 }
 
 // DefaultDeps wires Deps to the real OS.
+//
+// Getenv is os.Getenv. It previously returned "" unconditionally, which made
+// the injection seam silently swallow production behaviour: resolveOverlayChain
+// consults VCPKG_OVERLAY_PORTS, so a real invocation that used that variable
+// was reported with overlay_chain_none_builtin_ports_only — a positive claim
+// that no overlays were in play, made without ever reading the variable that
+// says otherwise. The seam exists so TESTS can control the environment, not so
+// production reads nothing.
 func DefaultDeps() Deps {
 	return Deps{
 		FS:        DefaultFS(),
-		Getenv:    func(string) string { return "" },
+		Getenv:    os.Getenv,
 		Discovery: discovery.DefaultDeps(),
 	}
+}
+
+// absoluteRoot validates a root-like parameter. See ReasonRelativeRoot: a
+// relative root binds to the hub daemon's working directory, which is not
+// the caller's and not the one the recorded vcpkg invocation ran in, so no
+// answer derived from it can be trusted.
+//
+// filepath.IsAbs is exactly the right predicate on Windows: it rejects
+// drive-relative forms like `\vcpkg` and `C:vcpkg`, which are genuinely
+// ambiguous (they depend on the process's current drive and per-drive
+// working directory) rather than merely relative.
+func absoluteRoot(path string) bool {
+	return filepath.IsAbs(path)
 }
 
 // vcpkgConfiguration is the minimal shape this package reads from a
@@ -70,7 +92,7 @@ func LastFailure(args Args, deps Deps) Result {
 	wrapperOK := false
 	if strings.TrimSpace(args.BuildFailedLog) != "" {
 		if data, err := deps.FS.ReadFile(args.BuildFailedLog); err == nil {
-			wrapperInfo, wrapperOK = ParseWrapperContent(data)
+			wrapperInfo, wrapperOK, _ = ParseWrapperContent(data)
 			if wrapperOK {
 				notes = append(notes, NoteWrapperUsedForContext)
 				sources = append(sources, SourceWrapperSummary)
@@ -112,23 +134,52 @@ func LastFailure(args Args, deps Deps) Result {
 		triplet = wrapperInfo.Triplet
 	}
 
+	// --- Step 2a: the port name must be ONE legal port-name segment ----------
+	// Validated here, AFTER auto-selection, so a hostile or malformed wrapper
+	// file cannot smuggle a traversal segment in through failed_ports either.
+	if !portNameRE.MatchString(port) {
+		res := unknownResult(ReasonInvalidPortName, ev, notes, sources)
+		res.FailedTarget = port
+		return res
+	}
+
 	// --- Step 2b: wrapper's own failed_ports list can positively confirm
-	// this port did NOT fail in that run — real evidence, not a guess.
+	// this port did NOT fail in that run — but ONLY when that list is proven
+	// EXHAUSTIVE. An incomplete list's silence about a port is not evidence;
+	// treating it as such tells the operator to stop looking at a port that
+	// did fail. When completeness cannot be established the tool says so and
+	// falls through to buildtree evidence, which is strictly better than
+	// either guessing or refusing to answer.
 	if wrapperOK && len(wrapperInfo.FailedPorts) > 0 && !portListedAsFailed(wrapperInfo.FailedPorts, port, triplet) {
-		return Result{
-			Status:        evidence.StatusOK,
-			ContextSource: dedupSources(append(sources, SourceWrapperSummary)),
-			Notes:         append(notes, NoteWrapperConfirmsNoFailure),
-			Evidence:      ev,
+		if wrapperInfo.FailedPortsListIsComplete() {
+			return Result{
+				Status:        evidence.StatusOK,
+				FailedTarget:  port,
+				ContextSource: dedupSources(append(sources, SourceWrapperSummary)),
+				Notes:         append(notes, NoteWrapperConfirmsNoFailure),
+				Evidence:      ev,
+			}
 		}
+		notes = append(notes, NoteWrapperFailedPortsIncomplete)
 	}
 
 	// --- Step 3: determine buildtrees root -----------------------------------
 	buildtreesRoot := strings.TrimSpace(args.BuildtreesRoot)
 	if buildtreesRoot == "" && wrapperOK && wrapperInfo.BuildtreesRoot != "" {
+		// Also covered by the absolute-root gate below: vcpkg resolves a
+		// relative --x-buildtrees-root against the shell that ran it, whose
+		// working directory this tool has no way to know.
 		buildtreesRoot = wrapperInfo.BuildtreesRoot
 	}
 	if buildtreesRoot == "" {
+		// An explicit but relative root would be resolved against the daemon's
+		// working directory by discovery too, so it is rejected before it can
+		// produce a confident answer about the wrong installation.
+		if strings.TrimSpace(args.Root) != "" && !absoluteRoot(strings.TrimSpace(args.Root)) {
+			res := unknownResult(ReasonRelativeRoot, ev, notes, sources)
+			res.FailedTarget = port
+			return res
+		}
 		discRes := discovery.DiscoverRoot(args.Root, deps.Discovery)
 		if discRes.Status != evidence.StatusOK {
 			ev.Paths = append(ev.Paths, discRes.Evidence.Paths...)
@@ -137,12 +188,18 @@ func LastFailure(args Args, deps Deps) Result {
 		}
 		buildtreesRoot = filepath.Join(discRes.Root, "buildtrees")
 	}
+	if !absoluteRoot(buildtreesRoot) {
+		res := unknownResult(ReasonRelativeRoot, ev, notes, sources)
+		res.FailedTarget = port
+		return res
+	}
 	sources = append(sources, SourceBuildtrees)
 	ev.AddPath(buildtreesRoot)
 
 	// --- Step 4: buildtrees root must exist (else --clean-buildtrees-after-build
 	// almost certainly removed it) -------------------------------------------
-	if !dirExists(deps.FS, buildtreesRoot) {
+	switch p, _ := probeDir(deps.FS, buildtreesRoot); p {
+	case evidence.PresenceAbsent:
 		res := unknownResult(ReasonBuildtreesCleaned, ev, notes, sources)
 		res.FailedTarget = port
 		if wrapperOK && wrapperInfo.ExitCode != nil {
@@ -152,12 +209,26 @@ func LastFailure(args Args, deps Deps) Result {
 		res.OverlayChain = chain
 		res.Notes = append(res.Notes, notesOut...)
 		return res
+	case evidence.PresenceUnreadable:
+		res := unknownResult(ReasonBuildtreesRootUnreadable, ev, notes, sources)
+		res.FailedTarget = port
+		return res
 	}
 
 	// --- Step 5: port directory must exist -----------------------------------
-	portDir := filepath.Join(buildtreesRoot, port)
-	if !dirExists(deps.FS, portDir) {
+	portDir, perr := portDirWithin(buildtreesRoot, port)
+	if perr != nil {
+		res := unknownResult(ReasonInvalidPortName, ev, notes, sources)
+		res.FailedTarget = port
+		return res
+	}
+	switch p, _ := probeDir(deps.FS, portDir); p {
+	case evidence.PresenceAbsent:
 		res := unknownResult(ReasonPortDirNotFound, ev, notes, sources)
+		res.FailedTarget = port
+		return res
+	case evidence.PresenceUnreadable:
+		res := unknownResult(ReasonPortDirUnreadable, ev, notes, sources)
 		res.FailedTarget = port
 		return res
 	}
@@ -197,15 +268,32 @@ func LastFailure(args Args, deps Deps) Result {
 		return res
 	}
 
-	// --- Step 8: scan phases in build order, last phase with a match wins ---
+	// --- Step 8: scan phases in build order --------------------------------
+	// Selection is driven by ERROR-severity diagnostics only. A warning-only
+	// log establishes nothing (see ContainsFailureDiagnostic), and letting a
+	// later phase's warnings override an earlier phase's real error would
+	// misreport the phase as well as the verdict. Warning-only matches are
+	// still retained, as the payload of unknown(no_failure_diagnostic).
+	//
 	// A "FAILED:" line ANYWHERE can be the tail of a user-interrupted build
 	// (scout-pass trap 2) rather than a genuine defect — checked across
 	// every phase log read, never assumed absent.
-	phaseOrder := []Phase{PhaseExtract, PhasePatch, PhaseConfig, PhaseInstall}
-	var chosenPhase Phase
-	var chosenDiags []Diagnostic
+	//
+	// An UNREADABLE log is tracked rather than skipped: it can hold a later
+	// phase's error, the only error in the port, or an interrupt marker, so
+	// a confident verdict cannot be issued while one is unread (F9).
+	// vcpkg's own step order. PhaseBuild sits between config and install: a
+	// non-ninja port runs a separate build step (build-<triplet>-<cfg>-*.log)
+	// before installing, whereas a ninja port compiles AND installs inside
+	// the install step (which is why an install-log compiler error is
+	// re-reported as `build` further down).
+	phaseOrder := []Phase{PhaseExtract, PhasePatch, PhaseConfig, PhaseBuild, PhaseInstall}
+	var errPhase, anyPhase Phase
+	var errDiags, anyDiags []Diagnostic
 	var allLogPaths []string
-	var chosenOutLog, chosenErrLog string
+	var errOutLog, errErrLog string
+	var anyOutLog, anyErrLog string
+	var unreadableLogs []string
 	interrupted := false
 
 	for _, ph := range phaseOrder {
@@ -219,6 +307,7 @@ func LastFailure(args Args, deps Deps) Result {
 			ev.AddPath(pf.Path)
 			data, rerr := deps.FS.ReadFile(pf.Path)
 			if rerr != nil {
+				unreadableLogs = append(unreadableLogs, pf.Path)
 				continue
 			}
 			if DetectInterrupted(data) {
@@ -232,55 +321,81 @@ func LastFailure(args Args, deps Deps) Result {
 				thisErr = pf.Path
 			}
 		}
-		if len(thisPhaseDiags) > 0 {
-			chosenPhase = ph
-			chosenDiags = thisPhaseDiags
-			chosenOutLog, chosenErrLog = thisOut, thisErr
+		if len(thisPhaseDiags) == 0 {
+			continue
+		}
+		anyPhase, anyDiags = ph, thisPhaseDiags
+		anyOutLog, anyErrLog = thisOut, thisErr
+		if ContainsFailureDiagnostic(thisPhaseDiags) {
+			errPhase, errDiags = ph, thisPhaseDiags
+			errOutLog, errErrLog = thisOut, thisErr
 		}
 	}
 
 	// Bonus/fallback: the top-level per-port narration log, only consulted
-	// when none of the primary phase logs yielded a match.
+	// when no primary phase log established a failure.
 	if stdoutNarration != "" {
 		allLogPaths = append(allLogPaths, stdoutNarration)
 		ev.AddPath(stdoutNarration)
 	}
-	if len(chosenDiags) == 0 && stdoutNarration != "" {
-		if data, rerr := deps.FS.ReadFile(stdoutNarration); rerr == nil {
+	if len(errDiags) == 0 && stdoutNarration != "" {
+		data, rerr := deps.FS.ReadFile(stdoutNarration)
+		if rerr != nil {
+			unreadableLogs = append(unreadableLogs, stdoutNarration)
+		} else {
 			if DetectInterrupted(data) {
 				interrupted = true
 			}
 			if d := ScanDiagnostics(data); len(d) > 0 {
-				chosenPhase = PhaseInstall
-				chosenDiags = d
-				chosenOutLog = stdoutNarration
+				if len(anyDiags) == 0 {
+					anyPhase, anyDiags, anyOutLog = PhaseInstall, d, stdoutNarration
+				}
+				if ContainsFailureDiagnostic(d) {
+					errPhase, errDiags, errOutLog = PhaseInstall, d, stdoutNarration
+					errErrLog = ""
+				}
 			}
 		}
 	}
 
-	// Second-to-last resort: a CMakeConfigureLog.yaml.log capability-probe
-	// dump. A diagnostic recovered ONLY here may describe a try_compile
-	// probe rather than the port's real build (scout-pass finding) — the
-	// note below flags exactly that caveat so a caller does not over-trust
-	// it as strongly as a primary-phase-log diagnostic.
+	// Last resort: a CMakeConfigureLog.yaml.log capability-probe dump. A
+	// try_compile that fails here is the NORMAL mechanism of CMake feature
+	// detection, so an error recovered ONLY from this source does not
+	// establish that the port failed — it is reported as
+	// unknown(capability_probe_only) with the diagnostics attached, never as
+	// a confident `failed` carrying a mere advisory note (F7).
 	usedCapabilityProbeLog := false
-	if len(chosenDiags) == 0 {
+	if len(errDiags) == 0 {
 		for _, p := range configureLogYAMLPaths {
 			data, rerr := deps.FS.ReadFile(p)
 			if rerr != nil {
+				unreadableLogs = append(unreadableLogs, p)
 				continue
 			}
 			if DetectInterrupted(data) {
 				interrupted = true
 			}
-			if d := ScanDiagnostics(data); len(d) > 0 {
-				chosenPhase = PhaseConfig
-				chosenDiags = d
-				chosenOutLog = p
-				usedCapabilityProbeLog = true
-				break
+			d := ScanDiagnostics(data)
+			if !ContainsFailureDiagnostic(d) {
+				continue
 			}
+			errPhase, errDiags, errOutLog = PhaseConfig, d, p
+			errErrLog = ""
+			if len(anyDiags) == 0 {
+				anyPhase, anyDiags, anyOutLog = PhaseConfig, d, p
+			}
+			usedCapabilityProbeLog = true
+			break
 		}
+	}
+
+	// Resolve which set the answer is built from: an error-bearing selection
+	// when one exists, otherwise the warning-only evidence.
+	chosenPhase, chosenDiags := errPhase, errDiags
+	chosenOutLog, chosenErrLog := errOutLog, errErrLog
+	if len(chosenDiags) == 0 {
+		chosenPhase, chosenDiags = anyPhase, anyDiags
+		chosenOutLog, chosenErrLog = anyOutLog, anyErrLog
 	}
 
 	overlayChain, overlayNotes := resolveOverlayChain(args, wrapperInfo, wrapperOK, deps)
@@ -304,20 +419,10 @@ func LastFailure(args Args, deps Deps) Result {
 		base.ExitCode = wrapperInfo.ExitCode
 	}
 
-	if interrupted {
-		// A ninja user-interrupt overrides any "FAILED:"-shaped match found
-		// alongside it — the build was stopped, not broken; reporting it as
-		// a defect would misdirect the operator (scout-pass trap 2).
-		base.Status = evidence.StatusUnknown
-		base.Reason = ReasonBuildInterrupted
-		return base
-	}
-
-	if len(chosenDiags) == 0 {
-		base.Status = evidence.StatusUnknown
-		base.Reason = ReasonNoDiagnosticFound
-		return base
-	}
+	// Diagnostics found are always returned, whatever the verdict — they are
+	// the evidence the caller judges, and withholding them on an `unknown`
+	// would force a re-read of the same logs.
+	base.Diagnostics = chosenDiags
 
 	reportedPhase := chosenPhase
 	if reportedPhase == PhaseInstall {
@@ -326,9 +431,47 @@ func LastFailure(args Args, deps Deps) Result {
 		// build (not the file-copy install step) is what actually failed.
 		reportedPhase = PhaseBuild
 	}
-	base.Status = evidence.StatusFailed
-	base.Phase = reportedPhase
-	base.Diagnostics = chosenDiags
+
+	// Verdict precedence, strongest positive evidence first.
+	switch {
+	case interrupted:
+		// A ninja user-interrupt overrides any "FAILED:"-shaped match found
+		// alongside it — the build was stopped, not broken; reporting it as
+		// a defect would misdirect the operator (scout-pass trap 2). This
+		// outranks the unreadable-log reason below because it is a positive
+		// finding from evidence that WAS read.
+		base.Status = evidence.StatusUnknown
+		base.Reason = ReasonBuildInterrupted
+
+	case len(unreadableLogs) > 0:
+		// F9: at least one relevant phase log could not be read. Any of the
+		// verdicts below could be changed by its contents, so none of them
+		// may be issued. The readable evidence is still returned.
+		base.Status = evidence.StatusUnknown
+		base.Reason = ReasonPhaseLogUnreadable
+		base.Phase = reportedPhase
+
+	case usedCapabilityProbeLog:
+		// F7: the only error came from a try_compile dump.
+		base.Status = evidence.StatusUnknown
+		base.Reason = ReasonCapabilityProbeOnly
+		base.Phase = reportedPhase
+
+	case len(chosenDiags) == 0:
+		base.Status = evidence.StatusUnknown
+		base.Reason = ReasonNoDiagnosticFound
+
+	case !ContainsFailureDiagnostic(chosenDiags):
+		// F6: recognized diagnostics, but every one is a warning or a note.
+		// That is the normal state of a SUCCESSFUL C++ build.
+		base.Status = evidence.StatusUnknown
+		base.Reason = ReasonNoFailureDiagnostic
+		base.Phase = reportedPhase
+
+	default:
+		base.Status = evidence.StatusFailed
+		base.Phase = reportedPhase
+	}
 	return base
 }
 

@@ -101,7 +101,7 @@ vcpkg_from_github(
 		if res.Applied[i].Ordinal != i {
 			t.Errorf("applied[%d] (%s) ordinal = %d, want %d", i, want, res.Applied[i].Ordinal, i)
 		}
-		if !res.Applied[i].Exists {
+		if res.Applied[i].Existence != evidence.PresenceExists {
 			t.Errorf("applied[%d] (%s) exists = false, want true", i, want)
 		}
 		if res.Applied[i].Guard != "" {
@@ -168,22 +168,48 @@ var python3StylePatchFiles = []string{
 	"0007-workaround-windows-11-sdk-rc-compiler-error.patch",
 }
 
+// python3Args builds the arguments for one python3-shape subtest.
+//
+// The triplet facts now come from the two mechanisms that actually carry
+// them, instead of from the triplet NAME:
+//
+//   - VCPKG_LIBRARY_LINKAGE comes from a real TRIPLET FILE, because that is
+//     what a triplet file genuinely sets (every builtin x64-windows*.cmake
+//     does exactly this).
+//   - VCPKG_TARGET_IS_MINGW / _IS_WINDOWS come from var_overrides, because
+//     in real vcpkg they are NOT set by the triplet file at all: vcpkg's own
+//     scripts derive them from VCPKG_CMAKE_SYSTEM_NAME at build time. A
+//     static analyzer that never runs those scripts must be TOLD them —
+//     which is precisely what the var_overrides escape hatch is for.
+func python3Args(t *testing.T, portDir, triplet, linkage string, targetIs map[string]string) Args {
+	t.Helper()
+	tripletDir := writeTripletDir(t, triplet, "set(VCPKG_TARGET_ARCHITECTURE x64)\nset(VCPKG_LIBRARY_LINKAGE "+linkage+")\n")
+	overrides := map[string]string{
+		"VCPKG_CROSSCOMPILING": "OFF",
+		"WINSDK_VERSION":       "10.0.22000",
+	}
+	for k, v := range targetIs {
+		overrides[k] = v
+	}
+	return Args{
+		PortDir: portDir, Triplet: triplet, PortName: "python3",
+		OverlayTriplets: []string{tripletDir},
+		VarOverrides:    overrides,
+	}
+}
+
 func TestApplyOrder_Python3StyleConditionalAccumulation(t *testing.T) {
 	base := []string{
 		"0001-base-01.patch", "0002-base-02.patch", "0003-base-03.patch", "0004-base-04.patch",
 		"0005-base-05.patch", "0006-base-06.patch", "0007-base-07.patch", "0008-base-08.patch",
 	}
-	overrides := map[string]string{
-		"VCPKG_CROSSCOMPILING": "OFF",
-		"WINSDK_VERSION":       "10.0.22000",
-	}
 
 	t.Run("mingw_triplet", func(t *testing.T) {
 		portDir := writeFixture(t, python3StylePortfile, python3StylePatchFiles...)
-		res := ApplyOrder(Args{
-			PortDir: portDir, Triplet: "x64-mingw-dynamic", PortName: "python3",
-			VarOverrides: overrides,
-		})
+		res := applyOrder(python3Args(t, portDir, "x64-mingw-dynamic", "dynamic", map[string]string{
+			"VCPKG_TARGET_IS_MINGW":   "ON",
+			"VCPKG_TARGET_IS_WINDOWS": "OFF",
+		}), DefaultDeps())
 		if res.Status != evidence.StatusOK {
 			t.Fatalf("status = %v, want ok; result=%+v", res.Status, res)
 		}
@@ -194,8 +220,9 @@ func TestApplyOrder_Python3StyleConditionalAccumulation(t *testing.T) {
 		}
 		// The static-linkage and windows-only patches must all be
 		// definitively guard-false for a MinGW triplet, never undecidable —
-		// VCPKG_TARGET_IS_MINGW is derivable and Kleene AND short-circuits
-		// through the nested CROSSCOMPILING/WINSDK sub-guards.
+		// VCPKG_TARGET_IS_MINGW is KNOWN here (supplied, not guessed) and
+		// Kleene AND short-circuits through the nested CROSSCOMPILING/WINSDK
+		// sub-guards.
 		for _, f := range []string{"0009-static-library.patch", "0016-fix-win-cross.patch", "0017-fix-win.patch", "0007-workaround-windows-11-sdk-rc-compiler-error.patch"} {
 			if findConditional(res, f) == nil {
 				t.Errorf("expected %s in conditional_not_applied for mingw triplet, got result=%+v", f, res)
@@ -211,10 +238,10 @@ func TestApplyOrder_Python3StyleConditionalAccumulation(t *testing.T) {
 
 	t.Run("windows_non_mingw_triplet", func(t *testing.T) {
 		portDir := writeFixture(t, python3StylePortfile, python3StylePatchFiles...)
-		res := ApplyOrder(Args{
-			PortDir: portDir, Triplet: "x64-windows", PortName: "python3",
-			VarOverrides: overrides,
-		})
+		res := applyOrder(python3Args(t, portDir, "x64-windows", "dynamic", map[string]string{
+			"VCPKG_TARGET_IS_MINGW":   "OFF",
+			"VCPKG_TARGET_IS_WINDOWS": "ON",
+		}), DefaultDeps())
 		if res.Status != evidence.StatusOK {
 			t.Fatalf("status = %v, want ok; result=%+v", res.Status, res)
 		}
@@ -236,10 +263,12 @@ func TestApplyOrder_Python3StyleConditionalAccumulation(t *testing.T) {
 
 	t.Run("static_triplet", func(t *testing.T) {
 		portDir := writeFixture(t, python3StylePortfile, python3StylePatchFiles...)
-		res := ApplyOrder(Args{
-			PortDir: portDir, Triplet: "x64-windows-static", PortName: "python3",
-			VarOverrides: overrides,
-		})
+		// Linkage comes from the triplet FILE here, not from the "-static"
+		// component in the name.
+		res := applyOrder(python3Args(t, portDir, "x64-windows-static", "static", map[string]string{
+			"VCPKG_TARGET_IS_MINGW":   "OFF",
+			"VCPKG_TARGET_IS_WINDOWS": "ON",
+		}), DefaultDeps())
 		if res.Status != evidence.StatusOK {
 			t.Fatalf("status = %v, want ok; result=%+v", res.Status, res)
 		}
@@ -363,7 +392,7 @@ vcpkg_from_github(
 	if res.Applied[0].ResolvedPath != want {
 		t.Errorf("resolved_path = %q, want %q (outside port dir %q)", res.Applied[0].ResolvedPath, want, portDir)
 	}
-	if !res.Applied[0].Exists {
+	if res.Applied[0].Existence != evidence.PresenceExists {
 		t.Errorf("exists = false, want true — this is the false-positive trap: a healthy port must not be reported missing")
 	}
 	if len(res.Missing) != 0 {
@@ -466,7 +495,7 @@ vcpkg_from_github(REPO a/b REF v1 SHA512 0 PATCHES ghost.patch)
 	if applied == nil {
 		t.Fatalf("expected ghost.patch applied (guard is unconditional), got %+v", res.Applied)
 	}
-	if applied.Exists {
+	if applied.Existence == evidence.PresenceExists {
 		t.Errorf("expected exists=false for ghost.patch")
 	}
 	if len(res.Missing) != 1 || res.Missing[0].Filename != "ghost.patch" {
@@ -489,7 +518,7 @@ vcpkg_from_github(REPO a/freexl REF v1 SHA512 0 PATCHES android-builtin-iconv.di
 		t.Fatalf("status = %v, want ok; result=%+v", res.Status, res)
 	}
 	applied := findApplied(res, "android-builtin-iconv.diff")
-	if applied == nil || !applied.Exists {
+	if applied == nil || applied.Existence != evidence.PresenceExists {
 		t.Fatalf("expected android-builtin-iconv.diff applied+exists, got %+v", res.Applied)
 	}
 	if findOrphaned(res, "stray.diff") == nil {
@@ -708,7 +737,7 @@ vcpkg_from_github(REPO a/b REF v1 SHA512 0 PATCHES [[${NOT_A_REAL_VAR}.patch]])
 	if res.Applied[0].Filename != wantLiteral {
 		t.Errorf("filename = %q, want the LITERAL bracket content unexpanded: %q", res.Applied[0].Filename, wantLiteral)
 	}
-	if res.Applied[0].Exists {
+	if res.Applied[0].Existence == evidence.PresenceExists {
 		t.Errorf("exists = true unexpectedly — the bracket content is a literal ${...} string that cannot match a real file; a true here would mean expansion silently happened")
 	}
 }
@@ -731,7 +760,7 @@ func TestApplyOrder_QuotedArgumentLineContinuation(t *testing.T) {
 	if res.Applied[0].Filename != "continued.patch" {
 		t.Errorf("filename = %q, want %q — the continuation must join the two fragments with nothing in between (no backslash, no newline)", res.Applied[0].Filename, "continued.patch")
 	}
-	if !res.Applied[0].Exists {
+	if res.Applied[0].Existence != evidence.PresenceExists {
 		t.Errorf("expected continued.patch to exist on disk")
 	}
 }
@@ -754,23 +783,199 @@ func TestUnescapeQuoted_EncodedEscapesAndContinuation(t *testing.T) {
 	}
 }
 
-func TestDeriveTripletFacts_IndependentPerComponent(t *testing.T) {
-	facts := deriveTripletFacts("x64-mingw-dynamic")
-	if facts["VCPKG_TARGET_IS_MINGW"] != "ON" {
-		t.Errorf("VCPKG_TARGET_IS_MINGW = %q, want ON", facts["VCPKG_TARGET_IS_MINGW"])
+// --- Triplet facts come from the triplet FILE, never from its name --------
+
+// writeTripletDir creates an overlay-triplets root containing one triplet
+// file with the given content.
+func writeTripletDir(t *testing.T, triplet, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, triplet+".cmake"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write triplet file: %v", err)
 	}
-	if facts["VCPKG_TARGET_IS_WINDOWS"] != "OFF" {
-		t.Errorf("VCPKG_TARGET_IS_WINDOWS = %q, want OFF (derived independently from the literal component match, per the accepted contract)", facts["VCPKG_TARGET_IS_WINDOWS"])
+	return dir
+}
+
+// staticGuardPortfile guards a patch on VCPKG_LIBRARY_LINKAGE being static.
+const staticGuardPortfile = `
+if(VCPKG_LIBRARY_LINKAGE STREQUAL "static")
+  list(APPEND PATCHES static-only.patch)
+endif()
+vcpkg_from_github(PATCHES ${PATCHES})
+`
+
+// TestApplyOrder_CustomTripletFileEstablishesLinkage is the mutation proof
+// for F4. The triplet is named "corp-windows" — no "static" component — but
+// its FILE sets VCPKG_LIBRARY_LINKAGE static. The name-derived model
+// asserted "dynamic" and reported the static-only patch as not applied; the
+// file-derived model gets it right.
+func TestApplyOrder_CustomTripletFileEstablishesLinkage(t *testing.T) {
+	portDir := writeFixture(t, staticGuardPortfile, "static-only.patch")
+	tripletDir := writeTripletDir(t, "corp-windows", `
+set(VCPKG_TARGET_ARCHITECTURE x64)
+set(VCPKG_CRT_LINKAGE dynamic)
+set(VCPKG_LIBRARY_LINKAGE static)
+`)
+
+	res := applyOrder(Args{
+		PortDir:         portDir,
+		Triplet:         "corp-windows",
+		OverlayTriplets: []string{tripletDir},
+	}, DefaultDeps())
+
+	if res.Status != evidence.StatusOK {
+		t.Fatalf("status = %v reason = %v, want ok; result = %+v", res.Status, res.Reason, res)
 	}
-	if facts["VCPKG_LIBRARY_LINKAGE"] != "dynamic" {
-		t.Errorf("VCPKG_LIBRARY_LINKAGE = %q, want dynamic", facts["VCPKG_LIBRARY_LINKAGE"])
+	if res.TripletFile == "" {
+		t.Fatal("triplet_file must name the file the facts were read from")
+	}
+	applied := findApplied(res, "static-only.patch")
+	if applied == nil {
+		t.Fatalf("static-only.patch not in applied — the triplet FILE sets VCPKG_LIBRARY_LINKAGE static, "+
+			"whatever the triplet NAME suggests; applied=%v undecidable=%+v conditional=%+v",
+			filenames(res.Applied), res.Undecidable, res.ConditionalNotApplied)
+	}
+	if applied.Existence != evidence.PresenceExists {
+		t.Errorf("existence = %v, want exists", applied.Existence)
+	}
+}
+
+// TestApplyOrder_NoTripletFile_LeavesGuardUndecidable is the other half of
+// F4: with no triplet file reachable, VCPKG_LIBRARY_LINKAGE is genuinely
+// unknown. The contract's answer is the undecidable bucket — NOT a guess
+// derived from the triplet name, in either direction.
+func TestApplyOrder_NoTripletFile_LeavesGuardUndecidable(t *testing.T) {
+	portDir := writeFixture(t, staticGuardPortfile, "static-only.patch")
+
+	// "x64-windows-static" is the name that most strongly invites the guess.
+	res := applyOrder(Args{
+		PortDir: portDir,
+		Triplet: "x64-windows-static",
+	}, DefaultDeps())
+
+	if res.TripletFile != "" {
+		t.Fatalf("triplet_file = %q, want empty (none was supplied)", res.TripletFile)
+	}
+	if findApplied(res, "static-only.patch") != nil {
+		t.Fatal("static-only.patch was reported APPLIED from the triplet NAME alone — " +
+			"no triplet file was read, so VCPKG_LIBRARY_LINKAGE is unknown")
+	}
+	if findConditional(res, "static-only.patch") != nil {
+		t.Fatal("static-only.patch was reported NOT-APPLIED from the triplet name alone")
+	}
+	if findUndecidable(res, "static-only.patch") == nil {
+		t.Fatalf("static-only.patch must be undecidable; result = %+v", res)
+	}
+}
+
+// TestApplyOrder_VarOverridesStillWinOverTripletFile keeps the documented
+// escape hatch working: an explicit caller override is a deliberate what-if
+// and outranks the file.
+func TestApplyOrder_VarOverridesStillWinOverTripletFile(t *testing.T) {
+	portDir := writeFixture(t, staticGuardPortfile, "static-only.patch")
+	tripletDir := writeTripletDir(t, "corp-windows", "set(VCPKG_LIBRARY_LINKAGE dynamic)\n")
+
+	res := applyOrder(Args{
+		PortDir:         portDir,
+		Triplet:         "corp-windows",
+		OverlayTriplets: []string{tripletDir},
+		VarOverrides:    map[string]string{"VCPKG_LIBRARY_LINKAGE": "static"},
+	}, DefaultDeps())
+
+	if findApplied(res, "static-only.patch") == nil {
+		t.Fatalf("explicit var_overrides must outrank the triplet file; result = %+v", res)
+	}
+}
+
+// TestParseTripletFacts_ConditionalSetIsNotAFact: triplet files routinely
+// carry port-specific overrides inside if() blocks. Whether such a branch
+// runs depends on state this static evaluation does not have, so a variable
+// set there must NOT be asserted for every port.
+func TestParseTripletFacts_ConditionalSetIsNotAFact(t *testing.T) {
+	facts := parseTripletFacts(`
+set(VCPKG_CRT_LINKAGE dynamic)
+if(PORT MATCHES "qt")
+  set(VCPKG_LIBRARY_LINKAGE dynamic)
+endif()
+`, `C:\ports\foo`, "foo", "")
+
+	if got, ok := facts["VCPKG_CRT_LINKAGE"]; !ok || got != "dynamic" {
+		t.Errorf("VCPKG_CRT_LINKAGE = %q ok=%v, want the top-level set() to establish it", got, ok)
+	}
+	if got, ok := facts["VCPKG_LIBRARY_LINKAGE"]; ok {
+		t.Errorf("VCPKG_LIBRARY_LINKAGE = %q was asserted from inside an if() block — "+
+			"that branch's execution is unknown here, so the variable must stay unresolved", got)
+	}
+}
+
+// TestParseTripletFacts_UnresolvedExpansionIsDropped: a half-expanded value
+// is not a fact.
+func TestParseTripletFacts_UnresolvedExpansionIsDropped(t *testing.T) {
+	facts := parseTripletFacts("set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE ${SOME_UNKNOWN}/tc.cmake)\n",
+		`C:\ports\foo`, "foo", "")
+	if got, ok := facts["VCPKG_CHAINLOAD_TOOLCHAIN_FILE"]; ok {
+		t.Errorf("value %q retained an unresolved reference and must not be reported as a fact", got)
+	}
+}
+
+// TestResolveTripletFile_OverlayPrecedesBuiltin mirrors vcpkg's own lookup
+// order: --overlay-triplets first, then <root>/triplets, then community/.
+func TestResolveTripletFile_OverlayPrecedesBuiltin(t *testing.T) {
+	overlay := writeTripletDir(t, "cl", "set(VCPKG_LIBRARY_LINKAGE static)\n")
+
+	root := t.TempDir()
+	builtin := filepath.Join(root, "triplets")
+	if err := os.MkdirAll(builtin, 0o755); err != nil {
+		t.Fatalf("mkdir builtin triplets: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(builtin, "cl.cmake"),
+		[]byte("set(VCPKG_LIBRARY_LINKAGE dynamic)\n"), 0o644); err != nil {
+		t.Fatalf("write builtin triplet: %v", err)
 	}
 
-	staticFacts := deriveTripletFacts("x64-windows-static")
-	if staticFacts["VCPKG_LIBRARY_LINKAGE"] != "static" {
-		t.Errorf("VCPKG_LIBRARY_LINKAGE = %q, want static", staticFacts["VCPKG_LIBRARY_LINKAGE"])
+	got, presence, err := resolveTripletFile(DefaultDeps(), "cl", []string{overlay}, root)
+	if presence != evidence.PresenceExists || err != nil {
+		t.Fatalf("presence = %v err = %v, want exists", presence, err)
 	}
-	if staticFacts["VCPKG_TARGET_IS_WINDOWS"] != "ON" {
-		t.Errorf("VCPKG_TARGET_IS_WINDOWS = %q, want ON", staticFacts["VCPKG_TARGET_IS_WINDOWS"])
+	if got != filepath.Join(overlay, "cl.cmake") {
+		t.Fatalf("resolved %q, want the OVERLAY file to win over the builtin one", got)
+	}
+
+	// With no overlay supplied, the builtin root is used.
+	got, presence, _ = resolveTripletFile(DefaultDeps(), "cl", nil, root)
+	if presence != evidence.PresenceExists || got != filepath.Join(builtin, "cl.cmake") {
+		t.Fatalf("resolved %q (%v), want the builtin triplets file", got, presence)
+	}
+}
+
+// TestResolveTripletFile_TraversingNameFindsNothing: a triplet name is
+// joined into a lookup path, so it must be bounded to one safe segment —
+// the same class of guard as the port-name rule in the lastfailure package.
+func TestResolveTripletFile_TraversingNameFindsNothing(t *testing.T) {
+	overlay := t.TempDir()
+	outside := filepath.Join(filepath.Dir(overlay), "escaped")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "evil.cmake"),
+		[]byte("set(VCPKG_LIBRARY_LINKAGE static)\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	got, presence, _ := resolveTripletFile(DefaultDeps(),
+		filepath.Join("..", "escaped", "evil"), []string{overlay}, "")
+	if presence != evidence.PresenceAbsent || got != "" {
+		t.Fatalf("resolved %q (%v) for a traversing triplet name; want absent — "+
+			"the name must never escape the supplied roots", got, presence)
+	}
+}
+
+// TestApplyOrder_RelativeOverlayTripletIsIgnored: a relative overlay root
+// would bind to the daemon's working directory, so it can only produce a
+// confident answer about an unrelated tree.
+func TestApplyOrder_RelativeOverlayTripletIsIgnored(t *testing.T) {
+	cands := tripletFileCandidates("cl", []string{"overlays/triplets"}, "")
+	if len(cands) != 0 {
+		t.Fatalf("candidates = %v, want none — a relative overlay root is not usable", cands)
 	}
 }

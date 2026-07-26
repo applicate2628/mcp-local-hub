@@ -3,7 +3,6 @@ package patchesapply
 import (
 	"path/filepath"
 	"regexp"
-	"strings"
 )
 
 // varEnv is the partial variable model a portfile.cmake is evaluated against.
@@ -41,7 +40,19 @@ type listItem struct {
 	pathUnresolved []string
 }
 
-func newVarEnv(portDir, portName, vcpkgRoot string, overrides map[string]string, triplet string) *varEnv {
+// newVarEnv builds the evaluation environment.
+//
+// tripletFacts are the variables an ACTUAL triplet file established (see
+// triplet.go); pass nil when no triplet file was available, which leaves
+// every triplet variable unresolved and therefore undecidable. Nothing here
+// derives a triplet fact from the triplet NAME — see triplet.go's package
+// comment for why that had to go.
+//
+// Explicit VarOverrides win over triplet-file facts: the caller stating
+// "evaluate as if VCPKG_LIBRARY_LINKAGE were static" is a deliberate
+// what-if, and is the documented escape hatch when no triplet file can be
+// supplied.
+func newVarEnv(portDir, portName, vcpkgRoot string, overrides map[string]string, tripletFacts map[string]string) *varEnv {
 	env := &varEnv{
 		scalars:   map[string]string{},
 		lists:     map[string][]listItem{},
@@ -49,57 +60,13 @@ func newVarEnv(portDir, portName, vcpkgRoot string, overrides map[string]string,
 		portName:  portName,
 		portDir:   portDir,
 	}
-	for name, tri := range deriveTripletFacts(triplet) {
-		env.scalars[name] = tri
+	for name, val := range tripletFacts {
+		env.scalars[name] = val
 	}
-	// Explicit overrides win over triplet-derived facts.
 	for k, v := range overrides {
 		env.scalars[k] = v
 	}
 	return env
-}
-
-// deriveTripletFacts derives the closed set of triplet facts this package
-// claims to know from the triplet name alone, per the accepted contract:
-// VCPKG_TARGET_IS_WINDOWS for *-windows*, VCPKG_TARGET_IS_MINGW for *-mingw*,
-// VCPKG_LIBRARY_LINKAGE from a -static component (else "dynamic"),
-// VCPKG_TARGET_IS_LINUX / VCPKG_TARGET_IS_OSX likewise. Each is derived
-// independently from its own component match — never cross-inferred from
-// real-world OS-family knowledge (e.g. this does NOT set
-// VCPKG_TARGET_IS_WINDOWS=true for a *-mingw* triplet just because MinGW
-// targets Windows; the contract names each derivation rule independently and
-// Kleene AND/OR still produces the right guard result via the explicit
-// VCPKG_TARGET_IS_MINGW term wherever that matters). Anything not in this
-// list (VCPKG_CROSSCOMPILING, WINSDK_VERSION, ...) is intentionally absent
-// here and stays unresolved unless the caller supplies an override.
-func deriveTripletFacts(triplet string) map[string]string {
-	comps := strings.Split(strings.ToLower(triplet), "-")
-	has := func(name string) bool {
-		for _, c := range comps {
-			if c == name {
-				return true
-			}
-		}
-		return false
-	}
-	onOff := func(b bool) string {
-		if b {
-			return "ON"
-		}
-		return "OFF"
-	}
-	facts := map[string]string{
-		"VCPKG_TARGET_IS_WINDOWS": onOff(has("windows")),
-		"VCPKG_TARGET_IS_MINGW":   onOff(has("mingw")),
-		"VCPKG_TARGET_IS_LINUX":   onOff(has("linux")),
-		"VCPKG_TARGET_IS_OSX":     onOff(has("osx")),
-	}
-	if has("static") {
-		facts["VCPKG_LIBRARY_LINKAGE"] = "static"
-	} else {
-		facts["VCPKG_LIBRARY_LINKAGE"] = "dynamic"
-	}
-	return facts
 }
 
 // lookup resolves a bare variable name to its known value, or nil if this

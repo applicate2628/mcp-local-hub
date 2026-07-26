@@ -25,10 +25,15 @@ func registerTools(vs *VcpkgServer) {
 			"explicit root param > VCPKG_ROOT env var > vcpkg resolved on PATH > a nearby " +
 			"vcpkg.json/vcpkg-configuration.json manifest with a co-located vcpkg/ submodule binary > " +
 			"labelled heuristic common locations (C:\\vcpkg, C:\\opt\\vcpkg, %USERPROFILE%\\vcpkg, a " +
-			"Visual Studio VC\\vcpkg install, /opt/vcpkg, ~/vcpkg, ...). Exactly one candidate -> ok " +
-			"with root+rule_fired. Several candidates (only possible at the heuristic tier) -> " +
-			"unknown(multiple_candidates) listing ALL of them, never a silent pick. None found -> " +
-			"unknown(no_candidates_found) — never reports \"not installed\"; supply root explicitly instead.",
+			"Visual Studio VC\\vcpkg install, /opt/vcpkg, ~/vcpkg, ...). " +
+			"An EXPLICIT root is TERMINAL: if it holds no vcpkg binary the answer is " +
+			"unknown(explicit_root_invalid), or unknown(explicit_root_unreadable) when the probe " +
+			"itself failed — it NEVER falls through to another installation the caller did not ask " +
+			"about. A HEURISTIC NEVER SELECTS: one hit -> unknown(heuristic_only), several -> " +
+			"unknown(multiple_candidates); both list every candidate so the caller can confirm one by " +
+			"passing it as root. Only the env / PATH / manifest rules yield ok with root+rule_fired. " +
+			"None found -> unknown(no_candidates_found) — never reports \"not installed\"; supply " +
+			"root explicitly instead.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -51,10 +56,28 @@ func registerTools(vs *VcpkgServer) {
 			"never fail the call. Diagnostics are matched by anchored MSVC/GCC/Clang diagnostic " +
 			"POSITION shape, never by exit code (libtool and similar wrappers can erase it) and never " +
 			"by a bare substring scan (a filename like error_estimator.h must not be mistaken for a " +
-			"diagnostic). Returns tri-state ok|failed|unknown(reason) plus log_paths[] so an agent can " +
+			"diagnostic). Recognized shapes cover MSVC with or without a diagnostic code, clang-cl, " +
+			"GCC/Clang, link.exe/lld-link and ninja FAILED. Scanned phase logs are extract, patch, " +
+			"config, build (build-<triplet>-<cfg>-*.log, written by non-ninja/autotools/NMAKE ports) " +
+			"and install. In a nested build the FIRST recognized diagnostic is the headline, and " +
+			"causeless build-wrapper lines (NMAKE's U-series) are never eligible to be it. " +
+			"Returns tri-state ok|failed|unknown(reason) plus log_paths[] so an agent can " +
 			"always read further itself, context_source[] naming exactly which sources the answer " +
 			"rests on, and overlay_chain[] echoed back (never resolved to a winner — that is the " +
-			"separate, out-of-scope vcpkg_port_resolution tool).",
+			"separate, out-of-scope vcpkg_port_resolution tool). " +
+			"FAILS CLOSED on incomplete evidence: `failed` requires an ERROR-severity diagnostic from a " +
+			"primary phase log. A warning-only log -> unknown(no_failure_diagnostic) (that is the normal " +
+			"state of a successful C++ build); an error found ONLY in a CMakeConfigureLog.yaml.log " +
+			"try_compile dump -> unknown(capability_probe_only) (a failing capability probe is normal " +
+			"feature detection); an unreadable relevant log -> unknown(phase_log_unreadable); an " +
+			"unreadable root or port directory -> unknown(buildtrees_root_unreadable|port_dir_unreadable), " +
+			"NEVER the verified-absence reasons buildtrees_cleaned|port_dir_not_found. root and " +
+			"buildtrees_root MUST be absolute (a relative root would bind to the hub daemon's working " +
+			"directory) -> unknown(relative_root); port must be one legal vcpkg port name -> " +
+			"unknown(invalid_port_name). A build_failed_log's failed_ports list can prove a port did NOT " +
+			"fail only when it is provably exhaustive (clean scan AND len(failed_ports) == " +
+			"build_failed_count); otherwise the tool falls back to buildtree evidence and notes " +
+			"wrapper_failed_ports_list_incomplete. Diagnostics found are returned whatever the verdict.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -68,11 +91,11 @@ func registerTools(vs *VcpkgServer) {
 				},
 				"root": map[string]any{
 					"type":        "string",
-					"description": "Optional vcpkg root override, used to derive <root>/buildtrees when buildtrees_root is not given directly.",
+					"description": "Optional ABSOLUTE vcpkg root override, used to derive <root>/buildtrees when buildtrees_root is not given directly. A relative value returns unknown(relative_root).",
 				},
 				"buildtrees_root": map[string]any{
 					"type":        "string",
-					"description": "Optional explicit buildtrees root override (matches vcpkg's --x-buildtrees-root). Highest precedence for locating logs.",
+					"description": "Optional explicit ABSOLUTE buildtrees root override (matches vcpkg's --x-buildtrees-root). Highest precedence for locating logs. A relative value returns unknown(relative_root).",
 				},
 				"build_failed_log": map[string]any{
 					"type":        "string",
@@ -135,7 +158,18 @@ func registerTools(vs *VcpkgServer) {
 	vs.server.AddTool(&mcp.Tool{
 		Name: "vcpkg_patches_apply",
 		Description: "Statically analyze a portfile to report which patches WOULD apply for a triplet, in order. It applies nothing. " +
-			"Guards that static analysis cannot decide are returned in an undecidable bucket instead of guessed either way.",
+			"Guards that static analysis cannot decide are returned in an undecidable bucket instead of guessed either way. " +
+			"Triplet variables are read from the ACTUAL triplet file located via overlay_triplets / " +
+			"vcpkg_root, NEVER derived from the triplet NAME (a custom triplet named corp-windows can " +
+			"set VCPKG_LIBRARY_LINKAGE static, and a name like `cl` implies nothing at all). With no " +
+			"triplet file reachable, every triplet variable is unresolved and the guards depending on " +
+			"one land in undecidable — supply var_overrides to decide them explicitly. triplet_file " +
+			"reports which file the facts came from. " +
+			"Each applied entry carries a tri-state existence (exists|absent|unreadable): only a " +
+			"VERIFIED absence is reported in missing[]. Paths the filesystem refused to answer for go " +
+			"in unreadable[] and force unknown(triplet_file_unreadable|patch_path_unreadable|" +
+			"orphan_scan_incomplete) — every bucket is still returned, so a partial inventory is never " +
+			"silently presented as a complete one.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -145,11 +179,16 @@ func registerTools(vs *VcpkgServer) {
 				},
 				"triplet": map[string]any{
 					"type":        "string",
-					"description": "Required triplet used to evaluate patch guards.",
+					"description": "Required triplet name, used to locate its triplet file and to evaluate patch guards.",
 				},
 				"vcpkg_root": map[string]any{
 					"type":        "string",
-					"description": "Optional vcpkg root for $ENV{VCPKG_ROOT} expansion in patch paths.",
+					"description": "Optional ABSOLUTE vcpkg root, for $ENV{VCPKG_ROOT} expansion in patch paths and for the builtin triplet lookup (<root>/triplets, <root>/triplets/community).",
+				},
+				"overlay_triplets": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Optional ABSOLUTE overlay-triplets directories in precedence order (matches vcpkg's --overlay-triplets); the first directory containing <triplet>.cmake wins, ahead of the builtin triplets.",
 				},
 				"port_name": map[string]any{
 					"type":        "string",
@@ -158,7 +197,7 @@ func registerTools(vs *VcpkgServer) {
 				"var_overrides": map[string]any{
 					"type":                 "object",
 					"additionalProperties": map[string]any{"type": "string"},
-					"description":          "Optional explicit CMake variable values used while evaluating guards.",
+					"description":          "Optional explicit CMake variable values used while evaluating guards. Outrank triplet-file facts, and are the way to decide variables vcpkg derives at build time (VCPKG_TARGET_IS_*, VCPKG_CROSSCOMPILING, ...).",
 				},
 			},
 		},

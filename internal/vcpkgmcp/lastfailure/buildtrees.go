@@ -1,9 +1,14 @@
 package lastfailure
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
 // This file scans a vcpkg buildtrees layout directly — the PRIMARY,
@@ -60,10 +65,58 @@ func (osFS) ReadFile(p string) ([]byte, error)       { return os.ReadFile(p) }
 // DefaultFS wires FS to the real OS.
 func DefaultFS() FS { return osFS{} }
 
-// dirExists reports whether path exists and is a directory.
-func dirExists(fsys FS, path string) bool {
-	fi, err := fsys.Stat(path)
-	return err == nil && fi.IsDir()
+// probeDir reports whether path is an existing directory, TRI-STATE.
+//
+// The boolean predecessor of this function returned `err == nil &&
+// fi.IsDir()`, which mapped a permission-denied / sharing-violation /
+// transient-I/O Stat onto the same `false` as a genuinely absent directory.
+// Callers then reported that false as unknown(buildtrees_cleaned) or
+// unknown(port_dir_not_found) — two VERIFIED-absence claims manufactured out
+// of a failure to look. Those reasons are now reserved for
+// evidence.PresenceAbsent, and PresenceUnreadable gets its own reason.
+func probeDir(fsys FS, path string) (evidence.Presence, error) {
+	return evidence.ProbeDir(fsys.Stat, path)
+}
+
+// portNameRE is the documented vcpkg port-name rule: "The name must be
+// lowercase ASCII letters, digits, or hyphens (-). It must not start nor end
+// with a hyphen." (Microsoft Learn, vcpkg.json Reference, "name" field:
+// https://learn.microsoft.com/en-us/vcpkg/reference/vcpkg-json).
+//
+// A port name is used as ONE path segment under the buildtrees root, so it
+// must be validated as one before being joined: `filepath.Join(root, port)`
+// happily normalises `..\outside` into a sibling of the root, which would
+// make this tool scan, read and report logs from OUTSIDE the explicit root
+// the caller granted it.
+var portNameRE = regexp.MustCompile(`^[a-z0-9]+(?:-+[a-z0-9]+)*$`)
+
+// errPortEscapesRoot marks a port whose joined path leaves buildtreesRoot.
+var errPortEscapesRoot = errors.New("port path escapes the buildtrees root")
+
+// portDirWithin validates port as a single legal vcpkg port-name segment and
+// returns its directory under buildtreesRoot, guaranteeing the result stays
+// beneath that root.
+//
+// Both checks are kept, deliberately: the name rule rejects the input shape,
+// and the containment check is the actual security boundary — it holds even
+// if the name rule is ever loosened, and it catches platform-specific path
+// normalisation (Windows alternate separators, trailing dots/spaces, 8.3
+// aliases) that a charset regex alone cannot reason about.
+func portDirWithin(buildtreesRoot, port string) (string, error) {
+	if !portNameRE.MatchString(port) {
+		return "", fmt.Errorf("%q is not a legal vcpkg port name "+
+			"(lowercase ASCII letters, digits and hyphens; must not start or end with a hyphen)", port)
+	}
+	root := filepath.Clean(buildtreesRoot)
+	joined := filepath.Clean(filepath.Join(root, port))
+	rel, err := filepath.Rel(root, joined)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", errPortEscapesRoot, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("%w: %q resolves to %q, outside %q", errPortEscapesRoot, port, joined, root)
+	}
+	return joined, nil
 }
 
 // phaseLogFile is one classified phase-log file inside a port directory.
@@ -136,6 +189,16 @@ func classifyPortDir(fsys FS, portDir, triplet string) (phases []phaseLogFile, o
 	configErrName := "config-" + triplet + "-err.log"
 	installPrefix := "install-" + triplet + "-"
 	patchPrefix := "patch-" + triplet + "-"
+	// buildPrefix classifies build-<triplet>-<cfg>-{out,err}.log, the log a
+	// NON-ninja build step writes (autotools/make/NMAKE ports, and any port
+	// whose vcpkg_build_* helper runs a separate build command). This was
+	// previously unclassified and therefore NEVER diagnostic-scanned: the
+	// file still appeared in log_paths (it fell through to otherLogPaths), so
+	// the answer LOOKED complete while the real error was never read.
+	// Verified field failure: three real libmesh:cl failures whose
+	// build-cl-dbg-err.log held an unambiguous first error each time, all
+	// reported as unknown(no_diagnostic_found).
+	buildPrefix := "build-" + triplet + "-"
 	stdoutName := "stdout-" + triplet + ".log"
 
 	for _, e := range entries {
@@ -162,6 +225,12 @@ func classifyPortDir(fsys FS, portDir, triplet string) (phases []phaseLogFile, o
 		case strings.HasPrefix(name, installPrefix) && strings.HasSuffix(name, "-err.log"):
 			cfg := strings.TrimSuffix(strings.TrimPrefix(name, installPrefix), "-err.log")
 			phases = append(phases, phaseLogFile{Phase: PhaseInstall, Stream: "err", Config: cfg, Path: full})
+		case strings.HasPrefix(name, buildPrefix) && strings.HasSuffix(name, "-out.log"):
+			cfg := strings.TrimSuffix(strings.TrimPrefix(name, buildPrefix), "-out.log")
+			phases = append(phases, phaseLogFile{Phase: PhaseBuild, Stream: "out", Config: cfg, Path: full})
+		case strings.HasPrefix(name, buildPrefix) && strings.HasSuffix(name, "-err.log"):
+			cfg := strings.TrimSuffix(strings.TrimPrefix(name, buildPrefix), "-err.log")
+			phases = append(phases, phaseLogFile{Phase: PhaseBuild, Stream: "err", Config: cfg, Path: full})
 		case strings.HasPrefix(name, patchPrefix) && strings.HasSuffix(name, "-out.log"):
 			// Config field repurposed to hold the 0-based patch ordinal N
 			// (patch-<triplet>-<N>-out.log) — same "extra descriptor" slot

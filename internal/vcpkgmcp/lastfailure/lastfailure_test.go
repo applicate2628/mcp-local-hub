@@ -2,12 +2,29 @@ package lastfailure
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/vcpkgmcp/discovery"
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
+
+// absPath makes a testdata-relative fixture path absolute.
+//
+// Every root-like parameter must be absolute (see ReasonRelativeRoot): a
+// relative root binds to the process working directory, which for the real
+// tool is the hub daemon's, not the caller's. That this helper had to be
+// introduced across the whole suite IS the evidence that the tool was
+// previously exercised only in its CWD-bound mode.
+func absPath(t *testing.T, rel string) string {
+	t.Helper()
+	p, err := filepath.Abs(rel)
+	if err != nil {
+		t.Fatalf("filepath.Abs(%q): %v", rel, err)
+	}
+	return p
+}
 
 func testDeps() Deps {
 	return Deps{
@@ -31,7 +48,10 @@ func TestParseWrapperContent_RealShapedFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	info, ok := ParseWrapperContent(data)
+	info, ok, perr := ParseWrapperContent(data)
+	if perr != nil {
+		t.Fatalf("scan error on a well-formed wrapper file: %v", perr)
+	}
 	if !ok {
 		t.Fatal("expected ok=true for a well-formed wrapper file")
 	}
@@ -60,7 +80,7 @@ func TestParseWrapperContent_Malformed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
-	_, ok := ParseWrapperContent(data)
+	_, ok, _ := ParseWrapperContent(data)
 	if ok {
 		t.Fatal("expected ok=false for an unrecognizable file — must degrade, never fabricate")
 	}
@@ -201,7 +221,7 @@ func TestDetectInterrupted(t *testing.T) {
 func TestLastFailure_Case_A_BuildtreesPlusWrapper(t *testing.T) {
 	// (a) buildtrees present + wrapper present.
 	args := Args{
-		BuildtreesRoot: "testdata/failing_port/buildtrees",
+		BuildtreesRoot: absPath(t, "testdata/failing_port/buildtrees"),
 		BuildFailedLog: "testdata/wrapper_ok.log",
 		// Port omitted on purpose: exactly one failed port in the wrapper.
 	}
@@ -239,7 +259,7 @@ func TestLastFailure_Case_A_BuildtreesPlusWrapper(t *testing.T) {
 func TestLastFailure_Case_B_BuildtreesOnly_NoWrapper(t *testing.T) {
 	args := Args{
 		Port:           "somelib",
-		BuildtreesRoot: "testdata/failing_port/buildtrees",
+		BuildtreesRoot: absPath(t, "testdata/failing_port/buildtrees"),
 		// BuildFailedLog deliberately omitted.
 	}
 	res := LastFailure(args, testDeps())
@@ -261,7 +281,7 @@ func TestLastFailure_Case_B_BuildtreesOnly_NoWrapper(t *testing.T) {
 func TestLastFailure_Case_C_WrapperMalformed_Degrades(t *testing.T) {
 	args := Args{
 		Port:           "somelib",
-		BuildtreesRoot: "testdata/failing_port/buildtrees",
+		BuildtreesRoot: absPath(t, "testdata/failing_port/buildtrees"),
 		BuildFailedLog: "testdata/wrapper_malformed.log",
 	}
 	res := LastFailure(args, testDeps())
@@ -283,7 +303,7 @@ func TestLastFailure_Case_C_WrapperMalformed_Degrades(t *testing.T) {
 func TestLastFailure_Case_D_BuildtreesCleaned(t *testing.T) {
 	args := Args{
 		Port:           "somelib",
-		BuildtreesRoot: "testdata/this_buildtrees_root_does_not_exist",
+		BuildtreesRoot: absPath(t, "testdata/this_buildtrees_root_does_not_exist"),
 	}
 	res := LastFailure(args, testDeps())
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonBuildtreesCleaned {
@@ -294,7 +314,7 @@ func TestLastFailure_Case_D_BuildtreesCleaned(t *testing.T) {
 func TestLastFailure_PortDirNotFound(t *testing.T) {
 	args := Args{
 		Port:           "does-not-exist-anywhere",
-		BuildtreesRoot: "testdata/failing_port/buildtrees",
+		BuildtreesRoot: absPath(t, "testdata/failing_port/buildtrees"),
 	}
 	res := LastFailure(args, testDeps())
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonPortDirNotFound {
@@ -311,7 +331,7 @@ func TestLastFailure_NoPhaseLogsFound(t *testing.T) {
 	args := Args{
 		Port:           "sqlite3",
 		Triplet:        "wingpl",
-		BuildtreesRoot: "testdata/wingpl_like/buildtrees",
+		BuildtreesRoot: absPath(t, "testdata/wingpl_like/buildtrees"),
 	}
 	res := LastFailure(args, testDeps())
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonNoPhaseLogsFound {
@@ -329,7 +349,7 @@ func TestLastFailure_SuccessfulPort_NoDiagnostic_NeverFabricates(t *testing.T) {
 	args := Args{
 		Port:           "boost-algorithm",
 		Triplet:        "wingpl",
-		BuildtreesRoot: "testdata/wingpl_like/buildtrees",
+		BuildtreesRoot: absPath(t, "testdata/wingpl_like/buildtrees"),
 	}
 	res := LastFailure(args, testDeps())
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonNoDiagnosticFound {
@@ -382,7 +402,7 @@ func TestLastFailure_MultipleFailedPortsAmbiguous_NeverSilentlyPicks(t *testing.
 func TestLastFailure_BuildInterrupted_NotReportedAsFailure(t *testing.T) {
 	args := Args{
 		Port:           "interruptedlib",
-		BuildtreesRoot: "testdata/failing_port/buildtrees",
+		BuildtreesRoot: absPath(t, "testdata/failing_port/buildtrees"),
 	}
 	res := LastFailure(args, testDeps())
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonBuildInterrupted {
@@ -397,7 +417,7 @@ func TestLastFailure_BuildInterrupted_NotReportedAsFailure(t *testing.T) {
 func TestLastFailure_PatchPhaseFileRecognized_InSituWithRealFailure(t *testing.T) {
 	args := Args{
 		Port:           "somelib",
-		BuildtreesRoot: "testdata/failing_port/buildtrees",
+		BuildtreesRoot: absPath(t, "testdata/failing_port/buildtrees"),
 	}
 	res := LastFailure(args, testDeps())
 	if res.Status != evidence.StatusFailed {
@@ -429,7 +449,7 @@ func TestLastFailure_PatchPhaseFileRecognized_InSituWithRealFailure(t *testing.T
 func TestLastFailure_SuccessfulPatchAlone_NeverFabricatesFailure(t *testing.T) {
 	args := Args{
 		Port:           "patchonlylib",
-		BuildtreesRoot: "testdata/failing_port/buildtrees",
+		BuildtreesRoot: absPath(t, "testdata/failing_port/buildtrees"),
 	}
 	res := LastFailure(args, testDeps())
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonNoDiagnosticFound {
@@ -440,31 +460,41 @@ func TestLastFailure_SuccessfulPatchAlone_NeverFabricatesFailure(t *testing.T) {
 	}
 }
 
-// TestLastFailure_CapabilityProbeLogFallback_NotedAsSuch: no primary phase
-// log shows a failure, but a config-<triplet>-<cfg>-CMakeConfigureLog.yaml.log
-// artifact (a try_compile capability-probe dump) does. The tool must still
-// surface the diagnostic (never silently drop real evidence) but flag it
-// with the capability-probe note so a caller does not over-trust it as
-// strongly as a primary-phase-log diagnostic.
-func TestLastFailure_CapabilityProbeLogFallback_NotedAsSuch(t *testing.T) {
+// TestLastFailure_CapabilityProbeOnly_NeverReportedAsFailure: no primary
+// phase log shows a failure, but a
+// config-<triplet>-<cfg>-CMakeConfigureLog.yaml.log artifact (a try_compile
+// capability-probe dump) does.
+//
+// A failing try_compile is the NORMAL mechanism of CMake feature detection —
+// FindThreads.cmake probing for pthread.h fails on every MSVC build ever
+// made — so it does NOT establish that the port failed. Previously this
+// produced status=failed with the probe caveat demoted to an advisory note,
+// i.e. a confident wrong verdict that an agent consuming `status` would act
+// on without ever reading the notes. The diagnostic is still returned; only
+// the VERDICT changes.
+func TestLastFailure_CapabilityProbeOnly_NeverReportedAsFailure(t *testing.T) {
 	args := Args{
 		Port:           "probelib",
-		BuildtreesRoot: "testdata/failing_port/buildtrees",
+		BuildtreesRoot: absPath(t, "testdata/failing_port/buildtrees"),
 	}
 	res := LastFailure(args, testDeps())
-	if res.Status != evidence.StatusFailed {
-		t.Fatalf("status = %v, want failed (recovered from the capability-probe log); result=%+v", res.Status, res)
+	if res.Status != evidence.StatusUnknown {
+		t.Fatalf("status = %v, want unknown — a try_compile probe failure is not a port failure; result=%+v", res.Status, res)
+	}
+	if res.Reason != ReasonCapabilityProbeOnly {
+		t.Fatalf("reason = %v, want %v", res.Reason, ReasonCapabilityProbeOnly)
+	}
+	// The evidence must still be returned — the caller judges it.
+	if !hasErrorDiagnostic(res.Diagnostics, "C1083") {
+		t.Errorf("diagnostics = %+v, want the C1083 error still surfaced as evidence", res.Diagnostics)
 	}
 	if !containsNote(res.Notes, NoteDiagnosticFromCapabilityProbeLog) {
-		t.Errorf("notes = %v, want diagnostic_from_capability_probe_log", res.Notes)
-	}
-	if !hasErrorDiagnostic(res.Diagnostics, "C1083") {
-		t.Errorf("diagnostics = %+v, want the C1083 fatal error recovered from the probe log", res.Diagnostics)
+		t.Errorf("notes = %v, want diagnostic_from_capability_probe_log retained", res.Notes)
 	}
 }
 
 func TestLastFailure_PortNotSpecified_NoWrapperNoPort(t *testing.T) {
-	res := LastFailure(Args{BuildtreesRoot: "testdata/failing_port/buildtrees"}, testDeps())
+	res := LastFailure(Args{BuildtreesRoot: absPath(t, "testdata/failing_port/buildtrees")}, testDeps())
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonPortNotSpecified {
 		t.Fatalf("got status=%v reason=%v, want unknown/port_not_specified", res.Status, res.Reason)
 	}

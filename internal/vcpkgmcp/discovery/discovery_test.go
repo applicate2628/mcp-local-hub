@@ -2,8 +2,10 @@ package discovery
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +37,25 @@ func (fs fakeFS) stat(path string) (os.FileInfo, error) {
 		return fakeFileInfo{name: filepath.Base(clean)}, nil
 	}
 	return nil, os.ErrNotExist
+}
+
+// errPermission is a non-ErrNotExist Stat failure, the shape a permission
+// denial / sharing violation / transient I/O error takes. It must never be
+// read as "absent".
+var errPermission = fs.ErrPermission
+
+// unreadableFS makes every Stat under one prefix fail with a non-ENOENT
+// error, so tests can exercise the "the OS refused to tell us" branch.
+type unreadableFS struct {
+	base   fakeFS
+	prefix string
+}
+
+func (u unreadableFS) stat(path string) (os.FileInfo, error) {
+	if strings.HasPrefix(filepath.Clean(path), filepath.Clean(u.prefix)) {
+		return nil, errPermission
+	}
+	return u.base.stat(path)
 }
 
 func baseDeps(goos string, files fakeFS) Deps {
@@ -103,8 +124,8 @@ func TestDiscoverRoot_PathLookup(t *testing.T) {
 
 func TestDiscoverRoot_ManifestWalkup(t *testing.T) {
 	files := fakeFS{
-		filepath.Clean(`C:\work\project\vcpkg.json`):          true,
-		filepath.Clean(`C:\work\project\vcpkg\vcpkg.exe`):     true,
+		filepath.Clean(`C:\work\project\vcpkg.json`):      true,
+		filepath.Clean(`C:\work\project\vcpkg\vcpkg.exe`): true,
 	}
 	deps := baseDeps("windows", files)
 	res := DiscoverRoot("", deps)
@@ -138,12 +159,31 @@ func TestDiscoverRoot_ManifestFoundButNoSubmoduleBinary_FallsThrough(t *testing.
 	}
 }
 
-func TestDiscoverRoot_HeuristicSingleHit(t *testing.T) {
+// TestDiscoverRoot_HeuristicSingleHit_NeverSelected is the mutation proof
+// for "a heuristic NEVER selects": a single hardcoded machine-layout match
+// is a candidate to confirm, not an authoritative root. Before this, one
+// unrelated C:\vcpkg on the box made the tool answer ok and sent every
+// downstream tool to analyse that installation.
+func TestDiscoverRoot_HeuristicSingleHit_NeverSelected(t *testing.T) {
 	files := fakeFS{filepath.Clean(`C:\vcpkg\vcpkg.exe`): true}
 	deps := baseDeps("windows", files)
 	res := DiscoverRoot("", deps)
-	if res.Status != evidence.StatusOK || res.RuleFired != RuleHeuristic || res.Root != `C:\vcpkg` {
-		t.Fatalf("got %+v", res)
+	if res.Status != evidence.StatusUnknown {
+		t.Fatalf("status = %v, want unknown — a heuristic match is never an authoritative root", res.Status)
+	}
+	if res.Reason != ReasonHeuristicOnly {
+		t.Fatalf("reason = %v, want %v", res.Reason, ReasonHeuristicOnly)
+	}
+	if res.Root != "" {
+		t.Fatalf("root = %q, want empty — nothing was SELECTED", res.Root)
+	}
+	if res.RuleFired != "" {
+		t.Fatalf("rule_fired = %q, want empty — no rule concluded", res.RuleFired)
+	}
+	// The candidate must still be surfaced so the caller can confirm it.
+	if len(res.Candidates) != 1 || res.Candidates[0].Path != `C:\vcpkg` ||
+		res.Candidates[0].Rule != RuleHeuristic {
+		t.Fatalf("candidates = %+v, want the single heuristic candidate reported", res.Candidates)
 	}
 }
 
@@ -173,26 +213,73 @@ func TestDiscoverRoot_NoneFound_OffersManualSpecification(t *testing.T) {
 	}
 }
 
-func TestDiscoverRoot_ExplicitInvalid_StillReported(t *testing.T) {
-	// Explicit param given but wrong (no vcpkg binary there): must not
-	// silently fall through to a heuristic hit without saying so.
-	files := fakeFS{filepath.Clean(`C:\vcpkg\vcpkg.exe`): true} // valid heuristic candidate
-	deps := baseDeps("windows", files)
-	res := DiscoverRoot(`C:\wrong`, deps)
-	if res.Status != evidence.StatusOK {
-		t.Fatalf("status = %v, want ok (heuristic still resolves)", res.Status)
+// TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough is the
+// mutation proof for "an explicit root is TERMINAL". The caller asks about
+// C:\wanted; a valid VCPKG_ROOT AND a valid heuristic hit both point
+// somewhere else. Answering ok for either would silently redirect every
+// downstream tool to an installation the caller never named.
+func TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough(t *testing.T) {
+	files := fakeFS{
+		filepath.Clean(`D:\other\vcpkg.exe`): true, // valid env root
+		filepath.Clean(`C:\vcpkg\vcpkg.exe`): true, // valid heuristic candidate
 	}
-	if res.RuleFired != RuleHeuristic {
-		t.Fatalf("rule = %v, want heuristic (explicit was invalid)", res.RuleFired)
+	deps := baseDeps("windows", files)
+	deps.Getenv = func(k string) string {
+		if k == "VCPKG_ROOT" {
+			return `D:\other`
+		}
+		return ""
+	}
+	deps.LookPath = func(string) (string, error) { return `D:\other\vcpkg.exe`, nil }
+
+	res := DiscoverRoot(`C:\wanted`, deps)
+	if res.Status != evidence.StatusUnknown {
+		t.Fatalf("status = %v, want unknown — an invalid EXPLICIT root is terminal", res.Status)
+	}
+	if res.Reason != ReasonExplicitRootInvalid {
+		t.Fatalf("reason = %v, want %v", res.Reason, ReasonExplicitRootInvalid)
+	}
+	if res.Root != "" {
+		t.Fatalf("root = %q, want empty — resolving ANY other installation answers a question nobody asked", res.Root)
+	}
+	// The rejected explicit value must be the one thing reported back.
+	if len(res.Candidates) != 1 || res.Candidates[0].Path != `C:\wanted` ||
+		res.Candidates[0].Rule != RuleExplicit {
+		t.Fatalf("candidates = %+v, want exactly the rejected explicit root", res.Candidates)
+	}
+	for _, c := range res.Candidates {
+		if c.Rule == RuleEnv || c.Rule == RulePath || c.Rule == RuleHeuristic {
+			t.Fatalf("lower-precedence rule %v was evaluated despite an explicit root", c.Rule)
+		}
 	}
 }
 
-func TestDiscoverRoot_POSIXHeuristics(t *testing.T) {
+// TestDiscoverRoot_ExplicitUnreadable_DistinctFromInvalid: a probe that
+// FAILS is not evidence of absence, and the two cases have different
+// remedies (fix access vs. correct the path), so they get different reasons.
+func TestDiscoverRoot_ExplicitUnreadable_DistinctFromInvalid(t *testing.T) {
+	deps := baseDeps("windows", fakeFS{})
+	deps.Stat = unreadableFS{base: fakeFS{}, prefix: `C:\locked`}.stat
+
+	res := DiscoverRoot(`C:\locked`, deps)
+	if res.Status != evidence.StatusUnknown {
+		t.Fatalf("status = %v, want unknown", res.Status)
+	}
+	if res.Reason != ReasonExplicitRootUnreadable {
+		t.Fatalf("reason = %v, want %v (an unreadable probe must never be reported as an invalid/absent root)",
+			res.Reason, ReasonExplicitRootUnreadable)
+	}
+}
+
+func TestDiscoverRoot_POSIXHeuristics_NeverSelected(t *testing.T) {
 	files := fakeFS{filepath.Clean("/opt/vcpkg/vcpkg"): true}
 	deps := baseDeps("linux", files)
 	deps.UserHomeDir = func() (string, error) { return "/home/op", nil }
 	res := DiscoverRoot("", deps)
-	if res.Status != evidence.StatusOK || res.Root != "/opt/vcpkg" {
-		t.Fatalf("got %+v", res)
+	if res.Status != evidence.StatusUnknown || res.Reason != ReasonHeuristicOnly {
+		t.Fatalf("got status=%v reason=%v, want unknown/heuristic_only", res.Status, res.Reason)
+	}
+	if len(res.Candidates) != 1 || res.Candidates[0].Path != "/opt/vcpkg" {
+		t.Fatalf("candidates = %+v, want /opt/vcpkg reported as a candidate", res.Candidates)
 	}
 }

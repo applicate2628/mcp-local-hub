@@ -42,11 +42,38 @@ var (
 	gccClangDiagRE = regexp.MustCompile(
 		`^(?P<file>.+?):(?P<line>\d+):(?P<col>\d+):\s+(?P<sev>fatal error|error|warning|note):\s*(?P<msg>.+)$`)
 
+	// The diagnostic CODE is OPTIONAL. cl.exe always emits one (error C2065),
+	// but clang-cl in MSVC-compatible mode emits the same POSITION shape with
+	// no code at all — verified against three real operator failures in a
+	// nested vcpkg -> make -> NMAKE -> cmake --build -> clang-cl build:
+	//
+	//	libsrc/general/mystring.cpp(63,15): error: definition of dllimport static field not allowed
+	//	libsrc/core/bitarray.cpp(164,13): error: cannot use 'throw' with exceptions disabled
+	//
+	// Requiring the code made both invisible. Making it optional cannot
+	// resurrect the filename trap: the shape still demands a parenthesised
+	// LINE NUMBER at the start of the line, which no "-- Installing: .../
+	// error_category.hpp" status line has.
 	msvcCompileDiagRE = regexp.MustCompile(
-		`^(?P<file>[^()\r\n]+)\((?P<line>\d+)(?:,\d+)?\):\s+(?P<sev>fatal error|error|warning)\s+(?P<code>[A-Za-z]+\d+)\s*:\s*(?P<msg>.+)$`)
+		`^(?P<file>[^()\r\n]+)\((?P<line>\d+)(?:,\d+)?\):\s+(?P<sev>fatal error|error|warning)(?:\s+(?P<code>[A-Za-z]+\d+))?\s*:\s*(?P<msg>.+)$`)
 
 	msvcLinkDiagRE = regexp.MustCompile(
 		`^(?P<file>[^:()\r\n]+?)\s*:\s+(?P<sev>fatal error|error|warning)\s+(?P<code>LNK\d+)\s*:\s*(?P<msg>.+)$`)
+
+	// toolDiagRE matches a diagnostic emitted by a compiler/linker DRIVER,
+	// which names itself instead of a source position — verified real sample
+	// from the same operator failure:
+	//
+	//	lld-link: error: undefined symbol: __declspec(dllimport) void __cdecl nglib::Ng_Init(void)
+	//
+	// The driver list is a CLOSED allowlist rather than a generic
+	// `^word: error:` pattern on purpose. A generic form would match build
+	// wrappers that carry no cause — above all NMAKE's U-series
+	// ("NMAKE : fatal error U1077: 'cd' : return code '0x2'"), which is
+	// exactly the noise this class of nested build buries the real error
+	// under. See wrapperNoiseRE.
+	toolDiagRE = regexp.MustCompile(
+		`^(?P<file>clang-cl|lld-link|clang\+\+|clang|link|cl|ld|gcc|g\+\+)\s*:\s+(?P<sev>fatal error|error|warning)\s*:\s*(?P<msg>.+)$`)
 
 	// ninjaFailedRE matches ninja's own build-step failure summary line,
 	// e.g. `FAILED: [code=2] CMakeFiles/cmTC_e5bae.dir/src.cxx.obj` —
@@ -78,6 +105,30 @@ var interruptMarkers = []string{
 	"ninja: build stopped: interrupted by user.",
 }
 
+// wrapperNoiseRE matches a BUILD-WRAPPER failure line: a tool reporting that
+// a command it launched exited non-zero, without saying why.
+//
+// NMAKE's U-series is the observed case. In a nested vcpkg -> autotools make
+// -> NMAKE -> cmake --build -> clang-cl failure, the real compiler error sits
+// thousands of lines up while the TAIL of the log is a cascade of
+//
+//	NMAKE : fatal error U1077: 'cd' : return code '0x2'
+//
+// one per wrapper layer. These carry no cause, so they must never be reported
+// as the diagnostic: doing so would hand the operator "return code 0x2"
+// instead of "cannot use 'throw' with exceptions disabled". A log whose ONLY
+// matches are wrapper noise yields unknown(no_diagnostic_found) with
+// log_paths — honest, and the same principle as ContainsFailureDiagnostic
+// one layer up.
+var wrapperNoiseRE = regexp.MustCompile(`^NMAKE\s*:\s*(?:fatal\s+)?error\s+U\d+`)
+
+// isWrapperNoise reports whether an already-trimmed line is a causeless
+// build-wrapper failure. Checked BEFORE any diagnostic shape, so no present
+// or future pattern can promote wrapper noise to a headline diagnostic.
+func isWrapperNoise(line string) bool {
+	return wrapperNoiseRE.MatchString(line)
+}
+
 // DetectInterrupted reports whether content carries a ninja user-interrupt
 // marker. A "FAILED:" line in the same log must NOT be reported as a real
 // build failure when this is true — the build was stopped, not broken.
@@ -106,6 +157,9 @@ func normalizeSeverity(sev string) string {
 // "error"/"warning" with no recognized position, which is deliberately
 // NOT treated as a diagnostic (that would resurrect the filename trap).
 func matchDiagnosticLine(line string) (Diagnostic, bool) {
+	if isWrapperNoise(line) {
+		return Diagnostic{}, false
+	}
 	if m := gccClangDiagRE.FindStringSubmatch(line); m != nil {
 		lineNum, _ := strconv.Atoi(m[gccClangDiagRE.SubexpIndex("line")])
 		return Diagnostic{
@@ -131,6 +185,16 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 			Text:     line,
 		}, true
 	}
+	if m := toolDiagRE.FindStringSubmatch(line); m != nil {
+		return Diagnostic{
+			// A driver diagnostic names no source position, so the driver
+			// itself is the most specific locator available — same choice as
+			// the ninja branch below, which reports the failing target.
+			File:     strings.TrimSpace(m[toolDiagRE.SubexpIndex("file")]),
+			Severity: normalizeSeverity(m[toolDiagRE.SubexpIndex("sev")]),
+			Text:     line,
+		}, true
+	}
 	if m := ninjaFailedRE.FindStringSubmatch(line); m != nil {
 		return Diagnostic{
 			File:     strings.TrimSpace(m[ninjaFailedRE.SubexpIndex("target")]),
@@ -139,6 +203,32 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 		}, true
 	}
 	return Diagnostic{}, false
+}
+
+// SeverityError is the normalized severity that — and only that — can
+// establish a build FAILURE. normalizeSeverity folds MSVC's "fatal error"
+// into it; "warning" and "note" are deliberately NOT in this set.
+const SeverityError = "error"
+
+// ContainsFailureDiagnostic reports whether diags contains at least one
+// diagnostic that actually establishes a failure.
+//
+// The matcher recognizes warnings and notes on purpose (they are useful
+// evidence, and a `-Werror` build's warning is genuinely interesting), but
+// recognizing a line is not the same as concluding the build broke. Before
+// this predicate existed, ANY non-empty diagnostic set was converted to
+// status=failed, so a log whose only match was
+// `file.cpp:1:1: warning: deprecated` — the normal state of most successful
+// C++ builds — was reported as a build failure with a confident phase and a
+// headline "diagnostic". A warning-only log establishes nothing about
+// success or failure, and must stay unknown(no_failure_diagnostic).
+func ContainsFailureDiagnostic(diags []Diagnostic) bool {
+	for _, d := range diags {
+		if d.Severity == SeverityError {
+			return true
+		}
+	}
+	return false
 }
 
 // maxDiagnosticsPerLog bounds how many matches ScanDiagnostics returns from

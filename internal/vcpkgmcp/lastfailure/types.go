@@ -82,6 +82,55 @@ const (
 	// toward fixing a bug that does not exist; the build was stopped, not
 	// broken. Deliberately distinct from ReasonNoDiagnosticFound.
 	ReasonBuildInterrupted Reason = "build_interrupted"
+
+	// --- Evidence-integrity reasons -------------------------------------
+	// The five reasons below all say "the tool declined to conclude because
+	// the evidence does not settle the question". They are kept as SEPARATE
+	// values rather than one blanket `insufficient_evidence` because each
+	// names a different operator remedy: pass an absolute path, fix an ACL,
+	// supply a complete wrapper, read the primary logs, distrust a probe.
+	// A single collapsed reason would be auditable but useless.
+
+	// ReasonRelativeRoot: a root-like parameter (root / buildtrees_root, or
+	// a --x-buildtrees-root recovered from a wrapper command line) is not
+	// absolute. A relative root silently binds to the HUB DAEMON's working
+	// directory — not the caller's, and not the one the recorded vcpkg
+	// invocation used — so every path derived from it points at an
+	// unrelated tree while the answer still looks confident.
+	ReasonRelativeRoot Reason = "relative_root"
+	// ReasonInvalidPortName: port is not a single legal vcpkg port-name
+	// segment (see portNameRE), or its joined path would escape the
+	// buildtrees root.
+	ReasonInvalidPortName Reason = "invalid_port_name"
+	// ReasonBuildtreesRootUnreadable: the buildtrees root could not be
+	// probed at all (permission denied, I/O error). Deliberately NOT
+	// ReasonBuildtreesCleaned — "cleaned" is a verified-absence claim and
+	// must never be manufactured from a failure to look.
+	ReasonBuildtreesRootUnreadable Reason = "buildtrees_root_unreadable"
+	// ReasonPortDirUnreadable: the port directory could not be probed at
+	// all. Sibling of ReasonBuildtreesRootUnreadable, same rationale
+	// relative to ReasonPortDirNotFound.
+	ReasonPortDirUnreadable Reason = "port_dir_unreadable"
+	// ReasonPhaseLogUnreadable: at least one phase log that is relevant to
+	// the verdict exists but could not be read. Any such log can change the
+	// answer — it may hold a later phase's error (changing which phase is
+	// reported), the only error in the port (changing unknown to failed),
+	// or an interrupt marker (changing a failure into a stopped build) —
+	// so a confident verdict cannot be produced while one is unread.
+	ReasonPhaseLogUnreadable Reason = "phase_log_unreadable"
+	// ReasonNoFailureDiagnostic: recognized diagnostics WERE found, but not
+	// one of them has error severity. Warnings and notes are evidence, not
+	// failures. Deliberately distinct from ReasonNoDiagnosticFound (nothing
+	// matched at all): here the caller gets the warnings back and can judge
+	// them, which is a materially different situation.
+	ReasonNoFailureDiagnostic Reason = "no_failure_diagnostic"
+	// ReasonCapabilityProbeOnly: the only error-severity diagnostic came
+	// from a CMakeConfigureLog.yaml.log try_compile dump, and no primary
+	// phase log independently identified a failure. A failing try_compile is
+	// the NORMAL mechanism of CMake feature detection (FindThreads.cmake
+	// probing for pthread.h fails on every MSVC build ever made), so it is
+	// evidence of a capability probe, not of a broken port.
+	ReasonCapabilityProbeOnly Reason = "capability_probe_only"
 )
 
 // Note is a small closed vocabulary of non-authoritative observations
@@ -92,15 +141,15 @@ const (
 type Note string
 
 const (
-	NoteWrapperAbsent              Note = "wrapper_absent"
-	NoteWrapperMalformed           Note = "wrapper_malformed_ignored"
-	NoteWrapperUsedForContext      Note = "wrapper_used_for_invocation_context"
+	NoteWrapperAbsent               Note = "wrapper_absent"
+	NoteWrapperMalformed            Note = "wrapper_malformed_ignored"
+	NoteWrapperUsedForContext       Note = "wrapper_used_for_invocation_context"
 	NotePortAutoSelectedFromWrapper Note = "port_auto_selected_from_wrapper_single_failure"
-	NoteTripletAutoSelectedFromDir Note = "triplet_auto_selected_from_buildtrees_dir"
-	NoteOverlayChainFromWrapper    Note = "overlay_chain_from_wrapper_invocation"
-	NoteOverlayChainFromEnv        Note = "overlay_chain_from_env"
-	NoteOverlayChainFromParam      Note = "overlay_chain_from_explicit_param"
-	NoteOverlayChainNone           Note = "overlay_chain_none_builtin_ports_only"
+	NoteTripletAutoSelectedFromDir  Note = "triplet_auto_selected_from_buildtrees_dir"
+	NoteOverlayChainFromWrapper     Note = "overlay_chain_from_wrapper_invocation"
+	NoteOverlayChainFromEnv         Note = "overlay_chain_from_env"
+	NoteOverlayChainFromParam       Note = "overlay_chain_from_explicit_param"
+	NoteOverlayChainNone            Note = "overlay_chain_none_builtin_ports_only"
 	// NoteWrapperConfirmsNoFailure: the wrapper's failed_ports list is
 	// present and does NOT name this port — real evidence the port did
 	// not fail in that run, not a guess.
@@ -115,6 +164,12 @@ const (
 	// a diagnostic from this source may describe a probe, not the port's
 	// actual build failure. Surfaced so a caller does not over-trust it.
 	NoteDiagnosticFromCapabilityProbeLog Note = "diagnostic_from_capability_probe_log"
+	// NoteWrapperFailedPortsIncomplete: the wrapper's failed_ports list could
+	// not be proven exhaustive (scan error, missing build_failed_count, or a
+	// count that disagrees with the number of entries), so its silence about
+	// the queried port was NOT accepted as proof the port did not fail. The
+	// tool fell through to buildtree evidence instead.
+	NoteWrapperFailedPortsIncomplete Note = "wrapper_failed_ports_list_incomplete"
 )
 
 // ContextSource names one input the answer actually rests on. Closed enum,

@@ -16,13 +16,27 @@
 //     is treated as a candidate; this rule never guesses.
 //  5. Heuristic common locations, explicitly labelled as heuristic.
 //
-// Every rule reports which one fired. Several candidates surviving one rule
-// tier (only possible at the heuristic tier) are ALL returned so the caller
-// can disambiguate — never silently picked. No candidate at all is reported
-// plainly, with a remedy: supply root explicitly.
+// Every rule reports which one fired. Two rules bound what this package is
+// allowed to CONCLUDE, as opposed to merely observe:
+//
+//   - An EXPLICIT root is TERMINAL. When the caller names a root, that root
+//     is the question. If it does not hold a vcpkg binary, the answer is
+//     unknown(explicit_root_invalid) or unknown(explicit_root_unreadable) —
+//     never a silent fall-through to some other installation the caller did
+//     not ask about. Answering "ok, D:\other" to "is C:\wanted a vcpkg root?"
+//     sends every downstream tool to analyse the wrong installation.
+//   - A HEURISTIC NEVER SELECTS. Rule 5 matches a hardcoded machine-layout
+//     guess; one match is not evidence that THIS is the caller's vcpkg. Every
+//     heuristic outcome is unknown(heuristic_only) (one hit) or
+//     unknown(multiple_candidates) (several), always listing the candidates
+//     so the caller can confirm one by passing it explicitly.
+//
+// No candidate at all is reported plainly, with a remedy: supply root
+// explicitly.
 package discovery
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,6 +67,25 @@ const (
 	// ReasonAmbiguous: the heuristic tier found more than one valid
 	// candidate and none of the higher-precedence rules fired.
 	ReasonAmbiguous Reason = "multiple_candidates"
+	// ReasonExplicitRootInvalid: the caller named a root explicitly and the
+	// filesystem positively reported no vcpkg binary there (the directory or
+	// the binary does not exist, or one of them is the wrong kind of entry).
+	// Terminal: no lower-precedence rule is consulted, because the caller
+	// asked about THIS root, not about whichever installation happens to be
+	// reachable some other way.
+	ReasonExplicitRootInvalid Reason = "explicit_root_invalid"
+	// ReasonExplicitRootUnreadable: the caller named a root explicitly and
+	// the probe could not determine whether a vcpkg binary is there at all
+	// (permission denied, I/O error, disconnected path). Distinct from
+	// ReasonExplicitRootInvalid because the remedy differs: fix access to the
+	// path, rather than correct the path.
+	ReasonExplicitRootUnreadable Reason = "explicit_root_unreadable"
+	// ReasonHeuristicOnly: the ONLY thing that matched was a hardcoded
+	// heuristic common location (exactly one of them). A heuristic match is a
+	// candidate, never a selection: nothing about C:\vcpkg existing proves it
+	// is the installation this caller means. Candidates carries it; the
+	// remedy is to confirm it by passing root explicitly.
+	ReasonHeuristicOnly Reason = "heuristic_only"
 )
 
 // Candidate is one discovered (or considered) vcpkg root.
@@ -129,15 +162,27 @@ func vcpkgBinaryName(goos string) string {
 	return "vcpkg"
 }
 
-// hasVcpkgBinary reports whether dir contains a vcpkg executable, per the
+// probeVcpkgBinary reports whether dir contains a vcpkg executable, per the
 // documented rule "the vcpkg root is the directory containing the vcpkg
-// program" — this is a verified fact (a Stat call), never a guess.
-func hasVcpkgBinary(deps Deps, dir string) bool {
+// program". The result is tri-state on purpose: a Stat that FAILS (permission
+// denied, I/O error) is not evidence of absence, and the explicit-root rule
+// must be able to tell those two cases apart — see ReasonExplicitRootInvalid
+// vs ReasonExplicitRootUnreadable.
+func probeVcpkgBinary(deps Deps, dir string) (evidence.Presence, error) {
 	if dir == "" {
-		return false
+		return evidence.PresenceAbsent, errors.New("empty directory")
 	}
-	fi, err := deps.Stat(filepath.Join(dir, vcpkgBinaryName(deps.GOOS)))
-	return err == nil && !fi.IsDir()
+	return evidence.ProbeFile(evidence.StatFunc(deps.Stat), filepath.Join(dir, vcpkgBinaryName(deps.GOOS)))
+}
+
+// hasVcpkgBinary is the boolean view used by the lower-precedence rules,
+// where an unreadable candidate and an absent one are handled identically
+// (both simply fail to win that tier and fall through to the next one).
+// The explicit-root rule deliberately does NOT use this — it needs the
+// distinction, and it is terminal.
+func hasVcpkgBinary(deps Deps, dir string) bool {
+	p, _ := probeVcpkgBinary(deps, dir)
+	return p == evidence.PresenceExists
 }
 
 // manifestFiles are the two manifest markers named by the design doc, most
@@ -190,10 +235,14 @@ func heuristicPathsFor(deps Deps) []struct{ path, detail string } {
 func DiscoverRoot(explicitRoot string, deps Deps) Result {
 	var res Result
 
-	// Rule 1: explicit parameter.
+	// Rule 1: explicit parameter. TERMINAL — see the package doc comment.
+	// When the caller names a root, that root IS the question being asked;
+	// resolving some other installation instead would answer a question
+	// nobody asked and silently redirect every downstream tool.
 	if strings.TrimSpace(explicitRoot) != "" {
 		res.Evidence.AddPath(explicitRoot)
-		if hasVcpkgBinary(deps, explicitRoot) {
+		presence, probeErr := probeVcpkgBinary(deps, explicitRoot)
+		if presence == evidence.PresenceExists {
 			return Result{
 				Status:     evidence.StatusOK,
 				RuleFired:  RuleExplicit,
@@ -202,13 +251,24 @@ func DiscoverRoot(explicitRoot string, deps Deps) Result {
 				Evidence:   res.Evidence,
 			}
 		}
-		// Explicit but wrong: still surface it as a considered (invalid)
-		// candidate list of exactly one — never silently fall through
-		// without saying the explicit value was rejected.
-		res.Candidates = append(res.Candidates, Candidate{
-			Path: explicitRoot, Rule: RuleExplicit,
-			Detail: "no " + vcpkgBinaryName(deps.GOOS) + " found in this directory",
-		})
+		reason := ReasonExplicitRootInvalid
+		detail := "no " + vcpkgBinaryName(deps.GOOS) + " found in this directory"
+		if presence == evidence.PresenceUnreadable {
+			reason = ReasonExplicitRootUnreadable
+			detail = "could not determine whether " + vcpkgBinaryName(deps.GOOS) +
+				" is present in this directory"
+		}
+		if probeErr != nil {
+			detail += ": " + probeErr.Error()
+		}
+		return Result{
+			Status: evidence.StatusUnknown,
+			Reason: reason,
+			Candidates: []Candidate{{
+				Path: explicitRoot, Rule: RuleExplicit, Detail: detail,
+			}},
+			Evidence: res.Evidence,
+		}
 	}
 
 	// Rule 2: VCPKG_ROOT env var.
@@ -272,7 +332,12 @@ func DiscoverRoot(explicitRoot string, deps Deps) Result {
 		}
 	}
 
-	// Rule 5: heuristic common locations.
+	// Rule 5: heuristic common locations. A hit here is a CANDIDATE, never a
+	// selection — the paths are hardcoded machine-layout guesses, so an
+	// unrelated C:\vcpkg on the box says nothing about which installation
+	// this caller means. Both outcomes below are therefore unknown, and both
+	// list every candidate so the caller can confirm one by passing it as an
+	// explicit root (which rule 1 then verifies and treats as terminal).
 	var heuristicHits []Candidate
 	for _, h := range heuristicPathsFor(deps) {
 		if hasVcpkgBinary(deps, h.path) {
@@ -280,22 +345,15 @@ func DiscoverRoot(explicitRoot string, deps Deps) Result {
 			res.Evidence.AddPath(h.path)
 		}
 	}
-	switch len(heuristicHits) {
-	case 0:
-		// fall through to "none found"
-	case 1:
-		return Result{
-			Status:     evidence.StatusOK,
-			RuleFired:  RuleHeuristic,
-			Root:       heuristicHits[0].Path,
-			Candidates: heuristicHits,
-			Evidence:   res.Evidence,
+	if len(heuristicHits) > 0 {
+		reason := ReasonHeuristicOnly
+		if len(heuristicHits) > 1 {
+			reason = ReasonAmbiguous
 		}
-	default:
 		res.Candidates = append(res.Candidates, heuristicHits...)
 		return Result{
 			Status:     evidence.StatusUnknown,
-			Reason:     ReasonAmbiguous,
+			Reason:     reason,
 			Candidates: res.Candidates,
 			Evidence:   res.Evidence,
 		}

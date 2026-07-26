@@ -52,10 +52,19 @@ type Args struct {
 	// Triplet is the triplet name to resolve guards against (e.g.
 	// "x64-windows-static", "x64-mingw-dynamic"). Required.
 	Triplet string `json:"triplet"`
-	// VcpkgRoot backs $ENV{VCPKG_ROOT} expansion inside the portfile. Needed
-	// only when a portfile's patch resolution chain reads it (the
-	// "${...}/ports/${PORT}" style path the licensepp shape uses).
+	// VcpkgRoot backs $ENV{VCPKG_ROOT} expansion inside the portfile, and
+	// supplies the builtin triplet lookup roots <root>/triplets and
+	// <root>/triplets/community. Must be absolute; a relative value is
+	// ignored for triplet lookup rather than bound to the daemon's working
+	// directory.
 	VcpkgRoot string `json:"vcpkg_root,omitempty"`
+	// OverlayTriplets is the ordered --overlay-triplets chain (order IS
+	// precedence, first match wins), taken from vcpkg's own key rather than
+	// guessed from machine layout. It is how a CUSTOM triplet's real
+	// variables reach this evaluation: without a triplet file, every triplet
+	// variable is unresolved and every guard depending on one becomes
+	// undecidable. Entries must be absolute.
+	OverlayTriplets []string `json:"overlay_triplets,omitempty"`
 	// PortName overrides the ${PORT} builtin; defaults to
 	// filepath.Base(PortDir) when omitted.
 	PortName string `json:"port_name,omitempty"`
@@ -92,7 +101,50 @@ const (
 	// well-formed file does NOT produce this — that guard degrades to the
 	// per-entry Undecidable bucket instead (see condition.go).
 	ReasonPatchesExprUnparsable Reason = "patches_expression_unparsable"
+
+	// --- Evidence-integrity reasons -------------------------------------
+	// Each of the three below reports "the filesystem declined to answer a
+	// question this result depends on". All THREE preserve every bucket
+	// computed so far — a partial inventory plus an honest unknown is more
+	// useful than either a silent partial answer or a bare refusal — and all
+	// three list the offending paths in Unreadable.
+
+	// ReasonTripletFileUnreadable: a triplet-file candidate exists on the
+	// lookup path but could not be read, so the triplet variables governing
+	// every guard are unknown for a reason that is fixable (an ACL, a lock)
+	// rather than inherent.
+	ReasonTripletFileUnreadable Reason = "triplet_file_unreadable"
+	// ReasonPatchPathUnreadable: at least one declared patch path could not
+	// be probed. Such a path is NOT in Missing — "missing" is a real defect
+	// report, and a permission error is not evidence that a file is absent.
+	ReasonPatchPathUnreadable Reason = "patch_path_unreadable"
+	// ReasonOrphanScanIncomplete: at least one directory under the port dir
+	// could not be listed, so the orphan inventory is a PREFIX of the truth.
+	// Without this, an unreadable subdirectory full of unreferenced patches
+	// was indistinguishable from "no orphans", under an overall ok.
+	ReasonOrphanScanIncomplete Reason = "orphan_scan_incomplete"
 )
+
+// UnreadableKind names which question a probe failed to answer. Closed enum.
+type UnreadableKind string
+
+const (
+	UnreadablePatchPath   UnreadableKind = "patch_path"
+	UnreadableOrphanDir   UnreadableKind = "orphan_scan_dir"
+	UnreadableTripletFile UnreadableKind = "triplet_file"
+)
+
+// UnreadablePath is one path whose existence or contents could not be
+// established. Distinct from Missing (verified absent) on purpose: the two
+// demand different operator responses, and conflating them turns an
+// environment problem into a false bug report about the port.
+type UnreadablePath struct {
+	Path string         `json:"path"`
+	Kind UnreadableKind `json:"kind"`
+	// Error is the underlying OS error text — free-form diagnostic detail,
+	// never a verdict (verdicts stay in the closed Reason/Kind enums).
+	Error string `json:"error,omitempty"`
+}
 
 // AppliedPatch is one patch that WOULD be applied for this triplet, in the
 // exact order vcpkg would apply it (0-based Ordinal, matching the observed
@@ -101,7 +153,10 @@ type AppliedPatch struct {
 	Ordinal      int    `json:"ordinal"`
 	Filename     string `json:"filename"`
 	ResolvedPath string `json:"resolved_path"`
-	Exists       bool   `json:"exists"`
+	// Existence is tri-state, replacing a bool that reported an
+	// access-denied Stat as a verified-absent patch file. "unreadable" means
+	// the probe failed, not that the patch is gone.
+	Existence evidence.Presence `json:"existence"`
 	// Guard is the verbatim enclosing guard chain; empty means unconditional.
 	Guard string `json:"guard,omitempty"`
 }
@@ -147,12 +202,20 @@ type Result struct {
 
 	Triplet string `json:"triplet,omitempty"`
 	PortDir string `json:"port_dir,omitempty"`
+	// TripletFile is the triplet file whose set() calls established the
+	// triplet variables, when one was found. Empty means NO triplet file was
+	// available, so every triplet variable was unresolved — the single most
+	// useful thing to check when guards come back undecidable unexpectedly.
+	TripletFile string `json:"triplet_file,omitempty"`
 
 	Applied               []AppliedPatch     `json:"applied,omitempty"`
 	ConditionalNotApplied []ConditionalPatch `json:"conditional_not_applied,omitempty"`
 	Undecidable           []UndecidablePatch `json:"undecidable,omitempty"`
 	Orphaned              []OrphanedPatch    `json:"orphaned,omitempty"`
 	Missing               []MissingPatch     `json:"missing,omitempty"`
+	// Unreadable lists every path the filesystem refused to answer for. Any
+	// entry here forces Status=unknown with the matching Reason.
+	Unreadable []UnreadablePath `json:"unreadable,omitempty"`
 
 	Evidence evidence.Evidence `json:"evidence"`
 }
@@ -225,7 +288,38 @@ func applyOrder(args Args, deps Deps) Result {
 	if portName == "" {
 		portName = filepath.Base(portDir)
 	}
-	env := newVarEnv(portDir, portName, strings.TrimSpace(args.VcpkgRoot), args.VarOverrides, triplet)
+	vcpkgRoot := strings.TrimSpace(args.VcpkgRoot)
+
+	// Triplet variables come from an ACTUAL triplet file, never from the
+	// triplet name — see triplet.go. No file found means every triplet
+	// variable stays unresolved, which surfaces as undecidable guards rather
+	// than as invented ON/OFF/static/dynamic values.
+	var unreadable []UnreadablePath
+	var tripletFacts map[string]string
+	tripletFile, tripletPresence, tripletErr := resolveTripletFile(deps, triplet, args.OverlayTriplets, vcpkgRoot)
+	switch tripletPresence {
+	case evidence.PresenceExists:
+		ev.AddPath(tripletFile)
+		tripletRaw, terr := deps.ReadFile(tripletFile)
+		if terr != nil {
+			unreadable = append(unreadable, UnreadablePath{
+				Path: tripletFile, Kind: UnreadableTripletFile, Error: terr.Error(),
+			})
+		} else {
+			ev.AddCommand("read " + tripletFile)
+			tripletFacts = parseTripletFacts(string(tripletRaw), portDir, portName, vcpkgRoot)
+		}
+	case evidence.PresenceUnreadable:
+		errText := ""
+		if tripletErr != nil {
+			errText = tripletErr.Error()
+		}
+		unreadable = append(unreadable, UnreadablePath{
+			Path: tripletFile, Kind: UnreadableTripletFile, Error: errText,
+		})
+	}
+
+	env := newVarEnv(portDir, portName, vcpkgRoot, args.VarOverrides, tripletFacts)
 
 	entries, sawPatches, truncated := walkPortfile(string(raw), env)
 	if truncated {
@@ -235,13 +329,29 @@ func applyOrder(args Args, deps Deps) Result {
 		}
 	}
 
-	res := Result{Triplet: triplet, PortDir: portDir}
+	res := Result{Triplet: triplet, PortDir: portDir, TripletFile: tripletFile}
+	if tripletPresence != evidence.PresenceExists {
+		res.TripletFile = ""
+	}
 	referenced := map[string]bool{}
 	ordinal := 0
 	for _, e := range entries {
 		resolvedPath := resolvePatchPath(e.expanded, portDir)
 		pathUnresolved := dedupStrings(e.pathUnresolved)
-		exists := len(pathUnresolved) == 0 && pathExists(deps, resolvedPath)
+		existence := evidence.PresenceAbsent
+		if len(pathUnresolved) == 0 {
+			var perr error
+			existence, perr = probePatchFile(deps, resolvedPath)
+			if existence == evidence.PresenceUnreadable {
+				errText := ""
+				if perr != nil {
+					errText = perr.Error()
+				}
+				unreadable = append(unreadable, UnreadablePath{
+					Path: resolvedPath, Kind: UnreadablePatchPath, Error: errText,
+				})
+			}
+		}
 		if resolvedPath != "" && len(pathUnresolved) == 0 {
 			referenced[filepath.Clean(resolvedPath)] = true
 		}
@@ -266,7 +376,7 @@ func applyOrder(args Args, deps Deps) Result {
 				Ordinal:      ordinal,
 				Filename:     e.raw,
 				ResolvedPath: resolvedPath,
-				Exists:       exists,
+				Existence:    existence,
 				Guard:        e.guardText,
 			})
 			ordinal++
@@ -284,23 +394,51 @@ func applyOrder(args Args, deps Deps) Result {
 				UnresolvedVars: e.unresolvedVars,
 			})
 		}
-		if !exists {
+		// Only a VERIFIED absence is a missing patch. An unreadable path is
+		// reported in Unreadable instead: calling it "missing" would turn an
+		// ACL problem into a false bug report against the port.
+		if existence == evidence.PresenceAbsent {
 			res.Missing = append(res.Missing, MissingPatch{
 				Filename: e.raw, ResolvedPath: resolvedPath, Guard: e.guardText,
 			})
 		}
 	}
 
-	res.Orphaned = findOrphans(deps, portDir, referenced)
+	orphans, orphanFailures := findOrphans(deps, portDir, referenced)
+	res.Orphaned = orphans
+	unreadable = append(unreadable, orphanFailures...)
+	res.Unreadable = unreadable
 	res.Evidence = ev
 
-	if !sawPatches {
+	// Verdict precedence: evidence-integrity problems first (each names a
+	// different remedy), then the structural "nothing declared" case. Every
+	// branch keeps the buckets already computed.
+	switch {
+	case hasUnreadableKind(unreadable, UnreadableTripletFile):
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonTripletFileUnreadable
+	case hasUnreadableKind(unreadable, UnreadablePatchPath):
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonPatchPathUnreadable
+	case hasUnreadableKind(unreadable, UnreadableOrphanDir):
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonOrphanScanIncomplete
+	case !sawPatches:
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonNoPatchesDeclared
-		return res
+	default:
+		res.Status = evidence.StatusOK
 	}
-	res.Status = evidence.StatusOK
 	return res
+}
+
+func hasUnreadableKind(in []UnreadablePath, kind UnreadableKind) bool {
+	for _, u := range in {
+		if u.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // resolvePatchPath turns an ${VAR}-expanded (but not yet path-joined)
@@ -318,26 +456,36 @@ func resolvePatchPath(expanded, portDir string) string {
 	return filepath.Clean(filepath.Join(portDir, expanded))
 }
 
-func pathExists(deps Deps, path string) bool {
+// probePatchFile reports whether a resolved patch reference is present on
+// disk, TRI-STATE. An empty path (an expansion that produced nothing) is a
+// verified absence, not a probe failure.
+func probePatchFile(deps Deps, path string) (evidence.Presence, error) {
 	if path == "" {
-		return false
+		return evidence.PresenceAbsent, nil
 	}
-	fi, err := deps.Stat(path)
-	return err == nil && !fi.IsDir()
+	return evidence.ProbeFile(evidence.StatFunc(deps.Stat), path)
 }
 
-// findOrphans recursively scans portDir for .patch/.diff files
-// whose cleaned absolute path never appeared in referenced (any declared
-// entry, regardless of guard truth — an orphan is orphaned for every
-// triplet, not just this one). A ReadDir failure degrades to "no orphans
-// reported" rather than failing the whole call — the applied/conditional/
-// undecidable/missing buckets are already independently useful.
-func findOrphans(deps Deps, portDir string, referenced map[string]bool) []OrphanedPatch {
+// findOrphans recursively scans portDir for .patch/.diff files whose cleaned
+// absolute path never appeared in referenced (any declared entry, regardless
+// of guard truth — an orphan is orphaned for every triplet, not just this
+// one).
+//
+// A ReadDir failure is now ACCUMULATED and returned rather than silently
+// ending that branch of the walk. Swallowing it produced an empty (or
+// truncated) orphan list that was indistinguishable from a verified "no
+// orphans", under an overall ok — the caller had no way to tell that a
+// subdirectory full of unreferenced patches simply could not be listed.
+func findOrphans(deps Deps, portDir string, referenced map[string]bool) ([]OrphanedPatch, []UnreadablePath) {
 	var out []OrphanedPatch
+	var failures []UnreadablePath
 	var walk func(string)
 	walk = func(dir string) {
 		dirEntries, err := deps.ReadDir(dir)
 		if err != nil {
+			failures = append(failures, UnreadablePath{
+				Path: dir, Kind: UnreadableOrphanDir, Error: err.Error(),
+			})
 			return
 		}
 		sort.Slice(dirEntries, func(i, j int) bool { return dirEntries[i].Name() < dirEntries[j].Name() })
@@ -357,5 +505,5 @@ func findOrphans(deps Deps, portDir string, referenced map[string]bool) []Orphan
 		}
 	}
 	walk(portDir)
-	return out
+	return out, failures
 }
